@@ -49,6 +49,89 @@ async fn exec_start_truncates_output_to_max_output_tokens() {
 }
 
 #[tokio::test]
+async fn exec_output_preserves_trailing_newline_when_within_max_output_tokens() {
+    let fixture = support::spawn_daemon("builder-a").await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "printf 'one two\\n'".to_string(),
+                workdir: None,
+                shell: Some("/bin/bash".to_string()),
+                tty: false,
+                yield_time_ms: Some(250),
+                max_output_tokens: Some(3),
+                login: Some(false),
+            },
+        )
+        .await;
+
+    assert_eq!(response.original_token_count, Some(2));
+    assert_eq!(response.output, "one two\n");
+}
+
+#[tokio::test]
+async fn exec_output_drains_late_output_after_exit() {
+    let fixture = support::spawn_daemon("builder-a").await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "(sleep 0.08; printf 'late tail') &".to_string(),
+                workdir: None,
+                shell: Some("/bin/bash".to_string()),
+                tty: false,
+                yield_time_ms: Some(250),
+                max_output_tokens: Some(10),
+                login: Some(false),
+            },
+        )
+        .await;
+
+    assert!(!response.running);
+    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.output, "late tail");
+}
+
+#[tokio::test]
+async fn exec_output_write_truncates_to_max_output_tokens() {
+    let fixture = support::spawn_daemon("builder-a").await;
+    let started = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "stty -echo; read line; printf 'one two three four five six'; sleep 30"
+                    .to_string(),
+                workdir: None,
+                shell: Some("/bin/bash".to_string()),
+                tty: true,
+                yield_time_ms: Some(250),
+                max_output_tokens: Some(3),
+                login: Some(false),
+            },
+        )
+        .await;
+
+    let response = fixture
+        .rpc::<ExecWriteRequest, ExecResponse>(
+            "/v1/exec/write",
+            &ExecWriteRequest {
+                daemon_session_id: started.daemon_session_id.expect("live session"),
+                chars: "go\n".to_string(),
+                yield_time_ms: Some(250),
+                max_output_tokens: Some(3),
+            },
+        )
+        .await;
+
+    assert!(response.running);
+    assert_eq!(response.original_token_count, Some(6));
+    assert_eq!(response.output, "one two three");
+}
+
+#[tokio::test]
 async fn exec_write_rejects_non_tty_sessions_when_chars_are_present() {
     let fixture = support::spawn_daemon("builder-a").await;
     let started = fixture

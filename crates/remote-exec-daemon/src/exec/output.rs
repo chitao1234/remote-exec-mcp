@@ -28,7 +28,6 @@ pub fn truncate_to_token_limit(raw: &str, max_output_tokens: Option<u32>) -> Str
 
     let mut seen = 0u32;
     let mut in_token = false;
-    let mut end = raw.len();
 
     for (index, ch) in raw.char_indices() {
         if ch.is_whitespace() {
@@ -39,14 +38,13 @@ pub fn truncate_to_token_limit(raw: &str, max_output_tokens: Option<u32>) -> Str
         if !in_token {
             seen += 1;
             if seen > limit {
-                end = index;
-                break;
+                return raw[..index].trim_end().to_string();
             }
             in_token = true;
         }
     }
 
-    raw[..end].trim_end().to_string()
+    raw.to_string()
 }
 
 pub async fn drain_after_exit(session: &mut LiveSession) -> anyhow::Result<String> {
