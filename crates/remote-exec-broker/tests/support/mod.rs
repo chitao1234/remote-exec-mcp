@@ -6,7 +6,8 @@ use axum::extract::State;
 use axum::routing::post;
 use axum::{Json, Router};
 use remote_exec_proto::rpc::{
-    ExecResponse, ExecStartRequest, ExecWriteRequest, HealthCheckResponse, TargetInfoResponse,
+    ExecResponse, ExecStartRequest, ExecWriteRequest, HealthCheckResponse, ImageReadRequest,
+    ImageReadResponse, PatchApplyRequest, PatchApplyResponse, TargetInfoResponse,
 };
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
@@ -57,7 +58,7 @@ impl ToolResult {
         let raw_content = result
             .content
             .iter()
-            .map(|content| serde_json::to_value(content).unwrap())
+            .map(normalize_content)
             .collect();
 
         Self {
@@ -66,6 +67,24 @@ impl ToolResult {
             raw_content,
         }
     }
+}
+
+fn normalize_content(content: &rmcp::model::Content) -> serde_json::Value {
+    if let Some(text) = content.raw.as_text() {
+        return serde_json::json!({
+            "type": "text",
+            "text": text.text,
+        });
+    }
+
+    if let Some(image) = content.raw.as_image() {
+        return serde_json::json!({
+            "type": "input_image",
+            "image_url": format!("data:{};base64,{}", image.mime_type, image.data),
+        });
+    }
+
+    serde_json::to_value(content).unwrap()
 }
 
 #[derive(Debug, Clone, Default)]
@@ -132,6 +151,8 @@ async fn spawn_stub_daemon(certs: &TestCerts) -> std::net::SocketAddr {
         .route("/v1/target-info", post(target_info))
         .route("/v1/exec/start", post(exec_start))
         .route("/v1/exec/write", post(exec_write))
+        .route("/v1/patch/apply", post(patch_apply))
+        .route("/v1/image/read", post(image_read))
         .with_state(state);
 
     let daemon_state = remote_exec_daemon::AppState {
@@ -202,6 +223,19 @@ async fn exec_write(Json(req): Json<ExecWriteRequest>) -> Json<ExecResponse> {
         exit_code: Some(0),
         original_token_count: Some(2),
         output: "poll output".to_string(),
+    })
+}
+
+async fn patch_apply(Json(_req): Json<PatchApplyRequest>) -> Json<PatchApplyResponse> {
+    Json(PatchApplyResponse {
+        output: "Success. Updated the following files:\nA hello.txt\n".to_string(),
+    })
+}
+
+async fn image_read(Json(req): Json<ImageReadRequest>) -> Json<ImageReadResponse> {
+    Json(ImageReadResponse {
+        image_url: "data:image/png;base64,AAAA".to_string(),
+        detail: req.detail.filter(|value| value == "original"),
     })
 }
 
