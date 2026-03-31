@@ -90,8 +90,7 @@ pub async fn exec_write(
     .map_err(internal_error)?;
     if has_exited(&mut session).await.map_err(internal_error)? {
         let response = finish_response(None, false, &session, output);
-        drop(session);
-        state.sessions.remove(&daemon_session_id).await;
+        session.retire().await;
         return Ok(Json(response));
     }
     let wall_time_seconds = session.started_at.elapsed().as_secs_f64();
