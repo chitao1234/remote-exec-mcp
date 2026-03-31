@@ -75,6 +75,6 @@ pub struct ImageReadResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RpcErrorBody {
-    pub code: &'static str,
+    pub code: String,
     pub message: String,
 }

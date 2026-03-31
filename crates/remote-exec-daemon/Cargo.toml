@@ -10,6 +10,8 @@ axum = { workspace = true }
 gethostname = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true }
+portable-pty = { workspace = true }
+rand = { workspace = true }
 remote-exec-proto = { path = "../remote-exec-proto" }
 rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
@@ -23,6 +25,7 @@ tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+image = { workspace = true }
 rcgen = { workspace = true }
 reqwest = { workspace = true }
 serde_json = { workspace = true }

@@ -18,6 +18,8 @@ pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/v1/health", post(health))
         .route("/v1/target-info", post(target_info))
+        .route("/v1/exec/start", post(crate::exec::exec_start))
+        .route("/v1/exec/write", post(crate::exec::exec_write))
         .with_state(state)
 }
 

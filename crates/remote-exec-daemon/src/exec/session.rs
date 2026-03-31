@@ -1,0 +1,187 @@
+use std::io::{Read, Write};
+use std::process::Stdio;
+use std::time::Instant;
+
+use anyhow::Context;
+use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+use tokio::io::AsyncReadExt;
+use tokio::process::Command;
+use tokio::sync::mpsc::error::TryRecvError;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+
+use super::transcript::TranscriptBuffer;
+
+pub struct LiveSession {
+    pub tty: bool,
+    pub started_at: Instant,
+    pub transcript: TranscriptBuffer,
+    pub child: SessionChild,
+    receiver: UnboundedReceiver<String>,
+    exit_code: Option<i32>,
+}
+
+pub enum SessionChild {
+    Pty(PtySession),
+    Pipe(tokio::process::Child),
+}
+
+pub struct PtySession {
+    pub child: Box<dyn portable_pty::Child + Send>,
+    pub writer: Box<dyn Write + Send>,
+}
+
+pub fn spawn(cmd: &[String], cwd: &std::path::Path, tty: bool) -> anyhow::Result<LiveSession> {
+    if tty {
+        spawn_pty(cmd, cwd)
+    } else {
+        spawn_pipe(cmd, cwd)
+    }
+}
+
+fn spawn_pty(cmd: &[String], cwd: &std::path::Path) -> anyhow::Result<LiveSession> {
+    let pty = NativePtySystem::default().openpty(PtySize {
+        rows: 24,
+        cols: 120,
+        pixel_width: 0,
+        pixel_height: 0,
+    })?;
+    let mut builder = CommandBuilder::new(&cmd[0]);
+    for arg in &cmd[1..] {
+        builder.arg(arg);
+    }
+    builder.cwd(cwd);
+
+    let child = pty.slave.spawn_command(builder)?;
+    let writer = pty.master.take_writer()?;
+    let mut reader = pty.master.try_clone_reader()?;
+    let (sender, receiver) = unbounded_channel();
+
+    std::thread::spawn(move || {
+        let mut buffer = [0u8; 8192];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(read) => {
+                    if sender
+                        .send(String::from_utf8_lossy(&buffer[..read]).into_owned())
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    Ok(LiveSession {
+        tty: true,
+        started_at: Instant::now(),
+        transcript: TranscriptBuffer::new(1024 * 1024),
+        child: SessionChild::Pty(PtySession { child, writer }),
+        receiver,
+        exit_code: None,
+    })
+}
+
+fn spawn_pipe(cmd: &[String], cwd: &std::path::Path) -> anyhow::Result<LiveSession> {
+    let mut command = Command::new(&cmd[0]);
+    command
+        .args(&cmd[1..])
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn()?;
+    let stdout = child.stdout.take().context("missing stdout pipe")?;
+    let stderr = child.stderr.take().context("missing stderr pipe")?;
+    let (sender, receiver) = unbounded_channel();
+
+    spawn_pipe_reader(stdout, sender.clone());
+    spawn_pipe_reader(stderr, sender);
+
+    Ok(LiveSession {
+        tty: false,
+        started_at: Instant::now(),
+        transcript: TranscriptBuffer::new(1024 * 1024),
+        child: SessionChild::Pipe(child),
+        receiver,
+        exit_code: None,
+    })
+}
+
+fn spawn_pipe_reader<R>(mut reader: R, sender: UnboundedSender<String>)
+where
+    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+{
+    tokio::spawn(async move {
+        let mut buffer = [0u8; 8192];
+        loop {
+            match reader.read(&mut buffer).await {
+                Ok(0) => break,
+                Ok(read) => {
+                    if sender
+                        .send(String::from_utf8_lossy(&buffer[..read]).into_owned())
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+}
+
+impl LiveSession {
+    pub async fn read_available(&mut self) -> anyhow::Result<String> {
+        let mut output = String::new();
+        loop {
+            match self.receiver.try_recv() {
+                Ok(chunk) => output.push_str(&chunk),
+                Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
+            }
+        }
+        Ok(output)
+    }
+
+    pub async fn has_exited(&mut self) -> anyhow::Result<bool> {
+        match &mut self.child {
+            SessionChild::Pty(pty) => {
+                if let Some(status) = pty.child.try_wait()? {
+                    self.exit_code = Some(status.exit_code() as i32);
+                    return Ok(true);
+                }
+            }
+            SessionChild::Pipe(child) => {
+                if let Some(status) = child.try_wait()? {
+                    self.exit_code = status.code();
+                    return Ok(true);
+                }
+            }
+        }
+
+        Ok(false)
+    }
+
+    pub async fn write(&mut self, chars: &str) -> anyhow::Result<()> {
+        if chars.is_empty() {
+            return Ok(());
+        }
+
+        match &mut self.child {
+            SessionChild::Pty(pty) => {
+                pty.writer.write_all(chars.as_bytes())?;
+                pty.writer.flush()?;
+                Ok(())
+            }
+            SessionChild::Pipe(_) => anyhow::bail!(
+                "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
+            ),
+        }
+    }
+
+    pub fn exit_code(&self) -> Option<i32> {
+        self.exit_code
+    }
+}
