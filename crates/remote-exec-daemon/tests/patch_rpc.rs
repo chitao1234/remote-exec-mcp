@@ -91,6 +91,68 @@ async fn update_file_rejects_non_eof_match_for_end_of_file_marker() {
 }
 
 #[tokio::test]
+async fn update_file_appends_at_eof_for_pure_addition_with_matching_context() {
+    let fixture = support::spawn_daemon("builder-a").await;
+    let path = fixture.workdir.join("plain.txt");
+    tokio::fs::write(&path, "before\ntail\n").await.unwrap();
+
+    let response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Update File: plain.txt\n",
+                    "@@ tail\n",
+                    "+after\n",
+                    "*** End of File\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert!(response.output.contains("M plain.txt"));
+    assert_eq!(
+        tokio::fs::read_to_string(path).await.unwrap(),
+        "before\ntail\nafter\n",
+    );
+}
+
+#[tokio::test]
+async fn update_file_rejects_eof_pure_addition_when_context_is_missing() {
+    let fixture = support::spawn_daemon("builder-a").await;
+    let path = fixture.workdir.join("plain.txt");
+    tokio::fs::write(&path, "before\ntail\n").await.unwrap();
+
+    let err = fixture
+        .rpc_error(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Update File: plain.txt\n",
+                    "@@ missing\n",
+                    "+after\n",
+                    "*** End of File\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert_eq!(err.code, "patch_failed");
+    assert_eq!(
+        tokio::fs::read_to_string(path).await.unwrap(),
+        "before\ntail\n",
+    );
+}
+
+#[tokio::test]
 async fn patch_failures_do_not_roll_back_earlier_file_changes() {
     let fixture = support::spawn_daemon("builder-a").await;
     tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")

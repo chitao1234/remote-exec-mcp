@@ -5,17 +5,7 @@ pub fn apply_hunks(current: &str, hunks: &[Hunk]) -> anyhow::Result<String> {
 
     for hunk in hunks {
         let (old_lines, new_lines) = build_segments(hunk);
-        let start = hunk
-            .context
-            .as_ref()
-            .and_then(|ctx| {
-                if hunk.end_of_file {
-                    lines.iter().rposition(|line| line == ctx)
-                } else {
-                    lines.iter().position(|line| line == ctx)
-                }
-            })
-            .unwrap_or(0);
+        let start = resolve_hunk_start(&lines, hunk)?;
 
         let start_idx = if old_lines.is_empty() {
             if hunk.end_of_file {
@@ -33,6 +23,20 @@ pub fn apply_hunks(current: &str, hunks: &[Hunk]) -> anyhow::Result<String> {
     }
 
     Ok(lines.join("\n"))
+}
+
+fn resolve_hunk_start(lines: &[String], hunk: &Hunk) -> anyhow::Result<usize> {
+    match hunk.context.as_ref() {
+        Some(ctx) => {
+            let found = if hunk.end_of_file {
+                lines.iter().rposition(|line| line == ctx)
+            } else {
+                lines.iter().position(|line| line == ctx)
+            };
+            found.ok_or_else(|| anyhow::anyhow!("context line `{ctx}` not found"))
+        }
+        None => Ok(0),
+    }
 }
 
 fn build_segments(hunk: &Hunk) -> (Vec<String>, Vec<String>) {
