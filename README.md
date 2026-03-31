@@ -59,6 +59,20 @@ cargo test --workspace
 cargo fmt --all --check
 ```
 
+## Reliability Notes
+
+- The broker now starts even if some configured targets are temporarily unreachable.
+- `write_stdin` only invalidates sessions when the daemon restarted or explicitly reports `unknown_session`.
+- `max_output_tokens` is enforced by the daemon for command output.
+
+## Quality Gate
+
+```bash
+cargo test --workspace
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+```
+
 Run the broker end-to-end test only:
 
 ```bash

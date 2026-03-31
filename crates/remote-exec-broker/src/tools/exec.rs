@@ -93,11 +93,11 @@ pub async fn write_stdin(
             ));
         }
         Err(err) => {
-            if let Ok(info) = target.client.target_info().await {
-                if info.daemon_instance_id != record.daemon_instance_id {
-                    state.sessions.remove(&record.session_id).await;
-                    return Err(anyhow::anyhow!("session invalidated after daemon restart"));
-                }
+            if let Ok(info) = target.client.target_info().await
+                && info.daemon_instance_id != record.daemon_instance_id
+            {
+                state.sessions.remove(&record.session_id).await;
+                return Err(anyhow::anyhow!("session invalidated after daemon restart"));
             }
             return Err(err.into());
         }

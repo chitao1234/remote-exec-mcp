@@ -22,6 +22,7 @@ hyper = { version = "1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["server", "http1", "http2", "tokio"] }
 image = { version = "0.25", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
 gethostname = "1"
+nix = { version = "0.28", default-features = false, features = ["user"] }
 portable-pty = "0.9.0"
 rand = "0.8"
 rcgen = "0.13"

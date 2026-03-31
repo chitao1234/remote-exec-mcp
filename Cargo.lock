@@ -1426,6 +1426,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "image",
+ "nix 0.28.0",
  "portable-pty",
  "rand 0.8.5",
  "rcgen",

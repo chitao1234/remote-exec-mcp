@@ -10,6 +10,7 @@ pub struct DaemonFixture {
     pub _tempdir: TempDir,
     pub client: reqwest::Client,
     pub addr: SocketAddr,
+    #[allow(dead_code)]
     pub workdir: PathBuf,
 }
 
@@ -18,6 +19,7 @@ impl DaemonFixture {
         format!("https://{}{}", self.addr, path)
     }
 
+    #[allow(dead_code)]
     pub async fn rpc<Req, Resp>(&self, path: &str, body: &Req) -> Resp
     where
         Req: Serialize + ?Sized,
@@ -36,6 +38,7 @@ impl DaemonFixture {
             .unwrap()
     }
 
+    #[allow(dead_code)]
     pub async fn rpc_error<Req>(&self, path: &str, body: &Req) -> RpcErrorBody
     where
         Req: Serialize + ?Sized,
@@ -103,6 +106,7 @@ pub async fn spawn_daemon(target: &str) -> DaemonFixture {
     }
 }
 
+#[allow(dead_code)]
 pub async fn write_png(path: &Path, width: u32, height: u32) {
     let image = image::DynamicImage::new_rgba8(width, height);
     image.save(path).unwrap();

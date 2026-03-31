@@ -72,11 +72,11 @@ pub fn parse_patch(input: &str) -> anyhow::Result<Vec<PatchAction>> {
         if let Some(path) = line.strip_prefix("*** Update File: ") {
             index += 1;
             let mut move_to = None;
-            if index + 1 < lines.len() {
-                if let Some(destination) = lines[index].strip_prefix("*** Move to: ") {
-                    move_to = Some(destination.into());
-                    index += 1;
-                }
+            if index + 1 < lines.len()
+                && let Some(destination) = lines[index].strip_prefix("*** Move to: ")
+            {
+                move_to = Some(destination.into());
+                index += 1;
             }
 
             let mut hunks = Vec::new();

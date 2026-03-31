@@ -1,5 +1,6 @@
 mod output;
 pub mod session;
+mod shell;
 pub mod store;
 pub mod transcript;
 
@@ -20,7 +21,8 @@ pub async fn exec_start(
     Json(req): Json<ExecStartRequest>,
 ) -> Result<Json<ExecResponse>, (StatusCode, Json<RpcErrorBody>)> {
     let cwd = resolve_workdir(&state, req.workdir.as_deref()).map_err(internal_error)?;
-    let argv = shell_argv(req.shell.as_deref(), req.login.unwrap_or(false), &req.cmd);
+    let argv = shell_argv(req.shell.as_deref(), req.login.unwrap_or(false), &req.cmd)
+        .map_err(internal_error)?;
     let mut session = session::spawn(&argv, &cwd, req.tty).map_err(internal_error)?;
 
     let deadline = Instant::now()
@@ -173,10 +175,10 @@ pub fn internal_error(err: anyhow::Error) -> (StatusCode, Json<RpcErrorBody>) {
     )
 }
 
-fn shell_argv(shell: Option<&str>, login: bool, cmd: &str) -> Vec<String> {
-    let shell = shell.unwrap_or("/bin/bash");
+fn shell_argv(shell: Option<&str>, login: bool, cmd: &str) -> anyhow::Result<Vec<String>> {
+    let shell = shell::resolve_shell(shell)?;
     let mode = if login { "-lc" } else { "-c" };
-    vec![shell.to_string(), mode.to_string(), cmd.to_string()]
+    Ok(vec![shell, mode.to_string(), cmd.to_string()])
 }
 
 fn chunk_id() -> String {
