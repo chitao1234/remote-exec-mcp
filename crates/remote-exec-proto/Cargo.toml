@@ -1,0 +1,9 @@
+[package]
+name = "remote-exec-proto"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+schemars = { workspace = true }
+serde = { workspace = true }

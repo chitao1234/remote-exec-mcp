@@ -1,0 +1,7 @@
+[package]
+name = "remote-exec-broker"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
