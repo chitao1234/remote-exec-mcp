@@ -186,3 +186,37 @@ async fn patch_failures_do_not_roll_back_earlier_file_changes() {
         "after\n",
     );
 }
+
+#[tokio::test]
+async fn update_file_applies_repeated_context_additions_in_order() {
+    let fixture = support::spawn_daemon("builder-a").await;
+    let path = fixture.workdir.join("plain.txt");
+    tokio::fs::write(&path, "a\nmarker\nb\nmarker\nc\n")
+        .await
+        .unwrap();
+
+    let response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Update File: plain.txt\n",
+                    "@@ marker\n",
+                    "+first\n",
+                    "@@ marker\n",
+                    "+second\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert!(response.output.contains("M plain.txt"));
+    assert_eq!(
+        tokio::fs::read_to_string(path).await.unwrap(),
+        "a\nfirst\nmarker\nb\nsecond\nmarker\nc\n",
+    );
+}

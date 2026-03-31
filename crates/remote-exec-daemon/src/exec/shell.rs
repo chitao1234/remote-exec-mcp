@@ -48,11 +48,34 @@ fn usable_passwd_shell(passwd_shell: Option<&str>) -> Option<&str> {
                 Path::new(value).file_name().and_then(|name| name.to_str()),
                 Some("false" | "nologin")
             )
+            && shell_path_is_executable(Path::new(value))
     })
+}
+
+fn shell_path_is_executable(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+
+    metadata.is_file() && has_execute_bits(&metadata)
+}
+
+#[cfg(unix)]
+fn has_execute_bits(metadata: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    metadata.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn has_execute_bits(_metadata: &std::fs::Metadata) -> bool {
+    true
 }
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
     use super::{choose_shell, resolve_shell_with};
 
     #[test]
@@ -92,6 +115,33 @@ mod tests {
         );
         assert_eq!(
             resolve_shell_with(None, None, || Err(anyhow::anyhow!("passwd lookup failed"))),
+            "/bin/bash"
+        );
+    }
+
+    #[test]
+    fn resolve_shell_ignores_missing_passwd_shell() {
+        assert_eq!(
+            resolve_shell_with(None, None, || {
+                Ok(Some("/opt/missing-shell".to_string()))
+            }),
+            "/bin/bash"
+        );
+    }
+
+    #[test]
+    fn resolve_shell_ignores_non_executable_passwd_shell() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let shell_path = tempdir.path().join("shell");
+        std::fs::write(&shell_path, "#!/bin/sh\n").unwrap();
+        let mut permissions = std::fs::metadata(&shell_path).unwrap().permissions();
+        permissions.set_mode(0o644);
+        std::fs::set_permissions(&shell_path, permissions).unwrap();
+
+        assert_eq!(
+            resolve_shell_with(None, None, || {
+                Ok(Some(shell_path.to_string_lossy().into_owned()))
+            }),
             "/bin/bash"
         );
     }

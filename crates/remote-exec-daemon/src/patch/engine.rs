@@ -2,10 +2,11 @@ use super::parser::{Hunk, HunkLine};
 
 pub fn apply_hunks(current: &str, hunks: &[Hunk]) -> anyhow::Result<String> {
     let mut lines = current.lines().map(str::to_string).collect::<Vec<_>>();
+    let mut search_start = 0;
 
     for hunk in hunks {
         let (old_lines, new_lines) = build_segments(hunk);
-        let start = resolve_hunk_start(&lines, hunk)?;
+        let start = resolve_hunk_start(&lines, hunk, search_start)?;
 
         let start_idx = if old_lines.is_empty() {
             if hunk.end_of_file {
@@ -19,23 +20,31 @@ pub fn apply_hunks(current: &str, hunks: &[Hunk]) -> anyhow::Result<String> {
             })?
         };
 
+        let next_search_start = next_search_start(start_idx, &old_lines, &new_lines, hunk);
         lines.splice(start_idx..start_idx + old_lines.len(), new_lines);
+        search_start = next_search_start.min(lines.len());
     }
 
     Ok(lines.join("\n"))
 }
 
-fn resolve_hunk_start(lines: &[String], hunk: &Hunk) -> anyhow::Result<usize> {
+fn resolve_hunk_start(lines: &[String], hunk: &Hunk, search_start: usize) -> anyhow::Result<usize> {
     match hunk.context.as_ref() {
         Some(ctx) => {
             let found = if hunk.end_of_file {
-                lines.iter().rposition(|line| line == ctx)
+                lines[search_start.min(lines.len())..]
+                    .iter()
+                    .rposition(|line| line == ctx)
+                    .map(|idx| idx + search_start.min(lines.len()))
             } else {
-                lines.iter().position(|line| line == ctx)
+                lines[search_start.min(lines.len())..]
+                    .iter()
+                    .position(|line| line == ctx)
+                    .map(|idx| idx + search_start.min(lines.len()))
             };
             found.ok_or_else(|| anyhow::anyhow!("context line `{ctx}` not found"))
         }
-        None => Ok(0),
+        None => Ok(search_start.min(lines.len())),
     }
 }
 
@@ -85,4 +94,17 @@ fn seek_sequence(
     }
 
     None
+}
+
+fn next_search_start(
+    start_idx: usize,
+    old_lines: &[String],
+    new_lines: &[String],
+    hunk: &Hunk,
+) -> usize {
+    if old_lines.is_empty() && hunk.context.is_some() && !hunk.end_of_file {
+        start_idx + new_lines.len() + 1
+    } else {
+        start_idx + new_lines.len()
+    }
 }
