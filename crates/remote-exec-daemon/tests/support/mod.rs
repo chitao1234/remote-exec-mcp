@@ -40,7 +40,13 @@ impl DaemonFixture {
     where
         Req: Serialize + ?Sized,
     {
-        let response = self.client.post(self.url(path)).json(body).send().await.unwrap();
+        let response = self
+            .client
+            .post(self.url(path))
+            .json(body)
+            .send()
+            .await
+            .unwrap();
         assert!(!response.status().is_success());
         response.json::<RpcErrorBody>().await.unwrap()
     }
@@ -117,8 +123,7 @@ fn write_test_certs(dir: &Path) -> TestCerts {
         .self_signed(&ca_key)
         .unwrap();
 
-    let mut daemon_params =
-        rcgen::CertificateParams::new(vec!["localhost".to_string()]).unwrap();
+    let mut daemon_params = rcgen::CertificateParams::new(vec!["localhost".to_string()]).unwrap();
     daemon_params
         .subject_alt_names
         .push(rcgen::SanType::IpAddress("127.0.0.1".parse().unwrap()));

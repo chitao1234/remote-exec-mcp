@@ -52,11 +52,7 @@ pub async fn read_image(
     } else {
         let image = image::load_from_memory(&bytes)
             .map_err(|err| crate::exec::rpc_error("image_decode_failed", err.to_string()))?;
-        let resized = image.resize(
-            MAX_WIDTH,
-            MAX_HEIGHT,
-            image::imageops::FilterType::Triangle,
-        );
+        let resized = image.resize(MAX_WIDTH, MAX_HEIGHT, image::imageops::FilterType::Triangle);
         let mut out = Vec::new();
         resized
             .write_to(&mut Cursor::new(&mut out), ImageFormat::Png)

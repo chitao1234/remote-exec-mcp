@@ -20,7 +20,10 @@ impl ToolCallOutput {
     }
 
     pub fn content_and_structured(content: Vec<Content>, structured: serde_json::Value) -> Self {
-        Self { content, structured }
+        Self {
+            content,
+            structured,
+        }
     }
 
     pub fn into_call_tool_result(self) -> CallToolResult {
@@ -58,10 +61,12 @@ impl BrokerServer {
         &self,
         Parameters(input): Parameters<remote_exec_proto::public::ExecCommandInput>,
     ) -> Result<CallToolResult, McpError> {
-        Ok(match crate::tools::exec::exec_command(&self.state, input).await {
-            Ok(output) => output.into_call_tool_result(),
-            Err(err) => CallToolResult::error(vec![Content::text(err.to_string())]),
-        })
+        Ok(
+            match crate::tools::exec::exec_command(&self.state, input).await {
+                Ok(output) => output.into_call_tool_result(),
+                Err(err) => CallToolResult::error(vec![Content::text(err.to_string())]),
+            },
+        )
     }
 
     #[tool(
@@ -72,10 +77,12 @@ impl BrokerServer {
         &self,
         Parameters(input): Parameters<remote_exec_proto::public::WriteStdinInput>,
     ) -> Result<CallToolResult, McpError> {
-        Ok(match crate::tools::exec::write_stdin(&self.state, input).await {
-            Ok(output) => output.into_call_tool_result(),
-            Err(err) => CallToolResult::error(vec![Content::text(err.to_string())]),
-        })
+        Ok(
+            match crate::tools::exec::write_stdin(&self.state, input).await {
+                Ok(output) => output.into_call_tool_result(),
+                Err(err) => CallToolResult::error(vec![Content::text(err.to_string())]),
+            },
+        )
     }
 
     #[tool(
@@ -86,10 +93,12 @@ impl BrokerServer {
         &self,
         Parameters(input): Parameters<remote_exec_proto::public::ApplyPatchInput>,
     ) -> Result<CallToolResult, McpError> {
-        Ok(match crate::tools::patch::apply_patch(&self.state, input).await {
-            Ok(output) => output.into_call_tool_result(),
-            Err(err) => CallToolResult::error(vec![Content::text(err.to_string())]),
-        })
+        Ok(
+            match crate::tools::patch::apply_patch(&self.state, input).await {
+                Ok(output) => output.into_call_tool_result(),
+                Err(err) => CallToolResult::error(vec![Content::text(err.to_string())]),
+            },
+        )
     }
 
     #[tool(
@@ -100,10 +109,12 @@ impl BrokerServer {
         &self,
         Parameters(input): Parameters<remote_exec_proto::public::ViewImageInput>,
     ) -> Result<CallToolResult, McpError> {
-        Ok(match crate::tools::image::view_image(&self.state, input).await {
-            Ok(output) => output.into_call_tool_result(),
-            Err(err) => CallToolResult::error(vec![Content::text(err.to_string())]),
-        })
+        Ok(
+            match crate::tools::image::view_image(&self.state, input).await {
+                Ok(output) => output.into_call_tool_result(),
+                Err(err) => CallToolResult::error(vec![Content::text(err.to_string())]),
+            },
+        )
     }
 }
 

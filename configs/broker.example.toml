@@ -1,0 +1,13 @@
+[targets.builder-a]
+base_url = "https://builder-a.example.com:9443"
+ca_pem = "/etc/remote-exec/ca.pem"
+client_cert_pem = "/etc/remote-exec/broker.pem"
+client_key_pem = "/etc/remote-exec/broker.key"
+expected_daemon_name = "builder-a"
+
+[targets.builder-b]
+base_url = "https://builder-b.example.com:9443"
+ca_pem = "/etc/remote-exec/ca.pem"
+client_cert_pem = "/etc/remote-exec/broker.pem"
+client_key_pem = "/etc/remote-exec/broker.key"
+expected_daemon_name = "builder-b"

@@ -1,0 +1,8 @@
+target = "builder-a"
+listen = "0.0.0.0:9443"
+default_workdir = "/srv/work"
+
+[tls]
+cert_pem = "/etc/remote-exec/daemon.pem"
+key_pem = "/etc/remote-exec/daemon.key"
+ca_pem = "/etc/remote-exec/ca.pem"

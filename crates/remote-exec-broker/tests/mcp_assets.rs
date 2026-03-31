@@ -14,7 +14,11 @@ async fn apply_patch_returns_plain_text_plus_structured_content() {
         )
         .await;
 
-    assert!(result.text_output.contains("Success. Updated the following files:"));
+    assert!(
+        result
+            .text_output
+            .contains("Success. Updated the following files:")
+    );
     assert_eq!(result.structured_content["target"], "builder-a");
 }
 

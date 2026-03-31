@@ -3,10 +3,10 @@ use std::sync::Arc;
 use anyhow::Context;
 use axum::Router;
 use axum::body::Body;
+use hyper::Request;
 use hyper::body::Incoming;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use hyper::Request;
 use hyper_util::rt::TokioIo;
 use rustls::RootCertStore;
 use rustls::ServerConfig;
@@ -66,8 +66,7 @@ fn load_certs(path: &std::path::Path) -> anyhow::Result<Vec<CertificateDer<'stat
 
 fn load_key(path: &std::path::Path) -> anyhow::Result<PrivateKeyDer<'static>> {
     let mut pem = std::io::BufReader::new(std::fs::File::open(path)?);
-    rustls_pemfile::private_key(&mut pem)?
-        .context("missing private key")
+    rustls_pemfile::private_key(&mut pem)?.context("missing private key")
 }
 
 fn load_roots(path: &std::path::Path) -> anyhow::Result<RootCertStore> {

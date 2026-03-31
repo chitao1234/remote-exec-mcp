@@ -78,7 +78,10 @@ pub async fn apply_patch(
     }
 
     Ok(Json(PatchApplyResponse {
-        output: format!("Success. Updated the following files:\n{}\n", summary.join("\n")),
+        output: format!(
+            "Success. Updated the following files:\n{}\n",
+            summary.join("\n")
+        ),
     }))
 }
 
@@ -90,7 +93,10 @@ fn ensure_trailing_newline(mut text: String) -> String {
 }
 
 fn display_relative(base: &Path, path: &Path) -> String {
-    path.strip_prefix(base).unwrap_or(path).display().to_string()
+    path.strip_prefix(base)
+        .unwrap_or(path)
+        .display()
+        .to_string()
 }
 
 fn apply_hunks(current: &str, hunks: &[parser::Hunk]) -> anyhow::Result<String> {

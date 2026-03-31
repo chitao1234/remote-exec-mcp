@@ -12,8 +12,7 @@ async fn add_file_overwrites_existing_content() {
         .rpc::<PatchApplyRequest, PatchApplyResponse>(
             "/v1/patch/apply",
             &PatchApplyRequest {
-                patch: "*** Begin Patch\n*** Add File: demo.txt\n+new\n*** End Patch\n"
-                    .to_string(),
+                patch: "*** Begin Patch\n*** Add File: demo.txt\n+new\n*** End Patch\n".to_string(),
                 workdir: Some(".".to_string()),
             },
         )

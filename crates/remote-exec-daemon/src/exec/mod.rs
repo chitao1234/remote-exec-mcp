@@ -21,8 +21,8 @@ pub async fn exec_start(
     let argv = shell_argv(req.shell.as_deref(), req.login.unwrap_or(false), &req.cmd);
     let mut session = session::spawn(&argv, &cwd, req.tty).map_err(internal_error)?;
 
-    let deadline =
-        Instant::now() + Duration::from_millis(req.yield_time_ms.unwrap_or(10_000).clamp(250, 30_000));
+    let deadline = Instant::now()
+        + Duration::from_millis(req.yield_time_ms.unwrap_or(10_000).clamp(250, 30_000));
     let mut output = String::new();
 
     while Instant::now() < deadline {
@@ -78,9 +78,13 @@ pub async fn exec_write(
     write_chars(session, &req.chars)
         .await
         .map_err(internal_error)?;
-    let output = poll_until(session, req.chars.is_empty(), req.yield_time_ms.unwrap_or(250))
-        .await
-        .map_err(internal_error)?;
+    let output = poll_until(
+        session,
+        req.chars.is_empty(),
+        req.yield_time_ms.unwrap_or(250),
+    )
+    .await
+    .map_err(internal_error)?;
     if has_exited(session).await.map_err(internal_error)? {
         let response = finish_response(None, false, session, output);
         sessions.remove(&req.daemon_session_id);

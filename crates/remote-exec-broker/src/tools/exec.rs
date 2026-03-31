@@ -67,7 +67,10 @@ pub async fn write_stdin(
         .context("unknown session")?;
 
     if let Some(target) = &input.target {
-        anyhow::ensure!(target == &record.target, "session does not belong to target `{target}`");
+        anyhow::ensure!(
+            target == &record.target,
+            "session does not belong to target `{target}`"
+        );
     }
 
     let target = state.target(&record.target)?;

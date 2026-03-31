@@ -20,6 +20,11 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 axum = { workspace = true }
+image = { workspace = true }
 rcgen = { workspace = true }
 remote-exec-daemon = { path = "../remote-exec-daemon" }
 tempfile = { workspace = true }
+
+[[test]]
+name = "multi_target"
+path = "../../tests/e2e/multi_target.rs"

@@ -31,8 +31,14 @@ pub enum HunkLine {
 
 pub fn parse_patch(input: &str) -> anyhow::Result<Vec<PatchAction>> {
     let lines: Vec<&str> = input.lines().collect();
-    anyhow::ensure!(lines.first() == Some(&"*** Begin Patch"), "invalid patch header");
-    anyhow::ensure!(lines.last() == Some(&"*** End Patch"), "invalid patch footer");
+    anyhow::ensure!(
+        lines.first() == Some(&"*** Begin Patch"),
+        "invalid patch header"
+    );
+    anyhow::ensure!(
+        lines.last() == Some(&"*** End Patch"),
+        "invalid patch footer"
+    );
 
     let mut actions = Vec::new();
     let mut index = 1;
@@ -57,9 +63,7 @@ pub fn parse_patch(input: &str) -> anyhow::Result<Vec<PatchAction>> {
         }
 
         if let Some(path) = line.strip_prefix("*** Delete File: ") {
-            actions.push(PatchAction::Delete {
-                path: path.into(),
-            });
+            actions.push(PatchAction::Delete { path: path.into() });
             index += 1;
             continue;
         }

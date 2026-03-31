@@ -1,9 +1,10 @@
 use anyhow::Context;
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
-    PatchApplyRequest, PatchApplyResponse, TargetInfoResponse,
+    PatchApplyRequest, PatchApplyResponse, RpcErrorBody, TargetInfoResponse,
 };
 use reqwest::Identity;
+use reqwest::header::CONNECTION;
 use reqwest::tls::Certificate;
 
 use crate::config::TargetConfig;
@@ -49,10 +50,7 @@ impl DaemonClient {
         self.post("/v1/exec/write", req).await
     }
 
-    pub async fn patch_apply(
-        &self,
-        req: &PatchApplyRequest,
-    ) -> anyhow::Result<PatchApplyResponse> {
+    pub async fn patch_apply(&self, req: &PatchApplyRequest) -> anyhow::Result<PatchApplyResponse> {
         self.post("/v1/patch/apply", req).await
     }
 
@@ -65,14 +63,22 @@ impl DaemonClient {
         Req: serde::Serialize + ?Sized,
         Resp: serde::de::DeserializeOwned,
     {
-        Ok(self
+        let response = self
             .client
             .post(format!("{}{}", self.base_url, path))
+            .header(CONNECTION, "close")
             .json(body)
             .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?)
+            .await?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            if let Ok(error) = serde_json::from_str::<RpcErrorBody>(&body) {
+                anyhow::bail!("{}: {}", error.code, error.message);
+            }
+            anyhow::bail!("daemon returned {status}: {body}");
+        }
+
+        Ok(response.json().await?)
     }
 }

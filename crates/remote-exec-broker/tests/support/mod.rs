@@ -55,11 +55,7 @@ impl ToolResult {
             .filter_map(|content| content.raw.as_text().map(|text| text.text.as_str()))
             .collect::<Vec<_>>()
             .join("\n");
-        let raw_content = result
-            .content
-            .iter()
-            .map(normalize_content)
-            .collect();
+        let raw_content = result.content.iter().map(normalize_content).collect();
 
         Self {
             text_output,
@@ -254,8 +250,7 @@ fn write_test_certs(dir: &Path) -> TestCerts {
         .self_signed(&ca_key)
         .unwrap();
 
-    let mut daemon_params =
-        rcgen::CertificateParams::new(vec!["localhost".to_string()]).unwrap();
+    let mut daemon_params = rcgen::CertificateParams::new(vec!["localhost".to_string()]).unwrap();
     daemon_params
         .subject_alt_names
         .push(rcgen::SanType::IpAddress("127.0.0.1".parse().unwrap()));
