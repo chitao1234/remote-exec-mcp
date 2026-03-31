@@ -70,9 +70,8 @@ fn seek_sequence(
     let max_start = lines.len() - pattern.len();
     if end_of_file {
         let eof_start = max_start;
-        if eof_start >= start && lines[eof_start..eof_start + pattern.len()] == *pattern {
-            return Some(eof_start);
-        }
+        return (eof_start >= start && lines[eof_start..eof_start + pattern.len()] == *pattern)
+            .then_some(eof_start);
     }
 
     for idx in start..=max_start {
