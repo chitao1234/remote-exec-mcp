@@ -5,3 +5,25 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+anyhow = { workspace = true }
+axum = { workspace = true }
+gethostname = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+remote-exec-proto = { path = "../remote-exec-proto" }
+rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+tokio-rustls = { workspace = true }
+toml = { workspace = true }
+tower = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+rcgen = { workspace = true }
+reqwest = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
