@@ -1,5 +1,6 @@
 pub mod config;
 pub mod exec;
+pub mod image;
 pub mod patch;
 pub mod server;
 pub mod tls;

@@ -7,9 +7,11 @@ version.workspace = true
 [dependencies]
 anyhow = { workspace = true }
 axum = { workspace = true }
+base64 = { workspace = true }
 gethostname = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true }
+image = { workspace = true }
 portable-pty = { workspace = true }
 rand = { workspace = true }
 remote-exec-proto = { path = "../remote-exec-proto" }
@@ -25,7 +27,6 @@ tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
-image = { workspace = true }
 rcgen = { workspace = true }
 reqwest = { workspace = true }
 serde_json = { workspace = true }
