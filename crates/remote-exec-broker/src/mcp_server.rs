@@ -146,20 +146,24 @@ pub fn format_command_text(
     response: &remote_exec_proto::rpc::ExecResponse,
     session_id: Option<&str>,
 ) -> String {
-    let status = match (response.exit_code, session_id) {
-        (Some(code), _) => format!("Process exited with code {code}"),
-        (None, Some(id)) => format!("Process running with session ID {id}"),
-        (None, None) => "Process running".to_string(),
-    };
+    let original = response
+        .original_token_count
+        .map(|count| format!("\nOriginal token count: {count}"))
+        .unwrap_or_default();
 
     format!(
-        "Command: {cmd}\nChunk ID: {}\nWall time: {:.3} seconds\n{status}\nOutput:\n{}",
+        "Command: {cmd}\nChunk ID: {}\nWall time: {:.3} seconds\n{}{original}\nOutput:\n{}",
         response
             .chunk_id
             .clone()
             .unwrap_or_else(|| "n/a".to_string()),
         response.wall_time_seconds,
-        response.output
+        match (response.exit_code, session_id) {
+            (Some(code), _) => format!("Process exited with code {code}"),
+            (None, Some(id)) => format!("Process running with session ID {id}"),
+            (None, None) => "Process running".to_string(),
+        },
+        response.output,
     )
 }
 
@@ -182,4 +186,29 @@ pub fn format_poll_text(
         response.wall_time_seconds,
         response.output
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_command_text;
+    use remote_exec_proto::rpc::ExecResponse;
+
+    #[test]
+    fn format_command_text_includes_original_token_count_when_present() {
+        let text = format_command_text(
+            "printf hi",
+            &ExecResponse {
+                daemon_session_id: None,
+                running: false,
+                chunk_id: Some("abc123".to_string()),
+                wall_time_seconds: 0.25,
+                exit_code: Some(0),
+                original_token_count: Some(6),
+                output: "one two three".to_string(),
+            },
+            None,
+        );
+
+        assert!(text.contains("Original token count: 6"));
+    }
 }

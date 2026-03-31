@@ -180,4 +180,8 @@ impl LiveSession {
     pub fn exit_code(&self) -> Option<i32> {
         self.exit_code
     }
+
+    pub fn record_output(&mut self, chunk: &str) {
+        self.transcript.push(chunk.as_bytes());
+    }
 }

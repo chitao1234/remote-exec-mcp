@@ -26,6 +26,29 @@ async fn exec_start_returns_a_live_session_for_long_running_tty_processes() {
 }
 
 #[tokio::test]
+async fn exec_start_truncates_output_to_max_output_tokens() {
+    let fixture = support::spawn_daemon("builder-a").await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "printf 'one two three four five six'".to_string(),
+                workdir: None,
+                shell: Some("/bin/bash".to_string()),
+                tty: false,
+                yield_time_ms: Some(250),
+                max_output_tokens: Some(3),
+                login: Some(false),
+            },
+        )
+        .await;
+
+    assert_eq!(response.original_token_count, Some(6));
+    assert_eq!(response.output, "one two three");
+}
+
+#[tokio::test]
 async fn exec_write_rejects_non_tty_sessions_when_chars_are_present() {
     let fixture = support::spawn_daemon("builder-a").await;
     let started = fixture

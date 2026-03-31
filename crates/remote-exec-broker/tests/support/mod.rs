@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -16,7 +15,6 @@ use rmcp::{
     transport::TokioChildProcess,
 };
 use tempfile::TempDir;
-use tokio::sync::Mutex;
 
 pub struct BrokerFixture {
     pub _tempdir: TempDir,
@@ -163,7 +161,7 @@ async fn spawn_stub_daemon(certs: &TestCerts) -> std::net::SocketAddr {
             },
         }),
         daemon_instance_id: "daemon-instance-1".to_string(),
-        sessions: Arc::new(Mutex::new(HashMap::new())),
+        sessions: remote_exec_daemon::exec::store::SessionStore::default(),
     };
 
     tokio::spawn(async move {

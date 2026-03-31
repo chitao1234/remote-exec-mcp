@@ -1,3 +1,4 @@
+mod output;
 pub mod session;
 pub mod store;
 pub mod transcript;
@@ -30,11 +31,22 @@ pub async fn exec_start(
         let chunk = poll_once(&mut session).await.map_err(internal_error)?;
         if !chunk.is_empty() {
             output.push_str(&chunk);
-            session.transcript.push(chunk.as_bytes());
+            session.record_output(&chunk);
         }
 
         if has_exited(&mut session).await.map_err(internal_error)? {
-            return Ok(Json(finish_response(None, false, &session, output)));
+            output.push_str(
+                &output::drain_after_exit(&mut session)
+                    .await
+                    .map_err(internal_error)?,
+            );
+            return Ok(Json(finish_response(
+                None,
+                false,
+                &session,
+                output,
+                req.max_output_tokens,
+            )));
         }
 
         tokio::time::sleep(Duration::from_millis(25)).await;
@@ -42,7 +54,7 @@ pub async fn exec_start(
 
     let daemon_session_id = uuid::Uuid::new_v4().to_string();
     let wall_time_seconds = session.started_at.elapsed().as_secs_f64();
-    let original_token_count = output.split_whitespace().count() as u32;
+    let snapshot = output::snapshot_output(output, req.max_output_tokens);
     state
         .sessions
         .insert(daemon_session_id.clone(), session)
@@ -54,8 +66,8 @@ pub async fn exec_start(
         chunk_id: Some(chunk_id()),
         wall_time_seconds,
         exit_code: None,
-        original_token_count: Some(original_token_count),
-        output,
+        original_token_count: Some(snapshot.original_token_count),
+        output: snapshot.output,
     }))
 }
 
@@ -89,12 +101,18 @@ pub async fn exec_write(
     .await
     .map_err(internal_error)?;
     if has_exited(&mut session).await.map_err(internal_error)? {
-        let response = finish_response(None, false, &session, output);
+        let mut output = output;
+        output.push_str(
+            &output::drain_after_exit(&mut session)
+                .await
+                .map_err(internal_error)?,
+        );
+        let response = finish_response(None, false, &session, output, req.max_output_tokens);
         session.retire().await;
         return Ok(Json(response));
     }
     let wall_time_seconds = session.started_at.elapsed().as_secs_f64();
-    let original_token_count = output.split_whitespace().count() as u32;
+    let snapshot = output::snapshot_output(output, req.max_output_tokens);
     drop(session);
 
     Ok(Json(ExecResponse {
@@ -103,8 +121,8 @@ pub async fn exec_write(
         chunk_id: Some(chunk_id()),
         wall_time_seconds,
         exit_code: None,
-        original_token_count: Some(original_token_count),
-        output,
+        original_token_count: Some(snapshot.original_token_count),
+        output: snapshot.output,
     }))
 }
 
@@ -182,7 +200,7 @@ async fn poll_until(
     while Instant::now() < deadline {
         let chunk = poll_once(session).await?;
         if !chunk.is_empty() {
-            session.transcript.push(chunk.as_bytes());
+            session.record_output(&chunk);
             output.push_str(&chunk);
         }
 
@@ -201,14 +219,16 @@ fn finish_response(
     running: bool,
     session: &session::LiveSession,
     output: String,
+    max_output_tokens: Option<u32>,
 ) -> ExecResponse {
+    let snapshot = output::snapshot_output(output, max_output_tokens);
     ExecResponse {
         daemon_session_id,
         running,
         chunk_id: Some(chunk_id()),
         wall_time_seconds: session.started_at.elapsed().as_secs_f64(),
         exit_code: session.exit_code(),
-        original_token_count: Some(output.split_whitespace().count() as u32),
-        output,
+        original_token_count: Some(snapshot.original_token_count),
+        output: snapshot.output,
     }
 }
