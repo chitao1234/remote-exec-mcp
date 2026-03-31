@@ -26,7 +26,9 @@ async fn add_file_overwrites_existing_content() {
 async fn update_file_accepts_end_of_file_marker() {
     let fixture = support::spawn_daemon("builder-a").await;
     let path = fixture.workdir.join("plain.txt");
-    tokio::fs::write(&path, "before").await.unwrap();
+    tokio::fs::write(&path, "before\nmiddle\nbefore\n")
+        .await
+        .unwrap();
 
     let response = fixture
         .rpc::<PatchApplyRequest, PatchApplyResponse>(
@@ -48,7 +50,10 @@ async fn update_file_accepts_end_of_file_marker() {
         .await;
 
     assert!(response.output.contains("M plain.txt"));
-    assert_eq!(tokio::fs::read_to_string(path).await.unwrap(), "after\n");
+    assert_eq!(
+        tokio::fs::read_to_string(path).await.unwrap(),
+        "before\nmiddle\nafter\n",
+    );
 }
 
 #[tokio::test]
