@@ -6,7 +6,6 @@ use anyhow::Context;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
-use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use super::transcript::TranscriptBuffer;
@@ -136,11 +135,8 @@ where
 impl LiveSession {
     pub async fn read_available(&mut self) -> anyhow::Result<String> {
         let mut output = String::new();
-        loop {
-            match self.receiver.try_recv() {
-                Ok(chunk) => output.push_str(&chunk),
-                Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
-            }
+        while let Ok(chunk) = self.receiver.try_recv() {
+            output.push_str(&chunk);
         }
         Ok(output)
     }

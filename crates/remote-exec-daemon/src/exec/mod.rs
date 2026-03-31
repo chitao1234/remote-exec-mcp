@@ -1,4 +1,5 @@
 pub mod session;
+pub mod store;
 pub mod transcript;
 
 use std::path::PathBuf;
@@ -44,9 +45,8 @@ pub async fn exec_start(
     let original_token_count = output.split_whitespace().count() as u32;
     state
         .sessions
-        .lock()
-        .await
-        .insert(daemon_session_id.clone(), session);
+        .insert(daemon_session_id.clone(), session)
+        .await;
 
     Ok(Json(ExecResponse {
         daemon_session_id: Some(daemon_session_id),
@@ -63,10 +63,13 @@ pub async fn exec_write(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ExecWriteRequest>,
 ) -> Result<Json<ExecResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    let mut sessions = state.sessions.lock().await;
-    let session = sessions
-        .get_mut(&req.daemon_session_id)
+    let daemon_session_id = req.daemon_session_id;
+    let session = state
+        .sessions
+        .get(&daemon_session_id)
+        .await
         .ok_or_else(|| rpc_error("unknown_session", "Unknown daemon session"))?;
+    let mut session = session.lock().await;
 
     if !req.chars.is_empty() && !session.tty {
         return Err(rpc_error(
@@ -75,29 +78,33 @@ pub async fn exec_write(
         ));
     }
 
-    write_chars(session, &req.chars)
+    write_chars(&mut session, &req.chars)
         .await
         .map_err(internal_error)?;
     let output = poll_until(
-        session,
+        &mut session,
         req.chars.is_empty(),
         req.yield_time_ms.unwrap_or(250),
     )
     .await
     .map_err(internal_error)?;
-    if has_exited(session).await.map_err(internal_error)? {
-        let response = finish_response(None, false, session, output);
-        sessions.remove(&req.daemon_session_id);
+    if has_exited(&mut session).await.map_err(internal_error)? {
+        let response = finish_response(None, false, &session, output);
+        drop(session);
+        state.sessions.remove(&daemon_session_id).await;
         return Ok(Json(response));
     }
+    let wall_time_seconds = session.started_at.elapsed().as_secs_f64();
+    let original_token_count = output.split_whitespace().count() as u32;
+    drop(session);
 
     Ok(Json(ExecResponse {
-        daemon_session_id: Some(req.daemon_session_id),
+        daemon_session_id: Some(daemon_session_id),
         running: true,
         chunk_id: Some(chunk_id()),
-        wall_time_seconds: session.started_at.elapsed().as_secs_f64(),
+        wall_time_seconds,
         exit_code: None,
-        original_token_count: Some(output.split_whitespace().count() as u32),
+        original_token_count: Some(original_token_count),
         output,
     }))
 }

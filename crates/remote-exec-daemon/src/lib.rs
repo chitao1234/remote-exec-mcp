@@ -5,19 +5,17 @@ pub mod patch;
 pub mod server;
 pub mod tls;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Once;
 
 use anyhow::Result;
 use config::DaemonConfig;
-use tokio::sync::Mutex;
 
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<DaemonConfig>,
     pub daemon_instance_id: String,
-    pub sessions: Arc<Mutex<HashMap<String, exec::session::LiveSession>>>,
+    pub sessions: exec::store::SessionStore,
 }
 
 pub async fn run(config: DaemonConfig) -> Result<()> {
@@ -26,7 +24,7 @@ pub async fn run(config: DaemonConfig) -> Result<()> {
     let state = AppState {
         config: Arc::new(config),
         daemon_instance_id: uuid::Uuid::new_v4().to_string(),
-        sessions: Arc::new(Mutex::new(HashMap::new())),
+        sessions: exec::store::SessionStore::default(),
     };
     server::serve(state).await
 }
