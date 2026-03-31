@@ -171,6 +171,10 @@ pub fn format_poll_text(
     response: &remote_exec_proto::rpc::ExecResponse,
     session_id: Option<&str>,
 ) -> String {
+    let original = response
+        .original_token_count
+        .map(|count| format!("\nOriginal token count: {count}"))
+        .unwrap_or_default();
     let status = match (response.exit_code, session_id) {
         (Some(code), _) => format!("Process exited with code {code}"),
         (None, Some(id)) => format!("Process running with session ID {id}"),
@@ -178,7 +182,7 @@ pub fn format_poll_text(
     };
 
     format!(
-        "Chunk ID: {}\nWall time: {:.3} seconds\n{status}\nOutput:\n{}",
+        "Chunk ID: {}\nWall time: {:.3} seconds\n{status}{original}\nOutput:\n{}",
         response
             .chunk_id
             .clone()
@@ -190,13 +194,31 @@ pub fn format_poll_text(
 
 #[cfg(test)]
 mod tests {
-    use super::format_command_text;
+    use super::{format_command_text, format_poll_text};
     use remote_exec_proto::rpc::ExecResponse;
 
     #[test]
     fn format_command_text_includes_original_token_count_when_present() {
         let text = format_command_text(
             "printf hi",
+            &ExecResponse {
+                daemon_session_id: None,
+                running: false,
+                chunk_id: Some("abc123".to_string()),
+                wall_time_seconds: 0.25,
+                exit_code: Some(0),
+                original_token_count: Some(6),
+                output: "one two three".to_string(),
+            },
+            None,
+        );
+
+        assert!(text.contains("Original token count: 6"));
+    }
+
+    #[test]
+    fn format_poll_text_includes_original_token_count_when_present() {
+        let text = format_poll_text(
             &ExecResponse {
                 daemon_session_id: None,
                 running: false,
