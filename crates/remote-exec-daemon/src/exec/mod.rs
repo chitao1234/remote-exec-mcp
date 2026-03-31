@@ -41,6 +41,7 @@ pub async fn exec_start(
                     .map_err(internal_error)?,
             );
             return Ok(Json(finish_response(
+                &state.daemon_instance_id,
                 None,
                 false,
                 &session,
@@ -62,6 +63,7 @@ pub async fn exec_start(
 
     Ok(Json(ExecResponse {
         daemon_session_id: Some(daemon_session_id),
+        daemon_instance_id: state.daemon_instance_id.clone(),
         running: true,
         chunk_id: Some(chunk_id()),
         wall_time_seconds,
@@ -107,7 +109,14 @@ pub async fn exec_write(
                 .await
                 .map_err(internal_error)?,
         );
-        let response = finish_response(None, false, &session, output, req.max_output_tokens);
+        let response = finish_response(
+            &state.daemon_instance_id,
+            None,
+            false,
+            &session,
+            output,
+            req.max_output_tokens,
+        );
         session.retire().await;
         return Ok(Json(response));
     }
@@ -117,6 +126,7 @@ pub async fn exec_write(
 
     Ok(Json(ExecResponse {
         daemon_session_id: Some(daemon_session_id),
+        daemon_instance_id: state.daemon_instance_id.clone(),
         running: true,
         chunk_id: Some(chunk_id()),
         wall_time_seconds,
@@ -215,6 +225,7 @@ async fn poll_until(
 }
 
 fn finish_response(
+    daemon_instance_id: &str,
     daemon_session_id: Option<String>,
     running: bool,
     session: &session::LiveSession,
@@ -224,6 +235,7 @@ fn finish_response(
     let snapshot = output::snapshot_output(output, max_output_tokens);
     ExecResponse {
         daemon_session_id,
+        daemon_instance_id: daemon_instance_id.to_string(),
         running,
         chunk_id: Some(chunk_id()),
         wall_time_seconds: session.started_at.elapsed().as_secs_f64(),

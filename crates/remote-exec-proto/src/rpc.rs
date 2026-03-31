@@ -41,6 +41,7 @@ pub struct ExecWriteRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ExecResponse {
     pub daemon_session_id: Option<String>,
+    pub daemon_instance_id: String,
     pub running: bool,
     pub chunk_id: Option<String>,
     pub wall_time_seconds: f64,

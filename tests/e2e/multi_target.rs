@@ -133,7 +133,8 @@ async fn sessions_are_invalidated_after_daemon_restart() {
         )
         .await;
     assert!(
-        invalidated.contains("session invalidated"),
+        invalidated.contains("session invalidated after daemon restart")
+            || invalidated.contains("session invalidated after daemon-side session loss"),
         "restart invalidation error: {invalidated}"
     );
 

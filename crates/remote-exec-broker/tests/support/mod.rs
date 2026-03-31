@@ -1,12 +1,14 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::extract::State;
+use axum::http::StatusCode;
 use axum::routing::post;
 use axum::{Json, Router};
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWriteRequest, HealthCheckResponse, ImageReadRequest,
-    ImageReadResponse, PatchApplyRequest, PatchApplyResponse, TargetInfoResponse,
+    ImageReadResponse, PatchApplyRequest, PatchApplyResponse, RpcErrorBody, TargetInfoResponse,
 };
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
@@ -15,6 +17,7 @@ use rmcp::{
     transport::TokioChildProcess,
 };
 use tempfile::TempDir;
+use tokio::sync::Mutex;
 
 pub struct BrokerFixture {
     pub _tempdir: TempDir,
@@ -23,6 +26,29 @@ pub struct BrokerFixture {
 
 impl BrokerFixture {
     pub async fn call_tool(&self, name: &str, arguments: serde_json::Value) -> ToolResult {
+        let result = self.raw_call_tool(name, arguments).await;
+        assert!(
+            !result.is_error,
+            "expected successful tool call, got {}",
+            result.text_output
+        );
+        result
+    }
+
+    #[allow(dead_code)]
+    pub async fn call_tool_error(&self, name: &str, arguments: serde_json::Value) -> String {
+        let result = self.raw_call_tool(name, arguments).await;
+        assert!(
+            result.is_error,
+            "expected tool error, text={}, structured={}, raw={}",
+            result.text_output,
+            result.structured_content,
+            serde_json::Value::Array(result.raw_content.clone())
+        );
+        result.text_output
+    }
+
+    async fn raw_call_tool(&self, name: &str, arguments: serde_json::Value) -> ToolResult {
         let result = self
             .client
             .call_tool(CallToolRequestParams {
@@ -40,6 +66,7 @@ impl BrokerFixture {
 
 #[allow(dead_code)]
 pub struct ToolResult {
+    pub is_error: bool,
     pub text_output: String,
     pub structured_content: serde_json::Value,
     pub raw_content: Vec<serde_json::Value>,
@@ -56,6 +83,7 @@ impl ToolResult {
         let raw_content = result.content.iter().map(normalize_content).collect();
 
         Self {
+            is_error: result.is_error.unwrap_or(false),
             text_output,
             structured_content: result.structured_content.unwrap_or(serde_json::Value::Null),
             raw_content,
@@ -125,13 +153,106 @@ expected_daemon_name = "builder-a"
     }
 }
 
+#[allow(dead_code)]
+pub async fn spawn_broker_with_live_and_dead_targets() -> BrokerFixture {
+    remote_exec_daemon::install_crypto_provider();
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let certs = write_test_certs(tempdir.path());
+    let live_addr = spawn_stub_daemon(&certs).await;
+    let dead_addr = allocate_addr();
+    let broker_config = tempdir.path().join("broker.toml");
+    std::fs::write(
+        &broker_config,
+        format!(
+            r#"[targets.builder-a]
+base_url = "https://{live_addr}"
+ca_pem = "{}"
+client_cert_pem = "{}"
+client_key_pem = "{}"
+expected_daemon_name = "builder-a"
+
+[targets.builder-b]
+base_url = "https://{dead_addr}"
+ca_pem = "{}"
+client_cert_pem = "{}"
+client_key_pem = "{}"
+expected_daemon_name = "builder-b"
+"#,
+            certs.ca_cert.display(),
+            certs.client_cert.display(),
+            certs.client_key.display(),
+            certs.ca_cert.display(),
+            certs.client_cert.display(),
+            certs.client_key.display(),
+        ),
+    )
+    .unwrap();
+
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
+    command.arg(&broker_config);
+    let transport = TokioChildProcess::new(command).unwrap();
+    let client = DummyClientHandler.serve(transport).await.unwrap();
+
+    BrokerFixture {
+        _tempdir: tempdir,
+        client,
+    }
+}
+
+#[allow(dead_code)]
+pub async fn spawn_broker_with_retryable_exec_write_error() -> BrokerFixture {
+    remote_exec_daemon::install_crypto_provider();
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let certs = write_test_certs(tempdir.path());
+    let addr = spawn_retryable_exec_write_daemon(&certs).await;
+    let broker_config = tempdir.path().join("broker.toml");
+    std::fs::write(
+        &broker_config,
+        format!(
+            r#"[targets.builder-a]
+base_url = "https://{addr}"
+ca_pem = "{}"
+client_cert_pem = "{}"
+client_key_pem = "{}"
+expected_daemon_name = "builder-a"
+"#,
+            certs.ca_cert.display(),
+            certs.client_cert.display(),
+            certs.client_key.display(),
+        ),
+    )
+    .unwrap();
+
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
+    command.arg(&broker_config);
+    let transport = TokioChildProcess::new(command).unwrap();
+    let client = DummyClientHandler.serve(transport).await.unwrap();
+
+    BrokerFixture {
+        _tempdir: tempdir,
+        client,
+    }
+}
+
 #[derive(Clone)]
 struct StubDaemonState {
     target: String,
     daemon_instance_id: String,
+    fail_exec_write_once: Arc<Mutex<bool>>,
 }
 
 async fn spawn_stub_daemon(certs: &TestCerts) -> std::net::SocketAddr {
+    spawn_daemon(certs, false).await
+}
+
+#[allow(dead_code)]
+async fn spawn_retryable_exec_write_daemon(certs: &TestCerts) -> std::net::SocketAddr {
+    spawn_daemon(certs, true).await
+}
+
+async fn spawn_daemon(certs: &TestCerts, fail_exec_write_once: bool) -> std::net::SocketAddr {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
     drop(listener);
@@ -139,6 +260,7 @@ async fn spawn_stub_daemon(certs: &TestCerts) -> std::net::SocketAddr {
     let state = StubDaemonState {
         target: "builder-a".to_string(),
         daemon_instance_id: "daemon-instance-1".to_string(),
+        fail_exec_write_once: Arc::new(Mutex::new(fail_exec_write_once)),
     };
     let app = Router::new()
         .route("/v1/health", post(health))
@@ -198,6 +320,7 @@ async fn target_info(State(state): State<StubDaemonState>) -> Json<TargetInfoRes
 async fn exec_start(Json(_req): Json<ExecStartRequest>) -> Json<ExecResponse> {
     Json(ExecResponse {
         daemon_session_id: Some("daemon-session-1".to_string()),
+        daemon_instance_id: "daemon-instance-1".to_string(),
         running: true,
         chunk_id: Some("chunk-start".to_string()),
         wall_time_seconds: 0.25,
@@ -207,17 +330,34 @@ async fn exec_start(Json(_req): Json<ExecStartRequest>) -> Json<ExecResponse> {
     })
 }
 
-async fn exec_write(Json(req): Json<ExecWriteRequest>) -> Json<ExecResponse> {
+async fn exec_write(
+    State(state): State<StubDaemonState>,
+    Json(req): Json<ExecWriteRequest>,
+) -> Result<Json<ExecResponse>, (StatusCode, Json<RpcErrorBody>)> {
     assert_eq!(req.daemon_session_id, "daemon-session-1");
-    Json(ExecResponse {
+    let mut fail_once = state.fail_exec_write_once.lock().await;
+    if *fail_once {
+        *fail_once = false;
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(RpcErrorBody {
+                code: "temporary_failure".to_string(),
+                message: "temporary failure".to_string(),
+            }),
+        ));
+    }
+    drop(fail_once);
+
+    Ok(Json(ExecResponse {
         daemon_session_id: None,
+        daemon_instance_id: state.daemon_instance_id,
         running: false,
         chunk_id: Some("chunk-write".to_string()),
         wall_time_seconds: 0.5,
         exit_code: Some(0),
         original_token_count: Some(2),
         output: "poll output".to_string(),
-    })
+    }))
 }
 
 async fn patch_apply(Json(_req): Json<PatchApplyRequest>) -> Json<PatchApplyResponse> {
@@ -284,6 +424,14 @@ fn write_test_certs(dir: &Path) -> TestCerts {
     }
 }
 
+#[allow(dead_code)]
+fn allocate_addr() -> std::net::SocketAddr {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    addr
+}
+
 async fn wait_until_ready(certs: &TestCerts, addr: std::net::SocketAddr) {
     let client = reqwest::Client::builder()
         .use_rustls_tls()
@@ -313,7 +461,7 @@ async fn wait_until_ready(certs: &TestCerts, addr: std::net::SocketAddr) {
         {
             return;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
     panic!("stub daemon did not become ready");

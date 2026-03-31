@@ -203,6 +203,7 @@ mod tests {
             "printf hi",
             &ExecResponse {
                 daemon_session_id: None,
+                daemon_instance_id: "daemon-instance-1".to_string(),
                 running: false,
                 chunk_id: Some("abc123".to_string()),
                 wall_time_seconds: 0.25,
@@ -221,6 +222,7 @@ mod tests {
         let text = format_poll_text(
             &ExecResponse {
                 daemon_session_id: None,
+                daemon_instance_id: "daemon-instance-1".to_string(),
                 running: false,
                 chunk_id: Some("abc123".to_string()),
                 wall_time_seconds: 0.25,

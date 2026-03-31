@@ -14,7 +14,6 @@ use session_store::SessionStore;
 #[derive(Clone)]
 pub struct TargetHandle {
     pub client: DaemonClient,
-    pub daemon_instance_id: String,
 }
 
 #[derive(Clone)]
@@ -42,23 +41,22 @@ async fn build_state(config: config::BrokerConfig) -> anyhow::Result<BrokerState
 
     for (name, target_config) in &config.targets {
         let client = DaemonClient::new(target_config).await?;
-        let info = client.target_info().await?;
-
-        if let Some(expected_name) = &target_config.expected_daemon_name {
-            anyhow::ensure!(
-                &info.target == expected_name,
-                "target `{name}` resolved to daemon `{}` instead of `{expected_name}`",
-                info.target
-            );
+        match client.target_info().await {
+            Ok(info) => {
+                if let Some(expected_name) = &target_config.expected_daemon_name {
+                    anyhow::ensure!(
+                        &info.target == expected_name,
+                        "target `{name}` resolved to daemon `{}` instead of `{expected_name}`",
+                        info.target
+                    );
+                }
+            }
+            Err(err) => {
+                tracing::warn!(target = %name, ?err, "target unavailable during broker startup");
+            }
         }
 
-        targets.insert(
-            name.clone(),
-            TargetHandle {
-                client,
-                daemon_instance_id: info.daemon_instance_id,
-            },
-        );
+        targets.insert(name.clone(), TargetHandle { client });
     }
 
     Ok(BrokerState {
