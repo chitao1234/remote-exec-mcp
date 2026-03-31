@@ -66,10 +66,10 @@ pub async fn exec_write(
     let daemon_session_id = req.daemon_session_id;
     let session = state
         .sessions
-        .get(&daemon_session_id)
+        .lock(&daemon_session_id)
         .await
         .ok_or_else(|| rpc_error("unknown_session", "Unknown daemon session"))?;
-    let mut session = session.lock().await;
+    let mut session = session;
 
     if !req.chars.is_empty() && !session.tty {
         return Err(rpc_error(
