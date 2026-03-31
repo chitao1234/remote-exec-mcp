@@ -1,0 +1,110 @@
+use anyhow::Context;
+use remote_exec_proto::public::{CommandToolResult, ExecCommandInput, WriteStdinInput};
+use remote_exec_proto::rpc::{ExecStartRequest, ExecWriteRequest};
+
+use crate::mcp_server::{ToolCallOutput, format_command_text, format_poll_text};
+
+pub async fn exec_command(
+    state: &crate::BrokerState,
+    input: ExecCommandInput,
+) -> anyhow::Result<ToolCallOutput> {
+    let target = state.target(&input.target)?;
+    let response = target
+        .client
+        .exec_start(&ExecStartRequest {
+            cmd: input.cmd.clone(),
+            workdir: input.workdir.clone(),
+            shell: input.shell.clone(),
+            tty: input.tty,
+            yield_time_ms: input.yield_time_ms,
+            max_output_tokens: input.max_output_tokens,
+            login: input.login,
+        })
+        .await?;
+
+    let session_id = if response.running {
+        let daemon_session_id = response
+            .daemon_session_id
+            .clone()
+            .expect("daemon session id");
+        Some(
+            state
+                .sessions
+                .insert(
+                    input.target.clone(),
+                    daemon_session_id,
+                    target.daemon_instance_id.clone(),
+                )
+                .await
+                .session_id,
+        )
+    } else {
+        None
+    };
+
+    Ok(ToolCallOutput::text_and_structured(
+        format_command_text(&input.cmd, &response, session_id.as_deref()),
+        serde_json::to_value(CommandToolResult {
+            target: input.target,
+            chunk_id: response.chunk_id,
+            wall_time_seconds: response.wall_time_seconds,
+            exit_code: response.exit_code,
+            session_id,
+            original_token_count: response.original_token_count,
+            output: response.output,
+        })?,
+    ))
+}
+
+pub async fn write_stdin(
+    state: &crate::BrokerState,
+    input: WriteStdinInput,
+) -> anyhow::Result<ToolCallOutput> {
+    let record = state
+        .sessions
+        .get(&input.session_id)
+        .await
+        .context("unknown session")?;
+
+    if let Some(target) = &input.target {
+        anyhow::ensure!(target == &record.target, "session does not belong to target `{target}`");
+    }
+
+    let target = state.target(&record.target)?;
+    let response = match target
+        .client
+        .exec_write(&ExecWriteRequest {
+            daemon_session_id: record.daemon_session_id.clone(),
+            chars: input.chars.unwrap_or_default(),
+            yield_time_ms: input.yield_time_ms,
+            max_output_tokens: input.max_output_tokens,
+        })
+        .await
+    {
+        Ok(response) => response,
+        Err(err) => {
+            state.sessions.remove(&record.session_id).await;
+            return Err(err.context("session invalidated after daemon-side session loss"));
+        }
+    };
+
+    let session_id = if response.running {
+        Some(record.session_id.clone())
+    } else {
+        state.sessions.remove(&record.session_id).await;
+        None
+    };
+
+    Ok(ToolCallOutput::text_and_structured(
+        format_poll_text(&response, session_id.as_deref()),
+        serde_json::to_value(CommandToolResult {
+            target: record.target,
+            chunk_id: response.chunk_id,
+            wall_time_seconds: response.wall_time_seconds,
+            exit_code: response.exit_code,
+            session_id,
+            original_token_count: response.original_token_count,
+            output: response.output,
+        })?,
+    ))
+}
