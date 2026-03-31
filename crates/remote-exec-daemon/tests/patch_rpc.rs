@@ -23,6 +23,35 @@ async fn add_file_overwrites_existing_content() {
 }
 
 #[tokio::test]
+async fn update_file_accepts_end_of_file_marker() {
+    let fixture = support::spawn_daemon("builder-a").await;
+    let path = fixture.workdir.join("plain.txt");
+    tokio::fs::write(&path, "before").await.unwrap();
+
+    let response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Update File: plain.txt\n",
+                    "@@\n",
+                    "-before\n",
+                    "+after\n",
+                    "*** End of File\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert!(response.output.contains("M plain.txt"));
+    assert_eq!(tokio::fs::read_to_string(path).await.unwrap(), "after\n");
+}
+
+#[tokio::test]
 async fn patch_failures_do_not_roll_back_earlier_file_changes() {
     let fixture = support::spawn_daemon("builder-a").await;
     tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
