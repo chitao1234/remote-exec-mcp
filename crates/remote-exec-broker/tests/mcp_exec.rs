@@ -89,6 +89,36 @@ async fn broker_keeps_healthy_targets_available_when_one_target_is_down() {
 }
 
 #[tokio::test]
+async fn broker_rejects_unverified_target_if_it_returns_as_the_wrong_daemon() {
+    let fixture = support::spawn_broker_with_late_target().await;
+    fixture
+        .broker
+        .call_tool(
+            "apply_patch",
+            serde_json::json!({
+                "target": "builder-a",
+                "input": "*** Begin Patch\n*** Add File: ok.txt\n+ok\n*** End Patch\n"
+            }),
+        )
+        .await;
+
+    fixture.spawn_target("not-builder-b").await;
+
+    let wrong = fixture
+        .broker
+        .call_tool_error(
+            "apply_patch",
+            serde_json::json!({
+                "target": "builder-b",
+                "input": "*** Begin Patch\n*** Add File: nope.txt\n+nope\n*** End Patch\n"
+            }),
+        )
+        .await;
+
+    assert!(wrong.contains("resolved to daemon `not-builder-b` instead of `builder-b`"));
+}
+
+#[tokio::test]
 async fn write_stdin_keeps_session_after_retryable_daemon_error() {
     let fixture = support::spawn_broker_with_retryable_exec_write_error().await;
 

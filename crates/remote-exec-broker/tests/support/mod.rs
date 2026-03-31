@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,6 +24,20 @@ use tokio::sync::Mutex;
 pub struct BrokerFixture {
     pub _tempdir: TempDir,
     pub client: RunningService<RoleClient, DummyClientHandler>,
+}
+
+#[allow(dead_code)]
+pub struct DelayedTargetFixture {
+    pub broker: BrokerFixture,
+    certs: TestCerts,
+    addr: std::net::SocketAddr,
+}
+
+#[allow(dead_code)]
+impl DelayedTargetFixture {
+    pub async fn spawn_target(&self, target: &str) {
+        spawn_named_daemon_on_addr(&self.certs, self.addr, target, false).await;
+    }
 }
 
 impl BrokerFixture {
@@ -236,6 +252,57 @@ expected_daemon_name = "builder-a"
     }
 }
 
+#[allow(dead_code)]
+pub async fn spawn_broker_with_late_target() -> DelayedTargetFixture {
+    remote_exec_daemon::install_crypto_provider();
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let certs = write_test_certs(tempdir.path());
+    let live_addr = spawn_stub_daemon(&certs).await;
+    let delayed_addr = allocate_addr();
+    let broker_config = tempdir.path().join("broker.toml");
+    std::fs::write(
+        &broker_config,
+        format!(
+            r#"[targets.builder-a]
+base_url = "https://{live_addr}"
+ca_pem = "{}"
+client_cert_pem = "{}"
+client_key_pem = "{}"
+expected_daemon_name = "builder-a"
+
+[targets.builder-b]
+base_url = "https://{delayed_addr}"
+ca_pem = "{}"
+client_cert_pem = "{}"
+client_key_pem = "{}"
+expected_daemon_name = "builder-b"
+"#,
+            certs.ca_cert.display(),
+            certs.client_cert.display(),
+            certs.client_key.display(),
+            certs.ca_cert.display(),
+            certs.client_cert.display(),
+            certs.client_key.display(),
+        ),
+    )
+    .unwrap();
+
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
+    command.arg(&broker_config);
+    let transport = TokioChildProcess::new(command).unwrap();
+    let client = DummyClientHandler.serve(transport).await.unwrap();
+
+    DelayedTargetFixture {
+        broker: BrokerFixture {
+            _tempdir: tempdir,
+            client,
+        },
+        certs,
+        addr: delayed_addr,
+    }
+}
+
 #[derive(Clone)]
 struct StubDaemonState {
     target: String,
@@ -257,8 +324,20 @@ async fn spawn_daemon(certs: &TestCerts, fail_exec_write_once: bool) -> std::net
     let addr = listener.local_addr().unwrap();
     drop(listener);
 
+    spawn_named_daemon_on_addr(certs, addr, "builder-a", fail_exec_write_once).await;
+    addr
+}
+
+async fn spawn_named_daemon_on_addr(
+    certs: &TestCerts,
+    addr: std::net::SocketAddr,
+    target: &str,
+    fail_exec_write_once: bool,
+) {
+    let target = target.to_string();
+
     let state = StubDaemonState {
-        target: "builder-a".to_string(),
+        target: target.clone(),
         daemon_instance_id: "daemon-instance-1".to_string(),
         fail_exec_write_once: Arc::new(Mutex::new(fail_exec_write_once)),
     };
@@ -273,7 +352,7 @@ async fn spawn_daemon(certs: &TestCerts, fail_exec_write_once: bool) -> std::net
 
     let daemon_state = remote_exec_daemon::AppState {
         config: Arc::new(remote_exec_daemon::config::DaemonConfig {
-            target: "builder-a".to_string(),
+            target,
             listen: addr,
             default_workdir: PathBuf::from("."),
             tls: remote_exec_daemon::config::TlsConfig {
@@ -293,7 +372,6 @@ async fn spawn_daemon(certs: &TestCerts, fail_exec_write_once: bool) -> std::net
     });
 
     wait_until_ready(certs, addr).await;
-    addr
 }
 
 async fn health() -> Json<HealthCheckResponse> {

@@ -9,6 +9,7 @@ pub async fn exec_command(
     input: ExecCommandInput,
 ) -> anyhow::Result<ToolCallOutput> {
     let target = state.target(&input.target)?;
+    target.ensure_identity_verified(&input.target).await?;
     let response = target
         .client
         .exec_start(&ExecStartRequest {

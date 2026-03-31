@@ -8,6 +8,7 @@ pub async fn apply_patch(
     input: ApplyPatchInput,
 ) -> anyhow::Result<ToolCallOutput> {
     let target = state.target(&input.target)?;
+    target.ensure_identity_verified(&input.target).await?;
     let response = target
         .client
         .patch_apply(&PatchApplyRequest {
