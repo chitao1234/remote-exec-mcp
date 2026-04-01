@@ -91,11 +91,20 @@ pub async fn write_stdin(
     state: &crate::BrokerState,
     input: WriteStdinInput,
 ) -> anyhow::Result<ToolCallOutput> {
+    write_stdin_inner(state, input)
+        .await
+        .map_err(|err| anyhow::anyhow!("write_stdin failed: {err}"))
+}
+
+async fn write_stdin_inner(
+    state: &crate::BrokerState,
+    input: WriteStdinInput,
+) -> anyhow::Result<ToolCallOutput> {
     let record = state
         .sessions
         .get(&input.session_id)
         .await
-        .context("unknown session")?;
+        .with_context(|| unknown_process_id_message(&input.session_id))?;
 
     if let Some(target) = &input.target {
         anyhow::ensure!(
@@ -118,16 +127,18 @@ pub async fn write_stdin(
         Ok(response) => response,
         Err(err) if err.rpc_code() == Some("unknown_session") => {
             state.sessions.remove(&record.session_id).await;
-            return Err(anyhow::anyhow!(
-                "session invalidated after daemon-side session loss"
-            ));
+            return Err(anyhow::anyhow!(unknown_process_id_message(
+                &record.session_id
+            )));
         }
         Err(err) => {
             if let Ok(info) = target.client.target_info().await
                 && info.daemon_instance_id != record.daemon_instance_id
             {
                 state.sessions.remove(&record.session_id).await;
-                return Err(anyhow::anyhow!("session invalidated after daemon restart"));
+                return Err(anyhow::anyhow!(unknown_process_id_message(
+                    &record.session_id
+                )));
             }
             return Err(err.into());
         }
@@ -157,4 +168,8 @@ pub async fn write_stdin(
             output: response.output,
         })?,
     ))
+}
+
+fn unknown_process_id_message(session_id: &str) -> String {
+    format!("Unknown process id {session_id}")
 }

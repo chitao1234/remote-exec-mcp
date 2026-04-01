@@ -72,12 +72,79 @@ pub async fn spawn_daemon(target: &str) -> DaemonFixture {
         target: target.to_string(),
         listen: addr,
         default_workdir: workdir.clone(),
+        allow_login_shell: true,
         tls: remote_exec_daemon::config::TlsConfig {
             cert_pem: certs.daemon_cert.clone(),
             key_pem: certs.daemon_key.clone(),
             ca_pem: certs.ca_cert.clone(),
         },
     };
+
+    tokio::spawn(remote_exec_daemon::run(config));
+
+    let client = reqwest::Client::builder()
+        .use_rustls_tls()
+        .add_root_certificate(
+            reqwest::Certificate::from_pem(&std::fs::read(&certs.ca_cert).unwrap()).unwrap(),
+        )
+        .identity(
+            reqwest::Identity::from_pem(
+                &[
+                    std::fs::read(&certs.client_cert).unwrap(),
+                    std::fs::read(&certs.client_key).unwrap(),
+                ]
+                .concat(),
+            )
+            .unwrap(),
+        )
+        .build()
+        .unwrap();
+
+    wait_until_ready(&client, addr).await;
+    DaemonFixture {
+        _tempdir: tempdir,
+        client,
+        addr,
+        workdir,
+    }
+}
+
+#[allow(dead_code)]
+pub async fn spawn_daemon_with_extra_config(target: &str, extra_config: &str) -> DaemonFixture {
+    remote_exec_daemon::install_crypto_provider();
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let certs = write_test_certs(tempdir.path(), target);
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+
+    let workdir = tempdir.path().join("workdir");
+    std::fs::create_dir_all(&workdir).unwrap();
+    let config_path = tempdir.path().join("daemon.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"target = "{target}"
+listen = "{addr}"
+default_workdir = "{}"
+{extra_config}
+
+[tls]
+cert_pem = "{}"
+key_pem = "{}"
+ca_pem = "{}"
+"#,
+            workdir.display(),
+            certs.daemon_cert.display(),
+            certs.daemon_key.display(),
+            certs.ca_cert.display(),
+        ),
+    )
+    .unwrap();
+    let config = remote_exec_daemon::config::DaemonConfig::load(&config_path)
+        .await
+        .unwrap();
 
     tokio::spawn(remote_exec_daemon::run(config));
 

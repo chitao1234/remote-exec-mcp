@@ -234,6 +234,7 @@ expected_daemon_name = "{target}"
             target: self.target.clone(),
             listen: self.addr,
             default_workdir: self.workdir.clone(),
+            allow_login_shell: true,
             tls: remote_exec_daemon::config::TlsConfig {
                 cert_pem: self.daemon_cert_pem.clone(),
                 key_pem: self.daemon_key_pem.clone(),

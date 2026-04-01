@@ -1,6 +1,7 @@
 target = "builder-a"
 listen = "0.0.0.0:9443"
 default_workdir = "/srv/work"
+allow_login_shell = true
 
 [tls]
 cert_pem = "/etc/remote-exec/daemon.pem"

@@ -132,9 +132,9 @@ async fn sessions_are_invalidated_after_daemon_restart() {
             }),
         )
         .await;
-    assert!(
-        invalidated.contains("session invalidated after daemon restart")
-            || invalidated.contains("session invalidated after daemon-side session loss"),
+    assert_eq!(
+        invalidated,
+        format!("write_stdin failed: Unknown process id {session_id}"),
         "restart invalidation error: {invalidated}"
     );
 
@@ -149,8 +149,9 @@ async fn sessions_are_invalidated_after_daemon_restart() {
             }),
         )
         .await;
-    assert!(
-        unknown.contains("unknown session"),
+    assert_eq!(
+        unknown,
+        format!("write_stdin failed: Unknown process id {session_id}"),
         "unknown session error: {unknown}"
     );
 }

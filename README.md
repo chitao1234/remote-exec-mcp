@@ -165,6 +165,7 @@ cargo fmt --all --check
 - `write_stdin` only invalidates sessions when the daemon restarted or explicitly reports `unknown_session`.
 - `max_output_tokens` is enforced by the daemon for command output.
 - `apply_patch` supports the documented `*** End of File` marker.
+- `allow_login_shell` controls daemon login-shell policy and defaults to `true`; explicit `login=true` is rejected when the daemon disables it.
 - Default shell resolution uses explicit override, then `SHELL`, then a usable passwd shell, then `bash` from `PATH`, then `/bin/sh`.
 
 ## Quality Gate

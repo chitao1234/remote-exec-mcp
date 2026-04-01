@@ -197,7 +197,7 @@ pub fn format_poll_text(
 }
 
 pub fn format_intercepted_patch_text(output: &str) -> String {
-    format!("Wall time: 0.000 seconds\nProcess exited with code 0\nOutput:\n{output}")
+    format!("Wall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\n{output}")
 }
 
 #[cfg(test)]
@@ -270,7 +270,7 @@ mod tests {
         let text =
             format_intercepted_patch_text("Success. Updated the following files:\nA hello.txt\n");
 
-        assert!(text.contains("Wall time: 0.000 seconds"));
+        assert!(text.contains("Wall time: 0.0000 seconds"));
         assert!(text.contains("Process exited with code 0"));
         assert!(text.contains("Output:\nSuccess. Updated the following files:"));
         assert!(!text.contains("Command:"));

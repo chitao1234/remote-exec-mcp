@@ -9,6 +9,8 @@ pub struct DaemonConfig {
     pub target: String,
     pub listen: SocketAddr,
     pub default_workdir: PathBuf,
+    #[serde(default = "default_allow_login_shell")]
+    pub allow_login_shell: bool,
     pub tls: TlsConfig,
 }
 
@@ -26,4 +28,8 @@ impl DaemonConfig {
             .with_context(|| format!("reading {}", path.as_ref().display()))?;
         Ok(toml::from_str(&text)?)
     }
+}
+
+fn default_allow_login_shell() -> bool {
+    true
 }

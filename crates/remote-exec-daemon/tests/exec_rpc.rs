@@ -74,6 +74,93 @@ async fn exec_start_returns_a_live_session_for_long_running_tty_processes() {
 }
 
 #[tokio::test]
+async fn exec_start_uses_login_shell_by_default_when_login_is_omitted() {
+    let home = tempfile::tempdir().unwrap();
+    std::fs::write(
+        home.path().join(".profile"),
+        "export LOGIN_SENTINEL=from_profile\n",
+    )
+    .unwrap();
+    let home_text = home.path().to_string_lossy().into_owned();
+    let _env = EnvOverrideGuard::set(&[("HOME", &home_text)]).await;
+    let fixture = support::spawn_daemon("builder-a").await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "printf '%s' \"$LOGIN_SENTINEL\"".to_string(),
+                workdir: None,
+                shell: Some(TEST_SHELL.to_string()),
+                tty: false,
+                yield_time_ms: Some(250),
+                max_output_tokens: None,
+                login: None,
+            },
+        )
+        .await;
+
+    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.output, "from_profile");
+}
+
+#[tokio::test]
+async fn exec_start_rejects_explicit_login_when_disabled_by_config() {
+    let fixture =
+        support::spawn_daemon_with_extra_config("builder-a", "allow_login_shell = false").await;
+
+    let err = fixture
+        .rpc_error(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "printf should-not-run".to_string(),
+                workdir: None,
+                shell: Some(TEST_SHELL.to_string()),
+                tty: false,
+                yield_time_ms: Some(250),
+                max_output_tokens: None,
+                login: Some(true),
+            },
+        )
+        .await;
+
+    assert_eq!(err.code, "login_shell_disabled");
+    assert!(err.message.contains("login shells are disabled"));
+}
+
+#[tokio::test]
+async fn exec_start_uses_non_login_shell_when_policy_disabled_and_login_is_omitted() {
+    let home = tempfile::tempdir().unwrap();
+    std::fs::write(
+        home.path().join(".profile"),
+        "export LOGIN_SENTINEL=from_profile\n",
+    )
+    .unwrap();
+    let home_text = home.path().to_string_lossy().into_owned();
+    let _env = EnvOverrideGuard::set(&[("HOME", &home_text)]).await;
+    let fixture =
+        support::spawn_daemon_with_extra_config("builder-a", "allow_login_shell = false").await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "printf '%s' \"$LOGIN_SENTINEL\"".to_string(),
+                workdir: None,
+                shell: Some(TEST_SHELL.to_string()),
+                tty: false,
+                yield_time_ms: Some(250),
+                max_output_tokens: None,
+                login: None,
+            },
+        )
+        .await;
+
+    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.output, "");
+}
+
+#[tokio::test]
 async fn env_overlay_is_applied_in_pipe_mode() {
     let _env = EnvOverrideGuard::set(&[
         ("TERM", "rainbow-terminal"),

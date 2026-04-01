@@ -36,6 +36,13 @@ pub enum StubImageReadResponse {
     },
 }
 
+#[derive(Debug, Clone, Copy)]
+enum ExecWriteBehavior {
+    Success,
+    TemporaryFailureOnce,
+    UnknownSession,
+}
+
 #[allow(dead_code)]
 pub struct DelayedTargetFixture {
     pub broker: BrokerFixture,
@@ -46,7 +53,12 @@ pub struct DelayedTargetFixture {
 #[allow(dead_code)]
 impl DelayedTargetFixture {
     pub async fn spawn_target(&self, target: &str) {
-        spawn_named_daemon_on_addr(&self.certs, self.addr, stub_daemon_state(target, false)).await;
+        spawn_named_daemon_on_addr(
+            &self.certs,
+            self.addr,
+            stub_daemon_state(target, ExecWriteBehavior::Success),
+        )
+        .await;
     }
 }
 
@@ -283,6 +295,43 @@ expected_daemon_name = "builder-a"
 }
 
 #[allow(dead_code)]
+pub async fn spawn_broker_with_unknown_session_exec_write_error() -> BrokerFixture {
+    remote_exec_daemon::install_crypto_provider();
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let certs = write_test_certs(tempdir.path());
+    let (addr, stub_state) = spawn_unknown_session_exec_write_daemon(&certs).await;
+    let broker_config = tempdir.path().join("broker.toml");
+    std::fs::write(
+        &broker_config,
+        format!(
+            r#"[targets.builder-a]
+base_url = "https://{addr}"
+ca_pem = "{}"
+client_cert_pem = "{}"
+client_key_pem = "{}"
+expected_daemon_name = "builder-a"
+"#,
+            certs.ca_cert.display(),
+            certs.client_cert.display(),
+            certs.client_key.display(),
+        ),
+    )
+    .unwrap();
+
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
+    command.arg(&broker_config);
+    let transport = TokioChildProcess::new(command).unwrap();
+    let client = DummyClientHandler.serve(transport).await.unwrap();
+
+    BrokerFixture {
+        _tempdir: tempdir,
+        client,
+        stub_state,
+    }
+}
+
+#[allow(dead_code)]
 pub async fn spawn_broker_with_late_target() -> DelayedTargetFixture {
     remote_exec_daemon::install_crypto_provider();
 
@@ -338,17 +387,17 @@ expected_daemon_name = "builder-b"
 struct StubDaemonState {
     target: String,
     daemon_instance_id: String,
-    fail_exec_write_once: Arc<Mutex<bool>>,
+    exec_write_behavior: Arc<Mutex<ExecWriteBehavior>>,
     exec_start_calls: Arc<Mutex<usize>>,
     last_patch_request: Arc<Mutex<Option<PatchApplyRequest>>>,
     image_read_response: Arc<Mutex<StubImageReadResponse>>,
 }
 
-fn stub_daemon_state(target: &str, fail_exec_write_once: bool) -> StubDaemonState {
+fn stub_daemon_state(target: &str, exec_write_behavior: ExecWriteBehavior) -> StubDaemonState {
     StubDaemonState {
         target: target.to_string(),
         daemon_instance_id: "daemon-instance-1".to_string(),
-        fail_exec_write_once: Arc::new(Mutex::new(fail_exec_write_once)),
+        exec_write_behavior: Arc::new(Mutex::new(exec_write_behavior)),
         exec_start_calls: Arc::new(Mutex::new(0)),
         last_patch_request: Arc::new(Mutex::new(None)),
         image_read_response: Arc::new(Mutex::new(StubImageReadResponse::Success(
@@ -361,25 +410,32 @@ fn stub_daemon_state(target: &str, fail_exec_write_once: bool) -> StubDaemonStat
 }
 
 async fn spawn_stub_daemon(certs: &TestCerts) -> (std::net::SocketAddr, StubDaemonState) {
-    spawn_daemon(certs, false).await
+    spawn_daemon(certs, ExecWriteBehavior::Success).await
 }
 
 #[allow(dead_code)]
 async fn spawn_retryable_exec_write_daemon(
     certs: &TestCerts,
 ) -> (std::net::SocketAddr, StubDaemonState) {
-    spawn_daemon(certs, true).await
+    spawn_daemon(certs, ExecWriteBehavior::TemporaryFailureOnce).await
+}
+
+#[allow(dead_code)]
+async fn spawn_unknown_session_exec_write_daemon(
+    certs: &TestCerts,
+) -> (std::net::SocketAddr, StubDaemonState) {
+    spawn_daemon(certs, ExecWriteBehavior::UnknownSession).await
 }
 
 async fn spawn_daemon(
     certs: &TestCerts,
-    fail_exec_write_once: bool,
+    exec_write_behavior: ExecWriteBehavior,
 ) -> (std::net::SocketAddr, StubDaemonState) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
     drop(listener);
 
-    let state = stub_daemon_state("builder-a", fail_exec_write_once);
+    let state = stub_daemon_state("builder-a", exec_write_behavior);
     spawn_named_daemon_on_addr(certs, addr, state.clone()).await;
     (addr, state)
 }
@@ -403,6 +459,7 @@ async fn spawn_named_daemon_on_addr(
             target: state.target.clone(),
             listen: addr,
             default_workdir: PathBuf::from("."),
+            allow_login_shell: true,
             tls: remote_exec_daemon::config::TlsConfig {
                 cert_pem: certs.daemon_cert.clone(),
                 key_pem: certs.daemon_key.clone(),
@@ -466,18 +523,30 @@ async fn exec_write(
     Json(req): Json<ExecWriteRequest>,
 ) -> Result<Json<ExecResponse>, (StatusCode, Json<RpcErrorBody>)> {
     assert_eq!(req.daemon_session_id, "daemon-session-1");
-    let mut fail_once = state.fail_exec_write_once.lock().await;
-    if *fail_once {
-        *fail_once = false;
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(RpcErrorBody {
-                code: "temporary_failure".to_string(),
-                message: "temporary failure".to_string(),
-            }),
-        ));
+    let mut behavior = state.exec_write_behavior.lock().await;
+    match *behavior {
+        ExecWriteBehavior::Success => {}
+        ExecWriteBehavior::TemporaryFailureOnce => {
+            *behavior = ExecWriteBehavior::Success;
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(RpcErrorBody {
+                    code: "temporary_failure".to_string(),
+                    message: "temporary failure".to_string(),
+                }),
+            ));
+        }
+        ExecWriteBehavior::UnknownSession => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(RpcErrorBody {
+                    code: "unknown_session".to_string(),
+                    message: "Unknown daemon session".to_string(),
+                }),
+            ));
+        }
     }
-    drop(fail_once);
+    drop(behavior);
 
     Ok(Json(ExecResponse {
         daemon_session_id: None,

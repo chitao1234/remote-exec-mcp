@@ -63,7 +63,7 @@ async fn exec_command_intercepts_direct_apply_patch_and_wraps_exec_output() {
         )
         .await;
 
-    assert!(result.text_output.contains("Wall time: 0.000 seconds"));
+    assert!(result.text_output.contains("Wall time: 0.0000 seconds"));
     assert!(result.text_output.contains("Process exited with code 0"));
     assert!(
         result
@@ -354,6 +354,64 @@ async fn write_stdin_preserves_original_command_metadata() {
 }
 
 #[tokio::test]
+async fn write_stdin_wraps_unknown_public_session_as_unknown_process_id() {
+    let fixture = support::spawn_broker_with_stub_daemon().await;
+
+    let error = fixture
+        .call_tool_error(
+            "write_stdin",
+            serde_json::json!({
+                "session_id": "sess_missing",
+                "chars": "",
+                "yield_time_ms": 5000
+            }),
+        )
+        .await;
+
+    assert_eq!(error, "write_stdin failed: Unknown process id sess_missing");
+}
+
+#[tokio::test]
+async fn write_stdin_wraps_daemon_unknown_session_as_unknown_process_id() {
+    let fixture = support::spawn_broker_with_unknown_session_exec_write_error().await;
+
+    let started = fixture
+        .call_tool(
+            "exec_command",
+            serde_json::json!({
+                "target": "builder-a",
+                "cmd": "printf ready; sleep 30",
+                "tty": true,
+                "yield_time_ms": 250
+            }),
+        )
+        .await;
+    let session_id = started.structured_content["session_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let error = fixture
+        .call_tool_error(
+            "write_stdin",
+            serde_json::json!({
+                "session_id": session_id,
+                "chars": "",
+                "yield_time_ms": 5000
+            }),
+        )
+        .await;
+
+    assert_eq!(
+        error,
+        format!(
+            "write_stdin failed: Unknown process id {}",
+            started.structured_content["session_id"].as_str().unwrap()
+        )
+    );
+}
+
+#[tokio::test]
 async fn broker_keeps_healthy_targets_available_when_one_target_is_down() {
     let fixture = support::spawn_broker_with_live_and_dead_targets().await;
 
@@ -440,6 +498,7 @@ async fn write_stdin_keeps_session_after_retryable_daemon_error() {
             }),
         )
         .await;
+    assert!(first.starts_with("write_stdin failed: "));
     assert!(first.contains("temporary_failure"));
 
     let second = fixture

@@ -21,8 +21,17 @@ pub async fn exec_start(
     Json(req): Json<ExecStartRequest>,
 ) -> Result<Json<ExecResponse>, (StatusCode, Json<RpcErrorBody>)> {
     let cwd = resolve_workdir(&state, req.workdir.as_deref()).map_err(internal_error)?;
-    let argv = shell_argv(req.shell.as_deref(), req.login.unwrap_or(false), &req.cmd)
-        .map_err(internal_error)?;
+    let login = match req.login {
+        Some(true) if !state.config.allow_login_shell => {
+            return Err(rpc_error(
+                "login_shell_disabled",
+                "login shells are disabled by daemon config",
+            ));
+        }
+        Some(login) => login,
+        None => state.config.allow_login_shell,
+    };
+    let argv = shell_argv(req.shell.as_deref(), login, &req.cmd).map_err(internal_error)?;
     let mut session = session::spawn(&argv, &cwd, req.tty).map_err(internal_error)?;
 
     let deadline = Instant::now()
