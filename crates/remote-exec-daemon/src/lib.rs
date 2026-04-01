@@ -24,7 +24,7 @@ pub async fn run(config: DaemonConfig) -> Result<()> {
     let state = AppState {
         config: Arc::new(config),
         daemon_instance_id: uuid::Uuid::new_v4().to_string(),
-        sessions: exec::store::SessionStore::default(),
+        sessions: exec::store::SessionStore::new(64),
     };
     server::serve(state).await
 }

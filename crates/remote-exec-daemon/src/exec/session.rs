@@ -187,6 +187,25 @@ impl LiveSession {
         Ok(false)
     }
 
+    pub async fn terminate(&mut self) -> anyhow::Result<()> {
+        if self.has_exited().await? {
+            return Ok(());
+        }
+
+        match &mut self.child {
+            SessionChild::Pty(pty) => {
+                let _ = pty.child.kill();
+                let _ = pty.child.try_wait()?;
+            }
+            SessionChild::Pipe(child) => {
+                let _ = child.start_kill();
+                let _ = child.try_wait()?;
+            }
+        }
+
+        Ok(())
+    }
+
     pub async fn write(&mut self, chars: &str) -> anyhow::Result<()> {
         if chars.is_empty() {
             return Ok(());
