@@ -179,6 +179,79 @@ async fn exec_command_intercepts_applypatch_heredoc_with_cd_wrapper() {
 }
 
 #[tokio::test]
+async fn exec_command_intercepts_apply_patch_whitespace_tolerant_forms() {
+    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let direct_patch = concat!(
+        "*** Begin Patch\n",
+        "*** Add File: direct.txt\n",
+        "+direct\n",
+        "*** End Patch\n",
+    );
+
+    let direct = fixture
+        .call_tool(
+            "exec_command",
+            serde_json::json!({
+                "target": "builder-a",
+                "cmd": format!(" \tapply_patch\t  '{direct_patch}' \t"),
+            }),
+        )
+        .await;
+
+    assert!(direct.text_output.contains("Process exited with code 0"));
+    assert!(
+        direct
+            .text_output
+            .contains("Output:\nSuccess. Updated the following files:")
+    );
+    assert_eq!(fixture.exec_start_calls().await, 0);
+    assert_eq!(
+        fixture.last_patch_request().await.unwrap().patch,
+        direct_patch.to_string()
+    );
+
+    let heredoc_fixture = support::spawn_broker_with_stub_daemon().await;
+    let heredoc_cmd = concat!(
+        "cd\t nested  && \tapplypatch\t <<'PATCH'\n",
+        "*** Begin Patch\n",
+        "*** Add File: heredoc.txt\n",
+        "+heredoc\n",
+        "*** End Patch\n",
+        "PATCH\n",
+    );
+
+    let heredoc = heredoc_fixture
+        .call_tool(
+            "exec_command",
+            serde_json::json!({
+                "target": "builder-a",
+                "cmd": heredoc_cmd,
+                "workdir": "outer"
+            }),
+        )
+        .await;
+
+    assert!(
+        heredoc
+            .text_output
+            .contains("Output:\nSuccess. Updated the following files:")
+    );
+    assert_eq!(heredoc_fixture.exec_start_calls().await, 0);
+    let forwarded = heredoc_fixture.last_patch_request().await.unwrap();
+    assert_eq!(forwarded.workdir, Some("outer/nested".to_string()));
+    assert_eq!(
+        forwarded.patch,
+        concat!(
+            "*** Begin Patch\n",
+            "*** Add File: heredoc.txt\n",
+            "+heredoc\n",
+            "*** End Patch\n",
+        )
+        .to_string()
+    );
+}
+
+#[tokio::test]
 async fn exec_command_invalid_intercepted_patch_surfaces_tool_error() {
     let fixture = support::spawn_broker_with_stub_daemon().await;
 

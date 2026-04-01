@@ -84,7 +84,10 @@ async fn update_move_accepts_horizontal_whitespace_on_control_lines() {
         .await;
 
     assert!(response.output.contains("M new.txt"));
-    assert_eq!(tokio::fs::read_to_string(destination).await.unwrap(), "new\n");
+    assert_eq!(
+        tokio::fs::read_to_string(destination).await.unwrap(),
+        "new\n"
+    );
     assert!(tokio::fs::metadata(source).await.is_err());
 }
 

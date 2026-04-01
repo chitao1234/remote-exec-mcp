@@ -6,6 +6,14 @@ pub struct InterceptedApplyPatch {
     pub workdir: Option<String>,
 }
 
+fn is_horizontal_whitespace(ch: char) -> bool {
+    ch == ' ' || ch == '\t'
+}
+
+fn trim_horizontal_start(text: &str) -> &str {
+    text.trim_start_matches(is_horizontal_whitespace)
+}
+
 pub fn maybe_intercept_apply_patch(
     cmd: &str,
     workdir: Option<&str>,
@@ -54,26 +62,43 @@ fn parse_single_quoted_argument(rest: &str) -> Option<String> {
 }
 
 fn split_cd_wrapper<'a>(cmd: &'a str, workdir: Option<&str>) -> (Option<String>, &'a str) {
-    if let Some(rest) = cmd.strip_prefix("cd ")
-        && let Some((path, tail)) = rest.split_once("&&")
-    {
-        let path = path.trim();
-        if path.is_empty() || path.chars().any(char::is_whitespace) {
+    if let Some(rest) = cmd.strip_prefix("cd") {
+        let Some(first) = rest.chars().next() else {
+            return (workdir.map(ToString::to_string), cmd);
+        };
+        if !is_horizontal_whitespace(first) {
             return (workdir.map(ToString::to_string), cmd);
         }
 
-        let mut resolved = workdir.map(PathBuf::from).unwrap_or_default();
-        resolved.push(path);
-        return (Some(resolved.display().to_string()), tail.trim_start());
+        let rest = trim_horizontal_start(rest);
+        if let Some((path, tail)) = rest.split_once("&&") {
+            let path = path.trim_matches(is_horizontal_whitespace);
+            if path.is_empty() || path.chars().any(char::is_whitespace) {
+                return (workdir.map(ToString::to_string), cmd);
+            }
+
+            let mut resolved = workdir.map(PathBuf::from).unwrap_or_default();
+            resolved.push(path);
+            return (
+                Some(resolved.display().to_string()),
+                trim_horizontal_start(tail),
+            );
+        }
     }
 
     (workdir.map(ToString::to_string), cmd)
 }
 
 fn parse_heredoc_invocation(cmd: &str) -> Option<(&str, &str)> {
-    let (head, rest) = cmd.split_once("<<'")?;
-    let command_name = head.trim();
-    let (delimiter, body_with_newline) = rest.split_once("'\n")?;
+    let operator = cmd.find("<<")?;
+    let command_name = cmd[..operator].trim();
+    let mut rest = &cmd[operator + 2..];
+    rest = trim_horizontal_start(rest);
+
+    let rest = rest.strip_prefix('\'')?;
+    let delimiter_end = rest.find('\'')?;
+    let delimiter = &rest[..delimiter_end];
+    let body_with_newline = rest[delimiter_end + 1..].strip_prefix('\n')?;
     let marker = format!("\n{delimiter}");
     let (body, trailing) = body_with_newline.rsplit_once(&marker)?;
     if !trailing.trim().is_empty() {
@@ -159,6 +184,48 @@ mod tests {
                     "*** Begin Patch\n",
                     "*** Add File: hello.txt\n",
                     "+hello\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some("outer/nested".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_apply_patch_invocations_with_horizontal_whitespace() {
+        let direct_patch = concat!(
+            "*** Begin Patch\n",
+            "*** Add File: direct.txt\n",
+            "+direct\n",
+            "*** End Patch\n",
+        );
+        let direct_cmd = format!(" \tapply_patch\t  '{direct_patch}' \t");
+
+        assert_eq!(
+            maybe_intercept_apply_patch(&direct_cmd, Some("workspace")),
+            Some(InterceptedApplyPatch {
+                patch: direct_patch.to_string(),
+                workdir: Some("workspace".to_string()),
+            })
+        );
+
+        let heredoc_cmd = concat!(
+            "cd\t nested  && \tapplypatch\t <<'PATCH'\n",
+            "*** Begin Patch\n",
+            "*** Add File: heredoc.txt\n",
+            "+heredoc\n",
+            "*** End Patch\n",
+            "PATCH\n",
+        );
+
+        assert_eq!(
+            maybe_intercept_apply_patch(heredoc_cmd, Some("outer")),
+            Some(InterceptedApplyPatch {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Add File: heredoc.txt\n",
+                    "+heredoc\n",
                     "*** End Patch\n",
                 )
                 .to_string(),

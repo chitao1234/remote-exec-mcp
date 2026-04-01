@@ -131,14 +131,14 @@ pub fn parse_patch(input: &str) -> anyhow::Result<Vec<PatchAction>> {
                     hunk_lines.push(parsed);
                     index += 1;
                 }
-                let end_of_file =
-                    if index + 1 < lines.len() && trim_horizontal(lines[index]) == "*** End of File"
-                    {
-                        index += 1;
-                        true
-                    } else {
-                        false
-                    };
+                let end_of_file = if index + 1 < lines.len()
+                    && trim_horizontal(lines[index]) == "*** End of File"
+                {
+                    index += 1;
+                    true
+                } else {
+                    false
+                };
                 anyhow::ensure!(!hunk_lines.is_empty(), "update hunk with no changes");
                 hunks.push(Hunk {
                     context,
