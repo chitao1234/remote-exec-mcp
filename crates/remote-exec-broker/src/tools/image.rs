@@ -3,17 +3,13 @@ use remote_exec_proto::public::{ViewImageInput, ViewImageResult};
 use remote_exec_proto::rpc::ImageReadRequest;
 use rmcp::model::Content;
 
+use crate::daemon_client::DaemonClientError;
 use crate::mcp_server::ToolCallOutput;
 
 pub async fn view_image(
     state: &crate::BrokerState,
     input: ViewImageInput,
 ) -> anyhow::Result<ToolCallOutput> {
-    match input.detail.as_deref() {
-        None | Some("original") => {}
-        Some(other) => anyhow::bail!("view_image.detail only supports `original`; got `{other}`"),
-    }
-
     let target = state.target(&input.target)?;
     target.ensure_identity_verified(&input.target).await?;
     let response = target
@@ -23,7 +19,8 @@ pub async fn view_image(
             workdir: input.workdir,
             detail: input.detail.clone(),
         })
-        .await?;
+        .await
+        .map_err(normalize_view_image_error)?;
     let image_content = content_from_data_url(&response.image_url)?;
 
     Ok(ToolCallOutput::content_and_structured(
@@ -34,6 +31,13 @@ pub async fn view_image(
             detail: response.detail,
         })?,
     ))
+}
+
+fn normalize_view_image_error(err: DaemonClientError) -> anyhow::Error {
+    match err {
+        DaemonClientError::Rpc { message, .. } => anyhow::Error::msg(message),
+        other => other.into(),
+    }
 }
 
 fn content_from_data_url(image_url: &str) -> anyhow::Result<Content> {

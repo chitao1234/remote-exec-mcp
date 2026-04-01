@@ -1,5 +1,8 @@
 mod support;
 
+use axum::http::StatusCode;
+use remote_exec_proto::rpc::RpcErrorBody;
+
 #[tokio::test]
 async fn apply_patch_returns_plain_text_plus_empty_structured_content() {
     let fixture = support::spawn_broker_with_stub_daemon().await;
@@ -37,5 +40,79 @@ async fn view_image_returns_input_image_content_and_structured_content() {
         .await;
 
     assert_eq!(result.raw_content[0]["type"], "input_image");
+    assert_eq!(result.raw_content[0]["image_url"], "data:image/png;base64,AAAA");
+    assert_eq!(result.structured_content["target"], "builder-a");
     assert_eq!(result.structured_content["detail"], "original");
+}
+
+#[tokio::test]
+async fn view_image_returns_text_only_errors_without_input_image_content() {
+    let fixture = support::spawn_broker_with_stub_daemon().await;
+    fixture
+        .set_image_read_response(support::StubImageReadResponse::Error {
+            status: StatusCode::BAD_REQUEST,
+            body: RpcErrorBody {
+                code: "image_missing".to_string(),
+                message:
+                    "unable to locate image at `/tmp/chart.png`: No such file or directory (os error 2)"
+                        .to_string(),
+            },
+        })
+        .await;
+
+    let result = fixture
+        .raw_tool_result(
+            "view_image",
+            serde_json::json!({
+                "target": "builder-a",
+                "path": "chart.png"
+            }),
+        )
+        .await;
+
+    assert!(result.is_error);
+    assert_eq!(
+        result.text_output,
+        "unable to locate image at `/tmp/chart.png`: No such file or directory (os error 2)"
+    );
+    assert_eq!(
+        result.raw_content,
+        vec![serde_json::json!({
+            "type": "text",
+            "text": "unable to locate image at `/tmp/chart.png`: No such file or directory (os error 2)"
+        })]
+    );
+}
+
+#[tokio::test]
+async fn view_image_invalid_detail_matches_daemon_message() {
+    let fixture = support::spawn_broker_with_stub_daemon().await;
+    fixture
+        .set_image_read_response(support::StubImageReadResponse::Error {
+            status: StatusCode::BAD_REQUEST,
+            body: RpcErrorBody {
+                code: "invalid_detail".to_string(),
+                message:
+                    "view_image.detail only supports `original`; omit `detail` for default resized behavior, got `low`"
+                        .to_string(),
+            },
+        })
+        .await;
+
+    let result = fixture
+        .raw_tool_result(
+            "view_image",
+            serde_json::json!({
+                "target": "builder-a",
+                "path": "chart.png",
+                "detail": "low"
+            }),
+        )
+        .await;
+
+    assert!(result.is_error);
+    assert_eq!(
+        result.text_output,
+        "view_image.detail only supports `original`; omit `detail` for default resized behavior, got `low`"
+    );
 }

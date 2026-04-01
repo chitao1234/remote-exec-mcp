@@ -27,6 +27,15 @@ pub struct BrokerFixture {
     stub_state: StubDaemonState,
 }
 
+#[derive(Debug, Clone)]
+pub enum StubImageReadResponse {
+    Success(ImageReadResponse),
+    Error {
+        status: StatusCode,
+        body: RpcErrorBody,
+    },
+}
+
 #[allow(dead_code)]
 pub struct DelayedTargetFixture {
     pub broker: BrokerFixture,
@@ -50,6 +59,11 @@ impl BrokerFixture {
             result.text_output
         );
         result
+    }
+
+    #[allow(dead_code)]
+    pub async fn raw_tool_result(&self, name: &str, arguments: serde_json::Value) -> ToolResult {
+        self.raw_call_tool(name, arguments).await
     }
 
     #[allow(dead_code)]
@@ -86,6 +100,10 @@ impl BrokerFixture {
 
     pub async fn last_patch_request(&self) -> Option<PatchApplyRequest> {
         self.stub_state.last_patch_request.lock().await.clone()
+    }
+
+    pub async fn set_image_read_response(&self, response: StubImageReadResponse) {
+        *self.stub_state.image_read_response.lock().await = response;
     }
 }
 
@@ -323,6 +341,7 @@ struct StubDaemonState {
     fail_exec_write_once: Arc<Mutex<bool>>,
     exec_start_calls: Arc<Mutex<usize>>,
     last_patch_request: Arc<Mutex<Option<PatchApplyRequest>>>,
+    image_read_response: Arc<Mutex<StubImageReadResponse>>,
 }
 
 fn stub_daemon_state(target: &str, fail_exec_write_once: bool) -> StubDaemonState {
@@ -332,6 +351,12 @@ fn stub_daemon_state(target: &str, fail_exec_write_once: bool) -> StubDaemonStat
         fail_exec_write_once: Arc::new(Mutex::new(fail_exec_write_once)),
         exec_start_calls: Arc::new(Mutex::new(0)),
         last_patch_request: Arc::new(Mutex::new(None)),
+        image_read_response: Arc::new(Mutex::new(StubImageReadResponse::Success(
+            ImageReadResponse {
+                image_url: "data:image/png;base64,AAAA".to_string(),
+                detail: None,
+            },
+        ))),
     }
 }
 
@@ -486,11 +511,17 @@ async fn patch_apply(
     }))
 }
 
-async fn image_read(Json(req): Json<ImageReadRequest>) -> Json<ImageReadResponse> {
-    Json(ImageReadResponse {
-        image_url: "data:image/png;base64,AAAA".to_string(),
-        detail: req.detail.filter(|value| value == "original"),
-    })
+async fn image_read(
+    State(state): State<StubDaemonState>,
+    Json(req): Json<ImageReadRequest>,
+) -> Result<Json<ImageReadResponse>, (StatusCode, Json<RpcErrorBody>)> {
+    match state.image_read_response.lock().await.clone() {
+        StubImageReadResponse::Success(mut response) => {
+            response.detail = req.detail.filter(|value| value == "original");
+            Ok(Json(response))
+        }
+        StubImageReadResponse::Error { status, body } => Err((status, Json(body))),
+    }
 }
 
 struct TestCerts {
