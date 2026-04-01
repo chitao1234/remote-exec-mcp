@@ -188,6 +188,163 @@ async fn later_verification_failures_do_not_mutate_earlier_files() {
 }
 
 #[tokio::test]
+async fn delete_directory_is_rejected_before_earlier_mutation() {
+    let fixture = support::spawn_daemon("builder-a").await;
+    tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
+        .await
+        .unwrap();
+    tokio::fs::create_dir(fixture.workdir.join("nested"))
+        .await
+        .unwrap();
+
+    let err = fixture
+        .rpc_error(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Update File: first.txt\n",
+                    "@@\n",
+                    "-before\n",
+                    "+after\n",
+                    "*** Delete File: nested\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert_eq!(err.code, "patch_failed");
+    assert_eq!(
+        tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
+            .await
+            .unwrap(),
+        "before\n",
+    );
+}
+
+#[tokio::test]
+async fn non_utf8_update_source_is_rejected_before_earlier_mutation() {
+    let fixture = support::spawn_daemon("builder-a").await;
+    tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
+        .await
+        .unwrap();
+    tokio::fs::write(fixture.workdir.join("binary.txt"), vec![0xff, 0xfe, 0xfd])
+        .await
+        .unwrap();
+
+    let err = fixture
+        .rpc_error(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Update File: first.txt\n",
+                    "@@\n",
+                    "-before\n",
+                    "+after\n",
+                    "*** Update File: binary.txt\n",
+                    "@@\n",
+                    "-old\n",
+                    "+new\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert_eq!(err.code, "patch_failed");
+    assert_eq!(
+        tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
+            .await
+            .unwrap(),
+        "before\n",
+    );
+}
+
+#[tokio::test]
+async fn non_utf8_delete_source_is_rejected_before_earlier_mutation() {
+    let fixture = support::spawn_daemon("builder-a").await;
+    tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
+        .await
+        .unwrap();
+    tokio::fs::write(fixture.workdir.join("binary.txt"), vec![0xff, 0xfe, 0xfd])
+        .await
+        .unwrap();
+
+    let err = fixture
+        .rpc_error(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Update File: first.txt\n",
+                    "@@\n",
+                    "-before\n",
+                    "+after\n",
+                    "*** Delete File: binary.txt\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert_eq!(err.code, "patch_failed");
+    assert_eq!(
+        tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
+            .await
+            .unwrap(),
+        "before\n",
+    );
+}
+
+#[tokio::test]
+async fn execution_failures_do_not_roll_back_earlier_file_changes() {
+    let fixture = support::spawn_daemon("builder-a").await;
+    tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
+        .await
+        .unwrap();
+    tokio::fs::write(fixture.workdir.join("blocked"), "not a directory\n")
+        .await
+        .unwrap();
+
+    let err = fixture
+        .rpc_error(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Update File: first.txt\n",
+                    "@@\n",
+                    "-before\n",
+                    "+after\n",
+                    "*** Add File: blocked/second.txt\n",
+                    "+hello\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert_eq!(err.code, "patch_failed");
+    assert_eq!(
+        tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
+            .await
+            .unwrap(),
+        "after\n",
+    );
+    assert!(std::fs::metadata(fixture.workdir.join("blocked/second.txt")).is_err());
+}
+
+#[tokio::test]
 async fn update_file_applies_repeated_context_additions_in_order() {
     let fixture = support::spawn_daemon("builder-a").await;
     let path = fixture.workdir.join("plain.txt");

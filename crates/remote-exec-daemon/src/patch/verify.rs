@@ -43,7 +43,13 @@ pub async fn verify_actions(
             }
             PatchAction::Delete { path } => {
                 let absolute_path = cwd.join(&path);
-                fs::metadata(&absolute_path).await?;
+                let metadata = fs::metadata(&absolute_path).await?;
+                anyhow::ensure!(
+                    metadata.is_file(),
+                    "`{}` is not a file",
+                    display_relative(cwd, &absolute_path)
+                );
+                let _ = fs::read_to_string(&absolute_path).await?;
                 verified.push(VerifiedAction::Delete {
                     path: absolute_path.clone(),
                     summary_path: display_relative(cwd, &absolute_path),
