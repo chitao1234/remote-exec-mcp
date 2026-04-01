@@ -1,8 +1,54 @@
 mod support;
 
+use std::ffi::OsString;
+use std::sync::OnceLock;
+
 use remote_exec_proto::rpc::{ExecResponse, ExecStartRequest, ExecWriteRequest};
+use tokio::sync::Mutex;
 
 const TEST_SHELL: &str = "/bin/sh";
+
+fn env_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+struct EnvOverrideGuard {
+    _guard: tokio::sync::MutexGuard<'static, ()>,
+    saved: Vec<(String, Option<OsString>)>,
+}
+
+impl EnvOverrideGuard {
+    async fn set(pairs: &[(&str, &str)]) -> Self {
+        let guard = env_lock().lock().await;
+        let mut saved = Vec::new();
+
+        for (key, value) in pairs {
+            saved.push((key.to_string(), std::env::var_os(key)));
+            unsafe {
+                std::env::set_var(key, value);
+            }
+        }
+
+        Self {
+            _guard: guard,
+            saved,
+        }
+    }
+}
+
+impl Drop for EnvOverrideGuard {
+    fn drop(&mut self) {
+        for (key, value) in self.saved.drain(..) {
+            unsafe {
+                match value {
+                    Some(value) => std::env::set_var(&key, value),
+                    None => std::env::remove_var(&key),
+                }
+            }
+        }
+    }
+}
 
 #[tokio::test]
 async fn exec_start_returns_a_live_session_for_long_running_tty_processes() {
@@ -25,6 +71,70 @@ async fn exec_start_returns_a_live_session_for_long_running_tty_processes() {
     assert!(response.running);
     assert!(response.daemon_session_id.is_some());
     assert!(response.output.contains("ready"));
+}
+
+#[tokio::test]
+async fn env_overlay_is_applied_in_pipe_mode() {
+    let _env = EnvOverrideGuard::set(&[
+        ("TERM", "rainbow-terminal"),
+        ("NO_COLOR", "0"),
+        ("PAGER", "less"),
+        ("GIT_PAGER", "more"),
+        ("CODEX_CI", "0"),
+    ])
+    .await;
+    let fixture = support::spawn_daemon("builder-a").await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "printf '%s|%s|%s|%s|%s' \"$TERM\" \"$NO_COLOR\" \"$PAGER\" \"$GIT_PAGER\" \"$CODEX_CI\""
+                    .to_string(),
+                workdir: None,
+                shell: Some(TEST_SHELL.to_string()),
+                tty: false,
+                yield_time_ms: Some(250),
+                max_output_tokens: None,
+                login: Some(false),
+            },
+        )
+        .await;
+
+    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.output, "dumb|1|cat|cat|1");
+}
+
+#[tokio::test]
+async fn env_overlay_is_applied_in_pty_mode() {
+    let _env = EnvOverrideGuard::set(&[
+        ("TERM", "rainbow-terminal"),
+        ("NO_COLOR", "0"),
+        ("PAGER", "less"),
+        ("GIT_PAGER", "more"),
+        ("CODEX_CI", "0"),
+    ])
+    .await;
+    let fixture = support::spawn_daemon("builder-a").await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "printf '%s|%s|%s|%s|%s' \"$TERM\" \"$NO_COLOR\" \"$PAGER\" \"$GIT_PAGER\" \"$CODEX_CI\""
+                    .to_string(),
+                workdir: None,
+                shell: Some(TEST_SHELL.to_string()),
+                tty: true,
+                yield_time_ms: Some(250),
+                max_output_tokens: None,
+                login: Some(false),
+            },
+        )
+        .await;
+
+    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.output, "dumb|1|cat|cat|1");
 }
 
 #[tokio::test]

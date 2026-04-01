@@ -10,6 +10,19 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use super::transcript::TranscriptBuffer;
 
+const NORMALIZED_ENV: [(&str, &str); 10] = [
+    ("NO_COLOR", "1"),
+    ("TERM", "dumb"),
+    ("LANG", "C.UTF-8"),
+    ("LC_CTYPE", "C.UTF-8"),
+    ("LC_ALL", "C.UTF-8"),
+    ("COLORTERM", ""),
+    ("PAGER", "cat"),
+    ("GIT_PAGER", "cat"),
+    ("GH_PAGER", "cat"),
+    ("CODEX_CI", "1"),
+];
+
 pub struct LiveSession {
     pub tty: bool,
     pub started_at: Instant,
@@ -37,6 +50,18 @@ pub fn spawn(cmd: &[String], cwd: &std::path::Path, tty: bool) -> anyhow::Result
     }
 }
 
+fn apply_env_overlay_builder(builder: &mut CommandBuilder) {
+    for (key, value) in NORMALIZED_ENV {
+        builder.env(key, value);
+    }
+}
+
+fn apply_env_overlay_command(command: &mut Command) {
+    for (key, value) in NORMALIZED_ENV {
+        command.env(key, value);
+    }
+}
+
 fn spawn_pty(cmd: &[String], cwd: &std::path::Path) -> anyhow::Result<LiveSession> {
     let pty = NativePtySystem::default().openpty(PtySize {
         rows: 24,
@@ -49,6 +74,7 @@ fn spawn_pty(cmd: &[String], cwd: &std::path::Path) -> anyhow::Result<LiveSessio
         builder.arg(arg);
     }
     builder.cwd(cwd);
+    apply_env_overlay_builder(&mut builder);
 
     let child = pty.slave.spawn_command(builder)?;
     let writer = pty.master.take_writer()?;
@@ -91,6 +117,7 @@ fn spawn_pipe(cmd: &[String], cwd: &std::path::Path) -> anyhow::Result<LiveSessi
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    apply_env_overlay_command(&mut command);
     let mut child = command.spawn()?;
     let stdout = child.stdout.take().context("missing stdout pipe")?;
     let stderr = child.stderr.take().context("missing stderr pipe")?;
