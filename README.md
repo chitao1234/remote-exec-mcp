@@ -6,6 +6,8 @@ The tool interfaces and behavior in this project are heavily influenced by [Code
 
 ## Components
 
+- `remote-exec-admin`
+  - Administrative CLI for TLS bootstrap and future operator workflows.
 - `remote-exec-broker`
   - Public MCP server over stdio.
   - Accepts tool calls with a required `target` for machine-local operations.
@@ -59,6 +61,41 @@ The broker and daemon use mutual TLS:
 - the daemon presents a server certificate signed by your CA
 - the broker presents a client certificate signed by the same CA
 - both sides trust the CA certificate configured in `ca_pem`
+
+Preferred bootstrap flow:
+
+```bash
+cargo run -p remote-exec-admin -- certs dev-init \
+  --out-dir ./remote-exec-certs \
+  --target builder-a \
+  --target builder-b
+```
+
+Add explicit daemon SANs when the broker will connect by DNS name or non-localhost IP:
+
+```bash
+cargo run -p remote-exec-admin -- certs dev-init \
+  --out-dir ./remote-exec-certs \
+  --target builder-a \
+  --daemon-san builder-a=dns:builder-a.example.com \
+  --daemon-san builder-a=ip:10.0.0.12
+```
+
+This command writes:
+
+- `ca.pem` and `ca.key`
+- `broker.pem` and `broker.key`
+- `daemons/<target>.pem` and `daemons/<target>.key` for each target
+- `certs-manifest.json`
+
+Notes:
+
+- If a target has no `--daemon-san` entries, `remote-exec-admin` defaults that daemon cert to `DNS:localhost` and `IP:127.0.0.1`.
+- The command prints broker and daemon config snippets after generation so you can paste the generated file paths directly into `configs/broker.example.toml` and `configs/daemon.example.toml`.
+- Keep `expected_daemon_name` set to the daemon's configured `target`; it is the application-level identity check on top of TLS.
+- Re-run with `--force` if you want to overwrite an existing output directory.
+
+Manual `openssl` flow remains available as a fallback:
 
 Minimum files:
 
