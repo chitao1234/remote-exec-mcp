@@ -2,6 +2,8 @@
 
 Remote-first MCP server for running Codex-style local-system tools on multiple Linux machines.
 
+The tool interfaces and behavior in this project are heavily influenced by [Codex](https://github.com/openai/codex), while the implementation here is a separate remote-first broker and per-machine daemon design.
+
 ## Components
 
 - `remote-exec-broker`
@@ -119,6 +121,11 @@ Security is based on target selection plus broker-to-daemon mutual TLS, not on p
 - Per-machine daemon deployment
 - Static broker target configuration
 - No session persistence across broker or daemon restart
+
+## Acknowledgments
+
+- The tool surface and behavioral model are heavily influenced by [Codex](https://github.com/openai/codex).
+- This project reinterprets those ideas for a remote-first MCP broker plus per-machine daemon architecture on Linux.
 
 ## References
 
