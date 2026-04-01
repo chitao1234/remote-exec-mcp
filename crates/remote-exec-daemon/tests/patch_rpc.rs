@@ -153,7 +153,7 @@ async fn update_file_rejects_eof_pure_addition_when_context_is_missing() {
 }
 
 #[tokio::test]
-async fn patch_failures_do_not_roll_back_earlier_file_changes() {
+async fn later_verification_failures_do_not_mutate_earlier_files() {
     let fixture = support::spawn_daemon("builder-a").await;
     tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
         .await
@@ -183,7 +183,7 @@ async fn patch_failures_do_not_roll_back_earlier_file_changes() {
         tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
             .await
             .unwrap(),
-        "after\n",
+        "before\n",
     );
 }
 

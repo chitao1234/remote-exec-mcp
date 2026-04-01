@@ -1,7 +1,7 @@
 mod engine;
 pub mod parser;
+mod verify;
 
-use std::path::Path;
 use std::sync::Arc;
 
 use axum::Json;
@@ -19,64 +19,12 @@ pub async fn apply_patch(
         .map_err(crate::exec::internal_error)?;
     let actions = parser::parse_patch(&req.patch)
         .map_err(|err| crate::exec::rpc_error("patch_failed", err.to_string()))?;
-    let mut summary = Vec::new();
-
-    for action in actions {
-        match action {
-            parser::PatchAction::Add { path, lines } => {
-                let path = cwd.join(path);
-                if let Some(parent) = path.parent() {
-                    tokio::fs::create_dir_all(parent)
-                        .await
-                        .map_err(|err| crate::exec::rpc_error("patch_failed", err.to_string()))?;
-                }
-                tokio::fs::write(&path, format!("{}\n", lines.join("\n")))
-                    .await
-                    .map_err(|err| crate::exec::rpc_error("patch_failed", err.to_string()))?;
-                summary.push(format!("A {}", display_relative(&cwd, &path)));
-            }
-            parser::PatchAction::Delete { path } => {
-                let path = cwd.join(path);
-                tokio::fs::remove_file(&path)
-                    .await
-                    .map_err(|err| crate::exec::rpc_error("patch_failed", err.to_string()))?;
-                summary.push(format!("D {}", display_relative(&cwd, &path)));
-            }
-            parser::PatchAction::Update {
-                path,
-                move_to,
-                hunks,
-            } => {
-                let path = cwd.join(path);
-                let current = tokio::fs::read_to_string(&path)
-                    .await
-                    .map_err(|err| crate::exec::rpc_error("patch_failed", err.to_string()))?;
-                let updated = engine::apply_hunks(&current, &hunks)
-                    .map_err(|err| crate::exec::rpc_error("patch_failed", err.to_string()))?;
-
-                if let Some(move_to) = move_to {
-                    let destination = cwd.join(move_to);
-                    if let Some(parent) = destination.parent() {
-                        tokio::fs::create_dir_all(parent).await.map_err(|err| {
-                            crate::exec::rpc_error("patch_failed", err.to_string())
-                        })?;
-                    }
-                    tokio::fs::write(&destination, ensure_trailing_newline(updated))
-                        .await
-                        .map_err(|err| crate::exec::rpc_error("patch_failed", err.to_string()))?;
-                    tokio::fs::remove_file(&path)
-                        .await
-                        .map_err(|err| crate::exec::rpc_error("patch_failed", err.to_string()))?;
-                    summary.push(format!("M {}", display_relative(&cwd, &destination)));
-                } else {
-                    tokio::fs::write(&path, ensure_trailing_newline(updated))
-                        .await
-                        .map_err(|err| crate::exec::rpc_error("patch_failed", err.to_string()))?;
-                    summary.push(format!("M {}", display_relative(&cwd, &path)));
-                }
-            }
-        }
-    }
+    let verified = verify::verify_actions(&cwd, actions)
+        .await
+        .map_err(|err| crate::exec::rpc_error("patch_failed", err.to_string()))?;
+    let summary = execute_verified_actions(verified)
+        .await
+        .map_err(|err| crate::exec::rpc_error("patch_failed", err.to_string()))?;
 
     Ok(Json(PatchApplyResponse {
         output: format!(
@@ -86,16 +34,46 @@ pub async fn apply_patch(
     }))
 }
 
-fn ensure_trailing_newline(mut text: String) -> String {
-    if !text.ends_with('\n') {
-        text.push('\n');
-    }
-    text
-}
+async fn execute_verified_actions(
+    actions: Vec<verify::VerifiedAction>,
+) -> anyhow::Result<Vec<String>> {
+    let mut summary = Vec::with_capacity(actions.len());
 
-fn display_relative(base: &Path, path: &Path) -> String {
-    path.strip_prefix(base)
-        .unwrap_or(path)
-        .display()
-        .to_string()
+    for action in actions {
+        match action {
+            verify::VerifiedAction::Add {
+                path,
+                content,
+                summary_path,
+            } => {
+                if let Some(parent) = path.parent() {
+                    tokio::fs::create_dir_all(parent).await?;
+                }
+                tokio::fs::write(&path, content).await?;
+                summary.push(format!("A {summary_path}"));
+            }
+            verify::VerifiedAction::Delete { path, summary_path } => {
+                tokio::fs::remove_file(&path).await?;
+                summary.push(format!("D {summary_path}"));
+            }
+            verify::VerifiedAction::Update {
+                source_path,
+                destination_path,
+                content,
+                summary_path,
+                remove_source,
+            } => {
+                if let Some(parent) = destination_path.parent() {
+                    tokio::fs::create_dir_all(parent).await?;
+                }
+                tokio::fs::write(&destination_path, content).await?;
+                if remove_source {
+                    tokio::fs::remove_file(&source_path).await?;
+                }
+                summary.push(format!("M {summary_path}"));
+            }
+        }
+    }
+
+    Ok(summary)
 }
