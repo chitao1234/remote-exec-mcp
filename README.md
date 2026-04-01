@@ -52,6 +52,66 @@ Broker config covers one entry per target:
 - client key path
 - expected daemon target name
 
+## TLS / CA setup
+
+The broker and daemon use mutual TLS:
+
+- the daemon presents a server certificate signed by your CA
+- the broker presents a client certificate signed by the same CA
+- both sides trust the CA certificate configured in `ca_pem`
+
+Minimum files:
+
+- `ca.pem` and `ca.key`
+- `broker.pem` and `broker.key`
+- one `daemon.pem` and `daemon.key` pair per daemon
+
+Example `openssl` flow:
+
+```bash
+# 1) Create a CA
+openssl genrsa -out ca.key 4096
+openssl req -x509 -new -key ca.key -sha256 -days 3650 \
+  -out ca.pem -subj "/CN=remote-exec-ca"
+
+# 2) Create the broker client certificate
+openssl genrsa -out broker.key 4096
+openssl req -new -key broker.key -out broker.csr \
+  -subj "/CN=remote-exec-broker"
+cat > broker.ext <<'EOF'
+basicConstraints=CA:FALSE
+keyUsage=digitalSignature,keyEncipherment
+extendedKeyUsage=clientAuth
+EOF
+openssl x509 -req -in broker.csr -CA ca.pem -CAkey ca.key -CAcreateserial \
+  -out broker.pem -days 825 -sha256 -extfile broker.ext
+
+# 3) Create a daemon server certificate
+openssl genrsa -out daemon.key 4096
+openssl req -new -key daemon.key -out daemon.csr \
+  -subj "/CN=builder-a.example.com"
+cat > daemon.ext <<'EOF'
+basicConstraints=CA:FALSE
+keyUsage=digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=DNS:builder-a.example.com,IP:127.0.0.1
+EOF
+openssl x509 -req -in daemon.csr -CA ca.pem -CAkey ca.key -CAcreateserial \
+  -out daemon.pem -days 825 -sha256 -extfile daemon.ext
+```
+
+Notes:
+
+- Generate a distinct daemon certificate for each host and set its `subjectAltName` to match the hostname or IP used in the broker `base_url`.
+- Reuse the same broker client certificate for multiple targets if you want, as long as every daemon trusts the same CA.
+- Keep `ca.key` private and distribute `ca.pem` to the broker and daemons.
+
+Wire those files into the example configs:
+
+- broker targets use `ca_pem`, `client_cert_pem`, `client_key_pem`, and `expected_daemon_name` as shown in `configs/broker.example.toml`
+- each daemon uses `tls.cert_pem`, `tls.key_pem`, and `tls.ca_pem` as shown in `configs/daemon.example.toml`
+- set `expected_daemon_name` to the daemon's configured `target`
+
 ## Local development
 
 Run the full workspace checks:
