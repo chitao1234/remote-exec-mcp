@@ -288,6 +288,7 @@ mod tests {
                 exit_code: Some(0),
                 original_token_count: Some(6),
                 output: "one two three".to_string(),
+                warnings: Vec::new(),
             },
             None,
         );
@@ -308,6 +309,7 @@ mod tests {
                 exit_code: Some(0),
                 original_token_count: Some(6),
                 output: "one two three".to_string(),
+                warnings: Vec::new(),
             },
             None,
         );
@@ -328,6 +330,7 @@ mod tests {
                 exit_code: Some(0),
                 original_token_count: Some(6),
                 output: "one two three".to_string(),
+                warnings: Vec::new(),
             },
             None,
         );

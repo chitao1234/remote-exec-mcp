@@ -9,8 +9,9 @@ use axum::http::StatusCode;
 use axum::routing::post;
 use axum::{Json, Router};
 use remote_exec_proto::rpc::{
-    ExecResponse, ExecStartRequest, ExecWriteRequest, HealthCheckResponse, ImageReadRequest,
-    ImageReadResponse, PatchApplyRequest, PatchApplyResponse, RpcErrorBody, TargetInfoResponse,
+    ExecResponse, ExecStartRequest, ExecWarning, ExecWriteRequest, HealthCheckResponse,
+    ImageReadRequest, ImageReadResponse, PatchApplyRequest, PatchApplyResponse, RpcErrorBody,
+    TargetInfoResponse,
 };
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
@@ -116,6 +117,10 @@ impl BrokerFixture {
 
     pub async fn set_image_read_response(&self, response: StubImageReadResponse) {
         *self.stub_state.image_read_response.lock().await = response;
+    }
+
+    pub async fn set_exec_start_warnings(&self, warnings: Vec<ExecWarning>) {
+        *self.stub_state.exec_start_warnings.lock().await = warnings;
     }
 }
 
@@ -390,6 +395,7 @@ struct StubDaemonState {
     target: String,
     daemon_instance_id: String,
     exec_write_behavior: Arc<Mutex<ExecWriteBehavior>>,
+    exec_start_warnings: Arc<Mutex<Vec<ExecWarning>>>,
     exec_start_calls: Arc<Mutex<usize>>,
     last_patch_request: Arc<Mutex<Option<PatchApplyRequest>>>,
     image_read_response: Arc<Mutex<StubImageReadResponse>>,
@@ -400,6 +406,7 @@ fn stub_daemon_state(target: &str, exec_write_behavior: ExecWriteBehavior) -> St
         target: target.to_string(),
         daemon_instance_id: "daemon-instance-1".to_string(),
         exec_write_behavior: Arc::new(Mutex::new(exec_write_behavior)),
+        exec_start_warnings: Arc::new(Mutex::new(Vec::new())),
         exec_start_calls: Arc::new(Mutex::new(0)),
         last_patch_request: Arc::new(Mutex::new(None)),
         image_read_response: Arc::new(Mutex::new(StubImageReadResponse::Success(
@@ -507,6 +514,7 @@ async fn exec_start(
     Json(_req): Json<ExecStartRequest>,
 ) -> Json<ExecResponse> {
     *state.exec_start_calls.lock().await += 1;
+    let warnings = state.exec_start_warnings.lock().await.clone();
 
     Json(ExecResponse {
         daemon_session_id: Some("daemon-session-1".to_string()),
@@ -517,6 +525,7 @@ async fn exec_start(
         exit_code: None,
         original_token_count: Some(1),
         output: "ready".to_string(),
+        warnings,
     })
 }
 
@@ -559,6 +568,7 @@ async fn exec_write(
         exit_code: Some(0),
         original_token_count: Some(2),
         output: "poll output".to_string(),
+        warnings: Vec::new(),
     }))
 }
 

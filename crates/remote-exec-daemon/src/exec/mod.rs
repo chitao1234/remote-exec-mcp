@@ -12,7 +12,9 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use rand::RngCore;
-use remote_exec_proto::rpc::{ExecResponse, ExecStartRequest, ExecWriteRequest, RpcErrorBody};
+use remote_exec_proto::rpc::{
+    ExecResponse, ExecStartRequest, ExecWarning, ExecWriteRequest, RpcErrorBody,
+};
 
 use crate::AppState;
 
@@ -67,10 +69,15 @@ pub async fn exec_start(
     let daemon_session_id = uuid::Uuid::new_v4().to_string();
     let wall_time_seconds = session.started_at.elapsed().as_secs_f64();
     let snapshot = output::snapshot_output(output, req.max_output_tokens);
-    state
+    let insert_outcome = state
         .sessions
         .insert(daemon_session_id.clone(), session)
         .await;
+    let warnings = if insert_outcome.crossed_warning_threshold {
+        vec![ExecWarning::session_limit_approaching(&state.config.target)]
+    } else {
+        Vec::new()
+    };
 
     Ok(Json(ExecResponse {
         daemon_session_id: Some(daemon_session_id),
@@ -81,6 +88,7 @@ pub async fn exec_start(
         exit_code: None,
         original_token_count: Some(snapshot.original_token_count),
         output: snapshot.output,
+        warnings,
     }))
 }
 
@@ -144,6 +152,7 @@ pub async fn exec_write(
         exit_code: None,
         original_token_count: Some(snapshot.original_token_count),
         output: snapshot.output,
+        warnings: Vec::new(),
     }))
 }
 
@@ -253,5 +262,6 @@ fn finish_response(
         exit_code: session.exit_code(),
         original_token_count: Some(snapshot.original_token_count),
         output: snapshot.output,
+        warnings: Vec::new(),
     }
 }

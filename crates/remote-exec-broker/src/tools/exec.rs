@@ -1,6 +1,7 @@
 use anyhow::Context;
 use remote_exec_proto::public::{CommandToolResult, ExecCommandInput, WriteStdinInput};
-use remote_exec_proto::rpc::{ExecStartRequest, ExecWriteRequest};
+use remote_exec_proto::rpc::{ExecStartRequest, ExecWarning, ExecWriteRequest};
+use rmcp::model::Meta;
 
 use super::exec_intercept::maybe_intercept_apply_patch;
 use crate::mcp_server::{
@@ -67,6 +68,7 @@ pub async fn exec_command(
             login: input.login,
         })
         .await?;
+    let response_meta = response_warning_meta(&response.warnings);
 
     let session_command = input.cmd.clone();
     let session_id = if response.running {
@@ -90,7 +92,7 @@ pub async fn exec_command(
         None
     };
 
-    Ok(ToolCallOutput::text_and_structured(
+    Ok(ToolCallOutput::text_structured_meta(
         format_command_text(&input.cmd, &response, session_id.as_deref()),
         serde_json::to_value(CommandToolResult {
             target: input.target,
@@ -102,6 +104,7 @@ pub async fn exec_command(
             original_token_count: response.original_token_count,
             output: response.output,
         })?,
+        response_meta,
     ))
 }
 
@@ -190,4 +193,14 @@ async fn write_stdin_inner(
 
 fn unknown_process_id_message(session_id: &str) -> String {
     format!("Unknown process id {session_id}")
+}
+
+fn response_warning_meta(warnings: &[ExecWarning]) -> Option<Meta> {
+    if warnings.is_empty() {
+        return None;
+    }
+
+    let mut meta = Meta::new();
+    meta.insert("warnings".to_string(), serde_json::to_value(warnings).unwrap());
+    Some(meta)
 }

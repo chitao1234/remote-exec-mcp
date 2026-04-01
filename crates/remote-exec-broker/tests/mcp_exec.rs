@@ -316,6 +316,35 @@ async fn exec_command_intercepted_apply_patch_warning_error_in_meta() {
 }
 
 #[tokio::test]
+async fn exec_command_forwarded_session_warning_in_meta() {
+    let fixture = support::spawn_broker_with_stub_daemon().await;
+    fixture
+        .set_exec_start_warnings(vec![remote_exec_proto::rpc::ExecWarning {
+            code: "exec_session_limit_approaching".to_string(),
+            message: "Target `builder-a` now has 60 open exec sessions.".to_string(),
+        }])
+        .await;
+
+    let result = fixture
+        .raw_tool_result(
+            "exec_command",
+            serde_json::json!({
+                "target": "builder-a",
+                "cmd": "printf ready; sleep 2",
+                "tty": true,
+                "yield_time_ms": 250
+            }),
+        )
+        .await;
+
+    assert!(!result.is_error);
+    assert_eq!(
+        result.meta.as_ref().unwrap()["warnings"][0]["code"],
+        "exec_session_limit_approaching"
+    );
+}
+
+#[tokio::test]
 async fn write_stdin_routes_by_public_session_id_instead_of_target_guessing() {
     let fixture = support::spawn_broker_with_stub_daemon().await;
     let started = fixture
