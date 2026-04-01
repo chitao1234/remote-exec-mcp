@@ -2,6 +2,8 @@ mod support;
 
 use remote_exec_proto::rpc::{ExecResponse, ExecStartRequest, ExecWriteRequest};
 
+const TEST_SHELL: &str = "/bin/sh";
+
 #[tokio::test]
 async fn exec_start_returns_a_live_session_for_long_running_tty_processes() {
     let fixture = support::spawn_daemon("builder-a").await;
@@ -11,7 +13,7 @@ async fn exec_start_returns_a_live_session_for_long_running_tty_processes() {
             &ExecStartRequest {
                 cmd: "printf ready; sleep 2".to_string(),
                 workdir: None,
-                shell: Some("/bin/bash".to_string()),
+                shell: Some(TEST_SHELL.to_string()),
                 tty: true,
                 yield_time_ms: Some(250),
                 max_output_tokens: Some(2_000),
@@ -35,7 +37,7 @@ async fn exec_start_truncates_output_to_max_output_tokens() {
             &ExecStartRequest {
                 cmd: "printf 'one two three four five six'".to_string(),
                 workdir: None,
-                shell: Some("/bin/bash".to_string()),
+                shell: Some(TEST_SHELL.to_string()),
                 tty: false,
                 yield_time_ms: Some(250),
                 max_output_tokens: Some(3),
@@ -58,7 +60,7 @@ async fn exec_output_preserves_trailing_newline_when_within_max_output_tokens() 
             &ExecStartRequest {
                 cmd: "printf 'one two\\n'".to_string(),
                 workdir: None,
-                shell: Some("/bin/bash".to_string()),
+                shell: Some(TEST_SHELL.to_string()),
                 tty: false,
                 yield_time_ms: Some(250),
                 max_output_tokens: Some(3),
@@ -81,7 +83,7 @@ async fn exec_output_drains_late_output_after_exit() {
             &ExecStartRequest {
                 cmd: "(sleep 0.08; printf 'late tail') &".to_string(),
                 workdir: None,
-                shell: Some("/bin/bash".to_string()),
+                shell: Some(TEST_SHELL.to_string()),
                 tty: false,
                 yield_time_ms: Some(250),
                 max_output_tokens: Some(10),
@@ -105,7 +107,7 @@ async fn exec_output_write_truncates_to_max_output_tokens() {
                 cmd: "stty -echo; read line; printf 'one two three four five six'; sleep 30"
                     .to_string(),
                 workdir: None,
-                shell: Some("/bin/bash".to_string()),
+                shell: Some(TEST_SHELL.to_string()),
                 tty: true,
                 yield_time_ms: Some(250),
                 max_output_tokens: Some(3),
@@ -140,7 +142,7 @@ async fn exec_write_rejects_non_tty_sessions_when_chars_are_present() {
             &ExecStartRequest {
                 cmd: "sleep 1".to_string(),
                 workdir: None,
-                shell: Some("/bin/bash".to_string()),
+                shell: Some(TEST_SHELL.to_string()),
                 tty: false,
                 yield_time_ms: Some(250),
                 max_output_tokens: Some(2_000),
@@ -178,7 +180,7 @@ async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon() {
             &ExecStartRequest {
                 cmd: "printf slow; sleep 30".to_string(),
                 workdir: None,
-                shell: Some("/bin/bash".to_string()),
+                shell: Some(TEST_SHELL.to_string()),
                 tty: true,
                 yield_time_ms: Some(250),
                 max_output_tokens: None,
@@ -192,7 +194,7 @@ async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon() {
             &ExecStartRequest {
                 cmd: "read line; printf '%s' \"$line\"; sleep 30".to_string(),
                 workdir: None,
-                shell: Some("/bin/bash".to_string()),
+                shell: Some(TEST_SHELL.to_string()),
                 tty: true,
                 yield_time_ms: Some(250),
                 max_output_tokens: None,

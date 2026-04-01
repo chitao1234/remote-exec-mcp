@@ -98,15 +98,13 @@ mod tests {
     use super::SessionStore;
     use crate::exec::session;
 
+    const TEST_SHELL: &str = "/bin/sh";
+
     #[tokio::test]
     async fn lock_rejects_stale_snapshot_after_session_replacement() {
         let store = SessionStore::default();
         let session_id = "session-1";
-        let cmd = vec![
-            "/bin/bash".to_string(),
-            "-c".to_string(),
-            "sleep 2".to_string(),
-        ];
+        let cmd = vec![TEST_SHELL.to_string(), "-c".to_string(), "sleep 2".to_string()];
 
         let first = session::spawn(&cmd, Path::new("/"), false).expect("first session");
         store.insert(session_id.to_string(), first).await;
@@ -138,11 +136,7 @@ mod tests {
     async fn retire_prevents_waiting_lock_from_reusing_session() {
         let store = SessionStore::default();
         let session_id = "session-1";
-        let cmd = vec![
-            "/bin/bash".to_string(),
-            "-c".to_string(),
-            "sleep 2".to_string(),
-        ];
+        let cmd = vec![TEST_SHELL.to_string(), "-c".to_string(), "sleep 2".to_string()];
 
         let session = session::spawn(&cmd, Path::new("/"), false).expect("session");
         store.insert(session_id.to_string(), session).await;
