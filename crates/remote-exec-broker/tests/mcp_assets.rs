@@ -1,7 +1,7 @@
 mod support;
 
 #[tokio::test]
-async fn apply_patch_returns_plain_text_plus_structured_content() {
+async fn apply_patch_returns_plain_text_plus_empty_structured_content() {
     let fixture = support::spawn_broker_with_stub_daemon().await;
     let result = fixture
         .call_tool(
@@ -19,7 +19,7 @@ async fn apply_patch_returns_plain_text_plus_structured_content() {
             .text_output
             .contains("Success. Updated the following files:")
     );
-    assert_eq!(result.structured_content["target"], "builder-a");
+    assert_eq!(result.structured_content, serde_json::json!({}));
 }
 
 #[tokio::test]

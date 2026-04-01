@@ -1,4 +1,4 @@
-use remote_exec_proto::public::{ApplyPatchInput, ApplyPatchResult};
+use remote_exec_proto::public::ApplyPatchInput;
 use remote_exec_proto::rpc::PatchApplyRequest;
 
 use crate::mcp_server::ToolCallOutput;
@@ -18,10 +18,7 @@ pub async fn apply_patch(
         .await?;
 
     Ok(ToolCallOutput::text_and_structured(
-        response.output.clone(),
-        serde_json::to_value(ApplyPatchResult {
-            target: input.target,
-            output: response.output,
-        })?,
+        response.output,
+        serde_json::json!({}),
     ))
 }

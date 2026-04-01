@@ -55,12 +55,6 @@ pub struct ApplyPatchInput {
     pub workdir: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct ApplyPatchResult {
-    pub target: String,
-    pub output: String,
-}
-
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ViewImageInput {
