@@ -9,6 +9,8 @@ use super::session::LiveSession;
 
 type SharedSession = Arc<Mutex<LiveSession>>;
 const DEFAULT_SESSION_LIMIT: usize = 64;
+const RECENT_PROTECTION_COUNT: usize = 8;
+const WARNING_THRESHOLD: usize = 60;
 
 #[derive(Clone)]
 struct SessionEntry {
@@ -21,6 +23,11 @@ struct Candidate {
     session_id: String,
     session: SharedSession,
     last_touched_at: Instant,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct InsertOutcome {
+    pub crossed_warning_threshold: bool,
 }
 
 #[derive(Clone)]
@@ -45,7 +52,8 @@ impl SessionStore {
         }
     }
 
-    pub async fn insert(&self, session_id: String, session: LiveSession) {
+    pub async fn insert(&self, session_id: String, session: LiveSession) -> InsertOutcome {
+        let crossed_warning_threshold = self.crosses_warning_threshold().await;
         self.prune_for_insert().await;
         self.inner.write().await.insert(
             session_id,
@@ -54,6 +62,9 @@ impl SessionStore {
                 last_touched_at: Instant::now(),
             },
         );
+        InsertOutcome {
+            crossed_warning_threshold,
+        }
     }
 
     pub async fn lock(&self, session_id: &str) -> Option<SessionLease> {
@@ -99,6 +110,15 @@ impl SessionStore {
         }
     }
 
+    async fn crosses_warning_threshold(&self) -> bool {
+        let current_len = self.inner.read().await.len();
+        current_len < WARNING_THRESHOLD && current_len + 1 >= WARNING_THRESHOLD
+    }
+
+    fn protected_recent_count(&self) -> usize {
+        self.limit.saturating_sub(1).min(RECENT_PROTECTION_COUNT)
+    }
+
     async fn prune_for_insert(&self) {
         loop {
             let snapshot = {
@@ -106,22 +126,24 @@ impl SessionStore {
                 if sessions.len() < self.limit {
                     return;
                 }
-                sessions
+                let mut snapshot = sessions
                     .iter()
                     .map(|(session_id, entry)| Candidate {
                         session_id: session_id.clone(),
                         session: entry.session.clone(),
                         last_touched_at: entry.last_touched_at,
                     })
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>();
+                snapshot.sort_by_key(|candidate| candidate.last_touched_at);
+                snapshot
             };
 
-            let victim = self.find_oldest_exited(&snapshot).await.or_else(|| {
-                snapshot
-                    .iter()
-                    .min_by_key(|candidate| candidate.last_touched_at)
-                    .cloned()
-            });
+            let protected = self.protected_recent_count();
+            let prunable = &snapshot[..snapshot.len().saturating_sub(protected)];
+            let victim = self
+                .find_oldest_exited(prunable)
+                .await
+                .or_else(|| prunable.first().cloned());
 
             let Some(victim) = victim else {
                 return;
@@ -333,5 +355,101 @@ mod tests {
         assert!(store.lock("session-1").await.is_none());
         assert!(store.lock("session-2").await.is_some());
         assert!(store.lock("session-3").await.is_some());
+    }
+
+    #[tokio::test]
+    async fn insert_protects_eight_most_recent_sessions() {
+        let store = SessionStore::new(10);
+        for index in 0..10 {
+            store
+                .insert(format!("session-{index}"), spawn_pipe_session("sleep 30"))
+                .await;
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+
+        store.lock("session-9").await.expect("session-9");
+        store.lock("session-8").await.expect("session-8");
+        store.lock("session-7").await.expect("session-7");
+        store.lock("session-6").await.expect("session-6");
+        store.lock("session-5").await.expect("session-5");
+        store.lock("session-4").await.expect("session-4");
+        store.lock("session-3").await.expect("session-3");
+        store.lock("session-2").await.expect("session-2");
+
+        let outcome = store
+            .insert("session-10".to_string(), spawn_pipe_session("sleep 30"))
+            .await;
+
+        assert!(!outcome.crossed_warning_threshold);
+        assert!(store.lock("session-0").await.is_none());
+        for protected in [
+            "session-2",
+            "session-3",
+            "session-4",
+            "session-5",
+            "session-6",
+            "session-7",
+            "session-8",
+            "session-9",
+        ] {
+            assert!(
+                store.lock(protected).await.is_some(),
+                "{protected} should remain protected"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn insert_prunes_oldest_exited_non_protected_session_before_live_one() {
+        let store = SessionStore::new(10);
+        store
+            .insert("session-0".to_string(), spawn_pipe_session("printf done"))
+            .await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        for index in 1..10 {
+            store
+                .insert(format!("session-{index}"), spawn_pipe_session("sleep 30"))
+                .await;
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+
+        let outcome = store
+            .insert("session-10".to_string(), spawn_pipe_session("sleep 30"))
+            .await;
+
+        assert!(!outcome.crossed_warning_threshold);
+        assert!(store.lock("session-0").await.is_none());
+        assert!(store.lock("session-1").await.is_some());
+    }
+
+    #[tokio::test]
+    async fn insert_reports_warning_only_when_crossing_threshold() {
+        let store = SessionStore::new(64);
+
+        for index in 0..59 {
+            let outcome = store
+                .insert(format!("session-{index}"), spawn_pipe_session("sleep 30"))
+                .await;
+            assert!(!outcome.crossed_warning_threshold, "unexpected warning at {index}");
+        }
+
+        let crossing = store
+            .insert("session-59".to_string(), spawn_pipe_session("sleep 30"))
+            .await;
+        assert!(crossing.crossed_warning_threshold);
+
+        let above_threshold = store
+            .insert("session-60".to_string(), spawn_pipe_session("sleep 30"))
+            .await;
+        assert!(!above_threshold.crossed_warning_threshold);
+
+        store.remove("session-0").await;
+        store.remove("session-1").await;
+
+        let recrossing = store
+            .insert("session-61".to_string(), spawn_pipe_session("sleep 30"))
+            .await;
+        assert!(recrossing.crossed_warning_threshold);
     }
 }
