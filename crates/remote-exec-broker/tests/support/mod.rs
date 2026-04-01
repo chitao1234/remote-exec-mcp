@@ -125,6 +125,7 @@ pub struct ToolResult {
     pub text_output: String,
     pub structured_content: serde_json::Value,
     pub raw_content: Vec<serde_json::Value>,
+    pub meta: Option<serde_json::Value>,
 }
 
 impl ToolResult {
@@ -142,6 +143,7 @@ impl ToolResult {
             text_output,
             structured_content: result.structured_content.unwrap_or(serde_json::Value::Null),
             raw_content,
+            meta: result.meta.map(|meta| serde_json::to_value(meta).unwrap()),
         }
     }
 }

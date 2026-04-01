@@ -2,13 +2,20 @@ use anyhow::Context;
 use rmcp::{
     ErrorData as McpError, ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{CallToolResult, Content, ServerCapabilities, ServerInfo},
+    model::{CallToolResult, Content, Meta, ServerCapabilities, ServerInfo},
     tool, tool_handler, tool_router,
 };
 
 pub struct ToolCallOutput {
     pub content: Vec<Content>,
     pub structured: serde_json::Value,
+    pub meta: Option<Meta>,
+}
+
+#[derive(Debug)]
+pub struct ToolCallError {
+    message: String,
+    meta: Option<Meta>,
 }
 
 impl ToolCallOutput {
@@ -16,6 +23,7 @@ impl ToolCallOutput {
         Self {
             content: vec![Content::text(text)],
             structured,
+            meta: None,
         }
     }
 
@@ -23,6 +31,19 @@ impl ToolCallOutput {
         Self {
             content,
             structured,
+            meta: None,
+        }
+    }
+
+    pub fn text_structured_meta(
+        text: String,
+        structured: serde_json::Value,
+        meta: Option<Meta>,
+    ) -> Self {
+        Self {
+            content: vec![Content::text(text)],
+            structured,
+            meta,
         }
     }
 
@@ -31,9 +52,58 @@ impl ToolCallOutput {
             content: self.content,
             structured_content: Some(self.structured),
             is_error: Some(false),
+            meta: self.meta,
+        }
+    }
+}
+
+impl ToolCallError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
             meta: None,
         }
     }
+
+    pub fn with_meta(message: impl Into<String>, meta: Option<Meta>) -> Self {
+        Self {
+            message: message.into(),
+            meta,
+        }
+    }
+}
+
+impl std::fmt::Display for ToolCallError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ToolCallError {}
+
+pub fn tool_error_result(text: String, meta: Option<Meta>) -> CallToolResult {
+    CallToolResult {
+        content: vec![Content::text(text)],
+        structured_content: None,
+        is_error: Some(true),
+        meta,
+    }
+}
+
+pub fn format_tool_error(err: anyhow::Error) -> CallToolResult {
+    match err.downcast::<ToolCallError>() {
+        Ok(tool_err) => tool_error_result(tool_err.message, tool_err.meta),
+        Err(err) => tool_error_result(err.to_string(), None),
+    }
+}
+
+pub fn warning_meta(code: &str, message: &str) -> Meta {
+    let mut meta = Meta::new();
+    meta.insert(
+        "warnings".to_string(),
+        serde_json::json!([{ "code": code, "message": message }]),
+    );
+    meta
 }
 
 #[derive(Clone)]
@@ -64,7 +134,7 @@ impl BrokerServer {
         Ok(
             match crate::tools::exec::exec_command(&self.state, input).await {
                 Ok(output) => output.into_call_tool_result(),
-                Err(err) => CallToolResult::error(vec![Content::text(err.to_string())]),
+                Err(err) => format_tool_error(err),
             },
         )
     }
@@ -80,7 +150,7 @@ impl BrokerServer {
         Ok(
             match crate::tools::exec::write_stdin(&self.state, input).await {
                 Ok(output) => output.into_call_tool_result(),
-                Err(err) => CallToolResult::error(vec![Content::text(err.to_string())]),
+                Err(err) => format_tool_error(err),
             },
         )
     }
@@ -96,7 +166,7 @@ impl BrokerServer {
         Ok(
             match crate::tools::patch::apply_patch(&self.state, input).await {
                 Ok(output) => output.into_call_tool_result(),
-                Err(err) => CallToolResult::error(vec![Content::text(err.to_string())]),
+                Err(err) => format_tool_error(err),
             },
         )
     }
@@ -112,7 +182,7 @@ impl BrokerServer {
         Ok(
             match crate::tools::image::view_image(&self.state, input).await {
                 Ok(output) => output.into_call_tool_result(),
-                Err(err) => CallToolResult::error(vec![Content::text(err.to_string())]),
+                Err(err) => format_tool_error(err),
             },
         )
     }

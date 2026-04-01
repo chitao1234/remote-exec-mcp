@@ -4,8 +4,13 @@ use remote_exec_proto::rpc::{ExecStartRequest, ExecWriteRequest};
 
 use super::exec_intercept::maybe_intercept_apply_patch;
 use crate::mcp_server::{
-    ToolCallOutput, format_command_text, format_intercepted_patch_text, format_poll_text,
+    ToolCallError, ToolCallOutput, format_command_text, format_intercepted_patch_text,
+    format_poll_text, warning_meta,
 };
+
+const APPLY_PATCH_WARNING_CODE: &str = "apply_patch_via_exec_command";
+const APPLY_PATCH_WARNING_MESSAGE: &str =
+    "Use apply_patch directly rather than through exec_command.";
 
 pub async fn exec_command(
     state: &crate::BrokerState,
@@ -18,9 +23,18 @@ pub async fn exec_command(
             intercepted.patch,
             intercepted.workdir,
         )
-        .await?;
+        .await
+        .map_err(|err| {
+            anyhow::Error::new(ToolCallError::with_meta(
+                err.to_string(),
+                Some(warning_meta(
+                    APPLY_PATCH_WARNING_CODE,
+                    APPLY_PATCH_WARNING_MESSAGE,
+                )),
+            ))
+        })?;
 
-        return Ok(ToolCallOutput::text_and_structured(
+        return Ok(ToolCallOutput::text_structured_meta(
             format_intercepted_patch_text(&output),
             serde_json::to_value(CommandToolResult {
                 target: input.target,
@@ -32,6 +46,10 @@ pub async fn exec_command(
                 original_token_count: None,
                 output,
             })?,
+            Some(warning_meta(
+                APPLY_PATCH_WARNING_CODE,
+                APPLY_PATCH_WARNING_MESSAGE,
+            )),
         ));
     }
 

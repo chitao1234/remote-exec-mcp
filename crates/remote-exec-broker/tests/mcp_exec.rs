@@ -274,6 +274,48 @@ async fn exec_command_invalid_intercepted_patch_surfaces_tool_error() {
 }
 
 #[tokio::test]
+async fn exec_command_intercepted_apply_patch_warning_success_in_meta() {
+    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let patch = "*** Begin Patch\n*** Add File: warning.txt\n+warning\n*** End Patch\n";
+
+    let result = fixture
+        .raw_tool_result(
+            "exec_command",
+            serde_json::json!({
+                "target": "builder-a",
+                "cmd": format!("apply_patch '{patch}'"),
+            }),
+        )
+        .await;
+
+    assert!(!result.is_error);
+    assert_eq!(
+        result.meta.as_ref().unwrap()["warnings"][0]["code"],
+        "apply_patch_via_exec_command"
+    );
+}
+
+#[tokio::test]
+async fn exec_command_intercepted_apply_patch_warning_error_in_meta() {
+    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let result = fixture
+        .raw_tool_result(
+            "exec_command",
+            serde_json::json!({
+                "target": "builder-a",
+                "cmd": "apply_patch 'not a patch'",
+            }),
+        )
+        .await;
+
+    assert!(result.is_error);
+    assert_eq!(
+        result.meta.as_ref().unwrap()["warnings"][0]["message"],
+        "Use apply_patch directly rather than through exec_command."
+    );
+}
+
+#[tokio::test]
 async fn write_stdin_routes_by_public_session_id_instead_of_target_guessing() {
     let fixture = support::spawn_broker_with_stub_daemon().await;
     let started = fixture
