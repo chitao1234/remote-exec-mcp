@@ -37,6 +37,14 @@ fn generates_bundle_for_requested_targets() {
     assert!(bundle.broker.cert_pem.contains("BEGIN CERTIFICATE"));
     assert!(bundle.broker.key_pem.contains("BEGIN PRIVATE KEY"));
     assert!(bundle.daemons.contains_key("builder-a"));
-    assert!(bundle.daemons["builder-a"].cert_pem.contains("BEGIN CERTIFICATE"));
-    assert!(bundle.daemons["builder-a"].key_pem.contains("BEGIN PRIVATE KEY"));
+    assert!(
+        bundle.daemons["builder-a"]
+            .cert_pem
+            .contains("BEGIN CERTIFICATE")
+    );
+    assert!(
+        bundle.daemons["builder-a"]
+            .key_pem
+            .contains("BEGIN PRIVATE KEY")
+    );
 }

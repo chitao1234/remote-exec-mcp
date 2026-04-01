@@ -131,7 +131,9 @@ mod tests {
     }
 
     fn with_path_var<T>(path: Option<&OsStr>, test: impl FnOnce() -> T) -> T {
-        let _lock = PATH_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _lock = PATH_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _guard = PathGuard::set(path);
         test()
     }

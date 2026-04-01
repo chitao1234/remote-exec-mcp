@@ -75,8 +75,14 @@ pub fn render_config_snippets(manifest: &DevInitManifest) -> String {
     output.push_str("Generated files:\n");
     output.push_str(&format!("- CA cert: {}\n", manifest.ca.cert_pem.display()));
     output.push_str(&format!("- CA key: {}\n", manifest.ca.key_pem.display()));
-    output.push_str(&format!("- Broker cert: {}\n", manifest.broker.cert_pem.display()));
-    output.push_str(&format!("- Broker key: {}\n", manifest.broker.key_pem.display()));
+    output.push_str(&format!(
+        "- Broker cert: {}\n",
+        manifest.broker.cert_pem.display()
+    ));
+    output.push_str(&format!(
+        "- Broker key: {}\n",
+        manifest.broker.key_pem.display()
+    ));
 
     for (target, daemon) in &manifest.daemons {
         output.push_str(&format!(

@@ -460,45 +460,22 @@ struct TestCerts {
 }
 
 fn write_test_certs(dir: &Path) -> TestCerts {
-    let ca_key = rcgen::KeyPair::generate().unwrap();
-    let ca_cert = rcgen::CertificateParams::new(vec![])
-        .unwrap()
-        .self_signed(&ca_key)
-        .unwrap();
-
-    let mut daemon_params = rcgen::CertificateParams::new(vec!["localhost".to_string()]).unwrap();
-    daemon_params
-        .subject_alt_names
-        .push(rcgen::SanType::IpAddress("127.0.0.1".parse().unwrap()));
-    let daemon_key = rcgen::KeyPair::generate().unwrap();
-    let daemon_cert = daemon_params
-        .signed_by(&daemon_key, &ca_cert, &ca_key)
-        .unwrap();
-
-    let client_key = rcgen::KeyPair::generate().unwrap();
-    let client_cert = rcgen::CertificateParams::new(vec!["broker".to_string()])
-        .unwrap()
-        .signed_by(&client_key, &ca_cert, &ca_key)
-        .unwrap();
-
-    let ca_cert_path = dir.join("ca.pem");
-    let daemon_cert_path = dir.join("daemon.pem");
-    let daemon_key_path = dir.join("daemon.key");
-    let client_cert_path = dir.join("client.pem");
-    let client_key_path = dir.join("client.key");
-
-    std::fs::write(&ca_cert_path, ca_cert.pem()).unwrap();
-    std::fs::write(&daemon_cert_path, daemon_cert.pem()).unwrap();
-    std::fs::write(&daemon_key_path, daemon_key.serialize_pem()).unwrap();
-    std::fs::write(&client_cert_path, client_cert.pem()).unwrap();
-    std::fs::write(&client_key_path, client_key.serialize_pem()).unwrap();
+    let out_dir = dir.join("certs");
+    let spec = remote_exec_pki::DevInitSpec {
+        ca_common_name: "remote-exec-ca".to_string(),
+        broker_common_name: "remote-exec-broker".to_string(),
+        daemon_specs: vec![remote_exec_pki::DaemonCertSpec::localhost("builder-a")],
+    };
+    let bundle = remote_exec_pki::build_dev_init_bundle(&spec).unwrap();
+    let manifest = remote_exec_pki::write_dev_init_bundle(&spec, &bundle, &out_dir, true).unwrap();
+    let daemon = manifest.daemons.get("builder-a").unwrap();
 
     TestCerts {
-        ca_cert: ca_cert_path,
-        client_cert: client_cert_path,
-        client_key: client_key_path,
-        daemon_cert: daemon_cert_path,
-        daemon_key: daemon_key_path,
+        ca_cert: manifest.ca.cert_pem.clone(),
+        client_cert: manifest.broker.cert_pem.clone(),
+        client_key: manifest.broker.key_pem.clone(),
+        daemon_cert: daemon.cert_pem.clone(),
+        daemon_key: daemon.key_pem.clone(),
     }
 }
 

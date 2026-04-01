@@ -33,7 +33,11 @@ pub fn write_dev_init_bundle(
     let manifest_path = out_dir.join("certs-manifest.json");
 
     let mut daemon_paths = BTreeMap::new();
-    for target in spec.daemon_specs.iter().map(|daemon| daemon.target.as_str()) {
+    for target in spec
+        .daemon_specs
+        .iter()
+        .map(|daemon| daemon.target.as_str())
+    {
         daemon_paths.insert(
             target.to_string(),
             KeyPairPaths {
@@ -59,10 +63,22 @@ pub fn write_dev_init_bundle(
 
     let mut written_paths = Vec::new();
 
-    write_text_file(&ca.cert_pem, &bundle.ca.cert_pem, force, 0o644, &mut written_paths)
-        .map_err(|err| err.context(format_written_paths(&written_paths)))?;
-    write_text_file(&ca.key_pem, &bundle.ca.key_pem, force, 0o600, &mut written_paths)
-        .map_err(|err| err.context(format_written_paths(&written_paths)))?;
+    write_text_file(
+        &ca.cert_pem,
+        &bundle.ca.cert_pem,
+        force,
+        0o644,
+        &mut written_paths,
+    )
+    .map_err(|err| err.context(format_written_paths(&written_paths)))?;
+    write_text_file(
+        &ca.key_pem,
+        &bundle.ca.key_pem,
+        force,
+        0o600,
+        &mut written_paths,
+    )
+    .map_err(|err| err.context(format_written_paths(&written_paths)))?;
     write_text_file(
         &broker.cert_pem,
         &bundle.broker.cert_pem,
@@ -80,7 +96,11 @@ pub fn write_dev_init_bundle(
     )
     .map_err(|err| err.context(format_written_paths(&written_paths)))?;
 
-    for target in spec.daemon_specs.iter().map(|daemon| daemon.target.as_str()) {
+    for target in spec
+        .daemon_specs
+        .iter()
+        .map(|daemon| daemon.target.as_str())
+    {
         let pem_pair = bundle
             .daemons
             .get(target)
@@ -183,7 +203,8 @@ fn format_written_paths(paths: &[PathBuf]) -> String {
     } else {
         format!(
             "previously written paths: {}",
-            paths.iter()
+            paths
+                .iter()
                 .map(|path| path.display().to_string())
                 .collect::<Vec<_>>()
                 .join(", ")

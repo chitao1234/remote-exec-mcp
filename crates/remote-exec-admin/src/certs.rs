@@ -56,7 +56,10 @@ fn build_daemon_specs(args: &DevInitArgs) -> anyhow::Result<Vec<remote_exec_pki:
         });
     }
 
-    ensure!(!daemon_specs.is_empty(), "at least one --target is required");
+    ensure!(
+        !daemon_specs.is_empty(),
+        "at least one --target is required"
+    );
     Ok(daemon_specs)
 }
 
@@ -67,7 +70,9 @@ fn parse_subject_alt_name(value: &str) -> anyhow::Result<remote_exec_pki::Subjec
     }
 
     if let Some(ip) = value.strip_prefix("ip:") {
-        let ip: IpAddr = ip.parse().with_context(|| format!("invalid IP SAN `{ip}`"))?;
+        let ip: IpAddr = ip
+            .parse()
+            .with_context(|| format!("invalid IP SAN `{ip}`"))?;
         return Ok(remote_exec_pki::SubjectAltName::Ip(ip));
     }
 

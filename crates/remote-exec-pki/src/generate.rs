@@ -48,7 +48,9 @@ pub fn build_dev_init_bundle(spec: &DevInitSpec) -> anyhow::Result<GeneratedDevI
 
 fn generate_ca(common_name: &str) -> anyhow::Result<GeneratedCa> {
     let mut params = CertificateParams::new(Vec::new())?;
-    params.distinguished_name.push(DnType::CommonName, common_name);
+    params
+        .distinguished_name
+        .push(DnType::CommonName, common_name);
     params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
 
     let key = KeyPair::generate()?;
@@ -67,7 +69,10 @@ fn issue_broker_cert(ca: &GeneratedCa, common_name: &str) -> anyhow::Result<Gene
     })
 }
 
-fn issue_daemon_cert(ca: &GeneratedCa, daemon: &DaemonCertSpec) -> anyhow::Result<GeneratedPemPair> {
+fn issue_daemon_cert(
+    ca: &GeneratedCa,
+    daemon: &DaemonCertSpec,
+) -> anyhow::Result<GeneratedPemPair> {
     let key = KeyPair::generate()?;
     let params = daemon_params(daemon)?;
     let cert = params.signed_by(&key, &ca.cert, &ca.key)?;
@@ -80,7 +85,9 @@ fn issue_daemon_cert(ca: &GeneratedCa, daemon: &DaemonCertSpec) -> anyhow::Resul
 
 fn broker_params(common_name: &str) -> anyhow::Result<CertificateParams> {
     let mut params = CertificateParams::new(Vec::new())?;
-    params.distinguished_name.push(DnType::CommonName, common_name);
+    params
+        .distinguished_name
+        .push(DnType::CommonName, common_name);
     params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
     Ok(params)
 }
@@ -128,8 +135,7 @@ mod tests {
 
     #[test]
     fn daemon_params_use_server_auth_and_copy_sans() {
-        let params = daemon_params(&DaemonCertSpec::localhost("builder-a"))
-            .expect("daemon params");
+        let params = daemon_params(&DaemonCertSpec::localhost("builder-a")).expect("daemon params");
         assert_eq!(
             params.extended_key_usages,
             vec![ExtendedKeyUsagePurpose::ServerAuth]
