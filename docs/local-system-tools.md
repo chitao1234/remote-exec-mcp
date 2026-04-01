@@ -81,6 +81,11 @@ The two biggest mismatches are:
 - `exec_command` and `write_stdin` declare structured JSON output schemas, but normal model-facing responses are plain text blocks with metadata headers.
 - `view_image` declares an object output schema `{ image_url, detail }`, but normal model-facing responses are a single `input_image` content item rather than a text or JSON object.
 
+There is another smaller but externally visible mismatch worth preserving:
+
+- direct `apply_patch` returns a plain text summary to the model and an empty object in code mode
+- `apply_patch` intercepted through `exec_command` still comes back through the unified-exec output wrapper, so code mode sees unified-exec-shaped JSON instead
+
 If you rebuild these tools outside Codex, decide explicitly whether you want wire compatibility with:
 
 - the tool declaration surface,
@@ -272,6 +277,8 @@ If so:
 - the `apply_patch` pathway runs instead
 - the reserved process id is released
 - the user-visible tool result becomes the patch result
+- the response does not include `Command:`, `Chunk ID:`, or a session id because those fields are left empty
+- however, the intercepted result is still wrapped as an `ExecCommandToolOutput`, so the normal unified-exec formatter still emits `Wall time: 0.0000 seconds` and `Output:`
 
 This interception exists to steer the model toward using `apply_patch` as a first-class tool.
 
@@ -414,7 +421,19 @@ It includes:
 
 The output text is token-truncated using the requested `max_output_tokens` or the default token limit.
 
+Important success/failure semantic:
+
+- a process exiting with a non-zero exit code does not make the tool call itself fail
+- the tool call still succeeds and reports the exit status inside the formatted payload or code-mode JSON
+- tool-call failure is reserved for handler-level failures such as process creation failure, sandbox denial, approval rejection, unknown session id, or similar orchestration/runtime errors
+
 The tool declaration's JSON output schema is instead produced by `code_mode_result()`, not by the normal model-facing function output.
+
+There is also a separate post-tool-use surface used by some higher-level flows:
+
+- for completed non-background sessions, `post_tool_use_response()` returns only the truncated raw command output string
+- for still-running sessions, it returns nothing
+- for intercepted `apply_patch`, it returns nothing because the wrapped result has no `session_command`
 
 ### Result metadata rules
 
@@ -597,6 +616,12 @@ The event contains:
 - `process_id`
 - `stdin`
 
+Important polling nuance:
+
+- this event is emitted even when `chars` is empty
+- in that case the event still appears, with `stdin = ""`
+- so a pure poll is observable in the event stream as a terminal interaction, not just as silent output collection
+
 ### Session lifecycle on exit
 
 After polling, `write_stdin` refreshes session state.
@@ -618,6 +643,11 @@ Notable errors:
 - write failure due to process death
 - process failure message surfaced by the runtime
 
+Tool-surface note:
+
+- the handler wraps underlying errors as `write_stdin failed: <error>`
+- so callers typically see the wrapped message, not just the bare unified-exec error text
+
 ## `apply_patch`
 
 ### Public tool variants
@@ -635,7 +665,12 @@ JSON function variant:
 - tool name: `apply_patch`
 - input shape is `{ "input": "<entire patch text>" }`
 
-Both route to the same handler.
+Both route to the same handler, but they reach it through different payload shapes:
+
+- freeform tool calls arrive as `ToolPayload::Custom { input }`
+- JSON function-tool calls arrive as `ToolPayload::Function { arguments }` and are deserialized into `ApplyPatchToolArgs { input }`
+
+In both cases the handler extracts a single patch string and then re-verifies it using the same `codex-apply-patch` parser before any mutation or approval flow.
 
 ### Freeform grammar
 
@@ -665,6 +700,13 @@ The Rust parser is slightly more lenient than the grammar comment suggests:
 
 - it tolerates some leading or trailing whitespace around patch markers
 - it accepts a few shell-wrapper forms during interception and verification
+- it is the runtime parser that ultimately decides what is accepted, not the Lark declaration alone
+
+This distinction matters for rebuilds:
+
+- the declared freeform grammar is what models or external callers see
+- the actual mutation semantics come from `codex-apply-patch` parsing and verification
+- reproducing only the Lark grammar will not exactly match Codex acceptance or rejection behavior
 
 ### Accepted invocation forms
 
@@ -690,6 +732,22 @@ Important limitation:
 
 - even for PowerShell and cmd, the extraction logic still expects a very narrow bash-like heredoc script structure
 - this is not a general-purpose shell parser
+
+More precisely, the shell-wrapper matcher is intentionally conservative:
+
+- the wrapper must look like exactly one top-level shell statement
+- the accepted forms are effectively:
+  - `apply_patch <<'EOF' ... EOF`
+  - `cd <path> && apply_patch <<'EOF' ... EOF`
+- the `cd` form must use `&&`, not `;`, `||`, or a pipe
+- the `cd` command must have exactly one positional path argument
+- trailing commands like `&& echo done` or preceding commands like `echo x; apply_patch ...` do not match
+- `apply_patch` and `applypatch` are both accepted command names at this parsing layer
+
+That means a standalone rebuild needs either:
+
+- the same narrow wrapper parser,
+- or a consciously broader parser that will diverge from Codex on edge cases
 
 ### Implicit-invocation rejection
 
@@ -724,6 +782,18 @@ For update hunks, verification computes:
 - a unified diff relative to the current file on disk
 
 For delete hunks, verification reads and records the deleted file's current contents.
+
+Important implementation detail:
+
+- direct tool calls are verified by constructing argv equivalent to `["apply_patch", patch_input]`
+- intercepted shell-style invocations are verified from the parsed shell argv or extracted heredoc body
+- verification is where implicit raw patch bodies are rejected, effective cwd is chosen, and semantic file changes are computed
+
+Text-model limitation:
+
+- verification for update and delete hunks uses UTF-8 text reads
+- non-UTF-8 files therefore do not round-trip through this pathway cleanly
+- `apply_patch` is a text-file editing tool, not a binary patch tool
 
 ### Relative path resolution
 
@@ -764,6 +834,14 @@ Extra permissions:
 - those permissions are normalized into a `PermissionProfile`
 - granted turn permissions are merged in before final orchestration
 
+Approval caching and runtime review are a separate layer from `assess_patch_safety()`:
+
+- `assess_patch_safety()` decides whether the patch is auto-approved, must ask the user, or is rejected immediately
+- if execution proceeds through the runtime, approval caching is keyed by the absolute affected file paths, not by the raw patch text
+- preapproved additional permissions can short-circuit the runtime approval prompt on the first attempt
+
+That means two different patches touching the same file set can reuse approval cache entries in ways that a naive patch-string cache would not.
+
 ### Execution strategy
 
 If the patch is rejected by safety checks:
@@ -780,6 +858,21 @@ In the normal successful case:
 - environment is intentionally empty for determinism
 
 That runtime still participates in orchestrator-managed approval and sandbox selection.
+
+There are two main execution entry paths:
+
+1. Direct `apply_patch` tool call
+   - handler verifies the patch
+   - handler computes effective permissions and emits patch events
+   - runtime self-invokes Codex with `--codex-run-as-apply-patch`
+
+2. `exec_command` interception
+   - unified exec first recognizes the command as a disguised `apply_patch`
+   - reserved unified-exec process id is released
+   - patch events are emitted instead of unified-exec begin/end events
+   - the `exec_command` yield timeout is forwarded into the apply-patch runtime request
+
+That second path is an important behavioral match if you want Codex-like interception rather than treating `apply_patch`-through-shell as a normal subprocess.
 
 In the current code, the handler's non-exec `Output(...)` branch is effectively only used for immediate error returns rather than for successful in-process patch application.
 
@@ -806,6 +899,12 @@ echo 'PATCH' | apply_patch
 
 This is the most important part for a rebuild.
 
+All patch application is text-oriented:
+
+- files are read and rewritten as UTF-8 text
+- chunk matching operates on logical lines
+- summary output is derived from semantic file actions rather than from raw byte diffs
+
 #### Add file
 
 Behavior:
@@ -825,12 +924,14 @@ Behavior:
 - fails if the path does not exist
 - fails if the path is a directory
 - records the deleted file contents during verification
+- uses text reads during verification, so non-UTF-8 files can fail before removal
 
 #### Update file
 
 Behavior:
 
 - source file must already exist and be readable
+- source file must be readable as UTF-8 text
 - patch chunks are matched against current file content
 - replacements are computed in memory before write
 - if `*** Move to:` is present:
@@ -853,6 +954,9 @@ Update chunks use a custom matching algorithm:
 - old lines must appear in order after the context anchor
 - if a chunk ends with an empty line sentinel, the matcher retries without that sentinel to handle EOF edits
 - replacements are sorted and then applied from the end of the file backward
+- a missing or empty update body is rejected before any filesystem write
+- invalid top-level hunk headers are rejected with explicit parse errors
+- path handling is strictly relative inside the patch language even though effective cwd may come from the surrounding invocation
 
 If expected context cannot be found, the patch fails.
 
@@ -895,6 +999,14 @@ Examples:
 - delete of missing file
 - delete of a directory
 - non-UTF-8 direct argument
+- invalid implicit invocation without explicit `apply_patch`
+- non-UTF-8 or otherwise unreadable text files during verification/update paths
+
+Tool-surface vs runtime-surface distinction:
+
+- successful tool calls return the summary text to the model
+- failed tool calls are surfaced as model-visible errors rather than success payloads containing stderr text
+- `code_mode_result()` for successful `apply_patch` still returns an empty JSON object even though the model-facing response is summary text
 
 ### Event behavior
 
@@ -904,6 +1016,14 @@ Examples:
 - `PatchApplyEndEvent`
 
 Those events include the semantic `changes` map, not just raw text.
+
+The event payloads are built from verified semantic file changes:
+
+- add events carry full added file content
+- delete events carry deleted file content captured during verification
+- update events carry unified diffs and optional move destinations
+
+This means event consumers can reconstruct the intended change set more precisely than they could from the summary text alone.
 
 Statuses:
 
@@ -922,6 +1042,12 @@ Normal model-facing response:
 Code-mode response:
 
 - empty JSON object
+
+Interception caveat:
+
+- when `apply_patch` is invoked through `exec_command` interception, the normal model-facing payload still contains the patch summary text
+- but code mode does not see the empty-object `apply_patch` shape
+- instead it sees unified-exec JSON with fields like `wall_time_seconds` and `output`, because the intercepted result is wrapped as `ExecCommandToolOutput`
 
 That mismatch is intentional in the current implementation.
 
@@ -964,6 +1090,10 @@ The handler:
 4. fetches filesystem metadata
 5. requires that the target exists and is a file
 6. reads the entire file into memory
+
+Behavior note:
+
+- although the tool description tells models to use a full local filepath, the runtime also accepts relative paths and resolves them against the turn cwd
 
 Error cases:
 
@@ -1088,6 +1218,12 @@ Typical error strings:
   `unable to process image at `<abs-path>`: unsupported image ...`
 - text-only model:
   `view_image is not allowed because you do not support image inputs`
+
+Failure-shape behavior:
+
+- on failure, `view_image` produces ordinary text tool output rather than an `input_image` content item
+- no image content item is emitted on error
+- no separate synthetic image message is inserted on error, just as on success
 
 ## Rebuild checklist
 
