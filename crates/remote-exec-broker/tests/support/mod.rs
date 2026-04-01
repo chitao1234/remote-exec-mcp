@@ -387,9 +387,9 @@ async fn target_info(State(state): State<StubDaemonState>) -> Json<TargetInfoRes
         target: state.target,
         daemon_version: "0.1.0".to_string(),
         daemon_instance_id: state.daemon_instance_id,
-        hostname: "stub-host".to_string(),
+        hostname: gethostname::gethostname().to_string_lossy().into_owned(),
         platform: std::env::consts::OS.to_string(),
-        arch: "x86_64".to_string(),
+        arch: std::env::consts::ARCH.to_string(),
         supports_pty: true,
         supports_image_read: true,
     })

@@ -28,7 +28,12 @@ async fn target_info_is_available_over_mutual_tls() {
         .unwrap();
 
     assert_eq!(info.target, "builder-a");
+    assert_eq!(
+        info.hostname,
+        gethostname::gethostname().to_string_lossy().into_owned()
+    );
     assert_eq!(info.platform, std::env::consts::OS);
+    assert_eq!(info.arch, std::env::consts::ARCH);
     assert!(info.supports_pty);
     assert!(info.supports_image_read);
 }
