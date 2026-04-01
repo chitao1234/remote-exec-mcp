@@ -41,6 +41,7 @@ pub struct CommandToolResult {
     pub wall_time_seconds: f64,
     pub exit_code: Option<i32>,
     pub session_id: Option<String>,
+    pub session_command: Option<String>,
     pub original_token_count: Option<u32>,
     pub output: String,
 }

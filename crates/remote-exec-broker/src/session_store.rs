@@ -9,6 +9,7 @@ pub struct SessionRecord {
     pub target: String,
     pub daemon_session_id: String,
     pub daemon_instance_id: String,
+    pub session_command: String,
 }
 
 #[derive(Default, Clone)]
@@ -22,6 +23,7 @@ impl SessionStore {
         target: String,
         daemon_session_id: String,
         daemon_instance_id: String,
+        session_command: String,
     ) -> SessionRecord {
         let session_id = format!("sess_{}", uuid::Uuid::new_v4().simple());
         let record = SessionRecord {
@@ -29,6 +31,7 @@ impl SessionStore {
             target,
             daemon_session_id,
             daemon_instance_id,
+            session_command,
         };
         self.inner
             .write()

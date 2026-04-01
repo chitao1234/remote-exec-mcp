@@ -23,6 +23,7 @@ pub async fn exec_command(
         })
         .await?;
 
+    let session_command = input.cmd.clone();
     let session_id = if response.running {
         let daemon_session_id = response
             .daemon_session_id
@@ -35,6 +36,7 @@ pub async fn exec_command(
                     input.target.clone(),
                     daemon_session_id,
                     response.daemon_instance_id.clone(),
+                    session_command.clone(),
                 )
                 .await
                 .session_id,
@@ -51,6 +53,7 @@ pub async fn exec_command(
             wall_time_seconds: response.wall_time_seconds,
             exit_code: response.exit_code,
             session_id,
+            session_command: Some(session_command),
             original_token_count: response.original_token_count,
             output: response.output,
         })?,
@@ -118,6 +121,7 @@ pub async fn write_stdin(
             wall_time_seconds: response.wall_time_seconds,
             exit_code: response.exit_code,
             session_id,
+            session_command: Some(record.session_command),
             original_token_count: response.original_token_count,
             output: response.output,
         })?,

@@ -23,6 +23,27 @@ async fn exec_command_returns_an_opaque_string_session_id() {
 }
 
 #[tokio::test]
+async fn exec_command_structured_output_includes_session_command() {
+    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let result = fixture
+        .call_tool(
+            "exec_command",
+            serde_json::json!({
+                "target": "builder-a",
+                "cmd": "printf ready; sleep 2",
+                "tty": true,
+                "yield_time_ms": 250
+            }),
+        )
+        .await;
+
+    assert_eq!(
+        result.structured_content["session_command"],
+        serde_json::Value::String("printf ready; sleep 2".to_string())
+    );
+}
+
+#[tokio::test]
 async fn write_stdin_routes_by_public_session_id_instead_of_target_guessing() {
     let fixture = support::spawn_broker_with_stub_daemon().await;
     let started = fixture
