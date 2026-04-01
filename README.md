@@ -62,8 +62,11 @@ cargo fmt --all --check
 ## Reliability Notes
 
 - The broker now starts even if some configured targets are temporarily unreachable.
+- Targets that are unavailable at broker startup are verified before the first forwarded call.
 - `write_stdin` only invalidates sessions when the daemon restarted or explicitly reports `unknown_session`.
 - `max_output_tokens` is enforced by the daemon for command output.
+- `apply_patch` supports the documented `*** End of File` marker.
+- Default shell resolution uses explicit override, then `SHELL`, then a usable passwd shell, then `/bin/bash`.
 
 ## Quality Gate
 
@@ -103,8 +106,15 @@ In v1:
 
 Security is based on target selection plus broker-to-daemon mutual TLS, not on per-call restrictions.
 
-## Current scope
+## Current status
 
+- Core remote tools are implemented: `exec_command`, `write_stdin`, `apply_patch`, and `view_image`.
+- Broker and daemon session handling are hardened for concurrent exec workloads and precise restart/session-loss behavior.
+- Patch application supports strict EOF-marker handling and repeated-context multi-hunk updates.
+- The workspace quality gate is green on `main`:
+  - `cargo test --workspace`
+  - `cargo fmt --all --check`
+  - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
 - Linux only
 - Per-machine daemon deployment
 - Static broker target configuration
@@ -113,5 +123,3 @@ Security is based on target selection plus broker-to-daemon mutual TLS, not on p
 ## References
 
 - `docs/local-system-tools.md`
-- `docs/specs/2026-03-31-remote-exec-mcp-design.md`
-- `docs/superpowers/plans/2026-03-31-remote-exec-mcp.md`
