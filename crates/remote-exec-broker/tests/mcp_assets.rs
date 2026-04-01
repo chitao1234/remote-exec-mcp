@@ -40,7 +40,10 @@ async fn view_image_returns_input_image_content_and_structured_content() {
         .await;
 
     assert_eq!(result.raw_content[0]["type"], "input_image");
-    assert_eq!(result.raw_content[0]["image_url"], "data:image/png;base64,AAAA");
+    assert_eq!(
+        result.raw_content[0]["image_url"],
+        "data:image/png;base64,AAAA"
+    );
     assert_eq!(result.structured_content["target"], "builder-a");
     assert_eq!(result.structured_content["detail"], "original");
 }

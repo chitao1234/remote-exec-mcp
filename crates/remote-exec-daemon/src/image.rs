@@ -36,14 +36,12 @@ pub async fn read_image(
     let cwd = crate::exec::resolve_workdir(&state, req.workdir.as_deref())
         .map_err(crate::exec::internal_error)?;
     let path = normalize_path(&cwd.join(&req.path));
-    let metadata = tokio::fs::metadata(&path)
-        .await
-        .map_err(|err| {
-            crate::exec::rpc_error(
-                "image_missing",
-                format!("unable to locate image at `{}`: {err}", path.display()),
-            )
-        })?;
+    let metadata = tokio::fs::metadata(&path).await.map_err(|err| {
+        crate::exec::rpc_error(
+            "image_missing",
+            format!("unable to locate image at `{}`: {err}", path.display()),
+        )
+    })?;
     if !metadata.is_file() {
         return Err(crate::exec::rpc_error(
             "image_not_file",
@@ -78,7 +76,10 @@ fn normalize_path(path: &Path) -> PathBuf {
 }
 
 fn passthrough_format(format: ImageFormat) -> bool {
-    matches!(format, ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::WebP)
+    matches!(
+        format,
+        ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::WebP
+    )
 }
 
 fn output_format_for_processed_image(format: ImageFormat) -> ImageFormat {
@@ -107,7 +108,9 @@ fn encode_processed_image(
     let mut out = Cursor::new(Vec::new());
     match format {
         ImageFormat::Png => image.write_to(&mut out, ImageFormat::Png)?,
-        ImageFormat::Jpeg => image.write_with_encoder(JpegEncoder::new_with_quality(&mut out, 85))?,
+        ImageFormat::Jpeg => {
+            image.write_with_encoder(JpegEncoder::new_with_quality(&mut out, 85))?
+        }
         ImageFormat::WebP => image.write_with_encoder(WebPEncoder::new_lossless(&mut out))?,
         other => unreachable!("unexpected processed image format: {other:?}"),
     }
@@ -119,8 +122,8 @@ fn render_image_bytes(
     detail: Option<&str>,
     bytes: Vec<u8>,
 ) -> Result<(ImageFormat, Vec<u8>), (StatusCode, Json<RpcErrorBody>)> {
-    let source_format =
-        image::guess_format(&bytes).map_err(|err| process_error(path, "image_decode_failed", err))?;
+    let source_format = image::guess_format(&bytes)
+        .map_err(|err| process_error(path, "image_decode_failed", err))?;
     let keep_original = detail == Some("original");
     if passthrough_format(source_format) && keep_original {
         return Ok((source_format, bytes));
