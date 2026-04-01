@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use super::session::LiveSession;
 
+pub const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 10_000;
 pub const EXIT_OUTPUT_GRACE: Duration = Duration::from_millis(100);
 
 pub struct OutputSnapshot {
@@ -11,11 +12,15 @@ pub struct OutputSnapshot {
 
 pub fn snapshot_output(raw: String, max_output_tokens: Option<u32>) -> OutputSnapshot {
     let original_token_count = raw.split_whitespace().count() as u32;
-    let output = truncate_to_token_limit(&raw, max_output_tokens);
+    let output = truncate_to_token_limit(&raw, effective_max_output_tokens(max_output_tokens));
     OutputSnapshot {
         original_token_count,
         output,
     }
+}
+
+pub fn effective_max_output_tokens(max_output_tokens: Option<u32>) -> Option<u32> {
+    Some(max_output_tokens.unwrap_or(DEFAULT_MAX_OUTPUT_TOKENS))
 }
 
 pub fn truncate_to_token_limit(raw: &str, max_output_tokens: Option<u32>) -> String {

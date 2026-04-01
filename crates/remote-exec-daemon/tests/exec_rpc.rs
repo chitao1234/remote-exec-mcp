@@ -138,6 +138,31 @@ async fn env_overlay_is_applied_in_pty_mode() {
 }
 
 #[tokio::test]
+async fn omitted_max_output_tokens_defaults_to_ten_thousand() {
+    let fixture = support::spawn_daemon("builder-a").await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "i=0; while [ \"$i\" -lt 10005 ]; do printf 'x '; i=$((i + 1)); done"
+                    .to_string(),
+                workdir: None,
+                shell: Some(TEST_SHELL.to_string()),
+                tty: false,
+                yield_time_ms: Some(250),
+                max_output_tokens: None,
+                login: Some(false),
+            },
+        )
+        .await;
+
+    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.original_token_count, Some(10_005));
+    assert_eq!(response.output.split_whitespace().count(), 10_000);
+}
+
+#[tokio::test]
 async fn exec_start_truncates_output_to_max_output_tokens() {
     let fixture = support::spawn_daemon("builder-a").await;
 
