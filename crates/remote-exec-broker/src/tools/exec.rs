@@ -114,7 +114,11 @@ pub async fn write_stdin(
     };
 
     Ok(ToolCallOutput::text_and_structured(
-        format_poll_text(&response, session_id.as_deref()),
+        format_poll_text(
+            Some(&record.session_command),
+            &response,
+            session_id.as_deref(),
+        ),
         serde_json::to_value(CommandToolResult {
             target: record.target,
             chunk_id: response.chunk_id,

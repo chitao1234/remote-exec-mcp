@@ -83,6 +83,47 @@ async fn write_stdin_routes_by_public_session_id_instead_of_target_guessing() {
 }
 
 #[tokio::test]
+async fn write_stdin_preserves_original_command_metadata() {
+    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let started = fixture
+        .call_tool(
+            "exec_command",
+            serde_json::json!({
+                "target": "builder-a",
+                "cmd": "printf ready; sleep 2",
+                "tty": true,
+                "yield_time_ms": 250
+            }),
+        )
+        .await;
+    let session_id = started.structured_content["session_id"]
+        .as_str()
+        .expect("running session")
+        .to_string();
+
+    let result = fixture
+        .call_tool(
+            "write_stdin",
+            serde_json::json!({
+                "session_id": session_id,
+                "chars": "",
+                "yield_time_ms": 5000
+            }),
+        )
+        .await;
+
+    assert!(
+        result
+            .text_output
+            .contains("Command: printf ready; sleep 2")
+    );
+    assert_eq!(
+        result.structured_content["session_command"],
+        serde_json::Value::String("printf ready; sleep 2".to_string())
+    );
+}
+
+#[tokio::test]
 async fn broker_keeps_healthy_targets_available_when_one_target_is_down() {
     let fixture = support::spawn_broker_with_live_and_dead_targets().await;
 

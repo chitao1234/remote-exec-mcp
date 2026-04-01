@@ -168,9 +168,13 @@ pub fn format_command_text(
 }
 
 pub fn format_poll_text(
+    cmd: Option<&str>,
     response: &remote_exec_proto::rpc::ExecResponse,
     session_id: Option<&str>,
 ) -> String {
+    let command = cmd
+        .map(|cmd| format!("Command: {cmd}\n"))
+        .unwrap_or_default();
     let original = response
         .original_token_count
         .map(|count| format!("\nOriginal token count: {count}"))
@@ -182,7 +186,7 @@ pub fn format_poll_text(
     };
 
     format!(
-        "Chunk ID: {}\nWall time: {:.3} seconds\n{status}{original}\nOutput:\n{}",
+        "{command}Chunk ID: {}\nWall time: {:.3} seconds\n{status}{original}\nOutput:\n{}",
         response
             .chunk_id
             .clone()
@@ -220,6 +224,7 @@ mod tests {
     #[test]
     fn format_poll_text_includes_original_token_count_when_present() {
         let text = format_poll_text(
+            None,
             &ExecResponse {
                 daemon_session_id: None,
                 daemon_instance_id: "daemon-instance-1".to_string(),
@@ -234,5 +239,25 @@ mod tests {
         );
 
         assert!(text.contains("Original token count: 6"));
+    }
+
+    #[test]
+    fn format_poll_text_includes_command_when_present() {
+        let text = format_poll_text(
+            Some("printf hi"),
+            &ExecResponse {
+                daemon_session_id: None,
+                daemon_instance_id: "daemon-instance-1".to_string(),
+                running: false,
+                chunk_id: Some("abc123".to_string()),
+                wall_time_seconds: 0.25,
+                exit_code: Some(0),
+                original_token_count: Some(6),
+                output: "one two three".to_string(),
+            },
+            None,
+        );
+
+        assert!(text.starts_with("Command: printf hi\n"));
     }
 }
