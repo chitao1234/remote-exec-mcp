@@ -57,6 +57,38 @@ async fn update_file_accepts_end_of_file_marker() {
 }
 
 #[tokio::test]
+async fn update_move_accepts_horizontal_whitespace_on_control_lines() {
+    let fixture = support::spawn_daemon("builder-a").await;
+    let source = fixture.workdir.join("old.txt");
+    let destination = fixture.workdir.join("new.txt");
+    tokio::fs::write(&source, "old\n").await.unwrap();
+
+    let response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    " \t*** Begin Patch\t\n",
+                    "\t*** Update File: old.txt  \n",
+                    "  *** Move to: new.txt\t\n",
+                    " \t@@\t\n",
+                    "-old\n",
+                    "+new\n",
+                    "\t*** End of File \n",
+                    "  *** End Patch\t\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert!(response.output.contains("M new.txt"));
+    assert_eq!(tokio::fs::read_to_string(destination).await.unwrap(), "new\n");
+    assert!(tokio::fs::metadata(source).await.is_err());
+}
+
+#[tokio::test]
 async fn update_file_rejects_non_eof_match_for_end_of_file_marker() {
     let fixture = support::spawn_daemon("builder-a").await;
     let path = fixture.workdir.join("plain.txt");
