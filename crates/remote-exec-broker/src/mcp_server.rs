@@ -196,9 +196,13 @@ pub fn format_poll_text(
     )
 }
 
+pub fn format_intercepted_patch_text(output: &str) -> String {
+    format!("Wall time: 0.000 seconds\nProcess exited with code 0\nOutput:\n{output}")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{format_command_text, format_poll_text};
+    use super::{format_command_text, format_intercepted_patch_text, format_poll_text};
     use remote_exec_proto::rpc::ExecResponse;
 
     #[test]
@@ -259,5 +263,18 @@ mod tests {
         );
 
         assert!(text.starts_with("Command: printf hi\n"));
+    }
+
+    #[test]
+    fn format_intercepted_patch_text_omits_command_and_chunk_metadata() {
+        let text = format_intercepted_patch_text(
+            "Success. Updated the following files:\nA hello.txt\n",
+        );
+
+        assert!(text.contains("Wall time: 0.000 seconds"));
+        assert!(text.contains("Process exited with code 0"));
+        assert!(text.contains("Output:\nSuccess. Updated the following files:"));
+        assert!(!text.contains("Command:"));
+        assert!(!text.contains("Chunk ID:"));
     }
 }

@@ -24,6 +24,7 @@ use tokio::sync::Mutex;
 pub struct BrokerFixture {
     pub _tempdir: TempDir,
     pub client: RunningService<RoleClient, DummyClientHandler>,
+    stub_state: StubDaemonState,
 }
 
 #[allow(dead_code)]
@@ -36,7 +37,12 @@ pub struct DelayedTargetFixture {
 #[allow(dead_code)]
 impl DelayedTargetFixture {
     pub async fn spawn_target(&self, target: &str) {
-        spawn_named_daemon_on_addr(&self.certs, self.addr, target, false).await;
+        spawn_named_daemon_on_addr(
+            &self.certs,
+            self.addr,
+            stub_daemon_state(target, false),
+        )
+        .await;
     }
 }
 
@@ -77,6 +83,14 @@ impl BrokerFixture {
             .unwrap();
 
         ToolResult::from_call_tool_result(result)
+    }
+
+    pub async fn exec_start_calls(&self) -> usize {
+        *self.stub_state.exec_start_calls.lock().await
+    }
+
+    pub async fn last_patch_request(&self) -> Option<PatchApplyRequest> {
+        self.stub_state.last_patch_request.lock().await.clone()
     }
 }
 
@@ -139,7 +153,7 @@ pub async fn spawn_broker_with_stub_daemon() -> BrokerFixture {
 
     let tempdir = tempfile::tempdir().unwrap();
     let certs = write_test_certs(tempdir.path());
-    let addr = spawn_stub_daemon(&certs).await;
+    let (addr, stub_state) = spawn_stub_daemon(&certs).await;
     let broker_config = tempdir.path().join("broker.toml");
     std::fs::write(
         &broker_config,
@@ -166,6 +180,7 @@ expected_daemon_name = "builder-a"
     BrokerFixture {
         _tempdir: tempdir,
         client,
+        stub_state,
     }
 }
 
@@ -175,7 +190,7 @@ pub async fn spawn_broker_with_live_and_dead_targets() -> BrokerFixture {
 
     let tempdir = tempfile::tempdir().unwrap();
     let certs = write_test_certs(tempdir.path());
-    let live_addr = spawn_stub_daemon(&certs).await;
+    let (live_addr, stub_state) = spawn_stub_daemon(&certs).await;
     let dead_addr = allocate_addr();
     let broker_config = tempdir.path().join("broker.toml");
     std::fs::write(
@@ -213,6 +228,7 @@ expected_daemon_name = "builder-b"
     BrokerFixture {
         _tempdir: tempdir,
         client,
+        stub_state,
     }
 }
 
@@ -222,7 +238,7 @@ pub async fn spawn_broker_with_retryable_exec_write_error() -> BrokerFixture {
 
     let tempdir = tempfile::tempdir().unwrap();
     let certs = write_test_certs(tempdir.path());
-    let addr = spawn_retryable_exec_write_daemon(&certs).await;
+    let (addr, stub_state) = spawn_retryable_exec_write_daemon(&certs).await;
     let broker_config = tempdir.path().join("broker.toml");
     std::fs::write(
         &broker_config,
@@ -249,6 +265,7 @@ expected_daemon_name = "builder-a"
     BrokerFixture {
         _tempdir: tempdir,
         client,
+        stub_state,
     }
 }
 
@@ -258,7 +275,7 @@ pub async fn spawn_broker_with_late_target() -> DelayedTargetFixture {
 
     let tempdir = tempfile::tempdir().unwrap();
     let certs = write_test_certs(tempdir.path());
-    let live_addr = spawn_stub_daemon(&certs).await;
+    let (live_addr, stub_state) = spawn_stub_daemon(&certs).await;
     let delayed_addr = allocate_addr();
     let broker_config = tempdir.path().join("broker.toml");
     std::fs::write(
@@ -297,6 +314,7 @@ expected_daemon_name = "builder-b"
         broker: BrokerFixture {
             _tempdir: tempdir,
             client,
+            stub_state,
         },
         certs,
         addr: delayed_addr,
@@ -308,39 +326,49 @@ struct StubDaemonState {
     target: String,
     daemon_instance_id: String,
     fail_exec_write_once: Arc<Mutex<bool>>,
+    exec_start_calls: Arc<Mutex<usize>>,
+    last_patch_request: Arc<Mutex<Option<PatchApplyRequest>>>,
 }
 
-async fn spawn_stub_daemon(certs: &TestCerts) -> std::net::SocketAddr {
+fn stub_daemon_state(target: &str, fail_exec_write_once: bool) -> StubDaemonState {
+    StubDaemonState {
+        target: target.to_string(),
+        daemon_instance_id: "daemon-instance-1".to_string(),
+        fail_exec_write_once: Arc::new(Mutex::new(fail_exec_write_once)),
+        exec_start_calls: Arc::new(Mutex::new(0)),
+        last_patch_request: Arc::new(Mutex::new(None)),
+    }
+}
+
+async fn spawn_stub_daemon(certs: &TestCerts) -> (std::net::SocketAddr, StubDaemonState) {
     spawn_daemon(certs, false).await
 }
 
 #[allow(dead_code)]
-async fn spawn_retryable_exec_write_daemon(certs: &TestCerts) -> std::net::SocketAddr {
+async fn spawn_retryable_exec_write_daemon(
+    certs: &TestCerts,
+) -> (std::net::SocketAddr, StubDaemonState) {
     spawn_daemon(certs, true).await
 }
 
-async fn spawn_daemon(certs: &TestCerts, fail_exec_write_once: bool) -> std::net::SocketAddr {
+async fn spawn_daemon(
+    certs: &TestCerts,
+    fail_exec_write_once: bool,
+) -> (std::net::SocketAddr, StubDaemonState) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
     drop(listener);
 
-    spawn_named_daemon_on_addr(certs, addr, "builder-a", fail_exec_write_once).await;
-    addr
+    let state = stub_daemon_state("builder-a", fail_exec_write_once);
+    spawn_named_daemon_on_addr(certs, addr, state.clone()).await;
+    (addr, state)
 }
 
 async fn spawn_named_daemon_on_addr(
     certs: &TestCerts,
     addr: std::net::SocketAddr,
-    target: &str,
-    fail_exec_write_once: bool,
+    state: StubDaemonState,
 ) {
-    let target = target.to_string();
-
-    let state = StubDaemonState {
-        target: target.clone(),
-        daemon_instance_id: "daemon-instance-1".to_string(),
-        fail_exec_write_once: Arc::new(Mutex::new(fail_exec_write_once)),
-    };
     let app = Router::new()
         .route("/v1/health", post(health))
         .route("/v1/target-info", post(target_info))
@@ -348,11 +376,11 @@ async fn spawn_named_daemon_on_addr(
         .route("/v1/exec/write", post(exec_write))
         .route("/v1/patch/apply", post(patch_apply))
         .route("/v1/image/read", post(image_read))
-        .with_state(state);
+        .with_state(state.clone());
 
     let daemon_state = remote_exec_daemon::AppState {
         config: Arc::new(remote_exec_daemon::config::DaemonConfig {
-            target,
+            target: state.target.clone(),
             listen: addr,
             default_workdir: PathBuf::from("."),
             tls: remote_exec_daemon::config::TlsConfig {
@@ -395,7 +423,12 @@ async fn target_info(State(state): State<StubDaemonState>) -> Json<TargetInfoRes
     })
 }
 
-async fn exec_start(Json(_req): Json<ExecStartRequest>) -> Json<ExecResponse> {
+async fn exec_start(
+    State(state): State<StubDaemonState>,
+    Json(_req): Json<ExecStartRequest>,
+) -> Json<ExecResponse> {
+    *state.exec_start_calls.lock().await += 1;
+
     Json(ExecResponse {
         daemon_session_id: Some("daemon-session-1".to_string()),
         daemon_instance_id: "daemon-instance-1".to_string(),
@@ -438,10 +471,24 @@ async fn exec_write(
     }))
 }
 
-async fn patch_apply(Json(_req): Json<PatchApplyRequest>) -> Json<PatchApplyResponse> {
-    Json(PatchApplyResponse {
+async fn patch_apply(
+    State(state): State<StubDaemonState>,
+    Json(req): Json<PatchApplyRequest>,
+) -> Result<Json<PatchApplyResponse>, (StatusCode, Json<RpcErrorBody>)> {
+    *state.last_patch_request.lock().await = Some(req.clone());
+    if !req.patch.starts_with("*** Begin Patch\n") {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(RpcErrorBody {
+                code: "patch_failed".to_string(),
+                message: "invalid patch header".to_string(),
+            }),
+        ));
+    }
+
+    Ok(Json(PatchApplyResponse {
         output: "Success. Updated the following files:\nA hello.txt\n".to_string(),
-    })
+    }))
 }
 
 async fn image_read(Json(req): Json<ImageReadRequest>) -> Json<ImageReadResponse> {

@@ -2,12 +2,39 @@ use anyhow::Context;
 use remote_exec_proto::public::{CommandToolResult, ExecCommandInput, WriteStdinInput};
 use remote_exec_proto::rpc::{ExecStartRequest, ExecWriteRequest};
 
-use crate::mcp_server::{ToolCallOutput, format_command_text, format_poll_text};
+use super::exec_intercept::maybe_intercept_apply_patch;
+use crate::mcp_server::{
+    ToolCallOutput, format_command_text, format_intercepted_patch_text, format_poll_text,
+};
 
 pub async fn exec_command(
     state: &crate::BrokerState,
     input: ExecCommandInput,
 ) -> anyhow::Result<ToolCallOutput> {
+    if let Some(intercepted) = maybe_intercept_apply_patch(&input.cmd, input.workdir.as_deref()) {
+        let output = crate::tools::patch::forward_patch(
+            state,
+            &input.target,
+            intercepted.patch,
+            intercepted.workdir,
+        )
+        .await?;
+
+        return Ok(ToolCallOutput::text_and_structured(
+            format_intercepted_patch_text(&output),
+            serde_json::to_value(CommandToolResult {
+                target: input.target,
+                chunk_id: None,
+                wall_time_seconds: 0.0,
+                exit_code: Some(0),
+                session_id: None,
+                session_command: None,
+                original_token_count: None,
+                output,
+            })?,
+        ));
+    }
+
     let target = state.target(&input.target)?;
     target.ensure_identity_verified(&input.target).await?;
     let response = target

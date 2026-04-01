@@ -44,6 +44,97 @@ async fn exec_command_structured_output_includes_session_command() {
 }
 
 #[tokio::test]
+async fn exec_command_intercepts_direct_apply_patch_and_wraps_exec_output() {
+    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let patch = concat!(
+        "*** Begin Patch\n",
+        "*** Add File: hello.txt\n",
+        "+hello\n",
+        "*** End Patch\n",
+    );
+
+    let result = fixture
+        .call_tool(
+            "exec_command",
+            serde_json::json!({
+                "target": "builder-a",
+                "cmd": format!("apply_patch '{patch}'"),
+            }),
+        )
+        .await;
+
+    assert!(result.text_output.contains("Wall time: 0.000 seconds"));
+    assert!(result.text_output.contains("Process exited with code 0"));
+    assert!(result.text_output.contains("Output:\nSuccess. Updated the following files:"));
+    assert!(!result.text_output.contains("Command:"));
+    assert!(!result.text_output.contains("Chunk ID:"));
+    assert!(result.structured_content["session_id"].is_null());
+    assert!(result.structured_content["session_command"].is_null());
+    assert_eq!(result.structured_content["wall_time_seconds"], 0.0);
+    assert_eq!(fixture.exec_start_calls().await, 0);
+    assert_eq!(
+        fixture.last_patch_request().await.unwrap().patch,
+        patch.to_string()
+    );
+}
+
+#[tokio::test]
+async fn exec_command_intercepts_applypatch_alias_without_allocating_session() {
+    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let patch = concat!(
+        "*** Begin Patch\n",
+        "*** Add File: alias.txt\n",
+        "+alias\n",
+        "*** End Patch\n",
+    );
+
+    let result = fixture
+        .call_tool(
+            "exec_command",
+            serde_json::json!({
+                "target": "builder-a",
+                "cmd": format!("applypatch \"{patch}\""),
+            }),
+        )
+        .await;
+
+    assert!(result.structured_content["session_id"].is_null());
+    assert_eq!(fixture.exec_start_calls().await, 0);
+    assert_eq!(
+        fixture.last_patch_request().await.unwrap().patch,
+        patch.to_string()
+    );
+}
+
+#[tokio::test]
+async fn exec_command_non_matching_patch_text_still_uses_exec_start() {
+    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let raw_patch = concat!(
+        "*** Begin Patch\n",
+        "*** Add File: raw.txt\n",
+        "+raw\n",
+        "*** End Patch\n",
+    );
+
+    let result = fixture
+        .call_tool(
+            "exec_command",
+            serde_json::json!({
+                "target": "builder-a",
+                "cmd": raw_patch,
+                "tty": true,
+                "yield_time_ms": 250
+            }),
+        )
+        .await;
+
+    assert!(result.text_output.contains("Command: *** Begin Patch"));
+    assert!(result.structured_content["session_id"].as_str().is_some());
+    assert_eq!(fixture.exec_start_calls().await, 1);
+    assert!(fixture.last_patch_request().await.is_none());
+}
+
+#[tokio::test]
 async fn write_stdin_routes_by_public_session_id_instead_of_target_guessing() {
     let fixture = support::spawn_broker_with_stub_daemon().await;
     let started = fixture
