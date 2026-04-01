@@ -1,0 +1,12 @@
+[package]
+name = "remote-exec-pki"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+rcgen = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }

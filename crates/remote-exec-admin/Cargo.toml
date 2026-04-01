@@ -1,0 +1,13 @@
+[package]
+name = "remote-exec-admin"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+remote-exec-pki = { path = "../remote-exec-pki" }
+
+[dev-dependencies]
+tempfile = { workspace = true }

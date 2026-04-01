@@ -3,6 +3,8 @@ members = [
   "crates/remote-exec-proto",
   "crates/remote-exec-daemon",
   "crates/remote-exec-broker",
+  "crates/remote-exec-pki",
+  "crates/remote-exec-admin",
 ]
 resolver = "2"
 
