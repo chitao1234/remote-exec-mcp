@@ -47,16 +47,13 @@ impl SessionStore {
 
     pub async fn insert(&self, session_id: String, session: LiveSession) {
         self.prune_for_insert().await;
-        self.inner
-            .write()
-            .await
-            .insert(
-                session_id,
-                SessionEntry {
-                    session: Arc::new(Mutex::new(session)),
-                    last_touched_at: Instant::now(),
-                },
-            );
+        self.inner.write().await.insert(
+            session_id,
+            SessionEntry {
+                session: Arc::new(Mutex::new(session)),
+                last_touched_at: Instant::now(),
+            },
+        );
     }
 
     pub async fn lock(&self, session_id: &str) -> Option<SessionLease> {
@@ -119,15 +116,12 @@ impl SessionStore {
                     .collect::<Vec<_>>()
             };
 
-            let victim = self
-                .find_oldest_exited(&snapshot)
-                .await
-                .or_else(|| {
-                    snapshot
-                        .iter()
-                        .min_by_key(|candidate| candidate.last_touched_at)
-                        .cloned()
-                });
+            let victim = self.find_oldest_exited(&snapshot).await.or_else(|| {
+                snapshot
+                    .iter()
+                    .min_by_key(|candidate| candidate.last_touched_at)
+                    .cloned()
+            });
 
             let Some(victim) = victim else {
                 return;
@@ -305,7 +299,10 @@ mod tests {
             .insert("session-2".to_string(), spawn_pipe_session("sleep 2"))
             .await;
 
-        let lease = store.lock("session-1").await.expect("session-1 should exist");
+        let lease = store
+            .lock("session-1")
+            .await
+            .expect("session-1 should exist");
         drop(lease);
         tokio::time::sleep(Duration::from_millis(10)).await;
 
