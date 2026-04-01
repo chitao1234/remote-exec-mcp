@@ -24,5 +24,8 @@ pub async fn apply_patch(
 ) -> anyhow::Result<ToolCallOutput> {
     let output = forward_patch(state, &input.target, input.input, input.workdir).await?;
 
-    Ok(ToolCallOutput::text_and_structured(output, serde_json::json!({})))
+    Ok(ToolCallOutput::text_and_structured(
+        output,
+        serde_json::json!({}),
+    ))
 }

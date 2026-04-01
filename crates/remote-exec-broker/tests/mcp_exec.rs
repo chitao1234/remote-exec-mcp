@@ -65,7 +65,11 @@ async fn exec_command_intercepts_direct_apply_patch_and_wraps_exec_output() {
 
     assert!(result.text_output.contains("Wall time: 0.000 seconds"));
     assert!(result.text_output.contains("Process exited with code 0"));
-    assert!(result.text_output.contains("Output:\nSuccess. Updated the following files:"));
+    assert!(
+        result
+            .text_output
+            .contains("Output:\nSuccess. Updated the following files:")
+    );
     assert!(!result.text_output.contains("Command:"));
     assert!(!result.text_output.contains("Chunk ID:"));
     assert!(result.structured_content["session_id"].is_null());
@@ -132,6 +136,68 @@ async fn exec_command_non_matching_patch_text_still_uses_exec_start() {
     assert!(result.structured_content["session_id"].as_str().is_some());
     assert_eq!(fixture.exec_start_calls().await, 1);
     assert!(fixture.last_patch_request().await.is_none());
+}
+
+#[tokio::test]
+async fn exec_command_intercepts_applypatch_heredoc_with_cd_wrapper() {
+    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let patch = concat!(
+        "*** Begin Patch\n",
+        "*** Add File: hello.txt\n",
+        "+hello\n",
+        "*** End Patch\n",
+    );
+    let cmd = concat!(
+        "cd nested && applypatch <<'PATCH'\n",
+        "*** Begin Patch\n",
+        "*** Add File: hello.txt\n",
+        "+hello\n",
+        "*** End Patch\n",
+        "PATCH\n",
+    );
+
+    let result = fixture
+        .call_tool(
+            "exec_command",
+            serde_json::json!({
+                "target": "builder-a",
+                "cmd": cmd,
+                "workdir": "outer"
+            }),
+        )
+        .await;
+
+    assert!(
+        result
+            .text_output
+            .contains("Output:\nSuccess. Updated the following files:")
+    );
+    assert_eq!(fixture.exec_start_calls().await, 0);
+    let forwarded = fixture.last_patch_request().await.unwrap();
+    assert_eq!(forwarded.patch, patch.to_string());
+    assert_eq!(forwarded.workdir, Some("outer/nested".to_string()));
+}
+
+#[tokio::test]
+async fn exec_command_invalid_intercepted_patch_surfaces_tool_error() {
+    let fixture = support::spawn_broker_with_stub_daemon().await;
+
+    let error = fixture
+        .call_tool_error(
+            "exec_command",
+            serde_json::json!({
+                "target": "builder-a",
+                "cmd": "apply_patch 'not a patch'"
+            }),
+        )
+        .await;
+
+    assert!(error.contains("patch_failed") || error.contains("invalid patch"));
+    assert_eq!(fixture.exec_start_calls().await, 0);
+    assert_eq!(
+        fixture.last_patch_request().await.unwrap().patch,
+        "not a patch".to_string()
+    );
 }
 
 #[tokio::test]

@@ -267,9 +267,8 @@ mod tests {
 
     #[test]
     fn format_intercepted_patch_text_omits_command_and_chunk_metadata() {
-        let text = format_intercepted_patch_text(
-            "Success. Updated the following files:\nA hello.txt\n",
-        );
+        let text =
+            format_intercepted_patch_text("Success. Updated the following files:\nA hello.txt\n");
 
         assert!(text.contains("Wall time: 0.000 seconds"));
         assert!(text.contains("Process exited with code 0"));

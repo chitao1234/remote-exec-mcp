@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterceptedApplyPatch {
     pub patch: String,
@@ -8,20 +10,31 @@ pub fn maybe_intercept_apply_patch(
     cmd: &str,
     workdir: Option<&str>,
 ) -> Option<InterceptedApplyPatch> {
-    let patch = parse_direct_invocation(cmd.trim())?;
+    let trimmed = cmd.trim();
+    if let Some(patch) = parse_direct_invocation(trimmed) {
+        return Some(InterceptedApplyPatch {
+            patch,
+            workdir: workdir.map(ToString::to_string),
+        });
+    }
+
+    let (effective_workdir, script) = split_cd_wrapper(trimmed, workdir);
+    let (command_name, body) = parse_heredoc_invocation(script)?;
+    if command_name != "apply_patch" && command_name != "applypatch" {
+        return None;
+    }
+
     Some(InterceptedApplyPatch {
-        patch,
-        workdir: workdir.map(ToString::to_string),
+        patch: format!("{body}\n"),
+        workdir: effective_workdir,
     })
 }
 
 fn parse_direct_invocation(cmd: &str) -> Option<String> {
-    ["apply_patch", "applypatch"]
-        .into_iter()
-        .find_map(|name| {
-            let rest = cmd.strip_prefix(name)?.trim_start();
-            parse_single_quoted_argument(rest)
-        })
+    ["apply_patch", "applypatch"].into_iter().find_map(|name| {
+        let rest = cmd.strip_prefix(name)?.trim_start();
+        parse_single_quoted_argument(rest)
+    })
 }
 
 fn parse_single_quoted_argument(rest: &str) -> Option<String> {
@@ -38,6 +51,36 @@ fn parse_single_quoted_argument(rest: &str) -> Option<String> {
     }
 
     Some(patch.to_string())
+}
+
+fn split_cd_wrapper<'a>(cmd: &'a str, workdir: Option<&str>) -> (Option<String>, &'a str) {
+    if let Some(rest) = cmd.strip_prefix("cd ")
+        && let Some((path, tail)) = rest.split_once("&&")
+    {
+        let path = path.trim();
+        if path.is_empty() || path.chars().any(char::is_whitespace) {
+            return (workdir.map(ToString::to_string), cmd);
+        }
+
+        let mut resolved = workdir.map(PathBuf::from).unwrap_or_default();
+        resolved.push(path);
+        return (Some(resolved.display().to_string()), tail.trim_start());
+    }
+
+    (workdir.map(ToString::to_string), cmd)
+}
+
+fn parse_heredoc_invocation(cmd: &str) -> Option<(&str, &str)> {
+    let (head, rest) = cmd.split_once("<<'")?;
+    let command_name = head.trim();
+    let (delimiter, body_with_newline) = rest.split_once("'\n")?;
+    let marker = format!("\n{delimiter}");
+    let (body, trailing) = body_with_newline.rsplit_once(&marker)?;
+    if !trailing.trim().is_empty() {
+        return None;
+    }
+
+    Some((command_name, body))
 }
 
 #[cfg(test)]
@@ -95,6 +138,32 @@ mod tests {
         assert_eq!(
             maybe_intercept_apply_patch(&format!("apply_patch '{raw_patch}' && echo done"), None),
             None
+        );
+    }
+
+    #[test]
+    fn parses_applypatch_heredoc_with_cd_wrapper_relative_to_workdir() {
+        let cmd = concat!(
+            "cd nested && applypatch <<'PATCH'\n",
+            "*** Begin Patch\n",
+            "*** Add File: hello.txt\n",
+            "+hello\n",
+            "*** End Patch\n",
+            "PATCH\n",
+        );
+
+        assert_eq!(
+            maybe_intercept_apply_patch(cmd, Some("outer")),
+            Some(InterceptedApplyPatch {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Add File: hello.txt\n",
+                    "+hello\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some("outer/nested".to_string()),
+            })
         );
     }
 }

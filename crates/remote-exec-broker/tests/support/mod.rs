@@ -37,12 +37,7 @@ pub struct DelayedTargetFixture {
 #[allow(dead_code)]
 impl DelayedTargetFixture {
     pub async fn spawn_target(&self, target: &str) {
-        spawn_named_daemon_on_addr(
-            &self.certs,
-            self.addr,
-            stub_daemon_state(target, false),
-        )
-        .await;
+        spawn_named_daemon_on_addr(&self.certs, self.addr, stub_daemon_state(target, false)).await;
     }
 }
 
