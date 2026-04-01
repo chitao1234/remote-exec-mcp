@@ -431,7 +431,10 @@ mod tests {
             let outcome = store
                 .insert(format!("session-{index}"), spawn_pipe_session("sleep 30"))
                 .await;
-            assert!(!outcome.crossed_warning_threshold, "unexpected warning at {index}");
+            assert!(
+                !outcome.crossed_warning_threshold,
+                "unexpected warning at {index}"
+            );
         }
 
         let crossing = store

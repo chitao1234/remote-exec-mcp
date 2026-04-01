@@ -201,6 +201,9 @@ fn response_warning_meta(warnings: &[ExecWarning]) -> Option<Meta> {
     }
 
     let mut meta = Meta::new();
-    meta.insert("warnings".to_string(), serde_json::to_value(warnings).unwrap());
+    meta.insert(
+        "warnings".to_string(),
+        serde_json::to_value(warnings).unwrap(),
+    );
     Some(meta)
 }
