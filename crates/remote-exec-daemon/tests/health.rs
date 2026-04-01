@@ -28,7 +28,7 @@ async fn target_info_is_available_over_mutual_tls() {
         .unwrap();
 
     assert_eq!(info.target, "builder-a");
-    assert_eq!(info.platform, "linux");
+    assert_eq!(info.platform, std::env::consts::OS);
     assert!(info.supports_pty);
     assert!(info.supports_image_read);
 }
