@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::path::Path;
 
 pub fn choose_shell(
@@ -5,12 +6,7 @@ pub fn choose_shell(
     env_shell: Option<&str>,
     passwd_shell: Option<&str>,
 ) -> String {
-    shell_override
-        .filter(|value| !value.is_empty())
-        .or_else(|| env_shell.filter(|value| !value.is_empty()))
-        .or_else(|| usable_passwd_shell(passwd_shell))
-        .unwrap_or("/bin/bash")
-        .to_string()
+    preferred_shell(shell_override, env_shell, passwd_shell).unwrap_or("/bin/sh".to_string())
 }
 
 pub fn resolve_shell(shell_override: Option<&str>) -> anyhow::Result<String> {
@@ -29,6 +25,18 @@ pub fn resolve_shell(shell_override: Option<&str>) -> anyhow::Result<String> {
     ))
 }
 
+fn preferred_shell(
+    shell_override: Option<&str>,
+    env_shell: Option<&str>,
+    passwd_shell: Option<&str>,
+) -> Option<String> {
+    shell_override
+        .filter(|value| !value.is_empty())
+        .or_else(|| env_shell.filter(|value| !value.is_empty()))
+        .or_else(|| usable_passwd_shell(passwd_shell))
+        .map(str::to_owned)
+}
+
 fn resolve_shell_with<F>(
     shell_override: Option<&str>,
     env_shell: Option<&str>,
@@ -38,7 +46,19 @@ where
     F: FnOnce() -> anyhow::Result<Option<String>>,
 {
     let passwd_shell = passwd_shell_lookup().ok().flatten();
-    choose_shell(shell_override, env_shell, passwd_shell.as_deref())
+    let path = std::env::var_os("PATH");
+    let fallback = choose_shell(shell_override, env_shell, passwd_shell.as_deref());
+
+    preferred_shell(shell_override, env_shell, passwd_shell.as_deref())
+        .or_else(|| find_bash_in_path(path.as_deref()))
+        .unwrap_or(fallback)
+}
+
+fn find_bash_in_path(path_env: Option<&OsStr>) -> Option<String> {
+    std::env::split_paths(path_env?)
+        .map(|dir| dir.join("bash"))
+        .find(|path| shell_path_is_executable(path))
+        .map(|path| path.to_string_lossy().into_owned())
 }
 
 fn usable_passwd_shell(passwd_shell: Option<&str>) -> Option<&str> {
@@ -74,9 +94,47 @@ fn has_execute_bits(_metadata: &std::fs::Metadata) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::{OsStr, OsString};
     use std::os::unix::fs::PermissionsExt;
+    use std::sync::Mutex;
 
     use super::{choose_shell, resolve_shell_with};
+
+    static PATH_LOCK: Mutex<()> = Mutex::new(());
+
+    struct PathGuard {
+        original: Option<OsString>,
+    }
+
+    impl PathGuard {
+        fn set(path: Option<&OsStr>) -> Self {
+            let original = std::env::var_os("PATH");
+            unsafe {
+                match path {
+                    Some(path) => std::env::set_var("PATH", path),
+                    None => std::env::remove_var("PATH"),
+                }
+            }
+            Self { original }
+        }
+    }
+
+    impl Drop for PathGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.original {
+                    Some(path) => std::env::set_var("PATH", path),
+                    None => std::env::remove_var("PATH"),
+                }
+            }
+        }
+    }
+
+    fn with_path_var<T>(path: Option<&OsStr>, test: impl FnOnce() -> T) -> T {
+        let _lock = PATH_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = PathGuard::set(path);
+        test()
+    }
 
     #[test]
     fn choose_shell_prefers_explicit_override() {
@@ -93,7 +151,7 @@ mod tests {
             "/bin/sh"
         );
         assert_eq!(choose_shell(None, None, Some("/bin/bash")), "/bin/bash");
-        assert_eq!(choose_shell(None, None, None), "/bin/bash");
+        assert_eq!(choose_shell(None, None, None), "/bin/sh");
     }
 
     #[test]
@@ -102,31 +160,35 @@ mod tests {
             choose_shell(None, Some("/bin/sh"), Some("/usr/sbin/nologin")),
             "/bin/sh"
         );
-        assert_eq!(choose_shell(None, None, Some("/bin/false")), "/bin/bash");
+        assert_eq!(choose_shell(None, None, Some("/bin/false")), "/bin/sh");
     }
 
     #[test]
     fn resolve_shell_ignores_passwd_lookup_failure() {
-        assert_eq!(
-            resolve_shell_with(None, Some("/bin/sh"), || {
-                Err(anyhow::anyhow!("passwd lookup failed"))
-            }),
-            "/bin/sh"
-        );
-        assert_eq!(
-            resolve_shell_with(None, None, || Err(anyhow::anyhow!("passwd lookup failed"))),
-            "/bin/bash"
-        );
+        with_path_var(None, || {
+            assert_eq!(
+                resolve_shell_with(None, Some("/bin/sh"), || {
+                    Err(anyhow::anyhow!("passwd lookup failed"))
+                }),
+                "/bin/sh"
+            );
+            assert_eq!(
+                resolve_shell_with(None, None, || Err(anyhow::anyhow!("passwd lookup failed"))),
+                "/bin/sh"
+            );
+        });
     }
 
     #[test]
     fn resolve_shell_ignores_missing_passwd_shell() {
-        assert_eq!(
-            resolve_shell_with(None, None, || {
-                Ok(Some("/opt/missing-shell".to_string()))
-            }),
-            "/bin/bash"
-        );
+        with_path_var(None, || {
+            assert_eq!(
+                resolve_shell_with(None, None, || {
+                    Ok(Some("/opt/missing-shell".to_string()))
+                }),
+                "/bin/sh"
+            );
+        });
     }
 
     #[test]
@@ -138,11 +200,30 @@ mod tests {
         permissions.set_mode(0o644);
         std::fs::set_permissions(&shell_path, permissions).unwrap();
 
-        assert_eq!(
-            resolve_shell_with(None, None, || {
-                Ok(Some(shell_path.to_string_lossy().into_owned()))
-            }),
-            "/bin/bash"
-        );
+        with_path_var(None, || {
+            assert_eq!(
+                resolve_shell_with(None, None, || {
+                    Ok(Some(shell_path.to_string_lossy().into_owned()))
+                }),
+                "/bin/sh"
+            );
+        });
+    }
+
+    #[test]
+    fn resolve_shell_uses_bash_from_path_before_bin_sh_fallback() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let bash_path = tempdir.path().join("bash");
+        std::fs::write(&bash_path, "#!/bin/sh\n").unwrap();
+        let mut permissions = std::fs::metadata(&bash_path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&bash_path, permissions).unwrap();
+
+        with_path_var(Some(tempdir.path().as_os_str()), || {
+            assert_eq!(
+                resolve_shell_with(None, None, || Ok(None)),
+                bash_path.to_string_lossy()
+            );
+        });
     }
 }
