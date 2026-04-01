@@ -1,6 +1,8 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
+use base64::Engine;
+use image::ImageFormat;
 use remote_exec_proto::rpc::RpcErrorBody;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -108,8 +110,32 @@ pub async fn spawn_daemon(target: &str) -> DaemonFixture {
 
 #[allow(dead_code)]
 pub async fn write_png(path: &Path, width: u32, height: u32) {
+    write_image(path, width, height, ImageFormat::Png).await;
+}
+
+#[allow(dead_code)]
+pub async fn write_image(path: &Path, width: u32, height: u32, format: ImageFormat) {
     let image = image::DynamicImage::new_rgba8(width, height);
-    image.save(path).unwrap();
+    image.save_with_format(path, format).unwrap();
+}
+
+#[allow(dead_code)]
+pub async fn write_invalid_bytes(path: &Path) {
+    tokio::fs::write(path, b"not an image").await.unwrap();
+}
+
+#[allow(dead_code)]
+pub fn decode_data_url(image_url: &str) -> (String, Vec<u8>) {
+    let (metadata, data) = image_url.split_once(',').unwrap();
+    let mime = metadata
+        .strip_prefix("data:")
+        .unwrap()
+        .strip_suffix(";base64")
+        .unwrap();
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .unwrap();
+    (mime.to_string(), bytes)
 }
 
 struct TestCerts {
