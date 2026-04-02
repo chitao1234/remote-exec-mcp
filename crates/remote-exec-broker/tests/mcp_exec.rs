@@ -207,6 +207,34 @@ async fn exec_command_intercepts_apply_patch_whitespace_tolerant_forms() {
 }
 
 #[tokio::test]
+async fn exec_command_intercepts_windows_shell_wrappers() {
+    let fixture = support::spawn_broker_with_stub_daemon_platform("windows", false).await;
+    let patch = "*** Begin Patch\n*** Add File: wrapped.txt\n+wrapped\n*** End Patch\n";
+
+    let cmd_result = fixture
+        .call_tool(
+            "exec_command",
+            serde_json::json!({
+                "target": "builder-a",
+                "cmd": format!("cmd /c apply_patch '{patch}'"),
+            }),
+        )
+        .await;
+    assert!(cmd_result.text_output.contains("Process exited with code 0"));
+
+    let pwsh_result = fixture
+        .call_tool(
+            "exec_command",
+            serde_json::json!({
+                "target": "builder-a",
+                "cmd": format!("pwsh -NoProfile -Command \"apply_patch '{patch}'\""),
+            }),
+        )
+        .await;
+    assert!(pwsh_result.text_output.contains("Process exited with code 0"));
+}
+
+#[tokio::test]
 async fn exec_command_invalid_intercepted_patch_surfaces_tool_error() {
     let fixture = support::spawn_broker_with_stub_daemon().await;
 

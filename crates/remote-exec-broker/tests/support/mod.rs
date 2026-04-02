@@ -57,7 +57,7 @@ impl DelayedTargetFixture {
         spawn_named_daemon_on_addr(
             &self.certs,
             self.addr,
-            stub_daemon_state(target, ExecWriteBehavior::Success),
+            stub_daemon_state(target, ExecWriteBehavior::Success, "linux", true),
         )
         .await;
     }
@@ -209,6 +209,47 @@ pub async fn spawn_broker_with_stub_daemon() -> BrokerFixture {
     let tempdir = tempfile::tempdir().unwrap();
     let certs = write_test_certs(tempdir.path());
     let (addr, stub_state) = spawn_stub_daemon(&certs).await;
+    let broker_config = tempdir.path().join("broker.toml");
+    std::fs::write(
+        &broker_config,
+        format!(
+            r#"[targets.builder-a]
+base_url = "https://{addr}"
+ca_pem = "{}"
+client_cert_pem = "{}"
+client_key_pem = "{}"
+expected_daemon_name = "builder-a"
+"#,
+            certs.ca_cert.display(),
+            certs.client_cert.display(),
+            certs.client_key.display(),
+        ),
+    )
+    .unwrap();
+
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
+    command.arg(&broker_config);
+    let transport = TokioChildProcess::new(command).unwrap();
+    let client = DummyClientHandler.serve(transport).await.unwrap();
+
+    BrokerFixture {
+        _tempdir: tempdir,
+        client,
+        stub_state,
+    }
+}
+
+pub async fn spawn_broker_with_stub_daemon_platform(
+    platform: &str,
+    supports_pty: bool,
+) -> BrokerFixture {
+    remote_exec_daemon::install_crypto_provider();
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let certs = write_test_certs(tempdir.path());
+    let (addr, stub_state) =
+        spawn_daemon_with_platform(&certs, ExecWriteBehavior::Success, platform, supports_pty)
+            .await;
     let broker_config = tempdir.path().join("broker.toml");
     std::fs::write(
         &broker_config,
@@ -476,14 +517,19 @@ struct StubDaemonState {
     image_read_response: Arc<Mutex<StubImageReadResponse>>,
 }
 
-fn stub_daemon_state(target: &str, exec_write_behavior: ExecWriteBehavior) -> StubDaemonState {
+fn stub_daemon_state(
+    target: &str,
+    exec_write_behavior: ExecWriteBehavior,
+    platform: &str,
+    supports_pty: bool,
+) -> StubDaemonState {
     StubDaemonState {
         target: target.to_string(),
         daemon_instance_id: Arc::new(Mutex::new("daemon-instance-1".to_string())),
         target_hostname: format!("{target}-host"),
-        target_platform: "linux".to_string(),
+        target_platform: platform.to_string(),
         target_arch: "x86_64".to_string(),
-        target_supports_pty: true,
+        target_supports_pty: supports_pty,
         exec_write_behavior: Arc::new(Mutex::new(exec_write_behavior)),
         exec_start_warnings: Arc::new(Mutex::new(Vec::new())),
         exec_start_calls: Arc::new(Mutex::new(0)),
@@ -519,11 +565,20 @@ async fn spawn_daemon(
     certs: &TestCerts,
     exec_write_behavior: ExecWriteBehavior,
 ) -> (std::net::SocketAddr, StubDaemonState) {
+    spawn_daemon_with_platform(certs, exec_write_behavior, "linux", true).await
+}
+
+async fn spawn_daemon_with_platform(
+    certs: &TestCerts,
+    exec_write_behavior: ExecWriteBehavior,
+    platform: &str,
+    supports_pty: bool,
+) -> (std::net::SocketAddr, StubDaemonState) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
     drop(listener);
 
-    let state = stub_daemon_state("builder-a", exec_write_behavior);
+    let state = stub_daemon_state("builder-a", exec_write_behavior, platform, supports_pty);
     spawn_named_daemon_on_addr(certs, addr, state.clone()).await;
     (addr, state)
 }

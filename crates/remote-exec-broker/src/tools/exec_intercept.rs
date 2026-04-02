@@ -14,11 +14,58 @@ fn trim_horizontal_start(text: &str) -> &str {
     text.trim_start_matches(is_horizontal_whitespace)
 }
 
+fn strip_prefix_ascii_case<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    let head = text.get(..prefix.len())?;
+    if head.eq_ignore_ascii_case(prefix) {
+        text.get(prefix.len()..)
+    } else {
+        None
+    }
+}
+
+fn trim_wrapping_quotes(text: &str) -> &str {
+    let trimmed = text.trim();
+    if trimmed.len() < 2 {
+        return trimmed;
+    }
+
+    let first = trimmed.as_bytes()[0];
+    let last = trimmed.as_bytes()[trimmed.len() - 1];
+    if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
+        &trimmed[1..trimmed.len() - 1]
+    } else {
+        trimmed
+    }
+}
+
+fn strip_shell_wrapper(cmd: &str) -> &str {
+    let trimmed = cmd.trim();
+
+    for prefix in [
+        "cmd /c ",
+        "cmd.exe /c ",
+        "powershell -Command ",
+        "powershell -NoProfile -Command ",
+        "powershell.exe -Command ",
+        "powershell.exe -NoProfile -Command ",
+        "pwsh -Command ",
+        "pwsh -NoProfile -Command ",
+        "pwsh.exe -Command ",
+        "pwsh.exe -NoProfile -Command ",
+    ] {
+        if let Some(rest) = strip_prefix_ascii_case(trimmed, prefix) {
+            return trim_wrapping_quotes(rest);
+        }
+    }
+
+    trimmed
+}
+
 pub fn maybe_intercept_apply_patch(
     cmd: &str,
     workdir: Option<&str>,
 ) -> Option<InterceptedApplyPatch> {
-    let trimmed = cmd.trim();
+    let trimmed = strip_shell_wrapper(cmd);
     if let Some(patch) = parse_direct_invocation(trimmed) {
         return Some(InterceptedApplyPatch {
             patch,

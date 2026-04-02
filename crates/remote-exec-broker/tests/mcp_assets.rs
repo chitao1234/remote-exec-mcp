@@ -61,6 +61,19 @@ async fn list_targets_returns_cached_daemon_info_and_null_for_unavailable_target
 }
 
 #[tokio::test]
+async fn list_targets_formats_windows_metadata_and_truthful_pty_support() {
+    let fixture = support::spawn_broker_with_stub_daemon_platform("windows", false).await;
+    let result = fixture
+        .call_tool("list_targets", serde_json::json!({}))
+        .await;
+
+    assert_eq!(
+        result.text_output,
+        "Configured targets:\n- builder-a: windows/x86_64, host=builder-a-host, version=0.1.0, pty=no"
+    );
+}
+
+#[tokio::test]
 async fn view_image_returns_input_image_content_and_structured_content() {
     let fixture = support::spawn_broker_with_stub_daemon().await;
     let result = fixture
