@@ -391,6 +391,42 @@ async fn exec_write_rejects_non_tty_sessions_when_chars_are_present() {
 }
 
 #[tokio::test]
+async fn exec_write_round_trips_pty_input_without_echo_assumptions() {
+    let fixture = support::spawn_daemon("builder-a").await;
+    let started = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "IFS= read -r line; printf '__RESULT__:%s:__END__' \"$line\"".to_string(),
+                workdir: None,
+                shell: Some(TEST_SHELL.to_string()),
+                tty: true,
+                yield_time_ms: Some(250),
+                max_output_tokens: None,
+                login: Some(false),
+            },
+        )
+        .await;
+
+    assert!(started.running);
+
+    let response = fixture
+        .rpc::<ExecWriteRequest, ExecResponse>(
+            "/v1/exec/write",
+            &ExecWriteRequest {
+                daemon_session_id: started.daemon_session_id.expect("live session"),
+                chars: "ping pong\n".to_string(),
+                yield_time_ms: Some(250),
+                max_output_tokens: None,
+            },
+        )
+        .await;
+
+    assert_eq!(response.exit_code, Some(0));
+    assert!(response.output.contains("__RESULT__:ping pong:__END__"));
+}
+
+#[tokio::test]
 async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon() {
     use std::time::{Duration, Instant};
 
