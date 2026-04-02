@@ -3,7 +3,9 @@ mod support;
 use std::ffi::OsString;
 use std::sync::OnceLock;
 
-use remote_exec_proto::rpc::{ExecResponse, ExecStartRequest, ExecWriteRequest};
+#[cfg(unix)]
+use remote_exec_proto::rpc::ExecWriteRequest;
+use remote_exec_proto::rpc::{ExecResponse, ExecStartRequest};
 use tokio::sync::Mutex;
 
 #[cfg(unix)]
@@ -138,8 +140,38 @@ async fn exec_start_rejects_explicit_login_when_disabled_by_config() {
 
 #[cfg(windows)]
 #[tokio::test]
-async fn exec_start_rejects_login_shell_requests_on_windows() {
+async fn exec_start_allows_login_requests_on_windows_when_enabled() {
     let fixture = support::spawn_daemon("builder-a").await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "echo windows-ready".to_string(),
+                workdir: None,
+                shell: Some("cmd.exe".to_string()),
+                tty: false,
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
+                max_output_tokens: None,
+                login: Some(true),
+            },
+        )
+        .await;
+
+    assert_eq!(response.exit_code, Some(0));
+    assert!(
+        response
+            .output
+            .to_ascii_lowercase()
+            .contains("windows-ready")
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn exec_start_rejects_login_requests_on_windows_when_disabled_by_config() {
+    let fixture =
+        support::spawn_daemon_with_extra_config("builder-a", "allow_login_shell = false").await;
 
     let err = fixture
         .rpc_error(
@@ -156,12 +188,13 @@ async fn exec_start_rejects_login_shell_requests_on_windows() {
         )
         .await;
 
-    assert_eq!(err.code, "login_shell_unsupported");
+    assert_eq!(err.code, "login_shell_disabled");
 }
 
 #[cfg(windows)]
 #[tokio::test]
 async fn exec_start_uses_cmd_when_shell_is_omitted() {
+    let _env = EnvOverrideGuard::set(&[("PATH", ""), ("COMSPEC", "cmd.exe")]).await;
     let fixture = support::spawn_daemon("builder-a").await;
 
     let response = fixture

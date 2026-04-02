@@ -313,6 +313,7 @@ mod tests {
             shell::shell_argv("cmd.exe", false, "echo ok"),
             vec![
                 "cmd.exe".to_string(),
+                "/D".to_string(),
                 "/C".to_string(),
                 "echo ok".to_string(),
             ]
