@@ -122,6 +122,29 @@ impl BrokerFixture {
     pub async fn set_exec_start_warnings(&self, warnings: Vec<ExecWarning>) {
         *self.stub_state.exec_start_warnings.lock().await = warnings;
     }
+
+    pub async fn set_stub_daemon_instance_id(&self, daemon_instance_id: &str) {
+        *self.stub_state.daemon_instance_id.lock().await = daemon_instance_id.to_string();
+    }
+
+    pub async fn start_running_session(&self) -> String {
+        let result = self
+            .call_tool(
+                "exec_command",
+                serde_json::json!({
+                    "target": "builder-a",
+                    "cmd": "printf ready; sleep 2",
+                    "tty": true,
+                    "yield_time_ms": 10
+                }),
+            )
+            .await;
+
+        result.structured_content["session_id"]
+            .as_str()
+            .expect("running session")
+            .to_string()
+    }
 }
 
 #[allow(dead_code)]
@@ -441,7 +464,7 @@ expected_daemon_name = "builder-b"
 #[derive(Clone)]
 struct StubDaemonState {
     target: String,
-    daemon_instance_id: String,
+    daemon_instance_id: Arc<Mutex<String>>,
     target_hostname: String,
     target_platform: String,
     target_arch: String,
@@ -456,7 +479,7 @@ struct StubDaemonState {
 fn stub_daemon_state(target: &str, exec_write_behavior: ExecWriteBehavior) -> StubDaemonState {
     StubDaemonState {
         target: target.to_string(),
-        daemon_instance_id: "daemon-instance-1".to_string(),
+        daemon_instance_id: Arc::new(Mutex::new("daemon-instance-1".to_string())),
         target_hostname: format!("{target}-host"),
         target_platform: "linux".to_string(),
         target_arch: "x86_64".to_string(),
@@ -553,10 +576,12 @@ async fn health() -> Json<HealthCheckResponse> {
 }
 
 async fn target_info(State(state): State<StubDaemonState>) -> Json<TargetInfoResponse> {
+    let daemon_instance_id = state.daemon_instance_id.lock().await.clone();
+
     Json(TargetInfoResponse {
         target: state.target,
         daemon_version: "0.1.0".to_string(),
-        daemon_instance_id: state.daemon_instance_id,
+        daemon_instance_id,
         hostname: state.target_hostname,
         platform: state.target_platform,
         arch: state.target_arch,
@@ -571,10 +596,11 @@ async fn exec_start(
 ) -> Json<ExecResponse> {
     *state.exec_start_calls.lock().await += 1;
     let warnings = state.exec_start_warnings.lock().await.clone();
+    let daemon_instance_id = state.daemon_instance_id.lock().await.clone();
 
     Json(ExecResponse {
         daemon_session_id: Some("daemon-session-1".to_string()),
-        daemon_instance_id: "daemon-instance-1".to_string(),
+        daemon_instance_id,
         running: true,
         chunk_id: Some("chunk-start".to_string()),
         wall_time_seconds: 0.25,
@@ -614,10 +640,11 @@ async fn exec_write(
         }
     }
     drop(behavior);
+    let daemon_instance_id = state.daemon_instance_id.lock().await.clone();
 
     Ok(Json(ExecResponse {
         daemon_session_id: None,
-        daemon_instance_id: state.daemon_instance_id,
+        daemon_instance_id,
         running: false,
         chunk_id: Some("chunk-write".to_string()),
         wall_time_seconds: 0.5,

@@ -45,13 +45,26 @@ impl TargetHandle {
         self.cached_daemon_info.lock().await.clone()
     }
 
+    pub async fn clear_cached_daemon_info(&self) {
+        *self.identity_verified.lock().await = false;
+        *self.cached_daemon_info.lock().await = None;
+    }
+
     pub async fn ensure_identity_verified(&self, name: &str) -> anyhow::Result<()> {
         let mut identity_verified = self.identity_verified.lock().await;
         if *identity_verified {
             return Ok(());
         }
 
-        let info = self.client.target_info().await?;
+        let info = match self.client.target_info().await {
+            Ok(info) => info,
+            Err(DaemonClientError::Transport(err)) => {
+                *identity_verified = false;
+                *self.cached_daemon_info.lock().await = None;
+                return Err(DaemonClientError::Transport(err).into());
+            }
+            Err(err) => return Err(err.into()),
+        };
         if let Some(expected_name) = &self.expected_daemon_name {
             anyhow::ensure!(
                 &info.target == expected_name,

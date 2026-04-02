@@ -12,7 +12,7 @@ pub async fn view_image(
 ) -> anyhow::Result<ToolCallOutput> {
     let target = state.target(&input.target)?;
     target.ensure_identity_verified(&input.target).await?;
-    let response = target
+    let response = match target
         .client
         .image_read(&ImageReadRequest {
             path: input.path,
@@ -20,7 +20,15 @@ pub async fn view_image(
             detail: input.detail.clone(),
         })
         .await
-        .map_err(normalize_view_image_error)?;
+    {
+        Ok(response) => response,
+        Err(err) => {
+            if matches!(err, DaemonClientError::Transport(_)) {
+                target.clear_cached_daemon_info().await;
+            }
+            return Err(normalize_view_image_error(err));
+        }
+    };
     let image_content = content_from_data_url(&response.image_url)?;
 
     Ok(ToolCallOutput::content_and_structured(

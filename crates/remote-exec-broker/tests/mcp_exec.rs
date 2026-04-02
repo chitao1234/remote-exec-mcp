@@ -464,6 +464,69 @@ async fn broker_rejects_unverified_target_if_it_returns_as_the_wrong_daemon() {
 }
 
 #[tokio::test]
+async fn list_targets_clears_cached_daemon_info_after_daemon_instance_mismatch() {
+    let fixture = support::spawn_broker_with_retryable_exec_write_error().await;
+
+    let before = fixture
+        .call_tool("list_targets", serde_json::json!({}))
+        .await;
+    assert!(before.structured_content["targets"][0]["daemon_info"].is_object());
+
+    let session_id = fixture.start_running_session().await;
+    fixture.set_stub_daemon_instance_id("daemon-instance-2").await;
+
+    let error = fixture
+        .call_tool_error(
+            "write_stdin",
+            serde_json::json!({
+                "session_id": session_id,
+                "chars": "",
+                "yield_time_ms": 10
+            }),
+        )
+        .await;
+    assert!(error.contains("Unknown process id"));
+
+    let after = fixture
+        .call_tool("list_targets", serde_json::json!({}))
+        .await;
+    assert!(after.structured_content["targets"][0]["daemon_info"].is_null());
+}
+
+#[tokio::test]
+async fn list_targets_repopulates_cached_daemon_info_after_later_successful_verification() {
+    let fixture = support::spawn_broker_with_late_target().await;
+
+    let before = fixture
+        .broker
+        .call_tool("list_targets", serde_json::json!({}))
+        .await;
+    assert!(before.structured_content["targets"][1]["daemon_info"].is_null());
+
+    fixture.spawn_target("builder-b").await;
+    let result = fixture
+        .broker
+        .call_tool(
+            "apply_patch",
+            serde_json::json!({
+                "target": "builder-b",
+                "input": "*** Begin Patch\n*** Add File: ok.txt\n+ok\n*** End Patch\n"
+            }),
+        )
+        .await;
+    assert!(result.text_output.contains("Success."));
+
+    let after = fixture
+        .broker
+        .call_tool("list_targets", serde_json::json!({}))
+        .await;
+    assert_eq!(
+        after.structured_content["targets"][1]["daemon_info"]["hostname"],
+        "builder-b-host"
+    );
+}
+
+#[tokio::test]
 async fn write_stdin_keeps_session_after_retryable_daemon_error() {
     let fixture = support::spawn_broker_with_retryable_exec_write_error().await;
 

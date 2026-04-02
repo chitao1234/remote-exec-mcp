@@ -4,6 +4,7 @@ use remote_exec_proto::rpc::{ExecStartRequest, ExecWarning, ExecWriteRequest};
 use rmcp::model::Meta;
 
 use super::exec_intercept::maybe_intercept_apply_patch;
+use crate::daemon_client::DaemonClientError;
 use crate::mcp_server::{
     ToolCallError, ToolCallOutput, format_command_text, format_intercepted_patch_text,
     format_poll_text, warning_meta,
@@ -56,7 +57,7 @@ pub async fn exec_command(
 
     let target = state.target(&input.target)?;
     target.ensure_identity_verified(&input.target).await?;
-    let response = target
+    let response = match target
         .client
         .exec_start(&ExecStartRequest {
             cmd: input.cmd.clone(),
@@ -67,7 +68,16 @@ pub async fn exec_command(
             max_output_tokens: input.max_output_tokens,
             login: input.login,
         })
-        .await?;
+        .await
+    {
+        Ok(response) => response,
+        Err(err) => {
+            if matches!(err, DaemonClientError::Transport(_)) {
+                target.clear_cached_daemon_info().await;
+            }
+            return Err(err.into());
+        }
+    };
     let response_meta = response_warning_meta(&response.warnings);
 
     let session_command = input.cmd.clone();
@@ -156,10 +166,14 @@ async fn write_stdin_inner(
             if let Ok(info) = target.client.target_info().await
                 && info.daemon_instance_id != record.daemon_instance_id
             {
+                target.clear_cached_daemon_info().await;
                 state.sessions.remove(&record.session_id).await;
                 return Err(anyhow::anyhow!(unknown_process_id_message(
                     &record.session_id
                 )));
+            }
+            if matches!(err, DaemonClientError::Transport(_)) {
+                target.clear_cached_daemon_info().await;
             }
             return Err(err.into());
         }
