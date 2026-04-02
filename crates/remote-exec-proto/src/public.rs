@@ -20,6 +20,10 @@ pub struct ExecCommandInput {
     pub login: Option<bool>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ListTargetsInput {}
+
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WriteStdinInput {
@@ -44,6 +48,11 @@ pub struct CommandToolResult {
     pub session_command: Option<String>,
     pub original_token_count: Option<u32>,
     pub output: String,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ListTargetsResult {
+    pub targets: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]

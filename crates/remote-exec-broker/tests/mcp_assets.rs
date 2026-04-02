@@ -27,6 +27,20 @@ async fn apply_patch_returns_plain_text_plus_empty_structured_content() {
 }
 
 #[tokio::test]
+async fn list_targets_returns_sorted_names_and_text_output() {
+    let fixture = support::spawn_broker_with_reverse_ordered_targets().await;
+    let result = fixture.call_tool("list_targets", serde_json::json!({})).await;
+
+    assert_eq!(result.text_output, "Configured targets:\n- builder-a\n- builder-b");
+    assert_eq!(
+        result.structured_content,
+        serde_json::json!({
+            "targets": ["builder-a", "builder-b"]
+        })
+    );
+}
+
+#[tokio::test]
 async fn view_image_returns_input_image_content_and_structured_content() {
     let fixture = support::spawn_broker_with_stub_daemon().await;
     let result = fixture
@@ -118,6 +132,34 @@ async fn view_image_invalid_detail_matches_daemon_message() {
     assert_eq!(
         result.text_output,
         "view_image.detail only supports `original`; omit `detail` for default resized behavior, got `low`"
+    );
+}
+
+#[tokio::test]
+async fn list_targets_is_advertised_as_read_only() {
+    let fixture = support::spawn_broker_with_stub_daemon().await;
+
+    let tools = fixture
+        .client
+        .list_tools(Some(PaginatedRequestParams {
+            meta: None,
+            cursor: None,
+        }))
+        .await
+        .expect("list tools");
+
+    let list_targets = tools
+        .tools
+        .into_iter()
+        .find(|tool| tool.name.as_ref() == "list_targets")
+        .expect("list_targets tool");
+
+    assert_eq!(
+        list_targets
+            .annotations
+            .as_ref()
+            .and_then(|annotations| annotations.read_only_hint),
+        Some(true)
     );
 }
 

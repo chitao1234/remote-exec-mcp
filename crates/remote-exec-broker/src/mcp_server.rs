@@ -124,6 +124,23 @@ impl BrokerServer {
 #[tool_router]
 impl BrokerServer {
     #[tool(
+        name = "list_targets",
+        description = "List configured target names.",
+        annotations(read_only_hint = true)
+    )]
+    async fn list_targets(
+        &self,
+        Parameters(input): Parameters<remote_exec_proto::public::ListTargetsInput>,
+    ) -> Result<CallToolResult, McpError> {
+        Ok(
+            match crate::tools::targets::list_targets(&self.state, input).await {
+                Ok(output) => output.into_call_tool_result(),
+                Err(err) => format_tool_error(err),
+            },
+        )
+    }
+
+    #[tool(
         name = "exec_command",
         description = "Run a command on a configured target machine."
     )]

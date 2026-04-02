@@ -217,6 +217,54 @@ expected_daemon_name = "builder-a"
 }
 
 #[allow(dead_code)]
+pub async fn spawn_broker_with_reverse_ordered_targets() -> BrokerFixture {
+    remote_exec_daemon::install_crypto_provider();
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let certs = write_test_certs(tempdir.path());
+    let (live_addr, stub_state) = spawn_stub_daemon(&certs).await;
+    let dead_addr = allocate_addr();
+    let broker_config = tempdir.path().join("broker.toml");
+    std::fs::write(
+        &broker_config,
+        format!(
+            r#"[targets.builder-b]
+base_url = "https://{dead_addr}"
+ca_pem = "{}"
+client_cert_pem = "{}"
+client_key_pem = "{}"
+expected_daemon_name = "builder-b"
+
+[targets.builder-a]
+base_url = "https://{live_addr}"
+ca_pem = "{}"
+client_cert_pem = "{}"
+client_key_pem = "{}"
+expected_daemon_name = "builder-a"
+"#,
+            certs.ca_cert.display(),
+            certs.client_cert.display(),
+            certs.client_key.display(),
+            certs.ca_cert.display(),
+            certs.client_cert.display(),
+            certs.client_key.display(),
+        ),
+    )
+    .unwrap();
+
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
+    command.arg(&broker_config);
+    let transport = TokioChildProcess::new(command).unwrap();
+    let client = DummyClientHandler.serve(transport).await.unwrap();
+
+    BrokerFixture {
+        _tempdir: tempdir,
+        client,
+        stub_state,
+    }
+}
+
+#[allow(dead_code)]
 pub async fn spawn_broker_with_live_and_dead_targets() -> BrokerFixture {
     remote_exec_daemon::install_crypto_provider();
 
