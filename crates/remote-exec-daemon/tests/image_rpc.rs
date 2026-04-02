@@ -26,6 +26,30 @@ async fn assert_default_passthrough(extension: &str, format: ImageFormat, expect
     assert_eq!(response.detail, None);
 }
 
+async fn assert_resized_output(extension: &str, format: ImageFormat, expected_mime: &str) {
+    let fixture = support::spawn_daemon("builder-a").await;
+    let path = fixture.workdir.join(format!("large.{extension}"));
+    support::write_image(&path, 4096, 2048, format).await;
+
+    let response = fixture
+        .rpc::<ImageReadRequest, ImageReadResponse>(
+            "/v1/image/read",
+            &ImageReadRequest {
+                path: format!("large.{extension}"),
+                workdir: Some(".".to_string()),
+                detail: None,
+            },
+        )
+        .await;
+
+    let (mime, bytes) = support::decode_data_url(&response.image_url);
+    let image = image::load_from_memory(&bytes).unwrap();
+    assert_eq!(mime, expected_mime);
+    assert!(image.width() <= 2048);
+    assert!(image.height() <= 768);
+    assert_eq!(response.detail, None);
+}
+
 #[tokio::test]
 async fn image_read_preserves_small_png_jpeg_and_webp_bytes_by_default() {
     assert_default_passthrough("png", ImageFormat::Png, "image/png").await;
@@ -58,48 +82,13 @@ async fn image_read_preserves_original_detail_for_passthrough_formats() {
 }
 
 #[tokio::test]
-async fn image_read_resizes_large_images_by_default() {
-    let fixture = support::spawn_daemon("builder-a").await;
-    let path = fixture.workdir.join("large.png");
-    support::write_png(&path, 4096, 2048).await;
-
-    let response = fixture
-        .rpc::<ImageReadRequest, ImageReadResponse>(
-            "/v1/image/read",
-            &ImageReadRequest {
-                path: "large.png".to_string(),
-                workdir: Some(".".to_string()),
-                detail: None,
-            },
-        )
-        .await;
-
-    assert!(response.image_url.starts_with("data:image/png;base64,"));
-    assert_eq!(response.detail, None);
+async fn image_read_resizes_large_png_and_keeps_png_encoding() {
+    assert_resized_output("png", ImageFormat::Png, "image/png").await;
 }
 
 #[tokio::test]
 async fn image_read_resizes_large_jpeg_and_keeps_jpeg_encoding() {
-    let fixture = support::spawn_daemon("builder-a").await;
-    let path = fixture.workdir.join("large.jpg");
-    support::write_image(&path, 4096, 2048, ImageFormat::Jpeg).await;
-
-    let response = fixture
-        .rpc::<ImageReadRequest, ImageReadResponse>(
-            "/v1/image/read",
-            &ImageReadRequest {
-                path: "large.jpg".to_string(),
-                workdir: Some(".".to_string()),
-                detail: None,
-            },
-        )
-        .await;
-
-    let (mime, bytes) = support::decode_data_url(&response.image_url);
-    let image = image::load_from_memory(&bytes).unwrap();
-    assert_eq!(mime, "image/jpeg");
-    assert!(image.width() <= 2048);
-    assert!(image.height() <= 768);
+    assert_resized_output("jpg", ImageFormat::Jpeg, "image/jpeg").await;
 }
 
 #[tokio::test]
