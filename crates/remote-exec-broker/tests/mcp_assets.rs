@@ -29,9 +29,14 @@ async fn apply_patch_returns_plain_text_plus_empty_structured_content() {
 #[tokio::test]
 async fn list_targets_returns_sorted_names_and_text_output() {
     let fixture = support::spawn_broker_with_reverse_ordered_targets().await;
-    let result = fixture.call_tool("list_targets", serde_json::json!({})).await;
+    let result = fixture
+        .call_tool("list_targets", serde_json::json!({}))
+        .await;
 
-    assert_eq!(result.text_output, "Configured targets:\n- builder-a\n- builder-b");
+    assert_eq!(
+        result.text_output,
+        "Configured targets:\n- builder-a\n- builder-b"
+    );
     assert_eq!(
         result.structured_content,
         serde_json::json!({
