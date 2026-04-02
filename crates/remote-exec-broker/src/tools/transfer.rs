@@ -1,8 +1,13 @@
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 
+use anyhow::Context;
 use remote_exec_proto::public::{
     TransferEndpoint, TransferFilesInput, TransferFilesResult, TransferOverwrite,
     TransferSourceType as PublicTransferSourceType,
+};
+use remote_exec_proto::path::{
+    PathPolicy, is_absolute_for_policy, linux_path_policy, same_path_for_policy,
+    windows_path_policy,
 };
 use remote_exec_proto::rpc::{
     TransferExportRequest, TransferImportRequest, TransferImportResponse, TransferOverwriteMode,
@@ -16,9 +21,9 @@ pub async fn transfer_files(
     state: &crate::BrokerState,
     input: TransferFilesInput,
 ) -> anyhow::Result<ToolCallOutput> {
-    ensure_absolute(&input.source)?;
-    ensure_absolute(&input.destination)?;
-    ensure_distinct_endpoints(&input.source, &input.destination)?;
+    ensure_absolute(state, &input.source).await?;
+    ensure_absolute(state, &input.destination).await?;
+    ensure_distinct_endpoints(state, &input.source, &input.destination).await?;
 
     let temp = tempfile::NamedTempFile::new()?;
     let archive_path = temp.path().to_path_buf();
@@ -127,40 +132,67 @@ async fn import_archive_to_endpoint(
     }
 }
 
-fn ensure_absolute(endpoint: &TransferEndpoint) -> anyhow::Result<()> {
+fn local_policy() -> PathPolicy {
+    if cfg!(windows) {
+        windows_path_policy()
+    } else {
+        linux_path_policy()
+    }
+}
+
+fn remote_policy(platform: &str) -> PathPolicy {
+    if platform.eq_ignore_ascii_case("windows") {
+        windows_path_policy()
+    } else {
+        linux_path_policy()
+    }
+}
+
+async fn endpoint_policy(
+    state: &crate::BrokerState,
+    endpoint: &TransferEndpoint,
+) -> anyhow::Result<PathPolicy> {
+    if endpoint.target == "local" {
+        return Ok(local_policy());
+    }
+
+    let target = state.target(&endpoint.target)?;
+    target.ensure_identity_verified(&endpoint.target).await?;
+    let info = target
+        .cached_daemon_info()
+        .await
+        .context("target info missing after identity verification")?;
+    Ok(remote_policy(&info.platform))
+}
+
+async fn ensure_absolute(
+    state: &crate::BrokerState,
+    endpoint: &TransferEndpoint,
+) -> anyhow::Result<()> {
+    let policy = endpoint_policy(state, endpoint).await?;
     anyhow::ensure!(
-        Path::new(&endpoint.path).is_absolute(),
+        is_absolute_for_policy(policy, &endpoint.path),
         "transfer endpoint path `{}` is not absolute",
         endpoint.path
     );
     Ok(())
 }
 
-fn ensure_distinct_endpoints(
+async fn ensure_distinct_endpoints(
+    state: &crate::BrokerState,
     source: &TransferEndpoint,
     destination: &TransferEndpoint,
 ) -> anyhow::Result<()> {
+    if source.target != destination.target {
+        return Ok(());
+    }
+
+    let policy = endpoint_policy(state, source).await?;
     anyhow::ensure!(
-        !(source.target == destination.target
-            && normalize_path(Path::new(&source.path))
-                == normalize_path(Path::new(&destination.path))),
+        !same_path_for_policy(policy, &source.path, &destination.path),
         "source and destination must differ"
     );
     Ok(())
-}
-
-fn normalize_path(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                normalized.pop();
-            }
-            other => normalized.push(other.as_os_str()),
-        }
-    }
-    normalized
 }
 
 fn normalize_transfer_error(err: DaemonClientError) -> anyhow::Error {

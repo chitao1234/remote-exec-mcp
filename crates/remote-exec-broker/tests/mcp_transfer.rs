@@ -82,3 +82,54 @@ async fn transfer_files_rejects_same_local_path_before_mutation() {
     assert!(error.contains("source and destination must differ"));
     assert_eq!(std::fs::read_to_string(&source).unwrap(), "hello\n");
 }
+
+#[tokio::test]
+async fn transfer_files_accepts_windows_remote_paths_on_non_windows_hosts() {
+    let fixture = support::spawn_broker_with_stub_daemon_platform("windows", false).await;
+
+    let error = fixture
+        .call_tool_error(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "builder-a",
+                    "path": "C:/Work/Artifact.txt"
+                },
+                "destination": {
+                    "target": "builder-a",
+                    "path": r"c:\work\artifact.txt"
+                },
+                "overwrite": "replace",
+                "create_parent": true
+            }),
+        )
+        .await;
+
+    assert!(error.contains("source and destination must differ"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn transfer_files_still_rejects_windows_paths_for_unix_local_endpoints() {
+    let fixture = support::spawn_broker_with_stub_daemon().await;
+
+    let error = fixture
+        .call_tool_error(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "local",
+                    "path": "C:/Work/Artifact.txt"
+                },
+                "destination": {
+                    "target": "local",
+                    "path": "/tmp/out.txt"
+                },
+                "overwrite": "fail",
+                "create_parent": true
+            }),
+        )
+        .await;
+
+    assert!(error.contains("is not absolute"));
+}
