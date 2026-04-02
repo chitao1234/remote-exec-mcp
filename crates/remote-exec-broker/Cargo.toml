@@ -8,20 +8,20 @@ version.workspace = true
 anyhow = { workspace = true }
 remote-exec-proto = { path = "../remote-exec-proto" }
 reqwest = { workspace = true }
-rmcp = { workspace = true, features = ["client", "macros", "transport-child-process", "transport-io"] }
+rmcp = { workspace = true, features = ["macros", "transport-io"] }
 rustls = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
 axum = { workspace = true }
 gethostname = { workspace = true }
 image = { workspace = true }
+rmcp = { workspace = true, features = ["client", "transport-child-process"] }
 remote-exec-daemon = { path = "../remote-exec-daemon" }
 remote-exec-pki = { path = "../remote-exec-pki" }
 tempfile = { workspace = true }
