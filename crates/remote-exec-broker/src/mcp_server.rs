@@ -173,7 +173,8 @@ impl BrokerServer {
 
     #[tool(
         name = "view_image",
-        description = "Read an image from a configured target machine."
+        description = "Read an image from a configured target machine.",
+        annotations(read_only_hint = true)
     )]
     async fn view_image(
         &self,

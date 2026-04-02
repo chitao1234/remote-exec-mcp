@@ -2,6 +2,7 @@ mod support;
 
 use axum::http::StatusCode;
 use remote_exec_proto::rpc::RpcErrorBody;
+use rmcp::model::PaginatedRequestParams;
 
 #[tokio::test]
 async fn apply_patch_returns_plain_text_plus_empty_structured_content() {
@@ -117,5 +118,33 @@ async fn view_image_invalid_detail_matches_daemon_message() {
     assert_eq!(
         result.text_output,
         "view_image.detail only supports `original`; omit `detail` for default resized behavior, got `low`"
+    );
+}
+
+#[tokio::test]
+async fn view_image_is_advertised_as_read_only() {
+    let fixture = support::spawn_broker_with_stub_daemon().await;
+
+    let tools = fixture
+        .client
+        .list_tools(Some(PaginatedRequestParams {
+            meta: None,
+            cursor: None,
+        }))
+        .await
+        .expect("list tools");
+
+    let view_image = tools
+        .tools
+        .into_iter()
+        .find(|tool| tool.name.as_ref() == "view_image")
+        .expect("view_image tool");
+
+    assert_eq!(
+        view_image
+            .annotations
+            .as_ref()
+            .and_then(|annotations| annotations.read_only_hint),
+        Some(true)
     );
 }
