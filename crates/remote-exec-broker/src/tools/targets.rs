@@ -1,4 +1,6 @@
-use remote_exec_proto::public::{ListTargetsInput, ListTargetsResult};
+use remote_exec_proto::public::{
+    ListTargetDaemonInfo, ListTargetEntry, ListTargetsInput, ListTargetsResult,
+};
 
 use crate::mcp_server::ToolCallOutput;
 
@@ -6,7 +8,23 @@ pub async fn list_targets(
     state: &crate::BrokerState,
     _input: ListTargetsInput,
 ) -> anyhow::Result<ToolCallOutput> {
-    let targets = state.targets.keys().cloned().collect::<Vec<_>>();
+    let mut targets = Vec::with_capacity(state.targets.len());
+    for (name, handle) in &state.targets {
+        let daemon_info = handle
+            .cached_daemon_info()
+            .await
+            .map(|info| ListTargetDaemonInfo {
+                daemon_version: info.daemon_version,
+                hostname: info.hostname,
+                platform: info.platform,
+                arch: info.arch,
+                supports_pty: info.supports_pty,
+            });
+        targets.push(ListTargetEntry {
+            name: name.clone(),
+            daemon_info,
+        });
+    }
     let text = format_targets_text(&targets);
 
     Ok(ToolCallOutput::text_and_structured(
@@ -15,12 +33,28 @@ pub async fn list_targets(
     ))
 }
 
-fn format_targets_text(targets: &[String]) -> String {
+fn format_targets_text(targets: &[ListTargetEntry]) -> String {
     if targets.is_empty() {
         return "No configured targets.".to_string();
     }
 
-    format!("Configured targets:\n- {}", targets.join("\n- "))
+    let lines = targets
+        .iter()
+        .map(|target| match &target.daemon_info {
+            Some(info) => format!(
+                "- {}: {}/{}, host={}, version={}, pty={}",
+                target.name,
+                info.platform,
+                info.arch,
+                info.hostname,
+                info.daemon_version,
+                if info.supports_pty { "yes" } else { "no" }
+            ),
+            None => format!("- {}", target.name),
+        })
+        .collect::<Vec<_>>();
+
+    format!("Configured targets:\n{}", lines.join("\n"))
 }
 
 #[cfg(test)]

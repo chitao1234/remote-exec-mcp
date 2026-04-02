@@ -51,8 +51,23 @@ pub struct CommandToolResult {
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ListTargetDaemonInfo {
+    pub daemon_version: String,
+    pub hostname: String,
+    pub platform: String,
+    pub arch: String,
+    pub supports_pty: bool,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ListTargetEntry {
+    pub name: String,
+    pub daemon_info: Option<ListTargetDaemonInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct ListTargetsResult {
-    pub targets: Vec<String>,
+    pub targets: Vec<ListTargetEntry>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]

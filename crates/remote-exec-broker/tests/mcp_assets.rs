@@ -27,7 +27,7 @@ async fn apply_patch_returns_plain_text_plus_empty_structured_content() {
 }
 
 #[tokio::test]
-async fn list_targets_returns_sorted_names_and_text_output() {
+async fn list_targets_returns_cached_daemon_info_and_null_for_unavailable_targets() {
     let fixture = support::spawn_broker_with_reverse_ordered_targets().await;
     let result = fixture
         .call_tool("list_targets", serde_json::json!({}))
@@ -35,12 +35,27 @@ async fn list_targets_returns_sorted_names_and_text_output() {
 
     assert_eq!(
         result.text_output,
-        "Configured targets:\n- builder-a\n- builder-b"
+        "Configured targets:\n- builder-a: linux/x86_64, host=builder-a-host, version=0.1.0, pty=yes\n- builder-b"
     );
     assert_eq!(
         result.structured_content,
         serde_json::json!({
-            "targets": ["builder-a", "builder-b"]
+            "targets": [
+                {
+                    "name": "builder-a",
+                    "daemon_info": {
+                        "daemon_version": "0.1.0",
+                        "hostname": "builder-a-host",
+                        "platform": "linux",
+                        "arch": "x86_64",
+                        "supports_pty": true
+                    }
+                },
+                {
+                    "name": "builder-b",
+                    "daemon_info": null
+                }
+            ]
         })
     );
 }

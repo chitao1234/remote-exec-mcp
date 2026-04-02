@@ -9,17 +9,42 @@ use std::sync::{Arc, Once};
 
 use anyhow::Context;
 use daemon_client::{DaemonClient, DaemonClientError};
+use remote_exec_proto::rpc::TargetInfoResponse;
 use session_store::SessionStore;
 use tokio::sync::Mutex;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CachedDaemonInfo {
+    pub daemon_version: String,
+    pub hostname: String,
+    pub platform: String,
+    pub arch: String,
+    pub supports_pty: bool,
+}
 
 #[derive(Clone)]
 pub struct TargetHandle {
     pub client: DaemonClient,
     expected_daemon_name: Option<String>,
     identity_verified: Arc<Mutex<bool>>,
+    cached_daemon_info: Arc<Mutex<Option<CachedDaemonInfo>>>,
 }
 
 impl TargetHandle {
+    fn cache_from_target_info(info: &TargetInfoResponse) -> CachedDaemonInfo {
+        CachedDaemonInfo {
+            daemon_version: info.daemon_version.clone(),
+            hostname: info.hostname.clone(),
+            platform: info.platform.clone(),
+            arch: info.arch.clone(),
+            supports_pty: info.supports_pty,
+        }
+    }
+
+    pub async fn cached_daemon_info(&self) -> Option<CachedDaemonInfo> {
+        self.cached_daemon_info.lock().await.clone()
+    }
+
     pub async fn ensure_identity_verified(&self, name: &str) -> anyhow::Result<()> {
         let mut identity_verified = self.identity_verified.lock().await;
         if *identity_verified {
@@ -35,6 +60,7 @@ impl TargetHandle {
             );
         }
 
+        *self.cached_daemon_info.lock().await = Some(Self::cache_from_target_info(&info));
         *identity_verified = true;
         Ok(())
     }
@@ -65,7 +91,7 @@ async fn build_state(config: config::BrokerConfig) -> anyhow::Result<BrokerState
 
     for (name, target_config) in &config.targets {
         let client = DaemonClient::new(target_config).await?;
-        let identity_verified = match client.target_info().await {
+        let (identity_verified, cached_daemon_info) = match client.target_info().await {
             Ok(info) => {
                 if let Some(expected_name) = &target_config.expected_daemon_name {
                     anyhow::ensure!(
@@ -74,11 +100,11 @@ async fn build_state(config: config::BrokerConfig) -> anyhow::Result<BrokerState
                         info.target
                     );
                 }
-                true
+                (true, Some(TargetHandle::cache_from_target_info(&info)))
             }
             Err(DaemonClientError::Transport(err)) => {
                 tracing::warn!(target = %name, ?err, "target unavailable during broker startup");
-                false
+                (false, None)
             }
             Err(err) => return Err(err.into()),
         };
@@ -89,6 +115,7 @@ async fn build_state(config: config::BrokerConfig) -> anyhow::Result<BrokerState
                 client,
                 expected_daemon_name: target_config.expected_daemon_name.clone(),
                 identity_verified: Arc::new(Mutex::new(identity_verified)),
+                cached_daemon_info: Arc::new(Mutex::new(cached_daemon_info)),
             },
         );
     }

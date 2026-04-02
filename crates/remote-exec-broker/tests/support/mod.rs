@@ -442,6 +442,10 @@ expected_daemon_name = "builder-b"
 struct StubDaemonState {
     target: String,
     daemon_instance_id: String,
+    target_hostname: String,
+    target_platform: String,
+    target_arch: String,
+    target_supports_pty: bool,
     exec_write_behavior: Arc<Mutex<ExecWriteBehavior>>,
     exec_start_warnings: Arc<Mutex<Vec<ExecWarning>>>,
     exec_start_calls: Arc<Mutex<usize>>,
@@ -453,6 +457,10 @@ fn stub_daemon_state(target: &str, exec_write_behavior: ExecWriteBehavior) -> St
     StubDaemonState {
         target: target.to_string(),
         daemon_instance_id: "daemon-instance-1".to_string(),
+        target_hostname: format!("{target}-host"),
+        target_platform: "linux".to_string(),
+        target_arch: "x86_64".to_string(),
+        target_supports_pty: true,
         exec_write_behavior: Arc::new(Mutex::new(exec_write_behavior)),
         exec_start_warnings: Arc::new(Mutex::new(Vec::new())),
         exec_start_calls: Arc::new(Mutex::new(0)),
@@ -549,10 +557,10 @@ async fn target_info(State(state): State<StubDaemonState>) -> Json<TargetInfoRes
         target: state.target,
         daemon_version: "0.1.0".to_string(),
         daemon_instance_id: state.daemon_instance_id,
-        hostname: gethostname::gethostname().to_string_lossy().into_owned(),
-        platform: std::env::consts::OS.to_string(),
-        arch: std::env::consts::ARCH.to_string(),
-        supports_pty: true,
+        hostname: state.target_hostname,
+        platform: state.target_platform,
+        arch: state.target_arch,
+        supports_pty: state.target_supports_pty,
         supports_image_read: true,
     })
 }
