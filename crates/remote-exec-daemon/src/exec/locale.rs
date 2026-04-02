@@ -7,6 +7,7 @@ const TEST_LOCALE_OUTPUT_ENV: &str = "REMOTE_EXEC_TEST_LOCALE_OUTPUT";
 pub(crate) enum LocaleStrategy {
     Direct(String),
     HybridCType(String),
+    #[allow(dead_code)]
     LastResortLcAll(String),
     LangCOnly,
 }
@@ -78,9 +79,9 @@ where
 
 fn resolved_from_override_env() -> Option<LocaleEnvPlan> {
     let output = std::env::var(TEST_LOCALE_OUTPUT_ENV).ok()?;
-    Some(LocaleEnvPlan::from_strategy(choose_strategy(parse_locale_output(
-        &output,
-    ))))
+    Some(LocaleEnvPlan::from_strategy(choose_strategy(
+        parse_locale_output(&output),
+    )))
 }
 
 fn resolve_locale_env_plan() -> LocaleEnvPlan {

@@ -10,12 +10,9 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use super::transcript::TranscriptBuffer;
 
-const NORMALIZED_ENV: [(&str, &str); 10] = [
+const NORMALIZED_ENV: [(&str, &str); 7] = [
     ("NO_COLOR", "1"),
     ("TERM", "dumb"),
-    ("LANG", "C.UTF-8"),
-    ("LC_CTYPE", "C.UTF-8"),
-    ("LC_ALL", "C.UTF-8"),
     ("COLORTERM", ""),
     ("PAGER", "cat"),
     ("GIT_PAGER", "cat"),
@@ -51,14 +48,26 @@ pub fn spawn(cmd: &[String], cwd: &std::path::Path, tty: bool) -> anyhow::Result
 }
 
 fn apply_env_overlay_builder(builder: &mut CommandBuilder) {
+    builder.env_remove("LANG");
+    builder.env_remove("LC_CTYPE");
+    builder.env_remove("LC_ALL");
     for (key, value) in NORMALIZED_ENV {
         builder.env(key, value);
+    }
+    for (key, value) in super::locale::LocaleEnvPlan::resolved().as_pairs() {
+        builder.env(&key, &value);
     }
 }
 
 fn apply_env_overlay_command(command: &mut Command) {
+    command.env_remove("LANG");
+    command.env_remove("LC_CTYPE");
+    command.env_remove("LC_ALL");
     for (key, value) in NORMALIZED_ENV {
         command.env(key, value);
+    }
+    for (key, value) in super::locale::LocaleEnvPlan::resolved().as_pairs() {
+        command.env(&key, &value);
     }
 }
 

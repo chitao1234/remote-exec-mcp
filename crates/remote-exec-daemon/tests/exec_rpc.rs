@@ -168,6 +168,10 @@ async fn env_overlay_is_applied_in_pipe_mode() {
         ("PAGER", "less"),
         ("GIT_PAGER", "more"),
         ("CODEX_CI", "0"),
+        (
+            "REMOTE_EXEC_TEST_LOCALE_OUTPUT",
+            "fr_FR.UTF-8\nen_US.UTF-8\n",
+        ),
     ])
     .await;
     let fixture = support::spawn_daemon("builder-a").await;
@@ -176,7 +180,7 @@ async fn env_overlay_is_applied_in_pipe_mode() {
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
             &ExecStartRequest {
-                cmd: "printf '%s|%s|%s|%s|%s' \"$TERM\" \"$NO_COLOR\" \"$PAGER\" \"$GIT_PAGER\" \"$CODEX_CI\""
+                cmd: "printf '%s|%s|%s|%s|%s|%s|%s|%s' \"$TERM\" \"$NO_COLOR\" \"$PAGER\" \"$GIT_PAGER\" \"$CODEX_CI\" \"$LANG\" \"$LC_CTYPE\" \"$LC_ALL\""
                     .to_string(),
                 workdir: None,
                 shell: Some(TEST_SHELL.to_string()),
@@ -189,7 +193,7 @@ async fn env_overlay_is_applied_in_pipe_mode() {
         .await;
 
     assert_eq!(response.exit_code, Some(0));
-    assert_eq!(response.output, "dumb|1|cat|cat|1");
+    assert_eq!(response.output, "dumb|1|cat|cat|1|C|en_US.UTF-8|");
 }
 
 #[tokio::test]
@@ -200,6 +204,10 @@ async fn env_overlay_is_applied_in_pty_mode() {
         ("PAGER", "less"),
         ("GIT_PAGER", "more"),
         ("CODEX_CI", "0"),
+        (
+            "REMOTE_EXEC_TEST_LOCALE_OUTPUT",
+            "fr_FR.UTF-8\nen_US.UTF-8\n",
+        ),
     ])
     .await;
     let fixture = support::spawn_daemon("builder-a").await;
@@ -208,7 +216,7 @@ async fn env_overlay_is_applied_in_pty_mode() {
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
             &ExecStartRequest {
-                cmd: "printf '%s|%s|%s|%s|%s' \"$TERM\" \"$NO_COLOR\" \"$PAGER\" \"$GIT_PAGER\" \"$CODEX_CI\""
+                cmd: "printf '%s|%s|%s|%s|%s|%s|%s|%s' \"$TERM\" \"$NO_COLOR\" \"$PAGER\" \"$GIT_PAGER\" \"$CODEX_CI\" \"$LANG\" \"$LC_CTYPE\" \"$LC_ALL\""
                     .to_string(),
                 workdir: None,
                 shell: Some(TEST_SHELL.to_string()),
@@ -221,7 +229,63 @@ async fn env_overlay_is_applied_in_pty_mode() {
         .await;
 
     assert_eq!(response.exit_code, Some(0));
-    assert_eq!(response.output, "dumb|1|cat|cat|1");
+    assert_eq!(response.output, "dumb|1|cat|cat|1|C|en_US.UTF-8|");
+}
+
+#[tokio::test]
+async fn env_overlay_prefers_lang_c_plus_lc_ctype_when_c_utf8_is_unavailable() {
+    let _env = EnvOverrideGuard::set(&[(
+        "REMOTE_EXEC_TEST_LOCALE_OUTPUT",
+        "fr_FR.UTF-8\nen_US.UTF-8\n",
+    )])
+    .await;
+    let fixture = support::spawn_daemon("builder-a").await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "printf '%s|%s|%s' \"$LANG\" \"$LC_CTYPE\" \"$LC_ALL\"".to_string(),
+                workdir: None,
+                shell: Some(TEST_SHELL.to_string()),
+                tty: false,
+                yield_time_ms: Some(250),
+                max_output_tokens: None,
+                login: Some(false),
+            },
+        )
+        .await;
+
+    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.output, "C|en_US.UTF-8|");
+}
+
+#[tokio::test]
+async fn env_overlay_falls_back_to_lang_c_only_when_no_utf8_locale_is_available() {
+    let _env = EnvOverrideGuard::set(&[(
+        "REMOTE_EXEC_TEST_LOCALE_OUTPUT",
+        "C\nPOSIX\nen_US.ISO8859-1\n",
+    )])
+    .await;
+    let fixture = support::spawn_daemon("builder-a").await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "printf '%s|%s|%s' \"$LANG\" \"$LC_CTYPE\" \"$LC_ALL\"".to_string(),
+                workdir: None,
+                shell: Some(TEST_SHELL.to_string()),
+                tty: false,
+                yield_time_ms: Some(250),
+                max_output_tokens: None,
+                login: Some(false),
+            },
+        )
+        .await;
+
+    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.output, "C||");
 }
 
 #[tokio::test]
