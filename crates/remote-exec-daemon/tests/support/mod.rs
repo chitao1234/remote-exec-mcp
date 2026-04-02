@@ -35,6 +35,20 @@ impl DaemonFixture {
     }
 
     #[allow(dead_code)]
+    pub async fn raw_post_bytes(
+        &self,
+        path: &str,
+        headers: &[(&str, String)],
+        body: Vec<u8>,
+    ) -> reqwest::Response {
+        let mut request = self.client.post(self.url(path));
+        for (name, value) in headers {
+            request = request.header(*name, value);
+        }
+        request.body(body).send().await.unwrap()
+    }
+
+    #[allow(dead_code)]
     pub async fn rpc<Req, Resp>(&self, path: &str, body: &Req) -> Resp
     where
         Req: Serialize + ?Sized,
