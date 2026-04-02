@@ -23,30 +23,46 @@ impl LocaleEnvPlan {
     }
 
     pub(crate) fn resolved() -> Self {
-        if let Some(plan) = resolved_from_override_env() {
-            return plan;
+        #[cfg(windows)]
+        {
+            return LocaleEnvPlan::from_strategy(LocaleStrategy::LangCOnly);
         }
 
-        static CACHE: OnceLock<LocaleEnvPlan> = OnceLock::new();
-        CACHE.get_or_init(resolve_locale_env_plan).clone()
+        #[cfg(not(windows))]
+        {
+            if let Some(plan) = resolved_from_override_env() {
+                return plan;
+            }
+
+            static CACHE: OnceLock<LocaleEnvPlan> = OnceLock::new();
+            CACHE.get_or_init(resolve_locale_env_plan).clone()
+        }
     }
 
     pub(crate) fn as_pairs(&self) -> Vec<(String, String)> {
-        match &self.strategy {
-            LocaleStrategy::Direct(locale) => vec![
-                ("LANG".to_string(), locale.clone()),
-                ("LC_CTYPE".to_string(), locale.clone()),
-                ("LC_ALL".to_string(), locale.clone()),
-            ],
-            LocaleStrategy::HybridCType(locale) => vec![
-                ("LANG".to_string(), "C".to_string()),
-                ("LC_CTYPE".to_string(), locale.clone()),
-            ],
-            LocaleStrategy::LastResortLcAll(locale) => vec![
-                ("LANG".to_string(), "C".to_string()),
-                ("LC_ALL".to_string(), locale.clone()),
-            ],
-            LocaleStrategy::LangCOnly => vec![("LANG".to_string(), "C".to_string())],
+        #[cfg(windows)]
+        {
+            Vec::new()
+        }
+
+        #[cfg(not(windows))]
+        {
+            match &self.strategy {
+                LocaleStrategy::Direct(locale) => vec![
+                    ("LANG".to_string(), locale.clone()),
+                    ("LC_CTYPE".to_string(), locale.clone()),
+                    ("LC_ALL".to_string(), locale.clone()),
+                ],
+                LocaleStrategy::HybridCType(locale) => vec![
+                    ("LANG".to_string(), "C".to_string()),
+                    ("LC_CTYPE".to_string(), locale.clone()),
+                ],
+                LocaleStrategy::LastResortLcAll(locale) => vec![
+                    ("LANG".to_string(), "C".to_string()),
+                    ("LC_ALL".to_string(), locale.clone()),
+                ],
+                LocaleStrategy::LangCOnly => vec![("LANG".to_string(), "C".to_string())],
+            }
         }
     }
 }
@@ -195,6 +211,7 @@ mod tests {
         assert_eq!(strategy, LocaleStrategy::LangCOnly);
     }
 
+    #[cfg(unix)]
     #[test]
     fn locale_env_plan_matches_direct_strategy_shape() {
         let plan = LocaleEnvPlan::from_strategy(LocaleStrategy::Direct("C.UTF-8".to_string()));
@@ -208,6 +225,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn locale_env_plan_matches_hybrid_strategy_shape() {
         let plan =
@@ -221,9 +239,17 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn locale_env_plan_matches_lang_c_only_shape() {
         let plan = LocaleEnvPlan::from_strategy(LocaleStrategy::LangCOnly);
         assert_eq!(plan.as_pairs(), vec![("LANG".to_string(), "C".to_string())]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn locale_env_plan_is_empty_on_windows() {
+        let plan = LocaleEnvPlan::from_strategy(LocaleStrategy::LangCOnly);
+        assert!(plan.as_pairs().is_empty());
     }
 }

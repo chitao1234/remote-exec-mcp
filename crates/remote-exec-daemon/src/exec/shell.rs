@@ -1,14 +1,19 @@
+#[cfg(unix)]
 use std::ffi::OsStr;
+#[cfg(unix)]
 use std::path::Path;
 
-pub fn choose_shell(
-    shell_override: Option<&str>,
-    env_shell: Option<&str>,
-    passwd_shell: Option<&str>,
-) -> String {
-    preferred_shell(shell_override, env_shell, passwd_shell).unwrap_or("/bin/sh".to_string())
+#[cfg(unix)]
+pub fn platform_supports_login_shells() -> bool {
+    true
 }
 
+#[cfg(windows)]
+pub fn platform_supports_login_shells() -> bool {
+    false
+}
+
+#[cfg(unix)]
 pub fn resolve_shell(shell_override: Option<&str>) -> anyhow::Result<String> {
     let env_shell = std::env::var("SHELL").ok();
     Ok(resolve_shell_with(
@@ -25,6 +30,60 @@ pub fn resolve_shell(shell_override: Option<&str>) -> anyhow::Result<String> {
     ))
 }
 
+#[cfg(windows)]
+pub fn resolve_shell(shell_override: Option<&str>) -> anyhow::Result<String> {
+    if let Some(shell) = shell_override.filter(|value| !value.is_empty()) {
+        return Ok(shell.to_string());
+    }
+    if let Some(comspec) = std::env::var("COMSPEC")
+        .ok()
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(comspec);
+    }
+    Ok("cmd.exe".to_string())
+}
+
+pub fn shell_argv(shell: &str, login: bool, cmd: &str) -> Vec<String> {
+    let lower = shell
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or(shell)
+        .to_ascii_lowercase();
+
+    if lower == "powershell.exe" || lower == "powershell" || lower == "pwsh.exe" || lower == "pwsh"
+    {
+        let mut argv = vec![shell.to_string()];
+        if !login {
+            argv.push("-NoProfile".to_string());
+        }
+        argv.push("-Command".to_string());
+        argv.push(cmd.to_string());
+        return argv;
+    }
+
+    if cfg!(windows) {
+        return vec![shell.to_string(), "/C".to_string(), cmd.to_string()];
+    }
+
+    if login {
+        vec![
+            shell.to_string(),
+            "-l".to_string(),
+            "-c".to_string(),
+            cmd.to_string(),
+        ]
+    } else {
+        vec![shell.to_string(), "-c".to_string(), cmd.to_string()]
+    }
+}
+
+#[cfg(unix)]
+fn choose_shell(shell_override: Option<&str>, env_shell: Option<&str>, passwd_shell: Option<&str>) -> String {
+    preferred_shell(shell_override, env_shell, passwd_shell).unwrap_or("/bin/sh".to_string())
+}
+
+#[cfg(unix)]
 fn preferred_shell(
     shell_override: Option<&str>,
     env_shell: Option<&str>,
@@ -37,6 +96,7 @@ fn preferred_shell(
         .map(str::to_owned)
 }
 
+#[cfg(unix)]
 fn resolve_shell_with<F>(
     shell_override: Option<&str>,
     env_shell: Option<&str>,
@@ -54,6 +114,7 @@ where
         .unwrap_or(fallback)
 }
 
+#[cfg(unix)]
 fn find_bash_in_path(path_env: Option<&OsStr>) -> Option<String> {
     std::env::split_paths(path_env?)
         .map(|dir| dir.join("bash"))
@@ -61,6 +122,7 @@ fn find_bash_in_path(path_env: Option<&OsStr>) -> Option<String> {
         .map(|path| path.to_string_lossy().into_owned())
 }
 
+#[cfg(unix)]
 fn usable_passwd_shell(passwd_shell: Option<&str>) -> Option<&str> {
     passwd_shell.filter(|value| {
         !value.is_empty()
@@ -72,6 +134,7 @@ fn usable_passwd_shell(passwd_shell: Option<&str>) -> Option<&str> {
     })
 }
 
+#[cfg(unix)]
 fn shell_path_is_executable(path: &Path) -> bool {
     let Ok(metadata) = std::fs::metadata(path) else {
         return false;
@@ -87,12 +150,7 @@ fn has_execute_bits(metadata: &std::fs::Metadata) -> bool {
     metadata.permissions().mode() & 0o111 != 0
 }
 
-#[cfg(not(unix))]
-fn has_execute_bits(_metadata: &std::fs::Metadata) -> bool {
-    true
-}
-
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use std::ffi::{OsStr, OsString};
     use std::os::unix::fs::PermissionsExt;
@@ -198,9 +256,7 @@ mod tests {
     fn resolve_shell_ignores_missing_passwd_shell() {
         with_path_var(None, || {
             assert_eq!(
-                resolve_shell_with(None, None, || {
-                    Ok(Some("/opt/missing-shell".to_string()))
-                }),
+                resolve_shell_with(None, None, || Ok(Some("/opt/missing-shell".to_string()))),
                 "/bin/sh"
             );
         });

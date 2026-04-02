@@ -6,6 +6,7 @@ use std::sync::OnceLock;
 use remote_exec_proto::rpc::{ExecResponse, ExecStartRequest, ExecWriteRequest};
 use tokio::sync::Mutex;
 
+#[cfg(unix)]
 const TEST_SHELL: &str = "/bin/sh";
 // Commands in these tests are expected to finish in a single RPC response, but the daemon only
 // guarantees a minimum 250 ms wait. Use a wider window so full-suite load does not turn them into
@@ -54,6 +55,7 @@ impl Drop for EnvOverrideGuard {
     }
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn exec_start_returns_a_live_session_for_long_running_tty_processes() {
     let fixture = support::spawn_daemon("builder-a").await;
@@ -77,6 +79,7 @@ async fn exec_start_returns_a_live_session_for_long_running_tty_processes() {
     assert!(response.output.contains("ready"));
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn exec_start_uses_login_shell_by_default_when_login_is_omitted() {
     let home = tempfile::tempdir().unwrap();
@@ -108,6 +111,7 @@ async fn exec_start_uses_login_shell_by_default_when_login_is_omitted() {
     assert_eq!(response.output, "from_profile");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn exec_start_rejects_explicit_login_when_disabled_by_config() {
     let fixture =
@@ -132,6 +136,54 @@ async fn exec_start_rejects_explicit_login_when_disabled_by_config() {
     assert!(err.message.contains("login shells are disabled"));
 }
 
+#[cfg(windows)]
+#[tokio::test]
+async fn exec_start_rejects_login_shell_requests_on_windows() {
+    let fixture = support::spawn_daemon("builder-a").await;
+
+    let err = fixture
+        .rpc_error(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "echo should-not-run".to_string(),
+                workdir: None,
+                shell: Some("cmd.exe".to_string()),
+                tty: false,
+                yield_time_ms: Some(250),
+                max_output_tokens: None,
+                login: Some(true),
+            },
+        )
+        .await;
+
+    assert_eq!(err.code, "login_shell_unsupported");
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn exec_start_uses_cmd_when_shell_is_omitted() {
+    let fixture = support::spawn_daemon("builder-a").await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "echo windows-ready".to_string(),
+                workdir: None,
+                shell: None,
+                tty: false,
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
+                max_output_tokens: None,
+                login: None,
+            },
+        )
+        .await;
+
+    assert_eq!(response.exit_code, Some(0));
+    assert!(response.output.to_ascii_lowercase().contains("windows-ready"));
+}
+
+#[cfg(unix)]
 #[tokio::test]
 async fn exec_start_uses_non_login_shell_when_policy_disabled_and_login_is_omitted() {
     let home = tempfile::tempdir().unwrap();
@@ -164,6 +216,7 @@ async fn exec_start_uses_non_login_shell_when_policy_disabled_and_login_is_omitt
     assert_eq!(response.output, "");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn env_overlay_is_applied_in_pipe_mode() {
     let _env = EnvOverrideGuard::set(&[
@@ -200,6 +253,7 @@ async fn env_overlay_is_applied_in_pipe_mode() {
     assert_eq!(response.output, "dumb|1|cat|cat|1|C|en_US.UTF-8|");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn env_overlay_is_applied_in_pty_mode() {
     let _env = EnvOverrideGuard::set(&[
@@ -236,6 +290,7 @@ async fn env_overlay_is_applied_in_pty_mode() {
     assert_eq!(response.output, "dumb|1|cat|cat|1|C|en_US.UTF-8|");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn env_overlay_prefers_lang_c_plus_lc_ctype_when_c_utf8_is_unavailable() {
     let _env = EnvOverrideGuard::set(&[(
@@ -264,6 +319,7 @@ async fn env_overlay_prefers_lang_c_plus_lc_ctype_when_c_utf8_is_unavailable() {
     assert_eq!(response.output, "C|en_US.UTF-8|");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn env_overlay_falls_back_to_lang_c_only_when_no_utf8_locale_is_available() {
     let _env = EnvOverrideGuard::set(&[(
@@ -292,6 +348,7 @@ async fn env_overlay_falls_back_to_lang_c_only_when_no_utf8_locale_is_available(
     assert_eq!(response.output, "C||");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn omitted_max_output_tokens_defaults_to_ten_thousand() {
     let fixture = support::spawn_daemon("builder-a").await;
@@ -316,6 +373,7 @@ async fn omitted_max_output_tokens_defaults_to_ten_thousand() {
     assert_eq!(response.output.split_whitespace().count(), 10_000);
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn exec_start_truncates_output_to_max_output_tokens() {
     let fixture = support::spawn_daemon("builder-a").await;
@@ -339,6 +397,7 @@ async fn exec_start_truncates_output_to_max_output_tokens() {
     assert_eq!(response.output, "one two three");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn exec_output_preserves_trailing_newline_when_within_max_output_tokens() {
     let fixture = support::spawn_daemon("builder-a").await;
@@ -362,6 +421,7 @@ async fn exec_output_preserves_trailing_newline_when_within_max_output_tokens() 
     assert_eq!(response.output, "one two\n");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn exec_output_drains_late_output_after_exit() {
     let fixture = support::spawn_daemon("builder-a").await;
@@ -386,6 +446,7 @@ async fn exec_output_drains_late_output_after_exit() {
     assert_eq!(response.output, "late tail");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens() {
     let fixture = support::spawn_daemon("builder-a").await;
@@ -422,6 +483,7 @@ async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens() {
     assert_eq!(response.output, "one two three");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn exec_write_rejects_non_tty_sessions_when_chars_are_present() {
     let fixture = support::spawn_daemon("builder-a").await;
@@ -457,6 +519,7 @@ async fn exec_write_rejects_non_tty_sessions_when_chars_are_present() {
     assert!(err.message.contains("tty=true"));
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn exec_write_round_trips_pty_input_without_echo_assumptions() {
     let fixture = support::spawn_daemon("builder-a").await;
@@ -493,6 +556,7 @@ async fn exec_write_round_trips_pty_input_without_echo_assumptions() {
     assert!(response.output.contains("__RESULT__:ping pong:__END__"));
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon() {
     use std::time::{Duration, Instant};

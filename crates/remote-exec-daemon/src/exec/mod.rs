@@ -24,7 +24,19 @@ pub async fn exec_start(
     Json(req): Json<ExecStartRequest>,
 ) -> Result<Json<ExecResponse>, (StatusCode, Json<RpcErrorBody>)> {
     let cwd = resolve_workdir(&state, req.workdir.as_deref()).map_err(internal_error)?;
+    if req.tty && !session::supports_pty() {
+        return Err(rpc_error(
+            "tty_unsupported",
+            "tty is not supported on this host",
+        ));
+    }
     let login = match req.login {
+        Some(true) if !shell::platform_supports_login_shells() => {
+            return Err(rpc_error(
+                "login_shell_unsupported",
+                "login shells are not supported on this platform",
+            ));
+        }
         Some(true) if !state.config.allow_login_shell => {
             return Err(rpc_error(
                 "login_shell_disabled",
@@ -32,9 +44,11 @@ pub async fn exec_start(
             ));
         }
         Some(login) => login,
-        None => state.config.allow_login_shell,
+        None if shell::platform_supports_login_shells() => state.config.allow_login_shell,
+        None => false,
     };
-    let argv = shell_argv(req.shell.as_deref(), login, &req.cmd).map_err(internal_error)?;
+    let shell = shell::resolve_shell(req.shell.as_deref()).map_err(internal_error)?;
+    let argv = shell::shell_argv(&shell, login, &req.cmd);
     let mut session = session::spawn(&argv, &cwd, req.tty).map_err(internal_error)?;
 
     let deadline = Instant::now()
@@ -194,20 +208,6 @@ pub fn internal_error(err: anyhow::Error) -> (StatusCode, Json<RpcErrorBody>) {
     )
 }
 
-fn shell_argv(shell: Option<&str>, login: bool, cmd: &str) -> anyhow::Result<Vec<String>> {
-    let shell = shell::resolve_shell(shell)?;
-    if login {
-        Ok(vec![
-            shell,
-            "-l".to_string(),
-            "-c".to_string(),
-            cmd.to_string(),
-        ])
-    } else {
-        Ok(vec![shell, "-c".to_string(), cmd.to_string()])
-    }
-}
-
 fn chunk_id() -> String {
     let mut bytes = [0u8; 3];
     rand::thread_rng().fill_bytes(&mut bytes);
@@ -277,12 +277,13 @@ fn finish_response(
 
 #[cfg(test)]
 mod tests {
-    use super::shell_argv;
+    use super::shell;
 
+    #[cfg(unix)]
     #[test]
     fn shell_argv_uses_dash_c_for_non_login_shells() {
         assert_eq!(
-            shell_argv(Some("/bin/sh"), false, "printf ok").unwrap(),
+            shell::shell_argv("/bin/sh", false, "printf ok"),
             vec![
                 "/bin/sh".to_string(),
                 "-c".to_string(),
@@ -291,15 +292,43 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn shell_argv_uses_dash_l_then_dash_c_for_login_shells() {
         assert_eq!(
-            shell_argv(Some("/bin/sh"), true, "printf ok").unwrap(),
+            shell::shell_argv("/bin/sh", true, "printf ok"),
             vec![
                 "/bin/sh".to_string(),
                 "-l".to_string(),
                 "-c".to_string(),
                 "printf ok".to_string(),
+            ]
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn shell_argv_uses_cmd_c_for_cmd_shells() {
+        assert_eq!(
+            shell::shell_argv("cmd.exe", false, "echo ok"),
+            vec![
+                "cmd.exe".to_string(),
+                "/C".to_string(),
+                "echo ok".to_string(),
+            ]
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn shell_argv_uses_command_for_powershell_family() {
+        assert_eq!(
+            shell::shell_argv("pwsh", false, "Write-Output ok"),
+            vec![
+                "pwsh".to_string(),
+                "-NoProfile".to_string(),
+                "-Command".to_string(),
+                "Write-Output ok".to_string(),
             ]
         );
     }

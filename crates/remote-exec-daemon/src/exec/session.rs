@@ -39,8 +39,22 @@ pub struct PtySession {
     pub writer: Box<dyn Write + Send>,
 }
 
+fn default_pty_size() -> PtySize {
+    PtySize {
+        rows: 24,
+        cols: 120,
+        pixel_width: 0,
+        pixel_height: 0,
+    }
+}
+
+pub fn supports_pty() -> bool {
+    NativePtySystem::default().openpty(default_pty_size()).is_ok()
+}
+
 pub fn spawn(cmd: &[String], cwd: &std::path::Path, tty: bool) -> anyhow::Result<LiveSession> {
     if tty {
+        anyhow::ensure!(supports_pty(), "tty is not supported on this host");
         spawn_pty(cmd, cwd)
     } else {
         spawn_pipe(cmd, cwd)
@@ -72,12 +86,7 @@ fn apply_env_overlay_command(command: &mut Command) {
 }
 
 fn spawn_pty(cmd: &[String], cwd: &std::path::Path) -> anyhow::Result<LiveSession> {
-    let pty = NativePtySystem::default().openpty(PtySize {
-        rows: 24,
-        cols: 120,
-        pixel_width: 0,
-        pixel_height: 0,
-    })?;
+    let pty = NativePtySystem::default().openpty(default_pty_size())?;
     let mut builder = CommandBuilder::new(&cmd[0]);
     for arg in &cmd[1..] {
         builder.arg(arg);
