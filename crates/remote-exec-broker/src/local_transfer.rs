@@ -1,23 +1,40 @@
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+use remote_exec_proto::path::{
+    PathPolicy, is_absolute_for_policy, linux_path_policy, normalize_for_system,
+    windows_path_policy,
+};
 use remote_exec_proto::rpc::{
     TransferImportRequest, TransferImportResponse, TransferOverwriteMode, TransferSourceType,
 };
 
 const SINGLE_FILE_ENTRY: &str = ".remote-exec-file";
 
+fn host_policy() -> PathPolicy {
+    if cfg!(windows) {
+        windows_path_policy()
+    } else {
+        linux_path_policy()
+    }
+}
+
+fn host_path(raw: &str) -> PathBuf {
+    PathBuf::from(normalize_for_system(host_policy(), raw))
+}
+
 pub async fn export_path_to_archive(
     path: &Path,
     archive_path: &Path,
 ) -> anyhow::Result<TransferSourceType> {
+    let source_text = path.display().to_string();
     anyhow::ensure!(
-        path.is_absolute(),
+        is_absolute_for_policy(host_policy(), &source_text),
         "transfer source path `{}` is not absolute",
-        path.display()
+        source_text
     );
+    let path = host_path(&source_text);
 
-    let metadata = tokio::fs::symlink_metadata(path).await?;
+    let metadata = tokio::fs::symlink_metadata(&path).await?;
     let source_type = if metadata.file_type().is_symlink() {
         anyhow::bail!(
             "transfer source contains unsupported symlink `{}`",
@@ -61,13 +78,17 @@ pub async fn import_archive_from_file(
     archive_path: &Path,
     request: &TransferImportRequest,
 ) -> anyhow::Result<TransferImportResponse> {
-    let destination = PathBuf::from(&request.destination_path);
+    anyhow::ensure!(
+        is_absolute_for_policy(host_policy(), &request.destination_path),
+        "transfer destination path `{}` is not absolute",
+        request.destination_path
+    );
+    let destination = host_path(&request.destination_path);
     anyhow::ensure!(
         destination.is_absolute(),
         "transfer destination path `{}` is not absolute",
         destination.display()
     );
-
     let replaced = prepare_destination(&destination, request).await?;
     let archive = archive_path.to_path_buf();
     let request = request.clone();
@@ -180,11 +201,7 @@ fn extract_archive(
                 std::fs::create_dir_all(parent)?;
             }
             std::fs::write(destination_path, &bytes)?;
-            if entry.header().mode()? & 0o111 != 0 {
-                let mut perms = std::fs::metadata(destination_path)?.permissions();
-                perms.set_mode(perms.mode() | 0o111);
-                std::fs::set_permissions(destination_path, perms)?;
-            }
+            restore_executable_bits(destination_path, entry.header().mode()?)?;
             anyhow::ensure!(
                 entries.next().transpose()?.is_none(),
                 "file archive contains extra entries"
@@ -220,11 +237,7 @@ fn extract_archive(
                 let mut bytes = Vec::new();
                 std::io::Read::read_to_end(&mut entry, &mut bytes)?;
                 std::fs::write(&out, &bytes)?;
-                if entry.header().mode()? & 0o111 != 0 {
-                    let mut perms = std::fs::metadata(&out)?.permissions();
-                    perms.set_mode(perms.mode() | 0o111);
-                    std::fs::set_permissions(&out, perms)?;
-                }
+                restore_executable_bits(&out, entry.header().mode()?)?;
                 summary.bytes_copied += bytes.len() as u64;
                 summary.files_copied += 1;
             }
@@ -232,4 +245,21 @@ fn extract_archive(
     }
 
     Ok(summary)
+}
+
+#[cfg(unix)]
+fn restore_executable_bits(path: &Path, mode: u32) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    if mode & 0o111 != 0 {
+        let mut perms = std::fs::metadata(path)?.permissions();
+        perms.set_mode(perms.mode() | 0o111);
+        std::fs::set_permissions(path, perms)?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn restore_executable_bits(_path: &Path, _mode: u32) -> anyhow::Result<()> {
+    Ok(())
 }

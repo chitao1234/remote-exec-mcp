@@ -1,5 +1,6 @@
 mod support;
 
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
 use remote_exec_proto::rpc::{
@@ -35,6 +36,7 @@ async fn export_file_streams_archive_and_reports_file_source_type() {
     assert!(!response.bytes().await.unwrap().is_empty());
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn export_directory_rejects_nested_symlinks_before_streaming() {
     let fixture = support::spawn_daemon("builder-a").await;
@@ -62,6 +64,7 @@ async fn export_directory_rejects_nested_symlinks_before_streaming() {
     assert_eq!(body.code, "transfer_source_unsupported");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn export_rejects_symlink_source_root() {
     let fixture = support::spawn_daemon("builder-a").await;
@@ -87,6 +90,7 @@ async fn export_rejects_symlink_source_root() {
     assert_eq!(body.code, "transfer_source_unsupported");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn export_file_preserves_executable_mode_in_archive_header() {
     let fixture = support::spawn_daemon("builder-a").await;
@@ -114,6 +118,45 @@ async fn export_file_preserves_executable_mode_in_archive_header() {
     assert_eq!(header.mode().unwrap() & 0o111, 0o111);
 }
 
+#[cfg(windows)]
+#[tokio::test]
+async fn import_accepts_forward_slash_windows_destination_paths() {
+    let fixture = support::spawn_daemon("builder-a").await;
+    let source = fixture.workdir.join("source.txt");
+    tokio::fs::write(&source, "artifact\n").await.unwrap();
+
+    let exported = fixture
+        .raw_post_json(
+            "/v1/transfer/export",
+            &TransferExportRequest {
+                path: source.display().to_string(),
+            },
+        )
+        .await;
+    let bytes = exported.bytes().await.unwrap().to_vec();
+    let destination = fixture.workdir.join("release").join("artifact.txt");
+    let destination_text = destination.display().to_string().replace('\\', "/");
+
+    let response = fixture
+        .raw_post_bytes(
+            "/v1/transfer/import",
+            &[
+                (TRANSFER_DESTINATION_PATH_HEADER, destination_text),
+                (TRANSFER_OVERWRITE_HEADER, "fail".to_string()),
+                (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
+                (TRANSFER_SOURCE_TYPE_HEADER, "file".to_string()),
+            ],
+            bytes,
+        )
+        .await;
+
+    assert!(response.status().is_success());
+    assert_eq!(
+        tokio::fs::read_to_string(&destination).await.unwrap(),
+        "artifact\n"
+    );
+}
+
 #[tokio::test]
 async fn import_directory_replaces_exact_destination_and_preserves_exec_bits() {
     let fixture = support::spawn_daemon("builder-a").await;
@@ -127,11 +170,14 @@ async fn import_directory_replaces_exact_destination_and_preserves_exec_bits() {
     tokio::fs::write(source_root.join("bin/tool.sh"), "#!/bin/sh\necho hi\n")
         .await
         .unwrap();
-    let mut perms = std::fs::metadata(source_root.join("bin/tool.sh"))
-        .unwrap()
-        .permissions();
-    perms.set_mode(0o755);
-    std::fs::set_permissions(source_root.join("bin/tool.sh"), perms).unwrap();
+    #[cfg(unix)]
+    {
+        let mut perms = std::fs::metadata(source_root.join("bin/tool.sh"))
+            .unwrap()
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(source_root.join("bin/tool.sh"), perms).unwrap();
+    }
 
     let exported = fixture
         .raw_post_json(
@@ -170,6 +216,7 @@ async fn import_directory_replaces_exact_destination_and_preserves_exec_bits() {
     assert_eq!(summary.directories_copied, 3);
     assert!(!summary.replaced);
     assert!(destination.join("empty").is_dir());
+    #[cfg(unix)]
     assert_eq!(
         std::fs::metadata(destination.join("bin/tool.sh"))
             .unwrap()

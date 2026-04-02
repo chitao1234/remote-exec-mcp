@@ -1,5 +1,6 @@
 mod support;
 
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
 #[tokio::test]
@@ -237,11 +238,14 @@ async fn transfer_files_moves_remote_directory_between_targets_without_basename_
     std::fs::create_dir_all(source_root.join("empty")).unwrap();
     std::fs::create_dir_all(source_root.join("bin")).unwrap();
     std::fs::write(source_root.join("bin/tool.sh"), "#!/bin/sh\necho hi\n").unwrap();
-    let mut perms = std::fs::metadata(source_root.join("bin/tool.sh"))
-        .unwrap()
-        .permissions();
-    perms.set_mode(0o755);
-    std::fs::set_permissions(source_root.join("bin/tool.sh"), perms).unwrap();
+    #[cfg(unix)]
+    {
+        let mut perms = std::fs::metadata(source_root.join("bin/tool.sh"))
+            .unwrap()
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(source_root.join("bin/tool.sh"), perms).unwrap();
+    }
     let destination = cluster.daemon_b.workdir.join("release");
 
     let result = cluster
@@ -264,6 +268,7 @@ async fn transfer_files_moves_remote_directory_between_targets_without_basename_
         .await;
 
     assert!(destination.join("empty").is_dir());
+    #[cfg(unix)]
     assert_eq!(
         std::fs::metadata(destination.join("bin/tool.sh"))
             .unwrap()
