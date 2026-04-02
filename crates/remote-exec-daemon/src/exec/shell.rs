@@ -96,6 +96,7 @@ fn has_execute_bits(_metadata: &std::fs::Metadata) -> bool {
 mod tests {
     use std::ffi::{OsStr, OsString};
     use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
     use std::sync::Mutex;
 
     use super::{choose_shell, resolve_shell_with};
@@ -138,6 +139,16 @@ mod tests {
         test()
     }
 
+    fn make_executable_shell() -> (tempfile::TempDir, PathBuf) {
+        let tempdir = tempfile::tempdir().unwrap();
+        let shell_path = tempdir.path().join("shell");
+        std::fs::write(&shell_path, "#!/bin/sh\n").unwrap();
+        let mut permissions = std::fs::metadata(&shell_path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&shell_path, permissions).unwrap();
+        (tempdir, shell_path)
+    }
+
     #[test]
     fn choose_shell_prefers_explicit_override() {
         assert_eq!(
@@ -148,11 +159,13 @@ mod tests {
 
     #[test]
     fn choose_shell_uses_env_before_passwd_and_fallback() {
+        let (_tempdir, shell_path) = make_executable_shell();
+        let shell_text = shell_path.to_string_lossy().into_owned();
         assert_eq!(
-            choose_shell(None, Some("/bin/sh"), Some("/bin/bash")),
+            choose_shell(None, Some("/bin/sh"), Some(&shell_text)),
             "/bin/sh"
         );
-        assert_eq!(choose_shell(None, None, Some("/bin/bash")), "/bin/bash");
+        assert_eq!(choose_shell(None, None, Some(&shell_text)), shell_text);
         assert_eq!(choose_shell(None, None, None), "/bin/sh");
     }
 
@@ -214,12 +227,9 @@ mod tests {
 
     #[test]
     fn resolve_shell_uses_bash_from_path_before_bin_sh_fallback() {
-        let tempdir = tempfile::tempdir().unwrap();
+        let (tempdir, shell_path) = make_executable_shell();
         let bash_path = tempdir.path().join("bash");
-        std::fs::write(&bash_path, "#!/bin/sh\n").unwrap();
-        let mut permissions = std::fs::metadata(&bash_path).unwrap().permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&bash_path, permissions).unwrap();
+        std::fs::rename(shell_path, &bash_path).unwrap();
 
         with_path_var(Some(tempdir.path().as_os_str()), || {
             assert_eq!(
