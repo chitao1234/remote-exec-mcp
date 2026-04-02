@@ -70,6 +70,47 @@ pub struct ListTargetsResult {
     pub targets: Vec<ListTargetEntry>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferOverwrite {
+    Fail,
+    Replace,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferSourceType {
+    File,
+    Directory,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TransferEndpoint {
+    pub target: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TransferFilesInput {
+    pub source: TransferEndpoint,
+    pub destination: TransferEndpoint,
+    pub overwrite: TransferOverwrite,
+    pub create_parent: bool,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct TransferFilesResult {
+    pub source: TransferEndpoint,
+    pub destination: TransferEndpoint,
+    pub source_type: TransferSourceType,
+    pub bytes_copied: u64,
+    pub files_copied: u64,
+    pub directories_copied: u64,
+    pub replaced: bool,
+}
+
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ApplyPatchInput {

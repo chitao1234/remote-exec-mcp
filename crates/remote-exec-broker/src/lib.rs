@@ -100,6 +100,7 @@ pub async fn run(config: config::BrokerConfig) -> anyhow::Result<()> {
 }
 
 async fn build_state(config: config::BrokerConfig) -> anyhow::Result<BrokerState> {
+    config.validate()?;
     let mut targets = BTreeMap::new();
 
     for (name, target_config) in &config.targets {
