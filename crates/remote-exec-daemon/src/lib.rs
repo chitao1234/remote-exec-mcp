@@ -4,6 +4,7 @@ pub mod image;
 pub mod patch;
 pub mod server;
 pub mod tls;
+pub mod transfer;
 
 use std::sync::Arc;
 use std::sync::Once;

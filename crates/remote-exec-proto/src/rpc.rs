@@ -78,6 +78,47 @@ pub struct PatchApplyResponse {
     pub output: String,
 }
 
+pub const TRANSFER_SOURCE_TYPE_HEADER: &str = "x-remote-exec-source-type";
+pub const TRANSFER_DESTINATION_PATH_HEADER: &str = "x-remote-exec-destination-path";
+pub const TRANSFER_OVERWRITE_HEADER: &str = "x-remote-exec-overwrite";
+pub const TRANSFER_CREATE_PARENT_HEADER: &str = "x-remote-exec-create-parent";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferSourceType {
+    File,
+    Directory,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferOverwriteMode {
+    Fail,
+    Replace,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TransferExportRequest {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TransferImportRequest {
+    pub destination_path: String,
+    pub overwrite: TransferOverwriteMode,
+    pub create_parent: bool,
+    pub source_type: TransferSourceType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TransferImportResponse {
+    pub source_type: TransferSourceType,
+    pub bytes_copied: u64,
+    pub files_copied: u64,
+    pub directories_copied: u64,
+    pub replaced: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ImageReadRequest {
     pub path: String,

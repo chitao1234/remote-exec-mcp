@@ -21,6 +21,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/exec/start", post(crate::exec::exec_start))
         .route("/v1/exec/write", post(crate::exec::exec_write))
         .route("/v1/patch/apply", post(crate::patch::apply_patch))
+        .route("/v1/transfer/export", post(crate::transfer::export_path))
+        .route("/v1/transfer/import", post(crate::transfer::import_archive))
         .route("/v1/image/read", post(crate::image::read_image))
         .with_state(state)
 }

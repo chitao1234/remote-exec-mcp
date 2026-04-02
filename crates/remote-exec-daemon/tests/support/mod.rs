@@ -22,6 +22,19 @@ impl DaemonFixture {
     }
 
     #[allow(dead_code)]
+    pub async fn raw_post_json<Req>(&self, path: &str, body: &Req) -> reqwest::Response
+    where
+        Req: Serialize + ?Sized,
+    {
+        self.client
+            .post(self.url(path))
+            .json(body)
+            .send()
+            .await
+            .unwrap()
+    }
+
+    #[allow(dead_code)]
     pub async fn rpc<Req, Resp>(&self, path: &str, body: &Req) -> Resp
     where
         Req: Serialize + ?Sized,
