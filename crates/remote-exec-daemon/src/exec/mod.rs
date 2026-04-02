@@ -1,3 +1,4 @@
+mod locale;
 mod output;
 pub mod session;
 mod shell;
