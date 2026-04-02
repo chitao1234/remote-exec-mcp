@@ -25,6 +25,7 @@ The tool interfaces and behavior in this project are heavily influenced by [Code
 - `write_stdin`
 - `apply_patch`
 - `view_image`
+- `transfer_files`
 
 ## Architecture
 
@@ -165,6 +166,8 @@ cargo fmt --all --check
 
 - The broker now starts even if some configured targets are temporarily unreachable.
 - Targets that are unavailable at broker startup are verified before the first forwarded call.
+- `transfer_files` uses broker-mediated copy for `local -> remote`, `remote -> local`, `remote -> remote`, and `local -> local`.
+- `transfer_files` treats `destination.path` as the exact final path to create or replace; it does not infer basenames or copy "into" an existing directory.
 - `write_stdin` only invalidates sessions when the daemon restarted or explicitly reports `unknown_session`.
 - `max_output_tokens` is enforced by the daemon for command output.
 - Each target daemon keeps at most `64` live exec sessions. When full, it protects the `8` most recently touched sessions, prunes exited sessions first, otherwise prunes the oldest non-protected live session, and terminates the pruned process.
@@ -188,6 +191,14 @@ Run the broker end-to-end test only:
 cargo test -p remote-exec-broker --test multi_target -- --nocapture
 ```
 
+Focused transfer commands:
+
+```bash
+cargo test -p remote-exec-daemon --test transfer_rpc -- --nocapture
+cargo test -p remote-exec-broker --test mcp_transfer -- --nocapture
+cargo test -p remote-exec-broker --test multi_target -- --nocapture
+```
+
 Start a daemon:
 
 ```bash
@@ -204,6 +215,8 @@ cargo run -p remote-exec-broker -- configs/broker.example.toml
 
 Selecting a target is equivalent to `danger-full-access` on that machine.
 
+Selecting `target: "local"` in `transfer_files` is equivalent to full filesystem access on the broker host.
+
 In v1:
 
 - there is no sandbox selection flow
@@ -211,10 +224,11 @@ In v1:
 - the daemon can access any file or process available to the daemon user
 
 Security is based on target selection plus broker-to-daemon mutual TLS, not on per-call restrictions.
+Configured remote targets may not be named `local`.
 
 ## Current status
 
-- Core remote tools are implemented: `list_targets`, `exec_command`, `write_stdin`, `apply_patch`, and `view_image`.
+- Core remote tools are implemented: `list_targets`, `exec_command`, `write_stdin`, `apply_patch`, `view_image`, and `transfer_files`.
 - Broker and daemon session handling are hardened for concurrent exec workloads and precise restart/session-loss behavior.
 - Patch application supports strict EOF-marker handling and repeated-context multi-hunk updates.
 - Broker target discovery returns cached daemon metadata when the broker currently considers it usable; otherwise `daemon_info` is `null`.

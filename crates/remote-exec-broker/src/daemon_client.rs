@@ -2,10 +2,10 @@ use anyhow::Context;
 use futures_util::TryStreamExt;
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
-    PatchApplyRequest, PatchApplyResponse, RpcErrorBody, TargetInfoResponse,
-    TransferExportRequest, TransferImportRequest, TransferImportResponse, TransferSourceType,
-    TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER,
-    TRANSFER_SOURCE_TYPE_HEADER,
+    PatchApplyRequest, PatchApplyResponse, RpcErrorBody, TRANSFER_CREATE_PARENT_HEADER,
+    TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
+    TargetInfoResponse, TransferExportRequest, TransferImportRequest, TransferImportResponse,
+    TransferSourceType,
 };
 use reqwest::Identity;
 use reqwest::header::CONNECTION;
@@ -156,7 +156,10 @@ impl DaemonClient {
             .client
             .post(format!("{}{}", self.base_url, "/v1/transfer/import"))
             .header(CONNECTION, "close")
-            .header(TRANSFER_DESTINATION_PATH_HEADER, req.destination_path.clone())
+            .header(
+                TRANSFER_DESTINATION_PATH_HEADER,
+                req.destination_path.clone(),
+            )
             .header(
                 TRANSFER_OVERWRITE_HEADER,
                 format_transfer_overwrite(&req.overwrite).to_string(),
@@ -253,10 +256,7 @@ where
 
 async fn decode_rpc_error(response: reqwest::Response) -> DaemonClientError {
     let status = response.status();
-    let body = response
-        .text()
-        .await
-        .unwrap_or_else(|err| err.to_string());
+    let body = response.text().await.unwrap_or_else(|err| err.to_string());
     if let Ok(error) = serde_json::from_str::<RpcErrorBody>(&body) {
         DaemonClientError::Rpc {
             status,

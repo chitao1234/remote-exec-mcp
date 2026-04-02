@@ -19,7 +19,10 @@ pub async fn export_path_to_archive(
 
     let metadata = tokio::fs::symlink_metadata(path).await?;
     let source_type = if metadata.file_type().is_symlink() {
-        anyhow::bail!("transfer source contains unsupported symlink `{}`", path.display());
+        anyhow::bail!(
+            "transfer source contains unsupported symlink `{}`",
+            path.display()
+        );
     } else if metadata.file_type().is_file() {
         TransferSourceType::File
     } else if metadata.file_type().is_dir() {
@@ -38,7 +41,9 @@ pub async fn export_path_to_archive(
         let file = std::fs::File::create(&destination)?;
         let mut builder = tar::Builder::new(file);
         match source_type_for_task {
-            TransferSourceType::File => builder.append_path_with_name(&source, SINGLE_FILE_ENTRY)?,
+            TransferSourceType::File => {
+                builder.append_path_with_name(&source, SINGLE_FILE_ENTRY)?
+            }
             TransferSourceType::Directory => {
                 builder.append_dir(".", &source)?;
                 append_directory_entries(&mut builder, &source, &source)?;
@@ -92,7 +97,10 @@ async fn prepare_destination(
     match tokio::fs::symlink_metadata(destination).await {
         Ok(metadata) => match request.overwrite {
             TransferOverwriteMode::Fail => {
-                anyhow::bail!("destination path `{}` already exists", destination.display());
+                anyhow::bail!(
+                    "destination path `{}` already exists",
+                    destination.display()
+                );
             }
             TransferOverwriteMode::Replace => {
                 if metadata.is_dir() {
@@ -129,7 +137,10 @@ fn append_directory_entries(
         } else if metadata.is_file() {
             builder.append_path_with_name(&path, rel)?;
         } else {
-            anyhow::bail!("transfer source contains unsupported entry `{}`", path.display());
+            anyhow::bail!(
+                "transfer source contains unsupported entry `{}`",
+                path.display()
+            );
         }
     }
 
@@ -156,7 +167,9 @@ fn extract_archive(
     match request.source_type {
         TransferSourceType::File => {
             let mut entries = archive.entries()?;
-            let mut entry = entries.next().ok_or_else(|| anyhow::anyhow!("archive is empty"))??;
+            let mut entry = entries
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("archive is empty"))??;
             anyhow::ensure!(
                 entry.header().entry_type().is_file(),
                 "archive entry is not a regular file"

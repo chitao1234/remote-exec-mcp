@@ -11,9 +11,9 @@ use axum::response::{IntoResponse, Response};
 use futures_util::TryStreamExt;
 use http_body_util::BodyExt;
 use remote_exec_proto::rpc::{
-    RpcErrorBody, TransferExportRequest, TransferImportRequest, TransferImportResponse,
-    TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER,
-    TRANSFER_SOURCE_TYPE_HEADER,
+    RpcErrorBody, TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER,
+    TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER, TransferExportRequest,
+    TransferImportRequest, TransferImportResponse,
 };
 
 use crate::AppState;
@@ -47,7 +47,8 @@ pub async fn import_archive(
     body: Body,
 ) -> Result<Json<TransferImportResponse>, (StatusCode, Json<RpcErrorBody>)> {
     let request = parse_import_request(&headers)?;
-    let temp = tempfile::NamedTempFile::new().map_err(|err| crate::exec::internal_error(err.into()))?;
+    let temp =
+        tempfile::NamedTempFile::new().map_err(|err| crate::exec::internal_error(err.into()))?;
     let temp_path = temp.into_temp_path();
     let mut file = tokio::fs::File::create(temp_path.to_path_buf())
         .await
@@ -94,7 +95,9 @@ fn map_transfer_error(err: anyhow::Error) -> (StatusCode, Json<RpcErrorBody>) {
     crate::exec::rpc_error(code, message)
 }
 
-fn parse_import_request(headers: &HeaderMap) -> Result<TransferImportRequest, (StatusCode, Json<RpcErrorBody>)> {
+fn parse_import_request(
+    headers: &HeaderMap,
+) -> Result<TransferImportRequest, (StatusCode, Json<RpcErrorBody>)> {
     Ok(TransferImportRequest {
         destination_path: header_string(headers, TRANSFER_DESTINATION_PATH_HEADER)?,
         overwrite: parse_header_enum(headers, TRANSFER_OVERWRITE_HEADER)?,
@@ -105,15 +108,23 @@ fn parse_import_request(headers: &HeaderMap) -> Result<TransferImportRequest, (S
     })
 }
 
-fn header_string(headers: &HeaderMap, name: &str) -> Result<String, (StatusCode, Json<RpcErrorBody>)> {
+fn header_string(
+    headers: &HeaderMap,
+    name: &str,
+) -> Result<String, (StatusCode, Json<RpcErrorBody>)> {
     headers
         .get(name)
         .and_then(|value| value.to_str().ok())
         .map(str::to_string)
-        .ok_or_else(|| crate::exec::rpc_error("transfer_failed", format!("missing header `{name}`")))
+        .ok_or_else(|| {
+            crate::exec::rpc_error("transfer_failed", format!("missing header `{name}`"))
+        })
 }
 
-fn parse_header_enum<T>(headers: &HeaderMap, name: &str) -> Result<T, (StatusCode, Json<RpcErrorBody>)>
+fn parse_header_enum<T>(
+    headers: &HeaderMap,
+    name: &str,
+) -> Result<T, (StatusCode, Json<RpcErrorBody>)>
 where
     T: serde::de::DeserializeOwned,
 {

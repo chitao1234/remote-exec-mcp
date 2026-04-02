@@ -3,8 +3,8 @@ mod support;
 use std::os::unix::fs::PermissionsExt;
 
 use remote_exec_proto::rpc::{
-    TransferExportRequest, TransferImportResponse, TRANSFER_CREATE_PARENT_HEADER,
-    TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
+    TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER,
+    TRANSFER_SOURCE_TYPE_HEADER, TransferExportRequest, TransferImportResponse,
 };
 
 #[tokio::test]
@@ -40,7 +40,9 @@ async fn export_directory_rejects_nested_symlinks_before_streaming() {
     let fixture = support::spawn_daemon("builder-a").await;
     let root = fixture.workdir.join("dist");
     tokio::fs::create_dir_all(&root).await.unwrap();
-    tokio::fs::write(root.join("app.txt"), "ok\n").await.unwrap();
+    tokio::fs::write(root.join("app.txt"), "ok\n")
+        .await
+        .unwrap();
     std::os::unix::fs::symlink(root.join("app.txt"), root.join("app-link")).unwrap();
 
     let response = fixture
@@ -89,7 +91,9 @@ async fn export_rejects_symlink_source_root() {
 async fn export_file_preserves_executable_mode_in_archive_header() {
     let fixture = support::spawn_daemon("builder-a").await;
     let source = fixture.workdir.join("tool.sh");
-    tokio::fs::write(&source, "#!/bin/sh\necho hi\n").await.unwrap();
+    tokio::fs::write(&source, "#!/bin/sh\necho hi\n")
+        .await
+        .unwrap();
     let mut perms = std::fs::metadata(&source).unwrap().permissions();
     perms.set_mode(0o755);
     std::fs::set_permissions(&source, perms).unwrap();
@@ -216,7 +220,10 @@ async fn import_rejects_existing_destination_when_overwrite_is_fail() {
         .await
         .unwrap();
     assert_eq!(err.code, "transfer_destination_exists");
-    assert_eq!(tokio::fs::read_to_string(&destination).await.unwrap(), "old\n");
+    assert_eq!(
+        tokio::fs::read_to_string(&destination).await.unwrap(),
+        "old\n"
+    );
 }
 
 #[tokio::test]
@@ -259,7 +266,10 @@ async fn import_replaces_directory_with_file_at_the_exact_destination_path() {
         .await;
 
     assert!(response.status().is_success());
-    assert_eq!(tokio::fs::read_to_string(&destination).await.unwrap(), "artifact\n");
+    assert_eq!(
+        tokio::fs::read_to_string(&destination).await.unwrap(),
+        "artifact\n"
+    );
 }
 
 #[tokio::test]

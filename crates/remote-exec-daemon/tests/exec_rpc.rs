@@ -7,6 +7,10 @@ use remote_exec_proto::rpc::{ExecResponse, ExecStartRequest, ExecWriteRequest};
 use tokio::sync::Mutex;
 
 const TEST_SHELL: &str = "/bin/sh";
+// Commands in these tests are expected to finish in a single RPC response, but the daemon only
+// guarantees a minimum 250 ms wait. Use a wider window so full-suite load does not turn them into
+// legitimate live-session responses.
+const COMPLETED_COMMAND_YIELD_MS: u64 = 5_000;
 
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -93,7 +97,7 @@ async fn exec_start_uses_login_shell_by_default_when_login_is_omitted() {
                 workdir: None,
                 shell: Some(TEST_SHELL.to_string()),
                 tty: false,
-                yield_time_ms: Some(250),
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
                 max_output_tokens: None,
                 login: None,
             },
@@ -149,7 +153,7 @@ async fn exec_start_uses_non_login_shell_when_policy_disabled_and_login_is_omitt
                 workdir: None,
                 shell: Some(TEST_SHELL.to_string()),
                 tty: false,
-                yield_time_ms: Some(250),
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
                 max_output_tokens: None,
                 login: None,
             },
@@ -185,7 +189,7 @@ async fn env_overlay_is_applied_in_pipe_mode() {
                 workdir: None,
                 shell: Some(TEST_SHELL.to_string()),
                 tty: false,
-                yield_time_ms: Some(250),
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
                 max_output_tokens: None,
                 login: Some(false),
             },
@@ -221,7 +225,7 @@ async fn env_overlay_is_applied_in_pty_mode() {
                 workdir: None,
                 shell: Some(TEST_SHELL.to_string()),
                 tty: true,
-                yield_time_ms: Some(250),
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
                 max_output_tokens: None,
                 login: Some(false),
             },
@@ -249,7 +253,7 @@ async fn env_overlay_prefers_lang_c_plus_lc_ctype_when_c_utf8_is_unavailable() {
                 workdir: None,
                 shell: Some(TEST_SHELL.to_string()),
                 tty: false,
-                yield_time_ms: Some(250),
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
                 max_output_tokens: None,
                 login: Some(false),
             },
@@ -277,7 +281,7 @@ async fn env_overlay_falls_back_to_lang_c_only_when_no_utf8_locale_is_available(
                 workdir: None,
                 shell: Some(TEST_SHELL.to_string()),
                 tty: false,
-                yield_time_ms: Some(250),
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
                 max_output_tokens: None,
                 login: Some(false),
             },
@@ -300,7 +304,7 @@ async fn omitted_max_output_tokens_defaults_to_ten_thousand() {
                 workdir: None,
                 shell: Some(TEST_SHELL.to_string()),
                 tty: false,
-                yield_time_ms: Some(250),
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
                 max_output_tokens: None,
                 login: Some(false),
             },
@@ -324,7 +328,7 @@ async fn exec_start_truncates_output_to_max_output_tokens() {
                 workdir: None,
                 shell: Some(TEST_SHELL.to_string()),
                 tty: false,
-                yield_time_ms: Some(250),
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
                 max_output_tokens: Some(3),
                 login: Some(false),
             },
@@ -347,7 +351,7 @@ async fn exec_output_preserves_trailing_newline_when_within_max_output_tokens() 
                 workdir: None,
                 shell: Some(TEST_SHELL.to_string()),
                 tty: false,
-                yield_time_ms: Some(250),
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
                 max_output_tokens: Some(3),
                 login: Some(false),
             },
@@ -370,7 +374,7 @@ async fn exec_output_drains_late_output_after_exit() {
                 workdir: None,
                 shell: Some(TEST_SHELL.to_string()),
                 tty: false,
-                yield_time_ms: Some(250),
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
                 max_output_tokens: Some(10),
                 login: Some(false),
             },
@@ -479,7 +483,7 @@ async fn exec_write_round_trips_pty_input_without_echo_assumptions() {
             &ExecWriteRequest {
                 daemon_session_id: started.daemon_session_id.expect("live session"),
                 chars: "ping pong\n".to_string(),
-                yield_time_ms: Some(250),
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
                 max_output_tokens: None,
             },
         )

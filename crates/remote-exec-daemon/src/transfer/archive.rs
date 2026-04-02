@@ -1,7 +1,9 @@
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
-use remote_exec_proto::rpc::{TransferImportRequest, TransferImportResponse, TransferSourceType, TransferOverwriteMode};
+use remote_exec_proto::rpc::{
+    TransferImportRequest, TransferImportResponse, TransferOverwriteMode, TransferSourceType,
+};
 
 pub const SINGLE_FILE_ENTRY: &str = ".remote-exec-file";
 
@@ -19,7 +21,10 @@ pub async fn export_path_to_archive(path: &Path) -> anyhow::Result<ExportedArchi
 
     let metadata = tokio::fs::symlink_metadata(path).await?;
     let source_type = if metadata.file_type().is_symlink() {
-        anyhow::bail!("transfer source contains unsupported symlink `{}`", path.display());
+        anyhow::bail!(
+            "transfer source contains unsupported symlink `{}`",
+            path.display()
+        );
     } else if metadata.file_type().is_file() {
         TransferSourceType::File
     } else if metadata.file_type().is_dir() {
@@ -83,7 +88,10 @@ fn append_directory_entries(
         } else if metadata.is_file() {
             builder.append_path_with_name(&path, rel)?;
         } else {
-            anyhow::bail!("transfer source contains unsupported entry `{}`", path.display());
+            anyhow::bail!(
+                "transfer source contains unsupported entry `{}`",
+                path.display()
+            );
         }
     }
 
@@ -134,7 +142,10 @@ async fn prepare_destination(
     match tokio::fs::symlink_metadata(destination).await {
         Ok(metadata) => match request.overwrite {
             TransferOverwriteMode::Fail => {
-                anyhow::bail!("destination path `{}` already exists", destination.display());
+                anyhow::bail!(
+                    "destination path `{}` already exists",
+                    destination.display()
+                );
             }
             TransferOverwriteMode::Replace => {
                 if metadata.is_dir() {
@@ -170,7 +181,9 @@ fn extract_archive(
     match request.source_type {
         TransferSourceType::File => {
             let mut entries = archive.entries()?;
-            let mut entry = entries.next().ok_or_else(|| anyhow::anyhow!("archive is empty"))??;
+            let mut entry = entries
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("archive is empty"))??;
             anyhow::ensure!(
                 entry.header().entry_type().is_file(),
                 "archive entry is not a regular file"

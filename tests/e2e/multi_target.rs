@@ -1,5 +1,7 @@
 mod support;
 
+use std::os::unix::fs::PermissionsExt;
+
 #[tokio::test]
 async fn sessions_are_isolated_per_target() {
     let cluster = support::spawn_cluster().await;
@@ -154,4 +156,122 @@ async fn sessions_are_invalidated_after_daemon_restart() {
         format!("write_stdin failed: Unknown process id {session_id}"),
         "unknown session error: {unknown}"
     );
+}
+
+#[tokio::test]
+async fn transfer_files_copies_local_file_to_remote_exact_destination_path() {
+    let cluster = support::spawn_cluster().await;
+    let local_dir = tempfile::tempdir().unwrap();
+    let source = local_dir.path().join("artifact.txt");
+    std::fs::write(&source, "artifact\n").unwrap();
+    let destination = cluster.daemon_a.workdir.join("releases/current.txt");
+
+    let result = cluster
+        .broker
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "local",
+                    "path": source.display().to_string()
+                },
+                "destination": {
+                    "target": "builder-a",
+                    "path": destination.display().to_string()
+                },
+                "overwrite": "fail",
+                "create_parent": true
+            }),
+        )
+        .await;
+
+    assert_eq!(std::fs::read_to_string(&destination).unwrap(), "artifact\n");
+    assert_eq!(
+        result.structured_content["destination"]["target"],
+        "builder-a"
+    );
+    assert!(
+        !cluster
+            .daemon_a
+            .workdir
+            .join("releases/artifact.txt")
+            .exists()
+    );
+}
+
+#[tokio::test]
+async fn transfer_files_copies_remote_file_back_to_local() {
+    let cluster = support::spawn_cluster().await;
+    let source = cluster.daemon_a.workdir.join("build.log");
+    std::fs::write(&source, "done\n").unwrap();
+    let local_dir = tempfile::tempdir().unwrap();
+    let destination = local_dir.path().join("logs/build.log");
+
+    let result = cluster
+        .broker
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "builder-a",
+                    "path": source.display().to_string()
+                },
+                "destination": {
+                    "target": "local",
+                    "path": destination.display().to_string()
+                },
+                "overwrite": "fail",
+                "create_parent": true
+            }),
+        )
+        .await;
+
+    assert_eq!(std::fs::read_to_string(&destination).unwrap(), "done\n");
+    assert_eq!(result.structured_content["source"]["target"], "builder-a");
+}
+
+#[tokio::test]
+async fn transfer_files_moves_remote_directory_between_targets_without_basename_inference() {
+    let cluster = support::spawn_cluster().await;
+    let source_root = cluster.daemon_a.workdir.join("dist");
+    std::fs::create_dir_all(source_root.join("empty")).unwrap();
+    std::fs::create_dir_all(source_root.join("bin")).unwrap();
+    std::fs::write(source_root.join("bin/tool.sh"), "#!/bin/sh\necho hi\n").unwrap();
+    let mut perms = std::fs::metadata(source_root.join("bin/tool.sh"))
+        .unwrap()
+        .permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(source_root.join("bin/tool.sh"), perms).unwrap();
+    let destination = cluster.daemon_b.workdir.join("release");
+
+    let result = cluster
+        .broker
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "builder-a",
+                    "path": source_root.display().to_string()
+                },
+                "destination": {
+                    "target": "builder-b",
+                    "path": destination.display().to_string()
+                },
+                "overwrite": "replace",
+                "create_parent": true
+            }),
+        )
+        .await;
+
+    assert!(destination.join("empty").is_dir());
+    assert_eq!(
+        std::fs::metadata(destination.join("bin/tool.sh"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o111,
+        0o111
+    );
+    assert!(!destination.join("dist").exists());
+    assert_eq!(result.structured_content["source_type"], "directory");
 }

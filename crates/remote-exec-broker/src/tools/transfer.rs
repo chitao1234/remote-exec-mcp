@@ -5,8 +5,8 @@ use remote_exec_proto::public::{
     TransferSourceType as PublicTransferSourceType,
 };
 use remote_exec_proto::rpc::{
-    TransferExportRequest, TransferImportRequest, TransferImportResponse,
-    TransferOverwriteMode, TransferSourceType as RpcTransferSourceType,
+    TransferExportRequest, TransferImportRequest, TransferImportResponse, TransferOverwriteMode,
+    TransferSourceType as RpcTransferSourceType,
 };
 
 use crate::daemon_client::DaemonClientError;
@@ -58,7 +58,10 @@ async fn export_endpoint_to_archive(
     archive_path: &Path,
 ) -> anyhow::Result<RpcTransferSourceType> {
     match endpoint.target.as_str() {
-        "local" => crate::local_transfer::export_path_to_archive(Path::new(&endpoint.path), archive_path).await,
+        "local" => {
+            crate::local_transfer::export_path_to_archive(Path::new(&endpoint.path), archive_path)
+                .await
+        }
         target_name => {
             let target = state.target(target_name)?;
             target.ensure_identity_verified(target_name).await?;
@@ -133,10 +136,14 @@ fn ensure_absolute(endpoint: &TransferEndpoint) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn ensure_distinct_endpoints(source: &TransferEndpoint, destination: &TransferEndpoint) -> anyhow::Result<()> {
+fn ensure_distinct_endpoints(
+    source: &TransferEndpoint,
+    destination: &TransferEndpoint,
+) -> anyhow::Result<()> {
     anyhow::ensure!(
         !(source.target == destination.target
-            && normalize_path(Path::new(&source.path)) == normalize_path(Path::new(&destination.path))),
+            && normalize_path(Path::new(&source.path))
+                == normalize_path(Path::new(&destination.path))),
         "source and destination must differ"
     );
     Ok(())
