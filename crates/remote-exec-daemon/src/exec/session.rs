@@ -49,7 +49,9 @@ fn default_pty_size() -> PtySize {
 }
 
 pub fn supports_pty() -> bool {
-    NativePtySystem::default().openpty(default_pty_size()).is_ok()
+    NativePtySystem::default()
+        .openpty(default_pty_size())
+        .is_ok()
 }
 
 pub fn spawn(cmd: &[String], cwd: &std::path::Path, tty: bool) -> anyhow::Result<LiveSession> {

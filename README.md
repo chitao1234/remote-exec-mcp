@@ -1,6 +1,6 @@
 # remote-exec-mcp
 
-Remote-first MCP server for running Codex-style local-system tools on multiple Linux machines.
+Remote-first MCP server for running Codex-style local-system tools on multiple Linux and Windows machines.
 
 The tool interfaces and behavior in this project are heavily influenced by [Codex](https://github.com/openai/codex), while the implementation here is a separate remote-first broker and per-machine daemon design.
 
@@ -174,8 +174,12 @@ cargo fmt --all --check
 - `apply_patch` supports the documented `*** End of File` marker.
 - `exec_command` intercepted into `apply_patch` always emits a warning in MCP `_meta.warnings` telling the client to use `apply_patch` directly.
 - `exec_command` emits a warning in MCP `_meta.warnings` when a target crosses from `59` to `60` open exec sessions. Warnings stay out of the normal text output.
-- `allow_login_shell` controls daemon login-shell policy and defaults to `true`; explicit `login=true` is rejected when the daemon disables it.
-- Default shell resolution uses explicit override, then `SHELL`, then a usable passwd shell, then `bash` from `PATH`, then `/bin/sh`.
+- `transfer_files` normalizes Windows path separators before filesystem access on Windows endpoints.
+- `transfer_files` compares Windows paths case-insensitively when checking obvious same-path collisions.
+- Executable preservation is best effort and only restored on platforms that expose executable mode bits.
+- `allow_login_shell` controls daemon login-shell policy and defaults to `true`; explicit `login=true` is rejected when the daemon disables it, and Windows daemons reject `login=true` because login-shell semantics are not supported there.
+- `list_targets` reports the daemon's actual `supports_pty` capability instead of assuming PTY support.
+- Default shell resolution uses explicit override, then `SHELL`, then a usable passwd shell, then `bash` from `PATH`, then `/bin/sh` on Unix, and `COMSPEC` then `cmd.exe` on Windows.
 
 ## Quality Gate
 
@@ -236,7 +240,7 @@ Configured remote targets may not be named `local`.
   - `cargo test --workspace`
   - `cargo fmt --all --check`
   - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
-- Linux only
+- Linux broker/daemon support plus Windows broker-host and Windows daemon support
 - Per-machine daemon deployment
 - Static broker target configuration
 - No session persistence across broker or daemon restart
@@ -244,7 +248,7 @@ Configured remote targets may not be named `local`.
 ## Acknowledgments
 
 - The tool surface and behavioral model are heavily influenced by [Codex](https://github.com/openai/codex).
-- This project reinterprets those ideas for a remote-first MCP broker plus per-machine daemon architecture on Linux.
+- This project reinterprets those ideas for a remote-first MCP broker plus per-machine daemon architecture on Linux and Windows.
 
 ## References
 

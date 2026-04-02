@@ -34,6 +34,9 @@ async fn target_info_is_available_over_mutual_tls() {
     );
     assert_eq!(info.platform, std::env::consts::OS);
     assert_eq!(info.arch, std::env::consts::ARCH);
-    assert_eq!(info.supports_pty, remote_exec_daemon::exec::session::supports_pty());
+    assert_eq!(
+        info.supports_pty,
+        remote_exec_daemon::exec::session::supports_pty()
+    );
     assert!(info.supports_image_read);
 }

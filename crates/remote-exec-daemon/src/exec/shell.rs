@@ -79,7 +79,11 @@ pub fn shell_argv(shell: &str, login: bool, cmd: &str) -> Vec<String> {
 }
 
 #[cfg(unix)]
-fn choose_shell(shell_override: Option<&str>, env_shell: Option<&str>, passwd_shell: Option<&str>) -> String {
+fn choose_shell(
+    shell_override: Option<&str>,
+    env_shell: Option<&str>,
+    passwd_shell: Option<&str>,
+) -> String {
     preferred_shell(shell_override, env_shell, passwd_shell).unwrap_or("/bin/sh".to_string())
 }
 

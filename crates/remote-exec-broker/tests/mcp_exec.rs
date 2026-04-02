@@ -220,7 +220,11 @@ async fn exec_command_intercepts_windows_shell_wrappers() {
             }),
         )
         .await;
-    assert!(cmd_result.text_output.contains("Process exited with code 0"));
+    assert!(
+        cmd_result
+            .text_output
+            .contains("Process exited with code 0")
+    );
 
     let pwsh_result = fixture
         .call_tool(
@@ -231,7 +235,11 @@ async fn exec_command_intercepts_windows_shell_wrappers() {
             }),
         )
         .await;
-    assert!(pwsh_result.text_output.contains("Process exited with code 0"));
+    assert!(
+        pwsh_result
+            .text_output
+            .contains("Process exited with code 0")
+    );
 }
 
 #[tokio::test]

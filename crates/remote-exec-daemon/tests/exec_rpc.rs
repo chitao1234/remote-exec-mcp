@@ -180,7 +180,12 @@ async fn exec_start_uses_cmd_when_shell_is_omitted() {
         .await;
 
     assert_eq!(response.exit_code, Some(0));
-    assert!(response.output.to_ascii_lowercase().contains("windows-ready"));
+    assert!(
+        response
+            .output
+            .to_ascii_lowercase()
+            .contains("windows-ready")
+    );
 }
 
 #[cfg(unix)]

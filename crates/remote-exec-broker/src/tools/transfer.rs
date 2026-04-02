@@ -1,13 +1,13 @@
 use std::path::Path;
 
 use anyhow::Context;
-use remote_exec_proto::public::{
-    TransferEndpoint, TransferFilesInput, TransferFilesResult, TransferOverwrite,
-    TransferSourceType as PublicTransferSourceType,
-};
 use remote_exec_proto::path::{
     PathPolicy, is_absolute_for_policy, linux_path_policy, same_path_for_policy,
     windows_path_policy,
+};
+use remote_exec_proto::public::{
+    TransferEndpoint, TransferFilesInput, TransferFilesResult, TransferOverwrite,
+    TransferSourceType as PublicTransferSourceType,
 };
 use remote_exec_proto::rpc::{
     TransferExportRequest, TransferImportRequest, TransferImportResponse, TransferOverwriteMode,
