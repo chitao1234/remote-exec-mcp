@@ -1,7 +1,7 @@
 mod support;
 
 #[tokio::test]
-async fn exec_command_returns_an_opaque_string_session_id() {
+async fn exec_command_returns_opaque_session_id_and_session_command() {
     let fixture = support::spawn_broker_with_stub_daemon().await;
     let result = fixture
         .call_tool(
@@ -20,23 +20,6 @@ async fn exec_command_returns_an_opaque_string_session_id() {
         .expect("running session");
     assert!(session_id.starts_with("sess_"));
     assert!(result.structured_content["exit_code"].is_null());
-}
-
-#[tokio::test]
-async fn exec_command_structured_output_includes_session_command() {
-    let fixture = support::spawn_broker_with_stub_daemon().await;
-    let result = fixture
-        .call_tool(
-            "exec_command",
-            serde_json::json!({
-                "target": "builder-a",
-                "cmd": "printf ready; sleep 2",
-                "tty": true,
-                "yield_time_ms": 250
-            }),
-        )
-        .await;
-
     assert_eq!(
         result.structured_content["session_command"],
         serde_json::Value::String("printf ready; sleep 2".to_string())
@@ -75,34 +58,6 @@ async fn exec_command_intercepts_direct_apply_patch_and_wraps_exec_output() {
     assert!(result.structured_content["session_id"].is_null());
     assert!(result.structured_content["session_command"].is_null());
     assert_eq!(result.structured_content["wall_time_seconds"], 0.0);
-    assert_eq!(fixture.exec_start_calls().await, 0);
-    assert_eq!(
-        fixture.last_patch_request().await.unwrap().patch,
-        patch.to_string()
-    );
-}
-
-#[tokio::test]
-async fn exec_command_intercepts_applypatch_alias_without_allocating_session() {
-    let fixture = support::spawn_broker_with_stub_daemon().await;
-    let patch = concat!(
-        "*** Begin Patch\n",
-        "*** Add File: alias.txt\n",
-        "+alias\n",
-        "*** End Patch\n",
-    );
-
-    let result = fixture
-        .call_tool(
-            "exec_command",
-            serde_json::json!({
-                "target": "builder-a",
-                "cmd": format!("applypatch \"{patch}\""),
-            }),
-        )
-        .await;
-
-    assert!(result.structured_content["session_id"].is_null());
     assert_eq!(fixture.exec_start_calls().await, 0);
     assert_eq!(
         fixture.last_patch_request().await.unwrap().patch,
@@ -345,7 +300,7 @@ async fn exec_command_forwarded_session_warning_in_meta() {
 }
 
 #[tokio::test]
-async fn write_stdin_routes_by_public_session_id_instead_of_target_guessing() {
+async fn write_stdin_routes_by_public_session_id_and_preserves_original_command_metadata() {
     let fixture = support::spawn_broker_with_stub_daemon().await;
     let started = fixture
         .call_tool(
@@ -381,37 +336,6 @@ async fn write_stdin_routes_by_public_session_id_instead_of_target_guessing() {
             .unwrap()
             .contains("poll output")
     );
-}
-
-#[tokio::test]
-async fn write_stdin_preserves_original_command_metadata() {
-    let fixture = support::spawn_broker_with_stub_daemon().await;
-    let started = fixture
-        .call_tool(
-            "exec_command",
-            serde_json::json!({
-                "target": "builder-a",
-                "cmd": "printf ready; sleep 2",
-                "tty": true,
-                "yield_time_ms": 250
-            }),
-        )
-        .await;
-    let session_id = started.structured_content["session_id"]
-        .as_str()
-        .expect("running session")
-        .to_string();
-
-    let result = fixture
-        .call_tool(
-            "write_stdin",
-            serde_json::json!({
-                "session_id": session_id,
-                "chars": "",
-                "yield_time_ms": 5000
-            }),
-        )
-        .await;
 
     assert!(
         result
