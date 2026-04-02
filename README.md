@@ -29,7 +29,8 @@ The tool interfaces and behavior in this project are heavily influenced by [Code
 ## Architecture
 
 - Agents talk only to the broker.
-- Agents can call `list_targets` to discover configured logical target names.
+- Agents can call `list_targets` to discover configured logical target names and cached daemon metadata when available.
+- `list_targets` is broker-local and does not probe daemons at read time.
 - The broker validates `target`, forwards the request to the selected daemon, and returns MCP-compatible content plus structured JSON.
 - Each daemon serves exactly one configured target machine.
 - Live exec sessions are broker-routed by opaque public `session_id`, not by daemon-local process identifiers.
@@ -216,7 +217,7 @@ Security is based on target selection plus broker-to-daemon mutual TLS, not on p
 - Core remote tools are implemented: `list_targets`, `exec_command`, `write_stdin`, `apply_patch`, and `view_image`.
 - Broker and daemon session handling are hardened for concurrent exec workloads and precise restart/session-loss behavior.
 - Patch application supports strict EOF-marker handling and repeated-context multi-hunk updates.
-- Broker target discovery is static and config-based; it does not depend on daemon reachability.
+- Broker target discovery returns cached daemon metadata when the broker currently considers it usable; otherwise `daemon_info` is `null`.
 - The workspace quality gate is green on `main`:
   - `cargo test --workspace`
   - `cargo fmt --all --check`

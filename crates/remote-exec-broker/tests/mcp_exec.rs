@@ -473,7 +473,9 @@ async fn list_targets_clears_cached_daemon_info_after_daemon_instance_mismatch()
     assert!(before.structured_content["targets"][0]["daemon_info"].is_object());
 
     let session_id = fixture.start_running_session().await;
-    fixture.set_stub_daemon_instance_id("daemon-instance-2").await;
+    fixture
+        .set_stub_daemon_instance_id("daemon-instance-2")
+        .await;
 
     let error = fixture
         .call_tool_error(
