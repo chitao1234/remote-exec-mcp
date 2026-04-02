@@ -1,5 +1,6 @@
 pub mod config;
 pub mod daemon_client;
+pub mod local_transfer;
 pub mod mcp_server;
 pub mod session_store;
 pub mod tools;

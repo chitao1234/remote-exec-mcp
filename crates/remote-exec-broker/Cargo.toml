@@ -6,13 +6,18 @@ version.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+futures-util = { workspace = true }
+http-body-util = { workspace = true }
 remote-exec-proto = { path = "../remote-exec-proto" }
 reqwest = { workspace = true }
 rmcp = { workspace = true, features = ["macros", "transport-io"] }
 rustls = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tar = { workspace = true }
+tempfile = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 toml = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
@@ -24,7 +29,6 @@ image = { workspace = true }
 rmcp = { workspace = true, features = ["client", "transport-child-process"] }
 remote-exec-daemon = { path = "../remote-exec-daemon" }
 remote-exec-pki = { path = "../remote-exec-pki" }
-tempfile = { workspace = true }
 
 [[test]]
 name = "multi_target"

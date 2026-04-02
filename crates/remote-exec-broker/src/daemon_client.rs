@@ -1,7 +1,11 @@
 use anyhow::Context;
+use futures_util::TryStreamExt;
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
     PatchApplyRequest, PatchApplyResponse, RpcErrorBody, TargetInfoResponse,
+    TransferExportRequest, TransferImportRequest, TransferImportResponse, TransferSourceType,
+    TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER,
+    TRANSFER_SOURCE_TYPE_HEADER,
 };
 use reqwest::Identity;
 use reqwest::header::CONNECTION;
@@ -109,6 +113,73 @@ impl DaemonClient {
         self.post("/v1/image/read", req).await
     }
 
+    pub async fn transfer_export_to_file(
+        &self,
+        req: &TransferExportRequest,
+        archive_path: &std::path::Path,
+    ) -> Result<TransferSourceType, DaemonClientError> {
+        let response = self
+            .client
+            .post(format!("{}{}", self.base_url, "/v1/transfer/export"))
+            .header(CONNECTION, "close")
+            .json(req)
+            .send()
+            .await
+            .map_err(|err| DaemonClientError::Transport(err.into()))?;
+        if !response.status().is_success() {
+            return Err(decode_rpc_error(response).await);
+        }
+
+        let source_type = parse_header_enum(response.headers(), TRANSFER_SOURCE_TYPE_HEADER)?;
+        let mut file = tokio::fs::File::create(archive_path)
+            .await
+            .map_err(|err| DaemonClientError::Transport(err.into()))?;
+        let mut stream = tokio_util::io::StreamReader::new(
+            response.bytes_stream().map_err(std::io::Error::other),
+        );
+        tokio::io::copy(&mut stream, &mut file)
+            .await
+            .map_err(|err| DaemonClientError::Transport(err.into()))?;
+        Ok(source_type)
+    }
+
+    pub async fn transfer_import_from_file(
+        &self,
+        archive_path: &std::path::Path,
+        req: &TransferImportRequest,
+    ) -> Result<TransferImportResponse, DaemonClientError> {
+        let file = tokio::fs::File::open(archive_path)
+            .await
+            .map_err(|err| DaemonClientError::Transport(err.into()))?;
+        let body = reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(file));
+        let response = self
+            .client
+            .post(format!("{}{}", self.base_url, "/v1/transfer/import"))
+            .header(CONNECTION, "close")
+            .header(TRANSFER_DESTINATION_PATH_HEADER, req.destination_path.clone())
+            .header(
+                TRANSFER_OVERWRITE_HEADER,
+                format_transfer_overwrite(&req.overwrite).to_string(),
+            )
+            .header(TRANSFER_CREATE_PARENT_HEADER, req.create_parent.to_string())
+            .header(
+                TRANSFER_SOURCE_TYPE_HEADER,
+                format_transfer_source_type(&req.source_type).to_string(),
+            )
+            .body(body)
+            .send()
+            .await
+            .map_err(|err| DaemonClientError::Transport(err.into()))?;
+        if !response.status().is_success() {
+            return Err(decode_rpc_error(response).await);
+        }
+
+        response
+            .json()
+            .await
+            .map_err(|err| DaemonClientError::Decode(err.into()))
+    }
+
     async fn post<Req, Resp>(&self, path: &str, body: &Req) -> Result<Resp, DaemonClientError>
     where
         Req: serde::Serialize + ?Sized,
@@ -146,5 +217,57 @@ impl DaemonClient {
             .json()
             .await
             .map_err(|err| DaemonClientError::Decode(err.into()))
+    }
+}
+
+fn format_transfer_source_type(source_type: &TransferSourceType) -> &'static str {
+    match source_type {
+        TransferSourceType::File => "file",
+        TransferSourceType::Directory => "directory",
+    }
+}
+
+fn format_transfer_overwrite(
+    overwrite: &remote_exec_proto::rpc::TransferOverwriteMode,
+) -> &'static str {
+    match overwrite {
+        remote_exec_proto::rpc::TransferOverwriteMode::Fail => "fail",
+        remote_exec_proto::rpc::TransferOverwriteMode::Replace => "replace",
+    }
+}
+
+fn parse_header_enum<T>(
+    headers: &reqwest::header::HeaderMap,
+    name: &str,
+) -> Result<T, DaemonClientError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let raw = headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| DaemonClientError::Decode(anyhow::anyhow!("missing header `{name}`")))?;
+    serde_json::from_str::<T>(&format!("\"{raw}\""))
+        .map_err(|err| DaemonClientError::Decode(err.into()))
+}
+
+async fn decode_rpc_error(response: reqwest::Response) -> DaemonClientError {
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .unwrap_or_else(|err| err.to_string());
+    if let Ok(error) = serde_json::from_str::<RpcErrorBody>(&body) {
+        DaemonClientError::Rpc {
+            status,
+            code: Some(error.code),
+            message: error.message,
+        }
+    } else {
+        DaemonClientError::Rpc {
+            status,
+            code: None,
+            message: body,
+        }
     }
 }

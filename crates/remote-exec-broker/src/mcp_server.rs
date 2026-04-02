@@ -204,6 +204,22 @@ impl BrokerServer {
             },
         )
     }
+
+    #[tool(
+        name = "transfer_files",
+        description = "Transfer one file or one directory tree between broker-local and configured target filesystems."
+    )]
+    async fn transfer_files(
+        &self,
+        Parameters(input): Parameters<remote_exec_proto::public::TransferFilesInput>,
+    ) -> Result<CallToolResult, McpError> {
+        Ok(
+            match crate::tools::transfer::transfer_files(&self.state, input).await {
+                Ok(output) => output.into_call_tool_result(),
+                Err(err) => format_tool_error(err),
+            },
+        )
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
