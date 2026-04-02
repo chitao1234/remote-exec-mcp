@@ -296,8 +296,7 @@ async fn omitted_max_output_tokens_defaults_to_ten_thousand() {
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
             &ExecStartRequest {
-                cmd: "i=0; while [ \"$i\" -lt 10005 ]; do printf 'x '; i=$((i + 1)); done"
-                    .to_string(),
+                cmd: "awk 'BEGIN { for (i = 0; i < 10005; ++i) printf \"x \" }'".to_string(),
                 workdir: None,
                 shell: Some(TEST_SHELL.to_string()),
                 tty: false,
