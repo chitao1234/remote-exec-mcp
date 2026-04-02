@@ -16,5 +16,42 @@ pub async fn list_targets(
 }
 
 fn format_targets_text(targets: &[String]) -> String {
+    if targets.is_empty() {
+        return "No configured targets.".to_string();
+    }
+
     format!("Configured targets:\n- {}", targets.join("\n- "))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use remote_exec_proto::public::ListTargetsInput;
+
+    use super::list_targets;
+    use crate::{BrokerState, session_store::SessionStore};
+
+    #[tokio::test]
+    async fn list_targets_returns_empty_text_and_array_for_empty_state() {
+        let state = BrokerState {
+            sessions: SessionStore::default(),
+            targets: BTreeMap::new(),
+        };
+
+        let result = list_targets(&state, ListTargetsInput {}).await.unwrap();
+        let call_result = result.into_call_tool_result();
+        let text = call_result
+            .content
+            .iter()
+            .filter_map(|content| content.raw.as_text().map(|text| text.text.as_str()))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert_eq!(text, "No configured targets.");
+        assert_eq!(
+            call_result.structured_content,
+            Some(serde_json::json!({ "targets": [] }))
+        );
+    }
 }
