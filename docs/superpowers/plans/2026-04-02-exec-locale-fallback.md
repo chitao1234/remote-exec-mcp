@@ -4,7 +4,7 @@
 
 **Goal:** Replace the daemon's fixed `C.UTF-8` child locale overlay with a cached host-supported fallback strategy that preserves C-style behavior and UTF-8 whenever possible.
 
-**Architecture:** Add a focused locale helper under the daemon exec runtime that discovers supported locales via `locale -a`, ranks them according to the approved policy, caches the chosen strategy, and exposes the final locale env overlay for both PTY and pipe-backed spawns. Keep the non-locale env overlay unchanged, and add deterministic tests by giving the locale helper a narrow test override seam for synthetic discovered locales.
+**Architecture:** Add a focused locale helper under the daemon exec runtime that discovers supported locales via `locale -a`, ranks them according to the approved policy, caches the chosen strategy, and exposes the final locale env overlay for both PTY and pipe-backed spawns. Keep the non-locale env overlay unchanged, and add deterministic tests through a process-env override seam for synthetic discovered locales; when that override is present, the helper must bypass the normal cache so tests stay isolated.
 
 **Tech Stack:** Rust 2024, Tokio, daemon RPC integration tests, unit tests, `cargo test`
 
@@ -13,13 +13,13 @@
 ## File Map
 
 - Create: `crates/remote-exec-daemon/src/exec/locale.rs`
-  - Own locale discovery, ranking, cached strategy resolution, and production/test seams.
+  - Own locale discovery, ranking, cached strategy resolution, and the env-var-based test seam.
 - Modify: `crates/remote-exec-daemon/src/exec/mod.rs`
   - Register the new helper module.
 - Modify: `crates/remote-exec-daemon/src/exec/session.rs`
   - Replace the fixed locale entries in the env overlay with values produced by the locale helper.
 - Modify: `crates/remote-exec-daemon/tests/exec_rpc.rs`
-  - Update env-overlay assertions and add deterministic locale env coverage for pipe and PTY mode using the helper's test seam.
+  - Update env-overlay assertions and add deterministic locale env coverage for pipe and PTY mode using the env-var seam.
 
 ### Task 1: Add Locale Strategy Discovery And Ranking
 
@@ -125,7 +125,7 @@ pub mod transcript;
 ```rust
 // crates/remote-exec-daemon/src/exec/locale.rs
 use std::process::Command;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LocaleStrategy {
@@ -146,6 +146,10 @@ impl LocaleEnvPlan {
     }
 
     pub fn resolved() -> Self {
+        if let Some(plan) = resolved_from_override_env() {
+            return plan;
+        }
+
         static CACHE: OnceLock<LocaleEnvPlan> = OnceLock::new();
         CACHE.get_or_init(resolve_locale_env_plan).clone()
     }
@@ -249,8 +253,7 @@ fn discover_locales() -> Option<Vec<String>> {
 }
 
 fn locale_command_output() -> Option<String> {
-    #[cfg(test)]
-    if let Some(output) = test_locale_output_override() {
+    if let Ok(output) = std::env::var("REMOTE_EXEC_TEST_LOCALE_OUTPUT") {
         return Some(output);
     }
 
@@ -261,11 +264,11 @@ fn locale_command_output() -> Option<String> {
     String::from_utf8(output.stdout).ok()
 }
 
-#[cfg(test)]
-fn test_locale_output_override() -> Option<String> {
-    static OVERRIDE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-    let lock = OVERRIDE.get_or_init(|| Mutex::new(None));
-    lock.lock().unwrap().clone()
+fn resolved_from_override_env() -> Option<LocaleEnvPlan> {
+    let output = std::env::var("REMOTE_EXEC_TEST_LOCALE_OUTPUT").ok()?;
+    Some(LocaleEnvPlan::from_strategy(choose_strategy(
+        output.lines().map(str::trim).filter(|line| !line.is_empty()),
+    )))
 }
 ```
 
@@ -403,32 +406,26 @@ git commit -m "feat: apply exec locale fallback overlay"
 **Testing approach:** `existing tests + targeted verification`
 Reason: the locale helper already has pure selection tests. This task adds the narrow test seam and daemon-level coverage needed to prove fallback behavior without depending on the real machine's installed locales.
 
-- [ ] **Step 1: Add a narrow test-only override API for discovered locale output**
+- [ ] **Step 1: Add a narrow env-var override seam for discovered locale output**
 
 ```rust
 // crates/remote-exec-daemon/src/exec/locale.rs
-#[cfg(test)]
-pub struct TestLocaleOverrideGuard {
-    previous: Option<String>,
-}
+const TEST_LOCALE_OUTPUT_ENV: &str = "REMOTE_EXEC_TEST_LOCALE_OUTPUT";
 
-#[cfg(test)]
-pub fn set_test_locale_output(output: Option<&str>) -> TestLocaleOverrideGuard {
-    static OVERRIDE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-    let lock = OVERRIDE.get_or_init(|| Mutex::new(None));
-    let mut guard = lock.lock().unwrap();
-    let previous = guard.clone();
-    *guard = output.map(ToOwned::to_owned);
-    TestLocaleOverrideGuard { previous }
-}
-
-#[cfg(test)]
-impl Drop for TestLocaleOverrideGuard {
-    fn drop(&mut self) {
-        static OVERRIDE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-        let lock = OVERRIDE.get_or_init(|| Mutex::new(None));
-        *lock.lock().unwrap() = self.previous.clone();
+pub fn resolved() -> Self {
+    if let Some(plan) = resolved_from_override_env() {
+        return plan;
     }
+
+    static CACHE: OnceLock<LocaleEnvPlan> = OnceLock::new();
+    CACHE.get_or_init(resolve_locale_env_plan).clone()
+}
+
+fn resolved_from_override_env() -> Option<LocaleEnvPlan> {
+    let output = std::env::var(TEST_LOCALE_OUTPUT_ENV).ok()?;
+    Some(LocaleEnvPlan::from_strategy(choose_strategy(
+        output.lines().map(str::trim).filter(|line| !line.is_empty()),
+    )))
 }
 ```
 
@@ -437,9 +434,11 @@ impl Drop for TestLocaleOverrideGuard {
 ```rust
 #[tokio::test]
 async fn env_overlay_prefers_lang_c_plus_lc_ctype_when_c_utf8_is_unavailable() {
-    let _locale = remote_exec_daemon::exec::locale::set_test_locale_output(Some(
+    let _env = EnvOverrideGuard::set(&[(
+        "REMOTE_EXEC_TEST_LOCALE_OUTPUT",
         "fr_FR.UTF-8\nen_US.UTF-8\n",
-    ));
+    )])
+    .await;
     let fixture = support::spawn_daemon("builder-a").await;
 
     let response = fixture
@@ -463,9 +462,11 @@ async fn env_overlay_prefers_lang_c_plus_lc_ctype_when_c_utf8_is_unavailable() {
 
 #[tokio::test]
 async fn env_overlay_falls_back_to_lang_c_only_when_no_utf8_locale_is_available() {
-    let _locale = remote_exec_daemon::exec::locale::set_test_locale_output(Some(
+    let _env = EnvOverrideGuard::set(&[(
+        "REMOTE_EXEC_TEST_LOCALE_OUTPUT",
         "C\nPOSIX\nen_US.ISO8859-1\n",
-    ));
+    )])
+    .await;
     let fixture = support::spawn_daemon("builder-a").await;
 
     let response = fixture
@@ -516,10 +517,11 @@ git commit -m "test: cover exec locale fallback behavior"
 - Keep PTY and pipe-backed child env behavior aligned:
   - Covered by Task 2 focused pipe and PTY env-overlay tests.
 - Keep tests independent from the host locale inventory:
-  - Covered by Task 3 test-only locale discovery override seam.
+  - Covered by Task 3 env-var-based locale discovery override seam.
 
 ## Self-Review Notes
 
 - No placeholders remain.
 - The plan keeps the locale override seam local to tests instead of turning it into a public runtime configuration feature.
+- The helper must bypass the normal cached path when the override env var is present, otherwise the first resolved locale plan would leak across fallback tests.
 - The plan intentionally does not expose `LastResortLcAll` through daemon exec tests yet; that behavior is still pinned by the helper-level strategy tests and can be expanded later if a concrete platform requires it.
