@@ -196,8 +196,16 @@ pub fn internal_error(err: anyhow::Error) -> (StatusCode, Json<RpcErrorBody>) {
 
 fn shell_argv(shell: Option<&str>, login: bool, cmd: &str) -> anyhow::Result<Vec<String>> {
     let shell = shell::resolve_shell(shell)?;
-    let mode = if login { "-lc" } else { "-c" };
-    Ok(vec![shell, mode.to_string(), cmd.to_string()])
+    if login {
+        Ok(vec![
+            shell,
+            "-l".to_string(),
+            "-c".to_string(),
+            cmd.to_string(),
+        ])
+    } else {
+        Ok(vec![shell, "-c".to_string(), cmd.to_string()])
+    }
 }
 
 fn chunk_id() -> String {
@@ -264,5 +272,35 @@ fn finish_response(
         original_token_count: Some(snapshot.original_token_count),
         output: snapshot.output,
         warnings: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shell_argv;
+
+    #[test]
+    fn shell_argv_uses_dash_c_for_non_login_shells() {
+        assert_eq!(
+            shell_argv(Some("/bin/sh"), false, "printf ok").unwrap(),
+            vec![
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                "printf ok".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn shell_argv_uses_dash_l_then_dash_c_for_login_shells() {
+        assert_eq!(
+            shell_argv(Some("/bin/sh"), true, "printf ok").unwrap(),
+            vec![
+                "/bin/sh".to_string(),
+                "-l".to_string(),
+                "-c".to_string(),
+                "printf ok".to_string(),
+            ]
+        );
     }
 }
