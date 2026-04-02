@@ -320,14 +320,13 @@ async fn exec_output_drains_late_output_after_exit() {
 }
 
 #[tokio::test]
-async fn exec_output_write_truncates_to_max_output_tokens() {
+async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens() {
     let fixture = support::spawn_daemon("builder-a").await;
     let started = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
             &ExecStartRequest {
-                cmd: "stty -echo; read line; printf 'one two three four five six'; sleep 30"
-                    .to_string(),
+                cmd: "sleep 0.4; printf 'one two three four five six'; sleep 30".to_string(),
                 workdir: None,
                 shell: Some(TEST_SHELL.to_string()),
                 tty: true,
@@ -337,14 +336,15 @@ async fn exec_output_write_truncates_to_max_output_tokens() {
             },
         )
         .await;
+    assert!(started.running);
 
     let response = fixture
         .rpc::<ExecWriteRequest, ExecResponse>(
             "/v1/exec/write",
             &ExecWriteRequest {
                 daemon_session_id: started.daemon_session_id.expect("live session"),
-                chars: "go\n".to_string(),
-                yield_time_ms: Some(250),
+                chars: "".to_string(),
+                yield_time_ms: Some(5_000),
                 max_output_tokens: Some(3),
             },
         )
