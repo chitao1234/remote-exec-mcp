@@ -17,7 +17,11 @@ fn load_ca_from_pem_accepts_generated_material_and_reuses_it_in_bundle_output() 
     assert_eq!(bundle.ca.cert_pem, ca.pem_pair.cert_pem);
     assert_eq!(bundle.ca.key_pem, ca.pem_pair.key_pem);
     assert!(bundle.broker.cert_pem.contains("BEGIN CERTIFICATE"));
-    assert!(bundle.daemons["builder-a"].cert_pem.contains("BEGIN CERTIFICATE"));
+    assert!(
+        bundle.daemons["builder-a"]
+            .cert_pem
+            .contains("BEGIN CERTIFICATE")
+    );
 }
 
 #[test]

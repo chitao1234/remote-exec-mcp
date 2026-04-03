@@ -89,7 +89,9 @@ pub fn load_ca_from_pem(cert_pem: &str, key_pem: &str) -> anyhow::Result<Certifi
         certificate_public_key_der(cert_pem)? == key.public_key_der(),
         "CA certificate and key do not match"
     );
-    let cert = params.self_signed(&key).context("reconstructing CA certificate from PEM")?;
+    let cert = params
+        .self_signed(&key)
+        .context("reconstructing CA certificate from PEM")?;
 
     Ok(CertificateAuthority {
         cert,
