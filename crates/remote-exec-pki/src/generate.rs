@@ -1,5 +1,8 @@
 use std::collections::BTreeMap;
+use std::fmt;
+use std::io::Cursor;
 
+use anyhow::{Context, ensure};
 use rcgen::{
     BasicConstraints, Certificate, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa,
     KeyPair, SanType,
@@ -20,33 +23,46 @@ pub struct GeneratedDevInitBundle {
     pub daemons: BTreeMap<String, GeneratedPemPair>,
 }
 
-struct GeneratedCa {
+pub struct CertificateAuthority {
     cert: Certificate,
     key: KeyPair,
+    pub pem_pair: GeneratedPemPair,
+}
+
+impl fmt::Debug for CertificateAuthority {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CertificateAuthority")
+            .field("pem_pair", &self.pem_pair)
+            .finish_non_exhaustive()
+    }
 }
 
 pub fn build_dev_init_bundle(spec: &DevInitSpec) -> anyhow::Result<GeneratedDevInitBundle> {
+    let ca = generate_ca(&spec.ca_common_name)?;
+    build_dev_init_bundle_from_ca(spec, &ca)
+}
+
+pub fn build_dev_init_bundle_from_ca(
+    spec: &DevInitSpec,
+    ca: &CertificateAuthority,
+) -> anyhow::Result<GeneratedDevInitBundle> {
     spec.validate()?;
 
-    let ca = generate_ca(&spec.ca_common_name)?;
-    let broker = issue_broker_cert(&ca, &spec.broker_common_name)?;
+    let broker = issue_broker_cert(ca, &spec.broker_common_name)?;
     let mut daemons = BTreeMap::new();
 
     for daemon in &spec.daemon_specs {
-        daemons.insert(daemon.target.clone(), issue_daemon_cert(&ca, daemon)?);
+        daemons.insert(daemon.target.clone(), issue_daemon_cert(ca, daemon)?);
     }
 
     Ok(GeneratedDevInitBundle {
-        ca: GeneratedPemPair {
-            cert_pem: ca.cert.pem(),
-            key_pem: ca.key.serialize_pem(),
-        },
+        ca: ca.pem_pair.clone(),
         broker,
         daemons,
     })
 }
 
-fn generate_ca(common_name: &str) -> anyhow::Result<GeneratedCa> {
+pub fn generate_ca(common_name: &str) -> anyhow::Result<CertificateAuthority> {
     let mut params = CertificateParams::new(Vec::new())?;
     params
         .distinguished_name
@@ -55,10 +71,52 @@ fn generate_ca(common_name: &str) -> anyhow::Result<GeneratedCa> {
 
     let key = KeyPair::generate()?;
     let cert = params.self_signed(&key)?;
-    Ok(GeneratedCa { cert, key })
+    Ok(CertificateAuthority {
+        pem_pair: GeneratedPemPair {
+            cert_pem: cert.pem(),
+            key_pem: key.serialize_pem(),
+        },
+        cert,
+        key,
+    })
 }
 
-fn issue_broker_cert(ca: &GeneratedCa, common_name: &str) -> anyhow::Result<GeneratedPemPair> {
+pub fn load_ca_from_pem(cert_pem: &str, key_pem: &str) -> anyhow::Result<CertificateAuthority> {
+    let params =
+        CertificateParams::from_ca_cert_pem(cert_pem).context("parsing CA certificate PEM")?;
+    let key = KeyPair::from_pem(key_pem).context("parsing CA key PEM")?;
+    ensure!(
+        certificate_public_key_der(cert_pem)? == key.public_key_der(),
+        "CA certificate and key do not match"
+    );
+    let cert = params.self_signed(&key).context("reconstructing CA certificate from PEM")?;
+
+    Ok(CertificateAuthority {
+        cert,
+        key,
+        pem_pair: GeneratedPemPair {
+            cert_pem: cert_pem.to_string(),
+            key_pem: key_pem.to_string(),
+        },
+    })
+}
+
+fn certificate_public_key_der(cert_pem: &str) -> anyhow::Result<Vec<u8>> {
+    let mut reader = Cursor::new(cert_pem.as_bytes());
+    let cert = rustls_pemfile::certs(&mut reader)
+        .next()
+        .transpose()
+        .context("reading CA certificate PEM")?
+        .context("missing CA certificate PEM block")?;
+    let (_, parsed) = x509_parser::parse_x509_certificate(cert.as_ref())
+        .map_err(|_| anyhow::anyhow!("parsing CA certificate DER"))?;
+    Ok(parsed.public_key().raw.to_vec())
+}
+
+pub fn issue_broker_cert(
+    ca: &CertificateAuthority,
+    common_name: &str,
+) -> anyhow::Result<GeneratedPemPair> {
     let key = KeyPair::generate()?;
     let params = broker_params(common_name)?;
     let cert = params.signed_by(&key, &ca.cert, &ca.key)?;
@@ -69,8 +127,8 @@ fn issue_broker_cert(ca: &GeneratedCa, common_name: &str) -> anyhow::Result<Gene
     })
 }
 
-fn issue_daemon_cert(
-    ca: &GeneratedCa,
+pub fn issue_daemon_cert(
+    ca: &CertificateAuthority,
     daemon: &DaemonCertSpec,
 ) -> anyhow::Result<GeneratedPemPair> {
     let key = KeyPair::generate()?;
