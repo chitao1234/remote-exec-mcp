@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use reqwest::header::CONNECTION;
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
     model::{CallToolRequestParams, CallToolResult, ClientInfo},
@@ -26,6 +27,42 @@ pub async fn spawn_cluster() -> ClusterFixture {
         daemon_a,
         daemon_b,
     }
+}
+
+fn toml_string(value: &str) -> String {
+    toml::Value::String(value.to_string()).to_string()
+}
+
+pub fn long_running_tty_exec_input(target: &str) -> serde_json::Value {
+    #[cfg(windows)]
+    let cmd = "echo hello & ping -n 30 127.0.0.1 >nul";
+    #[cfg(not(windows))]
+    let cmd = "printf hello; sleep 30";
+
+    #[cfg(windows)]
+    let mut arguments = serde_json::json!({
+        "target": target,
+        "cmd": cmd,
+        "tty": true,
+        "yield_time_ms": 250,
+    });
+    #[cfg(not(windows))]
+    let arguments = serde_json::json!({
+        "target": target,
+        "cmd": cmd,
+        "tty": true,
+        "yield_time_ms": 250,
+    });
+
+    #[cfg(windows)]
+    {
+        arguments.as_object_mut().unwrap().insert(
+            "shell".to_string(),
+            serde_json::Value::String("cmd.exe".to_string()),
+        );
+    }
+
+    arguments
 }
 
 pub struct BrokerFixture {
@@ -160,6 +197,7 @@ pub struct DaemonFixture {
     daemon_cert_pem: PathBuf,
     daemon_key_pem: PathBuf,
     client: reqwest::Client,
+    shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     handle: Option<JoinHandle<anyhow::Result<()>>>,
 }
 
@@ -174,6 +212,7 @@ impl DaemonFixture {
         std::fs::create_dir_all(&workdir).unwrap();
         let client = reqwest::Client::builder()
             .use_rustls_tls()
+            .pool_max_idle_per_host(0)
             .add_root_certificate(
                 reqwest::Certificate::from_pem(&std::fs::read(&certs.ca_cert).unwrap()).unwrap(),
             )
@@ -201,6 +240,7 @@ impl DaemonFixture {
             daemon_cert_pem: certs.daemon_cert,
             daemon_key_pem: certs.daemon_key,
             client,
+            shutdown: None,
             handle: None,
         };
         fixture.start().await;
@@ -215,17 +255,18 @@ impl DaemonFixture {
     pub fn target_config_fragment(&self) -> String {
         format!(
             r#"[targets.{target}]
-base_url = "https://{addr}"
-ca_pem = "{ca_pem}"
-client_cert_pem = "{client_cert_pem}"
-client_key_pem = "{client_key_pem}"
-expected_daemon_name = "{target}"
+base_url = {base_url}
+ca_pem = {ca_pem}
+client_cert_pem = {client_cert_pem}
+client_key_pem = {client_key_pem}
+expected_daemon_name = {expected_daemon_name}
 "#,
             target = self.target,
-            addr = self.addr,
-            ca_pem = self.ca_pem.display(),
-            client_cert_pem = self.client_cert_pem.display(),
-            client_key_pem = self.client_key_pem.display(),
+            base_url = toml_string(&format!("https://{}", self.addr)),
+            ca_pem = toml_string(&self.ca_pem.display().to_string()),
+            client_cert_pem = toml_string(&self.client_cert_pem.display().to_string()),
+            client_key_pem = toml_string(&self.client_key_pem.display().to_string()),
+            expected_daemon_name = toml_string(&self.target),
         )
     }
 
@@ -241,13 +282,22 @@ expected_daemon_name = "{target}"
                 ca_pem: self.ca_pem.clone(),
             },
         };
-        self.handle = Some(tokio::spawn(remote_exec_daemon::run(config)));
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        self.shutdown = Some(shutdown_tx);
+        self.handle = Some(tokio::spawn(remote_exec_daemon::run_until(
+            config,
+            async move {
+                let _ = shutdown_rx.await;
+            },
+        )));
         wait_until_ready(&self.client, self.addr).await;
     }
 
     async fn stop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
         if let Some(handle) = self.handle.take() {
-            handle.abort();
             let _ = handle.await;
             wait_for_listener_release(self.addr).await;
         }
@@ -256,6 +306,9 @@ expected_daemon_name = "{target}"
 
 impl Drop for DaemonFixture {
     fn drop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
         if let Some(handle) = self.handle.take() {
             handle.abort();
         }
@@ -306,6 +359,7 @@ async fn wait_until_ready(client: &reqwest::Client, addr: std::net::SocketAddr) 
     for _ in 0..80 {
         if client
             .post(format!("https://{addr}/v1/health"))
+            .header(CONNECTION, "close")
             .json(&serde_json::json!({}))
             .send()
             .await
@@ -319,12 +373,72 @@ async fn wait_until_ready(client: &reqwest::Client, addr: std::net::SocketAddr) 
 }
 
 async fn wait_for_listener_release(addr: std::net::SocketAddr) {
-    for _ in 0..80 {
+    #[cfg(windows)]
+    let retries = 400;
+    #[cfg(not(windows))]
+    let retries = 80;
+
+    #[cfg(windows)]
+    let delay_ms = 50;
+    #[cfg(not(windows))]
+    let delay_ms = 25;
+
+    for _ in 0..retries {
         if let Ok(listener) = std::net::TcpListener::bind(addr) {
             drop(listener);
             return;
         }
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
     }
     panic!("daemon listener was not released");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DaemonFixture;
+    use std::path::PathBuf;
+
+    #[test]
+    fn target_config_fragment_escapes_windows_paths_for_toml() {
+        let fixture = DaemonFixture {
+            _tempdir: tempfile::tempdir().unwrap(),
+            target: "builder-a".to_string(),
+            addr: "127.0.0.1:9443".parse().unwrap(),
+            workdir: PathBuf::from(r"C:\Users\chi\AppData\Local\Temp\.tmp-work\workdir"),
+            ca_pem: PathBuf::from(r"C:\Users\chi\AppData\Local\Temp\.tmp-work\certs\ca.pem"),
+            client_cert_pem: PathBuf::from(
+                r"C:\Users\chi\AppData\Local\Temp\.tmp-work\certs\broker.pem",
+            ),
+            client_key_pem: PathBuf::from(
+                r"C:\Users\chi\AppData\Local\Temp\.tmp-work\certs\broker-key.pem",
+            ),
+            daemon_cert_pem: PathBuf::from(
+                r"C:\Users\chi\AppData\Local\Temp\.tmp-work\certs\daemon.pem",
+            ),
+            daemon_key_pem: PathBuf::from(
+                r"C:\Users\chi\AppData\Local\Temp\.tmp-work\certs\daemon-key.pem",
+            ),
+            client: reqwest::Client::new(),
+            shutdown: None,
+            handle: None,
+        };
+
+        let parsed = fixture
+            .target_config_fragment()
+            .parse::<toml::Table>()
+            .expect("config fragment should parse as TOML");
+
+        assert_eq!(
+            parsed["targets"]["builder-a"]["ca_pem"].as_str(),
+            Some(r"C:\Users\chi\AppData\Local\Temp\.tmp-work\certs\ca.pem")
+        );
+        assert_eq!(
+            parsed["targets"]["builder-a"]["client_cert_pem"].as_str(),
+            Some(r"C:\Users\chi\AppData\Local\Temp\.tmp-work\certs\broker.pem")
+        );
+        assert_eq!(
+            parsed["targets"]["builder-a"]["client_key_pem"].as_str(),
+            Some(r"C:\Users\chi\AppData\Local\Temp\.tmp-work\certs\broker-key.pem")
+        );
+    }
 }

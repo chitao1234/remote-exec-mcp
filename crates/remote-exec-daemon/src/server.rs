@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -9,9 +10,16 @@ use remote_exec_proto::rpc::{HealthCheckResponse, TargetInfoResponse};
 use crate::AppState;
 
 pub async fn serve(state: AppState) -> Result<()> {
+    serve_with_shutdown(state, std::future::pending::<()>()).await
+}
+
+pub async fn serve_with_shutdown<F>(state: AppState, shutdown: F) -> Result<()>
+where
+    F: Future<Output = ()> + Send,
+{
     let state = Arc::new(state);
     let app = router(state.clone());
-    crate::tls::serve_tls(app, state).await
+    crate::tls::serve_tls_with_shutdown(app, state, shutdown).await
 }
 
 pub fn router(state: Arc<AppState>) -> Router {

@@ -11,12 +11,7 @@ async fn sessions_are_isolated_per_target() {
         .broker
         .call_tool(
             "exec_command",
-            serde_json::json!({
-                "target": "builder-a",
-                "cmd": "printf hello; sleep 30",
-                "tty": true,
-                "yield_time_ms": 250
-            }),
+            support::long_running_tty_exec_input("builder-a"),
         )
         .await;
 
@@ -108,12 +103,7 @@ async fn sessions_are_invalidated_after_daemon_restart() {
         .broker
         .call_tool(
             "exec_command",
-            serde_json::json!({
-                "target": "builder-a",
-                "cmd": "printf hello; sleep 30",
-                "tty": true,
-                "yield_time_ms": 250
-            }),
+            support::long_running_tty_exec_input("builder-a"),
         )
         .await;
     let session_id = started.structured_content["session_id"]

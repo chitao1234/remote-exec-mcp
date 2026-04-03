@@ -6,6 +6,8 @@ pub mod server;
 pub mod tls;
 pub mod transfer;
 
+use std::future::Future;
+use std::future::pending;
 use std::sync::Arc;
 use std::sync::Once;
 
@@ -20,6 +22,13 @@ pub struct AppState {
 }
 
 pub async fn run(config: DaemonConfig) -> Result<()> {
+    run_until(config, pending::<()>()).await
+}
+
+pub async fn run_until<F>(config: DaemonConfig, shutdown: F) -> Result<()>
+where
+    F: Future<Output = ()> + Send,
+{
     install_crypto_provider();
 
     let state = AppState {
@@ -27,7 +36,7 @@ pub async fn run(config: DaemonConfig) -> Result<()> {
         daemon_instance_id: uuid::Uuid::new_v4().to_string(),
         sessions: exec::store::SessionStore::new(64),
     };
-    server::serve(state).await
+    server::serve_with_shutdown(state, shutdown).await
 }
 
 pub fn install_crypto_provider() {
