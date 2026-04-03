@@ -222,34 +222,77 @@ impl DerefMut for SessionLease {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
+    use std::sync::OnceLock;
     use std::time::Duration;
 
     use super::SessionStore;
     use crate::exec::session;
 
+    #[cfg(unix)]
     const TEST_SHELL: &str = "/bin/sh";
+    #[cfg(windows)]
+    const TEST_SHELL: &str = "cmd.exe";
+
+    fn test_workdir() -> &'static Path {
+        static WORKDIR: OnceLock<PathBuf> = OnceLock::new();
+        WORKDIR
+            .get_or_init(|| std::env::current_dir().expect("current directory should resolve"))
+            .as_path()
+    }
+
+    fn shell_argv(script: &str) -> Vec<String> {
+        #[cfg(unix)]
+        {
+            vec![TEST_SHELL.to_string(), "-c".to_string(), script.to_string()]
+        }
+
+        #[cfg(windows)]
+        {
+            vec![
+                TEST_SHELL.to_string(),
+                "/D".to_string(),
+                "/C".to_string(),
+                script.to_string(),
+            ]
+        }
+    }
+
+    fn sleep_script(seconds: u64) -> String {
+        #[cfg(unix)]
+        {
+            format!("sleep {seconds}")
+        }
+
+        #[cfg(windows)]
+        {
+            format!("ping -n {} 127.0.0.1 >nul", seconds + 1)
+        }
+    }
+
+    fn completed_script() -> &'static str {
+        #[cfg(unix)]
+        {
+            "printf done"
+        }
+
+        #[cfg(windows)]
+        {
+            "echo done"
+        }
+    }
 
     fn spawn_pipe_session(script: &str) -> session::LiveSession {
-        session::spawn(
-            &[TEST_SHELL.to_string(), "-c".to_string(), script.to_string()],
-            Path::new("/"),
-            false,
-        )
-        .expect("session should spawn")
+        session::spawn(&shell_argv(script), test_workdir(), false).expect("session should spawn")
     }
 
     #[tokio::test]
     async fn lock_rejects_stale_snapshot_after_session_replacement() {
         let store = SessionStore::default();
         let session_id = "session-1";
-        let cmd = vec![
-            TEST_SHELL.to_string(),
-            "-c".to_string(),
-            "sleep 2".to_string(),
-        ];
+        let cmd = shell_argv(&sleep_script(2));
 
-        let first = session::spawn(&cmd, Path::new("/"), false).expect("first session");
+        let first = session::spawn(&cmd, test_workdir(), false).expect("first session");
         store.insert(session_id.to_string(), first).await;
         let stale = {
             let sessions = store.inner.read().await;
@@ -259,7 +302,7 @@ mod tests {
                 .expect("session must exist for stale snapshot")
         };
 
-        let replacement = session::spawn(&cmd, Path::new("/"), false).expect("replacement session");
+        let replacement = session::spawn(&cmd, test_workdir(), false).expect("replacement session");
         store.insert(session_id.to_string(), replacement).await;
 
         let stale_guard = store.lock_if_current(session_id, stale).await;
@@ -279,13 +322,9 @@ mod tests {
     async fn retire_prevents_waiting_lock_from_reusing_session() {
         let store = SessionStore::default();
         let session_id = "session-1";
-        let cmd = vec![
-            TEST_SHELL.to_string(),
-            "-c".to_string(),
-            "sleep 2".to_string(),
-        ];
+        let cmd = shell_argv(&sleep_script(2));
 
-        let session = session::spawn(&cmd, Path::new("/"), false).expect("session");
+        let session = session::spawn(&cmd, test_workdir(), false).expect("session");
         store.insert(session_id.to_string(), session).await;
         let lease = store.lock(session_id).await.expect("lease");
 
@@ -314,11 +353,17 @@ mod tests {
     async fn lock_refreshes_recency_so_older_live_session_is_pruned() {
         let store = SessionStore::new(2);
         store
-            .insert("session-1".to_string(), spawn_pipe_session("sleep 2"))
+            .insert(
+                "session-1".to_string(),
+                spawn_pipe_session(&sleep_script(2)),
+            )
             .await;
         tokio::time::sleep(Duration::from_millis(10)).await;
         store
-            .insert("session-2".to_string(), spawn_pipe_session("sleep 2"))
+            .insert(
+                "session-2".to_string(),
+                spawn_pipe_session(&sleep_script(2)),
+            )
             .await;
 
         let lease = store
@@ -329,7 +374,10 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         store
-            .insert("session-3".to_string(), spawn_pipe_session("sleep 2"))
+            .insert(
+                "session-3".to_string(),
+                spawn_pipe_session(&sleep_script(2)),
+            )
             .await;
 
         assert!(store.lock("session-1").await.is_some());
@@ -341,15 +389,24 @@ mod tests {
     async fn insert_prunes_exited_session_before_live_session() {
         let store = SessionStore::new(2);
         store
-            .insert("session-1".to_string(), spawn_pipe_session("printf done"))
+            .insert(
+                "session-1".to_string(),
+                spawn_pipe_session(completed_script()),
+            )
             .await;
         tokio::time::sleep(Duration::from_millis(50)).await;
         store
-            .insert("session-2".to_string(), spawn_pipe_session("sleep 2"))
+            .insert(
+                "session-2".to_string(),
+                spawn_pipe_session(&sleep_script(2)),
+            )
             .await;
 
         store
-            .insert("session-3".to_string(), spawn_pipe_session("sleep 2"))
+            .insert(
+                "session-3".to_string(),
+                spawn_pipe_session(&sleep_script(2)),
+            )
             .await;
 
         assert!(store.lock("session-1").await.is_none());
@@ -362,7 +419,10 @@ mod tests {
         let store = SessionStore::new(10);
         for index in 0..10 {
             store
-                .insert(format!("session-{index}"), spawn_pipe_session("sleep 30"))
+                .insert(
+                    format!("session-{index}"),
+                    spawn_pipe_session(&sleep_script(30)),
+                )
                 .await;
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
@@ -377,7 +437,10 @@ mod tests {
         store.lock("session-2").await.expect("session-2");
 
         let outcome = store
-            .insert("session-10".to_string(), spawn_pipe_session("sleep 30"))
+            .insert(
+                "session-10".to_string(),
+                spawn_pipe_session(&sleep_script(30)),
+            )
             .await;
 
         assert!(!outcome.crossed_warning_threshold);
@@ -403,19 +466,28 @@ mod tests {
     async fn insert_prunes_oldest_exited_non_protected_session_before_live_one() {
         let store = SessionStore::new(10);
         store
-            .insert("session-0".to_string(), spawn_pipe_session("printf done"))
+            .insert(
+                "session-0".to_string(),
+                spawn_pipe_session(completed_script()),
+            )
             .await;
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         for index in 1..10 {
             store
-                .insert(format!("session-{index}"), spawn_pipe_session("sleep 30"))
+                .insert(
+                    format!("session-{index}"),
+                    spawn_pipe_session(&sleep_script(30)),
+                )
                 .await;
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
 
         let outcome = store
-            .insert("session-10".to_string(), spawn_pipe_session("sleep 30"))
+            .insert(
+                "session-10".to_string(),
+                spawn_pipe_session(&sleep_script(30)),
+            )
             .await;
 
         assert!(!outcome.crossed_warning_threshold);
@@ -429,7 +501,10 @@ mod tests {
 
         for index in 0..59 {
             let outcome = store
-                .insert(format!("session-{index}"), spawn_pipe_session("sleep 30"))
+                .insert(
+                    format!("session-{index}"),
+                    spawn_pipe_session(&sleep_script(30)),
+                )
                 .await;
             assert!(
                 !outcome.crossed_warning_threshold,
@@ -438,12 +513,18 @@ mod tests {
         }
 
         let crossing = store
-            .insert("session-59".to_string(), spawn_pipe_session("sleep 30"))
+            .insert(
+                "session-59".to_string(),
+                spawn_pipe_session(&sleep_script(30)),
+            )
             .await;
         assert!(crossing.crossed_warning_threshold);
 
         let above_threshold = store
-            .insert("session-60".to_string(), spawn_pipe_session("sleep 30"))
+            .insert(
+                "session-60".to_string(),
+                spawn_pipe_session(&sleep_script(30)),
+            )
             .await;
         assert!(!above_threshold.crossed_warning_threshold);
 
@@ -451,7 +532,10 @@ mod tests {
         store.remove("session-1").await;
 
         let recrossing = store
-            .insert("session-61".to_string(), spawn_pipe_session("sleep 30"))
+            .insert(
+                "session-61".to_string(),
+                spawn_pipe_session(&sleep_script(30)),
+            )
             .await;
         assert!(recrossing.crossed_warning_threshold);
     }
