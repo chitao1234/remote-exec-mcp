@@ -1,4 +1,6 @@
 #[cfg(windows)]
+use std::borrow::Cow;
+#[cfg(windows)]
 use std::collections::BTreeMap;
 #[cfg(windows)]
 use std::ffi::OsString;
@@ -154,6 +156,37 @@ fn terminal_query_prefix_len(bytes: &[u8]) -> Option<usize> {
         [0x1b, b'[', b'5'] | [0x1b, b'[', b'6'] => Some(3),
         _ => None,
     }
+}
+
+#[cfg(windows)]
+fn normalize_windows_tty_input(chars: &str) -> Cow<'_, str> {
+    if !chars.contains('\n') {
+        return Cow::Borrowed(chars);
+    }
+
+    let mut normalized = String::with_capacity(chars.len());
+    let mut last_was_cr = false;
+
+    for ch in chars.chars() {
+        match ch {
+            '\r' => {
+                normalized.push('\r');
+                last_was_cr = true;
+            }
+            '\n' => {
+                if !last_was_cr {
+                    normalized.push('\r');
+                }
+                last_was_cr = false;
+            }
+            _ => {
+                normalized.push(ch);
+                last_was_cr = false;
+            }
+        }
+    }
+
+    Cow::Owned(normalized)
 }
 
 fn portable_pty_probe() -> anyhow::Result<()> {
@@ -671,6 +704,15 @@ impl LiveSession {
             return Ok(());
         }
 
+        #[cfg(windows)]
+        let chars = if self.tty {
+            normalize_windows_tty_input(chars)
+        } else {
+            Cow::Borrowed(chars)
+        };
+        #[cfg(not(windows))]
+        let chars = chars;
+
         match &mut self.child {
             SessionChild::Pty(pty) => {
                 pty.writer.write_all(chars.as_bytes())?;
@@ -678,7 +720,7 @@ impl LiveSession {
                 Ok(())
             }
             #[cfg(windows)]
-            SessionChild::Winpty(pty) => pty.write(chars),
+            SessionChild::Winpty(pty) => pty.write(chars.as_ref()),
             SessionChild::Pipe(_) => anyhow::bail!(
                 "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
             ),
@@ -787,5 +829,32 @@ mod windows_pty_backend_tests {
         assert_eq!(second.output, "after");
         assert_eq!(second.response, "\x1b[1;1R");
         assert_eq!(state.drain_pending(), "");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_tty_input_normalization_converts_bare_lf_to_cr() {
+        assert_eq!(
+            super::normalize_windows_tty_input("ping\n").as_ref(),
+            "ping\r"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_tty_input_normalization_coalesces_crlf_to_cr() {
+        assert_eq!(
+            super::normalize_windows_tty_input("ping\r\npong\n").as_ref(),
+            "ping\rpong\r"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_tty_input_normalization_leaves_existing_cr_unchanged() {
+        assert_eq!(
+            super::normalize_windows_tty_input("ping\r").as_ref(),
+            "ping\r"
+        );
     }
 }

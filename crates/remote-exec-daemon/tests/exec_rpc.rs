@@ -1,6 +1,8 @@
 mod support;
 
 use std::ffi::OsString;
+#[cfg(windows)]
+use std::path::Path;
 use std::sync::OnceLock;
 
 use remote_exec_proto::rpc::{ExecResponse, ExecStartRequest, ExecWriteRequest};
@@ -53,6 +55,14 @@ fn windows_cmd_start_request(
         max_output_tokens,
         login: Some(false),
     }
+}
+
+#[cfg(windows)]
+fn windows_probe_command(mode: &str) -> String {
+    let probe = Path::new(env!("CARGO_BIN_EXE_pty_input_probe"))
+        .display()
+        .to_string();
+    format!("& '{probe}' {mode}")
 }
 
 fn env_lock() -> &'static Mutex<()> {
@@ -459,7 +469,7 @@ async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens_on_windows() 
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
             &windows_start_request(
-                "Start-Sleep -Milliseconds 400; [Console]::Out.Write('one two three four five six'); Start-Sleep -Seconds 30",
+                &windows_probe_command("delayed_tokens"),
                 true,
                 Some(250),
                 Some(3),
@@ -587,6 +597,61 @@ async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon_on_windows(
     assert!(fast_response.output.contains("ping"));
 
     let _ = slow_poll.await.unwrap();
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn exec_write_bare_lf_advances_windows_pty_line_reader() {
+    let fixture = support::spawn_daemon("builder-a").await;
+    let started = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &windows_start_request(&windows_probe_command("read_line"), true, Some(250), None),
+        )
+        .await;
+
+    assert!(started.running, "start response: {started:#?}");
+
+    let session_id = started.daemon_session_id.expect("live session");
+    let response = fixture
+        .rpc::<ExecWriteRequest, ExecResponse>(
+            "/v1/exec/write",
+            &ExecWriteRequest {
+                daemon_session_id: session_id.clone(),
+                chars: "ping\n".to_string(),
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
+                max_output_tokens: None,
+            },
+        )
+        .await;
+
+    let mut combined_output = started.output;
+    combined_output.push_str(&response.output);
+
+    let exit_code = if response.running {
+        let tail = fixture
+            .rpc::<ExecWriteRequest, ExecResponse>(
+                "/v1/exec/write",
+                &ExecWriteRequest {
+                    daemon_session_id: session_id,
+                    chars: String::new(),
+                    yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
+                    max_output_tokens: None,
+                },
+            )
+            .await;
+        combined_output.push_str(&tail.output);
+        tail.exit_code
+    } else {
+        response.exit_code
+    };
+
+    assert_eq!(exit_code, Some(0), "combined output: {:?}", combined_output);
+    assert!(
+        combined_output.contains("LINE:ping"),
+        "combined output did not contain completed line marker: {:?}",
+        combined_output
+    );
 }
 
 #[cfg(unix)]
