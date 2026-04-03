@@ -12,6 +12,46 @@ use crate::{
     spec::DevInitSpec,
 };
 
+pub fn write_ca_pair(
+    pair: &crate::GeneratedPemPair,
+    out_dir: &Path,
+    force: bool,
+) -> anyhow::Result<KeyPairPaths> {
+    let paths = KeyPairPaths {
+        cert_pem: out_dir.join("ca.pem"),
+        key_pem: out_dir.join("ca.key"),
+    };
+    write_pair(&paths, pair, force)?;
+    Ok(paths)
+}
+
+pub fn write_broker_pair(
+    pair: &crate::GeneratedPemPair,
+    out_dir: &Path,
+    force: bool,
+) -> anyhow::Result<KeyPairPaths> {
+    let paths = KeyPairPaths {
+        cert_pem: out_dir.join("broker.pem"),
+        key_pem: out_dir.join("broker.key"),
+    };
+    write_pair(&paths, pair, force)?;
+    Ok(paths)
+}
+
+pub fn write_daemon_pair(
+    target: &str,
+    pair: &crate::GeneratedPemPair,
+    out_dir: &Path,
+    force: bool,
+) -> anyhow::Result<KeyPairPaths> {
+    let paths = KeyPairPaths {
+        cert_pem: out_dir.join(format!("{target}.pem")),
+        key_pem: out_dir.join(format!("{target}.key")),
+    };
+    write_pair(&paths, pair, force)?;
+    Ok(paths)
+}
+
 pub fn write_dev_init_bundle(
     spec: &DevInitSpec,
     bundle: &GeneratedDevInitBundle,
@@ -151,6 +191,34 @@ fn validate_output_paths<'a>(
             );
         }
     }
+    Ok(())
+}
+
+fn write_pair(
+    paths: &KeyPairPaths,
+    pair: &crate::GeneratedPemPair,
+    force: bool,
+) -> anyhow::Result<()> {
+    validate_output_paths([paths.cert_pem.as_path(), paths.key_pem.as_path()], force)?;
+
+    let mut written_paths = Vec::new();
+    write_text_file(
+        &paths.cert_pem,
+        &pair.cert_pem,
+        force,
+        0o644,
+        &mut written_paths,
+    )
+    .map_err(|err| err.context(format_written_paths(&written_paths)))?;
+    write_text_file(
+        &paths.key_pem,
+        &pair.key_pem,
+        force,
+        0o600,
+        &mut written_paths,
+    )
+    .map_err(|err| err.context(format_written_paths(&written_paths)))?;
+
     Ok(())
 }
 

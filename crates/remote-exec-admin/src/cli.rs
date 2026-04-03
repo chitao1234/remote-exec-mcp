@@ -24,6 +24,9 @@ pub struct CertsArgs {
 #[derive(Subcommand, Debug)]
 pub enum CertsCommand {
     DevInit(DevInitArgs),
+    InitCa(InitCaArgs),
+    IssueBroker(IssueBrokerArgs),
+    IssueDaemon(IssueDaemonArgs),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -39,6 +42,57 @@ pub struct DevInitArgs {
 
     #[arg(long, default_value = "remote-exec-broker")]
     pub broker_common_name: String,
+
+    #[arg(long, default_value_t = false)]
+    pub force: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct InitCaArgs {
+    #[arg(long)]
+    pub out_dir: PathBuf,
+
+    #[arg(long, default_value = "remote-exec-ca")]
+    pub ca_common_name: String,
+
+    #[arg(long, default_value_t = false)]
+    pub force: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct IssueBrokerArgs {
+    #[arg(long)]
+    pub out_dir: PathBuf,
+
+    #[arg(long)]
+    pub ca_cert_pem: PathBuf,
+
+    #[arg(long)]
+    pub ca_key_pem: PathBuf,
+
+    #[arg(long, default_value = "remote-exec-broker")]
+    pub broker_common_name: String,
+
+    #[arg(long, default_value_t = false)]
+    pub force: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct IssueDaemonArgs {
+    #[arg(long)]
+    pub out_dir: PathBuf,
+
+    #[arg(long)]
+    pub ca_cert_pem: PathBuf,
+
+    #[arg(long)]
+    pub ca_key_pem: PathBuf,
+
+    #[arg(long)]
+    pub target: String,
+
+    #[arg(long = "san")]
+    pub sans: Vec<String>,
 
     #[arg(long, default_value_t = false)]
     pub force: bool,
