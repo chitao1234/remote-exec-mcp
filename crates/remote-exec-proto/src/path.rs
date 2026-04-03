@@ -86,6 +86,29 @@ pub fn normalize_for_system(policy: PathPolicy, raw: &str) -> String {
     }
 }
 
+pub fn join_for_policy(policy: PathPolicy, base: &str, child: &str) -> String {
+    let normalized_child = normalize_for_system(policy, child);
+    if normalized_child.is_empty() || is_absolute_for_policy(policy, &normalized_child) {
+        return normalized_child;
+    }
+
+    let normalized_base = normalize_for_system(policy, base);
+    if normalized_base.is_empty() {
+        return normalized_child;
+    }
+
+    let separator = match policy.style {
+        PathStyle::Posix => '/',
+        PathStyle::Windows => '\\',
+    };
+
+    if normalized_base.ends_with(separator) {
+        format!("{normalized_base}{normalized_child}")
+    } else {
+        format!("{normalized_base}{separator}{normalized_child}")
+    }
+}
+
 pub fn same_path_for_policy(policy: PathPolicy, left: &str, right: &str) -> bool {
     comparison_key(policy, left) == comparison_key(policy, right)
 }
@@ -93,8 +116,8 @@ pub fn same_path_for_policy(policy: PathPolicy, left: &str, right: &str) -> bool
 #[cfg(test)]
 mod tests {
     use super::{
-        is_absolute_for_policy, linux_path_policy, normalize_for_system, same_path_for_policy,
-        windows_path_policy,
+        is_absolute_for_policy, join_for_policy, linux_path_policy, normalize_for_system,
+        same_path_for_policy, windows_path_policy,
     };
 
     #[test]
@@ -131,6 +154,28 @@ mod tests {
         assert_eq!(
             normalize_for_system(policy, "C:/work/releases/current.txt"),
             r"C:\work\releases\current.txt"
+        );
+    }
+
+    #[test]
+    fn linux_join_uses_forward_slashes() {
+        let policy = linux_path_policy();
+        assert_eq!(
+            join_for_policy(policy, "outer", "nested/file.txt"),
+            "outer/nested/file.txt"
+        );
+    }
+
+    #[test]
+    fn windows_join_normalizes_both_separator_styles() {
+        let policy = windows_path_policy();
+        assert_eq!(
+            join_for_policy(policy, "C:/work/releases", "nested/file.txt"),
+            r"C:\work\releases\nested\file.txt"
+        );
+        assert_eq!(
+            join_for_policy(policy, r"C:\work\releases", r"nested\file.txt"),
+            r"C:\work\releases\nested\file.txt"
         );
     }
 }

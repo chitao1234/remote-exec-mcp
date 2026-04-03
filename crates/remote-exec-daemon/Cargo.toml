@@ -35,6 +35,9 @@ uuid = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+winpty-rs = { workspace = true }
+
 [dev-dependencies]
 remote-exec-pki = { path = "../remote-exec-pki" }
 reqwest = { workspace = true }

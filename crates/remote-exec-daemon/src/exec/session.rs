@@ -1,3 +1,7 @@
+#[cfg(windows)]
+use std::collections::BTreeMap;
+#[cfg(windows)]
+use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::process::Stdio;
 use std::time::Instant;
@@ -24,14 +28,16 @@ pub struct LiveSession {
     pub tty: bool,
     pub started_at: Instant,
     pub transcript: TranscriptBuffer,
-    pub child: SessionChild,
+    pub(crate) child: SessionChild,
     receiver: UnboundedReceiver<String>,
     exit_code: Option<i32>,
 }
 
-pub enum SessionChild {
+pub(crate) enum SessionChild {
     Pty(PtySession),
-    Pipe(tokio::process::Child),
+    #[cfg(windows)]
+    Winpty(super::winpty::WinptySession),
+    Pipe(Box<tokio::process::Child>),
 }
 
 pub struct PtySession {
@@ -48,29 +54,96 @@ fn default_pty_size() -> PtySize {
     }
 }
 
-pub fn supports_pty() -> bool {
+#[cfg(any(test, windows))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WindowsPtyBackend {
+    PortablePty,
+    Winpty,
+}
+
+fn portable_pty_probe() -> anyhow::Result<()> {
     NativePtySystem::default()
         .openpty(default_pty_size())
-        .is_ok()
+        .map(|_| ())
+}
+
+#[cfg(any(test, windows))]
+fn select_windows_pty_backend_with(
+    portable_probe: impl FnOnce() -> anyhow::Result<()>,
+    winpty_probe: impl FnOnce() -> anyhow::Result<()>,
+) -> Option<WindowsPtyBackend> {
+    if portable_probe().is_ok() {
+        return Some(WindowsPtyBackend::PortablePty);
+    }
+    if winpty_probe().is_ok() {
+        return Some(WindowsPtyBackend::Winpty);
+    }
+    None
+}
+
+#[cfg(windows)]
+fn select_windows_pty_backend() -> Option<WindowsPtyBackend> {
+    select_windows_pty_backend_with(portable_pty_probe, super::winpty::supports_winpty)
+}
+
+pub fn supports_pty() -> bool {
+    #[cfg(windows)]
+    {
+        select_windows_pty_backend().is_some()
+    }
+
+    #[cfg(not(windows))]
+    {
+        portable_pty_probe().is_ok()
+    }
 }
 
 pub fn spawn(cmd: &[String], cwd: &std::path::Path, tty: bool) -> anyhow::Result<LiveSession> {
     if tty {
-        anyhow::ensure!(supports_pty(), "tty is not supported on this host");
-        spawn_pty(cmd, cwd)
+        #[cfg(windows)]
+        {
+            match select_windows_pty_backend() {
+                Some(WindowsPtyBackend::PortablePty) => spawn_pty(cmd, cwd),
+                Some(WindowsPtyBackend::Winpty) => {
+                    let (session, receiver) =
+                        super::winpty::spawn_winpty(cmd, cwd, winpty_environment_block())?;
+                    Ok(LiveSession {
+                        tty: true,
+                        started_at: Instant::now(),
+                        transcript: TranscriptBuffer::new(1024 * 1024),
+                        child: SessionChild::Winpty(session),
+                        receiver,
+                        exit_code: None,
+                    })
+                }
+                None => anyhow::bail!("tty is not supported on this host"),
+            }
+        }
+
+        #[cfg(not(windows))]
+        {
+            anyhow::ensure!(supports_pty(), "tty is not supported on this host");
+            spawn_pty(cmd, cwd)
+        }
     } else {
         spawn_pipe(cmd, cwd)
     }
+}
+
+fn normalized_env_pairs() -> Vec<(String, String)> {
+    let mut pairs = NORMALIZED_ENV
+        .iter()
+        .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+        .collect::<Vec<_>>();
+    pairs.extend(super::locale::LocaleEnvPlan::resolved().as_pairs());
+    pairs
 }
 
 fn apply_env_overlay_builder(builder: &mut CommandBuilder) {
     builder.env_remove("LANG");
     builder.env_remove("LC_CTYPE");
     builder.env_remove("LC_ALL");
-    for (key, value) in NORMALIZED_ENV {
-        builder.env(key, value);
-    }
-    for (key, value) in super::locale::LocaleEnvPlan::resolved().as_pairs() {
+    for (key, value) in normalized_env_pairs() {
         builder.env(&key, &value);
     }
 }
@@ -79,12 +152,37 @@ fn apply_env_overlay_command(command: &mut Command) {
     command.env_remove("LANG");
     command.env_remove("LC_CTYPE");
     command.env_remove("LC_ALL");
-    for (key, value) in NORMALIZED_ENV {
-        command.env(key, value);
-    }
-    for (key, value) in super::locale::LocaleEnvPlan::resolved().as_pairs() {
+    for (key, value) in normalized_env_pairs() {
         command.env(&key, &value);
     }
+}
+
+#[cfg(windows)]
+fn winpty_environment_block() -> OsString {
+    let mut environment = BTreeMap::<String, (String, OsString)>::new();
+
+    for (key, value) in std::env::vars_os() {
+        let key_text = key.to_string_lossy().into_owned();
+        environment.insert(key_text.to_ascii_uppercase(), (key_text, value));
+    }
+
+    for key in ["LANG", "LC_CTYPE", "LC_ALL"] {
+        environment.remove(key);
+    }
+
+    for (key, value) in normalized_env_pairs() {
+        environment.insert(key.to_ascii_uppercase(), (key, OsString::from(value)));
+    }
+
+    let mut block = OsString::new();
+    for (_normalized, (key, value)) in environment {
+        let mut entry = OsString::from(key);
+        entry.push("=");
+        entry.push(&value);
+        block.push(entry);
+        block.push("\0");
+    }
+    block
 }
 
 fn spawn_pty(cmd: &[String], cwd: &std::path::Path) -> anyhow::Result<LiveSession> {
@@ -150,7 +248,7 @@ fn spawn_pipe(cmd: &[String], cwd: &std::path::Path) -> anyhow::Result<LiveSessi
         tty: false,
         started_at: Instant::now(),
         transcript: TranscriptBuffer::new(1024 * 1024),
-        child: SessionChild::Pipe(child),
+        child: SessionChild::Pipe(Box::new(child)),
         receiver,
         exit_code: None,
     })
@@ -196,6 +294,13 @@ impl LiveSession {
                     return Ok(true);
                 }
             }
+            #[cfg(windows)]
+            SessionChild::Winpty(pty) => {
+                if let Some(status) = pty.try_wait()? {
+                    self.exit_code = Some(status);
+                    return Ok(true);
+                }
+            }
             SessionChild::Pipe(child) => {
                 if let Some(status) = child.try_wait()? {
                     self.exit_code = status.code();
@@ -217,6 +322,10 @@ impl LiveSession {
                 let _ = pty.child.kill();
                 let _ = pty.child.try_wait()?;
             }
+            #[cfg(windows)]
+            SessionChild::Winpty(pty) => {
+                let _ = pty.terminate();
+            }
             SessionChild::Pipe(child) => {
                 let _ = child.start_kill();
                 let _ = child.try_wait()?;
@@ -237,6 +346,8 @@ impl LiveSession {
                 pty.writer.flush()?;
                 Ok(())
             }
+            #[cfg(windows)]
+            SessionChild::Winpty(pty) => pty.write(chars),
             SessionChild::Pipe(_) => anyhow::bail!(
                 "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
             ),
@@ -249,5 +360,40 @@ impl LiveSession {
 
     pub fn record_output(&mut self, chunk: &str) {
         self.transcript.push(chunk.as_bytes());
+    }
+}
+
+#[cfg(test)]
+mod windows_pty_backend_tests {
+    use super::{WindowsPtyBackend, select_windows_pty_backend_with};
+
+    #[test]
+    fn windows_pty_backend_prefers_portable_pty_when_both_backends_work() {
+        assert_eq!(
+            select_windows_pty_backend_with(|| Ok(()), || Ok(())),
+            Some(WindowsPtyBackend::PortablePty)
+        );
+    }
+
+    #[test]
+    fn windows_pty_backend_falls_back_to_winpty_when_portable_pty_is_unavailable() {
+        assert_eq!(
+            select_windows_pty_backend_with(
+                || Err(anyhow::anyhow!("conpty unavailable")),
+                || Ok(())
+            ),
+            Some(WindowsPtyBackend::Winpty)
+        );
+    }
+
+    #[test]
+    fn windows_pty_backend_reports_no_support_when_both_backends_fail() {
+        assert_eq!(
+            select_windows_pty_backend_with(
+                || Err(anyhow::anyhow!("conpty unavailable")),
+                || Err(anyhow::anyhow!("winpty unavailable"))
+            ),
+            None
+        );
     }
 }

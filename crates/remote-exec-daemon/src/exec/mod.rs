@@ -4,6 +4,8 @@ pub mod session;
 mod shell;
 pub mod store;
 pub mod transcript;
+#[cfg(windows)]
+mod winpty;
 
 use std::path::PathBuf;
 use std::sync::Arc;

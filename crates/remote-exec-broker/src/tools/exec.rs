@@ -1,4 +1,5 @@
 use anyhow::Context;
+use remote_exec_proto::path::{PathPolicy, linux_path_policy, windows_path_policy};
 use remote_exec_proto::public::{CommandToolResult, ExecCommandInput, WriteStdinInput};
 use remote_exec_proto::rpc::{ExecStartRequest, ExecWarning, ExecWriteRequest};
 use rmcp::model::Meta;
@@ -18,7 +19,13 @@ pub async fn exec_command(
     state: &crate::BrokerState,
     input: ExecCommandInput,
 ) -> anyhow::Result<ToolCallOutput> {
-    if let Some(intercepted) = maybe_intercept_apply_patch(&input.cmd, input.workdir.as_deref()) {
+    let target = state.target(&input.target)?;
+    target.ensure_identity_verified(&input.target).await?;
+    let path_policy = target_path_policy(target).await?;
+
+    if let Some(intercepted) =
+        maybe_intercept_apply_patch(&input.cmd, input.workdir.as_deref(), path_policy)
+    {
         let output = crate::tools::patch::forward_patch(
             state,
             &input.target,
@@ -55,8 +62,6 @@ pub async fn exec_command(
         ));
     }
 
-    let target = state.target(&input.target)?;
-    target.ensure_identity_verified(&input.target).await?;
     let response = match target
         .client
         .exec_start(&ExecStartRequest {
@@ -220,4 +225,17 @@ fn response_warning_meta(warnings: &[ExecWarning]) -> Option<Meta> {
         serde_json::to_value(warnings).unwrap(),
     );
     Some(meta)
+}
+
+async fn target_path_policy(target: &crate::TargetHandle) -> anyhow::Result<PathPolicy> {
+    let info = target
+        .cached_daemon_info()
+        .await
+        .context("target info missing after identity verification")?;
+
+    Ok(if info.platform.eq_ignore_ascii_case("windows") {
+        windows_path_policy()
+    } else {
+        linux_path_policy()
+    })
 }

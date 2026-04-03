@@ -177,9 +177,11 @@ cargo fmt --all --check
 - `transfer_files` normalizes Windows path separators before filesystem access on Windows endpoints.
 - `transfer_files` compares Windows paths case-insensitively when checking obvious same-path collisions.
 - Executable preservation is best effort and only restored on platforms that expose executable mode bits.
-- `allow_login_shell` controls daemon login-shell policy and defaults to `true`; explicit `login=true` is rejected when the daemon disables it, and Windows daemons reject `login=true` because login-shell semantics are not supported there.
+- `allow_login_shell` controls daemon login-shell policy and defaults to `true`; explicit `login=true` is rejected only when the daemon disables it.
+- On Windows, `login=false` suppresses shell startup state where supported: `pwsh` and `powershell` add `-NoProfile`, while `cmd.exe` adds `/D` to disable AutoRun. `login=true` drops those suppression flags.
 - `list_targets` reports the daemon's actual `supports_pty` capability instead of assuming PTY support.
-- Default shell resolution uses explicit override, then `SHELL`, then a usable passwd shell, then `bash` from `PATH`, then `/bin/sh` on Unix, and `COMSPEC` then `cmd.exe` on Windows.
+- On Windows, `tty=true` prefers the existing ConPTY-backed `portable-pty` path and falls back to `winpty-rs` when ConPTY is unavailable and the native winpty runtime is installed.
+- Default shell resolution uses explicit override, then `SHELL`, then a usable passwd shell, then `bash` from `PATH`, then `/bin/sh` on Unix. On Windows it uses explicit override, then the first `pwsh.exe` on `PATH`, then `powershell.exe` or `powershell`, then `COMSPEC`, then `cmd.exe`.
 
 ## Quality Gate
 

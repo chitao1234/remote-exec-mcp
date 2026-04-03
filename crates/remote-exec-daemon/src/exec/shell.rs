@@ -89,6 +89,7 @@ fn shell_argv_for_platform(is_windows: bool, shell: &str, login: bool, cmd: &str
     }
 }
 
+#[cfg(any(test, windows))]
 fn find_first_on_path(path_env: Option<&OsStr>, names: &[&str]) -> Option<String> {
     std::env::split_paths(path_env?)
         .flat_map(|dir| names.iter().map(move |name| dir.join(name)))
@@ -100,6 +101,7 @@ fn find_first_on_path(path_env: Option<&OsStr>, names: &[&str]) -> Option<String
         .map(|path| path.to_string_lossy().into_owned())
 }
 
+#[cfg(any(test, windows))]
 fn resolve_windows_shell_with(
     shell_override: Option<&str>,
     path_env: Option<&OsStr>,

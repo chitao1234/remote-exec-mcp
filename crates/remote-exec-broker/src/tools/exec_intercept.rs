@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use remote_exec_proto::path::{PathPolicy, join_for_policy, normalize_for_system};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterceptedApplyPatch {
@@ -64,6 +64,7 @@ fn strip_shell_wrapper(cmd: &str) -> &str {
 pub fn maybe_intercept_apply_patch(
     cmd: &str,
     workdir: Option<&str>,
+    path_policy: PathPolicy,
 ) -> Option<InterceptedApplyPatch> {
     let trimmed = strip_shell_wrapper(cmd);
     if let Some(patch) = parse_direct_invocation(trimmed) {
@@ -73,7 +74,7 @@ pub fn maybe_intercept_apply_patch(
         });
     }
 
-    let (effective_workdir, script) = split_cd_wrapper(trimmed, workdir);
+    let (effective_workdir, script) = split_cd_wrapper(trimmed, workdir, path_policy);
     let (command_name, body) = parse_heredoc_invocation(script)?;
     if command_name != "apply_patch" && command_name != "applypatch" {
         return None;
@@ -108,7 +109,11 @@ fn parse_single_quoted_argument(rest: &str) -> Option<String> {
     Some(patch.to_string())
 }
 
-fn split_cd_wrapper<'a>(cmd: &'a str, workdir: Option<&str>) -> (Option<String>, &'a str) {
+fn split_cd_wrapper<'a>(
+    cmd: &'a str,
+    workdir: Option<&str>,
+    path_policy: PathPolicy,
+) -> (Option<String>, &'a str) {
     if let Some(rest) = cmd.strip_prefix("cd") {
         let Some(first) = rest.chars().next() else {
             return (workdir.map(ToString::to_string), cmd);
@@ -124,10 +129,11 @@ fn split_cd_wrapper<'a>(cmd: &'a str, workdir: Option<&str>) -> (Option<String>,
                 return (workdir.map(ToString::to_string), cmd);
             }
 
-            let mut resolved = workdir.map(PathBuf::from).unwrap_or_default();
-            resolved.push(path);
             return (
-                Some(resolved.display().to_string()),
+                Some(match workdir {
+                    Some(base) => join_for_policy(path_policy, base, path),
+                    None => normalize_for_system(path_policy, path),
+                }),
                 trim_horizontal_start(tail),
             );
         }
@@ -157,6 +163,8 @@ fn parse_heredoc_invocation(cmd: &str) -> Option<(&str, &str)> {
 
 #[cfg(test)]
 mod tests {
+    use remote_exec_proto::path::{linux_path_policy, windows_path_policy};
+
     use super::{InterceptedApplyPatch, maybe_intercept_apply_patch};
 
     #[test]
@@ -170,7 +178,7 @@ mod tests {
         let cmd = format!("apply_patch '{patch}'");
 
         assert_eq!(
-            maybe_intercept_apply_patch(&cmd, Some("workspace")),
+            maybe_intercept_apply_patch(&cmd, Some("workspace"), linux_path_policy()),
             Some(InterceptedApplyPatch {
                 patch: patch.to_string(),
                 workdir: Some("workspace".to_string()),
@@ -189,7 +197,7 @@ mod tests {
         let cmd = format!("applypatch \"{patch}\"");
 
         assert_eq!(
-            maybe_intercept_apply_patch(&cmd, None),
+            maybe_intercept_apply_patch(&cmd, None, linux_path_policy()),
             Some(InterceptedApplyPatch {
                 patch: patch.to_string(),
                 workdir: None,
@@ -206,9 +214,16 @@ mod tests {
             "*** End Patch\n",
         );
 
-        assert_eq!(maybe_intercept_apply_patch(raw_patch, None), None);
         assert_eq!(
-            maybe_intercept_apply_patch(&format!("apply_patch '{raw_patch}' && echo done"), None),
+            maybe_intercept_apply_patch(raw_patch, None, linux_path_policy()),
+            None
+        );
+        assert_eq!(
+            maybe_intercept_apply_patch(
+                &format!("apply_patch '{raw_patch}' && echo done"),
+                None,
+                linux_path_policy()
+            ),
             None
         );
     }
@@ -225,7 +240,7 @@ mod tests {
         );
 
         assert_eq!(
-            maybe_intercept_apply_patch(cmd, Some("outer")),
+            maybe_intercept_apply_patch(cmd, Some("outer"), linux_path_policy()),
             Some(InterceptedApplyPatch {
                 patch: concat!(
                     "*** Begin Patch\n",
@@ -250,7 +265,7 @@ mod tests {
         let direct_cmd = format!(" \tapply_patch\t  '{direct_patch}' \t");
 
         assert_eq!(
-            maybe_intercept_apply_patch(&direct_cmd, Some("workspace")),
+            maybe_intercept_apply_patch(&direct_cmd, Some("workspace"), linux_path_policy()),
             Some(InterceptedApplyPatch {
                 patch: direct_patch.to_string(),
                 workdir: Some("workspace".to_string()),
@@ -267,7 +282,7 @@ mod tests {
         );
 
         assert_eq!(
-            maybe_intercept_apply_patch(heredoc_cmd, Some("outer")),
+            maybe_intercept_apply_patch(heredoc_cmd, Some("outer"), linux_path_policy()),
             Some(InterceptedApplyPatch {
                 patch: concat!(
                     "*** Begin Patch\n",
@@ -277,6 +292,32 @@ mod tests {
                 )
                 .to_string(),
                 workdir: Some("outer/nested".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn normalizes_cd_wrapper_paths_for_windows_targets() {
+        let cmd = concat!(
+            "cd nested/child && applypatch <<'PATCH'\n",
+            "*** Begin Patch\n",
+            "*** Add File: hello.txt\n",
+            "+hello\n",
+            "*** End Patch\n",
+            "PATCH\n",
+        );
+
+        assert_eq!(
+            maybe_intercept_apply_patch(cmd, Some("C:/outer"), windows_path_policy()),
+            Some(InterceptedApplyPatch {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Add File: hello.txt\n",
+                    "+hello\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some(r"C:\outer\nested\child".to_string()),
             })
         );
     }

@@ -8,6 +8,10 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tempfile::TempDir;
 
+fn toml_string(value: &str) -> String {
+    toml::Value::String(value.to_string()).to_string()
+}
+
 pub struct DaemonFixture {
     pub _tempdir: TempDir,
     pub client: reqwest::Client,
@@ -152,20 +156,22 @@ pub async fn spawn_daemon_with_extra_config(target: &str, extra_config: &str) ->
     std::fs::write(
         &config_path,
         format!(
-            r#"target = "{target}"
-listen = "{addr}"
-default_workdir = "{}"
+            r#"target = {target}
+listen = {listen}
+default_workdir = {default_workdir}
 {extra_config}
 
 [tls]
-cert_pem = "{}"
-key_pem = "{}"
-ca_pem = "{}"
+cert_pem = {cert_pem}
+key_pem = {key_pem}
+ca_pem = {ca_pem}
 "#,
-            workdir.display(),
-            certs.daemon_cert.display(),
-            certs.daemon_key.display(),
-            certs.ca_cert.display(),
+            target = toml_string(target),
+            listen = toml_string(&addr.to_string()),
+            default_workdir = toml_string(&workdir.display().to_string()),
+            cert_pem = toml_string(&certs.daemon_cert.display().to_string()),
+            key_pem = toml_string(&certs.daemon_key.display().to_string()),
+            ca_pem = toml_string(&certs.ca_cert.display().to_string()),
         ),
     )
     .unwrap();

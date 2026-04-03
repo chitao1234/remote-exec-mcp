@@ -158,7 +158,7 @@ fn write_text_file(
     path: &Path,
     contents: &str,
     force: bool,
-    mode: u32,
+    _mode: u32,
     written_paths: &mut Vec<PathBuf>,
 ) -> anyhow::Result<()> {
     if path.exists() && !force {
@@ -178,7 +178,7 @@ fn write_text_file(
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&tmp_path, fs::Permissions::from_mode(mode))
+        fs::set_permissions(&tmp_path, fs::Permissions::from_mode(_mode))
             .with_context(|| format!("setting permissions on {}", tmp_path.display()))?;
     }
 
