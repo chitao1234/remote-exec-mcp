@@ -66,3 +66,126 @@ fn dev_init_requires_force_to_overwrite_existing_files() {
         String::from_utf8_lossy(&second.stderr)
     );
 }
+
+#[test]
+fn dev_init_reuses_ca_from_previous_bundle_directory() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let source_dir = tempdir.path().join("source");
+    let reused_dir = tempdir.path().join("reused");
+
+    let first = Command::new(env!("CARGO_BIN_EXE_remote-exec-admin"))
+        .args(["certs", "dev-init", "--out-dir"])
+        .arg(&source_dir)
+        .args(["--target", "builder-a"])
+        .output()
+        .expect("initial dev-init");
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+
+    let second = Command::new(env!("CARGO_BIN_EXE_remote-exec-admin"))
+        .args(["certs", "dev-init", "--out-dir"])
+        .arg(&reused_dir)
+        .args(["--target", "builder-b", "--reuse-ca-from-dir"])
+        .arg(&source_dir)
+        .output()
+        .expect("reused dev-init");
+    assert!(
+        second.status.success(),
+        "{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(source_dir.join("ca.pem")).unwrap(),
+        std::fs::read_to_string(reused_dir.join("ca.pem")).unwrap()
+    );
+    assert_eq!(
+        std::fs::read_to_string(source_dir.join("ca.key")).unwrap(),
+        std::fs::read_to_string(reused_dir.join("ca.key")).unwrap()
+    );
+    assert!(reused_dir.join("broker.pem").exists());
+    assert!(reused_dir.join("daemons").join("builder-b.pem").exists());
+}
+
+#[test]
+fn dev_init_reuses_ca_from_explicit_pem_paths() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let source_dir = tempdir.path().join("source");
+    let reused_dir = tempdir.path().join("reused");
+
+    let first = Command::new(env!("CARGO_BIN_EXE_remote-exec-admin"))
+        .args(["certs", "dev-init", "--out-dir"])
+        .arg(&source_dir)
+        .args(["--target", "builder-a"])
+        .output()
+        .expect("initial dev-init");
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+
+    let second = Command::new(env!("CARGO_BIN_EXE_remote-exec-admin"))
+        .args(["certs", "dev-init", "--out-dir"])
+        .arg(&reused_dir)
+        .args(["--target", "builder-b", "--reuse-ca-cert-pem"])
+        .arg(source_dir.join("ca.pem"))
+        .args(["--reuse-ca-key-pem"])
+        .arg(source_dir.join("ca.key"))
+        .output()
+        .expect("explicit CA reuse");
+    assert!(
+        second.status.success(),
+        "{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(source_dir.join("ca.pem")).unwrap(),
+        std::fs::read_to_string(reused_dir.join("ca.pem")).unwrap()
+    );
+}
+
+#[test]
+fn dev_init_rejects_partial_or_mixed_reuse_ca_inputs() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let source_dir = tempdir.path().join("source");
+    let first = Command::new(env!("CARGO_BIN_EXE_remote-exec-admin"))
+        .args(["certs", "dev-init", "--out-dir"])
+        .arg(&source_dir)
+        .args(["--target", "builder-a"])
+        .output()
+        .expect("initial dev-init");
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+
+    let partial = Command::new(env!("CARGO_BIN_EXE_remote-exec-admin"))
+        .args(["certs", "dev-init", "--out-dir"])
+        .arg(tempdir.path().join("partial"))
+        .args(["--target", "builder-a", "--reuse-ca-cert-pem"])
+        .arg(source_dir.join("ca.pem"))
+        .output()
+        .expect("partial reuse");
+    assert!(!partial.status.success());
+    assert!(String::from_utf8_lossy(&partial.stderr).contains("--reuse-ca-key-pem"));
+
+    let mixed = Command::new(env!("CARGO_BIN_EXE_remote-exec-admin"))
+        .args(["certs", "dev-init", "--out-dir"])
+        .arg(tempdir.path().join("mixed"))
+        .args(["--target", "builder-a", "--reuse-ca-from-dir"])
+        .arg(&source_dir)
+        .args(["--reuse-ca-cert-pem"])
+        .arg(source_dir.join("ca.pem"))
+        .args(["--reuse-ca-key-pem"])
+        .arg(source_dir.join("ca.key"))
+        .output()
+        .expect("mixed reuse");
+    assert!(!mixed.status.success());
+    assert!(String::from_utf8_lossy(&mixed.stderr).contains("--reuse-ca-from-dir"));
+}

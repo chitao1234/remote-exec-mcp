@@ -17,13 +17,14 @@ pub fn run(args: CertsArgs) -> anyhow::Result<()> {
 
 fn run_dev_init(args: DevInitArgs) -> anyhow::Result<()> {
     let daemon_specs = build_daemon_specs(&args)?;
+    let ca = resolve_dev_init_ca(&args)?;
     let spec = remote_exec_pki::DevInitSpec {
         ca_common_name: "remote-exec-ca".to_string(),
-        broker_common_name: args.broker_common_name,
+        broker_common_name: args.broker_common_name.clone(),
         daemon_specs,
     };
 
-    let bundle = remote_exec_pki::build_dev_init_bundle(&spec)?;
+    let bundle = remote_exec_pki::build_dev_init_bundle_from_ca(&spec, &ca)?;
     let manifest =
         remote_exec_pki::write_dev_init_bundle(&spec, &bundle, &args.out_dir, args.force)?;
 
@@ -154,4 +155,30 @@ fn build_single_daemon_spec(
     }
     .validate()?;
     Ok(daemon)
+}
+
+fn resolve_dev_init_ca(
+    args: &DevInitArgs,
+) -> anyhow::Result<remote_exec_pki::CertificateAuthority> {
+    if args.reuse_ca.reuse_ca_from_dir.is_some()
+        && (args.reuse_ca.reuse_ca_cert_pem.is_some() || args.reuse_ca.reuse_ca_key_pem.is_some())
+    {
+        anyhow::bail!(
+            "cannot combine --reuse-ca-from-dir with --reuse-ca-cert-pem/--reuse-ca-key-pem"
+        );
+    }
+
+    if let Some(dir) = args.reuse_ca.reuse_ca_from_dir.as_ref() {
+        return load_ca_from_files(&dir.join("ca.pem"), &dir.join("ca.key"));
+    }
+
+    match (
+        args.reuse_ca.reuse_ca_cert_pem.as_ref(),
+        args.reuse_ca.reuse_ca_key_pem.as_ref(),
+    ) {
+        (None, None) => remote_exec_pki::generate_ca("remote-exec-ca"),
+        (Some(cert), Some(key)) => load_ca_from_files(cert, key),
+        (Some(_), None) => anyhow::bail!("--reuse-ca-cert-pem requires --reuse-ca-key-pem"),
+        (None, Some(_)) => anyhow::bail!("--reuse-ca-key-pem requires --reuse-ca-cert-pem"),
+    }
 }

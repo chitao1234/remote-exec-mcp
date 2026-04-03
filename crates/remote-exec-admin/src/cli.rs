@@ -45,6 +45,21 @@ pub struct DevInitArgs {
 
     #[arg(long, default_value_t = false)]
     pub force: bool,
+
+    #[command(flatten)]
+    pub reuse_ca: ReuseCaArgs,
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub struct ReuseCaArgs {
+    #[arg(long)]
+    pub reuse_ca_cert_pem: Option<PathBuf>,
+
+    #[arg(long)]
+    pub reuse_ca_key_pem: Option<PathBuf>,
+
+    #[arg(long)]
+    pub reuse_ca_from_dir: Option<PathBuf>,
 }
 
 #[derive(Args, Debug, Clone)]
