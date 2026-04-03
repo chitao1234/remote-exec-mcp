@@ -75,6 +75,25 @@ cargo run -p remote-exec-admin -- certs dev-init \
   --target builder-b
 ```
 
+Reuse an existing CA from a previous `dev-init` bundle:
+
+```bash
+cargo run -p remote-exec-admin -- certs dev-init \
+  --out-dir ./remote-exec-certs-next \
+  --target builder-c \
+  --reuse-ca-from-dir ./remote-exec-certs
+```
+
+Reuse an existing CA from explicit PEM paths:
+
+```bash
+cargo run -p remote-exec-admin -- certs dev-init \
+  --out-dir ./remote-exec-certs-next \
+  --target builder-c \
+  --reuse-ca-cert-pem ./remote-exec-ca/ca.pem \
+  --reuse-ca-key-pem ./remote-exec-ca/ca.key
+```
+
 Add explicit daemon SANs when the broker will connect by DNS name or non-localhost IP:
 
 ```bash
@@ -92,12 +111,43 @@ This command writes:
 - `daemons/<target>.pem` and `daemons/<target>.key` for each target
 - `certs-manifest.json`
 
+Lower-level certificate commands are also available when you do not want a full bundle:
+
+Generate only a CA:
+
+```bash
+cargo run -p remote-exec-admin -- certs init-ca \
+  --out-dir ./remote-exec-ca
+```
+
+Issue only a broker certificate from an existing CA:
+
+```bash
+cargo run -p remote-exec-admin -- certs issue-broker \
+  --ca-cert-pem ./remote-exec-ca/ca.pem \
+  --ca-key-pem ./remote-exec-ca/ca.key \
+  --out-dir ./remote-exec-broker-cert
+```
+
+Issue one daemon certificate from an existing CA:
+
+```bash
+cargo run -p remote-exec-admin -- certs issue-daemon \
+  --ca-cert-pem ./remote-exec-ca/ca.pem \
+  --ca-key-pem ./remote-exec-ca/ca.key \
+  --out-dir ./remote-exec-daemon-cert \
+  --target builder-a \
+  --san dns:builder-a.example.com \
+  --san ip:10.0.0.12
+```
+
 Notes:
 
 - If a target has no `--daemon-san` entries, `remote-exec-admin` defaults that daemon cert to `DNS:localhost` and `IP:127.0.0.1`.
 - The command prints broker and daemon config snippets after generation so you can paste the generated file paths directly into `configs/broker.example.toml` and `configs/daemon.example.toml`.
 - Keep `expected_daemon_name` set to the daemon's configured `target`; it is the application-level identity check on top of TLS.
 - Re-run with `--force` if you want to overwrite an existing output directory.
+- `certs dev-init` is the only command that writes `certs-manifest.json`; the standalone issuance commands write only the PEM files they are responsible for.
 
 Manual `openssl` flow remains available as a fallback:
 
