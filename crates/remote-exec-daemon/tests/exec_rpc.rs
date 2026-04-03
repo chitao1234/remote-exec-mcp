@@ -8,10 +8,52 @@ use tokio::sync::Mutex;
 
 #[cfg(unix)]
 const TEST_SHELL: &str = "/bin/sh";
+#[cfg(windows)]
+const TEST_SHELL: &str = "powershell.exe";
+#[cfg(windows)]
+const WINDOWS_CMD_SHELL: &str = "cmd.exe";
+#[cfg(windows)]
+const WINDOWS_ENV_OVERLAY_OUTPUT: &str = "dumb|1|cat|cat|1|||";
 // Commands in these tests are expected to finish in a single RPC response, but the daemon only
 // guarantees a minimum 250 ms wait. Use a wider window so full-suite load does not turn them into
 // legitimate live-session responses.
 const COMPLETED_COMMAND_YIELD_MS: u64 = 5_000;
+
+#[cfg(windows)]
+fn windows_start_request(
+    cmd: &str,
+    tty: bool,
+    yield_time_ms: Option<u64>,
+    max_output_tokens: Option<u32>,
+) -> ExecStartRequest {
+    ExecStartRequest {
+        cmd: cmd.to_string(),
+        workdir: None,
+        shell: Some(TEST_SHELL.to_string()),
+        tty,
+        yield_time_ms,
+        max_output_tokens,
+        login: Some(false),
+    }
+}
+
+#[cfg(windows)]
+fn windows_cmd_start_request(
+    cmd: &str,
+    tty: bool,
+    yield_time_ms: Option<u64>,
+    max_output_tokens: Option<u32>,
+) -> ExecStartRequest {
+    ExecStartRequest {
+        cmd: cmd.to_string(),
+        workdir: None,
+        shell: Some(WINDOWS_CMD_SHELL.to_string()),
+        tty,
+        yield_time_ms,
+        max_output_tokens,
+        login: Some(false),
+    }
+}
 
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -271,6 +313,280 @@ async fn exec_start_keeps_windows_tty_sessions_alive_and_answers_terminal_querie
         !combined_output.contains("\u{1b}[6n"),
         "combined output leaked CPR probe: {combined_output:?}"
     );
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn env_overlay_is_applied_in_pipe_mode_on_windows() {
+    let _env = EnvOverrideGuard::set(&[
+        ("TERM", "rainbow-terminal"),
+        ("NO_COLOR", "0"),
+        ("PAGER", "less"),
+        ("GIT_PAGER", "more"),
+        ("CODEX_CI", "0"),
+        ("LANG", "fr_FR.UTF-8"),
+        ("LC_CTYPE", "fr_FR.UTF-8"),
+        ("LC_ALL", "fr_FR.UTF-8"),
+    ])
+    .await;
+    let fixture = support::spawn_daemon("builder-a").await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &windows_start_request(
+                r#"[Console]::Out.Write("$env:TERM|$env:NO_COLOR|$env:PAGER|$env:GIT_PAGER|$env:CODEX_CI|$env:LANG|$env:LC_CTYPE|$env:LC_ALL")"#,
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+            ),
+    )
+        .await;
+
+    assert_eq!(response.exit_code, Some(0));
+    assert!(
+        response.output.ends_with(WINDOWS_ENV_OVERLAY_OUTPUT),
+        "unexpected pty output: {:?}",
+        response.output
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn env_overlay_is_applied_in_pty_mode_on_windows() {
+    let _env = EnvOverrideGuard::set(&[
+        ("TERM", "rainbow-terminal"),
+        ("NO_COLOR", "0"),
+        ("PAGER", "less"),
+        ("GIT_PAGER", "more"),
+        ("CODEX_CI", "0"),
+        ("LANG", "fr_FR.UTF-8"),
+        ("LC_CTYPE", "fr_FR.UTF-8"),
+        ("LC_ALL", "fr_FR.UTF-8"),
+    ])
+    .await;
+    let fixture = support::spawn_daemon("builder-a").await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &windows_start_request(
+                r#"[Console]::Out.Write("$env:TERM|$env:NO_COLOR|$env:PAGER|$env:GIT_PAGER|$env:CODEX_CI|$env:LANG|$env:LC_CTYPE|$env:LC_ALL")"#,
+                true,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+            ),
+    )
+        .await;
+
+    assert_eq!(response.exit_code, Some(0));
+    assert!(
+        response.output.ends_with(WINDOWS_ENV_OVERLAY_OUTPUT),
+        "unexpected pty output: {:?}",
+        response.output
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn omitted_max_output_tokens_defaults_to_ten_thousand_on_windows() {
+    let fixture = support::spawn_daemon("builder-a").await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &windows_start_request(
+                "[Console]::Out.Write(('x ' * 10005))",
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+            ),
+        )
+        .await;
+
+    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.original_token_count, Some(10_005));
+    assert_eq!(response.output.split_whitespace().count(), 10_000);
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn exec_start_truncates_output_to_max_output_tokens_on_windows() {
+    let fixture = support::spawn_daemon("builder-a").await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &windows_start_request(
+                "[Console]::Out.Write('one two three four five six')",
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                Some(3),
+            ),
+        )
+        .await;
+
+    assert_eq!(response.original_token_count, Some(6));
+    assert_eq!(response.output, "one two three");
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn exec_output_preserves_trailing_newline_when_within_max_output_tokens_on_windows() {
+    let fixture = support::spawn_daemon("builder-a").await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &windows_start_request(
+                r#"[Console]::Out.Write("one two`n")"#,
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                Some(3),
+            ),
+        )
+        .await;
+
+    assert_eq!(response.original_token_count, Some(2));
+    assert_eq!(response.output, "one two\n");
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens_on_windows() {
+    let fixture = support::spawn_daemon("builder-a").await;
+    let started = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &windows_start_request(
+                "Start-Sleep -Milliseconds 400; [Console]::Out.Write('one two three four five six'); Start-Sleep -Seconds 30",
+                true,
+                Some(250),
+                Some(3),
+            ),
+        )
+        .await;
+    assert!(started.running);
+
+    let response = fixture
+        .rpc::<ExecWriteRequest, ExecResponse>(
+            "/v1/exec/write",
+            &ExecWriteRequest {
+                daemon_session_id: started.daemon_session_id.expect("live session"),
+                chars: String::new(),
+                yield_time_ms: Some(5_000),
+                max_output_tokens: Some(3),
+            },
+        )
+        .await;
+
+    assert!(response.running);
+    assert_eq!(response.original_token_count, Some(6));
+    assert_eq!(response.output, "one two three");
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn exec_write_rejects_non_tty_sessions_when_chars_are_present_on_windows() {
+    let fixture = support::spawn_daemon("builder-a").await;
+    let started = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &windows_start_request("Start-Sleep -Seconds 1", false, Some(250), Some(2_000)),
+        )
+        .await;
+
+    let session_id = started.daemon_session_id.expect("live session");
+    let err = fixture
+        .rpc_error(
+            "/v1/exec/write",
+            &ExecWriteRequest {
+                daemon_session_id: session_id,
+                chars: "pwd\n".to_string(),
+                yield_time_ms: Some(250),
+                max_output_tokens: Some(2_000),
+            },
+        )
+        .await;
+
+    assert_eq!(err.code, "stdin_closed");
+    assert!(err.message.contains("tty=true"));
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon_on_windows() {
+    use std::time::{Duration, Instant};
+
+    let fixture = support::spawn_daemon("builder-a").await;
+
+    let slow = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &windows_cmd_start_request(
+                "echo slow & ping -n 30 127.0.0.1 >nul",
+                true,
+                Some(250),
+                None,
+            ),
+        )
+        .await;
+    let fast = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &windows_cmd_start_request(
+                "setlocal EnableDelayedExpansion & set /P line= & echo !line! & ping -n 30 127.0.0.1 >nul",
+                true,
+                Some(250),
+                None,
+            ),
+        )
+        .await;
+
+    let slow_client = fixture.client.clone();
+    let slow_url = fixture.url("/v1/exec/write");
+    let slow_session_id = slow.daemon_session_id.clone().expect("slow session");
+    let slow_poll = tokio::spawn(async move {
+        slow_client
+            .post(slow_url)
+            .json(&ExecWriteRequest {
+                daemon_session_id: slow_session_id,
+                chars: String::new(),
+                yield_time_ms: Some(5_000),
+                max_output_tokens: None,
+            })
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json::<ExecResponse>()
+            .await
+            .unwrap()
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let started = Instant::now();
+    let fast_response = fixture
+        .rpc::<ExecWriteRequest, ExecResponse>(
+            "/v1/exec/write",
+            &ExecWriteRequest {
+                daemon_session_id: fast.daemon_session_id.expect("fast session"),
+                chars: "ping\n".to_string(),
+                yield_time_ms: Some(250),
+                max_output_tokens: None,
+            },
+        )
+        .await;
+
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "fast session waited behind unrelated session for {:?}",
+        started.elapsed()
+    );
+    assert!(fast_response.output.contains("ping"));
+
+    let _ = slow_poll.await.unwrap();
 }
 
 #[cfg(unix)]
