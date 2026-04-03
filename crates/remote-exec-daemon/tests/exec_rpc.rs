@@ -3,9 +3,7 @@ mod support;
 use std::ffi::OsString;
 use std::sync::OnceLock;
 
-#[cfg(unix)]
-use remote_exec_proto::rpc::ExecWriteRequest;
-use remote_exec_proto::rpc::{ExecResponse, ExecStartRequest};
+use remote_exec_proto::rpc::{ExecResponse, ExecStartRequest, ExecWriteRequest};
 use tokio::sync::Mutex;
 
 #[cfg(unix)]
@@ -218,6 +216,60 @@ async fn exec_start_uses_cmd_when_shell_is_omitted() {
             .output
             .to_ascii_lowercase()
             .contains("windows-ready")
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn exec_start_keeps_windows_tty_sessions_alive_and_answers_terminal_queries() {
+    let fixture = support::spawn_daemon("builder-a").await;
+    let started = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "echo hello & ping -n 30 127.0.0.1 >nul".to_string(),
+                workdir: None,
+                shell: Some("cmd.exe".to_string()),
+                tty: true,
+                yield_time_ms: Some(250),
+                max_output_tokens: Some(2_000),
+                login: Some(false),
+            },
+        )
+        .await;
+
+    assert!(started.running, "start response: {started:#?}");
+    let session_id = started
+        .daemon_session_id
+        .clone()
+        .expect("tty start should create a live session");
+
+    let polled = fixture
+        .rpc::<ExecWriteRequest, ExecResponse>(
+            "/v1/exec/write",
+            &ExecWriteRequest {
+                daemon_session_id: session_id,
+                chars: String::new(),
+                yield_time_ms: Some(5_000),
+                max_output_tokens: Some(2_000),
+            },
+        )
+        .await;
+
+    assert!(polled.running, "poll response: {polled:#?}");
+
+    let combined_output = format!("{}{}", started.output, polled.output).to_ascii_lowercase();
+    assert!(
+        combined_output.contains("hello"),
+        "combined output did not contain hello: {combined_output:?}"
+    );
+    assert!(
+        !combined_output.contains("\u{1b}[5n"),
+        "combined output leaked DSR probe: {combined_output:?}"
+    );
+    assert!(
+        !combined_output.contains("\u{1b}[6n"),
+        "combined output leaked CPR probe: {combined_output:?}"
     );
 }
 

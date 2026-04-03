@@ -3,7 +3,11 @@ use std::collections::BTreeMap;
 #[cfg(windows)]
 use std::ffi::OsString;
 use std::io::{Read, Write};
+#[cfg(windows)]
+use std::path::Path;
 use std::process::Stdio;
+#[cfg(windows)]
+use std::time::Duration;
 use std::time::Instant;
 
 use anyhow::Context;
@@ -31,6 +35,8 @@ pub struct LiveSession {
     pub(crate) child: SessionChild,
     receiver: UnboundedReceiver<String>,
     exit_code: Option<i32>,
+    #[cfg(windows)]
+    terminal_query_state: Option<WindowsTerminalQueryState>,
 }
 
 pub(crate) enum SessionChild {
@@ -42,6 +48,7 @@ pub(crate) enum SessionChild {
 
 pub struct PtySession {
     pub child: Box<dyn portable_pty::Child + Send>,
+    pub master: Box<dyn portable_pty::MasterPty + Send>,
     pub writer: Box<dyn Write + Send>,
 }
 
@@ -59,6 +66,94 @@ fn default_pty_size() -> PtySize {
 enum WindowsPtyBackend {
     PortablePty,
     Winpty,
+}
+
+#[cfg(windows)]
+impl WindowsPtyBackend {
+    fn debug_name(self) -> &'static str {
+        match self {
+            Self::PortablePty => "conpty_via_portable_pty",
+            Self::Winpty => "winpty",
+        }
+    }
+}
+
+#[cfg(windows)]
+#[derive(Debug, Clone)]
+struct WindowsPtyDiagnostics {
+    selected_backend: Option<WindowsPtyBackend>,
+    portable_pty_probe: Result<(), String>,
+    winpty_probe: Result<(), String>,
+}
+
+#[cfg(windows)]
+#[derive(Debug, Default)]
+struct WindowsTerminalQueryState {
+    pending: Vec<u8>,
+}
+
+#[cfg(windows)]
+#[derive(Debug, Default)]
+struct WindowsTerminalQueryResult {
+    output: String,
+    response: String,
+}
+
+#[cfg(windows)]
+impl WindowsTerminalQueryState {
+    fn filter_chunk(&mut self, chunk: &str) -> WindowsTerminalQueryResult {
+        let mut input = Vec::with_capacity(self.pending.len() + chunk.len());
+        input.extend_from_slice(&self.pending);
+        input.extend_from_slice(chunk.as_bytes());
+        self.pending.clear();
+
+        let mut visible = Vec::with_capacity(input.len());
+        let mut response = String::new();
+        let mut index = 0;
+
+        while index < input.len() {
+            let remaining = &input[index..];
+            if remaining.starts_with(b"\x1b[5n") {
+                response.push_str("\x1b[0n");
+                index += 4;
+                continue;
+            }
+            if remaining.starts_with(b"\x1b[6n") {
+                response.push_str("\x1b[1;1R");
+                index += 4;
+                continue;
+            }
+
+            if let Some(prefix_len) = terminal_query_prefix_len(remaining) {
+                self.pending.extend_from_slice(&remaining[..prefix_len]);
+                break;
+            }
+
+            visible.push(input[index]);
+            index += 1;
+        }
+
+        WindowsTerminalQueryResult {
+            output: String::from_utf8_lossy(&visible).into_owned(),
+            response,
+        }
+    }
+
+    fn drain_pending(&mut self) -> String {
+        let pending = String::from_utf8_lossy(&self.pending).into_owned();
+        self.pending.clear();
+        pending
+    }
+}
+
+#[cfg(windows)]
+fn terminal_query_prefix_len(bytes: &[u8]) -> Option<usize> {
+    match bytes {
+        [0x1b] => Some(1),
+        [0x1b, b'['] => Some(2),
+        [0x1b, b'[', b'5'] | [0x1b, b'[', b'6'] => Some(3),
+        _ => None,
+    }
 }
 
 fn portable_pty_probe() -> anyhow::Result<()> {
@@ -86,6 +181,25 @@ fn select_windows_pty_backend() -> Option<WindowsPtyBackend> {
     select_windows_pty_backend_with(portable_pty_probe, super::winpty::supports_winpty)
 }
 
+#[cfg(windows)]
+fn collect_windows_pty_diagnostics() -> WindowsPtyDiagnostics {
+    let portable_pty_probe = portable_pty_probe().map_err(|err| err.to_string());
+    let winpty_probe = super::winpty::supports_winpty().map_err(|err| err.to_string());
+    let selected_backend = if portable_pty_probe.is_ok() {
+        Some(WindowsPtyBackend::PortablePty)
+    } else if winpty_probe.is_ok() {
+        Some(WindowsPtyBackend::Winpty)
+    } else {
+        None
+    };
+
+    WindowsPtyDiagnostics {
+        selected_backend,
+        portable_pty_probe,
+        winpty_probe,
+    }
+}
+
 pub fn supports_pty() -> bool {
     #[cfg(windows)]
     {
@@ -95,6 +209,67 @@ pub fn supports_pty() -> bool {
     #[cfg(not(windows))]
     {
         portable_pty_probe().is_ok()
+    }
+}
+
+#[cfg(windows)]
+fn build_metadata_line(label: &str, path: Option<&'static str>) -> String {
+    match path {
+        Some(path) => {
+            let kind = if Path::new(path).is_file() {
+                "file exists"
+            } else if Path::new(path).is_dir() {
+                "dir exists"
+            } else {
+                "missing on disk"
+            };
+            format!("{label}: {path} ({kind})")
+        }
+        None => format!("{label}: <not set>"),
+    }
+}
+
+#[cfg(windows)]
+fn probe_line(label: &str, result: &Result<(), String>) -> String {
+    match result {
+        Ok(()) => format!("{label}: ok"),
+        Err(err) => format!("{label}: {err}"),
+    }
+}
+
+#[cfg(windows)]
+fn windows_status_name(code: u32) -> Option<&'static str> {
+    match code {
+        0xC000007B => Some("STATUS_INVALID_IMAGE_FORMAT"),
+        0xC0000135 => Some("STATUS_DLL_NOT_FOUND"),
+        0xC0000139 => Some("STATUS_ENTRYPOINT_NOT_FOUND"),
+        0xC0000142 => Some("STATUS_DLL_INIT_FAILED"),
+        _ => None,
+    }
+}
+
+#[cfg(windows)]
+fn format_windows_exit_code(code: i32) -> String {
+    let raw = code as u32;
+    match windows_status_name(raw) {
+        Some(name) => format!("{code} (0x{raw:08X}, {name})"),
+        None => format!("{code} (0x{raw:08X})"),
+    }
+}
+
+#[cfg(windows)]
+fn summarize_output_excerpt(output: &str) -> String {
+    let normalized = output.replace('\r', "\\r").replace('\n', "\\n");
+    if normalized.is_empty() {
+        "<empty>".to_string()
+    } else {
+        let mut chars = normalized.chars();
+        let excerpt = chars.by_ref().take(160).collect::<String>();
+        if chars.next().is_some() {
+            format!("{excerpt}...")
+        } else {
+            excerpt
+        }
     }
 }
 
@@ -114,6 +289,7 @@ pub fn spawn(cmd: &[String], cwd: &std::path::Path, tty: bool) -> anyhow::Result
                         child: SessionChild::Winpty(session),
                         receiver,
                         exit_code: None,
+                        terminal_query_state: Some(WindowsTerminalQueryState::default()),
                     })
                 }
                 None => anyhow::bail!("tty is not supported on this host"),
@@ -185,6 +361,141 @@ fn winpty_environment_block() -> OsString {
     block
 }
 
+#[cfg(windows)]
+async fn summarize_windows_backend_session(
+    mut session: LiveSession,
+    backend: WindowsPtyBackend,
+) -> String {
+    let deadline = Instant::now() + Duration::from_millis(300);
+    let mut output = String::new();
+
+    while Instant::now() < deadline {
+        match session.read_available().await {
+            Ok(chunk) => output.push_str(&chunk),
+            Err(err) => {
+                return format!(
+                    "{} smoke test: failed to read output: {err}",
+                    backend.debug_name()
+                );
+            }
+        }
+
+        match session.has_exited().await {
+            Ok(true) => {
+                if let Ok(tail) = session.read_available().await {
+                    output.push_str(&tail);
+                }
+                let exit_code = session
+                    .exit_code()
+                    .map(format_windows_exit_code)
+                    .unwrap_or_else(|| "<missing exit code>".to_string());
+                return format!(
+                    "{} smoke test: exited early with {exit_code}; output={}",
+                    backend.debug_name(),
+                    summarize_output_excerpt(&output)
+                );
+            }
+            Ok(false) => {}
+            Err(err) => {
+                return format!(
+                    "{} smoke test: failed to query exit status: {err}",
+                    backend.debug_name()
+                );
+            }
+        }
+
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    let _ = session.terminate().await;
+    format!(
+        "{} smoke test: still running after 300ms; output={}",
+        backend.debug_name(),
+        summarize_output_excerpt(&output)
+    )
+}
+
+#[cfg(windows)]
+async fn smoke_test_windows_backend(
+    backend: WindowsPtyBackend,
+    cmd: &[String],
+    cwd: &Path,
+) -> String {
+    match backend {
+        WindowsPtyBackend::PortablePty => match spawn_pty(cmd, cwd) {
+            Ok(session) => summarize_windows_backend_session(session, backend).await,
+            Err(err) => format!("{} smoke test: spawn failed: {err}", backend.debug_name()),
+        },
+        WindowsPtyBackend::Winpty => {
+            match super::winpty::spawn_winpty(cmd, cwd, winpty_environment_block()) {
+                Ok((session, receiver)) => {
+                    let live_session = LiveSession {
+                        tty: true,
+                        started_at: Instant::now(),
+                        transcript: TranscriptBuffer::new(1024 * 1024),
+                        child: SessionChild::Winpty(session),
+                        receiver,
+                        exit_code: None,
+                        terminal_query_state: Some(WindowsTerminalQueryState::default()),
+                    };
+                    summarize_windows_backend_session(live_session, backend).await
+                }
+                Err(err) => format!("{} smoke test: spawn failed: {err}", backend.debug_name()),
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+pub async fn windows_pty_debug_report(cmd: &[String], cwd: &Path) -> String {
+    let diagnostics = collect_windows_pty_diagnostics();
+    let mut lines = vec![
+        "Windows PTY diagnostics".to_string(),
+        format!("cwd: {}", cwd.display()),
+        format!("argv: {cmd:?}"),
+        format!(
+            "selected backend: {}",
+            diagnostics
+                .selected_backend
+                .map(WindowsPtyBackend::debug_name)
+                .unwrap_or("none")
+        ),
+        probe_line("portable-pty ConPTY probe", &diagnostics.portable_pty_probe),
+        probe_line("winpty probe", &diagnostics.winpty_probe),
+        build_metadata_line("winpty link kind", option_env!("DEP_WINPTY_LINK_KIND")),
+        build_metadata_line("winpty root", option_env!("DEP_WINPTY_WINPTY_ROOT")),
+        build_metadata_line("winpty lib dir", option_env!("DEP_WINPTY_WINPTY_LIB_DIR")),
+        build_metadata_line("winpty bin dir", option_env!("DEP_WINPTY_WINPTY_BIN_DIR")),
+        build_metadata_line("winpty.dll", option_env!("DEP_WINPTY_WINPTY_DLL")),
+        build_metadata_line("winpty-agent.exe", option_env!("DEP_WINPTY_WINPTY_RUNTIME")),
+        build_metadata_line("conpty.dll", option_env!("DEP_WINPTY_CONPTY_DLL")),
+        build_metadata_line("OpenConsole.exe", option_env!("DEP_WINPTY_CONPTY_RUNTIME")),
+    ];
+
+    lines.push(if diagnostics.portable_pty_probe.is_ok() {
+        smoke_test_windows_backend(WindowsPtyBackend::PortablePty, cmd, cwd).await
+    } else {
+        format!(
+            "conpty_via_portable_pty smoke test: skipped because probe failed: {}",
+            diagnostics.portable_pty_probe.as_ref().err().unwrap()
+        )
+    });
+    lines.push(if diagnostics.winpty_probe.is_ok() {
+        smoke_test_windows_backend(WindowsPtyBackend::Winpty, cmd, cwd).await
+    } else {
+        format!(
+            "winpty smoke test: skipped because probe failed: {}",
+            diagnostics.winpty_probe.as_ref().err().unwrap()
+        )
+    });
+    lines.push(
+        "note: STATUS_DLL_INIT_FAILED / STATUS_DLL_NOT_FOUND identifies the failure class, not the exact missing DLL."
+            .to_string(),
+    );
+
+    lines.join("\n")
+}
+
 fn spawn_pty(cmd: &[String], cwd: &std::path::Path) -> anyhow::Result<LiveSession> {
     let pty = NativePtySystem::default().openpty(default_pty_size())?;
     let mut builder = CommandBuilder::new(&cmd[0]);
@@ -221,9 +532,15 @@ fn spawn_pty(cmd: &[String], cwd: &std::path::Path) -> anyhow::Result<LiveSessio
         tty: true,
         started_at: Instant::now(),
         transcript: TranscriptBuffer::new(1024 * 1024),
-        child: SessionChild::Pty(PtySession { child, writer }),
+        child: SessionChild::Pty(PtySession {
+            child,
+            master: pty.master,
+            writer,
+        }),
         receiver,
         exit_code: None,
+        #[cfg(windows)]
+        terminal_query_state: Some(WindowsTerminalQueryState::default()),
     })
 }
 
@@ -251,6 +568,8 @@ fn spawn_pipe(cmd: &[String], cwd: &std::path::Path) -> anyhow::Result<LiveSessi
         child: SessionChild::Pipe(Box::new(child)),
         receiver,
         exit_code: None,
+        #[cfg(windows)]
+        terminal_query_state: None,
     })
 }
 
@@ -281,8 +600,16 @@ impl LiveSession {
     pub async fn read_available(&mut self) -> anyhow::Result<String> {
         let mut output = String::new();
         while let Ok(chunk) = self.receiver.try_recv() {
+            #[cfg(windows)]
+            let chunk = self.filter_terminal_queries(chunk)?;
             output.push_str(&chunk);
         }
+
+        #[cfg(windows)]
+        if self.exit_code.is_some() {
+            output.push_str(&self.drain_terminal_query_buffer());
+        }
+
         Ok(output)
     }
 
@@ -336,6 +663,10 @@ impl LiveSession {
     }
 
     pub async fn write(&mut self, chars: &str) -> anyhow::Result<()> {
+        self.write_chars_internal(chars)
+    }
+
+    fn write_chars_internal(&mut self, chars: &str) -> anyhow::Result<()> {
         if chars.is_empty() {
             return Ok(());
         }
@@ -354,6 +685,28 @@ impl LiveSession {
         }
     }
 
+    #[cfg(windows)]
+    fn filter_terminal_queries(&mut self, chunk: String) -> anyhow::Result<String> {
+        let Some(result) = self
+            .terminal_query_state
+            .as_mut()
+            .map(|state| state.filter_chunk(&chunk))
+        else {
+            return Ok(chunk);
+        };
+
+        self.write_chars_internal(&result.response)?;
+        Ok(result.output)
+    }
+
+    #[cfg(windows)]
+    fn drain_terminal_query_buffer(&mut self) -> String {
+        self.terminal_query_state
+            .as_mut()
+            .map(WindowsTerminalQueryState::drain_pending)
+            .unwrap_or_default()
+    }
+
     pub fn exit_code(&self) -> Option<i32> {
         self.exit_code
     }
@@ -365,6 +718,8 @@ impl LiveSession {
 
 #[cfg(test)]
 mod windows_pty_backend_tests {
+    #[cfg(windows)]
+    use super::WindowsTerminalQueryState;
     use super::{WindowsPtyBackend, select_windows_pty_backend_with};
 
     #[test]
@@ -395,5 +750,42 @@ mod windows_pty_backend_tests {
             ),
             None
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_terminal_query_state_replies_to_device_status_report() {
+        let mut state = WindowsTerminalQueryState::default();
+        let result = state.filter_chunk("before\x1b[5nafter");
+
+        assert_eq!(result.output, "beforeafter");
+        assert_eq!(result.response, "\x1b[0n");
+        assert_eq!(state.drain_pending(), "");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_terminal_query_state_replies_to_cursor_position_report() {
+        let mut state = WindowsTerminalQueryState::default();
+        let result = state.filter_chunk("before\x1b[6nafter");
+
+        assert_eq!(result.output, "beforeafter");
+        assert_eq!(result.response, "\x1b[1;1R");
+        assert_eq!(state.drain_pending(), "");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_terminal_query_state_handles_split_query_sequences() {
+        let mut state = WindowsTerminalQueryState::default();
+
+        let first = state.filter_chunk("before\x1b[");
+        assert_eq!(first.output, "before");
+        assert_eq!(first.response, "");
+
+        let second = state.filter_chunk("6nafter");
+        assert_eq!(second.output, "after");
+        assert_eq!(second.response, "\x1b[1;1R");
+        assert_eq!(state.drain_pending(), "");
     }
 }
