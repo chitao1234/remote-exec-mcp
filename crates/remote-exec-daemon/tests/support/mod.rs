@@ -14,6 +14,30 @@ fn toml_string(value: &str) -> String {
     toml::Value::String(value.to_string()).to_string()
 }
 
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowsPtyTestBackend {
+    Conpty,
+    Winpty,
+}
+
+#[cfg(windows)]
+impl WindowsPtyTestBackend {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Conpty => "conpty",
+            Self::Winpty => "winpty",
+        }
+    }
+
+    fn backend_override(self) -> WindowsPtyBackendOverride {
+        match self {
+            Self::Conpty => WindowsPtyBackendOverride::PortablePty,
+            Self::Winpty => WindowsPtyBackendOverride::Winpty,
+        }
+    }
+}
+
 pub struct DaemonFixture {
     pub _tempdir: TempDir,
     pub client: reqwest::Client,
@@ -151,9 +175,33 @@ pub async fn spawn_daemon(target: &str) -> DaemonFixture {
 }
 
 #[cfg(windows)]
-#[allow(dead_code)]
-pub async fn spawn_daemon_forced_winpty(target: &str) -> DaemonFixture {
-    spawn_daemon_with_backend_override(target, Some(WindowsPtyBackendOverride::Winpty)).await
+pub fn supported_windows_pty_backends() -> Vec<WindowsPtyTestBackend> {
+    let mut backends = Vec::new();
+
+    if remote_exec_daemon::exec::session::supports_pty_with_override(Some(
+        WindowsPtyBackendOverride::PortablePty,
+    )) {
+        backends.push(WindowsPtyTestBackend::Conpty);
+    }
+    if remote_exec_daemon::exec::session::supports_pty_with_override(Some(
+        WindowsPtyBackendOverride::Winpty,
+    )) {
+        backends.push(WindowsPtyTestBackend::Winpty);
+    }
+
+    assert!(
+        !backends.is_empty(),
+        "expected at least one Windows PTY backend to be available"
+    );
+    backends
+}
+
+#[cfg(windows)]
+pub async fn spawn_daemon_for_windows_pty_backend(
+    target: &str,
+    backend: WindowsPtyTestBackend,
+) -> DaemonFixture {
+    spawn_daemon_with_backend_override(target, Some(backend.backend_override())).await
 }
 
 #[allow(dead_code)]
