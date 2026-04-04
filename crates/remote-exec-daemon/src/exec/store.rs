@@ -283,7 +283,13 @@ mod tests {
     }
 
     fn spawn_pipe_session(script: &str) -> session::LiveSession {
-        session::spawn(&shell_argv(script), test_workdir(), false).expect("session should spawn")
+        session::spawn(
+            &shell_argv(script),
+            test_workdir(),
+            false,
+            &crate::config::ProcessEnvironment::capture_current(),
+        )
+        .expect("session should spawn")
     }
 
     #[tokio::test]
@@ -292,7 +298,13 @@ mod tests {
         let session_id = "session-1";
         let cmd = shell_argv(&sleep_script(2));
 
-        let first = session::spawn(&cmd, test_workdir(), false).expect("first session");
+        let first = session::spawn(
+            &cmd,
+            test_workdir(),
+            false,
+            &crate::config::ProcessEnvironment::capture_current(),
+        )
+        .expect("first session");
         store.insert(session_id.to_string(), first).await;
         let stale = {
             let sessions = store.inner.read().await;
@@ -302,7 +314,13 @@ mod tests {
                 .expect("session must exist for stale snapshot")
         };
 
-        let replacement = session::spawn(&cmd, test_workdir(), false).expect("replacement session");
+        let replacement = session::spawn(
+            &cmd,
+            test_workdir(),
+            false,
+            &crate::config::ProcessEnvironment::capture_current(),
+        )
+        .expect("replacement session");
         store.insert(session_id.to_string(), replacement).await;
 
         let stale_guard = store.lock_if_current(session_id, stale).await;
@@ -324,7 +342,13 @@ mod tests {
         let session_id = "session-1";
         let cmd = shell_argv(&sleep_script(2));
 
-        let session = session::spawn(&cmd, test_workdir(), false).expect("session");
+        let session = session::spawn(
+            &cmd,
+            test_workdir(),
+            false,
+            &crate::config::ProcessEnvironment::capture_current(),
+        )
+        .expect("session");
         store.insert(session_id.to_string(), session).await;
         let lease = store.lock(session_id).await.expect("lease");
 

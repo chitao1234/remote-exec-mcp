@@ -3,12 +3,11 @@ mod support;
 use std::ffi::OsString;
 #[cfg(windows)]
 use std::path::Path;
-use std::sync::OnceLock;
 
+use remote_exec_daemon::config::ProcessEnvironment;
 use remote_exec_proto::rpc::{ExecResponse, ExecStartRequest, ExecWriteRequest};
 #[cfg(windows)]
 use support::WindowsPtyTestBackend;
-use tokio::sync::Mutex;
 
 #[cfg(unix)]
 const TEST_SHELL: &str = "/bin/sh";
@@ -29,6 +28,21 @@ macro_rules! for_each_windows_pty_backend {
         for $backend in support::supported_windows_pty_backends() {
             let $fixture =
                 support::spawn_daemon_for_windows_pty_backend("builder-a", $backend).await;
+            $body
+        }
+    }};
+}
+
+#[cfg(windows)]
+macro_rules! for_each_windows_pty_backend_with_environment {
+    ($backend:ident, $fixture:ident, $environment:expr, $body:block) => {{
+        for $backend in support::supported_windows_pty_backends() {
+            let $fixture = support::spawn_daemon_for_windows_pty_backend_with_process_environment(
+                "builder-a",
+                $backend,
+                $environment.clone(),
+            )
+            .await;
             $body
         }
     }};
@@ -286,52 +300,12 @@ async fn assert_windows_powershell_command_quoting(
     );
 }
 
-#[cfg(windows)]
-fn windows_exec_rpc_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
-
-fn env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
-
-struct EnvOverrideGuard {
-    _guard: tokio::sync::MutexGuard<'static, ()>,
-    saved: Vec<(String, Option<OsString>)>,
-}
-
-impl EnvOverrideGuard {
-    async fn set(pairs: &[(&str, &str)]) -> Self {
-        let guard = env_lock().lock().await;
-        let mut saved = Vec::new();
-
-        for (key, value) in pairs {
-            saved.push((key.to_string(), std::env::var_os(key)));
-            unsafe {
-                std::env::set_var(key, value);
-            }
-        }
-
-        Self {
-            _guard: guard,
-            saved,
-        }
+fn process_environment_with(pairs: &[(&str, &str)]) -> ProcessEnvironment {
+    let mut environment = ProcessEnvironment::capture_current();
+    for (key, value) in pairs {
+        environment.set_var(key, Some(OsString::from(value)));
     }
-}
-
-impl Drop for EnvOverrideGuard {
-    fn drop(&mut self) {
-        for (key, value) in self.saved.drain(..) {
-            unsafe {
-                match value {
-                    Some(value) => std::env::set_var(&key, value),
-                    None => std::env::remove_var(&key),
-                }
-            }
-        }
-    }
+    environment
 }
 
 #[cfg(unix)]
@@ -368,8 +342,11 @@ async fn exec_start_uses_login_shell_by_default_when_login_is_omitted() {
     )
     .unwrap();
     let home_text = home.path().to_string_lossy().into_owned();
-    let _env = EnvOverrideGuard::set(&[("HOME", &home_text)]).await;
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn_daemon_with_process_environment(
+        "builder-a",
+        process_environment_with(&[("HOME", &home_text)]),
+    )
+    .await;
 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
@@ -418,7 +395,6 @@ async fn exec_start_rejects_explicit_login_when_disabled_by_config() {
 #[cfg(windows)]
 #[tokio::test]
 async fn exec_start_allows_login_requests_on_windows_when_enabled() {
-    let _test_lock = windows_exec_rpc_lock().lock().await;
     let fixture = support::spawn_daemon("builder-a").await;
 
     let response = fixture
@@ -448,7 +424,6 @@ async fn exec_start_allows_login_requests_on_windows_when_enabled() {
 #[cfg(windows)]
 #[tokio::test]
 async fn exec_start_rejects_login_requests_on_windows_when_disabled_by_config() {
-    let _test_lock = windows_exec_rpc_lock().lock().await;
     let fixture =
         support::spawn_daemon_with_extra_config("builder-a", "allow_login_shell = false").await;
 
@@ -473,9 +448,11 @@ async fn exec_start_rejects_login_requests_on_windows_when_disabled_by_config() 
 #[cfg(windows)]
 #[tokio::test]
 async fn exec_start_uses_cmd_when_shell_is_omitted() {
-    let _test_lock = windows_exec_rpc_lock().lock().await;
-    let _env = EnvOverrideGuard::set(&[("PATH", ""), ("COMSPEC", "cmd.exe")]).await;
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn_daemon_with_process_environment(
+        "builder-a",
+        process_environment_with(&[("PATH", ""), ("COMSPEC", "cmd.exe")]),
+    )
+    .await;
 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
@@ -504,7 +481,6 @@ async fn exec_start_uses_cmd_when_shell_is_omitted() {
 #[cfg(windows)]
 #[tokio::test]
 async fn exec_start_keeps_windows_tty_sessions_alive_and_answers_terminal_queries() {
-    let _test_lock = windows_exec_rpc_lock().lock().await;
     for_each_windows_pty_backend!(backend, fixture, {
         assert_windows_tty_session_answers_terminal_queries(&fixture, backend).await;
     });
@@ -513,19 +489,20 @@ async fn exec_start_keeps_windows_tty_sessions_alive_and_answers_terminal_querie
 #[cfg(windows)]
 #[tokio::test]
 async fn env_overlay_is_applied_in_pipe_mode_on_windows() {
-    let _test_lock = windows_exec_rpc_lock().lock().await;
-    let _env = EnvOverrideGuard::set(&[
-        ("TERM", "rainbow-terminal"),
-        ("NO_COLOR", "0"),
-        ("PAGER", "less"),
-        ("GIT_PAGER", "more"),
-        ("CODEX_CI", "0"),
-        ("LANG", "fr_FR.UTF-8"),
-        ("LC_CTYPE", "fr_FR.UTF-8"),
-        ("LC_ALL", "fr_FR.UTF-8"),
-    ])
+    let fixture = support::spawn_daemon_with_process_environment(
+        "builder-a",
+        process_environment_with(&[
+            ("TERM", "rainbow-terminal"),
+            ("NO_COLOR", "0"),
+            ("PAGER", "less"),
+            ("GIT_PAGER", "more"),
+            ("CODEX_CI", "0"),
+            ("LANG", "fr_FR.UTF-8"),
+            ("LC_CTYPE", "fr_FR.UTF-8"),
+            ("LC_ALL", "fr_FR.UTF-8"),
+        ]),
+    )
     .await;
-    let fixture = support::spawn_daemon("builder-a").await;
 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
@@ -536,7 +513,7 @@ async fn env_overlay_is_applied_in_pipe_mode_on_windows() {
                 Some(COMPLETED_COMMAND_YIELD_MS),
                 None,
             ),
-    )
+        )
         .await;
 
     assert_eq!(response.exit_code, Some(0));
@@ -550,8 +527,7 @@ async fn env_overlay_is_applied_in_pipe_mode_on_windows() {
 #[cfg(windows)]
 #[tokio::test]
 async fn env_overlay_is_applied_in_pty_mode_on_windows() {
-    let _test_lock = windows_exec_rpc_lock().lock().await;
-    let _env = EnvOverrideGuard::set(&[
+    let environment = process_environment_with(&[
         ("TERM", "rainbow-terminal"),
         ("NO_COLOR", "0"),
         ("PAGER", "less"),
@@ -560,9 +536,8 @@ async fn env_overlay_is_applied_in_pty_mode_on_windows() {
         ("LANG", "fr_FR.UTF-8"),
         ("LC_CTYPE", "fr_FR.UTF-8"),
         ("LC_ALL", "fr_FR.UTF-8"),
-    ])
-    .await;
-    for_each_windows_pty_backend!(backend, fixture, {
+    ]);
+    for_each_windows_pty_backend_with_environment!(backend, fixture, environment, {
         let response = fixture
             .rpc::<ExecStartRequest, ExecResponse>(
                 "/v1/exec/start",
@@ -594,7 +569,6 @@ async fn env_overlay_is_applied_in_pty_mode_on_windows() {
 #[cfg(windows)]
 #[tokio::test]
 async fn omitted_max_output_tokens_defaults_to_ten_thousand_on_windows() {
-    let _test_lock = windows_exec_rpc_lock().lock().await;
     let fixture = support::spawn_daemon("builder-a").await;
 
     let response = fixture
@@ -617,7 +591,6 @@ async fn omitted_max_output_tokens_defaults_to_ten_thousand_on_windows() {
 #[cfg(windows)]
 #[tokio::test]
 async fn exec_start_truncates_output_to_max_output_tokens_on_windows() {
-    let _test_lock = windows_exec_rpc_lock().lock().await;
     let fixture = support::spawn_daemon("builder-a").await;
 
     let response = fixture
@@ -639,7 +612,6 @@ async fn exec_start_truncates_output_to_max_output_tokens_on_windows() {
 #[cfg(windows)]
 #[tokio::test]
 async fn exec_output_preserves_trailing_newline_when_within_max_output_tokens_on_windows() {
-    let _test_lock = windows_exec_rpc_lock().lock().await;
     let fixture = support::spawn_daemon("builder-a").await;
 
     let response = fixture
@@ -661,7 +633,6 @@ async fn exec_output_preserves_trailing_newline_when_within_max_output_tokens_on
 #[cfg(windows)]
 #[tokio::test]
 async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens_on_windows() {
-    let _test_lock = windows_exec_rpc_lock().lock().await;
     for_each_windows_pty_backend!(backend, fixture, {
         let started = fixture
             .rpc::<ExecStartRequest, ExecResponse>(
@@ -715,7 +686,6 @@ async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens_on_windows() 
 #[cfg(windows)]
 #[tokio::test]
 async fn exec_write_rejects_non_tty_sessions_when_chars_are_present_on_windows() {
-    let _test_lock = windows_exec_rpc_lock().lock().await;
     let fixture = support::spawn_daemon("builder-a").await;
     let started = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
@@ -746,7 +716,6 @@ async fn exec_write_rejects_non_tty_sessions_when_chars_are_present_on_windows()
 async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon_on_windows() {
     use std::time::{Duration, Instant};
 
-    let _test_lock = windows_exec_rpc_lock().lock().await;
     for_each_windows_pty_backend!(backend, fixture, {
         let slow = fixture
             .rpc::<ExecStartRequest, ExecResponse>(
@@ -826,7 +795,6 @@ async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon_on_windows(
 #[cfg(windows)]
 #[tokio::test]
 async fn exec_write_bare_lf_advances_windows_pty_line_reader() {
-    let _test_lock = windows_exec_rpc_lock().lock().await;
     for_each_windows_pty_backend!(backend, fixture, {
         assert_windows_bare_lf_advances_pty_line_reader(&fixture, backend).await;
     });
@@ -835,7 +803,6 @@ async fn exec_write_bare_lf_advances_windows_pty_line_reader() {
 #[cfg(windows)]
 #[tokio::test]
 async fn exec_start_preserves_complex_powershell_command_quoting_across_windows_pty_backends() {
-    let _test_lock = windows_exec_rpc_lock().lock().await;
     for_each_windows_pty_backend!(backend, fixture, {
         assert_windows_powershell_command_quoting(&fixture, backend).await;
     });
@@ -851,9 +818,12 @@ async fn exec_start_uses_non_login_shell_when_policy_disabled_and_login_is_omitt
     )
     .unwrap();
     let home_text = home.path().to_string_lossy().into_owned();
-    let _env = EnvOverrideGuard::set(&[("HOME", &home_text)]).await;
-    let fixture =
-        support::spawn_daemon_with_extra_config("builder-a", "allow_login_shell = false").await;
+    let fixture = support::spawn_daemon_with_extra_config_and_process_environment(
+        "builder-a",
+        "allow_login_shell = false",
+        process_environment_with(&[("HOME", &home_text)]),
+    )
+    .await;
 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
@@ -877,19 +847,21 @@ async fn exec_start_uses_non_login_shell_when_policy_disabled_and_login_is_omitt
 #[cfg(unix)]
 #[tokio::test]
 async fn env_overlay_is_applied_in_pipe_mode() {
-    let _env = EnvOverrideGuard::set(&[
-        ("TERM", "rainbow-terminal"),
-        ("NO_COLOR", "0"),
-        ("PAGER", "less"),
-        ("GIT_PAGER", "more"),
-        ("CODEX_CI", "0"),
-        (
-            "REMOTE_EXEC_TEST_LOCALE_OUTPUT",
-            "fr_FR.UTF-8\nen_US.UTF-8\n",
-        ),
-    ])
+    let fixture = support::spawn_daemon_with_process_environment(
+        "builder-a",
+        process_environment_with(&[
+            ("TERM", "rainbow-terminal"),
+            ("NO_COLOR", "0"),
+            ("PAGER", "less"),
+            ("GIT_PAGER", "more"),
+            ("CODEX_CI", "0"),
+            (
+                "REMOTE_EXEC_TEST_LOCALE_OUTPUT",
+                "fr_FR.UTF-8\nen_US.UTF-8\n",
+            ),
+        ]),
+    )
     .await;
-    let fixture = support::spawn_daemon("builder-a").await;
 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
@@ -914,19 +886,21 @@ async fn env_overlay_is_applied_in_pipe_mode() {
 #[cfg(unix)]
 #[tokio::test]
 async fn env_overlay_is_applied_in_pty_mode() {
-    let _env = EnvOverrideGuard::set(&[
-        ("TERM", "rainbow-terminal"),
-        ("NO_COLOR", "0"),
-        ("PAGER", "less"),
-        ("GIT_PAGER", "more"),
-        ("CODEX_CI", "0"),
-        (
-            "REMOTE_EXEC_TEST_LOCALE_OUTPUT",
-            "fr_FR.UTF-8\nen_US.UTF-8\n",
-        ),
-    ])
+    let fixture = support::spawn_daemon_with_process_environment(
+        "builder-a",
+        process_environment_with(&[
+            ("TERM", "rainbow-terminal"),
+            ("NO_COLOR", "0"),
+            ("PAGER", "less"),
+            ("GIT_PAGER", "more"),
+            ("CODEX_CI", "0"),
+            (
+                "REMOTE_EXEC_TEST_LOCALE_OUTPUT",
+                "fr_FR.UTF-8\nen_US.UTF-8\n",
+            ),
+        ]),
+    )
     .await;
-    let fixture = support::spawn_daemon("builder-a").await;
 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
@@ -951,12 +925,14 @@ async fn env_overlay_is_applied_in_pty_mode() {
 #[cfg(unix)]
 #[tokio::test]
 async fn env_overlay_prefers_lang_c_plus_lc_ctype_when_c_utf8_is_unavailable() {
-    let _env = EnvOverrideGuard::set(&[(
-        "REMOTE_EXEC_TEST_LOCALE_OUTPUT",
-        "fr_FR.UTF-8\nen_US.UTF-8\n",
-    )])
+    let fixture = support::spawn_daemon_with_process_environment(
+        "builder-a",
+        process_environment_with(&[(
+            "REMOTE_EXEC_TEST_LOCALE_OUTPUT",
+            "fr_FR.UTF-8\nen_US.UTF-8\n",
+        )]),
+    )
     .await;
-    let fixture = support::spawn_daemon("builder-a").await;
 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
@@ -980,12 +956,14 @@ async fn env_overlay_prefers_lang_c_plus_lc_ctype_when_c_utf8_is_unavailable() {
 #[cfg(unix)]
 #[tokio::test]
 async fn env_overlay_falls_back_to_lang_c_only_when_no_utf8_locale_is_available() {
-    let _env = EnvOverrideGuard::set(&[(
-        "REMOTE_EXEC_TEST_LOCALE_OUTPUT",
-        "C\nPOSIX\nen_US.ISO8859-1\n",
-    )])
+    let fixture = support::spawn_daemon_with_process_environment(
+        "builder-a",
+        process_environment_with(&[(
+            "REMOTE_EXEC_TEST_LOCALE_OUTPUT",
+            "C\nPOSIX\nen_US.ISO8859-1\n",
+        )]),
+    )
     .await;
-    let fixture = support::spawn_daemon("builder-a").await;
 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(

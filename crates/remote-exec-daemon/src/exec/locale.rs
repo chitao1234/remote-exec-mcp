@@ -3,6 +3,8 @@ use std::process::Command;
 #[cfg(not(windows))]
 use std::sync::OnceLock;
 
+use crate::config::ProcessEnvironment;
+
 #[cfg(not(windows))]
 const TEST_LOCALE_OUTPUT_ENV: &str = "REMOTE_EXEC_TEST_LOCALE_OUTPUT";
 
@@ -28,7 +30,7 @@ impl LocaleEnvPlan {
         Self { strategy }
     }
 
-    pub(crate) fn resolved() -> Self {
+    pub(crate) fn resolved(_environment: &ProcessEnvironment) -> Self {
         #[cfg(windows)]
         {
             LocaleEnvPlan::from_strategy(LocaleStrategy::LangCOnly)
@@ -36,7 +38,7 @@ impl LocaleEnvPlan {
 
         #[cfg(not(windows))]
         {
-            if let Some(plan) = resolved_from_override_env() {
+            if let Some(plan) = resolved_from_override_env(_environment) {
                 return plan;
             }
 
@@ -101,8 +103,9 @@ where
 }
 
 #[cfg(not(windows))]
-fn resolved_from_override_env() -> Option<LocaleEnvPlan> {
-    let output = std::env::var(TEST_LOCALE_OUTPUT_ENV).ok()?;
+fn resolved_from_override_env(environment: &ProcessEnvironment) -> Option<LocaleEnvPlan> {
+    let output = environment.var_os(TEST_LOCALE_OUTPUT_ENV)?;
+    let output = output.to_string_lossy();
     Some(LocaleEnvPlan::from_strategy(choose_strategy(
         parse_locale_output(&output),
     )))

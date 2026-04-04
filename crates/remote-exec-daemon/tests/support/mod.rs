@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use base64::Engine;
 use image::ImageFormat;
+use remote_exec_daemon::config::ProcessEnvironment;
 #[cfg(windows)]
 use remote_exec_daemon::config::WindowsPtyBackendOverride;
 use remote_exec_proto::rpc::RpcErrorBody;
@@ -117,6 +118,7 @@ impl DaemonFixture {
 async fn spawn_daemon_with_backend_override(
     target: &str,
     windows_pty_backend_override: Option<remote_exec_daemon::config::WindowsPtyBackendOverride>,
+    process_environment: ProcessEnvironment,
 ) -> DaemonFixture {
     remote_exec_daemon::install_crypto_provider();
 
@@ -134,6 +136,7 @@ async fn spawn_daemon_with_backend_override(
         default_workdir: workdir.clone(),
         allow_login_shell: true,
         windows_pty_backend_override,
+        process_environment,
         tls: remote_exec_daemon::config::TlsConfig {
             cert_pem: certs.daemon_cert.clone(),
             key_pem: certs.daemon_key.clone(),
@@ -171,7 +174,7 @@ async fn spawn_daemon_with_backend_override(
 }
 
 pub async fn spawn_daemon(target: &str) -> DaemonFixture {
-    spawn_daemon_with_backend_override(target, None).await
+    spawn_daemon_with_backend_override(target, None, ProcessEnvironment::capture_current()).await
 }
 
 #[cfg(windows)]
@@ -201,11 +204,53 @@ pub async fn spawn_daemon_for_windows_pty_backend(
     target: &str,
     backend: WindowsPtyTestBackend,
 ) -> DaemonFixture {
-    spawn_daemon_with_backend_override(target, Some(backend.backend_override())).await
+    spawn_daemon_with_backend_override(
+        target,
+        Some(backend.backend_override()),
+        ProcessEnvironment::capture_current(),
+    )
+    .await
+}
+
+#[allow(dead_code)]
+pub async fn spawn_daemon_with_process_environment(
+    target: &str,
+    process_environment: ProcessEnvironment,
+) -> DaemonFixture {
+    spawn_daemon_with_backend_override(target, None, process_environment).await
+}
+
+#[cfg(windows)]
+#[allow(dead_code)]
+pub async fn spawn_daemon_for_windows_pty_backend_with_process_environment(
+    target: &str,
+    backend: WindowsPtyTestBackend,
+    process_environment: ProcessEnvironment,
+) -> DaemonFixture {
+    spawn_daemon_with_backend_override(
+        target,
+        Some(backend.backend_override()),
+        process_environment,
+    )
+    .await
 }
 
 #[allow(dead_code)]
 pub async fn spawn_daemon_with_extra_config(target: &str, extra_config: &str) -> DaemonFixture {
+    spawn_daemon_with_extra_config_and_process_environment(
+        target,
+        extra_config,
+        ProcessEnvironment::capture_current(),
+    )
+    .await
+}
+
+#[allow(dead_code)]
+pub async fn spawn_daemon_with_extra_config_and_process_environment(
+    target: &str,
+    extra_config: &str,
+    process_environment: ProcessEnvironment,
+) -> DaemonFixture {
     remote_exec_daemon::install_crypto_provider();
 
     let tempdir = tempfile::tempdir().unwrap();
@@ -239,9 +284,10 @@ ca_pem = {ca_pem}
         ),
     )
     .unwrap();
-    let config = remote_exec_daemon::config::DaemonConfig::load(&config_path)
+    let mut config = remote_exec_daemon::config::DaemonConfig::load(&config_path)
         .await
         .unwrap();
+    config.process_environment = process_environment;
 
     tokio::spawn(remote_exec_daemon::run(config));
 

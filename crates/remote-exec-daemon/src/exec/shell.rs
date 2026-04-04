@@ -2,6 +2,8 @@ use std::ffi::OsStr;
 #[cfg(unix)]
 use std::path::Path;
 
+use crate::config::ProcessEnvironment;
+
 #[cfg(unix)]
 pub fn platform_supports_login_shells() -> bool {
     true
@@ -13,11 +15,17 @@ pub fn platform_supports_login_shells() -> bool {
 }
 
 #[cfg(unix)]
-pub fn resolve_shell(shell_override: Option<&str>) -> anyhow::Result<String> {
-    let env_shell = std::env::var("SHELL").ok();
+pub fn resolve_shell(
+    shell_override: Option<&str>,
+    environment: &ProcessEnvironment,
+) -> anyhow::Result<String> {
+    let env_shell = environment
+        .var_os("SHELL")
+        .map(|value| value.to_string_lossy().into_owned());
     Ok(resolve_shell_with(
         shell_override,
         env_shell.as_deref(),
+        environment.path(),
         || -> anyhow::Result<Option<String>> {
             Ok(
                 nix::unistd::User::from_uid(nix::unistd::Uid::effective())?.and_then(|user| {
@@ -30,13 +38,14 @@ pub fn resolve_shell(shell_override: Option<&str>) -> anyhow::Result<String> {
 }
 
 #[cfg(windows)]
-pub fn resolve_shell(shell_override: Option<&str>) -> anyhow::Result<String> {
-    let path = std::env::var_os("PATH");
-    let comspec = std::env::var("COMSPEC").ok();
+pub fn resolve_shell(
+    shell_override: Option<&str>,
+    environment: &ProcessEnvironment,
+) -> anyhow::Result<String> {
     Ok(resolve_windows_shell_with(
         shell_override,
-        path.as_deref(),
-        comspec.as_deref(),
+        environment.path(),
+        environment.comspec(),
     ))
 }
 
@@ -148,17 +157,17 @@ fn preferred_shell(
 fn resolve_shell_with<F>(
     shell_override: Option<&str>,
     env_shell: Option<&str>,
+    path_env: Option<&OsStr>,
     passwd_shell_lookup: F,
 ) -> String
 where
     F: FnOnce() -> anyhow::Result<Option<String>>,
 {
     let passwd_shell = passwd_shell_lookup().ok().flatten();
-    let path = std::env::var_os("PATH");
     let fallback = choose_shell(shell_override, env_shell, passwd_shell.as_deref());
 
     preferred_shell(shell_override, env_shell, passwd_shell.as_deref())
-        .or_else(|| find_bash_in_path(path.as_deref()))
+        .or_else(|| find_bash_in_path(path_env))
         .unwrap_or(fallback)
 }
 
@@ -288,13 +297,15 @@ mod tests {
     fn resolve_shell_ignores_passwd_lookup_failure() {
         with_path_var(None, || {
             assert_eq!(
-                resolve_shell_with(None, Some("/bin/sh"), || {
+                resolve_shell_with(None, Some("/bin/sh"), None, || {
                     Err(anyhow::anyhow!("passwd lookup failed"))
                 }),
                 "/bin/sh"
             );
             assert_eq!(
-                resolve_shell_with(None, None, || Err(anyhow::anyhow!("passwd lookup failed"))),
+                resolve_shell_with(None, None, None, || Err(anyhow::anyhow!(
+                    "passwd lookup failed"
+                ))),
                 "/bin/sh"
             );
         });
@@ -304,7 +315,9 @@ mod tests {
     fn resolve_shell_ignores_missing_passwd_shell() {
         with_path_var(None, || {
             assert_eq!(
-                resolve_shell_with(None, None, || Ok(Some("/opt/missing-shell".to_string()))),
+                resolve_shell_with(None, None, None, || Ok(Some(
+                    "/opt/missing-shell".to_string()
+                ))),
                 "/bin/sh"
             );
         });
@@ -321,7 +334,7 @@ mod tests {
 
         with_path_var(None, || {
             assert_eq!(
-                resolve_shell_with(None, None, || {
+                resolve_shell_with(None, None, None, || {
                     Ok(Some(shell_path.to_string_lossy().into_owned()))
                 }),
                 "/bin/sh"
@@ -337,7 +350,7 @@ mod tests {
 
         with_path_var(Some(tempdir.path().as_os_str()), || {
             assert_eq!(
-                resolve_shell_with(None, None, || Ok(None)),
+                resolve_shell_with(None, None, Some(tempdir.path().as_os_str()), || Ok(None)),
                 bash_path.to_string_lossy()
             );
         });

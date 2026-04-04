@@ -21,8 +21,10 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use winptyrs::EnvBlock;
 
 use super::transcript::TranscriptBuffer;
+#[cfg(not(windows))]
+use crate::config::ProcessEnvironment;
 #[cfg(windows)]
-use crate::config::WindowsPtyBackendOverride;
+use crate::config::{ProcessEnvironment, WindowsPtyBackendOverride};
 
 const NORMALIZED_ENV: [(&str, &str); 7] = [
     ("NO_COLOR", "1"),
@@ -339,6 +341,7 @@ pub fn spawn_with_windows_pty_backend_override(
     cwd: &std::path::Path,
     tty: bool,
     windows_pty_backend_override: Option<WindowsPtyBackendOverride>,
+    environment: &ProcessEnvironment,
 ) -> anyhow::Result<LiveSession> {
     if tty {
         #[cfg(windows)]
@@ -348,10 +351,13 @@ pub fn spawn_with_windows_pty_backend_override(
                 portable_pty_probe,
                 super::winpty::supports_winpty,
             ) {
-                Some(WindowsPtyBackend::PortablePty) => spawn_pty(cmd, cwd),
+                Some(WindowsPtyBackend::PortablePty) => spawn_pty(cmd, cwd, environment),
                 Some(WindowsPtyBackend::Winpty) => {
-                    let (session, receiver) =
-                        super::winpty::spawn_winpty(cmd, cwd, winpty_environment_block())?;
+                    let (session, receiver) = super::winpty::spawn_winpty(
+                        cmd,
+                        cwd,
+                        winpty_environment_block(environment),
+                    )?;
                     Ok(LiveSession {
                         tty: true,
                         started_at: Instant::now(),
@@ -370,62 +376,83 @@ pub fn spawn_with_windows_pty_backend_override(
         {
             let _ = windows_pty_backend_override;
             anyhow::ensure!(supports_pty(), "tty is not supported on this host");
-            spawn_pty(cmd, cwd)
+            spawn_pty(cmd, cwd, environment)
         }
     } else {
-        spawn_pipe(cmd, cwd)
+        spawn_pipe(cmd, cwd, environment)
     }
 }
 
-pub fn spawn(cmd: &[String], cwd: &std::path::Path, tty: bool) -> anyhow::Result<LiveSession> {
-    spawn_with_windows_pty_backend_override(cmd, cwd, tty, None)
+pub fn spawn(
+    cmd: &[String],
+    cwd: &std::path::Path,
+    tty: bool,
+    environment: &ProcessEnvironment,
+) -> anyhow::Result<LiveSession> {
+    spawn_with_windows_pty_backend_override(cmd, cwd, tty, None, environment)
 }
 
-fn normalized_env_pairs() -> Vec<(String, String)> {
+fn normalized_env_pairs(environment: &ProcessEnvironment) -> Vec<(String, String)> {
     let mut pairs = NORMALIZED_ENV
         .iter()
         .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
         .collect::<Vec<_>>();
-    pairs.extend(super::locale::LocaleEnvPlan::resolved().as_pairs());
+    pairs.extend(super::locale::LocaleEnvPlan::resolved(environment).as_pairs());
     pairs
 }
 
-fn apply_env_overlay_builder(builder: &mut CommandBuilder) {
+fn apply_base_environment_builder(builder: &mut CommandBuilder, environment: &ProcessEnvironment) {
+    builder.env_clear();
+    for (key, value) in environment.vars() {
+        builder.env(key, value);
+    }
+}
+
+fn apply_env_overlay_builder(builder: &mut CommandBuilder, environment: &ProcessEnvironment) {
+    apply_base_environment_builder(builder, environment);
     builder.env_remove("LANG");
     builder.env_remove("LC_CTYPE");
     builder.env_remove("LC_ALL");
-    for (key, value) in normalized_env_pairs() {
+    for (key, value) in normalized_env_pairs(environment) {
         builder.env(&key, &value);
     }
 }
 
-fn apply_env_overlay_command(command: &mut Command) {
+fn apply_base_environment_command(command: &mut Command, environment: &ProcessEnvironment) {
+    command.env_clear();
+    for (key, value) in environment.vars() {
+        command.env(key, value);
+    }
+}
+
+fn apply_env_overlay_command(command: &mut Command, environment: &ProcessEnvironment) {
+    apply_base_environment_command(command, environment);
     command.env_remove("LANG");
     command.env_remove("LC_CTYPE");
     command.env_remove("LC_ALL");
-    for (key, value) in normalized_env_pairs() {
+    for (key, value) in normalized_env_pairs(environment) {
         command.env(&key, &value);
     }
 }
 
 #[cfg(windows)]
-fn winpty_environment_block() -> EnvBlock {
-    let mut environment = BTreeMap::<String, (String, OsString)>::new();
+fn winpty_environment_block(environment: &ProcessEnvironment) -> EnvBlock {
+    let mut env_map = BTreeMap::<String, (String, OsString)>::new();
 
-    for (key, value) in std::env::vars_os() {
+    for (key, value) in environment.vars() {
         let key_text = key.to_string_lossy().into_owned();
-        environment.insert(key_text.to_ascii_uppercase(), (key_text, value));
+        env_map.insert(key_text.to_ascii_uppercase(), (key_text, value.clone()));
     }
 
     for key in ["LANG", "LC_CTYPE", "LC_ALL"] {
-        environment.remove(key);
+        env_map.remove(key);
     }
 
-    for (key, value) in normalized_env_pairs() {
-        environment.insert(key.to_ascii_uppercase(), (key, OsString::from(value)));
+    for (key, value) in normalized_env_pairs(environment) {
+        env_map.insert(key.to_ascii_uppercase(), (key, OsString::from(value)));
     }
 
-    EnvBlock::from_pairs(environment.into_values())
+    EnvBlock::from_pairs(env_map.into_values())
 }
 
 #[cfg(windows)]
@@ -487,14 +514,15 @@ async fn smoke_test_windows_backend(
     backend: WindowsPtyBackend,
     cmd: &[String],
     cwd: &Path,
+    environment: &ProcessEnvironment,
 ) -> String {
     match backend {
-        WindowsPtyBackend::PortablePty => match spawn_pty(cmd, cwd) {
+        WindowsPtyBackend::PortablePty => match spawn_pty(cmd, cwd, environment) {
             Ok(session) => summarize_windows_backend_session(session, backend).await,
             Err(err) => format!("{} smoke test: spawn failed: {err}", backend.debug_name()),
         },
         WindowsPtyBackend::Winpty => {
-            match super::winpty::spawn_winpty(cmd, cwd, winpty_environment_block()) {
+            match super::winpty::spawn_winpty(cmd, cwd, winpty_environment_block(environment)) {
                 Ok((session, receiver)) => {
                     let live_session = LiveSession {
                         tty: true,
@@ -516,6 +544,7 @@ async fn smoke_test_windows_backend(
 #[cfg(windows)]
 pub async fn windows_pty_debug_report(cmd: &[String], cwd: &Path) -> String {
     let diagnostics = collect_windows_pty_diagnostics();
+    let environment = ProcessEnvironment::capture_current();
     let mut lines = vec![
         "Windows PTY diagnostics".to_string(),
         format!("cwd: {}", cwd.display()),
@@ -540,7 +569,7 @@ pub async fn windows_pty_debug_report(cmd: &[String], cwd: &Path) -> String {
     ];
 
     lines.push(if diagnostics.portable_pty_probe.is_ok() {
-        smoke_test_windows_backend(WindowsPtyBackend::PortablePty, cmd, cwd).await
+        smoke_test_windows_backend(WindowsPtyBackend::PortablePty, cmd, cwd, &environment).await
     } else {
         format!(
             "conpty_via_portable_pty smoke test: skipped because probe failed: {}",
@@ -548,7 +577,7 @@ pub async fn windows_pty_debug_report(cmd: &[String], cwd: &Path) -> String {
         )
     });
     lines.push(if diagnostics.winpty_probe.is_ok() {
-        smoke_test_windows_backend(WindowsPtyBackend::Winpty, cmd, cwd).await
+        smoke_test_windows_backend(WindowsPtyBackend::Winpty, cmd, cwd, &environment).await
     } else {
         format!(
             "winpty smoke test: skipped because probe failed: {}",
@@ -563,14 +592,18 @@ pub async fn windows_pty_debug_report(cmd: &[String], cwd: &Path) -> String {
     lines.join("\n")
 }
 
-fn spawn_pty(cmd: &[String], cwd: &std::path::Path) -> anyhow::Result<LiveSession> {
+fn spawn_pty(
+    cmd: &[String],
+    cwd: &std::path::Path,
+    environment: &ProcessEnvironment,
+) -> anyhow::Result<LiveSession> {
     let pty = NativePtySystem::default().openpty(default_pty_size())?;
     let mut builder = CommandBuilder::new(&cmd[0]);
     for arg in &cmd[1..] {
         builder.arg(arg);
     }
     builder.cwd(cwd);
-    apply_env_overlay_builder(&mut builder);
+    apply_env_overlay_builder(&mut builder, environment);
 
     let child = pty.slave.spawn_command(builder)?;
     let writer = pty.master.take_writer()?;
@@ -611,7 +644,11 @@ fn spawn_pty(cmd: &[String], cwd: &std::path::Path) -> anyhow::Result<LiveSessio
     })
 }
 
-fn spawn_pipe(cmd: &[String], cwd: &std::path::Path) -> anyhow::Result<LiveSession> {
+fn spawn_pipe(
+    cmd: &[String],
+    cwd: &std::path::Path,
+    environment: &ProcessEnvironment,
+) -> anyhow::Result<LiveSession> {
     let mut command = Command::new(&cmd[0]);
     command
         .args(&cmd[1..])
@@ -619,7 +656,7 @@ fn spawn_pipe(cmd: &[String], cwd: &std::path::Path) -> anyhow::Result<LiveSessi
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    apply_env_overlay_command(&mut command);
+    apply_env_overlay_command(&mut command, environment);
     let mut child = command.spawn()?;
     let stdout = child.stdout.take().context("missing stdout pipe")?;
     let stderr = child.stderr.take().context("missing stderr pipe")?;
