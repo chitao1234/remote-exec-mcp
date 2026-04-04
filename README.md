@@ -17,7 +17,7 @@ The tool interfaces and behavior in this project are heavily influenced by [Code
   - Executes commands, manages local sessions, applies patches, and reads images.
 - `remote-exec-daemon-xp`
   - Standalone Windows XP daemon over plain HTTP.
-  - Supports `exec_command`, `write_stdin`, `apply_patch`, and single-file `transfer_files`.
+  - Supports `exec_command`, `write_stdin`, `apply_patch`, and `transfer_files` for files and directories.
   - Does not support PTY or image reads.
 - `remote-exec-proto`
   - Shared public tool schemas and broker-daemon RPC types.
@@ -248,7 +248,7 @@ cargo fmt --all --check
 - `list_targets` reports the daemon's actual `supports_pty` capability instead of assuming PTY support.
 - On Windows, `tty=true` prefers the existing ConPTY-backed `portable-pty` path and falls back to `winpty-rs` when ConPTY is unavailable and the native winpty runtime is installed.
 - Default shell resolution uses explicit override, then `SHELL`, then a usable passwd shell, then `bash` from `PATH`, then `/bin/sh` on Unix. On Windows it uses explicit override, then the first `pwsh.exe` on `PATH`, then `powershell.exe` or `powershell`, then `COMSPEC`, then `cmd.exe`.
-- `remote-exec-daemon-xp` is intentionally narrower than the main daemon: it always uses `cmd.exe`, rejects `tty=true`, does not implement `view_image`, and only supports single-file transfer.
+- `remote-exec-daemon-xp` is intentionally narrower than the main daemon: it always uses `cmd.exe`, rejects `tty=true`, does not implement `view_image`, and only accepts the narrow v1 transfer subset for regular files and directory trees. Symlinks, hard links, special files, sparse entries, and malformed archive paths remain unsupported there.
 
 ## Quality Gate
 

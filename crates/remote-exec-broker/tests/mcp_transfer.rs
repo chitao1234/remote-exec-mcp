@@ -80,7 +80,10 @@ async fn transfer_files_copies_local_directory_to_plain_http_remote() {
         )
         .await;
 
-    let capture = fixture.last_transfer_import().await.expect("transfer import");
+    let capture = fixture
+        .last_transfer_import()
+        .await
+        .expect("transfer import");
     assert_eq!(capture.destination_path, "C:/dest/tree");
     assert_eq!(capture.source_type, "directory");
     assert_eq!(capture.overwrite, "replace");

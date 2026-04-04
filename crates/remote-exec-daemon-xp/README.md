@@ -32,5 +32,7 @@ default_workdir = C:\work
 - plain HTTP only in v1
 - no PTY support
 - no image support
-- single-file transfer only
+- `transfer_files` supports regular files and directory trees
+- directory transfers use GNU tar payloads for cross-target compatibility
+- unsupported archive entries remain rejected: symlinks, hard links, special files, sparse entries, and malformed paths
 - `cmd.exe` only for shell execution

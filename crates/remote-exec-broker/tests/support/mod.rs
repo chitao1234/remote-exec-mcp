@@ -14,8 +14,8 @@ use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWarning, ExecWriteRequest, HealthCheckResponse,
     ImageReadRequest, ImageReadResponse, PatchApplyRequest, PatchApplyResponse, RpcErrorBody,
     TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER,
-    TRANSFER_SOURCE_TYPE_HEADER, TargetInfoResponse, TransferExportRequest,
-    TransferImportResponse, TransferSourceType,
+    TRANSFER_SOURCE_TYPE_HEADER, TargetInfoResponse, TransferExportRequest, TransferImportResponse,
+    TransferSourceType,
 };
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
@@ -23,9 +23,9 @@ use rmcp::{
     service::RunningService,
     transport::TokioChildProcess,
 };
+use tar::{Builder, EntryType, Header};
 use tempfile::TempDir;
 use tokio::sync::Mutex;
-use tar::{Builder, EntryType, Header};
 
 pub struct BrokerFixture {
     pub _tempdir: TempDir,
@@ -572,7 +572,9 @@ fn stub_directory_archive() -> Vec<u8> {
     root.set_mode(0o755);
     root.set_size(0);
     root.set_cksum();
-    builder.append_data(&mut root, ".", std::io::empty()).unwrap();
+    builder
+        .append_data(&mut root, ".", std::io::empty())
+        .unwrap();
 
     let mut nested = Header::new_gnu();
     nested.set_entry_type(EntryType::Directory);
