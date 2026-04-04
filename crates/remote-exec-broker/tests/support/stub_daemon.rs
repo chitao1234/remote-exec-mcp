@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -20,6 +18,7 @@ use super::certs::{TestCerts, allocate_addr};
 #[derive(Debug, Clone)]
 pub enum StubImageReadResponse {
     Success(ImageReadResponse),
+    #[allow(dead_code, reason = "Shared across broker integration test crates")]
     Error {
         status: StatusCode,
         body: RpcErrorBody,
@@ -29,7 +28,9 @@ pub enum StubImageReadResponse {
 #[derive(Debug, Clone, Copy)]
 pub(super) enum ExecWriteBehavior {
     Success,
+    #[allow(dead_code, reason = "Shared across broker integration test crates")]
     TemporaryFailureOnce,
+    #[allow(dead_code, reason = "Shared across broker integration test crates")]
     UnknownSession,
 }
 
@@ -80,12 +81,14 @@ pub(super) async fn spawn_stub_daemon(
     spawn_daemon(certs, ExecWriteBehavior::Success).await
 }
 
+#[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub(super) async fn spawn_retryable_exec_write_daemon(
     certs: &TestCerts,
 ) -> (std::net::SocketAddr, StubDaemonState) {
     spawn_daemon(certs, ExecWriteBehavior::TemporaryFailureOnce).await
 }
 
+#[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub(super) async fn spawn_unknown_session_exec_write_daemon(
     certs: &TestCerts,
 ) -> (std::net::SocketAddr, StubDaemonState) {

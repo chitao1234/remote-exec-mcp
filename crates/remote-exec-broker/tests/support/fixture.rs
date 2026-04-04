@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use rmcp::{
     ClientHandler, RoleClient,
     model::{CallToolRequestParams, CallToolResult, ClientInfo},
@@ -12,6 +10,7 @@ use super::stub_daemon::{StubDaemonState, StubImageReadResponse};
 pub struct BrokerFixture {
     pub _tempdir: TempDir,
     pub client: RunningService<RoleClient, DummyClientHandler>,
+    #[allow(dead_code, reason = "Shared across broker integration test crates")]
     pub(super) stub_state: StubDaemonState,
 }
 
@@ -24,22 +23,6 @@ impl BrokerFixture {
             result.text_output
         );
         result
-    }
-
-    pub async fn raw_tool_result(&self, name: &str, arguments: serde_json::Value) -> ToolResult {
-        self.raw_call_tool(name, arguments).await
-    }
-
-    pub async fn call_tool_error(&self, name: &str, arguments: serde_json::Value) -> String {
-        let result = self.raw_call_tool(name, arguments).await;
-        assert!(
-            result.is_error,
-            "expected tool error, text={}, structured={}, raw={}",
-            result.text_output,
-            result.structured_content,
-            serde_json::Value::Array(result.raw_content.clone())
-        );
-        result.text_output
     }
 
     async fn raw_call_tool(&self, name: &str, arguments: serde_json::Value) -> ToolResult {
@@ -55,6 +38,25 @@ impl BrokerFixture {
             .unwrap();
 
         ToolResult::from_call_tool_result(result)
+    }
+}
+
+#[allow(dead_code, reason = "Shared across broker integration test crates")]
+impl BrokerFixture {
+    pub async fn raw_tool_result(&self, name: &str, arguments: serde_json::Value) -> ToolResult {
+        self.raw_call_tool(name, arguments).await
+    }
+
+    pub async fn call_tool_error(&self, name: &str, arguments: serde_json::Value) -> String {
+        let result = self.raw_call_tool(name, arguments).await;
+        assert!(
+            result.is_error,
+            "expected tool error, text={}, structured={}, raw={}",
+            result.text_output,
+            result.structured_content,
+            serde_json::Value::Array(result.raw_content.clone())
+        );
+        result.text_output
     }
 
     pub async fn exec_start_calls(&self) -> usize {
@@ -105,6 +107,7 @@ pub struct ToolResult {
     pub text_output: String,
     pub structured_content: serde_json::Value,
     pub raw_content: Vec<serde_json::Value>,
+    #[allow(dead_code, reason = "Shared across broker integration test crates")]
     pub meta: Option<serde_json::Value>,
 }
 

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
@@ -12,9 +10,11 @@ pub struct DaemonFixture {
     pub _tempdir: TempDir,
     pub client: reqwest::Client,
     pub addr: SocketAddr,
+    #[allow(dead_code, reason = "Shared across daemon integration test crates")]
     pub workdir: PathBuf,
 }
 
+#[allow(dead_code, reason = "Shared across daemon integration test crates")]
 impl DaemonFixture {
     pub fn url(&self, path: &str) -> String {
         format!("https://{}{}", self.addr, path)

@@ -33,3 +33,7 @@ remote-exec-pki = { path = "../remote-exec-pki" }
 [[test]]
 name = "multi_target"
 path = "../../tests/e2e/multi_target.rs"
+
+[[test]]
+name = "mcp_exec"
+path = "tests/mcp_exec/mod.rs"

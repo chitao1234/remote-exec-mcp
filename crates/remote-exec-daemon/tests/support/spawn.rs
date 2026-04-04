@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::net::SocketAddr;
 
 use remote_exec_daemon::config::ProcessEnvironment;
@@ -9,11 +7,13 @@ use remote_exec_daemon::config::WindowsPtyBackendOverride;
 use super::certs::write_test_certs;
 use super::fixture::DaemonFixture;
 
+#[allow(dead_code, reason = "Shared across daemon integration test crates")]
 fn toml_string(value: &str) -> String {
     toml::Value::String(value.to_string()).to_string()
 }
 
 #[cfg(windows)]
+#[allow(dead_code, reason = "Shared across daemon integration test crates")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowsPtyTestBackend {
     Conpty,
@@ -21,6 +21,7 @@ pub enum WindowsPtyTestBackend {
 }
 
 #[cfg(windows)]
+#[allow(dead_code, reason = "Shared across daemon integration test crates")]
 impl WindowsPtyTestBackend {
     pub fn name(self) -> &'static str {
         match self {
@@ -100,6 +101,7 @@ pub async fn spawn_daemon(target: &str) -> DaemonFixture {
 }
 
 #[cfg(windows)]
+#[allow(dead_code, reason = "Shared across daemon integration test crates")]
 pub fn supported_windows_pty_backends() -> Vec<WindowsPtyTestBackend> {
     let mut backends = Vec::new();
 
@@ -122,6 +124,7 @@ pub fn supported_windows_pty_backends() -> Vec<WindowsPtyTestBackend> {
 }
 
 #[cfg(windows)]
+#[allow(dead_code, reason = "Shared across daemon integration test crates")]
 pub async fn spawn_daemon_for_windows_pty_backend(
     target: &str,
     backend: WindowsPtyTestBackend,
@@ -134,6 +137,7 @@ pub async fn spawn_daemon_for_windows_pty_backend(
     .await
 }
 
+#[allow(dead_code, reason = "Shared across daemon integration test crates")]
 pub async fn spawn_daemon_with_process_environment(
     target: &str,
     process_environment: ProcessEnvironment,
@@ -142,6 +146,7 @@ pub async fn spawn_daemon_with_process_environment(
 }
 
 #[cfg(windows)]
+#[allow(dead_code, reason = "Shared across daemon integration test crates")]
 pub async fn spawn_daemon_for_windows_pty_backend_with_process_environment(
     target: &str,
     backend: WindowsPtyTestBackend,
@@ -155,6 +160,7 @@ pub async fn spawn_daemon_for_windows_pty_backend_with_process_environment(
     .await
 }
 
+#[allow(dead_code, reason = "Shared across daemon integration test crates")]
 pub async fn spawn_daemon_with_extra_config(target: &str, extra_config: &str) -> DaemonFixture {
     spawn_daemon_with_extra_config_and_process_environment(
         target,
@@ -164,6 +170,7 @@ pub async fn spawn_daemon_with_extra_config(target: &str, extra_config: &str) ->
     .await
 }
 
+#[allow(dead_code, reason = "Shared across daemon integration test crates")]
 pub async fn spawn_daemon_with_extra_config_and_process_environment(
     target: &str,
     extra_config: &str,

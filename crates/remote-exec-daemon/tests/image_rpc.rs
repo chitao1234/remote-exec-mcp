@@ -1,12 +1,41 @@
 mod support;
 
+use std::path::Path;
+
+use base64::Engine;
 use image::ImageFormat;
 use remote_exec_proto::rpc::{ImageReadRequest, ImageReadResponse};
+
+async fn write_png(path: &Path, width: u32, height: u32) {
+    write_image(path, width, height, ImageFormat::Png).await;
+}
+
+async fn write_image(path: &Path, width: u32, height: u32, format: ImageFormat) {
+    let image = image::DynamicImage::new_rgba8(width, height);
+    image.save_with_format(path, format).unwrap();
+}
+
+async fn write_invalid_bytes(path: &Path) {
+    tokio::fs::write(path, b"not an image").await.unwrap();
+}
+
+fn decode_data_url(image_url: &str) -> (String, Vec<u8>) {
+    let (metadata, data) = image_url.split_once(',').unwrap();
+    let mime = metadata
+        .strip_prefix("data:")
+        .unwrap()
+        .strip_suffix(";base64")
+        .unwrap();
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .unwrap();
+    (mime.to_string(), bytes)
+}
 
 async fn assert_default_passthrough(extension: &str, format: ImageFormat, expected_mime: &str) {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let path = fixture.workdir.join(format!("small.{extension}"));
-    support::assets::write_image(&path, 64, 64, format).await;
+    write_image(&path, 64, 64, format).await;
     let original = tokio::fs::read(&path).await.unwrap();
 
     let response = fixture
@@ -20,7 +49,7 @@ async fn assert_default_passthrough(extension: &str, format: ImageFormat, expect
         )
         .await;
 
-    let (mime, returned) = support::assets::decode_data_url(&response.image_url);
+    let (mime, returned) = decode_data_url(&response.image_url);
     assert_eq!(mime, expected_mime);
     assert_eq!(returned, original);
     assert_eq!(response.detail, None);
@@ -29,7 +58,7 @@ async fn assert_default_passthrough(extension: &str, format: ImageFormat, expect
 async fn assert_resized_output(extension: &str, format: ImageFormat, expected_mime: &str) {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let path = fixture.workdir.join(format!("large.{extension}"));
-    support::assets::write_image(&path, 4096, 2048, format).await;
+    write_image(&path, 4096, 2048, format).await;
 
     let response = fixture
         .rpc::<ImageReadRequest, ImageReadResponse>(
@@ -42,7 +71,7 @@ async fn assert_resized_output(extension: &str, format: ImageFormat, expected_mi
         )
         .await;
 
-    let (mime, bytes) = support::assets::decode_data_url(&response.image_url);
+    let (mime, bytes) = decode_data_url(&response.image_url);
     let image = image::load_from_memory(&bytes).unwrap();
     assert_eq!(mime, expected_mime);
     assert!(image.width() <= 2048);
@@ -61,7 +90,7 @@ async fn image_read_preserves_small_png_jpeg_and_webp_bytes_by_default() {
 async fn image_read_preserves_original_detail_for_passthrough_formats() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let path = fixture.workdir.join("original.webp");
-    support::assets::write_image(&path, 3000, 2000, ImageFormat::WebP).await;
+    write_image(&path, 3000, 2000, ImageFormat::WebP).await;
     let original = tokio::fs::read(&path).await.unwrap();
 
     let response = fixture
@@ -75,7 +104,7 @@ async fn image_read_preserves_original_detail_for_passthrough_formats() {
         )
         .await;
 
-    let (mime, returned) = support::assets::decode_data_url(&response.image_url);
+    let (mime, returned) = decode_data_url(&response.image_url);
     assert_eq!(mime, "image/webp");
     assert_eq!(returned, original);
     assert_eq!(response.detail, Some("original".to_string()));
@@ -95,7 +124,7 @@ async fn image_read_resizes_large_jpeg_and_keeps_jpeg_encoding() {
 async fn image_read_reencodes_gif_in_default_mode() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let path = fixture.workdir.join("anim.gif");
-    support::assets::write_image(&path, 64, 64, ImageFormat::Gif).await;
+    write_image(&path, 64, 64, ImageFormat::Gif).await;
     let original = tokio::fs::read(&path).await.unwrap();
 
     let response = fixture
@@ -109,7 +138,7 @@ async fn image_read_reencodes_gif_in_default_mode() {
         )
         .await;
 
-    let (mime, bytes) = support::assets::decode_data_url(&response.image_url);
+    let (mime, bytes) = decode_data_url(&response.image_url);
     assert_eq!(mime, "image/png");
     assert_ne!(bytes, original);
 }
@@ -162,7 +191,7 @@ async fn image_read_rejects_directory_paths_with_path_context() {
 async fn image_read_wraps_invalid_image_failures_with_path_context() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let path = fixture.workdir.join("broken.png");
-    support::assets::write_invalid_bytes(&path).await;
+    write_invalid_bytes(&path).await;
 
     let err = fixture
         .rpc_error(
@@ -184,7 +213,7 @@ async fn image_read_wraps_invalid_image_failures_with_path_context() {
 async fn image_read_rejects_unknown_detail_values() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let path = fixture.workdir.join("small.png");
-    support::assets::write_png(&path, 32, 32).await;
+    write_png(&path, 32, 32).await;
 
     let err = fixture
         .rpc_error(

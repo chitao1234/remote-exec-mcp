@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::path::Path;
 
 use rmcp::{ServiceExt, transport::TokioChildProcess};
@@ -12,12 +10,14 @@ use super::stub_daemon::{
     stub_daemon_state,
 };
 
+#[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub struct DelayedTargetFixture {
     pub broker: BrokerFixture,
     certs: TestCerts,
     addr: std::net::SocketAddr,
 }
 
+#[allow(dead_code, reason = "Shared across broker integration test crates")]
 impl DelayedTargetFixture {
     pub async fn spawn_target(&self, target: &str) {
         spawn_named_daemon_on_addr(
@@ -127,6 +127,7 @@ pub async fn spawn_broker_with_stub_daemon_platform(
     }
 }
 
+#[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub async fn spawn_broker_with_reverse_ordered_targets() -> BrokerFixture {
     remote_exec_daemon::install_crypto_provider();
 
@@ -163,6 +164,7 @@ pub async fn spawn_broker_with_reverse_ordered_targets() -> BrokerFixture {
     }
 }
 
+#[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub async fn spawn_broker_with_live_and_dead_targets() -> BrokerFixture {
     remote_exec_daemon::install_crypto_provider();
 
@@ -199,6 +201,7 @@ pub async fn spawn_broker_with_live_and_dead_targets() -> BrokerFixture {
     }
 }
 
+#[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub async fn spawn_broker_with_retryable_exec_write_error() -> BrokerFixture {
     remote_exec_daemon::install_crypto_provider();
 
@@ -227,6 +230,7 @@ pub async fn spawn_broker_with_retryable_exec_write_error() -> BrokerFixture {
     }
 }
 
+#[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub async fn spawn_broker_with_unknown_session_exec_write_error() -> BrokerFixture {
     remote_exec_daemon::install_crypto_provider();
 
@@ -255,6 +259,7 @@ pub async fn spawn_broker_with_unknown_session_exec_write_error() -> BrokerFixtu
     }
 }
 
+#[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub async fn spawn_broker_with_late_target() -> DelayedTargetFixture {
     remote_exec_daemon::install_crypto_provider();
 
