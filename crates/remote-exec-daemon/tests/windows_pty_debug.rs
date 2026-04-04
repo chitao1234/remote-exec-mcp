@@ -109,16 +109,18 @@ fn raw_portable_pty_smoke(
             output.extend_from_slice(&chunk);
         }
 
-        if respond_to_dsr && !responded_to_dsr && output.windows(4).any(|w| w == b"\x1b[6n") {
-            if let Some(writer) = writer.as_mut() {
-                if let Err(err) = writer.write_all(b"\x1b[1;1R") {
-                    return format!("failed to answer DSR probe: {err}");
-                }
-                if let Err(err) = writer.flush() {
-                    return format!("failed to flush DSR probe response: {err}");
-                }
-                responded_to_dsr = true;
+        if respond_to_dsr
+            && !responded_to_dsr
+            && output.windows(4).any(|w| w == b"\x1b[6n")
+            && let Some(writer) = writer.as_mut()
+        {
+            if let Err(err) = writer.write_all(b"\x1b[1;1R") {
+                return format!("failed to answer DSR probe: {err}");
             }
+            if let Err(err) = writer.flush() {
+                return format!("failed to flush DSR probe response: {err}");
+            }
+            responded_to_dsr = true;
         }
 
         match child.try_wait() {

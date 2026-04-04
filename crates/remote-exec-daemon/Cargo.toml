@@ -42,3 +42,7 @@ winptyrs = { workspace = true }
 remote-exec-pki = { path = "../remote-exec-pki" }
 reqwest = { workspace = true }
 tempfile = { workspace = true }
+
+[[test]]
+name = "exec_rpc"
+path = "tests/exec_rpc/mod.rs"
