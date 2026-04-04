@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-struct ExportedFile {
+struct ExportedPayload {
     std::string source_type;
     std::string bytes;
 };
@@ -16,9 +16,10 @@ struct ImportSummary {
     bool replaced;
 };
 
-ExportedFile export_file(const std::string& absolute_path);
-ImportSummary import_file(
+ExportedPayload export_path(const std::string& absolute_path);
+ImportSummary import_path(
     const std::string& bytes,
+    const std::string& source_type,
     const std::string& absolute_path,
     bool replace_existing,
     bool create_parent

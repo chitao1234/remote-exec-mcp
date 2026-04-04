@@ -298,11 +298,11 @@ static HttpResponse route_request(AppState& state, const HttpRequest& request) {
     if (request.path == "/v1/transfer/export") {
         try {
             const Json body = parse_json_body(request);
-            const ExportedFile file = export_file(body.at("path").get<std::string>());
+            const ExportedPayload payload = export_path(body.at("path").get<std::string>());
             response.status = 200;
             response.headers["Content-Type"] = "application/octet-stream";
-            response.headers["x-remote-exec-source-type"] = file.source_type;
-            response.body = file.bytes;
+            response.headers["x-remote-exec-source-type"] = payload.source_type;
+            response.body = payload.bytes;
         } catch (const std::exception& ex) {
             write_rpc_error(response, 400, "transfer_failed", ex.what());
         }
@@ -312,18 +312,9 @@ static HttpResponse route_request(AppState& state, const HttpRequest& request) {
     if (request.path == "/v1/transfer/import") {
         try {
             const std::string source_type = request.header("x-remote-exec-source-type");
-            if (source_type != "file") {
-                write_rpc_error(
-                    response,
-                    400,
-                    "transfer_source_unsupported",
-                    "only single-file transfer is supported on this target"
-                );
-                return response;
-            }
-
-            const ImportSummary summary = import_file(
+            const ImportSummary summary = import_path(
                 request.body,
+                source_type,
                 request.header("x-remote-exec-destination-path"),
                 request.header("x-remote-exec-overwrite") == "replace",
                 request.header("x-remote-exec-create-parent") == "true"

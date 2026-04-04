@@ -23,7 +23,13 @@ static void write_text(const fs::path& path, const std::string& value) {
 
 static std::string octal_field(std::size_t width, std::uint64_t value) {
     char buffer[64];
-    std::snprintf(buffer, sizeof(buffer), "%0*llo", static_cast<int>(width - 1), value);
+    std::snprintf(
+        buffer,
+        sizeof(buffer),
+        "%0*llo",
+        static_cast<int>(width - 1),
+        static_cast<unsigned long long>(value)
+    );
     std::string field(width, '\0');
     const std::string digits(buffer);
     const std::size_t start = width - 1 - std::min(width - 1, digits.size());
@@ -85,17 +91,6 @@ static void append_tar_file(std::string& archive, const std::string& path, const
         append_gnu_long_name(&archive, path);
     }
     append_tar_entry(&archive, path, '0', body);
-}
-
-static void append_tar_directory(std::string& archive, const std::string& path) {
-    std::string normalized = path;
-    if (normalized.empty() || normalized[normalized.size() - 1] != '/') {
-        normalized += '/';
-    }
-    if (normalized.size() >= 100) {
-        append_gnu_long_name(&archive, normalized);
-    }
-    append_tar_entry(&archive, normalized, '5', "");
 }
 
 static void finalize_tar(std::string& archive) {
