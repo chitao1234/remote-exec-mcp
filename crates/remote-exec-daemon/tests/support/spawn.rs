@@ -96,6 +96,7 @@ async fn spawn_daemon_with_backend_override(
     }
 }
 
+#[allow(dead_code, reason = "Shared across daemon integration test crates")]
 pub async fn spawn_daemon(target: &str) -> DaemonFixture {
     spawn_daemon_with_backend_override(target, None, ProcessEnvironment::capture_current()).await
 }

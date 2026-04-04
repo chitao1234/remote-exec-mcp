@@ -303,18 +303,18 @@ impl LiveSession {
         }
 
         #[cfg(windows)]
-        let chars = windows::normalize_input(chars, self.tty);
+        let normalized_chars = windows::normalize_input(chars, self.tty);
         #[cfg(not(windows))]
-        let chars = chars;
+        let normalized_chars = chars;
 
         match &mut self.child {
             SessionChild::Pty(pty) => {
-                pty.writer.write_all(chars.as_bytes())?;
+                pty.writer.write_all(normalized_chars.as_bytes())?;
                 pty.writer.flush()?;
                 Ok(())
             }
             #[cfg(windows)]
-            SessionChild::Winpty(pty) => pty.write(chars.as_ref()),
+            SessionChild::Winpty(pty) => pty.write(normalized_chars.as_ref()),
             SessionChild::Pipe(_) => anyhow::bail!(
                 "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
             ),

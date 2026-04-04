@@ -36,7 +36,7 @@ uuid = { workspace = true }
 nix = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
-winptyrs = { workspace = true }
+winptyrs = { path = "../../winptyrs/crates/winptyrs" }
 
 [dev-dependencies]
 remote-exec-pki = { path = "../remote-exec-pki" }

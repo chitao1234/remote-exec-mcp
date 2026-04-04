@@ -5,7 +5,7 @@ use rmcp::{
 };
 use tempfile::TempDir;
 
-use super::stub_daemon::{StubDaemonState, StubImageReadResponse};
+use super::stub_daemon::{StubDaemonState, StubImageReadResponse, StubTransferImportCapture};
 
 pub struct BrokerFixture {
     pub _tempdir: TempDir,
@@ -65,6 +65,10 @@ impl BrokerFixture {
 
     pub async fn last_patch_request(&self) -> Option<remote_exec_proto::rpc::PatchApplyRequest> {
         self.stub_state.last_patch_request.lock().await.clone()
+    }
+
+    pub async fn last_transfer_import(&self) -> Option<StubTransferImportCapture> {
+        self.stub_state.last_transfer_import.lock().await.clone()
     }
 
     pub async fn set_image_read_response(&self, response: StubImageReadResponse) {

@@ -6,6 +6,7 @@ members = [
   "crates/remote-exec-pki",
   "crates/remote-exec-admin",
 ]
+exclude = ["vendor/winpty-rs"]
 resolver = "2"
 
 [workspace.package]
@@ -49,4 +50,3 @@ tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["serde", "v4"] }
-winptyrs = { path = "winptyrs/crates/winptyrs" }

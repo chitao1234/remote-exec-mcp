@@ -29,8 +29,7 @@ pub async fn export_path_to_archive(
     let source_text = path.display().to_string();
     anyhow::ensure!(
         is_absolute_for_policy(host_policy(), &source_text),
-        "transfer source path `{}` is not absolute",
-        source_text
+        "transfer source path `{source_text}` is not absolute"
     );
     let path = host_path(&source_text);
 

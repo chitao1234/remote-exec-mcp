@@ -1,28 +1,64 @@
-use std::{collections::BTreeMap, net::IpAddr};
+use std::{collections::BTreeMap, fs, net::IpAddr, path::Path};
 
 use anyhow::{Context, ensure};
 
-use crate::cli::{CertsArgs, CertsCommand, DevInitArgs};
+use crate::cli::{
+    CertsArgs, CertsCommand, DevInitArgs, InitCaArgs, IssueBrokerArgs, IssueDaemonArgs,
+};
 
 pub fn run(args: CertsArgs) -> anyhow::Result<()> {
     match args.command {
         CertsCommand::DevInit(args) => run_dev_init(args),
+        CertsCommand::InitCa(args) => run_init_ca(args),
+        CertsCommand::IssueBroker(args) => run_issue_broker(args),
+        CertsCommand::IssueDaemon(args) => run_issue_daemon(args),
     }
 }
 
 fn run_dev_init(args: DevInitArgs) -> anyhow::Result<()> {
     let daemon_specs = build_daemon_specs(&args)?;
+    let ca = resolve_dev_init_ca(&args)?;
     let spec = remote_exec_pki::DevInitSpec {
         ca_common_name: "remote-exec-ca".to_string(),
-        broker_common_name: args.broker_common_name,
+        broker_common_name: args.broker_common_name.clone(),
         daemon_specs,
     };
 
-    let bundle = remote_exec_pki::build_dev_init_bundle(&spec)?;
+    let bundle = remote_exec_pki::build_dev_init_bundle_from_ca(&spec, &ca)?;
     let manifest =
         remote_exec_pki::write_dev_init_bundle(&spec, &bundle, &args.out_dir, args.force)?;
 
     println!("{}", remote_exec_pki::render_config_snippets(&manifest));
+    Ok(())
+}
+
+fn run_init_ca(args: InitCaArgs) -> anyhow::Result<()> {
+    let ca = remote_exec_pki::generate_ca(&args.ca_common_name)?;
+    let paths = remote_exec_pki::write_ca_pair(&ca.pem_pair, &args.out_dir, args.force)?;
+
+    println!("Wrote CA cert: {}", paths.cert_pem.display());
+    println!("Wrote CA key: {}", paths.key_pem.display());
+    Ok(())
+}
+
+fn run_issue_broker(args: IssueBrokerArgs) -> anyhow::Result<()> {
+    let ca = load_ca_from_files(&args.ca_cert_pem, &args.ca_key_pem)?;
+    let broker = remote_exec_pki::issue_broker_cert(&ca, &args.broker_common_name)?;
+    let paths = remote_exec_pki::write_broker_pair(&broker, &args.out_dir, args.force)?;
+
+    println!("Wrote broker cert: {}", paths.cert_pem.display());
+    println!("Wrote broker key: {}", paths.key_pem.display());
+    Ok(())
+}
+
+fn run_issue_daemon(args: IssueDaemonArgs) -> anyhow::Result<()> {
+    let ca = load_ca_from_files(&args.ca_cert_pem, &args.ca_key_pem)?;
+    let daemon = build_single_daemon_spec(&args)?;
+    let pair = remote_exec_pki::issue_daemon_cert(&ca, &daemon)?;
+    let paths = remote_exec_pki::write_daemon_pair(&args.target, &pair, &args.out_dir, args.force)?;
+
+    println!("Wrote daemon cert: {}", paths.cert_pem.display());
+    println!("Wrote daemon key: {}", paths.key_pem.display());
     Ok(())
 }
 
@@ -77,4 +113,72 @@ fn parse_subject_alt_name(value: &str) -> anyhow::Result<remote_exec_pki::Subjec
     }
 
     anyhow::bail!("unsupported SAN `{value}`; expected dns:<hostname> or ip:<address>")
+}
+
+fn load_ca_from_files(
+    cert_path: &Path,
+    key_path: &Path,
+) -> anyhow::Result<remote_exec_pki::CertificateAuthority> {
+    let cert_pem = fs::read_to_string(cert_path)
+        .with_context(|| format!("reading {}", cert_path.display()))?;
+    let key_pem =
+        fs::read_to_string(key_path).with_context(|| format!("reading {}", key_path.display()))?;
+    remote_exec_pki::load_ca_from_pem(&cert_pem, &key_pem).with_context(|| {
+        format!(
+            "loading CA from {} and {}",
+            cert_path.display(),
+            key_path.display()
+        )
+    })
+}
+
+fn build_single_daemon_spec(
+    args: &IssueDaemonArgs,
+) -> anyhow::Result<remote_exec_pki::DaemonCertSpec> {
+    let sans = if args.sans.is_empty() {
+        remote_exec_pki::DaemonCertSpec::localhost(&args.target).sans
+    } else {
+        args.sans
+            .iter()
+            .map(|san| parse_subject_alt_name(san))
+            .collect::<anyhow::Result<Vec<_>>>()?
+    };
+
+    let daemon = remote_exec_pki::DaemonCertSpec {
+        target: args.target.clone(),
+        sans,
+    };
+    remote_exec_pki::DevInitSpec {
+        ca_common_name: "unused".to_string(),
+        broker_common_name: "unused".to_string(),
+        daemon_specs: vec![daemon.clone()],
+    }
+    .validate()?;
+    Ok(daemon)
+}
+
+fn resolve_dev_init_ca(
+    args: &DevInitArgs,
+) -> anyhow::Result<remote_exec_pki::CertificateAuthority> {
+    if args.reuse_ca.reuse_ca_from_dir.is_some()
+        && (args.reuse_ca.reuse_ca_cert_pem.is_some() || args.reuse_ca.reuse_ca_key_pem.is_some())
+    {
+        anyhow::bail!(
+            "cannot combine --reuse-ca-from-dir with --reuse-ca-cert-pem/--reuse-ca-key-pem"
+        );
+    }
+
+    if let Some(dir) = args.reuse_ca.reuse_ca_from_dir.as_ref() {
+        return load_ca_from_files(&dir.join("ca.pem"), &dir.join("ca.key"));
+    }
+
+    match (
+        args.reuse_ca.reuse_ca_cert_pem.as_ref(),
+        args.reuse_ca.reuse_ca_key_pem.as_ref(),
+    ) {
+        (None, None) => remote_exec_pki::generate_ca("remote-exec-ca"),
+        (Some(cert), Some(key)) => load_ca_from_files(cert, key),
+        (Some(_), None) => anyhow::bail!("--reuse-ca-cert-pem requires --reuse-ca-key-pem"),
+        (None, Some(_)) => anyhow::bail!("--reuse-ca-key-pem requires --reuse-ca-cert-pem"),
+    }
 }

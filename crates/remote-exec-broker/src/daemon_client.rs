@@ -60,20 +60,42 @@ pub struct DaemonClient {
 
 impl DaemonClient {
     pub async fn new(config: &TargetConfig) -> anyhow::Result<Self> {
-        let ca = Certificate::from_pem(&tokio::fs::read(&config.ca_pem).await?)?;
-        let identity = Identity::from_pem(
-            &[
-                tokio::fs::read(&config.client_cert_pem).await?,
-                tokio::fs::read(&config.client_key_pem).await?,
-            ]
-            .concat(),
-        )?;
-        let client = reqwest::Client::builder()
-            .use_rustls_tls()
-            .add_root_certificate(ca)
-            .identity(identity)
-            .build()
-            .context("building daemon client")?;
+        let client = if config.base_url.starts_with("http://") {
+            anyhow::ensure!(
+                config.allow_insecure_http,
+                "http:// targets require allow_insecure_http = true"
+            );
+            reqwest::Client::builder()
+                .build()
+                .context("building insecure daemon client")?
+        } else {
+            let ca_pem = config
+                .ca_pem
+                .as_ref()
+                .context("ca_pem is required for https targets")?;
+            let client_cert_pem = config
+                .client_cert_pem
+                .as_ref()
+                .context("client_cert_pem is required for https targets")?;
+            let client_key_pem = config
+                .client_key_pem
+                .as_ref()
+                .context("client_key_pem is required for https targets")?;
+            let ca = Certificate::from_pem(&tokio::fs::read(ca_pem).await?)?;
+            let identity = Identity::from_pem(
+                &[
+                    tokio::fs::read(client_cert_pem).await?,
+                    tokio::fs::read(client_key_pem).await?,
+                ]
+                .concat(),
+            )?;
+            reqwest::Client::builder()
+                .use_rustls_tls()
+                .add_root_certificate(ca)
+                .identity(identity)
+                .build()
+                .context("building daemon client")?
+        };
 
         Ok(Self {
             client,
@@ -148,10 +170,18 @@ impl DaemonClient {
         archive_path: &std::path::Path,
         req: &TransferImportRequest,
     ) -> Result<TransferImportResponse, DaemonClientError> {
-        let file = tokio::fs::File::open(archive_path)
-            .await
-            .map_err(|err| DaemonClientError::Transport(err.into()))?;
-        let body = reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(file));
+        let body = if self.base_url.starts_with("http://") {
+            reqwest::Body::from(
+                tokio::fs::read(archive_path)
+                    .await
+                    .map_err(|err| DaemonClientError::Transport(err.into()))?,
+            )
+        } else {
+            let file = tokio::fs::File::open(archive_path)
+                .await
+                .map_err(|err| DaemonClientError::Transport(err.into()))?;
+            reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(file))
+        };
         let response = self
             .client
             .post(format!("{}{}", self.base_url, "/v1/transfer/import"))

@@ -87,13 +87,7 @@ fn seek_sequence(
             .then_some(eof_start);
     }
 
-    for idx in start..=max_start {
-        if lines[idx..idx + pattern.len()] == *pattern {
-            return Some(idx);
-        }
-    }
-
-    None
+    (start..=max_start).find(|&idx| lines[idx..idx + pattern.len()] == *pattern)
 }
 
 fn next_search_start(

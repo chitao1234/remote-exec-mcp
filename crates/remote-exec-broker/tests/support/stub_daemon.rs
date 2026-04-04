@@ -1,16 +1,21 @@
+use std::io::Cursor;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::body::Bytes;
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::routing::post;
 use axum::{Json, Router};
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWarning, ExecWriteRequest, HealthCheckResponse,
     ImageReadRequest, ImageReadResponse, PatchApplyRequest, PatchApplyResponse, RpcErrorBody,
-    TargetInfoResponse,
+    TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER,
+    TRANSFER_SOURCE_TYPE_HEADER, TargetInfoResponse, TransferExportRequest, TransferImportResponse,
+    TransferSourceType,
 };
+use tar::{Builder, EntryType, Header};
 use tokio::sync::Mutex;
 
 use super::certs::{TestCerts, allocate_addr};
@@ -18,6 +23,28 @@ use super::certs::{TestCerts, allocate_addr};
 #[derive(Debug, Clone)]
 pub enum StubImageReadResponse {
     Success(ImageReadResponse),
+    #[allow(dead_code, reason = "Shared across broker integration test crates")]
+    Error {
+        status: StatusCode,
+        body: RpcErrorBody,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct StubTransferImportCapture {
+    pub destination_path: String,
+    pub source_type: String,
+    pub overwrite: String,
+    pub create_parent: String,
+    pub body_len: usize,
+}
+
+#[derive(Debug, Clone)]
+enum StubTransferExportResponse {
+    Success {
+        source_type: TransferSourceType,
+        body: Vec<u8>,
+    },
     #[allow(dead_code, reason = "Shared across broker integration test crates")]
     Error {
         status: StatusCode,
@@ -46,7 +73,53 @@ pub(super) struct StubDaemonState {
     pub(super) exec_start_warnings: Arc<Mutex<Vec<ExecWarning>>>,
     pub(super) exec_start_calls: Arc<Mutex<usize>>,
     pub(super) last_patch_request: Arc<Mutex<Option<PatchApplyRequest>>>,
+    pub(super) last_transfer_import: Arc<Mutex<Option<StubTransferImportCapture>>>,
     pub(super) image_read_response: Arc<Mutex<StubImageReadResponse>>,
+    transfer_export_response: Arc<Mutex<StubTransferExportResponse>>,
+}
+
+fn stub_directory_archive() -> Vec<u8> {
+    let mut builder = Builder::new(Vec::new());
+
+    let mut root = Header::new_gnu();
+    root.set_entry_type(EntryType::Directory);
+    root.set_mode(0o755);
+    root.set_size(0);
+    root.set_cksum();
+    builder
+        .append_data(&mut root, ".", std::io::empty())
+        .unwrap();
+
+    let mut nested = Header::new_gnu();
+    nested.set_entry_type(EntryType::Directory);
+    nested.set_mode(0o755);
+    nested.set_size(0);
+    nested.set_cksum();
+    builder
+        .append_data(&mut nested, "nested", std::io::empty())
+        .unwrap();
+
+    let mut empty = Header::new_gnu();
+    empty.set_entry_type(EntryType::Directory);
+    empty.set_mode(0o755);
+    empty.set_size(0);
+    empty.set_cksum();
+    builder
+        .append_data(&mut empty, "nested/empty", std::io::empty())
+        .unwrap();
+
+    let body = b"hello remote\n";
+    let mut file = Header::new_gnu();
+    file.set_entry_type(EntryType::Regular);
+    file.set_mode(0o644);
+    file.set_size(body.len() as u64);
+    file.set_cksum();
+    builder
+        .append_data(&mut file, "nested/hello.txt", Cursor::new(body.as_slice()))
+        .unwrap();
+
+    builder.finish().unwrap();
+    builder.into_inner().unwrap().to_vec()
 }
 
 pub(super) fn stub_daemon_state(
@@ -66,12 +139,17 @@ pub(super) fn stub_daemon_state(
         exec_start_warnings: Arc::new(Mutex::new(Vec::new())),
         exec_start_calls: Arc::new(Mutex::new(0)),
         last_patch_request: Arc::new(Mutex::new(None)),
+        last_transfer_import: Arc::new(Mutex::new(None)),
         image_read_response: Arc::new(Mutex::new(StubImageReadResponse::Success(
             ImageReadResponse {
                 image_url: "data:image/png;base64,AAAA".to_string(),
                 detail: None,
             },
         ))),
+        transfer_export_response: Arc::new(Mutex::new(StubTransferExportResponse::Success {
+            source_type: TransferSourceType::Directory,
+            body: stub_directory_archive(),
+        })),
     }
 }
 
@@ -119,14 +197,7 @@ pub(super) async fn spawn_named_daemon_on_addr(
     addr: std::net::SocketAddr,
     state: StubDaemonState,
 ) {
-    let app = Router::new()
-        .route("/v1/health", post(health))
-        .route("/v1/target-info", post(target_info))
-        .route("/v1/exec/start", post(exec_start))
-        .route("/v1/exec/write", post(exec_write))
-        .route("/v1/patch/apply", post(patch_apply))
-        .route("/v1/image/read", post(image_read))
-        .with_state(state.clone());
+    let app = stub_router(state.clone());
 
     let daemon_state = remote_exec_daemon::AppState {
         config: Arc::new(remote_exec_daemon::config::DaemonConfig {
@@ -153,6 +224,19 @@ pub(super) async fn spawn_named_daemon_on_addr(
     });
 
     wait_until_ready(certs, addr).await;
+}
+
+pub(super) fn stub_router(state: StubDaemonState) -> Router {
+    Router::new()
+        .route("/v1/health", post(health))
+        .route("/v1/target-info", post(target_info))
+        .route("/v1/exec/start", post(exec_start))
+        .route("/v1/exec/write", post(exec_write))
+        .route("/v1/patch/apply", post(patch_apply))
+        .route("/v1/transfer/export", post(transfer_export))
+        .route("/v1/transfer/import", post(transfer_import))
+        .route("/v1/image/read", post(image_read))
+        .with_state(state)
 }
 
 async fn health() -> Json<HealthCheckResponse> {
@@ -260,6 +344,82 @@ async fn patch_apply(
 
     Ok(Json(PatchApplyResponse {
         output: "Success. Updated the following files:\nA hello.txt\n".to_string(),
+    }))
+}
+
+async fn transfer_export(
+    State(state): State<StubDaemonState>,
+    Json(_req): Json<TransferExportRequest>,
+) -> Result<(HeaderMap, Vec<u8>), (StatusCode, Json<RpcErrorBody>)> {
+    match state.transfer_export_response.lock().await.clone() {
+        StubTransferExportResponse::Success { source_type, body } => {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                TRANSFER_SOURCE_TYPE_HEADER,
+                HeaderValue::from_static(match source_type {
+                    TransferSourceType::File => "file",
+                    TransferSourceType::Directory => "directory",
+                }),
+            );
+            Ok((headers, body))
+        }
+        StubTransferExportResponse::Error { status, body } => Err((status, Json(body))),
+    }
+}
+
+async fn transfer_import(
+    State(state): State<StubDaemonState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<TransferImportResponse>, (StatusCode, Json<RpcErrorBody>)> {
+    let destination_path = headers
+        .get(TRANSFER_DESTINATION_PATH_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let source_type = headers
+        .get(TRANSFER_SOURCE_TYPE_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let overwrite = headers
+        .get(TRANSFER_OVERWRITE_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let create_parent = headers
+        .get(TRANSFER_CREATE_PARENT_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+
+    *state.last_transfer_import.lock().await = Some(StubTransferImportCapture {
+        destination_path,
+        source_type: source_type.clone(),
+        overwrite: overwrite.clone(),
+        create_parent,
+        body_len: body.len(),
+    });
+
+    let parsed_source_type = match source_type.as_str() {
+        "directory" => TransferSourceType::Directory,
+        _ => TransferSourceType::File,
+    };
+
+    Ok(Json(TransferImportResponse {
+        source_type: parsed_source_type.clone(),
+        bytes_copied: if matches!(parsed_source_type, TransferSourceType::Directory) {
+            13
+        } else {
+            body.len() as u64
+        },
+        files_copied: 1,
+        directories_copied: if matches!(parsed_source_type, TransferSourceType::Directory) {
+            3
+        } else {
+            0
+        },
+        replaced: overwrite == "replace",
     }))
 }
 
