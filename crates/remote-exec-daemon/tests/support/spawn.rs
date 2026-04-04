@@ -1,8 +1,6 @@
 use std::net::SocketAddr;
 
-use remote_exec_daemon::config::ProcessEnvironment;
-#[cfg(windows)]
-use remote_exec_daemon::config::WindowsPtyBackendOverride;
+use remote_exec_daemon::config::{ProcessEnvironment, PtyMode};
 
 use super::certs::write_test_certs;
 use super::fixture::DaemonFixture;
@@ -30,17 +28,17 @@ impl WindowsPtyTestBackend {
         }
     }
 
-    fn backend_override(self) -> WindowsPtyBackendOverride {
+    fn pty_mode(self) -> PtyMode {
         match self {
-            Self::Conpty => WindowsPtyBackendOverride::PortablePty,
-            Self::Winpty => WindowsPtyBackendOverride::Winpty,
+            Self::Conpty => PtyMode::Conpty,
+            Self::Winpty => PtyMode::Winpty,
         }
     }
 }
 
-async fn spawn_daemon_with_backend_override(
+async fn spawn_daemon_with_pty_mode(
     target: &str,
-    windows_pty_backend_override: Option<remote_exec_daemon::config::WindowsPtyBackendOverride>,
+    pty: PtyMode,
     process_environment: ProcessEnvironment,
 ) -> DaemonFixture {
     remote_exec_daemon::install_crypto_provider();
@@ -58,7 +56,8 @@ async fn spawn_daemon_with_backend_override(
         listen: addr,
         default_workdir: workdir.clone(),
         allow_login_shell: true,
-        windows_pty_backend_override,
+        pty,
+        default_shell: None,
         process_environment,
         tls: remote_exec_daemon::config::TlsConfig {
             cert_pem: certs.daemon_cert.clone(),
@@ -98,7 +97,7 @@ async fn spawn_daemon_with_backend_override(
 
 #[allow(dead_code, reason = "Shared across daemon integration test crates")]
 pub async fn spawn_daemon(target: &str) -> DaemonFixture {
-    spawn_daemon_with_backend_override(target, None, ProcessEnvironment::capture_current()).await
+    spawn_daemon_with_pty_mode(target, PtyMode::Auto, ProcessEnvironment::capture_current()).await
 }
 
 #[cfg(windows)]
@@ -106,14 +105,10 @@ pub async fn spawn_daemon(target: &str) -> DaemonFixture {
 pub fn supported_windows_pty_backends() -> Vec<WindowsPtyTestBackend> {
     let mut backends = Vec::new();
 
-    if remote_exec_daemon::exec::session::supports_pty_with_override(Some(
-        WindowsPtyBackendOverride::PortablePty,
-    )) {
+    if remote_exec_daemon::exec::session::supports_pty_for_mode(PtyMode::Conpty) {
         backends.push(WindowsPtyTestBackend::Conpty);
     }
-    if remote_exec_daemon::exec::session::supports_pty_with_override(Some(
-        WindowsPtyBackendOverride::Winpty,
-    )) {
+    if remote_exec_daemon::exec::session::supports_pty_for_mode(PtyMode::Winpty) {
         backends.push(WindowsPtyTestBackend::Winpty);
     }
 
@@ -130,9 +125,9 @@ pub async fn spawn_daemon_for_windows_pty_backend(
     target: &str,
     backend: WindowsPtyTestBackend,
 ) -> DaemonFixture {
-    spawn_daemon_with_backend_override(
+    spawn_daemon_with_pty_mode(
         target,
-        Some(backend.backend_override()),
+        backend.pty_mode(),
         ProcessEnvironment::capture_current(),
     )
     .await
@@ -143,7 +138,7 @@ pub async fn spawn_daemon_with_process_environment(
     target: &str,
     process_environment: ProcessEnvironment,
 ) -> DaemonFixture {
-    spawn_daemon_with_backend_override(target, None, process_environment).await
+    spawn_daemon_with_pty_mode(target, PtyMode::Auto, process_environment).await
 }
 
 #[cfg(windows)]
@@ -153,12 +148,7 @@ pub async fn spawn_daemon_for_windows_pty_backend_with_process_environment(
     backend: WindowsPtyTestBackend,
     process_environment: ProcessEnvironment,
 ) -> DaemonFixture {
-    spawn_daemon_with_backend_override(
-        target,
-        Some(backend.backend_override()),
-        process_environment,
-    )
-    .await
+    spawn_daemon_with_pty_mode(target, backend.pty_mode(), process_environment).await
 }
 
 #[allow(dead_code, reason = "Shared across daemon integration test crates")]

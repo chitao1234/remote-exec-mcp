@@ -205,7 +205,8 @@ pub(super) async fn spawn_named_daemon_on_addr(
             listen: addr,
             default_workdir: PathBuf::from("."),
             allow_login_shell: true,
-            windows_pty_backend_override: None,
+            pty: remote_exec_daemon::config::PtyMode::Auto,
+            default_shell: None,
             process_environment: remote_exec_daemon::config::ProcessEnvironment::capture_current(),
             tls: remote_exec_daemon::config::TlsConfig {
                 cert_pem: certs.daemon_cert.clone(),
@@ -213,6 +214,13 @@ pub(super) async fn spawn_named_daemon_on_addr(
                 ca_pem: certs.ca_cert.clone(),
             },
         }),
+        default_shell: if cfg!(windows) {
+            "cmd.exe".to_string()
+        } else {
+            "/bin/sh".to_string()
+        },
+        supports_pty: state.target_supports_pty,
+        windows_pty_backend_override: None,
         daemon_instance_id: "daemon-instance-1".to_string(),
         sessions: remote_exec_daemon::exec::store::SessionStore::default(),
     };

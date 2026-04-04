@@ -12,11 +12,14 @@ use std::sync::Arc;
 use std::sync::Once;
 
 use anyhow::Result;
-use config::DaemonConfig;
+use config::{DaemonConfig, WindowsPtyBackendOverride};
 
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<DaemonConfig>,
+    pub default_shell: String,
+    pub supports_pty: bool,
+    pub windows_pty_backend_override: Option<WindowsPtyBackendOverride>,
     pub daemon_instance_id: String,
     pub sessions: exec::store::SessionStore,
 }
@@ -31,8 +34,20 @@ where
 {
     install_crypto_provider();
 
+    let default_shell = exec::shell::resolve_default_shell(
+        config.default_shell.as_deref(),
+        &config.process_environment,
+    )?;
+    exec::session::validate_pty_mode(config.pty)?;
+    let supports_pty = exec::session::supports_pty_for_mode(config.pty);
+    let windows_pty_backend_override =
+        exec::session::windows_pty_backend_override_for_mode(config.pty)?;
+
     let state = AppState {
         config: Arc::new(config),
+        default_shell,
+        supports_pty,
+        windows_pty_backend_override,
         daemon_instance_id: uuid::Uuid::new_v4().to_string(),
         sessions: exec::store::SessionStore::new(64),
     };

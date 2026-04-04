@@ -53,10 +53,11 @@ async fn exec_start_rejects_login_requests_on_windows_when_disabled_by_config() 
 }
 
 #[tokio::test]
-async fn exec_start_uses_cmd_when_shell_is_omitted() {
-    let fixture = support::spawn::spawn_daemon_with_process_environment(
+async fn exec_start_uses_configured_default_shell_when_shell_is_omitted() {
+    let fixture = support::spawn::spawn_daemon_with_extra_config_and_process_environment(
         "builder-a",
-        process_environment_with(&[("PATH", ""), ("COMSPEC", "cmd.exe")]),
+        r#"default_shell = "cmd.exe""#,
+        process_environment_with(&[("PATH", ""), ("COMSPEC", "missing-cmd.exe")]),
     )
     .await;
 
@@ -82,6 +83,29 @@ async fn exec_start_uses_cmd_when_shell_is_omitted() {
             .to_ascii_lowercase()
             .contains("windows-ready")
     );
+}
+
+#[tokio::test]
+async fn exec_start_rejects_tty_when_disabled_by_config_on_windows() {
+    let fixture =
+        support::spawn::spawn_daemon_with_extra_config("builder-a", r#"pty = "none""#).await;
+
+    let err = fixture
+        .rpc_error(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "echo should-not-run".to_string(),
+                workdir: None,
+                shell: Some("cmd.exe".to_string()),
+                tty: true,
+                yield_time_ms: Some(250),
+                max_output_tokens: None,
+                login: Some(false),
+            },
+        )
+        .await;
+
+    assert_eq!(err.code, "tty_disabled");
 }
 
 #[tokio::test]

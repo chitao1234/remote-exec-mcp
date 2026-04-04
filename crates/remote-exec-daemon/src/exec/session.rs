@@ -9,7 +9,7 @@ use tokio::process::Command;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use super::transcript::TranscriptBuffer;
-use crate::config::{ProcessEnvironment, WindowsPtyBackendOverride};
+use crate::config::{ProcessEnvironment, PtyMode, WindowsPtyBackendOverride};
 
 mod environment;
 #[cfg(windows)]
@@ -89,6 +89,62 @@ pub fn supports_pty_with_override(
 
 pub fn supports_pty() -> bool {
     supports_pty_with_override(None)
+}
+
+pub fn windows_pty_backend_override_for_mode(
+    pty_mode: PtyMode,
+) -> anyhow::Result<Option<WindowsPtyBackendOverride>> {
+    match pty_mode {
+        PtyMode::Auto | PtyMode::None => Ok(None),
+        PtyMode::Conpty => {
+            #[cfg(windows)]
+            {
+                Ok(Some(WindowsPtyBackendOverride::PortablePty))
+            }
+            #[cfg(not(windows))]
+            {
+                anyhow::bail!("configured PTY backend `conpty` is only supported on Windows");
+            }
+        }
+        PtyMode::Winpty => {
+            #[cfg(windows)]
+            {
+                Ok(Some(WindowsPtyBackendOverride::Winpty))
+            }
+            #[cfg(not(windows))]
+            {
+                anyhow::bail!("configured PTY backend `winpty` is only supported on Windows");
+            }
+        }
+    }
+}
+
+pub fn supports_pty_for_mode(pty_mode: PtyMode) -> bool {
+    if matches!(pty_mode, PtyMode::None) {
+        return false;
+    }
+
+    let Ok(windows_pty_backend_override) = windows_pty_backend_override_for_mode(pty_mode) else {
+        return false;
+    };
+    supports_pty_with_override(windows_pty_backend_override)
+}
+
+pub fn validate_pty_mode(pty_mode: PtyMode) -> anyhow::Result<()> {
+    if matches!(pty_mode, PtyMode::Auto | PtyMode::None) {
+        return Ok(());
+    }
+
+    anyhow::ensure!(
+        supports_pty_for_mode(pty_mode),
+        "configured PTY backend `{}` is not available on this host",
+        match pty_mode {
+            PtyMode::Conpty => "conpty",
+            PtyMode::Winpty => "winpty",
+            PtyMode::Auto | PtyMode::None => unreachable!("validated above"),
+        }
+    );
+    Ok(())
 }
 
 pub fn spawn_with_windows_pty_backend_override(
@@ -349,5 +405,32 @@ impl LiveSession {
 
     pub fn record_output(&mut self, chunk: &str) {
         self.transcript.push(chunk.as_bytes());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::config::PtyMode;
+
+    use super::{supports_pty_for_mode, windows_pty_backend_override_for_mode};
+
+    #[test]
+    fn pty_mode_none_disables_tty_support() {
+        assert!(!supports_pty_for_mode(PtyMode::None));
+    }
+
+    #[test]
+    fn pty_mode_auto_has_no_forced_windows_override() {
+        assert_eq!(
+            windows_pty_backend_override_for_mode(PtyMode::Auto).unwrap(),
+            None
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn forcing_windows_pty_backend_is_rejected_on_non_windows_hosts() {
+        assert!(windows_pty_backend_override_for_mode(PtyMode::Conpty).is_err());
+        assert!(windows_pty_backend_override_for_mode(PtyMode::Winpty).is_err());
     }
 }

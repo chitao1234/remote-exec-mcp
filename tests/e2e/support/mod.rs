@@ -276,7 +276,8 @@ expected_daemon_name = {expected_daemon_name}
             listen: self.addr,
             default_workdir: self.workdir.clone(),
             allow_login_shell: true,
-            windows_pty_backend_override: None,
+            pty: remote_exec_daemon::config::PtyMode::Auto,
+            default_shell: None,
             process_environment: remote_exec_daemon::config::ProcessEnvironment::capture_current(),
             tls: remote_exec_daemon::config::TlsConfig {
                 cert_pem: self.daemon_cert_pem.clone(),

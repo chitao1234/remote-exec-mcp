@@ -58,6 +58,37 @@ async fn exec_start_uses_login_shell_by_default_when_login_is_omitted() {
 }
 
 #[tokio::test]
+async fn exec_start_uses_configured_default_shell_when_shell_is_omitted() {
+    let fixture = support::spawn::spawn_daemon_with_extra_config_and_process_environment(
+        "builder-a",
+        &format!(
+            "default_shell = {}",
+            toml::Value::String(TEST_SHELL.to_string())
+        ),
+        process_environment_with(&[("SHELL", "/definitely/missing-shell")]),
+    )
+    .await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "printf default-ready".to_string(),
+                workdir: None,
+                shell: None,
+                tty: false,
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
+                max_output_tokens: None,
+                login: Some(false),
+            },
+        )
+        .await;
+
+    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.output, "default-ready");
+}
+
+#[tokio::test]
 async fn exec_start_rejects_explicit_login_when_disabled_by_config() {
     let fixture =
         support::spawn::spawn_daemon_with_extra_config("builder-a", "allow_login_shell = false")
@@ -115,6 +146,29 @@ async fn exec_start_uses_non_login_shell_when_policy_disabled_and_login_is_omitt
 
     assert_eq!(response.exit_code, Some(0));
     assert_eq!(response.output, "");
+}
+
+#[tokio::test]
+async fn exec_start_rejects_tty_when_disabled_by_config() {
+    let fixture =
+        support::spawn::spawn_daemon_with_extra_config("builder-a", r#"pty = "none""#).await;
+
+    let err = fixture
+        .rpc_error(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "printf should-not-run".to_string(),
+                workdir: None,
+                shell: Some(TEST_SHELL.to_string()),
+                tty: true,
+                yield_time_ms: Some(250),
+                max_output_tokens: None,
+                login: Some(false),
+            },
+        )
+        .await;
+
+    assert_eq!(err.code, "tty_disabled");
 }
 
 #[tokio::test]

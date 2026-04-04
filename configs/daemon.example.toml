@@ -2,6 +2,11 @@ target = "builder-a"
 listen = "0.0.0.0:9443"
 default_workdir = "/srv/work"
 allow_login_shell = true
+# Optional. Omit to auto-detect PTY support, or set to "none" to disable TTY.
+# On Windows, "conpty" and "winpty" force a specific backend and fail startup if unavailable.
+# pty = "none"
+# Optional. If set, daemon startup fails unless this shell is usable.
+# default_shell = "/bin/sh"
 
 [tls]
 cert_pem = "/etc/remote-exec/daemon.pem"

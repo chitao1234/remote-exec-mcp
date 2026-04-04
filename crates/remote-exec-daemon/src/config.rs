@@ -11,6 +11,16 @@ pub enum WindowsPtyBackendOverride {
     Winpty,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PtyMode {
+    #[default]
+    Auto,
+    Conpty,
+    Winpty,
+    None,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ProcessEnvironment {
     path: Option<OsString>,
@@ -90,8 +100,10 @@ pub struct DaemonConfig {
     pub default_workdir: PathBuf,
     #[serde(default = "default_allow_login_shell")]
     pub allow_login_shell: bool,
-    #[serde(skip, default)]
-    pub windows_pty_backend_override: Option<WindowsPtyBackendOverride>,
+    #[serde(default)]
+    pub pty: PtyMode,
+    #[serde(default)]
+    pub default_shell: Option<String>,
     #[serde(skip, default = "ProcessEnvironment::capture_current")]
     pub process_environment: ProcessEnvironment,
     pub tls: TlsConfig,

@@ -1,7 +1,7 @@
 mod locale;
 mod output;
 pub mod session;
-mod shell;
+pub(crate) mod shell;
 pub mod store;
 pub mod transcript;
 #[cfg(windows)]
@@ -26,11 +26,19 @@ pub async fn exec_start(
     Json(req): Json<ExecStartRequest>,
 ) -> Result<Json<ExecResponse>, (StatusCode, Json<RpcErrorBody>)> {
     let cwd = resolve_workdir(&state, req.workdir.as_deref()).map_err(internal_error)?;
-    if req.tty && !session::supports_pty_with_override(state.config.windows_pty_backend_override) {
-        return Err(rpc_error(
-            "tty_unsupported",
-            "tty is not supported on this host",
-        ));
+    if req.tty {
+        if matches!(state.config.pty, crate::config::PtyMode::None) {
+            return Err(rpc_error(
+                "tty_disabled",
+                "tty is disabled by daemon config",
+            ));
+        }
+        if !state.supports_pty {
+            return Err(rpc_error(
+                "tty_unsupported",
+                "tty is not supported on this host",
+            ));
+        }
     }
     let login = match req.login {
         Some(true) if !shell::platform_supports_login_shells() => {
@@ -49,14 +57,13 @@ pub async fn exec_start(
         None if shell::platform_supports_login_shells() => state.config.allow_login_shell,
         None => false,
     };
-    let shell = shell::resolve_shell(req.shell.as_deref(), &state.config.process_environment)
-        .map_err(internal_error)?;
+    let shell = shell::selected_shell(req.shell.as_deref(), &state.default_shell);
     let argv = shell::shell_argv(&shell, login, &req.cmd);
     let mut session = session::spawn_with_windows_pty_backend_override(
         &argv,
         &cwd,
         req.tty,
-        state.config.windows_pty_backend_override,
+        state.windows_pty_backend_override,
         &state.config.process_environment,
     )
     .map_err(internal_error)?;

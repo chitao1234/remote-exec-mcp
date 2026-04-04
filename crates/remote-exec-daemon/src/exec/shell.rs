@@ -1,6 +1,11 @@
 use std::ffi::OsStr;
-#[cfg(unix)]
+#[cfg(any(test, unix, windows))]
 use std::path::Path;
+#[cfg(any(test, windows))]
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+
+use anyhow::Context;
 
 use crate::config::ProcessEnvironment;
 
@@ -15,17 +20,17 @@ pub fn platform_supports_login_shells() -> bool {
 }
 
 #[cfg(unix)]
-pub fn resolve_shell(
-    shell_override: Option<&str>,
+pub fn resolve_default_shell(
+    configured_default_shell: Option<&str>,
     environment: &ProcessEnvironment,
 ) -> anyhow::Result<String> {
     let env_shell = environment
         .var_os("SHELL")
         .map(|value| value.to_string_lossy().into_owned());
-    Ok(resolve_shell_with(
-        shell_override,
+    resolve_default_unix_shell_with(
+        configured_default_shell,
         env_shell.as_deref(),
-        environment.path(),
+        environment,
         || -> anyhow::Result<Option<String>> {
             Ok(
                 nix::unistd::User::from_uid(nix::unistd::Uid::effective())?.and_then(|user| {
@@ -34,19 +39,22 @@ pub fn resolve_shell(
                 }),
             )
         },
-    ))
+    )
 }
 
 #[cfg(windows)]
-pub fn resolve_shell(
-    shell_override: Option<&str>,
+pub fn resolve_default_shell(
+    configured_default_shell: Option<&str>,
     environment: &ProcessEnvironment,
 ) -> anyhow::Result<String> {
-    Ok(resolve_windows_shell_with(
-        shell_override,
-        environment.path(),
-        environment.comspec(),
-    ))
+    resolve_default_windows_shell_with(configured_default_shell, environment)
+}
+
+pub fn selected_shell(shell_override: Option<&str>, default_shell: &str) -> String {
+    shell_override
+        .filter(|value| !value.is_empty())
+        .unwrap_or(default_shell)
+        .to_string()
 }
 
 pub fn shell_argv(shell: &str, login: bool, cmd: &str) -> Vec<String> {
@@ -98,97 +106,135 @@ fn shell_argv_for_platform(is_windows: bool, shell: &str, login: bool, cmd: &str
     }
 }
 
-#[cfg(any(test, windows))]
-fn find_first_on_path(path_env: Option<&OsStr>, names: &[&str]) -> Option<String> {
-    std::env::split_paths(path_env?)
-        .flat_map(|dir| names.iter().map(move |name| dir.join(name)))
-        .find(|path| {
-            std::fs::metadata(path)
-                .map(|meta| meta.is_file())
-                .unwrap_or(false)
-        })
-        .map(|path| path.to_string_lossy().into_owned())
-}
-
-#[cfg(any(test, windows))]
-fn resolve_windows_shell_with(
-    shell_override: Option<&str>,
-    path_env: Option<&OsStr>,
-    comspec: Option<&str>,
-) -> String {
-    if let Some(shell) = shell_override.filter(|value| !value.is_empty()) {
-        return shell.to_string();
-    }
-    if let Some(shell) = find_first_on_path(path_env, &["pwsh.exe"]) {
-        return shell;
-    }
-    if let Some(shell) = find_first_on_path(path_env, &["powershell.exe", "powershell"]) {
-        return shell;
-    }
-    if let Some(shell) = comspec.filter(|value| !value.is_empty()) {
-        return shell.to_string();
-    }
-    "cmd.exe".to_string()
-}
-
 #[cfg(unix)]
-fn choose_shell(
-    shell_override: Option<&str>,
+fn resolve_default_unix_shell_with<F>(
+    configured_default_shell: Option<&str>,
     env_shell: Option<&str>,
-    passwd_shell: Option<&str>,
-) -> String {
-    preferred_shell(shell_override, env_shell, passwd_shell).unwrap_or("/bin/sh".to_string())
-}
-
-#[cfg(unix)]
-fn preferred_shell(
-    shell_override: Option<&str>,
-    env_shell: Option<&str>,
-    passwd_shell: Option<&str>,
-) -> Option<String> {
-    shell_override
-        .filter(|value| !value.is_empty())
-        .or_else(|| env_shell.filter(|value| !value.is_empty()))
-        .or_else(|| usable_passwd_shell(passwd_shell))
-        .map(str::to_owned)
-}
-
-#[cfg(unix)]
-fn resolve_shell_with<F>(
-    shell_override: Option<&str>,
-    env_shell: Option<&str>,
-    path_env: Option<&OsStr>,
+    environment: &ProcessEnvironment,
     passwd_shell_lookup: F,
-) -> String
+) -> anyhow::Result<String>
 where
     F: FnOnce() -> anyhow::Result<Option<String>>,
 {
-    let passwd_shell = passwd_shell_lookup().ok().flatten();
-    let fallback = choose_shell(shell_override, env_shell, passwd_shell.as_deref());
-
-    preferred_shell(shell_override, env_shell, passwd_shell.as_deref())
-        .or_else(|| find_bash_in_path(path_env))
-        .unwrap_or(fallback)
+    resolve_default_unix_shell_with_validator(
+        configured_default_shell,
+        env_shell,
+        environment,
+        passwd_shell_lookup,
+        validate_unix_shell_candidate,
+    )
 }
 
 #[cfg(unix)]
-fn find_bash_in_path(path_env: Option<&OsStr>) -> Option<String> {
+fn resolve_default_unix_shell_with_validator<F, G>(
+    configured_default_shell: Option<&str>,
+    env_shell: Option<&str>,
+    environment: &ProcessEnvironment,
+    passwd_shell_lookup: F,
+    validate: G,
+) -> anyhow::Result<String>
+where
+    F: FnOnce() -> anyhow::Result<Option<String>>,
+    G: Fn(&str, &ProcessEnvironment) -> anyhow::Result<String>,
+{
+    if let Some(shell) = configured_default_shell.filter(|value| !value.is_empty()) {
+        return validate(shell, environment)
+            .with_context(|| format!("configured default shell `{shell}` is not usable"));
+    }
+
+    if let Some(shell) =
+        usable_unix_shell_candidate_with_validator(env_shell, environment, &validate)
+    {
+        return Ok(shell);
+    }
+
+    let passwd_shell = passwd_shell_lookup().ok().flatten();
+    if let Some(shell) =
+        usable_unix_shell_candidate_with_validator(passwd_shell.as_deref(), environment, &validate)
+    {
+        return Ok(shell);
+    }
+
+    if let Some(shell) =
+        usable_unix_shell_candidate_with_validator(Some("bash"), environment, &validate)
+    {
+        return Ok(shell);
+    }
+    if let Some(shell) =
+        usable_unix_shell_candidate_with_validator(Some("/bin/sh"), environment, &validate)
+    {
+        return Ok(shell);
+    }
+
+    anyhow::bail!("no usable default shell found; tried SHELL, passwd shell, bash, and /bin/sh");
+}
+
+#[cfg(unix)]
+fn usable_unix_shell_candidate(
+    candidate: Option<&str>,
+    environment: &ProcessEnvironment,
+) -> Option<String> {
+    usable_unix_shell_candidate_with_validator(
+        candidate,
+        environment,
+        validate_unix_shell_candidate,
+    )
+}
+
+#[cfg(unix)]
+fn usable_unix_shell_candidate_with_validator<G>(
+    candidate: Option<&str>,
+    environment: &ProcessEnvironment,
+    validate: G,
+) -> Option<String>
+where
+    G: Fn(&str, &ProcessEnvironment) -> anyhow::Result<String>,
+{
+    let shell = candidate.filter(|value| !value.is_empty())?;
+    validate(shell, environment).ok()
+}
+
+#[cfg(unix)]
+fn validate_unix_shell_candidate(
+    shell: &str,
+    environment: &ProcessEnvironment,
+) -> anyhow::Result<String> {
+    anyhow::ensure!(
+        !is_disallowed_unix_shell(shell),
+        "shell `{shell}` is not a usable login shell"
+    );
+
+    let resolved = if is_path_like(shell) {
+        let path = Path::new(shell);
+        anyhow::ensure!(
+            shell_path_is_executable(path),
+            "shell `{shell}` is not executable"
+        );
+        shell.to_string()
+    } else {
+        find_unix_command_on_path(environment.path(), shell)
+            .ok_or_else(|| anyhow::anyhow!("shell `{shell}` was not found on PATH"))?
+    };
+
+    probe_shell_for_platform(false, &resolved, environment)
+        .with_context(|| format!("failed startup probe for shell `{shell}`"))?;
+    Ok(resolved)
+}
+
+#[cfg(unix)]
+fn is_disallowed_unix_shell(shell: &str) -> bool {
+    matches!(
+        Path::new(shell).file_name().and_then(|name| name.to_str()),
+        Some("false" | "nologin")
+    )
+}
+
+#[cfg(unix)]
+fn find_unix_command_on_path(path_env: Option<&OsStr>, command: &str) -> Option<String> {
     std::env::split_paths(path_env?)
-        .map(|dir| dir.join("bash"))
+        .map(|dir| dir.join(command))
         .find(|path| shell_path_is_executable(path))
         .map(|path| path.to_string_lossy().into_owned())
-}
-
-#[cfg(unix)]
-fn usable_passwd_shell(passwd_shell: Option<&str>) -> Option<&str> {
-    passwd_shell.filter(|value| {
-        !value.is_empty()
-            && !matches!(
-                Path::new(value).file_name().and_then(|name| name.to_str()),
-                Some("false" | "nologin")
-            )
-            && shell_path_is_executable(Path::new(value))
-    })
 }
 
 #[cfg(unix)]
@@ -207,222 +253,323 @@ fn has_execute_bits(metadata: &std::fs::Metadata) -> bool {
     metadata.permissions().mode() & 0o111 != 0
 }
 
+#[cfg(any(test, windows))]
+fn resolve_default_windows_shell_with(
+    configured_default_shell: Option<&str>,
+    environment: &ProcessEnvironment,
+) -> anyhow::Result<String> {
+    resolve_default_windows_shell_with_validator(
+        configured_default_shell,
+        environment,
+        validate_windows_shell_candidate,
+    )
+}
+
+#[cfg(any(test, windows))]
+fn resolve_default_windows_shell_with_validator<G>(
+    configured_default_shell: Option<&str>,
+    environment: &ProcessEnvironment,
+    validate: G,
+) -> anyhow::Result<String>
+where
+    G: Fn(&str, &ProcessEnvironment) -> anyhow::Result<String>,
+{
+    if let Some(shell) = configured_default_shell.filter(|value| !value.is_empty()) {
+        return validate(shell, environment)
+            .with_context(|| format!("configured default shell `{shell}` is not usable"));
+    }
+
+    for candidate in ["pwsh.exe", "powershell.exe", "powershell"] {
+        if let Ok(shell) = validate(candidate, environment) {
+            return Ok(shell);
+        }
+    }
+
+    if let Some(shell) = environment.comspec().filter(|value| !value.is_empty())
+        && let Ok(shell) = validate(shell, environment)
+    {
+        return Ok(shell);
+    }
+
+    if let Ok(shell) = validate("cmd.exe", environment) {
+        return Ok(shell);
+    }
+
+    anyhow::bail!(
+        "no usable default shell found; tried pwsh.exe, powershell.exe, COMSPEC, and cmd.exe"
+    );
+}
+
+#[cfg(any(test, windows))]
+fn validate_windows_shell_candidate(
+    shell: &str,
+    environment: &ProcessEnvironment,
+) -> anyhow::Result<String> {
+    let resolved =
+        resolve_windows_command_path(shell, environment).unwrap_or_else(|| shell.to_string());
+
+    probe_shell_for_platform(true, &resolved, environment)
+        .with_context(|| format!("failed startup probe for shell `{shell}`"))?;
+    Ok(resolved)
+}
+
+fn probe_shell_for_platform(
+    is_windows: bool,
+    shell: &str,
+    environment: &ProcessEnvironment,
+) -> anyhow::Result<()> {
+    let argv = shell_argv_for_platform(is_windows, shell, false, "exit 0");
+    let mut command = Command::new(&argv[0]);
+    command.args(&argv[1..]);
+    command.stdin(Stdio::null());
+    command.stdout(Stdio::null());
+    command.stderr(Stdio::null());
+    command.env_clear();
+    for (key, value) in environment.vars() {
+        command.env(key, value);
+    }
+
+    let status = command
+        .status()
+        .with_context(|| format!("failed to start shell `{shell}`"))?;
+    anyhow::ensure!(
+        status.success(),
+        "startup probe exited with status {status}"
+    );
+    Ok(())
+}
+
+fn is_path_like(command: &str) -> bool {
+    let path = Path::new(command);
+    path.is_absolute() || path.components().count() > 1
+}
+
+#[cfg(any(test, windows))]
+fn resolve_windows_command_path(command: &str, environment: &ProcessEnvironment) -> Option<String> {
+    if is_path_like(command) {
+        return windows_path_candidates(Path::new(command), environment.var_os("PATHEXT"))
+            .into_iter()
+            .find(|candidate| is_regular_file(candidate))
+            .map(|candidate| candidate.to_string_lossy().into_owned());
+    }
+
+    std::env::split_paths(environment.path()?)
+        .flat_map(|dir| {
+            windows_path_candidates(&dir.join(command), environment.var_os("PATHEXT")).into_iter()
+        })
+        .find(|candidate| is_regular_file(candidate))
+        .map(|candidate| candidate.to_string_lossy().into_owned())
+}
+
+#[cfg(any(test, windows))]
+fn windows_path_candidates(path: &Path, pathext: Option<&OsStr>) -> Vec<PathBuf> {
+    if path.extension().is_some() {
+        return vec![path.to_path_buf()];
+    }
+
+    let mut candidates = vec![path.to_path_buf()];
+    candidates.extend(
+        windows_path_exts(pathext)
+            .into_iter()
+            .map(|ext| path.with_extension(ext)),
+    );
+    candidates
+}
+
+#[cfg(any(test, windows))]
+fn windows_path_exts(pathext: Option<&OsStr>) -> Vec<String> {
+    let mut exts = pathext
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_else(|| ".com;.exe;.bat;.cmd".to_string())
+        .split(';')
+        .filter(|ext| !ext.is_empty())
+        .map(|ext| ext.trim_start_matches('.').to_string())
+        .collect::<Vec<_>>();
+
+    if exts.is_empty() {
+        exts.extend(["com", "exe", "bat", "cmd"].into_iter().map(str::to_owned));
+    }
+
+    exts
+}
+
+#[cfg(any(test, windows))]
+fn is_regular_file(path: &Path) -> bool {
+    std::fs::metadata(path)
+        .map(|metadata| metadata.is_file())
+        .unwrap_or(false)
+}
+
 #[cfg(all(test, unix))]
 mod tests {
-    use std::ffi::{OsStr, OsString};
+    use std::ffi::OsString;
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
-    use std::sync::Mutex;
 
-    use super::{choose_shell, resolve_shell_with};
+    use crate::config::ProcessEnvironment;
 
-    static PATH_LOCK: Mutex<()> = Mutex::new(());
+    use super::resolve_default_unix_shell_with;
 
-    struct PathGuard {
-        original: Option<OsString>,
-    }
-
-    impl PathGuard {
-        fn set(path: Option<&OsStr>) -> Self {
-            let original = std::env::var_os("PATH");
-            unsafe {
-                match path {
-                    Some(path) => std::env::set_var("PATH", path),
-                    None => std::env::remove_var("PATH"),
-                }
-            }
-            Self { original }
+    fn make_environment(path: Option<&std::path::Path>, shell: Option<&str>) -> ProcessEnvironment {
+        let mut environment = ProcessEnvironment::default();
+        if let Some(path) = path {
+            environment.set_var("PATH", Some(OsString::from(path.as_os_str())));
         }
-    }
-
-    impl Drop for PathGuard {
-        fn drop(&mut self) {
-            unsafe {
-                match &self.original {
-                    Some(path) => std::env::set_var("PATH", path),
-                    None => std::env::remove_var("PATH"),
-                }
-            }
+        if let Some(shell) = shell {
+            environment.set_var("SHELL", Some(OsString::from(shell)));
         }
+        environment
     }
 
-    fn with_path_var<T>(path: Option<&OsStr>, test: impl FnOnce() -> T) -> T {
-        let _lock = PATH_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _guard = PathGuard::set(path);
-        test()
-    }
-
-    fn make_executable_shell() -> (tempfile::TempDir, PathBuf) {
-        let tempdir = tempfile::tempdir().unwrap();
-        let shell_path = tempdir.path().join("shell");
-        std::fs::write(&shell_path, "#!/bin/sh\n").unwrap();
-        let mut permissions = std::fs::metadata(&shell_path).unwrap().permissions();
+    fn write_fake_shell(path: &PathBuf, exit_code: i32) {
+        std::fs::write(path, format!("#!/bin/sh\nexit {exit_code}\n")).unwrap();
+        let mut permissions = std::fs::metadata(path).unwrap().permissions();
         permissions.set_mode(0o755);
-        std::fs::set_permissions(&shell_path, permissions).unwrap();
-        (tempdir, shell_path)
+        std::fs::set_permissions(path, permissions).unwrap();
     }
 
     #[test]
-    fn choose_shell_prefers_explicit_override() {
-        assert_eq!(
-            choose_shell(Some("/bin/zsh"), Some("/bin/sh"), Some("/bin/bash")),
-            "/bin/zsh"
-        );
-    }
-
-    #[test]
-    fn choose_shell_uses_env_before_passwd_and_fallback() {
-        let (_tempdir, shell_path) = make_executable_shell();
-        let shell_text = shell_path.to_string_lossy().into_owned();
-        assert_eq!(
-            choose_shell(None, Some("/bin/sh"), Some(&shell_text)),
-            "/bin/sh"
-        );
-        assert_eq!(choose_shell(None, None, Some(&shell_text)), shell_text);
-        assert_eq!(choose_shell(None, None, None), "/bin/sh");
-    }
-
-    #[test]
-    fn choose_shell_ignores_unusable_passwd_shells() {
-        assert_eq!(
-            choose_shell(None, Some("/bin/sh"), Some("/usr/sbin/nologin")),
-            "/bin/sh"
-        );
-        assert_eq!(choose_shell(None, None, Some("/bin/false")), "/bin/sh");
-    }
-
-    #[test]
-    fn resolve_shell_ignores_passwd_lookup_failure() {
-        with_path_var(None, || {
-            assert_eq!(
-                resolve_shell_with(None, Some("/bin/sh"), None, || {
-                    Err(anyhow::anyhow!("passwd lookup failed"))
-                }),
-                "/bin/sh"
-            );
-            assert_eq!(
-                resolve_shell_with(None, None, None, || Err(anyhow::anyhow!(
-                    "passwd lookup failed"
-                ))),
-                "/bin/sh"
-            );
-        });
-    }
-
-    #[test]
-    fn resolve_shell_ignores_missing_passwd_shell() {
-        with_path_var(None, || {
-            assert_eq!(
-                resolve_shell_with(None, None, None, || Ok(Some(
-                    "/opt/missing-shell".to_string()
-                ))),
-                "/bin/sh"
-            );
-        });
-    }
-
-    #[test]
-    fn resolve_shell_ignores_non_executable_passwd_shell() {
+    fn unix_default_shell_prefers_configured_shell() {
         let tempdir = tempfile::tempdir().unwrap();
-        let shell_path = tempdir.path().join("shell");
-        std::fs::write(&shell_path, "#!/bin/sh\n").unwrap();
-        let mut permissions = std::fs::metadata(&shell_path).unwrap().permissions();
-        permissions.set_mode(0o644);
-        std::fs::set_permissions(&shell_path, permissions).unwrap();
+        let configured_shell = tempdir.path().join("configured-shell");
+        write_fake_shell(&configured_shell, 0);
+        let env_shell = tempdir.path().join("env-shell");
+        write_fake_shell(&env_shell, 0);
+        let environment =
+            make_environment(Some(tempdir.path()), Some(&env_shell.to_string_lossy()));
 
-        with_path_var(None, || {
-            assert_eq!(
-                resolve_shell_with(None, None, None, || {
-                    Ok(Some(shell_path.to_string_lossy().into_owned()))
-                }),
-                "/bin/sh"
-            );
-        });
+        assert_eq!(
+            resolve_default_unix_shell_with(
+                Some(&configured_shell.to_string_lossy()),
+                environment
+                    .var_os("SHELL")
+                    .map(|value| value.to_string_lossy().into_owned())
+                    .as_deref(),
+                &environment,
+                || Ok(None),
+            )
+            .unwrap(),
+            configured_shell.to_string_lossy()
+        );
     }
 
     #[test]
-    fn resolve_shell_uses_bash_from_path_before_bin_sh_fallback() {
-        let (tempdir, shell_path) = make_executable_shell();
-        let bash_path = tempdir.path().join("bash");
-        std::fs::rename(shell_path, &bash_path).unwrap();
+    fn unix_default_shell_falls_back_from_unusable_env_shell_to_passwd_shell() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let env_shell = tempdir.path().join("env-shell");
+        write_fake_shell(&env_shell, 1);
+        let passwd_shell = tempdir.path().join("passwd-shell");
+        write_fake_shell(&passwd_shell, 0);
+        let environment =
+            make_environment(Some(tempdir.path()), Some(&env_shell.to_string_lossy()));
 
-        with_path_var(Some(tempdir.path().as_os_str()), || {
-            assert_eq!(
-                resolve_shell_with(None, None, Some(tempdir.path().as_os_str()), || Ok(None)),
-                bash_path.to_string_lossy()
-            );
-        });
+        assert_eq!(
+            resolve_default_unix_shell_with(
+                None,
+                environment
+                    .var_os("SHELL")
+                    .map(|value| value.to_string_lossy().into_owned())
+                    .as_deref(),
+                &environment,
+                || Ok(Some(passwd_shell.to_string_lossy().into_owned())),
+            )
+            .unwrap(),
+            passwd_shell.to_string_lossy()
+        );
+    }
+
+    #[test]
+    fn unix_default_shell_uses_bash_from_path_before_bin_sh() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let bash = tempdir.path().join("bash");
+        write_fake_shell(&bash, 0);
+        let environment = make_environment(Some(tempdir.path()), None);
+
+        assert_eq!(
+            resolve_default_unix_shell_with(None, None, &environment, || Ok(None)).unwrap(),
+            bash.to_string_lossy()
+        );
+    }
+
+    #[test]
+    fn unix_default_shell_rejects_unusable_configured_shell() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let configured_shell = tempdir.path().join("configured-shell");
+        write_fake_shell(&configured_shell, 1);
+        let environment = make_environment(Some(tempdir.path()), None);
+
+        let err = resolve_default_unix_shell_with(
+            Some(&configured_shell.to_string_lossy()),
+            None,
+            &environment,
+            || Ok(None),
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("configured default shell"));
     }
 }
 
 #[cfg(test)]
 mod windows_shell_tests {
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
-    use std::sync::Mutex;
+    use crate::config::ProcessEnvironment;
 
-    use super::{resolve_windows_shell_with, shell_argv_for_platform};
+    use super::{resolve_default_windows_shell_with_validator, shell_argv_for_platform};
 
-    static PATH_LOCK: Mutex<()> = Mutex::new(());
-
-    fn write_fake_executable(path: &std::path::Path) {
-        std::fs::write(path, b"stub").unwrap();
-        #[cfg(unix)]
-        {
-            let mut permissions = std::fs::metadata(path).unwrap().permissions();
-            permissions.set_mode(0o755);
-            std::fs::set_permissions(path, permissions).unwrap();
+    fn make_environment(comspec: Option<&str>) -> ProcessEnvironment {
+        let mut environment = ProcessEnvironment::default();
+        if let Some(comspec) = comspec {
+            environment.set_var("COMSPEC", Some(comspec.into()));
         }
+        environment
     }
 
     #[test]
-    fn windows_shell_prefers_pwsh_from_path_before_legacy_powershell_and_cmd() {
-        let _lock = PATH_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let tempdir = tempfile::tempdir().unwrap();
-        write_fake_executable(&tempdir.path().join("pwsh.exe"));
-        write_fake_executable(&tempdir.path().join("powershell.exe"));
-        let path = std::env::join_paths([tempdir.path()]).unwrap();
+    fn windows_default_shell_prefers_pwsh_before_legacy_powershell_and_cmd() {
+        let environment = make_environment(Some(r"C:\custom\cmd.exe"));
 
         assert_eq!(
-            resolve_windows_shell_with(
-                None,
-                Some(path.as_os_str()),
-                Some(r"C:\Windows\System32\cmd.exe"),
-            ),
-            tempdir
-                .path()
-                .join("pwsh.exe")
-                .to_string_lossy()
-                .into_owned()
+            resolve_default_windows_shell_with_validator(None, &environment, |candidate, _| {
+                match candidate {
+                    "pwsh.exe" => Ok(r"C:\tools\pwsh.exe".to_string()),
+                    "powershell.exe" => Ok(r"C:\tools\powershell.exe".to_string()),
+                    "powershell" => Ok(r"C:\tools\powershell".to_string()),
+                    r"C:\custom\cmd.exe" => Ok(r"C:\custom\cmd.exe".to_string()),
+                    "cmd.exe" => Ok("cmd.exe".to_string()),
+                    _ => anyhow::bail!("missing"),
+                }
+            })
+            .unwrap(),
+            r"C:\tools\pwsh.exe"
         );
     }
 
     #[test]
-    fn windows_shell_falls_back_to_legacy_powershell_then_comspec_then_cmd() {
-        let _lock = PATH_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let tempdir = tempfile::tempdir().unwrap();
-        write_fake_executable(&tempdir.path().join("powershell.exe"));
-        let path = std::env::join_paths([tempdir.path()]).unwrap();
+    fn windows_default_shell_falls_back_to_comspec() {
+        let environment = make_environment(Some(r"C:\custom\cmd.exe"));
 
         assert_eq!(
-            resolve_windows_shell_with(None, Some(path.as_os_str()), Some(r"C:\custom\cmd.exe")),
-            tempdir
-                .path()
-                .join("powershell.exe")
-                .to_string_lossy()
-                .into_owned()
-        );
-        assert_eq!(
-            resolve_windows_shell_with(None, None, Some(r"C:\custom\cmd.exe")),
+            resolve_default_windows_shell_with_validator(None, &environment, |candidate, _| {
+                match candidate {
+                    r"C:\custom\cmd.exe" => Ok(r"C:\custom\cmd.exe".to_string()),
+                    _ => anyhow::bail!("missing"),
+                }
+            })
+            .unwrap(),
             r"C:\custom\cmd.exe"
         );
-        assert_eq!(resolve_windows_shell_with(None, None, None), "cmd.exe");
+    }
+
+    #[test]
+    fn windows_default_shell_rejects_unusable_configured_shell() {
+        let environment = make_environment(None);
+        let err =
+            resolve_default_windows_shell_with_validator(Some("pwsh.exe"), &environment, |_, _| {
+                anyhow::bail!("not usable")
+            })
+            .unwrap_err();
+
+        assert!(err.to_string().contains("configured default shell"));
     }
 
     #[test]

@@ -51,9 +51,7 @@ async fn target_info(State(state): State<Arc<AppState>>) -> Json<TargetInfoRespo
         hostname: gethostname::gethostname().to_string_lossy().into_owned(),
         platform: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
-        supports_pty: crate::exec::session::supports_pty_with_override(
-            state.config.windows_pty_backend_override,
-        ),
+        supports_pty: state.supports_pty,
         supports_image_read: true,
     })
 }
