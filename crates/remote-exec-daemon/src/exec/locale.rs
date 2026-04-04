@@ -14,9 +14,6 @@ pub(crate) enum LocaleStrategy {
     Direct(String),
     #[cfg(not(windows))]
     HybridCType(String),
-    #[cfg(not(windows))]
-    #[allow(dead_code)]
-    LastResortLcAll(String),
     LangCOnly,
 }
 
@@ -64,10 +61,6 @@ impl LocaleEnvPlan {
                 LocaleStrategy::HybridCType(locale) => vec![
                     ("LANG".to_string(), "C".to_string()),
                     ("LC_CTYPE".to_string(), locale.clone()),
-                ],
-                LocaleStrategy::LastResortLcAll(locale) => vec![
-                    ("LANG".to_string(), "C".to_string()),
-                    ("LC_ALL".to_string(), locale.clone()),
                 ],
                 LocaleStrategy::LangCOnly => vec![("LANG".to_string(), "C".to_string())],
             }

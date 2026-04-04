@@ -32,14 +32,4 @@ impl TranscriptBuffer {
             self.tail.drain(..drop_len);
         }
     }
-
-    #[allow(dead_code)]
-    pub fn render(&self) -> String {
-        let mut data = self.head.clone();
-        if self.total > self.limit {
-            data.extend_from_slice(b"\n...<truncated>...\n");
-        }
-        data.extend_from_slice(&self.tail);
-        String::from_utf8_lossy(&data).into_owned()
-    }
 }
