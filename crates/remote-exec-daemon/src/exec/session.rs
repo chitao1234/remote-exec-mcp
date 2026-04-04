@@ -21,9 +21,6 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use winptyrs::EnvBlock;
 
 use super::transcript::TranscriptBuffer;
-#[cfg(not(windows))]
-use crate::config::ProcessEnvironment;
-#[cfg(windows)]
 use crate::config::{ProcessEnvironment, WindowsPtyBackendOverride};
 
 const NORMALIZED_ENV: [(&str, &str); 7] = [
