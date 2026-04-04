@@ -231,6 +231,19 @@ expected_daemon_name = {expected_daemon_name}
     )
 }
 
+fn render_insecure_http_broker_target(name: &str, addr: std::net::SocketAddr) -> String {
+    format!(
+        r#"[targets.{name}]
+base_url = {base_url}
+allow_insecure_http = true
+expected_daemon_name = {expected_daemon_name}
+"#,
+        name = name,
+        base_url = toml_string(&format!("http://{addr}")),
+        expected_daemon_name = toml_string(name),
+    )
+}
+
 fn write_broker_config(path: &Path, targets: &[BrokerConfigTarget<'_>]) {
     let config = targets
         .iter()
@@ -255,6 +268,36 @@ pub async fn spawn_broker_with_stub_daemon() -> BrokerFixture {
             certs: &certs,
         }],
     );
+
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
+    command.arg(&broker_config);
+    let transport = TokioChildProcess::new(command).unwrap();
+    let client = DummyClientHandler.serve(transport).await.unwrap();
+
+    BrokerFixture {
+        _tempdir: tempdir,
+        client,
+        stub_state,
+    }
+}
+
+pub async fn spawn_broker_with_plain_http_stub_daemon() -> BrokerFixture {
+    let tempdir = tempfile::tempdir().unwrap();
+    let stub_state = stub_daemon_state("builder-xp", ExecWriteBehavior::Success, "windows", false);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = stub_router(stub_state.clone());
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    wait_until_ready_http(addr).await;
+
+    let broker_config = tempdir.path().join("broker.toml");
+    std::fs::write(
+        &broker_config,
+        render_insecure_http_broker_target("builder-xp", addr),
+    )
+    .unwrap();
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
     command.arg(&broker_config);
@@ -560,14 +603,7 @@ async fn spawn_named_daemon_on_addr(
     addr: std::net::SocketAddr,
     state: StubDaemonState,
 ) {
-    let app = Router::new()
-        .route("/v1/health", post(health))
-        .route("/v1/target-info", post(target_info))
-        .route("/v1/exec/start", post(exec_start))
-        .route("/v1/exec/write", post(exec_write))
-        .route("/v1/patch/apply", post(patch_apply))
-        .route("/v1/image/read", post(image_read))
-        .with_state(state.clone());
+    let app = stub_router(state.clone());
 
     let daemon_state = remote_exec_daemon::AppState {
         config: Arc::new(remote_exec_daemon::config::DaemonConfig {
@@ -592,6 +628,17 @@ async fn spawn_named_daemon_on_addr(
     });
 
     wait_until_ready(certs, addr).await;
+}
+
+fn stub_router(state: StubDaemonState) -> Router {
+    Router::new()
+        .route("/v1/health", post(health))
+        .route("/v1/target-info", post(target_info))
+        .route("/v1/exec/start", post(exec_start))
+        .route("/v1/exec/write", post(exec_write))
+        .route("/v1/patch/apply", post(patch_apply))
+        .route("/v1/image/read", post(image_read))
+        .with_state(state)
 }
 
 async fn health() -> Json<HealthCheckResponse> {
@@ -784,4 +831,23 @@ async fn wait_until_ready(certs: &TestCerts, addr: std::net::SocketAddr) {
     }
 
     panic!("stub daemon did not become ready");
+}
+
+async fn wait_until_ready_http(addr: std::net::SocketAddr) {
+    let client = reqwest::Client::builder().build().unwrap();
+
+    for _ in 0..40 {
+        if client
+            .post(format!("http://{addr}/v1/health"))
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .is_ok()
+        {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    panic!("plain http stub daemon did not become ready");
 }

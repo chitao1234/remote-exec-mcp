@@ -11,3 +11,8 @@ ca_pem = "/etc/remote-exec/ca.pem"
 client_cert_pem = "/etc/remote-exec/broker.pem"
 client_key_pem = "/etc/remote-exec/broker.key"
 expected_daemon_name = "builder-b"
+
+[targets.builder-xp]
+base_url = "http://builder-xp.example.com:8181"
+allow_insecure_http = true
+expected_daemon_name = "builder-xp"

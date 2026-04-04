@@ -27,6 +27,35 @@ async fn apply_patch_returns_plain_text_plus_empty_structured_content() {
 }
 
 #[tokio::test]
+async fn apply_patch_forwards_to_explicitly_enabled_insecure_http_target() {
+    let fixture = support::spawn_broker_with_plain_http_stub_daemon().await;
+    let result = fixture
+        .call_tool(
+            "apply_patch",
+            serde_json::json!({
+                "target": "builder-xp",
+                "input": "*** Begin Patch\n*** Add File: hello.txt\n+hello xp\n*** End Patch\n",
+            }),
+        )
+        .await;
+
+    assert!(
+        result
+            .text_output
+            .contains("Success. Updated the following files:")
+    );
+    assert_eq!(result.structured_content, serde_json::json!({}));
+    assert_eq!(
+        fixture
+            .last_patch_request()
+            .await
+            .expect("patch request")
+            .patch,
+        "*** Begin Patch\n*** Add File: hello.txt\n+hello xp\n*** End Patch\n"
+    );
+}
+
+#[tokio::test]
 async fn list_targets_returns_cached_daemon_info_and_null_for_unavailable_targets() {
     let fixture = support::spawn_broker_with_reverse_ordered_targets().await;
     let result = fixture

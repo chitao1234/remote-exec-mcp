@@ -15,6 +15,10 @@ The tool interfaces and behavior in this project are heavily influenced by [Code
 - `remote-exec-daemon`
   - Per-machine daemon over mTLS JSON/HTTP.
   - Executes commands, manages local sessions, applies patches, and reads images.
+- `remote-exec-daemon-xp`
+  - Standalone Windows XP daemon over plain HTTP.
+  - Supports `exec_command`, `write_stdin`, `apply_patch`, and single-file `transfer_files`.
+  - Does not support PTY or image reads.
 - `remote-exec-proto`
   - Shared public tool schemas and broker-daemon RPC types.
 
@@ -53,10 +57,11 @@ Daemon config covers:
 Broker config covers one entry per target:
 
 - daemon base URL
-- CA path
-- client certificate path
-- client key path
+- CA path for `https://` targets
+- client certificate path for `https://` targets
+- client key path for `https://` targets
 - expected daemon target name
+- `allow_insecure_http = true` when a target intentionally uses `http://`
 
 ## TLS / CA setup
 
@@ -65,6 +70,8 @@ The broker and daemon use mutual TLS:
 - the daemon presents a server certificate signed by your CA
 - the broker presents a client certificate signed by the same CA
 - both sides trust the CA certificate configured in `ca_pem`
+
+`remote-exec-daemon-xp` is the exception for v1. It uses plain HTTP only, so broker targets that point at it must use `http://...` together with `allow_insecure_http = true`.
 
 Preferred bootstrap flow:
 
@@ -203,6 +210,15 @@ Wire those files into the example configs:
 - each daemon uses `tls.cert_pem`, `tls.key_pem`, and `tls.ca_pem` as shown in `configs/daemon.example.toml`
 - set `expected_daemon_name` to the daemon's configured `target`
 
+Example XP target in broker config:
+
+```toml
+[targets.builder-xp]
+base_url = "http://builder-xp.example.com:8181"
+allow_insecure_http = true
+expected_daemon_name = "builder-xp"
+```
+
 ## Local development
 
 Run the full workspace checks:
@@ -232,6 +248,7 @@ cargo fmt --all --check
 - `list_targets` reports the daemon's actual `supports_pty` capability instead of assuming PTY support.
 - On Windows, `tty=true` prefers the existing ConPTY-backed `portable-pty` path and falls back to `winpty-rs` when ConPTY is unavailable and the native winpty runtime is installed.
 - Default shell resolution uses explicit override, then `SHELL`, then a usable passwd shell, then `bash` from `PATH`, then `/bin/sh` on Unix. On Windows it uses explicit override, then the first `pwsh.exe` on `PATH`, then `powershell.exe` or `powershell`, then `COMSPEC`, then `cmd.exe`.
+- `remote-exec-daemon-xp` is intentionally narrower than the main daemon: it always uses `cmd.exe`, rejects `tty=true`, does not implement `view_image`, and only supports single-file transfer.
 
 ## Quality Gate
 
