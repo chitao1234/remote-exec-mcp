@@ -11,18 +11,9 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use super::transcript::TranscriptBuffer;
 use crate::config::{ProcessEnvironment, WindowsPtyBackendOverride};
 
+mod environment;
 #[cfg(windows)]
 mod windows;
-
-const NORMALIZED_ENV: [(&str, &str); 7] = [
-    ("NO_COLOR", "1"),
-    ("TERM", "dumb"),
-    ("COLORTERM", ""),
-    ("PAGER", "cat"),
-    ("GIT_PAGER", "cat"),
-    ("GH_PAGER", "cat"),
-    ("CODEX_CI", "1"),
-];
 const TRANSCRIPT_LIMIT_BYTES: usize = 1024 * 1024;
 
 pub struct LiveSession {
@@ -133,49 +124,6 @@ pub fn spawn(
     spawn_with_windows_pty_backend_override(cmd, cwd, tty, None, environment)
 }
 
-fn normalized_env_pairs(environment: &ProcessEnvironment) -> Vec<(String, String)> {
-    let mut pairs = NORMALIZED_ENV
-        .iter()
-        .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
-        .collect::<Vec<_>>();
-    pairs.extend(super::locale::LocaleEnvPlan::resolved(environment).as_pairs());
-    pairs
-}
-
-fn apply_base_environment_builder(builder: &mut CommandBuilder, environment: &ProcessEnvironment) {
-    builder.env_clear();
-    for (key, value) in environment.vars() {
-        builder.env(key, value);
-    }
-}
-
-fn apply_env_overlay_builder(builder: &mut CommandBuilder, environment: &ProcessEnvironment) {
-    apply_base_environment_builder(builder, environment);
-    builder.env_remove("LANG");
-    builder.env_remove("LC_CTYPE");
-    builder.env_remove("LC_ALL");
-    for (key, value) in normalized_env_pairs(environment) {
-        builder.env(&key, &value);
-    }
-}
-
-fn apply_base_environment_command(command: &mut Command, environment: &ProcessEnvironment) {
-    command.env_clear();
-    for (key, value) in environment.vars() {
-        command.env(key, value);
-    }
-}
-
-fn apply_env_overlay_command(command: &mut Command, environment: &ProcessEnvironment) {
-    apply_base_environment_command(command, environment);
-    command.env_remove("LANG");
-    command.env_remove("LC_CTYPE");
-    command.env_remove("LC_ALL");
-    for (key, value) in normalized_env_pairs(environment) {
-        command.env(&key, &value);
-    }
-}
-
 #[cfg(windows)]
 pub async fn windows_pty_debug_report(cmd: &[String], cwd: &std::path::Path) -> String {
     windows::debug_report(cmd, cwd).await
@@ -192,7 +140,7 @@ fn spawn_pty(
         builder.arg(arg);
     }
     builder.cwd(cwd);
-    apply_env_overlay_builder(&mut builder, environment);
+    environment::apply_overlay_builder(&mut builder, environment);
 
     let child = pty.slave.spawn_command(builder)?;
     let writer = pty.master.take_writer()?;
@@ -240,7 +188,7 @@ fn spawn_pipe(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    apply_env_overlay_command(&mut command, environment);
+    environment::apply_overlay_command(&mut command, environment);
     let mut child = command.spawn()?;
     let stdout = child.stdout.take().context("missing stdout pipe")?;
     let stderr = child.stderr.take().context("missing stderr pipe")?;

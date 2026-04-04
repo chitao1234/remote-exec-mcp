@@ -283,7 +283,7 @@ fn winpty_environment_block(environment: &ProcessEnvironment) -> EnvBlock {
         env_map.remove(key);
     }
 
-    for (key, value) in super::normalized_env_pairs(environment) {
+    for (key, value) in super::environment::normalized_pairs(environment) {
         env_map.insert(key.to_ascii_uppercase(), (key, OsString::from(value)));
     }
 
