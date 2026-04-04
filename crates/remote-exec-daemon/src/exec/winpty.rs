@@ -71,6 +71,49 @@ fn command_line(args: &[String]) -> Option<OsString> {
     ))
 }
 
+fn resolve_executable_for_winpty(program: &str) -> OsString {
+    let path = Path::new(program);
+    if path.is_absolute() || program.contains(['\\', '/']) {
+        return OsString::from(program);
+    }
+
+    let candidates = executable_candidates(program);
+    if let Some(path_env) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path_env) {
+            for candidate in &candidates {
+                let resolved = dir.join(candidate);
+                if std::fs::metadata(&resolved)
+                    .map(|metadata| metadata.is_file())
+                    .unwrap_or(false)
+                {
+                    return resolved.into_os_string();
+                }
+            }
+        }
+    }
+
+    OsString::from(program)
+}
+
+fn executable_candidates(program: &str) -> Vec<OsString> {
+    let lower = program.to_ascii_lowercase();
+    if lower.ends_with(".exe")
+        || lower.ends_with(".com")
+        || lower.ends_with(".bat")
+        || lower.ends_with(".cmd")
+    {
+        return vec![OsString::from(program)];
+    }
+
+    let mut candidates = vec![OsString::from(program)];
+    for extension in [".exe", ".com", ".bat", ".cmd"] {
+        let mut candidate = OsString::from(program);
+        candidate.push(extension);
+        candidates.push(candidate);
+    }
+    candidates
+}
+
 pub(crate) fn supports_winpty() -> anyhow::Result<()> {
     winpty_builder()
         .open()
@@ -84,7 +127,8 @@ pub(crate) fn spawn_winpty(
     environment: EnvBlock,
 ) -> anyhow::Result<(WinptySession, UnboundedReceiver<String>)> {
     let mut pty = winpty_builder().open().map_err(map_winpty_error)?;
-    let mut spawn = SpawnConfig::new(&cmd[0]).cwd(cwd.as_os_str().to_os_string());
+    let mut spawn = SpawnConfig::new(resolve_executable_for_winpty(&cmd[0]))
+        .cwd(cwd.as_os_str().to_os_string());
     if let Some(cmdline) = command_line(&cmd[1..]) {
         spawn = spawn.cmdline(cmdline);
     }
@@ -153,5 +197,55 @@ impl WinptySession {
             .context("failed to run taskkill for winpty session")?;
         anyhow::ensure!(status.success(), "taskkill failed for winpty session");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsString;
+
+    use super::{command_line, quote_windows_argument};
+
+    #[test]
+    fn quote_windows_argument_leaves_simple_arguments_unchanged() {
+        assert_eq!(quote_windows_argument("plain"), "plain");
+        assert_eq!(quote_windows_argument(r#"C:\Tools\bin"#), r#"C:\Tools\bin"#);
+    }
+
+    #[test]
+    fn quote_windows_argument_quotes_whitespace_and_embedded_quotes() {
+        assert_eq!(quote_windows_argument("two words"), r#""two words""#);
+        assert_eq!(
+            quote_windows_argument(r#"quote "mark""#),
+            r#""quote \"mark\"""#
+        );
+    }
+
+    #[test]
+    fn quote_windows_argument_doubles_trailing_backslashes_before_closing_quote() {
+        assert_eq!(
+            quote_windows_argument(r#"C:\Program Files\Test Folder\"#),
+            r#""C:\Program Files\Test Folder\\""#,
+        );
+    }
+
+    #[test]
+    fn command_line_quotes_each_argument_for_winpty_spawn() {
+        assert_eq!(
+            command_line(&[
+                "plain".to_string(),
+                "two words".to_string(),
+                r#"quote "mark""#.to_string(),
+                r#"C:\Program Files\Test Folder\"#.to_string(),
+            ]),
+            Some(OsString::from(
+                r#"plain "two words" "quote \"mark\"" "C:\Program Files\Test Folder\\""#,
+            ))
+        );
+    }
+
+    #[test]
+    fn command_line_returns_none_for_empty_argv_tail() {
+        assert_eq!(command_line(&[]), None);
     }
 }

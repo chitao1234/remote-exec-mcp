@@ -26,7 +26,7 @@ pub async fn exec_start(
     Json(req): Json<ExecStartRequest>,
 ) -> Result<Json<ExecResponse>, (StatusCode, Json<RpcErrorBody>)> {
     let cwd = resolve_workdir(&state, req.workdir.as_deref()).map_err(internal_error)?;
-    if req.tty && !session::supports_pty() {
+    if req.tty && !session::supports_pty_with_override(state.config.windows_pty_backend_override) {
         return Err(rpc_error(
             "tty_unsupported",
             "tty is not supported on this host",
@@ -51,7 +51,13 @@ pub async fn exec_start(
     };
     let shell = shell::resolve_shell(req.shell.as_deref()).map_err(internal_error)?;
     let argv = shell::shell_argv(&shell, login, &req.cmd);
-    let mut session = session::spawn(&argv, &cwd, req.tty).map_err(internal_error)?;
+    let mut session = session::spawn_with_windows_pty_backend_override(
+        &argv,
+        &cwd,
+        req.tty,
+        state.config.windows_pty_backend_override,
+    )
+    .map_err(internal_error)?;
 
     let deadline = Instant::now()
         + Duration::from_millis(req.yield_time_ms.unwrap_or(10_000).clamp(250, 30_000));

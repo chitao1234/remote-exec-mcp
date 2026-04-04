@@ -575,6 +575,7 @@ async fn spawn_named_daemon_on_addr(
             listen: addr,
             default_workdir: PathBuf::from("."),
             allow_login_shell: true,
+            windows_pty_backend_override: None,
             tls: remote_exec_daemon::config::TlsConfig {
                 cert_pem: certs.daemon_cert.clone(),
                 key_pem: certs.daemon_key.clone(),

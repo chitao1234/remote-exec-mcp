@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 
 use base64::Engine;
 use image::ImageFormat;
+#[cfg(windows)]
+use remote_exec_daemon::config::WindowsPtyBackendOverride;
 use remote_exec_proto::rpc::RpcErrorBody;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -88,7 +90,10 @@ impl DaemonFixture {
     }
 }
 
-pub async fn spawn_daemon(target: &str) -> DaemonFixture {
+async fn spawn_daemon_with_backend_override(
+    target: &str,
+    windows_pty_backend_override: Option<remote_exec_daemon::config::WindowsPtyBackendOverride>,
+) -> DaemonFixture {
     remote_exec_daemon::install_crypto_provider();
 
     let tempdir = tempfile::tempdir().unwrap();
@@ -104,6 +109,7 @@ pub async fn spawn_daemon(target: &str) -> DaemonFixture {
         listen: addr,
         default_workdir: workdir.clone(),
         allow_login_shell: true,
+        windows_pty_backend_override,
         tls: remote_exec_daemon::config::TlsConfig {
             cert_pem: certs.daemon_cert.clone(),
             key_pem: certs.daemon_key.clone(),
@@ -138,6 +144,16 @@ pub async fn spawn_daemon(target: &str) -> DaemonFixture {
         addr,
         workdir,
     }
+}
+
+pub async fn spawn_daemon(target: &str) -> DaemonFixture {
+    spawn_daemon_with_backend_override(target, None).await
+}
+
+#[cfg(windows)]
+#[allow(dead_code)]
+pub async fn spawn_daemon_forced_winpty(target: &str) -> DaemonFixture {
+    spawn_daemon_with_backend_override(target, Some(WindowsPtyBackendOverride::Winpty)).await
 }
 
 #[allow(dead_code)]

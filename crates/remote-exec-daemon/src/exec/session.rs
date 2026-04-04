@@ -21,6 +21,8 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use winptyrs::EnvBlock;
 
 use super::transcript::TranscriptBuffer;
+#[cfg(windows)]
+use crate::config::WindowsPtyBackendOverride;
 
 const NORMALIZED_ENV: [(&str, &str); 7] = [
     ("NO_COLOR", "1"),
@@ -212,8 +214,20 @@ fn select_windows_pty_backend_with(
 }
 
 #[cfg(windows)]
-fn select_windows_pty_backend() -> Option<WindowsPtyBackend> {
-    select_windows_pty_backend_with(portable_pty_probe, super::winpty::supports_winpty)
+fn select_windows_pty_backend_with_override(
+    windows_pty_backend_override: Option<WindowsPtyBackendOverride>,
+    portable_probe: impl FnOnce() -> anyhow::Result<()>,
+    winpty_probe: impl FnOnce() -> anyhow::Result<()>,
+) -> Option<WindowsPtyBackend> {
+    match windows_pty_backend_override {
+        Some(WindowsPtyBackendOverride::PortablePty) => portable_probe()
+            .ok()
+            .map(|_| WindowsPtyBackend::PortablePty),
+        Some(WindowsPtyBackendOverride::Winpty) => {
+            winpty_probe().ok().map(|_| WindowsPtyBackend::Winpty)
+        }
+        None => select_windows_pty_backend_with(portable_probe, winpty_probe),
+    }
 }
 
 #[cfg(windows)]
@@ -235,16 +249,28 @@ fn collect_windows_pty_diagnostics() -> WindowsPtyDiagnostics {
     }
 }
 
-pub fn supports_pty() -> bool {
+pub fn supports_pty_with_override(
+    windows_pty_backend_override: Option<WindowsPtyBackendOverride>,
+) -> bool {
     #[cfg(windows)]
     {
-        select_windows_pty_backend().is_some()
+        select_windows_pty_backend_with_override(
+            windows_pty_backend_override,
+            portable_pty_probe,
+            super::winpty::supports_winpty,
+        )
+        .is_some()
     }
 
     #[cfg(not(windows))]
     {
+        let _ = windows_pty_backend_override;
         portable_pty_probe().is_ok()
     }
+}
+
+pub fn supports_pty() -> bool {
+    supports_pty_with_override(None)
 }
 
 #[cfg(windows)]
@@ -308,11 +334,20 @@ fn summarize_output_excerpt(output: &str) -> String {
     }
 }
 
-pub fn spawn(cmd: &[String], cwd: &std::path::Path, tty: bool) -> anyhow::Result<LiveSession> {
+pub fn spawn_with_windows_pty_backend_override(
+    cmd: &[String],
+    cwd: &std::path::Path,
+    tty: bool,
+    windows_pty_backend_override: Option<WindowsPtyBackendOverride>,
+) -> anyhow::Result<LiveSession> {
     if tty {
         #[cfg(windows)]
         {
-            match select_windows_pty_backend() {
+            match select_windows_pty_backend_with_override(
+                windows_pty_backend_override,
+                portable_pty_probe,
+                super::winpty::supports_winpty,
+            ) {
                 Some(WindowsPtyBackend::PortablePty) => spawn_pty(cmd, cwd),
                 Some(WindowsPtyBackend::Winpty) => {
                     let (session, receiver) =
@@ -333,12 +368,17 @@ pub fn spawn(cmd: &[String], cwd: &std::path::Path, tty: bool) -> anyhow::Result
 
         #[cfg(not(windows))]
         {
+            let _ = windows_pty_backend_override;
             anyhow::ensure!(supports_pty(), "tty is not supported on this host");
             spawn_pty(cmd, cwd)
         }
     } else {
         spawn_pipe(cmd, cwd)
     }
+}
+
+pub fn spawn(cmd: &[String], cwd: &std::path::Path, tty: bool) -> anyhow::Result<LiveSession> {
+    spawn_with_windows_pty_backend_override(cmd, cwd, tty, None)
 }
 
 fn normalized_env_pairs() -> Vec<(String, String)> {
@@ -755,7 +795,12 @@ impl LiveSession {
 #[cfg(test)]
 mod windows_pty_backend_tests {
     #[cfg(windows)]
+    use crate::config::WindowsPtyBackendOverride;
+
+    #[cfg(windows)]
     use super::WindowsTerminalQueryState;
+    #[cfg(windows)]
+    use super::select_windows_pty_backend_with_override;
     use super::{WindowsPtyBackend, select_windows_pty_backend_with};
 
     #[test]
@@ -782,6 +827,32 @@ mod windows_pty_backend_tests {
         assert_eq!(
             select_windows_pty_backend_with(
                 || Err(anyhow::anyhow!("conpty unavailable")),
+                || Err(anyhow::anyhow!("winpty unavailable"))
+            ),
+            None
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_pty_backend_override_forces_winpty_without_probing_portable_pty() {
+        assert_eq!(
+            select_windows_pty_backend_with_override(
+                Some(WindowsPtyBackendOverride::Winpty),
+                || panic!("portable-pty probe should not run when winpty is forced"),
+                || Ok(())
+            ),
+            Some(WindowsPtyBackend::Winpty)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_pty_backend_override_reports_no_support_when_forced_backend_fails() {
+        assert_eq!(
+            select_windows_pty_backend_with_override(
+                Some(WindowsPtyBackendOverride::Winpty),
+                || panic!("portable-pty probe should not run when winpty is forced"),
                 || Err(anyhow::anyhow!("winpty unavailable"))
             ),
             None

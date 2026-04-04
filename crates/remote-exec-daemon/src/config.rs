@@ -4,6 +4,12 @@ use std::path::PathBuf;
 use anyhow::Context;
 use serde::Deserialize;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowsPtyBackendOverride {
+    PortablePty,
+    Winpty,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct DaemonConfig {
     pub target: String,
@@ -11,6 +17,8 @@ pub struct DaemonConfig {
     pub default_workdir: PathBuf,
     #[serde(default = "default_allow_login_shell")]
     pub allow_login_shell: bool,
+    #[serde(skip, default)]
+    pub windows_pty_backend_override: Option<WindowsPtyBackendOverride>,
     pub tls: TlsConfig,
 }
 

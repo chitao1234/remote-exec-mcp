@@ -65,6 +65,133 @@ fn windows_probe_command(mode: &str) -> String {
     format!("& '{probe}' {mode}")
 }
 
+#[cfg(windows)]
+fn strip_ansi(text: &str) -> String {
+    let mut out = String::new();
+    let mut chars = text.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' && chars.peek() == Some(&'[') {
+            chars.next();
+            for next in chars.by_ref() {
+                if ('@'..='~').contains(&next) {
+                    break;
+                }
+            }
+            continue;
+        }
+
+        out.push(ch);
+    }
+
+    out
+}
+
+#[cfg(windows)]
+async fn assert_windows_tty_session_answers_terminal_queries(fixture: &support::DaemonFixture) {
+    let started = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "echo hello & ping -n 30 127.0.0.1 >nul".to_string(),
+                workdir: None,
+                shell: Some("cmd.exe".to_string()),
+                tty: true,
+                yield_time_ms: Some(250),
+                max_output_tokens: Some(2_000),
+                login: Some(false),
+            },
+        )
+        .await;
+
+    assert!(started.running, "start response: {started:#?}");
+    let session_id = started
+        .daemon_session_id
+        .clone()
+        .expect("tty start should create a live session");
+
+    let polled = fixture
+        .rpc::<ExecWriteRequest, ExecResponse>(
+            "/v1/exec/write",
+            &ExecWriteRequest {
+                daemon_session_id: session_id,
+                chars: String::new(),
+                yield_time_ms: Some(5_000),
+                max_output_tokens: Some(2_000),
+            },
+        )
+        .await;
+
+    assert!(polled.running, "poll response: {polled:#?}");
+
+    let combined_output = format!("{}{}", started.output, polled.output).to_ascii_lowercase();
+    assert!(
+        combined_output.contains("hello"),
+        "combined output did not contain hello: {combined_output:?}"
+    );
+    assert!(
+        !combined_output.contains("\u{1b}[5n"),
+        "combined output leaked DSR probe: {combined_output:?}"
+    );
+    assert!(
+        !combined_output.contains("\u{1b}[6n"),
+        "combined output leaked CPR probe: {combined_output:?}"
+    );
+}
+
+#[cfg(windows)]
+async fn assert_windows_bare_lf_advances_pty_line_reader(fixture: &support::DaemonFixture) {
+    let started = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &windows_start_request(&windows_probe_command("read_line"), true, Some(250), None),
+        )
+        .await;
+
+    assert!(started.running, "start response: {started:#?}");
+
+    let session_id = started.daemon_session_id.expect("live session");
+    let response = fixture
+        .rpc::<ExecWriteRequest, ExecResponse>(
+            "/v1/exec/write",
+            &ExecWriteRequest {
+                daemon_session_id: session_id.clone(),
+                chars: "ping\n".to_string(),
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
+                max_output_tokens: None,
+            },
+        )
+        .await;
+
+    let mut combined_output = started.output;
+    combined_output.push_str(&response.output);
+
+    let exit_code = if response.running {
+        let tail = fixture
+            .rpc::<ExecWriteRequest, ExecResponse>(
+                "/v1/exec/write",
+                &ExecWriteRequest {
+                    daemon_session_id: session_id,
+                    chars: String::new(),
+                    yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
+                    max_output_tokens: None,
+                },
+            )
+            .await;
+        combined_output.push_str(&tail.output);
+        tail.exit_code
+    } else {
+        response.exit_code
+    };
+
+    assert_eq!(exit_code, Some(0), "combined output: {:?}", combined_output);
+    assert!(
+        combined_output.contains("LINE:ping"),
+        "combined output did not contain completed line marker: {:?}",
+        combined_output
+    );
+}
+
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
@@ -275,54 +402,14 @@ async fn exec_start_uses_cmd_when_shell_is_omitted() {
 #[tokio::test]
 async fn exec_start_keeps_windows_tty_sessions_alive_and_answers_terminal_queries() {
     let fixture = support::spawn_daemon("builder-a").await;
-    let started = fixture
-        .rpc::<ExecStartRequest, ExecResponse>(
-            "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "echo hello & ping -n 30 127.0.0.1 >nul".to_string(),
-                workdir: None,
-                shell: Some("cmd.exe".to_string()),
-                tty: true,
-                yield_time_ms: Some(250),
-                max_output_tokens: Some(2_000),
-                login: Some(false),
-            },
-        )
-        .await;
+    assert_windows_tty_session_answers_terminal_queries(&fixture).await;
+}
 
-    assert!(started.running, "start response: {started:#?}");
-    let session_id = started
-        .daemon_session_id
-        .clone()
-        .expect("tty start should create a live session");
-
-    let polled = fixture
-        .rpc::<ExecWriteRequest, ExecResponse>(
-            "/v1/exec/write",
-            &ExecWriteRequest {
-                daemon_session_id: session_id,
-                chars: String::new(),
-                yield_time_ms: Some(5_000),
-                max_output_tokens: Some(2_000),
-            },
-        )
-        .await;
-
-    assert!(polled.running, "poll response: {polled:#?}");
-
-    let combined_output = format!("{}{}", started.output, polled.output).to_ascii_lowercase();
-    assert!(
-        combined_output.contains("hello"),
-        "combined output did not contain hello: {combined_output:?}"
-    );
-    assert!(
-        !combined_output.contains("\u{1b}[5n"),
-        "combined output leaked DSR probe: {combined_output:?}"
-    );
-    assert!(
-        !combined_output.contains("\u{1b}[6n"),
-        "combined output leaked CPR probe: {combined_output:?}"
-    );
+#[cfg(windows)]
+#[tokio::test]
+async fn exec_start_forced_winpty_keeps_windows_tty_sessions_alive_and_answers_terminal_queries() {
+    let fixture = support::spawn_daemon_forced_winpty("builder-a").await;
+    assert_windows_tty_session_answers_terminal_queries(&fixture).await;
 }
 
 #[cfg(windows)]
@@ -603,54 +690,37 @@ async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon_on_windows(
 #[tokio::test]
 async fn exec_write_bare_lf_advances_windows_pty_line_reader() {
     let fixture = support::spawn_daemon("builder-a").await;
-    let started = fixture
+    assert_windows_bare_lf_advances_pty_line_reader(&fixture).await;
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn exec_write_bare_lf_advances_forced_winpty_line_reader() {
+    let fixture = support::spawn_daemon_forced_winpty("builder-a").await;
+    assert_windows_bare_lf_advances_pty_line_reader(&fixture).await;
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn exec_start_forced_winpty_preserves_complex_powershell_command_quoting() {
+    let fixture = support::spawn_daemon_forced_winpty("builder-a").await;
+
+    let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &windows_start_request(&windows_probe_command("read_line"), true, Some(250), None),
+            &windows_start_request(
+                r#"$items = @('plain', 'two words', 'quote "mark"', 'trail\', 'C:\Program Files\Test Folder\'); [Console]::Out.Write(($items -join '|'))"#,
+                true,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+            ),
         )
         .await;
 
-    assert!(started.running, "start response: {started:#?}");
-
-    let session_id = started.daemon_session_id.expect("live session");
-    let response = fixture
-        .rpc::<ExecWriteRequest, ExecResponse>(
-            "/v1/exec/write",
-            &ExecWriteRequest {
-                daemon_session_id: session_id.clone(),
-                chars: "ping\n".to_string(),
-                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: None,
-            },
-        )
-        .await;
-
-    let mut combined_output = started.output;
-    combined_output.push_str(&response.output);
-
-    let exit_code = if response.running {
-        let tail = fixture
-            .rpc::<ExecWriteRequest, ExecResponse>(
-                "/v1/exec/write",
-                &ExecWriteRequest {
-                    daemon_session_id: session_id,
-                    chars: String::new(),
-                    yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                    max_output_tokens: None,
-                },
-            )
-            .await;
-        combined_output.push_str(&tail.output);
-        tail.exit_code
-    } else {
-        response.exit_code
-    };
-
-    assert_eq!(exit_code, Some(0), "combined output: {:?}", combined_output);
-    assert!(
-        combined_output.contains("LINE:ping"),
-        "combined output did not contain completed line marker: {:?}",
-        combined_output
+    assert_eq!(response.exit_code, Some(0), "response: {response:#?}");
+    assert_eq!(
+        strip_ansi(&response.output),
+        r#"plain|two words|quote "mark"|trail\|C:\Program Files\Test Folder\"#
     );
 }
 
