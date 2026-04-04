@@ -10,7 +10,9 @@ resolver = "2"
 
 [workspace.package]
 edition = "2024"
+homepage = "https://github.com/chitao1234/remote-exec-mcp"
 license = "Apache-2.0"
+repository = "https://github.com/chitao1234/remote-exec-mcp"
 version = "0.1.0"
 
 [workspace.dependencies]
@@ -47,4 +49,4 @@ tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["serde", "v4"] }
-winpty-rs = { path = "vendor/winpty-rs" }
+winptyrs = { path = "winptyrs/crates/winptyrs" }

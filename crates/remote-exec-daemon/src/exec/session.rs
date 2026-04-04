@@ -17,6 +17,8 @@ use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+#[cfg(windows)]
+use winptyrs::EnvBlock;
 
 use super::transcript::TranscriptBuffer;
 
@@ -367,7 +369,7 @@ fn apply_env_overlay_command(command: &mut Command) {
 }
 
 #[cfg(windows)]
-fn winpty_environment_block() -> OsString {
+fn winpty_environment_block() -> EnvBlock {
     let mut environment = BTreeMap::<String, (String, OsString)>::new();
 
     for (key, value) in std::env::vars_os() {
@@ -383,15 +385,7 @@ fn winpty_environment_block() -> OsString {
         environment.insert(key.to_ascii_uppercase(), (key, OsString::from(value)));
     }
 
-    let mut block = OsString::new();
-    for (_normalized, (key, value)) in environment {
-        let mut entry = OsString::from(key);
-        entry.push("=");
-        entry.push(&value);
-        block.push(entry);
-        block.push("\0");
-    }
-    block
+    EnvBlock::from_pairs(environment.into_values())
 }
 
 #[cfg(windows)]

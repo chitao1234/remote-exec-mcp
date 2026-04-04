@@ -6,24 +6,24 @@ use std::time::Duration;
 
 use anyhow::Context;
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
-use winptyrs::{AgentConfig, MouseMode, PTY, PTYArgs, PTYBackend};
+use winptyrs::{AgentBuilder, AgentFlags, Child, EnvBlock, MouseMode, Pty, PtySize, SpawnConfig};
 
 pub(crate) struct WinptySession {
-    pty: Arc<Mutex<PTY>>,
+    child: Arc<Mutex<Child>>,
+    pid: u32,
+    pty: Arc<Mutex<Pty>>,
 }
 
-fn map_winpty_error(err: OsString) -> anyhow::Error {
-    anyhow::anyhow!(err.to_string_lossy().into_owned())
+fn map_winpty_error(err: winptyrs::Error) -> anyhow::Error {
+    anyhow::anyhow!(err.to_string())
 }
 
-fn winpty_args() -> PTYArgs {
-    PTYArgs {
-        cols: 120,
-        rows: 24,
-        mouse_mode: MouseMode::WINPTY_MOUSE_MODE_NONE,
-        timeout: 10_000,
-        agent_config: AgentConfig::WINPTY_FLAG_COLOR_ESCAPES,
-    }
+fn winpty_builder() -> AgentBuilder {
+    AgentBuilder::new()
+        .size(PtySize::new(120, 24).expect("default winpty size is valid"))
+        .mouse_mode(MouseMode::None)
+        .timeout_ms(10_000)
+        .agent_flags(AgentFlags::COLOR_ESCAPES)
 }
 
 fn quote_windows_argument(arg: &str) -> String {
@@ -72,7 +72,8 @@ fn command_line(args: &[String]) -> Option<OsString> {
 }
 
 pub(crate) fn supports_winpty() -> anyhow::Result<()> {
-    PTY::new_with_backend(&winpty_args(), PTYBackend::WinPTY)
+    winpty_builder()
+        .open()
         .map(|_| ())
         .map_err(map_winpty_error)
 }
@@ -80,52 +81,55 @@ pub(crate) fn supports_winpty() -> anyhow::Result<()> {
 pub(crate) fn spawn_winpty(
     cmd: &[String],
     cwd: &Path,
-    environment: OsString,
+    environment: EnvBlock,
 ) -> anyhow::Result<(WinptySession, UnboundedReceiver<String>)> {
-    let mut pty =
-        PTY::new_with_backend(&winpty_args(), PTYBackend::WinPTY).map_err(map_winpty_error)?;
-    pty.spawn(
-        OsString::from(&cmd[0]),
-        command_line(&cmd[1..]),
-        Some(cwd.as_os_str().to_os_string()),
-        Some(environment),
-    )
-    .map_err(map_winpty_error)?;
+    let mut pty = winpty_builder().open().map_err(map_winpty_error)?;
+    let mut spawn = SpawnConfig::new(&cmd[0]).cwd(cwd.as_os_str().to_os_string());
+    if let Some(cmdline) = command_line(&cmd[1..]) {
+        spawn = spawn.cmdline(cmdline);
+    }
+    let child = pty
+        .spawn(spawn.env(environment))
+        .map_err(map_winpty_error)?;
 
-    let pty: Arc<Mutex<PTY>> = Arc::new(Mutex::new(pty));
-    let reader: Arc<Mutex<PTY>> = Arc::clone(&pty);
+    let pid = child.id();
+    let pty: Arc<Mutex<Pty>> = Arc::new(Mutex::new(pty));
+    let reader: Arc<Mutex<Pty>> = Arc::clone(&pty);
+    let child: Arc<Mutex<Child>> = Arc::new(Mutex::new(child));
+    let reader_child = Arc::clone(&child);
     let (sender, receiver) = unbounded_channel();
 
     std::thread::spawn(move || {
         loop {
-            let read_result: Result<OsString, OsString> = reader.lock().unwrap().read(false);
+            let read_result = reader.lock().unwrap().read_nonblocking();
             match read_result {
                 Ok(chunk) if !chunk.is_empty() => {
-                    if sender.send(chunk.to_string_lossy().into_owned()).is_err() {
+                    if sender.send(chunk).is_err() {
                         break;
                     }
                 }
                 Ok(_) => {
-                    if !reader.lock().unwrap().is_alive().unwrap_or(false) {
+                    if !reader_child.lock().unwrap().is_alive().unwrap_or(false) {
                         break;
                     }
                     std::thread::sleep(Duration::from_millis(25));
                 }
+                Err(winptyrs::Error::Eof) => break,
                 Err(_) => break,
             }
         }
     });
 
-    Ok((WinptySession { pty }, receiver))
+    Ok((WinptySession { child, pid, pty }, receiver))
 }
 
 impl WinptySession {
     pub(crate) fn try_wait(&self) -> anyhow::Result<Option<i32>> {
-        self.pty
+        self.child
             .lock()
             .unwrap()
-            .get_exitstatus()
-            .map(|status: Option<u32>| status.map(|value| value as i32))
+            .try_wait()
+            .map(|status| status.map(|value| value as i32))
             .map_err(map_winpty_error)
     }
 
@@ -133,7 +137,7 @@ impl WinptySession {
         self.pty
             .lock()
             .unwrap()
-            .write(OsString::from(chars))
+            .write(chars)
             .map(|_| ())
             .map_err(map_winpty_error)
     }
@@ -143,10 +147,8 @@ impl WinptySession {
             return Ok(());
         }
 
-        let pid = self.pty.lock().unwrap().get_pid();
-        let _ = self.pty.lock().unwrap().cancel_io();
         let status = ProcessCommand::new("taskkill.exe")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .args(["/PID", &self.pid.to_string(), "/T", "/F"])
             .status()
             .context("failed to run taskkill for winpty session")?;
         anyhow::ensure!(status.success(), "taskkill failed for winpty session");
