@@ -4,7 +4,7 @@ use remote_exec_proto::rpc::{PatchApplyRequest, PatchApplyResponse};
 
 #[tokio::test]
 async fn add_file_overwrites_existing_content() {
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
     let path = fixture.workdir.join("demo.txt");
     tokio::fs::write(&path, "old\n").await.unwrap();
 
@@ -24,7 +24,7 @@ async fn add_file_overwrites_existing_content() {
 
 #[tokio::test]
 async fn update_file_accepts_end_of_file_marker() {
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
     let path = fixture.workdir.join("plain.txt");
     tokio::fs::write(&path, "before\nmiddle\nbefore\n")
         .await
@@ -58,7 +58,7 @@ async fn update_file_accepts_end_of_file_marker() {
 
 #[tokio::test]
 async fn update_move_accepts_horizontal_whitespace_on_control_lines() {
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
     let source = fixture.workdir.join("old.txt");
     let destination = fixture.workdir.join("new.txt");
     tokio::fs::write(&source, "old\n").await.unwrap();
@@ -93,7 +93,7 @@ async fn update_move_accepts_horizontal_whitespace_on_control_lines() {
 
 #[tokio::test]
 async fn update_file_rejects_non_eof_match_for_end_of_file_marker() {
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
     let path = fixture.workdir.join("plain.txt");
     tokio::fs::write(&path, "before\nmiddle\ntail\n")
         .await
@@ -127,7 +127,7 @@ async fn update_file_rejects_non_eof_match_for_end_of_file_marker() {
 
 #[tokio::test]
 async fn update_file_appends_at_eof_for_pure_addition_with_matching_context() {
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
     let path = fixture.workdir.join("plain.txt");
     tokio::fs::write(&path, "before\ntail\n").await.unwrap();
 
@@ -158,7 +158,7 @@ async fn update_file_appends_at_eof_for_pure_addition_with_matching_context() {
 
 #[tokio::test]
 async fn update_file_rejects_eof_pure_addition_when_context_is_missing() {
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
     let path = fixture.workdir.join("plain.txt");
     tokio::fs::write(&path, "before\ntail\n").await.unwrap();
 
@@ -189,7 +189,7 @@ async fn update_file_rejects_eof_pure_addition_when_context_is_missing() {
 
 #[tokio::test]
 async fn later_verification_failures_do_not_mutate_earlier_files() {
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
     tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
         .await
         .unwrap();
@@ -224,7 +224,7 @@ async fn later_verification_failures_do_not_mutate_earlier_files() {
 
 #[tokio::test]
 async fn delete_directory_is_rejected_before_earlier_mutation() {
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
     tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
         .await
         .unwrap();
@@ -262,7 +262,7 @@ async fn delete_directory_is_rejected_before_earlier_mutation() {
 
 #[tokio::test]
 async fn non_utf8_update_source_is_rejected_before_earlier_mutation() {
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
     tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
         .await
         .unwrap();
@@ -303,7 +303,7 @@ async fn non_utf8_update_source_is_rejected_before_earlier_mutation() {
 
 #[tokio::test]
 async fn non_utf8_delete_source_is_rejected_before_earlier_mutation() {
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
     tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
         .await
         .unwrap();
@@ -341,7 +341,7 @@ async fn non_utf8_delete_source_is_rejected_before_earlier_mutation() {
 
 #[tokio::test]
 async fn execution_failures_do_not_roll_back_earlier_file_changes() {
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
     tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
         .await
         .unwrap();
@@ -381,7 +381,7 @@ async fn execution_failures_do_not_roll_back_earlier_file_changes() {
 
 #[tokio::test]
 async fn update_file_applies_repeated_context_additions_in_order() {
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
     let path = fixture.workdir.join("plain.txt");
     tokio::fs::write(&path, "a\nmarker\nb\nmarker\nc\n")
         .await

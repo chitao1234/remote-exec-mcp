@@ -248,7 +248,7 @@ async fn windows_pty_debug_report_prints_backend_diagnostics() {
         raw_portable_pty_smoke(None, &[], &[], false, 300, false)
     );
 
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
     let start = fixture
         .rpc::<remote_exec_proto::rpc::ExecStartRequest, remote_exec_proto::rpc::ExecResponse>(
             "/v1/exec/start",

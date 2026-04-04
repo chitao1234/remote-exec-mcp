@@ -5,7 +5,7 @@ use reqwest::StatusCode;
 
 #[tokio::test]
 async fn target_info_is_available_over_mutual_tls() {
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
 
     let health = fixture
         .client

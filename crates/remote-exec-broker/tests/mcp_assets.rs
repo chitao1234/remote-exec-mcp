@@ -6,7 +6,7 @@ use rmcp::model::PaginatedRequestParams;
 
 #[tokio::test]
 async fn apply_patch_returns_plain_text_plus_empty_structured_content() {
-    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     let result = fixture
         .call_tool(
             "apply_patch",
@@ -28,7 +28,7 @@ async fn apply_patch_returns_plain_text_plus_empty_structured_content() {
 
 #[tokio::test]
 async fn list_targets_returns_cached_daemon_info_and_null_for_unavailable_targets() {
-    let fixture = support::spawn_broker_with_reverse_ordered_targets().await;
+    let fixture = support::spawners::spawn_broker_with_reverse_ordered_targets().await;
     let result = fixture
         .call_tool("list_targets", serde_json::json!({}))
         .await;
@@ -62,7 +62,7 @@ async fn list_targets_returns_cached_daemon_info_and_null_for_unavailable_target
 
 #[tokio::test]
 async fn list_targets_formats_windows_metadata_and_truthful_pty_support() {
-    let fixture = support::spawn_broker_with_stub_daemon_platform("windows", false).await;
+    let fixture = support::spawners::spawn_broker_with_stub_daemon_platform("windows", false).await;
     let result = fixture
         .call_tool("list_targets", serde_json::json!({}))
         .await;
@@ -75,7 +75,7 @@ async fn list_targets_formats_windows_metadata_and_truthful_pty_support() {
 
 #[tokio::test]
 async fn view_image_returns_input_image_content_and_structured_content() {
-    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     let result = fixture
         .call_tool(
             "view_image",
@@ -98,9 +98,9 @@ async fn view_image_returns_input_image_content_and_structured_content() {
 
 #[tokio::test]
 async fn view_image_returns_text_only_errors_without_input_image_content() {
-    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     fixture
-        .set_image_read_response(support::StubImageReadResponse::Error {
+        .set_image_read_response(support::stub_daemon::StubImageReadResponse::Error {
             status: StatusCode::BAD_REQUEST,
             body: RpcErrorBody {
                 code: "image_missing".to_string(),
@@ -137,9 +137,9 @@ async fn view_image_returns_text_only_errors_without_input_image_content() {
 
 #[tokio::test]
 async fn view_image_invalid_detail_matches_daemon_message() {
-    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     fixture
-        .set_image_read_response(support::StubImageReadResponse::Error {
+        .set_image_read_response(support::stub_daemon::StubImageReadResponse::Error {
             status: StatusCode::BAD_REQUEST,
             body: RpcErrorBody {
                 code: "invalid_detail".to_string(),
@@ -170,7 +170,7 @@ async fn view_image_invalid_detail_matches_daemon_message() {
 
 #[tokio::test]
 async fn list_targets_is_advertised_as_read_only() {
-    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
 
     let tools = fixture
         .client
@@ -198,7 +198,7 @@ async fn list_targets_is_advertised_as_read_only() {
 
 #[tokio::test]
 async fn view_image_is_advertised_as_read_only() {
-    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
 
     let tools = fixture
         .client

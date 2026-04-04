@@ -10,7 +10,7 @@ use remote_exec_proto::rpc::{
 
 #[tokio::test]
 async fn export_file_streams_archive_and_reports_file_source_type() {
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
     let source = fixture.workdir.join("hello.txt");
     tokio::fs::write(&source, "hello\n").await.unwrap();
 
@@ -39,7 +39,7 @@ async fn export_file_streams_archive_and_reports_file_source_type() {
 #[cfg(unix)]
 #[tokio::test]
 async fn export_directory_rejects_nested_symlinks_before_streaming() {
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
     let root = fixture.workdir.join("dist");
     tokio::fs::create_dir_all(&root).await.unwrap();
     tokio::fs::write(root.join("app.txt"), "ok\n")
@@ -67,7 +67,7 @@ async fn export_directory_rejects_nested_symlinks_before_streaming() {
 #[cfg(unix)]
 #[tokio::test]
 async fn export_rejects_symlink_source_root() {
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
     let target = fixture.workdir.join("target.txt");
     let link = fixture.workdir.join("root-link");
     tokio::fs::write(&target, "ok\n").await.unwrap();
@@ -93,7 +93,7 @@ async fn export_rejects_symlink_source_root() {
 #[cfg(unix)]
 #[tokio::test]
 async fn export_file_preserves_executable_mode_in_archive_header() {
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
     let source = fixture.workdir.join("tool.sh");
     tokio::fs::write(&source, "#!/bin/sh\necho hi\n")
         .await
@@ -121,7 +121,7 @@ async fn export_file_preserves_executable_mode_in_archive_header() {
 #[cfg(windows)]
 #[tokio::test]
 async fn import_accepts_forward_slash_windows_destination_paths() {
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
     let source = fixture.workdir.join("source.txt");
     tokio::fs::write(&source, "artifact\n").await.unwrap();
 
@@ -159,7 +159,7 @@ async fn import_accepts_forward_slash_windows_destination_paths() {
 
 #[tokio::test]
 async fn import_directory_replaces_exact_destination_and_preserves_exec_bits() {
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
     let source_root = fixture.workdir.join("dist");
     tokio::fs::create_dir_all(source_root.join("empty"))
         .await
@@ -229,7 +229,7 @@ async fn import_directory_replaces_exact_destination_and_preserves_exec_bits() {
 
 #[tokio::test]
 async fn import_rejects_existing_destination_when_overwrite_is_fail() {
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
     let source = fixture.workdir.join("source.txt");
     let destination = fixture.workdir.join("dest.txt");
     tokio::fs::write(&source, "new\n").await.unwrap();
@@ -275,7 +275,7 @@ async fn import_rejects_existing_destination_when_overwrite_is_fail() {
 
 #[tokio::test]
 async fn import_replaces_directory_with_file_at_the_exact_destination_path() {
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
     let source = fixture.workdir.join("tool.txt");
     let destination = fixture.workdir.join("release");
     tokio::fs::write(&source, "artifact\n").await.unwrap();
@@ -321,7 +321,7 @@ async fn import_replaces_directory_with_file_at_the_exact_destination_path() {
 
 #[tokio::test]
 async fn import_rejects_missing_parent_when_create_parent_is_false() {
-    let fixture = support::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
     let source = fixture.workdir.join("source.txt");
     let destination = fixture.workdir.join("missing/child.txt");
     tokio::fs::write(&source, "artifact\n").await.unwrap();

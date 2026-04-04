@@ -2,7 +2,7 @@ mod support;
 
 #[tokio::test]
 async fn exec_command_returns_opaque_session_id_and_session_command() {
-    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     let result = fixture
         .call_tool(
             "exec_command",
@@ -28,7 +28,7 @@ async fn exec_command_returns_opaque_session_id_and_session_command() {
 
 #[tokio::test]
 async fn exec_command_intercepts_direct_apply_patch_and_wraps_exec_output() {
-    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     let patch = concat!(
         "*** Begin Patch\n",
         "*** Add File: hello.txt\n",
@@ -67,7 +67,7 @@ async fn exec_command_intercepts_direct_apply_patch_and_wraps_exec_output() {
 
 #[tokio::test]
 async fn exec_command_non_matching_patch_text_still_uses_exec_start() {
-    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     let raw_patch = concat!(
         "*** Begin Patch\n",
         "*** Add File: raw.txt\n",
@@ -95,7 +95,7 @@ async fn exec_command_non_matching_patch_text_still_uses_exec_start() {
 
 #[tokio::test]
 async fn exec_command_intercepts_applypatch_heredoc_with_cd_wrapper() {
-    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     let patch = concat!(
         "*** Begin Patch\n",
         "*** Add File: hello.txt\n",
@@ -135,7 +135,7 @@ async fn exec_command_intercepts_applypatch_heredoc_with_cd_wrapper() {
 
 #[tokio::test]
 async fn exec_command_intercepts_apply_patch_whitespace_tolerant_forms() {
-    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     let direct_patch = concat!(
         "*** Begin Patch\n",
         "*** Add File: direct.txt\n",
@@ -165,7 +165,7 @@ async fn exec_command_intercepts_apply_patch_whitespace_tolerant_forms() {
         direct_patch.to_string()
     );
 
-    let heredoc_fixture = support::spawn_broker_with_stub_daemon().await;
+    let heredoc_fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     let heredoc_cmd = concat!(
         "cd\t nested  && \tapplypatch\t <<'PATCH'\n",
         "*** Begin Patch\n",
@@ -208,7 +208,7 @@ async fn exec_command_intercepts_apply_patch_whitespace_tolerant_forms() {
 
 #[tokio::test]
 async fn exec_command_intercepts_windows_shell_wrappers() {
-    let fixture = support::spawn_broker_with_stub_daemon_platform("windows", false).await;
+    let fixture = support::spawners::spawn_broker_with_stub_daemon_platform("windows", false).await;
     let patch = "*** Begin Patch\n*** Add File: wrapped.txt\n+wrapped\n*** End Patch\n";
 
     let cmd_result = fixture
@@ -244,7 +244,7 @@ async fn exec_command_intercepts_windows_shell_wrappers() {
 
 #[tokio::test]
 async fn exec_command_invalid_intercepted_patch_surfaces_tool_error() {
-    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
 
     let error = fixture
         .call_tool_error(
@@ -266,7 +266,7 @@ async fn exec_command_invalid_intercepted_patch_surfaces_tool_error() {
 
 #[tokio::test]
 async fn exec_command_intercepted_apply_patch_warning_success_in_meta() {
-    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     let patch = "*** Begin Patch\n*** Add File: warning.txt\n+warning\n*** End Patch\n";
 
     let result = fixture
@@ -288,7 +288,7 @@ async fn exec_command_intercepted_apply_patch_warning_success_in_meta() {
 
 #[tokio::test]
 async fn exec_command_intercepted_apply_patch_warning_error_in_meta() {
-    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     let result = fixture
         .raw_tool_result(
             "exec_command",
@@ -308,7 +308,7 @@ async fn exec_command_intercepted_apply_patch_warning_error_in_meta() {
 
 #[tokio::test]
 async fn exec_command_forwarded_session_warning_in_meta() {
-    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     fixture
         .set_exec_start_warnings(vec![remote_exec_proto::rpc::ExecWarning {
             code: "exec_session_limit_approaching".to_string(),
@@ -337,7 +337,7 @@ async fn exec_command_forwarded_session_warning_in_meta() {
 
 #[tokio::test]
 async fn write_stdin_routes_by_public_session_id_and_preserves_original_command_metadata() {
-    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     let started = fixture
         .call_tool(
             "exec_command",
@@ -386,7 +386,7 @@ async fn write_stdin_routes_by_public_session_id_and_preserves_original_command_
 
 #[tokio::test]
 async fn write_stdin_wraps_unknown_public_session_as_unknown_process_id() {
-    let fixture = support::spawn_broker_with_stub_daemon().await;
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
 
     let error = fixture
         .call_tool_error(
@@ -404,7 +404,7 @@ async fn write_stdin_wraps_unknown_public_session_as_unknown_process_id() {
 
 #[tokio::test]
 async fn write_stdin_wraps_daemon_unknown_session_as_unknown_process_id() {
-    let fixture = support::spawn_broker_with_unknown_session_exec_write_error().await;
+    let fixture = support::spawners::spawn_broker_with_unknown_session_exec_write_error().await;
 
     let started = fixture
         .call_tool(
@@ -444,7 +444,7 @@ async fn write_stdin_wraps_daemon_unknown_session_as_unknown_process_id() {
 
 #[tokio::test]
 async fn broker_keeps_healthy_targets_available_when_one_target_is_down() {
-    let fixture = support::spawn_broker_with_live_and_dead_targets().await;
+    let fixture = support::spawners::spawn_broker_with_live_and_dead_targets().await;
 
     let healthy = fixture
         .call_tool(
@@ -471,7 +471,7 @@ async fn broker_keeps_healthy_targets_available_when_one_target_is_down() {
 
 #[tokio::test]
 async fn broker_rejects_unverified_target_if_it_returns_as_the_wrong_daemon() {
-    let fixture = support::spawn_broker_with_late_target().await;
+    let fixture = support::spawners::spawn_broker_with_late_target().await;
     fixture
         .broker
         .call_tool(
@@ -501,7 +501,7 @@ async fn broker_rejects_unverified_target_if_it_returns_as_the_wrong_daemon() {
 
 #[tokio::test]
 async fn list_targets_clears_cached_daemon_info_after_daemon_instance_mismatch() {
-    let fixture = support::spawn_broker_with_retryable_exec_write_error().await;
+    let fixture = support::spawners::spawn_broker_with_retryable_exec_write_error().await;
 
     let before = fixture
         .call_tool("list_targets", serde_json::json!({}))
@@ -533,7 +533,7 @@ async fn list_targets_clears_cached_daemon_info_after_daemon_instance_mismatch()
 
 #[tokio::test]
 async fn list_targets_repopulates_cached_daemon_info_after_later_successful_verification() {
-    let fixture = support::spawn_broker_with_late_target().await;
+    let fixture = support::spawners::spawn_broker_with_late_target().await;
 
     let before = fixture
         .broker
@@ -566,7 +566,7 @@ async fn list_targets_repopulates_cached_daemon_info_after_later_successful_veri
 
 #[tokio::test]
 async fn write_stdin_keeps_session_after_retryable_daemon_error() {
-    let fixture = support::spawn_broker_with_retryable_exec_write_error().await;
+    let fixture = support::spawners::spawn_broker_with_retryable_exec_write_error().await;
 
     let started = fixture
         .call_tool(
