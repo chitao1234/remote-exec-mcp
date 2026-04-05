@@ -14,6 +14,7 @@
 
 #include "common.h"
 #include "http_helpers.h"
+#include "logging.h"
 #include "patch_engine.h"
 #include "server.h"
 #include "transfer_ops.h"
@@ -182,6 +183,16 @@ static std::string resolve_workdir(const AppState& state, const Json& body) {
     return join_windows_path(state.config.default_workdir, raw);
 }
 
+static LogLevel level_for_status(int status) {
+    if (status >= 500) {
+        return LOG_ERROR;
+    }
+    if (status >= 400) {
+        return LOG_WARN;
+    }
+    return LOG_INFO;
+}
+
 static HttpResponse route_request(AppState& state, const HttpRequest& request) {
     HttpResponse response;
     response.status = 200;
@@ -251,6 +262,12 @@ static HttpResponse route_request(AppState& state, const HttpRequest& request) {
                 body.value("yield_time_ms", 0UL),
                 body.value("max_output_tokens", 0UL)
             );
+            log_message(
+                LOG_INFO,
+                "server",
+                "exec/start target=`" + state.config.target + "` cmd_preview=`" +
+                    preview_text(body.at("cmd").get<std::string>(), 120) + "`"
+            );
             exec_response["daemon_instance_id"] = state.daemon_instance_id;
             write_json(response, exec_response);
         } catch (const std::exception& ex) {
@@ -262,6 +279,13 @@ static HttpResponse route_request(AppState& state, const HttpRequest& request) {
     if (request.path == "/v1/exec/write") {
         try {
             const Json body = parse_json_body(request);
+            {
+                std::ostringstream message;
+                message << "exec/write daemon_session_id=`"
+                        << body.at("daemon_session_id").get<std::string>()
+                        << "` chars_len=" << body.value("chars", std::string()).size();
+                log_message(LOG_INFO, "server", message.str());
+            }
             Json exec_response = state.sessions.write_stdin(
                 body.at("daemon_session_id").get<std::string>(),
                 body.value("chars", std::string()),
@@ -288,6 +312,9 @@ static HttpResponse route_request(AppState& state, const HttpRequest& request) {
                 resolve_workdir(state, body),
                 body.at("patch").get<std::string>()
             );
+            std::ostringstream summary;
+            summary << "patch/apply patch_len=" << body.at("patch").get<std::string>().size();
+            log_message(LOG_INFO, "server", summary.str());
             write_json(response, Json{{"output", result.output}});
         } catch (const std::exception& ex) {
             write_rpc_error(response, 400, "patch_failed", ex.what());
@@ -299,6 +326,12 @@ static HttpResponse route_request(AppState& state, const HttpRequest& request) {
         try {
             const Json body = parse_json_body(request);
             const ExportedPayload payload = export_path(body.at("path").get<std::string>());
+            log_message(
+                LOG_INFO,
+                "server",
+                "transfer/export path=`" + body.at("path").get<std::string>() +
+                    "` source_type=`" + payload.source_type + "`"
+            );
             response.status = 200;
             response.headers["Content-Type"] = "application/octet-stream";
             response.headers["x-remote-exec-source-type"] = payload.source_type;
@@ -319,6 +352,16 @@ static HttpResponse route_request(AppState& state, const HttpRequest& request) {
                 request.header("x-remote-exec-overwrite") == "replace",
                 request.header("x-remote-exec-create-parent") == "true"
             );
+            {
+                std::ostringstream message;
+                message << "transfer/import destination=`"
+                        << request.header("x-remote-exec-destination-path")
+                        << "` bytes_copied=" << summary.bytes_copied
+                        << " files_copied=" << summary.files_copied
+                        << " directories_copied=" << summary.directories_copied
+                        << " replaced=" << (summary.replaced ? "true" : "false");
+                log_message(LOG_INFO, "server", message.str());
+            }
             write_json(
                 response,
                 Json{
@@ -393,18 +436,36 @@ int run_server(const DaemonConfig& config) {
 
     try {
         listener = create_listener(state.config);
+        {
+            std::ostringstream message;
+            message << "listening on " << state.config.listen_host << ':'
+                    << state.config.listen_port
+                    << " target=`" << state.config.target << "`"
+                    << " daemon_instance_id=`" << state.daemon_instance_id << "`";
+            log_message(LOG_INFO, "server", message.str());
+        }
         for (;;) {
             SOCKET client = accept(listener, NULL, NULL);
             if (client == INVALID_SOCKET) {
+                log_message(LOG_WARN, "server", "accept failed");
                 continue;
             }
 
             try {
+                const DWORD started_at_ms = GetTickCount();
                 const std::string raw_request = read_request(client);
                 const HttpRequest request = parse_http_request(raw_request);
                 const HttpResponse response = route_request(state, request);
+                {
+                    std::ostringstream message;
+                    message << request.method << ' ' << request.path
+                            << " status=" << response.status
+                            << " elapsed_ms=" << (GetTickCount() - started_at_ms);
+                    log_message(level_for_status(response.status), "server", message.str());
+                }
                 send_all(client, render_http_response(response));
             } catch (const std::exception& ex) {
+                log_message(LOG_ERROR, "server", ex.what());
                 HttpResponse response;
                 response.status = 500;
                 write_rpc_error(response, 500, "internal_error", ex.what());

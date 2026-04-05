@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "logging.h"
 #include "session_store.h"
 
 static std::string make_chunk_id() {
@@ -119,6 +120,13 @@ Json SessionStore::start_command(
     unsigned long yield_time_ms,
     unsigned long max_output_chars
 ) {
+    {
+        std::ostringstream message;
+        message << "start_command cmd_preview=`" << preview_text(command, 120)
+                << "` workdir=`" << workdir << "` shell=`"
+                << (shell.empty() ? "cmd.exe" : shell) << '`';
+        log_message(LOG_INFO, "session_store", message.str());
+    }
     SECURITY_ATTRIBUTES sa;
     sa.nLength = sizeof(sa);
     sa.lpSecurityDescriptor = NULL;
@@ -206,6 +214,12 @@ Json SessionStore::start_command(
                 output,
                 max_output_chars
             );
+            {
+                std::ostringstream message;
+                message << "command completed before session handoff exit_code=" << exit_code
+                        << " output_chars=" << output.size();
+                log_message(LOG_INFO, "session_store", message.str());
+            }
             close_live_session(session);
             return response;
         }
@@ -214,6 +228,12 @@ Json SessionStore::start_command(
     }
 
     sessions_[session->id] = session;
+    {
+        std::ostringstream message;
+        message << "stored live session daemon_session_id=`" << session->id
+                << "` open_sessions=" << sessions_.size();
+        log_message(LOG_INFO, "session_store", message.str());
+    }
     return build_response(
         session->id.c_str(),
         true,
@@ -233,7 +253,19 @@ Json SessionStore::write_stdin(
 ) {
     std::map<std::string, std::shared_ptr<LiveSession> >::iterator it = sessions_.find(daemon_session_id);
     if (it == sessions_.end()) {
+        log_message(
+            LOG_WARN,
+            "session_store",
+            "unknown daemon session `" + daemon_session_id + "`"
+        );
         throw std::runtime_error("unknown_session");
+    }
+
+    {
+        std::ostringstream message;
+        message << "write_stdin daemon_session_id=`" << daemon_session_id
+                << "` chars_len=" << chars.size();
+        log_message(LOG_INFO, "session_store", message.str());
     }
 
     const std::shared_ptr<LiveSession>& session = it->second;
@@ -272,12 +304,24 @@ Json SessionStore::write_stdin(
             );
             close_live_session(session);
             sessions_.erase(it);
+            {
+                std::ostringstream message;
+                message << "session completed daemon_session_id=`" << daemon_session_id
+                        << "` exit_code=" << exit_code
+                        << " open_sessions=" << sessions_.size();
+                log_message(LOG_INFO, "session_store", message.str());
+            }
             return response;
         }
 
         Sleep(25);
     }
 
+    {
+        std::ostringstream message;
+        message << "session still running daemon_session_id=`" << session->id << '`';
+        log_message(LOG_INFO, "session_store", message.str());
+    }
     return build_response(
         session->id.c_str(),
         true,

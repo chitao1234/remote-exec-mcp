@@ -5,7 +5,7 @@ TARGET := $(BUILD_DIR)/remote-exec-daemon-xp.exe
 COMMON_FLAGS := -std=gnu++17 -O0 -Wall -Wextra -Iinclude -Ithird_party
 TARGET_FLAGS := $(COMMON_FLAGS) -DWINVER=0x0501 -D_WIN32_WINNT=0x0501 -static-libgcc -static-libstdc++
 WIN_LIBS := -lws2_32
-SRCS := src/main.cpp src/config.cpp src/http_helpers.cpp src/server.cpp src/session_store.cpp src/patch_engine.cpp src/transfer_ops.cpp
+SRCS := src/main.cpp src/config.cpp src/http_helpers.cpp src/logging.cpp src/server.cpp src/session_store.cpp src/patch_engine.cpp src/transfer_ops.cpp
 HOST_PATCH := $(BUILD_DIR)/test_patch
 HOST_TRANSFER := $(BUILD_DIR)/test_transfer
 
