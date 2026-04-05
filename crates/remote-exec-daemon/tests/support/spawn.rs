@@ -1,5 +1,8 @@
 use std::net::SocketAddr;
+#[cfg(windows)]
+use std::sync::OnceLock;
 
+use anyhow::Context;
 use remote_exec_daemon::config::{ProcessEnvironment, PtyMode};
 
 use super::certs::write_test_certs;
@@ -41,6 +44,9 @@ async fn spawn_daemon_with_pty_mode(
     pty: PtyMode,
     process_environment: ProcessEnvironment,
 ) -> DaemonFixture {
+    #[cfg(windows)]
+    let concurrency_guard = daemon_test_lock().lock().await;
+
     remote_exec_daemon::install_crypto_provider();
 
     let tempdir = tempfile::tempdir().unwrap();
@@ -66,10 +72,29 @@ async fn spawn_daemon_with_pty_mode(
         },
     };
 
-    tokio::spawn(remote_exec_daemon::run(config));
+    let (shutdown, server_thread) = spawn_background_daemon(config);
+    let client = build_client(&certs);
 
-    let client = reqwest::Client::builder()
+    wait_until_ready(&client, addr).await;
+    #[cfg(windows)]
+    return DaemonFixture::new(
+        tempdir,
+        client,
+        addr,
+        workdir,
+        shutdown,
+        server_thread,
+        concurrency_guard,
+    );
+
+    #[cfg(not(windows))]
+    DaemonFixture::new(tempdir, client, addr, workdir, shutdown, server_thread)
+}
+
+fn build_client(certs: &super::certs::TestCerts) -> reqwest::Client {
+    reqwest::Client::builder()
         .use_rustls_tls()
+        .pool_max_idle_per_host(0)
         .add_root_certificate(
             reqwest::Certificate::from_pem(&std::fs::read(&certs.ca_cert).unwrap()).unwrap(),
         )
@@ -84,15 +109,41 @@ async fn spawn_daemon_with_pty_mode(
             .unwrap(),
         )
         .build()
+        .unwrap()
+}
+
+fn spawn_background_daemon(
+    config: remote_exec_daemon::config::DaemonConfig,
+) -> (
+    tokio::sync::oneshot::Sender<()>,
+    std::thread::JoinHandle<anyhow::Result<()>>,
+) {
+    let target = config.target.clone();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    let server_thread = std::thread::Builder::new()
+        .name(format!("remote-exec-daemon-test-{target}"))
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .context("failed to build daemon test runtime")?;
+            runtime.block_on(remote_exec_daemon::run_until(config, async move {
+                let _ = shutdown_rx.await;
+            }))
+        })
         .unwrap();
 
-    wait_until_ready(&client, addr).await;
-    DaemonFixture {
-        _tempdir: tempdir,
-        client,
-        addr,
-        workdir,
-    }
+    (shutdown_tx, server_thread)
+}
+
+#[cfg(windows)]
+fn daemon_test_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+
+    // Windows daemon integration tests exercise real PTY backends and are not
+    // isolated enough to run multiple daemon fixtures concurrently in one test
+    // process. Hold this guard for the full fixture lifetime.
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
 #[allow(dead_code, reason = "Shared across daemon integration test crates")]
@@ -167,6 +218,9 @@ pub async fn spawn_daemon_with_extra_config_and_process_environment(
     extra_config: &str,
     process_environment: ProcessEnvironment,
 ) -> DaemonFixture {
+    #[cfg(windows)]
+    let concurrency_guard = daemon_test_lock().lock().await;
+
     remote_exec_daemon::install_crypto_provider();
 
     let tempdir = tempfile::tempdir().unwrap();
@@ -205,39 +259,30 @@ ca_pem = {ca_pem}
         .unwrap();
     config.process_environment = process_environment;
 
-    tokio::spawn(remote_exec_daemon::run(config));
-
-    let client = reqwest::Client::builder()
-        .use_rustls_tls()
-        .add_root_certificate(
-            reqwest::Certificate::from_pem(&std::fs::read(&certs.ca_cert).unwrap()).unwrap(),
-        )
-        .identity(
-            reqwest::Identity::from_pem(
-                &[
-                    std::fs::read(&certs.client_cert).unwrap(),
-                    std::fs::read(&certs.client_key).unwrap(),
-                ]
-                .concat(),
-            )
-            .unwrap(),
-        )
-        .build()
-        .unwrap();
+    let (shutdown, server_thread) = spawn_background_daemon(config);
+    let client = build_client(&certs);
 
     wait_until_ready(&client, addr).await;
-    DaemonFixture {
-        _tempdir: tempdir,
+    #[cfg(windows)]
+    return DaemonFixture::new(
+        tempdir,
         client,
         addr,
         workdir,
-    }
+        shutdown,
+        server_thread,
+        concurrency_guard,
+    );
+
+    #[cfg(not(windows))]
+    DaemonFixture::new(tempdir, client, addr, workdir, shutdown, server_thread)
 }
 
 async fn wait_until_ready(client: &reqwest::Client, addr: SocketAddr) {
     for _ in 0..40 {
         if client
             .post(format!("https://{addr}/v1/health"))
+            .header(reqwest::header::CONNECTION, "close")
             .json(&serde_json::json!({}))
             .send()
             .await

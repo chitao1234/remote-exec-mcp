@@ -8,8 +8,6 @@ use std::ffi::OsString;
 use std::path::Path;
 #[cfg(windows)]
 use std::path::PathBuf;
-#[cfg(windows)]
-use std::sync::OnceLock;
 
 use remote_exec_daemon::config::ProcessEnvironment;
 use remote_exec_proto::rpc::{ExecResponse, ExecStartRequest, ExecWriteRequest};
@@ -27,25 +25,13 @@ const WINDOWS_GIT_BASH_COMMON_PATH: &str = r"C:\Program Files\Git\bin\bash.exe";
 #[cfg(windows)]
 const WINDOWS_ENV_OVERLAY_OUTPUT: &str = "dumb|1|cat|cat|1|||";
 // Commands in these tests are expected to finish in a single RPC response, but the daemon only
-// guarantees a minimum 250 ms wait. Use a wider window so full-suite load does not turn them into
-// legitimate live-session responses.
-const COMPLETED_COMMAND_YIELD_MS: u64 = 5_000;
-
-#[cfg(windows)]
-async fn lock_windows_pty_test_matrix() -> tokio::sync::MutexGuard<'static, ()> {
-    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-
-    // Winpty-backed integration tests can interfere with each other when the default test
-    // harness runs them concurrently. Serialize only the PTY backend matrix helpers.
-    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
-        .lock()
-        .await
-}
+// guarantees a minimum 250 ms wait and may legitimately return a live session under heavy load.
+// Use a generous window so large-output assertions do not become timing-sensitive.
+const COMPLETED_COMMAND_YIELD_MS: u64 = 10_000;
 
 #[cfg(windows)]
 macro_rules! for_each_windows_pty_backend {
     ($backend:ident, $fixture:ident, $body:block) => {{
-        let _guard = lock_windows_pty_test_matrix().await;
         for $backend in support::spawn::supported_windows_pty_backends() {
             let $fixture =
                 support::spawn::spawn_daemon_for_windows_pty_backend("builder-a", $backend).await;
@@ -57,7 +43,6 @@ macro_rules! for_each_windows_pty_backend {
 #[cfg(windows)]
 macro_rules! for_each_windows_pty_backend_with_environment {
     ($backend:ident, $fixture:ident, $environment:expr, $body:block) => {{
-        let _guard = lock_windows_pty_test_matrix().await;
         for $backend in support::spawn::supported_windows_pty_backends() {
             let $fixture =
                 support::spawn::spawn_daemon_for_windows_pty_backend_with_process_environment(

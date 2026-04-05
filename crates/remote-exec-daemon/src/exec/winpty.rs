@@ -2,7 +2,7 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::process::Command as ProcessCommand;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
@@ -147,19 +147,31 @@ pub(crate) fn spawn_winpty(
     let (sender, receiver) = unbounded_channel();
 
     std::thread::spawn(move || {
+        let mut exit_deadline = None;
+
         loop {
             let read_result = reader.lock().unwrap().read_nonblocking();
             match read_result {
                 Ok(chunk) if !chunk.is_empty() => {
+                    exit_deadline = None;
                     if sender.send(chunk).is_err() {
                         break;
                     }
                 }
                 Ok(_) => {
-                    if !reader_child.lock().unwrap().is_alive().unwrap_or(false) {
+                    let child_alive = reader_child.lock().unwrap().is_alive().unwrap_or(false);
+                    if child_alive {
+                        exit_deadline = None;
+                        std::thread::sleep(Duration::from_millis(25));
+                        continue;
+                    }
+
+                    let deadline = exit_deadline
+                        .get_or_insert_with(|| Instant::now() + super::output::EXIT_OUTPUT_GRACE);
+                    if Instant::now() >= *deadline {
                         break;
                     }
-                    std::thread::sleep(Duration::from_millis(25));
+                    std::thread::sleep(Duration::from_millis(10));
                 }
                 Err(winptyrs::Error::Eof) => break,
                 Err(_) => break,
