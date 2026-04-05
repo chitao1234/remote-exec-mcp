@@ -794,17 +794,27 @@ mod windows_shell_tests {
     }
 
     #[test]
-    fn windows_requested_shell_resolves_bare_bash_to_git_bash_path() {
+    fn windows_requested_shell_resolves_git_bash_aliases_to_git_bash_path() {
         let tempdir = tempfile::tempdir().unwrap();
         let git_bash = tempdir.path().join("Git").join("bin").join("bash.exe");
         std::fs::create_dir_all(git_bash.parent().unwrap()).unwrap();
         std::fs::write(&git_bash, b"stub").unwrap();
         let environment = make_environment(&[], Some(tempdir.path()), None);
 
-        assert_eq!(
-            resolve_requested_windows_shell("bash.exe", &environment).unwrap(),
-            git_bash.to_string_lossy()
-        );
+        for alias in [
+            "bash.exe",
+            "bash",
+            "sh.exe",
+            "sh",
+            "git-bash.exe",
+            "git-bash",
+        ] {
+            assert_eq!(
+                resolve_requested_windows_shell(alias, &environment).unwrap(),
+                git_bash.to_string_lossy(),
+                "alias {alias} should resolve to Git Bash"
+            );
+        }
     }
 
     #[test]

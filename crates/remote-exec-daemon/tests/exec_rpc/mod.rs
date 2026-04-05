@@ -78,14 +78,33 @@ fn windows_start_request(
     yield_time_ms: Option<u64>,
     max_output_tokens: Option<u32>,
 ) -> ExecStartRequest {
-    ExecStartRequest {
-        cmd: cmd.to_string(),
-        workdir: None,
-        shell: Some(TEST_SHELL.to_string()),
+    windows_start_request_with_shell(
+        Some(TEST_SHELL),
+        cmd,
         tty,
         yield_time_ms,
         max_output_tokens,
-        login: Some(false),
+        false,
+    )
+}
+
+#[cfg(windows)]
+fn windows_start_request_with_shell(
+    shell: Option<&str>,
+    cmd: &str,
+    tty: bool,
+    yield_time_ms: Option<u64>,
+    max_output_tokens: Option<u32>,
+    login: bool,
+) -> ExecStartRequest {
+    ExecStartRequest {
+        cmd: cmd.to_string(),
+        workdir: None,
+        shell: shell.map(str::to_owned),
+        tty,
+        yield_time_ms,
+        max_output_tokens,
+        login: Some(login),
     }
 }
 
@@ -96,15 +115,26 @@ fn windows_cmd_start_request(
     yield_time_ms: Option<u64>,
     max_output_tokens: Option<u32>,
 ) -> ExecStartRequest {
-    ExecStartRequest {
-        cmd: cmd.to_string(),
-        workdir: None,
-        shell: Some(WINDOWS_CMD_SHELL.to_string()),
+    windows_start_request_with_shell(
+        Some(WINDOWS_CMD_SHELL),
+        cmd,
         tty,
         yield_time_ms,
         max_output_tokens,
-        login: Some(false),
-    }
+        false,
+    )
+}
+
+#[cfg(windows)]
+fn windows_git_bash_start_request(
+    shell: Option<&str>,
+    cmd: &str,
+    tty: bool,
+    yield_time_ms: Option<u64>,
+    max_output_tokens: Option<u32>,
+    login: bool,
+) -> ExecStartRequest {
+    windows_start_request_with_shell(shell, cmd, tty, yield_time_ms, max_output_tokens, login)
 }
 
 #[cfg(windows)]
@@ -367,6 +397,123 @@ async fn assert_windows_powershell_command_quoting(
     assert_eq!(
         strip_terminal_noise(&response.output),
         r#"plain|two words|quote "mark"|trail\|C:\Program Files\Test Folder\"#,
+        "{} output: {:?}",
+        backend.name(),
+        response.output
+    );
+}
+
+#[cfg(windows)]
+async fn assert_windows_git_bash_tty_read_line(
+    fixture: &support::fixture::DaemonFixture,
+    backend: WindowsPtyTestBackend,
+    shell: Option<&str>,
+) {
+    let started = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &windows_git_bash_start_request(
+                shell,
+                "printf 'READY\\n'; IFS= read -r line; printf 'LINE:%s\\n' \"$line\"",
+                true,
+                Some(250),
+                None,
+                false,
+            ),
+        )
+        .await;
+
+    assert!(
+        started.running,
+        "{} start response: {started:#?}",
+        backend.name()
+    );
+    let session_id = started.daemon_session_id.expect("live session");
+    let response = fixture
+        .rpc::<ExecWriteRequest, ExecResponse>(
+            "/v1/exec/write",
+            &ExecWriteRequest {
+                daemon_session_id: session_id.clone(),
+                chars: "ping\n".to_string(),
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
+                max_output_tokens: None,
+            },
+        )
+        .await;
+
+    let mut combined_output = started.output;
+    combined_output.push_str(&response.output);
+
+    let exit_code = if response.running {
+        let tail = fixture
+            .rpc::<ExecWriteRequest, ExecResponse>(
+                "/v1/exec/write",
+                &ExecWriteRequest {
+                    daemon_session_id: session_id,
+                    chars: String::new(),
+                    yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
+                    max_output_tokens: None,
+                },
+            )
+            .await;
+        combined_output.push_str(&tail.output);
+        tail.exit_code
+    } else {
+        response.exit_code
+    };
+
+    let normalized_output = strip_terminal_noise(&combined_output).replace('\r', "");
+
+    assert_eq!(
+        exit_code,
+        Some(0),
+        "{} combined output: {:?}",
+        backend.name(),
+        combined_output
+    );
+    assert!(
+        normalized_output.contains("READY"),
+        "{} combined output missing READY marker: {:?}",
+        backend.name(),
+        combined_output
+    );
+    assert!(
+        normalized_output.contains("LINE:ping"),
+        "{} combined output missing line echo: {:?}",
+        backend.name(),
+        combined_output
+    );
+}
+
+#[cfg(windows)]
+async fn assert_windows_git_bash_command_quoting(
+    fixture: &support::fixture::DaemonFixture,
+    backend: WindowsPtyTestBackend,
+    shell: Option<&str>,
+) {
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &windows_git_bash_start_request(
+                shell,
+                "first='two words'; second='quote \"mark\"'; third='literal $HOME & | ; * ?'; fourth='C:\\Program Files\\Test Folder\\'; printf '%s' \"$first|$second|$third|$fourth\"",
+                true,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+                false,
+            ),
+        )
+        .await;
+
+    assert_eq!(
+        response.exit_code,
+        Some(0),
+        "{} response: {response:#?}",
+        backend.name()
+    );
+    assert_eq!(
+        strip_terminal_noise(&response.output).replace('\r', ""),
+        r#"two words|quote "mark"|literal $HOME & | ; * ?|C:\Program Files\Test Folder\"#,
         "{} output: {:?}",
         backend.name(),
         response.output

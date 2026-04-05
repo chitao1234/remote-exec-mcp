@@ -251,6 +251,7 @@ cargo fmt --all --check
 - `list_targets` reports the daemon's actual `supports_pty` capability instead of assuming PTY support.
 - `pty = "none"` disables TTY entirely. On Windows, `pty = "conpty"` or `pty = "winpty"` force that backend and startup fails if the selected backend is unavailable. When `pty` is omitted, the daemon keeps the current auto-detect behavior.
 - Default shell resolution uses `default_shell` when configured. Otherwise it tries `SHELL`, then a usable passwd shell, then `bash`, then `/bin/sh` on Unix; and Git Bash, then `pwsh.exe`, then `powershell.exe` or `powershell`, then `COMSPEC`, then `cmd.exe` on Windows.
+- Git Bash auto-discovery on Windows only checks standard Git for Windows install roots and locations derivable from `git.exe` on `PATH`. Portable or unusual installs should set `default_shell` to an explicit path.
 - `remote-exec-daemon-xp` is intentionally narrower than the main daemon: it always uses `cmd.exe`, rejects `tty=true`, does not implement `view_image`, and only accepts the narrow v1 transfer subset for regular files and directory trees. Symlinks, hard links, special files, sparse entries, and malformed archive paths remain unsupported there.
 
 ## Quality Gate

@@ -129,7 +129,10 @@ pub(crate) fn spawn_winpty(
     let mut pty = winpty_builder().open().map_err(map_winpty_error)?;
     let mut spawn = SpawnConfig::new(resolve_executable_for_winpty(&cmd[0]))
         .cwd(cwd.as_os_str().to_os_string());
-    if let Some(cmdline) = command_line(&cmd[1..]) {
+    // Winpty forwards this string to CreateProcessW as lpCommandLine. Include argv[0]
+    // so programs that rely on CRT-style argv parsing, such as Git Bash, still see
+    // switches like `-c` and `-l` in argv[1..] instead of losing them into argv[0].
+    if let Some(cmdline) = command_line(cmd) {
         spawn = spawn.cmdline(cmdline);
     }
     let child = pty
@@ -233,19 +236,32 @@ mod tests {
     fn command_line_quotes_each_argument_for_winpty_spawn() {
         assert_eq!(
             command_line(&[
+                "bash.exe".to_string(),
+                "-c".to_string(),
+                "printf ok".to_string(),
+            ]),
+            Some(OsString::from(r#"bash.exe -c "printf ok""#,))
+        );
+    }
+
+    #[test]
+    fn command_line_quotes_whole_argv_for_winpty_spawn() {
+        assert_eq!(
+            command_line(&[
+                "pwsh.exe".to_string(),
                 "plain".to_string(),
                 "two words".to_string(),
                 r#"quote "mark""#.to_string(),
                 r#"C:\Program Files\Test Folder\"#.to_string(),
             ]),
             Some(OsString::from(
-                r#"plain "two words" "quote \"mark\"" "C:\Program Files\Test Folder\\""#,
+                r#"pwsh.exe plain "two words" "quote \"mark\"" "C:\Program Files\Test Folder\\""#,
             ))
         );
     }
 
     #[test]
-    fn command_line_returns_none_for_empty_argv_tail() {
+    fn command_line_returns_none_for_empty_argv() {
         assert_eq!(command_line(&[]), None);
     }
 }
