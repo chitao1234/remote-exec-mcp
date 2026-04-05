@@ -4,15 +4,14 @@
 #include <memory>
 #include <string>
 
-#include <windows.h>
-
 #include "http_helpers.h"
+#include "win32_scoped.h"
 
 struct LiveSession {
     std::string id;
-    HANDLE process_handle;
-    HANDLE stdin_write;
-    HANDLE stdout_read;
+    UniqueHandle process_handle;
+    UniqueHandle stdin_write;
+    UniqueHandle stdout_read;
     DWORD started_at_ms;
     std::string output_carry;
 };

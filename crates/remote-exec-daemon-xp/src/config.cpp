@@ -4,16 +4,7 @@
 #include <stdexcept>
 
 #include "config.h"
-
-static std::string trim(const std::string& raw) {
-    const std::string whitespace = " \t\r\n";
-    const std::size_t start = raw.find_first_not_of(whitespace);
-    if (start == std::string::npos) {
-        return "";
-    }
-    const std::size_t end = raw.find_last_not_of(whitespace);
-    return raw.substr(start, end - start + 1);
-}
+#include "text_utils.h"
 
 static std::string unquote(const std::string& raw) {
     if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"') {
@@ -31,7 +22,7 @@ DaemonConfig load_config(const std::string& path) {
     std::map<std::string, std::string> values;
     std::string line;
     while (std::getline(input, line)) {
-        line = trim(line);
+        line = trim_ascii(line);
         if (line.empty() || line[0] == '#' || line[0] == ';') {
             continue;
         }
@@ -41,8 +32,8 @@ DaemonConfig load_config(const std::string& path) {
             throw std::runtime_error("invalid config line: " + line);
         }
 
-        const std::string key = trim(line.substr(0, equals));
-        const std::string value = unquote(trim(line.substr(equals + 1)));
+        const std::string key = trim_ascii(line.substr(0, equals));
+        const std::string value = unquote(trim_ascii(line.substr(equals + 1)));
         values[key] = value;
     }
 

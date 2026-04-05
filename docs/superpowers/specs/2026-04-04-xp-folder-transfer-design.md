@@ -4,7 +4,7 @@
 
 Add directory transfer support to the standalone Windows XP daemon while preserving the existing public `transfer_files` contract and cross-target interoperability with the Rust broker and Unix daemon.
 
-The XP daemon will continue to use plain HTTP and the existing `/v1/transfer/export` and `/v1/transfer/import` endpoints. For `source_type=file`, behavior stays as-is and the HTTP body remains raw file bytes. For `source_type=directory`, the HTTP body becomes a GNU tar stream compatible with what the Rust daemon already produces and consumes.
+The XP daemon will continue to use plain HTTP and the existing `/v1/transfer/export` and `/v1/transfer/import` endpoints. For `source_type=file`, the HTTP body is a GNU tar stream containing exactly one regular file entry at `.remote-exec-file`, matching the Rust daemon and broker-local staging contract. For `source_type=directory`, the HTTP body is a GNU tar stream for the directory tree.
 
 ## Goals
 
@@ -31,7 +31,7 @@ The public `transfer_files` tool contract remains unchanged.
   - `x-remote-exec-overwrite`
   - `x-remote-exec-create-parent`
   - `x-remote-exec-source-type`
-- `x-remote-exec-source-type=file` means the body is raw file bytes.
+- `x-remote-exec-source-type=file` means the body is a GNU tar stream containing exactly one regular file entry at `.remote-exec-file`.
 - `x-remote-exec-source-type=directory` means the body is a GNU tar stream.
 
 No new headers, no broker feature flags, and no XP-only transport branches are introduced.
@@ -91,7 +91,7 @@ All behavior stays inside `crates/remote-exec-daemon-xp` unless tests reveal a b
 
 Refactor the current file-only transfer helpers into generalized helpers that support:
 
-- file export/import using raw bytes
+- file export/import using a single-file GNU tar stream at `.remote-exec-file`
 - directory export/import using GNU tar streams
 
 Expected responsibilities:
@@ -108,7 +108,7 @@ Expected responsibilities:
 
 Update transfer routes to delegate both file and directory operations through the generalized transfer helpers.
 
-- `/v1/transfer/export` returns raw bytes for files and tar bytes for directories.
+- `/v1/transfer/export` returns tar bytes for both files and directories.
 - `/v1/transfer/import` accepts `source_type=file` and `source_type=directory`.
 - Directory import no longer returns the current single-file-only rejection.
 - Error handling remains intentionally simple and maps failures into the existing RPC error envelope.
@@ -142,6 +142,7 @@ Archive paths are validated in archive form first and then normalized to Windows
 - Unsupported typeflags fail the import.
 - Truncated headers, truncated payloads, or malformed long-name sequences fail the import.
 - The importer stops at the standard two zero blocks or end-of-buffer once a valid terminal condition is reached.
+- File import requires exactly one regular file entry at `.remote-exec-file` and rejects any extra archive entries.
 
 ## Testing
 
@@ -149,6 +150,7 @@ Archive paths are validated in archive form first and then normalized to Windows
 
 Extend `crates/remote-exec-daemon-xp/tests/test_transfer.cpp` to cover:
 
+- single-file tar export/import using `.remote-exec-file`
 - directory export and import round trips
 - nested directory trees
 - empty directory preservation
@@ -160,7 +162,7 @@ Extend `crates/remote-exec-daemon-xp/tests/test_transfer.cpp` to cover:
 
 ### Broker and cross-target verification
 
-Add or extend broker tests so the public `transfer_files` path continues to work with `source_type=directory`.
+Add or extend broker tests so the public `transfer_files` path continues to work with `source_type=file` and `source_type=directory`.
 
 Verification should include real XP daemon execution under Wine for at least:
 

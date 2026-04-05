@@ -58,7 +58,7 @@ pub async fn export_path_to_archive(
         let mut builder = tar::Builder::new(file);
         match source_type_for_task {
             TransferSourceType::File => {
-                builder.append_path_with_name(&source, SINGLE_FILE_ENTRY)?
+                builder.append_path_with_name(&source, SINGLE_FILE_ENTRY)?;
             }
             TransferSourceType::Directory => {
                 builder.append_dir(".", &source)?;
@@ -181,11 +181,10 @@ fn extract_archive(
         replaced,
     };
 
-    let file = std::fs::File::open(archive_path)?;
-    let mut archive = tar::Archive::new(file);
-
     match request.source_type {
         TransferSourceType::File => {
+            let file = std::fs::File::open(archive_path)?;
+            let mut archive = tar::Archive::new(file);
             let mut entries = archive.entries()?;
             let mut entry = entries
                 .next()
@@ -193,6 +192,10 @@ fn extract_archive(
             anyhow::ensure!(
                 entry.header().entry_type().is_file(),
                 "archive entry is not a regular file"
+            );
+            anyhow::ensure!(
+                entry.path()?.as_ref() == Path::new(SINGLE_FILE_ENTRY),
+                "file archive entry path must be `{SINGLE_FILE_ENTRY}`"
             );
             let mut bytes = Vec::new();
             std::io::Read::read_to_end(&mut entry, &mut bytes)?;
@@ -209,6 +212,8 @@ fn extract_archive(
             summary.files_copied = 1;
         }
         TransferSourceType::Directory => {
+            let file = std::fs::File::open(archive_path)?;
+            let mut archive = tar::Archive::new(file);
             std::fs::create_dir_all(destination_path)?;
             for entry in archive.entries()? {
                 let mut entry = entry?;

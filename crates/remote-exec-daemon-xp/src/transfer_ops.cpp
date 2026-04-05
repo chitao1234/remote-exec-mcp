@@ -25,6 +25,7 @@
 namespace {
 
 const std::size_t TAR_BLOCK_SIZE = 512;
+const char* const SINGLE_FILE_ENTRY = ".remote-exec-file";
 
 struct DirectoryEntry {
     std::string name;
@@ -318,6 +319,10 @@ void append_padded_body(std::string* archive, const std::string& body) {
     archive->append(tar_padding(body.size()), '\0');
 }
 
+void append_archive_terminator(std::string* archive) {
+    archive->append(TAR_BLOCK_SIZE * 2, '\0');
+}
+
 void append_tar_header(
     std::string* archive,
     const std::string& path,
@@ -565,18 +570,58 @@ ExportedPayload export_directory_as_tar(const std::string& absolute_path) {
     std::string archive;
     append_directory_entry(&archive, ".");
     append_directory_contents(&archive, absolute_path, "");
-    archive.append(TAR_BLOCK_SIZE * 2, '\0');
+    append_archive_terminator(&archive);
     return ExportedPayload{"directory", archive};
 }
 
-ImportSummary import_file_payload(
-    const std::string& bytes,
+ExportedPayload export_file_as_tar(const std::string& absolute_path) {
+    std::string archive;
+    append_file_entry(&archive, SINGLE_FILE_ENTRY, read_binary_file(absolute_path));
+    append_archive_terminator(&archive);
+    return ExportedPayload{"file", archive};
+}
+
+void ensure_zero_archive_tail(const std::string& archive, std::size_t offset) {
+    while (offset < archive.size()) {
+        if (archive.size() - offset < TAR_BLOCK_SIZE) {
+            throw std::runtime_error("truncated tar header");
+        }
+        if (!is_zero_block(archive.data() + offset)) {
+            throw std::runtime_error("file archive contains extra entries");
+        }
+        offset += TAR_BLOCK_SIZE;
+    }
+}
+
+ImportSummary import_file_from_tar(
+    const std::string& archive,
     const std::string& absolute_path,
     bool replace_existing,
     bool create_parent
 ) {
     const bool existed = prepare_destination_path(absolute_path, replace_existing, create_parent);
+
+    if (archive.size() < TAR_BLOCK_SIZE) {
+        throw std::runtime_error("archive is empty");
+    }
+
+    const TarHeaderView header = parse_header(archive.data());
+    if (header.typeflag != '0') {
+        throw std::runtime_error("archive entry is not a regular file");
+    }
+    if (header.path != SINGLE_FILE_ENTRY) {
+        throw std::runtime_error("file archive entry path must be " + std::string(SINGLE_FILE_ENTRY));
+    }
+
+    const std::size_t body_offset = TAR_BLOCK_SIZE;
+    if (body_offset + padded_length(header.size) > archive.size()) {
+        throw std::runtime_error("truncated tar entry body");
+    }
+
+    const std::string bytes = archive.substr(body_offset, static_cast<std::size_t>(header.size));
     write_binary_file(absolute_path, bytes);
+
+    ensure_zero_archive_tail(archive, body_offset + padded_length(header.size));
 
     return ImportSummary{
         "file",
@@ -669,7 +714,7 @@ ExportedPayload export_path(const std::string& absolute_path) {
         throw std::runtime_error("transfer path is not absolute");
     }
     if (is_regular_file(absolute_path)) {
-        return ExportedPayload{"file", read_binary_file(absolute_path)};
+        return export_file_as_tar(absolute_path);
     }
     if (is_directory(absolute_path)) {
         return export_directory_as_tar(absolute_path);
@@ -689,7 +734,7 @@ ImportSummary import_path(
     }
 
     if (source_type == "file") {
-        return import_file_payload(bytes, absolute_path, replace_existing, create_parent);
+        return import_file_from_tar(bytes, absolute_path, replace_existing, create_parent);
     }
     if (source_type == "directory") {
         return import_directory_from_tar(bytes, absolute_path, replace_existing, create_parent);

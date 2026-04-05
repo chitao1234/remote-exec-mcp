@@ -5,11 +5,14 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "transfer_ops.h"
 
 namespace fs = std::filesystem;
+
+static const char* const SINGLE_FILE_ENTRY = ".remote-exec-file";
 
 static std::string read_text(const fs::path& path) {
     std::ifstream input(path.c_str(), std::ios::binary);
@@ -104,6 +107,55 @@ static std::string tar_with_single_file(const std::string& path, const std::stri
     return archive;
 }
 
+static std::uint64_t parse_octal_value(const char* data, std::size_t size) {
+    std::size_t index = 0;
+    while (index < size && (data[index] == ' ' || data[index] == '\0')) {
+        ++index;
+    }
+
+    std::uint64_t value = 0;
+    while (index < size && data[index] >= '0' && data[index] <= '7') {
+        value = (value * 8) + static_cast<std::uint64_t>(data[index] - '0');
+        ++index;
+    }
+    return value;
+}
+
+static bool block_is_zero(const char* block) {
+    for (std::size_t i = 0; i < 512; ++i) {
+        if (block[i] != '\0') {
+            return false;
+        }
+    }
+    return true;
+}
+
+static std::pair<std::string, std::string> read_single_file_tar(const std::string& archive) {
+    assert(archive.size() >= 512);
+
+    const char* header = archive.data();
+    std::size_t path_length = 0;
+    while (path_length < 100 && header[path_length] != '\0') {
+        ++path_length;
+    }
+    const std::string path(header, path_length);
+    const char typeflag = header[156] == '\0' ? '0' : header[156];
+    assert(typeflag == '0');
+
+    const std::uint64_t size = parse_octal_value(header + 124, 12);
+    const std::size_t body_offset = 512;
+    const std::size_t body_size = static_cast<std::size_t>(size);
+    const std::size_t padded_size = ((body_size + 511) / 512) * 512;
+    assert(body_offset + padded_size <= archive.size());
+
+    for (std::size_t offset = body_offset + padded_size; offset < archive.size(); offset += 512) {
+        assert(offset + 512 <= archive.size());
+        assert(block_is_zero(archive.data() + offset));
+    }
+
+    return std::make_pair(path, archive.substr(body_offset, body_size));
+}
+
 static void assert_file_transfer() {
     const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-file";
     fs::remove_all(root);
@@ -112,13 +164,57 @@ static void assert_file_transfer() {
     write_text(root / "source.txt", "hello transfer");
     const ExportedPayload exported = export_path((root / "source.txt").string());
     assert(exported.source_type == "file");
-    assert(exported.bytes == "hello transfer");
+    const std::pair<std::string, std::string> file_entry = read_single_file_tar(exported.bytes);
+    assert(file_entry.first == SINGLE_FILE_ENTRY);
+    assert(file_entry.second == "hello transfer");
 
     const ImportSummary imported =
         import_path(exported.bytes, exported.source_type, (root / "copied.txt").string(), true, true);
     assert(imported.files_copied == 1);
     assert(imported.directories_copied == 0);
     assert(read_text(root / "copied.txt") == "hello transfer");
+}
+
+static void assert_file_transfer_rejects_unexpected_entry_path() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-file-reject";
+    fs::remove_all(root);
+    fs::create_directories(root);
+
+    bool rejected = false;
+    try {
+        (void)import_path(
+            tar_with_single_file("payload.txt", "bad"),
+            "file",
+            (root / "copied.txt").string(),
+            true,
+            true
+        );
+    } catch (...) {
+        rejected = true;
+    }
+
+    assert(rejected);
+}
+
+static void assert_file_transfer_rejects_raw_bytes() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-file-raw";
+    fs::remove_all(root);
+    fs::create_directories(root);
+
+    bool rejected = false;
+    try {
+        (void)import_path(
+            "raw-bytes",
+            "file",
+            (root / "copied.txt").string(),
+            true,
+            true
+        );
+    } catch (...) {
+        rejected = true;
+    }
+
+    assert(rejected);
 }
 
 static void assert_directory_round_trip() {
@@ -207,6 +303,8 @@ static void assert_directory_traversal_is_rejected() {
 
 int main() {
     assert_file_transfer();
+    assert_file_transfer_rejects_unexpected_entry_path();
+    assert_file_transfer_rejects_raw_bytes();
     assert_directory_round_trip();
     assert_directory_replace_behavior();
     assert_directory_long_path_round_trip();

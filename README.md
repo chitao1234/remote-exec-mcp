@@ -271,6 +271,7 @@ cargo fmt --all --check
 - The broker now starts even if some configured targets are temporarily unreachable.
 - Targets that are unavailable at broker startup are verified before the first forwarded call.
 - `transfer_files` uses broker-mediated copy for `local -> remote`, `remote -> local`, `remote -> remote`, and `local -> local`.
+- Internal transfer transport uses GNU tar for both files and directories. Single-file transfers use one fixed archive entry named `.remote-exec-file`.
 - Broker `[local]` config enables `target: "local"` for `exec_command`, `write_stdin`, `apply_patch`, and `view_image` on the broker host.
 - `transfer_files` treats `destination.path` as the exact final path to create or replace; it does not infer basenames or copy "into" an existing directory.
 - `write_stdin` only invalidates sessions when the daemon restarted or explicitly reports `unknown_session`.

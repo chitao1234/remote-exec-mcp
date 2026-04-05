@@ -9,29 +9,10 @@
 #include <windows.h>
 
 #include "logging.h"
-
-static std::string trim(const std::string& raw) {
-    const std::string whitespace = " \t\r\n";
-    const std::size_t start = raw.find_first_not_of(whitespace);
-    if (start == std::string::npos) {
-        return "";
-    }
-    const std::size_t end = raw.find_last_not_of(whitespace);
-    return raw.substr(start, end - start + 1);
-}
-
-static std::string lowercase(std::string value) {
-    std::transform(
-        value.begin(),
-        value.end(),
-        value.begin(),
-        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); }
-    );
-    return value;
-}
+#include "text_utils.h"
 
 static bool parse_level_token(const std::string& raw, LogLevel* level) {
-    const std::string token = lowercase(trim(raw));
+    const std::string token = lowercase_ascii(trim_ascii(raw));
     if (token == "trace") {
         *level = LOG_TRACE;
         return true;
@@ -82,7 +63,7 @@ static LogLevel parse_filter_value(const char* raw) {
     const std::vector<std::string> parts = split_filters(raw);
 
     for (std::size_t index = 0; index < parts.size(); ++index) {
-        const std::string token = trim(parts[index]);
+        const std::string token = trim_ascii(parts[index]);
         const std::size_t equals = token.find('=');
         if (equals == std::string::npos) {
             LogLevel parsed = LOG_INFO;
@@ -92,7 +73,7 @@ static LogLevel parse_filter_value(const char* raw) {
             continue;
         }
 
-        const std::string key = lowercase(trim(token.substr(0, equals)));
+        const std::string key = lowercase_ascii(trim_ascii(token.substr(0, equals)));
         const std::string value = token.substr(equals + 1);
         if (key == "remote_exec_daemon_xp" || key == "daemon_xp") {
             LogLevel parsed = LOG_INFO;

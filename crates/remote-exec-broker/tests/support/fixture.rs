@@ -7,7 +7,7 @@ use tempfile::TempDir;
 
 use super::stub_daemon::{
     ExecStartBehavior, ExecWriteBehavior, StubDaemonState, StubImageReadResponse,
-    StubTransferImportCapture,
+    StubTransferImportCapture, set_transfer_export_file_response,
 };
 
 pub struct BrokerFixture {
@@ -76,6 +76,10 @@ impl BrokerFixture {
 
     pub async fn last_transfer_import(&self) -> Option<StubTransferImportCapture> {
         self.stub_state.last_transfer_import.lock().await.clone()
+    }
+
+    pub async fn set_transfer_export_file_response(&self, body: &[u8]) {
+        set_transfer_export_file_response(&self.stub_state, body.to_vec()).await;
     }
 
     pub async fn set_image_read_response(&self, response: StubImageReadResponse) {

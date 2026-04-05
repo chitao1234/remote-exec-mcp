@@ -21,6 +21,8 @@ use tokio::sync::Mutex;
 
 use super::certs::{TestCerts, allocate_addr};
 
+const SINGLE_FILE_ENTRY: &str = ".remote-exec-file";
+
 #[derive(Debug, Clone)]
 pub enum StubImageReadResponse {
     Success(ImageReadResponse),
@@ -38,6 +40,7 @@ pub struct StubTransferImportCapture {
     pub overwrite: String,
     pub create_parent: String,
     pub body_len: usize,
+    pub body: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -133,6 +136,30 @@ fn stub_directory_archive() -> Vec<u8> {
     builder.into_inner().unwrap().to_vec()
 }
 
+fn stub_single_file_archive(body: &[u8]) -> Vec<u8> {
+    let mut builder = Builder::new(Vec::new());
+    let mut file = Header::new_gnu();
+    file.set_entry_type(EntryType::Regular);
+    file.set_mode(0o644);
+    file.set_size(body.len() as u64);
+    file.set_cksum();
+    builder
+        .append_data(&mut file, SINGLE_FILE_ENTRY, Cursor::new(body))
+        .unwrap();
+
+    builder.finish().unwrap();
+    builder.into_inner().unwrap().to_vec()
+}
+
+fn stub_single_file_archive_bytes(body: &[u8]) -> u64 {
+    let mut archive = tar::Archive::new(Cursor::new(body));
+    let mut entries = archive.entries().unwrap();
+    let mut entry = entries.next().unwrap().unwrap();
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut entry, &mut bytes).unwrap();
+    bytes.len() as u64
+}
+
 pub(super) fn stub_daemon_state(
     target: &str,
     exec_write_behavior: ExecWriteBehavior,
@@ -163,6 +190,13 @@ pub(super) fn stub_daemon_state(
             body: stub_directory_archive(),
         })),
     }
+}
+
+pub(super) async fn set_transfer_export_file_response(state: &StubDaemonState, body: Vec<u8>) {
+    *state.transfer_export_response.lock().await = StubTransferExportResponse::Success {
+        source_type: TransferSourceType::File,
+        body: stub_single_file_archive(&body),
+    };
 }
 
 pub(super) async fn spawn_stub_daemon(
@@ -453,6 +487,7 @@ async fn transfer_import(
         overwrite: overwrite.clone(),
         create_parent,
         body_len: body.len(),
+        body: body.to_vec(),
     });
 
     let parsed_source_type = match source_type.as_str() {
@@ -465,7 +500,7 @@ async fn transfer_import(
         bytes_copied: if matches!(parsed_source_type, TransferSourceType::Directory) {
             13
         } else {
-            body.len() as u64
+            stub_single_file_archive_bytes(&body)
         },
         files_copied: 1,
         directories_copied: if matches!(parsed_source_type, TransferSourceType::Directory) {

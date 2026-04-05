@@ -1,6 +1,35 @@
 mod support;
 
+use std::io::{Cursor, Read};
+
 use rmcp::model::PaginatedRequestParams;
+
+const SINGLE_FILE_ENTRY: &str = ".remote-exec-file";
+
+fn read_single_file_archive(bytes: &[u8]) -> (String, Vec<u8>) {
+    let mut archive = tar::Archive::new(Cursor::new(bytes));
+    let mut entries = archive.entries().expect("archive entries");
+    let mut entry = entries
+        .next()
+        .expect("archive entry")
+        .expect("archive entry ok");
+    let path = entry
+        .path()
+        .expect("entry path")
+        .to_string_lossy()
+        .into_owned();
+    let mut body = Vec::new();
+    entry.read_to_end(&mut body).expect("entry body");
+    assert!(
+        entries
+            .next()
+            .transpose()
+            .expect("no extra entries")
+            .is_none(),
+        "single-file archive contained extra entries"
+    );
+    (path, body)
+}
 
 #[cfg(windows)]
 fn msys_style_path(path: &std::path::Path) -> String {
@@ -142,6 +171,81 @@ async fn transfer_files_copies_local_directory_to_plain_http_remote() {
     assert_eq!(result.structured_content["files_copied"], 1);
     assert_eq!(result.structured_content["directories_copied"], 3);
     assert_eq!(result.structured_content["replaced"], true);
+}
+
+#[tokio::test]
+async fn transfer_files_copies_local_file_to_plain_http_remote_as_single_file_tar() {
+    let fixture = support::spawn_broker_with_plain_http_stub_daemon().await;
+    let source = fixture._tempdir.path().join("source.txt");
+    std::fs::write(&source, "hello xp\n").unwrap();
+
+    let result = fixture
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "local",
+                    "path": source.display().to_string()
+                },
+                "destination": {
+                    "target": "builder-xp",
+                    "path": "C:/dest/file.txt"
+                },
+                "overwrite": "fail",
+                "create_parent": true
+            }),
+        )
+        .await;
+
+    let capture = fixture
+        .last_transfer_import()
+        .await
+        .expect("transfer import");
+    assert_eq!(capture.destination_path, "C:/dest/file.txt");
+    assert_eq!(capture.source_type, "file");
+    let (path, body) = read_single_file_archive(&capture.body);
+    assert_eq!(path, SINGLE_FILE_ENTRY);
+    assert_eq!(body, b"hello xp\n");
+    assert_eq!(capture.body_len, capture.body.len());
+    assert_eq!(result.structured_content["source_type"], "file");
+    assert_eq!(result.structured_content["files_copied"], 1);
+    assert_eq!(result.structured_content["directories_copied"], 0);
+    assert_eq!(result.structured_content["bytes_copied"], 9);
+    assert_eq!(result.structured_content["replaced"], false);
+}
+
+#[tokio::test]
+async fn transfer_files_copies_plain_http_remote_file_to_local_from_single_file_tar() {
+    let fixture = support::spawn_broker_with_plain_http_stub_daemon().await;
+    fixture
+        .set_transfer_export_file_response(b"hello xp\n")
+        .await;
+    let destination = fixture._tempdir.path().join("dest.txt");
+
+    let result = fixture
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "builder-xp",
+                    "path": "C:/remote/file.txt"
+                },
+                "destination": {
+                    "target": "local",
+                    "path": destination.display().to_string()
+                },
+                "overwrite": "replace",
+                "create_parent": true
+            }),
+        )
+        .await;
+
+    assert_eq!(std::fs::read_to_string(&destination).unwrap(), "hello xp\n");
+    assert_eq!(result.structured_content["source_type"], "file");
+    assert_eq!(result.structured_content["files_copied"], 1);
+    assert_eq!(result.structured_content["directories_copied"], 0);
+    assert_eq!(result.structured_content["bytes_copied"], 9);
+    assert_eq!(result.structured_content["replaced"], false);
 }
 
 #[tokio::test]

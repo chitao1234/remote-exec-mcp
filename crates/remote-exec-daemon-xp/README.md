@@ -10,6 +10,8 @@ Host-native verification:
 
 - `make test-host-patch`
 - `make test-host-transfer`
+- `make test-host-config`
+- `make test-host-http-request`
 - `make check`
 
 ## Run
@@ -35,6 +37,7 @@ default_workdir = C:\work
 - no PTY support
 - no image support
 - `transfer_files` supports regular files and directory trees
-- directory transfers use GNU tar payloads for cross-target compatibility
+- transfer payloads use GNU tar for both files and directories
+- single-file transfers use the fixed archive entry `.remote-exec-file`
 - unsupported archive entries remain rejected: symlinks, hard links, special files, sparse entries, and malformed paths
 - `cmd.exe` only for shell execution
