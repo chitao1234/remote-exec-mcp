@@ -13,6 +13,7 @@ use std::sync::Once;
 
 use anyhow::Result;
 use config::{DaemonConfig, WindowsPtyBackendOverride};
+use remote_exec_proto::rpc::TargetInfoResponse;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -28,12 +29,7 @@ pub async fn run(config: DaemonConfig) -> Result<()> {
     run_until(config, pending::<()>()).await
 }
 
-pub async fn run_until<F>(config: DaemonConfig, shutdown: F) -> Result<()>
-where
-    F: Future<Output = ()> + Send,
-{
-    install_crypto_provider();
-
+pub fn build_app_state(config: DaemonConfig) -> Result<AppState> {
     let default_shell = exec::shell::resolve_default_shell(
         config.default_shell.as_deref(),
         &config.process_environment,
@@ -43,14 +39,35 @@ where
     let windows_pty_backend_override =
         exec::session::windows_pty_backend_override_for_mode(config.pty)?;
 
-    let state = AppState {
+    Ok(AppState {
         config: Arc::new(config),
         default_shell,
         supports_pty,
         windows_pty_backend_override,
         daemon_instance_id: uuid::Uuid::new_v4().to_string(),
         sessions: exec::store::SessionStore::new(64),
-    };
+    })
+}
+
+pub fn target_info_response(state: &AppState) -> TargetInfoResponse {
+    TargetInfoResponse {
+        target: state.config.target.clone(),
+        daemon_version: env!("CARGO_PKG_VERSION").to_string(),
+        daemon_instance_id: state.daemon_instance_id.clone(),
+        hostname: gethostname::gethostname().to_string_lossy().into_owned(),
+        platform: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        supports_pty: state.supports_pty,
+        supports_image_read: true,
+    }
+}
+
+pub async fn run_until<F>(config: DaemonConfig, shutdown: F) -> Result<()>
+where
+    F: Future<Output = ()> + Send,
+{
+    install_crypto_provider();
+    let state = build_app_state(config)?;
     server::serve_with_shutdown(state, shutdown).await
 }
 

@@ -116,6 +116,35 @@ pub struct TlsConfig {
     pub ca_pem: PathBuf,
 }
 
+#[derive(Debug, Clone)]
+pub struct EmbeddedDaemonConfig {
+    pub target: String,
+    pub default_workdir: PathBuf,
+    pub allow_login_shell: bool,
+    pub pty: PtyMode,
+    pub default_shell: Option<String>,
+    pub process_environment: ProcessEnvironment,
+}
+
+impl EmbeddedDaemonConfig {
+    pub fn into_daemon_config(self) -> DaemonConfig {
+        DaemonConfig {
+            target: self.target,
+            listen: SocketAddr::from(([127, 0, 0, 1], 0)),
+            default_workdir: self.default_workdir,
+            allow_login_shell: self.allow_login_shell,
+            pty: self.pty,
+            default_shell: self.default_shell,
+            process_environment: self.process_environment,
+            tls: TlsConfig {
+                cert_pem: PathBuf::new(),
+                key_pem: PathBuf::new(),
+                ca_pem: PathBuf::new(),
+            },
+        }
+    }
+}
+
 impl DaemonConfig {
     pub async fn load(path: impl AsRef<std::path::Path>) -> anyhow::Result<Self> {
         let text = tokio::fs::read_to_string(path.as_ref())

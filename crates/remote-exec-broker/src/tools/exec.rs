@@ -63,7 +63,6 @@ pub async fn exec_command(
     }
 
     let response = match target
-        .client
         .exec_start(&ExecStartRequest {
             cmd: input.cmd.clone(),
             workdir: input.workdir.clone(),
@@ -152,7 +151,6 @@ async fn write_stdin_inner(
 
     let target = state.target(&record.target)?;
     let response = match target
-        .client
         .exec_write(&ExecWriteRequest {
             daemon_session_id: record.daemon_session_id.clone(),
             chars: input.chars.unwrap_or_default(),
@@ -169,7 +167,7 @@ async fn write_stdin_inner(
             )));
         }
         Err(err) => {
-            if let Ok(info) = target.client.target_info().await
+            if let Ok(info) = target.target_info().await
                 && info.daemon_instance_id != record.daemon_instance_id
             {
                 target.clear_cached_daemon_info().await;

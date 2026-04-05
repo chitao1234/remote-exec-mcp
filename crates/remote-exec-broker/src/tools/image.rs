@@ -13,7 +13,6 @@ pub async fn view_image(
     let target = state.target(&input.target)?;
     target.ensure_identity_verified(&input.target).await?;
     let response = match target
-        .client
         .image_read(&ImageReadRequest {
             path: input.path,
             workdir: input.workdir,

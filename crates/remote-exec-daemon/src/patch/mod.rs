@@ -15,6 +15,13 @@ pub async fn apply_patch(
     State(state): State<Arc<AppState>>,
     Json(req): Json<PatchApplyRequest>,
 ) -> Result<Json<PatchApplyResponse>, (StatusCode, Json<RpcErrorBody>)> {
+    apply_patch_local(state, req).await.map(Json)
+}
+
+pub async fn apply_patch_local(
+    state: Arc<AppState>,
+    req: PatchApplyRequest,
+) -> Result<PatchApplyResponse, (StatusCode, Json<RpcErrorBody>)> {
     let cwd = crate::exec::resolve_workdir(&state, req.workdir.as_deref())
         .map_err(crate::exec::internal_error)?;
     let actions = parser::parse_patch(&req.patch)
@@ -26,12 +33,12 @@ pub async fn apply_patch(
         .await
         .map_err(|err| crate::exec::rpc_error("patch_failed", err.to_string()))?;
 
-    Ok(Json(PatchApplyResponse {
+    Ok(PatchApplyResponse {
         output: format!(
             "Success. Updated the following files:\n{}\n",
             summary.join("\n")
         ),
-    }))
+    })
 }
 
 async fn execute_verified_actions(

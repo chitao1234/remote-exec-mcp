@@ -44,14 +44,5 @@ async fn health(State(state): State<Arc<AppState>>) -> Json<HealthCheckResponse>
 }
 
 async fn target_info(State(state): State<Arc<AppState>>) -> Json<TargetInfoResponse> {
-    Json(TargetInfoResponse {
-        target: state.config.target.clone(),
-        daemon_version: env!("CARGO_PKG_VERSION").to_string(),
-        daemon_instance_id: state.daemon_instance_id.clone(),
-        hostname: gethostname::gethostname().to_string_lossy().into_owned(),
-        platform: std::env::consts::OS.to_string(),
-        arch: std::env::consts::ARCH.to_string(),
-        supports_pty: state.supports_pty,
-        supports_image_read: true,
-    })
+    Json(crate::target_info_response(&state))
 }

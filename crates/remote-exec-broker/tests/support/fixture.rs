@@ -18,6 +18,10 @@ pub struct BrokerFixture {
 }
 
 impl BrokerFixture {
+    pub fn local_workdir(&self) -> std::path::PathBuf {
+        self._tempdir.path().join("local-work")
+    }
+
     pub async fn call_tool(&self, name: &str, arguments: serde_json::Value) -> ToolResult {
         let result = self.raw_call_tool(name, arguments).await;
         assert!(

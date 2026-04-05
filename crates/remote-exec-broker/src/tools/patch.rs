@@ -13,7 +13,6 @@ pub async fn forward_patch(
     let target = state.target(target_name)?;
     target.ensure_identity_verified(target_name).await?;
     let response = match target
-        .client
         .patch_apply(&PatchApplyRequest { patch, workdir })
         .await
     {

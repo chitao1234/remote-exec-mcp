@@ -6,8 +6,10 @@ version.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+axum = { workspace = true }
 futures-util = { workspace = true }
 http-body-util = { workspace = true }
+remote-exec-daemon = { path = "../remote-exec-daemon" }
 remote-exec-proto = { path = "../remote-exec-proto" }
 reqwest = { workspace = true }
 rmcp = { workspace = true, features = ["macros", "transport-io"] }
@@ -23,11 +25,9 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
-axum = { workspace = true }
 gethostname = { workspace = true }
 image = { workspace = true }
 rmcp = { workspace = true, features = ["client", "transport-child-process"] }
-remote-exec-daemon = { path = "../remote-exec-daemon" }
 remote-exec-pki = { path = "../remote-exec-pki" }
 
 [[test]]

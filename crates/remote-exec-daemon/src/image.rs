@@ -21,6 +21,13 @@ pub async fn read_image(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ImageReadRequest>,
 ) -> Result<Json<ImageReadResponse>, (StatusCode, Json<RpcErrorBody>)> {
+    read_image_local(state, req).await.map(Json)
+}
+
+pub async fn read_image_local(
+    state: Arc<AppState>,
+    req: ImageReadRequest,
+) -> Result<ImageReadResponse, (StatusCode, Json<RpcErrorBody>)> {
     match req.detail.as_deref() {
         None | Some("original") => {}
         Some(other) => {
@@ -55,10 +62,10 @@ pub async fn read_image(
     let (format, rendered_bytes) = render_image_bytes(&path, req.detail.as_deref(), bytes)?;
     let image_url = encode_data_url(format, rendered_bytes)?;
 
-    Ok(Json(ImageReadResponse {
+    Ok(ImageReadResponse {
         image_url,
         detail: req.detail.filter(|value| value == "original"),
-    }))
+    })
 }
 
 fn normalize_path(path: &Path) -> PathBuf {

@@ -12,6 +12,7 @@ The tool interfaces and behavior in this project are heavily influenced by [Code
   - Public MCP server over stdio.
   - Accepts tool calls with a required `target` for machine-local operations.
   - Owns opaque public `session_id` values for live command sessions.
+  - Can optionally expose the broker host itself as `target: "local"` for daemon-backed exec, patch, and image operations.
 - `remote-exec-daemon`
   - Per-machine daemon over mTLS JSON/HTTP.
   - Executes commands, manages local sessions, applies patches, and reads images.
@@ -35,8 +36,10 @@ The tool interfaces and behavior in this project are heavily influenced by [Code
 
 - Agents talk only to the broker.
 - Agents can call `list_targets` to discover configured logical target names and cached daemon metadata when available.
+- When broker `[local]` config is enabled, `list_targets` also includes `local` for the broker host.
 - `list_targets` is broker-local and does not probe daemons at read time.
 - The broker validates `target`, forwards the request to the selected daemon, and returns MCP-compatible content plus structured JSON.
+- For the optional `local` target, the broker reuses daemon execution logic in-process instead of asking operators to run a second same-host daemon manually.
 - Each daemon serves exactly one configured target machine.
 - Live exec sessions are broker-routed by opaque public `session_id`, not by daemon-local process identifiers.
 
@@ -64,6 +67,7 @@ Broker config covers one entry per target:
 - client key path for `https://` targets
 - expected daemon target name
 - `allow_insecure_http = true` when a target intentionally uses `http://`
+- optional `[local]` broker-host config with default working directory, login-shell policy, PTY mode, and default shell
 
 ## TLS / CA setup
 
@@ -221,6 +225,16 @@ allow_insecure_http = true
 expected_daemon_name = "builder-xp"
 ```
 
+Optional broker-host local target in broker config:
+
+```toml
+[local]
+default_workdir = "/srv/local-work"
+allow_login_shell = true
+# pty = "none"
+# default_shell = "/bin/sh"
+```
+
 ## Local development
 
 Run the full workspace checks:
@@ -235,6 +249,7 @@ cargo fmt --all --check
 - The broker now starts even if some configured targets are temporarily unreachable.
 - Targets that are unavailable at broker startup are verified before the first forwarded call.
 - `transfer_files` uses broker-mediated copy for `local -> remote`, `remote -> local`, `remote -> remote`, and `local -> local`.
+- Broker `[local]` config enables `target: "local"` for `exec_command`, `write_stdin`, `apply_patch`, and `view_image` on the broker host.
 - `transfer_files` treats `destination.path` as the exact final path to create or replace; it does not infer basenames or copy "into" an existing directory.
 - `write_stdin` only invalidates sessions when the daemon restarted or explicitly reports `unknown_session`.
 - `max_output_tokens` is enforced by the daemon for command output.
@@ -295,6 +310,8 @@ Selecting a target is equivalent to `danger-full-access` on that machine.
 
 Selecting `target: "local"` in `transfer_files` is equivalent to full filesystem access on the broker host.
 
+When broker `[local]` config is enabled, selecting `target: "local"` in `exec_command`, `write_stdin`, `apply_patch`, or `view_image` is equivalent to full process and filesystem access on the broker host.
+
 In v1:
 
 - there is no sandbox selection flow
@@ -307,6 +324,7 @@ Configured remote targets may not be named `local`.
 ## Current status
 
 - Core remote tools are implemented: `list_targets`, `exec_command`, `write_stdin`, `apply_patch`, `view_image`, and `transfer_files`.
+- The broker can optionally expose its own host as `target: "local"` for daemon-backed exec, stdin polling, patch, and image workflows.
 - Broker and daemon session handling are hardened for concurrent exec workloads and precise restart/session-loss behavior.
 - Patch application supports strict EOF-marker handling and repeated-context multi-hunk updates.
 - Broker target discovery returns cached daemon metadata when the broker currently considers it usable; otherwise `daemon_info` is `null`.

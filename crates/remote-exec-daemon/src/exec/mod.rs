@@ -29,6 +29,13 @@ pub async fn exec_start(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ExecStartRequest>,
 ) -> Result<Json<ExecResponse>, (StatusCode, Json<RpcErrorBody>)> {
+    exec_start_local(state, req).await.map(Json)
+}
+
+pub async fn exec_start_local(
+    state: Arc<AppState>,
+    req: ExecStartRequest,
+) -> Result<ExecResponse, (StatusCode, Json<RpcErrorBody>)> {
     let cwd = resolve_workdir(&state, req.workdir.as_deref()).map_err(internal_error)?;
     if req.tty {
         if matches!(state.config.pty, crate::config::PtyMode::None) {
@@ -94,14 +101,14 @@ pub async fn exec_start(
                     .await
                     .map_err(internal_error)?,
             );
-            return Ok(Json(finish_response(
+            return Ok(finish_response(
                 &state.daemon_instance_id,
                 None,
                 false,
                 &session,
                 output,
                 req.max_output_tokens,
-            )));
+            ));
         }
 
         tokio::time::sleep(Duration::from_millis(25)).await;
@@ -120,7 +127,7 @@ pub async fn exec_start(
         Vec::new()
     };
 
-    Ok(Json(ExecResponse {
+    Ok(ExecResponse {
         daemon_session_id: Some(daemon_session_id),
         daemon_instance_id: state.daemon_instance_id.clone(),
         running: true,
@@ -130,13 +137,20 @@ pub async fn exec_start(
         original_token_count: Some(snapshot.original_token_count),
         output: snapshot.output,
         warnings,
-    }))
+    })
 }
 
 pub async fn exec_write(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ExecWriteRequest>,
 ) -> Result<Json<ExecResponse>, (StatusCode, Json<RpcErrorBody>)> {
+    exec_write_local(state, req).await.map(Json)
+}
+
+pub async fn exec_write_local(
+    state: Arc<AppState>,
+    req: ExecWriteRequest,
+) -> Result<ExecResponse, (StatusCode, Json<RpcErrorBody>)> {
     let daemon_session_id = req.daemon_session_id;
     let session = state
         .sessions
@@ -178,13 +192,13 @@ pub async fn exec_write(
             req.max_output_tokens,
         );
         session.retire().await;
-        return Ok(Json(response));
+        return Ok(response);
     }
     let wall_time_seconds = session.started_at.elapsed().as_secs_f64();
     let snapshot = output::snapshot_output(output, req.max_output_tokens);
     drop(session);
 
-    Ok(Json(ExecResponse {
+    Ok(ExecResponse {
         daemon_session_id: Some(daemon_session_id),
         daemon_instance_id: state.daemon_instance_id.clone(),
         running: true,
@@ -194,7 +208,7 @@ pub async fn exec_write(
         original_token_count: Some(snapshot.original_token_count),
         output: snapshot.output,
         warnings: Vec::new(),
-    }))
+    })
 }
 
 pub fn resolve_workdir(state: &Arc<AppState>, workdir: Option<&str>) -> anyhow::Result<PathBuf> {

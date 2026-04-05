@@ -2,11 +2,15 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use anyhow::Context;
+use remote_exec_daemon::config::{EmbeddedDaemonConfig, ProcessEnvironment, PtyMode};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BrokerConfig {
+    #[serde(default)]
     pub targets: BTreeMap<String, TargetConfig>,
+    #[serde(default)]
+    pub local: Option<LocalTargetConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -21,6 +25,17 @@ pub struct TargetConfig {
     #[serde(default)]
     pub allow_insecure_http: bool,
     pub expected_daemon_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LocalTargetConfig {
+    pub default_workdir: PathBuf,
+    #[serde(default = "default_allow_login_shell")]
+    pub allow_login_shell: bool,
+    #[serde(default)]
+    pub pty: PtyMode,
+    #[serde(default)]
+    pub default_shell: Option<String>,
 }
 
 impl TargetConfig {
@@ -50,6 +65,19 @@ impl TargetConfig {
     }
 }
 
+impl LocalTargetConfig {
+    pub fn embedded_daemon_config(&self) -> EmbeddedDaemonConfig {
+        EmbeddedDaemonConfig {
+            target: "local".to_string(),
+            default_workdir: self.default_workdir.clone(),
+            allow_login_shell: self.allow_login_shell,
+            pty: self.pty,
+            default_shell: self.default_shell.clone(),
+            process_environment: ProcessEnvironment::capture_current(),
+        }
+    }
+}
+
 impl BrokerConfig {
     pub(crate) fn validate(&self) -> anyhow::Result<()> {
         anyhow::ensure!(
@@ -70,6 +98,10 @@ impl BrokerConfig {
         config.validate()?;
         Ok(config)
     }
+}
+
+fn default_allow_login_shell() -> bool {
+    true
 }
 
 #[cfg(test)]
@@ -118,6 +150,32 @@ client_key_pem = "/tmp/broker.key"
 
         let config = BrokerConfig::load(&config_path).await.unwrap();
         assert!(config.targets.contains_key("builder-a"));
+    }
+
+    #[tokio::test]
+    async fn load_accepts_local_only_broker_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("broker.toml");
+        tokio::fs::write(
+            &config_path,
+            format!(
+                "[local]\ndefault_workdir = {}\nallow_login_shell = false\n",
+                toml::Value::String(dir.path().display().to_string())
+            ),
+        )
+        .await
+        .unwrap();
+
+        let config = BrokerConfig::load(&config_path).await.unwrap();
+        assert!(config.targets.is_empty());
+        assert_eq!(
+            config.local.as_ref().map(|local| &local.default_workdir),
+            Some(&dir.path().to_path_buf())
+        );
+        assert_eq!(
+            config.local.as_ref().map(|local| local.allow_login_shell),
+            Some(false)
+        );
     }
 
     #[tokio::test]

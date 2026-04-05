@@ -16,3 +16,15 @@ expected_daemon_name = "builder-b"
 base_url = "http://builder-xp.example.com:8181"
 allow_insecure_http = true
 expected_daemon_name = "builder-xp"
+
+# Optional broker-host local target for exec_command, write_stdin, apply_patch, and view_image.
+# When enabled, list_targets includes `local`.
+#
+#[local]
+#default_workdir = "/srv/local-work"
+#allow_login_shell = true
+## Optional. Omit to auto-detect PTY support, or set to "none" to disable TTY.
+## On Windows, "conpty" and "winpty" force a specific backend and fail startup if unavailable.
+## pty = "none"
+## Optional. If set, broker startup fails unless this shell is usable on the broker host.
+## default_shell = "/bin/sh"

@@ -70,7 +70,6 @@ async fn export_endpoint_to_archive(
             let target = state.target(target_name)?;
             target.ensure_identity_verified(target_name).await?;
             match target
-                .client
                 .transfer_export_to_file(
                     &TransferExportRequest {
                         path: endpoint.path.clone(),
@@ -115,7 +114,6 @@ async fn import_archive_to_endpoint(
             let target = state.target(target_name)?;
             target.ensure_identity_verified(target_name).await?;
             match target
-                .client
                 .transfer_import_from_file(archive_path, &request)
                 .await
             {

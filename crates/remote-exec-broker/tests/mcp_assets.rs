@@ -1,6 +1,7 @@
 mod support;
 
 use axum::http::StatusCode;
+use image::{ImageBuffer, Rgba};
 use remote_exec_proto::rpc::RpcErrorBody;
 use rmcp::model::PaginatedRequestParams;
 
@@ -103,6 +104,53 @@ async fn list_targets_formats_windows_metadata_and_truthful_pty_support() {
 }
 
 #[tokio::test]
+async fn list_targets_includes_enabled_local_target() {
+    let fixture = support::spawners::spawn_broker_with_local_target().await;
+    let result = fixture
+        .call_tool("list_targets", serde_json::json!({}))
+        .await;
+
+    assert_eq!(result.structured_content["targets"][0]["name"], "local");
+    assert_eq!(
+        result.structured_content["targets"][0]["daemon_info"]["platform"],
+        std::env::consts::OS
+    );
+    assert!(
+        result
+            .text_output
+            .starts_with("Configured targets:\n- local:"),
+        "unexpected text output: {}",
+        result.text_output
+    );
+}
+
+#[tokio::test]
+async fn apply_patch_runs_against_enabled_local_target() {
+    let fixture = support::spawners::spawn_broker_with_local_target().await;
+    let workdir = fixture.local_workdir();
+    let result = fixture
+        .call_tool(
+            "apply_patch",
+            serde_json::json!({
+                "target": "local",
+                "input": "*** Begin Patch\n*** Add File: hello.txt\n+hello local\n*** End Patch\n",
+                "workdir": workdir.display().to_string()
+            }),
+        )
+        .await;
+
+    assert!(
+        result
+            .text_output
+            .contains("Success. Updated the following files:")
+    );
+    assert_eq!(
+        std::fs::read_to_string(workdir.join("hello.txt")).unwrap(),
+        "hello local\n"
+    );
+}
+
+#[tokio::test]
 async fn view_image_returns_input_image_content_and_structured_content() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     let result = fixture
@@ -122,6 +170,29 @@ async fn view_image_returns_input_image_content_and_structured_content() {
         "data:image/png;base64,AAAA"
     );
     assert_eq!(result.structured_content["target"], "builder-a");
+    assert_eq!(result.structured_content["detail"], "original");
+}
+
+#[tokio::test]
+async fn view_image_reads_from_enabled_local_target() {
+    let fixture = support::spawners::spawn_broker_with_local_target().await;
+    let image_path = fixture.local_workdir().join("chart.png");
+    let image = ImageBuffer::<Rgba<u8>, _>::from_pixel(2, 2, Rgba([0, 128, 255, 255]));
+    image.save(&image_path).unwrap();
+
+    let result = fixture
+        .call_tool(
+            "view_image",
+            serde_json::json!({
+                "target": "local",
+                "path": image_path.display().to_string(),
+                "detail": "original"
+            }),
+        )
+        .await;
+
+    assert_eq!(result.raw_content[0]["type"], "input_image");
+    assert_eq!(result.structured_content["target"], "local");
     assert_eq!(result.structured_content["detail"], "original");
 }
 
