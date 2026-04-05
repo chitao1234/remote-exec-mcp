@@ -86,6 +86,128 @@ async fn exec_start_uses_configured_default_shell_when_shell_is_omitted() {
 }
 
 #[tokio::test]
+async fn exec_start_prefers_git_bash_when_shell_is_omitted_on_windows() {
+    let Some(_git_bash) = available_windows_git_bash_path() else {
+        return;
+    };
+
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "printf '%s' git-bash-ready".to_string(),
+                workdir: None,
+                shell: None,
+                tty: false,
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
+                max_output_tokens: None,
+                login: Some(false),
+            },
+        )
+        .await;
+
+    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.output, "git-bash-ready");
+}
+
+#[tokio::test]
+async fn exec_start_resolves_bare_bash_shell_requests_to_git_bash_on_windows() {
+    let Some(_git_bash) = available_windows_git_bash_path() else {
+        return;
+    };
+
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "printf '%s' explicit-git-bash".to_string(),
+                workdir: None,
+                shell: Some("bash.exe".to_string()),
+                tty: false,
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
+                max_output_tokens: None,
+                login: Some(false),
+            },
+        )
+        .await;
+
+    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.output, "explicit-git-bash");
+}
+
+#[tokio::test]
+async fn exec_start_preserves_workdir_for_git_bash_login_shells_on_windows() {
+    let Some(_git_bash) = available_windows_git_bash_path() else {
+        return;
+    };
+
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let workdir = fixture.workdir.join("git bash cwd");
+    std::fs::create_dir_all(&workdir).unwrap();
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "printf '%s' \"$(pwd -W)\"".to_string(),
+                workdir: Some(workdir.display().to_string()),
+                shell: Some("bash.exe".to_string()),
+                tty: false,
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
+                max_output_tokens: None,
+                login: Some(true),
+            },
+        )
+        .await;
+
+    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(
+        response.output.replace('\\', "/"),
+        workdir.display().to_string().replace('\\', "/")
+    );
+}
+
+#[tokio::test]
+async fn exec_start_uses_git_bash_login_profiles_when_shell_is_omitted() {
+    let Some(_git_bash) = available_windows_git_bash_path() else {
+        return;
+    };
+
+    let home = tempfile::tempdir().unwrap();
+    std::fs::write(
+        home.path().join(".bash_profile"),
+        "export LOGIN_SENTINEL=from_git_bash_profile\n",
+    )
+    .unwrap();
+    let home_text = home.path().to_string_lossy().into_owned();
+    let fixture = support::spawn::spawn_daemon_with_process_environment(
+        "builder-a",
+        process_environment_with(&[("HOME", &home_text)]),
+    )
+    .await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "printf '%s' \"$LOGIN_SENTINEL\"".to_string(),
+                workdir: None,
+                shell: None,
+                tty: false,
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
+                max_output_tokens: None,
+                login: None,
+            },
+        )
+        .await;
+
+    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.output, "from_git_bash_profile");
+}
+
+#[tokio::test]
 async fn exec_start_rejects_tty_when_disabled_by_config_on_windows() {
     let fixture =
         support::spawn::spawn_daemon_with_extra_config("builder-a", r#"pty = "none""#).await;

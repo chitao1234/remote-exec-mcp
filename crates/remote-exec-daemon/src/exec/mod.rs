@@ -57,7 +57,12 @@ pub async fn exec_start(
         None if shell::platform_supports_login_shells() => state.config.allow_login_shell,
         None => false,
     };
-    let shell = shell::selected_shell(req.shell.as_deref(), &state.default_shell);
+    let shell = shell::selected_shell(
+        req.shell.as_deref(),
+        &state.default_shell,
+        &state.config.process_environment,
+    )
+    .map_err(internal_error)?;
     let argv = shell::shell_argv(&shell, login, &req.cmd);
     let mut session = session::spawn_with_windows_pty_backend_override(
         &argv,

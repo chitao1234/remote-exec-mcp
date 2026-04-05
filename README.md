@@ -246,11 +246,11 @@ cargo fmt --all --check
 - `transfer_files` compares Windows paths case-insensitively when checking obvious same-path collisions.
 - Executable preservation is best effort and only restored on platforms that expose executable mode bits.
 - `allow_login_shell` controls daemon login-shell policy and defaults to `true`; explicit `login=true` is rejected only when the daemon disables it.
-- `default_shell` lets the daemon pin its fallback shell on both Unix and Windows. Startup now fails if the configured shell, or the auto-detected fallback when `default_shell` is omitted, is not usable on that host.
-- On Windows, `login=false` suppresses shell startup state where supported: `pwsh` and `powershell` add `-NoProfile`, while `cmd.exe` adds `/D` to disable AutoRun. `login=true` drops those suppression flags.
+- `default_shell` lets the daemon pin its fallback shell on both Unix and Windows. Startup now fails if the configured shell, or the auto-detected fallback when `default_shell` is omitted, is not usable on that host. Set this to `powershell.exe` or `cmd.exe` on Windows if you do not want the new Git Bash-first default.
+- On Windows, `login=false` suppresses shell startup state where supported: Git Bash omits `-l`, `pwsh` and `powershell` add `-NoProfile`, and `cmd.exe` adds `/D` to disable AutoRun. `login=true` uses Git Bash with `-l -c` and drops those PowerShell and `cmd.exe` suppression flags.
 - `list_targets` reports the daemon's actual `supports_pty` capability instead of assuming PTY support.
 - `pty = "none"` disables TTY entirely. On Windows, `pty = "conpty"` or `pty = "winpty"` force that backend and startup fails if the selected backend is unavailable. When `pty` is omitted, the daemon keeps the current auto-detect behavior.
-- Default shell resolution uses `default_shell` when configured. Otherwise it tries `SHELL`, then a usable passwd shell, then `bash`, then `/bin/sh` on Unix; and `pwsh.exe`, then `powershell.exe` or `powershell`, then `COMSPEC`, then `cmd.exe` on Windows.
+- Default shell resolution uses `default_shell` when configured. Otherwise it tries `SHELL`, then a usable passwd shell, then `bash`, then `/bin/sh` on Unix; and Git Bash, then `pwsh.exe`, then `powershell.exe` or `powershell`, then `COMSPEC`, then `cmd.exe` on Windows.
 - `remote-exec-daemon-xp` is intentionally narrower than the main daemon: it always uses `cmd.exe`, rejects `tty=true`, does not implement `view_image`, and only accepts the narrow v1 transfer subset for regular files and directory trees. Symlinks, hard links, special files, sparse entries, and malformed archive paths remain unsupported there.
 
 ## Quality Gate

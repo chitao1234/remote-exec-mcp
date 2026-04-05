@@ -6,6 +6,8 @@ allow_login_shell = true
 # On Windows, "conpty" and "winpty" force a specific backend and fail startup if unavailable.
 # pty = "none"
 # Optional. If set, daemon startup fails unless this shell is usable.
+# On Windows, omitted default shell now prefers Git Bash when Git for Windows is installed.
+# Set this to "powershell.exe" or "cmd.exe" to keep the older behavior.
 # default_shell = "/bin/sh"
 
 [tls]

@@ -1,9 +1,13 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+#[cfg(windows)]
+use std::ffi::OsStr;
 use std::ffi::OsString;
 #[cfg(windows)]
 use std::path::Path;
+#[cfg(windows)]
+use std::path::PathBuf;
 #[cfg(windows)]
 use std::sync::OnceLock;
 
@@ -18,6 +22,8 @@ const TEST_SHELL: &str = "/bin/sh";
 const TEST_SHELL: &str = "powershell.exe";
 #[cfg(windows)]
 const WINDOWS_CMD_SHELL: &str = "cmd.exe";
+#[cfg(windows)]
+const WINDOWS_GIT_BASH_COMMON_PATH: &str = r"C:\Program Files\Git\bin\bash.exe";
 #[cfg(windows)]
 const WINDOWS_ENV_OVERLAY_OUTPUT: &str = "dumb|1|cat|cat|1|||";
 // Commands in these tests are expected to finish in a single RPC response, but the daemon only
@@ -107,6 +113,56 @@ fn windows_probe_command(mode: &str) -> String {
         .display()
         .to_string();
     format!("& '{probe}' {mode}")
+}
+
+#[cfg(windows)]
+fn available_windows_git_bash_path() -> Option<String> {
+    let mut candidates = vec![PathBuf::from(WINDOWS_GIT_BASH_COMMON_PATH)];
+    if let Some(program_files) = std::env::var_os("ProgramFiles") {
+        candidates.push(
+            PathBuf::from(program_files)
+                .join("Git")
+                .join("bin")
+                .join("bash.exe"),
+        );
+    }
+    if let Some(program_files_x86) = std::env::var_os("ProgramFiles(x86)") {
+        candidates.push(
+            PathBuf::from(program_files_x86)
+                .join("Git")
+                .join("bin")
+                .join("bash.exe"),
+        );
+    }
+    if let Some(local_app_data) = std::env::var_os("LocalAppData") {
+        candidates.push(
+            PathBuf::from(local_app_data)
+                .join("Programs")
+                .join("Git")
+                .join("bin")
+                .join("bash.exe"),
+        );
+    }
+    if let Some(git_path) =
+        find_windows_command_on_path(std::env::var_os("PATH").as_deref(), "git.exe")
+    {
+        for ancestor in git_path.ancestors().skip(1).take(4) {
+            candidates.push(ancestor.join("bin").join("bash.exe"));
+            candidates.push(ancestor.join("usr").join("bin").join("bash.exe"));
+        }
+    }
+
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+        .map(|candidate| candidate.to_string_lossy().into_owned())
+}
+
+#[cfg(windows)]
+fn find_windows_command_on_path(path_env: Option<&OsStr>, name: &str) -> Option<PathBuf> {
+    std::env::split_paths(path_env?)
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())
 }
 
 #[cfg(windows)]
