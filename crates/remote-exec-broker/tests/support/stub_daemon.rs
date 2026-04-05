@@ -6,6 +6,7 @@ use std::time::Duration;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
 use remote_exec_proto::rpc::{
@@ -59,6 +60,15 @@ pub(super) enum ExecWriteBehavior {
     TemporaryFailureOnce,
     #[allow(dead_code, reason = "Shared across broker integration test crates")]
     UnknownSession,
+    #[allow(dead_code, reason = "Shared across broker integration test crates")]
+    MalformedCompletedMissingExitCode,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) enum ExecStartBehavior {
+    Success,
+    #[allow(dead_code, reason = "Shared across broker integration test crates")]
+    RunningMissingDaemonSessionId,
 }
 
 #[derive(Clone)]
@@ -69,7 +79,8 @@ pub(super) struct StubDaemonState {
     target_platform: String,
     target_arch: String,
     target_supports_pty: bool,
-    exec_write_behavior: Arc<Mutex<ExecWriteBehavior>>,
+    pub(super) exec_write_behavior: Arc<Mutex<ExecWriteBehavior>>,
+    pub(super) exec_start_behavior: Arc<Mutex<ExecStartBehavior>>,
     pub(super) exec_start_warnings: Arc<Mutex<Vec<ExecWarning>>>,
     pub(super) exec_start_calls: Arc<Mutex<usize>>,
     pub(super) last_patch_request: Arc<Mutex<Option<PatchApplyRequest>>>,
@@ -136,6 +147,7 @@ pub(super) fn stub_daemon_state(
         target_arch: "x86_64".to_string(),
         target_supports_pty: supports_pty,
         exec_write_behavior: Arc::new(Mutex::new(exec_write_behavior)),
+        exec_start_behavior: Arc::new(Mutex::new(ExecStartBehavior::Success)),
         exec_start_warnings: Arc::new(Mutex::new(Vec::new())),
         exec_start_calls: Arc::new(Mutex::new(0)),
         last_patch_request: Arc::new(Mutex::new(None)),
@@ -273,30 +285,47 @@ async fn target_info(State(state): State<StubDaemonState>) -> Json<TargetInfoRes
 async fn exec_start(
     State(state): State<StubDaemonState>,
     Json(_req): Json<ExecStartRequest>,
-) -> Json<ExecResponse> {
+) -> Response {
     *state.exec_start_calls.lock().await += 1;
+    let behavior = *state.exec_start_behavior.lock().await;
     let warnings = state.exec_start_warnings.lock().await.clone();
     let daemon_instance_id = state.daemon_instance_id.lock().await.clone();
 
-    Json(ExecResponse {
-        daemon_session_id: Some("daemon-session-1".to_string()),
-        daemon_instance_id,
-        running: true,
-        chunk_id: Some("chunk-start".to_string()),
-        wall_time_seconds: 0.25,
-        exit_code: None,
-        original_token_count: Some(1),
-        output: "ready".to_string(),
-        warnings,
-    })
+    let body = match behavior {
+        ExecStartBehavior::Success => serde_json::to_value(ExecResponse {
+            daemon_session_id: Some("daemon-session-1".to_string()),
+            daemon_instance_id,
+            running: true,
+            chunk_id: Some("chunk-start".to_string()),
+            wall_time_seconds: 0.25,
+            exit_code: None,
+            original_token_count: Some(1),
+            output: "ready".to_string(),
+            warnings,
+        })
+        .unwrap(),
+        ExecStartBehavior::RunningMissingDaemonSessionId => serde_json::json!({
+            "daemon_instance_id": daemon_instance_id,
+            "running": true,
+            "chunk_id": "chunk-start",
+            "wall_time_seconds": 0.25,
+            "exit_code": null,
+            "original_token_count": 1,
+            "output": "ready",
+            "warnings": warnings,
+        }),
+    };
+
+    (StatusCode::OK, Json(body)).into_response()
 }
 
 async fn exec_write(
     State(state): State<StubDaemonState>,
     Json(req): Json<ExecWriteRequest>,
-) -> Result<Json<ExecResponse>, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<Response, (StatusCode, Json<RpcErrorBody>)> {
     assert_eq!(req.daemon_session_id, "daemon-session-1");
     let mut behavior = state.exec_write_behavior.lock().await;
+    let response_behavior = *behavior;
     match *behavior {
         ExecWriteBehavior::Success => {}
         ExecWriteBehavior::TemporaryFailureOnce => {
@@ -318,21 +347,38 @@ async fn exec_write(
                 }),
             ));
         }
+        ExecWriteBehavior::MalformedCompletedMissingExitCode => {}
     }
     drop(behavior);
     let daemon_instance_id = state.daemon_instance_id.lock().await.clone();
 
-    Ok(Json(ExecResponse {
-        daemon_session_id: None,
-        daemon_instance_id,
-        running: false,
-        chunk_id: Some("chunk-write".to_string()),
-        wall_time_seconds: 0.5,
-        exit_code: Some(0),
-        original_token_count: Some(2),
-        output: "poll output".to_string(),
-        warnings: Vec::new(),
-    }))
+    let body = match response_behavior {
+        ExecWriteBehavior::MalformedCompletedMissingExitCode => serde_json::json!({
+            "daemon_session_id": null,
+            "daemon_instance_id": daemon_instance_id,
+            "running": false,
+            "chunk_id": "chunk-write",
+            "wall_time_seconds": 0.5,
+            "exit_code": null,
+            "original_token_count": 2,
+            "output": "poll output",
+            "warnings": [],
+        }),
+        _ => serde_json::to_value(ExecResponse {
+            daemon_session_id: None,
+            daemon_instance_id,
+            running: false,
+            chunk_id: Some("chunk-write".to_string()),
+            wall_time_seconds: 0.5,
+            exit_code: Some(0),
+            original_token_count: Some(2),
+            output: "poll output".to_string(),
+            warnings: Vec::new(),
+        })
+        .unwrap(),
+    };
+
+    Ok((StatusCode::OK, Json(body)).into_response())
 }
 
 async fn patch_apply(

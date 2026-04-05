@@ -5,7 +5,10 @@ use rmcp::{
 };
 use tempfile::TempDir;
 
-use super::stub_daemon::{StubDaemonState, StubImageReadResponse, StubTransferImportCapture};
+use super::stub_daemon::{
+    ExecStartBehavior, ExecWriteBehavior, StubDaemonState, StubImageReadResponse,
+    StubTransferImportCapture,
+};
 
 pub struct BrokerFixture {
     pub _tempdir: TempDir,
@@ -80,6 +83,16 @@ impl BrokerFixture {
         warnings: Vec<remote_exec_proto::rpc::ExecWarning>,
     ) {
         *self.stub_state.exec_start_warnings.lock().await = warnings;
+    }
+
+    pub async fn set_malformed_exec_start_missing_session_id(&self) {
+        *self.stub_state.exec_start_behavior.lock().await =
+            ExecStartBehavior::RunningMissingDaemonSessionId;
+    }
+
+    pub async fn set_malformed_exec_write_missing_exit_code(&self) {
+        *self.stub_state.exec_write_behavior.lock().await =
+            ExecWriteBehavior::MalformedCompletedMissingExitCode;
     }
 
     pub async fn set_stub_daemon_instance_id(&self, daemon_instance_id: &str) {

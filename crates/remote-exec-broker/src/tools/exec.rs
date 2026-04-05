@@ -1,7 +1,7 @@
 use anyhow::Context;
 use remote_exec_proto::path::{PathPolicy, linux_path_policy, windows_path_policy};
 use remote_exec_proto::public::{CommandToolResult, ExecCommandInput, WriteStdinInput};
-use remote_exec_proto::rpc::{ExecStartRequest, ExecWarning, ExecWriteRequest};
+use remote_exec_proto::rpc::{ExecResponse, ExecStartRequest, ExecWarning, ExecWriteRequest};
 use rmcp::model::Meta;
 
 use super::exec_intercept::maybe_intercept_apply_patch;
@@ -83,6 +83,7 @@ pub async fn exec_command(
             return Err(err.into());
         }
     };
+    validate_exec_response(&response)?;
     let response_meta = response_warning_meta(&response.warnings);
 
     let session_command = input.cmd.clone();
@@ -183,6 +184,7 @@ async fn write_stdin_inner(
             return Err(err.into());
         }
     };
+    validate_exec_response(&response)?;
 
     let session_id = if response.running {
         Some(record.session_id.clone())
@@ -212,6 +214,33 @@ async fn write_stdin_inner(
 
 fn unknown_process_id_message(session_id: &str) -> String {
     format!("Unknown process id {session_id}")
+}
+
+fn validate_exec_response(response: &ExecResponse) -> anyhow::Result<()> {
+    if response.running {
+        anyhow::ensure!(
+            response.exit_code.is_none(),
+            "daemon returned malformed exec response: running response unexpectedly included exit_code"
+        );
+        anyhow::ensure!(
+            response
+                .daemon_session_id
+                .as_deref()
+                .is_some_and(|session_id| !session_id.is_empty()),
+            "daemon returned malformed exec response: running response missing daemon_session_id"
+        );
+        return Ok(());
+    }
+
+    anyhow::ensure!(
+        response.exit_code.is_some(),
+        "daemon returned malformed exec response: completed response missing exit_code"
+    );
+    anyhow::ensure!(
+        response.daemon_session_id.is_none(),
+        "daemon returned malformed exec response: completed response unexpectedly included daemon_session_id"
+    );
+    Ok(())
 }
 
 fn response_warning_meta(warnings: &[ExecWarning]) -> Option<Meta> {
