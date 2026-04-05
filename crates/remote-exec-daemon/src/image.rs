@@ -28,6 +28,13 @@ pub async fn read_image_local(
     state: Arc<AppState>,
     req: ImageReadRequest,
 ) -> Result<ImageReadResponse, (StatusCode, Json<RpcErrorBody>)> {
+    tracing::info!(
+        target = %state.config.target,
+        path = %req.path,
+        detail = req.detail.as_deref().unwrap_or("default"),
+        has_workdir = req.workdir.is_some(),
+        "image_read received"
+    );
     match req.detail.as_deref() {
         None | Some("original") => {}
         Some(other) => {
@@ -61,6 +68,13 @@ pub async fn read_image_local(
         .map_err(|err| process_error(&path, "image_decode_failed", err))?;
     let (format, rendered_bytes) = render_image_bytes(&path, req.detail.as_deref(), bytes)?;
     let image_url = encode_data_url(format, rendered_bytes)?;
+    tracing::info!(
+        target = %state.config.target,
+        path = %path.display(),
+        detail = req.detail.as_deref().unwrap_or("default"),
+        image_url_len = image_url.len(),
+        "image_read completed"
+    );
 
     Ok(ImageReadResponse {
         image_url,

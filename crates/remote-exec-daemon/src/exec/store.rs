@@ -55,12 +55,20 @@ impl SessionStore {
     pub async fn insert(&self, session_id: String, session: LiveSession) -> InsertOutcome {
         let crossed_warning_threshold = self.crosses_warning_threshold().await;
         self.prune_for_insert().await;
-        self.inner.write().await.insert(
+        let session_id_for_log = session_id.clone();
+        let mut sessions = self.inner.write().await;
+        sessions.insert(
             session_id,
             SessionEntry {
                 session: Arc::new(Mutex::new(session)),
                 last_touched_at: Instant::now(),
             },
+        );
+        tracing::info!(
+            session_id = %session_id_for_log,
+            open_sessions = sessions.len(),
+            crossed_warning_threshold,
+            "stored exec session"
         );
         InsertOutcome {
             crossed_warning_threshold,
@@ -73,7 +81,14 @@ impl SessionStore {
     }
 
     pub async fn remove(&self, session_id: &str) {
-        self.inner.write().await.remove(session_id);
+        let mut sessions = self.inner.write().await;
+        if sessions.remove(session_id).is_some() {
+            tracing::info!(
+                session_id,
+                open_sessions = sessions.len(),
+                "removed exec session"
+            );
+        }
     }
 
     async fn lock_if_current(
@@ -164,6 +179,13 @@ impl SessionStore {
             if let Some(removed) = removed {
                 let mut guard = removed.session.lock_owned().await;
                 let _ = guard.terminate().await;
+                drop(guard);
+                let open_sessions_after_prune = self.inner.read().await.len();
+                tracing::warn!(
+                    victim_session_id = %victim.session_id,
+                    open_sessions_after_prune,
+                    "pruned exec session to respect limit"
+                );
                 return;
             }
         }
@@ -199,6 +221,11 @@ impl SessionLease {
             .is_some_and(|current| Arc::ptr_eq(&current.session, &self.session));
         if is_current {
             sessions.remove(&self.session_id);
+            tracing::info!(
+                session_id = %self.session_id,
+                open_sessions = sessions.len(),
+                "retired exec session"
+            );
             true
         } else {
             false

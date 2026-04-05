@@ -271,6 +271,7 @@ static HttpResponse route_request(AppState& state, const HttpRequest& request) {
             exec_response["daemon_instance_id"] = state.daemon_instance_id;
             write_json(response, exec_response);
         } catch (const std::exception& ex) {
+            log_message(LOG_ERROR, "server", std::string("exec/start failed: ") + ex.what());
             write_rpc_error(response, 500, "internal_error", ex.what());
         }
         return response;
@@ -297,8 +298,10 @@ static HttpResponse route_request(AppState& state, const HttpRequest& request) {
         } catch (const std::exception& ex) {
             const std::string message = ex.what();
             if (message == "unknown_session") {
+                log_message(LOG_WARN, "server", "exec/write failed: unknown_session");
                 write_rpc_error(response, 400, "unknown_session", "Unknown daemon session");
             } else {
+                log_message(LOG_ERROR, "server", std::string("exec/write failed: ") + message);
                 write_rpc_error(response, 500, "internal_error", message);
             }
         }
@@ -317,6 +320,7 @@ static HttpResponse route_request(AppState& state, const HttpRequest& request) {
             log_message(LOG_INFO, "server", summary.str());
             write_json(response, Json{{"output", result.output}});
         } catch (const std::exception& ex) {
+            log_message(LOG_WARN, "server", std::string("patch/apply failed: ") + ex.what());
             write_rpc_error(response, 400, "patch_failed", ex.what());
         }
         return response;
@@ -337,6 +341,7 @@ static HttpResponse route_request(AppState& state, const HttpRequest& request) {
             response.headers["x-remote-exec-source-type"] = payload.source_type;
             response.body = payload.bytes;
         } catch (const std::exception& ex) {
+            log_message(LOG_WARN, "server", std::string("transfer/export failed: ") + ex.what());
             write_rpc_error(response, 400, "transfer_failed", ex.what());
         }
         return response;
@@ -373,6 +378,7 @@ static HttpResponse route_request(AppState& state, const HttpRequest& request) {
                 }
             );
         } catch (const std::exception& ex) {
+            log_message(LOG_WARN, "server", std::string("transfer/import failed: ") + ex.what());
             write_rpc_error(response, 400, "transfer_failed", ex.what());
         }
         return response;

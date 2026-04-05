@@ -1,6 +1,7 @@
 pub mod config;
 pub mod exec;
 pub mod image;
+pub mod logging;
 pub mod patch;
 pub mod server;
 pub mod tls;
@@ -68,6 +69,16 @@ where
 {
     install_crypto_provider();
     let state = build_app_state(config)?;
+    tracing::info!(
+        target = %state.config.target,
+        listen = %state.config.listen,
+        default_workdir = %state.config.default_workdir.display(),
+        default_shell = %state.default_shell,
+        supports_pty = state.supports_pty,
+        pty_mode = ?state.config.pty,
+        daemon_instance_id = %state.daemon_instance_id,
+        "starting daemon"
+    );
     server::serve_with_shutdown(state, shutdown).await
 }
 

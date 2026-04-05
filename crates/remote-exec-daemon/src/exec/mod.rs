@@ -36,6 +36,15 @@ pub async fn exec_start_local(
     state: Arc<AppState>,
     req: ExecStartRequest,
 ) -> Result<ExecResponse, (StatusCode, Json<RpcErrorBody>)> {
+    let cmd_preview = crate::logging::preview_text(&req.cmd, 120);
+    tracing::info!(
+        target = %state.config.target,
+        tty = req.tty,
+        has_workdir = req.workdir.is_some(),
+        requested_shell = req.shell.as_deref().unwrap_or("<default>"),
+        cmd_preview = %cmd_preview,
+        "exec_start received"
+    );
     let cwd = resolve_workdir(&state, req.workdir.as_deref()).map_err(internal_error)?;
     if req.tty {
         if matches!(state.config.pty, crate::config::PtyMode::None) {
@@ -74,6 +83,13 @@ pub async fn exec_start_local(
         &state.config.process_environment,
     )
     .map_err(internal_error)?;
+    tracing::debug!(
+        target = %state.config.target,
+        cwd = %cwd.display(),
+        shell = %shell,
+        login,
+        "resolved exec request"
+    );
     let argv = shell::shell_argv(&shell, login, &req.cmd);
     let mut session = session::spawn_with_windows_pty_backend_override(
         &argv,
@@ -126,6 +142,13 @@ pub async fn exec_start_local(
     } else {
         Vec::new()
     };
+    tracing::info!(
+        target = %state.config.target,
+        daemon_session_id = %daemon_session_id,
+        warnings = warnings.len(),
+        wall_time_seconds,
+        "exec_start left process running"
+    );
 
     Ok(ExecResponse {
         daemon_session_id: Some(daemon_session_id),
@@ -152,6 +175,13 @@ pub async fn exec_write_local(
     req: ExecWriteRequest,
 ) -> Result<ExecResponse, (StatusCode, Json<RpcErrorBody>)> {
     let daemon_session_id = req.daemon_session_id;
+    tracing::info!(
+        target = %state.config.target,
+        daemon_session_id = %daemon_session_id,
+        chars_len = req.chars.len(),
+        empty_poll = req.chars.is_empty(),
+        "exec_write received"
+    );
     let session = state
         .sessions
         .lock(&daemon_session_id)
@@ -192,11 +222,24 @@ pub async fn exec_write_local(
             req.max_output_tokens,
         );
         session.retire().await;
+        tracing::info!(
+            target = %state.config.target,
+            daemon_session_id = %daemon_session_id,
+            exit_code = response.exit_code.unwrap_or_default(),
+            wall_time_seconds = response.wall_time_seconds,
+            "exec_write completed session"
+        );
         return Ok(response);
     }
     let wall_time_seconds = session.started_at.elapsed().as_secs_f64();
     let snapshot = output::snapshot_output(output, req.max_output_tokens);
     drop(session);
+    tracing::info!(
+        target = %state.config.target,
+        daemon_session_id = %daemon_session_id,
+        wall_time_seconds,
+        "exec_write left process running"
+    );
 
     Ok(ExecResponse {
         daemon_session_id: Some(daemon_session_id),
@@ -247,21 +290,25 @@ pub fn rpc_error(
     code: &'static str,
     message: impl Into<String>,
 ) -> (StatusCode, Json<RpcErrorBody>) {
+    let message = message.into();
+    tracing::warn!(code, %message, "daemon request rejected");
     (
         StatusCode::BAD_REQUEST,
         Json(RpcErrorBody {
             code: code.to_string(),
-            message: message.into(),
+            message,
         }),
     )
 }
 
 pub fn internal_error(err: anyhow::Error) -> (StatusCode, Json<RpcErrorBody>) {
+    let message = err.to_string();
+    tracing::error!(error = %message, "daemon internal error");
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(RpcErrorBody {
             code: "internal_error".to_string(),
-            message: err.to_string(),
+            message,
         }),
     )
 }
@@ -320,13 +367,22 @@ fn finish_response(
     max_output_tokens: Option<u32>,
 ) -> ExecResponse {
     let snapshot = output::snapshot_output(output, max_output_tokens);
+    let wall_time_seconds = session.started_at.elapsed().as_secs_f64();
+    let exit_code = session.exit_code();
+    tracing::info!(
+        daemon_session_id = daemon_session_id.as_deref().unwrap_or("-"),
+        running,
+        exit_code,
+        wall_time_seconds,
+        "built exec response"
+    );
     ExecResponse {
         daemon_session_id,
         daemon_instance_id: daemon_instance_id.to_string(),
         running,
         chunk_id: Some(chunk_id()),
-        wall_time_seconds: session.started_at.elapsed().as_secs_f64(),
-        exit_code: session.exit_code(),
+        wall_time_seconds,
+        exit_code,
         original_token_count: Some(snapshot.original_token_count),
         output: snapshot.output,
         warnings: Vec::new(),

@@ -22,6 +22,7 @@ pub async fn export_path(
     State(_state): State<Arc<AppState>>,
     Json(req): Json<TransferExportRequest>,
 ) -> Result<Response, (StatusCode, Json<RpcErrorBody>)> {
+    tracing::info!(path = %req.path, "transfer export received");
     let exported = archive::export_path_to_archive(&req.path)
         .await
         .map_err(map_transfer_error)?;
@@ -31,6 +32,11 @@ pub async fn export_path(
         .map_err(|err| crate::exec::internal_error(err.into()))?;
     let stream = tokio_util::io::ReaderStream::new(file);
     let body = Body::from_stream(stream);
+    tracing::info!(
+        path = %req.path,
+        source_type = format_source_type(&exported.source_type),
+        "transfer export completed"
+    );
 
     Ok((
         [(
@@ -47,6 +53,13 @@ pub async fn import_archive(
     body: Body,
 ) -> Result<Json<TransferImportResponse>, (StatusCode, Json<RpcErrorBody>)> {
     let request = parse_import_request(&headers)?;
+    tracing::info!(
+        destination_path = %request.destination_path,
+        overwrite = ?request.overwrite,
+        create_parent = request.create_parent,
+        source_type = format_source_type(&request.source_type),
+        "transfer import received"
+    );
     let temp =
         tempfile::NamedTempFile::new().map_err(|err| crate::exec::internal_error(err.into()))?;
     let temp_path = temp.into_temp_path();
@@ -63,6 +76,14 @@ pub async fn import_archive(
     let summary = archive::import_archive_from_file(&temp_path, &request)
         .await
         .map_err(map_transfer_error)?;
+    tracing::info!(
+        destination_path = %request.destination_path,
+        bytes_copied = summary.bytes_copied,
+        files_copied = summary.files_copied,
+        directories_copied = summary.directories_copied,
+        replaced = summary.replaced,
+        "transfer import completed"
+    );
     Ok(Json(summary))
 }
 

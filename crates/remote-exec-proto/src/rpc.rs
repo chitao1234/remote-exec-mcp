@@ -150,9 +150,7 @@ pub struct RpcErrorBody {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ExecStartRequest, ExecWriteRequest, ImageReadRequest, PatchApplyRequest,
-    };
+    use super::{ExecStartRequest, ExecWriteRequest, ImageReadRequest, PatchApplyRequest};
 
     #[test]
     fn exec_start_request_omits_none_fields() {

@@ -8,6 +8,7 @@ pub async fn list_targets(
     state: &crate::BrokerState,
     _input: ListTargetsInput,
 ) -> anyhow::Result<ToolCallOutput> {
+    tracing::info!(tool = "list_targets", "broker tool started");
     let mut targets = Vec::with_capacity(state.targets.len());
     for (name, handle) in &state.targets {
         let daemon_info = handle
@@ -26,6 +27,16 @@ pub async fn list_targets(
         });
     }
     let text = format_targets_text(&targets);
+    let reachable = targets
+        .iter()
+        .filter(|target| target.daemon_info.is_some())
+        .count();
+    tracing::info!(
+        tool = "list_targets",
+        configured_targets = targets.len(),
+        reachable_targets = reachable,
+        "broker tool completed"
+    );
 
     Ok(ToolCallOutput::text_and_structured(
         text,

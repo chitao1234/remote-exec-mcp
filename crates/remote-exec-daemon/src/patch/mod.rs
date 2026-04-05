@@ -22,6 +22,12 @@ pub async fn apply_patch_local(
     state: Arc<AppState>,
     req: PatchApplyRequest,
 ) -> Result<PatchApplyResponse, (StatusCode, Json<RpcErrorBody>)> {
+    tracing::info!(
+        target = %state.config.target,
+        patch_len = req.patch.len(),
+        has_workdir = req.workdir.is_some(),
+        "patch_apply received"
+    );
     let cwd = crate::exec::resolve_workdir(&state, req.workdir.as_deref())
         .map_err(crate::exec::internal_error)?;
     let actions = parser::parse_patch(&req.patch)
@@ -32,6 +38,11 @@ pub async fn apply_patch_local(
     let summary = execute_verified_actions(verified)
         .await
         .map_err(|err| crate::exec::rpc_error("patch_failed", err.to_string()))?;
+    tracing::info!(
+        target = %state.config.target,
+        updated_paths = summary.len(),
+        "patch_apply completed"
+    );
 
     Ok(PatchApplyResponse {
         output: format!(

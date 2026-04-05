@@ -34,6 +34,7 @@ where
     F: Future<Output = ()> + Send,
 {
     let listener = bind_listener(state.config.listen)?;
+    tracing::info!(listen = %state.config.listen, "daemon tls listener bound");
     let tls = TlsAcceptor::from(Arc::new(server_config(&state)?));
     let mut connections = JoinSet::new();
     let (connection_shutdown_tx, _) = watch::channel(());
@@ -51,7 +52,8 @@ where
                 break;
             }
             accepted = listener.accept() => {
-                let (stream, _) = accepted?;
+                let (stream, peer_addr) = accepted?;
+                tracing::debug!(peer = %peer_addr, "accepted tcp connection");
                 let tls = tls.clone();
                 let app = app.clone();
                 let mut connection_shutdown = connection_shutdown_tx.subscribe();
@@ -59,7 +61,7 @@ where
                     let stream = match tls.accept(stream).await {
                         Ok(stream) => stream,
                         Err(err) => {
-                            tracing::warn!(?err, "tls accept failed");
+                            tracing::warn!(peer = %peer_addr, ?err, "tls accept failed");
                             return;
                         }
                     };
@@ -75,7 +77,7 @@ where
                     tokio::select! {
                         result = &mut connection => {
                             if let Err(err) = result {
-                                tracing::warn!(?err, "http serve failed");
+                                tracing::warn!(peer = %peer_addr, ?err, "http serve failed");
                             }
                         }
                         changed = connection_shutdown.changed() => {
@@ -83,7 +85,7 @@ where
                                 connection.as_mut().graceful_shutdown();
                             }
                             if let Err(err) = connection.await {
-                                tracing::warn!(?err, "http serve failed during shutdown");
+                                tracing::warn!(peer = %peer_addr, ?err, "http serve failed during shutdown");
                             }
                         }
                     }
@@ -101,6 +103,7 @@ where
         }
     }
 
+    tracing::info!("daemon tls listener stopped");
     Ok(())
 }
 

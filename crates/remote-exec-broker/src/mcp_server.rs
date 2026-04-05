@@ -92,8 +92,14 @@ pub fn tool_error_result(text: String, meta: Option<Meta>) -> CallToolResult {
 
 pub fn format_tool_error(err: anyhow::Error) -> CallToolResult {
     match err.downcast::<ToolCallError>() {
-        Ok(tool_err) => tool_error_result(tool_err.message, tool_err.meta),
-        Err(err) => tool_error_result(err.to_string(), None),
+        Ok(tool_err) => {
+            tracing::warn!(error = %tool_err.message, "broker tool returned error");
+            tool_error_result(tool_err.message, tool_err.meta)
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "broker tool returned error");
+            tool_error_result(err.to_string(), None)
+        }
     }
 }
 
@@ -234,6 +240,7 @@ impl ServerHandler for BrokerServer {
 }
 
 pub async fn serve_stdio(state: crate::BrokerState) -> anyhow::Result<()> {
+    tracing::info!("starting broker MCP stdio service");
     let server = BrokerServer::new(state);
     server
         .serve(rmcp::transport::stdio())
@@ -242,6 +249,7 @@ pub async fn serve_stdio(state: crate::BrokerState) -> anyhow::Result<()> {
         .waiting()
         .await
         .context("waiting for broker MCP service")?;
+    tracing::info!("broker MCP stdio service stopped");
     Ok(())
 }
 

@@ -1,4 +1,6 @@
 use anyhow::Context;
+use std::time::Instant;
+
 use remote_exec_proto::path::{PathPolicy, linux_path_policy, windows_path_policy};
 use remote_exec_proto::public::{CommandToolResult, ExecCommandInput, WriteStdinInput};
 use remote_exec_proto::rpc::{ExecResponse, ExecStartRequest, ExecWarning, ExecWriteRequest};
@@ -19,6 +21,18 @@ pub async fn exec_command(
     state: &crate::BrokerState,
     input: ExecCommandInput,
 ) -> anyhow::Result<ToolCallOutput> {
+    let started = Instant::now();
+    let target_name = input.target.clone();
+    let cmd_preview = crate::logging::preview_text(&input.cmd, 120);
+    tracing::info!(
+        tool = "exec_command",
+        target = %target_name,
+        tty = input.tty,
+        has_workdir = input.workdir.is_some(),
+        has_shell = input.shell.is_some(),
+        cmd_preview = %cmd_preview,
+        "broker tool started"
+    );
     let target = state.target(&input.target)?;
     target.ensure_identity_verified(&input.target).await?;
     let path_policy = target_path_policy(target).await?;
@@ -34,6 +48,14 @@ pub async fn exec_command(
         )
         .await
         .map_err(|err| {
+            tracing::warn!(
+                tool = "exec_command",
+                target = %target_name,
+                intercepted = true,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                error = %err,
+                "broker tool failed"
+            );
             anyhow::Error::new(ToolCallError::with_meta(
                 err.to_string(),
                 Some(warning_meta(
@@ -43,6 +65,13 @@ pub async fn exec_command(
             ))
         })?;
 
+        tracing::info!(
+            tool = "exec_command",
+            target = %target_name,
+            intercepted = true,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "broker tool completed"
+        );
         return Ok(ToolCallOutput::text_structured_meta(
             format_intercepted_patch_text(&output),
             serde_json::to_value(CommandToolResult {
@@ -79,6 +108,14 @@ pub async fn exec_command(
             if matches!(err, DaemonClientError::Transport(_)) {
                 target.clear_cached_daemon_info().await;
             }
+            tracing::warn!(
+                tool = "exec_command",
+                target = %target_name,
+                intercepted = false,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                error = %err,
+                "broker tool failed"
+            );
             return Err(err.into());
         }
     };
@@ -107,6 +144,18 @@ pub async fn exec_command(
         None
     };
 
+    tracing::info!(
+        tool = "exec_command",
+        target = %target_name,
+        intercepted = false,
+        running = response.running,
+        exit_code = response.exit_code,
+        public_session_id = session_id.as_deref().unwrap_or("-"),
+        daemon_instance_id = %response.daemon_instance_id,
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "broker tool completed"
+    );
+
     Ok(ToolCallOutput::text_structured_meta(
         format_command_text(&input.cmd, &response, session_id.as_deref()),
         serde_json::to_value(CommandToolResult {
@@ -127,9 +176,43 @@ pub async fn write_stdin(
     state: &crate::BrokerState,
     input: WriteStdinInput,
 ) -> anyhow::Result<ToolCallOutput> {
+    let started = Instant::now();
+    let session_id = input.session_id.clone();
+    let requested_target = input.target.clone();
+    let chars_len = input.chars.as_ref().map(|chars| chars.len()).unwrap_or(0);
+    tracing::info!(
+        tool = "write_stdin",
+        session_id = %session_id,
+        requested_target = requested_target.as_deref().unwrap_or("-"),
+        chars_len,
+        empty_poll = chars_len == 0,
+        "broker tool started"
+    );
     write_stdin_inner(state, input)
         .await
-        .map_err(|err| anyhow::anyhow!("write_stdin failed: {err}"))
+        .inspect(|output| {
+            let structured = &output.structured;
+            tracing::info!(
+                tool = "write_stdin",
+                session_id = %session_id,
+                requested_target = requested_target.as_deref().unwrap_or("-"),
+                running = structured["session_id"].is_string(),
+                exit_code = structured["exit_code"].as_i64().unwrap_or(-1),
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "broker tool completed"
+            );
+        })
+        .map_err(|err| {
+            tracing::warn!(
+                tool = "write_stdin",
+                session_id = %session_id,
+                requested_target = requested_target.as_deref().unwrap_or("-"),
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                error = %err,
+                "broker tool failed"
+            );
+            anyhow::anyhow!("write_stdin failed: {err}")
+        })
 }
 
 async fn write_stdin_inner(

@@ -21,6 +21,21 @@ pub async fn transfer_files(
     state: &crate::BrokerState,
     input: TransferFilesInput,
 ) -> anyhow::Result<ToolCallOutput> {
+    let started = std::time::Instant::now();
+    let source_target = input.source.target.clone();
+    let source_path = input.source.path.clone();
+    let destination_target = input.destination.target.clone();
+    let destination_path = input.destination.path.clone();
+    tracing::info!(
+        tool = "transfer_files",
+        source_target = %source_target,
+        source_path = %source_path,
+        destination_target = %destination_target,
+        destination_path = %destination_path,
+        overwrite = ?input.overwrite,
+        create_parent = input.create_parent,
+        "broker tool started"
+    );
     ensure_absolute(state, &input.source).await?;
     ensure_absolute(state, &input.destination).await?;
     ensure_distinct_endpoints(state, &input.source, &input.destination).await?;
@@ -51,6 +66,15 @@ pub async fn transfer_files(
         replaced: summary.replaced,
     };
 
+    tracing::info!(
+        tool = "transfer_files",
+        source_target = %source_target,
+        source_path = %source_path,
+        destination_target = %destination_target,
+        destination_path = %destination_path,
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "broker tool completed"
+    );
     Ok(ToolCallOutput::text_and_structured(
         format_transfer_text(&result),
         serde_json::to_value(result)?,

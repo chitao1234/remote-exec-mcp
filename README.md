@@ -69,6 +69,28 @@ Broker config covers one entry per target:
 - `allow_insecure_http = true` when a target intentionally uses `http://`
 - optional `[local]` broker-host config with default working directory, login-shell policy, PTY mode, and default shell
 
+## Observability
+
+All three runtime components emit diagnostics to `stderr`.
+
+- `remote-exec-broker` keeps `stdout` reserved for the MCP stdio transport, so turning logging up does not corrupt the JSON line protocol.
+- Rust components read `REMOTE_EXEC_LOG` first and fall back to `RUST_LOG`.
+- `remote-exec-daemon-xp` also reads `REMOTE_EXEC_LOG` first, then `RUST_LOG`. It accepts a bare level such as `info` or `debug`, and it also understands shared filter strings by honoring `remote_exec_daemon_xp=<level>`.
+- Default logging is conservative for dependencies and `info` for the project crates.
+
+Examples:
+
+```bash
+REMOTE_EXEC_LOG=debug cargo run -p remote-exec-daemon -- configs/daemon.example.toml
+REMOTE_EXEC_LOG=debug cargo run -p remote-exec-broker -- configs/broker.example.toml
+```
+
+One shared filter string can drive all components:
+
+```bash
+REMOTE_EXEC_LOG='warn,remote_exec_broker=debug,remote_exec_daemon=debug,remote_exec_daemon_xp=debug'
+```
+
 ## TLS / CA setup
 
 The broker and daemon use mutual TLS:

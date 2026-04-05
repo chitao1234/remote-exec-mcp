@@ -37,6 +37,13 @@ impl SessionStore {
             .write()
             .await
             .insert(session_id.clone(), record.clone());
+        tracing::info!(
+            session_id = %record.session_id,
+            target = %record.target,
+            daemon_session_id = %record.daemon_session_id,
+            daemon_instance_id = %record.daemon_instance_id,
+            "created broker session mapping"
+        );
         record
     }
 
@@ -45,6 +52,14 @@ impl SessionStore {
     }
 
     pub async fn remove(&self, session_id: &str) {
-        self.inner.write().await.remove(session_id);
+        if let Some(record) = self.inner.write().await.remove(session_id) {
+            tracing::info!(
+                session_id = %record.session_id,
+                target = %record.target,
+                daemon_session_id = %record.daemon_session_id,
+                daemon_instance_id = %record.daemon_instance_id,
+                "removed broker session mapping"
+            );
+        }
     }
 }

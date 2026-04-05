@@ -55,11 +55,15 @@ impl std::error::Error for DaemonClientError {}
 #[derive(Clone)]
 pub struct DaemonClient {
     client: reqwest::Client,
+    target_name: String,
     base_url: String,
 }
 
 impl DaemonClient {
-    pub async fn new(config: &TargetConfig) -> anyhow::Result<Self> {
+    pub async fn new(
+        target_name: impl Into<String>,
+        config: &TargetConfig,
+    ) -> anyhow::Result<Self> {
         let client = if config.base_url.starts_with("http://") {
             anyhow::ensure!(
                 config.allow_insecure_http,
@@ -99,6 +103,7 @@ impl DaemonClient {
 
         Ok(Self {
             client,
+            target_name: target_name.into(),
             base_url: config.base_url.clone(),
         })
     }
@@ -140,6 +145,13 @@ impl DaemonClient {
         req: &TransferExportRequest,
         archive_path: &std::path::Path,
     ) -> Result<TransferSourceType, DaemonClientError> {
+        let started = std::time::Instant::now();
+        tracing::debug!(
+            target = %self.target_name,
+            base_url = %self.base_url,
+            path = %req.path,
+            "starting daemon transfer export"
+        );
         let response = self
             .client
             .post(format!("{}{}", self.base_url, "/v1/transfer/export"))
@@ -147,8 +159,26 @@ impl DaemonClient {
             .json(req)
             .send()
             .await
-            .map_err(|err| DaemonClientError::Transport(err.into()))?;
+            .map_err(|err| {
+                tracing::warn!(
+                    target = %self.target_name,
+                    base_url = %self.base_url,
+                    path = %req.path,
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    error = %err,
+                    "daemon transfer export transport failed"
+                );
+                DaemonClientError::Transport(err.into())
+            })?;
         if !response.status().is_success() {
+            tracing::warn!(
+                target = %self.target_name,
+                base_url = %self.base_url,
+                path = %req.path,
+                status = response.status().as_u16(),
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "daemon transfer export returned error status"
+            );
             return Err(decode_rpc_error(response).await);
         }
 
@@ -162,6 +192,13 @@ impl DaemonClient {
         tokio::io::copy(&mut stream, &mut file)
             .await
             .map_err(|err| DaemonClientError::Transport(err.into()))?;
+        tracing::debug!(
+            target = %self.target_name,
+            base_url = %self.base_url,
+            path = %req.path,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "daemon transfer export completed"
+        );
         Ok(source_type)
     }
 
@@ -170,6 +207,7 @@ impl DaemonClient {
         archive_path: &std::path::Path,
         req: &TransferImportRequest,
     ) -> Result<TransferImportResponse, DaemonClientError> {
+        let started = std::time::Instant::now();
         let body = if self.base_url.starts_with("http://") {
             reqwest::Body::from(
                 tokio::fs::read(archive_path)
@@ -202,15 +240,48 @@ impl DaemonClient {
             .body(body)
             .send()
             .await
-            .map_err(|err| DaemonClientError::Transport(err.into()))?;
+            .map_err(|err| {
+                tracing::warn!(
+                    target = %self.target_name,
+                    base_url = %self.base_url,
+                    destination_path = %req.destination_path,
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    error = %err,
+                    "daemon transfer import transport failed"
+                );
+                DaemonClientError::Transport(err.into())
+            })?;
         if !response.status().is_success() {
+            tracing::warn!(
+                target = %self.target_name,
+                base_url = %self.base_url,
+                destination_path = %req.destination_path,
+                status = response.status().as_u16(),
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "daemon transfer import returned error status"
+            );
             return Err(decode_rpc_error(response).await);
         }
 
-        response
-            .json()
-            .await
-            .map_err(|err| DaemonClientError::Decode(err.into()))
+        let summary = response.json().await.map_err(|err| {
+            tracing::warn!(
+                target = %self.target_name,
+                base_url = %self.base_url,
+                destination_path = %req.destination_path,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                error = %err,
+                "daemon transfer import decode failed"
+            );
+            DaemonClientError::Decode(err.into())
+        })?;
+        tracing::debug!(
+            target = %self.target_name,
+            base_url = %self.base_url,
+            destination_path = %req.destination_path,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "daemon transfer import completed"
+        );
+        Ok(summary)
     }
 
     async fn post<Req, Resp>(&self, path: &str, body: &Req) -> Result<Resp, DaemonClientError>
@@ -218,6 +289,13 @@ impl DaemonClient {
         Req: serde::Serialize + ?Sized,
         Resp: serde::de::DeserializeOwned,
     {
+        let started = std::time::Instant::now();
+        tracing::debug!(
+            target = %self.target_name,
+            base_url = %self.base_url,
+            path,
+            "sending daemon rpc"
+        );
         let response = self
             .client
             .post(format!("{}{}", self.base_url, path))
@@ -225,8 +303,26 @@ impl DaemonClient {
             .json(body)
             .send()
             .await
-            .map_err(|err| DaemonClientError::Transport(err.into()))?;
+            .map_err(|err| {
+                tracing::warn!(
+                    target = %self.target_name,
+                    base_url = %self.base_url,
+                    path,
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    error = %err,
+                    "daemon rpc transport failed"
+                );
+                DaemonClientError::Transport(err.into())
+            })?;
         if !response.status().is_success() {
+            tracing::warn!(
+                target = %self.target_name,
+                base_url = %self.base_url,
+                path,
+                status = response.status().as_u16(),
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "daemon rpc returned error status"
+            );
             let status = response.status();
             let body = response
                 .text()
@@ -246,10 +342,25 @@ impl DaemonClient {
             });
         }
 
-        response
-            .json()
-            .await
-            .map_err(|err| DaemonClientError::Decode(err.into()))
+        let decoded = response.json().await.map_err(|err| {
+            tracing::warn!(
+                target = %self.target_name,
+                base_url = %self.base_url,
+                path,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                error = %err,
+                "daemon rpc decode failed"
+            );
+            DaemonClientError::Decode(err.into())
+        })?;
+        tracing::debug!(
+            target = %self.target_name,
+            base_url = %self.base_url,
+            path,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "daemon rpc completed"
+        );
+        Ok(decoded)
     }
 }
 

@@ -1,10 +1,12 @@
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::Result;
-use axum::extract::State;
+use axum::extract::{Request, State};
+use axum::middleware::{self, Next};
 use axum::routing::post;
-use axum::{Json, Router};
+use axum::{Json, Router, response::Response};
 use remote_exec_proto::rpc::{HealthCheckResponse, TargetInfoResponse};
 
 use crate::AppState;
@@ -33,6 +35,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/transfer/import", post(crate::transfer::import_archive))
         .route("/v1/image/read", post(crate::image::read_image))
         .with_state(state)
+        .layer(middleware::from_fn(log_http_request))
 }
 
 async fn health(State(state): State<Arc<AppState>>) -> Json<HealthCheckResponse> {
@@ -45,4 +48,23 @@ async fn health(State(state): State<Arc<AppState>>) -> Json<HealthCheckResponse>
 
 async fn target_info(State(state): State<Arc<AppState>>) -> Json<TargetInfoResponse> {
     Json(crate::target_info_response(&state))
+}
+
+async fn log_http_request(request: Request, next: Next) -> Response {
+    let method = request.method().clone();
+    let path = request.uri().path().to_string();
+    let started = Instant::now();
+    let response = next.run(request).await;
+    let status = response.status();
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+
+    if status.is_server_error() {
+        tracing::error!(%method, path = %path, status = status.as_u16(), elapsed_ms, "http request completed");
+    } else if status.is_client_error() {
+        tracing::warn!(%method, path = %path, status = status.as_u16(), elapsed_ms, "http request completed");
+    } else {
+        tracing::info!(%method, path = %path, status = status.as_u16(), elapsed_ms, "http request completed");
+    }
+
+    response
 }

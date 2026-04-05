@@ -2,6 +2,7 @@ pub mod config;
 pub mod daemon_client;
 pub mod local_backend;
 pub mod local_transfer;
+pub mod logging;
 pub mod mcp_server;
 pub mod session_store;
 pub mod tools;
@@ -134,6 +135,7 @@ impl TargetHandle {
     pub async fn clear_cached_daemon_info(&self) {
         *self.identity_verified.lock().await = false;
         *self.cached_daemon_info.lock().await = None;
+        tracing::info!("cleared cached daemon identity and metadata");
     }
 
     pub async fn ensure_identity_verified(&self, name: &str) -> anyhow::Result<()> {
@@ -147,6 +149,7 @@ impl TargetHandle {
             Err(DaemonClientError::Transport(err)) => {
                 *identity_verified = false;
                 *self.cached_daemon_info.lock().await = None;
+                tracing::warn!(target = %name, ?err, "target identity verification failed");
                 return Err(DaemonClientError::Transport(err).into());
             }
             Err(err) => return Err(err.into()),
@@ -161,6 +164,16 @@ impl TargetHandle {
 
         *self.cached_daemon_info.lock().await = Some(Self::cache_from_target_info(&info));
         *identity_verified = true;
+        tracing::info!(
+            target = %name,
+            daemon_name = %info.target,
+            daemon_instance_id = %info.daemon_instance_id,
+            platform = %info.platform,
+            arch = %info.arch,
+            hostname = %info.hostname,
+            supports_pty = info.supports_pty,
+            "verified target identity"
+        );
         Ok(())
     }
 }
@@ -181,7 +194,13 @@ impl BrokerState {
 
 pub async fn run(config: config::BrokerConfig) -> anyhow::Result<()> {
     install_crypto_provider();
+    tracing::info!(
+        configured_targets = config.targets.len(),
+        local_target_enabled = config.local.is_some(),
+        "starting broker"
+    );
     let state = build_state(config).await?;
+    tracing::info!(configured_targets = state.targets.len(), "broker ready");
     mcp_server::serve_stdio(state).await
 }
 
@@ -192,6 +211,15 @@ async fn build_state(config: config::BrokerConfig) -> anyhow::Result<BrokerState
     if let Some(local_config) = &config.local {
         let client = LocalDaemonClient::new(local_config)?;
         let info = client.target_info().await?;
+        tracing::info!(
+            target = "local",
+            daemon_instance_id = %info.daemon_instance_id,
+            platform = %info.platform,
+            arch = %info.arch,
+            hostname = %info.hostname,
+            supports_pty = info.supports_pty,
+            "enabled embedded local target"
+        );
         targets.insert(
             "local".to_string(),
             TargetHandle {
@@ -206,7 +234,7 @@ async fn build_state(config: config::BrokerConfig) -> anyhow::Result<BrokerState
     }
 
     for (name, target_config) in &config.targets {
-        let client = DaemonClient::new(target_config).await?;
+        let client = DaemonClient::new(name.clone(), target_config).await?;
         let (identity_verified, cached_daemon_info) = match client.target_info().await {
             Ok(info) => {
                 if let Some(expected_name) = &target_config.expected_daemon_name {
@@ -216,6 +244,17 @@ async fn build_state(config: config::BrokerConfig) -> anyhow::Result<BrokerState
                         info.target
                     );
                 }
+                tracing::info!(
+                    target = %name,
+                    base_url = %target_config.base_url,
+                    daemon_name = %info.target,
+                    daemon_instance_id = %info.daemon_instance_id,
+                    platform = %info.platform,
+                    arch = %info.arch,
+                    hostname = %info.hostname,
+                    supports_pty = info.supports_pty,
+                    "target available during broker startup"
+                );
                 (true, Some(TargetHandle::cache_from_target_info(&info)))
             }
             Err(DaemonClientError::Transport(err)) => {

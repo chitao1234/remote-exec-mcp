@@ -194,18 +194,6 @@ where
 }
 
 #[cfg(unix)]
-fn usable_unix_shell_candidate(
-    candidate: Option<&str>,
-    environment: &ProcessEnvironment,
-) -> Option<String> {
-    usable_unix_shell_candidate_with_validator(
-        candidate,
-        environment,
-        validate_unix_shell_candidate,
-    )
-}
-
-#[cfg(unix)]
 fn usable_unix_shell_candidate_with_validator<G>(
     candidate: Option<&str>,
     environment: &ProcessEnvironment,
@@ -278,6 +266,7 @@ fn has_execute_bits(metadata: &std::fs::Metadata) -> bool {
 }
 
 #[cfg(any(test, windows))]
+#[cfg_attr(test, allow(dead_code))]
 fn resolve_default_windows_shell_with(
     configured_default_shell: Option<&str>,
     environment: &ProcessEnvironment,
@@ -331,6 +320,7 @@ where
 }
 
 #[cfg(any(test, windows))]
+#[cfg_attr(test, allow(dead_code))]
 fn validate_windows_shell_candidate(
     shell: &str,
     environment: &ProcessEnvironment,

@@ -14,6 +14,7 @@ struct LiveSession {
     HANDLE stdin_write;
     HANDLE stdout_read;
     DWORD started_at_ms;
+    std::string output_carry;
 };
 
 class SessionStore {
