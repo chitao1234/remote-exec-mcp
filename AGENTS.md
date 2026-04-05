@@ -6,7 +6,7 @@ These instructions apply to the entire `remote-exec-mcp` workspace.
 
 ## Project Overview
 
-- This repository is a Rust 2024 workspace for a remote-first MCP server that exposes Codex-style local-system tools across multiple Linux machines.
+- This repository is a Rust 2024 workspace for a remote-first MCP server that exposes Codex-style local system tools across multiple Linux machines.
 - The public tool surface is currently `exec_command`, `write_stdin`, `apply_patch`, and `view_image`.
 - The architecture is intentionally split:
   - `remote-exec-broker` is the public MCP server over stdio. It validates `target`, routes requests to daemons, and owns the opaque public `session_id` namespace.
@@ -26,7 +26,6 @@ These instructions apply to the entire `remote-exec-mcp` workspace.
 - `crates/remote-exec-admin/src/`: CLI entrypoints for certificate/bootstrap workflows.
 - `crates/remote-exec-pki/src/`: shared PKI generation, manifest, and write helpers.
 - `configs/*.example.toml`: canonical config examples for broker and daemon shape.
-- `docs/local-system-tools.md`: compatibility notes for the upstream Codex-inspired tool behavior.
 - `README.md`: operator runbook, trust model, bootstrap flow, and project-wide quality gate.
 - `tests/e2e/multi_target.rs`: broker-plus-daemon multi-target end-to-end coverage.
 
@@ -49,7 +48,6 @@ These instructions apply to the entire `remote-exec-mcp` workspace.
   - update `crates/remote-exec-proto/src/rpc.rs`
   - update both the broker client and daemon server/handler paths in the same change
   - keep error messages stable where tests or documented behavior depend on them
-- When changing execution semantics, patch parsing, or image behavior, check `docs/local-system-tools.md` first and keep the remote behavior aligned unless the task explicitly calls for divergence.
 - When changing certificate/bootstrap behavior, update the following together if applicable:
   - `crates/remote-exec-admin`
   - `crates/remote-exec-pki`
