@@ -6,7 +6,9 @@ members = [
   "crates/remote-exec-pki",
   "crates/remote-exec-admin",
 ]
-exclude = ["vendor/winpty-rs"]
+exclude = [
+  "winptyrs",
+]
 resolver = "2"
 
 [workspace.package]
