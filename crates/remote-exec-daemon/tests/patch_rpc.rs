@@ -22,6 +22,55 @@ async fn add_file_overwrites_existing_content() {
     assert_eq!(tokio::fs::read_to_string(path).await.unwrap(), "new\n");
 }
 
+#[cfg(windows)]
+#[tokio::test]
+async fn apply_patch_accepts_msys_style_workdir_on_windows() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let workdir = fixture.workdir.join("msys-workdir");
+    tokio::fs::create_dir_all(&workdir).await.unwrap();
+
+    let response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: "*** Begin Patch\n*** Add File: demo.txt\n+new\n*** End Patch\n".to_string(),
+                workdir: Some(support::msys_style_path(&workdir)),
+            },
+        )
+        .await;
+
+    assert!(response.output.contains("A demo.txt"));
+    assert_eq!(
+        tokio::fs::read_to_string(workdir.join("demo.txt"))
+            .await
+            .unwrap(),
+        "new\n"
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn apply_patch_accepts_cygwin_style_absolute_paths_on_windows() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let path = fixture.workdir.join("cygdrive-demo.txt");
+
+    let response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: format!(
+                    "*** Begin Patch\n*** Add File: {}\n+new\n*** End Patch\n",
+                    support::cygwin_style_path(&path)
+                ),
+                workdir: None,
+            },
+        )
+        .await;
+
+    assert!(response.output.contains("A cygdrive-demo.txt"));
+    assert_eq!(tokio::fs::read_to_string(path).await.unwrap(), "new\n");
+}
+
 #[tokio::test]
 async fn update_file_accepts_end_of_file_marker() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;

@@ -163,6 +163,30 @@ async fn image_read_reports_missing_file_with_path_context() {
     assert!(err.message.contains("missing.png"));
 }
 
+#[cfg(windows)]
+#[tokio::test]
+async fn image_read_accepts_msys_style_absolute_paths_on_windows() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let path = fixture.workdir.join("msys-path.png");
+    write_png(&path, 48, 48).await;
+    let original = tokio::fs::read(&path).await.unwrap();
+
+    let response = fixture
+        .rpc::<ImageReadRequest, ImageReadResponse>(
+            "/v1/image/read",
+            &ImageReadRequest {
+                path: support::msys_style_path(&path),
+                workdir: None,
+                detail: None,
+            },
+        )
+        .await;
+
+    let (mime, returned) = decode_data_url(&response.image_url);
+    assert_eq!(mime, "image/png");
+    assert_eq!(returned, original);
+}
+
 #[tokio::test]
 async fn image_read_rejects_directory_paths_with_path_context() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;

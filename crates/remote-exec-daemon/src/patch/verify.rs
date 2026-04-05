@@ -34,7 +34,7 @@ pub async fn verify_actions(
     for action in actions {
         match action {
             PatchAction::Add { path, lines } => {
-                let absolute_path = cwd.join(&path);
+                let absolute_path = resolve_patch_path(cwd, &path);
                 verified.push(VerifiedAction::Add {
                     path: absolute_path.clone(),
                     content: ensure_trailing_newline(lines.join("\n")),
@@ -42,7 +42,7 @@ pub async fn verify_actions(
                 });
             }
             PatchAction::Delete { path } => {
-                let absolute_path = cwd.join(&path);
+                let absolute_path = resolve_patch_path(cwd, &path);
                 let metadata = fs::metadata(&absolute_path).await?;
                 anyhow::ensure!(
                     metadata.is_file(),
@@ -60,11 +60,11 @@ pub async fn verify_actions(
                 move_to,
                 hunks,
             } => {
-                let source_path = cwd.join(&path);
+                let source_path = resolve_patch_path(cwd, &path);
                 let current = fs::read_to_string(&source_path).await?;
                 let destination_path = move_to
                     .as_ref()
-                    .map(|destination| cwd.join(destination))
+                    .map(|destination| resolve_patch_path(cwd, destination))
                     .unwrap_or_else(|| source_path.clone());
                 let remove_source = move_to.is_some() && destination_path != source_path;
                 let content = ensure_trailing_newline(engine::apply_hunks(&current, &hunks)?);
@@ -81,6 +81,10 @@ pub async fn verify_actions(
     }
 
     Ok(verified)
+}
+
+fn resolve_patch_path(cwd: &Path, path: &Path) -> PathBuf {
+    crate::exec::resolve_input_path(cwd, &path.as_os_str().to_string_lossy())
 }
 
 fn ensure_trailing_newline(mut text: String) -> String {

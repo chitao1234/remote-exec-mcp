@@ -2,6 +2,24 @@ mod support;
 
 use rmcp::model::PaginatedRequestParams;
 
+#[cfg(windows)]
+fn msys_style_path(path: &std::path::Path) -> String {
+    let text = path.display().to_string().replace('\\', "/");
+    let bytes = text.as_bytes();
+    assert!(
+        bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic(),
+        "expected drive-qualified Windows path, got {text}"
+    );
+
+    let drive = (bytes[0] as char).to_ascii_lowercase();
+    let rest = text[2..].trim_start_matches('/');
+    if rest.is_empty() {
+        format!("/{drive}")
+    } else {
+        format!("/{drive}/{rest}")
+    }
+}
+
 #[tokio::test]
 async fn transfer_files_is_listed_for_mcp_clients() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
@@ -53,6 +71,37 @@ async fn transfer_files_copies_local_file_and_reports_summary() {
     assert_eq!(result.structured_content["directories_copied"], 0);
     assert_eq!(result.structured_content["bytes_copied"], 6);
     assert_eq!(result.structured_content["replaced"], false);
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn transfer_files_copies_local_file_using_msys_style_windows_paths() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
+    let source = fixture._tempdir.path().join("source.txt");
+    let destination = fixture._tempdir.path().join("dest.txt");
+    std::fs::write(&source, "hello\n").unwrap();
+
+    let result = fixture
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "local",
+                    "path": msys_style_path(&source)
+                },
+                "destination": {
+                    "target": "local",
+                    "path": msys_style_path(&destination)
+                },
+                "overwrite": "fail",
+                "create_parent": false
+            }),
+        )
+        .await;
+
+    assert_eq!(std::fs::read_to_string(&destination).unwrap(), "hello\n");
+    assert_eq!(result.structured_content["source_type"], "file");
+    assert_eq!(result.structured_content["files_copied"], 1);
 }
 
 #[tokio::test]
@@ -172,6 +221,31 @@ async fn transfer_files_accepts_windows_remote_paths_on_non_windows_hosts() {
                 "destination": {
                     "target": "builder-a",
                     "path": r"c:\work\artifact.txt"
+                },
+                "overwrite": "replace",
+                "create_parent": true
+            }),
+        )
+        .await;
+
+    assert!(error.contains("source and destination must differ"));
+}
+
+#[tokio::test]
+async fn transfer_files_accepts_msys_and_cygwin_windows_remote_paths_on_non_windows_hosts() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon_platform("windows", false).await;
+
+    let error = fixture
+        .call_tool_error(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "builder-a",
+                    "path": "/c/Work/Artifact.txt"
+                },
+                "destination": {
+                    "target": "builder-a",
+                    "path": "/cygdrive/c/work/artifact.txt"
                 },
                 "overwrite": "replace",
                 "create_parent": true

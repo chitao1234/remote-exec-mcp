@@ -40,6 +40,53 @@ fn split_windows_prefix(raw: &str) -> (&str, &str) {
     ("", raw)
 }
 
+fn translate_windows_posix_drive_path(raw: &str) -> Option<String> {
+    let bytes = raw.as_bytes();
+    if bytes.len() >= 2
+        && bytes[0] == b'/'
+        && bytes[1].is_ascii_alphabetic()
+        && (bytes.len() == 2 || bytes[2] == b'/')
+    {
+        return Some(build_windows_drive_path(
+            bytes[1] as char,
+            raw.get(2..).unwrap_or_default(),
+        ));
+    }
+
+    let lower = raw.to_ascii_lowercase();
+    let rest = lower.strip_prefix("/cygdrive/")?;
+    let rest_bytes = rest.as_bytes();
+    if rest_bytes.is_empty()
+        || !rest_bytes[0].is_ascii_alphabetic()
+        || (rest_bytes.len() > 1 && rest_bytes[1] != b'/')
+    {
+        return None;
+    }
+
+    Some(build_windows_drive_path(
+        raw.as_bytes()["/cygdrive/".len()] as char,
+        raw.get("/cygdrive/".len() + 1..).unwrap_or_default(),
+    ))
+}
+
+fn build_windows_drive_path(drive: char, rest: &str) -> String {
+    let tail = rest.trim_start_matches(['/', '\\']);
+    if tail.is_empty() {
+        format!("{}:\\", drive.to_ascii_uppercase())
+    } else {
+        format!(
+            "{}:\\{}",
+            drive.to_ascii_uppercase(),
+            tail.chars()
+                .map(|ch| match ch {
+                    '/' | '\\' => '\\',
+                    other => other,
+                })
+                .collect::<String>()
+        )
+    }
+}
+
 fn normalize_windows_separators(raw: &str) -> String {
     let (prefix, rest) = split_windows_prefix(raw);
     let normalized_rest = rest
@@ -55,7 +102,7 @@ fn normalize_windows_separators(raw: &str) -> String {
 fn comparison_key(policy: PathPolicy, raw: &str) -> String {
     let normalized = match policy.style {
         PathStyle::Posix => raw.to_string(),
-        PathStyle::Windows => normalize_windows_separators(raw),
+        PathStyle::Windows => normalize_for_system(policy, raw),
     };
 
     match policy.comparison {
@@ -75,6 +122,7 @@ pub fn is_absolute_for_policy(policy: PathPolicy, raw: &str) -> bool {
                 && (bytes[2] == b'\\' || bytes[2] == b'/'))
                 || raw.starts_with(r"\\")
                 || raw.starts_with("//")
+                || translate_windows_posix_drive_path(raw).is_some()
         }
     }
 }
@@ -82,7 +130,8 @@ pub fn is_absolute_for_policy(policy: PathPolicy, raw: &str) -> bool {
 pub fn normalize_for_system(policy: PathPolicy, raw: &str) -> String {
     match policy.style {
         PathStyle::Posix => raw.to_string(),
-        PathStyle::Windows => normalize_windows_separators(raw),
+        PathStyle::Windows => translate_windows_posix_drive_path(raw)
+            .unwrap_or_else(|| normalize_windows_separators(raw)),
     }
 }
 
@@ -125,6 +174,11 @@ mod tests {
         let policy = windows_path_policy();
         assert!(is_absolute_for_policy(policy, r"C:\work\artifact.txt"));
         assert!(is_absolute_for_policy(policy, "C:/work/artifact.txt"));
+        assert!(is_absolute_for_policy(policy, "/c/work/artifact.txt"));
+        assert!(is_absolute_for_policy(
+            policy,
+            "/cygdrive/c/work/artifact.txt"
+        ));
         assert!(!is_absolute_for_policy(policy, r"work\artifact.txt"));
     }
 
@@ -135,6 +189,16 @@ mod tests {
             policy,
             r"C:\Work\Artifact.txt",
             "c:/work/artifact.txt"
+        ));
+        assert!(same_path_for_policy(
+            policy,
+            "/c/Work/Artifact.txt",
+            r"c:\work\artifact.txt"
+        ));
+        assert!(same_path_for_policy(
+            policy,
+            "/cygdrive/c/Work/Artifact.txt",
+            r"c:\work\artifact.txt"
         ));
     }
 
@@ -153,6 +217,14 @@ mod tests {
         let policy = windows_path_policy();
         assert_eq!(
             normalize_for_system(policy, "C:/work/releases/current.txt"),
+            r"C:\work\releases\current.txt"
+        );
+        assert_eq!(
+            normalize_for_system(policy, "/c/work/releases/current.txt"),
+            r"C:\work\releases\current.txt"
+        );
+        assert_eq!(
+            normalize_for_system(policy, "/cygdrive/c/work/releases/current.txt"),
             r"C:\work\releases\current.txt"
         );
     }
@@ -176,6 +248,10 @@ mod tests {
         assert_eq!(
             join_for_policy(policy, r"C:\work\releases", r"nested\file.txt"),
             r"C:\work\releases\nested\file.txt"
+        );
+        assert_eq!(
+            join_for_policy(policy, r"C:\work\releases", "/c/other/file.txt"),
+            r"C:\other\file.txt"
         );
     }
 }

@@ -170,6 +170,31 @@ async fn exec_start_preserves_workdir_for_git_bash_login_shells_on_windows() {
 }
 
 #[tokio::test]
+async fn exec_start_accepts_msys_style_workdir_on_windows() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let workdir = fixture.workdir.join("msys workdir");
+    std::fs::create_dir_all(&workdir).unwrap();
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "echo %CD%".to_string(),
+                workdir: Some(support::msys_style_path(&workdir)),
+                shell: Some("cmd.exe".to_string()),
+                tty: false,
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
+                max_output_tokens: None,
+                login: Some(false),
+            },
+        )
+        .await;
+
+    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.output.trim(), workdir.display().to_string(),);
+}
+
+#[tokio::test]
 async fn exec_start_uses_git_bash_login_profiles_when_shell_is_omitted() {
     let Some(_git_bash) = available_windows_git_bash_path() else {
         return;

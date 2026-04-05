@@ -27,8 +27,8 @@ fn host_path(raw: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(normalize_for_system(host_policy(), raw))
 }
 
-pub async fn export_path_to_archive(path: &Path) -> anyhow::Result<ExportedArchive> {
-    let source_text = path.display().to_string();
+pub async fn export_path_to_archive(path: &str) -> anyhow::Result<ExportedArchive> {
+    let source_text = path.to_string();
     anyhow::ensure!(
         is_absolute_for_policy(host_policy(), &source_text),
         "transfer source path `{source_text}` is not absolute"

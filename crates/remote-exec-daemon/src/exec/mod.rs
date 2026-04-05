@@ -7,7 +7,7 @@ pub mod transcript;
 #[cfg(windows)]
 mod winpty;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -15,6 +15,10 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use rand::RngCore;
+use remote_exec_proto::path::{
+    PathPolicy, is_absolute_for_policy, linux_path_policy, normalize_for_system,
+    windows_path_policy,
+};
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWarning, ExecWriteRequest, RpcErrorBody,
 };
@@ -197,14 +201,32 @@ pub fn resolve_workdir(state: &Arc<AppState>, workdir: Option<&str>) -> anyhow::
     Ok(match workdir {
         None => state.config.default_workdir.clone(),
         Some(raw) => {
-            let path = PathBuf::from(raw);
-            if path.is_absolute() {
-                path
+            if is_absolute_for_policy(host_path_policy(), raw) {
+                PathBuf::from(normalize_for_system(host_path_policy(), raw))
             } else {
-                state.config.default_workdir.join(path)
+                state
+                    .config
+                    .default_workdir
+                    .join(normalize_for_system(host_path_policy(), raw))
             }
         }
     })
+}
+
+pub fn resolve_input_path(base: &Path, raw: &str) -> PathBuf {
+    if is_absolute_for_policy(host_path_policy(), raw) {
+        PathBuf::from(normalize_for_system(host_path_policy(), raw))
+    } else {
+        base.join(normalize_for_system(host_path_policy(), raw))
+    }
+}
+
+fn host_path_policy() -> PathPolicy {
+    if cfg!(windows) {
+        windows_path_policy()
+    } else {
+        linux_path_policy()
+    }
 }
 
 pub fn rpc_error(

@@ -157,6 +157,79 @@ async fn import_accepts_forward_slash_windows_destination_paths() {
     );
 }
 
+#[cfg(windows)]
+#[tokio::test]
+async fn export_accepts_msys_style_windows_source_paths() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let source = fixture.workdir.join("msys-source.txt");
+    tokio::fs::write(&source, "artifact\n").await.unwrap();
+
+    let response = fixture
+        .raw_post_json(
+            "/v1/transfer/export",
+            &TransferExportRequest {
+                path: support::msys_style_path(&source),
+            },
+        )
+        .await;
+
+    assert!(response.status().is_success());
+    assert_eq!(
+        response
+            .headers()
+            .get(TRANSFER_SOURCE_TYPE_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "file"
+    );
+    assert!(!response.bytes().await.unwrap().is_empty());
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn import_accepts_cygwin_style_windows_destination_paths() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let source = fixture.workdir.join("source.txt");
+    tokio::fs::write(&source, "artifact\n").await.unwrap();
+
+    let exported = fixture
+        .raw_post_json(
+            "/v1/transfer/export",
+            &TransferExportRequest {
+                path: source.display().to_string(),
+            },
+        )
+        .await;
+    let bytes = exported.bytes().await.unwrap().to_vec();
+    let destination = fixture
+        .workdir
+        .join("cygdrive-release")
+        .join("artifact.txt");
+
+    let response = fixture
+        .raw_post_bytes(
+            "/v1/transfer/import",
+            &[
+                (
+                    TRANSFER_DESTINATION_PATH_HEADER,
+                    support::cygwin_style_path(&destination),
+                ),
+                (TRANSFER_OVERWRITE_HEADER, "fail".to_string()),
+                (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
+                (TRANSFER_SOURCE_TYPE_HEADER, "file".to_string()),
+            ],
+            bytes,
+        )
+        .await;
+
+    assert!(response.status().is_success());
+    assert_eq!(
+        tokio::fs::read_to_string(&destination).await.unwrap(),
+        "artifact\n"
+    );
+}
+
 #[tokio::test]
 async fn import_directory_replaces_exact_destination_and_preserves_exec_bits() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;

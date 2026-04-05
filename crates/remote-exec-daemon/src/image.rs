@@ -35,7 +35,7 @@ pub async fn read_image(
 
     let cwd = crate::exec::resolve_workdir(&state, req.workdir.as_deref())
         .map_err(crate::exec::internal_error)?;
-    let path = normalize_path(&cwd.join(&req.path));
+    let path = normalize_path(&crate::exec::resolve_input_path(&cwd, &req.path));
     let metadata = tokio::fs::metadata(&path).await.map_err(|err| {
         crate::exec::rpc_error(
             "image_missing",

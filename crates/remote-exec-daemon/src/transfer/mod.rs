@@ -22,7 +22,7 @@ pub async fn export_path(
     State(_state): State<Arc<AppState>>,
     Json(req): Json<TransferExportRequest>,
 ) -> Result<Response, (StatusCode, Json<RpcErrorBody>)> {
-    let exported = archive::export_path_to_archive(std::path::Path::new(&req.path))
+    let exported = archive::export_path_to_archive(&req.path)
         .await
         .map_err(map_transfer_error)?;
 

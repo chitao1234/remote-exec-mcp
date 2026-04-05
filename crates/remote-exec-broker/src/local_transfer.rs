@@ -23,10 +23,10 @@ fn host_path(raw: &str) -> PathBuf {
 }
 
 pub async fn export_path_to_archive(
-    path: &Path,
+    path: &str,
     archive_path: &Path,
 ) -> anyhow::Result<TransferSourceType> {
-    let source_text = path.display().to_string();
+    let source_text = path.to_string();
     anyhow::ensure!(
         is_absolute_for_policy(host_policy(), &source_text),
         "transfer source path `{source_text}` is not absolute"
