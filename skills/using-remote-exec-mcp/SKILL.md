@@ -263,6 +263,7 @@ How to use it:
 - Prefer `apply_patch` over shell editing when you know the exact file changes.
 - Use the same patch discipline as the normal Codex `apply_patch` tool.
 - Relative file paths in the patch are resolved from `workdir` when provided.
+- On XP targets, `remote-exec-daemon-xp` currently does not support absolute file paths inside the patch text. Set `workdir` and keep patch paths relative.
 - The patch engine supports the documented `*** End of File` marker.
 - Updating an existing file preserves its current `LF` versus `CRLF` line ending style.
 - This tool is target-local. It does not move bytes between endpoints.
@@ -457,8 +458,10 @@ Example: download a remote log to broker-host `local`:
 
 - PTY support is target-specific. Trust `list_targets().targets[].daemon_info.supports_pty`, not assumptions.
 - `remote-exec-daemon-xp` is narrower than the main daemon.
+- On XP targets, shell selection is not supported, the default shell is `cmd.exe`.
 - On XP targets, `tty: true` is rejected.
 - On XP targets, `view_image` is unavailable.
+- On XP targets, `apply_patch` currently rejects absolute file paths inside the patch text. Use `workdir` plus relative patch paths instead.
 - On XP targets, `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles.
 - On XP targets, `compression: "zstd"` is unsupported. Keep transfer compression at `none`.
 - Do not assume symlink-heavy or special-file transfers work on XP.
