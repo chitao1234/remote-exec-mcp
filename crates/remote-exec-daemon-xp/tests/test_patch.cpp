@@ -91,6 +91,17 @@ int main() {
     assert(missing_header_result.output.find("M missing-header.txt") != std::string::npos);
     assert(read_text(root / "missing-header.txt") == "after\nmiddle\n");
 
+    write_text(root / "plain-add.txt", "alpha\nbeta\n");
+    const std::string plain_add_patch =
+        "*** Begin Patch\n"
+        "*** Update File: plain-add.txt\n"
+        "+gamma\n"
+        "*** End Patch\n";
+
+    PatchApplyResult plain_add_result = apply_patch(root.string(), plain_add_patch);
+    assert(plain_add_result.output.find("M plain-add.txt") != std::string::npos);
+    assert(read_text(root / "plain-add.txt") == "alpha\nbeta\ngamma\n");
+
     write_text(root / "eof.txt", "before\nmiddle\nbefore\n");
     const std::string eof_patch =
         "*** Begin Patch\n"

@@ -455,7 +455,7 @@ static void apply_update_chunk(
         return;
     }
 
-    const std::size_t insert_at = chunk.is_end_of_file ? lines->size() : std::min(*cursor, lines->size());
+    const std::size_t insert_at = lines->size();
     lines->insert(lines->begin() + insert_at, chunk.new_lines.begin(), chunk.new_lines.end());
     *cursor = insert_at + chunk.new_lines.size();
 }
