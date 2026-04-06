@@ -57,6 +57,7 @@ pub struct ListTargetDaemonInfo {
     pub platform: String,
     pub arch: String,
     pub supports_pty: bool,
+    pub supports_transfer_compression: bool,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -77,11 +78,26 @@ pub enum TransferOverwrite {
     Replace,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferCompression {
+    #[default]
+    None,
+    Zstd,
+}
+
+impl TransferCompression {
+    pub fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TransferSourceType {
     File,
     Directory,
+    Multiple,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -94,17 +110,25 @@ pub struct TransferEndpoint {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TransferFilesInput {
-    pub source: TransferEndpoint,
+    #[serde(default)]
+    pub source: Option<TransferEndpoint>,
+    #[serde(default)]
+    pub sources: Vec<TransferEndpoint>,
     pub destination: TransferEndpoint,
     pub overwrite: TransferOverwrite,
     pub create_parent: bool,
+    #[serde(default)]
+    pub compression: TransferCompression,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct TransferFilesResult {
-    pub source: TransferEndpoint,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<TransferEndpoint>,
+    pub sources: Vec<TransferEndpoint>,
     pub destination: TransferEndpoint,
     pub source_type: TransferSourceType,
+    pub compression: TransferCompression,
     pub bytes_copied: u64,
     pub files_copied: u64,
     pub directories_copied: u64,

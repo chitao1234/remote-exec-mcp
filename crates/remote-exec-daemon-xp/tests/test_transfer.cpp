@@ -96,6 +96,13 @@ static void append_tar_file(std::string& archive, const std::string& path, const
     append_tar_entry(&archive, path, '0', body);
 }
 
+static void append_tar_directory(std::string& archive, const std::string& path) {
+    if (path.size() >= 100) {
+        append_gnu_long_name(&archive, path);
+    }
+    append_tar_entry(&archive, path, '5', "");
+}
+
 static void finalize_tar(std::string& archive) {
     archive.append(1024, '\0');
 }
@@ -301,6 +308,26 @@ static void assert_directory_traversal_is_rejected() {
     assert(rejected);
 }
 
+static void assert_multiple_sources_import() {
+    std::string archive;
+    append_tar_file(archive, "alpha.txt", "alpha");
+    append_tar_directory(archive, "nested");
+    append_tar_file(archive, "nested/beta.txt", "beta");
+    finalize_tar(archive);
+
+    const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-multiple";
+    fs::remove_all(root);
+
+    const ImportSummary imported =
+        import_path(archive, "multiple", (root / "dest").string(), true, true);
+
+    assert(imported.source_type == "multiple");
+    assert(imported.files_copied == 2);
+    assert(imported.directories_copied >= 2);
+    assert(read_text(root / "dest" / "alpha.txt") == "alpha");
+    assert(read_text(root / "dest" / "nested" / "beta.txt") == "beta");
+}
+
 int main() {
     assert_file_transfer();
     assert_file_transfer_rejects_unexpected_entry_path();
@@ -309,5 +336,6 @@ int main() {
     assert_directory_replace_behavior();
     assert_directory_long_path_round_trip();
     assert_directory_traversal_is_rejected();
+    assert_multiple_sources_import();
     return 0;
 }

@@ -30,6 +30,7 @@ image = { workspace = true }
 rmcp = { workspace = true, features = ["client", "transport-child-process"] }
 remote-exec-pki = { path = "../remote-exec-pki" }
 tar = { workspace = true }
+zstd = { workspace = true }
 
 [[test]]
 name = "multi_target"

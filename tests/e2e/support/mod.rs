@@ -276,6 +276,7 @@ expected_daemon_name = {expected_daemon_name}
             listen: self.addr,
             default_workdir: self.workdir.clone(),
             sandbox: None,
+            enable_transfer_compression: true,
             allow_login_shell: true,
             pty: remote_exec_daemon::config::PtyMode::Auto,
             default_shell: None,

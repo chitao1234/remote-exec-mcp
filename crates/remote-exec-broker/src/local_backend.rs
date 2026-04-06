@@ -17,8 +17,9 @@ impl LocalDaemonClient {
     pub fn new(
         config: &crate::config::LocalTargetConfig,
         sandbox: Option<remote_exec_proto::sandbox::FilesystemSandbox>,
+        enable_transfer_compression: bool,
     ) -> anyhow::Result<Self> {
-        let embedded = config.embedded_daemon_config(sandbox);
+        let embedded = config.embedded_daemon_config(sandbox, enable_transfer_compression);
         let state = remote_exec_daemon::build_app_state(embedded.into_daemon_config())?;
         Ok(Self {
             state: Arc::new(state),

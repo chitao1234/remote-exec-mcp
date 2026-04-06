@@ -32,6 +32,7 @@ pub struct CachedDaemonInfo {
     pub platform: String,
     pub arch: String,
     pub supports_pty: bool,
+    pub supports_transfer_compression: bool,
 }
 
 #[derive(Clone)]
@@ -56,6 +57,7 @@ impl TargetHandle {
             platform: info.platform.clone(),
             arch: info.arch.clone(),
             supports_pty: info.supports_pty,
+            supports_transfer_compression: info.supports_transfer_compression,
         }
     }
 
@@ -184,6 +186,7 @@ impl TargetHandle {
 
 #[derive(Clone)]
 pub struct BrokerState {
+    pub enable_transfer_compression: bool,
     pub host_sandbox: Option<CompiledFilesystemSandbox>,
     pub sessions: SessionStore,
     pub targets: BTreeMap<String, TargetHandle>,
@@ -219,7 +222,11 @@ async fn build_state(config: config::BrokerConfig) -> anyhow::Result<BrokerState
     let mut targets = BTreeMap::new();
 
     if let Some(local_config) = &config.local {
-        let client = LocalDaemonClient::new(local_config, config.host_sandbox.clone())?;
+        let client = LocalDaemonClient::new(
+            local_config,
+            config.host_sandbox.clone(),
+            config.enable_transfer_compression,
+        )?;
         let info = client.target_info().await?;
         tracing::info!(
             target = "local",
@@ -228,6 +235,7 @@ async fn build_state(config: config::BrokerConfig) -> anyhow::Result<BrokerState
             arch = %info.arch,
             hostname = %info.hostname,
             supports_pty = info.supports_pty,
+            supports_transfer_compression = info.supports_transfer_compression,
             "enabled embedded local target"
         );
         targets.insert(
@@ -263,6 +271,7 @@ async fn build_state(config: config::BrokerConfig) -> anyhow::Result<BrokerState
                     arch = %info.arch,
                     hostname = %info.hostname,
                     supports_pty = info.supports_pty,
+                    supports_transfer_compression = info.supports_transfer_compression,
                     "target available during broker startup"
                 );
                 (true, Some(TargetHandle::cache_from_target_info(&info)))
@@ -286,6 +295,7 @@ async fn build_state(config: config::BrokerConfig) -> anyhow::Result<BrokerState
     }
 
     Ok(BrokerState {
+        enable_transfer_compression: config.enable_transfer_compression,
         host_sandbox,
         sessions: SessionStore::default(),
         targets,
@@ -336,6 +346,7 @@ mod tests {
 
         let err = match build_state(BrokerConfig {
             host_sandbox: None,
+            enable_transfer_compression: true,
             targets: BTreeMap::new(),
             local: Some(LocalTargetConfig {
                 default_workdir: tempdir.path().to_path_buf(),

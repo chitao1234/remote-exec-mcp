@@ -270,3 +270,59 @@ async fn transfer_files_moves_remote_directory_between_targets_without_basename_
     assert!(!destination.join("dist").exists());
     assert_eq!(result.structured_content["source_type"], "directory");
 }
+
+#[tokio::test]
+async fn transfer_files_bundles_multiple_local_sources_with_zstd_for_remote_destination() {
+    let cluster = support::spawn_cluster().await;
+    let local_dir = tempfile::tempdir().unwrap();
+    let file_source = local_dir.path().join("alpha.txt");
+    let directory_source = local_dir.path().join("tree");
+    std::fs::write(&file_source, "alpha\n").unwrap();
+    std::fs::create_dir_all(&directory_source).unwrap();
+    std::fs::write(directory_source.join("nested.txt"), "nested\n").unwrap();
+    let destination = cluster.daemon_a.workdir.join("bundle");
+
+    let result = cluster
+        .broker
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "sources": [
+                    {
+                        "target": "local",
+                        "path": file_source.display().to_string()
+                    },
+                    {
+                        "target": "local",
+                        "path": directory_source.display().to_string()
+                    }
+                ],
+                "destination": {
+                    "target": "builder-a",
+                    "path": destination.display().to_string()
+                },
+                "overwrite": "replace",
+                "create_parent": true,
+                "compression": "zstd"
+            }),
+        )
+        .await;
+
+    assert_eq!(
+        std::fs::read_to_string(destination.join("alpha.txt")).unwrap(),
+        "alpha\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(destination.join("tree/nested.txt")).unwrap(),
+        "nested\n"
+    );
+    assert_eq!(result.structured_content["source_type"], "multiple");
+    assert_eq!(result.structured_content["compression"], "zstd");
+    assert_eq!(
+        result.structured_content["sources"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}

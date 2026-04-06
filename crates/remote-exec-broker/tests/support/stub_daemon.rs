@@ -12,9 +12,9 @@ use axum::{Json, Router};
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWarning, ExecWriteRequest, HealthCheckResponse,
     ImageReadRequest, ImageReadResponse, PatchApplyRequest, PatchApplyResponse, RpcErrorBody,
-    TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER,
-    TRANSFER_SOURCE_TYPE_HEADER, TargetInfoResponse, TransferExportRequest, TransferImportResponse,
-    TransferSourceType,
+    TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER,
+    TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER, TargetInfoResponse,
+    TransferCompression, TransferExportRequest, TransferImportResponse, TransferSourceType,
 };
 use tar::{Builder, EntryType, Header};
 use tokio::sync::Mutex;
@@ -37,6 +37,7 @@ pub enum StubImageReadResponse {
 pub struct StubTransferImportCapture {
     pub destination_path: String,
     pub source_type: String,
+    pub compression: String,
     pub overwrite: String,
     pub create_parent: String,
     pub body_len: usize,
@@ -47,6 +48,7 @@ pub struct StubTransferImportCapture {
 enum StubTransferExportResponse {
     Success {
         source_type: TransferSourceType,
+        compression: TransferCompression,
         body: Vec<u8>,
     },
     #[allow(dead_code, reason = "Shared across broker integration test crates")]
@@ -82,6 +84,7 @@ pub(super) struct StubDaemonState {
     target_platform: String,
     target_arch: String,
     target_supports_pty: bool,
+    pub(super) target_supports_transfer_compression: bool,
     pub(super) exec_write_behavior: Arc<Mutex<ExecWriteBehavior>>,
     pub(super) exec_start_behavior: Arc<Mutex<ExecStartBehavior>>,
     pub(super) exec_start_warnings: Arc<Mutex<Vec<ExecWarning>>>,
@@ -173,6 +176,7 @@ pub(super) fn stub_daemon_state(
         target_platform: platform.to_string(),
         target_arch: "x86_64".to_string(),
         target_supports_pty: supports_pty,
+        target_supports_transfer_compression: true,
         exec_write_behavior: Arc::new(Mutex::new(exec_write_behavior)),
         exec_start_behavior: Arc::new(Mutex::new(ExecStartBehavior::Success)),
         exec_start_warnings: Arc::new(Mutex::new(Vec::new())),
@@ -187,14 +191,20 @@ pub(super) fn stub_daemon_state(
         ))),
         transfer_export_response: Arc::new(Mutex::new(StubTransferExportResponse::Success {
             source_type: TransferSourceType::Directory,
+            compression: TransferCompression::None,
             body: stub_directory_archive(),
         })),
     }
 }
 
+pub(super) fn set_transfer_compression_support(state: &mut StubDaemonState, enabled: bool) {
+    state.target_supports_transfer_compression = enabled;
+}
+
 pub(super) async fn set_transfer_export_file_response(state: &StubDaemonState, body: Vec<u8>) {
     *state.transfer_export_response.lock().await = StubTransferExportResponse::Success {
         source_type: TransferSourceType::File,
+        compression: TransferCompression::None,
         body: stub_single_file_archive(&body),
     };
 }
@@ -205,6 +215,7 @@ pub(super) async fn set_transfer_export_directory_response(
 ) {
     *state.transfer_export_response.lock().await = StubTransferExportResponse::Success {
         source_type: TransferSourceType::Directory,
+        compression: TransferCompression::None,
         body: archive_body,
     };
 }
@@ -261,6 +272,7 @@ pub(super) async fn spawn_named_daemon_on_addr(
             listen: addr,
             default_workdir: PathBuf::from("."),
             sandbox: None,
+            enable_transfer_compression: state.target_supports_transfer_compression,
             allow_login_shell: true,
             pty: remote_exec_daemon::config::PtyMode::Auto,
             default_shell: None,
@@ -278,6 +290,7 @@ pub(super) async fn spawn_named_daemon_on_addr(
         },
         sandbox: None,
         supports_pty: state.target_supports_pty,
+        supports_transfer_compression: state.target_supports_transfer_compression,
         windows_pty_backend_override: None,
         daemon_instance_id: "daemon-instance-1".to_string(),
         sessions: remote_exec_daemon::exec::store::SessionStore::default(),
@@ -325,6 +338,7 @@ async fn target_info(State(state): State<StubDaemonState>) -> Json<TargetInfoRes
         arch: state.target_arch,
         supports_pty: state.target_supports_pty,
         supports_image_read: true,
+        supports_transfer_compression: state.target_supports_transfer_compression,
     })
 }
 
@@ -452,13 +466,25 @@ async fn transfer_export(
     Json(_req): Json<TransferExportRequest>,
 ) -> Result<(HeaderMap, Vec<u8>), (StatusCode, Json<RpcErrorBody>)> {
     match state.transfer_export_response.lock().await.clone() {
-        StubTransferExportResponse::Success { source_type, body } => {
+        StubTransferExportResponse::Success {
+            source_type,
+            compression,
+            body,
+        } => {
             let mut headers = HeaderMap::new();
             headers.insert(
                 TRANSFER_SOURCE_TYPE_HEADER,
                 HeaderValue::from_static(match source_type {
                     TransferSourceType::File => "file",
                     TransferSourceType::Directory => "directory",
+                    TransferSourceType::Multiple => "multiple",
+                }),
+            );
+            headers.insert(
+                TRANSFER_COMPRESSION_HEADER,
+                HeaderValue::from_static(match compression {
+                    TransferCompression::None => "none",
+                    TransferCompression::Zstd => "zstd",
                 }),
             );
             Ok((headers, body))
@@ -482,6 +508,11 @@ async fn transfer_import(
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default()
         .to_string();
+    let compression = headers
+        .get(TRANSFER_COMPRESSION_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("none")
+        .to_string();
     let overwrite = headers
         .get(TRANSFER_OVERWRITE_HEADER)
         .and_then(|value| value.to_str().ok())
@@ -496,6 +527,7 @@ async fn transfer_import(
     *state.last_transfer_import.lock().await = Some(StubTransferImportCapture {
         destination_path,
         source_type: source_type.clone(),
+        compression: compression.clone(),
         overwrite: overwrite.clone(),
         create_parent,
         body_len: body.len(),
@@ -504,24 +536,56 @@ async fn transfer_import(
 
     let parsed_source_type = match source_type.as_str() {
         "directory" => TransferSourceType::Directory,
+        "multiple" => TransferSourceType::Multiple,
         _ => TransferSourceType::File,
     };
+    let (bytes_copied, files_copied, directories_copied) =
+        summarize_archive(&body, &parsed_source_type, &compression);
 
     Ok(Json(TransferImportResponse {
         source_type: parsed_source_type.clone(),
-        bytes_copied: if matches!(parsed_source_type, TransferSourceType::Directory) {
-            13
-        } else {
-            stub_single_file_archive_bytes(&body)
-        },
-        files_copied: 1,
-        directories_copied: if matches!(parsed_source_type, TransferSourceType::Directory) {
-            3
-        } else {
-            0
-        },
+        bytes_copied,
+        files_copied,
+        directories_copied,
         replaced: overwrite == "replace",
     }))
+}
+
+fn summarize_archive(
+    body: &[u8],
+    source_type: &TransferSourceType,
+    compression: &str,
+) -> (u64, u64, u64) {
+    let raw = match compression {
+        "zstd" => zstd::stream::decode_all(Cursor::new(body)).expect("decode zstd archive"),
+        _ => body.to_vec(),
+    };
+
+    match source_type {
+        TransferSourceType::File => (stub_single_file_archive_bytes(&raw), 1, 0),
+        TransferSourceType::Directory | TransferSourceType::Multiple => {
+            let mut bytes = 0;
+            let mut files = 0;
+            let mut directories = matches!(
+                source_type,
+                TransferSourceType::Directory | TransferSourceType::Multiple
+            ) as u64;
+            let mut archive = tar::Archive::new(Cursor::new(raw));
+            for entry in archive.entries().expect("archive entries") {
+                let entry = entry.expect("archive entry");
+                if entry.header().entry_type().is_dir() {
+                    let path = entry.path().expect("entry path");
+                    if path.as_ref() != std::path::Path::new(".") {
+                        directories += 1;
+                    }
+                } else if entry.header().entry_type().is_file() {
+                    bytes += entry.header().size().expect("entry size");
+                    files += 1;
+                }
+            }
+            (bytes, files, directories)
+        }
+    }
 }
 
 async fn image_read(

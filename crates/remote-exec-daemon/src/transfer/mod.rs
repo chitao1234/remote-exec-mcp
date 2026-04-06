@@ -11,9 +11,9 @@ use axum::response::{IntoResponse, Response};
 use futures_util::TryStreamExt;
 use http_body_util::BodyExt;
 use remote_exec_proto::rpc::{
-    RpcErrorBody, TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER,
-    TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER, TransferExportRequest,
-    TransferImportRequest, TransferImportResponse,
+    RpcErrorBody, TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
+    TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
+    TransferCompression, TransferExportRequest, TransferImportRequest, TransferImportResponse,
 };
 use remote_exec_proto::sandbox::SandboxError;
 
@@ -23,10 +23,16 @@ pub async fn export_path(
     State(state): State<Arc<AppState>>,
     Json(req): Json<TransferExportRequest>,
 ) -> Result<Response, (StatusCode, Json<RpcErrorBody>)> {
-    tracing::info!(path = %req.path, "transfer export received");
-    let exported = archive::export_path_to_archive(&req.path, state.sandbox.as_ref())
-        .await
-        .map_err(map_transfer_error)?;
+    ensure_transfer_compression_supported(state.as_ref(), &req.compression)?;
+    tracing::info!(
+        path = %req.path,
+        compression = format_compression(&req.compression),
+        "transfer export received"
+    );
+    let exported =
+        archive::export_path_to_archive(&req.path, req.compression.clone(), state.sandbox.as_ref())
+            .await
+            .map_err(map_transfer_error)?;
 
     let file = tokio::fs::File::open(exported.temp_path.to_path_buf())
         .await
@@ -36,14 +42,21 @@ pub async fn export_path(
     tracing::info!(
         path = %req.path,
         source_type = format_source_type(&exported.source_type),
+        compression = format_compression(&exported.compression),
         "transfer export completed"
     );
 
     Ok((
-        [(
-            TRANSFER_SOURCE_TYPE_HEADER,
-            format_source_type(&exported.source_type).to_string(),
-        )],
+        [
+            (
+                TRANSFER_SOURCE_TYPE_HEADER,
+                format_source_type(&exported.source_type).to_string(),
+            ),
+            (
+                TRANSFER_COMPRESSION_HEADER,
+                format_compression(&exported.compression).to_string(),
+            ),
+        ],
         body,
     )
         .into_response())
@@ -55,11 +68,13 @@ pub async fn import_archive(
     body: Body,
 ) -> Result<Json<TransferImportResponse>, (StatusCode, Json<RpcErrorBody>)> {
     let request = parse_import_request(&headers)?;
+    ensure_transfer_compression_supported(state.as_ref(), &request.compression)?;
     tracing::info!(
         destination_path = %request.destination_path,
         overwrite = ?request.overwrite,
         create_parent = request.create_parent,
         source_type = format_source_type(&request.source_type),
+        compression = format_compression(&request.compression),
         "transfer import received"
     );
     let temp =
@@ -93,6 +108,14 @@ fn format_source_type(source_type: &remote_exec_proto::rpc::TransferSourceType) 
     match source_type {
         remote_exec_proto::rpc::TransferSourceType::File => "file",
         remote_exec_proto::rpc::TransferSourceType::Directory => "directory",
+        remote_exec_proto::rpc::TransferSourceType::Multiple => "multiple",
+    }
+}
+
+fn format_compression(compression: &TransferCompression) -> &'static str {
+    match compression {
+        TransferCompression::None => "none",
+        TransferCompression::Zstd => "zstd",
     }
 }
 
@@ -106,6 +129,10 @@ fn map_transfer_error(err: anyhow::Error) -> (StatusCode, Json<RpcErrorBody>) {
         "transfer_destination_exists"
     } else if message.contains("destination parent") && message.contains("does not exist") {
         "transfer_parent_missing"
+    } else if message.contains("transfer compression")
+        || message.contains("does not support transfer compression")
+    {
+        "transfer_compression_unsupported"
     } else if message.contains("unsupported symlink")
         || message.contains("unsupported entry")
         || message.contains("regular file or directory")
@@ -131,6 +158,8 @@ fn parse_import_request(
             .parse::<bool>()
             .map_err(|err| crate::exec::rpc_error("transfer_failed", err.to_string()))?,
         source_type: parse_header_enum(headers, TRANSFER_SOURCE_TYPE_HEADER)?,
+        compression: parse_optional_header_enum(headers, TRANSFER_COMPRESSION_HEADER)?
+            .unwrap_or_default(),
     })
 }
 
@@ -157,4 +186,32 @@ where
     let raw = header_string(headers, name)?;
     serde_json::from_str::<T>(&format!("\"{raw}\""))
         .map_err(|err| crate::exec::rpc_error("transfer_failed", err.to_string()))
+}
+
+fn parse_optional_header_enum<T>(
+    headers: &HeaderMap,
+    name: &str,
+) -> Result<Option<T>, (StatusCode, Json<RpcErrorBody>)>
+where
+    T: serde::de::DeserializeOwned,
+{
+    match headers.get(name).and_then(|value| value.to_str().ok()) {
+        Some(raw) => serde_json::from_str::<T>(&format!("\"{raw}\""))
+            .map(Some)
+            .map_err(|err| crate::exec::rpc_error("transfer_failed", err.to_string())),
+        None => Ok(None),
+    }
+}
+
+fn ensure_transfer_compression_supported(
+    state: &AppState,
+    compression: &TransferCompression,
+) -> Result<(), (StatusCode, Json<RpcErrorBody>)> {
+    if matches!(compression, TransferCompression::Zstd) && !state.supports_transfer_compression {
+        return Err(crate::exec::rpc_error(
+            "transfer_compression_unsupported",
+            "this daemon does not support transfer compression".to_string(),
+        ));
+    }
+    Ok(())
 }

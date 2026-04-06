@@ -2,64 +2,121 @@ use std::path::Path;
 
 use anyhow::Context;
 use remote_exec_proto::path::{
-    PathPolicy, is_absolute_for_policy, linux_path_policy, same_path_for_policy,
-    windows_path_policy,
+    PathPolicy, basename_for_policy, is_absolute_for_policy, join_for_policy, linux_path_policy,
+    same_path_for_policy, windows_path_policy,
 };
 use remote_exec_proto::public::{
-    TransferEndpoint, TransferFilesInput, TransferFilesResult, TransferOverwrite,
-    TransferSourceType as PublicTransferSourceType,
+    TransferCompression as PublicTransferCompression, TransferEndpoint, TransferFilesInput,
+    TransferFilesResult, TransferOverwrite, TransferSourceType as PublicTransferSourceType,
 };
 use remote_exec_proto::rpc::{
-    TransferExportRequest, TransferImportRequest, TransferImportResponse, TransferOverwriteMode,
-    TransferSourceType as RpcTransferSourceType,
+    TransferCompression as RpcTransferCompression, TransferExportRequest, TransferImportRequest,
+    TransferImportResponse, TransferOverwriteMode, TransferSourceType as RpcTransferSourceType,
 };
 
 use crate::daemon_client::DaemonClientError;
 use crate::mcp_server::ToolCallOutput;
+
+struct ExportedSourceArchive {
+    endpoint: TransferEndpoint,
+    source_policy: PathPolicy,
+    source_type: RpcTransferSourceType,
+    temp_path: tempfile::TempPath,
+}
 
 pub async fn transfer_files(
     state: &crate::BrokerState,
     input: TransferFilesInput,
 ) -> anyhow::Result<ToolCallOutput> {
     let started = std::time::Instant::now();
-    let source_target = input.source.target.clone();
-    let source_path = input.source.path.clone();
-    let destination_target = input.destination.target.clone();
-    let destination_path = input.destination.path.clone();
+    let sources = resolve_sources(&input)?;
+    let destination = input.destination.clone();
+    let compression = map_transfer_compression(&input.compression);
+    let first_source_target = sources
+        .first()
+        .map(|source| source.target.as_str())
+        .unwrap_or("unknown");
+    let first_source_path = sources
+        .first()
+        .map(|source| source.path.as_str())
+        .unwrap_or("unknown");
+
     tracing::info!(
         tool = "transfer_files",
-        source_target = %source_target,
-        source_path = %source_path,
-        destination_target = %destination_target,
-        destination_path = %destination_path,
+        source_count = sources.len(),
+        first_source_target = %first_source_target,
+        first_source_path = %first_source_path,
+        destination_target = %destination.target,
+        destination_path = %destination.path,
+        compression = format_transfer_compression(&compression),
         overwrite = ?input.overwrite,
         create_parent = input.create_parent,
         "broker tool started"
     );
-    ensure_absolute(state, &input.source).await?;
-    ensure_absolute(state, &input.destination).await?;
-    ensure_distinct_endpoints(state, &input.source, &input.destination).await?;
 
-    let temp = tempfile::NamedTempFile::new()?;
-    let archive_path = temp.path().to_path_buf();
-    let source_type = export_endpoint_to_archive(state, &input.source, &archive_path).await?;
-    let summary = import_archive_to_endpoint(
-        state,
-        &archive_path,
-        &input.destination,
-        &input.overwrite,
-        &source_type,
-        input.create_parent,
+    for source in &sources {
+        ensure_absolute(state, source).await?;
+        ensure_distinct_endpoints(state, source, &destination).await?;
+    }
+    ensure_absolute(state, &destination).await?;
+    ensure_multi_source_basenames_are_unique(state, &sources, &destination).await?;
+    ensure_transfer_compression_supported(state, &compression, &sources, &destination).await?;
+
+    let (source_type, summary) = match sources.as_slice() {
+        [source] => {
+            transfer_single_source(
+                state,
+                source,
+                &destination,
+                &input.overwrite,
+                &compression,
+                input.create_parent,
+            )
+            .await?
+        }
+        _ => {
+            transfer_multiple_sources(
+                state,
+                &sources,
+                &destination,
+                &input.overwrite,
+                &compression,
+                input.create_parent,
+            )
+            .await?
+        }
+    };
+
+    finish_transfer(
+        started,
+        &sources,
+        destination,
+        input.compression,
+        source_type,
+        summary,
     )
-    .await?;
+}
 
+fn finish_transfer(
+    started: std::time::Instant,
+    sources: &[TransferEndpoint],
+    destination: TransferEndpoint,
+    compression: PublicTransferCompression,
+    source_type: RpcTransferSourceType,
+    summary: TransferImportResponse,
+) -> anyhow::Result<ToolCallOutput> {
+    let destination_target = destination.target.clone();
+    let destination_path = destination.path.clone();
     let result = TransferFilesResult {
-        source: input.source,
-        destination: input.destination,
+        source: (sources.len() == 1).then(|| sources[0].clone()),
+        sources: sources.to_vec(),
+        destination,
         source_type: match source_type {
             RpcTransferSourceType::File => PublicTransferSourceType::File,
             RpcTransferSourceType::Directory => PublicTransferSourceType::Directory,
+            RpcTransferSourceType::Multiple => PublicTransferSourceType::Multiple,
         },
+        compression,
         bytes_copied: summary.bytes_copied,
         files_copied: summary.files_copied,
         directories_copied: summary.directories_copied,
@@ -68,8 +125,7 @@ pub async fn transfer_files(
 
     tracing::info!(
         tool = "transfer_files",
-        source_target = %source_target,
-        source_path = %source_path,
+        source_count = sources.len(),
         destination_target = %destination_target,
         destination_path = %destination_path,
         elapsed_ms = started.elapsed().as_millis() as u64,
@@ -81,27 +137,45 @@ pub async fn transfer_files(
     ))
 }
 
+fn resolve_sources(input: &TransferFilesInput) -> anyhow::Result<Vec<TransferEndpoint>> {
+    match (&input.source, input.sources.is_empty()) {
+        (Some(_), false) => anyhow::bail!("provide either `source` or `sources`, not both"),
+        (Some(source), true) => Ok(vec![source.clone()]),
+        (None, false) => Ok(input.sources.clone()),
+        (None, true) => anyhow::bail!("`sources` must contain at least one entry"),
+    }
+}
+
+fn map_transfer_compression(compression: &PublicTransferCompression) -> RpcTransferCompression {
+    match compression {
+        PublicTransferCompression::None => RpcTransferCompression::None,
+        PublicTransferCompression::Zstd => RpcTransferCompression::Zstd,
+    }
+}
+
 async fn export_endpoint_to_archive(
     state: &crate::BrokerState,
     endpoint: &TransferEndpoint,
     archive_path: &Path,
+    compression: &RpcTransferCompression,
 ) -> anyhow::Result<RpcTransferSourceType> {
     match endpoint.target.as_str() {
         "local" => {
             crate::local_transfer::export_path_to_archive(
                 &endpoint.path,
                 archive_path,
+                compression.clone(),
                 state.host_sandbox.as_ref(),
             )
             .await
         }
         target_name => {
-            let target = state.target(target_name)?;
-            target.ensure_identity_verified(target_name).await?;
+            let target = verified_remote_target(state, target_name).await?;
             match target
                 .transfer_export_to_file(
                     &TransferExportRequest {
                         path: endpoint.path.clone(),
+                        compression: compression.clone(),
                     },
                     archive_path,
                 )
@@ -119,12 +193,95 @@ async fn export_endpoint_to_archive(
     }
 }
 
+async fn transfer_single_source(
+    state: &crate::BrokerState,
+    source: &TransferEndpoint,
+    destination: &TransferEndpoint,
+    overwrite: &TransferOverwrite,
+    compression: &RpcTransferCompression,
+    create_parent: bool,
+) -> anyhow::Result<(RpcTransferSourceType, TransferImportResponse)> {
+    let temp = tempfile::NamedTempFile::new()?;
+    let archive_path = temp.into_temp_path();
+    let source_type =
+        export_endpoint_to_archive(state, source, archive_path.as_ref(), compression).await?;
+    let summary = import_archive_to_endpoint(
+        state,
+        archive_path.as_ref(),
+        destination,
+        overwrite,
+        &source_type,
+        compression,
+        create_parent,
+    )
+    .await?;
+    Ok((source_type, summary))
+}
+
+async fn transfer_multiple_sources(
+    state: &crate::BrokerState,
+    sources: &[TransferEndpoint],
+    destination: &TransferEndpoint,
+    overwrite: &TransferOverwrite,
+    compression: &RpcTransferCompression,
+    create_parent: bool,
+) -> anyhow::Result<(RpcTransferSourceType, TransferImportResponse)> {
+    let mut exported = Vec::with_capacity(sources.len());
+    for source in sources {
+        let temp = tempfile::NamedTempFile::new()?;
+        let temp_path = temp.into_temp_path();
+        let source_policy = endpoint_policy(state, source).await?;
+        let source_type =
+            export_endpoint_to_archive(state, source, temp_path.as_ref(), compression).await?;
+        exported.push(ExportedSourceArchive {
+            endpoint: source.clone(),
+            source_policy,
+            source_type,
+            temp_path,
+        });
+    }
+
+    let bundled = tempfile::NamedTempFile::new()?;
+    let bundled_path = bundled.into_temp_path();
+    remote_exec_daemon::transfer::archive::bundle_archives_to_file(
+        exported
+            .iter()
+            .map(
+                |source| remote_exec_daemon::transfer::archive::BundledArchiveSource {
+                    source_path: source.endpoint.path.clone(),
+                    source_policy: source.source_policy,
+                    source_type: source.source_type.clone(),
+                    compression: compression.clone(),
+                    archive_path: source.temp_path.to_path_buf(),
+                },
+            )
+            .collect(),
+        bundled_path.as_ref(),
+        compression.clone(),
+    )
+    .await?;
+
+    let source_type = RpcTransferSourceType::Multiple;
+    let summary = import_archive_to_endpoint(
+        state,
+        bundled_path.as_ref(),
+        destination,
+        overwrite,
+        &source_type,
+        compression,
+        create_parent,
+    )
+    .await?;
+    Ok((source_type, summary))
+}
+
 async fn import_archive_to_endpoint(
     state: &crate::BrokerState,
     archive_path: &Path,
     endpoint: &TransferEndpoint,
     overwrite: &TransferOverwrite,
     source_type: &RpcTransferSourceType,
+    compression: &RpcTransferCompression,
     create_parent: bool,
 ) -> anyhow::Result<TransferImportResponse> {
     let request = TransferImportRequest {
@@ -135,6 +292,7 @@ async fn import_archive_to_endpoint(
         },
         create_parent,
         source_type: source_type.clone(),
+        compression: compression.clone(),
     };
 
     match endpoint.target.as_str() {
@@ -147,8 +305,7 @@ async fn import_archive_to_endpoint(
             .await
         }
         target_name => {
-            let target = state.target(target_name)?;
-            target.ensure_identity_verified(target_name).await?;
+            let target = verified_remote_target(state, target_name).await?;
             match target
                 .transfer_import_from_file(archive_path, &request)
                 .await
@@ -181,6 +338,26 @@ fn remote_policy(platform: &str) -> PathPolicy {
     }
 }
 
+async fn verified_remote_target<'a>(
+    state: &'a crate::BrokerState,
+    target_name: &'a str,
+) -> anyhow::Result<&'a crate::TargetHandle> {
+    let target = state.target(target_name)?;
+    target.ensure_identity_verified(target_name).await?;
+    Ok(target)
+}
+
+async fn verified_remote_daemon_info(
+    state: &crate::BrokerState,
+    target_name: &str,
+) -> anyhow::Result<crate::CachedDaemonInfo> {
+    verified_remote_target(state, target_name)
+        .await?
+        .cached_daemon_info()
+        .await
+        .context("target info missing after identity verification")
+}
+
 async fn endpoint_policy(
     state: &crate::BrokerState,
     endpoint: &TransferEndpoint,
@@ -189,12 +366,7 @@ async fn endpoint_policy(
         return Ok(local_policy());
     }
 
-    let target = state.target(&endpoint.target)?;
-    target.ensure_identity_verified(&endpoint.target).await?;
-    let info = target
-        .cached_daemon_info()
-        .await
-        .context("target info missing after identity verification")?;
+    let info = verified_remote_daemon_info(state, &endpoint.target).await?;
     Ok(remote_policy(&info.platform))
 }
 
@@ -228,6 +400,70 @@ async fn ensure_distinct_endpoints(
     Ok(())
 }
 
+async fn ensure_multi_source_basenames_are_unique(
+    state: &crate::BrokerState,
+    sources: &[TransferEndpoint],
+    destination: &TransferEndpoint,
+) -> anyhow::Result<()> {
+    if sources.len() <= 1 {
+        return Ok(());
+    }
+
+    let destination_policy = endpoint_policy(state, destination).await?;
+    let mut seen_paths: Vec<String> = Vec::with_capacity(sources.len());
+    for source in sources {
+        let source_policy = endpoint_policy(state, source).await?;
+        let basename = basename_for_policy(source_policy, &source.path).ok_or_else(|| {
+            anyhow::anyhow!(
+                "transfer source path `{}` has no usable basename for multi-source transfer",
+                source.path
+            )
+        })?;
+        let candidate = join_for_policy(destination_policy, &destination.path, &basename);
+        anyhow::ensure!(
+            !seen_paths.iter().any(|existing| same_path_for_policy(
+                destination_policy,
+                existing,
+                &candidate
+            )),
+            "multi-source transfer would create duplicate destination entry `{basename}`"
+        );
+        seen_paths.push(candidate);
+    }
+
+    Ok(())
+}
+
+async fn ensure_transfer_compression_supported(
+    state: &crate::BrokerState,
+    compression: &RpcTransferCompression,
+    sources: &[TransferEndpoint],
+    destination: &TransferEndpoint,
+) -> anyhow::Result<()> {
+    if matches!(compression, RpcTransferCompression::None) {
+        return Ok(());
+    }
+
+    anyhow::ensure!(
+        state.enable_transfer_compression,
+        "broker transfer compression is disabled by config"
+    );
+    for endpoint in sources.iter().chain(std::iter::once(destination)) {
+        if endpoint.target == "local" {
+            continue;
+        }
+
+        let info = verified_remote_daemon_info(state, &endpoint.target).await?;
+        anyhow::ensure!(
+            info.supports_transfer_compression,
+            "target `{}` does not support transfer compression",
+            endpoint.target
+        );
+    }
+
+    Ok(())
+}
+
 fn normalize_transfer_error(err: DaemonClientError) -> anyhow::Error {
     match err {
         DaemonClientError::Rpc { message, .. } => anyhow::Error::msg(message),
@@ -236,19 +472,35 @@ fn normalize_transfer_error(err: DaemonClientError) -> anyhow::Error {
 }
 
 fn format_transfer_text(result: &TransferFilesResult) -> String {
+    let source_summary = match (&result.source, &result.source_type) {
+        (Some(source), PublicTransferSourceType::File) => {
+            format!("file `{}` from `{}`", source.path, source.target)
+        }
+        (Some(source), PublicTransferSourceType::Directory) => {
+            format!("directory `{}` from `{}`", source.path, source.target)
+        }
+        _ => format!("{} sources", result.sources.len()),
+    };
+
     format!(
-        "Transferred {} `{}` from `{}` to `{}` on `{}`.\nFiles: {}, directories: {}, bytes: {}, replaced: {}",
-        match result.source_type {
-            PublicTransferSourceType::File => "file",
-            PublicTransferSourceType::Directory => "directory",
-        },
-        result.source.path,
-        result.source.target,
+        "Transferred {} to `{}` on `{}`.\nCompression: {}\nFiles: {}, directories: {}, bytes: {}, replaced: {}",
+        source_summary,
         result.destination.path,
         result.destination.target,
+        match result.compression {
+            PublicTransferCompression::None => "none",
+            PublicTransferCompression::Zstd => "zstd",
+        },
         result.files_copied,
         result.directories_copied,
         result.bytes_copied,
         if result.replaced { "yes" } else { "no" }
     )
+}
+
+fn format_transfer_compression(compression: &RpcTransferCompression) -> &'static str {
+    match compression {
+        RpcTransferCompression::None => "none",
+        RpcTransferCompression::Zstd => "zstd",
+    }
 }

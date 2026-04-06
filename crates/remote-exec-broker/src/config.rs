@@ -14,6 +14,8 @@ pub struct BrokerConfig {
     pub local: Option<LocalTargetConfig>,
     #[serde(default)]
     pub host_sandbox: Option<FilesystemSandbox>,
+    #[serde(default = "default_enable_transfer_compression")]
+    pub enable_transfer_compression: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -72,11 +74,13 @@ impl LocalTargetConfig {
     pub fn embedded_daemon_config(
         &self,
         sandbox: Option<FilesystemSandbox>,
+        enable_transfer_compression: bool,
     ) -> EmbeddedDaemonConfig {
         EmbeddedDaemonConfig {
             target: "local".to_string(),
             default_workdir: self.default_workdir.clone(),
             sandbox,
+            enable_transfer_compression,
             allow_login_shell: self.allow_login_shell,
             pty: self.pty,
             default_shell: self.default_shell.clone(),
@@ -108,6 +112,10 @@ impl BrokerConfig {
 }
 
 fn default_allow_login_shell() -> bool {
+    true
+}
+
+fn default_enable_transfer_compression() -> bool {
     true
 }
 

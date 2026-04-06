@@ -6,9 +6,9 @@ use rmcp::{ServiceExt, transport::TokioChildProcess};
 use super::certs::{TestCerts, allocate_addr, write_test_certs};
 use super::fixture::{BrokerFixture, DummyClientHandler};
 use super::stub_daemon::{
-    ExecWriteBehavior, spawn_daemon_with_platform, spawn_named_daemon_on_addr,
-    spawn_retryable_exec_write_daemon, spawn_stub_daemon, spawn_unknown_session_exec_write_daemon,
-    stub_daemon_state, stub_router,
+    ExecWriteBehavior, set_transfer_compression_support, spawn_daemon_with_platform,
+    spawn_named_daemon_on_addr, spawn_retryable_exec_write_daemon, spawn_stub_daemon,
+    spawn_unknown_session_exec_write_daemon, stub_daemon_state, stub_router,
 };
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
@@ -167,7 +167,9 @@ pub async fn spawn_broker_with_stub_daemon_platform(
 
 pub async fn spawn_broker_with_plain_http_stub_daemon() -> BrokerFixture {
     let tempdir = tempfile::tempdir().unwrap();
-    let stub_state = stub_daemon_state("builder-xp", ExecWriteBehavior::Success, "windows", false);
+    let mut stub_state =
+        stub_daemon_state("builder-xp", ExecWriteBehavior::Success, "windows", false);
+    set_transfer_compression_support(&mut stub_state, false);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let app = stub_router(stub_state.clone());

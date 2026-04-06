@@ -634,6 +634,7 @@ ImportSummary import_file_from_tar(
 
 ImportSummary import_directory_from_tar(
     const std::string& archive,
+    const std::string& source_type,
     const std::string& absolute_path,
     bool replace_existing,
     bool create_parent
@@ -641,7 +642,7 @@ ImportSummary import_directory_from_tar(
     const bool replaced = prepare_destination_path(absolute_path, replace_existing, create_parent);
     make_directory_if_missing(absolute_path);
 
-    ImportSummary summary = {"directory", 0, 0, 1, replaced};
+    ImportSummary summary = {source_type, 0, 0, 1, replaced};
     std::size_t offset = 0;
     std::string pending_long_name;
 
@@ -737,7 +738,22 @@ ImportSummary import_path(
         return import_file_from_tar(bytes, absolute_path, replace_existing, create_parent);
     }
     if (source_type == "directory") {
-        return import_directory_from_tar(bytes, absolute_path, replace_existing, create_parent);
+        return import_directory_from_tar(
+            bytes,
+            source_type,
+            absolute_path,
+            replace_existing,
+            create_parent
+        );
+    }
+    if (source_type == "multiple") {
+        return import_directory_from_tar(
+            bytes,
+            source_type,
+            absolute_path,
+            replace_existing,
+            create_parent
+        );
     }
     throw std::runtime_error("unsupported transfer source type");
 }

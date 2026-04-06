@@ -20,6 +20,7 @@ pub async fn list_targets(
                 platform: info.platform,
                 arch: info.arch,
                 supports_pty: info.supports_pty,
+                supports_transfer_compression: info.supports_transfer_compression,
             });
         targets.push(ListTargetEntry {
             name: name.clone(),
@@ -53,13 +54,18 @@ fn format_targets_text(targets: &[ListTargetEntry]) -> String {
         .iter()
         .map(|target| match &target.daemon_info {
             Some(info) => format!(
-                "- {}: {}/{}, host={}, version={}, pty={}",
+                "- {}: {}/{}, host={}, version={}, pty={}, transfer-compression={}",
                 target.name,
                 info.platform,
                 info.arch,
                 info.hostname,
                 info.daemon_version,
-                if info.supports_pty { "yes" } else { "no" }
+                if info.supports_pty { "yes" } else { "no" },
+                if info.supports_transfer_compression {
+                    "yes"
+                } else {
+                    "no"
+                }
             ),
             None => format!("- {}", target.name),
         })
@@ -80,6 +86,7 @@ mod tests {
     #[tokio::test]
     async fn list_targets_returns_empty_text_and_array_for_empty_state() {
         let state = BrokerState {
+            enable_transfer_compression: true,
             host_sandbox: None,
             sessions: SessionStore::default(),
             targets: BTreeMap::new(),

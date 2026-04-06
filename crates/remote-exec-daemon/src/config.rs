@@ -101,6 +101,8 @@ pub struct DaemonConfig {
     pub default_workdir: PathBuf,
     #[serde(default)]
     pub sandbox: Option<FilesystemSandbox>,
+    #[serde(default = "default_enable_transfer_compression")]
+    pub enable_transfer_compression: bool,
     #[serde(default = "default_allow_login_shell")]
     pub allow_login_shell: bool,
     #[serde(default)]
@@ -124,6 +126,7 @@ pub struct EmbeddedDaemonConfig {
     pub target: String,
     pub default_workdir: PathBuf,
     pub sandbox: Option<FilesystemSandbox>,
+    pub enable_transfer_compression: bool,
     pub allow_login_shell: bool,
     pub pty: PtyMode,
     pub default_shell: Option<String>,
@@ -137,6 +140,7 @@ impl EmbeddedDaemonConfig {
             listen: SocketAddr::from(([127, 0, 0, 1], 0)),
             default_workdir: self.default_workdir,
             sandbox: self.sandbox,
+            enable_transfer_compression: self.enable_transfer_compression,
             allow_login_shell: self.allow_login_shell,
             pty: self.pty,
             default_shell: self.default_shell,
@@ -160,5 +164,9 @@ impl DaemonConfig {
 }
 
 fn default_allow_login_shell() -> bool {
+    true
+}
+
+fn default_enable_transfer_compression() -> bool {
     true
 }

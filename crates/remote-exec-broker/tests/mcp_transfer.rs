@@ -31,6 +31,30 @@ fn read_single_file_archive(bytes: &[u8]) -> (String, Vec<u8>) {
     (path, body)
 }
 
+fn decode_archive(bytes: &[u8], compression: &str) -> Vec<u8> {
+    match compression {
+        "zstd" => zstd::stream::decode_all(Cursor::new(bytes)).expect("decode zstd archive"),
+        _ => bytes.to_vec(),
+    }
+}
+
+fn read_archive_paths(bytes: &[u8], compression: &str) -> Vec<String> {
+    let decoded = decode_archive(bytes, compression);
+    let mut archive = tar::Archive::new(Cursor::new(decoded));
+    archive
+        .entries()
+        .expect("archive entries")
+        .map(|entry| {
+            entry
+                .expect("archive entry")
+                .path()
+                .expect("entry path")
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect()
+}
+
 fn raw_tar_file_with_path(path: &str, body: &[u8]) -> Vec<u8> {
     fn write_octal(field: &mut [u8], value: u64) {
         let digits = field.len() - 1;
@@ -156,6 +180,62 @@ async fn transfer_files_copies_local_file_and_reports_summary() {
     assert_eq!(result.structured_content["replaced"], false);
 }
 
+#[tokio::test]
+async fn transfer_files_bundles_multiple_local_sources_into_destination_directory() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
+    let file_source = fixture._tempdir.path().join("alpha.txt");
+    let directory_source = fixture._tempdir.path().join("tree");
+    let destination = fixture._tempdir.path().join("bundle");
+    std::fs::write(&file_source, "alpha\n").unwrap();
+    std::fs::create_dir_all(&directory_source).unwrap();
+    std::fs::write(directory_source.join("nested.txt"), "nested\n").unwrap();
+
+    let result = fixture
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "sources": [
+                    {
+                        "target": "local",
+                        "path": file_source.display().to_string()
+                    },
+                    {
+                        "target": "local",
+                        "path": directory_source.display().to_string()
+                    }
+                ],
+                "destination": {
+                    "target": "local",
+                    "path": destination.display().to_string()
+                },
+                "overwrite": "fail",
+                "create_parent": false
+            }),
+        )
+        .await;
+
+    assert_eq!(
+        std::fs::read_to_string(destination.join("alpha.txt")).unwrap(),
+        "alpha\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(destination.join("tree/nested.txt")).unwrap(),
+        "nested\n"
+    );
+    assert_eq!(result.structured_content["source_type"], "multiple");
+    assert_eq!(
+        result.structured_content["sources"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(result.structured_content["compression"], "none");
+    assert_eq!(result.structured_content["files_copied"], 2);
+    assert_eq!(result.structured_content["directories_copied"], 2);
+    assert!(result.structured_content["source"].is_null());
+}
+
 #[cfg(windows)]
 #[tokio::test]
 async fn transfer_files_copies_local_file_using_msys_style_windows_paths() {
@@ -228,6 +308,54 @@ async fn transfer_files_copies_local_directory_to_plain_http_remote() {
 }
 
 #[tokio::test]
+async fn transfer_files_bundles_multiple_local_sources_for_plain_http_remote_import() {
+    let fixture = support::spawn_broker_with_plain_http_stub_daemon().await;
+    let file_source = fixture._tempdir.path().join("alpha.txt");
+    let directory_source = fixture._tempdir.path().join("tree");
+    std::fs::write(&file_source, "alpha\n").unwrap();
+    std::fs::create_dir_all(&directory_source).unwrap();
+    std::fs::write(directory_source.join("nested.txt"), "nested\n").unwrap();
+
+    let result = fixture
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "sources": [
+                    {
+                        "target": "local",
+                        "path": file_source.display().to_string()
+                    },
+                    {
+                        "target": "local",
+                        "path": directory_source.display().to_string()
+                    }
+                ],
+                "destination": {
+                    "target": "builder-xp",
+                    "path": "C:/dest/bundle"
+                },
+                "overwrite": "replace",
+                "create_parent": true
+            }),
+        )
+        .await;
+
+    let capture = fixture
+        .last_transfer_import()
+        .await
+        .expect("transfer import");
+    assert_eq!(capture.destination_path, "C:/dest/bundle");
+    assert_eq!(capture.source_type, "multiple");
+    assert_eq!(capture.compression, "none");
+    let paths = read_archive_paths(&capture.body, &capture.compression);
+    assert!(paths.contains(&"alpha.txt".to_string()));
+    assert!(paths.contains(&"tree".to_string()));
+    assert!(paths.contains(&"tree/nested.txt".to_string()));
+    assert_eq!(result.structured_content["source_type"], "multiple");
+    assert_eq!(result.structured_content["files_copied"], 2);
+}
+
+#[tokio::test]
 async fn transfer_files_copies_local_file_to_plain_http_remote_as_single_file_tar() {
     let fixture = support::spawn_broker_with_plain_http_stub_daemon().await;
     let source = fixture._tempdir.path().join("source.txt");
@@ -266,6 +394,71 @@ async fn transfer_files_copies_local_file_to_plain_http_remote_as_single_file_ta
     assert_eq!(result.structured_content["directories_copied"], 0);
     assert_eq!(result.structured_content["bytes_copied"], 9);
     assert_eq!(result.structured_content["replaced"], false);
+}
+
+#[tokio::test]
+async fn transfer_files_uses_zstd_when_requested_and_supported() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
+    let source = fixture._tempdir.path().join("source.txt");
+    std::fs::write(&source, "hello zstd\n").unwrap();
+
+    let result = fixture
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "local",
+                    "path": source.display().to_string()
+                },
+                "destination": {
+                    "target": "builder-a",
+                    "path": "/tmp/dest.txt"
+                },
+                "overwrite": "fail",
+                "create_parent": true,
+                "compression": "zstd"
+            }),
+        )
+        .await;
+
+    let capture = fixture
+        .last_transfer_import()
+        .await
+        .expect("transfer import");
+    assert_eq!(capture.compression, "zstd");
+    let decoded = decode_archive(&capture.body, &capture.compression);
+    let (path, body) = read_single_file_archive(&decoded);
+    assert_eq!(path, SINGLE_FILE_ENTRY);
+    assert_eq!(body, b"hello zstd\n");
+    assert_eq!(result.structured_content["compression"], "zstd");
+}
+
+#[tokio::test]
+async fn transfer_files_rejects_zstd_when_target_does_not_support_compression() {
+    let fixture = support::spawn_broker_with_plain_http_stub_daemon().await;
+    let source = fixture._tempdir.path().join("source.txt");
+    std::fs::write(&source, "hello xp\n").unwrap();
+
+    let error = fixture
+        .call_tool_error(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "local",
+                    "path": source.display().to_string()
+                },
+                "destination": {
+                    "target": "builder-xp",
+                    "path": "C:/dest/file.txt"
+                },
+                "overwrite": "fail",
+                "create_parent": true,
+                "compression": "zstd"
+            }),
+        )
+        .await;
+
+    assert!(error.contains("does not support transfer compression"));
 }
 
 #[tokio::test]

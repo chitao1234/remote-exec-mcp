@@ -83,6 +83,7 @@ HttpResponse handle_target_info(const AppState& state) {
             {"arch", "x86"},
             {"supports_pty", false},
             {"supports_image_read", false},
+            {"supports_transfer_compression", false},
         }
     );
     return response;
@@ -197,6 +198,9 @@ HttpResponse handle_transfer_export(const HttpRequest& request) {
 
     try {
         const Json body = parse_json_body(request);
+        if (body.value("compression", std::string("none")) != "none") {
+            throw std::runtime_error("this daemon does not support transfer compression");
+        }
         const ExportedPayload payload = export_path(body.at("path").get<std::string>());
         log_message(
             LOG_INFO,
@@ -206,6 +210,7 @@ HttpResponse handle_transfer_export(const HttpRequest& request) {
         );
         response.headers["Content-Type"] = "application/octet-stream";
         response.headers["x-remote-exec-source-type"] = payload.source_type;
+        response.headers["x-remote-exec-compression"] = "none";
         response.body = payload.bytes;
     } catch (const std::exception& ex) {
         log_message(LOG_WARN, "server", std::string("transfer/export failed: ") + ex.what());
@@ -220,6 +225,10 @@ HttpResponse handle_transfer_import(const HttpRequest& request) {
     response.status = 200;
 
     try {
+        const std::string compression = request.header("x-remote-exec-compression");
+        if (!compression.empty() && compression != "none") {
+            throw std::runtime_error("this daemon does not support transfer compression");
+        }
         const ImportSummary summary = import_path(
             request.body,
             request.header("x-remote-exec-source-type"),

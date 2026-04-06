@@ -63,6 +63,7 @@ async fn spawn_daemon_with_pty_mode(
         listen: addr,
         default_workdir: workdir.clone(),
         sandbox: None,
+        enable_transfer_compression: true,
         allow_login_shell: true,
         pty,
         default_shell: None,

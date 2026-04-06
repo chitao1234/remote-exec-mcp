@@ -137,6 +137,38 @@ pub fn normalize_for_system(policy: PathPolicy, raw: &str) -> String {
     }
 }
 
+pub fn basename_for_policy(policy: PathPolicy, raw: &str) -> Option<String> {
+    let normalized = normalize_for_system(policy, raw);
+    match policy.style {
+        PathStyle::Posix => normalized
+            .trim_end_matches('/')
+            .rsplit('/')
+            .find(|segment| !segment.is_empty())
+            .map(str::to_string),
+        PathStyle::Windows => split_windows_path_basename(&normalized),
+    }
+}
+
+fn split_windows_path_basename(raw: &str) -> Option<String> {
+    let (prefix, rest) = split_windows_prefix(raw);
+    let trimmed = rest.trim_end_matches('\\');
+    if trimmed.is_empty() {
+        return (!prefix.is_empty())
+            .then(|| {
+                prefix
+                    .trim_end_matches([':', '\\'])
+                    .trim_start_matches('\\')
+                    .to_string()
+            })
+            .filter(|segment| !segment.is_empty());
+    }
+
+    trimmed
+        .rsplit('\\')
+        .find(|segment| !segment.is_empty())
+        .map(str::to_string)
+}
+
 pub fn join_for_policy(policy: PathPolicy, base: &str, child: &str) -> String {
     let normalized_child = normalize_for_system(policy, child);
     if normalized_child.is_empty() || is_absolute_for_policy(policy, &normalized_child) {
@@ -181,8 +213,8 @@ pub fn normalize_relative_path(path: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_absolute_for_policy, join_for_policy, linux_path_policy, normalize_for_system,
-        normalize_relative_path, same_path_for_policy, windows_path_policy,
+        basename_for_policy, is_absolute_for_policy, join_for_policy, linux_path_policy,
+        normalize_for_system, normalize_relative_path, same_path_for_policy, windows_path_policy,
     };
 
     #[test]
@@ -252,6 +284,30 @@ mod tests {
             join_for_policy(policy, "outer", "nested/file.txt"),
             "outer/nested/file.txt"
         );
+    }
+
+    #[test]
+    fn basename_for_policy_handles_posix_paths() {
+        let policy = linux_path_policy();
+        assert_eq!(
+            basename_for_policy(policy, "/tmp/build/output.tar"),
+            Some("output.tar".to_string())
+        );
+        assert_eq!(basename_for_policy(policy, "/"), None);
+    }
+
+    #[test]
+    fn basename_for_policy_handles_windows_paths() {
+        let policy = windows_path_policy();
+        assert_eq!(
+            basename_for_policy(policy, "C:/work/releases/current.txt"),
+            Some("current.txt".to_string())
+        );
+        assert_eq!(
+            basename_for_policy(policy, "/cygdrive/c/work/releases"),
+            Some("releases".to_string())
+        );
+        assert_eq!(basename_for_policy(policy, r"C:\"), Some("C".to_string()));
     }
 
     #[test]

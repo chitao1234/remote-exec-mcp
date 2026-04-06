@@ -5,8 +5,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use remote_exec_proto::rpc::{
-    TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER,
-    TRANSFER_SOURCE_TYPE_HEADER, TransferExportRequest, TransferImportResponse,
+    TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER,
+    TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER, TransferCompression,
+    TransferExportRequest, TransferImportResponse, TransferSourceType,
 };
 
 fn raw_tar_file_with_path(path: &Path, body: &[u8]) -> Vec<u8> {
@@ -64,6 +65,50 @@ fn raw_tar_file_with_path(path: &Path, body: &[u8]) -> Vec<u8> {
     archive
 }
 
+fn multi_source_tar() -> Vec<u8> {
+    let mut builder = tar::Builder::new(Vec::new());
+
+    let file_body = b"alpha\n";
+    let mut alpha = tar::Header::new_gnu();
+    alpha.set_entry_type(tar::EntryType::Regular);
+    alpha.set_mode(0o644);
+    alpha.set_size(file_body.len() as u64);
+    alpha.set_cksum();
+    builder
+        .append_data(
+            &mut alpha,
+            "alpha.txt",
+            std::io::Cursor::new(file_body.as_slice()),
+        )
+        .unwrap();
+
+    let mut nested = tar::Header::new_gnu();
+    nested.set_entry_type(tar::EntryType::Directory);
+    nested.set_mode(0o755);
+    nested.set_size(0);
+    nested.set_cksum();
+    builder
+        .append_data(&mut nested, "nested", std::io::empty())
+        .unwrap();
+
+    let nested_body = b"beta\n";
+    let mut beta = tar::Header::new_gnu();
+    beta.set_entry_type(tar::EntryType::Regular);
+    beta.set_mode(0o644);
+    beta.set_size(nested_body.len() as u64);
+    beta.set_cksum();
+    builder
+        .append_data(
+            &mut beta,
+            "nested/beta.txt",
+            std::io::Cursor::new(nested_body.as_slice()),
+        )
+        .unwrap();
+
+    builder.finish().unwrap();
+    builder.into_inner().unwrap()
+}
+
 #[tokio::test]
 async fn export_file_streams_archive_and_reports_file_source_type() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
@@ -75,6 +120,7 @@ async fn export_file_streams_archive_and_reports_file_source_type() {
             "/v1/transfer/export",
             &TransferExportRequest {
                 path: source.display().to_string(),
+                compression: TransferCompression::None,
             },
         )
         .await;
@@ -90,6 +136,43 @@ async fn export_file_streams_archive_and_reports_file_source_type() {
         "file"
     );
     assert!(!response.bytes().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn export_file_supports_zstd_compression() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let source = fixture.workdir.join("hello.txt");
+    tokio::fs::write(&source, "hello\n").await.unwrap();
+
+    let response = fixture
+        .raw_post_json(
+            "/v1/transfer/export",
+            &TransferExportRequest {
+                path: source.display().to_string(),
+                compression: TransferCompression::Zstd,
+            },
+        )
+        .await;
+
+    assert!(response.status().is_success());
+    assert_eq!(
+        response
+            .headers()
+            .get(TRANSFER_COMPRESSION_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "zstd"
+    );
+    let decoded =
+        zstd::stream::decode_all(std::io::Cursor::new(response.bytes().await.unwrap())).unwrap();
+    let mut archive = tar::Archive::new(std::io::Cursor::new(decoded));
+    let mut entries = archive.entries().unwrap();
+    let entry = entries.next().unwrap().unwrap();
+    assert_eq!(
+        entry.path().unwrap().as_ref(),
+        Path::new(".remote-exec-file")
+    );
 }
 
 #[cfg(unix)]
@@ -108,6 +191,7 @@ async fn export_directory_rejects_nested_symlinks_before_streaming() {
             "/v1/transfer/export",
             &TransferExportRequest {
                 path: root.display().to_string(),
+                compression: TransferCompression::None,
             },
         )
         .await;
@@ -134,6 +218,7 @@ async fn export_rejects_symlink_source_root() {
             "/v1/transfer/export",
             &TransferExportRequest {
                 path: link.display().to_string(),
+                compression: TransferCompression::None,
             },
         )
         .await;
@@ -163,6 +248,7 @@ async fn export_file_preserves_executable_mode_in_archive_header() {
             "/v1/transfer/export",
             &TransferExportRequest {
                 path: source.display().to_string(),
+                compression: TransferCompression::None,
             },
         )
         .await;
@@ -186,6 +272,7 @@ async fn import_accepts_forward_slash_windows_destination_paths() {
             "/v1/transfer/export",
             &TransferExportRequest {
                 path: source.display().to_string(),
+                compression: TransferCompression::None,
             },
         )
         .await;
@@ -225,6 +312,7 @@ async fn export_accepts_msys_style_windows_source_paths() {
             "/v1/transfer/export",
             &TransferExportRequest {
                 path: support::msys_style_path(&source),
+                compression: TransferCompression::None,
             },
         )
         .await;
@@ -254,6 +342,7 @@ async fn import_accepts_cygwin_style_windows_destination_paths() {
             "/v1/transfer/export",
             &TransferExportRequest {
                 path: source.display().to_string(),
+                compression: TransferCompression::None,
             },
         )
         .await;
@@ -313,6 +402,7 @@ async fn import_directory_replaces_exact_destination_and_preserves_exec_bits() {
             "/v1/transfer/export",
             &TransferExportRequest {
                 path: source_root.display().to_string(),
+                compression: TransferCompression::None,
             },
         )
         .await;
@@ -357,6 +447,47 @@ async fn import_directory_replaces_exact_destination_and_preserves_exec_bits() {
 }
 
 #[tokio::test]
+async fn import_multiple_source_archive_creates_destination_directory_bundle() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let destination = fixture.workdir.join("bundle");
+
+    let response = fixture
+        .raw_post_bytes(
+            "/v1/transfer/import",
+            &[
+                (
+                    TRANSFER_DESTINATION_PATH_HEADER,
+                    destination.display().to_string(),
+                ),
+                (TRANSFER_OVERWRITE_HEADER, "replace".to_string()),
+                (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
+                (TRANSFER_SOURCE_TYPE_HEADER, "multiple".to_string()),
+                (TRANSFER_COMPRESSION_HEADER, "none".to_string()),
+            ],
+            multi_source_tar(),
+        )
+        .await;
+
+    assert!(response.status().is_success());
+    let summary = response.json::<TransferImportResponse>().await.unwrap();
+    assert_eq!(summary.source_type, TransferSourceType::Multiple);
+    assert_eq!(summary.files_copied, 2);
+    assert_eq!(summary.directories_copied, 2);
+    assert_eq!(
+        tokio::fs::read_to_string(destination.join("alpha.txt"))
+            .await
+            .unwrap(),
+        "alpha\n"
+    );
+    assert_eq!(
+        tokio::fs::read_to_string(destination.join("nested/beta.txt"))
+            .await
+            .unwrap(),
+        "beta\n"
+    );
+}
+
+#[tokio::test]
 async fn import_rejects_existing_destination_when_overwrite_is_fail() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let source = fixture.workdir.join("source.txt");
@@ -369,6 +500,7 @@ async fn import_rejects_existing_destination_when_overwrite_is_fail() {
             "/v1/transfer/export",
             &TransferExportRequest {
                 path: source.display().to_string(),
+                compression: TransferCompression::None,
             },
         )
         .await;
@@ -420,6 +552,7 @@ async fn import_replaces_directory_with_file_at_the_exact_destination_path() {
             "/v1/transfer/export",
             &TransferExportRequest {
                 path: source.display().to_string(),
+                compression: TransferCompression::None,
             },
         )
         .await;
@@ -460,6 +593,7 @@ async fn import_rejects_missing_parent_when_create_parent_is_false() {
             "/v1/transfer/export",
             &TransferExportRequest {
                 path: source.display().to_string(),
+                compression: TransferCompression::None,
             },
         )
         .await;
@@ -547,6 +681,7 @@ allow = {allow}
             "/v1/transfer/export",
             &TransferExportRequest {
                 path: blocked.display().to_string(),
+                compression: TransferCompression::None,
             },
         )
         .await;
@@ -558,6 +693,34 @@ allow = {allow}
         .unwrap();
     assert_eq!(err.code, "sandbox_denied");
     assert!(err.message.contains("read access"));
+}
+
+#[tokio::test]
+async fn export_rejects_zstd_when_transfer_compression_is_disabled() {
+    let fixture = support::spawn::spawn_daemon_with_extra_config(
+        "builder-a",
+        "enable_transfer_compression = false",
+    )
+    .await;
+    let source = fixture.workdir.join("hello.txt");
+    tokio::fs::write(&source, "hello\n").await.unwrap();
+
+    let response = fixture
+        .raw_post_json(
+            "/v1/transfer/export",
+            &TransferExportRequest {
+                path: source.display().to_string(),
+                compression: TransferCompression::Zstd,
+            },
+        )
+        .await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let err = response
+        .json::<remote_exec_proto::rpc::RpcErrorBody>()
+        .await
+        .unwrap();
+    assert_eq!(err.code, "transfer_compression_unsupported");
 }
 
 #[tokio::test]
@@ -583,6 +746,7 @@ allow = {allow}
             "/v1/transfer/export",
             &TransferExportRequest {
                 path: source.display().to_string(),
+                compression: TransferCompression::None,
             },
         )
         .await;

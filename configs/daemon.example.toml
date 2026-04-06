@@ -1,10 +1,14 @@
 target = "builder-a"
 listen = "0.0.0.0:9443"
 default_workdir = "/srv/work"
+enable_transfer_compression = true
 allow_login_shell = true
 # Optional. Omit to auto-detect PTY support, or set to "none" to disable TTY.
 # On Windows, "conpty" and "winpty" force a specific backend and fail startup if unavailable.
 # pty = "none"
+# Optional. When false, the daemon rejects `transfer_files` requests that set
+# `compression = "zstd"` and only accepts uncompressed tar payloads.
+# enable_transfer_compression = false
 # Optional. If set, daemon startup fails unless this shell is usable.
 # On Windows, omitted default shell now prefers Git Bash when Git for Windows is installed.
 # Set this to "powershell.exe" or "cmd.exe" to keep the older behavior.

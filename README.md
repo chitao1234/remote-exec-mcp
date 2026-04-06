@@ -15,10 +15,10 @@ The tool interfaces and behavior in this project are heavily influenced by [Code
   - Can optionally expose the broker host itself as `target: "local"` for daemon-backed exec, patch, and image operations.
 - `remote-exec-daemon`
   - Per-machine daemon over mTLS JSON/HTTP.
-  - Executes commands, manages local sessions, applies patches, and reads images.
+  - Executes commands, manages local sessions, applies patches, reads images, and serves transfer archives.
 - `remote-exec-daemon-xp`
   - Standalone Windows XP daemon over plain HTTP.
-  - Supports `exec_command`, `write_stdin`, `apply_patch`, and `transfer_files` for files and directories.
+  - Supports `exec_command`, `write_stdin`, `apply_patch`, and `transfer_files` for files, directories, and broker-built multi-source bundles.
   - Does not support PTY or image reads.
 - `remote-exec-proto`
   - Shared public tool schemas and broker-daemon RPC types.
@@ -55,12 +55,14 @@ Daemon config covers:
 - target name
 - listen address
 - default working directory
+- optional transfer compression support toggle
 - optional default shell override
 - optional PTY mode selection
 - TLS certificate, key, and CA paths
 
 Broker config covers one entry per target:
 
+- optional broker-side transfer compression support toggle
 - daemon base URL
 - CA path for `https://` targets
 - client certificate path for `https://` targets
@@ -272,8 +274,11 @@ cargo fmt --all --check
 - Targets that are unavailable at broker startup are verified before the first forwarded call.
 - `transfer_files` uses broker-mediated copy for `local -> remote`, `remote -> local`, `remote -> remote`, and `local -> local`.
 - Internal transfer transport uses GNU tar for both files and directories. Single-file transfers use one fixed archive entry named `.remote-exec-file`.
+- `transfer_files` accepts either a single `source` or a `sources` array. Multi-source transfers treat `destination.path` as a directory root and place each source under its basename.
+- `transfer_files` can optionally compress archive payloads with `zstd` when the broker and every participating daemon allow transfer compression. `compression = "none"` remains the default.
+- Broker and daemon configs each support `enable_transfer_compression = false` to reject compressed transfers without disabling uncompressed transfers.
 - Broker `[local]` config enables `target: "local"` for `exec_command`, `write_stdin`, `apply_patch`, and `view_image` on the broker host.
-- `transfer_files` treats `destination.path` as the exact final path to create or replace; it does not infer basenames or copy "into" an existing directory.
+- `transfer_files` treats `destination.path` as the exact final path to create or replace for single-source transfers; it does not infer basenames or copy "into" an existing directory in that mode.
 - `write_stdin` only invalidates sessions when the daemon restarted or explicitly reports `unknown_session`.
 - `max_output_tokens` is enforced by the daemon for command output.
 - Each target daemon keeps at most `64` live exec sessions. When full, it protects the `8` most recently touched sessions, prunes exited sessions first, otherwise prunes the oldest non-protected live session, and terminates the pruned process.
@@ -287,11 +292,11 @@ cargo fmt --all --check
 - `default_shell` lets the daemon pin its fallback shell on both Unix and Windows. Startup now fails if the configured shell, or the auto-detected fallback when `default_shell` is omitted, is not usable on that host. Set this to `powershell.exe` or `cmd.exe` on Windows if you do not want the new Git Bash-first default.
 - On Windows, `login=false` suppresses shell startup state where supported: Git Bash omits `-l`, `pwsh` and `powershell` add `-NoProfile`, and `cmd.exe` adds `/D` to disable AutoRun. `login=true` uses Git Bash with `-l -c` and drops those PowerShell and `cmd.exe` suppression flags.
 - On Windows, tool path inputs also accept MSYS/Cygwin drive-style absolute paths such as `/c/work/file.txt` and `/cygdrive/c/work/file.txt` for `workdir`, image paths, patch file paths, and transfer endpoints. Raw command strings are not rewritten.
-- `list_targets` reports the daemon's actual `supports_pty` capability instead of assuming PTY support.
+- `list_targets` reports the daemon's actual `supports_pty` and `supports_transfer_compression` capabilities instead of assuming them.
 - `pty = "none"` disables TTY entirely. On Windows, `pty = "conpty"` or `pty = "winpty"` force that backend and startup fails if the selected backend is unavailable. When `pty` is omitted, the daemon keeps the current auto-detect behavior.
 - Default shell resolution uses `default_shell` when configured. Otherwise it tries `SHELL`, then a usable passwd shell, then `bash`, then `/bin/sh` on Unix; and Git Bash, then `pwsh.exe`, then `powershell.exe` or `powershell`, then `COMSPEC`, then `cmd.exe` on Windows.
 - Git Bash auto-discovery on Windows only checks standard Git for Windows install roots and locations derivable from `git.exe` on `PATH`. Portable or unusual installs should set `default_shell` to an explicit path.
-- `remote-exec-daemon-xp` is intentionally narrower than the main daemon: it always uses `cmd.exe`, rejects `tty=true`, does not implement `view_image`, and only accepts the narrow v1 transfer subset for regular files and directory trees. Symlinks, hard links, special files, sparse entries, and malformed archive paths remain unsupported there.
+- `remote-exec-daemon-xp` is intentionally narrower than the main daemon: it always uses `cmd.exe`, rejects `tty=true`, does not implement `view_image`, supports broker-built multi-source transfer bundles, and never enables transfer compression. Symlinks, hard links, special files, sparse entries, and malformed archive paths remain unsupported there.
 
 ## Quality Gate
 

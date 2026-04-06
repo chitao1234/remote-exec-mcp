@@ -17,6 +17,8 @@ pub struct TargetInfoResponse {
     pub arch: String,
     pub supports_pty: bool,
     pub supports_image_read: bool,
+    #[serde(default)]
+    pub supports_transfer_compression: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -87,15 +89,31 @@ pub struct PatchApplyResponse {
 }
 
 pub const TRANSFER_SOURCE_TYPE_HEADER: &str = "x-remote-exec-source-type";
+pub const TRANSFER_COMPRESSION_HEADER: &str = "x-remote-exec-compression";
 pub const TRANSFER_DESTINATION_PATH_HEADER: &str = "x-remote-exec-destination-path";
 pub const TRANSFER_OVERWRITE_HEADER: &str = "x-remote-exec-overwrite";
 pub const TRANSFER_CREATE_PARENT_HEADER: &str = "x-remote-exec-create-parent";
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferCompression {
+    #[default]
+    None,
+    Zstd,
+}
+
+impl TransferCompression {
+    pub fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TransferSourceType {
     File,
     Directory,
+    Multiple,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -108,6 +126,8 @@ pub enum TransferOverwriteMode {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransferExportRequest {
     pub path: String,
+    #[serde(default, skip_serializing_if = "TransferCompression::is_none")]
+    pub compression: TransferCompression,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -116,6 +136,7 @@ pub struct TransferImportRequest {
     pub overwrite: TransferOverwriteMode,
     pub create_parent: bool,
     pub source_type: TransferSourceType,
+    pub compression: TransferCompression,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

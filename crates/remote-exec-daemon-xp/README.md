@@ -36,8 +36,9 @@ default_workdir = C:\work
 - plain HTTP only in v1
 - no PTY support
 - no image support
-- `transfer_files` supports regular files and directory trees
+- `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles
 - transfer payloads use GNU tar for both files and directories
 - single-file transfers use the fixed archive entry `.remote-exec-file`
+- transfer compression is not supported; XP only accepts uncompressed payloads
 - unsupported archive entries remain rejected: symlinks, hard links, special files, sparse entries, and malformed paths
 - `cmd.exe` only for shell execution

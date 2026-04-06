@@ -26,6 +26,7 @@ pub struct AppState {
     pub default_shell: String,
     pub sandbox: Option<CompiledFilesystemSandbox>,
     pub supports_pty: bool,
+    pub supports_transfer_compression: bool,
     pub windows_pty_backend_override: Option<WindowsPtyBackendOverride>,
     pub daemon_instance_id: String,
     pub sessions: exec::store::SessionStore,
@@ -47,6 +48,7 @@ pub fn build_app_state(config: DaemonConfig) -> Result<AppState> {
     )?;
     exec::session::validate_pty_mode(config.pty)?;
     let supports_pty = exec::session::supports_pty_for_mode(config.pty);
+    let supports_transfer_compression = config.enable_transfer_compression;
     let windows_pty_backend_override =
         exec::session::windows_pty_backend_override_for_mode(config.pty)?;
 
@@ -55,6 +57,7 @@ pub fn build_app_state(config: DaemonConfig) -> Result<AppState> {
         default_shell,
         sandbox,
         supports_pty,
+        supports_transfer_compression,
         windows_pty_backend_override,
         daemon_instance_id: uuid::Uuid::new_v4().to_string(),
         sessions: exec::store::SessionStore::new(64),
@@ -79,6 +82,7 @@ pub fn target_info_response(state: &AppState) -> TargetInfoResponse {
         arch: std::env::consts::ARCH.to_string(),
         supports_pty: state.supports_pty,
         supports_image_read: true,
+        supports_transfer_compression: state.supports_transfer_compression,
     }
 }
 
@@ -94,6 +98,7 @@ where
         default_workdir = %state.config.default_workdir.display(),
         default_shell = %state.default_shell,
         supports_pty = state.supports_pty,
+        supports_transfer_compression = state.supports_transfer_compression,
         pty_mode = ?state.config.pty,
         daemon_instance_id = %state.daemon_instance_id,
         "starting daemon"

@@ -44,6 +44,7 @@ async fn target_info_is_available_over_mutual_tls() {
         )
     );
     assert!(info.supports_image_read);
+    assert!(info.supports_transfer_compression);
 }
 
 #[tokio::test]
@@ -54,6 +55,7 @@ async fn daemon_startup_rejects_unusable_default_shell() {
             listen: SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
             default_workdir: std::env::temp_dir(),
             sandbox: None,
+            enable_transfer_compression: true,
             allow_login_shell: true,
             pty: remote_exec_daemon::config::PtyMode::Auto,
             default_shell: Some("definitely-not-a-real-shell".to_string()),
@@ -81,6 +83,7 @@ async fn daemon_startup_rejects_non_windows_conpty_configuration() {
             listen: SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
             default_workdir: std::env::temp_dir(),
             sandbox: None,
+            enable_transfer_compression: true,
             allow_login_shell: true,
             pty: remote_exec_daemon::config::PtyMode::Conpty,
             default_shell: Some("/bin/sh".to_string()),

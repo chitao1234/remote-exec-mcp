@@ -1,11 +1,13 @@
-use std::path::Path;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 
 use remote_exec_proto::path::{
-    PathPolicy, is_absolute_for_policy, linux_path_policy, normalize_for_system,
-    normalize_relative_path, windows_path_policy,
+    PathPolicy, basename_for_policy, is_absolute_for_policy, linux_path_policy,
+    normalize_for_system, normalize_relative_path, windows_path_policy,
 };
 use remote_exec_proto::rpc::{
-    TransferImportRequest, TransferImportResponse, TransferOverwriteMode, TransferSourceType,
+    TransferCompression, TransferImportRequest, TransferImportResponse, TransferOverwriteMode,
+    TransferSourceType,
 };
 use remote_exec_proto::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
 
@@ -13,7 +15,16 @@ pub const SINGLE_FILE_ENTRY: &str = ".remote-exec-file";
 
 pub struct ExportedArchive {
     pub source_type: TransferSourceType,
+    pub compression: TransferCompression,
     pub temp_path: tempfile::TempPath,
+}
+
+pub struct BundledArchiveSource {
+    pub source_path: String,
+    pub source_policy: PathPolicy,
+    pub source_type: TransferSourceType,
+    pub compression: TransferCompression,
+    pub archive_path: PathBuf,
 }
 
 fn host_policy() -> PathPolicy {
@@ -30,14 +41,17 @@ fn host_path(raw: &str) -> std::path::PathBuf {
 
 pub async fn export_path_to_archive(
     path: &str,
+    compression: TransferCompression,
     sandbox: Option<&CompiledFilesystemSandbox>,
 ) -> anyhow::Result<ExportedArchive> {
     let temp = tempfile::NamedTempFile::new()?;
     let temp_path = temp.into_temp_path();
-    let source_type = export_path_to_file(path, temp_path.as_ref(), sandbox).await?;
+    let source_type =
+        export_path_to_file(path, temp_path.as_ref(), compression.clone(), sandbox).await?;
 
     Ok(ExportedArchive {
         source_type,
+        compression,
         temp_path,
     })
 }
@@ -45,6 +59,7 @@ pub async fn export_path_to_archive(
 pub async fn export_path_to_file(
     path: &str,
     archive_path: &Path,
+    compression: TransferCompression,
     sandbox: Option<&CompiledFilesystemSandbox>,
 ) -> anyhow::Result<TransferSourceType> {
     let source_text = path.to_string();
@@ -77,8 +92,8 @@ pub async fn export_path_to_file(
     let source_type_for_task = source_type.clone();
 
     tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-        let file = std::fs::File::create(&archive_path)?;
-        let mut builder = tar::Builder::new(file);
+        let writer = open_archive_writer(&archive_path, &compression)?;
+        let mut builder = tar::Builder::new(writer);
 
         match source_type_for_task {
             TransferSourceType::File => {
@@ -88,18 +103,40 @@ pub async fn export_path_to_file(
                 builder.append_dir(".", &source_path)?;
                 append_directory_entries(&mut builder, &source_path, &source_path)?;
             }
+            TransferSourceType::Multiple => {
+                anyhow::bail!("single-path export cannot produce a multi-source archive");
+            }
         }
 
-        builder.finish()?;
-        Ok(())
+        finish_archive_builder(builder)
     })
     .await??;
 
     Ok(source_type)
 }
 
-fn append_directory_entries(
-    builder: &mut tar::Builder<std::fs::File>,
+pub async fn bundle_archives_to_file(
+    sources: Vec<BundledArchiveSource>,
+    archive_path: &Path,
+    compression: TransferCompression,
+) -> anyhow::Result<()> {
+    let archive_path = archive_path.to_path_buf();
+
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let writer = open_archive_writer(&archive_path, &compression)?;
+        let mut builder = tar::Builder::new(writer);
+        for source in &sources {
+            append_source_archive(&mut builder, source)?;
+        }
+        finish_archive_builder(builder)
+    })
+    .await??;
+
+    Ok(())
+}
+
+fn append_directory_entries<W: Write>(
+    builder: &mut tar::Builder<W>,
     root: &Path,
     current: &Path,
 ) -> anyhow::Result<()> {
@@ -124,6 +161,106 @@ fn append_directory_entries(
                 path.display()
             );
         }
+    }
+
+    Ok(())
+}
+
+fn append_source_archive<W: Write>(
+    builder: &mut tar::Builder<W>,
+    source: &BundledArchiveSource,
+) -> anyhow::Result<()> {
+    let root_name =
+        basename_for_policy(source.source_policy, &source.source_path).ok_or_else(|| {
+            anyhow::anyhow!(
+                "transfer source path `{}` has no usable basename for multi-source transfer",
+                source.source_path
+            )
+        })?;
+    let reader = open_archive_reader(&source.archive_path, &source.compression)?;
+    let mut archive = tar::Archive::new(reader);
+
+    match source.source_type {
+        TransferSourceType::File => {
+            append_file_archive_to_bundle(builder, &mut archive, &root_name)
+        }
+        TransferSourceType::Directory => {
+            append_directory_archive_to_bundle(builder, &mut archive, &root_name)
+        }
+        TransferSourceType::Multiple => {
+            anyhow::bail!("multi-source archives cannot be nested");
+        }
+    }
+}
+
+fn append_file_archive_to_bundle<W: Write, R: Read>(
+    builder: &mut tar::Builder<W>,
+    archive: &mut tar::Archive<R>,
+    root_name: &str,
+) -> anyhow::Result<()> {
+    let mut entries = archive.entries()?;
+    let mut entry = entries
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("archive is empty"))??;
+    anyhow::ensure!(
+        entry.header().entry_type().is_file(),
+        "archive entry is not a regular file"
+    );
+
+    let raw_path = entry.path()?.to_path_buf();
+    let rel = normalize_relative_path(&raw_path).ok_or_else(|| {
+        anyhow::anyhow!(
+            "archive contains unsupported entry `{}`",
+            raw_path.display()
+        )
+    })?;
+    anyhow::ensure!(
+        rel == Path::new(SINGLE_FILE_ENTRY),
+        "file archive entry path must be `{SINGLE_FILE_ENTRY}`"
+    );
+
+    let mut header = entry.header().clone();
+    builder.append_data(&mut header, root_name, &mut entry)?;
+    anyhow::ensure!(
+        entries.next().transpose()?.is_none(),
+        "file archive contains extra entries"
+    );
+    Ok(())
+}
+
+fn append_directory_archive_to_bundle<W: Write, R: Read>(
+    builder: &mut tar::Builder<W>,
+    archive: &mut tar::Archive<R>,
+    root_name: &str,
+) -> anyhow::Result<()> {
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let raw_rel = entry.path()?.to_path_buf();
+        let rel = normalize_relative_path(&raw_rel).ok_or_else(|| {
+            anyhow::anyhow!("archive contains unsupported entry `{}`", raw_rel.display())
+        })?;
+        let entry_type = entry.header().entry_type();
+        anyhow::ensure!(
+            entry_type.is_dir() || entry_type.is_file(),
+            "archive contains unsupported entry `{}`",
+            raw_rel.display()
+        );
+
+        if rel.as_os_str().is_empty() {
+            anyhow::ensure!(entry_type.is_dir(), "archive file entry cannot target root");
+            let mut header = entry.header().clone();
+            builder.append_data(&mut header, root_name, std::io::empty())?;
+            continue;
+        }
+
+        let out_rel = PathBuf::from(root_name).join(&rel);
+        let mut header = entry.header().clone();
+        if entry_type.is_dir() {
+            builder.append_data(&mut header, &out_rel, std::io::empty())?;
+            continue;
+        }
+
+        builder.append_data(&mut header, &out_rel, &mut entry)?;
     }
 
     Ok(())
@@ -203,12 +340,15 @@ fn extract_archive(
         source_type: request.source_type.clone(),
         bytes_copied: 0,
         files_copied: 0,
-        directories_copied: matches!(request.source_type, TransferSourceType::Directory) as u64,
+        directories_copied: matches!(
+            request.source_type,
+            TransferSourceType::Directory | TransferSourceType::Multiple
+        ) as u64,
         replaced,
     };
 
-    let file = std::fs::File::open(archive_path)?;
-    let mut archive = tar::Archive::new(file);
+    let reader = open_archive_reader(archive_path, &request.compression)?;
+    let mut archive = tar::Archive::new(reader);
 
     match request.source_type {
         TransferSourceType::File => {
@@ -220,21 +360,15 @@ fn extract_archive(
                 entry.header().entry_type().is_file(),
                 "archive entry is not a regular file"
             );
-            let mut bytes = Vec::new();
-            std::io::Read::read_to_end(&mut entry, &mut bytes)?;
-            if let Some(parent) = destination_path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(destination_path, &bytes)?;
-            restore_executable_bits(destination_path, entry.header().mode()?)?;
+            let bytes_written = write_archive_file(&mut entry, destination_path)?;
             anyhow::ensure!(
                 entries.next().transpose()?.is_none(),
                 "file archive contains extra entries"
             );
-            summary.bytes_copied = bytes.len() as u64;
+            summary.bytes_copied = bytes_written;
             summary.files_copied = 1;
         }
-        TransferSourceType::Directory => {
+        TransferSourceType::Directory | TransferSourceType::Multiple => {
             std::fs::create_dir_all(destination_path)?;
             for entry in archive.entries()? {
                 let mut entry = entry?;
@@ -260,20 +394,56 @@ fn extract_archive(
                     continue;
                 }
 
-                if let Some(parent) = out.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                let mut bytes = Vec::new();
-                std::io::Read::read_to_end(&mut entry, &mut bytes)?;
-                std::fs::write(&out, &bytes)?;
-                restore_executable_bits(&out, entry.header().mode()?)?;
-                summary.bytes_copied += bytes.len() as u64;
+                summary.bytes_copied += write_archive_file(&mut entry, &out)?;
                 summary.files_copied += 1;
             }
         }
     }
 
     Ok(summary)
+}
+
+fn write_archive_file<R: Read>(entry: &mut tar::Entry<R>, path: &Path) -> anyhow::Result<u64> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(entry, &mut bytes)?;
+    std::fs::write(path, &bytes)?;
+    restore_executable_bits(path, entry.header().mode()?)?;
+    Ok(bytes.len() as u64)
+}
+
+fn open_archive_writer(
+    archive_path: &Path,
+    compression: &TransferCompression,
+) -> anyhow::Result<Box<dyn Write>> {
+    let file = std::fs::File::create(archive_path)?;
+    match compression {
+        TransferCompression::None => Ok(Box::new(file)),
+        TransferCompression::Zstd => {
+            let encoder = zstd::stream::write::Encoder::new(file, 0)?;
+            Ok(Box::new(encoder.auto_finish()))
+        }
+    }
+}
+
+fn open_archive_reader(
+    archive_path: &Path,
+    compression: &TransferCompression,
+) -> anyhow::Result<Box<dyn Read>> {
+    let file = std::fs::File::open(archive_path)?;
+    match compression {
+        TransferCompression::None => Ok(Box::new(file)),
+        TransferCompression::Zstd => Ok(Box::new(zstd::stream::read::Decoder::new(file)?)),
+    }
+}
+
+fn finish_archive_builder<W: Write>(mut builder: tar::Builder<W>) -> anyhow::Result<()> {
+    builder.finish()?;
+    drop(builder.into_inner()?);
+    Ok(())
 }
 
 #[cfg(unix)]

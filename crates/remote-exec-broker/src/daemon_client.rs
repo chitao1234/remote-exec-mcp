@@ -2,10 +2,10 @@ use anyhow::Context;
 use futures_util::TryStreamExt;
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
-    PatchApplyRequest, PatchApplyResponse, RpcErrorBody, TRANSFER_CREATE_PARENT_HEADER,
-    TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
-    TargetInfoResponse, TransferExportRequest, TransferImportRequest, TransferImportResponse,
-    TransferSourceType,
+    PatchApplyRequest, PatchApplyResponse, RpcErrorBody, TRANSFER_COMPRESSION_HEADER,
+    TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER,
+    TRANSFER_SOURCE_TYPE_HEADER, TargetInfoResponse, TransferCompression, TransferExportRequest,
+    TransferImportRequest, TransferImportResponse, TransferSourceType,
 };
 use reqwest::Identity;
 use reqwest::header::CONNECTION;
@@ -183,6 +183,17 @@ impl DaemonClient {
         }
 
         let source_type = parse_header_enum(response.headers(), TRANSFER_SOURCE_TYPE_HEADER)?;
+        let actual_compression =
+            parse_optional_header_enum(response.headers(), TRANSFER_COMPRESSION_HEADER)?
+                .unwrap_or_default();
+        if actual_compression != req.compression {
+            return Err(DaemonClientError::Decode(anyhow::anyhow!(
+                "target `{}` returned transfer compression `{}` for requested `{}`",
+                self.target_name,
+                format_transfer_compression(&actual_compression),
+                format_transfer_compression(&req.compression)
+            )));
+        }
         let mut file = tokio::fs::File::create(archive_path)
             .await
             .map_err(|err| DaemonClientError::Transport(err.into()))?;
@@ -236,6 +247,10 @@ impl DaemonClient {
             .header(
                 TRANSFER_SOURCE_TYPE_HEADER,
                 format_transfer_source_type(&req.source_type).to_string(),
+            )
+            .header(
+                TRANSFER_COMPRESSION_HEADER,
+                format_transfer_compression(&req.compression).to_string(),
             )
             .body(body)
             .send()
@@ -368,6 +383,14 @@ fn format_transfer_source_type(source_type: &TransferSourceType) -> &'static str
     match source_type {
         TransferSourceType::File => "file",
         TransferSourceType::Directory => "directory",
+        TransferSourceType::Multiple => "multiple",
+    }
+}
+
+fn format_transfer_compression(compression: &TransferCompression) -> &'static str {
+    match compression {
+        TransferCompression::None => "none",
+        TransferCompression::Zstd => "zstd",
     }
 }
 
@@ -393,6 +416,21 @@ where
         .ok_or_else(|| DaemonClientError::Decode(anyhow::anyhow!("missing header `{name}`")))?;
     serde_json::from_str::<T>(&format!("\"{raw}\""))
         .map_err(|err| DaemonClientError::Decode(err.into()))
+}
+
+fn parse_optional_header_enum<T>(
+    headers: &reqwest::header::HeaderMap,
+    name: &str,
+) -> Result<Option<T>, DaemonClientError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    match headers.get(name).and_then(|value| value.to_str().ok()) {
+        Some(raw) => serde_json::from_str::<T>(&format!("\"{raw}\""))
+            .map(Some)
+            .map_err(|err| DaemonClientError::Decode(err.into())),
+        None => Ok(None),
+    }
 }
 
 async fn decode_rpc_error(response: reqwest::Response) -> DaemonClientError {

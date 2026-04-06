@@ -1,3 +1,5 @@
+enable_transfer_compression = true
+
 [targets.builder-a]
 base_url = "https://builder-a.example.com:9443"
 ca_pem = "/etc/remote-exec/ca.pem"
@@ -16,6 +18,10 @@ expected_daemon_name = "builder-b"
 base_url = "http://builder-xp.example.com:8181"
 allow_insecure_http = true
 expected_daemon_name = "builder-xp"
+
+# Optional. When false, the broker rejects `transfer_files` requests that set
+# `compression = "zstd"` and keeps all transfer payloads uncompressed.
+# enable_transfer_compression = false
 
 # Optional broker-host sandbox for broker-local filesystem access.
 # This applies to `transfer_files` endpoints with `target: "local"` and, when `[local]`
