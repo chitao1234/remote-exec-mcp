@@ -1,4 +1,4 @@
-use remote_exec_proto::public::ApplyPatchInput;
+use remote_exec_proto::public::{ApplyPatchInput, ApplyPatchResult};
 use remote_exec_proto::rpc::PatchApplyRequest;
 
 use crate::daemon_client::DaemonClientError;
@@ -61,7 +61,10 @@ pub async fn apply_patch(
     );
 
     Ok(ToolCallOutput::text_and_structured(
-        output,
-        serde_json::json!({}),
+        output.clone(),
+        serde_json::to_value(ApplyPatchResult {
+            success: true,
+            output,
+        })?,
     ))
 }

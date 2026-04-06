@@ -266,7 +266,14 @@ How to use it:
 Result behavior:
 
 - Human text reports the updated files.
-- Structured content is an empty object: `{}`.
+- Structured content includes:
+
+```json
+{
+  "success": true,
+  "output": "Success. Updated the following files:\nA src/main.rs\n"
+}
+```
 
 ### `view_image`
 
