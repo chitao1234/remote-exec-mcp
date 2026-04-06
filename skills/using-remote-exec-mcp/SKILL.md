@@ -349,8 +349,7 @@ Input shape:
     "path": "/srv/inbox"
   },
   "overwrite": "replace",
-  "create_parent": true,
-  "compression": "none"
+  "create_parent": true
 }
 ```
 
@@ -367,11 +366,6 @@ Supported `overwrite` values:
 - `fail`
 - `replace`
 
-Supported `compression` values:
-
-- `none`
-- `zstd`
-
 How to use it:
 
 - Use it for `local -> remote`, `remote -> local`, `remote -> remote`, and `local -> local`.
@@ -382,9 +376,8 @@ How to use it:
 - `create_parent: true` only creates missing parents for the exact final destination path or destination root you requested.
 - If a source target and the destination target are the same, those two paths still must differ.
 - Use endpoint-native absolute paths. Linux endpoints use Unix absolute paths such as `/srv/app/file.txt`. Windows endpoints accept drive-qualified paths such as `C:/work/file.txt` and also MSYS/Cygwin-style absolute paths such as `/c/work/file.txt` and `/cygdrive/c/work/file.txt`.
-- Omit `compression` unless you specifically want compressed transfer staging. `compression` defaults to `none`.
-- Prefer the default `compression: "none"` unless the user or operator explicitly requires `zstd`.
-- If a `compression: "zstd"` request is rejected, retry with `compression: "none"` unless the user specifically required compression.
+- Transfer compression is an internal broker detail. Do not send a `compression` field.
+- The broker automatically uses compressed staging only when its own config and all participating remote targets support it, and otherwise falls back internally.
 - Reach for `transfer_files` instead of `scp`, `cp`, shell redirection, or ad hoc archives whenever data must move between endpoints.
 
 Structured result fields:
@@ -393,7 +386,6 @@ Structured result fields:
 - `sources`
 - `destination`
 - `source_type`
-- `compression`
 - `bytes_copied`
 - `files_copied`
 - `directories_copied`
@@ -463,7 +455,7 @@ Example: download a remote log to broker-host `local`:
 - On XP targets, `view_image` is unavailable.
 - On XP targets, `apply_patch` currently rejects absolute file paths inside the patch text. Use `workdir` plus relative patch paths instead.
 - On XP targets, `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles.
-- On XP targets, `compression: "zstd"` is unsupported. Keep transfer compression at `none`.
+- On XP targets, transfer compression is never used; the broker falls back automatically.
 - Do not assume symlink-heavy or special-file transfers work on XP.
 
 ## Common Mistakes
@@ -474,7 +466,7 @@ Example: download a remote log to broker-host `local`:
 - Using shell tricks for cross-endpoint copy instead of `transfer_files`.
 - Treating `destination.path` as if it had the same meaning for both single-source and multi-source transfers.
 - Sending non-absolute paths to `transfer_files`.
-- Requesting `compression: "zstd"` without checking target capability or config support.
+- Sending an unsupported `compression` field to `transfer_files`.
 - Starting an interactive program without `tty: true` and then expecting writable stdin later.
 - Using `write_stdin` after the session has already exited or after a daemon restart.
 - Sending patch text through `exec_command` instead of using `apply_patch`.

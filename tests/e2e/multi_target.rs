@@ -302,8 +302,7 @@ async fn transfer_files_bundles_multiple_local_sources_with_zstd_for_remote_dest
                     "path": destination.display().to_string()
                 },
                 "overwrite": "replace",
-                "create_parent": true,
-                "compression": "zstd"
+                "create_parent": true
             }),
         )
         .await;
@@ -317,7 +316,6 @@ async fn transfer_files_bundles_multiple_local_sources_with_zstd_for_remote_dest
         "nested\n"
     );
     assert_eq!(result.structured_content["source_type"], "multiple");
-    assert_eq!(result.structured_content["compression"], "zstd");
     assert_eq!(
         result.structured_content["sources"]
             .as_array()

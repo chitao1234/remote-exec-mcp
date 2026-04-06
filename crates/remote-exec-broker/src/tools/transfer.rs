@@ -6,8 +6,8 @@ use remote_exec_proto::path::{
     same_path_for_policy, windows_path_policy,
 };
 use remote_exec_proto::public::{
-    TransferCompression as PublicTransferCompression, TransferEndpoint, TransferFilesInput,
-    TransferFilesResult, TransferOverwrite, TransferSourceType as PublicTransferSourceType,
+    TransferEndpoint, TransferFilesInput, TransferFilesResult, TransferOverwrite,
+    TransferSourceType as PublicTransferSourceType,
 };
 use remote_exec_proto::rpc::{
     TransferCompression as RpcTransferCompression, TransferExportRequest, TransferImportRequest,
@@ -31,7 +31,7 @@ pub async fn transfer_files(
     let started = std::time::Instant::now();
     let sources = resolve_sources(&input)?;
     let destination = input.destination.clone();
-    let compression = map_transfer_compression(&input.compression);
+    let compression = negotiate_transfer_compression(state, &sources, &destination).await?;
     let first_source_target = sources
         .first()
         .map(|source| source.target.as_str())
@@ -60,7 +60,6 @@ pub async fn transfer_files(
     }
     ensure_absolute(state, &destination).await?;
     ensure_multi_source_basenames_are_unique(state, &sources, &destination).await?;
-    ensure_transfer_compression_supported(state, &compression, &sources, &destination).await?;
 
     let (source_type, summary) = match sources.as_slice() {
         [source] => {
@@ -87,21 +86,13 @@ pub async fn transfer_files(
         }
     };
 
-    finish_transfer(
-        started,
-        &sources,
-        destination,
-        input.compression,
-        source_type,
-        summary,
-    )
+    finish_transfer(started, &sources, destination, source_type, summary)
 }
 
 fn finish_transfer(
     started: std::time::Instant,
     sources: &[TransferEndpoint],
     destination: TransferEndpoint,
-    compression: PublicTransferCompression,
     source_type: RpcTransferSourceType,
     summary: TransferImportResponse,
 ) -> anyhow::Result<ToolCallOutput> {
@@ -116,7 +107,6 @@ fn finish_transfer(
             RpcTransferSourceType::Directory => PublicTransferSourceType::Directory,
             RpcTransferSourceType::Multiple => PublicTransferSourceType::Multiple,
         },
-        compression,
         bytes_copied: summary.bytes_copied,
         files_copied: summary.files_copied,
         directories_copied: summary.directories_copied,
@@ -143,13 +133,6 @@ fn resolve_sources(input: &TransferFilesInput) -> anyhow::Result<Vec<TransferEnd
         (Some(source), true) => Ok(vec![source.clone()]),
         (None, false) => Ok(input.sources.clone()),
         (None, true) => anyhow::bail!("`sources` must contain at least one entry"),
-    }
-}
-
-fn map_transfer_compression(compression: &PublicTransferCompression) -> RpcTransferCompression {
-    match compression {
-        PublicTransferCompression::None => RpcTransferCompression::None,
-        PublicTransferCompression::Zstd => RpcTransferCompression::Zstd,
     }
 }
 
@@ -434,34 +417,33 @@ async fn ensure_multi_source_basenames_are_unique(
     Ok(())
 }
 
-async fn ensure_transfer_compression_supported(
+async fn negotiate_transfer_compression(
     state: &crate::BrokerState,
-    compression: &RpcTransferCompression,
     sources: &[TransferEndpoint],
     destination: &TransferEndpoint,
-) -> anyhow::Result<()> {
-    if matches!(compression, RpcTransferCompression::None) {
-        return Ok(());
+) -> anyhow::Result<RpcTransferCompression> {
+    if !state.enable_transfer_compression {
+        return Ok(RpcTransferCompression::None);
     }
 
-    anyhow::ensure!(
-        state.enable_transfer_compression,
-        "broker transfer compression is disabled by config"
-    );
+    let mut has_remote_endpoint = false;
     for endpoint in sources.iter().chain(std::iter::once(destination)) {
         if endpoint.target == "local" {
             continue;
         }
 
+        has_remote_endpoint = true;
         let info = verified_remote_daemon_info(state, &endpoint.target).await?;
-        anyhow::ensure!(
-            info.supports_transfer_compression,
-            "target `{}` does not support transfer compression",
-            endpoint.target
-        );
+        if !info.supports_transfer_compression {
+            return Ok(RpcTransferCompression::None);
+        }
     }
 
-    Ok(())
+    if has_remote_endpoint {
+        Ok(RpcTransferCompression::Zstd)
+    } else {
+        Ok(RpcTransferCompression::None)
+    }
 }
 
 fn normalize_transfer_error(err: DaemonClientError) -> anyhow::Error {
@@ -483,14 +465,10 @@ fn format_transfer_text(result: &TransferFilesResult) -> String {
     };
 
     format!(
-        "Transferred {} to `{}` on `{}`.\nCompression: {}\nFiles: {}, directories: {}, bytes: {}, replaced: {}",
+        "Transferred {} to `{}` on `{}`.\nFiles: {}, directories: {}, bytes: {}, replaced: {}",
         source_summary,
         result.destination.path,
         result.destination.target,
-        match result.compression {
-            PublicTransferCompression::None => "none",
-            PublicTransferCompression::Zstd => "zstd",
-        },
         result.files_copied,
         result.directories_copied,
         result.bytes_copied,

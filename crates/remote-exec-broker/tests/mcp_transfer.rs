@@ -2,7 +2,7 @@ mod support;
 
 use std::io::{Cursor, Read};
 
-use rmcp::model::PaginatedRequestParams;
+use rmcp::model::{CallToolRequestParams, PaginatedRequestParams};
 
 const SINGLE_FILE_ENTRY: &str = ".remote-exec-file";
 
@@ -230,7 +230,6 @@ async fn transfer_files_bundles_multiple_local_sources_into_destination_director
             .len(),
         2
     );
-    assert_eq!(result.structured_content["compression"], "none");
     assert_eq!(result.structured_content["files_copied"], 2);
     assert_eq!(result.structured_content["directories_copied"], 2);
     assert!(result.structured_content["source"].is_null());
@@ -397,7 +396,7 @@ async fn transfer_files_copies_local_file_to_plain_http_remote_as_single_file_ta
 }
 
 #[tokio::test]
-async fn transfer_files_uses_zstd_when_requested_and_supported() {
+async fn transfer_files_auto_negotiates_zstd_when_supported() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     let source = fixture._tempdir.path().join("source.txt");
     std::fs::write(&source, "hello zstd\n").unwrap();
@@ -415,8 +414,7 @@ async fn transfer_files_uses_zstd_when_requested_and_supported() {
                     "path": "/tmp/dest.txt"
                 },
                 "overwrite": "fail",
-                "create_parent": true,
-                "compression": "zstd"
+                "create_parent": true
             }),
         )
         .await;
@@ -430,17 +428,17 @@ async fn transfer_files_uses_zstd_when_requested_and_supported() {
     let (path, body) = read_single_file_archive(&decoded);
     assert_eq!(path, SINGLE_FILE_ENTRY);
     assert_eq!(body, b"hello zstd\n");
-    assert_eq!(result.structured_content["compression"], "zstd");
+    assert_eq!(result.structured_content["source_type"], "file");
 }
 
 #[tokio::test]
-async fn transfer_files_rejects_zstd_when_target_does_not_support_compression() {
+async fn transfer_files_falls_back_to_none_when_target_does_not_support_compression() {
     let fixture = support::spawn_broker_with_plain_http_stub_daemon().await;
     let source = fixture._tempdir.path().join("source.txt");
     std::fs::write(&source, "hello xp\n").unwrap();
 
-    let error = fixture
-        .call_tool_error(
+    let result = fixture
+        .call_tool(
             "transfer_files",
             serde_json::json!({
                 "source": {
@@ -452,13 +450,51 @@ async fn transfer_files_rejects_zstd_when_target_does_not_support_compression() 
                     "path": "C:/dest/file.txt"
                 },
                 "overwrite": "fail",
-                "create_parent": true,
-                "compression": "zstd"
+                "create_parent": true
             }),
         )
         .await;
 
-    assert!(error.contains("does not support transfer compression"));
+    let capture = fixture
+        .last_transfer_import()
+        .await
+        .expect("transfer import");
+    assert_eq!(capture.compression, "none");
+    assert_eq!(result.structured_content["source_type"], "file");
+}
+
+#[tokio::test]
+async fn transfer_files_rejects_public_compression_field() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
+    let source = fixture._tempdir.path().join("source.txt");
+    std::fs::write(&source, "hello zstd\n").unwrap();
+
+    let arguments = serde_json::json!({
+        "source": {
+            "target": "local",
+            "path": source.display().to_string()
+        },
+        "destination": {
+            "target": "builder-a",
+            "path": "/tmp/dest.txt"
+        },
+        "overwrite": "fail",
+        "create_parent": true,
+        "compression": "zstd"
+    });
+    let error = fixture
+        .client
+        .call_tool(CallToolRequestParams {
+            meta: None,
+            name: "transfer_files".to_string().into(),
+            arguments: Some(arguments.as_object().unwrap().clone()),
+            task: None,
+        })
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("unknown field `compression`"), "{error}");
 }
 
 #[tokio::test]

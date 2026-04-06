@@ -5,8 +5,8 @@ use base64::Engine;
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use remote_exec_broker::client::{Connection, RemoteExecClient, ToolResponse};
 use remote_exec_proto::public::{
-    ApplyPatchInput, ExecCommandInput, ListTargetsInput, TransferCompression, TransferEndpoint,
-    TransferFilesInput, TransferOverwrite, ViewImageInput, WriteStdinInput,
+    ApplyPatchInput, ExecCommandInput, ListTargetsInput, TransferEndpoint, TransferFilesInput,
+    TransferOverwrite, ViewImageInput, WriteStdinInput,
 };
 use tokio::io::AsyncReadExt;
 
@@ -154,9 +154,6 @@ struct TransferFilesArgs {
 
     #[arg(long, default_value_t = false)]
     create_parent: bool,
-
-    #[arg(long, value_enum, default_value_t = CliTransferCompression::None)]
-    compression: CliTransferCompression,
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -165,26 +162,11 @@ enum CliTransferOverwrite {
     Replace,
 }
 
-#[derive(Copy, Clone, Debug, ValueEnum)]
-enum CliTransferCompression {
-    None,
-    Zstd,
-}
-
 impl From<CliTransferOverwrite> for TransferOverwrite {
     fn from(value: CliTransferOverwrite) -> Self {
         match value {
             CliTransferOverwrite::Fail => Self::Fail,
             CliTransferOverwrite::Replace => Self::Replace,
-        }
-    }
-}
-
-impl From<CliTransferCompression> for TransferCompression {
-    fn from(value: CliTransferCompression) -> Self {
-        match value {
-            CliTransferCompression::None => Self::None,
-            CliTransferCompression::Zstd => Self::Zstd,
         }
     }
 }
@@ -291,7 +273,6 @@ async fn main() -> anyhow::Result<()> {
                         destination: parse_transfer_endpoint(&args.destination)?,
                         overwrite: args.overwrite.into(),
                         create_parent: args.create_parent,
-                        compression: args.compression.into(),
                     },
                 )
                 .await?;

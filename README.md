@@ -291,9 +291,9 @@ cargo fmt --all --check
 - `transfer_files` uses broker-mediated copy for `local -> remote`, `remote -> local`, `remote -> remote`, and `local -> local`.
 - Internal transfer transport uses GNU tar for both files and directories. Single-file transfers use one fixed archive entry named `.remote-exec-file`.
 - `transfer_files` accepts either a single `source` or a `sources` array. Multi-source transfers treat `destination.path` as a directory root and place each source under its basename.
-- `transfer_files` can optionally compress archive payloads with `zstd` when the broker and every participating daemon allow transfer compression. `compression = "none"` remains the default.
+- `transfer_files` does not expose a public compression option. The broker automatically uses `zstd` for internal transfer staging only when its own config and every participating remote daemon support it, and otherwise falls back to uncompressed staging.
 - When structured content is enabled, `transfer_files` structured results always include `sources`; the legacy `source` field is only populated for single-source transfers.
-- Broker and daemon configs each support `enable_transfer_compression = false` to reject compressed transfers without disabling uncompressed transfers.
+- Broker and daemon configs each support `enable_transfer_compression = false` to force internal transfer staging to stay uncompressed.
 - Broker `[local]` config enables `target: "local"` for `exec_command`, `write_stdin`, `apply_patch`, and `view_image` on the broker host.
 - `transfer_files` treats `destination.path` as the exact final path to create or replace for single-source transfers; it does not infer basenames or copy "into" an existing directory in that mode.
 - `write_stdin` only invalidates sessions when the daemon restarted or explicitly reports `unknown_session`.
@@ -316,7 +316,7 @@ cargo fmt --all --check
 - `pty = "none"` disables TTY entirely. On Windows, `pty = "conpty"` or `pty = "winpty"` force that backend and startup fails if the selected backend is unavailable. When `pty` is omitted, the daemon keeps the current auto-detect behavior.
 - Default shell resolution uses `default_shell` when configured. Otherwise it tries `SHELL`, then a usable passwd shell, then `bash`, then `/bin/sh` on Unix; and Git Bash, then `pwsh.exe`, then `powershell.exe` or `powershell`, then `COMSPEC`, then `cmd.exe` on Windows.
 - Git Bash auto-discovery on Windows only checks standard Git for Windows install roots and locations derivable from `git.exe` on `PATH`. Portable or unusual installs should set `default_shell` to an explicit path.
-- `remote-exec-daemon-xp` is intentionally narrower than the main daemon: it always uses `cmd.exe`, rejects `tty=true`, does not implement `view_image`, supports regular-file transfers, directory trees, and broker-built multi-source transfer bundles, and never enables transfer compression. Symlinks, hard links, special files, sparse entries, and malformed archive paths remain unsupported there.
+- `remote-exec-daemon-xp` is intentionally narrower than the main daemon: it always uses `cmd.exe`, rejects `tty=true`, does not implement `view_image`, supports regular-file transfers, directory trees, and broker-built multi-source transfer bundles, and always falls back to uncompressed transfer staging. Symlinks, hard links, special files, sparse entries, and malformed archive paths remain unsupported there.
 
 ## Quality Gate
 
