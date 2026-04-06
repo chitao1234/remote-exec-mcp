@@ -17,6 +17,23 @@ base_url = "http://builder-xp.example.com:8181"
 allow_insecure_http = true
 expected_daemon_name = "builder-xp"
 
+# Optional broker-host sandbox for broker-local filesystem access.
+# This applies to `transfer_files` endpoints with `target: "local"` and, when `[local]`
+# is enabled, also applies to the embedded local target.
+# Missing `allow` or `allow = []` means "allow all", then `deny` refines it.
+#
+#[host_sandbox.exec_cwd]
+#allow = ["/srv/local-work"]
+#deny = ["/srv/local-work/private"]
+#
+#[host_sandbox.read]
+#allow = ["/srv/local-work", "/srv/assets"]
+#deny = ["/srv/local-work/.git"]
+#
+#[host_sandbox.write]
+#allow = ["/srv/local-work"]
+#deny = ["/srv/local-work/.git", "/srv/local-work/readonly"]
+#
 # Optional broker-host local target for exec_command, write_stdin, apply_patch, and view_image.
 # When enabled, list_targets includes `local`.
 #

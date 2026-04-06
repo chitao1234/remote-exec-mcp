@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use anyhow::Context;
+use remote_exec_proto::sandbox::FilesystemSandbox;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +99,8 @@ pub struct DaemonConfig {
     pub target: String,
     pub listen: SocketAddr,
     pub default_workdir: PathBuf,
+    #[serde(default)]
+    pub sandbox: Option<FilesystemSandbox>,
     #[serde(default = "default_allow_login_shell")]
     pub allow_login_shell: bool,
     #[serde(default)]
@@ -120,6 +123,7 @@ pub struct TlsConfig {
 pub struct EmbeddedDaemonConfig {
     pub target: String,
     pub default_workdir: PathBuf,
+    pub sandbox: Option<FilesystemSandbox>,
     pub allow_login_shell: bool,
     pub pty: PtyMode,
     pub default_shell: Option<String>,
@@ -132,6 +136,7 @@ impl EmbeddedDaemonConfig {
             target: self.target,
             listen: SocketAddr::from(([127, 0, 0, 1], 0)),
             default_workdir: self.default_workdir,
+            sandbox: self.sandbox,
             allow_login_shell: self.allow_login_shell,
             pty: self.pty,
             default_shell: self.default_shell,

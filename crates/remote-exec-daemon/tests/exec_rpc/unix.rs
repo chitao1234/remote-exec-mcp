@@ -172,6 +172,35 @@ async fn exec_start_rejects_tty_when_disabled_by_config() {
 }
 
 #[tokio::test]
+async fn exec_start_rejects_cwd_outside_exec_sandbox() {
+    let fixture = support::spawn::spawn_daemon_with_extra_config(
+        "builder-a",
+        r#"[sandbox.exec_cwd]
+deny = ["/"]
+"#,
+    )
+    .await;
+
+    let err = fixture
+        .rpc_error(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "printf should-not-run".to_string(),
+                workdir: None,
+                shell: Some(TEST_SHELL.to_string()),
+                tty: false,
+                yield_time_ms: Some(250),
+                max_output_tokens: None,
+                login: Some(false),
+            },
+        )
+        .await;
+
+    assert_eq!(err.code, "sandbox_denied");
+    assert!(err.message.contains("exec_cwd access"));
+}
+
+#[tokio::test]
 async fn env_overlay_is_applied_in_pipe_mode() {
     let fixture = support::spawn::spawn_daemon_with_process_environment(
         "builder-a",

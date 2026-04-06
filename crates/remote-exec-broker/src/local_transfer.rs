@@ -7,6 +7,7 @@ use remote_exec_proto::path::{
 use remote_exec_proto::rpc::{
     TransferImportRequest, TransferImportResponse, TransferOverwriteMode, TransferSourceType,
 };
+use remote_exec_proto::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
 
 const SINGLE_FILE_ENTRY: &str = ".remote-exec-file";
 
@@ -25,6 +26,7 @@ fn host_path(raw: &str) -> PathBuf {
 pub async fn export_path_to_archive(
     path: &str,
     archive_path: &Path,
+    sandbox: Option<&CompiledFilesystemSandbox>,
 ) -> anyhow::Result<TransferSourceType> {
     let source_text = path.to_string();
     anyhow::ensure!(
@@ -32,6 +34,7 @@ pub async fn export_path_to_archive(
         "transfer source path `{source_text}` is not absolute"
     );
     let path = host_path(&source_text);
+    authorize_path(host_policy(), sandbox, SandboxAccess::Read, &path)?;
 
     let metadata = tokio::fs::symlink_metadata(&path).await?;
     let source_type = if metadata.file_type().is_symlink() {
@@ -76,6 +79,7 @@ pub async fn export_path_to_archive(
 pub async fn import_archive_from_file(
     archive_path: &Path,
     request: &TransferImportRequest,
+    sandbox: Option<&CompiledFilesystemSandbox>,
 ) -> anyhow::Result<TransferImportResponse> {
     anyhow::ensure!(
         is_absolute_for_policy(host_policy(), &request.destination_path),
@@ -83,6 +87,7 @@ pub async fn import_archive_from_file(
         request.destination_path
     );
     let destination = host_path(&request.destination_path);
+    authorize_path(host_policy(), sandbox, SandboxAccess::Write, &destination)?;
     anyhow::ensure!(
         destination.is_absolute(),
         "transfer destination path `{}` is not absolute",

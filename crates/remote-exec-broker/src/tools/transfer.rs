@@ -88,7 +88,12 @@ async fn export_endpoint_to_archive(
 ) -> anyhow::Result<RpcTransferSourceType> {
     match endpoint.target.as_str() {
         "local" => {
-            crate::local_transfer::export_path_to_archive(&endpoint.path, archive_path).await
+            crate::local_transfer::export_path_to_archive(
+                &endpoint.path,
+                archive_path,
+                state.host_sandbox.as_ref(),
+            )
+            .await
         }
         target_name => {
             let target = state.target(target_name)?;
@@ -133,7 +138,14 @@ async fn import_archive_to_endpoint(
     };
 
     match endpoint.target.as_str() {
-        "local" => crate::local_transfer::import_archive_from_file(archive_path, &request).await,
+        "local" => {
+            crate::local_transfer::import_archive_from_file(
+                archive_path,
+                &request,
+                state.host_sandbox.as_ref(),
+            )
+            .await
+        }
         target_name => {
             let target = state.target(target_name)?;
             target.ensure_identity_verified(target_name).await?;

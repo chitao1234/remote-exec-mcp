@@ -15,15 +15,16 @@ use remote_exec_proto::rpc::{
     TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER, TransferExportRequest,
     TransferImportRequest, TransferImportResponse,
 };
+use remote_exec_proto::sandbox::SandboxError;
 
 use crate::AppState;
 
 pub async fn export_path(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Json(req): Json<TransferExportRequest>,
 ) -> Result<Response, (StatusCode, Json<RpcErrorBody>)> {
     tracing::info!(path = %req.path, "transfer export received");
-    let exported = archive::export_path_to_archive(&req.path)
+    let exported = archive::export_path_to_archive(&req.path, state.sandbox.as_ref())
         .await
         .map_err(map_transfer_error)?;
 
@@ -49,6 +50,7 @@ pub async fn export_path(
 }
 
 pub async fn import_archive(
+    State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     body: Body,
 ) -> Result<Json<TransferImportResponse>, (StatusCode, Json<RpcErrorBody>)> {
@@ -73,7 +75,7 @@ pub async fn import_archive(
         .await
         .map_err(|err| crate::exec::internal_error(err.into()))?;
 
-    let summary = archive::import_archive_from_file(&temp_path, &request)
+    let summary = archive::import_archive_from_file(&temp_path, &request, state.sandbox.as_ref())
         .await
         .map_err(map_transfer_error)?;
     tracing::info!(
@@ -96,7 +98,9 @@ fn format_source_type(source_type: &remote_exec_proto::rpc::TransferSourceType) 
 
 fn map_transfer_error(err: anyhow::Error) -> (StatusCode, Json<RpcErrorBody>) {
     let message = err.to_string();
-    let code = if message.contains("not absolute") {
+    let code = if err.downcast_ref::<SandboxError>().is_some() {
+        "sandbox_denied"
+    } else if message.contains("not absolute") {
         "transfer_path_not_absolute"
     } else if message.contains("destination path") && message.contains("already exists") {
         "transfer_destination_exists"

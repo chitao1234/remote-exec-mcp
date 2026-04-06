@@ -14,8 +14,11 @@ pub struct LocalDaemonClient {
 }
 
 impl LocalDaemonClient {
-    pub fn new(config: &crate::config::LocalTargetConfig) -> anyhow::Result<Self> {
-        let embedded = config.embedded_daemon_config();
+    pub fn new(
+        config: &crate::config::LocalTargetConfig,
+        sandbox: Option<remote_exec_proto::sandbox::FilesystemSandbox>,
+    ) -> anyhow::Result<Self> {
+        let embedded = config.embedded_daemon_config(sandbox);
         let state = remote_exec_daemon::build_app_state(embedded.into_daemon_config())?;
         Ok(Self {
             state: Arc::new(state),

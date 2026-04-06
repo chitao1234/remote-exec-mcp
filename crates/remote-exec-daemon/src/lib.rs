@@ -14,12 +14,17 @@ use std::sync::Once;
 
 use anyhow::Result;
 use config::{DaemonConfig, WindowsPtyBackendOverride};
-use remote_exec_proto::rpc::TargetInfoResponse;
+use remote_exec_proto::{
+    path::{PathPolicy, linux_path_policy, windows_path_policy},
+    rpc::TargetInfoResponse,
+    sandbox::{CompiledFilesystemSandbox, compile_filesystem_sandbox},
+};
 
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<DaemonConfig>,
     pub default_shell: String,
+    pub sandbox: Option<CompiledFilesystemSandbox>,
     pub supports_pty: bool,
     pub windows_pty_backend_override: Option<WindowsPtyBackendOverride>,
     pub daemon_instance_id: String,
@@ -31,6 +36,11 @@ pub async fn run(config: DaemonConfig) -> Result<()> {
 }
 
 pub fn build_app_state(config: DaemonConfig) -> Result<AppState> {
+    let sandbox = config
+        .sandbox
+        .as_ref()
+        .map(|sandbox| compile_filesystem_sandbox(host_path_policy(), sandbox))
+        .transpose()?;
     let default_shell = exec::shell::resolve_default_shell(
         config.default_shell.as_deref(),
         &config.process_environment,
@@ -43,11 +53,20 @@ pub fn build_app_state(config: DaemonConfig) -> Result<AppState> {
     Ok(AppState {
         config: Arc::new(config),
         default_shell,
+        sandbox,
         supports_pty,
         windows_pty_backend_override,
         daemon_instance_id: uuid::Uuid::new_v4().to_string(),
         sessions: exec::store::SessionStore::new(64),
     })
+}
+
+fn host_path_policy() -> PathPolicy {
+    if cfg!(windows) {
+        windows_path_policy()
+    } else {
+        linux_path_policy()
+    }
 }
 
 pub fn target_info_response(state: &AppState) -> TargetInfoResponse {

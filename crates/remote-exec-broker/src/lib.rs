@@ -18,6 +18,10 @@ use remote_exec_proto::rpc::{
     PatchApplyRequest, PatchApplyResponse, TargetInfoResponse, TransferExportRequest,
     TransferImportRequest, TransferImportResponse, TransferSourceType,
 };
+use remote_exec_proto::{
+    path::{PathPolicy, linux_path_policy, windows_path_policy},
+    sandbox::{CompiledFilesystemSandbox, compile_filesystem_sandbox},
+};
 use session_store::SessionStore;
 use tokio::sync::Mutex;
 
@@ -180,6 +184,7 @@ impl TargetHandle {
 
 #[derive(Clone)]
 pub struct BrokerState {
+    pub host_sandbox: Option<CompiledFilesystemSandbox>,
     pub sessions: SessionStore,
     pub targets: BTreeMap<String, TargetHandle>,
 }
@@ -206,10 +211,15 @@ pub async fn run(config: config::BrokerConfig) -> anyhow::Result<()> {
 
 async fn build_state(config: config::BrokerConfig) -> anyhow::Result<BrokerState> {
     config.validate()?;
+    let host_sandbox = config
+        .host_sandbox
+        .as_ref()
+        .map(|sandbox| compile_filesystem_sandbox(host_path_policy(), sandbox))
+        .transpose()?;
     let mut targets = BTreeMap::new();
 
     if let Some(local_config) = &config.local {
-        let client = LocalDaemonClient::new(local_config)?;
+        let client = LocalDaemonClient::new(local_config, config.host_sandbox.clone())?;
         let info = client.target_info().await?;
         tracing::info!(
             target = "local",
@@ -276,9 +286,18 @@ async fn build_state(config: config::BrokerConfig) -> anyhow::Result<BrokerState
     }
 
     Ok(BrokerState {
+        host_sandbox,
         sessions: SessionStore::default(),
         targets,
     })
+}
+
+fn host_path_policy() -> PathPolicy {
+    if cfg!(windows) {
+        windows_path_policy()
+    } else {
+        linux_path_policy()
+    }
 }
 
 fn unsupported_local_transfer_error() -> DaemonClientError {
@@ -316,6 +335,7 @@ mod tests {
         let missing_shell = r"C:\definitely\missing\remote-exec-shell.exe";
 
         let err = match build_state(BrokerConfig {
+            host_sandbox: None,
             targets: BTreeMap::new(),
             local: Some(LocalTargetConfig {
                 default_workdir: tempdir.path().to_path_buf(),

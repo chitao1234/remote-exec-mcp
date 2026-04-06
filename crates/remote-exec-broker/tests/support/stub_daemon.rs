@@ -250,6 +250,7 @@ pub(super) async fn spawn_named_daemon_on_addr(
             target: state.target.clone(),
             listen: addr,
             default_workdir: PathBuf::from("."),
+            sandbox: None,
             allow_login_shell: true,
             pty: remote_exec_daemon::config::PtyMode::Auto,
             default_shell: None,
@@ -265,6 +266,7 @@ pub(super) async fn spawn_named_daemon_on_addr(
         } else {
             "/bin/sh".to_string()
         },
+        sandbox: None,
         supports_pty: state.target_supports_pty,
         windows_pty_backend_override: None,
         daemon_instance_id: "daemon-instance-1".to_string(),

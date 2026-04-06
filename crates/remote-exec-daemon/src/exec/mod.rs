@@ -22,6 +22,7 @@ use remote_exec_proto::path::{
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWarning, ExecWriteRequest, RpcErrorBody,
 };
+use remote_exec_proto::sandbox::{SandboxAccess, SandboxError, authorize_path};
 
 use crate::AppState;
 
@@ -46,6 +47,8 @@ pub async fn exec_start_local(
         "exec_start received"
     );
     let cwd = resolve_workdir(&state, req.workdir.as_deref()).map_err(internal_error)?;
+    ensure_sandbox_access(&state, SandboxAccess::ExecCwd, &cwd)
+        .map_err(|err| rpc_error("sandbox_denied", err.to_string()))?;
     if req.tty {
         if matches!(state.config.pty, crate::config::PtyMode::None) {
             return Err(rpc_error(
@@ -284,6 +287,14 @@ fn host_path_policy() -> PathPolicy {
     } else {
         linux_path_policy()
     }
+}
+
+pub fn ensure_sandbox_access(
+    state: &Arc<AppState>,
+    access: SandboxAccess,
+    path: &Path,
+) -> Result<(), SandboxError> {
+    authorize_path(host_path_policy(), state.sandbox.as_ref(), access, path)
 }
 
 pub fn rpc_error(

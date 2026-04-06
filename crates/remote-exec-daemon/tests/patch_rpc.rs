@@ -461,3 +461,82 @@ async fn update_file_applies_repeated_context_additions_in_order() {
         "a\nfirst\nmarker\nb\nsecond\nmarker\nc\n",
     );
 }
+
+#[tokio::test]
+async fn apply_patch_uses_resolved_paths_not_workdir_for_sandbox_checks() {
+    let fixture =
+        support::spawn::spawn_daemon_with_extra_config_for_workdir("builder-a", |workdir| {
+            let allow = toml::Value::Array(vec![toml::Value::String(
+                workdir.join("visible").display().to_string(),
+            )]);
+            format!(
+                r#"[sandbox.write]
+allow = {allow}
+"#
+            )
+        })
+        .await;
+    tokio::fs::create_dir_all(fixture.workdir.join("visible"))
+        .await
+        .unwrap();
+    tokio::fs::create_dir_all(fixture.workdir.join("blocked"))
+        .await
+        .unwrap();
+
+    let response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: "*** Begin Patch\n*** Add File: ../visible/demo.txt\n+ok\n*** End Patch\n"
+                    .to_string(),
+                workdir: Some("blocked".to_string()),
+            },
+        )
+        .await;
+
+    assert!(response.output.contains("A ../visible/demo.txt"));
+    assert_eq!(
+        tokio::fs::read_to_string(fixture.workdir.join("visible/demo.txt"))
+            .await
+            .unwrap(),
+        "ok\n"
+    );
+}
+
+#[tokio::test]
+async fn apply_patch_rejects_writes_outside_sandbox() {
+    let fixture =
+        support::spawn::spawn_daemon_with_extra_config_for_workdir("builder-a", |workdir| {
+            let allow = toml::Value::Array(vec![toml::Value::String(
+                workdir.join("visible").display().to_string(),
+            )]);
+            format!(
+                r#"[sandbox.write]
+allow = {allow}
+"#
+            )
+        })
+        .await;
+    tokio::fs::create_dir_all(fixture.workdir.join("blocked"))
+        .await
+        .unwrap();
+
+    let err = fixture
+        .rpc_error(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: "*** Begin Patch\n*** Add File: blocked/nope.txt\n+nope\n*** End Patch\n"
+                    .to_string(),
+                workdir: None,
+            },
+        )
+        .await;
+
+    assert_eq!(err.code, "sandbox_denied");
+    assert!(err.message.contains("write access"));
+    assert!(
+        tokio::fs::metadata(fixture.workdir.join("blocked/nope.txt"))
+            .await
+            .is_err()
+    );
+}

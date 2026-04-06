@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use remote_exec_daemon::config::{EmbeddedDaemonConfig, ProcessEnvironment, PtyMode};
+use remote_exec_proto::sandbox::FilesystemSandbox;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -11,6 +12,8 @@ pub struct BrokerConfig {
     pub targets: BTreeMap<String, TargetConfig>,
     #[serde(default)]
     pub local: Option<LocalTargetConfig>,
+    #[serde(default)]
+    pub host_sandbox: Option<FilesystemSandbox>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -66,10 +69,14 @@ impl TargetConfig {
 }
 
 impl LocalTargetConfig {
-    pub fn embedded_daemon_config(&self) -> EmbeddedDaemonConfig {
+    pub fn embedded_daemon_config(
+        &self,
+        sandbox: Option<FilesystemSandbox>,
+    ) -> EmbeddedDaemonConfig {
         EmbeddedDaemonConfig {
             target: "local".to_string(),
             default_workdir: self.default_workdir.clone(),
+            sandbox,
             allow_login_shell: self.allow_login_shell,
             pty: self.pty,
             default_shell: self.default_shell.clone(),

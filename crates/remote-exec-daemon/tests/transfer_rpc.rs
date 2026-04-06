@@ -433,3 +433,92 @@ async fn import_rejects_missing_parent_when_create_parent_is_false() {
     assert_eq!(err.code, "transfer_parent_missing");
     assert!(!destination.exists());
 }
+
+#[tokio::test]
+async fn export_rejects_paths_outside_read_sandbox() {
+    let fixture =
+        support::spawn::spawn_daemon_with_extra_config_for_workdir("builder-a", |workdir| {
+            let allow = toml::Value::Array(vec![toml::Value::String(
+                workdir.join("visible").display().to_string(),
+            )]);
+            format!(
+                r#"[sandbox.read]
+allow = {allow}
+"#
+            )
+        })
+        .await;
+    let blocked = fixture.workdir.join("blocked.txt");
+    tokio::fs::write(&blocked, "blocked\n").await.unwrap();
+
+    let response = fixture
+        .raw_post_json(
+            "/v1/transfer/export",
+            &TransferExportRequest {
+                path: blocked.display().to_string(),
+            },
+        )
+        .await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let err = response
+        .json::<remote_exec_proto::rpc::RpcErrorBody>()
+        .await
+        .unwrap();
+    assert_eq!(err.code, "sandbox_denied");
+    assert!(err.message.contains("read access"));
+}
+
+#[tokio::test]
+async fn import_rejects_destinations_outside_write_sandbox() {
+    let fixture =
+        support::spawn::spawn_daemon_with_extra_config_for_workdir("builder-a", |workdir| {
+            let allow = toml::Value::Array(vec![toml::Value::String(
+                workdir.join("allowed").display().to_string(),
+            )]);
+            format!(
+                r#"[sandbox.write]
+allow = {allow}
+"#
+            )
+        })
+        .await;
+    let source = fixture.workdir.join("source.txt");
+    let blocked_destination = fixture.workdir.join("blocked/out.txt");
+    tokio::fs::write(&source, "artifact\n").await.unwrap();
+
+    let exported = fixture
+        .raw_post_json(
+            "/v1/transfer/export",
+            &TransferExportRequest {
+                path: source.display().to_string(),
+            },
+        )
+        .await;
+    let bytes = exported.bytes().await.unwrap().to_vec();
+
+    let response = fixture
+        .raw_post_bytes(
+            "/v1/transfer/import",
+            &[
+                (
+                    TRANSFER_DESTINATION_PATH_HEADER,
+                    blocked_destination.display().to_string(),
+                ),
+                (TRANSFER_OVERWRITE_HEADER, "fail".to_string()),
+                (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
+                (TRANSFER_SOURCE_TYPE_HEADER, "file".to_string()),
+            ],
+            bytes,
+        )
+        .await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let err = response
+        .json::<remote_exec_proto::rpc::RpcErrorBody>()
+        .await
+        .unwrap();
+    assert_eq!(err.code, "sandbox_denied");
+    assert!(err.message.contains("write access"));
+    assert!(!blocked_destination.exists());
+}

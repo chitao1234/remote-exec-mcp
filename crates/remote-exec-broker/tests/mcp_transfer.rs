@@ -385,3 +385,47 @@ async fn transfer_files_still_rejects_windows_paths_for_unix_local_endpoints() {
 
     assert!(error.contains("is not absolute"));
 }
+
+#[tokio::test]
+async fn transfer_files_applies_host_sandbox_to_local_endpoints() {
+    let fixture = support::spawners::spawn_broker_with_local_target_and_host_sandbox_for_workdir(
+        |local_workdir| {
+            let allow = toml::Value::Array(vec![toml::Value::String(
+                local_workdir.join("allowed").display().to_string(),
+            )]);
+            format!(
+                r#"[host_sandbox.read]
+allow = {allow}
+"#
+            )
+        },
+    )
+    .await;
+    let blocked_source = fixture.local_workdir().join("blocked/source.txt");
+    let allowed_destination = fixture.local_workdir().join("allowed/dest.txt");
+    std::fs::create_dir_all(blocked_source.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(allowed_destination.parent().unwrap()).unwrap();
+    std::fs::write(&blocked_source, "hello\n").unwrap();
+
+    let error = fixture
+        .call_tool_error(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "local",
+                    "path": blocked_source.display().to_string()
+                },
+                "destination": {
+                    "target": "local",
+                    "path": allowed_destination.display().to_string()
+                },
+                "overwrite": "fail",
+                "create_parent": false
+            }),
+        )
+        .await;
+
+    assert!(error.contains("read access"));
+    assert_eq!(std::fs::read_to_string(&blocked_source).unwrap(), "hello\n");
+    assert!(!allowed_destination.exists());
+}

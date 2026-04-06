@@ -329,17 +329,22 @@ cargo run -p remote-exec-broker -- configs/broker.example.toml
 
 ## Trust model
 
-Selecting a target is equivalent to `danger-full-access` on that machine.
+Selecting a target is equivalent to `danger-full-access` on that machine unless static sandbox config restricts the relevant path-based operation.
 
-Selecting `target: "local"` in `transfer_files` is equivalent to full filesystem access on the broker host.
+Selecting `target: "local"` in `transfer_files` uses broker-host filesystem access and is governed by optional broker `host_sandbox` config.
 
-When broker `[local]` config is enabled, selecting `target: "local"` in `exec_command`, `write_stdin`, `apply_patch`, or `view_image` is equivalent to full process and filesystem access on the broker host.
+When broker `[local]` config is enabled, selecting `target: "local"` in `exec_command`, `write_stdin`, `apply_patch`, or `view_image` uses the broker host and the same optional broker `host_sandbox` rules.
 
 In v1:
 
 - there is no sandbox selection flow
 - there is no per-call approval flow
-- the daemon can access any file or process available to the daemon user
+- sandbox rules are static config allow/deny lists
+- missing `allow` or `allow = []` means allow all, then `deny` refines the allowed set
+- `exec_command` only checks the resolved starting `cwd`; it does not inspect arbitrary paths embedded in the command text
+- `view_image` checks the resolved final image path for read access
+- `apply_patch` checks resolved write targets; its `workdir` is not sandboxed separately
+- `transfer_files` checks the source path for read access and the destination path for write access on the respective host
 
 Security is based on target selection plus broker-to-daemon mutual TLS, not on per-call restrictions.
 Configured remote targets may not be named `local`.
@@ -348,6 +353,7 @@ Configured remote targets may not be named `local`.
 
 - Core remote tools are implemented: `list_targets`, `exec_command`, `write_stdin`, `apply_patch`, `view_image`, and `transfer_files`.
 - The broker can optionally expose its own host as `target: "local"` for daemon-backed exec, stdin polling, patch, and image workflows.
+- Static path-based sandboxing is available for exec `cwd`, reads, and writes on both daemons and broker-host local access paths.
 - Broker and daemon session handling are hardened for concurrent exec workloads and precise restart/session-loss behavior.
 - Patch application supports strict EOF-marker handling and repeated-context multi-hunk updates.
 - Broker target discovery returns cached daemon metadata when the broker currently considers it usable; otherwise `daemon_info` is `null`.

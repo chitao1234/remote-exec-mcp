@@ -256,3 +256,70 @@ async fn image_read_rejects_unknown_detail_values() {
         "view_image.detail only supports `original`; omit `detail` for default resized behavior, got `low`"
     );
 }
+
+#[tokio::test]
+async fn image_read_uses_resolved_path_not_workdir_for_sandbox_checks() {
+    let fixture =
+        support::spawn::spawn_daemon_with_extra_config_for_workdir("builder-a", |workdir| {
+            let allow = toml::Value::Array(vec![toml::Value::String(
+                workdir.join("visible").display().to_string(),
+            )]);
+            format!(
+                r#"[sandbox.read]
+allow = {allow}
+"#
+            )
+        })
+        .await;
+    let visible = fixture.workdir.join("visible");
+    let hidden = fixture.workdir.join("hidden");
+    tokio::fs::create_dir_all(&visible).await.unwrap();
+    tokio::fs::create_dir_all(&hidden).await.unwrap();
+    write_png(&visible.join("ok.png"), 16, 16).await;
+
+    let response = fixture
+        .rpc::<ImageReadRequest, ImageReadResponse>(
+            "/v1/image/read",
+            &ImageReadRequest {
+                path: "../visible/ok.png".to_string(),
+                workdir: Some("hidden".to_string()),
+                detail: None,
+            },
+        )
+        .await;
+
+    assert!(response.image_url.starts_with("data:image/png;base64,"));
+}
+
+#[tokio::test]
+async fn image_read_rejects_paths_outside_read_sandbox() {
+    let fixture =
+        support::spawn::spawn_daemon_with_extra_config_for_workdir("builder-a", |workdir| {
+            let allow = toml::Value::Array(vec![toml::Value::String(
+                workdir.join("visible").display().to_string(),
+            )]);
+            format!(
+                r#"[sandbox.read]
+allow = {allow}
+"#
+            )
+        })
+        .await;
+    let hidden = fixture.workdir.join("hidden");
+    tokio::fs::create_dir_all(&hidden).await.unwrap();
+    write_png(&hidden.join("blocked.png"), 16, 16).await;
+
+    let err = fixture
+        .rpc_error(
+            "/v1/image/read",
+            &ImageReadRequest {
+                path: "hidden/blocked.png".to_string(),
+                workdir: None,
+                detail: None,
+            },
+        )
+        .await;
+
+    assert_eq!(err.code, "sandbox_denied");
+    assert!(err.message.contains("read access"));
+}

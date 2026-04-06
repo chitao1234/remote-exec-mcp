@@ -11,6 +11,7 @@ use image::codecs::jpeg::JpegEncoder;
 use image::codecs::webp::WebPEncoder;
 use image::{DynamicImage, ImageFormat};
 use remote_exec_proto::rpc::{ImageReadRequest, ImageReadResponse, RpcErrorBody};
+use remote_exec_proto::sandbox::SandboxAccess;
 
 use crate::AppState;
 
@@ -50,6 +51,8 @@ pub async fn read_image_local(
     let cwd = crate::exec::resolve_workdir(&state, req.workdir.as_deref())
         .map_err(crate::exec::internal_error)?;
     let path = normalize_path(&crate::exec::resolve_input_path(&cwd, &req.path));
+    crate::exec::ensure_sandbox_access(&state, SandboxAccess::Read, &path)
+        .map_err(|err| crate::exec::rpc_error("sandbox_denied", err.to_string()))?;
     let metadata = tokio::fs::metadata(&path).await.map_err(|err| {
         crate::exec::rpc_error(
             "image_missing",

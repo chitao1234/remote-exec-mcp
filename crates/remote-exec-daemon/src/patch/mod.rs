@@ -8,6 +8,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use remote_exec_proto::rpc::{PatchApplyRequest, PatchApplyResponse, RpcErrorBody};
+use remote_exec_proto::sandbox::SandboxError;
 
 use crate::AppState;
 
@@ -32,12 +33,12 @@ pub async fn apply_patch_local(
         .map_err(crate::exec::internal_error)?;
     let actions = parser::parse_patch(&req.patch)
         .map_err(|err| crate::exec::rpc_error("patch_failed", err.to_string()))?;
-    let verified = verify::verify_actions(&cwd, actions)
+    let verified = verify::verify_actions(&state, &cwd, actions)
         .await
-        .map_err(|err| crate::exec::rpc_error("patch_failed", err.to_string()))?;
+        .map_err(map_patch_error)?;
     let summary = execute_verified_actions(verified)
         .await
-        .map_err(|err| crate::exec::rpc_error("patch_failed", err.to_string()))?;
+        .map_err(map_patch_error)?;
     tracing::info!(
         target = %state.config.target,
         updated_paths = summary.len(),
@@ -94,4 +95,13 @@ async fn execute_verified_actions(
     }
 
     Ok(summary)
+}
+
+fn map_patch_error(err: anyhow::Error) -> (StatusCode, Json<RpcErrorBody>) {
+    let code = if err.downcast_ref::<SandboxError>().is_some() {
+        "sandbox_denied"
+    } else {
+        "patch_failed"
+    };
+    crate::exec::rpc_error(code, err.to_string())
 }

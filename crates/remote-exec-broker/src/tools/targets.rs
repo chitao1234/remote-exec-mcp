@@ -80,6 +80,7 @@ mod tests {
     #[tokio::test]
     async fn list_targets_returns_empty_text_and_array_for_empty_state() {
         let state = BrokerState {
+            host_sandbox: None,
             sessions: SessionStore::default(),
             targets: BTreeMap::new(),
         };

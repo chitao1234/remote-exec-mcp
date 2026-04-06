@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::path::Path;
 #[cfg(windows)]
 use std::sync::OnceLock;
 
@@ -61,6 +62,7 @@ async fn spawn_daemon_with_pty_mode(
         target: target.to_string(),
         listen: addr,
         default_workdir: workdir.clone(),
+        sandbox: None,
         allow_login_shell: true,
         pty,
         default_shell: None,
@@ -204,9 +206,9 @@ pub async fn spawn_daemon_for_windows_pty_backend_with_process_environment(
 
 #[allow(dead_code, reason = "Shared across daemon integration test crates")]
 pub async fn spawn_daemon_with_extra_config(target: &str, extra_config: &str) -> DaemonFixture {
-    spawn_daemon_with_extra_config_and_process_environment(
+    spawn_daemon_with_extra_config_for_workdir_and_process_environment(
         target,
-        extra_config,
+        |_| extra_config.to_string(),
         ProcessEnvironment::capture_current(),
     )
     .await
@@ -218,6 +220,39 @@ pub async fn spawn_daemon_with_extra_config_and_process_environment(
     extra_config: &str,
     process_environment: ProcessEnvironment,
 ) -> DaemonFixture {
+    spawn_daemon_with_extra_config_for_workdir_and_process_environment(
+        target,
+        |_| extra_config.to_string(),
+        process_environment,
+    )
+    .await
+}
+
+#[allow(dead_code, reason = "Shared across daemon integration test crates")]
+pub async fn spawn_daemon_with_extra_config_for_workdir<F>(
+    target: &str,
+    render_extra_config: F,
+) -> DaemonFixture
+where
+    F: FnOnce(&Path) -> String,
+{
+    spawn_daemon_with_extra_config_for_workdir_and_process_environment(
+        target,
+        render_extra_config,
+        ProcessEnvironment::capture_current(),
+    )
+    .await
+}
+
+#[allow(dead_code, reason = "Shared across daemon integration test crates")]
+pub async fn spawn_daemon_with_extra_config_for_workdir_and_process_environment<F>(
+    target: &str,
+    render_extra_config: F,
+    process_environment: ProcessEnvironment,
+) -> DaemonFixture
+where
+    F: FnOnce(&Path) -> String,
+{
     #[cfg(windows)]
     let concurrency_guard = daemon_test_lock().lock().await;
 
@@ -231,6 +266,7 @@ pub async fn spawn_daemon_with_extra_config_and_process_environment(
 
     let workdir = tempdir.path().join("workdir");
     std::fs::create_dir_all(&workdir).unwrap();
+    let extra_config = render_extra_config(&workdir);
     let config_path = tempdir.path().join("daemon.toml");
     std::fs::write(
         &config_path,

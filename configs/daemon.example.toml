@@ -9,6 +9,21 @@ allow_login_shell = true
 # On Windows, omitted default shell now prefers Git Bash when Git for Windows is installed.
 # Set this to "powershell.exe" or "cmd.exe" to keep the older behavior.
 # default_shell = "/bin/sh"
+#
+# Optional static path sandbox. Missing `allow` or `allow = []` means "allow all",
+# then `deny` can carve out exclusions.
+#
+#[sandbox.exec_cwd]
+#allow = ["/srv/work"]
+#deny = ["/srv/work/private"]
+#
+#[sandbox.read]
+#allow = ["/srv/work", "/srv/assets"]
+#deny = ["/srv/work/.git", "/srv/assets/secrets"]
+#
+#[sandbox.write]
+#allow = ["/srv/work"]
+#deny = ["/srv/work/.git", "/srv/work/readonly"]
 
 [tls]
 cert_pem = "/etc/remote-exec/daemon.pem"
