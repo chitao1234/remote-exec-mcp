@@ -330,7 +330,7 @@ async fn update_file_rejects_eof_pure_addition_when_context_is_missing() {
 }
 
 #[tokio::test]
-async fn later_verification_failures_do_not_mutate_earlier_files() {
+async fn later_failures_leave_earlier_files_mutated() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
         .await
@@ -360,12 +360,12 @@ async fn later_verification_failures_do_not_mutate_earlier_files() {
         tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
             .await
             .unwrap(),
-        "before\n",
+        "after\n",
     );
 }
 
 #[tokio::test]
-async fn delete_directory_is_rejected_before_earlier_mutation() {
+async fn delete_directory_failure_leaves_earlier_mutation_applied() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
         .await
@@ -398,12 +398,12 @@ async fn delete_directory_is_rejected_before_earlier_mutation() {
         tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
             .await
             .unwrap(),
-        "before\n",
+        "after\n",
     );
 }
 
 #[tokio::test]
-async fn non_utf8_update_source_is_rejected_before_earlier_mutation() {
+async fn non_utf8_update_source_failure_leaves_earlier_mutation_applied() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
         .await
@@ -439,12 +439,12 @@ async fn non_utf8_update_source_is_rejected_before_earlier_mutation() {
         tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
             .await
             .unwrap(),
-        "before\n",
+        "after\n",
     );
 }
 
 #[tokio::test]
-async fn non_utf8_delete_source_is_rejected_before_earlier_mutation() {
+async fn non_utf8_delete_source_failure_leaves_earlier_mutation_applied() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
         .await
@@ -477,7 +477,7 @@ async fn non_utf8_delete_source_is_rejected_before_earlier_mutation() {
         tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
             .await
             .unwrap(),
-        "before\n",
+        "after\n",
     );
 }
 

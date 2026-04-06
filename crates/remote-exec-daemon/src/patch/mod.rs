@@ -3,6 +3,7 @@ mod matcher;
 pub mod parser;
 mod verify;
 
+use std::path::Path;
 use std::sync::Arc;
 
 use axum::Json;
@@ -34,10 +35,7 @@ pub async fn apply_patch_local(
         .map_err(crate::exec::internal_error)?;
     let actions = parser::parse_patch(&req.patch)
         .map_err(|err| crate::exec::rpc_error("patch_failed", err.to_string()))?;
-    let verified = verify::verify_actions(&state, &cwd, actions)
-        .await
-        .map_err(map_patch_error)?;
-    let summary = execute_verified_actions(verified)
+    let summary = execute_actions(&state, &cwd, actions)
         .await
         .map_err(map_patch_error)?;
     tracing::info!(
@@ -54,13 +52,16 @@ pub async fn apply_patch_local(
     })
 }
 
-async fn execute_verified_actions(
-    actions: Vec<verify::VerifiedAction>,
+async fn execute_actions(
+    state: &Arc<AppState>,
+    cwd: &Path,
+    actions: Vec<parser::PatchAction>,
 ) -> anyhow::Result<Vec<String>> {
     let mut summary = Vec::with_capacity(actions.len());
 
     for action in actions {
-        match action {
+        let verified = verify::verify_action(state, cwd, action).await?;
+        match verified {
             verify::VerifiedAction::Add {
                 path,
                 content,
@@ -79,10 +80,12 @@ async fn execute_verified_actions(
             verify::VerifiedAction::Update {
                 source_path,
                 destination_path,
-                content,
+                hunks,
                 summary_path,
                 remove_source,
             } => {
+                let current = tokio::fs::read_to_string(&source_path).await?;
+                let content = ensure_trailing_newline(engine::apply_hunks(&current, &hunks)?);
                 if let Some(parent) = destination_path.parent() {
                     tokio::fs::create_dir_all(parent).await?;
                 }
@@ -105,4 +108,11 @@ fn map_patch_error(err: anyhow::Error) -> (StatusCode, Json<RpcErrorBody>) {
         "patch_failed"
     };
     crate::exec::rpc_error(code, err.to_string())
+}
+
+fn ensure_trailing_newline(mut text: String) -> String {
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text
 }
