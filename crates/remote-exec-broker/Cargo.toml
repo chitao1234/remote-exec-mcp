@@ -16,7 +16,6 @@ rmcp = { workspace = true, features = ["macros", "transport-io"] }
 rustls = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tar = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
@@ -30,6 +29,7 @@ gethostname = { workspace = true }
 image = { workspace = true }
 rmcp = { workspace = true, features = ["client", "transport-child-process"] }
 remote-exec-pki = { path = "../remote-exec-pki" }
+tar = { workspace = true }
 
 [[test]]
 name = "multi_target"

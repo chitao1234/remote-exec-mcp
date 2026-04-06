@@ -32,6 +32,21 @@ pub async fn export_path_to_archive(
     path: &str,
     sandbox: Option<&CompiledFilesystemSandbox>,
 ) -> anyhow::Result<ExportedArchive> {
+    let temp = tempfile::NamedTempFile::new()?;
+    let temp_path = temp.into_temp_path();
+    let source_type = export_path_to_file(path, temp_path.as_ref(), sandbox).await?;
+
+    Ok(ExportedArchive {
+        source_type,
+        temp_path,
+    })
+}
+
+pub async fn export_path_to_file(
+    path: &str,
+    archive_path: &Path,
+    sandbox: Option<&CompiledFilesystemSandbox>,
+) -> anyhow::Result<TransferSourceType> {
     let source_text = path.to_string();
     anyhow::ensure!(
         is_absolute_for_policy(host_policy(), &source_text),
@@ -57,9 +72,7 @@ pub async fn export_path_to_archive(
         );
     };
 
-    let temp = tempfile::NamedTempFile::new()?;
-    let temp_path = temp.into_temp_path();
-    let archive_path = temp_path.to_path_buf();
+    let archive_path = archive_path.to_path_buf();
     let source_path = path.to_path_buf();
     let source_type_for_task = source_type.clone();
 
@@ -82,10 +95,7 @@ pub async fn export_path_to_archive(
     })
     .await??;
 
-    Ok(ExportedArchive {
-        source_type,
-        temp_path,
-    })
+    Ok(source_type)
 }
 
 fn append_directory_entries(
