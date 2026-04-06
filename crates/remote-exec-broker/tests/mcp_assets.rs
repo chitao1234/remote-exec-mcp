@@ -65,7 +65,7 @@ async fn list_targets_returns_cached_daemon_info_and_null_for_unavailable_target
 
     assert_eq!(
         result.text_output,
-        "Configured targets:\n- builder-a: linux/x86_64, host=builder-a-host, version=0.1.0, pty=yes, transfer-compression=yes\n- builder-b"
+        "Configured targets:\n- builder-a: linux/x86_64, host=builder-a-host, version=0.1.0, pty=yes\n- builder-b"
     );
     assert_eq!(
         result.structured_content,
@@ -78,8 +78,7 @@ async fn list_targets_returns_cached_daemon_info_and_null_for_unavailable_target
                         "hostname": "builder-a-host",
                         "platform": "linux",
                         "arch": "x86_64",
-                        "supports_pty": true,
-                        "supports_transfer_compression": true
+                        "supports_pty": true
                     }
                 },
                 {
@@ -100,7 +99,7 @@ async fn list_targets_formats_windows_metadata_and_truthful_pty_support() {
 
     assert_eq!(
         result.text_output,
-        "Configured targets:\n- builder-a: windows/x86_64, host=builder-a-host, version=0.1.0, pty=no, transfer-compression=yes"
+        "Configured targets:\n- builder-a: windows/x86_64, host=builder-a-host, version=0.1.0, pty=no"
     );
 }
 

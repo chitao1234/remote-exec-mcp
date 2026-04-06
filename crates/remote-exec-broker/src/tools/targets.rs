@@ -20,7 +20,6 @@ pub async fn list_targets(
                 platform: info.platform,
                 arch: info.arch,
                 supports_pty: info.supports_pty,
-                supports_transfer_compression: info.supports_transfer_compression,
             });
         targets.push(ListTargetEntry {
             name: name.clone(),
@@ -54,18 +53,13 @@ fn format_targets_text(targets: &[ListTargetEntry]) -> String {
         .iter()
         .map(|target| match &target.daemon_info {
             Some(info) => format!(
-                "- {}: {}/{}, host={}, version={}, pty={}, transfer-compression={}",
+                "- {}: {}/{}, host={}, version={}, pty={}",
                 target.name,
                 info.platform,
                 info.arch,
                 info.hostname,
                 info.daemon_version,
                 if info.supports_pty { "yes" } else { "no" },
-                if info.supports_transfer_compression {
-                    "yes"
-                } else {
-                    "no"
-                }
             ),
             None => format!("- {}", target.name),
         })

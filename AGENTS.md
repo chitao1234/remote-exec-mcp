@@ -43,7 +43,7 @@ These instructions apply to the entire `remote-exec-mcp` workspace.
 - Preserve the current broker-host `local` semantics:
   - `transfer_files` may use broker-host filesystem access with `target: "local"` even when the broker `[local]` exec target is disabled.
   - broker `[local]` only controls broker-host `exec_command`, `write_stdin`, `apply_patch`, and `view_image`.
-- Keep `list_targets` broker-local and cache-based. It should report the broker's current cached daemon metadata, including truthful `supports_pty` and `supports_transfer_compression` capability flags.
+- Keep `list_targets` broker-local and cache-based. It should report the broker's current cached daemon metadata, including truthful `supports_pty` capability.
 
 ## Change Guidance
 

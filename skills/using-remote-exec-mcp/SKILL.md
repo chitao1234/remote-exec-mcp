@@ -77,8 +77,7 @@ Structured result shape:
         "hostname": "builder-a-host",
         "platform": "linux",
         "arch": "x86_64",
-        "supports_pty": true,
-        "supports_transfer_compression": true
+        "supports_pty": true
       }
     },
     {
@@ -94,7 +93,6 @@ Use the result this way:
 - Reuse `targets[].name` exactly in later tool calls.
 - Read `daemon_info.platform` to choose endpoint-native absolute paths for `transfer_files`.
 - Read `daemon_info.supports_pty` before using `tty: true`.
-- Read `daemon_info.supports_transfer_compression` before requesting `compression: "zstd"` against a remote endpoint.
 - If `daemon_info` is `null`, do not invent your own meaning. It only means the broker has no current cached metadata.
 - If broker-host exec support is enabled, `local` appears here as a normal target entry.
 
@@ -376,7 +374,8 @@ How to use it:
 - If a source target and the destination target are the same, those two paths still must differ.
 - Use endpoint-native absolute paths. Linux endpoints use Unix absolute paths such as `/srv/app/file.txt`. Windows endpoints accept drive-qualified paths such as `C:/work/file.txt` and also MSYS/Cygwin-style absolute paths such as `/c/work/file.txt` and `/cygdrive/c/work/file.txt`.
 - Omit `compression` unless you specifically want compressed transfer staging. `compression` defaults to `none`.
-- Use `compression: "zstd"` only when the broker and every participating daemon support transfer compression.
+- Prefer the default `compression: "none"` unless the user or operator explicitly requires `zstd`.
+- If a `compression: "zstd"` request is rejected, retry with `compression: "none"` unless the user specifically required compression.
 - Reach for `transfer_files` instead of `scp`, `cp`, shell redirection, or ad hoc archives whenever data must move between endpoints.
 
 Structured result fields:

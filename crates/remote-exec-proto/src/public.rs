@@ -57,7 +57,6 @@ pub struct ListTargetDaemonInfo {
     pub platform: String,
     pub arch: String,
     pub supports_pty: bool,
-    pub supports_transfer_compression: bool,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
