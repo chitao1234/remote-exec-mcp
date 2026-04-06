@@ -199,6 +199,16 @@ pub(super) async fn set_transfer_export_file_response(state: &StubDaemonState, b
     };
 }
 
+pub(super) async fn set_transfer_export_directory_response(
+    state: &StubDaemonState,
+    archive_body: Vec<u8>,
+) {
+    *state.transfer_export_response.lock().await = StubTransferExportResponse::Success {
+        source_type: TransferSourceType::Directory,
+        body: archive_body,
+    };
+}
+
 pub(super) async fn spawn_stub_daemon(
     certs: &TestCerts,
 ) -> (std::net::SocketAddr, StubDaemonState) {

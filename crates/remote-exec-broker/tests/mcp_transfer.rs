@@ -31,6 +31,60 @@ fn read_single_file_archive(bytes: &[u8]) -> (String, Vec<u8>) {
     (path, body)
 }
 
+fn raw_tar_file_with_path(path: &str, body: &[u8]) -> Vec<u8> {
+    fn write_octal(field: &mut [u8], value: u64) {
+        let digits = field.len() - 1;
+        let text = format!("{value:o}");
+        assert!(
+            text.len() <= digits,
+            "value {value} does not fit in tar field"
+        );
+        let start = digits - text.len();
+        field[..start].fill(b'0');
+        field[start..digits].copy_from_slice(text.as_bytes());
+        field[digits] = 0;
+    }
+
+    fn write_checksum(field: &mut [u8], checksum: u32) {
+        let text = format!("{checksum:o}");
+        assert!(
+            text.len() <= 6,
+            "checksum {checksum} does not fit in tar field"
+        );
+        let start = 6 - text.len();
+        field[..start].fill(b'0');
+        field[start..6].copy_from_slice(text.as_bytes());
+        field[6] = 0;
+        field[7] = b' ';
+    }
+
+    assert!(
+        path.len() <= 100,
+        "tar test helper only supports short paths"
+    );
+    let mut header = [0u8; 512];
+    header[..path.len()].copy_from_slice(path.as_bytes());
+    write_octal(&mut header[100..108], 0o644);
+    write_octal(&mut header[108..116], 0);
+    write_octal(&mut header[116..124], 0);
+    write_octal(&mut header[124..136], body.len() as u64);
+    write_octal(&mut header[136..148], 0);
+    header[148..156].fill(b' ');
+    header[156] = b'0';
+    header[257..263].copy_from_slice(b"ustar\0");
+    header[263..265].copy_from_slice(b"00");
+    let checksum = header.iter().map(|byte| *byte as u32).sum();
+    write_checksum(&mut header[148..156], checksum);
+
+    let mut archive = Vec::with_capacity(512 + body.len() + 1024);
+    archive.extend_from_slice(&header);
+    archive.extend_from_slice(body);
+    let padding = (512 - (body.len() % 512)) % 512;
+    archive.resize(archive.len() + padding, 0);
+    archive.extend_from_slice(&[0u8; 1024]);
+    archive
+}
+
 #[cfg(windows)]
 fn msys_style_path(path: &std::path::Path) -> String {
     let text = path.display().to_string().replace('\\', "/");
@@ -280,6 +334,37 @@ async fn transfer_files_copies_plain_http_remote_directory_to_local() {
         "hello remote\n"
     );
     assert!(destination.join("nested/empty").is_dir());
+}
+
+#[tokio::test]
+async fn transfer_files_rejects_remote_directory_entries_that_escape_local_destination() {
+    let fixture = support::spawn_broker_with_plain_http_stub_daemon().await;
+    fixture
+        .set_transfer_export_directory_response(raw_tar_file_with_path("../escape.txt", b"owned\n"))
+        .await;
+    let destination = fixture._tempdir.path().join("dest");
+    let escaped = fixture._tempdir.path().join("escape.txt");
+
+    let error = fixture
+        .call_tool_error(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "builder-xp",
+                    "path": "C:/remote-exec/tree"
+                },
+                "destination": {
+                    "target": "local",
+                    "path": destination.display().to_string()
+                },
+                "overwrite": "replace",
+                "create_parent": true
+            }),
+        )
+        .await;
+
+    assert!(error.contains("must not have `..`") || error.contains("unsupported entry"));
+    assert!(!escaped.exists());
 }
 
 #[tokio::test]

@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use remote_exec_proto::path::{
     PathPolicy, is_absolute_for_policy, linux_path_policy, normalize_for_system,
-    windows_path_policy,
+    normalize_relative_path, windows_path_policy,
 };
 use remote_exec_proto::rpc::{
     TransferImportRequest, TransferImportResponse, TransferOverwriteMode, TransferSourceType,
@@ -88,11 +88,6 @@ pub async fn import_archive_from_file(
     );
     let destination = host_path(&request.destination_path);
     authorize_path(host_policy(), sandbox, SandboxAccess::Write, &destination)?;
-    anyhow::ensure!(
-        destination.is_absolute(),
-        "transfer destination path `{}` is not absolute",
-        destination.display()
-    );
     let replaced = prepare_destination(&destination, request).await?;
     let archive = archive_path.to_path_buf();
     let request = request.clone();
@@ -222,8 +217,11 @@ fn extract_archive(
             std::fs::create_dir_all(destination_path)?;
             for entry in archive.entries()? {
                 let mut entry = entry?;
-                let rel = entry.path()?.to_path_buf();
-                if rel == Path::new(".") {
+                let raw_rel = entry.path()?.to_path_buf();
+                let rel = normalize_relative_path(&raw_rel).ok_or_else(|| {
+                    anyhow::anyhow!("archive contains unsupported entry `{}`", raw_rel.display())
+                })?;
+                if rel.as_os_str().is_empty() {
                     continue;
                 }
 

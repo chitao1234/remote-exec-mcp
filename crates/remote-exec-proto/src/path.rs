@@ -1,3 +1,5 @@
+use std::path::{Component, Path, PathBuf};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathStyle {
     Posix,
@@ -162,11 +164,25 @@ pub fn same_path_for_policy(policy: PathPolicy, left: &str, right: &str) -> bool
     comparison_key(policy, left) == comparison_key(policy, right)
 }
 
+pub fn normalize_relative_path(path: &Path) -> Option<PathBuf> {
+    let mut normalized = PathBuf::new();
+
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => normalized.push(part),
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+
+    Some(normalized)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         is_absolute_for_policy, join_for_policy, linux_path_policy, normalize_for_system,
-        same_path_for_policy, windows_path_policy,
+        normalize_relative_path, same_path_for_policy, windows_path_policy,
     };
 
     #[test]
@@ -252,6 +268,22 @@ mod tests {
         assert_eq!(
             join_for_policy(policy, r"C:\work\releases", "/c/other/file.txt"),
             r"C:\other\file.txt"
+        );
+    }
+
+    #[test]
+    fn normalize_relative_path_rejects_parent_traversal() {
+        assert!(normalize_relative_path(std::path::Path::new("../escape.txt")).is_none());
+        assert!(normalize_relative_path(std::path::Path::new("nested/../../escape.txt")).is_none());
+    }
+
+    #[test]
+    fn normalize_relative_path_collapses_current_dir_components() {
+        assert_eq!(
+            normalize_relative_path(std::path::Path::new("./nested/./hello.txt"))
+                .unwrap()
+                .to_string_lossy(),
+            "nested/hello.txt"
         );
     }
 }

@@ -109,6 +109,7 @@ fn map_transfer_error(err: anyhow::Error) -> (StatusCode, Json<RpcErrorBody>) {
     } else if message.contains("unsupported symlink")
         || message.contains("unsupported entry")
         || message.contains("regular file or directory")
+        || message.contains("paths in archives must not have `..`")
     {
         "transfer_source_unsupported"
     } else if message.contains("No such file or directory") {

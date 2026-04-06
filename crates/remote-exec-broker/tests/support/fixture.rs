@@ -7,7 +7,8 @@ use tempfile::TempDir;
 
 use super::stub_daemon::{
     ExecStartBehavior, ExecWriteBehavior, StubDaemonState, StubImageReadResponse,
-    StubTransferImportCapture, set_transfer_export_file_response,
+    StubTransferImportCapture, set_transfer_export_directory_response,
+    set_transfer_export_file_response,
 };
 
 pub struct BrokerFixture {
@@ -80,6 +81,10 @@ impl BrokerFixture {
 
     pub async fn set_transfer_export_file_response(&self, body: &[u8]) {
         set_transfer_export_file_response(&self.stub_state, body.to_vec()).await;
+    }
+
+    pub async fn set_transfer_export_directory_response(&self, archive_body: Vec<u8>) {
+        set_transfer_export_directory_response(&self.stub_state, archive_body).await;
     }
 
     pub async fn set_image_read_response(&self, response: StubImageReadResponse) {

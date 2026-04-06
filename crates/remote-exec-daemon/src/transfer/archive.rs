@@ -2,7 +2,7 @@ use std::path::Path;
 
 use remote_exec_proto::path::{
     PathPolicy, is_absolute_for_policy, linux_path_policy, normalize_for_system,
-    windows_path_policy,
+    normalize_relative_path, windows_path_policy,
 };
 use remote_exec_proto::rpc::{
     TransferImportRequest, TransferImportResponse, TransferOverwriteMode, TransferSourceType,
@@ -228,8 +228,11 @@ fn extract_archive(
             std::fs::create_dir_all(destination_path)?;
             for entry in archive.entries()? {
                 let mut entry = entry?;
-                let rel = entry.path()?.to_path_buf();
-                if rel == Path::new(".") {
+                let raw_rel = entry.path()?.to_path_buf();
+                let rel = normalize_relative_path(&raw_rel).ok_or_else(|| {
+                    anyhow::anyhow!("archive contains unsupported entry `{}`", raw_rel.display())
+                })?;
+                if rel.as_os_str().is_empty() {
                     continue;
                 }
 

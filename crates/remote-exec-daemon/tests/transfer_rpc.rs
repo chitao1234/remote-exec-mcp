@@ -2,11 +2,67 @@ mod support;
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 
 use remote_exec_proto::rpc::{
     TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER,
     TRANSFER_SOURCE_TYPE_HEADER, TransferExportRequest, TransferImportResponse,
 };
+
+fn raw_tar_file_with_path(path: &Path, body: &[u8]) -> Vec<u8> {
+    fn write_octal(field: &mut [u8], value: u64) {
+        let digits = field.len() - 1;
+        let text = format!("{value:o}");
+        assert!(
+            text.len() <= digits,
+            "value {value} does not fit in tar field"
+        );
+        let start = digits - text.len();
+        field[..start].fill(b'0');
+        field[start..digits].copy_from_slice(text.as_bytes());
+        field[digits] = 0;
+    }
+
+    fn write_checksum(field: &mut [u8], checksum: u32) {
+        let text = format!("{checksum:o}");
+        assert!(
+            text.len() <= 6,
+            "checksum {checksum} does not fit in tar field"
+        );
+        let start = 6 - text.len();
+        field[..start].fill(b'0');
+        field[start..6].copy_from_slice(text.as_bytes());
+        field[6] = 0;
+        field[7] = b' ';
+    }
+
+    let path = path.to_string_lossy();
+    assert!(
+        path.len() <= 100,
+        "tar test helper only supports short paths"
+    );
+    let mut header = [0u8; 512];
+    header[..path.len()].copy_from_slice(path.as_bytes());
+    write_octal(&mut header[100..108], 0o644);
+    write_octal(&mut header[108..116], 0);
+    write_octal(&mut header[116..124], 0);
+    write_octal(&mut header[124..136], body.len() as u64);
+    write_octal(&mut header[136..148], 0);
+    header[148..156].fill(b' ');
+    header[156] = b'0';
+    header[257..263].copy_from_slice(b"ustar\0");
+    header[263..265].copy_from_slice(b"00");
+    let checksum = header.iter().map(|byte| *byte as u32).sum();
+    write_checksum(&mut header[148..156], checksum);
+
+    let mut archive = Vec::with_capacity(512 + body.len() + 1024);
+    archive.extend_from_slice(&header);
+    archive.extend_from_slice(body);
+    let padding = (512 - (body.len() % 512)) % 512;
+    archive.resize(archive.len() + padding, 0);
+    archive.extend_from_slice(&[0u8; 1024]);
+    archive
+}
 
 #[tokio::test]
 async fn export_file_streams_archive_and_reports_file_source_type() {
@@ -432,6 +488,41 @@ async fn import_rejects_missing_parent_when_create_parent_is_false() {
         .unwrap();
     assert_eq!(err.code, "transfer_parent_missing");
     assert!(!destination.exists());
+}
+
+#[tokio::test]
+async fn import_rejects_directory_entries_that_escape_destination() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let destination = fixture.workdir.join("release");
+    let escaped = fixture.workdir.join("escaped.txt");
+    let bytes = raw_tar_file_with_path(Path::new("../escaped.txt"), b"owned\n");
+
+    let response = fixture
+        .raw_post_bytes(
+            "/v1/transfer/import",
+            &[
+                (
+                    TRANSFER_DESTINATION_PATH_HEADER,
+                    destination.display().to_string(),
+                ),
+                (TRANSFER_OVERWRITE_HEADER, "replace".to_string()),
+                (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
+                (TRANSFER_SOURCE_TYPE_HEADER, "directory".to_string()),
+            ],
+            bytes,
+        )
+        .await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let err = response
+        .json::<remote_exec_proto::rpc::RpcErrorBody>()
+        .await
+        .unwrap();
+    assert_eq!(err.code, "transfer_source_unsupported");
+    assert!(
+        err.message.contains("must not have `..`") || err.message.contains("unsupported entry")
+    );
+    assert!(!escaped.exists());
 }
 
 #[tokio::test]
