@@ -170,6 +170,35 @@ async fn update_file_matches_change_context_after_unicode_normalization() {
 }
 
 #[tokio::test]
+async fn update_file_rejects_singleton_empty_eof_hunk_without_trailing_newline() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let path = fixture.workdir.join("plain.txt");
+    tokio::fs::write(&path, "alpha").await.unwrap();
+
+    let err = fixture
+        .rpc_error(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Update File: plain.txt\n",
+                    "@@\n",
+                    "-\n",
+                    "+omega\n",
+                    "*** End of File\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert_eq!(err.code, "patch_failed");
+    assert_eq!(tokio::fs::read_to_string(path).await.unwrap(), "alpha");
+}
+
+#[tokio::test]
 async fn update_move_accepts_horizontal_whitespace_on_control_lines() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let source = fixture.workdir.join("old.txt");

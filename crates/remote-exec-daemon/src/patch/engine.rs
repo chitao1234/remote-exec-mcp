@@ -116,7 +116,9 @@ fn resolve_segments(
 }
 
 fn strip_trailing_empty_sentinel(segments: &ResolvedSegments) -> Option<ResolvedSegments> {
-    matches!(segments.old_lines.last(), Some(last) if last.is_empty()).then(|| ResolvedSegments {
+    (segments.old_lines.len() > 1
+        && matches!(segments.old_lines.last(), Some(last) if last.is_empty()))
+    .then(|| ResolvedSegments {
         old_lines: segments.old_lines[..segments.old_lines.len() - 1].to_vec(),
         new_lines: strip_optional_trailing_empty(&segments.new_lines),
     })
@@ -318,5 +320,15 @@ mod tests {
             apply_hunks(current, &hunks).unwrap(),
             "alpha\ninserted\nmarker  \ntail\n"
         );
+    }
+
+    #[test]
+    fn singleton_empty_eof_hunk_does_not_retry_as_pure_insertion() {
+        let current = "alpha";
+        let hunks = vec![chunk(None, &[""], &["omega"], true)];
+
+        let err = apply_hunks(current, &hunks).unwrap_err();
+
+        assert!(err.to_string().contains("failed to find hunk lines"));
     }
 }
