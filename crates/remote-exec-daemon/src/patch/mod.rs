@@ -60,9 +60,9 @@ async fn execute_actions(
     let mut summary = Vec::with_capacity(actions.len());
 
     for action in actions {
-        let verified = verify::verify_action(state, cwd, action).await?;
-        match verified {
-            verify::VerifiedAction::Add {
+        let resolved = verify::resolve_action(state, cwd, action).await?;
+        match resolved {
+            verify::ResolvedAction::Add {
                 path,
                 content,
                 summary_path,
@@ -73,11 +73,11 @@ async fn execute_actions(
                 tokio::fs::write(&path, content).await?;
                 summary.push(format!("A {summary_path}"));
             }
-            verify::VerifiedAction::Delete { path, summary_path } => {
+            verify::ResolvedAction::Delete { path, summary_path } => {
                 tokio::fs::remove_file(&path).await?;
                 summary.push(format!("D {summary_path}"));
             }
-            verify::VerifiedAction::Update {
+            verify::ResolvedAction::Update {
                 source_path,
                 destination_path,
                 hunks,
@@ -110,7 +110,7 @@ fn map_patch_error(err: anyhow::Error) -> (StatusCode, Json<RpcErrorBody>) {
     crate::exec::rpc_error(code, err.to_string())
 }
 
-fn ensure_trailing_newline(mut text: String) -> String {
+pub(super) fn ensure_trailing_newline(mut text: String) -> String {
     if !text.ends_with('\n') {
         text.push('\n');
     }

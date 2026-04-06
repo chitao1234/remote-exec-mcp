@@ -187,9 +187,9 @@ fn exact_eof_match_candidates(lines: &[String], pattern: &[String]) -> Vec<(usiz
         candidates.push((start, content_len));
     }
 
-    if has_trailing_split_sentinel(lines)
+    if has_trailing_eof_sentinel(lines)
         && pattern.len() > 1
-        && has_trailing_empty_sentinel(pattern)
+        && has_trailing_eof_sentinel(pattern)
         && let Some(start) = lines.len().checked_sub(pattern.len())
         && !candidates.contains(&(start, lines.len()))
     {
@@ -199,16 +199,12 @@ fn exact_eof_match_candidates(lines: &[String], pattern: &[String]) -> Vec<(usiz
     candidates
 }
 
-fn has_trailing_split_sentinel(lines: &[String]) -> bool {
-    matches!(lines.last(), Some(last) if last.is_empty())
-}
-
-fn has_trailing_empty_sentinel(lines: &[String]) -> bool {
+fn has_trailing_eof_sentinel(lines: &[String]) -> bool {
     matches!(lines.last(), Some(last) if last.is_empty())
 }
 
 fn logical_content_len(lines: &[String]) -> usize {
-    if has_trailing_split_sentinel(lines) {
+    if has_trailing_eof_sentinel(lines) {
         lines.len().saturating_sub(1)
     } else {
         lines.len()

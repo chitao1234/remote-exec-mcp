@@ -3,11 +3,12 @@ use std::path::{Path, PathBuf};
 use remote_exec_proto::sandbox::SandboxAccess;
 use tokio::fs;
 
+use super::ensure_trailing_newline;
 use super::parser::{PatchAction, UpdateChunk};
 use crate::AppState;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum VerifiedAction {
+pub enum ResolvedAction {
     Add {
         path: PathBuf,
         content: String,
@@ -26,16 +27,16 @@ pub enum VerifiedAction {
     },
 }
 
-pub async fn verify_action(
+pub async fn resolve_action(
     state: &std::sync::Arc<AppState>,
     cwd: &Path,
     action: PatchAction,
-) -> anyhow::Result<VerifiedAction> {
+) -> anyhow::Result<ResolvedAction> {
     match action {
         PatchAction::Add { path, lines } => {
             let absolute_path = resolve_patch_path(cwd, &path);
             crate::exec::ensure_sandbox_access(state, SandboxAccess::Write, &absolute_path)?;
-            Ok(VerifiedAction::Add {
+            Ok(ResolvedAction::Add {
                 path: absolute_path.clone(),
                 content: ensure_trailing_newline(lines.join("\n")),
                 summary_path: display_relative(cwd, &absolute_path),
@@ -51,7 +52,7 @@ pub async fn verify_action(
                 display_relative(cwd, &absolute_path)
             );
             let _ = fs::read_to_string(&absolute_path).await?;
-            Ok(VerifiedAction::Delete {
+            Ok(ResolvedAction::Delete {
                 path: absolute_path.clone(),
                 summary_path: display_relative(cwd, &absolute_path),
             })
@@ -72,7 +73,7 @@ pub async fn verify_action(
             }
             let remove_source = move_to.is_some() && destination_path != source_path;
 
-            Ok(VerifiedAction::Update {
+            Ok(ResolvedAction::Update {
                 source_path,
                 destination_path: destination_path.clone(),
                 hunks,
@@ -85,13 +86,6 @@ pub async fn verify_action(
 
 fn resolve_patch_path(cwd: &Path, path: &Path) -> PathBuf {
     crate::exec::resolve_input_path(cwd, &path.as_os_str().to_string_lossy())
-}
-
-fn ensure_trailing_newline(mut text: String) -> String {
-    if !text.ends_with('\n') {
-        text.push('\n');
-    }
-    text
 }
 
 fn display_relative(base: &Path, path: &Path) -> String {
