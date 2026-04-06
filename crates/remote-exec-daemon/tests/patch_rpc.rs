@@ -106,6 +106,38 @@ async fn update_file_accepts_end_of_file_marker() {
 }
 
 #[tokio::test]
+async fn update_file_replaces_blank_last_real_line_at_end_of_file() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let path = fixture.workdir.join("plain.txt");
+    tokio::fs::write(&path, "alpha\n\n").await.unwrap();
+
+    let response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Update File: plain.txt\n",
+                    "@@\n",
+                    "-\n",
+                    "+omega\n",
+                    "*** End of File\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert!(response.output.contains("M plain.txt"));
+    assert_eq!(
+        tokio::fs::read_to_string(path).await.unwrap(),
+        "alpha\nomega\n"
+    );
+}
+
+#[tokio::test]
 async fn update_move_accepts_horizontal_whitespace_on_control_lines() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let source = fixture.workdir.join("old.txt");

@@ -146,7 +146,11 @@ fn resolve_replacement_start(
     segments: &ResolvedSegments,
 ) -> anyhow::Result<usize> {
     if segments.old_lines.is_empty() {
-        return Ok(eof_insert_index(lines));
+        return Ok(if !hunk.is_end_of_file && hunk.change_context.is_some() {
+            start.min(lines.len())
+        } else {
+            eof_insert_index(lines)
+        });
     }
 
     seek_hunk_sequence(lines, &segments.old_lines, start, hunk.is_end_of_file).ok_or_else(|| {
@@ -167,13 +171,13 @@ fn seek_hunk_sequence(
         return matcher::seek_sequence(lines, pattern, start, false);
     }
 
-    for eof_start in exact_eof_match_starts(lines, pattern) {
+    for (eof_start, search_len) in exact_eof_match_candidates(lines, pattern) {
         if start > eof_start {
             continue;
         }
 
-        if let Some(idx) =
-            matcher::seek_sequence(lines, pattern, eof_start, true).filter(|&idx| idx == eof_start)
+        if let Some(idx) = matcher::seek_sequence(&lines[..search_len], pattern, eof_start, true)
+            .filter(|&idx| idx == eof_start)
         {
             return Some(idx);
         }
@@ -182,25 +186,24 @@ fn seek_hunk_sequence(
     None
 }
 
-fn exact_eof_match_starts(lines: &[String], pattern: &[String]) -> Vec<usize> {
-    let mut starts = Vec::with_capacity(2);
+fn exact_eof_match_candidates(lines: &[String], pattern: &[String]) -> Vec<(usize, usize)> {
+    let mut candidates = Vec::with_capacity(2);
+    let content_len = logical_content_len(lines);
 
-    if let Some(start) = lines.len().checked_sub(pattern.len()) {
-        starts.push(start);
+    if let Some(start) = content_len.checked_sub(pattern.len()) {
+        candidates.push((start, content_len));
     }
 
     if has_trailing_split_sentinel(lines)
-        && !has_trailing_empty_sentinel(pattern)
-        && let Some(start) = lines
-            .len()
-            .checked_sub(1)
-            .and_then(|content_len| content_len.checked_sub(pattern.len()))
-        && !starts.contains(&start)
+        && pattern.len() > 1
+        && has_trailing_empty_sentinel(pattern)
+        && let Some(start) = lines.len().checked_sub(pattern.len())
+        && !candidates.contains(&(start, lines.len()))
     {
-        starts.push(start);
+        candidates.push((start, lines.len()));
     }
 
-    starts
+    candidates
 }
 
 fn has_trailing_split_sentinel(lines: &[String]) -> bool {
@@ -209,6 +212,14 @@ fn has_trailing_split_sentinel(lines: &[String]) -> bool {
 
 fn has_trailing_empty_sentinel(lines: &[String]) -> bool {
     matches!(lines.last(), Some(last) if last.is_empty())
+}
+
+fn logical_content_len(lines: &[String]) -> usize {
+    if has_trailing_split_sentinel(lines) {
+        lines.len().saturating_sub(1)
+    } else {
+        lines.len()
+    }
 }
 
 fn eof_insert_index(lines: &[String]) -> usize {
@@ -297,5 +308,13 @@ mod tests {
             apply_hunks(current, &hunks).unwrap(),
             "before\nmiddle\nafter\n"
         );
+    }
+
+    #[test]
+    fn eof_hunk_replaces_blank_last_real_line_in_newline_terminated_file() {
+        let current = "alpha\n\n";
+        let hunks = vec![chunk(None, &[""], &["omega"], true)];
+
+        assert_eq!(apply_hunks(current, &hunks).unwrap(), "alpha\nomega\n");
     }
 }
