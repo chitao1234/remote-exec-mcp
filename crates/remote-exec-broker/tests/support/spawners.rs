@@ -89,8 +89,13 @@ fn write_broker_config(
     targets: &[BrokerConfigTarget<'_>],
     local: Option<&LocalBrokerConfig<'_>>,
     host_sandbox: Option<&str>,
+    extra_top_level: Option<&str>,
 ) {
-    let mut parts = targets.iter().map(render_broker_target).collect::<Vec<_>>();
+    let mut parts = Vec::new();
+    if let Some(extra_top_level) = extra_top_level {
+        parts.push(extra_top_level.to_string());
+    }
+    parts.extend(targets.iter().map(render_broker_target));
     if let Some(host_sandbox) = host_sandbox {
         parts.push(host_sandbox.to_string());
     }
@@ -114,6 +119,7 @@ pub async fn spawn_broker_with_stub_daemon() -> BrokerFixture {
             addr,
             certs: &certs,
         }],
+        None,
         None,
         None,
     );
@@ -149,6 +155,7 @@ pub async fn spawn_broker_with_stub_daemon_platform(
             addr,
             certs: &certs,
         }],
+        None,
         None,
         None,
     );
@@ -224,6 +231,7 @@ pub async fn spawn_broker_with_reverse_ordered_targets() -> BrokerFixture {
         ],
         None,
         None,
+        None,
     );
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
@@ -263,6 +271,7 @@ pub async fn spawn_broker_with_live_and_dead_targets() -> BrokerFixture {
         ],
         None,
         None,
+        None,
     );
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
@@ -294,6 +303,7 @@ pub async fn spawn_broker_with_retryable_exec_write_error() -> BrokerFixture {
         }],
         None,
         None,
+        None,
     );
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
@@ -323,6 +333,7 @@ pub async fn spawn_broker_with_unknown_session_exec_write_error() -> BrokerFixtu
             addr,
             certs: &certs,
         }],
+        None,
         None,
         None,
     );
@@ -364,6 +375,7 @@ pub async fn spawn_broker_with_late_target() -> DelayedTargetFixture {
         ],
         None,
         None,
+        None,
     );
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
@@ -395,6 +407,7 @@ pub async fn spawn_broker_with_local_target() -> BrokerFixture {
         Some(&LocalBrokerConfig {
             default_workdir: &local_workdir,
         }),
+        None,
         None,
     );
 
@@ -434,6 +447,7 @@ where
             default_workdir: &local_workdir,
         }),
         Some(&host_sandbox),
+        None,
     );
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
@@ -465,4 +479,35 @@ async fn wait_until_ready_http(addr: std::net::SocketAddr) {
     }
 
     panic!("plain http stub daemon did not become ready");
+}
+
+pub async fn spawn_broker_with_stub_daemon_and_structured_content_disabled() -> BrokerFixture {
+    remote_exec_daemon::install_crypto_provider();
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let certs = write_test_certs(tempdir.path());
+    let (addr, stub_state) = spawn_stub_daemon(&certs).await;
+    let broker_config = tempdir.path().join("broker.toml");
+    write_broker_config(
+        &broker_config,
+        &[BrokerConfigTarget {
+            name: "builder-a",
+            addr,
+            certs: &certs,
+        }],
+        None,
+        None,
+        Some("disable_structured_content = true"),
+    );
+
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
+    command.arg(&broker_config);
+    let transport = TokioChildProcess::new(command).unwrap();
+    let client = DummyClientHandler.serve(transport).await.unwrap();
+
+    BrokerFixture {
+        _tempdir: tempdir,
+        client,
+        stub_state,
+    }
 }

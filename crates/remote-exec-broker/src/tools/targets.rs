@@ -81,13 +81,14 @@ mod tests {
     async fn list_targets_returns_empty_text_and_array_for_empty_state() {
         let state = BrokerState {
             enable_transfer_compression: true,
+            disable_structured_content: false,
             host_sandbox: None,
             sessions: SessionStore::default(),
             targets: BTreeMap::new(),
         };
 
         let result = list_targets(&state, ListTargetsInput {}).await.unwrap();
-        let call_result = result.into_call_tool_result();
+        let call_result = result.into_call_tool_result(true);
         let text = call_result
             .content
             .iter()

@@ -103,6 +103,21 @@ async fn list_targets_returns_cached_daemon_info_and_null_for_unavailable_target
 }
 
 #[tokio::test]
+async fn list_targets_omits_structured_content_when_broker_disables_it() {
+    let fixture =
+        support::spawners::spawn_broker_with_stub_daemon_and_structured_content_disabled().await;
+    let result = fixture
+        .call_tool("list_targets", serde_json::json!({}))
+        .await;
+
+    assert_eq!(
+        result.text_output,
+        "Configured targets:\n- builder-a: linux/x86_64, host=builder-a-host, version=0.1.0, pty=yes"
+    );
+    assert_eq!(result.structured_content, serde_json::Value::Null);
+}
+
+#[tokio::test]
 async fn list_targets_formats_windows_metadata_and_truthful_pty_support() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon_platform("windows", false).await;
     let result = fixture
@@ -206,6 +221,29 @@ async fn view_image_reads_from_enabled_local_target() {
     assert_eq!(result.raw_content[0]["type"], "input_image");
     assert_eq!(result.structured_content["target"], "local");
     assert_eq!(result.structured_content["detail"], "original");
+}
+
+#[tokio::test]
+async fn view_image_keeps_input_image_content_when_broker_disables_structured_content() {
+    let fixture =
+        support::spawners::spawn_broker_with_stub_daemon_and_structured_content_disabled().await;
+    let result = fixture
+        .call_tool(
+            "view_image",
+            serde_json::json!({
+                "target": "builder-a",
+                "path": "chart.png",
+                "detail": "original"
+            }),
+        )
+        .await;
+
+    assert_eq!(result.raw_content[0]["type"], "input_image");
+    assert_eq!(
+        result.raw_content[0]["image_url"],
+        "data:image/png;base64,AAAA"
+    );
+    assert_eq!(result.structured_content, serde_json::Value::Null);
 }
 
 #[tokio::test]

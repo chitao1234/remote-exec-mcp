@@ -187,6 +187,7 @@ impl TargetHandle {
 #[derive(Clone)]
 pub struct BrokerState {
     pub enable_transfer_compression: bool,
+    pub disable_structured_content: bool,
     pub host_sandbox: Option<CompiledFilesystemSandbox>,
     pub sessions: SessionStore,
     pub targets: BTreeMap<String, TargetHandle>,
@@ -205,6 +206,7 @@ pub async fn run(config: config::BrokerConfig) -> anyhow::Result<()> {
     tracing::info!(
         configured_targets = config.targets.len(),
         local_target_enabled = config.local.is_some(),
+        disable_structured_content = config.disable_structured_content,
         "starting broker"
     );
     let state = build_state(config).await?;
@@ -296,6 +298,7 @@ async fn build_state(config: config::BrokerConfig) -> anyhow::Result<BrokerState
 
     Ok(BrokerState {
         enable_transfer_compression: config.enable_transfer_compression,
+        disable_structured_content: config.disable_structured_content,
         host_sandbox,
         sessions: SessionStore::default(),
         targets,
@@ -347,6 +350,7 @@ mod tests {
         let err = match build_state(BrokerConfig {
             host_sandbox: None,
             enable_transfer_compression: true,
+            disable_structured_content: false,
             targets: BTreeMap::new(),
             local: Some(LocalTargetConfig {
                 default_workdir: tempdir.path().to_path_buf(),

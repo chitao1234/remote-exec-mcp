@@ -35,6 +35,7 @@ Do not use this skill for ordinary work in your current Codex workspace. `remote
 - Choosing a `target` grants broad access on that machine, optionally narrowed only by static sandbox config for the relevant path-based operation.
 - One command call runs on one endpoint only. If bytes must cross endpoints, use `transfer_files`.
 - `list_targets` is inventory, not a live health check. A target with `daemon_info: null` may still be configured and valid.
+- A broker may be configured with `disable_structured_content = true`. When that is enabled, successful tool calls omit structured content and you must rely on normal text or image content instead.
 
 ## When To Use Which Tool
 
@@ -54,6 +55,8 @@ Do not use this skill for ordinary work in your current Codex workspace. `remote
 5. If `exec_command` returns a `session_id`, keep it and use `write_stdin` for follow-up input or polling.
 
 ## Tool Contracts
+
+The structured result shapes below apply when the broker leaves structured content enabled.
 
 ### `list_targets`
 
@@ -214,7 +217,7 @@ How to use it:
 - You may omit `target`. The broker can route by `session_id` alone.
 - If you provide `target`, it must match the original session target or the call fails.
 - Reuse the returned `session_id` until it becomes `null`.
-- Read `warnings` when present. `write_stdin` returns the same structured exec result shape as `exec_command`.
+- Read `warnings` when present. When structured content is enabled, `write_stdin` returns the same structured exec result shape as `exec_command`.
 
 Important failure cases:
 

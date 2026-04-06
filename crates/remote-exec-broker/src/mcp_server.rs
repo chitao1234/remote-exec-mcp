@@ -26,10 +26,10 @@ impl ToolCallOutput {
         }
     }
 
-    pub fn into_call_tool_result(self) -> CallToolResult {
+    pub fn into_call_tool_result(self, include_structured_content: bool) -> CallToolResult {
         CallToolResult {
             content: self.content,
-            structured_content: Some(self.structured),
+            structured_content: include_structured_content.then_some(self.structured),
             is_error: Some(false),
             meta: None,
         }
@@ -63,6 +63,10 @@ impl BrokerServer {
             tool_router: Self::tool_router(),
         }
     }
+
+    fn include_structured_content(&self) -> bool {
+        !self.state.disable_structured_content
+    }
 }
 
 #[tool_router]
@@ -78,7 +82,7 @@ impl BrokerServer {
     ) -> Result<CallToolResult, McpError> {
         Ok(
             match crate::tools::targets::list_targets(&self.state, input).await {
-                Ok(output) => output.into_call_tool_result(),
+                Ok(output) => output.into_call_tool_result(self.include_structured_content()),
                 Err(err) => format_tool_error(err),
             },
         )
@@ -94,7 +98,7 @@ impl BrokerServer {
     ) -> Result<CallToolResult, McpError> {
         Ok(
             match crate::tools::exec::exec_command(&self.state, input).await {
-                Ok(output) => output.into_call_tool_result(),
+                Ok(output) => output.into_call_tool_result(self.include_structured_content()),
                 Err(err) => format_tool_error(err),
             },
         )
@@ -110,7 +114,7 @@ impl BrokerServer {
     ) -> Result<CallToolResult, McpError> {
         Ok(
             match crate::tools::exec::write_stdin(&self.state, input).await {
-                Ok(output) => output.into_call_tool_result(),
+                Ok(output) => output.into_call_tool_result(self.include_structured_content()),
                 Err(err) => format_tool_error(err),
             },
         )
@@ -126,7 +130,7 @@ impl BrokerServer {
     ) -> Result<CallToolResult, McpError> {
         Ok(
             match crate::tools::patch::apply_patch(&self.state, input).await {
-                Ok(output) => output.into_call_tool_result(),
+                Ok(output) => output.into_call_tool_result(self.include_structured_content()),
                 Err(err) => format_tool_error(err),
             },
         )
@@ -143,7 +147,7 @@ impl BrokerServer {
     ) -> Result<CallToolResult, McpError> {
         Ok(
             match crate::tools::image::view_image(&self.state, input).await {
-                Ok(output) => output.into_call_tool_result(),
+                Ok(output) => output.into_call_tool_result(self.include_structured_content()),
                 Err(err) => format_tool_error(err),
             },
         )
@@ -159,7 +163,7 @@ impl BrokerServer {
     ) -> Result<CallToolResult, McpError> {
         Ok(
             match crate::tools::transfer::transfer_files(&self.state, input).await {
-                Ok(output) => output.into_call_tool_result(),
+                Ok(output) => output.into_call_tool_result(self.include_structured_content()),
                 Err(err) => format_tool_error(err),
             },
         )

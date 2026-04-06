@@ -16,6 +16,8 @@ pub struct BrokerConfig {
     pub host_sandbox: Option<FilesystemSandbox>,
     #[serde(default = "default_enable_transfer_compression")]
     pub enable_transfer_compression: bool,
+    #[serde(default)]
+    pub disable_structured_content: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -191,6 +193,30 @@ client_key_pem = "/tmp/broker.key"
             config.local.as_ref().map(|local| local.allow_login_shell),
             Some(false)
         );
+        assert!(!config.disable_structured_content);
+    }
+
+    #[tokio::test]
+    async fn load_accepts_disabling_structured_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("broker.toml");
+        tokio::fs::write(
+            &config_path,
+            r#"
+disable_structured_content = true
+
+[targets.builder-a]
+base_url = "https://127.0.0.1:8443"
+ca_pem = "/tmp/ca.pem"
+client_cert_pem = "/tmp/broker.pem"
+client_key_pem = "/tmp/broker.key"
+"#,
+        )
+        .await
+        .unwrap();
+
+        let config = BrokerConfig::load(&config_path).await.unwrap();
+        assert!(config.disable_structured_content);
     }
 
     #[tokio::test]
