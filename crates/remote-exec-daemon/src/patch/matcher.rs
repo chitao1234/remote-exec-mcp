@@ -19,22 +19,24 @@ pub(crate) fn seek_sequence(
         return None;
     }
 
-    find_match(lines, pattern, start, max_start, eof, |left, right| left == right)
-        .or_else(|| {
-            find_match(lines, pattern, start, max_start, eof, |left, right| {
-                left.trim_end() == right.trim_end()
-            })
+    find_match(lines, pattern, start, max_start, eof, |left, right| {
+        left == right
+    })
+    .or_else(|| {
+        find_match(lines, pattern, start, max_start, eof, |left, right| {
+            left.trim_end() == right.trim_end()
         })
-        .or_else(|| {
-            find_match(lines, pattern, start, max_start, eof, |left, right| {
-                left.trim() == right.trim()
-            })
+    })
+    .or_else(|| {
+        find_match(lines, pattern, start, max_start, eof, |left, right| {
+            left.trim() == right.trim()
         })
-        .or_else(|| {
-            find_match(lines, pattern, start, max_start, eof, |left, right| {
-                normalize_unicode(left.trim()) == normalize_unicode(right.trim())
-            })
+    })
+    .or_else(|| {
+        find_match(lines, pattern, start, max_start, eof, |left, right| {
+            normalize_unicode(left.trim()) == normalize_unicode(right.trim())
         })
+    })
 }
 
 fn find_match<F>(
