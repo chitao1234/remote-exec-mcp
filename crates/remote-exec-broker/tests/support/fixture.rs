@@ -137,12 +137,14 @@ pub struct ToolResult {
     pub text_output: String,
     pub structured_content: serde_json::Value,
     pub raw_content: Vec<serde_json::Value>,
-    #[allow(dead_code, reason = "Shared across broker integration test crates")]
-    pub meta: Option<serde_json::Value>,
 }
 
 impl ToolResult {
     fn from_call_tool_result(result: CallToolResult) -> Self {
+        assert!(
+            result.meta.is_none(),
+            "tool responses should not populate MCP _meta"
+        );
         let text_output = result
             .content
             .iter()
@@ -156,7 +158,6 @@ impl ToolResult {
             text_output,
             structured_content: result.structured_content.unwrap_or(serde_json::Value::Null),
             raw_content,
-            meta: result.meta.map(|meta| serde_json::to_value(meta).unwrap()),
         }
     }
 }

@@ -2,20 +2,13 @@ use anyhow::Context;
 use rmcp::{
     ErrorData as McpError, ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{CallToolResult, Content, Meta, ServerCapabilities, ServerInfo},
+    model::{CallToolResult, Content, ServerCapabilities, ServerInfo},
     tool, tool_handler, tool_router,
 };
 
 pub struct ToolCallOutput {
     pub content: Vec<Content>,
     pub structured: serde_json::Value,
-    pub meta: Option<Meta>,
-}
-
-#[derive(Debug)]
-pub struct ToolCallError {
-    message: String,
-    meta: Option<Meta>,
 }
 
 impl ToolCallOutput {
@@ -23,7 +16,6 @@ impl ToolCallOutput {
         Self {
             content: vec![Content::text(text)],
             structured,
-            meta: None,
         }
     }
 
@@ -31,19 +23,6 @@ impl ToolCallOutput {
         Self {
             content,
             structured,
-            meta: None,
-        }
-    }
-
-    pub fn text_structured_meta(
-        text: String,
-        structured: serde_json::Value,
-        meta: Option<Meta>,
-    ) -> Self {
-        Self {
-            content: vec![Content::text(text)],
-            structured,
-            meta,
         }
     }
 
@@ -52,64 +31,23 @@ impl ToolCallOutput {
             content: self.content,
             structured_content: Some(self.structured),
             is_error: Some(false),
-            meta: self.meta,
-        }
-    }
-}
-
-impl ToolCallError {
-    pub fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
             meta: None,
         }
     }
-
-    pub fn with_meta(message: impl Into<String>, meta: Option<Meta>) -> Self {
-        Self {
-            message: message.into(),
-            meta,
-        }
-    }
 }
 
-impl std::fmt::Display for ToolCallError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for ToolCallError {}
-
-pub fn tool_error_result(text: String, meta: Option<Meta>) -> CallToolResult {
+pub fn tool_error_result(text: String) -> CallToolResult {
     CallToolResult {
         content: vec![Content::text(text)],
         structured_content: None,
         is_error: Some(true),
-        meta,
+        meta: None,
     }
 }
 
 pub fn format_tool_error(err: anyhow::Error) -> CallToolResult {
-    match err.downcast::<ToolCallError>() {
-        Ok(tool_err) => {
-            tracing::warn!(error = %tool_err.message, "broker tool returned error");
-            tool_error_result(tool_err.message, tool_err.meta)
-        }
-        Err(err) => {
-            tracing::warn!(error = %err, "broker tool returned error");
-            tool_error_result(err.to_string(), None)
-        }
-    }
-}
-
-pub fn warning_meta(code: &str, message: &str) -> Meta {
-    let mut meta = Meta::new();
-    meta.insert(
-        "warnings".to_string(),
-        serde_json::json!([{ "code": code, "message": message }]),
-    );
-    meta
+    tracing::warn!(error = %err, "broker tool returned error");
+    tool_error_result(err.to_string())
 }
 
 #[derive(Clone)]
@@ -312,10 +250,36 @@ pub fn format_intercepted_patch_text(output: &str) -> String {
     format!("Wall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\n{output}")
 }
 
+pub fn prepend_warning_text(
+    text: String,
+    warnings: &[remote_exec_proto::rpc::ExecWarning],
+) -> String {
+    if warnings.is_empty() {
+        return text;
+    }
+
+    let warning_text = if warnings.len() == 1 {
+        format!("Warning: {}", warnings[0].message)
+    } else {
+        format!(
+            "Warnings:\n{}",
+            warnings
+                .iter()
+                .map(|warning| format!("- {}", warning.message))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    };
+
+    format!("{warning_text}\n\n{text}")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{format_command_text, format_intercepted_patch_text, format_poll_text};
-    use remote_exec_proto::rpc::ExecResponse;
+    use super::{
+        format_command_text, format_intercepted_patch_text, format_poll_text, prepend_warning_text,
+    };
+    use remote_exec_proto::rpc::{ExecResponse, ExecWarning};
 
     #[test]
     fn format_command_text_includes_original_token_count_when_present() {
@@ -390,5 +354,21 @@ mod tests {
         assert!(text.contains("Output:\nSuccess. Updated the following files:"));
         assert!(!text.contains("Command:"));
         assert!(!text.contains("Chunk ID:"));
+    }
+
+    #[test]
+    fn prepend_warning_text_prefixes_single_warning() {
+        let text = prepend_warning_text(
+            "Process exited with code 0".to_string(),
+            &[ExecWarning {
+                code: "example".to_string(),
+                message: "Visible warning".to_string(),
+            }],
+        );
+
+        assert_eq!(
+            text,
+            "Warning: Visible warning\n\nProcess exited with code 0"
+        );
     }
 }

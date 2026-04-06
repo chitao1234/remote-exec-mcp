@@ -4,13 +4,12 @@ use std::time::Instant;
 use remote_exec_proto::path::{PathPolicy, linux_path_policy, windows_path_policy};
 use remote_exec_proto::public::{CommandToolResult, ExecCommandInput, WriteStdinInput};
 use remote_exec_proto::rpc::{ExecResponse, ExecStartRequest, ExecWarning, ExecWriteRequest};
-use rmcp::model::Meta;
 
 use super::exec_intercept::maybe_intercept_apply_patch;
 use crate::daemon_client::DaemonClientError;
 use crate::mcp_server::{
-    ToolCallError, ToolCallOutput, format_command_text, format_intercepted_patch_text,
-    format_poll_text, warning_meta,
+    ToolCallOutput, format_command_text, format_intercepted_patch_text, format_poll_text,
+    prepend_warning_text,
 };
 
 const APPLY_PATCH_WARNING_CODE: &str = "apply_patch_via_exec_command";
@@ -40,6 +39,7 @@ pub async fn exec_command(
     if let Some(intercepted) =
         maybe_intercept_apply_patch(&input.cmd, input.workdir.as_deref(), path_policy)
     {
+        let warnings = vec![apply_patch_warning()];
         let output = crate::tools::patch::forward_patch(
             state,
             &input.target,
@@ -56,13 +56,7 @@ pub async fn exec_command(
                 error = %err,
                 "broker tool failed"
             );
-            anyhow::Error::new(ToolCallError::with_meta(
-                err.to_string(),
-                Some(warning_meta(
-                    APPLY_PATCH_WARNING_CODE,
-                    APPLY_PATCH_WARNING_MESSAGE,
-                )),
-            ))
+            anyhow::anyhow!(prepend_warning_text(err.to_string(), &warnings))
         })?;
 
         tracing::info!(
@@ -72,8 +66,8 @@ pub async fn exec_command(
             elapsed_ms = started.elapsed().as_millis() as u64,
             "broker tool completed"
         );
-        return Ok(ToolCallOutput::text_structured_meta(
-            format_intercepted_patch_text(&output),
+        return Ok(ToolCallOutput::text_and_structured(
+            prepend_warning_text(format_intercepted_patch_text(&output), &warnings),
             serde_json::to_value(CommandToolResult {
                 target: input.target,
                 chunk_id: None,
@@ -83,11 +77,8 @@ pub async fn exec_command(
                 session_command: None,
                 original_token_count: None,
                 output,
+                warnings,
             })?,
-            Some(warning_meta(
-                APPLY_PATCH_WARNING_CODE,
-                APPLY_PATCH_WARNING_MESSAGE,
-            )),
         ));
     }
 
@@ -120,7 +111,6 @@ pub async fn exec_command(
         }
     };
     validate_exec_response(&response)?;
-    let response_meta = response_warning_meta(&response.warnings);
 
     let session_command = input.cmd.clone();
     let session_id = if response.running {
@@ -156,8 +146,11 @@ pub async fn exec_command(
         "broker tool completed"
     );
 
-    Ok(ToolCallOutput::text_structured_meta(
-        format_command_text(&input.cmd, &response, session_id.as_deref()),
+    Ok(ToolCallOutput::text_and_structured(
+        prepend_warning_text(
+            format_command_text(&input.cmd, &response, session_id.as_deref()),
+            &response.warnings,
+        ),
         serde_json::to_value(CommandToolResult {
             target: input.target,
             chunk_id: response.chunk_id,
@@ -167,8 +160,8 @@ pub async fn exec_command(
             session_command: Some(session_command),
             original_token_count: response.original_token_count,
             output: response.output,
+            warnings: response.warnings,
         })?,
-        response_meta,
     ))
 }
 
@@ -275,10 +268,13 @@ async fn write_stdin_inner(
     };
 
     Ok(ToolCallOutput::text_and_structured(
-        format_poll_text(
-            Some(&record.session_command),
-            &response,
-            session_id.as_deref(),
+        prepend_warning_text(
+            format_poll_text(
+                Some(&record.session_command),
+                &response,
+                session_id.as_deref(),
+            ),
+            &response.warnings,
         ),
         serde_json::to_value(CommandToolResult {
             target: record.target,
@@ -289,6 +285,7 @@ async fn write_stdin_inner(
             session_command: Some(record.session_command),
             original_token_count: response.original_token_count,
             output: response.output,
+            warnings: response.warnings,
         })?,
     ))
 }
@@ -324,19 +321,6 @@ fn validate_exec_response(response: &ExecResponse) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn response_warning_meta(warnings: &[ExecWarning]) -> Option<Meta> {
-    if warnings.is_empty() {
-        return None;
-    }
-
-    let mut meta = Meta::new();
-    meta.insert(
-        "warnings".to_string(),
-        serde_json::to_value(warnings).unwrap(),
-    );
-    Some(meta)
-}
-
 async fn target_path_policy(target: &crate::TargetHandle) -> anyhow::Result<PathPolicy> {
     let info = target
         .cached_daemon_info()
@@ -348,4 +332,11 @@ async fn target_path_policy(target: &crate::TargetHandle) -> anyhow::Result<Path
     } else {
         linux_path_policy()
     })
+}
+
+fn apply_patch_warning() -> ExecWarning {
+    ExecWarning {
+        code: APPLY_PATCH_WARNING_CODE.to_string(),
+        message: APPLY_PATCH_WARNING_MESSAGE.to_string(),
+    }
 }

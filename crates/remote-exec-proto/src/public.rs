@@ -1,6 +1,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::rpc::ExecWarning;
+
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ExecCommandInput {
@@ -48,6 +50,8 @@ pub struct CommandToolResult {
     pub session_command: Option<String>,
     pub original_token_count: Option<u32>,
     pub output: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<ExecWarning>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]

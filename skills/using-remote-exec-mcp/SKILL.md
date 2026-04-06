@@ -137,6 +137,7 @@ How to use it:
 - Keep the returned `session_id` when present. That means the command is still running.
 - Read `session_command` if you need the original command string echoed back.
 - Read `original_token_count` to understand whether output was truncated by `max_output_tokens`.
+- Read `warnings` when present. Warnings are also surfaced in the normal text output.
 - Do not send patch text through `exec_command`. The broker may intercept obvious `apply_patch` shell wrappers for compatibility, but that path emits a warning and is not the preferred workflow.
 
 Common example, one-shot command:
@@ -171,11 +172,13 @@ Structured result fields that usually matter:
 - `session_command`
 - `output`
 - `original_token_count`
+- `warnings`
 
 Interpretation:
 
 - `session_id: null` means the command has already completed.
 - `session_id: "..."` means the command is still running and can be continued or polled with `write_stdin`.
+- `warnings` appears only when the broker or daemon needs to surface non-fatal warnings. The same warning text is also included in the normal text output.
 
 ### `write_stdin`
 
@@ -211,6 +214,7 @@ How to use it:
 - You may omit `target`. The broker can route by `session_id` alone.
 - If you provide `target`, it must match the original session target or the call fails.
 - Reuse the returned `session_id` until it becomes `null`.
+- Read `warnings` when present. `write_stdin` returns the same structured exec result shape as `exec_command`.
 
 Important failure cases:
 

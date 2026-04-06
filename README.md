@@ -289,8 +289,8 @@ cargo fmt --all --check
 - `max_output_tokens` is enforced by the daemon for command output.
 - Each target daemon keeps at most `64` live exec sessions. When full, it protects the `8` most recently touched sessions, prunes exited sessions first, otherwise prunes the oldest non-protected live session, and terminates the pruned process.
 - `apply_patch` supports the documented `*** End of File` marker.
-- `exec_command` intercepted into `apply_patch` always emits a warning in MCP `_meta.warnings` telling the client to use `apply_patch` directly.
-- `exec_command` emits a warning in MCP `_meta.warnings` when a target crosses from `59` to `60` open exec sessions. Warnings stay out of the normal text output.
+- `exec_command` intercepted into `apply_patch` always returns a warning in structured content `warnings` and in normal text output telling the client to use `apply_patch` directly.
+- `exec_command` returns a warning in structured content `warnings` and in normal text output when a target crosses from `59` to `60` open exec sessions.
 - `transfer_files` normalizes Windows path separators before filesystem access on Windows endpoints.
 - `transfer_files` compares Windows paths case-insensitively when checking obvious same-path collisions.
 - Executable preservation is best effort and only restored on platforms that expose executable mode bits.

@@ -265,7 +265,7 @@ async fn exec_command_invalid_intercepted_patch_surfaces_tool_error() {
 }
 
 #[tokio::test]
-async fn exec_command_intercepted_apply_patch_warning_success_in_meta() {
+async fn exec_command_intercepted_apply_patch_warning_in_structured_content_and_text() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     let patch = "*** Begin Patch\n*** Add File: warning.txt\n+warning\n*** End Patch\n";
 
@@ -281,13 +281,18 @@ async fn exec_command_intercepted_apply_patch_warning_success_in_meta() {
 
     assert!(!result.is_error);
     assert_eq!(
-        result.meta.as_ref().unwrap()["warnings"][0]["code"],
+        result.structured_content["warnings"][0]["code"],
         "apply_patch_via_exec_command"
+    );
+    assert!(
+        result
+            .text_output
+            .contains("Warning: Use apply_patch directly rather than through exec_command.")
     );
 }
 
 #[tokio::test]
-async fn exec_command_intercepted_apply_patch_warning_error_in_meta() {
+async fn exec_command_intercepted_apply_patch_warning_error_is_visible_in_text() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     let result = fixture
         .raw_tool_result(
@@ -300,14 +305,15 @@ async fn exec_command_intercepted_apply_patch_warning_error_in_meta() {
         .await;
 
     assert!(result.is_error);
-    assert_eq!(
-        result.meta.as_ref().unwrap()["warnings"][0]["message"],
-        "Use apply_patch directly rather than through exec_command."
+    assert!(
+        result
+            .text_output
+            .contains("Warning: Use apply_patch directly rather than through exec_command.")
     );
 }
 
 #[tokio::test]
-async fn exec_command_forwarded_session_warning_in_meta() {
+async fn exec_command_forwarded_session_warning_in_structured_content_and_text() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     fixture
         .set_exec_start_warnings(vec![remote_exec_proto::rpc::ExecWarning {
@@ -330,7 +336,12 @@ async fn exec_command_forwarded_session_warning_in_meta() {
 
     assert!(!result.is_error);
     assert_eq!(
-        result.meta.as_ref().unwrap()["warnings"][0]["code"],
+        result.structured_content["warnings"][0]["code"],
         "exec_session_limit_approaching"
+    );
+    assert!(
+        result
+            .text_output
+            .contains("Warning: Target `builder-a` now has 60 open exec sessions.")
     );
 }
