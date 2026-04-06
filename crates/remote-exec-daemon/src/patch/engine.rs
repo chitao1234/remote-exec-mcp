@@ -167,12 +167,48 @@ fn seek_hunk_sequence(
         return matcher::seek_sequence(lines, pattern, start, false);
     }
 
-    let eof_start = lines.len().checked_sub(pattern.len())?;
-    if start > eof_start {
-        return None;
+    for eof_start in exact_eof_match_starts(lines, pattern) {
+        if start > eof_start {
+            continue;
+        }
+
+        if let Some(idx) =
+            matcher::seek_sequence(lines, pattern, eof_start, true).filter(|&idx| idx == eof_start)
+        {
+            return Some(idx);
+        }
     }
 
-    matcher::seek_sequence(lines, pattern, eof_start, true).filter(|&idx| idx == eof_start)
+    None
+}
+
+fn exact_eof_match_starts(lines: &[String], pattern: &[String]) -> Vec<usize> {
+    let mut starts = Vec::with_capacity(2);
+
+    if let Some(start) = lines.len().checked_sub(pattern.len()) {
+        starts.push(start);
+    }
+
+    if has_trailing_split_sentinel(lines)
+        && !has_trailing_empty_sentinel(pattern)
+        && let Some(start) = lines
+            .len()
+            .checked_sub(1)
+            .and_then(|content_len| content_len.checked_sub(pattern.len()))
+        && !starts.contains(&start)
+    {
+        starts.push(start);
+    }
+
+    starts
+}
+
+fn has_trailing_split_sentinel(lines: &[String]) -> bool {
+    matches!(lines.last(), Some(last) if last.is_empty())
+}
+
+fn has_trailing_empty_sentinel(lines: &[String]) -> bool {
+    matches!(lines.last(), Some(last) if last.is_empty())
 }
 
 fn eof_insert_index(lines: &[String]) -> usize {
@@ -250,5 +286,16 @@ mod tests {
         let err = apply_hunks(current, &hunks).unwrap_err();
 
         assert!(err.to_string().contains("failed to find hunk lines"));
+    }
+
+    #[test]
+    fn eof_hunk_matches_last_real_line_in_newline_terminated_file() {
+        let current = "before\nmiddle\nbefore\n";
+        let hunks = vec![chunk(None, &["before"], &["after"], true)];
+
+        assert_eq!(
+            apply_hunks(current, &hunks).unwrap(),
+            "before\nmiddle\nafter\n"
+        );
     }
 }
