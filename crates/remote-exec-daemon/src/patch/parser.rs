@@ -12,22 +12,16 @@ pub enum PatchAction {
     Update {
         path: PathBuf,
         move_to: Option<PathBuf>,
-        hunks: Vec<Hunk>,
+        hunks: Vec<UpdateChunk>,
     },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Hunk {
-    pub context: Option<String>,
-    pub lines: Vec<HunkLine>,
-    pub end_of_file: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HunkLine {
-    Context(String),
-    Delete(String),
-    Add(String),
+pub struct UpdateChunk {
+    pub change_context: Option<String>,
+    pub old_lines: Vec<String>,
+    pub new_lines: Vec<String>,
+    pub is_end_of_file: bool,
 }
 
 fn is_horizontal_whitespace(ch: char) -> bool {
@@ -59,6 +53,25 @@ fn parse_hunk_header(line: &str) -> anyhow::Result<Option<String>> {
     }
 
     anyhow::bail!("invalid update hunk header `{line}`");
+}
+
+fn parse_update_chunk_line(
+    line: &str,
+    old_lines: &mut Vec<String>,
+    new_lines: &mut Vec<String>,
+) -> anyhow::Result<()> {
+    match line.chars().next() {
+        Some(' ') => {
+            let value = line[1..].to_string();
+            old_lines.push(value.clone());
+            new_lines.push(value);
+        }
+        Some('-') => old_lines.push(line[1..].to_string()),
+        Some('+') => new_lines.push(line[1..].to_string()),
+        _ => anyhow::bail!("invalid update hunk line `{line}`"),
+    }
+
+    Ok(())
 }
 
 pub fn parse_patch(input: &str) -> anyhow::Result<Vec<PatchAction>> {
@@ -101,6 +114,7 @@ pub fn parse_patch(input: &str) -> anyhow::Result<Vec<PatchAction>> {
         }
 
         if let Some(path) = strip_control_prefix(line, "*** Update File: ") {
+            let path = PathBuf::from(path);
             index += 1;
             let mut move_to = None;
             if index + 1 < lines.len()
@@ -112,26 +126,30 @@ pub fn parse_patch(input: &str) -> anyhow::Result<Vec<PatchAction>> {
 
             let mut hunks = Vec::new();
             while index + 1 < lines.len() && !is_structural_control_line(lines[index]) {
-                let context = parse_hunk_header(lines[index])?;
-                index += 1;
+                let change_context = if trim_horizontal(lines[index]).starts_with("@@") {
+                    let header = parse_hunk_header(lines[index])?;
+                    index += 1;
+                    header
+                } else if hunks.is_empty() {
+                    None
+                } else {
+                    anyhow::bail!(
+                        "invalid update hunk header `{}`",
+                        trim_horizontal(lines[index])
+                    );
+                };
 
-                let mut hunk_lines = Vec::new();
+                let mut old_lines = Vec::new();
+                let mut new_lines = Vec::new();
                 while index + 1 < lines.len()
                     && !trim_horizontal(lines[index]).starts_with("@@")
                     && trim_horizontal(lines[index]) != "*** End of File"
                     && !is_structural_control_line(lines[index])
                 {
-                    let raw = lines[index];
-                    let parsed = match raw.chars().next() {
-                        Some(' ') => HunkLine::Context(raw[1..].to_string()),
-                        Some('-') => HunkLine::Delete(raw[1..].to_string()),
-                        Some('+') => HunkLine::Add(raw[1..].to_string()),
-                        _ => anyhow::bail!("invalid update hunk line `{raw}`"),
-                    };
-                    hunk_lines.push(parsed);
+                    parse_update_chunk_line(lines[index], &mut old_lines, &mut new_lines)?;
                     index += 1;
                 }
-                let end_of_file = if index + 1 < lines.len()
+                let is_end_of_file = if index + 1 < lines.len()
                     && trim_horizontal(lines[index]) == "*** End of File"
                 {
                     index += 1;
@@ -139,16 +157,26 @@ pub fn parse_patch(input: &str) -> anyhow::Result<Vec<PatchAction>> {
                 } else {
                     false
                 };
-                anyhow::ensure!(!hunk_lines.is_empty(), "update hunk with no changes");
-                hunks.push(Hunk {
-                    context,
-                    lines: hunk_lines,
-                    end_of_file,
+                anyhow::ensure!(
+                    !old_lines.is_empty() || !new_lines.is_empty(),
+                    "update hunk for path `{}` has no changes",
+                    path.display()
+                );
+                hunks.push(UpdateChunk {
+                    change_context,
+                    old_lines,
+                    new_lines,
+                    is_end_of_file,
                 });
             }
+            anyhow::ensure!(
+                !hunks.is_empty(),
+                "update file hunk for path `{}` is empty",
+                path.display()
+            );
 
             actions.push(PatchAction::Update {
-                path: path.into(),
+                path,
                 move_to,
                 hunks,
             });
@@ -164,7 +192,7 @@ pub fn parse_patch(input: &str) -> anyhow::Result<Vec<PatchAction>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Hunk, HunkLine, PatchAction, parse_patch};
+    use super::{PatchAction, UpdateChunk, parse_patch};
 
     #[test]
     fn parses_control_lines_with_horizontal_whitespace() {
@@ -184,15 +212,54 @@ mod tests {
             vec![PatchAction::Update {
                 path: "old.txt".into(),
                 move_to: Some("new.txt".into()),
-                hunks: vec![Hunk {
-                    context: None,
-                    lines: vec![
-                        HunkLine::Delete("old".to_string()),
-                        HunkLine::Add("new".to_string()),
-                    ],
-                    end_of_file: true,
+                hunks: vec![UpdateChunk {
+                    change_context: None,
+                    old_lines: vec!["old".to_string()],
+                    new_lines: vec!["new".to_string()],
+                    is_end_of_file: true,
                 }],
             }]
+        );
+    }
+
+    #[test]
+    fn parses_first_update_chunk_without_explicit_header() {
+        let patch = concat!(
+            "*** Begin Patch\n",
+            "*** Update File: demo.txt\n",
+            " line1\n",
+            "+line2\n",
+            "*** End Patch\n",
+        );
+
+        assert_eq!(
+            parse_patch(patch).unwrap(),
+            vec![PatchAction::Update {
+                path: "demo.txt".into(),
+                move_to: None,
+                hunks: vec![UpdateChunk {
+                    change_context: None,
+                    old_lines: vec!["line1".to_string()],
+                    new_lines: vec!["line1".to_string(), "line2".to_string()],
+                    is_end_of_file: false,
+                }],
+            }]
+        );
+    }
+
+    #[test]
+    fn rejects_empty_update_file_sections() {
+        let patch = concat!(
+            "*** Begin Patch\n",
+            "*** Update File: demo.txt\n",
+            "*** End Patch\n",
+        );
+
+        let err = parse_patch(patch).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("update file hunk for path `demo.txt` is empty"),
+            "{err}"
         );
     }
 }

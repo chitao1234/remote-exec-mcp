@@ -1,6 +1,6 @@
-use super::parser::{Hunk, HunkLine};
+use super::parser::UpdateChunk;
 
-pub fn apply_hunks(current: &str, hunks: &[Hunk]) -> anyhow::Result<String> {
+pub fn apply_hunks(current: &str, hunks: &[UpdateChunk]) -> anyhow::Result<String> {
     let mut lines = current.lines().map(str::to_string).collect::<Vec<_>>();
     let mut search_start = 0;
 
@@ -9,13 +9,13 @@ pub fn apply_hunks(current: &str, hunks: &[Hunk]) -> anyhow::Result<String> {
         let start = resolve_hunk_start(&lines, hunk, search_start)?;
 
         let start_idx = if old_lines.is_empty() {
-            if hunk.end_of_file {
+            if hunk.is_end_of_file {
                 lines.len()
             } else {
                 start.min(lines.len())
             }
         } else {
-            seek_sequence(&lines, &old_lines, start, hunk.end_of_file).ok_or_else(|| {
+            seek_sequence(&lines, &old_lines, start, hunk.is_end_of_file).ok_or_else(|| {
                 anyhow::anyhow!("failed to find hunk lines `{}`", old_lines.join("\n"))
             })?
         };
@@ -28,10 +28,14 @@ pub fn apply_hunks(current: &str, hunks: &[Hunk]) -> anyhow::Result<String> {
     Ok(lines.join("\n"))
 }
 
-fn resolve_hunk_start(lines: &[String], hunk: &Hunk, search_start: usize) -> anyhow::Result<usize> {
-    match hunk.context.as_ref() {
+fn resolve_hunk_start(
+    lines: &[String],
+    hunk: &UpdateChunk,
+    search_start: usize,
+) -> anyhow::Result<usize> {
+    match hunk.change_context.as_ref() {
         Some(ctx) => {
-            let found = if hunk.end_of_file {
+            let found = if hunk.is_end_of_file {
                 lines[search_start.min(lines.len())..]
                     .iter()
                     .rposition(|line| line == ctx)
@@ -48,22 +52,8 @@ fn resolve_hunk_start(lines: &[String], hunk: &Hunk, search_start: usize) -> any
     }
 }
 
-fn build_segments(hunk: &Hunk) -> (Vec<String>, Vec<String>) {
-    let mut old_lines = Vec::new();
-    let mut new_lines = Vec::new();
-
-    for line in &hunk.lines {
-        match line {
-            HunkLine::Context(value) => {
-                old_lines.push(value.clone());
-                new_lines.push(value.clone());
-            }
-            HunkLine::Delete(value) => old_lines.push(value.clone()),
-            HunkLine::Add(value) => new_lines.push(value.clone()),
-        }
-    }
-
-    (old_lines, new_lines)
+fn build_segments(hunk: &UpdateChunk) -> (Vec<String>, Vec<String>) {
+    (hunk.old_lines.clone(), hunk.new_lines.clone())
 }
 
 fn seek_sequence(
@@ -94,9 +84,9 @@ fn next_search_start(
     start_idx: usize,
     old_lines: &[String],
     new_lines: &[String],
-    hunk: &Hunk,
+    hunk: &UpdateChunk,
 ) -> usize {
-    if old_lines.is_empty() && hunk.context.is_some() && !hunk.end_of_file {
+    if old_lines.is_empty() && hunk.change_context.is_some() && !hunk.is_end_of_file {
         start_idx + new_lines.len() + 1
     } else {
         start_idx + new_lines.len()
