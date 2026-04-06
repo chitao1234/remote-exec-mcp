@@ -26,11 +26,20 @@ enum PatchKind {
     PATCH_UPDATE,
 };
 
+struct UpdateChunk {
+    bool has_change_context;
+    std::string change_context;
+    std::vector<std::string> old_lines;
+    std::vector<std::string> new_lines;
+    bool is_end_of_file;
+};
+
 struct PatchAction {
     PatchKind kind;
     std::string path;
     std::string move_to;
-    std::vector<std::string> body;
+    std::vector<std::string> lines;
+    std::vector<UpdateChunk> chunks;
 };
 
 char native_separator() {
@@ -230,127 +239,239 @@ std::string join_lines(const std::vector<std::string>& lines, bool trailing_newl
     return out.str();
 }
 
-std::vector<PatchAction> parse_patch(const std::string& patch_text) {
-    std::istringstream input(patch_text);
-    std::string line;
-    std::vector<PatchAction> actions;
-    PatchAction* current = NULL;
-    bool saw_begin = false;
+static bool starts_with(const std::string& line, const char* prefix) {
+    return line.rfind(prefix, 0) == 0;
+}
 
+static bool is_structural_line(const std::string& line) {
+    return starts_with(line, "*** ");
+}
+
+static bool is_update_data_line(const std::string& line) {
+    return !line.empty() && (line[0] == ' ' || line[0] == '+' || line[0] == '-');
+}
+
+std::vector<std::string> split_patch_lines(const std::string& patch_text) {
+    std::istringstream input(patch_text);
+    std::vector<std::string> lines;
+    std::string line;
     while (std::getline(input, line)) {
         if (!line.empty() && line[line.size() - 1] == '\r') {
             line.erase(line.size() - 1);
         }
+        lines.push_back(line);
+    }
+    return lines;
+}
 
-        if (line == "*** Begin Patch") {
-            saw_begin = true;
-            continue;
-        }
-        if (line == "*** End Patch") {
-            break;
-        }
-        if (line == "*** End of File") {
-            continue;
-        }
-        if (!saw_begin) {
-            throw std::runtime_error("invalid patch header");
-        }
+static void parse_update_chunk_line(const std::string& line, UpdateChunk* chunk) {
+    const std::string value = line.substr(1);
+    if (line[0] == ' ') {
+        chunk->old_lines.push_back(value);
+        chunk->new_lines.push_back(value);
+        return;
+    }
+    if (line[0] == '-') {
+        chunk->old_lines.push_back(value);
+        return;
+    }
+    if (line[0] == '+') {
+        chunk->new_lines.push_back(value);
+        return;
+    }
+    throw std::runtime_error("invalid update hunk line");
+}
 
-        if (line.rfind("*** Add File: ", 0) == 0) {
-            actions.push_back(PatchAction{PATCH_ADD, normalize_relative_path(line.substr(14)), "", {}});
-            current = &actions.back();
-            continue;
-        }
-        if (line.rfind("*** Delete File: ", 0) == 0) {
-            actions.push_back(PatchAction{PATCH_DELETE, normalize_relative_path(line.substr(17)), "", {}});
-            current = &actions.back();
-            continue;
-        }
-        if (line.rfind("*** Update File: ", 0) == 0) {
-            actions.push_back(PatchAction{PATCH_UPDATE, normalize_relative_path(line.substr(17)), "", {}});
-            current = &actions.back();
-            continue;
-        }
-        if (line.rfind("*** Move to: ", 0) == 0) {
-            if (current == NULL) {
-                throw std::runtime_error("move target without active file");
-            }
-            current->move_to = normalize_relative_path(line.substr(13));
-            continue;
-        }
-        if (line.rfind("@@", 0) == 0 ||
-            (!line.empty() && (line[0] == '+' || line[0] == '-' || line[0] == ' '))) {
-            if (current == NULL) {
-                throw std::runtime_error("patch body without active file");
-            }
-            current->body.push_back(line);
-        }
+std::vector<PatchAction> parse_patch(const std::string& patch_text) {
+    const std::vector<std::string> lines = split_patch_lines(patch_text);
+    if (lines.empty() || lines.front() != "*** Begin Patch") {
+        throw std::runtime_error("invalid patch header");
+    }
+    if (lines.size() < 2 || lines.back() != "*** End Patch") {
+        throw std::runtime_error("invalid patch footer");
     }
 
-    if (!saw_begin || actions.empty()) {
+    std::vector<PatchAction> actions;
+    std::size_t index = 1;
+    while (index + 1 < lines.size()) {
+        const std::string& line = lines[index];
+        if (starts_with(line, "*** Add File: ")) {
+            PatchAction action;
+            action.kind = PATCH_ADD;
+            action.path = normalize_relative_path(line.substr(14));
+            ++index;
+            while (index + 1 < lines.size() && !is_structural_line(lines[index])) {
+                if (lines[index].empty() || lines[index][0] != '+') {
+                    throw std::runtime_error("add file lines must start with +");
+                }
+                action.lines.push_back(lines[index].substr(1));
+                ++index;
+            }
+            actions.push_back(action);
+            continue;
+        }
+
+        if (starts_with(line, "*** Delete File: ")) {
+            PatchAction action;
+            action.kind = PATCH_DELETE;
+            action.path = normalize_relative_path(line.substr(17));
+            actions.push_back(action);
+            ++index;
+            continue;
+        }
+
+        if (starts_with(line, "*** Update File: ")) {
+            PatchAction action;
+            action.kind = PATCH_UPDATE;
+            action.path = normalize_relative_path(line.substr(17));
+            ++index;
+
+            if (index + 1 < lines.size() && starts_with(lines[index], "*** Move to: ")) {
+                action.move_to = normalize_relative_path(lines[index].substr(13));
+                ++index;
+            }
+
+            while (index + 1 < lines.size() && !is_structural_line(lines[index])) {
+                UpdateChunk chunk;
+                chunk.has_change_context = false;
+                chunk.is_end_of_file = false;
+
+                if (starts_with(lines[index], "@@")) {
+                    if (lines[index] == "@@") {
+                        chunk.has_change_context = false;
+                    } else if (starts_with(lines[index], "@@ ")) {
+                        chunk.has_change_context = true;
+                        chunk.change_context = lines[index].substr(3);
+                    } else {
+                        throw std::runtime_error("invalid update hunk header");
+                    }
+                    ++index;
+                } else if (!action.chunks.empty()) {
+                    throw std::runtime_error("invalid update hunk header");
+                }
+
+                while (index + 1 < lines.size() && is_update_data_line(lines[index])) {
+                    parse_update_chunk_line(lines[index], &chunk);
+                    ++index;
+                }
+                if (index + 1 < lines.size() && lines[index] == "*** End of File") {
+                    chunk.is_end_of_file = true;
+                    ++index;
+                }
+                if (chunk.old_lines.empty() && chunk.new_lines.empty()) {
+                    throw std::runtime_error("update hunk with no changes");
+                }
+                action.chunks.push_back(chunk);
+            }
+
+            if (action.chunks.empty()) {
+                throw std::runtime_error("update file hunk is empty");
+            }
+            actions.push_back(action);
+            continue;
+        }
+
+        throw std::runtime_error("unsupported patch line");
+    }
+
+    if (actions.empty()) {
         throw std::runtime_error("patch contained no actions");
     }
-
     return actions;
 }
 
-std::string apply_update_body(const std::string& old_text, const std::vector<std::string>& body) {
-    bool had_trailing_newline = false;
-    const std::vector<std::string> old_lines = split_lines(old_text, &had_trailing_newline);
-    std::vector<std::string> new_lines;
-    std::size_t cursor = 0;
-    bool touched = false;
-
-    for (std::size_t i = 0; i < body.size(); ++i) {
-        const std::string& line = body[i];
-        if (line.rfind("@@", 0) == 0) {
+static std::size_t find_sequence(
+    const std::vector<std::string>& lines,
+    const std::vector<std::string>& needle,
+    std::size_t start,
+    bool require_eof
+) {
+    if (needle.empty()) {
+        return std::min(start, lines.size());
+    }
+    if (needle.size() > lines.size()) {
+        return std::string::npos;
+    }
+    const std::size_t max_start = lines.size() - needle.size();
+    for (std::size_t i = std::min(start, lines.size()); i <= max_start; ++i) {
+        bool matches = true;
+        for (std::size_t j = 0; j < needle.size(); ++j) {
+            if (lines[i + j] != needle[j]) {
+                matches = false;
+                break;
+            }
+        }
+        if (!matches) {
             continue;
         }
-        if (line.empty()) {
+        if (require_eof && i + needle.size() != lines.size()) {
             continue;
         }
-
-        const char prefix = line[0];
-        const std::string text = line.substr(1);
-
-        if (prefix == ' ') {
-            if (cursor >= old_lines.size() || old_lines[cursor] != text) {
-                throw std::runtime_error("patch context not found");
-            }
-            new_lines.push_back(old_lines[cursor]);
-            ++cursor;
-        } else if (prefix == '-') {
-            if (cursor >= old_lines.size() || old_lines[cursor] != text) {
-                throw std::runtime_error("patch removal not found");
-            }
-            ++cursor;
-            touched = true;
-        } else if (prefix == '+') {
-            new_lines.push_back(text);
-            touched = true;
-        }
+        return i;
     }
-
-    if (!touched) {
-        return old_text;
-    }
-
-    while (cursor < old_lines.size()) {
-        new_lines.push_back(old_lines[cursor]);
-        ++cursor;
-    }
-
-    return join_lines(new_lines, had_trailing_newline || !new_lines.empty());
+    return std::string::npos;
 }
 
-std::string render_added_content(const std::vector<std::string>& body) {
-    std::vector<std::string> lines;
-    for (std::size_t i = 0; i < body.size(); ++i) {
-        const std::string& line = body[i];
-        if (!line.empty() && line[0] == '+') {
-            lines.push_back(line.substr(1));
+static std::size_t find_context_anchor(
+    const std::vector<std::string>& lines,
+    const std::string& context,
+    std::size_t start,
+    bool require_eof
+) {
+    const std::vector<std::string> needle(1, context);
+    return find_sequence(lines, needle, start, require_eof);
+}
+
+static void apply_update_chunk(
+    std::vector<std::string>* lines,
+    std::size_t* cursor,
+    const UpdateChunk& chunk
+) {
+    if (!chunk.old_lines.empty()) {
+        const std::size_t start =
+            find_sequence(*lines, chunk.old_lines, *cursor, chunk.is_end_of_file);
+        if (start == std::string::npos) {
+            throw std::runtime_error("patch removal not found");
         }
+        lines->erase(lines->begin() + start, lines->begin() + start + chunk.old_lines.size());
+        lines->insert(lines->begin() + start, chunk.new_lines.begin(), chunk.new_lines.end());
+        *cursor = start + chunk.new_lines.size();
+        return;
     }
+
+    if (chunk.has_change_context) {
+        const std::size_t anchor =
+            find_context_anchor(*lines, chunk.change_context, *cursor, chunk.is_end_of_file);
+        if (anchor == std::string::npos) {
+            throw std::runtime_error("patch context not found");
+        }
+        const std::size_t insert_at = chunk.is_end_of_file ? anchor + 1 : anchor;
+        lines->insert(lines->begin() + insert_at, chunk.new_lines.begin(), chunk.new_lines.end());
+        *cursor = insert_at + chunk.new_lines.size() + (chunk.is_end_of_file ? 0 : 1);
+        return;
+    }
+
+    const std::size_t insert_at = chunk.is_end_of_file ? lines->size() : std::min(*cursor, lines->size());
+    lines->insert(lines->begin() + insert_at, chunk.new_lines.begin(), chunk.new_lines.end());
+    *cursor = insert_at + chunk.new_lines.size();
+}
+
+static std::string apply_update_chunks(
+    const std::string& old_text,
+    const std::vector<UpdateChunk>& chunks
+) {
+    bool had_trailing_newline = false;
+    std::vector<std::string> lines = split_lines(old_text, &had_trailing_newline);
+    std::size_t cursor = 0;
+
+    for (std::size_t i = 0; i < chunks.size(); ++i) {
+        apply_update_chunk(&lines, &cursor, chunks[i]);
+    }
+
+    return join_lines(lines, had_trailing_newline || !lines.empty());
+}
+
+std::string render_added_content(const std::vector<std::string>& lines) {
     return join_lines(lines, !lines.empty());
 }
 
@@ -367,7 +488,7 @@ PatchApplyResult apply_patch(const std::string& root, const std::string& patch_t
             action.move_to.empty() ? source_path : join_path(root, action.move_to);
 
         if (action.kind == PATCH_ADD) {
-            write_text_atomic(source_path, render_added_content(action.body));
+            write_text_atomic(source_path, render_added_content(action.lines));
             summary.push_back("A " + action.path);
             continue;
         }
@@ -379,8 +500,7 @@ PatchApplyResult apply_patch(const std::string& root, const std::string& patch_t
         }
 
         const std::string old_text = read_text_file(source_path);
-        const std::string new_text =
-            action.body.empty() ? old_text : apply_update_body(old_text, action.body);
+        const std::string new_text = apply_update_chunks(old_text, action.chunks);
         write_text_atomic(destination_path, new_text);
         if (!action.move_to.empty() && destination_path != source_path && file_exists(source_path)) {
             remove_file_required(source_path);

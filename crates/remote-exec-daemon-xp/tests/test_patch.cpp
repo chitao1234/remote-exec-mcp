@@ -1,6 +1,7 @@
 #include <cassert>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <string>
 
 #include "patch_engine.h"
@@ -15,6 +16,16 @@ static std::string read_text(const fs::path& path) {
 static void write_text(const fs::path& path, const std::string& value) {
     std::ofstream output(path.c_str(), std::ios::binary | std::ios::trunc);
     output << value;
+}
+
+static void expect_patch_failure(const fs::path& root, const std::string& patch) {
+    bool threw = false;
+    try {
+        (void)apply_patch(root.string(), patch);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    assert(threw);
 }
 
 int main() {
@@ -49,12 +60,15 @@ int main() {
         "*** Begin Patch\n"
         "*** Update File: new.txt\n"
         "*** Move to: moved.txt\n"
+        "@@\n"
+        "-new file\n"
+        "+moved file\n"
         "*** End Patch\n";
 
     PatchApplyResult move_result = apply_patch(root.string(), move_patch);
     assert(move_result.output.find("M moved.txt") != std::string::npos);
     assert(!fs::exists(root / "new.txt"));
-    assert(read_text(root / "moved.txt") == "new file\n");
+    assert(read_text(root / "moved.txt") == "moved file\n");
 
     const std::string delete_patch =
         "*** Begin Patch\n"
@@ -64,6 +78,85 @@ int main() {
     PatchApplyResult delete_result = apply_patch(root.string(), delete_patch);
     assert(delete_result.output.find("D moved.txt") != std::string::npos);
     assert(!fs::exists(root / "moved.txt"));
+
+    write_text(root / "missing-header.txt", "before\nmiddle\n");
+    const std::string missing_header_patch =
+        "*** Begin Patch\n"
+        "*** Update File: missing-header.txt\n"
+        "-before\n"
+        "+after\n"
+        "*** End Patch\n";
+
+    PatchApplyResult missing_header_result = apply_patch(root.string(), missing_header_patch);
+    assert(missing_header_result.output.find("M missing-header.txt") != std::string::npos);
+    assert(read_text(root / "missing-header.txt") == "after\nmiddle\n");
+
+    write_text(root / "eof.txt", "before\nmiddle\nbefore\n");
+    const std::string eof_patch =
+        "*** Begin Patch\n"
+        "*** Update File: eof.txt\n"
+        "@@\n"
+        "-before\n"
+        "+after\n"
+        "*** End of File\n"
+        "*** End Patch\n";
+
+    PatchApplyResult eof_result = apply_patch(root.string(), eof_patch);
+    assert(eof_result.output.find("M eof.txt") != std::string::npos);
+    assert(read_text(root / "eof.txt") == "before\nmiddle\nafter\n");
+
+    write_text(root / "eof-fail.txt", "before\nmiddle\ntail\n");
+    const std::string eof_fail_patch =
+        "*** Begin Patch\n"
+        "*** Update File: eof-fail.txt\n"
+        "@@\n"
+        "-before\n"
+        "+after\n"
+        "*** End of File\n"
+        "*** End Patch\n";
+
+    expect_patch_failure(root, eof_fail_patch);
+    assert(read_text(root / "eof-fail.txt") == "before\nmiddle\ntail\n");
+
+    write_text(root / "append.txt", "before\ntail\n");
+    const std::string append_patch =
+        "*** Begin Patch\n"
+        "*** Update File: append.txt\n"
+        "@@ tail\n"
+        "+after\n"
+        "*** End of File\n"
+        "*** End Patch\n";
+
+    PatchApplyResult append_result = apply_patch(root.string(), append_patch);
+    assert(append_result.output.find("M append.txt") != std::string::npos);
+    assert(read_text(root / "append.txt") == "before\ntail\nafter\n");
+
+    write_text(root / "repeat.txt", "a\nmarker\nb\nmarker\nc\n");
+    const std::string repeat_patch =
+        "*** Begin Patch\n"
+        "*** Update File: repeat.txt\n"
+        "@@ marker\n"
+        "+first\n"
+        "@@ marker\n"
+        "+second\n"
+        "*** End Patch\n";
+
+    PatchApplyResult repeat_result = apply_patch(root.string(), repeat_patch);
+    assert(repeat_result.output.find("M repeat.txt") != std::string::npos);
+    assert(read_text(root / "repeat.txt") == "a\nfirst\nmarker\nb\nsecond\nmarker\nc\n");
+
+    write_text(root / "partial-first.txt", "before\n");
+    const std::string partial_patch =
+        "*** Begin Patch\n"
+        "*** Update File: partial-first.txt\n"
+        "@@\n"
+        "-before\n"
+        "+after\n"
+        "*** Delete File: missing.txt\n"
+        "*** End Patch\n";
+
+    expect_patch_failure(root, partial_patch);
+    assert(read_text(root / "partial-first.txt") == "after\n");
 
     return 0;
 }
