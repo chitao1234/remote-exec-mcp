@@ -81,7 +81,8 @@ fn resolve_hunk_start(
         Some(ctx) => {
             let search_start = search_start.min(lines.len());
 
-            let found = matcher::seek_sequence(lines, &[ctx.clone()], search_start, false);
+            let found =
+                matcher::seek_sequence(lines, std::slice::from_ref(ctx), search_start, false);
             found.ok_or_else(|| anyhow::anyhow!("context line `{ctx}` not found"))
         }
         None => Ok(search_start.min(lines.len())),
@@ -106,14 +107,12 @@ fn resolve_segments(
         return Ok(initial);
     }
 
-    if hunk.is_end_of_file {
-        if let Some(retry) = strip_trailing_empty_sentinel(&initial) {
-            if retry.old_lines.is_empty()
-                || seek_hunk_sequence(lines, &retry.old_lines, start, true).is_some()
-            {
-                return Ok(retry);
-            }
-        }
+    if hunk.is_end_of_file
+        && let Some(retry) = strip_trailing_empty_sentinel(&initial)
+        && (retry.old_lines.is_empty()
+            || seek_hunk_sequence(lines, &retry.old_lines, start, true).is_some())
+    {
+        return Ok(retry);
     }
 
     anyhow::bail!(

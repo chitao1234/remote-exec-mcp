@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::rpc::ExecWarning;
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ExecCommandInput {
     pub target: String,
@@ -22,11 +22,11 @@ pub struct ExecCommandInput {
     pub login: Option<bool>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ListTargetsInput {}
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WriteStdinInput {
     pub session_id: String,
@@ -110,7 +110,7 @@ pub struct TransferEndpoint {
     pub path: String,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TransferFilesInput {
     #[serde(default)]
@@ -138,7 +138,7 @@ pub struct TransferFilesResult {
     pub replaced: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ApplyPatchInput {
     pub target: String,
@@ -147,7 +147,7 @@ pub struct ApplyPatchInput {
     pub workdir: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ViewImageInput {
     pub target: String,

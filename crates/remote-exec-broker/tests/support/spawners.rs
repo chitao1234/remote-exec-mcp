@@ -1,14 +1,15 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use axum::serve;
 use rmcp::{ServiceExt, transport::TokioChildProcess};
+use tempfile::TempDir;
 
 use super::certs::{TestCerts, allocate_addr, write_test_certs};
 use super::fixture::{BrokerFixture, DummyClientHandler};
 use super::stub_daemon::{
-    ExecWriteBehavior, set_transfer_compression_support, spawn_daemon_with_platform,
-    spawn_named_daemon_on_addr, spawn_retryable_exec_write_daemon, spawn_stub_daemon,
-    spawn_unknown_session_exec_write_daemon, stub_daemon_state, stub_router,
+    ExecWriteBehavior, StubDaemonState, set_transfer_compression_support,
+    spawn_daemon_with_platform, spawn_named_daemon_on_addr, spawn_retryable_exec_write_daemon,
+    spawn_stub_daemon, spawn_unknown_session_exec_write_daemon, stub_daemon_state, stub_router,
 };
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
@@ -28,6 +29,19 @@ impl DelayedTargetFixture {
         )
         .await;
     }
+}
+
+pub struct HttpBrokerFixture {
+    pub _tempdir: TempDir,
+    pub url: String,
+    _stub_state: StubDaemonState,
+    _child: tokio::process::Child,
+}
+
+pub struct BrokerConfigFixture {
+    pub _tempdir: TempDir,
+    pub config_path: PathBuf,
+    _stub_state: StubDaemonState,
 }
 
 struct BrokerConfigTarget<'a> {
@@ -133,6 +147,74 @@ pub async fn spawn_broker_with_stub_daemon() -> BrokerFixture {
         _tempdir: tempdir,
         client,
         stub_state,
+    }
+}
+
+pub async fn spawn_broker_config_with_stub_daemon() -> BrokerConfigFixture {
+    remote_exec_daemon::install_crypto_provider();
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let certs = write_test_certs(tempdir.path());
+    let (addr, stub_state) = spawn_stub_daemon(&certs).await;
+    let broker_config = tempdir.path().join("broker.toml");
+    write_broker_config(
+        &broker_config,
+        &[BrokerConfigTarget {
+            name: "builder-a",
+            addr,
+            certs: &certs,
+        }],
+        None,
+        None,
+        None,
+    );
+
+    BrokerConfigFixture {
+        _tempdir: tempdir,
+        config_path: broker_config,
+        _stub_state: stub_state,
+    }
+}
+
+pub async fn spawn_streamable_http_broker_with_stub_daemon() -> HttpBrokerFixture {
+    remote_exec_daemon::install_crypto_provider();
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let certs = write_test_certs(tempdir.path());
+    let (daemon_addr, stub_state) = spawn_stub_daemon(&certs).await;
+    let broker_addr = allocate_addr();
+    let broker_config = tempdir.path().join("broker.toml");
+    write_broker_config(
+        &broker_config,
+        &[BrokerConfigTarget {
+            name: "builder-a",
+            addr: daemon_addr,
+            certs: &certs,
+        }],
+        None,
+        None,
+        Some(&format!(
+            r#"[mcp]
+transport = "streamable_http"
+listen = {listen}
+path = "/mcp"
+"#,
+            listen = toml_string(&broker_addr.to_string()),
+        )),
+    );
+
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
+    command.arg(&broker_config);
+    command.kill_on_drop(true);
+    let child = command.spawn().unwrap();
+    let url = format!("http://{broker_addr}/mcp");
+    wait_until_ready_mcp_http(&url).await;
+
+    HttpBrokerFixture {
+        _tempdir: tempdir,
+        url,
+        _stub_state: stub_state,
+        _child: child,
     }
 }
 
@@ -479,6 +561,29 @@ async fn wait_until_ready_http(addr: std::net::SocketAddr) {
     }
 
     panic!("plain http stub daemon did not become ready");
+}
+
+async fn wait_until_ready_mcp_http(url: &str) {
+    let client = reqwest::Client::builder().build().unwrap();
+
+    for _ in 0..40 {
+        let response = client
+            .post(url)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .header(reqwest::header::ACCEPT, "application/json, text/event-stream")
+            .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"#)
+            .send()
+            .await;
+        if response
+            .as_ref()
+            .is_ok_and(|response| response.status().is_success())
+        {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    panic!("streamable HTTP broker did not become ready");
 }
 
 pub async fn spawn_broker_with_stub_daemon_and_structured_content_disabled() -> BrokerFixture {

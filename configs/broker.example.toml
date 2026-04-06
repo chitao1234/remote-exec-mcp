@@ -1,6 +1,20 @@
 enable_transfer_compression = true
 disable_structured_content = false
 
+# Optional MCP transport selection. When omitted, the broker serves MCP over stdio.
+#
+#[mcp]
+#transport = "streamable_http"
+#listen = "127.0.0.1:8787"
+## Optional. Defaults to "/mcp".
+## path = "/mcp"
+## Optional. Defaults to true. When false, the endpoint uses stateless POST-only mode.
+## stateful = true
+## Optional. Milliseconds. Set to 0 to disable.
+## sse_keep_alive_ms = 15000
+## Optional. Milliseconds. Set to 0 to disable retry priming events.
+## sse_retry_ms = 3000
+
 [targets.builder-a]
 base_url = "https://builder-a.example.com:9443"
 ca_pem = "/etc/remote-exec/ca.pem"

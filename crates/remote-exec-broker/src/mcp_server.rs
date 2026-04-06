@@ -1,10 +1,13 @@
 use anyhow::Context;
+use axum::Router;
 use rmcp::{
     ErrorData as McpError, ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{CallToolResult, Content, ServerCapabilities, ServerInfo},
     tool, tool_handler, tool_router,
+    transport::{StreamableHttpServerConfig, StreamableHttpService},
 };
+use tokio_util::sync::CancellationToken;
 
 pub struct ToolCallOutput {
     pub content: Vec<Content>,
@@ -204,6 +207,121 @@ pub async fn serve_stdio(state: crate::BrokerState) -> anyhow::Result<()> {
         .context("waiting for broker MCP service")?;
     tracing::info!("broker MCP stdio service stopped");
     Ok(())
+}
+
+pub async fn serve(
+    state: crate::BrokerState,
+    config: &crate::config::McpServerConfig,
+) -> anyhow::Result<()> {
+    match config {
+        crate::config::McpServerConfig::Stdio => serve_stdio(state).await,
+        crate::config::McpServerConfig::StreamableHttp {
+            listen,
+            path,
+            stateful,
+            sse_keep_alive_ms,
+            sse_retry_ms,
+        } => {
+            serve_streamable_http(
+                state,
+                *listen,
+                path,
+                *stateful,
+                duration_from_millis(*sse_keep_alive_ms),
+                duration_from_millis(*sse_retry_ms),
+            )
+            .await
+        }
+    }
+}
+
+async fn serve_streamable_http(
+    state: crate::BrokerState,
+    listen: std::net::SocketAddr,
+    path: &str,
+    stateful: bool,
+    sse_keep_alive: Option<std::time::Duration>,
+    sse_retry: Option<std::time::Duration>,
+) -> anyhow::Result<()> {
+    let cancellation_token = CancellationToken::new();
+    let server_state = state.clone();
+    let service: StreamableHttpService<
+        _,
+        rmcp::transport::streamable_http_server::session::local::LocalSessionManager,
+    > = StreamableHttpService::new(
+        move || Ok(BrokerServer::new(server_state.clone())),
+        Default::default(),
+        StreamableHttpServerConfig {
+            sse_keep_alive,
+            sse_retry,
+            stateful_mode: stateful,
+            cancellation_token: cancellation_token.child_token(),
+        },
+    );
+    let router = Router::new().nest_service(path, service);
+    let listener = tokio::net::TcpListener::bind(listen)
+        .await
+        .with_context(|| format!("binding broker MCP streamable HTTP listener on {listen}"))?;
+    let local_addr = listener
+        .local_addr()
+        .context("reading broker listener address")?;
+
+    tracing::info!(
+        listen = %local_addr,
+        path,
+        stateful,
+        sse_keep_alive_ms = sse_keep_alive.map(|duration| duration.as_millis() as u64),
+        sse_retry_ms = sse_retry.map(|duration| duration.as_millis() as u64),
+        "starting broker MCP streamable HTTP service"
+    );
+
+    let shutdown_token = cancellation_token.clone();
+    axum::serve(listener, router)
+        .with_graceful_shutdown(async move {
+            wait_for_shutdown_signal().await;
+            shutdown_token.cancel();
+        })
+        .await
+        .context("running broker MCP streamable HTTP service")?;
+
+    tracing::info!("broker MCP streamable HTTP service stopped");
+    Ok(())
+}
+
+fn duration_from_millis(value: Option<u64>) -> Option<std::time::Duration> {
+    match value {
+        Some(0) => None,
+        Some(value) => Some(std::time::Duration::from_millis(value)),
+        None => None,
+    }
+}
+
+async fn wait_for_shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+
+        match signal(SignalKind::terminate()) {
+            Ok(mut terminate) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = terminate.recv() => {}
+                }
+            }
+            Err(err) => {
+                tracing::warn!(
+                    ?err,
+                    "failed to install SIGTERM handler; falling back to ctrl-c"
+                );
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }
 
 pub fn format_command_text(

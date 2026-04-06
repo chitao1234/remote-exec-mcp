@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use anyhow::Context;
@@ -9,6 +10,8 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Deserialize)]
 pub struct BrokerConfig {
     #[serde(default)]
+    pub mcp: McpServerConfig,
+    #[serde(default)]
     pub targets: BTreeMap<String, TargetConfig>,
     #[serde(default)]
     pub local: Option<LocalTargetConfig>,
@@ -18,6 +21,24 @@ pub struct BrokerConfig {
     pub enable_transfer_compression: bool,
     #[serde(default)]
     pub disable_structured_content: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(tag = "transport", rename_all = "snake_case")]
+pub enum McpServerConfig {
+    #[default]
+    Stdio,
+    StreamableHttp {
+        listen: SocketAddr,
+        #[serde(default = "default_streamable_http_path")]
+        path: String,
+        #[serde(default = "default_streamable_http_stateful")]
+        stateful: bool,
+        #[serde(default = "default_streamable_http_sse_keep_alive_ms")]
+        sse_keep_alive_ms: Option<u64>,
+        #[serde(default = "default_streamable_http_sse_retry_ms")]
+        sse_retry_ms: Option<u64>,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -91,8 +112,24 @@ impl LocalTargetConfig {
     }
 }
 
+impl McpServerConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        match self {
+            Self::Stdio => Ok(()),
+            Self::StreamableHttp { path, .. } => {
+                anyhow::ensure!(
+                    path.starts_with('/'),
+                    "streamable_http MCP path must start with `/`"
+                );
+                Ok(())
+            }
+        }
+    }
+}
+
 impl BrokerConfig {
     pub(crate) fn validate(&self) -> anyhow::Result<()> {
+        self.mcp.validate()?;
         anyhow::ensure!(
             !self.targets.contains_key("local"),
             "configured target name `local` is reserved for broker-host filesystem access"
@@ -121,9 +158,25 @@ fn default_enable_transfer_compression() -> bool {
     true
 }
 
+fn default_streamable_http_path() -> String {
+    "/mcp".to_string()
+}
+
+fn default_streamable_http_stateful() -> bool {
+    true
+}
+
+fn default_streamable_http_sse_keep_alive_ms() -> Option<u64> {
+    Some(15_000)
+}
+
+fn default_streamable_http_sse_retry_ms() -> Option<u64> {
+    Some(3_000)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::BrokerConfig;
+    use super::{BrokerConfig, McpServerConfig};
 
     #[tokio::test]
     async fn load_rejects_reserved_local_target_name() {
@@ -194,6 +247,7 @@ client_key_pem = "/tmp/broker.key"
             Some(false)
         );
         assert!(!config.disable_structured_content);
+        assert!(matches!(config.mcp, McpServerConfig::Stdio));
     }
 
     #[tokio::test]
@@ -265,6 +319,68 @@ expected_daemon_name = "builder-xp"
         assert_eq!(
             config.targets["builder-xp"].expected_daemon_name.as_deref(),
             Some("builder-xp")
+        );
+    }
+
+    #[tokio::test]
+    async fn load_accepts_streamable_http_mcp_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("broker.toml");
+        tokio::fs::write(
+            &config_path,
+            r#"
+[mcp]
+transport = "streamable_http"
+listen = "127.0.0.1:8787"
+path = "/rpc"
+stateful = false
+sse_keep_alive_ms = 0
+sse_retry_ms = 1000
+"#,
+        )
+        .await
+        .unwrap();
+
+        let config = BrokerConfig::load(&config_path).await.unwrap();
+        match config.mcp {
+            McpServerConfig::StreamableHttp {
+                listen,
+                path,
+                stateful,
+                sse_keep_alive_ms,
+                sse_retry_ms,
+            } => {
+                assert_eq!(listen, "127.0.0.1:8787".parse().unwrap());
+                assert_eq!(path, "/rpc");
+                assert!(!stateful);
+                assert_eq!(sse_keep_alive_ms, Some(0));
+                assert_eq!(sse_retry_ms, Some(1000));
+            }
+            other => panic!("unexpected MCP config: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn load_rejects_streamable_http_path_without_leading_slash() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("broker.toml");
+        tokio::fs::write(
+            &config_path,
+            r#"
+[mcp]
+transport = "streamable_http"
+listen = "127.0.0.1:8787"
+path = "mcp"
+"#,
+        )
+        .await
+        .unwrap();
+
+        let err = BrokerConfig::load(&config_path).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("streamable_http MCP path must start with `/`"),
+            "unexpected error: {err}"
         );
     }
 }

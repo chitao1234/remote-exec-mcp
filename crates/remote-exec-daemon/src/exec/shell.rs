@@ -538,13 +538,12 @@ fn is_regular_file(path: &Path) -> bool {
 
 #[cfg(all(test, unix))]
 mod tests {
+    use std::collections::BTreeMap;
     use std::ffi::OsString;
-    use std::os::unix::fs::PermissionsExt;
-    use std::path::PathBuf;
 
     use crate::config::ProcessEnvironment;
 
-    use super::resolve_default_unix_shell_with;
+    use super::resolve_default_unix_shell_with_validator;
 
     fn make_environment(path: Option<&std::path::Path>, shell: Option<&str>) -> ProcessEnvironment {
         let mut environment = ProcessEnvironment::default();
@@ -557,88 +556,98 @@ mod tests {
         environment
     }
 
-    fn write_fake_shell(path: &PathBuf, exit_code: i32) {
-        std::fs::write(path, format!("#!/bin/sh\nexit {exit_code}\n")).unwrap();
-        let mut permissions = std::fs::metadata(path).unwrap().permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(path, permissions).unwrap();
+    fn stub_validator(
+        resolutions: BTreeMap<String, String>,
+    ) -> impl Fn(&str, &ProcessEnvironment) -> anyhow::Result<String> {
+        move |shell, _environment| {
+            resolutions
+                .get(shell)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("shell `{shell}` is not usable"))
+        }
     }
 
     #[test]
     fn unix_default_shell_prefers_configured_shell() {
-        let tempdir = tempfile::tempdir().unwrap();
-        let configured_shell = tempdir.path().join("configured-shell");
-        write_fake_shell(&configured_shell, 0);
-        let env_shell = tempdir.path().join("env-shell");
-        write_fake_shell(&env_shell, 0);
+        let configured_shell = "/opt/test/configured-shell";
+        let env_shell = "/opt/test/env-shell";
         let environment =
-            make_environment(Some(tempdir.path()), Some(&env_shell.to_string_lossy()));
+            make_environment(Some(std::path::Path::new("/opt/test")), Some(env_shell));
 
         assert_eq!(
-            resolve_default_unix_shell_with(
-                Some(&configured_shell.to_string_lossy()),
+            resolve_default_unix_shell_with_validator(
+                Some(configured_shell),
                 environment
                     .var_os("SHELL")
                     .map(|value| value.to_string_lossy().into_owned())
                     .as_deref(),
                 &environment,
                 || Ok(None),
+                stub_validator(BTreeMap::from([
+                    (configured_shell.to_string(), configured_shell.to_string()),
+                    (env_shell.to_string(), env_shell.to_string()),
+                ])),
             )
             .unwrap(),
-            configured_shell.to_string_lossy()
+            configured_shell
         );
     }
 
     #[test]
     fn unix_default_shell_falls_back_from_unusable_env_shell_to_passwd_shell() {
-        let tempdir = tempfile::tempdir().unwrap();
-        let env_shell = tempdir.path().join("env-shell");
-        write_fake_shell(&env_shell, 1);
-        let passwd_shell = tempdir.path().join("passwd-shell");
-        write_fake_shell(&passwd_shell, 0);
+        let env_shell = "/opt/test/env-shell";
+        let passwd_shell = "/opt/test/passwd-shell";
         let environment =
-            make_environment(Some(tempdir.path()), Some(&env_shell.to_string_lossy()));
+            make_environment(Some(std::path::Path::new("/opt/test")), Some(env_shell));
 
         assert_eq!(
-            resolve_default_unix_shell_with(
+            resolve_default_unix_shell_with_validator(
                 None,
                 environment
                     .var_os("SHELL")
                     .map(|value| value.to_string_lossy().into_owned())
                     .as_deref(),
                 &environment,
-                || Ok(Some(passwd_shell.to_string_lossy().into_owned())),
+                || Ok(Some(passwd_shell.to_string())),
+                stub_validator(BTreeMap::from([(
+                    passwd_shell.to_string(),
+                    passwd_shell.to_string(),
+                )])),
             )
             .unwrap(),
-            passwd_shell.to_string_lossy()
+            passwd_shell
         );
     }
 
     #[test]
     fn unix_default_shell_uses_bash_from_path_before_bin_sh() {
-        let tempdir = tempfile::tempdir().unwrap();
-        let bash = tempdir.path().join("bash");
-        write_fake_shell(&bash, 0);
-        let environment = make_environment(Some(tempdir.path()), None);
+        let bash = "/opt/test/bash";
+        let environment = make_environment(Some(std::path::Path::new("/opt/test")), None);
 
         assert_eq!(
-            resolve_default_unix_shell_with(None, None, &environment, || Ok(None)).unwrap(),
-            bash.to_string_lossy()
+            resolve_default_unix_shell_with_validator(
+                None,
+                None,
+                &environment,
+                || Ok(None),
+                stub_validator(BTreeMap::from([("bash".to_string(), bash.to_string())])),
+            )
+            .unwrap(),
+            bash
         );
     }
 
     #[test]
     fn unix_default_shell_rejects_unusable_configured_shell() {
-        let tempdir = tempfile::tempdir().unwrap();
-        let configured_shell = tempdir.path().join("configured-shell");
-        write_fake_shell(&configured_shell, 1);
-        let environment = make_environment(Some(tempdir.path()), None);
+        let configured_shell = "/opt/test/configured-shell";
+        let environment = make_environment(Some(std::path::Path::new("/opt/test")), None);
 
-        let err = resolve_default_unix_shell_with(
-            Some(&configured_shell.to_string_lossy()),
+        let err = resolve_default_unix_shell_with_validator(
+            Some(configured_shell),
             None,
             &environment,
             || Ok(None),
+            stub_validator(BTreeMap::new()),
         )
         .unwrap_err();
 

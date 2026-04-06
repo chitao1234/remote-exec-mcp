@@ -11,11 +11,14 @@ Everything under `docs/` is historical implementation detail and planning contex
 - `remote-exec-admin`
   - Administrative CLI for TLS bootstrap and future operator workflows.
 - `remote-exec-broker`
-  - Public MCP server over stdio.
+  - Public MCP server over stdio by default, or over streamable HTTP when configured.
   - Accepts tool calls with a required `target` for machine-local operations.
   - Owns opaque public `session_id` values for live command sessions.
   - Can optionally expose the broker host itself as `target: "local"` for daemon-backed `exec_command`, `write_stdin`, `apply_patch`, and `view_image`.
   - Always provides broker-host filesystem access for `transfer_files` endpoints that use `target: "local"`, even when the broker `[local]` target is disabled.
+- `remote-exec`
+  - CLI client for the broker's public MCP tool surface.
+  - Can spawn `remote-exec-broker <config>` over stdio or connect to a broker streamable HTTP endpoint.
 - `remote-exec-daemon`
   - Per-machine daemon over mTLS JSON/HTTP.
   - Executes commands, manages local sessions, applies patches, reads images, and serves transfer archives.
@@ -38,6 +41,7 @@ Everything under `docs/` is historical implementation detail and planning contex
 ## Architecture
 
 - Agents talk only to the broker.
+- The broker can expose MCP over stdio or streamable HTTP.
 - Agents can call `list_targets` to discover configured logical target names and cached daemon metadata when available.
 - When broker `[local]` config is enabled, `list_targets` also includes `local` for the broker host.
 - `list_targets` is broker-local and does not probe daemons at read time.
@@ -66,6 +70,7 @@ Daemon config covers:
 
 Broker config covers one entry per target:
 
+- optional MCP transport selection
 - optional broker-host sandbox allow/deny rules for exec `cwd`, reads, and writes
 - optional broker-side transfer compression support toggle
 - optional broker-side MCP structured-content toggle
@@ -76,6 +81,11 @@ Broker config covers one entry per target:
 - expected daemon target name
 - `allow_insecure_http = true` when a target intentionally uses `http://`
 - optional `[local]` broker-host config with default working directory, login-shell policy, PTY mode, and default shell
+
+MCP transport config covers:
+
+- `stdio` by default when `[mcp]` is omitted
+- `streamable_http` with a listen address, path, optional stateful-session mode, and optional SSE timing overrides
 
 ## Observability
 
@@ -342,6 +352,31 @@ Start the broker:
 cargo run -p remote-exec-broker -- configs/broker.example.toml
 ```
 
+Call the broker over stdio by spawning the companion broker binary:
+
+```bash
+cargo run -p remote-exec-broker --bin remote-exec -- \
+  --broker-config configs/broker.example.toml \
+  list-targets
+```
+
+Expose the broker over streamable HTTP instead of stdio:
+
+```toml
+[mcp]
+transport = "streamable_http"
+listen = "127.0.0.1:8787"
+path = "/mcp"
+```
+
+Then connect with the CLI over HTTP:
+
+```bash
+cargo run -p remote-exec-broker --bin remote-exec -- \
+  --broker-url http://127.0.0.1:8787/mcp \
+  list-targets
+```
+
 ## Trust model
 
 Selecting a target is equivalent to `danger-full-access` on that machine unless static sandbox config restricts the relevant path-based operation.
@@ -367,6 +402,8 @@ Configured remote targets may not be named `local`.
 ## Current status
 
 - Core remote tools are implemented: `list_targets`, `exec_command`, `write_stdin`, `apply_patch`, `view_image`, and `transfer_files`.
+- The broker now supports MCP stdio and streamable HTTP transports.
+- A companion `remote-exec` CLI client can call the broker over stdio or streamable HTTP.
 - The broker can optionally expose its own host as `target: "local"` for daemon-backed exec, stdin polling, patch, and image workflows.
 - Static path-based sandboxing is available for exec `cwd`, reads, and writes on both daemons and broker-host local access paths.
 - Broker and daemon session handling are hardened for concurrent exec workloads and precise restart/session-loss behavior.

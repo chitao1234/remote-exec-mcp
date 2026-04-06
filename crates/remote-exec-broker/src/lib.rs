@@ -1,3 +1,4 @@
+pub mod client;
 pub mod config;
 pub mod daemon_client;
 pub mod local_backend;
@@ -203,15 +204,17 @@ impl BrokerState {
 
 pub async fn run(config: config::BrokerConfig) -> anyhow::Result<()> {
     install_crypto_provider();
+    let mcp = config.mcp.clone();
     tracing::info!(
         configured_targets = config.targets.len(),
         local_target_enabled = config.local.is_some(),
         disable_structured_content = config.disable_structured_content,
+        mcp_transport = mcp_transport_name(&mcp),
         "starting broker"
     );
     let state = build_state(config).await?;
     tracing::info!(configured_targets = state.targets.len(), "broker ready");
-    mcp_server::serve_stdio(state).await
+    mcp_server::serve(state, &mcp).await
 }
 
 async fn build_state(config: config::BrokerConfig) -> anyhow::Result<BrokerState> {
@@ -321,6 +324,13 @@ fn unsupported_local_transfer_error() -> DaemonClientError {
     }
 }
 
+fn mcp_transport_name(config: &config::McpServerConfig) -> &'static str {
+    match config {
+        config::McpServerConfig::Stdio => "stdio",
+        config::McpServerConfig::StreamableHttp { .. } => "streamable_http",
+    }
+}
+
 pub fn install_crypto_provider() {
     static INIT: Once = Once::new();
 
@@ -348,6 +358,7 @@ mod tests {
         let missing_shell = r"C:\definitely\missing\remote-exec-shell.exe";
 
         let err = match build_state(BrokerConfig {
+            mcp: Default::default(),
             host_sandbox: None,
             enable_transfer_compression: true,
             disable_structured_content: false,
