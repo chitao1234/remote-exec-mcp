@@ -73,17 +73,8 @@ fn resolve_hunk_start(
     match hunk.change_context.as_ref() {
         Some(ctx) => {
             let search_start = search_start.min(lines.len());
-            let found = if hunk.is_end_of_file {
-                lines[search_start..]
-                    .iter()
-                    .rposition(|line| line == ctx)
-                    .map(|idx| idx + search_start)
-            } else {
-                lines[search_start..]
-                    .iter()
-                    .position(|line| line == ctx)
-                    .map(|idx| idx + search_start)
-            };
+
+            let found = matcher::seek_sequence(lines, &[ctx.clone()], search_start, false);
             found.ok_or_else(|| anyhow::anyhow!("context line `{ctx}` not found"))
         }
         None => Ok(search_start.min(lines.len())),
@@ -316,5 +307,16 @@ mod tests {
         let hunks = vec![chunk(None, &[""], &["omega"], true)];
 
         assert_eq!(apply_hunks(current, &hunks).unwrap(), "alpha\nomega\n");
+    }
+
+    #[test]
+    fn change_context_matches_with_trailing_whitespace() {
+        let current = "alpha\nmarker  \ntail\n";
+        let hunks = vec![chunk(Some("marker"), &[], &["inserted"], false)];
+
+        assert_eq!(
+            apply_hunks(current, &hunks).unwrap(),
+            "alpha\ninserted\nmarker  \ntail\n"
+        );
     }
 }
