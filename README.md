@@ -290,6 +290,7 @@ cargo fmt --all --check
 - `max_output_tokens` is enforced by the daemon for command output.
 - Each target daemon keeps at most `64` live exec sessions. When full, it protects the `8` most recently touched sessions, prunes exited sessions first, otherwise prunes the oldest non-protected live session, and terminates the pruned process.
 - `apply_patch` supports the documented `*** End of File` marker.
+- `apply_patch` preserves an updated file's existing `LF` versus `CRLF` line ending style.
 - Successful `apply_patch` calls return text output only; they do not expose MCP `structuredContent`.
 - `exec_command` intercepted into `apply_patch` always returns a warning in structured content `warnings` when structured content is enabled, and in normal text output either way.
 - `exec_command` returns a warning in structured content `warnings` when structured content is enabled, and in normal text output when a target crosses from `59` to `60` open exec sessions.

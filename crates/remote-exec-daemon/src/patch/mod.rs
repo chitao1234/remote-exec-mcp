@@ -14,6 +14,9 @@ use remote_exec_proto::sandbox::SandboxError;
 
 use crate::AppState;
 
+const LF: &str = "\n";
+const CRLF: &str = "\r\n";
+
 pub async fn apply_patch(
     State(state): State<Arc<AppState>>,
     Json(req): Json<PatchApplyRequest>,
@@ -85,7 +88,11 @@ async fn execute_actions(
                 remove_source,
             } => {
                 let current = tokio::fs::read_to_string(&source_path).await?;
-                let content = ensure_trailing_newline(engine::apply_hunks(&current, &hunks)?);
+                let line_ending = detect_line_ending(&current);
+                let content = ensure_trailing_newline(
+                    engine::apply_hunks(&current, &hunks, line_ending)?,
+                    line_ending,
+                );
                 if let Some(parent) = destination_path.parent() {
                     tokio::fs::create_dir_all(parent).await?;
                 }
@@ -110,9 +117,25 @@ fn map_patch_error(err: anyhow::Error) -> (StatusCode, Json<RpcErrorBody>) {
     crate::exec::rpc_error(code, err.to_string())
 }
 
-pub(super) fn ensure_trailing_newline(mut text: String) -> String {
+fn detect_line_ending(text: &str) -> &'static str {
+    let bytes = text.as_bytes();
+    for idx in 0..bytes.len() {
+        if bytes[idx] != b'\n' {
+            continue;
+        }
+        return if idx > 0 && bytes[idx - 1] == b'\r' {
+            CRLF
+        } else {
+            LF
+        };
+    }
+
+    LF
+}
+
+pub(super) fn ensure_trailing_newline(mut text: String, line_ending: &str) -> String {
     if !text.ends_with('\n') {
-        text.push('\n');
+        text.push_str(line_ending);
     }
     text
 }

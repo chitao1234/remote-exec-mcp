@@ -264,6 +264,7 @@ How to use it:
 - Use the same patch discipline as the normal Codex `apply_patch` tool.
 - Relative file paths in the patch are resolved from `workdir` when provided.
 - The patch engine supports the documented `*** End of File` marker.
+- Updating an existing file preserves its current `LF` versus `CRLF` line ending style.
 - This tool is target-local. It does not move bytes between endpoints.
 
 Result behavior:

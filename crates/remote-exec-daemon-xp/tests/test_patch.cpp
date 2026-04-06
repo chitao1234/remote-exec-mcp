@@ -46,6 +46,19 @@ int main() {
     assert(update_result.output.find("M hello.txt") != std::string::npos);
     assert(read_text(root / "hello.txt") == "hello xp\n");
 
+    write_text(root / "crlf.txt", "hello\r\nworld\r\n");
+    const std::string crlf_patch =
+        "*** Begin Patch\n"
+        "*** Update File: crlf.txt\n"
+        "@@\n"
+        "-hello\n"
+        "+hello xp\n"
+        "*** End Patch\n";
+
+    PatchApplyResult crlf_result = apply_patch(root.string(), crlf_patch);
+    assert(crlf_result.output.find("M crlf.txt") != std::string::npos);
+    assert(read_text(root / "crlf.txt") == "hello xp\r\nworld\r\n");
+
     const std::string add_patch =
         "*** Begin Patch\n"
         "*** Add File: new.txt\n"

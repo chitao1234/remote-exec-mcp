@@ -38,7 +38,7 @@ pub async fn resolve_action(
             crate::exec::ensure_sandbox_access(state, SandboxAccess::Write, &absolute_path)?;
             Ok(ResolvedAction::Add {
                 path: absolute_path.clone(),
-                content: ensure_trailing_newline(lines.join("\n")),
+                content: ensure_trailing_newline(lines.join("\n"), "\n"),
                 summary_path: display_relative(cwd, &absolute_path),
             })
         }

@@ -1,7 +1,11 @@
 use super::matcher;
 use super::parser::UpdateChunk;
 
-pub fn apply_hunks(current: &str, hunks: &[UpdateChunk]) -> anyhow::Result<String> {
+pub fn apply_hunks(
+    current: &str,
+    hunks: &[UpdateChunk],
+    line_ending: &str,
+) -> anyhow::Result<String> {
     let original_lines = split_current_lines(current);
     let replacements = plan_replacements(&original_lines, hunks)?;
     let mut lines = original_lines;
@@ -10,7 +14,7 @@ pub fn apply_hunks(current: &str, hunks: &[UpdateChunk]) -> anyhow::Result<Strin
         lines.splice(replacement.start..replacement.end, replacement.new_lines);
     }
 
-    Ok(lines.join("\n"))
+    Ok(lines.join(line_ending))
 }
 
 #[derive(Debug, Clone)]
@@ -61,7 +65,10 @@ fn split_current_lines(current: &str) -> Vec<String> {
     if current.is_empty() {
         Vec::new()
     } else {
-        current.split('\n').map(str::to_string).collect()
+        current
+            .split('\n')
+            .map(|line| line.strip_suffix('\r').unwrap_or(line).to_string())
+            .collect()
     }
 }
 
@@ -265,7 +272,7 @@ mod tests {
         let hunks = vec![chunk(None, &[], &["gamma"], false)];
 
         assert_eq!(
-            apply_hunks(current, &hunks).unwrap(),
+            apply_hunks(current, &hunks, "\n").unwrap(),
             "alpha\nbeta\ngamma\n"
         );
     }
@@ -275,7 +282,10 @@ mod tests {
         let current = "alpha\nbeta";
         let hunks = vec![chunk(None, &["beta", ""], &["beta", "gamma", ""], true)];
 
-        assert_eq!(apply_hunks(current, &hunks).unwrap(), "alpha\nbeta\ngamma");
+        assert_eq!(
+            apply_hunks(current, &hunks, "\n").unwrap(),
+            "alpha\nbeta\ngamma"
+        );
     }
 
     #[test]
@@ -283,7 +293,7 @@ mod tests {
         let current = "beta\nomega\ntail";
         let hunks = vec![chunk(None, &["beta", ""], &["beta", "gamma", ""], true)];
 
-        let err = apply_hunks(current, &hunks).unwrap_err();
+        let err = apply_hunks(current, &hunks, "\n").unwrap_err();
 
         assert!(err.to_string().contains("failed to find hunk lines"));
     }
@@ -294,7 +304,7 @@ mod tests {
         let hunks = vec![chunk(None, &["before"], &["after"], true)];
 
         assert_eq!(
-            apply_hunks(current, &hunks).unwrap(),
+            apply_hunks(current, &hunks, "\n").unwrap(),
             "before\nmiddle\nafter\n"
         );
     }
@@ -304,7 +314,10 @@ mod tests {
         let current = "alpha\n\n";
         let hunks = vec![chunk(None, &[""], &["omega"], true)];
 
-        assert_eq!(apply_hunks(current, &hunks).unwrap(), "alpha\nomega\n");
+        assert_eq!(
+            apply_hunks(current, &hunks, "\n").unwrap(),
+            "alpha\nomega\n"
+        );
     }
 
     #[test]
@@ -313,8 +326,19 @@ mod tests {
         let hunks = vec![chunk(Some("marker"), &[], &["inserted"], false)];
 
         assert_eq!(
-            apply_hunks(current, &hunks).unwrap(),
+            apply_hunks(current, &hunks, "\n").unwrap(),
             "alpha\ninserted\nmarker  \ntail\n"
+        );
+    }
+
+    #[test]
+    fn crlf_input_round_trips_as_crlf() {
+        let current = "alpha\r\nbeta\r\n";
+        let hunks = vec![chunk(None, &["alpha"], &["omega"], false)];
+
+        assert_eq!(
+            apply_hunks(current, &hunks, "\r\n").unwrap(),
+            "omega\r\nbeta\r\n"
         );
     }
 
@@ -323,7 +347,7 @@ mod tests {
         let current = "alpha";
         let hunks = vec![chunk(None, &[""], &["omega"], true)];
 
-        let err = apply_hunks(current, &hunks).unwrap_err();
+        let err = apply_hunks(current, &hunks, "\n").unwrap_err();
 
         assert!(err.to_string().contains("failed to find hunk lines"));
     }

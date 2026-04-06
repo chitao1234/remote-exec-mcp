@@ -22,6 +22,39 @@ async fn add_file_overwrites_existing_content() {
     assert_eq!(tokio::fs::read_to_string(path).await.unwrap(), "new\n");
 }
 
+#[tokio::test]
+async fn update_file_preserves_crlf_line_endings() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let path = fixture.workdir.join("crlf.txt");
+    tokio::fs::write(&path, b"hello\r\nworld\r\n")
+        .await
+        .unwrap();
+
+    let response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Update File: crlf.txt\n",
+                    "@@\n",
+                    "-hello\n",
+                    "+hello daemon\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert!(response.output.contains("M crlf.txt"));
+    assert_eq!(
+        tokio::fs::read(path).await.unwrap(),
+        b"hello daemon\r\nworld\r\n"
+    );
+}
+
 #[cfg(windows)]
 #[tokio::test]
 async fn apply_patch_accepts_msys_style_workdir_on_windows() {

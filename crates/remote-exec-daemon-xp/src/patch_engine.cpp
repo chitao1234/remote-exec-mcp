@@ -42,6 +42,11 @@ struct PatchAction {
     std::vector<UpdateChunk> chunks;
 };
 
+enum LineEndingKind {
+    LINE_ENDING_LF,
+    LINE_ENDING_CRLF,
+};
+
 char native_separator() {
 #ifdef _WIN32
     return '\\';
@@ -225,16 +230,37 @@ std::vector<std::string> split_lines(const std::string& text, bool* trailing_new
     return lines;
 }
 
-std::string join_lines(const std::vector<std::string>& lines, bool trailing_newline) {
+LineEndingKind detect_line_ending(const std::string& text) {
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        if (text[i] != '\n') {
+            continue;
+        }
+        if (i > 0 && text[i - 1] == '\r') {
+            return LINE_ENDING_CRLF;
+        }
+        return LINE_ENDING_LF;
+    }
+    return LINE_ENDING_LF;
+}
+
+const char* line_ending_text(LineEndingKind line_ending) {
+    return line_ending == LINE_ENDING_CRLF ? "\r\n" : "\n";
+}
+
+std::string join_lines(
+    const std::vector<std::string>& lines,
+    bool trailing_newline,
+    LineEndingKind line_ending
+) {
     std::ostringstream out;
     for (std::size_t i = 0; i < lines.size(); ++i) {
         if (i != 0) {
-            out << '\n';
+            out << line_ending_text(line_ending);
         }
         out << lines[i];
     }
     if (trailing_newline && !lines.empty()) {
-        out << '\n';
+        out << line_ending_text(line_ending);
     }
     return out.str();
 }
@@ -465,6 +491,7 @@ static std::string apply_update_chunks(
     const std::vector<UpdateChunk>& chunks
 ) {
     bool had_trailing_newline = false;
+    const LineEndingKind line_ending = detect_line_ending(old_text);
     std::vector<std::string> lines = split_lines(old_text, &had_trailing_newline);
     std::size_t cursor = 0;
 
@@ -472,11 +499,11 @@ static std::string apply_update_chunks(
         apply_update_chunk(&lines, &cursor, chunks[i]);
     }
 
-    return join_lines(lines, had_trailing_newline || !lines.empty());
+    return join_lines(lines, had_trailing_newline || !lines.empty(), line_ending);
 }
 
 std::string render_added_content(const std::vector<std::string>& lines) {
-    return join_lines(lines, !lines.empty());
+    return join_lines(lines, !lines.empty(), LINE_ENDING_LF);
 }
 
 } // namespace
