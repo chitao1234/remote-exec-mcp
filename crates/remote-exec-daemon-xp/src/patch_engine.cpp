@@ -449,7 +449,7 @@ static void apply_update_chunk(
 
     if (chunk.has_change_context) {
         const std::size_t anchor = search_start;
-        const std::size_t insert_at = chunk.is_end_of_file ? anchor + 1 : anchor;
+        const std::size_t insert_at = chunk.is_end_of_file ? lines->size() : anchor;
         lines->insert(lines->begin() + insert_at, chunk.new_lines.begin(), chunk.new_lines.end());
         *cursor = insert_at + chunk.new_lines.size() + (chunk.is_end_of_file ? 0 : 1);
         return;

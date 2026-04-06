@@ -131,6 +131,19 @@ int main() {
     assert(append_result.output.find("M append.txt") != std::string::npos);
     assert(read_text(root / "append.txt") == "before\ntail\nafter\n");
 
+    write_text(root / "append-repeat.txt", "before\ntail\nmiddle\ntail\n");
+    const std::string append_repeat_patch =
+        "*** Begin Patch\n"
+        "*** Update File: append-repeat.txt\n"
+        "@@ tail\n"
+        "+after\n"
+        "*** End of File\n"
+        "*** End Patch\n";
+
+    PatchApplyResult append_repeat_result = apply_patch(root.string(), append_repeat_patch);
+    assert(append_repeat_result.output.find("M append-repeat.txt") != std::string::npos);
+    assert(read_text(root / "append-repeat.txt") == "before\ntail\nmiddle\ntail\nafter\n");
+
     write_text(root / "repeat.txt", "a\nmarker\nb\nmarker\nc\n");
     const std::string repeat_patch =
         "*** Begin Patch\n"
