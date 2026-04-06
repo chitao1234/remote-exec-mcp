@@ -427,9 +427,17 @@ static void apply_update_chunk(
     std::size_t* cursor,
     const UpdateChunk& chunk
 ) {
+    std::size_t search_start = std::min(*cursor, lines->size());
+    if (chunk.has_change_context) {
+        search_start = find_context_anchor(*lines, chunk.change_context, *cursor, false);
+        if (search_start == std::string::npos) {
+            throw std::runtime_error("patch context not found");
+        }
+    }
+
     if (!chunk.old_lines.empty()) {
         const std::size_t start =
-            find_sequence(*lines, chunk.old_lines, *cursor, chunk.is_end_of_file);
+            find_sequence(*lines, chunk.old_lines, search_start, chunk.is_end_of_file);
         if (start == std::string::npos) {
             throw std::runtime_error("patch removal not found");
         }
@@ -440,11 +448,7 @@ static void apply_update_chunk(
     }
 
     if (chunk.has_change_context) {
-        const std::size_t anchor =
-            find_context_anchor(*lines, chunk.change_context, *cursor, chunk.is_end_of_file);
-        if (anchor == std::string::npos) {
-            throw std::runtime_error("patch context not found");
-        }
+        const std::size_t anchor = search_start;
         const std::size_t insert_at = chunk.is_end_of_file ? anchor + 1 : anchor;
         lines->insert(lines->begin() + insert_at, chunk.new_lines.begin(), chunk.new_lines.end());
         *cursor = insert_at + chunk.new_lines.size() + (chunk.is_end_of_file ? 0 : 1);

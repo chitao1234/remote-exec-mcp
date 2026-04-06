@@ -145,6 +145,22 @@ int main() {
     assert(repeat_result.output.find("M repeat.txt") != std::string::npos);
     assert(read_text(root / "repeat.txt") == "a\nfirst\nmarker\nb\nsecond\nmarker\nc\n");
 
+    write_text(root / "repeat-replace.txt", "old\nmarker\nold\nmarker\nold\n");
+    const std::string repeat_replace_patch =
+        "*** Begin Patch\n"
+        "*** Update File: repeat-replace.txt\n"
+        "@@ marker\n"
+        "-old\n"
+        "+first\n"
+        "@@ marker\n"
+        "-old\n"
+        "+second\n"
+        "*** End Patch\n";
+
+    PatchApplyResult repeat_replace_result = apply_patch(root.string(), repeat_replace_patch);
+    assert(repeat_replace_result.output.find("M repeat-replace.txt") != std::string::npos);
+    assert(read_text(root / "repeat-replace.txt") == "old\nmarker\nfirst\nmarker\nsecond\n");
+
     write_text(root / "partial-first.txt", "before\n");
     const std::string partial_patch =
         "*** Begin Patch\n"
