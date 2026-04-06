@@ -138,6 +138,67 @@ async fn update_file_replaces_blank_last_real_line_at_end_of_file() {
 }
 
 #[tokio::test]
+async fn update_file_accepts_first_chunk_without_explicit_header() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let path = fixture.workdir.join("plain.txt");
+    tokio::fs::write(&path, "before\nmiddle\n").await.unwrap();
+
+    let response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Update File: plain.txt\n",
+                    "-before\n",
+                    "+after\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert!(response.output.contains("M plain.txt"));
+    assert_eq!(
+        tokio::fs::read_to_string(path).await.unwrap(),
+        "after\nmiddle\n",
+    );
+}
+
+#[tokio::test]
+async fn update_file_matches_old_lines_ignoring_trailing_whitespace() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let path = fixture.workdir.join("plain.txt");
+    tokio::fs::write(&path, "alpha  \ntail\n").await.unwrap();
+
+    let response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Update File: plain.txt\n",
+                    "@@\n",
+                    "-alpha\n",
+                    "+omega\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert!(response.output.contains("M plain.txt"));
+    assert_eq!(
+        tokio::fs::read_to_string(path).await.unwrap(),
+        "omega\ntail\n",
+    );
+}
+
+#[tokio::test]
 async fn update_file_matches_change_context_after_unicode_normalization() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let path = fixture.workdir.join("plain.txt");
@@ -166,6 +227,39 @@ async fn update_file_matches_change_context_after_unicode_normalization() {
     assert_eq!(
         tokio::fs::read_to_string(path).await.unwrap(),
         "start\ninserted\nalpha — “beta\u{00a0}gamma”\ntail\n"
+    );
+}
+
+#[tokio::test]
+async fn update_file_matches_old_lines_after_unicode_normalization() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let path = fixture.workdir.join("plain.txt");
+    tokio::fs::write(&path, "start\nalpha — “beta\u{00a0}gamma”\ntail\n")
+        .await
+        .unwrap();
+
+    let response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Update File: plain.txt\n",
+                    "@@\n",
+                    "-alpha - \"beta gamma\"\n",
+                    "+omega\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert!(response.output.contains("M plain.txt"));
+    assert_eq!(
+        tokio::fs::read_to_string(path).await.unwrap(),
+        "start\nomega\ntail\n",
     );
 }
 
