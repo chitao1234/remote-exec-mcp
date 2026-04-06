@@ -104,14 +104,14 @@ fn resolve_segments(
         return Ok(initial);
     }
 
-    if matcher::seek_sequence(lines, &initial.old_lines, start, hunk.is_end_of_file).is_some() {
+    if seek_hunk_sequence(lines, &initial.old_lines, start, hunk.is_end_of_file).is_some() {
         return Ok(initial);
     }
 
     if hunk.is_end_of_file {
         if let Some(retry) = strip_trailing_empty_sentinel(&initial) {
             if retry.old_lines.is_empty()
-                || matcher::seek_sequence(lines, &retry.old_lines, start, true).is_some()
+                || seek_hunk_sequence(lines, &retry.old_lines, start, true).is_some()
             {
                 return Ok(retry);
             }
@@ -149,14 +149,30 @@ fn resolve_replacement_start(
         return Ok(eof_insert_index(lines));
     }
 
-    matcher::seek_sequence(lines, &segments.old_lines, start, hunk.is_end_of_file).ok_or_else(
-        || {
-            anyhow::anyhow!(
-                "failed to find hunk lines `{}`",
-                segments.old_lines.join("\n")
-            )
-        },
-    )
+    seek_hunk_sequence(lines, &segments.old_lines, start, hunk.is_end_of_file).ok_or_else(|| {
+        anyhow::anyhow!(
+            "failed to find hunk lines `{}`",
+            segments.old_lines.join("\n")
+        )
+    })
+}
+
+fn seek_hunk_sequence(
+    lines: &[String],
+    pattern: &[String],
+    start: usize,
+    is_end_of_file: bool,
+) -> Option<usize> {
+    if !is_end_of_file {
+        return matcher::seek_sequence(lines, pattern, start, false);
+    }
+
+    let eof_start = lines.len().checked_sub(pattern.len())?;
+    if start > eof_start {
+        return None;
+    }
+
+    matcher::seek_sequence(lines, pattern, eof_start, true).filter(|&idx| idx == eof_start)
 }
 
 fn eof_insert_index(lines: &[String]) -> usize {
@@ -224,5 +240,15 @@ mod tests {
         let hunks = vec![chunk(None, &["beta", ""], &["beta", "gamma", ""], true)];
 
         assert_eq!(apply_hunks(current, &hunks).unwrap(), "alpha\nbeta\ngamma");
+    }
+
+    #[test]
+    fn eof_retry_does_not_match_non_terminal_occurrence() {
+        let current = "beta\nomega\ntail";
+        let hunks = vec![chunk(None, &["beta", ""], &["beta", "gamma", ""], true)];
+
+        let err = apply_hunks(current, &hunks).unwrap_err();
+
+        assert!(err.to_string().contains("failed to find hunk lines"));
     }
 }
