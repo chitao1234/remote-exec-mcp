@@ -1,4 +1,5 @@
 mod engine;
+mod matcher;
 pub mod parser;
 mod verify;
 
