@@ -35,7 +35,7 @@ Do not use this skill for ordinary work in your current Codex workspace. `remote
 - Choosing a `target` grants broad access on that machine, optionally narrowed only by static sandbox config for the relevant path-based operation.
 - One command call runs on one endpoint only. If bytes must cross endpoints, use `transfer_files`.
 - `list_targets` is inventory, not a live health check. A target with `daemon_info: null` may still be configured and valid.
-- A broker may be configured with `disable_structured_content = true`. When that is enabled, successful tool calls omit structured content and you must rely on normal text or image content instead.
+- A broker may be configured with `disable_structured_content = true`. When that is enabled, successful structured-result tool calls omit structured content and you must rely on normal text or image content instead. `apply_patch` is text-only either way.
 
 ## When To Use Which Tool
 
@@ -56,7 +56,7 @@ Do not use this skill for ordinary work in your current Codex workspace. `remote
 
 ## Tool Contracts
 
-The structured result shapes below apply when the broker leaves structured content enabled.
+The structured result shapes below apply when the broker leaves structured content enabled. `apply_patch` is the exception and remains text-only.
 
 ### `list_targets`
 
@@ -269,14 +269,7 @@ How to use it:
 Result behavior:
 
 - Human text reports the updated files.
-- Structured content includes:
-
-```json
-{
-  "success": true,
-  "output": "Success. Updated the following files:\nA src/main.rs\n"
-}
-```
+- Successful calls do not include structured content. Read the normal text output for the patch summary.
 
 ### `view_image`
 

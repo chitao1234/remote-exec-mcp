@@ -8,28 +8,39 @@ use rmcp::{
 
 pub struct ToolCallOutput {
     pub content: Vec<Content>,
-    pub structured: serde_json::Value,
+    pub structured: Option<serde_json::Value>,
 }
 
 impl ToolCallOutput {
     pub fn text_and_structured(text: String, structured: serde_json::Value) -> Self {
         Self {
             content: vec![Content::text(text)],
-            structured,
+            structured: Some(structured),
+        }
+    }
+
+    pub fn text(text: String) -> Self {
+        Self {
+            content: vec![Content::text(text)],
+            structured: None,
         }
     }
 
     pub fn content_and_structured(content: Vec<Content>, structured: serde_json::Value) -> Self {
         Self {
             content,
-            structured,
+            structured: Some(structured),
         }
     }
 
     pub fn into_call_tool_result(self, include_structured_content: bool) -> CallToolResult {
         CallToolResult {
             content: self.content,
-            structured_content: include_structured_content.then_some(self.structured),
+            structured_content: if include_structured_content {
+                self.structured
+            } else {
+                None
+            },
             is_error: Some(false),
             meta: None,
         }

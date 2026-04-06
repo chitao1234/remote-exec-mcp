@@ -1,4 +1,4 @@
-use remote_exec_proto::public::{ApplyPatchInput, ApplyPatchResult};
+use remote_exec_proto::public::ApplyPatchInput;
 use remote_exec_proto::rpc::PatchApplyRequest;
 
 use crate::daemon_client::DaemonClientError;
@@ -60,11 +60,5 @@ pub async fn apply_patch(
         "broker tool completed"
     );
 
-    Ok(ToolCallOutput::text_and_structured(
-        output.clone(),
-        serde_json::to_value(ApplyPatchResult {
-            success: true,
-            output,
-        })?,
-    ))
+    Ok(ToolCallOutput::text(output))
 }

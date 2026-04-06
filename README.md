@@ -41,7 +41,7 @@ Everything under `docs/` is historical implementation detail and planning contex
 - Agents can call `list_targets` to discover configured logical target names and cached daemon metadata when available.
 - When broker `[local]` config is enabled, `list_targets` also includes `local` for the broker host.
 - `list_targets` is broker-local and does not probe daemons at read time.
-- The broker validates `target`, forwards the request to the selected daemon, and returns MCP-compatible content plus structured JSON unless `disable_structured_content = true` is configured.
+- The broker validates `target`, forwards the request to the selected daemon, and returns MCP-compatible content plus structured JSON for tools that expose it unless `disable_structured_content = true` is configured.
 - For the optional `local` target, the broker reuses daemon execution logic in-process instead of asking operators to run a second same-host daemon manually.
 - Each daemon serves exactly one configured target machine.
 - Live exec sessions are broker-routed by opaque public `session_id`, not by daemon-local process identifiers.
@@ -290,7 +290,7 @@ cargo fmt --all --check
 - `max_output_tokens` is enforced by the daemon for command output.
 - Each target daemon keeps at most `64` live exec sessions. When full, it protects the `8` most recently touched sessions, prunes exited sessions first, otherwise prunes the oldest non-protected live session, and terminates the pruned process.
 - `apply_patch` supports the documented `*** End of File` marker.
-- When structured content is enabled, successful `apply_patch` calls return `success: true` and the same patch summary text in `output`.
+- Successful `apply_patch` calls return text output only; they do not expose MCP `structuredContent`.
 - `exec_command` intercepted into `apply_patch` always returns a warning in structured content `warnings` when structured content is enabled, and in normal text output either way.
 - `exec_command` returns a warning in structured content `warnings` when structured content is enabled, and in normal text output when a target crosses from `59` to `60` open exec sessions.
 - Broker config supports `disable_structured_content = true` to omit MCP `structuredContent` from successful tool responses.

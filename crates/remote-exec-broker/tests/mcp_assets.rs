@@ -6,7 +6,7 @@ use remote_exec_proto::rpc::RpcErrorBody;
 use rmcp::model::PaginatedRequestParams;
 
 #[tokio::test]
-async fn apply_patch_returns_plain_text_plus_structured_output_and_success() {
+async fn apply_patch_returns_plain_text_without_structured_output() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     let result = fixture
         .call_tool(
@@ -24,13 +24,7 @@ async fn apply_patch_returns_plain_text_plus_structured_output_and_success() {
             .text_output
             .contains("Success. Updated the following files:")
     );
-    assert_eq!(
-        result.structured_content,
-        serde_json::json!({
-            "success": true,
-            "output": "Success. Updated the following files:\nA hello.txt\n"
-        })
-    );
+    assert_eq!(result.structured_content, serde_json::Value::Null);
 }
 
 #[tokio::test]
@@ -51,13 +45,7 @@ async fn apply_patch_forwards_to_explicitly_enabled_insecure_http_target() {
             .text_output
             .contains("Success. Updated the following files:")
     );
-    assert_eq!(
-        result.structured_content,
-        serde_json::json!({
-            "success": true,
-            "output": "Success. Updated the following files:\nA hello.txt\n"
-        })
-    );
+    assert_eq!(result.structured_content, serde_json::Value::Null);
     assert_eq!(
         fixture
             .last_patch_request()

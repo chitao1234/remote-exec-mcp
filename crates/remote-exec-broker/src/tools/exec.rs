@@ -184,7 +184,10 @@ pub async fn write_stdin(
     write_stdin_inner(state, input)
         .await
         .inspect(|output| {
-            let structured = &output.structured;
+            let structured = output
+                .structured
+                .as_ref()
+                .expect("write_stdin tool output should include structured content");
             tracing::info!(
                 tool = "write_stdin",
                 session_id = %session_id,
