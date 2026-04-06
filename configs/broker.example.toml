@@ -42,6 +42,8 @@ expected_daemon_name = "builder-xp"
 #
 # Optional broker-host local target for exec_command, write_stdin, apply_patch, and view_image.
 # When enabled, list_targets includes `local`.
+# `transfer_files` can still use broker-host filesystem access with `target: "local"` even if
+# this section is omitted.
 #
 #[local]
 #default_workdir = "/srv/local-work"

@@ -32,7 +32,7 @@ Do not use this skill for ordinary work in your current Codex workspace. `remote
 - `local` means the broker host, not your current Codex workspace.
 - For `exec_command`, `write_stdin`, `apply_patch`, and `view_image`, `local` exists only when the broker-host local target is enabled.
 - For `transfer_files`, `local` always means the broker-host filesystem endpoint and may be usable even when it does not appear in `list_targets`.
-- Choosing a `target` is equivalent to full access on that machine for this v1 trust model.
+- Choosing a `target` grants broad access on that machine, optionally narrowed only by static sandbox config for the relevant path-based operation.
 - One command call runs on one endpoint only. If bytes must cross endpoints, use `transfer_files`.
 - `list_targets` is inventory, not a live health check. A target with `daemon_info: null` may still be configured and valid.
 
@@ -77,7 +77,8 @@ Structured result shape:
         "hostname": "builder-a-host",
         "platform": "linux",
         "arch": "x86_64",
-        "supports_pty": true
+        "supports_pty": true,
+        "supports_transfer_compression": true
       }
     },
     {
@@ -93,6 +94,7 @@ Use the result this way:
 - Reuse `targets[].name` exactly in later tool calls.
 - Read `daemon_info.platform` to choose endpoint-native absolute paths for `transfer_files`.
 - Read `daemon_info.supports_pty` before using `tty: true`.
+- Read `daemon_info.supports_transfer_compression` before requesting `compression: "zstd"` against a remote endpoint.
 - If `daemon_info` is `null`, do not invent your own meaning. It only means the broker has no current cached metadata.
 - If broker-host exec support is enabled, `local` appears here as a normal target entry.
 
@@ -325,23 +327,29 @@ Input shape:
 
 ```json
 {
-  "source": {
-    "target": "local",
-    "path": "/tmp/report.txt"
-  },
+  "sources": [
+    {
+      "target": "local",
+      "path": "/tmp/report.txt"
+    },
+    {
+      "target": "local",
+      "path": "/tmp/screenshots"
+    }
+  ],
   "destination": {
     "target": "builder-a",
-    "path": "/srv/inbox/report.txt"
+    "path": "/srv/inbox"
   },
-  "overwrite": "fail",
-  "create_parent": true
+  "overwrite": "replace",
+  "create_parent": true,
+  "compression": "none"
 }
 ```
 
 Required fields:
 
-- `source.target`
-- `source.path`
+- exactly one of `source` or `sources`
 - `destination.target`
 - `destination.path`
 - `overwrite`
@@ -352,26 +360,42 @@ Supported `overwrite` values:
 - `fail`
 - `replace`
 
+Supported `compression` values:
+
+- `none`
+- `zstd`
+
 How to use it:
 
 - Use it for `local -> remote`, `remote -> local`, `remote -> remote`, and `local -> local`.
-- Both `source.path` and `destination.path` must be absolute for their own endpoint platform.
-- `destination.path` is the exact final path to create or replace.
-- `destination.path` does not mean "copy into this directory".
-- `create_parent: true` only creates missing parents for that exact final path.
-- If `source.target` and `destination.target` are the same, the paths still must differ.
+- Provide either one `source` object or a `sources` array, never both.
+- Every source path and the destination path must be absolute for their own endpoint platform.
+- Single-source transfers treat `destination.path` as the exact final path to create or replace.
+- Multi-source transfers treat `destination.path` as a directory root and place each source beneath it using that source's basename.
+- `create_parent: true` only creates missing parents for the exact final destination path or destination root you requested.
+- If a source target and the destination target are the same, those two paths still must differ.
 - Use endpoint-native absolute paths. Linux endpoints use Unix absolute paths such as `/srv/app/file.txt`. Windows endpoints accept drive-qualified paths such as `C:/work/file.txt` and also MSYS/Cygwin-style absolute paths such as `/c/work/file.txt` and `/cygdrive/c/work/file.txt`.
+- Omit `compression` unless you specifically want compressed transfer staging. `compression` defaults to `none`.
+- Use `compression: "zstd"` only when the broker and every participating daemon support transfer compression.
 - Reach for `transfer_files` instead of `scp`, `cp`, shell redirection, or ad hoc archives whenever data must move between endpoints.
 
 Structured result fields:
 
 - `source`
+- `sources`
 - `destination`
 - `source_type`
+- `compression`
 - `bytes_copied`
 - `files_copied`
 - `directories_copied`
 - `replaced`
+
+Result interpretation:
+
+- `sources` is always present.
+- `source` is only populated for single-source compatibility.
+- `source_type` can be `file`, `directory`, or `multiple`.
 
 Example: download a remote log to broker-host `local`:
 
@@ -428,7 +452,8 @@ Example: download a remote log to broker-host `local`:
 - `remote-exec-daemon-xp` is narrower than the main daemon.
 - On XP targets, `tty: true` is rejected.
 - On XP targets, `view_image` is unavailable.
-- On XP targets, file transfer support is limited to regular files and directory trees.
+- On XP targets, `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles.
+- On XP targets, `compression: "zstd"` is unsupported. Keep transfer compression at `none`.
 - Do not assume symlink-heavy or special-file transfers work on XP.
 
 ## Common Mistakes
@@ -437,8 +462,9 @@ Example: download a remote log to broker-host `local`:
 - Forgetting that `local` means the broker host, not the current Codex workspace.
 - Running a command on one target and expecting it to read or write files on another target.
 - Using shell tricks for cross-endpoint copy instead of `transfer_files`.
-- Treating `destination.path` as a directory container instead of the exact final path.
+- Treating `destination.path` as if it had the same meaning for both single-source and multi-source transfers.
 - Sending non-absolute paths to `transfer_files`.
+- Requesting `compression: "zstd"` without checking target capability or config support.
 - Starting an interactive program without `tty: true` and then expecting writable stdin later.
 - Using `write_stdin` after the session has already exited or after a daemon restart.
 - Sending patch text through `exec_command` instead of using `apply_patch`.

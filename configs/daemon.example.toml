@@ -16,6 +16,8 @@ allow_login_shell = true
 #
 # Optional static path sandbox. Missing `allow` or `allow = []` means "allow all",
 # then `deny` can carve out exclusions.
+# `exec_cwd` applies only to the resolved starting cwd for `exec_command`.
+# `view_image`, `apply_patch`, and `transfer_files` use the resolved read/write path rules.
 #
 #[sandbox.exec_cwd]
 #allow = ["/srv/work"]
