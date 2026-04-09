@@ -21,7 +21,7 @@ where
 {
     let state = Arc::new(state);
     let app = router(state.clone());
-    crate::tls::serve_tls_with_shutdown(app, state, shutdown).await
+    crate::tls::serve_with_shutdown(app, state, shutdown).await
 }
 
 pub fn router(state: Arc<AppState>) -> Router {

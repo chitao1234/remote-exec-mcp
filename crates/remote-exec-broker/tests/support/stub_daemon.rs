@@ -271,17 +271,19 @@ pub(super) async fn spawn_named_daemon_on_addr(
             target: state.target.clone(),
             listen: addr,
             default_workdir: PathBuf::from("."),
+            transport: remote_exec_daemon::config::DaemonTransport::Tls,
             sandbox: None,
             enable_transfer_compression: state.target_supports_transfer_compression,
             allow_login_shell: true,
             pty: remote_exec_daemon::config::PtyMode::Auto,
             default_shell: None,
             process_environment: remote_exec_daemon::config::ProcessEnvironment::capture_current(),
-            tls: remote_exec_daemon::config::TlsConfig {
+            tls: Some(remote_exec_daemon::config::TlsConfig {
                 cert_pem: certs.daemon_cert.clone(),
                 key_pem: certs.daemon_key.clone(),
                 ca_pem: certs.ca_cert.clone(),
-            },
+                pinned_client_cert_pem: None,
+            }),
         }),
         default_shell: if cfg!(windows) {
             "cmd.exe".to_string()
@@ -604,6 +606,7 @@ async fn image_read(
 async fn wait_until_ready(certs: &TestCerts, addr: std::net::SocketAddr) {
     let client = reqwest::Client::builder()
         .use_rustls_tls()
+        .danger_accept_invalid_hostnames(true)
         .add_root_certificate(
             reqwest::Certificate::from_pem(&std::fs::read(&certs.ca_cert).unwrap()).unwrap(),
         )

@@ -134,6 +134,8 @@ default_workdir = {default_workdir}
 cert_pem = {daemon_cert}
 key_pem = {daemon_key}
 ca_pem = {ca_pem}
+# Optional exact broker leaf certificate pin.
+# pinned_client_cert_pem = {broker_cert}
 
 "#,
             target = toml_string(target),
@@ -142,6 +144,7 @@ ca_pem = {ca_pem}
             daemon_cert = toml_string(&daemon.cert_pem.display().to_string()),
             daemon_key = toml_string(&daemon.key_pem.display().to_string()),
             ca_pem = toml_string(&manifest.ca.cert_pem.display().to_string()),
+            broker_cert = toml_string(&manifest.broker.cert_pem.display().to_string()),
         ));
     }
 

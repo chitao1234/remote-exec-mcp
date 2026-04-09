@@ -52,6 +52,10 @@ pub struct TargetConfig {
     pub client_key_pem: Option<PathBuf>,
     #[serde(default)]
     pub allow_insecure_http: bool,
+    #[serde(default)]
+    pub skip_server_name_verification: bool,
+    #[serde(default)]
+    pub pinned_server_cert_pem: Option<PathBuf>,
     pub expected_daemon_name: Option<String>,
 }
 
@@ -72,6 +76,14 @@ impl TargetConfig {
             anyhow::ensure!(
                 self.allow_insecure_http,
                 "target `{name}` uses http://; http:// targets require allow_insecure_http = true"
+            );
+            anyhow::ensure!(
+                !self.skip_server_name_verification,
+                "target `{name}` cannot set skip_server_name_verification for http:// targets"
+            );
+            anyhow::ensure!(
+                self.pinned_server_cert_pem.is_none(),
+                "target `{name}` cannot set pinned_server_cert_pem for http:// targets"
             );
             return Ok(());
         }
@@ -319,6 +331,52 @@ expected_daemon_name = "builder-xp"
         assert_eq!(
             config.targets["builder-xp"].expected_daemon_name.as_deref(),
             Some("builder-xp")
+        );
+    }
+
+    #[tokio::test]
+    async fn load_rejects_server_name_skip_for_http_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("broker.toml");
+        tokio::fs::write(
+            &config_path,
+            r#"[targets.builder-xp]
+base_url = "http://127.0.0.1:8181"
+allow_insecure_http = true
+skip_server_name_verification = true
+"#,
+        )
+        .await
+        .unwrap();
+
+        let err = BrokerConfig::load(&config_path).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("cannot set skip_server_name_verification"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn load_rejects_server_cert_pin_for_http_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("broker.toml");
+        tokio::fs::write(
+            &config_path,
+            r#"[targets.builder-xp]
+base_url = "http://127.0.0.1:8181"
+allow_insecure_http = true
+pinned_server_cert_pem = "/tmp/pin.pem"
+"#,
+        )
+        .await
+        .unwrap();
+
+        let err = BrokerConfig::load(&config_path).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("cannot set pinned_server_cert_pem"),
+            "unexpected error: {err}"
         );
     }
 

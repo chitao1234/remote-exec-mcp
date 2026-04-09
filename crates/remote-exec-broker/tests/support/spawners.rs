@@ -4,7 +4,7 @@ use axum::serve;
 use rmcp::{ServiceExt, transport::TokioChildProcess};
 use tempfile::TempDir;
 
-use super::certs::{TestCerts, allocate_addr, write_test_certs};
+use super::certs::{TestCerts, allocate_addr, write_test_certs, write_test_certs_for_daemon_spec};
 use super::fixture::{BrokerFixture, DummyClientHandler};
 use super::stub_daemon::{
     ExecWriteBehavior, StubDaemonState, set_transfer_compression_support,
@@ -48,6 +48,7 @@ struct BrokerConfigTarget<'a> {
     name: &'a str,
     addr: std::net::SocketAddr,
     certs: &'a TestCerts,
+    extra_config: Option<&'a str>,
 }
 
 struct LocalBrokerConfig<'a> {
@@ -59,6 +60,16 @@ fn toml_string(value: &str) -> String {
 }
 
 fn render_broker_target(target: &BrokerConfigTarget<'_>) -> String {
+    let extra_config = target
+        .extra_config
+        .map(|extra| {
+            if extra.is_empty() {
+                String::new()
+            } else {
+                format!("{extra}\n")
+            }
+        })
+        .unwrap_or_default();
     format!(
         r#"[targets.{name}]
 base_url = {base_url}
@@ -66,13 +77,14 @@ ca_pem = {ca_pem}
 client_cert_pem = {client_cert_pem}
 client_key_pem = {client_key_pem}
 expected_daemon_name = {expected_daemon_name}
-"#,
+{extra_config}"#,
         name = target.name,
         base_url = toml_string(&format!("https://{}", target.addr)),
         ca_pem = toml_string(&target.certs.ca_cert.display().to_string()),
         client_cert_pem = toml_string(&target.certs.client_cert.display().to_string()),
         client_key_pem = toml_string(&target.certs.client_key.display().to_string()),
         expected_daemon_name = toml_string(target.name),
+        extra_config = extra_config,
     )
 }
 
@@ -119,6 +131,76 @@ fn write_broker_config(
     std::fs::write(path, parts.join("\n")).unwrap();
 }
 
+async fn spawn_broker_child(
+    config_path: &Path,
+) -> rmcp::service::RunningService<rmcp::RoleClient, DummyClientHandler> {
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
+    command.arg(config_path);
+    let transport = TokioChildProcess::new(command).unwrap();
+    DummyClientHandler.serve(transport).await.unwrap()
+}
+
+pub async fn spawn_broker_with_stub_daemon_and_extra_target_config(
+    certs: TestCerts,
+    extra_target_config: &str,
+) -> BrokerFixture {
+    remote_exec_daemon::install_crypto_provider();
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let (addr, stub_state) = spawn_stub_daemon(&certs).await;
+    let broker_config = tempdir.path().join("broker.toml");
+    write_broker_config(
+        &broker_config,
+        &[BrokerConfigTarget {
+            name: "builder-a",
+            addr,
+            certs: &certs,
+            extra_config: Some(extra_target_config),
+        }],
+        None,
+        None,
+        None,
+    );
+
+    let client = spawn_broker_child(&broker_config).await;
+    BrokerFixture {
+        _tempdir: tempdir,
+        client,
+        stub_state,
+    }
+}
+
+pub async fn spawn_broker_with_stub_daemon_and_daemon_spec(
+    daemon_spec: remote_exec_pki::DaemonCertSpec,
+    extra_target_config: &str,
+) -> BrokerFixture {
+    remote_exec_daemon::install_crypto_provider();
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let certs = write_test_certs_for_daemon_spec(tempdir.path(), daemon_spec);
+    let (addr, stub_state) = spawn_stub_daemon(&certs).await;
+    let broker_config = tempdir.path().join("broker.toml");
+    write_broker_config(
+        &broker_config,
+        &[BrokerConfigTarget {
+            name: "builder-a",
+            addr,
+            certs: &certs,
+            extra_config: Some(extra_target_config),
+        }],
+        None,
+        None,
+        None,
+    );
+
+    let client = spawn_broker_child(&broker_config).await;
+    BrokerFixture {
+        _tempdir: tempdir,
+        client,
+        stub_state,
+    }
+}
+
 pub async fn spawn_broker_with_stub_daemon() -> BrokerFixture {
     remote_exec_daemon::install_crypto_provider();
 
@@ -132,6 +214,7 @@ pub async fn spawn_broker_with_stub_daemon() -> BrokerFixture {
             name: "builder-a",
             addr,
             certs: &certs,
+            extra_config: None,
         }],
         None,
         None,
@@ -163,6 +246,7 @@ pub async fn spawn_broker_config_with_stub_daemon() -> BrokerConfigFixture {
             name: "builder-a",
             addr,
             certs: &certs,
+            extra_config: None,
         }],
         None,
         None,
@@ -190,6 +274,7 @@ pub async fn spawn_streamable_http_broker_with_stub_daemon() -> HttpBrokerFixtur
             name: "builder-a",
             addr: daemon_addr,
             certs: &certs,
+            extra_config: None,
         }],
         None,
         None,
@@ -236,6 +321,7 @@ pub async fn spawn_broker_with_stub_daemon_platform(
             name: "builder-a",
             addr,
             certs: &certs,
+            extra_config: None,
         }],
         None,
         None,
@@ -304,11 +390,13 @@ pub async fn spawn_broker_with_reverse_ordered_targets() -> BrokerFixture {
                 name: "builder-b",
                 addr: dead_addr,
                 certs: &certs,
+                extra_config: None,
             },
             BrokerConfigTarget {
                 name: "builder-a",
                 addr: live_addr,
                 certs: &certs,
+                extra_config: None,
             },
         ],
         None,
@@ -344,11 +432,13 @@ pub async fn spawn_broker_with_live_and_dead_targets() -> BrokerFixture {
                 name: "builder-a",
                 addr: live_addr,
                 certs: &certs,
+                extra_config: None,
             },
             BrokerConfigTarget {
                 name: "builder-b",
                 addr: dead_addr,
                 certs: &certs,
+                extra_config: None,
             },
         ],
         None,
@@ -382,6 +472,7 @@ pub async fn spawn_broker_with_retryable_exec_write_error() -> BrokerFixture {
             name: "builder-a",
             addr,
             certs: &certs,
+            extra_config: None,
         }],
         None,
         None,
@@ -414,6 +505,7 @@ pub async fn spawn_broker_with_unknown_session_exec_write_error() -> BrokerFixtu
             name: "builder-a",
             addr,
             certs: &certs,
+            extra_config: None,
         }],
         None,
         None,
@@ -448,11 +540,13 @@ pub async fn spawn_broker_with_late_target() -> DelayedTargetFixture {
                 name: "builder-a",
                 addr: live_addr,
                 certs: &certs,
+                extra_config: None,
             },
             BrokerConfigTarget {
                 name: "builder-b",
                 addr: delayed_addr,
                 certs: &certs,
+                extra_config: None,
             },
         ],
         None,
@@ -599,6 +693,7 @@ pub async fn spawn_broker_with_stub_daemon_and_structured_content_disabled() -> 
             name: "builder-a",
             addr,
             certs: &certs,
+            extra_config: None,
         }],
         None,
         None,

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use anyhow::Context;
-use remote_exec_daemon::config::{ProcessEnvironment, PtyMode};
+use remote_exec_daemon::config::{DaemonTransport, ProcessEnvironment, PtyMode};
 
 use super::certs::write_test_certs;
 use super::fixture::DaemonFixture;
@@ -40,6 +40,13 @@ impl WindowsPtyTestBackend {
     }
 }
 
+#[allow(dead_code, reason = "Shared across daemon integration test crates")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PinnedClientCert {
+    MatchingBrokerLeaf,
+    MismatchedDaemonLeaf,
+}
+
 async fn spawn_daemon_with_pty_mode(
     target: &str,
     pty: PtyMode,
@@ -62,17 +69,19 @@ async fn spawn_daemon_with_pty_mode(
         target: target.to_string(),
         listen: addr,
         default_workdir: workdir.clone(),
+        transport: DaemonTransport::Tls,
         sandbox: None,
         enable_transfer_compression: true,
         allow_login_shell: true,
         pty,
         default_shell: None,
         process_environment,
-        tls: remote_exec_daemon::config::TlsConfig {
+        tls: Some(remote_exec_daemon::config::TlsConfig {
             cert_pem: certs.daemon_cert.clone(),
             key_pem: certs.daemon_key.clone(),
             ca_pem: certs.ca_cert.clone(),
-        },
+            pinned_client_cert_pem: None,
+        }),
     };
 
     let (shutdown, server_thread) = spawn_background_daemon(config);
@@ -84,6 +93,7 @@ async fn spawn_daemon_with_pty_mode(
         tempdir,
         client,
         addr,
+        "https",
         workdir,
         shutdown,
         server_thread,
@@ -91,7 +101,141 @@ async fn spawn_daemon_with_pty_mode(
     );
 
     #[cfg(not(windows))]
-    DaemonFixture::new(tempdir, client, addr, workdir, shutdown, server_thread)
+    DaemonFixture::new(
+        tempdir,
+        client,
+        addr,
+        "https",
+        workdir,
+        shutdown,
+        server_thread,
+    )
+}
+
+#[allow(dead_code, reason = "Shared across daemon integration test crates")]
+pub async fn spawn_daemon_with_pinned_client_cert(
+    target: &str,
+    pinned_client_cert: PinnedClientCert,
+) -> DaemonFixture {
+    #[cfg(windows)]
+    let concurrency_guard = daemon_test_lock().lock().await;
+
+    remote_exec_daemon::install_crypto_provider();
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let certs = write_test_certs(tempdir.path(), target);
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+
+    let workdir = tempdir.path().join("workdir");
+    std::fs::create_dir_all(&workdir).unwrap();
+    let pinned_client_cert_pem = match pinned_client_cert {
+        PinnedClientCert::MatchingBrokerLeaf => certs.client_cert.clone(),
+        PinnedClientCert::MismatchedDaemonLeaf => certs.daemon_cert.clone(),
+    };
+    let config = remote_exec_daemon::config::DaemonConfig {
+        target: target.to_string(),
+        listen: addr,
+        default_workdir: workdir.clone(),
+        transport: DaemonTransport::Tls,
+        sandbox: None,
+        enable_transfer_compression: true,
+        allow_login_shell: true,
+        pty: PtyMode::Auto,
+        default_shell: None,
+        process_environment: ProcessEnvironment::capture_current(),
+        tls: Some(remote_exec_daemon::config::TlsConfig {
+            cert_pem: certs.daemon_cert.clone(),
+            key_pem: certs.daemon_key.clone(),
+            ca_pem: certs.ca_cert.clone(),
+            pinned_client_cert_pem: Some(pinned_client_cert_pem),
+        }),
+    };
+
+    let (shutdown, server_thread) = spawn_background_daemon(config);
+    let client = build_client(&certs);
+
+    match pinned_client_cert {
+        PinnedClientCert::MatchingBrokerLeaf => wait_until_ready(&client, addr).await,
+        PinnedClientCert::MismatchedDaemonLeaf => wait_until_listener_ready(addr).await,
+    }
+    #[cfg(windows)]
+    return DaemonFixture::new(
+        tempdir,
+        client,
+        addr,
+        "https",
+        workdir,
+        shutdown,
+        server_thread,
+        concurrency_guard,
+    );
+
+    #[cfg(not(windows))]
+    DaemonFixture::new(
+        tempdir,
+        client,
+        addr,
+        "https",
+        workdir,
+        shutdown,
+        server_thread,
+    )
+}
+
+#[allow(dead_code, reason = "Shared across daemon integration test crates")]
+pub async fn spawn_daemon_over_http(target: &str) -> DaemonFixture {
+    #[cfg(windows)]
+    let concurrency_guard = daemon_test_lock().lock().await;
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+
+    let workdir = tempdir.path().join("workdir");
+    std::fs::create_dir_all(&workdir).unwrap();
+    let config = remote_exec_daemon::config::DaemonConfig {
+        target: target.to_string(),
+        listen: addr,
+        default_workdir: workdir.clone(),
+        transport: DaemonTransport::Http,
+        sandbox: None,
+        enable_transfer_compression: true,
+        allow_login_shell: true,
+        pty: PtyMode::Auto,
+        default_shell: None,
+        process_environment: ProcessEnvironment::capture_current(),
+        tls: None,
+    };
+
+    let (shutdown, server_thread) = spawn_background_daemon(config);
+    let client = reqwest::Client::builder().build().unwrap();
+
+    wait_until_ready_http(&client, addr).await;
+    #[cfg(windows)]
+    return DaemonFixture::new(
+        tempdir,
+        client,
+        addr,
+        "http",
+        workdir,
+        shutdown,
+        server_thread,
+        concurrency_guard,
+    );
+
+    #[cfg(not(windows))]
+    DaemonFixture::new(
+        tempdir,
+        client,
+        addr,
+        "http",
+        workdir,
+        shutdown,
+        server_thread,
+    )
 }
 
 fn build_client(certs: &super::certs::TestCerts) -> reqwest::Client {
@@ -305,6 +449,7 @@ ca_pem = {ca_pem}
         tempdir,
         client,
         addr,
+        "https",
         workdir,
         shutdown,
         server_thread,
@@ -312,7 +457,15 @@ ca_pem = {ca_pem}
     );
 
     #[cfg(not(windows))]
-    DaemonFixture::new(tempdir, client, addr, workdir, shutdown, server_thread)
+    DaemonFixture::new(
+        tempdir,
+        client,
+        addr,
+        "https",
+        workdir,
+        shutdown,
+        server_thread,
+    )
 }
 
 async fn wait_until_ready(client: &reqwest::Client, addr: SocketAddr) {
@@ -330,4 +483,31 @@ async fn wait_until_ready(client: &reqwest::Client, addr: SocketAddr) {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     panic!("daemon did not become ready");
+}
+
+async fn wait_until_ready_http(client: &reqwest::Client, addr: SocketAddr) {
+    for _ in 0..40 {
+        if client
+            .post(format!("http://{addr}/v1/health"))
+            .header(reqwest::header::CONNECTION, "close")
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .is_ok()
+        {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("daemon did not become ready");
+}
+
+async fn wait_until_listener_ready(addr: SocketAddr) {
+    for _ in 0..40 {
+        if tokio::net::TcpStream::connect(addr).await.is_ok() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("daemon listener did not become ready");
 }

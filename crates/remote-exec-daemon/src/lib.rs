@@ -37,6 +37,7 @@ pub async fn run(config: DaemonConfig) -> Result<()> {
 }
 
 pub fn build_app_state(config: DaemonConfig) -> Result<AppState> {
+    config.validate()?;
     let sandbox = config
         .sandbox
         .as_ref()
@@ -95,6 +96,7 @@ where
     tracing::info!(
         target = %state.config.target,
         listen = %state.config.listen,
+        transport = ?state.config.transport,
         default_workdir = %state.config.default_workdir.display(),
         default_shell = %state.default_shell,
         supports_pty = state.supports_pty,

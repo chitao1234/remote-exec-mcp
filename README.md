@@ -61,6 +61,8 @@ Daemon config covers:
 
 - target name
 - listen address
+- daemon transport: mutual TLS by default, or explicit plain HTTP
+- optional exact broker leaf certificate pin for TLS mode
 - default working directory
 - optional static sandbox allow/deny rules for exec `cwd`, reads, and writes
 - optional transfer compression support toggle
@@ -78,6 +80,8 @@ Broker config covers one entry per target:
 - CA path for `https://` targets
 - client certificate path for `https://` targets
 - client key path for `https://` targets
+- optional `skip_server_name_verification = true` for `https://` targets that should validate chain and expiry but ignore SAN/hostname matching
+- optional exact leaf certificate pin via `pinned_server_cert_pem` for `https://` targets
 - expected daemon target name
 - `allow_insecure_http = true` when a target intentionally uses `http://`
 - optional `[local]` broker-host config with default working directory, login-shell policy, PTY mode, and default shell
@@ -111,13 +115,13 @@ REMOTE_EXEC_LOG='warn,remote_exec_broker=debug,remote_exec_daemon=debug,remote_e
 
 ## TLS / CA setup
 
-The broker and daemon use mutual TLS:
+Rust broker and daemon targets use mutual TLS by default:
 
 - the daemon presents a server certificate signed by your CA
 - the broker presents a client certificate signed by the same CA
 - both sides trust the CA certificate configured in `ca_pem`
 
-`remote-exec-daemon-xp` is the exception for v1. It uses plain HTTP only, so broker targets that point at it must use `http://...` together with `allow_insecure_http = true`.
+If you explicitly configure a Rust daemon with `transport = "http"`, or you target `remote-exec-daemon-xp`, the broker target must use `http://...` together with `allow_insecure_http = true`.
 
 Preferred bootstrap flow:
 
@@ -198,7 +202,10 @@ Notes:
 
 - If a target has no `--daemon-san` entries, `remote-exec-admin` defaults that daemon cert to `DNS:localhost` and `IP:127.0.0.1`.
 - The command prints broker and daemon config snippets after generation so you can paste the generated file paths directly into `configs/broker.example.toml` and `configs/daemon.example.toml`.
-- Keep `expected_daemon_name` set to the daemon's configured `target`; it is the application-level identity check on top of TLS.
+- Keep `expected_daemon_name` set to the daemon's configured `target`; it is the application-level identity check on top of transport security.
+- `skip_server_name_verification = true` keeps CA, key-usage, and expiry validation but skips matching the broker URL host against the daemon certificate SANs.
+- `pinned_server_cert_pem` adds an exact daemon leaf-certificate pin on top of CA validation. The PEM file may contain multiple acceptable leaf certificates to ease certificate rotation.
+- `tls.pinned_client_cert_pem` adds an exact broker leaf-certificate pin on top of the daemon's normal client-certificate CA validation. The PEM file may contain multiple acceptable broker leaf certificates to ease rotation.
 - Re-run with `--force` if you want to overwrite an existing output directory.
 - `certs dev-init` is the only command that writes `certs-manifest.json`; the standalone issuance commands write only the PEM files they are responsible for.
 
@@ -246,23 +253,48 @@ openssl x509 -req -in daemon.csr -CA ca.pem -CAkey ca.key -CAcreateserial \
 
 Notes:
 
-- Generate a distinct daemon certificate for each host and set its `subjectAltName` to match the hostname or IP used in the broker `base_url`.
+- Generate a distinct daemon certificate for each host and set its `subjectAltName` to match the hostname or IP used in the broker `base_url`, unless that broker target intentionally sets `skip_server_name_verification = true`.
 - Reuse the same broker client certificate for multiple targets if you want, as long as every daemon trusts the same CA.
 - Keep `ca.key` private and distribute `ca.pem` to the broker and daemons.
+- Set `tls.pinned_client_cert_pem` on a daemon if you want it to accept only one or more exact broker leaf certificates in addition to normal CA-based client-auth checks.
 
 Wire those files into the example configs:
 
-- broker targets use `ca_pem`, `client_cert_pem`, `client_key_pem`, and `expected_daemon_name` as shown in `configs/broker.example.toml`
-- each daemon uses `tls.cert_pem`, `tls.key_pem`, and `tls.ca_pem` as shown in `configs/daemon.example.toml`
+- broker targets use `ca_pem`, `client_cert_pem`, `client_key_pem`, `expected_daemon_name`, and optionally `skip_server_name_verification` / `pinned_server_cert_pem` as shown in `configs/broker.example.toml`
+- each TLS-enabled daemon uses `tls.cert_pem`, `tls.key_pem`, `tls.ca_pem`, and optionally `tls.pinned_client_cert_pem` as shown in `configs/daemon.example.toml`
+- set `transport = "http"` on a Rust daemon if you intentionally want plain HTTP instead of mutual TLS
 - set `expected_daemon_name` to the daemon's configured `target`
 
-Example XP target in broker config:
+Example plain-HTTP target in broker config:
 
 ```toml
 [targets.builder-xp]
 base_url = "http://builder-xp.example.com:8181"
 allow_insecure_http = true
 expected_daemon_name = "builder-xp"
+```
+
+Example plain-HTTP Rust daemon config:
+
+```toml
+target = "builder-a"
+listen = "0.0.0.0:8181"
+default_workdir = "/srv/work"
+transport = "http"
+```
+
+Example daemon-side broker pin:
+
+```toml
+target = "builder-a"
+listen = "0.0.0.0:9443"
+default_workdir = "/srv/work"
+
+[tls]
+cert_pem = "/etc/remote-exec/daemon.pem"
+key_pem = "/etc/remote-exec/daemon.key"
+ca_pem = "/etc/remote-exec/ca.pem"
+pinned_client_cert_pem = "/etc/remote-exec/pins/broker.pem"
 ```
 
 Optional broker-host local target in broker config:

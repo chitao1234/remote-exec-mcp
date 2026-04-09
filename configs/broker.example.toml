@@ -21,6 +21,12 @@ ca_pem = "/etc/remote-exec/ca.pem"
 client_cert_pem = "/etc/remote-exec/broker.pem"
 client_key_pem = "/etc/remote-exec/broker.key"
 expected_daemon_name = "builder-a"
+# Optional. When true, TLS still validates the certificate chain and expiry but
+# skips matching the URL host against the daemon certificate SANs.
+# skip_server_name_verification = true
+# Optional exact leaf certificate pin. The PEM file may contain one or more
+# acceptable daemon leaf certificates to ease rotation.
+# pinned_server_cert_pem = "/etc/remote-exec/pins/builder-a.pem"
 
 [targets.builder-b]
 base_url = "https://builder-b.example.com:9443"
@@ -33,6 +39,8 @@ expected_daemon_name = "builder-b"
 base_url = "http://builder-xp.example.com:8181"
 allow_insecure_http = true
 expected_daemon_name = "builder-xp"
+# Any Rust daemon configured with `transport = "http"` uses the same broker-side
+# `http://` + `allow_insecure_http = true` pattern.
 
 # Optional. When false, the broker rejects `transfer_files` requests that set
 # `compression = "zstd"` and keeps all transfer payloads uncompressed.

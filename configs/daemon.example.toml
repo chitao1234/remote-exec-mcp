@@ -1,6 +1,9 @@
 target = "builder-a"
 listen = "0.0.0.0:9443"
 default_workdir = "/srv/work"
+# Optional. Defaults to "tls". Set to "http" to serve the Rust daemon over
+# plain HTTP without TLS or client-certificate authentication.
+# transport = "http"
 enable_transfer_compression = true
 allow_login_shell = true
 # Optional. Omit to auto-detect PTY support, or set to "none" to disable TTY.
@@ -31,7 +34,11 @@ allow_login_shell = true
 #allow = ["/srv/work"]
 #deny = ["/srv/work/.git", "/srv/work/readonly"]
 
+# Required when `transport = "tls"` or when `transport` is omitted.
 [tls]
 cert_pem = "/etc/remote-exec/daemon.pem"
 key_pem = "/etc/remote-exec/daemon.key"
 ca_pem = "/etc/remote-exec/ca.pem"
+# Optional exact broker leaf certificate pin. The PEM file may contain one or
+# more acceptable broker leaf certificates to ease rotation.
+# pinned_client_cert_pem = "/etc/remote-exec/pins/broker.pem"

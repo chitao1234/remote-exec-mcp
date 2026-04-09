@@ -14,6 +14,7 @@ pub struct DaemonFixture {
     pub _tempdir: TempDir,
     pub client: reqwest::Client,
     pub addr: SocketAddr,
+    scheme: &'static str,
     #[allow(dead_code, reason = "Shared across daemon integration test crates")]
     pub workdir: PathBuf,
     #[cfg(windows)]
@@ -33,6 +34,7 @@ impl DaemonFixture {
         tempdir: TempDir,
         client: reqwest::Client,
         addr: SocketAddr,
+        scheme: &'static str,
         workdir: PathBuf,
         shutdown: oneshot::Sender<()>,
         server_thread: JoinHandle<anyhow::Result<()>>,
@@ -42,6 +44,7 @@ impl DaemonFixture {
             _tempdir: tempdir,
             client,
             addr,
+            scheme,
             workdir,
             concurrency_guard: Some(concurrency_guard),
             shutdown: Some(shutdown),
@@ -54,6 +57,7 @@ impl DaemonFixture {
         tempdir: TempDir,
         client: reqwest::Client,
         addr: SocketAddr,
+        scheme: &'static str,
         workdir: PathBuf,
         shutdown: oneshot::Sender<()>,
         server_thread: JoinHandle<anyhow::Result<()>>,
@@ -62,6 +66,7 @@ impl DaemonFixture {
             _tempdir: tempdir,
             client,
             addr,
+            scheme,
             workdir,
             #[cfg(windows)]
             concurrency_guard: None,
@@ -71,7 +76,7 @@ impl DaemonFixture {
     }
 
     pub fn url(&self, path: &str) -> String {
-        format!("https://{}{}", self.addr, path)
+        format!("{}://{}{}", self.scheme, self.addr, path)
     }
 
     pub async fn raw_post_json<Req>(&self, path: &str, body: &Req) -> reqwest::Response

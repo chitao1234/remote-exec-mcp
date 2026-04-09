@@ -275,17 +275,19 @@ expected_daemon_name = {expected_daemon_name}
             target: self.target.clone(),
             listen: self.addr,
             default_workdir: self.workdir.clone(),
+            transport: remote_exec_daemon::config::DaemonTransport::Tls,
             sandbox: None,
             enable_transfer_compression: true,
             allow_login_shell: true,
             pty: remote_exec_daemon::config::PtyMode::Auto,
             default_shell: None,
             process_environment: remote_exec_daemon::config::ProcessEnvironment::capture_current(),
-            tls: remote_exec_daemon::config::TlsConfig {
+            tls: Some(remote_exec_daemon::config::TlsConfig {
                 cert_pem: self.daemon_cert_pem.clone(),
                 key_pem: self.daemon_key_pem.clone(),
                 ca_pem: self.ca_pem.clone(),
-            },
+                pinned_client_cert_pem: None,
+            }),
         };
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         self.shutdown = Some(shutdown_tx);

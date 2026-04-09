@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-mod certs;
+pub mod certs;
 pub mod fixture;
 pub mod spawners;
 pub mod stub_daemon;

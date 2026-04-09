@@ -1611,6 +1611,7 @@ dependencies = [
  "reqwest",
  "rmcp",
  "rustls",
+ "rustls-pemfile",
  "serde",
  "serde_json",
  "tar",
