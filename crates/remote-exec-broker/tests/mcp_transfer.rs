@@ -132,10 +132,7 @@ async fn transfer_files_is_listed_for_mcp_clients() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     let tools = fixture
         .client
-        .list_tools(Some(PaginatedRequestParams {
-            meta: None,
-            cursor: None,
-        }))
+        .list_tools(Some(PaginatedRequestParams::default()))
         .await
         .expect("list tools");
 
@@ -484,12 +481,10 @@ async fn transfer_files_rejects_public_compression_field() {
     });
     let error = fixture
         .client
-        .call_tool(CallToolRequestParams {
-            meta: None,
-            name: "transfer_files".to_string().into(),
-            arguments: Some(arguments.as_object().unwrap().clone()),
-            task: None,
-        })
+        .call_tool(
+            CallToolRequestParams::new("transfer_files")
+                .with_arguments(arguments.as_object().unwrap().clone()),
+        )
         .await
         .unwrap_err()
         .to_string();

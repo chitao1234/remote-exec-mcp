@@ -606,12 +606,11 @@ async fn image_read(
 }
 
 async fn wait_until_ready(certs: &TestCerts, addr: std::net::SocketAddr) {
+    let ca = reqwest::Certificate::from_pem(&std::fs::read(&certs.ca_cert).unwrap()).unwrap();
     let client = reqwest::Client::builder()
         .use_rustls_tls()
+        .tls_certs_only([ca])
         .danger_accept_invalid_hostnames(true)
-        .add_root_certificate(
-            reqwest::Certificate::from_pem(&std::fs::read(&certs.ca_cert).unwrap()).unwrap(),
-        )
         .identity(
             reqwest::Identity::from_pem(
                 &[

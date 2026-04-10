@@ -120,12 +120,10 @@ impl BrokerFixture {
     async fn raw_call_tool(&self, name: &str, arguments: serde_json::Value) -> ToolResult {
         let result = self
             .client
-            .call_tool(CallToolRequestParams {
-                meta: None,
-                name: name.to_string().into(),
-                arguments: Some(arguments.as_object().unwrap().clone()),
-                task: None,
-            })
+            .call_tool(
+                CallToolRequestParams::new(name.to_string())
+                    .with_arguments(arguments.as_object().unwrap().clone()),
+            )
             .await
             .unwrap();
 

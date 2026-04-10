@@ -37,26 +37,16 @@ impl ToolCallOutput {
     }
 
     pub fn into_call_tool_result(self, include_structured_content: bool) -> CallToolResult {
-        CallToolResult {
-            content: self.content,
-            structured_content: if include_structured_content {
-                self.structured
-            } else {
-                None
-            },
-            is_error: Some(false),
-            meta: None,
+        let mut result = CallToolResult::success(self.content);
+        if include_structured_content {
+            result.structured_content = self.structured;
         }
+        result
     }
 }
 
 pub fn tool_error_result(text: String) -> CallToolResult {
-    CallToolResult {
-        content: vec![Content::text(text)],
-        structured_content: None,
-        is_error: Some(true),
-        meta: None,
-    }
+    CallToolResult::error(vec![Content::text(text)])
 }
 
 pub fn format_tool_error(err: anyhow::Error) -> CallToolResult {
@@ -187,11 +177,8 @@ impl BrokerServer {
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for BrokerServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            instructions: Some("Remote exec MCP broker".into()),
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            ..Default::default()
-        }
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_instructions("Remote exec MCP broker")
     }
 }
 
@@ -251,12 +238,11 @@ async fn serve_streamable_http(
     > = StreamableHttpService::new(
         move || Ok(BrokerServer::new(server_state.clone())),
         Default::default(),
-        StreamableHttpServerConfig {
-            sse_keep_alive,
-            sse_retry,
-            stateful_mode: stateful,
-            cancellation_token: cancellation_token.child_token(),
-        },
+        StreamableHttpServerConfig::default()
+            .with_sse_keep_alive(sse_keep_alive)
+            .with_sse_retry(sse_retry)
+            .with_stateful_mode(stateful)
+            .with_cancellation_token(cancellation_token.child_token()),
     );
     let router = Router::new().nest_service(path, service);
     let listener = tokio::net::TcpListener::bind(listen)

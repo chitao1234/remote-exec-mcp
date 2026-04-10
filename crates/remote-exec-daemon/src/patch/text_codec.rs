@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::path::Path;
 
-use chardetng::EncodingDetector;
+use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
 use encoding_rs::{Encoding, UTF_16BE, UTF_16LE};
 
 #[derive(Debug, Clone)]
@@ -80,9 +80,9 @@ fn detect_encoding(bytes: &[u8]) -> (&'static Encoding, usize) {
         return (encoding, bom_len);
     }
 
-    let mut detector = EncodingDetector::new();
+    let mut detector = EncodingDetector::new(Iso2022JpDetection::Allow);
     detector.feed(bytes, true);
-    (detector.guess(None, true), 0)
+    (detector.guess(None, Utf8Detection::Allow), 0)
 }
 
 fn decode_without_replacement<'a>(

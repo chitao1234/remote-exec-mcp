@@ -386,8 +386,7 @@ async fn build_https_client(config: &TargetConfig) -> anyhow::Result<reqwest::Cl
             Identity::from_pem(&[client_cert_pem.as_slice(), client_key_pem.as_slice()].concat())?;
         let mut builder = reqwest::Client::builder()
             .use_rustls_tls()
-            .tls_built_in_root_certs(false)
-            .add_root_certificate(ca)
+            .tls_certs_only([ca])
             .identity(identity);
         if config.skip_server_name_verification {
             builder = builder.danger_accept_invalid_hostnames(true);

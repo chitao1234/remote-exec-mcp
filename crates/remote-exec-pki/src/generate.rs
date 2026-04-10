@@ -4,8 +4,8 @@ use std::io::Cursor;
 
 use anyhow::{Context, ensure};
 use rcgen::{
-    BasicConstraints, Certificate, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa,
-    KeyPair, SanType,
+    BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
+    PublicKeyData, SanType,
 };
 
 use crate::spec::{DaemonCertSpec, DevInitSpec, SubjectAltName};
@@ -24,8 +24,7 @@ pub struct GeneratedDevInitBundle {
 }
 
 pub struct CertificateAuthority {
-    cert: Certificate,
-    key: KeyPair,
+    issuer: Issuer<'static, KeyPair>,
     pub pem_pair: GeneratedPemPair,
 }
 
@@ -71,31 +70,28 @@ pub fn generate_ca(common_name: &str) -> anyhow::Result<CertificateAuthority> {
 
     let key = KeyPair::generate()?;
     let cert = params.self_signed(&key)?;
+    let key_pem = key.serialize_pem();
+    let issuer: Issuer<'static, KeyPair> = Issuer::new(params, key);
     Ok(CertificateAuthority {
+        issuer,
         pem_pair: GeneratedPemPair {
             cert_pem: cert.pem(),
-            key_pem: key.serialize_pem(),
+            key_pem,
         },
-        cert,
-        key,
     })
 }
 
 pub fn load_ca_from_pem(cert_pem: &str, key_pem: &str) -> anyhow::Result<CertificateAuthority> {
-    let params =
-        CertificateParams::from_ca_cert_pem(cert_pem).context("parsing CA certificate PEM")?;
     let key = KeyPair::from_pem(key_pem).context("parsing CA key PEM")?;
     ensure!(
-        certificate_public_key_der(cert_pem)? == key.public_key_der(),
+        certificate_public_key_der(cert_pem)? == key.subject_public_key_info(),
         "CA certificate and key do not match"
     );
-    let cert = params
-        .self_signed(&key)
-        .context("reconstructing CA certificate from PEM")?;
+    let issuer: Issuer<'static, KeyPair> =
+        Issuer::from_ca_cert_pem(cert_pem, key).context("parsing CA certificate PEM")?;
 
     Ok(CertificateAuthority {
-        cert,
-        key,
+        issuer,
         pem_pair: GeneratedPemPair {
             cert_pem: cert_pem.to_string(),
             key_pem: key_pem.to_string(),
@@ -121,7 +117,7 @@ pub fn issue_broker_cert(
 ) -> anyhow::Result<GeneratedPemPair> {
     let key = KeyPair::generate()?;
     let params = broker_params(common_name)?;
-    let cert = params.signed_by(&key, &ca.cert, &ca.key)?;
+    let cert = params.signed_by(&key, &ca.issuer)?;
 
     Ok(GeneratedPemPair {
         cert_pem: cert.pem(),
@@ -135,7 +131,7 @@ pub fn issue_daemon_cert(
 ) -> anyhow::Result<GeneratedPemPair> {
     let key = KeyPair::generate()?;
     let params = daemon_params(daemon)?;
-    let cert = params.signed_by(&key, &ca.cert, &ca.key)?;
+    let cert = params.signed_by(&key, &ca.issuer)?;
 
     Ok(GeneratedPemPair {
         cert_pem: cert.pem(),

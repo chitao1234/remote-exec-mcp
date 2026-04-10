@@ -14,7 +14,6 @@ use std::time::{Duration, Instant};
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use rand::RngCore;
 use remote_exec_proto::path::{
     PathPolicy, is_absolute_for_policy, linux_path_policy, normalize_for_system,
     windows_path_policy,
@@ -332,8 +331,7 @@ pub fn internal_error(err: anyhow::Error) -> (StatusCode, Json<RpcErrorBody>) {
 }
 
 fn chunk_id() -> String {
-    let mut bytes = [0u8; 3];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    let bytes = rand::random::<[u8; 3]>();
     format!("{:02x}{:02x}{:02x}", bytes[0], bytes[1], bytes[2])
 }
 

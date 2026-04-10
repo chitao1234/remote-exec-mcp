@@ -48,12 +48,7 @@ impl RemoteExecClient {
             .with_context(|| format!("tool `{name}` arguments must serialize to a JSON object"))?;
         let result = self
             .service
-            .call_tool(CallToolRequestParams {
-                meta: None,
-                name: name.to_string().into(),
-                arguments: Some(arguments),
-                task: None,
-            })
+            .call_tool(CallToolRequestParams::new(name.to_string()).with_arguments(arguments))
             .await
             .with_context(|| format!("calling `{name}`"))?;
 

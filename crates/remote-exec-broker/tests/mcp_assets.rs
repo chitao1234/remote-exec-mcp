@@ -351,10 +351,7 @@ async fn list_targets_is_advertised_as_read_only() {
 
     let tools = fixture
         .client
-        .list_tools(Some(PaginatedRequestParams {
-            meta: None,
-            cursor: None,
-        }))
+        .list_tools(Some(PaginatedRequestParams::default()))
         .await
         .expect("list tools");
 
@@ -379,10 +376,7 @@ async fn view_image_is_advertised_as_read_only() {
 
     let tools = fixture
         .client
-        .list_tools(Some(PaginatedRequestParams {
-            meta: None,
-            cursor: None,
-        }))
+        .list_tools(Some(PaginatedRequestParams::default()))
         .await
         .expect("list tools");
 
