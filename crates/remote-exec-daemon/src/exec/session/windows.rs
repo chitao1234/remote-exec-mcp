@@ -1,15 +1,20 @@
 use std::borrow::Cow;
+#[cfg(feature = "winpty")]
 use std::collections::BTreeMap;
+#[cfg(feature = "winpty")]
 use std::ffi::OsString;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::bail;
+#[cfg(feature = "winpty")]
 use winptyrs::EnvBlock;
 
 use crate::config::{ProcessEnvironment, WindowsPtyBackendOverride};
 
-use super::{LiveSession, SessionChild, new_live_session, portable_pty_probe, spawn_pty};
+use super::{LiveSession, portable_pty_probe, spawn_pty};
+#[cfg(feature = "winpty")]
+use super::{SessionChild, new_live_session};
 
 #[cfg(any(test, windows))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -158,9 +163,49 @@ pub(super) fn select_pty_backend_with_override(
     }
 }
 
+#[cfg(not(feature = "winpty"))]
+fn winpty_feature_disabled_message() -> &'static str {
+    "winpty backend is not compiled in; enable the `winpty` cargo feature"
+}
+
+#[cfg(feature = "winpty")]
+fn compiled_winpty_probe() -> anyhow::Result<()> {
+    super::super::winpty::supports_winpty()
+}
+
+#[cfg(not(feature = "winpty"))]
+fn compiled_winpty_probe() -> anyhow::Result<()> {
+    bail!("{}", winpty_feature_disabled_message())
+}
+
+#[cfg(feature = "winpty")]
+fn spawn_compiled_winpty_session(
+    cmd: &[String],
+    cwd: &Path,
+    environment: &ProcessEnvironment,
+) -> anyhow::Result<LiveSession> {
+    let (session, receiver) =
+        super::super::winpty::spawn_winpty(cmd, cwd, winpty_environment_block(environment))?;
+    Ok(new_live_session(
+        true,
+        SessionChild::Winpty(session),
+        receiver,
+    ))
+}
+
+#[cfg(not(feature = "winpty"))]
+fn spawn_compiled_winpty_session(
+    cmd: &[String],
+    cwd: &Path,
+    environment: &ProcessEnvironment,
+) -> anyhow::Result<LiveSession> {
+    let _ = (cmd, cwd, environment);
+    bail!("{}", winpty_feature_disabled_message())
+}
+
 fn collect_pty_diagnostics() -> PtyDiagnostics {
     let portable_pty_probe = portable_pty_probe().map_err(|err| err.to_string());
-    let winpty_probe = super::super::winpty::supports_winpty().map_err(|err| err.to_string());
+    let winpty_probe = compiled_winpty_probe().map_err(|err| err.to_string());
     let selected_backend = if portable_pty_probe.is_ok() {
         Some(PtyBackend::PortablePty)
     } else if winpty_probe.is_ok() {
@@ -182,7 +227,7 @@ pub(super) fn supports_pty_with_override(
     select_pty_backend_with_override(
         windows_pty_backend_override,
         portable_pty_probe,
-        super::super::winpty::supports_winpty,
+        compiled_winpty_probe,
     )
     .is_some()
 }
@@ -196,21 +241,10 @@ pub(super) fn spawn_tty_session(
     match select_pty_backend_with_override(
         windows_pty_backend_override,
         portable_pty_probe,
-        super::super::winpty::supports_winpty,
+        compiled_winpty_probe,
     ) {
         Some(PtyBackend::PortablePty) => spawn_pty(cmd, cwd, environment),
-        Some(PtyBackend::Winpty) => {
-            let (session, receiver) = super::super::winpty::spawn_winpty(
-                cmd,
-                cwd,
-                winpty_environment_block(environment),
-            )?;
-            Ok(new_live_session(
-                true,
-                SessionChild::Winpty(session),
-                receiver,
-            ))
-        }
+        Some(PtyBackend::Winpty) => spawn_compiled_winpty_session(cmd, cwd, environment),
         None => bail!("tty is not supported on this host"),
     }
 }
@@ -271,6 +305,7 @@ fn summarize_output_excerpt(output: &str) -> String {
     }
 }
 
+#[cfg(feature = "winpty")]
 fn winpty_environment_block(environment: &ProcessEnvironment) -> EnvBlock {
     let mut env_map = BTreeMap::<String, (String, OsString)>::new();
 
@@ -354,20 +389,10 @@ async fn smoke_test_windows_backend(
             Ok(session) => summarize_windows_backend_session(session, backend).await,
             Err(err) => format!("{} smoke test: spawn failed: {err}", backend.debug_name()),
         },
-        PtyBackend::Winpty => {
-            match super::super::winpty::spawn_winpty(
-                cmd,
-                cwd,
-                winpty_environment_block(environment),
-            ) {
-                Ok((session, receiver)) => {
-                    let live_session =
-                        new_live_session(true, SessionChild::Winpty(session), receiver);
-                    summarize_windows_backend_session(live_session, backend).await
-                }
-                Err(err) => format!("{} smoke test: spawn failed: {err}", backend.debug_name()),
-            }
-        }
+        PtyBackend::Winpty => match spawn_compiled_winpty_session(cmd, cwd, environment) {
+            Ok(session) => summarize_windows_backend_session(session, backend).await,
+            Err(err) => format!("{} smoke test: spawn failed: {err}", backend.debug_name()),
+        },
     }
 }
 

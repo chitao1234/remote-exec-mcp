@@ -8,6 +8,7 @@ enable_transfer_compression = true
 allow_login_shell = true
 # Optional. Omit to auto-detect PTY support, or set to "none" to disable TTY.
 # On Windows, "conpty" and "winpty" force a specific backend and fail startup if unavailable.
+# "winpty" also requires the daemon to be built with the default `winpty` Cargo feature.
 # pty = "none"
 # Optional. When false, the daemon rejects `transfer_files` requests that set
 # `compression = "zstd"` and only accepts uncompressed tar payloads.

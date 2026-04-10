@@ -77,6 +77,7 @@ expected_daemon_name = "builder-xp"
 #allow_login_shell = true
 ## Optional. Omit to auto-detect PTY support, or set to "none" to disable TTY.
 ## On Windows, "conpty" and "winpty" force a specific backend and fail startup if unavailable.
+## "winpty" also requires the broker to be built with its default `winpty` Cargo feature.
 ## pty = "none"
 ## Optional. If set, broker startup fails unless this shell is usable on the broker host.
 ## default_shell = "/bin/sh"

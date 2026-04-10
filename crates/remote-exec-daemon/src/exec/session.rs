@@ -29,7 +29,7 @@ pub struct LiveSession {
 
 pub(crate) enum SessionChild {
     Pty(PtySession),
-    #[cfg(windows)]
+    #[cfg(all(windows, feature = "winpty"))]
     Winpty(super::winpty::WinptySession),
     Pipe(Box<tokio::process::Child>),
 }
@@ -308,7 +308,7 @@ impl LiveSession {
                     return Ok(true);
                 }
             }
-            #[cfg(windows)]
+            #[cfg(all(windows, feature = "winpty"))]
             SessionChild::Winpty(pty) => {
                 if let Some(status) = pty.try_wait()? {
                     self.exit_code = Some(status);
@@ -336,7 +336,7 @@ impl LiveSession {
                 let _ = pty.child.kill();
                 let _ = pty.child.try_wait()?;
             }
-            #[cfg(windows)]
+            #[cfg(all(windows, feature = "winpty"))]
             SessionChild::Winpty(pty) => {
                 let _ = pty.terminate();
             }
@@ -369,7 +369,7 @@ impl LiveSession {
                 pty.writer.flush()?;
                 Ok(())
             }
-            #[cfg(windows)]
+            #[cfg(all(windows, feature = "winpty"))]
             SessionChild::Winpty(pty) => pty.write(normalized_chars.as_ref()),
             SessionChild::Pipe(_) => anyhow::bail!(
                 "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
@@ -412,7 +412,7 @@ impl LiveSession {
 mod tests {
     use crate::config::PtyMode;
 
-    use super::{supports_pty_for_mode, windows_pty_backend_override_for_mode};
+    use super::{supports_pty_for_mode, validate_pty_mode, windows_pty_backend_override_for_mode};
 
     #[test]
     fn pty_mode_none_disables_tty_support() {
@@ -432,5 +432,12 @@ mod tests {
     fn forcing_windows_pty_backend_is_rejected_on_non_windows_hosts() {
         assert!(windows_pty_backend_override_for_mode(PtyMode::Conpty).is_err());
         assert!(windows_pty_backend_override_for_mode(PtyMode::Winpty).is_err());
+    }
+
+    #[cfg(all(windows, not(feature = "winpty")))]
+    #[test]
+    fn winpty_mode_is_unavailable_when_the_feature_is_disabled() {
+        assert!(!supports_pty_for_mode(PtyMode::Winpty));
+        assert!(validate_pty_mode(PtyMode::Winpty).is_err());
     }
 }

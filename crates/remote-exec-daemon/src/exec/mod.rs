@@ -4,7 +4,7 @@ pub mod session;
 pub(crate) mod shell;
 pub mod store;
 pub mod transcript;
-#[cfg(windows)]
+#[cfg(all(windows, feature = "winpty"))]
 mod winpty;
 
 use std::path::{Path, PathBuf};

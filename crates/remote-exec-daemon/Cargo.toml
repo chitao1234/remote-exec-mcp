@@ -4,6 +4,10 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 
+[features]
+default = ["winpty"]
+winpty = ["dep:winptyrs"]
+
 [dependencies]
 anyhow = { workspace = true }
 axum = { workspace = true }
@@ -39,7 +43,7 @@ zstd = { workspace = true }
 nix = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
-winptyrs = { path = "../../winptyrs/crates/winptyrs" }
+winptyrs = { path = "../../winptyrs/crates/winptyrs", optional = true }
 
 [dev-dependencies]
 remote-exec-pki = { path = "../remote-exec-pki" }
