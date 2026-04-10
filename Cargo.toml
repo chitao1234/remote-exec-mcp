@@ -8,6 +8,7 @@ members = [
 ]
 exclude = [
   "winptyrs",
+  "portable-pty",
 ]
 resolver = "2"
 
@@ -34,7 +35,7 @@ hyper-util = { version = "0.1", features = ["server", "http1", "tokio"] }
 image = { version = "0.25", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
 gethostname = "1"
 nix = { version = "0.31", default-features = false, features = ["user"] }
-portable-pty = "0.9"
+portable-pty = { path = "portable-pty" }
 rand = "0.10"
 rcgen = "0.14"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "stream"] }

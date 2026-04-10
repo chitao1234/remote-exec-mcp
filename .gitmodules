@@ -1,3 +1,6 @@
 [submodule "winptyrs"]
 	path = winptyrs
 	url = https://github.com/chitao1234/winpty-rs
+[submodule "portable-pty"]
+	path = portable-pty
+	url = https://github.com/chitao1234/remote-exec-mcp-portable-pty.git
