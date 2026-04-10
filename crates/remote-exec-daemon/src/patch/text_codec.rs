@@ -109,6 +109,9 @@ fn looks_like_text(text: &str) -> bool {
 }
 
 fn encode_text_for_encoding(encoding: &'static Encoding, text: &str) -> anyhow::Result<Vec<u8>> {
+    // encoding_rs handles the WHATWG legacy text encodings we care about
+    // directly. UTF-16 is the exception: its Rust encode API intentionally
+    // emits UTF-8 bytes, so preserve UTF-16LE/BE manually here.
     if encoding == UTF_16LE {
         return Ok(text
             .encode_utf16()
@@ -134,7 +137,9 @@ fn encode_text_for_encoding(encoding: &'static Encoding, text: &str) -> anyhow::
 
 #[cfg(test)]
 mod tests {
-    use super::PatchTextFile;
+    use encoding_rs::{BIG5, EUC_KR, GBK, SHIFT_JIS};
+
+    use super::{PatchTextFile, encode_text_for_encoding};
 
     #[test]
     fn autodetect_decodes_utf16le_with_bom_and_preserves_encoding() {
@@ -163,5 +168,49 @@ mod tests {
         let err =
             PatchTextFile::from_bytes(vec![0xFF, 0x00, 0xFE, 0x01, 0xFD, 0x02], true).unwrap_err();
         assert!(err.to_string().contains("does not look like text"));
+    }
+
+    #[test]
+    fn autodetect_round_trips_common_east_asian_encodings() {
+        let cases = [
+            (
+                SHIFT_JIS,
+                "価格を更新します。\n次の行です。\n",
+                "価格を反映します。\n次の行です。\n",
+            ),
+            (
+                GBK,
+                "简体中文文件。\n第二行内容。\n",
+                "简体中文配置。\n第二行内容。\n",
+            ),
+            (
+                BIG5,
+                "繁體中文檔案。\n第二行內容。\n",
+                "繁體中文設定。\n第二行內容。\n",
+            ),
+            (
+                EUC_KR,
+                "한국어 파일입니다.\n둘째 줄입니다.\n",
+                "한국어 설정입니다.\n둘째 줄입니다.\n",
+            ),
+        ];
+
+        for (encoding, original_text, updated_text) in cases {
+            let original_bytes = encode_text_for_encoding(encoding, original_text).unwrap();
+            let file = PatchTextFile::from_bytes(original_bytes, true).unwrap();
+
+            assert_eq!(
+                file.text,
+                original_text,
+                "failed to decode {}",
+                encoding.name()
+            );
+            assert_eq!(
+                file.encode(updated_text).unwrap(),
+                encode_text_for_encoding(encoding, updated_text).unwrap(),
+                "failed to preserve {}",
+                encoding.name()
+            );
+        }
     }
 }

@@ -335,7 +335,7 @@ cargo fmt --all --check
 - Each target daemon keeps at most `64` live exec sessions. When full, it protects the `8` most recently touched sessions, prunes exited sessions first, otherwise prunes the oldest non-protected live session, and terminates the pruned process.
 - `apply_patch` supports the documented `*** End of File` marker.
 - `apply_patch` preserves an updated file's existing `LF` versus `CRLF` line ending style.
-- Daemons can opt into experimental `experimental_apply_patch_target_encoding_autodetect = true` support so `apply_patch` can read and rewrite existing non-UTF-8 text files using the autodetected original encoding.
+- Daemons can opt into experimental `experimental_apply_patch_target_encoding_autodetect = true` support so `apply_patch` can read and rewrite existing non-UTF-8 text files using the autodetected original encoding. The current test coverage explicitly includes UTF-16LE plus common East Asian encodings such as Shift_JIS, GBK, Big5, and EUC-KR.
 - Broker `[local]` config can also set `experimental_apply_patch_target_encoding_autodetect = true` to enable the same behavior for the embedded broker-host local target only.
 - Successful `apply_patch` calls return text output only; they do not expose MCP `structuredContent`.
 - `exec_command` intercepted into `apply_patch` always returns a warning in structured content `warnings` when structured content is enabled, and in normal text output either way.

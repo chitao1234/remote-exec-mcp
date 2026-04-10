@@ -1,11 +1,22 @@
 mod support;
 
+use encoding_rs::{BIG5, EUC_KR, Encoding, GBK, SHIFT_JIS};
 use remote_exec_proto::rpc::{PatchApplyRequest, PatchApplyResponse};
 
 fn utf16le_bom_bytes(text: &str) -> Vec<u8> {
     let mut bytes = vec![0xFF, 0xFE];
     bytes.extend(text.encode_utf16().flat_map(|unit| unit.to_le_bytes()));
     bytes
+}
+
+fn encoded_bytes(encoding: &'static Encoding, text: &str) -> Vec<u8> {
+    let (encoded, _, had_errors) = encoding.encode(text);
+    assert!(
+        !had_errors,
+        "test text should be encodable as {}",
+        encoding.name()
+    );
+    encoded.into_owned()
 }
 
 #[tokio::test]
@@ -708,6 +719,87 @@ async fn delete_file_autodetects_utf16le_target_encoding_when_enabled() {
 
     assert!(response.output.contains("D utf16.txt"));
     assert!(tokio::fs::metadata(path).await.is_err());
+}
+
+#[tokio::test]
+async fn update_file_autodetects_common_east_asian_encodings_when_enabled() {
+    let fixture = support::spawn::spawn_daemon_with_extra_config(
+        "builder-a",
+        "experimental_apply_patch_target_encoding_autodetect = true",
+    )
+    .await;
+
+    let cases = [
+        (
+            "shift-jis.txt",
+            SHIFT_JIS,
+            "価格を更新します。\r\n次の行です。\r\n",
+            "価格を反映します。\r\n次の行です。\r\n",
+            "価格を更新します。",
+            "価格を反映します。",
+        ),
+        (
+            "gbk.txt",
+            GBK,
+            "简体中文文件。\r\n第二行内容。\r\n",
+            "简体中文配置。\r\n第二行内容。\r\n",
+            "简体中文文件。",
+            "简体中文配置。",
+        ),
+        (
+            "big5.txt",
+            BIG5,
+            "繁體中文檔案。\r\n第二行內容。\r\n",
+            "繁體中文設定。\r\n第二行內容。\r\n",
+            "繁體中文檔案。",
+            "繁體中文設定。",
+        ),
+        (
+            "euc-kr.txt",
+            EUC_KR,
+            "한국어 파일입니다.\r\n둘째 줄입니다.\r\n",
+            "한국어 설정입니다.\r\n둘째 줄입니다.\r\n",
+            "한국어 파일입니다.",
+            "한국어 설정입니다.",
+        ),
+    ];
+
+    for (filename, encoding, original_text, updated_text, old_line, new_line) in cases {
+        let path = fixture.workdir.join(filename);
+        tokio::fs::write(&path, encoded_bytes(encoding, original_text))
+            .await
+            .unwrap();
+
+        let response = fixture
+            .rpc::<PatchApplyRequest, PatchApplyResponse>(
+                "/v1/patch/apply",
+                &PatchApplyRequest {
+                    patch: format!(
+                        concat!(
+                            "*** Begin Patch\n",
+                            "*** Update File: {filename}\n",
+                            "@@\n",
+                            "-{old_line}\n",
+                            "+{new_line}\n",
+                            "*** End Patch\n",
+                        ),
+                        filename = filename,
+                        old_line = old_line,
+                        new_line = new_line,
+                    ),
+                    workdir: Some(".".to_string()),
+                },
+            )
+            .await;
+
+        assert!(response.output.contains(&format!("M {filename}")));
+        assert_eq!(
+            tokio::fs::read(&path).await.unwrap(),
+            encoded_bytes(encoding, updated_text),
+            "failed to preserve {}",
+            encoding.name()
+        );
+    }
 }
 
 #[tokio::test]
