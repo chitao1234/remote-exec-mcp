@@ -29,6 +29,35 @@ async fn exec_start_allows_login_requests_on_windows_when_enabled() {
 }
 
 #[tokio::test]
+async fn exec_start_uses_configured_exec_yield_time_policy() {
+    let fixture = support::spawn::spawn_daemon_with_extra_config(
+        "builder-a",
+        r#"[yield_time.exec_command]
+default_ms = 3000
+max_ms = 3000
+min_ms = 3000
+"#,
+    )
+    .await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &windows_cmd_start_request(
+                "echo ready & ping -n 3 127.0.0.1 >nul",
+                false,
+                Some(1),
+                Some(2_000),
+            ),
+        )
+        .await;
+
+    assert!(!response.running, "{response:#?}");
+    assert_eq!(response.exit_code, Some(0));
+    assert!(response.output.to_ascii_lowercase().contains("ready"));
+}
+
+#[tokio::test]
 async fn exec_start_rejects_login_requests_on_windows_when_disabled_by_config() {
     let fixture =
         support::spawn::spawn_daemon_with_extra_config("builder-a", "allow_login_shell = false")

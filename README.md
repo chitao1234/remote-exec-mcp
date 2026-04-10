@@ -68,6 +68,7 @@ Daemon config covers:
 - optional transfer compression support toggle
 - optional default shell override
 - optional PTY mode selection
+- optional per-operation yield-time policy overrides for `exec_command`, empty `write_stdin` polls, and non-empty `write_stdin` writes
 - TLS certificate, key, and CA paths
 
 Broker config covers one entry per target:
@@ -84,7 +85,7 @@ Broker config covers one entry per target:
 - optional exact leaf certificate pin via `pinned_server_cert_pem` for `https://` targets
 - expected daemon target name
 - `allow_insecure_http = true` when a target intentionally uses `http://`
-- optional `[local]` broker-host config with default working directory, login-shell policy, PTY mode, default shell, and embedded-local `apply_patch` encoding autodetect flag
+- optional `[local]` broker-host config with default working directory, login-shell policy, PTY mode, default shell, embedded-local yield-time policy overrides, and embedded-local `apply_patch` encoding autodetect flag
 
 MCP transport config covers:
 
@@ -306,6 +307,22 @@ default_workdir = "/srv/local-work"
 allow_login_shell = true
 # pty = "none"
 # default_shell = "/bin/sh"
+#
+## Optional. Per-operation yield-time policy overrides for the embedded local target.
+## [local.yield_time.exec_command]
+## default_ms = 10000
+## max_ms = 30000
+## min_ms = 250
+##
+## [local.yield_time.write_stdin_poll]
+## default_ms = 5000
+## max_ms = 300000
+## min_ms = 5000
+##
+## [local.yield_time.write_stdin_input]
+## default_ms = 250
+## max_ms = 30000
+## min_ms = 250
 # experimental_apply_patch_target_encoding_autodetect = true
 ```
 
@@ -332,6 +349,8 @@ cargo fmt --all --check
 - `transfer_files` treats `destination.path` as the exact final path to create or replace for single-source transfers; it does not infer basenames or copy "into" an existing directory in that mode.
 - `write_stdin` only invalidates sessions when the daemon restarted or explicitly reports `unknown_session`.
 - `max_output_tokens` is enforced by the daemon for command output.
+- Daemon config can override `yield_time_ms` policy separately for `exec_command`, empty `write_stdin` polls, and non-empty `write_stdin` writes. Each bucket supports `default_ms`, `max_ms`, and `min_ms`, where `min_ms` silently raises smaller caller-provided values.
+- Broker `[local]` supports the same nested `yield_time` config for the embedded broker-host local target. `remote-exec-daemon-xp` supports the same three buckets with flat `yield_time_*` INI keys.
 - Each target daemon keeps at most `64` live exec sessions. When full, it protects the `8` most recently touched sessions, prunes exited sessions first, otherwise prunes the oldest non-protected live session, and terminates the pruned process.
 - `apply_patch` supports the documented `*** End of File` marker.
 - `apply_patch` preserves an updated file's existing `LF` versus `CRLF` line ending style.

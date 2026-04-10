@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use remote_exec_proto::sandbox::FilesystemSandbox;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowsPtyBackendOverride {
@@ -28,6 +28,157 @@ pub enum DaemonTransport {
     #[default]
     Tls,
     Http,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum YieldTimeOperation {
+    ExecCommand,
+    WriteStdinPoll,
+    WriteStdinInput,
+}
+
+impl YieldTimeOperation {
+    fn config_path(self) -> &'static str {
+        match self {
+            Self::ExecCommand => "yield_time.exec_command",
+            Self::WriteStdinPoll => "yield_time.write_stdin_poll",
+            Self::WriteStdinInput => "yield_time.write_stdin_input",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct YieldTimeOperationConfig {
+    pub default_ms: u64,
+    pub max_ms: u64,
+    pub min_ms: u64,
+}
+
+impl YieldTimeOperationConfig {
+    pub const fn new(default_ms: u64, max_ms: u64, min_ms: u64) -> Self {
+        Self {
+            default_ms,
+            max_ms,
+            min_ms,
+        }
+    }
+
+    pub fn resolve_ms(self, requested_ms: Option<u64>) -> u64 {
+        requested_ms
+            .unwrap_or(self.default_ms)
+            .clamp(self.min_ms, self.max_ms)
+    }
+
+    fn validate(self, operation: YieldTimeOperation) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.min_ms <= self.max_ms,
+            "{}.min_ms must be less than or equal to {}.max_ms",
+            operation.config_path(),
+            operation.config_path()
+        );
+        anyhow::ensure!(
+            self.default_ms >= self.min_ms && self.default_ms <= self.max_ms,
+            "{}.default_ms must be between {}.min_ms and {}.max_ms",
+            operation.config_path(),
+            operation.config_path(),
+            operation.config_path()
+        );
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct YieldTimeConfig {
+    pub exec_command: YieldTimeOperationConfig,
+    pub write_stdin_poll: YieldTimeOperationConfig,
+    pub write_stdin_input: YieldTimeOperationConfig,
+}
+
+impl YieldTimeConfig {
+    pub fn resolve_ms(self, operation: YieldTimeOperation, requested_ms: Option<u64>) -> u64 {
+        self.operation_config(operation).resolve_ms(requested_ms)
+    }
+
+    fn operation_config(self, operation: YieldTimeOperation) -> YieldTimeOperationConfig {
+        match operation {
+            YieldTimeOperation::ExecCommand => self.exec_command,
+            YieldTimeOperation::WriteStdinPoll => self.write_stdin_poll,
+            YieldTimeOperation::WriteStdinInput => self.write_stdin_input,
+        }
+    }
+
+    fn validate(self) -> anyhow::Result<()> {
+        self.exec_command
+            .validate(YieldTimeOperation::ExecCommand)?;
+        self.write_stdin_poll
+            .validate(YieldTimeOperation::WriteStdinPoll)?;
+        self.write_stdin_input
+            .validate(YieldTimeOperation::WriteStdinInput)?;
+        Ok(())
+    }
+}
+
+impl Default for YieldTimeConfig {
+    fn default() -> Self {
+        Self {
+            exec_command: default_exec_command_yield_time(),
+            write_stdin_poll: default_write_stdin_poll_yield_time(),
+            write_stdin_input: default_write_stdin_input_yield_time(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+struct YieldTimeConfigOverride {
+    #[serde(default)]
+    exec_command: YieldTimeOperationConfigOverride,
+    #[serde(default)]
+    write_stdin_poll: YieldTimeOperationConfigOverride,
+    #[serde(default)]
+    write_stdin_input: YieldTimeOperationConfigOverride,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+struct YieldTimeOperationConfigOverride {
+    #[serde(default)]
+    default_ms: Option<u64>,
+    #[serde(default)]
+    max_ms: Option<u64>,
+    #[serde(default)]
+    min_ms: Option<u64>,
+}
+
+impl YieldTimeConfigOverride {
+    fn resolve(self) -> YieldTimeConfig {
+        YieldTimeConfig {
+            exec_command: self.exec_command.resolve(default_exec_command_yield_time()),
+            write_stdin_poll: self
+                .write_stdin_poll
+                .resolve(default_write_stdin_poll_yield_time()),
+            write_stdin_input: self
+                .write_stdin_input
+                .resolve(default_write_stdin_input_yield_time()),
+        }
+    }
+}
+
+impl YieldTimeOperationConfigOverride {
+    fn resolve(self, defaults: YieldTimeOperationConfig) -> YieldTimeOperationConfig {
+        YieldTimeOperationConfig {
+            default_ms: self.default_ms.unwrap_or(defaults.default_ms),
+            max_ms: self.max_ms.unwrap_or(defaults.max_ms),
+            min_ms: self.min_ms.unwrap_or(defaults.min_ms),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for YieldTimeConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(YieldTimeConfigOverride::deserialize(deserializer)?.resolve())
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -120,6 +271,8 @@ pub struct DaemonConfig {
     #[serde(default)]
     pub default_shell: Option<String>,
     #[serde(default)]
+    pub yield_time: YieldTimeConfig,
+    #[serde(default)]
     pub experimental_apply_patch_target_encoding_autodetect: bool,
     #[serde(skip, default = "ProcessEnvironment::capture_current")]
     pub process_environment: ProcessEnvironment,
@@ -145,6 +298,7 @@ pub struct EmbeddedDaemonConfig {
     pub allow_login_shell: bool,
     pub pty: PtyMode,
     pub default_shell: Option<String>,
+    pub yield_time: YieldTimeConfig,
     pub experimental_apply_patch_target_encoding_autodetect: bool,
     pub process_environment: ProcessEnvironment,
 }
@@ -161,6 +315,7 @@ impl EmbeddedDaemonConfig {
             allow_login_shell: self.allow_login_shell,
             pty: self.pty,
             default_shell: self.default_shell,
+            yield_time: self.yield_time,
             experimental_apply_patch_target_encoding_autodetect: self
                 .experimental_apply_patch_target_encoding_autodetect,
             process_environment: self.process_environment,
@@ -171,6 +326,7 @@ impl EmbeddedDaemonConfig {
 
 impl DaemonConfig {
     pub fn validate(&self) -> anyhow::Result<()> {
+        self.yield_time.validate()?;
         if matches!(self.transport, DaemonTransport::Tls) {
             anyhow::ensure!(
                 self.tls.is_some(),
@@ -206,11 +362,23 @@ fn default_enable_transfer_compression() -> bool {
     true
 }
 
+const fn default_exec_command_yield_time() -> YieldTimeOperationConfig {
+    YieldTimeOperationConfig::new(10_000, 30_000, 250)
+}
+
+const fn default_write_stdin_poll_yield_time() -> YieldTimeOperationConfig {
+    YieldTimeOperationConfig::new(5_000, 300_000, 5_000)
+}
+
+const fn default_write_stdin_input_yield_time() -> YieldTimeOperationConfig {
+    YieldTimeOperationConfig::new(250, 30_000, 250)
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
-    use super::{DaemonConfig, DaemonTransport};
+    use super::{DaemonConfig, DaemonTransport, YieldTimeConfig, YieldTimeOperation};
 
     #[tokio::test]
     async fn load_accepts_http_transport_without_tls_block() {
@@ -231,6 +399,7 @@ transport = "http"
         let config = DaemonConfig::load(&config_path).await.unwrap();
         assert!(matches!(config.transport, DaemonTransport::Http));
         assert!(config.tls.is_none());
+        assert_eq!(config.yield_time, YieldTimeConfig::default());
         assert!(!config.experimental_apply_patch_target_encoding_autodetect);
     }
 
@@ -253,6 +422,100 @@ default_workdir = "/tmp"
         assert!(
             err.to_string()
                 .contains("tls config is required when transport = \"tls\""),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn yield_time_defaults_preserve_existing_behavior() {
+        let config = YieldTimeConfig::default();
+
+        assert_eq!(
+            config.resolve_ms(YieldTimeOperation::ExecCommand, None),
+            10_000
+        );
+        assert_eq!(
+            config.resolve_ms(YieldTimeOperation::ExecCommand, Some(1)),
+            250
+        );
+        assert_eq!(
+            config.resolve_ms(YieldTimeOperation::WriteStdinPoll, None),
+            5_000
+        );
+        assert_eq!(
+            config.resolve_ms(YieldTimeOperation::WriteStdinPoll, Some(1)),
+            5_000
+        );
+        assert_eq!(
+            config.resolve_ms(YieldTimeOperation::WriteStdinPoll, Some(400_000)),
+            300_000
+        );
+        assert_eq!(
+            config.resolve_ms(YieldTimeOperation::WriteStdinInput, None),
+            250
+        );
+        assert_eq!(
+            config.resolve_ms(YieldTimeOperation::WriteStdinInput, Some(100_000)),
+            30_000
+        );
+    }
+
+    #[tokio::test]
+    async fn load_merges_partial_yield_time_overrides() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("daemon.toml");
+        tokio::fs::write(
+            &config_path,
+            r#"
+target = "builder-a"
+listen = "127.0.0.1:8080"
+default_workdir = "/tmp"
+transport = "http"
+
+[yield_time.exec_command]
+max_ms = 60000
+
+[yield_time.write_stdin_poll]
+default_ms = 12000
+"#,
+        )
+        .await
+        .unwrap();
+
+        let config = DaemonConfig::load(&config_path).await.unwrap();
+        assert_eq!(config.yield_time.exec_command.default_ms, 10_000);
+        assert_eq!(config.yield_time.exec_command.min_ms, 250);
+        assert_eq!(config.yield_time.exec_command.max_ms, 60_000);
+        assert_eq!(config.yield_time.write_stdin_poll.default_ms, 12_000);
+        assert_eq!(config.yield_time.write_stdin_poll.min_ms, 5_000);
+        assert_eq!(config.yield_time.write_stdin_poll.max_ms, 300_000);
+        assert_eq!(config.yield_time.write_stdin_input.default_ms, 250);
+    }
+
+    #[tokio::test]
+    async fn load_rejects_invalid_yield_time_bounds() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("daemon.toml");
+        tokio::fs::write(
+            &config_path,
+            r#"
+target = "builder-a"
+listen = "127.0.0.1:8080"
+default_workdir = "/tmp"
+transport = "http"
+
+[yield_time.exec_command]
+default_ms = 100
+min_ms = 200
+"#,
+        )
+        .await
+        .unwrap();
+
+        let err = DaemonConfig::load(&config_path).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("yield_time.exec_command.default_ms must be between"),
             "unexpected error: {err}"
         );
     }

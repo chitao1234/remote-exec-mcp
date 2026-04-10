@@ -3,7 +3,9 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use anyhow::Context;
-use remote_exec_daemon::config::{EmbeddedDaemonConfig, ProcessEnvironment, PtyMode};
+use remote_exec_daemon::config::{
+    EmbeddedDaemonConfig, ProcessEnvironment, PtyMode, YieldTimeConfig,
+};
 use remote_exec_proto::sandbox::FilesystemSandbox;
 use serde::Deserialize;
 
@@ -69,6 +71,8 @@ pub struct LocalTargetConfig {
     #[serde(default)]
     pub default_shell: Option<String>,
     #[serde(default)]
+    pub yield_time: YieldTimeConfig,
+    #[serde(default)]
     pub experimental_apply_patch_target_encoding_autodetect: bool,
 }
 
@@ -121,6 +125,7 @@ impl LocalTargetConfig {
             allow_login_shell: self.allow_login_shell,
             pty: self.pty,
             default_shell: self.default_shell.clone(),
+            yield_time: self.yield_time,
             experimental_apply_patch_target_encoding_autodetect: self
                 .experimental_apply_patch_target_encoding_autodetect,
             process_environment: ProcessEnvironment::capture_current(),

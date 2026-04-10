@@ -76,22 +76,6 @@ Json build_response(
     };
 }
 
-unsigned long clamp_timeout(
-    unsigned long requested_ms,
-    unsigned long fallback_ms,
-    unsigned long minimum_ms,
-    unsigned long maximum_ms
-) {
-    unsigned long value = requested_ms == 0 ? fallback_ms : requested_ms;
-    if (value < minimum_ms) {
-        value = minimum_ms;
-    }
-    if (value > maximum_ms) {
-        value = maximum_ms;
-    }
-    return value;
-}
-
 PipePair create_pipe_pair(const char* label) {
     SECURITY_ATTRIBUTES sa;
     sa.nLength = sizeof(sa);
@@ -214,8 +198,10 @@ Json SessionStore::start_command(
     const std::string& command,
     const std::string& workdir,
     const std::string& shell,
+    bool has_yield_time_ms,
     unsigned long yield_time_ms,
-    unsigned long max_output_chars
+    unsigned long max_output_chars,
+    const YieldTimeConfig& yield_time
 ) {
     {
         std::ostringstream message;
@@ -226,7 +212,11 @@ Json SessionStore::start_command(
     }
     std::shared_ptr<LiveSession> session = launch_live_session(command, workdir, shell);
 
-    const unsigned long timeout_ms = clamp_timeout(yield_time_ms, 10000, 250, 30000);
+    const unsigned long timeout_ms = resolve_yield_time_ms(
+        yield_time.exec_command,
+        has_yield_time_ms,
+        yield_time_ms
+    );
     const PollResult poll_result = poll_session(session, timeout_ms);
 
     if (poll_result.completed) {
@@ -270,8 +260,10 @@ Json SessionStore::start_command(
 Json SessionStore::write_stdin(
     const std::string& daemon_session_id,
     const std::string& chars,
+    bool has_yield_time_ms,
     unsigned long yield_time_ms,
-    unsigned long max_output_chars
+    unsigned long max_output_chars,
+    const YieldTimeConfig& yield_time
 ) {
     std::map<std::string, std::shared_ptr<LiveSession> >::iterator it = sessions_.find(daemon_session_id);
     if (it == sessions_.end()) {
@@ -304,7 +296,13 @@ Json SessionStore::write_stdin(
         }
     }
 
-    const unsigned long timeout_ms = clamp_timeout(yield_time_ms, 250, 250, 30000);
+    const YieldTimeOperationConfig& operation_config =
+        chars.empty() ? yield_time.write_stdin_poll : yield_time.write_stdin_input;
+    const unsigned long timeout_ms = resolve_yield_time_ms(
+        operation_config,
+        has_yield_time_ms,
+        yield_time_ms
+    );
     const PollResult poll_result = poll_session(session, timeout_ms);
 
     if (poll_result.completed) {

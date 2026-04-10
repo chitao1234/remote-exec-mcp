@@ -368,6 +368,7 @@ mod tests {
                 allow_login_shell: true,
                 pty: remote_exec_daemon::config::PtyMode::Auto,
                 default_shell: Some(missing_shell.to_string()),
+                yield_time: remote_exec_daemon::config::YieldTimeConfig::default(),
                 experimental_apply_patch_target_encoding_autodetect: false,
             }),
         })

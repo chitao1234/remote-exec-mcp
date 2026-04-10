@@ -16,6 +16,24 @@ allow_login_shell = true
 # On Windows, omitted default shell now prefers Git Bash when Git for Windows is installed.
 # Set this to "powershell.exe" or "cmd.exe" to keep the older behavior.
 # default_shell = "/bin/sh"
+# Optional. Per-operation yield-time policy overrides. `min_ms` silently raises
+# smaller caller-provided values, `default_ms` applies when the caller omits
+# `yield_time_ms`, and `max_ms` caps larger values.
+#
+#[yield_time.exec_command]
+#default_ms = 10000
+#max_ms = 30000
+#min_ms = 250
+#
+#[yield_time.write_stdin_poll]
+#default_ms = 5000
+#max_ms = 300000
+#min_ms = 5000
+#
+#[yield_time.write_stdin_input]
+#default_ms = 250
+#max_ms = 30000
+#min_ms = 250
 # Optional experimental flag. When true, `apply_patch` tries to autodetect the
 # existing target file's text encoding instead of requiring UTF-8.
 # experimental_apply_patch_target_encoding_autodetect = true

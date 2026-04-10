@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 
+#include "config.h"
 #include "http_helpers.h"
 #include "win32_scoped.h"
 
@@ -25,14 +26,18 @@ public:
         const std::string& command,
         const std::string& workdir,
         const std::string& shell,
+        bool has_yield_time_ms,
         unsigned long yield_time_ms,
-        unsigned long max_output_chars
+        unsigned long max_output_chars,
+        const YieldTimeConfig& yield_time
     );
     Json write_stdin(
         const std::string& daemon_session_id,
         const std::string& chars,
+        bool has_yield_time_ms,
         unsigned long yield_time_ms,
-        unsigned long max_output_chars
+        unsigned long max_output_chars,
+        const YieldTimeConfig& yield_time
     );
 
 private:

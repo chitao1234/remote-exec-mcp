@@ -24,7 +24,7 @@ use remote_exec_proto::rpc::{
 };
 use remote_exec_proto::sandbox::{SandboxAccess, SandboxError, authorize_path};
 
-use crate::AppState;
+use crate::{AppState, config::YieldTimeOperation};
 
 pub async fn exec_start(
     State(state): State<Arc<AppState>>,
@@ -91,6 +91,10 @@ pub async fn exec_start_local(
         cwd = %cwd.display(),
         shell = %shell,
         login,
+        resolved_yield_time_ms = state
+            .config
+            .yield_time
+            .resolve_ms(YieldTimeOperation::ExecCommand, req.yield_time_ms),
         "resolved exec request"
     );
     let argv = shell::shell_argv(&shell, login, &req.cmd);
@@ -103,8 +107,11 @@ pub async fn exec_start_local(
     )
     .map_err(internal_error)?;
 
-    let deadline = Instant::now()
-        + Duration::from_millis(req.yield_time_ms.unwrap_or(10_000).clamp(250, 30_000));
+    let yield_time_ms = state
+        .config
+        .yield_time
+        .resolve_ms(YieldTimeOperation::ExecCommand, req.yield_time_ms);
+    let deadline = Instant::now() + Duration::from_millis(yield_time_ms);
     let mut output = String::new();
 
     while Instant::now() < deadline {
@@ -202,13 +209,13 @@ pub async fn exec_write_local(
     write_chars(&mut session, &req.chars)
         .await
         .map_err(internal_error)?;
-    let output = poll_until(
-        &mut session,
-        req.chars.is_empty(),
-        req.yield_time_ms.unwrap_or(250),
-    )
-    .await
-    .map_err(internal_error)?;
+    let yield_time_ms = state
+        .config
+        .yield_time
+        .resolve_ms(write_yield_time_operation(&req.chars), req.yield_time_ms);
+    let output = poll_until(&mut session, yield_time_ms)
+        .await
+        .map_err(internal_error)?;
     if has_exited(&mut session).await.map_err(internal_error)? {
         let mut output = output;
         output.push_str(
@@ -344,12 +351,9 @@ async fn write_chars(session: &mut session::LiveSession, chars: &str) -> anyhow:
 
 async fn poll_until(
     session: &mut session::LiveSession,
-    empty_poll: bool,
-    requested_ms: u64,
+    yield_time_ms: u64,
 ) -> anyhow::Result<String> {
-    let lower = if empty_poll { 5_000 } else { 250 };
-    let upper = if empty_poll { 300_000 } else { 30_000 };
-    let deadline = Instant::now() + Duration::from_millis(requested_ms.clamp(lower, upper));
+    let deadline = Instant::now() + Duration::from_millis(yield_time_ms);
     let mut output = String::new();
 
     while Instant::now() < deadline {
@@ -367,6 +371,14 @@ async fn poll_until(
     }
 
     Ok(output)
+}
+
+fn write_yield_time_operation(chars: &str) -> YieldTimeOperation {
+    if chars.is_empty() {
+        YieldTimeOperation::WriteStdinPoll
+    } else {
+        YieldTimeOperation::WriteStdinInput
+    }
 }
 
 fn finish_response(
@@ -402,7 +414,8 @@ fn finish_response(
 
 #[cfg(test)]
 mod tests {
-    use super::shell;
+    use super::{shell, write_yield_time_operation};
+    use crate::config::YieldTimeOperation;
 
     #[cfg(unix)]
     #[test]
@@ -456,6 +469,22 @@ mod tests {
                 "-Command".to_string(),
                 "Write-Output ok".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn write_yield_time_operation_uses_poll_bucket_for_empty_chars() {
+        assert_eq!(
+            write_yield_time_operation(""),
+            YieldTimeOperation::WriteStdinPoll
+        );
+    }
+
+    #[test]
+    fn write_yield_time_operation_uses_input_bucket_for_non_empty_chars() {
+        assert_eq!(
+            write_yield_time_operation("hello"),
+            YieldTimeOperation::WriteStdinInput
         );
     }
 }

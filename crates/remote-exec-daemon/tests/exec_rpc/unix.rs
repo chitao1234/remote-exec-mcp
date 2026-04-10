@@ -24,6 +24,37 @@ async fn exec_start_returns_a_live_session_for_long_running_tty_processes() {
 }
 
 #[tokio::test]
+async fn exec_start_uses_configured_exec_yield_time_policy() {
+    let fixture = support::spawn::spawn_daemon_with_extra_config(
+        "builder-a",
+        r#"[yield_time.exec_command]
+default_ms = 3000
+max_ms = 3000
+min_ms = 3000
+"#,
+    )
+    .await;
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "printf ready; sleep 2".to_string(),
+                workdir: None,
+                shell: Some(TEST_SHELL.to_string()),
+                tty: false,
+                yield_time_ms: Some(1),
+                max_output_tokens: Some(2_000),
+                login: Some(false),
+            },
+        )
+        .await;
+
+    assert!(!response.running, "{response:#?}");
+    assert_eq!(response.exit_code, Some(0));
+    assert!(response.output.contains("ready"));
+}
+
+#[tokio::test]
 async fn exec_start_uses_login_shell_by_default_when_login_is_omitted() {
     let home = tempfile::tempdir().unwrap();
     std::fs::write(

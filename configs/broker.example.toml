@@ -80,6 +80,24 @@ expected_daemon_name = "builder-xp"
 ## pty = "none"
 ## Optional. If set, broker startup fails unless this shell is usable on the broker host.
 ## default_shell = "/bin/sh"
+## Optional. Per-operation yield-time policy overrides for the embedded local target only.
+## `min_ms` silently raises smaller caller-provided values, `default_ms` applies when
+## the caller omits `yield_time_ms`, and `max_ms` caps larger values.
+##
+## [local.yield_time.exec_command]
+## default_ms = 10000
+## max_ms = 30000
+## min_ms = 250
+##
+## [local.yield_time.write_stdin_poll]
+## default_ms = 5000
+## max_ms = 300000
+## min_ms = 5000
+##
+## [local.yield_time.write_stdin_input]
+## default_ms = 250
+## max_ms = 30000
+## min_ms = 250
 ## Optional experimental flag for the embedded local target only. When true,
 ## local `apply_patch` can autodetect an existing target file's text encoding.
 ## experimental_apply_patch_target_encoding_autodetect = true

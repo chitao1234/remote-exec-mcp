@@ -95,6 +95,10 @@ HttpResponse handle_exec_start(AppState& state, const HttpRequest& request) {
 
     try {
         const Json body = parse_json_body(request);
+        const Json::const_iterator yield_time_it = body.find("yield_time_ms");
+        const bool has_yield_time_ms = yield_time_it != body.end();
+        const unsigned long yield_time_ms =
+            has_yield_time_ms ? yield_time_it->get<unsigned long>() : 0UL;
         if (body.value("tty", false)) {
             return make_rpc_error_response(
                 400,
@@ -116,8 +120,10 @@ HttpResponse handle_exec_start(AppState& state, const HttpRequest& request) {
             body.at("cmd").get<std::string>(),
             resolve_workdir(state, body),
             shell,
-            body.value("yield_time_ms", 0UL),
-            body.value("max_output_tokens", 0UL)
+            has_yield_time_ms,
+            yield_time_ms,
+            body.value("max_output_tokens", 0UL),
+            state.config.yield_time
         );
         log_message(
             LOG_INFO,
@@ -141,6 +147,10 @@ HttpResponse handle_exec_write(AppState& state, const HttpRequest& request) {
 
     try {
         const Json body = parse_json_body(request);
+        const Json::const_iterator yield_time_it = body.find("yield_time_ms");
+        const bool has_yield_time_ms = yield_time_it != body.end();
+        const unsigned long yield_time_ms =
+            has_yield_time_ms ? yield_time_it->get<unsigned long>() : 0UL;
         {
             std::ostringstream message;
             message << "exec/write daemon_session_id=`"
@@ -151,8 +161,10 @@ HttpResponse handle_exec_write(AppState& state, const HttpRequest& request) {
         Json exec_response = state.sessions.write_stdin(
             body.at("daemon_session_id").get<std::string>(),
             body.value("chars", std::string()),
-            body.value("yield_time_ms", 0UL),
-            body.value("max_output_tokens", 0UL)
+            has_yield_time_ms,
+            yield_time_ms,
+            body.value("max_output_tokens", 0UL),
+            state.config.yield_time
         );
         exec_response["daemon_instance_id"] = state.daemon_instance_id;
         write_json(response, exec_response);

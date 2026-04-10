@@ -31,6 +31,16 @@ target = builder-xp
 listen_host = 0.0.0.0
 listen_port = 8181
 default_workdir = C:\work
+# Optional per-operation yield-time policy overrides.
+# yield_time_exec_command_default_ms = 10000
+# yield_time_exec_command_max_ms = 30000
+# yield_time_exec_command_min_ms = 250
+# yield_time_write_stdin_poll_default_ms = 5000
+# yield_time_write_stdin_poll_max_ms = 300000
+# yield_time_write_stdin_poll_min_ms = 5000
+# yield_time_write_stdin_input_default_ms = 250
+# yield_time_write_stdin_input_max_ms = 30000
+# yield_time_write_stdin_input_min_ms = 250
 ```
 
 ## Limitations

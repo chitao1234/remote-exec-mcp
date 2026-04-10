@@ -130,6 +130,7 @@ async fn daemon_startup_rejects_unusable_default_shell() {
             allow_login_shell: true,
             pty: remote_exec_daemon::config::PtyMode::Auto,
             default_shell: Some("definitely-not-a-real-shell".to_string()),
+            yield_time: remote_exec_daemon::config::YieldTimeConfig::default(),
             experimental_apply_patch_target_encoding_autodetect: false,
             process_environment: remote_exec_daemon::config::ProcessEnvironment::capture_current(),
             tls: Some(remote_exec_daemon::config::TlsConfig {
@@ -161,6 +162,7 @@ async fn daemon_startup_rejects_non_windows_conpty_configuration() {
             allow_login_shell: true,
             pty: remote_exec_daemon::config::PtyMode::Conpty,
             default_shell: Some("/bin/sh".to_string()),
+            yield_time: remote_exec_daemon::config::YieldTimeConfig::default(),
             experimental_apply_patch_target_encoding_autodetect: false,
             process_environment: remote_exec_daemon::config::ProcessEnvironment::capture_current(),
             tls: Some(remote_exec_daemon::config::TlsConfig {

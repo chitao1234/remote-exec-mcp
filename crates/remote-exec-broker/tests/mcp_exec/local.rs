@@ -54,3 +54,31 @@ async fn exec_command_and_write_stdin_work_for_enabled_local_target() {
         serde_json::Value::String(LOCAL_LONG_RUNNING_CMD.to_string())
     );
 }
+
+#[tokio::test]
+async fn exec_command_uses_local_yield_time_policy_overrides() {
+    let fixture = support::spawners::spawn_broker_with_local_target_and_extra_config(
+        r#"[local.yield_time.exec_command]
+default_ms = 3000
+max_ms = 3000
+min_ms = 3000
+"#,
+    )
+    .await;
+    let result = fixture
+        .call_tool(
+            "exec_command",
+            serde_json::json!({
+                "target": "local",
+                "cmd": LOCAL_LONG_RUNNING_CMD,
+                "shell": LOCAL_TEST_SHELL,
+                "tty": false,
+                "yield_time_ms": 1
+            }),
+        )
+        .await;
+
+    assert!(result.structured_content["session_id"].is_null());
+    assert_eq!(result.structured_content["exit_code"], 0);
+    assert!(result.text_output.contains("ready"));
+}
