@@ -68,6 +68,8 @@ pub struct LocalTargetConfig {
     pub pty: PtyMode,
     #[serde(default)]
     pub default_shell: Option<String>,
+    #[serde(default)]
+    pub experimental_apply_patch_target_encoding_autodetect: bool,
 }
 
 impl TargetConfig {
@@ -119,6 +121,8 @@ impl LocalTargetConfig {
             allow_login_shell: self.allow_login_shell,
             pty: self.pty,
             default_shell: self.default_shell.clone(),
+            experimental_apply_patch_target_encoding_autodetect: self
+                .experimental_apply_patch_target_encoding_autodetect,
             process_environment: ProcessEnvironment::capture_current(),
         }
     }
@@ -260,6 +264,30 @@ client_key_pem = "/tmp/broker.key"
         );
         assert!(!config.disable_structured_content);
         assert!(matches!(config.mcp, McpServerConfig::Stdio));
+    }
+
+    #[tokio::test]
+    async fn load_accepts_local_apply_patch_encoding_autodetect() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("broker.toml");
+        tokio::fs::write(
+            &config_path,
+            format!(
+                "[local]\ndefault_workdir = {}\nexperimental_apply_patch_target_encoding_autodetect = true\n",
+                toml::Value::String(dir.path().display().to_string())
+            ),
+        )
+        .await
+        .unwrap();
+
+        let config = BrokerConfig::load(&config_path).await.unwrap();
+        assert_eq!(
+            config
+                .local
+                .as_ref()
+                .map(|local| local.experimental_apply_patch_target_encoding_autodetect),
+            Some(true)
+        );
     }
 
     #[tokio::test]

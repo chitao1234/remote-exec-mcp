@@ -53,6 +53,7 @@ struct BrokerConfigTarget<'a> {
 
 struct LocalBrokerConfig<'a> {
     default_workdir: &'a Path,
+    experimental_apply_patch_target_encoding_autodetect: bool,
 }
 
 fn toml_string(value: &str) -> String {
@@ -102,11 +103,20 @@ expected_daemon_name = {expected_daemon_name}
 }
 
 fn render_local_broker_config(local: &LocalBrokerConfig<'_>) -> String {
+    let experimental_apply_patch_target_encoding_autodetect =
+        if local.experimental_apply_patch_target_encoding_autodetect {
+            "experimental_apply_patch_target_encoding_autodetect = true\n"
+        } else {
+            ""
+        };
     format!(
         r#"[local]
 default_workdir = {default_workdir}
+{experimental_apply_patch_target_encoding_autodetect}
 "#,
         default_workdir = toml_string(&local.default_workdir.display().to_string()),
+        experimental_apply_patch_target_encoding_autodetect =
+            experimental_apply_patch_target_encoding_autodetect,
     )
 }
 
@@ -582,6 +592,7 @@ pub async fn spawn_broker_with_local_target() -> BrokerFixture {
         &[],
         Some(&LocalBrokerConfig {
             default_workdir: &local_workdir,
+            experimental_apply_patch_target_encoding_autodetect: false,
         }),
         None,
         None,
@@ -621,8 +632,39 @@ where
         &[],
         Some(&LocalBrokerConfig {
             default_workdir: &local_workdir,
+            experimental_apply_patch_target_encoding_autodetect: false,
         }),
         Some(&host_sandbox),
+        None,
+    );
+
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
+    command.arg(&broker_config);
+    let transport = TokioChildProcess::new(command).unwrap();
+    let client = DummyClientHandler.serve(transport).await.unwrap();
+
+    BrokerFixture {
+        _tempdir: tempdir,
+        client,
+        stub_state: stub_daemon_state("local", ExecWriteBehavior::Success, "local", true),
+    }
+}
+
+pub async fn spawn_broker_with_local_target_apply_patch_encoding_autodetect() -> BrokerFixture {
+    remote_exec_daemon::install_crypto_provider();
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let local_workdir = tempdir.path().join("local-work");
+    std::fs::create_dir_all(&local_workdir).unwrap();
+    let broker_config = tempdir.path().join("broker.toml");
+    write_broker_config(
+        &broker_config,
+        &[],
+        Some(&LocalBrokerConfig {
+            default_workdir: &local_workdir,
+            experimental_apply_patch_target_encoding_autodetect: true,
+        }),
+        None,
         None,
     );
 

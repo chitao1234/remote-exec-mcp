@@ -84,7 +84,7 @@ Broker config covers one entry per target:
 - optional exact leaf certificate pin via `pinned_server_cert_pem` for `https://` targets
 - expected daemon target name
 - `allow_insecure_http = true` when a target intentionally uses `http://`
-- optional `[local]` broker-host config with default working directory, login-shell policy, PTY mode, and default shell
+- optional `[local]` broker-host config with default working directory, login-shell policy, PTY mode, default shell, and embedded-local `apply_patch` encoding autodetect flag
 
 MCP transport config covers:
 
@@ -263,6 +263,7 @@ Wire those files into the example configs:
 - broker targets use `ca_pem`, `client_cert_pem`, `client_key_pem`, `expected_daemon_name`, and optionally `skip_server_name_verification` / `pinned_server_cert_pem` as shown in `configs/broker.example.toml`
 - each TLS-enabled daemon uses `tls.cert_pem`, `tls.key_pem`, `tls.ca_pem`, and optionally `tls.pinned_client_cert_pem` as shown in `configs/daemon.example.toml`
 - set `transport = "http"` on a Rust daemon if you intentionally want plain HTTP instead of mutual TLS
+- set `experimental_apply_patch_target_encoding_autodetect = true` on a daemon if you want experimental `apply_patch` support for existing non-UTF-8 text files
 - set `expected_daemon_name` to the daemon's configured `target`
 
 Example plain-HTTP target in broker config:
@@ -305,6 +306,7 @@ default_workdir = "/srv/local-work"
 allow_login_shell = true
 # pty = "none"
 # default_shell = "/bin/sh"
+# experimental_apply_patch_target_encoding_autodetect = true
 ```
 
 ## Local development
@@ -333,6 +335,8 @@ cargo fmt --all --check
 - Each target daemon keeps at most `64` live exec sessions. When full, it protects the `8` most recently touched sessions, prunes exited sessions first, otherwise prunes the oldest non-protected live session, and terminates the pruned process.
 - `apply_patch` supports the documented `*** End of File` marker.
 - `apply_patch` preserves an updated file's existing `LF` versus `CRLF` line ending style.
+- Daemons can opt into experimental `experimental_apply_patch_target_encoding_autodetect = true` support so `apply_patch` can read and rewrite existing non-UTF-8 text files using the autodetected original encoding.
+- Broker `[local]` config can also set `experimental_apply_patch_target_encoding_autodetect = true` to enable the same behavior for the embedded broker-host local target only.
 - Successful `apply_patch` calls return text output only; they do not expose MCP `structuredContent`.
 - `exec_command` intercepted into `apply_patch` always returns a warning in structured content `warnings` when structured content is enabled, and in normal text output either way.
 - `exec_command` returns a warning in structured content `warnings` when structured content is enabled, and in normal text output when a target crosses from `59` to `60` open exec sessions.

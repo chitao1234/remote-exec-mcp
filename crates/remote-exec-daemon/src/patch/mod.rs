@@ -1,6 +1,7 @@
 mod engine;
 mod matcher;
 pub mod parser;
+mod text_codec;
 mod verify;
 
 use std::path::Path;
@@ -87,16 +88,22 @@ async fn execute_actions(
                 summary_path,
                 remove_source,
             } => {
-                let current = tokio::fs::read_to_string(&source_path).await?;
-                let line_ending = detect_line_ending(&current);
+                let current = text_codec::PatchTextFile::read(
+                    &source_path,
+                    state
+                        .config
+                        .experimental_apply_patch_target_encoding_autodetect,
+                )
+                .await?;
+                let line_ending = detect_line_ending(&current.text);
                 let content = ensure_trailing_newline(
-                    engine::apply_hunks(&current, &hunks, line_ending)?,
+                    engine::apply_hunks(&current.text, &hunks, line_ending)?,
                     line_ending,
                 );
                 if let Some(parent) = destination_path.parent() {
                     tokio::fs::create_dir_all(parent).await?;
                 }
-                tokio::fs::write(&destination_path, content).await?;
+                tokio::fs::write(&destination_path, current.encode(&content)?).await?;
                 if remove_source {
                     tokio::fs::remove_file(&source_path).await?;
                 }

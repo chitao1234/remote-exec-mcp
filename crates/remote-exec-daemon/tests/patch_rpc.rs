@@ -2,6 +2,12 @@ mod support;
 
 use remote_exec_proto::rpc::{PatchApplyRequest, PatchApplyResponse};
 
+fn utf16le_bom_bytes(text: &str) -> Vec<u8> {
+    let mut bytes = vec![0xFF, 0xFE];
+    bytes.extend(text.encode_utf16().flat_map(|unit| unit.to_le_bytes()));
+    bytes
+}
+
 #[tokio::test]
 async fn add_file_overwrites_existing_content() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
@@ -605,6 +611,132 @@ async fn non_utf8_delete_source_failure_leaves_earlier_mutation_applied() {
             .await
             .unwrap(),
         "after\n",
+    );
+}
+
+#[tokio::test]
+async fn utf16le_update_source_still_fails_when_autodetect_is_disabled() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let path = fixture.workdir.join("utf16.txt");
+    tokio::fs::write(&path, utf16le_bom_bytes("hello\r\nworld\r\n"))
+        .await
+        .unwrap();
+
+    let err = fixture
+        .rpc_error(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Update File: utf16.txt\n",
+                    "@@\n",
+                    "-hello\n",
+                    "+hello daemon\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert_eq!(err.code, "patch_failed");
+    assert_eq!(
+        tokio::fs::read(path).await.unwrap(),
+        utf16le_bom_bytes("hello\r\nworld\r\n")
+    );
+}
+
+#[tokio::test]
+async fn update_file_autodetects_utf16le_target_encoding_when_enabled() {
+    let fixture = support::spawn::spawn_daemon_with_extra_config(
+        "builder-a",
+        "experimental_apply_patch_target_encoding_autodetect = true",
+    )
+    .await;
+    let path = fixture.workdir.join("utf16.txt");
+    tokio::fs::write(&path, utf16le_bom_bytes("hello\r\nworld\r\n"))
+        .await
+        .unwrap();
+
+    let response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: concat!(
+                    "*** Begin Patch\n",
+                    "*** Update File: utf16.txt\n",
+                    "@@\n",
+                    "-hello\n",
+                    "+hello daemon\n",
+                    "*** End Patch\n",
+                )
+                .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert!(response.output.contains("M utf16.txt"));
+    assert_eq!(
+        tokio::fs::read(path).await.unwrap(),
+        utf16le_bom_bytes("hello daemon\r\nworld\r\n")
+    );
+}
+
+#[tokio::test]
+async fn delete_file_autodetects_utf16le_target_encoding_when_enabled() {
+    let fixture = support::spawn::spawn_daemon_with_extra_config(
+        "builder-a",
+        "experimental_apply_patch_target_encoding_autodetect = true",
+    )
+    .await;
+    let path = fixture.workdir.join("utf16.txt");
+    tokio::fs::write(&path, utf16le_bom_bytes("hello\r\n"))
+        .await
+        .unwrap();
+
+    let response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: "*** Begin Patch\n*** Delete File: utf16.txt\n*** End Patch\n".to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert!(response.output.contains("D utf16.txt"));
+    assert!(tokio::fs::metadata(path).await.is_err());
+}
+
+#[tokio::test]
+async fn add_file_overwrite_preserves_utf16le_target_encoding_when_enabled() {
+    let fixture = support::spawn::spawn_daemon_with_extra_config(
+        "builder-a",
+        "experimental_apply_patch_target_encoding_autodetect = true",
+    )
+    .await;
+    let path = fixture.workdir.join("utf16.txt");
+    tokio::fs::write(&path, utf16le_bom_bytes("before\r\n"))
+        .await
+        .unwrap();
+
+    let response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: "*** Begin Patch\n*** Add File: utf16.txt\n+after\n*** End Patch\n"
+                    .to_string(),
+                workdir: Some(".".to_string()),
+            },
+        )
+        .await;
+
+    assert!(response.output.contains("A utf16.txt"));
+    assert_eq!(
+        tokio::fs::read(path).await.unwrap(),
+        utf16le_bom_bytes("after\n")
     );
 }
 

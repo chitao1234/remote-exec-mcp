@@ -281,6 +281,7 @@ expected_daemon_name = {expected_daemon_name}
             allow_login_shell: true,
             pty: remote_exec_daemon::config::PtyMode::Auto,
             default_shell: None,
+            experimental_apply_patch_target_encoding_autodetect: false,
             process_environment: remote_exec_daemon::config::ProcessEnvironment::capture_current(),
             tls: Some(remote_exec_daemon::config::TlsConfig {
                 cert_pem: self.daemon_cert_pem.clone(),

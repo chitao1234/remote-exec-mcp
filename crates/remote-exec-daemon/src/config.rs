@@ -119,6 +119,8 @@ pub struct DaemonConfig {
     pub pty: PtyMode,
     #[serde(default)]
     pub default_shell: Option<String>,
+    #[serde(default)]
+    pub experimental_apply_patch_target_encoding_autodetect: bool,
     #[serde(skip, default = "ProcessEnvironment::capture_current")]
     pub process_environment: ProcessEnvironment,
     #[serde(default)]
@@ -143,6 +145,7 @@ pub struct EmbeddedDaemonConfig {
     pub allow_login_shell: bool,
     pub pty: PtyMode,
     pub default_shell: Option<String>,
+    pub experimental_apply_patch_target_encoding_autodetect: bool,
     pub process_environment: ProcessEnvironment,
 }
 
@@ -158,6 +161,8 @@ impl EmbeddedDaemonConfig {
             allow_login_shell: self.allow_login_shell,
             pty: self.pty,
             default_shell: self.default_shell,
+            experimental_apply_patch_target_encoding_autodetect: self
+                .experimental_apply_patch_target_encoding_autodetect,
             process_environment: self.process_environment,
             tls: None,
         }
@@ -226,6 +231,7 @@ transport = "http"
         let config = DaemonConfig::load(&config_path).await.unwrap();
         assert!(matches!(config.transport, DaemonTransport::Http));
         assert!(config.tls.is_none());
+        assert!(!config.experimental_apply_patch_target_encoding_autodetect);
     }
 
     #[tokio::test]
@@ -280,6 +286,31 @@ pinned_client_cert_pem = "/tmp/broker.pem"
                 .and_then(|tls| tls.pinned_client_cert_pem.as_ref()),
             Some(&PathBuf::from("/tmp/broker.pem"))
         );
+    }
+
+    #[tokio::test]
+    async fn load_accepts_experimental_apply_patch_target_encoding_autodetect() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("daemon.toml");
+        tokio::fs::write(
+            &config_path,
+            r#"
+target = "builder-a"
+listen = "127.0.0.1:9443"
+default_workdir = "/tmp"
+experimental_apply_patch_target_encoding_autodetect = true
+
+[tls]
+cert_pem = "/tmp/daemon.pem"
+key_pem = "/tmp/daemon.key"
+ca_pem = "/tmp/ca.pem"
+"#,
+        )
+        .await
+        .unwrap();
+
+        let config = DaemonConfig::load(&config_path).await.unwrap();
+        assert!(config.experimental_apply_patch_target_encoding_autodetect);
     }
 
     #[tokio::test]

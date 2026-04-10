@@ -5,13 +5,14 @@ use tokio::fs;
 
 use super::ensure_trailing_newline;
 use super::parser::{PatchAction, UpdateChunk};
+use super::text_codec::PatchTextFile;
 use crate::AppState;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolvedAction {
     Add {
         path: PathBuf,
-        content: String,
+        content: Vec<u8>,
         summary_path: String,
     },
     Delete {
@@ -36,9 +37,23 @@ pub async fn resolve_action(
         PatchAction::Add { path, lines } => {
             let absolute_path = resolve_patch_path(cwd, &path);
             crate::exec::ensure_sandbox_access(state, SandboxAccess::Write, &absolute_path)?;
+            let content = ensure_trailing_newline(lines.join("\n"), "\n");
+            let content = match fs::metadata(&absolute_path).await {
+                Ok(metadata) if metadata.is_file() => PatchTextFile::read(
+                    &absolute_path,
+                    state
+                        .config
+                        .experimental_apply_patch_target_encoding_autodetect,
+                )
+                .await?
+                .encode(&content)?,
+                Ok(_) => content.into_bytes(),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => content.into_bytes(),
+                Err(err) => return Err(err.into()),
+            };
             Ok(ResolvedAction::Add {
                 path: absolute_path.clone(),
-                content: ensure_trailing_newline(lines.join("\n"), "\n"),
+                content,
                 summary_path: display_relative(cwd, &absolute_path),
             })
         }
@@ -51,7 +66,13 @@ pub async fn resolve_action(
                 "`{}` is not a file",
                 display_relative(cwd, &absolute_path)
             );
-            let _ = fs::read_to_string(&absolute_path).await?;
+            let _ = PatchTextFile::read(
+                &absolute_path,
+                state
+                    .config
+                    .experimental_apply_patch_target_encoding_autodetect,
+            )
+            .await?;
             Ok(ResolvedAction::Delete {
                 path: absolute_path.clone(),
                 summary_path: display_relative(cwd, &absolute_path),

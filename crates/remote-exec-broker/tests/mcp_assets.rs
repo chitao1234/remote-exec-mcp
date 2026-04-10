@@ -5,6 +5,12 @@ use image::{ImageBuffer, Rgba};
 use remote_exec_proto::rpc::RpcErrorBody;
 use rmcp::model::PaginatedRequestParams;
 
+fn utf16le_bom_bytes(text: &str) -> Vec<u8> {
+    let mut bytes = vec![0xFF, 0xFE];
+    bytes.extend(text.encode_utf16().flat_map(|unit| unit.to_le_bytes()));
+    bytes
+}
+
 #[tokio::test]
 async fn apply_patch_returns_plain_text_without_structured_output() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
@@ -162,6 +168,39 @@ async fn apply_patch_runs_against_enabled_local_target() {
     assert_eq!(
         std::fs::read_to_string(workdir.join("hello.txt")).unwrap(),
         "hello local\n"
+    );
+}
+
+#[tokio::test]
+async fn apply_patch_local_target_can_autodetect_existing_target_encoding_when_enabled() {
+    let fixture =
+        support::spawners::spawn_broker_with_local_target_apply_patch_encoding_autodetect().await;
+    let workdir = fixture.local_workdir();
+    let path = workdir.join("utf16.txt");
+    std::fs::write(&path, utf16le_bom_bytes("hello\r\nworld\r\n")).unwrap();
+
+    let result = fixture
+        .call_tool(
+            "apply_patch",
+            serde_json::json!({
+                "target": "local",
+                "input": concat!(
+                    "*** Begin Patch\n",
+                    "*** Update File: utf16.txt\n",
+                    "@@\n",
+                    "-hello\n",
+                    "+hello local\n",
+                    "*** End Patch\n",
+                ),
+                "workdir": workdir.display().to_string()
+            }),
+        )
+        .await;
+
+    assert!(result.text_output.contains("M utf16.txt"));
+    assert_eq!(
+        std::fs::read(path).unwrap(),
+        utf16le_bom_bytes("hello local\r\nworld\r\n")
     );
 }
 

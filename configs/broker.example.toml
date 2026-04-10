@@ -80,3 +80,6 @@ expected_daemon_name = "builder-xp"
 ## pty = "none"
 ## Optional. If set, broker startup fails unless this shell is usable on the broker host.
 ## default_shell = "/bin/sh"
+## Optional experimental flag for the embedded local target only. When true,
+## local `apply_patch` can autodetect an existing target file's text encoding.
+## experimental_apply_patch_target_encoding_autodetect = true

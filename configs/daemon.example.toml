@@ -16,6 +16,9 @@ allow_login_shell = true
 # On Windows, omitted default shell now prefers Git Bash when Git for Windows is installed.
 # Set this to "powershell.exe" or "cmd.exe" to keep the older behavior.
 # default_shell = "/bin/sh"
+# Optional experimental flag. When true, `apply_patch` tries to autodetect the
+# existing target file's text encoding instead of requiring UTF-8.
+# experimental_apply_patch_target_encoding_autodetect = true
 #
 # Optional static path sandbox. Missing `allow` or `allow = []` means "allow all",
 # then `deny` can carve out exclusions.

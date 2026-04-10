@@ -75,6 +75,7 @@ async fn spawn_daemon_with_pty_mode(
         allow_login_shell: true,
         pty,
         default_shell: None,
+        experimental_apply_patch_target_encoding_autodetect: false,
         process_environment,
         tls: Some(remote_exec_daemon::config::TlsConfig {
             cert_pem: certs.daemon_cert.clone(),
@@ -144,6 +145,7 @@ pub async fn spawn_daemon_with_pinned_client_cert(
         allow_login_shell: true,
         pty: PtyMode::Auto,
         default_shell: None,
+        experimental_apply_patch_target_encoding_autodetect: false,
         process_environment: ProcessEnvironment::capture_current(),
         tls: Some(remote_exec_daemon::config::TlsConfig {
             cert_pem: certs.daemon_cert.clone(),
@@ -206,6 +208,7 @@ pub async fn spawn_daemon_over_http(target: &str) -> DaemonFixture {
         allow_login_shell: true,
         pty: PtyMode::Auto,
         default_shell: None,
+        experimental_apply_patch_target_encoding_autodetect: false,
         process_environment: ProcessEnvironment::capture_current(),
         tls: None,
     };
