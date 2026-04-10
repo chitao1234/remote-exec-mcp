@@ -10,6 +10,7 @@ pub mod transfer;
 use std::future::Future;
 use std::future::pending;
 use std::sync::Arc;
+#[cfg(feature = "tls")]
 use std::sync::Once;
 
 use anyhow::Result;
@@ -19,6 +20,9 @@ use remote_exec_proto::{
     rpc::TargetInfoResponse,
     sandbox::{CompiledFilesystemSandbox, compile_filesystem_sandbox},
 };
+
+pub(crate) const TLS_FEATURE_REQUIRED_MESSAGE: &str =
+    "transport = \"tls\" requires the remote-exec-daemon `tls` Cargo feature";
 
 #[derive(Clone)]
 pub struct AppState {
@@ -109,12 +113,20 @@ where
 }
 
 pub fn install_crypto_provider() {
-    static INIT: Once = Once::new();
+    #[cfg(not(feature = "tls"))]
+    {
+        return;
+    }
 
-    INIT.call_once(|| {
-        let provider = rustls::crypto::ring::default_provider();
-        provider
-            .install_default()
-            .expect("failed to install rustls crypto provider");
-    });
+    #[cfg(feature = "tls")]
+    {
+        static INIT: Once = Once::new();
+
+        INIT.call_once(|| {
+            let provider = rustls::crypto::ring::default_provider();
+            provider
+                .install_default()
+                .expect("failed to install rustls crypto provider");
+        });
+    }
 }

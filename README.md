@@ -20,7 +20,8 @@ Everything under `docs/` is historical implementation detail and planning contex
   - CLI client for the broker's public MCP tool surface.
   - Can spawn `remote-exec-broker <config>` over stdio or connect to a broker streamable HTTP endpoint.
 - `remote-exec-daemon`
-  - Per-machine daemon over mTLS JSON/HTTP.
+  - Per-machine daemon over mTLS JSON/HTTP by default, or plain HTTP when configured.
+  - The `tls` Cargo feature gates the HTTPS/mTLS transport and is enabled by default.
   - Executes commands, manages local sessions, applies patches, reads images, and serves transfer archives.
 - `remote-exec-daemon-xp`
   - Standalone Windows XP daemon over plain HTTP.
@@ -61,7 +62,7 @@ Daemon config covers:
 
 - target name
 - listen address
-- daemon transport: mutual TLS by default, or explicit plain HTTP
+- daemon transport: mutual TLS by default when built with the default `tls` Cargo feature, or explicit plain HTTP
 - optional exact broker leaf certificate pin for TLS mode
 - default working directory
 - optional static sandbox allow/deny rules for exec `cwd`, reads, and writes
@@ -118,11 +119,14 @@ REMOTE_EXEC_LOG='warn,remote_exec_broker=debug,remote_exec_daemon=debug,remote_e
 
 Rust broker and daemon targets use mutual TLS by default:
 
+- the Rust daemon's `tls` Cargo feature is enabled by default
 - the daemon presents a server certificate signed by your CA
 - the broker presents a client certificate signed by the same CA
 - both sides trust the CA certificate configured in `ca_pem`
 
-If you explicitly configure a Rust daemon with `transport = "http"`, or you target `remote-exec-daemon-xp`, the broker target must use `http://...` together with `allow_insecure_http = true`.
+If you build `remote-exec-daemon` without its default `tls` feature, it only supports `transport = "http"` and rejects `transport = "tls"` at startup.
+
+If you explicitly configure a Rust daemon with `transport = "http"`, build it without the `tls` feature, or target `remote-exec-daemon-xp`, the broker target must use `http://...` together with `allow_insecure_http = true`.
 
 Preferred bootstrap flow:
 
@@ -262,8 +266,8 @@ Notes:
 Wire those files into the example configs:
 
 - broker targets use `ca_pem`, `client_cert_pem`, `client_key_pem`, `expected_daemon_name`, and optionally `skip_server_name_verification` / `pinned_server_cert_pem` as shown in `configs/broker.example.toml`
-- each TLS-enabled daemon uses `tls.cert_pem`, `tls.key_pem`, `tls.ca_pem`, and optionally `tls.pinned_client_cert_pem` as shown in `configs/daemon.example.toml`
-- set `transport = "http"` on a Rust daemon if you intentionally want plain HTTP instead of mutual TLS
+- each TLS-enabled daemon built with the default `tls` feature uses `tls.cert_pem`, `tls.key_pem`, `tls.ca_pem`, and optionally `tls.pinned_client_cert_pem` as shown in `configs/daemon.example.toml`
+- set `transport = "http"` on a Rust daemon if you intentionally want plain HTTP instead of mutual TLS, or when you build without the `tls` feature
 - set `experimental_apply_patch_target_encoding_autodetect = true` on a daemon if you want experimental `apply_patch` support for existing non-UTF-8 text files
 - set `expected_daemon_name` to the daemon's configured `target`
 
@@ -368,6 +372,7 @@ cargo fmt --all --check
 - On Windows, `login=false` suppresses shell startup state where supported: Git Bash omits `-l`, `pwsh` and `powershell` add `-NoProfile`, and `cmd.exe` adds `/D` to disable AutoRun. `login=true` uses Git Bash with `-l -c` and drops those PowerShell and `cmd.exe` suppression flags.
 - On Windows, tool path inputs also accept MSYS/Cygwin drive-style absolute paths such as `/c/work/file.txt` and `/cygdrive/c/work/file.txt` for `workdir`, image paths, patch file paths, and transfer endpoints. Raw command strings are not rewritten.
 - `list_targets` reports the daemon's actual `supports_pty` capability instead of assuming PTY support.
+- The `remote-exec-daemon` Cargo feature `tls` is enabled by default. Builds that disable it no longer accept `transport = "tls"` and must use `transport = "http"` instead.
 - `pty = "none"` disables TTY entirely. On Windows, `pty = "conpty"` or `pty = "winpty"` force that backend and startup fails if the selected backend is unavailable. The `remote-exec-daemon` Cargo feature `winpty` is enabled by default, and `remote-exec-broker` forwards it for the embedded local target. Builds that disable that feature no longer expose the `winpty` backend. When `pty` is omitted, the daemon keeps the current auto-detect behavior.
 - `winptyrs` now prefers static linking when both static and dynamic layouts are available. Set `WINPTY_STATIC=0` to force dynamic linking instead.
 - Default shell resolution uses `default_shell` when configured. Otherwise it tries `SHELL`, then a usable passwd shell, then `bash`, then `/bin/sh` on Unix; and Git Bash, then `pwsh.exe`, then `powershell.exe` or `powershell`, then `COMSPEC`, then `cmd.exe` on Windows.

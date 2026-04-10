@@ -5,7 +5,8 @@ license.workspace = true
 version.workspace = true
 
 [features]
-default = ["winpty"]
+default = ["daemon-tls", "winpty"]
+daemon-tls = ["remote-exec-daemon/tls"]
 winpty = ["remote-exec-daemon/winpty"]
 
 [dependencies]

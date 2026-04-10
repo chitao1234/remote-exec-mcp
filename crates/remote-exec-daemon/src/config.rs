@@ -328,6 +328,7 @@ impl DaemonConfig {
     pub fn validate(&self) -> anyhow::Result<()> {
         self.yield_time.validate()?;
         if matches!(self.transport, DaemonTransport::Tls) {
+            anyhow::ensure!(cfg!(feature = "tls"), crate::TLS_FEATURE_REQUIRED_MESSAGE);
             anyhow::ensure!(
                 self.tls.is_some(),
                 "tls config is required when transport = \"tls\""
@@ -419,11 +420,19 @@ default_workdir = "/tmp"
         .unwrap();
 
         let err = DaemonConfig::load(&config_path).await.unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("tls config is required when transport = \"tls\""),
-            "unexpected error: {err}"
-        );
+        if cfg!(feature = "tls") {
+            assert!(
+                err.to_string()
+                    .contains("tls config is required when transport = \"tls\""),
+                "unexpected error: {err}"
+            );
+        } else {
+            assert!(
+                err.to_string()
+                    .contains(crate::TLS_FEATURE_REQUIRED_MESSAGE),
+                "unexpected error: {err}"
+            );
+        }
     }
 
     #[test]
@@ -520,6 +529,7 @@ min_ms = 200
         );
     }
 
+    #[cfg(feature = "tls")]
     #[tokio::test]
     async fn load_accepts_tls_transport_with_pinned_client_cert() {
         let dir = tempfile::tempdir().unwrap();
@@ -561,12 +571,8 @@ pinned_client_cert_pem = "/tmp/broker.pem"
 target = "builder-a"
 listen = "127.0.0.1:9443"
 default_workdir = "/tmp"
+transport = "http"
 experimental_apply_patch_target_encoding_autodetect = true
-
-[tls]
-cert_pem = "/tmp/daemon.pem"
-key_pem = "/tmp/daemon.key"
-ca_pem = "/tmp/ca.pem"
 "#,
         )
         .await
@@ -602,6 +608,36 @@ pinned_client_cert_pem = "/tmp/broker.pem"
         assert!(
             err.to_string()
                 .contains("pinned_client_cert_pem requires transport = \"tls\""),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[cfg(not(feature = "tls"))]
+    #[tokio::test]
+    async fn load_rejects_explicit_tls_transport_when_tls_feature_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("daemon.toml");
+        tokio::fs::write(
+            &config_path,
+            r#"
+target = "builder-a"
+listen = "127.0.0.1:9443"
+default_workdir = "/tmp"
+transport = "tls"
+
+[tls]
+cert_pem = "/tmp/daemon.pem"
+key_pem = "/tmp/daemon.key"
+ca_pem = "/tmp/ca.pem"
+"#,
+        )
+        .await
+        .unwrap();
+
+        let err = DaemonConfig::load(&config_path).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains(crate::TLS_FEATURE_REQUIRED_MESSAGE),
             "unexpected error: {err}"
         );
     }
