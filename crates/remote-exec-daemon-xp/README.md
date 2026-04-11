@@ -31,6 +31,9 @@ target = builder-xp
 listen_host = 0.0.0.0
 listen_port = 8181
 default_workdir = C:\work
+# Optional HTTP bearer auth. This authenticates broker requests but does not
+# add encryption or integrity protection on plain HTTP.
+# http_auth_bearer_token = replace-me
 # Optional per-operation yield-time policy overrides.
 # yield_time_exec_command_default_ms = 10000
 # yield_time_exec_command_max_ms = 30000
@@ -45,7 +48,7 @@ default_workdir = C:\work
 
 ## Limitations
 
-- plain HTTP only in v1
+- plain HTTP only in v1, with optional bearer-auth request authentication
 - no PTY support
 - no image support
 - `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles
@@ -55,3 +58,4 @@ default_workdir = C:\work
 - unsupported archive entries remain rejected: symlinks, hard links, special files, sparse entries, and malformed paths
 - `cmd.exe` only for shell execution
 - broker targets that point at XP must use `http://...` plus `allow_insecure_http = true`
+- optional `http_auth_bearer_token` can require `Authorization: Bearer ...` from the broker, but it still does not encrypt plain-HTTP traffic

@@ -6,7 +6,7 @@ use remote_exec_proto::rpc::{
     TRANSFER_SOURCE_TYPE_HEADER, TargetInfoResponse, TransferCompression, TransferExportRequest,
     TransferImportRequest, TransferImportResponse, TransferSourceType,
 };
-use reqwest::header::{CONNECTION, CONTENT_LENGTH};
+use reqwest::header::{AUTHORIZATION, CONNECTION, CONTENT_LENGTH, HeaderValue};
 
 use crate::config::{TargetConfig, TargetTransportKind};
 
@@ -54,6 +54,7 @@ pub struct DaemonClient {
     client: reqwest::Client,
     target_name: String,
     base_url: String,
+    authorization: Option<HeaderValue>,
 }
 
 impl DaemonClient {
@@ -71,11 +72,17 @@ impl DaemonClient {
                 crate::broker_tls::build_daemon_https_client(config).await?
             }
         };
+        let authorization = config
+            .http_auth
+            .as_ref()
+            .map(build_bearer_authorization_header)
+            .transpose()?;
 
         Ok(Self {
             client,
             target_name,
             base_url: config.base_url.clone(),
+            authorization,
         })
     }
 
@@ -124,9 +131,7 @@ impl DaemonClient {
             "starting daemon transfer export"
         );
         let response = self
-            .client
-            .post(format!("{}{}", self.base_url, "/v1/transfer/export"))
-            .header(CONNECTION, "close")
+            .request("/v1/transfer/export")
             .json(req)
             .send()
             .await
@@ -200,9 +205,7 @@ impl DaemonClient {
             .len();
         let body = reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(file));
         let response = self
-            .client
-            .post(format!("{}{}", self.base_url, "/v1/transfer/import"))
-            .header(CONNECTION, "close")
+            .request("/v1/transfer/import")
             .header(CONTENT_LENGTH, file_len)
             .header(
                 TRANSFER_DESTINATION_PATH_HEADER,
@@ -280,24 +283,17 @@ impl DaemonClient {
             path,
             "sending daemon rpc"
         );
-        let response = self
-            .client
-            .post(format!("{}{}", self.base_url, path))
-            .header(CONNECTION, "close")
-            .json(body)
-            .send()
-            .await
-            .map_err(|err| {
-                tracing::warn!(
-                    target = %self.target_name,
-                    base_url = %self.base_url,
-                    path,
-                    elapsed_ms = started.elapsed().as_millis() as u64,
-                    error = %err,
-                    "daemon rpc transport failed"
-                );
-                DaemonClientError::Transport(err.into())
-            })?;
+        let response = self.request(path).json(body).send().await.map_err(|err| {
+            tracing::warn!(
+                target = %self.target_name,
+                base_url = %self.base_url,
+                path,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                error = %err,
+                "daemon rpc transport failed"
+            );
+            DaemonClientError::Transport(err.into())
+        })?;
         if !response.status().is_success() {
             tracing::warn!(
                 target = %self.target_name,
@@ -346,6 +342,24 @@ impl DaemonClient {
         );
         Ok(decoded)
     }
+
+    fn request(&self, path: &str) -> reqwest::RequestBuilder {
+        let mut request = self
+            .client
+            .post(format!("{}{}", self.base_url, path))
+            .header(CONNECTION, "close");
+        if let Some(authorization) = &self.authorization {
+            request = request.header(AUTHORIZATION, authorization.clone());
+        }
+        request
+    }
+}
+
+fn build_bearer_authorization_header(
+    http_auth: &crate::config::HttpAuthConfig,
+) -> anyhow::Result<HeaderValue> {
+    HeaderValue::from_str(&format!("Bearer {}", http_auth.bearer_token))
+        .map_err(anyhow::Error::from)
 }
 
 fn format_transfer_source_type(source_type: &TransferSourceType) -> &'static str {

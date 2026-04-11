@@ -19,6 +19,7 @@ struct DaemonConfig {
     std::string listen_host;
     int listen_port;
     std::string default_workdir;
+    std::string http_auth_bearer_token;
     YieldTimeConfig yield_time;
 };
 

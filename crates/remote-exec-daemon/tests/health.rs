@@ -7,6 +7,7 @@ use remote_exec_daemon::config::{
 };
 use remote_exec_proto::rpc::TargetInfoResponse;
 use reqwest::StatusCode;
+use reqwest::header::{AUTHORIZATION, WWW_AUTHENTICATE};
 
 fn startup_validation_config() -> DaemonConfig {
     DaemonConfig {
@@ -15,6 +16,7 @@ fn startup_validation_config() -> DaemonConfig {
         default_workdir: std::env::temp_dir(),
         windows_posix_root: None,
         transport: DaemonTransport::Http,
+        http_auth: None,
         sandbox: None,
         enable_transfer_compression: true,
         allow_login_shell: true,
@@ -64,6 +66,70 @@ async fn target_info_is_available_over_plain_http() {
     );
     assert!(info.supports_image_read);
     assert!(info.supports_transfer_compression);
+}
+
+#[tokio::test]
+async fn plain_http_bearer_auth_rejects_missing_or_invalid_tokens() {
+    let fixture = support::spawn::spawn_daemon_with_extra_config(
+        "builder-a",
+        r#"
+[http_auth]
+bearer_token = "shared-secret"
+"#,
+    )
+    .await;
+
+    let missing = fixture
+        .client
+        .post(fixture.url("/v1/target-info"))
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        missing
+            .headers()
+            .get(WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok()),
+        Some("Bearer")
+    );
+
+    let wrong = fixture
+        .client
+        .post(fixture.url("/v1/target-info"))
+        .header(AUTHORIZATION, "Bearer wrong-secret")
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(wrong.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn plain_http_bearer_auth_accepts_matching_token() {
+    let fixture = support::spawn::spawn_daemon_with_extra_config(
+        "builder-a",
+        r#"
+[http_auth]
+bearer_token = "shared-secret"
+"#,
+    )
+    .await;
+
+    let info = fixture
+        .client
+        .post(fixture.url("/v1/target-info"))
+        .header(AUTHORIZATION, "Bearer shared-secret")
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json::<TargetInfoResponse>()
+        .await
+        .unwrap();
+
+    assert_eq!(info.target, "builder-a");
 }
 
 #[tokio::test]

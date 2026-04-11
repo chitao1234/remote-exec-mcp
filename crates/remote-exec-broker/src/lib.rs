@@ -271,6 +271,7 @@ async fn build_state(config: config::BrokerConfig) -> anyhow::Result<BrokerState
                 tracing::info!(
                     target = %name,
                     base_url = %target_config.base_url,
+                    http_auth_enabled = target_config.http_auth.is_some(),
                     daemon_name = %info.target,
                     daemon_instance_id = %info.daemon_instance_id,
                     platform = %info.platform,
@@ -283,7 +284,12 @@ async fn build_state(config: config::BrokerConfig) -> anyhow::Result<BrokerState
                 (true, Some(TargetHandle::cache_from_target_info(&info)))
             }
             Err(DaemonClientError::Transport(err)) => {
-                tracing::warn!(target = %name, ?err, "target unavailable during broker startup");
+                tracing::warn!(
+                    target = %name,
+                    http_auth_enabled = target_config.http_auth.is_some(),
+                    ?err,
+                    "target unavailable during broker startup"
+                );
                 (false, None)
             }
             Err(err) => return Err(err.into()),

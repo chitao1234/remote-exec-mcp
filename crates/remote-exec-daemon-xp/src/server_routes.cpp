@@ -289,6 +289,13 @@ LogLevel level_for_status(int status) {
 }
 
 HttpResponse route_request(AppState& state, const HttpRequest& request) {
+    if (!state.config.http_auth_bearer_token.empty() &&
+        !request_has_bearer_auth(request, state.config.http_auth_bearer_token)) {
+        HttpResponse response;
+        write_bearer_auth_challenge(response);
+        return response;
+    }
+
     if (request.method != "POST") {
         return make_rpc_error_response(405, "method_not_allowed", "only POST is supported");
     }

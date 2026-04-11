@@ -18,10 +18,19 @@ Json parse_json_body(const HttpRequest& req) {
     return Json::parse(req.body);
 }
 
+bool request_has_bearer_auth(const HttpRequest& req, const std::string& bearer_token) {
+    return req.header("authorization") == "Bearer " + bearer_token;
+}
+
 void write_json(HttpResponse& res, const Json& body) {
     res.status = 200;
     res.headers["Content-Type"] = "application/json";
     res.body = body.dump();
+}
+
+void write_bearer_auth_challenge(HttpResponse& res) {
+    write_rpc_error(res, 401, "unauthorized", "missing or invalid bearer token");
+    res.headers["WWW-Authenticate"] = "Bearer";
 }
 
 void write_rpc_error(
@@ -45,6 +54,8 @@ static std::string reason_phrase(int status) {
         return "OK";
     case 400:
         return "Bad Request";
+    case 401:
+        return "Unauthorized";
     case 404:
         return "Not Found";
     case 405:

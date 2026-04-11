@@ -64,6 +64,7 @@ Daemon config covers:
 - target name
 - listen address
 - daemon transport: mutual TLS by default when built with the default `tls` Cargo feature, or explicit plain HTTP
+- optional HTTP bearer auth shared secret via `Authorization: Bearer ...`
 - optional exact broker leaf certificate pin for TLS mode
 - default working directory
 - optional static sandbox allow/deny rules for exec `cwd`, reads, and writes
@@ -86,6 +87,7 @@ Broker config covers one entry per target:
 - client key path for `https://` targets
 - optional `skip_server_name_verification = true` for `https://` targets that should validate chain and expiry but ignore SAN/hostname matching
 - optional exact leaf certificate pin via `pinned_server_cert_pem` for `https://` targets
+- optional HTTP bearer auth shared secret for daemon requests
 - expected daemon target name
 - `allow_insecure_http = true` when a target intentionally uses `http://`
 - optional `[local]` broker-host config with default working directory, login-shell policy, PTY mode, default shell, embedded-local yield-time policy overrides, and embedded-local `apply_patch` encoding autodetect flag
@@ -132,6 +134,8 @@ If you build `remote-exec-broker` without its default `broker-tls` feature, it r
 If you build `remote-exec-daemon` without its default `tls` feature, it only supports `transport = "http"` and rejects `transport = "tls"` at startup.
 
 If you explicitly configure a Rust daemon with `transport = "http"`, build it without the `tls` feature, or target `remote-exec-daemon-xp`, the broker target must use `http://...` together with `allow_insecure_http = true`.
+
+Optional `http_auth` / `http_auth_bearer_token` bearer auth can add request authentication for plain-HTTP daemon links, but it does not add confidentiality or integrity protection. Use TLS when you need transport security.
 
 Preferred bootstrap flow:
 
@@ -271,7 +275,9 @@ Notes:
 Wire those files into the example configs:
 
 - broker targets use `ca_pem`, `client_cert_pem`, `client_key_pem`, `expected_daemon_name`, and optionally `skip_server_name_verification` / `pinned_server_cert_pem` as shown in `configs/broker.example.toml`
+- broker targets can also set `[targets.<name>.http_auth] bearer_token = "..."` when the daemon expects `Authorization: Bearer ...`
 - each TLS-enabled daemon built with the default `tls` feature uses `tls.cert_pem`, `tls.key_pem`, `tls.ca_pem`, and optionally `tls.pinned_client_cert_pem` as shown in `configs/daemon.example.toml`
+- Rust daemons can also set `[http_auth] bearer_token = "..."`, and the XP daemon can set `http_auth_bearer_token = ...`
 - set `transport = "http"` on a Rust daemon if you intentionally want plain HTTP instead of mutual TLS, or when you build without the `tls` feature
 - set `experimental_apply_patch_target_encoding_autodetect = true` on a daemon if you want experimental `apply_patch` support for existing non-UTF-8 text files
 - set `expected_daemon_name` to the daemon's configured `target`
@@ -283,6 +289,9 @@ Example plain-HTTP target in broker config:
 base_url = "http://builder-xp.example.com:8181"
 allow_insecure_http = true
 expected_daemon_name = "builder-xp"
+
+[targets.builder-xp.http_auth]
+bearer_token = "shared-secret"
 ```
 
 Example plain-HTTP Rust daemon config:
@@ -292,6 +301,9 @@ target = "builder-a"
 listen = "0.0.0.0:8181"
 default_workdir = "/srv/work"
 transport = "http"
+
+[http_auth]
+bearer_token = "shared-secret"
 ```
 
 Example daemon-side broker pin:

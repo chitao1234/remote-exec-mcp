@@ -41,6 +41,10 @@ expected_daemon_name = "builder-b"
 base_url = "http://builder-xp.example.com:8181"
 allow_insecure_http = true
 expected_daemon_name = "builder-xp"
+# Optional HTTP bearer auth. Useful for plain-HTTP targets and also supported
+# for HTTPS targets when you want an extra shared-secret check on top of TLS.
+# [targets.builder-xp.http_auth]
+# bearer_token = "replace-me"
 # Any Rust daemon configured with `transport = "http"` uses the same broker-side
 # `http://` + `allow_insecure_http = true` pattern.
 

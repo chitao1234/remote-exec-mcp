@@ -44,6 +44,10 @@ static unsigned long read_optional_unsigned_long(
     return parse_unsigned_long(it->second, key);
 }
 
+static bool contains_ascii_whitespace(const std::string& value) {
+    return value.find_first_of(" \t\r\n") != std::string::npos;
+}
+
 static void validate_yield_time_operation(
     const YieldTimeOperationConfig& config,
     const std::string& key_prefix
@@ -138,6 +142,20 @@ DaemonConfig load_config(const std::string& path) {
     config.listen_host = values.at("listen_host");
     config.listen_port = static_cast<int>(parse_unsigned_long(values.at("listen_port"), "listen_port"));
     config.default_workdir = values.at("default_workdir");
+    config.http_auth_bearer_token.clear();
+    {
+        const std::map<std::string, std::string>::const_iterator it =
+            values.find("http_auth_bearer_token");
+        if (it != values.end()) {
+            if (it->second.empty()) {
+                throw std::runtime_error("http_auth_bearer_token must not be empty");
+            }
+            if (contains_ascii_whitespace(it->second)) {
+                throw std::runtime_error("http_auth_bearer_token must not contain whitespace");
+            }
+            config.http_auth_bearer_token = it->second;
+        }
+    }
     config.yield_time = default_yield_time_config();
     config.yield_time.exec_command = read_yield_time_operation(
         values,
