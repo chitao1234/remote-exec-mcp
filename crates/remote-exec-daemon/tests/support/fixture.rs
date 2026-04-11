@@ -6,8 +6,6 @@ use remote_exec_proto::rpc::RpcErrorBody;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tempfile::TempDir;
-#[cfg(windows)]
-use tokio::sync::MutexGuard;
 use tokio::sync::oneshot;
 
 pub struct DaemonFixture {
@@ -17,42 +15,12 @@ pub struct DaemonFixture {
     scheme: &'static str,
     #[allow(dead_code, reason = "Shared across daemon integration test crates")]
     pub workdir: PathBuf,
-    #[cfg(windows)]
-    #[allow(
-        dead_code,
-        reason = "Retained for fixture-lifetime Windows test serialization"
-    )]
-    concurrency_guard: Option<MutexGuard<'static, ()>>,
     shutdown: Option<oneshot::Sender<()>>,
     server_thread: Option<JoinHandle<anyhow::Result<()>>>,
 }
 
 #[allow(dead_code, reason = "Shared across daemon integration test crates")]
 impl DaemonFixture {
-    #[cfg(windows)]
-    pub(crate) fn new(
-        tempdir: TempDir,
-        client: reqwest::Client,
-        addr: SocketAddr,
-        scheme: &'static str,
-        workdir: PathBuf,
-        shutdown: oneshot::Sender<()>,
-        server_thread: JoinHandle<anyhow::Result<()>>,
-        concurrency_guard: MutexGuard<'static, ()>,
-    ) -> Self {
-        Self {
-            _tempdir: tempdir,
-            client,
-            addr,
-            scheme,
-            workdir,
-            concurrency_guard: Some(concurrency_guard),
-            shutdown: Some(shutdown),
-            server_thread: Some(server_thread),
-        }
-    }
-
-    #[cfg(not(windows))]
     pub(crate) fn new(
         tempdir: TempDir,
         client: reqwest::Client,
@@ -68,8 +36,6 @@ impl DaemonFixture {
             addr,
             scheme,
             workdir,
-            #[cfg(windows)]
-            concurrency_guard: None,
             shutdown: Some(shutdown),
             server_thread: Some(server_thread),
         }

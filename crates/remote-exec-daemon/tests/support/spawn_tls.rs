@@ -36,9 +36,6 @@ async fn spawn_daemon_with_tls_pty_mode(
     pty: PtyMode,
     process_environment: ProcessEnvironment,
 ) -> DaemonFixture {
-    #[cfg(windows)]
-    let concurrency_guard = super::daemon_test_lock().lock().await;
-
     super::install_test_crypto_provider();
 
     let tempdir = tempfile::tempdir().unwrap();
@@ -80,7 +77,6 @@ async fn spawn_daemon_with_tls_pty_mode(
         workdir,
         shutdown,
         server_thread,
-        concurrency_guard,
     );
 
     #[cfg(not(windows))]
@@ -106,9 +102,6 @@ pub async fn spawn_daemon_with_pinned_client_cert(
     target: &str,
     pinned_client_cert: PinnedClientCert,
 ) -> DaemonFixture {
-    #[cfg(windows)]
-    let concurrency_guard = super::daemon_test_lock().lock().await;
-
     super::install_test_crypto_provider();
 
     let tempdir = tempfile::tempdir().unwrap();
@@ -160,7 +153,6 @@ pub async fn spawn_daemon_with_pinned_client_cert(
         workdir,
         shutdown,
         server_thread,
-        concurrency_guard,
     );
 
     #[cfg(not(windows))]

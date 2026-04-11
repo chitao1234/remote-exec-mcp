@@ -1,7 +1,5 @@
 use std::net::SocketAddr;
 use std::path::Path;
-#[cfg(windows)]
-use std::sync::OnceLock;
 
 use anyhow::Context;
 use remote_exec_daemon::config::{DaemonConfig, DaemonTransport, ProcessEnvironment, PtyMode};
@@ -91,30 +89,6 @@ pub(super) fn reserve_listen_addr() -> SocketAddr {
     addr
 }
 
-#[cfg(windows)]
-fn daemon_fixture(
-    tempdir: tempfile::TempDir,
-    client: reqwest::Client,
-    addr: SocketAddr,
-    scheme: &'static str,
-    workdir: std::path::PathBuf,
-    shutdown: tokio::sync::oneshot::Sender<()>,
-    server_thread: std::thread::JoinHandle<anyhow::Result<()>>,
-    concurrency_guard: tokio::sync::MutexGuard<'static, ()>,
-) -> DaemonFixture {
-    DaemonFixture::new(
-        tempdir,
-        client,
-        addr,
-        scheme,
-        workdir,
-        shutdown,
-        server_thread,
-        concurrency_guard,
-    )
-}
-
-#[cfg(not(windows))]
 fn daemon_fixture(
     tempdir: tempfile::TempDir,
     client: reqwest::Client,
@@ -189,24 +163,11 @@ pub(super) fn spawn_background_daemon(
     (shutdown_tx, server_thread)
 }
 
-#[cfg(windows)]
-pub(super) fn daemon_test_lock() -> &'static tokio::sync::Mutex<()> {
-    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-
-    // Windows daemon integration tests exercise real PTY backends and are not
-    // isolated enough to run multiple daemon fixtures concurrently in one test
-    // process. Hold this guard for the full fixture lifetime.
-    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
-}
-
 async fn spawn_daemon_with_pty_mode(
     target: &str,
     pty: PtyMode,
     process_environment: ProcessEnvironment,
 ) -> DaemonFixture {
-    #[cfg(windows)]
-    let concurrency_guard = daemon_test_lock().lock().await;
-
     install_test_crypto_provider();
 
     let tempdir = tempfile::tempdir().unwrap();
@@ -228,7 +189,6 @@ async fn spawn_daemon_with_pty_mode(
         workdir,
         shutdown,
         server_thread,
-        concurrency_guard,
     );
 
     #[cfg(not(windows))]
@@ -353,9 +313,6 @@ pub async fn spawn_daemon_with_extra_config_for_workdir_and_process_environment<
 where
     F: FnOnce(&Path) -> String,
 {
-    #[cfg(windows)]
-    let concurrency_guard = daemon_test_lock().lock().await;
-
     install_test_crypto_provider();
 
     let tempdir = tempfile::tempdir().unwrap();
@@ -397,7 +354,6 @@ transport = "http"
         workdir,
         shutdown,
         server_thread,
-        concurrency_guard,
     );
 
     #[cfg(not(windows))]
