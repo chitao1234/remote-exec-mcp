@@ -1,3 +1,4 @@
+#[cfg(feature = "tls")]
 mod certs;
 pub mod fixture;
 pub mod spawn;

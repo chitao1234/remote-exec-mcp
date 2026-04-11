@@ -327,21 +327,7 @@ impl EmbeddedDaemonConfig {
 impl DaemonConfig {
     pub fn validate(&self) -> anyhow::Result<()> {
         self.yield_time.validate()?;
-        if matches!(self.transport, DaemonTransport::Tls) {
-            anyhow::ensure!(cfg!(feature = "tls"), crate::TLS_FEATURE_REQUIRED_MESSAGE);
-            anyhow::ensure!(
-                self.tls.is_some(),
-                "tls config is required when transport = \"tls\""
-            );
-        }
-        if matches!(self.transport, DaemonTransport::Http)
-            && self
-                .tls
-                .as_ref()
-                .is_some_and(|tls| tls.pinned_client_cert_pem.is_some())
-        {
-            anyhow::bail!("pinned_client_cert_pem requires transport = \"tls\"");
-        }
+        crate::tls::validate_config(self)?;
         Ok(())
     }
 
@@ -377,6 +363,7 @@ const fn default_write_stdin_input_yield_time() -> YieldTimeOperationConfig {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "tls")]
     use std::path::PathBuf;
 
     use super::{DaemonConfig, DaemonTransport, YieldTimeConfig, YieldTimeOperation};
@@ -429,7 +416,7 @@ default_workdir = "/tmp"
         } else {
             assert!(
                 err.to_string()
-                    .contains(crate::TLS_FEATURE_REQUIRED_MESSAGE),
+                    .contains(crate::tls::FEATURE_REQUIRED_MESSAGE),
                 "unexpected error: {err}"
             );
         }
@@ -637,7 +624,7 @@ ca_pem = "/tmp/ca.pem"
         let err = DaemonConfig::load(&config_path).await.unwrap_err();
         assert!(
             err.to_string()
-                .contains(crate::TLS_FEATURE_REQUIRED_MESSAGE),
+                .contains(crate::tls::FEATURE_REQUIRED_MESSAGE),
             "unexpected error: {err}"
         );
     }

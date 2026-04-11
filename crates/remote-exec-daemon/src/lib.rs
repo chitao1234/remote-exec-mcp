@@ -10,8 +10,6 @@ pub mod transfer;
 use std::future::Future;
 use std::future::pending;
 use std::sync::Arc;
-#[cfg(feature = "tls")]
-use std::sync::Once;
 
 use anyhow::Result;
 use config::{DaemonConfig, WindowsPtyBackendOverride};
@@ -20,9 +18,6 @@ use remote_exec_proto::{
     rpc::TargetInfoResponse,
     sandbox::{CompiledFilesystemSandbox, compile_filesystem_sandbox},
 };
-
-pub(crate) const TLS_FEATURE_REQUIRED_MESSAGE: &str =
-    "transport = \"tls\" requires the remote-exec-daemon `tls` Cargo feature";
 
 #[derive(Clone)]
 pub struct AppState {
@@ -38,6 +33,10 @@ pub struct AppState {
 
 pub async fn run(config: DaemonConfig) -> Result<()> {
     run_until(config, pending::<()>()).await
+}
+
+pub fn install_crypto_provider() {
+    tls::install_crypto_provider();
 }
 
 pub fn build_app_state(config: DaemonConfig) -> Result<AppState> {
@@ -95,7 +94,7 @@ pub async fn run_until<F>(config: DaemonConfig, shutdown: F) -> Result<()>
 where
     F: Future<Output = ()> + Send,
 {
-    install_crypto_provider();
+    tls::install_crypto_provider();
     let state = build_app_state(config)?;
     tracing::info!(
         target = %state.config.target,
@@ -110,23 +109,4 @@ where
         "starting daemon"
     );
     server::serve_with_shutdown(state, shutdown).await
-}
-
-pub fn install_crypto_provider() {
-    #[cfg(not(feature = "tls"))]
-    {
-        return;
-    }
-
-    #[cfg(feature = "tls")]
-    {
-        static INIT: Once = Once::new();
-
-        INIT.call_once(|| {
-            let provider = rustls::crypto::ring::default_provider();
-            provider
-                .install_default()
-                .expect("failed to install rustls crypto provider");
-        });
-    }
 }

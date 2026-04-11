@@ -14,26 +14,37 @@ use tokio::task::JoinSet;
 use tower::ServiceExt;
 
 use crate::AppState;
-use crate::config::DaemonTransport;
+use crate::config::{DaemonConfig, DaemonTransport};
+
+#[allow(
+    dead_code,
+    reason = "Referenced when TLS feature-gated paths reject configuration"
+)]
+pub(crate) const FEATURE_REQUIRED_MESSAGE: &str =
+    "transport = \"tls\" requires the remote-exec-daemon `tls` Cargo feature";
 
 #[cfg(feature = "tls")]
 #[path = "tls_enabled.rs"]
-mod tls_enabled;
-
-#[cfg(feature = "tls")]
-pub use tls_enabled::{serve_tls, serve_tls_with_shutdown};
+mod tls_impl;
 
 #[cfg(not(feature = "tls"))]
-pub async fn serve_tls(_: Router, _: Arc<AppState>) -> anyhow::Result<()> {
-    anyhow::bail!(crate::TLS_FEATURE_REQUIRED_MESSAGE);
-}
+#[path = "tls_disabled.rs"]
+mod tls_impl;
 
-#[cfg(not(feature = "tls"))]
-pub async fn serve_tls_with_shutdown<F>(_: Router, _: Arc<AppState>, _: F) -> anyhow::Result<()>
-where
-    F: Future<Output = ()> + Send,
-{
-    anyhow::bail!(crate::TLS_FEATURE_REQUIRED_MESSAGE);
+pub(crate) use tls_impl::install_crypto_provider;
+pub use tls_impl::{serve_tls, serve_tls_with_shutdown};
+
+pub(crate) fn validate_config(config: &DaemonConfig) -> anyhow::Result<()> {
+    if matches!(config.transport, DaemonTransport::Http)
+        && config
+            .tls
+            .as_ref()
+            .is_some_and(|tls| tls.pinned_client_cert_pem.is_some())
+    {
+        anyhow::bail!("pinned_client_cert_pem requires transport = \"tls\"");
+    }
+
+    tls_impl::validate_config(config)
 }
 
 pub async fn serve(app: Router, state: Arc<AppState>) -> anyhow::Result<()> {

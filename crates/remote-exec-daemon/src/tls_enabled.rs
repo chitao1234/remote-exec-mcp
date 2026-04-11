@@ -1,5 +1,6 @@
 use std::future::Future;
 use std::sync::Arc;
+use std::sync::Once;
 
 use anyhow::Context;
 use axum::Router;
@@ -22,6 +23,27 @@ use tokio_rustls::TlsAcceptor;
 use tower::ServiceExt;
 
 use crate::AppState;
+use crate::config::{DaemonConfig, DaemonTransport};
+
+pub(crate) fn install_crypto_provider() {
+    static INIT: Once = Once::new();
+
+    INIT.call_once(|| {
+        let provider = rustls::crypto::ring::default_provider();
+        let _ = provider.install_default();
+    });
+}
+
+pub(crate) fn validate_config(config: &DaemonConfig) -> anyhow::Result<()> {
+    if matches!(config.transport, DaemonTransport::Tls) {
+        anyhow::ensure!(
+            config.tls.is_some(),
+            "tls config is required when transport = \"tls\""
+        );
+    }
+
+    Ok(())
+}
 
 pub async fn serve_tls(app: Router, state: Arc<AppState>) -> anyhow::Result<()> {
     serve_tls_with_shutdown(app, state, std::future::pending::<()>()).await
