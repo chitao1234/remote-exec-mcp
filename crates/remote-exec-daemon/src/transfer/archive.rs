@@ -1,10 +1,8 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use remote_exec_proto::path::{
-    PathPolicy, basename_for_policy, is_absolute_for_policy, linux_path_policy,
-    normalize_for_system, normalize_relative_path, windows_path_policy,
-};
+use crate::host_path;
+use remote_exec_proto::path::{PathPolicy, basename_for_policy, normalize_relative_path};
 use remote_exec_proto::rpc::{
     TransferCompression, TransferImportRequest, TransferImportResponse, TransferOverwriteMode,
     TransferSourceType,
@@ -28,26 +26,30 @@ pub struct BundledArchiveSource {
 }
 
 fn host_policy() -> PathPolicy {
-    if cfg!(windows) {
-        windows_path_policy()
-    } else {
-        linux_path_policy()
-    }
+    host_path::host_path_policy()
 }
 
-fn host_path(raw: &str) -> std::path::PathBuf {
-    std::path::PathBuf::from(normalize_for_system(host_policy(), raw))
+fn host_path(raw: &str, windows_posix_root: Option<&Path>) -> anyhow::Result<std::path::PathBuf> {
+    host_path::resolve_absolute_input_path(raw, windows_posix_root)
+        .ok_or_else(|| anyhow::anyhow!("transfer path `{raw}` is not absolute"))
 }
 
 pub async fn export_path_to_archive(
     path: &str,
     compression: TransferCompression,
     sandbox: Option<&CompiledFilesystemSandbox>,
+    windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<ExportedArchive> {
     let temp = tempfile::NamedTempFile::new()?;
     let temp_path = temp.into_temp_path();
-    let source_type =
-        export_path_to_file(path, temp_path.as_ref(), compression.clone(), sandbox).await?;
+    let source_type = export_path_to_file(
+        path,
+        temp_path.as_ref(),
+        compression.clone(),
+        sandbox,
+        windows_posix_root,
+    )
+    .await?;
 
     Ok(ExportedArchive {
         source_type,
@@ -61,13 +63,14 @@ pub async fn export_path_to_file(
     archive_path: &Path,
     compression: TransferCompression,
     sandbox: Option<&CompiledFilesystemSandbox>,
+    windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<TransferSourceType> {
     let source_text = path.to_string();
     anyhow::ensure!(
-        is_absolute_for_policy(host_policy(), &source_text),
+        host_path::is_input_path_absolute(&source_text, windows_posix_root),
         "transfer source path `{source_text}` is not absolute"
     );
-    let path = host_path(&source_text);
+    let path = host_path(&source_text, windows_posix_root)?;
     authorize_path(host_policy(), sandbox, SandboxAccess::Read, &path)?;
 
     let metadata = tokio::fs::symlink_metadata(&path).await?;
@@ -270,13 +273,14 @@ pub async fn import_archive_from_file(
     archive_path: &Path,
     request: &TransferImportRequest,
     sandbox: Option<&CompiledFilesystemSandbox>,
+    windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<TransferImportResponse> {
     anyhow::ensure!(
-        is_absolute_for_policy(host_policy(), &request.destination_path),
+        host_path::is_input_path_absolute(&request.destination_path, windows_posix_root),
         "transfer destination path `{}` is not absolute",
         request.destination_path
     );
-    let destination = host_path(&request.destination_path);
+    let destination = host_path(&request.destination_path, windows_posix_root)?;
     authorize_path(host_policy(), sandbox, SandboxAccess::Write, &destination)?;
 
     let replaced = prepare_destination(&destination, request).await?;

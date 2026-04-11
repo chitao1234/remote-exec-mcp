@@ -187,6 +187,42 @@ async fn image_read_accepts_msys_style_absolute_paths_on_windows() {
     assert_eq!(returned, original);
 }
 
+#[cfg(windows)]
+#[tokio::test]
+async fn image_read_accepts_windows_posix_root_paths_on_windows() {
+    let fixture =
+        support::spawn::spawn_daemon_with_extra_config_for_workdir("builder-a", |workdir| {
+            let root = workdir.join("synthetic-msys-root");
+            format!(
+                "windows_posix_root = {}\n",
+                toml::Value::String(root.display().to_string()).to_string()
+            )
+        })
+        .await;
+    let root = fixture.workdir.join("synthetic-msys-root");
+    let path = root.join("assets").join("synthetic-root.png");
+    tokio::fs::create_dir_all(path.parent().unwrap())
+        .await
+        .unwrap();
+    write_png(&path, 48, 48).await;
+    let original = tokio::fs::read(&path).await.unwrap();
+
+    let response = fixture
+        .rpc::<ImageReadRequest, ImageReadResponse>(
+            "/v1/image/read",
+            &ImageReadRequest {
+                path: "/assets/synthetic-root.png".to_string(),
+                workdir: None,
+                detail: None,
+            },
+        )
+        .await;
+
+    let (mime, returned) = decode_data_url(&response.image_url);
+    assert_eq!(mime, "image/png");
+    assert_eq!(returned, original);
+}
+
 #[tokio::test]
 async fn image_read_rejects_directory_paths_with_path_context() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;

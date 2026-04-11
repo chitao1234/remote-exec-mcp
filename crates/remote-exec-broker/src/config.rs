@@ -70,6 +70,8 @@ pub(crate) enum TargetTransportKind {
 #[derive(Debug, Clone, Deserialize)]
 pub struct LocalTargetConfig {
     pub default_workdir: PathBuf,
+    #[serde(default)]
+    pub windows_posix_root: Option<PathBuf>,
     #[serde(default = "default_allow_login_shell")]
     pub allow_login_shell: bool,
     #[serde(default)]
@@ -127,6 +129,7 @@ impl LocalTargetConfig {
         EmbeddedDaemonConfig {
             target: "local".to_string(),
             default_workdir: self.default_workdir.clone(),
+            windows_posix_root: self.windows_posix_root.clone(),
             sandbox,
             enable_transfer_compression,
             allow_login_shell: self.allow_login_shell,
@@ -204,6 +207,9 @@ fn default_streamable_http_sse_retry_ms() -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    use std::path::PathBuf;
+
     use super::{BrokerConfig, McpServerConfig};
 
     fn valid_target_config(name: &str) -> String {
@@ -306,6 +312,31 @@ client_key_pem = "/tmp/broker.key"
         );
         assert!(!config.disable_structured_content);
         assert!(matches!(config.mcp, McpServerConfig::Stdio));
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn load_accepts_local_windows_posix_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("broker.toml");
+        tokio::fs::write(
+            &config_path,
+            format!(
+                "[local]\ndefault_workdir = {}\nwindows_posix_root = \"C:\\\\msys64\"\n",
+                toml::Value::String(dir.path().display().to_string())
+            ),
+        )
+        .await
+        .unwrap();
+
+        let config = BrokerConfig::load(&config_path).await.unwrap();
+        assert_eq!(
+            config
+                .local
+                .as_ref()
+                .and_then(|local| local.windows_posix_root.as_ref()),
+            Some(&PathBuf::from(r"C:\msys64"))
+        );
     }
 
     #[tokio::test]

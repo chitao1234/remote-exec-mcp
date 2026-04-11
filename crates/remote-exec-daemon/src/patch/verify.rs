@@ -35,7 +35,7 @@ pub async fn resolve_action(
 ) -> anyhow::Result<ResolvedAction> {
     match action {
         PatchAction::Add { path, lines } => {
-            let absolute_path = resolve_patch_path(cwd, &path);
+            let absolute_path = resolve_patch_path(state, cwd, &path);
             crate::exec::ensure_sandbox_access(state, SandboxAccess::Write, &absolute_path)?;
             let content = ensure_trailing_newline(lines.join("\n"), "\n");
             let content = match fs::metadata(&absolute_path).await {
@@ -58,7 +58,7 @@ pub async fn resolve_action(
             })
         }
         PatchAction::Delete { path } => {
-            let absolute_path = resolve_patch_path(cwd, &path);
+            let absolute_path = resolve_patch_path(state, cwd, &path);
             crate::exec::ensure_sandbox_access(state, SandboxAccess::Write, &absolute_path)?;
             let metadata = fs::metadata(&absolute_path).await?;
             anyhow::ensure!(
@@ -83,11 +83,11 @@ pub async fn resolve_action(
             move_to,
             hunks,
         } => {
-            let source_path = resolve_patch_path(cwd, &path);
+            let source_path = resolve_patch_path(state, cwd, &path);
             crate::exec::ensure_sandbox_access(state, SandboxAccess::Write, &source_path)?;
             let destination_path = move_to
                 .as_ref()
-                .map(|destination| resolve_patch_path(cwd, destination))
+                .map(|destination| resolve_patch_path(state, cwd, destination))
                 .unwrap_or_else(|| source_path.clone());
             if destination_path != source_path {
                 crate::exec::ensure_sandbox_access(state, SandboxAccess::Write, &destination_path)?;
@@ -105,8 +105,12 @@ pub async fn resolve_action(
     }
 }
 
-fn resolve_patch_path(cwd: &Path, path: &Path) -> PathBuf {
-    crate::exec::resolve_input_path(cwd, &path.as_os_str().to_string_lossy())
+fn resolve_patch_path(state: &std::sync::Arc<AppState>, cwd: &Path, path: &Path) -> PathBuf {
+    crate::exec::resolve_input_path_with_windows_posix_root(
+        cwd,
+        &path.as_os_str().to_string_lossy(),
+        state.config.windows_posix_root.as_deref(),
+    )
 }
 
 fn display_relative(base: &Path, path: &Path) -> String {

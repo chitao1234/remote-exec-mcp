@@ -313,6 +313,7 @@ pub(super) async fn spawn_named_daemon_on_addr(
             target: state.target.clone(),
             listen: addr,
             default_workdir: PathBuf::from("."),
+            windows_posix_root: None,
             transport: remote_exec_daemon::config::DaemonTransport::Tls,
             sandbox: None,
             enable_transfer_compression: state.target_supports_transfer_compression,

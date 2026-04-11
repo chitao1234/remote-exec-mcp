@@ -360,6 +360,7 @@ mod tests {
             targets: BTreeMap::new(),
             local: Some(LocalTargetConfig {
                 default_workdir: tempdir.path().to_path_buf(),
+                windows_posix_root: None,
                 allow_login_shell: true,
                 pty: remote_exec_daemon::config::PtyMode::Auto,
                 default_shell: Some(missing_shell.to_string()),

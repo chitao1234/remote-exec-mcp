@@ -61,6 +61,7 @@ fn base_daemon_config(
         target: target.to_string(),
         listen,
         default_workdir: default_workdir.to_path_buf(),
+        windows_posix_root: None,
         transport: DaemonTransport::Http,
         sandbox: None,
         enable_transfer_compression: true,

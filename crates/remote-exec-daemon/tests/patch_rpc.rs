@@ -121,6 +121,41 @@ async fn apply_patch_accepts_cygwin_style_absolute_paths_on_windows() {
     assert_eq!(tokio::fs::read_to_string(path).await.unwrap(), "new\n");
 }
 
+#[cfg(windows)]
+#[tokio::test]
+async fn apply_patch_accepts_windows_posix_root_paths_on_windows() {
+    let fixture =
+        support::spawn::spawn_daemon_with_extra_config_for_workdir("builder-a", |workdir| {
+            let root = workdir.join("synthetic-msys-root");
+            format!(
+                "windows_posix_root = {}\n",
+                toml::Value::String(root.display().to_string()).to_string()
+            )
+        })
+        .await;
+    let root = fixture.workdir.join("synthetic-msys-root");
+    let workdir = root.join("usr").join("src");
+    tokio::fs::create_dir_all(&workdir).await.unwrap();
+
+    let response = fixture
+        .rpc::<PatchApplyRequest, PatchApplyResponse>(
+            "/v1/patch/apply",
+            &PatchApplyRequest {
+                patch: "*** Begin Patch\n*** Add File: demo.txt\n+new\n*** End Patch\n".to_string(),
+                workdir: Some("/usr/src".to_string()),
+            },
+        )
+        .await;
+
+    assert!(response.output.contains("A demo.txt"));
+    assert_eq!(
+        tokio::fs::read_to_string(workdir.join("demo.txt"))
+            .await
+            .unwrap(),
+        "new\n"
+    );
+}
+
 #[tokio::test]
 async fn update_file_accepts_end_of_file_marker() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;

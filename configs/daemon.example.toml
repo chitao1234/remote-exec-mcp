@@ -18,6 +18,10 @@ allow_login_shell = true
 # On Windows, omitted default shell now prefers Git Bash when Git for Windows is installed.
 # Set this to "powershell.exe" or "cmd.exe" to keep the older behavior.
 # default_shell = "/bin/sh"
+# Optional Windows-only synthetic POSIX root. When set, single-slash POSIX paths
+# such as "/usr/bin/bash" or "/tmp/work" resolve under this root for `workdir`,
+# image, patch, and transfer paths, and for configured shell paths.
+# windows_posix_root = "C:\\msys64"
 # Optional. Per-operation yield-time policy overrides. `min_ms` silently raises
 # smaller caller-provided values, `default_ms` applies when the caller omits
 # `yield_time_ms`, and `max_ms` caps larger values.

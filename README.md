@@ -316,6 +316,7 @@ default_workdir = "/srv/local-work"
 allow_login_shell = true
 # pty = "none"
 # default_shell = "/bin/sh"
+# windows_posix_root = "C:\\msys64"
 #
 ## Optional. Per-operation yield-time policy overrides for the embedded local target.
 ## [local.yield_time.exec_command]
@@ -374,15 +375,17 @@ cargo fmt --all --check
 - Executable preservation is best effort and only restored on platforms that expose executable mode bits.
 - `allow_login_shell` controls daemon login-shell policy and defaults to `true`; explicit `login=true` is rejected only when the daemon disables it.
 - `default_shell` lets the daemon pin its fallback shell on both Unix and Windows. Startup now fails if the configured shell, or the auto-detected fallback when `default_shell` is omitted, is not usable on that host. Set this to `powershell.exe` or `cmd.exe` on Windows if you do not want the new Git Bash-first default.
-- On Windows, `login=false` suppresses shell startup state where supported: Git Bash omits `-l`, `pwsh` and `powershell` add `-NoProfile`, and `cmd.exe` adds `/D` to disable AutoRun. `login=true` uses Git Bash with `-l -c` and drops those PowerShell and `cmd.exe` suppression flags.
-- On Windows, tool path inputs also accept MSYS/Cygwin drive-style absolute paths such as `/c/work/file.txt` and `/cygdrive/c/work/file.txt` for `workdir`, image paths, patch file paths, and transfer endpoints. Raw command strings are not rewritten.
+- On Windows, `windows_posix_root` lets the daemon treat single-slash POSIX paths such as `/usr/bin/bash` or `/tmp/work` as absolute paths rooted under a configured Cygwin/MSYS install or workspace directory. This applies to `workdir`, image paths, patch file paths, transfer endpoints, and configured shell paths. Raw command strings are not rewritten.
+- Broker `[local]` config supports the same `windows_posix_root` setting for the embedded broker-host local target.
+- On Windows, `login=false` suppresses shell startup state where supported: Git Bash omits `-l`, `pwsh` and `powershell` add `-NoProfile`, and `cmd.exe` adds `/D` to disable AutoRun. `login=true` uses Git Bash with `-l -c` and drops those PowerShell and `cmd.exe` suppression flags. When the selected Windows bash comes from `windows_posix_root`, the daemon also sets `CHERE_INVOKING=1` so login shells preserve the requested cwd.
+- On Windows, tool path inputs also accept MSYS/Cygwin drive-style absolute paths such as `/c/work/file.txt` and `/cygdrive/c/work/file.txt` even without `windows_posix_root`.
 - `list_targets` reports the daemon's actual `supports_pty` capability instead of assuming PTY support.
 - The `remote-exec-broker` Cargo feature `broker-tls` is enabled by default. Builds that disable it reject `https://` daemon targets and `https://` broker URLs, but still support stdio and plain `http://` streamable HTTP.
 - The `remote-exec-daemon` Cargo feature `tls` is enabled by default. Builds that disable it no longer accept `transport = "tls"` and must use `transport = "http"` instead.
 - `pty = "none"` disables TTY entirely. On Windows, `pty = "conpty"` or `pty = "winpty"` force that backend and startup fails if the selected backend is unavailable. The `remote-exec-daemon` Cargo feature `winpty` is enabled by default, and `remote-exec-broker` forwards it for the embedded local target. Builds that disable that feature no longer expose the `winpty` backend. When `pty` is omitted, the daemon keeps the current auto-detect behavior.
 - `winptyrs` now prefers static linking when both static and dynamic layouts are available. Set `WINPTY_STATIC=0` to force dynamic linking instead.
-- Default shell resolution uses `default_shell` when configured. Otherwise it tries `SHELL`, then a usable passwd shell, then `bash`, then `/bin/sh` on Unix; and Git Bash, then `pwsh.exe`, then `powershell.exe` or `powershell`, then `COMSPEC`, then `cmd.exe` on Windows.
-- Git Bash auto-discovery on Windows only checks standard Git for Windows install roots and locations derivable from `git.exe` on `PATH`. Portable or unusual installs should set `default_shell` to an explicit path.
+- Default shell resolution uses `default_shell` when configured. Otherwise it tries `SHELL`, then a usable passwd shell, then `bash`, then `/bin/sh` on Unix; and a bash under `windows_posix_root` when configured, then Git Bash, then `pwsh.exe`, then `powershell.exe` or `powershell`, then `COMSPEC`, then `cmd.exe` on Windows.
+- Git Bash auto-discovery on Windows checks `windows_posix_root` first when configured, then standard Git for Windows install roots and locations derivable from `git.exe` on `PATH`. Portable or unusual installs should set `default_shell` or `windows_posix_root` explicitly.
 - `remote-exec-daemon-xp` is intentionally narrower than the main daemon: it always uses `cmd.exe`, rejects `tty=true`, does not implement `view_image`, supports regular-file transfers, directory trees, and broker-built multi-source transfer bundles, and always falls back to uncompressed transfer staging. Symlinks, hard links, special files, sparse entries, and malformed archive paths remain unsupported there.
 
 ## Quality Gate

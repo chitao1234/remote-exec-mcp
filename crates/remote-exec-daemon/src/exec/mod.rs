@@ -14,16 +14,13 @@ use std::time::{Duration, Instant};
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use remote_exec_proto::path::{
-    PathPolicy, is_absolute_for_policy, linux_path_policy, normalize_for_system,
-    windows_path_policy,
-};
+use remote_exec_proto::path::PathPolicy;
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWarning, ExecWriteRequest, RpcErrorBody,
 };
 use remote_exec_proto::sandbox::{SandboxAccess, SandboxError, authorize_path};
 
-use crate::{AppState, config::YieldTimeOperation};
+use crate::{AppState, config::YieldTimeOperation, host_path};
 
 pub async fn exec_start(
     State(state): State<Arc<AppState>>,
@@ -83,8 +80,15 @@ pub async fn exec_start_local(
         req.shell.as_deref(),
         &state.default_shell,
         &state.config.process_environment,
+        state.config.windows_posix_root.as_deref(),
     )
     .map_err(internal_error)?;
+    let mut process_environment = state.config.process_environment.clone();
+    shell::apply_session_environment_overrides(
+        &mut process_environment,
+        &shell,
+        state.config.windows_posix_root.as_deref(),
+    );
     tracing::debug!(
         target = %state.config.target,
         cwd = %cwd.display(),
@@ -102,7 +106,7 @@ pub async fn exec_start_local(
         &cwd,
         req.tty,
         state.windows_pty_backend_override,
-        &state.config.process_environment,
+        &process_environment,
     )
     .map_err(internal_error)?;
 
@@ -266,33 +270,28 @@ pub async fn exec_write_local(
 pub fn resolve_workdir(state: &Arc<AppState>, workdir: Option<&str>) -> anyhow::Result<PathBuf> {
     Ok(match workdir {
         None => state.config.default_workdir.clone(),
-        Some(raw) => {
-            if is_absolute_for_policy(host_path_policy(), raw) {
-                PathBuf::from(normalize_for_system(host_path_policy(), raw))
-            } else {
-                state
-                    .config
-                    .default_workdir
-                    .join(normalize_for_system(host_path_policy(), raw))
-            }
-        }
+        Some(raw) => host_path::resolve_input_path(
+            &state.config.default_workdir,
+            raw,
+            state.config.windows_posix_root.as_deref(),
+        ),
     })
 }
 
 pub fn resolve_input_path(base: &Path, raw: &str) -> PathBuf {
-    if is_absolute_for_policy(host_path_policy(), raw) {
-        PathBuf::from(normalize_for_system(host_path_policy(), raw))
-    } else {
-        base.join(normalize_for_system(host_path_policy(), raw))
-    }
+    resolve_input_path_with_windows_posix_root(base, raw, None)
+}
+
+pub fn resolve_input_path_with_windows_posix_root(
+    base: &Path,
+    raw: &str,
+    windows_posix_root: Option<&Path>,
+) -> PathBuf {
+    host_path::resolve_input_path(base, raw, windows_posix_root)
 }
 
 fn host_path_policy() -> PathPolicy {
-    if cfg!(windows) {
-        windows_path_policy()
-    } else {
-        linux_path_policy()
-    }
+    host_path::host_path_policy()
 }
 
 pub fn ensure_sandbox_access(

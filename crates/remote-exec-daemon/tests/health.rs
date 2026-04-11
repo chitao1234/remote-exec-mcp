@@ -13,6 +13,7 @@ fn startup_validation_config() -> DaemonConfig {
         target: "builder-a".to_string(),
         listen: SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
         default_workdir: std::env::temp_dir(),
+        windows_posix_root: None,
         transport: DaemonTransport::Http,
         sandbox: None,
         enable_transfer_compression: true,

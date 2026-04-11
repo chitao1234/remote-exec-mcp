@@ -1,5 +1,6 @@
 pub mod config;
 pub mod exec;
+pub(crate) mod host_path;
 pub mod image;
 pub mod logging;
 pub mod patch;
@@ -14,7 +15,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use config::{DaemonConfig, WindowsPtyBackendOverride};
 use remote_exec_proto::{
-    path::{PathPolicy, linux_path_policy, windows_path_policy},
+    path::PathPolicy,
     rpc::TargetInfoResponse,
     sandbox::{CompiledFilesystemSandbox, compile_filesystem_sandbox},
 };
@@ -49,6 +50,7 @@ pub fn build_app_state(config: DaemonConfig) -> Result<AppState> {
     let default_shell = exec::shell::resolve_default_shell(
         config.default_shell.as_deref(),
         &config.process_environment,
+        config.windows_posix_root.as_deref(),
     )?;
     exec::session::validate_pty_mode(config.pty)?;
     let supports_pty = exec::session::supports_pty_for_mode(config.pty);
@@ -69,11 +71,7 @@ pub fn build_app_state(config: DaemonConfig) -> Result<AppState> {
 }
 
 fn host_path_policy() -> PathPolicy {
-    if cfg!(windows) {
-        windows_path_policy()
-    } else {
-        linux_path_policy()
-    }
+    host_path::host_path_policy()
 }
 
 pub fn target_info_response(state: &AppState) -> TargetInfoResponse {

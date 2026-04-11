@@ -83,6 +83,10 @@ expected_daemon_name = "builder-xp"
 ## pty = "none"
 ## Optional. If set, broker startup fails unless this shell is usable on the broker host.
 ## default_shell = "/bin/sh"
+## Optional Windows-only synthetic POSIX root for the embedded local target.
+## Single-slash POSIX paths such as "/usr/bin/bash" or "/tmp/work" resolve under
+## this root for local exec, image, and patch requests.
+## windows_posix_root = "C:\\msys64"
 ## Optional. Per-operation yield-time policy overrides for the embedded local target only.
 ## `min_ms` silently raises smaller caller-provided values, `default_ms` applies when
 ## the caller omits `yield_time_ms`, and `max_ms` caps larger values.

@@ -29,10 +29,14 @@ pub async fn export_path(
         compression = format_compression(&req.compression),
         "transfer export received"
     );
-    let exported =
-        archive::export_path_to_archive(&req.path, req.compression.clone(), state.sandbox.as_ref())
-            .await
-            .map_err(map_transfer_error)?;
+    let exported = archive::export_path_to_archive(
+        &req.path,
+        req.compression.clone(),
+        state.sandbox.as_ref(),
+        state.config.windows_posix_root.as_deref(),
+    )
+    .await
+    .map_err(map_transfer_error)?;
 
     let file = tokio::fs::File::open(exported.temp_path.to_path_buf())
         .await
@@ -90,9 +94,14 @@ pub async fn import_archive(
         .await
         .map_err(|err| crate::exec::internal_error(err.into()))?;
 
-    let summary = archive::import_archive_from_file(&temp_path, &request, state.sandbox.as_ref())
-        .await
-        .map_err(map_transfer_error)?;
+    let summary = archive::import_archive_from_file(
+        &temp_path,
+        &request,
+        state.sandbox.as_ref(),
+        state.config.windows_posix_root.as_deref(),
+    )
+    .await
+    .map_err(map_transfer_error)?;
     tracing::info!(
         destination_path = %request.destination_path,
         bytes_copied = summary.bytes_copied,

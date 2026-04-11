@@ -669,6 +669,31 @@ async fn transfer_files_accepts_msys_and_cygwin_windows_remote_paths_on_non_wind
     assert!(error.contains("source and destination must differ"));
 }
 
+#[tokio::test]
+async fn transfer_files_accepts_single_slash_windows_remote_paths_for_synthetic_posix_roots() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon_platform("windows", false).await;
+
+    let error = fixture
+        .call_tool_error(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "builder-a",
+                    "path": "/tmp/Artifact.txt"
+                },
+                "destination": {
+                    "target": "builder-a",
+                    "path": "/tmp/artifact.txt"
+                },
+                "overwrite": "replace",
+                "create_parent": true
+            }),
+        )
+        .await;
+
+    assert!(error.contains("source and destination must differ"));
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn transfer_files_still_rejects_windows_paths_for_unix_local_endpoints() {

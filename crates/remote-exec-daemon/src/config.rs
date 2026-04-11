@@ -259,6 +259,8 @@ pub struct DaemonConfig {
     pub listen: SocketAddr,
     pub default_workdir: PathBuf,
     #[serde(default)]
+    pub windows_posix_root: Option<PathBuf>,
+    #[serde(default)]
     pub transport: DaemonTransport,
     #[serde(default)]
     pub sandbox: Option<FilesystemSandbox>,
@@ -293,6 +295,7 @@ pub struct TlsConfig {
 pub struct EmbeddedDaemonConfig {
     pub target: String,
     pub default_workdir: PathBuf,
+    pub windows_posix_root: Option<PathBuf>,
     pub sandbox: Option<FilesystemSandbox>,
     pub enable_transfer_compression: bool,
     pub allow_login_shell: bool,
@@ -309,6 +312,7 @@ impl EmbeddedDaemonConfig {
             target: self.target,
             listen: SocketAddr::from(([127, 0, 0, 1], 0)),
             default_workdir: self.default_workdir,
+            windows_posix_root: self.windows_posix_root,
             transport: DaemonTransport::Http,
             sandbox: self.sandbox,
             enable_transfer_compression: self.enable_transfer_compression,
@@ -326,6 +330,13 @@ impl EmbeddedDaemonConfig {
 
 impl DaemonConfig {
     pub fn validate(&self) -> anyhow::Result<()> {
+        #[cfg(windows)]
+        if let Some(root) = &self.windows_posix_root {
+            anyhow::ensure!(
+                root.is_absolute(),
+                "windows_posix_root must be an absolute path"
+            );
+        }
         self.yield_time.validate()?;
         crate::tls::validate_config(self)?;
         Ok(())
@@ -363,7 +374,7 @@ const fn default_write_stdin_input_yield_time() -> YieldTimeOperationConfig {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "tls")]
+    #[cfg(any(feature = "tls", windows))]
     use std::path::PathBuf;
 
     use super::{DaemonConfig, DaemonTransport, YieldTimeConfig, YieldTimeOperation};
@@ -389,6 +400,28 @@ transport = "http"
         assert!(config.tls.is_none());
         assert_eq!(config.yield_time, YieldTimeConfig::default());
         assert!(!config.experimental_apply_patch_target_encoding_autodetect);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn load_accepts_windows_posix_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("daemon.toml");
+        tokio::fs::write(
+            &config_path,
+            r#"
+target = "builder-a"
+listen = "127.0.0.1:8080"
+default_workdir = "/tmp"
+windows_posix_root = "C:\\msys64"
+transport = "http"
+"#,
+        )
+        .await
+        .unwrap();
+
+        let config = DaemonConfig::load(&config_path).await.unwrap();
+        assert_eq!(config.windows_posix_root, Some(PathBuf::from(r"C:\msys64")));
     }
 
     #[tokio::test]

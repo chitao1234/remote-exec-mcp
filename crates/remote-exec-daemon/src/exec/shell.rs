@@ -8,6 +8,8 @@ use std::process::{Command, Stdio};
 use anyhow::Context;
 
 use crate::config::ProcessEnvironment;
+#[cfg(any(test, windows))]
+use crate::host_path;
 
 #[cfg(unix)]
 pub fn platform_supports_login_shells() -> bool {
@@ -23,6 +25,7 @@ pub fn platform_supports_login_shells() -> bool {
 pub fn resolve_default_shell(
     configured_default_shell: Option<&str>,
     environment: &ProcessEnvironment,
+    _windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<String> {
     let env_shell = environment
         .var_os("SHELL")
@@ -46,8 +49,9 @@ pub fn resolve_default_shell(
 pub fn resolve_default_shell(
     configured_default_shell: Option<&str>,
     environment: &ProcessEnvironment,
+    windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<String> {
-    resolve_default_windows_shell_with(configured_default_shell, environment)
+    resolve_default_windows_shell_with(configured_default_shell, environment, windows_posix_root)
 }
 
 #[cfg(unix)]
@@ -55,6 +59,7 @@ pub fn selected_shell(
     shell_override: Option<&str>,
     default_shell: &str,
     _environment: &ProcessEnvironment,
+    _windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<String> {
     Ok(shell_override
         .filter(|value| !value.is_empty())
@@ -67,10 +72,43 @@ pub fn selected_shell(
     shell_override: Option<&str>,
     default_shell: &str,
     environment: &ProcessEnvironment,
+    windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<String> {
     match shell_override.filter(|value| !value.is_empty()) {
-        Some(shell) => resolve_requested_windows_shell(shell, environment),
+        Some(shell) => resolve_requested_windows_shell(shell, environment, windows_posix_root),
         None => Ok(default_shell.to_string()),
+    }
+}
+
+#[cfg(unix)]
+pub fn apply_session_environment_overrides(
+    environment: &mut ProcessEnvironment,
+    shell: &str,
+    _windows_posix_root: Option<&Path>,
+) {
+    if should_set_chere_invoking_for_platform(
+        cfg!(windows),
+        cfg!(target_os = "cygwin"),
+        shell,
+        None,
+    ) {
+        environment.set_var("CHERE_INVOKING", Some("1".into()));
+    }
+}
+
+#[cfg(windows)]
+pub fn apply_session_environment_overrides(
+    environment: &mut ProcessEnvironment,
+    shell: &str,
+    windows_posix_root: Option<&Path>,
+) {
+    if should_set_chere_invoking_for_platform(
+        cfg!(windows),
+        cfg!(target_os = "cygwin"),
+        shell,
+        windows_posix_root,
+    ) {
+        environment.set_var("CHERE_INVOKING", Some("1".into()));
     }
 }
 
@@ -270,10 +308,12 @@ fn has_execute_bits(metadata: &std::fs::Metadata) -> bool {
 fn resolve_default_windows_shell_with(
     configured_default_shell: Option<&str>,
     environment: &ProcessEnvironment,
+    windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<String> {
     resolve_default_windows_shell_with_validator(
         configured_default_shell,
         environment,
+        windows_posix_root,
         validate_windows_shell_candidate,
     )
 }
@@ -282,35 +322,36 @@ fn resolve_default_windows_shell_with(
 fn resolve_default_windows_shell_with_validator<G>(
     configured_default_shell: Option<&str>,
     environment: &ProcessEnvironment,
+    windows_posix_root: Option<&Path>,
     validate: G,
 ) -> anyhow::Result<String>
 where
-    G: Fn(&str, &ProcessEnvironment) -> anyhow::Result<String>,
+    G: Fn(&str, &ProcessEnvironment, Option<&Path>) -> anyhow::Result<String>,
 {
     if let Some(shell) = configured_default_shell.filter(|value| !value.is_empty()) {
-        return validate(shell, environment)
+        return validate(shell, environment, windows_posix_root)
             .with_context(|| format!("configured default shell `{shell}` is not usable"));
     }
 
-    if let Some(shell) = find_windows_git_bash(environment)
-        && let Ok(shell) = validate(&shell, environment)
+    if let Some(shell) = find_windows_bash(environment, windows_posix_root)
+        && let Ok(shell) = validate(&shell, environment, windows_posix_root)
     {
         return Ok(shell);
     }
 
     for candidate in ["pwsh.exe", "powershell.exe", "powershell"] {
-        if let Ok(shell) = validate(candidate, environment) {
+        if let Ok(shell) = validate(candidate, environment, windows_posix_root) {
             return Ok(shell);
         }
     }
 
     if let Some(shell) = environment.comspec().filter(|value| !value.is_empty())
-        && let Ok(shell) = validate(shell, environment)
+        && let Ok(shell) = validate(shell, environment, windows_posix_root)
     {
         return Ok(shell);
     }
 
-    if let Ok(shell) = validate("cmd.exe", environment) {
+    if let Ok(shell) = validate("cmd.exe", environment, windows_posix_root) {
         return Ok(shell);
     }
 
@@ -324,16 +365,18 @@ where
 fn validate_windows_shell_candidate(
     shell: &str,
     environment: &ProcessEnvironment,
+    windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<String> {
-    let lower = shell_basename_lower(shell);
-    let resolved = if !is_path_like(shell) && is_windows_git_bash_alias(&lower) {
-        find_windows_git_bash(environment).ok_or_else(|| {
+    let shell = resolve_windows_shell_path(shell, windows_posix_root);
+    let lower = shell_basename_lower(&shell);
+    let resolved = if !is_path_like(&shell) && is_windows_git_bash_alias(&lower) {
+        find_windows_bash(environment, windows_posix_root).ok_or_else(|| {
             anyhow::anyhow!(
                 "Git Bash was requested via `{shell}` but no Git for Windows bash.exe was found"
             )
         })?
     } else {
-        resolve_windows_command_path(shell, environment).unwrap_or_else(|| shell.to_string())
+        resolve_windows_command_path(&shell, environment).unwrap_or_else(|| shell.clone())
     };
 
     probe_shell_for_platform(true, &resolved, environment)
@@ -345,16 +388,18 @@ fn validate_windows_shell_candidate(
 fn resolve_requested_windows_shell(
     shell: &str,
     environment: &ProcessEnvironment,
+    windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<String> {
-    let lower = shell_basename_lower(shell);
-    if !is_path_like(shell) && is_windows_git_bash_alias(&lower) {
-        return find_windows_git_bash(environment).ok_or_else(|| {
+    let shell = resolve_windows_shell_path(shell, windows_posix_root);
+    let lower = shell_basename_lower(&shell);
+    if !is_path_like(&shell) && is_windows_git_bash_alias(&lower) {
+        return find_windows_bash(environment, windows_posix_root).ok_or_else(|| {
             anyhow::anyhow!(
                 "Git Bash was requested via `{shell}` but no Git for Windows bash.exe was found"
             )
         });
     }
-    Ok(shell.to_string())
+    Ok(shell)
 }
 
 fn probe_shell_for_platform(
@@ -420,26 +465,36 @@ fn is_windows_git_bash_alias(lower: &str) -> bool {
 }
 
 #[cfg(any(test, windows))]
-fn find_windows_git_bash(environment: &ProcessEnvironment) -> Option<String> {
-    windows_git_bash_candidates(environment)
+fn find_windows_bash(
+    environment: &ProcessEnvironment,
+    windows_posix_root: Option<&Path>,
+) -> Option<String> {
+    windows_bash_candidates(environment, windows_posix_root)
         .into_iter()
         .find(|candidate| is_regular_file(candidate))
         .map(|candidate| candidate.to_string_lossy().into_owned())
 }
 
 #[cfg(any(test, windows))]
-fn windows_git_bash_candidates(environment: &ProcessEnvironment) -> Vec<PathBuf> {
+fn windows_bash_candidates(
+    environment: &ProcessEnvironment,
+    windows_posix_root: Option<&Path>,
+) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
 
+    if let Some(root) = windows_posix_root {
+        push_bash_candidates(&mut candidates, root);
+    }
+
     for install_root in windows_git_install_roots(environment) {
-        push_git_bash_candidates(&mut candidates, &install_root);
+        push_bash_candidates(&mut candidates, &install_root);
     }
 
     if let Some(git_path) = resolve_windows_command_path("git.exe", environment)
         .or_else(|| resolve_windows_command_path("git", environment))
     {
         for ancestor in Path::new(&git_path).ancestors().skip(1).take(4) {
-            push_git_bash_candidates(&mut candidates, ancestor);
+            push_bash_candidates(&mut candidates, ancestor);
         }
     }
 
@@ -469,7 +524,7 @@ fn windows_git_install_roots(environment: &ProcessEnvironment) -> Vec<PathBuf> {
 }
 
 #[cfg(any(test, windows))]
-fn push_git_bash_candidates(candidates: &mut Vec<PathBuf>, install_root: &Path) {
+fn push_bash_candidates(candidates: &mut Vec<PathBuf>, install_root: &Path) {
     for candidate in [
         install_root.join("bin").join("bash.exe"),
         install_root.join("usr").join("bin").join("bash.exe"),
@@ -478,6 +533,34 @@ fn push_git_bash_candidates(candidates: &mut Vec<PathBuf>, install_root: &Path) 
             candidates.push(candidate);
         }
     }
+}
+
+#[cfg(any(test, windows))]
+fn resolve_windows_shell_path(shell: &str, windows_posix_root: Option<&Path>) -> String {
+    host_path::resolve_absolute_input_path(shell, windows_posix_root)
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| shell.to_string())
+}
+
+#[cfg(any(test, unix, windows))]
+fn should_set_chere_invoking_for_platform(
+    is_windows: bool,
+    is_cygwin: bool,
+    shell: &str,
+    windows_posix_root: Option<&Path>,
+) -> bool {
+    if is_cygwin {
+        return true;
+    }
+
+    let lower = shell_basename_lower(shell);
+
+    if is_windows {
+        return is_windows_bash_family(&lower)
+            || host_path::shell_uses_windows_posix_root(shell, windows_posix_root);
+    }
+
+    false
 }
 
 #[cfg(any(test, windows))]
@@ -697,8 +780,11 @@ mod windows_shell_tests {
         let environment = make_environment(&[], Some(tempdir.path()), Some(r"C:\custom\cmd.exe"));
 
         assert_eq!(
-            resolve_default_windows_shell_with_validator(None, &environment, |candidate, _| {
-                match candidate {
+            resolve_default_windows_shell_with_validator(
+                None,
+                &environment,
+                None,
+                |candidate, _, _| match candidate {
                     candidate if candidate == git_bash.to_string_lossy() => {
                         Ok(candidate.to_string())
                     }
@@ -708,8 +794,8 @@ mod windows_shell_tests {
                     r"C:\custom\cmd.exe" => Ok(r"C:\custom\cmd.exe".to_string()),
                     "cmd.exe" => Ok("cmd.exe".to_string()),
                     _ => anyhow::bail!("missing"),
-                }
-            })
+                },
+            )
             .unwrap(),
             git_bash.to_string_lossy()
         );
@@ -720,16 +806,19 @@ mod windows_shell_tests {
         let environment = make_environment(&[], None, Some(r"C:\custom\cmd.exe"));
 
         assert_eq!(
-            resolve_default_windows_shell_with_validator(None, &environment, |candidate, _| {
-                match candidate {
+            resolve_default_windows_shell_with_validator(
+                None,
+                &environment,
+                None,
+                |candidate, _, _| match candidate {
                     "pwsh.exe" => Ok(r"C:\tools\pwsh.exe".to_string()),
                     "powershell.exe" => Ok(r"C:\tools\powershell.exe".to_string()),
                     "powershell" => Ok(r"C:\tools\powershell".to_string()),
                     r"C:\custom\cmd.exe" => Ok(r"C:\custom\cmd.exe".to_string()),
                     "cmd.exe" => Ok("cmd.exe".to_string()),
                     _ => anyhow::bail!("missing"),
-                }
-            })
+                },
+            )
             .unwrap(),
             r"C:\tools\pwsh.exe"
         );
@@ -753,12 +842,17 @@ mod windows_shell_tests {
         let environment = make_environment(&[&git_cmd], None, Some(r"C:\custom\cmd.exe"));
 
         assert_eq!(
-            resolve_default_windows_shell_with_validator(None, &environment, |candidate, _| {
-                if candidate == git_bash.to_string_lossy() {
-                    return Ok(candidate.to_string());
-                }
-                anyhow::bail!("missing")
-            })
+            resolve_default_windows_shell_with_validator(
+                None,
+                &environment,
+                None,
+                |candidate: &str, _, _| {
+                    if candidate == git_bash.to_string_lossy() {
+                        return Ok(candidate.to_string());
+                    }
+                    anyhow::bail!("missing")
+                },
+            )
             .unwrap(),
             git_bash.to_string_lossy()
         );
@@ -769,12 +863,15 @@ mod windows_shell_tests {
         let environment = make_environment(&[], None, Some(r"C:\custom\cmd.exe"));
 
         assert_eq!(
-            resolve_default_windows_shell_with_validator(None, &environment, |candidate, _| {
-                match candidate {
+            resolve_default_windows_shell_with_validator(
+                None,
+                &environment,
+                None,
+                |candidate, _, _| match candidate {
                     r"C:\custom\cmd.exe" => Ok(r"C:\custom\cmd.exe".to_string()),
                     _ => anyhow::bail!("missing"),
-                }
-            })
+                },
+            )
             .unwrap(),
             r"C:\custom\cmd.exe"
         );
@@ -783,11 +880,13 @@ mod windows_shell_tests {
     #[test]
     fn windows_default_shell_rejects_unusable_configured_shell() {
         let environment = make_environment(&[], None, None);
-        let err =
-            resolve_default_windows_shell_with_validator(Some("pwsh.exe"), &environment, |_, _| {
-                anyhow::bail!("not usable")
-            })
-            .unwrap_err();
+        let err = resolve_default_windows_shell_with_validator(
+            Some("pwsh.exe"),
+            &environment,
+            None,
+            |_, _, _| anyhow::bail!("not usable"),
+        )
+        .unwrap_err();
 
         assert!(err.to_string().contains("configured default shell"));
     }
@@ -809,7 +908,7 @@ mod windows_shell_tests {
             "git-bash",
         ] {
             assert_eq!(
-                resolve_requested_windows_shell(alias, &environment).unwrap(),
+                resolve_requested_windows_shell(alias, &environment, None).unwrap(),
                 git_bash.to_string_lossy(),
                 "alias {alias} should resolve to Git Bash"
             );
@@ -819,7 +918,7 @@ mod windows_shell_tests {
     #[test]
     fn windows_requested_shell_rejects_bare_bash_when_git_bash_is_missing() {
         let environment = make_environment(&[], None, None);
-        let err = resolve_requested_windows_shell("bash.exe", &environment).unwrap_err();
+        let err = resolve_requested_windows_shell("bash.exe", &environment, None).unwrap_err();
 
         assert!(err.to_string().contains("Git Bash"));
     }
@@ -877,5 +976,38 @@ mod windows_shell_tests {
                 "printf ok".to_string(),
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod chere_invoking_tests {
+    use super::should_set_chere_invoking_for_platform;
+
+    #[test]
+    fn chere_invoking_applies_to_all_cygwin_shells() {
+        assert!(should_set_chere_invoking_for_platform(
+            false,
+            true,
+            "/bin/bash",
+            None
+        ));
+        assert!(should_set_chere_invoking_for_platform(
+            false, true, "sh", None
+        ));
+        assert!(should_set_chere_invoking_for_platform(
+            false, true, "/bin/zsh", None
+        ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn chere_invoking_applies_to_windows_posix_root_shells_even_when_not_bash_family() {
+        let root = std::path::Path::new(r"C:\msys64");
+        assert!(should_set_chere_invoking_for_platform(
+            true,
+            false,
+            "/usr/bin/zsh",
+            Some(root)
+        ));
     }
 }

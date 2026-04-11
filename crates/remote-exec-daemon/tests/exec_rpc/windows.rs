@@ -224,6 +224,77 @@ async fn exec_start_accepts_msys_style_workdir_on_windows() {
 }
 
 #[tokio::test]
+async fn exec_start_accepts_windows_posix_root_workdirs_on_windows() {
+    let fixture =
+        support::spawn::spawn_daemon_with_extra_config_for_workdir("builder-a", |workdir| {
+            let root = workdir.join("synthetic-msys-root");
+            format!(
+                "windows_posix_root = {}\n",
+                toml::Value::String(root.display().to_string()).to_string()
+            )
+        })
+        .await;
+    let root = fixture.workdir.join("synthetic-msys-root");
+    let workdir = root.join("tmp").join("demo");
+    std::fs::create_dir_all(&workdir).unwrap();
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "echo %CD%".to_string(),
+                workdir: Some("/tmp/demo".to_string()),
+                shell: Some("cmd.exe".to_string()),
+                tty: false,
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
+                max_output_tokens: None,
+                login: Some(false),
+            },
+        )
+        .await;
+
+    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.output.trim(), workdir.display().to_string());
+}
+
+#[tokio::test]
+async fn exec_start_resolves_windows_posix_root_shells_and_sets_chere_invoking() {
+    let Some(git_bash) = available_windows_git_bash_path() else {
+        return;
+    };
+    let Some(root) = windows_bash_root(&git_bash) else {
+        return;
+    };
+
+    let fixture = support::spawn::spawn_daemon_with_extra_config(
+        "builder-a",
+        &format!(
+            "windows_posix_root = {}\ndefault_shell = \"/usr/bin/bash\"\n",
+            toml::Value::String(root.display().to_string()).to_string()
+        ),
+    )
+    .await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "printf '%s' \"$CHERE_INVOKING\"".to_string(),
+                workdir: None,
+                shell: None,
+                tty: false,
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
+                max_output_tokens: None,
+                login: Some(true),
+            },
+        )
+        .await;
+
+    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.output, "1");
+}
+
+#[tokio::test]
 async fn exec_start_uses_git_bash_login_profiles_when_shell_is_omitted() {
     let Some(_git_bash) = available_windows_git_bash_path() else {
         return;

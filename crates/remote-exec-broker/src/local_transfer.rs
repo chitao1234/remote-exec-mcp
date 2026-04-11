@@ -16,6 +16,7 @@ pub async fn export_path_to_archive(
         archive_path,
         compression,
         sandbox,
+        None,
     )
     .await
 }
@@ -25,6 +26,11 @@ pub async fn import_archive_from_file(
     request: &TransferImportRequest,
     sandbox: Option<&CompiledFilesystemSandbox>,
 ) -> anyhow::Result<TransferImportResponse> {
-    remote_exec_daemon::transfer::archive::import_archive_from_file(archive_path, request, sandbox)
-        .await
+    remote_exec_daemon::transfer::archive::import_archive_from_file(
+        archive_path,
+        request,
+        sandbox,
+        None,
+    )
+    .await
 }

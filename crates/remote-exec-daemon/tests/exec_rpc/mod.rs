@@ -174,6 +174,19 @@ fn available_windows_git_bash_path() -> Option<String> {
 }
 
 #[cfg(windows)]
+fn windows_bash_root(shell: &str) -> Option<PathBuf> {
+    Path::new(shell)
+        .ancestors()
+        .skip(1)
+        .take(4)
+        .find(|ancestor| {
+            ancestor.join("bin").join("bash.exe").is_file()
+                || ancestor.join("usr").join("bin").join("bash.exe").is_file()
+        })
+        .map(Path::to_path_buf)
+}
+
+#[cfg(windows)]
 fn find_windows_command_on_path(path_env: Option<&OsStr>, name: &str) -> Option<PathBuf> {
     std::env::split_paths(path_env?)
         .map(|dir| dir.join(name))

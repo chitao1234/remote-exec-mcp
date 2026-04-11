@@ -357,9 +357,23 @@ async fn ensure_absolute(
     state: &crate::BrokerState,
     endpoint: &TransferEndpoint,
 ) -> anyhow::Result<()> {
-    let policy = endpoint_policy(state, endpoint).await?;
+    if endpoint.target == "local" {
+        let policy = local_policy();
+        anyhow::ensure!(
+            is_absolute_for_policy(policy, &endpoint.path),
+            "transfer endpoint path `{}` is not absolute",
+            endpoint.path
+        );
+        return Ok(());
+    }
+
+    let info = verified_remote_daemon_info(state, &endpoint.target).await?;
+    let policy = remote_policy(&info.platform);
     anyhow::ensure!(
-        is_absolute_for_policy(policy, &endpoint.path),
+        is_absolute_for_policy(policy, &endpoint.path)
+            || (info.platform.eq_ignore_ascii_case("windows")
+                && endpoint.path.starts_with('/')
+                && !endpoint.path.starts_with("//")),
         "transfer endpoint path `{}` is not absolute",
         endpoint.path
     );

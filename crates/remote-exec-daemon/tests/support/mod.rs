@@ -48,3 +48,24 @@ pub(crate) fn cygwin_style_path(path: &std::path::Path) -> String {
         format!("/cygdrive/{}/{}", drive.to_ascii_lowercase(), rest)
     }
 }
+
+#[cfg(windows)]
+#[allow(
+    dead_code,
+    reason = "Shared across multiple Windows integration test crates"
+)]
+pub(crate) fn posix_root_relative_path(root: &std::path::Path, path: &std::path::Path) -> String {
+    let relative = path.strip_prefix(root).unwrap_or_else(|_| {
+        panic!(
+            "expected `{}` to be within synthetic posix root `{}`",
+            path.display(),
+            root.display()
+        )
+    });
+    let text = relative.display().to_string().replace('\\', "/");
+    if text.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/{}", text.trim_start_matches('/'))
+    }
+}
