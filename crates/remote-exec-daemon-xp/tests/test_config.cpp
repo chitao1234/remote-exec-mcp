@@ -26,6 +26,7 @@ int main() {
         "listen_host = 0.0.0.0\n"
         "listen_port = 8181\n"
         "default_workdir = \"C:\\work dir\"\n"
+        "http_auth_bearer_token = shared-secret\n"
         "yield_time_exec_command_default_ms = 15000\n"
         "yield_time_exec_command_max_ms = 60000\n"
         "yield_time_exec_command_min_ms = 500\n"
@@ -38,6 +39,7 @@ int main() {
     assert(config.listen_host == "0.0.0.0");
     assert(config.listen_port == 8181);
     assert(config.default_workdir == "C:\\work dir");
+    assert(config.http_auth_bearer_token == "shared-secret");
     assert(config.yield_time.exec_command.default_ms == 15000UL);
     assert(config.yield_time.exec_command.max_ms == 60000UL);
     assert(config.yield_time.exec_command.min_ms == 500UL);
@@ -80,6 +82,23 @@ int main() {
     rejected = false;
     try {
         (void)load_config(invalid_yield_path.string());
+    } catch (...) {
+        rejected = true;
+    }
+    assert(rejected);
+
+    const fs::path invalid_auth_path = root / "invalid-auth.ini";
+    write_text(
+        invalid_auth_path,
+        "target = builder-xp\n"
+        "listen_host = 0.0.0.0\n"
+        "listen_port = 8181\n"
+        "default_workdir = C:\\work\n"
+        "http_auth_bearer_token = bad token\n"
+    );
+    rejected = false;
+    try {
+        (void)load_config(invalid_auth_path.string());
     } catch (...) {
         rejected = true;
     }

@@ -43,6 +43,8 @@ int run_server(const DaemonConfig& config) {
         message << "listening on " << state.config.listen_host << ':'
                 << state.config.listen_port
                 << " target=`" << state.config.target << "`"
+                << " http_auth_enabled=`"
+                << (!state.config.http_auth_bearer_token.empty() ? "true" : "false") << "`"
                 << " daemon_instance_id=`" << state.daemon_instance_id << "`";
         log_message(LOG_INFO, "server", message.str());
     }

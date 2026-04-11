@@ -64,6 +64,7 @@ fn base_daemon_config(
         listen,
         default_workdir: default_workdir.to_path_buf(),
         transport: DaemonTransport::Http,
+        http_auth: None,
         sandbox: None,
         enable_transfer_compression: true,
         allow_login_shell: true,

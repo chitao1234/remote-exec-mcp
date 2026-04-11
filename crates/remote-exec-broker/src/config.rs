@@ -47,6 +47,8 @@ pub enum McpServerConfig {
 pub struct TargetConfig {
     pub base_url: String,
     #[serde(default)]
+    pub http_auth: Option<HttpAuthConfig>,
+    #[serde(default)]
     pub ca_pem: Option<PathBuf>,
     #[serde(default)]
     pub client_cert_pem: Option<PathBuf>,
@@ -59,6 +61,11 @@ pub struct TargetConfig {
     #[serde(default)]
     pub pinned_server_cert_pem: Option<PathBuf>,
     pub expected_daemon_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct HttpAuthConfig {
+    pub bearer_token: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,6 +91,10 @@ pub struct LocalTargetConfig {
 
 impl TargetConfig {
     pub(crate) fn validated_transport(&self, name: &str) -> anyhow::Result<TargetTransportKind> {
+        if let Some(http_auth) = &self.http_auth {
+            http_auth.validate(&format!("target `{name}`"))?;
+        }
+
         if self.base_url.starts_with("http://") {
             anyhow::ensure!(
                 self.allow_insecure_http,
@@ -115,6 +126,20 @@ impl TargetConfig {
             "target `{name}` is missing client_key_pem"
         );
         Ok(TargetTransportKind::Https)
+    }
+}
+
+impl HttpAuthConfig {
+    fn validate(&self, scope: &str) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.bearer_token.is_empty(),
+            "{scope} http_auth.bearer_token must not be empty"
+        );
+        anyhow::ensure!(
+            !self.bearer_token.chars().any(char::is_whitespace),
+            "{scope} http_auth.bearer_token must not contain whitespace"
+        );
+        Ok(())
     }
 }
 
@@ -396,6 +421,59 @@ expected_daemon_name = "builder-xp"
         assert_eq!(
             config.targets["builder-xp"].expected_daemon_name.as_deref(),
             Some("builder-xp")
+        );
+    }
+
+    #[tokio::test]
+    async fn load_accepts_http_bearer_auth_for_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("broker.toml");
+        tokio::fs::write(
+            &config_path,
+            r#"[targets.builder-xp]
+base_url = "http://127.0.0.1:8181"
+allow_insecure_http = true
+expected_daemon_name = "builder-xp"
+
+[targets.builder-xp.http_auth]
+bearer_token = "shared-secret"
+"#,
+        )
+        .await
+        .unwrap();
+
+        let config = BrokerConfig::load(&config_path).await.unwrap();
+        assert_eq!(
+            config.targets["builder-xp"]
+                .http_auth
+                .as_ref()
+                .map(|auth| auth.bearer_token.as_str()),
+            Some("shared-secret")
+        );
+    }
+
+    #[tokio::test]
+    async fn load_rejects_empty_http_bearer_auth_for_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("broker.toml");
+        tokio::fs::write(
+            &config_path,
+            r#"[targets.builder-xp]
+base_url = "http://127.0.0.1:8181"
+allow_insecure_http = true
+
+[targets.builder-xp.http_auth]
+bearer_token = ""
+"#,
+        )
+        .await
+        .unwrap();
+
+        let err = BrokerConfig::load(&config_path).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("http_auth.bearer_token must not be empty"),
+            "unexpected error: {err}"
         );
     }
 

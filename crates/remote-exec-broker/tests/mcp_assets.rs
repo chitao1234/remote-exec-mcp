@@ -63,6 +63,34 @@ async fn apply_patch_forwards_to_explicitly_enabled_insecure_http_target() {
 }
 
 #[tokio::test]
+async fn apply_patch_forwards_to_http_target_with_bearer_auth() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon_http_auth("shared-secret").await;
+    let result = fixture
+        .call_tool(
+            "apply_patch",
+            serde_json::json!({
+                "target": "builder-a",
+                "input": "*** Begin Patch\n*** Add File: hello.txt\n+hello auth\n*** End Patch\n",
+            }),
+        )
+        .await;
+
+    assert!(
+        result
+            .text_output
+            .contains("Success. Updated the following files:")
+    );
+    assert_eq!(
+        fixture
+            .last_patch_request()
+            .await
+            .expect("patch request")
+            .patch,
+        "*** Begin Patch\n*** Add File: hello.txt\n+hello auth\n*** End Patch\n"
+    );
+}
+
+#[tokio::test]
 async fn list_targets_returns_cached_daemon_info_and_null_for_unavailable_targets() {
     let fixture = support::spawners::spawn_broker_with_reverse_ordered_targets().await;
     let result = fixture

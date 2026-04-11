@@ -5,6 +5,12 @@ default_workdir = "/srv/work"
 # Cargo feature. Set to "http" to serve the Rust daemon over plain HTTP
 # without TLS or client-certificate authentication.
 # transport = "http"
+# Optional HTTP bearer auth. Supported on both `http` and `tls` transports.
+# This authenticates broker requests but does not add encryption or integrity
+# protection when you use plain HTTP.
+#
+#[http_auth]
+#bearer_token = "replace-me"
 enable_transfer_compression = true
 allow_login_shell = true
 # Optional. Omit to auto-detect PTY support, or set to "none" to disable TTY.

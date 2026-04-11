@@ -100,6 +100,7 @@ where
         target = %state.config.target,
         listen = %state.config.listen,
         transport = ?state.config.transport,
+        http_auth_enabled = state.config.http_auth.is_some(),
         default_workdir = %state.config.default_workdir.display(),
         default_shell = %state.default_shell,
         supports_pty = state.supports_pty,

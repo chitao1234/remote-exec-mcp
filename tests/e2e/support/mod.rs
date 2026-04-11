@@ -238,6 +238,7 @@ expected_daemon_name = {expected_daemon_name}
             listen: self.addr,
             default_workdir: self.workdir.clone(),
             transport: remote_exec_daemon::config::DaemonTransport::Http,
+            http_auth: None,
             sandbox: None,
             enable_transfer_compression: true,
             allow_login_shell: true,

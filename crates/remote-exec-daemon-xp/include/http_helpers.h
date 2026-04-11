@@ -23,7 +23,9 @@ struct HttpResponse {
 };
 
 Json parse_json_body(const HttpRequest& req);
+bool request_has_bearer_auth(const HttpRequest& req, const std::string& bearer_token);
 void write_json(HttpResponse& res, const Json& body);
+void write_bearer_auth_challenge(HttpResponse& res);
 void write_rpc_error(
     HttpResponse& res,
     int status,

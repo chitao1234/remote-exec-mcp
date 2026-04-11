@@ -261,6 +261,8 @@ pub struct DaemonConfig {
     #[serde(default)]
     pub transport: DaemonTransport,
     #[serde(default)]
+    pub http_auth: Option<HttpAuthConfig>,
+    #[serde(default)]
     pub sandbox: Option<FilesystemSandbox>,
     #[serde(default = "default_enable_transfer_compression")]
     pub enable_transfer_compression: bool,
@@ -278,6 +280,11 @@ pub struct DaemonConfig {
     pub process_environment: ProcessEnvironment,
     #[serde(default)]
     pub tls: Option<TlsConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct HttpAuthConfig {
+    pub bearer_token: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -310,6 +317,7 @@ impl EmbeddedDaemonConfig {
             listen: SocketAddr::from(([127, 0, 0, 1], 0)),
             default_workdir: self.default_workdir,
             transport: DaemonTransport::Http,
+            http_auth: None,
             sandbox: self.sandbox,
             enable_transfer_compression: self.enable_transfer_compression,
             allow_login_shell: self.allow_login_shell,
@@ -326,6 +334,9 @@ impl EmbeddedDaemonConfig {
 
 impl DaemonConfig {
     pub fn validate(&self) -> anyhow::Result<()> {
+        if let Some(http_auth) = &self.http_auth {
+            http_auth.validate()?;
+        }
         self.yield_time.validate()?;
         crate::tls::validate_config(self)?;
         Ok(())
@@ -338,6 +349,20 @@ impl DaemonConfig {
         let config: Self = toml::from_str(&text)?;
         config.validate()?;
         Ok(config)
+    }
+}
+
+impl HttpAuthConfig {
+    fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.bearer_token.is_empty(),
+            "http_auth.bearer_token must not be empty"
+        );
+        anyhow::ensure!(
+            !self.bearer_token.chars().any(char::is_whitespace),
+            "http_auth.bearer_token must not contain whitespace"
+        );
+        Ok(())
     }
 }
 
@@ -386,6 +411,7 @@ transport = "http"
 
         let config = DaemonConfig::load(&config_path).await.unwrap();
         assert!(matches!(config.transport, DaemonTransport::Http));
+        assert!(config.http_auth.is_none());
         assert!(config.tls.is_none());
         assert_eq!(config.yield_time, YieldTimeConfig::default());
         assert!(!config.experimental_apply_patch_target_encoding_autodetect);
@@ -567,6 +593,62 @@ experimental_apply_patch_target_encoding_autodetect = true
 
         let config = DaemonConfig::load(&config_path).await.unwrap();
         assert!(config.experimental_apply_patch_target_encoding_autodetect);
+    }
+
+    #[tokio::test]
+    async fn load_accepts_http_bearer_auth() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("daemon.toml");
+        tokio::fs::write(
+            &config_path,
+            r#"
+target = "builder-a"
+listen = "127.0.0.1:8080"
+default_workdir = "/tmp"
+transport = "http"
+
+[http_auth]
+bearer_token = "shared-secret"
+"#,
+        )
+        .await
+        .unwrap();
+
+        let config = DaemonConfig::load(&config_path).await.unwrap();
+        assert_eq!(
+            config
+                .http_auth
+                .as_ref()
+                .map(|auth| auth.bearer_token.as_str()),
+            Some("shared-secret")
+        );
+    }
+
+    #[tokio::test]
+    async fn load_rejects_empty_http_bearer_auth() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("daemon.toml");
+        tokio::fs::write(
+            &config_path,
+            r#"
+target = "builder-a"
+listen = "127.0.0.1:8080"
+default_workdir = "/tmp"
+transport = "http"
+
+[http_auth]
+bearer_token = ""
+"#,
+        )
+        .await
+        .unwrap();
+
+        let err = DaemonConfig::load(&config_path).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("http_auth.bearer_token must not be empty"),
+            "unexpected error: {err}"
+        );
     }
 
     #[tokio::test]

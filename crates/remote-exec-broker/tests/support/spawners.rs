@@ -11,10 +11,11 @@ use super::fixture::{BrokerFixture, DummyClientHandler};
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
 use super::stub_daemon::spawn_stub_daemon;
 use super::stub_daemon::{
-    ExecWriteBehavior, StubDaemonState, set_transfer_compression_support,
-    spawn_named_plain_http_daemon_on_addr, spawn_plain_http_daemon_with_platform,
-    spawn_plain_http_retryable_exec_write_daemon, spawn_plain_http_stub_daemon,
-    spawn_plain_http_unknown_session_exec_write_daemon, stub_daemon_state, stub_router,
+    ExecWriteBehavior, StubDaemonState, set_required_bearer_token,
+    set_transfer_compression_support, spawn_named_plain_http_daemon_on_addr,
+    spawn_plain_http_daemon_with_platform, spawn_plain_http_retryable_exec_write_daemon,
+    spawn_plain_http_stub_daemon, spawn_plain_http_unknown_session_exec_write_daemon,
+    stub_daemon_state, stub_router,
 };
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
@@ -254,6 +255,46 @@ pub async fn spawn_broker_with_stub_daemon() -> BrokerFixture {
             addr,
             transport: BrokerTargetTransport::Http,
             extra_config: None,
+        }],
+        None,
+        None,
+        None,
+    );
+
+    let client = spawn_broker_child(&broker_config).await;
+
+    BrokerFixture {
+        _tempdir: tempdir,
+        client,
+        stub_state,
+    }
+}
+
+pub async fn spawn_broker_with_stub_daemon_http_auth(bearer_token: &str) -> BrokerFixture {
+    let tempdir = tempfile::tempdir().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let mut stub_state = stub_daemon_state("builder-a", ExecWriteBehavior::Success, "linux", true);
+    set_transfer_compression_support(&mut stub_state, false);
+    set_required_bearer_token(&mut stub_state, bearer_token);
+    let app = stub_router(stub_state.clone());
+    tokio::spawn(async move {
+        serve(listener, app).await.unwrap();
+    });
+    wait_until_ready_http(addr).await;
+    let broker_config = tempdir.path().join("broker.toml");
+    let auth_config = format!(
+        r#"[targets.builder-a.http_auth]
+bearer_token = {}"#,
+        toml_string(bearer_token)
+    );
+    write_broker_config(
+        &broker_config,
+        &[BrokerConfigTarget {
+            name: "builder-a",
+            addr,
+            transport: BrokerTargetTransport::Http,
+            extra_config: Some(&auth_config),
         }],
         None,
         None,

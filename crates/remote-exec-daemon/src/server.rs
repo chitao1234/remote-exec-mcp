@@ -4,10 +4,15 @@ use std::time::Instant;
 
 use anyhow::Result;
 use axum::extract::{Request, State};
+use axum::http::StatusCode;
+use axum::http::header::{AUTHORIZATION, WWW_AUTHENTICATE};
 use axum::middleware::{self, Next};
 use axum::routing::post;
-use axum::{Json, Router, response::Response};
-use remote_exec_proto::rpc::{HealthCheckResponse, TargetInfoResponse};
+use axum::{
+    Json, Router,
+    response::{IntoResponse, Response},
+};
+use remote_exec_proto::rpc::{HealthCheckResponse, RpcErrorBody, TargetInfoResponse};
 
 use crate::AppState;
 
@@ -34,6 +39,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/transfer/export", post(crate::transfer::export_path))
         .route("/v1/transfer/import", post(crate::transfer::import_archive))
         .route("/v1/image/read", post(crate::image::read_image))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_http_auth,
+        ))
         .with_state(state)
         .layer(middleware::from_fn(log_http_request))
 }
@@ -67,4 +76,33 @@ async fn log_http_request(request: Request, next: Next) -> Response {
     }
 
     response
+}
+
+async fn require_http_auth(
+    State(state): State<Arc<AppState>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let Some(http_auth) = state.config.http_auth.as_ref() else {
+        return next.run(request).await;
+    };
+
+    let actual = request
+        .headers()
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok());
+    let expected = format!("Bearer {}", http_auth.bearer_token);
+    if actual == Some(expected.as_str()) {
+        return next.run(request).await;
+    }
+
+    (
+        StatusCode::UNAUTHORIZED,
+        [(WWW_AUTHENTICATE, "Bearer")],
+        Json(RpcErrorBody {
+            code: "unauthorized".to_string(),
+            message: "missing or invalid bearer token".to_string(),
+        }),
+    )
+        .into_response()
 }

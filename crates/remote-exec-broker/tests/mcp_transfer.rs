@@ -178,6 +178,71 @@ async fn transfer_files_copies_local_file_and_reports_summary() {
 }
 
 #[tokio::test]
+async fn transfer_files_uses_bearer_auth_for_remote_imports() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon_http_auth("shared-secret").await;
+    let source = fixture._tempdir.path().join("source.txt");
+    std::fs::write(&source, "hello auth\n").unwrap();
+
+    let result = fixture
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "local",
+                    "path": source.display().to_string()
+                },
+                "destination": {
+                    "target": "builder-a",
+                    "path": "/srv/remote.txt"
+                },
+                "overwrite": "fail",
+                "create_parent": false
+            }),
+        )
+        .await;
+
+    assert_eq!(result.structured_content["source_type"], "file");
+    assert_eq!(result.structured_content["files_copied"], 1);
+    let capture = fixture
+        .last_transfer_import()
+        .await
+        .expect("transfer import capture");
+    assert_eq!(capture.destination_path, "/srv/remote.txt");
+    assert_eq!(capture.source_type, "file");
+}
+
+#[tokio::test]
+async fn transfer_files_uses_bearer_auth_for_remote_exports() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon_http_auth("shared-secret").await;
+    let destination = fixture._tempdir.path().join("download");
+
+    let result = fixture
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "builder-a",
+                    "path": "/srv/export"
+                },
+                "destination": {
+                    "target": "local",
+                    "path": destination.display().to_string()
+                },
+                "overwrite": "fail",
+                "create_parent": false
+            }),
+        )
+        .await;
+
+    assert_eq!(
+        std::fs::read_to_string(destination.join("nested/hello.txt")).unwrap(),
+        "hello remote\n"
+    );
+    assert_eq!(result.structured_content["source_type"], "directory");
+    assert_eq!(result.structured_content["files_copied"], 1);
+}
+
+#[tokio::test]
 async fn transfer_files_bundles_multiple_local_sources_into_destination_directory() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     let file_source = fixture._tempdir.path().join("alpha.txt");

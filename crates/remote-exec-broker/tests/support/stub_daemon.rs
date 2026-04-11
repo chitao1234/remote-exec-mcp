@@ -5,8 +5,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::Bytes;
+use axum::extract::Request;
 use axum::extract::State;
+use axum::http::header::{AUTHORIZATION, WWW_AUTHENTICATE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
@@ -89,6 +92,7 @@ pub(super) struct StubDaemonState {
     target_arch: String,
     target_supports_pty: bool,
     pub(super) target_supports_transfer_compression: bool,
+    required_bearer_token: Option<String>,
     pub(super) exec_write_behavior: Arc<Mutex<ExecWriteBehavior>>,
     pub(super) exec_start_behavior: Arc<Mutex<ExecStartBehavior>>,
     pub(super) exec_start_warnings: Arc<Mutex<Vec<ExecWarning>>>,
@@ -181,6 +185,7 @@ pub(super) fn stub_daemon_state(
         target_arch: "x86_64".to_string(),
         target_supports_pty: supports_pty,
         target_supports_transfer_compression: true,
+        required_bearer_token: None,
         exec_write_behavior: Arc::new(Mutex::new(exec_write_behavior)),
         exec_start_behavior: Arc::new(Mutex::new(ExecStartBehavior::Success)),
         exec_start_warnings: Arc::new(Mutex::new(Vec::new())),
@@ -203,6 +208,10 @@ pub(super) fn stub_daemon_state(
 
 pub(super) fn set_transfer_compression_support(state: &mut StubDaemonState, enabled: bool) {
     state.target_supports_transfer_compression = enabled;
+}
+
+pub(super) fn set_required_bearer_token(state: &mut StubDaemonState, token: &str) {
+    state.required_bearer_token = Some(token.to_string());
 }
 
 pub(super) async fn set_transfer_export_file_response(state: &StubDaemonState, body: Vec<u8>) {
@@ -314,6 +323,7 @@ pub(super) async fn spawn_named_daemon_on_addr(
             listen: addr,
             default_workdir: PathBuf::from("."),
             transport: remote_exec_daemon::config::DaemonTransport::Tls,
+            http_auth: None,
             sandbox: None,
             enable_transfer_compression: state.target_supports_transfer_compression,
             allow_login_shell: true,
@@ -383,7 +393,40 @@ pub(super) fn stub_router(state: StubDaemonState) -> Router {
         .route("/v1/transfer/export", post(transfer_export))
         .route("/v1/transfer/import", post(transfer_import))
         .route("/v1/image/read", post(image_read))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_bearer_auth,
+        ))
         .with_state(state)
+}
+
+async fn require_bearer_auth(
+    State(state): State<StubDaemonState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let Some(expected_token) = state.required_bearer_token.as_deref() else {
+        return next.run(request).await;
+    };
+
+    let actual = request
+        .headers()
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok());
+    let expected = format!("Bearer {expected_token}");
+    if actual == Some(expected.as_str()) {
+        return next.run(request).await;
+    }
+
+    (
+        StatusCode::UNAUTHORIZED,
+        [(WWW_AUTHENTICATE, "Bearer")],
+        Json(RpcErrorBody {
+            code: "unauthorized".to_string(),
+            message: "missing or invalid bearer token".to_string(),
+        }),
+    )
+        .into_response()
 }
 
 async fn health() -> Json<HealthCheckResponse> {
