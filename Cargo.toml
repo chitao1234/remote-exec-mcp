@@ -38,7 +38,7 @@ nix = { version = "0.31", default-features = false, features = ["user"] }
 portable-pty = { path = "portable-pty" }
 rand = "0.10"
 rcgen = "0.14"
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "stream"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream"] }
 rmcp = { version = "1", default-features = false, features = ["server"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-pemfile = "2"

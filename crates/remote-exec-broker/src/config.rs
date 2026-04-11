@@ -61,6 +61,12 @@ pub struct TargetConfig {
     pub expected_daemon_name: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TargetTransportKind {
+    Http,
+    Https,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct LocalTargetConfig {
     pub default_workdir: PathBuf,
@@ -77,7 +83,7 @@ pub struct LocalTargetConfig {
 }
 
 impl TargetConfig {
-    fn validate_transport(&self, name: &str) -> anyhow::Result<()> {
+    pub(crate) fn validated_transport(&self, name: &str) -> anyhow::Result<TargetTransportKind> {
         if self.base_url.starts_with("http://") {
             anyhow::ensure!(
                 self.allow_insecure_http,
@@ -91,13 +97,14 @@ impl TargetConfig {
                 self.pinned_server_cert_pem.is_none(),
                 "target `{name}` cannot set pinned_server_cert_pem for http:// targets"
             );
-            return Ok(());
+            return Ok(TargetTransportKind::Http);
         }
 
         anyhow::ensure!(
             self.base_url.starts_with("https://"),
             "target `{name}` base_url must start with http:// or https://"
         );
+        crate::broker_tls::ensure_https_target_supported(name)?;
         anyhow::ensure!(self.ca_pem.is_some(), "target `{name}` is missing ca_pem");
         anyhow::ensure!(
             self.client_cert_pem.is_some(),
@@ -107,7 +114,7 @@ impl TargetConfig {
             self.client_key_pem.is_some(),
             "target `{name}` is missing client_key_pem"
         );
-        Ok(())
+        Ok(TargetTransportKind::Https)
     }
 }
 
@@ -156,7 +163,7 @@ impl BrokerConfig {
             "configured target name `local` is reserved for broker-host filesystem access"
         );
         for (name, target) in &self.targets {
-            target.validate_transport(name)?;
+            target.validated_transport(name)?;
         }
         Ok(())
     }
@@ -199,21 +206,33 @@ fn default_streamable_http_sse_retry_ms() -> Option<u64> {
 mod tests {
     use super::{BrokerConfig, McpServerConfig};
 
-    #[tokio::test]
-    async fn load_rejects_reserved_local_target_name() {
-        let dir = tempfile::tempdir().unwrap();
-        let config_path = dir.path().join("broker.toml");
-        tokio::fs::write(
-            &config_path,
-            r#"[targets.local]
+    fn valid_target_config(name: &str) -> String {
+        if cfg!(feature = "broker-tls") {
+            format!(
+                r#"[targets.{name}]
 base_url = "https://127.0.0.1:8443"
 ca_pem = "/tmp/ca.pem"
 client_cert_pem = "/tmp/broker.pem"
 client_key_pem = "/tmp/broker.key"
-"#,
-        )
-        .await
-        .unwrap();
+"#
+            )
+        } else {
+            format!(
+                r#"[targets.{name}]
+base_url = "http://127.0.0.1:8181"
+allow_insecure_http = true
+"#
+            )
+        }
+    }
+
+    #[tokio::test]
+    async fn load_rejects_reserved_local_target_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("broker.toml");
+        tokio::fs::write(&config_path, valid_target_config("local"))
+            .await
+            .unwrap();
 
         let err = BrokerConfig::load(&config_path).await.unwrap_err();
         assert!(
@@ -225,6 +244,19 @@ client_key_pem = "/tmp/broker.key"
 
     #[tokio::test]
     async fn load_accepts_non_reserved_target_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("broker.toml");
+        tokio::fs::write(&config_path, valid_target_config("builder-a"))
+            .await
+            .unwrap();
+
+        let config = BrokerConfig::load(&config_path).await.unwrap();
+        assert!(config.targets.contains_key("builder-a"));
+    }
+
+    #[cfg(not(feature = "broker-tls"))]
+    #[tokio::test]
+    async fn load_rejects_https_targets_when_broker_tls_feature_disabled() {
         let dir = tempfile::tempdir().unwrap();
         let config_path = dir.path().join("broker.toml");
         tokio::fs::write(
@@ -239,8 +271,13 @@ client_key_pem = "/tmp/broker.key"
         .await
         .unwrap();
 
-        let config = BrokerConfig::load(&config_path).await.unwrap();
-        assert!(config.targets.contains_key("builder-a"));
+        let err = BrokerConfig::load(&config_path).await.unwrap_err();
+        assert!(
+            err.to_string().contains(
+                "https:// support requires the remote-exec-broker `broker-tls` Cargo feature"
+            ),
+            "unexpected error: {err}"
+        );
     }
 
     #[tokio::test]
@@ -301,15 +338,10 @@ client_key_pem = "/tmp/broker.key"
         let config_path = dir.path().join("broker.toml");
         tokio::fs::write(
             &config_path,
-            r#"
-disable_structured_content = true
-
-[targets.builder-a]
-base_url = "https://127.0.0.1:8443"
-ca_pem = "/tmp/ca.pem"
-client_cert_pem = "/tmp/broker.pem"
-client_key_pem = "/tmp/broker.key"
-"#,
+            format!(
+                "disable_structured_content = true\n\n{}",
+                valid_target_config("builder-a")
+            ),
         )
         .await
         .unwrap();

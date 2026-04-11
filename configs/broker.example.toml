@@ -16,6 +16,7 @@ disable_structured_content = false
 ## sse_retry_ms = 3000
 
 [targets.builder-a]
+# Requires the broker to be built with its default `broker-tls` Cargo feature.
 base_url = "https://builder-a.example.com:9443"
 ca_pem = "/etc/remote-exec/ca.pem"
 client_cert_pem = "/etc/remote-exec/broker.pem"
@@ -29,6 +30,7 @@ expected_daemon_name = "builder-a"
 # pinned_server_cert_pem = "/etc/remote-exec/pins/builder-a.pem"
 
 [targets.builder-b]
+# Requires the broker to be built with its default `broker-tls` Cargo feature.
 base_url = "https://builder-b.example.com:9443"
 ca_pem = "/etc/remote-exec/ca.pem"
 client_cert_pem = "/etc/remote-exec/broker.pem"

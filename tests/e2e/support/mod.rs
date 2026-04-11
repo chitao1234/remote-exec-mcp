@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use reqwest::header::CONNECTION;
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
     model::{CallToolRequestParams, CallToolResult, ClientInfo},
@@ -189,11 +188,6 @@ pub struct DaemonFixture {
     pub target: String,
     pub addr: std::net::SocketAddr,
     pub workdir: PathBuf,
-    ca_pem: PathBuf,
-    client_cert_pem: PathBuf,
-    client_key_pem: PathBuf,
-    daemon_cert_pem: PathBuf,
-    daemon_key_pem: PathBuf,
     client: reqwest::Client,
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     handle: Option<JoinHandle<anyhow::Result<()>>>,
@@ -201,42 +195,17 @@ pub struct DaemonFixture {
 
 impl DaemonFixture {
     pub async fn spawn(target: &str) -> Self {
-        remote_exec_daemon::install_crypto_provider();
-
         let tempdir = tempfile::tempdir().unwrap();
-        let certs = write_test_certs(tempdir.path());
         let addr = allocate_addr();
         let workdir = tempdir.path().join("workdir");
         std::fs::create_dir_all(&workdir).unwrap();
-        let client = reqwest::Client::builder()
-            .use_rustls_tls()
-            .pool_max_idle_per_host(0)
-            .add_root_certificate(
-                reqwest::Certificate::from_pem(&std::fs::read(&certs.ca_cert).unwrap()).unwrap(),
-            )
-            .identity(
-                reqwest::Identity::from_pem(
-                    &[
-                        std::fs::read(&certs.client_cert).unwrap(),
-                        std::fs::read(&certs.client_key).unwrap(),
-                    ]
-                    .concat(),
-                )
-                .unwrap(),
-            )
-            .build()
-            .unwrap();
+        let client = build_http_client();
 
         let mut fixture = Self {
             _tempdir: tempdir,
             target: target.to_string(),
             addr,
             workdir,
-            ca_pem: certs.ca_cert,
-            client_cert_pem: certs.client_cert,
-            client_key_pem: certs.client_key,
-            daemon_cert_pem: certs.daemon_cert,
-            daemon_key_pem: certs.daemon_key,
             client,
             shutdown: None,
             handle: None,
@@ -254,16 +223,11 @@ impl DaemonFixture {
         format!(
             r#"[targets.{target}]
 base_url = {base_url}
-ca_pem = {ca_pem}
-client_cert_pem = {client_cert_pem}
-client_key_pem = {client_key_pem}
+allow_insecure_http = true
 expected_daemon_name = {expected_daemon_name}
 "#,
             target = self.target,
-            base_url = toml_string(&format!("https://{}", self.addr)),
-            ca_pem = toml_string(&self.ca_pem.display().to_string()),
-            client_cert_pem = toml_string(&self.client_cert_pem.display().to_string()),
-            client_key_pem = toml_string(&self.client_key_pem.display().to_string()),
+            base_url = toml_string(&format!("http://{}", self.addr)),
             expected_daemon_name = toml_string(&self.target),
         )
     }
@@ -273,7 +237,7 @@ expected_daemon_name = {expected_daemon_name}
             target: self.target.clone(),
             listen: self.addr,
             default_workdir: self.workdir.clone(),
-            transport: remote_exec_daemon::config::DaemonTransport::Tls,
+            transport: remote_exec_daemon::config::DaemonTransport::Http,
             sandbox: None,
             enable_transfer_compression: true,
             allow_login_shell: true,
@@ -282,12 +246,7 @@ expected_daemon_name = {expected_daemon_name}
             yield_time: remote_exec_daemon::config::YieldTimeConfig::default(),
             experimental_apply_patch_target_encoding_autodetect: false,
             process_environment: remote_exec_daemon::config::ProcessEnvironment::capture_current(),
-            tls: Some(remote_exec_daemon::config::TlsConfig {
-                cert_pem: self.daemon_cert_pem.clone(),
-                key_pem: self.daemon_key_pem.clone(),
-                ca_pem: self.ca_pem.clone(),
-                pinned_client_cert_pem: None,
-            }),
+            tls: None,
         };
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         self.shutdown = Some(shutdown_tx);
@@ -297,7 +256,7 @@ expected_daemon_name = {expected_daemon_name}
                 let _ = shutdown_rx.await;
             },
         )));
-        wait_until_ready(&self.client, self.addr).await;
+        wait_until_ready_http(&self.client, self.addr).await;
     }
 
     async fn stop(&mut self) {
@@ -327,34 +286,6 @@ pub async fn write_png(path: &Path, width: u32, height: u32) {
     image.save(path).unwrap();
 }
 
-struct TestCerts {
-    ca_cert: PathBuf,
-    client_cert: PathBuf,
-    client_key: PathBuf,
-    daemon_cert: PathBuf,
-    daemon_key: PathBuf,
-}
-
-fn write_test_certs(dir: &Path) -> TestCerts {
-    let out_dir = dir.join("certs");
-    let spec = remote_exec_pki::DevInitSpec {
-        ca_common_name: "remote-exec-ca".to_string(),
-        broker_common_name: "remote-exec-broker".to_string(),
-        daemon_specs: vec![remote_exec_pki::DaemonCertSpec::localhost("builder-a")],
-    };
-    let bundle = remote_exec_pki::build_dev_init_bundle(&spec).unwrap();
-    let manifest = remote_exec_pki::write_dev_init_bundle(&spec, &bundle, &out_dir, true).unwrap();
-    let daemon = manifest.daemons.get("builder-a").unwrap();
-
-    TestCerts {
-        ca_cert: manifest.ca.cert_pem.clone(),
-        client_cert: manifest.broker.cert_pem.clone(),
-        client_key: manifest.broker.key_pem.clone(),
-        daemon_cert: daemon.cert_pem.clone(),
-        daemon_key: daemon.key_pem.clone(),
-    }
-}
-
 fn allocate_addr() -> std::net::SocketAddr {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
@@ -362,11 +293,10 @@ fn allocate_addr() -> std::net::SocketAddr {
     addr
 }
 
-async fn wait_until_ready(client: &reqwest::Client, addr: std::net::SocketAddr) {
+async fn wait_until_ready_http(client: &reqwest::Client, addr: std::net::SocketAddr) {
     for _ in 0..80 {
         if client
-            .post(format!("https://{addr}/v1/health"))
-            .header(CONNECTION, "close")
+            .post(format!("http://{addr}/v1/health"))
             .json(&serde_json::json!({}))
             .send()
             .await
@@ -377,6 +307,14 @@ async fn wait_until_ready(client: &reqwest::Client, addr: std::net::SocketAddr) 
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     panic!("daemon did not become ready");
+}
+
+fn build_http_client() -> reqwest::Client {
+    remote_exec_broker::install_crypto_provider();
+    reqwest::Client::builder()
+        .pool_max_idle_per_host(0)
+        .build()
+        .unwrap()
 }
 
 async fn wait_for_listener_release(addr: std::net::SocketAddr) {
@@ -402,30 +340,17 @@ async fn wait_for_listener_release(addr: std::net::SocketAddr) {
 
 #[cfg(test)]
 mod tests {
-    use super::DaemonFixture;
+    use super::{DaemonFixture, build_http_client};
     use std::path::PathBuf;
 
     #[test]
-    fn target_config_fragment_escapes_windows_paths_for_toml() {
+    fn target_config_fragment_renders_insecure_http_target() {
         let fixture = DaemonFixture {
             _tempdir: tempfile::tempdir().unwrap(),
             target: "builder-a".to_string(),
             addr: "127.0.0.1:9443".parse().unwrap(),
-            workdir: PathBuf::from(r"C:\Users\chi\AppData\Local\Temp\.tmp-work\workdir"),
-            ca_pem: PathBuf::from(r"C:\Users\chi\AppData\Local\Temp\.tmp-work\certs\ca.pem"),
-            client_cert_pem: PathBuf::from(
-                r"C:\Users\chi\AppData\Local\Temp\.tmp-work\certs\broker.pem",
-            ),
-            client_key_pem: PathBuf::from(
-                r"C:\Users\chi\AppData\Local\Temp\.tmp-work\certs\broker-key.pem",
-            ),
-            daemon_cert_pem: PathBuf::from(
-                r"C:\Users\chi\AppData\Local\Temp\.tmp-work\certs\daemon.pem",
-            ),
-            daemon_key_pem: PathBuf::from(
-                r"C:\Users\chi\AppData\Local\Temp\.tmp-work\certs\daemon-key.pem",
-            ),
-            client: reqwest::Client::new(),
+            workdir: PathBuf::from("/tmp/workdir"),
+            client: build_http_client(),
             shutdown: None,
             handle: None,
         };
@@ -436,16 +361,12 @@ mod tests {
             .expect("config fragment should parse as TOML");
 
         assert_eq!(
-            parsed["targets"]["builder-a"]["ca_pem"].as_str(),
-            Some(r"C:\Users\chi\AppData\Local\Temp\.tmp-work\certs\ca.pem")
+            parsed["targets"]["builder-a"]["base_url"].as_str(),
+            Some("http://127.0.0.1:9443")
         );
         assert_eq!(
-            parsed["targets"]["builder-a"]["client_cert_pem"].as_str(),
-            Some(r"C:\Users\chi\AppData\Local\Temp\.tmp-work\certs\broker.pem")
-        );
-        assert_eq!(
-            parsed["targets"]["builder-a"]["client_key_pem"].as_str(),
-            Some(r"C:\Users\chi\AppData\Local\Temp\.tmp-work\certs\broker-key.pem")
+            parsed["targets"]["builder-a"]["allow_insecure_http"].as_bool(),
+            Some(true)
         );
     }
 }

@@ -48,7 +48,7 @@ winptyrs = { path = "../../winptyrs/crates/winptyrs", optional = true }
 
 [dev-dependencies]
 remote-exec-pki = { path = "../remote-exec-pki" }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["rustls-no-provider"] }
 tempfile = { workspace = true }
 
 [[test]]

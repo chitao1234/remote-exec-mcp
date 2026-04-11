@@ -5,7 +5,13 @@ license.workspace = true
 version.workspace = true
 
 [features]
-default = ["daemon-tls", "winpty"]
+default = ["broker-tls", "daemon-tls", "winpty"]
+broker-tls = [
+    "dep:rustls",
+    "dep:rustls-pemfile",
+    "reqwest/rustls-no-provider",
+    "rmcp/reqwest-tls-no-provider",
+]
 daemon-tls = ["remote-exec-daemon/tls"]
 winpty = ["remote-exec-daemon/winpty"]
 
@@ -19,9 +25,9 @@ http-body-util = { workspace = true }
 remote-exec-daemon = { path = "../remote-exec-daemon", default-features = false }
 remote-exec-proto = { path = "../remote-exec-proto" }
 reqwest = { workspace = true }
-rmcp = { workspace = true, features = ["client", "macros", "reqwest-tls-no-provider", "server", "transport-child-process", "transport-io", "transport-streamable-http-client-reqwest", "transport-streamable-http-server"] }
-rustls = { workspace = true }
-rustls-pemfile = { workspace = true }
+rmcp = { workspace = true, features = ["client", "macros", "server", "transport-child-process", "transport-io", "transport-streamable-http-client-reqwest", "transport-streamable-http-server"] }
+rustls = { workspace = true, optional = true }
+rustls-pemfile = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
@@ -38,14 +44,6 @@ image = { workspace = true }
 remote-exec-pki = { path = "../remote-exec-pki" }
 tar = { workspace = true }
 zstd = { workspace = true }
-
-[[test]]
-name = "multi_target"
-path = "../../tests/e2e/multi_target.rs"
-
-[[test]]
-name = "mcp_exec"
-path = "tests/mcp_exec/mod.rs"
 
 [[bin]]
 name = "remote-exec"

@@ -1,3 +1,4 @@
+pub(crate) mod broker_tls;
 pub mod client;
 pub mod config;
 pub mod daemon_client;
@@ -9,7 +10,7 @@ pub mod session_store;
 pub mod tools;
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Once};
+use std::sync::Arc;
 
 use anyhow::Context;
 use daemon_client::{DaemonClient, DaemonClientError};
@@ -332,14 +333,8 @@ fn mcp_transport_name(config: &config::McpServerConfig) -> &'static str {
 }
 
 pub fn install_crypto_provider() {
-    static INIT: Once = Once::new();
-
-    INIT.call_once(|| {
-        let provider = rustls::crypto::ring::default_provider();
-        provider
-            .install_default()
-            .expect("failed to install rustls crypto provider");
-    });
+    remote_exec_daemon::install_crypto_provider();
+    broker_tls::install_crypto_provider();
 }
 
 #[cfg(test)]

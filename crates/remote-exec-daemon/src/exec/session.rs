@@ -412,7 +412,9 @@ impl LiveSession {
 mod tests {
     use crate::config::PtyMode;
 
-    use super::{supports_pty_for_mode, validate_pty_mode, windows_pty_backend_override_for_mode};
+    #[cfg(all(windows, not(feature = "winpty")))]
+    use super::validate_pty_mode;
+    use super::{supports_pty_for_mode, windows_pty_backend_override_for_mode};
 
     #[test]
     fn pty_mode_none_disables_tty_support() {

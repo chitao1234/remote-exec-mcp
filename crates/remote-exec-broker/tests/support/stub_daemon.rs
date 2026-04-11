@@ -1,4 +1,5 @@
 use std::io::Cursor;
+#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,7 +20,10 @@ use remote_exec_proto::rpc::{
 use tar::{Builder, EntryType, Header};
 use tokio::sync::Mutex;
 
-use super::certs::{TestCerts, allocate_addr};
+#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+use super::certs::TestCerts;
+#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+use super::certs::allocate_addr;
 
 const SINGLE_FILE_ENTRY: &str = ".remote-exec-file";
 
@@ -220,26 +224,44 @@ pub(super) async fn set_transfer_export_directory_response(
     };
 }
 
+#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
 pub(super) async fn spawn_stub_daemon(
     certs: &TestCerts,
 ) -> (std::net::SocketAddr, StubDaemonState) {
     spawn_daemon(certs, ExecWriteBehavior::Success).await
 }
 
+pub(super) async fn spawn_plain_http_stub_daemon() -> (std::net::SocketAddr, StubDaemonState) {
+    spawn_plain_http_daemon(ExecWriteBehavior::Success).await
+}
+
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
+#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
 pub(super) async fn spawn_retryable_exec_write_daemon(
     certs: &TestCerts,
 ) -> (std::net::SocketAddr, StubDaemonState) {
     spawn_daemon(certs, ExecWriteBehavior::TemporaryFailureOnce).await
 }
 
+pub(super) async fn spawn_plain_http_retryable_exec_write_daemon()
+-> (std::net::SocketAddr, StubDaemonState) {
+    spawn_plain_http_daemon(ExecWriteBehavior::TemporaryFailureOnce).await
+}
+
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
+#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
 pub(super) async fn spawn_unknown_session_exec_write_daemon(
     certs: &TestCerts,
 ) -> (std::net::SocketAddr, StubDaemonState) {
     spawn_daemon(certs, ExecWriteBehavior::UnknownSession).await
 }
 
+pub(super) async fn spawn_plain_http_unknown_session_exec_write_daemon()
+-> (std::net::SocketAddr, StubDaemonState) {
+    spawn_plain_http_daemon(ExecWriteBehavior::UnknownSession).await
+}
+
+#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
 async fn spawn_daemon(
     certs: &TestCerts,
     exec_write_behavior: ExecWriteBehavior,
@@ -247,6 +269,13 @@ async fn spawn_daemon(
     spawn_daemon_with_platform(certs, exec_write_behavior, "linux", true).await
 }
 
+async fn spawn_plain_http_daemon(
+    exec_write_behavior: ExecWriteBehavior,
+) -> (std::net::SocketAddr, StubDaemonState) {
+    spawn_plain_http_daemon_with_platform(exec_write_behavior, "linux", true).await
+}
+
+#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
 pub(super) async fn spawn_daemon_with_platform(
     certs: &TestCerts,
     exec_write_behavior: ExecWriteBehavior,
@@ -259,6 +288,19 @@ pub(super) async fn spawn_daemon_with_platform(
     (addr, state)
 }
 
+pub(super) async fn spawn_plain_http_daemon_with_platform(
+    exec_write_behavior: ExecWriteBehavior,
+    platform: &str,
+    supports_pty: bool,
+) -> (std::net::SocketAddr, StubDaemonState) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let state = stub_daemon_state("builder-a", exec_write_behavior, platform, supports_pty);
+    spawn_named_plain_http_daemon_on_listener(listener, state.clone()).await;
+    (addr, state)
+}
+
+#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
 pub(super) async fn spawn_named_daemon_on_addr(
     certs: &TestCerts,
     addr: std::net::SocketAddr,
@@ -307,6 +349,28 @@ pub(super) async fn spawn_named_daemon_on_addr(
     });
 
     wait_until_ready(certs, addr).await;
+}
+
+pub(super) async fn spawn_named_plain_http_daemon_on_addr(
+    addr: std::net::SocketAddr,
+    state: StubDaemonState,
+) {
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    spawn_named_plain_http_daemon_on_listener(listener, state).await;
+}
+
+pub(super) async fn spawn_named_plain_http_daemon_on_listener(
+    listener: tokio::net::TcpListener,
+    state: StubDaemonState,
+) {
+    let addr = listener.local_addr().unwrap();
+    let app = stub_router(state);
+
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    wait_until_ready_http(addr).await;
 }
 
 pub(super) fn stub_router(state: StubDaemonState) -> Router {
@@ -605,6 +669,7 @@ async fn image_read(
     }
 }
 
+#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
 async fn wait_until_ready(certs: &TestCerts, addr: std::net::SocketAddr) {
     let ca = reqwest::Certificate::from_pem(&std::fs::read(&certs.ca_cert).unwrap()).unwrap();
     let client = reqwest::Client::builder()
@@ -638,4 +703,24 @@ async fn wait_until_ready(certs: &TestCerts, addr: std::net::SocketAddr) {
     }
 
     panic!("stub daemon did not become ready");
+}
+
+async fn wait_until_ready_http(addr: std::net::SocketAddr) {
+    remote_exec_broker::install_crypto_provider();
+    let client = reqwest::Client::builder().build().unwrap();
+
+    for _ in 0..40 {
+        if client
+            .post(format!("http://{addr}/v1/health"))
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .is_ok()
+        {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    panic!("plain http stub daemon did not become ready");
 }

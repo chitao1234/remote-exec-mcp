@@ -129,6 +129,8 @@ async fn connect_stdio(
 async fn connect_streamable_http(
     url: &str,
 ) -> anyhow::Result<RunningService<RoleClient, RemoteExecClientHandler>> {
+    crate::broker_tls::ensure_broker_url_supported(url)?;
+    crate::install_crypto_provider();
     RemoteExecClientHandler
         .serve(StreamableHttpClientTransport::from_uri(url.to_string()))
         .await

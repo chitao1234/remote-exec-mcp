@@ -4,26 +4,29 @@ use axum::serve;
 use rmcp::{ServiceExt, transport::TokioChildProcess};
 use tempfile::TempDir;
 
-use super::certs::{TestCerts, allocate_addr, write_test_certs, write_test_certs_for_daemon_spec};
+use super::certs::allocate_addr;
+#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+use super::certs::{TestCerts, write_test_certs_for_daemon_spec};
 use super::fixture::{BrokerFixture, DummyClientHandler};
+#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+use super::stub_daemon::spawn_stub_daemon;
 use super::stub_daemon::{
     ExecWriteBehavior, StubDaemonState, set_transfer_compression_support,
-    spawn_daemon_with_platform, spawn_named_daemon_on_addr, spawn_retryable_exec_write_daemon,
-    spawn_stub_daemon, spawn_unknown_session_exec_write_daemon, stub_daemon_state, stub_router,
+    spawn_named_plain_http_daemon_on_addr, spawn_plain_http_daemon_with_platform,
+    spawn_plain_http_retryable_exec_write_daemon, spawn_plain_http_stub_daemon,
+    spawn_plain_http_unknown_session_exec_write_daemon, stub_daemon_state, stub_router,
 };
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub struct DelayedTargetFixture {
     pub broker: BrokerFixture,
-    certs: TestCerts,
     addr: std::net::SocketAddr,
 }
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
 impl DelayedTargetFixture {
     pub async fn spawn_target(&self, target: &str) {
-        spawn_named_daemon_on_addr(
-            &self.certs,
+        spawn_named_plain_http_daemon_on_addr(
             self.addr,
             stub_daemon_state(target, ExecWriteBehavior::Success, "linux", true),
         )
@@ -47,8 +50,17 @@ pub struct BrokerConfigFixture {
 struct BrokerConfigTarget<'a> {
     name: &'a str,
     addr: std::net::SocketAddr,
-    certs: &'a TestCerts,
+    transport: BrokerTargetTransport<'a>,
     extra_config: Option<&'a str>,
+}
+
+#[derive(Clone, Copy)]
+enum BrokerTargetTransport<'a> {
+    Http,
+    #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+    Https(&'a TestCerts),
+    #[cfg(not(all(feature = "broker-tls", feature = "daemon-tls")))]
+    _Lifetime(std::marker::PhantomData<&'a ()>),
 }
 
 struct LocalBrokerConfig<'a> {
@@ -72,35 +84,40 @@ fn render_broker_target(target: &BrokerConfigTarget<'_>) -> String {
             }
         })
         .unwrap_or_default();
-    format!(
-        r#"[targets.{name}]
+    match target.transport {
+        BrokerTargetTransport::Http => format!(
+            r#"[targets.{name}]
+base_url = {base_url}
+allow_insecure_http = true
+expected_daemon_name = {expected_daemon_name}
+{extra_config}"#,
+            name = target.name,
+            base_url = toml_string(&format!("http://{}", target.addr)),
+            expected_daemon_name = toml_string(target.name),
+            extra_config = extra_config,
+        ),
+        #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+        BrokerTargetTransport::Https(certs) => format!(
+            r#"[targets.{name}]
 base_url = {base_url}
 ca_pem = {ca_pem}
 client_cert_pem = {client_cert_pem}
 client_key_pem = {client_key_pem}
 expected_daemon_name = {expected_daemon_name}
 {extra_config}"#,
-        name = target.name,
-        base_url = toml_string(&format!("https://{}", target.addr)),
-        ca_pem = toml_string(&target.certs.ca_cert.display().to_string()),
-        client_cert_pem = toml_string(&target.certs.client_cert.display().to_string()),
-        client_key_pem = toml_string(&target.certs.client_key.display().to_string()),
-        expected_daemon_name = toml_string(target.name),
-        extra_config = extra_config,
-    )
-}
-
-fn render_insecure_http_broker_target(name: &str, addr: std::net::SocketAddr) -> String {
-    format!(
-        r#"[targets.{name}]
-base_url = {base_url}
-allow_insecure_http = true
-expected_daemon_name = {expected_daemon_name}
-"#,
-        name = name,
-        base_url = toml_string(&format!("http://{addr}")),
-        expected_daemon_name = toml_string(name),
-    )
+            name = target.name,
+            base_url = toml_string(&format!("https://{}", target.addr)),
+            ca_pem = toml_string(&certs.ca_cert.display().to_string()),
+            client_cert_pem = toml_string(&certs.client_cert.display().to_string()),
+            client_key_pem = toml_string(&certs.client_key.display().to_string()),
+            expected_daemon_name = toml_string(target.name),
+            extra_config = extra_config,
+        ),
+        #[cfg(not(all(feature = "broker-tls", feature = "daemon-tls")))]
+        BrokerTargetTransport::_Lifetime(_) => {
+            unreachable!("lifetime marker variant is never constructed")
+        }
+    }
 }
 
 fn render_local_broker_config(local: &LocalBrokerConfig<'_>) -> String {
@@ -163,7 +180,8 @@ async fn spawn_broker_child(
     DummyClientHandler.serve(transport).await.unwrap()
 }
 
-pub async fn spawn_broker_with_stub_daemon_and_extra_target_config(
+#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+pub async fn spawn_broker_with_tls_stub_daemon_and_extra_target_config(
     certs: TestCerts,
     extra_target_config: &str,
 ) -> BrokerFixture {
@@ -177,7 +195,7 @@ pub async fn spawn_broker_with_stub_daemon_and_extra_target_config(
         &[BrokerConfigTarget {
             name: "builder-a",
             addr,
-            certs: &certs,
+            transport: BrokerTargetTransport::Https(&certs),
             extra_config: Some(extra_target_config),
         }],
         None,
@@ -193,7 +211,8 @@ pub async fn spawn_broker_with_stub_daemon_and_extra_target_config(
     }
 }
 
-pub async fn spawn_broker_with_stub_daemon_and_daemon_spec(
+#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+pub async fn spawn_broker_with_tls_stub_daemon_and_daemon_spec(
     daemon_spec: remote_exec_pki::DaemonCertSpec,
     extra_target_config: &str,
 ) -> BrokerFixture {
@@ -208,7 +227,7 @@ pub async fn spawn_broker_with_stub_daemon_and_daemon_spec(
         &[BrokerConfigTarget {
             name: "builder-a",
             addr,
-            certs: &certs,
+            transport: BrokerTargetTransport::Https(&certs),
             extra_config: Some(extra_target_config),
         }],
         None,
@@ -225,18 +244,15 @@ pub async fn spawn_broker_with_stub_daemon_and_daemon_spec(
 }
 
 pub async fn spawn_broker_with_stub_daemon() -> BrokerFixture {
-    remote_exec_daemon::install_crypto_provider();
-
     let tempdir = tempfile::tempdir().unwrap();
-    let certs = write_test_certs(tempdir.path());
-    let (addr, stub_state) = spawn_stub_daemon(&certs).await;
+    let (addr, stub_state) = spawn_plain_http_stub_daemon().await;
     let broker_config = tempdir.path().join("broker.toml");
     write_broker_config(
         &broker_config,
         &[BrokerConfigTarget {
             name: "builder-a",
             addr,
-            certs: &certs,
+            transport: BrokerTargetTransport::Http,
             extra_config: None,
         }],
         None,
@@ -244,10 +260,7 @@ pub async fn spawn_broker_with_stub_daemon() -> BrokerFixture {
         None,
     );
 
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
-    command.arg(&broker_config);
-    let transport = TokioChildProcess::new(command).unwrap();
-    let client = DummyClientHandler.serve(transport).await.unwrap();
+    let client = spawn_broker_child(&broker_config).await;
 
     BrokerFixture {
         _tempdir: tempdir,
@@ -257,18 +270,15 @@ pub async fn spawn_broker_with_stub_daemon() -> BrokerFixture {
 }
 
 pub async fn spawn_broker_config_with_stub_daemon() -> BrokerConfigFixture {
-    remote_exec_daemon::install_crypto_provider();
-
     let tempdir = tempfile::tempdir().unwrap();
-    let certs = write_test_certs(tempdir.path());
-    let (addr, stub_state) = spawn_stub_daemon(&certs).await;
+    let (addr, stub_state) = spawn_plain_http_stub_daemon().await;
     let broker_config = tempdir.path().join("broker.toml");
     write_broker_config(
         &broker_config,
         &[BrokerConfigTarget {
             name: "builder-a",
             addr,
-            certs: &certs,
+            transport: BrokerTargetTransport::Http,
             extra_config: None,
         }],
         None,
@@ -284,11 +294,8 @@ pub async fn spawn_broker_config_with_stub_daemon() -> BrokerConfigFixture {
 }
 
 pub async fn spawn_streamable_http_broker_with_stub_daemon() -> HttpBrokerFixture {
-    remote_exec_daemon::install_crypto_provider();
-
     let tempdir = tempfile::tempdir().unwrap();
-    let certs = write_test_certs(tempdir.path());
-    let (daemon_addr, stub_state) = spawn_stub_daemon(&certs).await;
+    let (daemon_addr, stub_state) = spawn_plain_http_stub_daemon().await;
     let broker_addr = allocate_addr();
     let broker_config = tempdir.path().join("broker.toml");
     write_broker_config(
@@ -296,7 +303,7 @@ pub async fn spawn_streamable_http_broker_with_stub_daemon() -> HttpBrokerFixtur
         &[BrokerConfigTarget {
             name: "builder-a",
             addr: daemon_addr,
-            certs: &certs,
+            transport: BrokerTargetTransport::Http,
             extra_config: None,
         }],
         None,
@@ -330,12 +337,9 @@ pub async fn spawn_broker_with_stub_daemon_platform(
     platform: &str,
     supports_pty: bool,
 ) -> BrokerFixture {
-    remote_exec_daemon::install_crypto_provider();
-
     let tempdir = tempfile::tempdir().unwrap();
-    let certs = write_test_certs(tempdir.path());
     let (addr, stub_state) =
-        spawn_daemon_with_platform(&certs, ExecWriteBehavior::Success, platform, supports_pty)
+        spawn_plain_http_daemon_with_platform(ExecWriteBehavior::Success, platform, supports_pty)
             .await;
     let broker_config = tempdir.path().join("broker.toml");
     write_broker_config(
@@ -343,7 +347,7 @@ pub async fn spawn_broker_with_stub_daemon_platform(
         &[BrokerConfigTarget {
             name: "builder-a",
             addr,
-            certs: &certs,
+            transport: BrokerTargetTransport::Http,
             extra_config: None,
         }],
         None,
@@ -351,10 +355,7 @@ pub async fn spawn_broker_with_stub_daemon_platform(
         None,
     );
 
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
-    command.arg(&broker_config);
-    let transport = TokioChildProcess::new(command).unwrap();
-    let client = DummyClientHandler.serve(transport).await.unwrap();
+    let client = spawn_broker_child(&broker_config).await;
 
     BrokerFixture {
         _tempdir: tempdir,
@@ -379,16 +380,20 @@ pub async fn spawn_broker_with_plain_http_stub_daemon() -> BrokerFixture {
     wait_until_ready_http(addr).await;
 
     let broker_config = tempdir.path().join("broker.toml");
-    std::fs::write(
+    write_broker_config(
         &broker_config,
-        render_insecure_http_broker_target("builder-xp", addr),
-    )
-    .unwrap();
+        &[BrokerConfigTarget {
+            name: "builder-xp",
+            addr,
+            transport: BrokerTargetTransport::Http,
+            extra_config: None,
+        }],
+        None,
+        None,
+        None,
+    );
 
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
-    command.arg(&broker_config);
-    let transport = TokioChildProcess::new(command).unwrap();
-    let client = DummyClientHandler.serve(transport).await.unwrap();
+    let client = spawn_broker_child(&broker_config).await;
 
     BrokerFixture {
         _tempdir: tempdir,
@@ -399,11 +404,8 @@ pub async fn spawn_broker_with_plain_http_stub_daemon() -> BrokerFixture {
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub async fn spawn_broker_with_reverse_ordered_targets() -> BrokerFixture {
-    remote_exec_daemon::install_crypto_provider();
-
     let tempdir = tempfile::tempdir().unwrap();
-    let certs = write_test_certs(tempdir.path());
-    let (live_addr, stub_state) = spawn_stub_daemon(&certs).await;
+    let (live_addr, stub_state) = spawn_plain_http_stub_daemon().await;
     let dead_addr = allocate_addr();
     let broker_config = tempdir.path().join("broker.toml");
     write_broker_config(
@@ -412,13 +414,13 @@ pub async fn spawn_broker_with_reverse_ordered_targets() -> BrokerFixture {
             BrokerConfigTarget {
                 name: "builder-b",
                 addr: dead_addr,
-                certs: &certs,
+                transport: BrokerTargetTransport::Http,
                 extra_config: None,
             },
             BrokerConfigTarget {
                 name: "builder-a",
                 addr: live_addr,
-                certs: &certs,
+                transport: BrokerTargetTransport::Http,
                 extra_config: None,
             },
         ],
@@ -427,10 +429,7 @@ pub async fn spawn_broker_with_reverse_ordered_targets() -> BrokerFixture {
         None,
     );
 
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
-    command.arg(&broker_config);
-    let transport = TokioChildProcess::new(command).unwrap();
-    let client = DummyClientHandler.serve(transport).await.unwrap();
+    let client = spawn_broker_child(&broker_config).await;
 
     BrokerFixture {
         _tempdir: tempdir,
@@ -441,11 +440,8 @@ pub async fn spawn_broker_with_reverse_ordered_targets() -> BrokerFixture {
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub async fn spawn_broker_with_live_and_dead_targets() -> BrokerFixture {
-    remote_exec_daemon::install_crypto_provider();
-
     let tempdir = tempfile::tempdir().unwrap();
-    let certs = write_test_certs(tempdir.path());
-    let (live_addr, stub_state) = spawn_stub_daemon(&certs).await;
+    let (live_addr, stub_state) = spawn_plain_http_stub_daemon().await;
     let dead_addr = allocate_addr();
     let broker_config = tempdir.path().join("broker.toml");
     write_broker_config(
@@ -454,13 +450,13 @@ pub async fn spawn_broker_with_live_and_dead_targets() -> BrokerFixture {
             BrokerConfigTarget {
                 name: "builder-a",
                 addr: live_addr,
-                certs: &certs,
+                transport: BrokerTargetTransport::Http,
                 extra_config: None,
             },
             BrokerConfigTarget {
                 name: "builder-b",
                 addr: dead_addr,
-                certs: &certs,
+                transport: BrokerTargetTransport::Http,
                 extra_config: None,
             },
         ],
@@ -469,10 +465,7 @@ pub async fn spawn_broker_with_live_and_dead_targets() -> BrokerFixture {
         None,
     );
 
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
-    command.arg(&broker_config);
-    let transport = TokioChildProcess::new(command).unwrap();
-    let client = DummyClientHandler.serve(transport).await.unwrap();
+    let client = spawn_broker_child(&broker_config).await;
 
     BrokerFixture {
         _tempdir: tempdir,
@@ -483,18 +476,15 @@ pub async fn spawn_broker_with_live_and_dead_targets() -> BrokerFixture {
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub async fn spawn_broker_with_retryable_exec_write_error() -> BrokerFixture {
-    remote_exec_daemon::install_crypto_provider();
-
     let tempdir = tempfile::tempdir().unwrap();
-    let certs = write_test_certs(tempdir.path());
-    let (addr, stub_state) = spawn_retryable_exec_write_daemon(&certs).await;
+    let (addr, stub_state) = spawn_plain_http_retryable_exec_write_daemon().await;
     let broker_config = tempdir.path().join("broker.toml");
     write_broker_config(
         &broker_config,
         &[BrokerConfigTarget {
             name: "builder-a",
             addr,
-            certs: &certs,
+            transport: BrokerTargetTransport::Http,
             extra_config: None,
         }],
         None,
@@ -502,10 +492,7 @@ pub async fn spawn_broker_with_retryable_exec_write_error() -> BrokerFixture {
         None,
     );
 
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
-    command.arg(&broker_config);
-    let transport = TokioChildProcess::new(command).unwrap();
-    let client = DummyClientHandler.serve(transport).await.unwrap();
+    let client = spawn_broker_child(&broker_config).await;
 
     BrokerFixture {
         _tempdir: tempdir,
@@ -516,18 +503,15 @@ pub async fn spawn_broker_with_retryable_exec_write_error() -> BrokerFixture {
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub async fn spawn_broker_with_unknown_session_exec_write_error() -> BrokerFixture {
-    remote_exec_daemon::install_crypto_provider();
-
     let tempdir = tempfile::tempdir().unwrap();
-    let certs = write_test_certs(tempdir.path());
-    let (addr, stub_state) = spawn_unknown_session_exec_write_daemon(&certs).await;
+    let (addr, stub_state) = spawn_plain_http_unknown_session_exec_write_daemon().await;
     let broker_config = tempdir.path().join("broker.toml");
     write_broker_config(
         &broker_config,
         &[BrokerConfigTarget {
             name: "builder-a",
             addr,
-            certs: &certs,
+            transport: BrokerTargetTransport::Http,
             extra_config: None,
         }],
         None,
@@ -535,10 +519,7 @@ pub async fn spawn_broker_with_unknown_session_exec_write_error() -> BrokerFixtu
         None,
     );
 
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
-    command.arg(&broker_config);
-    let transport = TokioChildProcess::new(command).unwrap();
-    let client = DummyClientHandler.serve(transport).await.unwrap();
+    let client = spawn_broker_child(&broker_config).await;
 
     BrokerFixture {
         _tempdir: tempdir,
@@ -549,11 +530,8 @@ pub async fn spawn_broker_with_unknown_session_exec_write_error() -> BrokerFixtu
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub async fn spawn_broker_with_late_target() -> DelayedTargetFixture {
-    remote_exec_daemon::install_crypto_provider();
-
     let tempdir = tempfile::tempdir().unwrap();
-    let certs = write_test_certs(tempdir.path());
-    let (live_addr, stub_state) = spawn_stub_daemon(&certs).await;
+    let (live_addr, stub_state) = spawn_plain_http_stub_daemon().await;
     let delayed_addr = allocate_addr();
     let broker_config = tempdir.path().join("broker.toml");
     write_broker_config(
@@ -562,13 +540,13 @@ pub async fn spawn_broker_with_late_target() -> DelayedTargetFixture {
             BrokerConfigTarget {
                 name: "builder-a",
                 addr: live_addr,
-                certs: &certs,
+                transport: BrokerTargetTransport::Http,
                 extra_config: None,
             },
             BrokerConfigTarget {
                 name: "builder-b",
                 addr: delayed_addr,
-                certs: &certs,
+                transport: BrokerTargetTransport::Http,
                 extra_config: None,
             },
         ],
@@ -577,10 +555,7 @@ pub async fn spawn_broker_with_late_target() -> DelayedTargetFixture {
         None,
     );
 
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
-    command.arg(&broker_config);
-    let transport = TokioChildProcess::new(command).unwrap();
-    let client = DummyClientHandler.serve(transport).await.unwrap();
+    let client = spawn_broker_child(&broker_config).await;
 
     DelayedTargetFixture {
         broker: BrokerFixture {
@@ -588,7 +563,6 @@ pub async fn spawn_broker_with_late_target() -> DelayedTargetFixture {
             client,
             stub_state,
         },
-        certs,
         addr: delayed_addr,
     }
 }
@@ -728,6 +702,7 @@ pub async fn spawn_broker_with_local_target_and_extra_config(extra_config: &str)
 }
 
 async fn wait_until_ready_http(addr: std::net::SocketAddr) {
+    remote_exec_broker::install_crypto_provider();
     let client = reqwest::Client::builder().build().unwrap();
 
     for _ in 0..40 {
@@ -747,6 +722,7 @@ async fn wait_until_ready_http(addr: std::net::SocketAddr) {
 }
 
 async fn wait_until_ready_mcp_http(url: &str) {
+    remote_exec_broker::install_crypto_provider();
     let client = reqwest::Client::builder().build().unwrap();
 
     for _ in 0..40 {
@@ -770,18 +746,15 @@ async fn wait_until_ready_mcp_http(url: &str) {
 }
 
 pub async fn spawn_broker_with_stub_daemon_and_structured_content_disabled() -> BrokerFixture {
-    remote_exec_daemon::install_crypto_provider();
-
     let tempdir = tempfile::tempdir().unwrap();
-    let certs = write_test_certs(tempdir.path());
-    let (addr, stub_state) = spawn_stub_daemon(&certs).await;
+    let (addr, stub_state) = spawn_plain_http_stub_daemon().await;
     let broker_config = tempdir.path().join("broker.toml");
     write_broker_config(
         &broker_config,
         &[BrokerConfigTarget {
             name: "builder-a",
             addr,
-            certs: &certs,
+            transport: BrokerTargetTransport::Http,
             extra_config: None,
         }],
         None,
@@ -789,10 +762,7 @@ pub async fn spawn_broker_with_stub_daemon_and_structured_content_disabled() -> 
         Some("disable_structured_content = true"),
     );
 
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
-    command.arg(&broker_config);
-    let transport = TokioChildProcess::new(command).unwrap();
-    let client = DummyClientHandler.serve(transport).await.unwrap();
+    let client = spawn_broker_child(&broker_config).await;
 
     BrokerFixture {
         _tempdir: tempdir,
