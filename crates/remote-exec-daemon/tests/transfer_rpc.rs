@@ -383,7 +383,7 @@ async fn export_accepts_windows_posix_root_source_paths() {
             let root = workdir.join("synthetic-msys-root");
             format!(
                 "windows_posix_root = {}\n",
-                toml::Value::String(root.display().to_string()).to_string()
+                toml::Value::String(root.display().to_string())
             )
         })
         .await;
@@ -416,7 +416,7 @@ async fn import_accepts_windows_posix_root_destination_paths() {
             let root = workdir.join("synthetic-msys-root");
             format!(
                 "windows_posix_root = {}\n",
-                toml::Value::String(root.display().to_string()).to_string()
+                toml::Value::String(root.display().to_string())
             )
         })
         .await;

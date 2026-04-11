@@ -230,7 +230,7 @@ async fn exec_start_accepts_windows_posix_root_workdirs_on_windows() {
             let root = workdir.join("synthetic-msys-root");
             format!(
                 "windows_posix_root = {}\n",
-                toml::Value::String(root.display().to_string()).to_string()
+                toml::Value::String(root.display().to_string())
             )
         })
         .await;
@@ -270,7 +270,7 @@ async fn exec_start_resolves_windows_posix_root_shells_and_sets_chere_invoking()
         "builder-a",
         &format!(
             "windows_posix_root = {}\ndefault_shell = \"/usr/bin/bash\"\n",
-            toml::Value::String(root.display().to_string()).to_string()
+            toml::Value::String(root.display().to_string())
         ),
     )
     .await;

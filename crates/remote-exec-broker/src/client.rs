@@ -5,6 +5,7 @@ use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
     model::{CallToolRequestParams, CallToolResult, ClientInfo},
     service::RunningService,
+    transport::streamable_http_client::StreamableHttpClientTransportConfig,
     transport::{StreamableHttpClientTransport, TokioChildProcess},
 };
 
@@ -131,8 +132,15 @@ async fn connect_streamable_http(
 ) -> anyhow::Result<RunningService<RoleClient, RemoteExecClientHandler>> {
     crate::broker_tls::ensure_broker_url_supported(url)?;
     crate::install_crypto_provider();
+    let client = reqwest::Client::builder()
+        .build()
+        .context("building streamable HTTP reqwest client")?;
+    let transport = StreamableHttpClientTransport::with_client(
+        client,
+        StreamableHttpClientTransportConfig::with_uri(url.to_string()),
+    );
     RemoteExecClientHandler
-        .serve(StreamableHttpClientTransport::from_uri(url.to_string()))
+        .serve(transport)
         .await
         .context("connecting to broker over streamable HTTP")
 }

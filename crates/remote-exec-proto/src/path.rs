@@ -336,10 +336,8 @@ mod tests {
     #[test]
     fn normalize_relative_path_collapses_current_dir_components() {
         assert_eq!(
-            normalize_relative_path(std::path::Path::new("./nested/./hello.txt"))
-                .unwrap()
-                .to_string_lossy(),
-            "nested/hello.txt"
+            normalize_relative_path(std::path::Path::new("./nested/./hello.txt")).unwrap(),
+            std::path::PathBuf::from("nested").join("hello.txt")
         );
     }
 }

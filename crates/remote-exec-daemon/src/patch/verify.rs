@@ -134,12 +134,8 @@ fn relative_patch_path(base: &Path, path: &Path) -> Option<String> {
         );
 
     for index in 0..root_len {
-        let Some(left) = base_components.get(index).copied() else {
-            return None;
-        };
-        let Some(right) = path_components.get(index).copied() else {
-            return None;
-        };
+        let left = base_components.get(index).copied()?;
+        let right = path_components.get(index).copied()?;
         if !path_component_eq(left, right) {
             return None;
         }

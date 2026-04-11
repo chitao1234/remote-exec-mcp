@@ -3,3 +3,4 @@ target/
 broker*.toml
 daemon*.toml
 remote-exec-certs/
+.codex/

@@ -262,9 +262,21 @@ mod tests {
         FilesystemSandbox, SandboxAccess, SandboxPathList, authorize_path,
         compile_filesystem_sandbox,
     };
+    #[cfg(not(windows))]
     use crate::path::linux_path_policy;
     #[cfg(windows)]
     use crate::path::windows_path_policy;
+
+    fn host_path_policy() -> crate::path::PathPolicy {
+        #[cfg(windows)]
+        {
+            windows_path_policy()
+        }
+        #[cfg(not(windows))]
+        {
+            linux_path_policy()
+        }
+    }
 
     #[test]
     fn empty_allow_list_defaults_to_allow_all() {
@@ -279,11 +291,12 @@ mod tests {
             },
             ..Default::default()
         };
-        let compiled = compile_filesystem_sandbox(linux_path_policy(), &sandbox).unwrap();
+        let policy = host_path_policy();
+        let compiled = compile_filesystem_sandbox(policy, &sandbox).unwrap();
 
         assert!(
             authorize_path(
-                linux_path_policy(),
+                policy,
                 Some(&compiled),
                 SandboxAccess::Read,
                 &tempdir.path().join("allowed.txt"),
@@ -292,7 +305,7 @@ mod tests {
         );
         assert!(
             authorize_path(
-                linux_path_policy(),
+                policy,
                 Some(&compiled),
                 SandboxAccess::Read,
                 &nested.join("blocked.txt"),
@@ -316,11 +329,12 @@ mod tests {
             },
             ..Default::default()
         };
-        let compiled = compile_filesystem_sandbox(linux_path_policy(), &sandbox).unwrap();
+        let policy = host_path_policy();
+        let compiled = compile_filesystem_sandbox(policy, &sandbox).unwrap();
 
         assert!(
             authorize_path(
-                linux_path_policy(),
+                policy,
                 Some(&compiled),
                 SandboxAccess::Write,
                 &allowed.join("ok.txt"),
@@ -329,7 +343,7 @@ mod tests {
         );
         assert!(
             authorize_path(
-                linux_path_policy(),
+                policy,
                 Some(&compiled),
                 SandboxAccess::Write,
                 &denied.join("nope.txt"),

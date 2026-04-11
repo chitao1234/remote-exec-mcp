@@ -129,7 +129,7 @@ async fn apply_patch_accepts_windows_posix_root_paths_on_windows() {
             let root = workdir.join("synthetic-msys-root");
             format!(
                 "windows_posix_root = {}\n",
-                toml::Value::String(root.display().to_string()).to_string()
+                toml::Value::String(root.display().to_string())
             )
         })
         .await;

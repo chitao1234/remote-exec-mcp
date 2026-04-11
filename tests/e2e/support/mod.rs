@@ -237,6 +237,7 @@ expected_daemon_name = {expected_daemon_name}
             target: self.target.clone(),
             listen: self.addr,
             default_workdir: self.workdir.clone(),
+            windows_posix_root: None,
             transport: remote_exec_daemon::config::DaemonTransport::Http,
             sandbox: None,
             enable_transfer_compression: true,
