@@ -80,23 +80,6 @@ pub fn selected_shell(
     }
 }
 
-#[cfg(unix)]
-pub fn apply_session_environment_overrides(
-    environment: &mut ProcessEnvironment,
-    shell: &str,
-    _windows_posix_root: Option<&Path>,
-) {
-    if should_set_chere_invoking_for_platform(
-        cfg!(windows),
-        cfg!(target_os = "cygwin"),
-        shell,
-        None,
-    ) {
-        environment.set_var("CHERE_INVOKING", Some("1".into()));
-    }
-}
-
-#[cfg(windows)]
 pub fn apply_session_environment_overrides(
     environment: &mut ProcessEnvironment,
     shell: &str,
