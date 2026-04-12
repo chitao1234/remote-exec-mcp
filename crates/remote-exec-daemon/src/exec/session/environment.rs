@@ -1,5 +1,4 @@
 use portable_pty::CommandBuilder;
-use tokio::process::Command;
 
 use crate::config::ProcessEnvironment;
 
@@ -35,8 +34,11 @@ pub(super) fn apply_overlay_builder(
     }
 }
 
-pub(super) fn apply_overlay_command(command: &mut Command, environment: &ProcessEnvironment) {
-    apply_base_environment_command(command, environment);
+pub(super) fn apply_overlay_std_command(
+    command: &mut std::process::Command,
+    environment: &ProcessEnvironment,
+) {
+    apply_base_environment_std_command(command, environment);
     command.env_remove("LANG");
     command.env_remove("LC_CTYPE");
     command.env_remove("LC_ALL");
@@ -52,7 +54,10 @@ fn apply_base_environment_builder(builder: &mut CommandBuilder, environment: &Pr
     }
 }
 
-fn apply_base_environment_command(command: &mut Command, environment: &ProcessEnvironment) {
+fn apply_base_environment_std_command(
+    command: &mut std::process::Command,
+    environment: &ProcessEnvironment,
+) {
     command.env_clear();
     for (key, value) in environment.vars() {
         command.env(key, value);

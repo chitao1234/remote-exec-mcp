@@ -166,8 +166,9 @@ pub(crate) fn spawn_winpty(
                         continue;
                     }
 
-                    let deadline = exit_deadline
-                        .get_or_insert_with(|| Instant::now() + super::output::EXIT_OUTPUT_GRACE);
+                    let deadline = exit_deadline.get_or_insert_with(|| {
+                        Instant::now() + super::output::EXIT_OUTPUT_IDLE_GRACE
+                    });
                     if Instant::now() >= *deadline {
                         break;
                     }

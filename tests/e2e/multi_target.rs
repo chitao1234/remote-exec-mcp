@@ -149,6 +149,33 @@ async fn sessions_are_invalidated_after_daemon_restart() {
     );
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn exec_command_preserves_output_after_external_pipeline_steps() {
+    let cluster = support::spawn_cluster().await;
+
+    let result = cluster
+        .broker
+        .call_tool(
+            "exec_command",
+            serde_json::json!({
+                "target": "builder-a",
+                "cmd": "printf 'marker\\n'; printf 'external\\n' | cat; printf 'done\\n'",
+                "shell": "/bin/sh",
+                "tty": false,
+                "yield_time_ms": 10_000
+            }),
+        )
+        .await;
+
+    assert_eq!(result.structured_content["target"], "builder-a");
+    assert_eq!(result.structured_content["exit_code"], 0);
+    assert_eq!(
+        result.structured_content["output"],
+        serde_json::Value::String("marker\nexternal\ndone\n".to_string())
+    );
+}
+
 #[tokio::test]
 async fn transfer_files_copies_local_file_to_remote_exact_destination_path() {
     let cluster = support::spawn_cluster().await;

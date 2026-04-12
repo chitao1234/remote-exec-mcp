@@ -462,6 +462,30 @@ async fn exec_output_drains_late_output_after_exit() {
 }
 
 #[tokio::test]
+async fn exec_output_preserves_pipe_mode_output_after_external_pipeline_steps() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "printf 'marker\\n'; printf 'external\\n' | cat; printf 'done\\n'".to_string(),
+                workdir: None,
+                shell: Some(TEST_SHELL.to_string()),
+                tty: false,
+                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
+                max_output_tokens: None,
+                login: Some(false),
+            },
+        )
+        .await;
+
+    assert!(!response.running);
+    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.output, "marker\nexternal\ndone\n");
+}
+
+#[tokio::test]
 async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let started = fixture
