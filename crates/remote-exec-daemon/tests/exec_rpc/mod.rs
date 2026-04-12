@@ -281,11 +281,21 @@ async fn assert_windows_tty_session_answers_terminal_queries(
         backend.name()
     );
 
-    let combined_output =
-        strip_terminal_noise(&format!("{}{}", started.output, polled.output)).to_ascii_lowercase();
+    let combined_output = format!("{}{}", started.output, polled.output);
+    let normalized_output = combined_output.to_ascii_lowercase();
     assert!(
-        combined_output.contains("hello"),
+        normalized_output.contains("hello"),
         "{} combined output did not contain hello: {combined_output:?}",
+        backend.name()
+    );
+    assert!(
+        !combined_output.contains('\u{1b}'),
+        "{} combined output leaked ESC control sequence: {combined_output:?}",
+        backend.name()
+    );
+    assert!(
+        !combined_output.contains('\u{7}'),
+        "{} combined output leaked BEL control sequence: {combined_output:?}",
         backend.name()
     );
     assert!(

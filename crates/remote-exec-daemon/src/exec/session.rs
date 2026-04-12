@@ -24,7 +24,7 @@ pub struct LiveSession {
     receiver: UnboundedReceiver<String>,
     exit_code: Option<i32>,
     #[cfg(windows)]
-    terminal_query_state: Option<windows::TerminalQueryState>,
+    terminal_output_state: Option<windows::TerminalOutputState>,
 }
 
 pub(crate) enum SessionChild {
@@ -53,7 +53,7 @@ fn new_live_session(
         receiver,
         exit_code: None,
         #[cfg(windows)]
-        terminal_query_state: tty.then(windows::TerminalQueryState::default),
+        terminal_output_state: tty.then(windows::TerminalOutputState::default),
     }
 }
 
@@ -288,13 +288,13 @@ impl LiveSession {
         let mut output = String::new();
         while let Ok(chunk) = self.receiver.try_recv() {
             #[cfg(windows)]
-            let chunk = self.filter_terminal_queries(chunk)?;
+            let chunk = self.filter_terminal_output(chunk)?;
             output.push_str(&chunk);
         }
 
         #[cfg(windows)]
         if self.exit_code.is_some() {
-            output.push_str(&self.drain_terminal_query_buffer());
+            output.push_str(&self.drain_terminal_output_buffer());
         }
 
         Ok(output)
@@ -378,9 +378,9 @@ impl LiveSession {
     }
 
     #[cfg(windows)]
-    fn filter_terminal_queries(&mut self, chunk: String) -> anyhow::Result<String> {
+    fn filter_terminal_output(&mut self, chunk: String) -> anyhow::Result<String> {
         let Some(result) = self
-            .terminal_query_state
+            .terminal_output_state
             .as_mut()
             .map(|state| state.filter_chunk(&chunk))
         else {
@@ -392,10 +392,10 @@ impl LiveSession {
     }
 
     #[cfg(windows)]
-    fn drain_terminal_query_buffer(&mut self) -> String {
-        self.terminal_query_state
+    fn drain_terminal_output_buffer(&mut self) -> String {
+        self.terminal_output_state
             .as_mut()
-            .map(windows::TerminalQueryState::drain_pending)
+            .map(windows::TerminalOutputState::drain_pending)
             .unwrap_or_default()
     }
 
