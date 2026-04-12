@@ -23,7 +23,7 @@ const WINDOWS_CMD_SHELL: &str = "cmd.exe";
 #[cfg(windows)]
 const WINDOWS_GIT_BASH_COMMON_PATH: &str = r"C:\Program Files\Git\bin\bash.exe";
 #[cfg(windows)]
-const WINDOWS_ENV_OVERLAY_OUTPUT: &str = "dumb|1|cat|cat|1|||";
+const WINDOWS_ENV_OVERLAY_OUTPUT: &str = "dumb|1|cat|cat|1|C.UTF-8|C.UTF-8|C.UTF-8";
 // Commands in these tests are expected to finish in a single RPC response, but the daemon only
 // guarantees a minimum 250 ms wait and may legitimately return a live session under heavy load.
 // Use a generous window so large-output assertions do not become timing-sensitive.
