@@ -40,7 +40,8 @@ pub fn install_crypto_provider() {
     tls::install_crypto_provider();
 }
 
-pub fn build_app_state(config: DaemonConfig) -> Result<AppState> {
+pub fn build_app_state(mut config: DaemonConfig) -> Result<AppState> {
+    config.normalize_paths();
     config.validate()?;
     let sandbox = config
         .sandbox

@@ -1,6 +1,6 @@
 use std::ffi::{OsStr, OsString};
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use remote_exec_proto::sandbox::FilesystemSandbox;
@@ -337,6 +337,11 @@ impl EmbeddedDaemonConfig {
 }
 
 impl DaemonConfig {
+    pub fn normalize_paths(&mut self) {
+        self.default_workdir =
+            normalize_configured_workdir(&self.default_workdir, self.windows_posix_root.as_deref());
+    }
+
     pub fn validate(&self) -> anyhow::Result<()> {
         #[cfg(windows)]
         if let Some(root) = &self.windows_posix_root {
@@ -345,6 +350,9 @@ impl DaemonConfig {
                 "windows_posix_root must be an absolute path"
             );
         }
+        let default_workdir =
+            normalize_configured_workdir(&self.default_workdir, self.windows_posix_root.as_deref());
+        validate_existing_directory(&default_workdir, "default_workdir")?;
         if let Some(http_auth) = &self.http_auth {
             http_auth.validate()?;
         }
@@ -357,10 +365,27 @@ impl DaemonConfig {
         let text = tokio::fs::read_to_string(path.as_ref())
             .await
             .with_context(|| format!("reading {}", path.as_ref().display()))?;
-        let config: Self = toml::from_str(&text)?;
+        let mut config: Self = toml::from_str(&text)?;
+        config.normalize_paths();
         config.validate()?;
         Ok(config)
     }
+}
+
+pub fn normalize_configured_workdir(path: &Path, windows_posix_root: Option<&Path>) -> PathBuf {
+    crate::host_path::resolve_absolute_input_path(&path.to_string_lossy(), windows_posix_root)
+        .unwrap_or_else(|| path.to_path_buf())
+}
+
+fn validate_existing_directory(path: &Path, field_name: &str) -> anyhow::Result<()> {
+    let metadata = std::fs::metadata(path)
+        .with_context(|| format!("{field_name} `{}` does not exist", path.display()))?;
+    anyhow::ensure!(
+        metadata.is_dir(),
+        "{field_name} `{}` must be a directory",
+        path.display()
+    );
+    Ok(())
 }
 
 impl HttpAuthConfig {
@@ -450,6 +475,33 @@ transport = "http"
         assert_eq!(config.windows_posix_root, Some(PathBuf::from(r"C:\msys64")));
     }
 
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn load_normalizes_default_workdir_through_windows_posix_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let synthetic_root = dir.path().join("msys64");
+        std::fs::create_dir_all(synthetic_root.join("tmp")).unwrap();
+        let config_path = dir.path().join("daemon.toml");
+        tokio::fs::write(
+            &config_path,
+            format!(
+                r#"
+target = "builder-a"
+listen = "127.0.0.1:8080"
+default_workdir = "/tmp"
+windows_posix_root = {}
+transport = "http"
+"#,
+                toml::Value::String(synthetic_root.display().to_string())
+            ),
+        )
+        .await
+        .unwrap();
+
+        let config = DaemonConfig::load(&config_path).await.unwrap();
+        assert_eq!(config.default_workdir, synthetic_root.join("tmp"));
+    }
+
     #[tokio::test]
     async fn load_rejects_default_tls_transport_without_tls_block() {
         let dir = tempfile::tempdir().unwrap();
@@ -479,6 +531,34 @@ default_workdir = "/tmp"
                 "unexpected error: {err}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn load_rejects_missing_default_workdir() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("daemon.toml");
+        let missing_workdir = dir.path().join("missing-workdir");
+        tokio::fs::write(
+            &config_path,
+            format!(
+                r#"
+target = "builder-a"
+listen = "127.0.0.1:8080"
+default_workdir = {}
+transport = "http"
+"#,
+                toml::Value::String(missing_workdir.display().to_string())
+            ),
+        )
+        .await
+        .unwrap();
+
+        let err = DaemonConfig::load(&config_path).await.unwrap_err();
+        assert!(
+            err.to_string().contains("default_workdir")
+                && err.to_string().contains("does not exist"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

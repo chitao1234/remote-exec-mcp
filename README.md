@@ -306,6 +306,8 @@ transport = "http"
 bearer_token = "shared-secret"
 ```
 
+`default_workdir` must already exist when the daemon starts.
+
 Example daemon-side broker pin:
 
 ```toml
@@ -347,6 +349,8 @@ allow_login_shell = true
 ## min_ms = 250
 # experimental_apply_patch_target_encoding_autodetect = true
 ```
+
+`default_workdir` must already exist when the broker starts with `[local]` enabled.
 
 ## Local development
 

@@ -1,6 +1,7 @@
 target = "builder-a"
 listen = "0.0.0.0:9443"
 default_workdir = "/srv/work"
+# Must already exist when the daemon starts.
 # Optional. Defaults to "tls" when the daemon is built with the default `tls`
 # Cargo feature. Set to "http" to serve the Rust daemon over plain HTTP
 # without TLS or client-certificate authentication.

@@ -218,7 +218,8 @@ pub async fn run(config: config::BrokerConfig) -> anyhow::Result<()> {
     mcp_server::serve(state, &mcp).await
 }
 
-async fn build_state(config: config::BrokerConfig) -> anyhow::Result<BrokerState> {
+async fn build_state(mut config: config::BrokerConfig) -> anyhow::Result<BrokerState> {
+    config.normalize_paths();
     config.validate()?;
     let host_sandbox = config
         .host_sandbox

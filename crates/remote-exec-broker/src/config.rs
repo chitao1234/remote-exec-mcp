@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use remote_exec_daemon::config::{
@@ -184,12 +184,28 @@ impl McpServerConfig {
 }
 
 impl BrokerConfig {
+    pub(crate) fn normalize_paths(&mut self) {
+        if let Some(local) = &mut self.local {
+            local.default_workdir = remote_exec_daemon::config::normalize_configured_workdir(
+                &local.default_workdir,
+                local.windows_posix_root.as_deref(),
+            );
+        }
+    }
+
     pub(crate) fn validate(&self) -> anyhow::Result<()> {
         self.mcp.validate()?;
         anyhow::ensure!(
             !self.targets.contains_key("local"),
             "configured target name `local` is reserved for broker-host filesystem access"
         );
+        if let Some(local) = &self.local {
+            let default_workdir = remote_exec_daemon::config::normalize_configured_workdir(
+                &local.default_workdir,
+                local.windows_posix_root.as_deref(),
+            );
+            validate_existing_directory(&default_workdir, "local.default_workdir")?;
+        }
         for (name, target) in &self.targets {
             target.validated_transport(name)?;
         }
@@ -200,7 +216,8 @@ impl BrokerConfig {
         let text = tokio::fs::read_to_string(path.as_ref())
             .await
             .with_context(|| format!("reading {}", path.as_ref().display()))?;
-        let config: Self = toml::from_str(&text)?;
+        let mut config: Self = toml::from_str(&text)?;
+        config.normalize_paths();
         config.validate()?;
         Ok(config)
     }
@@ -228,6 +245,17 @@ fn default_streamable_http_sse_keep_alive_ms() -> Option<u64> {
 
 fn default_streamable_http_sse_retry_ms() -> Option<u64> {
     Some(3_000)
+}
+
+fn validate_existing_directory(path: &Path, field_name: &str) -> anyhow::Result<()> {
+    let metadata = std::fs::metadata(path)
+        .with_context(|| format!("{field_name} `{}` does not exist", path.display()))?;
+    anyhow::ensure!(
+        metadata.is_dir(),
+        "{field_name} `{}` must be a directory",
+        path.display()
+    );
+    Ok(())
 }
 
 #[cfg(test)]
@@ -339,6 +367,29 @@ client_key_pem = "/tmp/broker.key"
         assert!(matches!(config.mcp, McpServerConfig::Stdio));
     }
 
+    #[tokio::test]
+    async fn load_rejects_missing_local_default_workdir() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("broker.toml");
+        let missing_workdir = dir.path().join("missing-local-workdir");
+        tokio::fs::write(
+            &config_path,
+            format!(
+                "[local]\ndefault_workdir = {}\n",
+                toml::Value::String(missing_workdir.display().to_string())
+            ),
+        )
+        .await
+        .unwrap();
+
+        let err = BrokerConfig::load(&config_path).await.unwrap_err();
+        assert!(
+            err.to_string().contains("local.default_workdir")
+                && err.to_string().contains("does not exist"),
+            "unexpected error: {err}"
+        );
+    }
+
     #[cfg(windows)]
     #[tokio::test]
     async fn load_accepts_local_windows_posix_root() {
@@ -361,6 +412,33 @@ client_key_pem = "/tmp/broker.key"
                 .as_ref()
                 .and_then(|local| local.windows_posix_root.as_ref()),
             Some(&PathBuf::from(r"C:\msys64"))
+        );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn load_normalizes_local_default_workdir_through_windows_posix_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let synthetic_root = dir.path().join("msys64");
+        std::fs::create_dir_all(synthetic_root.join("tmp")).unwrap();
+        let config_path = dir.path().join("broker.toml");
+        tokio::fs::write(
+            &config_path,
+            format!(
+                "[local]\ndefault_workdir = \"/tmp\"\nwindows_posix_root = {}\n",
+                toml::Value::String(synthetic_root.display().to_string())
+            ),
+        )
+        .await
+        .unwrap();
+
+        let config = BrokerConfig::load(&config_path).await.unwrap();
+        assert_eq!(
+            config
+                .local
+                .as_ref()
+                .map(|local| local.default_workdir.clone()),
+            Some(synthetic_root.join("tmp"))
         );
     }
 
