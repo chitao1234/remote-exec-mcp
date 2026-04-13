@@ -7,6 +7,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::bail;
+use vte::{Params, Parser, Perform};
 #[cfg(feature = "winpty")]
 use winptyrs::EnvBlock;
 
@@ -39,70 +40,81 @@ struct PtyDiagnostics {
     winpty_probe: Result<(), String>,
 }
 
-#[derive(Debug, Default)]
-pub(super) struct TerminalQueryState {
-    pending: Vec<u8>,
+pub(super) struct TerminalOutputState {
+    parser: Parser,
 }
 
 #[derive(Debug, Default)]
-pub(super) struct TerminalQueryResult {
+pub(super) struct TerminalOutputResult {
     pub(super) output: String,
     pub(super) response: String,
 }
 
-impl TerminalQueryState {
-    pub(super) fn filter_chunk(&mut self, chunk: &str) -> TerminalQueryResult {
-        let mut input = Vec::with_capacity(self.pending.len() + chunk.len());
-        input.extend_from_slice(&self.pending);
-        input.extend_from_slice(chunk.as_bytes());
-        self.pending.clear();
-
-        let mut visible = Vec::with_capacity(input.len());
-        let mut response = String::new();
-        let mut index = 0;
-
-        while index < input.len() {
-            let remaining = &input[index..];
-            if remaining.starts_with(b"\x1b[5n") {
-                response.push_str("\x1b[0n");
-                index += 4;
-                continue;
-            }
-            if remaining.starts_with(b"\x1b[6n") {
-                response.push_str("\x1b[1;1R");
-                index += 4;
-                continue;
-            }
-
-            if let Some(prefix_len) = terminal_query_prefix_len(remaining) {
-                self.pending.extend_from_slice(&remaining[..prefix_len]);
-                break;
-            }
-
-            visible.push(input[index]);
-            index += 1;
+impl Default for TerminalOutputState {
+    fn default() -> Self {
+        Self {
+            parser: Parser::new(),
         }
+    }
+}
 
-        TerminalQueryResult {
-            output: String::from_utf8_lossy(&visible).into_owned(),
-            response,
+impl TerminalOutputState {
+    pub(super) fn filter_chunk(&mut self, chunk: &str) -> TerminalOutputResult {
+        let mut performer = TerminalOutputPerformer::default();
+        self.parser.advance(&mut performer, chunk.as_bytes());
+
+        TerminalOutputResult {
+            output: performer.output,
+            response: performer.response,
         }
     }
 
     pub(super) fn drain_pending(&mut self) -> String {
-        let pending = String::from_utf8_lossy(&self.pending).into_owned();
-        self.pending.clear();
-        pending
+        String::new()
     }
 }
 
-fn terminal_query_prefix_len(bytes: &[u8]) -> Option<usize> {
-    match bytes {
-        [0x1b] => Some(1),
-        [0x1b, b'['] => Some(2),
-        [0x1b, b'[', b'5'] | [0x1b, b'[', b'6'] => Some(3),
-        _ => None,
+#[derive(Debug, Default)]
+struct TerminalOutputPerformer {
+    output: String,
+    response: String,
+}
+
+impl Perform for TerminalOutputPerformer {
+    fn print(&mut self, ch: char) {
+        self.output.push(ch);
     }
+
+    fn execute(&mut self, byte: u8) {
+        match byte {
+            b'\r' => self.output.push('\r'),
+            b'\n' => self.output.push('\n'),
+            b'\t' => self.output.push('\t'),
+            0x08 => {
+                self.output.pop();
+            }
+            _ => {}
+        }
+    }
+
+    fn csi_dispatch(&mut self, params: &Params, _intermediates: &[u8], ignore: bool, action: char) {
+        if ignore || action != 'n' {
+            return;
+        }
+
+        match first_csi_param(params) {
+            Some(5) => self.response.push_str("\x1b[0n"),
+            Some(6) => self.response.push_str("\x1b[1;1R"),
+            _ => {}
+        }
+    }
+}
+
+fn first_csi_param(params: &Params) -> Option<u16> {
+    params
+        .iter()
+        .next()
+        .and_then(|param| param.iter().copied().next())
 }
 
 pub(super) fn normalize_input(chars: &str, tty: bool) -> Cow<'_, str> {
@@ -453,7 +465,7 @@ mod tests {
 
     #[cfg(windows)]
     use super::select_pty_backend_with_override;
-    use super::{PtyBackend, TerminalQueryState, normalize_input, select_pty_backend_with};
+    use super::{PtyBackend, TerminalOutputState, normalize_input, select_pty_backend_with};
 
     #[test]
     fn windows_pty_backend_prefers_portable_pty_when_both_backends_work() {
@@ -510,8 +522,8 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn windows_terminal_query_state_replies_to_device_status_report() {
-        let mut state = TerminalQueryState::default();
+    fn windows_terminal_output_state_replies_to_device_status_report() {
+        let mut state = TerminalOutputState::default();
         let result = state.filter_chunk("before\x1b[5nafter");
 
         assert_eq!(result.output, "beforeafter");
@@ -521,8 +533,8 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn windows_terminal_query_state_replies_to_cursor_position_report() {
-        let mut state = TerminalQueryState::default();
+    fn windows_terminal_output_state_replies_to_cursor_position_report() {
+        let mut state = TerminalOutputState::default();
         let result = state.filter_chunk("before\x1b[6nafter");
 
         assert_eq!(result.output, "beforeafter");
@@ -532,8 +544,8 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn windows_terminal_query_state_handles_split_query_sequences() {
-        let mut state = TerminalQueryState::default();
+    fn windows_terminal_output_state_handles_split_query_sequences() {
+        let mut state = TerminalOutputState::default();
 
         let first = state.filter_chunk("before\x1b[");
         assert_eq!(first.output, "before");
@@ -542,6 +554,29 @@ mod tests {
         let second = state.filter_chunk("6nafter");
         assert_eq!(second.output, "after");
         assert_eq!(second.response, "\x1b[1;1R");
+        assert_eq!(state.drain_pending(), "");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_terminal_output_state_strips_conpty_control_sequences() {
+        let mut state = TerminalOutputState::default();
+        let result = state
+            .filter_chunk("\x1b[m\x1b]0;C:\\Windows\\system32\\cmd.exe\x07\x1b[?25hhello \r\n");
+
+        assert_eq!(result.output, "hello \r\n");
+        assert_eq!(result.response, "");
+        assert_eq!(state.drain_pending(), "");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_terminal_output_state_strips_winpty_control_sequences() {
+        let mut state = TerminalOutputState::default();
+        let result = state.filter_chunk("\x1b[0m\x1b[0Khello\x1b[0K\x1b[?25l\r\n\x1b[0K\x1b[?25h");
+
+        assert_eq!(result.output, "hello\r\n");
+        assert_eq!(result.response, "");
         assert_eq!(state.drain_pending(), "");
     }
 

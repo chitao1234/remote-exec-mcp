@@ -1,11 +1,9 @@
 use std::io::{Read, Write};
-use std::process::Stdio;
-use std::time::Instant;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
-use tokio::io::AsyncReadExt;
-use tokio::process::Command;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use super::transcript::TranscriptBuffer;
@@ -24,14 +22,20 @@ pub struct LiveSession {
     receiver: UnboundedReceiver<String>,
     exit_code: Option<i32>,
     #[cfg(windows)]
-    terminal_query_state: Option<windows::TerminalQueryState>,
+    terminal_output_state: Option<windows::TerminalOutputState>,
+}
+
+pub(crate) enum OutputWait {
+    Chunk(String),
+    Closed,
+    TimedOut,
 }
 
 pub(crate) enum SessionChild {
     Pty(PtySession),
     #[cfg(all(windows, feature = "winpty"))]
     Winpty(super::winpty::WinptySession),
-    Pipe(Box<tokio::process::Child>),
+    Pipe(Box<std::process::Child>),
 }
 
 pub struct PtySession {
@@ -53,7 +57,7 @@ fn new_live_session(
         receiver,
         exit_code: None,
         #[cfg(windows)]
-        terminal_query_state: tty.then(windows::TerminalQueryState::default),
+        terminal_output_state: tty.then(windows::TerminalOutputState::default),
     }
 }
 
@@ -244,30 +248,28 @@ fn spawn_pipe(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    environment::apply_overlay_command(&mut command, environment);
+    environment::apply_overlay_std_command(&mut command, environment);
     let mut child = command.spawn()?;
     let stdout = child.stdout.take().context("missing stdout pipe")?;
     let stderr = child.stderr.take().context("missing stderr pipe")?;
     let (sender, receiver) = unbounded_channel();
+    let session = new_live_session(false, SessionChild::Pipe(Box::new(child)), receiver);
 
+    let _ = (cmd, cwd);
     spawn_pipe_reader(stdout, sender.clone());
     spawn_pipe_reader(stderr, sender);
 
-    Ok(new_live_session(
-        false,
-        SessionChild::Pipe(Box::new(child)),
-        receiver,
-    ))
+    Ok(session)
 }
 
 fn spawn_pipe_reader<R>(mut reader: R, sender: UnboundedSender<String>)
 where
-    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+    R: Read + Send + 'static,
 {
-    tokio::spawn(async move {
+    std::thread::spawn(move || {
         let mut buffer = [0u8; 8192];
         loop {
-            match reader.read(&mut buffer).await {
+            match reader.read(&mut buffer) {
                 Ok(0) => break,
                 Ok(read) => {
                     if sender
@@ -288,16 +290,38 @@ impl LiveSession {
         let mut output = String::new();
         while let Ok(chunk) = self.receiver.try_recv() {
             #[cfg(windows)]
-            let chunk = self.filter_terminal_queries(chunk)?;
+            let chunk = self.filter_terminal_output(chunk)?;
             output.push_str(&chunk);
         }
 
         #[cfg(windows)]
         if self.exit_code.is_some() {
-            output.push_str(&self.drain_terminal_query_buffer());
+            output.push_str(&self.drain_terminal_output_buffer());
         }
 
         Ok(output)
+    }
+
+    pub(crate) async fn wait_for_output(
+        &mut self,
+        timeout: Duration,
+    ) -> anyhow::Result<OutputWait> {
+        match tokio::time::timeout(timeout, self.receiver.recv()).await {
+            Ok(Some(chunk)) => {
+                #[cfg(windows)]
+                let chunk = self.filter_terminal_output(chunk)?;
+
+                let mut output = chunk;
+                output.push_str(&self.read_available().await?);
+                Ok(OutputWait::Chunk(output))
+            }
+            Ok(None) => Ok(OutputWait::Closed),
+            Err(_) => Ok(OutputWait::TimedOut),
+        }
+    }
+
+    pub(crate) fn output_closed(&self) -> bool {
+        self.receiver.is_closed()
     }
 
     pub async fn has_exited(&mut self) -> anyhow::Result<bool> {
@@ -341,7 +365,7 @@ impl LiveSession {
                 let _ = pty.terminate();
             }
             SessionChild::Pipe(child) => {
-                let _ = child.start_kill();
+                let _ = child.kill();
                 let _ = child.try_wait()?;
             }
         }
@@ -378,9 +402,9 @@ impl LiveSession {
     }
 
     #[cfg(windows)]
-    fn filter_terminal_queries(&mut self, chunk: String) -> anyhow::Result<String> {
+    fn filter_terminal_output(&mut self, chunk: String) -> anyhow::Result<String> {
         let Some(result) = self
-            .terminal_query_state
+            .terminal_output_state
             .as_mut()
             .map(|state| state.filter_chunk(&chunk))
         else {
@@ -392,10 +416,10 @@ impl LiveSession {
     }
 
     #[cfg(windows)]
-    fn drain_terminal_query_buffer(&mut self) -> String {
-        self.terminal_query_state
+    fn drain_terminal_output_buffer(&mut self) -> String {
+        self.terminal_output_state
             .as_mut()
-            .map(windows::TerminalQueryState::drain_pending)
+            .map(windows::TerminalOutputState::drain_pending)
             .unwrap_or_default()
     }
 
@@ -410,11 +434,26 @@ impl LiveSession {
 
 #[cfg(test)]
 mod tests {
+    use std::process::Command;
+    use std::process::Stdio;
+    use std::time::Duration;
+
+    use tokio::sync::mpsc::unbounded_channel;
+
     use crate::config::PtyMode;
+    use crate::exec::output;
 
     #[cfg(all(windows, not(feature = "winpty")))]
     use super::validate_pty_mode;
-    use super::{supports_pty_for_mode, windows_pty_backend_override_for_mode};
+    use super::{
+        LiveSession, SessionChild, new_live_session, supports_pty_for_mode,
+        windows_pty_backend_override_for_mode,
+    };
+
+    #[cfg(unix)]
+    const TEST_SHELL: &str = "/bin/sh";
+    #[cfg(windows)]
+    const TEST_SHELL: &str = "cmd.exe";
 
     #[test]
     fn pty_mode_none_disables_tty_support() {
@@ -441,5 +480,46 @@ mod tests {
     fn winpty_mode_is_unavailable_when_the_feature_is_disabled() {
         assert!(!supports_pty_for_mode(PtyMode::Winpty));
         assert!(validate_pty_mode(PtyMode::Winpty).is_err());
+    }
+
+    async fn finished_pipe_session(
+        receiver: tokio::sync::mpsc::UnboundedReceiver<String>,
+    ) -> LiveSession {
+        let mut command = Command::new(TEST_SHELL);
+        #[cfg(unix)]
+        command.args(["-c", "exit 0"]);
+        #[cfg(windows)]
+        command.args(["/D", "/C", "exit 0"]);
+        command.stdin(Stdio::null());
+        command.stdout(Stdio::null());
+        command.stderr(Stdio::null());
+
+        let child = command.spawn().expect("test child should spawn");
+        let mut session = new_live_session(false, SessionChild::Pipe(Box::new(child)), receiver);
+        session.exit_code = Some(0);
+        session
+    }
+
+    #[tokio::test]
+    async fn drain_after_exit_waits_for_delayed_pipe_output_until_channel_closes() {
+        let (sender, receiver) = unbounded_channel();
+        let mut session = finished_pipe_session(receiver).await;
+
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            sender
+                .send("delayed ".to_string())
+                .expect("first delayed chunk");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            sender
+                .send("tail".to_string())
+                .expect("second delayed chunk");
+        });
+
+        let output = output::drain_after_exit(&mut session)
+            .await
+            .expect("exit drain should succeed");
+
+        assert_eq!(output, "delayed tail");
     }
 }

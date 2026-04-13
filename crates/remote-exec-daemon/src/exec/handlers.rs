@@ -98,6 +98,7 @@ pub async fn exec_start_local(
         daemon_session_id = %daemon_session_id,
         warnings = warnings.len(),
         wall_time_seconds = response.wall_time_seconds,
+        output_bytes = response.output.len(),
         "exec_start left process running"
     );
     Ok(response)

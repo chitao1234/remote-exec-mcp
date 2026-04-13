@@ -8,11 +8,10 @@ use crate::config::ProcessEnvironment;
 #[cfg(not(windows))]
 const TEST_LOCALE_OUTPUT_ENV: &str = "REMOTE_EXEC_TEST_LOCALE_OUTPUT";
 
+#[cfg_attr(windows, allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum LocaleStrategy {
-    #[cfg(not(windows))]
     Direct(String),
-    #[cfg(not(windows))]
     HybridCType(String),
     LangCOnly,
 }
@@ -30,7 +29,7 @@ impl LocaleEnvPlan {
     pub(crate) fn resolved(_environment: &ProcessEnvironment) -> Self {
         #[cfg(windows)]
         {
-            LocaleEnvPlan::from_strategy(LocaleStrategy::LangCOnly)
+            LocaleEnvPlan::from_strategy(LocaleStrategy::Direct("C.UTF-8".to_string()))
         }
 
         #[cfg(not(windows))]
@@ -45,25 +44,17 @@ impl LocaleEnvPlan {
     }
 
     pub(crate) fn as_pairs(&self) -> Vec<(String, String)> {
-        #[cfg(windows)]
-        {
-            Vec::new()
-        }
-
-        #[cfg(not(windows))]
-        {
-            match &self.strategy {
-                LocaleStrategy::Direct(locale) => vec![
-                    ("LANG".to_string(), locale.clone()),
-                    ("LC_CTYPE".to_string(), locale.clone()),
-                    ("LC_ALL".to_string(), locale.clone()),
-                ],
-                LocaleStrategy::HybridCType(locale) => vec![
-                    ("LANG".to_string(), "C".to_string()),
-                    ("LC_CTYPE".to_string(), locale.clone()),
-                ],
-                LocaleStrategy::LangCOnly => vec![("LANG".to_string(), "C".to_string())],
-            }
+        match &self.strategy {
+            LocaleStrategy::Direct(locale) => vec![
+                ("LANG".to_string(), locale.clone()),
+                ("LC_CTYPE".to_string(), locale.clone()),
+                ("LC_ALL".to_string(), locale.clone()),
+            ],
+            LocaleStrategy::HybridCType(locale) => vec![
+                ("LANG".to_string(), "C".to_string()),
+                ("LC_CTYPE".to_string(), locale.clone()),
+            ],
+            LocaleStrategy::LangCOnly => vec![("LANG".to_string(), "C".to_string())],
         }
     }
 }
@@ -176,7 +167,7 @@ fn locale_rank(locale: &str) -> (u8, String) {
 #[cfg(test)]
 mod tests {
     #[cfg(windows)]
-    use super::{LocaleEnvPlan, LocaleStrategy};
+    use super::LocaleEnvPlan;
     #[cfg(not(windows))]
     use super::{LocaleEnvPlan, LocaleStrategy, choose_strategy};
 
@@ -268,8 +259,15 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn locale_env_plan_is_empty_on_windows() {
-        let plan = LocaleEnvPlan::from_strategy(LocaleStrategy::LangCOnly);
-        assert!(plan.as_pairs().is_empty());
+    fn windows_locale_env_plan_always_uses_c_utf8() {
+        let plan = LocaleEnvPlan::resolved(&crate::config::ProcessEnvironment::default());
+        assert_eq!(
+            plan.as_pairs(),
+            vec![
+                ("LANG".to_string(), "C.UTF-8".to_string()),
+                ("LC_CTYPE".to_string(), "C.UTF-8".to_string()),
+                ("LC_ALL".to_string(), "C.UTF-8".to_string()),
+            ]
+        );
     }
 }

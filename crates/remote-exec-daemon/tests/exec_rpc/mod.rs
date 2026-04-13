@@ -23,7 +23,7 @@ const WINDOWS_CMD_SHELL: &str = "cmd.exe";
 #[cfg(windows)]
 const WINDOWS_GIT_BASH_COMMON_PATH: &str = r"C:\Program Files\Git\bin\bash.exe";
 #[cfg(windows)]
-const WINDOWS_ENV_OVERLAY_OUTPUT: &str = "dumb|1|cat|cat|1|||";
+const WINDOWS_ENV_OVERLAY_OUTPUT: &str = "dumb|1|cat|cat|1|C.UTF-8|C.UTF-8|C.UTF-8";
 // Commands in these tests are expected to finish in a single RPC response, but the daemon only
 // guarantees a minimum 250 ms wait and may legitimately return a live session under heavy load.
 // Use a generous window so large-output assertions do not become timing-sensitive.
@@ -281,11 +281,21 @@ async fn assert_windows_tty_session_answers_terminal_queries(
         backend.name()
     );
 
-    let combined_output =
-        strip_terminal_noise(&format!("{}{}", started.output, polled.output)).to_ascii_lowercase();
+    let combined_output = format!("{}{}", started.output, polled.output);
+    let normalized_output = combined_output.to_ascii_lowercase();
     assert!(
-        combined_output.contains("hello"),
+        normalized_output.contains("hello"),
         "{} combined output did not contain hello: {combined_output:?}",
+        backend.name()
+    );
+    assert!(
+        !combined_output.contains('\u{1b}'),
+        "{} combined output leaked ESC control sequence: {combined_output:?}",
+        backend.name()
+    );
+    assert!(
+        !combined_output.contains('\u{7}'),
+        "{} combined output leaked BEL control sequence: {combined_output:?}",
         backend.name()
     );
     assert!(

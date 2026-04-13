@@ -1,9 +1,10 @@
 use std::time::{Duration, Instant};
 
-use super::session::LiveSession;
+use super::session::{LiveSession, OutputWait};
 
 pub const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 10_000;
-pub const EXIT_OUTPUT_GRACE: Duration = Duration::from_millis(100);
+pub const EXIT_OUTPUT_IDLE_GRACE: Duration = Duration::from_millis(250);
+pub const EXIT_OUTPUT_MAX_GRACE: Duration = Duration::from_secs(2);
 
 pub struct OutputSnapshot {
     pub original_token_count: u32,
@@ -53,18 +54,38 @@ pub fn truncate_to_token_limit(raw: &str, max_output_tokens: Option<u32>) -> Str
 }
 
 pub async fn drain_after_exit(session: &mut LiveSession) -> anyhow::Result<String> {
-    let deadline = Instant::now() + EXIT_OUTPUT_GRACE;
     let mut output = String::new();
+    let deadline = Instant::now() + EXIT_OUTPUT_MAX_GRACE;
 
-    while Instant::now() < deadline {
-        let chunk = session.read_available().await?;
-        if !chunk.is_empty() {
-            session.record_output(&chunk);
-            output.push_str(&chunk);
+    drain_available(session, &mut output).await?;
+
+    while !session.output_closed() {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
         }
 
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        match session
+            .wait_for_output(remaining.min(EXIT_OUTPUT_IDLE_GRACE))
+            .await?
+        {
+            OutputWait::Chunk(chunk) => {
+                session.record_output(&chunk);
+                output.push_str(&chunk);
+            }
+            OutputWait::Closed | OutputWait::TimedOut => break,
+        }
     }
 
+    drain_available(session, &mut output).await?;
     Ok(output)
+}
+
+async fn drain_available(session: &mut LiveSession, output: &mut String) -> anyhow::Result<()> {
+    let chunk = session.read_available().await?;
+    if !chunk.is_empty() {
+        session.record_output(&chunk);
+        output.push_str(&chunk);
+    }
+    Ok(())
 }
