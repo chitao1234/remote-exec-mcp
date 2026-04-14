@@ -1,5 +1,8 @@
+use std::any::Any;
 use std::net::SocketAddr;
 use std::path::Path;
+use std::thread::JoinHandle;
+use std::time::Duration;
 
 use anyhow::Context;
 use remote_exec_daemon::config::{DaemonConfig, DaemonTransport, ProcessEnvironment, PtyMode};
@@ -91,6 +94,17 @@ pub(super) fn reserve_listen_addr() -> SocketAddr {
     addr
 }
 
+const STARTUP_POLL_ATTEMPTS: usize = 100;
+const STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const STARTUP_BIND_RETRY_ATTEMPTS: usize = 5;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum StartupWaitOutcome {
+    Ready,
+    ThreadFinished,
+    TimedOut,
+}
+
 fn daemon_fixture(
     tempdir: tempfile::TempDir,
     client: reqwest::Client,
@@ -111,8 +125,12 @@ fn daemon_fixture(
     )
 }
 
-pub(super) async fn wait_until_ready(client: &reqwest::Client, url: &str) {
-    for _ in 0..40 {
+pub(super) async fn wait_until_ready(
+    client: &reqwest::Client,
+    url: &str,
+    server_thread: &JoinHandle<anyhow::Result<()>>,
+) -> StartupWaitOutcome {
+    for _ in 0..STARTUP_POLL_ATTEMPTS {
         if client
             .post(url)
             .header(reqwest::header::CONNECTION, "close")
@@ -121,31 +139,48 @@ pub(super) async fn wait_until_ready(client: &reqwest::Client, url: &str) {
             .await
             .is_ok()
         {
-            return;
+            return StartupWaitOutcome::Ready;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        if server_thread.is_finished() {
+            return StartupWaitOutcome::ThreadFinished;
+        }
+        tokio::time::sleep(STARTUP_POLL_INTERVAL).await;
     }
 
-    panic!("daemon did not become ready");
+    if server_thread.is_finished() {
+        StartupWaitOutcome::ThreadFinished
+    } else {
+        StartupWaitOutcome::TimedOut
+    }
 }
 
 #[cfg(feature = "tls")]
-pub(super) async fn wait_until_listener_ready(addr: SocketAddr) {
-    for _ in 0..40 {
+pub(super) async fn wait_until_listener_ready(
+    addr: SocketAddr,
+    server_thread: &JoinHandle<anyhow::Result<()>>,
+) -> StartupWaitOutcome {
+    for _ in 0..STARTUP_POLL_ATTEMPTS {
         if tokio::net::TcpStream::connect(addr).await.is_ok() {
-            return;
+            return StartupWaitOutcome::Ready;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        if server_thread.is_finished() {
+            return StartupWaitOutcome::ThreadFinished;
+        }
+        tokio::time::sleep(STARTUP_POLL_INTERVAL).await;
     }
 
-    panic!("daemon listener did not become ready");
+    if server_thread.is_finished() {
+        StartupWaitOutcome::ThreadFinished
+    } else {
+        StartupWaitOutcome::TimedOut
+    }
 }
 
 pub(super) fn spawn_background_daemon(
     config: DaemonConfig,
 ) -> (
     tokio::sync::oneshot::Sender<()>,
-    std::thread::JoinHandle<anyhow::Result<()>>,
+    JoinHandle<anyhow::Result<()>>,
 ) {
     let target = config.target.clone();
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
@@ -165,6 +200,73 @@ pub(super) fn spawn_background_daemon(
     (shutdown_tx, server_thread)
 }
 
+pub(super) fn join_server_thread(
+    server_thread: JoinHandle<anyhow::Result<()>>,
+) -> anyhow::Result<()> {
+    match server_thread.join() {
+        Ok(result) => result,
+        Err(payload) => anyhow::bail!(
+            "daemon test thread panicked: {}",
+            panic_payload_message(payload)
+        ),
+    }
+}
+
+pub(super) fn startup_failure_error(
+    target: &str,
+    addr: SocketAddr,
+    readiness_target: &str,
+    outcome: StartupWaitOutcome,
+    shutdown: tokio::sync::oneshot::Sender<()>,
+    server_thread: JoinHandle<anyhow::Result<()>>,
+) -> anyhow::Error {
+    match outcome {
+        StartupWaitOutcome::Ready => anyhow::anyhow!(
+            "internal error: startup_failure_error called after successful startup for target `{target}` on {addr}"
+        ),
+        StartupWaitOutcome::ThreadFinished => match join_server_thread(server_thread) {
+            Ok(()) => anyhow::anyhow!(
+                "daemon test thread exited before {readiness_target} became ready for target `{target}` on {addr}"
+            ),
+            Err(err) => err.context(format!(
+                "daemon test startup failed before {readiness_target} became ready for target `{target}` on {addr}"
+            )),
+        },
+        StartupWaitOutcome::TimedOut => {
+            let _ = shutdown.send(());
+            match join_server_thread(server_thread) {
+                Ok(()) => anyhow::anyhow!(
+                    "daemon did not become ready at {readiness_target} for target `{target}` on {addr} within {} ms",
+                    STARTUP_POLL_ATTEMPTS as u64 * STARTUP_POLL_INTERVAL.as_millis() as u64
+                ),
+                Err(err) => err.context(format!(
+                    "daemon test startup timed out waiting for {readiness_target} for target `{target}` on {addr}"
+                )),
+            }
+        }
+    }
+}
+
+pub(super) fn is_retryable_startup_error(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        let text = cause.to_string().to_ascii_lowercase();
+        text.contains("address already in use")
+            || text.contains("one usage of each socket address")
+            || text.contains("os error 98")
+            || text.contains("os error 10048")
+    })
+}
+
+fn panic_payload_message(payload: Box<dyn Any + Send>) -> String {
+    match payload.downcast::<String>() {
+        Ok(message) => *message,
+        Err(payload) => match payload.downcast::<&'static str>() {
+            Ok(message) => (*message).to_string(),
+            Err(_) => "non-string panic payload".to_string(),
+        },
+    }
+}
+
 async fn spawn_daemon_with_pty_mode(
     target: &str,
     pty: PtyMode,
@@ -172,37 +274,53 @@ async fn spawn_daemon_with_pty_mode(
 ) -> DaemonFixture {
     install_test_crypto_provider();
 
-    let tempdir = tempfile::tempdir().unwrap();
-    let addr = reserve_listen_addr();
-    let workdir = tempdir.path().join("workdir");
-    std::fs::create_dir_all(&workdir).unwrap();
-    let config = base_daemon_config(target, addr, &workdir, pty, process_environment);
+    for attempt in 1..=STARTUP_BIND_RETRY_ATTEMPTS {
+        let tempdir = tempfile::tempdir().unwrap();
+        let addr = reserve_listen_addr();
+        let workdir = tempdir.path().join("workdir");
+        std::fs::create_dir_all(&workdir).unwrap();
+        let config = base_daemon_config(target, addr, &workdir, pty, process_environment.clone());
 
-    let (shutdown, server_thread) = spawn_background_daemon(config);
-    let client = reqwest::Client::builder().build().unwrap();
-    wait_until_ready(&client, &format!("http://{addr}/v1/health")).await;
+        let (shutdown, server_thread) = spawn_background_daemon(config);
+        let client = reqwest::Client::builder().build().unwrap();
+        let startup =
+            wait_until_ready(&client, &format!("http://{addr}/v1/health"), &server_thread).await;
 
-    #[cfg(windows)]
-    return daemon_fixture(
-        tempdir,
-        client,
-        addr,
-        "http",
-        workdir,
-        shutdown,
-        server_thread,
-    );
+        if startup == StartupWaitOutcome::Ready {
+            return daemon_fixture(
+                tempdir,
+                client,
+                addr,
+                "http",
+                workdir,
+                shutdown,
+                server_thread,
+            );
+        }
 
-    #[cfg(not(windows))]
-    daemon_fixture(
-        tempdir,
-        client,
-        addr,
-        "http",
-        workdir,
-        shutdown,
-        server_thread,
-    )
+        let err = startup_failure_error(
+            target,
+            addr,
+            "health endpoint",
+            startup,
+            shutdown,
+            server_thread,
+        );
+        if attempt < STARTUP_BIND_RETRY_ATTEMPTS && is_retryable_startup_error(&err) {
+            tracing::warn!(
+                target,
+                listen = %addr,
+                attempt,
+                error = %err,
+                "retrying daemon test startup after bind race"
+            );
+            continue;
+        }
+
+        panic!("daemon test startup failed: {err:#}");
+    }
+
+    unreachable!("startup retry loop should return or panic")
 }
 
 #[allow(dead_code, reason = "Shared across daemon integration test crates")]
@@ -296,7 +414,7 @@ pub async fn spawn_daemon_with_extra_config_for_workdir<F>(
     render_extra_config: F,
 ) -> DaemonFixture
 where
-    F: FnOnce(&Path) -> String,
+    F: Fn(&Path) -> String,
 {
     spawn_daemon_with_extra_config_for_workdir_and_process_environment(
         target,
@@ -313,59 +431,75 @@ pub async fn spawn_daemon_with_extra_config_for_workdir_and_process_environment<
     process_environment: ProcessEnvironment,
 ) -> DaemonFixture
 where
-    F: FnOnce(&Path) -> String,
+    F: Fn(&Path) -> String,
 {
     install_test_crypto_provider();
 
-    let tempdir = tempfile::tempdir().unwrap();
-    let addr = reserve_listen_addr();
-    let workdir = tempdir.path().join("workdir");
-    std::fs::create_dir_all(&workdir).unwrap();
-    let extra_config = render_extra_config(&workdir);
-    let config_path = tempdir.path().join("daemon.toml");
-    std::fs::write(
-        &config_path,
-        format!(
-            r#"target = {target}
+    for attempt in 1..=STARTUP_BIND_RETRY_ATTEMPTS {
+        let tempdir = tempfile::tempdir().unwrap();
+        let addr = reserve_listen_addr();
+        let workdir = tempdir.path().join("workdir");
+        std::fs::create_dir_all(&workdir).unwrap();
+        let extra_config = render_extra_config(&workdir);
+        let config_path = tempdir.path().join("daemon.toml");
+        std::fs::write(
+            &config_path,
+            format!(
+                r#"target = {target}
 listen = {listen}
 default_workdir = {default_workdir}
 transport = "http"
 {extra_config}
 "#,
-            target = toml_string(target),
-            listen = toml_string(&addr.to_string()),
-            default_workdir = toml_string(&workdir.display().to_string()),
-        ),
-    )
-    .unwrap();
-    let mut config = remote_exec_daemon::config::DaemonConfig::load(&config_path)
-        .await
+                target = toml_string(target),
+                listen = toml_string(&addr.to_string()),
+                default_workdir = toml_string(&workdir.display().to_string()),
+            ),
+        )
         .unwrap();
-    config.process_environment = process_environment;
+        let mut config = remote_exec_daemon::config::DaemonConfig::load(&config_path)
+            .await
+            .unwrap();
+        config.process_environment = process_environment.clone();
 
-    let (shutdown, server_thread) = spawn_background_daemon(config);
-    let client = reqwest::Client::builder().build().unwrap();
-    wait_until_ready(&client, &format!("http://{addr}/v1/health")).await;
+        let (shutdown, server_thread) = spawn_background_daemon(config);
+        let client = reqwest::Client::builder().build().unwrap();
+        let startup =
+            wait_until_ready(&client, &format!("http://{addr}/v1/health"), &server_thread).await;
 
-    #[cfg(windows)]
-    return daemon_fixture(
-        tempdir,
-        client,
-        addr,
-        "http",
-        workdir,
-        shutdown,
-        server_thread,
-    );
+        if startup == StartupWaitOutcome::Ready {
+            return daemon_fixture(
+                tempdir,
+                client,
+                addr,
+                "http",
+                workdir,
+                shutdown,
+                server_thread,
+            );
+        }
 
-    #[cfg(not(windows))]
-    daemon_fixture(
-        tempdir,
-        client,
-        addr,
-        "http",
-        workdir,
-        shutdown,
-        server_thread,
-    )
+        let err = startup_failure_error(
+            target,
+            addr,
+            "health endpoint",
+            startup,
+            shutdown,
+            server_thread,
+        );
+        if attempt < STARTUP_BIND_RETRY_ATTEMPTS && is_retryable_startup_error(&err) {
+            tracing::warn!(
+                target,
+                listen = %addr,
+                attempt,
+                error = %err,
+                "retrying daemon test startup after bind race"
+            );
+            continue;
+        }
+
+        panic!("daemon test startup failed: {err:#}");
+    }
+
+    unreachable!("startup retry loop should return or panic")
 }

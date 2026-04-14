@@ -38,59 +38,79 @@ async fn spawn_daemon_with_tls_pty_mode(
 ) -> DaemonFixture {
     super::install_test_crypto_provider();
 
-    let tempdir = tempfile::tempdir().unwrap();
-    let certs = write_test_certs(tempdir.path(), target);
-    let addr = super::reserve_listen_addr();
-    let workdir = tempdir.path().join("workdir");
-    std::fs::create_dir_all(&workdir).unwrap();
-    let config = DaemonConfig {
-        target: target.to_string(),
-        listen: addr,
-        default_workdir: workdir.clone(),
-        windows_posix_root: None,
-        transport: DaemonTransport::Tls,
-        http_auth: None,
-        sandbox: None,
-        enable_transfer_compression: true,
-        allow_login_shell: true,
-        pty,
-        default_shell: None,
-        yield_time: remote_exec_daemon::config::YieldTimeConfig::default(),
-        experimental_apply_patch_target_encoding_autodetect: false,
-        process_environment,
-        tls: Some(remote_exec_daemon::config::TlsConfig {
-            cert_pem: certs.daemon_cert.clone(),
-            key_pem: certs.daemon_key.clone(),
-            ca_pem: certs.ca_cert.clone(),
-            pinned_client_cert_pem: None,
-        }),
-    };
+    for attempt in 1..=super::STARTUP_BIND_RETRY_ATTEMPTS {
+        let tempdir = tempfile::tempdir().unwrap();
+        let certs = write_test_certs(tempdir.path(), target);
+        let addr = super::reserve_listen_addr();
+        let workdir = tempdir.path().join("workdir");
+        std::fs::create_dir_all(&workdir).unwrap();
+        let config = DaemonConfig {
+            target: target.to_string(),
+            listen: addr,
+            default_workdir: workdir.clone(),
+            windows_posix_root: None,
+            transport: DaemonTransport::Tls,
+            http_auth: None,
+            sandbox: None,
+            enable_transfer_compression: true,
+            allow_login_shell: true,
+            pty,
+            default_shell: None,
+            yield_time: remote_exec_daemon::config::YieldTimeConfig::default(),
+            experimental_apply_patch_target_encoding_autodetect: false,
+            process_environment: process_environment.clone(),
+            tls: Some(remote_exec_daemon::config::TlsConfig {
+                cert_pem: certs.daemon_cert.clone(),
+                key_pem: certs.daemon_key.clone(),
+                ca_pem: certs.ca_cert.clone(),
+                pinned_client_cert_pem: None,
+            }),
+        };
 
-    let (shutdown, server_thread) = super::spawn_background_daemon(config);
-    let client = build_tls_client(&certs);
-    super::wait_until_ready(&client, &format!("https://{addr}/v1/health")).await;
+        let (shutdown, server_thread) = super::spawn_background_daemon(config);
+        let client = build_tls_client(&certs);
+        let startup = super::wait_until_ready(
+            &client,
+            &format!("https://{addr}/v1/health"),
+            &server_thread,
+        )
+        .await;
 
-    #[cfg(windows)]
-    return super::daemon_fixture(
-        tempdir,
-        client,
-        addr,
-        "https",
-        workdir,
-        shutdown,
-        server_thread,
-    );
+        if startup == super::StartupWaitOutcome::Ready {
+            return super::daemon_fixture(
+                tempdir,
+                client,
+                addr,
+                "https",
+                workdir,
+                shutdown,
+                server_thread,
+            );
+        }
 
-    #[cfg(not(windows))]
-    super::daemon_fixture(
-        tempdir,
-        client,
-        addr,
-        "https",
-        workdir,
-        shutdown,
-        server_thread,
-    )
+        let err = super::startup_failure_error(
+            target,
+            addr,
+            "health endpoint",
+            startup,
+            shutdown,
+            server_thread,
+        );
+        if attempt < super::STARTUP_BIND_RETRY_ATTEMPTS && super::is_retryable_startup_error(&err) {
+            tracing::warn!(
+                target,
+                listen = %addr,
+                attempt,
+                error = %err,
+                "retrying TLS daemon test startup after bind race"
+            );
+            continue;
+        }
+
+        panic!("daemon test startup failed: {err:#}");
+    }
+
+    unreachable!("startup retry loop should return or panic")
 }
 
 #[allow(dead_code, reason = "Shared across daemon integration test crates")]
@@ -106,67 +126,93 @@ pub async fn spawn_daemon_with_pinned_client_cert(
 ) -> DaemonFixture {
     super::install_test_crypto_provider();
 
-    let tempdir = tempfile::tempdir().unwrap();
-    let certs = write_test_certs(tempdir.path(), target);
-    let addr = super::reserve_listen_addr();
-    let workdir = tempdir.path().join("workdir");
-    std::fs::create_dir_all(&workdir).unwrap();
-    let pinned_client_cert_pem = match pinned_client_cert {
-        PinnedClientCert::MatchingBrokerLeaf => certs.client_cert.clone(),
-        PinnedClientCert::MismatchedDaemonLeaf => certs.daemon_cert.clone(),
-    };
-    let config = DaemonConfig {
-        target: target.to_string(),
-        listen: addr,
-        default_workdir: workdir.clone(),
-        windows_posix_root: None,
-        transport: DaemonTransport::Tls,
-        http_auth: None,
-        sandbox: None,
-        enable_transfer_compression: true,
-        allow_login_shell: true,
-        pty: PtyMode::Auto,
-        default_shell: None,
-        yield_time: remote_exec_daemon::config::YieldTimeConfig::default(),
-        experimental_apply_patch_target_encoding_autodetect: false,
-        process_environment: ProcessEnvironment::capture_current(),
-        tls: Some(remote_exec_daemon::config::TlsConfig {
-            cert_pem: certs.daemon_cert.clone(),
-            key_pem: certs.daemon_key.clone(),
-            ca_pem: certs.ca_cert.clone(),
-            pinned_client_cert_pem: Some(pinned_client_cert_pem),
-        }),
-    };
+    for attempt in 1..=super::STARTUP_BIND_RETRY_ATTEMPTS {
+        let tempdir = tempfile::tempdir().unwrap();
+        let certs = write_test_certs(tempdir.path(), target);
+        let addr = super::reserve_listen_addr();
+        let workdir = tempdir.path().join("workdir");
+        std::fs::create_dir_all(&workdir).unwrap();
+        let pinned_client_cert_pem = match pinned_client_cert {
+            PinnedClientCert::MatchingBrokerLeaf => certs.client_cert.clone(),
+            PinnedClientCert::MismatchedDaemonLeaf => certs.daemon_cert.clone(),
+        };
+        let config = DaemonConfig {
+            target: target.to_string(),
+            listen: addr,
+            default_workdir: workdir.clone(),
+            windows_posix_root: None,
+            transport: DaemonTransport::Tls,
+            http_auth: None,
+            sandbox: None,
+            enable_transfer_compression: true,
+            allow_login_shell: true,
+            pty: PtyMode::Auto,
+            default_shell: None,
+            yield_time: remote_exec_daemon::config::YieldTimeConfig::default(),
+            experimental_apply_patch_target_encoding_autodetect: false,
+            process_environment: ProcessEnvironment::capture_current(),
+            tls: Some(remote_exec_daemon::config::TlsConfig {
+                cert_pem: certs.daemon_cert.clone(),
+                key_pem: certs.daemon_key.clone(),
+                ca_pem: certs.ca_cert.clone(),
+                pinned_client_cert_pem: Some(pinned_client_cert_pem),
+            }),
+        };
 
-    let (shutdown, server_thread) = super::spawn_background_daemon(config);
-    let client = build_tls_client(&certs);
+        let (shutdown, server_thread) = super::spawn_background_daemon(config);
+        let client = build_tls_client(&certs);
 
-    match pinned_client_cert {
-        PinnedClientCert::MatchingBrokerLeaf => {
-            super::wait_until_ready(&client, &format!("https://{addr}/v1/health")).await;
+        let startup = match pinned_client_cert {
+            PinnedClientCert::MatchingBrokerLeaf => {
+                super::wait_until_ready(
+                    &client,
+                    &format!("https://{addr}/v1/health"),
+                    &server_thread,
+                )
+                .await
+            }
+            PinnedClientCert::MismatchedDaemonLeaf => {
+                super::wait_until_listener_ready(addr, &server_thread).await
+            }
+        };
+
+        if startup == super::StartupWaitOutcome::Ready {
+            return super::daemon_fixture(
+                tempdir,
+                client,
+                addr,
+                "https",
+                workdir,
+                shutdown,
+                server_thread,
+            );
         }
-        PinnedClientCert::MismatchedDaemonLeaf => super::wait_until_listener_ready(addr).await,
+
+        let readiness_target = match pinned_client_cert {
+            PinnedClientCert::MatchingBrokerLeaf => "health endpoint",
+            PinnedClientCert::MismatchedDaemonLeaf => "listener",
+        };
+        let err = super::startup_failure_error(
+            target,
+            addr,
+            readiness_target,
+            startup,
+            shutdown,
+            server_thread,
+        );
+        if attempt < super::STARTUP_BIND_RETRY_ATTEMPTS && super::is_retryable_startup_error(&err) {
+            tracing::warn!(
+                target,
+                listen = %addr,
+                attempt,
+                error = %err,
+                "retrying TLS daemon test startup after bind race"
+            );
+            continue;
+        }
+
+        panic!("daemon test startup failed: {err:#}");
     }
 
-    #[cfg(windows)]
-    return super::daemon_fixture(
-        tempdir,
-        client,
-        addr,
-        "https",
-        workdir,
-        shutdown,
-        server_thread,
-    );
-
-    #[cfg(not(windows))]
-    super::daemon_fixture(
-        tempdir,
-        client,
-        addr,
-        "https",
-        workdir,
-        shutdown,
-        server_thread,
-    )
+    unreachable!("startup retry loop should return or panic")
 }
