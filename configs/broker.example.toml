@@ -1,19 +1,16 @@
-enable_transfer_compression = true
-disable_structured_content = false
-
 # Optional MCP transport selection. When omitted, the broker serves MCP over stdio.
 #
 #[mcp]
 #transport = "streamable_http"
 #listen = "127.0.0.1:8787"
-## Optional. Defaults to "/mcp".
-## path = "/mcp"
-## Optional. Defaults to true. When false, the endpoint uses stateless POST-only mode.
-## stateful = true
-## Optional. Milliseconds. Set to 0 to disable.
-## sse_keep_alive_ms = 15000
-## Optional. Milliseconds. Set to 0 to disable retry priming events.
-## sse_retry_ms = 3000
+# Optional. Defaults to "/mcp".
+#path = "/mcp"
+# Optional. Defaults to true. When false, the endpoint uses stateless POST-only mode.
+#stateful = true
+# Optional. Milliseconds. Set to 0 to disable.
+#sse_keep_alive_ms = 15000
+# Optional. Milliseconds. Set to 0 to disable retry priming events.
+#sse_retry_ms = 3000
 
 [targets.builder-a]
 # Requires the broker to be built with its default `broker-tls` Cargo feature.
@@ -39,28 +36,27 @@ expected_daemon_name = "builder-b"
 
 [targets.builder-xp]
 base_url = "http://builder-xp.example.com:8181"
+# Any Rust daemon configured with `transport = "http"` uses the same broker-side
+# `http://` + `allow_insecure_http = true` pattern.
 allow_insecure_http = true
 expected_daemon_name = "builder-xp"
 # Optional HTTP bearer auth. Useful for plain-HTTP targets and also supported
 # for HTTPS targets when you want an extra shared-secret check on top of TLS.
-# [targets.builder-xp.http_auth]
-# bearer_token = "replace-me"
-# Any Rust daemon configured with `transport = "http"` uses the same broker-side
-# `http://` + `allow_insecure_http = true` pattern.
+#[targets.builder-xp.http_auth]
+#bearer_token = "replace-me"
 
 # Optional. When false, the broker rejects `transfer_files` requests that set
 # `compression = "zstd"` and keeps all transfer payloads uncompressed.
-# enable_transfer_compression = false
+#enable_transfer_compression = true
 
 # Optional. When true, the broker omits MCP `structuredContent` from successful
 # tool results and only returns normal content items.
-# disable_structured_content = true
+disable_structured_content = true
 
 # Optional broker-host sandbox for broker-local filesystem access.
 # This applies to `transfer_files` endpoints with `target: "local"` and, when `[local]`
 # is enabled, also applies to the embedded local target.
 # Missing `allow` or `allow = []` means "allow all", then `deny` refines it.
-#
 #[host_sandbox.exec_cwd]
 #allow = ["/srv/local-work"]
 #deny = ["/srv/local-work/private"]
@@ -72,44 +68,48 @@ expected_daemon_name = "builder-xp"
 #[host_sandbox.write]
 #allow = ["/srv/local-work"]
 #deny = ["/srv/local-work/.git", "/srv/local-work/readonly"]
-#
+
 # Optional broker-host local target for exec_command, write_stdin, apply_patch, and view_image.
 # When enabled, list_targets includes `local`.
 # `transfer_files` can still use broker-host filesystem access with `target: "local"` even if
 # this section is omitted.
-#
 #[local]
 #default_workdir = "/srv/local-work"
+
 # Must already exist when the broker starts with `[local]` enabled.
 #allow_login_shell = true
-## Optional. Omit to auto-detect PTY support, or set to "none" to disable TTY.
-## On Windows, "conpty" and "winpty" force a specific backend and fail startup if unavailable.
-## "winpty" also requires the broker to be built with its default `winpty` Cargo feature.
-## pty = "none"
-## Optional. If set, broker startup fails unless this shell is usable on the broker host.
-## default_shell = "/bin/sh"
-## Optional Windows-only synthetic POSIX root for the embedded local target.
-## Single-slash POSIX paths such as "/usr/bin/bash" or "/tmp/work" resolve under
-## this root for local exec, image, and patch requests.
-## windows_posix_root = "C:\\msys64"
-## Optional. Per-operation yield-time policy overrides for the embedded local target only.
-## `min_ms` silently raises smaller caller-provided values, `default_ms` applies when
-## the caller omits `yield_time_ms`, and `max_ms` caps larger values.
-##
-## [local.yield_time.exec_command]
-## default_ms = 10000
-## max_ms = 30000
-## min_ms = 250
-##
-## [local.yield_time.write_stdin_poll]
-## default_ms = 5000
-## max_ms = 300000
-## min_ms = 5000
-##
-## [local.yield_time.write_stdin_input]
-## default_ms = 250
-## max_ms = 30000
-## min_ms = 250
-## Optional experimental flag for the embedded local target only. When true,
-## local `apply_patch` can autodetect an existing target file's text encoding.
-## experimental_apply_patch_target_encoding_autodetect = true
+
+# Optional. Omit to auto-detect PTY support, or set to "none" to disable TTY.
+# On Windows, "conpty" and "winpty" force a specific backend and fail startup if unavailable.
+# "winpty" also requires the broker to be built with its default `winpty` Cargo feature.
+#pty = "none"
+
+# Optional. If set, broker startup fails unless this shell is usable on the broker host.
+#default_shell = "/bin/sh"
+
+# Optional Windows-only synthetic POSIX root for the embedded local target.
+# Single-slash POSIX paths such as "/usr/bin/bash" or "/tmp/work" resolve under
+# this root for local exec, image, and patch requests.
+#windows_posix_root = "C:\\msys64"
+
+# Optional experimental flag for the embedded local target only. When true,
+# local `apply_patch` can autodetect an existing target file's text encoding.
+#experimental_apply_patch_target_encoding_autodetect = true
+
+# Optional. Per-operation yield-time policy overrides for the embedded local target only.
+# `min_ms` silently raises smaller caller-provided values, `default_ms` applies when
+# the caller omits `yield_time_ms`, and `max_ms` caps larger values.
+#[local.yield_time.exec_command]
+#default_ms = 10000
+#max_ms = 30000
+#min_ms = 250
+#
+#[local.yield_time.write_stdin_poll]
+#default_ms = 5000
+#max_ms = 300000
+#min_ms = 5000
+#
+#[local.yield_time.write_stdin_input]
+#default_ms = 250
+#max_ms = 30000
+#min_ms = 250
