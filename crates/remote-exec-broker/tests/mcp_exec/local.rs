@@ -82,3 +82,27 @@ min_ms = 3000
     assert_eq!(result.structured_content["exit_code"], 0);
     assert!(result.text_output.contains("ready"));
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn exec_command_local_pipe_mode_preserves_stdout_stderr_order() {
+    let fixture = support::spawners::spawn_broker_with_local_target().await;
+    let result = fixture
+        .call_tool(
+            "exec_command",
+            serde_json::json!({
+                "target": "local",
+                "cmd": "printf 'stdout-1\\n'; printf 'stderr-1\\n' >&2; printf 'stdout-2\\n'; printf 'stderr-2\\n' >&2",
+                "shell": LOCAL_TEST_SHELL,
+                "tty": false,
+                "yield_time_ms": 10_000
+            }),
+        )
+        .await;
+
+    assert_eq!(result.structured_content["exit_code"], 0);
+    assert_eq!(
+        result.structured_content["output"],
+        serde_json::json!("stdout-1\nstderr-1\nstdout-2\nstderr-2\n")
+    );
+}

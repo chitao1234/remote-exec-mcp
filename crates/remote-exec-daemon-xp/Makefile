@@ -10,6 +10,8 @@ HOST_PATCH := $(BUILD_DIR)/test_patch
 HOST_TRANSFER := $(BUILD_DIR)/test_transfer
 HOST_CONFIG := $(BUILD_DIR)/test_config
 HOST_HTTP_REQUEST := $(BUILD_DIR)/test_http_request
+XP_SESSION_STORE := $(BUILD_DIR)/test_session_store.exe
+WINE ?= wine
 
 all: $(TARGET)
 
@@ -48,6 +50,13 @@ $(HOST_HTTP_REQUEST): tests/test_http_request.cpp src/http_request.cpp src/http_
 	mkdir -p $(BUILD_DIR)
 	$(HOST_CXX) $(COMMON_FLAGS) -o $@ tests/test_http_request.cpp src/http_request.cpp src/http_helpers.cpp src/text_utils.cpp
 
+test-wine-session-store: $(XP_SESSION_STORE)
+	$(WINE) ./$(XP_SESSION_STORE)
+
+$(XP_SESSION_STORE): tests/test_session_store.cpp src/session_store.cpp src/console_output.cpp src/logging.cpp src/win32_error.cpp src/config.cpp src/text_utils.cpp
+	mkdir -p $(BUILD_DIR)
+	$(CXX) $(TARGET_FLAGS) -o $@ tests/test_session_store.cpp src/session_store.cpp src/console_output.cpp src/logging.cpp src/win32_error.cpp src/config.cpp src/text_utils.cpp $(WIN_LIBS)
+
 check: test-host-patch test-host-transfer test-host-config test-host-http-request all
 
-.PHONY: all clean test-host-patch test-host-transfer test-host-config test-host-http-request check
+.PHONY: all clean test-host-patch test-host-transfer test-host-config test-host-http-request test-wine-session-store check

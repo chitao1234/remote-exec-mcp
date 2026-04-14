@@ -16,11 +16,17 @@ Host-native verification:
 - `make test-host-http-request`
 - `make check`
 
+Wine-backed XP exec verification, when `wine` is available:
+
+- `make test-wine-session-store`
+
 ## Run
 
 `build/remote-exec-daemon-xp.exe config/daemon-xp.example.ini`
 
 Logs go to `stderr`. Set `REMOTE_EXEC_LOG=debug` to raise the level, or use a shared filter string such as `REMOTE_EXEC_LOG=warn,remote_exec_daemon_xp=debug`.
+
+Non-TTY exec output merges `stdout` and `stderr` through one pipe, so the returned `output` field preserves their emitted order.
 
 ## Config
 

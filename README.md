@@ -375,6 +375,7 @@ cargo fmt --all --check
 - `transfer_files` treats `destination.path` as the exact final path to create or replace for single-source transfers; it does not infer basenames or copy "into" an existing directory in that mode.
 - `write_stdin` only invalidates sessions when the daemon restarted or explicitly reports `unknown_session`.
 - `max_output_tokens` is enforced by the daemon for command output.
+- Non-TTY `exec_command` output on both the main daemon and `remote-exec-daemon-xp` merges `stdout` and `stderr` through one pipe so the single public `output` field preserves their emitted order.
 - Daemon config can override `yield_time_ms` policy separately for `exec_command`, empty `write_stdin` polls, and non-empty `write_stdin` writes. Each bucket supports `default_ms`, `max_ms`, and `min_ms`, where `min_ms` silently raises smaller caller-provided values.
 - Broker `[local]` supports the same nested `yield_time` config for the embedded broker-host local target. `remote-exec-daemon-xp` supports the same three buckets with flat `yield_time_*` INI keys.
 - Each target daemon keeps at most `64` live exec sessions. When full, it protects the `8` most recently touched sessions, prunes exited sessions first, otherwise prunes the oldest non-protected live session, and terminates the pruned process.

@@ -2,7 +2,6 @@ use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use anyhow::Context;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
@@ -241,23 +240,22 @@ fn spawn_pipe(
     cwd: &std::path::Path,
     environment: &ProcessEnvironment,
 ) -> anyhow::Result<LiveSession> {
+    let (reader, writer) = std::io::pipe()?;
+    let stderr = writer.try_clone()?;
     let mut command = Command::new(&cmd[0]);
     command
         .args(&cmd[1..])
         .current_dir(cwd)
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stdout(Stdio::from(writer))
+        .stderr(Stdio::from(stderr));
     environment::apply_overlay_std_command(&mut command, environment);
-    let mut child = command.spawn()?;
-    let stdout = child.stdout.take().context("missing stdout pipe")?;
-    let stderr = child.stderr.take().context("missing stderr pipe")?;
+    let child = command.spawn()?;
     let (sender, receiver) = unbounded_channel();
     let session = new_live_session(false, SessionChild::Pipe(Box::new(child)), receiver);
 
     let _ = (cmd, cwd);
-    spawn_pipe_reader(stdout, sender.clone());
-    spawn_pipe_reader(stderr, sender);
+    spawn_pipe_reader(reader, sender);
 
     Ok(session)
 }
