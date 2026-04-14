@@ -19,7 +19,7 @@ Everything under `docs/` is historical implementation detail and planning contex
   - Always provides broker-host filesystem access for `transfer_files` endpoints that use `target: "local"`, even when the broker `[local]` target is disabled.
 - `remote-exec`
   - CLI client for the broker's public MCP tool surface.
-  - Can spawn `remote-exec-broker <config>` over stdio or connect to a broker streamable HTTP endpoint.
+  - Can load a broker config and invoke the broker tool handlers directly, or connect to a broker streamable HTTP endpoint.
 - `remote-exec-daemon`
   - Per-machine daemon over mTLS JSON/HTTP by default, or plain HTTP when configured.
   - The `tls` Cargo feature gates the HTTPS/mTLS transport and is enabled by default.
@@ -441,13 +441,15 @@ Start the broker:
 cargo run -p remote-exec-broker -- configs/broker.example.toml
 ```
 
-Call the broker over stdio by spawning the companion broker binary:
+Call the broker directly from a config file:
 
 ```bash
 cargo run -p remote-exec-broker --bin remote-exec -- \
   --broker-config configs/broker.example.toml \
   list-targets
 ```
+
+When `--broker-config` is used, the CLI loads the broker config and invokes the same broker tool handlers in-process. It does not start the broker MCP server, and the config's `[mcp]` transport only matters when running `remote-exec-broker` itself.
 
 Expose the broker over streamable HTTP instead of stdio:
 

@@ -34,9 +34,6 @@ struct ConnectionArgs {
     #[arg(long)]
     broker_config: Option<PathBuf>,
 
-    #[arg(long, requires = "broker_config")]
-    broker_bin: Option<PathBuf>,
-
     #[arg(long)]
     broker_url: Option<String>,
 }
@@ -287,11 +284,7 @@ async fn main() -> anyhow::Result<()> {
 impl ConnectionArgs {
     fn resolve(&self) -> anyhow::Result<Connection> {
         match (&self.broker_config, &self.broker_url) {
-            (Some(config_path), None) => Ok(Connection::Stdio {
-                broker_bin: self
-                    .broker_bin
-                    .clone()
-                    .unwrap_or_else(default_broker_bin_path),
+            (Some(config_path), None) => Ok(Connection::Config {
                 config_path: config_path.clone(),
             }),
             (None, Some(url)) => Ok(Connection::StreamableHttp { url: url.clone() }),
@@ -429,20 +422,6 @@ fn decode_data_url(image_url: &str) -> anyhow::Result<Vec<u8>> {
     base64::engine::general_purpose::STANDARD
         .decode(payload)
         .context("decoding image data URL")
-}
-
-fn default_broker_bin_path() -> PathBuf {
-    let default_name = if cfg!(windows) {
-        "remote-exec-broker.exe"
-    } else {
-        "remote-exec-broker"
-    };
-
-    std::env::current_exe()
-        .ok()
-        .map(|path| path.with_file_name(default_name))
-        .filter(|path| path.exists())
-        .unwrap_or_else(|| PathBuf::from(default_name))
 }
 
 fn status_code(response: &ToolResponse) -> i32 {
