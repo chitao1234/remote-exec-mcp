@@ -12,6 +12,10 @@ const DEFAULT_SESSION_LIMIT: usize = 64;
 const RECENT_PROTECTION_COUNT: usize = 8;
 const WARNING_THRESHOLD: usize = 60;
 
+fn session_matches(entry: &SessionEntry, session: &SharedSession) -> bool {
+    Arc::ptr_eq(&entry.session, session)
+}
+
 #[derive(Clone)]
 struct SessionEntry {
     session: SharedSession,
@@ -102,7 +106,7 @@ impl SessionStore {
             .read()
             .await
             .get(session_id)
-            .is_some_and(|current| Arc::ptr_eq(&current.session, &session));
+            .is_some_and(|current| session_matches(current, &session));
         if is_current {
             self.touch_if_current(session_id, &session).await;
             Some(SessionLease {
@@ -119,7 +123,7 @@ impl SessionStore {
     async fn touch_if_current(&self, session_id: &str, session: &SharedSession) {
         let mut sessions = self.inner.write().await;
         if let Some(entry) = sessions.get_mut(session_id)
-            && Arc::ptr_eq(&entry.session, session)
+            && session_matches(entry, session)
         {
             entry.last_touched_at = Instant::now();
         }
@@ -196,7 +200,7 @@ impl SessionStore {
         let mut sessions = self.inner.write().await;
         let is_current = sessions
             .get(session_id)
-            .is_some_and(|current| Arc::ptr_eq(&current.session, session));
+            .is_some_and(|current| session_matches(current, session));
         if is_current {
             sessions.remove(session_id)
         } else {
@@ -205,21 +209,14 @@ impl SessionStore {
     }
 
     async fn find_oldest_exited(&self, snapshot: &[Candidate]) -> Option<Candidate> {
-        let mut oldest_exited = None;
-
         for candidate in snapshot {
             let mut guard = candidate.session.clone().lock_owned().await;
             if guard.has_exited().await.unwrap_or(false) {
-                let replace = oldest_exited.as_ref().is_none_or(|current: &Candidate| {
-                    candidate.last_touched_at < current.last_touched_at
-                });
-                if replace {
-                    oldest_exited = Some(candidate.clone());
-                }
+                return Some(candidate.clone());
             }
         }
 
-        oldest_exited
+        None
     }
 }
 
@@ -234,7 +231,7 @@ impl SessionLease {
         let mut sessions = self.inner.write().await;
         let is_current = sessions
             .get(&self.session_id)
-            .is_some_and(|current| Arc::ptr_eq(&current.session, &self.session));
+            .is_some_and(|current| session_matches(current, &self.session));
         if is_current {
             sessions.remove(&self.session_id);
             tracing::info!(
