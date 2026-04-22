@@ -136,21 +136,8 @@ impl SessionStore {
 
     async fn prune_for_insert(&self) {
         loop {
-            let snapshot = {
-                let sessions = self.inner.read().await;
-                if sessions.len() < self.limit {
-                    return;
-                }
-                let mut snapshot = sessions
-                    .iter()
-                    .map(|(session_id, entry)| Candidate {
-                        session_id: session_id.clone(),
-                        session: entry.session.clone(),
-                        last_touched_at: entry.last_touched_at,
-                    })
-                    .collect::<Vec<_>>();
-                snapshot.sort_by_key(|candidate| candidate.last_touched_at);
-                snapshot
+            let Some(snapshot) = self.snapshot_for_prune().await else {
+                return;
             };
 
             let protected = self.protected_recent_count();
@@ -164,17 +151,9 @@ impl SessionStore {
                 return;
             };
 
-            let removed = {
-                let mut sessions = self.inner.write().await;
-                let is_current = sessions
-                    .get(&victim.session_id)
-                    .is_some_and(|current| Arc::ptr_eq(&current.session, &victim.session));
-                if is_current {
-                    sessions.remove(&victim.session_id)
-                } else {
-                    None
-                }
-            };
+            let removed = self
+                .remove_if_current(&victim.session_id, &victim.session)
+                .await;
 
             if let Some(removed) = removed {
                 let mut guard = removed.session.lock_owned().await;
@@ -191,19 +170,56 @@ impl SessionStore {
         }
     }
 
+    async fn snapshot_for_prune(&self) -> Option<Vec<Candidate>> {
+        let sessions = self.inner.read().await;
+        if sessions.len() < self.limit {
+            return None;
+        }
+
+        let mut snapshot = sessions
+            .iter()
+            .map(|(session_id, entry)| Candidate {
+                session_id: session_id.clone(),
+                session: entry.session.clone(),
+                last_touched_at: entry.last_touched_at,
+            })
+            .collect::<Vec<_>>();
+        snapshot.sort_by_key(|candidate| candidate.last_touched_at);
+        Some(snapshot)
+    }
+
+    async fn remove_if_current(
+        &self,
+        session_id: &str,
+        session: &SharedSession,
+    ) -> Option<SessionEntry> {
+        let mut sessions = self.inner.write().await;
+        let is_current = sessions
+            .get(session_id)
+            .is_some_and(|current| Arc::ptr_eq(&current.session, session));
+        if is_current {
+            sessions.remove(session_id)
+        } else {
+            None
+        }
+    }
+
     async fn find_oldest_exited(&self, snapshot: &[Candidate]) -> Option<Candidate> {
-        let mut exited = Vec::new();
+        let mut oldest_exited = None;
 
         for candidate in snapshot {
             let mut guard = candidate.session.clone().lock_owned().await;
             if guard.has_exited().await.unwrap_or(false) {
-                exited.push(candidate.clone());
+                let replace = oldest_exited.as_ref().is_none_or(|current: &Candidate| {
+                    candidate.last_touched_at < current.last_touched_at
+                });
+                if replace {
+                    oldest_exited = Some(candidate.clone());
+                }
             }
         }
 
-        exited
-            .into_iter()
-            .min_by_key(|candidate| candidate.last_touched_at)
+        oldest_exited
     }
 }
 
