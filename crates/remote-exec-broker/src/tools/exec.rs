@@ -36,69 +36,15 @@ pub async fn exec_command(
     target.ensure_identity_verified(&input.target).await?;
     let path_policy = target_path_policy(target).await?;
 
-    if let Some(intercepted) =
-        maybe_intercept_apply_patch(&input.cmd, input.workdir.as_deref(), path_policy)
+    if let Some(output) =
+        maybe_intercepted_exec_output(state, &input, &target_name, started, path_policy).await?
     {
-        let warnings = vec![apply_patch_warning()];
-        let output = crate::tools::patch::forward_patch(
-            state,
-            &input.target,
-            intercepted.patch,
-            intercepted.workdir,
-        )
-        .await
-        .map_err(|err| {
-            tracing::warn!(
-                tool = "exec_command",
-                target = %target_name,
-                intercepted = true,
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                error = %err,
-                "broker tool failed"
-            );
-            anyhow::anyhow!(prepend_warning_text(err.to_string(), &warnings))
-        })?;
-
-        tracing::info!(
-            tool = "exec_command",
-            target = %target_name,
-            intercepted = true,
-            elapsed_ms = started.elapsed().as_millis() as u64,
-            "broker tool completed"
-        );
-        return Ok(ToolCallOutput::text_and_structured(
-            prepend_warning_text(format_intercepted_patch_text(&output), &warnings),
-            serde_json::to_value(CommandToolResult {
-                target: input.target,
-                chunk_id: None,
-                wall_time_seconds: 0.0,
-                exit_code: Some(0),
-                session_id: None,
-                session_command: None,
-                original_token_count: None,
-                output,
-                warnings,
-            })?,
-        ));
+        return Ok(output);
     }
 
-    let response = match target
-        .exec_start(&ExecStartRequest {
-            cmd: input.cmd.clone(),
-            workdir: input.workdir.clone(),
-            shell: input.shell.clone(),
-            tty: input.tty,
-            yield_time_ms: input.yield_time_ms,
-            max_output_tokens: input.max_output_tokens,
-            login: input.login,
-        })
-        .await
-    {
+    let response = match forward_exec_start(target, &input).await {
         Ok(response) => response,
         Err(err) => {
-            if matches!(err, DaemonClientError::Transport(_)) {
-                target.clear_cached_daemon_info().await;
-            }
             tracing::warn!(
                 tool = "exec_command",
                 target = %target_name,
@@ -113,26 +59,8 @@ pub async fn exec_command(
     validate_exec_response(&response)?;
 
     let session_command = input.cmd.clone();
-    let session_id = if response.running {
-        let daemon_session_id = response
-            .daemon_session_id
-            .clone()
-            .expect("daemon session id");
-        Some(
-            state
-                .sessions
-                .insert(
-                    input.target.clone(),
-                    daemon_session_id,
-                    response.daemon_instance_id.clone(),
-                    session_command.clone(),
-                )
-                .await
-                .session_id,
-        )
-    } else {
-        None
-    };
+    let session_id =
+        register_public_session(state, &input.target, &session_command, &response).await;
 
     tracing::info!(
         tool = "exec_command",
@@ -146,23 +74,7 @@ pub async fn exec_command(
         "broker tool completed"
     );
 
-    Ok(ToolCallOutput::text_and_structured(
-        prepend_warning_text(
-            format_command_text(&input.cmd, &response, session_id.as_deref()),
-            &response.warnings,
-        ),
-        serde_json::to_value(CommandToolResult {
-            target: input.target,
-            chunk_id: response.chunk_id,
-            wall_time_seconds: response.wall_time_seconds,
-            exit_code: response.exit_code,
-            session_id,
-            session_command: Some(session_command),
-            original_token_count: response.original_token_count,
-            output: response.output,
-            warnings: response.warnings,
-        })?,
-    ))
+    exec_command_output(input.target, session_command, response, session_id)
 }
 
 pub async fn write_stdin(
@@ -229,7 +141,159 @@ async fn write_stdin_inner(
     }
 
     let target = state.target(&record.target)?;
-    let response = match target
+    let response = forward_exec_write(state, target, &record, input).await?;
+    validate_exec_response(&response)?;
+
+    let session_id = if response.running {
+        Some(record.session_id.clone())
+    } else {
+        state.sessions.remove(&record.session_id).await;
+        None
+    };
+
+    write_stdin_output(record, response, session_id)
+}
+
+async fn maybe_intercepted_exec_output(
+    state: &crate::BrokerState,
+    input: &ExecCommandInput,
+    target_name: &str,
+    started: Instant,
+    path_policy: PathPolicy,
+) -> anyhow::Result<Option<ToolCallOutput>> {
+    let Some(intercepted) =
+        maybe_intercept_apply_patch(&input.cmd, input.workdir.as_deref(), path_policy)
+    else {
+        return Ok(None);
+    };
+
+    let warnings = vec![apply_patch_warning()];
+    let output = crate::tools::patch::forward_patch(
+        state,
+        &input.target,
+        intercepted.patch,
+        intercepted.workdir,
+    )
+    .await
+    .map_err(|err| {
+        tracing::warn!(
+            tool = "exec_command",
+            target = %target_name,
+            intercepted = true,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            error = %err,
+            "broker tool failed"
+        );
+        anyhow::anyhow!(prepend_warning_text(err.to_string(), &warnings))
+    })?;
+
+    tracing::info!(
+        tool = "exec_command",
+        target = %target_name,
+        intercepted = true,
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "broker tool completed"
+    );
+    Ok(Some(ToolCallOutput::text_and_structured(
+        prepend_warning_text(format_intercepted_patch_text(&output), &warnings),
+        serde_json::to_value(CommandToolResult {
+            target: input.target.clone(),
+            chunk_id: None,
+            wall_time_seconds: 0.0,
+            exit_code: Some(0),
+            session_id: None,
+            session_command: None,
+            original_token_count: None,
+            output,
+            warnings,
+        })?,
+    )))
+}
+
+fn exec_start_request(input: &ExecCommandInput) -> ExecStartRequest {
+    ExecStartRequest {
+        cmd: input.cmd.clone(),
+        workdir: input.workdir.clone(),
+        shell: input.shell.clone(),
+        tty: input.tty,
+        yield_time_ms: input.yield_time_ms,
+        max_output_tokens: input.max_output_tokens,
+        login: input.login,
+    }
+}
+
+async fn forward_exec_start(
+    target: &crate::TargetHandle,
+    input: &ExecCommandInput,
+) -> Result<ExecResponse, DaemonClientError> {
+    let result = target.exec_start(&exec_start_request(input)).await;
+    if let Err(DaemonClientError::Transport(_)) = &result {
+        target.clear_cached_daemon_info().await;
+    }
+    result
+}
+
+async fn register_public_session(
+    state: &crate::BrokerState,
+    target: &str,
+    session_command: &str,
+    response: &ExecResponse,
+) -> Option<String> {
+    if !response.running {
+        return None;
+    }
+
+    let daemon_session_id = response
+        .daemon_session_id
+        .clone()
+        .expect("daemon session id");
+    Some(
+        state
+            .sessions
+            .insert(
+                target.to_string(),
+                daemon_session_id,
+                response.daemon_instance_id.clone(),
+                session_command.to_string(),
+            )
+            .await
+            .session_id,
+    )
+}
+
+fn exec_command_output(
+    target: String,
+    session_command: String,
+    response: ExecResponse,
+    session_id: Option<String>,
+) -> anyhow::Result<ToolCallOutput> {
+    let text = prepend_warning_text(
+        format_command_text(&session_command, &response, session_id.as_deref()),
+        &response.warnings,
+    );
+    Ok(ToolCallOutput::text_and_structured(
+        text,
+        serde_json::to_value(CommandToolResult {
+            target,
+            chunk_id: response.chunk_id,
+            wall_time_seconds: response.wall_time_seconds,
+            exit_code: response.exit_code,
+            session_id,
+            session_command: Some(session_command),
+            original_token_count: response.original_token_count,
+            output: response.output,
+            warnings: response.warnings,
+        })?,
+    ))
+}
+
+async fn forward_exec_write(
+    state: &crate::BrokerState,
+    target: &crate::TargetHandle,
+    record: &crate::session_store::SessionRecord,
+    input: WriteStdinInput,
+) -> anyhow::Result<ExecResponse> {
+    match target
         .exec_write(&ExecWriteRequest {
             daemon_session_id: record.daemon_session_id.clone(),
             chars: input.chars.unwrap_or_default(),
@@ -238,12 +302,12 @@ async fn write_stdin_inner(
         })
         .await
     {
-        Ok(response) => response,
+        Ok(response) => Ok(response),
         Err(err) if err.rpc_code() == Some("unknown_session") => {
             state.sessions.remove(&record.session_id).await;
-            return Err(anyhow::anyhow!(unknown_process_id_message(
+            Err(anyhow::anyhow!(unknown_process_id_message(
                 &record.session_id
-            )));
+            )))
         }
         Err(err) => {
             if let Ok(info) = target.target_info().await
@@ -258,27 +322,26 @@ async fn write_stdin_inner(
             if matches!(err, DaemonClientError::Transport(_)) {
                 target.clear_cached_daemon_info().await;
             }
-            return Err(err.into());
+            Err(err.into())
         }
-    };
-    validate_exec_response(&response)?;
+    }
+}
 
-    let session_id = if response.running {
-        Some(record.session_id.clone())
-    } else {
-        state.sessions.remove(&record.session_id).await;
-        None
-    };
-
-    Ok(ToolCallOutput::text_and_structured(
-        prepend_warning_text(
-            format_poll_text(
-                Some(&record.session_command),
-                &response,
-                session_id.as_deref(),
-            ),
-            &response.warnings,
+fn write_stdin_output(
+    record: crate::session_store::SessionRecord,
+    response: ExecResponse,
+    session_id: Option<String>,
+) -> anyhow::Result<ToolCallOutput> {
+    let text = prepend_warning_text(
+        format_poll_text(
+            Some(&record.session_command),
+            &response,
+            session_id.as_deref(),
         ),
+        &response.warnings,
+    );
+    Ok(ToolCallOutput::text_and_structured(
+        text,
         serde_json::to_value(CommandToolResult {
             target: record.target,
             chunk_id: response.chunk_id,
