@@ -352,7 +352,25 @@ fn extract_archive(
     request: &TransferImportRequest,
     replaced: bool,
 ) -> anyhow::Result<TransferImportResponse> {
-    let mut summary = TransferImportResponse {
+    let mut summary = new_import_summary(request, replaced);
+
+    let reader = open_archive_reader(archive_path, &request.compression)?;
+    let mut archive = tar::Archive::new(reader);
+
+    match request.source_type {
+        TransferSourceType::File => {
+            extract_single_file_archive(&mut archive, destination_path, &mut summary)?
+        }
+        TransferSourceType::Directory | TransferSourceType::Multiple => {
+            extract_tree_archive(&mut archive, destination_path, &mut summary)?
+        }
+    }
+
+    Ok(summary)
+}
+
+fn new_import_summary(request: &TransferImportRequest, replaced: bool) -> TransferImportResponse {
+    TransferImportResponse {
         source_type: request.source_type.clone(),
         bytes_copied: 0,
         files_copied: 0,
@@ -361,56 +379,69 @@ fn extract_archive(
             TransferSourceType::Directory | TransferSourceType::Multiple
         ) as u64,
         replaced,
-    };
+    }
+}
 
-    let reader = open_archive_reader(archive_path, &request.compression)?;
-    let mut archive = tar::Archive::new(reader);
+fn extract_single_file_archive<R: Read>(
+    archive: &mut tar::Archive<R>,
+    destination_path: &Path,
+    summary: &mut TransferImportResponse,
+) -> anyhow::Result<()> {
+    let mut entries = archive.entries()?;
+    let mut entry = entries
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("archive is empty"))??;
+    anyhow::ensure!(
+        entry.header().entry_type().is_file(),
+        "archive entry is not a regular file"
+    );
 
-    match request.source_type {
-        TransferSourceType::File => {
-            let mut entries = archive.entries()?;
-            let mut entry = entries
-                .next()
-                .ok_or_else(|| anyhow::anyhow!("archive is empty"))??;
-            anyhow::ensure!(
-                entry.header().entry_type().is_file(),
-                "archive entry is not a regular file"
-            );
-            let bytes_written = write_archive_file(&mut entry, destination_path)?;
-            anyhow::ensure!(
-                entries.next().transpose()?.is_none(),
-                "file archive contains extra entries"
-            );
-            summary.bytes_copied = bytes_written;
-            summary.files_copied = 1;
-        }
-        TransferSourceType::Directory | TransferSourceType::Multiple => {
-            std::fs::create_dir_all(destination_path)?;
-            for entry in archive.entries()? {
-                let mut entry = entry?;
-                let raw_rel = entry.path()?.to_path_buf();
-                let rel = normalize_archive_entry_path(&raw_rel)?;
-                if rel.as_os_str().is_empty() {
-                    continue;
-                }
+    summary.bytes_copied = write_archive_file(&mut entry, destination_path)?;
+    summary.files_copied = 1;
+    anyhow::ensure!(
+        entries.next().transpose()?.is_none(),
+        "file archive contains extra entries"
+    );
+    Ok(())
+}
 
-                let out = destination_path.join(&rel);
-                let entry_type = entry.header().entry_type();
-                ensure_supported_archive_entry_type(entry_type, &raw_rel)?;
+fn extract_tree_archive<R: Read>(
+    archive: &mut tar::Archive<R>,
+    destination_path: &Path,
+    summary: &mut TransferImportResponse,
+) -> anyhow::Result<()> {
+    std::fs::create_dir_all(destination_path)?;
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        extract_tree_archive_entry(&mut entry, destination_path, summary)?;
+    }
+    Ok(())
+}
 
-                if entry_type.is_dir() {
-                    std::fs::create_dir_all(&out)?;
-                    summary.directories_copied += 1;
-                    continue;
-                }
-
-                summary.bytes_copied += write_archive_file(&mut entry, &out)?;
-                summary.files_copied += 1;
-            }
-        }
+fn extract_tree_archive_entry<R: Read>(
+    entry: &mut tar::Entry<R>,
+    destination_path: &Path,
+    summary: &mut TransferImportResponse,
+) -> anyhow::Result<()> {
+    let raw_rel = entry.path()?.to_path_buf();
+    let rel = normalize_archive_entry_path(&raw_rel)?;
+    if rel.as_os_str().is_empty() {
+        return Ok(());
     }
 
-    Ok(summary)
+    let out = destination_path.join(&rel);
+    let entry_type = entry.header().entry_type();
+    ensure_supported_archive_entry_type(entry_type, &raw_rel)?;
+
+    if entry_type.is_dir() {
+        std::fs::create_dir_all(&out)?;
+        summary.directories_copied += 1;
+        return Ok(());
+    }
+
+    summary.bytes_copied += write_archive_file(entry, &out)?;
+    summary.files_copied += 1;
+    Ok(())
 }
 
 fn write_archive_file<R: Read>(entry: &mut tar::Entry<R>, path: &Path) -> anyhow::Result<u64> {
