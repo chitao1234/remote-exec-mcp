@@ -58,9 +58,10 @@ pub fn write_dev_init_bundle(
     out_dir: &Path,
     force: bool,
 ) -> anyhow::Result<DevInitManifest> {
+    let daemon_out_dir = out_dir.join("daemons");
     fs::create_dir_all(out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
-    fs::create_dir_all(out_dir.join("daemons"))
-        .with_context(|| format!("creating {}", out_dir.join("daemons").display()))?;
+    fs::create_dir_all(&daemon_out_dir)
+        .with_context(|| format!("creating {}", daemon_out_dir.display()))?;
 
     let ca = KeyPairPaths {
         cert_pem: out_dir.join("ca.pem"),
@@ -71,22 +72,49 @@ pub fn write_dev_init_bundle(
         key_pem: out_dir.join("broker.key"),
     };
     let manifest_path = out_dir.join("certs-manifest.json");
+    let daemon_paths = build_daemon_paths(spec, &daemon_out_dir);
+    validate_dev_init_output_paths(&ca, &broker, &daemon_paths, &manifest_path, force)?;
 
-    let mut daemon_paths = BTreeMap::new();
-    for target in spec
-        .daemon_specs
+    let mut written_paths = Vec::new();
+    write_generated_pair(&ca, &bundle.ca, force, &mut written_paths)?;
+    write_generated_pair(&broker, &bundle.broker, force, &mut written_paths)?;
+    write_generated_daemon_pairs(spec, bundle, &daemon_paths, force, &mut written_paths)?;
+
+    let manifest = build_manifest(spec, out_dir.to_path_buf(), ca, broker, daemon_paths);
+    write_tracked_text_file(
+        &manifest_path,
+        &serde_json::to_string_pretty(&manifest)?,
+        force,
+        0o644,
+        &mut written_paths,
+    )?;
+
+    Ok(manifest)
+}
+
+fn build_daemon_paths(spec: &DevInitSpec, daemon_out_dir: &Path) -> BTreeMap<String, KeyPairPaths> {
+    spec.daemon_specs
         .iter()
-        .map(|daemon| daemon.target.as_str())
-    {
-        daemon_paths.insert(
-            target.to_string(),
-            KeyPairPaths {
-                cert_pem: out_dir.join("daemons").join(format!("{target}.pem")),
-                key_pem: out_dir.join("daemons").join(format!("{target}.key")),
-            },
-        );
-    }
+        .map(|daemon| {
+            let target = daemon.target.clone();
+            (
+                target.clone(),
+                KeyPairPaths {
+                    cert_pem: daemon_out_dir.join(format!("{target}.pem")),
+                    key_pem: daemon_out_dir.join(format!("{target}.key")),
+                },
+            )
+        })
+        .collect()
+}
 
+fn validate_dev_init_output_paths(
+    ca: &KeyPairPaths,
+    broker: &KeyPairPaths,
+    daemon_paths: &BTreeMap<String, KeyPairPaths>,
+    manifest_path: &Path,
+    force: bool,
+) -> anyhow::Result<()> {
     validate_output_paths(
         std::iter::once(ca.cert_pem.as_path())
             .chain(std::iter::once(ca.key_pem.as_path()))
@@ -97,50 +125,20 @@ pub fn write_dev_init_bundle(
                     .values()
                     .flat_map(|paths| [paths.cert_pem.as_path(), paths.key_pem.as_path()]),
             )
-            .chain(std::iter::once(manifest_path.as_path())),
+            .chain(std::iter::once(manifest_path)),
         force,
-    )?;
+    )
+}
 
-    let mut written_paths = Vec::new();
-
-    write_text_file(
-        &ca.cert_pem,
-        &bundle.ca.cert_pem,
-        force,
-        0o644,
-        &mut written_paths,
-    )
-    .map_err(|err| err.context(format_written_paths(&written_paths)))?;
-    write_text_file(
-        &ca.key_pem,
-        &bundle.ca.key_pem,
-        force,
-        0o600,
-        &mut written_paths,
-    )
-    .map_err(|err| err.context(format_written_paths(&written_paths)))?;
-    write_text_file(
-        &broker.cert_pem,
-        &bundle.broker.cert_pem,
-        force,
-        0o644,
-        &mut written_paths,
-    )
-    .map_err(|err| err.context(format_written_paths(&written_paths)))?;
-    write_text_file(
-        &broker.key_pem,
-        &bundle.broker.key_pem,
-        force,
-        0o600,
-        &mut written_paths,
-    )
-    .map_err(|err| err.context(format_written_paths(&written_paths)))?;
-
-    for target in spec
-        .daemon_specs
-        .iter()
-        .map(|daemon| daemon.target.as_str())
-    {
+fn write_generated_daemon_pairs(
+    spec: &DevInitSpec,
+    bundle: &GeneratedDevInitBundle,
+    daemon_paths: &BTreeMap<String, KeyPairPaths>,
+    force: bool,
+    written_paths: &mut Vec<PathBuf>,
+) -> anyhow::Result<()> {
+    for daemon in &spec.daemon_specs {
+        let target = daemon.target.as_str();
         let pem_pair = bundle
             .daemons
             .get(target)
@@ -148,35 +146,9 @@ pub fn write_dev_init_bundle(
         let paths = daemon_paths
             .get(target)
             .expect("validated daemon paths must exist");
-        write_text_file(
-            &paths.cert_pem,
-            &pem_pair.cert_pem,
-            force,
-            0o644,
-            &mut written_paths,
-        )
-        .map_err(|err| err.context(format_written_paths(&written_paths)))?;
-        write_text_file(
-            &paths.key_pem,
-            &pem_pair.key_pem,
-            force,
-            0o600,
-            &mut written_paths,
-        )
-        .map_err(|err| err.context(format_written_paths(&written_paths)))?;
+        write_generated_pair(paths, pem_pair, force, written_paths)?;
     }
-
-    let manifest = build_manifest(spec, out_dir.to_path_buf(), ca, broker, daemon_paths);
-    write_text_file(
-        &manifest_path,
-        &serde_json::to_string_pretty(&manifest)?,
-        force,
-        0o644,
-        &mut written_paths,
-    )
-    .map_err(|err| err.context(format_written_paths(&written_paths)))?;
-
-    Ok(manifest)
+    Ok(())
 }
 
 fn validate_output_paths<'a>(
@@ -202,24 +174,29 @@ fn write_pair(
     validate_output_paths([paths.cert_pem.as_path(), paths.key_pem.as_path()], force)?;
 
     let mut written_paths = Vec::new();
-    write_text_file(
-        &paths.cert_pem,
-        &pair.cert_pem,
-        force,
-        0o644,
-        &mut written_paths,
-    )
-    .map_err(|err| err.context(format_written_paths(&written_paths)))?;
-    write_text_file(
-        &paths.key_pem,
-        &pair.key_pem,
-        force,
-        0o600,
-        &mut written_paths,
-    )
-    .map_err(|err| err.context(format_written_paths(&written_paths)))?;
+    write_generated_pair(paths, pair, force, &mut written_paths)
+}
 
+fn write_generated_pair(
+    paths: &KeyPairPaths,
+    pair: &crate::GeneratedPemPair,
+    force: bool,
+    written_paths: &mut Vec<PathBuf>,
+) -> anyhow::Result<()> {
+    write_tracked_text_file(&paths.cert_pem, &pair.cert_pem, force, 0o644, written_paths)?;
+    write_tracked_text_file(&paths.key_pem, &pair.key_pem, force, 0o600, written_paths)?;
     Ok(())
+}
+
+fn write_tracked_text_file(
+    path: &Path,
+    contents: &str,
+    force: bool,
+    mode: u32,
+    written_paths: &mut Vec<PathBuf>,
+) -> anyhow::Result<()> {
+    write_text_file(path, contents, force, mode, written_paths)
+        .map_err(|err| err.context(format_written_paths(written_paths)))
 }
 
 fn write_text_file(
