@@ -52,6 +52,37 @@ pub struct TargetHandle {
 }
 
 impl TargetHandle {
+    fn new(
+        backend: TargetBackend,
+        expected_daemon_name: Option<String>,
+        identity_verified: bool,
+        cached_daemon_info: Option<CachedDaemonInfo>,
+    ) -> Self {
+        Self {
+            backend,
+            expected_daemon_name,
+            identity_verified: Arc::new(Mutex::new(identity_verified)),
+            cached_daemon_info: Arc::new(Mutex::new(cached_daemon_info)),
+        }
+    }
+
+    fn verified(
+        backend: TargetBackend,
+        expected_daemon_name: Option<String>,
+        info: &TargetInfoResponse,
+    ) -> Self {
+        Self::new(
+            backend,
+            expected_daemon_name,
+            true,
+            Some(Self::cache_from_target_info(info)),
+        )
+    }
+
+    fn unavailable(backend: TargetBackend, expected_daemon_name: Option<String>) -> Self {
+        Self::new(backend, expected_daemon_name, false, None)
+    }
+
     fn cache_from_target_info(info: &TargetInfoResponse) -> CachedDaemonInfo {
         CachedDaemonInfo {
             daemon_version: info.daemon_version.clone(),
@@ -162,13 +193,7 @@ impl TargetHandle {
             }
             Err(err) => return Err(err.into()),
         };
-        if let Some(expected_name) = &self.expected_daemon_name {
-            anyhow::ensure!(
-                &info.target == expected_name,
-                "target `{name}` resolved to daemon `{}` instead of `{expected_name}`",
-                info.target
-            );
-        }
+        ensure_expected_daemon_name(name, self.expected_daemon_name.as_deref(), &info.target)?;
 
         *self.cached_daemon_info.lock().await = Some(Self::cache_from_target_info(&info));
         *identity_verified = true;
@@ -184,6 +209,21 @@ impl TargetHandle {
         );
         Ok(())
     }
+}
+
+fn ensure_expected_daemon_name(
+    target_name: &str,
+    expected_daemon_name: Option<&str>,
+    actual_daemon_name: &str,
+) -> anyhow::Result<()> {
+    if let Some(expected_daemon_name) = expected_daemon_name {
+        anyhow::ensure!(
+            actual_daemon_name == expected_daemon_name,
+            "target `{target_name}` resolved to daemon `{actual_daemon_name}` instead of `{expected_daemon_name}`"
+        );
+    }
+
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -247,28 +287,23 @@ async fn build_state(mut config: config::BrokerConfig) -> anyhow::Result<BrokerS
         );
         targets.insert(
             "local".to_string(),
-            TargetHandle {
-                backend: TargetBackend::Local(client),
-                expected_daemon_name: Some("local".to_string()),
-                identity_verified: Arc::new(Mutex::new(true)),
-                cached_daemon_info: Arc::new(Mutex::new(Some(
-                    TargetHandle::cache_from_target_info(&info),
-                ))),
-            },
+            TargetHandle::verified(
+                TargetBackend::Local(client),
+                Some("local".to_string()),
+                &info,
+            ),
         );
     }
 
     for (name, target_config) in &config.targets {
         let client = DaemonClient::new(name.clone(), target_config).await?;
-        let (identity_verified, cached_daemon_info) = match client.target_info().await {
+        let handle = match client.target_info().await {
             Ok(info) => {
-                if let Some(expected_name) = &target_config.expected_daemon_name {
-                    anyhow::ensure!(
-                        &info.target == expected_name,
-                        "target `{name}` resolved to daemon `{}` instead of `{expected_name}`",
-                        info.target
-                    );
-                }
+                ensure_expected_daemon_name(
+                    name,
+                    target_config.expected_daemon_name.as_deref(),
+                    &info.target,
+                )?;
                 tracing::info!(
                     target = %name,
                     base_url = %target_config.base_url,
@@ -282,7 +317,11 @@ async fn build_state(mut config: config::BrokerConfig) -> anyhow::Result<BrokerS
                     supports_transfer_compression = info.supports_transfer_compression,
                     "target available during broker startup"
                 );
-                (true, Some(TargetHandle::cache_from_target_info(&info)))
+                TargetHandle::verified(
+                    TargetBackend::Remote(client),
+                    target_config.expected_daemon_name.clone(),
+                    &info,
+                )
             }
             Err(DaemonClientError::Transport(err)) => {
                 tracing::warn!(
@@ -291,20 +330,15 @@ async fn build_state(mut config: config::BrokerConfig) -> anyhow::Result<BrokerS
                     ?err,
                     "target unavailable during broker startup"
                 );
-                (false, None)
+                TargetHandle::unavailable(
+                    TargetBackend::Remote(client),
+                    target_config.expected_daemon_name.clone(),
+                )
             }
             Err(err) => return Err(err.into()),
         };
 
-        targets.insert(
-            name.clone(),
-            TargetHandle {
-                backend: TargetBackend::Remote(client),
-                expected_daemon_name: target_config.expected_daemon_name.clone(),
-                identity_verified: Arc::new(Mutex::new(identity_verified)),
-                cached_daemon_info: Arc::new(Mutex::new(cached_daemon_info)),
-            },
-        );
+        targets.insert(name.clone(), handle);
     }
 
     Ok(BrokerState {
