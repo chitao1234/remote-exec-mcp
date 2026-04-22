@@ -30,6 +30,11 @@ pub(crate) enum OutputWait {
     TimedOut,
 }
 
+enum ChildStatus {
+    Running,
+    Exited(Option<i32>),
+}
+
 pub(crate) enum SessionChild {
     Pty(PtySession),
     #[cfg(all(windows, feature = "winpty"))]
@@ -266,6 +271,45 @@ where
     });
 }
 
+impl SessionChild {
+    fn try_wait_status(&mut self) -> anyhow::Result<ChildStatus> {
+        match self {
+            SessionChild::Pty(pty) => Ok(match pty.child.try_wait()? {
+                Some(status) => ChildStatus::Exited(Some(status.exit_code() as i32)),
+                None => ChildStatus::Running,
+            }),
+            #[cfg(all(windows, feature = "winpty"))]
+            SessionChild::Winpty(pty) => Ok(match pty.try_wait()? {
+                Some(status) => ChildStatus::Exited(Some(status)),
+                None => ChildStatus::Running,
+            }),
+            SessionChild::Pipe(child) => Ok(match child.try_wait()? {
+                Some(status) => ChildStatus::Exited(status.code()),
+                None => ChildStatus::Running,
+            }),
+        }
+    }
+
+    fn terminate(&mut self) -> anyhow::Result<()> {
+        match self {
+            SessionChild::Pty(pty) => {
+                let _ = pty.child.kill();
+                let _ = pty.child.try_wait()?;
+            }
+            #[cfg(all(windows, feature = "winpty"))]
+            SessionChild::Winpty(pty) => {
+                let _ = pty.terminate();
+            }
+            SessionChild::Pipe(child) => {
+                let _ = child.kill();
+                let _ = child.try_wait()?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
 impl LiveSession {
     pub async fn read_available(&mut self) -> anyhow::Result<String> {
         let mut output = String::new();
@@ -306,29 +350,13 @@ impl LiveSession {
     }
 
     pub async fn has_exited(&mut self) -> anyhow::Result<bool> {
-        match &mut self.child {
-            SessionChild::Pty(pty) => {
-                if let Some(status) = pty.child.try_wait()? {
-                    self.exit_code = Some(status.exit_code() as i32);
-                    return Ok(true);
-                }
-            }
-            #[cfg(all(windows, feature = "winpty"))]
-            SessionChild::Winpty(pty) => {
-                if let Some(status) = pty.try_wait()? {
-                    self.exit_code = Some(status);
-                    return Ok(true);
-                }
-            }
-            SessionChild::Pipe(child) => {
-                if let Some(status) = child.try_wait()? {
-                    self.exit_code = status.code();
-                    return Ok(true);
-                }
+        match self.child.try_wait_status()? {
+            ChildStatus::Running => Ok(false),
+            ChildStatus::Exited(exit_code) => {
+                self.exit_code = exit_code;
+                Ok(true)
             }
         }
-
-        Ok(false)
     }
 
     pub async fn terminate(&mut self) -> anyhow::Result<()> {
@@ -336,22 +364,7 @@ impl LiveSession {
             return Ok(());
         }
 
-        match &mut self.child {
-            SessionChild::Pty(pty) => {
-                let _ = pty.child.kill();
-                let _ = pty.child.try_wait()?;
-            }
-            #[cfg(all(windows, feature = "winpty"))]
-            SessionChild::Winpty(pty) => {
-                let _ = pty.terminate();
-            }
-            SessionChild::Pipe(child) => {
-                let _ = child.kill();
-                let _ = child.try_wait()?;
-            }
-        }
-
-        Ok(())
+        self.child.terminate()
     }
 
     pub async fn write(&mut self, chars: &str) -> anyhow::Result<()> {
