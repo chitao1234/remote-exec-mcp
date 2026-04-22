@@ -203,26 +203,9 @@ fn spawn_pty(
 
     let child = pty.slave.spawn_command(builder)?;
     let writer = pty.master.take_writer()?;
-    let mut reader = pty.master.try_clone_reader()?;
+    let reader = pty.master.try_clone_reader()?;
     let (sender, receiver) = unbounded_channel();
-
-    std::thread::spawn(move || {
-        let mut buffer = [0u8; 8192];
-        loop {
-            match reader.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(read) => {
-                    if sender
-                        .send(String::from_utf8_lossy(&buffer[..read]).into_owned())
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-    });
+    spawn_output_reader(reader, sender);
 
     Ok(new_live_session(
         true,
@@ -255,12 +238,12 @@ fn spawn_pipe(
     let session = new_live_session(false, SessionChild::Pipe(Box::new(child)), receiver);
 
     let _ = (cmd, cwd);
-    spawn_pipe_reader(reader, sender);
+    spawn_output_reader(reader, sender);
 
     Ok(session)
 }
 
-fn spawn_pipe_reader<R>(mut reader: R, sender: UnboundedSender<String>)
+fn spawn_output_reader<R>(mut reader: R, sender: UnboundedSender<String>)
 where
     R: Read + Send + 'static,
 {
