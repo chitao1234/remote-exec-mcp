@@ -103,6 +103,11 @@ async fn export_endpoint_to_archive(
     archive_path: &Path,
     compression: &RpcTransferCompression,
 ) -> anyhow::Result<RpcTransferSourceType> {
+    let request = TransferExportRequest {
+        path: endpoint.path.clone(),
+        compression: compression.clone(),
+    };
+
     match endpoint.target.as_str() {
         "local" => {
             crate::local_transfer::export_path_to_archive(
@@ -114,25 +119,7 @@ async fn export_endpoint_to_archive(
             .await
         }
         target_name => {
-            let target = verified_remote_target(state, target_name).await?;
-            match target
-                .transfer_export_to_file(
-                    &TransferExportRequest {
-                        path: endpoint.path.clone(),
-                        compression: compression.clone(),
-                    },
-                    archive_path,
-                )
-                .await
-            {
-                Ok(source_type) => Ok(source_type),
-                Err(err) => {
-                    if matches!(err, DaemonClientError::Transport(_)) {
-                        target.clear_cached_daemon_info().await;
-                    }
-                    Err(normalize_transfer_error(err))
-                }
-            }
+            export_remote_endpoint_to_archive(state, target_name, &request, archive_path).await
         }
     }
 }
@@ -146,16 +133,8 @@ async fn import_archive_to_endpoint(
     compression: &RpcTransferCompression,
     create_parent: bool,
 ) -> anyhow::Result<TransferImportResponse> {
-    let request = TransferImportRequest {
-        destination_path: endpoint.path.clone(),
-        overwrite: match overwrite {
-            TransferOverwrite::Fail => TransferOverwriteMode::Fail,
-            TransferOverwrite::Replace => TransferOverwriteMode::Replace,
-        },
-        create_parent,
-        source_type: source_type.clone(),
-        compression: compression.clone(),
-    };
+    let request =
+        build_import_request(endpoint, overwrite, source_type, compression, create_parent);
 
     match endpoint.target.as_str() {
         "local" => {
@@ -167,19 +146,7 @@ async fn import_archive_to_endpoint(
             .await
         }
         target_name => {
-            let target = verified_remote_target(state, target_name).await?;
-            match target
-                .transfer_import_from_file(archive_path, &request)
-                .await
-            {
-                Ok(summary) => Ok(summary),
-                Err(err) => {
-                    if matches!(err, DaemonClientError::Transport(_)) {
-                        target.clear_cached_daemon_info().await;
-                    }
-                    Err(normalize_transfer_error(err))
-                }
-            }
+            import_remote_archive_to_endpoint(state, target_name, archive_path, &request).await
         }
     }
 }
@@ -188,5 +155,69 @@ fn normalize_transfer_error(err: DaemonClientError) -> anyhow::Error {
     match err {
         DaemonClientError::Rpc { message, .. } => anyhow::Error::msg(message),
         other => other.into(),
+    }
+}
+
+async fn export_remote_endpoint_to_archive(
+    state: &crate::BrokerState,
+    target_name: &str,
+    request: &TransferExportRequest,
+    archive_path: &Path,
+) -> anyhow::Result<RpcTransferSourceType> {
+    let target = verified_remote_target(state, target_name).await?;
+    handle_remote_transfer_result(
+        target,
+        target.transfer_export_to_file(request, archive_path).await,
+    )
+    .await
+}
+
+async fn import_remote_archive_to_endpoint(
+    state: &crate::BrokerState,
+    target_name: &str,
+    archive_path: &Path,
+    request: &TransferImportRequest,
+) -> anyhow::Result<TransferImportResponse> {
+    let target = verified_remote_target(state, target_name).await?;
+    handle_remote_transfer_result(
+        target,
+        target
+            .transfer_import_from_file(archive_path, request)
+            .await,
+    )
+    .await
+}
+
+fn build_import_request(
+    endpoint: &TransferEndpoint,
+    overwrite: &TransferOverwrite,
+    source_type: &RpcTransferSourceType,
+    compression: &RpcTransferCompression,
+    create_parent: bool,
+) -> TransferImportRequest {
+    TransferImportRequest {
+        destination_path: endpoint.path.clone(),
+        overwrite: match overwrite {
+            TransferOverwrite::Fail => TransferOverwriteMode::Fail,
+            TransferOverwrite::Replace => TransferOverwriteMode::Replace,
+        },
+        create_parent,
+        source_type: source_type.clone(),
+        compression: compression.clone(),
+    }
+}
+
+async fn handle_remote_transfer_result<T>(
+    target: &crate::TargetHandle,
+    result: Result<T, DaemonClientError>,
+) -> anyhow::Result<T> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(err) => {
+            if matches!(err, DaemonClientError::Transport(_)) {
+                target.clear_cached_daemon_info().await;
+            }
+            Err(normalize_transfer_error(err))
+        }
     }
 }
