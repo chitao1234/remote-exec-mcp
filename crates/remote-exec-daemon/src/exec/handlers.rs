@@ -53,38 +53,22 @@ pub async fn exec_start_local(
             session.record_output(&chunk);
         }
 
-        if has_exited(&mut session).await.map_err(internal_error)? {
-            return finish_completed_response(
-                state.as_ref(),
-                &mut session,
-                output,
-                req.max_output_tokens,
-            )
-            .await;
+        if let Some(response) = completed_response_if_exited(
+            state.as_ref(),
+            &mut session,
+            &mut output,
+            req.max_output_tokens,
+        )
+        .await?
+        {
+            return Ok(response);
         }
 
         tokio::time::sleep(Duration::from_millis(EXEC_START_POLL_INTERVAL_MS)).await;
     }
 
-    let daemon_session_id = uuid::Uuid::new_v4().to_string();
-    let insert_outcome = state
-        .sessions
-        .insert(daemon_session_id.clone(), session)
-        .await;
-    let warnings = session_limit_warnings(state.as_ref(), insert_outcome.crossed_warning_threshold);
-    let session = state
-        .sessions
-        .lock(&daemon_session_id)
-        .await
-        .ok_or_else(|| internal_error(anyhow::anyhow!("stored daemon session disappeared")))?;
-    let response = running_response(
-        &state.daemon_instance_id,
-        daemon_session_id.clone(),
-        &session,
-        output,
-        req.max_output_tokens,
-        warnings.clone(),
-    );
+    let (daemon_session_id, warnings, response) =
+        store_running_session(state.as_ref(), session, output, req.max_output_tokens).await?;
     tracing::info!(
         target = %state.config.target,
         daemon_session_id = %daemon_session_id,
@@ -139,10 +123,15 @@ pub async fn exec_write_local(
     let output = poll_until(&mut session, yield_time_ms)
         .await
         .map_err(internal_error)?;
-    if has_exited(&mut session).await.map_err(internal_error)? {
-        let response =
-            finish_completed_response(state.as_ref(), &mut session, output, req.max_output_tokens)
-                .await?;
+    let mut output = output;
+    if let Some(response) = completed_response_if_exited(
+        state.as_ref(),
+        &mut session,
+        &mut output,
+        req.max_output_tokens,
+    )
+    .await?
+    {
         session.retire().await;
         tracing::info!(
             target = %state.config.target,
@@ -154,8 +143,8 @@ pub async fn exec_write_local(
         return Ok(response);
     }
 
-    let response = running_response(
-        &state.daemon_instance_id,
+    let response = running_session_response(
+        state.as_ref(),
         daemon_session_id.clone(),
         &session,
         output,
@@ -241,6 +230,67 @@ async fn finish_completed_response(
         output,
         max_output_tokens,
     ))
+}
+
+async fn completed_response_if_exited(
+    state: &AppState,
+    session: &mut session::LiveSession,
+    output: &mut String,
+    max_output_tokens: Option<u32>,
+) -> Result<Option<ExecResponse>, (StatusCode, Json<RpcErrorBody>)> {
+    if !has_exited(session).await.map_err(internal_error)? {
+        return Ok(None);
+    }
+
+    finish_completed_response(state, session, std::mem::take(output), max_output_tokens)
+        .await
+        .map(Some)
+}
+
+async fn store_running_session(
+    state: &AppState,
+    session: session::LiveSession,
+    output: String,
+    max_output_tokens: Option<u32>,
+) -> Result<(String, Vec<ExecWarning>, ExecResponse), (StatusCode, Json<RpcErrorBody>)> {
+    let daemon_session_id = uuid::Uuid::new_v4().to_string();
+    let insert_outcome = state
+        .sessions
+        .insert(daemon_session_id.clone(), session)
+        .await;
+    let warnings = session_limit_warnings(state, insert_outcome.crossed_warning_threshold);
+    let session = state
+        .sessions
+        .lock(&daemon_session_id)
+        .await
+        .ok_or_else(|| internal_error(anyhow::anyhow!("stored daemon session disappeared")))?;
+    let response = running_session_response(
+        state,
+        daemon_session_id.clone(),
+        &session,
+        output,
+        max_output_tokens,
+        warnings.clone(),
+    );
+    Ok((daemon_session_id, warnings, response))
+}
+
+fn running_session_response(
+    state: &AppState,
+    daemon_session_id: String,
+    session: &session::LiveSession,
+    output: String,
+    max_output_tokens: Option<u32>,
+    warnings: Vec<ExecWarning>,
+) -> ExecResponse {
+    running_response(
+        &state.daemon_instance_id,
+        daemon_session_id,
+        session,
+        output,
+        max_output_tokens,
+        warnings,
+    )
 }
 
 fn session_limit_warnings(state: &AppState, crossed_warning_threshold: bool) -> Vec<ExecWarning> {
