@@ -6,6 +6,18 @@ use remote_exec_proto::path::{
 use remote_exec_proto::public::TransferEndpoint;
 use remote_exec_proto::rpc::TransferCompression as RpcTransferCompression;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EndpointTargetContext {
+    Local {
+        policy: PathPolicy,
+    },
+    Remote {
+        policy: PathPolicy,
+        accepts_single_slash_windows_absolute: bool,
+        supports_transfer_compression: bool,
+    },
+}
+
 pub(super) async fn verified_remote_target<'a>(
     state: &'a crate::BrokerState,
     target_name: &'a str,
@@ -26,39 +38,35 @@ async fn verified_remote_daemon_info(
         .context("target info missing after identity verification")
 }
 
+async fn endpoint_target_context(
+    state: &crate::BrokerState,
+    target_name: &str,
+) -> anyhow::Result<EndpointTargetContext> {
+    if target_name == "local" {
+        return Ok(EndpointTargetContext::local());
+    }
+
+    Ok(EndpointTargetContext::remote(
+        verified_remote_daemon_info(state, target_name).await?,
+    ))
+}
+
 pub(super) async fn endpoint_policy(
     state: &crate::BrokerState,
     endpoint: &TransferEndpoint,
 ) -> anyhow::Result<PathPolicy> {
-    if endpoint.target == "local" {
-        return Ok(local_policy());
-    }
-
-    let info = verified_remote_daemon_info(state, &endpoint.target).await?;
-    Ok(remote_policy(&info.platform))
+    Ok(endpoint_target_context(state, &endpoint.target)
+        .await?
+        .policy())
 }
 
 pub(super) async fn ensure_absolute(
     state: &crate::BrokerState,
     endpoint: &TransferEndpoint,
 ) -> anyhow::Result<()> {
-    if endpoint.target == "local" {
-        let policy = local_policy();
-        anyhow::ensure!(
-            is_absolute_for_policy(policy, &endpoint.path),
-            "transfer endpoint path `{}` is not absolute",
-            endpoint.path
-        );
-        return Ok(());
-    }
-
-    let info = verified_remote_daemon_info(state, &endpoint.target).await?;
-    let policy = remote_policy(&info.platform);
+    let context = endpoint_target_context(state, &endpoint.target).await?;
     anyhow::ensure!(
-        is_absolute_for_policy(policy, &endpoint.path)
-            || (info.platform.eq_ignore_ascii_case("windows")
-                && endpoint.path.starts_with('/')
-                && !endpoint.path.starts_with("//")),
+        context.is_absolute_path(&endpoint.path),
         "transfer endpoint path `{}` is not absolute",
         endpoint.path
     );
@@ -127,13 +135,13 @@ pub(super) async fn negotiate_transfer_compression(
 
     let mut has_remote_endpoint = false;
     for endpoint in sources.iter().chain(std::iter::once(destination)) {
-        if endpoint.target == "local" {
+        let context = endpoint_target_context(state, &endpoint.target).await?;
+        let Some(supports_transfer_compression) = context.supports_transfer_compression() else {
             continue;
-        }
+        };
 
         has_remote_endpoint = true;
-        let info = verified_remote_daemon_info(state, &endpoint.target).await?;
-        if !info.supports_transfer_compression {
+        if !supports_transfer_compression {
             return Ok(RpcTransferCompression::None);
         }
     }
@@ -150,6 +158,50 @@ fn local_policy() -> PathPolicy {
         windows_path_policy()
     } else {
         linux_path_policy()
+    }
+}
+
+impl EndpointTargetContext {
+    fn local() -> Self {
+        Self::Local {
+            policy: local_policy(),
+        }
+    }
+
+    fn remote(info: crate::CachedDaemonInfo) -> Self {
+        let accepts_single_slash_windows_absolute = info.platform.eq_ignore_ascii_case("windows");
+        Self::Remote {
+            policy: remote_policy(&info.platform),
+            accepts_single_slash_windows_absolute,
+            supports_transfer_compression: info.supports_transfer_compression,
+        }
+    }
+
+    fn policy(self) -> PathPolicy {
+        match self {
+            Self::Local { policy } | Self::Remote { policy, .. } => policy,
+        }
+    }
+
+    fn is_absolute_path(self, path: &str) -> bool {
+        is_absolute_for_policy(self.policy(), path)
+            || matches!(
+                self,
+                Self::Remote {
+                    accepts_single_slash_windows_absolute: true,
+                    ..
+                } if path.starts_with('/') && !path.starts_with("//")
+            )
+    }
+
+    fn supports_transfer_compression(self) -> Option<bool> {
+        match self {
+            Self::Local { .. } => None,
+            Self::Remote {
+                supports_transfer_compression,
+                ..
+            } => Some(supports_transfer_compression),
+        }
     }
 }
 
