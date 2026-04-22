@@ -98,21 +98,31 @@ impl TargetConfig {
         }
 
         if self.base_url.starts_with("http://") {
-            anyhow::ensure!(
-                self.allow_insecure_http,
-                "target `{name}` uses http://; http:// targets require allow_insecure_http = true"
-            );
-            anyhow::ensure!(
-                !self.skip_server_name_verification,
-                "target `{name}` cannot set skip_server_name_verification for http:// targets"
-            );
-            anyhow::ensure!(
-                self.pinned_server_cert_pem.is_none(),
-                "target `{name}` cannot set pinned_server_cert_pem for http:// targets"
-            );
+            self.validate_http_transport(name)?;
             return Ok(TargetTransportKind::Http);
         }
 
+        self.validate_https_transport(name)?;
+        Ok(TargetTransportKind::Https)
+    }
+
+    fn validate_http_transport(&self, name: &str) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.allow_insecure_http,
+            "target `{name}` uses http://; http:// targets require allow_insecure_http = true"
+        );
+        anyhow::ensure!(
+            !self.skip_server_name_verification,
+            "target `{name}` cannot set skip_server_name_verification for http:// targets"
+        );
+        anyhow::ensure!(
+            self.pinned_server_cert_pem.is_none(),
+            "target `{name}` cannot set pinned_server_cert_pem for http:// targets"
+        );
+        Ok(())
+    }
+
+    fn validate_https_transport(&self, name: &str) -> anyhow::Result<()> {
         anyhow::ensure!(
             self.base_url.starts_with("https://"),
             "target `{name}` base_url must start with http:// or https://"
@@ -127,7 +137,7 @@ impl TargetConfig {
             self.client_key_pem.is_some(),
             "target `{name}` is missing client_key_pem"
         );
-        Ok(TargetTransportKind::Https)
+        Ok(())
     }
 }
 
@@ -146,6 +156,13 @@ impl HttpAuthConfig {
 }
 
 impl LocalTargetConfig {
+    fn normalized_default_workdir(&self) -> PathBuf {
+        remote_exec_daemon::config::normalize_configured_workdir(
+            &self.default_workdir,
+            self.windows_posix_root.as_deref(),
+        )
+    }
+
     pub fn embedded_daemon_config(
         &self,
         sandbox: Option<FilesystemSandbox>,
@@ -186,10 +203,7 @@ impl McpServerConfig {
 impl BrokerConfig {
     pub(crate) fn normalize_paths(&mut self) {
         if let Some(local) = &mut self.local {
-            local.default_workdir = remote_exec_daemon::config::normalize_configured_workdir(
-                &local.default_workdir,
-                local.windows_posix_root.as_deref(),
-            );
+            local.default_workdir = local.normalized_default_workdir();
         }
     }
 
@@ -200,11 +214,10 @@ impl BrokerConfig {
             "configured target name `local` is reserved for broker-host filesystem access"
         );
         if let Some(local) = &self.local {
-            let default_workdir = remote_exec_daemon::config::normalize_configured_workdir(
-                &local.default_workdir,
-                local.windows_posix_root.as_deref(),
-            );
-            validate_existing_directory(&default_workdir, "local.default_workdir")?;
+            validate_existing_directory(
+                &local.normalized_default_workdir(),
+                "local.default_workdir",
+            )?;
         }
         for (name, target) in &self.targets {
             target.validated_transport(name)?;
