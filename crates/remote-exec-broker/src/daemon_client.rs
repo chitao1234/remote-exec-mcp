@@ -130,55 +130,10 @@ impl DaemonClient {
             path = %req.path,
             "starting daemon transfer export"
         );
-        let response = self
-            .request("/v1/transfer/export")
-            .json(req)
-            .send()
-            .await
-            .map_err(|err| {
-                tracing::warn!(
-                    target = %self.target_name,
-                    base_url = %self.base_url,
-                    path = %req.path,
-                    elapsed_ms = started.elapsed().as_millis() as u64,
-                    error = %err,
-                    "daemon transfer export transport failed"
-                );
-                DaemonClientError::Transport(err.into())
-            })?;
-        if !response.status().is_success() {
-            tracing::warn!(
-                target = %self.target_name,
-                base_url = %self.base_url,
-                path = %req.path,
-                status = response.status().as_u16(),
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                "daemon transfer export returned error status"
-            );
-            return Err(decode_rpc_error(response).await);
-        }
-
-        let source_type = parse_header_enum(response.headers(), TRANSFER_SOURCE_TYPE_HEADER)?;
-        let actual_compression =
-            parse_optional_header_enum(response.headers(), TRANSFER_COMPRESSION_HEADER)?
-                .unwrap_or_default();
-        if actual_compression != req.compression {
-            return Err(DaemonClientError::Decode(anyhow::anyhow!(
-                "target `{}` returned transfer compression `{}` for requested `{}`",
-                self.target_name,
-                format_transfer_compression(&actual_compression),
-                format_transfer_compression(&req.compression)
-            )));
-        }
-        let mut file = tokio::fs::File::create(archive_path)
-            .await
-            .map_err(|err| DaemonClientError::Transport(err.into()))?;
-        let mut stream = tokio_util::io::StreamReader::new(
-            response.bytes_stream().map_err(std::io::Error::other),
-        );
-        tokio::io::copy(&mut stream, &mut file)
-            .await
-            .map_err(|err| DaemonClientError::Transport(err.into()))?;
+        let response = self.send_transfer_export_request(req, started).await?;
+        let source_type = self.transfer_export_source_type(req, response.headers())?;
+        self.write_transfer_export_archive(archive_path, response)
+            .await?;
         tracing::debug!(
             target = %self.target_name,
             base_url = %self.base_url,
@@ -195,15 +150,113 @@ impl DaemonClient {
         req: &TransferImportRequest,
     ) -> Result<TransferImportResponse, DaemonClientError> {
         let started = std::time::Instant::now();
-        let file = tokio::fs::File::open(archive_path)
+        let (file_len, body) = open_transfer_import_body(archive_path).await?;
+        let response = self
+            .send_transfer_import_request(req, file_len, body, started)
+            .await?;
+        let summary = self
+            .decode_transfer_import_response(req, started, response)
+            .await?;
+        tracing::debug!(
+            target = %self.target_name,
+            base_url = %self.base_url,
+            destination_path = %req.destination_path,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "daemon transfer import completed"
+        );
+        Ok(summary)
+    }
+
+    async fn send_transfer_export_request(
+        &self,
+        req: &TransferExportRequest,
+        started: std::time::Instant,
+    ) -> Result<reqwest::Response, DaemonClientError> {
+        let response = self
+            .request("/v1/transfer/export")
+            .json(req)
+            .send()
+            .await
+            .map_err(|err| {
+                tracing::warn!(
+                    target = %self.target_name,
+                    base_url = %self.base_url,
+                    path = %req.path,
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    error = %err,
+                    "daemon transfer export transport failed"
+                );
+                DaemonClientError::Transport(err.into())
+            })?;
+        self.ensure_transfer_export_success(req, started, response)
+            .await
+    }
+
+    async fn ensure_transfer_export_success(
+        &self,
+        req: &TransferExportRequest,
+        started: std::time::Instant,
+        response: reqwest::Response,
+    ) -> Result<reqwest::Response, DaemonClientError> {
+        if response.status().is_success() {
+            return Ok(response);
+        }
+
+        tracing::warn!(
+            target = %self.target_name,
+            base_url = %self.base_url,
+            path = %req.path,
+            status = response.status().as_u16(),
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "daemon transfer export returned error status"
+        );
+        Err(decode_rpc_error(response).await)
+    }
+
+    fn transfer_export_source_type(
+        &self,
+        req: &TransferExportRequest,
+        headers: &reqwest::header::HeaderMap,
+    ) -> Result<TransferSourceType, DaemonClientError> {
+        let source_type = parse_header_enum(headers, TRANSFER_SOURCE_TYPE_HEADER)?;
+        let actual_compression =
+            parse_optional_header_enum(headers, TRANSFER_COMPRESSION_HEADER)?.unwrap_or_default();
+        if actual_compression != req.compression {
+            return Err(DaemonClientError::Decode(anyhow::anyhow!(
+                "target `{}` returned transfer compression `{}` for requested `{}`",
+                self.target_name,
+                format_transfer_compression(&actual_compression),
+                format_transfer_compression(&req.compression)
+            )));
+        }
+
+        Ok(source_type)
+    }
+
+    async fn write_transfer_export_archive(
+        &self,
+        archive_path: &std::path::Path,
+        response: reqwest::Response,
+    ) -> Result<(), DaemonClientError> {
+        let mut file = tokio::fs::File::create(archive_path)
             .await
             .map_err(|err| DaemonClientError::Transport(err.into()))?;
-        let file_len = file
-            .metadata()
+        let mut stream = tokio_util::io::StreamReader::new(
+            response.bytes_stream().map_err(std::io::Error::other),
+        );
+        tokio::io::copy(&mut stream, &mut file)
             .await
-            .map_err(|err| DaemonClientError::Transport(err.into()))?
-            .len();
-        let body = reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(file));
+            .map_err(|err| DaemonClientError::Transport(err.into()))?;
+        Ok(())
+    }
+
+    async fn send_transfer_import_request(
+        &self,
+        req: &TransferImportRequest,
+        file_len: u64,
+        body: reqwest::Body,
+        started: std::time::Instant,
+    ) -> Result<reqwest::Response, DaemonClientError> {
         let response = self
             .request("/v1/transfer/import")
             .header(CONTENT_LENGTH, file_len)
@@ -238,19 +291,38 @@ impl DaemonClient {
                 );
                 DaemonClientError::Transport(err.into())
             })?;
-        if !response.status().is_success() {
-            tracing::warn!(
-                target = %self.target_name,
-                base_url = %self.base_url,
-                destination_path = %req.destination_path,
-                status = response.status().as_u16(),
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                "daemon transfer import returned error status"
-            );
-            return Err(decode_rpc_error(response).await);
+        self.ensure_transfer_import_success(req, started, response)
+            .await
+    }
+
+    async fn ensure_transfer_import_success(
+        &self,
+        req: &TransferImportRequest,
+        started: std::time::Instant,
+        response: reqwest::Response,
+    ) -> Result<reqwest::Response, DaemonClientError> {
+        if response.status().is_success() {
+            return Ok(response);
         }
 
-        let summary = response.json().await.map_err(|err| {
+        tracing::warn!(
+            target = %self.target_name,
+            base_url = %self.base_url,
+            destination_path = %req.destination_path,
+            status = response.status().as_u16(),
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "daemon transfer import returned error status"
+        );
+        Err(decode_rpc_error(response).await)
+    }
+
+    async fn decode_transfer_import_response(
+        &self,
+        req: &TransferImportRequest,
+        started: std::time::Instant,
+        response: reqwest::Response,
+    ) -> Result<TransferImportResponse, DaemonClientError> {
+        response.json().await.map_err(|err| {
             tracing::warn!(
                 target = %self.target_name,
                 base_url = %self.base_url,
@@ -260,15 +332,7 @@ impl DaemonClient {
                 "daemon transfer import decode failed"
             );
             DaemonClientError::Decode(err.into())
-        })?;
-        tracing::debug!(
-            target = %self.target_name,
-            base_url = %self.base_url,
-            destination_path = %req.destination_path,
-            elapsed_ms = started.elapsed().as_millis() as u64,
-            "daemon transfer import completed"
-        );
-        Ok(summary)
+        })
     }
 
     async fn post<Req, Resp>(&self, path: &str, body: &Req) -> Result<Resp, DaemonClientError>
@@ -392,6 +456,21 @@ fn format_transfer_overwrite(
         remote_exec_proto::rpc::TransferOverwriteMode::Fail => "fail",
         remote_exec_proto::rpc::TransferOverwriteMode::Replace => "replace",
     }
+}
+
+async fn open_transfer_import_body(
+    archive_path: &std::path::Path,
+) -> Result<(u64, reqwest::Body), DaemonClientError> {
+    let file = tokio::fs::File::open(archive_path)
+        .await
+        .map_err(|err| DaemonClientError::Transport(err.into()))?;
+    let file_len = file
+        .metadata()
+        .await
+        .map_err(|err| DaemonClientError::Transport(err.into()))?
+        .len();
+    let body = reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(file));
+    Ok((file_len, body))
 }
 
 fn parse_header_enum<T>(
