@@ -19,6 +19,8 @@ use super::{
     },
 };
 
+const EXEC_START_POLL_INTERVAL_MS: u64 = 25;
+
 pub async fn exec_start(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ExecStartRequest>,
@@ -52,22 +54,16 @@ pub async fn exec_start_local(
         }
 
         if has_exited(&mut session).await.map_err(internal_error)? {
-            output.push_str(
-                &super::output::drain_after_exit(&mut session)
-                    .await
-                    .map_err(internal_error)?,
-            );
-            return Ok(finish_response(
-                &state.daemon_instance_id,
-                None,
-                false,
-                &session,
+            return finish_completed_response(
+                state.as_ref(),
+                &mut session,
                 output,
                 req.max_output_tokens,
-            ));
+            )
+            .await;
         }
 
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        tokio::time::sleep(Duration::from_millis(EXEC_START_POLL_INTERVAL_MS)).await;
     }
 
     let daemon_session_id = uuid::Uuid::new_v4().to_string();
@@ -75,11 +71,7 @@ pub async fn exec_start_local(
         .sessions
         .insert(daemon_session_id.clone(), session)
         .await;
-    let warnings = if insert_outcome.crossed_warning_threshold {
-        vec![ExecWarning::session_limit_approaching(&state.config.target)]
-    } else {
-        Vec::new()
-    };
+    let warnings = session_limit_warnings(state.as_ref(), insert_outcome.crossed_warning_threshold);
     let session = state
         .sessions
         .lock(&daemon_session_id)
@@ -148,20 +140,9 @@ pub async fn exec_write_local(
         .await
         .map_err(internal_error)?;
     if has_exited(&mut session).await.map_err(internal_error)? {
-        let mut output = output;
-        output.push_str(
-            &super::output::drain_after_exit(&mut session)
-                .await
-                .map_err(internal_error)?,
-        );
-        let response = finish_response(
-            &state.daemon_instance_id,
-            None,
-            false,
-            &session,
-            output,
-            req.max_output_tokens,
-        );
+        let response =
+            finish_completed_response(state.as_ref(), &mut session, output, req.max_output_tokens)
+                .await?;
         session.retire().await;
         tracing::info!(
             target = %state.config.target,
@@ -239,6 +220,35 @@ fn prepare_exec_start(
         process_environment,
         yield_time_ms,
     })
+}
+
+async fn finish_completed_response(
+    state: &AppState,
+    session: &mut session::LiveSession,
+    mut output: String,
+    max_output_tokens: Option<u32>,
+) -> Result<ExecResponse, (StatusCode, Json<RpcErrorBody>)> {
+    output.push_str(
+        &super::output::drain_after_exit(session)
+            .await
+            .map_err(internal_error)?,
+    );
+    Ok(finish_response(
+        &state.daemon_instance_id,
+        None,
+        false,
+        session,
+        output,
+        max_output_tokens,
+    ))
+}
+
+fn session_limit_warnings(state: &AppState, crossed_warning_threshold: bool) -> Vec<ExecWarning> {
+    if crossed_warning_threshold {
+        vec![ExecWarning::session_limit_approaching(&state.config.target)]
+    } else {
+        Vec::new()
+    }
 }
 
 fn ensure_requested_tty_supported(
