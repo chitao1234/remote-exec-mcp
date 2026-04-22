@@ -283,44 +283,13 @@ impl DaemonClient {
             path,
             "sending daemon rpc"
         );
-        let response = self.request(path).json(body).send().await.map_err(|err| {
-            tracing::warn!(
-                target = %self.target_name,
-                base_url = %self.base_url,
-                path,
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                error = %err,
-                "daemon rpc transport failed"
-            );
-            DaemonClientError::Transport(err.into())
-        })?;
-        if !response.status().is_success() {
-            tracing::warn!(
-                target = %self.target_name,
-                base_url = %self.base_url,
-                path,
-                status = response.status().as_u16(),
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                "daemon rpc returned error status"
-            );
-            let status = response.status();
-            let body = response
-                .text()
-                .await
-                .map_err(|err| DaemonClientError::Transport(err.into()))?;
-            if let Ok(error) = serde_json::from_str::<RpcErrorBody>(&body) {
-                return Err(DaemonClientError::Rpc {
-                    status,
-                    code: Some(error.code),
-                    message: error.message,
-                });
-            }
-            return Err(DaemonClientError::Rpc {
-                status,
-                code: None,
-                message: body,
-            });
-        }
+        let response = self
+            .request(path)
+            .json(body)
+            .send()
+            .await
+            .map_err(|err| self.rpc_transport_error(path, started, err))?;
+        let response = self.ensure_rpc_success(path, started, response).await?;
 
         let decoded = response.json().await.map_err(|err| {
             tracing::warn!(
@@ -341,6 +310,45 @@ impl DaemonClient {
             "daemon rpc completed"
         );
         Ok(decoded)
+    }
+
+    async fn ensure_rpc_success(
+        &self,
+        path: &str,
+        started: std::time::Instant,
+        response: reqwest::Response,
+    ) -> Result<reqwest::Response, DaemonClientError> {
+        if response.status().is_success() {
+            return Ok(response);
+        }
+
+        tracing::warn!(
+            target = %self.target_name,
+            base_url = %self.base_url,
+            path,
+            status = response.status().as_u16(),
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "daemon rpc returned error status"
+        );
+        let error = decode_rpc_error_strict(response).await?;
+        Err(error)
+    }
+
+    fn rpc_transport_error(
+        &self,
+        path: &str,
+        started: std::time::Instant,
+        err: reqwest::Error,
+    ) -> DaemonClientError {
+        tracing::warn!(
+            target = %self.target_name,
+            base_url = %self.base_url,
+            path,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            error = %err,
+            "daemon rpc transport failed"
+        );
+        DaemonClientError::Transport(err.into())
     }
 
     fn request(&self, path: &str) -> reqwest::RequestBuilder {
@@ -393,12 +401,7 @@ fn parse_header_enum<T>(
 where
     T: serde::de::DeserializeOwned,
 {
-    let raw = headers
-        .get(name)
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(|| DaemonClientError::Decode(anyhow::anyhow!("missing header `{name}`")))?;
-    serde_json::from_str::<T>(&format!("\"{raw}\""))
-        .map_err(|err| DaemonClientError::Decode(err.into()))
+    parse_header_enum_value(header_str(headers, name)?)
 }
 
 fn parse_optional_header_enum<T>(
@@ -408,17 +411,49 @@ fn parse_optional_header_enum<T>(
 where
     T: serde::de::DeserializeOwned,
 {
-    match headers.get(name).and_then(|value| value.to_str().ok()) {
-        Some(raw) => serde_json::from_str::<T>(&format!("\"{raw}\""))
-            .map(Some)
-            .map_err(|err| DaemonClientError::Decode(err.into())),
-        None => Ok(None),
-    }
+    optional_header_str(headers, name)
+        .map(parse_header_enum_value)
+        .transpose()
+}
+
+fn header_str<'a>(
+    headers: &'a reqwest::header::HeaderMap,
+    name: &str,
+) -> Result<&'a str, DaemonClientError> {
+    optional_header_str(headers, name)
+        .ok_or_else(|| DaemonClientError::Decode(anyhow::anyhow!("missing header `{name}`")))
+}
+
+fn optional_header_str<'a>(headers: &'a reqwest::header::HeaderMap, name: &str) -> Option<&'a str> {
+    headers.get(name).and_then(|value| value.to_str().ok())
+}
+
+fn parse_header_enum_value<T>(raw: &str) -> Result<T, DaemonClientError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    serde_json::from_str::<T>(&format!("\"{raw}\""))
+        .map_err(|err| DaemonClientError::Decode(err.into()))
+}
+
+async fn decode_rpc_error_strict(
+    response: reqwest::Response,
+) -> Result<DaemonClientError, DaemonClientError> {
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|err| DaemonClientError::Transport(err.into()))?;
+    Ok(decode_rpc_error_body(status, body))
 }
 
 async fn decode_rpc_error(response: reqwest::Response) -> DaemonClientError {
     let status = response.status();
     let body = response.text().await.unwrap_or_else(|err| err.to_string());
+    decode_rpc_error_body(status, body)
+}
+
+fn decode_rpc_error_body(status: reqwest::StatusCode, body: String) -> DaemonClientError {
     if let Ok(error) = serde_json::from_str::<RpcErrorBody>(&body) {
         DaemonClientError::Rpc {
             status,
