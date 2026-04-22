@@ -74,44 +74,16 @@ pub async fn export_path_to_file(
     authorize_path(host_policy(), sandbox, SandboxAccess::Read, &path)?;
 
     let metadata = tokio::fs::symlink_metadata(&path).await?;
-    let source_type = if metadata.file_type().is_symlink() {
-        anyhow::bail!(
-            "transfer source contains unsupported symlink `{}`",
-            path.display()
-        );
-    } else if metadata.file_type().is_file() {
-        TransferSourceType::File
-    } else if metadata.file_type().is_dir() {
-        TransferSourceType::Directory
-    } else {
-        anyhow::bail!(
-            "transfer source path `{}` is not a regular file or directory",
-            path.display()
-        );
-    };
+    let source_type = export_source_type_from_metadata(&path, &metadata)?;
 
     let archive_path = archive_path.to_path_buf();
     let source_path = path.to_path_buf();
     let source_type_for_task = source_type.clone();
 
     tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-        let writer = open_archive_writer(&archive_path, &compression)?;
-        let mut builder = tar::Builder::new(writer);
-
-        match source_type_for_task {
-            TransferSourceType::File => {
-                builder.append_path_with_name(&source_path, SINGLE_FILE_ENTRY)?;
-            }
-            TransferSourceType::Directory => {
-                builder.append_dir(".", &source_path)?;
-                append_directory_entries(&mut builder, &source_path, &source_path)?;
-            }
-            TransferSourceType::Multiple => {
-                anyhow::bail!("single-path export cannot produce a multi-source archive");
-            }
-        }
-
-        finish_archive_builder(builder)
+        with_archive_builder(&archive_path, &compression, |builder| {
+            append_export_source(builder, &source_path, source_type_for_task)
+        })
     })
     .await??;
 
@@ -126,14 +98,58 @@ pub async fn bundle_archives_to_file(
     let archive_path = archive_path.to_path_buf();
 
     tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-        let writer = open_archive_writer(&archive_path, &compression)?;
-        let mut builder = tar::Builder::new(writer);
-        for source in &sources {
-            append_source_archive(&mut builder, source)?;
-        }
-        finish_archive_builder(builder)
+        with_archive_builder(&archive_path, &compression, |builder| {
+            for source in &sources {
+                append_source_archive(builder, source)?;
+            }
+            Ok(())
+        })
     })
     .await??;
+
+    Ok(())
+}
+
+fn export_source_type_from_metadata(
+    path: &Path,
+    metadata: &std::fs::Metadata,
+) -> anyhow::Result<TransferSourceType> {
+    if metadata.file_type().is_symlink() {
+        anyhow::bail!(
+            "transfer source contains unsupported symlink `{}`",
+            path.display()
+        );
+    }
+    if metadata.file_type().is_file() {
+        return Ok(TransferSourceType::File);
+    }
+    if metadata.file_type().is_dir() {
+        return Ok(TransferSourceType::Directory);
+    }
+
+    anyhow::bail!(
+        "transfer source path `{}` is not a regular file or directory",
+        path.display()
+    );
+}
+
+fn append_export_source<W: Write>(
+    builder: &mut tar::Builder<W>,
+    source_path: &Path,
+    source_type: TransferSourceType,
+) -> anyhow::Result<()> {
+    match source_type {
+        TransferSourceType::File => {
+            builder.append_path_with_name(source_path, SINGLE_FILE_ENTRY)?;
+        }
+        TransferSourceType::Directory => {
+            builder.append_dir(".", source_path)?;
+            append_directory_entries(builder, source_path, source_path)?;
+        }
+        TransferSourceType::Multiple => {
+            anyhow::bail!("single-path export cannot produce a multi-source archive");
+        }
+    }
 
     Ok(())
 }
@@ -479,6 +495,20 @@ fn open_archive_reader(
         TransferCompression::None => Ok(Box::new(file)),
         TransferCompression::Zstd => Ok(Box::new(zstd::stream::read::Decoder::new(file)?)),
     }
+}
+
+fn with_archive_builder<F>(
+    archive_path: &Path,
+    compression: &TransferCompression,
+    build: F,
+) -> anyhow::Result<()>
+where
+    F: FnOnce(&mut tar::Builder<Box<dyn Write>>) -> anyhow::Result<()>,
+{
+    let writer = open_archive_writer(archive_path, compression)?;
+    let mut builder = tar::Builder::new(writer);
+    build(&mut builder)?;
+    finish_archive_builder(builder)
 }
 
 fn finish_archive_builder<W: Write>(mut builder: tar::Builder<W>) -> anyhow::Result<()> {
