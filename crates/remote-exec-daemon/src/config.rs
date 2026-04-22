@@ -337,12 +337,11 @@ impl EmbeddedDaemonConfig {
 }
 
 impl DaemonConfig {
-    pub fn normalize_paths(&mut self) {
-        self.default_workdir =
-            normalize_configured_workdir(&self.default_workdir, self.windows_posix_root.as_deref());
+    fn normalized_default_workdir(&self) -> PathBuf {
+        normalize_configured_workdir(&self.default_workdir, self.windows_posix_root.as_deref())
     }
 
-    pub fn validate(&self) -> anyhow::Result<()> {
+    fn validate_windows_posix_root(&self) -> anyhow::Result<()> {
         #[cfg(windows)]
         if let Some(root) = &self.windows_posix_root {
             anyhow::ensure!(
@@ -350,12 +349,26 @@ impl DaemonConfig {
                 "windows_posix_root must be an absolute path"
             );
         }
-        let default_workdir =
-            normalize_configured_workdir(&self.default_workdir, self.windows_posix_root.as_deref());
-        validate_existing_directory(&default_workdir, "default_workdir")?;
+
+        Ok(())
+    }
+
+    fn validate_http_auth(&self) -> anyhow::Result<()> {
         if let Some(http_auth) = &self.http_auth {
             http_auth.validate()?;
         }
+
+        Ok(())
+    }
+
+    pub fn normalize_paths(&mut self) {
+        self.default_workdir = self.normalized_default_workdir();
+    }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        self.validate_windows_posix_root()?;
+        validate_existing_directory(&self.normalized_default_workdir(), "default_workdir")?;
+        self.validate_http_auth()?;
         self.yield_time.validate()?;
         crate::tls::validate_config(self)?;
         Ok(())
