@@ -176,13 +176,19 @@ fn header_string(
     headers: &HeaderMap,
     name: &str,
 ) -> Result<String, (StatusCode, Json<RpcErrorBody>)> {
-    headers
+    optional_header_string(headers, name)?.ok_or_else(|| {
+        crate::exec::rpc_error("transfer_failed", format!("missing header `{name}`"))
+    })
+}
+
+fn optional_header_string(
+    headers: &HeaderMap,
+    name: &str,
+) -> Result<Option<String>, (StatusCode, Json<RpcErrorBody>)> {
+    Ok(headers
         .get(name)
         .and_then(|value| value.to_str().ok())
-        .map(str::to_string)
-        .ok_or_else(|| {
-            crate::exec::rpc_error("transfer_failed", format!("missing header `{name}`"))
-        })
+        .map(str::to_string))
 }
 
 fn parse_header_enum<T>(
@@ -192,9 +198,7 @@ fn parse_header_enum<T>(
 where
     T: serde::de::DeserializeOwned,
 {
-    let raw = header_string(headers, name)?;
-    serde_json::from_str::<T>(&format!("\"{raw}\""))
-        .map_err(|err| crate::exec::rpc_error("transfer_failed", err.to_string()))
+    parse_header_enum_value(&header_string(headers, name)?)
 }
 
 fn parse_optional_header_enum<T>(
@@ -204,12 +208,18 @@ fn parse_optional_header_enum<T>(
 where
     T: serde::de::DeserializeOwned,
 {
-    match headers.get(name).and_then(|value| value.to_str().ok()) {
-        Some(raw) => serde_json::from_str::<T>(&format!("\"{raw}\""))
-            .map(Some)
-            .map_err(|err| crate::exec::rpc_error("transfer_failed", err.to_string())),
-        None => Ok(None),
-    }
+    optional_header_string(headers, name)?
+        .as_deref()
+        .map(parse_header_enum_value)
+        .transpose()
+}
+
+fn parse_header_enum_value<T>(raw: &str) -> Result<T, (StatusCode, Json<RpcErrorBody>)>
+where
+    T: serde::de::DeserializeOwned,
+{
+    serde_json::from_str::<T>(&format!("\"{raw}\""))
+        .map_err(|err| crate::exec::rpc_error("transfer_failed", err.to_string()))
 }
 
 fn ensure_transfer_compression_supported(
