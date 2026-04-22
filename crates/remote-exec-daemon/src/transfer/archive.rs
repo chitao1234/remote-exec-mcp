@@ -196,6 +196,29 @@ fn append_source_archive<W: Write>(
     }
 }
 
+fn normalize_archive_entry_path(raw_path: &Path) -> anyhow::Result<PathBuf> {
+    normalize_relative_path(raw_path).ok_or_else(|| unsupported_archive_entry(raw_path))
+}
+
+fn ensure_supported_archive_entry_type(
+    entry_type: tar::EntryType,
+    raw_path: &Path,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        entry_type.is_dir() || entry_type.is_file(),
+        "archive contains unsupported entry `{}`",
+        raw_path.display()
+    );
+    Ok(())
+}
+
+fn unsupported_archive_entry(raw_path: &Path) -> anyhow::Error {
+    anyhow::anyhow!(
+        "archive contains unsupported entry `{}`",
+        raw_path.display()
+    )
+}
+
 fn append_file_archive_to_bundle<W: Write, R: Read>(
     builder: &mut tar::Builder<W>,
     archive: &mut tar::Archive<R>,
@@ -211,12 +234,7 @@ fn append_file_archive_to_bundle<W: Write, R: Read>(
     );
 
     let raw_path = entry.path()?.to_path_buf();
-    let rel = normalize_relative_path(&raw_path).ok_or_else(|| {
-        anyhow::anyhow!(
-            "archive contains unsupported entry `{}`",
-            raw_path.display()
-        )
-    })?;
+    let rel = normalize_archive_entry_path(&raw_path)?;
     anyhow::ensure!(
         rel == Path::new(SINGLE_FILE_ENTRY),
         "file archive entry path must be `{SINGLE_FILE_ENTRY}`"
@@ -239,15 +257,9 @@ fn append_directory_archive_to_bundle<W: Write, R: Read>(
     for entry in archive.entries()? {
         let mut entry = entry?;
         let raw_rel = entry.path()?.to_path_buf();
-        let rel = normalize_relative_path(&raw_rel).ok_or_else(|| {
-            anyhow::anyhow!("archive contains unsupported entry `{}`", raw_rel.display())
-        })?;
+        let rel = normalize_archive_entry_path(&raw_rel)?;
         let entry_type = entry.header().entry_type();
-        anyhow::ensure!(
-            entry_type.is_dir() || entry_type.is_file(),
-            "archive contains unsupported entry `{}`",
-            raw_rel.display()
-        );
+        ensure_supported_archive_entry_type(entry_type, &raw_rel)?;
 
         if rel.as_os_str().is_empty() {
             anyhow::ensure!(entry_type.is_dir(), "archive file entry cannot target root");
@@ -377,20 +389,14 @@ fn extract_archive(
             for entry in archive.entries()? {
                 let mut entry = entry?;
                 let raw_rel = entry.path()?.to_path_buf();
-                let rel = normalize_relative_path(&raw_rel).ok_or_else(|| {
-                    anyhow::anyhow!("archive contains unsupported entry `{}`", raw_rel.display())
-                })?;
+                let rel = normalize_archive_entry_path(&raw_rel)?;
                 if rel.as_os_str().is_empty() {
                     continue;
                 }
 
                 let out = destination_path.join(&rel);
                 let entry_type = entry.header().entry_type();
-                anyhow::ensure!(
-                    entry_type.is_dir() || entry_type.is_file(),
-                    "archive contains unsupported entry `{}`",
-                    rel.display()
-                );
+                ensure_supported_archive_entry_type(entry_type, &raw_rel)?;
 
                 if entry_type.is_dir() {
                     std::fs::create_dir_all(&out)?;
