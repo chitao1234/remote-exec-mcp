@@ -25,6 +25,16 @@ pub fn shell_argv(shell: &str, login: bool, cmd: &str) -> Vec<String> {
     shell_argv_for_platform(cfg!(windows), shell, login, cmd)
 }
 
+fn shell_argv_with_login_flag(shell: &str, login: bool, cmd: &str) -> Vec<String> {
+    let mut argv = vec![shell.to_string()];
+    if login {
+        argv.push("-l".to_string());
+    }
+    argv.push("-c".to_string());
+    argv.push(cmd.to_string());
+    argv
+}
+
 pub(super) fn shell_argv_for_platform(
     is_windows: bool,
     shell: &str,
@@ -44,15 +54,7 @@ pub(super) fn shell_argv_for_platform(
     }
 
     if is_windows && is_windows_bash_family(&lower) {
-        if login {
-            return vec![
-                shell.to_string(),
-                "-l".to_string(),
-                "-c".to_string(),
-                cmd.to_string(),
-            ];
-        }
-        return vec![shell.to_string(), "-c".to_string(), cmd.to_string()];
+        return shell_argv_with_login_flag(shell, login, cmd);
     }
 
     if is_windows {
@@ -70,16 +72,7 @@ pub(super) fn shell_argv_for_platform(
         return argv;
     }
 
-    if login {
-        vec![
-            shell.to_string(),
-            "-l".to_string(),
-            "-c".to_string(),
-            cmd.to_string(),
-        ]
-    } else {
-        vec![shell.to_string(), "-c".to_string(), cmd.to_string()]
-    }
+    shell_argv_with_login_flag(shell, login, cmd)
 }
 
 pub(super) fn probe_shell_for_platform(
@@ -138,10 +131,7 @@ pub(super) fn is_windows_bash_family(lower: &str) -> bool {
 
 #[cfg(any(test, windows))]
 pub(super) fn is_windows_git_bash_alias(lower: &str) -> bool {
-    matches!(
-        lower,
-        "bash.exe" | "bash" | "sh.exe" | "sh" | "git-bash.exe" | "git-bash"
-    )
+    is_windows_bash_family(lower)
 }
 
 #[cfg(any(test, unix, windows))]
