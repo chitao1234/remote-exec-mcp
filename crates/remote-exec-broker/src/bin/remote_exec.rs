@@ -173,112 +173,153 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let connection = cli.connection.resolve()?;
     let client = RemoteExecClient::connect(connection).await?;
-
-    let exit_code = match cli.command {
-        Command::ListTargets => {
-            let response = client
-                .call_tool("list_targets", &ListTargetsInput::default())
-                .await?;
-            emit_response(&response, cli.json)?;
-            status_code(&response)
-        }
-        Command::Exec(args) => {
-            let response = client
-                .call_tool(
-                    "exec_command",
-                    &ExecCommandInput {
-                        target: args.target,
-                        cmd: args.cmd,
-                        workdir: args.workdir,
-                        shell: args.shell,
-                        tty: args.tty,
-                        yield_time_ms: args.yield_time_ms,
-                        max_output_tokens: args.max_output_tokens,
-                        login: resolve_login_flag(args.login, args.no_login),
-                    },
-                )
-                .await?;
-            emit_response(&response, cli.json)?;
-            status_code(&response)
-        }
-        Command::WriteStdin(args) => {
-            let response = client
-                .call_tool(
-                    "write_stdin",
-                    &WriteStdinInput {
-                        session_id: args.session_id,
-                        chars: load_optional_text_input(args.chars, args.chars_file).await?,
-                        yield_time_ms: args.yield_time_ms,
-                        max_output_tokens: args.max_output_tokens,
-                        target: args.target,
-                    },
-                )
-                .await?;
-            emit_response(&response, cli.json)?;
-            status_code(&response)
-        }
-        Command::ApplyPatch(args) => {
-            let response = client
-                .call_tool(
-                    "apply_patch",
-                    &ApplyPatchInput {
-                        target: args.target,
-                        input: load_required_text_input(args.input, args.input_file).await?,
-                        workdir: args.workdir,
-                    },
-                )
-                .await?;
-            emit_response(&response, cli.json)?;
-            status_code(&response)
-        }
-        Command::ViewImage(args) => {
-            let response = client
-                .call_tool(
-                    "view_image",
-                    &ViewImageInput {
-                        target: args.target,
-                        path: args.path,
-                        workdir: args.workdir,
-                        detail: args.detail,
-                    },
-                )
-                .await?;
-            if !response.is_error
-                && let Some(out) = &args.out
-            {
-                write_image_output(&response, out).await?;
-            }
-            emit_view_image_response(&response, cli.json, args.out.as_deref())?;
-            status_code(&response)
-        }
-        Command::TransferFiles(args) => {
-            let endpoints = args
-                .sources
-                .iter()
-                .map(|endpoint| parse_transfer_endpoint(endpoint))
-                .collect::<anyhow::Result<Vec<_>>>()?;
-            let response = client
-                .call_tool(
-                    "transfer_files",
-                    &TransferFilesInput {
-                        source: (endpoints.len() == 1).then(|| endpoints[0].clone()),
-                        sources: if endpoints.len() == 1 {
-                            Vec::new()
-                        } else {
-                            endpoints
-                        },
-                        destination: parse_transfer_endpoint(&args.destination)?,
-                        overwrite: args.overwrite.into(),
-                        create_parent: args.create_parent,
-                    },
-                )
-                .await?;
-            emit_response(&response, cli.json)?;
-            status_code(&response)
-        }
-    };
+    let exit_code = run_command(&client, cli.command, cli.json).await?;
 
     std::process::exit(exit_code);
+}
+
+async fn run_command(
+    client: &RemoteExecClient,
+    command: Command,
+    json: bool,
+) -> anyhow::Result<i32> {
+    match command {
+        Command::ListTargets => run_list_targets(client, json).await,
+        Command::Exec(args) => run_exec(client, args, json).await,
+        Command::WriteStdin(args) => run_write_stdin(client, args, json).await,
+        Command::ApplyPatch(args) => run_apply_patch(client, args, json).await,
+        Command::ViewImage(args) => run_view_image(client, args, json).await,
+        Command::TransferFiles(args) => run_transfer_files(client, args, json).await,
+    }
+}
+
+async fn run_list_targets(client: &RemoteExecClient, json: bool) -> anyhow::Result<i32> {
+    let response = client
+        .call_tool("list_targets", &ListTargetsInput::default())
+        .await?;
+    emit_and_status(&response, json)
+}
+
+async fn run_exec(
+    client: &RemoteExecClient,
+    args: ExecCommandArgs,
+    json: bool,
+) -> anyhow::Result<i32> {
+    let response = client
+        .call_tool("exec_command", &exec_command_input(args))
+        .await?;
+    emit_and_status(&response, json)
+}
+
+async fn run_write_stdin(
+    client: &RemoteExecClient,
+    args: WriteStdinArgs,
+    json: bool,
+) -> anyhow::Result<i32> {
+    let response = client
+        .call_tool("write_stdin", &write_stdin_input(args).await?)
+        .await?;
+    emit_and_status(&response, json)
+}
+
+async fn run_apply_patch(
+    client: &RemoteExecClient,
+    args: ApplyPatchArgs,
+    json: bool,
+) -> anyhow::Result<i32> {
+    let response = client
+        .call_tool("apply_patch", &apply_patch_input(args).await?)
+        .await?;
+    emit_and_status(&response, json)
+}
+
+async fn run_view_image(
+    client: &RemoteExecClient,
+    args: ViewImageArgs,
+    json: bool,
+) -> anyhow::Result<i32> {
+    let output_path = args.out.clone();
+    let response = client
+        .call_tool("view_image", &view_image_input(args))
+        .await?;
+    if !response.is_error
+        && let Some(out) = &output_path
+    {
+        write_image_output(&response, out).await?;
+    }
+    emit_view_image_response(&response, json, output_path.as_deref())?;
+    Ok(status_code(&response))
+}
+
+async fn run_transfer_files(
+    client: &RemoteExecClient,
+    args: TransferFilesArgs,
+    json: bool,
+) -> anyhow::Result<i32> {
+    let response = client
+        .call_tool("transfer_files", &transfer_files_input(args)?)
+        .await?;
+    emit_and_status(&response, json)
+}
+
+fn exec_command_input(args: ExecCommandArgs) -> ExecCommandInput {
+    ExecCommandInput {
+        target: args.target,
+        cmd: args.cmd,
+        workdir: args.workdir,
+        shell: args.shell,
+        tty: args.tty,
+        yield_time_ms: args.yield_time_ms,
+        max_output_tokens: args.max_output_tokens,
+        login: resolve_login_flag(args.login, args.no_login),
+    }
+}
+
+async fn write_stdin_input(args: WriteStdinArgs) -> anyhow::Result<WriteStdinInput> {
+    Ok(WriteStdinInput {
+        session_id: args.session_id,
+        chars: load_optional_text_input(args.chars, args.chars_file).await?,
+        yield_time_ms: args.yield_time_ms,
+        max_output_tokens: args.max_output_tokens,
+        target: args.target,
+    })
+}
+
+async fn apply_patch_input(args: ApplyPatchArgs) -> anyhow::Result<ApplyPatchInput> {
+    Ok(ApplyPatchInput {
+        target: args.target,
+        input: load_required_text_input(args.input, args.input_file).await?,
+        workdir: args.workdir,
+    })
+}
+
+fn view_image_input(args: ViewImageArgs) -> ViewImageInput {
+    ViewImageInput {
+        target: args.target,
+        path: args.path,
+        workdir: args.workdir,
+        detail: args.detail,
+    }
+}
+
+fn transfer_files_input(args: TransferFilesArgs) -> anyhow::Result<TransferFilesInput> {
+    let endpoints = args
+        .sources
+        .iter()
+        .map(|endpoint| parse_transfer_endpoint(endpoint))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
+    Ok(TransferFilesInput {
+        source: (endpoints.len() == 1).then(|| endpoints[0].clone()),
+        sources: if endpoints.len() == 1 {
+            Vec::new()
+        } else {
+            endpoints
+        },
+        destination: parse_transfer_endpoint(&args.destination)?,
+        overwrite: args.overwrite.into(),
+        create_parent: args.create_parent,
+    })
 }
 
 impl ConnectionArgs {
@@ -373,6 +414,11 @@ fn emit_response(response: &ToolResponse, json: bool) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn emit_and_status(response: &ToolResponse, json: bool) -> anyhow::Result<i32> {
+    emit_response(response, json)?;
+    Ok(status_code(response))
 }
 
 fn emit_view_image_response(
