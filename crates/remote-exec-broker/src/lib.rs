@@ -261,85 +261,11 @@ pub async fn run(config: config::BrokerConfig) -> anyhow::Result<()> {
 async fn build_state(mut config: config::BrokerConfig) -> anyhow::Result<BrokerState> {
     config.normalize_paths();
     config.validate()?;
-    let host_sandbox = config
-        .host_sandbox
-        .as_ref()
-        .map(|sandbox| compile_filesystem_sandbox(host_path_policy(), sandbox))
-        .transpose()?;
+    let host_sandbox = compile_host_sandbox(&config)?;
     let mut targets = BTreeMap::new();
 
-    if let Some(local_config) = &config.local {
-        let client = LocalDaemonClient::new(
-            local_config,
-            config.host_sandbox.clone(),
-            config.enable_transfer_compression,
-        )?;
-        let info = client.target_info().await?;
-        tracing::info!(
-            target = "local",
-            daemon_instance_id = %info.daemon_instance_id,
-            platform = %info.platform,
-            arch = %info.arch,
-            hostname = %info.hostname,
-            supports_pty = info.supports_pty,
-            supports_transfer_compression = info.supports_transfer_compression,
-            "enabled embedded local target"
-        );
-        targets.insert(
-            "local".to_string(),
-            TargetHandle::verified(
-                TargetBackend::Local(client),
-                Some("local".to_string()),
-                &info,
-            ),
-        );
-    }
-
-    for (name, target_config) in &config.targets {
-        let client = DaemonClient::new(name.clone(), target_config).await?;
-        let handle = match client.target_info().await {
-            Ok(info) => {
-                ensure_expected_daemon_name(
-                    name,
-                    target_config.expected_daemon_name.as_deref(),
-                    &info.target,
-                )?;
-                tracing::info!(
-                    target = %name,
-                    base_url = %target_config.base_url,
-                    http_auth_enabled = target_config.http_auth.is_some(),
-                    daemon_name = %info.target,
-                    daemon_instance_id = %info.daemon_instance_id,
-                    platform = %info.platform,
-                    arch = %info.arch,
-                    hostname = %info.hostname,
-                    supports_pty = info.supports_pty,
-                    supports_transfer_compression = info.supports_transfer_compression,
-                    "target available during broker startup"
-                );
-                TargetHandle::verified(
-                    TargetBackend::Remote(client),
-                    target_config.expected_daemon_name.clone(),
-                    &info,
-                )
-            }
-            Err(DaemonClientError::Transport(err)) => {
-                tracing::warn!(
-                    target = %name,
-                    http_auth_enabled = target_config.http_auth.is_some(),
-                    ?err,
-                    "target unavailable during broker startup"
-                );
-                TargetHandle::unavailable(
-                    TargetBackend::Remote(client),
-                    target_config.expected_daemon_name.clone(),
-                )
-            }
-            Err(err) => return Err(err.into()),
-        };
-
-        targets.insert(name.clone(), handle);
-    }
+    insert_local_target(&config, &mut targets).await?;
+    insert_remote_targets(&config.targets, &mut targets).await?;
 
     Ok(BrokerState {
         enable_transfer_compression: config.enable_transfer_compression,
@@ -348,6 +274,129 @@ async fn build_state(mut config: config::BrokerConfig) -> anyhow::Result<BrokerS
         sessions: SessionStore::default(),
         targets,
     })
+}
+
+fn compile_host_sandbox(
+    config: &config::BrokerConfig,
+) -> anyhow::Result<Option<CompiledFilesystemSandbox>> {
+    Ok(config
+        .host_sandbox
+        .as_ref()
+        .map(|sandbox| compile_filesystem_sandbox(host_path_policy(), sandbox))
+        .transpose()?)
+}
+
+async fn insert_local_target(
+    config: &config::BrokerConfig,
+    targets: &mut BTreeMap<String, TargetHandle>,
+) -> anyhow::Result<()> {
+    let Some(local_config) = &config.local else {
+        return Ok(());
+    };
+
+    let client = LocalDaemonClient::new(
+        local_config,
+        config.host_sandbox.clone(),
+        config.enable_transfer_compression,
+    )?;
+    let info = client.target_info().await?;
+    log_local_target_enabled(&info);
+    targets.insert(
+        "local".to_string(),
+        TargetHandle::verified(
+            TargetBackend::Local(client),
+            Some("local".to_string()),
+            &info,
+        ),
+    );
+    Ok(())
+}
+
+async fn insert_remote_targets(
+    target_configs: &BTreeMap<String, config::TargetConfig>,
+    targets: &mut BTreeMap<String, TargetHandle>,
+) -> anyhow::Result<()> {
+    for (name, target_config) in target_configs {
+        let handle = build_remote_target_handle(name, target_config).await?;
+        targets.insert(name.clone(), handle);
+    }
+    Ok(())
+}
+
+async fn build_remote_target_handle(
+    name: &str,
+    target_config: &config::TargetConfig,
+) -> anyhow::Result<TargetHandle> {
+    let client = DaemonClient::new(name.to_string(), target_config).await?;
+    match client.target_info().await {
+        Ok(info) => {
+            ensure_expected_daemon_name(
+                name,
+                target_config.expected_daemon_name.as_deref(),
+                &info.target,
+            )?;
+            log_remote_target_available(name, target_config, &info);
+            Ok(TargetHandle::verified(
+                TargetBackend::Remote(client),
+                target_config.expected_daemon_name.clone(),
+                &info,
+            ))
+        }
+        Err(DaemonClientError::Transport(err)) => {
+            log_remote_target_unavailable(name, target_config, &err);
+            Ok(TargetHandle::unavailable(
+                TargetBackend::Remote(client),
+                target_config.expected_daemon_name.clone(),
+            ))
+        }
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn log_local_target_enabled(info: &TargetInfoResponse) {
+    tracing::info!(
+        target = "local",
+        daemon_instance_id = %info.daemon_instance_id,
+        platform = %info.platform,
+        arch = %info.arch,
+        hostname = %info.hostname,
+        supports_pty = info.supports_pty,
+        supports_transfer_compression = info.supports_transfer_compression,
+        "enabled embedded local target"
+    );
+}
+
+fn log_remote_target_available(
+    name: &str,
+    target_config: &config::TargetConfig,
+    info: &TargetInfoResponse,
+) {
+    tracing::info!(
+        target = %name,
+        base_url = %target_config.base_url,
+        http_auth_enabled = target_config.http_auth.is_some(),
+        daemon_name = %info.target,
+        daemon_instance_id = %info.daemon_instance_id,
+        platform = %info.platform,
+        arch = %info.arch,
+        hostname = %info.hostname,
+        supports_pty = info.supports_pty,
+        supports_transfer_compression = info.supports_transfer_compression,
+        "target available during broker startup"
+    );
+}
+
+fn log_remote_target_unavailable(
+    name: &str,
+    target_config: &config::TargetConfig,
+    err: &anyhow::Error,
+) {
+    tracing::warn!(
+        target = %name,
+        http_auth_enabled = target_config.http_auth.is_some(),
+        ?err,
+        "target unavailable during broker startup"
+    );
 }
 
 fn host_path_policy() -> PathPolicy {
