@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PatchAction {
@@ -75,119 +75,177 @@ fn parse_update_chunk_line(
 }
 
 pub fn parse_patch(input: &str) -> anyhow::Result<Vec<PatchAction>> {
-    let lines: Vec<&str> = input.lines().collect();
-    anyhow::ensure!(
-        lines.first().copied().map(trim_horizontal) == Some("*** Begin Patch"),
-        "invalid patch header"
-    );
-    anyhow::ensure!(
-        lines.last().copied().map(trim_horizontal) == Some("*** End Patch"),
-        "invalid patch footer"
-    );
+    PatchParser::new(input)?.parse_actions()
+}
 
-    let mut actions = Vec::new();
-    let mut index = 1;
-    while index + 1 < lines.len() {
-        let line = lines[index];
+struct PatchParser<'a> {
+    lines: Vec<&'a str>,
+    index: usize,
+}
+
+impl<'a> PatchParser<'a> {
+    fn new(input: &'a str) -> anyhow::Result<Self> {
+        let lines: Vec<&str> = input.lines().collect();
+        anyhow::ensure!(
+            lines.first().copied().map(trim_horizontal) == Some("*** Begin Patch"),
+            "invalid patch header"
+        );
+        anyhow::ensure!(
+            lines.last().copied().map(trim_horizontal) == Some("*** End Patch"),
+            "invalid patch footer"
+        );
+
+        Ok(Self { lines, index: 1 })
+    }
+
+    fn parse_actions(&mut self) -> anyhow::Result<Vec<PatchAction>> {
+        let mut actions = Vec::new();
+        while !self.at_body_end() {
+            actions.push(self.parse_action()?);
+        }
+
+        anyhow::ensure!(!actions.is_empty(), "empty patch");
+        Ok(actions)
+    }
+
+    fn parse_action(&mut self) -> anyhow::Result<PatchAction> {
+        let line = self.current();
         if let Some(path) = strip_control_prefix(line, "*** Add File: ") {
-            index += 1;
-            let mut added = Vec::new();
-            while index + 1 < lines.len() && !is_structural_control_line(lines[index]) {
-                let raw = lines[index];
-                let value = raw
-                    .strip_prefix('+')
-                    .ok_or_else(|| anyhow::anyhow!("add file lines must start with `+`"))?;
-                added.push(value.to_string());
-                index += 1;
-            }
-            actions.push(PatchAction::Add {
-                path: path.into(),
-                lines: added,
-            });
-            continue;
+            return self.parse_add_file(path.into());
         }
 
         if let Some(path) = strip_control_prefix(line, "*** Delete File: ") {
-            actions.push(PatchAction::Delete { path: path.into() });
-            index += 1;
-            continue;
+            return Ok(self.parse_delete_file(path.into()));
         }
 
         if let Some(path) = strip_control_prefix(line, "*** Update File: ") {
-            let path = PathBuf::from(path);
-            index += 1;
-            let mut move_to = None;
-            if index + 1 < lines.len()
-                && let Some(destination) = strip_control_prefix(lines[index], "*** Move to: ")
-            {
-                move_to = Some(destination.into());
-                index += 1;
-            }
-
-            let mut hunks = Vec::new();
-            while index + 1 < lines.len() && !is_structural_control_line(lines[index]) {
-                let change_context = if trim_horizontal(lines[index]).starts_with("@@") {
-                    let header = parse_hunk_header(lines[index])?;
-                    index += 1;
-                    header
-                } else if hunks.is_empty() {
-                    None
-                } else {
-                    anyhow::bail!(
-                        "invalid update hunk header `{}`",
-                        trim_horizontal(lines[index])
-                    );
-                };
-
-                let mut old_lines = Vec::new();
-                let mut new_lines = Vec::new();
-                while index + 1 < lines.len()
-                    && !trim_horizontal(lines[index]).starts_with("@@")
-                    && trim_horizontal(lines[index]) != "*** End of File"
-                    && !is_structural_control_line(lines[index])
-                {
-                    parse_update_chunk_line(lines[index], &mut old_lines, &mut new_lines)?;
-                    index += 1;
-                }
-                let is_end_of_file = if index + 1 < lines.len()
-                    && trim_horizontal(lines[index]) == "*** End of File"
-                {
-                    index += 1;
-                    true
-                } else {
-                    false
-                };
-                anyhow::ensure!(
-                    !old_lines.is_empty() || !new_lines.is_empty(),
-                    "update hunk for path `{}` has no changes",
-                    path.display()
-                );
-                hunks.push(UpdateChunk {
-                    change_context,
-                    old_lines,
-                    new_lines,
-                    is_end_of_file,
-                });
-            }
-            anyhow::ensure!(
-                !hunks.is_empty(),
-                "update file hunk for path `{}` is empty",
-                path.display()
-            );
-
-            actions.push(PatchAction::Update {
-                path,
-                move_to,
-                hunks,
-            });
-            continue;
+            return self.parse_update_file(path.into());
         }
 
         anyhow::bail!("unsupported patch line `{}`", trim_horizontal(line));
     }
 
-    anyhow::ensure!(!actions.is_empty(), "empty patch");
-    Ok(actions)
+    fn parse_add_file(&mut self, path: PathBuf) -> anyhow::Result<PatchAction> {
+        self.advance();
+        let mut added = Vec::new();
+        while !self.at_body_end() && !is_structural_control_line(self.current()) {
+            let raw = self.current();
+            let value = raw
+                .strip_prefix('+')
+                .ok_or_else(|| anyhow::anyhow!("add file lines must start with `+`"))?;
+            added.push(value.to_string());
+            self.advance();
+        }
+
+        Ok(PatchAction::Add { path, lines: added })
+    }
+
+    fn parse_delete_file(&mut self, path: PathBuf) -> PatchAction {
+        self.advance();
+        PatchAction::Delete { path }
+    }
+
+    fn parse_update_file(&mut self, path: PathBuf) -> anyhow::Result<PatchAction> {
+        self.advance();
+        let move_to = self.parse_move_to();
+        let mut hunks = Vec::new();
+        while !self.at_body_end() && !is_structural_control_line(self.current()) {
+            hunks.push(self.parse_update_chunk(&path, hunks.is_empty())?);
+        }
+        anyhow::ensure!(
+            !hunks.is_empty(),
+            "update file hunk for path `{}` is empty",
+            path.display()
+        );
+
+        Ok(PatchAction::Update {
+            path,
+            move_to,
+            hunks,
+        })
+    }
+
+    fn parse_move_to(&mut self) -> Option<PathBuf> {
+        if self.at_body_end() {
+            return None;
+        }
+
+        let destination = strip_control_prefix(self.current(), "*** Move to: ")?;
+        let destination = PathBuf::from(destination);
+        self.advance();
+        Some(destination)
+    }
+
+    fn parse_update_chunk(
+        &mut self,
+        path: &Path,
+        is_first_hunk: bool,
+    ) -> anyhow::Result<UpdateChunk> {
+        let change_context = self.parse_update_chunk_header(is_first_hunk)?;
+        let mut old_lines = Vec::new();
+        let mut new_lines = Vec::new();
+        while self.current_line_is_update_chunk_body() {
+            parse_update_chunk_line(self.current(), &mut old_lines, &mut new_lines)?;
+            self.advance();
+        }
+
+        let is_end_of_file = self.consume_end_of_file_marker();
+        anyhow::ensure!(
+            !old_lines.is_empty() || !new_lines.is_empty(),
+            "update hunk for path `{}` has no changes",
+            path.display()
+        );
+
+        Ok(UpdateChunk {
+            change_context,
+            old_lines,
+            new_lines,
+            is_end_of_file,
+        })
+    }
+
+    fn parse_update_chunk_header(&mut self, is_first_hunk: bool) -> anyhow::Result<Option<String>> {
+        let line = self.current();
+        if trim_horizontal(line).starts_with("@@") {
+            let header = parse_hunk_header(line)?;
+            self.advance();
+            return Ok(header);
+        }
+
+        if is_first_hunk {
+            return Ok(None);
+        }
+
+        anyhow::bail!("invalid update hunk header `{}`", trim_horizontal(line));
+    }
+
+    fn current_line_is_update_chunk_body(&self) -> bool {
+        !self.at_body_end()
+            && !trim_horizontal(self.current()).starts_with("@@")
+            && trim_horizontal(self.current()) != "*** End of File"
+            && !is_structural_control_line(self.current())
+    }
+
+    fn consume_end_of_file_marker(&mut self) -> bool {
+        if !self.at_body_end() && trim_horizontal(self.current()) == "*** End of File" {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn at_body_end(&self) -> bool {
+        self.index + 1 >= self.lines.len()
+    }
+
+    fn current(&self) -> &'a str {
+        self.lines[self.index]
+    }
+
+    fn advance(&mut self) {
+        self.index += 1;
+    }
 }
 
 #[cfg(test)]
