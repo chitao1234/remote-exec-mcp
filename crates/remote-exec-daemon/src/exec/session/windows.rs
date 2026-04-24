@@ -317,6 +317,18 @@ fn summarize_output_excerpt(output: &str) -> String {
     }
 }
 
+fn skipped_smoke_test_line(backend: PtyBackend, probe: &Result<(), String>) -> String {
+    let reason = probe
+        .as_ref()
+        .err()
+        .map(String::as_str)
+        .unwrap_or("unknown probe failure");
+    format!(
+        "{} smoke test: skipped because probe failed: {reason}",
+        backend.debug_name()
+    )
+}
+
 #[cfg(feature = "winpty")]
 fn winpty_environment_block(environment: &ProcessEnvironment) -> EnvBlock {
     let mut env_map = BTreeMap::<String, (String, OsString)>::new();
@@ -437,18 +449,12 @@ pub(super) async fn debug_report(cmd: &[String], cwd: &Path) -> String {
     lines.push(if diagnostics.portable_pty_probe.is_ok() {
         smoke_test_windows_backend(PtyBackend::PortablePty, cmd, cwd, &environment).await
     } else {
-        format!(
-            "conpty_via_portable_pty smoke test: skipped because probe failed: {}",
-            diagnostics.portable_pty_probe.as_ref().err().unwrap()
-        )
+        skipped_smoke_test_line(PtyBackend::PortablePty, &diagnostics.portable_pty_probe)
     });
     lines.push(if diagnostics.winpty_probe.is_ok() {
         smoke_test_windows_backend(PtyBackend::Winpty, cmd, cwd, &environment).await
     } else {
-        format!(
-            "winpty smoke test: skipped because probe failed: {}",
-            diagnostics.winpty_probe.as_ref().err().unwrap()
-        )
+        skipped_smoke_test_line(PtyBackend::Winpty, &diagnostics.winpty_probe)
     });
     lines.push(
         "note: STATUS_DLL_INIT_FAILED / STATUS_DLL_NOT_FOUND identifies the failure class, not the exact missing DLL."

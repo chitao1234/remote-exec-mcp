@@ -437,10 +437,17 @@ const fn default_write_stdin_input_yield_time() -> YieldTimeOperationConfig {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(any(feature = "tls", windows))]
-    use std::path::PathBuf;
+    use std::path::Path;
 
     use super::{DaemonConfig, DaemonTransport, YieldTimeConfig, YieldTimeOperation};
+
+    fn neutral_toml_path(path: &Path) -> toml::Value {
+        toml::Value::String(path.display().to_string())
+    }
+
+    fn neutral_workdir(dir: &tempfile::TempDir) -> toml::Value {
+        neutral_toml_path(dir.path())
+    }
 
     #[tokio::test]
     async fn load_accepts_http_transport_without_tls_block() {
@@ -448,12 +455,15 @@ mod tests {
         let config_path = dir.path().join("daemon.toml");
         tokio::fs::write(
             &config_path,
-            r#"
+            format!(
+                r#"
 target = "builder-a"
 listen = "127.0.0.1:8080"
-default_workdir = "/tmp"
+default_workdir = {}
 transport = "http"
 "#,
+                neutral_workdir(&dir)
+            ),
         )
         .await
         .unwrap();
@@ -470,30 +480,7 @@ transport = "http"
     #[tokio::test]
     async fn load_accepts_windows_posix_root() {
         let dir = tempfile::tempdir().unwrap();
-        let config_path = dir.path().join("daemon.toml");
-        tokio::fs::write(
-            &config_path,
-            r#"
-target = "builder-a"
-listen = "127.0.0.1:8080"
-default_workdir = "/tmp"
-windows_posix_root = "C:\\msys64"
-transport = "http"
-"#,
-        )
-        .await
-        .unwrap();
-
-        let config = DaemonConfig::load(&config_path).await.unwrap();
-        assert_eq!(config.windows_posix_root, Some(PathBuf::from(r"C:\msys64")));
-    }
-
-    #[cfg(windows)]
-    #[tokio::test]
-    async fn load_normalizes_default_workdir_through_windows_posix_root() {
-        let dir = tempfile::tempdir().unwrap();
         let synthetic_root = dir.path().join("msys64");
-        std::fs::create_dir_all(synthetic_root.join("tmp")).unwrap();
         let config_path = dir.path().join("daemon.toml");
         tokio::fs::write(
             &config_path,
@@ -501,18 +488,51 @@ transport = "http"
                 r#"
 target = "builder-a"
 listen = "127.0.0.1:8080"
-default_workdir = "/tmp"
+default_workdir = {}
 windows_posix_root = {}
 transport = "http"
 "#,
-                toml::Value::String(synthetic_root.display().to_string())
+                neutral_workdir(&dir),
+                neutral_toml_path(&synthetic_root)
             ),
         )
         .await
         .unwrap();
 
         let config = DaemonConfig::load(&config_path).await.unwrap();
-        assert_eq!(config.default_workdir, synthetic_root.join("tmp"));
+        assert_eq!(config.windows_posix_root, Some(synthetic_root));
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn load_normalizes_default_workdir_through_windows_posix_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let synthetic_root = dir.path().join("msys64");
+        let posix_workdir_name = "tmp";
+        let posix_workdir = format!("/{posix_workdir_name}");
+        std::fs::create_dir_all(synthetic_root.join(posix_workdir_name)).unwrap();
+        let config_path = dir.path().join("daemon.toml");
+        tokio::fs::write(
+            &config_path,
+            format!(
+                r#"
+target = "builder-a"
+listen = "127.0.0.1:8080"
+default_workdir = "{posix_workdir}"
+windows_posix_root = {}
+transport = "http"
+"#,
+                neutral_toml_path(&synthetic_root)
+            ),
+        )
+        .await
+        .unwrap();
+
+        let config = DaemonConfig::load(&config_path).await.unwrap();
+        assert_eq!(
+            config.default_workdir,
+            synthetic_root.join(posix_workdir_name)
+        );
     }
 
     #[tokio::test]
@@ -521,11 +541,14 @@ transport = "http"
         let config_path = dir.path().join("daemon.toml");
         tokio::fs::write(
             &config_path,
-            r#"
+            format!(
+                r#"
 target = "builder-a"
 listen = "127.0.0.1:9443"
-default_workdir = "/tmp"
+default_workdir = {}
 "#,
+                neutral_workdir(&dir)
+            ),
         )
         .await
         .unwrap();
@@ -614,10 +637,11 @@ transport = "http"
         let config_path = dir.path().join("daemon.toml");
         tokio::fs::write(
             &config_path,
-            r#"
+            format!(
+                r#"
 target = "builder-a"
 listen = "127.0.0.1:8080"
-default_workdir = "/tmp"
+default_workdir = {}
 transport = "http"
 
 [yield_time.exec_command]
@@ -626,6 +650,8 @@ max_ms = 60000
 [yield_time.write_stdin_poll]
 default_ms = 12000
 "#,
+                neutral_workdir(&dir)
+            ),
         )
         .await
         .unwrap();
@@ -646,16 +672,19 @@ default_ms = 12000
         let config_path = dir.path().join("daemon.toml");
         tokio::fs::write(
             &config_path,
-            r#"
+            format!(
+                r#"
 target = "builder-a"
 listen = "127.0.0.1:8080"
-default_workdir = "/tmp"
+default_workdir = {}
 transport = "http"
 
 [yield_time.exec_command]
 default_ms = 100
 min_ms = 200
 "#,
+                neutral_workdir(&dir)
+            ),
         )
         .await
         .unwrap();
@@ -673,19 +702,30 @@ min_ms = 200
     async fn load_accepts_tls_transport_with_pinned_client_cert() {
         let dir = tempfile::tempdir().unwrap();
         let config_path = dir.path().join("daemon.toml");
+        let daemon_cert = dir.path().join("daemon.pem");
+        let daemon_key = dir.path().join("daemon.key");
+        let ca_cert = dir.path().join("ca.pem");
+        let broker_cert = dir.path().join("broker.pem");
         tokio::fs::write(
             &config_path,
-            r#"
+            format!(
+                r#"
 target = "builder-a"
 listen = "127.0.0.1:9443"
-default_workdir = "/tmp"
+default_workdir = {}
 
 [tls]
-cert_pem = "/tmp/daemon.pem"
-key_pem = "/tmp/daemon.key"
-ca_pem = "/tmp/ca.pem"
-pinned_client_cert_pem = "/tmp/broker.pem"
+cert_pem = {}
+key_pem = {}
+ca_pem = {}
+pinned_client_cert_pem = {}
 "#,
+                neutral_workdir(&dir),
+                neutral_toml_path(&daemon_cert),
+                neutral_toml_path(&daemon_key),
+                neutral_toml_path(&ca_cert),
+                neutral_toml_path(&broker_cert)
+            ),
         )
         .await
         .unwrap();
@@ -696,7 +736,7 @@ pinned_client_cert_pem = "/tmp/broker.pem"
                 .tls
                 .as_ref()
                 .and_then(|tls| tls.pinned_client_cert_pem.as_ref()),
-            Some(&PathBuf::from("/tmp/broker.pem"))
+            Some(&broker_cert)
         );
     }
 
@@ -706,13 +746,16 @@ pinned_client_cert_pem = "/tmp/broker.pem"
         let config_path = dir.path().join("daemon.toml");
         tokio::fs::write(
             &config_path,
-            r#"
+            format!(
+                r#"
 target = "builder-a"
 listen = "127.0.0.1:9443"
-default_workdir = "/tmp"
+default_workdir = {}
 transport = "http"
 experimental_apply_patch_target_encoding_autodetect = true
 "#,
+                neutral_workdir(&dir)
+            ),
         )
         .await
         .unwrap();
@@ -727,15 +770,18 @@ experimental_apply_patch_target_encoding_autodetect = true
         let config_path = dir.path().join("daemon.toml");
         tokio::fs::write(
             &config_path,
-            r#"
+            format!(
+                r#"
 target = "builder-a"
 listen = "127.0.0.1:8080"
-default_workdir = "/tmp"
+default_workdir = {}
 transport = "http"
 
 [http_auth]
 bearer_token = "shared-secret"
 "#,
+                neutral_workdir(&dir)
+            ),
         )
         .await
         .unwrap();
@@ -756,15 +802,18 @@ bearer_token = "shared-secret"
         let config_path = dir.path().join("daemon.toml");
         tokio::fs::write(
             &config_path,
-            r#"
+            format!(
+                r#"
 target = "builder-a"
 listen = "127.0.0.1:8080"
-default_workdir = "/tmp"
+default_workdir = {}
 transport = "http"
 
 [http_auth]
 bearer_token = ""
 "#,
+                neutral_workdir(&dir)
+            ),
         )
         .await
         .unwrap();
@@ -781,20 +830,31 @@ bearer_token = ""
     async fn load_rejects_pinned_client_cert_for_http_transport() {
         let dir = tempfile::tempdir().unwrap();
         let config_path = dir.path().join("daemon.toml");
+        let daemon_cert = dir.path().join("daemon.pem");
+        let daemon_key = dir.path().join("daemon.key");
+        let ca_cert = dir.path().join("ca.pem");
+        let broker_cert = dir.path().join("broker.pem");
         tokio::fs::write(
             &config_path,
-            r#"
+            format!(
+                r#"
 target = "builder-a"
 listen = "127.0.0.1:8080"
-default_workdir = "/tmp"
+default_workdir = {}
 transport = "http"
 
 [tls]
-cert_pem = "/tmp/daemon.pem"
-key_pem = "/tmp/daemon.key"
-ca_pem = "/tmp/ca.pem"
-pinned_client_cert_pem = "/tmp/broker.pem"
+cert_pem = {}
+key_pem = {}
+ca_pem = {}
+pinned_client_cert_pem = {}
 "#,
+                neutral_workdir(&dir),
+                neutral_toml_path(&daemon_cert),
+                neutral_toml_path(&daemon_key),
+                neutral_toml_path(&ca_cert),
+                neutral_toml_path(&broker_cert)
+            ),
         )
         .await
         .unwrap();
@@ -812,19 +872,28 @@ pinned_client_cert_pem = "/tmp/broker.pem"
     async fn load_rejects_explicit_tls_transport_when_tls_feature_disabled() {
         let dir = tempfile::tempdir().unwrap();
         let config_path = dir.path().join("daemon.toml");
+        let daemon_cert = dir.path().join("daemon.pem");
+        let daemon_key = dir.path().join("daemon.key");
+        let ca_cert = dir.path().join("ca.pem");
         tokio::fs::write(
             &config_path,
-            r#"
+            format!(
+                r#"
 target = "builder-a"
 listen = "127.0.0.1:9443"
-default_workdir = "/tmp"
+default_workdir = {}
 transport = "tls"
 
 [tls]
-cert_pem = "/tmp/daemon.pem"
-key_pem = "/tmp/daemon.key"
-ca_pem = "/tmp/ca.pem"
+cert_pem = {}
+key_pem = {}
+ca_pem = {}
 "#,
+                neutral_workdir(&dir),
+                neutral_toml_path(&daemon_cert),
+                neutral_toml_path(&daemon_key),
+                neutral_toml_path(&ca_cert)
+            ),
         )
         .await
         .unwrap();

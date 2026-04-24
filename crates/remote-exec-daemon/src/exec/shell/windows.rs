@@ -175,9 +175,7 @@ fn windows_git_install_roots(environment: &ProcessEnvironment) -> Vec<PathBuf> {
             continue;
         };
         let root = base.join(&suffix);
-        if !roots.contains(&root) {
-            roots.push(root);
-        }
+        push_unique_path(&mut roots, root);
     }
 
     roots
@@ -188,10 +186,27 @@ fn push_bash_candidates(candidates: &mut Vec<PathBuf>, install_root: &Path) {
         install_root.join("bin").join("bash.exe"),
         install_root.join("usr").join("bin").join("bash.exe"),
     ] {
-        if !candidates.contains(&candidate) {
-            candidates.push(candidate);
-        }
+        push_unique_path(candidates, candidate);
     }
+}
+
+fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
+    if !paths
+        .iter()
+        .any(|existing| same_windows_candidate_path(existing, &path))
+    {
+        paths.push(path);
+    }
+}
+
+fn same_windows_candidate_path(left: &Path, right: &Path) -> bool {
+    let left = left.to_string_lossy();
+    let right = right.to_string_lossy();
+    remote_exec_proto::path::same_path_for_policy(
+        remote_exec_proto::path::windows_path_policy(),
+        left.as_ref(),
+        right.as_ref(),
+    )
 }
 
 fn resolve_windows_shell_path(shell: &str, windows_posix_root: Option<&Path>) -> String {
@@ -231,19 +246,38 @@ fn windows_path_candidates(path: &Path, pathext: Option<&OsStr>) -> Vec<PathBuf>
 }
 
 fn windows_path_exts(pathext: Option<&OsStr>) -> Vec<String> {
-    let mut exts = pathext
-        .map(|value| value.to_string_lossy().into_owned())
-        .unwrap_or_else(|| ".com;.exe;.bat;.cmd".to_string())
-        .split(';')
-        .filter(|ext| !ext.is_empty())
-        .map(|ext| ext.trim_start_matches('.').to_string())
-        .collect::<Vec<_>>();
+    let mut exts = Vec::new();
+
+    if let Some(pathext) = pathext {
+        for ext in pathext.to_string_lossy().split(';') {
+            push_windows_path_ext(&mut exts, ext);
+        }
+    } else {
+        push_default_windows_path_exts(&mut exts);
+    }
 
     if exts.is_empty() {
-        exts.extend(["com", "exe", "bat", "cmd"].into_iter().map(str::to_owned));
+        push_default_windows_path_exts(&mut exts);
     }
 
     exts
+}
+
+fn push_windows_path_ext(exts: &mut Vec<String>, ext: &str) {
+    let ext = ext.trim().trim_start_matches('.');
+    if !ext.is_empty()
+        && !exts
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(ext))
+    {
+        exts.push(ext.to_string());
+    }
+}
+
+fn push_default_windows_path_exts(exts: &mut Vec<String>) {
+    for ext in ["com", "exe", "bat", "cmd"] {
+        push_windows_path_ext(exts, ext);
+    }
 }
 
 fn is_regular_file(path: &Path) -> bool {
@@ -258,7 +292,10 @@ mod tests {
 
     use crate::config::ProcessEnvironment;
 
-    use super::{resolve_default_windows_shell_with_validator, resolve_requested_windows_shell};
+    use super::{
+        push_unique_path, resolve_default_windows_shell_with_validator,
+        resolve_requested_windows_shell, windows_path_exts,
+    };
 
     fn make_environment(
         path_entries: &[&Path],
@@ -432,5 +469,29 @@ mod tests {
         let err = resolve_requested_windows_shell("bash.exe", &environment, None).unwrap_err();
 
         assert!(err.to_string().contains("Git Bash"));
+    }
+
+    #[test]
+    fn windows_path_exts_deduplicates_and_falls_back_for_empty_values() {
+        assert_eq!(
+            windows_path_exts(Some(std::ffi::OsStr::new(".EXE;.exe; .CMD ;"))),
+            vec!["EXE".to_string(), "CMD".to_string()]
+        );
+        assert_eq!(
+            windows_path_exts(Some(std::ffi::OsStr::new(";;"))),
+            vec![
+                "com".to_string(),
+                "exe".to_string(),
+                "bat".to_string(),
+                "cmd".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn windows_path_candidate_deduping_ignores_case_and_separator_style() {
+        let mut paths = vec![std::path::PathBuf::from(r"C:\Git\bin\bash.exe")];
+        push_unique_path(&mut paths, std::path::PathBuf::from("c:/git/bin/bash.exe"));
+        assert_eq!(paths.len(), 1);
     }
 }

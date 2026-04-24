@@ -33,7 +33,8 @@ pub fn windows_path_policy() -> PathPolicy {
 }
 
 fn split_windows_prefix(raw: &str) -> (&str, &str) {
-    if raw.len() >= 2 && raw.as_bytes()[1] == b':' {
+    let bytes = raw.as_bytes();
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
         return (&raw[..2], &raw[2..]);
     }
     if raw.starts_with(r"\\") || raw.starts_with("//") {
@@ -79,26 +80,25 @@ fn build_windows_drive_path(drive: char, rest: &str) -> String {
         format!(
             "{}:\\{}",
             drive.to_ascii_uppercase(),
-            tail.chars()
-                .map(|ch| match ch {
-                    '/' | '\\' => '\\',
-                    other => other,
-                })
-                .collect::<String>()
+            normalize_windows_path_chars(tail)
         )
     }
 }
 
-fn normalize_windows_separators(raw: &str) -> String {
-    let (prefix, rest) = split_windows_prefix(raw);
-    let normalized_rest = rest
-        .chars()
+fn normalize_windows_path_chars(raw: &str) -> String {
+    raw.chars()
         .map(|ch| match ch {
             '/' | '\\' => '\\',
             other => other,
         })
-        .collect::<String>();
-    format!("{prefix}{normalized_rest}")
+        .collect()
+}
+
+fn normalize_windows_separators(raw: &str) -> String {
+    let (prefix, rest) = split_windows_prefix(raw);
+    let normalized_prefix = normalize_windows_path_chars(prefix);
+    let normalized_rest = normalize_windows_path_chars(rest);
+    format!("{normalized_prefix}{normalized_rest}")
 }
 
 fn comparison_key(policy: PathPolicy, raw: &str) -> String {
@@ -274,6 +274,10 @@ mod tests {
         assert_eq!(
             normalize_for_system(policy, "/cygdrive/c/work/releases/current.txt"),
             r"C:\work\releases\current.txt"
+        );
+        assert_eq!(
+            normalize_for_system(policy, "//server/share/releases/current.txt"),
+            r"\\server\share\releases\current.txt"
         );
     }
 

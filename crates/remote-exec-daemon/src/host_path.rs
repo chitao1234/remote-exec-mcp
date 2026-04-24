@@ -6,7 +6,11 @@ use remote_exec_proto::path::{
 };
 
 pub fn host_path_policy() -> PathPolicy {
-    if cfg!(windows) {
+    host_path_policy_for_platform(cfg!(windows))
+}
+
+fn host_path_policy_for_platform(is_windows: bool) -> PathPolicy {
+    if is_windows {
         windows_path_policy()
     } else {
         linux_path_policy()
@@ -21,16 +25,18 @@ pub fn resolve_absolute_input_path(
     raw: &str,
     windows_posix_root: Option<&Path>,
 ) -> Option<PathBuf> {
-    if is_absolute_for_policy(host_path_policy(), raw) {
-        return Some(PathBuf::from(normalize_for_system(host_path_policy(), raw)));
+    let policy = host_path_policy();
+    if is_absolute_for_policy(policy, raw) {
+        return Some(PathBuf::from(normalize_for_system(policy, raw)));
     }
 
     synthetic_windows_posix_absolute_path(raw, windows_posix_root)
 }
 
 pub fn resolve_input_path(base: &Path, raw: &str, windows_posix_root: Option<&Path>) -> PathBuf {
+    let policy = host_path_policy();
     resolve_absolute_input_path(raw, windows_posix_root)
-        .unwrap_or_else(|| base.join(normalize_for_system(host_path_policy(), raw)))
+        .unwrap_or_else(|| base.join(normalize_for_system(policy, raw)))
 }
 
 #[cfg(windows)]
@@ -76,10 +82,8 @@ fn synthetic_windows_posix_absolute_path(
 
 #[cfg(windows)]
 fn path_has_windows_prefix(path: &Path, prefix: &Path) -> bool {
-    let path_text = normalize_for_system(windows_path_policy(), &path.to_string_lossy());
-    let prefix_text = normalize_for_system(windows_path_policy(), &prefix.to_string_lossy());
-    let path_lower = path_text.to_ascii_lowercase();
-    let mut prefix_lower = prefix_text.to_ascii_lowercase();
+    let path_lower = normalized_windows_path_key(path);
+    let mut prefix_lower = normalized_windows_path_key(prefix);
 
     if path_lower == prefix_lower {
         return true;
@@ -91,9 +95,17 @@ fn path_has_windows_prefix(path: &Path, prefix: &Path) -> bool {
     path_lower.starts_with(&prefix_lower)
 }
 
+#[cfg(windows)]
+fn normalized_windows_path_key(path: &Path) -> String {
+    normalize_for_system(windows_path_policy(), &path.to_string_lossy()).to_ascii_lowercase()
+}
+
 #[cfg(all(test, windows))]
 mod tests {
-    use super::{is_input_path_absolute, resolve_absolute_input_path, resolve_input_path};
+    use super::{
+        is_input_path_absolute, resolve_absolute_input_path, resolve_input_path,
+        shell_uses_windows_posix_root,
+    };
 
     #[test]
     fn synthetic_windows_posix_root_treats_single_slash_paths_as_absolute() {
@@ -123,5 +135,18 @@ mod tests {
             resolve_input_path(std::path::Path::new(r"C:\work"), "src/main.rs", Some(root)),
             std::path::PathBuf::from(r"C:\work\src\main.rs")
         );
+    }
+
+    #[test]
+    fn shell_uses_windows_posix_root_matches_boundaries_case_insensitively() {
+        let root = std::path::Path::new(r"C:\msys64");
+        assert!(shell_uses_windows_posix_root(
+            r"C:\MSYS64\usr\bin\zsh.exe",
+            Some(root)
+        ));
+        assert!(!shell_uses_windows_posix_root(
+            r"C:\msys64-tools\usr\bin\zsh.exe",
+            Some(root)
+        ));
     }
 }
