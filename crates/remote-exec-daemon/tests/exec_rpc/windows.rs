@@ -541,7 +541,7 @@ async fn omitted_max_output_tokens_defaults_to_ten_thousand_on_windows() {
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
             &windows_start_request(
-                "[Console]::Out.Write(('x ' * 10005))",
+                "[Console]::Out.Write(('x ' * 25000))",
                 false,
                 Some(COMPLETED_COMMAND_YIELD_MS),
                 None,
@@ -550,8 +550,9 @@ async fn omitted_max_output_tokens_defaults_to_ten_thousand_on_windows() {
         .await;
 
     assert_eq!(response.exit_code, Some(0));
-    assert_eq!(response.original_token_count, Some(10_005));
-    assert_eq!(response.output.split_whitespace().count(), 10_000);
+    assert_eq!(response.original_token_count, Some(12_500));
+    assert!(response.output.starts_with("Total output lines: 1\n\n"));
+    assert!(response.output.contains("tokens truncated"));
 }
 
 #[tokio::test]
@@ -562,16 +563,19 @@ async fn exec_start_truncates_output_to_max_output_tokens_on_windows() {
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
             &windows_start_request(
-                "[Console]::Out.Write('one two three four five six')",
+                "[Console]::Out.Write(('a' * 100))",
                 false,
                 Some(COMPLETED_COMMAND_YIELD_MS),
-                Some(3),
+                Some(15),
             ),
         )
         .await;
 
-    assert_eq!(response.original_token_count, Some(6));
-    assert_eq!(response.output, "one two three");
+    assert_eq!(response.original_token_count, Some(25));
+    assert_eq!(
+        response.output,
+        "Total output lines: 1\n\naaaaaa\u{2026}22 tokens truncated\u{2026}aaaaaa"
+    );
 }
 
 #[tokio::test]
@@ -633,13 +637,13 @@ async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens_on_windows() 
         );
         assert_eq!(
             response.original_token_count,
-            Some(6),
+            Some(7),
             "{} response: {response:#?}",
             backend.name()
         );
         assert_eq!(
             strip_terminal_noise(&response.output),
-            "one two three",
+            "Total output lines: 1\n\n\u{2026}7 tokens truncated\u{2026}",
             "{} response: {response:#?}",
             backend.name()
         );
