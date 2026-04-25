@@ -1,5 +1,7 @@
 #include <cassert>
 #include <filesystem>
+#include <fstream>
+#include <limits>
 #include <string>
 
 #include "config.h"
@@ -36,6 +38,13 @@ static std::string normalize_output(const std::string& input) {
     return output;
 }
 
+static void write_text_file(const fs::path& path, const std::string& contents) {
+    std::ofstream out(path.string().c_str(), std::ios::binary);
+    assert(out.good());
+    out << contents;
+    out.close();
+}
+
 int main() {
     const fs::path root = make_test_root();
     SessionStore store;
@@ -47,7 +56,7 @@ int main() {
         "",
         true,
         5000UL,
-        0UL,
+        std::numeric_limits<unsigned long>::max(),
         yield_time
     );
 
@@ -58,6 +67,55 @@ int main() {
         normalize_output(response.at("output").get<std::string>()) ==
         "stdout-1\nstderr-1\nstdout-2\nstderr-2\n"
     );
+
+    write_text_file(root / "long.txt", std::string(100, 'a'));
+    const Json middle_truncated = store.start_command(
+        "type long.txt",
+        root.string(),
+        "",
+        true,
+        5000UL,
+        15UL,
+        yield_time
+    );
+    assert(middle_truncated.at("original_token_count").get<int>() == 25);
+    assert(
+        normalize_output(middle_truncated.at("output").get<std::string>()) ==
+        std::string("Total output lines: 1\n\naaaaaa") +
+            "\xE2\x80\xA6" + "22 tokens truncated" + "\xE2\x80\xA6" + "aaaaaa"
+    );
+
+    write_text_file(root / "huge.txt", std::string(50000, 'x'));
+    const Json omitted_limit = store.start_command(
+        "type huge.txt",
+        root.string(),
+        "",
+        true,
+        5000UL,
+        std::numeric_limits<unsigned long>::max(),
+        yield_time
+    );
+    assert(omitted_limit.at("original_token_count").get<int>() == 12500);
+    assert(
+        normalize_output(omitted_limit.at("output").get<std::string>())
+            .find("Total output lines: 1\n\n") == 0
+    );
+    assert(
+        omitted_limit.at("output").get<std::string>().find("tokens truncated") !=
+        std::string::npos
+    );
+
+    const Json zero_limit = store.start_command(
+        "type huge.txt",
+        root.string(),
+        "",
+        true,
+        5000UL,
+        0UL,
+        yield_time
+    );
+    assert(zero_limit.at("original_token_count").get<int>() == 12500);
+    assert(zero_limit.at("output").get<std::string>().empty());
 
     return 0;
 }

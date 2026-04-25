@@ -28,7 +28,7 @@ public:
         const std::string& shell,
         bool has_yield_time_ms,
         unsigned long yield_time_ms,
-        unsigned long max_output_chars,
+        unsigned long max_output_tokens,
         const YieldTimeConfig& yield_time
     );
     Json write_stdin(
@@ -36,7 +36,7 @@ public:
         const std::string& chars,
         bool has_yield_time_ms,
         unsigned long yield_time_ms,
-        unsigned long max_output_chars,
+        unsigned long max_output_tokens,
         const YieldTimeConfig& yield_time
     );
 

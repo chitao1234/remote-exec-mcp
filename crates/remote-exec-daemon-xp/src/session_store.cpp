@@ -1,4 +1,6 @@
+#include <algorithm>
 #include <cstdlib>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -27,11 +29,117 @@ struct PollResult {
     DWORD exit_code;
 };
 
-std::string trim_output(const std::string& output, unsigned long max_output_chars) {
-    if (max_output_chars == 0 || output.size() <= max_output_chars) {
+const unsigned long DEFAULT_MAX_OUTPUT_TOKENS = 10000UL;
+const unsigned long OMITTED_MAX_OUTPUT_TOKENS = std::numeric_limits<unsigned long>::max();
+const std::size_t BYTES_PER_TOKEN = 4U;
+
+unsigned long approximate_token_count(std::size_t bytes) {
+    if (bytes == 0U) {
+        return 0UL;
+    }
+    return static_cast<unsigned long>((bytes + BYTES_PER_TOKEN - 1U) / BYTES_PER_TOKEN);
+}
+
+unsigned long effective_max_output_tokens(unsigned long requested) {
+    if (requested == OMITTED_MAX_OUTPUT_TOKENS) {
+        return DEFAULT_MAX_OUTPUT_TOKENS;
+    }
+    return requested;
+}
+
+unsigned long count_lines(const std::string& output) {
+    if (output.empty()) {
+        return 0UL;
+    }
+
+    unsigned long lines = 1UL;
+    for (std::string::const_iterator it = output.begin(); it != output.end(); ++it) {
+        if (*it == '\n') {
+            ++lines;
+        }
+    }
+    if (output[output.size() - 1] == '\n') {
+        --lines;
+    }
+    return lines;
+}
+
+bool is_utf8_continuation_byte(unsigned char byte) {
+    return (byte & 0xC0U) == 0x80U;
+}
+
+std::size_t floor_char_boundary(const std::string& output, std::size_t max_bytes) {
+    std::size_t index = std::min(max_bytes, output.size());
+    while (index > 0U && index < output.size() &&
+           is_utf8_continuation_byte(static_cast<unsigned char>(output[index]))) {
+        --index;
+    }
+    return index;
+}
+
+std::size_t ceil_char_boundary(const std::string& output, std::size_t min_bytes) {
+    std::size_t index = std::min(min_bytes, output.size());
+    while (index < output.size() &&
+           is_utf8_continuation_byte(static_cast<unsigned char>(output[index]))) {
+        ++index;
+    }
+    return index;
+}
+
+std::size_t suffix_start_for_budget(const std::string& output, std::size_t max_bytes) {
+    if (max_bytes >= output.size()) {
+        return 0U;
+    }
+    return ceil_char_boundary(output, output.size() - max_bytes);
+}
+
+std::string truncation_prefix(unsigned long line_count) {
+    std::ostringstream out;
+    out << "Total output lines: " << line_count << "\n\n";
+    return out.str();
+}
+
+std::string truncation_marker(unsigned long truncated_tokens) {
+    std::ostringstream out;
+    out << "\xE2\x80\xA6" << truncated_tokens << " tokens truncated" << "\xE2\x80\xA6";
+    return out.str();
+}
+
+std::string render_output(const std::string& output, unsigned long requested_max_output_tokens) {
+    if (requested_max_output_tokens == 0UL) {
+        return std::string();
+    }
+
+    const std::size_t max_output_bytes =
+        static_cast<std::size_t>(effective_max_output_tokens(requested_max_output_tokens)) *
+        BYTES_PER_TOKEN;
+    if (output.size() <= max_output_bytes) {
         return output;
     }
-    return output.substr(output.size() - max_output_chars);
+
+    const std::string prefix = truncation_prefix(count_lines(output));
+    unsigned long truncated_tokens = approximate_token_count(output.size());
+    for (;;) {
+        const std::string marker = truncation_marker(truncated_tokens);
+        if (max_output_bytes <= prefix.size() + marker.size()) {
+            return prefix + marker;
+        }
+
+        const std::size_t payload_budget = max_output_bytes - prefix.size() - marker.size();
+        const std::size_t head_budget = payload_budget / 2U;
+        const std::size_t tail_budget = payload_budget - head_budget;
+        const std::size_t head_end = floor_char_boundary(output, head_budget);
+        const std::size_t tail_start =
+            std::max(head_end, suffix_start_for_budget(output, tail_budget));
+        const unsigned long next_truncated_tokens =
+            approximate_token_count(tail_start - head_end);
+
+        if (next_truncated_tokens == truncated_tokens) {
+            return prefix + output.substr(0, head_end) + marker + output.substr(tail_start);
+        }
+
+        truncated_tokens = next_truncated_tokens;
+    }
 }
 
 double wall_time_seconds(DWORD started_at_ms) {
@@ -53,17 +161,10 @@ Json build_response(
     bool has_exit_code,
     DWORD exit_code,
     const std::string& output,
-    unsigned long max_output_chars
+    unsigned long max_output_tokens
 ) {
-    const std::string trimmed = trim_output(output, max_output_chars);
-    unsigned long original_token_count = 0;
-    {
-        std::istringstream tokens(output);
-        std::string token;
-        while (tokens >> token) {
-            ++original_token_count;
-        }
-    }
+    const std::string trimmed = render_output(output, max_output_tokens);
+    const unsigned long original_token_count = approximate_token_count(output.size());
     return Json{
         {"daemon_session_id", daemon_session_id != NULL ? Json(daemon_session_id) : Json(nullptr)},
         {"running", running},
@@ -200,7 +301,7 @@ Json SessionStore::start_command(
     const std::string& shell,
     bool has_yield_time_ms,
     unsigned long yield_time_ms,
-    unsigned long max_output_chars,
+    unsigned long max_output_tokens,
     const YieldTimeConfig& yield_time
 ) {
     {
@@ -227,7 +328,7 @@ Json SessionStore::start_command(
             true,
             poll_result.exit_code,
             poll_result.output,
-            max_output_chars
+            max_output_tokens
         );
         {
             std::ostringstream message;
@@ -253,7 +354,7 @@ Json SessionStore::start_command(
         false,
         0,
         poll_result.output,
-        max_output_chars
+        max_output_tokens
     );
 }
 
@@ -262,7 +363,7 @@ Json SessionStore::write_stdin(
     const std::string& chars,
     bool has_yield_time_ms,
     unsigned long yield_time_ms,
-    unsigned long max_output_chars,
+    unsigned long max_output_tokens,
     const YieldTimeConfig& yield_time
 ) {
     std::map<std::string, std::shared_ptr<LiveSession> >::iterator it = sessions_.find(daemon_session_id);
@@ -313,7 +414,7 @@ Json SessionStore::write_stdin(
             true,
             poll_result.exit_code,
             poll_result.output,
-            max_output_chars
+            max_output_tokens
         );
         sessions_.erase(it);
         {
@@ -338,6 +439,6 @@ Json SessionStore::write_stdin(
         false,
         0,
         poll_result.output,
-        max_output_chars
+        max_output_tokens
     );
 }

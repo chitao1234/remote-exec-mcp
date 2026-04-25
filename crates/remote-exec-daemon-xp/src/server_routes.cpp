@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cctype>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -99,6 +100,11 @@ HttpResponse handle_exec_start(AppState& state, const HttpRequest& request) {
         const bool has_yield_time_ms = yield_time_it != body.end();
         const unsigned long yield_time_ms =
             has_yield_time_ms ? yield_time_it->get<unsigned long>() : 0UL;
+        const Json::const_iterator max_output_tokens_it = body.find("max_output_tokens");
+        const unsigned long max_output_tokens =
+            max_output_tokens_it != body.end()
+                ? max_output_tokens_it->get<unsigned long>()
+                : std::numeric_limits<unsigned long>::max();
         if (body.value("tty", false)) {
             return make_rpc_error_response(
                 400,
@@ -122,7 +128,7 @@ HttpResponse handle_exec_start(AppState& state, const HttpRequest& request) {
             shell,
             has_yield_time_ms,
             yield_time_ms,
-            body.value("max_output_tokens", 0UL),
+            max_output_tokens,
             state.config.yield_time
         );
         log_message(
@@ -151,6 +157,11 @@ HttpResponse handle_exec_write(AppState& state, const HttpRequest& request) {
         const bool has_yield_time_ms = yield_time_it != body.end();
         const unsigned long yield_time_ms =
             has_yield_time_ms ? yield_time_it->get<unsigned long>() : 0UL;
+        const Json::const_iterator max_output_tokens_it = body.find("max_output_tokens");
+        const unsigned long max_output_tokens =
+            max_output_tokens_it != body.end()
+                ? max_output_tokens_it->get<unsigned long>()
+                : std::numeric_limits<unsigned long>::max();
         {
             std::ostringstream message;
             message << "exec/write daemon_session_id=`"
@@ -163,7 +174,7 @@ HttpResponse handle_exec_write(AppState& state, const HttpRequest& request) {
             body.value("chars", std::string()),
             has_yield_time_ms,
             yield_time_ms,
-            body.value("max_output_tokens", 0UL),
+            max_output_tokens,
             state.config.yield_time
         );
         exec_response["daemon_instance_id"] = state.daemon_instance_id;
