@@ -103,8 +103,9 @@ pub fn truncate_to_token_limit(raw: &str, max_output_tokens: Option<u32>) -> Str
         let next_truncated_tokens = approximate_token_count(tail_start.saturating_sub(head_end));
 
         if next_truncated_tokens == truncated_tokens {
-            let mut rendered =
-                String::with_capacity(prefix.len() + head_end + marker.len() + raw.len() - tail_start);
+            let mut rendered = String::with_capacity(
+                prefix.len() + head_end + marker.len() + raw.len() - tail_start,
+            );
             rendered.push_str(&prefix);
             rendered.push_str(&raw[..head_end]);
             rendered.push_str(&marker);
