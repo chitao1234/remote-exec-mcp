@@ -28,6 +28,13 @@ Logs go to `stderr`. Set `REMOTE_EXEC_LOG=debug` to raise the level, or use a sh
 
 Non-TTY exec output merges `stdout` and `stderr` through one pipe, so the returned `output` field preserves their emitted order.
 
+`exec_command` and `write_stdin` use the same truncation contract as the main daemon:
+
+- `max_output_tokens` is approximate, with one token treated as about four UTF-8 bytes
+- `original_token_count` is `ceil(total_utf8_bytes / 4)`
+- omitted `max_output_tokens` still defaults to `10000`, while explicit `0` returns an empty `output`
+- when truncation happens, `output` becomes `Total output lines: N\n\n{head}…X tokens truncated…{tail}` with a UTF-8-safe roughly 50/50 head/tail split
+
 ## Config
 
 Example config:
