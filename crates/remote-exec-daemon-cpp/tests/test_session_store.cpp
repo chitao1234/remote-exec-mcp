@@ -56,7 +56,7 @@ int main() {
         false,
         true,
         5000UL,
-        0UL,
+        DEFAULT_MAX_OUTPUT_TOKENS,
         yield_time,
         64UL
     );
@@ -69,6 +69,42 @@ int main() {
         "stdout-1\nstderr-1\nstdout-2\nstderr-2\n"
     );
 
+#ifdef _WIN32
+    const std::string token_command = "echo one two three";
+#else
+    const std::string token_command = "printf 'one two three\\n'";
+#endif
+
+    const Json token_limited = store.start_command(
+        token_command,
+        root.string(),
+        shell,
+        false,
+        false,
+        true,
+        5000UL,
+        2UL,
+        yield_time,
+        64UL
+    );
+    assert(token_limited.at("original_token_count").get<unsigned long>() == 3UL);
+    assert(normalize_output(token_limited.at("output").get<std::string>()) == "one two");
+
+    const Json zero_limited = store.start_command(
+        token_command,
+        root.string(),
+        shell,
+        false,
+        false,
+        true,
+        5000UL,
+        0UL,
+        yield_time,
+        64UL
+    );
+    assert(zero_limited.at("original_token_count").get<unsigned long>() == 3UL);
+    assert(zero_limited.at("output").get<std::string>().empty());
+
 #ifndef _WIN32
     const Json locale_response = store.start_command(
         "printf '%s %s\\n' \"$LC_ALL\" \"$LANG\"",
@@ -78,7 +114,7 @@ int main() {
         false,
         true,
         5000UL,
-        0UL,
+        DEFAULT_MAX_OUTPUT_TOKENS,
         yield_time,
         64UL
     );
@@ -93,7 +129,7 @@ int main() {
         false,
         true,
         250UL,
-        0UL,
+        DEFAULT_MAX_OUTPUT_TOKENS,
         yield_time,
         64UL
     );
@@ -105,7 +141,7 @@ int main() {
         "hello\n",
         true,
         5000UL,
-        0UL,
+        DEFAULT_MAX_OUTPUT_TOKENS,
         yield_time
     );
     assert(!completed.at("running").get<bool>());
@@ -122,7 +158,7 @@ int main() {
             true,
             true,
             250UL,
-            0UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
             yield_time,
             64UL
         );
@@ -134,7 +170,7 @@ int main() {
             "hello\n",
             true,
             5000UL,
-            0UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
             yield_time
         );
         assert(!tty_completed.at("running").get<bool>());
@@ -147,7 +183,14 @@ int main() {
 
     bool unknown_session_rejected = false;
     try {
-        (void)store.write_stdin("missing-session", "", true, 250UL, 0UL, yield_time);
+        (void)store.write_stdin(
+            "missing-session",
+            "",
+            true,
+            250UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            yield_time
+        );
     } catch (const UnknownSessionError&) {
         unknown_session_rejected = true;
     }

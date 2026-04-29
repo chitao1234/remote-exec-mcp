@@ -263,7 +263,7 @@ How to use it:
 - Prefer `apply_patch` over shell editing when you know the exact file changes.
 - Use the same patch discipline as the normal Codex `apply_patch` tool.
 - Relative file paths in the patch are resolved from `workdir` when provided.
-- On Windows XP-compatible C++ daemon targets, `apply_patch` currently does not support absolute file paths inside the patch text. Set `workdir` and keep patch paths relative.
+- C++ daemon targets support both absolute patch paths and paths relative to `workdir`.
 - The patch engine supports the documented `*** End of File` marker.
 - Updating an existing file preserves its current `LF` versus `CRLF` line ending style.
 - This tool is target-local. It does not move bytes between endpoints.
@@ -455,7 +455,7 @@ Example: download a remote log to broker-host `local`:
 - On C++ daemon targets, `view_image` is unavailable.
 - On POSIX C++ daemon targets, shell selection follows the Rust daemon policy and child processes force `LC_ALL=C.UTF-8` plus `LANG=C.UTF-8`.
 - On Windows XP-compatible C++ daemon targets, the supported shell is `cmd.exe`.
-- On Windows XP-compatible C++ daemon targets, `apply_patch` currently rejects absolute file paths inside the patch text. Use `workdir` plus relative patch paths instead.
+- On C++ daemon targets, `apply_patch` supports both absolute patch paths and paths relative to `workdir`.
 - On C++ daemon targets, `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles.
 - On C++ daemon targets, transfer compression is never used; the broker falls back automatically.
 - Do not assume symlink-heavy or special-file transfers work on C++ daemon targets.

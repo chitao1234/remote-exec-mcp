@@ -69,6 +69,29 @@ int main() {
     assert(add_result.output.find("A new.txt") != std::string::npos);
     assert(read_text(root / "new.txt") == "new file\n");
 
+    const fs::path absolute_path = root / "absolute.txt";
+    const std::string absolute_add_patch =
+        "*** Begin Patch\n"
+        "*** Add File: " + absolute_path.string() + "\n"
+        "+absolute file\n"
+        "*** End Patch\n";
+
+    PatchApplyResult absolute_add_result = apply_patch(root.string(), absolute_add_patch);
+    assert(absolute_add_result.output.find("A ") != std::string::npos);
+    assert(read_text(absolute_path) == "absolute file\n");
+
+    const std::string absolute_update_patch =
+        "*** Begin Patch\n"
+        "*** Update File: " + absolute_path.string() + "\n"
+        "@@\n"
+        "-absolute file\n"
+        "+absolute update\n"
+        "*** End Patch\n";
+
+    PatchApplyResult absolute_update_result = apply_patch(root.string(), absolute_update_patch);
+    assert(absolute_update_result.output.find("M ") != std::string::npos);
+    assert(read_text(absolute_path) == "absolute update\n");
+
     const std::string move_patch =
         "*** Begin Patch\n"
         "*** Update File: new.txt\n"

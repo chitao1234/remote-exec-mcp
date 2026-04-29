@@ -38,9 +38,9 @@ clean:
 test-host-patch: $(HOST_PATCH)
 	./$(HOST_PATCH)
 
-$(HOST_PATCH): tests/test_patch.cpp src/patch_engine.cpp
+$(HOST_PATCH): tests/test_patch.cpp src/patch_engine.cpp src/platform.cpp
 	mkdir -p $(BUILD_DIR)
-	$(HOST_CXX) $(COMMON_FLAGS) -o $@ tests/test_patch.cpp src/patch_engine.cpp
+	$(HOST_CXX) $(COMMON_FLAGS) -o $@ tests/test_patch.cpp src/patch_engine.cpp src/platform.cpp
 
 test-host-transfer: $(HOST_TRANSFER)
 	./$(HOST_TRANSFER)

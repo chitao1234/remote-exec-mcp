@@ -295,6 +295,34 @@ static void assert_directory_long_path_round_trip() {
     assert(read_text(root / "dest" / long_name / "nested" / "payload.txt") == "long path");
 }
 
+#ifndef _WIN32
+static void assert_symlink_sources_are_rejected() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-symlink";
+    fs::remove_all(root);
+    fs::create_directories(root / "source");
+    write_text(root / "target.txt", "target");
+    write_text(root / "source" / "regular.txt", "regular");
+    fs::create_symlink(root / "target.txt", root / "link.txt");
+    fs::create_symlink(root / "target.txt", root / "source" / "link.txt");
+
+    bool rejected = false;
+    try {
+        (void)export_path((root / "link.txt").string());
+    } catch (...) {
+        rejected = true;
+    }
+    assert(rejected);
+
+    rejected = false;
+    try {
+        (void)export_path((root / "source").string());
+    } catch (...) {
+        rejected = true;
+    }
+    assert(rejected);
+}
+#endif
+
 static void assert_directory_traversal_is_rejected() {
     const std::string archive = tar_with_single_file("../escape.txt", "bad");
     const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-traversal";
@@ -335,6 +363,9 @@ int main() {
     assert_directory_round_trip();
     assert_directory_replace_behavior();
     assert_directory_long_path_round_trip();
+#ifndef _WIN32
+    assert_symlink_sources_are_rejected();
+#endif
     assert_directory_traversal_is_rejected();
     assert_multiple_sources_import();
     return 0;

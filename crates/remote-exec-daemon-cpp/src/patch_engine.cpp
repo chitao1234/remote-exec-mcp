@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cerrno>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -17,6 +18,7 @@
 #endif
 
 #include "patch_engine.h"
+#include "platform.h"
 
 namespace {
 
@@ -59,12 +61,6 @@ std::string normalize_relative_path(const std::string& raw) {
     if (raw.empty()) {
         throw std::runtime_error("patch path is empty");
     }
-    if (raw[0] == '/' || raw[0] == '\\') {
-        throw std::runtime_error("absolute patch paths are not supported");
-    }
-    if (raw.size() >= 2 && raw[1] == ':') {
-        throw std::runtime_error("absolute patch paths are not supported");
-    }
 
     std::vector<std::string> parts;
     std::string current;
@@ -73,9 +69,11 @@ std::string normalize_relative_path(const std::string& raw) {
         if (ch == '/' || ch == '\\') {
             if (!current.empty()) {
                 if (current == "..") {
-                    throw std::runtime_error("path traversal is not supported");
-                }
-                if (current != ".") {
+                    if (parts.empty()) {
+                        throw std::runtime_error("path traversal is not supported");
+                    }
+                    parts.pop_back();
+                } else if (current != ".") {
                     parts.push_back(current);
                 }
                 current.clear();
@@ -86,9 +84,11 @@ std::string normalize_relative_path(const std::string& raw) {
     }
     if (!current.empty()) {
         if (current == "..") {
-            throw std::runtime_error("path traversal is not supported");
-        }
-        if (current != ".") {
+            if (parts.empty()) {
+                throw std::runtime_error("path traversal is not supported");
+            }
+            parts.pop_back();
+        } else if (current != ".") {
             parts.push_back(current);
         }
     }
@@ -106,6 +106,86 @@ std::string normalize_relative_path(const std::string& raw) {
     return out.str();
 }
 
+std::string normalize_absolute_path(const std::string& raw) {
+    if (raw.empty()) {
+        throw std::runtime_error("patch path is empty");
+    }
+
+    std::string prefix;
+    std::size_t start = 0;
+#ifdef _WIN32
+    if (raw.size() >= 3 && std::isalpha(static_cast<unsigned char>(raw[0])) != 0 &&
+        raw[1] == ':' && (raw[2] == '\\' || raw[2] == '/')) {
+        prefix = raw.substr(0, 2);
+        prefix.push_back(native_separator());
+        start = 3;
+    } else if (raw.rfind("\\\\", 0) == 0 || raw.rfind("//", 0) == 0) {
+        prefix = "\\\\";
+        start = 2;
+    } else {
+        throw std::runtime_error("absolute patch path is not supported");
+    }
+#else
+    if (raw[0] != '/') {
+        throw std::runtime_error("absolute patch path is not supported");
+    }
+    prefix = "/";
+    start = 1;
+#endif
+
+    std::vector<std::string> parts;
+    std::string current;
+    for (std::size_t i = start; i < raw.size(); ++i) {
+        const char ch = raw[i];
+        if (ch == '/' || ch == '\\') {
+            if (!current.empty()) {
+                if (current == "..") {
+                    if (!parts.empty()) {
+                        parts.pop_back();
+                    }
+                } else if (current != ".") {
+                    parts.push_back(current);
+                }
+                current.clear();
+            }
+        } else {
+            current.push_back(ch);
+        }
+    }
+    if (!current.empty()) {
+        if (current == "..") {
+            if (!parts.empty()) {
+                parts.pop_back();
+            }
+        } else if (current != ".") {
+            parts.push_back(current);
+        }
+    }
+    if (parts.empty()) {
+        throw std::runtime_error("patch path is empty");
+    }
+
+    std::ostringstream out;
+    out << prefix;
+    for (std::size_t i = 0; i < parts.size(); ++i) {
+        if (i != 0 || (!prefix.empty() && prefix[prefix.size() - 1] != native_separator())) {
+            out << native_separator();
+        }
+        out << parts[i];
+    }
+    return out.str();
+}
+
+std::string normalize_patch_path(const std::string& raw) {
+    if (platform::is_absolute_path(raw)) {
+        return normalize_absolute_path(raw);
+    }
+    if (raw.size() >= 2 && raw[1] == ':') {
+        throw std::runtime_error("drive-relative patch paths are not supported");
+    }
+    return normalize_relative_path(raw);
+}
+
 std::string join_path(const std::string& base, const std::string& relative) {
     if (base.empty()) {
         return relative;
@@ -117,6 +197,13 @@ std::string join_path(const std::string& base, const std::string& relative) {
     }
     joined += relative;
     return joined;
+}
+
+std::string resolve_patch_path(const std::string& root, const std::string& path) {
+    if (platform::is_absolute_path(path)) {
+        return path;
+    }
+    return join_path(root, path);
 }
 
 std::string parent_directory(const std::string& path) {
@@ -324,7 +411,7 @@ std::vector<PatchAction> parse_patch(const std::string& patch_text) {
         if (starts_with(line, "*** Add File: ")) {
             PatchAction action;
             action.kind = PATCH_ADD;
-            action.path = normalize_relative_path(line.substr(14));
+            action.path = normalize_patch_path(line.substr(14));
             ++index;
             while (index + 1 < lines.size() && !is_structural_line(lines[index])) {
                 if (lines[index].empty() || lines[index][0] != '+') {
@@ -340,7 +427,7 @@ std::vector<PatchAction> parse_patch(const std::string& patch_text) {
         if (starts_with(line, "*** Delete File: ")) {
             PatchAction action;
             action.kind = PATCH_DELETE;
-            action.path = normalize_relative_path(line.substr(17));
+            action.path = normalize_patch_path(line.substr(17));
             actions.push_back(action);
             ++index;
             continue;
@@ -349,11 +436,11 @@ std::vector<PatchAction> parse_patch(const std::string& patch_text) {
         if (starts_with(line, "*** Update File: ")) {
             PatchAction action;
             action.kind = PATCH_UPDATE;
-            action.path = normalize_relative_path(line.substr(17));
+            action.path = normalize_patch_path(line.substr(17));
             ++index;
 
             if (index + 1 < lines.size() && starts_with(lines[index], "*** Move to: ")) {
-                action.move_to = normalize_relative_path(lines[index].substr(13));
+                action.move_to = normalize_patch_path(lines[index].substr(13));
                 ++index;
             }
 
@@ -514,9 +601,9 @@ PatchApplyResult apply_patch(const std::string& root, const std::string& patch_t
 
     for (std::size_t i = 0; i < actions.size(); ++i) {
         const PatchAction& action = actions[i];
-        const std::string source_path = join_path(root, action.path);
+        const std::string source_path = resolve_patch_path(root, action.path);
         const std::string destination_path =
-            action.move_to.empty() ? source_path : join_path(root, action.move_to);
+            action.move_to.empty() ? source_path : resolve_patch_path(root, action.move_to);
 
         if (action.kind == PATCH_ADD) {
             write_text_atomic(source_path, render_added_content(action.lines));

@@ -75,6 +75,29 @@ int main() {
     assert(info.at("target").get<std::string>() == "cpp-test");
     assert(info.at("supports_pty").get<bool>() == process_session_supports_pty());
 
+    const HttpResponse compression_response = route_request(
+        state,
+        json_request(
+            "/v1/transfer/export",
+            Json{{"path", (root / "missing.txt").string()}, {"compression", "zstd"}}
+        )
+    );
+    assert(compression_response.status == 400);
+    assert(
+        Json::parse(compression_response.body).at("code").get<std::string>() ==
+        "transfer_compression_unsupported"
+    );
+
+    const HttpResponse missing_source_response = route_request(
+        state,
+        json_request("/v1/transfer/export", Json{{"path", (root / "missing.txt").string()}})
+    );
+    assert(missing_source_response.status == 400);
+    assert(
+        Json::parse(missing_source_response.body).at("code").get<std::string>() ==
+        "transfer_source_missing"
+    );
+
 #ifndef _WIN32
     if (process_session_supports_pty()) {
         const HttpResponse start_response = route_request(

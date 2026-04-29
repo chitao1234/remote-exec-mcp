@@ -34,6 +34,49 @@ HttpResponse make_rpc_error_response(
     return response;
 }
 
+bool contains_text(const std::string& value, const std::string& needle) {
+    return value.find(needle) != std::string::npos;
+}
+
+unsigned long requested_max_output_tokens(const Json& body) {
+    const Json::const_iterator it = body.find("max_output_tokens");
+    return it == body.end() ? DEFAULT_MAX_OUTPUT_TOKENS : it->get<unsigned long>();
+}
+
+std::string transfer_error_code(const std::string& message) {
+    if (contains_text(message, "not absolute")) {
+        return "transfer_path_not_absolute";
+    }
+    if (contains_text(message, "destination path") &&
+        contains_text(message, "already exists")) {
+        return "transfer_destination_exists";
+    }
+    if (contains_text(message, "destination parent") &&
+        contains_text(message, "does not exist")) {
+        return "transfer_parent_missing";
+    }
+    if (contains_text(message, "transfer compression") ||
+        contains_text(message, "does not support transfer compression")) {
+        return "transfer_compression_unsupported";
+    }
+    if (contains_text(message, "unsupported symlink") ||
+        contains_text(message, "unsupported entry") ||
+        contains_text(message, "unsupported transfer source type") ||
+        contains_text(message, "regular file or directory") ||
+        contains_text(message, "archive entry is not a regular file") ||
+        contains_text(message, "archive file entry cannot target root") ||
+        contains_text(message, "archive path escapes") ||
+        contains_text(message, "archive path must be relative") ||
+        contains_text(message, "archive path contains empty component")) {
+        return "transfer_source_unsupported";
+    }
+    if (contains_text(message, "transfer source missing") ||
+        contains_text(message, "No such file or directory")) {
+        return "transfer_source_missing";
+    }
+    return "transfer_failed";
+}
+
 HttpResponse handle_health(const AppState& state) {
     HttpResponse response;
     write_json(
@@ -112,7 +155,7 @@ HttpResponse handle_exec_start(AppState& state, const HttpRequest& request) {
             tty_requested,
             has_yield_time_ms,
             yield_time_ms,
-            body.value("max_output_tokens", 0UL),
+            requested_max_output_tokens(body),
             state.config.yield_time,
             state.config.max_open_sessions
         );
@@ -160,7 +203,7 @@ HttpResponse handle_exec_write(AppState& state, const HttpRequest& request) {
             body.value("chars", std::string()),
             has_yield_time_ms,
             yield_time_ms,
-            body.value("max_output_tokens", 0UL),
+            requested_max_output_tokens(body),
             state.config.yield_time
         );
         exec_response["daemon_instance_id"] = state.daemon_instance_id;
@@ -223,8 +266,9 @@ HttpResponse handle_transfer_export(const HttpRequest& request) {
         response.headers["x-remote-exec-compression"] = "none";
         response.body = payload.bytes;
     } catch (const std::exception& ex) {
-        log_message(LOG_WARN, "server", std::string("transfer/export failed: ") + ex.what());
-        write_rpc_error(response, 400, "transfer_failed", ex.what());
+        const std::string message = ex.what();
+        log_message(LOG_WARN, "server", "transfer/export failed: " + message);
+        write_rpc_error(response, 400, transfer_error_code(message), message);
     }
 
     return response;
@@ -267,8 +311,9 @@ HttpResponse handle_transfer_import(const HttpRequest& request) {
             }
         );
     } catch (const std::exception& ex) {
-        log_message(LOG_WARN, "server", std::string("transfer/import failed: ") + ex.what());
-        write_rpc_error(response, 400, "transfer_failed", ex.what());
+        const std::string message = ex.what();
+        log_message(LOG_WARN, "server", "transfer/import failed: " + message);
+        write_rpc_error(response, 400, transfer_error_code(message), message);
     }
 
     return response;

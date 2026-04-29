@@ -31,6 +31,7 @@ struct DirectoryEntry {
     std::string name;
     bool is_directory;
     bool is_regular_file;
+    bool is_symlink;
 };
 
 struct TarHeaderView {
@@ -57,23 +58,38 @@ std::string parent_directory(const std::string& path) {
     return path.substr(0, slash);
 }
 
-bool stat_path(const std::string& path, struct stat* st) {
+bool stat_path_no_follow(const std::string& path, struct stat* st) {
+#ifdef _WIN32
     return stat(path.c_str(), st) == 0;
+#else
+    return lstat(path.c_str(), st) == 0;
+#endif
+}
+
+bool is_symlink_path(const std::string& path) {
+#ifdef _WIN32
+    const DWORD attributes = GetFileAttributesA(path.c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES &&
+           (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+#else
+    struct stat st;
+    return lstat(path.c_str(), &st) == 0 && S_ISLNK(st.st_mode);
+#endif
 }
 
 bool path_exists(const std::string& path) {
     struct stat st;
-    return stat_path(path, &st);
+    return stat_path_no_follow(path, &st);
 }
 
 bool is_regular_file(const std::string& path) {
     struct stat st;
-    return stat_path(path, &st) && (st.st_mode & S_IFREG) != 0;
+    return stat_path_no_follow(path, &st) && (st.st_mode & S_IFREG) != 0;
 }
 
 bool is_directory(const std::string& path) {
     struct stat st;
-    return stat_path(path, &st) && (st.st_mode & S_IFDIR) != 0;
+    return stat_path_no_follow(path, &st) && (st.st_mode & S_IFDIR) != 0;
 }
 
 char os_separator() {
@@ -177,9 +193,14 @@ std::vector<DirectoryEntry> list_directory_entries(const std::string& path) {
         if (name == "." || name == "..") {
             continue;
         }
+        const bool entry_is_symlink =
+            (find_data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
         const bool entry_is_directory =
+            !entry_is_symlink &&
             (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-        entries.push_back(DirectoryEntry{name, entry_is_directory, !entry_is_directory});
+        entries.push_back(
+            DirectoryEntry{name, entry_is_directory, !entry_is_directory && !entry_is_symlink, entry_is_symlink}
+        );
     } while (FindNextFileA(handle, &find_data) != 0);
 
     const DWORD last_error = GetLastError();
@@ -201,12 +222,17 @@ std::vector<DirectoryEntry> list_directory_entries(const std::string& path) {
         }
         const std::string child = join_path(path, name);
         struct stat st;
-        if (!stat_path(child, &st)) {
+        if (!stat_path_no_follow(child, &st)) {
             closedir(dir);
             throw std::runtime_error("unable to stat path " + child);
         }
         entries.push_back(
-            DirectoryEntry{name, (st.st_mode & S_IFDIR) != 0, (st.st_mode & S_IFREG) != 0}
+            DirectoryEntry{
+                name,
+                S_ISDIR(st.st_mode),
+                S_ISREG(st.st_mode),
+                S_ISLNK(st.st_mode)
+            }
         );
     }
     closedir(dir);
@@ -382,6 +408,9 @@ void append_directory_contents(
             append_directory_entry(archive, child_rel);
             append_directory_contents(archive, child_path, child_rel);
             continue;
+        }
+        if (entry.is_symlink) {
+            throw std::runtime_error("transfer source contains unsupported symlink " + child_path);
         }
         if (!entry.is_regular_file) {
             throw std::runtime_error("transfer source contains unsupported entry " + child_path);
@@ -713,6 +742,12 @@ ImportSummary import_directory_from_tar(
 ExportedPayload export_path(const std::string& absolute_path) {
     if (!is_absolute_path(absolute_path)) {
         throw std::runtime_error("transfer path is not absolute");
+    }
+    if (!path_exists(absolute_path)) {
+        throw std::runtime_error("transfer source missing");
+    }
+    if (is_symlink_path(absolute_path)) {
+        throw std::runtime_error("transfer source contains unsupported symlink " + absolute_path);
     }
     if (is_regular_file(absolute_path)) {
         return export_file_as_tar(absolute_path);

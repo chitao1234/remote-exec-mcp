@@ -1,4 +1,5 @@
 #include <atomic>
+#include <cctype>
 #include <cstdint>
 #include <sstream>
 #include <string>
@@ -24,11 +25,55 @@ struct PollResult {
     int exit_code;
 };
 
-std::string trim_output(const std::string& output, unsigned long max_output_chars) {
-    if (max_output_chars == 0 || output.size() <= max_output_chars) {
-        return output;
+bool is_token_space(char ch) {
+    return std::isspace(static_cast<unsigned char>(ch)) != 0;
+}
+
+unsigned long count_tokens(const std::string& output) {
+    unsigned long count = 0;
+    bool in_token = false;
+    for (std::size_t i = 0; i < output.size(); ++i) {
+        if (is_token_space(output[i])) {
+            in_token = false;
+            continue;
+        }
+        if (!in_token) {
+            ++count;
+            in_token = true;
+        }
     }
-    return output.substr(output.size() - max_output_chars);
+    return count;
+}
+
+std::string trim_trailing_token_space(std::string output) {
+    while (!output.empty() && is_token_space(output[output.size() - 1])) {
+        output.erase(output.size() - 1);
+    }
+    return output;
+}
+
+std::string truncate_output_tokens(const std::string& output, unsigned long max_output_tokens) {
+    if (max_output_tokens == 0) {
+        return "";
+    }
+
+    unsigned long seen = 0;
+    bool in_token = false;
+    for (std::size_t i = 0; i < output.size(); ++i) {
+        if (is_token_space(output[i])) {
+            in_token = false;
+            continue;
+        }
+        if (!in_token) {
+            ++seen;
+            if (seen > max_output_tokens) {
+                return trim_trailing_token_space(output.substr(0, i));
+            }
+            in_token = true;
+        }
+    }
+
+    return output;
 }
 
 double wall_time_seconds(std::uint64_t started_at_ms) {
@@ -46,17 +91,10 @@ Json build_response(
     bool has_exit_code,
     int exit_code,
     const std::string& output,
-    unsigned long max_output_chars
+    unsigned long max_output_tokens
 ) {
-    const std::string trimmed = trim_output(output, max_output_chars);
-    unsigned long original_token_count = 0;
-    {
-        std::istringstream tokens(output);
-        std::string token;
-        while (tokens >> token) {
-            ++original_token_count;
-        }
-    }
+    const std::string trimmed = truncate_output_tokens(output, max_output_tokens);
+    const unsigned long original_token_count = count_tokens(output);
     return Json{
         {"daemon_session_id", daemon_session_id != NULL ? Json(daemon_session_id) : Json(nullptr)},
         {"running", running},
@@ -142,7 +180,7 @@ Json SessionStore::start_command(
     bool tty,
     bool has_yield_time_ms,
     unsigned long yield_time_ms,
-    unsigned long max_output_chars,
+    unsigned long max_output_tokens,
     const YieldTimeConfig& yield_time,
     unsigned long max_open_sessions
 ) {
@@ -176,7 +214,7 @@ Json SessionStore::start_command(
             true,
             poll_result.exit_code,
             poll_result.output,
-            max_output_chars
+            max_output_tokens
         );
         {
             std::ostringstream message;
@@ -202,7 +240,7 @@ Json SessionStore::start_command(
         false,
         0,
         poll_result.output,
-        max_output_chars
+        max_output_tokens
     );
 }
 
@@ -211,7 +249,7 @@ Json SessionStore::write_stdin(
     const std::string& chars,
     bool has_yield_time_ms,
     unsigned long yield_time_ms,
-    unsigned long max_output_chars,
+    unsigned long max_output_tokens,
     const YieldTimeConfig& yield_time
 ) {
     std::map<std::string, std::shared_ptr<LiveSession> >::iterator it =
@@ -254,7 +292,7 @@ Json SessionStore::write_stdin(
             true,
             poll_result.exit_code,
             poll_result.output,
-            max_output_chars
+            max_output_tokens
         );
         sessions_.erase(it);
         {
@@ -279,6 +317,6 @@ Json SessionStore::write_stdin(
         false,
         0,
         poll_result.output,
-        max_output_chars
+        max_output_tokens
     );
 }

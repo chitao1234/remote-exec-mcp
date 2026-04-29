@@ -9,6 +9,8 @@
 #include "config.h"
 #include "http_helpers.h"
 
+static const unsigned long DEFAULT_MAX_OUTPUT_TOKENS = 10000UL;
+
 class ProcessSession;
 
 class UnknownSessionError : public std::runtime_error {
@@ -44,7 +46,7 @@ public:
         bool tty,
         bool has_yield_time_ms,
         unsigned long yield_time_ms,
-        unsigned long max_output_chars,
+        unsigned long max_output_tokens,
         const YieldTimeConfig& yield_time,
         unsigned long max_open_sessions
     );
@@ -53,7 +55,7 @@ public:
         const std::string& chars,
         bool has_yield_time_ms,
         unsigned long yield_time_ms,
-        unsigned long max_output_chars,
+        unsigned long max_output_tokens,
         const YieldTimeConfig& yield_time
     );
 
