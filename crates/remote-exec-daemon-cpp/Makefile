@@ -6,9 +6,9 @@ WINDOWS_XP_TARGET := $(BUILD_DIR)/remote-exec-daemon-cpp-xp.exe
 COMMON_FLAGS := -std=gnu++17 -O0 -Wall -Wextra -Iinclude -Ithird_party
 WINDOWS_XP_FLAGS := $(COMMON_FLAGS) -DWINVER=0x0501 -D_WIN32_WINNT=0x0501 -static-libgcc -static-libstdc++
 WIN_LIBS := -lws2_32
-COMMON_SRCS := src/main.cpp src/config.cpp src/http_helpers.cpp src/http_request.cpp src/logging.cpp src/text_utils.cpp src/platform.cpp src/server.cpp src/server_routes.cpp src/server_transport.cpp src/session_store.cpp src/patch_engine.cpp src/transfer_ops.cpp
-WINDOWS_XP_SRCS := $(COMMON_SRCS) src/console_output.cpp src/win32_error.cpp
-POSIX_SRCS := $(COMMON_SRCS)
+COMMON_SRCS := src/main.cpp src/config.cpp src/http_helpers.cpp src/http_request.cpp src/logging.cpp src/text_utils.cpp src/platform.cpp src/shell_policy.cpp src/server.cpp src/server_routes.cpp src/server_transport.cpp src/session_store.cpp src/patch_engine.cpp src/transfer_ops.cpp
+WINDOWS_XP_SRCS := $(COMMON_SRCS) src/process_session_win32.cpp src/console_output.cpp src/win32_error.cpp
+POSIX_SRCS := $(COMMON_SRCS) src/process_session_posix.cpp
 HOST_PATCH := $(BUILD_DIR)/test_patch
 HOST_TRANSFER := $(BUILD_DIR)/test_transfer
 HOST_CONFIG := $(BUILD_DIR)/test_config
@@ -65,16 +65,16 @@ $(HOST_HTTP_REQUEST): tests/test_http_request.cpp src/http_request.cpp src/http_
 test-host-session-store: $(HOST_SESSION_STORE)
 	./$(HOST_SESSION_STORE)
 
-$(HOST_SESSION_STORE): tests/test_session_store.cpp src/session_store.cpp src/platform.cpp src/logging.cpp src/config.cpp src/text_utils.cpp
+$(HOST_SESSION_STORE): tests/test_session_store.cpp src/session_store.cpp src/process_session_posix.cpp src/platform.cpp src/shell_policy.cpp src/logging.cpp src/config.cpp src/text_utils.cpp
 	mkdir -p $(BUILD_DIR)
-	$(HOST_CXX) $(COMMON_FLAGS) -o $@ tests/test_session_store.cpp src/session_store.cpp src/platform.cpp src/logging.cpp src/config.cpp src/text_utils.cpp
+	$(HOST_CXX) $(COMMON_FLAGS) -o $@ tests/test_session_store.cpp src/session_store.cpp src/process_session_posix.cpp src/platform.cpp src/shell_policy.cpp src/logging.cpp src/config.cpp src/text_utils.cpp
 
 test-wine-session-store: $(XP_SESSION_STORE)
 	$(WINE) ./$(XP_SESSION_STORE)
 
-$(XP_SESSION_STORE): tests/test_session_store.cpp src/session_store.cpp src/platform.cpp src/console_output.cpp src/logging.cpp src/win32_error.cpp src/config.cpp src/text_utils.cpp
+$(XP_SESSION_STORE): tests/test_session_store.cpp src/session_store.cpp src/process_session_win32.cpp src/platform.cpp src/shell_policy.cpp src/console_output.cpp src/logging.cpp src/win32_error.cpp src/config.cpp src/text_utils.cpp
 	mkdir -p $(BUILD_DIR)
-	$(CXX) $(WINDOWS_XP_FLAGS) -o $@ tests/test_session_store.cpp src/session_store.cpp src/platform.cpp src/console_output.cpp src/logging.cpp src/win32_error.cpp src/config.cpp src/text_utils.cpp $(WIN_LIBS)
+	$(CXX) $(WINDOWS_XP_FLAGS) -o $@ tests/test_session_store.cpp src/session_store.cpp src/process_session_win32.cpp src/platform.cpp src/shell_policy.cpp src/console_output.cpp src/logging.cpp src/win32_error.cpp src/config.cpp src/text_utils.cpp $(WIN_LIBS)
 
 check-posix: test-host-patch test-host-transfer test-host-config test-host-http-request test-host-session-store all-posix
 
