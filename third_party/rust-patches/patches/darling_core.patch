@@ -1,0 +1,11 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -11,7 +11,7 @@
+ 
+ [package]
+ edition = "2021"
+-rust-version = "1.88.0"
++rust-version = "1.85.0"
+ name = "darling_core"
+ version = "0.23.0"
+ authors = ["Ted Driggs <ted.driggs@outlook.com>"]

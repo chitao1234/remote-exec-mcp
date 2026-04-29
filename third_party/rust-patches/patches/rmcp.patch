@@ -1,0 +1,32 @@
+--- a/src/model/elicitation_schema.rs
++++ b/src/model/elicitation_schema.rs
+@@ -973,10 +973,10 @@
+ 
+     /// Set minimal number of items for multi-select enum options
+     pub fn min_items(mut self, value: u64) -> Result<EnumSchemaBuilder<MultiSelect>, String> {
+-        if let Some(max) = self.max_items
+-            && value > max
+-        {
+-            return Err("Provided value is greater than max_items".to_string());
++        if let Some(max) = self.max_items {
++            if value > max {
++                return Err("Provided value is greater than max_items".to_string());
++            }
+         }
+         self.min_items = Some(value);
+         Ok(self)
+@@ -984,10 +984,10 @@
+ 
+     /// Set maximal number of items for multi-select enum options
+     pub fn max_items(mut self, value: u64) -> Result<EnumSchemaBuilder<MultiSelect>, String> {
+-        if let Some(min) = self.min_items
+-            && value < min
+-        {
+-            return Err("Provided value is less than min_items".to_string());
++        if let Some(min) = self.min_items {
++            if value < min {
++                return Err("Provided value is less than min_items".to_string());
++            }
+         }
+         self.max_items = Some(value);
+         Ok(self)

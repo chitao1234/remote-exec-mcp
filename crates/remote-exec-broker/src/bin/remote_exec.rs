@@ -242,10 +242,10 @@ async fn run_view_image(
     let response = client
         .call_tool("view_image", &view_image_input(args))
         .await?;
-    if !response.is_error
-        && let Some(out) = &output_path
-    {
-        write_image_output(&response, out).await?;
+    if !response.is_error {
+        if let Some(out) = &output_path {
+            write_image_output(&response, out).await?;
+        }
     }
     emit_view_image_response(&response, json, output_path.as_deref())?;
     Ok(status_code(&response))

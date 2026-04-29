@@ -310,14 +310,14 @@ async fn forward_exec_write(
             )))
         }
         Err(err) => {
-            if let Ok(info) = target.target_info().await
-                && info.daemon_instance_id != record.daemon_instance_id
-            {
-                target.clear_cached_daemon_info().await;
-                state.sessions.remove(&record.session_id).await;
-                return Err(anyhow::anyhow!(unknown_process_id_message(
-                    &record.session_id
-                )));
+            if let Ok(info) = target.target_info().await {
+                if info.daemon_instance_id != record.daemon_instance_id {
+                    target.clear_cached_daemon_info().await;
+                    state.sessions.remove(&record.session_id).await;
+                    return Err(anyhow::anyhow!(unknown_process_id_message(
+                        &record.session_id
+                    )));
+                }
             }
             if matches!(err, DaemonClientError::Transport(_)) {
                 target.clear_cached_daemon_info().await;

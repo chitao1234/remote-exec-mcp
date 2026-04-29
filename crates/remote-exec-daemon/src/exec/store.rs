@@ -122,10 +122,10 @@ impl SessionStore {
 
     async fn touch_if_current(&self, session_id: &str, session: &SharedSession) {
         let mut sessions = self.inner.write().await;
-        if let Some(entry) = sessions.get_mut(session_id)
-            && session_matches(entry, session)
-        {
-            entry.last_touched_at = Instant::now();
+        if let Some(entry) = sessions.get_mut(session_id) {
+            if session_matches(entry, session) {
+                entry.last_touched_at = Instant::now();
+            }
         }
     }
 

@@ -354,6 +354,8 @@ allow_login_shell = true
 
 ## Local development
 
+The Rust workspace MSRV is `1.85.0`, which is the first stable release with Rust 2024 edition support.
+
 Run the full workspace checks:
 
 ```bash

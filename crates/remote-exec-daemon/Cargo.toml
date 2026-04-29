@@ -2,6 +2,7 @@
 name = "remote-exec-daemon"
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
 version.workspace = true
 
 [features]
@@ -21,6 +22,7 @@ http-body-util = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true }
 image = { workspace = true }
+os_pipe = { workspace = true }
 portable-pty = { workspace = true }
 rand = { workspace = true }
 remote-exec-proto = { path = "../remote-exec-proto" }

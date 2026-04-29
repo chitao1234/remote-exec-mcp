@@ -1,0 +1,148 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -11,7 +11,7 @@
+ 
+ [package]
+ edition = "2024"
+-rust-version = "1.87.0"
++rust-version = "1.85.0"
+ name = "process-wrap"
+ version = "9.1.0"
+ authors = ["Félix Saparelli <felix@passcod.name>"]
+--- a/src/generic_wrap.rs
++++ b/src/generic_wrap.rs
+@@ -3,6 +3,27 @@
+ 	allow(unused_macros, unused_imports)
+ )]
+ 
++#[doc(hidden)]
++pub trait AsAny: ::std::any::Any {
++	fn as_any(&self) -> &dyn ::std::any::Any;
++	fn as_any_mut(&mut self) -> &mut dyn ::std::any::Any;
++	fn into_any(self: Box<Self>) -> Box<dyn ::std::any::Any>;
++}
++
++impl<T: ::std::any::Any> AsAny for T {
++	fn as_any(&self) -> &dyn ::std::any::Any {
++		self
++	}
++
++	fn as_any_mut(&mut self) -> &mut dyn ::std::any::Any {
++		self
++	}
++
++	fn into_any(self: Box<Self>) -> Box<dyn ::std::any::Any> {
++		self
++	}
++}
++
+ macro_rules! Wrap {
+ 	($command:ty, $child:ty, $childer:ident, $first_child_wrapper:expr) => {
+ 		/// A wrapper around a `Command` that allows for additional functionality to be added.
+@@ -158,8 +179,7 @@
+ 			pub fn get_wrap<W: CommandWrapper + 'static>(&self) -> Option<&W> {
+ 				let typeid = ::std::any::TypeId::of::<W>();
+ 				self.wrappers.get(&typeid).map(|w| {
+-					let w_any = w as &dyn ::std::any::Any;
+-					w_any
++					w.as_any()
+ 						.downcast_ref()
+ 						.expect("downcasting is guaranteed to succeed due to wrap()'s internals")
+ 				})
+@@ -186,7 +206,7 @@
+ 		/// #[derive(Debug)]
+ 		/// pub struct YourWrapper;
+ 		#[doc = concat!("impl ", stringify!(CommandWrapper), " for YourWrapper {}\n```")]
+-		pub trait CommandWrapper: ::std::fmt::Debug + Send + Sync {
++		pub trait CommandWrapper: crate::generic_wrap::AsAny + ::std::fmt::Debug + Send + Sync {
+ 			/// Called on a first instance if a second of the same type is added.
+ 			///
+ 			/// Only one of a wrapper type can exist within a Wrap at a time. The default behaviour
+--- a/src/std/core.rs
++++ b/src/std/core.rs
+@@ -1,5 +1,4 @@
+ use std::{
+-	any::Any,
+ 	io::{Read, Result},
+ 	process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Output},
+ };
+@@ -48,7 +47,7 @@
+ ///     }
+ /// }
+ /// ```
+-pub trait ChildWrapper: Any + std::fmt::Debug + Send + Sync {
++pub trait ChildWrapper: crate::generic_wrap::AsAny + std::fmt::Debug + Send + Sync {
+ 	/// Obtain a reference to the wrapped child.
+ 	fn inner(&self) -> &dyn ChildWrapper;
+ 
+@@ -245,7 +244,7 @@
+ 
+ impl dyn ChildWrapper {
+ 	fn downcast_ref<T: 'static>(&self) -> Option<&T> {
+-		(self as &dyn Any).downcast_ref()
++		self.as_any().downcast_ref()
+ 	}
+ 
+ 	fn is_raw_child(&self) -> bool {
+@@ -273,7 +272,7 @@
+ 		}
+ 
+ 		// UNWRAP: we've just checked that with is_raw_child()
+-		(inner as &mut dyn Any).downcast_mut().unwrap()
++		inner.as_any_mut().downcast_mut().unwrap()
+ 	}
+ 
+ 	/// Obtain the underlying [`Child`].
+@@ -286,7 +285,7 @@
+ 		}
+ 
+ 		// UNWRAP: we've just checked that with is_raw_child()
+-		*(inner as Box<dyn Any>).downcast().unwrap()
++		*inner.into_any().downcast().unwrap()
+ 	}
+ }
+ 
+--- a/src/tokio/core.rs
++++ b/src/tokio/core.rs
+@@ -1,5 +1,4 @@
+ use std::{
+-	any::Any,
+ 	future::Future,
+ 	io::Result,
+ 	pin::Pin,
+@@ -54,7 +53,7 @@
+ ///     }
+ /// }
+ /// ```
+-pub trait ChildWrapper: Any + std::fmt::Debug + Send + Sync {
++pub trait ChildWrapper: crate::generic_wrap::AsAny + std::fmt::Debug + Send + Sync {
+ 	/// Obtain a reference to the wrapped child.
+ 	fn inner(&self) -> &dyn ChildWrapper;
+ 
+@@ -246,7 +245,7 @@
+ 
+ impl dyn ChildWrapper {
+ 	fn downcast_ref<T: 'static>(&self) -> Option<&T> {
+-		(self as &dyn Any).downcast_ref()
++		self.as_any().downcast_ref()
+ 	}
+ 
+ 	fn is_raw_child(&self) -> bool {
+@@ -274,7 +273,7 @@
+ 		}
+ 
+ 		// UNWRAP: we've just checked that with is_raw_child()
+-		(inner as &mut dyn Any).downcast_mut().unwrap()
++		inner.as_any_mut().downcast_mut().unwrap()
+ 	}
+ 
+ 	/// Obtain the underlying [`Child`].
+@@ -287,7 +286,7 @@
+ 		}
+ 
+ 		// UNWRAP: we've just checked that with is_raw_child()
+-		*(inner as Box<dyn Any>).downcast().unwrap()
++		*inner.into_any().downcast().unwrap()
+ 	}
+ }
+ 

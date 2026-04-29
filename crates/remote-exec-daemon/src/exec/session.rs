@@ -228,7 +228,7 @@ fn spawn_pipe(
     cwd: &std::path::Path,
     environment: &ProcessEnvironment,
 ) -> anyhow::Result<LiveSession> {
-    let (reader, writer) = std::io::pipe()?;
+    let (reader, writer) = os_pipe::pipe()?;
     let stderr = writer.try_clone()?;
     let mut command = Command::new(&cmd[0]);
     command

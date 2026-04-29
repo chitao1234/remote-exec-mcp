@@ -2,6 +2,7 @@
 name = "remote-exec-broker"
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
 version.workspace = true
 
 [features]

@@ -107,12 +107,14 @@ fn resolve_segments(
         return Ok(initial);
     }
 
-    if hunk.is_end_of_file
-        && let Some(retry) = strip_trailing_empty_sentinel(&initial)
-        && (retry.old_lines.is_empty()
-            || seek_hunk_sequence(lines, &retry.old_lines, start, true).is_some())
-    {
-        return Ok(retry);
+    if hunk.is_end_of_file {
+        if let Some(retry) = strip_trailing_empty_sentinel(&initial) {
+            if retry.old_lines.is_empty()
+                || seek_hunk_sequence(lines, &retry.old_lines, start, true).is_some()
+            {
+                return Ok(retry);
+            }
+        }
     }
 
     anyhow::bail!(
@@ -193,13 +195,12 @@ fn exact_eof_match_candidates(lines: &[String], pattern: &[String]) -> Vec<(usiz
         candidates.push((start, content_len));
     }
 
-    if has_trailing_eof_sentinel(lines)
-        && pattern.len() > 1
-        && has_trailing_eof_sentinel(pattern)
-        && let Some(start) = lines.len().checked_sub(pattern.len())
-        && !candidates.contains(&(start, lines.len()))
-    {
-        candidates.push((start, lines.len()));
+    if has_trailing_eof_sentinel(lines) && pattern.len() > 1 && has_trailing_eof_sentinel(pattern) {
+        if let Some(start) = lines.len().checked_sub(pattern.len()) {
+            if !candidates.contains(&(start, lines.len())) {
+                candidates.push((start, lines.len()));
+            }
+        }
     }
 
     candidates

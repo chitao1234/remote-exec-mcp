@@ -10,13 +10,14 @@ exclude = [
   "winptyrs",
   "portable-pty",
 ]
-resolver = "2"
+resolver = "3"
 
 [workspace.package]
 edition = "2024"
 homepage = "https://github.com/chitao1234/remote-exec-mcp"
 license = "Apache-2.0"
 repository = "https://github.com/chitao1234/remote-exec-mcp"
+rust-version = "1.85.0"
 version = "0.1.0"
 
 [workspace.dependencies]
@@ -35,6 +36,7 @@ hyper-util = { version = "0.1", features = ["server", "http1", "tokio"] }
 image = { version = "0.25", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
 gethostname = "1"
 nix = { version = "0.31", default-features = false, features = ["user"] }
+os_pipe = "1.2"
 portable-pty = { path = "portable-pty" }
 rand = "0.10"
 rcgen = "0.14"
@@ -57,3 +59,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 vte = "0.15"
 zstd = "0.13"
+
+[patch.crates-io]
+# Local compatibility shims required to keep the Rust 2024 workspace building on 1.85.0.
+darling = { path = "third_party/rust-patches/darling" }
+darling_core = { path = "third_party/rust-patches/darling_core" }
+darling_macro = { path = "third_party/rust-patches/darling_macro" }
+process-wrap = { path = "third_party/rust-patches/process-wrap" }
+rmcp = { path = "third_party/rust-patches/rmcp" }

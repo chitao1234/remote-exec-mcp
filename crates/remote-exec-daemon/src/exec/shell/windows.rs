@@ -60,10 +60,10 @@ where
             .with_context(|| format!("configured default shell `{shell}` is not usable"));
     }
 
-    if let Some(shell) = find_windows_bash(environment, windows_posix_root)
-        && let Ok(shell) = validate(&shell, environment, windows_posix_root)
-    {
-        return Ok(shell);
+    if let Some(shell) = find_windows_bash(environment, windows_posix_root) {
+        if let Ok(shell) = validate(&shell, environment, windows_posix_root) {
+            return Ok(shell);
+        }
     }
 
     for candidate in ["pwsh.exe", "powershell.exe", "powershell"] {
@@ -72,10 +72,10 @@ where
         }
     }
 
-    if let Some(shell) = environment.comspec().filter(|value| !value.is_empty())
-        && let Ok(shell) = validate(shell, environment, windows_posix_root)
-    {
-        return Ok(shell);
+    if let Some(shell) = environment.comspec().filter(|value| !value.is_empty()) {
+        if let Ok(shell) = validate(shell, environment, windows_posix_root) {
+            return Ok(shell);
+        }
     }
 
     if let Ok(shell) = validate("cmd.exe", environment, windows_posix_root) {
