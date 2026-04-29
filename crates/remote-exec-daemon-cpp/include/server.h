@@ -9,6 +9,7 @@ struct AppState {
     DaemonConfig config;
     std::string daemon_instance_id;
     std::string hostname;
+    std::string default_shell;
     SessionStore sessions;
 };
 

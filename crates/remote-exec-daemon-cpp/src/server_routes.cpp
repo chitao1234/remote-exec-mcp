@@ -1,5 +1,3 @@
-#include <algorithm>
-#include <cctype>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -7,43 +5,21 @@
 #include "common.h"
 #include "logging.h"
 #include "patch_engine.h"
+#include "platform.h"
 #include "server_routes.h"
 #include "transfer_ops.h"
 
 namespace {
-
-bool is_absolute_windows_path(const std::string& path) {
-    return (path.size() >= 3 && std::isalpha(static_cast<unsigned char>(path[0])) != 0 &&
-            path[1] == ':' && (path[2] == '\\' || path[2] == '/')) ||
-           path.rfind("\\\\", 0) == 0 || path.rfind("//", 0) == 0;
-}
-
-std::string normalize_windows_separators(std::string path) {
-    std::replace(path.begin(), path.end(), '/', '\\');
-    return path;
-}
-
-std::string join_windows_path(const std::string& base, const std::string& relative) {
-    if (base.empty()) {
-        return normalize_windows_separators(relative);
-    }
-    std::string joined = normalize_windows_separators(base);
-    if (!joined.empty() && joined[joined.size() - 1] != '\\') {
-        joined += '\\';
-    }
-    joined += normalize_windows_separators(relative);
-    return joined;
-}
 
 std::string resolve_workdir(const AppState& state, const Json& body) {
     const std::string raw = body.value("workdir", state.config.default_workdir);
     if (raw.empty()) {
         return state.config.default_workdir;
     }
-    if (is_absolute_windows_path(raw)) {
-        return normalize_windows_separators(raw);
+    if (platform::is_absolute_path(raw)) {
+        return platform::normalize_path_separators(raw);
     }
-    return join_windows_path(state.config.default_workdir, raw);
+    return platform::join_path(state.config.default_workdir, raw);
 }
 
 HttpResponse make_rpc_error_response(
@@ -63,7 +39,7 @@ HttpResponse handle_health(const AppState& state) {
         response,
         Json {
             {"status", "ok"},
-            {"daemon_version", REMOTE_EXEC_XP_VERSION},
+            {"daemon_version", REMOTE_EXEC_CPP_VERSION},
             {"daemon_instance_id", state.daemon_instance_id},
         }
     );
@@ -76,11 +52,11 @@ HttpResponse handle_target_info(const AppState& state) {
         response,
         Json {
             {"target", state.config.target},
-            {"daemon_version", REMOTE_EXEC_XP_VERSION},
+            {"daemon_version", REMOTE_EXEC_CPP_VERSION},
             {"daemon_instance_id", state.daemon_instance_id},
             {"hostname", state.hostname},
-            {"platform", "windows"},
-            {"arch", "x86"},
+            {"platform", platform::platform_name()},
+            {"arch", platform::arch_name()},
             {"supports_pty", false},
             {"supports_image_read", false},
             {"supports_transfer_compression", false},
@@ -107,23 +83,35 @@ HttpResponse handle_exec_start(AppState& state, const HttpRequest& request) {
             );
         }
 
-        const std::string shell = body.value("shell", "");
-        if (!shell.empty() && shell != "cmd" && shell != "cmd.exe") {
+        const bool login_requested = body.value("login", state.config.allow_login_shell);
+        if (login_requested && !state.config.allow_login_shell) {
+            return make_rpc_error_response(
+                400,
+                "login_shell_disabled",
+                "login shells are disabled by daemon config"
+            );
+        }
+        const std::string shell_override = body.value("shell", std::string());
+        if (!shell_override.empty() && !platform::shell_supported(shell_override)) {
             return make_rpc_error_response(
                 400,
                 "unsupported_shell",
-                "only cmd.exe is supported on this target"
+                "requested shell is not supported on this target"
             );
         }
+        const std::string shell =
+            platform::selected_shell(shell_override, state.default_shell);
 
         Json exec_response = state.sessions.start_command(
             body.at("cmd").get<std::string>(),
             resolve_workdir(state, body),
             shell,
+            login_requested,
             has_yield_time_ms,
             yield_time_ms,
             body.value("max_output_tokens", 0UL),
-            state.config.yield_time
+            state.config.yield_time,
+            state.config.max_open_sessions
         );
         log_message(
             LOG_INFO,
@@ -133,6 +121,12 @@ HttpResponse handle_exec_start(AppState& state, const HttpRequest& request) {
         );
         exec_response["daemon_instance_id"] = state.daemon_instance_id;
         write_json(response, exec_response);
+    } catch (const SessionLimitError& ex) {
+        log_message(LOG_WARN, "server", std::string("exec/start rejected: ") + ex.what());
+        write_rpc_error(response, 429, "session_limit_exceeded", ex.what());
+    } catch (const Json::exception& ex) {
+        log_message(LOG_WARN, "server", std::string("exec/start bad request: ") + ex.what());
+        write_rpc_error(response, 400, "bad_request", ex.what());
     } catch (const std::exception& ex) {
         log_message(LOG_ERROR, "server", std::string("exec/start failed: ") + ex.what());
         write_rpc_error(response, 500, "internal_error", ex.what());
@@ -168,15 +162,16 @@ HttpResponse handle_exec_write(AppState& state, const HttpRequest& request) {
         );
         exec_response["daemon_instance_id"] = state.daemon_instance_id;
         write_json(response, exec_response);
+    } catch (const UnknownSessionError& ex) {
+        log_message(LOG_WARN, "server", std::string("exec/write unknown session: ") + ex.what());
+        write_rpc_error(response, 400, "unknown_session", ex.what());
+    } catch (const Json::exception& ex) {
+        log_message(LOG_WARN, "server", std::string("exec/write bad request: ") + ex.what());
+        write_rpc_error(response, 400, "bad_request", ex.what());
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
-        if (message == "unknown_session") {
-            log_message(LOG_WARN, "server", "exec/write failed: unknown_session");
-            write_rpc_error(response, 400, "unknown_session", "Unknown daemon session");
-        } else {
-            log_message(LOG_ERROR, "server", std::string("exec/write failed: ") + message);
-            write_rpc_error(response, 500, "internal_error", message);
-        }
+        log_message(LOG_ERROR, "server", std::string("exec/write failed: ") + message);
+        write_rpc_error(response, 500, "internal_error", message);
     }
 
     return response;

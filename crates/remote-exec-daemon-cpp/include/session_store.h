@@ -1,19 +1,33 @@
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 #include "config.h"
 #include "http_helpers.h"
-#include "win32_scoped.h"
+
+class ProcessSession;
+
+class UnknownSessionError : public std::runtime_error {
+public:
+    explicit UnknownSessionError(const std::string& message) : std::runtime_error(message) {}
+};
+
+class SessionLimitError : public std::runtime_error {
+public:
+    explicit SessionLimitError(const std::string& message) : std::runtime_error(message) {}
+};
 
 struct LiveSession {
+    LiveSession();
+    ~LiveSession();
+
     std::string id;
-    UniqueHandle process_handle;
-    UniqueHandle stdin_write;
-    UniqueHandle stdout_read;
-    DWORD started_at_ms;
+    std::unique_ptr<ProcessSession> process;
+    std::uint64_t started_at_ms;
     std::string output_carry;
 };
 
@@ -26,10 +40,12 @@ public:
         const std::string& command,
         const std::string& workdir,
         const std::string& shell,
+        bool login,
         bool has_yield_time_ms,
         unsigned long yield_time_ms,
         unsigned long max_output_chars,
-        const YieldTimeConfig& yield_time
+        const YieldTimeConfig& yield_time,
+        unsigned long max_open_sessions
     );
     Json write_stdin(
         const std::string& daemon_session_id,

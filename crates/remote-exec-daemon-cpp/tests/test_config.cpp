@@ -14,19 +14,24 @@ static void write_text(const fs::path& path, const std::string& value) {
 }
 
 int main() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-xp-config-test";
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-config-test";
     fs::remove_all(root);
     fs::create_directories(root);
 
-    const fs::path config_path = root / "daemon-xp.ini";
+    const fs::path config_path = root / "daemon-cpp.ini";
     write_text(
         config_path,
         "# comment\n"
-        "target = builder-xp\n"
+        "target = builder-cpp\n"
         "listen_host = 0.0.0.0\n"
         "listen_port = 8181\n"
         "default_workdir = \"C:\\work dir\"\n"
+        "default_shell = /bin/sh\n"
+        "allow_login_shell = false\n"
         "http_auth_bearer_token = shared-secret\n"
+        "max_request_header_bytes = 32768\n"
+        "max_request_body_bytes = 1048576\n"
+        "max_open_sessions = 12\n"
         "yield_time_exec_command_default_ms = 15000\n"
         "yield_time_exec_command_max_ms = 60000\n"
         "yield_time_exec_command_min_ms = 500\n"
@@ -35,11 +40,16 @@ int main() {
     );
 
     const DaemonConfig config = load_config(config_path.string());
-    assert(config.target == "builder-xp");
+    assert(config.target == "builder-cpp");
     assert(config.listen_host == "0.0.0.0");
     assert(config.listen_port == 8181);
     assert(config.default_workdir == "C:\\work dir");
+    assert(config.default_shell == "/bin/sh");
+    assert(!config.allow_login_shell);
     assert(config.http_auth_bearer_token == "shared-secret");
+    assert(config.max_request_header_bytes == 32768UL);
+    assert(config.max_request_body_bytes == 1048576UL);
+    assert(config.max_open_sessions == 12UL);
     assert(config.yield_time.exec_command.default_ms == 15000UL);
     assert(config.yield_time.exec_command.max_ms == 60000UL);
     assert(config.yield_time.exec_command.min_ms == 500UL);
@@ -60,7 +70,7 @@ int main() {
     assert(resolve_yield_time_ms(defaults.write_stdin_input, true, 50000UL) == 30000UL);
 
     const fs::path invalid_path = root / "invalid.ini";
-    write_text(invalid_path, "target builder-xp\n");
+    write_text(invalid_path, "target builder-cpp\n");
     bool rejected = false;
     try {
         (void)load_config(invalid_path.string());
@@ -72,7 +82,7 @@ int main() {
     const fs::path invalid_yield_path = root / "invalid-yield.ini";
     write_text(
         invalid_yield_path,
-        "target = builder-xp\n"
+        "target = builder-cpp\n"
         "listen_host = 0.0.0.0\n"
         "listen_port = 8181\n"
         "default_workdir = C:\\work\n"
@@ -90,7 +100,7 @@ int main() {
     const fs::path invalid_auth_path = root / "invalid-auth.ini";
     write_text(
         invalid_auth_path,
-        "target = builder-xp\n"
+        "target = builder-cpp\n"
         "listen_host = 0.0.0.0\n"
         "listen_port = 8181\n"
         "default_workdir = C:\\work\n"
@@ -99,6 +109,22 @@ int main() {
     rejected = false;
     try {
         (void)load_config(invalid_auth_path.string());
+    } catch (...) {
+        rejected = true;
+    }
+    assert(rejected);
+
+    const fs::path invalid_port_path = root / "invalid-port.ini";
+    write_text(
+        invalid_port_path,
+        "target = builder-cpp\n"
+        "listen_host = 0.0.0.0\n"
+        "listen_port = 70000\n"
+        "default_workdir = C:\\work\n"
+    );
+    rejected = false;
+    try {
+        (void)load_config(invalid_port_path.string());
     } catch (...) {
         rejected = true;
     }

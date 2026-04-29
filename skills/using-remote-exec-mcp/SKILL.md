@@ -263,7 +263,7 @@ How to use it:
 - Prefer `apply_patch` over shell editing when you know the exact file changes.
 - Use the same patch discipline as the normal Codex `apply_patch` tool.
 - Relative file paths in the patch are resolved from `workdir` when provided.
-- On XP targets, `remote-exec-daemon-xp` currently does not support absolute file paths inside the patch text. Set `workdir` and keep patch paths relative.
+- On Windows XP-compatible C++ daemon targets, `apply_patch` currently does not support absolute file paths inside the patch text. Set `workdir` and keep patch paths relative.
 - The patch engine supports the documented `*** End of File` marker.
 - Updating an existing file preserves its current `LF` versus `CRLF` line ending style.
 - This tool is target-local. It does not move bytes between endpoints.
@@ -324,7 +324,7 @@ Result behavior:
 Platform notes:
 
 - Some targets may not implement image reads.
-- `remote-exec-daemon-xp` does not support `view_image`.
+- `remote-exec-daemon-cpp` does not support `view_image`.
 
 ### `transfer_files`
 
@@ -449,14 +449,15 @@ Example: download a remote log to broker-host `local`:
 ## Platform And Compatibility Notes
 
 - PTY support is target-specific. Trust `list_targets().targets[].daemon_info.supports_pty`, not assumptions.
-- `remote-exec-daemon-xp` is narrower than the main daemon.
-- On XP targets, shell selection is not supported, the default shell is `cmd.exe`.
-- On XP targets, `tty: true` is rejected.
-- On XP targets, `view_image` is unavailable.
-- On XP targets, `apply_patch` currently rejects absolute file paths inside the patch text. Use `workdir` plus relative patch paths instead.
-- On XP targets, `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles.
-- On XP targets, transfer compression is never used; the broker falls back automatically.
-- Do not assume symlink-heavy or special-file transfers work on XP.
+- `remote-exec-daemon-cpp` is narrower than the main daemon.
+- On C++ daemon targets, `tty: true` is rejected.
+- On C++ daemon targets, `view_image` is unavailable.
+- On POSIX C++ daemon targets, shell selection follows the Rust daemon policy and child processes force `LC_ALL=C.UTF-8` plus `LANG=C.UTF-8`.
+- On Windows XP-compatible C++ daemon targets, the supported shell is `cmd.exe`.
+- On Windows XP-compatible C++ daemon targets, `apply_patch` currently rejects absolute file paths inside the patch text. Use `workdir` plus relative patch paths instead.
+- On C++ daemon targets, `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles.
+- On C++ daemon targets, transfer compression is never used; the broker falls back automatically.
+- Do not assume symlink-heavy or special-file transfers work on C++ daemon targets.
 
 ## Common Mistakes
 

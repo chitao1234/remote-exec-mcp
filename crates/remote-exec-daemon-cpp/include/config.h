@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 
 struct YieldTimeOperationConfig {
@@ -19,7 +20,12 @@ struct DaemonConfig {
     std::string listen_host;
     int listen_port;
     std::string default_workdir;
+    std::string default_shell;
+    bool allow_login_shell;
     std::string http_auth_bearer_token;
+    std::size_t max_request_header_bytes;
+    std::size_t max_request_body_bytes;
+    unsigned long max_open_sessions;
     YieldTimeConfig yield_time;
 };
 

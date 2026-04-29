@@ -8,13 +8,13 @@
 HttpRequest parse_http_request(const std::string& raw) {
     const std::size_t header_end = raw.find("\r\n\r\n");
     if (header_end == std::string::npos) {
-        throw std::runtime_error("invalid http request");
+        throw HttpParseError("invalid http request");
     }
 
     std::istringstream lines(raw.substr(0, header_end));
     std::string request_line;
     if (!std::getline(lines, request_line)) {
-        throw std::runtime_error("missing request line");
+        throw HttpParseError("missing request line");
     }
     if (!request_line.empty() && request_line[request_line.size() - 1] == '\r') {
         request_line.erase(request_line.size() - 1);
@@ -24,7 +24,7 @@ HttpRequest parse_http_request(const std::string& raw) {
     HttpRequest request;
     request_line_stream >> request.method >> request.path;
     if (request.method.empty() || request.path.empty()) {
-        throw std::runtime_error("invalid request line");
+        throw HttpParseError("invalid request line");
     }
 
     std::string header_line;

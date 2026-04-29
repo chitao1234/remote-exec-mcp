@@ -6,12 +6,12 @@ These instructions apply to the entire `remote-exec-mcp` workspace.
 
 ## Project Overview
 
-- This repository is a Rust 2024 workspace for a remote-first MCP server that exposes Codex-style local system tools across multiple Linux and Windows machines, plus a narrower standalone Windows XP daemon.
+- This repository is a Rust 2024 workspace for a remote-first MCP server that exposes Codex-style local system tools across multiple Linux and Windows machines, plus a narrower standalone C++ daemon with POSIX and Windows XP-compatible build paths.
 - The public tool surface is currently `list_targets`, `exec_command`, `write_stdin`, `apply_patch`, `view_image`, and `transfer_files`.
 - The architecture is intentionally split:
   - `remote-exec-broker` is the public MCP server over stdio. It validates `target`, routes requests to daemons, and owns the opaque public `session_id` namespace.
   - `remote-exec-daemon` is the per-machine mTLS JSON/HTTP server that performs local execution, patching, image reads, transfer archive import/export, and static path sandbox checks.
-  - `remote-exec-daemon-xp` is the standalone Windows XP daemon over plain HTTP. It intentionally supports a reduced feature set and no transfer compression.
+  - `remote-exec-daemon-cpp` is the standalone C++ daemon over plain HTTP. It intentionally supports a reduced feature set, native POSIX and Windows XP-compatible build paths, and no transfer compression.
   - `remote-exec-proto` defines shared public tool schemas and broker-daemon RPC payloads.
   - `remote-exec-admin` provides operator-facing CLI workflows for certificate/bootstrap tasks.
   - `remote-exec-pki` contains reusable certificate generation and manifest helpers.
@@ -22,7 +22,7 @@ These instructions apply to the entire `remote-exec-mcp` workspace.
 - `Cargo.toml`: workspace manifest and shared dependency versions.
 - `crates/remote-exec-broker/src/`: public MCP server, target config, daemon client, tool handlers, and session store.
 - `crates/remote-exec-daemon/src/`: daemon config, TLS setup, HTTP server, exec session logic, patch engine, image handling, transfer handling, and sandbox enforcement.
-- `crates/remote-exec-daemon-xp/`: standalone XP daemon, Win32 exec/session handling, HTTP routes, patch engine, and narrow transfer implementation.
+- `crates/remote-exec-daemon-cpp/`: standalone C++ daemon, POSIX/Win32 exec/session handling, HTTP routes, patch engine, and narrow transfer implementation.
 - `crates/remote-exec-proto/src/public.rs`: public tool arguments and structured results.
 - `crates/remote-exec-proto/src/rpc.rs`: internal broker-daemon request/response types.
 - `crates/remote-exec-proto/src/path.rs`: cross-platform path policy helpers used by transfer and sandbox code.
@@ -56,15 +56,15 @@ These instructions apply to the entire `remote-exec-mcp` workspace.
 - When changing broker-daemon transport or daemon RPC contracts:
   - update `crates/remote-exec-proto/src/rpc.rs`
   - update both the broker client and daemon server/handler paths in the same change
-  - update `crates/remote-exec-daemon-xp` too when the plain-HTTP XP path shares that contract
+  - update `crates/remote-exec-daemon-cpp` too when the plain-HTTP C++ daemon path shares that contract
   - keep error messages stable where tests or documented behavior depend on them
 - When changing transfer behavior or transfer capability reporting, update the following together if applicable:
   - `crates/remote-exec-broker/src/tools/transfer.rs`
   - `crates/remote-exec-broker/src/tools/targets.rs`
   - `crates/remote-exec-daemon/src/transfer/`
-  - `crates/remote-exec-daemon-xp/src/transfer_ops.cpp`
+  - `crates/remote-exec-daemon-cpp/src/transfer_ops.cpp`
   - `README.md`
-  - `crates/remote-exec-daemon-xp/README.md`
+  - `crates/remote-exec-daemon-cpp/README.md`
   - `skills/using-remote-exec-mcp/SKILL.md`
 - When changing sandbox behavior, update the following together if applicable:
   - `crates/remote-exec-proto/src/sandbox.rs`
@@ -95,8 +95,8 @@ These instructions apply to the entire `remote-exec-mcp` workspace.
   - `cargo test -p remote-exec-admin --test dev_init`
   - `cargo test -p remote-exec-admin --test certs_issue`
   - `cargo test -p remote-exec-pki --test dev_init_bundle`
-  - `make -C crates/remote-exec-daemon-xp test-host-transfer`
-  - `make -C crates/remote-exec-daemon-xp check`
+  - `make -C crates/remote-exec-daemon-cpp test-host-transfer`
+  - `make -C crates/remote-exec-daemon-cpp check-posix`
 - For cross-cutting or public-surface changes, finish with the full quality gate from `README.md`:
   - `cargo test --workspace`
   - `cargo fmt --all --check`

@@ -4,9 +4,14 @@
 #include <cstdlib>
 #include <sstream>
 #include <string>
+#include <ctime>
 #include <vector>
 
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <sys/time.h>
+#endif
 
 #include "logging.h"
 #include "text_utils.h"
@@ -75,7 +80,8 @@ static LogLevel parse_filter_value(const char* raw) {
 
         const std::string key = lowercase_ascii(trim_ascii(token.substr(0, equals)));
         const std::string value = token.substr(equals + 1);
-        if (key == "remote_exec_daemon_xp" || key == "daemon_xp") {
+        if (key == "remote_exec_daemon_cpp" || key == "daemon_cpp" ||
+            key == "remote_exec_daemon_xp" || key == "daemon_xp") {
             LogLevel parsed = LOG_INFO;
             if (parse_level_token(value, &parsed)) {
                 component_level = parsed;
@@ -140,18 +146,40 @@ void log_message(LogLevel level, const std::string& component, const std::string
         return;
     }
 
+#ifdef _WIN32
     SYSTEMTIME now;
     GetLocalTime(&now);
+    const int year = static_cast<int>(now.wYear);
+    const int month = static_cast<int>(now.wMonth);
+    const int day = static_cast<int>(now.wDay);
+    const int hour = static_cast<int>(now.wHour);
+    const int minute = static_cast<int>(now.wMinute);
+    const int second = static_cast<int>(now.wSecond);
+    const int millisecond = static_cast<int>(now.wMilliseconds);
+#else
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    struct tm local_time;
+    localtime_r(&tv.tv_sec, &local_time);
+    const int year = local_time.tm_year + 1900;
+    const int month = local_time.tm_mon + 1;
+    const int day = local_time.tm_mday;
+    const int hour = local_time.tm_hour;
+    const int minute = local_time.tm_min;
+    const int second = local_time.tm_sec;
+    const int millisecond = static_cast<int>(tv.tv_usec / 1000);
+#endif
+
     std::fprintf(
         stderr,
         "%04d-%02d-%02d %02d:%02d:%02d.%03d %-5s %s %s\n",
-        static_cast<int>(now.wYear),
-        static_cast<int>(now.wMonth),
-        static_cast<int>(now.wDay),
-        static_cast<int>(now.wHour),
-        static_cast<int>(now.wMinute),
-        static_cast<int>(now.wSecond),
-        static_cast<int>(now.wMilliseconds),
+        year,
+        month,
+        day,
+        hour,
+        minute,
+        second,
+        millisecond,
         level_name(level),
         component.c_str(),
         message.c_str()

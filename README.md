@@ -24,8 +24,8 @@ Everything under `docs/` is historical implementation detail and planning contex
   - Per-machine daemon over mTLS JSON/HTTP by default, or plain HTTP when configured.
   - The `tls` Cargo feature gates the HTTPS/mTLS transport and is enabled by default.
   - Executes commands, manages local sessions, applies patches, reads images, and serves transfer archives.
-- `remote-exec-daemon-xp`
-  - Standalone Windows XP daemon over plain HTTP.
+- `remote-exec-daemon-cpp`
+  - Standalone C++ daemon over plain HTTP, with native POSIX and Windows XP-compatible build paths.
   - Supports `exec_command`, `write_stdin`, `apply_patch`, and `transfer_files` for files, directories, and broker-built multi-source bundles.
   - Does not support PTY or image reads.
 - `remote-exec-proto`
@@ -103,7 +103,7 @@ All three runtime components emit diagnostics to `stderr`.
 
 - `remote-exec-broker` keeps `stdout` reserved for the MCP stdio transport, so turning logging up does not corrupt the JSON line protocol.
 - Rust components read `REMOTE_EXEC_LOG` first and fall back to `RUST_LOG`.
-- `remote-exec-daemon-xp` also reads `REMOTE_EXEC_LOG` first, then `RUST_LOG`. It accepts a bare level such as `info` or `debug`, and it also understands shared filter strings by honoring `remote_exec_daemon_xp=<level>`.
+- `remote-exec-daemon-cpp` also reads `REMOTE_EXEC_LOG` first, then `RUST_LOG`. It accepts a bare level such as `info` or `debug`, and it also understands shared filter strings by honoring `remote_exec_daemon_cpp=<level>`. The previous `remote_exec_daemon_xp=<level>` filter remains accepted as a compatibility alias.
 - Default logging is conservative for dependencies and `info` for the project crates.
 
 Examples:
@@ -116,7 +116,7 @@ REMOTE_EXEC_LOG=debug cargo run -p remote-exec-broker -- configs/broker.example.
 One shared filter string can drive all components:
 
 ```bash
-REMOTE_EXEC_LOG='warn,remote_exec_broker=debug,remote_exec_daemon=debug,remote_exec_daemon_xp=debug'
+REMOTE_EXEC_LOG='warn,remote_exec_broker=debug,remote_exec_daemon=debug,remote_exec_daemon_cpp=debug'
 ```
 
 ## TLS / CA setup
@@ -133,7 +133,7 @@ If you build `remote-exec-broker` without its default `broker-tls` feature, it r
 
 If you build `remote-exec-daemon` without its default `tls` feature, it only supports `transport = "http"` and rejects `transport = "tls"` at startup.
 
-If you explicitly configure a Rust daemon with `transport = "http"`, build it without the `tls` feature, or target `remote-exec-daemon-xp`, the broker target must use `http://...` together with `allow_insecure_http = true`.
+If you explicitly configure a Rust daemon with `transport = "http"`, build it without the `tls` feature, or target `remote-exec-daemon-cpp`, the broker target must use `http://...` together with `allow_insecure_http = true`.
 
 Optional `http_auth` / `http_auth_bearer_token` bearer auth can add request authentication for plain-HTTP daemon links, but it does not add confidentiality or integrity protection. Use TLS when you need transport security.
 
@@ -277,7 +277,7 @@ Wire those files into the example configs:
 - broker targets use `ca_pem`, `client_cert_pem`, `client_key_pem`, `expected_daemon_name`, and optionally `skip_server_name_verification` / `pinned_server_cert_pem` as shown in `configs/broker.example.toml`
 - broker targets can also set `[targets.<name>.http_auth] bearer_token = "..."` when the daemon expects `Authorization: Bearer ...`
 - each TLS-enabled daemon built with the default `tls` feature uses `tls.cert_pem`, `tls.key_pem`, `tls.ca_pem`, and optionally `tls.pinned_client_cert_pem` as shown in `configs/daemon.example.toml`
-- Rust daemons can also set `[http_auth] bearer_token = "..."`, and the XP daemon can set `http_auth_bearer_token = ...`
+- Rust daemons can also set `[http_auth] bearer_token = "..."`, and the C++ daemon can set `http_auth_bearer_token = ...`
 - set `transport = "http"` on a Rust daemon if you intentionally want plain HTTP instead of mutual TLS, or when you build without the `tls` feature
 - set `experimental_apply_patch_target_encoding_autodetect = true` on a daemon if you want experimental `apply_patch` support for existing non-UTF-8 text files
 - set `expected_daemon_name` to the daemon's configured `target`
@@ -285,12 +285,12 @@ Wire those files into the example configs:
 Example plain-HTTP target in broker config:
 
 ```toml
-[targets.builder-xp]
-base_url = "http://builder-xp.example.com:8181"
+[targets.builder-cpp]
+base_url = "http://builder-cpp.example.com:8181"
 allow_insecure_http = true
-expected_daemon_name = "builder-xp"
+expected_daemon_name = "builder-cpp"
 
-[targets.builder-xp.http_auth]
+[targets.builder-cpp.http_auth]
 bearer_token = "shared-secret"
 ```
 
@@ -377,9 +377,9 @@ cargo fmt --all --check
 - `transfer_files` treats `destination.path` as the exact final path to create or replace for single-source transfers; it does not infer basenames or copy "into" an existing directory in that mode.
 - `write_stdin` only invalidates sessions when the daemon restarted or explicitly reports `unknown_session`.
 - `max_output_tokens` is enforced by the daemon for command output.
-- Non-TTY `exec_command` output on both the main daemon and `remote-exec-daemon-xp` merges `stdout` and `stderr` through one pipe so the single public `output` field preserves their emitted order.
+- Non-TTY `exec_command` output on both the main daemon and `remote-exec-daemon-cpp` merges `stdout` and `stderr` through one pipe so the single public `output` field preserves their emitted order.
 - Daemon config can override `yield_time_ms` policy separately for `exec_command`, empty `write_stdin` polls, and non-empty `write_stdin` writes. Each bucket supports `default_ms`, `max_ms`, and `min_ms`, where `min_ms` silently raises smaller caller-provided values.
-- Broker `[local]` supports the same nested `yield_time` config for the embedded broker-host local target. `remote-exec-daemon-xp` supports the same three buckets with flat `yield_time_*` INI keys.
+- Broker `[local]` supports the same nested `yield_time` config for the embedded broker-host local target. `remote-exec-daemon-cpp` supports the same three buckets with flat `yield_time_*` INI keys.
 - Each target daemon keeps at most `64` live exec sessions. When full, it protects the `8` most recently touched sessions, prunes exited sessions first, otherwise prunes the oldest non-protected live session, and terminates the pruned process.
 - `apply_patch` supports the documented `*** End of File` marker.
 - `apply_patch` preserves an updated file's existing `LF` versus `CRLF` line ending style.
@@ -407,7 +407,7 @@ cargo fmt --all --check
 - `winptyrs` now prefers static linking when both static and dynamic layouts are available. Set `WINPTY_STATIC=0` to force dynamic linking instead.
 - Default shell resolution uses `default_shell` when configured. Otherwise it tries `SHELL`, then a usable passwd shell, then `bash`, then `/bin/sh` on Unix; and a bash under `windows_posix_root` when configured, then Git Bash, then `pwsh.exe`, then `powershell.exe` or `powershell`, then `COMSPEC`, then `cmd.exe` on Windows.
 - Git Bash auto-discovery on Windows checks `windows_posix_root` first when configured, then standard Git for Windows install roots and locations derivable from `git.exe` on `PATH`. Portable or unusual installs should set `default_shell` or `windows_posix_root` explicitly.
-- `remote-exec-daemon-xp` is intentionally narrower than the main daemon: it always uses `cmd.exe`, rejects `tty=true`, does not implement `view_image`, supports regular-file transfers, directory trees, and broker-built multi-source transfer bundles, and always falls back to uncompressed transfer staging. Symlinks, hard links, special files, sparse entries, and malformed archive paths remain unsupported there.
+- `remote-exec-daemon-cpp` is intentionally narrower than the main daemon: it rejects `tty=true`, does not implement `view_image`, does not implement TLS or static sandboxing, supports regular-file transfers, directory trees, and broker-built multi-source transfer bundles, and always falls back to uncompressed transfer staging. On POSIX it follows the Rust daemon's default shell policy and forces `LC_ALL=C.UTF-8` plus `LANG=C.UTF-8`; on Windows XP-compatible builds it supports `cmd.exe`. Symlinks, hard links, special files, sparse entries, and malformed archive paths remain unsupported there.
 
 ## Quality Gate
 
@@ -415,6 +415,8 @@ cargo fmt --all --check
 cargo test --workspace
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
+make -C crates/remote-exec-daemon-cpp check-posix
+make -C crates/remote-exec-daemon-cpp all-windows-xp
 ```
 
 Run the broker end-to-end test only:

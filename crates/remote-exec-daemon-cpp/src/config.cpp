@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <cerrno>
+#include <climits>
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -42,6 +43,57 @@ static unsigned long read_optional_unsigned_long(
         return fallback;
     }
     return parse_unsigned_long(it->second, key);
+}
+
+static std::string read_required_string(
+    const std::map<std::string, std::string>& values,
+    const std::string& key
+) {
+    const std::map<std::string, std::string>::const_iterator it = values.find(key);
+    if (it == values.end()) {
+        throw std::runtime_error("missing required config key: " + key);
+    }
+    return it->second;
+}
+
+static std::string read_optional_string(
+    const std::map<std::string, std::string>& values,
+    const std::string& key,
+    const std::string& fallback
+) {
+    const std::map<std::string, std::string>::const_iterator it = values.find(key);
+    return it == values.end() ? fallback : it->second;
+}
+
+static bool read_optional_bool(
+    const std::map<std::string, std::string>& values,
+    const std::string& key,
+    bool fallback
+) {
+    const std::map<std::string, std::string>::const_iterator it = values.find(key);
+    if (it == values.end()) {
+        return fallback;
+    }
+    if (it->second == "true" || it->second == "1" || it->second == "yes") {
+        return true;
+    }
+    if (it->second == "false" || it->second == "0" || it->second == "no") {
+        return false;
+    }
+    throw std::runtime_error("invalid boolean value for " + key + ": " + it->second);
+}
+
+static std::size_t read_optional_size_t(
+    const std::map<std::string, std::string>& values,
+    const std::string& key,
+    std::size_t fallback
+) {
+    const std::map<std::string, std::string>::const_iterator it = values.find(key);
+    if (it == values.end()) {
+        return fallback;
+    }
+    const unsigned long value = parse_unsigned_long(it->second, key);
+    return static_cast<std::size_t>(value);
 }
 
 static bool contains_ascii_whitespace(const std::string& value) {
@@ -138,10 +190,19 @@ DaemonConfig load_config(const std::string& path) {
     }
 
     DaemonConfig config;
-    config.target = values.at("target");
-    config.listen_host = values.at("listen_host");
-    config.listen_port = static_cast<int>(parse_unsigned_long(values.at("listen_port"), "listen_port"));
-    config.default_workdir = values.at("default_workdir");
+    config.target = read_required_string(values, "target");
+    config.listen_host = read_required_string(values, "listen_host");
+    {
+        const unsigned long listen_port =
+            parse_unsigned_long(read_required_string(values, "listen_port"), "listen_port");
+        if (listen_port == 0 || listen_port > 65535UL) {
+            throw std::runtime_error("listen_port must be between 1 and 65535");
+        }
+        config.listen_port = static_cast<int>(listen_port);
+    }
+    config.default_workdir = read_required_string(values, "default_workdir");
+    config.default_shell = read_optional_string(values, "default_shell", "");
+    config.allow_login_shell = read_optional_bool(values, "allow_login_shell", true);
     config.http_auth_bearer_token.clear();
     {
         const std::map<std::string, std::string>::const_iterator it =
@@ -155,6 +216,26 @@ DaemonConfig load_config(const std::string& path) {
             }
             config.http_auth_bearer_token = it->second;
         }
+    }
+    config.max_request_header_bytes = read_optional_size_t(
+        values,
+        "max_request_header_bytes",
+        64UL * 1024UL
+    );
+    config.max_request_body_bytes = read_optional_size_t(
+        values,
+        "max_request_body_bytes",
+        512UL * 1024UL * 1024UL
+    );
+    config.max_open_sessions = read_optional_unsigned_long(values, "max_open_sessions", 64UL);
+    if (config.max_request_header_bytes == 0) {
+        throw std::runtime_error("max_request_header_bytes must be greater than zero");
+    }
+    if (config.max_request_body_bytes == 0) {
+        throw std::runtime_error("max_request_body_bytes must be greater than zero");
+    }
+    if (config.max_open_sessions == 0) {
+        throw std::runtime_error("max_open_sessions must be greater than zero");
     }
     config.yield_time = default_yield_time_config();
     config.yield_time.exec_command = read_yield_time_operation(
