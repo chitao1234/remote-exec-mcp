@@ -211,6 +211,9 @@ HttpResponse handle_exec_write(AppState& state, const HttpRequest& request) {
     } catch (const UnknownSessionError& ex) {
         log_message(LOG_WARN, "server", std::string("exec/write unknown session: ") + ex.what());
         write_rpc_error(response, 400, "unknown_session", ex.what());
+    } catch (const StdinClosedError& ex) {
+        log_message(LOG_WARN, "server", std::string("exec/write stdin closed: ") + ex.what());
+        write_rpc_error(response, 400, "stdin_closed", ex.what());
     } catch (const Json::exception& ex) {
         log_message(LOG_WARN, "server", std::string("exec/write bad request: ") + ex.what());
         write_rpc_error(response, 400, "bad_request", ex.what());

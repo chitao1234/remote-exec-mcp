@@ -87,6 +87,14 @@ PosixPipePair create_posix_pipe(const char* label) {
     return pair;
 }
 
+UniqueFd open_dev_null_read() {
+    UniqueFd fd(open("/dev/null", O_RDONLY));
+    if (!fd.valid()) {
+        throw std::runtime_error(std::string("open(/dev/null) failed: ") + std::strerror(errno));
+    }
+    return fd;
+}
+
 PosixPtyPair create_posix_pty() {
     UniqueFd master(posix_openpt(O_RDWR | O_NOCTTY));
     if (!master.valid()) {
@@ -239,6 +247,12 @@ public:
     }
 
     void write_stdin(const std::string& chars) override {
+        if (!input_write_.valid()) {
+            throw std::runtime_error(
+                "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
+            );
+        }
+
         const char* data = chars.data();
         std::size_t remaining = chars.size();
         while (remaining > 0) {
@@ -398,7 +412,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     }
 
     PosixPipePair stdout_pipe = create_posix_pipe("pipe(stdout)");
-    PosixPipePair stdin_pipe = create_posix_pipe("pipe(stdin)");
+    UniqueFd stdin_null = open_dev_null_read();
 
     const pid_t pid = fork();
     if (pid < 0) {
@@ -407,25 +421,26 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
 
     if (pid == 0) {
         setpgid(0, 0);
-        dup2(stdin_pipe.read_end.get(), STDIN_FILENO);
-        dup2(stdout_pipe.write_end.get(), STDOUT_FILENO);
-        dup2(stdout_pipe.write_end.get(), STDERR_FILENO);
+        if (dup2(stdin_null.get(), STDIN_FILENO) < 0 ||
+            dup2(stdout_pipe.write_end.get(), STDOUT_FILENO) < 0 ||
+            dup2(stdout_pipe.write_end.get(), STDERR_FILENO) < 0) {
+            _exit(126);
+        }
 
-        stdin_pipe.read_end.reset();
-        stdin_pipe.write_end.reset();
+        stdin_null.reset();
         stdout_pipe.read_end.reset();
         stdout_pipe.write_end.reset();
         exec_shell_child(argv, workdir, false);
     }
 
     setpgid(pid, pid);
-    stdin_pipe.read_end.reset();
+    stdin_null.reset();
     stdout_pipe.write_end.reset();
 
     return std::unique_ptr<ProcessSession>(
         new PosixProcessSession(
             pid,
-            std::move(stdin_pipe.write_end),
+            UniqueFd(),
             std::move(stdout_pipe.read_end)
         )
     );

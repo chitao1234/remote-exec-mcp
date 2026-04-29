@@ -118,6 +118,11 @@ std::shared_ptr<LiveSession> launch_live_session(
     session->id = make_chunk_id();
     session->process = ProcessSession::launch(command, workdir, shell, login, tty);
     session->started_at_ms = platform::monotonic_ms();
+#ifdef _WIN32
+    session->stdin_open = true;
+#else
+    session->stdin_open = tty;
+#endif
     return session;
 }
 
@@ -156,7 +161,7 @@ PollResult poll_session(
 
 }  // namespace
 
-LiveSession::LiveSession() : started_at_ms(0) {}
+LiveSession::LiveSession() : started_at_ms(0), stdin_open(false) {}
 
 LiveSession::~LiveSession() {}
 
@@ -272,6 +277,11 @@ Json SessionStore::write_stdin(
 
     const std::shared_ptr<LiveSession>& session = it->second;
     if (!chars.empty()) {
+        if (!session->stdin_open) {
+            throw StdinClosedError(
+                "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
+            );
+        }
         session->process->write_stdin(chars);
     }
 

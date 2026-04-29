@@ -99,6 +99,41 @@ int main() {
     );
 
 #ifndef _WIN32
+    const HttpResponse non_tty_start_response = route_request(
+        state,
+        json_request(
+            "/v1/exec/start",
+            Json{
+                {"cmd", "printf ready; sleep 5"},
+                {"workdir", root.string()},
+                {"login", false},
+                {"tty", false},
+                {"yield_time_ms", 250},
+            }
+        )
+    );
+    assert(non_tty_start_response.status == 200);
+    const Json non_tty_started = Json::parse(non_tty_start_response.body);
+    assert(non_tty_started.at("running").get<bool>());
+    assert(non_tty_started.at("output").get<std::string>() == "ready");
+
+    const HttpResponse stdin_closed_response = route_request(
+        state,
+        json_request(
+            "/v1/exec/write",
+            Json{
+                {"daemon_session_id", non_tty_started.at("daemon_session_id").get<std::string>()},
+                {"chars", "hello\n"},
+                {"yield_time_ms", 250},
+            }
+        )
+    );
+    assert(stdin_closed_response.status == 400);
+    assert(
+        Json::parse(stdin_closed_response.body).at("code").get<std::string>() ==
+        "stdin_closed"
+    );
+
     if (process_session_supports_pty()) {
         const HttpResponse start_response = route_request(
             state,

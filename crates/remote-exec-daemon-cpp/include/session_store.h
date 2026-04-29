@@ -23,6 +23,11 @@ public:
     explicit SessionLimitError(const std::string& message) : std::runtime_error(message) {}
 };
 
+class StdinClosedError : public std::runtime_error {
+public:
+    explicit StdinClosedError(const std::string& message) : std::runtime_error(message) {}
+};
+
 struct LiveSession {
     LiveSession();
     ~LiveSession();
@@ -31,6 +36,7 @@ struct LiveSession {
     std::unique_ptr<ProcessSession> process;
     std::uint64_t started_at_ms;
     std::string output_carry;
+    bool stdin_open;
 };
 
 class SessionStore {

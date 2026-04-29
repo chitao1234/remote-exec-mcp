@@ -64,6 +64,12 @@ reports this through `/v1/target-info` as `supports_pty`, and rejects `tty=true`
 only when PTY allocation is unavailable. Windows XP-compatible builds always
 report `supports_pty=false`.
 
+POSIX non-TTY exec intentionally starts child processes with stdin attached to
+`/dev/null`, matching the Rust daemon's closed-stdin behavior. Start POSIX
+interactive commands with `tty=true` when later `write_stdin` input is needed.
+Windows XP-compatible non-TTY exec intentionally keeps its pipe-backed stdin
+open to preserve the original XP daemon behavior.
+
 ## Config
 
 Example config:

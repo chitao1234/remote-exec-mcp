@@ -121,8 +121,25 @@ int main() {
     assert(locale_response.at("exit_code").get<int>() == 0);
     assert(locale_response.at("output").get<std::string>() == "C.UTF-8 C.UTF-8\n");
 
-    const Json running = store.start_command(
-        "printf ready; IFS= read line; printf ' got:%s\\n' \"$line\"",
+    const Json stdin_closed_response = store.start_command(
+        "if IFS= read line; then printf 'got:%s\\n' \"$line\"; "
+        "else printf 'stdin:closed\\n'; fi",
+        root.string(),
+        shell,
+        false,
+        false,
+        true,
+        5000UL,
+        DEFAULT_MAX_OUTPUT_TOKENS,
+        yield_time,
+        64UL
+    );
+    assert(!stdin_closed_response.at("running").get<bool>());
+    assert(stdin_closed_response.at("exit_code").get<int>() == 0);
+    assert(stdin_closed_response.at("output").get<std::string>() == "stdin:closed\n");
+
+    const Json non_tty_running = store.start_command(
+        "printf ready; sleep 5",
         root.string(),
         shell,
         false,
@@ -133,20 +150,24 @@ int main() {
         yield_time,
         64UL
     );
-    assert(running.at("running").get<bool>());
-    assert(running.at("output").get<std::string>() == "ready");
+    assert(non_tty_running.at("running").get<bool>());
+    assert(non_tty_running.at("output").get<std::string>() == "ready");
 
-    const Json completed = store.write_stdin(
-        running.at("daemon_session_id").get<std::string>(),
-        "hello\n",
-        true,
-        5000UL,
-        DEFAULT_MAX_OUTPUT_TOKENS,
-        yield_time
-    );
-    assert(!completed.at("running").get<bool>());
-    assert(completed.at("exit_code").get<int>() == 0);
-    assert(completed.at("output").get<std::string>() == " got:hello\n");
+    bool stdin_closed_rejected = false;
+    try {
+        (void)store.write_stdin(
+            non_tty_running.at("daemon_session_id").get<std::string>(),
+            "hello\n",
+            true,
+            250UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            yield_time
+        );
+    } catch (const StdinClosedError& ex) {
+        stdin_closed_rejected =
+            std::string(ex.what()).find("stdin is closed") != std::string::npos;
+    }
+    assert(stdin_closed_rejected);
 
     if (process_session_supports_pty()) {
         const Json tty_running = store.start_command(
@@ -195,6 +216,37 @@ int main() {
         unknown_session_rejected = true;
     }
     assert(unknown_session_rejected);
+#else
+    const Json xp_running = store.start_command(
+        "echo ready&set /P line=&call echo got:%line%",
+        root.string(),
+        shell,
+        false,
+        false,
+        true,
+        250UL,
+        DEFAULT_MAX_OUTPUT_TOKENS,
+        yield_time,
+        64UL
+    );
+    assert(xp_running.at("running").get<bool>());
+    const std::string xp_initial =
+        normalize_output(xp_running.at("output").get<std::string>());
+
+    const Json xp_completed = store.write_stdin(
+        xp_running.at("daemon_session_id").get<std::string>(),
+        "hello\r\n",
+        true,
+        5000UL,
+        DEFAULT_MAX_OUTPUT_TOKENS,
+        yield_time
+    );
+    assert(!xp_completed.at("running").get<bool>());
+    assert(xp_completed.at("exit_code").get<int>() == 0);
+    const std::string xp_output =
+        xp_initial + normalize_output(xp_completed.at("output").get<std::string>());
+    assert(xp_output.find("ready\n") != std::string::npos);
+    assert(xp_output.find("got:hello\n") != std::string::npos);
 #endif
 
     return 0;
