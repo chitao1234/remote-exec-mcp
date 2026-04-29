@@ -27,7 +27,7 @@ Everything under `docs/` is historical implementation detail and planning contex
 - `remote-exec-daemon-cpp`
   - Standalone C++ daemon over plain HTTP, with native POSIX and Windows XP-compatible build paths.
   - Supports `exec_command`, `write_stdin`, `apply_patch`, and `transfer_files` for files, directories, and broker-built multi-source bundles.
-  - Does not support PTY or image reads.
+  - Supports POSIX PTY sessions when the host can allocate a PTY; Windows XP-compatible PTY sessions and image reads remain unsupported.
 - `remote-exec-proto`
   - Shared public tool schemas and broker-daemon RPC types.
 
@@ -407,7 +407,7 @@ cargo fmt --all --check
 - `winptyrs` now prefers static linking when both static and dynamic layouts are available. Set `WINPTY_STATIC=0` to force dynamic linking instead.
 - Default shell resolution uses `default_shell` when configured. Otherwise it tries `SHELL`, then a usable passwd shell, then `bash`, then `/bin/sh` on Unix; and a bash under `windows_posix_root` when configured, then Git Bash, then `pwsh.exe`, then `powershell.exe` or `powershell`, then `COMSPEC`, then `cmd.exe` on Windows.
 - Git Bash auto-discovery on Windows checks `windows_posix_root` first when configured, then standard Git for Windows install roots and locations derivable from `git.exe` on `PATH`. Portable or unusual installs should set `default_shell` or `windows_posix_root` explicitly.
-- `remote-exec-daemon-cpp` is intentionally narrower than the main daemon: it rejects `tty=true`, does not implement `view_image`, does not implement TLS or static sandboxing, supports regular-file transfers, directory trees, and broker-built multi-source transfer bundles, and always falls back to uncompressed transfer staging. On POSIX it follows the Rust daemon's default shell policy and forces `LC_ALL=C.UTF-8` plus `LANG=C.UTF-8`; on Windows XP-compatible builds it supports `cmd.exe`. Symlinks, hard links, special files, sparse entries, and malformed archive paths remain unsupported there.
+- `remote-exec-daemon-cpp` is intentionally narrower than the main daemon: POSIX builds support `tty=true` when PTY allocation is available, Windows XP-compatible builds reject `tty=true`, `view_image` is unavailable, TLS and static sandboxing are unavailable, regular-file transfers, directory trees, and broker-built multi-source transfer bundles are supported, and transfer staging always falls back to uncompressed payloads. On POSIX it follows the Rust daemon's default shell policy and forces `LC_ALL=C.UTF-8` plus `LANG=C.UTF-8`; on Windows XP-compatible builds it supports `cmd.exe`. Symlinks, hard links, special files, sparse entries, and malformed archive paths remain unsupported there.
 
 ## Quality Gate
 

@@ -73,11 +73,12 @@ std::shared_ptr<LiveSession> launch_live_session(
     const std::string& command,
     const std::string& workdir,
     const std::string& shell,
-    bool login
+    bool login,
+    bool tty
 ) {
     std::shared_ptr<LiveSession> session(new LiveSession());
     session->id = make_chunk_id();
-    session->process = ProcessSession::launch(command, workdir, shell, login);
+    session->process = ProcessSession::launch(command, workdir, shell, login, tty);
     session->started_at_ms = platform::monotonic_ms();
     return session;
 }
@@ -138,6 +139,7 @@ Json SessionStore::start_command(
     const std::string& workdir,
     const std::string& shell,
     bool login,
+    bool tty,
     bool has_yield_time_ms,
     unsigned long yield_time_ms,
     unsigned long max_output_chars,
@@ -152,10 +154,12 @@ Json SessionStore::start_command(
         std::ostringstream message;
         message << "start_command cmd_preview=`" << preview_text(command, 120)
                 << "` workdir=`" << workdir << "` shell=`" << shell
-                << "` login=" << (login ? "true" : "false");
+                << "` login=" << (login ? "true" : "false")
+                << " tty=" << (tty ? "true" : "false");
         log_message(LOG_INFO, "session_store", message.str());
     }
-    std::shared_ptr<LiveSession> session = launch_live_session(command, workdir, shell, login);
+    std::shared_ptr<LiveSession> session =
+        launch_live_session(command, workdir, shell, login, tty);
 
     const unsigned long timeout_ms = resolve_yield_time_ms(
         yield_time.exec_command,

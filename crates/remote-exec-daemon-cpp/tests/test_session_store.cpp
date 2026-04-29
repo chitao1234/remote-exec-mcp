@@ -4,6 +4,7 @@
 
 #include "config.h"
 #include "platform.h"
+#include "process_session.h"
 #include "session_store.h"
 
 namespace fs = std::filesystem;
@@ -52,6 +53,7 @@ int main() {
         root.string(),
         shell,
         false,
+        false,
         true,
         5000UL,
         0UL,
@@ -73,6 +75,7 @@ int main() {
         root.string(),
         shell,
         false,
+        false,
         true,
         5000UL,
         0UL,
@@ -86,6 +89,7 @@ int main() {
         "printf ready; IFS= read line; printf ' got:%s\\n' \"$line\"",
         root.string(),
         shell,
+        false,
         false,
         true,
         250UL,
@@ -107,6 +111,39 @@ int main() {
     assert(!completed.at("running").get<bool>());
     assert(completed.at("exit_code").get<int>() == 0);
     assert(completed.at("output").get<std::string>() == " got:hello\n");
+
+    if (process_session_supports_pty()) {
+        const Json tty_running = store.start_command(
+            "if test -t 0; then printf 'tty:yes\\n'; else printf 'tty:no\\n'; fi; "
+            "IFS= read line; printf 'input:%s\\n' \"$line\"",
+            root.string(),
+            shell,
+            false,
+            true,
+            true,
+            250UL,
+            0UL,
+            yield_time,
+            64UL
+        );
+        assert(tty_running.at("running").get<bool>());
+        assert(normalize_output(tty_running.at("output").get<std::string>()) == "tty:yes\n");
+
+        const Json tty_completed = store.write_stdin(
+            tty_running.at("daemon_session_id").get<std::string>(),
+            "hello\n",
+            true,
+            5000UL,
+            0UL,
+            yield_time
+        );
+        assert(!tty_completed.at("running").get<bool>());
+        assert(tty_completed.at("exit_code").get<int>() == 0);
+        const std::string normalized_tty_output =
+            normalize_output(tty_completed.at("output").get<std::string>());
+        assert(normalized_tty_output.find("hello\n") != std::string::npos);
+        assert(normalized_tty_output.find("input:hello\n") != std::string::npos);
+    }
 
     bool unknown_session_rejected = false;
     try {

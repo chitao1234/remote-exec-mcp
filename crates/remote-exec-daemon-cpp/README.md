@@ -36,6 +36,7 @@ Focused host-native tests:
 - `make test-host-config`
 - `make test-host-http-request`
 - `make test-host-session-store`
+- `make test-host-server-routes`
 
 ## Run
 
@@ -57,6 +58,11 @@ shared filter string such as
 
 Non-TTY exec output merges `stdout` and `stderr` through one pipe, so the
 returned `output` field preserves their emitted order.
+
+POSIX builds support `tty=true` when the host can allocate a PTY. The daemon
+reports this through `/v1/target-info` as `supports_pty`, and rejects `tty=true`
+only when PTY allocation is unavailable. Windows XP-compatible builds always
+report `supports_pty=false`.
 
 ## Config
 
@@ -113,7 +119,8 @@ default_workdir = /work
 - plain HTTP only, with optional bearer-auth request authentication
 - no TLS support
 - no static sandbox support
-- no PTY support
+- PTY support is POSIX-only and depends on host PTY allocation
+- no PTY support in Windows XP-compatible builds
 - no image support
 - transfer compression is not supported
 - `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles

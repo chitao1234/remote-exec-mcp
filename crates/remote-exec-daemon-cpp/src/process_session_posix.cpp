@@ -8,9 +8,13 @@
 #include <vector>
 
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
+#include <stdlib.h>
+#include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <termios.h>
 #include <unistd.h>
 
 #include "platform.h"
@@ -67,6 +71,11 @@ struct PosixPipePair {
     UniqueFd write_end;
 };
 
+struct PosixPtyPair {
+    UniqueFd master;
+    std::string slave_path;
+};
+
 PosixPipePair create_posix_pipe(const char* label) {
     int fds[2];
     if (pipe(fds) != 0) {
@@ -78,11 +87,33 @@ PosixPipePair create_posix_pipe(const char* label) {
     return pair;
 }
 
-void set_nonblocking(int fd) {
-    const int flags = fcntl(fd, F_GETFL, 0);
-    if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) {
-        throw std::runtime_error("fcntl(O_NONBLOCK) failed");
+PosixPtyPair create_posix_pty() {
+    UniqueFd master(posix_openpt(O_RDWR | O_NOCTTY));
+    if (!master.valid()) {
+        throw std::runtime_error(std::string("posix_openpt failed: ") + std::strerror(errno));
     }
+    if (grantpt(master.get()) != 0) {
+        throw std::runtime_error(std::string("grantpt failed: ") + std::strerror(errno));
+    }
+    if (unlockpt(master.get()) != 0) {
+        throw std::runtime_error(std::string("unlockpt failed: ") + std::strerror(errno));
+    }
+
+    char* slave_name = ptsname(master.get());
+    if (slave_name == NULL) {
+        throw std::runtime_error(std::string("ptsname failed: ") + std::strerror(errno));
+    }
+
+    struct winsize size;
+    std::memset(&size, 0, sizeof(size));
+    size.ws_row = 24;
+    size.ws_col = 120;
+    ioctl(master.get(), TIOCSWINSZ, &size);
+
+    PosixPtyPair pair;
+    pair.master = std::move(master);
+    pair.slave_path = slave_name;
+    return pair;
 }
 
 std::string replacement_utf8() {
@@ -150,12 +181,56 @@ std::string decode_utf8_output(std::string* carry, const std::string& raw_chunk,
     return output;
 }
 
+bool readable_now(int fd) {
+    struct pollfd descriptor;
+    descriptor.fd = fd;
+    descriptor.events = POLLIN | POLLHUP | POLLERR;
+    descriptor.revents = 0;
+
+    for (;;) {
+        const int result = poll(&descriptor, 1, 0);
+        if (result > 0) {
+            return (descriptor.revents & (POLLIN | POLLHUP | POLLERR)) != 0;
+        }
+        if (result == 0) {
+            return false;
+        }
+        if (errno != EINTR) {
+            throw std::runtime_error(std::string("poll failed: ") + std::strerror(errno));
+        }
+    }
+}
+
+void exec_shell_child(
+    const std::vector<std::string>& argv,
+    const std::string& workdir,
+    bool tty
+) {
+    if (!workdir.empty() && chdir(workdir.c_str()) != 0) {
+        _exit(126);
+    }
+
+    setenv("LC_ALL", "C.UTF-8", 1);
+    setenv("LANG", "C.UTF-8", 1);
+    if (tty) {
+        setenv("TERM", "xterm-256color", 0);
+    }
+
+    std::vector<char*> exec_argv;
+    for (std::size_t i = 0; i < argv.size(); ++i) {
+        exec_argv.push_back(const_cast<char*>(argv[i].c_str()));
+    }
+    exec_argv.push_back(NULL);
+    execvp(exec_argv[0], &exec_argv[0]);
+    _exit(127);
+}
+
 class PosixProcessSession : public ProcessSession {
 public:
-    PosixProcessSession(pid_t pid, UniqueFd stdin_write, UniqueFd stdout_read)
+    PosixProcessSession(pid_t pid, UniqueFd input_write, UniqueFd output_read)
         : pid_(pid),
-          stdin_write_(std::move(stdin_write)),
-          stdout_read_(std::move(stdout_read)),
+          input_write_(std::move(input_write)),
+          output_read_(std::move(output_read)),
           reaped_(false),
           exit_code_(0) {}
 
@@ -167,7 +242,7 @@ public:
         const char* data = chars.data();
         std::size_t remaining = chars.size();
         while (remaining > 0) {
-            const ssize_t written = write(stdin_write_.get(), data, remaining);
+            const ssize_t written = write(input_write_.get(), data, remaining);
             if (written < 0) {
                 if (errno == EINTR) {
                     continue;
@@ -187,8 +262,9 @@ public:
     std::string read_available(std::string* carry) override {
         std::string raw;
         char buffer[4096];
-        for (;;) {
-            const ssize_t read_count = read(stdout_read_.get(), buffer, sizeof(buffer));
+        const int read_fd = output_read_.valid() ? output_read_.get() : input_write_.get();
+        while (readable_now(read_fd)) {
+            const ssize_t read_count = read(read_fd, buffer, sizeof(buffer));
             if (read_count > 0) {
                 raw.append(buffer, static_cast<std::size_t>(read_count));
                 continue;
@@ -200,6 +276,9 @@ public:
                 continue;
             }
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                break;
+            }
+            if (errno == EIO) {
                 break;
             }
             break;
@@ -258,23 +337,68 @@ public:
 
 private:
     pid_t pid_;
-    UniqueFd stdin_write_;
-    UniqueFd stdout_read_;
+    UniqueFd input_write_;
+    UniqueFd output_read_;
     bool reaped_;
     int exit_code_;
 };
 
 }  // namespace
 
+bool process_session_supports_pty() {
+    static const bool supported = []() {
+        try {
+            PosixPtyPair pair = create_posix_pty();
+            return pair.master.valid() && !pair.slave_path.empty();
+        } catch (const std::exception&) {
+            return false;
+        }
+    }();
+    return supported;
+}
+
 std::unique_ptr<ProcessSession> ProcessSession::launch(
     const std::string& command,
     const std::string& workdir,
     const std::string& shell,
-    bool login
+    bool login,
+    bool tty
 ) {
+    const std::vector<std::string> argv = platform::shell_argv(shell, login, command);
+
+    if (tty) {
+        PosixPtyPair pty = create_posix_pty();
+        const pid_t pid = fork();
+        if (pid < 0) {
+            throw std::runtime_error(std::string("fork failed: ") + std::strerror(errno));
+        }
+
+        if (pid == 0) {
+            setsid();
+            const int slave_fd = open(pty.slave_path.c_str(), O_RDWR);
+            if (slave_fd < 0) {
+                _exit(126);
+            }
+#ifdef TIOCSCTTY
+            ioctl(slave_fd, TIOCSCTTY, 0);
+#endif
+            dup2(slave_fd, STDIN_FILENO);
+            dup2(slave_fd, STDOUT_FILENO);
+            dup2(slave_fd, STDERR_FILENO);
+            if (slave_fd > STDERR_FILENO) {
+                close(slave_fd);
+            }
+            pty.master.reset();
+            exec_shell_child(argv, workdir, true);
+        }
+
+        return std::unique_ptr<ProcessSession>(
+            new PosixProcessSession(pid, std::move(pty.master), UniqueFd())
+        );
+    }
+
     PosixPipePair stdout_pipe = create_posix_pipe("pipe(stdout)");
     PosixPipePair stdin_pipe = create_posix_pipe("pipe(stdin)");
-    const std::vector<std::string> argv = platform::shell_argv(shell, login, command);
 
     const pid_t pid = fork();
     if (pid < 0) {
@@ -291,27 +415,12 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
         stdin_pipe.write_end.reset();
         stdout_pipe.read_end.reset();
         stdout_pipe.write_end.reset();
-
-        if (!workdir.empty() && chdir(workdir.c_str()) != 0) {
-            _exit(126);
-        }
-
-        setenv("LC_ALL", "C.UTF-8", 1);
-        setenv("LANG", "C.UTF-8", 1);
-
-        std::vector<char*> exec_argv;
-        for (std::size_t i = 0; i < argv.size(); ++i) {
-            exec_argv.push_back(const_cast<char*>(argv[i].c_str()));
-        }
-        exec_argv.push_back(NULL);
-        execvp(exec_argv[0], &exec_argv[0]);
-        _exit(127);
+        exec_shell_child(argv, workdir, false);
     }
 
     setpgid(pid, pid);
     stdin_pipe.read_end.reset();
     stdout_pipe.write_end.reset();
-    set_nonblocking(stdout_pipe.read_end.get());
 
     return std::unique_ptr<ProcessSession>(
         new PosixProcessSession(

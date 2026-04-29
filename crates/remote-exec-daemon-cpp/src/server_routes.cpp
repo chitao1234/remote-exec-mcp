@@ -6,6 +6,7 @@
 #include "logging.h"
 #include "patch_engine.h"
 #include "platform.h"
+#include "process_session.h"
 #include "server_routes.h"
 #include "transfer_ops.h"
 
@@ -57,7 +58,7 @@ HttpResponse handle_target_info(const AppState& state) {
             {"hostname", state.hostname},
             {"platform", platform::platform_name()},
             {"arch", platform::arch_name()},
-            {"supports_pty", false},
+            {"supports_pty", process_session_supports_pty()},
             {"supports_image_read", false},
             {"supports_transfer_compression", false},
         }
@@ -75,7 +76,8 @@ HttpResponse handle_exec_start(AppState& state, const HttpRequest& request) {
         const bool has_yield_time_ms = yield_time_it != body.end();
         const unsigned long yield_time_ms =
             has_yield_time_ms ? yield_time_it->get<unsigned long>() : 0UL;
-        if (body.value("tty", false)) {
+        const bool tty_requested = body.value("tty", false);
+        if (tty_requested && !process_session_supports_pty()) {
             return make_rpc_error_response(
                 400,
                 "tty_unsupported",
@@ -107,6 +109,7 @@ HttpResponse handle_exec_start(AppState& state, const HttpRequest& request) {
             resolve_workdir(state, body),
             shell,
             login_requested,
+            tty_requested,
             has_yield_time_ms,
             yield_time_ms,
             body.value("max_output_tokens", 0UL),

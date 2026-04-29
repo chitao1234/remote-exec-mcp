@@ -450,7 +450,8 @@ Example: download a remote log to broker-host `local`:
 
 - PTY support is target-specific. Trust `list_targets().targets[].daemon_info.supports_pty`, not assumptions.
 - `remote-exec-daemon-cpp` is narrower than the main daemon.
-- On C++ daemon targets, `tty: true` is rejected.
+- On POSIX C++ daemon targets, `tty: true` works when `supports_pty` is true.
+- On Windows XP-compatible C++ daemon targets, `tty: true` is rejected.
 - On C++ daemon targets, `view_image` is unavailable.
 - On POSIX C++ daemon targets, shell selection follows the Rust daemon policy and child processes force `LC_ALL=C.UTF-8` plus `LANG=C.UTF-8`.
 - On Windows XP-compatible C++ daemon targets, the supported shell is `cmd.exe`.

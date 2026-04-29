@@ -14,6 +14,7 @@ HOST_TRANSFER := $(BUILD_DIR)/test_transfer
 HOST_CONFIG := $(BUILD_DIR)/test_config
 HOST_HTTP_REQUEST := $(BUILD_DIR)/test_http_request
 HOST_SESSION_STORE := $(BUILD_DIR)/test_session_store
+HOST_SERVER_ROUTES := $(BUILD_DIR)/test_server_routes
 XP_SESSION_STORE := $(BUILD_DIR)/test_session_store-xp.exe
 WINE ?= wine
 
@@ -69,6 +70,13 @@ $(HOST_SESSION_STORE): tests/test_session_store.cpp src/session_store.cpp src/pr
 	mkdir -p $(BUILD_DIR)
 	$(HOST_CXX) $(COMMON_FLAGS) -o $@ tests/test_session_store.cpp src/session_store.cpp src/process_session_posix.cpp src/platform.cpp src/shell_policy.cpp src/logging.cpp src/config.cpp src/text_utils.cpp
 
+test-host-server-routes: $(HOST_SERVER_ROUTES)
+	./$(HOST_SERVER_ROUTES)
+
+$(HOST_SERVER_ROUTES): tests/test_server_routes.cpp src/server_routes.cpp src/http_helpers.cpp src/session_store.cpp src/process_session_posix.cpp src/platform.cpp src/shell_policy.cpp src/patch_engine.cpp src/transfer_ops.cpp src/logging.cpp src/config.cpp src/text_utils.cpp
+	mkdir -p $(BUILD_DIR)
+	$(HOST_CXX) $(COMMON_FLAGS) -o $@ tests/test_server_routes.cpp src/server_routes.cpp src/http_helpers.cpp src/session_store.cpp src/process_session_posix.cpp src/platform.cpp src/shell_policy.cpp src/patch_engine.cpp src/transfer_ops.cpp src/logging.cpp src/config.cpp src/text_utils.cpp
+
 test-wine-session-store: $(XP_SESSION_STORE)
 	$(WINE) ./$(XP_SESSION_STORE)
 
@@ -76,10 +84,10 @@ $(XP_SESSION_STORE): tests/test_session_store.cpp src/session_store.cpp src/proc
 	mkdir -p $(BUILD_DIR)
 	$(CXX) $(WINDOWS_XP_FLAGS) -o $@ tests/test_session_store.cpp src/session_store.cpp src/process_session_win32.cpp src/platform.cpp src/shell_policy.cpp src/console_output.cpp src/logging.cpp src/win32_error.cpp src/config.cpp src/text_utils.cpp $(WIN_LIBS)
 
-check-posix: test-host-patch test-host-transfer test-host-config test-host-http-request test-host-session-store all-posix
+check-posix: test-host-patch test-host-transfer test-host-config test-host-http-request test-host-session-store test-host-server-routes all-posix
 
 check-windows-xp: all-windows-xp
 
 check: check-posix
 
-.PHONY: all all-posix all-windows-xp clean test-host-patch test-host-transfer test-host-config test-host-http-request test-host-session-store test-wine-session-store check-posix check-windows-xp check
+.PHONY: all all-posix all-windows-xp clean test-host-patch test-host-transfer test-host-config test-host-http-request test-host-session-store test-host-server-routes test-wine-session-store check-posix check-windows-xp check

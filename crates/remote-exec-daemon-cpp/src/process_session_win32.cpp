@@ -158,8 +158,13 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     const std::string& command,
     const std::string& workdir,
     const std::string& shell,
-    bool login
+    bool login,
+    bool tty
 ) {
+    if (tty) {
+        throw std::runtime_error("tty is not supported on this host");
+    }
+
     PipePair stdout_pipe = create_pipe_pair("CreatePipe(stdout)");
     PipePair stdin_pipe = create_pipe_pair("CreatePipe(stdin)");
     SetHandleInformation(stdout_pipe.read_end.get(), HANDLE_FLAG_INHERIT, 0);
@@ -212,6 +217,10 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
             std::move(stdout_pipe.read_end)
         )
     );
+}
+
+bool process_session_supports_pty() {
+    return false;
 }
 
 #endif

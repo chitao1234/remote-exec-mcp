@@ -14,7 +14,8 @@ public:
         const std::string& command,
         const std::string& workdir,
         const std::string& shell,
-        bool login
+        bool login,
+        bool tty
     );
 
     virtual void write_stdin(const std::string& chars) = 0;
@@ -26,3 +27,5 @@ public:
 protected:
     ProcessSession() {}
 };
+
+bool process_session_supports_pty();

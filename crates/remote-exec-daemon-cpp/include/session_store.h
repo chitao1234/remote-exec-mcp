@@ -41,6 +41,7 @@ public:
         const std::string& workdir,
         const std::string& shell,
         bool login,
+        bool tty,
         bool has_yield_time_ms,
         unsigned long yield_time_ms,
         unsigned long max_output_chars,
