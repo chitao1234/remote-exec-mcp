@@ -6,6 +6,7 @@ pub mod local_backend;
 pub mod local_transfer;
 pub mod logging;
 pub mod mcp_server;
+pub mod port_forward;
 pub mod session_store;
 pub mod tools;
 
@@ -16,9 +17,14 @@ use anyhow::Context;
 use daemon_client::{DaemonClient, DaemonClientError};
 use local_backend::LocalDaemonClient;
 use remote_exec_proto::rpc::{
-    ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
-    PatchApplyRequest, PatchApplyResponse, TargetInfoResponse, TransferExportRequest,
-    TransferImportRequest, TransferImportResponse, TransferSourceType,
+    EmptyResponse, ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest,
+    ImageReadResponse, PatchApplyRequest, PatchApplyResponse, PortConnectRequest,
+    PortConnectResponse, PortConnectionCloseRequest, PortConnectionReadRequest,
+    PortConnectionReadResponse, PortConnectionWriteRequest, PortListenAcceptRequest,
+    PortListenAcceptResponse, PortListenCloseRequest, PortListenRequest, PortListenResponse,
+    PortUdpDatagramReadRequest, PortUdpDatagramReadResponse, PortUdpDatagramWriteRequest,
+    TargetInfoResponse, TransferExportRequest, TransferImportRequest, TransferImportResponse,
+    TransferSourceType,
 };
 use remote_exec_proto::{
     path::{PathPolicy, linux_path_policy, windows_path_policy},
@@ -35,6 +41,7 @@ pub struct CachedDaemonInfo {
     pub arch: String,
     pub supports_pty: bool,
     pub supports_transfer_compression: bool,
+    pub supports_port_forward: bool,
 }
 
 #[derive(Clone)]
@@ -91,6 +98,7 @@ impl TargetHandle {
             arch: info.arch.clone(),
             supports_pty: info.supports_pty,
             supports_transfer_compression: info.supports_transfer_compression,
+            supports_port_forward: info.supports_port_forward,
         }
     }
 
@@ -171,6 +179,96 @@ impl TargetHandle {
         }
     }
 
+    pub async fn port_listen(
+        &self,
+        req: &PortListenRequest,
+    ) -> Result<PortListenResponse, DaemonClientError> {
+        match &self.backend {
+            TargetBackend::Remote(client) => client.port_listen(req).await,
+            TargetBackend::Local(client) => client.port_listen(req).await,
+        }
+    }
+
+    pub async fn port_listen_accept(
+        &self,
+        req: &PortListenAcceptRequest,
+    ) -> Result<PortListenAcceptResponse, DaemonClientError> {
+        match &self.backend {
+            TargetBackend::Remote(client) => client.port_listen_accept(req).await,
+            TargetBackend::Local(client) => client.port_listen_accept(req).await,
+        }
+    }
+
+    pub async fn port_listen_close(
+        &self,
+        req: &PortListenCloseRequest,
+    ) -> Result<EmptyResponse, DaemonClientError> {
+        match &self.backend {
+            TargetBackend::Remote(client) => client.port_listen_close(req).await,
+            TargetBackend::Local(client) => client.port_listen_close(req).await,
+        }
+    }
+
+    pub async fn port_connect(
+        &self,
+        req: &PortConnectRequest,
+    ) -> Result<PortConnectResponse, DaemonClientError> {
+        match &self.backend {
+            TargetBackend::Remote(client) => client.port_connect(req).await,
+            TargetBackend::Local(client) => client.port_connect(req).await,
+        }
+    }
+
+    pub async fn port_connection_read(
+        &self,
+        req: &PortConnectionReadRequest,
+    ) -> Result<PortConnectionReadResponse, DaemonClientError> {
+        match &self.backend {
+            TargetBackend::Remote(client) => client.port_connection_read(req).await,
+            TargetBackend::Local(client) => client.port_connection_read(req).await,
+        }
+    }
+
+    pub async fn port_connection_write(
+        &self,
+        req: &PortConnectionWriteRequest,
+    ) -> Result<EmptyResponse, DaemonClientError> {
+        match &self.backend {
+            TargetBackend::Remote(client) => client.port_connection_write(req).await,
+            TargetBackend::Local(client) => client.port_connection_write(req).await,
+        }
+    }
+
+    pub async fn port_connection_close(
+        &self,
+        req: &PortConnectionCloseRequest,
+    ) -> Result<EmptyResponse, DaemonClientError> {
+        match &self.backend {
+            TargetBackend::Remote(client) => client.port_connection_close(req).await,
+            TargetBackend::Local(client) => client.port_connection_close(req).await,
+        }
+    }
+
+    pub async fn port_udp_datagram_read(
+        &self,
+        req: &PortUdpDatagramReadRequest,
+    ) -> Result<PortUdpDatagramReadResponse, DaemonClientError> {
+        match &self.backend {
+            TargetBackend::Remote(client) => client.port_udp_datagram_read(req).await,
+            TargetBackend::Local(client) => client.port_udp_datagram_read(req).await,
+        }
+    }
+
+    pub async fn port_udp_datagram_write(
+        &self,
+        req: &PortUdpDatagramWriteRequest,
+    ) -> Result<EmptyResponse, DaemonClientError> {
+        match &self.backend {
+            TargetBackend::Remote(client) => client.port_udp_datagram_write(req).await,
+            TargetBackend::Local(client) => client.port_udp_datagram_write(req).await,
+        }
+    }
+
     pub async fn clear_cached_daemon_info(&self) {
         *self.identity_verified.lock().await = false;
         *self.cached_daemon_info.lock().await = None;
@@ -232,6 +330,7 @@ pub struct BrokerState {
     pub disable_structured_content: bool,
     pub host_sandbox: Option<CompiledFilesystemSandbox>,
     pub sessions: SessionStore,
+    pub port_forwards: port_forward::PortForwardStore,
     pub targets: BTreeMap<String, TargetHandle>,
 }
 
@@ -240,6 +339,25 @@ impl BrokerState {
         self.targets
             .get(name)
             .with_context(|| format!("unknown target `{name}`"))
+    }
+
+    pub async fn forwarding_side(&self, name: &str) -> anyhow::Result<port_forward::SideHandle> {
+        if name == "local" && !self.targets.contains_key("local") {
+            return Ok(port_forward::SideHandle::local());
+        }
+
+        let handle = self.target(name)?;
+        handle.ensure_identity_verified(name).await?;
+        if let Some(info) = handle.cached_daemon_info().await {
+            anyhow::ensure!(
+                info.supports_port_forward,
+                "target `{name}` does not support port forwarding"
+            );
+        }
+        Ok(port_forward::SideHandle::target(
+            name.to_string(),
+            handle.clone(),
+        ))
     }
 }
 
@@ -272,6 +390,7 @@ async fn build_state(mut config: config::BrokerConfig) -> anyhow::Result<BrokerS
         disable_structured_content: config.disable_structured_content,
         host_sandbox,
         sessions: SessionStore::default(),
+        port_forwards: port_forward::PortForwardStore::default(),
         targets,
     })
 }

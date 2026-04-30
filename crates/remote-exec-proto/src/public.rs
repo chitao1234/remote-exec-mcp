@@ -61,6 +61,7 @@ pub struct ListTargetDaemonInfo {
     pub platform: String,
     pub arch: String,
     pub supports_pty: bool,
+    pub supports_port_forward: bool,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -146,4 +147,81 @@ pub struct ViewImageResult {
     pub target: String,
     pub image_url: String,
     pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ForwardPortsInput {
+    Open {
+        listen_side: String,
+        connect_side: String,
+        forwards: Vec<ForwardPortSpec>,
+    },
+    List {
+        #[serde(default)]
+        listen_side: Option<String>,
+        #[serde(default)]
+        connect_side: Option<String>,
+        #[serde(default)]
+        forward_ids: Vec<String>,
+    },
+    Close {
+        forward_ids: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ForwardPortSpec {
+    pub listen_endpoint: String,
+    pub connect_endpoint: String,
+    pub protocol: ForwardPortProtocol,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ForwardPortProtocol {
+    Tcp,
+    Udp,
+}
+
+impl Default for ForwardPortProtocol {
+    fn default() -> Self {
+        Self::Tcp
+    }
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ForwardPortsResult {
+    pub action: ForwardPortsAction,
+    pub forwards: Vec<ForwardPortEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ForwardPortsAction {
+    Open,
+    List,
+    Close,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ForwardPortEntry {
+    pub forward_id: String,
+    pub listen_side: String,
+    pub listen_endpoint: String,
+    pub connect_side: String,
+    pub connect_endpoint: String,
+    pub protocol: ForwardPortProtocol,
+    pub status: ForwardPortStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ForwardPortStatus {
+    Open,
+    Closed,
+    Failed,
 }

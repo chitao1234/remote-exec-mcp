@@ -104,6 +104,7 @@ HttpResponse handle_target_info(const AppState& state) {
             {"supports_pty", process_session_supports_pty()},
             {"supports_image_read", false},
             {"supports_transfer_compression", false},
+            {"supports_port_forward", false},
         }
     );
     return response;
@@ -359,6 +360,14 @@ HttpResponse route_request(AppState& state, const HttpRequest& request) {
             400,
             "image_unsupported",
             "image read is not supported on this target"
+        );
+    }
+
+    if (request.path.find("/v1/port/") == 0) {
+        return make_rpc_error_response(
+            400,
+            "port_forward_unsupported",
+            "port forwarding is not supported on this target"
         );
     }
 

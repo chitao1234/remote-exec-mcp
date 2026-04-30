@@ -1,6 +1,6 @@
 ---
 name: using-remote-exec-mcp
-description: Use when work must happen through a remote-exec-mcp broker on a named target or broker-host `local`, including target discovery with `list_targets`, remote command execution with `exec_command`, live session continuation with `write_stdin`, remote edits with `apply_patch`, image inspection with `view_image`, and cross-endpoint copies with `transfer_files`
+description: Use when work must happen through a remote-exec-mcp broker on a named target or broker-host `local`, including target discovery with `list_targets`, remote command execution with `exec_command`, live session continuation with `write_stdin`, remote edits with `apply_patch`, image inspection with `view_image`, cross-endpoint copies with `transfer_files`, and TCP/UDP forwarding with `forward_ports`
 ---
 
 # Using remote-exec-mcp
@@ -9,7 +9,7 @@ This skill is self-contained. An agent should be able to use the public `remote-
 
 ## What This Toolset Is
 
-`remote-exec-mcp` is a brokered remote-work toolset. It gives you six public tools:
+`remote-exec-mcp` is a brokered remote-work toolset. It gives you seven public tools:
 
 - `list_targets`
 - `exec_command`
@@ -17,8 +17,9 @@ This skill is self-contained. An agent should be able to use the public `remote-
 - `apply_patch`
 - `view_image`
 - `transfer_files`
+- `forward_ports`
 
-Use it when work belongs on a named remote machine, on the broker host exposed as `target: "local"`, or when files must move between endpoints.
+Use it when work belongs on a named remote machine, on the broker host exposed as `target: "local"`, when files must move between endpoints, or when network ports must be forwarded between endpoints.
 
 Do not use this skill for ordinary work in your current Codex workspace. `remote-exec-mcp` is for broker-managed endpoints, not for your current local shell unless the user explicitly wants the broker host.
 
@@ -26,14 +27,17 @@ Do not use this skill for ordinary work in your current Codex workspace. `remote
 
 - Agents talk to one broker.
 - The broker owns the public `session_id` namespace.
+- The broker owns the public `forward_id` namespace for `forward_ports`.
 - The daemon on each machine owns its own private local session identifiers.
 - `session_id` is opaque. Treat it as a broker token, not as a PID and not as a daemon session id.
 - Every machine-local operation is target-scoped. Pick the right `target` first.
 - `local` means the broker host, not your current Codex workspace.
 - For `exec_command`, `write_stdin`, `apply_patch`, and `view_image`, `local` exists only when the broker-host local target is enabled.
 - For `transfer_files`, `local` always means the broker-host filesystem endpoint and may be usable even when it does not appear in `list_targets`.
+- For `forward_ports`, side `"local"` always means the broker-host network endpoint and may be usable even when it does not appear in `list_targets`.
 - Choosing a `target` grants broad access on that machine, optionally narrowed only by static sandbox config for the relevant path-based operation.
 - One command call runs on one endpoint only. If bytes must cross endpoints, use `transfer_files`.
+- A port forward has a `listen_side` and a `connect_side`; swap them to reverse direction.
 - `list_targets` is inventory, not a live health check. A target with `daemon_info: null` may still be configured and valid.
 - A broker may be configured with `disable_structured_content = true`. When that is enabled, successful structured-result tool calls omit structured content and you must rely on normal text or image content instead. `apply_patch` is text-only either way.
 
@@ -45,6 +49,7 @@ Do not use this skill for ordinary work in your current Codex workspace. `remote
 - Need to edit files on one endpoint with patch text: `apply_patch`
 - Need to inspect an image file that already exists on one endpoint: `view_image`
 - Need to move a file or directory tree between endpoints: `transfer_files`
+- Need to expose or tunnel TCP/UDP ports between endpoints: `forward_ports`
 
 ## First Moves
 
@@ -414,6 +419,69 @@ Example: download a remote log to broker-host `local`:
 }
 ```
 
+### `forward_ports`
+
+Use this whenever TCP or UDP traffic must cross endpoint boundaries.
+
+Open input shape:
+
+```json
+{
+  "action": "open",
+  "listen_side": "local",
+  "connect_side": "builder-a",
+  "forwards": [
+    {
+      "listen_endpoint": "127.0.0.1:5432",
+      "connect_endpoint": "127.0.0.1:5432",
+      "protocol": "tcp"
+    }
+  ]
+}
+```
+
+List input shape:
+
+```json
+{
+  "action": "list",
+  "forward_ids": ["fwd_..."]
+}
+```
+
+Close input shape:
+
+```json
+{
+  "action": "close",
+  "forward_ids": ["fwd_..."]
+}
+```
+
+How to use it:
+
+- `listen_side` is where the listening socket is opened.
+- `connect_side` is where outbound connections or datagrams are sent.
+- Either side may be a configured target or `"local"`.
+- Bare endpoint strings such as `"8080"` mean `"127.0.0.1:8080"`.
+- `listen_endpoint` may use port `0`; read the structured result's `listen_endpoint` for the actual bound port.
+- `connect_endpoint` must use a nonzero port.
+- Non-loopback bind addresses such as `"0.0.0.0:8080"` are allowed.
+- Supported `protocol` values are `tcp` and `udp`.
+- Keep the returned `forward_id`; use it to close the forward explicitly.
+
+Structured result fields:
+
+- `action`
+- `forwards[].forward_id`
+- `forwards[].listen_side`
+- `forwards[].listen_endpoint`
+- `forwards[].connect_side`
+- `forwards[].connect_endpoint`
+- `forwards[].protocol`
+- `forwards[].status`
+- `forwards[].last_error`
+
 ## Standard Workflows
 
 ### Inspect And Edit Remote Code
@@ -460,6 +528,7 @@ Example: download a remote log to broker-host `local`:
 - On C++ daemon targets, `apply_patch` supports both absolute patch paths and paths relative to `workdir`.
 - On C++ daemon targets, `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles.
 - On C++ daemon targets, transfer compression is never used; the broker falls back automatically.
+- On C++ daemon targets, `forward_ports` is unavailable.
 - Do not assume symlink-heavy or special-file transfers work on C++ daemon targets.
 
 ## Common Mistakes
@@ -471,6 +540,8 @@ Example: download a remote log to broker-host `local`:
 - Treating `destination.path` as if it had the same meaning for both single-source and multi-source transfers.
 - Sending non-absolute paths to `transfer_files`.
 - Sending an unsupported `compression` field to `transfer_files`.
+- Leaving `forward_ports` forwards open after they are no longer needed.
+- Reversing `listen_side` and `connect_side` when opening a port forward.
 - Starting an interactive program without `tty: true` and then expecting writable stdin later.
 - Using `write_stdin` after the session has already exited or after a daemon restart.
 - Sending patch text through `exec_command` instead of using `apply_patch`.
@@ -483,4 +554,5 @@ Example: download a remote log to broker-host `local`:
 - Direct file edit on one endpoint: `apply_patch`
 - Existing image inspection on one endpoint: `view_image`
 - Any copy between endpoints: `transfer_files`
+- TCP/UDP forwarding between endpoints: `forward_ports`
 - Need a valid target name or PTY capability first: `list_targets`

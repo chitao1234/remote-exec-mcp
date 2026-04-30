@@ -4,6 +4,7 @@ pub(crate) mod host_path;
 pub mod image;
 pub mod logging;
 pub mod patch;
+pub mod port_forward;
 pub mod server;
 pub mod tls;
 pub mod transfer;
@@ -30,6 +31,7 @@ pub struct AppState {
     pub windows_pty_backend_override: Option<WindowsPtyBackendOverride>,
     pub daemon_instance_id: String,
     pub sessions: exec::store::SessionStore,
+    pub port_forwards: port_forward::PortForwardState,
 }
 
 pub async fn run(config: DaemonConfig) -> Result<()> {
@@ -68,6 +70,7 @@ pub fn build_app_state(mut config: DaemonConfig) -> Result<AppState> {
         windows_pty_backend_override,
         daemon_instance_id: uuid::Uuid::new_v4().to_string(),
         sessions: exec::store::SessionStore::new(64),
+        port_forwards: port_forward::PortForwardState::default(),
     })
 }
 
@@ -86,6 +89,7 @@ pub fn target_info_response(state: &AppState) -> TargetInfoResponse {
         supports_pty: state.supports_pty,
         supports_image_read: true,
         supports_transfer_compression: state.supports_transfer_compression,
+        supports_port_forward: true,
     }
 }
 

@@ -20,6 +20,8 @@ pub struct TargetInfoResponse {
     pub supports_image_read: bool,
     #[serde(default)]
     pub supports_transfer_compression: bool,
+    #[serde(default)]
+    pub supports_port_forward: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -163,6 +165,94 @@ pub struct ImageReadResponse {
     pub image_url: String,
     pub detail: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PortForwardProtocol {
+    Tcp,
+    Udp,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PortListenRequest {
+    pub endpoint: String,
+    pub protocol: PortForwardProtocol,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PortListenResponse {
+    pub bind_id: String,
+    pub endpoint: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PortListenAcceptRequest {
+    pub bind_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PortListenAcceptResponse {
+    pub connection_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PortConnectRequest {
+    pub endpoint: String,
+    pub protocol: PortForwardProtocol,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PortConnectResponse {
+    pub connection_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PortConnectionReadRequest {
+    pub connection_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PortConnectionReadResponse {
+    pub data: String,
+    pub eof: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PortConnectionWriteRequest {
+    pub connection_id: String,
+    pub data: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PortUdpDatagramReadRequest {
+    pub bind_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PortUdpDatagramReadResponse {
+    pub peer: String,
+    pub data: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PortUdpDatagramWriteRequest {
+    pub bind_id: String,
+    pub peer: String,
+    pub data: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PortConnectionCloseRequest {
+    pub connection_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PortListenCloseRequest {
+    pub bind_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EmptyResponse {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RpcErrorBody {

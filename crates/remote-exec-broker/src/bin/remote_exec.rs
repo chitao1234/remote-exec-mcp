@@ -5,8 +5,9 @@ use base64::Engine;
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use remote_exec_broker::client::{Connection, RemoteExecClient, ToolResponse};
 use remote_exec_proto::public::{
-    ApplyPatchInput, ExecCommandInput, ListTargetsInput, TransferEndpoint, TransferFilesInput,
-    TransferOverwrite, ViewImageInput, WriteStdinInput,
+    ApplyPatchInput, ExecCommandInput, ForwardPortProtocol, ForwardPortSpec, ForwardPortsInput,
+    ListTargetsInput, TransferEndpoint, TransferFilesInput, TransferOverwrite, ViewImageInput,
+    WriteStdinInput,
 };
 use tokio::io::AsyncReadExt;
 
@@ -47,6 +48,7 @@ enum Command {
     ApplyPatch(ApplyPatchArgs),
     ViewImage(ViewImageArgs),
     TransferFiles(TransferFilesArgs),
+    ForwardPorts(ForwardPortsArgs),
 }
 
 #[derive(Args, Debug)]
@@ -153,6 +155,49 @@ struct TransferFilesArgs {
     create_parent: bool,
 }
 
+#[derive(Args, Debug)]
+struct ForwardPortsArgs {
+    #[command(subcommand)]
+    action: ForwardPortsActionArgs,
+}
+
+#[derive(Subcommand, Debug)]
+enum ForwardPortsActionArgs {
+    Open(ForwardPortsOpenArgs),
+    List(ForwardPortsListArgs),
+    Close(ForwardPortsCloseArgs),
+}
+
+#[derive(Args, Debug)]
+struct ForwardPortsOpenArgs {
+    #[arg(long)]
+    listen_side: String,
+
+    #[arg(long)]
+    connect_side: String,
+
+    #[arg(long = "forward", required = true)]
+    forwards: Vec<String>,
+}
+
+#[derive(Args, Debug)]
+struct ForwardPortsListArgs {
+    #[arg(long)]
+    listen_side: Option<String>,
+
+    #[arg(long)]
+    connect_side: Option<String>,
+
+    #[arg(long = "forward-id")]
+    forward_ids: Vec<String>,
+}
+
+#[derive(Args, Debug)]
+struct ForwardPortsCloseArgs {
+    #[arg(long = "forward-id", required = true)]
+    forward_ids: Vec<String>,
+}
+
 #[derive(Copy, Clone, Debug, ValueEnum)]
 enum CliTransferOverwrite {
     Fail,
@@ -190,6 +235,7 @@ async fn run_command(
         Command::ApplyPatch(args) => run_apply_patch(client, args, json).await,
         Command::ViewImage(args) => run_view_image(client, args, json).await,
         Command::TransferFiles(args) => run_transfer_files(client, args, json).await,
+        Command::ForwardPorts(args) => run_forward_ports(client, args, json).await,
     }
 }
 
@@ -262,6 +308,17 @@ async fn run_transfer_files(
     emit_and_status(&response, json)
 }
 
+async fn run_forward_ports(
+    client: &RemoteExecClient,
+    args: ForwardPortsArgs,
+    json: bool,
+) -> anyhow::Result<i32> {
+    let response = client
+        .call_tool("forward_ports", &forward_ports_input(args)?)
+        .await?;
+    emit_and_status(&response, json)
+}
+
 fn exec_command_input(args: ExecCommandArgs) -> ExecCommandInput {
     ExecCommandInput {
         target: args.target,
@@ -319,6 +376,28 @@ fn transfer_files_input(args: TransferFilesArgs) -> anyhow::Result<TransferFiles
         destination: parse_transfer_endpoint(&args.destination)?,
         overwrite: args.overwrite.into(),
         create_parent: args.create_parent,
+    })
+}
+
+fn forward_ports_input(args: ForwardPortsArgs) -> anyhow::Result<ForwardPortsInput> {
+    Ok(match args.action {
+        ForwardPortsActionArgs::Open(args) => ForwardPortsInput::Open {
+            listen_side: args.listen_side,
+            connect_side: args.connect_side,
+            forwards: args
+                .forwards
+                .iter()
+                .map(|value| parse_forward_spec(value))
+                .collect::<anyhow::Result<Vec<_>>>()?,
+        },
+        ForwardPortsActionArgs::List(args) => ForwardPortsInput::List {
+            listen_side: args.listen_side,
+            connect_side: args.connect_side,
+            forward_ids: args.forward_ids,
+        },
+        ForwardPortsActionArgs::Close(args) => ForwardPortsInput::Close {
+            forward_ids: args.forward_ids,
+        },
     })
 }
 
@@ -390,6 +469,34 @@ fn parse_transfer_endpoint(value: &str) -> anyhow::Result<TransferEndpoint> {
     Ok(TransferEndpoint {
         target: target.to_string(),
         path: path.to_string(),
+    })
+}
+
+fn parse_forward_spec(value: &str) -> anyhow::Result<ForwardPortSpec> {
+    let (protocol, endpoints) = value.split_once(':').with_context(|| {
+        format!("invalid forward `{value}`; expected <protocol>:<listen>=<connect>")
+    })?;
+    let (listen_endpoint, connect_endpoint) = endpoints.split_once('=').with_context(|| {
+        format!("invalid forward `{value}`; expected <protocol>:<listen>=<connect>")
+    })?;
+    let protocol = match protocol {
+        "tcp" => ForwardPortProtocol::Tcp,
+        "udp" => ForwardPortProtocol::Udp,
+        other => anyhow::bail!("unsupported forward protocol `{other}`"),
+    };
+    anyhow::ensure!(
+        !listen_endpoint.is_empty(),
+        "forward listen endpoint must not be empty"
+    );
+    anyhow::ensure!(
+        !connect_endpoint.is_empty(),
+        "forward connect endpoint must not be empty"
+    );
+
+    Ok(ForwardPortSpec {
+        listen_endpoint: listen_endpoint.to_string(),
+        connect_endpoint: connect_endpoint.to_string(),
+        protocol,
     })
 }
 

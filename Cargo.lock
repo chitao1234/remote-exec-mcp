@@ -1653,6 +1653,7 @@ dependencies = [
 name = "remote-exec-proto"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "schemars",
  "serde",
  "serde_json",

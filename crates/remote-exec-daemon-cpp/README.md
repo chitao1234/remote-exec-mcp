@@ -128,6 +128,7 @@ default_workdir = /work
 - PTY support is POSIX-only and depends on host PTY allocation
 - no PTY support in Windows XP-compatible builds
 - no image support
+- no `forward_ports` support
 - transfer compression is not supported
 - `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles
 - transfer payloads use GNU tar for files and directories

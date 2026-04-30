@@ -334,6 +334,40 @@ pub async fn spawn_broker_config_with_stub_daemon() -> BrokerConfigFixture {
     }
 }
 
+pub async fn spawn_broker_config_local_only() -> BrokerConfigFixture {
+    let tempdir = tempfile::tempdir().unwrap();
+    let broker_config = tempdir.path().join("broker.toml");
+    let local_workdir = tempdir.path().join("local-work");
+    tokio::fs::create_dir(&local_workdir).await.unwrap();
+    write_broker_config(
+        &broker_config,
+        &[],
+        Some(&LocalBrokerConfig {
+            default_workdir: &local_workdir,
+            experimental_apply_patch_target_encoding_autodetect: false,
+            extra_config: Some("pty = \"none\""),
+        }),
+        None,
+        None,
+    );
+
+    BrokerConfigFixture {
+        _tempdir: tempdir,
+        config_path: broker_config,
+        _stub_state: stub_daemon_state("unused", ExecWriteBehavior::Success, "linux", true),
+    }
+}
+
+pub async fn spawn_broker_local_only() -> BrokerFixture {
+    let fixture = spawn_broker_config_local_only().await;
+    let client = spawn_broker_child(&fixture.config_path).await;
+    BrokerFixture {
+        _tempdir: fixture._tempdir,
+        client,
+        stub_state: fixture._stub_state,
+    }
+}
+
 pub async fn spawn_streamable_http_broker_with_stub_daemon() -> HttpBrokerFixture {
     let tempdir = tempfile::tempdir().unwrap();
     let (daemon_addr, stub_state) = spawn_plain_http_stub_daemon().await;

@@ -351,6 +351,7 @@ pub(super) async fn spawn_named_daemon_on_addr(
         windows_pty_backend_override: None,
         daemon_instance_id: "daemon-instance-1".to_string(),
         sessions: remote_exec_daemon::exec::store::SessionStore::default(),
+        port_forwards: remote_exec_daemon::port_forward::PortForwardState::default(),
     };
 
     tokio::spawn(async move {
@@ -451,6 +452,7 @@ async fn target_info(State(state): State<StubDaemonState>) -> Json<TargetInfoRes
         supports_pty: state.target_supports_pty,
         supports_image_read: true,
         supports_transfer_compression: state.target_supports_transfer_compression,
+        supports_port_forward: false,
     })
 }
 

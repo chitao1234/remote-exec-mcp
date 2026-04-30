@@ -99,7 +99,7 @@ async fn list_targets_returns_cached_daemon_info_and_null_for_unavailable_target
 
     assert_eq!(
         result.text_output,
-        "Configured targets:\n- builder-a: linux/x86_64, host=builder-a-host, version=0.1.0, pty=yes\n- builder-b"
+        "Configured targets:\n- builder-a: linux/x86_64, host=builder-a-host, version=0.1.0, pty=yes, forward_ports=no\n- builder-b"
     );
     assert_eq!(
         result.structured_content,
@@ -112,7 +112,8 @@ async fn list_targets_returns_cached_daemon_info_and_null_for_unavailable_target
                         "hostname": "builder-a-host",
                         "platform": "linux",
                         "arch": "x86_64",
-                        "supports_pty": true
+                        "supports_pty": true,
+                        "supports_port_forward": false
                     }
                 },
                 {
@@ -134,7 +135,7 @@ async fn list_targets_omits_structured_content_when_broker_disables_it() {
 
     assert_eq!(
         result.text_output,
-        "Configured targets:\n- builder-a: linux/x86_64, host=builder-a-host, version=0.1.0, pty=yes"
+        "Configured targets:\n- builder-a: linux/x86_64, host=builder-a-host, version=0.1.0, pty=yes, forward_ports=no"
     );
     assert_eq!(result.structured_content, serde_json::Value::Null);
 }
@@ -148,7 +149,7 @@ async fn list_targets_formats_windows_metadata_and_truthful_pty_support() {
 
     assert_eq!(
         result.text_output,
-        "Configured targets:\n- builder-a: windows/x86_64, host=builder-a-host, version=0.1.0, pty=no"
+        "Configured targets:\n- builder-a: windows/x86_64, host=builder-a-host, version=0.1.0, pty=no, forward_ports=no"
     );
 }
 

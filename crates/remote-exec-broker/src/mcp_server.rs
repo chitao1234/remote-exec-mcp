@@ -149,6 +149,18 @@ impl BrokerServer {
     ) -> Result<CallToolResult, McpError> {
         Ok(self.finish_tool_call(crate::tools::transfer::transfer_files(&self.state, input).await))
     }
+
+    #[tool(
+        name = "forward_ports",
+        description = "Open, list, or close TCP/UDP port forwards between broker-local and configured target machines."
+    )]
+    async fn forward_ports(
+        &self,
+        Parameters(input): Parameters<remote_exec_proto::public::ForwardPortsInput>,
+    ) -> Result<CallToolResult, McpError> {
+        Ok(self
+            .finish_tool_call(crate::tools::port_forward::forward_ports(&self.state, input).await))
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
