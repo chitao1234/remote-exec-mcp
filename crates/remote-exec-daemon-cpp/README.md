@@ -15,6 +15,9 @@ implementation detail, not the current contract.
 
 ## Build
 
+Build outputs are written to this directory's `build/` tree even when `make` is
+invoked from another working directory.
+
 POSIX daemon:
 
 - `make all-posix`
