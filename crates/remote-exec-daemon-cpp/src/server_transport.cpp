@@ -23,8 +23,6 @@
 #include "http_request.h"
 #include "server_transport.h"
 
-namespace {
-
 void close_socket(SOCKET socket) {
 #ifdef _WIN32
     closesocket(socket);
@@ -59,6 +57,8 @@ bool would_block_error(int error) {
     return error == EAGAIN || error == EWOULDBLOCK;
 #endif
 }
+
+namespace {
 
 std::size_t parse_content_length_value(const std::string& raw) {
     if (raw.empty()) {

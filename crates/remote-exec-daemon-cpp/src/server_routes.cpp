@@ -6,6 +6,7 @@
 #include "logging.h"
 #include "patch_engine.h"
 #include "platform.h"
+#include "port_forward.h"
 #include "process_session.h"
 #include "server_routes.h"
 #include "transfer_ops.h"
@@ -104,9 +105,274 @@ HttpResponse handle_target_info(const AppState& state) {
             {"supports_pty", process_session_supports_pty()},
             {"supports_image_read", false},
             {"supports_transfer_compression", false},
-            {"supports_port_forward", false},
+            {"supports_port_forward", true},
         }
     );
+    return response;
+}
+
+HttpResponse handle_port_listen(AppState& state, const HttpRequest& request) {
+    HttpResponse response;
+    response.status = 200;
+
+    try {
+        const Json body = parse_json_body(request);
+        write_json(
+            response,
+            state.port_forwards.listen(
+                body.at("endpoint").get<std::string>(),
+                body.at("protocol").get<std::string>()
+            )
+        );
+    } catch (const PortForwardError& ex) {
+        log_message(LOG_WARN, "server", std::string("port/listen failed: ") + ex.what());
+        write_rpc_error(response, ex.status(), ex.code(), ex.what());
+    } catch (const Json::exception& ex) {
+        log_message(LOG_WARN, "server", std::string("port/listen bad request: ") + ex.what());
+        write_rpc_error(response, 400, "bad_request", ex.what());
+    } catch (const std::exception& ex) {
+        log_message(LOG_ERROR, "server", std::string("port/listen failed: ") + ex.what());
+        write_rpc_error(response, 500, "internal_error", ex.what());
+    }
+
+    return response;
+}
+
+HttpResponse handle_port_listen_accept(AppState& state, const HttpRequest& request) {
+    HttpResponse response;
+    response.status = 200;
+
+    try {
+        const Json body = parse_json_body(request);
+        write_json(
+            response,
+            state.port_forwards.listen_accept(body.at("bind_id").get<std::string>())
+        );
+    } catch (const PortForwardError& ex) {
+        log_message(LOG_WARN, "server", std::string("port/listen/accept failed: ") + ex.what());
+        write_rpc_error(response, ex.status(), ex.code(), ex.what());
+    } catch (const Json::exception& ex) {
+        log_message(
+            LOG_WARN,
+            "server",
+            std::string("port/listen/accept bad request: ") + ex.what()
+        );
+        write_rpc_error(response, 400, "bad_request", ex.what());
+    } catch (const std::exception& ex) {
+        log_message(LOG_ERROR, "server", std::string("port/listen/accept failed: ") + ex.what());
+        write_rpc_error(response, 500, "internal_error", ex.what());
+    }
+
+    return response;
+}
+
+HttpResponse handle_port_listen_close(AppState& state, const HttpRequest& request) {
+    HttpResponse response;
+    response.status = 200;
+
+    try {
+        const Json body = parse_json_body(request);
+        write_json(
+            response,
+            state.port_forwards.listen_close(body.at("bind_id").get<std::string>())
+        );
+    } catch (const PortForwardError& ex) {
+        log_message(LOG_WARN, "server", std::string("port/listen/close failed: ") + ex.what());
+        write_rpc_error(response, ex.status(), ex.code(), ex.what());
+    } catch (const Json::exception& ex) {
+        log_message(
+            LOG_WARN,
+            "server",
+            std::string("port/listen/close bad request: ") + ex.what()
+        );
+        write_rpc_error(response, 400, "bad_request", ex.what());
+    } catch (const std::exception& ex) {
+        log_message(LOG_ERROR, "server", std::string("port/listen/close failed: ") + ex.what());
+        write_rpc_error(response, 500, "internal_error", ex.what());
+    }
+
+    return response;
+}
+
+HttpResponse handle_port_connect(AppState& state, const HttpRequest& request) {
+    HttpResponse response;
+    response.status = 200;
+
+    try {
+        const Json body = parse_json_body(request);
+        write_json(
+            response,
+            state.port_forwards.connect(
+                body.at("endpoint").get<std::string>(),
+                body.at("protocol").get<std::string>()
+            )
+        );
+    } catch (const PortForwardError& ex) {
+        log_message(LOG_WARN, "server", std::string("port/connect failed: ") + ex.what());
+        write_rpc_error(response, ex.status(), ex.code(), ex.what());
+    } catch (const Json::exception& ex) {
+        log_message(LOG_WARN, "server", std::string("port/connect bad request: ") + ex.what());
+        write_rpc_error(response, 400, "bad_request", ex.what());
+    } catch (const std::exception& ex) {
+        log_message(LOG_ERROR, "server", std::string("port/connect failed: ") + ex.what());
+        write_rpc_error(response, 500, "internal_error", ex.what());
+    }
+
+    return response;
+}
+
+HttpResponse handle_port_connection_read(AppState& state, const HttpRequest& request) {
+    HttpResponse response;
+    response.status = 200;
+
+    try {
+        const Json body = parse_json_body(request);
+        write_json(
+            response,
+            state.port_forwards.connection_read(
+                body.at("connection_id").get<std::string>()
+            )
+        );
+    } catch (const PortForwardError& ex) {
+        log_message(LOG_WARN, "server", std::string("port/connection/read failed: ") + ex.what());
+        write_rpc_error(response, ex.status(), ex.code(), ex.what());
+    } catch (const Json::exception& ex) {
+        log_message(
+            LOG_WARN,
+            "server",
+            std::string("port/connection/read bad request: ") + ex.what()
+        );
+        write_rpc_error(response, 400, "bad_request", ex.what());
+    } catch (const std::exception& ex) {
+        log_message(
+            LOG_ERROR,
+            "server",
+            std::string("port/connection/read failed: ") + ex.what()
+        );
+        write_rpc_error(response, 500, "internal_error", ex.what());
+    }
+
+    return response;
+}
+
+HttpResponse handle_port_connection_write(AppState& state, const HttpRequest& request) {
+    HttpResponse response;
+    response.status = 200;
+
+    try {
+        const Json body = parse_json_body(request);
+        write_json(
+            response,
+            state.port_forwards.connection_write(
+                body.at("connection_id").get<std::string>(),
+                body.at("data").get<std::string>()
+            )
+        );
+    } catch (const PortForwardError& ex) {
+        log_message(LOG_WARN, "server", std::string("port/connection/write failed: ") + ex.what());
+        write_rpc_error(response, ex.status(), ex.code(), ex.what());
+    } catch (const Json::exception& ex) {
+        log_message(
+            LOG_WARN,
+            "server",
+            std::string("port/connection/write bad request: ") + ex.what()
+        );
+        write_rpc_error(response, 400, "bad_request", ex.what());
+    } catch (const std::exception& ex) {
+        log_message(
+            LOG_ERROR,
+            "server",
+            std::string("port/connection/write failed: ") + ex.what()
+        );
+        write_rpc_error(response, 500, "internal_error", ex.what());
+    }
+
+    return response;
+}
+
+HttpResponse handle_port_connection_close(AppState& state, const HttpRequest& request) {
+    HttpResponse response;
+    response.status = 200;
+
+    try {
+        const Json body = parse_json_body(request);
+        write_json(
+            response,
+            state.port_forwards.connection_close(
+                body.at("connection_id").get<std::string>()
+            )
+        );
+    } catch (const PortForwardError& ex) {
+        log_message(LOG_WARN, "server", std::string("port/connection/close failed: ") + ex.what());
+        write_rpc_error(response, ex.status(), ex.code(), ex.what());
+    } catch (const Json::exception& ex) {
+        log_message(
+            LOG_WARN,
+            "server",
+            std::string("port/connection/close bad request: ") + ex.what()
+        );
+        write_rpc_error(response, 400, "bad_request", ex.what());
+    } catch (const std::exception& ex) {
+        log_message(
+            LOG_ERROR,
+            "server",
+            std::string("port/connection/close failed: ") + ex.what()
+        );
+        write_rpc_error(response, 500, "internal_error", ex.what());
+    }
+
+    return response;
+}
+
+HttpResponse handle_port_udp_read(AppState& state, const HttpRequest& request) {
+    HttpResponse response;
+    response.status = 200;
+
+    try {
+        const Json body = parse_json_body(request);
+        write_json(
+            response,
+            state.port_forwards.udp_datagram_read(body.at("bind_id").get<std::string>())
+        );
+    } catch (const PortForwardError& ex) {
+        log_message(LOG_WARN, "server", std::string("port/udp/read failed: ") + ex.what());
+        write_rpc_error(response, ex.status(), ex.code(), ex.what());
+    } catch (const Json::exception& ex) {
+        log_message(LOG_WARN, "server", std::string("port/udp/read bad request: ") + ex.what());
+        write_rpc_error(response, 400, "bad_request", ex.what());
+    } catch (const std::exception& ex) {
+        log_message(LOG_ERROR, "server", std::string("port/udp/read failed: ") + ex.what());
+        write_rpc_error(response, 500, "internal_error", ex.what());
+    }
+
+    return response;
+}
+
+HttpResponse handle_port_udp_write(AppState& state, const HttpRequest& request) {
+    HttpResponse response;
+    response.status = 200;
+
+    try {
+        const Json body = parse_json_body(request);
+        write_json(
+            response,
+            state.port_forwards.udp_datagram_write(
+                body.at("bind_id").get<std::string>(),
+                body.at("peer").get<std::string>(),
+                body.at("data").get<std::string>()
+            )
+        );
+    } catch (const PortForwardError& ex) {
+        log_message(LOG_WARN, "server", std::string("port/udp/write failed: ") + ex.what());
+        write_rpc_error(response, ex.status(), ex.code(), ex.what());
+    } catch (const Json::exception& ex) {
+        log_message(LOG_WARN, "server", std::string("port/udp/write bad request: ") + ex.what());
+        write_rpc_error(response, 400, "bad_request", ex.what());
+    } catch (const std::exception& ex) {
+        log_message(LOG_ERROR, "server", std::string("port/udp/write failed: ") + ex.what());
+        write_rpc_error(response, 500, "internal_error", ex.what());
+    }
+
     return response;
 }
 
@@ -363,12 +629,40 @@ HttpResponse route_request(AppState& state, const HttpRequest& request) {
         );
     }
 
-    if (request.path.find("/v1/port/") == 0) {
-        return make_rpc_error_response(
-            400,
-            "port_forward_unsupported",
-            "port forwarding is not supported on this target"
-        );
+    if (request.path == "/v1/port/listen") {
+        return handle_port_listen(state, request);
+    }
+
+    if (request.path == "/v1/port/listen/accept") {
+        return handle_port_listen_accept(state, request);
+    }
+
+    if (request.path == "/v1/port/listen/close") {
+        return handle_port_listen_close(state, request);
+    }
+
+    if (request.path == "/v1/port/connect") {
+        return handle_port_connect(state, request);
+    }
+
+    if (request.path == "/v1/port/connection/read") {
+        return handle_port_connection_read(state, request);
+    }
+
+    if (request.path == "/v1/port/connection/write") {
+        return handle_port_connection_write(state, request);
+    }
+
+    if (request.path == "/v1/port/connection/close") {
+        return handle_port_connection_close(state, request);
+    }
+
+    if (request.path == "/v1/port/udp/read") {
+        return handle_port_udp_read(state, request);
+    }
+
+    if (request.path == "/v1/port/udp/write") {
+        return handle_port_udp_write(state, request);
     }
 
     if (request.path == "/v1/exec/start") {

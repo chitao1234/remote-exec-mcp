@@ -168,6 +168,7 @@ LiveSession::~LiveSession() {}
 SessionStore::SessionStore() {}
 
 SessionStore::~SessionStore() {
+    BasicLockGuard lock(mutex_);
     for (std::map<std::string, std::shared_ptr<LiveSession> >::iterator it = sessions_.begin();
          it != sessions_.end();
          ++it) {
@@ -189,6 +190,7 @@ Json SessionStore::start_command(
     const YieldTimeConfig& yield_time,
     unsigned long max_open_sessions
 ) {
+    BasicLockGuard lock(mutex_);
     if (sessions_.size() >= max_open_sessions) {
         throw SessionLimitError("too many open exec sessions");
     }
@@ -257,6 +259,7 @@ Json SessionStore::write_stdin(
     unsigned long max_output_tokens,
     const YieldTimeConfig& yield_time
 ) {
+    BasicLockGuard lock(mutex_);
     std::map<std::string, std::shared_ptr<LiveSession> >::iterator it =
         sessions_.find(daemon_session_id);
     if (it == sessions_.end()) {

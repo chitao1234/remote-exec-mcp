@@ -28,9 +28,8 @@ Everything under `docs/` is historical implementation detail and planning contex
   - Executes commands, manages local sessions, applies patches, reads images, serves transfer archives, and provides broker-controlled port-forward socket primitives.
 - `remote-exec-daemon-cpp`
   - Standalone C++ daemon over plain HTTP, with native POSIX and Windows XP-compatible build paths.
-  - Supports `exec_command`, `write_stdin`, `apply_patch`, and `transfer_files` for files, directories, and broker-built multi-source bundles.
+  - Supports `exec_command`, `write_stdin`, `apply_patch`, `transfer_files` for files/directories/broker-built multi-source bundles, and `forward_ports`.
   - Supports POSIX PTY sessions when the host can allocate a PTY; Windows XP-compatible PTY sessions and image reads remain unsupported.
-  - Does not support `forward_ports`.
   - Intentionally closes stdin for POSIX non-PTY exec, while keeping Windows XP-compatible non-PTY stdin open for original-daemon compatibility.
 - `remote-exec-proto`
   - Shared public tool schemas and broker-daemon RPC types.

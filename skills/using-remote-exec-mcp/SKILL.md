@@ -528,7 +528,7 @@ Structured result fields:
 - On C++ daemon targets, `apply_patch` supports both absolute patch paths and paths relative to `workdir`.
 - On C++ daemon targets, `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles.
 - On C++ daemon targets, transfer compression is never used; the broker falls back automatically.
-- On C++ daemon targets, `forward_ports` is unavailable.
+- On C++ daemon targets, `forward_ports` is available through the same broker-owned `forward_id` lifecycle.
 - Do not assume symlink-heavy or special-file transfers work on C++ daemon targets.
 
 ## Common Mistakes

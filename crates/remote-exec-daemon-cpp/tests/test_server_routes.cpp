@@ -5,6 +5,7 @@
 #include "config.h"
 #include "http_helpers.h"
 #include "platform.h"
+#include "port_forward.h"
 #include "process_session.h"
 #include "server_routes.h"
 
@@ -33,13 +34,11 @@ static DaemonConfig make_config(const fs::path& root) {
     return config;
 }
 
-static AppState make_state(const fs::path& root) {
-    AppState state;
+static void initialize_state(AppState& state, const fs::path& root) {
     state.config = make_config(root);
     state.daemon_instance_id = "test-instance";
     state.hostname = "test-host";
     state.default_shell = platform::resolve_default_shell("");
-    return state;
 }
 
 static HttpRequest json_request(const std::string& path, const Json& body) {
@@ -64,7 +63,8 @@ static std::string normalize_output(const std::string& input) {
 
 int main() {
     const fs::path root = make_test_root();
-    AppState state = make_state(root);
+    AppState state;
+    initialize_state(state, root);
 
     HttpRequest info_request;
     info_request.method = "POST";
@@ -74,6 +74,59 @@ int main() {
     const Json info = Json::parse(info_response.body);
     assert(info.at("target").get<std::string>() == "cpp-test");
     assert(info.at("supports_pty").get<bool>() == process_session_supports_pty());
+    assert(info.at("supports_port_forward").get<bool>());
+
+    assert(normalize_port_forward_endpoint("8080") == "127.0.0.1:8080");
+    assert(base64_decode_bytes(base64_encode_bytes(std::string("hello\0world", 11))).size() == 11);
+
+    const HttpResponse listen_response = route_request(
+        state,
+        json_request(
+            "/v1/port/listen",
+            Json{{"endpoint", "127.0.0.1:0"}, {"protocol", "tcp"}}
+        )
+    );
+    assert(listen_response.status == 200);
+    const Json listen = Json::parse(listen_response.body);
+    assert(listen.at("bind_id").get<std::string>().find("bind_") == 0);
+    assert(listen.at("endpoint").get<std::string>().find("127.0.0.1:") == 0);
+
+    const HttpResponse close_response = route_request(
+        state,
+        json_request(
+            "/v1/port/listen/close",
+            Json{{"bind_id", listen.at("bind_id").get<std::string>()}}
+        )
+    );
+    assert(close_response.status == 200);
+
+    const HttpResponse zero_connect_response = route_request(
+        state,
+        json_request(
+            "/v1/port/connect",
+            Json{{"endpoint", "127.0.0.1:0"}, {"protocol", "tcp"}}
+        )
+    );
+    assert(zero_connect_response.status == 400);
+    assert(Json::parse(zero_connect_response.body).at("code").get<std::string>() == "invalid_endpoint");
+
+    const HttpResponse udp_listen_response = route_request(
+        state,
+        json_request(
+            "/v1/port/listen",
+            Json{{"endpoint", "127.0.0.1:0"}, {"protocol", "udp"}}
+        )
+    );
+    assert(udp_listen_response.status == 200);
+    const Json udp_listen = Json::parse(udp_listen_response.body);
+    const HttpResponse udp_close_response = route_request(
+        state,
+        json_request(
+            "/v1/port/listen/close",
+            Json{{"bind_id", udp_listen.at("bind_id").get<std::string>()}}
+        )
+    );
+    assert(udp_close_response.status == 200);
 
     const HttpResponse compression_response = route_request(
         state,
