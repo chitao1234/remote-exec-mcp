@@ -4,6 +4,7 @@ use axum::Json;
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
     PatchApplyRequest, PatchApplyResponse, RpcErrorBody, TargetInfoResponse,
+    TransferPathInfoRequest, TransferPathInfoResponse,
 };
 
 use crate::daemon_client::DaemonClientError;
@@ -64,6 +65,23 @@ impl LocalDaemonClient {
         remote_exec_daemon::image::read_image_local(self.state.clone(), req.clone())
             .await
             .map_err(map_local_rpc_error)
+    }
+
+    pub async fn transfer_path_info(
+        &self,
+        req: &TransferPathInfoRequest,
+    ) -> Result<TransferPathInfoResponse, DaemonClientError> {
+        remote_exec_daemon::transfer::path_info_for_request(&self.state, req)
+            .map_err(map_local_error)
+    }
+}
+
+fn map_local_error(err: anyhow::Error) -> DaemonClientError {
+    let (status, Json(body)) = remote_exec_daemon::transfer::map_transfer_error(err);
+    DaemonClientError::Rpc {
+        status: reqwest::StatusCode::from_u16(status.as_u16()).expect("valid status code"),
+        code: Some(body.code),
+        message: body.message,
     }
 }
 

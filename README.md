@@ -370,12 +370,13 @@ cargo fmt --all --check
 - Targets that are unavailable at broker startup are verified before the first forwarded call.
 - `transfer_files` uses broker-mediated copy for `local -> remote`, `remote -> local`, `remote -> remote`, and `local -> local`.
 - Internal transfer transport uses GNU tar for both files and directories. Single-file transfers use one fixed archive entry named `.remote-exec-file`.
-- `transfer_files` accepts either a single `source` or a `sources` array. Multi-source transfers treat `destination.path` as a directory root and place each source under its basename.
+- `transfer_files` accepts either a single `source` or a `sources` array. The optional `destination_mode` defaults to `auto`: single-source transfers behave like `cp` by copying under `destination.path` when it is an existing directory or ends in a path separator, otherwise using it as the exact final path; multi-source transfers use it as a directory root and place each source under its basename. Use `destination_mode = "into_directory"` to copy under `destination.path` by basename, or `destination_mode = "exact"` to force exact-path semantics.
+- `transfer_files` `overwrite` defaults to `merge`. `fail` rejects any existing destination, `merge` overlays files into an existing compatible file or directory without deleting unrelated directory entries, and `replace` removes the existing destination before importing.
 - `transfer_files` does not expose a public compression option. The broker automatically uses `zstd` for internal transfer staging only when its own config and every participating remote daemon support it, and otherwise falls back to uncompressed staging.
 - When structured content is enabled, `transfer_files` structured results always include `sources`; the legacy `source` field is only populated for single-source transfers.
 - Broker and daemon configs each support `enable_transfer_compression = false` to force internal transfer staging to stay uncompressed.
 - Broker `[local]` config enables `target: "local"` for `exec_command`, `write_stdin`, `apply_patch`, and `view_image` on the broker host.
-- `transfer_files` treats `destination.path` as the exact final path to create or replace for single-source transfers; it does not infer basenames or copy "into" an existing directory in that mode.
+- `transfer_files` structured results include both the requested `destination` and the broker-computed `resolved_destination`.
 - `write_stdin` only invalidates sessions when the daemon restarted or explicitly reports `unknown_session`.
 - `max_output_tokens` is enforced by the daemon for command output.
 - Non-TTY `exec_command` output on both the main daemon and `remote-exec-daemon-cpp` merges `stdout` and `stderr` through one pipe so the single public `output` field preserves their emitted order.

@@ -121,6 +121,7 @@ pub enum TransferSourceType {
 #[serde(rename_all = "snake_case")]
 pub enum TransferOverwriteMode {
     Fail,
+    Merge,
     Replace,
 }
 
@@ -129,6 +130,17 @@ pub struct TransferExportRequest {
     pub path: String,
     #[serde(default, skip_serializing_if = "TransferCompression::is_none")]
     pub compression: TransferCompression,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TransferPathInfoRequest {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TransferPathInfoResponse {
+    pub exists: bool,
+    pub is_directory: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

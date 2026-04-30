@@ -28,11 +28,11 @@ pub struct BundledArchiveSource {
     pub archive_path: PathBuf,
 }
 
-fn host_policy() -> PathPolicy {
+pub(crate) fn host_policy() -> PathPolicy {
     host_path::host_path_policy()
 }
 
-fn host_path(raw: &str, windows_posix_root: Option<&Path>) -> anyhow::Result<PathBuf> {
+pub(crate) fn host_path(raw: &str, windows_posix_root: Option<&Path>) -> anyhow::Result<PathBuf> {
     host_path::resolve_absolute_input_path(raw, windows_posix_root)
         .ok_or_else(|| anyhow::anyhow!("transfer path `{raw}` is not absolute"))
 }

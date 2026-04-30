@@ -61,6 +61,10 @@ async fn prepare_destination(
                     destination.display()
                 );
             }
+            TransferOverwriteMode::Merge => {
+                ensure_merge_destination_is_compatible(destination, &metadata, request)?;
+                Ok(false)
+            }
             TransferOverwriteMode::Replace => {
                 if metadata.is_dir() {
                     tokio::fs::remove_dir_all(destination).await?;
@@ -73,6 +77,37 @@ async fn prepare_destination(
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(err) => Err(err.into()),
     }
+}
+
+fn ensure_merge_destination_is_compatible(
+    destination: &Path,
+    metadata: &std::fs::Metadata,
+    request: &TransferImportRequest,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        !metadata.file_type().is_symlink(),
+        "destination path contains unsupported symlink `{}`",
+        destination.display()
+    );
+
+    match request.source_type {
+        TransferSourceType::File => {
+            anyhow::ensure!(
+                !metadata.is_dir(),
+                "destination path `{}` is a directory",
+                destination.display()
+            );
+        }
+        TransferSourceType::Directory | TransferSourceType::Multiple => {
+            anyhow::ensure!(
+                metadata.is_dir(),
+                "destination path `{}` is not a directory",
+                destination.display()
+            );
+        }
+    }
+
+    Ok(())
 }
 
 fn extract_archive(
@@ -161,6 +196,7 @@ fn extract_tree_archive_entry<R: Read>(
     let out = destination_path.join(&rel);
     let entry_type = entry.header().entry_type();
     ensure_supported_archive_entry_type(entry_type, &raw_rel)?;
+    ensure_no_existing_symlink_in_path(destination_path, &out)?;
 
     if entry_type.is_dir() {
         std::fs::create_dir_all(&out)?;
@@ -174,6 +210,7 @@ fn extract_tree_archive_entry<R: Read>(
 }
 
 fn write_archive_file<R: Read>(entry: &mut tar::Entry<R>, path: &Path) -> anyhow::Result<u64> {
+    ensure_not_existing_symlink(path)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -183,6 +220,36 @@ fn write_archive_file<R: Read>(entry: &mut tar::Entry<R>, path: &Path) -> anyhow
     std::fs::write(path, &bytes)?;
     restore_executable_bits(path, entry.header().mode()?)?;
     Ok(bytes.len() as u64)
+}
+
+fn ensure_no_existing_symlink_in_path(root: &Path, path: &Path) -> anyhow::Result<()> {
+    ensure_not_existing_symlink(root)?;
+    let Ok(relative) = path.strip_prefix(root) else {
+        ensure_not_existing_symlink(path)?;
+        return Ok(());
+    };
+
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        current.push(component);
+        ensure_not_existing_symlink(&current)?;
+    }
+
+    Ok(())
+}
+
+fn ensure_not_existing_symlink(path: &Path) -> anyhow::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => anyhow::ensure!(
+            !metadata.file_type().is_symlink(),
+            "destination path contains unsupported symlink `{}`",
+            path.display()
+        ),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err.into()),
+    }
+
+    Ok(())
 }
 
 #[cfg(unix)]

@@ -157,6 +157,12 @@ void ensure_parent_directory(const std::string& path, bool create_parent) {
     make_directory_if_missing(parent);
 }
 
+void ensure_not_existing_symlink(const std::string& path) {
+    if (path_exists(path) && is_symlink_path(path)) {
+        throw std::runtime_error("destination path contains unsupported symlink");
+    }
+}
+
 std::string read_binary_file(const std::string& path) {
     std::ifstream input(path.c_str(), std::ios::binary);
     if (!input) {
@@ -275,21 +281,43 @@ void remove_existing_path(const std::string& path) {
 
 bool prepare_destination_path(
     const std::string& absolute_path,
-    bool replace_existing,
+    const std::string& source_type,
+    const std::string& overwrite_mode,
     bool create_parent
 ) {
     const bool existed = path_exists(absolute_path);
-    if (existed && !replace_existing) {
+    if (overwrite_mode != "fail" && overwrite_mode != "merge" && overwrite_mode != "replace") {
+        throw std::runtime_error("unsupported transfer overwrite mode");
+    }
+    if (existed && overwrite_mode == "fail") {
         throw std::runtime_error("destination path already exists");
     }
 
     ensure_parent_directory(absolute_path, create_parent);
 
-    if (existed) {
+    if (existed && overwrite_mode == "merge") {
+        ensure_not_existing_symlink(absolute_path);
+        if (source_type == "file") {
+            if (is_directory(absolute_path)) {
+                throw std::runtime_error("destination path is a directory");
+            }
+            if (!is_regular_file(absolute_path)) {
+                throw std::runtime_error("destination path is not a regular file");
+            }
+        } else if (source_type == "directory" || source_type == "multiple") {
+            if (!is_directory(absolute_path)) {
+                throw std::runtime_error("destination path is not a directory");
+            }
+        } else {
+            throw std::runtime_error("unsupported transfer source type");
+        }
+    }
+
+    if (existed && overwrite_mode == "replace") {
         remove_existing_path(absolute_path);
     }
 
-    return existed;
+    return existed && overwrite_mode == "replace";
 }
 
 void write_string_field(std::string* header, std::size_t offset, std::size_t width, const std::string& value) {
@@ -595,6 +623,23 @@ std::string materialize_archive_path(
     return path;
 }
 
+void ensure_no_existing_symlink_in_path(
+    const std::string& destination_root,
+    const std::string& relative_archive_path
+) {
+    ensure_not_existing_symlink(destination_root);
+    if (relative_archive_path == ".") {
+        return;
+    }
+
+    const std::vector<std::string> parts = split_archive_path(relative_archive_path);
+    std::string path = destination_root;
+    for (std::size_t i = 0; i < parts.size(); ++i) {
+        path = join_path(path, parts[i]);
+        ensure_not_existing_symlink(path);
+    }
+}
+
 ExportedPayload export_directory_as_tar(const std::string& absolute_path) {
     std::string archive;
     append_directory_entry(&archive, ".");
@@ -625,10 +670,11 @@ void ensure_zero_archive_tail(const std::string& archive, std::size_t offset) {
 ImportSummary import_file_from_tar(
     const std::string& archive,
     const std::string& absolute_path,
-    bool replace_existing,
+    const std::string& overwrite_mode,
     bool create_parent
 ) {
-    const bool existed = prepare_destination_path(absolute_path, replace_existing, create_parent);
+    const bool replaced = prepare_destination_path(absolute_path, "file", overwrite_mode, create_parent);
+    ensure_not_existing_symlink(absolute_path);
 
     if (archive.size() < TAR_BLOCK_SIZE) {
         throw std::runtime_error("archive is empty");
@@ -657,7 +703,7 @@ ImportSummary import_file_from_tar(
         static_cast<std::uint64_t>(bytes.size()),
         1,
         0,
-        existed,
+        replaced,
     };
 }
 
@@ -665,10 +711,10 @@ ImportSummary import_directory_from_tar(
     const std::string& archive,
     const std::string& source_type,
     const std::string& absolute_path,
-    bool replace_existing,
+    const std::string& overwrite_mode,
     bool create_parent
 ) {
-    const bool replaced = prepare_destination_path(absolute_path, replace_existing, create_parent);
+    const bool replaced = prepare_destination_path(absolute_path, source_type, overwrite_mode, create_parent);
     make_directory_if_missing(absolute_path);
 
     ImportSummary summary = {source_type, 0, 0, 1, replaced};
@@ -702,6 +748,7 @@ ImportSummary import_directory_from_tar(
         pending_long_name.clear();
         const std::string relative_path = validate_relative_archive_path(raw_path);
         const std::string output_path = materialize_archive_path(absolute_path, relative_path);
+        ensure_no_existing_symlink_in_path(absolute_path, relative_path);
 
         if (header.typeflag == '5') {
             if (relative_path != ".") {
@@ -758,11 +805,24 @@ ExportedPayload export_path(const std::string& absolute_path) {
     throw std::runtime_error("transfer source must be a regular file or directory");
 }
 
+PathInfo path_info(const std::string& absolute_path) {
+    if (!is_absolute_path(absolute_path)) {
+        throw std::runtime_error("transfer path is not absolute");
+    }
+    if (!path_exists(absolute_path)) {
+        return PathInfo{false, false};
+    }
+    if (is_symlink_path(absolute_path)) {
+        throw std::runtime_error("destination path contains unsupported symlink");
+    }
+    return PathInfo{true, is_directory(absolute_path)};
+}
+
 ImportSummary import_path(
     const std::string& bytes,
     const std::string& source_type,
     const std::string& absolute_path,
-    bool replace_existing,
+    const std::string& overwrite_mode,
     bool create_parent
 ) {
     if (!is_absolute_path(absolute_path)) {
@@ -770,14 +830,14 @@ ImportSummary import_path(
     }
 
     if (source_type == "file") {
-        return import_file_from_tar(bytes, absolute_path, replace_existing, create_parent);
+        return import_file_from_tar(bytes, absolute_path, overwrite_mode, create_parent);
     }
     if (source_type == "directory") {
         return import_directory_from_tar(
             bytes,
             source_type,
             absolute_path,
-            replace_existing,
+            overwrite_mode,
             create_parent
         );
     }
@@ -786,7 +846,7 @@ ImportSummary import_path(
             bytes,
             source_type,
             absolute_path,
-            replace_existing,
+            overwrite_mode,
             create_parent
         );
     }

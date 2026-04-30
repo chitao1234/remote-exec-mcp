@@ -4,7 +4,8 @@ use remote_exec_proto::rpc::{
     PatchApplyRequest, PatchApplyResponse, RpcErrorBody, TRANSFER_COMPRESSION_HEADER,
     TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER,
     TRANSFER_SOURCE_TYPE_HEADER, TargetInfoResponse, TransferCompression, TransferExportRequest,
-    TransferImportRequest, TransferImportResponse, TransferSourceType,
+    TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
+    TransferPathInfoResponse, TransferSourceType,
 };
 use reqwest::header::{AUTHORIZATION, CONNECTION, CONTENT_LENGTH, HeaderValue};
 
@@ -116,6 +117,13 @@ impl DaemonClient {
         req: &ImageReadRequest,
     ) -> Result<ImageReadResponse, DaemonClientError> {
         self.post("/v1/image/read", req).await
+    }
+
+    pub async fn transfer_path_info(
+        &self,
+        req: &TransferPathInfoRequest,
+    ) -> Result<TransferPathInfoResponse, DaemonClientError> {
+        self.post("/v1/transfer/path-info", req).await
     }
 
     pub async fn transfer_export_to_file(
@@ -454,6 +462,7 @@ fn format_transfer_overwrite(
 ) -> &'static str {
     match overwrite {
         remote_exec_proto::rpc::TransferOverwriteMode::Fail => "fail",
+        remote_exec_proto::rpc::TransferOverwriteMode::Merge => "merge",
         remote_exec_proto::rpc::TransferOverwriteMode::Replace => "replace",
     }
 }

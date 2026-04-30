@@ -7,7 +7,8 @@ use std::path::Path;
 use remote_exec_proto::rpc::{
     TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER,
     TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER, TransferCompression,
-    TransferExportRequest, TransferImportResponse, TransferSourceType,
+    TransferExportRequest, TransferImportResponse, TransferPathInfoRequest,
+    TransferPathInfoResponse, TransferSourceType,
 };
 
 fn raw_tar_file_with_path(path: &Path, body: &[u8]) -> Vec<u8> {
@@ -136,6 +137,47 @@ async fn export_file_streams_archive_and_reports_file_source_type() {
         "file"
     );
     assert!(!response.bytes().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn transfer_path_info_reports_existing_directory() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let destination = fixture.workdir.join("release");
+    tokio::fs::create_dir_all(&destination).await.unwrap();
+
+    let response = fixture
+        .raw_post_json(
+            "/v1/transfer/path-info",
+            &TransferPathInfoRequest {
+                path: destination.display().to_string(),
+            },
+        )
+        .await;
+
+    assert!(response.status().is_success());
+    let info = response.json::<TransferPathInfoResponse>().await.unwrap();
+    assert!(info.exists);
+    assert!(info.is_directory);
+}
+
+#[tokio::test]
+async fn transfer_path_info_reports_missing_destination() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let destination = fixture.workdir.join("missing");
+
+    let response = fixture
+        .raw_post_json(
+            "/v1/transfer/path-info",
+            &TransferPathInfoRequest {
+                path: destination.display().to_string(),
+            },
+        )
+        .await;
+
+    assert!(response.status().is_success());
+    let info = response.json::<TransferPathInfoResponse>().await.unwrap();
+    assert!(!info.exists);
+    assert!(!info.is_directory);
 }
 
 #[tokio::test]
@@ -568,6 +610,116 @@ async fn import_multiple_source_archive_creates_destination_directory_bundle() {
             .await
             .unwrap(),
         "beta\n"
+    );
+}
+
+#[tokio::test]
+async fn import_directory_merge_preserves_unrelated_destination_entries() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let source_root = fixture.workdir.join("dist");
+    tokio::fs::create_dir_all(source_root.join("nested"))
+        .await
+        .unwrap();
+    tokio::fs::write(source_root.join("nested/new.txt"), "new\n")
+        .await
+        .unwrap();
+    let destination = fixture.workdir.join("release");
+    tokio::fs::create_dir_all(destination.join("nested"))
+        .await
+        .unwrap();
+    tokio::fs::write(destination.join("keep.txt"), "keep\n")
+        .await
+        .unwrap();
+    tokio::fs::write(destination.join("nested/old.txt"), "old\n")
+        .await
+        .unwrap();
+
+    let exported = fixture
+        .raw_post_json(
+            "/v1/transfer/export",
+            &TransferExportRequest {
+                path: source_root.display().to_string(),
+                compression: TransferCompression::None,
+            },
+        )
+        .await;
+    let bytes = exported.bytes().await.unwrap().to_vec();
+
+    let response = fixture
+        .raw_post_bytes(
+            "/v1/transfer/import",
+            &[
+                (
+                    TRANSFER_DESTINATION_PATH_HEADER,
+                    destination.display().to_string(),
+                ),
+                (TRANSFER_OVERWRITE_HEADER, "merge".to_string()),
+                (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
+                (TRANSFER_SOURCE_TYPE_HEADER, "directory".to_string()),
+                (TRANSFER_COMPRESSION_HEADER, "none".to_string()),
+            ],
+            bytes,
+        )
+        .await;
+
+    assert!(response.status().is_success());
+    let summary = response.json::<TransferImportResponse>().await.unwrap();
+    assert_eq!(summary.source_type, TransferSourceType::Directory);
+    assert!(!summary.replaced);
+    assert_eq!(
+        tokio::fs::read_to_string(destination.join("nested/new.txt"))
+            .await
+            .unwrap(),
+        "new\n"
+    );
+    assert_eq!(
+        tokio::fs::read_to_string(destination.join("keep.txt"))
+            .await
+            .unwrap(),
+        "keep\n"
+    );
+    assert_eq!(
+        tokio::fs::read_to_string(destination.join("nested/old.txt"))
+            .await
+            .unwrap(),
+        "old\n"
+    );
+}
+
+#[tokio::test]
+async fn import_directory_merge_rejects_existing_file_destination() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let destination = fixture.workdir.join("release");
+    tokio::fs::write(&destination, "not a directory\n")
+        .await
+        .unwrap();
+
+    let response = fixture
+        .raw_post_bytes(
+            "/v1/transfer/import",
+            &[
+                (
+                    TRANSFER_DESTINATION_PATH_HEADER,
+                    destination.display().to_string(),
+                ),
+                (TRANSFER_OVERWRITE_HEADER, "merge".to_string()),
+                (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
+                (TRANSFER_SOURCE_TYPE_HEADER, "directory".to_string()),
+                (TRANSFER_COMPRESSION_HEADER, "none".to_string()),
+            ],
+            multi_source_tar(),
+        )
+        .await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let err = response
+        .json::<remote_exec_proto::rpc::RpcErrorBody>()
+        .await
+        .unwrap();
+    assert_eq!(err.code, "transfer_destination_unsupported");
+    assert_eq!(
+        tokio::fs::read_to_string(&destination).await.unwrap(),
+        "not a directory\n"
     );
 }
 

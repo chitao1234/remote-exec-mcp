@@ -199,6 +199,7 @@ fn build_import_request(
         destination_path: endpoint.path.clone(),
         overwrite: match overwrite {
             TransferOverwrite::Fail => TransferOverwriteMode::Fail,
+            TransferOverwrite::Merge => TransferOverwriteMode::Merge,
             TransferOverwrite::Replace => TransferOverwriteMode::Replace,
         },
         create_parent,

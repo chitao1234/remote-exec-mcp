@@ -18,7 +18,8 @@ use remote_exec_proto::rpc::{
     ImageReadRequest, ImageReadResponse, PatchApplyRequest, PatchApplyResponse, RpcErrorBody,
     TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER,
     TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER, TargetInfoResponse,
-    TransferCompression, TransferExportRequest, TransferImportResponse, TransferSourceType,
+    TransferCompression, TransferExportRequest, TransferImportResponse, TransferPathInfoRequest,
+    TransferPathInfoResponse, TransferSourceType,
 };
 use tar::{Builder, EntryType, Header};
 use tokio::sync::Mutex;
@@ -101,6 +102,7 @@ pub(super) struct StubDaemonState {
     pub(super) last_transfer_import: Arc<Mutex<Option<StubTransferImportCapture>>>,
     pub(super) image_read_response: Arc<Mutex<StubImageReadResponse>>,
     transfer_export_response: Arc<Mutex<StubTransferExportResponse>>,
+    transfer_path_info_response: Arc<Mutex<TransferPathInfoResponse>>,
 }
 
 fn stub_directory_archive() -> Vec<u8> {
@@ -203,6 +205,10 @@ pub(super) fn stub_daemon_state(
             compression: TransferCompression::None,
             body: stub_directory_archive(),
         })),
+        transfer_path_info_response: Arc::new(Mutex::new(TransferPathInfoResponse {
+            exists: false,
+            is_directory: false,
+        })),
     }
 }
 
@@ -231,6 +237,13 @@ pub(super) async fn set_transfer_export_directory_response(
         compression: TransferCompression::None,
         body: archive_body,
     };
+}
+
+pub(super) async fn set_transfer_path_info_response(
+    state: &StubDaemonState,
+    response: TransferPathInfoResponse,
+) {
+    *state.transfer_path_info_response.lock().await = response;
 }
 
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
@@ -391,6 +404,7 @@ pub(super) fn stub_router(state: StubDaemonState) -> Router {
         .route("/v1/exec/start", post(exec_start))
         .route("/v1/exec/write", post(exec_write))
         .route("/v1/patch/apply", post(patch_apply))
+        .route("/v1/transfer/path-info", post(transfer_path_info))
         .route("/v1/transfer/export", post(transfer_export))
         .route("/v1/transfer/import", post(transfer_import))
         .route("/v1/image/read", post(image_read))
@@ -603,6 +617,13 @@ async fn transfer_export(
         }
         StubTransferExportResponse::Error { status, body } => Err((status, Json(body))),
     }
+}
+
+async fn transfer_path_info(
+    State(state): State<StubDaemonState>,
+    Json(_req): Json<TransferPathInfoRequest>,
+) -> Json<TransferPathInfoResponse> {
+    Json(state.transfer_path_info_response.lock().await.clone())
 }
 
 async fn transfer_import(

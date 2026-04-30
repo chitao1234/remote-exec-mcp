@@ -175,8 +175,13 @@ static void assert_file_transfer() {
     assert(file_entry.first == SINGLE_FILE_ENTRY);
     assert(file_entry.second == "hello transfer");
 
-    const ImportSummary imported =
-        import_path(exported.bytes, exported.source_type, (root / "copied.txt").string(), true, true);
+    const ImportSummary imported = import_path(
+        exported.bytes,
+        exported.source_type,
+        (root / "copied.txt").string(),
+        "replace",
+        true
+    );
     assert(imported.files_copied == 1);
     assert(imported.directories_copied == 0);
     assert(read_text(root / "copied.txt") == "hello transfer");
@@ -193,7 +198,7 @@ static void assert_file_transfer_rejects_unexpected_entry_path() {
             tar_with_single_file("payload.txt", "bad"),
             "file",
             (root / "copied.txt").string(),
-            true,
+            "replace",
             true
         );
     } catch (...) {
@@ -214,7 +219,7 @@ static void assert_file_transfer_rejects_raw_bytes() {
             "raw-bytes",
             "file",
             (root / "copied.txt").string(),
-            true,
+            "replace",
             true
         );
     } catch (...) {
@@ -238,7 +243,7 @@ static void assert_directory_round_trip() {
         exported.bytes,
         exported.source_type,
         (root / "dest").string(),
-        true,
+        "replace",
         true
     );
 
@@ -263,13 +268,51 @@ static void assert_directory_replace_behavior() {
         exported.bytes,
         exported.source_type,
         (root / "dest").string(),
-        true,
+        "replace",
         true
     );
 
     assert(imported.replaced);
     assert(!fs::exists(root / "dest" / "stale" / "old.txt"));
     assert(read_text(root / "dest" / "fresh.txt") == "fresh");
+}
+
+static void assert_path_info_reports_existing_directory() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-path-info";
+    fs::remove_all(root);
+    fs::create_directories(root / "dest");
+
+    const PathInfo existing = path_info((root / "dest").string());
+    assert(existing.exists);
+    assert(existing.is_directory);
+
+    const PathInfo missing = path_info((root / "missing").string());
+    assert(!missing.exists);
+    assert(!missing.is_directory);
+}
+
+static void assert_directory_merge_behavior() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-merge";
+    fs::remove_all(root);
+    fs::create_directories(root / "source" / "nested");
+    fs::create_directories(root / "dest" / "nested");
+    write_text(root / "source" / "nested" / "fresh.txt", "fresh");
+    write_text(root / "dest" / "stale.txt", "stale");
+    write_text(root / "dest" / "nested" / "old.txt", "old");
+
+    const ExportedPayload exported = export_path((root / "source").string());
+    const ImportSummary imported = import_path(
+        exported.bytes,
+        exported.source_type,
+        (root / "dest").string(),
+        "merge",
+        true
+    );
+
+    assert(!imported.replaced);
+    assert(read_text(root / "dest" / "nested" / "fresh.txt") == "fresh");
+    assert(read_text(root / "dest" / "stale.txt") == "stale");
+    assert(read_text(root / "dest" / "nested" / "old.txt") == "old");
 }
 
 static void assert_directory_long_path_round_trip() {
@@ -287,7 +330,7 @@ static void assert_directory_long_path_round_trip() {
         exported.bytes,
         exported.source_type,
         (root / "dest").string(),
-        true,
+        "replace",
         true
     );
 
@@ -329,7 +372,7 @@ static void assert_directory_traversal_is_rejected() {
     fs::remove_all(root);
     bool rejected = false;
     try {
-        (void)import_path(archive, "directory", (root / "dest").string(), true, true);
+        (void)import_path(archive, "directory", (root / "dest").string(), "replace", true);
     } catch (...) {
         rejected = true;
     }
@@ -347,7 +390,7 @@ static void assert_multiple_sources_import() {
     fs::remove_all(root);
 
     const ImportSummary imported =
-        import_path(archive, "multiple", (root / "dest").string(), true, true);
+        import_path(archive, "multiple", (root / "dest").string(), "replace", true);
 
     assert(imported.source_type == "multiple");
     assert(imported.files_copied == 2);
@@ -362,6 +405,8 @@ int main() {
     assert_file_transfer_rejects_raw_bytes();
     assert_directory_round_trip();
     assert_directory_replace_behavior();
+    assert_path_info_reports_existing_directory();
+    assert_directory_merge_behavior();
     assert_directory_long_path_round_trip();
 #ifndef _WIN32
     assert_symlink_sources_are_rejected();

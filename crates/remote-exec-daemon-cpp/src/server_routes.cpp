@@ -55,6 +55,14 @@ std::string transfer_error_code(const std::string& message) {
         contains_text(message, "does not exist")) {
         return "transfer_parent_missing";
     }
+    if ((contains_text(message, "destination path") &&
+         contains_text(message, "is a directory")) ||
+        (contains_text(message, "destination path") &&
+         contains_text(message, "is not a directory")) ||
+        (contains_text(message, "destination path") &&
+         contains_text(message, "is not a regular file"))) {
+        return "transfer_destination_unsupported";
+    }
     if (contains_text(message, "transfer compression") ||
         contains_text(message, "does not support transfer compression")) {
         return "transfer_compression_unsupported";
@@ -277,6 +285,29 @@ HttpResponse handle_transfer_export(const HttpRequest& request) {
     return response;
 }
 
+HttpResponse handle_transfer_path_info(const HttpRequest& request) {
+    HttpResponse response;
+    response.status = 200;
+
+    try {
+        const Json body = parse_json_body(request);
+        const PathInfo info = path_info(body.at("path").get<std::string>());
+        write_json(
+            response,
+            Json{
+                {"exists", info.exists},
+                {"is_directory", info.is_directory},
+            }
+        );
+    } catch (const std::exception& ex) {
+        const std::string message = ex.what();
+        log_message(LOG_WARN, "server", "transfer/path-info failed: " + message);
+        write_rpc_error(response, 400, transfer_error_code(message), message);
+    }
+
+    return response;
+}
+
 HttpResponse handle_transfer_import(const HttpRequest& request) {
     HttpResponse response;
     response.status = 200;
@@ -290,7 +321,7 @@ HttpResponse handle_transfer_import(const HttpRequest& request) {
             request.body,
             request.header("x-remote-exec-source-type"),
             request.header("x-remote-exec-destination-path"),
-            request.header("x-remote-exec-overwrite") == "replace",
+            request.header("x-remote-exec-overwrite"),
             request.header("x-remote-exec-create-parent") == "true"
         );
         {
@@ -376,6 +407,10 @@ HttpResponse route_request(AppState& state, const HttpRequest& request) {
 
     if (request.path == "/v1/transfer/export") {
         return handle_transfer_export(request);
+    }
+
+    if (request.path == "/v1/transfer/path-info") {
+        return handle_transfer_path_info(request);
     }
 
     if (request.path == "/v1/transfer/import") {

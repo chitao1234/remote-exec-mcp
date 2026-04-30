@@ -348,7 +348,8 @@ Input shape:
     "target": "builder-a",
     "path": "/srv/inbox"
   },
-  "overwrite": "replace",
+  "overwrite": "merge",
+  "destination_mode": "auto",
   "create_parent": true
 }
 ```
@@ -358,21 +359,28 @@ Required fields:
 - exactly one of `source` or `sources`
 - `destination.target`
 - `destination.path`
-- `overwrite`
 - `create_parent`
 
 Supported `overwrite` values:
 
 - `fail`
+- `merge` (default)
 - `replace`
+
+Supported `destination_mode` values:
+
+- `auto` (default)
+- `exact`
+- `into_directory`
 
 How to use it:
 
 - Use it for `local -> remote`, `remote -> local`, `remote -> remote`, and `local -> local`.
 - Provide either one `source` object or a `sources` array, never both.
 - Every source path and the destination path must be absolute for their own endpoint platform.
-- Single-source transfers treat `destination.path` as the exact final path to create or replace.
-- Multi-source transfers treat `destination.path` as a directory root and place each source beneath it using that source's basename.
+- `destination_mode: "auto"` gives single-source transfers `cp`-like behavior: copy beneath `destination.path` when it is an existing directory or ends in a path separator, otherwise use it as the exact final path. Multi-source transfers treat `destination.path` as a directory root and place each source beneath it using that source's basename.
+- Use `destination_mode: "into_directory"` to copy each source beneath `destination.path` using the source basename.
+- `overwrite: "merge"` overlays files into an existing compatible destination without deleting unrelated directory entries; use `replace` only when deleting the existing destination first is intended.
 - `create_parent: true` only creates missing parents for the exact final destination path or destination root you requested.
 - If a source target and the destination target are the same, those two paths still must differ.
 - Use endpoint-native absolute paths. Linux endpoints use Unix absolute paths such as `/srv/app/file.txt`. Windows endpoints accept drive-qualified paths such as `C:/work/file.txt` and also MSYS/Cygwin-style absolute paths such as `/c/work/file.txt` and `/cygdrive/c/work/file.txt`.
@@ -385,6 +393,8 @@ Structured result fields:
 - `source`
 - `sources`
 - `destination`
+- `resolved_destination`
+- `destination_mode`
 - `source_type`
 - `bytes_copied`
 - `files_copied`
@@ -469,6 +479,7 @@ Example: download a remote log to broker-host `local`:
 - Running a command on one target and expecting it to read or write files on another target.
 - Using shell tricks for cross-endpoint copy instead of `transfer_files`.
 - Treating `destination.path` as if it had the same meaning for both single-source and multi-source transfers.
+- Expecting `overwrite: "merge"` to delete files that are absent from the source.
 - Sending non-absolute paths to `transfer_files`.
 - Sending an unsupported `compression` field to `transfer_files`.
 - Starting an interactive program without `tty: true` and then expecting writable stdin later.

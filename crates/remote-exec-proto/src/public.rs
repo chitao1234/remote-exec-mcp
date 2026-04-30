@@ -78,7 +78,28 @@ pub struct ListTargetsResult {
 #[serde(rename_all = "snake_case")]
 pub enum TransferOverwrite {
     Fail,
+    Merge,
     Replace,
+}
+
+impl Default for TransferOverwrite {
+    fn default() -> Self {
+        Self::Merge
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferDestinationMode {
+    Auto,
+    Exact,
+    IntoDirectory,
+}
+
+impl Default for TransferDestinationMode {
+    fn default() -> Self {
+        Self::Auto
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -104,7 +125,10 @@ pub struct TransferFilesInput {
     #[serde(default)]
     pub sources: Vec<TransferEndpoint>,
     pub destination: TransferEndpoint,
+    #[serde(default)]
     pub overwrite: TransferOverwrite,
+    #[serde(default)]
+    pub destination_mode: TransferDestinationMode,
     pub create_parent: bool,
 }
 
@@ -114,6 +138,8 @@ pub struct TransferFilesResult {
     pub source: Option<TransferEndpoint>,
     pub sources: Vec<TransferEndpoint>,
     pub destination: TransferEndpoint,
+    pub resolved_destination: TransferEndpoint,
+    pub destination_mode: TransferDestinationMode,
     pub source_type: TransferSourceType,
     pub bytes_copied: u64,
     pub files_copied: u64,

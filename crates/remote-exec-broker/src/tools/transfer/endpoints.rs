@@ -3,8 +3,10 @@ use remote_exec_proto::path::{
     PathPolicy, basename_for_policy, is_absolute_for_policy, join_for_policy, linux_path_policy,
     same_path_for_policy, windows_path_policy,
 };
-use remote_exec_proto::public::TransferEndpoint;
-use remote_exec_proto::rpc::TransferCompression as RpcTransferCompression;
+use remote_exec_proto::public::{TransferDestinationMode, TransferEndpoint};
+use remote_exec_proto::rpc::{
+    TransferCompression as RpcTransferCompression, TransferPathInfoRequest,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EndpointTargetContext {
@@ -122,6 +124,143 @@ pub(super) async fn ensure_multi_source_basenames_are_unique(
     }
 
     Ok(())
+}
+
+pub(super) async fn resolve_destination(
+    state: &crate::BrokerState,
+    sources: &[TransferEndpoint],
+    destination: &TransferEndpoint,
+    destination_mode: &TransferDestinationMode,
+) -> anyhow::Result<TransferEndpoint> {
+    let resolved_path = match destination_mode {
+        TransferDestinationMode::Exact => destination.path.clone(),
+        TransferDestinationMode::IntoDirectory => {
+            resolve_into_directory_destination(state, sources, destination).await?
+        }
+        TransferDestinationMode::Auto => {
+            let context = endpoint_target_context(state, &destination.target).await?;
+            if sources.len() == 1
+                && (path_looks_like_directory(context, &destination.path)
+                    || existing_destination_is_directory(state, destination).await?)
+            {
+                resolve_into_directory_destination(state, sources, destination).await?
+            } else {
+                destination.path.clone()
+            }
+        }
+    };
+
+    Ok(TransferEndpoint {
+        target: destination.target.clone(),
+        path: resolved_path,
+    })
+}
+
+async fn resolve_into_directory_destination(
+    state: &crate::BrokerState,
+    sources: &[TransferEndpoint],
+    destination: &TransferEndpoint,
+) -> anyhow::Result<String> {
+    let destination_context = endpoint_target_context(state, &destination.target).await?;
+    let destination_policy = destination_context.policy();
+    let mut candidates: Vec<String> = Vec::with_capacity(sources.len());
+    for source in sources {
+        let source_policy = endpoint_policy(state, source).await?;
+        let basename = basename_for_policy(source_policy, &source.path).ok_or_else(|| {
+            anyhow::anyhow!(
+                "transfer source path `{}` has no usable basename for destination directory mode",
+                source.path
+            )
+        })?;
+        let candidate = join_child_for_context(destination_context, &destination.path, &basename);
+        anyhow::ensure!(
+            !candidates.iter().any(|existing| same_path_for_policy(
+                destination_policy,
+                existing,
+                &candidate
+            )),
+            "destination directory mode would create duplicate destination entry `{basename}`"
+        );
+        candidates.push(candidate);
+    }
+
+    match candidates.as_slice() {
+        [candidate] => Ok(candidate.clone()),
+        _ => Ok(destination.path.clone()),
+    }
+}
+
+fn join_child_for_context(context: EndpointTargetContext, base: &str, child: &str) -> String {
+    if matches!(
+        context,
+        EndpointTargetContext::Remote {
+            accepts_single_slash_windows_absolute: true,
+            ..
+        }
+    ) && base.starts_with('/')
+        && !base.starts_with("//")
+        && !is_absolute_for_policy(context.policy(), base)
+    {
+        let trimmed_base = base.trim_end_matches('/');
+        if trimmed_base.is_empty() {
+            format!("/{child}")
+        } else {
+            format!("{trimmed_base}/{child}")
+        }
+    } else {
+        join_for_policy(context.policy(), base, child)
+    }
+}
+
+fn path_looks_like_directory(context: EndpointTargetContext, path: &str) -> bool {
+    if path.ends_with('/') {
+        return true;
+    }
+
+    matches!(
+        context.policy().style,
+        remote_exec_proto::path::PathStyle::Windows
+    ) && path.ends_with('\\')
+}
+
+async fn existing_destination_is_directory(
+    state: &crate::BrokerState,
+    destination: &TransferEndpoint,
+) -> anyhow::Result<bool> {
+    let result = match destination.target.as_str() {
+        "local" => crate::local_transfer::path_info(&destination.path, state.host_sandbox.as_ref())
+            .map_err(anyhow::Error::from),
+        target_name => {
+            let target = verified_remote_target(state, target_name).await?;
+            target
+                .transfer_path_info(&TransferPathInfoRequest {
+                    path: destination.path.clone(),
+                })
+                .await
+                .map_err(normalize_path_info_error)
+        }
+    };
+
+    match result {
+        Ok(info) => Ok(info.exists && info.is_directory),
+        Err(err) if path_info_missing_or_unsupported(&err) => Ok(false),
+        Err(err) => Err(err),
+    }
+}
+
+fn normalize_path_info_error(err: crate::daemon_client::DaemonClientError) -> anyhow::Error {
+    match err {
+        crate::daemon_client::DaemonClientError::Rpc { message, .. } => anyhow::Error::msg(message),
+        other => other.into(),
+    }
+}
+
+fn path_info_missing_or_unsupported(err: &anyhow::Error) -> bool {
+    let message = err.to_string();
+    message.contains("unknown endpoint")
+        || message.contains("not_found")
+        || message.contains("404")
+        || message.contains("405")
 }
 
 pub(super) async fn negotiate_transfer_compression(

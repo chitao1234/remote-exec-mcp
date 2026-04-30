@@ -175,6 +175,185 @@ async fn transfer_files_copies_local_file_and_reports_summary() {
     assert_eq!(result.structured_content["directories_copied"], 0);
     assert_eq!(result.structured_content["bytes_copied"], 6);
     assert_eq!(result.structured_content["replaced"], false);
+    assert_eq!(result.structured_content["destination_mode"], "auto");
+    assert_eq!(
+        result.structured_content["resolved_destination"]["path"],
+        destination.display().to_string()
+    );
+}
+
+#[tokio::test]
+async fn transfer_files_defaults_to_merge_overwrite() {
+    let fixture = support::spawn_broker_with_plain_http_stub_daemon().await;
+    let source = fixture._tempdir.path().join("source.txt");
+    std::fs::write(&source, "hello default\n").unwrap();
+
+    fixture
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "local",
+                    "path": source.display().to_string()
+                },
+                "destination": {
+                    "target": "builder-xp",
+                    "path": "/srv/remote.txt"
+                },
+                "create_parent": true
+            }),
+        )
+        .await;
+
+    let capture = fixture
+        .last_transfer_import()
+        .await
+        .expect("transfer import capture");
+    assert_eq!(capture.overwrite, "merge");
+}
+
+#[tokio::test]
+async fn transfer_files_into_directory_resolves_single_source_basename() {
+    let fixture = support::spawn_broker_with_plain_http_stub_daemon().await;
+    let source = fixture._tempdir.path().join("artifact.txt");
+    std::fs::write(&source, "hello directory mode\n").unwrap();
+
+    let result = fixture
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "local",
+                    "path": source.display().to_string()
+                },
+                "destination": {
+                    "target": "builder-xp",
+                    "path": "/srv/inbox"
+                },
+                "destination_mode": "into_directory",
+                "overwrite": "merge",
+                "create_parent": true
+            }),
+        )
+        .await;
+
+    let capture = fixture
+        .last_transfer_import()
+        .await
+        .expect("transfer import capture");
+    assert_eq!(capture.destination_path, "/srv/inbox/artifact.txt");
+    assert_eq!(
+        result.structured_content["destination"]["path"],
+        "/srv/inbox"
+    );
+    assert_eq!(
+        result.structured_content["resolved_destination"]["path"],
+        "/srv/inbox/artifact.txt"
+    );
+    assert_eq!(
+        result.structured_content["destination_mode"],
+        "into_directory"
+    );
+}
+
+#[tokio::test]
+async fn transfer_files_auto_mode_treats_trailing_separator_as_directory() {
+    let fixture = support::spawn_broker_with_plain_http_stub_daemon().await;
+    let source = fixture._tempdir.path().join("artifact.txt");
+    std::fs::write(&source, "hello auto mode\n").unwrap();
+
+    fixture
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "local",
+                    "path": source.display().to_string()
+                },
+                "destination": {
+                    "target": "builder-xp",
+                    "path": "C:/srv/inbox/"
+                },
+                "create_parent": true
+            }),
+        )
+        .await;
+
+    let capture = fixture
+        .last_transfer_import()
+        .await
+        .expect("transfer import capture");
+    assert_eq!(capture.destination_path, r"C:\srv\inbox\artifact.txt");
+}
+
+#[tokio::test]
+async fn transfer_files_auto_mode_treats_existing_directory_as_directory() {
+    let fixture = support::spawn_broker_with_plain_http_stub_daemon().await;
+    let source = fixture._tempdir.path().join("artifact.txt");
+    std::fs::write(&source, "hello cp mode\n").unwrap();
+    fixture
+        .set_transfer_path_info_response(remote_exec_proto::rpc::TransferPathInfoResponse {
+            exists: true,
+            is_directory: true,
+        })
+        .await;
+
+    let result = fixture
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "local",
+                    "path": source.display().to_string()
+                },
+                "destination": {
+                    "target": "builder-xp",
+                    "path": "C:/srv/inbox"
+                },
+                "create_parent": true
+            }),
+        )
+        .await;
+
+    let capture = fixture
+        .last_transfer_import()
+        .await
+        .expect("transfer import capture");
+    assert_eq!(capture.destination_path, r"C:\srv\inbox\artifact.txt");
+    assert_eq!(
+        result.structured_content["resolved_destination"]["path"],
+        r"C:\srv\inbox\artifact.txt"
+    );
+}
+
+#[tokio::test]
+async fn transfer_files_auto_mode_keeps_missing_single_destination_exact() {
+    let fixture = support::spawn_broker_with_plain_http_stub_daemon().await;
+    let source = fixture._tempdir.path().join("artifact.txt");
+    std::fs::write(&source, "hello exact cp mode\n").unwrap();
+
+    fixture
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "local",
+                    "path": source.display().to_string()
+                },
+                "destination": {
+                    "target": "builder-xp",
+                    "path": "C:/srv/inbox"
+                },
+                "create_parent": true
+            }),
+        )
+        .await;
+
+    let capture = fixture
+        .last_transfer_import()
+        .await
+        .expect("transfer import capture");
+    assert_eq!(capture.destination_path, "C:/srv/inbox");
 }
 
 #[tokio::test]

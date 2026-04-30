@@ -1,7 +1,8 @@
 use std::time::Instant;
 
 use remote_exec_proto::public::{
-    TransferEndpoint, TransferFilesResult, TransferSourceType as PublicTransferSourceType,
+    TransferDestinationMode, TransferEndpoint, TransferFilesResult,
+    TransferSourceType as PublicTransferSourceType,
 };
 use remote_exec_proto::rpc::{
     TransferCompression as RpcTransferCompression, TransferImportResponse,
@@ -13,7 +14,9 @@ use crate::mcp_server::ToolCallOutput;
 pub(super) fn finish_transfer(
     started: Instant,
     sources: &[TransferEndpoint],
+    requested_destination: TransferEndpoint,
     destination: TransferEndpoint,
+    destination_mode: TransferDestinationMode,
     source_type: RpcTransferSourceType,
     summary: TransferImportResponse,
 ) -> anyhow::Result<ToolCallOutput> {
@@ -22,7 +25,9 @@ pub(super) fn finish_transfer(
     let result = TransferFilesResult {
         source: (sources.len() == 1).then(|| sources[0].clone()),
         sources: sources.to_vec(),
-        destination,
+        destination: requested_destination,
+        resolved_destination: destination,
+        destination_mode,
         source_type: match source_type {
             RpcTransferSourceType::File => PublicTransferSourceType::File,
             RpcTransferSourceType::Directory => PublicTransferSourceType::Directory,
@@ -69,8 +74,8 @@ fn format_transfer_text(result: &TransferFilesResult) -> String {
     format!(
         "Transferred {} to `{}` on `{}`.\nFiles: {}, directories: {}, bytes: {}, replaced: {}",
         source_summary,
-        result.destination.path,
-        result.destination.target,
+        result.resolved_destination.path,
+        result.resolved_destination.target,
         result.files_copied,
         result.directories_copied,
         result.bytes_copied,

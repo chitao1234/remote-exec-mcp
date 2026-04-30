@@ -130,6 +130,7 @@ default_workdir = /work
 - no image support
 - transfer compression is not supported
 - `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles
+- transfer imports support `fail`, `merge`, and `replace` overwrite modes; `merge` overlays compatible existing destinations without deleting unrelated directory entries
 - transfer payloads use GNU tar for files and directories
 - single-file transfers use the fixed archive entry `.remote-exec-file`
 - unsupported archive entries remain rejected: symlinks, hard links, special files, sparse entries, and malformed paths

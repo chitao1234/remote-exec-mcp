@@ -5,8 +5,8 @@ use base64::Engine;
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use remote_exec_broker::client::{Connection, RemoteExecClient, ToolResponse};
 use remote_exec_proto::public::{
-    ApplyPatchInput, ExecCommandInput, ListTargetsInput, TransferEndpoint, TransferFilesInput,
-    TransferOverwrite, ViewImageInput, WriteStdinInput,
+    ApplyPatchInput, ExecCommandInput, ListTargetsInput, TransferDestinationMode, TransferEndpoint,
+    TransferFilesInput, TransferOverwrite, ViewImageInput, WriteStdinInput,
 };
 use tokio::io::AsyncReadExt;
 
@@ -146,8 +146,11 @@ struct TransferFilesArgs {
     #[arg(long)]
     destination: String,
 
-    #[arg(long, value_enum, default_value_t = CliTransferOverwrite::Fail)]
+    #[arg(long, value_enum, default_value_t = CliTransferOverwrite::Merge)]
     overwrite: CliTransferOverwrite,
+
+    #[arg(long, value_enum, default_value_t = CliTransferDestinationMode::Auto)]
+    destination_mode: CliTransferDestinationMode,
 
     #[arg(long, default_value_t = false)]
     create_parent: bool,
@@ -156,6 +159,7 @@ struct TransferFilesArgs {
 #[derive(Copy, Clone, Debug, ValueEnum)]
 enum CliTransferOverwrite {
     Fail,
+    Merge,
     Replace,
 }
 
@@ -163,7 +167,25 @@ impl From<CliTransferOverwrite> for TransferOverwrite {
     fn from(value: CliTransferOverwrite) -> Self {
         match value {
             CliTransferOverwrite::Fail => Self::Fail,
+            CliTransferOverwrite::Merge => Self::Merge,
             CliTransferOverwrite::Replace => Self::Replace,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum)]
+enum CliTransferDestinationMode {
+    Auto,
+    Exact,
+    IntoDirectory,
+}
+
+impl From<CliTransferDestinationMode> for TransferDestinationMode {
+    fn from(value: CliTransferDestinationMode) -> Self {
+        match value {
+            CliTransferDestinationMode::Auto => Self::Auto,
+            CliTransferDestinationMode::Exact => Self::Exact,
+            CliTransferDestinationMode::IntoDirectory => Self::IntoDirectory,
         }
     }
 }
@@ -318,6 +340,7 @@ fn transfer_files_input(args: TransferFilesArgs) -> anyhow::Result<TransferFiles
         },
         destination: parse_transfer_endpoint(&args.destination)?,
         overwrite: args.overwrite.into(),
+        destination_mode: args.destination_mode.into(),
         create_parent: args.create_parent,
     })
 }

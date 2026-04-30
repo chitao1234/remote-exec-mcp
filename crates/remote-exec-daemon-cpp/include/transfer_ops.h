@@ -16,11 +16,17 @@ struct ImportSummary {
     bool replaced;
 };
 
+struct PathInfo {
+    bool exists;
+    bool is_directory;
+};
+
 ExportedPayload export_path(const std::string& absolute_path);
+PathInfo path_info(const std::string& absolute_path);
 ImportSummary import_path(
     const std::string& bytes,
     const std::string& source_type,
     const std::string& absolute_path,
-    bool replace_existing,
+    const std::string& overwrite_mode,
     bool create_parent
 );

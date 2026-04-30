@@ -1,10 +1,14 @@
 use std::path::{Path, PathBuf};
 
-use remote_exec_proto::path::PathPolicy;
-use remote_exec_proto::rpc::{
-    TransferCompression, TransferImportRequest, TransferImportResponse, TransferSourceType,
+use remote_exec_proto::path::{
+    PathPolicy, is_absolute_for_policy, linux_path_policy, normalize_for_system,
+    windows_path_policy,
 };
-use remote_exec_proto::sandbox::CompiledFilesystemSandbox;
+use remote_exec_proto::rpc::{
+    TransferCompression, TransferImportRequest, TransferImportResponse, TransferPathInfoResponse,
+    TransferSourceType,
+};
+use remote_exec_proto::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
 
 pub struct BundledArchiveSource {
     pub source_path: String,
@@ -42,6 +46,46 @@ pub async fn import_archive_from_file(
         None,
     )
     .await
+}
+
+pub fn path_info(
+    path: &str,
+    sandbox: Option<&CompiledFilesystemSandbox>,
+) -> anyhow::Result<TransferPathInfoResponse> {
+    let policy = host_policy();
+    anyhow::ensure!(
+        is_absolute_for_policy(policy, path),
+        "transfer endpoint path `{path}` is not absolute"
+    );
+    let path = PathBuf::from(normalize_for_system(policy, path));
+    authorize_path(policy, sandbox, SandboxAccess::Write, &path)?;
+
+    match std::fs::symlink_metadata(&path) {
+        Ok(metadata) => {
+            anyhow::ensure!(
+                !metadata.file_type().is_symlink(),
+                "destination path contains unsupported symlink `{}`",
+                path.display()
+            );
+            Ok(TransferPathInfoResponse {
+                exists: true,
+                is_directory: metadata.is_dir(),
+            })
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(TransferPathInfoResponse {
+            exists: false,
+            is_directory: false,
+        }),
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn host_policy() -> PathPolicy {
+    if cfg!(windows) {
+        windows_path_policy()
+    } else {
+        linux_path_policy()
+    }
 }
 
 pub async fn bundle_archives_to_file(

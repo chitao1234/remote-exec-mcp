@@ -14,10 +14,60 @@ use remote_exec_proto::rpc::{
     RpcErrorBody, TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
     TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
     TransferCompression, TransferExportRequest, TransferImportRequest, TransferImportResponse,
+    TransferPathInfoRequest, TransferPathInfoResponse,
 };
 use remote_exec_proto::sandbox::SandboxError;
 
 use crate::AppState;
+
+pub async fn path_info(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<TransferPathInfoRequest>,
+) -> Result<Json<TransferPathInfoResponse>, (StatusCode, Json<RpcErrorBody>)> {
+    let info = path_info_for_request(state.as_ref(), &req).map_err(map_transfer_error)?;
+    Ok(Json(info))
+}
+
+pub fn path_info_for_request(
+    state: &AppState,
+    req: &TransferPathInfoRequest,
+) -> anyhow::Result<TransferPathInfoResponse> {
+    anyhow::ensure!(
+        crate::host_path::is_input_path_absolute(
+            &req.path,
+            state.config.windows_posix_root.as_deref()
+        ),
+        "transfer endpoint path `{}` is not absolute",
+        req.path
+    );
+
+    let path = archive::host_path(&req.path, state.config.windows_posix_root.as_deref())?;
+    remote_exec_proto::sandbox::authorize_path(
+        archive::host_policy(),
+        state.sandbox.as_ref(),
+        remote_exec_proto::sandbox::SandboxAccess::Write,
+        &path,
+    )?;
+
+    match std::fs::symlink_metadata(&path) {
+        Ok(metadata) => {
+            anyhow::ensure!(
+                !metadata.file_type().is_symlink(),
+                "destination path contains unsupported symlink `{}`",
+                path.display()
+            );
+            Ok(TransferPathInfoResponse {
+                exists: true,
+                is_directory: metadata.is_dir(),
+            })
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(TransferPathInfoResponse {
+            exists: false,
+            is_directory: false,
+        }),
+        Err(err) => Err(err.into()),
+    }
+}
 
 pub async fn export_path(
     State(state): State<Arc<AppState>>,
@@ -128,7 +178,7 @@ fn format_compression(compression: &TransferCompression) -> &'static str {
     }
 }
 
-fn map_transfer_error(err: anyhow::Error) -> (StatusCode, Json<RpcErrorBody>) {
+pub fn map_transfer_error(err: anyhow::Error) -> (StatusCode, Json<RpcErrorBody>) {
     let message = err.to_string();
     let code = if err.downcast_ref::<SandboxError>().is_some() {
         "sandbox_denied"
@@ -138,6 +188,11 @@ fn map_transfer_error(err: anyhow::Error) -> (StatusCode, Json<RpcErrorBody>) {
         "transfer_destination_exists"
     } else if message.contains("destination parent") && message.contains("does not exist") {
         "transfer_parent_missing"
+    } else if message.contains("destination path") && message.contains("is a directory")
+        || message.contains("destination path") && message.contains("is not a directory")
+        || message.contains("destination path contains unsupported symlink")
+    {
+        "transfer_destination_unsupported"
     } else if message.contains("transfer compression")
         || message.contains("does not support transfer compression")
     {

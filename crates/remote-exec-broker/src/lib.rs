@@ -18,7 +18,8 @@ use local_backend::LocalDaemonClient;
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
     PatchApplyRequest, PatchApplyResponse, TargetInfoResponse, TransferExportRequest,
-    TransferImportRequest, TransferImportResponse, TransferSourceType,
+    TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
+    TransferPathInfoResponse, TransferSourceType,
 };
 use remote_exec_proto::{
     path::{PathPolicy, linux_path_policy, windows_path_policy},
@@ -155,6 +156,16 @@ impl TargetHandle {
                 client.transfer_export_to_file(req, archive_path).await
             }
             TargetBackend::Local(_) => Err(unsupported_local_transfer_error()),
+        }
+    }
+
+    pub async fn transfer_path_info(
+        &self,
+        req: &TransferPathInfoRequest,
+    ) -> Result<TransferPathInfoResponse, DaemonClientError> {
+        match &self.backend {
+            TargetBackend::Remote(client) => client.transfer_path_info(req).await,
+            TargetBackend::Local(client) => client.transfer_path_info(req).await,
         }
     }
 
