@@ -3,6 +3,7 @@ use std::path::Path;
 
 use remote_exec_proto::rpc::{
     TransferImportRequest, TransferImportResponse, TransferOverwriteMode, TransferSourceType,
+    TransferSymlinkMode, TransferWarning,
 };
 use remote_exec_proto::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
 
@@ -122,12 +123,18 @@ fn extract_archive(
     let mut archive = tar::Archive::new(reader);
 
     match request.source_type {
-        TransferSourceType::File => {
-            extract_single_file_archive(&mut archive, destination_path, &mut summary)?
-        }
-        TransferSourceType::Directory | TransferSourceType::Multiple => {
-            extract_tree_archive(&mut archive, destination_path, &mut summary)?
-        }
+        TransferSourceType::File => extract_single_file_archive(
+            &mut archive,
+            destination_path,
+            &request.symlink_mode,
+            &mut summary,
+        )?,
+        TransferSourceType::Directory | TransferSourceType::Multiple => extract_tree_archive(
+            &mut archive,
+            destination_path,
+            &request.symlink_mode,
+            &mut summary,
+        )?,
     }
 
     Ok(summary)
@@ -143,25 +150,33 @@ fn new_import_summary(request: &TransferImportRequest, replaced: bool) -> Transf
             TransferSourceType::Directory | TransferSourceType::Multiple
         ) as u64,
         replaced,
+        warnings: Vec::new(),
     }
 }
 
 fn extract_single_file_archive<R: Read>(
     archive: &mut tar::Archive<R>,
     destination_path: &Path,
+    symlink_mode: &TransferSymlinkMode,
     summary: &mut TransferImportResponse,
 ) -> anyhow::Result<()> {
     let mut entries = archive.entries()?;
     let mut entry = entries
         .next()
         .ok_or_else(|| anyhow::anyhow!("archive is empty"))??;
+    let entry_type = entry.header().entry_type();
     anyhow::ensure!(
-        entry.header().entry_type().is_file(),
+        entry_type.is_file() || entry_type.is_symlink(),
         "archive entry is not a regular file"
     );
 
-    summary.bytes_copied = write_archive_file(&mut entry, destination_path)?;
-    summary.files_copied = 1;
+    if entry_type.is_symlink() {
+        write_archive_symlink(&mut entry, destination_path, symlink_mode, summary)?;
+    } else {
+        summary.bytes_copied = write_archive_file(&mut entry, destination_path)?;
+        summary.files_copied = 1;
+    }
+
     anyhow::ensure!(
         entries.next().transpose()?.is_none(),
         "file archive contains extra entries"
@@ -172,12 +187,13 @@ fn extract_single_file_archive<R: Read>(
 fn extract_tree_archive<R: Read>(
     archive: &mut tar::Archive<R>,
     destination_path: &Path,
+    symlink_mode: &TransferSymlinkMode,
     summary: &mut TransferImportResponse,
 ) -> anyhow::Result<()> {
     std::fs::create_dir_all(destination_path)?;
     for entry in archive.entries()? {
         let mut entry = entry?;
-        extract_tree_archive_entry(&mut entry, destination_path, summary)?;
+        extract_tree_archive_entry(&mut entry, destination_path, symlink_mode, summary)?;
     }
     Ok(())
 }
@@ -185,6 +201,7 @@ fn extract_tree_archive<R: Read>(
 fn extract_tree_archive_entry<R: Read>(
     entry: &mut tar::Entry<R>,
     destination_path: &Path,
+    symlink_mode: &TransferSymlinkMode,
     summary: &mut TransferImportResponse,
 ) -> anyhow::Result<()> {
     let raw_rel = entry.path()?.to_path_buf();
@@ -204,9 +221,96 @@ fn extract_tree_archive_entry<R: Read>(
         return Ok(());
     }
 
+    if entry_type.is_symlink() {
+        write_archive_symlink(entry, &out, symlink_mode, summary)?;
+        return Ok(());
+    }
+
     summary.bytes_copied += write_archive_file(entry, &out)?;
     summary.files_copied += 1;
     Ok(())
+}
+
+fn write_archive_symlink<R: Read>(
+    entry: &mut tar::Entry<R>,
+    path: &Path,
+    symlink_mode: &TransferSymlinkMode,
+    summary: &mut TransferImportResponse,
+) -> anyhow::Result<()> {
+    match symlink_import_action(symlink_mode, entry, path)? {
+        SymlinkImportAction::Preserve(target) => {
+            ensure_not_existing_symlink(path)?;
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            remove_existing_file_before_symlink(path)?;
+            create_symlink(&target, path)?;
+            summary.files_copied += 1;
+            Ok(())
+        }
+        SymlinkImportAction::Skip => {
+            summary
+                .warnings
+                .push(TransferWarning::skipped_symlink(path.display()));
+            Ok(())
+        }
+        SymlinkImportAction::Reject => {
+            anyhow::bail!("archive contains unsupported symlink `{}`", path.display())
+        }
+    }
+}
+
+fn remove_existing_file_before_symlink(path: &Path) -> anyhow::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() => {
+            anyhow::bail!("destination path `{}` is a directory", path.display())
+        }
+        Ok(_) => {
+            std::fs::remove_file(path)?;
+            Ok(())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err.into()),
+    }
+}
+
+enum SymlinkImportAction {
+    Preserve(std::path::PathBuf),
+    Skip,
+    Reject,
+}
+
+fn symlink_import_action<R: Read>(
+    symlink_mode: &TransferSymlinkMode,
+    entry: &tar::Entry<R>,
+    path: &Path,
+) -> anyhow::Result<SymlinkImportAction> {
+    match symlink_mode {
+        TransferSymlinkMode::Preserve => {
+            let target = entry.link_name()?.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "archive symlink entry `{}` has no link target",
+                    path.display()
+                )
+            })?;
+            Ok(SymlinkImportAction::Preserve(target.into_owned()))
+        }
+        TransferSymlinkMode::Skip => Ok(SymlinkImportAction::Skip),
+        TransferSymlinkMode::Follow | TransferSymlinkMode::Reject => {
+            Ok(SymlinkImportAction::Reject)
+        }
+    }
+}
+
+#[cfg(unix)]
+fn create_symlink(target: &Path, path: &Path) -> anyhow::Result<()> {
+    std::os::unix::fs::symlink(target, path)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn create_symlink(_target: &Path, path: &Path) -> anyhow::Result<()> {
+    anyhow::bail!("archive contains unsupported symlink `{}`", path.display())
 }
 
 fn write_archive_file<R: Read>(entry: &mut tar::Entry<R>, path: &Path) -> anyhow::Result<u64> {

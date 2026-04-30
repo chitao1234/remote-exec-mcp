@@ -38,6 +38,37 @@ bool contains_text(const std::string& value, const std::string& needle) {
     return value.find(needle) != std::string::npos;
 }
 
+std::string base64_encode(const std::string& input) {
+    static const char table[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string output;
+    std::size_t index = 0;
+    while (index < input.size()) {
+        const unsigned char first = static_cast<unsigned char>(input[index++]);
+        const bool has_second = index < input.size();
+        const unsigned char second = has_second ? static_cast<unsigned char>(input[index++]) : 0;
+        const bool has_third = index < input.size();
+        const unsigned char third = has_third ? static_cast<unsigned char>(input[index++]) : 0;
+
+        output.push_back(table[first >> 2]);
+        output.push_back(table[((first & 0x03) << 4) | (second >> 4)]);
+        output.push_back(has_second ? table[((second & 0x0f) << 2) | (third >> 6)] : '=');
+        output.push_back(has_third ? table[third & 0x3f] : '=');
+    }
+    return output;
+}
+
+Json transfer_warnings_json(const std::vector<TransferWarning>& warnings) {
+    Json json = Json::array();
+    for (std::size_t i = 0; i < warnings.size(); ++i) {
+        json.push_back(Json{
+            {"code", warnings[i].code},
+            {"message", warnings[i].message},
+        });
+    }
+    return json;
+}
+
 unsigned long requested_max_output_tokens(const Json& body) {
     const Json::const_iterator it = body.find("max_output_tokens");
     return it == body.end() ? DEFAULT_MAX_OUTPUT_TOKENS : it->get<unsigned long>();
@@ -69,6 +100,7 @@ std::string transfer_error_code(const std::string& message) {
     }
     if (contains_text(message, "unsupported symlink") ||
         contains_text(message, "unsupported entry") ||
+        contains_text(message, "symlink mode is unsupported") ||
         contains_text(message, "unsupported transfer source type") ||
         contains_text(message, "regular file or directory") ||
         contains_text(message, "archive entry is not a regular file") ||
@@ -265,7 +297,11 @@ HttpResponse handle_transfer_export(const HttpRequest& request) {
         if (body.value("compression", std::string("none")) != "none") {
             throw std::runtime_error("this daemon does not support transfer compression");
         }
-        const ExportedPayload payload = export_path(body.at("path").get<std::string>());
+        const ExportedPayload payload = export_path(
+            body.at("path").get<std::string>(),
+            body.value("transfer_mode", std::string("lenient")),
+            body.value("symlink_mode", std::string("preserve"))
+        );
         log_message(
             LOG_INFO,
             "server",
@@ -275,6 +311,10 @@ HttpResponse handle_transfer_export(const HttpRequest& request) {
         response.headers["Content-Type"] = "application/octet-stream";
         response.headers["x-remote-exec-source-type"] = payload.source_type;
         response.headers["x-remote-exec-compression"] = "none";
+        if (!payload.warnings.empty()) {
+            response.headers["x-remote-exec-warnings-bin"] =
+                base64_encode(transfer_warnings_json(payload.warnings).dump());
+        }
         response.body = payload.bytes;
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
@@ -322,7 +362,13 @@ HttpResponse handle_transfer_import(const HttpRequest& request) {
             request.header("x-remote-exec-source-type"),
             request.header("x-remote-exec-destination-path"),
             request.header("x-remote-exec-overwrite"),
-            request.header("x-remote-exec-create-parent") == "true"
+            request.header("x-remote-exec-create-parent") == "true",
+            request.header("x-remote-exec-transfer-mode").empty()
+                ? "lenient"
+                : request.header("x-remote-exec-transfer-mode"),
+            request.header("x-remote-exec-symlink-mode").empty()
+                ? "preserve"
+                : request.header("x-remote-exec-symlink-mode")
         );
         {
             std::ostringstream message;
@@ -342,6 +388,7 @@ HttpResponse handle_transfer_import(const HttpRequest& request) {
                 {"files_copied", summary.files_copied},
                 {"directories_copied", summary.directories_copied},
                 {"replaced", summary.replaced},
+                {"warnings", transfer_warnings_json(summary.warnings)},
             }
         );
     } catch (const std::exception& ex) {

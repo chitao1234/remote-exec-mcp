@@ -13,13 +13,13 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::Context;
-use daemon_client::{DaemonClient, DaemonClientError};
+use daemon_client::{DaemonClient, DaemonClientError, TransferExportResponse};
 use local_backend::LocalDaemonClient;
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
     PatchApplyRequest, PatchApplyResponse, TargetInfoResponse, TransferExportRequest,
     TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
-    TransferPathInfoResponse, TransferSourceType,
+    TransferPathInfoResponse,
 };
 use remote_exec_proto::{
     path::{PathPolicy, linux_path_policy, windows_path_policy},
@@ -150,7 +150,7 @@ impl TargetHandle {
         &self,
         req: &TransferExportRequest,
         archive_path: &std::path::Path,
-    ) -> Result<TransferSourceType, DaemonClientError> {
+    ) -> Result<TransferExportResponse, DaemonClientError> {
         match &self.backend {
             TargetBackend::Remote(client) => {
                 client.transfer_export_to_file(req, archive_path).await

@@ -94,6 +94,9 @@ pub const TRANSFER_COMPRESSION_HEADER: &str = "x-remote-exec-compression";
 pub const TRANSFER_DESTINATION_PATH_HEADER: &str = "x-remote-exec-destination-path";
 pub const TRANSFER_OVERWRITE_HEADER: &str = "x-remote-exec-overwrite";
 pub const TRANSFER_CREATE_PARENT_HEADER: &str = "x-remote-exec-create-parent";
+pub const TRANSFER_MODE_HEADER: &str = "x-remote-exec-transfer-mode";
+pub const TRANSFER_SYMLINK_MODE_HEADER: &str = "x-remote-exec-symlink-mode";
+pub const TRANSFER_WARNINGS_HEADER: &str = "x-remote-exec-warnings-bin";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -125,11 +128,55 @@ pub enum TransferOverwriteMode {
     Replace,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferMode {
+    #[default]
+    Lenient,
+    Strict,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferSymlinkMode {
+    #[default]
+    Preserve,
+    Follow,
+    Skip,
+    Reject,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct TransferWarning {
+    pub code: String,
+    pub message: String,
+}
+
+impl TransferWarning {
+    pub fn skipped_unsupported_entry(path: impl std::fmt::Display) -> Self {
+        Self {
+            code: "transfer_skipped_unsupported_entry".to_string(),
+            message: format!("Skipped unsupported transfer source entry `{path}`."),
+        }
+    }
+
+    pub fn skipped_symlink(path: impl std::fmt::Display) -> Self {
+        Self {
+            code: "transfer_skipped_symlink".to_string(),
+            message: format!("Skipped symlink transfer source entry `{path}`."),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransferExportRequest {
     pub path: String,
     #[serde(default, skip_serializing_if = "TransferCompression::is_none")]
     pub compression: TransferCompression,
+    #[serde(default)]
+    pub transfer_mode: TransferMode,
+    #[serde(default)]
+    pub symlink_mode: TransferSymlinkMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -150,6 +197,10 @@ pub struct TransferImportRequest {
     pub create_parent: bool,
     pub source_type: TransferSourceType,
     pub compression: TransferCompression,
+    #[serde(default)]
+    pub transfer_mode: TransferMode,
+    #[serde(default)]
+    pub symlink_mode: TransferSymlinkMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -159,6 +210,8 @@ pub struct TransferImportResponse {
     pub files_copied: u64,
     pub directories_copied: u64,
     pub replaced: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<TransferWarning>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

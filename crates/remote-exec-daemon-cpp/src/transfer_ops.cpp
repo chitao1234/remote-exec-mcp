@@ -7,6 +7,7 @@
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <set>
 #include <vector>
 
 #ifdef _WIN32
@@ -38,7 +39,22 @@ struct TarHeaderView {
     std::string path;
     char typeflag;
     std::uint64_t size;
+    std::string link_name;
 };
+
+struct ExportOptions {
+    std::string transfer_mode;
+    std::string symlink_mode;
+};
+
+struct ExportContext {
+    ExportOptions options;
+    std::vector<TransferWarning> warnings;
+    std::set<std::string> followed_directories;
+};
+
+void handle_unsupported_entry(ExportContext* context, const std::string& path);
+void handle_skipped_symlink(ExportContext* context, const std::string& path);
 
 bool is_absolute_path(const std::string& path) {
 #ifdef _WIN32
@@ -87,9 +103,19 @@ bool is_regular_file(const std::string& path) {
     return stat_path_no_follow(path, &st) && (st.st_mode & S_IFREG) != 0;
 }
 
+bool is_regular_file_follow(const std::string& path) {
+    struct stat st;
+    return stat(path.c_str(), &st) == 0 && (st.st_mode & S_IFREG) != 0;
+}
+
 bool is_directory(const std::string& path) {
     struct stat st;
     return stat_path_no_follow(path, &st) && (st.st_mode & S_IFDIR) != 0;
+}
+
+bool is_directory_follow(const std::string& path) {
+    struct stat st;
+    return stat(path.c_str(), &st) == 0 && (st.st_mode & S_IFDIR) != 0;
 }
 
 char os_separator() {
@@ -177,6 +203,26 @@ void write_binary_file(const std::string& path, const std::string& bytes) {
         throw std::runtime_error("unable to write destination file");
     }
     output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+}
+
+void write_symlink(const std::string& target, const std::string& path) {
+#ifdef _WIN32
+    (void)target;
+    throw std::runtime_error("archive contains unsupported symlink " + path);
+#else
+    ensure_parent_directory(path, true);
+    if (path_exists(path)) {
+        if (is_directory(path)) {
+            throw std::runtime_error("destination path is a directory");
+        }
+        if (std::remove(path.c_str()) != 0) {
+            throw std::runtime_error("unable to remove existing file " + path);
+        }
+    }
+    if (symlink(target.c_str(), path.c_str()) != 0) {
+        throw std::runtime_error("unable to create symlink " + path);
+    }
+#endif
 }
 
 std::vector<DirectoryEntry> list_directory_entries(const std::string& path) {
@@ -382,7 +428,8 @@ void append_tar_header(
     const std::string& path,
     char typeflag,
     std::uint64_t size,
-    std::uint64_t mode
+    std::uint64_t mode,
+    const std::string& link_name = std::string()
 ) {
     std::string header(TAR_BLOCK_SIZE, '\0');
     write_string_field(&header, 0, 100, truncate_path_for_header(path));
@@ -392,6 +439,9 @@ void append_tar_header(
     write_octal_field(&header, 124, 12, size);
     write_octal_field(&header, 136, 12, 0);
     header[156] = typeflag;
+    if (!link_name.empty()) {
+        write_string_field(&header, 157, 100, link_name);
+    }
     write_string_field(&header, 257, 6, "ustar ");
     header[263] = ' ';
     header[264] = '\0';
@@ -420,10 +470,23 @@ void append_file_entry(std::string* archive, const std::string& rel_path, const 
     append_padded_body(archive, body);
 }
 
+#ifndef _WIN32
+void append_symlink_entry(std::string* archive, const std::string& rel_path, const std::string& target) {
+    if (rel_path.size() > 100) {
+        append_gnu_long_name(archive, rel_path);
+    }
+    if (target.size() > 100) {
+        throw std::runtime_error("tar symlink target too long");
+    }
+    append_tar_header(archive, rel_path, '2', 0, 0777, target);
+}
+#endif
+
 void append_directory_contents(
     std::string* archive,
     const std::string& current_path,
-    const std::string& current_rel
+    const std::string& current_rel,
+    ExportContext* context
 ) {
     const std::vector<DirectoryEntry> entries = list_directory_entries(current_path);
     for (std::size_t i = 0; i < entries.size(); ++i) {
@@ -434,14 +497,55 @@ void append_directory_contents(
 
         if (entry.is_directory) {
             append_directory_entry(archive, child_rel);
-            append_directory_contents(archive, child_path, child_rel);
+            append_directory_contents(archive, child_path, child_rel, context);
             continue;
         }
         if (entry.is_symlink) {
+            if (context->options.symlink_mode == "reject") {
+                throw std::runtime_error("transfer source contains unsupported symlink " + child_path);
+            }
+            if (context->options.symlink_mode == "skip") {
+                handle_skipped_symlink(context, child_path);
+                continue;
+            }
+#ifdef _WIN32
             throw std::runtime_error("transfer source contains unsupported symlink " + child_path);
+#else
+            if (context->options.symlink_mode == "preserve") {
+                char target_buffer[4096];
+                const ssize_t target_len =
+                    readlink(child_path.c_str(), target_buffer, sizeof(target_buffer) - 1);
+                if (target_len < 0) {
+                    throw std::runtime_error("unable to read symlink " + child_path);
+                }
+                target_buffer[target_len] = '\0';
+                append_symlink_entry(archive, child_rel, std::string(target_buffer));
+                continue;
+            }
+            if (context->options.symlink_mode == "follow") {
+                if (is_directory_follow(child_path)) {
+                    if (context->followed_directories.count(child_path) != 0) {
+                        handle_skipped_symlink(context, child_path);
+                        continue;
+                    }
+                    context->followed_directories.insert(child_path);
+                    append_directory_entry(archive, child_rel);
+                    append_directory_contents(archive, child_path, child_rel, context);
+                    continue;
+                }
+                if (is_regular_file_follow(child_path)) {
+                    append_file_entry(archive, child_rel, read_binary_file(child_path));
+                    continue;
+                }
+                handle_unsupported_entry(context, child_path);
+                continue;
+            }
+            throw std::runtime_error("transfer source contains unsupported symlink " + child_path);
+#endif
         }
         if (!entry.is_regular_file) {
-            throw std::runtime_error("transfer source contains unsupported entry " + child_path);
+            handle_unsupported_entry(context, child_path);
+            continue;
         }
 
         append_file_entry(archive, child_rel, read_binary_file(child_path));
@@ -491,6 +595,44 @@ bool checksum_valid(const char* block) {
     return stored == computed;
 }
 
+void validate_transfer_options(const ExportOptions& options) {
+    if (options.transfer_mode != "lenient" && options.transfer_mode != "strict") {
+        throw std::runtime_error("unsupported transfer mode");
+    }
+    if (options.symlink_mode != "preserve" && options.symlink_mode != "follow" &&
+        options.symlink_mode != "skip" && options.symlink_mode != "reject") {
+        throw std::runtime_error("unsupported transfer symlink mode");
+    }
+}
+
+void add_warning(
+    std::vector<TransferWarning>* warnings,
+    const std::string& code,
+    const std::string& message
+) {
+    warnings->push_back(TransferWarning{code, message});
+}
+
+void handle_unsupported_entry(ExportContext* context, const std::string& path) {
+    if (context->options.transfer_mode == "lenient") {
+        add_warning(
+            &context->warnings,
+            "transfer_skipped_unsupported_entry",
+            "Skipped unsupported transfer source entry `" + path + "`."
+        );
+        return;
+    }
+    throw std::runtime_error("transfer source contains unsupported entry " + path);
+}
+
+void handle_skipped_symlink(ExportContext* context, const std::string& path) {
+    add_warning(
+        &context->warnings,
+        "transfer_skipped_symlink",
+        "Skipped symlink transfer source entry `" + path + "`."
+    );
+}
+
 std::string header_path(const char* block) {
     const std::string name = field_string(block, 100);
     const std::string prefix = field_string(block + 345, 155);
@@ -512,6 +654,7 @@ TarHeaderView parse_header(const char* block) {
         header_path(block),
         raw_type == '\0' ? '0' : raw_type,
         parse_octal_field(block + 124, 12),
+        field_string(block + 157, 100),
     };
 }
 
@@ -640,19 +783,41 @@ void ensure_no_existing_symlink_in_path(
     }
 }
 
-ExportedPayload export_directory_as_tar(const std::string& absolute_path) {
+ExportedPayload export_directory_as_tar(const std::string& absolute_path, ExportContext* context) {
     std::string archive;
     append_directory_entry(&archive, ".");
-    append_directory_contents(&archive, absolute_path, "");
+    append_directory_contents(&archive, absolute_path, "", context);
     append_archive_terminator(&archive);
-    return ExportedPayload{"directory", archive};
+    return ExportedPayload{"directory", archive, context->warnings};
 }
 
-ExportedPayload export_file_as_tar(const std::string& absolute_path) {
+ExportedPayload export_file_as_tar(const std::string& absolute_path, const ExportOptions& options) {
     std::string archive;
+#ifdef _WIN32
+    (void)options;
     append_file_entry(&archive, SINGLE_FILE_ENTRY, read_binary_file(absolute_path));
+#else
+    if (is_symlink_path(absolute_path)) {
+        if (options.symlink_mode == "preserve") {
+            char target_buffer[4096];
+            const ssize_t target_len =
+                readlink(absolute_path.c_str(), target_buffer, sizeof(target_buffer) - 1);
+            if (target_len < 0) {
+                throw std::runtime_error("unable to read symlink " + absolute_path);
+            }
+            target_buffer[target_len] = '\0';
+            append_symlink_entry(&archive, SINGLE_FILE_ENTRY, std::string(target_buffer));
+        } else if (options.symlink_mode == "follow") {
+            append_file_entry(&archive, SINGLE_FILE_ENTRY, read_binary_file(absolute_path));
+        } else {
+            throw std::runtime_error("transfer source contains unsupported symlink " + absolute_path);
+        }
+    } else {
+        append_file_entry(&archive, SINGLE_FILE_ENTRY, read_binary_file(absolute_path));
+    }
+#endif
     append_archive_terminator(&archive);
-    return ExportedPayload{"file", archive};
+    return ExportedPayload{"file", archive, std::vector<TransferWarning>()};
 }
 
 void ensure_zero_archive_tail(const std::string& archive, std::size_t offset) {
@@ -671,7 +836,8 @@ ImportSummary import_file_from_tar(
     const std::string& archive,
     const std::string& absolute_path,
     const std::string& overwrite_mode,
-    bool create_parent
+    bool create_parent,
+    const std::string& symlink_mode
 ) {
     const bool replaced = prepare_destination_path(absolute_path, "file", overwrite_mode, create_parent);
     ensure_not_existing_symlink(absolute_path);
@@ -681,7 +847,7 @@ ImportSummary import_file_from_tar(
     }
 
     const TarHeaderView header = parse_header(archive.data());
-    if (header.typeflag != '0') {
+    if (header.typeflag != '0' && header.typeflag != '2') {
         throw std::runtime_error("archive entry is not a regular file");
     }
     if (header.path != SINGLE_FILE_ENTRY) {
@@ -693,17 +859,27 @@ ImportSummary import_file_from_tar(
         throw std::runtime_error("truncated tar entry body");
     }
 
-    const std::string bytes = archive.substr(body_offset, static_cast<std::size_t>(header.size));
-    write_binary_file(absolute_path, bytes);
+    std::uint64_t bytes_copied = 0;
+    if (header.typeflag == '2') {
+        if (symlink_mode != "preserve") {
+            throw std::runtime_error("archive contains unsupported symlink " + absolute_path);
+        }
+        write_symlink(header.link_name, absolute_path);
+    } else {
+        const std::string bytes = archive.substr(body_offset, static_cast<std::size_t>(header.size));
+        write_binary_file(absolute_path, bytes);
+        bytes_copied = static_cast<std::uint64_t>(bytes.size());
+    }
 
     ensure_zero_archive_tail(archive, body_offset + padded_length(header.size));
 
     return ImportSummary{
         "file",
-        static_cast<std::uint64_t>(bytes.size()),
+        bytes_copied,
         1,
         0,
         replaced,
+        std::vector<TransferWarning>(),
     };
 }
 
@@ -712,12 +888,13 @@ ImportSummary import_directory_from_tar(
     const std::string& source_type,
     const std::string& absolute_path,
     const std::string& overwrite_mode,
-    bool create_parent
+    bool create_parent,
+    const std::string& symlink_mode
 ) {
     const bool replaced = prepare_destination_path(absolute_path, source_type, overwrite_mode, create_parent);
     make_directory_if_missing(absolute_path);
 
-    ImportSummary summary = {source_type, 0, 0, 1, replaced};
+    ImportSummary summary = {source_type, 0, 0, 1, replaced, std::vector<TransferWarning>()};
     std::size_t offset = 0;
     std::string pending_long_name;
 
@@ -760,6 +937,19 @@ ImportSummary import_directory_from_tar(
             continue;
         }
 
+        if (header.typeflag == '2') {
+            if (symlink_mode != "preserve") {
+                throw std::runtime_error("archive contains unsupported symlink");
+            }
+            if (relative_path == ".") {
+                throw std::runtime_error("archive symlink entry cannot target root");
+            }
+            write_symlink(header.link_name, output_path);
+            summary.files_copied += 1;
+            offset += padded_length(header.size);
+            continue;
+        }
+
         if (header.typeflag != '0') {
             throw std::runtime_error("archive contains unsupported entry");
         }
@@ -786,7 +976,15 @@ ImportSummary import_directory_from_tar(
 
 } // namespace
 
-ExportedPayload export_path(const std::string& absolute_path) {
+ExportedPayload export_path(
+    const std::string& absolute_path,
+    const std::string& transfer_mode,
+    const std::string& symlink_mode
+) {
+    ExportContext context;
+    context.options = ExportOptions{transfer_mode.empty() ? "lenient" : transfer_mode,
+                                    symlink_mode.empty() ? "preserve" : symlink_mode};
+    validate_transfer_options(context.options);
     if (!is_absolute_path(absolute_path)) {
         throw std::runtime_error("transfer path is not absolute");
     }
@@ -794,13 +992,21 @@ ExportedPayload export_path(const std::string& absolute_path) {
         throw std::runtime_error("transfer source missing");
     }
     if (is_symlink_path(absolute_path)) {
+#ifdef _WIN32
         throw std::runtime_error("transfer source contains unsupported symlink " + absolute_path);
+#else
+        if (context.options.symlink_mode == "reject" || context.options.symlink_mode == "skip") {
+            throw std::runtime_error("transfer source contains unsupported symlink " + absolute_path);
+        }
+#endif
     }
-    if (is_regular_file(absolute_path)) {
-        return export_file_as_tar(absolute_path);
+    if (is_regular_file(absolute_path) ||
+        (is_symlink_path(absolute_path) && context.options.symlink_mode == "preserve" && is_regular_file_follow(absolute_path))) {
+        return export_file_as_tar(absolute_path, context.options);
     }
-    if (is_directory(absolute_path)) {
-        return export_directory_as_tar(absolute_path);
+    if (is_directory(absolute_path) ||
+        (is_symlink_path(absolute_path) && context.options.symlink_mode == "follow" && is_directory_follow(absolute_path))) {
+        return export_directory_as_tar(absolute_path, &context);
     }
     throw std::runtime_error("transfer source must be a regular file or directory");
 }
@@ -823,14 +1029,25 @@ ImportSummary import_path(
     const std::string& source_type,
     const std::string& absolute_path,
     const std::string& overwrite_mode,
-    bool create_parent
+    bool create_parent,
+    const std::string& transfer_mode,
+    const std::string& symlink_mode
 ) {
+    ExportOptions options{transfer_mode.empty() ? "lenient" : transfer_mode,
+                          symlink_mode.empty() ? "preserve" : symlink_mode};
+    validate_transfer_options(options);
     if (!is_absolute_path(absolute_path)) {
         throw std::runtime_error("transfer path is not absolute");
     }
 
     if (source_type == "file") {
-        return import_file_from_tar(bytes, absolute_path, overwrite_mode, create_parent);
+        return import_file_from_tar(
+            bytes,
+            absolute_path,
+            overwrite_mode,
+            create_parent,
+            options.symlink_mode
+        );
     }
     if (source_type == "directory") {
         return import_directory_from_tar(
@@ -838,7 +1055,8 @@ ImportSummary import_path(
             source_type,
             absolute_path,
             overwrite_mode,
-            create_parent
+            create_parent,
+            options.symlink_mode
         );
     }
     if (source_type == "multiple") {
@@ -847,7 +1065,8 @@ ImportSummary import_path(
             source_type,
             absolute_path,
             overwrite_mode,
-            create_parent
+            create_parent,
+            options.symlink_mode
         );
     }
     throw std::runtime_error("unsupported transfer source type");

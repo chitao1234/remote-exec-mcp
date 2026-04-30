@@ -134,8 +134,11 @@ default_workdir = /work
 - transfer compression is not supported
 - `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles
 - transfer imports support `fail`, `merge`, and `replace` overwrite modes; `merge` overlays compatible existing destinations without deleting unrelated directory entries
+- POSIX transfer exports skip unsupported special entries in directory trees by default and report warnings; strict mode fails instead
+- POSIX transfer symlink modes support preserving, following, skipping, or rejecting symlinks
+- Windows XP-compatible transfer builds do not support preserving or following symlinks; use skip or reject modes
 - transfer payloads use GNU tar for files and directories
 - single-file transfers use the fixed archive entry `.remote-exec-file`
-- unsupported archive entries remain rejected: symlinks, hard links, special files, sparse entries, and malformed paths
+- unsupported archive entries remain rejected: hard links, special files unless skipped during lenient export, sparse entries, and malformed paths
 - broker targets that point at this daemon must use `http://...` plus `allow_insecure_http = true`
 - optional `http_auth_bearer_token` can require `Authorization: Bearer ...` from the broker, but it still does not encrypt plain-HTTP traffic

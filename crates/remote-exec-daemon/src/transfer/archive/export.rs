@@ -2,34 +2,44 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use remote_exec_proto::path::basename_for_policy;
-use remote_exec_proto::rpc::{TransferCompression, TransferSourceType};
+use remote_exec_proto::rpc::{
+    TransferCompression, TransferMode, TransferSourceType, TransferSymlinkMode, TransferWarning,
+};
 use remote_exec_proto::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
 
 use super::codec::{open_archive_reader, with_archive_builder};
 use super::entry::{ensure_supported_archive_entry_type, normalize_archive_entry_path};
-use super::{BundledArchiveSource, ExportedArchive, SINGLE_FILE_ENTRY, host_path, host_policy};
+use super::{
+    BundledArchiveSource, ExportPathResult, ExportedArchive, SINGLE_FILE_ENTRY, host_path,
+    host_policy,
+};
 
 pub async fn export_path_to_archive(
     path: &str,
     compression: TransferCompression,
+    transfer_mode: TransferMode,
+    symlink_mode: TransferSymlinkMode,
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<ExportedArchive> {
     let temp = tempfile::NamedTempFile::new()?;
     let temp_path = temp.into_temp_path();
-    let source_type = export_path_to_file(
+    let exported = export_path_to_file(
         path,
         temp_path.as_ref(),
         compression.clone(),
+        transfer_mode,
+        symlink_mode,
         sandbox,
         windows_posix_root,
     )
     .await?;
 
     Ok(ExportedArchive {
-        source_type,
+        source_type: exported.source_type,
         compression,
         temp_path,
+        warnings: exported.warnings,
     })
 }
 
@@ -37,9 +47,11 @@ pub async fn export_path_to_file(
     path: &str,
     archive_path: &Path,
     compression: TransferCompression,
+    transfer_mode: TransferMode,
+    symlink_mode: TransferSymlinkMode,
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
-) -> anyhow::Result<TransferSourceType> {
+) -> anyhow::Result<ExportPathResult> {
     let source_text = path.to_string();
     anyhow::ensure!(
         crate::host_path::is_input_path_absolute(&source_text, windows_posix_root),
@@ -49,20 +61,32 @@ pub async fn export_path_to_file(
     authorize_path(host_policy(), sandbox, SandboxAccess::Read, &path)?;
 
     let metadata = tokio::fs::symlink_metadata(&path).await?;
-    let source_type = export_source_type_from_metadata(&path, &metadata)?;
+    let source_type = export_source_type_from_metadata(&path, &metadata, &symlink_mode)?;
 
     let archive_path = archive_path.to_path_buf();
     let source_path = path.to_path_buf();
     let source_type_for_task = source_type.clone();
 
-    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+    let warnings = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<TransferWarning>> {
+        let mut warnings = Vec::new();
         with_archive_builder(&archive_path, &compression, |builder| {
-            append_export_source(builder, &source_path, source_type_for_task)
-        })
+            warnings = append_export_source(
+                builder,
+                &source_path,
+                source_type_for_task,
+                &transfer_mode,
+                &symlink_mode,
+            )?;
+            Ok(())
+        })?;
+        Ok(warnings)
     })
     .await??;
 
-    Ok(source_type)
+    Ok(ExportPathResult {
+        source_type,
+        warnings,
+    })
 }
 
 pub async fn bundle_archives_to_file(
@@ -88,12 +112,31 @@ pub async fn bundle_archives_to_file(
 fn export_source_type_from_metadata(
     path: &Path,
     metadata: &std::fs::Metadata,
+    symlink_mode: &TransferSymlinkMode,
 ) -> anyhow::Result<TransferSourceType> {
     if metadata.file_type().is_symlink() {
-        anyhow::bail!(
-            "transfer source contains unsupported symlink `{}`",
-            path.display()
-        );
+        match symlink_mode {
+            TransferSymlinkMode::Preserve => return Ok(TransferSourceType::File),
+            TransferSymlinkMode::Follow => {
+                let target_metadata = std::fs::metadata(path)?;
+                if target_metadata.is_file() {
+                    return Ok(TransferSourceType::File);
+                }
+                if target_metadata.is_dir() {
+                    return Ok(TransferSourceType::Directory);
+                }
+                anyhow::bail!(
+                    "transfer source symlink target `{}` is not a regular file or directory",
+                    path.display()
+                );
+            }
+            TransferSymlinkMode::Skip | TransferSymlinkMode::Reject => {
+                anyhow::bail!(
+                    "transfer source contains unsupported symlink `{}`",
+                    path.display()
+                );
+            }
+        }
     }
     if metadata.file_type().is_file() {
         return Ok(TransferSourceType::File);
@@ -112,52 +155,151 @@ fn append_export_source<W: Write>(
     builder: &mut tar::Builder<W>,
     source_path: &Path,
     source_type: TransferSourceType,
-) -> anyhow::Result<()> {
+    transfer_mode: &TransferMode,
+    symlink_mode: &TransferSymlinkMode,
+) -> anyhow::Result<Vec<TransferWarning>> {
+    let mut warnings = Vec::new();
     match source_type {
         TransferSourceType::File => {
-            builder.append_path_with_name(source_path, SINGLE_FILE_ENTRY)?;
+            append_file_or_symlink_entry(
+                builder,
+                source_path,
+                Path::new(SINGLE_FILE_ENTRY),
+                symlink_mode,
+            )?;
         }
         TransferSourceType::Directory => {
             builder.append_dir(".", source_path)?;
-            append_directory_entries(builder, source_path, source_path)?;
+            append_directory_entries(
+                builder,
+                source_path,
+                source_path,
+                transfer_mode,
+                symlink_mode,
+                &mut warnings,
+            )?;
         }
         TransferSourceType::Multiple => {
             anyhow::bail!("single-path export cannot produce a multi-source archive");
         }
     }
 
-    Ok(())
+    Ok(warnings)
 }
 
 fn append_directory_entries<W: Write>(
     builder: &mut tar::Builder<W>,
     root: &Path,
     current: &Path,
+    transfer_mode: &TransferMode,
+    symlink_mode: &TransferSymlinkMode,
+    warnings: &mut Vec<TransferWarning>,
 ) -> anyhow::Result<()> {
     for entry in std::fs::read_dir(current)? {
         let entry = entry?;
         let path = entry.path();
         let rel = path.strip_prefix(root)?;
         let metadata = std::fs::symlink_metadata(&path)?;
-        anyhow::ensure!(
-            !metadata.file_type().is_symlink(),
-            "transfer source contains unsupported symlink `{}`",
-            path.display()
-        );
+        if metadata.file_type().is_symlink() {
+            match symlink_mode {
+                TransferSymlinkMode::Preserve => {
+                    append_symlink_entry(builder, &path, rel)?;
+                }
+                TransferSymlinkMode::Follow => {
+                    let target_metadata = std::fs::metadata(&path)?;
+                    if target_metadata.is_dir() {
+                        builder.append_dir(rel, &path)?;
+                        append_directory_entries(
+                            builder,
+                            root,
+                            &path,
+                            transfer_mode,
+                            symlink_mode,
+                            warnings,
+                        )?;
+                    } else if target_metadata.is_file() {
+                        builder.append_path_with_name(&path, rel)?;
+                    } else {
+                        handle_unsupported_entry(&path, transfer_mode, warnings)?;
+                    }
+                }
+                TransferSymlinkMode::Skip => {
+                    warnings.push(TransferWarning::skipped_symlink(path.display()));
+                }
+                TransferSymlinkMode::Reject => anyhow::bail!(
+                    "transfer source contains unsupported symlink `{}`",
+                    path.display()
+                ),
+            }
+            continue;
+        }
         if metadata.is_dir() {
             builder.append_dir(rel, &path)?;
-            append_directory_entries(builder, root, &path)?;
+            append_directory_entries(builder, root, &path, transfer_mode, symlink_mode, warnings)?;
         } else if metadata.is_file() {
             builder.append_path_with_name(&path, rel)?;
         } else {
-            anyhow::bail!(
-                "transfer source contains unsupported entry `{}`",
-                path.display()
-            );
+            handle_unsupported_entry(&path, transfer_mode, warnings)?;
         }
     }
 
     Ok(())
+}
+
+fn append_file_or_symlink_entry<W: Write>(
+    builder: &mut tar::Builder<W>,
+    source_path: &Path,
+    archive_path: &Path,
+    symlink_mode: &TransferSymlinkMode,
+) -> anyhow::Result<()> {
+    let metadata = std::fs::symlink_metadata(source_path)?;
+    if metadata.file_type().is_symlink() {
+        match symlink_mode {
+            TransferSymlinkMode::Preserve => {
+                append_symlink_entry(builder, source_path, archive_path)?;
+            }
+            TransferSymlinkMode::Follow => {
+                builder.append_path_with_name(source_path, archive_path)?
+            }
+            TransferSymlinkMode::Skip | TransferSymlinkMode::Reject => anyhow::bail!(
+                "transfer source contains unsupported symlink `{}`",
+                source_path.display()
+            ),
+        }
+    } else {
+        builder.append_path_with_name(source_path, archive_path)?;
+    }
+    Ok(())
+}
+
+fn append_symlink_entry<W: Write>(
+    builder: &mut tar::Builder<W>,
+    source_path: &Path,
+    archive_path: &Path,
+) -> anyhow::Result<()> {
+    let target = std::fs::read_link(source_path)?;
+    let mut header = tar::Header::new_gnu();
+    header.set_entry_type(tar::EntryType::Symlink);
+    header.set_size(0);
+    builder.append_link(&mut header, archive_path, target)?;
+    Ok(())
+}
+
+fn handle_unsupported_entry(
+    path: &Path,
+    transfer_mode: &TransferMode,
+    warnings: &mut Vec<TransferWarning>,
+) -> anyhow::Result<()> {
+    match transfer_mode {
+        TransferMode::Lenient => {
+            warnings.push(TransferWarning::skipped_unsupported_entry(path.display()));
+            Ok(())
+        }
+        TransferMode::Strict => anyhow::bail!(
+            "transfer source contains unsupported entry `{}`",
+            path.display()
+        ),
+    }
 }
 
 fn append_source_archive<W: Write>(

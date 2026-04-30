@@ -6,7 +6,7 @@ use remote_exec_proto::path::{
 };
 use remote_exec_proto::rpc::{
     TransferCompression, TransferImportRequest, TransferImportResponse, TransferPathInfoResponse,
-    TransferSourceType,
+    TransferSourceType, TransferWarning,
 };
 use remote_exec_proto::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
 
@@ -18,20 +18,31 @@ pub struct BundledArchiveSource {
     pub archive_path: PathBuf,
 }
 
+pub struct ExportedArchive {
+    pub source_type: TransferSourceType,
+    pub warnings: Vec<TransferWarning>,
+}
+
 pub async fn export_path_to_archive(
     path: &str,
     archive_path: &Path,
-    compression: TransferCompression,
+    request: &remote_exec_proto::rpc::TransferExportRequest,
     sandbox: Option<&CompiledFilesystemSandbox>,
-) -> anyhow::Result<TransferSourceType> {
-    remote_exec_daemon::transfer::archive::export_path_to_file(
+) -> anyhow::Result<ExportedArchive> {
+    let exported = remote_exec_daemon::transfer::archive::export_path_to_file(
         path,
         archive_path,
-        compression,
+        request.compression.clone(),
+        request.transfer_mode.clone(),
+        request.symlink_mode.clone(),
         sandbox,
         None,
     )
-    .await
+    .await?;
+    Ok(ExportedArchive {
+        source_type: exported.source_type,
+        warnings: exported.warnings,
+    })
 }
 
 pub async fn import_archive_from_file(

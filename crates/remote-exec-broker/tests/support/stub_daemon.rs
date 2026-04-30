@@ -17,9 +17,9 @@ use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWarning, ExecWriteRequest, HealthCheckResponse,
     ImageReadRequest, ImageReadResponse, PatchApplyRequest, PatchApplyResponse, RpcErrorBody,
     TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER,
-    TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER, TargetInfoResponse,
-    TransferCompression, TransferExportRequest, TransferImportResponse, TransferPathInfoRequest,
-    TransferPathInfoResponse, TransferSourceType,
+    TRANSFER_MODE_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
+    TRANSFER_SYMLINK_MODE_HEADER, TargetInfoResponse, TransferCompression, TransferExportRequest,
+    TransferImportResponse, TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType,
 };
 use tar::{Builder, EntryType, Header};
 use tokio::sync::Mutex;
@@ -48,6 +48,8 @@ pub struct StubTransferImportCapture {
     pub compression: String,
     pub overwrite: String,
     pub create_parent: String,
+    pub transfer_mode: String,
+    pub symlink_mode: String,
     pub body_len: usize,
     pub body: Vec<u8>,
 }
@@ -656,6 +658,16 @@ async fn transfer_import(
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default()
         .to_string();
+    let transfer_mode = headers
+        .get(TRANSFER_MODE_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let symlink_mode = headers
+        .get(TRANSFER_SYMLINK_MODE_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
 
     *state.last_transfer_import.lock().await = Some(StubTransferImportCapture {
         destination_path,
@@ -663,6 +675,8 @@ async fn transfer_import(
         compression: compression.clone(),
         overwrite: overwrite.clone(),
         create_parent,
+        transfer_mode,
+        symlink_mode,
         body_len: body.len(),
         body: body.to_vec(),
     });
@@ -681,6 +695,7 @@ async fn transfer_import(
         files_copied,
         directories_copied,
         replaced: overwrite == "replace",
+        warnings: Vec::new(),
     }))
 }
 

@@ -11,7 +11,7 @@ pub(super) fn ensure_supported_archive_entry_type(
     raw_path: &Path,
 ) -> anyhow::Result<()> {
     anyhow::ensure!(
-        entry_type.is_dir() || entry_type.is_file(),
+        entry_type.is_dir() || entry_type.is_file() || entry_type.is_symlink(),
         "archive contains unsupported entry `{}`",
         raw_path.display()
     );

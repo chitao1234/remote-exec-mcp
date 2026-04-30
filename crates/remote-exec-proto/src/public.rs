@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::rpc::ExecWarning;
+use crate::rpc::{ExecWarning, TransferWarning};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -104,6 +104,34 @@ impl Default for TransferDestinationMode {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
+pub enum TransferMode {
+    Lenient,
+    Strict,
+}
+
+impl Default for TransferMode {
+    fn default() -> Self {
+        Self::Lenient
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferSymlinkMode {
+    Preserve,
+    Follow,
+    Skip,
+    Reject,
+}
+
+impl Default for TransferSymlinkMode {
+    fn default() -> Self {
+        Self::Preserve
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum TransferSourceType {
     File,
     Directory,
@@ -129,6 +157,10 @@ pub struct TransferFilesInput {
     pub overwrite: TransferOverwrite,
     #[serde(default)]
     pub destination_mode: TransferDestinationMode,
+    #[serde(default)]
+    pub transfer_mode: TransferMode,
+    #[serde(default)]
+    pub symlink_mode: TransferSymlinkMode,
     pub create_parent: bool,
 }
 
@@ -140,11 +172,15 @@ pub struct TransferFilesResult {
     pub destination: TransferEndpoint,
     pub resolved_destination: TransferEndpoint,
     pub destination_mode: TransferDestinationMode,
+    pub transfer_mode: TransferMode,
+    pub symlink_mode: TransferSymlinkMode,
     pub source_type: TransferSourceType,
     pub bytes_copied: u64,
     pub files_copied: u64,
     pub directories_copied: u64,
     pub replaced: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<TransferWarning>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]

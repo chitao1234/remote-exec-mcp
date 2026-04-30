@@ -2,14 +2,21 @@ use futures_util::TryStreamExt;
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
     PatchApplyRequest, PatchApplyResponse, RpcErrorBody, TRANSFER_COMPRESSION_HEADER,
-    TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER,
-    TRANSFER_SOURCE_TYPE_HEADER, TargetInfoResponse, TransferCompression, TransferExportRequest,
+    TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_MODE_HEADER,
+    TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER, TRANSFER_SYMLINK_MODE_HEADER,
+    TRANSFER_WARNINGS_HEADER, TargetInfoResponse, TransferCompression, TransferExportRequest,
     TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
-    TransferPathInfoResponse, TransferSourceType,
+    TransferPathInfoResponse, TransferSourceType, TransferWarning,
 };
 use reqwest::header::{AUTHORIZATION, CONNECTION, CONTENT_LENGTH, HeaderValue};
 
 use crate::config::{TargetConfig, TargetTransportKind};
+
+#[derive(Debug, Clone)]
+pub struct TransferExportResponse {
+    pub source_type: TransferSourceType,
+    pub warnings: Vec<TransferWarning>,
+}
 
 #[derive(Debug)]
 pub enum DaemonClientError {
@@ -130,7 +137,7 @@ impl DaemonClient {
         &self,
         req: &TransferExportRequest,
         archive_path: &std::path::Path,
-    ) -> Result<TransferSourceType, DaemonClientError> {
+    ) -> Result<TransferExportResponse, DaemonClientError> {
         let started = std::time::Instant::now();
         tracing::debug!(
             target = %self.target_name,
@@ -140,6 +147,7 @@ impl DaemonClient {
         );
         let response = self.send_transfer_export_request(req, started).await?;
         let source_type = self.transfer_export_source_type(req, response.headers())?;
+        let warnings = self.transfer_warnings(response.headers())?;
         self.write_transfer_export_archive(archive_path, response)
             .await?;
         tracing::debug!(
@@ -149,7 +157,10 @@ impl DaemonClient {
             elapsed_ms = started.elapsed().as_millis() as u64,
             "daemon transfer export completed"
         );
-        Ok(source_type)
+        Ok(TransferExportResponse {
+            source_type,
+            warnings,
+        })
     }
 
     pub async fn transfer_import_from_file(
@@ -241,6 +252,37 @@ impl DaemonClient {
         Ok(source_type)
     }
 
+    fn transfer_warnings(
+        &self,
+        headers: &reqwest::header::HeaderMap,
+    ) -> Result<Vec<TransferWarning>, DaemonClientError> {
+        let Some(raw) = headers.get(TRANSFER_WARNINGS_HEADER) else {
+            return Ok(Vec::new());
+        };
+        let raw = raw.to_str().map_err(|err| {
+            DaemonClientError::Decode(anyhow::anyhow!(
+                "invalid transfer warnings header from `{}`: {err}",
+                self.target_name
+            ))
+        })?;
+
+        use base64::Engine as _;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(raw)
+            .map_err(|err| {
+                DaemonClientError::Decode(anyhow::anyhow!(
+                    "invalid transfer warnings header from `{}`: {err}",
+                    self.target_name
+                ))
+            })?;
+        serde_json::from_slice(&bytes).map_err(|err| {
+            DaemonClientError::Decode(anyhow::anyhow!(
+                "invalid transfer warnings JSON from `{}`: {err}",
+                self.target_name
+            ))
+        })
+    }
+
     async fn write_transfer_export_archive(
         &self,
         archive_path: &std::path::Path,
@@ -284,6 +326,14 @@ impl DaemonClient {
             .header(
                 TRANSFER_COMPRESSION_HEADER,
                 format_transfer_compression(&req.compression).to_string(),
+            )
+            .header(
+                TRANSFER_MODE_HEADER,
+                format_transfer_mode(&req.transfer_mode).to_string(),
+            )
+            .header(
+                TRANSFER_SYMLINK_MODE_HEADER,
+                format_transfer_symlink_mode(&req.symlink_mode).to_string(),
             )
             .body(body)
             .send()
@@ -464,6 +514,24 @@ fn format_transfer_overwrite(
         remote_exec_proto::rpc::TransferOverwriteMode::Fail => "fail",
         remote_exec_proto::rpc::TransferOverwriteMode::Merge => "merge",
         remote_exec_proto::rpc::TransferOverwriteMode::Replace => "replace",
+    }
+}
+
+fn format_transfer_mode(mode: &remote_exec_proto::rpc::TransferMode) -> &'static str {
+    match mode {
+        remote_exec_proto::rpc::TransferMode::Lenient => "lenient",
+        remote_exec_proto::rpc::TransferMode::Strict => "strict",
+    }
+}
+
+fn format_transfer_symlink_mode(
+    mode: &remote_exec_proto::rpc::TransferSymlinkMode,
+) -> &'static str {
+    match mode {
+        remote_exec_proto::rpc::TransferSymlinkMode::Preserve => "preserve",
+        remote_exec_proto::rpc::TransferSymlinkMode::Follow => "follow",
+        remote_exec_proto::rpc::TransferSymlinkMode::Skip => "skip",
+        remote_exec_proto::rpc::TransferSymlinkMode::Reject => "reject",
     }
 }
 

@@ -6,7 +6,8 @@ use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use remote_exec_broker::client::{Connection, RemoteExecClient, ToolResponse};
 use remote_exec_proto::public::{
     ApplyPatchInput, ExecCommandInput, ListTargetsInput, TransferDestinationMode, TransferEndpoint,
-    TransferFilesInput, TransferOverwrite, ViewImageInput, WriteStdinInput,
+    TransferFilesInput, TransferMode, TransferOverwrite, TransferSymlinkMode, ViewImageInput,
+    WriteStdinInput,
 };
 use tokio::io::AsyncReadExt;
 
@@ -152,6 +153,12 @@ struct TransferFilesArgs {
     #[arg(long, value_enum, default_value_t = CliTransferDestinationMode::Auto)]
     destination_mode: CliTransferDestinationMode,
 
+    #[arg(long, value_enum, default_value_t = CliTransferMode::Lenient)]
+    transfer_mode: CliTransferMode,
+
+    #[arg(long, value_enum, default_value_t = CliTransferSymlinkMode::Preserve)]
+    symlink_mode: CliTransferSymlinkMode,
+
     #[arg(long, default_value_t = false)]
     create_parent: bool,
 }
@@ -186,6 +193,40 @@ impl From<CliTransferDestinationMode> for TransferDestinationMode {
             CliTransferDestinationMode::Auto => Self::Auto,
             CliTransferDestinationMode::Exact => Self::Exact,
             CliTransferDestinationMode::IntoDirectory => Self::IntoDirectory,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum)]
+enum CliTransferMode {
+    Lenient,
+    Strict,
+}
+
+impl From<CliTransferMode> for TransferMode {
+    fn from(value: CliTransferMode) -> Self {
+        match value {
+            CliTransferMode::Lenient => Self::Lenient,
+            CliTransferMode::Strict => Self::Strict,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum)]
+enum CliTransferSymlinkMode {
+    Preserve,
+    Follow,
+    Skip,
+    Reject,
+}
+
+impl From<CliTransferSymlinkMode> for TransferSymlinkMode {
+    fn from(value: CliTransferSymlinkMode) -> Self {
+        match value {
+            CliTransferSymlinkMode::Preserve => Self::Preserve,
+            CliTransferSymlinkMode::Follow => Self::Follow,
+            CliTransferSymlinkMode::Skip => Self::Skip,
+            CliTransferSymlinkMode::Reject => Self::Reject,
         }
     }
 }
@@ -341,6 +382,8 @@ fn transfer_files_input(args: TransferFilesArgs) -> anyhow::Result<TransferFiles
         destination: parse_transfer_endpoint(&args.destination)?,
         overwrite: args.overwrite.into(),
         destination_mode: args.destination_mode.into(),
+        transfer_mode: args.transfer_mode.into(),
+        symlink_mode: args.symlink_mode.into(),
         create_parent: args.create_parent,
     })
 }

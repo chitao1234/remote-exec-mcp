@@ -2,7 +2,8 @@ use std::time::Instant;
 
 use remote_exec_proto::public::{
     TransferDestinationMode, TransferEndpoint, TransferFilesResult,
-    TransferSourceType as PublicTransferSourceType,
+    TransferMode as PublicTransferMode, TransferSourceType as PublicTransferSourceType,
+    TransferSymlinkMode as PublicTransferSymlinkMode,
 };
 use remote_exec_proto::rpc::{
     TransferCompression as RpcTransferCompression, TransferImportResponse,
@@ -17,6 +18,8 @@ pub(super) fn finish_transfer(
     requested_destination: TransferEndpoint,
     destination: TransferEndpoint,
     destination_mode: TransferDestinationMode,
+    transfer_mode: PublicTransferMode,
+    symlink_mode: PublicTransferSymlinkMode,
     source_type: RpcTransferSourceType,
     summary: TransferImportResponse,
 ) -> anyhow::Result<ToolCallOutput> {
@@ -28,6 +31,8 @@ pub(super) fn finish_transfer(
         destination: requested_destination,
         resolved_destination: destination,
         destination_mode,
+        transfer_mode,
+        symlink_mode,
         source_type: match source_type {
             RpcTransferSourceType::File => PublicTransferSourceType::File,
             RpcTransferSourceType::Directory => PublicTransferSourceType::Directory,
@@ -37,6 +42,7 @@ pub(super) fn finish_transfer(
         files_copied: summary.files_copied,
         directories_copied: summary.directories_copied,
         replaced: summary.replaced,
+        warnings: summary.warnings,
     };
 
     tracing::info!(
@@ -71,7 +77,7 @@ fn format_transfer_text(result: &TransferFilesResult) -> String {
         _ => format!("{} sources", result.sources.len()),
     };
 
-    format!(
+    let summary = format!(
         "Transferred {} to `{}` on `{}`.\nFiles: {}, directories: {}, bytes: {}, replaced: {}",
         source_summary,
         result.resolved_destination.path,
@@ -80,5 +86,25 @@ fn format_transfer_text(result: &TransferFilesResult) -> String {
         result.directories_copied,
         result.bytes_copied,
         if result.replaced { "yes" } else { "no" }
-    )
+    );
+
+    if result.warnings.is_empty() {
+        return summary;
+    }
+
+    let warning_text = if result.warnings.len() == 1 {
+        format!("Warning: {}", result.warnings[0].message)
+    } else {
+        format!(
+            "Warnings:\n{}",
+            result
+                .warnings
+                .iter()
+                .map(|warning| format!("- {}", warning.message))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    };
+
+    format!("{warning_text}\n\n{summary}")
 }

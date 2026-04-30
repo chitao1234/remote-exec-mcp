@@ -1,6 +1,8 @@
 mod support;
 
 use std::io::{Cursor, Read};
+#[cfg(unix)]
+use std::process::Command;
 
 use rmcp::model::{CallToolRequestParams, PaginatedRequestParams};
 
@@ -176,6 +178,8 @@ async fn transfer_files_copies_local_file_and_reports_summary() {
     assert_eq!(result.structured_content["bytes_copied"], 6);
     assert_eq!(result.structured_content["replaced"], false);
     assert_eq!(result.structured_content["destination_mode"], "auto");
+    assert_eq!(result.structured_content["transfer_mode"], "lenient");
+    assert_eq!(result.structured_content["symlink_mode"], "preserve");
     assert_eq!(
         result.structured_content["resolved_destination"]["path"],
         destination.display().to_string()
@@ -210,6 +214,59 @@ async fn transfer_files_defaults_to_merge_overwrite() {
         .await
         .expect("transfer import capture");
     assert_eq!(capture.overwrite, "merge");
+    assert_eq!(capture.transfer_mode, "lenient");
+    assert_eq!(capture.symlink_mode, "preserve");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn transfer_files_leniently_skips_local_special_files_with_warning() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
+    let source = fixture._tempdir.path().join("source");
+    let destination = fixture._tempdir.path().join("dest");
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::write(source.join("regular.txt"), "regular\n").unwrap();
+    let fifo = source.join("events.fifo");
+    assert!(
+        Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    let result = fixture
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "local",
+                    "path": source.display().to_string()
+                },
+                "destination": {
+                    "target": "local",
+                    "path": destination.display().to_string()
+                },
+                "create_parent": false
+            }),
+        )
+        .await;
+
+    assert_eq!(
+        std::fs::read_to_string(destination.join("regular.txt")).unwrap(),
+        "regular\n"
+    );
+    assert!(!destination.join("events.fifo").exists());
+    assert_eq!(result.structured_content["source_type"], "directory");
+    assert_eq!(
+        result.structured_content["warnings"][0]["code"],
+        "transfer_skipped_unsupported_entry"
+    );
+    assert!(
+        result
+            .text_output
+            .contains("Skipped unsupported transfer source entry")
+    );
 }
 
 #[tokio::test]

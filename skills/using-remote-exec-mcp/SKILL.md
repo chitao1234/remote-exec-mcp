@@ -350,6 +350,8 @@ Input shape:
   },
   "overwrite": "merge",
   "destination_mode": "auto",
+  "transfer_mode": "lenient",
+  "symlink_mode": "preserve",
   "create_parent": true
 }
 ```
@@ -373,6 +375,18 @@ Supported `destination_mode` values:
 - `exact`
 - `into_directory`
 
+Supported `transfer_mode` values:
+
+- `lenient` (default)
+- `strict`
+
+Supported `symlink_mode` values:
+
+- `preserve` (default)
+- `follow`
+- `skip`
+- `reject`
+
 How to use it:
 
 - Use it for `local -> remote`, `remote -> local`, `remote -> remote`, and `local -> local`.
@@ -381,6 +395,8 @@ How to use it:
 - `destination_mode: "auto"` gives single-source transfers `cp`-like behavior: copy beneath `destination.path` when it is an existing directory or ends in a path separator, otherwise use it as the exact final path. Multi-source transfers treat `destination.path` as a directory root and place each source beneath it using that source's basename.
 - Use `destination_mode: "into_directory"` to copy each source beneath `destination.path` using the source basename.
 - `overwrite: "merge"` overlays files into an existing compatible destination without deleting unrelated directory entries; use `replace` only when deleting the existing destination first is intended.
+- `transfer_mode: "lenient"` skips unsupported special entries inside source directory trees such as device nodes, FIFOs, and sockets, and returns warnings. Use `strict` when such entries should fail the transfer.
+- `symlink_mode: "preserve"` copies symlinks as symlinks. Use `follow` to copy symlink targets, `skip` to omit symlinks with warnings, or `reject` to fail on symlinks. On Windows XP-compatible C++ daemon targets, use `skip` or `reject` because symlink preservation/following is unsupported there.
 - `create_parent: true` only creates missing parents for the exact final destination path or destination root you requested.
 - If a source target and the destination target are the same, those two paths still must differ.
 - Use endpoint-native absolute paths. Linux endpoints use Unix absolute paths such as `/srv/app/file.txt`. Windows endpoints accept drive-qualified paths such as `C:/work/file.txt` and also MSYS/Cygwin-style absolute paths such as `/c/work/file.txt` and `/cygdrive/c/work/file.txt`.
@@ -400,12 +416,14 @@ Structured result fields:
 - `files_copied`
 - `directories_copied`
 - `replaced`
+- `warnings`
 
 Result interpretation:
 
 - `sources` is always present.
 - `source` is only populated for single-source compatibility.
 - `source_type` can be `file`, `directory`, or `multiple`.
+- `warnings` is present when lenient transfer handling skips source entries or symlinks. The same warning text is also included in normal text output.
 
 Example: download a remote log to broker-host `local`:
 
@@ -469,8 +487,10 @@ Example: download a remote log to broker-host `local`:
 - On Windows XP-compatible C++ daemon targets, the supported shell is `cmd.exe`.
 - On C++ daemon targets, `apply_patch` supports both absolute patch paths and paths relative to `workdir`.
 - On C++ daemon targets, `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles.
+- On POSIX C++ daemon targets, transfer symlink modes are supported.
+- On Windows XP-compatible C++ daemon targets, symlink preservation and following are unsupported; use `symlink_mode: "skip"` or `symlink_mode: "reject"`.
 - On C++ daemon targets, transfer compression is never used; the broker falls back automatically.
-- Do not assume symlink-heavy or special-file transfers work on C++ daemon targets.
+- Do not assume hard links, sparse files, or special files other than lenient skips transfer on C++ daemon targets.
 
 ## Common Mistakes
 

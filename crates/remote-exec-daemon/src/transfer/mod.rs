@@ -7,14 +7,15 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use futures_util::TryStreamExt;
 use http_body_util::BodyExt;
 use remote_exec_proto::rpc::{
     RpcErrorBody, TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
-    TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
+    TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_MODE_HEADER, TRANSFER_OVERWRITE_HEADER,
+    TRANSFER_SOURCE_TYPE_HEADER, TRANSFER_SYMLINK_MODE_HEADER, TRANSFER_WARNINGS_HEADER,
     TransferCompression, TransferExportRequest, TransferImportRequest, TransferImportResponse,
-    TransferPathInfoRequest, TransferPathInfoResponse,
+    TransferPathInfoRequest, TransferPathInfoResponse, TransferWarning,
 };
 use remote_exec_proto::sandbox::SandboxError;
 
@@ -77,11 +78,15 @@ pub async fn export_path(
     tracing::info!(
         path = %req.path,
         compression = format_compression(&req.compression),
+        transfer_mode = ?req.transfer_mode,
+        symlink_mode = ?req.symlink_mode,
         "transfer export received"
     );
     let exported = archive::export_path_to_archive(
         &req.path,
         req.compression.clone(),
+        req.transfer_mode.clone(),
+        req.symlink_mode.clone(),
         state.sandbox.as_ref(),
         state.config.windows_posix_root.as_deref(),
     )
@@ -97,23 +102,29 @@ pub async fn export_path(
         path = %req.path,
         source_type = format_source_type(&exported.source_type),
         compression = format_compression(&exported.compression),
+        warnings = exported.warnings.len(),
         "transfer export completed"
     );
 
-    Ok((
-        [
-            (
-                TRANSFER_SOURCE_TYPE_HEADER,
-                format_source_type(&exported.source_type).to_string(),
-            ),
-            (
-                TRANSFER_COMPRESSION_HEADER,
-                format_compression(&exported.compression).to_string(),
-            ),
-        ],
-        body,
-    )
-        .into_response())
+    let mut response_builder = Response::builder()
+        .header(
+            TRANSFER_SOURCE_TYPE_HEADER,
+            format_source_type(&exported.source_type),
+        )
+        .header(
+            TRANSFER_COMPRESSION_HEADER,
+            format_compression(&exported.compression),
+        );
+    if !exported.warnings.is_empty() {
+        response_builder = response_builder.header(
+            TRANSFER_WARNINGS_HEADER,
+            encode_transfer_warnings(&exported.warnings)?,
+        );
+    }
+
+    response_builder
+        .body(body)
+        .map_err(|err| crate::exec::internal_error(err.into()))
 }
 
 pub async fn import_archive(
@@ -129,6 +140,8 @@ pub async fn import_archive(
         create_parent = request.create_parent,
         source_type = format_source_type(&request.source_type),
         compression = format_compression(&request.compression),
+        transfer_mode = ?request.transfer_mode,
+        symlink_mode = ?request.symlink_mode,
         "transfer import received"
     );
     let temp =
@@ -158,6 +171,7 @@ pub async fn import_archive(
         files_copied = summary.files_copied,
         directories_copied = summary.directories_copied,
         replaced = summary.replaced,
+        warnings = summary.warnings.len(),
         "transfer import completed"
     );
     Ok(Json(summary))
@@ -224,7 +238,21 @@ fn parse_import_request(
         source_type: parse_header_enum(headers, TRANSFER_SOURCE_TYPE_HEADER)?,
         compression: parse_optional_header_enum(headers, TRANSFER_COMPRESSION_HEADER)?
             .unwrap_or_default(),
+        transfer_mode: parse_optional_header_enum(headers, TRANSFER_MODE_HEADER)?
+            .unwrap_or_default(),
+        symlink_mode: parse_optional_header_enum(headers, TRANSFER_SYMLINK_MODE_HEADER)?
+            .unwrap_or_default(),
     })
+}
+
+fn encode_transfer_warnings(
+    warnings: &[TransferWarning],
+) -> Result<String, (StatusCode, Json<RpcErrorBody>)> {
+    use base64::Engine as _;
+
+    let json =
+        serde_json::to_vec(warnings).map_err(|err| crate::exec::internal_error(err.into()))?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(json))
 }
 
 fn header_string(

@@ -40,6 +40,8 @@ pub async fn transfer_files(
         compression = format_transfer_compression(&compression),
         overwrite = ?input.overwrite,
         destination_mode = ?input.destination_mode,
+        transfer_mode = ?input.transfer_mode,
+        symlink_mode = ?input.symlink_mode,
         create_parent = input.create_parent,
         "broker tool started"
     );
@@ -68,6 +70,8 @@ pub async fn transfer_files(
                 &destination,
                 &input.overwrite,
                 &compression,
+                &input.transfer_mode,
+                &input.symlink_mode,
                 input.create_parent,
             )
             .await?
@@ -79,6 +83,8 @@ pub async fn transfer_files(
                 &destination,
                 &input.overwrite,
                 &compression,
+                &input.transfer_mode,
+                &input.symlink_mode,
                 input.create_parent,
             )
             .await?
@@ -91,6 +97,8 @@ pub async fn transfer_files(
         requested_destination,
         destination,
         input.destination_mode,
+        input.transfer_mode,
+        input.symlink_mode,
         source_type,
         summary,
     )

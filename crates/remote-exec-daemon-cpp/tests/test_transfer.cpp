@@ -7,6 +7,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
 
 #include "transfer_ops.h"
 
@@ -83,6 +86,27 @@ static void append_tar_entry(
 
     archive->append(header);
     append_padded_bytes(archive, body);
+}
+
+static void append_tar_symlink(
+    std::string* archive,
+    const std::string& path,
+    const std::string& target
+) {
+    std::string header(512, '\0');
+    set_bytes(&header, 0, 100, path);
+    header.replace(100, 8, octal_field(8, 0777));
+    header.replace(108, 8, octal_field(8, 0));
+    header.replace(116, 8, octal_field(8, 0));
+    header.replace(124, 12, octal_field(12, 0));
+    header.replace(136, 12, octal_field(12, 0));
+    header[156] = '2';
+    set_bytes(&header, 157, 100, target);
+    set_bytes(&header, 257, 6, "ustar ");
+    set_bytes(&header, 263, 2, " \0");
+    write_checksum(&header);
+
+    archive->append(header);
 }
 
 static void append_gnu_long_name(std::string* archive, const std::string& path) {
@@ -350,7 +374,7 @@ static void assert_symlink_sources_are_rejected() {
 
     bool rejected = false;
     try {
-        (void)export_path((root / "link.txt").string());
+        (void)export_path((root / "link.txt").string(), "lenient", "reject");
     } catch (...) {
         rejected = true;
     }
@@ -358,11 +382,56 @@ static void assert_symlink_sources_are_rejected() {
 
     rejected = false;
     try {
-        (void)export_path((root / "source").string());
+        (void)export_path((root / "source").string(), "lenient", "reject");
     } catch (...) {
         rejected = true;
     }
     assert(rejected);
+}
+
+static void assert_symlink_sources_are_preserved_by_default() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-symlink-preserve";
+    fs::remove_all(root);
+    fs::create_directories(root / "source");
+    write_text(root / "source" / "regular.txt", "regular");
+    fs::create_symlink("regular.txt", root / "source" / "link.txt");
+
+    const ExportedPayload exported = export_path((root / "source").string());
+    assert(exported.source_type == "directory");
+    assert(exported.bytes.find("link.txt") != std::string::npos);
+}
+
+static void assert_lenient_transfer_skips_special_files_with_warning() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-lenient";
+    fs::remove_all(root);
+    fs::create_directories(root / "source");
+    write_text(root / "source" / "regular.txt", "regular");
+    const fs::path fifo = root / "source" / "events.fifo";
+    assert(mkfifo(fifo.c_str(), 0600) == 0);
+
+    const ExportedPayload exported = export_path((root / "source").string());
+    assert(exported.source_type == "directory");
+    assert(exported.warnings.size() == 1);
+    assert(exported.warnings[0].code == "transfer_skipped_unsupported_entry");
+    assert(exported.bytes.find("regular.txt") != std::string::npos);
+    assert(exported.bytes.find("events.fifo") == std::string::npos);
+}
+
+static void assert_symlink_import_preserves_links() {
+    std::string archive;
+    append_tar_file(archive, "alpha.txt", "alpha");
+    append_tar_symlink(&archive, "alpha-link", "alpha.txt");
+    finalize_tar(archive);
+
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-symlink-import";
+    fs::remove_all(root);
+
+    const ImportSummary imported =
+        import_path(archive, "directory", (root / "dest").string(), "replace", true);
+
+    assert(imported.files_copied == 2);
+    assert(read_text(root / "dest" / "alpha.txt") == "alpha");
+    assert(fs::read_symlink(root / "dest" / "alpha-link") == fs::path("alpha.txt"));
 }
 #endif
 
@@ -410,6 +479,9 @@ int main() {
     assert_directory_long_path_round_trip();
 #ifndef _WIN32
     assert_symlink_sources_are_rejected();
+    assert_symlink_sources_are_preserved_by_default();
+    assert_lenient_transfer_skips_special_files_with_warning();
+    assert_symlink_import_preserves_links();
 #endif
     assert_directory_traversal_is_rejected();
     assert_multiple_sources_import();
