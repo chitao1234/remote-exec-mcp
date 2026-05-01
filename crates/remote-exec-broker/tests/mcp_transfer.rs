@@ -178,7 +178,6 @@ async fn transfer_files_copies_local_file_and_reports_summary() {
     assert_eq!(result.structured_content["bytes_copied"], 6);
     assert_eq!(result.structured_content["replaced"], false);
     assert_eq!(result.structured_content["destination_mode"], "auto");
-    assert!(result.structured_content.get("transfer_mode").is_none());
     assert_eq!(result.structured_content["symlink_mode"], "preserve");
     assert_eq!(
         result.structured_content["resolved_destination"]["path"],

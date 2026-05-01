@@ -163,16 +163,16 @@ impl LocalDaemonClient {
 
 fn map_local_error(err: anyhow::Error) -> DaemonClientError {
     let (status, Json(body)) = remote_exec_daemon::transfer::map_transfer_error(err);
-    DaemonClientError::Rpc {
-        status: reqwest::StatusCode::from_u16(status.as_u16()).expect("valid status code"),
-        code: Some(body.code),
-        message: body.message,
-    }
+    local_rpc_error_body(status, body)
 }
 
-fn map_local_rpc_error(
+pub(crate) fn map_local_rpc_error(
     (status, Json(body)): (axum::http::StatusCode, Json<RpcErrorBody>),
 ) -> DaemonClientError {
+    local_rpc_error_body(status, body)
+}
+
+fn local_rpc_error_body(status: axum::http::StatusCode, body: RpcErrorBody) -> DaemonClientError {
     DaemonClientError::Rpc {
         status: reqwest::StatusCode::from_u16(status.as_u16()).expect("valid status code"),
         code: Some(body.code),

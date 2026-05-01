@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 use anyhow::Context;
-use axum::Json;
 use remote_exec_proto::port_forward::{
     ensure_nonzero_connect_endpoint, normalize_endpoint, udp_connector_endpoint,
 };
@@ -23,6 +22,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::TargetHandle;
 use crate::daemon_client::DaemonClientError;
+use crate::local_backend::map_local_rpc_error;
 
 #[derive(Clone)]
 pub enum SideHandle {
@@ -708,18 +708,5 @@ fn format_protocol(protocol: PublicForwardPortProtocol) -> &'static str {
     match protocol {
         PublicForwardPortProtocol::Tcp => "tcp",
         PublicForwardPortProtocol::Udp => "udp",
-    }
-}
-
-fn map_local_rpc_error(
-    (status, Json(body)): (
-        axum::http::StatusCode,
-        Json<remote_exec_proto::rpc::RpcErrorBody>,
-    ),
-) -> DaemonClientError {
-    DaemonClientError::Rpc {
-        status: reqwest::StatusCode::from_u16(status.as_u16()).expect("valid status code"),
-        code: Some(body.code),
-        message: body.message,
     }
 }

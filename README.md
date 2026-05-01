@@ -427,7 +427,7 @@ cargo test --workspace
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 make -C crates/remote-exec-daemon-cpp check-posix
-make -C crates/remote-exec-daemon-cpp all-windows-xp
+make -C crates/remote-exec-daemon-cpp check-windows-xp
 ```
 
 Run the broker end-to-end test only:
