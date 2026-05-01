@@ -6,10 +6,12 @@ use std::path::Path;
 
 use remote_exec_proto::rpc::{
     TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER,
-    TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER, TRANSFER_WARNINGS_HEADER,
-    TransferCompression, TransferExportRequest, TransferImportResponse, TransferPathInfoRequest,
-    TransferPathInfoResponse, TransferSourceType, TransferWarning,
+    TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER, TransferCompression,
+    TransferExportRequest, TransferImportResponse, TransferPathInfoRequest,
+    TransferPathInfoResponse, TransferSourceType,
 };
+#[cfg(unix)]
+use remote_exec_proto::rpc::{TRANSFER_WARNINGS_HEADER, TransferWarning};
 
 fn raw_tar_file_with_path(path: &Path, body: &[u8]) -> Vec<u8> {
     fn write_octal(field: &mut [u8], value: u64) {
