@@ -12,7 +12,6 @@ struct TransferWarning {
 struct ExportedPayload {
     std::string source_type;
     std::string bytes;
-    std::vector<TransferWarning> warnings;
 };
 
 struct ImportSummary {

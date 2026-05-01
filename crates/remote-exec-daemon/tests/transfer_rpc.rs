@@ -10,8 +10,6 @@ use remote_exec_proto::rpc::{
     TransferExportRequest, TransferImportResponse, TransferPathInfoRequest,
     TransferPathInfoResponse, TransferSourceType,
 };
-#[cfg(unix)]
-use remote_exec_proto::rpc::{TRANSFER_WARNINGS_HEADER, TransferWarning};
 
 fn raw_tar_file_with_path(path: &Path, body: &[u8]) -> Vec<u8> {
     fn write_octal(field: &mut [u8], value: u64) {
@@ -346,15 +344,12 @@ async fn export_directory_skips_special_files_with_warning() {
         .await;
 
     assert!(response.status().is_success());
-    let warning_header = response
-        .headers()
-        .get(TRANSFER_WARNINGS_HEADER)
-        .expect("warnings header")
-        .to_str()
-        .unwrap();
-    let warnings = decode_warning_header(warning_header);
-    assert_eq!(warnings.len(), 1);
-    assert_eq!(warnings[0].code, "transfer_skipped_unsupported_entry");
+    assert!(
+        response
+            .headers()
+            .get("x-remote-exec-warnings-bin")
+            .is_none()
+    );
 
     let bytes = response.bytes().await.unwrap().to_vec();
     let mut archive = tar::Archive::new(std::io::Cursor::new(bytes));
@@ -365,16 +360,36 @@ async fn export_directory_skips_special_files_with_warning() {
         .collect::<Vec<_>>();
     assert!(paths.iter().any(|path| path == Path::new("app.txt")));
     assert!(!paths.iter().any(|path| path == Path::new("events.fifo")));
-}
 
-#[cfg(unix)]
-fn decode_warning_header(raw: &str) -> Vec<TransferWarning> {
-    use base64::Engine as _;
+    let destination = fixture.workdir.join("imported");
+    let response = fixture
+        .raw_post_bytes(
+            "/v1/transfer/import",
+            &[
+                (
+                    TRANSFER_DESTINATION_PATH_HEADER,
+                    destination.display().to_string(),
+                ),
+                (TRANSFER_OVERWRITE_HEADER, "merge".to_string()),
+                (TRANSFER_CREATE_PARENT_HEADER, "false".to_string()),
+                (TRANSFER_SOURCE_TYPE_HEADER, "directory".to_string()),
+            ],
+            archive.into_inner().into_inner(),
+        )
+        .await;
 
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(raw)
-        .unwrap();
-    serde_json::from_slice(&bytes).unwrap()
+    assert!(response.status().is_success());
+    let summary = response.json::<TransferImportResponse>().await.unwrap();
+    assert_eq!(summary.warnings.len(), 1);
+    assert_eq!(
+        summary.warnings[0].code,
+        "transfer_skipped_unsupported_entry"
+    );
+    assert!(
+        !destination
+            .join(".remote-exec-transfer-summary.json")
+            .exists()
+    );
 }
 
 #[cfg(unix)]

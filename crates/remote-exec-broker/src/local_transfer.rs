@@ -23,6 +23,11 @@ pub struct ExportedArchive {
     pub warnings: Vec<TransferWarning>,
 }
 
+pub struct ExportedArchiveStream {
+    pub source_type: TransferSourceType,
+    pub reader: tokio::io::DuplexStream,
+}
+
 pub async fn export_path_to_archive(
     path: &str,
     archive_path: &Path,
@@ -44,6 +49,25 @@ pub async fn export_path_to_archive(
     })
 }
 
+pub async fn export_path_to_stream(
+    path: &str,
+    request: &remote_exec_proto::rpc::TransferExportRequest,
+    sandbox: Option<&CompiledFilesystemSandbox>,
+) -> anyhow::Result<ExportedArchiveStream> {
+    let exported = remote_exec_daemon::transfer::archive::export_path_to_stream(
+        path,
+        request.compression.clone(),
+        request.symlink_mode.clone(),
+        sandbox,
+        None,
+    )
+    .await?;
+    Ok(ExportedArchiveStream {
+        source_type: exported.source_type,
+        reader: exported.reader,
+    })
+}
+
 pub async fn import_archive_from_file(
     archive_path: &Path,
     request: &TransferImportRequest,
@@ -54,6 +78,20 @@ pub async fn import_archive_from_file(
         request,
         sandbox,
         None,
+    )
+    .await
+}
+
+pub async fn import_archive_from_async_reader<R>(
+    reader: R,
+    request: &TransferImportRequest,
+    sandbox: Option<&CompiledFilesystemSandbox>,
+) -> anyhow::Result<TransferImportResponse>
+where
+    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+{
+    remote_exec_daemon::transfer::archive::import_archive_from_async_reader(
+        reader, request, sandbox, None,
     )
     .await
 }

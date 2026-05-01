@@ -16,6 +16,7 @@
 namespace fs = std::filesystem;
 
 static const char* const SINGLE_FILE_ENTRY = ".remote-exec-file";
+static const char* const TRANSFER_SUMMARY_ENTRY = ".remote-exec-transfer-summary.json";
 
 static std::string read_text(const fs::path& path) {
     std::ifstream input(path.c_str(), std::ios::binary);
@@ -411,10 +412,16 @@ static void assert_transfer_skips_special_files_with_warning() {
 
     const ExportedPayload exported = export_path((root / "source").string());
     assert(exported.source_type == "directory");
-    assert(exported.warnings.size() == 1);
-    assert(exported.warnings[0].code == "transfer_skipped_unsupported_entry");
     assert(exported.bytes.find("regular.txt") != std::string::npos);
-    assert(exported.bytes.find("events.fifo") == std::string::npos);
+    assert(exported.bytes.find(TRANSFER_SUMMARY_ENTRY) != std::string::npos);
+
+    const ImportSummary imported =
+        import_path(exported.bytes, "directory", (root / "dest").string(), "replace", true);
+    assert(imported.warnings.size() == 1);
+    assert(imported.warnings[0].code == "transfer_skipped_unsupported_entry");
+    assert(read_text(root / "dest" / "regular.txt") == "regular");
+    assert(!fs::exists(root / "dest" / "events.fifo"));
+    assert(!fs::exists(root / "dest" / TRANSFER_SUMMARY_ENTRY));
 }
 
 static void assert_symlink_import_preserves_links() {

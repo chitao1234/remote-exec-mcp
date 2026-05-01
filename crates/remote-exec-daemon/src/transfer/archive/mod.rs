@@ -8,17 +8,27 @@ mod codec;
 mod entry;
 mod export;
 mod import;
+mod summary;
 
-pub use export::{bundle_archives_to_file, export_path_to_archive, export_path_to_file};
-pub use import::import_archive_from_file;
+pub use export::{
+    bundle_archives_to_file, export_path_to_archive, export_path_to_file, export_path_to_stream,
+};
+pub use import::{import_archive_from_async_reader, import_archive_from_file};
 
 pub const SINGLE_FILE_ENTRY: &str = ".remote-exec-file";
+pub const TRANSFER_SUMMARY_ENTRY: &str = ".remote-exec-transfer-summary.json";
 
 pub struct ExportedArchive {
     pub source_type: TransferSourceType,
     pub compression: TransferCompression,
     pub temp_path: tempfile::TempPath,
     pub warnings: Vec<TransferWarning>,
+}
+
+pub struct ExportedArchiveStream {
+    pub source_type: TransferSourceType,
+    pub compression: TransferCompression,
+    pub reader: tokio::io::DuplexStream,
 }
 
 pub struct BundledArchiveSource {

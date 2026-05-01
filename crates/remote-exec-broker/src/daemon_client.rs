@@ -8,9 +8,9 @@ use remote_exec_proto::rpc::{
     PortUdpDatagramReadRequest, PortUdpDatagramReadResponse, PortUdpDatagramWriteRequest,
     RpcErrorBody, TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
     TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
-    TRANSFER_SYMLINK_MODE_HEADER, TRANSFER_WARNINGS_HEADER, TargetInfoResponse,
-    TransferCompression, TransferExportRequest, TransferImportRequest, TransferImportResponse,
-    TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType, TransferWarning,
+    TRANSFER_SYMLINK_MODE_HEADER, TargetInfoResponse, TransferCompression, TransferExportRequest,
+    TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
+    TransferPathInfoResponse, TransferSourceType,
 };
 use reqwest::header::{AUTHORIZATION, CONNECTION, CONTENT_LENGTH, HeaderValue};
 
@@ -19,7 +19,24 @@ use crate::config::{TargetConfig, TargetTransportKind};
 #[derive(Debug, Clone)]
 pub struct TransferExportResponse {
     pub source_type: TransferSourceType,
-    pub warnings: Vec<TransferWarning>,
+}
+
+#[derive(Debug)]
+pub struct TransferExportStream {
+    pub source_type: TransferSourceType,
+    response: reqwest::Response,
+}
+
+impl TransferExportStream {
+    pub fn into_body(self) -> reqwest::Body {
+        reqwest::Body::wrap_stream(self.response.bytes_stream())
+    }
+
+    pub fn into_async_read(self) -> impl tokio::io::AsyncRead + Send + Unpin + 'static {
+        tokio_util::io::StreamReader::new(
+            self.response.bytes_stream().map_err(std::io::Error::other),
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -212,9 +229,10 @@ impl DaemonClient {
             path = %req.path,
             "starting daemon transfer export"
         );
-        let response = self.send_transfer_export_request(req, started).await?;
-        let source_type = self.transfer_export_source_type(req, response.headers())?;
-        let warnings = self.transfer_warnings(response.headers())?;
+        let TransferExportStream {
+            source_type,
+            response,
+        } = self.transfer_export_stream(req).await?;
         self.write_transfer_export_archive(archive_path, response)
             .await?;
         tracing::debug!(
@@ -224,9 +242,19 @@ impl DaemonClient {
             elapsed_ms = started.elapsed().as_millis() as u64,
             "daemon transfer export completed"
         );
-        Ok(TransferExportResponse {
+        Ok(TransferExportResponse { source_type })
+    }
+
+    pub async fn transfer_export_stream(
+        &self,
+        req: &TransferExportRequest,
+    ) -> Result<TransferExportStream, DaemonClientError> {
+        let started = std::time::Instant::now();
+        let response = self.send_transfer_export_request(req, started).await?;
+        let source_type = self.transfer_export_source_type(req, response.headers())?;
+        Ok(TransferExportStream {
             source_type,
-            warnings,
+            response,
         })
     }
 
@@ -238,7 +266,7 @@ impl DaemonClient {
         let started = std::time::Instant::now();
         let (file_len, body) = open_transfer_import_body(archive_path).await?;
         let response = self
-            .send_transfer_import_request(req, file_len, body, started)
+            .send_transfer_import_request(req, Some(file_len), body, started)
             .await?;
         let summary = self
             .decode_transfer_import_response(req, started, response)
@@ -251,6 +279,19 @@ impl DaemonClient {
             "daemon transfer import completed"
         );
         Ok(summary)
+    }
+
+    pub async fn transfer_import_from_body(
+        &self,
+        req: &TransferImportRequest,
+        body: reqwest::Body,
+    ) -> Result<TransferImportResponse, DaemonClientError> {
+        let started = std::time::Instant::now();
+        let response = self
+            .send_transfer_import_request(req, None, body, started)
+            .await?;
+        self.decode_transfer_import_response(req, started, response)
+            .await
     }
 
     async fn send_transfer_export_request(
@@ -319,37 +360,6 @@ impl DaemonClient {
         Ok(source_type)
     }
 
-    fn transfer_warnings(
-        &self,
-        headers: &reqwest::header::HeaderMap,
-    ) -> Result<Vec<TransferWarning>, DaemonClientError> {
-        let Some(raw) = headers.get(TRANSFER_WARNINGS_HEADER) else {
-            return Ok(Vec::new());
-        };
-        let raw = raw.to_str().map_err(|err| {
-            DaemonClientError::Decode(anyhow::anyhow!(
-                "invalid transfer warnings header from `{}`: {err}",
-                self.target_name
-            ))
-        })?;
-
-        use base64::Engine as _;
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(raw)
-            .map_err(|err| {
-                DaemonClientError::Decode(anyhow::anyhow!(
-                    "invalid transfer warnings header from `{}`: {err}",
-                    self.target_name
-                ))
-            })?;
-        serde_json::from_slice(&bytes).map_err(|err| {
-            DaemonClientError::Decode(anyhow::anyhow!(
-                "invalid transfer warnings JSON from `{}`: {err}",
-                self.target_name
-            ))
-        })
-    }
-
     async fn write_transfer_export_archive(
         &self,
         archive_path: &std::path::Path,
@@ -370,13 +380,12 @@ impl DaemonClient {
     async fn send_transfer_import_request(
         &self,
         req: &TransferImportRequest,
-        file_len: u64,
+        file_len: Option<u64>,
         body: reqwest::Body,
         started: std::time::Instant,
     ) -> Result<reqwest::Response, DaemonClientError> {
-        let response = self
+        let mut request = self
             .request("/v1/transfer/import")
-            .header(CONTENT_LENGTH, file_len)
             .header(
                 TRANSFER_DESTINATION_PATH_HEADER,
                 req.destination_path.clone(),
@@ -397,21 +406,21 @@ impl DaemonClient {
             .header(
                 TRANSFER_SYMLINK_MODE_HEADER,
                 format_transfer_symlink_mode(&req.symlink_mode).to_string(),
-            )
-            .body(body)
-            .send()
-            .await
-            .map_err(|err| {
-                tracing::warn!(
-                    target = %self.target_name,
-                    base_url = %self.base_url,
-                    destination_path = %req.destination_path,
-                    elapsed_ms = started.elapsed().as_millis() as u64,
-                    error = %err,
-                    "daemon transfer import transport failed"
-                );
-                DaemonClientError::Transport(err.into())
-            })?;
+            );
+        if let Some(file_len) = file_len {
+            request = request.header(CONTENT_LENGTH, file_len);
+        }
+        let response = request.body(body).send().await.map_err(|err| {
+            tracing::warn!(
+                target = %self.target_name,
+                base_url = %self.base_url,
+                destination_path = %req.destination_path,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                error = %err,
+                "daemon transfer import transport failed"
+            );
+            DaemonClientError::Transport(err.into())
+        })?;
         self.ensure_transfer_import_success(req, started, response)
             .await
     }

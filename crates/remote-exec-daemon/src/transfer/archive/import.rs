@@ -7,8 +7,9 @@ use remote_exec_proto::rpc::{
 };
 use remote_exec_proto::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
 
-use super::codec::open_archive_reader;
+use super::codec::{open_archive_reader, wrap_archive_reader};
 use super::entry::{ensure_supported_archive_entry_type, normalize_archive_entry_path};
+use super::summary::{is_transfer_summary_path, read_transfer_summary};
 use super::{host_path, host_policy};
 
 pub async fn import_archive_from_file(
@@ -17,6 +18,44 @@ pub async fn import_archive_from_file(
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<TransferImportResponse> {
+    let (destination, replaced) =
+        prepare_import_destination(request, sandbox, windows_posix_root).await?;
+    let archive_path = archive_path.to_path_buf();
+    let request = request.clone();
+
+    tokio::task::spawn_blocking(move || {
+        extract_archive(&archive_path, &destination, &request, replaced)
+    })
+    .await?
+}
+
+pub async fn import_archive_from_async_reader<R>(
+    reader: R,
+    request: &TransferImportRequest,
+    sandbox: Option<&CompiledFilesystemSandbox>,
+    windows_posix_root: Option<&Path>,
+) -> anyhow::Result<TransferImportResponse>
+where
+    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+{
+    let (destination, replaced) =
+        prepare_import_destination(request, sandbox, windows_posix_root).await?;
+    let request = request.clone();
+    let runtime = tokio::runtime::Handle::current();
+
+    tokio::task::spawn_blocking(move || {
+        let reader = tokio_util::io::SyncIoBridge::new_with_handle(reader, runtime);
+        let reader = wrap_archive_reader(reader, &request.compression)?;
+        extract_archive_from_reader(reader, &destination, &request, replaced)
+    })
+    .await?
+}
+
+async fn prepare_import_destination(
+    request: &TransferImportRequest,
+    sandbox: Option<&CompiledFilesystemSandbox>,
+    windows_posix_root: Option<&Path>,
+) -> anyhow::Result<(std::path::PathBuf, bool)> {
     anyhow::ensure!(
         crate::host_path::is_input_path_absolute(&request.destination_path, windows_posix_root),
         "transfer destination path `{}` is not absolute",
@@ -26,13 +65,7 @@ pub async fn import_archive_from_file(
     authorize_path(host_policy(), sandbox, SandboxAccess::Write, &destination)?;
 
     let replaced = prepare_destination(&destination, request).await?;
-    let archive_path = archive_path.to_path_buf();
-    let request = request.clone();
-
-    tokio::task::spawn_blocking(move || {
-        extract_archive(&archive_path, &destination, &request, replaced)
-    })
-    .await?
+    Ok((destination, replaced))
 }
 
 async fn prepare_destination(
@@ -117,9 +150,18 @@ fn extract_archive(
     request: &TransferImportRequest,
     replaced: bool,
 ) -> anyhow::Result<TransferImportResponse> {
+    let reader = open_archive_reader(archive_path, &request.compression)?;
+    extract_archive_from_reader(reader, destination_path, request, replaced)
+}
+
+fn extract_archive_from_reader<R: Read>(
+    reader: R,
+    destination_path: &Path,
+    request: &TransferImportRequest,
+    replaced: bool,
+) -> anyhow::Result<TransferImportResponse> {
     let mut summary = new_import_summary(request, replaced);
 
-    let reader = open_archive_reader(archive_path, &request.compression)?;
     let mut archive = tar::Archive::new(reader);
 
     match request.source_type {
@@ -177,10 +219,16 @@ fn extract_single_file_archive<R: Read>(
         summary.files_copied = 1;
     }
 
-    anyhow::ensure!(
-        entries.next().transpose()?.is_none(),
-        "file archive contains extra entries"
-    );
+    for entry in entries {
+        let mut entry = entry?;
+        let raw_rel = entry.path()?.to_path_buf();
+        let rel = normalize_archive_entry_path(&raw_rel)?;
+        anyhow::ensure!(
+            is_transfer_summary_path(&rel),
+            "file archive contains extra entries"
+        );
+        summary.warnings.extend(read_transfer_summary(&mut entry)?);
+    }
     Ok(())
 }
 
@@ -206,6 +254,10 @@ fn extract_tree_archive_entry<R: Read>(
 ) -> anyhow::Result<()> {
     let raw_rel = entry.path()?.to_path_buf();
     let rel = normalize_archive_entry_path(&raw_rel)?;
+    if is_transfer_summary_path(&rel) {
+        summary.warnings.extend(read_transfer_summary(entry)?);
+        return Ok(());
+    }
     if rel.as_os_str().is_empty() {
         return Ok(());
     }

@@ -22,11 +22,15 @@
 #endif
 
 #include "transfer_ops.h"
+#include "json.hpp"
+
+using Json = nlohmann::json;
 
 namespace {
 
 const std::size_t TAR_BLOCK_SIZE = 512;
 const char* const SINGLE_FILE_ENTRY = ".remote-exec-file";
+const char* const TRANSFER_SUMMARY_ENTRY = ".remote-exec-transfer-summary.json";
 
 struct DirectoryEntry {
     std::string name;
@@ -625,6 +629,52 @@ void handle_skipped_symlink(ExportContext* context, const std::string& path) {
     );
 }
 
+Json transfer_warnings_json(const std::vector<TransferWarning>& warnings) {
+    Json json = Json::array();
+    for (std::size_t i = 0; i < warnings.size(); ++i) {
+        json.push_back(Json{
+            {"code", warnings[i].code},
+            {"message", warnings[i].message},
+        });
+    }
+    return json;
+}
+
+void append_transfer_summary_entry(
+    std::string* archive,
+    const std::vector<TransferWarning>& warnings
+) {
+    if (warnings.empty()) {
+        return;
+    }
+    const Json summary = Json{{"warnings", transfer_warnings_json(warnings)}};
+    append_file_entry(archive, TRANSFER_SUMMARY_ENTRY, summary.dump());
+}
+
+bool is_transfer_summary_path(const std::string& path) {
+    return path == TRANSFER_SUMMARY_ENTRY;
+}
+
+std::vector<TransferWarning> read_transfer_summary(const std::string& body) {
+    std::vector<TransferWarning> warnings;
+    const Json summary = Json::parse(body);
+    const Json raw_warnings = summary.value("warnings", Json::array());
+    for (std::size_t i = 0; i < raw_warnings.size(); ++i) {
+        warnings.push_back(TransferWarning{
+            raw_warnings[i].value("code", std::string()),
+            raw_warnings[i].value("message", std::string()),
+        });
+    }
+    return warnings;
+}
+
+void append_warnings(
+    std::vector<TransferWarning>* destination,
+    const std::vector<TransferWarning>& source
+) {
+    destination->insert(destination->end(), source.begin(), source.end());
+}
+
 std::string header_path(const char* block) {
     const std::string name = field_string(block, 100);
     const std::string prefix = field_string(block + 345, 155);
@@ -779,8 +829,9 @@ ExportedPayload export_directory_as_tar(const std::string& absolute_path, Export
     std::string archive;
     append_directory_entry(&archive, ".");
     append_directory_contents(&archive, absolute_path, "", context);
+    append_transfer_summary_entry(&archive, context->warnings);
     append_archive_terminator(&archive);
-    return ExportedPayload{"directory", archive, context->warnings};
+    return ExportedPayload{"directory", archive};
 }
 
 ExportedPayload export_file_as_tar(const std::string& absolute_path, const ExportOptions& options) {
@@ -809,18 +860,51 @@ ExportedPayload export_file_as_tar(const std::string& absolute_path, const Expor
     }
 #endif
     append_archive_terminator(&archive);
-    return ExportedPayload{"file", archive, std::vector<TransferWarning>()};
+    return ExportedPayload{"file", archive};
 }
 
-void ensure_zero_archive_tail(const std::string& archive, std::size_t offset) {
+void consume_file_archive_tail(
+    const std::string& archive,
+    std::size_t offset,
+    std::vector<TransferWarning>* warnings
+) {
+    std::string pending_long_name;
     while (offset < archive.size()) {
         if (archive.size() - offset < TAR_BLOCK_SIZE) {
             throw std::runtime_error("truncated tar header");
         }
-        if (!is_zero_block(archive.data() + offset)) {
+        const char* block = archive.data() + offset;
+        if (is_zero_block(block)) {
+            offset += TAR_BLOCK_SIZE;
+            continue;
+        }
+
+        const TarHeaderView header = parse_header(block);
+        offset += TAR_BLOCK_SIZE;
+        if (offset + padded_length(header.size) > archive.size()) {
+            throw std::runtime_error("truncated tar entry body");
+        }
+
+        if (header.typeflag == 'L') {
+            pending_long_name = read_gnu_long_name(archive, offset, header.size);
+            offset += padded_length(header.size);
+            continue;
+        }
+
+        const std::string raw_path = pending_long_name.empty() ? header.path : pending_long_name;
+        pending_long_name.clear();
+        if (!is_transfer_summary_path(raw_path) || header.typeflag != '0') {
             throw std::runtime_error("file archive contains extra entries");
         }
-        offset += TAR_BLOCK_SIZE;
+        append_warnings(
+            warnings,
+            read_transfer_summary(archive.substr(offset, static_cast<std::size_t>(header.size)))
+        );
+        offset += padded_length(header.size);
+    }
+
+    if (!pending_long_name.empty()) {
+        throw std::runtime_error("dangling GNU long name entry");
     }
 }
 
@@ -863,7 +947,8 @@ ImportSummary import_file_from_tar(
         bytes_copied = static_cast<std::uint64_t>(bytes.size());
     }
 
-    ensure_zero_archive_tail(archive, body_offset + padded_length(header.size));
+    std::vector<TransferWarning> warnings;
+    consume_file_archive_tail(archive, body_offset + padded_length(header.size), &warnings);
 
     return ImportSummary{
         "file",
@@ -871,7 +956,7 @@ ImportSummary import_file_from_tar(
         1,
         0,
         replaced,
-        std::vector<TransferWarning>(),
+        warnings,
     };
 }
 
@@ -916,6 +1001,19 @@ ImportSummary import_directory_from_tar(
         const std::string raw_path = pending_long_name.empty() ? header.path : pending_long_name;
         pending_long_name.clear();
         const std::string relative_path = validate_relative_archive_path(raw_path);
+        if (is_transfer_summary_path(relative_path)) {
+            if (header.typeflag != '0') {
+                throw std::runtime_error("transfer summary archive entry is not a regular file");
+            }
+            append_warnings(
+                &summary.warnings,
+                read_transfer_summary(
+                    archive.substr(offset, static_cast<std::size_t>(header.size))
+                )
+            );
+            offset += padded_length(header.size);
+            continue;
+        }
         const std::string output_path = materialize_archive_path(absolute_path, relative_path);
         ensure_no_existing_symlink_in_path(absolute_path, relative_path);
 

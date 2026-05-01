@@ -7,12 +7,20 @@ use remote_exec_proto::rpc::{
 };
 use remote_exec_proto::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
 
-use super::codec::{open_archive_reader, with_archive_builder};
+use super::codec::{open_archive_reader, with_archive_builder, with_archive_writer};
 use super::entry::{ensure_supported_archive_entry_type, normalize_archive_entry_path};
+use super::summary::{append_transfer_summary, is_transfer_summary_path, read_transfer_summary};
 use super::{
-    BundledArchiveSource, ExportPathResult, ExportedArchive, SINGLE_FILE_ENTRY, host_path,
-    host_policy,
+    BundledArchiveSource, ExportPathResult, ExportedArchive, ExportedArchiveStream,
+    SINGLE_FILE_ENTRY, host_path, host_policy,
 };
+
+const STREAM_BUFFER_SIZE: usize = 64 * 1024;
+
+struct PreparedExport {
+    source_path: PathBuf,
+    source_type: TransferSourceType,
+}
 
 pub async fn export_path_to_archive(
     path: &str,
@@ -49,36 +57,152 @@ pub async fn export_path_to_file(
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<ExportPathResult> {
-    let source_text = path.to_string();
-    anyhow::ensure!(
-        crate::host_path::is_input_path_absolute(&source_text, windows_posix_root),
-        "transfer source path `{source_text}` is not absolute"
-    );
-    let path = host_path(&source_text, windows_posix_root)?;
-    authorize_path(host_policy(), sandbox, SandboxAccess::Read, &path)?;
-
-    let metadata = tokio::fs::symlink_metadata(&path).await?;
-    let source_type = export_source_type_from_metadata(&path, &metadata, &symlink_mode)?;
-
+    let prepared = prepare_export_path(path, &symlink_mode, sandbox, windows_posix_root).await?;
     let archive_path = archive_path.to_path_buf();
-    let source_path = path.to_path_buf();
-    let source_type_for_task = source_type.clone();
+    let source_type = prepared.source_type.clone();
 
-    let warnings = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<TransferWarning>> {
-        let mut warnings = Vec::new();
-        with_archive_builder(&archive_path, &compression, |builder| {
-            warnings =
-                append_export_source(builder, &source_path, source_type_for_task, &symlink_mode)?;
-            Ok(())
-        })?;
-        Ok(warnings)
-    })
-    .await??;
+    let warnings =
+        write_prepared_export_to_file(prepared, archive_path, compression, symlink_mode).await?;
 
     Ok(ExportPathResult {
         source_type,
         warnings,
     })
+}
+
+pub async fn export_path_to_stream(
+    path: &str,
+    compression: TransferCompression,
+    symlink_mode: TransferSymlinkMode,
+    sandbox: Option<&CompiledFilesystemSandbox>,
+    windows_posix_root: Option<&Path>,
+) -> anyhow::Result<ExportedArchiveStream> {
+    let prepared = prepare_export_path(path, &symlink_mode, sandbox, windows_posix_root).await?;
+    let source_type = prepared.source_type.clone();
+    let (reader, writer) = tokio::io::duplex(STREAM_BUFFER_SIZE);
+    let task_compression = compression.clone();
+    tokio::spawn(async move {
+        let writer = tokio_util::io::SyncIoBridge::new(writer);
+        if let Err(err) =
+            write_prepared_export_to_writer(prepared, writer, task_compression, symlink_mode).await
+        {
+            tracing::debug!(error = %err, "streamed transfer export stopped");
+        }
+    });
+
+    Ok(ExportedArchiveStream {
+        source_type,
+        compression,
+        reader,
+    })
+}
+
+async fn prepare_export_path(
+    path: &str,
+    symlink_mode: &TransferSymlinkMode,
+    sandbox: Option<&CompiledFilesystemSandbox>,
+    windows_posix_root: Option<&Path>,
+) -> anyhow::Result<PreparedExport> {
+    let source_text = path.to_string();
+    anyhow::ensure!(
+        crate::host_path::is_input_path_absolute(&source_text, windows_posix_root),
+        "transfer source path `{source_text}` is not absolute"
+    );
+    let source_path = host_path(&source_text, windows_posix_root)?;
+    authorize_path(host_policy(), sandbox, SandboxAccess::Read, &source_path)?;
+
+    let metadata = tokio::fs::symlink_metadata(&source_path).await?;
+    let source_type = export_source_type_from_metadata(&source_path, &metadata, symlink_mode)?;
+    preflight_export_path(&source_path, &source_type, symlink_mode).await?;
+
+    Ok(PreparedExport {
+        source_path,
+        source_type,
+    })
+}
+
+async fn preflight_export_path(
+    source_path: &Path,
+    source_type: &TransferSourceType,
+    symlink_mode: &TransferSymlinkMode,
+) -> anyhow::Result<()> {
+    if !matches!(
+        (source_type, symlink_mode),
+        (TransferSourceType::Directory, TransferSymlinkMode::Reject)
+    ) {
+        return Ok(());
+    }
+
+    let source_path = source_path.to_path_buf();
+    tokio::task::spawn_blocking(move || reject_directory_symlinks(&source_path)).await?
+}
+
+fn reject_directory_symlinks(current: &Path) -> anyhow::Result<()> {
+    for entry in std::fs::read_dir(current)? {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = std::fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            anyhow::bail!(
+                "transfer source contains unsupported symlink `{}`",
+                path.display()
+            );
+        }
+        if metadata.is_dir() {
+            reject_directory_symlinks(&path)?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn write_prepared_export_to_file(
+    prepared: PreparedExport,
+    archive_path: PathBuf,
+    compression: TransferCompression,
+    symlink_mode: TransferSymlinkMode,
+) -> anyhow::Result<Vec<TransferWarning>> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<TransferWarning>> {
+        let mut warnings = Vec::new();
+        with_archive_builder(&archive_path, &compression, |builder| {
+            warnings = append_export_source(
+                builder,
+                &prepared.source_path,
+                prepared.source_type,
+                &symlink_mode,
+            )?;
+            append_transfer_summary(builder, &warnings)?;
+            Ok(())
+        })?;
+        Ok(warnings)
+    })
+    .await?
+}
+
+async fn write_prepared_export_to_writer<W>(
+    prepared: PreparedExport,
+    writer: W,
+    compression: TransferCompression,
+    symlink_mode: TransferSymlinkMode,
+) -> anyhow::Result<Vec<TransferWarning>>
+where
+    W: Write + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<TransferWarning>> {
+        let mut warnings = Vec::new();
+        with_archive_writer(writer, &compression, |builder| {
+            warnings = append_export_source(
+                builder,
+                &prepared.source_path,
+                prepared.source_type,
+                &symlink_mode,
+            )?;
+            append_transfer_summary(builder, &warnings)?;
+            Ok(())
+        })?;
+        Ok(warnings)
+    })
+    .await?
 }
 
 pub async fn bundle_archives_to_file(
@@ -90,9 +214,11 @@ pub async fn bundle_archives_to_file(
 
     tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
         with_archive_builder(&archive_path, &compression, |builder| {
+            let mut warnings = Vec::new();
             for source in &sources {
-                append_source_archive(builder, source)?;
+                warnings.extend(append_source_archive(builder, source)?);
             }
+            append_transfer_summary(builder, &warnings)?;
             Ok(())
         })
     })
@@ -274,7 +400,7 @@ fn handle_unsupported_entry(path: &Path, warnings: &mut Vec<TransferWarning>) {
 fn append_source_archive<W: Write>(
     builder: &mut tar::Builder<W>,
     source: &BundledArchiveSource,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Vec<TransferWarning>> {
     let root_name =
         basename_for_policy(source.source_policy, &source.source_path).ok_or_else(|| {
             anyhow::anyhow!(
@@ -302,7 +428,8 @@ fn append_file_archive_to_bundle<W: Write, R: Read>(
     builder: &mut tar::Builder<W>,
     archive: &mut tar::Archive<R>,
     root_name: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Vec<TransferWarning>> {
+    let mut warnings = Vec::new();
     let mut entries = archive.entries()?;
     let mut entry = entries
         .next()
@@ -321,22 +448,33 @@ fn append_file_archive_to_bundle<W: Write, R: Read>(
 
     let mut header = entry.header().clone();
     builder.append_data(&mut header, root_name, &mut entry)?;
-    anyhow::ensure!(
-        entries.next().transpose()?.is_none(),
-        "file archive contains extra entries"
-    );
-    Ok(())
+    for entry in entries {
+        let mut entry = entry?;
+        let raw_path = entry.path()?.to_path_buf();
+        let rel = normalize_archive_entry_path(&raw_path)?;
+        anyhow::ensure!(
+            is_transfer_summary_path(&rel),
+            "file archive contains extra entries"
+        );
+        warnings.extend(read_transfer_summary(&mut entry)?);
+    }
+    Ok(warnings)
 }
 
 fn append_directory_archive_to_bundle<W: Write, R: Read>(
     builder: &mut tar::Builder<W>,
     archive: &mut tar::Archive<R>,
     root_name: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Vec<TransferWarning>> {
+    let mut warnings = Vec::new();
     for entry in archive.entries()? {
         let mut entry = entry?;
         let raw_rel = entry.path()?.to_path_buf();
         let rel = normalize_archive_entry_path(&raw_rel)?;
+        if is_transfer_summary_path(&rel) {
+            warnings.extend(read_transfer_summary(&mut entry)?);
+            continue;
+        }
         let entry_type = entry.header().entry_type();
         ensure_supported_archive_entry_type(entry_type, &raw_rel)?;
 
@@ -357,5 +495,5 @@ fn append_directory_archive_to_bundle<W: Write, R: Read>(
         builder.append_data(&mut header, &out_rel, &mut entry)?;
     }
 
-    Ok(())
+    Ok(warnings)
 }

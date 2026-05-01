@@ -14,7 +14,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::Context;
-use daemon_client::{DaemonClient, DaemonClientError, TransferExportResponse};
+use daemon_client::{
+    DaemonClient, DaemonClientError, TransferExportResponse, TransferExportStream,
+};
 use local_backend::LocalDaemonClient;
 use remote_exec_proto::rpc::{
     EmptyResponse, ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest,
@@ -166,6 +168,16 @@ impl TargetHandle {
         }
     }
 
+    pub async fn transfer_export_stream(
+        &self,
+        req: &TransferExportRequest,
+    ) -> Result<TransferExportStream, DaemonClientError> {
+        match &self.backend {
+            TargetBackend::Remote(client) => client.transfer_export_stream(req).await,
+            TargetBackend::Local(_) => Err(unsupported_local_transfer_error()),
+        }
+    }
+
     pub async fn transfer_path_info(
         &self,
         req: &TransferPathInfoRequest,
@@ -185,6 +197,17 @@ impl TargetHandle {
             TargetBackend::Remote(client) => {
                 client.transfer_import_from_file(archive_path, req).await
             }
+            TargetBackend::Local(_) => Err(unsupported_local_transfer_error()),
+        }
+    }
+
+    pub async fn transfer_import_from_body(
+        &self,
+        req: &TransferImportRequest,
+        body: reqwest::Body,
+    ) -> Result<TransferImportResponse, DaemonClientError> {
+        match &self.backend {
+            TargetBackend::Remote(client) => client.transfer_import_from_body(req, body).await,
             TargetBackend::Local(_) => Err(unsupported_local_transfer_error()),
         }
     }

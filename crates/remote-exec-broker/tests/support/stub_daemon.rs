@@ -19,7 +19,7 @@ use remote_exec_proto::rpc::{
     TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER,
     TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER, TRANSFER_SYMLINK_MODE_HEADER,
     TargetInfoResponse, TransferCompression, TransferExportRequest, TransferImportResponse,
-    TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType,
+    TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType, TransferWarning,
 };
 use tar::{Builder, EntryType, Header};
 use tokio::sync::Mutex;
@@ -30,6 +30,7 @@ use super::certs::TestCerts;
 use super::certs::allocate_addr;
 
 const SINGLE_FILE_ENTRY: &str = ".remote-exec-file";
+const TRANSFER_SUMMARY_ENTRY: &str = ".remote-exec-transfer-summary.json";
 
 #[derive(Debug, Clone)]
 pub enum StubImageReadResponse {
@@ -165,13 +166,21 @@ fn stub_single_file_archive(body: &[u8]) -> Vec<u8> {
     builder.into_inner().unwrap().to_vec()
 }
 
-fn stub_single_file_archive_bytes(body: &[u8]) -> u64 {
+fn stub_single_file_archive_summary(body: &[u8]) -> (u64, Vec<TransferWarning>) {
     let mut archive = tar::Archive::new(Cursor::new(body));
     let mut entries = archive.entries().unwrap();
     let mut entry = entries.next().unwrap().unwrap();
     let mut bytes = Vec::new();
     std::io::Read::read_to_end(&mut entry, &mut bytes).unwrap();
-    bytes.len() as u64
+    let mut warnings = Vec::new();
+    for entry in entries {
+        let mut entry = entry.unwrap();
+        if entry.path().unwrap().as_ref() != std::path::Path::new(TRANSFER_SUMMARY_ENTRY) {
+            continue;
+        }
+        warnings.extend(read_transfer_summary(&mut entry));
+    }
+    (bytes.len() as u64, warnings)
 }
 
 pub(super) fn stub_daemon_state(
@@ -681,7 +690,7 @@ async fn transfer_import(
         "multiple" => TransferSourceType::Multiple,
         _ => TransferSourceType::File,
     };
-    let (bytes_copied, files_copied, directories_copied) =
+    let (bytes_copied, files_copied, directories_copied, warnings) =
         summarize_archive(&body, &parsed_source_type, &compression);
 
     Ok(Json(TransferImportResponse {
@@ -690,7 +699,7 @@ async fn transfer_import(
         files_copied,
         directories_copied,
         replaced: overwrite == "replace",
-        warnings: Vec::new(),
+        warnings,
     }))
 }
 
@@ -698,27 +707,35 @@ fn summarize_archive(
     body: &[u8],
     source_type: &TransferSourceType,
     compression: &str,
-) -> (u64, u64, u64) {
+) -> (u64, u64, u64, Vec<TransferWarning>) {
     let raw = match compression {
         "zstd" => zstd::stream::decode_all(Cursor::new(body)).expect("decode zstd archive"),
         _ => body.to_vec(),
     };
 
     match source_type {
-        TransferSourceType::File => (stub_single_file_archive_bytes(&raw), 1, 0),
+        TransferSourceType::File => {
+            let (bytes, warnings) = stub_single_file_archive_summary(&raw);
+            (bytes, 1, 0, warnings)
+        }
         TransferSourceType::Directory | TransferSourceType::Multiple => {
             let mut bytes = 0;
             let mut files = 0;
+            let mut warnings = Vec::new();
             let mut directories = matches!(
                 source_type,
                 TransferSourceType::Directory | TransferSourceType::Multiple
             ) as u64;
             let mut archive = tar::Archive::new(Cursor::new(raw));
             for entry in archive.entries().expect("archive entries") {
-                let entry = entry.expect("archive entry");
+                let mut entry = entry.expect("archive entry");
+                let path = entry.path().expect("entry path").into_owned();
+                if path == std::path::Path::new(TRANSFER_SUMMARY_ENTRY) {
+                    warnings.extend(read_transfer_summary(&mut entry));
+                    continue;
+                }
                 if entry.header().entry_type().is_dir() {
-                    let path = entry.path().expect("entry path");
-                    if path.as_ref() != std::path::Path::new(".") {
+                    if path != std::path::Path::new(".") {
                         directories += 1;
                     }
                 } else if entry.header().entry_type().is_file() {
@@ -726,9 +743,22 @@ fn summarize_archive(
                     files += 1;
                 }
             }
-            (bytes, files, directories)
+            (bytes, files, directories, warnings)
         }
     }
+}
+
+fn read_transfer_summary<R: std::io::Read>(entry: &mut tar::Entry<R>) -> Vec<TransferWarning> {
+    let summary: serde_json::Value = serde_json::from_reader(entry).unwrap();
+    summary["warnings"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|warning| TransferWarning {
+            code: warning["code"].as_str().unwrap_or_default().to_string(),
+            message: warning["message"].as_str().unwrap_or_default().to_string(),
+        })
+        .collect()
 }
 
 async fn image_read(

@@ -13,9 +13,9 @@ use http_body_util::BodyExt;
 use remote_exec_proto::rpc::{
     RpcErrorBody, TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
     TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
-    TRANSFER_SYMLINK_MODE_HEADER, TRANSFER_WARNINGS_HEADER, TransferCompression,
-    TransferExportRequest, TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
-    TransferPathInfoResponse, TransferWarning,
+    TRANSFER_SYMLINK_MODE_HEADER, TransferCompression, TransferExportRequest,
+    TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
+    TransferPathInfoResponse,
 };
 use remote_exec_proto::sandbox::SandboxError;
 
@@ -81,7 +81,7 @@ pub async fn export_path(
         symlink_mode = ?req.symlink_mode,
         "transfer export received"
     );
-    let exported = archive::export_path_to_archive(
+    let exported = archive::export_path_to_stream(
         &req.path,
         req.compression.clone(),
         req.symlink_mode.clone(),
@@ -91,20 +91,16 @@ pub async fn export_path(
     .await
     .map_err(map_transfer_error)?;
 
-    let file = tokio::fs::File::open(exported.temp_path.to_path_buf())
-        .await
-        .map_err(|err| crate::exec::internal_error(err.into()))?;
-    let stream = tokio_util::io::ReaderStream::new(file);
+    let stream = tokio_util::io::ReaderStream::new(exported.reader);
     let body = Body::from_stream(stream);
     tracing::info!(
         path = %req.path,
         source_type = format_source_type(&exported.source_type),
         compression = format_compression(&exported.compression),
-        warnings = exported.warnings.len(),
         "transfer export completed"
     );
 
-    let mut response_builder = Response::builder()
+    Response::builder()
         .header(
             TRANSFER_SOURCE_TYPE_HEADER,
             format_source_type(&exported.source_type),
@@ -112,15 +108,7 @@ pub async fn export_path(
         .header(
             TRANSFER_COMPRESSION_HEADER,
             format_compression(&exported.compression),
-        );
-    if !exported.warnings.is_empty() {
-        response_builder = response_builder.header(
-            TRANSFER_WARNINGS_HEADER,
-            encode_transfer_warnings(&exported.warnings)?,
-        );
-    }
-
-    response_builder
+        )
         .body(body)
         .map_err(|err| crate::exec::internal_error(err.into()))
 }
@@ -141,21 +129,11 @@ pub async fn import_archive(
         symlink_mode = ?request.symlink_mode,
         "transfer import received"
     );
-    let temp =
-        tempfile::NamedTempFile::new().map_err(|err| crate::exec::internal_error(err.into()))?;
-    let temp_path = temp.into_temp_path();
-    let mut file = tokio::fs::File::create(temp_path.to_path_buf())
-        .await
-        .map_err(|err| crate::exec::internal_error(err.into()))?;
-    let mut stream = tokio_util::io::StreamReader::new(
+    let stream = tokio_util::io::StreamReader::new(
         BodyExt::into_data_stream(body).map_err(std::io::Error::other),
     );
-    tokio::io::copy(&mut stream, &mut file)
-        .await
-        .map_err(|err| crate::exec::internal_error(err.into()))?;
-
-    let summary = archive::import_archive_from_file(
-        &temp_path,
+    let summary = archive::import_archive_from_async_reader(
+        stream,
         &request,
         state.sandbox.as_ref(),
         state.config.windows_posix_root.as_deref(),
@@ -238,16 +216,6 @@ fn parse_import_request(
         symlink_mode: parse_optional_header_enum(headers, TRANSFER_SYMLINK_MODE_HEADER)?
             .unwrap_or_default(),
     })
-}
-
-fn encode_transfer_warnings(
-    warnings: &[TransferWarning],
-) -> Result<String, (StatusCode, Json<RpcErrorBody>)> {
-    use base64::Engine as _;
-
-    let json =
-        serde_json::to_vec(warnings).map_err(|err| crate::exec::internal_error(err.into()))?;
-    Ok(base64::engine::general_purpose::STANDARD.encode(json))
 }
 
 fn header_string(

@@ -97,7 +97,6 @@ pub const TRANSFER_DESTINATION_PATH_HEADER: &str = "x-remote-exec-destination-pa
 pub const TRANSFER_OVERWRITE_HEADER: &str = "x-remote-exec-overwrite";
 pub const TRANSFER_CREATE_PARENT_HEADER: &str = "x-remote-exec-create-parent";
 pub const TRANSFER_SYMLINK_MODE_HEADER: &str = "x-remote-exec-symlink-mode";
-pub const TRANSFER_WARNINGS_HEADER: &str = "x-remote-exec-warnings-bin";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

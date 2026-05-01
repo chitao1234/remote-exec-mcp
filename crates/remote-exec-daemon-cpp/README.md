@@ -144,6 +144,7 @@ default_workdir = /work
 - Windows XP-compatible transfer builds do not support preserving or following symlinks; use skip or reject modes
 - transfer payloads use GNU tar for files and directories
 - single-file transfers use the fixed archive entry `.remote-exec-file`
+- transfer warnings use the reserved archive summary entry `.remote-exec-transfer-summary.json`, which is consumed during import and is not extracted
 - unsupported archive entries remain rejected: hard links, special files unless skipped during export, sparse entries, and malformed paths
 - broker targets that point at this daemon must use `http://...` plus `allow_insecure_http = true`
 - optional `http_auth_bearer_token` can require `Authorization: Bearer ...` from the broker, but it still does not encrypt plain-HTTP traffic

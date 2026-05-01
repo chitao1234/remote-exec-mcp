@@ -401,6 +401,7 @@ How to use it:
 - Use endpoint-native absolute paths. Linux endpoints use Unix absolute paths such as `/srv/app/file.txt`. Windows endpoints accept drive-qualified paths such as `C:/work/file.txt` and also MSYS/Cygwin-style absolute paths such as `/c/work/file.txt` and `/cygdrive/c/work/file.txt`.
 - Transfer compression is an internal broker detail. Do not send a `compression` field.
 - The broker automatically uses compressed staging only when its own config and all participating remote targets support it, and otherwise falls back internally.
+- Reserved transfer archive summary entries such as `.remote-exec-transfer-summary.json` are internal and are not copied to the destination.
 - Reach for `transfer_files` instead of `scp`, `cp`, shell redirection, or ad hoc archives whenever data must move between endpoints.
 
 Structured result fields:

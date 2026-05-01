@@ -6,7 +6,7 @@ use remote_exec_proto::public::{
 use remote_exec_proto::rpc::{
     TransferCompression as RpcTransferCompression, TransferExportRequest, TransferImportRequest,
     TransferImportResponse, TransferOverwriteMode, TransferSourceType as RpcTransferSourceType,
-    TransferSymlinkMode as RpcTransferSymlinkMode, TransferWarning,
+    TransferSymlinkMode as RpcTransferSymlinkMode,
 };
 
 use crate::daemon_client::DaemonClientError;
@@ -17,13 +17,11 @@ struct ExportedSourceArchive {
     endpoint: TransferEndpoint,
     source_policy: remote_exec_proto::path::PathPolicy,
     source_type: RpcTransferSourceType,
-    warnings: Vec<TransferWarning>,
     temp_path: tempfile::TempPath,
 }
 
 struct ExportArchiveResult {
     source_type: RpcTransferSourceType,
-    warnings: Vec<TransferWarning>,
 }
 
 pub(super) async fn transfer_single_source(
@@ -35,28 +33,105 @@ pub(super) async fn transfer_single_source(
     symlink_mode: &PublicTransferSymlinkMode,
     create_parent: bool,
 ) -> anyhow::Result<(RpcTransferSourceType, TransferImportResponse)> {
-    let temp = tempfile::NamedTempFile::new()?;
-    let archive_path = temp.into_temp_path();
-    let exported = export_endpoint_to_archive(
-        state,
-        source,
-        archive_path.as_ref(),
-        compression,
-        symlink_mode,
-    )
-    .await?;
-    let request = build_import_request(
-        destination,
-        overwrite,
-        exported.source_type.clone(),
-        compression,
-        symlink_mode,
-        create_parent,
-    );
-    let mut summary =
-        import_archive_to_endpoint(state, archive_path.as_ref(), destination, &request).await?;
-    summary.warnings.splice(0..0, exported.warnings);
-    Ok((exported.source_type, summary))
+    match (source.target.as_str(), destination.target.as_str()) {
+        ("local", "local") => {
+            let export_request = build_export_request(source, compression, symlink_mode);
+            let exported = crate::local_transfer::export_path_to_stream(
+                &source.path,
+                &export_request,
+                state.host_sandbox.as_ref(),
+            )
+            .await?;
+            let request = build_import_request(
+                destination,
+                overwrite,
+                exported.source_type.clone(),
+                compression,
+                symlink_mode,
+                create_parent,
+            );
+            let summary = crate::local_transfer::import_archive_from_async_reader(
+                exported.reader,
+                &request,
+                state.host_sandbox.as_ref(),
+            )
+            .await?;
+            Ok((exported.source_type, summary))
+        }
+        ("local", target_name) => {
+            let export_request = build_export_request(source, compression, symlink_mode);
+            let exported = crate::local_transfer::export_path_to_stream(
+                &source.path,
+                &export_request,
+                state.host_sandbox.as_ref(),
+            )
+            .await?;
+            let request = build_import_request(
+                destination,
+                overwrite,
+                exported.source_type.clone(),
+                compression,
+                symlink_mode,
+                create_parent,
+            );
+            let body =
+                reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(exported.reader));
+            let summary =
+                import_remote_body_to_endpoint(state, target_name, body, &request).await?;
+            Ok((exported.source_type, summary))
+        }
+        (target_name, "local") => {
+            let export_request = build_export_request(source, compression, symlink_mode);
+            let target = verified_remote_target(state, target_name).await?;
+            let exported = handle_remote_transfer_result(
+                target,
+                target.transfer_export_stream(&export_request).await,
+            )
+            .await?;
+            let source_type = exported.source_type.clone();
+            let request = build_import_request(
+                destination,
+                overwrite,
+                source_type.clone(),
+                compression,
+                symlink_mode,
+                create_parent,
+            );
+            let summary = crate::local_transfer::import_archive_from_async_reader(
+                exported.into_async_read(),
+                &request,
+                state.host_sandbox.as_ref(),
+            )
+            .await?;
+            Ok((source_type, summary))
+        }
+        (source_target_name, destination_target_name) => {
+            let export_request = build_export_request(source, compression, symlink_mode);
+            let source_target = verified_remote_target(state, source_target_name).await?;
+            let exported = handle_remote_transfer_result(
+                source_target,
+                source_target.transfer_export_stream(&export_request).await,
+            )
+            .await?;
+            let source_type = exported.source_type.clone();
+            let request = build_import_request(
+                destination,
+                overwrite,
+                source_type.clone(),
+                compression,
+                symlink_mode,
+                create_parent,
+            );
+            let summary = import_remote_body_to_endpoint(
+                state,
+                destination_target_name,
+                exported.into_body(),
+                &request,
+            )
+            .await?;
+            Ok((source_type, summary))
+        }
+    }
 }
 
 pub(super) async fn transfer_multiple_sources(
@@ -85,7 +160,6 @@ pub(super) async fn transfer_multiple_sources(
             endpoint: source.clone(),
             source_policy,
             source_type: exported.source_type,
-            warnings: exported.warnings,
             temp_path,
         });
     }
@@ -117,14 +191,21 @@ pub(super) async fn transfer_multiple_sources(
         symlink_mode,
         create_parent,
     );
-    let mut summary =
+    let summary =
         import_archive_to_endpoint(state, bundled_path.as_ref(), destination, &request).await?;
-    let export_warnings = exported_sources
-        .into_iter()
-        .flat_map(|source| source.warnings)
-        .collect::<Vec<_>>();
-    summary.warnings.splice(0..0, export_warnings);
     Ok((source_type, summary))
+}
+
+fn build_export_request(
+    endpoint: &TransferEndpoint,
+    compression: &RpcTransferCompression,
+    symlink_mode: &PublicTransferSymlinkMode,
+) -> TransferExportRequest {
+    TransferExportRequest {
+        path: endpoint.path.clone(),
+        compression: compression.clone(),
+        symlink_mode: to_rpc_symlink_mode(symlink_mode),
+    }
 }
 
 async fn export_endpoint_to_archive(
@@ -134,11 +215,7 @@ async fn export_endpoint_to_archive(
     compression: &RpcTransferCompression,
     symlink_mode: &PublicTransferSymlinkMode,
 ) -> anyhow::Result<ExportArchiveResult> {
-    let request = TransferExportRequest {
-        path: endpoint.path.clone(),
-        compression: compression.clone(),
-        symlink_mode: to_rpc_symlink_mode(symlink_mode),
-    };
+    let request = build_export_request(endpoint, compression, symlink_mode);
 
     match endpoint.target.as_str() {
         "local" => {
@@ -151,7 +228,6 @@ async fn export_endpoint_to_archive(
             .await?;
             Ok(ExportArchiveResult {
                 source_type: exported.source_type,
-                warnings: exported.warnings,
             })
         }
         target_name => {
@@ -202,7 +278,6 @@ async fn export_remote_endpoint_to_archive(
     .await?;
     Ok(ExportArchiveResult {
         source_type: exported.source_type,
-        warnings: exported.warnings,
     })
 }
 
@@ -218,6 +293,20 @@ async fn import_remote_archive_to_endpoint(
         target
             .transfer_import_from_file(archive_path, request)
             .await,
+    )
+    .await
+}
+
+async fn import_remote_body_to_endpoint(
+    state: &crate::BrokerState,
+    target_name: &str,
+    body: reqwest::Body,
+    request: &TransferImportRequest,
+) -> anyhow::Result<TransferImportResponse> {
+    let target = verified_remote_target(state, target_name).await?;
+    handle_remote_transfer_result(
+        target,
+        target.transfer_import_from_body(request, body).await,
     )
     .await
 }
