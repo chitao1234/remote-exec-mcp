@@ -85,6 +85,14 @@ bool stat_path_no_follow(const std::string& path, struct stat* st) {
 #endif
 }
 
+bool stat_is_regular_file(const struct stat& st) {
+    return (st.st_mode & S_IFMT) == S_IFREG;
+}
+
+bool stat_is_directory(const struct stat& st) {
+    return (st.st_mode & S_IFMT) == S_IFDIR;
+}
+
 bool is_symlink_path(const std::string& path) {
 #ifdef _WIN32
     const DWORD attributes = GetFileAttributesA(path.c_str());
@@ -103,22 +111,22 @@ bool path_exists(const std::string& path) {
 
 bool is_regular_file(const std::string& path) {
     struct stat st;
-    return stat_path_no_follow(path, &st) && (st.st_mode & S_IFREG) != 0;
+    return stat_path_no_follow(path, &st) && stat_is_regular_file(st);
 }
 
 bool is_regular_file_follow(const std::string& path) {
     struct stat st;
-    return stat(path.c_str(), &st) == 0 && (st.st_mode & S_IFREG) != 0;
+    return stat(path.c_str(), &st) == 0 && stat_is_regular_file(st);
 }
 
 bool is_directory(const std::string& path) {
     struct stat st;
-    return stat_path_no_follow(path, &st) && (st.st_mode & S_IFDIR) != 0;
+    return stat_path_no_follow(path, &st) && stat_is_directory(st);
 }
 
 bool is_directory_follow(const std::string& path) {
     struct stat st;
-    return stat(path.c_str(), &st) == 0 && (st.st_mode & S_IFDIR) != 0;
+    return stat(path.c_str(), &st) == 0 && stat_is_directory(st);
 }
 
 char os_separator() {
@@ -1089,7 +1097,10 @@ ExportedPayload export_path(
 #endif
     }
     if (is_regular_file(absolute_path) ||
-        (is_symlink_path(absolute_path) && context.options.symlink_mode == "preserve" && is_regular_file_follow(absolute_path))) {
+        (is_symlink_path(absolute_path) && context.options.symlink_mode == "preserve" &&
+         is_regular_file_follow(absolute_path)) ||
+        (is_symlink_path(absolute_path) && context.options.symlink_mode == "follow" &&
+         is_regular_file_follow(absolute_path))) {
         return export_file_as_tar(absolute_path, context.options);
     }
     if (is_directory(absolute_path) ||

@@ -2,13 +2,17 @@
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <utility>
 #include <vector>
 #ifndef _WIN32
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
+#include <unistd.h>
 #endif
 
 #include "transfer_ops.h"
@@ -402,6 +406,22 @@ static void assert_symlink_sources_are_preserved_by_default() {
     assert(exported.bytes.find("link.txt") != std::string::npos);
 }
 
+static void assert_top_level_file_symlink_can_be_followed() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-symlink-follow-file";
+    fs::remove_all(root);
+    fs::create_directories(root);
+    write_text(root / "target.txt", "target");
+    fs::create_symlink(root / "target.txt", root / "link.txt");
+
+    const ExportedPayload exported = export_path((root / "link.txt").string(), "follow");
+    assert(exported.source_type == "file");
+
+    const ImportSummary imported =
+        import_path(exported.bytes, exported.source_type, (root / "dest.txt").string(), "replace", true);
+    assert(imported.files_copied == 1);
+    assert(read_text(root / "dest.txt") == "target");
+}
+
 static void assert_transfer_skips_special_files_with_warning() {
     const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-special-skip";
     fs::remove_all(root);
@@ -422,6 +442,32 @@ static void assert_transfer_skips_special_files_with_warning() {
     assert(read_text(root / "dest" / "regular.txt") == "regular");
     assert(!fs::exists(root / "dest" / "events.fifo"));
     assert(!fs::exists(root / "dest" / TRANSFER_SUMMARY_ENTRY));
+}
+
+static void assert_top_level_special_files_are_unsupported() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-top-special";
+    fs::remove_all(root);
+    fs::create_directories(root);
+    const fs::path socket_path = root / "events.sock";
+
+    const int socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    assert(socket_fd >= 0);
+    sockaddr_un address;
+    std::memset(&address, 0, sizeof(address));
+    address.sun_family = AF_UNIX;
+    const std::string socket_path_text = socket_path.string();
+    assert(socket_path_text.size() < sizeof(address.sun_path));
+    std::strncpy(address.sun_path, socket_path_text.c_str(), sizeof(address.sun_path) - 1);
+    assert(bind(socket_fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
+
+    bool rejected = false;
+    try {
+        (void)export_path(socket_path_text);
+    } catch (const std::exception& ex) {
+        rejected = std::string(ex.what()).find("regular file or directory") != std::string::npos;
+    }
+    close(socket_fd);
+    assert(rejected);
 }
 
 static void assert_symlink_import_preserves_links() {
@@ -487,7 +533,9 @@ int main() {
 #ifndef _WIN32
     assert_symlink_sources_are_rejected();
     assert_symlink_sources_are_preserved_by_default();
+    assert_top_level_file_symlink_can_be_followed();
     assert_transfer_skips_special_files_with_warning();
+    assert_top_level_special_files_are_unsupported();
     assert_symlink_import_preserves_links();
 #endif
     assert_directory_traversal_is_rejected();
