@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use remote_exec_proto::path::basename_for_policy;
 use remote_exec_proto::rpc::{
-    TransferCompression, TransferMode, TransferSourceType, TransferSymlinkMode, TransferWarning,
+    TransferCompression, TransferSourceType, TransferSymlinkMode, TransferWarning,
 };
 use remote_exec_proto::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
 
@@ -17,7 +17,6 @@ use super::{
 pub async fn export_path_to_archive(
     path: &str,
     compression: TransferCompression,
-    transfer_mode: TransferMode,
     symlink_mode: TransferSymlinkMode,
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
@@ -28,7 +27,6 @@ pub async fn export_path_to_archive(
         path,
         temp_path.as_ref(),
         compression.clone(),
-        transfer_mode,
         symlink_mode,
         sandbox,
         windows_posix_root,
@@ -47,7 +45,6 @@ pub async fn export_path_to_file(
     path: &str,
     archive_path: &Path,
     compression: TransferCompression,
-    transfer_mode: TransferMode,
     symlink_mode: TransferSymlinkMode,
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
@@ -70,13 +67,8 @@ pub async fn export_path_to_file(
     let warnings = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<TransferWarning>> {
         let mut warnings = Vec::new();
         with_archive_builder(&archive_path, &compression, |builder| {
-            warnings = append_export_source(
-                builder,
-                &source_path,
-                source_type_for_task,
-                &transfer_mode,
-                &symlink_mode,
-            )?;
+            warnings =
+                append_export_source(builder, &source_path, source_type_for_task, &symlink_mode)?;
             Ok(())
         })?;
         Ok(warnings)
@@ -155,7 +147,6 @@ fn append_export_source<W: Write>(
     builder: &mut tar::Builder<W>,
     source_path: &Path,
     source_type: TransferSourceType,
-    transfer_mode: &TransferMode,
     symlink_mode: &TransferSymlinkMode,
 ) -> anyhow::Result<Vec<TransferWarning>> {
     let mut warnings = Vec::new();
@@ -174,7 +165,6 @@ fn append_export_source<W: Write>(
                 builder,
                 source_path,
                 source_path,
-                transfer_mode,
                 symlink_mode,
                 &mut warnings,
             )?;
@@ -191,7 +181,6 @@ fn append_directory_entries<W: Write>(
     builder: &mut tar::Builder<W>,
     root: &Path,
     current: &Path,
-    transfer_mode: &TransferMode,
     symlink_mode: &TransferSymlinkMode,
     warnings: &mut Vec<TransferWarning>,
 ) -> anyhow::Result<()> {
@@ -209,18 +198,11 @@ fn append_directory_entries<W: Write>(
                     let target_metadata = std::fs::metadata(&path)?;
                     if target_metadata.is_dir() {
                         builder.append_dir(rel, &path)?;
-                        append_directory_entries(
-                            builder,
-                            root,
-                            &path,
-                            transfer_mode,
-                            symlink_mode,
-                            warnings,
-                        )?;
+                        append_directory_entries(builder, root, &path, symlink_mode, warnings)?;
                     } else if target_metadata.is_file() {
                         builder.append_path_with_name(&path, rel)?;
                     } else {
-                        handle_unsupported_entry(&path, transfer_mode, warnings)?;
+                        handle_unsupported_entry(&path, warnings);
                     }
                 }
                 TransferSymlinkMode::Skip => {
@@ -235,11 +217,11 @@ fn append_directory_entries<W: Write>(
         }
         if metadata.is_dir() {
             builder.append_dir(rel, &path)?;
-            append_directory_entries(builder, root, &path, transfer_mode, symlink_mode, warnings)?;
+            append_directory_entries(builder, root, &path, symlink_mode, warnings)?;
         } else if metadata.is_file() {
             builder.append_path_with_name(&path, rel)?;
         } else {
-            handle_unsupported_entry(&path, transfer_mode, warnings)?;
+            handle_unsupported_entry(&path, warnings);
         }
     }
 
@@ -285,21 +267,8 @@ fn append_symlink_entry<W: Write>(
     Ok(())
 }
 
-fn handle_unsupported_entry(
-    path: &Path,
-    transfer_mode: &TransferMode,
-    warnings: &mut Vec<TransferWarning>,
-) -> anyhow::Result<()> {
-    match transfer_mode {
-        TransferMode::Lenient => {
-            warnings.push(TransferWarning::skipped_unsupported_entry(path.display()));
-            Ok(())
-        }
-        TransferMode::Strict => anyhow::bail!(
-            "transfer source contains unsupported entry `{}`",
-            path.display()
-        ),
-    }
+fn handle_unsupported_entry(path: &Path, warnings: &mut Vec<TransferWarning>) {
+    warnings.push(TransferWarning::skipped_unsupported_entry(path.display()));
 }
 
 fn append_source_archive<W: Write>(

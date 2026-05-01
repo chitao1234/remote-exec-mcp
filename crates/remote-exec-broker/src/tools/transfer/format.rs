@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use remote_exec_proto::public::{
     TransferDestinationMode, TransferEndpoint, TransferFilesResult,
-    TransferMode as PublicTransferMode, TransferSourceType as PublicTransferSourceType,
+    TransferSourceType as PublicTransferSourceType,
     TransferSymlinkMode as PublicTransferSymlinkMode,
 };
 use remote_exec_proto::rpc::{
@@ -12,37 +12,39 @@ use remote_exec_proto::rpc::{
 
 use crate::mcp_server::ToolCallOutput;
 
+pub(super) struct CompletedTransfer {
+    pub requested_destination: TransferEndpoint,
+    pub destination: TransferEndpoint,
+    pub destination_mode: TransferDestinationMode,
+    pub symlink_mode: PublicTransferSymlinkMode,
+    pub source_type: RpcTransferSourceType,
+    pub summary: TransferImportResponse,
+}
+
 pub(super) fn finish_transfer(
     started: Instant,
     sources: &[TransferEndpoint],
-    requested_destination: TransferEndpoint,
-    destination: TransferEndpoint,
-    destination_mode: TransferDestinationMode,
-    transfer_mode: PublicTransferMode,
-    symlink_mode: PublicTransferSymlinkMode,
-    source_type: RpcTransferSourceType,
-    summary: TransferImportResponse,
+    completed: CompletedTransfer,
 ) -> anyhow::Result<ToolCallOutput> {
-    let destination_target = destination.target.clone();
-    let destination_path = destination.path.clone();
+    let destination_target = completed.destination.target.clone();
+    let destination_path = completed.destination.path.clone();
     let result = TransferFilesResult {
         source: (sources.len() == 1).then(|| sources[0].clone()),
         sources: sources.to_vec(),
-        destination: requested_destination,
-        resolved_destination: destination,
-        destination_mode,
-        transfer_mode,
-        symlink_mode,
-        source_type: match source_type {
+        destination: completed.requested_destination,
+        resolved_destination: completed.destination,
+        destination_mode: completed.destination_mode,
+        symlink_mode: completed.symlink_mode,
+        source_type: match completed.source_type {
             RpcTransferSourceType::File => PublicTransferSourceType::File,
             RpcTransferSourceType::Directory => PublicTransferSourceType::Directory,
             RpcTransferSourceType::Multiple => PublicTransferSourceType::Multiple,
         },
-        bytes_copied: summary.bytes_copied,
-        files_copied: summary.files_copied,
-        directories_copied: summary.directories_copied,
-        replaced: summary.replaced,
-        warnings: summary.warnings,
+        bytes_copied: completed.summary.bytes_copied,
+        files_copied: completed.summary.files_copied,
+        directories_copied: completed.summary.directories_copied,
+        replaced: completed.summary.replaced,
+        warnings: completed.summary.warnings,
     };
 
     tracing::info!(

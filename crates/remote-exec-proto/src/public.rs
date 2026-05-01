@@ -74,60 +74,32 @@ pub struct ListTargetsResult {
     pub targets: Vec<ListTargetEntry>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TransferOverwrite {
     Fail,
+    #[default]
     Merge,
     Replace,
 }
 
-impl Default for TransferOverwrite {
-    fn default() -> Self {
-        Self::Merge
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TransferDestinationMode {
+    #[default]
     Auto,
     Exact,
     IntoDirectory,
 }
 
-impl Default for TransferDestinationMode {
-    fn default() -> Self {
-        Self::Auto
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TransferMode {
-    Lenient,
-    Strict,
-}
-
-impl Default for TransferMode {
-    fn default() -> Self {
-        Self::Lenient
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TransferSymlinkMode {
+    #[default]
     Preserve,
     Follow,
     Skip,
     Reject,
-}
-
-impl Default for TransferSymlinkMode {
-    fn default() -> Self {
-        Self::Preserve
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -158,8 +130,6 @@ pub struct TransferFilesInput {
     #[serde(default)]
     pub destination_mode: TransferDestinationMode,
     #[serde(default)]
-    pub transfer_mode: TransferMode,
-    #[serde(default)]
     pub symlink_mode: TransferSymlinkMode,
     pub create_parent: bool,
 }
@@ -172,7 +142,6 @@ pub struct TransferFilesResult {
     pub destination: TransferEndpoint,
     pub resolved_destination: TransferEndpoint,
     pub destination_mode: TransferDestinationMode,
-    pub transfer_mode: TransferMode,
     pub symlink_mode: TransferSymlinkMode,
     pub source_type: TransferSourceType,
     pub bytes_copied: u64,

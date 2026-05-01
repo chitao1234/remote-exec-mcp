@@ -33,7 +33,6 @@ pub async fn export_path_to_archive(
         path,
         archive_path,
         request.compression.clone(),
-        request.transfer_mode.clone(),
         request.symlink_mode.clone(),
         sandbox,
         None,

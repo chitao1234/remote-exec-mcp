@@ -228,8 +228,7 @@ async fn existing_destination_is_directory(
     destination: &TransferEndpoint,
 ) -> anyhow::Result<bool> {
     let result = match destination.target.as_str() {
-        "local" => crate::local_transfer::path_info(&destination.path, state.host_sandbox.as_ref())
-            .map_err(anyhow::Error::from),
+        "local" => crate::local_transfer::path_info(&destination.path, state.host_sandbox.as_ref()),
         target_name => {
             let target = verified_remote_target(state, target_name).await?;
             target

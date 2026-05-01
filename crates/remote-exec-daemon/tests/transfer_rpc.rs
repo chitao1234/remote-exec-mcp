@@ -151,7 +151,6 @@ async fn export_file_streams_archive_and_reports_file_source_type() {
             &TransferExportRequest {
                 path: source.display().to_string(),
                 compression: TransferCompression::None,
-                transfer_mode: Default::default(),
                 symlink_mode: Default::default(),
             },
         )
@@ -223,7 +222,6 @@ async fn export_file_supports_zstd_compression() {
             &TransferExportRequest {
                 path: source.display().to_string(),
                 compression: TransferCompression::Zstd,
-                transfer_mode: Default::default(),
                 symlink_mode: remote_exec_proto::rpc::TransferSymlinkMode::Reject,
             },
         )
@@ -267,7 +265,6 @@ async fn export_directory_rejects_nested_symlinks_before_streaming() {
             &TransferExportRequest {
                 path: root.display().to_string(),
                 compression: TransferCompression::None,
-                transfer_mode: Default::default(),
                 symlink_mode: remote_exec_proto::rpc::TransferSymlinkMode::Reject,
             },
         )
@@ -298,7 +295,6 @@ async fn export_directory_preserves_symlinks_by_default() {
             &TransferExportRequest {
                 path: root.display().to_string(),
                 compression: TransferCompression::None,
-                transfer_mode: Default::default(),
                 symlink_mode: Default::default(),
             },
         )
@@ -322,7 +318,7 @@ async fn export_directory_preserves_symlinks_by_default() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn export_directory_leniently_skips_special_files_with_warning() {
+async fn export_directory_skips_special_files_with_warning() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let root = fixture.workdir.join("dist");
     tokio::fs::create_dir_all(&root).await.unwrap();
@@ -342,7 +338,6 @@ async fn export_directory_leniently_skips_special_files_with_warning() {
             &TransferExportRequest {
                 path: root.display().to_string(),
                 compression: TransferCompression::None,
-                transfer_mode: Default::default(),
                 symlink_mode: Default::default(),
             },
         )
@@ -395,7 +390,6 @@ async fn export_rejects_symlink_source_root() {
             &TransferExportRequest {
                 path: link.display().to_string(),
                 compression: TransferCompression::None,
-                transfer_mode: Default::default(),
                 symlink_mode: remote_exec_proto::rpc::TransferSymlinkMode::Reject,
             },
         )
@@ -427,7 +421,6 @@ async fn export_file_preserves_executable_mode_in_archive_header() {
             &TransferExportRequest {
                 path: source.display().to_string(),
                 compression: TransferCompression::None,
-                transfer_mode: Default::default(),
                 symlink_mode: Default::default(),
             },
         )
@@ -453,7 +446,6 @@ async fn import_accepts_forward_slash_windows_destination_paths() {
             &TransferExportRequest {
                 path: source.display().to_string(),
                 compression: TransferCompression::None,
-                transfer_mode: Default::default(),
                 symlink_mode: Default::default(),
             },
         )
@@ -495,7 +487,6 @@ async fn export_accepts_msys_style_windows_source_paths() {
             &TransferExportRequest {
                 path: support::msys_style_path(&source),
                 compression: TransferCompression::None,
-                transfer_mode: Default::default(),
                 symlink_mode: Default::default(),
             },
         )
@@ -527,7 +518,6 @@ async fn import_accepts_cygwin_style_windows_destination_paths() {
             &TransferExportRequest {
                 path: source.display().to_string(),
                 compression: TransferCompression::None,
-                transfer_mode: Default::default(),
                 symlink_mode: Default::default(),
             },
         )
@@ -586,7 +576,6 @@ async fn export_accepts_windows_posix_root_source_paths() {
             &TransferExportRequest {
                 path: "/artifacts/synthetic-source.txt".to_string(),
                 compression: TransferCompression::None,
-                transfer_mode: Default::default(),
                 symlink_mode: Default::default(),
             },
         )
@@ -617,7 +606,6 @@ async fn import_accepts_windows_posix_root_destination_paths() {
             &TransferExportRequest {
                 path: source.display().to_string(),
                 compression: TransferCompression::None,
-                transfer_mode: Default::default(),
                 symlink_mode: Default::default(),
             },
         )
@@ -677,7 +665,6 @@ async fn import_directory_replaces_exact_destination_and_preserves_exec_bits() {
             &TransferExportRequest {
                 path: source_root.display().to_string(),
                 compression: TransferCompression::None,
-                transfer_mode: Default::default(),
                 symlink_mode: Default::default(),
             },
         )
@@ -830,7 +817,6 @@ async fn import_directory_merge_preserves_unrelated_destination_entries() {
             &TransferExportRequest {
                 path: source_root.display().to_string(),
                 compression: TransferCompression::None,
-                transfer_mode: Default::default(),
                 symlink_mode: Default::default(),
             },
         )
@@ -929,7 +915,6 @@ async fn import_rejects_existing_destination_when_overwrite_is_fail() {
             &TransferExportRequest {
                 path: source.display().to_string(),
                 compression: TransferCompression::None,
-                transfer_mode: Default::default(),
                 symlink_mode: Default::default(),
             },
         )
@@ -983,7 +968,6 @@ async fn import_replaces_directory_with_file_at_the_exact_destination_path() {
             &TransferExportRequest {
                 path: source.display().to_string(),
                 compression: TransferCompression::None,
-                transfer_mode: Default::default(),
                 symlink_mode: Default::default(),
             },
         )
@@ -1026,7 +1010,6 @@ async fn import_rejects_missing_parent_when_create_parent_is_false() {
             &TransferExportRequest {
                 path: source.display().to_string(),
                 compression: TransferCompression::None,
-                transfer_mode: Default::default(),
                 symlink_mode: Default::default(),
             },
         )
@@ -1116,7 +1099,6 @@ allow = {allow}
             &TransferExportRequest {
                 path: blocked.display().to_string(),
                 compression: TransferCompression::None,
-                transfer_mode: Default::default(),
                 symlink_mode: Default::default(),
             },
         )
@@ -1147,7 +1129,6 @@ async fn export_rejects_zstd_when_transfer_compression_is_disabled() {
             &TransferExportRequest {
                 path: source.display().to_string(),
                 compression: TransferCompression::Zstd,
-                transfer_mode: Default::default(),
                 symlink_mode: Default::default(),
             },
         )
@@ -1185,7 +1166,6 @@ allow = {allow}
             &TransferExportRequest {
                 path: source.display().to_string(),
                 compression: TransferCompression::None,
-                transfer_mode: Default::default(),
                 symlink_mode: Default::default(),
             },
         )

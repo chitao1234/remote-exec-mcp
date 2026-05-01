@@ -2,11 +2,11 @@ use futures_util::TryStreamExt;
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
     PatchApplyRequest, PatchApplyResponse, RpcErrorBody, TRANSFER_COMPRESSION_HEADER,
-    TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_MODE_HEADER,
-    TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER, TRANSFER_SYMLINK_MODE_HEADER,
-    TRANSFER_WARNINGS_HEADER, TargetInfoResponse, TransferCompression, TransferExportRequest,
-    TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
-    TransferPathInfoResponse, TransferSourceType, TransferWarning,
+    TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER,
+    TRANSFER_SOURCE_TYPE_HEADER, TRANSFER_SYMLINK_MODE_HEADER, TRANSFER_WARNINGS_HEADER,
+    TargetInfoResponse, TransferCompression, TransferExportRequest, TransferImportRequest,
+    TransferImportResponse, TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType,
+    TransferWarning,
 };
 use reqwest::header::{AUTHORIZATION, CONNECTION, CONTENT_LENGTH, HeaderValue};
 
@@ -328,10 +328,6 @@ impl DaemonClient {
                 format_transfer_compression(&req.compression).to_string(),
             )
             .header(
-                TRANSFER_MODE_HEADER,
-                format_transfer_mode(&req.transfer_mode).to_string(),
-            )
-            .header(
                 TRANSFER_SYMLINK_MODE_HEADER,
                 format_transfer_symlink_mode(&req.symlink_mode).to_string(),
             )
@@ -514,13 +510,6 @@ fn format_transfer_overwrite(
         remote_exec_proto::rpc::TransferOverwriteMode::Fail => "fail",
         remote_exec_proto::rpc::TransferOverwriteMode::Merge => "merge",
         remote_exec_proto::rpc::TransferOverwriteMode::Replace => "replace",
-    }
-}
-
-fn format_transfer_mode(mode: &remote_exec_proto::rpc::TransferMode) -> &'static str {
-    match mode {
-        remote_exec_proto::rpc::TransferMode::Lenient => "lenient",
-        remote_exec_proto::rpc::TransferMode::Strict => "strict",
     }
 }
 

@@ -9,7 +9,7 @@ use endpoints::{
     ensure_absolute, ensure_distinct_endpoints, ensure_multi_source_basenames_are_unique,
     negotiate_transfer_compression, resolve_destination,
 };
-use format::{finish_transfer, format_transfer_compression};
+use format::{CompletedTransfer, finish_transfer, format_transfer_compression};
 use operations::{transfer_multiple_sources, transfer_single_source};
 
 pub async fn transfer_files(
@@ -40,7 +40,6 @@ pub async fn transfer_files(
         compression = format_transfer_compression(&compression),
         overwrite = ?input.overwrite,
         destination_mode = ?input.destination_mode,
-        transfer_mode = ?input.transfer_mode,
         symlink_mode = ?input.symlink_mode,
         create_parent = input.create_parent,
         "broker tool started"
@@ -70,7 +69,6 @@ pub async fn transfer_files(
                 &destination,
                 &input.overwrite,
                 &compression,
-                &input.transfer_mode,
                 &input.symlink_mode,
                 input.create_parent,
             )
@@ -83,7 +81,6 @@ pub async fn transfer_files(
                 &destination,
                 &input.overwrite,
                 &compression,
-                &input.transfer_mode,
                 &input.symlink_mode,
                 input.create_parent,
             )
@@ -94,13 +91,14 @@ pub async fn transfer_files(
     finish_transfer(
         started,
         &sources,
-        requested_destination,
-        destination,
-        input.destination_mode,
-        input.transfer_mode,
-        input.symlink_mode,
-        source_type,
-        summary,
+        CompletedTransfer {
+            requested_destination,
+            destination,
+            destination_mode: input.destination_mode,
+            symlink_mode: input.symlink_mode,
+            source_type,
+            summary,
+        },
     )
 }
 

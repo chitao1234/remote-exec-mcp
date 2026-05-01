@@ -94,7 +94,6 @@ pub const TRANSFER_COMPRESSION_HEADER: &str = "x-remote-exec-compression";
 pub const TRANSFER_DESTINATION_PATH_HEADER: &str = "x-remote-exec-destination-path";
 pub const TRANSFER_OVERWRITE_HEADER: &str = "x-remote-exec-overwrite";
 pub const TRANSFER_CREATE_PARENT_HEADER: &str = "x-remote-exec-create-parent";
-pub const TRANSFER_MODE_HEADER: &str = "x-remote-exec-transfer-mode";
 pub const TRANSFER_SYMLINK_MODE_HEADER: &str = "x-remote-exec-symlink-mode";
 pub const TRANSFER_WARNINGS_HEADER: &str = "x-remote-exec-warnings-bin";
 
@@ -126,14 +125,6 @@ pub enum TransferOverwriteMode {
     Fail,
     Merge,
     Replace,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum TransferMode {
-    #[default]
-    Lenient,
-    Strict,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -174,8 +165,6 @@ pub struct TransferExportRequest {
     #[serde(default, skip_serializing_if = "TransferCompression::is_none")]
     pub compression: TransferCompression,
     #[serde(default)]
-    pub transfer_mode: TransferMode,
-    #[serde(default)]
     pub symlink_mode: TransferSymlinkMode,
 }
 
@@ -197,8 +186,6 @@ pub struct TransferImportRequest {
     pub create_parent: bool,
     pub source_type: TransferSourceType,
     pub compression: TransferCompression,
-    #[serde(default)]
-    pub transfer_mode: TransferMode,
     #[serde(default)]
     pub symlink_mode: TransferSymlinkMode,
 }

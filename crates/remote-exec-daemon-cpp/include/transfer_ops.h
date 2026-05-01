@@ -31,7 +31,6 @@ struct PathInfo {
 
 ExportedPayload export_path(
     const std::string& absolute_path,
-    const std::string& transfer_mode = "lenient",
     const std::string& symlink_mode = "preserve"
 );
 PathInfo path_info(const std::string& absolute_path);
@@ -41,6 +40,5 @@ ImportSummary import_path(
     const std::string& absolute_path,
     const std::string& overwrite_mode,
     bool create_parent,
-    const std::string& transfer_mode = "lenient",
     const std::string& symlink_mode = "preserve"
 );

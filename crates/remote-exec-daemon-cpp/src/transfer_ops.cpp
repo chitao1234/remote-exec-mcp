@@ -43,7 +43,6 @@ struct TarHeaderView {
 };
 
 struct ExportOptions {
-    std::string transfer_mode;
     std::string symlink_mode;
 };
 
@@ -596,9 +595,6 @@ bool checksum_valid(const char* block) {
 }
 
 void validate_transfer_options(const ExportOptions& options) {
-    if (options.transfer_mode != "lenient" && options.transfer_mode != "strict") {
-        throw std::runtime_error("unsupported transfer mode");
-    }
     if (options.symlink_mode != "preserve" && options.symlink_mode != "follow" &&
         options.symlink_mode != "skip" && options.symlink_mode != "reject") {
         throw std::runtime_error("unsupported transfer symlink mode");
@@ -614,15 +610,11 @@ void add_warning(
 }
 
 void handle_unsupported_entry(ExportContext* context, const std::string& path) {
-    if (context->options.transfer_mode == "lenient") {
-        add_warning(
-            &context->warnings,
-            "transfer_skipped_unsupported_entry",
-            "Skipped unsupported transfer source entry `" + path + "`."
-        );
-        return;
-    }
-    throw std::runtime_error("transfer source contains unsupported entry " + path);
+    add_warning(
+        &context->warnings,
+        "transfer_skipped_unsupported_entry",
+        "Skipped unsupported transfer source entry `" + path + "`."
+    );
 }
 
 void handle_skipped_symlink(ExportContext* context, const std::string& path) {
@@ -978,12 +970,10 @@ ImportSummary import_directory_from_tar(
 
 ExportedPayload export_path(
     const std::string& absolute_path,
-    const std::string& transfer_mode,
     const std::string& symlink_mode
 ) {
     ExportContext context;
-    context.options = ExportOptions{transfer_mode.empty() ? "lenient" : transfer_mode,
-                                    symlink_mode.empty() ? "preserve" : symlink_mode};
+    context.options = ExportOptions{symlink_mode.empty() ? "preserve" : symlink_mode};
     validate_transfer_options(context.options);
     if (!is_absolute_path(absolute_path)) {
         throw std::runtime_error("transfer path is not absolute");
@@ -1030,11 +1020,9 @@ ImportSummary import_path(
     const std::string& absolute_path,
     const std::string& overwrite_mode,
     bool create_parent,
-    const std::string& transfer_mode,
     const std::string& symlink_mode
 ) {
-    ExportOptions options{transfer_mode.empty() ? "lenient" : transfer_mode,
-                          symlink_mode.empty() ? "preserve" : symlink_mode};
+    ExportOptions options{symlink_mode.empty() ? "preserve" : symlink_mode};
     validate_transfer_options(options);
     if (!is_absolute_path(absolute_path)) {
         throw std::runtime_error("transfer path is not absolute");

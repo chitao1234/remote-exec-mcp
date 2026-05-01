@@ -299,7 +299,6 @@ HttpResponse handle_transfer_export(const HttpRequest& request) {
         }
         const ExportedPayload payload = export_path(
             body.at("path").get<std::string>(),
-            body.value("transfer_mode", std::string("lenient")),
             body.value("symlink_mode", std::string("preserve"))
         );
         log_message(
@@ -363,9 +362,6 @@ HttpResponse handle_transfer_import(const HttpRequest& request) {
             request.header("x-remote-exec-destination-path"),
             request.header("x-remote-exec-overwrite"),
             request.header("x-remote-exec-create-parent") == "true",
-            request.header("x-remote-exec-transfer-mode").empty()
-                ? "lenient"
-                : request.header("x-remote-exec-transfer-mode"),
             request.header("x-remote-exec-symlink-mode").empty()
                 ? "preserve"
                 : request.header("x-remote-exec-symlink-mode")

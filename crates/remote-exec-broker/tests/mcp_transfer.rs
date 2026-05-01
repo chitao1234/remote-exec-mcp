@@ -178,7 +178,7 @@ async fn transfer_files_copies_local_file_and_reports_summary() {
     assert_eq!(result.structured_content["bytes_copied"], 6);
     assert_eq!(result.structured_content["replaced"], false);
     assert_eq!(result.structured_content["destination_mode"], "auto");
-    assert_eq!(result.structured_content["transfer_mode"], "lenient");
+    assert!(result.structured_content.get("transfer_mode").is_none());
     assert_eq!(result.structured_content["symlink_mode"], "preserve");
     assert_eq!(
         result.structured_content["resolved_destination"]["path"],
@@ -214,13 +214,12 @@ async fn transfer_files_defaults_to_merge_overwrite() {
         .await
         .expect("transfer import capture");
     assert_eq!(capture.overwrite, "merge");
-    assert_eq!(capture.transfer_mode, "lenient");
     assert_eq!(capture.symlink_mode, "preserve");
 }
 
 #[cfg(unix)]
 #[tokio::test]
-async fn transfer_files_leniently_skips_local_special_files_with_warning() {
+async fn transfer_files_skips_local_special_files_with_warning() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     let source = fixture._tempdir.path().join("source");
     let destination = fixture._tempdir.path().join("dest");

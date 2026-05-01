@@ -374,7 +374,7 @@ static void assert_symlink_sources_are_rejected() {
 
     bool rejected = false;
     try {
-        (void)export_path((root / "link.txt").string(), "lenient", "reject");
+        (void)export_path((root / "link.txt").string(), "reject");
     } catch (...) {
         rejected = true;
     }
@@ -382,7 +382,7 @@ static void assert_symlink_sources_are_rejected() {
 
     rejected = false;
     try {
-        (void)export_path((root / "source").string(), "lenient", "reject");
+        (void)export_path((root / "source").string(), "reject");
     } catch (...) {
         rejected = true;
     }
@@ -401,8 +401,8 @@ static void assert_symlink_sources_are_preserved_by_default() {
     assert(exported.bytes.find("link.txt") != std::string::npos);
 }
 
-static void assert_lenient_transfer_skips_special_files_with_warning() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-lenient";
+static void assert_transfer_skips_special_files_with_warning() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-special-skip";
     fs::remove_all(root);
     fs::create_directories(root / "source");
     write_text(root / "source" / "regular.txt", "regular");
@@ -480,7 +480,7 @@ int main() {
 #ifndef _WIN32
     assert_symlink_sources_are_rejected();
     assert_symlink_sources_are_preserved_by_default();
-    assert_lenient_transfer_skips_special_files_with_warning();
+    assert_transfer_skips_special_files_with_warning();
     assert_symlink_import_preserves_links();
 #endif
     assert_directory_traversal_is_rejected();

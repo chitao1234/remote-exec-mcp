@@ -12,10 +12,10 @@ use futures_util::TryStreamExt;
 use http_body_util::BodyExt;
 use remote_exec_proto::rpc::{
     RpcErrorBody, TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
-    TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_MODE_HEADER, TRANSFER_OVERWRITE_HEADER,
-    TRANSFER_SOURCE_TYPE_HEADER, TRANSFER_SYMLINK_MODE_HEADER, TRANSFER_WARNINGS_HEADER,
-    TransferCompression, TransferExportRequest, TransferImportRequest, TransferImportResponse,
-    TransferPathInfoRequest, TransferPathInfoResponse, TransferWarning,
+    TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
+    TRANSFER_SYMLINK_MODE_HEADER, TRANSFER_WARNINGS_HEADER, TransferCompression,
+    TransferExportRequest, TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
+    TransferPathInfoResponse, TransferWarning,
 };
 use remote_exec_proto::sandbox::SandboxError;
 
@@ -78,14 +78,12 @@ pub async fn export_path(
     tracing::info!(
         path = %req.path,
         compression = format_compression(&req.compression),
-        transfer_mode = ?req.transfer_mode,
         symlink_mode = ?req.symlink_mode,
         "transfer export received"
     );
     let exported = archive::export_path_to_archive(
         &req.path,
         req.compression.clone(),
-        req.transfer_mode.clone(),
         req.symlink_mode.clone(),
         state.sandbox.as_ref(),
         state.config.windows_posix_root.as_deref(),
@@ -140,7 +138,6 @@ pub async fn import_archive(
         create_parent = request.create_parent,
         source_type = format_source_type(&request.source_type),
         compression = format_compression(&request.compression),
-        transfer_mode = ?request.transfer_mode,
         symlink_mode = ?request.symlink_mode,
         "transfer import received"
     );
@@ -237,8 +234,6 @@ fn parse_import_request(
             .map_err(|err| crate::exec::rpc_error("transfer_failed", err.to_string()))?,
         source_type: parse_header_enum(headers, TRANSFER_SOURCE_TYPE_HEADER)?,
         compression: parse_optional_header_enum(headers, TRANSFER_COMPRESSION_HEADER)?
-            .unwrap_or_default(),
-        transfer_mode: parse_optional_header_enum(headers, TRANSFER_MODE_HEADER)?
             .unwrap_or_default(),
         symlink_mode: parse_optional_header_enum(headers, TRANSFER_SYMLINK_MODE_HEADER)?
             .unwrap_or_default(),
