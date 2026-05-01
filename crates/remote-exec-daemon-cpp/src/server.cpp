@@ -12,9 +12,11 @@
 #endif
 
 #include "common.h"
+#include "filesystem_sandbox.h"
 #include "http_request.h"
 #include "http_helpers.h"
 #include "logging.h"
+#include "path_policy.h"
 #include "platform.h"
 #include "server.h"
 #include "server_routes.h"
@@ -34,6 +36,9 @@ bool contains_text(const std::string& value, const std::string& needle) {
 }
 
 std::string transfer_error_code(const std::string& message) {
+    if (contains_text(message, "sandbox")) {
+        return "sandbox_denied";
+    }
     if (contains_text(message, "not absolute")) {
         return "transfer_path_not_absolute";
     }
@@ -169,6 +174,26 @@ bool reject_before_route(
     return false;
 }
 
+const CompiledFilesystemSandbox* active_sandbox(const AppState& state) {
+    return state.sandbox_enabled ? &state.sandbox : NULL;
+}
+
+void authorize_sandbox_path(
+    const AppState& state,
+    SandboxAccess access,
+    const std::string& path
+) {
+    authorize_path(host_path_policy(), active_sandbox(state), access, path);
+}
+
+std::string resolve_absolute_transfer_path(const std::string& path) {
+    const PathPolicy policy = host_path_policy();
+    if (!is_absolute_for_policy(policy, path)) {
+        throw std::runtime_error("transfer path is not absolute");
+    }
+    return normalize_for_system(policy, path);
+}
+
 HttpResponse handle_streaming_transfer_import(
     const AppState& state,
     const HttpRequest& request,
@@ -186,11 +211,14 @@ HttpResponse handle_streaming_transfer_import(
         if (!compression.empty() && compression != "none") {
             throw std::runtime_error("this daemon does not support transfer compression");
         }
+        const std::string destination_path =
+            resolve_absolute_transfer_path(request.header("x-remote-exec-destination-path"));
+        authorize_sandbox_path(state, SANDBOX_WRITE, destination_path);
         HttpBodyTransferArchiveReader archive_reader(body);
         const ImportSummary summary = import_path_from_reader(
             archive_reader,
             request.header("x-remote-exec-source-type"),
-            request.header("x-remote-exec-destination-path"),
+            destination_path,
             request.header("x-remote-exec-overwrite"),
             request.header("x-remote-exec-create-parent") == "true",
             request.header("x-remote-exec-symlink-mode").empty()
@@ -199,8 +227,7 @@ HttpResponse handle_streaming_transfer_import(
         );
         {
             std::ostringstream message;
-            message << "transfer/import destination=`"
-                    << request.header("x-remote-exec-destination-path")
+            message << "transfer/import destination=`" << destination_path
                     << "` bytes_copied=" << summary.bytes_copied
                     << " files_copied=" << summary.files_copied
                     << " directories_copied=" << summary.directories_copied
@@ -261,7 +288,9 @@ int handle_streaming_transfer_export(
             throw std::runtime_error("this daemon does not support transfer compression");
         }
 
-        const std::string path = body_json.at("path").get<std::string>();
+        const std::string path =
+            resolve_absolute_transfer_path(body_json.at("path").get<std::string>());
+        authorize_sandbox_path(state, SANDBOX_READ, path);
         const std::string symlink_mode = body_json.value("symlink_mode", std::string("preserve"));
         const std::string source_type = export_path_source_type(path, symlink_mode);
         log_message(
@@ -411,6 +440,10 @@ int run_server(const DaemonConfig& config) {
     state.daemon_instance_id = daemon_instance_id();
     state.hostname = platform::hostname();
     state.default_shell = platform::resolve_default_shell(config.default_shell);
+    state.sandbox_enabled = config.sandbox_configured;
+    if (state.sandbox_enabled) {
+        state.sandbox = compile_filesystem_sandbox(host_path_policy(), config.sandbox);
+    }
     UniqueSocket listener(create_listener(state.config));
 
     {

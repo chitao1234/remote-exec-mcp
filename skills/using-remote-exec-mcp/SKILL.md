@@ -549,6 +549,7 @@ Structured result fields:
 - On Windows XP-compatible C++ daemon targets, non-PTY exec intentionally keeps stdin open for compatibility with the original XP daemon.
 - On Windows XP-compatible C++ daemon targets, the supported shell is `cmd.exe`.
 - On C++ daemon targets, `apply_patch` supports both absolute patch paths and paths relative to `workdir`.
+- On C++ daemon targets, static path sandboxing can restrict exec cwd, transfer read/write endpoints, and patch write targets.
 - On C++ daemon targets, `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles.
 - On C++ daemon targets, transfer archive bodies stream through the daemon instead of requiring a full tar archive to be staged in memory.
 - On POSIX C++ daemon targets, transfer symlink modes are supported.

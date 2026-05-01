@@ -12,7 +12,9 @@
 #include <sys/socket.h>
 
 #include "config.h"
+#include "filesystem_sandbox.h"
 #include "http_helpers.h"
+#include "path_policy.h"
 #include "platform.h"
 #include "process_session.h"
 #include "server.h"
@@ -48,6 +50,13 @@ static void initialize_state(AppState& state, const fs::path& root) {
     state.daemon_instance_id = "test-instance";
     state.hostname = "test-host";
     state.default_shell = platform::resolve_default_shell("");
+}
+
+static void enable_sandbox(AppState& state) {
+    state.sandbox_enabled = state.config.sandbox_configured;
+    if (state.sandbox_enabled) {
+        state.sandbox = compile_filesystem_sandbox(host_path_policy(), state.config.sandbox);
+    }
 }
 
 static std::string read_all_from_socket(SOCKET socket) {
@@ -250,6 +259,50 @@ int main() {
     assert(export_response.find("Content-Length:") == std::string::npos);
     assert(export_response.find("x-remote-exec-source-type: file\r\n") != std::string::npos);
     assert(single_file_tar_body(decode_chunked_response_body(export_response)) == "streamed export");
+
+    const fs::path sandbox_root = root / "sandbox";
+    const fs::path read_allowed = sandbox_root / "read";
+    const fs::path write_allowed = sandbox_root / "write";
+    const fs::path outside = sandbox_root / "outside";
+    fs::create_directories(read_allowed);
+    fs::create_directories(write_allowed);
+    fs::create_directories(outside);
+    write_text_file(outside / "outside.txt", "outside");
+
+    AppState sandbox_state;
+    initialize_state(sandbox_state, root);
+    sandbox_state.config.sandbox_configured = true;
+    sandbox_state.config.sandbox.read.allow.push_back(read_allowed.string());
+    sandbox_state.config.sandbox.write.allow.push_back(write_allowed.string());
+    enable_sandbox(sandbox_state);
+
+    const std::string denied_export_body = Json{{"path", (outside / "outside.txt").string()}}.dump();
+    std::ostringstream denied_export_request;
+    denied_export_request << "POST /v1/transfer/export HTTP/1.1\r\n"
+                          << "Content-Length: " << denied_export_body.size() << "\r\n"
+                          << "\r\n"
+                          << denied_export_body;
+    const std::string denied_export_response =
+        run_single_request(sandbox_state, denied_export_request.str());
+    assert(denied_export_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
+    assert(Json::parse(response_body(denied_export_response)).at("code").get<std::string>() == "sandbox_denied");
+
+    std::ostringstream denied_import_request;
+    denied_import_request << "POST /v1/transfer/import HTTP/1.1\r\n"
+                          << "Transfer-Encoding: chunked\r\n"
+                          << "x-remote-exec-source-type: file\r\n"
+                          << "x-remote-exec-destination-path: " << (outside / "imported.txt").string() << "\r\n"
+                          << "x-remote-exec-overwrite: replace\r\n"
+                          << "x-remote-exec-create-parent: true\r\n"
+                          << "x-remote-exec-symlink-mode: preserve\r\n"
+                          << "x-remote-exec-compression: none\r\n"
+                          << "\r\n"
+                          << chunked_body(archive);
+    const std::string denied_import_response =
+        run_single_request(sandbox_state, denied_import_request.str());
+    assert(denied_import_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
+    assert(Json::parse(response_body(denied_import_response)).at("code").get<std::string>() == "sandbox_denied");
+    assert(!fs::exists(outside / "imported.txt"));
 
     return 0;
 }

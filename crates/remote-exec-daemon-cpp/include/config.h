@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <string>
 
+#include "filesystem_sandbox.h"
+
 struct YieldTimeOperationConfig {
     unsigned long default_ms;
     unsigned long max_ms;
@@ -27,6 +29,8 @@ struct DaemonConfig {
     std::size_t max_request_body_bytes;
     unsigned long max_open_sessions;
     YieldTimeConfig yield_time;
+    bool sandbox_configured = false;
+    FilesystemSandbox sandbox;
 };
 
 YieldTimeConfig default_yield_time_config();

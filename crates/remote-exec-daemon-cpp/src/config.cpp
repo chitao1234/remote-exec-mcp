@@ -100,6 +100,50 @@ static bool contains_ascii_whitespace(const std::string& value) {
     return value.find_first_of(" \t\r\n") != std::string::npos;
 }
 
+static std::vector<std::string> split_semicolon_list(const std::string& raw) {
+    std::vector<std::string> values;
+    std::size_t start = 0;
+    while (start <= raw.size()) {
+        const std::size_t end = raw.find(';', start);
+        const std::string part = trim_ascii(
+            raw.substr(start, end == std::string::npos ? std::string::npos : end - start)
+        );
+        if (!part.empty()) {
+            values.push_back(part);
+        }
+        if (end == std::string::npos) {
+            break;
+        }
+        start = end + 1;
+    }
+    return values;
+}
+
+static std::vector<std::string> read_optional_path_list(
+    const std::map<std::string, std::string>& values,
+    const std::string& key
+) {
+    const std::map<std::string, std::string>::const_iterator it = values.find(key);
+    if (it == values.end()) {
+        return std::vector<std::string>();
+    }
+    return split_semicolon_list(it->second);
+}
+
+static bool has_key_with_prefix(
+    const std::map<std::string, std::string>& values,
+    const std::string& prefix
+) {
+    for (std::map<std::string, std::string>::const_iterator it = values.begin();
+         it != values.end();
+         ++it) {
+        if (it->first.rfind(prefix, 0) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void validate_yield_time_operation(
     const YieldTimeOperationConfig& config,
     const std::string& key_prefix
@@ -253,5 +297,12 @@ DaemonConfig load_config(const std::string& path) {
         "yield_time_write_stdin_input",
         config.yield_time.write_stdin_input
     );
+    config.sandbox_configured = has_key_with_prefix(values, "sandbox_");
+    config.sandbox.exec_cwd.allow = read_optional_path_list(values, "sandbox_exec_cwd_allow");
+    config.sandbox.exec_cwd.deny = read_optional_path_list(values, "sandbox_exec_cwd_deny");
+    config.sandbox.read.allow = read_optional_path_list(values, "sandbox_read_allow");
+    config.sandbox.read.deny = read_optional_path_list(values, "sandbox_read_deny");
+    config.sandbox.write.allow = read_optional_path_list(values, "sandbox_write_allow");
+    config.sandbox.write.deny = read_optional_path_list(values, "sandbox_write_deny");
     return config;
 }

@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -18,6 +19,7 @@
 #endif
 
 #include "patch_engine.h"
+#include "path_policy.h"
 #include "platform.h"
 
 namespace {
@@ -177,13 +179,15 @@ std::string normalize_absolute_path(const std::string& raw) {
 }
 
 std::string normalize_patch_path(const std::string& raw) {
-    if (platform::is_absolute_path(raw)) {
-        return normalize_absolute_path(raw);
+    const PathPolicy policy = host_path_policy();
+    const std::string normalized = normalize_for_system(policy, raw);
+    if (is_absolute_for_policy(policy, raw) || is_absolute_for_policy(policy, normalized)) {
+        return normalize_absolute_path(normalized);
     }
     if (raw.size() >= 2 && raw[1] == ':') {
         throw std::runtime_error("drive-relative patch paths are not supported");
     }
-    return normalize_relative_path(raw);
+    return normalize_relative_path(normalized);
 }
 
 std::string join_path(const std::string& base, const std::string& relative) {
@@ -200,7 +204,7 @@ std::string join_path(const std::string& base, const std::string& relative) {
 }
 
 std::string resolve_patch_path(const std::string& root, const std::string& path) {
-    if (platform::is_absolute_path(path)) {
+    if (is_absolute_for_policy(host_path_policy(), path)) {
         return path;
     }
     return join_path(root, path);
@@ -595,7 +599,11 @@ std::string render_added_content(const std::vector<std::string>& lines) {
 
 } // namespace
 
-PatchApplyResult apply_patch(const std::string& root, const std::string& patch_text) {
+PatchApplyResult apply_patch(
+    const std::string& root,
+    const std::string& patch_text,
+    const PatchPathAuthorizer& authorizer
+) {
     const std::vector<PatchAction> actions = parse_patch(patch_text);
     std::vector<std::string> summary;
 
@@ -604,6 +612,12 @@ PatchApplyResult apply_patch(const std::string& root, const std::string& patch_t
         const std::string source_path = resolve_patch_path(root, action.path);
         const std::string destination_path =
             action.move_to.empty() ? source_path : resolve_patch_path(root, action.move_to);
+        if (authorizer) {
+            authorizer(source_path);
+            if (destination_path != source_path) {
+                authorizer(destination_path);
+            }
+        }
 
         if (action.kind == PATCH_ADD) {
             write_text_atomic(source_path, render_added_content(action.lines));

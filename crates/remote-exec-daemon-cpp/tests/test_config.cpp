@@ -59,6 +59,32 @@ int main() {
     assert(config.yield_time.write_stdin_input.default_ms == 250UL);
     assert(config.yield_time.write_stdin_input.max_ms == 45000UL);
     assert(config.yield_time.write_stdin_input.min_ms == 250UL);
+    assert(!config.sandbox_configured);
+
+    const fs::path sandbox_config_path = root / "sandbox.ini";
+    write_text(
+        sandbox_config_path,
+        "target = sandbox-cpp\n"
+        "listen_host = 127.0.0.1\n"
+        "listen_port = 8181\n"
+        "default_workdir = /work\n"
+        "sandbox_exec_cwd_allow = /work;/tmp/work\n"
+        "sandbox_exec_cwd_deny = /work/private\n"
+        "sandbox_read_allow = /work;/assets\n"
+        "sandbox_read_deny = /work/.git;/assets/secrets\n"
+        "sandbox_write_allow = /work\n"
+        "sandbox_write_deny = /work/.git;/work/readonly\n"
+    );
+    const DaemonConfig sandbox_config = load_config(sandbox_config_path.string());
+    assert(sandbox_config.sandbox_configured);
+    assert(sandbox_config.sandbox.exec_cwd.allow.size() == 2);
+    assert(sandbox_config.sandbox.exec_cwd.allow[0] == "/work");
+    assert(sandbox_config.sandbox.exec_cwd.allow[1] == "/tmp/work");
+    assert(sandbox_config.sandbox.exec_cwd.deny[0] == "/work/private");
+    assert(sandbox_config.sandbox.read.allow[1] == "/assets");
+    assert(sandbox_config.sandbox.read.deny[1] == "/assets/secrets");
+    assert(sandbox_config.sandbox.write.allow[0] == "/work");
+    assert(sandbox_config.sandbox.write.deny[1] == "/work/readonly");
 
     const YieldTimeConfig defaults = default_yield_time_config();
     assert(resolve_yield_time_ms(defaults.exec_command, false, 0UL) == 10000UL);

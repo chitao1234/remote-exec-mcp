@@ -3,8 +3,10 @@
 #include <string>
 
 #include "common.h"
+#include "filesystem_sandbox.h"
 #include "logging.h"
 #include "patch_engine.h"
+#include "path_policy.h"
 #include "platform.h"
 #include "port_forward.h"
 #include "process_session.h"
@@ -18,10 +20,31 @@ std::string resolve_workdir(const AppState& state, const Json& body) {
     if (raw.empty()) {
         return state.config.default_workdir;
     }
-    if (platform::is_absolute_path(raw)) {
-        return platform::normalize_path_separators(raw);
+    const PathPolicy policy = host_path_policy();
+    if (is_absolute_for_policy(policy, raw)) {
+        return normalize_for_system(policy, raw);
     }
-    return platform::join_path(state.config.default_workdir, raw);
+    return join_for_policy(policy, state.config.default_workdir, raw);
+}
+
+const CompiledFilesystemSandbox* active_sandbox(const AppState& state) {
+    return state.sandbox_enabled ? &state.sandbox : NULL;
+}
+
+void authorize_sandbox_path(
+    const AppState& state,
+    SandboxAccess access,
+    const std::string& path
+) {
+    authorize_path(host_path_policy(), active_sandbox(state), access, path);
+}
+
+std::string resolve_absolute_transfer_path(const std::string& path) {
+    const PathPolicy policy = host_path_policy();
+    if (!is_absolute_for_policy(policy, path)) {
+        throw std::runtime_error("transfer path is not absolute");
+    }
+    return normalize_for_system(policy, path);
 }
 
 HttpResponse make_rpc_error_response(
@@ -56,6 +79,9 @@ unsigned long requested_max_output_tokens(const Json& body) {
 }
 
 std::string transfer_error_code(const std::string& message) {
+    if (contains_text(message, "sandbox")) {
+        return "sandbox_denied";
+    }
     if (contains_text(message, "not absolute")) {
         return "transfer_path_not_absolute";
     }
@@ -433,10 +459,12 @@ HttpResponse handle_exec_start(AppState& state, const HttpRequest& request) {
         }
         const std::string shell =
             platform::selected_shell(shell_override, state.default_shell);
+        const std::string workdir = resolve_workdir(state, body);
+        authorize_sandbox_path(state, SANDBOX_EXEC_CWD, workdir);
 
         Json exec_response = state.sessions.start_command(
             body.at("cmd").get<std::string>(),
-            resolve_workdir(state, body),
+            workdir,
             shell,
             login_requested,
             tty_requested,
@@ -457,6 +485,9 @@ HttpResponse handle_exec_start(AppState& state, const HttpRequest& request) {
     } catch (const SessionLimitError& ex) {
         log_message(LOG_WARN, "server", std::string("exec/start rejected: ") + ex.what());
         write_rpc_error(response, 429, "session_limit_exceeded", ex.what());
+    } catch (const SandboxError& ex) {
+        log_message(LOG_WARN, "server", std::string("exec/start denied: ") + ex.what());
+        write_rpc_error(response, 400, "sandbox_denied", ex.what());
     } catch (const Json::exception& ex) {
         log_message(LOG_WARN, "server", std::string("exec/start bad request: ") + ex.what());
         write_rpc_error(response, 400, "bad_request", ex.what());
@@ -519,14 +550,24 @@ HttpResponse handle_patch_apply(AppState& state, const HttpRequest& request) {
 
     try {
         const Json body = parse_json_body(request);
+        PatchPathAuthorizer authorizer;
+        if (state.sandbox_enabled) {
+            authorizer = [&state](const std::string& path) {
+                authorize_sandbox_path(state, SANDBOX_WRITE, path);
+            };
+        }
         const PatchApplyResult result = apply_patch(
             resolve_workdir(state, body),
-            body.at("patch").get<std::string>()
+            body.at("patch").get<std::string>(),
+            authorizer
         );
         std::ostringstream summary;
         summary << "patch/apply patch_len=" << body.at("patch").get<std::string>().size();
         log_message(LOG_INFO, "server", summary.str());
         write_json(response, Json{{"output", result.output}});
+    } catch (const SandboxError& ex) {
+        log_message(LOG_WARN, "server", std::string("patch/apply denied: ") + ex.what());
+        write_rpc_error(response, 400, "sandbox_denied", ex.what());
     } catch (const std::exception& ex) {
         log_message(LOG_WARN, "server", std::string("patch/apply failed: ") + ex.what());
         write_rpc_error(response, 400, "patch_failed", ex.what());
@@ -535,7 +576,7 @@ HttpResponse handle_patch_apply(AppState& state, const HttpRequest& request) {
     return response;
 }
 
-HttpResponse handle_transfer_export(const HttpRequest& request) {
+HttpResponse handle_transfer_export(AppState& state, const HttpRequest& request) {
     HttpResponse response;
     response.status = 200;
 
@@ -544,15 +585,16 @@ HttpResponse handle_transfer_export(const HttpRequest& request) {
         if (body.value("compression", std::string("none")) != "none") {
             throw std::runtime_error("this daemon does not support transfer compression");
         }
+        const std::string path = resolve_absolute_transfer_path(body.at("path").get<std::string>());
+        authorize_sandbox_path(state, SANDBOX_READ, path);
         const ExportedPayload payload = export_path(
-            body.at("path").get<std::string>(),
+            path,
             body.value("symlink_mode", std::string("preserve"))
         );
         log_message(
             LOG_INFO,
             "server",
-            "transfer/export path=`" + body.at("path").get<std::string>() +
-                "` source_type=`" + payload.source_type + "`"
+            "transfer/export path=`" + path + "` source_type=`" + payload.source_type + "`"
         );
         response.headers["Content-Type"] = "application/octet-stream";
         response.headers["x-remote-exec-source-type"] = payload.source_type;
@@ -567,13 +609,15 @@ HttpResponse handle_transfer_export(const HttpRequest& request) {
     return response;
 }
 
-HttpResponse handle_transfer_path_info(const HttpRequest& request) {
+HttpResponse handle_transfer_path_info(AppState& state, const HttpRequest& request) {
     HttpResponse response;
     response.status = 200;
 
     try {
         const Json body = parse_json_body(request);
-        const PathInfo info = path_info(body.at("path").get<std::string>());
+        const std::string path = resolve_absolute_transfer_path(body.at("path").get<std::string>());
+        authorize_sandbox_path(state, SANDBOX_WRITE, path);
+        const PathInfo info = path_info(path);
         write_json(
             response,
             Json{
@@ -590,7 +634,7 @@ HttpResponse handle_transfer_path_info(const HttpRequest& request) {
     return response;
 }
 
-HttpResponse handle_transfer_import(const HttpRequest& request) {
+HttpResponse handle_transfer_import(AppState& state, const HttpRequest& request) {
     HttpResponse response;
     response.status = 200;
 
@@ -599,10 +643,13 @@ HttpResponse handle_transfer_import(const HttpRequest& request) {
         if (!compression.empty() && compression != "none") {
             throw std::runtime_error("this daemon does not support transfer compression");
         }
+        const std::string destination_path =
+            resolve_absolute_transfer_path(request.header("x-remote-exec-destination-path"));
+        authorize_sandbox_path(state, SANDBOX_WRITE, destination_path);
         const ImportSummary summary = import_path(
             request.body,
             request.header("x-remote-exec-source-type"),
-            request.header("x-remote-exec-destination-path"),
+            destination_path,
             request.header("x-remote-exec-overwrite"),
             request.header("x-remote-exec-create-parent") == "true",
             request.header("x-remote-exec-symlink-mode").empty()
@@ -611,8 +658,7 @@ HttpResponse handle_transfer_import(const HttpRequest& request) {
         );
         {
             std::ostringstream message;
-            message << "transfer/import destination=`"
-                    << request.header("x-remote-exec-destination-path")
+            message << "transfer/import destination=`" << destination_path
                     << "` bytes_copied=" << summary.bytes_copied
                     << " files_copied=" << summary.files_copied
                     << " directories_copied=" << summary.directories_copied
@@ -728,15 +774,15 @@ HttpResponse route_request(AppState& state, const HttpRequest& request) {
     }
 
     if (request.path == "/v1/transfer/export") {
-        return handle_transfer_export(request);
+        return handle_transfer_export(state, request);
     }
 
     if (request.path == "/v1/transfer/path-info") {
-        return handle_transfer_path_info(request);
+        return handle_transfer_path_info(state, request);
     }
 
     if (request.path == "/v1/transfer/import") {
-        return handle_transfer_import(request);
+        return handle_transfer_import(state, request);
     }
 
     return make_rpc_error_response(404, "not_found", "unknown endpoint");

@@ -40,6 +40,8 @@ Focused host-native tests:
 - `make test-host-http-request`
 - `make test-host-session-store`
 - `make test-host-server-routes`
+- `make test-host-server-streaming`
+- `make test-host-sandbox`
 
 ## Run
 
@@ -117,7 +119,29 @@ default_workdir = /work
 # yield_time_write_stdin_input_default_ms = 250
 # yield_time_write_stdin_input_max_ms = 30000
 # yield_time_write_stdin_input_min_ms = 250
+
+# Optional static path sandbox. Values are semicolon-separated path lists.
+# Missing allow lists, empty allow lists, or omitted sandbox keys mean "allow
+# all", then deny lists carve out exclusions.
+# sandbox_exec_cwd_allow = /work
+# sandbox_exec_cwd_deny = /work/private
+# sandbox_read_allow = /work;/assets
+# sandbox_read_deny = /work/.git;/assets/secrets
+# sandbox_write_allow = /work
+# sandbox_write_deny = /work/.git;/work/readonly
 ```
+
+Sandbox rules mirror the Rust daemon's static allow/deny model:
+
+- `sandbox_exec_cwd_*` applies to the resolved starting `cwd` for `exec_command`.
+- `sandbox_read_*` applies to transfer export source paths.
+- `sandbox_write_*` applies to transfer import destinations, transfer path-info
+  destination probes, and resolved `apply_patch` write targets.
+- Empty or omitted `allow` lists allow all paths for that access class; `deny`
+  entries override allow membership.
+- POSIX roots are canonicalized through existing ancestors, so symlinks in
+  configured roots or requested paths cannot bypass boundary checks. Windows
+  roots use Windows-style normalization and case-insensitive matching.
 
 ## Shell Policy
 
@@ -132,7 +156,6 @@ default_workdir = /work
 
 - plain HTTP only, with optional bearer-auth request authentication
 - no TLS support
-- no static sandbox support
 - PTY support is POSIX-only and depends on host PTY allocation
 - no PTY support in Windows XP-compatible builds
 - no image support
