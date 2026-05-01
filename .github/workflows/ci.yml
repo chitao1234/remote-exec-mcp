@@ -12,8 +12,61 @@ env:
   RUST_BACKTRACE: "1"
 
 jobs:
-  rust:
-    name: Rust (${{ matrix.os }})
+  rust-fmt:
+    name: Rust fmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+  rust-test:
+    name: Rust test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Run tests
+        run: cargo test --workspace --locked
+
+  rust-clippy:
+    name: Rust clippy (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
 
@@ -33,18 +86,65 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt
+          components: clippy
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
 
-      - name: Check formatting
-        run: cargo fmt --all --check
-
-      - name: Run tests
-        run: cargo test --workspace --locked
-
       - name: Run clippy
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+  cpp:
+    name: C++ daemon (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache C++ build outputs
+        uses: actions/cache@v4
+        with:
+          path: crates/remote-exec-daemon-cpp/build
+          key: cpp-${{ runner.os }}-${{ hashFiles('crates/remote-exec-daemon-cpp/**') }}
+          restore-keys: |
+            cpp-${{ runner.os }}-
+
+      - name: Install Linux C++ dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ make g++-mingw-w64-i686
+
+      - name: Set up MSYS2
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: true
+          install: >-
+            make
+            mingw-w64-i686-gcc
+
+      - name: Run Linux C++ checks
+        if: runner.os == 'Linux'
+        run: |
+          make -C crates/remote-exec-daemon-cpp check-posix
+          make -C crates/remote-exec-daemon-cpp check-windows-xp
+
+      - name: Run Windows C++ checks
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: make -C crates/remote-exec-daemon-cpp check-windows-xp
