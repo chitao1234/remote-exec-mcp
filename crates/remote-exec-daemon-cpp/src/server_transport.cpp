@@ -22,6 +22,7 @@
 
 #include "http_request.h"
 #include "server_transport.h"
+#include "text_utils.h"
 
 void close_socket(SOCKET socket) {
 #ifdef _WIN32
@@ -60,6 +61,14 @@ bool would_block_error(int error) {
 
 namespace {
 
+struct RequestBodyFraming {
+    RequestBodyFraming() : has_content_length(false), content_length(0), chunked(false) {}
+
+    bool has_content_length;
+    std::size_t content_length;
+    bool chunked;
+};
+
 std::size_t parse_content_length_value(const std::string& raw) {
     if (raw.empty()) {
         throw BadHttpRequest("invalid Content-Length");
@@ -80,6 +89,42 @@ std::size_t parse_content_length_value(const std::string& raw) {
     return value;
 }
 
+int hex_digit_value(char ch) {
+    if (ch >= '0' && ch <= '9') {
+        return ch - '0';
+    }
+    if (ch >= 'a' && ch <= 'f') {
+        return ch - 'a' + 10;
+    }
+    if (ch >= 'A' && ch <= 'F') {
+        return ch - 'A' + 10;
+    }
+    return -1;
+}
+
+std::size_t parse_chunk_size_line(const std::string& line) {
+    const std::size_t extension = line.find(';');
+    const std::string size_text =
+        trim_ascii(extension == std::string::npos ? line : line.substr(0, extension));
+    if (size_text.empty()) {
+        throw BadHttpRequest("invalid chunk size");
+    }
+
+    std::size_t value = 0;
+    for (std::size_t i = 0; i < size_text.size(); ++i) {
+        const int digit = hex_digit_value(size_text[i]);
+        if (digit < 0) {
+            throw BadHttpRequest("invalid chunk size");
+        }
+        const std::size_t chunk_digit = static_cast<std::size_t>(digit);
+        if (value > (std::numeric_limits<std::size_t>::max() - chunk_digit) / 16U) {
+            throw BadHttpRequest("chunk size is too large");
+        }
+        value = value * 16U + chunk_digit;
+    }
+    return value;
+}
+
 std::string trim_http_header_value(std::string value) {
     while (!value.empty() && (value[0] == ' ' || value[0] == '\t')) {
         value.erase(value.begin());
@@ -92,11 +137,11 @@ std::string trim_http_header_value(std::string value) {
     return value;
 }
 
-std::size_t content_length_from_headers(const std::string& header_block) {
+RequestBodyFraming request_body_framing_from_headers(const std::string& header_block) {
     std::istringstream lines(header_block);
     std::string line;
-    bool found = false;
-    std::size_t content_length = 0;
+    RequestBodyFraming framing;
+    bool found_transfer_encoding = false;
 
     while (std::getline(lines, line)) {
         if (!line.empty() && line[line.size() - 1] == '\r') {
@@ -106,21 +151,86 @@ std::size_t content_length_from_headers(const std::string& header_block) {
         if (colon == std::string::npos) {
             continue;
         }
-        std::string name = line.substr(0, colon);
-        for (std::size_t i = 0; i < name.size(); ++i) {
-            name[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(name[i])));
-        }
-        if (name != "content-length") {
+        const std::string name = lowercase_ascii(trim_http_header_value(line.substr(0, colon)));
+        const std::string value = trim_http_header_value(line.substr(colon + 1));
+        if (name == "content-length") {
+            if (framing.has_content_length) {
+                throw BadHttpRequest("duplicate Content-Length");
+            }
+            framing.has_content_length = true;
+            framing.content_length = parse_content_length_value(value);
             continue;
         }
-        if (found) {
-            throw BadHttpRequest("duplicate Content-Length");
+        if (name == "transfer-encoding") {
+            if (found_transfer_encoding) {
+                throw BadHttpRequest("duplicate Transfer-Encoding");
+            }
+            found_transfer_encoding = true;
+            if (lowercase_ascii(value) != "chunked") {
+                throw BadHttpRequest("unsupported Transfer-Encoding");
+            }
+            framing.chunked = true;
         }
-        found = true;
-        content_length = parse_content_length_value(trim_http_header_value(line.substr(colon + 1)));
     }
 
-    return found ? content_length : 0U;
+    if (framing.chunked && framing.has_content_length) {
+        throw BadHttpRequest("chunked request cannot include Content-Length");
+    }
+
+    return framing;
+}
+
+bool find_complete_chunked_request_size(
+    const std::string& data,
+    std::size_t body_start,
+    std::size_t max_body_bytes,
+    std::size_t* complete_size
+) {
+    std::size_t offset = body_start;
+    std::size_t decoded_size = 0;
+
+    for (;;) {
+        const std::size_t line_end = data.find("\r\n", offset);
+        if (line_end == std::string::npos) {
+            return false;
+        }
+
+        const std::size_t chunk_size =
+            parse_chunk_size_line(data.substr(offset, line_end - offset));
+        offset = line_end + 2U;
+
+        if (chunk_size == 0U) {
+            if (data.size() >= offset + 2U && data.compare(offset, 2U, "\r\n") == 0) {
+                *complete_size = offset + 2U;
+                return true;
+            }
+
+            const std::size_t trailer_end = data.find("\r\n\r\n", offset);
+            if (trailer_end == std::string::npos) {
+                return false;
+            }
+            *complete_size = trailer_end + 4U;
+            return true;
+        }
+
+        if (chunk_size > max_body_bytes - decoded_size) {
+            throw BadHttpRequest("http request body too large");
+        }
+        decoded_size += chunk_size;
+
+        if (chunk_size > data.size() - offset) {
+            return false;
+        }
+        const std::size_t chunk_end = offset + chunk_size;
+        if (data.size() - chunk_end < 2U) {
+            return false;
+        }
+        if (data.compare(chunk_end, 2U, "\r\n") != 0) {
+            throw BadHttpRequest("invalid chunked request body");
+        }
+
+        offset = chunk_end + 2U;
+    }
 }
 
 }  // namespace
@@ -188,7 +298,9 @@ std::string read_http_request(
     std::string data;
     char buffer[4096];
     std::size_t expected_size = 0;
+    std::size_t body_start = 0;
     bool parsed_headers = false;
+    bool chunked_body = false;
 
     for (;;) {
         const int received = recv(client, buffer, sizeof(buffer), 0);
@@ -219,26 +331,47 @@ std::string read_http_request(
             }
 
             parsed_headers = true;
-            const std::size_t content_length =
-                content_length_from_headers(data.substr(0, header_end));
-            if (content_length > max_body_bytes) {
+            body_start = header_end + 4U;
+            const RequestBodyFraming framing =
+                request_body_framing_from_headers(data.substr(0, header_end));
+            chunked_body = framing.chunked;
+            if (framing.content_length > max_body_bytes) {
                 throw BadHttpRequest("http request body too large");
             }
-            expected_size = header_end + 4U + content_length;
+            expected_size = body_start + framing.content_length;
         }
 
         if (parsed_headers) {
-            if (data.size() > expected_size) {
-                data.resize(expected_size);
-            }
-            if (data.size() >= expected_size) {
-                break;
+            if (chunked_body) {
+                std::size_t complete_size = 0;
+                if (find_complete_chunked_request_size(
+                        data,
+                        body_start,
+                        max_body_bytes,
+                        &complete_size
+                    )) {
+                    if (data.size() > complete_size) {
+                        data.resize(complete_size);
+                    }
+                    expected_size = complete_size;
+                    break;
+                }
+            } else {
+                if (data.size() > expected_size) {
+                    data.resize(expected_size);
+                }
+                if (data.size() >= expected_size) {
+                    break;
+                }
             }
         }
     }
 
     if (!parsed_headers) {
         throw BadHttpRequest("incomplete http request");
+    }
+    if (data.size() < expected_size || (chunked_body && expected_size == 0U)) {
+        throw BadHttpRequest("incomplete http request body");
     }
 
     return data;

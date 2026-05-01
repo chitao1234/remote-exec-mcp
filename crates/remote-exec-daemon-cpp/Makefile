@@ -14,6 +14,7 @@ HOST_PATCH := $(BUILD_DIR)/test_patch
 HOST_TRANSFER := $(BUILD_DIR)/test_transfer
 HOST_CONFIG := $(BUILD_DIR)/test_config
 HOST_HTTP_REQUEST := $(BUILD_DIR)/test_http_request
+HOST_SERVER_TRANSPORT := $(BUILD_DIR)/test_server_transport
 HOST_SESSION_STORE := $(BUILD_DIR)/test_session_store
 HOST_SERVER_ROUTES := $(BUILD_DIR)/test_server_routes
 XP_SESSION_STORE := $(BUILD_DIR)/test_session_store-xp.exe
@@ -64,6 +65,13 @@ $(HOST_HTTP_REQUEST): $(MAKEFILE_DIR)tests/test_http_request.cpp $(MAKEFILE_DIR)
 	mkdir -p $(BUILD_DIR)
 	$(HOST_CXX) $(COMMON_FLAGS) -o $@ $^
 
+test-host-server-transport: $(HOST_SERVER_TRANSPORT)
+	$(HOST_SERVER_TRANSPORT)
+
+$(HOST_SERVER_TRANSPORT): $(MAKEFILE_DIR)tests/test_server_transport.cpp $(MAKEFILE_DIR)src/server_transport.cpp $(MAKEFILE_DIR)src/http_request.cpp $(MAKEFILE_DIR)src/http_helpers.cpp $(MAKEFILE_DIR)src/text_utils.cpp
+	mkdir -p $(BUILD_DIR)
+	$(HOST_CXX) $(COMMON_FLAGS) -o $@ $^
+
 test-host-session-store: $(HOST_SESSION_STORE)
 	$(HOST_SESSION_STORE)
 
@@ -85,10 +93,10 @@ $(XP_SESSION_STORE): $(MAKEFILE_DIR)tests/test_session_store.cpp $(MAKEFILE_DIR)
 	mkdir -p $(BUILD_DIR)
 	$(CXX) $(WINDOWS_XP_FLAGS) -o $@ $^ $(WIN_LIBS)
 
-check-posix: test-host-patch test-host-transfer test-host-config test-host-http-request test-host-session-store test-host-server-routes all-posix
+check-posix: test-host-patch test-host-transfer test-host-config test-host-http-request test-host-server-transport test-host-session-store test-host-server-routes all-posix
 
 check-windows-xp: all-windows-xp
 
 check: check-posix
 
-.PHONY: all all-posix all-windows-xp clean test-host-patch test-host-transfer test-host-config test-host-http-request test-host-session-store test-host-server-routes test-wine-session-store check-posix check-windows-xp check
+.PHONY: all all-posix all-windows-xp clean test-host-patch test-host-transfer test-host-config test-host-http-request test-host-server-transport test-host-session-store test-host-server-routes test-wine-session-store check-posix check-windows-xp check
