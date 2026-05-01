@@ -48,6 +48,10 @@ public:
     NetworkSession& operator=(const NetworkSession&) = delete;
 };
 
+int last_socket_error();
+bool would_block_error(int error);
+std::string socket_error_message(const std::string& operation);
+void close_socket(SOCKET socket);
 std::string read_http_request(
     SOCKET client,
     std::size_t max_header_bytes,

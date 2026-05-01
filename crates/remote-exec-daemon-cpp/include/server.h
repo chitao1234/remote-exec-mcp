@@ -3,6 +3,7 @@
 #include <string>
 
 #include "config.h"
+#include "port_forward.h"
 #include "session_store.h"
 
 struct AppState {
@@ -11,6 +12,7 @@ struct AppState {
     std::string hostname;
     std::string default_shell;
     SessionStore sessions;
+    PortForwardStore port_forwards;
 };
 
 int run_server(const DaemonConfig& config);

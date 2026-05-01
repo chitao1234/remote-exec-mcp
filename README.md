@@ -15,18 +15,20 @@ Everything under `docs/` is historical implementation detail and planning contex
   - The `broker-tls` Cargo feature gates broker-side `https://` client support for daemon targets and `https://` broker URLs, and is enabled by default.
   - Accepts tool calls with a required `target` for machine-local operations.
   - Owns opaque public `session_id` values for live command sessions.
+  - Owns opaque public `forward_id` values for live TCP/UDP port forwards.
   - Can optionally expose the broker host itself as `target: "local"` for daemon-backed `exec_command`, `write_stdin`, `apply_patch`, and `view_image`.
   - Always provides broker-host filesystem access for `transfer_files` endpoints that use `target: "local"`, even when the broker `[local]` target is disabled.
+  - Always provides broker-host network access for `forward_ports` sides that use `"local"`, even when the broker `[local]` target is disabled.
 - `remote-exec`
   - CLI client for the broker's public MCP tool surface.
   - Can load a broker config and invoke the broker tool handlers directly, or connect to a broker streamable HTTP endpoint.
 - `remote-exec-daemon`
   - Per-machine daemon over mTLS JSON/HTTP by default, or plain HTTP when configured.
   - The `tls` Cargo feature gates the HTTPS/mTLS transport and is enabled by default.
-  - Executes commands, manages local sessions, applies patches, reads images, and serves transfer archives.
+  - Executes commands, manages local sessions, applies patches, reads images, serves transfer archives, and provides broker-controlled port-forward socket primitives.
 - `remote-exec-daemon-cpp`
   - Standalone C++ daemon over plain HTTP, with native POSIX and Windows XP-compatible build paths.
-  - Supports `exec_command`, `write_stdin`, `apply_patch`, and `transfer_files` for files, directories, and broker-built multi-source bundles.
+  - Supports `exec_command`, `write_stdin`, `apply_patch`, `transfer_files` for files/directories/broker-built multi-source bundles, and `forward_ports`.
   - Supports POSIX PTY sessions when the host can allocate a PTY; Windows XP-compatible PTY sessions and image reads remain unsupported.
   - Intentionally closes stdin for POSIX non-PTY exec, while keeping Windows XP-compatible non-PTY stdin open for original-daemon compatibility.
 - `remote-exec-proto`
@@ -40,6 +42,7 @@ Everything under `docs/` is historical implementation detail and planning contex
 - `apply_patch`
 - `view_image`
 - `transfer_files`
+- `forward_ports`
 
 ## Architecture
 
@@ -369,6 +372,7 @@ cargo fmt --all --check
 - The broker now starts even if some configured targets are temporarily unreachable.
 - Targets that are unavailable at broker startup are verified before the first forwarded call.
 - `transfer_files` uses broker-mediated copy for `local -> remote`, `remote -> local`, `remote -> remote`, and `local -> local`.
+- `forward_ports` uses broker-mediated TCP/UDP forwarding between a `listen_side` and `connect_side`; either side may be a configured target or `"local"`.
 - Internal transfer transport uses GNU tar for both files and directories. Single-file transfers use one fixed archive entry named `.remote-exec-file`.
 - `transfer_files` accepts either a single `source` or a `sources` array. The optional `destination_mode` defaults to `auto`: single-source transfers behave like `cp` by copying under `destination.path` when it is an existing directory or ends in a path separator, otherwise using it as the exact final path; multi-source transfers use it as a directory root and place each source under its basename. Use `destination_mode = "into_directory"` to copy under `destination.path` by basename, or `destination_mode = "exact"` to force exact-path semantics.
 - `transfer_files` `overwrite` defaults to `merge`. `fail` rejects any existing destination, `merge` overlays files into an existing compatible file or directory without deleting unrelated directory entries, and `replace` removes the existing destination before importing.
@@ -395,6 +399,9 @@ cargo fmt --all --check
 - Broker config supports `disable_structured_content = true` to omit MCP `structuredContent` from successful tool responses.
 - `transfer_files` normalizes Windows path separators before filesystem access on Windows endpoints.
 - `transfer_files` compares Windows paths case-insensitively when checking obvious same-path collisions.
+- `forward_ports` accepts `action = "open" | "list" | "close"`; `open` requires `listen_side`, `connect_side`, and one or more `forwards`, `list` can filter by side or `forward_ids`, and `close` requires explicit `forward_ids`.
+- `forward_ports` endpoint strings accept a bare port such as `"8080"` as shorthand for `"127.0.0.1:8080"`. Non-loopback bind addresses such as `"0.0.0.0:8080"` are allowed. `listen_endpoint` may use port `0`; `connect_endpoint` must use a nonzero port.
+- Failed `forward_ports` initialization is all-or-nothing: any listeners created by the failed call are closed and no failed forward remains listed.
 - Executable preservation is best effort and only restored on platforms that expose executable mode bits.
 - `allow_login_shell` controls daemon login-shell policy and defaults to `true`; explicit `login=true` is rejected only when the daemon disables it.
 - `default_shell` lets the daemon pin its fallback shell on both Unix and Windows. Startup now fails if the configured shell, or the auto-detected fallback when `default_shell` is omitted, is not usable on that host. Set this to `powershell.exe` or `cmd.exe` on Windows if you do not want the new Git Bash-first default.
@@ -484,6 +491,8 @@ Selecting `target: "local"` in `transfer_files` uses broker-host filesystem acce
 
 When broker `[local]` config is enabled, selecting `target: "local"` in `exec_command`, `write_stdin`, `apply_patch`, or `view_image` uses the broker host and the same optional broker `host_sandbox` rules.
 
+Selecting side `"local"` in `forward_ports` uses broker-host network access regardless of broker `[local]` exec configuration. `forward_ports` is not restricted by filesystem sandbox rules.
+
 In v1:
 
 - there is no sandbox selection flow
@@ -494,13 +503,14 @@ In v1:
 - `view_image` checks the resolved final image path for read access
 - `apply_patch` checks resolved write targets; its `workdir` is not sandboxed separately
 - `transfer_files` checks the source path for read access and the destination path for write access on the respective host
+- `forward_ports` can bind non-loopback addresses and connect to arbitrary endpoints reachable from each side
 
 Security is based on target selection plus broker-to-daemon mutual TLS for normal targets, with an explicit insecure-HTTP opt-in only for XP-style targets, not on per-call approval flows.
 Configured remote targets may not be named `local`.
 
 ## Current status
 
-- Core remote tools are implemented: `list_targets`, `exec_command`, `write_stdin`, `apply_patch`, `view_image`, and `transfer_files`.
+- Core remote tools are implemented: `list_targets`, `exec_command`, `write_stdin`, `apply_patch`, `view_image`, `transfer_files`, and `forward_ports`.
 - The broker now supports MCP stdio and streamable HTTP transports.
 - A companion `remote-exec` CLI client can call the broker over stdio or streamable HTTP.
 - The broker can optionally expose its own host as `target: "local"` for daemon-backed exec, stdin polling, patch, and image workflows.

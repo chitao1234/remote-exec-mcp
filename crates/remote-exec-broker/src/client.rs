@@ -12,8 +12,8 @@ use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
 use remote_exec_proto::public::{
-    ApplyPatchInput, ExecCommandInput, ListTargetsInput, TransferFilesInput, ViewImageInput,
-    WriteStdinInput,
+    ApplyPatchInput, ExecCommandInput, ForwardPortsInput, ListTargetsInput, TransferFilesInput,
+    ViewImageInput, WriteStdinInput,
 };
 
 #[derive(Debug, Clone)]
@@ -192,6 +192,9 @@ async fn call_direct_tool(
         "view_image" => invoke_tool!(ViewImageInput, crate::tools::image::view_image),
         "transfer_files" => {
             invoke_tool!(TransferFilesInput, crate::tools::transfer::transfer_files)
+        }
+        "forward_ports" => {
+            invoke_tool!(ForwardPortsInput, crate::tools::port_forward::forward_ports)
         }
         _ => crate::mcp_server::tool_error_result(format!("unknown tool `{name}`")),
     }

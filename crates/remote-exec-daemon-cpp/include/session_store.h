@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "basic_mutex.h"
 #include "config.h"
 #include "http_helpers.h"
 
@@ -66,5 +67,6 @@ public:
     );
 
 private:
+    BasicMutex mutex_;
     std::map<std::string, std::shared_ptr<LiveSession> > sessions_;
 };

@@ -73,6 +73,11 @@ interactive commands with `tty=true` when later `write_stdin` input is needed.
 Windows XP-compatible non-TTY exec intentionally keeps its pipe-backed stdin
 open to preserve the original XP daemon behavior.
 
+The C++ daemon implements the daemon-side port RPCs used by broker
+`forward_ports`: TCP listeners/connectors, UDP datagram sockets, non-loopback
+listen binds, and the same bare-port normalization where `8080` means
+`127.0.0.1:8080`.
+
 ## Config
 
 Example config:

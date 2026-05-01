@@ -20,6 +20,7 @@ pub async fn list_targets(
                 platform: info.platform,
                 arch: info.arch,
                 supports_pty: info.supports_pty,
+                supports_port_forward: info.supports_port_forward,
             });
         targets.push(ListTargetEntry {
             name: name.clone(),
@@ -53,13 +54,18 @@ fn format_targets_text(targets: &[ListTargetEntry]) -> String {
         .iter()
         .map(|target| match &target.daemon_info {
             Some(info) => format!(
-                "- {}: {}/{}, host={}, version={}, pty={}",
+                "- {}: {}/{}, host={}, version={}, pty={}, forward_ports={}",
                 target.name,
                 info.platform,
                 info.arch,
                 info.hostname,
                 info.daemon_version,
                 if info.supports_pty { "yes" } else { "no" },
+                if info.supports_port_forward {
+                    "yes"
+                } else {
+                    "no"
+                },
             ),
             None => format!("- {}", target.name),
         })
@@ -84,6 +90,7 @@ mod tests {
             disable_structured_content: false,
             host_sandbox: None,
             sessions: SessionStore::default(),
+            port_forwards: crate::port_forward::PortForwardStore::default(),
             targets: BTreeMap::new(),
         };
 
