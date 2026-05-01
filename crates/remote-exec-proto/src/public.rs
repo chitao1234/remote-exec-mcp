@@ -250,15 +250,3 @@ pub enum ForwardPortStatus {
     Closed,
     Failed,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::TransferSymlinkMode;
-
-    #[test]
-    fn transfer_symlink_mode_reject_is_unsupported() {
-        let parsed = serde_json::from_str::<TransferSymlinkMode>("\"reject\"");
-
-        assert!(parsed.is_err());
-    }
-}

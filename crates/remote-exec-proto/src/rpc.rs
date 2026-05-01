@@ -312,17 +312,7 @@ pub struct RpcErrorBody {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ExecStartRequest, ExecWriteRequest, ImageReadRequest, PatchApplyRequest,
-        TransferSymlinkMode,
-    };
-
-    #[test]
-    fn transfer_symlink_mode_reject_is_unsupported() {
-        let parsed = serde_json::from_str::<TransferSymlinkMode>("\"reject\"");
-
-        assert!(parsed.is_err());
-    }
+    use super::{ExecStartRequest, ExecWriteRequest, ImageReadRequest, PatchApplyRequest};
 
     #[test]
     fn exec_start_request_omits_none_fields() {

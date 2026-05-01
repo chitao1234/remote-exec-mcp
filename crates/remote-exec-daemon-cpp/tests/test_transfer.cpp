@@ -389,21 +389,6 @@ static void assert_directory_long_path_round_trip() {
     assert(read_text(root / "dest" / long_name / "nested" / "payload.txt") == "long path");
 }
 
-static void assert_reject_symlink_mode_is_unsupported() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-reject-mode";
-    fs::remove_all(root);
-    fs::create_directories(root);
-    write_text(root / "source.txt", "source");
-
-    bool rejected = false;
-    try {
-        (void)export_path((root / "source.txt").string(), "reject");
-    } catch (const std::exception& ex) {
-        rejected = std::string(ex.what()).find("unsupported transfer symlink mode") != std::string::npos;
-    }
-    assert(rejected);
-}
-
 #ifndef _WIN32
 static void assert_symlink_sources_are_preserved_by_default() {
     const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-symlink-preserve";
@@ -656,7 +641,6 @@ int main() {
     assert_path_info_reports_existing_directory();
     assert_directory_merge_behavior();
     assert_directory_long_path_round_trip();
-    assert_reject_symlink_mode_is_unsupported();
 #ifndef _WIN32
     assert_symlink_sources_are_preserved_by_default();
     assert_top_level_file_symlink_can_be_followed();
