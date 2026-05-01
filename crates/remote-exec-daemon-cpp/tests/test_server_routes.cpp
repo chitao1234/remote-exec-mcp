@@ -1,5 +1,8 @@
 #include <cassert>
+#include <cstdint>
+#include <fstream>
 #include <filesystem>
+#include <iterator>
 #include <string>
 
 #include "config.h"
@@ -59,6 +62,16 @@ static std::string normalize_output(const std::string& input) {
         }
     }
     return output;
+}
+
+static void write_text_file(const fs::path& path, const std::string& value) {
+    std::ofstream output(path.c_str(), std::ios::binary | std::ios::trunc);
+    output << value;
+}
+
+static std::string read_text_file(const fs::path& path) {
+    std::ifstream input(path.c_str(), std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
 }
 
 int main() {
@@ -150,6 +163,58 @@ int main() {
         Json::parse(missing_source_response.body).at("code").get<std::string>() ==
         "transfer_source_missing"
     );
+
+    const fs::path source_file = root / "transfer-source.txt";
+    write_text_file(source_file, "route transfer payload");
+
+    const HttpResponse source_info_response = route_request(
+        state,
+        json_request("/v1/transfer/path-info", Json{{"path", source_file.string()}})
+    );
+    assert(source_info_response.status == 200);
+    const Json source_info = Json::parse(source_info_response.body);
+    assert(source_info.at("exists").get<bool>());
+    assert(!source_info.at("is_directory").get<bool>());
+
+    const HttpResponse root_info_response = route_request(
+        state,
+        json_request("/v1/transfer/path-info", Json{{"path", root.string()}})
+    );
+    assert(root_info_response.status == 200);
+    const Json root_info = Json::parse(root_info_response.body);
+    assert(root_info.at("exists").get<bool>());
+    assert(root_info.at("is_directory").get<bool>());
+
+    const HttpResponse export_response = route_request(
+        state,
+        json_request("/v1/transfer/export", Json{{"path", source_file.string()}})
+    );
+    assert(export_response.status == 200);
+    assert(export_response.headers.at("Content-Type") == "application/octet-stream");
+    assert(export_response.headers.at("x-remote-exec-source-type") == "file");
+    assert(export_response.headers.at("x-remote-exec-compression") == "none");
+    assert(!export_response.body.empty());
+
+    HttpRequest import_request;
+    import_request.method = "POST";
+    import_request.path = "/v1/transfer/import";
+    import_request.headers["x-remote-exec-source-type"] = "file";
+    import_request.headers["x-remote-exec-destination-path"] = (root / "transfer-dest.txt").string();
+    import_request.headers["x-remote-exec-overwrite"] = "replace";
+    import_request.headers["x-remote-exec-create-parent"] = "true";
+    import_request.headers["x-remote-exec-symlink-mode"] = "preserve";
+    import_request.headers["x-remote-exec-compression"] = "none";
+    import_request.body = export_response.body;
+
+    const HttpResponse import_response = route_request(state, import_request);
+    assert(import_response.status == 200);
+    const Json imported = Json::parse(import_response.body);
+    assert(imported.at("source_type").get<std::string>() == "file");
+    assert(imported.at("files_copied").get<std::uint64_t>() == 1);
+    assert(imported.at("bytes_copied").get<std::uint64_t>() == 22);
+    assert(imported.at("replaced").get<bool>() == false);
+    assert(imported.at("warnings").empty());
+    assert(read_text_file(root / "transfer-dest.txt") == "route transfer payload");
 
 #ifndef _WIN32
     const HttpResponse non_tty_start_response = route_request(
