@@ -596,7 +596,6 @@ fn format_transfer_symlink_mode(
         remote_exec_proto::rpc::TransferSymlinkMode::Preserve => "preserve",
         remote_exec_proto::rpc::TransferSymlinkMode::Follow => "follow",
         remote_exec_proto::rpc::TransferSymlinkMode::Skip => "skip",
-        remote_exec_proto::rpc::TransferSymlinkMode::Reject => "reject",
     }
 }
 

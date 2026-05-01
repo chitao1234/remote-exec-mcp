@@ -302,6 +302,9 @@ ImportSummary import_file_from_tar(
     bool create_parent,
     const std::string& symlink_mode
 ) {
+#ifdef _WIN32
+    (void)symlink_mode;
+#endif
     const bool replaced = prepare_destination_path(absolute_path, "file", overwrite_mode, create_parent);
     ensure_not_existing_symlink(absolute_path);
 
@@ -319,6 +322,10 @@ ImportSummary import_file_from_tar(
     std::uint64_t files_copied = 1;
     std::vector<TransferWarning> warnings;
     if (header.typeflag == '2') {
+#ifdef _WIN32
+        warnings.push_back(skipped_symlink_warning(absolute_path));
+        files_copied = 0;
+#else
         if (symlink_mode == "skip") {
             warnings.push_back(skipped_symlink_warning(absolute_path));
             files_copied = 0;
@@ -327,6 +334,7 @@ ImportSummary import_file_from_tar(
         } else {
             write_symlink(header.link_name, absolute_path);
         }
+#endif
         skip_exact(reader, entry_body_with_padding(header.size), "truncated tar entry body");
     } else {
         copy_reader_to_file(reader, absolute_path, header.size, header.mode);
@@ -353,6 +361,9 @@ ImportSummary import_directory_from_tar(
     bool create_parent,
     const std::string& symlink_mode
 ) {
+#ifdef _WIN32
+    (void)symlink_mode;
+#endif
     const bool replaced = prepare_destination_path(absolute_path, source_type, overwrite_mode, create_parent);
     make_directory_if_missing(absolute_path);
 
@@ -402,6 +413,11 @@ ImportSummary import_directory_from_tar(
         }
 
         if (header.typeflag == '2') {
+#ifdef _WIN32
+            summary.warnings.push_back(skipped_symlink_warning(output_path));
+            skip_exact(reader, entry_body_with_padding(header.size), "truncated tar entry body");
+            continue;
+#else
             if (symlink_mode == "skip") {
                 summary.warnings.push_back(skipped_symlink_warning(output_path));
                 skip_exact(reader, entry_body_with_padding(header.size), "truncated tar entry body");
@@ -417,6 +433,7 @@ ImportSummary import_directory_from_tar(
             summary.files_copied += 1;
             skip_exact(reader, entry_body_with_padding(header.size), "truncated tar entry body");
             continue;
+#endif
         }
 
         if (header.typeflag != '0') {

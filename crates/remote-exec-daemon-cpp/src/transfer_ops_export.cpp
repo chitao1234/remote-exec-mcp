@@ -74,15 +74,29 @@ void append_directory_contents(
             continue;
         }
         if (entry.is_symlink) {
-            if (context->options.symlink_mode == "reject") {
-                throw std::runtime_error("transfer source contains unsupported symlink " + child_path);
-            }
             if (context->options.symlink_mode == "skip") {
                 handle_skipped_symlink(context, child_path);
                 continue;
             }
 #ifdef _WIN32
-            throw std::runtime_error("transfer source contains unsupported symlink " + child_path);
+            if (context->options.symlink_mode == "follow") {
+                if (is_directory_follow(child_path)) {
+                    if (context->followed_directories.count(child_path) != 0) {
+                        handle_skipped_symlink(context, child_path);
+                        continue;
+                    }
+                    context->followed_directories.insert(child_path);
+                    append_directory_entry(archive, child_rel);
+                    append_directory_contents(archive, child_path, child_rel, context);
+                    continue;
+                }
+                if (is_regular_file_follow(child_path)) {
+                    append_file_entry_from_path(archive, child_rel, child_path);
+                    continue;
+                }
+            }
+            handle_skipped_symlink(context, child_path);
+            continue;
 #else
             if (context->options.symlink_mode == "preserve") {
                 char target_buffer[4096];
@@ -122,30 +136,6 @@ void append_directory_contents(
         }
 
         append_file_entry_from_path(archive, child_rel, child_path);
-    }
-}
-
-void reject_directory_symlinks(const std::string& current_path) {
-    const std::vector<DirectoryEntry> entries = list_directory_entries(current_path);
-    for (std::size_t i = 0; i < entries.size(); ++i) {
-        const DirectoryEntry& entry = entries[i];
-        const std::string child_path = join_path(current_path, entry.name);
-        if (entry.is_symlink) {
-            throw std::runtime_error("transfer source contains unsupported symlink " + child_path);
-        }
-        if (entry.is_directory) {
-            reject_directory_symlinks(child_path);
-        }
-    }
-}
-
-void preflight_export_path(
-    const std::string& absolute_path,
-    const std::string& source_type,
-    const ExportOptions& options
-) {
-    if (source_type == "directory" && options.symlink_mode == "reject") {
-        reject_directory_symlinks(absolute_path);
     }
 }
 
@@ -206,10 +196,11 @@ void validate_export_path(const std::string& absolute_path, const ExportOptions&
     }
     if (is_symlink_path(absolute_path)) {
 #ifdef _WIN32
-        (void)options;
-        throw std::runtime_error("transfer source contains unsupported symlink " + absolute_path);
+        if (options.symlink_mode != "follow") {
+            throw std::runtime_error("transfer source contains unsupported symlink " + absolute_path);
+        }
 #else
-        if (options.symlink_mode == "reject" || options.symlink_mode == "skip") {
+        if (options.symlink_mode == "skip") {
             throw std::runtime_error("transfer source contains unsupported symlink " + absolute_path);
         }
 #endif
@@ -224,9 +215,11 @@ std::string export_path_source_type(
 ) {
     const ExportOptions options = normalized_options(symlink_mode);
     validate_export_path(absolute_path, options);
+#ifndef _WIN32
     if (is_symlink_path(absolute_path) && options.symlink_mode == "preserve") {
         return "file";
     }
+#endif
     if (is_regular_file(absolute_path) ||
         (is_symlink_path(absolute_path) && options.symlink_mode == "follow" &&
          is_regular_file_follow(absolute_path))) {
@@ -234,7 +227,6 @@ std::string export_path_source_type(
     }
     if (is_directory(absolute_path) ||
         (is_symlink_path(absolute_path) && options.symlink_mode == "follow" && is_directory_follow(absolute_path))) {
-        preflight_export_path(absolute_path, "directory", options);
         return "directory";
     }
     throw std::runtime_error("transfer source must be a regular file or directory");
@@ -249,7 +241,6 @@ void export_path_to_sink_as(
     ExportContext context;
     context.options = normalized_options(symlink_mode);
     validate_export_path(absolute_path, context.options);
-    preflight_export_path(absolute_path, source_type, context.options);
 
     if (source_type == "file") {
         export_file_as_tar(&sink, absolute_path, context.options);

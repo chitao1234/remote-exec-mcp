@@ -338,7 +338,6 @@ fn to_rpc_symlink_mode(mode: &PublicTransferSymlinkMode) -> RpcTransferSymlinkMo
         PublicTransferSymlinkMode::Preserve => RpcTransferSymlinkMode::Preserve,
         PublicTransferSymlinkMode::Follow => RpcTransferSymlinkMode::Follow,
         PublicTransferSymlinkMode::Skip => RpcTransferSymlinkMode::Skip,
-        PublicTransferSymlinkMode::Reject => RpcTransferSymlinkMode::Reject,
     }
 }
 

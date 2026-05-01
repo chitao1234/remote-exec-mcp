@@ -384,7 +384,6 @@ Supported `symlink_mode` values:
 - `preserve` (default)
 - `follow`
 - `skip`
-- `reject`
 
 How to use it:
 
@@ -395,7 +394,7 @@ How to use it:
 - Use `destination_mode: "into_directory"` to copy each source beneath `destination.path` using the source basename.
 - `overwrite: "merge"` overlays files into an existing compatible destination without deleting unrelated directory entries; use `replace` only when deleting the existing destination first is intended.
 - Unsupported special entries inside source directory trees such as device nodes, FIFOs, and sockets are skipped and returned as warnings.
-- `symlink_mode: "preserve"` copies symlinks as symlinks. Use `follow` to copy symlink targets, `skip` to omit symlinks with warnings, or `reject` to fail on symlinks. On Windows XP-compatible C++ daemon targets, use `skip` or `reject` because symlink preservation/following is unsupported there.
+- `symlink_mode: "preserve"` copies symlinks as symlinks. Use `follow` to copy symlink targets or `skip` to omit symlinks with warnings. On Windows XP-compatible C++ daemon targets, symlink entries inside directory transfers and import archives are skipped with warnings when preservation is unavailable, while `follow` copies regular-file and directory targets when the platform exposes them.
 - `create_parent: true` only creates missing parents for the exact final destination path or destination root you requested.
 - If a source target and the destination target are the same, those two paths still must differ.
 - Use endpoint-native absolute paths. Linux endpoints use Unix absolute paths such as `/srv/app/file.txt`. Windows endpoints accept drive-qualified paths such as `C:/work/file.txt` and also MSYS/Cygwin-style absolute paths such as `/c/work/file.txt` and `/cygdrive/c/work/file.txt`.
@@ -553,7 +552,7 @@ Structured result fields:
 - On C++ daemon targets, `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles.
 - On C++ daemon targets, transfer archive bodies stream through the daemon instead of requiring a full tar archive to be staged in memory.
 - On POSIX C++ daemon targets, transfer symlink modes are supported.
-- On Windows XP-compatible C++ daemon targets, symlink preservation and following are unsupported; use `symlink_mode: "skip"` or `symlink_mode: "reject"`.
+- On Windows XP-compatible C++ daemon targets, symlink entries inside directory transfers and import archives are skipped with warnings when preservation is unavailable; use `symlink_mode: "follow"` to copy regular-file and directory targets when the platform exposes them.
 - On C++ daemon targets, transfer compression is never used; the broker falls back automatically.
 - On C++ daemon targets, `forward_ports` is available through the same broker-owned `forward_id` lifecycle.
 - Do not assume hard links, sparse files, or special files transfer on C++ daemon targets; special files are skipped during export.

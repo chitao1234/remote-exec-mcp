@@ -22,6 +22,7 @@ HOST_SESSION_STORE := $(BUILD_DIR)/test_session_store
 HOST_SERVER_ROUTES := $(BUILD_DIR)/test_server_routes
 HOST_SANDBOX := $(BUILD_DIR)/test_sandbox
 XP_SESSION_STORE := $(BUILD_DIR)/test_session_store-xp.exe
+XP_TRANSFER := $(BUILD_DIR)/test_transfer-xp.exe
 WINE ?= wine
 
 all: all-posix
@@ -111,10 +112,17 @@ $(XP_SESSION_STORE): $(MAKEFILE_DIR)tests/test_session_store.cpp $(MAKEFILE_DIR)
 	mkdir -p $(BUILD_DIR)
 	$(CXX) $(WINDOWS_XP_FLAGS) -o $@ $^ $(WIN_LIBS)
 
+test-wine-transfer: $(XP_TRANSFER)
+	$(WINE) $(XP_TRANSFER)
+
+$(XP_TRANSFER): $(MAKEFILE_DIR)tests/test_transfer.cpp $(TRANSFER_SRCS)
+	mkdir -p $(BUILD_DIR)
+	$(CXX) $(WINDOWS_XP_FLAGS) -o $@ $^ $(WIN_LIBS)
+
 check-posix: test-host-patch test-host-transfer test-host-config test-host-http-request test-host-server-transport test-host-server-streaming test-host-session-store test-host-server-routes test-host-sandbox all-posix
 
-check-windows-xp: all-windows-xp
+check-windows-xp: all-windows-xp $(XP_TRANSFER)
 
 check: check-posix
 
-.PHONY: all all-posix all-windows-xp clean test-host-patch test-host-transfer test-host-config test-host-http-request test-host-server-transport test-host-server-streaming test-host-session-store test-host-server-routes test-host-sandbox test-wine-session-store check-posix check-windows-xp check
+.PHONY: all all-posix all-windows-xp clean test-host-patch test-host-transfer test-host-config test-host-http-request test-host-server-transport test-host-server-streaming test-host-session-store test-host-server-routes test-host-sandbox test-wine-session-store test-wine-transfer check-posix check-windows-xp check

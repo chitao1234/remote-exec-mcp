@@ -222,7 +222,7 @@ async fn export_file_supports_zstd_compression() {
             &TransferExportRequest {
                 path: source.display().to_string(),
                 compression: TransferCompression::Zstd,
-                symlink_mode: remote_exec_proto::rpc::TransferSymlinkMode::Reject,
+                symlink_mode: Default::default(),
             },
         )
         .await;
@@ -246,36 +246,6 @@ async fn export_file_supports_zstd_compression() {
         entry.path().unwrap().as_ref(),
         Path::new(".remote-exec-file")
     );
-}
-
-#[cfg(unix)]
-#[tokio::test]
-async fn export_directory_rejects_nested_symlinks_before_streaming() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
-    let root = fixture.workdir.join("dist");
-    tokio::fs::create_dir_all(&root).await.unwrap();
-    tokio::fs::write(root.join("app.txt"), "ok\n")
-        .await
-        .unwrap();
-    std::os::unix::fs::symlink(root.join("app.txt"), root.join("app-link")).unwrap();
-
-    let response = fixture
-        .raw_post_json(
-            "/v1/transfer/export",
-            &TransferExportRequest {
-                path: root.display().to_string(),
-                compression: TransferCompression::None,
-                symlink_mode: remote_exec_proto::rpc::TransferSymlinkMode::Reject,
-            },
-        )
-        .await;
-
-    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
-    let body = response
-        .json::<remote_exec_proto::rpc::RpcErrorBody>()
-        .await
-        .unwrap();
-    assert_eq!(body.code, "transfer_source_unsupported");
 }
 
 #[cfg(unix)]
@@ -390,34 +360,6 @@ async fn export_directory_skips_special_files_with_warning() {
             .join(".remote-exec-transfer-summary.json")
             .exists()
     );
-}
-
-#[cfg(unix)]
-#[tokio::test]
-async fn export_rejects_symlink_source_root() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
-    let target = fixture.workdir.join("target.txt");
-    let link = fixture.workdir.join("root-link");
-    tokio::fs::write(&target, "ok\n").await.unwrap();
-    std::os::unix::fs::symlink(&target, &link).unwrap();
-
-    let response = fixture
-        .raw_post_json(
-            "/v1/transfer/export",
-            &TransferExportRequest {
-                path: link.display().to_string(),
-                compression: TransferCompression::None,
-                symlink_mode: remote_exec_proto::rpc::TransferSymlinkMode::Reject,
-            },
-        )
-        .await;
-
-    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
-    let body = response
-        .json::<remote_exec_proto::rpc::RpcErrorBody>()
-        .await
-        .unwrap();
-    assert_eq!(body.code, "transfer_source_unsupported");
 }
 
 #[cfg(unix)]

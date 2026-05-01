@@ -113,47 +113,11 @@ async fn prepare_export_path(
 
     let metadata = tokio::fs::symlink_metadata(&source_path).await?;
     let source_type = export_source_type_from_metadata(&source_path, &metadata, symlink_mode)?;
-    preflight_export_path(&source_path, &source_type, symlink_mode).await?;
 
     Ok(PreparedExport {
         source_path,
         source_type,
     })
-}
-
-async fn preflight_export_path(
-    source_path: &Path,
-    source_type: &TransferSourceType,
-    symlink_mode: &TransferSymlinkMode,
-) -> anyhow::Result<()> {
-    if !matches!(
-        (source_type, symlink_mode),
-        (TransferSourceType::Directory, TransferSymlinkMode::Reject)
-    ) {
-        return Ok(());
-    }
-
-    let source_path = source_path.to_path_buf();
-    tokio::task::spawn_blocking(move || reject_directory_symlinks(&source_path)).await?
-}
-
-fn reject_directory_symlinks(current: &Path) -> anyhow::Result<()> {
-    for entry in std::fs::read_dir(current)? {
-        let entry = entry?;
-        let path = entry.path();
-        let metadata = std::fs::symlink_metadata(&path)?;
-        if metadata.file_type().is_symlink() {
-            anyhow::bail!(
-                "transfer source contains unsupported symlink `{}`",
-                path.display()
-            );
-        }
-        if metadata.is_dir() {
-            reject_directory_symlinks(&path)?;
-        }
-    }
-
-    Ok(())
 }
 
 async fn write_prepared_export_to_file(
@@ -248,7 +212,7 @@ fn export_source_type_from_metadata(
                     path.display()
                 );
             }
-            TransferSymlinkMode::Skip | TransferSymlinkMode::Reject => {
+            TransferSymlinkMode::Skip => {
                 anyhow::bail!(
                     "transfer source contains unsupported symlink `{}`",
                     path.display()
@@ -334,10 +298,6 @@ fn append_directory_entries<W: Write>(
                 TransferSymlinkMode::Skip => {
                     warnings.push(TransferWarning::skipped_symlink(path.display()));
                 }
-                TransferSymlinkMode::Reject => anyhow::bail!(
-                    "transfer source contains unsupported symlink `{}`",
-                    path.display()
-                ),
             }
             continue;
         }
@@ -369,7 +329,7 @@ fn append_file_or_symlink_entry<W: Write>(
             TransferSymlinkMode::Follow => {
                 builder.append_path_with_name(source_path, archive_path)?
             }
-            TransferSymlinkMode::Skip | TransferSymlinkMode::Reject => anyhow::bail!(
+            TransferSymlinkMode::Skip => anyhow::bail!(
                 "transfer source contains unsupported symlink `{}`",
                 source_path.display()
             ),

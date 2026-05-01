@@ -164,8 +164,8 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
 - daemon HTTP transfer imports and exports stream archive bodies instead of staging the full tar payload in memory
 - transfer imports support `fail`, `merge`, and `replace` overwrite modes; `merge` overlays compatible existing destinations without deleting unrelated directory entries
 - POSIX transfer exports skip unsupported special entries in directory trees and report warnings
-- POSIX transfer symlink modes support preserving, following, skipping, or rejecting symlinks
-- Windows XP-compatible transfer builds do not support preserving or following symlinks; use skip or reject modes
+- POSIX transfer symlink modes support preserving, following, or skipping symlinks
+- Windows XP-compatible transfer builds skip symlink entries inside directory transfers and import archives when preservation is unavailable; follow mode copies regular-file and directory targets when the platform exposes them
 - transfer payloads use GNU tar for files and directories
 - single-file transfers use the fixed archive entry `.remote-exec-file`
 - transfer warnings use the reserved archive summary entry `.remote-exec-transfer-summary.json`, which is consumed during import and is not extracted

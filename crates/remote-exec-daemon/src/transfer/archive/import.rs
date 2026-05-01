@@ -306,7 +306,7 @@ fn write_archive_symlink<R: Read>(
                 .push(TransferWarning::skipped_symlink(path.display()));
             Ok(())
         }
-        SymlinkImportAction::Reject => {
+        SymlinkImportAction::Unsupported => {
             anyhow::bail!("archive contains unsupported symlink `{}`", path.display())
         }
     }
@@ -329,7 +329,7 @@ fn remove_existing_file_before_symlink(path: &Path) -> anyhow::Result<()> {
 enum SymlinkImportAction {
     Preserve(std::path::PathBuf),
     Skip,
-    Reject,
+    Unsupported,
 }
 
 fn symlink_import_action<R: Read>(
@@ -348,9 +348,7 @@ fn symlink_import_action<R: Read>(
             Ok(SymlinkImportAction::Preserve(target.into_owned()))
         }
         TransferSymlinkMode::Skip => Ok(SymlinkImportAction::Skip),
-        TransferSymlinkMode::Follow | TransferSymlinkMode::Reject => {
-            Ok(SymlinkImportAction::Reject)
-        }
+        TransferSymlinkMode::Follow => Ok(SymlinkImportAction::Unsupported),
     }
 }
 

@@ -338,7 +338,7 @@ std::string read_gnu_long_name(
 
 void validate_transfer_options(const ExportOptions& options) {
     if (options.symlink_mode != "preserve" && options.symlink_mode != "follow" &&
-        options.symlink_mode != "skip" && options.symlink_mode != "reject") {
+        options.symlink_mode != "skip") {
         throw std::runtime_error("unsupported transfer symlink mode");
     }
 }

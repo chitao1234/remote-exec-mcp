@@ -243,7 +243,6 @@ enum CliTransferSymlinkMode {
     Preserve,
     Follow,
     Skip,
-    Reject,
 }
 
 impl From<CliTransferSymlinkMode> for TransferSymlinkMode {
@@ -252,7 +251,6 @@ impl From<CliTransferSymlinkMode> for TransferSymlinkMode {
             CliTransferSymlinkMode::Preserve => Self::Preserve,
             CliTransferSymlinkMode::Follow => Self::Follow,
             CliTransferSymlinkMode::Skip => Self::Skip,
-            CliTransferSymlinkMode::Reject => Self::Reject,
         }
     }
 }

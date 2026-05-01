@@ -23,12 +23,12 @@ static const char* const SINGLE_FILE_ENTRY = ".remote-exec-file";
 static const char* const TRANSFER_SUMMARY_ENTRY = ".remote-exec-transfer-summary.json";
 
 static std::string read_text(const fs::path& path) {
-    std::ifstream input(path.c_str(), std::ios::binary);
+    std::ifstream input(path.string().c_str(), std::ios::binary);
     return std::string((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
 }
 
 static void write_text(const fs::path& path, const std::string& value) {
-    std::ofstream output(path.c_str(), std::ios::binary | std::ios::trunc);
+    std::ofstream output(path.string().c_str(), std::ios::binary | std::ios::trunc);
     output << value;
 }
 
@@ -126,6 +126,7 @@ static void append_tar_file(std::string& archive, const std::string& path, const
     append_tar_entry(&archive, path, '0', body);
 }
 
+#ifndef _WIN32
 static void append_tar_file_with_mode(
     std::string& archive,
     const std::string& path,
@@ -137,6 +138,7 @@ static void append_tar_file_with_mode(
     }
     append_tar_entry(&archive, path, '0', body, mode);
 }
+#endif
 
 static void append_tar_directory(std::string& archive, const std::string& path) {
     if (path.size() >= 100) {
@@ -205,10 +207,12 @@ static std::pair<std::string, std::string> read_single_file_tar(const std::strin
     return std::make_pair(path, archive.substr(body_offset, body_size));
 }
 
+#ifndef _WIN32
 static std::uint64_t read_first_tar_mode(const std::string& archive) {
     assert(archive.size() >= 512);
     return parse_octal_value(archive.data() + 100, 8);
 }
+#endif
 
 static void assert_file_transfer() {
     const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-file";
@@ -385,33 +389,22 @@ static void assert_directory_long_path_round_trip() {
     assert(read_text(root / "dest" / long_name / "nested" / "payload.txt") == "long path");
 }
 
-#ifndef _WIN32
-static void assert_symlink_sources_are_rejected() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-symlink";
+static void assert_reject_symlink_mode_is_unsupported() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-reject-mode";
     fs::remove_all(root);
-    fs::create_directories(root / "source");
-    write_text(root / "target.txt", "target");
-    write_text(root / "source" / "regular.txt", "regular");
-    fs::create_symlink(root / "target.txt", root / "link.txt");
-    fs::create_symlink(root / "target.txt", root / "source" / "link.txt");
+    fs::create_directories(root);
+    write_text(root / "source.txt", "source");
 
     bool rejected = false;
     try {
-        (void)export_path((root / "link.txt").string(), "reject");
-    } catch (...) {
-        rejected = true;
-    }
-    assert(rejected);
-
-    rejected = false;
-    try {
-        (void)export_path((root / "source").string(), "reject");
-    } catch (...) {
-        rejected = true;
+        (void)export_path((root / "source.txt").string(), "reject");
+    } catch (const std::exception& ex) {
+        rejected = std::string(ex.what()).find("unsupported transfer symlink mode") != std::string::npos;
     }
     assert(rejected);
 }
 
+#ifndef _WIN32
 static void assert_symlink_sources_are_preserved_by_default() {
     const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-symlink-preserve";
     fs::remove_all(root);
@@ -584,6 +577,43 @@ static void assert_symlink_import_skip_reports_warning() {
 }
 #endif
 
+#ifdef _WIN32
+static void assert_windows_symlink_import_modes_skip_with_warning() {
+    const char* const modes[] = {"preserve", "follow", "skip"};
+    for (std::size_t i = 0; i < sizeof(modes) / sizeof(modes[0]); ++i) {
+        std::string archive;
+        append_tar_file(archive, "alpha.txt", "alpha");
+        append_tar_symlink(&archive, "alpha-link", "alpha.txt");
+        finalize_tar(archive);
+
+        const fs::path root =
+            fs::temp_directory_path() / ("remote-exec-cpp-transfer-win-symlink-import-" + std::string(modes[i]));
+        fs::remove_all(root);
+
+        const ImportSummary imported =
+            import_path(archive, "directory", (root / "dest").string(), "replace", true, modes[i]);
+
+        assert(imported.files_copied == 1);
+        assert(imported.warnings.size() == 1);
+        assert(imported.warnings[0].code == "transfer_skipped_symlink");
+        assert(read_text(root / "dest" / "alpha.txt") == "alpha");
+        assert(!fs::exists(root / "dest" / "alpha-link"));
+
+        std::string file_archive;
+        append_tar_symlink(&file_archive, SINGLE_FILE_ENTRY, "missing-target.txt");
+        finalize_tar(file_archive);
+
+        const ImportSummary file_imported =
+            import_path(file_archive, "file", (root / "skipped-file-link").string(), "replace", true, modes[i]);
+
+        assert(file_imported.files_copied == 0);
+        assert(file_imported.warnings.size() == 1);
+        assert(file_imported.warnings[0].code == "transfer_skipped_symlink");
+        assert(!fs::exists(root / "skipped-file-link"));
+    }
+}
+#endif
+
 static void assert_directory_traversal_is_rejected() {
     const std::string archive = tar_with_single_file("../escape.txt", "bad");
     const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-traversal";
@@ -626,8 +656,8 @@ int main() {
     assert_path_info_reports_existing_directory();
     assert_directory_merge_behavior();
     assert_directory_long_path_round_trip();
+    assert_reject_symlink_mode_is_unsupported();
 #ifndef _WIN32
-    assert_symlink_sources_are_rejected();
     assert_symlink_sources_are_preserved_by_default();
     assert_top_level_file_symlink_can_be_followed();
     assert_top_level_symlink_is_preserved_without_following_target();
@@ -636,6 +666,9 @@ int main() {
     assert_top_level_special_files_are_unsupported();
     assert_symlink_import_preserves_links();
     assert_symlink_import_skip_reports_warning();
+#endif
+#ifdef _WIN32
+    assert_windows_symlink_import_modes_skip_with_warning();
 #endif
     assert_directory_traversal_is_rejected();
     assert_multiple_sources_import();
