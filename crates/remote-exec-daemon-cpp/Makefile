@@ -7,7 +7,8 @@ WINDOWS_XP_TARGET := $(BUILD_DIR)/remote-exec-daemon-cpp-xp.exe
 COMMON_FLAGS := -std=gnu++17 -O0 -Wall -Wextra -I$(MAKEFILE_DIR)include -I$(MAKEFILE_DIR)third_party
 WINDOWS_XP_FLAGS := $(COMMON_FLAGS) -DWINVER=0x0501 -D_WIN32_WINNT=0x0501 -static-libgcc -static-libstdc++
 WIN_LIBS := -lws2_32
-COMMON_SRCS := $(addprefix $(MAKEFILE_DIR),src/main.cpp src/config.cpp src/http_helpers.cpp src/http_request.cpp src/logging.cpp src/text_utils.cpp src/platform.cpp src/shell_policy.cpp src/server.cpp src/server_routes.cpp src/server_transport.cpp src/session_store.cpp src/patch_engine.cpp src/transfer_ops.cpp src/port_forward.cpp src/basic_mutex.cpp)
+TRANSFER_SRCS := $(addprefix $(MAKEFILE_DIR),src/transfer_ops.cpp src/transfer_ops_fs.cpp src/transfer_ops_tar.cpp src/transfer_ops_export.cpp src/transfer_ops_import.cpp)
+COMMON_SRCS := $(addprefix $(MAKEFILE_DIR),src/main.cpp src/config.cpp src/http_helpers.cpp src/http_request.cpp src/logging.cpp src/text_utils.cpp src/platform.cpp src/shell_policy.cpp src/server.cpp src/server_routes.cpp src/server_transport.cpp src/session_store.cpp src/patch_engine.cpp src/port_forward.cpp src/basic_mutex.cpp) $(TRANSFER_SRCS)
 WINDOWS_XP_SRCS := $(COMMON_SRCS) $(addprefix $(MAKEFILE_DIR),src/process_session_win32.cpp src/console_output.cpp src/win32_error.cpp)
 POSIX_SRCS := $(COMMON_SRCS) $(MAKEFILE_DIR)src/process_session_posix.cpp
 HOST_PATCH := $(BUILD_DIR)/test_patch
@@ -47,7 +48,7 @@ $(HOST_PATCH): $(MAKEFILE_DIR)tests/test_patch.cpp $(MAKEFILE_DIR)src/patch_engi
 test-host-transfer: $(HOST_TRANSFER)
 	$(HOST_TRANSFER)
 
-$(HOST_TRANSFER): $(MAKEFILE_DIR)tests/test_transfer.cpp $(MAKEFILE_DIR)src/transfer_ops.cpp
+$(HOST_TRANSFER): $(MAKEFILE_DIR)tests/test_transfer.cpp $(TRANSFER_SRCS)
 	mkdir -p $(BUILD_DIR)
 	$(HOST_CXX) $(COMMON_FLAGS) -o $@ $^
 
@@ -82,7 +83,7 @@ $(HOST_SESSION_STORE): $(MAKEFILE_DIR)tests/test_session_store.cpp $(MAKEFILE_DI
 test-host-server-routes: $(HOST_SERVER_ROUTES)
 	$(HOST_SERVER_ROUTES)
 
-$(HOST_SERVER_ROUTES): $(MAKEFILE_DIR)tests/test_server_routes.cpp $(MAKEFILE_DIR)src/server_routes.cpp $(MAKEFILE_DIR)src/http_helpers.cpp $(MAKEFILE_DIR)src/session_store.cpp $(MAKEFILE_DIR)src/process_session_posix.cpp $(MAKEFILE_DIR)src/platform.cpp $(MAKEFILE_DIR)src/shell_policy.cpp $(MAKEFILE_DIR)src/patch_engine.cpp $(MAKEFILE_DIR)src/transfer_ops.cpp $(MAKEFILE_DIR)src/port_forward.cpp $(MAKEFILE_DIR)src/server_transport.cpp $(MAKEFILE_DIR)src/basic_mutex.cpp $(MAKEFILE_DIR)src/logging.cpp $(MAKEFILE_DIR)src/config.cpp $(MAKEFILE_DIR)src/text_utils.cpp
+$(HOST_SERVER_ROUTES): $(MAKEFILE_DIR)tests/test_server_routes.cpp $(MAKEFILE_DIR)src/server_routes.cpp $(MAKEFILE_DIR)src/http_helpers.cpp $(MAKEFILE_DIR)src/session_store.cpp $(MAKEFILE_DIR)src/process_session_posix.cpp $(MAKEFILE_DIR)src/platform.cpp $(MAKEFILE_DIR)src/shell_policy.cpp $(MAKEFILE_DIR)src/patch_engine.cpp $(TRANSFER_SRCS) $(MAKEFILE_DIR)src/port_forward.cpp $(MAKEFILE_DIR)src/server_transport.cpp $(MAKEFILE_DIR)src/basic_mutex.cpp $(MAKEFILE_DIR)src/logging.cpp $(MAKEFILE_DIR)src/config.cpp $(MAKEFILE_DIR)src/text_utils.cpp
 	mkdir -p $(BUILD_DIR)
 	$(HOST_CXX) $(COMMON_FLAGS) -o $@ $^
 
