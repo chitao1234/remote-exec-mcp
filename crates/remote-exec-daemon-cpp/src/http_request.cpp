@@ -86,13 +86,11 @@ std::string decode_chunked_body(const std::string& body) {
 
 }  // namespace
 
-HttpRequest parse_http_request(const std::string& raw) {
-    const std::size_t header_end = raw.find("\r\n\r\n");
-    if (header_end == std::string::npos) {
-        throw HttpParseError("invalid http request");
-    }
-
-    std::istringstream lines(raw.substr(0, header_end));
+HttpRequest parse_http_request_head(const std::string& raw_headers) {
+    const std::size_t header_end = raw_headers.find("\r\n\r\n");
+    const std::string header_block =
+        header_end == std::string::npos ? raw_headers : raw_headers.substr(0, header_end);
+    std::istringstream lines(header_block);
     std::string request_line;
     if (!std::getline(lines, request_line)) {
         throw HttpParseError("missing request line");
@@ -126,6 +124,16 @@ HttpRequest parse_http_request(const std::string& raw) {
             trim_ascii(header_line.substr(colon + 1));
     }
 
+    return request;
+}
+
+HttpRequest parse_http_request(const std::string& raw) {
+    const std::size_t header_end = raw.find("\r\n\r\n");
+    if (header_end == std::string::npos) {
+        throw HttpParseError("invalid http request");
+    }
+
+    HttpRequest request = parse_http_request_head(raw.substr(0, header_end));
     const std::string transfer_encoding =
         lowercase_ascii(trim_ascii(request.header("transfer-encoding")));
     if (!transfer_encoding.empty()) {

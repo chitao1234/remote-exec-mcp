@@ -138,6 +138,7 @@ default_workdir = /work
 - no image support
 - transfer compression is not supported
 - `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles
+- daemon HTTP transfer imports and exports stream archive bodies instead of staging the full tar payload in memory
 - transfer imports support `fail`, `merge`, and `replace` overwrite modes; `merge` overlays compatible existing destinations without deleting unrelated directory entries
 - POSIX transfer exports skip unsupported special entries in directory trees and report warnings
 - POSIX transfer symlink modes support preserving, following, skipping, or rejecting symlinks

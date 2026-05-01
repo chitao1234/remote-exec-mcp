@@ -2,6 +2,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -63,18 +64,27 @@ std::string truncate_path_for_header(const std::string& path) {
     return path.substr(0, 100);
 }
 
-std::size_t tar_padding(std::size_t size) {
-    const std::size_t remainder = size % TAR_BLOCK_SIZE;
+std::size_t tar_padding(std::uint64_t size) {
+    const std::size_t remainder = static_cast<std::size_t>(size % TAR_BLOCK_SIZE);
     return remainder == 0 ? 0 : TAR_BLOCK_SIZE - remainder;
 }
 
-void append_padded_body(std::string* archive, const std::string& body) {
-    archive->append(body);
-    archive->append(tar_padding(body.size()), '\0');
+void append_padding(TransferArchiveSink* archive, std::uint64_t size) {
+    const std::size_t padding = tar_padding(size);
+    if (padding == 0U) {
+        return;
+    }
+    const std::string zeros(padding, '\0');
+    archive->write_string(zeros);
+}
+
+void append_padded_body(TransferArchiveSink* archive, const std::string& body) {
+    archive->write_string(body);
+    append_padding(archive, body.size());
 }
 
 void append_tar_header(
-    std::string* archive,
+    TransferArchiveSink* archive,
     const std::string& path,
     char typeflag,
     std::uint64_t size,
@@ -96,7 +106,7 @@ void append_tar_header(
     header[263] = ' ';
     header[264] = '\0';
     write_tar_checksum(&header);
-    archive->append(header);
+    archive->write_string(header);
 }
 
 std::string field_string(const char* data, std::size_t size) {
@@ -158,24 +168,25 @@ std::string header_path(const char* block) {
 
 }  // namespace
 
-void append_archive_terminator(std::string* archive) {
-    archive->append(TAR_BLOCK_SIZE * 2, '\0');
+void append_archive_terminator(TransferArchiveSink* archive) {
+    const std::string terminator(TAR_BLOCK_SIZE * 2, '\0');
+    archive->write_string(terminator);
 }
 
-void append_gnu_long_name(std::string* archive, const std::string& path) {
+void append_gnu_long_name(TransferArchiveSink* archive, const std::string& path) {
     const std::string body = path + '\0';
     append_tar_header(archive, "././@LongLink", 'L', body.size(), 0644);
     append_padded_body(archive, body);
 }
 
-void append_directory_entry(std::string* archive, const std::string& rel_path) {
+void append_directory_entry(TransferArchiveSink* archive, const std::string& rel_path) {
     if (rel_path.size() > 100) {
         append_gnu_long_name(archive, rel_path);
     }
     append_tar_header(archive, rel_path, '5', 0, 0755);
 }
 
-void append_file_entry(std::string* archive, const std::string& rel_path, const std::string& body) {
+void append_file_entry(TransferArchiveSink* archive, const std::string& rel_path, const std::string& body) {
     if (rel_path.size() > 100) {
         append_gnu_long_name(archive, rel_path);
     }
@@ -183,8 +194,48 @@ void append_file_entry(std::string* archive, const std::string& rel_path, const 
     append_padded_body(archive, body);
 }
 
+void append_file_entry_from_path(
+    TransferArchiveSink* archive,
+    const std::string& rel_path,
+    const std::string& source_path
+) {
+    std::ifstream input(source_path.c_str(), std::ios::binary | std::ios::ate);
+    if (!input) {
+        throw std::runtime_error("transfer source missing");
+    }
+    const std::ifstream::pos_type end_position = input.tellg();
+    if (end_position < 0) {
+        throw std::runtime_error("unable to read transfer source size");
+    }
+    const std::uint64_t file_size = static_cast<std::uint64_t>(end_position);
+    input.seekg(0, std::ios::beg);
+    if (!input) {
+        throw std::runtime_error("unable to read transfer source");
+    }
+
+    if (rel_path.size() > 100) {
+        append_gnu_long_name(archive, rel_path);
+    }
+    append_tar_header(archive, rel_path, '0', file_size, 0644);
+
+    char buffer[8192];
+    std::uint64_t remaining = file_size;
+    while (remaining > 0U) {
+        const std::size_t requested =
+            remaining < sizeof(buffer) ? static_cast<std::size_t>(remaining) : sizeof(buffer);
+        input.read(buffer, static_cast<std::streamsize>(requested));
+        const std::streamsize received = input.gcount();
+        if (received <= 0 || static_cast<std::size_t>(received) != requested) {
+            throw std::runtime_error("unable to read transfer source");
+        }
+        archive->write(buffer, static_cast<std::size_t>(received));
+        remaining -= static_cast<std::uint64_t>(received);
+    }
+    append_padding(archive, file_size);
+}
+
 #ifndef _WIN32
-void append_symlink_entry(std::string* archive, const std::string& rel_path, const std::string& target) {
+void append_symlink_entry(TransferArchiveSink* archive, const std::string& rel_path, const std::string& target) {
     if (rel_path.size() > 100) {
         append_gnu_long_name(archive, rel_path);
     }
@@ -209,7 +260,7 @@ bool is_transfer_summary_path(const std::string& path) {
 }
 
 void append_transfer_summary_entry(
-    std::string* archive,
+    TransferArchiveSink* archive,
     const std::vector<TransferWarning>& warnings
 ) {
     if (warnings.empty()) {

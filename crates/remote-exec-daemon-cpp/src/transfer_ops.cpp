@@ -6,6 +6,14 @@
 
 using namespace transfer_ops_internal;
 
+TransferArchiveReader::~TransferArchiveReader() {}
+
+TransferArchiveSink::~TransferArchiveSink() {}
+
+void TransferArchiveSink::write_string(const std::string& data) {
+    write(data.data(), data.size());
+}
+
 PathInfo path_info(const std::string& absolute_path) {
     if (!is_absolute_path(absolute_path)) {
         throw std::runtime_error("transfer path is not absolute");

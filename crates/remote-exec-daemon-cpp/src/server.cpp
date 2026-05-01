@@ -2,6 +2,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -18,6 +19,7 @@
 #include "server.h"
 #include "server_routes.h"
 #include "server_transport.h"
+#include "transfer_ops.h"
 
 namespace {
 
@@ -27,23 +29,313 @@ std::string daemon_instance_id() {
     return out.str();
 }
 
-void handle_client(AppState& state, UniqueSocket client) {
+bool contains_text(const std::string& value, const std::string& needle) {
+    return value.find(needle) != std::string::npos;
+}
+
+std::string transfer_error_code(const std::string& message) {
+    if (contains_text(message, "not absolute")) {
+        return "transfer_path_not_absolute";
+    }
+    if (contains_text(message, "destination path") &&
+        contains_text(message, "already exists")) {
+        return "transfer_destination_exists";
+    }
+    if (contains_text(message, "destination parent") &&
+        contains_text(message, "does not exist")) {
+        return "transfer_parent_missing";
+    }
+    if ((contains_text(message, "destination path") &&
+         contains_text(message, "is a directory")) ||
+        (contains_text(message, "destination path") &&
+         contains_text(message, "is not a directory")) ||
+        (contains_text(message, "destination path") &&
+         contains_text(message, "is not a regular file"))) {
+        return "transfer_destination_unsupported";
+    }
+    if (contains_text(message, "transfer compression") ||
+        contains_text(message, "does not support transfer compression")) {
+        return "transfer_compression_unsupported";
+    }
+    if (contains_text(message, "unsupported symlink") ||
+        contains_text(message, "unsupported entry") ||
+        contains_text(message, "symlink mode is unsupported") ||
+        contains_text(message, "unsupported transfer source type") ||
+        contains_text(message, "regular file or directory") ||
+        contains_text(message, "archive entry is not a regular file") ||
+        contains_text(message, "archive file entry cannot target root") ||
+        contains_text(message, "archive path escapes") ||
+        contains_text(message, "archive path must be relative") ||
+        contains_text(message, "archive path contains empty component")) {
+        return "transfer_source_unsupported";
+    }
+    if (contains_text(message, "transfer source missing") ||
+        contains_text(message, "No such file or directory")) {
+        return "transfer_source_missing";
+    }
+    return "transfer_failed";
+}
+
+Json transfer_warnings_json(const std::vector<TransferWarning>& warnings) {
+    Json json = Json::array();
+    for (std::size_t i = 0; i < warnings.size(); ++i) {
+        json.push_back(Json{
+            {"code", warnings[i].code},
+            {"message", warnings[i].message},
+        });
+    }
+    return json;
+}
+
+class HttpBodyTransferArchiveReader : public TransferArchiveReader {
+public:
+    explicit HttpBodyTransferArchiveReader(HttpRequestBodyStream* body) : body_(body) {}
+
+    bool read_exact_or_eof(char* data, std::size_t size) {
+        std::size_t offset = 0;
+        while (offset < size) {
+            const std::size_t received = body_->read(data + offset, size - offset);
+            if (received == 0U) {
+                if (offset == 0U) {
+                    return false;
+                }
+                throw std::runtime_error("truncated transfer body");
+            }
+            offset += received;
+        }
+        return true;
+    }
+
+private:
+    HttpRequestBodyStream* body_;
+};
+
+class ChunkedTransferArchiveSink : public TransferArchiveSink {
+public:
+    explicit ChunkedTransferArchiveSink(SOCKET client) : client_(client), finished_(false) {}
+
+    void write(const char* data, std::size_t size) {
+        if (size == 0U) {
+            return;
+        }
+        std::ostringstream header;
+        header << std::hex << size << "\r\n";
+        send_all(client_, header.str());
+        send_all_bytes(client_, data, size);
+        send_all(client_, "\r\n");
+    }
+
+    void finish() {
+        if (finished_) {
+            return;
+        }
+        send_all(client_, "0\r\n\r\n");
+        finished_ = true;
+    }
+
+private:
+    SOCKET client_;
+    bool finished_;
+};
+
+std::string read_request_body_to_string(HttpRequestBodyStream* body) {
+    std::string output;
+    char buffer[8192];
+    for (;;) {
+        const std::size_t received = body->read(buffer, sizeof(buffer));
+        if (received == 0U) {
+            return output;
+        }
+        output.append(buffer, received);
+    }
+}
+
+bool reject_before_route(
+    const AppState& state,
+    const HttpRequest& request,
+    HttpResponse* response
+) {
+    if (!state.config.http_auth_bearer_token.empty() &&
+        !request_has_bearer_auth(request, state.config.http_auth_bearer_token)) {
+        write_bearer_auth_challenge(*response);
+        return true;
+    }
+
+    if (request.method != "POST") {
+        write_rpc_error(*response, 405, "method_not_allowed", "only POST is supported");
+        return true;
+    }
+
+    return false;
+}
+
+HttpResponse handle_streaming_transfer_import(
+    const AppState& state,
+    const HttpRequest& request,
+    HttpRequestBodyStream* body
+) {
+    HttpResponse response;
+    response.status = 200;
+
+    if (reject_before_route(state, request, &response)) {
+        return response;
+    }
+
     try {
-        const std::uint64_t started_at_ms = platform::monotonic_ms();
-        const std::string raw_request = read_http_request(
-            client.get(),
-            state.config.max_request_header_bytes,
-            state.config.max_request_body_bytes
+        const std::string compression = request.header("x-remote-exec-compression");
+        if (!compression.empty() && compression != "none") {
+            throw std::runtime_error("this daemon does not support transfer compression");
+        }
+        HttpBodyTransferArchiveReader archive_reader(body);
+        const ImportSummary summary = import_path_from_reader(
+            archive_reader,
+            request.header("x-remote-exec-source-type"),
+            request.header("x-remote-exec-destination-path"),
+            request.header("x-remote-exec-overwrite"),
+            request.header("x-remote-exec-create-parent") == "true",
+            request.header("x-remote-exec-symlink-mode").empty()
+                ? "preserve"
+                : request.header("x-remote-exec-symlink-mode")
         );
-        const HttpRequest request = parse_http_request(raw_request);
-        const HttpResponse response = route_request(state, request);
         {
             std::ostringstream message;
-            message << request.method << ' ' << request.path
-                    << " status=" << response.status
-                    << " elapsed_ms=" << (platform::monotonic_ms() - started_at_ms);
-            log_message(level_for_status(response.status), "server", message.str());
+            message << "transfer/import destination=`"
+                    << request.header("x-remote-exec-destination-path")
+                    << "` bytes_copied=" << summary.bytes_copied
+                    << " files_copied=" << summary.files_copied
+                    << " directories_copied=" << summary.directories_copied
+                    << " replaced=" << (summary.replaced ? "true" : "false");
+            log_message(LOG_INFO, "server", message.str());
         }
+        write_json(
+            response,
+            Json{
+                {"source_type", summary.source_type},
+                {"bytes_copied", summary.bytes_copied},
+                {"files_copied", summary.files_copied},
+                {"directories_copied", summary.directories_copied},
+                {"replaced", summary.replaced},
+                {"warnings", transfer_warnings_json(summary.warnings)},
+            }
+        );
+    } catch (const std::exception& ex) {
+        const std::string message = ex.what();
+        log_message(LOG_WARN, "server", "transfer/import failed: " + message);
+        write_rpc_error(response, 400, transfer_error_code(message), message);
+    }
+
+    return response;
+}
+
+void send_transfer_export_headers(SOCKET client, const std::string& source_type) {
+    std::ostringstream out;
+    out << "HTTP/1.1 200 OK\r\n"
+        << "Connection: close\r\n"
+        << "Content-Type: application/octet-stream\r\n"
+        << "Transfer-Encoding: chunked\r\n"
+        << "x-remote-exec-compression: none\r\n"
+        << "x-remote-exec-source-type: " << source_type << "\r\n"
+        << "\r\n";
+    send_all(client, out.str());
+}
+
+int handle_streaming_transfer_export(
+    const AppState& state,
+    const HttpRequest& request_head,
+    HttpRequestBodyStream* body,
+    SOCKET client
+) {
+    HttpResponse rejection;
+    rejection.status = 200;
+    if (reject_before_route(state, request_head, &rejection)) {
+        send_all(client, render_http_response(rejection));
+        return rejection.status;
+    }
+
+    bool headers_sent = false;
+    try {
+        HttpRequest request = request_head;
+        request.body = read_request_body_to_string(body);
+        const Json body_json = parse_json_body(request);
+        if (body_json.value("compression", std::string("none")) != "none") {
+            throw std::runtime_error("this daemon does not support transfer compression");
+        }
+
+        const std::string path = body_json.at("path").get<std::string>();
+        const std::string symlink_mode = body_json.value("symlink_mode", std::string("preserve"));
+        const std::string source_type = export_path_source_type(path, symlink_mode);
+        log_message(
+            LOG_INFO,
+            "server",
+            "transfer/export path=`" + path + "` source_type=`" + source_type + "`"
+        );
+
+        send_transfer_export_headers(client, source_type);
+        headers_sent = true;
+        ChunkedTransferArchiveSink sink(client);
+        export_path_to_sink_as(sink, path, source_type, symlink_mode);
+        sink.finish();
+        return 200;
+    } catch (const std::exception& ex) {
+        const std::string message = ex.what();
+        log_message(LOG_WARN, "server", "transfer/export failed: " + message);
+        if (headers_sent) {
+            return 200;
+        }
+
+        HttpResponse response;
+        response.status = 400;
+        write_rpc_error(response, 400, transfer_error_code(message), message);
+        send_all(client, render_http_response(response));
+        return response.status;
+    }
+}
+
+void log_request_result(
+    const HttpRequest& request,
+    int status,
+    std::uint64_t started_at_ms
+) {
+    std::ostringstream message;
+    message << request.method << ' ' << request.path
+            << " status=" << status
+            << " elapsed_ms=" << (platform::monotonic_ms() - started_at_ms);
+    log_message(level_for_status(status), "server", message.str());
+}
+
+}  // namespace
+
+void handle_client_once(AppState& state, UniqueSocket client) {
+    try {
+        const std::uint64_t started_at_ms = platform::monotonic_ms();
+        const HttpRequestHead request_head = read_http_request_head(
+            client.get(),
+            state.config.max_request_header_bytes
+        );
+        HttpRequest request = parse_http_request_head(request_head.raw_headers);
+        const HttpRequestBodyFraming framing =
+            request_body_framing_from_headers(request_head.raw_headers);
+        HttpRequestBodyStream body(
+            client.get(),
+            request_head.initial_body,
+            framing,
+            state.config.max_request_body_bytes
+        );
+
+        if (request.path == "/v1/transfer/export") {
+            const int status = handle_streaming_transfer_export(state, request, &body, client.get());
+            log_request_result(request, status, started_at_ms);
+            return;
+        }
+
+        HttpResponse response;
+        if (request.path == "/v1/transfer/import") {
+            response = handle_streaming_transfer_import(state, request, &body);
+        } else {
+            request.body = read_request_body_to_string(&body);
+            response = route_request(state, request);
+        }
+        log_request_result(request, response.status, started_at_ms);
         send_all(client.get(), render_http_response(response));
     } catch (const BadHttpRequest& ex) {
         log_message(LOG_WARN, "server", ex.what());
@@ -66,6 +358,8 @@ void handle_client(AppState& state, UniqueSocket client) {
     }
 }
 
+namespace {
+
 #ifdef _WIN32
 struct ClientThreadContext {
     AppState* state;
@@ -77,7 +371,7 @@ DWORD WINAPI client_thread_entry(LPVOID raw_context) {
         static_cast<ClientThreadContext*>(raw_context)
     );
     UniqueSocket client(context->socket);
-    handle_client(*context->state, std::move(client));
+    handle_client_once(*context->state, std::move(client));
     return 0;
 }
 #endif
@@ -99,7 +393,7 @@ void spawn_client_thread(AppState& state, UniqueSocket client) {
     std::thread(
         [&state](SOCKET socket) {
             UniqueSocket thread_client(socket);
-            handle_client(state, std::move(thread_client));
+            handle_client_once(state, std::move(thread_client));
         },
         client.release()
     )

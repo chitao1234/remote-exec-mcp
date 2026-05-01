@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -28,13 +29,50 @@ struct PathInfo {
     bool is_directory;
 };
 
+class TransferArchiveReader {
+public:
+    virtual ~TransferArchiveReader();
+    virtual bool read_exact_or_eof(char* data, std::size_t size) = 0;
+};
+
+class TransferArchiveSink {
+public:
+    virtual ~TransferArchiveSink();
+    virtual void write(const char* data, std::size_t size) = 0;
+
+    void write_string(const std::string& data);
+};
+
 ExportedPayload export_path(
     const std::string& absolute_path,
+    const std::string& symlink_mode = "preserve"
+);
+std::string export_path_source_type(
+    const std::string& absolute_path,
+    const std::string& symlink_mode = "preserve"
+);
+std::string export_path_to_sink(
+    TransferArchiveSink& sink,
+    const std::string& absolute_path,
+    const std::string& symlink_mode = "preserve"
+);
+void export_path_to_sink_as(
+    TransferArchiveSink& sink,
+    const std::string& absolute_path,
+    const std::string& source_type,
     const std::string& symlink_mode = "preserve"
 );
 PathInfo path_info(const std::string& absolute_path);
 ImportSummary import_path(
     const std::string& bytes,
+    const std::string& source_type,
+    const std::string& absolute_path,
+    const std::string& overwrite_mode,
+    bool create_parent,
+    const std::string& symlink_mode = "preserve"
+);
+ImportSummary import_path_from_reader(
+    TransferArchiveReader& reader,
     const std::string& source_type,
     const std::string& absolute_path,
     const std::string& overwrite_mode,

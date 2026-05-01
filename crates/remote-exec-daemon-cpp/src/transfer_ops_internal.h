@@ -42,8 +42,6 @@ std::string join_path(const std::string& base, const std::string& child);
 void make_directory_if_missing(const std::string& path);
 void ensure_parent_directory(const std::string& path, bool create_parent);
 void ensure_not_existing_symlink(const std::string& path);
-std::string read_binary_file(const std::string& path);
-void write_binary_file(const std::string& path, const std::string& bytes);
 void write_symlink(const std::string& target, const std::string& path);
 std::vector<DirectoryEntry> list_directory_entries(const std::string& path);
 bool prepare_destination_path(
@@ -53,12 +51,17 @@ bool prepare_destination_path(
     bool create_parent
 );
 
-void append_archive_terminator(std::string* archive);
-void append_directory_entry(std::string* archive, const std::string& rel_path);
-void append_file_entry(std::string* archive, const std::string& rel_path, const std::string& body);
+void append_archive_terminator(TransferArchiveSink* archive);
+void append_directory_entry(TransferArchiveSink* archive, const std::string& rel_path);
+void append_file_entry(TransferArchiveSink* archive, const std::string& rel_path, const std::string& body);
+void append_file_entry_from_path(
+    TransferArchiveSink* archive,
+    const std::string& rel_path,
+    const std::string& source_path
+);
 #ifndef _WIN32
 void append_symlink_entry(
-    std::string* archive,
+    TransferArchiveSink* archive,
     const std::string& rel_path,
     const std::string& target
 );
@@ -73,7 +76,7 @@ std::string read_gnu_long_name(
 );
 bool is_transfer_summary_path(const std::string& path);
 void append_transfer_summary_entry(
-    std::string* archive,
+    TransferArchiveSink* archive,
     const std::vector<TransferWarning>& warnings
 );
 std::vector<TransferWarning> read_transfer_summary(const std::string& body);

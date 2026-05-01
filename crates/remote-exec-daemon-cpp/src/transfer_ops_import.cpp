@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cctype>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -116,31 +117,135 @@ void ensure_no_existing_symlink_in_path(
     }
 }
 
+class StringTransferArchiveReader : public TransferArchiveReader {
+public:
+    explicit StringTransferArchiveReader(const std::string* archive)
+        : archive_(archive), offset_(0) {}
+
+    bool read_exact_or_eof(char* data, std::size_t size) {
+        if (size == 0U) {
+            return true;
+        }
+        if (offset_ >= archive_->size()) {
+            return false;
+        }
+        if (archive_->size() - offset_ < size) {
+            throw std::runtime_error("truncated transfer body");
+        }
+        std::copy(archive_->data() + offset_, archive_->data() + offset_ + size, data);
+        offset_ += size;
+        return true;
+    }
+
+private:
+    const std::string* archive_;
+    std::size_t offset_;
+};
+
+void read_exact_or_throw(
+    TransferArchiveReader& reader,
+    char* data,
+    std::size_t size,
+    const std::string& error_message
+) {
+    if (!reader.read_exact_or_eof(data, size)) {
+        throw std::runtime_error(error_message);
+    }
+}
+
+std::string read_exact_string(
+    TransferArchiveReader& reader,
+    std::uint64_t size,
+    const std::string& error_message
+) {
+    std::string body(static_cast<std::size_t>(size), '\0');
+    if (!body.empty()) {
+        read_exact_or_throw(reader, &body[0], body.size(), error_message);
+    }
+    return body;
+}
+
+void skip_exact(
+    TransferArchiveReader& reader,
+    std::uint64_t size,
+    const std::string& error_message
+) {
+    char buffer[8192];
+    std::uint64_t remaining = size;
+    while (remaining > 0U) {
+        const std::size_t requested =
+            remaining < sizeof(buffer) ? static_cast<std::size_t>(remaining) : sizeof(buffer);
+        read_exact_or_throw(reader, buffer, requested, error_message);
+        remaining -= static_cast<std::uint64_t>(requested);
+    }
+}
+
+std::uint64_t entry_padding(std::uint64_t size) {
+    const std::uint64_t remainder = size % TAR_BLOCK_SIZE;
+    return remainder == 0U ? 0U : static_cast<std::uint64_t>(TAR_BLOCK_SIZE) - remainder;
+}
+
+std::uint64_t entry_body_with_padding(std::uint64_t size) {
+    return size + entry_padding(size);
+}
+
+void skip_entry_padding(TransferArchiveReader& reader, std::uint64_t size) {
+    skip_exact(
+        reader,
+        entry_padding(size),
+        "truncated tar entry body"
+    );
+}
+
+std::string read_gnu_long_name_from_reader(TransferArchiveReader& reader, std::uint64_t size) {
+    std::string value = read_exact_string(reader, size, "truncated tar entry body");
+    skip_entry_padding(reader, size);
+    while (!value.empty() && value[value.size() - 1] == '\0') {
+        value.erase(value.size() - 1);
+    }
+    return value;
+}
+
+void copy_reader_to_file(
+    TransferArchiveReader& reader,
+    const std::string& path,
+    std::uint64_t size
+) {
+    std::ofstream output(path.c_str(), std::ios::binary | std::ios::trunc);
+    if (!output) {
+        throw std::runtime_error("unable to write destination file");
+    }
+
+    char buffer[8192];
+    std::uint64_t remaining = size;
+    while (remaining > 0U) {
+        const std::size_t requested =
+            remaining < sizeof(buffer) ? static_cast<std::size_t>(remaining) : sizeof(buffer);
+        read_exact_or_throw(reader, buffer, requested, "truncated tar entry body");
+        output.write(buffer, static_cast<std::streamsize>(requested));
+        if (!output) {
+            throw std::runtime_error("unable to write destination file");
+        }
+        remaining -= static_cast<std::uint64_t>(requested);
+    }
+    skip_entry_padding(reader, size);
+}
+
 void consume_file_archive_tail(
-    const std::string& archive,
-    std::size_t offset,
+    TransferArchiveReader& reader,
     std::vector<TransferWarning>* warnings
 ) {
     std::string pending_long_name;
-    while (offset < archive.size()) {
-        if (archive.size() - offset < TAR_BLOCK_SIZE) {
-            throw std::runtime_error("truncated tar header");
-        }
-        const char* block = archive.data() + offset;
+    char block[TAR_BLOCK_SIZE];
+    while (reader.read_exact_or_eof(block, TAR_BLOCK_SIZE)) {
         if (is_zero_block(block)) {
-            offset += TAR_BLOCK_SIZE;
             continue;
         }
 
         const TarHeaderView header = parse_header(block);
-        offset += TAR_BLOCK_SIZE;
-        if (offset + padded_length(header.size) > archive.size()) {
-            throw std::runtime_error("truncated tar entry body");
-        }
 
         if (header.typeflag == 'L') {
-            pending_long_name = read_gnu_long_name(archive, offset, header.size);
-            offset += padded_length(header.size);
+            pending_long_name = read_gnu_long_name_from_reader(reader, header.size);
             continue;
         }
 
@@ -151,9 +256,9 @@ void consume_file_archive_tail(
         }
         append_warnings(
             warnings,
-            read_transfer_summary(archive.substr(offset, static_cast<std::size_t>(header.size)))
+            read_transfer_summary(read_exact_string(reader, header.size, "truncated tar entry body"))
         );
-        offset += padded_length(header.size);
+        skip_entry_padding(reader, header.size);
     }
 
     if (!pending_long_name.empty()) {
@@ -162,7 +267,7 @@ void consume_file_archive_tail(
 }
 
 ImportSummary import_file_from_tar(
-    const std::string& archive,
+    TransferArchiveReader& reader,
     const std::string& absolute_path,
     const std::string& overwrite_mode,
     bool create_parent,
@@ -171,21 +276,14 @@ ImportSummary import_file_from_tar(
     const bool replaced = prepare_destination_path(absolute_path, "file", overwrite_mode, create_parent);
     ensure_not_existing_symlink(absolute_path);
 
-    if (archive.size() < TAR_BLOCK_SIZE) {
-        throw std::runtime_error("archive is empty");
-    }
-
-    const TarHeaderView header = parse_header(archive.data());
+    char block[TAR_BLOCK_SIZE];
+    read_exact_or_throw(reader, block, TAR_BLOCK_SIZE, "archive is empty");
+    const TarHeaderView header = parse_header(block);
     if (header.typeflag != '0' && header.typeflag != '2') {
         throw std::runtime_error("archive entry is not a regular file");
     }
     if (header.path != SINGLE_FILE_ENTRY) {
         throw std::runtime_error("file archive entry path must be " + std::string(SINGLE_FILE_ENTRY));
-    }
-
-    const std::size_t body_offset = TAR_BLOCK_SIZE;
-    if (body_offset + padded_length(header.size) > archive.size()) {
-        throw std::runtime_error("truncated tar entry body");
     }
 
     std::uint64_t bytes_copied = 0;
@@ -194,14 +292,14 @@ ImportSummary import_file_from_tar(
             throw std::runtime_error("archive contains unsupported symlink " + absolute_path);
         }
         write_symlink(header.link_name, absolute_path);
+        skip_exact(reader, entry_body_with_padding(header.size), "truncated tar entry body");
     } else {
-        const std::string bytes = archive.substr(body_offset, static_cast<std::size_t>(header.size));
-        write_binary_file(absolute_path, bytes);
-        bytes_copied = static_cast<std::uint64_t>(bytes.size());
+        copy_reader_to_file(reader, absolute_path, header.size);
+        bytes_copied = header.size;
     }
 
     std::vector<TransferWarning> warnings;
-    consume_file_archive_tail(archive, body_offset + padded_length(header.size), &warnings);
+    consume_file_archive_tail(reader, &warnings);
 
     return ImportSummary{
         "file",
@@ -214,7 +312,7 @@ ImportSummary import_file_from_tar(
 }
 
 ImportSummary import_directory_from_tar(
-    const std::string& archive,
+    TransferArchiveReader& reader,
     const std::string& source_type,
     const std::string& absolute_path,
     const std::string& overwrite_mode,
@@ -225,29 +323,18 @@ ImportSummary import_directory_from_tar(
     make_directory_if_missing(absolute_path);
 
     ImportSummary summary = {source_type, 0, 0, 1, replaced, std::vector<TransferWarning>()};
-    std::size_t offset = 0;
     std::string pending_long_name;
+    char block[TAR_BLOCK_SIZE];
 
-    while (offset < archive.size()) {
-        if (archive.size() - offset < TAR_BLOCK_SIZE) {
-            throw std::runtime_error("truncated tar header");
-        }
-
-        const char* block = archive.data() + offset;
+    while (reader.read_exact_or_eof(block, TAR_BLOCK_SIZE)) {
         if (is_zero_block(block)) {
             break;
         }
 
         const TarHeaderView header = parse_header(block);
-        offset += TAR_BLOCK_SIZE;
-
-        if (offset + padded_length(header.size) > archive.size()) {
-            throw std::runtime_error("truncated tar entry body");
-        }
 
         if (header.typeflag == 'L') {
-            pending_long_name = read_gnu_long_name(archive, offset, header.size);
-            offset += padded_length(header.size);
+            pending_long_name = read_gnu_long_name_from_reader(reader, header.size);
             continue;
         }
 
@@ -261,10 +348,10 @@ ImportSummary import_directory_from_tar(
             append_warnings(
                 &summary.warnings,
                 read_transfer_summary(
-                    archive.substr(offset, static_cast<std::size_t>(header.size))
+                    read_exact_string(reader, header.size, "truncated tar entry body")
                 )
             );
-            offset += padded_length(header.size);
+            skip_entry_padding(reader, header.size);
             continue;
         }
         const std::string output_path = materialize_archive_path(absolute_path, relative_path);
@@ -276,7 +363,7 @@ ImportSummary import_directory_from_tar(
                 make_directory_if_missing(output_path);
                 summary.directories_copied += 1;
             }
-            offset += padded_length(header.size);
+            skip_exact(reader, entry_body_with_padding(header.size), "truncated tar entry body");
             continue;
         }
 
@@ -289,7 +376,7 @@ ImportSummary import_directory_from_tar(
             }
             write_symlink(header.link_name, output_path);
             summary.files_copied += 1;
-            offset += padded_length(header.size);
+            skip_exact(reader, entry_body_with_padding(header.size), "truncated tar entry body");
             continue;
         }
 
@@ -301,13 +388,9 @@ ImportSummary import_directory_from_tar(
         }
 
         ensure_parent_directory(output_path, true);
-        write_binary_file(
-            output_path,
-            archive.substr(offset, static_cast<std::size_t>(header.size))
-        );
+        copy_reader_to_file(reader, output_path, header.size);
         summary.bytes_copied += header.size;
         summary.files_copied += 1;
-        offset += padded_length(header.size);
     }
 
     if (!pending_long_name.empty()) {
@@ -327,6 +410,25 @@ ImportSummary import_path(
     bool create_parent,
     const std::string& symlink_mode
 ) {
+    StringTransferArchiveReader reader(&bytes);
+    return import_path_from_reader(
+        reader,
+        source_type,
+        absolute_path,
+        overwrite_mode,
+        create_parent,
+        symlink_mode
+    );
+}
+
+ImportSummary import_path_from_reader(
+    TransferArchiveReader& reader,
+    const std::string& source_type,
+    const std::string& absolute_path,
+    const std::string& overwrite_mode,
+    bool create_parent,
+    const std::string& symlink_mode
+) {
     ExportOptions options{symlink_mode.empty() ? "preserve" : symlink_mode};
     validate_transfer_options(options);
     if (!is_absolute_path(absolute_path)) {
@@ -335,7 +437,7 @@ ImportSummary import_path(
 
     if (source_type == "file") {
         return import_file_from_tar(
-            bytes,
+            reader,
             absolute_path,
             overwrite_mode,
             create_parent,
@@ -344,7 +446,7 @@ ImportSummary import_path(
     }
     if (source_type == "directory") {
         return import_directory_from_tar(
-            bytes,
+            reader,
             source_type,
             absolute_path,
             overwrite_mode,
@@ -354,7 +456,7 @@ ImportSummary import_path(
     }
     if (source_type == "multiple") {
         return import_directory_from_tar(
-            bytes,
+            reader,
             source_type,
             absolute_path,
             overwrite_mode,

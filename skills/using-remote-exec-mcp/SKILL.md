@@ -550,6 +550,7 @@ Structured result fields:
 - On Windows XP-compatible C++ daemon targets, the supported shell is `cmd.exe`.
 - On C++ daemon targets, `apply_patch` supports both absolute patch paths and paths relative to `workdir`.
 - On C++ daemon targets, `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles.
+- On C++ daemon targets, transfer archive bodies stream through the daemon instead of requiring a full tar archive to be staged in memory.
 - On POSIX C++ daemon targets, transfer symlink modes are supported.
 - On Windows XP-compatible C++ daemon targets, symlink preservation and following are unsupported; use `symlink_mode: "skip"` or `symlink_mode: "reject"`.
 - On C++ daemon targets, transfer compression is never used; the broker falls back automatically.

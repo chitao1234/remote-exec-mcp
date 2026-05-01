@@ -2,8 +2,6 @@
 #include <cerrno>
 #include <cctype>
 #include <cstdio>
-#include <fstream>
-#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -191,22 +189,6 @@ void ensure_not_existing_symlink(const std::string& path) {
     if (path_exists(path) && is_symlink_path(path)) {
         throw std::runtime_error("destination path contains unsupported symlink");
     }
-}
-
-std::string read_binary_file(const std::string& path) {
-    std::ifstream input(path.c_str(), std::ios::binary);
-    if (!input) {
-        throw std::runtime_error("transfer source missing");
-    }
-    return std::string((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-}
-
-void write_binary_file(const std::string& path, const std::string& bytes) {
-    std::ofstream output(path.c_str(), std::ios::binary | std::ios::trunc);
-    if (!output) {
-        throw std::runtime_error("unable to write destination file");
-    }
-    output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
 }
 
 void write_symlink(const std::string& target, const std::string& path) {

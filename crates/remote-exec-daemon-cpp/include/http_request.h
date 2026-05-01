@@ -11,3 +11,4 @@ public:
 };
 
 HttpRequest parse_http_request(const std::string& raw);
+HttpRequest parse_http_request_head(const std::string& raw_headers);
