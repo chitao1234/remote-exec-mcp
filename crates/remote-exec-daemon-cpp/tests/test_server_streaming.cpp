@@ -260,6 +260,30 @@ int main() {
     assert(export_response.find("x-remote-exec-source-type: file\r\n") != std::string::npos);
     assert(single_file_tar_body(decode_chunked_response_body(export_response)) == "streamed export");
 
+#ifndef _WIN32
+    const fs::path symlink_source = root / "reject-symlink-source";
+    fs::create_directories(symlink_source);
+    write_text_file(symlink_source / "target.txt", "target");
+    fs::create_symlink("target.txt", symlink_source / "target-link.txt");
+    const std::string reject_symlink_body =
+        Json{
+            {"path", symlink_source.string()},
+            {"symlink_mode", "reject"},
+        }
+            .dump();
+    std::ostringstream reject_symlink_request;
+    reject_symlink_request << "POST /v1/transfer/export HTTP/1.1\r\n"
+                           << "Content-Length: " << reject_symlink_body.size() << "\r\n"
+                           << "\r\n"
+                           << reject_symlink_body;
+
+    const std::string reject_symlink_response =
+        run_single_request(state, reject_symlink_request.str());
+    assert(reject_symlink_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
+    assert(reject_symlink_response.find("Transfer-Encoding: chunked\r\n") == std::string::npos);
+    assert(Json::parse(response_body(reject_symlink_response)).at("code").get<std::string>() == "transfer_source_unsupported");
+#endif
+
     const fs::path sandbox_root = root / "sandbox";
     const fs::path read_allowed = sandbox_root / "read";
     const fs::path write_allowed = sandbox_root / "write";

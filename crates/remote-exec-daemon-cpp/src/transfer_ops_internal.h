@@ -24,6 +24,7 @@ struct TarHeaderView {
     std::string path;
     char typeflag;
     std::uint64_t size;
+    std::uint64_t mode;
     std::string link_name;
 };
 

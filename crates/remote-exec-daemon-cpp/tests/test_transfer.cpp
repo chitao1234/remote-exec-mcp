@@ -75,11 +75,12 @@ static void append_tar_entry(
     std::string* archive,
     const std::string& path,
     char typeflag,
-    const std::string& body
+    const std::string& body,
+    std::uint64_t mode = 0644
 ) {
     std::string header(512, '\0');
     set_bytes(&header, 0, 100, path);
-    header.replace(100, 8, octal_field(8, typeflag == '5' ? 0755 : 0644));
+    header.replace(100, 8, octal_field(8, typeflag == '5' ? 0755 : mode));
     header.replace(108, 8, octal_field(8, 0));
     header.replace(116, 8, octal_field(8, 0));
     header.replace(124, 12, octal_field(12, body.size()));
@@ -123,6 +124,18 @@ static void append_tar_file(std::string& archive, const std::string& path, const
         append_gnu_long_name(&archive, path);
     }
     append_tar_entry(&archive, path, '0', body);
+}
+
+static void append_tar_file_with_mode(
+    std::string& archive,
+    const std::string& path,
+    const std::string& body,
+    std::uint64_t mode
+) {
+    if (path.size() >= 100) {
+        append_gnu_long_name(&archive, path);
+    }
+    append_tar_entry(&archive, path, '0', body, mode);
 }
 
 static void append_tar_directory(std::string& archive, const std::string& path) {
@@ -190,6 +203,11 @@ static std::pair<std::string, std::string> read_single_file_tar(const std::strin
     }
 
     return std::make_pair(path, archive.substr(body_offset, body_size));
+}
+
+static std::uint64_t read_first_tar_mode(const std::string& archive) {
+    assert(archive.size() >= 512);
+    return parse_octal_value(archive.data() + 100, 8);
 }
 
 static void assert_file_transfer() {
@@ -422,6 +440,55 @@ static void assert_top_level_file_symlink_can_be_followed() {
     assert(read_text(root / "dest.txt") == "target");
 }
 
+static void assert_top_level_symlink_is_preserved_without_following_target() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-symlink-preserve-root";
+    fs::remove_all(root);
+    fs::create_directories(root);
+    fs::create_symlink("missing-target.txt", root / "broken-link.txt");
+
+    const ExportedPayload exported = export_path((root / "broken-link.txt").string(), "preserve");
+    assert(exported.source_type == "file");
+
+    const ImportSummary imported =
+        import_path(exported.bytes, exported.source_type, (root / "restored-link.txt").string(), "replace", true);
+    assert(imported.files_copied == 1);
+    assert(fs::read_symlink(root / "restored-link.txt") == fs::path("missing-target.txt"));
+}
+
+static void assert_executable_bits_round_trip() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-executable";
+    fs::remove_all(root);
+    fs::create_directories(root);
+    const fs::path source = root / "tool.sh";
+    write_text(source, "#!/bin/sh\necho hi\n");
+    fs::permissions(
+        source,
+        fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec,
+        fs::perm_options::add
+    );
+
+    const ExportedPayload exported = export_path(source.string());
+    assert((read_first_tar_mode(exported.bytes) & 0111) == 0111);
+
+    const fs::path imported_path = root / "imported.sh";
+    const ImportSummary imported =
+        import_path(exported.bytes, exported.source_type, imported_path.string(), "replace", true);
+    assert(imported.files_copied == 1);
+    assert((static_cast<unsigned>(fs::status(imported_path).permissions()) &
+            static_cast<unsigned>(fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec)) != 0U);
+
+    std::string archive;
+    append_tar_directory(archive, ".");
+    append_tar_file_with_mode(archive, "bin/tool.sh", "#!/bin/sh\necho hi\n", 0755);
+    finalize_tar(archive);
+    const fs::path directory_dest = root / "directory-dest";
+    const ImportSummary directory_imported =
+        import_path(archive, "directory", directory_dest.string(), "replace", true);
+    assert(directory_imported.files_copied == 1);
+    assert((static_cast<unsigned>(fs::status(directory_dest / "bin" / "tool.sh").permissions()) &
+            static_cast<unsigned>(fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec)) != 0U);
+}
+
 static void assert_transfer_skips_special_files_with_warning() {
     const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-special-skip";
     fs::remove_all(root);
@@ -486,6 +553,35 @@ static void assert_symlink_import_preserves_links() {
     assert(read_text(root / "dest" / "alpha.txt") == "alpha");
     assert(fs::read_symlink(root / "dest" / "alpha-link") == fs::path("alpha.txt"));
 }
+
+static void assert_symlink_import_skip_reports_warning() {
+    std::string archive;
+    append_tar_file(archive, "alpha.txt", "alpha");
+    append_tar_symlink(&archive, "alpha-link", "alpha.txt");
+    finalize_tar(archive);
+
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-symlink-import-skip";
+    fs::remove_all(root);
+
+    const ImportSummary imported =
+        import_path(archive, "directory", (root / "dest").string(), "replace", true, "skip");
+
+    assert(imported.files_copied == 1);
+    assert(imported.warnings.size() == 1);
+    assert(imported.warnings[0].code == "transfer_skipped_symlink");
+    assert(read_text(root / "dest" / "alpha.txt") == "alpha");
+    assert(!fs::exists(root / "dest" / "alpha-link"));
+
+    std::string file_archive;
+    append_tar_symlink(&file_archive, SINGLE_FILE_ENTRY, "missing-target.txt");
+    finalize_tar(file_archive);
+    const ImportSummary file_imported =
+        import_path(file_archive, "file", (root / "skipped-file-link").string(), "replace", true, "skip");
+    assert(file_imported.files_copied == 0);
+    assert(file_imported.warnings.size() == 1);
+    assert(file_imported.warnings[0].code == "transfer_skipped_symlink");
+    assert(!fs::exists(root / "skipped-file-link"));
+}
 #endif
 
 static void assert_directory_traversal_is_rejected() {
@@ -534,9 +630,12 @@ int main() {
     assert_symlink_sources_are_rejected();
     assert_symlink_sources_are_preserved_by_default();
     assert_top_level_file_symlink_can_be_followed();
+    assert_top_level_symlink_is_preserved_without_following_target();
+    assert_executable_bits_round_trip();
     assert_transfer_skips_special_files_with_warning();
     assert_top_level_special_files_are_unsupported();
     assert_symlink_import_preserves_links();
+    assert_symlink_import_skip_reports_warning();
 #endif
     assert_directory_traversal_is_rejected();
     assert_multiple_sources_import();

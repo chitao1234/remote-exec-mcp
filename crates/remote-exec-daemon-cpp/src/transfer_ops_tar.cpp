@@ -8,6 +8,10 @@
 #include <string>
 #include <vector>
 
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
+
 #include "json.hpp"
 #include "transfer_ops_internal.h"
 
@@ -199,6 +203,15 @@ void append_file_entry_from_path(
     const std::string& rel_path,
     const std::string& source_path
 ) {
+#ifndef _WIN32
+    struct stat st;
+    if (stat(source_path.c_str(), &st) != 0) {
+        throw std::runtime_error("transfer source missing");
+    }
+    const std::uint64_t mode = static_cast<std::uint64_t>(st.st_mode & 0777);
+#else
+    const std::uint64_t mode = 0644;
+#endif
     std::ifstream input(source_path.c_str(), std::ios::binary | std::ios::ate);
     if (!input) {
         throw std::runtime_error("transfer source missing");
@@ -216,7 +229,7 @@ void append_file_entry_from_path(
     if (rel_path.size() > 100) {
         append_gnu_long_name(archive, rel_path);
     }
-    append_tar_header(archive, rel_path, '0', file_size, 0644);
+    append_tar_header(archive, rel_path, '0', file_size, mode);
 
     char buffer[8192];
     std::uint64_t remaining = file_size;
@@ -299,6 +312,7 @@ TarHeaderView parse_header(const char* block) {
         header_path(block),
         raw_type == '\0' ? '0' : raw_type,
         parse_octal_field(block + 124, 12),
+        parse_octal_field(block + 100, 8),
         field_string(block + 157, 100),
     };
 }

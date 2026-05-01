@@ -125,6 +125,30 @@ void append_directory_contents(
     }
 }
 
+void reject_directory_symlinks(const std::string& current_path) {
+    const std::vector<DirectoryEntry> entries = list_directory_entries(current_path);
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+        const DirectoryEntry& entry = entries[i];
+        const std::string child_path = join_path(current_path, entry.name);
+        if (entry.is_symlink) {
+            throw std::runtime_error("transfer source contains unsupported symlink " + child_path);
+        }
+        if (entry.is_directory) {
+            reject_directory_symlinks(child_path);
+        }
+    }
+}
+
+void preflight_export_path(
+    const std::string& absolute_path,
+    const std::string& source_type,
+    const ExportOptions& options
+) {
+    if (source_type == "directory" && options.symlink_mode == "reject") {
+        reject_directory_symlinks(absolute_path);
+    }
+}
+
 void export_directory_as_tar(
     TransferArchiveSink* archive,
     const std::string& absolute_path,
@@ -200,15 +224,17 @@ std::string export_path_source_type(
 ) {
     const ExportOptions options = normalized_options(symlink_mode);
     validate_export_path(absolute_path, options);
+    if (is_symlink_path(absolute_path) && options.symlink_mode == "preserve") {
+        return "file";
+    }
     if (is_regular_file(absolute_path) ||
-        (is_symlink_path(absolute_path) && options.symlink_mode == "preserve" &&
-         is_regular_file_follow(absolute_path)) ||
         (is_symlink_path(absolute_path) && options.symlink_mode == "follow" &&
          is_regular_file_follow(absolute_path))) {
         return "file";
     }
     if (is_directory(absolute_path) ||
         (is_symlink_path(absolute_path) && options.symlink_mode == "follow" && is_directory_follow(absolute_path))) {
+        preflight_export_path(absolute_path, "directory", options);
         return "directory";
     }
     throw std::runtime_error("transfer source must be a regular file or directory");
@@ -223,6 +249,7 @@ void export_path_to_sink_as(
     ExportContext context;
     context.options = normalized_options(symlink_mode);
     validate_export_path(absolute_path, context.options);
+    preflight_export_path(absolute_path, source_type, context.options);
 
     if (source_type == "file") {
         export_file_as_tar(&sink, absolute_path, context.options);
