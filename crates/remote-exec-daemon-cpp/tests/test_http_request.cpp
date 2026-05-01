@@ -4,6 +4,16 @@
 #include "http_helpers.h"
 #include "http_request.h"
 
+static void assert_rejects(const std::string& raw) {
+    bool rejected = false;
+    try {
+        (void)parse_http_request(raw);
+    } catch (const HttpParseError&) {
+        rejected = true;
+    }
+    assert(rejected);
+}
+
 int main() {
     const std::string raw =
         "POST /v1/exec/start HTTP/1.1\r\n"
@@ -39,21 +49,15 @@ int main() {
     assert(chunked_request.header("transfer-encoding") == "chunked");
     assert(chunked_request.body == "{\"cmd\":\"dir\"}");
 
-    bool bad_chunk_rejected = false;
-    try {
-        (void)parse_http_request(
-            "POST /v1/exec/start HTTP/1.1\r\n"
-            "Transfer-Encoding: chunked\r\n"
-            "\r\n"
-            "not-hex\r\n"
-            "body\r\n"
-            "0\r\n"
-            "\r\n"
-        );
-    } catch (...) {
-        bad_chunk_rejected = true;
-    }
-    assert(bad_chunk_rejected);
+    assert_rejects(
+        "POST /v1/exec/start HTTP/1.1\r\n"
+        "Transfer-Encoding: chunked\r\n"
+        "\r\n"
+        "not-hex\r\n"
+        "body\r\n"
+        "0\r\n"
+        "\r\n"
+    );
 
     HttpResponse unauthorized;
     write_bearer_auth_challenge(unauthorized);
@@ -61,13 +65,68 @@ int main() {
     assert(unauthorized.headers["WWW-Authenticate"] == "Bearer");
     assert(unauthorized.body.find("\"code\":\"unauthorized\"") != std::string::npos);
 
-    bool rejected = false;
-    try {
-        (void)parse_http_request("invalid");
-    } catch (...) {
-        rejected = true;
-    }
-    assert(rejected);
+    assert_rejects("invalid");
+    assert_rejects(
+        "POST /v1/exec/start\r\n"
+        "\r\n"
+    );
+    assert_rejects(
+        "POST /v1/exec/start HTTP/1.1 extra\r\n"
+        "\r\n"
+    );
+    assert_rejects(
+        "POST /v1/exec/start HTTP/2.0\r\n"
+        "\r\n"
+    );
+    assert_rejects(
+        "POST /v1/exec/start HTTP/1.1\r\n"
+        "Bad Header\r\n"
+        "\r\n"
+    );
+    assert_rejects(
+        "POST /v1/exec/start HTTP/1.1\r\n"
+        ": no-name\r\n"
+        "\r\n"
+    );
+    assert_rejects(
+        "POST /v1/exec/start HTTP/1.1\r\n"
+        "Bad Header: value\r\n"
+        "\r\n"
+    );
+    assert_rejects(
+        "POST /v1/exec/start HTTP/1.1\r\n"
+        "X-Test: one\r\n"
+        "x-test: two\r\n"
+        "\r\n"
+    );
+    assert_rejects(
+        "POST /v1/exec/start HTTP/1.1\r\n"
+        "Content-Length: 5\r\n"
+        "\r\n"
+        "too long"
+    );
+    assert_rejects(
+        "POST /v1/exec/start HTTP/1.1\r\n"
+        "Content-Length: 8\r\n"
+        "\r\n"
+        "short"
+    );
+    assert_rejects(
+        "POST /v1/exec/start HTTP/1.1\r\n"
+        "Transfer-Encoding: chunked\r\n"
+        "\r\n"
+        "0\r\n"
+        "\r\n"
+        "extra"
+    );
+    assert_rejects(
+        "POST /v1/exec/start HTTP/1.1\r\n"
+        "Transfer-Encoding: chunked\r\n"
+        "\r\n"
+        "0\r\n"
+        "bad trailer\r\n"
+        "\r\n"
+    );
 
     return 0;
 }
