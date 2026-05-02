@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <iterator>
 #include <string>
+#include <thread>
 
 #include "config.h"
 #include "filesystem_sandbox.h"
@@ -410,6 +411,83 @@ int main() {
     );
 
     if (process_session_supports_pty()) {
+        const HttpResponse slow_start_response = route_request(
+            state,
+            json_request(
+                "/v1/exec/start",
+                Json{
+                    {"cmd", "printf slow; sleep 30"},
+                    {"workdir", root.string()},
+                    {"login", false},
+                    {"tty", true},
+                    {"yield_time_ms", 250},
+                }
+            )
+        );
+        assert(slow_start_response.status == 200);
+        const Json slow_started = Json::parse(slow_start_response.body);
+        assert(slow_started.at("running").get<bool>());
+
+        const HttpResponse fast_start_response = route_request(
+            state,
+            json_request(
+                "/v1/exec/start",
+                Json{
+                    {"cmd", "IFS= read line; printf '%s' \"$line\"; sleep 30"},
+                    {"workdir", root.string()},
+                    {"login", false},
+                    {"tty", true},
+                    {"yield_time_ms", 250},
+                }
+            )
+        );
+        assert(fast_start_response.status == 200);
+        const Json fast_started = Json::parse(fast_start_response.body);
+        assert(fast_started.at("running").get<bool>());
+
+        HttpResponse slow_poll_response;
+        std::thread slow_thread([&]() {
+            slow_poll_response = route_request(
+                state,
+                json_request(
+                    "/v1/exec/write",
+                    Json{
+                        {"daemon_session_id", slow_started.at("daemon_session_id").get<std::string>()},
+                        {"chars", ""},
+                        {"yield_time_ms", 5000},
+                    }
+                )
+            );
+        });
+
+        platform::sleep_ms(200);
+        const std::uint64_t fast_started_at = platform::monotonic_ms();
+        const HttpResponse fast_write_response = route_request(
+            state,
+            json_request(
+                "/v1/exec/write",
+                Json{
+                    {"daemon_session_id", fast_started.at("daemon_session_id").get<std::string>()},
+                    {"chars", "ping\n"},
+                    {"yield_time_ms", 250},
+                }
+            )
+        );
+        const std::uint64_t fast_elapsed_ms = platform::monotonic_ms() - fast_started_at;
+        assert(fast_write_response.status == 200);
+        assert(
+            fast_elapsed_ms < 2000UL &&
+            "fast route request waited behind unrelated session"
+        );
+        assert(
+            Json::parse(fast_write_response.body)
+                .at("output")
+                .get<std::string>()
+                .find("ping") != std::string::npos
+        );
+        slow_thread.join();
+        assert(slow_poll_response.status == 200);
+
         const HttpResponse start_response = route_request(
             state,
             json_request(

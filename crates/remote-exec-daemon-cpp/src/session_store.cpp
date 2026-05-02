@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "logging.h"
 #include "platform.h"
@@ -24,6 +25,9 @@ struct PollResult {
     bool completed;
     int exit_code;
 };
+
+const unsigned long EXIT_DRAIN_INITIAL_WAIT_MS = 125UL;
+const unsigned long EXIT_DRAIN_QUIET_MS = 25UL;
 
 bool is_token_space(char ch) {
     return std::isspace(static_cast<unsigned char>(ch)) != 0;
@@ -134,6 +138,42 @@ std::string flush_output_carry(const std::shared_ptr<LiveSession>& session) {
     return session->process->flush_carry(&session->output_carry);
 }
 
+std::string drain_output_after_exit(
+    const std::shared_ptr<LiveSession>& session,
+    std::uint64_t poll_start,
+    unsigned long timeout_ms,
+    bool saw_output_before_exit
+) {
+    const std::uint64_t drain_start = platform::monotonic_ms();
+    std::uint64_t last_output_at = drain_start;
+    bool saw_output = saw_output_before_exit;
+    std::string output;
+
+    for (;;) {
+        const std::string chunk = read_available(session);
+        if (!chunk.empty()) {
+            output += chunk;
+            saw_output = true;
+            last_output_at = platform::monotonic_ms();
+            continue;
+        }
+
+        const std::uint64_t now = platform::monotonic_ms();
+        if (now - poll_start >= timeout_ms) {
+            return output;
+        }
+        if (saw_output) {
+            if (now - last_output_at >= EXIT_DRAIN_QUIET_MS) {
+                return output;
+            }
+        } else if (now - drain_start >= EXIT_DRAIN_INITIAL_WAIT_MS) {
+            return output;
+        }
+
+        platform::sleep_ms(10);
+    }
+}
+
 PollResult poll_session(
     const std::shared_ptr<LiveSession>& session,
     unsigned long timeout_ms
@@ -146,7 +186,14 @@ PollResult poll_session(
 
         int exit_code = 0;
         if (session->process->has_exited(&exit_code)) {
+            const bool saw_output_before_exit = !output.empty();
             output += read_available(session);
+            output += drain_output_after_exit(
+                session,
+                poll_start,
+                timeout_ms,
+                saw_output_before_exit || !output.empty()
+            );
             output += flush_output_carry(session);
             return PollResult{output, true, exit_code};
         }
@@ -161,20 +208,52 @@ PollResult poll_session(
 
 }  // namespace
 
-LiveSession::LiveSession() : started_at_ms(0), stdin_open(false) {}
+LiveSession::LiveSession() : started_at_ms(0), stdin_open(false), retired(false) {}
 
 LiveSession::~LiveSession() {}
 
-SessionStore::SessionStore() {}
+SessionStore::SessionStore() : pending_starts_(0UL) {}
 
 SessionStore::~SessionStore() {
-    BasicLockGuard lock(mutex_);
-    for (std::map<std::string, std::shared_ptr<LiveSession> >::iterator it = sessions_.begin();
-         it != sessions_.end();
-         ++it) {
-        if (it->second->process.get() != NULL) {
-            it->second->process->terminate();
+    std::vector<std::shared_ptr<LiveSession> > sessions;
+    {
+        BasicLockGuard lock(mutex_);
+        for (std::map<std::string, std::shared_ptr<LiveSession> >::iterator it = sessions_.begin();
+             it != sessions_.end();
+             ++it) {
+            sessions.push_back(it->second);
         }
+        sessions_.clear();
+        pending_starts_ = 0UL;
+    }
+
+    for (std::size_t i = 0; i < sessions.size(); ++i) {
+        BasicLockGuard session_lock(sessions[i]->mutex_);
+        sessions[i]->retired = true;
+        if (sessions[i]->process.get() != NULL) {
+            sessions[i]->process->terminate();
+        }
+    }
+}
+
+void release_pending_start(BasicMutex& mutex, unsigned long* pending_starts) {
+    BasicLockGuard lock(mutex);
+    if (*pending_starts > 0UL) {
+        --(*pending_starts);
+    }
+}
+
+void erase_session_if_current(
+    BasicMutex& mutex,
+    std::map<std::string, std::shared_ptr<LiveSession> >& sessions,
+    const std::string& daemon_session_id,
+    const std::shared_ptr<LiveSession>& session
+) {
+    BasicLockGuard lock(mutex);
+    std::map<std::string, std::shared_ptr<LiveSession> >::iterator it =
+        sessions.find(daemon_session_id);
+    if (it != sessions.end() && it->second == session) {
+        sessions.erase(it);
     }
 }
 
@@ -190,9 +269,12 @@ Json SessionStore::start_command(
     const YieldTimeConfig& yield_time,
     unsigned long max_open_sessions
 ) {
-    BasicLockGuard lock(mutex_);
-    if (sessions_.size() >= max_open_sessions) {
-        throw SessionLimitError("too many open exec sessions");
+    {
+        BasicLockGuard lock(mutex_);
+        if (sessions_.size() + pending_starts_ >= max_open_sessions) {
+            throw SessionLimitError("too many open exec sessions");
+        }
+        ++pending_starts_;
     }
 
     {
@@ -203,52 +285,71 @@ Json SessionStore::start_command(
                 << " tty=" << (tty ? "true" : "false");
         log_message(LOG_INFO, "session_store", message.str());
     }
-    std::shared_ptr<LiveSession> session =
-        launch_live_session(command, workdir, shell, login, tty);
+    try {
+        std::shared_ptr<LiveSession> session =
+            launch_live_session(command, workdir, shell, login, tty);
 
-    const unsigned long timeout_ms = resolve_yield_time_ms(
-        yield_time.exec_command,
-        has_yield_time_ms,
-        yield_time_ms
-    );
-    const PollResult poll_result = poll_session(session, timeout_ms);
+        const unsigned long timeout_ms = resolve_yield_time_ms(
+            yield_time.exec_command,
+            has_yield_time_ms,
+            yield_time_ms
+        );
+        PollResult poll_result;
+        {
+            BasicLockGuard session_lock(session->mutex_);
+            poll_result = poll_session(session, timeout_ms);
+            if (poll_result.completed) {
+                session->retired = true;
+            }
+        }
 
-    if (poll_result.completed) {
-        Json response = build_response(
-            NULL,
-            false,
-            session->started_at_ms,
+        {
+            BasicLockGuard lock(mutex_);
+            if (pending_starts_ > 0UL) {
+                --pending_starts_;
+            }
+            if (!poll_result.completed) {
+                sessions_[session->id] = session;
+                std::ostringstream message;
+                message << "stored live session daemon_session_id=`" << session->id
+                        << "` open_sessions=" << sessions_.size();
+                log_message(LOG_INFO, "session_store", message.str());
+            }
+        }
+
+        if (poll_result.completed) {
+            Json response = build_response(
+                NULL,
+                false,
+                session->started_at_ms,
+                true,
+                poll_result.exit_code,
+                poll_result.output,
+                max_output_tokens
+            );
+            {
+                std::ostringstream message;
+                message << "command completed before session handoff exit_code="
+                        << poll_result.exit_code
+                        << " output_chars=" << poll_result.output.size();
+                log_message(LOG_INFO, "session_store", message.str());
+            }
+            return response;
+        }
+
+        return build_response(
+            session->id.c_str(),
             true,
-            poll_result.exit_code,
+            session->started_at_ms,
+            false,
+            0,
             poll_result.output,
             max_output_tokens
         );
-        {
-            std::ostringstream message;
-            message << "command completed before session handoff exit_code="
-                    << poll_result.exit_code
-                    << " output_chars=" << poll_result.output.size();
-            log_message(LOG_INFO, "session_store", message.str());
-        }
-        return response;
+    } catch (...) {
+        release_pending_start(mutex_, &pending_starts_);
+        throw;
     }
-
-    sessions_[session->id] = session;
-    {
-        std::ostringstream message;
-        message << "stored live session daemon_session_id=`" << session->id
-                << "` open_sessions=" << sessions_.size();
-        log_message(LOG_INFO, "session_store", message.str());
-    }
-    return build_response(
-        session->id.c_str(),
-        true,
-        session->started_at_ms,
-        false,
-        0,
-        poll_result.output,
-        max_output_tokens
-    );
 }
 
 Json SessionStore::write_stdin(
@@ -259,16 +360,20 @@ Json SessionStore::write_stdin(
     unsigned long max_output_tokens,
     const YieldTimeConfig& yield_time
 ) {
-    BasicLockGuard lock(mutex_);
-    std::map<std::string, std::shared_ptr<LiveSession> >::iterator it =
-        sessions_.find(daemon_session_id);
-    if (it == sessions_.end()) {
-        log_message(
-            LOG_WARN,
-            "session_store",
-            "unknown daemon session `" + daemon_session_id + "`"
-        );
-        throw UnknownSessionError("Unknown daemon session");
+    std::shared_ptr<LiveSession> session;
+    {
+        BasicLockGuard lock(mutex_);
+        std::map<std::string, std::shared_ptr<LiveSession> >::iterator it =
+            sessions_.find(daemon_session_id);
+        if (it == sessions_.end()) {
+            log_message(
+                LOG_WARN,
+                "session_store",
+                "unknown daemon session `" + daemon_session_id + "`"
+            );
+            throw UnknownSessionError("Unknown daemon session");
+        }
+        session = it->second;
     }
 
     {
@@ -278,26 +383,42 @@ Json SessionStore::write_stdin(
         log_message(LOG_INFO, "session_store", message.str());
     }
 
-    const std::shared_ptr<LiveSession>& session = it->second;
-    if (!chars.empty()) {
-        if (!session->stdin_open) {
-            throw StdinClosedError(
-                "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
+    PollResult poll_result;
+    {
+        BasicLockGuard session_lock(session->mutex_);
+        if (session->retired) {
+            log_message(
+                LOG_WARN,
+                "session_store",
+                "unknown daemon session `" + daemon_session_id + "`"
             );
+            throw UnknownSessionError("Unknown daemon session");
         }
-        session->process->write_stdin(chars);
+
+        if (!chars.empty()) {
+            if (!session->stdin_open) {
+                throw StdinClosedError(
+                    "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
+                );
+            }
+            session->process->write_stdin(chars);
+        }
+
+        const YieldTimeOperationConfig& operation_config =
+            chars.empty() ? yield_time.write_stdin_poll : yield_time.write_stdin_input;
+        const unsigned long timeout_ms = resolve_yield_time_ms(
+            operation_config,
+            has_yield_time_ms,
+            yield_time_ms
+        );
+        poll_result = poll_session(session, timeout_ms);
+        if (poll_result.completed) {
+            session->retired = true;
+        }
     }
 
-    const YieldTimeOperationConfig& operation_config =
-        chars.empty() ? yield_time.write_stdin_poll : yield_time.write_stdin_input;
-    const unsigned long timeout_ms = resolve_yield_time_ms(
-        operation_config,
-        has_yield_time_ms,
-        yield_time_ms
-    );
-    const PollResult poll_result = poll_session(session, timeout_ms);
-
     if (poll_result.completed) {
+        erase_session_if_current(mutex_, sessions_, daemon_session_id, session);
         Json response = build_response(
             NULL,
             false,
@@ -307,12 +428,17 @@ Json SessionStore::write_stdin(
             poll_result.output,
             max_output_tokens
         );
-        sessions_.erase(it);
         {
             std::ostringstream message;
+            unsigned long open_sessions = 0UL;
+            {
+                BasicLockGuard lock(mutex_);
+                open_sessions =
+                    static_cast<unsigned long>(sessions_.size() + pending_starts_);
+            }
             message << "session completed daemon_session_id=`" << daemon_session_id
                     << "` exit_code=" << poll_result.exit_code
-                    << " open_sessions=" << sessions_.size();
+                    << " open_sessions=" << open_sessions;
             log_message(LOG_INFO, "session_store", message.str());
         }
         return response;

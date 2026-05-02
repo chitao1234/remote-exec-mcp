@@ -1,6 +1,7 @@
 #include <cassert>
 #include <filesystem>
 #include <string>
+#include <thread>
 
 #include "config.h"
 #include "platform.h"
@@ -121,6 +122,37 @@ int main() {
     assert(locale_response.at("exit_code").get<int>() == 0);
     assert(locale_response.at("output").get<std::string>() == "C.UTF-8 C.UTF-8\n");
 
+    const Json late_output = store.start_command(
+        "(sleep 0.08; printf 'late tail') &",
+        root.string(),
+        shell,
+        false,
+        false,
+        true,
+        5000UL,
+        10UL,
+        yield_time,
+        64UL
+    );
+    assert(!late_output.at("running").get<bool>());
+    assert(late_output.at("exit_code").get<int>() == 0);
+    assert(late_output.at("output").get<std::string>() == "late tail");
+
+    const Json newline_preserved = store.start_command(
+        "printf 'one two\\n'",
+        root.string(),
+        shell,
+        false,
+        false,
+        true,
+        5000UL,
+        3UL,
+        yield_time,
+        64UL
+    );
+    assert(newline_preserved.at("original_token_count").get<unsigned long>() == 2UL);
+    assert(newline_preserved.at("output").get<std::string>() == "one two\n");
+
     const Json stdin_closed_response = store.start_command(
         "if IFS= read line; then printf 'got:%s\\n' \"$line\"; "
         "else printf 'stdin:closed\\n'; fi",
@@ -170,6 +202,65 @@ int main() {
     assert(stdin_closed_rejected);
 
     if (process_session_supports_pty()) {
+        const Json slow_running = store.start_command(
+            "printf slow; sleep 30",
+            root.string(),
+            shell,
+            false,
+            true,
+            true,
+            250UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            yield_time,
+            64UL
+        );
+        assert(slow_running.at("running").get<bool>());
+
+        const Json fast_running = store.start_command(
+            "IFS= read line; printf '%s' \"$line\"; sleep 30",
+            root.string(),
+            shell,
+            false,
+            true,
+            true,
+            250UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            yield_time,
+            64UL
+        );
+        assert(fast_running.at("running").get<bool>());
+
+        Json slow_poll;
+        std::thread slow_thread([&]() {
+            slow_poll = store.write_stdin(
+                slow_running.at("daemon_session_id").get<std::string>(),
+                "",
+                true,
+                5000UL,
+                DEFAULT_MAX_OUTPUT_TOKENS,
+                yield_time
+            );
+        });
+
+        platform::sleep_ms(200);
+        const std::uint64_t fast_started_at = platform::monotonic_ms();
+        const Json fast_completed = store.write_stdin(
+            fast_running.at("daemon_session_id").get<std::string>(),
+            "ping\n",
+            true,
+            250UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            yield_time
+        );
+        const std::uint64_t fast_elapsed_ms = platform::monotonic_ms() - fast_started_at;
+        assert(
+            fast_elapsed_ms < 2000UL &&
+            "fast session waited behind unrelated session"
+        );
+        assert(fast_completed.at("output").get<std::string>().find("ping") != std::string::npos);
+        slow_thread.join();
+        assert(slow_poll.at("running").get<bool>());
+
         const Json tty_running = store.start_command(
             "if test -t 0; then printf 'tty:yes\\n'; else printf 'tty:no\\n'; fi; "
             "IFS= read line; printf 'input:%s\\n' \"$line\"",

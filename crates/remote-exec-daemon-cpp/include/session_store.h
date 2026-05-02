@@ -33,11 +33,13 @@ struct LiveSession {
     LiveSession();
     ~LiveSession();
 
+    BasicMutex mutex_;
     std::string id;
     std::unique_ptr<ProcessSession> process;
     std::uint64_t started_at_ms;
     std::string output_carry;
     bool stdin_open;
+    bool retired;
 };
 
 class SessionStore {
@@ -69,4 +71,5 @@ public:
 private:
     BasicMutex mutex_;
     std::map<std::string, std::shared_ptr<LiveSession> > sessions_;
+    unsigned long pending_starts_;
 };
