@@ -238,8 +238,8 @@ static void assert_file_transfer() {
     assert(read_text(root / "copied.txt") == "hello transfer");
 }
 
-static void assert_file_transfer_rejects_unexpected_entry_path() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-file-reject";
+static void assert_file_transfer_blocks_unexpected_entry_path() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-file-entry-path";
     fs::remove_all(root);
     fs::create_directories(root);
 
@@ -259,7 +259,7 @@ static void assert_file_transfer_rejects_unexpected_entry_path() {
     assert(rejected);
 }
 
-static void assert_file_transfer_rejects_raw_bytes() {
+static void assert_file_transfer_blocks_raw_bytes() {
     const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-file-raw";
     fs::remove_all(root);
     fs::create_directories(root);
@@ -634,8 +634,8 @@ static void assert_multiple_sources_import() {
 
 int main() {
     assert_file_transfer();
-    assert_file_transfer_rejects_unexpected_entry_path();
-    assert_file_transfer_rejects_raw_bytes();
+    assert_file_transfer_blocks_unexpected_entry_path();
+    assert_file_transfer_blocks_raw_bytes();
     assert_directory_round_trip();
     assert_directory_replace_behavior();
     assert_path_info_reports_existing_directory();

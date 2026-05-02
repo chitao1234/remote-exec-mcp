@@ -260,6 +260,35 @@ TransferWarning skipped_symlink_warning(const std::string& path) {
     };
 }
 
+enum SymlinkImportAction {
+    SYMLINK_IMPORT_PRESERVE,
+    SYMLINK_IMPORT_SKIP,
+};
+
+SymlinkImportAction symlink_import_action(
+    const std::string& symlink_mode,
+    const std::string& error_path
+) {
+#ifdef _WIN32
+    (void)symlink_mode;
+    (void)error_path;
+    return SYMLINK_IMPORT_SKIP;
+#else
+    if (symlink_mode == "skip") {
+        return SYMLINK_IMPORT_SKIP;
+    }
+    if (symlink_mode == "preserve") {
+        return SYMLINK_IMPORT_PRESERVE;
+    }
+
+    std::string message = "archive contains unsupported symlink";
+    if (!error_path.empty()) {
+        message += " " + error_path;
+    }
+    throw std::runtime_error(message);
+#endif
+}
+
 void consume_file_archive_tail(
     TransferArchiveReader& reader,
     std::vector<TransferWarning>* warnings
@@ -302,9 +331,6 @@ ImportSummary import_file_from_tar(
     bool create_parent,
     const std::string& symlink_mode
 ) {
-#ifdef _WIN32
-    (void)symlink_mode;
-#endif
     const bool replaced = prepare_destination_path(absolute_path, "file", overwrite_mode, create_parent);
     ensure_not_existing_symlink(absolute_path);
 
@@ -322,19 +348,15 @@ ImportSummary import_file_from_tar(
     std::uint64_t files_copied = 1;
     std::vector<TransferWarning> warnings;
     if (header.typeflag == '2') {
-#ifdef _WIN32
-        warnings.push_back(skipped_symlink_warning(absolute_path));
-        files_copied = 0;
-#else
-        if (symlink_mode == "skip") {
+        switch (symlink_import_action(symlink_mode, absolute_path)) {
+        case SYMLINK_IMPORT_SKIP:
             warnings.push_back(skipped_symlink_warning(absolute_path));
             files_copied = 0;
-        } else if (symlink_mode != "preserve") {
-            throw std::runtime_error("archive contains unsupported symlink " + absolute_path);
-        } else {
+            break;
+        case SYMLINK_IMPORT_PRESERVE:
             write_symlink(header.link_name, absolute_path);
+            break;
         }
-#endif
         skip_exact(reader, entry_body_with_padding(header.size), "truncated tar entry body");
     } else {
         copy_reader_to_file(reader, absolute_path, header.size, header.mode);
@@ -361,9 +383,6 @@ ImportSummary import_directory_from_tar(
     bool create_parent,
     const std::string& symlink_mode
 ) {
-#ifdef _WIN32
-    (void)symlink_mode;
-#endif
     const bool replaced = prepare_destination_path(absolute_path, source_type, overwrite_mode, create_parent);
     make_directory_if_missing(absolute_path);
 
@@ -413,18 +432,13 @@ ImportSummary import_directory_from_tar(
         }
 
         if (header.typeflag == '2') {
-#ifdef _WIN32
-            summary.warnings.push_back(skipped_symlink_warning(output_path));
-            skip_exact(reader, entry_body_with_padding(header.size), "truncated tar entry body");
-            continue;
-#else
-            if (symlink_mode == "skip") {
+            switch (symlink_import_action(symlink_mode, "")) {
+            case SYMLINK_IMPORT_SKIP:
                 summary.warnings.push_back(skipped_symlink_warning(output_path));
                 skip_exact(reader, entry_body_with_padding(header.size), "truncated tar entry body");
                 continue;
-            }
-            if (symlink_mode != "preserve") {
-                throw std::runtime_error("archive contains unsupported symlink");
+            case SYMLINK_IMPORT_PRESERVE:
+                break;
             }
             if (relative_path == ".") {
                 throw std::runtime_error("archive symlink entry cannot target root");
@@ -433,7 +447,6 @@ ImportSummary import_directory_from_tar(
             summary.files_copied += 1;
             skip_exact(reader, entry_body_with_padding(header.size), "truncated tar entry body");
             continue;
-#endif
         }
 
         if (header.typeflag != '0') {

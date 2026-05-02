@@ -62,66 +62,9 @@ bool contains_text(const std::string& value, const std::string& needle) {
     return value.find(needle) != std::string::npos;
 }
 
-Json transfer_warnings_json(const std::vector<TransferWarning>& warnings) {
-    Json json = Json::array();
-    for (std::size_t i = 0; i < warnings.size(); ++i) {
-        json.push_back(Json{
-            {"code", warnings[i].code},
-            {"message", warnings[i].message},
-        });
-    }
-    return json;
-}
-
 unsigned long requested_max_output_tokens(const Json& body) {
     const Json::const_iterator it = body.find("max_output_tokens");
     return it == body.end() ? DEFAULT_MAX_OUTPUT_TOKENS : it->get<unsigned long>();
-}
-
-std::string transfer_error_code(const std::string& message) {
-    if (contains_text(message, "sandbox")) {
-        return "sandbox_denied";
-    }
-    if (contains_text(message, "not absolute")) {
-        return "transfer_path_not_absolute";
-    }
-    if (contains_text(message, "destination path") &&
-        contains_text(message, "already exists")) {
-        return "transfer_destination_exists";
-    }
-    if (contains_text(message, "destination parent") &&
-        contains_text(message, "does not exist")) {
-        return "transfer_parent_missing";
-    }
-    if ((contains_text(message, "destination path") &&
-         contains_text(message, "is a directory")) ||
-        (contains_text(message, "destination path") &&
-         contains_text(message, "is not a directory")) ||
-        (contains_text(message, "destination path") &&
-         contains_text(message, "is not a regular file"))) {
-        return "transfer_destination_unsupported";
-    }
-    if (contains_text(message, "transfer compression") ||
-        contains_text(message, "does not support transfer compression")) {
-        return "transfer_compression_unsupported";
-    }
-    if (contains_text(message, "unsupported symlink") ||
-        contains_text(message, "unsupported entry") ||
-        contains_text(message, "symlink mode is unsupported") ||
-        contains_text(message, "unsupported transfer source type") ||
-        contains_text(message, "regular file or directory") ||
-        contains_text(message, "archive entry is not a regular file") ||
-        contains_text(message, "archive file entry cannot target root") ||
-        contains_text(message, "archive path escapes") ||
-        contains_text(message, "archive path must be relative") ||
-        contains_text(message, "archive path contains empty component")) {
-        return "transfer_source_unsupported";
-    }
-    if (contains_text(message, "transfer source missing") ||
-        contains_text(message, "No such file or directory")) {
-        return "transfer_source_missing";
-    }
-    return "transfer_failed";
 }
 
 HttpResponse handle_health(const AppState& state) {
@@ -582,9 +525,7 @@ HttpResponse handle_transfer_export(AppState& state, const HttpRequest& request)
 
     try {
         const Json body = parse_json_body(request);
-        if (body.value("compression", std::string("none")) != "none") {
-            throw std::runtime_error("this daemon does not support transfer compression");
-        }
+        require_uncompressed_transfer(body.value("compression", std::string("none")));
         const std::string path = resolve_absolute_transfer_path(body.at("path").get<std::string>());
         authorize_sandbox_path(state, SANDBOX_READ, path);
         const ExportedPayload payload = export_path(
@@ -639,10 +580,7 @@ HttpResponse handle_transfer_import(AppState& state, const HttpRequest& request)
     response.status = 200;
 
     try {
-        const std::string compression = request.header("x-remote-exec-compression");
-        if (!compression.empty() && compression != "none") {
-            throw std::runtime_error("this daemon does not support transfer compression");
-        }
+        require_uncompressed_transfer(request.header("x-remote-exec-compression"));
         const std::string destination_path =
             resolve_absolute_transfer_path(request.header("x-remote-exec-destination-path"));
         authorize_sandbox_path(state, SANDBOX_WRITE, destination_path);
@@ -652,30 +590,10 @@ HttpResponse handle_transfer_import(AppState& state, const HttpRequest& request)
             destination_path,
             request.header("x-remote-exec-overwrite"),
             request.header("x-remote-exec-create-parent") == "true",
-            request.header("x-remote-exec-symlink-mode").empty()
-                ? "preserve"
-                : request.header("x-remote-exec-symlink-mode")
+            transfer_symlink_mode_or_default(request.header("x-remote-exec-symlink-mode"))
         );
-        {
-            std::ostringstream message;
-            message << "transfer/import destination=`" << destination_path
-                    << "` bytes_copied=" << summary.bytes_copied
-                    << " files_copied=" << summary.files_copied
-                    << " directories_copied=" << summary.directories_copied
-                    << " replaced=" << (summary.replaced ? "true" : "false");
-            log_message(LOG_INFO, "server", message.str());
-        }
-        write_json(
-            response,
-            Json{
-                {"source_type", summary.source_type},
-                {"bytes_copied", summary.bytes_copied},
-                {"files_copied", summary.files_copied},
-                {"directories_copied", summary.directories_copied},
-                {"replaced", summary.replaced},
-                {"warnings", transfer_warnings_json(summary.warnings)},
-            }
-        );
+        log_transfer_import_summary(destination_path, summary);
+        write_json(response, transfer_summary_json(summary));
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
         log_message(LOG_WARN, "server", "transfer/import failed: " + message);
@@ -686,6 +604,94 @@ HttpResponse handle_transfer_import(AppState& state, const HttpRequest& request)
 }
 
 }  // namespace
+
+std::string transfer_error_code(const std::string& message) {
+    if (contains_text(message, "sandbox")) {
+        return "sandbox_denied";
+    }
+    if (contains_text(message, "not absolute")) {
+        return "transfer_path_not_absolute";
+    }
+    if (contains_text(message, "destination path") &&
+        contains_text(message, "already exists")) {
+        return "transfer_destination_exists";
+    }
+    if (contains_text(message, "destination parent") &&
+        contains_text(message, "does not exist")) {
+        return "transfer_parent_missing";
+    }
+    if ((contains_text(message, "destination path") &&
+         contains_text(message, "is a directory")) ||
+        (contains_text(message, "destination path") &&
+         contains_text(message, "is not a directory")) ||
+        (contains_text(message, "destination path") &&
+         contains_text(message, "is not a regular file"))) {
+        return "transfer_destination_unsupported";
+    }
+    if (contains_text(message, "transfer compression") ||
+        contains_text(message, "does not support transfer compression")) {
+        return "transfer_compression_unsupported";
+    }
+    if (contains_text(message, "unsupported symlink") ||
+        contains_text(message, "unsupported entry") ||
+        contains_text(message, "symlink mode is unsupported") ||
+        contains_text(message, "unsupported transfer source type") ||
+        contains_text(message, "regular file or directory") ||
+        contains_text(message, "archive entry is not a regular file") ||
+        contains_text(message, "archive file entry cannot target root") ||
+        contains_text(message, "archive path escapes") ||
+        contains_text(message, "archive path must be relative") ||
+        contains_text(message, "archive path contains empty component")) {
+        return "transfer_source_unsupported";
+    }
+    if (contains_text(message, "transfer source missing") ||
+        contains_text(message, "No such file or directory")) {
+        return "transfer_source_missing";
+    }
+    return "transfer_failed";
+}
+
+void require_uncompressed_transfer(const std::string& compression) {
+    if (!compression.empty() && compression != "none") {
+        throw std::runtime_error("this daemon does not support transfer compression");
+    }
+}
+
+std::string transfer_symlink_mode_or_default(const std::string& symlink_mode) {
+    return symlink_mode.empty() ? "preserve" : symlink_mode;
+}
+
+Json transfer_warnings_json(const std::vector<TransferWarning>& warnings) {
+    Json json = Json::array();
+    for (std::size_t i = 0; i < warnings.size(); ++i) {
+        json.push_back(Json{
+            {"code", warnings[i].code},
+            {"message", warnings[i].message},
+        });
+    }
+    return json;
+}
+
+Json transfer_summary_json(const ImportSummary& summary) {
+    return Json{
+        {"source_type", summary.source_type},
+        {"bytes_copied", summary.bytes_copied},
+        {"files_copied", summary.files_copied},
+        {"directories_copied", summary.directories_copied},
+        {"replaced", summary.replaced},
+        {"warnings", transfer_warnings_json(summary.warnings)},
+    };
+}
+
+void log_transfer_import_summary(const std::string& destination_path, const ImportSummary& summary) {
+    std::ostringstream message;
+    message << "transfer/import destination=`" << destination_path
+            << "` bytes_copied=" << summary.bytes_copied
+            << " files_copied=" << summary.files_copied
+            << " directories_copied=" << summary.directories_copied
+            << " replaced=" << (summary.replaced ? "true" : "false");
+    log_message(LOG_INFO, "server", message.str());
+}
 
 LogLevel level_for_status(int status) {
     if (status >= 500) {

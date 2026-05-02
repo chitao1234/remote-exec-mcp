@@ -55,6 +55,57 @@ void handle_skipped_symlink(ExportContext* context, const std::string& path) {
     );
 }
 
+#ifndef _WIN32
+std::string read_symlink_target(const std::string& path) {
+    char target_buffer[4096];
+    const ssize_t target_len =
+        readlink(path.c_str(), target_buffer, sizeof(target_buffer) - 1);
+    if (target_len < 0) {
+        throw std::runtime_error("unable to read symlink " + path);
+    }
+    target_buffer[target_len] = '\0';
+    return std::string(target_buffer);
+}
+
+void append_preserved_symlink_entry(
+    TransferArchiveSink* archive,
+    const std::string& source_path,
+    const std::string& archive_path
+) {
+    append_symlink_entry(archive, archive_path, read_symlink_target(source_path));
+}
+#endif
+
+void append_directory_contents(
+    TransferArchiveSink* archive,
+    const std::string& current_path,
+    const std::string& current_rel,
+    ExportContext* context
+);
+
+bool append_followed_symlink_entry(
+    TransferArchiveSink* archive,
+    const std::string& child_path,
+    const std::string& child_rel,
+    ExportContext* context
+) {
+    if (is_directory_follow(child_path)) {
+        if (context->followed_directories.count(child_path) != 0) {
+            handle_skipped_symlink(context, child_path);
+            return true;
+        }
+        context->followed_directories.insert(child_path);
+        append_directory_entry(archive, child_rel);
+        append_directory_contents(archive, child_path, child_rel, context);
+        return true;
+    }
+    if (is_regular_file_follow(child_path)) {
+        append_file_entry_from_path(archive, child_rel, child_path);
+        return true;
+    }
+    return false;
+}
+
 void append_directory_contents(
     TransferArchiveSink* archive,
     const std::string& current_path,
@@ -79,49 +130,19 @@ void append_directory_contents(
                 continue;
             }
 #ifdef _WIN32
-            if (context->options.symlink_mode == "follow") {
-                if (is_directory_follow(child_path)) {
-                    if (context->followed_directories.count(child_path) != 0) {
-                        handle_skipped_symlink(context, child_path);
-                        continue;
-                    }
-                    context->followed_directories.insert(child_path);
-                    append_directory_entry(archive, child_rel);
-                    append_directory_contents(archive, child_path, child_rel, context);
-                    continue;
-                }
-                if (is_regular_file_follow(child_path)) {
-                    append_file_entry_from_path(archive, child_rel, child_path);
-                    continue;
-                }
+            if (context->options.symlink_mode == "follow" &&
+                append_followed_symlink_entry(archive, child_path, child_rel, context)) {
+                continue;
             }
             handle_skipped_symlink(context, child_path);
             continue;
 #else
             if (context->options.symlink_mode == "preserve") {
-                char target_buffer[4096];
-                const ssize_t target_len =
-                    readlink(child_path.c_str(), target_buffer, sizeof(target_buffer) - 1);
-                if (target_len < 0) {
-                    throw std::runtime_error("unable to read symlink " + child_path);
-                }
-                target_buffer[target_len] = '\0';
-                append_symlink_entry(archive, child_rel, std::string(target_buffer));
+                append_preserved_symlink_entry(archive, child_path, child_rel);
                 continue;
             }
             if (context->options.symlink_mode == "follow") {
-                if (is_directory_follow(child_path)) {
-                    if (context->followed_directories.count(child_path) != 0) {
-                        handle_skipped_symlink(context, child_path);
-                        continue;
-                    }
-                    context->followed_directories.insert(child_path);
-                    append_directory_entry(archive, child_rel);
-                    append_directory_contents(archive, child_path, child_rel, context);
-                    continue;
-                }
-                if (is_regular_file_follow(child_path)) {
-                    append_file_entry_from_path(archive, child_rel, child_path);
+                if (append_followed_symlink_entry(archive, child_path, child_rel, context)) {
                     continue;
                 }
                 handle_unsupported_entry(context, child_path);
@@ -161,14 +182,7 @@ void export_file_as_tar(
 #else
     if (is_symlink_path(absolute_path)) {
         if (options.symlink_mode == "preserve") {
-            char target_buffer[4096];
-            const ssize_t target_len =
-                readlink(absolute_path.c_str(), target_buffer, sizeof(target_buffer) - 1);
-            if (target_len < 0) {
-                throw std::runtime_error("unable to read symlink " + absolute_path);
-            }
-            target_buffer[target_len] = '\0';
-            append_symlink_entry(archive, SINGLE_FILE_ENTRY, std::string(target_buffer));
+            append_preserved_symlink_entry(archive, absolute_path, SINGLE_FILE_ENTRY);
         } else if (options.symlink_mode == "follow") {
             append_file_entry_from_path(archive, SINGLE_FILE_ENTRY, absolute_path);
         } else {
