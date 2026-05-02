@@ -225,6 +225,23 @@ int main() {
     const Json invalid_detail = Json::parse(invalid_detail_response.body);
     assert(invalid_detail.at("code").get<std::string>() == "invalid_detail");
 
+    const fs::path gif_file = root / "tiny.gif";
+    write_binary_file(
+        gif_file,
+        base64_decode_bytes("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==")
+    );
+
+    const HttpResponse gif_response = route_request(
+        state,
+        json_request(
+            "/v1/image/read",
+            Json{{"path", "tiny.gif"}, {"workdir", root.string()}}
+        )
+    );
+    assert(gif_response.status == 400);
+    const Json gif_error = Json::parse(gif_response.body);
+    assert(gif_error.at("code").get<std::string>() == "image_decode_failed");
+
     const HttpResponse source_info_response = route_request(
         state,
         json_request("/v1/transfer/path-info", Json{{"path", source_file.string()}})

@@ -111,11 +111,6 @@ std::string image_mime_type(const std::string& path, const std::string& bytes) {
         static_cast<unsigned char>(bytes[2]) == 0xFF) {
         return "image/jpeg";
     }
-    if (bytes.size() >= 6 &&
-        (std::memcmp(bytes.data(), "GIF87a", 6) == 0 ||
-         std::memcmp(bytes.data(), "GIF89a", 6) == 0)) {
-        return "image/gif";
-    }
     if (bytes.size() >= 12 &&
         std::memcmp(bytes.data(), "RIFF", 4) == 0 &&
         std::memcmp(bytes.data() + 8, "WEBP", 4) == 0) {
