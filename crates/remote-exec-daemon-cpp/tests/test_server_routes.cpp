@@ -83,6 +83,20 @@ static std::string read_text_file(const fs::path& path) {
     return std::string((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
 }
 
+static std::string read_binary_file(const fs::path& path) {
+    return read_text_file(path);
+}
+
+static void write_binary_file(const fs::path& path, const std::string& value) {
+    write_text_file(path, value);
+}
+
+static std::string decode_data_url_bytes(const std::string& image_url) {
+    const std::size_t comma = image_url.find(',');
+    assert(comma != std::string::npos);
+    return base64_decode_bytes(image_url.substr(comma + 1));
+}
+
 int main() {
     const fs::path root = make_test_root();
     AppState state;
@@ -96,6 +110,7 @@ int main() {
     const Json info = Json::parse(info_response.body);
     assert(info.at("target").get<std::string>() == "cpp-test");
     assert(info.at("supports_pty").get<bool>() == process_session_supports_pty());
+    assert(info.at("supports_image_read").get<bool>());
     assert(info.at("supports_port_forward").get<bool>());
 
     assert(normalize_port_forward_endpoint("8080") == "127.0.0.1:8080");
@@ -175,6 +190,39 @@ int main() {
 
     const fs::path source_file = root / "transfer-source.txt";
     write_text_file(source_file, "route transfer payload");
+
+    const fs::path image_file = root / "tiny.png";
+    write_binary_file(
+        image_file,
+        base64_decode_bytes(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL9sAAAAASUVORK5CYII="
+        )
+    );
+    const std::string original_image = read_binary_file(image_file);
+
+    const HttpResponse image_response = route_request(
+        state,
+        json_request(
+            "/v1/image/read",
+            Json{{"path", "tiny.png"}, {"workdir", root.string()}}
+        )
+    );
+    assert(image_response.status == 200);
+    const Json image = Json::parse(image_response.body);
+    assert(image.at("detail").get<std::string>() == "original");
+    assert(image.at("image_url").get<std::string>().find("data:image/png;base64,") == 0);
+    assert(decode_data_url_bytes(image.at("image_url").get<std::string>()) == original_image);
+
+    const HttpResponse invalid_detail_response = route_request(
+        state,
+        json_request(
+            "/v1/image/read",
+            Json{{"path", "tiny.png"}, {"workdir", root.string()}, {"detail", "low"}}
+        )
+    );
+    assert(invalid_detail_response.status == 400);
+    const Json invalid_detail = Json::parse(invalid_detail_response.body);
+    assert(invalid_detail.at("code").get<std::string>() == "invalid_detail");
 
     const HttpResponse source_info_response = route_request(
         state,

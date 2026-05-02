@@ -307,11 +307,13 @@ How to use it:
 
 - Use `path` for the image file on that target.
 - Use `workdir` only when the path is relative and you need predictable resolution.
-- Omit `detail` for default preview behavior.
-- Use `detail: "original"` only when full-fidelity inspection matters.
+- Omit `detail` for the target default behavior.
+- On Rust daemon targets, omitted `detail` keeps the default resized-preview behavior.
+- On C++ daemon targets, omitted `detail` defaults to `original` because only passthrough image formats are supported there.
+- Use `detail: "original"` when full-fidelity inspection matters or when you want to force original bytes on Rust daemon targets.
 - The only supported non-empty `detail` value is `original`.
 - Errors for unsupported detail values are explicit. Example message:
-  `view_image.detail only supports original; omit detail for default resized behavior ...`
+  `view_image.detail only supports original; omit detail for default ...`
 
 Result behavior:
 
@@ -329,7 +331,7 @@ Result behavior:
 Platform notes:
 
 - Some targets may not implement image reads.
-- `remote-exec-daemon-cpp` does not support `view_image`.
+- `remote-exec-daemon-cpp` supports passthrough `view_image` reads for PNG, JPEG, WebP, and GIF only.
 
 ### `transfer_files`
 
@@ -542,7 +544,7 @@ Structured result fields:
 - `remote-exec-daemon-cpp` is narrower than the main daemon.
 - On POSIX C++ daemon targets, `tty: true` works when `supports_pty` is true.
 - On Windows XP-compatible C++ daemon targets, `tty: true` is rejected.
-- On C++ daemon targets, `view_image` is unavailable.
+- On C++ daemon targets, `view_image` supports only passthrough PNG, JPEG, WebP, and GIF reads, and omitted `detail` defaults to `original`.
 - On POSIX C++ daemon targets, shell selection follows the Rust daemon policy and child processes force `LC_ALL=C.UTF-8` plus `LANG=C.UTF-8`.
 - On POSIX C++ daemon targets, non-PTY exec intentionally starts with stdin closed; use `tty: true` when later `write_stdin` input is needed.
 - On Windows XP-compatible C++ daemon targets, non-PTY exec intentionally keeps stdin open for compatibility with the original XP daemon.

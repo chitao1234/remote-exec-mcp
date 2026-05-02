@@ -58,7 +58,7 @@ async fn assert_default_passthrough(extension: &str, format: ImageFormat, expect
 async fn assert_resized_output(extension: &str, format: ImageFormat, expected_mime: &str) {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let path = fixture.workdir.join(format!("large.{extension}"));
-    write_image(&path, 4096, 2048, format).await;
+    write_image(&path, 4096, 4096, format).await;
 
     let response = fixture
         .rpc::<ImageReadRequest, ImageReadResponse>(
@@ -75,7 +75,31 @@ async fn assert_resized_output(extension: &str, format: ImageFormat, expected_mi
     let image = image::load_from_memory(&bytes).unwrap();
     assert_eq!(mime, expected_mime);
     assert!(image.width() <= 2048);
-    assert!(image.height() <= 768);
+    assert!(image.height() <= 2048);
+    assert_eq!(response.detail, None);
+}
+
+#[tokio::test]
+async fn image_read_preserves_large_passthrough_within_2048_square_threshold() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let path = fixture.workdir.join("tall.webp");
+    write_image(&path, 1600, 2000, ImageFormat::WebP).await;
+    let original = tokio::fs::read(&path).await.unwrap();
+
+    let response = fixture
+        .rpc::<ImageReadRequest, ImageReadResponse>(
+            "/v1/image/read",
+            &ImageReadRequest {
+                path: "tall.webp".to_string(),
+                workdir: Some(".".to_string()),
+                detail: None,
+            },
+        )
+        .await;
+
+    let (mime, returned) = decode_data_url(&response.image_url);
+    assert_eq!(mime, "image/webp");
+    assert_eq!(returned, original);
     assert_eq!(response.detail, None);
 }
 

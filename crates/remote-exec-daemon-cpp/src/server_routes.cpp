@@ -1,6 +1,9 @@
+#include <cstring>
+#include <fstream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <sys/stat.h>
 
 #include "common.h"
 #include "filesystem_sandbox.h"
@@ -67,6 +70,78 @@ unsigned long requested_max_output_tokens(const Json& body) {
     return it == body.end() ? DEFAULT_MAX_OUTPUT_TOKENS : it->get<unsigned long>();
 }
 
+std::string resolve_input_path(
+    const AppState& state,
+    const Json& body,
+    const std::string& key
+) {
+    const std::string raw = body.at(key).get<std::string>();
+    const PathPolicy policy = host_path_policy();
+    if (is_absolute_for_policy(policy, raw)) {
+        return normalize_for_system(policy, raw);
+    }
+    return join_for_policy(policy, resolve_workdir(state, body), raw);
+}
+
+std::string read_binary_file_bytes(const std::string& path) {
+    std::ifstream input(path.c_str(), std::ios::binary);
+    if (!input) {
+        throw std::runtime_error("unable to process image at `" + path + "`: unable to read file");
+    }
+    return std::string((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+}
+
+bool image_path_exists(const std::string& path) {
+    struct stat st;
+    return stat(path.c_str(), &st) == 0;
+}
+
+bool image_path_is_regular_file(const std::string& path) {
+    struct stat st;
+    return stat(path.c_str(), &st) == 0 && (st.st_mode & S_IFMT) == S_IFREG;
+}
+
+std::string image_mime_type(const std::string& path, const std::string& bytes) {
+    if (bytes.size() >= 8 && std::memcmp(bytes.data(), "\x89PNG\r\n\x1A\n", 8) == 0) {
+        return "image/png";
+    }
+    if (bytes.size() >= 3 &&
+        static_cast<unsigned char>(bytes[0]) == 0xFF &&
+        static_cast<unsigned char>(bytes[1]) == 0xD8 &&
+        static_cast<unsigned char>(bytes[2]) == 0xFF) {
+        return "image/jpeg";
+    }
+    if (bytes.size() >= 6 &&
+        (std::memcmp(bytes.data(), "GIF87a", 6) == 0 ||
+         std::memcmp(bytes.data(), "GIF89a", 6) == 0)) {
+        return "image/gif";
+    }
+    if (bytes.size() >= 12 &&
+        std::memcmp(bytes.data(), "RIFF", 4) == 0 &&
+        std::memcmp(bytes.data() + 8, "WEBP", 4) == 0) {
+        return "image/webp";
+    }
+    throw std::runtime_error(
+        "unable to process image at `" + path + "`: unsupported image format"
+    );
+}
+
+std::string image_error_code(const std::string& message) {
+    if (contains_text(message, "sandbox")) {
+        return "sandbox_denied";
+    }
+    if (contains_text(message, "view_image.detail only supports")) {
+        return "invalid_detail";
+    }
+    if (contains_text(message, "unable to locate image at")) {
+        return "image_missing";
+    }
+    if (contains_text(message, "image path") && contains_text(message, "is not a file")) {
+        return "image_not_file";
+    }
+    return "image_decode_failed";
+}
+
 HttpResponse handle_health(const AppState& state) {
     HttpResponse response;
     write_json(
@@ -92,11 +167,54 @@ HttpResponse handle_target_info(const AppState& state) {
             {"platform", platform::platform_name()},
             {"arch", platform::arch_name()},
             {"supports_pty", process_session_supports_pty()},
-            {"supports_image_read", false},
+            {"supports_image_read", true},
             {"supports_transfer_compression", false},
             {"supports_port_forward", true},
         }
     );
+    return response;
+}
+
+HttpResponse handle_image_read(AppState& state, const HttpRequest& request) {
+    HttpResponse response;
+    response.status = 200;
+
+    try {
+        const Json body = parse_json_body(request);
+        const std::string detail = body.value("detail", std::string());
+        if (!detail.empty() && detail != "original") {
+            throw std::runtime_error(
+                "view_image.detail only supports `original`; omit `detail` for default original behavior, got `" +
+                detail + "`"
+            );
+        }
+
+        const std::string path = resolve_input_path(state, body, "path");
+        authorize_sandbox_path(state, SANDBOX_READ, path);
+        if (!image_path_exists(path)) {
+            throw std::runtime_error(
+                "unable to locate image at `" + path + "`: No such file or directory"
+            );
+        }
+        if (!image_path_is_regular_file(path)) {
+            throw std::runtime_error("image path `" + path + "` is not a file");
+        }
+
+        const std::string bytes = read_binary_file_bytes(path);
+        const std::string mime = image_mime_type(path, bytes);
+        write_json(
+            response,
+            Json{
+                {"image_url", "data:" + mime + ";base64," + base64_encode_bytes(bytes)},
+                {"detail", "original"},
+            }
+        );
+    } catch (const std::exception& ex) {
+        const std::string message = ex.what();
+        log_message(LOG_WARN, "server", "image/read failed: " + message);
+        write_rpc_error(response, 400, image_error_code(message), message);
+    }
+
     return response;
 }
 
@@ -724,11 +842,7 @@ HttpResponse route_request(AppState& state, const HttpRequest& request) {
     }
 
     if (request.path == "/v1/image/read") {
-        return make_rpc_error_response(
-            400,
-            "image_unsupported",
-            "image read is not supported on this target"
-        );
+        return handle_image_read(state, request);
     }
 
     if (request.path == "/v1/port/listen") {

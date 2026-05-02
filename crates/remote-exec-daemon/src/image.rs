@@ -16,7 +16,7 @@ use remote_exec_proto::sandbox::SandboxAccess;
 use crate::AppState;
 
 const MAX_WIDTH: u32 = 2048;
-const MAX_HEIGHT: u32 = 768;
+const MAX_HEIGHT: u32 = 2048;
 
 pub async fn read_image(
     State(state): State<Arc<AppState>>,

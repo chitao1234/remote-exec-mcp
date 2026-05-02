@@ -80,6 +80,10 @@ The C++ daemon implements the daemon-side port RPCs used by broker
 listen binds, and the same bare-port normalization where `8080` means
 `127.0.0.1:8080`.
 
+`view_image` supports passthrough reads for PNG, JPEG, WebP, and GIF only. The
+daemon does not resize or re-encode images, so omitted `detail` defaults to
+`original`.
+
 ## Config
 
 Example config:
@@ -158,7 +162,8 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
 - no TLS support
 - PTY support is POSIX-only and depends on host PTY allocation
 - no PTY support in Windows XP-compatible builds
-- no image support
+- `view_image` supports passthrough PNG, JPEG, WebP, and GIF only
+- omitted `view_image.detail` defaults to `original` because no resize/re-encode path exists
 - transfer compression is not supported
 - `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles
 - daemon HTTP transfer imports and exports stream archive bodies instead of staging the full tar payload in memory
