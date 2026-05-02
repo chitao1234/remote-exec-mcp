@@ -1,7 +1,14 @@
 #pragma once
 
 #include <memory>
+#include <stdexcept>
 #include <string>
+
+class ProcessStdinClosedError : public std::runtime_error {
+public:
+    explicit ProcessStdinClosedError(const std::string& message)
+        : std::runtime_error(message) {}
+};
 
 class ProcessSession {
 public:

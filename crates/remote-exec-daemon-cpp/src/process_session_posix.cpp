@@ -261,6 +261,11 @@ public:
                 if (errno == EINTR) {
                     continue;
                 }
+                if (errno == EPIPE || errno == EIO) {
+                    throw ProcessStdinClosedError(
+                        "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
+                    );
+                }
                 throw std::runtime_error(
                     std::string("write(stdin) failed: ") + std::strerror(errno)
                 );

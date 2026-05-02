@@ -401,7 +401,12 @@ Json SessionStore::write_stdin(
                     "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
                 );
             }
-            session->process->write_stdin(chars);
+            try {
+                session->process->write_stdin(chars);
+            } catch (const ProcessStdinClosedError& ex) {
+                session->stdin_open = false;
+                throw StdinClosedError(ex.what());
+            }
         }
 
         const YieldTimeOperationConfig& operation_config =

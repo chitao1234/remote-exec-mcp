@@ -90,6 +90,12 @@ PipePair create_pipe_pair(const char* label) {
     return pair;
 }
 
+bool is_stdin_closed_error(DWORD error) {
+    return error == ERROR_BROKEN_PIPE ||
+           error == ERROR_NO_DATA ||
+           error == ERROR_PIPE_NOT_CONNECTED;
+}
+
 class Win32ProcessSession : public ProcessSession {
 public:
     Win32ProcessSession(
@@ -105,15 +111,30 @@ public:
     }
 
     void write_stdin(const std::string& chars) override {
-        DWORD written = 0;
-        if (WriteFile(
-                stdin_write_.get(),
-                chars.data(),
-                static_cast<DWORD>(chars.size()),
-                &written,
-                NULL
-            ) == 0) {
-            throw std::runtime_error(last_error_message("WriteFile"));
+        const char* data = chars.data();
+        std::size_t remaining = chars.size();
+        while (remaining > 0U) {
+            DWORD written = 0;
+            if (WriteFile(
+                    stdin_write_.get(),
+                    data,
+                    static_cast<DWORD>(remaining),
+                    &written,
+                    NULL
+                ) == 0) {
+                const DWORD error = GetLastError();
+                if (is_stdin_closed_error(error)) {
+                    throw ProcessStdinClosedError(
+                        "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
+                    );
+                }
+                throw std::runtime_error(last_error_message("WriteFile"));
+            }
+            if (written == 0U) {
+                throw std::runtime_error("WriteFile wrote zero bytes");
+            }
+            data += written;
+            remaining -= static_cast<std::size_t>(written);
         }
     }
 
