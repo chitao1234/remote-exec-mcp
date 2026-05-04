@@ -24,11 +24,14 @@ pub async fn view_image(
     );
     let target = state.target(&input.target)?;
     let response = match target
-        .image_read_checked(&input.target, &ImageReadRequest {
-            path: input.path,
-            workdir: input.workdir,
-            detail: input.detail.clone(),
-        })
+        .image_read_checked(
+            &input.target,
+            &ImageReadRequest {
+                path: input.path,
+                workdir: input.workdir,
+                detail: input.detail.clone(),
+            },
+        )
         .await
     {
         Ok(response) => response,

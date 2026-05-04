@@ -52,7 +52,7 @@ pub async fn exec_command(
                 error = %err,
                 "broker tool failed"
             );
-            return Err(err.into());
+            return Err(err);
         }
     };
     validate_exec_response(&response)?;
@@ -292,12 +292,16 @@ async fn forward_exec_write(
     input: WriteStdinInput,
 ) -> anyhow::Result<ExecResponse> {
     let response = target
-        .clear_on_transport_error(target.exec_write(&ExecWriteRequest {
-            daemon_session_id: record.daemon_session_id.clone(),
-            chars: input.chars.unwrap_or_default(),
-            yield_time_ms: input.yield_time_ms,
-            max_output_tokens: input.max_output_tokens,
-        }).await)
+        .clear_on_transport_error(
+            target
+                .exec_write(&ExecWriteRequest {
+                    daemon_session_id: record.daemon_session_id.clone(),
+                    chars: input.chars.unwrap_or_default(),
+                    yield_time_ms: input.yield_time_ms,
+                    max_output_tokens: input.max_output_tokens,
+                })
+                .await,
+        )
         .await;
 
     match response {

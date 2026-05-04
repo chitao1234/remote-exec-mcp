@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use axum::extract::Request;
 use axum::extract::State;
-use axum::http::header::{AUTHORIZATION, WWW_AUTHENTICATE};
 use axum::http::StatusCode;
+use axum::http::header::{AUTHORIZATION, WWW_AUTHENTICATE};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
@@ -30,12 +30,12 @@ mod stub_daemon_image;
 mod stub_daemon_transfer;
 
 pub(crate) use stub_daemon_exec::{ExecStartBehavior, ExecWriteBehavior};
+pub(crate) use stub_daemon_exec::{set_exec_start_behavior, set_exec_write_behavior};
 pub(crate) use stub_daemon_image::StubImageReadResponse;
+pub(crate) use stub_daemon_image::set_image_read_response;
 pub(crate) use stub_daemon_transfer::{
     StubTransferExportCapture, StubTransferImportCapture, StubTransferPathInfoResponse,
 };
-pub(crate) use stub_daemon_exec::{set_exec_start_behavior, set_exec_write_behavior};
-pub(crate) use stub_daemon_image::set_image_read_response;
 pub(crate) use stub_daemon_transfer::{
     set_transfer_export_directory_response, set_transfer_export_file_response,
     set_transfer_path_info_error_response, set_transfer_path_info_response,

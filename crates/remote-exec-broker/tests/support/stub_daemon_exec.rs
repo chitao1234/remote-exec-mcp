@@ -1,11 +1,9 @@
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::response::Response;
-use axum::Json;
-use remote_exec_proto::rpc::{
-    ExecResponse, ExecStartRequest, ExecWriteRequest, RpcErrorBody,
-};
+use remote_exec_proto::rpc::{ExecResponse, ExecStartRequest, ExecWriteRequest, RpcErrorBody};
 
 use super::StubDaemonState;
 
@@ -27,17 +25,11 @@ pub enum ExecStartBehavior {
     RunningMissingDaemonSessionId,
 }
 
-pub(crate) async fn set_exec_start_behavior(
-    state: &StubDaemonState,
-    behavior: ExecStartBehavior,
-) {
+pub(crate) async fn set_exec_start_behavior(state: &StubDaemonState, behavior: ExecStartBehavior) {
     *state.exec_start_behavior.lock().await = behavior;
 }
 
-pub(crate) async fn set_exec_write_behavior(
-    state: &StubDaemonState,
-    behavior: ExecWriteBehavior,
-) {
+pub(crate) async fn set_exec_write_behavior(state: &StubDaemonState, behavior: ExecWriteBehavior) {
     *state.exec_write_behavior.lock().await = behavior;
 }
 

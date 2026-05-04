@@ -1,6 +1,6 @@
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::Json;
 use remote_exec_proto::rpc::{ImageReadRequest, ImageReadResponse, RpcErrorBody};
 
 use super::StubDaemonState;

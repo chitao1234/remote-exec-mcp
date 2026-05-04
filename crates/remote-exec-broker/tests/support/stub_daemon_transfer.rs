@@ -1,15 +1,15 @@
 use std::io::Cursor;
 
+use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use axum::Json;
 use remote_exec_proto::rpc::{
     RpcErrorBody, TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
     TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
     TRANSFER_SYMLINK_MODE_HEADER, TransferCompression, TransferExportRequest,
-    TransferImportResponse, TransferPathInfoRequest, TransferPathInfoResponse,
-    TransferSourceType, TransferWarning,
+    TransferImportResponse, TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType,
+    TransferWarning,
 };
 use tar::{Builder, EntryType, Header};
 
@@ -74,10 +74,7 @@ pub(super) fn default_transfer_path_info_response() -> StubTransferPathInfoRespo
     })
 }
 
-pub(crate) async fn set_transfer_export_file_response(
-    state: &StubDaemonState,
-    body: Vec<u8>,
-) {
+pub(crate) async fn set_transfer_export_file_response(state: &StubDaemonState, body: Vec<u8>) {
     *state.transfer_export_response.lock().await = StubTransferExportResponse::Success {
         source_type: TransferSourceType::File,
         compression: TransferCompression::None,

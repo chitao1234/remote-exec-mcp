@@ -24,7 +24,9 @@ impl TargetHandle {
         req: &ExecStartRequest,
     ) -> anyhow::Result<ExecResponse> {
         self.ensure_identity_verified(target_name).await?;
-        Ok(self.clear_on_transport_error(self.exec_start(req).await).await?)
+        Ok(self
+            .clear_on_transport_error(self.exec_start(req).await)
+            .await?)
     }
 
     pub async fn patch_apply_checked(
