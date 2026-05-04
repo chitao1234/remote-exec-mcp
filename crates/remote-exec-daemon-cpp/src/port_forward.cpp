@@ -217,12 +217,17 @@ Json PortForwardStore::udp_datagram_read(const std::string& bind_id) {
         throw PortForwardError(400, "port_read_failed", socket_error_message("recvfrom"));
     }
     buffer.resize(static_cast<std::size_t>(received));
+    const std::string peer = printable_port_forward_endpoint(
+        reinterpret_cast<sockaddr*>(&peer_address),
+        peer_len
+    );
+    const std::string payload(
+        reinterpret_cast<const char*>(buffer.data()),
+        buffer.size()
+    );
     return Json{
-        {"peer", printable_port_forward_endpoint(reinterpret_cast<sockaddr*>(&peer_address), peer_len)},
-        {"data", base64_encode_bytes(std::string(
-            reinterpret_cast<const char*>(buffer.data()),
-            reinterpret_cast<const char*>(buffer.data()) + buffer.size()
-        ))},
+        {"peer", peer},
+        {"data", base64_encode_bytes(payload)},
     };
 }
 
