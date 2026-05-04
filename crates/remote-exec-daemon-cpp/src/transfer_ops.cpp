@@ -1,5 +1,14 @@
+#include <cerrno>
+#include <cstring>
 #include <stdexcept>
 #include <string>
+
+#ifdef _WIN32
+#include <sys/stat.h>
+#else
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 #include "rpc_failures.h"
 #include "transfer_ops.h"
@@ -22,14 +31,29 @@ PathInfo path_info(const std::string& absolute_path) {
             "transfer path is not absolute"
         );
     }
-    if (!path_exists(absolute_path)) {
-        return PathInfo{false, false};
+
+    struct stat st;
+#ifdef _WIN32
+    if (stat(absolute_path.c_str(), &st) != 0) {
+#else
+    if (lstat(absolute_path.c_str(), &st) != 0) {
+#endif
+        const int error_code = errno;
+        if (error_code == ENOENT || error_code == ENOTDIR) {
+            return PathInfo{false, false};
+        }
+        throw TransferFailure(TransferRpcCode::Internal, std::strerror(error_code));
     }
-    if (is_symlink_path(absolute_path)) {
+
+#ifdef _WIN32
+    return PathInfo{true, (st.st_mode & S_IFMT) == S_IFDIR};
+#else
+    if ((st.st_mode & S_IFMT) == S_IFLNK) {
         throw TransferFailure(
             TransferRpcCode::DestinationUnsupported,
             "destination path contains unsupported symlink"
         );
     }
-    return PathInfo{true, is_directory(absolute_path)};
+    return PathInfo{true, (st.st_mode & S_IFMT) == S_IFDIR};
+#endif
 }

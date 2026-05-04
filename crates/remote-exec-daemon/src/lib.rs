@@ -4,6 +4,7 @@ pub mod image;
 pub mod logging;
 pub mod patch;
 pub mod port_forward;
+pub(crate) mod rpc_error;
 pub mod server;
 pub mod tls;
 pub mod transfer;

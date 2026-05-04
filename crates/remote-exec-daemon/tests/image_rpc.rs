@@ -1,5 +1,7 @@
 mod support;
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use base64::Engine;
@@ -382,4 +384,44 @@ allow = {allow}
 
     assert_eq!(err.code, "sandbox_denied");
     assert!(err.message.contains("read access"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn image_read_reports_permission_denied_as_internal_error() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let hidden = fixture.workdir.join("hidden");
+    tokio::fs::create_dir_all(&hidden).await.unwrap();
+    write_png(&hidden.join("blocked.png"), 16, 16).await;
+
+    let original_mode = std::fs::metadata(&hidden).unwrap().permissions().mode();
+    let mut blocked_perms = std::fs::metadata(&hidden).unwrap().permissions();
+    blocked_perms.set_mode(0o000);
+    std::fs::set_permissions(&hidden, blocked_perms).unwrap();
+
+    let response = fixture
+        .raw_post_json(
+            "/v1/image/read",
+            &ImageReadRequest {
+                path: "hidden/blocked.png".to_string(),
+                workdir: None,
+                detail: None,
+            },
+        )
+        .await;
+
+    let mut restored_perms = std::fs::metadata(&hidden).unwrap().permissions();
+    restored_perms.set_mode(original_mode);
+    std::fs::set_permissions(&hidden, restored_perms).unwrap();
+
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::INTERNAL_SERVER_ERROR
+    );
+    let err = response
+        .json::<remote_exec_proto::rpc::RpcErrorBody>()
+        .await
+        .unwrap();
+    assert_eq!(err.code, "internal_error");
+    assert!(err.message.contains("blocked.png") || err.message.contains("Permission denied"));
 }

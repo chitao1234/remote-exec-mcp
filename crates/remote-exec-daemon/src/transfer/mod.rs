@@ -8,13 +8,15 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use axum::response::Response;
-use remote_exec_host::HostRpcError;
 use remote_exec_proto::rpc::{
-    RpcErrorBody, TransferExportRequest, TransferImportResponse, TransferPathInfoRequest,
-    TransferPathInfoResponse,
+    RpcErrorBody, TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
+    TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
+    TRANSFER_SYMLINK_MODE_HEADER, TransferExportRequest, TransferImportRequest,
+    TransferImportResponse, TransferPathInfoRequest, TransferPathInfoResponse,
 };
 
 use crate::AppState;
+use crate::rpc_error::{bad_request, host_rpc_error_response};
 
 pub async fn path_info(
     State(state): State<Arc<AppState>>,
@@ -66,7 +68,7 @@ pub async fn import_archive(
     headers: HeaderMap,
     body: Body,
 ) -> Result<Json<TransferImportResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    let request = remote_exec_host::transfer::parse_import_request(&headers)?;
+    let request = parse_import_request(&headers)?;
     tracing::info!(
         destination_path = %request.destination_path,
         overwrite = ?request.overwrite,
@@ -106,12 +108,75 @@ fn format_compression(compression: &remote_exec_proto::rpc::TransferCompression)
     }
 }
 
-fn host_rpc_error_response(err: HostRpcError) -> (StatusCode, Json<RpcErrorBody>) {
-    (
-        StatusCode::from_u16(err.status).expect("valid host rpc status"),
-        Json(RpcErrorBody {
-            code: err.code.to_string(),
-            message: err.message,
-        }),
-    )
+fn parse_import_request(
+    headers: &HeaderMap,
+) -> Result<TransferImportRequest, (StatusCode, Json<RpcErrorBody>)> {
+    Ok(TransferImportRequest {
+        destination_path: required_header_string(headers, TRANSFER_DESTINATION_PATH_HEADER)?,
+        overwrite: parse_required_header_enum(headers, TRANSFER_OVERWRITE_HEADER)?,
+        create_parent: required_header_string(headers, TRANSFER_CREATE_PARENT_HEADER)?
+            .parse::<bool>()
+            .map_err(|err| {
+                bad_request(format!(
+                    "invalid header `{TRANSFER_CREATE_PARENT_HEADER}`: {err}"
+                ))
+            })?,
+        source_type: parse_required_header_enum(headers, TRANSFER_SOURCE_TYPE_HEADER)?,
+        compression: parse_optional_header_enum(headers, TRANSFER_COMPRESSION_HEADER)?
+            .unwrap_or_default(),
+        symlink_mode: parse_optional_header_enum(headers, TRANSFER_SYMLINK_MODE_HEADER)?
+            .unwrap_or_default(),
+    })
+}
+
+fn required_header_string(
+    headers: &HeaderMap,
+    name: &str,
+) -> Result<String, (StatusCode, Json<RpcErrorBody>)> {
+    optional_header_string(headers, name)?
+        .ok_or_else(|| bad_request(format!("missing header `{name}`")))
+}
+
+fn optional_header_string(
+    headers: &HeaderMap,
+    name: &str,
+) -> Result<Option<String>, (StatusCode, Json<RpcErrorBody>)> {
+    match headers.get(name) {
+        None => Ok(None),
+        Some(value) => value
+            .to_str()
+            .map(|value| Some(value.to_string()))
+            .map_err(|err| bad_request(format!("invalid header `{name}`: {err}"))),
+    }
+}
+
+fn parse_required_header_enum<T>(
+    headers: &HeaderMap,
+    name: &str,
+) -> Result<T, (StatusCode, Json<RpcErrorBody>)>
+where
+    T: serde::de::DeserializeOwned,
+{
+    parse_header_enum_value(name, &required_header_string(headers, name)?)
+}
+
+fn parse_optional_header_enum<T>(
+    headers: &HeaderMap,
+    name: &str,
+) -> Result<Option<T>, (StatusCode, Json<RpcErrorBody>)>
+where
+    T: serde::de::DeserializeOwned,
+{
+    optional_header_string(headers, name)?
+        .as_deref()
+        .map(|raw| parse_header_enum_value(name, raw))
+        .transpose()
+}
+
+fn parse_header_enum_value<T>(name: &str, raw: &str) -> Result<T, (StatusCode, Json<RpcErrorBody>)>
+where
+    T: serde::de::DeserializeOwned,
+{
+    serde_json::from_str::<T>(&format!("\"{raw}\""))
+        .map_err(|err| bad_request(format!("invalid header `{name}`: {err}")))
 }

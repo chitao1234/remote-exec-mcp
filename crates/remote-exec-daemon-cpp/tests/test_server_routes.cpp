@@ -254,6 +254,33 @@ int main() {
     const Json gif_error = Json::parse(gif_response.body);
     assert(gif_error.at("code").get<std::string>() == "image_decode_failed");
 
+#ifndef _WIN32
+    const fs::path blocked_image_dir = root / "blocked-image";
+    fs::create_directories(blocked_image_dir);
+    write_binary_file(
+        blocked_image_dir / "blocked.png",
+        base64_decode_bytes(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg=="
+        )
+    );
+    fs::permissions(blocked_image_dir, fs::perms::none, fs::perm_options::replace);
+    const HttpResponse blocked_image_response = route_request(
+        state,
+        json_request(
+            "/v1/image/read",
+            Json{{"path", "blocked-image/blocked.png"}, {"workdir", root.string()}}
+        )
+    );
+    fs::permissions(
+        blocked_image_dir,
+        fs::perms::owner_all,
+        fs::perm_options::replace
+    );
+    assert(blocked_image_response.status == 500);
+    const Json blocked_image_error = Json::parse(blocked_image_response.body);
+    assert(blocked_image_error.at("code").get<std::string>() == "internal_error");
+#endif
+
     const HttpResponse source_info_response = route_request(
         state,
         json_request("/v1/transfer/path-info", Json{{"path", source_file.string()}})
@@ -279,6 +306,28 @@ int main() {
     assert(relative_info_response.status == 400);
     const Json relative_info_error = Json::parse(relative_info_response.body);
     assert(relative_info_error.at("code").get<std::string>() == "transfer_path_not_absolute");
+
+#ifndef _WIN32
+    const fs::path blocked_transfer_dir = root / "blocked-transfer";
+    fs::create_directories(blocked_transfer_dir);
+    write_text_file(blocked_transfer_dir / "inside.txt", "secret");
+    fs::permissions(blocked_transfer_dir, fs::perms::none, fs::perm_options::replace);
+    const HttpResponse blocked_transfer_info_response = route_request(
+        state,
+        json_request(
+            "/v1/transfer/path-info",
+            Json{{"path", (blocked_transfer_dir / "inside.txt").string()}}
+        )
+    );
+    fs::permissions(
+        blocked_transfer_dir,
+        fs::perms::owner_all,
+        fs::perm_options::replace
+    );
+    assert(blocked_transfer_info_response.status == 500);
+    const Json blocked_transfer_info_error = Json::parse(blocked_transfer_info_response.body);
+    assert(blocked_transfer_info_error.at("code").get<std::string>() == "internal_error");
+#endif
 
     const HttpResponse export_response = route_request(
         state,

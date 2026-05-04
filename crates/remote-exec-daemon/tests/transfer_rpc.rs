@@ -233,6 +233,46 @@ async fn transfer_path_info_rejects_relative_paths_with_explicit_code() {
     assert!(err.message.contains("relative/output"));
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn transfer_path_info_reports_permission_denied_as_internal_error() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let blocked = fixture.workdir.join("blocked");
+    tokio::fs::create_dir_all(&blocked).await.unwrap();
+    tokio::fs::write(blocked.join("inside.txt"), "secret\n")
+        .await
+        .unwrap();
+
+    let original_mode = std::fs::metadata(&blocked).unwrap().permissions().mode();
+    let mut blocked_perms = std::fs::metadata(&blocked).unwrap().permissions();
+    blocked_perms.set_mode(0o000);
+    std::fs::set_permissions(&blocked, blocked_perms).unwrap();
+
+    let response = fixture
+        .raw_post_json(
+            "/v1/transfer/path-info",
+            &TransferPathInfoRequest {
+                path: blocked.join("inside.txt").display().to_string(),
+            },
+        )
+        .await;
+
+    let mut restored_perms = std::fs::metadata(&blocked).unwrap().permissions();
+    restored_perms.set_mode(original_mode);
+    std::fs::set_permissions(&blocked, restored_perms).unwrap();
+
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::INTERNAL_SERVER_ERROR
+    );
+    let err = response
+        .json::<remote_exec_proto::rpc::RpcErrorBody>()
+        .await
+        .unwrap();
+    assert_eq!(err.code, "internal_error");
+    assert!(err.message.contains("Permission denied"));
+}
+
 #[tokio::test]
 async fn export_file_supports_zstd_compression() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
@@ -1065,6 +1105,46 @@ async fn import_rejects_existing_destination_when_overwrite_is_fail() {
         tokio::fs::read_to_string(&destination).await.unwrap(),
         "old\n"
     );
+}
+
+#[tokio::test]
+async fn import_rejects_missing_destination_header_as_bad_request() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let source = fixture.workdir.join("source.txt");
+    tokio::fs::write(&source, "artifact\n").await.unwrap();
+
+    let exported = fixture
+        .raw_post_json(
+            "/v1/transfer/export",
+            &TransferExportRequest {
+                path: source.display().to_string(),
+                compression: TransferCompression::None,
+                symlink_mode: Default::default(),
+                exclude: Vec::new(),
+            },
+        )
+        .await;
+    let bytes = exported.bytes().await.unwrap().to_vec();
+
+    let response = fixture
+        .raw_post_bytes(
+            "/v1/transfer/import",
+            &[
+                (TRANSFER_OVERWRITE_HEADER, "replace".to_string()),
+                (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
+                (TRANSFER_SOURCE_TYPE_HEADER, "file".to_string()),
+            ],
+            bytes,
+        )
+        .await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let err = response
+        .json::<remote_exec_proto::rpc::RpcErrorBody>()
+        .await
+        .unwrap();
+    assert_eq!(err.code, "bad_request");
+    assert!(err.message.contains(TRANSFER_DESTINATION_PATH_HEADER));
 }
 
 #[tokio::test]

@@ -1,33 +1,21 @@
 use std::fmt::Display;
 use std::io::Cursor;
+use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-use axum::Json;
-use axum::extract::State;
-use axum::http::StatusCode;
 use base64::Engine;
 use image::codecs::jpeg::JpegEncoder;
 use image::codecs::webp::WebPEncoder;
 use image::{DynamicImage, ImageFormat};
-use remote_exec_proto::rpc::{ImageReadRequest, ImageReadResponse, RpcErrorBody};
+use remote_exec_proto::rpc::{ImageReadRequest, ImageReadResponse};
 use remote_exec_proto::sandbox::SandboxAccess;
 
 use crate::AppState;
-use crate::error::{HostRpcError, ImageError};
+use crate::error::ImageError;
 
 const MAX_WIDTH: u32 = 2048;
 const MAX_HEIGHT: u32 = 2048;
-
-pub async fn read_image(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<ImageReadRequest>,
-) -> Result<Json<ImageReadResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    read_image_local(state, req)
-        .await
-        .map(Json)
-        .map_err(|err| host_rpc_error_response(err.into_host_rpc_error()))
-}
 
 pub async fn read_image_local(
     state: Arc<AppState>,
@@ -58,12 +46,9 @@ pub async fn read_image_local(
     ));
     crate::exec::ensure_sandbox_access(&state, SandboxAccess::Read, &path)
         .map_err(|err| ImageError::sandbox_denied(err.to_string()))?;
-    let metadata = tokio::fs::metadata(&path).await.map_err(|err| {
-        ImageError::missing(format!(
-            "unable to locate image at `{}`: {err}",
-            path.display()
-        ))
-    })?;
+    let metadata = tokio::fs::metadata(&path)
+        .await
+        .map_err(|err| metadata_error(&path, err))?;
     if !metadata.is_file() {
         return Err(ImageError::not_file(format!(
             "image path `{}` is not a file",
@@ -73,7 +58,7 @@ pub async fn read_image_local(
 
     let bytes = tokio::fs::read(&path)
         .await
-        .map_err(|err| process_error(&path, err))?;
+        .map_err(|err| read_error(&path, err))?;
     let (format, rendered_bytes) = render_image_bytes(&path, req.detail.as_deref(), bytes)?;
     let image_url = encode_data_url(format, rendered_bytes)?;
     tracing::info!(
@@ -126,6 +111,27 @@ fn process_error(path: &Path, err: impl Display) -> ImageError {
     ))
 }
 
+fn metadata_error(path: &Path, err: std::io::Error) -> ImageError {
+    if err.kind() == ErrorKind::NotFound {
+        ImageError::missing(format!(
+            "unable to locate image at `{}`: {err}",
+            path.display()
+        ))
+    } else {
+        ImageError::internal(format!(
+            "unable to access image at `{}`: {err}",
+            path.display()
+        ))
+    }
+}
+
+fn read_error(path: &Path, err: std::io::Error) -> ImageError {
+    ImageError::internal(format!(
+        "unable to read image at `{}`: {err}",
+        path.display()
+    ))
+}
+
 fn encode_processed_image(
     image: &DynamicImage,
     format: ImageFormat,
@@ -165,8 +171,12 @@ fn render_image_bytes(
         image.resize(MAX_WIDTH, MAX_HEIGHT, image::imageops::FilterType::Triangle)
     };
     let output_format = output_format_for_processed_image(source_format);
-    let rendered_bytes =
-        encode_processed_image(&rendered, output_format).map_err(|err| process_error(path, err))?;
+    let rendered_bytes = encode_processed_image(&rendered, output_format).map_err(|err| {
+        ImageError::internal(format!(
+            "unable to encode image at `{}`: {err}",
+            path.display()
+        ))
+    })?;
     Ok((output_format, rendered_bytes))
 }
 
@@ -177,8 +187,8 @@ fn encode_data_url(format: ImageFormat, bytes: Vec<u8>) -> Result<String, ImageE
         ImageFormat::WebP => "image/webp",
         ImageFormat::Gif => "image/gif",
         other => {
-            return Err(ImageError::decode_failed(format!(
-                "unsupported image format `{other:?}`"
+            return Err(ImageError::internal(format!(
+                "unexpected output image format `{other:?}`"
             )));
         }
     };
@@ -187,14 +197,4 @@ fn encode_data_url(format: ImageFormat, bytes: Vec<u8>) -> Result<String, ImageE
         "data:{mime};base64,{}",
         base64::engine::general_purpose::STANDARD.encode(bytes)
     ))
-}
-
-fn host_rpc_error_response(err: HostRpcError) -> (StatusCode, Json<RpcErrorBody>) {
-    (
-        StatusCode::from_u16(err.status).expect("valid host rpc status"),
-        Json(RpcErrorBody {
-            code: err.code.to_string(),
-            message: err.message,
-        }),
-    )
 }

@@ -1,3 +1,4 @@
+#include <cerrno>
 #include <cstring>
 #include <fstream>
 #include <sstream>
@@ -98,6 +99,10 @@ ImageFailure decode_failed_image(const std::string& message) {
     return ImageFailure(ImageRpcCode::DecodeFailed, message);
 }
 
+ImageFailure internal_image_failure(const std::string& message) {
+    return ImageFailure(ImageRpcCode::Internal, message);
+}
+
 std::vector<std::string> transfer_exclude_or_empty(const Json& body) {
     const Json::const_iterator it = body.find("exclude");
     if (it == body.end() || it->is_null()) {
@@ -125,23 +130,37 @@ std::string resolve_input_path(
 }
 
 std::string read_binary_file_bytes(const std::string& path) {
+    errno = 0;
     std::ifstream input(path.c_str(), std::ios::binary);
     if (!input) {
-        throw decode_failed_image(
-            "unable to process image at `" + path + "`: unable to read file"
-        );
+        const int error_code = errno;
+        if (error_code != 0) {
+            throw internal_image_failure(
+                "unable to read image at `" + path + "`: " + std::strerror(error_code)
+            );
+        }
+        throw internal_image_failure("unable to read image at `" + path + "`");
     }
     return std::string((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
 }
 
-bool image_path_exists(const std::string& path) {
+void require_regular_image_file(const std::string& path) {
     struct stat st;
-    return stat(path.c_str(), &st) == 0;
-}
+    if (stat(path.c_str(), &st) == 0) {
+        if ((st.st_mode & S_IFMT) != S_IFREG) {
+            throw not_file_image_failure(path);
+        }
+        return;
+    }
 
-bool image_path_is_regular_file(const std::string& path) {
-    struct stat st;
-    return stat(path.c_str(), &st) == 0 && (st.st_mode & S_IFMT) == S_IFREG;
+    const int error_code = errno;
+    if (error_code == ENOENT || error_code == ENOTDIR) {
+        throw missing_image_failure(path);
+    }
+
+    throw internal_image_failure(
+        "unable to access image at `" + path + "`: " + std::strerror(error_code)
+    );
 }
 
 std::string image_mime_type(const std::string& path, const std::string& bytes) {
@@ -210,12 +229,7 @@ HttpResponse handle_image_read(AppState& state, const HttpRequest& request) {
 
         const std::string path = resolve_input_path(state, body, "path");
         authorize_sandbox_path(state, SANDBOX_READ, path);
-        if (!image_path_exists(path)) {
-            throw missing_image_failure(path);
-        }
-        if (!image_path_is_regular_file(path)) {
-            throw not_file_image_failure(path);
-        }
+        require_regular_image_file(path);
 
         const std::string bytes = read_binary_file_bytes(path);
         const std::string mime = image_mime_type(path, bytes);
