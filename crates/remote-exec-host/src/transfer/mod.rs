@@ -2,9 +2,6 @@ pub mod archive;
 
 use std::sync::Arc;
 
-use axum::body::Body;
-use futures_util::TryStreamExt;
-use http_body_util::BodyExt;
 use remote_exec_proto::rpc::{
     TransferCompression, TransferExportRequest, TransferImportRequest, TransferImportResponse,
     TransferPathInfoRequest, TransferPathInfoResponse,
@@ -78,14 +75,11 @@ pub async fn export_path_local(
 pub async fn import_archive_local(
     state: Arc<AppState>,
     request: TransferImportRequest,
-    body: Body,
+    reader: impl tokio::io::AsyncRead + Unpin + Send + 'static,
 ) -> Result<TransferImportResponse, TransferError> {
     ensure_transfer_compression_supported(state.as_ref(), &request.compression)?;
-    let stream = tokio_util::io::StreamReader::new(
-        BodyExt::into_data_stream(body).map_err(std::io::Error::other),
-    );
     archive::import_archive_from_async_reader(
-        stream,
+        reader,
         &request,
         state.sandbox.as_ref(),
         state.config.windows_posix_root.as_deref(),

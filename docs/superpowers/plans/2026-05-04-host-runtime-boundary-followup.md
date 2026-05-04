@@ -6,7 +6,7 @@
 
 **Goal:** Remove the remaining image/transfer transport leakage from `remote-exec-host`, classify request-shape failures and internal filesystem faults correctly, and lock the behavior down with regression coverage.
 
-**Architecture:** Keep `remote-exec-host` focused on local runtime operations plus typed host errors, not Axum handlers or HTTP header parsing for image/transfer. Let `remote-exec-daemon` own transfer import header validation and HTTP response shaping, while both Rust and C++ daemons distinguish request faults from true internal filesystem failures on image and transfer routes.
+**Architecture:** Keep `remote-exec-host` focused on local runtime operations plus typed host errors, not Axum handlers or HTTP header parsing for image/transfer. Let `remote-exec-daemon` own transfer import header validation, HTTP body adaptation, and HTTP response shaping, while `remote-exec-host` stays on transport-neutral request types and `AsyncRead` seams. Both Rust and C++ daemons should distinguish request faults from true internal filesystem failures on image and transfer routes.
 
 **Tech Stack:** Rust 2024, Tokio, axum, reqwest, serde, existing daemon integration fixtures, C++17 route harnesses, cargo test, cargo fmt, cargo clippy, make
 

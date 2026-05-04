@@ -8,6 +8,8 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use axum::response::Response;
+use futures_util::TryStreamExt;
+use http_body_util::BodyExt;
 use remote_exec_proto::rpc::{
     RpcErrorBody, TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
     TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
@@ -78,7 +80,10 @@ pub async fn import_archive(
         symlink_mode = ?request.symlink_mode,
         "transfer import received"
     );
-    let summary = remote_exec_host::transfer::import_archive_local(state, request.clone(), body)
+    let reader = tokio_util::io::StreamReader::new(
+        BodyExt::into_data_stream(body).map_err(std::io::Error::other),
+    );
+    let summary = remote_exec_host::transfer::import_archive_local(state, request.clone(), reader)
         .await
         .map_err(|err| host_rpc_error_response(err.into_host_rpc_error()))?;
     tracing::info!(
