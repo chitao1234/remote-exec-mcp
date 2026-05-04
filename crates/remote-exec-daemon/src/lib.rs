@@ -1,5 +1,6 @@
 pub mod config;
 pub mod exec;
+pub mod http;
 pub mod image;
 pub mod logging;
 pub mod patch;
