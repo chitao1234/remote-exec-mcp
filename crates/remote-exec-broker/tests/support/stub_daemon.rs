@@ -73,6 +73,16 @@ enum StubTransferExportResponse {
     },
 }
 
+#[derive(Debug, Clone)]
+pub enum StubTransferPathInfoResponse {
+    Success(TransferPathInfoResponse),
+    #[allow(dead_code, reason = "Shared across broker integration test crates")]
+    Error {
+        status: StatusCode,
+        body: RpcErrorBody,
+    },
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(super) enum ExecWriteBehavior {
     Success,
@@ -110,7 +120,7 @@ pub(super) struct StubDaemonState {
     pub(super) last_transfer_export: Arc<Mutex<Option<StubTransferExportCapture>>>,
     pub(super) image_read_response: Arc<Mutex<StubImageReadResponse>>,
     transfer_export_response: Arc<Mutex<StubTransferExportResponse>>,
-    transfer_path_info_response: Arc<Mutex<TransferPathInfoResponse>>,
+    transfer_path_info_response: Arc<Mutex<StubTransferPathInfoResponse>>,
 }
 
 fn stub_directory_archive() -> Vec<u8> {
@@ -222,10 +232,12 @@ pub(super) fn stub_daemon_state(
             compression: TransferCompression::None,
             body: stub_directory_archive(),
         })),
-        transfer_path_info_response: Arc::new(Mutex::new(TransferPathInfoResponse {
-            exists: false,
-            is_directory: false,
-        })),
+        transfer_path_info_response: Arc::new(Mutex::new(StubTransferPathInfoResponse::Success(
+            TransferPathInfoResponse {
+                exists: false,
+                is_directory: false,
+            },
+        ))),
     }
 }
 
@@ -260,7 +272,17 @@ pub(super) async fn set_transfer_path_info_response(
     state: &StubDaemonState,
     response: TransferPathInfoResponse,
 ) {
-    *state.transfer_path_info_response.lock().await = response;
+    *state.transfer_path_info_response.lock().await =
+        StubTransferPathInfoResponse::Success(response);
+}
+
+pub(super) async fn set_transfer_path_info_error_response(
+    state: &StubDaemonState,
+    status: StatusCode,
+    body: RpcErrorBody,
+) {
+    *state.transfer_path_info_response.lock().await =
+        StubTransferPathInfoResponse::Error { status, body };
 }
 
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
@@ -347,45 +369,31 @@ pub(super) async fn spawn_named_daemon_on_addr(
 ) {
     let app = stub_router(state.clone());
 
-    let daemon_state = remote_exec_daemon::AppState {
-        config: Arc::new(remote_exec_daemon::config::DaemonConfig {
-            target: state.target.clone(),
-            listen: addr,
-            default_workdir: PathBuf::from("."),
-            windows_posix_root: None,
-            transport: remote_exec_daemon::config::DaemonTransport::Tls,
-            http_auth: None,
-            sandbox: None,
-            enable_transfer_compression: state.target_supports_transfer_compression,
-            allow_login_shell: true,
-            pty: remote_exec_daemon::config::PtyMode::Auto,
-            default_shell: None,
-            yield_time: remote_exec_daemon::config::YieldTimeConfig::default(),
-            experimental_apply_patch_target_encoding_autodetect: false,
-            process_environment: remote_exec_daemon::config::ProcessEnvironment::capture_current(),
-            tls: Some(remote_exec_daemon::config::TlsConfig {
-                cert_pem: certs.daemon_cert.clone(),
-                key_pem: certs.daemon_key.clone(),
-                ca_pem: certs.ca_cert.clone(),
-                pinned_client_cert_pem: None,
-            }),
-        }),
-        default_shell: if cfg!(windows) {
-            "cmd.exe".to_string()
-        } else {
-            "/bin/sh".to_string()
-        },
+    let daemon_config = remote_exec_daemon::config::DaemonConfig {
+        target: state.target.clone(),
+        listen: addr,
+        default_workdir: PathBuf::from("."),
+        windows_posix_root: None,
+        transport: remote_exec_daemon::config::DaemonTransport::Tls,
+        http_auth: None,
         sandbox: None,
-        supports_pty: state.target_supports_pty,
-        supports_transfer_compression: state.target_supports_transfer_compression,
-        windows_pty_backend_override: None,
-        daemon_instance_id: "daemon-instance-1".to_string(),
-        sessions: remote_exec_daemon::exec::store::SessionStore::default(),
-        port_forwards: remote_exec_daemon::port_forward::PortForwardState::default(),
+        enable_transfer_compression: state.target_supports_transfer_compression,
+        allow_login_shell: true,
+        pty: remote_exec_daemon::config::PtyMode::Auto,
+        default_shell: None,
+        yield_time: remote_exec_daemon::config::YieldTimeConfig::default(),
+        experimental_apply_patch_target_encoding_autodetect: false,
+        process_environment: remote_exec_daemon::config::ProcessEnvironment::capture_current(),
+        tls: Some(remote_exec_daemon::config::TlsConfig {
+            cert_pem: certs.daemon_cert.clone(),
+            key_pem: certs.daemon_key.clone(),
+            ca_pem: certs.ca_cert.clone(),
+            pinned_client_cert_pem: None,
+        }),
     };
 
     tokio::spawn(async move {
-        remote_exec_daemon::tls::serve_tls(app, Arc::new(daemon_state))
+        remote_exec_daemon::tls::serve_tls(app, Arc::new(daemon_config))
             .await
             .unwrap();
     });
@@ -644,8 +652,11 @@ async fn transfer_export(
 async fn transfer_path_info(
     State(state): State<StubDaemonState>,
     Json(_req): Json<TransferPathInfoRequest>,
-) -> Json<TransferPathInfoResponse> {
-    Json(state.transfer_path_info_response.lock().await.clone())
+) -> Result<Json<TransferPathInfoResponse>, (StatusCode, Json<RpcErrorBody>)> {
+    match state.transfer_path_info_response.lock().await.clone() {
+        StubTransferPathInfoResponse::Success(response) => Ok(Json(response)),
+        StubTransferPathInfoResponse::Error { status, body } => Err((status, Json(body))),
+    }
 }
 
 async fn transfer_import(

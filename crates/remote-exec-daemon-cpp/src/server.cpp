@@ -18,6 +18,7 @@
 #include "logging.h"
 #include "path_policy.h"
 #include "platform.h"
+#include "rpc_failures.h"
 #include "server.h"
 #include "server_routes.h"
 #include "server_transport.h"
@@ -136,7 +137,10 @@ void authorize_sandbox_path(
 std::string resolve_absolute_transfer_path(const std::string& path) {
     const PathPolicy policy = host_path_policy();
     if (!is_absolute_for_policy(policy, path)) {
-        throw std::runtime_error("transfer path is not absolute");
+        throw TransferFailure(
+            TransferRpcCode::PathNotAbsolute,
+            "transfer path is not absolute"
+        );
     }
     return normalize_for_system(policy, path);
 }
@@ -169,10 +173,31 @@ HttpResponse handle_streaming_transfer_import(
         );
         log_transfer_import_summary(destination_path, summary);
         write_json(response, transfer_summary_json(summary));
+    } catch (const SandboxError& ex) {
+        log_message(LOG_WARN, "server", std::string("transfer/import failed: ") + ex.what());
+        write_rpc_error(
+            response,
+            400,
+            transfer_error_code_name(TransferRpcCode::SandboxDenied),
+            ex.what()
+        );
+    } catch (const TransferFailure& failure) {
+        log_message(LOG_WARN, "server", "transfer/import failed: " + failure.message);
+        write_rpc_error(
+            response,
+            400,
+            transfer_error_code_name(failure.code),
+            failure.message
+        );
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
         log_message(LOG_WARN, "server", "transfer/import failed: " + message);
-        write_rpc_error(response, 400, transfer_error_code(message), message);
+        write_rpc_error(
+            response,
+            400,
+            transfer_error_code_name(TransferRpcCode::TransferFailed),
+            message
+        );
     }
 
     return response;
@@ -228,6 +253,39 @@ int handle_streaming_transfer_export(
         export_path_to_sink_as(sink, path, source_type, symlink_mode, exclude);
         sink.finish();
         return 200;
+    } catch (const SandboxError& ex) {
+        const std::string message = ex.what();
+        log_message(LOG_WARN, "server", "transfer/export failed: " + message);
+        if (headers_sent) {
+            return 200;
+        }
+
+        HttpResponse response;
+        response.status = 400;
+        write_rpc_error(
+            response,
+            400,
+            transfer_error_code_name(TransferRpcCode::SandboxDenied),
+            message
+        );
+        send_all(client, render_http_response(response));
+        return response.status;
+    } catch (const TransferFailure& failure) {
+        log_message(LOG_WARN, "server", "transfer/export failed: " + failure.message);
+        if (headers_sent) {
+            return 200;
+        }
+
+        HttpResponse response;
+        response.status = 400;
+        write_rpc_error(
+            response,
+            400,
+            transfer_error_code_name(failure.code),
+            failure.message
+        );
+        send_all(client, render_http_response(response));
+        return response.status;
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
         log_message(LOG_WARN, "server", "transfer/export failed: " + message);
@@ -237,7 +295,12 @@ int handle_streaming_transfer_export(
 
         HttpResponse response;
         response.status = 400;
-        write_rpc_error(response, 400, transfer_error_code(message), message);
+        write_rpc_error(
+            response,
+            400,
+            transfer_error_code_name(TransferRpcCode::TransferFailed),
+            message
+        );
         send_all(client, render_http_response(response));
         return response.status;
     }

@@ -15,6 +15,7 @@
 #include <unistd.h>
 #endif
 
+#include "rpc_failures.h"
 #include "transfer_ops.h"
 
 namespace fs = std::filesystem;
@@ -737,6 +738,15 @@ static void assert_multiple_sources_import() {
 }
 
 int main() {
+    assert(
+        std::string(transfer_error_code_name(TransferRpcCode::SourceMissing)) ==
+        "transfer_source_missing"
+    );
+    assert(
+        std::string(transfer_error_code_name(TransferRpcCode::CompressionUnsupported)) ==
+        "transfer_compression_unsupported"
+    );
+
     assert_file_transfer();
     assert_file_transfer_blocks_unexpected_entry_path();
     assert_file_transfer_blocks_raw_bytes();

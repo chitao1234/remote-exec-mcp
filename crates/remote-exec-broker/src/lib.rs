@@ -575,7 +575,6 @@ fn mcp_transport_name(config: &config::McpServerConfig) -> &'static str {
 }
 
 pub fn install_crypto_provider() {
-    remote_exec_daemon::install_crypto_provider();
     broker_tls::install_crypto_provider();
 }
 
@@ -604,9 +603,9 @@ mod tests {
                 default_workdir: tempdir.path().to_path_buf(),
                 windows_posix_root: None,
                 allow_login_shell: true,
-                pty: remote_exec_daemon::config::PtyMode::Auto,
+                pty: remote_exec_host::PtyMode::Auto,
                 default_shell: Some(missing_shell.to_string()),
-                yield_time: remote_exec_daemon::config::YieldTimeConfig::default(),
+                yield_time: remote_exec_host::YieldTimeConfig::default(),
                 experimental_apply_patch_target_encoding_autodetect: false,
             }),
         })

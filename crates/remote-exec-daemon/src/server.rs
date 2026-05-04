@@ -15,21 +15,26 @@ use axum::{
 use remote_exec_proto::rpc::{HealthCheckResponse, RpcErrorBody, TargetInfoResponse};
 
 use crate::AppState;
+use crate::config::DaemonConfig;
 
-pub async fn serve(state: AppState) -> Result<()> {
-    serve_with_shutdown(state, std::future::pending::<()>()).await
+pub async fn serve(state: AppState, daemon_config: Arc<DaemonConfig>) -> Result<()> {
+    serve_with_shutdown(state, daemon_config, std::future::pending::<()>()).await
 }
 
-pub async fn serve_with_shutdown<F>(state: AppState, shutdown: F) -> Result<()>
+pub async fn serve_with_shutdown<F>(
+    state: AppState,
+    daemon_config: Arc<DaemonConfig>,
+    shutdown: F,
+) -> Result<()>
 where
     F: Future<Output = ()> + Send,
 {
     let state = Arc::new(state);
-    let app = router(state.clone());
-    crate::tls::serve_with_shutdown(app, state, shutdown).await
+    let app = router(state.clone(), daemon_config.clone());
+    crate::tls::serve_with_shutdown(app, daemon_config, shutdown).await
 }
 
-pub fn router(state: Arc<AppState>) -> Router {
+pub fn router(state: Arc<AppState>, daemon_config: Arc<DaemonConfig>) -> Router {
     Router::new()
         .route("/v1/health", post(health))
         .route("/v1/target-info", post(target_info))
@@ -71,7 +76,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(crate::port_forward::udp_datagram_write),
         )
         .layer(middleware::from_fn_with_state(
-            state.clone(),
+            daemon_config,
             require_http_auth,
         ))
         .with_state(state)
@@ -110,11 +115,11 @@ async fn log_http_request(request: Request, next: Next) -> Response {
 }
 
 async fn require_http_auth(
-    State(state): State<Arc<AppState>>,
+    State(daemon_config): State<Arc<DaemonConfig>>,
     request: Request,
     next: Next,
 ) -> Response {
-    let Some(http_auth) = state.config.http_auth.as_ref() else {
+    let Some(http_auth) = daemon_config.http_auth.as_ref() else {
         return next.run(request).await;
     };
 

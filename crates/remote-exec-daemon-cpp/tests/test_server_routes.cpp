@@ -226,6 +226,17 @@ int main() {
     const Json invalid_detail = Json::parse(invalid_detail_response.body);
     assert(invalid_detail.at("code").get<std::string>() == "invalid_detail");
 
+    const HttpResponse missing_image_response = route_request(
+        state,
+        json_request(
+            "/v1/image/read",
+            Json{{"path", "missing.png"}, {"workdir", root.string()}}
+        )
+    );
+    assert(missing_image_response.status == 400);
+    const Json missing_image = Json::parse(missing_image_response.body);
+    assert(missing_image.at("code").get<std::string>() == "image_missing");
+
     const fs::path gif_file = root / "tiny.gif";
     write_binary_file(
         gif_file,
@@ -260,6 +271,14 @@ int main() {
     const Json root_info = Json::parse(root_info_response.body);
     assert(root_info.at("exists").get<bool>());
     assert(root_info.at("is_directory").get<bool>());
+
+    const HttpResponse relative_info_response = route_request(
+        state,
+        json_request("/v1/transfer/path-info", Json{{"path", "relative/path.txt"}})
+    );
+    assert(relative_info_response.status == 400);
+    const Json relative_info_error = Json::parse(relative_info_response.body);
+    assert(relative_info_error.at("code").get<std::string>() == "transfer_path_not_absolute");
 
     const HttpResponse export_response = route_request(
         state,
@@ -341,6 +360,28 @@ int main() {
     assert(imported.at("replaced").get<bool>() == false);
     assert(imported.at("warnings").empty());
     assert(read_text_file(root / "transfer-dest.txt") == "route transfer payload");
+
+    fs::create_directories(root / "merge-dir");
+    HttpRequest merge_file_into_directory_request;
+    merge_file_into_directory_request.method = "POST";
+    merge_file_into_directory_request.path = "/v1/transfer/import";
+    merge_file_into_directory_request.headers["x-remote-exec-source-type"] = "file";
+    merge_file_into_directory_request.headers["x-remote-exec-destination-path"] =
+        (root / "merge-dir").string();
+    merge_file_into_directory_request.headers["x-remote-exec-overwrite"] = "merge";
+    merge_file_into_directory_request.headers["x-remote-exec-create-parent"] = "true";
+    merge_file_into_directory_request.headers["x-remote-exec-symlink-mode"] = "preserve";
+    merge_file_into_directory_request.headers["x-remote-exec-compression"] = "none";
+    merge_file_into_directory_request.body = export_response.body;
+    const HttpResponse merge_file_into_directory_response =
+        route_request(state, merge_file_into_directory_request);
+    assert(merge_file_into_directory_response.status == 400);
+    const Json merge_file_into_directory_error =
+        Json::parse(merge_file_into_directory_response.body);
+    assert(
+        merge_file_into_directory_error.at("code").get<std::string>() ==
+        "transfer_destination_unsupported"
+    );
 
     const fs::path sandbox_root = root / "sandbox";
     const fs::path exec_allowed = sandbox_root / "exec";

@@ -4,6 +4,8 @@ use std::path::Path;
 use remote_exec_proto::rpc::TransferWarning;
 use serde::{Deserialize, Serialize};
 
+use crate::error::TransferError;
+
 use super::TRANSFER_SUMMARY_ENTRY;
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -40,10 +42,12 @@ pub(super) fn append_transfer_summary<W: Write>(
 pub(super) fn read_transfer_summary<R: Read>(
     entry: &mut tar::Entry<R>,
 ) -> anyhow::Result<Vec<TransferWarning>> {
-    anyhow::ensure!(
-        entry.header().entry_type().is_file(),
-        "transfer summary archive entry is not a regular file"
-    );
+    if !entry.header().entry_type().is_file() {
+        return Err(TransferError::source_unsupported(
+            "transfer summary archive entry is not a regular file",
+        )
+        .into());
+    }
     let mut body = Vec::new();
     entry.read_to_end(&mut body)?;
     let summary = serde_json::from_slice::<TransferArchiveSummary>(&body)?;

@@ -13,6 +13,7 @@
 #endif
 
 #include "json.hpp"
+#include "rpc_failures.h"
 #include "transfer_ops_internal.h"
 
 using Json = nlohmann::json;
@@ -206,7 +207,10 @@ void append_file_entry_from_path(
 #ifndef _WIN32
     struct stat st;
     if (stat(source_path.c_str(), &st) != 0) {
-        throw std::runtime_error("transfer source missing");
+        throw TransferFailure(
+            TransferRpcCode::SourceMissing,
+            "transfer source missing"
+        );
     }
     const std::uint64_t mode = static_cast<std::uint64_t>(st.st_mode & 0777);
 #else
@@ -214,7 +218,10 @@ void append_file_entry_from_path(
 #endif
     std::ifstream input(source_path.c_str(), std::ios::binary | std::ios::ate);
     if (!input) {
-        throw std::runtime_error("transfer source missing");
+        throw TransferFailure(
+            TransferRpcCode::SourceMissing,
+            "transfer source missing"
+        );
     }
     const std::ifstream::pos_type end_position = input.tellg();
     if (end_position < 0) {
@@ -339,7 +346,10 @@ std::string read_gnu_long_name(
 void validate_transfer_options(const ExportOptions& options) {
     if (options.symlink_mode != "preserve" && options.symlink_mode != "follow" &&
         options.symlink_mode != "skip") {
-        throw std::runtime_error("unsupported transfer symlink mode");
+        throw TransferFailure(
+            TransferRpcCode::SourceUnsupported,
+            "unsupported transfer symlink mode"
+        );
     }
 }
 

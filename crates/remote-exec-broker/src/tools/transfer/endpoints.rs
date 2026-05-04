@@ -236,14 +236,13 @@ async fn existing_destination_is_directory(
                     path: destination.path.clone(),
                 })
                 .await
-                .map_err(normalize_path_info_error)
         }
     };
 
     match result {
         Ok(info) => Ok(info.exists && info.is_directory),
         Err(err) if path_info_missing_or_unsupported(&err) => Ok(false),
-        Err(err) => Err(err),
+        Err(err) => Err(normalize_path_info_error(err)),
     }
 }
 
@@ -254,12 +253,23 @@ fn normalize_path_info_error(err: crate::daemon_client::DaemonClientError) -> an
     }
 }
 
-fn path_info_missing_or_unsupported(err: &anyhow::Error) -> bool {
-    let message = err.to_string();
-    message.contains("unknown endpoint")
-        || message.contains("not_found")
-        || message.contains("404")
-        || message.contains("405")
+fn path_info_missing_or_unsupported(err: &crate::daemon_client::DaemonClientError) -> bool {
+    match err {
+        crate::daemon_client::DaemonClientError::Rpc {
+            status,
+            code,
+            message,
+        } => {
+            *status == reqwest::StatusCode::NOT_FOUND
+                || *status == reqwest::StatusCode::METHOD_NOT_ALLOWED
+                || matches!(
+                    code.as_deref(),
+                    Some("not_found") | Some("unknown_endpoint")
+                )
+                || message.contains("unknown endpoint")
+        }
+        _ => false,
+    }
 }
 
 pub(super) async fn negotiate_transfer_compression(

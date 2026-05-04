@@ -22,7 +22,6 @@ use tokio::task::JoinSet;
 use tokio_rustls::TlsAcceptor;
 use tower::ServiceExt;
 
-use crate::AppState;
 use crate::config::{DaemonConfig, DaemonTransport};
 
 pub(crate) fn install_crypto_provider() {
@@ -45,21 +44,21 @@ pub(crate) fn validate_config(config: &DaemonConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn serve_tls(app: Router, state: Arc<AppState>) -> anyhow::Result<()> {
-    serve_tls_with_shutdown(app, state, std::future::pending::<()>()).await
+pub async fn serve_tls(app: Router, daemon_config: Arc<DaemonConfig>) -> anyhow::Result<()> {
+    serve_tls_with_shutdown(app, daemon_config, std::future::pending::<()>()).await
 }
 
 pub async fn serve_tls_with_shutdown<F>(
     app: Router,
-    state: Arc<AppState>,
+    daemon_config: Arc<DaemonConfig>,
     shutdown: F,
 ) -> anyhow::Result<()>
 where
     F: Future<Output = ()> + Send,
 {
-    let listener = super::bind_listener(state.config.listen)?;
-    tracing::info!(listen = %state.config.listen, "daemon tls listener bound");
-    let tls = TlsAcceptor::from(Arc::new(server_config(&state).await?));
+    let listener = super::bind_listener(daemon_config.listen)?;
+    tracing::info!(listen = %daemon_config.listen, "daemon tls listener bound");
+    let tls = TlsAcceptor::from(Arc::new(server_config(daemon_config.as_ref()).await?));
     let mut connections = JoinSet::new();
     let (connection_shutdown_tx, _) = watch::channel(());
     tokio::pin!(shutdown);
@@ -131,9 +130,8 @@ where
     Ok(())
 }
 
-async fn server_config(state: &AppState) -> anyhow::Result<ServerConfig> {
-    let tls = state
-        .config
+async fn server_config(daemon_config: &DaemonConfig) -> anyhow::Result<ServerConfig> {
+    let tls = daemon_config
         .tls
         .as_ref()
         .context("tls config is required when transport = \"tls\"")?;

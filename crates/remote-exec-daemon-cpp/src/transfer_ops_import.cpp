@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #endif
 
+#include "rpc_failures.h"
 #include "transfer_ops_internal.h"
 
 namespace {
@@ -54,15 +55,24 @@ std::string validate_relative_archive_path(const std::string& raw_path) {
         return ".";
     }
     if (normalized[0] == '/') {
-        throw std::runtime_error("archive path must be relative");
+        throw TransferFailure(
+            TransferRpcCode::SourceUnsupported,
+            "archive path must be relative"
+        );
     }
     if (normalized.size() >= 2 &&
         std::isalpha(static_cast<unsigned char>(normalized[0])) != 0 &&
         normalized[1] == ':') {
-        throw std::runtime_error("archive path must be relative");
+        throw TransferFailure(
+            TransferRpcCode::SourceUnsupported,
+            "archive path must be relative"
+        );
     }
     if (normalized.rfind("//", 0) == 0) {
-        throw std::runtime_error("archive path must be relative");
+        throw TransferFailure(
+            TransferRpcCode::SourceUnsupported,
+            "archive path must be relative"
+        );
     }
 
     const std::vector<std::string> parts = split_archive_path(normalized);
@@ -70,10 +80,16 @@ std::string validate_relative_archive_path(const std::string& raw_path) {
     for (std::size_t i = 0; i < parts.size(); ++i) {
         const std::string& part = parts[i];
         if (part.empty()) {
-            throw std::runtime_error("archive path contains empty component");
+            throw TransferFailure(
+                TransferRpcCode::SourceUnsupported,
+                "archive path contains empty component"
+            );
         }
         if (part == "." || part == "..") {
-            throw std::runtime_error("archive path escapes destination");
+            throw TransferFailure(
+                TransferRpcCode::SourceUnsupported,
+                "archive path escapes destination"
+            );
         }
         cleaned.push_back(part);
     }
@@ -285,7 +301,7 @@ SymlinkImportAction symlink_import_action(
     if (!error_path.empty()) {
         message += " " + error_path;
     }
-    throw std::runtime_error(message);
+    throw TransferFailure(TransferRpcCode::SourceUnsupported, message);
 #endif
 }
 
@@ -310,7 +326,10 @@ void consume_file_archive_tail(
         const std::string raw_path = pending_long_name.empty() ? header.path : pending_long_name;
         pending_long_name.clear();
         if (!is_transfer_summary_path(raw_path) || header.typeflag != '0') {
-            throw std::runtime_error("file archive contains extra entries");
+            throw TransferFailure(
+                TransferRpcCode::SourceUnsupported,
+                "file archive contains extra entries"
+            );
         }
         append_warnings(
             warnings,
@@ -320,7 +339,10 @@ void consume_file_archive_tail(
     }
 
     if (!pending_long_name.empty()) {
-        throw std::runtime_error("dangling GNU long name entry");
+        throw TransferFailure(
+            TransferRpcCode::SourceUnsupported,
+            "dangling GNU long name entry"
+        );
     }
 }
 
@@ -338,10 +360,16 @@ ImportSummary import_file_from_tar(
     read_exact_or_throw(reader, block, TAR_BLOCK_SIZE, "archive is empty");
     const TarHeaderView header = parse_header(block);
     if (header.typeflag != '0' && header.typeflag != '2') {
-        throw std::runtime_error("archive entry is not a regular file");
+        throw TransferFailure(
+            TransferRpcCode::SourceUnsupported,
+            "archive entry is not a regular file"
+        );
     }
     if (header.path != SINGLE_FILE_ENTRY) {
-        throw std::runtime_error("file archive entry path must be " + std::string(SINGLE_FILE_ENTRY));
+        throw TransferFailure(
+            TransferRpcCode::SourceUnsupported,
+            "file archive entry path must be " + std::string(SINGLE_FILE_ENTRY)
+        );
     }
 
     std::uint64_t bytes_copied = 0;
@@ -407,7 +435,10 @@ ImportSummary import_directory_from_tar(
         const std::string relative_path = validate_relative_archive_path(raw_path);
         if (is_transfer_summary_path(relative_path)) {
             if (header.typeflag != '0') {
-                throw std::runtime_error("transfer summary archive entry is not a regular file");
+                throw TransferFailure(
+                    TransferRpcCode::SourceUnsupported,
+                    "transfer summary archive entry is not a regular file"
+                );
             }
             append_warnings(
                 &summary.warnings,
@@ -441,7 +472,10 @@ ImportSummary import_directory_from_tar(
                 break;
             }
             if (relative_path == ".") {
-                throw std::runtime_error("archive symlink entry cannot target root");
+                throw TransferFailure(
+                    TransferRpcCode::SourceUnsupported,
+                    "archive symlink entry cannot target root"
+                );
             }
             write_symlink(header.link_name, output_path);
             summary.files_copied += 1;
@@ -450,10 +484,16 @@ ImportSummary import_directory_from_tar(
         }
 
         if (header.typeflag != '0') {
-            throw std::runtime_error("archive contains unsupported entry");
+            throw TransferFailure(
+                TransferRpcCode::SourceUnsupported,
+                "archive contains unsupported entry"
+            );
         }
         if (relative_path == ".") {
-            throw std::runtime_error("archive file entry cannot target root");
+            throw TransferFailure(
+                TransferRpcCode::SourceUnsupported,
+                "archive file entry cannot target root"
+            );
         }
 
         ensure_parent_directory(output_path, true);
@@ -463,7 +503,10 @@ ImportSummary import_directory_from_tar(
     }
 
     if (!pending_long_name.empty()) {
-        throw std::runtime_error("dangling GNU long name entry");
+        throw TransferFailure(
+            TransferRpcCode::SourceUnsupported,
+            "dangling GNU long name entry"
+        );
     }
 
     return summary;
@@ -502,7 +545,10 @@ ImportSummary import_path_from_reader(
     options.symlink_mode = symlink_mode.empty() ? "preserve" : symlink_mode;
     validate_transfer_options(options);
     if (!is_absolute_path(absolute_path)) {
-        throw std::runtime_error("transfer path is not absolute");
+        throw TransferFailure(
+            TransferRpcCode::PathNotAbsolute,
+            "transfer path is not absolute"
+        );
     }
 
     if (source_type == "file") {
@@ -534,5 +580,8 @@ ImportSummary import_path_from_reader(
             options.symlink_mode
         );
     }
-    throw std::runtime_error("unsupported transfer source type");
+    throw TransferFailure(
+        TransferRpcCode::SourceUnsupported,
+        "unsupported transfer source type"
+    );
 }

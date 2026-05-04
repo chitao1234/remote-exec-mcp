@@ -26,6 +26,9 @@ Everything under `docs/` is historical implementation detail and planning contex
   - Per-machine daemon over mTLS JSON/HTTP by default, or plain HTTP when configured.
   - The `tls` Cargo feature gates the HTTPS/mTLS transport and is enabled by default.
   - Executes commands, manages local sessions, applies patches, reads images, serves transfer archives, and provides broker-controlled port-forward socket primitives.
+- `remote-exec-host`
+  - Shared Rust host runtime used by broker-host `local` behavior and the Rust daemon.
+  - Owns transport-neutral host config, path handling, and the extracted host-local capability runtime as that boundary is cleaned up.
 - `remote-exec-daemon-cpp`
   - Standalone C++ daemon over plain HTTP, with native POSIX and Windows XP-compatible build paths.
   - Supports `exec_command`, `write_stdin`, `apply_patch`, `transfer_files` for files/directories/broker-built multi-source bundles, and `forward_ports`.
@@ -52,7 +55,7 @@ Everything under `docs/` is historical implementation detail and planning contex
 - When broker `[local]` config is enabled, `list_targets` also includes `local` for the broker host.
 - `list_targets` is broker-local and does not probe daemons at read time.
 - The broker validates `target`, forwards the request to the selected daemon, and returns MCP-compatible content plus structured JSON for tools that expose it unless `disable_structured_content = true` is configured.
-- For the optional `local` target, the broker reuses daemon execution logic in-process instead of asking operators to run a second same-host daemon manually.
+- For the optional `local` target, the broker reuses the shared Rust host runtime in-process instead of asking operators to run a second same-host daemon manually.
 - Each daemon serves exactly one configured target machine.
 - Live exec sessions are broker-routed by opaque public `session_id`, not by daemon-local process identifiers.
 

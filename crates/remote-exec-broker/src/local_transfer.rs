@@ -10,6 +10,8 @@ use remote_exec_proto::rpc::{
 };
 use remote_exec_proto::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
 
+use crate::daemon_client::DaemonClientError;
+
 pub struct BundledArchiveSource {
     pub source_path: String,
     pub source_policy: PathPolicy,
@@ -34,7 +36,7 @@ pub async fn export_path_to_archive(
     request: &remote_exec_proto::rpc::TransferExportRequest,
     sandbox: Option<&CompiledFilesystemSandbox>,
 ) -> anyhow::Result<ExportedArchive> {
-    let exported = remote_exec_daemon::transfer::archive::export_path_to_file(
+    let exported = remote_exec_host::transfer::archive::export_path_to_file(
         path,
         archive_path,
         request.compression.clone(),
@@ -55,7 +57,7 @@ pub async fn export_path_to_stream(
     request: &remote_exec_proto::rpc::TransferExportRequest,
     sandbox: Option<&CompiledFilesystemSandbox>,
 ) -> anyhow::Result<ExportedArchiveStream> {
-    let exported = remote_exec_daemon::transfer::archive::export_path_to_stream(
+    let exported = remote_exec_host::transfer::archive::export_path_to_stream(
         path,
         request.compression.clone(),
         request.symlink_mode.clone(),
@@ -75,7 +77,7 @@ pub async fn import_archive_from_file(
     request: &TransferImportRequest,
     sandbox: Option<&CompiledFilesystemSandbox>,
 ) -> anyhow::Result<TransferImportResponse> {
-    remote_exec_daemon::transfer::archive::import_archive_from_file(
+    remote_exec_host::transfer::archive::import_archive_from_file(
         archive_path,
         request,
         sandbox,
@@ -92,7 +94,7 @@ pub async fn import_archive_from_async_reader<R>(
 where
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
 {
-    remote_exec_daemon::transfer::archive::import_archive_from_async_reader(
+    remote_exec_host::transfer::archive::import_archive_from_async_reader(
         reader, request, sandbox, None,
     )
     .await
@@ -101,22 +103,32 @@ where
 pub fn path_info(
     path: &str,
     sandbox: Option<&CompiledFilesystemSandbox>,
-) -> anyhow::Result<TransferPathInfoResponse> {
+) -> Result<TransferPathInfoResponse, DaemonClientError> {
     let policy = host_policy();
-    anyhow::ensure!(
-        is_absolute_for_policy(policy, path),
-        "transfer endpoint path `{path}` is not absolute"
-    );
+    if !is_absolute_for_policy(policy, path) {
+        return Err(crate::local_backend::map_local_transfer_error(
+            remote_exec_host::TransferError::path_not_absolute(format!(
+                "transfer endpoint path `{path}` is not absolute"
+            )),
+        ));
+    }
     let path = PathBuf::from(normalize_for_system(policy, path));
-    authorize_path(policy, sandbox, SandboxAccess::Write, &path)?;
+    authorize_path(policy, sandbox, SandboxAccess::Write, &path).map_err(|err| {
+        crate::local_backend::map_local_transfer_error(
+            remote_exec_host::TransferError::sandbox_denied(err.to_string()),
+        )
+    })?;
 
     match std::fs::symlink_metadata(&path) {
         Ok(metadata) => {
-            anyhow::ensure!(
-                !metadata.file_type().is_symlink(),
-                "destination path contains unsupported symlink `{}`",
-                path.display()
-            );
+            if metadata.file_type().is_symlink() {
+                return Err(crate::local_backend::map_local_transfer_error(
+                    remote_exec_host::TransferError::destination_unsupported(format!(
+                        "destination path contains unsupported symlink `{}`",
+                        path.display()
+                    )),
+                ));
+            }
             Ok(TransferPathInfoResponse {
                 exists: true,
                 is_directory: metadata.is_dir(),
@@ -126,7 +138,9 @@ pub fn path_info(
             exists: false,
             is_directory: false,
         }),
-        Err(err) => Err(err.into()),
+        Err(err) => Err(crate::local_backend::map_local_transfer_error(
+            remote_exec_host::TransferError::internal(err.to_string()),
+        )),
     }
 }
 
@@ -143,11 +157,11 @@ pub async fn bundle_archives_to_file(
     archive_path: &Path,
     compression: TransferCompression,
 ) -> anyhow::Result<()> {
-    remote_exec_daemon::transfer::archive::bundle_archives_to_file(
+    remote_exec_host::transfer::archive::bundle_archives_to_file(
         sources
             .into_iter()
             .map(
-                |source| remote_exec_daemon::transfer::archive::BundledArchiveSource {
+                |source| remote_exec_host::transfer::archive::BundledArchiveSource {
                     source_path: source.source_path,
                     source_policy: source.source_policy,
                     source_type: source.source_type,

@@ -7,6 +7,7 @@
 #include <unistd.h>
 #endif
 
+#include "rpc_failures.h"
 #include "transfer_ops_internal.h"
 #include "transfer_glob.h"
 
@@ -183,7 +184,10 @@ void append_directory_contents(
                 handle_unsupported_entry(context, child_path);
                 continue;
             }
-            throw std::runtime_error("transfer source contains unsupported symlink " + child_path);
+            throw TransferFailure(
+                TransferRpcCode::SourceUnsupported,
+                "transfer source contains unsupported symlink " + child_path
+            );
 #endif
         }
         if (!entry.is_regular_file) {
@@ -222,7 +226,10 @@ void export_file_as_tar(
         } else if (options.symlink_mode == "follow") {
             append_file_entry_from_path(archive, SINGLE_FILE_ENTRY, absolute_path);
         } else {
-            throw std::runtime_error("transfer source contains unsupported symlink " + absolute_path);
+            throw TransferFailure(
+                TransferRpcCode::SourceUnsupported,
+                "transfer source contains unsupported symlink " + absolute_path
+            );
         }
     } else {
         append_file_entry_from_path(archive, SINGLE_FILE_ENTRY, absolute_path);
@@ -244,19 +251,31 @@ ExportOptions normalized_options(
 
 void validate_export_path(const std::string& absolute_path, const ExportOptions& options) {
     if (!is_absolute_path(absolute_path)) {
-        throw std::runtime_error("transfer path is not absolute");
+        throw TransferFailure(
+            TransferRpcCode::PathNotAbsolute,
+            "transfer path is not absolute"
+        );
     }
     if (!path_exists(absolute_path)) {
-        throw std::runtime_error("transfer source missing");
+        throw TransferFailure(
+            TransferRpcCode::SourceMissing,
+            "transfer source missing"
+        );
     }
     if (is_symlink_path(absolute_path)) {
 #ifdef _WIN32
         if (options.symlink_mode != "follow") {
-            throw std::runtime_error("transfer source contains unsupported symlink " + absolute_path);
+            throw TransferFailure(
+                TransferRpcCode::SourceUnsupported,
+                "transfer source contains unsupported symlink " + absolute_path
+            );
         }
 #else
         if (options.symlink_mode == "skip") {
-            throw std::runtime_error("transfer source contains unsupported symlink " + absolute_path);
+            throw TransferFailure(
+                TransferRpcCode::SourceUnsupported,
+                "transfer source contains unsupported symlink " + absolute_path
+            );
         }
 #endif
     }
@@ -287,7 +306,10 @@ std::string export_path_source_type(
         (is_symlink_path(absolute_path) && options.symlink_mode == "follow" && is_directory_follow(absolute_path))) {
         return "directory";
     }
-    throw std::runtime_error("transfer source must be a regular file or directory");
+    throw TransferFailure(
+        TransferRpcCode::SourceUnsupported,
+        "transfer source must be a regular file or directory"
+    );
 }
 
 void export_path_to_sink_as(
@@ -310,7 +332,10 @@ void export_path_to_sink_as(
         export_directory_as_tar(&sink, absolute_path, exclude_matcher, &context);
         return;
     }
-    throw std::runtime_error("unsupported transfer source type");
+    throw TransferFailure(
+        TransferRpcCode::SourceUnsupported,
+        "unsupported transfer source type"
+    );
 }
 
 std::string export_path_to_sink(

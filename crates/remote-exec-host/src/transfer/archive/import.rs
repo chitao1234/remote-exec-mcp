@@ -7,6 +7,8 @@ use remote_exec_proto::rpc::{
 };
 use remote_exec_proto::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
 
+use crate::error::TransferError;
+
 use super::codec::{open_archive_reader, wrap_archive_reader};
 use super::entry::{ensure_supported_archive_entry_type, normalize_archive_entry_path};
 use super::summary::{is_transfer_summary_path, read_transfer_summary};
@@ -56,13 +58,16 @@ async fn prepare_import_destination(
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<(std::path::PathBuf, bool)> {
-    anyhow::ensure!(
-        crate::host_path::is_input_path_absolute(&request.destination_path, windows_posix_root),
-        "transfer destination path `{}` is not absolute",
-        request.destination_path
-    );
+    if !crate::host_path::is_input_path_absolute(&request.destination_path, windows_posix_root) {
+        return Err(TransferError::path_not_absolute(format!(
+            "transfer destination path `{}` is not absolute",
+            request.destination_path
+        ))
+        .into());
+    }
     let destination = host_path(&request.destination_path, windows_posix_root)?;
-    authorize_path(host_policy(), sandbox, SandboxAccess::Write, &destination)?;
+    authorize_path(host_policy(), sandbox, SandboxAccess::Write, &destination)
+        .map_err(|err| TransferError::sandbox_denied(err.to_string()))?;
 
     let replaced = prepare_destination(&destination, request).await?;
     Ok((destination, replaced))
@@ -76,25 +81,27 @@ async fn prepare_destination(
         if request.create_parent {
             tokio::fs::create_dir_all(parent).await?;
         } else {
-            anyhow::ensure!(
-                tokio::fs::metadata(parent)
-                    .await
-                    .map(|metadata| metadata.is_dir())
-                    .unwrap_or(false),
-                "destination parent `{}` does not exist",
-                parent.display()
-            );
+            let parent_exists = tokio::fs::metadata(parent)
+                .await
+                .map(|metadata| metadata.is_dir())
+                .unwrap_or(false);
+            if !parent_exists {
+                return Err(TransferError::parent_missing(format!(
+                    "destination parent `{}` does not exist",
+                    parent.display()
+                ))
+                .into());
+            }
         }
     }
 
     match tokio::fs::symlink_metadata(destination).await {
         Ok(metadata) => match request.overwrite {
-            TransferOverwriteMode::Fail => {
-                anyhow::bail!(
-                    "destination path `{}` already exists",
-                    destination.display()
-                );
-            }
+            TransferOverwriteMode::Fail => Err(TransferError::destination_exists(format!(
+                "destination path `{}` already exists",
+                destination.display()
+            ))
+            .into()),
             TransferOverwriteMode::Merge => {
                 ensure_merge_destination_is_compatible(destination, &metadata, request)?;
                 Ok(false)
@@ -118,26 +125,32 @@ fn ensure_merge_destination_is_compatible(
     metadata: &std::fs::Metadata,
     request: &TransferImportRequest,
 ) -> anyhow::Result<()> {
-    anyhow::ensure!(
-        !metadata.file_type().is_symlink(),
-        "destination path contains unsupported symlink `{}`",
-        destination.display()
-    );
+    if metadata.file_type().is_symlink() {
+        return Err(TransferError::destination_unsupported(format!(
+            "destination path contains unsupported symlink `{}`",
+            destination.display()
+        ))
+        .into());
+    }
 
     match request.source_type {
         TransferSourceType::File => {
-            anyhow::ensure!(
-                !metadata.is_dir(),
-                "destination path `{}` is a directory",
-                destination.display()
-            );
+            if metadata.is_dir() {
+                return Err(TransferError::destination_unsupported(format!(
+                    "destination path `{}` is a directory",
+                    destination.display()
+                ))
+                .into());
+            }
         }
         TransferSourceType::Directory | TransferSourceType::Multiple => {
-            anyhow::ensure!(
-                metadata.is_dir(),
-                "destination path `{}` is not a directory",
-                destination.display()
-            );
+            if !metadata.is_dir() {
+                return Err(TransferError::destination_unsupported(format!(
+                    "destination path `{}` is not a directory",
+                    destination.display()
+                ))
+                .into());
+            }
         }
     }
 
@@ -207,10 +220,11 @@ fn extract_single_file_archive<R: Read>(
         .next()
         .ok_or_else(|| anyhow::anyhow!("archive is empty"))??;
     let entry_type = entry.header().entry_type();
-    anyhow::ensure!(
-        entry_type.is_file() || entry_type.is_symlink(),
-        "archive entry is not a regular file"
-    );
+    if !(entry_type.is_file() || entry_type.is_symlink()) {
+        return Err(
+            TransferError::source_unsupported("archive entry is not a regular file").into(),
+        );
+    }
 
     if entry_type.is_symlink() {
         write_archive_symlink(&mut entry, destination_path, symlink_mode, summary)?;
@@ -223,10 +237,11 @@ fn extract_single_file_archive<R: Read>(
         let mut entry = entry?;
         let raw_rel = entry.path()?.to_path_buf();
         let rel = normalize_archive_entry_path(&raw_rel)?;
-        anyhow::ensure!(
-            is_transfer_summary_path(&rel),
-            "file archive contains extra entries"
-        );
+        if !is_transfer_summary_path(&rel) {
+            return Err(
+                TransferError::source_unsupported("file archive contains extra entries").into(),
+            );
+        }
         summary.warnings.extend(read_transfer_summary(&mut entry)?);
     }
     Ok(())
@@ -306,17 +321,21 @@ fn write_archive_symlink<R: Read>(
                 .push(TransferWarning::skipped_symlink(path.display()));
             Ok(())
         }
-        SymlinkImportAction::Unsupported => {
-            anyhow::bail!("archive contains unsupported symlink `{}`", path.display())
-        }
+        SymlinkImportAction::Unsupported => Err(TransferError::source_unsupported(format!(
+            "archive contains unsupported symlink `{}`",
+            path.display()
+        ))
+        .into()),
     }
 }
 
 fn remove_existing_file_before_symlink(path: &Path) -> anyhow::Result<()> {
     match std::fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.is_dir() => {
-            anyhow::bail!("destination path `{}` is a directory", path.display())
-        }
+        Ok(metadata) if metadata.is_dir() => Err(TransferError::destination_unsupported(format!(
+            "destination path `{}` is a directory",
+            path.display()
+        ))
+        .into()),
         Ok(_) => {
             std::fs::remove_file(path)?;
             Ok(())
@@ -340,10 +359,10 @@ fn symlink_import_action<R: Read>(
     match symlink_mode {
         TransferSymlinkMode::Preserve => {
             let target = entry.link_name()?.ok_or_else(|| {
-                anyhow::anyhow!(
+                TransferError::source_unsupported(format!(
                     "archive symlink entry `{}` has no link target",
                     path.display()
-                )
+                ))
             })?;
             Ok(SymlinkImportAction::Preserve(target.into_owned()))
         }
@@ -360,7 +379,11 @@ fn create_symlink(target: &Path, path: &Path) -> anyhow::Result<()> {
 
 #[cfg(not(unix))]
 fn create_symlink(_target: &Path, path: &Path) -> anyhow::Result<()> {
-    anyhow::bail!("archive contains unsupported symlink `{}`", path.display())
+    Err(TransferError::source_unsupported(format!(
+        "archive contains unsupported symlink `{}`",
+        path.display()
+    ))
+    .into())
 }
 
 fn write_archive_file<R: Read>(entry: &mut tar::Entry<R>, path: &Path) -> anyhow::Result<u64> {
@@ -394,11 +417,15 @@ fn ensure_no_existing_symlink_in_path(root: &Path, path: &Path) -> anyhow::Resul
 
 fn ensure_not_existing_symlink(path: &Path) -> anyhow::Result<()> {
     match std::fs::symlink_metadata(path) {
-        Ok(metadata) => anyhow::ensure!(
-            !metadata.file_type().is_symlink(),
-            "destination path contains unsupported symlink `{}`",
-            path.display()
-        ),
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() {
+                return Err(TransferError::destination_unsupported(format!(
+                    "destination path contains unsupported symlink `{}`",
+                    path.display()
+                ))
+                .into());
+            }
+        }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
         Err(err) => return Err(err.into()),
     }

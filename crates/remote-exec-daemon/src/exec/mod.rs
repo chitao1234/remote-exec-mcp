@@ -1,16 +1,5 @@
-mod handlers;
-mod locale;
-mod output;
-pub mod session;
-pub(crate) mod shell;
-pub mod store;
-mod support;
-pub mod transcript;
-#[cfg(all(windows, feature = "winpty"))]
-mod winpty;
-
-pub use handlers::{exec_start, exec_start_local, exec_write, exec_write_local};
-pub use support::{
-    ensure_sandbox_access, internal_error, resolve_input_path,
-    resolve_input_path_with_windows_posix_root, resolve_workdir, rpc_error,
+pub use remote_exec_host::exec::{
+    ensure_sandbox_access, exec_start, exec_start_local, exec_write, exec_write_local,
+    internal_error, resolve_input_path, resolve_input_path_with_windows_posix_root,
+    resolve_workdir, rpc_error, session, store, transcript,
 };

@@ -1,6 +1,5 @@
 pub mod config;
 pub mod exec;
-pub(crate) mod host_path;
 pub mod image;
 pub mod logging;
 pub mod patch;
@@ -14,25 +13,10 @@ use std::future::pending;
 use std::sync::Arc;
 
 use anyhow::Result;
-use config::{DaemonConfig, WindowsPtyBackendOverride};
-use remote_exec_proto::{
-    path::PathPolicy,
-    rpc::TargetInfoResponse,
-    sandbox::{CompiledFilesystemSandbox, compile_filesystem_sandbox},
-};
+use config::DaemonConfig;
+use remote_exec_proto::rpc::TargetInfoResponse;
 
-#[derive(Clone)]
-pub struct AppState {
-    pub config: Arc<DaemonConfig>,
-    pub default_shell: String,
-    pub sandbox: Option<CompiledFilesystemSandbox>,
-    pub supports_pty: bool,
-    pub supports_transfer_compression: bool,
-    pub windows_pty_backend_override: Option<WindowsPtyBackendOverride>,
-    pub daemon_instance_id: String,
-    pub sessions: exec::store::SessionStore,
-    pub port_forwards: port_forward::PortForwardState,
-}
+pub type AppState = remote_exec_host::HostRuntimeState;
 
 pub async fn run(config: DaemonConfig) -> Result<()> {
     run_until(config, pending::<()>()).await
@@ -42,55 +26,12 @@ pub fn install_crypto_provider() {
     tls::install_crypto_provider();
 }
 
-pub fn build_app_state(mut config: DaemonConfig) -> Result<AppState> {
-    config.normalize_paths();
-    config.validate()?;
-    let sandbox = config
-        .sandbox
-        .as_ref()
-        .map(|sandbox| compile_filesystem_sandbox(host_path_policy(), sandbox))
-        .transpose()?;
-    let default_shell = exec::shell::resolve_default_shell(
-        config.default_shell.as_deref(),
-        &config.process_environment,
-        config.windows_posix_root.as_deref(),
-    )?;
-    exec::session::validate_pty_mode(config.pty)?;
-    let supports_pty = exec::session::supports_pty_for_mode(config.pty);
-    let supports_transfer_compression = config.enable_transfer_compression;
-    let windows_pty_backend_override =
-        exec::session::windows_pty_backend_override_for_mode(config.pty)?;
-
-    Ok(AppState {
-        config: Arc::new(config),
-        default_shell,
-        sandbox,
-        supports_pty,
-        supports_transfer_compression,
-        windows_pty_backend_override,
-        daemon_instance_id: uuid::Uuid::new_v4().to_string(),
-        sessions: exec::store::SessionStore::new(64),
-        port_forwards: port_forward::PortForwardState::default(),
-    })
-}
-
-fn host_path_policy() -> PathPolicy {
-    host_path::host_path_policy()
+pub fn build_app_state(config: DaemonConfig) -> Result<AppState> {
+    remote_exec_host::build_runtime_state(config.into_host_runtime_config())
 }
 
 pub fn target_info_response(state: &AppState) -> TargetInfoResponse {
-    TargetInfoResponse {
-        target: state.config.target.clone(),
-        daemon_version: env!("CARGO_PKG_VERSION").to_string(),
-        daemon_instance_id: state.daemon_instance_id.clone(),
-        hostname: gethostname::gethostname().to_string_lossy().into_owned(),
-        platform: std::env::consts::OS.to_string(),
-        arch: std::env::consts::ARCH.to_string(),
-        supports_pty: state.supports_pty,
-        supports_image_read: true,
-        supports_transfer_compression: state.supports_transfer_compression,
-        supports_port_forward: true,
-    }
+    remote_exec_host::target_info_response(state, env!("CARGO_PKG_VERSION"))
 }
 
 pub async fn run_until<F>(config: DaemonConfig, shutdown: F) -> Result<()>
@@ -98,19 +39,20 @@ where
     F: Future<Output = ()> + Send,
 {
     tls::install_crypto_provider();
-    let state = build_app_state(config)?;
+    let daemon_config = Arc::new(config);
+    let state = remote_exec_host::build_runtime_state(daemon_config.host_runtime_config())?;
     tracing::info!(
-        target = %state.config.target,
-        listen = %state.config.listen,
-        transport = ?state.config.transport,
-        http_auth_enabled = state.config.http_auth.is_some(),
-        default_workdir = %state.config.default_workdir.display(),
+        target = %daemon_config.target,
+        listen = %daemon_config.listen,
+        transport = ?daemon_config.transport,
+        http_auth_enabled = daemon_config.http_auth.is_some(),
+        default_workdir = %daemon_config.default_workdir.display(),
         default_shell = %state.default_shell,
         supports_pty = state.supports_pty,
         supports_transfer_compression = state.supports_transfer_compression,
-        pty_mode = ?state.config.pty,
+        pty_mode = ?daemon_config.pty,
         daemon_instance_id = %state.daemon_instance_id,
         "starting daemon"
     );
-    server::serve_with_shutdown(state, shutdown).await
+    server::serve_with_shutdown(state, daemon_config, shutdown).await
 }

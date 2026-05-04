@@ -10,6 +10,7 @@ These instructions apply to the entire `remote-exec-mcp` workspace.
 - The public tool surface is currently `list_targets`, `exec_command`, `write_stdin`, `apply_patch`, `view_image`, and `transfer_files`.
 - The architecture is intentionally split:
   - `remote-exec-broker` is the public MCP server over stdio. It validates `target`, routes requests to daemons, and owns the opaque public `session_id` namespace.
+  - `remote-exec-host` is the shared Rust host runtime used by broker-host `local` behavior and the Rust daemon. It owns transport-neutral host config, path handling, and host-local capability implementations.
   - `remote-exec-daemon` is the per-machine mTLS JSON/HTTP server that performs local execution, patching, image reads, transfer archive import/export, and static path sandbox checks.
   - `remote-exec-daemon-cpp` is the standalone C++ daemon over plain HTTP. It intentionally supports a reduced feature set, native POSIX and Windows XP-compatible build paths, and no transfer compression.
   - `remote-exec-proto` defines shared public tool schemas and broker-daemon RPC payloads.
@@ -21,6 +22,7 @@ These instructions apply to the entire `remote-exec-mcp` workspace.
 
 - `Cargo.toml`: workspace manifest and shared dependency versions.
 - `crates/remote-exec-broker/src/`: public MCP server, target config, daemon client, tool handlers, and session store.
+- `crates/remote-exec-host/src/`: shared host runtime config, path helpers, and transport-neutral host capability logic reused by the broker and Rust daemon.
 - `crates/remote-exec-daemon/src/`: daemon config, TLS setup, HTTP server, exec session logic, patch engine, image handling, transfer handling, and sandbox enforcement.
 - `crates/remote-exec-daemon-cpp/`: standalone C++ daemon, POSIX/Win32 exec/session handling, HTTP routes, patch engine, and narrow transfer implementation.
 - `crates/remote-exec-proto/src/public.rs`: public tool arguments and structured results.

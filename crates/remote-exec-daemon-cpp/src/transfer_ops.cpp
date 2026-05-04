@@ -1,6 +1,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "rpc_failures.h"
 #include "transfer_ops.h"
 #include "transfer_ops_internal.h"
 
@@ -16,13 +17,19 @@ void TransferArchiveSink::write_string(const std::string& data) {
 
 PathInfo path_info(const std::string& absolute_path) {
     if (!is_absolute_path(absolute_path)) {
-        throw std::runtime_error("transfer path is not absolute");
+        throw TransferFailure(
+            TransferRpcCode::PathNotAbsolute,
+            "transfer path is not absolute"
+        );
     }
     if (!path_exists(absolute_path)) {
         return PathInfo{false, false};
     }
     if (is_symlink_path(absolute_path)) {
-        throw std::runtime_error("destination path contains unsupported symlink");
+        throw TransferFailure(
+            TransferRpcCode::DestinationUnsupported,
+            "destination path contains unsupported symlink"
+        );
     }
     return PathInfo{true, is_directory(absolute_path)};
 }

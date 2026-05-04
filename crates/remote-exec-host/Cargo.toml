@@ -1,14 +1,13 @@
 [package]
-name = "remote-exec-daemon"
+name = "remote-exec-host"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 version.workspace = true
 
 [features]
-default = ["tls", "winpty"]
-tls = ["dep:rustls", "dep:rustls-pemfile", "dep:tokio-rustls"]
-winpty = ["dep:winptyrs", "remote-exec-host/winpty"]
+default = ["winpty"]
+winpty = ["dep:winptyrs"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -20,27 +19,18 @@ futures-util = { workspace = true }
 gethostname = { workspace = true }
 globset = { workspace = true }
 http-body-util = { workspace = true }
-hyper = { workspace = true }
-hyper-util = { workspace = true }
 image = { workspace = true }
 os_pipe = { workspace = true }
 portable-pty = { workspace = true }
 rand = { workspace = true }
-remote-exec-host = { path = "../remote-exec-host", default-features = false }
 remote-exec-proto = { path = "../remote-exec-proto" }
-rustls = { workspace = true, optional = true }
-rustls-pemfile = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tar = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
-tokio-rustls = { workspace = true, optional = true }
 tokio-util = { workspace = true }
-toml = { workspace = true }
-tower = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 vte = { workspace = true }
 zstd = { workspace = true }
@@ -50,13 +40,3 @@ nix = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 winptyrs = { path = "../../winptyrs/crates/winptyrs", optional = true }
-
-[dev-dependencies]
-remote-exec-pki = { path = "../remote-exec-pki" }
-reqwest = { workspace = true, features = ["rustls-no-provider"] }
-rustls = { workspace = true }
-tempfile = { workspace = true }
-
-[[test]]
-name = "exec_rpc"
-path = "tests/exec_rpc/mod.rs"

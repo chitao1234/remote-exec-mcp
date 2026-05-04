@@ -212,6 +212,28 @@ async fn transfer_path_info_reports_missing_destination() {
 }
 
 #[tokio::test]
+async fn transfer_path_info_rejects_relative_paths_with_explicit_code() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+
+    let response = fixture
+        .raw_post_json(
+            "/v1/transfer/path-info",
+            &TransferPathInfoRequest {
+                path: "relative/output".to_string(),
+            },
+        )
+        .await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let err = response
+        .json::<remote_exec_proto::rpc::RpcErrorBody>()
+        .await
+        .unwrap();
+    assert_eq!(err.code, "transfer_path_not_absolute");
+    assert!(err.message.contains("relative/output"));
+}
+
+#[tokio::test]
 async fn export_file_supports_zstd_compression() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let source = fixture.workdir.join("hello.txt");
@@ -248,6 +270,32 @@ async fn export_file_supports_zstd_compression() {
         entry.path().unwrap().as_ref(),
         Path::new(".remote-exec-file")
     );
+}
+
+#[tokio::test]
+async fn export_reports_missing_sources_with_explicit_code() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let missing = fixture.workdir.join("missing.txt");
+
+    let response = fixture
+        .raw_post_json(
+            "/v1/transfer/export",
+            &TransferExportRequest {
+                path: missing.display().to_string(),
+                compression: TransferCompression::None,
+                symlink_mode: Default::default(),
+                exclude: Vec::new(),
+            },
+        )
+        .await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let err = response
+        .json::<remote_exec_proto::rpc::RpcErrorBody>()
+        .await
+        .unwrap();
+    assert_eq!(err.code, "transfer_source_missing");
+    assert!(err.message.contains("missing.txt"));
 }
 
 #[cfg(unix)]

@@ -17,6 +17,7 @@
 #include <unistd.h>
 #endif
 
+#include "rpc_failures.h"
 #include "transfer_ops_internal.h"
 
 namespace transfer_ops_internal {
@@ -160,7 +161,10 @@ void ensure_parent_directory(const std::string& path, bool create_parent) {
     }
     if (!create_parent) {
         if (!is_directory(parent)) {
-            throw std::runtime_error("destination parent does not exist");
+            throw TransferFailure(
+                TransferRpcCode::ParentMissing,
+                "destination parent does not exist"
+            );
         }
         return;
     }
@@ -187,19 +191,28 @@ void ensure_parent_directory(const std::string& path, bool create_parent) {
 
 void ensure_not_existing_symlink(const std::string& path) {
     if (path_exists(path) && is_symlink_path(path)) {
-        throw std::runtime_error("destination path contains unsupported symlink");
+        throw TransferFailure(
+            TransferRpcCode::DestinationUnsupported,
+            "destination path contains unsupported symlink"
+        );
     }
 }
 
 void write_symlink(const std::string& target, const std::string& path) {
 #ifdef _WIN32
     (void)target;
-    throw std::runtime_error("archive contains unsupported symlink " + path);
+    throw TransferFailure(
+        TransferRpcCode::SourceUnsupported,
+        "archive contains unsupported symlink " + path
+    );
 #else
     ensure_parent_directory(path, true);
     if (path_exists(path)) {
         if (is_directory(path)) {
-            throw std::runtime_error("destination path is a directory");
+            throw TransferFailure(
+                TransferRpcCode::DestinationUnsupported,
+                "destination path is a directory"
+            );
         }
         if (std::remove(path.c_str()) != 0) {
             throw std::runtime_error("unable to remove existing file " + path);
@@ -297,7 +310,10 @@ bool prepare_destination_path(
         throw std::runtime_error("unsupported transfer overwrite mode");
     }
     if (existed && overwrite_mode == "fail") {
-        throw std::runtime_error("destination path already exists");
+        throw TransferFailure(
+            TransferRpcCode::DestinationExists,
+            "destination path already exists"
+        );
     }
 
     ensure_parent_directory(absolute_path, create_parent);
@@ -306,17 +322,29 @@ bool prepare_destination_path(
         ensure_not_existing_symlink(absolute_path);
         if (source_type == "file") {
             if (is_directory(absolute_path)) {
-                throw std::runtime_error("destination path is a directory");
+                throw TransferFailure(
+                    TransferRpcCode::DestinationUnsupported,
+                    "destination path is a directory"
+                );
             }
             if (!is_regular_file(absolute_path)) {
-                throw std::runtime_error("destination path is not a regular file");
+                throw TransferFailure(
+                    TransferRpcCode::DestinationUnsupported,
+                    "destination path is not a regular file"
+                );
             }
         } else if (source_type == "directory" || source_type == "multiple") {
             if (!is_directory(absolute_path)) {
-                throw std::runtime_error("destination path is not a directory");
+                throw TransferFailure(
+                    TransferRpcCode::DestinationUnsupported,
+                    "destination path is not a directory"
+                );
             }
         } else {
-            throw std::runtime_error("unsupported transfer source type");
+            throw TransferFailure(
+                TransferRpcCode::SourceUnsupported,
+                "unsupported transfer source type"
+            );
         }
     }
 

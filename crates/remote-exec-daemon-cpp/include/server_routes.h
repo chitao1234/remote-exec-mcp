@@ -8,7 +8,6 @@
 #include "server.h"
 #include "transfer_ops.h"
 
-std::string transfer_error_code(const std::string& message);
 void require_uncompressed_transfer(const std::string& compression);
 std::string transfer_symlink_mode_or_default(const std::string& symlink_mode);
 Json transfer_warnings_json(const std::vector<TransferWarning>& warnings);

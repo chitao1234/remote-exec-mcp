@@ -13,7 +13,6 @@ use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tower::ServiceExt;
 
-use crate::AppState;
 use crate::config::{DaemonConfig, DaemonTransport};
 
 #[allow(
@@ -47,38 +46,38 @@ pub(crate) fn validate_config(config: &DaemonConfig) -> anyhow::Result<()> {
     tls_impl::validate_config(config)
 }
 
-pub async fn serve(app: Router, state: Arc<AppState>) -> anyhow::Result<()> {
-    serve_with_shutdown(app, state, std::future::pending::<()>()).await
+pub async fn serve(app: Router, daemon_config: Arc<DaemonConfig>) -> anyhow::Result<()> {
+    serve_with_shutdown(app, daemon_config, std::future::pending::<()>()).await
 }
 
 pub async fn serve_with_shutdown<F>(
     app: Router,
-    state: Arc<AppState>,
+    daemon_config: Arc<DaemonConfig>,
     shutdown: F,
 ) -> anyhow::Result<()>
 where
     F: Future<Output = ()> + Send,
 {
-    match state.config.transport {
-        DaemonTransport::Tls => serve_tls_with_shutdown(app, state, shutdown).await,
-        DaemonTransport::Http => serve_http_with_shutdown(app, state, shutdown).await,
+    match daemon_config.transport {
+        DaemonTransport::Tls => serve_tls_with_shutdown(app, daemon_config, shutdown).await,
+        DaemonTransport::Http => serve_http_with_shutdown(app, daemon_config, shutdown).await,
     }
 }
 
-pub async fn serve_http(app: Router, state: Arc<AppState>) -> anyhow::Result<()> {
-    serve_http_with_shutdown(app, state, std::future::pending::<()>()).await
+pub async fn serve_http(app: Router, daemon_config: Arc<DaemonConfig>) -> anyhow::Result<()> {
+    serve_http_with_shutdown(app, daemon_config, std::future::pending::<()>()).await
 }
 
 pub async fn serve_http_with_shutdown<F>(
     app: Router,
-    state: Arc<AppState>,
+    daemon_config: Arc<DaemonConfig>,
     shutdown: F,
 ) -> anyhow::Result<()>
 where
     F: Future<Output = ()> + Send,
 {
-    let listener = bind_listener(state.config.listen)?;
-    tracing::info!(listen = %state.config.listen, "daemon http listener bound");
+    let listener = bind_listener(daemon_config.listen)?;
+    tracing::info!(listen = %daemon_config.listen, "daemon http listener bound");
     let mut connections = JoinSet::new();
     let (connection_shutdown_tx, _) = watch::channel(());
     tokio::pin!(shutdown);

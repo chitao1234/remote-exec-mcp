@@ -8,7 +8,8 @@ use tempfile::TempDir;
 use super::stub_daemon::{
     ExecStartBehavior, ExecWriteBehavior, StubDaemonState, StubImageReadResponse,
     StubTransferExportCapture, StubTransferImportCapture, set_transfer_export_directory_response,
-    set_transfer_export_file_response, set_transfer_path_info_response,
+    set_transfer_export_file_response, set_transfer_path_info_error_response,
+    set_transfer_path_info_response,
 };
 
 pub struct BrokerFixture {
@@ -94,6 +95,14 @@ impl BrokerFixture {
         response: remote_exec_proto::rpc::TransferPathInfoResponse,
     ) {
         set_transfer_path_info_response(&self.stub_state, response).await;
+    }
+
+    pub async fn set_transfer_path_info_error_response(
+        &self,
+        status: axum::http::StatusCode,
+        body: remote_exec_proto::rpc::RpcErrorBody,
+    ) {
+        set_transfer_path_info_error_response(&self.stub_state, status, body).await;
     }
 
     pub async fn set_image_read_response(&self, response: StubImageReadResponse) {

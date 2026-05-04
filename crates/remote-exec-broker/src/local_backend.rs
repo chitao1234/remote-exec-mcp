@@ -15,7 +15,7 @@ use crate::daemon_client::DaemonClientError;
 
 #[derive(Clone)]
 pub struct LocalDaemonClient {
-    state: Arc<remote_exec_daemon::AppState>,
+    state: Arc<remote_exec_host::HostRuntimeState>,
 }
 
 impl LocalDaemonClient {
@@ -24,22 +24,25 @@ impl LocalDaemonClient {
         sandbox: Option<remote_exec_proto::sandbox::FilesystemSandbox>,
         enable_transfer_compression: bool,
     ) -> anyhow::Result<Self> {
-        let embedded = config.embedded_daemon_config(sandbox, enable_transfer_compression);
-        let state = remote_exec_daemon::build_app_state(embedded.into_daemon_config())?;
+        let embedded = config.embedded_host_config(sandbox, enable_transfer_compression);
+        let state = remote_exec_host::build_runtime_state(embedded.into_host_runtime_config())?;
         Ok(Self {
             state: Arc::new(state),
         })
     }
 
     pub async fn target_info(&self) -> Result<TargetInfoResponse, DaemonClientError> {
-        Ok(remote_exec_daemon::target_info_response(&self.state))
+        Ok(remote_exec_host::target_info_response(
+            &self.state,
+            env!("CARGO_PKG_VERSION"),
+        ))
     }
 
     pub async fn exec_start(
         &self,
         req: &ExecStartRequest,
     ) -> Result<ExecResponse, DaemonClientError> {
-        remote_exec_daemon::exec::exec_start_local(self.state.clone(), req.clone())
+        remote_exec_host::exec::exec_start_local(self.state.clone(), req.clone())
             .await
             .map_err(map_local_rpc_error)
     }
@@ -48,7 +51,7 @@ impl LocalDaemonClient {
         &self,
         req: &ExecWriteRequest,
     ) -> Result<ExecResponse, DaemonClientError> {
-        remote_exec_daemon::exec::exec_write_local(self.state.clone(), req.clone())
+        remote_exec_host::exec::exec_write_local(self.state.clone(), req.clone())
             .await
             .map_err(map_local_rpc_error)
     }
@@ -57,7 +60,7 @@ impl LocalDaemonClient {
         &self,
         req: &PatchApplyRequest,
     ) -> Result<PatchApplyResponse, DaemonClientError> {
-        remote_exec_daemon::patch::apply_patch_local(self.state.clone(), req.clone())
+        remote_exec_host::patch::apply_patch_local(self.state.clone(), req.clone())
             .await
             .map_err(map_local_rpc_error)
     }
@@ -66,24 +69,24 @@ impl LocalDaemonClient {
         &self,
         req: &ImageReadRequest,
     ) -> Result<ImageReadResponse, DaemonClientError> {
-        remote_exec_daemon::image::read_image_local(self.state.clone(), req.clone())
+        remote_exec_host::image::read_image_local(self.state.clone(), req.clone())
             .await
-            .map_err(map_local_rpc_error)
+            .map_err(map_local_image_error)
     }
 
     pub async fn transfer_path_info(
         &self,
         req: &TransferPathInfoRequest,
     ) -> Result<TransferPathInfoResponse, DaemonClientError> {
-        remote_exec_daemon::transfer::path_info_for_request(&self.state, req)
-            .map_err(map_local_error)
+        remote_exec_host::transfer::path_info_for_request(&self.state, req)
+            .map_err(map_local_transfer_error)
     }
 
     pub async fn port_listen(
         &self,
         req: &PortListenRequest,
     ) -> Result<PortListenResponse, DaemonClientError> {
-        remote_exec_daemon::port_forward::listen_local(self.state.clone(), req.clone())
+        remote_exec_host::port_forward::listen_local(self.state.clone(), req.clone())
             .await
             .map_err(map_local_rpc_error)
     }
@@ -92,7 +95,7 @@ impl LocalDaemonClient {
         &self,
         req: &PortListenAcceptRequest,
     ) -> Result<PortListenAcceptResponse, DaemonClientError> {
-        remote_exec_daemon::port_forward::listen_accept_local(self.state.clone(), req.clone())
+        remote_exec_host::port_forward::listen_accept_local(self.state.clone(), req.clone())
             .await
             .map_err(map_local_rpc_error)
     }
@@ -101,7 +104,7 @@ impl LocalDaemonClient {
         &self,
         req: &PortListenCloseRequest,
     ) -> Result<EmptyResponse, DaemonClientError> {
-        remote_exec_daemon::port_forward::listen_close_local(self.state.clone(), req.clone())
+        remote_exec_host::port_forward::listen_close_local(self.state.clone(), req.clone())
             .await
             .map_err(map_local_rpc_error)
     }
@@ -110,7 +113,7 @@ impl LocalDaemonClient {
         &self,
         req: &PortConnectRequest,
     ) -> Result<PortConnectResponse, DaemonClientError> {
-        remote_exec_daemon::port_forward::connect_local(self.state.clone(), req.clone())
+        remote_exec_host::port_forward::connect_local(self.state.clone(), req.clone())
             .await
             .map_err(map_local_rpc_error)
     }
@@ -119,7 +122,7 @@ impl LocalDaemonClient {
         &self,
         req: &PortConnectionReadRequest,
     ) -> Result<PortConnectionReadResponse, DaemonClientError> {
-        remote_exec_daemon::port_forward::connection_read_local(self.state.clone(), req.clone())
+        remote_exec_host::port_forward::connection_read_local(self.state.clone(), req.clone())
             .await
             .map_err(map_local_rpc_error)
     }
@@ -128,7 +131,7 @@ impl LocalDaemonClient {
         &self,
         req: &PortConnectionWriteRequest,
     ) -> Result<EmptyResponse, DaemonClientError> {
-        remote_exec_daemon::port_forward::connection_write_local(self.state.clone(), req.clone())
+        remote_exec_host::port_forward::connection_write_local(self.state.clone(), req.clone())
             .await
             .map_err(map_local_rpc_error)
     }
@@ -137,7 +140,7 @@ impl LocalDaemonClient {
         &self,
         req: &PortConnectionCloseRequest,
     ) -> Result<EmptyResponse, DaemonClientError> {
-        remote_exec_daemon::port_forward::connection_close_local(self.state.clone(), req.clone())
+        remote_exec_host::port_forward::connection_close_local(self.state.clone(), req.clone())
             .await
             .map_err(map_local_rpc_error)
     }
@@ -146,7 +149,7 @@ impl LocalDaemonClient {
         &self,
         req: &PortUdpDatagramReadRequest,
     ) -> Result<PortUdpDatagramReadResponse, DaemonClientError> {
-        remote_exec_daemon::port_forward::udp_datagram_read_local(self.state.clone(), req.clone())
+        remote_exec_host::port_forward::udp_datagram_read_local(self.state.clone(), req.clone())
             .await
             .map_err(map_local_rpc_error)
     }
@@ -155,15 +158,18 @@ impl LocalDaemonClient {
         &self,
         req: &PortUdpDatagramWriteRequest,
     ) -> Result<EmptyResponse, DaemonClientError> {
-        remote_exec_daemon::port_forward::udp_datagram_write_local(self.state.clone(), req.clone())
+        remote_exec_host::port_forward::udp_datagram_write_local(self.state.clone(), req.clone())
             .await
             .map_err(map_local_rpc_error)
     }
 }
 
-fn map_local_error(err: anyhow::Error) -> DaemonClientError {
-    let (status, Json(body)) = remote_exec_daemon::transfer::map_transfer_error(err);
-    local_rpc_error_body(status, body)
+pub(crate) fn map_local_image_error(err: remote_exec_host::ImageError) -> DaemonClientError {
+    map_local_rpc_error(err.into_rpc())
+}
+
+pub(crate) fn map_local_transfer_error(err: remote_exec_host::TransferError) -> DaemonClientError {
+    map_local_rpc_error(err.into_rpc())
 }
 
 pub(crate) fn map_local_rpc_error(

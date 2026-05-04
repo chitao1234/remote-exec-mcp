@@ -13,6 +13,7 @@
 #include "platform.h"
 #include "port_forward.h"
 #include "process_session.h"
+#include "rpc_failures.h"
 #include "server_routes.h"
 #include "transfer_ops.h"
 
@@ -45,7 +46,10 @@ void authorize_sandbox_path(
 std::string resolve_absolute_transfer_path(const std::string& path) {
     const PathPolicy policy = host_path_policy();
     if (!is_absolute_for_policy(policy, path)) {
-        throw std::runtime_error("transfer path is not absolute");
+        throw TransferFailure(
+            TransferRpcCode::PathNotAbsolute,
+            "transfer path is not absolute"
+        );
     }
     return normalize_for_system(policy, path);
 }
@@ -61,8 +65,37 @@ HttpResponse make_rpc_error_response(
     return response;
 }
 
-bool contains_text(const std::string& value, const std::string& needle) {
-    return value.find(needle) != std::string::npos;
+TransferFailure transfer_compression_unsupported() {
+    return TransferFailure(
+        TransferRpcCode::CompressionUnsupported,
+        "this daemon does not support transfer compression"
+    );
+}
+
+ImageFailure invalid_detail_failure(const std::string& detail) {
+    return ImageFailure(
+        ImageRpcCode::InvalidDetail,
+        "view_image.detail only supports `original`; omit `detail` for default original behavior, got `" +
+            detail + "`"
+    );
+}
+
+ImageFailure missing_image_failure(const std::string& path) {
+    return ImageFailure(
+        ImageRpcCode::Missing,
+        "unable to locate image at `" + path + "`: No such file or directory"
+    );
+}
+
+ImageFailure not_file_image_failure(const std::string& path) {
+    return ImageFailure(
+        ImageRpcCode::NotFile,
+        "image path `" + path + "` is not a file"
+    );
+}
+
+ImageFailure decode_failed_image(const std::string& message) {
+    return ImageFailure(ImageRpcCode::DecodeFailed, message);
 }
 
 std::vector<std::string> transfer_exclude_or_empty(const Json& body) {
@@ -94,7 +127,9 @@ std::string resolve_input_path(
 std::string read_binary_file_bytes(const std::string& path) {
     std::ifstream input(path.c_str(), std::ios::binary);
     if (!input) {
-        throw std::runtime_error("unable to process image at `" + path + "`: unable to read file");
+        throw decode_failed_image(
+            "unable to process image at `" + path + "`: unable to read file"
+        );
     }
     return std::string((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
 }
@@ -124,25 +159,9 @@ std::string image_mime_type(const std::string& path, const std::string& bytes) {
         std::memcmp(bytes.data() + 8, "WEBP", 4) == 0) {
         return "image/webp";
     }
-    throw std::runtime_error(
+    throw decode_failed_image(
         "unable to process image at `" + path + "`: unsupported image format"
     );
-}
-
-std::string image_error_code(const std::string& message) {
-    if (contains_text(message, "sandbox")) {
-        return "sandbox_denied";
-    }
-    if (contains_text(message, "view_image.detail only supports")) {
-        return "invalid_detail";
-    }
-    if (contains_text(message, "unable to locate image at")) {
-        return "image_missing";
-    }
-    if (contains_text(message, "image path") && contains_text(message, "is not a file")) {
-        return "image_not_file";
-    }
-    return "image_decode_failed";
 }
 
 HttpResponse handle_health(const AppState& state) {
@@ -186,21 +205,16 @@ HttpResponse handle_image_read(AppState& state, const HttpRequest& request) {
         const Json body = parse_json_body(request);
         const std::string detail = body.value("detail", std::string());
         if (!detail.empty() && detail != "original") {
-            throw std::runtime_error(
-                "view_image.detail only supports `original`; omit `detail` for default original behavior, got `" +
-                detail + "`"
-            );
+            throw invalid_detail_failure(detail);
         }
 
         const std::string path = resolve_input_path(state, body, "path");
         authorize_sandbox_path(state, SANDBOX_READ, path);
         if (!image_path_exists(path)) {
-            throw std::runtime_error(
-                "unable to locate image at `" + path + "`: No such file or directory"
-            );
+            throw missing_image_failure(path);
         }
         if (!image_path_is_regular_file(path)) {
-            throw std::runtime_error("image path `" + path + "` is not a file");
+            throw not_file_image_failure(path);
         }
 
         const std::string bytes = read_binary_file_bytes(path);
@@ -212,10 +226,31 @@ HttpResponse handle_image_read(AppState& state, const HttpRequest& request) {
                 {"detail", "original"},
             }
         );
+    } catch (const SandboxError& ex) {
+        log_message(LOG_WARN, "server", std::string("image/read failed: ") + ex.what());
+        write_rpc_error(
+            response,
+            400,
+            image_error_code_name(ImageRpcCode::SandboxDenied),
+            ex.what()
+        );
+    } catch (const ImageFailure& failure) {
+        log_message(LOG_WARN, "server", "image/read failed: " + failure.message);
+        write_rpc_error(
+            response,
+            400,
+            image_error_code_name(failure.code),
+            failure.message
+        );
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
         log_message(LOG_WARN, "server", "image/read failed: " + message);
-        write_rpc_error(response, 400, image_error_code(message), message);
+        write_rpc_error(
+            response,
+            400,
+            image_error_code_name(ImageRpcCode::DecodeFailed),
+            message
+        );
     }
 
     return response;
@@ -664,10 +699,31 @@ HttpResponse handle_transfer_export(AppState& state, const HttpRequest& request)
         response.headers["x-remote-exec-source-type"] = payload.source_type;
         response.headers["x-remote-exec-compression"] = "none";
         response.body = payload.bytes;
+    } catch (const SandboxError& ex) {
+        log_message(LOG_WARN, "server", std::string("transfer/export failed: ") + ex.what());
+        write_rpc_error(
+            response,
+            400,
+            transfer_error_code_name(TransferRpcCode::SandboxDenied),
+            ex.what()
+        );
+    } catch (const TransferFailure& failure) {
+        log_message(LOG_WARN, "server", "transfer/export failed: " + failure.message);
+        write_rpc_error(
+            response,
+            400,
+            transfer_error_code_name(failure.code),
+            failure.message
+        );
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
         log_message(LOG_WARN, "server", "transfer/export failed: " + message);
-        write_rpc_error(response, 400, transfer_error_code(message), message);
+        write_rpc_error(
+            response,
+            400,
+            transfer_error_code_name(TransferRpcCode::TransferFailed),
+            message
+        );
     }
 
     return response;
@@ -689,10 +745,31 @@ HttpResponse handle_transfer_path_info(AppState& state, const HttpRequest& reque
                 {"is_directory", info.is_directory},
             }
         );
+    } catch (const SandboxError& ex) {
+        log_message(LOG_WARN, "server", std::string("transfer/path-info failed: ") + ex.what());
+        write_rpc_error(
+            response,
+            400,
+            transfer_error_code_name(TransferRpcCode::SandboxDenied),
+            ex.what()
+        );
+    } catch (const TransferFailure& failure) {
+        log_message(LOG_WARN, "server", "transfer/path-info failed: " + failure.message);
+        write_rpc_error(
+            response,
+            400,
+            transfer_error_code_name(failure.code),
+            failure.message
+        );
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
         log_message(LOG_WARN, "server", "transfer/path-info failed: " + message);
-        write_rpc_error(response, 400, transfer_error_code(message), message);
+        write_rpc_error(
+            response,
+            400,
+            transfer_error_code_name(TransferRpcCode::TransferFailed),
+            message
+        );
     }
 
     return response;
@@ -717,10 +794,31 @@ HttpResponse handle_transfer_import(AppState& state, const HttpRequest& request)
         );
         log_transfer_import_summary(destination_path, summary);
         write_json(response, transfer_summary_json(summary));
+    } catch (const SandboxError& ex) {
+        log_message(LOG_WARN, "server", std::string("transfer/import failed: ") + ex.what());
+        write_rpc_error(
+            response,
+            400,
+            transfer_error_code_name(TransferRpcCode::SandboxDenied),
+            ex.what()
+        );
+    } catch (const TransferFailure& failure) {
+        log_message(LOG_WARN, "server", "transfer/import failed: " + failure.message);
+        write_rpc_error(
+            response,
+            400,
+            transfer_error_code_name(failure.code),
+            failure.message
+        );
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
         log_message(LOG_WARN, "server", "transfer/import failed: " + message);
-        write_rpc_error(response, 400, transfer_error_code(message), message);
+        write_rpc_error(
+            response,
+            400,
+            transfer_error_code_name(TransferRpcCode::TransferFailed),
+            message
+        );
     }
 
     return response;
@@ -728,55 +826,9 @@ HttpResponse handle_transfer_import(AppState& state, const HttpRequest& request)
 
 }  // namespace
 
-std::string transfer_error_code(const std::string& message) {
-    if (contains_text(message, "sandbox")) {
-        return "sandbox_denied";
-    }
-    if (contains_text(message, "not absolute")) {
-        return "transfer_path_not_absolute";
-    }
-    if (contains_text(message, "destination path") &&
-        contains_text(message, "already exists")) {
-        return "transfer_destination_exists";
-    }
-    if (contains_text(message, "destination parent") &&
-        contains_text(message, "does not exist")) {
-        return "transfer_parent_missing";
-    }
-    if ((contains_text(message, "destination path") &&
-         contains_text(message, "is a directory")) ||
-        (contains_text(message, "destination path") &&
-         contains_text(message, "is not a directory")) ||
-        (contains_text(message, "destination path") &&
-         contains_text(message, "is not a regular file"))) {
-        return "transfer_destination_unsupported";
-    }
-    if (contains_text(message, "transfer compression") ||
-        contains_text(message, "does not support transfer compression")) {
-        return "transfer_compression_unsupported";
-    }
-    if (contains_text(message, "unsupported symlink") ||
-        contains_text(message, "unsupported entry") ||
-        contains_text(message, "symlink mode is unsupported") ||
-        contains_text(message, "unsupported transfer source type") ||
-        contains_text(message, "regular file or directory") ||
-        contains_text(message, "archive entry is not a regular file") ||
-        contains_text(message, "archive file entry cannot target root") ||
-        contains_text(message, "archive path escapes") ||
-        contains_text(message, "archive path must be relative") ||
-        contains_text(message, "archive path contains empty component")) {
-        return "transfer_source_unsupported";
-    }
-    if (contains_text(message, "transfer source missing") ||
-        contains_text(message, "No such file or directory")) {
-        return "transfer_source_missing";
-    }
-    return "transfer_failed";
-}
-
 void require_uncompressed_transfer(const std::string& compression) {
     if (!compression.empty() && compression != "none") {
-        throw std::runtime_error("this daemon does not support transfer compression");
+        throw transfer_compression_unsupported();
     }
 }
 

@@ -13,8 +13,8 @@ broker-tls = [
     "reqwest/rustls-no-provider",
     "rmcp/reqwest-tls-no-provider",
 ]
-daemon-tls = ["remote-exec-daemon/tls"]
-winpty = ["remote-exec-daemon/winpty"]
+daemon-tls = []
+winpty = ["remote-exec-host/winpty"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -23,7 +23,7 @@ base64 = { workspace = true }
 clap = { workspace = true }
 futures-util = { workspace = true }
 http-body-util = { workspace = true }
-remote-exec-daemon = { path = "../remote-exec-daemon", default-features = false }
+remote-exec-host = { path = "../remote-exec-host", default-features = false }
 remote-exec-proto = { path = "../remote-exec-proto" }
 reqwest = { workspace = true }
 rmcp = { workspace = true, features = ["client", "macros", "server", "transport-child-process", "transport-io", "transport-streamable-http-client-reqwest", "transport-streamable-http-server"] }
@@ -42,6 +42,7 @@ uuid = { workspace = true }
 [dev-dependencies]
 gethostname = { workspace = true }
 image = { workspace = true }
+remote-exec-daemon = { path = "../remote-exec-daemon" }
 remote-exec-pki = { path = "../remote-exec-pki" }
 tar = { workspace = true }
 zstd = { workspace = true }

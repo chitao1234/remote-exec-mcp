@@ -3,9 +3,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use remote_exec_daemon::config::{
-    EmbeddedDaemonConfig, ProcessEnvironment, PtyMode, YieldTimeConfig,
-};
+use remote_exec_host::{EmbeddedHostConfig, ProcessEnvironment, PtyMode, YieldTimeConfig};
 use remote_exec_proto::sandbox::FilesystemSandbox;
 use serde::Deserialize;
 
@@ -157,18 +155,18 @@ impl HttpAuthConfig {
 
 impl LocalTargetConfig {
     fn normalized_default_workdir(&self) -> PathBuf {
-        remote_exec_daemon::config::normalize_configured_workdir(
+        remote_exec_host::config::normalize_configured_workdir(
             &self.default_workdir,
             self.windows_posix_root.as_deref(),
         )
     }
 
-    pub fn embedded_daemon_config(
+    pub fn embedded_host_config(
         &self,
         sandbox: Option<FilesystemSandbox>,
         enable_transfer_compression: bool,
-    ) -> EmbeddedDaemonConfig {
-        EmbeddedDaemonConfig {
+    ) -> EmbeddedHostConfig {
+        EmbeddedHostConfig {
             target: "local".to_string(),
             default_workdir: self.default_workdir.clone(),
             windows_posix_root: self.windows_posix_root.clone(),

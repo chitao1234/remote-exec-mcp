@@ -2,33 +2,17 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
+use remote_exec_host::{EmbeddedHostConfig, HostRuntimeConfig};
 use remote_exec_proto::sandbox::FilesystemSandbox;
 use serde::Deserialize;
-
-mod environment;
-mod yield_time;
 
 #[cfg(test)]
 mod tests;
 
-pub use environment::ProcessEnvironment;
-pub use yield_time::{YieldTimeConfig, YieldTimeOperation, YieldTimeOperationConfig};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WindowsPtyBackendOverride {
-    PortablePty,
-    Winpty,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PtyMode {
-    #[default]
-    Auto,
-    Conpty,
-    Winpty,
-    None,
-}
+pub use remote_exec_host::{
+    ProcessEnvironment, PtyMode, WindowsPtyBackendOverride, YieldTimeConfig, YieldTimeOperation,
+    YieldTimeOperationConfig,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -99,6 +83,23 @@ pub struct EmbeddedDaemonConfig {
 }
 
 impl EmbeddedDaemonConfig {
+    pub fn into_host_config(self) -> EmbeddedHostConfig {
+        EmbeddedHostConfig {
+            target: self.target,
+            default_workdir: self.default_workdir,
+            windows_posix_root: self.windows_posix_root,
+            sandbox: self.sandbox,
+            enable_transfer_compression: self.enable_transfer_compression,
+            allow_login_shell: self.allow_login_shell,
+            pty: self.pty,
+            default_shell: self.default_shell,
+            yield_time: self.yield_time,
+            experimental_apply_patch_target_encoding_autodetect: self
+                .experimental_apply_patch_target_encoding_autodetect,
+            process_environment: self.process_environment,
+        }
+    }
+
     pub fn into_daemon_config(self) -> DaemonConfig {
         DaemonConfig {
             target: self.target,
@@ -121,21 +122,68 @@ impl EmbeddedDaemonConfig {
     }
 }
 
+impl From<EmbeddedHostConfig> for EmbeddedDaemonConfig {
+    fn from(value: EmbeddedHostConfig) -> Self {
+        Self {
+            target: value.target,
+            default_workdir: value.default_workdir,
+            windows_posix_root: value.windows_posix_root,
+            sandbox: value.sandbox,
+            enable_transfer_compression: value.enable_transfer_compression,
+            allow_login_shell: value.allow_login_shell,
+            pty: value.pty,
+            default_shell: value.default_shell,
+            yield_time: value.yield_time,
+            experimental_apply_patch_target_encoding_autodetect: value
+                .experimental_apply_patch_target_encoding_autodetect,
+            process_environment: value.process_environment,
+        }
+    }
+}
+
+impl From<EmbeddedHostConfig> for DaemonConfig {
+    fn from(value: EmbeddedHostConfig) -> Self {
+        EmbeddedDaemonConfig::from(value).into_daemon_config()
+    }
+}
+
 impl DaemonConfig {
-    fn normalized_default_workdir(&self) -> PathBuf {
-        normalize_configured_workdir(&self.default_workdir, self.windows_posix_root.as_deref())
+    pub fn host_runtime_config(&self) -> HostRuntimeConfig {
+        HostRuntimeConfig {
+            target: self.target.clone(),
+            default_workdir: self.default_workdir.clone(),
+            windows_posix_root: self.windows_posix_root.clone(),
+            sandbox: self.sandbox.clone(),
+            enable_transfer_compression: self.enable_transfer_compression,
+            allow_login_shell: self.allow_login_shell,
+            pty: self.pty,
+            default_shell: self.default_shell.clone(),
+            yield_time: self.yield_time,
+            experimental_apply_patch_target_encoding_autodetect: self
+                .experimental_apply_patch_target_encoding_autodetect,
+            process_environment: self.process_environment.clone(),
+        }
     }
 
-    fn validate_windows_posix_root(&self) -> anyhow::Result<()> {
-        #[cfg(windows)]
-        if let Some(root) = &self.windows_posix_root {
-            anyhow::ensure!(
-                root.is_absolute(),
-                "windows_posix_root must be an absolute path"
-            );
+    pub fn into_host_runtime_config(self) -> HostRuntimeConfig {
+        HostRuntimeConfig {
+            target: self.target,
+            default_workdir: self.default_workdir,
+            windows_posix_root: self.windows_posix_root,
+            sandbox: self.sandbox,
+            enable_transfer_compression: self.enable_transfer_compression,
+            allow_login_shell: self.allow_login_shell,
+            pty: self.pty,
+            default_shell: self.default_shell,
+            yield_time: self.yield_time,
+            experimental_apply_patch_target_encoding_autodetect: self
+                .experimental_apply_patch_target_encoding_autodetect,
+            process_environment: self.process_environment,
         }
+    }
 
-        Ok(())
+    fn normalized_default_workdir(&self) -> PathBuf {
+        normalize_configured_workdir(&self.default_workdir, self.windows_posix_root.as_deref())
     }
 
     fn validate_http_auth(&self) -> anyhow::Result<()> {
@@ -151,10 +199,8 @@ impl DaemonConfig {
     }
 
     pub fn validate(&self) -> anyhow::Result<()> {
-        self.validate_windows_posix_root()?;
-        validate_existing_directory(&self.normalized_default_workdir(), "default_workdir")?;
+        self.host_runtime_config().validate()?;
         self.validate_http_auth()?;
-        self.yield_time.validate()?;
         crate::tls::validate_config(self)?;
         Ok(())
     }
@@ -171,19 +217,7 @@ impl DaemonConfig {
 }
 
 pub fn normalize_configured_workdir(path: &Path, windows_posix_root: Option<&Path>) -> PathBuf {
-    crate::host_path::resolve_absolute_input_path(&path.to_string_lossy(), windows_posix_root)
-        .unwrap_or_else(|| path.to_path_buf())
-}
-
-fn validate_existing_directory(path: &Path, field_name: &str) -> anyhow::Result<()> {
-    let metadata = std::fs::metadata(path)
-        .with_context(|| format!("{field_name} `{}` does not exist", path.display()))?;
-    anyhow::ensure!(
-        metadata.is_dir(),
-        "{field_name} `{}` must be a directory",
-        path.display()
-    );
-    Ok(())
+    remote_exec_host::config::normalize_configured_workdir(path, windows_posix_root)
 }
 
 impl HttpAuthConfig {

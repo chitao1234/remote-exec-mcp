@@ -7,6 +7,8 @@ use remote_exec_proto::rpc::{
 };
 use remote_exec_proto::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
 
+use crate::error::TransferError;
+
 use super::codec::{open_archive_reader, with_archive_builder, with_archive_writer};
 use super::entry::{ensure_supported_archive_entry_type, normalize_archive_entry_path};
 use super::exclude_matcher::{ExcludeMatcher, normalize_relative_path};
@@ -113,14 +115,28 @@ async fn prepare_export_path(
     windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<PreparedExport> {
     let source_text = path.to_string();
-    anyhow::ensure!(
-        crate::host_path::is_input_path_absolute(&source_text, windows_posix_root),
-        "transfer source path `{source_text}` is not absolute"
-    );
+    if !crate::host_path::is_input_path_absolute(&source_text, windows_posix_root) {
+        return Err(TransferError::path_not_absolute(format!(
+            "transfer source path `{source_text}` is not absolute"
+        ))
+        .into());
+    }
     let source_path = host_path(&source_text, windows_posix_root)?;
-    authorize_path(host_policy(), sandbox, SandboxAccess::Read, &source_path)?;
+    authorize_path(host_policy(), sandbox, SandboxAccess::Read, &source_path)
+        .map_err(|err| TransferError::sandbox_denied(err.to_string()))?;
 
-    let metadata = tokio::fs::symlink_metadata(&source_path).await?;
+    let metadata = tokio::fs::symlink_metadata(&source_path)
+        .await
+        .map_err(|err| {
+            if err.kind() == std::io::ErrorKind::NotFound {
+                TransferError::source_missing(format!(
+                    "transfer source path `{}` does not exist",
+                    source_path.display()
+                ))
+            } else {
+                TransferError::internal(err.to_string())
+            }
+        })?;
     let source_type = export_source_type_from_metadata(&source_path, &metadata, symlink_mode)?;
     let exclude_matcher = ExcludeMatcher::compile(exclude)?;
 
@@ -220,16 +236,18 @@ fn export_source_type_from_metadata(
                 if target_metadata.is_dir() {
                     return Ok(TransferSourceType::Directory);
                 }
-                anyhow::bail!(
+                return Err(TransferError::source_unsupported(format!(
                     "transfer source symlink target `{}` is not a regular file or directory",
                     path.display()
-                );
+                ))
+                .into());
             }
             TransferSymlinkMode::Skip => {
-                anyhow::bail!(
+                return Err(TransferError::source_unsupported(format!(
                     "transfer source contains unsupported symlink `{}`",
                     path.display()
-                );
+                ))
+                .into());
             }
         }
     }
@@ -240,10 +258,11 @@ fn export_source_type_from_metadata(
         return Ok(TransferSourceType::Directory);
     }
 
-    anyhow::bail!(
+    Err(TransferError::source_unsupported(format!(
         "transfer source path `{}` is not a regular file or directory",
         path.display()
-    );
+    ))
+    .into())
 }
 
 fn append_export_source<W: Write>(
@@ -367,10 +386,13 @@ fn append_file_or_symlink_entry<W: Write>(
             TransferSymlinkMode::Follow => {
                 builder.append_path_with_name(source_path, archive_path)?
             }
-            TransferSymlinkMode::Skip => anyhow::bail!(
-                "transfer source contains unsupported symlink `{}`",
-                source_path.display()
-            ),
+            TransferSymlinkMode::Skip => {
+                return Err(TransferError::source_unsupported(format!(
+                    "transfer source contains unsupported symlink `{}`",
+                    source_path.display()
+                ))
+                .into());
+            }
         }
     } else {
         builder.append_path_with_name(source_path, archive_path)?;
@@ -432,17 +454,20 @@ fn append_file_archive_to_bundle<W: Write, R: Read>(
     let mut entry = entries
         .next()
         .ok_or_else(|| anyhow::anyhow!("archive is empty"))??;
-    anyhow::ensure!(
-        entry.header().entry_type().is_file(),
-        "archive entry is not a regular file"
-    );
+    if !entry.header().entry_type().is_file() {
+        return Err(
+            TransferError::source_unsupported("archive entry is not a regular file").into(),
+        );
+    }
 
     let raw_path = entry.path()?.to_path_buf();
     let rel = normalize_archive_entry_path(&raw_path)?;
-    anyhow::ensure!(
-        rel == Path::new(SINGLE_FILE_ENTRY),
-        "file archive entry path must be `{SINGLE_FILE_ENTRY}`"
-    );
+    if rel != Path::new(SINGLE_FILE_ENTRY) {
+        return Err(TransferError::source_unsupported(format!(
+            "file archive entry path must be `{SINGLE_FILE_ENTRY}`"
+        ))
+        .into());
+    }
 
     let mut header = entry.header().clone();
     builder.append_data(&mut header, root_name, &mut entry)?;
@@ -450,10 +475,11 @@ fn append_file_archive_to_bundle<W: Write, R: Read>(
         let mut entry = entry?;
         let raw_path = entry.path()?.to_path_buf();
         let rel = normalize_archive_entry_path(&raw_path)?;
-        anyhow::ensure!(
-            is_transfer_summary_path(&rel),
-            "file archive contains extra entries"
-        );
+        if !is_transfer_summary_path(&rel) {
+            return Err(
+                TransferError::source_unsupported("file archive contains extra entries").into(),
+            );
+        }
         warnings.extend(read_transfer_summary(&mut entry)?);
     }
     Ok(warnings)
@@ -477,7 +503,12 @@ fn append_directory_archive_to_bundle<W: Write, R: Read>(
         ensure_supported_archive_entry_type(entry_type, &raw_rel)?;
 
         if rel.as_os_str().is_empty() {
-            anyhow::ensure!(entry_type.is_dir(), "archive file entry cannot target root");
+            if !entry_type.is_dir() {
+                return Err(TransferError::source_unsupported(
+                    "archive file entry cannot target root",
+                )
+                .into());
+            }
             let mut header = entry.header().clone();
             builder.append_data(&mut header, root_name, std::io::empty())?;
             continue;

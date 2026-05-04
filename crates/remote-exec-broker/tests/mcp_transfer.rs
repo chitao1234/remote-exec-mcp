@@ -465,6 +465,45 @@ async fn transfer_files_auto_mode_keeps_missing_single_destination_exact() {
 }
 
 #[tokio::test]
+async fn transfer_files_auto_mode_treats_not_found_path_info_as_missing_exact() {
+    let fixture = support::spawn_broker_with_plain_http_stub_daemon().await;
+    let source = fixture._tempdir.path().join("artifact.txt");
+    std::fs::write(&source, "hello exact cp mode\n").unwrap();
+    fixture
+        .set_transfer_path_info_error_response(
+            axum::http::StatusCode::NOT_FOUND,
+            remote_exec_proto::rpc::RpcErrorBody {
+                code: "not_found".to_string(),
+                message: "path info probe unavailable".to_string(),
+            },
+        )
+        .await;
+
+    fixture
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "local",
+                    "path": source.display().to_string()
+                },
+                "destination": {
+                    "target": "builder-xp",
+                    "path": "C:/srv/inbox"
+                },
+                "create_parent": true
+            }),
+        )
+        .await;
+
+    let capture = fixture
+        .last_transfer_import()
+        .await
+        .expect("transfer import capture");
+    assert_eq!(capture.destination_path, "C:/srv/inbox");
+}
+
+#[tokio::test]
 async fn transfer_files_uses_bearer_auth_for_remote_imports() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon_http_auth("shared-secret").await;
     let source = fixture._tempdir.path().join("source.txt");
