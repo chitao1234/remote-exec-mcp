@@ -1,0 +1,43 @@
+use std::collections::BTreeMap;
+
+use anyhow::Context;
+use remote_exec_proto::sandbox::CompiledFilesystemSandbox;
+
+use crate::{port_forward, session_store::SessionStore, target::TargetHandle};
+
+#[derive(Clone)]
+pub struct BrokerState {
+    pub enable_transfer_compression: bool,
+    pub disable_structured_content: bool,
+    pub host_sandbox: Option<CompiledFilesystemSandbox>,
+    pub sessions: SessionStore,
+    pub port_forwards: port_forward::PortForwardStore,
+    pub targets: BTreeMap<String, TargetHandle>,
+}
+
+impl BrokerState {
+    pub fn target(&self, name: &str) -> anyhow::Result<&TargetHandle> {
+        self.targets
+            .get(name)
+            .with_context(|| format!("unknown target `{name}`"))
+    }
+
+    pub async fn forwarding_side(&self, name: &str) -> anyhow::Result<port_forward::SideHandle> {
+        if name == "local" && !self.targets.contains_key("local") {
+            return Ok(port_forward::SideHandle::local());
+        }
+
+        let handle = self.target(name)?;
+        handle.ensure_identity_verified(name).await?;
+        if let Some(info) = handle.cached_daemon_info().await {
+            anyhow::ensure!(
+                info.supports_port_forward,
+                "target `{name}` does not support port forwarding"
+            );
+        }
+        Ok(port_forward::SideHandle::target(
+            name.to_string(),
+            handle.clone(),
+        ))
+    }
+}
