@@ -19,9 +19,11 @@
 #include "path_policy.h"
 #include "platform.h"
 #include "rpc_failures.h"
+#include "server_route_common.h"
 #include "server.h"
 #include "server_routes.h"
 #include "server_transport.h"
+#include "transfer_http_codec.h"
 #include "transfer_ops.h"
 
 namespace {
@@ -158,18 +160,19 @@ HttpResponse handle_streaming_transfer_import(
     }
 
     try {
-        require_uncompressed_transfer(request.header("x-remote-exec-compression"));
+        const TransferImportMetadata metadata = parse_transfer_import_metadata(request);
+        require_uncompressed_transfer(metadata.compression);
         const std::string destination_path =
-            resolve_absolute_transfer_path(request.header("x-remote-exec-destination-path"));
+            resolve_absolute_transfer_path(metadata.destination_path);
         authorize_sandbox_path(state, SANDBOX_WRITE, destination_path);
         HttpBodyTransferArchiveReader archive_reader(body);
         const ImportSummary summary = import_path_from_reader(
             archive_reader,
-            request.header("x-remote-exec-source-type"),
+            metadata.source_type,
             destination_path,
-            request.header("x-remote-exec-overwrite"),
-            request.header("x-remote-exec-create-parent") == "true",
-            transfer_symlink_mode_or_default(request.header("x-remote-exec-symlink-mode"))
+            metadata.overwrite,
+            metadata.create_parent,
+            metadata.symlink_mode
         );
         log_transfer_import_summary(destination_path, summary);
         write_json(response, transfer_summary_json(summary));
@@ -203,15 +206,21 @@ HttpResponse handle_streaming_transfer_import(
     return response;
 }
 
-void send_transfer_export_headers(SOCKET client, const std::string& source_type) {
+void send_transfer_export_headers(SOCKET client, const ExportedPayload& payload) {
+    HttpResponse response;
+    response.status = 200;
+    response.headers["Connection"] = "close";
+    response.headers["Transfer-Encoding"] = "chunked";
+    write_transfer_export_headers(response, payload);
+
     std::ostringstream out;
-    out << "HTTP/1.1 200 OK\r\n"
-        << "Connection: close\r\n"
-        << "Content-Type: application/octet-stream\r\n"
-        << "Transfer-Encoding: chunked\r\n"
-        << "x-remote-exec-compression: none\r\n"
-        << "x-remote-exec-source-type: " << source_type << "\r\n"
-        << "\r\n";
+    out << "HTTP/1.1 200 OK\r\n";
+    for (std::map<std::string, std::string>::const_iterator it = response.headers.begin();
+         it != response.headers.end();
+         ++it) {
+        out << it->first << ": " << it->second << "\r\n";
+    }
+    out << "\r\n";
     send_all(client, out.str());
 }
 
@@ -247,7 +256,7 @@ int handle_streaming_transfer_export(
             "transfer/export path=`" + path + "` source_type=`" + source_type + "`"
         );
 
-        send_transfer_export_headers(client, source_type);
+        send_transfer_export_headers(client, ExportedPayload{source_type, std::string()});
         headers_sent = true;
         ChunkedTransferArchiveSink sink(client);
         export_path_to_sink_as(sink, path, source_type, symlink_mode, exclude);
