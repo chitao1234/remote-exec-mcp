@@ -4,6 +4,8 @@ pub mod certs;
 pub mod fixture;
 pub mod spawners;
 pub mod stub_daemon;
+#[path = "../../../../tests/support/transfer_archive.rs"]
+pub mod transfer_archive;
 
 #[allow(
     unused_imports,

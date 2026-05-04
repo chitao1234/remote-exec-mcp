@@ -7,7 +7,8 @@ use tempfile::TempDir;
 
 use super::stub_daemon::{
     ExecStartBehavior, ExecWriteBehavior, StubDaemonState, StubImageReadResponse,
-    StubTransferExportCapture, StubTransferImportCapture, set_transfer_export_directory_response,
+    StubTransferExportCapture, StubTransferImportCapture, set_exec_start_behavior,
+    set_exec_write_behavior, set_image_read_response, set_transfer_export_directory_response,
     set_transfer_export_file_response, set_transfer_path_info_error_response,
     set_transfer_path_info_response,
 };
@@ -106,7 +107,7 @@ impl BrokerFixture {
     }
 
     pub async fn set_image_read_response(&self, response: StubImageReadResponse) {
-        *self.stub_state.image_read_response.lock().await = response;
+        set_image_read_response(&self.stub_state, response).await;
     }
 
     pub async fn set_exec_start_warnings(
@@ -117,13 +118,19 @@ impl BrokerFixture {
     }
 
     pub async fn set_malformed_exec_start_missing_session_id(&self) {
-        *self.stub_state.exec_start_behavior.lock().await =
-            ExecStartBehavior::RunningMissingDaemonSessionId;
+        set_exec_start_behavior(
+            &self.stub_state,
+            ExecStartBehavior::RunningMissingDaemonSessionId,
+        )
+        .await;
     }
 
     pub async fn set_malformed_exec_write_missing_exit_code(&self) {
-        *self.stub_state.exec_write_behavior.lock().await =
-            ExecWriteBehavior::MalformedCompletedMissingExitCode;
+        set_exec_write_behavior(
+            &self.stub_state,
+            ExecWriteBehavior::MalformedCompletedMissingExitCode,
+        )
+        .await;
     }
 
     pub async fn set_stub_daemon_instance_id(&self, daemon_instance_id: &str) {

@@ -2,6 +2,8 @@
 mod certs;
 pub mod fixture;
 pub mod spawn;
+#[path = "../../../../tests/support/transfer_archive.rs"]
+pub mod transfer_archive;
 
 #[cfg(windows)]
 #[allow(

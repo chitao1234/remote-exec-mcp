@@ -10,6 +10,7 @@ use remote_exec_proto::rpc::{
     TransferExportRequest, TransferImportResponse, TransferPathInfoRequest,
     TransferPathInfoResponse, TransferSourceType,
 };
+use support::transfer_archive::decode_archive;
 
 fn raw_tar_file_with_path(path: &Path, body: &[u8]) -> Vec<u8> {
     fn write_octal(field: &mut [u8], value: u64) {
@@ -301,8 +302,8 @@ async fn export_file_supports_zstd_compression() {
             .unwrap(),
         "zstd"
     );
-    let decoded =
-        zstd::stream::decode_all(std::io::Cursor::new(response.bytes().await.unwrap())).unwrap();
+    let bytes = response.bytes().await.unwrap();
+    let decoded = decode_archive(&bytes, "zstd");
     let mut archive = tar::Archive::new(std::io::Cursor::new(decoded));
     let mut entries = archive.entries().unwrap();
     let entry = entries.next().unwrap().unwrap();

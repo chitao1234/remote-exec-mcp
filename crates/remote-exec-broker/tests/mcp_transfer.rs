@@ -5,6 +5,7 @@ use std::io::{Cursor, Read};
 use std::process::Command;
 
 use rmcp::model::{CallToolRequestParams, PaginatedRequestParams};
+use support::transfer_archive::{decode_archive, read_archive_paths};
 
 const SINGLE_FILE_ENTRY: &str = ".remote-exec-file";
 
@@ -31,30 +32,6 @@ fn read_single_file_archive(bytes: &[u8]) -> (String, Vec<u8>) {
         "single-file archive contained extra entries"
     );
     (path, body)
-}
-
-fn decode_archive(bytes: &[u8], compression: &str) -> Vec<u8> {
-    match compression {
-        "zstd" => zstd::stream::decode_all(Cursor::new(bytes)).expect("decode zstd archive"),
-        _ => bytes.to_vec(),
-    }
-}
-
-fn read_archive_paths(bytes: &[u8], compression: &str) -> Vec<String> {
-    let decoded = decode_archive(bytes, compression);
-    let mut archive = tar::Archive::new(Cursor::new(decoded));
-    archive
-        .entries()
-        .expect("archive entries")
-        .map(|entry| {
-            entry
-                .expect("archive entry")
-                .path()
-                .expect("entry path")
-                .to_string_lossy()
-                .into_owned()
-        })
-        .collect()
 }
 
 fn raw_tar_file_with_path(path: &str, body: &[u8]) -> Vec<u8> {
