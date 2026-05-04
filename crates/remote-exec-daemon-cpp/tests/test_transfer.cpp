@@ -207,6 +207,43 @@ static std::pair<std::string, std::string> read_single_file_tar(const std::strin
     return std::make_pair(path, archive.substr(body_offset, body_size));
 }
 
+static std::vector<std::string> read_tar_paths(const std::string& archive) {
+    std::vector<std::string> paths;
+    std::size_t offset = 0;
+    std::string long_name;
+
+    while (offset + 512 <= archive.size() && !block_is_zero(archive.data() + offset)) {
+        const char* header = archive.data() + offset;
+        std::size_t path_length = 0;
+        while (path_length < 100 && header[path_length] != '\0') {
+            ++path_length;
+        }
+        std::string path(header, path_length);
+        const char typeflag = header[156] == '\0' ? '0' : header[156];
+        const std::uint64_t size = parse_octal_value(header + 124, 12);
+        const std::size_t body_offset = offset + 512;
+        const std::size_t padded_size = ((static_cast<std::size_t>(size) + 511) / 512) * 512;
+
+        if (typeflag == 'L') {
+            long_name = archive.substr(body_offset, static_cast<std::size_t>(size));
+            while (!long_name.empty() && long_name[long_name.size() - 1] == '\0') {
+                long_name.erase(long_name.size() - 1);
+            }
+            offset = body_offset + padded_size;
+            continue;
+        }
+
+        if (!long_name.empty()) {
+            path = long_name;
+            long_name.clear();
+        }
+        paths.push_back(path);
+        offset = body_offset + padded_size;
+    }
+
+    return paths;
+}
+
 #ifndef _WIN32
 static std::uint64_t read_first_tar_mode(const std::string& archive) {
     assert(archive.size() >= 512);
@@ -387,6 +424,73 @@ static void assert_directory_long_path_round_trip() {
 
     assert(imported.source_type == "directory");
     assert(read_text(root / "dest" / long_name / "nested" / "payload.txt") == "long path");
+}
+
+static void assert_directory_export_excludes_matching_entries() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-exclude-dir";
+    fs::remove_all(root);
+    fs::create_directories(root / "source" / ".git");
+    fs::create_directories(root / "source" / "logs");
+    fs::create_directories(root / "source" / "src");
+    write_text(root / "source" / "keep.txt", "keep");
+    write_text(root / "source" / "top.log", "drop");
+    write_text(root / "source" / ".git" / "config", "secret");
+    write_text(root / "source" / "logs" / "readme.txt", "keep");
+    write_text(root / "source" / "logs" / "app.log", "drop");
+    write_text(root / "source" / "src" / "a.cpp", "drop");
+    write_text(root / "source" / "src" / "z.cpp", "keep");
+
+    std::vector<std::string> exclude;
+    exclude.push_back("**/*.log");
+    exclude.push_back(".git/**");
+    exclude.push_back("src/[ab].cpp");
+    const ExportedPayload exported =
+        export_path((root / "source").string(), "preserve", exclude);
+    const std::vector<std::string> archive_paths = read_tar_paths(exported.bytes);
+
+    assert(std::find(archive_paths.begin(), archive_paths.end(), ".") != archive_paths.end());
+    assert(std::find(archive_paths.begin(), archive_paths.end(), "keep.txt") != archive_paths.end());
+    assert(std::find(archive_paths.begin(), archive_paths.end(), "logs/readme.txt") != archive_paths.end());
+    assert(std::find(archive_paths.begin(), archive_paths.end(), "src/z.cpp") != archive_paths.end());
+    assert(std::find(archive_paths.begin(), archive_paths.end(), "top.log") == archive_paths.end());
+    assert(std::find(archive_paths.begin(), archive_paths.end(), ".git") == archive_paths.end());
+    assert(std::find(archive_paths.begin(), archive_paths.end(), ".git/config") == archive_paths.end());
+    assert(std::find(archive_paths.begin(), archive_paths.end(), "logs/app.log") == archive_paths.end());
+    assert(std::find(archive_paths.begin(), archive_paths.end(), "src/a.cpp") == archive_paths.end());
+
+    const ImportSummary imported = import_path(
+        exported.bytes,
+        exported.source_type,
+        (root / "dest").string(),
+        "replace",
+        true
+    );
+    assert(imported.files_copied == 3);
+    assert(imported.warnings.empty());
+    assert(read_text(root / "dest" / "keep.txt") == "keep");
+    assert(read_text(root / "dest" / "logs" / "readme.txt") == "keep");
+    assert(read_text(root / "dest" / "src" / "z.cpp") == "keep");
+    assert(!fs::exists(root / "dest" / "top.log"));
+    assert(!fs::exists(root / "dest" / ".git"));
+    assert(!fs::exists(root / "dest" / "logs" / "app.log"));
+    assert(!fs::exists(root / "dest" / "src" / "a.cpp"));
+}
+
+static void assert_single_file_export_ignores_exclude_patterns() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-exclude-file";
+    fs::remove_all(root);
+    fs::create_directories(root);
+    write_text(root / "hello.txt", "hello");
+
+    std::vector<std::string> exclude;
+    exclude.push_back("**/*.txt");
+    const ExportedPayload exported =
+        export_path((root / "hello.txt").string(), "preserve", exclude);
+
+    assert(exported.source_type == "file");
+    const std::pair<std::string, std::string> file_entry = read_single_file_tar(exported.bytes);
+    assert(file_entry.first == SINGLE_FILE_ENTRY);
+    assert(file_entry.second == "hello");
 }
 
 #ifndef _WIN32
@@ -641,6 +745,8 @@ int main() {
     assert_path_info_reports_existing_directory();
     assert_directory_merge_behavior();
     assert_directory_long_path_round_trip();
+    assert_directory_export_excludes_matching_entries();
+    assert_single_file_export_ignores_exclude_patterns();
 #ifndef _WIN32
     assert_symlink_sources_are_preserved_by_default();
     assert_top_level_file_symlink_can_be_followed();

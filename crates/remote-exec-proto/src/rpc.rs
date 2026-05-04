@@ -166,6 +166,8 @@ pub struct TransferExportRequest {
     pub compression: TransferCompression,
     #[serde(default)]
     pub symlink_mode: TransferSymlinkMode,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -10,7 +10,7 @@ use endpoints::{
     negotiate_transfer_compression, resolve_destination,
 };
 use format::{CompletedTransfer, finish_transfer, format_transfer_compression};
-use operations::{transfer_multiple_sources, transfer_single_source};
+use operations::{TransferExecutionOptions, transfer_multiple_sources, transfer_single_source};
 
 pub async fn transfer_files(
     state: &crate::BrokerState,
@@ -38,6 +38,7 @@ pub async fn transfer_files(
         destination_target = %requested_destination.target,
         destination_path = %requested_destination.path,
         compression = format_transfer_compression(&compression),
+        exclude_count = input.exclude.len(),
         overwrite = ?input.overwrite,
         destination_mode = ?input.destination_mode,
         symlink_mode = ?input.symlink_mode,
@@ -63,28 +64,24 @@ pub async fn transfer_files(
 
     let (source_type, summary) = match sources.as_slice() {
         [source] => {
-            transfer_single_source(
-                state,
-                source,
-                &destination,
-                &input.overwrite,
-                &compression,
-                &input.symlink_mode,
-                input.create_parent,
-            )
-            .await?
+            let options = TransferExecutionOptions {
+                overwrite: &input.overwrite,
+                compression: &compression,
+                exclude: &input.exclude,
+                symlink_mode: &input.symlink_mode,
+                create_parent: input.create_parent,
+            };
+            transfer_single_source(state, source, &destination, options).await?
         }
         _ => {
-            transfer_multiple_sources(
-                state,
-                &sources,
-                &destination,
-                &input.overwrite,
-                &compression,
-                &input.symlink_mode,
-                input.create_parent,
-            )
-            .await?
+            let options = TransferExecutionOptions {
+                overwrite: &input.overwrite,
+                compression: &compression,
+                exclude: &input.exclude,
+                symlink_mode: &input.symlink_mode,
+                create_parent: input.create_parent,
+            };
+            transfer_multiple_sources(state, &sources, &destination, options).await?
         }
     };
 

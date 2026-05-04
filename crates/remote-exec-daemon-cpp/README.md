@@ -166,6 +166,8 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
 - omitted `view_image.detail` defaults to `original` because no resize/re-encode path exists
 - transfer compression is not supported
 - `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles
+- `transfer_files` accepts an optional export-side `exclude` array. Patterns match paths relative to each source root, use `/` as the logical separator on all platforms, and support `*`, `?`, `**`, `[abc]`, `[a-z]`, `[!abc]`, `[!a-c]`, `[^abc]`, and `[^a-c]`
+- excluded matches are silent, excluded directories are pruned recursively, and single-file sources ignore `exclude` in v1
 - daemon HTTP transfer imports and exports stream archive bodies instead of staging the full tar payload in memory
 - transfer imports support `fail`, `merge`, and `replace` overwrite modes; `merge` overlays compatible existing destinations without deleting unrelated directory entries
 - POSIX transfer exports skip unsupported special entries in directory trees and report warnings

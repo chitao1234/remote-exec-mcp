@@ -8,6 +8,7 @@
 #endif
 
 #include "transfer_ops_internal.h"
+#include "transfer_glob.h"
 
 namespace {
 
@@ -80,6 +81,7 @@ void append_directory_contents(
     TransferArchiveSink* archive,
     const std::string& current_path,
     const std::string& current_rel,
+    const transfer_glob::Matcher& exclude_matcher,
     ExportContext* context
 );
 
@@ -87,6 +89,7 @@ bool append_followed_symlink_entry(
     TransferArchiveSink* archive,
     const std::string& child_path,
     const std::string& child_rel,
+    const transfer_glob::Matcher& exclude_matcher,
     ExportContext* context
 ) {
     if (is_directory_follow(child_path)) {
@@ -96,7 +99,13 @@ bool append_followed_symlink_entry(
         }
         context->followed_directories.insert(child_path);
         append_directory_entry(archive, child_rel);
-        append_directory_contents(archive, child_path, child_rel, context);
+        append_directory_contents(
+            archive,
+            child_path,
+            child_rel,
+            exclude_matcher,
+            context
+        );
         return true;
     }
     if (is_regular_file_follow(child_path)) {
@@ -110,6 +119,7 @@ void append_directory_contents(
     TransferArchiveSink* archive,
     const std::string& current_path,
     const std::string& current_rel,
+    const transfer_glob::Matcher& exclude_matcher,
     ExportContext* context
 ) {
     const std::vector<DirectoryEntry> entries = list_directory_entries(current_path);
@@ -120,8 +130,22 @@ void append_directory_contents(
             current_rel.empty() ? entry.name : current_rel + "/" + entry.name;
 
         if (entry.is_directory) {
+            if (exclude_matcher.is_excluded_directory(child_rel)) {
+                continue;
+            }
+        } else if (exclude_matcher.is_excluded_path(child_rel)) {
+            continue;
+        }
+
+        if (entry.is_directory) {
             append_directory_entry(archive, child_rel);
-            append_directory_contents(archive, child_path, child_rel, context);
+            append_directory_contents(
+                archive,
+                child_path,
+                child_rel,
+                exclude_matcher,
+                context
+            );
             continue;
         }
         if (entry.is_symlink) {
@@ -131,7 +155,13 @@ void append_directory_contents(
             }
 #ifdef _WIN32
             if (context->options.symlink_mode == "follow" &&
-                append_followed_symlink_entry(archive, child_path, child_rel, context)) {
+                append_followed_symlink_entry(
+                    archive,
+                    child_path,
+                    child_rel,
+                    exclude_matcher,
+                    context
+                )) {
                 continue;
             }
             handle_skipped_symlink(context, child_path);
@@ -142,7 +172,12 @@ void append_directory_contents(
                 continue;
             }
             if (context->options.symlink_mode == "follow") {
-                if (append_followed_symlink_entry(archive, child_path, child_rel, context)) {
+                if (append_followed_symlink_entry(
+                        archive,
+                        child_path,
+                        child_rel,
+                        exclude_matcher,
+                        context)) {
                     continue;
                 }
                 handle_unsupported_entry(context, child_path);
@@ -163,10 +198,11 @@ void append_directory_contents(
 void export_directory_as_tar(
     TransferArchiveSink* archive,
     const std::string& absolute_path,
+    const transfer_glob::Matcher& exclude_matcher,
     ExportContext* context
 ) {
     append_directory_entry(archive, ".");
-    append_directory_contents(archive, absolute_path, "", context);
+    append_directory_contents(archive, absolute_path, "", exclude_matcher, context);
     append_transfer_summary_entry(archive, context->warnings);
     append_archive_terminator(archive);
 }
@@ -195,8 +231,13 @@ void export_file_as_tar(
     append_archive_terminator(archive);
 }
 
-ExportOptions normalized_options(const std::string& symlink_mode) {
-    ExportOptions options{symlink_mode.empty() ? "preserve" : symlink_mode};
+ExportOptions normalized_options(
+    const std::string& symlink_mode,
+    const std::vector<std::string>& exclude
+) {
+    ExportOptions options;
+    options.symlink_mode = symlink_mode.empty() ? "preserve" : symlink_mode;
+    options.exclude = exclude;
     validate_transfer_options(options);
     return options;
 }
@@ -227,7 +268,10 @@ std::string export_path_source_type(
     const std::string& absolute_path,
     const std::string& symlink_mode
 ) {
-    const ExportOptions options = normalized_options(symlink_mode);
+    const ExportOptions options = normalized_options(
+        symlink_mode,
+        std::vector<std::string>()
+    );
     validate_export_path(absolute_path, options);
 #ifndef _WIN32
     if (is_symlink_path(absolute_path) && options.symlink_mode == "preserve") {
@@ -250,18 +294,20 @@ void export_path_to_sink_as(
     TransferArchiveSink& sink,
     const std::string& absolute_path,
     const std::string& source_type,
-    const std::string& symlink_mode
+    const std::string& symlink_mode,
+    const std::vector<std::string>& exclude
 ) {
     ExportContext context;
-    context.options = normalized_options(symlink_mode);
+    context.options = normalized_options(symlink_mode, exclude);
     validate_export_path(absolute_path, context.options);
+    const transfer_glob::Matcher exclude_matcher(context.options.exclude);
 
     if (source_type == "file") {
         export_file_as_tar(&sink, absolute_path, context.options);
         return;
     }
     if (source_type == "directory") {
-        export_directory_as_tar(&sink, absolute_path, &context);
+        export_directory_as_tar(&sink, absolute_path, exclude_matcher, &context);
         return;
     }
     throw std::runtime_error("unsupported transfer source type");
@@ -270,19 +316,26 @@ void export_path_to_sink_as(
 std::string export_path_to_sink(
     TransferArchiveSink& sink,
     const std::string& absolute_path,
-    const std::string& symlink_mode
+    const std::string& symlink_mode,
+    const std::vector<std::string>& exclude
 ) {
     const std::string source_type = export_path_source_type(absolute_path, symlink_mode);
-    export_path_to_sink_as(sink, absolute_path, source_type, symlink_mode);
+    export_path_to_sink_as(sink, absolute_path, source_type, symlink_mode, exclude);
     return source_type;
 }
 
 ExportedPayload export_path(
     const std::string& absolute_path,
-    const std::string& symlink_mode
+    const std::string& symlink_mode,
+    const std::vector<std::string>& exclude
 ) {
     std::string archive;
     StringTransferArchiveSink sink(&archive);
-    const std::string source_type = export_path_to_sink(sink, absolute_path, symlink_mode);
+    const std::string source_type = export_path_to_sink(
+        sink,
+        absolute_path,
+        symlink_mode,
+        exclude
+    );
     return ExportedPayload{source_type, archive};
 }

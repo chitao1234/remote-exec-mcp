@@ -24,18 +24,29 @@ struct ExportArchiveResult {
     source_type: RpcTransferSourceType,
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct TransferExecutionOptions<'a> {
+    pub(super) overwrite: &'a TransferOverwrite,
+    pub(super) compression: &'a RpcTransferCompression,
+    pub(super) exclude: &'a [String],
+    pub(super) symlink_mode: &'a PublicTransferSymlinkMode,
+    pub(super) create_parent: bool,
+}
+
 pub(super) async fn transfer_single_source(
     state: &crate::BrokerState,
     source: &TransferEndpoint,
     destination: &TransferEndpoint,
-    overwrite: &TransferOverwrite,
-    compression: &RpcTransferCompression,
-    symlink_mode: &PublicTransferSymlinkMode,
-    create_parent: bool,
+    options: TransferExecutionOptions<'_>,
 ) -> anyhow::Result<(RpcTransferSourceType, TransferImportResponse)> {
     match (source.target.as_str(), destination.target.as_str()) {
         ("local", "local") => {
-            let export_request = build_export_request(source, compression, symlink_mode);
+            let export_request = build_export_request(
+                source,
+                options.compression,
+                options.exclude,
+                options.symlink_mode,
+            );
             let exported = crate::local_transfer::export_path_to_stream(
                 &source.path,
                 &export_request,
@@ -44,11 +55,11 @@ pub(super) async fn transfer_single_source(
             .await?;
             let request = build_import_request(
                 destination,
-                overwrite,
+                options.overwrite,
                 exported.source_type.clone(),
-                compression,
-                symlink_mode,
-                create_parent,
+                options.compression,
+                options.symlink_mode,
+                options.create_parent,
             );
             let summary = crate::local_transfer::import_archive_from_async_reader(
                 exported.reader,
@@ -59,7 +70,12 @@ pub(super) async fn transfer_single_source(
             Ok((exported.source_type, summary))
         }
         ("local", target_name) => {
-            let export_request = build_export_request(source, compression, symlink_mode);
+            let export_request = build_export_request(
+                source,
+                options.compression,
+                options.exclude,
+                options.symlink_mode,
+            );
             let exported = crate::local_transfer::export_path_to_stream(
                 &source.path,
                 &export_request,
@@ -68,11 +84,11 @@ pub(super) async fn transfer_single_source(
             .await?;
             let request = build_import_request(
                 destination,
-                overwrite,
+                options.overwrite,
                 exported.source_type.clone(),
-                compression,
-                symlink_mode,
-                create_parent,
+                options.compression,
+                options.symlink_mode,
+                options.create_parent,
             );
             let body =
                 reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(exported.reader));
@@ -81,7 +97,12 @@ pub(super) async fn transfer_single_source(
             Ok((exported.source_type, summary))
         }
         (target_name, "local") => {
-            let export_request = build_export_request(source, compression, symlink_mode);
+            let export_request = build_export_request(
+                source,
+                options.compression,
+                options.exclude,
+                options.symlink_mode,
+            );
             let target = verified_remote_target(state, target_name).await?;
             let exported = handle_remote_transfer_result(
                 target,
@@ -91,11 +112,11 @@ pub(super) async fn transfer_single_source(
             let source_type = exported.source_type.clone();
             let request = build_import_request(
                 destination,
-                overwrite,
+                options.overwrite,
                 source_type.clone(),
-                compression,
-                symlink_mode,
-                create_parent,
+                options.compression,
+                options.symlink_mode,
+                options.create_parent,
             );
             let summary = crate::local_transfer::import_archive_from_async_reader(
                 exported.into_async_read(),
@@ -106,7 +127,12 @@ pub(super) async fn transfer_single_source(
             Ok((source_type, summary))
         }
         (source_target_name, destination_target_name) => {
-            let export_request = build_export_request(source, compression, symlink_mode);
+            let export_request = build_export_request(
+                source,
+                options.compression,
+                options.exclude,
+                options.symlink_mode,
+            );
             let source_target = verified_remote_target(state, source_target_name).await?;
             let exported = handle_remote_transfer_result(
                 source_target,
@@ -116,11 +142,11 @@ pub(super) async fn transfer_single_source(
             let source_type = exported.source_type.clone();
             let request = build_import_request(
                 destination,
-                overwrite,
+                options.overwrite,
                 source_type.clone(),
-                compression,
-                symlink_mode,
-                create_parent,
+                options.compression,
+                options.symlink_mode,
+                options.create_parent,
             );
             let summary = import_remote_body_to_endpoint(
                 state,
@@ -138,10 +164,7 @@ pub(super) async fn transfer_multiple_sources(
     state: &crate::BrokerState,
     sources: &[TransferEndpoint],
     destination: &TransferEndpoint,
-    overwrite: &TransferOverwrite,
-    compression: &RpcTransferCompression,
-    symlink_mode: &PublicTransferSymlinkMode,
-    create_parent: bool,
+    options: TransferExecutionOptions<'_>,
 ) -> anyhow::Result<(RpcTransferSourceType, TransferImportResponse)> {
     let mut exported_sources = Vec::with_capacity(sources.len());
     for source in sources {
@@ -152,8 +175,9 @@ pub(super) async fn transfer_multiple_sources(
             state,
             source,
             temp_path.as_ref(),
-            compression,
-            symlink_mode,
+            options.compression,
+            options.exclude,
+            options.symlink_mode,
         )
         .await?;
         exported_sources.push(ExportedSourceArchive {
@@ -173,23 +197,23 @@ pub(super) async fn transfer_multiple_sources(
                 source_path: source.endpoint.path.clone(),
                 source_policy: source.source_policy,
                 source_type: source.source_type.clone(),
-                compression: compression.clone(),
+                compression: options.compression.clone(),
                 archive_path: source.temp_path.to_path_buf(),
             })
             .collect(),
         bundled_path.as_ref(),
-        compression.clone(),
+        options.compression.clone(),
     )
     .await?;
 
     let source_type = RpcTransferSourceType::Multiple;
     let request = build_import_request(
         destination,
-        overwrite,
+        options.overwrite,
         source_type.clone(),
-        compression,
-        symlink_mode,
-        create_parent,
+        options.compression,
+        options.symlink_mode,
+        options.create_parent,
     );
     let summary =
         import_archive_to_endpoint(state, bundled_path.as_ref(), destination, &request).await?;
@@ -199,12 +223,14 @@ pub(super) async fn transfer_multiple_sources(
 fn build_export_request(
     endpoint: &TransferEndpoint,
     compression: &RpcTransferCompression,
+    exclude: &[String],
     symlink_mode: &PublicTransferSymlinkMode,
 ) -> TransferExportRequest {
     TransferExportRequest {
         path: endpoint.path.clone(),
         compression: compression.clone(),
         symlink_mode: to_rpc_symlink_mode(symlink_mode),
+        exclude: exclude.to_vec(),
     }
 }
 
@@ -213,9 +239,10 @@ async fn export_endpoint_to_archive(
     endpoint: &TransferEndpoint,
     archive_path: &Path,
     compression: &RpcTransferCompression,
+    exclude: &[String],
     symlink_mode: &PublicTransferSymlinkMode,
 ) -> anyhow::Result<ExportArchiveResult> {
-    let request = build_export_request(endpoint, compression, symlink_mode);
+    let request = build_export_request(endpoint, compression, exclude, symlink_mode);
 
     match endpoint.target.as_str() {
         "local" => {

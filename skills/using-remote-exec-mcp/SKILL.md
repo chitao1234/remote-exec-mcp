@@ -355,6 +355,10 @@ Input shape:
     "target": "builder-a",
     "path": "/srv/inbox"
   },
+  "exclude": [
+    "**/*.log",
+    ".git/**"
+  ],
   "overwrite": "merge",
   "destination_mode": "auto",
   "symlink_mode": "preserve",
@@ -396,6 +400,9 @@ How to use it:
 - Use `destination_mode: "into_directory"` to copy each source beneath `destination.path` using the source basename.
 - `overwrite: "merge"` overlays files into an existing compatible destination without deleting unrelated directory entries; use `replace` only when deleting the existing destination first is intended.
 - Unsupported special entries inside source directory trees such as device nodes, FIFOs, and sockets are skipped and returned as warnings.
+- `exclude` is optional and is matched relative to each source root during export, not against the destination path.
+- `exclude` patterns use `/` as the logical separator on every platform and support `*`, `?`, `**`, `[abc]`, `[a-z]`, `[!abc]`, `[!a-c]`, `[^abc]`, and `[^a-c]`.
+- Matching `exclude` entries are omitted silently. Excluded directories are pruned recursively. In v1, single-file sources ignore `exclude`.
 - `symlink_mode: "preserve"` copies symlinks as symlinks. Use `follow` to copy symlink targets or `skip` to omit symlinks with warnings. On Windows XP-compatible C++ daemon targets, symlink entries inside directory transfers and import archives are skipped with warnings when preservation is unavailable, while `follow` copies regular-file and directory targets when the platform exposes them.
 - `create_parent: true` only creates missing parents for the exact final destination path or destination root you requested.
 - If a source target and the destination target are the same, those two paths still must differ.

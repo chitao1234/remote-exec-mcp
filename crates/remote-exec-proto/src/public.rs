@@ -125,6 +125,8 @@ pub struct TransferFilesInput {
     #[serde(default)]
     pub sources: Vec<TransferEndpoint>,
     pub destination: TransferEndpoint,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude: Vec<String>,
     #[serde(default)]
     pub overwrite: TransferOverwrite,
     #[serde(default)]

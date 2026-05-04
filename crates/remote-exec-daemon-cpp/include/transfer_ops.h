@@ -45,7 +45,8 @@ public:
 
 ExportedPayload export_path(
     const std::string& absolute_path,
-    const std::string& symlink_mode = "preserve"
+    const std::string& symlink_mode = "preserve",
+    const std::vector<std::string>& exclude = std::vector<std::string>()
 );
 std::string export_path_source_type(
     const std::string& absolute_path,
@@ -54,13 +55,15 @@ std::string export_path_source_type(
 std::string export_path_to_sink(
     TransferArchiveSink& sink,
     const std::string& absolute_path,
-    const std::string& symlink_mode = "preserve"
+    const std::string& symlink_mode = "preserve",
+    const std::vector<std::string>& exclude = std::vector<std::string>()
 );
 void export_path_to_sink_as(
     TransferArchiveSink& sink,
     const std::string& absolute_path,
     const std::string& source_type,
-    const std::string& symlink_mode = "preserve"
+    const std::string& symlink_mode = "preserve",
+    const std::vector<std::string>& exclude = std::vector<std::string>()
 );
 PathInfo path_info(const std::string& absolute_path);
 ImportSummary import_path(

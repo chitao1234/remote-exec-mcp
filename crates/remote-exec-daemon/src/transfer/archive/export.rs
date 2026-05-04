@@ -9,6 +9,7 @@ use remote_exec_proto::sandbox::{CompiledFilesystemSandbox, SandboxAccess, autho
 
 use super::codec::{open_archive_reader, with_archive_builder, with_archive_writer};
 use super::entry::{ensure_supported_archive_entry_type, normalize_archive_entry_path};
+use super::exclude_matcher::{ExcludeMatcher, normalize_relative_path};
 use super::summary::{append_transfer_summary, is_transfer_summary_path, read_transfer_summary};
 use super::{
     BundledArchiveSource, ExportPathResult, ExportedArchive, ExportedArchiveStream,
@@ -20,12 +21,14 @@ const STREAM_BUFFER_SIZE: usize = 64 * 1024;
 struct PreparedExport {
     source_path: PathBuf,
     source_type: TransferSourceType,
+    exclude_matcher: ExcludeMatcher,
 }
 
 pub async fn export_path_to_archive(
     path: &str,
     compression: TransferCompression,
     symlink_mode: TransferSymlinkMode,
+    exclude: &[String],
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<ExportedArchive> {
@@ -36,6 +39,7 @@ pub async fn export_path_to_archive(
         temp_path.as_ref(),
         compression.clone(),
         symlink_mode,
+        exclude,
         sandbox,
         windows_posix_root,
     )
@@ -54,10 +58,12 @@ pub async fn export_path_to_file(
     archive_path: &Path,
     compression: TransferCompression,
     symlink_mode: TransferSymlinkMode,
+    exclude: &[String],
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<ExportPathResult> {
-    let prepared = prepare_export_path(path, &symlink_mode, sandbox, windows_posix_root).await?;
+    let prepared =
+        prepare_export_path(path, &symlink_mode, exclude, sandbox, windows_posix_root).await?;
     let archive_path = archive_path.to_path_buf();
     let source_type = prepared.source_type.clone();
 
@@ -74,10 +80,12 @@ pub async fn export_path_to_stream(
     path: &str,
     compression: TransferCompression,
     symlink_mode: TransferSymlinkMode,
+    exclude: &[String],
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<ExportedArchiveStream> {
-    let prepared = prepare_export_path(path, &symlink_mode, sandbox, windows_posix_root).await?;
+    let prepared =
+        prepare_export_path(path, &symlink_mode, exclude, sandbox, windows_posix_root).await?;
     let source_type = prepared.source_type.clone();
     let (reader, writer) = tokio::io::duplex(STREAM_BUFFER_SIZE);
     let task_compression = compression.clone();
@@ -100,6 +108,7 @@ pub async fn export_path_to_stream(
 async fn prepare_export_path(
     path: &str,
     symlink_mode: &TransferSymlinkMode,
+    exclude: &[String],
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<PreparedExport> {
@@ -113,10 +122,12 @@ async fn prepare_export_path(
 
     let metadata = tokio::fs::symlink_metadata(&source_path).await?;
     let source_type = export_source_type_from_metadata(&source_path, &metadata, symlink_mode)?;
+    let exclude_matcher = ExcludeMatcher::compile(exclude)?;
 
     Ok(PreparedExport {
         source_path,
         source_type,
+        exclude_matcher,
     })
 }
 
@@ -133,6 +144,7 @@ async fn write_prepared_export_to_file(
                 builder,
                 &prepared.source_path,
                 prepared.source_type,
+                &prepared.exclude_matcher,
                 &symlink_mode,
             )?;
             append_transfer_summary(builder, &warnings)?;
@@ -159,6 +171,7 @@ where
                 builder,
                 &prepared.source_path,
                 prepared.source_type,
+                &prepared.exclude_matcher,
                 &symlink_mode,
             )?;
             append_transfer_summary(builder, &warnings)?;
@@ -237,6 +250,7 @@ fn append_export_source<W: Write>(
     builder: &mut tar::Builder<W>,
     source_path: &Path,
     source_type: TransferSourceType,
+    exclude_matcher: &ExcludeMatcher,
     symlink_mode: &TransferSymlinkMode,
 ) -> anyhow::Result<Vec<TransferWarning>> {
     let mut warnings = Vec::new();
@@ -255,6 +269,7 @@ fn append_export_source<W: Write>(
                 builder,
                 source_path,
                 source_path,
+                exclude_matcher,
                 symlink_mode,
                 &mut warnings,
             )?;
@@ -271,6 +286,7 @@ fn append_directory_entries<W: Write>(
     builder: &mut tar::Builder<W>,
     root: &Path,
     current: &Path,
+    exclude_matcher: &ExcludeMatcher,
     symlink_mode: &TransferSymlinkMode,
     warnings: &mut Vec<TransferWarning>,
 ) -> anyhow::Result<()> {
@@ -278,7 +294,15 @@ fn append_directory_entries<W: Write>(
         let entry = entry?;
         let path = entry.path();
         let rel = path.strip_prefix(root)?;
+        let rel_text = normalize_relative_path(rel);
         let metadata = std::fs::symlink_metadata(&path)?;
+        if metadata.is_dir() {
+            if exclude_matcher.is_excluded_directory(&rel_text) {
+                continue;
+            }
+        } else if exclude_matcher.is_excluded_path(&rel_text) {
+            continue;
+        }
         if metadata.file_type().is_symlink() {
             match symlink_mode {
                 TransferSymlinkMode::Preserve => {
@@ -288,7 +312,14 @@ fn append_directory_entries<W: Write>(
                     let target_metadata = std::fs::metadata(&path)?;
                     if target_metadata.is_dir() {
                         builder.append_dir(rel, &path)?;
-                        append_directory_entries(builder, root, &path, symlink_mode, warnings)?;
+                        append_directory_entries(
+                            builder,
+                            root,
+                            &path,
+                            exclude_matcher,
+                            symlink_mode,
+                            warnings,
+                        )?;
                     } else if target_metadata.is_file() {
                         builder.append_path_with_name(&path, rel)?;
                     } else {
@@ -303,7 +334,14 @@ fn append_directory_entries<W: Write>(
         }
         if metadata.is_dir() {
             builder.append_dir(rel, &path)?;
-            append_directory_entries(builder, root, &path, symlink_mode, warnings)?;
+            append_directory_entries(
+                builder,
+                root,
+                &path,
+                exclude_matcher,
+                symlink_mode,
+                warnings,
+            )?;
         } else if metadata.is_file() {
             builder.append_path_with_name(&path, rel)?;
         } else {

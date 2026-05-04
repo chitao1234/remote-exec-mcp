@@ -79,12 +79,14 @@ pub async fn export_path(
         path = %req.path,
         compression = format_compression(&req.compression),
         symlink_mode = ?req.symlink_mode,
+        exclude_count = req.exclude.len(),
         "transfer export received"
     );
     let exported = archive::export_path_to_stream(
         &req.path,
         req.compression.clone(),
         req.symlink_mode.clone(),
+        &req.exclude,
         state.sandbox.as_ref(),
         state.config.windows_posix_root.as_deref(),
     )

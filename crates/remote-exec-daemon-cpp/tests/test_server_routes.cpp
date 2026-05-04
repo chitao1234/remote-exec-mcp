@@ -14,6 +14,7 @@
 #include "port_forward.h"
 #include "process_session.h"
 #include "server_routes.h"
+#include "transfer_ops.h"
 
 namespace fs = std::filesystem;
 
@@ -269,6 +270,56 @@ int main() {
     assert(export_response.headers.at("x-remote-exec-source-type") == "file");
     assert(export_response.headers.at("x-remote-exec-compression") == "none");
     assert(!export_response.body.empty());
+
+    const fs::path exclude_source = root / "transfer-exclude-source";
+    fs::create_directories(exclude_source / ".git");
+    fs::create_directories(exclude_source / "logs");
+    write_text_file(exclude_source / "keep.txt", "keep");
+    write_text_file(exclude_source / "top.log", "drop");
+    write_text_file(exclude_source / ".git" / "config", "secret");
+    write_text_file(exclude_source / "logs" / "readme.txt", "keep");
+    write_text_file(exclude_source / "logs" / "app.log", "drop");
+    Json exclude_patterns = Json::array();
+    exclude_patterns.push_back("**/*.log");
+    exclude_patterns.push_back(".git/**");
+    const HttpResponse export_excluded_response = route_request(
+        state,
+        json_request(
+            "/v1/transfer/export",
+            Json{{"path", exclude_source.string()}, {"exclude", exclude_patterns}}
+        )
+    );
+    assert(export_excluded_response.status == 200);
+    const ImportSummary excluded_import = import_path(
+        export_excluded_response.body,
+        "directory",
+        (root / "transfer-exclude-dest").string(),
+        "replace",
+        true
+    );
+    assert(excluded_import.warnings.empty());
+    assert(read_text_file(root / "transfer-exclude-dest" / "keep.txt") == "keep");
+    assert(read_text_file(root / "transfer-exclude-dest" / "logs" / "readme.txt") == "keep");
+    assert(!fs::exists(root / "transfer-exclude-dest" / "top.log"));
+    assert(!fs::exists(root / "transfer-exclude-dest" / ".git"));
+    assert(!fs::exists(root / "transfer-exclude-dest" / "logs" / "app.log"));
+
+    Json malformed_exclude = Json::array();
+    malformed_exclude.push_back("tmp/[abc");
+    const HttpResponse invalid_exclude_response = route_request(
+        state,
+        json_request(
+            "/v1/transfer/export",
+            Json{{"path", exclude_source.string()}, {"exclude", malformed_exclude}}
+        )
+    );
+    assert(invalid_exclude_response.status == 400);
+    const Json invalid_exclude = Json::parse(invalid_exclude_response.body);
+    assert(invalid_exclude.at("code").get<std::string>() == "transfer_failed");
+    assert(
+        invalid_exclude.at("message").get<std::string>().find("invalid exclude pattern") !=
+        std::string::npos
+    );
 
     HttpRequest import_request;
     import_request.method = "POST";

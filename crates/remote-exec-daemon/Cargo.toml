@@ -18,6 +18,7 @@ chardetng = { workspace = true }
 encoding_rs = { workspace = true }
 futures-util = { workspace = true }
 gethostname = { workspace = true }
+globset = { workspace = true }
 http-body-util = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true }

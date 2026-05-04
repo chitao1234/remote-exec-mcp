@@ -498,7 +498,8 @@ ImportSummary import_path_from_reader(
     bool create_parent,
     const std::string& symlink_mode
 ) {
-    ExportOptions options{symlink_mode.empty() ? "preserve" : symlink_mode};
+    ExportOptions options;
+    options.symlink_mode = symlink_mode.empty() ? "preserve" : symlink_mode;
     validate_transfer_options(options);
     if (!is_absolute_path(absolute_path)) {
         throw std::runtime_error("transfer path is not absolute");

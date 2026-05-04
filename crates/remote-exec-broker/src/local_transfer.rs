@@ -39,6 +39,7 @@ pub async fn export_path_to_archive(
         archive_path,
         request.compression.clone(),
         request.symlink_mode.clone(),
+        &request.exclude,
         sandbox,
         None,
     )
@@ -58,6 +59,7 @@ pub async fn export_path_to_stream(
         path,
         request.compression.clone(),
         request.symlink_mode.clone(),
+        &request.exclude,
         sandbox,
         None,
     )

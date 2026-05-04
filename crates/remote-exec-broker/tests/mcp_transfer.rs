@@ -268,6 +268,59 @@ async fn transfer_files_skips_local_special_files_with_warning() {
 }
 
 #[tokio::test]
+async fn transfer_files_excludes_matching_local_directory_entries() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
+    let source = fixture._tempdir.path().join("source");
+    let destination = fixture._tempdir.path().join("dest");
+    std::fs::create_dir_all(source.join(".git")).unwrap();
+    std::fs::create_dir_all(source.join("logs")).unwrap();
+    std::fs::create_dir_all(source.join("src")).unwrap();
+    std::fs::write(source.join("keep.txt"), "keep\n").unwrap();
+    std::fs::write(source.join("top.log"), "drop\n").unwrap();
+    std::fs::write(source.join(".git/config"), "secret\n").unwrap();
+    std::fs::write(source.join("logs/readme.txt"), "keep\n").unwrap();
+    std::fs::write(source.join("logs/app.log"), "drop\n").unwrap();
+    std::fs::write(source.join("src/a.rs"), "drop\n").unwrap();
+    std::fs::write(source.join("src/z.rs"), "keep\n").unwrap();
+
+    let result = fixture
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "local",
+                    "path": source.display().to_string()
+                },
+                "destination": {
+                    "target": "local",
+                    "path": destination.display().to_string()
+                },
+                "exclude": ["**/*.log", ".git/**", "src/[ab].rs"],
+                "create_parent": false
+            }),
+        )
+        .await;
+
+    assert_eq!(
+        std::fs::read_to_string(destination.join("keep.txt")).unwrap(),
+        "keep\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(destination.join("logs/readme.txt")).unwrap(),
+        "keep\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(destination.join("src/z.rs")).unwrap(),
+        "keep\n"
+    );
+    assert!(!destination.join("top.log").exists());
+    assert!(!destination.join(".git").exists());
+    assert!(!destination.join("logs/app.log").exists());
+    assert!(!destination.join("src/a.rs").exists());
+    assert_eq!(result.structured_content["files_copied"], 3);
+}
+
+#[tokio::test]
 async fn transfer_files_into_directory_resolves_single_source_basename() {
     let fixture = support::spawn_broker_with_plain_http_stub_daemon().await;
     let source = fixture._tempdir.path().join("artifact.txt");
@@ -474,6 +527,40 @@ async fn transfer_files_uses_bearer_auth_for_remote_exports() {
     );
     assert_eq!(result.structured_content["source_type"], "directory");
     assert_eq!(result.structured_content["files_copied"], 1);
+}
+
+#[tokio::test]
+async fn transfer_files_forwards_exclude_patterns_to_remote_exports() {
+    let fixture = support::spawn_broker_with_plain_http_stub_daemon().await;
+    let destination = fixture._tempdir.path().join("copied");
+
+    fixture
+        .call_tool(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "builder-xp",
+                    "path": "/srv/reports"
+                },
+                "destination": {
+                    "target": "local",
+                    "path": destination.display().to_string()
+                },
+                "exclude": ["**/*.log", ".git/**"],
+                "create_parent": true
+            }),
+        )
+        .await;
+
+    let capture = fixture
+        .last_transfer_export()
+        .await
+        .expect("transfer export capture");
+    assert_eq!(capture.request.path, "/srv/reports");
+    assert_eq!(
+        serde_json::to_value(&capture.request).unwrap()["exclude"],
+        serde_json::json!(["**/*.log", ".git/**"])
+    );
 }
 
 #[tokio::test]

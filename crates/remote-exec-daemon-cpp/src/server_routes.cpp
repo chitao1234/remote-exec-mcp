@@ -65,6 +65,14 @@ bool contains_text(const std::string& value, const std::string& needle) {
     return value.find(needle) != std::string::npos;
 }
 
+std::vector<std::string> transfer_exclude_or_empty(const Json& body) {
+    const Json::const_iterator it = body.find("exclude");
+    if (it == body.end() || it->is_null()) {
+        return std::vector<std::string>();
+    }
+    return it->get<std::vector<std::string> >();
+}
+
 unsigned long requested_max_output_tokens(const Json& body) {
     const Json::const_iterator it = body.find("max_output_tokens");
     return it == body.end() ? DEFAULT_MAX_OUTPUT_TOKENS : it->get<unsigned long>();
@@ -641,9 +649,11 @@ HttpResponse handle_transfer_export(AppState& state, const HttpRequest& request)
         require_uncompressed_transfer(body.value("compression", std::string("none")));
         const std::string path = resolve_absolute_transfer_path(body.at("path").get<std::string>());
         authorize_sandbox_path(state, SANDBOX_READ, path);
+        const std::vector<std::string> exclude = transfer_exclude_or_empty(body);
         const ExportedPayload payload = export_path(
             path,
-            body.value("symlink_mode", std::string("preserve"))
+            body.value("symlink_mode", std::string("preserve")),
+            exclude
         );
         log_message(
             LOG_INFO,

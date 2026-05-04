@@ -152,6 +152,7 @@ async fn export_file_streams_archive_and_reports_file_source_type() {
                 path: source.display().to_string(),
                 compression: TransferCompression::None,
                 symlink_mode: Default::default(),
+                exclude: Vec::new(),
             },
         )
         .await;
@@ -223,6 +224,7 @@ async fn export_file_supports_zstd_compression() {
                 path: source.display().to_string(),
                 compression: TransferCompression::Zstd,
                 symlink_mode: Default::default(),
+                exclude: Vec::new(),
             },
         )
         .await;
@@ -266,6 +268,7 @@ async fn export_directory_preserves_symlinks_by_default() {
                 path: root.display().to_string(),
                 compression: TransferCompression::None,
                 symlink_mode: Default::default(),
+                exclude: Vec::new(),
             },
         )
         .await;
@@ -309,6 +312,7 @@ async fn export_directory_skips_special_files_with_warning() {
                 path: root.display().to_string(),
                 compression: TransferCompression::None,
                 symlink_mode: Default::default(),
+                exclude: Vec::new(),
             },
         )
         .await;
@@ -362,6 +366,104 @@ async fn export_directory_skips_special_files_with_warning() {
     );
 }
 
+#[tokio::test]
+async fn export_directory_excludes_matching_entries_relative_to_source_root() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let root = fixture.workdir.join("dist");
+    tokio::fs::create_dir_all(root.join(".git")).await.unwrap();
+    tokio::fs::create_dir_all(root.join("logs")).await.unwrap();
+    tokio::fs::create_dir_all(root.join("src")).await.unwrap();
+    tokio::fs::write(root.join("keep.txt"), "keep\n")
+        .await
+        .unwrap();
+    tokio::fs::write(root.join("top.log"), "drop\n")
+        .await
+        .unwrap();
+    tokio::fs::write(root.join(".git/config"), "secret\n")
+        .await
+        .unwrap();
+    tokio::fs::write(root.join("logs/readme.txt"), "keep\n")
+        .await
+        .unwrap();
+    tokio::fs::write(root.join("logs/app.log"), "drop\n")
+        .await
+        .unwrap();
+    tokio::fs::write(root.join("src/a.rs"), "drop\n")
+        .await
+        .unwrap();
+    tokio::fs::write(root.join("src/z.rs"), "keep\n")
+        .await
+        .unwrap();
+
+    let response = fixture
+        .raw_post_json(
+            "/v1/transfer/export",
+            &TransferExportRequest {
+                path: root.display().to_string(),
+                compression: TransferCompression::None,
+                symlink_mode: Default::default(),
+                exclude: vec![
+                    "**/*.log".to_string(),
+                    ".git/**".to_string(),
+                    "src/[ab].rs".to_string(),
+                ],
+            },
+        )
+        .await;
+
+    assert!(response.status().is_success());
+    let bytes = response.bytes().await.unwrap().to_vec();
+    let mut archive = tar::Archive::new(std::io::Cursor::new(bytes));
+    let paths = archive
+        .entries()
+        .unwrap()
+        .map(|entry| entry.unwrap().path().unwrap().to_path_buf())
+        .collect::<Vec<_>>();
+
+    assert!(paths.iter().any(|path| path == Path::new(".")));
+    assert!(paths.iter().any(|path| path == Path::new("keep.txt")));
+    assert!(
+        paths
+            .iter()
+            .any(|path| path == Path::new("logs/readme.txt"))
+    );
+    assert!(paths.iter().any(|path| path == Path::new("src/z.rs")));
+    assert!(!paths.iter().any(|path| path == Path::new("top.log")));
+    assert!(!paths.iter().any(|path| path == Path::new(".git")));
+    assert!(!paths.iter().any(|path| path == Path::new(".git/config")));
+    assert!(!paths.iter().any(|path| path == Path::new("logs/app.log")));
+    assert!(!paths.iter().any(|path| path == Path::new("src/a.rs")));
+}
+
+#[tokio::test]
+async fn export_single_file_ignores_exclude_patterns() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let source = fixture.workdir.join("hello.txt");
+    tokio::fs::write(&source, "hello\n").await.unwrap();
+
+    let response = fixture
+        .raw_post_json(
+            "/v1/transfer/export",
+            &TransferExportRequest {
+                path: source.display().to_string(),
+                compression: TransferCompression::None,
+                symlink_mode: Default::default(),
+                exclude: vec!["**/*.txt".to_string()],
+            },
+        )
+        .await;
+
+    assert!(response.status().is_success());
+    let bytes = response.bytes().await.unwrap();
+    let mut archive = tar::Archive::new(std::io::Cursor::new(bytes));
+    let mut entries = archive.entries().unwrap();
+    let entry = entries.next().unwrap().unwrap();
+    assert_eq!(
+        entry.path().unwrap().as_ref(),
+        Path::new(".remote-exec-file")
+    );
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn export_file_preserves_executable_mode_in_archive_header() {
@@ -381,6 +483,7 @@ async fn export_file_preserves_executable_mode_in_archive_header() {
                 path: source.display().to_string(),
                 compression: TransferCompression::None,
                 symlink_mode: Default::default(),
+                exclude: Vec::new(),
             },
         )
         .await;
@@ -406,6 +509,7 @@ async fn import_accepts_forward_slash_windows_destination_paths() {
                 path: source.display().to_string(),
                 compression: TransferCompression::None,
                 symlink_mode: Default::default(),
+                exclude: Vec::new(),
             },
         )
         .await;
@@ -447,6 +551,7 @@ async fn export_accepts_msys_style_windows_source_paths() {
                 path: support::msys_style_path(&source),
                 compression: TransferCompression::None,
                 symlink_mode: Default::default(),
+                exclude: Vec::new(),
             },
         )
         .await;
@@ -478,6 +583,7 @@ async fn import_accepts_cygwin_style_windows_destination_paths() {
                 path: source.display().to_string(),
                 compression: TransferCompression::None,
                 symlink_mode: Default::default(),
+                exclude: Vec::new(),
             },
         )
         .await;
@@ -536,6 +642,7 @@ async fn export_accepts_windows_posix_root_source_paths() {
                 path: "/artifacts/synthetic-source.txt".to_string(),
                 compression: TransferCompression::None,
                 symlink_mode: Default::default(),
+                exclude: Vec::new(),
             },
         )
         .await;
@@ -566,6 +673,7 @@ async fn import_accepts_windows_posix_root_destination_paths() {
                 path: source.display().to_string(),
                 compression: TransferCompression::None,
                 symlink_mode: Default::default(),
+                exclude: Vec::new(),
             },
         )
         .await;
@@ -625,6 +733,7 @@ async fn import_directory_replaces_exact_destination_and_preserves_exec_bits() {
                 path: source_root.display().to_string(),
                 compression: TransferCompression::None,
                 symlink_mode: Default::default(),
+                exclude: Vec::new(),
             },
         )
         .await;
@@ -777,6 +886,7 @@ async fn import_directory_merge_preserves_unrelated_destination_entries() {
                 path: source_root.display().to_string(),
                 compression: TransferCompression::None,
                 symlink_mode: Default::default(),
+                exclude: Vec::new(),
             },
         )
         .await;
@@ -875,6 +985,7 @@ async fn import_rejects_existing_destination_when_overwrite_is_fail() {
                 path: source.display().to_string(),
                 compression: TransferCompression::None,
                 symlink_mode: Default::default(),
+                exclude: Vec::new(),
             },
         )
         .await;
@@ -928,6 +1039,7 @@ async fn import_replaces_directory_with_file_at_the_exact_destination_path() {
                 path: source.display().to_string(),
                 compression: TransferCompression::None,
                 symlink_mode: Default::default(),
+                exclude: Vec::new(),
             },
         )
         .await;
@@ -970,6 +1082,7 @@ async fn import_rejects_missing_parent_when_create_parent_is_false() {
                 path: source.display().to_string(),
                 compression: TransferCompression::None,
                 symlink_mode: Default::default(),
+                exclude: Vec::new(),
             },
         )
         .await;
@@ -1059,6 +1172,7 @@ allow = {allow}
                 path: blocked.display().to_string(),
                 compression: TransferCompression::None,
                 symlink_mode: Default::default(),
+                exclude: Vec::new(),
             },
         )
         .await;
@@ -1089,6 +1203,7 @@ async fn export_rejects_zstd_when_transfer_compression_is_disabled() {
                 path: source.display().to_string(),
                 compression: TransferCompression::Zstd,
                 symlink_mode: Default::default(),
+                exclude: Vec::new(),
             },
         )
         .await;
@@ -1126,6 +1241,7 @@ allow = {allow}
                 path: source.display().to_string(),
                 compression: TransferCompression::None,
                 symlink_mode: Default::default(),
+                exclude: Vec::new(),
             },
         )
         .await;

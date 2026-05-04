@@ -94,6 +94,14 @@ std::string read_request_body_to_string(HttpRequestBodyStream* body) {
     }
 }
 
+std::vector<std::string> transfer_exclude_or_empty(const Json& body) {
+    const Json::const_iterator it = body.find("exclude");
+    if (it == body.end() || it->is_null()) {
+        return std::vector<std::string>();
+    }
+    return it->get<std::vector<std::string> >();
+}
+
 bool reject_before_route(
     const AppState& state,
     const HttpRequest& request,
@@ -206,6 +214,7 @@ int handle_streaming_transfer_export(
             resolve_absolute_transfer_path(body_json.at("path").get<std::string>());
         authorize_sandbox_path(state, SANDBOX_READ, path);
         const std::string symlink_mode = body_json.value("symlink_mode", std::string("preserve"));
+        const std::vector<std::string> exclude = transfer_exclude_or_empty(body_json);
         const std::string source_type = export_path_source_type(path, symlink_mode);
         log_message(
             LOG_INFO,
@@ -216,7 +225,7 @@ int handle_streaming_transfer_export(
         send_transfer_export_headers(client, source_type);
         headers_sent = true;
         ChunkedTransferArchiveSink sink(client);
-        export_path_to_sink_as(sink, path, source_type, symlink_mode);
+        export_path_to_sink_as(sink, path, source_type, symlink_mode, exclude);
         sink.finish();
         return 200;
     } catch (const std::exception& ex) {

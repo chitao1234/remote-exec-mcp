@@ -30,6 +30,7 @@ struct TarHeaderView {
 
 struct ExportOptions {
     std::string symlink_mode;
+    std::vector<std::string> exclude;
 };
 
 bool is_absolute_path(const std::string& path);

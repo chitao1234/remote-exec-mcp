@@ -6,6 +6,7 @@ use remote_exec_proto::rpc::{TransferCompression, TransferSourceType, TransferWa
 
 mod codec;
 mod entry;
+mod exclude_matcher;
 mod export;
 mod import;
 mod summary;

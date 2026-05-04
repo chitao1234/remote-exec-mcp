@@ -29,6 +29,7 @@ chardetng = "1"
 clap = { version = "4", features = ["derive"] }
 encoding_rs = "0.8"
 futures-util = "0.3"
+globset = "0.4"
 http-body-util = "0.1"
 http = "1"
 hyper = { version = "1", features = ["server", "http1"] }

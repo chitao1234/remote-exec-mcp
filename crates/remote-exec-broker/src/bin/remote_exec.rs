@@ -148,6 +148,9 @@ struct TransferFilesArgs {
     #[arg(long)]
     destination: String,
 
+    #[arg(long = "exclude")]
+    exclude: Vec<String>,
+
     #[arg(long, value_enum, default_value_t = CliTransferOverwrite::Merge)]
     overwrite: CliTransferOverwrite,
 
@@ -416,6 +419,7 @@ fn transfer_files_input(args: TransferFilesArgs) -> anyhow::Result<TransferFiles
             endpoints
         },
         destination: parse_transfer_endpoint(&args.destination)?,
+        exclude: args.exclude,
         overwrite: args.overwrite.into(),
         destination_mode: args.destination_mode.into(),
         symlink_mode: args.symlink_mode.into(),

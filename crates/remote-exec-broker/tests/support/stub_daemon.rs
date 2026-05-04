@@ -55,6 +55,11 @@ pub struct StubTransferImportCapture {
 }
 
 #[derive(Debug, Clone)]
+pub struct StubTransferExportCapture {
+    pub request: TransferExportRequest,
+}
+
+#[derive(Debug, Clone)]
 enum StubTransferExportResponse {
     Success {
         source_type: TransferSourceType,
@@ -102,6 +107,7 @@ pub(super) struct StubDaemonState {
     pub(super) exec_start_calls: Arc<Mutex<usize>>,
     pub(super) last_patch_request: Arc<Mutex<Option<PatchApplyRequest>>>,
     pub(super) last_transfer_import: Arc<Mutex<Option<StubTransferImportCapture>>>,
+    pub(super) last_transfer_export: Arc<Mutex<Option<StubTransferExportCapture>>>,
     pub(super) image_read_response: Arc<Mutex<StubImageReadResponse>>,
     transfer_export_response: Arc<Mutex<StubTransferExportResponse>>,
     transfer_path_info_response: Arc<Mutex<TransferPathInfoResponse>>,
@@ -204,6 +210,7 @@ pub(super) fn stub_daemon_state(
         exec_start_calls: Arc::new(Mutex::new(0)),
         last_patch_request: Arc::new(Mutex::new(None)),
         last_transfer_import: Arc::new(Mutex::new(None)),
+        last_transfer_export: Arc::new(Mutex::new(None)),
         image_read_response: Arc::new(Mutex::new(StubImageReadResponse::Success(
             ImageReadResponse {
                 image_url: "data:image/png;base64,AAAA".to_string(),
@@ -601,8 +608,11 @@ async fn patch_apply(
 
 async fn transfer_export(
     State(state): State<StubDaemonState>,
-    Json(_req): Json<TransferExportRequest>,
+    Json(req): Json<TransferExportRequest>,
 ) -> Result<(HeaderMap, Vec<u8>), (StatusCode, Json<RpcErrorBody>)> {
+    *state.last_transfer_export.lock().await = Some(StubTransferExportCapture {
+        request: req.clone(),
+    });
     match state.transfer_export_response.lock().await.clone() {
         StubTransferExportResponse::Success {
             source_type,
