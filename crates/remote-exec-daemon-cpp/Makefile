@@ -11,7 +11,8 @@ TRANSFER_SRCS := $(addprefix $(MAKEFILE_DIR),src/transfer_ops.cpp src/transfer_o
 POLICY_SRCS := $(addprefix $(MAKEFILE_DIR),src/path_policy.cpp src/filesystem_sandbox.cpp)
 RPC_FAILURE_SRCS := $(MAKEFILE_DIR)src/rpc_failures.cpp
 ROUTE_SRCS := $(addprefix $(MAKEFILE_DIR),src/server_routes.cpp src/server_route_common.cpp src/server_route_exec.cpp src/server_route_image.cpp src/server_route_port_forward.cpp src/server_route_transfer.cpp src/transfer_http_codec.cpp)
-COMMON_SRCS := $(addprefix $(MAKEFILE_DIR),src/main.cpp src/config.cpp src/http_helpers.cpp src/http_request.cpp src/logging.cpp src/text_utils.cpp src/platform.cpp src/shell_policy.cpp src/server.cpp src/server_transport.cpp src/session_store.cpp src/patch_engine.cpp src/port_forward.cpp src/basic_mutex.cpp) $(ROUTE_SRCS) $(TRANSFER_SRCS) $(POLICY_SRCS) $(RPC_FAILURE_SRCS)
+PORT_FORWARD_SRCS := $(addprefix $(MAKEFILE_DIR),src/port_forward.cpp src/port_forward_endpoint.cpp src/port_forward_codec.cpp src/port_forward_socket_ops.cpp)
+COMMON_SRCS := $(addprefix $(MAKEFILE_DIR),src/main.cpp src/config.cpp src/http_helpers.cpp src/http_request.cpp src/logging.cpp src/text_utils.cpp src/platform.cpp src/shell_policy.cpp src/server.cpp src/server_transport.cpp src/session_store.cpp src/patch_engine.cpp src/basic_mutex.cpp) $(ROUTE_SRCS) $(PORT_FORWARD_SRCS) $(TRANSFER_SRCS) $(POLICY_SRCS) $(RPC_FAILURE_SRCS)
 WINDOWS_XP_SRCS := $(COMMON_SRCS) $(addprefix $(MAKEFILE_DIR),src/process_session_win32.cpp src/console_output.cpp src/win32_error.cpp)
 POSIX_SRCS := $(COMMON_SRCS) $(MAKEFILE_DIR)src/process_session_posix.cpp
 HOST_PATCH := $(BUILD_DIR)/test_patch
@@ -82,7 +83,7 @@ $(HOST_SERVER_TRANSPORT): $(MAKEFILE_DIR)tests/test_server_transport.cpp $(MAKEF
 test-host-server-streaming: $(HOST_SERVER_STREAMING)
 	$(HOST_SERVER_STREAMING)
 
-$(HOST_SERVER_STREAMING): $(MAKEFILE_DIR)tests/test_server_streaming.cpp $(MAKEFILE_DIR)src/server.cpp $(ROUTE_SRCS) $(MAKEFILE_DIR)src/http_helpers.cpp $(MAKEFILE_DIR)src/http_request.cpp $(MAKEFILE_DIR)src/session_store.cpp $(MAKEFILE_DIR)src/process_session_posix.cpp $(MAKEFILE_DIR)src/platform.cpp $(MAKEFILE_DIR)src/shell_policy.cpp $(MAKEFILE_DIR)src/patch_engine.cpp $(TRANSFER_SRCS) $(POLICY_SRCS) $(RPC_FAILURE_SRCS) $(MAKEFILE_DIR)src/port_forward.cpp $(MAKEFILE_DIR)src/server_transport.cpp $(MAKEFILE_DIR)src/basic_mutex.cpp $(MAKEFILE_DIR)src/logging.cpp $(MAKEFILE_DIR)src/config.cpp $(MAKEFILE_DIR)src/text_utils.cpp
+$(HOST_SERVER_STREAMING): $(MAKEFILE_DIR)tests/test_server_streaming.cpp $(MAKEFILE_DIR)src/server.cpp $(ROUTE_SRCS) $(MAKEFILE_DIR)src/http_helpers.cpp $(MAKEFILE_DIR)src/http_request.cpp $(MAKEFILE_DIR)src/session_store.cpp $(MAKEFILE_DIR)src/process_session_posix.cpp $(MAKEFILE_DIR)src/platform.cpp $(MAKEFILE_DIR)src/shell_policy.cpp $(MAKEFILE_DIR)src/patch_engine.cpp $(TRANSFER_SRCS) $(POLICY_SRCS) $(RPC_FAILURE_SRCS) $(PORT_FORWARD_SRCS) $(MAKEFILE_DIR)src/server_transport.cpp $(MAKEFILE_DIR)src/basic_mutex.cpp $(MAKEFILE_DIR)src/logging.cpp $(MAKEFILE_DIR)src/config.cpp $(MAKEFILE_DIR)src/text_utils.cpp
 	mkdir -p $(BUILD_DIR)
 	$(HOST_CXX) $(COMMON_FLAGS) -o $@ $^
 
@@ -96,7 +97,7 @@ $(HOST_SESSION_STORE): $(MAKEFILE_DIR)tests/test_session_store.cpp $(MAKEFILE_DI
 test-host-server-routes: $(HOST_SERVER_ROUTES)
 	$(HOST_SERVER_ROUTES)
 
-$(HOST_SERVER_ROUTES): $(MAKEFILE_DIR)tests/test_server_routes.cpp $(ROUTE_SRCS) $(MAKEFILE_DIR)src/http_helpers.cpp $(MAKEFILE_DIR)src/session_store.cpp $(MAKEFILE_DIR)src/process_session_posix.cpp $(MAKEFILE_DIR)src/platform.cpp $(MAKEFILE_DIR)src/shell_policy.cpp $(MAKEFILE_DIR)src/patch_engine.cpp $(TRANSFER_SRCS) $(POLICY_SRCS) $(RPC_FAILURE_SRCS) $(MAKEFILE_DIR)src/port_forward.cpp $(MAKEFILE_DIR)src/server_transport.cpp $(MAKEFILE_DIR)src/basic_mutex.cpp $(MAKEFILE_DIR)src/logging.cpp $(MAKEFILE_DIR)src/config.cpp $(MAKEFILE_DIR)src/text_utils.cpp
+$(HOST_SERVER_ROUTES): $(MAKEFILE_DIR)tests/test_server_routes.cpp $(ROUTE_SRCS) $(MAKEFILE_DIR)src/http_helpers.cpp $(MAKEFILE_DIR)src/session_store.cpp $(MAKEFILE_DIR)src/process_session_posix.cpp $(MAKEFILE_DIR)src/platform.cpp $(MAKEFILE_DIR)src/shell_policy.cpp $(MAKEFILE_DIR)src/patch_engine.cpp $(TRANSFER_SRCS) $(POLICY_SRCS) $(RPC_FAILURE_SRCS) $(PORT_FORWARD_SRCS) $(MAKEFILE_DIR)src/server_transport.cpp $(MAKEFILE_DIR)src/basic_mutex.cpp $(MAKEFILE_DIR)src/logging.cpp $(MAKEFILE_DIR)src/config.cpp $(MAKEFILE_DIR)src/text_utils.cpp
 	mkdir -p $(BUILD_DIR)
 	$(HOST_CXX) $(COMMON_FLAGS) -o $@ $^
 

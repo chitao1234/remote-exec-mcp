@@ -64,8 +64,3 @@ private:
     std::map<std::string, std::shared_ptr<SharedSocket> > udp_sockets_;
     std::map<std::string, std::shared_ptr<TcpConnection> > tcp_connections_;
 };
-
-std::string normalize_port_forward_endpoint(const std::string& endpoint);
-std::string ensure_nonzero_connect_endpoint(const std::string& endpoint);
-std::string base64_encode_bytes(const std::string& bytes);
-std::string base64_decode_bytes(const std::string& data);
