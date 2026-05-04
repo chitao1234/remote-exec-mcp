@@ -2,13 +2,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use axum::Json;
-use axum::http::StatusCode;
 use remote_exec_proto::path::PathPolicy;
-use remote_exec_proto::rpc::{ExecResponse, ExecWarning, RpcErrorBody};
+use remote_exec_proto::rpc::{ExecResponse, ExecWarning};
 use remote_exec_proto::sandbox::{SandboxAccess, SandboxError, authorize_path};
 
-use crate::{AppState, config::YieldTimeOperation, host_path};
+use crate::{AppState, HostRpcError, config::YieldTimeOperation, host_path};
 
 use super::{output, session};
 
@@ -43,31 +41,24 @@ pub fn ensure_sandbox_access(
     authorize_path(host_path_policy(), state.sandbox.as_ref(), access, path)
 }
 
-pub fn rpc_error(
-    code: &'static str,
-    message: impl Into<String>,
-) -> (StatusCode, Json<RpcErrorBody>) {
+pub fn rpc_error(code: &'static str, message: impl Into<String>) -> HostRpcError {
     let message = message.into();
     tracing::warn!(code, %message, "daemon request rejected");
-    (
-        StatusCode::BAD_REQUEST,
-        Json(RpcErrorBody {
-            code: code.to_string(),
-            message,
-        }),
-    )
+    HostRpcError {
+        status: 400,
+        code,
+        message,
+    }
 }
 
-pub fn internal_error(err: anyhow::Error) -> (StatusCode, Json<RpcErrorBody>) {
+pub fn internal_error(err: anyhow::Error) -> HostRpcError {
     let message = err.to_string();
     tracing::error!(error = %message, "daemon internal error");
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(RpcErrorBody {
-            code: "internal_error".to_string(),
-            message,
-        }),
-    )
+    HostRpcError {
+        status: 500,
+        code: "internal_error",
+        message,
+    }
 }
 
 pub(super) async fn poll_once(session: &mut session::LiveSession) -> anyhow::Result<String> {

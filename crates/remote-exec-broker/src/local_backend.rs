@@ -44,7 +44,7 @@ impl LocalDaemonClient {
     ) -> Result<ExecResponse, DaemonClientError> {
         remote_exec_host::exec::exec_start_local(self.state.clone(), req.clone())
             .await
-            .map_err(map_local_rpc_error)
+            .map_err(map_host_rpc_error)
     }
 
     pub async fn exec_write(
@@ -53,7 +53,7 @@ impl LocalDaemonClient {
     ) -> Result<ExecResponse, DaemonClientError> {
         remote_exec_host::exec::exec_write_local(self.state.clone(), req.clone())
             .await
-            .map_err(map_local_rpc_error)
+            .map_err(map_host_rpc_error)
     }
 
     pub async fn patch_apply(
@@ -62,7 +62,7 @@ impl LocalDaemonClient {
     ) -> Result<PatchApplyResponse, DaemonClientError> {
         remote_exec_host::patch::apply_patch_local(self.state.clone(), req.clone())
             .await
-            .map_err(map_local_rpc_error)
+            .map_err(map_host_rpc_error)
     }
 
     pub async fn image_read(

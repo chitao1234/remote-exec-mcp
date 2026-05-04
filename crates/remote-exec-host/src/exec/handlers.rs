@@ -1,15 +1,10 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use axum::Json;
-use axum::extract::State;
-use axum::http::StatusCode;
-use remote_exec_proto::rpc::{
-    ExecResponse, ExecStartRequest, ExecWarning, ExecWriteRequest, RpcErrorBody,
-};
+use remote_exec_proto::rpc::{ExecResponse, ExecStartRequest, ExecWarning, ExecWriteRequest};
 use remote_exec_proto::sandbox::SandboxAccess;
 
-use crate::{AppState, config::YieldTimeOperation};
+use crate::{AppState, HostRpcError, config::YieldTimeOperation};
 
 use super::{
     session, shell,
@@ -21,17 +16,10 @@ use super::{
 
 const EXEC_START_POLL_INTERVAL_MS: u64 = 25;
 
-pub async fn exec_start(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<ExecStartRequest>,
-) -> Result<Json<ExecResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    exec_start_local(state, req).await.map(Json)
-}
-
 pub async fn exec_start_local(
     state: Arc<AppState>,
     req: ExecStartRequest,
-) -> Result<ExecResponse, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<ExecResponse, HostRpcError> {
     log_exec_start_request(&state, &req);
     let prepared = prepare_exec_start(&state, &req)?;
     let mut session = session::spawn_with_windows_pty_backend_override(
@@ -80,17 +68,10 @@ pub async fn exec_start_local(
     Ok(response)
 }
 
-pub async fn exec_write(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<ExecWriteRequest>,
-) -> Result<Json<ExecResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    exec_write_local(state, req).await.map(Json)
-}
-
 pub async fn exec_write_local(
     state: Arc<AppState>,
     req: ExecWriteRequest,
-) -> Result<ExecResponse, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<ExecResponse, HostRpcError> {
     let daemon_session_id = req.daemon_session_id;
     tracing::info!(
         target = %state.config.target,
@@ -171,7 +152,7 @@ struct PreparedExecStart {
 fn prepare_exec_start(
     state: &Arc<AppState>,
     req: &ExecStartRequest,
-) -> Result<PreparedExecStart, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<PreparedExecStart, HostRpcError> {
     let cwd = resolve_workdir(state, req.workdir.as_deref()).map_err(internal_error)?;
     ensure_sandbox_access(state, SandboxAccess::ExecCwd, &cwd)
         .map_err(|err| rpc_error("sandbox_denied", err.to_string()))?;
@@ -216,7 +197,7 @@ async fn finish_completed_response(
     session: &mut session::LiveSession,
     mut output: String,
     max_output_tokens: Option<u32>,
-) -> Result<ExecResponse, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<ExecResponse, HostRpcError> {
     output.push_str(
         &super::output::drain_after_exit(session)
             .await
@@ -237,7 +218,7 @@ async fn completed_response_if_exited(
     session: &mut session::LiveSession,
     output: &mut String,
     max_output_tokens: Option<u32>,
-) -> Result<Option<ExecResponse>, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<Option<ExecResponse>, HostRpcError> {
     if !has_exited(session).await.map_err(internal_error)? {
         return Ok(None);
     }
@@ -252,7 +233,7 @@ async fn store_running_session(
     session: session::LiveSession,
     output: String,
     max_output_tokens: Option<u32>,
-) -> Result<(String, Vec<ExecWarning>, ExecResponse), (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<(String, Vec<ExecWarning>, ExecResponse), HostRpcError> {
     let daemon_session_id = uuid::Uuid::new_v4().to_string();
     let insert_outcome = state
         .sessions
@@ -301,10 +282,7 @@ fn session_limit_warnings(state: &AppState, crossed_warning_threshold: bool) -> 
     }
 }
 
-fn ensure_requested_tty_supported(
-    state: &Arc<AppState>,
-    tty: bool,
-) -> Result<(), (StatusCode, Json<RpcErrorBody>)> {
+fn ensure_requested_tty_supported(state: &Arc<AppState>, tty: bool) -> Result<(), HostRpcError> {
     if !tty {
         return Ok(());
     }
@@ -326,7 +304,7 @@ fn ensure_requested_tty_supported(
 fn resolve_login_request(
     state: &Arc<AppState>,
     requested_login: Option<bool>,
-) -> Result<bool, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<bool, HostRpcError> {
     match requested_login {
         Some(true) if !shell::platform_supports_login_shells() => Err(rpc_error(
             "login_shell_unsupported",

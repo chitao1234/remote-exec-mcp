@@ -438,5 +438,13 @@ fn decode_bytes(data: &str) -> Result<Vec<u8>, (StatusCode, Json<RpcErrorBody>)>
 }
 
 fn rpc_error(code: &'static str, message: impl Into<String>) -> (StatusCode, Json<RpcErrorBody>) {
-    crate::exec::rpc_error(code, message)
+    let message = message.into();
+    tracing::warn!(code, %message, "daemon request rejected");
+    (
+        StatusCode::BAD_REQUEST,
+        Json(RpcErrorBody {
+            code: code.to_string(),
+            message,
+        }),
+    )
 }

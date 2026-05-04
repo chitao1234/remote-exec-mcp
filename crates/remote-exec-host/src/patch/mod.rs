@@ -7,28 +7,18 @@ mod verify;
 use std::path::Path;
 use std::sync::Arc;
 
-use axum::Json;
-use axum::extract::State;
-use axum::http::StatusCode;
-use remote_exec_proto::rpc::{PatchApplyRequest, PatchApplyResponse, RpcErrorBody};
+use remote_exec_proto::rpc::{PatchApplyRequest, PatchApplyResponse};
 use remote_exec_proto::sandbox::SandboxError;
 
-use crate::AppState;
+use crate::{AppState, HostRpcError};
 
 const LF: &str = "\n";
 const CRLF: &str = "\r\n";
 
-pub async fn apply_patch(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<PatchApplyRequest>,
-) -> Result<Json<PatchApplyResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    apply_patch_local(state, req).await.map(Json)
-}
-
 pub async fn apply_patch_local(
     state: Arc<AppState>,
     req: PatchApplyRequest,
-) -> Result<PatchApplyResponse, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<PatchApplyResponse, HostRpcError> {
     tracing::info!(
         target = %state.config.target,
         patch_len = req.patch.len(),
@@ -115,7 +105,7 @@ async fn execute_actions(
     Ok(summary)
 }
 
-fn map_patch_error(err: anyhow::Error) -> (StatusCode, Json<RpcErrorBody>) {
+fn map_patch_error(err: anyhow::Error) -> HostRpcError {
     let code = if err.downcast_ref::<SandboxError>().is_some() {
         "sandbox_denied"
     } else {
