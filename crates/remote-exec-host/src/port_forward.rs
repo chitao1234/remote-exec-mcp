@@ -3,9 +3,6 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 
 use anyhow::Context;
-use axum::Json;
-use axum::extract::State;
-use axum::http::StatusCode;
 use base64::Engine;
 use remote_exec_proto::port_forward::{ensure_nonzero_connect_endpoint, normalize_endpoint};
 use remote_exec_proto::rpc::{
@@ -13,14 +10,14 @@ use remote_exec_proto::rpc::{
     PortConnectionReadRequest, PortConnectionReadResponse, PortConnectionWriteRequest,
     PortForwardProtocol, PortListenAcceptRequest, PortListenAcceptResponse, PortListenCloseRequest,
     PortListenRequest, PortListenResponse, PortUdpDatagramReadRequest, PortUdpDatagramReadResponse,
-    PortUdpDatagramWriteRequest, RpcErrorBody,
+    PortUdpDatagramWriteRequest,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::Mutex;
 
-use crate::AppState;
+use crate::{AppState, HostRpcError};
 
 const READ_BUF_SIZE: usize = 64 * 1024;
 
@@ -46,73 +43,10 @@ impl TcpConnection {
     }
 }
 
-pub async fn listen(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<PortListenRequest>,
-) -> Result<Json<PortListenResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    listen_local(state, req).await.map(Json)
-}
-
-pub async fn listen_accept(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<PortListenAcceptRequest>,
-) -> Result<Json<PortListenAcceptResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    listen_accept_local(state, req).await.map(Json)
-}
-
-pub async fn listen_close(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<PortListenCloseRequest>,
-) -> Result<Json<EmptyResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    listen_close_local(state, req).await.map(Json)
-}
-
-pub async fn connect(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<PortConnectRequest>,
-) -> Result<Json<PortConnectResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    connect_local(state, req).await.map(Json)
-}
-
-pub async fn connection_read(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<PortConnectionReadRequest>,
-) -> Result<Json<PortConnectionReadResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    connection_read_local(state, req).await.map(Json)
-}
-
-pub async fn connection_write(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<PortConnectionWriteRequest>,
-) -> Result<Json<EmptyResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    connection_write_local(state, req).await.map(Json)
-}
-
-pub async fn connection_close(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<PortConnectionCloseRequest>,
-) -> Result<Json<EmptyResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    connection_close_local(state, req).await.map(Json)
-}
-
-pub async fn udp_datagram_read(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<PortUdpDatagramReadRequest>,
-) -> Result<Json<PortUdpDatagramReadResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    udp_datagram_read_local(state, req).await.map(Json)
-}
-
-pub async fn udp_datagram_write(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<PortUdpDatagramWriteRequest>,
-) -> Result<Json<EmptyResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    udp_datagram_write_local(state, req).await.map(Json)
-}
-
 pub async fn listen_local(
     state: Arc<AppState>,
     req: PortListenRequest,
-) -> Result<PortListenResponse, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<PortListenResponse, HostRpcError> {
     let endpoint = normalize_endpoint(&req.endpoint)
         .map_err(|err| rpc_error("invalid_endpoint", err.to_string()))?;
     match req.protocol {
@@ -124,7 +58,7 @@ pub async fn listen_local(
 pub async fn listen_accept_local(
     state: Arc<AppState>,
     req: PortListenAcceptRequest,
-) -> Result<PortListenAcceptResponse, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<PortListenAcceptResponse, HostRpcError> {
     let listener = state
         .port_forwards
         .tcp_listeners
@@ -162,7 +96,7 @@ pub async fn listen_accept_local(
 pub async fn listen_close_local(
     state: Arc<AppState>,
     req: PortListenCloseRequest,
-) -> Result<EmptyResponse, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<EmptyResponse, HostRpcError> {
     state
         .port_forwards
         .tcp_listeners
@@ -186,7 +120,7 @@ pub async fn listen_close_local(
 pub async fn connect_local(
     state: Arc<AppState>,
     req: PortConnectRequest,
-) -> Result<PortConnectResponse, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<PortConnectResponse, HostRpcError> {
     match req.protocol {
         PortForwardProtocol::Tcp => connect_tcp(state, &req.endpoint).await,
         PortForwardProtocol::Udp => Err(rpc_error(
@@ -199,7 +133,7 @@ pub async fn connect_local(
 pub async fn connection_read_local(
     state: Arc<AppState>,
     req: PortConnectionReadRequest,
-) -> Result<PortConnectionReadResponse, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<PortConnectionReadResponse, HostRpcError> {
     let stream = tcp_connection(&state, &req.connection_id).await?;
     let mut reader = stream.reader.lock().await;
     let mut buf = vec![0u8; READ_BUF_SIZE];
@@ -230,7 +164,7 @@ pub async fn connection_read_local(
 pub async fn connection_write_local(
     state: Arc<AppState>,
     req: PortConnectionWriteRequest,
-) -> Result<EmptyResponse, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<EmptyResponse, HostRpcError> {
     let bytes = decode_bytes(&req.data)?;
     let stream = tcp_connection(&state, &req.connection_id).await?;
     let mut writer = stream.writer.lock().await;
@@ -244,7 +178,7 @@ pub async fn connection_write_local(
 pub async fn connection_close_local(
     state: Arc<AppState>,
     req: PortConnectionCloseRequest,
-) -> Result<EmptyResponse, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<EmptyResponse, HostRpcError> {
     state
         .port_forwards
         .tcp_connections
@@ -262,7 +196,7 @@ pub async fn connection_close_local(
 pub async fn udp_datagram_read_local(
     state: Arc<AppState>,
     req: PortUdpDatagramReadRequest,
-) -> Result<PortUdpDatagramReadResponse, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<PortUdpDatagramReadResponse, HostRpcError> {
     let socket = udp_socket(&state, &req.bind_id).await?;
     let mut buf = vec![0u8; READ_BUF_SIZE];
     let (read, peer) = socket
@@ -279,7 +213,7 @@ pub async fn udp_datagram_read_local(
 pub async fn udp_datagram_write_local(
     state: Arc<AppState>,
     req: PortUdpDatagramWriteRequest,
-) -> Result<EmptyResponse, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<EmptyResponse, HostRpcError> {
     let bytes = decode_bytes(&req.data)?;
     let peer = resolve_endpoint(&req.peer)
         .await
@@ -295,7 +229,7 @@ pub async fn udp_datagram_write_local(
 async fn listen_tcp(
     state: Arc<AppState>,
     endpoint: &str,
-) -> Result<PortListenResponse, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<PortListenResponse, HostRpcError> {
     let listener = TcpListener::bind(endpoint)
         .await
         .map_err(|err| rpc_error("port_bind_failed", err.to_string()))?;
@@ -325,7 +259,7 @@ async fn listen_tcp(
 async fn listen_udp(
     state: Arc<AppState>,
     endpoint: &str,
-) -> Result<PortListenResponse, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<PortListenResponse, HostRpcError> {
     let socket = UdpSocket::bind(endpoint)
         .await
         .map_err(|err| rpc_error("port_bind_failed", err.to_string()))?;
@@ -355,7 +289,7 @@ async fn listen_udp(
 async fn connect_tcp(
     state: Arc<AppState>,
     endpoint: &str,
-) -> Result<PortConnectResponse, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<PortConnectResponse, HostRpcError> {
     let endpoint = ensure_nonzero_connect_endpoint(endpoint)
         .map_err(|err| rpc_error("invalid_endpoint", err.to_string()))?;
     let stream = TcpStream::connect(endpoint.as_str())
@@ -380,7 +314,7 @@ async fn connect_tcp(
 async fn tcp_connection(
     state: &AppState,
     connection_id: &str,
-) -> Result<Arc<TcpConnection>, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<Arc<TcpConnection>, HostRpcError> {
     state
         .port_forwards
         .tcp_connections
@@ -396,10 +330,7 @@ async fn tcp_connection(
         })
 }
 
-async fn udp_socket(
-    state: &AppState,
-    bind_id: &str,
-) -> Result<Arc<UdpSocket>, (StatusCode, Json<RpcErrorBody>)> {
+async fn udp_socket(state: &AppState, bind_id: &str) -> Result<Arc<UdpSocket>, HostRpcError> {
     state
         .port_forwards
         .udp_sockets
@@ -431,20 +362,18 @@ fn encode_bytes(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-fn decode_bytes(data: &str) -> Result<Vec<u8>, (StatusCode, Json<RpcErrorBody>)> {
+fn decode_bytes(data: &str) -> Result<Vec<u8>, HostRpcError> {
     base64::engine::general_purpose::STANDARD
         .decode(data)
         .map_err(|err| rpc_error("invalid_port_data", err.to_string()))
 }
 
-fn rpc_error(code: &'static str, message: impl Into<String>) -> (StatusCode, Json<RpcErrorBody>) {
+fn rpc_error(code: &'static str, message: impl Into<String>) -> HostRpcError {
     let message = message.into();
     tracing::warn!(code, %message, "daemon request rejected");
-    (
-        StatusCode::BAD_REQUEST,
-        Json(RpcErrorBody {
-            code: code.to_string(),
-            message,
-        }),
-    )
+    HostRpcError {
+        status: 400,
+        code,
+        message,
+    }
 }

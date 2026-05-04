@@ -1667,7 +1667,6 @@ name = "remote-exec-host"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "axum",
  "base64",
  "chardetng",
  "encoding_rs",

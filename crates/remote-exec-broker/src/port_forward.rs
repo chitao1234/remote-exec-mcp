@@ -22,7 +22,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::TargetHandle;
 use crate::daemon_client::DaemonClientError;
-use crate::local_backend::map_local_rpc_error;
+use crate::local_backend::map_host_rpc_error;
 
 #[derive(Clone)]
 pub enum SideHandle {
@@ -184,7 +184,7 @@ impl LocalPortClient {
     ) -> Result<PortListenResponse, DaemonClientError> {
         remote_exec_host::port_forward::listen_local(self.state.clone(), req.clone())
             .await
-            .map_err(map_local_rpc_error)
+            .map_err(map_host_rpc_error)
     }
 
     async fn port_listen_accept(
@@ -193,7 +193,7 @@ impl LocalPortClient {
     ) -> Result<PortListenAcceptResponse, DaemonClientError> {
         remote_exec_host::port_forward::listen_accept_local(self.state.clone(), req.clone())
             .await
-            .map_err(map_local_rpc_error)
+            .map_err(map_host_rpc_error)
     }
 
     async fn port_listen_close(
@@ -202,7 +202,7 @@ impl LocalPortClient {
     ) -> Result<EmptyResponse, DaemonClientError> {
         remote_exec_host::port_forward::listen_close_local(self.state.clone(), req.clone())
             .await
-            .map_err(map_local_rpc_error)
+            .map_err(map_host_rpc_error)
     }
 
     async fn port_connect(
@@ -211,7 +211,7 @@ impl LocalPortClient {
     ) -> Result<PortConnectResponse, DaemonClientError> {
         remote_exec_host::port_forward::connect_local(self.state.clone(), req.clone())
             .await
-            .map_err(map_local_rpc_error)
+            .map_err(map_host_rpc_error)
     }
 
     async fn port_connection_read(
@@ -220,7 +220,7 @@ impl LocalPortClient {
     ) -> Result<PortConnectionReadResponse, DaemonClientError> {
         remote_exec_host::port_forward::connection_read_local(self.state.clone(), req.clone())
             .await
-            .map_err(map_local_rpc_error)
+            .map_err(map_host_rpc_error)
     }
 
     async fn port_connection_write(
@@ -229,7 +229,7 @@ impl LocalPortClient {
     ) -> Result<EmptyResponse, DaemonClientError> {
         remote_exec_host::port_forward::connection_write_local(self.state.clone(), req.clone())
             .await
-            .map_err(map_local_rpc_error)
+            .map_err(map_host_rpc_error)
     }
 
     async fn port_connection_close(
@@ -238,7 +238,7 @@ impl LocalPortClient {
     ) -> Result<EmptyResponse, DaemonClientError> {
         remote_exec_host::port_forward::connection_close_local(self.state.clone(), req.clone())
             .await
-            .map_err(map_local_rpc_error)
+            .map_err(map_host_rpc_error)
     }
 
     async fn port_udp_datagram_read(
@@ -247,7 +247,7 @@ impl LocalPortClient {
     ) -> Result<PortUdpDatagramReadResponse, DaemonClientError> {
         remote_exec_host::port_forward::udp_datagram_read_local(self.state.clone(), req.clone())
             .await
-            .map_err(map_local_rpc_error)
+            .map_err(map_host_rpc_error)
     }
 
     async fn port_udp_datagram_write(
@@ -256,7 +256,7 @@ impl LocalPortClient {
     ) -> Result<EmptyResponse, DaemonClientError> {
         remote_exec_host::port_forward::udp_datagram_write_local(self.state.clone(), req.clone())
             .await
-            .map_err(map_local_rpc_error)
+            .map_err(map_host_rpc_error)
     }
 }
 

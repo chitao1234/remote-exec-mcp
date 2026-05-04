@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use axum::Json;
 use remote_exec_proto::rpc::{
     EmptyResponse, ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest,
     ImageReadResponse, PatchApplyRequest, PatchApplyResponse, PortConnectRequest,
@@ -88,7 +87,7 @@ impl LocalDaemonClient {
     ) -> Result<PortListenResponse, DaemonClientError> {
         remote_exec_host::port_forward::listen_local(self.state.clone(), req.clone())
             .await
-            .map_err(map_local_rpc_error)
+            .map_err(map_host_rpc_error)
     }
 
     pub async fn port_listen_accept(
@@ -97,7 +96,7 @@ impl LocalDaemonClient {
     ) -> Result<PortListenAcceptResponse, DaemonClientError> {
         remote_exec_host::port_forward::listen_accept_local(self.state.clone(), req.clone())
             .await
-            .map_err(map_local_rpc_error)
+            .map_err(map_host_rpc_error)
     }
 
     pub async fn port_listen_close(
@@ -106,7 +105,7 @@ impl LocalDaemonClient {
     ) -> Result<EmptyResponse, DaemonClientError> {
         remote_exec_host::port_forward::listen_close_local(self.state.clone(), req.clone())
             .await
-            .map_err(map_local_rpc_error)
+            .map_err(map_host_rpc_error)
     }
 
     pub async fn port_connect(
@@ -115,7 +114,7 @@ impl LocalDaemonClient {
     ) -> Result<PortConnectResponse, DaemonClientError> {
         remote_exec_host::port_forward::connect_local(self.state.clone(), req.clone())
             .await
-            .map_err(map_local_rpc_error)
+            .map_err(map_host_rpc_error)
     }
 
     pub async fn port_connection_read(
@@ -124,7 +123,7 @@ impl LocalDaemonClient {
     ) -> Result<PortConnectionReadResponse, DaemonClientError> {
         remote_exec_host::port_forward::connection_read_local(self.state.clone(), req.clone())
             .await
-            .map_err(map_local_rpc_error)
+            .map_err(map_host_rpc_error)
     }
 
     pub async fn port_connection_write(
@@ -133,7 +132,7 @@ impl LocalDaemonClient {
     ) -> Result<EmptyResponse, DaemonClientError> {
         remote_exec_host::port_forward::connection_write_local(self.state.clone(), req.clone())
             .await
-            .map_err(map_local_rpc_error)
+            .map_err(map_host_rpc_error)
     }
 
     pub async fn port_connection_close(
@@ -142,7 +141,7 @@ impl LocalDaemonClient {
     ) -> Result<EmptyResponse, DaemonClientError> {
         remote_exec_host::port_forward::connection_close_local(self.state.clone(), req.clone())
             .await
-            .map_err(map_local_rpc_error)
+            .map_err(map_host_rpc_error)
     }
 
     pub async fn port_udp_datagram_read(
@@ -151,7 +150,7 @@ impl LocalDaemonClient {
     ) -> Result<PortUdpDatagramReadResponse, DaemonClientError> {
         remote_exec_host::port_forward::udp_datagram_read_local(self.state.clone(), req.clone())
             .await
-            .map_err(map_local_rpc_error)
+            .map_err(map_host_rpc_error)
     }
 
     pub async fn port_udp_datagram_write(
@@ -160,7 +159,7 @@ impl LocalDaemonClient {
     ) -> Result<EmptyResponse, DaemonClientError> {
         remote_exec_host::port_forward::udp_datagram_write_local(self.state.clone(), req.clone())
             .await
-            .map_err(map_local_rpc_error)
+            .map_err(map_host_rpc_error)
     }
 }
 
@@ -179,15 +178,6 @@ pub(crate) fn map_host_rpc_error(err: remote_exec_host::HostRpcError) -> DaemonC
             code: err.code.to_string(),
             message: err.message,
         },
-    )
-}
-
-pub(crate) fn map_local_rpc_error(
-    (status, Json(body)): (axum::http::StatusCode, Json<RpcErrorBody>),
-) -> DaemonClientError {
-    local_rpc_error_body(
-        reqwest::StatusCode::from_u16(status.as_u16()).expect("valid status code"),
-        body,
     )
 }
 
