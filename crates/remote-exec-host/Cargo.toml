@@ -17,7 +17,6 @@ encoding_rs = { workspace = true }
 futures-util = { workspace = true }
 gethostname = { workspace = true }
 globset = { workspace = true }
-http-body-util = { workspace = true }
 image = { workspace = true }
 os_pipe = { workspace = true }
 portable-pty = { workspace = true }

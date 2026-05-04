@@ -504,6 +504,42 @@ async fn transfer_files_auto_mode_treats_not_found_path_info_as_missing_exact() 
 }
 
 #[tokio::test]
+async fn transfer_files_auto_mode_does_not_treat_message_only_unknown_endpoint_as_missing() {
+    let fixture = support::spawn_broker_with_plain_http_stub_daemon().await;
+    let source = fixture._tempdir.path().join("artifact.txt");
+    std::fs::write(&source, "hello exact cp mode\n").unwrap();
+    fixture
+        .set_transfer_path_info_error_response(
+            axum::http::StatusCode::BAD_REQUEST,
+            remote_exec_proto::rpc::RpcErrorBody {
+                code: String::new(),
+                message: "unknown endpoint".to_string(),
+            },
+        )
+        .await;
+
+    let error = fixture
+        .call_tool_error(
+            "transfer_files",
+            serde_json::json!({
+                "source": {
+                    "target": "local",
+                    "path": source.display().to_string()
+                },
+                "destination": {
+                    "target": "builder-xp",
+                    "path": "C:/srv/inbox"
+                },
+                "create_parent": true
+            }),
+        )
+        .await;
+
+    assert!(error.contains("unknown endpoint"));
+    assert!(fixture.last_transfer_import().await.is_none());
+}
+
+#[tokio::test]
 async fn transfer_files_uses_bearer_auth_for_remote_imports() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon_http_auth("shared-secret").await;
     let source = fixture._tempdir.path().join("source.txt");

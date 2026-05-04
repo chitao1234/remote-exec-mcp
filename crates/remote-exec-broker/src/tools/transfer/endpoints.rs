@@ -255,18 +255,13 @@ fn normalize_path_info_error(err: crate::daemon_client::DaemonClientError) -> an
 
 fn path_info_missing_or_unsupported(err: &crate::daemon_client::DaemonClientError) -> bool {
     match err {
-        crate::daemon_client::DaemonClientError::Rpc {
-            status,
-            code,
-            message,
-        } => {
+        crate::daemon_client::DaemonClientError::Rpc { status, code, .. } => {
             *status == reqwest::StatusCode::NOT_FOUND
                 || *status == reqwest::StatusCode::METHOD_NOT_ALLOWED
                 || matches!(
                     code.as_deref(),
                     Some("not_found") | Some("unknown_endpoint")
                 )
-                || message.contains("unknown endpoint")
         }
         _ => false,
     }
