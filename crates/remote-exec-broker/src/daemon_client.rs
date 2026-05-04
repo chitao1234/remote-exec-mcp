@@ -6,15 +6,14 @@ use remote_exec_proto::rpc::{
     PortConnectionReadResponse, PortConnectionWriteRequest, PortListenAcceptRequest,
     PortListenAcceptResponse, PortListenCloseRequest, PortListenRequest, PortListenResponse,
     PortUdpDatagramReadRequest, PortUdpDatagramReadResponse, PortUdpDatagramWriteRequest,
-    RpcErrorBody, TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
-    TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
-    TRANSFER_SYMLINK_MODE_HEADER, TargetInfoResponse, TransferCompression, TransferExportRequest,
-    TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
+    RpcErrorBody, TargetInfoResponse, TransferExportMetadata, TransferExportRequest,
+    TransferImportMetadata, TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
     TransferPathInfoResponse, TransferSourceType,
 };
 use reqwest::header::{AUTHORIZATION, CONNECTION, CONTENT_LENGTH, HeaderValue};
 
 use crate::config::{TargetConfig, TargetTransportKind};
+use crate::tools::transfer::codec;
 
 #[derive(Debug, Clone)]
 pub struct TransferExportResponse {
@@ -251,9 +250,9 @@ impl DaemonClient {
     ) -> Result<TransferExportStream, DaemonClientError> {
         let started = std::time::Instant::now();
         let response = self.send_transfer_export_request(req, started).await?;
-        let source_type = self.transfer_export_source_type(req, response.headers())?;
+        let metadata = self.transfer_export_metadata(req, response.headers())?;
         Ok(TransferExportStream {
-            source_type,
+            source_type: metadata.source_type,
             response,
         })
     }
@@ -340,24 +339,22 @@ impl DaemonClient {
         Err(decode_rpc_error(response).await)
     }
 
-    fn transfer_export_source_type(
+    fn transfer_export_metadata(
         &self,
         req: &TransferExportRequest,
         headers: &reqwest::header::HeaderMap,
-    ) -> Result<TransferSourceType, DaemonClientError> {
-        let source_type = parse_header_enum(headers, TRANSFER_SOURCE_TYPE_HEADER)?;
-        let actual_compression =
-            parse_optional_header_enum(headers, TRANSFER_COMPRESSION_HEADER)?.unwrap_or_default();
-        if actual_compression != req.compression {
+    ) -> Result<TransferExportMetadata, DaemonClientError> {
+        let metadata = codec::parse_export_metadata(headers)?;
+        if metadata.compression != req.compression {
             return Err(DaemonClientError::Decode(anyhow::anyhow!(
                 "target `{}` returned transfer compression `{}` for requested `{}`",
                 self.target_name,
-                format_transfer_compression(&actual_compression),
-                format_transfer_compression(&req.compression)
+                codec::compression_header_value(&metadata.compression),
+                codec::compression_header_value(&req.compression)
             )));
         }
 
-        Ok(source_type)
+        Ok(metadata)
     }
 
     async fn write_transfer_export_archive(
@@ -384,29 +381,10 @@ impl DaemonClient {
         body: reqwest::Body,
         started: std::time::Instant,
     ) -> Result<reqwest::Response, DaemonClientError> {
-        let mut request = self
-            .request("/v1/transfer/import")
-            .header(
-                TRANSFER_DESTINATION_PATH_HEADER,
-                req.destination_path.clone(),
-            )
-            .header(
-                TRANSFER_OVERWRITE_HEADER,
-                format_transfer_overwrite(&req.overwrite).to_string(),
-            )
-            .header(TRANSFER_CREATE_PARENT_HEADER, req.create_parent.to_string())
-            .header(
-                TRANSFER_SOURCE_TYPE_HEADER,
-                format_transfer_source_type(&req.source_type).to_string(),
-            )
-            .header(
-                TRANSFER_COMPRESSION_HEADER,
-                format_transfer_compression(&req.compression).to_string(),
-            )
-            .header(
-                TRANSFER_SYMLINK_MODE_HEADER,
-                format_transfer_symlink_mode(&req.symlink_mode).to_string(),
-            );
+        let mut request = codec::apply_import_headers(
+            self.request("/v1/transfer/import"),
+            &TransferImportMetadata::from(req),
+        );
         if let Some(file_len) = file_len {
             request = request.header(CONTENT_LENGTH, file_len);
         }
@@ -564,41 +542,6 @@ fn build_bearer_authorization_header(
         .map_err(anyhow::Error::from)
 }
 
-fn format_transfer_source_type(source_type: &TransferSourceType) -> &'static str {
-    match source_type {
-        TransferSourceType::File => "file",
-        TransferSourceType::Directory => "directory",
-        TransferSourceType::Multiple => "multiple",
-    }
-}
-
-fn format_transfer_compression(compression: &TransferCompression) -> &'static str {
-    match compression {
-        TransferCompression::None => "none",
-        TransferCompression::Zstd => "zstd",
-    }
-}
-
-fn format_transfer_overwrite(
-    overwrite: &remote_exec_proto::rpc::TransferOverwriteMode,
-) -> &'static str {
-    match overwrite {
-        remote_exec_proto::rpc::TransferOverwriteMode::Fail => "fail",
-        remote_exec_proto::rpc::TransferOverwriteMode::Merge => "merge",
-        remote_exec_proto::rpc::TransferOverwriteMode::Replace => "replace",
-    }
-}
-
-fn format_transfer_symlink_mode(
-    mode: &remote_exec_proto::rpc::TransferSymlinkMode,
-) -> &'static str {
-    match mode {
-        remote_exec_proto::rpc::TransferSymlinkMode::Preserve => "preserve",
-        remote_exec_proto::rpc::TransferSymlinkMode::Follow => "follow",
-        remote_exec_proto::rpc::TransferSymlinkMode::Skip => "skip",
-    }
-}
-
 async fn open_transfer_import_body(
     archive_path: &std::path::Path,
 ) -> Result<(u64, reqwest::Body), DaemonClientError> {
@@ -612,48 +555,6 @@ async fn open_transfer_import_body(
         .len();
     let body = reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(file));
     Ok((file_len, body))
-}
-
-fn parse_header_enum<T>(
-    headers: &reqwest::header::HeaderMap,
-    name: &str,
-) -> Result<T, DaemonClientError>
-where
-    T: serde::de::DeserializeOwned,
-{
-    parse_header_enum_value(header_str(headers, name)?)
-}
-
-fn parse_optional_header_enum<T>(
-    headers: &reqwest::header::HeaderMap,
-    name: &str,
-) -> Result<Option<T>, DaemonClientError>
-where
-    T: serde::de::DeserializeOwned,
-{
-    optional_header_str(headers, name)
-        .map(parse_header_enum_value)
-        .transpose()
-}
-
-fn header_str<'a>(
-    headers: &'a reqwest::header::HeaderMap,
-    name: &str,
-) -> Result<&'a str, DaemonClientError> {
-    optional_header_str(headers, name)
-        .ok_or_else(|| DaemonClientError::Decode(anyhow::anyhow!("missing header `{name}`")))
-}
-
-fn optional_header_str<'a>(headers: &'a reqwest::header::HeaderMap, name: &str) -> Option<&'a str> {
-    headers.get(name).and_then(|value| value.to_str().ok())
-}
-
-fn parse_header_enum_value<T>(raw: &str) -> Result<T, DaemonClientError>
-where
-    T: serde::de::DeserializeOwned,
-{
-    serde_json::from_str::<T>(&format!("\"{raw}\""))
-        .map_err(|err| DaemonClientError::Decode(err.into()))
 }
 
 async fn decode_rpc_error_strict(

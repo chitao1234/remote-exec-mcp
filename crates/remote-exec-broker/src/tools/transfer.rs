@@ -1,3 +1,4 @@
+pub(crate) mod codec;
 mod endpoints;
 mod format;
 mod operations;
