@@ -8,7 +8,7 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use axum::response::Response;
-use remote_exec_host::TransferError;
+use remote_exec_host::HostRpcError;
 use remote_exec_proto::rpc::{
     RpcErrorBody, TransferExportRequest, TransferImportResponse, TransferPathInfoRequest,
     TransferPathInfoResponse,
@@ -22,7 +22,7 @@ pub async fn path_info(
 ) -> Result<Json<TransferPathInfoResponse>, (StatusCode, Json<RpcErrorBody>)> {
     remote_exec_host::transfer::path_info_for_request(state.as_ref(), &req)
         .map(Json)
-        .map_err(TransferError::into_rpc)
+        .map_err(|err| host_rpc_error_response(err.into_host_rpc_error()))
 }
 
 pub async fn export_path(
@@ -39,7 +39,7 @@ pub async fn export_path(
 
     let exported = remote_exec_host::transfer::export_path_local(state, req)
         .await
-        .map_err(TransferError::into_rpc)?;
+        .map_err(|err| host_rpc_error_response(err.into_host_rpc_error()))?;
     let stream = tokio_util::io::ReaderStream::new(exported.reader);
     let body = Body::from_stream(stream);
     tracing::info!(
@@ -78,7 +78,7 @@ pub async fn import_archive(
     );
     let summary = remote_exec_host::transfer::import_archive_local(state, request.clone(), body)
         .await
-        .map_err(TransferError::into_rpc)?;
+        .map_err(|err| host_rpc_error_response(err.into_host_rpc_error()))?;
     tracing::info!(
         destination_path = %request.destination_path,
         bytes_copied = summary.bytes_copied,
@@ -104,4 +104,14 @@ fn format_compression(compression: &remote_exec_proto::rpc::TransferCompression)
         remote_exec_proto::rpc::TransferCompression::None => "none",
         remote_exec_proto::rpc::TransferCompression::Zstd => "zstd",
     }
+}
+
+fn host_rpc_error_response(err: HostRpcError) -> (StatusCode, Json<RpcErrorBody>) {
+    (
+        StatusCode::from_u16(err.status).expect("valid host rpc status"),
+        Json(RpcErrorBody {
+            code: err.code.to_string(),
+            message: err.message,
+        }),
+    )
 }

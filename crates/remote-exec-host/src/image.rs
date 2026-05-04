@@ -14,7 +14,7 @@ use remote_exec_proto::rpc::{ImageReadRequest, ImageReadResponse, RpcErrorBody};
 use remote_exec_proto::sandbox::SandboxAccess;
 
 use crate::AppState;
-use crate::error::ImageError;
+use crate::error::{HostRpcError, ImageError};
 
 const MAX_WIDTH: u32 = 2048;
 const MAX_HEIGHT: u32 = 2048;
@@ -26,7 +26,7 @@ pub async fn read_image(
     read_image_local(state, req)
         .await
         .map(Json)
-        .map_err(ImageError::into_rpc)
+        .map_err(|err| host_rpc_error_response(err.into_host_rpc_error()))
 }
 
 pub async fn read_image_local(
@@ -187,4 +187,14 @@ fn encode_data_url(format: ImageFormat, bytes: Vec<u8>) -> Result<String, ImageE
         "data:{mime};base64,{}",
         base64::engine::general_purpose::STANDARD.encode(bytes)
     ))
+}
+
+fn host_rpc_error_response(err: HostRpcError) -> (StatusCode, Json<RpcErrorBody>) {
+    (
+        StatusCode::from_u16(err.status).expect("valid host rpc status"),
+        Json(RpcErrorBody {
+            code: err.code.to_string(),
+            message: err.message,
+        }),
+    )
 }

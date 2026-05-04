@@ -24,6 +24,8 @@ const char* transfer_error_code_name(TransferRpcCode code) {
         return "transfer_source_unsupported";
     case TransferRpcCode::SourceMissing:
         return "transfer_source_missing";
+    case TransferRpcCode::Internal:
+        return "internal_error";
     case TransferRpcCode::TransferFailed:
         return "transfer_failed";
     }
@@ -42,6 +44,26 @@ const char* image_error_code_name(ImageRpcCode code) {
         return "image_not_file";
     case ImageRpcCode::DecodeFailed:
         return "image_decode_failed";
+    case ImageRpcCode::Internal:
+        return "internal_error";
     }
     return "image_decode_failed";
+}
+
+int transfer_error_status(TransferRpcCode code) {
+    switch (code) {
+    case TransferRpcCode::Internal:
+        return 500;
+    default:
+        return 400;
+    }
+}
+
+int image_error_status(ImageRpcCode code) {
+    switch (code) {
+    case ImageRpcCode::Internal:
+        return 500;
+    default:
+        return 400;
+    }
 }

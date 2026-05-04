@@ -312,7 +312,10 @@ void append_warnings(
 
 TarHeaderView parse_header(const char* block) {
     if (!checksum_valid(block)) {
-        throw std::runtime_error("invalid tar header checksum");
+        throw TransferFailure(
+            TransferRpcCode::TransferFailed,
+            "invalid tar header checksum"
+        );
     }
     const char raw_type = block[156];
     return TarHeaderView{
@@ -334,7 +337,10 @@ std::string read_gnu_long_name(
     std::uint64_t size
 ) {
     if (body_offset + padded_length(size) > archive.size()) {
-        throw std::runtime_error("truncated tar entry body");
+        throw TransferFailure(
+            TransferRpcCode::TransferFailed,
+            "truncated tar entry body"
+        );
     }
     std::string value = archive.substr(body_offset, static_cast<std::size_t>(size));
     while (!value.empty() && value[value.size() - 1] == '\0') {

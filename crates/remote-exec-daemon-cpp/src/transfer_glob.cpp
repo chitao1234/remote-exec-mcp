@@ -5,13 +5,18 @@
 #include <string>
 #include <vector>
 
+#include "rpc_failures.h"
+
 namespace {
 
-std::runtime_error invalid_pattern(
+TransferFailure invalid_pattern(
     const std::string& pattern,
     const std::string& reason
 ) {
-    return std::runtime_error("invalid exclude pattern `" + pattern + "`: " + reason);
+    return TransferFailure(
+        TransferRpcCode::TransferFailed,
+        "invalid exclude pattern `" + pattern + "`: " + reason
+    );
 }
 
 std::size_t character_class_end(

@@ -19,13 +19,14 @@ use remote_exec_proto::rpc::{
 };
 
 use crate::AppState;
-use crate::error::TransferError;
+use crate::error::{HostRpcError, TransferError};
 
 pub async fn path_info(
     State(state): State<Arc<AppState>>,
     Json(req): Json<TransferPathInfoRequest>,
 ) -> Result<Json<TransferPathInfoResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    let info = path_info_for_request(state.as_ref(), &req).map_err(TransferError::into_rpc)?;
+    let info = path_info_for_request(state.as_ref(), &req)
+        .map_err(|err| host_rpc_error_response(err.into_host_rpc_error()))?;
     Ok(Json(info))
 }
 
@@ -105,7 +106,7 @@ pub async fn export_path(
     );
     let exported = export_path_local(state.clone(), req)
         .await
-        .map_err(TransferError::into_rpc)?;
+        .map_err(|err| host_rpc_error_response(err.into_host_rpc_error()))?;
 
     let stream = tokio_util::io::ReaderStream::new(exported.reader);
     let body = Body::from_stream(stream);
@@ -165,7 +166,7 @@ pub async fn import_archive(
     );
     let summary = import_archive_local(state.clone(), request.clone(), body)
         .await
-        .map_err(TransferError::into_rpc)?;
+        .map_err(|err| host_rpc_error_response(err.into_host_rpc_error()))?;
     tracing::info!(
         destination_path = %request.destination_path,
         bytes_copied = summary.bytes_copied,
@@ -201,7 +202,7 @@ pub fn classify_transfer_error(err: anyhow::Error) -> TransferError {
 }
 
 pub fn map_transfer_error(err: anyhow::Error) -> (StatusCode, Json<RpcErrorBody>) {
-    classify_transfer_error(err).into_rpc()
+    host_rpc_error_response(classify_transfer_error(err).into_host_rpc_error())
 }
 
 pub fn parse_import_request(
@@ -281,4 +282,14 @@ fn ensure_transfer_compression_supported(
         ));
     }
     Ok(())
+}
+
+fn host_rpc_error_response(err: HostRpcError) -> (StatusCode, Json<RpcErrorBody>) {
+    (
+        StatusCode::from_u16(err.status).expect("valid host rpc status"),
+        Json(RpcErrorBody {
+            code: err.code.to_string(),
+            message: err.message,
+        }),
+    )
 }

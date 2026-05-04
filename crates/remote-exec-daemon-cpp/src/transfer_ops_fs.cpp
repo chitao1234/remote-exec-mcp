@@ -307,7 +307,10 @@ bool prepare_destination_path(
 ) {
     const bool existed = path_exists(absolute_path);
     if (overwrite_mode != "fail" && overwrite_mode != "merge" && overwrite_mode != "replace") {
-        throw std::runtime_error("unsupported transfer overwrite mode");
+        throw TransferFailure(
+            TransferRpcCode::TransferFailed,
+            "unsupported transfer overwrite mode"
+        );
     }
     if (existed && overwrite_mode == "fail") {
         throw TransferFailure(

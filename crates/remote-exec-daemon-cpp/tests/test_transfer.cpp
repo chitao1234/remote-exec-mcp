@@ -746,6 +746,14 @@ int main() {
         std::string(transfer_error_code_name(TransferRpcCode::CompressionUnsupported)) ==
         "transfer_compression_unsupported"
     );
+    assert(
+        std::string(transfer_error_code_name(TransferRpcCode::Internal)) == "internal_error"
+    );
+    assert(transfer_error_status(TransferRpcCode::Internal) == 500);
+    assert(transfer_error_status(TransferRpcCode::SourceMissing) == 400);
+    assert(std::string(image_error_code_name(ImageRpcCode::Internal)) == "internal_error");
+    assert(image_error_status(ImageRpcCode::Internal) == 500);
+    assert(image_error_status(ImageRpcCode::DecodeFailed) == 400);
 
     assert_file_transfer();
     assert_file_transfer_blocks_unexpected_entry_path();

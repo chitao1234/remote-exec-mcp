@@ -165,23 +165,63 @@ impl LocalDaemonClient {
 }
 
 pub(crate) fn map_local_image_error(err: remote_exec_host::ImageError) -> DaemonClientError {
-    map_local_rpc_error(err.into_rpc())
+    map_host_rpc_error(err.into_host_rpc_error())
 }
 
 pub(crate) fn map_local_transfer_error(err: remote_exec_host::TransferError) -> DaemonClientError {
-    map_local_rpc_error(err.into_rpc())
+    map_host_rpc_error(err.into_host_rpc_error())
+}
+
+pub(crate) fn map_host_rpc_error(err: remote_exec_host::HostRpcError) -> DaemonClientError {
+    local_rpc_error_body(
+        reqwest::StatusCode::from_u16(err.status).expect("valid status code"),
+        RpcErrorBody {
+            code: err.code.to_string(),
+            message: err.message,
+        },
+    )
 }
 
 pub(crate) fn map_local_rpc_error(
     (status, Json(body)): (axum::http::StatusCode, Json<RpcErrorBody>),
 ) -> DaemonClientError {
-    local_rpc_error_body(status, body)
+    local_rpc_error_body(
+        reqwest::StatusCode::from_u16(status.as_u16()).expect("valid status code"),
+        body,
+    )
 }
 
-fn local_rpc_error_body(status: axum::http::StatusCode, body: RpcErrorBody) -> DaemonClientError {
+fn local_rpc_error_body(status: reqwest::StatusCode, body: RpcErrorBody) -> DaemonClientError {
     DaemonClientError::Rpc {
-        status: reqwest::StatusCode::from_u16(status.as_u16()).expect("valid status code"),
+        status,
         code: Some(body.code),
         message: body.message,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DaemonClientError;
+
+    #[test]
+    fn host_internal_errors_preserve_server_status_for_local_backend() {
+        let err = super::map_host_rpc_error(remote_exec_host::HostRpcError {
+            status: 500,
+            code: "internal_error",
+            message: "boom".to_string(),
+        });
+
+        match err {
+            DaemonClientError::Rpc {
+                status,
+                code,
+                message,
+            } => {
+                assert_eq!(status, reqwest::StatusCode::INTERNAL_SERVER_ERROR);
+                assert_eq!(code.as_deref(), Some("internal_error"));
+                assert_eq!(message, "boom");
+            }
+            other => panic!("expected rpc error, got {other:?}"),
+        }
     }
 }

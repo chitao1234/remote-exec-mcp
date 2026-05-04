@@ -150,7 +150,10 @@ public:
             return false;
         }
         if (archive_->size() - offset_ < size) {
-            throw std::runtime_error("truncated transfer body");
+            throw TransferFailure(
+                TransferRpcCode::TransferFailed,
+                "truncated transfer body"
+            );
         }
         std::copy(archive_->data() + offset_, archive_->data() + offset_ + size, data);
         offset_ += size;
@@ -169,7 +172,7 @@ void read_exact_or_throw(
     const std::string& error_message
 ) {
     if (!reader.read_exact_or_eof(data, size)) {
-        throw std::runtime_error(error_message);
+        throw TransferFailure(TransferRpcCode::TransferFailed, error_message);
     }
 }
 

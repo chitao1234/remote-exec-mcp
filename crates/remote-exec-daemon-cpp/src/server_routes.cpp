@@ -238,7 +238,7 @@ HttpResponse handle_image_read(AppState& state, const HttpRequest& request) {
         log_message(LOG_WARN, "server", "image/read failed: " + failure.message);
         write_rpc_error(
             response,
-            400,
+            image_error_status(failure.code),
             image_error_code_name(failure.code),
             failure.message
         );
@@ -247,8 +247,8 @@ HttpResponse handle_image_read(AppState& state, const HttpRequest& request) {
         log_message(LOG_WARN, "server", "image/read failed: " + message);
         write_rpc_error(
             response,
-            400,
-            image_error_code_name(ImageRpcCode::DecodeFailed),
+            image_error_status(ImageRpcCode::Internal),
+            image_error_code_name(ImageRpcCode::Internal),
             message
         );
     }
@@ -711,7 +711,7 @@ HttpResponse handle_transfer_export(AppState& state, const HttpRequest& request)
         log_message(LOG_WARN, "server", "transfer/export failed: " + failure.message);
         write_rpc_error(
             response,
-            400,
+            transfer_error_status(failure.code),
             transfer_error_code_name(failure.code),
             failure.message
         );
@@ -720,8 +720,8 @@ HttpResponse handle_transfer_export(AppState& state, const HttpRequest& request)
         log_message(LOG_WARN, "server", "transfer/export failed: " + message);
         write_rpc_error(
             response,
-            400,
-            transfer_error_code_name(TransferRpcCode::TransferFailed),
+            transfer_error_status(TransferRpcCode::Internal),
+            transfer_error_code_name(TransferRpcCode::Internal),
             message
         );
     }
@@ -757,7 +757,7 @@ HttpResponse handle_transfer_path_info(AppState& state, const HttpRequest& reque
         log_message(LOG_WARN, "server", "transfer/path-info failed: " + failure.message);
         write_rpc_error(
             response,
-            400,
+            transfer_error_status(failure.code),
             transfer_error_code_name(failure.code),
             failure.message
         );
@@ -766,8 +766,8 @@ HttpResponse handle_transfer_path_info(AppState& state, const HttpRequest& reque
         log_message(LOG_WARN, "server", "transfer/path-info failed: " + message);
         write_rpc_error(
             response,
-            400,
-            transfer_error_code_name(TransferRpcCode::TransferFailed),
+            transfer_error_status(TransferRpcCode::Internal),
+            transfer_error_code_name(TransferRpcCode::Internal),
             message
         );
     }
@@ -806,7 +806,7 @@ HttpResponse handle_transfer_import(AppState& state, const HttpRequest& request)
         log_message(LOG_WARN, "server", "transfer/import failed: " + failure.message);
         write_rpc_error(
             response,
-            400,
+            transfer_error_status(failure.code),
             transfer_error_code_name(failure.code),
             failure.message
         );
@@ -815,8 +815,8 @@ HttpResponse handle_transfer_import(AppState& state, const HttpRequest& request)
         log_message(LOG_WARN, "server", "transfer/import failed: " + message);
         write_rpc_error(
             response,
-            400,
-            transfer_error_code_name(TransferRpcCode::TransferFailed),
+            transfer_error_status(TransferRpcCode::Internal),
+            transfer_error_code_name(TransferRpcCode::Internal),
             message
         );
     }

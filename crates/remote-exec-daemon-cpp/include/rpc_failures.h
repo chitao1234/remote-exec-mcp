@@ -12,6 +12,7 @@ enum class TransferRpcCode {
     CompressionUnsupported,
     SourceUnsupported,
     SourceMissing,
+    Internal,
     TransferFailed,
 };
 
@@ -21,6 +22,7 @@ enum class ImageRpcCode {
     Missing,
     NotFile,
     DecodeFailed,
+    Internal,
 };
 
 class TransferFailure : public std::runtime_error {
@@ -41,3 +43,5 @@ public:
 
 const char* transfer_error_code_name(TransferRpcCode code);
 const char* image_error_code_name(ImageRpcCode code);
+int transfer_error_status(TransferRpcCode code);
+int image_error_status(ImageRpcCode code);

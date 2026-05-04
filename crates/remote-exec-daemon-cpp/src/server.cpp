@@ -185,7 +185,7 @@ HttpResponse handle_streaming_transfer_import(
         log_message(LOG_WARN, "server", "transfer/import failed: " + failure.message);
         write_rpc_error(
             response,
-            400,
+            transfer_error_status(failure.code),
             transfer_error_code_name(failure.code),
             failure.message
         );
@@ -194,8 +194,8 @@ HttpResponse handle_streaming_transfer_import(
         log_message(LOG_WARN, "server", "transfer/import failed: " + message);
         write_rpc_error(
             response,
-            400,
-            transfer_error_code_name(TransferRpcCode::TransferFailed),
+            transfer_error_status(TransferRpcCode::Internal),
+            transfer_error_code_name(TransferRpcCode::Internal),
             message
         );
     }
@@ -277,10 +277,10 @@ int handle_streaming_transfer_export(
         }
 
         HttpResponse response;
-        response.status = 400;
+        response.status = transfer_error_status(failure.code);
         write_rpc_error(
             response,
-            400,
+            transfer_error_status(failure.code),
             transfer_error_code_name(failure.code),
             failure.message
         );
@@ -294,11 +294,11 @@ int handle_streaming_transfer_export(
         }
 
         HttpResponse response;
-        response.status = 400;
+        response.status = transfer_error_status(TransferRpcCode::Internal);
         write_rpc_error(
             response,
-            400,
-            transfer_error_code_name(TransferRpcCode::TransferFailed),
+            transfer_error_status(TransferRpcCode::Internal),
+            transfer_error_code_name(TransferRpcCode::Internal),
             message
         );
         send_all(client, render_http_response(response));

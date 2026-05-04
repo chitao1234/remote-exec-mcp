@@ -1,8 +1,11 @@
 use std::fmt;
 
-use axum::Json;
-use axum::http::StatusCode;
-use remote_exec_proto::rpc::RpcErrorBody;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostRpcError {
+    pub status: u16,
+    pub code: &'static str,
+    pub message: String,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransferErrorKind {
@@ -70,11 +73,11 @@ impl TransferError {
             TransferErrorKind::CompressionUnsupported => "transfer_compression_unsupported",
             TransferErrorKind::SourceUnsupported => "transfer_source_unsupported",
             TransferErrorKind::SourceMissing => "transfer_source_missing",
-            TransferErrorKind::Internal => "transfer_failed",
+            TransferErrorKind::Internal => "internal_error",
         }
     }
 
-    pub fn into_rpc(self) -> (StatusCode, Json<RpcErrorBody>) {
+    pub fn into_host_rpc_error(self) -> HostRpcError {
         let code = self.code();
         let message = self.message;
         if self.kind == TransferErrorKind::Internal {
@@ -82,13 +85,15 @@ impl TransferError {
         } else {
             tracing::warn!(code, %message, "daemon request rejected");
         }
-        (
-            StatusCode::BAD_REQUEST,
-            Json(RpcErrorBody {
-                code: code.to_string(),
-                message,
-            }),
-        )
+        HostRpcError {
+            status: if self.kind == TransferErrorKind::Internal {
+                500
+            } else {
+                400
+            },
+            code,
+            message,
+        }
     }
 
     fn new(kind: TransferErrorKind, message: impl Into<String>) -> Self {
@@ -154,11 +159,12 @@ impl ImageError {
             ImageErrorKind::InvalidDetail => "invalid_detail",
             ImageErrorKind::Missing => "image_missing",
             ImageErrorKind::NotFile => "image_not_file",
-            ImageErrorKind::DecodeFailed | ImageErrorKind::Internal => "image_decode_failed",
+            ImageErrorKind::DecodeFailed => "image_decode_failed",
+            ImageErrorKind::Internal => "internal_error",
         }
     }
 
-    pub fn into_rpc(self) -> (StatusCode, Json<RpcErrorBody>) {
+    pub fn into_host_rpc_error(self) -> HostRpcError {
         let code = self.code();
         let message = self.message;
         if self.kind == ImageErrorKind::Internal {
@@ -166,13 +172,15 @@ impl ImageError {
         } else {
             tracing::warn!(code, %message, "daemon request rejected");
         }
-        (
-            StatusCode::BAD_REQUEST,
-            Json(RpcErrorBody {
-                code: code.to_string(),
-                message,
-            }),
-        )
+        HostRpcError {
+            status: if self.kind == ImageErrorKind::Internal {
+                500
+            } else {
+                400
+            },
+            code,
+            message,
+        }
     }
 
     fn new(kind: ImageErrorKind, message: impl Into<String>) -> Self {
@@ -190,3 +198,32 @@ impl fmt::Display for ImageError {
 }
 
 impl std::error::Error for ImageError {}
+
+#[cfg(test)]
+mod tests {
+    use super::{ImageError, TransferError};
+
+    #[test]
+    fn transfer_internal_maps_to_internal_error_server_response() {
+        let err = TransferError::internal("transfer boom").into_host_rpc_error();
+        assert_eq!(err.status, 500);
+        assert_eq!(err.code, "internal_error");
+        assert_eq!(err.message, "transfer boom");
+    }
+
+    #[test]
+    fn image_internal_maps_to_internal_error_server_response() {
+        let err = ImageError::internal("image boom").into_host_rpc_error();
+        assert_eq!(err.status, 500);
+        assert_eq!(err.code, "internal_error");
+        assert_eq!(err.message, "image boom");
+    }
+
+    #[test]
+    fn image_decode_failed_stays_a_client_error() {
+        let err = ImageError::decode_failed("bad image bytes").into_host_rpc_error();
+        assert_eq!(err.status, 400);
+        assert_eq!(err.code, "image_decode_failed");
+        assert_eq!(err.message, "bad image bytes");
+    }
+}
