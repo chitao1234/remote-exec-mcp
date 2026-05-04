@@ -232,9 +232,9 @@ async fn existing_destination_is_directory(
         target_name => {
             let target = verified_remote_target(state, target_name).await?;
             target
-                .transfer_path_info(&TransferPathInfoRequest {
+                .clear_on_transport_error(target.transfer_path_info(&TransferPathInfoRequest {
                     path: destination.path.clone(),
-                })
+                }).await)
                 .await
         }
     };

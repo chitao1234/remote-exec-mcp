@@ -1,7 +1,6 @@
 use remote_exec_proto::public::ApplyPatchInput;
 use remote_exec_proto::rpc::PatchApplyRequest;
 
-use crate::daemon_client::DaemonClientError;
 use crate::mcp_server::ToolCallOutput;
 
 pub async fn forward_patch(
@@ -11,19 +10,9 @@ pub async fn forward_patch(
     workdir: Option<String>,
 ) -> anyhow::Result<String> {
     let target = state.target(target_name)?;
-    target.ensure_identity_verified(target_name).await?;
-    let response = match target
-        .patch_apply(&PatchApplyRequest { patch, workdir })
-        .await
-    {
-        Ok(response) => response,
-        Err(err) => {
-            if matches!(err, DaemonClientError::Transport(_)) {
-                target.clear_cached_daemon_info().await;
-            }
-            return Err(err.into());
-        }
-    };
+    let response = target
+        .patch_apply_checked(target_name, &PatchApplyRequest { patch, workdir })
+        .await?;
     Ok(response.output)
 }
 

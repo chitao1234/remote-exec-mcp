@@ -23,9 +23,8 @@ pub async fn view_image(
         "broker tool started"
     );
     let target = state.target(&input.target)?;
-    target.ensure_identity_verified(&input.target).await?;
     let response = match target
-        .image_read(&ImageReadRequest {
+        .image_read_checked(&input.target, &ImageReadRequest {
             path: input.path,
             workdir: input.workdir,
             detail: input.detail.clone(),
@@ -34,9 +33,6 @@ pub async fn view_image(
     {
         Ok(response) => response,
         Err(err) => {
-            if matches!(err, DaemonClientError::Transport(_)) {
-                target.clear_cached_daemon_info().await;
-            }
             tracing::warn!(
                 tool = "view_image",
                 target = %target_name,
@@ -70,10 +66,11 @@ pub async fn view_image(
     ))
 }
 
-fn normalize_view_image_error(err: DaemonClientError) -> anyhow::Error {
-    match err {
-        DaemonClientError::Rpc { message, .. } => anyhow::Error::msg(message),
-        other => other.into(),
+fn normalize_view_image_error(err: anyhow::Error) -> anyhow::Error {
+    match err.downcast::<DaemonClientError>() {
+        Ok(DaemonClientError::Rpc { message, .. }) => anyhow::Error::msg(message),
+        Ok(other) => other.into(),
+        Err(other) => other,
     }
 }
 

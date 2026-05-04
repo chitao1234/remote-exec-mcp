@@ -1,4 +1,5 @@
 mod backend;
+mod capabilities;
 mod handle;
 
 pub(crate) use backend::TargetBackend;

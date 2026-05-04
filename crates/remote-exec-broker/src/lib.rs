@@ -3,6 +3,7 @@ pub mod client;
 pub mod config;
 pub mod daemon_client;
 pub mod local_backend;
+pub(crate) mod local_port_backend;
 pub mod local_transfer;
 pub mod logging;
 pub mod mcp_server;

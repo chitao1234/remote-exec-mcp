@@ -20,6 +20,7 @@ async fn exec_command_and_write_stdin_work_for_enabled_local_target() {
                 "target": "local",
                 "cmd": LOCAL_LONG_RUNNING_CMD,
                 "shell": LOCAL_TEST_SHELL,
+                "login": false,
                 "tty": false,
                 "yield_time_ms": 250
             }),
@@ -72,6 +73,7 @@ min_ms = 3000
                 "target": "local",
                 "cmd": LOCAL_LONG_RUNNING_CMD,
                 "shell": LOCAL_TEST_SHELL,
+                "login": false,
                 "tty": false,
                 "yield_time_ms": 1
             }),
@@ -94,6 +96,7 @@ async fn exec_command_local_pipe_mode_preserves_stdout_stderr_order() {
                 "target": "local",
                 "cmd": "printf 'stdout-1\\n'; printf 'stderr-1\\n' >&2; printf 'stdout-2\\n'; printf 'stderr-2\\n' >&2",
                 "shell": LOCAL_TEST_SHELL,
+                "login": false,
                 "tty": false,
                 "yield_time_ms": 10_000
             }),

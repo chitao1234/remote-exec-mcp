@@ -9,7 +9,6 @@ use super::exec_format::{
     format_command_text, format_intercepted_patch_text, format_poll_text, prepend_warning_text,
 };
 use super::exec_intercept::maybe_intercept_apply_patch;
-use crate::daemon_client::DaemonClientError;
 use crate::mcp_server::ToolCallOutput;
 
 const APPLY_PATCH_WARNING_CODE: &str = "apply_patch_via_exec_command";
@@ -42,7 +41,7 @@ pub async fn exec_command(
         return Ok(output);
     }
 
-    let response = match forward_exec_start(target, &input).await {
+    let response = match forward_exec_start(target, &input.target, &input).await {
         Ok(response) => response,
         Err(err) => {
             tracing::warn!(
@@ -224,13 +223,12 @@ fn exec_start_request(input: &ExecCommandInput) -> ExecStartRequest {
 
 async fn forward_exec_start(
     target: &crate::TargetHandle,
+    target_name: &str,
     input: &ExecCommandInput,
-) -> Result<ExecResponse, DaemonClientError> {
-    let result = target.exec_start(&exec_start_request(input)).await;
-    if let Err(DaemonClientError::Transport(_)) = &result {
-        target.clear_cached_daemon_info().await;
-    }
-    result
+) -> anyhow::Result<ExecResponse> {
+    target
+        .exec_start_checked(target_name, &exec_start_request(input))
+        .await
 }
 
 async fn register_public_session(
@@ -293,15 +291,16 @@ async fn forward_exec_write(
     record: &crate::session_store::SessionRecord,
     input: WriteStdinInput,
 ) -> anyhow::Result<ExecResponse> {
-    match target
-        .exec_write(&ExecWriteRequest {
+    let response = target
+        .clear_on_transport_error(target.exec_write(&ExecWriteRequest {
             daemon_session_id: record.daemon_session_id.clone(),
             chars: input.chars.unwrap_or_default(),
             yield_time_ms: input.yield_time_ms,
             max_output_tokens: input.max_output_tokens,
-        })
-        .await
-    {
+        }).await)
+        .await;
+
+    match response {
         Ok(response) => Ok(response),
         Err(err) if err.rpc_code() == Some("unknown_session") => {
             state.sessions.remove(&record.session_id).await;
@@ -318,9 +317,6 @@ async fn forward_exec_write(
                         &record.session_id
                     )));
                 }
-            }
-            if matches!(err, DaemonClientError::Transport(_)) {
-                target.clear_cached_daemon_info().await;
             }
             Err(err.into())
         }
