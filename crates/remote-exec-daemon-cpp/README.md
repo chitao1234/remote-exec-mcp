@@ -16,7 +16,9 @@ implementation detail, not the current contract.
 ## Build
 
 Build outputs are written to this directory's `build/` tree even when `make` is
-invoked from another working directory.
+invoked from another working directory. Incremental builds reuse cached object
+files under `build/obj/`, so repeated `make` runs only rebuild sources whose
+inputs changed.
 
 POSIX daemon:
 
