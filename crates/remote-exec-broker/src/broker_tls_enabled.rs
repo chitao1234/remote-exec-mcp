@@ -20,9 +20,7 @@ pub(crate) fn install_crypto_provider() {
             return;
         }
         let provider = rustls::crypto::ring::default_provider();
-        provider
-            .install_default()
-            .expect("failed to install rustls crypto provider");
+        let _ = provider.install_default();
     });
 }
 
