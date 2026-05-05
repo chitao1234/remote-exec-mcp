@@ -18,7 +18,9 @@ pub(crate) fn apply_import_headers(
 ) -> reqwest::RequestBuilder {
     transfer_import_header_pairs(metadata)
         .into_iter()
-        .fold(builder, |builder, (name, value)| builder.header(name, value))
+        .fold(builder, |builder, (name, value)| {
+            builder.header(name, value)
+        })
 }
 
 pub(crate) fn compression_header_value(compression: &TransferCompression) -> &'static str {
@@ -92,7 +94,10 @@ mod tests {
         .build()
         .unwrap();
 
-        assert_eq!(request.headers()[TRANSFER_DESTINATION_PATH_HEADER], "/tmp/out");
+        assert_eq!(
+            request.headers()[TRANSFER_DESTINATION_PATH_HEADER],
+            "/tmp/out"
+        );
         assert_eq!(request.headers()[TRANSFER_OVERWRITE_HEADER], "replace");
         assert_eq!(request.headers()[TRANSFER_CREATE_PARENT_HEADER], "false");
         assert_eq!(request.headers()[TRANSFER_SOURCE_TYPE_HEADER], "multiple");

@@ -24,7 +24,9 @@ pub(crate) fn apply_export_headers(
 ) -> axum::http::response::Builder {
     transfer_export_header_pairs(metadata)
         .into_iter()
-        .fold(builder, |builder, (name, value)| builder.header(name, value))
+        .fold(builder, |builder, (name, value)| {
+            builder.header(name, value)
+        })
 }
 
 pub(crate) fn parse_import_metadata(

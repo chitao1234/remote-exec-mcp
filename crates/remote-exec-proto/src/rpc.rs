@@ -490,7 +490,9 @@ where
         .map(Option::unwrap_or_default)
 }
 
-fn parse_optional_symlink_mode<F>(header: &mut F) -> Result<TransferSymlinkMode, TransferHeaderError>
+fn parse_optional_symlink_mode<F>(
+    header: &mut F,
+) -> Result<TransferSymlinkMode, TransferHeaderError>
 where
     F: FnMut(&'static str) -> Result<Option<String>, TransferHeaderError>,
 {
@@ -655,10 +657,10 @@ mod tests {
     use super::{
         ExecStartRequest, ExecWriteRequest, ImageReadRequest, PatchApplyRequest,
         TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
-        TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER,
-        TRANSFER_SOURCE_TYPE_HEADER, TRANSFER_SYMLINK_MODE_HEADER, TransferCompression,
-        TransferExportMetadata, TransferHeaderError, TransferHeaderErrorKind,
-        TransferImportMetadata, TransferOverwriteMode, TransferSourceType, TransferSymlinkMode,
+        TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
+        TRANSFER_SYMLINK_MODE_HEADER, TransferCompression, TransferExportMetadata,
+        TransferHeaderError, TransferHeaderErrorKind, TransferImportMetadata,
+        TransferOverwriteMode, TransferSourceType, TransferSymlinkMode,
         parse_transfer_export_metadata, parse_transfer_import_metadata,
         transfer_export_header_pairs, transfer_import_header_pairs,
     };
