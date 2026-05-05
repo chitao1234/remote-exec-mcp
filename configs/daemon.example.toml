@@ -3,6 +3,8 @@ listen = "0.0.0.0:9443"
 # Must already exist when the daemon starts.
 default_workdir = "/srv/work"
 allow_login_shell = true
+# Live exec sessions and daemon-side forwarded sockets are in-memory only and
+# are closed during daemon shutdown or restart.
 
 # Optional. Defaults to "tls" when the daemon is built with the default `tls`
 # Cargo feature. Set to "http" to serve the Rust daemon over plain HTTP

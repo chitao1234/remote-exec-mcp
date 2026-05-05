@@ -30,6 +30,7 @@ Do not use this skill for ordinary work in your current Codex workspace. `remote
 - The broker owns the public `forward_id` namespace for `forward_ports`.
 - The daemon on each machine owns its own private local session identifiers.
 - `session_id` is opaque. Treat it as a broker token, not as a PID and not as a daemon session id.
+- `forward_id` is opaque and broker-scoped. Treat it as a broker token, not as daemon-local state, and do not expect it to survive a broker restart.
 - Every machine-local operation is target-scoped. Pick the right `target` first.
 - `local` means the broker host, not your current Codex workspace.
 - For `exec_command`, `write_stdin`, `apply_patch`, and `view_image`, `local` exists only when the broker-host local target is enabled.
@@ -500,6 +501,9 @@ How to use it:
 - Non-loopback bind addresses such as `"0.0.0.0:8080"` are allowed.
 - Supported `protocol` values are `tcp` and `udp`.
 - Keep the returned `forward_id`; use it to close the forward explicitly.
+- `forward_id` is broker runtime state only. If the broker restarts, reopen the forward instead of trying to reuse the old id.
+- If the daemon restarts or the broker loses the forward, treat that forward as gone and open a new one.
+- If the broker crashes without a clean close, daemon-side listeners are eventually reclaimed automatically after lease renewal stops, but reopening still creates a fresh `forward_id`.
 
 Structured result fields:
 
@@ -551,7 +555,7 @@ Structured result fields:
 - `remote-exec-daemon-cpp` is narrower than the main daemon.
 - On POSIX C++ daemon targets, `tty: true` works when `supports_pty` is true.
 - On Windows XP-compatible C++ daemon targets, `tty: true` is rejected.
-- On C++ daemon targets, `view_image` supports only passthrough PNG, JPEG, WebP, and GIF reads, and omitted `detail` defaults to `original`.
+- On C++ daemon targets, `view_image` supports only passthrough PNG, JPEG, and WebP reads, and omitted `detail` defaults to `original`.
 - On POSIX C++ daemon targets, shell selection follows the Rust daemon policy and child processes force `LC_ALL=C.UTF-8` plus `LANG=C.UTF-8`.
 - On POSIX C++ daemon targets, non-PTY exec intentionally starts with stdin closed; use `tty: true` when later `write_stdin` input is needed.
 - On Windows XP-compatible C++ daemon targets, non-PTY exec intentionally keeps stdin open for compatibility with the original XP daemon.
@@ -564,6 +568,7 @@ Structured result fields:
 - On Windows XP-compatible C++ daemon targets, symlink entries inside directory transfers and import archives are skipped with warnings when preservation is unavailable; use `symlink_mode: "follow"` to copy regular-file and directory targets when the platform exposes them.
 - On C++ daemon targets, transfer compression is never used; the broker falls back automatically.
 - On C++ daemon targets, `forward_ports` is available through the same broker-owned `forward_id` lifecycle.
+- On C++ daemon targets, recoverable peer abort/reset errors during forwarding surface as normal tool errors and do not terminate the daemon.
 - Do not assume hard links, sparse files, or special files transfer on C++ daemon targets; special files are skipped during export.
 
 ## Common Mistakes
@@ -578,6 +583,7 @@ Structured result fields:
 - Sending an unsupported `compression` field to `transfer_files`.
 - Leaving `forward_ports` forwards open after they are no longer needed.
 - Reversing `listen_side` and `connect_side` when opening a port forward.
+- Reusing a stale `forward_id` after a broker or daemon restart instead of reopening the forward.
 - Starting an interactive program without `tty: true` and then expecting writable stdin later.
 - Using `write_stdin` after the session has already exited or after a daemon restart.
 - Sending patch text through `exec_command` instead of using `apply_patch`.

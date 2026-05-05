@@ -376,6 +376,10 @@ cargo fmt --all --check
 - Targets that are unavailable at broker startup are verified before the first forwarded call.
 - `transfer_files` uses broker-mediated copy for `local -> remote`, `remote -> local`, `remote -> remote`, and `local -> local`.
 - `forward_ports` uses broker-mediated TCP/UDP forwarding between a `listen_side` and `connect_side`; either side may be a configured target or `"local"`.
+- Public `session_id` and `forward_id` values are broker-owned in-memory runtime state. A broker restart drops those mappings, so live exec sessions and port forwards must be reopened after restart.
+- If a broker disappears without closing a port forward, daemon-side forward leases eventually expire and reclaim the listener/connection state so the same endpoint can be rebound later.
+- Rust daemon shutdown now cancels pending port-forward accept/read/write work promptly and closes live forwarded listeners, UDP sockets, and TCP connections before the daemon exits.
+- Recoverable peer aborts or resets during C++ daemon forwarding are surfaced as normal forward errors and do not terminate the daemon process.
 - Internal transfer transport uses GNU tar for both files and directories. Single-file transfers use one fixed archive entry named `.remote-exec-file`. Non-fatal export warnings are carried in a reserved `.remote-exec-transfer-summary.json` archive entry that import consumes and never writes to the destination.
 - `transfer_files` accepts either a single `source` or a `sources` array. The optional `destination_mode` defaults to `auto`: single-source transfers behave like `cp` by copying under `destination.path` when it is an existing directory or ends in a path separator, otherwise using it as the exact final path; multi-source transfers use it as a directory root and place each source under its basename. Use `destination_mode = "into_directory"` to copy under `destination.path` by basename, or `destination_mode = "exact"` to force exact-path semantics.
 - `transfer_files` also accepts an optional `exclude` array of glob patterns that is applied independently to each source root during export. Matching uses `/` as the logical separator on every platform and supports `*`, `?`, `**`, `[abc]`, `[a-z]`, `[!abc]`, `[!a-c]`, `[^abc]`, and `[^a-c]`.
@@ -388,7 +392,7 @@ cargo fmt --all --check
 - Broker and daemon configs each support `enable_transfer_compression = false` to force internal transfer staging to stay uncompressed.
 - Broker `[local]` config enables `target: "local"` for `exec_command`, `write_stdin`, `apply_patch`, and `view_image` on the broker host.
 - `transfer_files` structured results include both the requested `destination` and the broker-computed `resolved_destination`.
-- `write_stdin` only invalidates sessions when the daemon restarted or explicitly reports `unknown_session`.
+- `write_stdin` normalizes lost sessions into the usual unknown-process error when the broker no longer has the mapping or when the daemon restarted or explicitly reports `unknown_session`.
 - `max_output_tokens` is enforced by the daemon for command output.
 - Non-TTY `exec_command` output on both the main daemon and `remote-exec-daemon-cpp` merges `stdout` and `stderr` through one pipe so the single public `output` field preserves their emitted order.
 - Daemon config can override `yield_time_ms` policy separately for `exec_command`, empty `write_stdin` polls, and non-empty `write_stdin` writes. Each bucket supports `default_ms`, `max_ms`, and `min_ms`, where `min_ms` silently raises smaller caller-provided values.
@@ -491,7 +495,7 @@ cargo run -p remote-exec-broker --bin remote-exec -- \
   --forward tcp:127.0.0.1:15432=127.0.0.1:5432
 ```
 
-`forward-ports` state lives in the long-running broker process. In `--broker-config` mode, `remote-exec` rebuilds broker state for that one invocation, so forwards do not persist across separate CLI runs there.
+`forward-ports` state lives in the long-running broker process. In `--broker-config` mode, `remote-exec` rebuilds broker state for that one invocation, so forwards do not persist across separate CLI runs there. If the broker dies without a clean close, daemon-side listeners are reclaimed automatically after lease renewal stops, but reopening still creates a new `forward_id`.
 
 Expose the broker over streamable HTTP instead of stdio:
 
@@ -553,7 +557,7 @@ Configured remote targets may not be named `local`.
 - Linux broker/daemon support plus Windows broker-host and Windows daemon support
 - Per-machine daemon deployment
 - Static broker target configuration
-- No session persistence across broker or daemon restart
+- No exec-session or port-forward persistence across broker or daemon restart
 
 ## Acknowledgments
 

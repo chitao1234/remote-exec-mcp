@@ -82,6 +82,13 @@ The C++ daemon implements the daemon-side port RPCs used by broker
 listen binds, and the same bare-port normalization where `8080` means
 `127.0.0.1:8080`.
 
+Live forwarded sockets are in-memory daemon state. A broker restart drops the
+broker-owned `forward_id` mapping, and if the broker disappears without closing
+the forward the daemon eventually reclaims the listener/connection state after
+lease renewal stops. Daemon shutdown closes live forwarded sockets promptly.
+Recoverable peer abort/reset errors during forwarding are reported as normal
+request failures and do not terminate the daemon process.
+
 `view_image` supports passthrough reads for PNG, JPEG, and WebP only. The
 daemon does not resize or re-encode images, so omitted `detail` defaults to
 `original`.
@@ -166,6 +173,7 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
 - no PTY support in Windows XP-compatible builds
 - `view_image` supports passthrough PNG, JPEG, and WebP only
 - omitted `view_image.detail` defaults to `original` because no resize/re-encode path exists
+- broker-owned `forward_id` values do not persist across broker restart
 - transfer compression is not supported
 - `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles
 - `transfer_files` accepts an optional export-side `exclude` array. Patterns match paths relative to each source root, use `/` as the logical separator on all platforms, and support `*`, `?`, `**`, `[abc]`, `[a-z]`, `[!abc]`, `[!a-c]`, `[^abc]`, and `[^a-c]`
