@@ -22,6 +22,46 @@ std::string make_port_id(const char* prefix) {
     return out.str();
 }
 
+PortForwardError bind_closed_error(const std::string& bind_id) {
+    return PortForwardError(400, "port_bind_closed", "bind `" + bind_id + "` was closed");
+}
+
+PortForwardError connection_closed_error(const std::string& connection_id) {
+    return PortForwardError(
+        400,
+        "port_connection_closed",
+        "connection `" + connection_id + "` was closed"
+    );
+}
+
+bool shared_socket_closed(const std::shared_ptr<SharedSocket>& socket_value) {
+    BasicLockGuard lock(socket_value->state_mutex);
+    return socket_value->closed;
+}
+
+bool tcp_connection_closed(const std::shared_ptr<TcpConnection>& connection) {
+    BasicLockGuard lock(connection->state_mutex);
+    return connection->closed;
+}
+
+void mark_shared_socket_closed(const std::shared_ptr<SharedSocket>& socket_value) {
+    BasicLockGuard lock(socket_value->state_mutex);
+    if (!socket_value->closed) {
+        socket_value->closed = true;
+        shutdown_socket(socket_value->socket.get());
+        socket_value->socket.reset();
+    }
+}
+
+void mark_tcp_connection_closed(const std::shared_ptr<TcpConnection>& connection) {
+    BasicLockGuard lock(connection->state_mutex);
+    if (!connection->closed) {
+        connection->closed = true;
+        shutdown_socket(connection->socket.get());
+        connection->socket.reset();
+    }
+}
+
 }  // namespace
 
 PortForwardError::PortForwardError(
@@ -39,9 +79,9 @@ const std::string& PortForwardError::code() const {
     return code_;
 }
 
-TcpConnection::TcpConnection(SOCKET socket_value) : socket(socket_value) {}
+TcpConnection::TcpConnection(SOCKET socket_value) : socket(socket_value), closed(false) {}
 
-SharedSocket::SharedSocket(SOCKET socket_value) : socket(socket_value) {}
+SharedSocket::SharedSocket(SOCKET socket_value) : socket(socket_value), closed(false) {}
 
 PortForwardStore::PortForwardStore() {}
 
@@ -94,7 +134,14 @@ Json PortForwardStore::listen_accept(const std::string& bind_id) {
         &peer_len
     );
     if (accepted == INVALID_SOCKET) {
+        if (shared_socket_closed(listener)) {
+            throw bind_closed_error(bind_id);
+        }
         throw PortForwardError(400, "port_accept_failed", socket_error_message("accept"));
+    }
+    if (shared_socket_closed(listener)) {
+        UniqueSocket cleanup(accepted);
+        throw bind_closed_error(bind_id);
     }
 
     const std::string connection_id = make_port_id("conn");
@@ -117,9 +164,29 @@ Json PortForwardStore::listen_accept(const std::string& bind_id) {
 }
 
 Json PortForwardStore::listen_close(const std::string& bind_id) {
-    BasicLockGuard lock(mutex_);
-    tcp_listeners_.erase(bind_id);
-    udp_sockets_.erase(bind_id);
+    std::shared_ptr<SharedSocket> listener;
+    std::shared_ptr<SharedSocket> socket_value;
+    {
+        BasicLockGuard lock(mutex_);
+        std::map<std::string, std::shared_ptr<SharedSocket> >::iterator tcp_it =
+            tcp_listeners_.find(bind_id);
+        if (tcp_it != tcp_listeners_.end()) {
+            listener = tcp_it->second;
+            tcp_listeners_.erase(tcp_it);
+        }
+        std::map<std::string, std::shared_ptr<SharedSocket> >::iterator udp_it =
+            udp_sockets_.find(bind_id);
+        if (udp_it != udp_sockets_.end()) {
+            socket_value = udp_it->second;
+            udp_sockets_.erase(udp_it);
+        }
+    }
+    if (listener.get() != NULL) {
+        mark_shared_socket_closed(listener);
+    }
+    if (socket_value.get() != NULL) {
+        mark_shared_socket_closed(socket_value);
+    }
     log_message(LOG_DEBUG, "port_forward", "closed bind `" + bind_id + "`");
     return Json::object();
 }
@@ -161,6 +228,9 @@ Json PortForwardStore::connect(const std::string& endpoint, const std::string& p
 Json PortForwardStore::connection_read(const std::string& connection_id) {
     const std::shared_ptr<TcpConnection> connection = tcp_connection(connection_id);
     BasicLockGuard read_lock(connection->read_mutex);
+    if (tcp_connection_closed(connection)) {
+        throw connection_closed_error(connection_id);
+    }
 
     std::string buffer;
     buffer.resize(READ_BUF_SIZE);
@@ -171,7 +241,13 @@ Json PortForwardStore::connection_read(const std::string& connection_id) {
         0
     );
     if (received < 0) {
+        if (tcp_connection_closed(connection)) {
+            throw connection_closed_error(connection_id);
+        }
         throw PortForwardError(400, "port_read_failed", socket_error_message("recv"));
+    }
+    if (tcp_connection_closed(connection)) {
+        throw connection_closed_error(connection_id);
     }
     if (received == 0) {
         connection_close(connection_id);
@@ -188,19 +264,43 @@ Json PortForwardStore::connection_write(
     const std::shared_ptr<TcpConnection> connection = tcp_connection(connection_id);
     const std::string bytes = base64_decode_bytes(data);
     BasicLockGuard write_lock(connection->write_mutex);
-    send_all_socket(connection->socket.get(), bytes);
+    if (tcp_connection_closed(connection)) {
+        throw connection_closed_error(connection_id);
+    }
+    try {
+        send_all_socket(connection->socket.get(), bytes);
+    } catch (const PortForwardError&) {
+        if (tcp_connection_closed(connection)) {
+            throw connection_closed_error(connection_id);
+        }
+        throw;
+    }
     return Json::object();
 }
 
 Json PortForwardStore::connection_close(const std::string& connection_id) {
-    BasicLockGuard lock(mutex_);
-    tcp_connections_.erase(connection_id);
+    std::shared_ptr<TcpConnection> connection;
+    {
+        BasicLockGuard lock(mutex_);
+        std::map<std::string, std::shared_ptr<TcpConnection> >::iterator it =
+            tcp_connections_.find(connection_id);
+        if (it != tcp_connections_.end()) {
+            connection = it->second;
+            tcp_connections_.erase(it);
+        }
+    }
+    if (connection.get() != NULL) {
+        mark_tcp_connection_closed(connection);
+    }
     log_message(LOG_DEBUG, "port_forward", "closed tcp connection `" + connection_id + "`");
     return Json::object();
 }
 
 Json PortForwardStore::udp_datagram_read(const std::string& bind_id) {
     const std::shared_ptr<SharedSocket> socket_value = udp_socket(bind_id);
+    if (shared_socket_closed(socket_value)) {
+        throw bind_closed_error(bind_id);
+    }
     std::vector<unsigned char> buffer(READ_BUF_SIZE);
     sockaddr_storage peer_address;
     std::memset(&peer_address, 0, sizeof(peer_address));
@@ -214,7 +314,13 @@ Json PortForwardStore::udp_datagram_read(const std::string& bind_id) {
         &peer_len
     );
     if (received < 0) {
+        if (shared_socket_closed(socket_value)) {
+            throw bind_closed_error(bind_id);
+        }
         throw PortForwardError(400, "port_read_failed", socket_error_message("recvfrom"));
+    }
+    if (shared_socket_closed(socket_value)) {
+        throw bind_closed_error(bind_id);
     }
     buffer.resize(static_cast<std::size_t>(received));
     const std::string peer = printable_port_forward_endpoint(
@@ -238,6 +344,9 @@ Json PortForwardStore::udp_datagram_write(
 ) {
     const std::shared_ptr<SharedSocket> socket_value = udp_socket(bind_id);
     const std::string bytes = base64_decode_bytes(data);
+    if (shared_socket_closed(socket_value)) {
+        throw bind_closed_error(bind_id);
+    }
     socklen_t peer_len = 0;
     const sockaddr_storage peer_address = parse_port_forward_peer(peer, &peer_len);
     const int sent = sendto(
@@ -249,6 +358,9 @@ Json PortForwardStore::udp_datagram_write(
         peer_len
     );
     if (sent < 0 || static_cast<std::size_t>(sent) != bytes.size()) {
+        if (shared_socket_closed(socket_value)) {
+            throw bind_closed_error(bind_id);
+        }
         throw PortForwardError(400, "port_write_failed", socket_error_message("sendto"));
     }
     return Json::object();

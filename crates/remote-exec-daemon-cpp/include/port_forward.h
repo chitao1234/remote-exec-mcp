@@ -25,14 +25,18 @@ struct TcpConnection {
     explicit TcpConnection(SOCKET socket);
 
     UniqueSocket socket;
+    BasicMutex state_mutex;
     BasicMutex read_mutex;
     BasicMutex write_mutex;
+    bool closed;
 };
 
 struct SharedSocket {
     explicit SharedSocket(SOCKET socket);
 
     UniqueSocket socket;
+    BasicMutex state_mutex;
+    bool closed;
 };
 
 class PortForwardStore {

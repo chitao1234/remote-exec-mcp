@@ -23,6 +23,9 @@ use crate::TargetHandle;
 use crate::daemon_client::DaemonClientError;
 use crate::local_port_backend::LocalPortClient;
 
+const PORT_BIND_CLOSED_CODE: &str = "port_bind_closed";
+const PORT_CONNECTION_CLOSED_CODE: &str = "port_connection_closed";
+
 #[derive(Clone)]
 pub enum SideHandle {
     Target { name: String, handle: TargetHandle },
@@ -233,6 +236,7 @@ struct ForwardRuntime {
 }
 
 pub async fn open_forward(
+    store: PortForwardStore,
     listen_side: SideHandle,
     connect_side: SideHandle,
     spec: &ForwardPortSpec,
@@ -287,7 +291,7 @@ pub async fn open_forward(
         connect_endpoint: connect_endpoint.clone(),
         cancel: cancel.clone(),
     };
-    spawn_forward(runtime);
+    spawn_forward(runtime, store);
 
     let entry = ForwardPortEntry {
         forward_id,
@@ -334,13 +338,24 @@ pub async fn close_record(record: PortForwardRecord) -> ForwardPortEntry {
     entry
 }
 
-fn spawn_forward(runtime: ForwardRuntime) {
+fn spawn_forward(runtime: ForwardRuntime, store: PortForwardStore) {
     tokio::spawn(async move {
         let result = match runtime.protocol {
             RpcPortForwardProtocol::Tcp => run_tcp_forward(runtime.clone()).await,
             RpcPortForwardProtocol::Udp => run_udp_forward(runtime.clone()).await,
         };
         if let Err(err) = result {
+            if is_expected_close_interruption(&err) {
+                tracing::debug!(
+                    forward_id = %runtime.forward_id,
+                    listen_side = %runtime.listen_side.name(),
+                    connect_side = %runtime.connect_side.name(),
+                    error = %err,
+                    "port forward task stopped during close"
+                );
+                return;
+            }
+            store.mark_failed(&runtime.forward_id, err.to_string()).await;
             tracing::warn!(
                 forward_id = %runtime.forward_id,
                 listen_side = %runtime.listen_side.name(),
@@ -561,6 +576,17 @@ fn log_pump_result(from: &str, to: &str, result: anyhow::Result<()>) {
 fn validate_udp_connector_endpoint(connect_endpoint: &str) -> anyhow::Result<()> {
     ensure_nonzero_connect_endpoint(connect_endpoint)?;
     Ok(())
+}
+
+fn is_expected_close_interruption(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .downcast_ref::<DaemonClientError>()
+            .and_then(DaemonClientError::rpc_code)
+            .is_some_and(|code| {
+                code == PORT_BIND_CLOSED_CODE || code == PORT_CONNECTION_CLOSED_CODE
+            })
+    })
 }
 
 fn rpc_protocol(protocol: PublicForwardPortProtocol) -> RpcPortForwardProtocol {

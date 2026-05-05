@@ -33,6 +33,14 @@ void close_socket(SOCKET socket) {
 #endif
 }
 
+void shutdown_socket(SOCKET socket) {
+#ifdef _WIN32
+    shutdown(socket, SD_BOTH);
+#else
+    shutdown(socket, SHUT_RDWR);
+#endif
+}
+
 int last_socket_error() {
 #ifdef _WIN32
     return WSAGetLastError();

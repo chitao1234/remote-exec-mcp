@@ -61,7 +61,14 @@ async fn open_forwards(
     let mut opened = Vec::with_capacity(forwards.len());
 
     for spec in &forwards {
-        match open_forward(listen_side.clone(), connect_side.clone(), spec).await {
+        match open_forward(
+            state.port_forwards.clone(),
+            listen_side.clone(),
+            connect_side.clone(),
+            spec,
+        )
+        .await
+        {
             Ok(forward) => opened.push(forward),
             Err(err) => {
                 for forward in opened {

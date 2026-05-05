@@ -95,6 +95,7 @@ int last_socket_error();
 bool would_block_error(int error);
 std::string socket_error_message(const std::string& operation);
 void close_socket(SOCKET socket);
+void shutdown_socket(SOCKET socket);
 HttpRequestBodyFraming request_body_framing_from_headers(const std::string& header_block);
 HttpRequestHead read_http_request_head(SOCKET client, std::size_t max_header_bytes);
 std::string read_http_request(

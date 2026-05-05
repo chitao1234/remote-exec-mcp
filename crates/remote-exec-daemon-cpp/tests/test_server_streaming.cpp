@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -9,6 +10,7 @@
 #include <string>
 #include <thread>
 
+#include <netdb.h>
 #include <sys/socket.h>
 
 #include "config.h"
@@ -16,6 +18,7 @@
 #include "http_helpers.h"
 #include "path_policy.h"
 #include "platform.h"
+#include "port_forward_endpoint.h"
 #include "process_session.h"
 #include "server.h"
 #include "server_transport.h"
@@ -221,6 +224,16 @@ static std::string run_single_request(AppState& state, const std::string& reques
     return read_all_from_socket(client_socket.get());
 }
 
+static std::string json_post_request(const std::string& path, const Json& body) {
+    const std::string payload = body.dump();
+    std::ostringstream request;
+    request << "POST " << path << " HTTP/1.1\r\n"
+            << "Content-Length: " << payload.size() << "\r\n"
+            << "\r\n"
+            << payload;
+    return request.str();
+}
+
 int main() {
     const fs::path root = make_test_root();
     AppState state;
@@ -303,6 +316,133 @@ int main() {
     assert(denied_import_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
     assert(Json::parse(response_body(denied_import_response)).at("code").get<std::string>() == "sandbox_denied");
     assert(!fs::exists(outside / "imported.txt"));
+
+    const Json tcp_listen = Json::parse(
+        response_body(
+            run_single_request(
+                state,
+                json_post_request(
+                    "/v1/port/listen",
+                    Json{{"endpoint", "127.0.0.1:0"}, {"protocol", "tcp"}}
+                )
+            )
+        )
+    );
+    const std::string accept_bind_id = tcp_listen.at("bind_id").get<std::string>();
+    std::string accept_response;
+    std::thread accept_thread([&]() {
+        accept_response = run_single_request(
+            state,
+            json_post_request("/v1/port/listen/accept", Json{{"bind_id", accept_bind_id}})
+        );
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    const std::string close_accept_response = run_single_request(
+        state,
+        json_post_request("/v1/port/listen/close", Json{{"bind_id", accept_bind_id}})
+    );
+    assert(close_accept_response.find("HTTP/1.1 200 OK\r\n") == 0);
+    accept_thread.join();
+    assert(accept_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
+    assert(Json::parse(response_body(accept_response)).at("code").get<std::string>() == "port_bind_closed");
+
+    const Json udp_listen = Json::parse(
+        response_body(
+            run_single_request(
+                state,
+                json_post_request(
+                    "/v1/port/listen",
+                    Json{{"endpoint", "127.0.0.1:0"}, {"protocol", "udp"}}
+                )
+            )
+        )
+    );
+    const std::string udp_bind_id = udp_listen.at("bind_id").get<std::string>();
+    std::string udp_read_response;
+    std::thread udp_read_thread([&]() {
+        udp_read_response = run_single_request(
+            state,
+            json_post_request("/v1/port/udp/read", Json{{"bind_id", udp_bind_id}})
+        );
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    const std::string close_udp_response = run_single_request(
+        state,
+        json_post_request("/v1/port/listen/close", Json{{"bind_id", udp_bind_id}})
+    );
+    assert(close_udp_response.find("HTTP/1.1 200 OK\r\n") == 0);
+    udp_read_thread.join();
+    assert(udp_read_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
+    assert(Json::parse(response_body(udp_read_response)).at("code").get<std::string>() == "port_bind_closed");
+
+    const Json read_listen = Json::parse(
+        response_body(
+            run_single_request(
+                state,
+                json_post_request(
+                    "/v1/port/listen",
+                    Json{{"endpoint", "127.0.0.1:0"}, {"protocol", "tcp"}}
+                )
+            )
+        )
+    );
+    int accepted_socket = socket(AF_INET, SOCK_STREAM, 0);
+    assert(accepted_socket != INVALID_SOCKET);
+    const ParsedPortForwardEndpoint accepted_endpoint =
+        parse_port_forward_endpoint(read_listen.at("endpoint").get<std::string>());
+    addrinfo hints;
+    std::memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    addrinfo* resolved = NULL;
+    assert(
+        getaddrinfo(
+            accepted_endpoint.host.c_str(),
+            accepted_endpoint.port.c_str(),
+            &hints,
+            &resolved
+        ) == 0
+    );
+    assert(connect(accepted_socket, resolved->ai_addr, static_cast<int>(resolved->ai_addrlen)) == 0);
+    freeaddrinfo(resolved);
+    const Json accepted = Json::parse(
+        response_body(
+            run_single_request(
+                state,
+                json_post_request(
+                    "/v1/port/listen/accept",
+                    Json{{"bind_id", read_listen.at("bind_id").get<std::string>()}}
+                )
+            )
+        )
+    );
+    const std::string read_connection_id = accepted.at("connection_id").get<std::string>();
+    std::string read_response;
+    std::thread read_thread([&]() {
+        read_response = run_single_request(
+            state,
+            json_post_request(
+                "/v1/port/connection/read",
+                Json{{"connection_id", read_connection_id}}
+            )
+        );
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    const std::string close_connection_response = run_single_request(
+        state,
+        json_post_request(
+            "/v1/port/connection/close",
+            Json{{"connection_id", read_connection_id}}
+        )
+    );
+    assert(close_connection_response.find("HTTP/1.1 200 OK\r\n") == 0);
+    read_thread.join();
+    close_socket(accepted_socket);
+    assert(read_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
+    assert(
+        Json::parse(response_body(read_response)).at("code").get<std::string>() ==
+        "port_connection_closed"
+    );
 
     return 0;
 }
