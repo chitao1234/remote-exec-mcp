@@ -1149,6 +1149,186 @@ async fn import_rejects_missing_destination_header_as_bad_request() {
 }
 
 #[tokio::test]
+async fn import_rejects_missing_create_parent_header_as_bad_request() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let source = fixture.workdir.join("source.txt");
+    tokio::fs::write(&source, "artifact\n").await.unwrap();
+
+    let exported = fixture
+        .raw_post_json(
+            "/v1/transfer/export",
+            &TransferExportRequest {
+                path: source.display().to_string(),
+                compression: TransferCompression::None,
+                symlink_mode: Default::default(),
+                exclude: Vec::new(),
+            },
+        )
+        .await;
+    let bytes = exported.bytes().await.unwrap().to_vec();
+    let destination = fixture.workdir.join("missing-create-parent.txt");
+
+    let response = fixture
+        .raw_post_bytes(
+            "/v1/transfer/import",
+            &[
+                (
+                    TRANSFER_DESTINATION_PATH_HEADER,
+                    destination.display().to_string(),
+                ),
+                (TRANSFER_OVERWRITE_HEADER, "replace".to_string()),
+                (TRANSFER_SOURCE_TYPE_HEADER, "file".to_string()),
+            ],
+            bytes,
+        )
+        .await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let err = response
+        .json::<remote_exec_proto::rpc::RpcErrorBody>()
+        .await
+        .unwrap();
+    assert_eq!(err.code, "bad_request");
+    assert!(err.message.contains(TRANSFER_CREATE_PARENT_HEADER));
+    assert!(!destination.exists());
+}
+
+#[tokio::test]
+async fn import_rejects_invalid_create_parent_header_as_bad_request() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let source = fixture.workdir.join("source.txt");
+    tokio::fs::write(&source, "artifact\n").await.unwrap();
+
+    let exported = fixture
+        .raw_post_json(
+            "/v1/transfer/export",
+            &TransferExportRequest {
+                path: source.display().to_string(),
+                compression: TransferCompression::None,
+                symlink_mode: Default::default(),
+                exclude: Vec::new(),
+            },
+        )
+        .await;
+    let bytes = exported.bytes().await.unwrap().to_vec();
+    let destination = fixture.workdir.join("invalid-create-parent.txt");
+
+    let response = fixture
+        .raw_post_bytes(
+            "/v1/transfer/import",
+            &[
+                (
+                    TRANSFER_DESTINATION_PATH_HEADER,
+                    destination.display().to_string(),
+                ),
+                (TRANSFER_OVERWRITE_HEADER, "replace".to_string()),
+                (TRANSFER_CREATE_PARENT_HEADER, "yes".to_string()),
+                (TRANSFER_SOURCE_TYPE_HEADER, "file".to_string()),
+            ],
+            bytes,
+        )
+        .await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let err = response
+        .json::<remote_exec_proto::rpc::RpcErrorBody>()
+        .await
+        .unwrap();
+    assert_eq!(err.code, "bad_request");
+    assert!(err.message.contains(TRANSFER_CREATE_PARENT_HEADER));
+    assert!(!destination.exists());
+}
+
+#[tokio::test]
+async fn import_rejects_invalid_metadata_enum_header_as_bad_request() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let source = fixture.workdir.join("source.txt");
+    tokio::fs::write(&source, "artifact\n").await.unwrap();
+
+    let exported = fixture
+        .raw_post_json(
+            "/v1/transfer/export",
+            &TransferExportRequest {
+                path: source.display().to_string(),
+                compression: TransferCompression::None,
+                symlink_mode: Default::default(),
+                exclude: Vec::new(),
+            },
+        )
+        .await;
+    let bytes = exported.bytes().await.unwrap().to_vec();
+    let destination = fixture.workdir.join("invalid-overwrite.txt");
+
+    let response = fixture
+        .raw_post_bytes(
+            "/v1/transfer/import",
+            &[
+                (
+                    TRANSFER_DESTINATION_PATH_HEADER,
+                    destination.display().to_string(),
+                ),
+                (TRANSFER_OVERWRITE_HEADER, "clobber".to_string()),
+                (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
+                (TRANSFER_SOURCE_TYPE_HEADER, "file".to_string()),
+            ],
+            bytes,
+        )
+        .await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let err = response
+        .json::<remote_exec_proto::rpc::RpcErrorBody>()
+        .await
+        .unwrap();
+    assert_eq!(err.code, "bad_request");
+    assert!(err.message.contains(TRANSFER_OVERWRITE_HEADER));
+    assert!(!destination.exists());
+}
+
+#[tokio::test]
+async fn import_accepts_omitted_optional_metadata_defaults() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let source = fixture.workdir.join("source.txt");
+    tokio::fs::write(&source, "artifact\n").await.unwrap();
+
+    let exported = fixture
+        .raw_post_json(
+            "/v1/transfer/export",
+            &TransferExportRequest {
+                path: source.display().to_string(),
+                compression: TransferCompression::None,
+                symlink_mode: Default::default(),
+                exclude: Vec::new(),
+            },
+        )
+        .await;
+    let bytes = exported.bytes().await.unwrap().to_vec();
+    let destination = fixture.workdir.join("defaults.txt");
+
+    let response = fixture
+        .raw_post_bytes(
+            "/v1/transfer/import",
+            &[
+                (
+                    TRANSFER_DESTINATION_PATH_HEADER,
+                    destination.display().to_string(),
+                ),
+                (TRANSFER_OVERWRITE_HEADER, "replace".to_string()),
+                (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
+                (TRANSFER_SOURCE_TYPE_HEADER, "file".to_string()),
+            ],
+            bytes,
+        )
+        .await;
+
+    assert!(response.status().is_success());
+    assert_eq!(
+        tokio::fs::read_to_string(&destination).await.unwrap(),
+        "artifact\n"
+    );
+}
+
+#[tokio::test]
 async fn import_replaces_directory_with_file_at_the_exact_destination_path() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let source = fixture.workdir.join("tool.txt");
