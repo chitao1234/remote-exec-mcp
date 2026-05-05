@@ -1,6 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use remote_exec_proto::rpc::{
+    EmptyResponse, PortForwardProtocol, PortListenCloseRequest, PortListenRequest,
+    PortListenResponse,
+};
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
     model::{CallToolRequestParams, CallToolResult, ClientInfo},
@@ -116,6 +120,10 @@ impl BrokerFixture {
         result.text_output
     }
 
+    pub async fn stop(&mut self) {
+        self.client.close().await.unwrap();
+    }
+
     async fn raw_call_tool(&self, name: &str, arguments: serde_json::Value) -> ToolResult {
         let result = self
             .client
@@ -219,6 +227,47 @@ impl DaemonFixture {
         self.start().await;
     }
 
+    pub fn url(&self, path: &str) -> String {
+        format!("http://{}{}", self.addr, path)
+    }
+
+    pub async fn port_listen(
+        &self,
+        endpoint: &str,
+        protocol: PortForwardProtocol,
+    ) -> PortListenResponse {
+        self.client
+            .post(self.url("/v1/port/listen"))
+            .json(&PortListenRequest {
+                endpoint: endpoint.to_string(),
+                protocol,
+            })
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap()
+    }
+
+    pub async fn port_listen_close(&self, bind_id: &str) {
+        self.client
+            .post(self.url("/v1/port/listen/close"))
+            .json(&PortListenCloseRequest {
+                bind_id: bind_id.to_string(),
+            })
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json::<EmptyResponse>()
+            .await
+            .unwrap();
+    }
+
     pub fn target_config_fragment(&self) -> String {
         format!(
             r#"[targets.{target}]
@@ -288,7 +337,7 @@ pub async fn write_png(path: &Path, width: u32, height: u32) {
     image.save(path).unwrap();
 }
 
-fn allocate_addr() -> std::net::SocketAddr {
+pub fn allocate_addr() -> std::net::SocketAddr {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
     drop(listener);

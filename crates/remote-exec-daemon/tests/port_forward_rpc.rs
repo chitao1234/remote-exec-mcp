@@ -181,7 +181,10 @@ async fn port_forward_pending_accept_returns_closed_after_listen_close() {
         .expect("accept should return after close")
         .unwrap();
     assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
-    let err = response.json::<remote_exec_proto::rpc::RpcErrorBody>().await.unwrap();
+    let err = response
+        .json::<remote_exec_proto::rpc::RpcErrorBody>()
+        .await
+        .unwrap();
     assert_eq!(err.code, "port_bind_closed");
 }
 
@@ -234,7 +237,10 @@ async fn port_forward_pending_udp_read_returns_closed_after_listen_close() {
         .expect("udp read should return after close")
         .unwrap();
     assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
-    let err = response.json::<remote_exec_proto::rpc::RpcErrorBody>().await.unwrap();
+    let err = response
+        .json::<remote_exec_proto::rpc::RpcErrorBody>()
+        .await
+        .unwrap();
     assert_eq!(err.code, "port_bind_closed");
 }
 
@@ -270,7 +276,9 @@ async fn port_forward_pending_connection_read_returns_closed_after_connection_cl
             .unwrap()
     });
 
-    let _stream = tokio::net::TcpStream::connect(&listen.endpoint).await.unwrap();
+    let _stream = tokio::net::TcpStream::connect(&listen.endpoint)
+        .await
+        .unwrap();
     let accepted = accept_task.await.unwrap();
 
     let client = fixture.client.clone();
@@ -305,6 +313,9 @@ async fn port_forward_pending_connection_read_returns_closed_after_connection_cl
         .expect("connection read should return after close")
         .unwrap();
     assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
-    let err = response.json::<remote_exec_proto::rpc::RpcErrorBody>().await.unwrap();
+    let err = response
+        .json::<remote_exec_proto::rpc::RpcErrorBody>()
+        .await
+        .unwrap();
     assert_eq!(err.code, "port_connection_closed");
 }

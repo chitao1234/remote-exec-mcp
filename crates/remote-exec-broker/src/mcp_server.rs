@@ -173,14 +173,16 @@ impl ServerHandler for BrokerServer {
 
 pub async fn serve_stdio(state: crate::BrokerState) -> anyhow::Result<()> {
     tracing::info!("starting broker MCP stdio service");
-    let server = BrokerServer::new(state);
-    server
+    let server = BrokerServer::new(state.clone());
+    let result = server
         .serve(rmcp::transport::stdio())
         .await
         .context("starting broker MCP service")?
         .waiting()
         .await
-        .context("waiting for broker MCP service")?;
+        .context("waiting for broker MCP service");
+    crate::port_forward::close_all(&state.port_forwards).await;
+    result?;
     tracing::info!("broker MCP stdio service stopped");
     Ok(())
 }
@@ -251,13 +253,15 @@ async fn serve_streamable_http(
     );
 
     let shutdown_token = cancellation_token.clone();
-    axum::serve(listener, router)
+    let result = axum::serve(listener, router)
         .with_graceful_shutdown(async move {
             wait_for_shutdown_signal().await;
             shutdown_token.cancel();
         })
         .await
-        .context("running broker MCP streamable HTTP service")?;
+        .context("running broker MCP streamable HTTP service");
+    crate::port_forward::close_all(&state.port_forwards).await;
+    result?;
 
     tracing::info!("broker MCP streamable HTTP service stopped");
     Ok(())

@@ -126,7 +126,10 @@ async fn forward_ports_forwards_local_udp_datagrams() {
         .to_string();
 
     let client = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    client.send_to(b"hello-udp", &listen_endpoint).await.unwrap();
+    client
+        .send_to(b"hello-udp", &listen_endpoint)
+        .await
+        .unwrap();
     let mut buf = [0u8; 64];
     let (read, _) = client.recv_from(&mut buf).await.unwrap();
     assert_eq!(&buf[..read], b"hello-udp");

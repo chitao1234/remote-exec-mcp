@@ -186,6 +186,15 @@ impl PortForwardStore {
             record.entry.last_error = Some(error);
         }
     }
+
+    pub async fn drain(&self) -> Vec<PortForwardRecord> {
+        self.entries
+            .write()
+            .await
+            .drain()
+            .map(|(_, record)| record)
+            .collect()
+    }
 }
 
 pub struct PortForwardFilter {
@@ -338,6 +347,12 @@ pub async fn close_record(record: PortForwardRecord) -> ForwardPortEntry {
     entry
 }
 
+pub async fn close_all(store: &PortForwardStore) {
+    for record in store.drain().await {
+        let _ = close_record(record).await;
+    }
+}
+
 fn spawn_forward(runtime: ForwardRuntime, store: PortForwardStore) {
     tokio::spawn(async move {
         let result = match runtime.protocol {
@@ -355,7 +370,9 @@ fn spawn_forward(runtime: ForwardRuntime, store: PortForwardStore) {
                 );
                 return;
             }
-            store.mark_failed(&runtime.forward_id, err.to_string()).await;
+            store
+                .mark_failed(&runtime.forward_id, err.to_string())
+                .await;
             tracing::warn!(
                 forward_id = %runtime.forward_id,
                 listen_side = %runtime.listen_side.name(),

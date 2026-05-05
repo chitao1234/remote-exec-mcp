@@ -221,7 +221,10 @@ pub async fn connection_write_local(
         if count == 0 {
             return Err(rpc_error(
                 "port_write_failed",
-                format!("connection `{}` returned zero-byte write", req.connection_id),
+                format!(
+                    "connection `{}` returned zero-byte write",
+                    req.connection_id
+                ),
             ));
         }
         written += count;
@@ -309,18 +312,13 @@ async fn listen_tcp(
         .local_addr()
         .map_err(|err| rpc_error("port_bind_failed", err.to_string()))?;
     let bind_id = format!("bind_{}", uuid::Uuid::new_v4().simple());
-    state
-        .port_forwards
-        .tcp_listeners
-        .lock()
-        .await
-        .insert(
-            bind_id.clone(),
-            Arc::new(TcpListenerEntry {
-                listener,
-                cancel: CancellationToken::new(),
-            }),
-        );
+    state.port_forwards.tcp_listeners.lock().await.insert(
+        bind_id.clone(),
+        Arc::new(TcpListenerEntry {
+            listener,
+            cancel: CancellationToken::new(),
+        }),
+    );
     tracing::info!(
         target = %state.config.target,
         bind_id = %bind_id,
@@ -345,18 +343,13 @@ async fn listen_udp(
         .local_addr()
         .map_err(|err| rpc_error("port_bind_failed", err.to_string()))?;
     let bind_id = format!("bind_{}", uuid::Uuid::new_v4().simple());
-    state
-        .port_forwards
-        .udp_sockets
-        .lock()
-        .await
-        .insert(
-            bind_id.clone(),
-            Arc::new(UdpSocketEntry {
-                socket,
-                cancel: CancellationToken::new(),
-            }),
-        );
+    state.port_forwards.udp_sockets.lock().await.insert(
+        bind_id.clone(),
+        Arc::new(UdpSocketEntry {
+            socket,
+            cancel: CancellationToken::new(),
+        }),
+    );
     tracing::info!(
         target = %state.config.target,
         bind_id = %bind_id,
@@ -428,10 +421,7 @@ async fn tcp_listener(
         .ok_or_else(|| rpc_error("unknown_port_bind", format!("unknown bind `{bind_id}`")))
 }
 
-async fn udp_socket(
-    state: &AppState,
-    bind_id: &str,
-) -> Result<Arc<UdpSocketEntry>, HostRpcError> {
+async fn udp_socket(state: &AppState, bind_id: &str) -> Result<Arc<UdpSocketEntry>, HostRpcError> {
     state
         .port_forwards
         .udp_sockets
