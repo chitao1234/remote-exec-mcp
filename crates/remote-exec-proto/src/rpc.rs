@@ -110,6 +110,21 @@ impl TransferCompression {
     pub fn is_none(&self) -> bool {
         matches!(self, Self::None)
     }
+
+    pub fn wire_value(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Zstd => "zstd",
+        }
+    }
+
+    pub fn from_wire_value(value: &str) -> Option<Self> {
+        match value {
+            "none" => Some(Self::None),
+            "zstd" => Some(Self::Zstd),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -120,12 +135,50 @@ pub enum TransferSourceType {
     Multiple,
 }
 
+impl TransferSourceType {
+    pub fn wire_value(&self) -> &'static str {
+        match self {
+            Self::File => "file",
+            Self::Directory => "directory",
+            Self::Multiple => "multiple",
+        }
+    }
+
+    pub fn from_wire_value(value: &str) -> Option<Self> {
+        match value {
+            "file" => Some(Self::File),
+            "directory" => Some(Self::Directory),
+            "multiple" => Some(Self::Multiple),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TransferOverwriteMode {
     Fail,
     Merge,
     Replace,
+}
+
+impl TransferOverwriteMode {
+    pub fn wire_value(&self) -> &'static str {
+        match self {
+            Self::Fail => "fail",
+            Self::Merge => "merge",
+            Self::Replace => "replace",
+        }
+    }
+
+    pub fn from_wire_value(value: &str) -> Option<Self> {
+        match value {
+            "fail" => Some(Self::Fail),
+            "merge" => Some(Self::Merge),
+            "replace" => Some(Self::Replace),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -135,6 +188,25 @@ pub enum TransferSymlinkMode {
     Preserve,
     Follow,
     Skip,
+}
+
+impl TransferSymlinkMode {
+    pub fn wire_value(&self) -> &'static str {
+        match self {
+            Self::Preserve => "preserve",
+            Self::Follow => "follow",
+            Self::Skip => "skip",
+        }
+    }
+
+    pub fn from_wire_value(value: &str) -> Option<Self> {
+        match value {
+            "preserve" => Some(Self::Preserve),
+            "follow" => Some(Self::Follow),
+            "skip" => Some(Self::Skip),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -232,6 +304,212 @@ impl From<TransferImportMetadata> for TransferImportRequest {
             symlink_mode: value.symlink_mode,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransferHeaderErrorKind {
+    Missing,
+    Invalid,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransferHeaderError {
+    pub header: &'static str,
+    pub kind: TransferHeaderErrorKind,
+    pub message: String,
+}
+
+impl TransferHeaderError {
+    pub fn missing(header: &'static str) -> Self {
+        Self {
+            header,
+            kind: TransferHeaderErrorKind::Missing,
+            message: format!("missing header `{header}`"),
+        }
+    }
+
+    pub fn invalid(header: &'static str, message: impl Into<String>) -> Self {
+        let message = message.into();
+        Self {
+            header,
+            kind: TransferHeaderErrorKind::Invalid,
+            message: format!("invalid header `{header}`: {message}"),
+        }
+    }
+}
+
+impl std::fmt::Display for TransferHeaderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for TransferHeaderError {}
+
+pub type TransferHeaderPairs = Vec<(&'static str, String)>;
+
+pub fn transfer_export_header_pairs(metadata: &TransferExportMetadata) -> TransferHeaderPairs {
+    vec![
+        (
+            TRANSFER_SOURCE_TYPE_HEADER,
+            metadata.source_type.wire_value().to_string(),
+        ),
+        (
+            TRANSFER_COMPRESSION_HEADER,
+            metadata.compression.wire_value().to_string(),
+        ),
+    ]
+}
+
+pub fn transfer_import_header_pairs(metadata: &TransferImportMetadata) -> TransferHeaderPairs {
+    vec![
+        (
+            TRANSFER_DESTINATION_PATH_HEADER,
+            metadata.destination_path.clone(),
+        ),
+        (
+            TRANSFER_OVERWRITE_HEADER,
+            metadata.overwrite.wire_value().to_string(),
+        ),
+        (
+            TRANSFER_CREATE_PARENT_HEADER,
+            metadata.create_parent.to_string(),
+        ),
+        (
+            TRANSFER_SOURCE_TYPE_HEADER,
+            metadata.source_type.wire_value().to_string(),
+        ),
+        (
+            TRANSFER_COMPRESSION_HEADER,
+            metadata.compression.wire_value().to_string(),
+        ),
+        (
+            TRANSFER_SYMLINK_MODE_HEADER,
+            metadata.symlink_mode.wire_value().to_string(),
+        ),
+    ]
+}
+
+pub fn parse_transfer_export_metadata(
+    mut header: impl FnMut(&'static str) -> Result<Option<String>, TransferHeaderError>,
+) -> Result<TransferExportMetadata, TransferHeaderError> {
+    Ok(TransferExportMetadata {
+        source_type: parse_required_source_type(&mut header)?,
+        compression: parse_optional_compression(&mut header)?,
+    })
+}
+
+pub fn parse_transfer_import_metadata(
+    mut header: impl FnMut(&'static str) -> Result<Option<String>, TransferHeaderError>,
+) -> Result<TransferImportMetadata, TransferHeaderError> {
+    Ok(TransferImportMetadata {
+        destination_path: required_transfer_header(&mut header, TRANSFER_DESTINATION_PATH_HEADER)?,
+        overwrite: parse_required_overwrite(&mut header)?,
+        create_parent: parse_required_create_parent(&mut header)?,
+        source_type: parse_required_source_type(&mut header)?,
+        compression: parse_optional_compression(&mut header)?,
+        symlink_mode: parse_optional_symlink_mode(&mut header)?,
+    })
+}
+
+fn required_transfer_header<F>(
+    header: &mut F,
+    name: &'static str,
+) -> Result<String, TransferHeaderError>
+where
+    F: FnMut(&'static str) -> Result<Option<String>, TransferHeaderError>,
+{
+    optional_transfer_header(header, name)?.ok_or_else(|| TransferHeaderError::missing(name))
+}
+
+fn optional_transfer_header<F>(
+    header: &mut F,
+    name: &'static str,
+) -> Result<Option<String>, TransferHeaderError>
+where
+    F: FnMut(&'static str) -> Result<Option<String>, TransferHeaderError>,
+{
+    header(name)
+}
+
+fn parse_required_source_type<F>(header: &mut F) -> Result<TransferSourceType, TransferHeaderError>
+where
+    F: FnMut(&'static str) -> Result<Option<String>, TransferHeaderError>,
+{
+    let raw = required_transfer_header(header, TRANSFER_SOURCE_TYPE_HEADER)?;
+    TransferSourceType::from_wire_value(&raw).ok_or_else(|| {
+        invalid_enum_header(
+            TRANSFER_SOURCE_TYPE_HEADER,
+            "expected one of `file`, `directory`, `multiple`",
+        )
+    })
+}
+
+fn parse_required_overwrite<F>(header: &mut F) -> Result<TransferOverwriteMode, TransferHeaderError>
+where
+    F: FnMut(&'static str) -> Result<Option<String>, TransferHeaderError>,
+{
+    let raw = required_transfer_header(header, TRANSFER_OVERWRITE_HEADER)?;
+    TransferOverwriteMode::from_wire_value(&raw).ok_or_else(|| {
+        invalid_enum_header(
+            TRANSFER_OVERWRITE_HEADER,
+            "expected one of `fail`, `merge`, `replace`",
+        )
+    })
+}
+
+fn parse_required_create_parent<F>(header: &mut F) -> Result<bool, TransferHeaderError>
+where
+    F: FnMut(&'static str) -> Result<Option<String>, TransferHeaderError>,
+{
+    match required_transfer_header(header, TRANSFER_CREATE_PARENT_HEADER)?.as_str() {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(TransferHeaderError::invalid(
+            TRANSFER_CREATE_PARENT_HEADER,
+            "expected `true` or `false`",
+        )),
+    }
+}
+
+fn parse_optional_compression<F>(header: &mut F) -> Result<TransferCompression, TransferHeaderError>
+where
+    F: FnMut(&'static str) -> Result<Option<String>, TransferHeaderError>,
+{
+    optional_transfer_header(header, TRANSFER_COMPRESSION_HEADER)?
+        .as_deref()
+        .map(|raw| {
+            TransferCompression::from_wire_value(raw).ok_or_else(|| {
+                invalid_enum_header(
+                    TRANSFER_COMPRESSION_HEADER,
+                    "expected one of `none`, `zstd`",
+                )
+            })
+        })
+        .transpose()
+        .map(Option::unwrap_or_default)
+}
+
+fn parse_optional_symlink_mode<F>(header: &mut F) -> Result<TransferSymlinkMode, TransferHeaderError>
+where
+    F: FnMut(&'static str) -> Result<Option<String>, TransferHeaderError>,
+{
+    optional_transfer_header(header, TRANSFER_SYMLINK_MODE_HEADER)?
+        .as_deref()
+        .map(|raw| {
+            TransferSymlinkMode::from_wire_value(raw).ok_or_else(|| {
+                invalid_enum_header(
+                    TRANSFER_SYMLINK_MODE_HEADER,
+                    "expected one of `preserve`, `follow`, `skip`",
+                )
+            })
+        })
+        .transpose()
+        .map(Option::unwrap_or_default)
+}
+
+fn invalid_enum_header(header: &'static str, message: &'static str) -> TransferHeaderError {
+    TransferHeaderError::invalid(header, message)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
