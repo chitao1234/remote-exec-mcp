@@ -181,7 +181,8 @@ async fn forward_ports_marks_forward_failed_after_background_connect_error() {
         .await
         .unwrap();
 
-    let failed = wait_for_forward_status(&fixture, &forward_id, "failed").await;
+    let failed =
+        wait_for_forward_status(&fixture, &forward_id, "failed", Duration::from_secs(5)).await;
     assert_eq!(failed["status"], "failed");
     let error = failed["last_error"].as_str().unwrap_or_default();
     assert!(
@@ -194,8 +195,11 @@ async fn wait_for_forward_status(
     fixture: &support::fixture::BrokerFixture,
     forward_id: &str,
     status: &str,
+    timeout: Duration,
 ) -> serde_json::Value {
-    for _ in 0..40 {
+    let started = std::time::Instant::now();
+    let mut last_entry = None;
+    while started.elapsed() < timeout {
         let list = fixture
             .call_tool(
                 "forward_ports",
@@ -206,11 +210,22 @@ async fn wait_for_forward_status(
             )
             .await;
         let entry = list.structured_content["forwards"][0].clone();
+        last_entry = Some(entry.clone());
         if entry["status"] == status {
             return entry;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 
-    panic!("forward `{forward_id}` did not reach status `{status}`");
+    let last_status = last_entry
+        .as_ref()
+        .and_then(|entry| entry["status"].as_str())
+        .unwrap_or("<missing>");
+    let last_error = last_entry
+        .as_ref()
+        .and_then(|entry| entry["last_error"].as_str())
+        .unwrap_or_default();
+    panic!(
+        "forward `{forward_id}` did not reach status `{status}` within {timeout:?}; last_status={last_status} last_error={last_error}"
+    );
 }

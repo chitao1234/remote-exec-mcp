@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 #[path = "support/mod.rs"]
 mod support;
 
@@ -410,8 +412,11 @@ impl Drop for CrashableCppDaemonBrokerFixture {
 }
 
 fn cpp_daemon_binary() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../remote-exec-daemon-cpp/build/remote-exec-daemon-cpp")
+    cpp_daemon_dir().join("build/remote-exec-daemon-cpp")
+}
+
+fn cpp_daemon_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../remote-exec-daemon-cpp")
 }
 
 async fn ensure_cpp_daemon_built() {
@@ -419,10 +424,10 @@ async fn ensure_cpp_daemon_built() {
         return;
     }
 
+    let cpp_daemon_dir = cpp_daemon_dir();
     let status = tokio::process::Command::new("make")
-        .arg("-C")
-        .arg("crates/remote-exec-daemon-cpp")
         .arg("all-posix")
+        .current_dir(&cpp_daemon_dir)
         .status()
         .await
         .unwrap();
