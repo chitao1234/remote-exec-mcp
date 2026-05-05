@@ -4,6 +4,7 @@
 mod support;
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use remote_exec_broker::client::{Connection, RemoteExecClient};
@@ -205,6 +206,7 @@ impl CppDaemonBrokerFixture {
         remote_exec_broker::install_crypto_provider();
 
         let tempdir = tempfile::tempdir().unwrap();
+        let daemon_binary = stage_cpp_daemon_binary(tempdir.path());
         let broker_config = tempdir.path().join("broker.toml");
         let daemon_config = tempdir.path().join("daemon-cpp.ini");
         let daemon_workdir = tempdir.path().join("daemon-workdir");
@@ -221,7 +223,7 @@ impl CppDaemonBrokerFixture {
         )
         .unwrap();
 
-        let daemon = tokio::process::Command::new(cpp_daemon_binary())
+        let daemon = tokio::process::Command::new(&daemon_binary)
             .arg(&daemon_config)
             .spawn()
             .unwrap();
@@ -282,6 +284,7 @@ impl CrashableCppDaemonBrokerFixture {
         remote_exec_broker::install_crypto_provider();
 
         let tempdir = tempfile::tempdir().unwrap();
+        let daemon_binary = stage_cpp_daemon_binary(tempdir.path());
         let broker_config = tempdir.path().join("broker-http.toml");
         let daemon_config = tempdir.path().join("daemon-cpp.ini");
         let daemon_workdir = tempdir.path().join("daemon-workdir");
@@ -300,7 +303,7 @@ impl CrashableCppDaemonBrokerFixture {
         )
         .unwrap();
 
-        let daemon = tokio::process::Command::new(cpp_daemon_binary())
+        let daemon = tokio::process::Command::new(&daemon_binary)
             .arg(&daemon_config)
             .spawn()
             .unwrap();
@@ -420,7 +423,19 @@ fn cpp_daemon_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../remote-exec-daemon-cpp")
 }
 
+fn stage_cpp_daemon_binary(tempdir: &Path) -> PathBuf {
+    let staged = tempdir.join("remote-exec-daemon-cpp");
+    std::fs::copy(cpp_daemon_binary(), &staged).unwrap();
+    staged
+}
+
 async fn ensure_cpp_daemon_built() {
+    static CPP_DAEMON_BUILD_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    let _build_guard = CPP_DAEMON_BUILD_LOCK
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await;
+
     if cpp_daemon_binary().exists() {
         return;
     }
