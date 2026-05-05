@@ -4,6 +4,7 @@
 #include <string>
 
 enum class TransferRpcCode {
+    BadRequest,
     SandboxDenied,
     PathNotAbsolute,
     DestinationExists,

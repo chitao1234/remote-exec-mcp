@@ -246,6 +246,7 @@ static std::string json_post_request(const std::string& path, const Json& body) 
 }
 
 int main() {
+    NetworkSession network;
     const fs::path root = make_test_root();
     AppState state;
     initialize_state(state, root);

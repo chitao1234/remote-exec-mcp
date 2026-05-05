@@ -5,6 +5,92 @@
 #include "rpc_failures.h"
 #include "transfer_http_codec.h"
 
+namespace {
+
+const char* DESTINATION_PATH_HEADER = "x-remote-exec-destination-path";
+const char* OVERWRITE_HEADER = "x-remote-exec-overwrite";
+const char* CREATE_PARENT_HEADER = "x-remote-exec-create-parent";
+const char* SOURCE_TYPE_HEADER = "x-remote-exec-source-type";
+const char* COMPRESSION_HEADER = "x-remote-exec-compression";
+const char* SYMLINK_MODE_HEADER = "x-remote-exec-symlink-mode";
+
+std::string missing_header_message(const char* name) {
+    return std::string("missing header `") + name + "`";
+}
+
+std::string invalid_header_message(const char* name, const std::string& detail) {
+    return std::string("invalid header `") + name + "`: " + detail;
+}
+
+std::string required_header(const HttpRequest& request, const char* name) {
+    const std::map<std::string, std::string>::const_iterator it = request.headers.find(name);
+    if (it == request.headers.end()) {
+        throw TransferFailure(
+            TransferRpcCode::BadRequest,
+            missing_header_message(name)
+        );
+    }
+    return it->second;
+}
+
+std::string optional_header_or(
+    const HttpRequest& request,
+    const char* name,
+    const std::string& fallback
+) {
+    const std::map<std::string, std::string>::const_iterator it = request.headers.find(name);
+    if (it == request.headers.end()) {
+        return fallback;
+    }
+    return it->second;
+}
+
+void require_one_of(
+    const char* name,
+    const std::string& value,
+    const char* first,
+    const char* second
+) {
+    if (value == first || value == second) {
+        return;
+    }
+    throw TransferFailure(
+        TransferRpcCode::BadRequest,
+        invalid_header_message(name, "unsupported value `" + value + "`")
+    );
+}
+
+void require_one_of(
+    const char* name,
+    const std::string& value,
+    const char* first,
+    const char* second,
+    const char* third
+) {
+    if (value == first || value == second || value == third) {
+        return;
+    }
+    throw TransferFailure(
+        TransferRpcCode::BadRequest,
+        invalid_header_message(name, "unsupported value `" + value + "`")
+    );
+}
+
+bool parse_create_parent(const std::string& value) {
+    if (value == "true") {
+        return true;
+    }
+    if (value == "false") {
+        return false;
+    }
+    throw TransferFailure(
+        TransferRpcCode::BadRequest,
+        invalid_header_message(CREATE_PARENT_HEADER, "expected `true` or `false`")
+    );
+}
+
+}  // namespace
+
 void require_uncompressed_transfer(const std::string& compression) {
     if (!compression.empty() && compression != "none") {
         throw TransferFailure(
@@ -16,15 +102,16 @@ void require_uncompressed_transfer(const std::string& compression) {
 
 TransferImportMetadata parse_transfer_import_metadata(const HttpRequest& request) {
     TransferImportMetadata metadata;
-    metadata.destination_path = request.header("x-remote-exec-destination-path");
-    metadata.overwrite = request.header("x-remote-exec-overwrite");
-    metadata.create_parent = request.header("x-remote-exec-create-parent") == "true";
-    metadata.source_type = request.header("x-remote-exec-source-type");
-    metadata.compression = request.header("x-remote-exec-compression");
-    metadata.symlink_mode = request.header("x-remote-exec-symlink-mode");
-    if (metadata.symlink_mode.empty()) {
-        metadata.symlink_mode = "preserve";
-    }
+    metadata.destination_path = required_header(request, DESTINATION_PATH_HEADER);
+    metadata.overwrite = required_header(request, OVERWRITE_HEADER);
+    require_one_of(OVERWRITE_HEADER, metadata.overwrite, "fail", "merge", "replace");
+    metadata.create_parent = parse_create_parent(required_header(request, CREATE_PARENT_HEADER));
+    metadata.source_type = required_header(request, SOURCE_TYPE_HEADER);
+    require_one_of(SOURCE_TYPE_HEADER, metadata.source_type, "file", "directory", "multiple");
+    metadata.compression = optional_header_or(request, COMPRESSION_HEADER, "none");
+    require_one_of(COMPRESSION_HEADER, metadata.compression, "none", "zstd");
+    metadata.symlink_mode = optional_header_or(request, SYMLINK_MODE_HEADER, "preserve");
+    require_one_of(SYMLINK_MODE_HEADER, metadata.symlink_mode, "preserve", "follow", "skip");
     return metadata;
 }
 

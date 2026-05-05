@@ -8,6 +8,8 @@ ImageFailure::ImageFailure(ImageRpcCode code, const std::string& message)
 
 const char* transfer_error_code_name(TransferRpcCode code) {
     switch (code) {
+    case TransferRpcCode::BadRequest:
+        return "bad_request";
     case TransferRpcCode::SandboxDenied:
         return "sandbox_denied";
     case TransferRpcCode::PathNotAbsolute:
