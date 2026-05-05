@@ -10,7 +10,7 @@ WINDOWS_XP_TEST_OBJ_DIR := $(OBJ_DIR)/windows-xp-test
 POSIX_TARGET := $(BUILD_DIR)/remote-exec-daemon-cpp
 WINDOWS_XP_TARGET := $(BUILD_DIR)/remote-exec-daemon-cpp-xp.exe
 COMMON_CPPFLAGS := -I$(MAKEFILE_DIR)include -I$(MAKEFILE_DIR)third_party
-PROD_CXXFLAGS := -std=gnu++11 -O0 -Wall -Wextra
+PROD_CXXFLAGS := -std=c++11 -O0 -Wall -Wextra
 TEST_CXXFLAGS := -std=gnu++17 -O0 -Wall -Wextra
 HOST_PROD_CPPFLAGS := $(COMMON_CPPFLAGS)
 HOST_PROD_CXXFLAGS := $(PROD_CXXFLAGS)
