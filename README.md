@@ -449,6 +449,15 @@ cargo test -p remote-exec-broker --test mcp_transfer -- --nocapture
 cargo test -p remote-exec-broker --test multi_target -- --nocapture
 ```
 
+Focused no-default-features commands:
+
+```bash
+cargo test -p remote-exec-broker --no-default-features --tests
+cargo test -p remote-exec-daemon --no-default-features --tests
+cargo clippy -p remote-exec-broker --no-default-features --all-targets -- -D warnings
+cargo clippy -p remote-exec-daemon --no-default-features --all-targets -- -D warnings
+```
+
 Start a daemon:
 
 ```bash
@@ -527,6 +536,7 @@ Configured remote targets may not be named `local`.
   - `cargo test --workspace`
   - `cargo fmt --all --check`
   - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+- CI also exercises broker and daemon `--no-default-features` test and clippy jobs on Ubuntu so the `tls-disabled` code paths stay intentionally covered.
 - Linux broker/daemon support plus Windows broker-host and Windows daemon support
 - Per-machine daemon deployment
 - Static broker target configuration
