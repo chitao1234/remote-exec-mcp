@@ -8,7 +8,9 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use remote_exec_broker::client::{Connection, RemoteExecClient};
-use remote_exec_proto::public::{ForwardPortProtocol, ForwardPortsInput};
+use remote_exec_proto::public::{
+    ExecCommandInput, ForwardPortProtocol, ForwardPortsInput, WriteStdinInput,
+};
 use remote_exec_proto::rpc::{
     EmptyResponse, PortForwardProtocol, PortListenCloseRequest, PortListenRequest,
     PortListenResponse,
@@ -117,6 +119,95 @@ async fn broker_forwards_ports_through_real_cpp_daemon_and_handles_port_conflict
 }
 
 #[tokio::test]
+async fn broker_prunes_cpp_exec_sessions_when_daemon_limit_is_reached() {
+    let fixture = CppDaemonBrokerFixture::spawn_with_daemon_config(
+        "max_open_sessions = 2\n\
+yield_time_exec_command_default_ms = 1\n\
+yield_time_exec_command_max_ms = 1000\n\
+yield_time_exec_command_min_ms = 1\n\
+yield_time_write_stdin_poll_default_ms = 1\n\
+yield_time_write_stdin_poll_max_ms = 1000\n\
+yield_time_write_stdin_poll_min_ms = 1\n\
+yield_time_write_stdin_input_default_ms = 1\n\
+yield_time_write_stdin_input_max_ms = 1000\n\
+yield_time_write_stdin_input_min_ms = 1\n",
+    )
+    .await;
+
+    let first = fixture
+        .client
+        .call_tool("exec_command", &exec_request("printf first; sleep 30"))
+        .await
+        .unwrap();
+    assert!(!first.is_error, "first exec failed: {}", first.text_output);
+    let first_session_id = first.structured_content["session_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let second = fixture
+        .client
+        .call_tool("exec_command", &exec_request("printf second; sleep 30"))
+        .await
+        .unwrap();
+    assert!(
+        !second.is_error,
+        "second exec failed: {}",
+        second.text_output
+    );
+    let second_session_id = second.structured_content["session_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let third = fixture
+        .client
+        .call_tool("exec_command", &exec_request("printf third; sleep 30"))
+        .await
+        .unwrap();
+    assert!(!third.is_error, "third exec failed: {}", third.text_output);
+    let third_session_id = third.structured_content["session_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let first_poll = fixture
+        .client
+        .call_tool("write_stdin", &poll_request(&first_session_id))
+        .await
+        .unwrap();
+    assert!(first_poll.is_error, "expected pruned session failure");
+    assert_eq!(
+        first_poll.text_output,
+        format!("write_stdin failed: Unknown process id {first_session_id}")
+    );
+
+    let second_poll = fixture
+        .client
+        .call_tool("write_stdin", &poll_request(&second_session_id))
+        .await
+        .unwrap();
+    assert!(
+        !second_poll.is_error,
+        "second poll failed: {}",
+        second_poll.text_output
+    );
+    assert_eq!(second_poll.structured_content["target"], "builder-cpp");
+
+    let third_poll = fixture
+        .client
+        .call_tool("write_stdin", &poll_request(&third_session_id))
+        .await
+        .unwrap();
+    assert!(
+        !third_poll.is_error,
+        "third poll failed: {}",
+        third_poll.text_output
+    );
+    assert_eq!(third_poll.structured_content["target"], "builder-cpp");
+}
+
+#[tokio::test]
 async fn real_cpp_daemon_releases_listener_after_broker_crash() {
     let mut fixture = CrashableCppDaemonBrokerFixture::spawn().await;
     let listen_addr = allocate_addr();
@@ -202,6 +293,10 @@ struct CppDaemonBrokerFixture {
 
 impl CppDaemonBrokerFixture {
     async fn spawn() -> Self {
+        Self::spawn_with_daemon_config("").await
+    }
+
+    async fn spawn_with_daemon_config(extra_daemon_config: &str) -> Self {
         ensure_cpp_daemon_built().await;
         remote_exec_broker::install_crypto_provider();
 
@@ -216,17 +311,17 @@ impl CppDaemonBrokerFixture {
         std::fs::write(
             &daemon_config,
             format!(
-                "target = builder-cpp\nlisten_host = 127.0.0.1\nlisten_port = {}\ndefault_workdir = {}\n",
+                "target = builder-cpp\nlisten_host = 127.0.0.1\nlisten_port = {}\ndefault_workdir = {}\n{}",
                 daemon_addr.port(),
-                daemon_workdir.display()
+                daemon_workdir.display(),
+                extra_daemon_config
             ),
         )
         .unwrap();
 
-        let daemon = tokio::process::Command::new(&daemon_binary)
-            .arg(&daemon_config)
-            .spawn()
-            .unwrap();
+        let mut daemon = tokio::process::Command::new(&daemon_binary);
+        daemon.arg(&daemon_config);
+        let daemon = spawn_cpp_daemon_process(&mut daemon).await;
         wait_until_ready_http(daemon_addr).await;
 
         std::fs::write(
@@ -303,10 +398,9 @@ impl CrashableCppDaemonBrokerFixture {
         )
         .unwrap();
 
-        let daemon = tokio::process::Command::new(&daemon_binary)
-            .arg(&daemon_config)
-            .spawn()
-            .unwrap();
+        let mut daemon = tokio::process::Command::new(&daemon_binary);
+        daemon.arg(&daemon_config);
+        let daemon = spawn_cpp_daemon_process(&mut daemon).await;
         wait_until_ready_http(daemon_addr).await;
 
         std::fs::write(
@@ -448,6 +542,43 @@ async fn ensure_cpp_daemon_built() {
         .await
         .unwrap();
     assert!(status.success(), "failed to build remote-exec-daemon-cpp");
+}
+
+fn exec_request(cmd: &str) -> ExecCommandInput {
+    ExecCommandInput {
+        target: "builder-cpp".to_string(),
+        cmd: cmd.to_string(),
+        workdir: None,
+        shell: None,
+        tty: false,
+        yield_time_ms: Some(1),
+        max_output_tokens: None,
+        login: None,
+    }
+}
+
+fn poll_request(session_id: &str) -> WriteStdinInput {
+    WriteStdinInput {
+        session_id: session_id.to_string(),
+        chars: Some(String::new()),
+        yield_time_ms: Some(1),
+        max_output_tokens: None,
+        target: None,
+    }
+}
+
+async fn spawn_cpp_daemon_process(command: &mut tokio::process::Command) -> tokio::process::Child {
+    const ETXTBSY: i32 = 26;
+    for attempt in 0..5 {
+        match command.spawn() {
+            Ok(child) => return child,
+            Err(error) if error.raw_os_error() == Some(ETXTBSY) && attempt + 1 < 5 => {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            Err(error) => panic!("failed to spawn staged C++ daemon: {error}"),
+        }
+    }
+    unreachable!("spawn retry loop returns or panics");
 }
 
 fn allocate_addr() -> std::net::SocketAddr {

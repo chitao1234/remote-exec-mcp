@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "config.h"
 #include "platform.h"
@@ -34,6 +35,61 @@ static std::string normalize_output(const std::string& input) {
     return output;
 }
 
+static Json start_test_command(
+    SessionStore& store,
+    const std::string& command,
+    const std::string& workdir,
+    const std::string& shell,
+    bool tty,
+    unsigned long yield_time_ms,
+    unsigned long max_output_tokens,
+    const YieldTimeConfig& yield_time,
+    unsigned long max_open_sessions
+) {
+    return store.start_command(
+        "cpp-test",
+        command,
+        workdir,
+        shell,
+        false,
+        tty,
+        true,
+        yield_time_ms,
+        max_output_tokens,
+        yield_time,
+        max_open_sessions
+    );
+}
+
+static YieldTimeConfig fast_yield_time_config() {
+    YieldTimeConfig config;
+    config.exec_command = YieldTimeOperationConfig{1UL, 1000UL, 1UL};
+    config.write_stdin_poll = YieldTimeOperationConfig{1UL, 1000UL, 1UL};
+    config.write_stdin_input = YieldTimeOperationConfig{1UL, 1000UL, 1UL};
+    return config;
+}
+
+static void assert_unknown_session(
+    SessionStore& store,
+    const std::string& daemon_session_id,
+    const YieldTimeConfig& yield_time
+) {
+    bool rejected = false;
+    try {
+        (void)store.write_stdin(
+            daemon_session_id,
+            "",
+            true,
+            1UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            yield_time
+        );
+    } catch (const UnknownSessionError&) {
+        rejected = true;
+    }
+    assert(rejected);
+}
+
 int main() {
     const fs::path root = make_test_root();
     SessionStore store;
@@ -49,13 +105,12 @@ int main() {
         "printf 'stdout-2\\n'; printf 'stderr-2\\n' >&2";
 #endif
 
-    const Json response = store.start_command(
+    const Json response = start_test_command(
+        store,
         merge_command,
         root.string(),
         shell,
         false,
-        false,
-        true,
         5000UL,
         DEFAULT_MAX_OUTPUT_TOKENS,
         yield_time,
@@ -76,13 +131,12 @@ int main() {
     const std::string token_command = "printf 'one two three\\n'";
 #endif
 
-    const Json token_limited = store.start_command(
+    const Json token_limited = start_test_command(
+        store,
         token_command,
         root.string(),
         shell,
         false,
-        false,
-        true,
         5000UL,
         2UL,
         yield_time,
@@ -91,13 +145,12 @@ int main() {
     assert(token_limited.at("original_token_count").get<unsigned long>() == 3UL);
     assert(normalize_output(token_limited.at("output").get<std::string>()) == "one two");
 
-    const Json zero_limited = store.start_command(
+    const Json zero_limited = start_test_command(
+        store,
         token_command,
         root.string(),
         shell,
         false,
-        false,
-        true,
         5000UL,
         0UL,
         yield_time,
@@ -107,13 +160,12 @@ int main() {
     assert(zero_limited.at("output").get<std::string>().empty());
 
 #ifndef _WIN32
-    const Json locale_response = store.start_command(
+    const Json locale_response = start_test_command(
+        store,
         "printf '%s %s\\n' \"$LC_ALL\" \"$LANG\"",
         root.string(),
         shell,
         false,
-        false,
-        true,
         5000UL,
         DEFAULT_MAX_OUTPUT_TOKENS,
         yield_time,
@@ -122,13 +174,12 @@ int main() {
     assert(locale_response.at("exit_code").get<int>() == 0);
     assert(locale_response.at("output").get<std::string>() == "C.UTF-8 C.UTF-8\n");
 
-    const Json late_output = store.start_command(
+    const Json late_output = start_test_command(
+        store,
         "(sleep 0.08; printf 'late tail') &",
         root.string(),
         shell,
         false,
-        false,
-        true,
         5000UL,
         10UL,
         yield_time,
@@ -138,13 +189,12 @@ int main() {
     assert(late_output.at("exit_code").get<int>() == 0);
     assert(late_output.at("output").get<std::string>() == "late tail");
 
-    const Json newline_preserved = store.start_command(
+    const Json newline_preserved = start_test_command(
+        store,
         "printf 'one two\\n'",
         root.string(),
         shell,
         false,
-        false,
-        true,
         5000UL,
         3UL,
         yield_time,
@@ -153,14 +203,13 @@ int main() {
     assert(newline_preserved.at("original_token_count").get<unsigned long>() == 2UL);
     assert(newline_preserved.at("output").get<std::string>() == "one two\n");
 
-    const Json stdin_closed_response = store.start_command(
+    const Json stdin_closed_response = start_test_command(
+        store,
         "if IFS= read line; then printf 'got:%s\\n' \"$line\"; "
         "else printf 'stdin:closed\\n'; fi",
         root.string(),
         shell,
         false,
-        false,
-        true,
         5000UL,
         DEFAULT_MAX_OUTPUT_TOKENS,
         yield_time,
@@ -170,13 +219,12 @@ int main() {
     assert(stdin_closed_response.at("exit_code").get<int>() == 0);
     assert(stdin_closed_response.at("output").get<std::string>() == "stdin:closed\n");
 
-    const Json non_tty_running = store.start_command(
+    const Json non_tty_running = start_test_command(
+        store,
         "printf ready; sleep 5",
         root.string(),
         shell,
         false,
-        false,
-        true,
         250UL,
         DEFAULT_MAX_OUTPUT_TOKENS,
         yield_time,
@@ -202,12 +250,11 @@ int main() {
     assert(stdin_closed_rejected);
 
     if (process_session_supports_pty()) {
-        const Json slow_running = store.start_command(
+        const Json slow_running = start_test_command(
+            store,
             "printf slow; sleep 30",
             root.string(),
             shell,
-            false,
-            true,
             true,
             250UL,
             DEFAULT_MAX_OUTPUT_TOKENS,
@@ -216,12 +263,11 @@ int main() {
         );
         assert(slow_running.at("running").get<bool>());
 
-        const Json fast_running = store.start_command(
+        const Json fast_running = start_test_command(
+            store,
             "IFS= read line; printf '%s' \"$line\"; sleep 30",
             root.string(),
             shell,
-            false,
-            true,
             true,
             250UL,
             DEFAULT_MAX_OUTPUT_TOKENS,
@@ -261,13 +307,12 @@ int main() {
         slow_thread.join();
         assert(slow_poll.at("running").get<bool>());
 
-        const Json tty_running = store.start_command(
+        const Json tty_running = start_test_command(
+            store,
             "if test -t 0; then printf 'tty:yes\\n'; else printf 'tty:no\\n'; fi; "
             "IFS= read line; printf 'input:%s\\n' \"$line\"",
             root.string(),
             shell,
-            false,
-            true,
             true,
             250UL,
             DEFAULT_MAX_OUTPUT_TOKENS,
@@ -293,6 +338,304 @@ int main() {
         assert(normalized_tty_output.find("input:hello\n") != std::string::npos);
     }
 
+    {
+        SessionStore limit_store;
+        const YieldTimeConfig fast_yield = fast_yield_time_config();
+        const Json first_running = start_test_command(
+            limit_store,
+            "printf 'first'; sleep 30",
+            root.string(),
+            shell,
+            false,
+            1UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            fast_yield,
+            2UL
+        );
+        const Json second_running = start_test_command(
+            limit_store,
+            "printf 'second'; sleep 30",
+            root.string(),
+            shell,
+            false,
+            1UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            fast_yield,
+            2UL
+        );
+        const Json third_running = start_test_command(
+            limit_store,
+            "printf 'third'; sleep 30",
+            root.string(),
+            shell,
+            false,
+            1UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            fast_yield,
+            2UL
+        );
+        assert(first_running.at("running").get<bool>());
+        assert(second_running.at("running").get<bool>());
+        assert(third_running.at("running").get<bool>());
+        assert_unknown_session(
+            limit_store,
+            first_running.at("daemon_session_id").get<std::string>(),
+            fast_yield
+        );
+        assert(
+            limit_store
+                .write_stdin(
+                    second_running.at("daemon_session_id").get<std::string>(),
+                    "",
+                    true,
+                    1UL,
+                    DEFAULT_MAX_OUTPUT_TOKENS,
+                    fast_yield
+                )
+                .at("running")
+                .get<bool>()
+        );
+        assert(
+            limit_store
+                .write_stdin(
+                    third_running.at("daemon_session_id").get<std::string>(),
+                    "",
+                    true,
+                    1UL,
+                    DEFAULT_MAX_OUTPUT_TOKENS,
+                    fast_yield
+                )
+                .at("running")
+                .get<bool>()
+        );
+    }
+
+    {
+        SessionStore recency_store;
+        const YieldTimeConfig fast_yield = fast_yield_time_config();
+        const Json first_running = start_test_command(
+            recency_store,
+            "printf 'first'; sleep 30",
+            root.string(),
+            shell,
+            false,
+            1UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            fast_yield,
+            2UL
+        );
+        const Json second_running = start_test_command(
+            recency_store,
+            "printf 'second'; sleep 30",
+            root.string(),
+            shell,
+            false,
+            1UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            fast_yield,
+            2UL
+        );
+        const Json first_touch = recency_store.write_stdin(
+            first_running.at("daemon_session_id").get<std::string>(),
+            "",
+            true,
+            1UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            fast_yield
+        );
+        assert(first_touch.at("running").get<bool>());
+
+        const Json third_running = start_test_command(
+            recency_store,
+            "printf 'third'; sleep 30",
+            root.string(),
+            shell,
+            false,
+            1UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            fast_yield,
+            2UL
+        );
+        assert(third_running.at("running").get<bool>());
+        assert_unknown_session(
+            recency_store,
+            second_running.at("daemon_session_id").get<std::string>(),
+            fast_yield
+        );
+        assert(
+            recency_store
+                .write_stdin(
+                    first_running.at("daemon_session_id").get<std::string>(),
+                    "",
+                    true,
+                    1UL,
+                    DEFAULT_MAX_OUTPUT_TOKENS,
+                    fast_yield
+                )
+                .at("running")
+                .get<bool>()
+        );
+    }
+
+    {
+        SessionStore exited_store;
+        const YieldTimeConfig fast_yield = fast_yield_time_config();
+        const Json exited_running = start_test_command(
+            exited_store,
+            "sleep 0.05",
+            root.string(),
+            shell,
+            false,
+            1UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            fast_yield,
+            2UL
+        );
+        const Json live_running = start_test_command(
+            exited_store,
+            "printf 'live'; sleep 30",
+            root.string(),
+            shell,
+            false,
+            1UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            fast_yield,
+            2UL
+        );
+        assert(exited_running.at("running").get<bool>());
+        assert(live_running.at("running").get<bool>());
+        platform::sleep_ms(150UL);
+
+        const Json replacement_running = start_test_command(
+            exited_store,
+            "printf 'replacement'; sleep 30",
+            root.string(),
+            shell,
+            false,
+            1UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            fast_yield,
+            2UL
+        );
+        assert(replacement_running.at("running").get<bool>());
+        assert_unknown_session(
+            exited_store,
+            exited_running.at("daemon_session_id").get<std::string>(),
+            fast_yield
+        );
+        assert(
+            exited_store
+                .write_stdin(
+                    live_running.at("daemon_session_id").get<std::string>(),
+                    "",
+                    true,
+                    1UL,
+                    DEFAULT_MAX_OUTPUT_TOKENS,
+                    fast_yield
+                )
+                .at("running")
+                .get<bool>()
+        );
+    }
+
+    {
+        SessionStore protected_store;
+        const YieldTimeConfig fast_yield = fast_yield_time_config();
+        std::vector<std::string> daemon_session_ids;
+        for (int index = 0; index < 10; ++index) {
+            const Json running = start_test_command(
+                protected_store,
+                "printf ready; sleep 30",
+                root.string(),
+                shell,
+                false,
+                1UL,
+                DEFAULT_MAX_OUTPUT_TOKENS,
+                fast_yield,
+                10UL
+            );
+            assert(running.at("running").get<bool>());
+            daemon_session_ids.push_back(
+                running.at("daemon_session_id").get<std::string>()
+            );
+        }
+
+        assert(
+            protected_store
+                .write_stdin(
+                    daemon_session_ids[0],
+                    "",
+                    true,
+                    1UL,
+                    DEFAULT_MAX_OUTPUT_TOKENS,
+                    fast_yield
+                )
+                .at("running")
+                .get<bool>()
+        );
+
+        const Json protected_replacement = start_test_command(
+            protected_store,
+            "printf extra; sleep 30",
+            root.string(),
+            shell,
+            false,
+            1UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            fast_yield,
+            10UL
+        );
+        assert(protected_replacement.at("running").get<bool>());
+        assert_unknown_session(protected_store, daemon_session_ids[1], fast_yield);
+        assert(
+            protected_store
+                .write_stdin(
+                    daemon_session_ids[0],
+                    "",
+                    true,
+                    1UL,
+                    DEFAULT_MAX_OUTPUT_TOKENS,
+                    fast_yield
+                )
+                .at("running")
+                .get<bool>()
+        );
+    }
+
+    {
+        SessionStore warning_store;
+        const YieldTimeConfig fast_yield = fast_yield_time_config();
+        Json threshold_response;
+        for (int index = 0; index < 60; ++index) {
+            const Json running = start_test_command(
+                warning_store,
+                "printf ready; sleep 30",
+                root.string(),
+                shell,
+                false,
+                1UL,
+                DEFAULT_MAX_OUTPUT_TOKENS,
+                fast_yield,
+                64UL
+            );
+            assert(running.at("running").get<bool>());
+            if (index < 59) {
+                assert(running.at("warnings").empty());
+            } else {
+                threshold_response = running;
+            }
+        }
+        assert(threshold_response.at("warnings").size() == 1U);
+        assert(
+            threshold_response.at("warnings")[0].at("code").get<std::string>() ==
+            "exec_session_limit_approaching"
+        );
+        assert(
+            threshold_response.at("warnings")[0].at("message").get<std::string>() ==
+            "Target `cpp-test` now has 60 open exec sessions."
+        );
+    }
+
     bool unknown_session_rejected = false;
     try {
         (void)store.write_stdin(
@@ -308,13 +651,12 @@ int main() {
     }
     assert(unknown_session_rejected);
 #else
-    const Json xp_running = store.start_command(
+    const Json xp_running = start_test_command(
+        store,
         "echo ready&set /P line=&call echo got:%line%",
         root.string(),
         shell,
         false,
-        false,
-        true,
         250UL,
         DEFAULT_MAX_OUTPUT_TOKENS,
         yield_time,

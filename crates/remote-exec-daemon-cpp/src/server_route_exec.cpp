@@ -84,6 +84,7 @@ HttpResponse handle_exec_start(AppState& state, const HttpRequest& request) {
         authorize_sandbox_path(state, SANDBOX_EXEC_CWD, workdir);
 
         Json exec_response = state.sessions.start_command(
+            state.config.target,
             body.at("cmd").get<std::string>(),
             workdir,
             shell,

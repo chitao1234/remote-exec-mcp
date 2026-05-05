@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -37,6 +38,7 @@ struct LiveSession {
     std::string id;
     std::unique_ptr<ProcessSession> process;
     std::uint64_t started_at_ms;
+    std::atomic<std::uint64_t> last_touched_order;
     std::string output_carry;
     bool stdin_open;
     bool retired;
@@ -48,6 +50,7 @@ public:
     ~SessionStore();
 
     Json start_command(
+        const std::string& target,
         const std::string& command,
         const std::string& workdir,
         const std::string& shell,
@@ -69,6 +72,9 @@ public:
     );
 
 private:
+    bool reserve_pending_start(unsigned long max_open_sessions);
+    bool prune_one_session_for_start(unsigned long max_open_sessions);
+
     BasicMutex mutex_;
     std::map<std::string, std::shared_ptr<LiveSession> > sessions_;
     unsigned long pending_starts_;

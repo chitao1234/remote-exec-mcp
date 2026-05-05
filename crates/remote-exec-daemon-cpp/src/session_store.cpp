@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <atomic>
 #include <cctype>
 #include <cstdint>
@@ -13,11 +14,16 @@
 namespace {
 
 std::atomic<unsigned long> next_id(1UL);
+std::atomic<std::uint64_t> next_touch_order(1ULL);
 
 std::string make_chunk_id() {
     std::ostringstream out;
     out << "cpp-" << platform::monotonic_ms() << '-' << next_id.fetch_add(1UL);
     return out.str();
+}
+
+std::uint64_t make_touch_order() {
+    return next_touch_order.fetch_add(1ULL);
 }
 
 struct PollResult {
@@ -28,6 +34,14 @@ struct PollResult {
 
 const unsigned long EXIT_DRAIN_INITIAL_WAIT_MS = 125UL;
 const unsigned long EXIT_DRAIN_QUIET_MS = 25UL;
+const unsigned long RECENT_PROTECTION_COUNT = 8UL;
+const unsigned long WARNING_THRESHOLD = 60UL;
+
+struct PruneCandidate {
+    std::string daemon_session_id;
+    std::shared_ptr<LiveSession> session;
+    std::uint64_t last_touched_order;
+};
 
 bool is_token_space(char ch) {
     return std::isspace(static_cast<unsigned char>(ch)) != 0;
@@ -95,7 +109,8 @@ Json build_response(
     bool has_exit_code,
     int exit_code,
     const std::string& output,
-    unsigned long max_output_tokens
+    unsigned long max_output_tokens,
+    const Json& warnings
 ) {
     const std::string trimmed = truncate_output_tokens(output, max_output_tokens);
     const unsigned long original_token_count = count_tokens(output);
@@ -107,8 +122,32 @@ Json build_response(
         {"exit_code", has_exit_code ? Json(exit_code) : Json(nullptr)},
         {"original_token_count", original_token_count},
         {"output", trimmed},
-        {"warnings", Json::array()}
+        {"warnings", warnings}
     };
+}
+
+Json empty_exec_warnings() {
+    return Json::array();
+}
+
+Json session_limit_warning(const std::string& target) {
+    return Json::array(
+        {Json{
+            {"code", "exec_session_limit_approaching"},
+            {"message", "Target `" + target + "` now has 60 open exec sessions."},
+        }}
+    );
+}
+
+bool crosses_warning_threshold(std::size_t open_sessions) {
+    return open_sessions < WARNING_THRESHOLD && open_sessions + 1U >= WARNING_THRESHOLD;
+}
+
+std::size_t protected_recent_count(std::size_t open_sessions) {
+    if (open_sessions == 0U) {
+        return 0U;
+    }
+    return std::min<std::size_t>(RECENT_PROTECTION_COUNT, open_sessions - 1U);
 }
 
 std::shared_ptr<LiveSession> launch_live_session(
@@ -208,7 +247,8 @@ PollResult poll_session(
 
 }  // namespace
 
-LiveSession::LiveSession() : started_at_ms(0), stdin_open(false), retired(false) {}
+LiveSession::LiveSession()
+    : started_at_ms(0), last_touched_order(0), stdin_open(false), retired(false) {}
 
 LiveSession::~LiveSession() {}
 
@@ -257,7 +297,132 @@ void erase_session_if_current(
     }
 }
 
+bool remove_session_if_current(
+    BasicMutex& mutex,
+    std::map<std::string, std::shared_ptr<LiveSession> >& sessions,
+    const std::string& daemon_session_id,
+    const std::shared_ptr<LiveSession>& session,
+    std::shared_ptr<LiveSession>* removed
+) {
+    BasicLockGuard lock(mutex);
+    std::map<std::string, std::shared_ptr<LiveSession> >::iterator it =
+        sessions.find(daemon_session_id);
+    if (it == sessions.end() || it->second != session) {
+        return false;
+    }
+    *removed = it->second;
+    sessions.erase(it);
+    return true;
+}
+
+bool SessionStore::reserve_pending_start(unsigned long max_open_sessions) {
+    for (;;) {
+        {
+            BasicLockGuard lock(mutex_);
+            if (sessions_.size() + pending_starts_ < max_open_sessions) {
+                ++pending_starts_;
+                return true;
+            }
+        }
+
+        if (!prune_one_session_for_start(max_open_sessions)) {
+            return false;
+        }
+    }
+}
+
+bool SessionStore::prune_one_session_for_start(unsigned long max_open_sessions) {
+    for (;;) {
+        std::vector<PruneCandidate> snapshot;
+        {
+            BasicLockGuard lock(mutex_);
+            if (sessions_.size() + pending_starts_ < max_open_sessions) {
+                return true;
+            }
+            if (sessions_.empty()) {
+                return false;
+            }
+            snapshot.reserve(sessions_.size());
+            for (std::map<std::string, std::shared_ptr<LiveSession> >::const_iterator it =
+                     sessions_.begin();
+                 it != sessions_.end();
+                 ++it) {
+                snapshot.push_back(
+                    PruneCandidate{
+                        it->first,
+                        it->second,
+                        it->second->last_touched_order.load(),
+                    }
+                );
+            }
+        }
+
+        std::sort(
+            snapshot.begin(),
+            snapshot.end(),
+            [](const PruneCandidate& left, const PruneCandidate& right) {
+                if (left.last_touched_order != right.last_touched_order) {
+                    return left.last_touched_order < right.last_touched_order;
+                }
+                return left.daemon_session_id < right.daemon_session_id;
+            }
+        );
+
+        const std::size_t prunable_count =
+            snapshot.size() - protected_recent_count(snapshot.size());
+        if (prunable_count == 0U) {
+            return false;
+        }
+
+        PruneCandidate victim = snapshot[0];
+        bool found_exited = false;
+        for (std::size_t i = 0; i < prunable_count; ++i) {
+            BasicLockGuard session_lock(snapshot[i].session->mutex_);
+            int exit_code = 0;
+            if (snapshot[i].session->retired || snapshot[i].session->process->has_exited(&exit_code)) {
+                victim = snapshot[i];
+                found_exited = true;
+                break;
+            }
+        }
+        if (!found_exited) {
+            victim = snapshot[0];
+        }
+
+        std::shared_ptr<LiveSession> removed;
+        if (!remove_session_if_current(
+                mutex_,
+                sessions_,
+                victim.daemon_session_id,
+                victim.session,
+                &removed
+            )) {
+            continue;
+        }
+
+        {
+            BasicLockGuard session_lock(removed->mutex_);
+            removed->retired = true;
+            if (removed->process.get() != NULL) {
+                removed->process->terminate();
+            }
+        }
+
+        unsigned long open_sessions_after_prune = 0UL;
+        {
+            BasicLockGuard lock(mutex_);
+            open_sessions_after_prune = static_cast<unsigned long>(sessions_.size());
+        }
+        std::ostringstream message;
+        message << "pruned exec session daemon_session_id=`" << victim.daemon_session_id
+                << "` open_sessions=" << open_sessions_after_prune;
+        log_message(LOG_WARN, "session_store", message.str());
+        return true;
+    }
+}
+
 Json SessionStore::start_command(
+    const std::string& target,
     const std::string& command,
     const std::string& workdir,
     const std::string& shell,
@@ -269,12 +434,8 @@ Json SessionStore::start_command(
     const YieldTimeConfig& yield_time,
     unsigned long max_open_sessions
 ) {
-    {
-        BasicLockGuard lock(mutex_);
-        if (sessions_.size() + pending_starts_ >= max_open_sessions) {
-            throw SessionLimitError("too many open exec sessions");
-        }
-        ++pending_starts_;
+    if (!reserve_pending_start(max_open_sessions)) {
+        throw SessionLimitError("too many open exec sessions");
     }
 
     {
@@ -303,17 +464,23 @@ Json SessionStore::start_command(
             }
         }
 
+        Json warnings = empty_exec_warnings();
         {
             BasicLockGuard lock(mutex_);
             if (pending_starts_ > 0UL) {
                 --pending_starts_;
             }
             if (!poll_result.completed) {
+                const bool crossed_warning_threshold = crosses_warning_threshold(sessions_.size());
+                session->last_touched_order.store(make_touch_order());
                 sessions_[session->id] = session;
                 std::ostringstream message;
                 message << "stored live session daemon_session_id=`" << session->id
                         << "` open_sessions=" << sessions_.size();
                 log_message(LOG_INFO, "session_store", message.str());
+                if (crossed_warning_threshold) {
+                    warnings = session_limit_warning(target);
+                }
             }
         }
 
@@ -325,7 +492,8 @@ Json SessionStore::start_command(
                 true,
                 poll_result.exit_code,
                 poll_result.output,
-                max_output_tokens
+                max_output_tokens,
+                empty_exec_warnings()
             );
             {
                 std::ostringstream message;
@@ -344,7 +512,8 @@ Json SessionStore::start_command(
             false,
             0,
             poll_result.output,
-            max_output_tokens
+            max_output_tokens,
+            warnings
         );
     } catch (...) {
         release_pending_start(mutex_, &pending_starts_);
@@ -374,6 +543,7 @@ Json SessionStore::write_stdin(
             throw UnknownSessionError("Unknown daemon session");
         }
         session = it->second;
+        session->last_touched_order.store(make_touch_order());
     }
 
     {
@@ -431,7 +601,8 @@ Json SessionStore::write_stdin(
             true,
             poll_result.exit_code,
             poll_result.output,
-            max_output_tokens
+            max_output_tokens,
+            empty_exec_warnings()
         );
         {
             std::ostringstream message;
@@ -461,6 +632,7 @@ Json SessionStore::write_stdin(
         false,
         0,
         poll_result.output,
-        max_output_tokens
+        max_output_tokens,
+        empty_exec_warnings()
     );
 }
