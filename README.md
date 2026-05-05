@@ -480,6 +480,19 @@ cargo run -p remote-exec-broker --bin remote-exec -- \
 
 When `--broker-config` is used, the CLI loads the broker config and invokes the same broker tool handlers in-process. It does not start the broker MCP server, and the config's `[mcp]` transport only matters when running `remote-exec-broker` itself.
 
+Open a local-to-remote TCP port forward from the CLI against a running broker:
+
+```bash
+cargo run -p remote-exec-broker --bin remote-exec -- \
+  --broker-url http://127.0.0.1:8787/mcp \
+  forward-ports open \
+  --listen-side local \
+  --connect-side builder-a \
+  --forward tcp:127.0.0.1:15432=127.0.0.1:5432
+```
+
+`forward-ports` state lives in the long-running broker process. In `--broker-config` mode, `remote-exec` rebuilds broker state for that one invocation, so forwards do not persist across separate CLI runs there.
+
 Expose the broker over streamable HTTP instead of stdio:
 
 ```toml

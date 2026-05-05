@@ -48,6 +48,10 @@ enum Command {
     ApplyPatch(ApplyPatchArgs),
     ViewImage(ViewImageArgs),
     TransferFiles(TransferFilesArgs),
+    #[command(
+        name = "forward-ports",
+        about = "Open, list, or close broker-mediated TCP/UDP port forwards."
+    )]
     ForwardPorts(ForwardPortsArgs),
 }
 
@@ -172,8 +176,11 @@ struct ForwardPortsArgs {
 
 #[derive(Subcommand, Debug)]
 enum ForwardPortsActionArgs {
+    #[command(about = "Open one or more broker-mediated TCP/UDP port forwards.")]
     Open(ForwardPortsOpenArgs),
+    #[command(about = "List open port forwards, optionally filtered by side or id.")]
     List(ForwardPortsListArgs),
+    #[command(about = "Close one or more existing port forwards by id.")]
     Close(ForwardPortsCloseArgs),
 }
 
@@ -185,7 +192,11 @@ struct ForwardPortsOpenArgs {
     #[arg(long)]
     connect_side: String,
 
-    #[arg(long = "forward", required = true)]
+    #[arg(
+        long = "forward",
+        required = true,
+        help = "Forward spec in the form <protocol>:<listen>=<connect>, for example tcp:127.0.0.1:0=127.0.0.1:5432"
+    )]
     forwards: Vec<String>,
 }
 
