@@ -128,6 +128,9 @@ const CompiledFilesystemSandbox* active_sandbox(const AppState& state) {
     return state.sandbox_enabled ? &state.sandbox : NULL;
 }
 
+bool log_send_failure(const SocketSendError& ex);
+bool try_send_response(SOCKET client, const HttpResponse& response);
+
 void authorize_sandbox_path(
     const AppState& state,
     SandboxAccess access,
@@ -277,7 +280,7 @@ int handle_streaming_transfer_export(
             transfer_error_code_name(TransferRpcCode::SandboxDenied),
             message
         );
-        send_all(client, render_http_response(response));
+        try_send_response(client, response);
         return response.status;
     } catch (const TransferFailure& failure) {
         log_message(LOG_WARN, "server", "transfer/export failed: " + failure.message);
@@ -293,7 +296,7 @@ int handle_streaming_transfer_export(
             transfer_error_code_name(failure.code),
             failure.message
         );
-        send_all(client, render_http_response(response));
+        try_send_response(client, response);
         return response.status;
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
@@ -310,7 +313,7 @@ int handle_streaming_transfer_export(
             transfer_error_code_name(TransferRpcCode::Internal),
             message
         );
-        send_all(client, render_http_response(response));
+        try_send_response(client, response);
         return response.status;
     }
 }
@@ -325,6 +328,25 @@ void log_request_result(
             << " status=" << status
             << " elapsed_ms=" << (platform::monotonic_ms() - started_at_ms);
     log_message(level_for_status(status), "server", message.str());
+}
+
+bool log_send_failure(const SocketSendError& ex) {
+    if (ex.peer_disconnected()) {
+        log_message(LOG_WARN, "server", std::string("client disconnected during send: ") + ex.what());
+        return true;
+    }
+
+    log_message(LOG_ERROR, "server", std::string("send failed: ") + ex.what());
+    return false;
+}
+
+bool try_send_response(SOCKET client, const HttpResponse& response) {
+    try {
+        send_all(client, render_http_response(response));
+        return true;
+    } catch (const SocketSendError& ex) {
+        return log_send_failure(ex);
+    }
 }
 
 }  // namespace
@@ -360,25 +382,27 @@ void handle_client_once(AppState& state, UniqueSocket client) {
             response = route_request(state, request);
         }
         log_request_result(request, response.status, started_at_ms);
-        send_all(client.get(), render_http_response(response));
+        try_send_response(client.get(), response);
     } catch (const BadHttpRequest& ex) {
         log_message(LOG_WARN, "server", ex.what());
         HttpResponse response;
         response.status = 400;
         write_rpc_error(response, 400, "bad_request", ex.what());
-        send_all(client.get(), render_http_response(response));
+        try_send_response(client.get(), response);
     } catch (const HttpParseError& ex) {
         log_message(LOG_WARN, "server", ex.what());
         HttpResponse response;
         response.status = 400;
         write_rpc_error(response, 400, "bad_request", ex.what());
-        send_all(client.get(), render_http_response(response));
+        try_send_response(client.get(), response);
+    } catch (const SocketSendError& ex) {
+        log_send_failure(ex);
     } catch (const std::exception& ex) {
         log_message(LOG_ERROR, "server", ex.what());
         HttpResponse response;
         response.status = 500;
         write_rpc_error(response, 500, "internal_error", ex.what());
-        send_all(client.get(), render_http_response(response));
+        try_send_response(client.get(), response);
     }
 }
 

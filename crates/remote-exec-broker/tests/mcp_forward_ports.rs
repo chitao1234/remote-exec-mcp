@@ -1,6 +1,8 @@
 #[path = "support/mod.rs"]
 mod support;
 
+use std::time::Duration;
+
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::test]
@@ -86,4 +88,126 @@ async fn forward_ports_opens_lists_and_closes_local_tcp_forward() {
         )
         .await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
+}
+
+#[tokio::test]
+async fn forward_ports_forwards_local_udp_datagrams() {
+    let fixture = support::spawners::spawn_broker_local_only().await;
+    let echo_socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let echo_addr = echo_socket.local_addr().unwrap();
+    tokio::spawn(async move {
+        let mut buf = [0u8; 1024];
+        let (len, peer) = echo_socket.recv_from(&mut buf).await.unwrap();
+        echo_socket.send_to(&buf[..len], peer).await.unwrap();
+    });
+
+    let open = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "local",
+                "connect_side": "local",
+                "forwards": [{
+                    "listen_endpoint": "127.0.0.1:0",
+                    "connect_endpoint": echo_addr.to_string(),
+                    "protocol": "udp"
+                }]
+            }),
+        )
+        .await;
+    let forward_id = open.structured_content["forwards"][0]["forward_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let listen_endpoint = open.structured_content["forwards"][0]["listen_endpoint"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let client = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    client.send_to(b"hello-udp", &listen_endpoint).await.unwrap();
+    let mut buf = [0u8; 64];
+    let (read, _) = client.recv_from(&mut buf).await.unwrap();
+    assert_eq!(&buf[..read], b"hello-udp");
+
+    let close = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "close",
+                "forward_ids": [forward_id]
+            }),
+        )
+        .await;
+    assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
+}
+
+#[tokio::test]
+async fn forward_ports_marks_forward_failed_after_background_connect_error() {
+    let fixture = support::spawners::spawn_broker_local_only().await;
+    let blackhole = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let blackhole_addr = blackhole.local_addr().unwrap();
+    drop(blackhole);
+
+    let open = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "local",
+                "connect_side": "local",
+                "forwards": [{
+                    "listen_endpoint": "127.0.0.1:0",
+                    "connect_endpoint": blackhole_addr.to_string(),
+                    "protocol": "tcp"
+                }]
+            }),
+        )
+        .await;
+    let forward_id = open.structured_content["forwards"][0]["forward_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let listen_endpoint = open.structured_content["forwards"][0]["listen_endpoint"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let _client = tokio::net::TcpStream::connect(&listen_endpoint)
+        .await
+        .unwrap();
+
+    let failed = wait_for_forward_status(&fixture, &forward_id, "failed").await;
+    assert_eq!(failed["status"], "failed");
+    let error = failed["last_error"].as_str().unwrap_or_default();
+    assert!(
+        error.contains("connecting tcp forward destination"),
+        "unexpected error: {error}"
+    );
+}
+
+async fn wait_for_forward_status(
+    fixture: &support::fixture::BrokerFixture,
+    forward_id: &str,
+    status: &str,
+) -> serde_json::Value {
+    for _ in 0..40 {
+        let list = fixture
+            .call_tool(
+                "forward_ports",
+                serde_json::json!({
+                    "action": "list",
+                    "forward_ids": [forward_id]
+                }),
+            )
+            .await;
+        let entry = list.structured_content["forwards"][0].clone();
+        if entry["status"] == status {
+            return entry;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    panic!("forward `{forward_id}` did not reach status `{status}`");
 }

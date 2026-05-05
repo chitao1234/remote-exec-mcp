@@ -68,6 +68,14 @@ bool would_block_error(int error) {
 #endif
 }
 
+bool peer_disconnected_send_error(int error) {
+#ifdef _WIN32
+    return error == WSAECONNABORTED || error == WSAECONNRESET || error == WSAESHUTDOWN;
+#else
+    return error == EPIPE || error == ECONNRESET || error == ENOTCONN;
+#endif
+}
+
 HttpRequestBodyFraming::HttpRequestBodyFraming()
     : has_content_length(false), content_length(0), chunked(false) {}
 
@@ -584,7 +592,11 @@ void send_all_bytes(SOCKET client, const char* data, std::size_t size) {
             0
         );
         if (sent <= 0) {
-            throw std::runtime_error(socket_error_message("send"));
+            const int error = last_socket_error();
+            throw SocketSendError(
+                socket_error_message("send"),
+                peer_disconnected_send_error(error)
+            );
         }
         offset += static_cast<std::size_t>(sent);
     }

@@ -224,6 +224,17 @@ static std::string run_single_request(AppState& state, const std::string& reques
     return read_all_from_socket(client_socket.get());
 }
 
+static void run_single_request_and_abort_client(AppState& state, const std::string& request) {
+    int sockets[2];
+    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
+
+    UniqueSocket server_socket(sockets[0]);
+    UniqueSocket client_socket(sockets[1]);
+    send_request_and_close_writer(client_socket.get(), request);
+    client_socket.reset();
+    handle_client_once(state, std::move(server_socket));
+}
+
 static std::string json_post_request(const std::string& path, const Json& body) {
     const std::string payload = body.dump();
     std::ostringstream request;
@@ -442,6 +453,14 @@ int main() {
     assert(
         Json::parse(response_body(read_response)).at("code").get<std::string>() ==
         "port_connection_closed"
+    );
+
+    run_single_request_and_abort_client(
+        state,
+        json_post_request(
+            "/v1/port/connection/read",
+            Json{{"connection_id", "missing-connection"}}
+        )
     );
 
     return 0;

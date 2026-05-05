@@ -18,6 +18,17 @@ public:
     explicit BadHttpRequest(const std::string& message) : std::runtime_error(message) {}
 };
 
+class SocketSendError : public std::runtime_error {
+public:
+    SocketSendError(const std::string& message, bool peer_disconnected)
+        : std::runtime_error(message), peer_disconnected_(peer_disconnected) {}
+
+    bool peer_disconnected() const { return peer_disconnected_; }
+
+private:
+    bool peer_disconnected_;
+};
+
 class UniqueSocket {
 public:
     UniqueSocket();
