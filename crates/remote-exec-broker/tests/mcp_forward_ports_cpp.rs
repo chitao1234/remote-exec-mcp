@@ -279,6 +279,7 @@ struct CrashableCppDaemonBrokerFixture {
 impl CrashableCppDaemonBrokerFixture {
     async fn spawn() -> Self {
         ensure_cpp_daemon_built().await;
+        remote_exec_broker::install_crypto_provider();
 
         let tempdir = tempfile::tempdir().unwrap();
         let broker_config = tempdir.path().join("broker-http.toml");

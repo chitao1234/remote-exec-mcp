@@ -69,6 +69,46 @@ impl TcpConnection {
     }
 }
 
+pub async fn shutdown_local(state: &AppState) {
+    state.shutdown.cancel();
+
+    let listeners = state
+        .port_forwards
+        .tcp_listeners
+        .lock()
+        .await
+        .drain()
+        .map(|(_, listener)| listener)
+        .collect::<Vec<_>>();
+    let sockets = state
+        .port_forwards
+        .udp_sockets
+        .lock()
+        .await
+        .drain()
+        .map(|(_, socket)| socket)
+        .collect::<Vec<_>>();
+    let connections = state
+        .port_forwards
+        .tcp_connections
+        .lock()
+        .await
+        .drain()
+        .map(|(_, connection)| connection)
+        .collect::<Vec<_>>();
+    state.port_forwards.leases.lock().await.clear();
+
+    for listener in listeners {
+        listener.cancel.cancel();
+    }
+    for socket in sockets {
+        socket.cancel.cancel();
+    }
+    for connection in connections {
+        connection.cancel.cancel();
+    }
+}
+
 pub async fn listen_local(
     state: Arc<AppState>,
     req: PortListenRequest,
@@ -88,7 +128,11 @@ pub async fn listen_accept_local(
 ) -> Result<PortListenAcceptResponse, HostRpcError> {
     sweep_expired_port_forwards(&state).await;
     let listener = tcp_listener(&state, &req.bind_id).await?;
+    let shutdown = state.shutdown.clone();
     let (stream, peer_addr) = tokio::select! {
+        _ = shutdown.cancelled() => {
+            return Err(port_bind_closed(&req.bind_id));
+        }
         _ = listener.cancel.cancelled() => {
             return Err(port_bind_closed(&req.bind_id));
         }
@@ -101,7 +145,7 @@ pub async fn listen_accept_local(
                 }
             })?,
     };
-    if listener.cancel.is_cancelled() {
+    if listener.cancel.is_cancelled() || state.shutdown.is_cancelled() {
         return Err(port_bind_closed(&req.bind_id));
     }
     let connection_id = format!("conn_{}", uuid::Uuid::new_v4().simple());
@@ -181,7 +225,11 @@ pub async fn connection_read_local(
     let stream = tcp_connection(&state, &req.connection_id).await?;
     let mut reader = stream.reader.lock().await;
     let mut buf = vec![0u8; READ_BUF_SIZE];
+    let shutdown = state.shutdown.clone();
     let read = tokio::select! {
+        _ = shutdown.cancelled() => {
+            return Err(port_connection_closed(&req.connection_id));
+        }
         _ = stream.cancel.cancelled() => {
             return Err(port_connection_closed(&req.connection_id));
         }
@@ -193,7 +241,7 @@ pub async fn connection_read_local(
             }
         })?,
     };
-    if stream.cancel.is_cancelled() {
+    if stream.cancel.is_cancelled() || state.shutdown.is_cancelled() {
         return Err(port_connection_closed(&req.connection_id));
     }
     if read == 0 {
@@ -226,16 +274,20 @@ pub async fn connection_write_local(
     sweep_expired_port_forwards(&state).await;
     let bytes = decode_bytes(&req.data)?;
     let stream = tcp_connection(&state, &req.connection_id).await?;
-    if stream.cancel.is_cancelled() {
+    if stream.cancel.is_cancelled() || state.shutdown.is_cancelled() {
         return Err(port_connection_closed(&req.connection_id));
     }
     let mut writer = stream.writer.lock().await;
     let mut written = 0usize;
+    let shutdown = state.shutdown.clone();
     while written < bytes.len() {
-        if stream.cancel.is_cancelled() {
+        if stream.cancel.is_cancelled() || state.shutdown.is_cancelled() {
             return Err(port_connection_closed(&req.connection_id));
         }
         let count = tokio::select! {
+            _ = shutdown.cancelled() => {
+                return Err(port_connection_closed(&req.connection_id));
+            }
             _ = stream.cancel.cancelled() => {
                 return Err(port_connection_closed(&req.connection_id));
             }
@@ -293,7 +345,11 @@ pub async fn udp_datagram_read_local(
     sweep_expired_port_forwards(&state).await;
     let socket = udp_socket(&state, &req.bind_id).await?;
     let mut buf = vec![0u8; READ_BUF_SIZE];
+    let shutdown = state.shutdown.clone();
     let (read, peer) = tokio::select! {
+        _ = shutdown.cancelled() => {
+            return Err(port_bind_closed(&req.bind_id));
+        }
         _ = socket.cancel.cancelled() => {
             return Err(port_bind_closed(&req.bind_id));
         }
@@ -305,7 +361,7 @@ pub async fn udp_datagram_read_local(
             }
         })?,
     };
-    if socket.cancel.is_cancelled() {
+    if socket.cancel.is_cancelled() || state.shutdown.is_cancelled() {
         return Err(port_bind_closed(&req.bind_id));
     }
     buf.truncate(read);
@@ -325,14 +381,21 @@ pub async fn udp_datagram_write_local(
         .await
         .map_err(|err| rpc_error("invalid_endpoint", err.to_string()))?;
     let socket = udp_socket(&state, &req.bind_id).await?;
-    if socket.cancel.is_cancelled() {
+    if socket.cancel.is_cancelled() || state.shutdown.is_cancelled() {
         return Err(port_bind_closed(&req.bind_id));
     }
-    socket
-        .socket
-        .send_to(&bytes, peer)
-        .await
-        .map_err(|err| rpc_error("port_write_failed", err.to_string()))?;
+    let shutdown = state.shutdown.clone();
+    tokio::select! {
+        _ = shutdown.cancelled() => {
+            return Err(port_bind_closed(&req.bind_id));
+        }
+        _ = socket.cancel.cancelled() => {
+            return Err(port_bind_closed(&req.bind_id));
+        }
+        write = socket.socket.send_to(&bytes, peer) => {
+            write.map_err(|err| rpc_error("port_write_failed", err.to_string()))?;
+        }
+    }
     Ok(EmptyResponse {})
 }
 
@@ -426,9 +489,14 @@ async fn connect_tcp(
 ) -> Result<PortConnectResponse, HostRpcError> {
     let endpoint = ensure_nonzero_connect_endpoint(endpoint)
         .map_err(|err| rpc_error("invalid_endpoint", err.to_string()))?;
-    let stream = TcpStream::connect(endpoint.as_str())
-        .await
-        .map_err(|err| rpc_error("port_connect_failed", err.to_string()))?;
+    let shutdown = state.shutdown.clone();
+    let stream = tokio::select! {
+        _ = shutdown.cancelled() => {
+            return Err(rpc_error("port_connect_failed", "daemon is shutting down"));
+        }
+        connect = TcpStream::connect(endpoint.as_str()) => connect
+            .map_err(|err| rpc_error("port_connect_failed", err.to_string()))?,
+    };
     let connection_id = format!("conn_{}", uuid::Uuid::new_v4().simple());
     let lease_id = lease.as_ref().map(|lease| lease.lease_id.clone());
     state.port_forwards.tcp_connections.lock().await.insert(

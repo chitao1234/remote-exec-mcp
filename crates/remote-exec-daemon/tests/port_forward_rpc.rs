@@ -1,6 +1,9 @@
 mod support;
 
+use std::sync::Arc;
+
 use base64::Engine;
+use remote_exec_daemon::config::{DaemonConfig, DaemonTransport, ProcessEnvironment, PtyMode};
 use remote_exec_proto::rpc::{
     EmptyResponse, PortConnectionCloseRequest, PortConnectionReadRequest,
     PortConnectionReadResponse, PortConnectionWriteRequest, PortForwardLease, PortForwardProtocol,
@@ -189,6 +192,64 @@ async fn port_forward_pending_accept_returns_closed_after_listen_close() {
         .json::<remote_exec_proto::rpc::RpcErrorBody>()
         .await
         .unwrap();
+    assert_eq!(err.code, "port_bind_closed");
+}
+
+#[tokio::test]
+async fn port_forward_pending_accept_returns_closed_after_daemon_shutdown() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let workdir = tempdir.path().join("workdir");
+    std::fs::create_dir_all(&workdir).unwrap();
+    let state = Arc::new(
+        remote_exec_daemon::build_app_state(DaemonConfig {
+            target: "builder-a".to_string(),
+            listen: "127.0.0.1:0".parse().unwrap(),
+            default_workdir: workdir,
+            windows_posix_root: None,
+            transport: DaemonTransport::Http,
+            http_auth: None,
+            sandbox: None,
+            enable_transfer_compression: true,
+            allow_login_shell: true,
+            pty: PtyMode::Auto,
+            default_shell: None,
+            yield_time: remote_exec_daemon::config::YieldTimeConfig::default(),
+            experimental_apply_patch_target_encoding_autodetect: false,
+            process_environment: ProcessEnvironment::capture_current(),
+            tls: None,
+        })
+        .unwrap(),
+    );
+
+    let listen = remote_exec_host::port_forward::listen_local(
+        state.clone(),
+        PortListenRequest {
+            endpoint: "127.0.0.1:0".to_string(),
+            protocol: PortForwardProtocol::Tcp,
+            lease: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let accept_state = state.clone();
+    let bind_id = listen.bind_id.clone();
+    let accept_task = tokio::spawn(async move {
+        remote_exec_host::port_forward::listen_accept_local(
+            accept_state,
+            PortListenAcceptRequest { bind_id },
+        )
+        .await
+    });
+
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    remote_exec_host::port_forward::shutdown_local(&state).await;
+
+    let err = tokio::time::timeout(std::time::Duration::from_secs(2), accept_task)
+        .await
+        .expect("accept should return after daemon shutdown")
+        .unwrap()
+        .unwrap_err();
     assert_eq!(err.code, "port_bind_closed");
 }
 

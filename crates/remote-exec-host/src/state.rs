@@ -4,6 +4,7 @@ use remote_exec_proto::{
     rpc::TargetInfoResponse,
     sandbox::{CompiledFilesystemSandbox, compile_filesystem_sandbox},
 };
+use tokio_util::sync::CancellationToken;
 
 use crate::{HostRuntimeConfig, WindowsPtyBackendOverride};
 
@@ -16,6 +17,7 @@ pub struct HostRuntimeState {
     pub supports_transfer_compression: bool,
     pub windows_pty_backend_override: Option<WindowsPtyBackendOverride>,
     pub daemon_instance_id: String,
+    pub shutdown: CancellationToken,
     pub sessions: crate::exec::store::SessionStore,
     pub port_forwards: crate::port_forward::PortForwardState,
 }
@@ -47,6 +49,7 @@ pub fn build_runtime_state(mut config: HostRuntimeConfig) -> anyhow::Result<Host
         supports_transfer_compression,
         windows_pty_backend_override,
         daemon_instance_id: uuid::Uuid::new_v4().to_string(),
+        shutdown: CancellationToken::new(),
         sessions: crate::exec::store::SessionStore::new(64),
         port_forwards: crate::port_forward::PortForwardState::default(),
     })
