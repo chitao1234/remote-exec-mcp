@@ -1,14 +1,15 @@
 mod support;
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use base64::Engine;
 use remote_exec_daemon::config::{DaemonConfig, DaemonTransport, ProcessEnvironment, PtyMode};
 use remote_exec_proto::rpc::{
     EmptyResponse, PortConnectionCloseRequest, PortConnectionReadRequest,
     PortConnectionReadResponse, PortConnectionWriteRequest, PortForwardLease, PortForwardProtocol,
-    PortLeaseRenewRequest, PortListenAcceptRequest, PortListenRequest, PortListenResponse,
-    PortUdpDatagramReadRequest,
+    PortLeaseRenewRequest, PortListenAcceptRequest, PortListenCloseRequest, PortListenRequest,
+    PortListenResponse, PortUdpDatagramReadRequest,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -168,7 +169,7 @@ async fn port_forward_pending_accept_returns_closed_after_listen_close() {
             .unwrap()
     });
 
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
 
     fixture
         .client
@@ -183,7 +184,7 @@ async fn port_forward_pending_accept_returns_closed_after_listen_close() {
         .await
         .unwrap();
 
-    let response = tokio::time::timeout(std::time::Duration::from_secs(2), accept_task)
+    let response = tokio::time::timeout(Duration::from_secs(2), accept_task)
         .await
         .expect("accept should return after close")
         .unwrap();
@@ -242,10 +243,10 @@ async fn port_forward_pending_accept_returns_closed_after_daemon_shutdown() {
         .await
     });
 
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
     remote_exec_host::port_forward::shutdown_local(&state).await;
 
-    let err = tokio::time::timeout(std::time::Duration::from_secs(2), accept_task)
+    let err = tokio::time::timeout(Duration::from_secs(2), accept_task)
         .await
         .expect("accept should return after daemon shutdown")
         .unwrap()
@@ -283,12 +284,12 @@ async fn port_forward_pending_udp_read_returns_closed_after_listen_close() {
             .unwrap()
     });
 
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
 
     fixture
         .client
         .post(fixture.url("/v1/port/listen/close"))
-        .json(&remote_exec_proto::rpc::PortListenCloseRequest {
+        .json(&PortListenCloseRequest {
             bind_id: listen.bind_id,
         })
         .send()
@@ -298,7 +299,7 @@ async fn port_forward_pending_udp_read_returns_closed_after_listen_close() {
         .await
         .unwrap();
 
-    let response = tokio::time::timeout(std::time::Duration::from_secs(2), read_task)
+    let response = tokio::time::timeout(Duration::from_secs(2), read_task)
         .await
         .expect("udp read should return after close")
         .unwrap();
@@ -360,7 +361,7 @@ async fn port_forward_pending_connection_read_returns_closed_after_connection_cl
             .unwrap()
     });
 
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
 
     fixture
         .client
@@ -375,7 +376,7 @@ async fn port_forward_pending_connection_read_returns_closed_after_connection_cl
         .await
         .unwrap();
 
-    let response = tokio::time::timeout(std::time::Duration::from_secs(2), read_task)
+    let response = tokio::time::timeout(Duration::from_secs(2), read_task)
         .await
         .expect("connection read should return after close")
         .unwrap();
@@ -412,27 +413,19 @@ async fn leased_port_forward_listener_can_be_reclaimed_after_expiry() {
     let listen = response.json::<PortListenResponse>().await.unwrap();
     assert_eq!(listen.endpoint, endpoint);
 
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
-    let rebound = fixture
-        .client
-        .post(fixture.url("/v1/port/listen"))
-        .json(&PortListenRequest {
-            endpoint: endpoint.clone(),
-            protocol: PortForwardProtocol::Tcp,
-            lease: None,
-        })
-        .send()
+    let rebound = wait_for_tcp_listener_rebind(&fixture, &endpoint, Duration::from_secs(5))
         .await
-        .unwrap();
-    assert_eq!(rebound.status(), reqwest::StatusCode::OK);
-    let rebound = rebound.json::<PortListenResponse>().await.unwrap();
+        .unwrap_or_else(|last_response| {
+            panic!("listener on {endpoint} was not reclaimed after lease expiry; {last_response}")
+        });
     assert_eq!(rebound.endpoint, endpoint);
 
     fixture
         .client
         .post(fixture.url("/v1/port/listen/close"))
-        .json(&remote_exec_proto::rpc::PortListenCloseRequest {
+        .json(&PortListenCloseRequest {
             bind_id: rebound.bind_id,
         })
         .send()
@@ -468,7 +461,7 @@ async fn late_port_forward_lease_renew_is_ignored_after_expiry() {
     let listen = response.json::<PortListenResponse>().await.unwrap();
     assert_eq!(listen.endpoint, endpoint);
 
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
     let renew = fixture
         .client
@@ -483,25 +476,19 @@ async fn late_port_forward_lease_renew_is_ignored_after_expiry() {
     assert_eq!(renew.status(), reqwest::StatusCode::OK);
     renew.json::<EmptyResponse>().await.unwrap();
 
-    let rebound = fixture
-        .client
-        .post(fixture.url("/v1/port/listen"))
-        .json(&PortListenRequest {
-            endpoint: endpoint.clone(),
-            protocol: PortForwardProtocol::Tcp,
-            lease: None,
-        })
-        .send()
+    let rebound = wait_for_tcp_listener_rebind(&fixture, &endpoint, Duration::from_secs(5))
         .await
-        .unwrap();
-    assert_eq!(rebound.status(), reqwest::StatusCode::OK);
-    let rebound = rebound.json::<PortListenResponse>().await.unwrap();
+        .unwrap_or_else(|last_response| {
+            panic!(
+                "listener on {endpoint} was not reclaimed after late lease renew; {last_response}"
+            )
+        });
     assert_eq!(rebound.endpoint, endpoint);
 
     fixture
         .client
         .post(fixture.url("/v1/port/listen/close"))
-        .json(&remote_exec_proto::rpc::PortListenCloseRequest {
+        .json(&PortListenCloseRequest {
             bind_id: rebound.bind_id,
         })
         .send()
@@ -510,4 +497,39 @@ async fn late_port_forward_lease_renew_is_ignored_after_expiry() {
         .json::<EmptyResponse>()
         .await
         .unwrap();
+}
+
+async fn wait_for_tcp_listener_rebind(
+    fixture: &support::fixture::DaemonFixture,
+    endpoint: &str,
+    timeout: Duration,
+) -> Result<PortListenResponse, String> {
+    let started = Instant::now();
+    let mut last_response = "no rebind attempt was made".to_string();
+
+    while started.elapsed() < timeout {
+        let response = fixture
+            .client
+            .post(fixture.url("/v1/port/listen"))
+            .json(&PortListenRequest {
+                endpoint: endpoint.to_string(),
+                protocol: PortForwardProtocol::Tcp,
+                lease: None,
+            })
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        if status.is_success() {
+            return Ok(response.json::<PortListenResponse>().await.unwrap());
+        }
+        let body = response
+            .text()
+            .await
+            .unwrap_or_else(|err| format!("failed to read response body: {err}"));
+        last_response = format!("last rebind response status={status}, body={body}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    Err(last_response)
 }
