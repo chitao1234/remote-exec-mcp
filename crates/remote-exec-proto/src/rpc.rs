@@ -372,7 +372,31 @@ pub struct RpcErrorBody {
 
 #[cfg(test)]
 mod tests {
-    use super::{ExecStartRequest, ExecWriteRequest, ImageReadRequest, PatchApplyRequest};
+    use std::collections::BTreeMap;
+
+    use super::{
+        ExecStartRequest, ExecWriteRequest, ImageReadRequest, PatchApplyRequest,
+        TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
+        TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER,
+        TRANSFER_SOURCE_TYPE_HEADER, TRANSFER_SYMLINK_MODE_HEADER, TransferCompression,
+        TransferExportMetadata, TransferHeaderError, TransferHeaderErrorKind,
+        TransferImportMetadata, TransferOverwriteMode, TransferSourceType, TransferSymlinkMode,
+        parse_transfer_export_metadata, parse_transfer_import_metadata,
+        transfer_export_header_pairs, transfer_import_header_pairs,
+    };
+
+    fn header_map(headers: &[(&'static str, &'static str)]) -> BTreeMap<&'static str, String> {
+        headers
+            .iter()
+            .map(|(name, value)| (*name, (*value).to_string()))
+            .collect()
+    }
+
+    fn lookup<'a>(
+        headers: &'a BTreeMap<&'static str, String>,
+    ) -> impl FnMut(&'static str) -> Result<Option<String>, TransferHeaderError> + 'a {
+        move |name| Ok(headers.get(name).cloned())
+    }
 
     #[test]
     fn exec_start_request_omits_none_fields() {
@@ -470,5 +494,146 @@ mod tests {
                 "protocol": "tcp",
             })
         );
+    }
+
+    #[test]
+    fn transfer_header_pairs_render_canonical_import_metadata() {
+        let metadata = TransferImportMetadata {
+            destination_path: "/tmp/output".to_string(),
+            overwrite: TransferOverwriteMode::Replace,
+            create_parent: true,
+            source_type: TransferSourceType::Directory,
+            compression: TransferCompression::Zstd,
+            symlink_mode: TransferSymlinkMode::Follow,
+        };
+
+        assert_eq!(
+            transfer_import_header_pairs(&metadata),
+            vec![
+                (TRANSFER_DESTINATION_PATH_HEADER, "/tmp/output".to_string()),
+                (TRANSFER_OVERWRITE_HEADER, "replace".to_string()),
+                (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
+                (TRANSFER_SOURCE_TYPE_HEADER, "directory".to_string()),
+                (TRANSFER_COMPRESSION_HEADER, "zstd".to_string()),
+                (TRANSFER_SYMLINK_MODE_HEADER, "follow".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn transfer_header_pairs_render_canonical_export_metadata() {
+        let metadata = TransferExportMetadata {
+            source_type: TransferSourceType::Multiple,
+            compression: TransferCompression::None,
+        };
+
+        assert_eq!(
+            transfer_export_header_pairs(&metadata),
+            vec![
+                (TRANSFER_SOURCE_TYPE_HEADER, "multiple".to_string()),
+                (TRANSFER_COMPRESSION_HEADER, "none".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn transfer_header_parser_reads_import_metadata_and_optional_defaults() {
+        let headers = header_map(&[
+            (TRANSFER_DESTINATION_PATH_HEADER, "/tmp/output"),
+            (TRANSFER_OVERWRITE_HEADER, "merge"),
+            (TRANSFER_CREATE_PARENT_HEADER, "false"),
+            (TRANSFER_SOURCE_TYPE_HEADER, "file"),
+        ]);
+
+        let parsed = parse_transfer_import_metadata(lookup(&headers)).unwrap();
+
+        assert_eq!(
+            parsed,
+            TransferImportMetadata {
+                destination_path: "/tmp/output".to_string(),
+                overwrite: TransferOverwriteMode::Merge,
+                create_parent: false,
+                source_type: TransferSourceType::File,
+                compression: TransferCompression::None,
+                symlink_mode: TransferSymlinkMode::Preserve,
+            }
+        );
+    }
+
+    #[test]
+    fn transfer_header_parser_rejects_missing_required_import_headers() {
+        for missing in [
+            TRANSFER_DESTINATION_PATH_HEADER,
+            TRANSFER_OVERWRITE_HEADER,
+            TRANSFER_CREATE_PARENT_HEADER,
+            TRANSFER_SOURCE_TYPE_HEADER,
+        ] {
+            let mut headers = header_map(&[
+                (TRANSFER_DESTINATION_PATH_HEADER, "/tmp/output"),
+                (TRANSFER_OVERWRITE_HEADER, "merge"),
+                (TRANSFER_CREATE_PARENT_HEADER, "true"),
+                (TRANSFER_SOURCE_TYPE_HEADER, "file"),
+            ]);
+            headers.remove(missing);
+
+            let err = parse_transfer_import_metadata(lookup(&headers)).unwrap_err();
+
+            assert_eq!(err.kind, TransferHeaderErrorKind::Missing);
+            assert_eq!(err.header, missing);
+        }
+    }
+
+    #[test]
+    fn transfer_header_parser_rejects_invalid_import_metadata_values() {
+        for (header, value) in [
+            (TRANSFER_OVERWRITE_HEADER, "clobber"),
+            (TRANSFER_CREATE_PARENT_HEADER, "yes"),
+            (TRANSFER_SOURCE_TYPE_HEADER, "folder"),
+            (TRANSFER_COMPRESSION_HEADER, "gzip"),
+            (TRANSFER_SYMLINK_MODE_HEADER, "copy"),
+        ] {
+            let mut headers = header_map(&[
+                (TRANSFER_DESTINATION_PATH_HEADER, "/tmp/output"),
+                (TRANSFER_OVERWRITE_HEADER, "merge"),
+                (TRANSFER_CREATE_PARENT_HEADER, "true"),
+                (TRANSFER_SOURCE_TYPE_HEADER, "file"),
+                (TRANSFER_COMPRESSION_HEADER, "none"),
+                (TRANSFER_SYMLINK_MODE_HEADER, "preserve"),
+            ]);
+            headers.insert(header, value.to_string());
+
+            let err = parse_transfer_import_metadata(lookup(&headers)).unwrap_err();
+
+            assert_eq!(err.kind, TransferHeaderErrorKind::Invalid);
+            assert_eq!(err.header, header);
+        }
+    }
+
+    #[test]
+    fn transfer_header_parser_reads_export_metadata_defaults() {
+        let headers = header_map(&[(TRANSFER_SOURCE_TYPE_HEADER, "directory")]);
+
+        let parsed = parse_transfer_export_metadata(lookup(&headers)).unwrap();
+
+        assert_eq!(
+            parsed,
+            TransferExportMetadata {
+                source_type: TransferSourceType::Directory,
+                compression: TransferCompression::None,
+            }
+        );
+    }
+
+    #[test]
+    fn transfer_header_parser_rejects_invalid_export_metadata() {
+        let missing = BTreeMap::new();
+        let err = parse_transfer_export_metadata(lookup(&missing)).unwrap_err();
+        assert_eq!(err.kind, TransferHeaderErrorKind::Missing);
+        assert_eq!(err.header, TRANSFER_SOURCE_TYPE_HEADER);
+
+        let invalid = header_map(&[(TRANSFER_SOURCE_TYPE_HEADER, "folder")]);
+        let err = parse_transfer_export_metadata(lookup(&invalid)).unwrap_err();
+        assert_eq!(err.kind, TransferHeaderErrorKind::Invalid);
+        assert_eq!(err.header, TRANSFER_SOURCE_TYPE_HEADER);
     }
 }
