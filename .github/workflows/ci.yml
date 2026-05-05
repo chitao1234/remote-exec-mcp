@@ -65,6 +65,31 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --locked
 
+  rust-test-no-default-features:
+    name: Rust no-default-features (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Test broker without default features
+        run: cargo test -p remote-exec-broker --no-default-features --tests --locked
+
+      - name: Test daemon without default features
+        run: cargo test -p remote-exec-daemon --no-default-features --tests --locked
+
   rust-clippy:
     name: Rust clippy (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -95,6 +120,33 @@ jobs:
 
       - name: Run clippy
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+  rust-clippy-no-default-features:
+    name: Rust clippy no-default-features (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Run broker clippy without default features
+        run: cargo clippy -p remote-exec-broker --no-default-features --all-targets --locked -- -D warnings
+
+      - name: Run daemon clippy without default features
+        run: cargo clippy -p remote-exec-daemon --no-default-features --all-targets --locked -- -D warnings
 
   cpp:
     name: C++ daemon (${{ matrix.os }})
