@@ -2,6 +2,9 @@ mod support;
 
 use std::time::Duration;
 
+use remote_exec_broker::client::{Connection, RemoteExecClient};
+use remote_exec_proto::public::{ForwardPortProtocol, ForwardPortSpec, ForwardPortsInput};
+use remote_exec_proto::rpc::{PortForwardProtocol, PortListenResponse};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -219,6 +222,83 @@ async fn forward_ports_release_remote_listeners_when_broker_stops() {
         .await;
     assert_eq!(rebound.endpoint, listen_addr.to_string());
     cluster.daemon_a.port_listen_close(&rebound.bind_id).await;
+}
+
+#[tokio::test]
+async fn forward_ports_release_remote_listeners_after_broker_crash() {
+    let daemon_a = support::DaemonFixture::spawn("builder-a").await;
+    let daemon_b = support::DaemonFixture::spawn("builder-b").await;
+    let mut broker = support::HttpBrokerFixture::spawn(&daemon_a, &daemon_b).await;
+    let client = RemoteExecClient::connect(Connection::StreamableHttp {
+        url: broker.url.clone(),
+    })
+    .await
+    .unwrap();
+    let listen_addr = support::allocate_addr();
+
+    let open = client
+        .call_tool(
+            "forward_ports",
+            &ForwardPortsInput::Open {
+                listen_side: "builder-a".to_string(),
+                connect_side: "local".to_string(),
+                forwards: vec![ForwardPortSpec {
+                    listen_endpoint: listen_addr.to_string(),
+                    connect_endpoint: "127.0.0.1:9".to_string(),
+                    protocol: ForwardPortProtocol::Tcp,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+    assert!(!open.is_error, "open failed: {}", open.text_output);
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    broker.kill().await;
+
+    let rebound = wait_for_daemon_listener_rebind(
+        &daemon_a,
+        &listen_addr.to_string(),
+        Duration::from_secs(10),
+    )
+    .await;
+    daemon_a.port_listen_close(&rebound.bind_id).await;
+
+    let reopened_broker = support::BrokerFixture::spawn(&daemon_a, &daemon_b).await;
+    let reopened = reopened_broker
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "builder-a",
+                "connect_side": "local",
+                "forwards": [{
+                    "listen_endpoint": listen_addr.to_string(),
+                    "connect_endpoint": "127.0.0.1:9",
+                    "protocol": "tcp"
+                }]
+            }),
+        )
+        .await;
+    let reopened_forward_id = reopened.structured_content["forwards"][0]["forward_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        reopened.structured_content["forwards"][0]["listen_endpoint"],
+        listen_addr.to_string()
+    );
+
+    let closed = reopened_broker
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "close",
+                "forward_ids": [reopened_forward_id]
+            }),
+        )
+        .await;
+    assert_eq!(closed.structured_content["forwards"][0]["status"], "closed");
 }
 
 #[tokio::test]
@@ -586,4 +666,27 @@ async fn wait_for_forward_status_timeout(
     }
 
     None
+}
+
+async fn wait_for_daemon_listener_rebind(
+    daemon: &support::DaemonFixture,
+    endpoint: &str,
+    timeout: Duration,
+) -> PortListenResponse {
+    let started = std::time::Instant::now();
+    loop {
+        let response = daemon
+            .try_port_listen(endpoint, PortForwardProtocol::Tcp)
+            .await;
+        if response.status().is_success() {
+            return response.json::<PortListenResponse>().await.unwrap();
+        }
+        if started.elapsed() >= timeout {
+            panic!(
+                "daemon listener on {endpoint} was not released after broker crash; last status={}",
+                response.status()
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
 }

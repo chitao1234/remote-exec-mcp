@@ -12,9 +12,10 @@ use remote_exec_proto::public::{
 use remote_exec_proto::rpc::{
     EmptyResponse, PortConnectRequest, PortConnectResponse, PortConnectionCloseRequest,
     PortConnectionReadRequest, PortConnectionReadResponse, PortConnectionWriteRequest,
-    PortForwardProtocol as RpcPortForwardProtocol, PortListenAcceptRequest,
-    PortListenAcceptResponse, PortListenCloseRequest, PortListenRequest, PortListenResponse,
-    PortUdpDatagramReadRequest, PortUdpDatagramReadResponse, PortUdpDatagramWriteRequest,
+    PortForwardLease, PortForwardProtocol as RpcPortForwardProtocol, PortLeaseRenewRequest,
+    PortListenAcceptRequest, PortListenAcceptResponse, PortListenCloseRequest, PortListenRequest,
+    PortListenResponse, PortUdpDatagramReadRequest, PortUdpDatagramReadResponse,
+    PortUdpDatagramWriteRequest,
 };
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
@@ -25,6 +26,8 @@ use crate::local_port_backend::LocalPortClient;
 
 const PORT_BIND_CLOSED_CODE: &str = "port_bind_closed";
 const PORT_CONNECTION_CLOSED_CODE: &str = "port_connection_closed";
+const FORWARD_LEASE_TTL_MS: u64 = 4_000;
+const FORWARD_LEASE_RENEW_INTERVAL_MS: u64 = 1_000;
 
 #[derive(Clone)]
 pub enum SideHandle {
@@ -75,6 +78,16 @@ impl SideHandle {
         match self {
             Self::Target { handle, .. } => handle.port_listen_close(req).await,
             Self::Local(client) => client.port_listen_close(req).await,
+        }
+    }
+
+    pub async fn port_lease_renew(
+        &self,
+        req: &PortLeaseRenewRequest,
+    ) -> Result<EmptyResponse, DaemonClientError> {
+        match self {
+            Self::Target { handle, .. } => handle.port_lease_renew(req).await,
+            Self::Local(client) => client.port_lease_renew(req).await,
         }
     }
 
@@ -223,6 +236,7 @@ pub struct PortForwardRecord {
     pub entry: ForwardPortEntry,
     pub bind_id: String,
     pub connect_bind_id: Option<String>,
+    pub lease_ids: Vec<LeaseOwner>,
     pub connect_side: SideHandle,
     pub listen_side: SideHandle,
     pub cancel: CancellationToken,
@@ -241,7 +255,14 @@ struct ForwardRuntime {
     bind_id: String,
     connect_bind_id: Option<String>,
     connect_endpoint: String,
+    lease_ids: Vec<LeaseOwner>,
     cancel: CancellationToken,
+}
+
+#[derive(Clone)]
+pub struct LeaseOwner {
+    side: SideHandle,
+    lease_id: String,
 }
 
 pub async fn open_forward(
@@ -253,11 +274,24 @@ pub async fn open_forward(
     let listen_endpoint = normalize_endpoint(&spec.listen_endpoint)?;
     let connect_endpoint = ensure_nonzero_connect_endpoint(&spec.connect_endpoint)?;
     let protocol = rpc_protocol(spec.protocol);
+    let listen_lease_id = format!("lease_{}", uuid::Uuid::new_v4().simple());
+    let mut lease_ids = vec![LeaseOwner {
+        side: listen_side.clone(),
+        lease_id: listen_lease_id.clone(),
+    }];
     if spec.protocol == PublicForwardPortProtocol::Udp {
         validate_udp_connector_endpoint(&connect_endpoint)?;
     }
     let connect_bind_id = if spec.protocol == PublicForwardPortProtocol::Udp {
-        Some(open_udp_connector(&connect_side, &connect_endpoint).await?)
+        let connector_lease_id = format!("lease_{}", uuid::Uuid::new_v4().simple());
+        let bind_id =
+            open_udp_connector(&connect_side, &connect_endpoint, connector_lease_id.clone())
+                .await?;
+        lease_ids.push(LeaseOwner {
+            side: connect_side.clone(),
+            lease_id: connector_lease_id,
+        });
+        Some(bind_id)
     } else {
         None
     };
@@ -266,6 +300,7 @@ pub async fn open_forward(
         .port_listen(&PortListenRequest {
             endpoint: listen_endpoint.clone(),
             protocol: protocol.clone(),
+            lease: Some(port_forward_lease(listen_lease_id)),
         })
         .await
         .with_context(|| {
@@ -298,6 +333,7 @@ pub async fn open_forward(
         bind_id: listen_response.bind_id.clone(),
         connect_bind_id: connect_bind_id.clone(),
         connect_endpoint: connect_endpoint.clone(),
+        lease_ids: lease_ids.clone(),
         cancel: cancel.clone(),
     };
     spawn_forward(runtime, store);
@@ -318,6 +354,7 @@ pub async fn open_forward(
             entry,
             bind_id: listen_response.bind_id,
             connect_bind_id,
+            lease_ids,
             connect_side,
             listen_side,
             cancel,
@@ -355,6 +392,7 @@ pub async fn close_all(store: &PortForwardStore) {
 
 fn spawn_forward(runtime: ForwardRuntime, store: PortForwardStore) {
     tokio::spawn(async move {
+        spawn_lease_renewer(runtime.lease_ids.clone(), runtime.cancel.clone());
         let result = match runtime.protocol {
             RpcPortForwardProtocol::Tcp => run_tcp_forward(runtime.clone()).await,
             RpcPortForwardProtocol::Udp => run_udp_forward(runtime.clone()).await,
@@ -370,6 +408,7 @@ fn spawn_forward(runtime: ForwardRuntime, store: PortForwardStore) {
                 );
                 return;
             }
+            runtime.cancel.cancel();
             store
                 .mark_failed(&runtime.forward_id, err.to_string())
                 .await;
@@ -400,9 +439,16 @@ async fn run_tcp_forward(runtime: ForwardRuntime) -> anyhow::Result<()> {
                         runtime.bind_id
                     )
                 })?;
+                let connection_lease_id = format!("lease_{}", uuid::Uuid::new_v4().simple());
+                let connection_lease = port_forward_lease(connection_lease_id.clone());
+                let connection_lease_owner = LeaseOwner {
+                    side: runtime.connect_side.clone(),
+                    lease_id: connection_lease_id,
+                };
                 let connect_response = match runtime.connect_side.port_connect(&PortConnectRequest {
                     endpoint: runtime.connect_endpoint.clone(),
                     protocol: RpcPortForwardProtocol::Tcp,
+                    lease: Some(connection_lease),
                 }).await {
                     Ok(response) => response,
                     Err(err) => {
@@ -418,6 +464,7 @@ async fn run_tcp_forward(runtime: ForwardRuntime) -> anyhow::Result<()> {
                     accepted.connection_id,
                     runtime.connect_side.clone(),
                     connect_response.connection_id,
+                    connection_lease_owner,
                 );
             }
         }
@@ -461,12 +508,14 @@ async fn run_udp_forward(runtime: ForwardRuntime) -> anyhow::Result<()> {
 async fn open_udp_connector(
     connect_side: &SideHandle,
     connect_endpoint: &str,
+    lease_id: String,
 ) -> anyhow::Result<String> {
     let bind_endpoint = udp_connector_endpoint(connect_endpoint)?;
     let response = connect_side
         .port_listen(&PortListenRequest {
             endpoint: bind_endpoint.to_string(),
             protocol: RpcPortForwardProtocol::Udp,
+            lease: Some(port_forward_lease(lease_id)),
         })
         .await
         .with_context(|| format!("opening udp connector on `{}`", connect_side.name()))?;
@@ -479,6 +528,7 @@ fn spawn_tcp_connection_pumps(
     left_connection_id: String,
     right_side: SideHandle,
     right_connection_id: String,
+    lease_owner: LeaseOwner,
 ) {
     let cleanup_left_side = left_side.clone();
     let cleanup_right_side = right_side.clone();
@@ -501,6 +551,8 @@ fn spawn_tcp_connection_pumps(
         left_connection_id.clone(),
     );
     tokio::spawn(async move {
+        let renew_cancel = CancellationToken::new();
+        spawn_lease_renewer(vec![lease_owner], renew_cancel.clone());
         tokio::select! {
             result = left_to_right => {
                 log_pump_result(&log_left_connection_id, &log_right_connection_id, result);
@@ -509,6 +561,7 @@ fn spawn_tcp_connection_pumps(
                 log_pump_result(&log_right_connection_id, &log_left_connection_id, result);
             }
         }
+        renew_cancel.cancel();
         close_connection_pair(
             cleanup_left_side,
             cleanup_left_connection_id,
@@ -579,6 +632,45 @@ async fn close_connection_pair(
     );
 }
 
+fn spawn_lease_renewer(lease_ids: Vec<LeaseOwner>, cancel: CancellationToken) {
+    if lease_ids.is_empty() {
+        return;
+    }
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(
+            FORWARD_LEASE_RENEW_INTERVAL_MS,
+        ));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                _ = cancel.cancelled() => return,
+                _ = interval.tick() => {}
+            }
+
+            for lease in &lease_ids {
+                let result = lease
+                    .side
+                    .port_lease_renew(&PortLeaseRenewRequest {
+                        lease_id: lease.lease_id.clone(),
+                        ttl_ms: FORWARD_LEASE_TTL_MS,
+                    })
+                    .await;
+                if let Err(err) = result {
+                    tracing::debug!(
+                        lease_id = %lease.lease_id,
+                        side = %lease.side.name(),
+                        error = %err,
+                        "port forward lease renew stopped"
+                    );
+                    cancel.cancel();
+                    return;
+                }
+            }
+        }
+    });
+}
+
 fn log_pump_result(from: &str, to: &str, result: anyhow::Result<()>) {
     if let Err(err) = result {
         tracing::debug!(
@@ -604,6 +696,13 @@ fn is_expected_close_interruption(err: &anyhow::Error) -> bool {
                 code == PORT_BIND_CLOSED_CODE || code == PORT_CONNECTION_CLOSED_CODE
             })
     })
+}
+
+fn port_forward_lease(lease_id: String) -> PortForwardLease {
+    PortForwardLease {
+        lease_id,
+        ttl_ms: FORWARD_LEASE_TTL_MS,
+    }
 }
 
 fn rpc_protocol(protocol: PublicForwardPortProtocol) -> RpcPortForwardProtocol {

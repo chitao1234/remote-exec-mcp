@@ -3,8 +3,9 @@ mod support;
 use base64::Engine;
 use remote_exec_proto::rpc::{
     EmptyResponse, PortConnectionCloseRequest, PortConnectionReadRequest,
-    PortConnectionReadResponse, PortConnectionWriteRequest, PortForwardProtocol,
-    PortListenAcceptRequest, PortListenRequest, PortListenResponse, PortUdpDatagramReadRequest,
+    PortConnectionReadResponse, PortConnectionWriteRequest, PortForwardLease, PortForwardProtocol,
+    PortLeaseRenewRequest, PortListenAcceptRequest, PortListenRequest, PortListenResponse,
+    PortUdpDatagramReadRequest,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -17,6 +18,7 @@ async fn port_forward_listen_normalizes_bare_port_and_closes() {
         .json(&PortListenRequest {
             endpoint: "0".to_string(),
             protocol: PortForwardProtocol::Tcp,
+            lease: None,
         })
         .send()
         .await
@@ -52,6 +54,7 @@ async fn port_forward_accept_read_write_and_close_tcp_connection() {
         .json(&PortListenRequest {
             endpoint: "127.0.0.1:0".to_string(),
             protocol: PortForwardProtocol::Tcp,
+            lease: None,
         })
         .send()
         .await
@@ -141,6 +144,7 @@ async fn port_forward_pending_accept_returns_closed_after_listen_close() {
         .json(&PortListenRequest {
             endpoint: "127.0.0.1:0".to_string(),
             protocol: PortForwardProtocol::Tcp,
+            lease: None,
         })
         .send()
         .await
@@ -197,6 +201,7 @@ async fn port_forward_pending_udp_read_returns_closed_after_listen_close() {
         .json(&PortListenRequest {
             endpoint: "127.0.0.1:0".to_string(),
             protocol: PortForwardProtocol::Udp,
+            lease: None,
         })
         .send()
         .await
@@ -253,6 +258,7 @@ async fn port_forward_pending_connection_read_returns_closed_after_connection_cl
         .json(&PortListenRequest {
             endpoint: "127.0.0.1:0".to_string(),
             protocol: PortForwardProtocol::Tcp,
+            lease: None,
         })
         .send()
         .await
@@ -318,4 +324,129 @@ async fn port_forward_pending_connection_read_returns_closed_after_connection_cl
         .await
         .unwrap();
     assert_eq!(err.code, "port_connection_closed");
+}
+
+#[tokio::test]
+async fn leased_port_forward_listener_can_be_reclaimed_after_expiry() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let reserved = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = reserved.local_addr().unwrap().to_string();
+    drop(reserved);
+
+    let response = fixture
+        .client
+        .post(fixture.url("/v1/port/listen"))
+        .json(&PortListenRequest {
+            endpoint: endpoint.clone(),
+            protocol: PortForwardProtocol::Tcp,
+            lease: Some(PortForwardLease {
+                lease_id: "lease-test".to_string(),
+                ttl_ms: 300,
+            }),
+        })
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let listen = response.json::<PortListenResponse>().await.unwrap();
+    assert_eq!(listen.endpoint, endpoint);
+
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    let rebound = fixture
+        .client
+        .post(fixture.url("/v1/port/listen"))
+        .json(&PortListenRequest {
+            endpoint: endpoint.clone(),
+            protocol: PortForwardProtocol::Tcp,
+            lease: None,
+        })
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(rebound.status(), reqwest::StatusCode::OK);
+    let rebound = rebound.json::<PortListenResponse>().await.unwrap();
+    assert_eq!(rebound.endpoint, endpoint);
+
+    fixture
+        .client
+        .post(fixture.url("/v1/port/listen/close"))
+        .json(&remote_exec_proto::rpc::PortListenCloseRequest {
+            bind_id: rebound.bind_id,
+        })
+        .send()
+        .await
+        .unwrap()
+        .json::<EmptyResponse>()
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn late_port_forward_lease_renew_is_ignored_after_expiry() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let reserved = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = reserved.local_addr().unwrap().to_string();
+    drop(reserved);
+
+    let response = fixture
+        .client
+        .post(fixture.url("/v1/port/listen"))
+        .json(&PortListenRequest {
+            endpoint: endpoint.clone(),
+            protocol: PortForwardProtocol::Tcp,
+            lease: Some(PortForwardLease {
+                lease_id: "lease-late-renew".to_string(),
+                ttl_ms: 300,
+            }),
+        })
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let listen = response.json::<PortListenResponse>().await.unwrap();
+    assert_eq!(listen.endpoint, endpoint);
+
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    let renew = fixture
+        .client
+        .post(fixture.url("/v1/port/lease/renew"))
+        .json(&PortLeaseRenewRequest {
+            lease_id: "lease-late-renew".to_string(),
+            ttl_ms: 300,
+        })
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(renew.status(), reqwest::StatusCode::OK);
+    renew.json::<EmptyResponse>().await.unwrap();
+
+    let rebound = fixture
+        .client
+        .post(fixture.url("/v1/port/listen"))
+        .json(&PortListenRequest {
+            endpoint: endpoint.clone(),
+            protocol: PortForwardProtocol::Tcp,
+            lease: None,
+        })
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(rebound.status(), reqwest::StatusCode::OK);
+    let rebound = rebound.json::<PortListenResponse>().await.unwrap();
+    assert_eq!(rebound.endpoint, endpoint);
+
+    fixture
+        .client
+        .post(fixture.url("/v1/port/listen/close"))
+        .json(&remote_exec_proto::rpc::PortListenCloseRequest {
+            bind_id: rebound.bind_id,
+        })
+        .send()
+        .await
+        .unwrap()
+        .json::<EmptyResponse>()
+        .await
+        .unwrap();
 }

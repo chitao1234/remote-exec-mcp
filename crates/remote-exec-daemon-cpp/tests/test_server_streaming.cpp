@@ -455,6 +455,52 @@ int main() {
         "port_connection_closed"
     );
 
+    const Json leased_listen = Json::parse(
+        response_body(
+            run_single_request(
+                state,
+                json_post_request(
+                    "/v1/port/listen",
+                    Json{
+                        {"endpoint", "127.0.0.1:0"},
+                        {"protocol", "tcp"},
+                        {"lease", Json{{"lease_id", "lease-late-renew"}, {"ttl_ms", 300}}}
+                    }
+                )
+            )
+        )
+    );
+    const std::string leased_endpoint = leased_listen.at("endpoint").get<std::string>();
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    const std::string renew_response = run_single_request(
+        state,
+        json_post_request(
+            "/v1/port/lease/renew",
+            Json{{"lease_id", "lease-late-renew"}, {"ttl_ms", 300}}
+        )
+    );
+    assert(renew_response.find("HTTP/1.1 200 OK\r\n") == 0);
+    const Json rebound_listen = Json::parse(
+        response_body(
+            run_single_request(
+                state,
+                json_post_request(
+                    "/v1/port/listen",
+                    Json{{"endpoint", leased_endpoint}, {"protocol", "tcp"}}
+                )
+            )
+        )
+    );
+    assert(rebound_listen.at("endpoint").get<std::string>() == leased_endpoint);
+    const std::string close_rebound_response = run_single_request(
+        state,
+        json_post_request(
+            "/v1/port/listen/close",
+            Json{{"bind_id", rebound_listen.at("bind_id").get<std::string>()}}
+        )
+    );
+    assert(close_rebound_response.find("HTTP/1.1 200 OK\r\n") == 0);
+
     run_single_request_and_abort_client(
         state,
         json_post_request(

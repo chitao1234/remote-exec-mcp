@@ -4,11 +4,11 @@ use remote_exec_proto::rpc::{
     EmptyResponse, ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest,
     ImageReadResponse, PatchApplyRequest, PatchApplyResponse, PortConnectRequest,
     PortConnectResponse, PortConnectionCloseRequest, PortConnectionReadRequest,
-    PortConnectionReadResponse, PortConnectionWriteRequest, PortListenAcceptRequest,
-    PortListenAcceptResponse, PortListenCloseRequest, PortListenRequest, PortListenResponse,
-    PortUdpDatagramReadRequest, PortUdpDatagramReadResponse, PortUdpDatagramWriteRequest,
-    TargetInfoResponse, TransferExportRequest, TransferImportRequest, TransferImportResponse,
-    TransferPathInfoRequest, TransferPathInfoResponse,
+    PortConnectionReadResponse, PortConnectionWriteRequest, PortLeaseRenewRequest,
+    PortListenAcceptRequest, PortListenAcceptResponse, PortListenCloseRequest, PortListenRequest,
+    PortListenResponse, PortUdpDatagramReadRequest, PortUdpDatagramReadResponse,
+    PortUdpDatagramWriteRequest, TargetInfoResponse, TransferExportRequest, TransferImportRequest,
+    TransferImportResponse, TransferPathInfoRequest, TransferPathInfoResponse,
 };
 use tokio::sync::Mutex;
 
@@ -217,6 +217,16 @@ impl TargetHandle {
         match &self.backend {
             TargetBackend::Remote(client) => client.port_listen_close(req).await,
             TargetBackend::Local(client) => client.port_listen_close(req).await,
+        }
+    }
+
+    pub async fn port_lease_renew(
+        &self,
+        req: &PortLeaseRenewRequest,
+    ) -> Result<EmptyResponse, DaemonClientError> {
+        match &self.backend {
+            TargetBackend::Remote(client) => client.port_lease_renew(req).await,
+            TargetBackend::Local(client) => client.port_lease_renew(req).await,
         }
     }
 

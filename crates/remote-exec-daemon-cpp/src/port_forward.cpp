@@ -9,10 +9,12 @@
 #include "port_forward_codec.h"
 #include "port_forward_endpoint.h"
 #include "port_forward_socket_ops.h"
+#include "platform.h"
 
 namespace {
 
 const std::size_t READ_BUF_SIZE = 64U * 1024U;
+const std::uint64_t MIN_LEASE_TTL_MS = 250U;
 
 std::atomic<unsigned long> next_port_id(1UL);
 
@@ -79,15 +81,23 @@ const std::string& PortForwardError::code() const {
     return code_;
 }
 
-TcpConnection::TcpConnection(SOCKET socket_value) : socket(socket_value), closed(false) {}
+TcpConnection::TcpConnection(SOCKET socket_value, const std::string& lease)
+    : socket(socket_value), closed(false), lease_id(lease) {}
 
-SharedSocket::SharedSocket(SOCKET socket_value) : socket(socket_value), closed(false) {}
+SharedSocket::SharedSocket(SOCKET socket_value, const std::string& lease)
+    : socket(socket_value), closed(false), lease_id(lease) {}
 
 PortForwardStore::PortForwardStore() {}
 
 PortForwardStore::~PortForwardStore() {}
 
-Json PortForwardStore::listen(const std::string& endpoint, const std::string& protocol) {
+Json PortForwardStore::listen(
+    const std::string& endpoint,
+    const std::string& protocol,
+    const std::string& lease_id,
+    std::uint64_t lease_ttl_ms
+) {
+    sweep_expired_leases();
     const std::string normalized = normalize_port_forward_endpoint(endpoint);
     const SOCKET socket_value = bind_port_forward_socket(normalized, protocol);
     UniqueSocket socket(socket_value);
@@ -98,11 +108,11 @@ Json PortForwardStore::listen(const std::string& endpoint, const std::string& pr
         BasicLockGuard lock(mutex_);
         if (protocol == "tcp") {
             tcp_listeners_[bind_id] = std::shared_ptr<SharedSocket>(
-                new SharedSocket(socket.release())
+                new SharedSocket(socket.release(), lease_id)
             );
         } else if (protocol == "udp") {
             udp_sockets_[bind_id] = std::shared_ptr<SharedSocket>(
-                new SharedSocket(socket.release())
+                new SharedSocket(socket.release(), lease_id)
             );
         } else {
             throw PortForwardError(
@@ -110,6 +120,9 @@ Json PortForwardStore::listen(const std::string& endpoint, const std::string& pr
                 "bad_request",
                 "unsupported port forward protocol `" + protocol + "`"
             );
+        }
+        if (!lease_id.empty()) {
+            register_bind_lease(lease_id, lease_ttl_ms, bind_id);
         }
     }
 
@@ -123,6 +136,7 @@ Json PortForwardStore::listen(const std::string& endpoint, const std::string& pr
 }
 
 Json PortForwardStore::listen_accept(const std::string& bind_id) {
+    sweep_expired_leases();
     const std::shared_ptr<SharedSocket> listener = tcp_listener(bind_id);
 
     sockaddr_storage peer_address;
@@ -148,8 +162,11 @@ Json PortForwardStore::listen_accept(const std::string& bind_id) {
     {
         BasicLockGuard lock(mutex_);
         tcp_connections_[connection_id] = std::shared_ptr<TcpConnection>(
-            new TcpConnection(accepted)
+            new TcpConnection(accepted, listener->lease_id)
         );
+        if (!listener->lease_id.empty()) {
+            track_connection_lease(listener->lease_id, connection_id);
+        }
     }
 
     log_message(
@@ -164,6 +181,7 @@ Json PortForwardStore::listen_accept(const std::string& bind_id) {
 }
 
 Json PortForwardStore::listen_close(const std::string& bind_id) {
+    sweep_expired_leases();
     std::shared_ptr<SharedSocket> listener;
     std::shared_ptr<SharedSocket> socket_value;
     {
@@ -182,16 +200,35 @@ Json PortForwardStore::listen_close(const std::string& bind_id) {
         }
     }
     if (listener.get() != NULL) {
+        if (!listener->lease_id.empty()) {
+            untrack_bind_lease(listener->lease_id, bind_id);
+        }
         mark_shared_socket_closed(listener);
     }
     if (socket_value.get() != NULL) {
+        if (!socket_value->lease_id.empty()) {
+            untrack_bind_lease(socket_value->lease_id, bind_id);
+        }
         mark_shared_socket_closed(socket_value);
     }
     log_message(LOG_DEBUG, "port_forward", "closed bind `" + bind_id + "`");
     return Json::object();
 }
 
-Json PortForwardStore::connect(const std::string& endpoint, const std::string& protocol) {
+Json PortForwardStore::lease_renew(const std::string& lease_id, std::uint64_t lease_ttl_ms) {
+    sweep_expired_leases();
+    BasicLockGuard lock(mutex_);
+    renew_lease(lease_id, lease_ttl_ms);
+    return Json::object();
+}
+
+Json PortForwardStore::connect(
+    const std::string& endpoint,
+    const std::string& protocol,
+    const std::string& lease_id,
+    std::uint64_t lease_ttl_ms
+) {
+    sweep_expired_leases();
     if (protocol == "udp") {
         throw PortForwardError(
             400,
@@ -213,8 +250,11 @@ Json PortForwardStore::connect(const std::string& endpoint, const std::string& p
     {
         BasicLockGuard lock(mutex_);
         tcp_connections_[connection_id] = std::shared_ptr<TcpConnection>(
-            new TcpConnection(socket_value)
+            new TcpConnection(socket_value, lease_id)
         );
+        if (!lease_id.empty()) {
+            register_connection_lease(lease_id, lease_ttl_ms, connection_id);
+        }
     }
     log_message(
         LOG_DEBUG,
@@ -226,6 +266,7 @@ Json PortForwardStore::connect(const std::string& endpoint, const std::string& p
 }
 
 Json PortForwardStore::connection_read(const std::string& connection_id) {
+    sweep_expired_leases();
     const std::shared_ptr<TcpConnection> connection = tcp_connection(connection_id);
     BasicLockGuard read_lock(connection->read_mutex);
     if (tcp_connection_closed(connection)) {
@@ -261,6 +302,7 @@ Json PortForwardStore::connection_write(
     const std::string& connection_id,
     const std::string& data
 ) {
+    sweep_expired_leases();
     const std::shared_ptr<TcpConnection> connection = tcp_connection(connection_id);
     const std::string bytes = base64_decode_bytes(data);
     BasicLockGuard write_lock(connection->write_mutex);
@@ -279,6 +321,7 @@ Json PortForwardStore::connection_write(
 }
 
 Json PortForwardStore::connection_close(const std::string& connection_id) {
+    sweep_expired_leases();
     std::shared_ptr<TcpConnection> connection;
     {
         BasicLockGuard lock(mutex_);
@@ -290,6 +333,9 @@ Json PortForwardStore::connection_close(const std::string& connection_id) {
         }
     }
     if (connection.get() != NULL) {
+        if (!connection->lease_id.empty()) {
+            untrack_connection_lease(connection->lease_id, connection_id);
+        }
         mark_tcp_connection_closed(connection);
     }
     log_message(LOG_DEBUG, "port_forward", "closed tcp connection `" + connection_id + "`");
@@ -297,6 +343,7 @@ Json PortForwardStore::connection_close(const std::string& connection_id) {
 }
 
 Json PortForwardStore::udp_datagram_read(const std::string& bind_id) {
+    sweep_expired_leases();
     const std::shared_ptr<SharedSocket> socket_value = udp_socket(bind_id);
     if (shared_socket_closed(socket_value)) {
         throw bind_closed_error(bind_id);
@@ -342,6 +389,7 @@ Json PortForwardStore::udp_datagram_write(
     const std::string& peer,
     const std::string& data
 ) {
+    sweep_expired_leases();
     const std::shared_ptr<SharedSocket> socket_value = udp_socket(bind_id);
     const std::string bytes = base64_decode_bytes(data);
     if (shared_socket_closed(socket_value)) {
@@ -399,4 +447,140 @@ std::shared_ptr<SharedSocket> PortForwardStore::udp_socket(const std::string& bi
         throw PortForwardError(400, "unknown_port_bind", "unknown bind `" + bind_id + "`");
     }
     return it->second;
+}
+
+void PortForwardStore::sweep_expired_leases() {
+    std::vector<std::shared_ptr<SharedSocket> > expired_binds;
+    std::vector<std::shared_ptr<TcpConnection> > expired_connections;
+    {
+        BasicLockGuard lock(mutex_);
+        const std::uint64_t now = platform::monotonic_ms();
+        std::vector<std::string> expired_ids;
+        for (std::map<std::string, LeaseEntry>::const_iterator it = leases_.begin();
+             it != leases_.end();
+             ++it) {
+            if (it->second.expires_at_ms <= now) {
+                expired_ids.push_back(it->first);
+            }
+        }
+        for (std::size_t i = 0; i < expired_ids.size(); ++i) {
+            std::map<std::string, LeaseEntry>::iterator lease_it = leases_.find(expired_ids[i]);
+            if (lease_it == leases_.end()) {
+                continue;
+            }
+            for (std::set<std::string>::const_iterator bind_it = lease_it->second.binds.begin();
+                 bind_it != lease_it->second.binds.end();
+                 ++bind_it) {
+                std::map<std::string, std::shared_ptr<SharedSocket> >::iterator tcp_it =
+                    tcp_listeners_.find(*bind_it);
+                if (tcp_it != tcp_listeners_.end()) {
+                    expired_binds.push_back(tcp_it->second);
+                    tcp_listeners_.erase(tcp_it);
+                }
+                std::map<std::string, std::shared_ptr<SharedSocket> >::iterator udp_it =
+                    udp_sockets_.find(*bind_it);
+                if (udp_it != udp_sockets_.end()) {
+                    expired_binds.push_back(udp_it->second);
+                    udp_sockets_.erase(udp_it);
+                }
+            }
+            for (std::set<std::string>::const_iterator conn_it =
+                     lease_it->second.connections.begin();
+                 conn_it != lease_it->second.connections.end();
+                 ++conn_it) {
+                std::map<std::string, std::shared_ptr<TcpConnection> >::iterator tcp_conn_it =
+                    tcp_connections_.find(*conn_it);
+                if (tcp_conn_it != tcp_connections_.end()) {
+                    expired_connections.push_back(tcp_conn_it->second);
+                    tcp_connections_.erase(tcp_conn_it);
+                }
+            }
+            leases_.erase(lease_it);
+        }
+    }
+
+    for (std::size_t i = 0; i < expired_binds.size(); ++i) {
+        mark_shared_socket_closed(expired_binds[i]);
+    }
+    for (std::size_t i = 0; i < expired_connections.size(); ++i) {
+        mark_tcp_connection_closed(expired_connections[i]);
+    }
+}
+
+void PortForwardStore::register_bind_lease(
+    const std::string& lease_id,
+    std::uint64_t lease_ttl_ms,
+    const std::string& bind_id
+) {
+    LeaseEntry& entry = leases_[lease_id];
+    entry.expires_at_ms = lease_deadline_ms(lease_ttl_ms);
+    entry.binds.insert(bind_id);
+}
+
+void PortForwardStore::register_connection_lease(
+    const std::string& lease_id,
+    std::uint64_t lease_ttl_ms,
+    const std::string& connection_id
+) {
+    LeaseEntry& entry = leases_[lease_id];
+    entry.expires_at_ms = lease_deadline_ms(lease_ttl_ms);
+    entry.connections.insert(connection_id);
+}
+
+void PortForwardStore::renew_lease(
+    const std::string& lease_id,
+    std::uint64_t lease_ttl_ms
+) {
+    std::map<std::string, LeaseEntry>::iterator it = leases_.find(lease_id);
+    if (it == leases_.end()) {
+        // Late renewals can race with expiry cleanup after a broker crash; treat them as a no-op.
+        return;
+    }
+    it->second.expires_at_ms = lease_deadline_ms(lease_ttl_ms);
+}
+
+void PortForwardStore::track_connection_lease(
+    const std::string& lease_id,
+    const std::string& connection_id
+) {
+    std::map<std::string, LeaseEntry>::iterator it = leases_.find(lease_id);
+    if (it != leases_.end()) {
+        it->second.connections.insert(connection_id);
+    }
+}
+
+void PortForwardStore::untrack_bind_lease(
+    const std::string& lease_id,
+    const std::string& bind_id
+) {
+    std::map<std::string, LeaseEntry>::iterator it = leases_.find(lease_id);
+    if (it == leases_.end()) {
+        return;
+    }
+    it->second.binds.erase(bind_id);
+    if (it->second.binds.empty() && it->second.connections.empty()) {
+        leases_.erase(it);
+    }
+}
+
+void PortForwardStore::untrack_connection_lease(
+    const std::string& lease_id,
+    const std::string& connection_id
+) {
+    std::map<std::string, LeaseEntry>::iterator it = leases_.find(lease_id);
+    if (it == leases_.end()) {
+        return;
+    }
+    it->second.connections.erase(connection_id);
+    if (it->second.binds.empty() && it->second.connections.empty()) {
+        leases_.erase(it);
+    }
+}
+
+std::uint64_t PortForwardStore::lease_deadline_ms(std::uint64_t lease_ttl_ms) const {
+    if (lease_ttl_ms == 0U) {
+        throw PortForwardError(400, "invalid_port_lease", "port forward lease ttl_ms must be > 0");
+    }
+    const std::uint64_t ttl_ms = lease_ttl_ms < MIN_LEASE_TTL_MS ? MIN_LEASE_TTL_MS : lease_ttl_ms;
+    return platform::monotonic_ms() + ttl_ms;
 }

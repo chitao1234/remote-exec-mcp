@@ -6,6 +6,7 @@
 HttpResponse handle_port_listen(AppState& state, const HttpRequest& request);
 HttpResponse handle_port_listen_accept(AppState& state, const HttpRequest& request);
 HttpResponse handle_port_listen_close(AppState& state, const HttpRequest& request);
+HttpResponse handle_port_lease_renew(AppState& state, const HttpRequest& request);
 HttpResponse handle_port_connect(AppState& state, const HttpRequest& request);
 HttpResponse handle_port_connection_read(AppState& state, const HttpRequest& request);
 HttpResponse handle_port_connection_write(AppState& state, const HttpRequest& request);

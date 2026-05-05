@@ -138,6 +138,54 @@ impl BrokerFixture {
     }
 }
 
+pub struct HttpBrokerFixture {
+    _tempdir: TempDir,
+    pub url: String,
+    child: tokio::process::Child,
+}
+
+impl HttpBrokerFixture {
+    pub async fn spawn(daemon_a: &DaemonFixture, daemon_b: &DaemonFixture) -> Self {
+        let tempdir = tempfile::tempdir().unwrap();
+        let broker_addr = allocate_addr();
+        let config_path = tempdir.path().join("broker-http.toml");
+        std::fs::write(
+            &config_path,
+            format!(
+                "{}\n{}\n[mcp]\ntransport = \"streamable_http\"\nlisten = {}\npath = \"/mcp\"\n",
+                daemon_a.target_config_fragment(),
+                daemon_b.target_config_fragment(),
+                toml_string(&broker_addr.to_string()),
+            ),
+        )
+        .unwrap();
+
+        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
+        command.arg(&config_path);
+        command.kill_on_drop(true);
+        let child = command.spawn().unwrap();
+        let url = format!("http://{broker_addr}/mcp");
+        wait_until_ready_mcp_http(&url).await;
+
+        Self {
+            _tempdir: tempdir,
+            url,
+            child,
+        }
+    }
+
+    pub async fn kill(&mut self) {
+        let _ = self.child.start_kill();
+        let _ = self.child.wait().await;
+    }
+}
+
+impl Drop for HttpBrokerFixture {
+    fn drop(&mut self) {
+        let _ = self.child.start_kill();
+    }
+}
+
 pub struct ToolResult {
     pub is_error: bool,
     pub text_output: String,
@@ -241,6 +289,7 @@ impl DaemonFixture {
             .json(&PortListenRequest {
                 endpoint: endpoint.to_string(),
                 protocol,
+                lease: None,
             })
             .send()
             .await
@@ -248,6 +297,23 @@ impl DaemonFixture {
             .error_for_status()
             .unwrap()
             .json()
+            .await
+            .unwrap()
+    }
+
+    pub async fn try_port_listen(
+        &self,
+        endpoint: &str,
+        protocol: PortForwardProtocol,
+    ) -> reqwest::Response {
+        self.client
+            .post(self.url("/v1/port/listen"))
+            .json(&PortListenRequest {
+                endpoint: endpoint.to_string(),
+                protocol,
+                lease: None,
+            })
+            .send()
             .await
             .unwrap()
     }
@@ -358,6 +424,30 @@ async fn wait_until_ready_http(client: &reqwest::Client, addr: std::net::SocketA
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     panic!("daemon did not become ready");
+}
+
+async fn wait_until_ready_mcp_http(url: &str) {
+    remote_exec_broker::install_crypto_provider();
+    let client = reqwest::Client::builder().build().unwrap();
+
+    for _ in 0..80 {
+        let response = client
+            .post(url)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .header(reqwest::header::ACCEPT, "application/json, text/event-stream")
+            .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"#)
+            .send()
+            .await;
+        if response
+            .as_ref()
+            .is_ok_and(|response| response.status().is_success())
+        {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    panic!("broker MCP HTTP endpoint did not become ready");
 }
 
 fn build_http_client() -> reqwest::Client {

@@ -4,10 +4,11 @@ use remote_exec_proto::rpc::{
     EmptyResponse, ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest,
     ImageReadResponse, PatchApplyRequest, PatchApplyResponse, PortConnectRequest,
     PortConnectResponse, PortConnectionCloseRequest, PortConnectionReadRequest,
-    PortConnectionReadResponse, PortConnectionWriteRequest, PortListenAcceptRequest,
-    PortListenAcceptResponse, PortListenCloseRequest, PortListenRequest, PortListenResponse,
-    PortUdpDatagramReadRequest, PortUdpDatagramReadResponse, PortUdpDatagramWriteRequest,
-    RpcErrorBody, TargetInfoResponse, TransferPathInfoRequest, TransferPathInfoResponse,
+    PortConnectionReadResponse, PortConnectionWriteRequest, PortLeaseRenewRequest,
+    PortListenAcceptRequest, PortListenAcceptResponse, PortListenCloseRequest, PortListenRequest,
+    PortListenResponse, PortUdpDatagramReadRequest, PortUdpDatagramReadResponse,
+    PortUdpDatagramWriteRequest, RpcErrorBody, TargetInfoResponse, TransferPathInfoRequest,
+    TransferPathInfoResponse,
 };
 
 use crate::daemon_client::DaemonClientError;
@@ -104,6 +105,15 @@ impl LocalDaemonClient {
         req: &PortListenCloseRequest,
     ) -> Result<EmptyResponse, DaemonClientError> {
         remote_exec_host::port_forward::listen_close_local(self.state.clone(), req.clone())
+            .await
+            .map_err(map_host_rpc_error)
+    }
+
+    pub async fn port_lease_renew(
+        &self,
+        req: &PortLeaseRenewRequest,
+    ) -> Result<EmptyResponse, DaemonClientError> {
+        remote_exec_host::port_forward::lease_renew_local(self.state.clone(), req.clone())
             .await
             .map_err(map_host_rpc_error)
     }

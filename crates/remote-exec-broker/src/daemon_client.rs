@@ -3,12 +3,12 @@ use remote_exec_proto::rpc::{
     EmptyResponse, ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest,
     ImageReadResponse, PatchApplyRequest, PatchApplyResponse, PortConnectRequest,
     PortConnectResponse, PortConnectionCloseRequest, PortConnectionReadRequest,
-    PortConnectionReadResponse, PortConnectionWriteRequest, PortListenAcceptRequest,
-    PortListenAcceptResponse, PortListenCloseRequest, PortListenRequest, PortListenResponse,
-    PortUdpDatagramReadRequest, PortUdpDatagramReadResponse, PortUdpDatagramWriteRequest,
-    RpcErrorBody, TargetInfoResponse, TransferExportMetadata, TransferExportRequest,
-    TransferImportMetadata, TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
-    TransferPathInfoResponse, TransferSourceType,
+    PortConnectionReadResponse, PortConnectionWriteRequest, PortLeaseRenewRequest,
+    PortListenAcceptRequest, PortListenAcceptResponse, PortListenCloseRequest, PortListenRequest,
+    PortListenResponse, PortUdpDatagramReadRequest, PortUdpDatagramReadResponse,
+    PortUdpDatagramWriteRequest, RpcErrorBody, TargetInfoResponse, TransferExportMetadata,
+    TransferExportRequest, TransferImportMetadata, TransferImportRequest, TransferImportResponse,
+    TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType,
 };
 use reqwest::header::{AUTHORIZATION, CONNECTION, CONTENT_LENGTH, HeaderValue};
 
@@ -172,6 +172,13 @@ impl DaemonClient {
         req: &PortListenCloseRequest,
     ) -> Result<EmptyResponse, DaemonClientError> {
         self.post("/v1/port/listen/close", req).await
+    }
+
+    pub async fn port_lease_renew(
+        &self,
+        req: &PortLeaseRenewRequest,
+    ) -> Result<EmptyResponse, DaemonClientError> {
+        self.post("/v1/port/lease/renew", req).await
     }
 
     pub async fn port_connect(

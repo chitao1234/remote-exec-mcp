@@ -35,6 +35,9 @@ HttpResponse route_request(AppState& state, const HttpRequest& request) {
     if (request.path == "/v1/port/listen/close") {
         return handle_port_listen_close(state, request);
     }
+    if (request.path == "/v1/port/lease/renew") {
+        return handle_port_lease_renew(state, request);
+    }
     if (request.path == "/v1/port/connect") {
         return handle_port_connect(state, request);
     }

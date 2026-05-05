@@ -268,9 +268,17 @@ pub enum PortForwardProtocol {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PortForwardLease {
+    pub lease_id: String,
+    pub ttl_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PortListenRequest {
     pub endpoint: String,
     pub protocol: PortForwardProtocol,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease: Option<PortForwardLease>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -293,6 +301,8 @@ pub struct PortListenAcceptResponse {
 pub struct PortConnectRequest {
     pub endpoint: String,
     pub protocol: PortForwardProtocol,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease: Option<PortForwardLease>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -343,6 +353,12 @@ pub struct PortConnectionCloseRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PortListenCloseRequest {
     pub bind_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PortLeaseRenewRequest {
+    pub lease_id: String,
+    pub ttl_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -423,6 +439,35 @@ mod tests {
             serde_json::to_value(&image).unwrap(),
             serde_json::json!({
                 "path": "image.png",
+            })
+        );
+    }
+
+    #[test]
+    fn port_forward_requests_omit_optional_lease() {
+        let listen = super::PortListenRequest {
+            endpoint: "127.0.0.1:0".to_string(),
+            protocol: super::PortForwardProtocol::Tcp,
+            lease: None,
+        };
+        let connect = super::PortConnectRequest {
+            endpoint: "127.0.0.1:80".to_string(),
+            protocol: super::PortForwardProtocol::Tcp,
+            lease: None,
+        };
+
+        assert_eq!(
+            serde_json::to_value(&listen).unwrap(),
+            serde_json::json!({
+                "endpoint": "127.0.0.1:0",
+                "protocol": "tcp",
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&connect).unwrap(),
+            serde_json::json!({
+                "endpoint": "127.0.0.1:80",
+                "protocol": "tcp",
             })
         );
     }

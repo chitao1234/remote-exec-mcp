@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use base64::Engine;
@@ -8,9 +9,9 @@ use remote_exec_proto::port_forward::{ensure_nonzero_connect_endpoint, normalize
 use remote_exec_proto::rpc::{
     EmptyResponse, PortConnectRequest, PortConnectResponse, PortConnectionCloseRequest,
     PortConnectionReadRequest, PortConnectionReadResponse, PortConnectionWriteRequest,
-    PortForwardProtocol, PortListenAcceptRequest, PortListenAcceptResponse, PortListenCloseRequest,
-    PortListenRequest, PortListenResponse, PortUdpDatagramReadRequest, PortUdpDatagramReadResponse,
-    PortUdpDatagramWriteRequest,
+    PortForwardLease, PortForwardProtocol, PortLeaseRenewRequest, PortListenAcceptRequest,
+    PortListenAcceptResponse, PortListenCloseRequest, PortListenRequest, PortListenResponse,
+    PortUdpDatagramReadRequest, PortUdpDatagramReadResponse, PortUdpDatagramWriteRequest,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
@@ -21,37 +22,49 @@ use tokio_util::sync::CancellationToken;
 use crate::{AppState, HostRpcError};
 
 const READ_BUF_SIZE: usize = 64 * 1024;
+const EXPIRED_FORWARD_SWEEP_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Default)]
 pub struct PortForwardState {
     tcp_listeners: Arc<Mutex<HashMap<String, Arc<TcpListenerEntry>>>>,
     udp_sockets: Arc<Mutex<HashMap<String, Arc<UdpSocketEntry>>>>,
     tcp_connections: Arc<Mutex<HashMap<String, Arc<TcpConnection>>>>,
+    leases: Arc<Mutex<HashMap<String, LeaseEntry>>>,
 }
 
 struct TcpListenerEntry {
     listener: TcpListener,
     cancel: CancellationToken,
+    lease_id: Option<String>,
 }
 
 struct UdpSocketEntry {
     socket: UdpSocket,
     cancel: CancellationToken,
+    lease_id: Option<String>,
 }
 
 struct TcpConnection {
     reader: Mutex<OwnedReadHalf>,
     writer: Mutex<OwnedWriteHalf>,
     cancel: CancellationToken,
+    lease_id: Option<String>,
+}
+
+struct LeaseEntry {
+    expires_at: Instant,
+    binds: HashSet<String>,
+    connections: HashSet<String>,
 }
 
 impl TcpConnection {
-    fn new(stream: TcpStream) -> Self {
+    fn new(stream: TcpStream, lease_id: Option<String>) -> Self {
         let (reader, writer) = stream.into_split();
         Self {
             reader: Mutex::new(reader),
             writer: Mutex::new(writer),
             cancel: CancellationToken::new(),
+            lease_id,
         }
     }
 }
@@ -60,11 +73,12 @@ pub async fn listen_local(
     state: Arc<AppState>,
     req: PortListenRequest,
 ) -> Result<PortListenResponse, HostRpcError> {
+    sweep_expired_port_forwards(&state).await;
     let endpoint = normalize_endpoint(&req.endpoint)
         .map_err(|err| rpc_error("invalid_endpoint", err.to_string()))?;
     match req.protocol {
-        PortForwardProtocol::Tcp => listen_tcp(state, &endpoint).await,
-        PortForwardProtocol::Udp => listen_udp(state, &endpoint).await,
+        PortForwardProtocol::Tcp => listen_tcp(state, &endpoint, req.lease).await,
+        PortForwardProtocol::Udp => listen_udp(state, &endpoint, req.lease).await,
     }
 }
 
@@ -72,6 +86,7 @@ pub async fn listen_accept_local(
     state: Arc<AppState>,
     req: PortListenAcceptRequest,
 ) -> Result<PortListenAcceptResponse, HostRpcError> {
+    sweep_expired_port_forwards(&state).await;
     let listener = tcp_listener(&state, &req.bind_id).await?;
     let (stream, peer_addr) = tokio::select! {
         _ = listener.cancel.cancelled() => {
@@ -90,12 +105,13 @@ pub async fn listen_accept_local(
         return Err(port_bind_closed(&req.bind_id));
     }
     let connection_id = format!("conn_{}", uuid::Uuid::new_v4().simple());
-    state
-        .port_forwards
-        .tcp_connections
-        .lock()
-        .await
-        .insert(connection_id.clone(), Arc::new(TcpConnection::new(stream)));
+    state.port_forwards.tcp_connections.lock().await.insert(
+        connection_id.clone(),
+        Arc::new(TcpConnection::new(stream, listener.lease_id.clone())),
+    );
+    if let Some(lease_id) = &listener.lease_id {
+        track_connection_lease(&state.port_forwards, lease_id, &connection_id).await;
+    }
     tracing::debug!(
         target = %state.config.target,
         bind_id = %req.bind_id,
@@ -110,6 +126,7 @@ pub async fn listen_close_local(
     state: Arc<AppState>,
     req: PortListenCloseRequest,
 ) -> Result<EmptyResponse, HostRpcError> {
+    sweep_expired_port_forwards(&state).await;
     let tcp_listener = state
         .port_forwards
         .tcp_listeners
@@ -123,9 +140,15 @@ pub async fn listen_close_local(
         .await
         .remove(&req.bind_id);
     if let Some(listener) = tcp_listener {
+        if let Some(lease_id) = &listener.lease_id {
+            untrack_bind_lease(&state.port_forwards, lease_id, &req.bind_id).await;
+        }
         listener.cancel.cancel();
     }
     if let Some(socket) = udp_socket {
+        if let Some(lease_id) = &socket.lease_id {
+            untrack_bind_lease(&state.port_forwards, lease_id, &req.bind_id).await;
+        }
         socket.cancel.cancel();
     }
     tracing::debug!(
@@ -140,8 +163,9 @@ pub async fn connect_local(
     state: Arc<AppState>,
     req: PortConnectRequest,
 ) -> Result<PortConnectResponse, HostRpcError> {
+    sweep_expired_port_forwards(&state).await;
     match req.protocol {
-        PortForwardProtocol::Tcp => connect_tcp(state, &req.endpoint).await,
+        PortForwardProtocol::Tcp => connect_tcp(state, &req.endpoint, req.lease).await,
         PortForwardProtocol::Udp => Err(rpc_error(
             "unsupported_operation",
             "udp connect is not used by this forwarding protocol",
@@ -153,6 +177,7 @@ pub async fn connection_read_local(
     state: Arc<AppState>,
     req: PortConnectionReadRequest,
 ) -> Result<PortConnectionReadResponse, HostRpcError> {
+    sweep_expired_port_forwards(&state).await;
     let stream = tcp_connection(&state, &req.connection_id).await?;
     let mut reader = stream.reader.lock().await;
     let mut buf = vec![0u8; READ_BUF_SIZE];
@@ -179,6 +204,9 @@ pub async fn connection_read_local(
             .lock()
             .await
             .remove(&req.connection_id);
+        if let Some(lease_id) = &stream.lease_id {
+            untrack_connection_lease(&state.port_forwards, lease_id, &req.connection_id).await;
+        }
         return Ok(PortConnectionReadResponse {
             data: String::new(),
             eof: true,
@@ -195,6 +223,7 @@ pub async fn connection_write_local(
     state: Arc<AppState>,
     req: PortConnectionWriteRequest,
 ) -> Result<EmptyResponse, HostRpcError> {
+    sweep_expired_port_forwards(&state).await;
     let bytes = decode_bytes(&req.data)?;
     let stream = tcp_connection(&state, &req.connection_id).await?;
     if stream.cancel.is_cancelled() {
@@ -236,6 +265,7 @@ pub async fn connection_close_local(
     state: Arc<AppState>,
     req: PortConnectionCloseRequest,
 ) -> Result<EmptyResponse, HostRpcError> {
+    sweep_expired_port_forwards(&state).await;
     let connection = state
         .port_forwards
         .tcp_connections
@@ -243,6 +273,9 @@ pub async fn connection_close_local(
         .await
         .remove(&req.connection_id);
     if let Some(connection) = connection {
+        if let Some(lease_id) = &connection.lease_id {
+            untrack_connection_lease(&state.port_forwards, lease_id, &req.connection_id).await;
+        }
         connection.cancel.cancel();
     }
     tracing::debug!(
@@ -257,6 +290,7 @@ pub async fn udp_datagram_read_local(
     state: Arc<AppState>,
     req: PortUdpDatagramReadRequest,
 ) -> Result<PortUdpDatagramReadResponse, HostRpcError> {
+    sweep_expired_port_forwards(&state).await;
     let socket = udp_socket(&state, &req.bind_id).await?;
     let mut buf = vec![0u8; READ_BUF_SIZE];
     let (read, peer) = tokio::select! {
@@ -285,6 +319,7 @@ pub async fn udp_datagram_write_local(
     state: Arc<AppState>,
     req: PortUdpDatagramWriteRequest,
 ) -> Result<EmptyResponse, HostRpcError> {
+    sweep_expired_port_forwards(&state).await;
     let bytes = decode_bytes(&req.data)?;
     let peer = resolve_endpoint(&req.peer)
         .await
@@ -301,9 +336,19 @@ pub async fn udp_datagram_write_local(
     Ok(EmptyResponse {})
 }
 
+pub async fn lease_renew_local(
+    state: Arc<AppState>,
+    req: PortLeaseRenewRequest,
+) -> Result<EmptyResponse, HostRpcError> {
+    sweep_expired_port_forwards(&state).await;
+    renew_port_forward_lease(&state.port_forwards, &req.lease_id, req.ttl_ms).await?;
+    Ok(EmptyResponse {})
+}
+
 async fn listen_tcp(
     state: Arc<AppState>,
     endpoint: &str,
+    lease: Option<PortForwardLease>,
 ) -> Result<PortListenResponse, HostRpcError> {
     let listener = TcpListener::bind(endpoint)
         .await
@@ -312,13 +357,18 @@ async fn listen_tcp(
         .local_addr()
         .map_err(|err| rpc_error("port_bind_failed", err.to_string()))?;
     let bind_id = format!("bind_{}", uuid::Uuid::new_v4().simple());
+    let lease_id = lease.as_ref().map(|lease| lease.lease_id.clone());
     state.port_forwards.tcp_listeners.lock().await.insert(
         bind_id.clone(),
         Arc::new(TcpListenerEntry {
             listener,
             cancel: CancellationToken::new(),
+            lease_id: lease_id.clone(),
         }),
     );
+    if let Some(lease) = lease {
+        register_bind_lease(&state.port_forwards, lease, &bind_id).await?;
+    }
     tracing::info!(
         target = %state.config.target,
         bind_id = %bind_id,
@@ -335,6 +385,7 @@ async fn listen_tcp(
 async fn listen_udp(
     state: Arc<AppState>,
     endpoint: &str,
+    lease: Option<PortForwardLease>,
 ) -> Result<PortListenResponse, HostRpcError> {
     let socket = UdpSocket::bind(endpoint)
         .await
@@ -343,13 +394,18 @@ async fn listen_udp(
         .local_addr()
         .map_err(|err| rpc_error("port_bind_failed", err.to_string()))?;
     let bind_id = format!("bind_{}", uuid::Uuid::new_v4().simple());
+    let lease_id = lease.as_ref().map(|lease| lease.lease_id.clone());
     state.port_forwards.udp_sockets.lock().await.insert(
         bind_id.clone(),
         Arc::new(UdpSocketEntry {
             socket,
             cancel: CancellationToken::new(),
+            lease_id: lease_id.clone(),
         }),
     );
+    if let Some(lease) = lease {
+        register_bind_lease(&state.port_forwards, lease, &bind_id).await?;
+    }
     tracing::info!(
         target = %state.config.target,
         bind_id = %bind_id,
@@ -366,6 +422,7 @@ async fn listen_udp(
 async fn connect_tcp(
     state: Arc<AppState>,
     endpoint: &str,
+    lease: Option<PortForwardLease>,
 ) -> Result<PortConnectResponse, HostRpcError> {
     let endpoint = ensure_nonzero_connect_endpoint(endpoint)
         .map_err(|err| rpc_error("invalid_endpoint", err.to_string()))?;
@@ -373,12 +430,14 @@ async fn connect_tcp(
         .await
         .map_err(|err| rpc_error("port_connect_failed", err.to_string()))?;
     let connection_id = format!("conn_{}", uuid::Uuid::new_v4().simple());
-    state
-        .port_forwards
-        .tcp_connections
-        .lock()
-        .await
-        .insert(connection_id.clone(), Arc::new(TcpConnection::new(stream)));
+    let lease_id = lease.as_ref().map(|lease| lease.lease_id.clone());
+    state.port_forwards.tcp_connections.lock().await.insert(
+        connection_id.clone(),
+        Arc::new(TcpConnection::new(stream, lease_id.clone())),
+    );
+    if let Some(lease) = lease {
+        register_connection_lease(&state.port_forwards, lease, &connection_id).await?;
+    }
     tracing::debug!(
         target = %state.config.target,
         connection_id = %connection_id,
@@ -430,6 +489,148 @@ async fn udp_socket(state: &AppState, bind_id: &str) -> Result<Arc<UdpSocketEntr
         .get(bind_id)
         .cloned()
         .ok_or_else(|| rpc_error("unknown_port_bind", format!("unknown bind `{bind_id}`")))
+}
+
+async fn register_bind_lease(
+    state: &PortForwardState,
+    lease: PortForwardLease,
+    bind_id: &str,
+) -> Result<(), HostRpcError> {
+    let ttl = lease_ttl(lease.ttl_ms)?;
+    let mut leases = state.leases.lock().await;
+    let entry = leases.entry(lease.lease_id).or_insert_with(|| LeaseEntry {
+        expires_at: Instant::now() + ttl,
+        binds: HashSet::new(),
+        connections: HashSet::new(),
+    });
+    entry.expires_at = Instant::now() + ttl;
+    entry.binds.insert(bind_id.to_string());
+    Ok(())
+}
+
+async fn register_connection_lease(
+    state: &PortForwardState,
+    lease: PortForwardLease,
+    connection_id: &str,
+) -> Result<(), HostRpcError> {
+    let ttl = lease_ttl(lease.ttl_ms)?;
+    let mut leases = state.leases.lock().await;
+    let entry = leases.entry(lease.lease_id).or_insert_with(|| LeaseEntry {
+        expires_at: Instant::now() + ttl,
+        binds: HashSet::new(),
+        connections: HashSet::new(),
+    });
+    entry.expires_at = Instant::now() + ttl;
+    entry.connections.insert(connection_id.to_string());
+    Ok(())
+}
+
+async fn renew_port_forward_lease(
+    state: &PortForwardState,
+    lease_id: &str,
+    ttl_ms: u64,
+) -> Result<(), HostRpcError> {
+    let ttl = lease_ttl(ttl_ms)?;
+    let mut leases = state.leases.lock().await;
+    if let Some(entry) = leases.get_mut(lease_id) {
+        // Late renewals can race with expiry cleanup after a broker crash; treat them as a no-op.
+        entry.expires_at = Instant::now() + ttl;
+    }
+    Ok(())
+}
+
+async fn track_connection_lease(state: &PortForwardState, lease_id: &str, connection_id: &str) {
+    let mut leases = state.leases.lock().await;
+    if let Some(entry) = leases.get_mut(lease_id) {
+        entry.connections.insert(connection_id.to_string());
+    }
+}
+
+async fn untrack_bind_lease(state: &PortForwardState, lease_id: &str, bind_id: &str) {
+    let mut leases = state.leases.lock().await;
+    remove_bind_from_lease(&mut leases, lease_id, bind_id);
+}
+
+async fn untrack_connection_lease(state: &PortForwardState, lease_id: &str, connection_id: &str) {
+    let mut leases = state.leases.lock().await;
+    remove_connection_from_lease(&mut leases, lease_id, connection_id);
+}
+
+async fn sweep_expired_port_forwards(state: &AppState) {
+    let expired = {
+        let mut leases = state.port_forwards.leases.lock().await;
+        let now = Instant::now();
+        let expired_ids = leases
+            .iter()
+            .filter(|(_, entry)| entry.expires_at <= now)
+            .map(|(lease_id, _)| lease_id.clone())
+            .collect::<Vec<_>>();
+        let mut expired = Vec::new();
+        for lease_id in expired_ids {
+            if let Some(entry) = leases.remove(&lease_id) {
+                expired.push(entry);
+            }
+        }
+        expired
+    };
+
+    for entry in expired {
+        expire_binds(&state.port_forwards, entry.binds).await;
+        expire_connections(&state.port_forwards, entry.connections).await;
+    }
+}
+
+async fn expire_binds(state: &PortForwardState, bind_ids: HashSet<String>) {
+    for bind_id in bind_ids {
+        if let Some(listener) = state.tcp_listeners.lock().await.remove(&bind_id) {
+            listener.cancel.cancel();
+        }
+        if let Some(socket) = state.udp_sockets.lock().await.remove(&bind_id) {
+            socket.cancel.cancel();
+        }
+    }
+}
+
+async fn expire_connections(state: &PortForwardState, connection_ids: HashSet<String>) {
+    for connection_id in connection_ids {
+        if let Some(connection) = state.tcp_connections.lock().await.remove(&connection_id) {
+            connection.cancel.cancel();
+        }
+    }
+}
+
+fn remove_bind_from_lease(leases: &mut HashMap<String, LeaseEntry>, lease_id: &str, bind_id: &str) {
+    if let Some(entry) = leases.get_mut(lease_id) {
+        entry.binds.remove(bind_id);
+        if entry.binds.is_empty() && entry.connections.is_empty() {
+            leases.remove(lease_id);
+        }
+    }
+}
+
+fn remove_connection_from_lease(
+    leases: &mut HashMap<String, LeaseEntry>,
+    lease_id: &str,
+    connection_id: &str,
+) {
+    if let Some(entry) = leases.get_mut(lease_id) {
+        entry.connections.remove(connection_id);
+        if entry.binds.is_empty() && entry.connections.is_empty() {
+            leases.remove(lease_id);
+        }
+    }
+}
+
+fn lease_ttl(ttl_ms: u64) -> Result<Duration, HostRpcError> {
+    if ttl_ms == 0 {
+        return Err(rpc_error(
+            "invalid_port_lease",
+            "port forward lease ttl_ms must be > 0",
+        ));
+    }
+    Ok(Duration::from_millis(
+        ttl_ms.max(EXPIRED_FORWARD_SWEEP_INTERVAL.as_millis() as u64),
+    ))
 }
 
 async fn resolve_endpoint(endpoint: &str) -> anyhow::Result<SocketAddr> {

@@ -6,9 +6,9 @@ use axum::http::StatusCode;
 use remote_exec_proto::rpc::{
     EmptyResponse, PortConnectRequest, PortConnectResponse, PortConnectionCloseRequest,
     PortConnectionReadRequest, PortConnectionReadResponse, PortConnectionWriteRequest,
-    PortListenAcceptRequest, PortListenAcceptResponse, PortListenCloseRequest, PortListenRequest,
-    PortListenResponse, PortUdpDatagramReadRequest, PortUdpDatagramReadResponse,
-    PortUdpDatagramWriteRequest, RpcErrorBody,
+    PortLeaseRenewRequest, PortListenAcceptRequest, PortListenAcceptResponse,
+    PortListenCloseRequest, PortListenRequest, PortListenResponse, PortUdpDatagramReadRequest,
+    PortUdpDatagramReadResponse, PortUdpDatagramWriteRequest, RpcErrorBody,
 };
 
 pub use remote_exec_host::port_forward::PortForwardState;
@@ -38,6 +38,16 @@ pub async fn listen_close(
     Json(req): Json<PortListenCloseRequest>,
 ) -> Result<Json<EmptyResponse>, (StatusCode, Json<RpcErrorBody>)> {
     remote_exec_host::port_forward::listen_close_local(state, req)
+        .await
+        .map(Json)
+        .map_err(crate::rpc_error::host_rpc_error_response)
+}
+
+pub async fn lease_renew(
+    State(state): State<Arc<crate::AppState>>,
+    Json(req): Json<PortLeaseRenewRequest>,
+) -> Result<Json<EmptyResponse>, (StatusCode, Json<RpcErrorBody>)> {
+    remote_exec_host::port_forward::lease_renew_local(state, req)
         .await
         .map(Json)
         .map_err(crate::rpc_error::host_rpc_error_response)

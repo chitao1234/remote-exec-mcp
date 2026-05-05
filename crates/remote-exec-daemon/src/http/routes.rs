@@ -27,6 +27,10 @@ pub(crate) fn router(state: Arc<AppState>, daemon_config: Arc<DaemonConfig>) -> 
             "/v1/port/listen/close",
             post(crate::port_forward::listen_close),
         )
+        .route(
+            "/v1/port/lease/renew",
+            post(crate::port_forward::lease_renew),
+        )
         .route("/v1/port/connect", post(crate::port_forward::connect))
         .route(
             "/v1/port/connection/read",
