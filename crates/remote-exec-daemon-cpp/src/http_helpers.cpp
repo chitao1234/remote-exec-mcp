@@ -76,7 +76,6 @@ std::string render_http_response(const HttpResponse& res) {
     out << "HTTP/1.1 " << res.status << ' ' << reason_phrase(res.status) << "\r\n";
 
     std::map<std::string, std::string> headers = res.headers;
-    headers["Connection"] = "close";
     headers["Content-Length"] = std::to_string(res.body.size());
 
     for (std::map<std::string, std::string>::const_iterator it = headers.begin();

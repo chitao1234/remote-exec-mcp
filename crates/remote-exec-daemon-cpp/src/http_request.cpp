@@ -84,7 +84,7 @@ void validate_request_target(const std::string& value) {
 }
 
 void validate_http_version(const std::string& value) {
-    if (value != "HTTP/1.0" && value != "HTTP/1.1") {
+    if (value != "HTTP/1.1") {
         throw HttpParseError("unsupported http version");
     }
 }

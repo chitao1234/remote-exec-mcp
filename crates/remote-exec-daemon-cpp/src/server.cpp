@@ -212,7 +212,6 @@ HttpResponse handle_streaming_transfer_import(
 void send_transfer_export_headers(SOCKET client, const ExportedPayload& payload) {
     HttpResponse response;
     response.status = 200;
-    response.headers["Connection"] = "close";
     response.headers["Transfer-Encoding"] = "chunked";
     write_transfer_export_headers(response, payload);
 
