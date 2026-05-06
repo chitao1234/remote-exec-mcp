@@ -51,6 +51,10 @@ impl LocalPortClient {
         Self { state }
     }
 
+    pub fn state(&self) -> Arc<remote_exec_host::HostRuntimeState> {
+        self.state.clone()
+    }
+
     pub async fn port_listen(
         &self,
         req: &PortListenRequest,

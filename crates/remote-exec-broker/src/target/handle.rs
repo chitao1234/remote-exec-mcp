@@ -202,6 +202,17 @@ impl TargetHandle {
         }
     }
 
+    pub async fn port_tunnel(&self) -> Result<crate::port_forward::PortTunnel, DaemonClientError> {
+        match &self.backend {
+            TargetBackend::Remote(client) => {
+                crate::port_forward::PortTunnel::from_stream(client.port_tunnel().await?)
+            }
+            TargetBackend::Local(client) => {
+                crate::port_forward::PortTunnel::local(client.port_tunnel_state()).await
+            }
+        }
+    }
+
     pub async fn port_listen_accept(
         &self,
         req: &PortListenAcceptRequest,

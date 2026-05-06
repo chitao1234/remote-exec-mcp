@@ -38,6 +38,10 @@ impl LocalDaemonClient {
         ))
     }
 
+    pub fn port_tunnel_state(&self) -> Arc<remote_exec_host::HostRuntimeState> {
+        self.state.clone()
+    }
+
     pub async fn exec_start(
         &self,
         req: &ExecStartRequest,

@@ -5,6 +5,7 @@ use anyhow::Context;
 use remote_exec_proto::port_forward::{
     ensure_nonzero_connect_endpoint, normalize_endpoint, udp_connector_endpoint,
 };
+use remote_exec_proto::port_tunnel::{Frame, read_frame, write_frame, write_preface};
 use remote_exec_proto::public::{
     ForwardPortEntry, ForwardPortProtocol as PublicForwardPortProtocol, ForwardPortSpec,
     ForwardPortStatus,
@@ -17,7 +18,8 @@ use remote_exec_proto::rpc::{
     PortListenResponse, PortUdpDatagramReadRequest, PortUdpDatagramReadResponse,
     PortUdpDatagramWriteRequest,
 };
-use tokio::sync::RwLock;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::{Mutex, RwLock, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use crate::TargetHandle;
@@ -149,6 +151,91 @@ impl SideHandle {
             Self::Target { handle, .. } => handle.port_udp_datagram_write(req).await,
             Self::Local(client) => client.port_udp_datagram_write(req).await,
         }
+    }
+
+    pub async fn port_tunnel(&self) -> Result<PortTunnel, DaemonClientError> {
+        match self {
+            Self::Target { handle, .. } => handle.port_tunnel().await,
+            Self::Local(client) => PortTunnel::local(client.state()).await,
+        }
+    }
+}
+
+pub struct PortTunnel {
+    tx: mpsc::Sender<Frame>,
+    rx: Mutex<mpsc::Receiver<anyhow::Result<Frame>>>,
+}
+
+impl PortTunnel {
+    pub fn from_stream<S>(stream: S) -> Result<Self, DaemonClientError>
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    {
+        let (mut reader, mut writer) = tokio::io::split(stream);
+        let (tx, mut write_rx) = mpsc::channel::<Frame>(128);
+        let (read_tx, read_rx) = mpsc::channel::<anyhow::Result<Frame>>(128);
+        tokio::spawn(async move {
+            while let Some(frame) = write_rx.recv().await {
+                if let Err(err) = write_frame(&mut writer, &frame).await {
+                    tracing::debug!(error = %err, "port tunnel writer stopped");
+                    return;
+                }
+            }
+        });
+        tokio::spawn(async move {
+            loop {
+                let frame = read_frame(&mut reader).await.map_err(anyhow::Error::from);
+                let stop = frame.is_err();
+                if read_tx.send(frame).await.is_err() || stop {
+                    return;
+                }
+            }
+        });
+        Ok(Self {
+            tx,
+            rx: Mutex::new(read_rx),
+        })
+    }
+
+    pub async fn local(
+        state: Arc<remote_exec_host::HostRuntimeState>,
+    ) -> Result<Self, DaemonClientError> {
+        let (mut broker_side, daemon_side) = tokio::io::duplex(256 * 1024);
+        tokio::spawn(remote_exec_host::port_forward::serve_tunnel(
+            state,
+            daemon_side,
+        ));
+        write_preface(&mut broker_side)
+            .await
+            .map_err(|err| DaemonClientError::Transport(err.into()))?;
+        Self::from_stream(broker_side)
+    }
+
+    pub async fn send(&self, frame: Frame) -> anyhow::Result<()> {
+        self.tx
+            .send(frame)
+            .await
+            .map_err(|_| anyhow::anyhow!("port tunnel writer is closed"))
+    }
+
+    pub async fn recv(&self) -> anyhow::Result<Frame> {
+        self.rx
+            .lock()
+            .await
+            .recv()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("port tunnel reader is closed"))?
+    }
+
+    pub async fn close_stream(&self, stream_id: u32) -> anyhow::Result<()> {
+        self.send(Frame {
+            frame_type: remote_exec_proto::port_tunnel::FrameType::Close,
+            flags: 0,
+            stream_id,
+            meta: Vec::new(),
+            data: Vec::new(),
+        })
+        .await
     }
 }
 
@@ -716,5 +803,34 @@ fn format_protocol(protocol: PublicForwardPortProtocol) -> &'static str {
     match protocol {
         PublicForwardPortProtocol::Tcp => "tcp",
         PublicForwardPortProtocol::Udp => "udp",
+    }
+}
+
+#[cfg(test)]
+mod port_tunnel_tests {
+    use remote_exec_proto::port_tunnel::{Frame, FrameType};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn local_port_tunnel_binds_tcp_listener() {
+        let tunnel = SideHandle::local().port_tunnel().await.unwrap();
+        tunnel
+            .send(Frame {
+                frame_type: FrameType::TcpListen,
+                flags: 0,
+                stream_id: 1,
+                meta: serde_json::to_vec(&serde_json::json!({
+                    "endpoint": "127.0.0.1:0"
+                }))
+                .unwrap(),
+                data: Vec::new(),
+            })
+            .await
+            .unwrap();
+
+        let frame = tunnel.recv().await.unwrap();
+
+        assert_eq!(frame.frame_type, FrameType::TcpListenOk);
     }
 }

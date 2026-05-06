@@ -1,4 +1,7 @@
 use futures_util::TryStreamExt;
+use remote_exec_proto::port_tunnel::{
+    TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, UPGRADE_TOKEN, write_preface,
+};
 use remote_exec_proto::rpc::{
     EmptyResponse, ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest,
     ImageReadResponse, PatchApplyRequest, PatchApplyResponse, PortConnectRequest,
@@ -10,7 +13,7 @@ use remote_exec_proto::rpc::{
     TransferExportRequest, TransferImportMetadata, TransferImportRequest, TransferImportResponse,
     TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType,
 };
-use reqwest::header::{AUTHORIZATION, CONTENT_LENGTH, HeaderValue};
+use reqwest::header::{AUTHORIZATION, CONNECTION, CONTENT_LENGTH, HeaderValue, UPGRADE};
 
 use crate::config::{TargetConfig, TargetTransportKind};
 use crate::tools::transfer::codec;
@@ -151,6 +154,30 @@ impl DaemonClient {
         req: &TransferPathInfoRequest,
     ) -> Result<TransferPathInfoResponse, DaemonClientError> {
         self.post("/v1/transfer/path-info", req).await
+    }
+
+    pub async fn port_tunnel(&self) -> Result<reqwest::Upgraded, DaemonClientError> {
+        let started = std::time::Instant::now();
+        let response = self
+            .request("/v1/port/tunnel")
+            .header(CONNECTION, "Upgrade")
+            .header(UPGRADE, UPGRADE_TOKEN)
+            .header(TUNNEL_PROTOCOL_VERSION_HEADER, TUNNEL_PROTOCOL_VERSION)
+            .header(CONTENT_LENGTH, "0")
+            .send()
+            .await
+            .map_err(|err| self.rpc_transport_error("/v1/port/tunnel", started, err))?;
+        if response.status() != reqwest::StatusCode::SWITCHING_PROTOCOLS {
+            return Err(decode_rpc_error(response).await);
+        }
+        let mut upgraded = response
+            .upgrade()
+            .await
+            .map_err(|err| DaemonClientError::Transport(err.into()))?;
+        write_preface(&mut upgraded)
+            .await
+            .map_err(|err| DaemonClientError::Transport(err.into()))?;
+        Ok(upgraded)
     }
 
     pub async fn port_listen(
@@ -597,6 +624,7 @@ fn decode_rpc_error_body(status: reqwest::StatusCode, body: String) -> DaemonCli
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     fn test_client(authorization: Option<HeaderValue>) -> DaemonClient {
         crate::install_crypto_provider();
@@ -636,5 +664,60 @@ mod tests {
             Some("Bearer shared-secret")
         );
         assert!(request.headers().get(reqwest::header::CONNECTION).is_none());
+    }
+
+    #[tokio::test]
+    async fn port_tunnel_sends_upgrade_headers_and_preface() {
+        crate::install_crypto_provider();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut byte = [0u8; 1];
+            while !request.ends_with(b"\r\n\r\n") {
+                let read = stream.read(&mut byte).await.unwrap();
+                request.extend_from_slice(&byte[..read]);
+            }
+            let request = String::from_utf8(request).unwrap();
+            assert!(request.starts_with("POST /v1/port/tunnel HTTP/1.1\r\n"));
+            assert!(request.to_ascii_lowercase().contains("connection: upgrade"));
+            assert!(
+                request
+                    .to_ascii_lowercase()
+                    .contains("upgrade: remote-exec-port-tunnel")
+            );
+            assert!(
+                request
+                    .to_ascii_lowercase()
+                    .contains("x-remote-exec-port-tunnel-version: 1")
+            );
+
+            stream
+                .write_all(
+                    b"HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: remote-exec-port-tunnel\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            let mut preface = [0u8; 8];
+            let mut filled = 0;
+            while filled < preface.len() {
+                let read = stream.read(&mut preface[filled..]).await.unwrap();
+                filled += read;
+            }
+            assert_eq!(&preface, b"REPFWD1\n");
+        });
+
+        let upgraded = DaemonClient {
+            client: reqwest::Client::builder().build().unwrap(),
+            target_name: "builder-a".to_string(),
+            base_url: format!("http://{addr}"),
+            authorization: None,
+        }
+        .port_tunnel()
+        .await
+        .unwrap();
+        drop(upgraded);
+        server.await.unwrap();
     }
 }
