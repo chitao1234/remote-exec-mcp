@@ -3,18 +3,14 @@
 #include "server_route_image.h"
 #include "server_route_port_forward.h"
 #include "server_route_transfer.h"
+#include "server_request_utils.h"
 #include "server_routes.h"
 
 HttpResponse route_request(AppState& state, const HttpRequest& request) {
-    if (!state.config.http_auth_bearer_token.empty() &&
-        !request_has_bearer_auth(request, state.config.http_auth_bearer_token)) {
-        HttpResponse response;
-        write_bearer_auth_challenge(response);
+    HttpResponse response;
+    response.status = 200;
+    if (reject_before_route(state, request, &response)) {
         return response;
-    }
-
-    if (request.method != "POST") {
-        return make_rpc_error_response(405, "method_not_allowed", "only POST is supported");
     }
 
     if (request.path == "/v1/health") {

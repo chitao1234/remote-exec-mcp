@@ -4,52 +4,13 @@
 #include <string>
 #include <sys/stat.h>
 
-#include "filesystem_sandbox.h"
 #include "logging.h"
-#include "path_policy.h"
 #include "port_forward_codec.h"
 #include "rpc_failures.h"
 #include "server_route_image.h"
+#include "server_request_utils.h"
 
 namespace {
-
-std::string resolve_workdir(const AppState& state, const Json& body) {
-    const std::string raw = body.value("workdir", state.config.default_workdir);
-    if (raw.empty()) {
-        return state.config.default_workdir;
-    }
-
-    const PathPolicy policy = host_path_policy();
-    if (is_absolute_for_policy(policy, raw)) {
-        return normalize_for_system(policy, raw);
-    }
-    return join_for_policy(policy, state.config.default_workdir, raw);
-}
-
-const CompiledFilesystemSandbox* active_sandbox(const AppState& state) {
-    return state.sandbox_enabled ? &state.sandbox : NULL;
-}
-
-void authorize_sandbox_path(
-    const AppState& state,
-    SandboxAccess access,
-    const std::string& path
-) {
-    authorize_path(host_path_policy(), active_sandbox(state), access, path);
-}
-
-std::string resolve_input_path(
-    const AppState& state,
-    const Json& body,
-    const std::string& key
-) {
-    const std::string raw = body.at(key).get<std::string>();
-    const PathPolicy policy = host_path_policy();
-    if (is_absolute_for_policy(policy, raw)) {
-        return normalize_for_system(policy, raw);
-    }
-    return join_for_policy(policy, resolve_workdir(state, body), raw);
-}
 
 ImageFailure invalid_detail_failure(const std::string& detail) {
     return ImageFailure(

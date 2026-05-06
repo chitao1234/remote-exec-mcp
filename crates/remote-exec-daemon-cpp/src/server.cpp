@@ -12,14 +12,12 @@
 #endif
 
 #include "common.h"
-#include "filesystem_sandbox.h"
 #include "http_request.h"
 #include "http_helpers.h"
 #include "logging.h"
-#include "path_policy.h"
 #include "platform.h"
-#include "rpc_failures.h"
 #include "server_route_common.h"
+#include "server_request_utils.h"
 #include "server.h"
 #include "server_routes.h"
 #include "server_transport.h"
@@ -98,14 +96,6 @@ std::string read_request_body_to_string(HttpRequestBodyStream* body) {
     }
 }
 
-std::vector<std::string> transfer_exclude_or_empty(const Json& body) {
-    const Json::const_iterator it = body.find("exclude");
-    if (it == body.end() || it->is_null()) {
-        return std::vector<std::string>();
-    }
-    return it->get<std::vector<std::string> >();
-}
-
 bool request_connection_close_requested(const HttpRequest& request) {
     const std::string value = lowercase_ascii(request.header("connection"));
     std::size_t offset = 0;
@@ -127,40 +117,8 @@ bool request_connection_close_requested(const HttpRequest& request) {
 
     return false;
 }
-
-bool reject_before_route(
-    const AppState& state,
-    const HttpRequest& request,
-    HttpResponse* response
-) {
-    if (!state.config.http_auth_bearer_token.empty() &&
-        !request_has_bearer_auth(request, state.config.http_auth_bearer_token)) {
-        write_bearer_auth_challenge(*response);
-        return true;
-    }
-
-    if (request.method != "POST") {
-        write_rpc_error(*response, 405, "method_not_allowed", "only POST is supported");
-        return true;
-    }
-
-    return false;
-}
-
-const CompiledFilesystemSandbox* active_sandbox(const AppState& state) {
-    return state.sandbox_enabled ? &state.sandbox : NULL;
-}
-
 bool log_send_failure(const SocketSendError& ex);
 bool try_send_response(SOCKET client, const HttpResponse& response);
-
-void authorize_sandbox_path(
-    const AppState& state,
-    SandboxAccess access,
-    const std::string& path
-) {
-    authorize_path(host_path_policy(), active_sandbox(state), access, path);
-}
 
 HttpRequestBodyFraming parse_request_body_framing_or_throw_bad_request(
     const HttpRequest& request
@@ -170,17 +128,6 @@ HttpRequestBodyFraming parse_request_body_framing_or_throw_bad_request(
     } catch (const HttpProtocolError& ex) {
         throw BadHttpRequest(ex.what());
     }
-}
-
-std::string resolve_absolute_transfer_path(const std::string& path) {
-    const PathPolicy policy = host_path_policy();
-    if (!is_absolute_for_policy(policy, path)) {
-        throw TransferFailure(
-            TransferRpcCode::PathNotAbsolute,
-            "transfer path is not absolute"
-        );
-    }
-    return normalize_for_system(policy, path);
 }
 
 HttpResponse handle_streaming_transfer_import(
@@ -196,47 +143,29 @@ HttpResponse handle_streaming_transfer_import(
     }
 
     try {
-        const TransferImportMetadata metadata = parse_transfer_import_metadata(request);
-        require_uncompressed_transfer(metadata.compression);
-        const std::string destination_path =
-            resolve_absolute_transfer_path(metadata.destination_path);
-        authorize_sandbox_path(state, SANDBOX_WRITE, destination_path);
+        const TransferImportRequestSpec import_request =
+            prepare_transfer_import_request(state, request);
         HttpBodyTransferArchiveReader archive_reader(body);
         const ImportSummary summary = import_path_from_reader(
             archive_reader,
-            metadata.source_type,
-            destination_path,
-            metadata.overwrite,
-            metadata.create_parent,
-            metadata.symlink_mode
+            import_request.metadata.source_type,
+            import_request.destination_path,
+            import_request.metadata.overwrite,
+            import_request.metadata.create_parent,
+            import_request.metadata.symlink_mode
         );
-        log_transfer_import_summary(destination_path, summary);
+        log_transfer_import_summary(import_request.destination_path, summary);
         write_json(response, transfer_summary_json(summary));
     } catch (const SandboxError& ex) {
         log_message(LOG_WARN, "server", std::string("transfer/import failed: ") + ex.what());
-        write_rpc_error(
-            response,
-            400,
-            transfer_error_code_name(TransferRpcCode::SandboxDenied),
-            ex.what()
-        );
+        write_transfer_error_response(response, ex);
     } catch (const TransferFailure& failure) {
         log_message(LOG_WARN, "server", "transfer/import failed: " + failure.message);
-        write_rpc_error(
-            response,
-            transfer_error_status(failure.code),
-            transfer_error_code_name(failure.code),
-            failure.message
-        );
+        write_transfer_error_response(response, failure);
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
         log_message(LOG_WARN, "server", "transfer/import failed: " + message);
-        write_rpc_error(
-            response,
-            transfer_error_status(TransferRpcCode::Internal),
-            transfer_error_code_name(TransferRpcCode::Internal),
-            message
-        );
+        write_transfer_internal_error_response(response, message);
     }
 
     return response;
@@ -277,24 +206,28 @@ int handle_streaming_transfer_export(
         HttpRequest request = request_head;
         request.body = read_request_body_to_string(body);
         const Json body_json = parse_json_body(request);
-        require_uncompressed_transfer(body_json.value("compression", std::string("none")));
-
-        const std::string path =
-            resolve_absolute_transfer_path(body_json.at("path").get<std::string>());
-        authorize_sandbox_path(state, SANDBOX_READ, path);
-        const std::string symlink_mode = body_json.value("symlink_mode", std::string("preserve"));
-        const std::vector<std::string> exclude = transfer_exclude_or_empty(body_json);
-        const std::string source_type = export_path_source_type(path, symlink_mode);
+        const TransferExportRequestSpec export_request =
+            prepare_transfer_export_request(state, body_json);
         log_message(
             LOG_INFO,
             "server",
-            "transfer/export path=`" + path + "` source_type=`" + source_type + "`"
+            "transfer/export path=`" + export_request.path + "` source_type=`" +
+                export_request.source_type + "`"
         );
 
-        send_transfer_export_headers(client, ExportedPayload{source_type, std::string()});
+        send_transfer_export_headers(
+            client,
+            ExportedPayload{export_request.source_type, std::string()}
+        );
         headers_sent = true;
         ChunkedTransferArchiveSink sink(client);
-        export_path_to_sink_as(sink, path, source_type, symlink_mode, exclude);
+        export_path_to_sink_as(
+            sink,
+            export_request.path,
+            export_request.source_type,
+            export_request.symlink_mode,
+            export_request.exclude
+        );
         sink.finish();
         return 200;
     } catch (const SandboxError& ex) {
@@ -306,12 +239,7 @@ int handle_streaming_transfer_export(
 
         HttpResponse response;
         response.status = 400;
-        write_rpc_error(
-            response,
-            400,
-            transfer_error_code_name(TransferRpcCode::SandboxDenied),
-            message
-        );
+        write_transfer_error_response(response, ex);
         try_send_response(client, response);
         return response.status;
     } catch (const TransferFailure& failure) {
@@ -322,12 +250,7 @@ int handle_streaming_transfer_export(
 
         HttpResponse response;
         response.status = transfer_error_status(failure.code);
-        write_rpc_error(
-            response,
-            transfer_error_status(failure.code),
-            transfer_error_code_name(failure.code),
-            failure.message
-        );
+        write_transfer_error_response(response, failure);
         try_send_response(client, response);
         return response.status;
     } catch (const std::exception& ex) {
@@ -339,12 +262,7 @@ int handle_streaming_transfer_export(
 
         HttpResponse response;
         response.status = transfer_error_status(TransferRpcCode::Internal);
-        write_rpc_error(
-            response,
-            transfer_error_status(TransferRpcCode::Internal),
-            transfer_error_code_name(TransferRpcCode::Internal),
-            message
-        );
+        write_transfer_internal_error_response(response, message);
         try_send_response(client, response);
         return response.status;
     }

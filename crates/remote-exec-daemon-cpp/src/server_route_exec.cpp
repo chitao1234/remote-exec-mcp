@@ -1,40 +1,14 @@
 #include <sstream>
 #include <string>
 
-#include "filesystem_sandbox.h"
 #include "logging.h"
-#include "path_policy.h"
 #include "platform.h"
 #include "process_session.h"
 #include "server_route_common.h"
 #include "server_route_exec.h"
+#include "server_request_utils.h"
 
 namespace {
-
-std::string resolve_workdir(const AppState& state, const Json& body) {
-    const std::string raw = body.value("workdir", state.config.default_workdir);
-    if (raw.empty()) {
-        return state.config.default_workdir;
-    }
-
-    const PathPolicy policy = host_path_policy();
-    if (is_absolute_for_policy(policy, raw)) {
-        return normalize_for_system(policy, raw);
-    }
-    return join_for_policy(policy, state.config.default_workdir, raw);
-}
-
-const CompiledFilesystemSandbox* active_sandbox(const AppState& state) {
-    return state.sandbox_enabled ? &state.sandbox : NULL;
-}
-
-void authorize_sandbox_path(
-    const AppState& state,
-    SandboxAccess access,
-    const std::string& path
-) {
-    authorize_path(host_path_policy(), active_sandbox(state), access, path);
-}
 
 unsigned long requested_max_output_tokens(const Json& body) {
     const Json::const_iterator it = body.find("max_output_tokens");
