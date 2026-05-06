@@ -114,11 +114,6 @@ bool try_read_http_request_head(
     HttpRequestHead* head
 );
 HttpRequestHead read_http_request_head(SOCKET client, std::size_t max_header_bytes);
-std::string read_http_request(
-    SOCKET client,
-    std::size_t max_header_bytes,
-    std::size_t max_body_bytes
-);
 void send_all(SOCKET client, const std::string& data);
 void send_all_bytes(SOCKET client, const char* data, std::size_t size);
 SOCKET create_listener(const DaemonConfig& config);

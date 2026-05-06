@@ -28,11 +28,27 @@ int main() {
     send_all(writer.get(), raw);
     writer.reset();
 
-    const std::string received = read_http_request(reader.get(), 65536, 1024);
-    const HttpRequest request = parse_http_request(received);
+    HttpRequestHead head;
+    assert(try_read_http_request_head(reader.get(), 65536, &head));
+
+    const HttpRequest request = parse_http_request_head(head.raw_headers);
+    const HttpRequestBodyFraming framing =
+        request_body_framing_from_headers(head.raw_headers);
+    HttpRequestBodyStream body(reader.get(), head.initial_body, framing, 1024);
+
+    std::string decoded;
+    char buffer[4];
+    for (;;) {
+        const std::size_t received = body.read(buffer, sizeof(buffer));
+        if (received == 0U) {
+            break;
+        }
+        decoded.append(buffer, received);
+    }
+
     assert(request.path == "/v1/transfer/import");
     assert(request.header("transfer-encoding") == "chunked");
-    assert(request.body == "hello world");
+    assert(decoded == "hello world");
 
     return 0;
 }
