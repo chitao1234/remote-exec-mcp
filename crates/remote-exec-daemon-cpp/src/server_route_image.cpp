@@ -109,8 +109,8 @@ HttpResponse handle_image_read(AppState& state, const HttpRequest& request) {
             throw invalid_detail_failure(detail);
         }
 
-        const std::string path = resolve_input_path(state, body, "path");
-        authorize_sandbox_path(state, SANDBOX_READ, path);
+        const std::string path =
+            resolve_authorized_input_path(state, body, "path", SANDBOX_READ);
         require_regular_image_file(path);
 
         const std::string bytes = read_binary_file_bytes(path);

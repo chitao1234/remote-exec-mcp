@@ -50,8 +50,11 @@ HttpResponse handle_transfer_path_info(AppState& state, const HttpRequest& reque
 
     try {
         const Json body = parse_json_body(request);
-        const std::string path = resolve_absolute_transfer_path(body.at("path").get<std::string>());
-        authorize_sandbox_path(state, SANDBOX_WRITE, path);
+        const std::string path = resolve_authorized_transfer_path(
+            state,
+            body.at("path").get<std::string>(),
+            SANDBOX_WRITE
+        );
         const PathInfo info = path_info(path);
         write_json(
             response,

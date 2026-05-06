@@ -54,8 +54,8 @@ HttpResponse handle_exec_start(AppState& state, const HttpRequest& request) {
         }
         const std::string shell =
             platform::selected_shell(shell_override, state.default_shell);
-        const std::string workdir = resolve_workdir(state, body);
-        authorize_sandbox_path(state, SANDBOX_EXEC_CWD, workdir);
+        const std::string workdir =
+            resolve_authorized_workdir(state, body, SANDBOX_EXEC_CWD);
 
         Json exec_response = state.sessions.start_command(
             state.config.target,

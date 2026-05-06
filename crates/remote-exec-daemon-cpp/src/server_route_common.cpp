@@ -58,19 +58,15 @@ HttpResponse handle_patch_apply(AppState& state, const HttpRequest& request) {
 
     try {
         const Json body = parse_json_body(request);
-        PatchPathAuthorizer authorizer;
-        if (state.sandbox_enabled) {
-            authorizer = [&state](const std::string& path) {
-                authorize_sandbox_path(state, SANDBOX_WRITE, path);
-            };
-        }
+        const std::string workdir = resolve_workdir(state, body);
+        const std::string patch_text = body.at("patch").get<std::string>();
         const PatchApplyResult result = apply_patch(
-            resolve_workdir(state, body),
-            body.at("patch").get<std::string>(),
-            authorizer
+            workdir,
+            patch_text,
+            make_patch_path_authorizer(state)
         );
         std::ostringstream summary;
-        summary << "patch/apply patch_len=" << body.at("patch").get<std::string>().size();
+        summary << "patch/apply patch_len=" << patch_text.size();
         log_message(LOG_INFO, "server", summary.str());
         write_json(response, Json{{"output", result.output}});
     } catch (const SandboxError& ex) {

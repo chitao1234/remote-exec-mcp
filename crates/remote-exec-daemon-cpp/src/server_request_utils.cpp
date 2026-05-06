@@ -11,6 +11,14 @@ const CompiledFilesystemSandbox* active_sandbox(const AppState& state) {
     return state.sandbox_enabled ? &state.sandbox : NULL;
 }
 
+std::string resolve_path_from_base(const std::string& base, const std::string& raw) {
+    const PathPolicy policy = host_path_policy();
+    if (is_absolute_for_policy(policy, raw)) {
+        return normalize_for_system(policy, raw);
+    }
+    return join_for_policy(policy, base, raw);
+}
+
 std::vector<std::string> transfer_exclude_or_empty(const Json& body) {
     const Json::const_iterator it = body.find("exclude");
     if (it == body.end() || it->is_null()) {
@@ -46,11 +54,17 @@ std::string resolve_workdir(const AppState& state, const Json& body) {
         return state.config.default_workdir;
     }
 
-    const PathPolicy policy = host_path_policy();
-    if (is_absolute_for_policy(policy, raw)) {
-        return normalize_for_system(policy, raw);
-    }
-    return join_for_policy(policy, state.config.default_workdir, raw);
+    return resolve_path_from_base(state.config.default_workdir, raw);
+}
+
+std::string resolve_authorized_workdir(
+    const AppState& state,
+    const Json& body,
+    SandboxAccess access
+) {
+    const std::string path = resolve_workdir(state, body);
+    authorize_sandbox_path(state, access, path);
+    return path;
 }
 
 std::string resolve_input_path(
@@ -59,11 +73,18 @@ std::string resolve_input_path(
     const std::string& key
 ) {
     const std::string raw = body.at(key).get<std::string>();
-    const PathPolicy policy = host_path_policy();
-    if (is_absolute_for_policy(policy, raw)) {
-        return normalize_for_system(policy, raw);
-    }
-    return join_for_policy(policy, resolve_workdir(state, body), raw);
+    return resolve_path_from_base(resolve_workdir(state, body), raw);
+}
+
+std::string resolve_authorized_input_path(
+    const AppState& state,
+    const Json& body,
+    const std::string& key,
+    SandboxAccess access
+) {
+    const std::string path = resolve_input_path(state, body, key);
+    authorize_sandbox_path(state, access, path);
+    return path;
 }
 
 void authorize_sandbox_path(
@@ -85,6 +106,25 @@ std::string resolve_absolute_transfer_path(const std::string& path) {
     return normalize_for_system(policy, path);
 }
 
+std::string resolve_authorized_transfer_path(
+    const AppState& state,
+    const std::string& path,
+    SandboxAccess access
+) {
+    const std::string resolved = resolve_absolute_transfer_path(path);
+    authorize_sandbox_path(state, access, resolved);
+    return resolved;
+}
+
+PatchPathAuthorizer make_patch_path_authorizer(const AppState& state) {
+    if (!state.sandbox_enabled) {
+        return PatchPathAuthorizer();
+    }
+    return [&state](const std::string& path) {
+        authorize_sandbox_path(state, SANDBOX_WRITE, path);
+    };
+}
+
 TransferExportRequestSpec prepare_transfer_export_request(
     const AppState& state,
     const Json& body
@@ -92,8 +132,11 @@ TransferExportRequestSpec prepare_transfer_export_request(
     require_uncompressed_transfer(body.value("compression", std::string("none")));
 
     TransferExportRequestSpec request;
-    request.path = resolve_absolute_transfer_path(body.at("path").get<std::string>());
-    authorize_sandbox_path(state, SANDBOX_READ, request.path);
+    request.path = resolve_authorized_transfer_path(
+        state,
+        body.at("path").get<std::string>(),
+        SANDBOX_READ
+    );
     request.symlink_mode = body.value("symlink_mode", std::string("preserve"));
     request.exclude = transfer_exclude_or_empty(body);
     request.source_type = export_path_source_type(request.path, request.symlink_mode);
@@ -107,9 +150,11 @@ TransferImportRequestSpec prepare_transfer_import_request(
     TransferImportRequestSpec import_request;
     import_request.metadata = parse_transfer_import_metadata(request);
     require_uncompressed_transfer(import_request.metadata.compression);
-    import_request.destination_path =
-        resolve_absolute_transfer_path(import_request.metadata.destination_path);
-    authorize_sandbox_path(state, SANDBOX_WRITE, import_request.destination_path);
+    import_request.destination_path = resolve_authorized_transfer_path(
+        state,
+        import_request.metadata.destination_path,
+        SANDBOX_WRITE
+    );
     return import_request;
 }
 
