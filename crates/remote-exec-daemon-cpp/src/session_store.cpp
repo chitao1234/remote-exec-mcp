@@ -2,6 +2,7 @@
 #include <atomic>
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -41,6 +42,14 @@ struct PruneCandidate {
     std::string daemon_session_id;
     std::shared_ptr<LiveSession> session;
     std::uint64_t last_touched_order;
+};
+
+struct SessionSnapshot {
+    std::string buffered_output;
+    bool eof;
+    bool exited;
+    int exit_code;
+    std::uint64_t generation;
 };
 
 bool is_token_space(char ch) {
@@ -169,86 +178,238 @@ std::shared_ptr<LiveSession> launch_live_session(
     return session;
 }
 
-std::string read_available(const std::shared_ptr<LiveSession>& session) {
-    return session->process->read_available(&session->output_carry);
+bool session_finished(const SessionSnapshot& snapshot) {
+    return snapshot.eof && snapshot.exited;
 }
 
-std::string flush_output_carry(const std::shared_ptr<LiveSession>& session) {
-    return session->process->flush_carry(&session->output_carry);
+SessionSnapshot session_snapshot_locked(const LiveSession& session) {
+    SessionSnapshot snapshot;
+    snapshot.buffered_output = session.output_.buffered_output;
+    snapshot.eof = session.output_.eof;
+    snapshot.exited = session.output_.exited;
+    snapshot.exit_code = session.output_.exit_code;
+    snapshot.generation = session.output_.generation;
+    return snapshot;
 }
 
-std::string drain_output_after_exit(
-    const std::shared_ptr<LiveSession>& session,
-    std::uint64_t poll_start,
-    unsigned long timeout_ms,
-    bool saw_output_before_exit
+bool wait_for_generation_change_locked(
+    LiveSession* session,
+    std::uint64_t baseline_generation,
+    std::uint64_t deadline_ms
 ) {
-    const std::uint64_t drain_start = platform::monotonic_ms();
-    std::uint64_t last_output_at = drain_start;
-    bool saw_output = saw_output_before_exit;
-    std::string output;
-
-    for (;;) {
-        const std::string chunk = read_available(session);
-        if (!chunk.empty()) {
-            output += chunk;
-            saw_output = true;
-            last_output_at = platform::monotonic_ms();
-            continue;
-        }
-
+    while (!session->closing && session->output_.generation == baseline_generation) {
         const std::uint64_t now = platform::monotonic_ms();
-        if (now - poll_start >= timeout_ms) {
-            return output;
+        if (now >= deadline_ms) {
+            return false;
         }
-        if (saw_output) {
-            if (now - last_output_at >= EXIT_DRAIN_QUIET_MS) {
-                return output;
-            }
-        } else if (now - drain_start >= EXIT_DRAIN_INITIAL_WAIT_MS) {
-            return output;
+        const unsigned long remaining = static_cast<unsigned long>(deadline_ms - now);
+        if (!session->cond_.timed_wait_ms(session->mutex_, remaining)) {
+            return false;
         }
+    }
+    return session->output_.generation != baseline_generation || session->closing;
+}
 
-        platform::sleep_ms(10);
+void append_session_output_locked(
+    LiveSession* session,
+    const std::string& chunk
+) {
+    if (!chunk.empty()) {
+        session->output_.buffered_output += chunk;
+        ++session->output_.generation;
+        session->cond_.broadcast();
     }
 }
 
-PollResult poll_session(
-    const std::shared_ptr<LiveSession>& session,
-    unsigned long timeout_ms
-) {
-    const std::uint64_t poll_start = platform::monotonic_ms();
-    std::string output;
+void mark_session_exit_locked(LiveSession* session) {
+    int exit_code = session->output_.exit_code;
+    if (session->process->has_exited(&exit_code)) {
+        session->output_.exited = true;
+        session->output_.exit_code = exit_code;
+    }
+}
 
+void finish_session_output_locked(LiveSession* session) {
+    const std::string flushed = session->process->flush_carry(&session->output_.decode_carry);
+    if (!flushed.empty()) {
+        session->output_.buffered_output += flushed;
+    }
+    session->output_.eof = true;
+    mark_session_exit_locked(session);
+    ++session->output_.generation;
+    session->cond_.broadcast();
+}
+
+void pump_session_output(const std::shared_ptr<LiveSession>& session) {
     for (;;) {
-        output += read_available(session);
-
-        int exit_code = 0;
-        if (session->process->has_exited(&exit_code)) {
-            const bool saw_output_before_exit = !output.empty();
-            output += read_available(session);
-            output += drain_output_after_exit(
-                session,
-                poll_start,
-                timeout_ms,
-                saw_output_before_exit || !output.empty()
-            );
-            output += flush_output_carry(session);
-            return PollResult{output, true, exit_code};
+        {
+            BasicLockGuard lock(session->mutex_);
+            if (session->closing || session->retired || session->process.get() == NULL) {
+                return;
+            }
         }
 
-        if (platform::monotonic_ms() - poll_start >= timeout_ms) {
+        bool eof = false;
+        std::string carry;
+        std::string chunk;
+        {
+            BasicLockGuard lock(session->mutex_);
+            carry = session->output_.decode_carry;
+        }
+
+        try {
+            chunk = session->process->read_output(true, &eof, &carry);
+        } catch (const std::exception&) {
+            BasicLockGuard lock(session->mutex_);
+            session->output_.decode_carry = carry;
+            finish_session_output_locked(session.get());
+            session->retired = true;
+            return;
+        }
+
+        BasicLockGuard lock(session->mutex_);
+        if (session->closing) {
+            return;
+        }
+        session->output_.decode_carry = carry;
+        append_session_output_locked(session.get(), chunk);
+        if (eof) {
+            finish_session_output_locked(session.get());
+            return;
+        }
+    }
+}
+
+#ifdef _WIN32
+struct SessionPumpContext {
+    std::shared_ptr<LiveSession> session;
+};
+
+DWORD WINAPI session_output_pump_entry(LPVOID raw_context) {
+    std::unique_ptr<SessionPumpContext> context(
+        static_cast<SessionPumpContext*>(raw_context)
+    );
+    pump_session_output(context->session);
+    return 0;
+}
+
+void start_session_pump(const std::shared_ptr<LiveSession>& session) {
+    BasicLockGuard lock(session->mutex_);
+    if (session->pump_started) {
+        return;
+    }
+    std::unique_ptr<SessionPumpContext> context(new SessionPumpContext());
+    context->session = session;
+    HANDLE handle = CreateThread(NULL, 0, session_output_pump_entry, context.get(), 0, NULL);
+    if (handle == NULL) {
+        throw std::runtime_error("CreateThread failed");
+    }
+    session->pump_thread_ = handle;
+    session->pump_started = true;
+    context.release();
+}
+
+void join_session_pump(LiveSession* session) {
+    HANDLE handle = NULL;
+    {
+        BasicLockGuard lock(session->mutex_);
+        handle = session->pump_thread_;
+        session->pump_thread_ = NULL;
+        session->pump_started = false;
+    }
+    if (handle != NULL) {
+        WaitForSingleObject(handle, INFINITE);
+        CloseHandle(handle);
+    }
+}
+#else
+void start_session_pump(const std::shared_ptr<LiveSession>& session) {
+    BasicLockGuard lock(session->mutex_);
+    if (session->pump_started) {
+        return;
+    }
+    session->pump_thread_ = new std::thread(pump_session_output, session);
+    session->pump_started = true;
+}
+
+void join_session_pump(LiveSession* session) {
+    std::thread* thread = NULL;
+    {
+        BasicLockGuard lock(session->mutex_);
+        thread = session->pump_thread_;
+        session->pump_thread_ = NULL;
+        session->pump_started = false;
+    }
+    if (thread != NULL) {
+        thread->join();
+        delete thread;
+    }
+}
+#endif
+
+std::string take_session_output_locked(
+    LiveSession* session,
+    unsigned long max_output_tokens
+) {
+    (void)max_output_tokens;
+    std::string output = session->output_.buffered_output;
+    session->output_.buffered_output.clear();
+    return output;
+}
+
+PollResult wait_for_session_activity(
+    const std::shared_ptr<LiveSession>& session,
+    unsigned long timeout_ms,
+    unsigned long max_output_tokens
+) {
+    const std::uint64_t deadline = platform::monotonic_ms() + timeout_ms;
+    BasicLockGuard session_lock(session->mutex_);
+    std::string output;
+    std::uint64_t seen_generation = session->output_.generation;
+
+    for (;;) {
+        mark_session_exit_locked(session.get());
+        const SessionSnapshot snapshot = session_snapshot_locked(*session);
+        if (!snapshot.buffered_output.empty()) {
+            output += take_session_output_locked(session.get(), max_output_tokens);
+            seen_generation = session->output_.generation;
+        }
+        if (session_finished(snapshot)) {
+            return PollResult{output, true, snapshot.exit_code};
+        }
+
+        const std::uint64_t now = platform::monotonic_ms();
+        if (timeout_ms == 0UL || now >= deadline) {
             return PollResult{output, false, 0};
         }
 
-        platform::sleep_ms(25);
+        if (!wait_for_generation_change_locked(session.get(), seen_generation, deadline)) {
+            return PollResult{output, false, 0};
+        }
     }
 }
 
 }  // namespace
 
+SessionOutputState::SessionOutputState()
+    : eof(false), exited(false), exit_code(0), generation(0) {}
+
 LiveSession::LiveSession()
-    : started_at_ms(0), last_touched_order(0), stdin_open(false), retired(false) {}
+    : started_at_ms(0),
+      last_touched_order(0),
+      stdin_open(false),
+      retired(false),
+      closing(false),
+      pump_started(false)
+#ifdef _WIN32
+      ,
+      pump_thread_(NULL)
+#else
+      ,
+      pump_thread_(NULL)
+#endif
+{
+}
 
 LiveSession::~LiveSession() {}
 
@@ -268,11 +429,16 @@ SessionStore::~SessionStore() {
     }
 
     for (std::size_t i = 0; i < sessions.size(); ++i) {
-        BasicLockGuard session_lock(sessions[i]->mutex_);
-        sessions[i]->retired = true;
-        if (sessions[i]->process.get() != NULL) {
-            sessions[i]->process->terminate();
+        {
+            BasicLockGuard session_lock(sessions[i]->mutex_);
+            sessions[i]->retired = true;
+            sessions[i]->closing = true;
+            sessions[i]->cond_.broadcast();
+            if (sessions[i]->process.get() != NULL) {
+                sessions[i]->process->terminate();
+            }
         }
+        join_session_pump(sessions[i].get());
     }
 }
 
@@ -379,7 +545,9 @@ bool SessionStore::prune_one_session_for_start(unsigned long max_open_sessions) 
         for (std::size_t i = 0; i < prunable_count; ++i) {
             BasicLockGuard session_lock(snapshot[i].session->mutex_);
             int exit_code = 0;
-            if (snapshot[i].session->retired || snapshot[i].session->process->has_exited(&exit_code)) {
+            if (snapshot[i].session->retired ||
+                snapshot[i].session->output_.exited ||
+                snapshot[i].session->process->has_exited(&exit_code)) {
                 victim = snapshot[i];
                 found_exited = true;
                 break;
@@ -403,10 +571,13 @@ bool SessionStore::prune_one_session_for_start(unsigned long max_open_sessions) 
         {
             BasicLockGuard session_lock(removed->mutex_);
             removed->retired = true;
+            removed->closing = true;
+            removed->cond_.broadcast();
             if (removed->process.get() != NULL) {
                 removed->process->terminate();
             }
         }
+        join_session_pump(removed.get());
 
         unsigned long open_sessions_after_prune = 0UL;
         {
@@ -449,20 +620,16 @@ Json SessionStore::start_command(
     try {
         std::shared_ptr<LiveSession> session =
             launch_live_session(command, workdir, shell, login, tty);
+        start_session_pump(session);
 
         const unsigned long timeout_ms = resolve_yield_time_ms(
             yield_time.exec_command,
             has_yield_time_ms,
             yield_time_ms
         );
-        PollResult poll_result;
-        {
-            BasicLockGuard session_lock(session->mutex_);
-            poll_result = poll_session(session, timeout_ms);
-            if (poll_result.completed) {
-                session->retired = true;
-            }
-        }
+        BasicLockGuard operation_lock(session->operation_mutex_);
+        const PollResult poll_result =
+            wait_for_session_activity(session, timeout_ms, max_output_tokens);
 
         Json warnings = empty_exec_warnings();
         {
@@ -485,6 +652,16 @@ Json SessionStore::start_command(
         }
 
         if (poll_result.completed) {
+            {
+                BasicLockGuard session_lock(session->mutex_);
+                session->retired = true;
+                session->closing = true;
+                session->cond_.broadcast();
+                if (session->process.get() != NULL) {
+                    session->process->terminate();
+                }
+            }
+            join_session_pump(session.get());
             Json response = build_response(
                 NULL,
                 false,
@@ -555,30 +732,32 @@ Json SessionStore::write_stdin(
 
     PollResult poll_result;
     {
-        BasicLockGuard session_lock(session->mutex_);
-        if (session->retired) {
-            log_message(
-                LOG_WARN,
-                "session_store",
-                "unknown daemon session `" + daemon_session_id + "`"
-            );
-            throw UnknownSessionError("Unknown daemon session");
-        }
-
-        if (!chars.empty()) {
-            if (!session->stdin_open) {
-                throw StdinClosedError(
-                    "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
+        BasicLockGuard operation_lock(session->operation_mutex_);
+        {
+            BasicLockGuard session_lock(session->mutex_);
+            if (session->retired) {
+                log_message(
+                    LOG_WARN,
+                    "session_store",
+                    "unknown daemon session `" + daemon_session_id + "`"
                 );
+                throw UnknownSessionError("Unknown daemon session");
             }
-            try {
-                session->process->write_stdin(chars);
-            } catch (const ProcessStdinClosedError& ex) {
-                session->stdin_open = false;
-                throw StdinClosedError(ex.what());
+
+            if (!chars.empty()) {
+                if (!session->stdin_open) {
+                    throw StdinClosedError(
+                        "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
+                    );
+                }
+                try {
+                    session->process->write_stdin(chars);
+                } catch (const ProcessStdinClosedError& ex) {
+                    session->stdin_open = false;
+                    throw StdinClosedError(ex.what());
+                }
             }
         }
-
         const YieldTimeOperationConfig& operation_config =
             chars.empty() ? yield_time.write_stdin_poll : yield_time.write_stdin_input;
         const unsigned long timeout_ms = resolve_yield_time_ms(
@@ -586,14 +765,21 @@ Json SessionStore::write_stdin(
             has_yield_time_ms,
             yield_time_ms
         );
-        poll_result = poll_session(session, timeout_ms);
-        if (poll_result.completed) {
-            session->retired = true;
-        }
+        poll_result = wait_for_session_activity(session, timeout_ms, max_output_tokens);
     }
 
     if (poll_result.completed) {
+        {
+            BasicLockGuard session_lock(session->mutex_);
+            session->retired = true;
+            session->closing = true;
+            session->cond_.broadcast();
+            if (session->process.get() != NULL) {
+                session->process->terminate();
+            }
+        }
         erase_session_if_current(mutex_, sessions_, daemon_session_id, session);
+        join_session_pump(session.get());
         Json response = build_response(
             NULL,
             false,

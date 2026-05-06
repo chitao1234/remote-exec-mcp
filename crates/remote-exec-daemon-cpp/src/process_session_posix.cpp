@@ -209,6 +209,26 @@ bool readable_now(int fd) {
     }
 }
 
+void wait_until_readable(int fd) {
+    struct pollfd descriptor;
+    descriptor.fd = fd;
+    descriptor.events = POLLIN | POLLHUP | POLLERR;
+    descriptor.revents = 0;
+
+    for (;;) {
+        const int result = poll(&descriptor, 1, -1);
+        if (result > 0) {
+            return;
+        }
+        if (result < 0 && errno == EINTR) {
+            continue;
+        }
+        if (result < 0) {
+            throw std::runtime_error(std::string("poll failed: ") + std::strerror(errno));
+        }
+    }
+}
+
 void exec_shell_child(
     const std::vector<std::string>& argv,
     const std::string& workdir,
@@ -278,17 +298,23 @@ public:
         }
     }
 
-    std::string read_available(std::string* carry) override {
+    std::string read_output(bool block, bool* eof, std::string* carry) override {
+        *eof = false;
         std::string raw;
         char buffer[4096];
         const int read_fd = output_read_.valid() ? output_read_.get() : input_write_.get();
-        while (readable_now(read_fd)) {
+        if (block && !readable_now(read_fd)) {
+            wait_until_readable(read_fd);
+        }
+        while (block || readable_now(read_fd)) {
             const ssize_t read_count = read(read_fd, buffer, sizeof(buffer));
             if (read_count > 0) {
                 raw.append(buffer, static_cast<std::size_t>(read_count));
+                block = false;
                 continue;
             }
             if (read_count == 0) {
+                *eof = true;
                 break;
             }
             if (errno == EINTR) {
@@ -298,9 +324,12 @@ public:
                 break;
             }
             if (errno == EIO) {
+                *eof = true;
                 break;
             }
-            break;
+            throw std::runtime_error(
+                std::string("read(stdout) failed: ") + std::strerror(errno)
+            );
         }
         return decode_utf8_output(carry, raw, false);
     }

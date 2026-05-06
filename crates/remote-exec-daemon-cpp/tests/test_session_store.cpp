@@ -250,6 +250,33 @@ int main() {
     assert(stdin_closed_rejected);
 
     if (process_session_supports_pty()) {
+        const YieldTimeConfig fast_yield = fast_yield_time_config();
+        const Json waiting = start_test_command(
+            store,
+            "printf 'ready\\n'; IFS= read line; printf 'echo:%s\\n' \"$line\"",
+            root.string(),
+            shell,
+            true,
+            50UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            fast_yield,
+            64UL
+        );
+        assert(waiting.at("running").get<bool>());
+        assert(waiting.at("output").get<std::string>().find("ready") != std::string::npos);
+        const std::string waiting_id = waiting.at("daemon_session_id").get<std::string>();
+        const Json resumed = store.write_stdin(
+            waiting_id,
+            "ping\n",
+            true,
+            1000UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            fast_yield
+        );
+        assert(!resumed.at("running").get<bool>());
+        assert(resumed.at("exit_code").get<int>() == 0);
+        assert(resumed.at("output").get<std::string>().find("echo:ping") != std::string::npos);
+
         const Json slow_running = start_test_command(
             store,
             "printf slow; sleep 30",
