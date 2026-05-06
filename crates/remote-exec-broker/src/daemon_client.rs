@@ -10,7 +10,7 @@ use remote_exec_proto::rpc::{
     TransferExportRequest, TransferImportMetadata, TransferImportRequest, TransferImportResponse,
     TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType,
 };
-use reqwest::header::{AUTHORIZATION, CONNECTION, CONTENT_LENGTH, HeaderValue};
+use reqwest::header::{AUTHORIZATION, CONTENT_LENGTH, HeaderValue};
 
 use crate::config::{TargetConfig, TargetTransportKind};
 use crate::tools::transfer::codec;
@@ -531,10 +531,7 @@ impl DaemonClient {
     }
 
     fn request(&self, path: &str) -> reqwest::RequestBuilder {
-        let mut request = self
-            .client
-            .post(format!("{}{}", self.base_url, path))
-            .header(CONNECTION, "close");
+        let mut request = self.client.post(format!("{}{}", self.base_url, path));
         if let Some(authorization) = &self.authorization {
             request = request.header(AUTHORIZATION, authorization.clone());
         }
@@ -594,5 +591,50 @@ fn decode_rpc_error_body(status: reqwest::StatusCode, body: String) -> DaemonCli
             code: None,
             message: body,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_client(authorization: Option<HeaderValue>) -> DaemonClient {
+        crate::install_crypto_provider();
+        DaemonClient {
+            client: reqwest::Client::builder().build().unwrap(),
+            target_name: "builder-a".to_string(),
+            base_url: "http://127.0.0.1:9".to_string(),
+            authorization,
+        }
+    }
+
+    #[test]
+    fn daemon_request_does_not_force_connection_close() {
+        let request = test_client(None)
+            .request("/v1/target-info")
+            .build()
+            .unwrap();
+
+        assert!(
+            request.headers().get(reqwest::header::CONNECTION).is_none(),
+            "broker daemon client should let reqwest manage persistent connections"
+        );
+    }
+
+    #[test]
+    fn daemon_request_still_applies_authorization_header() {
+        let request = test_client(Some(HeaderValue::from_static("Bearer shared-secret")))
+            .request("/v1/target-info")
+            .build()
+            .unwrap();
+
+        assert_eq!(
+            request
+                .headers()
+                .get(reqwest::header::AUTHORIZATION)
+                .and_then(|value| value.to_str().ok()),
+            Some("Bearer shared-secret")
+        );
+        assert!(request.headers().get(reqwest::header::CONNECTION).is_none());
     }
 }
