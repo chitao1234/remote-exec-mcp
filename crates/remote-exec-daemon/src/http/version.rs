@@ -22,11 +22,11 @@ pub async fn require_http_11(request: Request, next: Next) -> Response {
 
 #[cfg(test)]
 mod tests {
+    use axum::Router;
     use axum::body::Body;
     use axum::http::{Method, Request, StatusCode, Version};
     use axum::middleware;
     use axum::routing::post;
-    use axum::Router;
     use tower::ServiceExt;
 
     use super::require_http_11;
