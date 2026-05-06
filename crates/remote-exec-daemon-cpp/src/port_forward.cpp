@@ -38,30 +38,34 @@ PortForwardError connection_closed_error(const std::string& connection_id) {
 
 bool shared_socket_closed(const std::shared_ptr<SharedSocket>& socket_value) {
     BasicLockGuard lock(socket_value->state_mutex);
-    return socket_value->closed;
+    return socket_value->state != PORT_RESOURCE_OPEN;
 }
 
 bool tcp_connection_closed(const std::shared_ptr<TcpConnection>& connection) {
     BasicLockGuard lock(connection->state_mutex);
-    return connection->closed;
+    return connection->state != PORT_RESOURCE_OPEN;
 }
 
-void mark_shared_socket_closed(const std::shared_ptr<SharedSocket>& socket_value) {
+void finish_close_shared_socket(const std::shared_ptr<SharedSocket>& socket_value) {
     BasicLockGuard lock(socket_value->state_mutex);
-    if (!socket_value->closed) {
-        socket_value->closed = true;
-        shutdown_socket(socket_value->socket.get());
-        socket_value->socket.reset();
+    if (socket_value->state == PORT_RESOURCE_CLOSED) {
+        return;
     }
+    socket_value->state = PORT_RESOURCE_CLOSING;
+    shutdown_socket(socket_value->socket.get());
+    socket_value->socket.reset();
+    socket_value->state = PORT_RESOURCE_CLOSED;
 }
 
-void mark_tcp_connection_closed(const std::shared_ptr<TcpConnection>& connection) {
+void finish_close_tcp_connection(const std::shared_ptr<TcpConnection>& connection) {
     BasicLockGuard lock(connection->state_mutex);
-    if (!connection->closed) {
-        connection->closed = true;
-        shutdown_socket(connection->socket.get());
-        connection->socket.reset();
+    if (connection->state == PORT_RESOURCE_CLOSED) {
+        return;
     }
+    connection->state = PORT_RESOURCE_CLOSING;
+    shutdown_socket(connection->socket.get());
+    connection->socket.reset();
+    connection->state = PORT_RESOURCE_CLOSED;
 }
 
 }  // namespace
@@ -82,10 +86,10 @@ const std::string& PortForwardError::code() const {
 }
 
 TcpConnection::TcpConnection(SOCKET socket_value, const std::string& lease)
-    : socket(socket_value), closed(false), lease_id(lease) {}
+    : socket(socket_value), state(PORT_RESOURCE_OPEN), lease_id(lease) {}
 
 SharedSocket::SharedSocket(SOCKET socket_value, const std::string& lease)
-    : socket(socket_value), closed(false), lease_id(lease) {}
+    : socket(socket_value), state(PORT_RESOURCE_OPEN), lease_id(lease) {}
 
 PortForwardStore::PortForwardStore() {}
 
@@ -203,13 +207,13 @@ Json PortForwardStore::listen_close(const std::string& bind_id) {
         if (!listener->lease_id.empty()) {
             untrack_bind_lease(listener->lease_id, bind_id);
         }
-        mark_shared_socket_closed(listener);
+        finish_close_shared_socket(listener);
     }
     if (socket_value.get() != NULL) {
         if (!socket_value->lease_id.empty()) {
             untrack_bind_lease(socket_value->lease_id, bind_id);
         }
-        mark_shared_socket_closed(socket_value);
+        finish_close_shared_socket(socket_value);
     }
     log_message(LOG_DEBUG, "port_forward", "closed bind `" + bind_id + "`");
     return Json::object();
@@ -336,7 +340,7 @@ Json PortForwardStore::connection_close(const std::string& connection_id) {
         if (!connection->lease_id.empty()) {
             untrack_connection_lease(connection->lease_id, connection_id);
         }
-        mark_tcp_connection_closed(connection);
+        finish_close_tcp_connection(connection);
     }
     log_message(LOG_DEBUG, "port_forward", "closed tcp connection `" + connection_id + "`");
     return Json::object();
@@ -500,10 +504,10 @@ void PortForwardStore::sweep_expired_leases() {
     }
 
     for (std::size_t i = 0; i < expired_binds.size(); ++i) {
-        mark_shared_socket_closed(expired_binds[i]);
+        finish_close_shared_socket(expired_binds[i]);
     }
     for (std::size_t i = 0; i < expired_connections.size(); ++i) {
-        mark_tcp_connection_closed(expired_connections[i]);
+        finish_close_tcp_connection(expired_connections[i]);
     }
 }
 

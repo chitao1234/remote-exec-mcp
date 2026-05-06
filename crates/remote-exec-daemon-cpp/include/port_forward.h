@@ -23,6 +23,12 @@ private:
     std::string code_;
 };
 
+enum PortResourceState {
+    PORT_RESOURCE_OPEN = 0,
+    PORT_RESOURCE_CLOSING = 1,
+    PORT_RESOURCE_CLOSED = 2
+};
+
 struct TcpConnection {
     TcpConnection(SOCKET socket, const std::string& lease_id);
 
@@ -30,7 +36,7 @@ struct TcpConnection {
     BasicMutex state_mutex;
     BasicMutex read_mutex;
     BasicMutex write_mutex;
-    bool closed;
+    PortResourceState state;
     std::string lease_id;
 };
 
@@ -39,7 +45,7 @@ struct SharedSocket {
 
     UniqueSocket socket;
     BasicMutex state_mutex;
-    bool closed;
+    PortResourceState state;
     std::string lease_id;
 };
 
