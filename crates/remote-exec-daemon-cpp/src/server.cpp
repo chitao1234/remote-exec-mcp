@@ -23,6 +23,7 @@
 #include "server.h"
 #include "server_routes.h"
 #include "server_transport.h"
+#include "text_utils.h"
 #include "transfer_http_codec.h"
 #include "transfer_ops.h"
 
@@ -103,6 +104,28 @@ std::vector<std::string> transfer_exclude_or_empty(const Json& body) {
         return std::vector<std::string>();
     }
     return it->get<std::vector<std::string> >();
+}
+
+bool request_connection_close_requested(const HttpRequest& request) {
+    const std::string value = lowercase_ascii(request.header("connection"));
+    std::size_t offset = 0;
+    while (offset <= value.size()) {
+        const std::size_t comma = value.find(',', offset);
+        const std::string token = trim_ascii(
+            comma == std::string::npos
+                ? value.substr(offset)
+                : value.substr(offset, comma - offset)
+        );
+        if (token == "close") {
+            return true;
+        }
+        if (comma == std::string::npos) {
+            return false;
+        }
+        offset = comma + 1U;
+    }
+
+    return false;
 }
 
 bool reject_before_route(
@@ -344,64 +367,93 @@ bool try_send_response(SOCKET client, const HttpResponse& response) {
         send_all(client, render_http_response(response));
         return true;
     } catch (const SocketSendError& ex) {
-        return log_send_failure(ex);
+        log_send_failure(ex);
+        return false;
     }
 }
 
 }  // namespace
 
-void handle_client_once(AppState& state, UniqueSocket client) {
-    try {
-        const std::uint64_t started_at_ms = platform::monotonic_ms();
-        const HttpRequestHead request_head = read_http_request_head(
-            client.get(),
-            state.config.max_request_header_bytes
-        );
-        HttpRequest request = parse_http_request_head(request_head.raw_headers);
-        const HttpRequestBodyFraming framing =
-            request_body_framing_from_headers(request_head.raw_headers);
-        HttpRequestBodyStream body(
-            client.get(),
-            request_head.initial_body,
-            framing,
-            state.config.max_request_body_bytes
-        );
+int handle_client_request(
+    AppState& state,
+    SOCKET client,
+    const HttpRequestHead& request_head,
+    bool* close_after_response
+) {
+    const std::uint64_t started_at_ms = platform::monotonic_ms();
+    HttpRequest request = parse_http_request_head(request_head.raw_headers);
+    *close_after_response = request_connection_close_requested(request);
+    const HttpRequestBodyFraming framing =
+        request_body_framing_from_headers(request_head.raw_headers);
+    HttpRequestBodyStream body(
+        client,
+        request_head.initial_body,
+        framing,
+        state.config.max_request_body_bytes
+    );
 
-        if (request.path == "/v1/transfer/export") {
-            const int status = handle_streaming_transfer_export(state, request, &body, client.get());
-            log_request_result(request, status, started_at_ms);
+    if (request.path == "/v1/transfer/export") {
+        const int status = handle_streaming_transfer_export(state, request, &body, client);
+        log_request_result(request, status, started_at_ms);
+        return status;
+    }
+
+    HttpResponse response;
+    if (request.path == "/v1/transfer/import") {
+        response = handle_streaming_transfer_import(state, request, &body);
+    } else {
+        request.body = read_request_body_to_string(&body);
+        response = route_request(state, request);
+    }
+    log_request_result(request, response.status, started_at_ms);
+    if (!try_send_response(client, response)) {
+        *close_after_response = true;
+    }
+    return response.status;
+}
+
+void handle_client(AppState& state, UniqueSocket client) {
+    for (;;) {
+        try {
+            HttpRequestHead request_head;
+            if (!try_read_http_request_head(
+                    client.get(),
+                    state.config.max_request_header_bytes,
+                    &request_head
+                )) {
+                return;
+            }
+
+            bool close_after_response = false;
+            handle_client_request(state, client.get(), request_head, &close_after_response);
+            if (close_after_response) {
+                return;
+            }
+        } catch (const BadHttpRequest& ex) {
+            log_message(LOG_WARN, "server", ex.what());
+            HttpResponse response;
+            response.status = 400;
+            write_rpc_error(response, 400, "bad_request", ex.what());
+            try_send_response(client.get(), response);
+            return;
+        } catch (const HttpParseError& ex) {
+            log_message(LOG_WARN, "server", ex.what());
+            HttpResponse response;
+            response.status = 400;
+            write_rpc_error(response, 400, "bad_request", ex.what());
+            try_send_response(client.get(), response);
+            return;
+        } catch (const SocketSendError& ex) {
+            log_send_failure(ex);
+            return;
+        } catch (const std::exception& ex) {
+            log_message(LOG_ERROR, "server", ex.what());
+            HttpResponse response;
+            response.status = 500;
+            write_rpc_error(response, 500, "internal_error", ex.what());
+            try_send_response(client.get(), response);
             return;
         }
-
-        HttpResponse response;
-        if (request.path == "/v1/transfer/import") {
-            response = handle_streaming_transfer_import(state, request, &body);
-        } else {
-            request.body = read_request_body_to_string(&body);
-            response = route_request(state, request);
-        }
-        log_request_result(request, response.status, started_at_ms);
-        try_send_response(client.get(), response);
-    } catch (const BadHttpRequest& ex) {
-        log_message(LOG_WARN, "server", ex.what());
-        HttpResponse response;
-        response.status = 400;
-        write_rpc_error(response, 400, "bad_request", ex.what());
-        try_send_response(client.get(), response);
-    } catch (const HttpParseError& ex) {
-        log_message(LOG_WARN, "server", ex.what());
-        HttpResponse response;
-        response.status = 400;
-        write_rpc_error(response, 400, "bad_request", ex.what());
-        try_send_response(client.get(), response);
-    } catch (const SocketSendError& ex) {
-        log_send_failure(ex);
-    } catch (const std::exception& ex) {
-        log_message(LOG_ERROR, "server", ex.what());
-        HttpResponse response;
-        response.status = 500;
-        write_rpc_error(response, 500, "internal_error", ex.what());
-        try_send_response(client.get(), response);
     }
 }
 
@@ -418,7 +470,7 @@ DWORD WINAPI client_thread_entry(LPVOID raw_context) {
         static_cast<ClientThreadContext*>(raw_context)
     );
     UniqueSocket client(context->socket);
-    handle_client_once(*context->state, std::move(client));
+    handle_client(*context->state, std::move(client));
     return 0;
 }
 #endif
@@ -440,7 +492,7 @@ void spawn_client_thread(AppState& state, UniqueSocket client) {
     std::thread(
         [&state](SOCKET socket) {
             UniqueSocket thread_client(socket);
-            handle_client_once(state, std::move(thread_client));
+            handle_client(state, std::move(thread_client));
         },
         client.release()
     )

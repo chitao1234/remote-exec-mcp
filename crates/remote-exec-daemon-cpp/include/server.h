@@ -19,5 +19,5 @@ struct AppState {
     PortForwardStore port_forwards;
 };
 
-void handle_client_once(AppState& state, UniqueSocket client);
+void handle_client(AppState& state, UniqueSocket client);
 int run_server(const DaemonConfig& config);

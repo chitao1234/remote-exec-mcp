@@ -306,13 +306,20 @@ NetworkSession::~NetworkSession() {
 #endif
 }
 
-HttpRequestHead read_http_request_head(SOCKET client, std::size_t max_header_bytes) {
+bool try_read_http_request_head(
+    SOCKET client,
+    std::size_t max_header_bytes,
+    HttpRequestHead* head
+) {
     std::string data;
     char buffer[4096];
 
     for (;;) {
         const int received = recv(client, buffer, sizeof(buffer), 0);
         if (received == 0) {
+            if (data.empty()) {
+                return false;
+            }
             break;
         }
         if (received < 0) {
@@ -336,9 +343,17 @@ HttpRequestHead read_http_request_head(SOCKET client, std::size_t max_header_byt
             throw BadHttpRequest("http request headers too large");
         }
 
-        HttpRequestHead head;
-        head.raw_headers = data.substr(0, header_end);
-        head.initial_body = data.substr(header_end + 4U);
+        head->raw_headers = data.substr(0, header_end);
+        head->initial_body = data.substr(header_end + 4U);
+        return true;
+    }
+
+    throw BadHttpRequest("incomplete http request");
+}
+
+HttpRequestHead read_http_request_head(SOCKET client, std::size_t max_header_bytes) {
+    HttpRequestHead head;
+    if (try_read_http_request_head(client, max_header_bytes, &head)) {
         return head;
     }
 

@@ -269,7 +269,7 @@ static std::string run_single_request(AppState& state, const std::string& reques
     UniqueSocket server_socket(sockets[0]);
     UniqueSocket client_socket(sockets[1]);
     send_request_and_close_writer(client_socket.get(), request);
-    handle_client_once(state, std::move(server_socket));
+    handle_client(state, std::move(server_socket));
     return read_all_from_socket(client_socket.get());
 }
 
@@ -281,7 +281,7 @@ static void run_single_request_and_abort_client(AppState& state, const std::stri
     UniqueSocket client_socket(sockets[1]);
     send_request_and_close_writer(client_socket.get(), request);
     client_socket.reset();
-    handle_client_once(state, std::move(server_socket));
+    handle_client(state, std::move(server_socket));
 }
 
 static std::string json_post_request(const std::string& path, const Json& body) {
