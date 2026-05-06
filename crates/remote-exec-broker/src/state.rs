@@ -31,8 +31,8 @@ impl BrokerState {
         handle.ensure_identity_verified(name).await?;
         if let Some(info) = handle.cached_daemon_info().await {
             anyhow::ensure!(
-                info.supports_port_forward && info.port_forward_protocol_version >= 2,
-                "target `{name}` does not support port forward protocol version 2"
+                info.supports_port_forward && info.port_forward_protocol_version >= 3,
+                "target `{name}` does not support port forward protocol version 3"
             );
         }
         Ok(port_forward::SideHandle::target(

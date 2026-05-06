@@ -7,7 +7,7 @@ pub const HEADER_LEN: usize = 16;
 pub const MAX_META_LEN: usize = 16 * 1024;
 pub const MAX_DATA_LEN: usize = 256 * 1024;
 pub const TUNNEL_PROTOCOL_VERSION_HEADER: &str = "x-remote-exec-port-tunnel-version";
-pub const TUNNEL_PROTOCOL_VERSION: &str = "1";
+pub const TUNNEL_PROTOCOL_VERSION: &str = "2";
 pub const UPGRADE_TOKEN: &str = "remote-exec-port-tunnel";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,6 +15,10 @@ pub const UPGRADE_TOKEN: &str = "remote-exec-port-tunnel";
 pub enum FrameType {
     Error = 1,
     Close = 2,
+    SessionOpen = 3,
+    SessionReady = 4,
+    SessionResume = 5,
+    SessionResumed = 6,
     TcpListen = 10,
     TcpListenOk = 11,
     TcpAccept = 12,
@@ -32,6 +36,10 @@ impl FrameType {
         match value {
             1 => Ok(Self::Error),
             2 => Ok(Self::Close),
+            3 => Ok(Self::SessionOpen),
+            4 => Ok(Self::SessionReady),
+            5 => Ok(Self::SessionResume),
+            6 => Ok(Self::SessionResumed),
             10 => Ok(Self::TcpListen),
             11 => Ok(Self::TcpListenOk),
             12 => Ok(Self::TcpAccept),
@@ -160,6 +168,30 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn session_control_frames_round_trip() {
+        let (mut client, mut server) = tokio::io::duplex(1024);
+        let writer = tokio::spawn(async move {
+            write_frame(
+                &mut client,
+                &Frame {
+                    frame_type: FrameType::SessionResume,
+                    flags: 0,
+                    stream_id: 0,
+                    meta: br#"{"session_id":"sess_123"}"#.to_vec(),
+                    data: Vec::new(),
+                },
+            )
+            .await
+        });
+
+        let frame = read_frame(&mut server).await.unwrap();
+        writer.await.unwrap().unwrap();
+        assert_eq!(frame.frame_type, FrameType::SessionResume);
+        assert_eq!(frame.stream_id, 0);
+        assert_eq!(frame.meta, br#"{"session_id":"sess_123"}"#);
+    }
 
     #[tokio::test]
     async fn frame_round_trip_preserves_binary_payload() {

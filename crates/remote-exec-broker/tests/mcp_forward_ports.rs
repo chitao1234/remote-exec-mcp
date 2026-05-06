@@ -238,7 +238,7 @@ async fn forward_ports_rejects_targets_without_tunnel_protocol_version() {
         .await;
 
     assert!(
-        error.contains("does not support port forward protocol version 2"),
+        error.contains("does not support port forward protocol version 3"),
         "unexpected error: {error}"
     );
 }

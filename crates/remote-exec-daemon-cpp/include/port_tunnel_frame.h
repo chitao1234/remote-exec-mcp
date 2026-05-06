@@ -13,6 +13,10 @@ static const std::size_t PORT_TUNNEL_MAX_DATA_LEN = 256U * 1024U;
 enum class PortTunnelFrameType : unsigned char {
     Error = 1,
     Close = 2,
+    SessionOpen = 3,
+    SessionReady = 4,
+    SessionResume = 5,
+    SessionResumed = 6,
     TcpListen = 10,
     TcpListenOk = 11,
     TcpAccept = 12,
