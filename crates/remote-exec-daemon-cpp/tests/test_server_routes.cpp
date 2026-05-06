@@ -160,19 +160,7 @@ int main() {
             Json{{"endpoint", "127.0.0.1:0"}, {"protocol", "tcp"}}
         )
     );
-    assert(listen_response.status == 200);
-    const Json listen = Json::parse(listen_response.body);
-    assert(listen.at("bind_id").get<std::string>().find("bind_") == 0);
-    assert(listen.at("endpoint").get<std::string>().find("127.0.0.1:") == 0);
-
-    const HttpResponse close_response = route_request(
-        state,
-        json_request(
-            "/v1/port/listen/close",
-            Json{{"bind_id", listen.at("bind_id").get<std::string>()}}
-        )
-    );
-    assert(close_response.status == 200);
+    assert(listen_response.status == 404);
 
     const HttpResponse zero_connect_response = route_request(
         state,
@@ -181,8 +169,7 @@ int main() {
             Json{{"endpoint", "127.0.0.1:0"}, {"protocol", "tcp"}}
         )
     );
-    assert(zero_connect_response.status == 400);
-    assert(Json::parse(zero_connect_response.body).at("code").get<std::string>() == "invalid_endpoint");
+    assert(zero_connect_response.status == 404);
 
     const HttpResponse udp_listen_response = route_request(
         state,
@@ -191,16 +178,7 @@ int main() {
             Json{{"endpoint", "127.0.0.1:0"}, {"protocol", "udp"}}
         )
     );
-    assert(udp_listen_response.status == 200);
-    const Json udp_listen = Json::parse(udp_listen_response.body);
-    const HttpResponse udp_close_response = route_request(
-        state,
-        json_request(
-            "/v1/port/listen/close",
-            Json{{"bind_id", udp_listen.at("bind_id").get<std::string>()}}
-        )
-    );
-    assert(udp_close_response.status == 200);
+    assert(udp_listen_response.status == 404);
 
     const HttpResponse compression_response = route_request(
         state,

@@ -18,6 +18,7 @@
 #include "logging.h"
 #include "path_policy.h"
 #include "platform.h"
+#include "port_tunnel.h"
 #include "rpc_failures.h"
 #include "server_route_common.h"
 #include "server.h"
@@ -395,6 +396,12 @@ int handle_client_request(
     if (request.path == "/v1/transfer/export") {
         const int status = handle_streaming_transfer_export(state, request, &body, client);
         log_request_result(request, status, started_at_ms);
+        return status;
+    }
+    if (is_port_tunnel_upgrade_request(request)) {
+        const int status = handle_port_tunnel_upgrade(state, client, request);
+        log_request_result(request, status, started_at_ms);
+        *close_after_response = true;
         return status;
     }
 

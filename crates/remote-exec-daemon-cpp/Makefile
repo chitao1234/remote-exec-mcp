@@ -27,7 +27,7 @@ TRANSFER_SRCS := $(addprefix $(MAKEFILE_DIR),src/transfer_ops.cpp src/transfer_o
 POLICY_SRCS := $(addprefix $(MAKEFILE_DIR),src/path_policy.cpp src/filesystem_sandbox.cpp)
 RPC_FAILURE_SRCS := $(MAKEFILE_DIR)src/rpc_failures.cpp
 ROUTE_SRCS := $(addprefix $(MAKEFILE_DIR),src/server_routes.cpp src/server_route_common.cpp src/server_route_exec.cpp src/server_route_image.cpp src/server_route_port_forward.cpp src/server_route_transfer.cpp src/transfer_http_codec.cpp)
-PORT_FORWARD_SRCS := $(addprefix $(MAKEFILE_DIR),src/port_forward.cpp src/port_forward_endpoint.cpp src/port_forward_codec.cpp src/port_forward_socket_ops.cpp)
+PORT_FORWARD_SRCS := $(addprefix $(MAKEFILE_DIR),src/port_forward.cpp src/port_forward_endpoint.cpp src/port_forward_codec.cpp src/port_forward_socket_ops.cpp src/port_tunnel_frame.cpp src/port_tunnel.cpp)
 BASE_SRCS := $(addprefix $(MAKEFILE_DIR),src/config.cpp src/http_helpers.cpp src/http_request.cpp src/logging.cpp src/text_utils.cpp src/platform.cpp src/shell_policy.cpp src/server.cpp src/server_transport.cpp src/session_store.cpp src/patch_engine.cpp src/basic_mutex.cpp) $(ROUTE_SRCS) $(PORT_FORWARD_SRCS) $(TRANSFER_SRCS) $(POLICY_SRCS) $(RPC_FAILURE_SRCS)
 POSIX_SRCS := $(BASE_SRCS) $(addprefix $(MAKEFILE_DIR),src/main.cpp src/process_session_posix.cpp)
 WINDOWS_XP_SRCS := $(BASE_SRCS) $(addprefix $(MAKEFILE_DIR),src/main.cpp src/process_session_win32.cpp src/console_output.cpp src/win32_error.cpp)
@@ -165,6 +165,8 @@ $(HOST_SERVER_TRANSPORT): $(HOST_SERVER_TRANSPORT_OBJS)
 test-host-server-streaming: $(HOST_SERVER_STREAMING)
 	$(HOST_SERVER_STREAMING)
 
+test-server-streaming: test-host-server-streaming
+
 $(HOST_SERVER_STREAMING): $(HOST_SERVER_STREAMING_OBJS)
 	mkdir -p $(dir $@)
 	$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -o $@ $^
@@ -219,4 +221,4 @@ check: check-posix
 
 -include $(DEP_FILES)
 
-.PHONY: all all-posix all-windows-xp clean test-host-patch test-host-transfer test-host-config test-host-http-request test-host-server-transport test-host-server-streaming test-host-session-store test-host-server-routes test-host-sandbox test-port-tunnel-frame test-wine-session-store test-wine-transfer check-posix check-windows-xp check
+.PHONY: all all-posix all-windows-xp clean test-host-patch test-host-transfer test-host-config test-host-http-request test-host-server-transport test-host-server-streaming test-server-streaming test-host-session-store test-host-server-routes test-host-sandbox test-port-tunnel-frame test-wine-session-store test-wine-transfer check-posix check-windows-xp check

@@ -20,6 +20,8 @@
 #include "path_policy.h"
 #include "platform.h"
 #include "port_forward_endpoint.h"
+#include "port_forward_socket_ops.h"
+#include "port_tunnel_frame.h"
 #include "process_session.h"
 #include "server.h"
 #include "server_transport.h"
@@ -88,6 +90,56 @@ static void recv_exact_or_assert(SOCKET socket, char* data, std::size_t size) {
         assert(received > 0);
         offset += static_cast<std::size_t>(received);
     }
+}
+
+static uint32_t read_u32_be(const std::vector<unsigned char>& bytes, std::size_t offset) {
+    return (static_cast<uint32_t>(bytes[offset]) << 24) |
+           (static_cast<uint32_t>(bytes[offset + 1U]) << 16) |
+           (static_cast<uint32_t>(bytes[offset + 2U]) << 8) |
+           static_cast<uint32_t>(bytes[offset + 3U]);
+}
+
+static std::string read_http_head_from_socket(SOCKET socket) {
+    std::string response;
+    while (response.find("\r\n\r\n") == std::string::npos) {
+        char ch = '\0';
+        recv_exact_or_assert(socket, &ch, 1);
+        response.push_back(ch);
+    }
+    return response;
+}
+
+static void send_preface(SOCKET socket) {
+    send_all_bytes(socket, port_tunnel_preface(), port_tunnel_preface_size());
+}
+
+static void send_tunnel_frame(SOCKET socket, const PortTunnelFrame& frame) {
+    const std::vector<unsigned char> encoded = encode_port_tunnel_frame(frame);
+    send_all_bytes(
+        socket,
+        reinterpret_cast<const char*>(encoded.data()),
+        encoded.size()
+    );
+}
+
+static PortTunnelFrame read_tunnel_frame(SOCKET socket) {
+    std::vector<unsigned char> bytes(PORT_TUNNEL_HEADER_LEN, 0U);
+    recv_exact_or_assert(
+        socket,
+        reinterpret_cast<char*>(bytes.data()),
+        PORT_TUNNEL_HEADER_LEN
+    );
+    const uint32_t meta_len = read_u32_be(bytes, 8U);
+    const uint32_t data_len = read_u32_be(bytes, 12U);
+    bytes.resize(PORT_TUNNEL_HEADER_LEN + meta_len + data_len);
+    if (meta_len + data_len > 0U) {
+        recv_exact_or_assert(
+            socket,
+            reinterpret_cast<char*>(bytes.data() + PORT_TUNNEL_HEADER_LEN),
+            static_cast<std::size_t>(meta_len + data_len)
+        );
+    }
+    return decode_port_tunnel_frame(bytes);
 }
 
 static std::size_t response_content_length(const std::string& header_block) {
@@ -349,6 +401,154 @@ static void assert_persistent_json_requests_reuse_socket(AppState& state) {
     server_thread.join();
 }
 
+static std::thread start_server_thread(AppState& state, UniqueSocket* server_socket) {
+    return std::thread(
+        [&state](SOCKET socket) {
+            UniqueSocket owned_socket(socket);
+            handle_client(state, std::move(owned_socket));
+        },
+        server_socket->release()
+    );
+}
+
+static void open_tunnel(AppState& state, UniqueSocket* client_socket, std::thread* server_thread) {
+    int sockets[2];
+    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
+
+    UniqueSocket server_socket(sockets[0]);
+    client_socket->reset(sockets[1]);
+    *server_thread = start_server_thread(state, &server_socket);
+
+    send_all(
+        client_socket->get(),
+        "POST /v1/port/tunnel HTTP/1.1\r\n"
+        "Connection: Upgrade\r\n"
+        "Upgrade: remote-exec-port-tunnel\r\n"
+        "X-Remote-Exec-Port-Tunnel-Version: 1\r\n"
+        "\r\n"
+    );
+    const std::string response = read_http_head_from_socket(client_socket->get());
+    assert(response.find("HTTP/1.1 101 Switching Protocols\r\n") == 0);
+    assert(response.find("Connection: Upgrade\r\n") != std::string::npos);
+    assert(response.find("Upgrade: remote-exec-port-tunnel\r\n") != std::string::npos);
+    send_preface(client_socket->get());
+}
+
+static PortTunnelFrame json_frame(
+    PortTunnelFrameType type,
+    uint32_t stream_id,
+    const Json& meta
+) {
+    PortTunnelFrame frame;
+    frame.type = type;
+    frame.flags = 0U;
+    frame.stream_id = stream_id;
+    frame.meta = meta.dump();
+    return frame;
+}
+
+static PortTunnelFrame data_frame(
+    PortTunnelFrameType type,
+    uint32_t stream_id,
+    const std::vector<unsigned char>& data
+) {
+    PortTunnelFrame frame;
+    frame.type = type;
+    frame.flags = 0U;
+    frame.stream_id = stream_id;
+    frame.data = data;
+    return frame;
+}
+
+static void close_tunnel(UniqueSocket* client_socket, std::thread* server_thread) {
+    client_socket->reset();
+    server_thread->join();
+}
+
+static void assert_tunnel_releases_tcp_listener_on_close(AppState& state) {
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_tunnel(state, &client_socket, &server_thread);
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}})
+    );
+    const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
+    assert(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
+    close_tunnel(&client_socket, &server_thread);
+
+    UniqueSocket rebound(bind_port_forward_socket(endpoint, "tcp"));
+    assert(rebound.valid());
+}
+
+static void assert_tunnel_tcp_connect_echoes_binary_data(AppState& state) {
+    UniqueSocket echo_listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
+    const std::string echo_endpoint = socket_local_endpoint(echo_listener.get());
+    std::thread echo_thread([&]() {
+        UniqueSocket accepted(accept(echo_listener.get(), NULL, NULL));
+        assert(accepted.valid());
+        char buffer[64];
+        const int received = recv(accepted.get(), buffer, sizeof(buffer), 0);
+        assert(received > 0);
+        send_all_bytes(accepted.get(), buffer, static_cast<std::size_t>(received));
+    });
+
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_tunnel(state, &client_socket, &server_thread);
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TcpConnect, 1U, Json{{"endpoint", echo_endpoint}})
+    );
+    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpConnectOk);
+    const std::vector<unsigned char> payload = {
+        0U, 1U, 2U, 255U, static_cast<unsigned char>('x'), static_cast<unsigned char>('\n')
+    };
+    send_tunnel_frame(client_socket.get(), data_frame(PortTunnelFrameType::TcpData, 1U, payload));
+    const PortTunnelFrame echoed = read_tunnel_frame(client_socket.get());
+    assert(echoed.type == PortTunnelFrameType::TcpData);
+    assert(echoed.data == payload);
+
+    close_tunnel(&client_socket, &server_thread);
+    echo_listener.reset();
+    echo_thread.join();
+}
+
+static void assert_tunnel_udp_bind_emits_two_peer_datagrams(AppState& state) {
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_tunnel(state, &client_socket, &server_thread);
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::UdpBind, 1U, Json{{"endpoint", "127.0.0.1:0"}})
+    );
+    const PortTunnelFrame bind_ok = read_tunnel_frame(client_socket.get());
+    assert(bind_ok.type == PortTunnelFrameType::UdpBindOk);
+    const std::string endpoint = Json::parse(bind_ok.meta).at("endpoint").get<std::string>();
+
+    UniqueSocket peer_a(bind_port_forward_socket("127.0.0.1:0", "udp"));
+    UniqueSocket peer_b(bind_port_forward_socket("127.0.0.1:0", "udp"));
+    socklen_t peer_len = 0;
+    const sockaddr_storage peer = parse_port_forward_peer(endpoint, &peer_len);
+    assert(sendto(peer_a.get(), "udp-a", 5, 0, reinterpret_cast<const sockaddr*>(&peer), peer_len) == 5);
+    assert(sendto(peer_b.get(), "udp-b", 5, 0, reinterpret_cast<const sockaddr*>(&peer), peer_len) == 5);
+
+    const PortTunnelFrame first = read_tunnel_frame(client_socket.get());
+    const PortTunnelFrame second = read_tunnel_frame(client_socket.get());
+    assert(first.type == PortTunnelFrameType::UdpDatagram);
+    assert(second.type == PortTunnelFrameType::UdpDatagram);
+    std::vector<std::string> payloads;
+    payloads.push_back(std::string(first.data.begin(), first.data.end()));
+    payloads.push_back(std::string(second.data.begin(), second.data.end()));
+    std::sort(payloads.begin(), payloads.end());
+    assert(payloads[0] == "udp-a");
+    assert(payloads[1] == "udp-b");
+
+    close_tunnel(&client_socket, &server_thread);
+}
+
 int main() {
     NetworkSession network;
     const fs::path root = make_test_root();
@@ -436,150 +636,6 @@ int main() {
     assert(Json::parse(response_body(denied_import_response)).at("code").get<std::string>() == "sandbox_denied");
     assert(!fs::exists(outside / "imported.txt"));
 
-    const Json tcp_listen = Json::parse(
-        response_body(
-            run_single_request(
-                state,
-                json_post_request(
-                    "/v1/port/listen",
-                    Json{{"endpoint", "127.0.0.1:0"}, {"protocol", "tcp"}}
-                )
-            )
-        )
-    );
-    const std::string accept_bind_id = tcp_listen.at("bind_id").get<std::string>();
-    std::string accept_response;
-    std::thread accept_thread([&]() {
-        accept_response = run_single_request(
-            state,
-            json_post_request("/v1/port/listen/accept", Json{{"bind_id", accept_bind_id}})
-        );
-    });
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    const std::string close_accept_response = run_single_request(
-        state,
-        json_post_request("/v1/port/listen/close", Json{{"bind_id", accept_bind_id}})
-    );
-    assert(close_accept_response.find("HTTP/1.1 200 OK\r\n") == 0);
-    accept_thread.join();
-    assert(accept_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
-    assert(Json::parse(response_body(accept_response)).at("code").get<std::string>() == "port_bind_closed");
-
-    const Json udp_listen = Json::parse(
-        response_body(
-            run_single_request(
-                state,
-                json_post_request(
-                    "/v1/port/listen",
-                    Json{{"endpoint", "127.0.0.1:0"}, {"protocol", "udp"}}
-                )
-            )
-        )
-    );
-    const std::string udp_bind_id = udp_listen.at("bind_id").get<std::string>();
-    std::string udp_read_response;
-    std::thread udp_read_thread([&]() {
-        udp_read_response = run_single_request(
-            state,
-            json_post_request("/v1/port/udp/read", Json{{"bind_id", udp_bind_id}})
-        );
-    });
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    const std::string close_udp_response = run_single_request(
-        state,
-        json_post_request("/v1/port/listen/close", Json{{"bind_id", udp_bind_id}})
-    );
-    assert(close_udp_response.find("HTTP/1.1 200 OK\r\n") == 0);
-    udp_read_thread.join();
-    assert(udp_read_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
-    assert(Json::parse(response_body(udp_read_response)).at("code").get<std::string>() == "port_bind_closed");
-
-    const Json read_listen = Json::parse(
-        response_body(
-            run_single_request(
-                state,
-                json_post_request(
-                    "/v1/port/listen",
-                    Json{{"endpoint", "127.0.0.1:0"}, {"protocol", "tcp"}}
-                )
-            )
-        )
-    );
-    int accepted_socket = socket(AF_INET, SOCK_STREAM, 0);
-    assert(accepted_socket != INVALID_SOCKET);
-    const ParsedPortForwardEndpoint accepted_endpoint =
-        parse_port_forward_endpoint(read_listen.at("endpoint").get<std::string>());
-    addrinfo hints;
-    std::memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    addrinfo* resolved = NULL;
-    assert(
-        getaddrinfo(
-            accepted_endpoint.host.c_str(),
-            accepted_endpoint.port.c_str(),
-            &hints,
-            &resolved
-        ) == 0
-    );
-    assert(connect(accepted_socket, resolved->ai_addr, static_cast<int>(resolved->ai_addrlen)) == 0);
-    freeaddrinfo(resolved);
-    const Json accepted = Json::parse(
-        response_body(
-            run_single_request(
-                state,
-                json_post_request(
-                    "/v1/port/listen/accept",
-                    Json{{"bind_id", read_listen.at("bind_id").get<std::string>()}}
-                )
-            )
-        )
-    );
-    const std::string read_connection_id = accepted.at("connection_id").get<std::string>();
-    std::string read_response;
-    std::thread read_thread([&]() {
-        read_response = run_single_request(
-            state,
-            json_post_request(
-                "/v1/port/connection/read",
-                Json{{"connection_id", read_connection_id}}
-            )
-        );
-    });
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    const std::string close_connection_response = run_single_request(
-        state,
-        json_post_request(
-            "/v1/port/connection/close",
-            Json{{"connection_id", read_connection_id}}
-        )
-    );
-    assert(close_connection_response.find("HTTP/1.1 200 OK\r\n") == 0);
-    read_thread.join();
-    close_socket(accepted_socket);
-    assert(read_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
-    assert(
-        Json::parse(response_body(read_response)).at("code").get<std::string>() ==
-        "port_connection_closed"
-    );
-
-    const Json leased_listen = Json::parse(
-        response_body(
-            run_single_request(
-                state,
-                json_post_request(
-                    "/v1/port/listen",
-                    Json{
-                        {"endpoint", "127.0.0.1:0"},
-                        {"protocol", "tcp"},
-                        {"lease", Json{{"lease_id", "lease-late-renew"}, {"ttl_ms", 300}}}
-                    }
-                )
-            )
-        )
-    );
-    const std::string leased_endpoint = leased_listen.at("endpoint").get<std::string>();
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
     const std::string renew_response = run_single_request(
         state,
         json_post_request(
@@ -587,27 +643,11 @@ int main() {
             Json{{"lease_id", "lease-late-renew"}, {"ttl_ms", 300}}
         )
     );
-    assert(renew_response.find("HTTP/1.1 200 OK\r\n") == 0);
-    const Json rebound_listen = Json::parse(
-        response_body(
-            run_single_request(
-                state,
-                json_post_request(
-                    "/v1/port/listen",
-                    Json{{"endpoint", leased_endpoint}, {"protocol", "tcp"}}
-                )
-            )
-        )
-    );
-    assert(rebound_listen.at("endpoint").get<std::string>() == leased_endpoint);
-    const std::string close_rebound_response = run_single_request(
-        state,
-        json_post_request(
-            "/v1/port/listen/close",
-            Json{{"bind_id", rebound_listen.at("bind_id").get<std::string>()}}
-        )
-    );
-    assert(close_rebound_response.find("HTTP/1.1 200 OK\r\n") == 0);
+    assert(renew_response.find("HTTP/1.1 404 Not Found\r\n") == 0);
+
+    assert_tunnel_releases_tcp_listener_on_close(state);
+    assert_tunnel_tcp_connect_echoes_binary_data(state);
+    assert_tunnel_udp_bind_emits_two_peer_datagrams(state);
 
     run_single_request_and_abort_client(
         state,

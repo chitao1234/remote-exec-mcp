@@ -1,7 +1,6 @@
 #include "server_route_common.h"
 #include "server_route_exec.h"
 #include "server_route_image.h"
-#include "server_route_port_forward.h"
 #include "server_route_transfer.h"
 #include "server_routes.h"
 
@@ -25,36 +24,6 @@ HttpResponse route_request(AppState& state, const HttpRequest& request) {
     }
     if (request.path == "/v1/image/read") {
         return handle_image_read(state, request);
-    }
-    if (request.path == "/v1/port/listen") {
-        return handle_port_listen(state, request);
-    }
-    if (request.path == "/v1/port/listen/accept") {
-        return handle_port_listen_accept(state, request);
-    }
-    if (request.path == "/v1/port/listen/close") {
-        return handle_port_listen_close(state, request);
-    }
-    if (request.path == "/v1/port/lease/renew") {
-        return handle_port_lease_renew(state, request);
-    }
-    if (request.path == "/v1/port/connect") {
-        return handle_port_connect(state, request);
-    }
-    if (request.path == "/v1/port/connection/read") {
-        return handle_port_connection_read(state, request);
-    }
-    if (request.path == "/v1/port/connection/write") {
-        return handle_port_connection_write(state, request);
-    }
-    if (request.path == "/v1/port/connection/close") {
-        return handle_port_connection_close(state, request);
-    }
-    if (request.path == "/v1/port/udp/read") {
-        return handle_port_udp_read(state, request);
-    }
-    if (request.path == "/v1/port/udp/write") {
-        return handle_port_udp_write(state, request);
     }
     if (request.path == "/v1/exec/start") {
         return handle_exec_start(state, request);
