@@ -11,10 +11,6 @@ use remote_exec_broker::client::{Connection, RemoteExecClient};
 use remote_exec_proto::public::{
     ExecCommandInput, ForwardPortProtocol, ForwardPortsInput, WriteStdinInput,
 };
-use remote_exec_proto::rpc::{
-    EmptyResponse, PortForwardProtocol, PortListenCloseRequest, PortListenRequest,
-    PortListenResponse,
-};
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -208,6 +204,87 @@ yield_time_write_stdin_input_min_ms = 1\n",
 }
 
 #[tokio::test]
+async fn broker_forwards_udp_datagrams_through_real_cpp_daemon_full_duplex() {
+    let fixture = CppDaemonBrokerFixture::spawn().await;
+    let echo_socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let echo_addr = echo_socket.local_addr().unwrap();
+    tokio::spawn(async move {
+        let mut buf = [0u8; 1024];
+        for _ in 0..2 {
+            let (read, peer) = match echo_socket.recv_from(&mut buf).await {
+                Ok(value) => value,
+                Err(_) => return,
+            };
+            if echo_socket.send_to(&buf[..read], peer).await.is_err() {
+                return;
+            }
+        }
+    });
+
+    let open = fixture
+        .client
+        .call_tool(
+            "forward_ports",
+            &ForwardPortsInput::Open {
+                listen_side: "builder-cpp".to_string(),
+                connect_side: "local".to_string(),
+                forwards: vec![remote_exec_proto::public::ForwardPortSpec {
+                    listen_endpoint: "127.0.0.1:0".to_string(),
+                    connect_endpoint: echo_addr.to_string(),
+                    protocol: ForwardPortProtocol::Udp,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+    assert!(!open.is_error, "open failed: {}", open.text_output);
+    let forward_id = open.structured_content["forwards"][0]["forward_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let listen_endpoint = open.structured_content["forwards"][0]["listen_endpoint"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let client_a = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let client_b = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    client_a
+        .send_to(b"cpp-udp-a", &listen_endpoint)
+        .await
+        .unwrap();
+    client_b
+        .send_to(b"cpp-udp-b", &listen_endpoint)
+        .await
+        .unwrap();
+
+    let mut buf = [0u8; 1024];
+    let read_a = tokio::time::timeout(Duration::from_secs(5), client_a.recv(&mut buf))
+        .await
+        .expect("client a should receive udp reply")
+        .unwrap();
+    assert_eq!(&buf[..read_a], b"cpp-udp-a");
+    let read_b = tokio::time::timeout(Duration::from_secs(5), client_b.recv(&mut buf))
+        .await
+        .expect("client b should receive udp reply")
+        .unwrap();
+    assert_eq!(&buf[..read_b], b"cpp-udp-b");
+
+    let close = fixture
+        .client
+        .call_tool(
+            "forward_ports",
+            &ForwardPortsInput::Close {
+                forward_ids: vec![forward_id],
+            },
+        )
+        .await
+        .unwrap();
+    assert!(!close.is_error, "close failed: {}", close.text_output);
+    assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
+}
+
+#[tokio::test]
 async fn real_cpp_daemon_releases_listener_after_broker_crash() {
     let mut fixture = CrashableCppDaemonBrokerFixture::spawn().await;
     let listen_addr = allocate_addr();
@@ -233,44 +310,9 @@ async fn real_cpp_daemon_releases_listener_after_broker_crash() {
     tokio::time::sleep(Duration::from_millis(200)).await;
     fixture.kill_broker().await;
 
-    let rebound = fixture
-        .wait_for_daemon_listener_rebind(&listen_addr.to_string(), Duration::from_secs(10))
+    let (reopened_client, reopened_forward_id) = fixture
+        .wait_for_public_forward_reopen(&listen_addr.to_string(), Duration::from_secs(10))
         .await;
-    fixture.close_daemon_bind(&rebound.bind_id).await;
-
-    let reopened_client = RemoteExecClient::connect(Connection::Config {
-        config_path: fixture.broker_config.clone(),
-    })
-    .await
-    .unwrap();
-    let reopened = reopened_client
-        .call_tool(
-            "forward_ports",
-            &ForwardPortsInput::Open {
-                listen_side: "builder-cpp".to_string(),
-                connect_side: "local".to_string(),
-                forwards: vec![remote_exec_proto::public::ForwardPortSpec {
-                    listen_endpoint: listen_addr.to_string(),
-                    connect_endpoint: "127.0.0.1:9".to_string(),
-                    protocol: ForwardPortProtocol::Tcp,
-                }],
-            },
-        )
-        .await
-        .unwrap();
-    assert!(
-        !reopened.is_error,
-        "reopen failed: {}",
-        reopened.text_output
-    );
-    assert_eq!(
-        reopened.structured_content["forwards"][0]["listen_endpoint"],
-        listen_addr.to_string()
-    );
-    let reopened_forward_id = reopened.structured_content["forwards"][0]["forward_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
 
     let closed = reopened_client
         .call_tool(
@@ -369,8 +411,6 @@ struct CrashableCppDaemonBrokerFixture {
     client: RemoteExecClient,
     broker: tokio::process::Child,
     daemon: tokio::process::Child,
-    daemon_addr: std::net::SocketAddr,
-    http_client: reqwest::Client,
 }
 
 impl CrashableCppDaemonBrokerFixture {
@@ -386,7 +426,6 @@ impl CrashableCppDaemonBrokerFixture {
         std::fs::create_dir_all(&daemon_workdir).unwrap();
         let daemon_addr = allocate_addr();
         let broker_addr = allocate_addr();
-        let http_client = reqwest::Client::builder().build().unwrap();
 
         std::fs::write(
             &daemon_config,
@@ -444,8 +483,6 @@ path = "/mcp"
             client,
             broker,
             daemon,
-            daemon_addr,
-            http_client,
         }
     }
 
@@ -454,51 +491,61 @@ path = "/mcp"
         let _ = self.broker.wait().await;
     }
 
-    async fn wait_for_daemon_listener_rebind(
+    async fn wait_for_public_forward_reopen(
         &self,
         endpoint: &str,
         timeout: Duration,
-    ) -> PortListenResponse {
+    ) -> (RemoteExecClient, String) {
         let started = std::time::Instant::now();
         loop {
-            let response = self
-                .http_client
-                .post(format!("http://{}/v1/port/listen", self.daemon_addr))
-                .json(&PortListenRequest {
-                    endpoint: endpoint.to_string(),
-                    protocol: PortForwardProtocol::Tcp,
-                    lease: None,
-                })
-                .send()
+            let client = RemoteExecClient::connect(Connection::Config {
+                config_path: self.broker_config.clone(),
+            })
+            .await
+            .unwrap();
+            let response = client
+                .call_tool(
+                    "forward_ports",
+                    &ForwardPortsInput::Open {
+                        listen_side: "builder-cpp".to_string(),
+                        connect_side: "local".to_string(),
+                        forwards: vec![remote_exec_proto::public::ForwardPortSpec {
+                            listen_endpoint: endpoint.to_string(),
+                            connect_endpoint: "127.0.0.1:9".to_string(),
+                            protocol: ForwardPortProtocol::Tcp,
+                        }],
+                    },
+                )
                 .await
                 .unwrap();
-            if response.status().is_success() {
-                return response.json::<PortListenResponse>().await.unwrap();
+            if !response.is_error {
+                assert_eq!(
+                    response.structured_content["forwards"][0]["listen_endpoint"],
+                    endpoint
+                );
+                let forward_id = response.structured_content["forwards"][0]["forward_id"]
+                    .as_str()
+                    .unwrap()
+                    .to_string();
+                return (client, forward_id);
+            }
+            if !response
+                .text_output
+                .contains("opening tcp listener on `builder-cpp`")
+            {
+                panic!(
+                    "unexpected public reopen failure while waiting for {endpoint}: {}",
+                    response.text_output
+                );
             }
             if started.elapsed() >= timeout {
                 panic!(
-                    "C++ daemon listener on {endpoint} was not released after broker crash; last status={}",
-                    response.status()
+                    "C++ daemon listener on {endpoint} was not released after broker crash; last error={}",
+                    response.text_output
                 );
             }
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
-    }
-
-    async fn close_daemon_bind(&self, bind_id: &str) {
-        self.http_client
-            .post(format!("http://{}/v1/port/listen/close", self.daemon_addr))
-            .json(&PortListenCloseRequest {
-                bind_id: bind_id.to_string(),
-            })
-            .send()
-            .await
-            .unwrap()
-            .error_for_status()
-            .unwrap()
-            .json::<EmptyResponse>()
-            .await
-            .unwrap();
     }
 }
 
