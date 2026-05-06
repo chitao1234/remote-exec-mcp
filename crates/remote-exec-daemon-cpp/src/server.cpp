@@ -1,107 +1,31 @@
-#include <memory>
 #include <sstream>
 #include <string>
 
-#ifdef _WIN32
-#include <winsock2.h>
-#include <windows.h>
-#else
-#include <thread>
-#endif
-
 #include "logging.h"
-#include "path_policy.h"
 #include "platform.h"
 #include "server.h"
-
-namespace {
-
-std::string daemon_instance_id() {
-    std::ostringstream out;
-    out << platform::monotonic_ms();
-    return out.str();
-}
-
-#ifdef _WIN32
-struct ClientThreadContext {
-    AppState* state;
-    SOCKET socket;
-};
-
-DWORD WINAPI client_thread_entry(LPVOID raw_context) {
-    std::unique_ptr<ClientThreadContext> context(
-        static_cast<ClientThreadContext*>(raw_context)
-    );
-    UniqueSocket client(context->socket);
-    handle_client(*context->state, std::move(client));
-    return 0;
-}
-#endif
-
-void spawn_client_thread(AppState& state, UniqueSocket client) {
-#ifdef _WIN32
-    std::unique_ptr<ClientThreadContext> context(new ClientThreadContext());
-    context->state = &state;
-    context->socket = client.release();
-    HANDLE handle = CreateThread(NULL, 0, client_thread_entry, context.get(), 0, NULL);
-    if (handle == NULL) {
-        UniqueSocket cleanup(context->socket);
-        log_message(LOG_ERROR, "server", "CreateThread failed");
-        return;
-    }
-    context.release();
-    CloseHandle(handle);
-#else
-    std::thread(
-        [&state](SOCKET socket) {
-            UniqueSocket thread_client(socket);
-            handle_client(state, std::move(thread_client));
-        },
-        client.release()
-    )
-        .detach();
-#endif
-}
-
-}  // namespace
+#include "server_runtime.h"
 
 int run_server(const DaemonConfig& config) {
     NetworkSession network;
-
-    AppState state;
-    state.config = config;
-    state.daemon_instance_id = daemon_instance_id();
-    state.hostname = platform::hostname();
-    state.default_shell = platform::resolve_default_shell(config.default_shell);
-    state.sandbox_enabled = config.sandbox_configured;
-    if (state.sandbox_enabled) {
-        state.sandbox = compile_filesystem_sandbox(host_path_policy(), config.sandbox);
-    }
-    UniqueSocket listener(create_listener(state.config));
+    ServerRuntime runtime(config);
+    runtime.start_accept_loop();
 
     {
         std::ostringstream message;
-        message << "listening on " << state.config.listen_host << ':'
-                << state.config.listen_port
-                << " target=`" << state.config.target << "`"
+        message << "listening on " << runtime.state().config.listen_host << ':'
+                << runtime.bound_port()
+                << " target=`" << runtime.state().config.target << "`"
                 << " http_auth_enabled=`"
-                << (!state.config.http_auth_bearer_token.empty() ? "true" : "false") << "`"
+                << (!runtime.state().config.http_auth_bearer_token.empty() ? "true" : "false")
+                << "`"
                 << " platform=`" << platform::platform_name() << "`"
                 << " arch=`" << platform::arch_name() << "`"
-                << " default_shell=`" << state.default_shell << "`"
-                << " daemon_instance_id=`" << state.daemon_instance_id << "`";
+                << " default_shell=`" << runtime.state().default_shell << "`"
+                << " daemon_instance_id=`" << runtime.state().daemon_instance_id << "`";
         log_message(LOG_INFO, "server", message.str());
     }
 
-    for (;;) {
-        UniqueSocket client(accept_client(listener.get()));
-        if (!client.valid()) {
-            log_message(LOG_WARN, "server", "accept failed");
-            continue;
-        }
-
-        spawn_client_thread(state, std::move(client));
-    }
-
+    runtime.join();
     return 0;
 }

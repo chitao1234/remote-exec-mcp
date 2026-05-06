@@ -17,6 +17,7 @@
 #include <netdb.h>
 #include <signal.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
 #endif
@@ -38,6 +39,32 @@ void shutdown_socket(SOCKET socket) {
     shutdown(socket, SD_BOTH);
 #else
     shutdown(socket, SHUT_RDWR);
+#endif
+}
+
+void set_socket_timeout_ms(SOCKET socket, unsigned long timeout_ms) {
+#ifdef _WIN32
+    const DWORD value = static_cast<DWORD>(timeout_ms);
+    setsockopt(
+        socket,
+        SOL_SOCKET,
+        SO_RCVTIMEO,
+        reinterpret_cast<const char*>(&value),
+        sizeof(value)
+    );
+    setsockopt(
+        socket,
+        SOL_SOCKET,
+        SO_SNDTIMEO,
+        reinterpret_cast<const char*>(&value),
+        sizeof(value)
+    );
+#else
+    timeval value;
+    value.tv_sec = static_cast<long>(timeout_ms / 1000UL);
+    value.tv_usec = static_cast<long>((timeout_ms % 1000UL) * 1000UL);
+    setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &value, sizeof(value));
+    setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, &value, sizeof(value));
 #endif
 }
 
@@ -73,6 +100,14 @@ bool peer_disconnected_send_error(int error) {
     return error == WSAECONNABORTED || error == WSAECONNRESET || error == WSAESHUTDOWN;
 #else
     return error == EPIPE || error == ECONNRESET || error == ENOTCONN;
+#endif
+}
+
+bool receive_timeout_error(int error) {
+#ifdef _WIN32
+    return error == WSAETIMEDOUT || error == WSAEWOULDBLOCK;
+#else
+    return error == EAGAIN || error == EWOULDBLOCK;
 #endif
 }
 
@@ -161,8 +196,11 @@ bool try_read_http_request_head(
         }
         if (received < 0) {
             const int error = last_socket_error();
-            if (would_block_error(error)) {
-                continue;
+            if (receive_timeout_error(error)) {
+                if (data.empty()) {
+                    return false;
+                }
+                throw BadHttpRequest("incomplete http request");
             }
             throw std::runtime_error(socket_error_message("recv"));
         }

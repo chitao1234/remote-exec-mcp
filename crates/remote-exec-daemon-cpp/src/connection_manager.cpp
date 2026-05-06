@@ -67,9 +67,8 @@ ConnectionManager::~ConnectionManager() {
 
 void ConnectionManager::run_worker(const std::shared_ptr<WorkerRecord>& record) {
     record->worker_main(record->socket, record->context);
-    close_socket(record->socket);
-    record->socket = INVALID_SOCKET;
     BasicLockGuard lock(record->state_mutex);
+    record->socket = INVALID_SOCKET;
     record->finished = true;
 }
 
@@ -121,7 +120,10 @@ void ConnectionManager::begin_shutdown() {
     }
 
     for (std::size_t i = 0; i < snapshot.size(); ++i) {
-        shutdown_socket(snapshot[i]->socket);
+        BasicLockGuard state_lock(snapshot[i]->state_mutex);
+        if (snapshot[i]->socket != INVALID_SOCKET) {
+            shutdown_socket(snapshot[i]->socket);
+        }
     }
 }
 
