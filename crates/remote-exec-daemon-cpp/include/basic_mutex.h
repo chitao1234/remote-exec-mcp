@@ -19,10 +19,34 @@ public:
     BasicMutex& operator=(const BasicMutex&) = delete;
 
 private:
+    friend class BasicCondVar;
 #ifdef _WIN32
     CRITICAL_SECTION mutex_;
 #else
     pthread_mutex_t mutex_;
+#endif
+};
+
+class BasicCondVar {
+public:
+    BasicCondVar();
+    ~BasicCondVar();
+
+    void wait(BasicMutex& mutex);
+    bool timed_wait_ms(BasicMutex& mutex, unsigned long timeout_ms);
+    void signal();
+    void broadcast();
+
+    BasicCondVar(const BasicCondVar&) = delete;
+    BasicCondVar& operator=(const BasicCondVar&) = delete;
+
+private:
+#ifdef _WIN32
+    HANDLE signal_event_;
+    HANDLE broadcast_event_;
+    long waiters_;
+#else
+    pthread_cond_t cond_;
 #endif
 };
 

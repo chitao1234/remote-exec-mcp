@@ -34,6 +34,7 @@ WINDOWS_XP_SRCS := $(BASE_SRCS) $(addprefix $(MAKEFILE_DIR),src/main.cpp src/pro
 HOST_PATCH := $(BUILD_DIR)/test_patch
 HOST_TRANSFER := $(BUILD_DIR)/test_transfer
 HOST_CONFIG := $(BUILD_DIR)/test_config
+HOST_BASIC_MUTEX := $(BUILD_DIR)/test_basic_mutex
 HOST_HTTP_REQUEST := $(BUILD_DIR)/test_http_request
 HOST_SERVER_TRANSPORT := $(BUILD_DIR)/test_server_transport
 HOST_SERVER_STREAMING := $(BUILD_DIR)/test_server_streaming
@@ -47,6 +48,7 @@ WINE ?= wine
 HOST_PATCH_SRCS := $(addprefix $(MAKEFILE_DIR),tests/test_patch.cpp src/patch_engine.cpp src/platform.cpp src/path_policy.cpp)
 HOST_TRANSFER_SRCS := $(MAKEFILE_DIR)tests/test_transfer.cpp $(TRANSFER_SRCS) $(RPC_FAILURE_SRCS)
 HOST_CONFIG_SRCS := $(addprefix $(MAKEFILE_DIR),tests/test_config.cpp src/config.cpp src/text_utils.cpp)
+HOST_BASIC_MUTEX_SRCS := $(addprefix $(MAKEFILE_DIR),tests/test_basic_mutex.cpp src/basic_mutex.cpp src/platform.cpp)
 HOST_HTTP_REQUEST_SRCS := $(addprefix $(MAKEFILE_DIR),tests/test_http_request.cpp src/http_codec.cpp src/http_request.cpp src/http_helpers.cpp src/text_utils.cpp)
 HOST_SERVER_TRANSPORT_SRCS := $(addprefix $(MAKEFILE_DIR),tests/test_server_transport.cpp src/http_codec.cpp src/server_transport.cpp src/http_request.cpp src/http_helpers.cpp src/text_utils.cpp)
 HOST_SERVER_STREAMING_SRCS := $(MAKEFILE_DIR)tests/test_server_streaming.cpp $(ROUTE_SRCS) $(addprefix $(MAKEFILE_DIR),src/server.cpp src/http_codec.cpp src/http_connection.cpp src/http_helpers.cpp src/http_request.cpp src/session_store.cpp src/process_session_posix.cpp src/platform.cpp src/shell_policy.cpp src/patch_engine.cpp src/server_request_utils.cpp src/server_transport.cpp src/basic_mutex.cpp src/logging.cpp src/config.cpp src/text_utils.cpp) $(TRANSFER_SRCS) $(POLICY_SRCS) $(RPC_FAILURE_SRCS) $(PORT_FORWARD_SRCS)
@@ -66,6 +68,7 @@ WINDOWS_XP_OBJS := $(sort $(call windows_xp_prod_objs,$(WINDOWS_XP_SRCS)))
 HOST_PATCH_OBJS := $(sort $(call host_test_objs,$(HOST_PATCH_SRCS)))
 HOST_TRANSFER_OBJS := $(sort $(call host_test_objs,$(HOST_TRANSFER_SRCS)))
 HOST_CONFIG_OBJS := $(sort $(call host_test_objs,$(HOST_CONFIG_SRCS)))
+HOST_BASIC_MUTEX_OBJS := $(sort $(call host_test_objs,$(HOST_BASIC_MUTEX_SRCS)))
 HOST_HTTP_REQUEST_OBJS := $(sort $(call host_test_objs,$(HOST_HTTP_REQUEST_SRCS)))
 HOST_SERVER_TRANSPORT_OBJS := $(sort $(call host_test_objs,$(HOST_SERVER_TRANSPORT_SRCS)))
 HOST_SERVER_STREAMING_OBJS := $(sort $(call host_test_objs,$(HOST_SERVER_STREAMING_SRCS)))
@@ -81,6 +84,7 @@ DEP_FILES := $(sort \
 	$(HOST_PATCH_OBJS:.o=.d) \
 	$(HOST_TRANSFER_OBJS:.o=.d) \
 	$(HOST_CONFIG_OBJS:.o=.d) \
+	$(HOST_BASIC_MUTEX_OBJS:.o=.d) \
 	$(HOST_HTTP_REQUEST_OBJS:.o=.d) \
 	$(HOST_SERVER_TRANSPORT_OBJS:.o=.d) \
 	$(HOST_SERVER_STREAMING_OBJS:.o=.d) \
@@ -141,6 +145,13 @@ test-host-config: $(HOST_CONFIG)
 	$(HOST_CONFIG)
 
 $(HOST_CONFIG): $(HOST_CONFIG_OBJS)
+	mkdir -p $(dir $@)
+	$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -o $@ $^
+
+test-host-basic-mutex: $(HOST_BASIC_MUTEX)
+	$(HOST_BASIC_MUTEX)
+
+$(HOST_BASIC_MUTEX): $(HOST_BASIC_MUTEX_OBJS)
 	mkdir -p $(dir $@)
 	$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -o $@ $^
 
@@ -208,4 +219,4 @@ check: check-posix
 
 -include $(DEP_FILES)
 
-.PHONY: all all-posix all-windows-xp clean test-host-patch test-host-transfer test-host-config test-host-http-request test-host-server-transport test-host-server-streaming test-host-session-store test-host-server-routes test-host-sandbox test-wine-session-store test-wine-transfer check-posix check-windows-xp check
+.PHONY: all all-posix all-windows-xp clean test-host-patch test-host-transfer test-host-config test-host-basic-mutex test-host-http-request test-host-server-transport test-host-server-streaming test-host-session-store test-host-server-routes test-host-sandbox test-wine-session-store test-wine-transfer check-posix check-windows-xp check
