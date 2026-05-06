@@ -418,6 +418,10 @@ Json PortForwardStore::udp_datagram_write(
     return Json::object();
 }
 
+void PortForwardStore::sweep_expired_leases_for_runtime() {
+    sweep_expired_leases();
+}
+
 std::shared_ptr<TcpConnection> PortForwardStore::tcp_connection(
     const std::string& connection_id
 ) {

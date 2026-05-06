@@ -244,7 +244,7 @@ $(XP_TRANSFER): $(XP_TRANSFER_OBJS)
 	mkdir -p $(dir $@)
 	$(CXX) $(WINDOWS_XP_TEST_CXXFLAGS) $(WINDOWS_XP_LDFLAGS) -o $@ $^ $(WIN_LIBS)
 
-check-posix: test-host-patch test-host-transfer test-host-config test-host-http-request test-host-server-transport test-host-server-streaming test-host-session-store test-host-server-routes test-host-sandbox all-posix
+check-posix: test-host-basic-mutex test-host-patch test-host-transfer test-host-config test-host-http-request test-host-server-transport test-host-server-streaming test-host-session-store test-host-server-routes test-host-connection-manager test-host-server-runtime test-host-port-forward test-host-sandbox all-posix
 
 check-windows-xp: all-windows-xp $(XP_TRANSFER)
 

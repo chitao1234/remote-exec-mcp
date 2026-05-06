@@ -2,6 +2,8 @@
 
 #include <vector>
 
+#include "platform.h"
+
 struct ConnectionManager::WorkerRecord {
     WorkerRecord(
         unsigned long worker_id_value,
@@ -37,24 +39,6 @@ struct ConnectionManager::WorkerRecord {
 #endif
 };
 
-namespace {
-
-#ifdef _WIN32
-struct WorkerThreadContext {
-    std::shared_ptr<ConnectionManager::WorkerRecord> record;
-};
-
-DWORD WINAPI worker_thread_entry(LPVOID raw_context) {
-    std::unique_ptr<WorkerThreadContext> context(
-        static_cast<WorkerThreadContext*>(raw_context)
-    );
-    ConnectionManager::run_worker(context->record);
-    return 0;
-}
-#endif
-
-}  // namespace
-
 ConnectionManager::ConnectionManager(unsigned long max_active_connections)
     : max_active_connections_(max_active_connections),
       shutting_down_(false),
@@ -62,7 +46,10 @@ ConnectionManager::ConnectionManager(unsigned long max_active_connections)
 
 ConnectionManager::~ConnectionManager() {
     begin_shutdown();
-    reap_finished();
+    while (active_count() != 0UL) {
+        reap_finished();
+        platform::sleep_ms(10UL);
+    }
 }
 
 void ConnectionManager::run_worker(const std::shared_ptr<WorkerRecord>& record) {
@@ -71,6 +58,16 @@ void ConnectionManager::run_worker(const std::shared_ptr<WorkerRecord>& record) 
     record->socket = INVALID_SOCKET;
     record->finished = true;
 }
+
+#ifdef _WIN32
+DWORD WINAPI ConnectionManager::worker_thread_entry(LPVOID raw_context) {
+    std::unique_ptr<std::shared_ptr<WorkerRecord> > context(
+        static_cast<std::shared_ptr<WorkerRecord>*>(raw_context)
+    );
+    run_worker(*context);
+    return 0;
+}
+#endif
 
 bool ConnectionManager::try_start(
     UniqueSocket client,
@@ -89,9 +86,11 @@ bool ConnectionManager::try_start(
     }
 
 #ifdef _WIN32
-    std::unique_ptr<WorkerThreadContext> thread_context(new WorkerThreadContext());
-    thread_context->record = record;
-    HANDLE handle = CreateThread(NULL, 0, worker_thread_entry, thread_context.get(), 0, NULL);
+    std::unique_ptr<std::shared_ptr<WorkerRecord> > thread_context(
+        new std::shared_ptr<WorkerRecord>(record)
+    );
+    HANDLE handle =
+        CreateThread(NULL, 0, &ConnectionManager::worker_thread_entry, thread_context.get(), 0, NULL);
     if (handle == NULL) {
         close_socket(record->socket);
         BasicLockGuard lock(mutex_);

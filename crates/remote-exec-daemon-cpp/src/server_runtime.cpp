@@ -64,10 +64,12 @@ ServerRuntime::ServerRuntime(const DaemonConfig& config)
       shutting_down_(false)
 #ifdef _WIN32
       ,
-      accept_thread_(NULL)
+      accept_thread_(NULL),
+      maintenance_thread_(NULL)
 #else
       ,
-      accept_thread_(NULL)
+      accept_thread_(NULL),
+      maintenance_thread_(NULL)
 #endif
 {
     state_.config = config;
@@ -86,24 +88,35 @@ ServerRuntime::~ServerRuntime() {
 }
 
 void ServerRuntime::start_accept_loop() {
-    BasicLockGuard lock(mutex_);
-    if (accept_thread_ != NULL) {
-        throw std::runtime_error("server runtime accept loop already started");
-    }
-    if (listener_.valid()) {
-        throw std::runtime_error("server runtime listener already initialized");
-    }
+    {
+        BasicLockGuard lock(mutex_);
+        if (accept_thread_ != NULL || maintenance_thread_ != NULL) {
+            throw std::runtime_error("server runtime accept loop already started");
+        }
+        if (listener_.valid()) {
+            throw std::runtime_error("server runtime listener already initialized");
+        }
 
-    listener_.reset(create_listener(state_.config));
+        listener_.reset(create_listener(state_.config));
+    }
 
 #ifdef _WIN32
     accept_thread_ = CreateThread(NULL, 0, &ServerRuntime::accept_thread_entry, this, 0, NULL);
     if (accept_thread_ == NULL) {
-        listener_.reset();
+        request_shutdown();
+        join();
+        throw std::runtime_error("CreateThread failed");
+    }
+    maintenance_thread_ =
+        CreateThread(NULL, 0, &ServerRuntime::maintenance_thread_entry, this, 0, NULL);
+    if (maintenance_thread_ == NULL) {
+        request_shutdown();
+        join();
         throw std::runtime_error("CreateThread failed");
     }
 #else
     accept_thread_ = new std::thread(&ServerRuntime::accept_loop, this);
+    maintenance_thread_ = new std::thread(&ServerRuntime::maintenance_loop, this);
 #endif
 }
 
@@ -126,13 +139,17 @@ void ServerRuntime::request_shutdown() {
 void ServerRuntime::join() {
 #ifdef _WIN32
     HANDLE accept_thread = NULL;
+    HANDLE maintenance_thread = NULL;
 #else
     std::thread* accept_thread = NULL;
+    std::thread* maintenance_thread = NULL;
 #endif
     {
         BasicLockGuard lock(mutex_);
         accept_thread = accept_thread_;
+        maintenance_thread = maintenance_thread_;
         accept_thread_ = NULL;
+        maintenance_thread_ = NULL;
     }
 
 #ifdef _WIN32
@@ -140,10 +157,18 @@ void ServerRuntime::join() {
         WaitForSingleObject(accept_thread, INFINITE);
         CloseHandle(accept_thread);
     }
+    if (maintenance_thread != NULL) {
+        WaitForSingleObject(maintenance_thread, INFINITE);
+        CloseHandle(maintenance_thread);
+    }
 #else
     if (accept_thread != NULL) {
         accept_thread->join();
         delete accept_thread;
+    }
+    if (maintenance_thread != NULL) {
+        maintenance_thread->join();
+        delete maintenance_thread;
     }
 #endif
 
@@ -170,6 +195,38 @@ ConnectionManager& ServerRuntime::connection_manager() {
 
 void ServerRuntime::maintenance_once() {
     connections_.reap_finished();
+    state_.port_forwards.sweep_expired_leases_for_runtime();
+
+    bool shutting_down = false;
+    {
+        BasicLockGuard lock(mutex_);
+        shutting_down = shutting_down_;
+    }
+    if (!shutting_down) {
+        return;
+    }
+
+    while (connections_.active_count() != 0UL) {
+        platform::sleep_ms(10UL);
+        connections_.reap_finished();
+    }
+}
+
+void ServerRuntime::maintenance_loop() {
+    for (;;) {
+        maintenance_once();
+
+        bool shutting_down = false;
+        {
+            BasicLockGuard lock(mutex_);
+            shutting_down = shutting_down_;
+        }
+        if (shutting_down) {
+            return;
+        }
+
+        platform::sleep_ms(250UL);
+    }
 }
 
 void ServerRuntime::accept_loop() {
@@ -204,6 +261,12 @@ void ServerRuntime::accept_loop() {
 DWORD WINAPI ServerRuntime::accept_thread_entry(LPVOID raw_context) {
     ServerRuntime* runtime = static_cast<ServerRuntime*>(raw_context);
     runtime->accept_loop();
+    return 0;
+}
+
+DWORD WINAPI ServerRuntime::maintenance_thread_entry(LPVOID raw_context) {
+    ServerRuntime* runtime = static_cast<ServerRuntime*>(raw_context);
+    runtime->maintenance_loop();
     return 0;
 }
 #endif

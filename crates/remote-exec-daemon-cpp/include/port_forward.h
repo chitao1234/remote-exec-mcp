@@ -84,6 +84,7 @@ public:
         const std::string& peer,
         const std::string& data
     );
+    void sweep_expired_leases_for_runtime();
 
 private:
     std::shared_ptr<TcpConnection> tcp_connection(const std::string& connection_id);

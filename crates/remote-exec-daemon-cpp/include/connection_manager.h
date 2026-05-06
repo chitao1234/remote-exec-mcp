@@ -31,6 +31,9 @@ public:
 private:
     struct WorkerRecord;
     static void run_worker(const std::shared_ptr<WorkerRecord>& record);
+#ifdef _WIN32
+    static DWORD WINAPI worker_thread_entry(LPVOID raw_context);
+#endif
 
     unsigned long max_active_connections_;
     mutable BasicMutex mutex_;

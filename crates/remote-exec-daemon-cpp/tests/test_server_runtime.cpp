@@ -73,6 +73,8 @@ int main() {
     assert(runtime.connection_manager().active_count() == 1UL);
 
     runtime.request_shutdown();
+    runtime.maintenance_once();
+    assert(runtime.connection_manager().active_count() == 0UL);
     runtime.join();
     assert(runtime.connection_manager().active_count() == 0UL);
 }

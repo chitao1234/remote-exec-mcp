@@ -21,8 +21,10 @@ public:
 
 private:
     void accept_loop();
+    void maintenance_loop();
 #ifdef _WIN32
     static DWORD WINAPI accept_thread_entry(LPVOID raw_context);
+    static DWORD WINAPI maintenance_thread_entry(LPVOID raw_context);
 #endif
 
     AppState state_;
@@ -32,7 +34,9 @@ private:
     bool shutting_down_;
 #ifdef _WIN32
     HANDLE accept_thread_;
+    HANDLE maintenance_thread_;
 #else
     std::thread* accept_thread_;
+    std::thread* maintenance_thread_;
 #endif
 };
