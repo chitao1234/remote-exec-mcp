@@ -39,6 +39,7 @@ HOST_HTTP_REQUEST := $(BUILD_DIR)/test_http_request
 HOST_SERVER_TRANSPORT := $(BUILD_DIR)/test_server_transport
 HOST_SERVER_STREAMING := $(BUILD_DIR)/test_server_streaming
 HOST_SESSION_STORE := $(BUILD_DIR)/test_session_store
+HOST_CONNECTION_MANAGER := $(BUILD_DIR)/test_connection_manager
 HOST_SERVER_ROUTES := $(BUILD_DIR)/test_server_routes
 HOST_SANDBOX := $(BUILD_DIR)/test_sandbox
 XP_SESSION_STORE := $(BUILD_DIR)/test_session_store-xp.exe
@@ -53,6 +54,7 @@ HOST_HTTP_REQUEST_SRCS := $(addprefix $(MAKEFILE_DIR),tests/test_http_request.cp
 HOST_SERVER_TRANSPORT_SRCS := $(addprefix $(MAKEFILE_DIR),tests/test_server_transport.cpp src/http_codec.cpp src/server_transport.cpp src/http_request.cpp src/http_helpers.cpp src/text_utils.cpp)
 HOST_SERVER_STREAMING_SRCS := $(MAKEFILE_DIR)tests/test_server_streaming.cpp $(ROUTE_SRCS) $(addprefix $(MAKEFILE_DIR),src/server.cpp src/http_codec.cpp src/http_connection.cpp src/http_helpers.cpp src/http_request.cpp src/session_store.cpp src/process_session_posix.cpp src/platform.cpp src/shell_policy.cpp src/patch_engine.cpp src/server_request_utils.cpp src/server_transport.cpp src/basic_mutex.cpp src/logging.cpp src/config.cpp src/text_utils.cpp) $(TRANSFER_SRCS) $(POLICY_SRCS) $(RPC_FAILURE_SRCS) $(PORT_FORWARD_SRCS)
 HOST_SESSION_STORE_SRCS := $(addprefix $(MAKEFILE_DIR),tests/test_session_store.cpp src/session_store.cpp src/process_session_posix.cpp src/platform.cpp src/shell_policy.cpp src/basic_mutex.cpp src/logging.cpp src/config.cpp src/text_utils.cpp)
+HOST_CONNECTION_MANAGER_SRCS := $(addprefix $(MAKEFILE_DIR),tests/test_connection_manager.cpp src/connection_manager.cpp src/server_transport.cpp src/http_codec.cpp src/http_request.cpp src/http_helpers.cpp src/text_utils.cpp src/basic_mutex.cpp src/platform.cpp src/logging.cpp)
 HOST_SERVER_ROUTES_SRCS := $(MAKEFILE_DIR)tests/test_server_routes.cpp $(ROUTE_SRCS) $(addprefix $(MAKEFILE_DIR),src/http_codec.cpp src/http_helpers.cpp src/session_store.cpp src/process_session_posix.cpp src/platform.cpp src/shell_policy.cpp src/patch_engine.cpp src/server_request_utils.cpp src/server_transport.cpp src/basic_mutex.cpp src/logging.cpp src/config.cpp src/text_utils.cpp) $(TRANSFER_SRCS) $(POLICY_SRCS) $(RPC_FAILURE_SRCS) $(PORT_FORWARD_SRCS)
 HOST_SANDBOX_SRCS := $(MAKEFILE_DIR)tests/test_sandbox.cpp $(POLICY_SRCS)
 XP_SESSION_STORE_SRCS := $(addprefix $(MAKEFILE_DIR),tests/test_session_store.cpp src/session_store.cpp src/process_session_win32.cpp src/platform.cpp src/shell_policy.cpp src/console_output.cpp src/basic_mutex.cpp src/logging.cpp src/win32_error.cpp src/config.cpp src/text_utils.cpp)
@@ -73,6 +75,7 @@ HOST_HTTP_REQUEST_OBJS := $(sort $(call host_test_objs,$(HOST_HTTP_REQUEST_SRCS)
 HOST_SERVER_TRANSPORT_OBJS := $(sort $(call host_test_objs,$(HOST_SERVER_TRANSPORT_SRCS)))
 HOST_SERVER_STREAMING_OBJS := $(sort $(call host_test_objs,$(HOST_SERVER_STREAMING_SRCS)))
 HOST_SESSION_STORE_OBJS := $(sort $(call host_test_objs,$(HOST_SESSION_STORE_SRCS)))
+HOST_CONNECTION_MANAGER_OBJS := $(sort $(call host_test_objs,$(HOST_CONNECTION_MANAGER_SRCS)))
 HOST_SERVER_ROUTES_OBJS := $(sort $(call host_test_objs,$(HOST_SERVER_ROUTES_SRCS)))
 HOST_SANDBOX_OBJS := $(sort $(call host_test_objs,$(HOST_SANDBOX_SRCS)))
 XP_SESSION_STORE_OBJS := $(sort $(call windows_xp_test_objs,$(XP_SESSION_STORE_SRCS)))
@@ -89,6 +92,7 @@ DEP_FILES := $(sort \
 	$(HOST_SERVER_TRANSPORT_OBJS:.o=.d) \
 	$(HOST_SERVER_STREAMING_OBJS:.o=.d) \
 	$(HOST_SESSION_STORE_OBJS:.o=.d) \
+	$(HOST_CONNECTION_MANAGER_OBJS:.o=.d) \
 	$(HOST_SERVER_ROUTES_OBJS:.o=.d) \
 	$(HOST_SANDBOX_OBJS:.o=.d) \
 	$(XP_SESSION_STORE_OBJS:.o=.d) \
@@ -183,6 +187,13 @@ $(HOST_SESSION_STORE): $(HOST_SESSION_STORE_OBJS)
 	mkdir -p $(dir $@)
 	$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -o $@ $^
 
+test-host-connection-manager: $(HOST_CONNECTION_MANAGER)
+	$(HOST_CONNECTION_MANAGER)
+
+$(HOST_CONNECTION_MANAGER): $(HOST_CONNECTION_MANAGER_OBJS)
+	mkdir -p $(dir $@)
+	$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -o $@ $^
+
 test-host-server-routes: $(HOST_SERVER_ROUTES)
 	$(HOST_SERVER_ROUTES)
 
@@ -219,4 +230,4 @@ check: check-posix
 
 -include $(DEP_FILES)
 
-.PHONY: all all-posix all-windows-xp clean test-host-patch test-host-transfer test-host-config test-host-basic-mutex test-host-http-request test-host-server-transport test-host-server-streaming test-host-session-store test-host-server-routes test-host-sandbox test-wine-session-store test-wine-transfer check-posix check-windows-xp check
+.PHONY: all all-posix all-windows-xp clean test-host-patch test-host-transfer test-host-config test-host-basic-mutex test-host-http-request test-host-server-transport test-host-server-streaming test-host-session-store test-host-connection-manager test-host-server-routes test-host-sandbox test-wine-session-store test-wine-transfer check-posix check-windows-xp check
