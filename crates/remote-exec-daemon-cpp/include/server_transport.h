@@ -12,6 +12,7 @@ const int INVALID_SOCKET = -1;
 #endif
 
 #include "config.h"
+#include "http_codec.h"
 
 class BadHttpRequest : public std::runtime_error {
 public:
@@ -64,14 +65,6 @@ struct HttpRequestHead {
     std::string initial_body;
 };
 
-struct HttpRequestBodyFraming {
-    HttpRequestBodyFraming();
-
-    bool has_content_length;
-    std::size_t content_length;
-    bool chunked;
-};
-
 class HttpRequestBodyStream {
 public:
     HttpRequestBodyStream(
@@ -107,18 +100,13 @@ bool would_block_error(int error);
 std::string socket_error_message(const std::string& operation);
 void close_socket(SOCKET socket);
 void shutdown_socket(SOCKET socket);
-HttpRequestBodyFraming request_body_framing_from_headers(const std::string& header_block);
+void set_socket_timeout_ms(SOCKET socket, unsigned long timeout_ms);
 bool try_read_http_request_head(
     SOCKET client,
     std::size_t max_header_bytes,
     HttpRequestHead* head
 );
 HttpRequestHead read_http_request_head(SOCKET client, std::size_t max_header_bytes);
-std::string read_http_request(
-    SOCKET client,
-    std::size_t max_header_bytes,
-    std::size_t max_body_bytes
-);
 void send_all(SOCKET client, const std::string& data);
 void send_all_bytes(SOCKET client, const char* data, std::size_t size);
 SOCKET create_listener(const DaemonConfig& config);

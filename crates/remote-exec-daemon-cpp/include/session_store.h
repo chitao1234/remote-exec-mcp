@@ -7,6 +7,13 @@
 #include <stdexcept>
 #include <string>
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <windows.h>
+#else
+#include <thread>
+#endif
+
 #include "basic_mutex.h"
 #include "config.h"
 #include "http_helpers.h"
@@ -30,18 +37,38 @@ public:
     explicit StdinClosedError(const std::string& message) : std::runtime_error(message) {}
 };
 
+struct SessionOutputState {
+    SessionOutputState();
+
+    std::string buffered_output;
+    std::string decode_carry;
+    bool eof;
+    bool exited;
+    int exit_code;
+    std::uint64_t generation;
+};
+
 struct LiveSession {
     LiveSession();
     ~LiveSession();
 
+    BasicMutex operation_mutex_;
     BasicMutex mutex_;
+    BasicCondVar cond_;
     std::string id;
     std::unique_ptr<ProcessSession> process;
     std::uint64_t started_at_ms;
     std::atomic<std::uint64_t> last_touched_order;
-    std::string output_carry;
+    SessionOutputState output_;
     bool stdin_open;
     bool retired;
+    bool closing;
+    bool pump_started;
+#ifdef _WIN32
+    HANDLE pump_thread_;
+#else
+    std::thread* pump_thread_;
+#endif
 };
 
 class SessionStore {

@@ -138,8 +138,8 @@ public:
         }
     }
 
-    std::string read_available(std::string* carry) override {
-        return read_available_console_output(stdout_read_.get(), carry);
+    std::string read_output(bool block, bool* eof, std::string* carry) override {
+        return read_console_output(stdout_read_.get(), block, eof, carry);
     }
 
     std::string flush_carry(std::string* carry) override {

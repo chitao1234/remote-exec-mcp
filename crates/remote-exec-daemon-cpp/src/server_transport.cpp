@@ -17,13 +17,14 @@
 #include <netdb.h>
 #include <signal.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
 #endif
 
+#include "http_codec.h"
 #include "http_request.h"
 #include "server_transport.h"
-#include "text_utils.h"
 
 void close_socket(SOCKET socket) {
 #ifdef _WIN32
@@ -38,6 +39,32 @@ void shutdown_socket(SOCKET socket) {
     shutdown(socket, SD_BOTH);
 #else
     shutdown(socket, SHUT_RDWR);
+#endif
+}
+
+void set_socket_timeout_ms(SOCKET socket, unsigned long timeout_ms) {
+#ifdef _WIN32
+    const DWORD value = static_cast<DWORD>(timeout_ms);
+    setsockopt(
+        socket,
+        SOL_SOCKET,
+        SO_RCVTIMEO,
+        reinterpret_cast<const char*>(&value),
+        sizeof(value)
+    );
+    setsockopt(
+        socket,
+        SOL_SOCKET,
+        SO_SNDTIMEO,
+        reinterpret_cast<const char*>(&value),
+        sizeof(value)
+    );
+#else
+    timeval value;
+    value.tv_sec = static_cast<long>(timeout_ms / 1000UL);
+    value.tv_usec = static_cast<long>((timeout_ms % 1000UL) * 1000UL);
+    setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &value, sizeof(value));
+    setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, &value, sizeof(value));
 #endif
 }
 
@@ -76,180 +103,25 @@ bool peer_disconnected_send_error(int error) {
 #endif
 }
 
-HttpRequestBodyFraming::HttpRequestBodyFraming()
-    : has_content_length(false), content_length(0), chunked(false) {}
+bool receive_timeout_error(int error) {
+#ifdef _WIN32
+    return error == WSAETIMEDOUT || error == WSAEWOULDBLOCK;
+#else
+    return error == EAGAIN || error == EWOULDBLOCK;
+#endif
+}
 
 namespace {
 
-std::size_t parse_content_length_value(const std::string& raw) {
-    if (raw.empty()) {
-        throw BadHttpRequest("invalid Content-Length");
-    }
-
-    std::size_t value = 0;
-    for (std::size_t i = 0; i < raw.size(); ++i) {
-        const char ch = raw[i];
-        if (ch < '0' || ch > '9') {
-            throw BadHttpRequest("invalid Content-Length");
-        }
-        const std::size_t digit = static_cast<std::size_t>(ch - '0');
-        if (value > (std::numeric_limits<std::size_t>::max() - digit) / 10U) {
-            throw BadHttpRequest("Content-Length is too large");
-        }
-        value = value * 10U + digit;
-    }
-    return value;
-}
-
-int hex_digit_value(char ch) {
-    if (ch >= '0' && ch <= '9') {
-        return ch - '0';
-    }
-    if (ch >= 'a' && ch <= 'f') {
-        return ch - 'a' + 10;
-    }
-    if (ch >= 'A' && ch <= 'F') {
-        return ch - 'A' + 10;
-    }
-    return -1;
-}
-
 std::size_t parse_chunk_size_line(const std::string& line) {
-    const std::size_t extension = line.find(';');
-    const std::string size_text =
-        trim_ascii(extension == std::string::npos ? line : line.substr(0, extension));
-    if (size_text.empty()) {
-        throw BadHttpRequest("invalid chunk size");
-    }
-
-    std::size_t value = 0;
-    for (std::size_t i = 0; i < size_text.size(); ++i) {
-        const int digit = hex_digit_value(size_text[i]);
-        if (digit < 0) {
-            throw BadHttpRequest("invalid chunk size");
-        }
-        const std::size_t chunk_digit = static_cast<std::size_t>(digit);
-        if (value > (std::numeric_limits<std::size_t>::max() - chunk_digit) / 16U) {
-            throw BadHttpRequest("chunk size is too large");
-        }
-        value = value * 16U + chunk_digit;
-    }
-    return value;
-}
-
-std::string trim_http_header_value(std::string value) {
-    while (!value.empty() && (value[0] == ' ' || value[0] == '\t')) {
-        value.erase(value.begin());
-    }
-    while (!value.empty() && (value[value.size() - 1] == ' ' ||
-                              value[value.size() - 1] == '\t' ||
-                              value[value.size() - 1] == '\r')) {
-        value.erase(value.size() - 1);
-    }
-    return value;
-}
-
-HttpRequestBodyFraming parse_request_body_framing_from_headers(const std::string& header_block) {
-    std::istringstream lines(header_block);
-    std::string line;
-    HttpRequestBodyFraming framing;
-    bool found_transfer_encoding = false;
-
-    while (std::getline(lines, line)) {
-        if (!line.empty() && line[line.size() - 1] == '\r') {
-            line.erase(line.size() - 1);
-        }
-        const std::size_t colon = line.find(':');
-        if (colon == std::string::npos) {
-            continue;
-        }
-        const std::string name = lowercase_ascii(trim_http_header_value(line.substr(0, colon)));
-        const std::string value = trim_http_header_value(line.substr(colon + 1));
-        if (name == "content-length") {
-            if (framing.has_content_length) {
-                throw BadHttpRequest("duplicate Content-Length");
-            }
-            framing.has_content_length = true;
-            framing.content_length = parse_content_length_value(value);
-            continue;
-        }
-        if (name == "transfer-encoding") {
-            if (found_transfer_encoding) {
-                throw BadHttpRequest("duplicate Transfer-Encoding");
-            }
-            found_transfer_encoding = true;
-            if (lowercase_ascii(value) != "chunked") {
-                throw BadHttpRequest("unsupported Transfer-Encoding");
-            }
-            framing.chunked = true;
-        }
-    }
-
-    if (framing.chunked && framing.has_content_length) {
-        throw BadHttpRequest("chunked request cannot include Content-Length");
-    }
-
-    return framing;
-}
-
-bool find_complete_chunked_request_size(
-    const std::string& data,
-    std::size_t body_start,
-    std::size_t max_body_bytes,
-    std::size_t* complete_size
-) {
-    std::size_t offset = body_start;
-    std::size_t decoded_size = 0;
-
-    for (;;) {
-        const std::size_t line_end = data.find("\r\n", offset);
-        if (line_end == std::string::npos) {
-            return false;
-        }
-
-        const std::size_t chunk_size =
-            parse_chunk_size_line(data.substr(offset, line_end - offset));
-        offset = line_end + 2U;
-
-        if (chunk_size == 0U) {
-            if (data.size() >= offset + 2U && data.compare(offset, 2U, "\r\n") == 0) {
-                *complete_size = offset + 2U;
-                return true;
-            }
-
-            const std::size_t trailer_end = data.find("\r\n\r\n", offset);
-            if (trailer_end == std::string::npos) {
-                return false;
-            }
-            *complete_size = trailer_end + 4U;
-            return true;
-        }
-
-        if (chunk_size > max_body_bytes - decoded_size) {
-            throw BadHttpRequest("http request body too large");
-        }
-        decoded_size += chunk_size;
-
-        if (chunk_size > data.size() - offset) {
-            return false;
-        }
-        const std::size_t chunk_end = offset + chunk_size;
-        if (data.size() - chunk_end < 2U) {
-            return false;
-        }
-        if (data.compare(chunk_end, 2U, "\r\n") != 0) {
-            throw BadHttpRequest("invalid chunked request body");
-        }
-
-        offset = chunk_end + 2U;
+    try {
+        return parse_http_chunk_size_line(line);
+    } catch (const HttpProtocolError& ex) {
+        throw BadHttpRequest(ex.what());
     }
 }
 
 }  // namespace
-
-HttpRequestBodyFraming request_body_framing_from_headers(const std::string& header_block) {
-    return parse_request_body_framing_from_headers(header_block);
-}
 
 UniqueSocket::UniqueSocket() : socket_(INVALID_SOCKET) {}
 
@@ -324,8 +196,11 @@ bool try_read_http_request_head(
         }
         if (received < 0) {
             const int error = last_socket_error();
-            if (would_block_error(error)) {
-                continue;
+            if (receive_timeout_error(error)) {
+                if (data.empty()) {
+                    return false;
+                }
+                throw BadHttpRequest("incomplete http request");
             }
             throw std::runtime_error(socket_error_message("recv"));
         }
@@ -504,93 +379,6 @@ void HttpRequestBodyStream::consume_chunk_trailers() {
         }
         consume_raw(line_end + 2U - raw_offset_);
     }
-}
-
-std::string read_http_request(
-    SOCKET client,
-    std::size_t max_header_bytes,
-    std::size_t max_body_bytes
-) {
-    std::string data;
-    char buffer[4096];
-    std::size_t expected_size = 0;
-    std::size_t body_start = 0;
-    bool parsed_headers = false;
-    bool chunked_body = false;
-
-    for (;;) {
-        const int received = recv(client, buffer, sizeof(buffer), 0);
-        if (received == 0) {
-            break;
-        }
-        if (received < 0) {
-            const int error = last_socket_error();
-            if (would_block_error(error)) {
-                continue;
-            }
-            throw std::runtime_error(socket_error_message("recv"));
-        }
-
-        data.append(buffer, received);
-
-        if (!parsed_headers) {
-            const std::size_t header_end = data.find("\r\n\r\n");
-            if (header_end == std::string::npos) {
-                if (data.size() > max_header_bytes) {
-                    throw BadHttpRequest("http request headers too large");
-                }
-                continue;
-            }
-
-            if (header_end + 4U > max_header_bytes) {
-                throw BadHttpRequest("http request headers too large");
-            }
-
-            parsed_headers = true;
-            body_start = header_end + 4U;
-            const HttpRequestBodyFraming framing =
-                request_body_framing_from_headers(data.substr(0, header_end));
-            chunked_body = framing.chunked;
-            if (framing.content_length > max_body_bytes) {
-                throw BadHttpRequest("http request body too large");
-            }
-            expected_size = body_start + framing.content_length;
-        }
-
-        if (parsed_headers) {
-            if (chunked_body) {
-                std::size_t complete_size = 0;
-                if (find_complete_chunked_request_size(
-                        data,
-                        body_start,
-                        max_body_bytes,
-                        &complete_size
-                    )) {
-                    if (data.size() > complete_size) {
-                        data.resize(complete_size);
-                    }
-                    expected_size = complete_size;
-                    break;
-                }
-            } else {
-                if (data.size() > expected_size) {
-                    data.resize(expected_size);
-                }
-                if (data.size() >= expected_size) {
-                    break;
-                }
-            }
-        }
-    }
-
-    if (!parsed_headers) {
-        throw BadHttpRequest("incomplete http request");
-    }
-    if (data.size() < expected_size || (chunked_body && expected_size == 0U)) {
-        throw BadHttpRequest("incomplete http request body");
-    }
-
-    return data;
 }
 
 void send_all(SOCKET client, const std::string& data) {

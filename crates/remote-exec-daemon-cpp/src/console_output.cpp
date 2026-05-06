@@ -135,9 +135,38 @@ std::string read_available_raw(HANDLE pipe) {
     return buffer;
 }
 
+std::string read_blocking_raw(HANDLE pipe, bool* eof) {
+    char buffer[4096];
+    DWORD read = 0;
+    if (ReadFile(pipe, buffer, sizeof(buffer), &read, NULL) == 0) {
+        const DWORD error = GetLastError();
+        if (error == ERROR_BROKEN_PIPE ||
+            error == ERROR_NO_DATA ||
+            error == ERROR_PIPE_NOT_CONNECTED) {
+            *eof = true;
+            return "";
+        }
+        throw std::runtime_error(last_error_message("ReadFile"));
+    }
+    if (read == 0) {
+        *eof = true;
+        return "";
+    }
+    return std::string(buffer, static_cast<std::size_t>(read));
+}
+
 }  // namespace
 
 std::string read_available_console_output(HANDLE pipe, std::string* carry) {
+    return decode_console_output(carry, read_available_raw(pipe), false);
+}
+
+std::string read_console_output(HANDLE pipe, bool block, bool* eof, std::string* carry) {
+    *eof = false;
+    if (block) {
+        return decode_console_output(carry, read_blocking_raw(pipe, eof), false);
+    }
+
     return decode_console_output(carry, read_available_raw(pipe), false);
 }
 
