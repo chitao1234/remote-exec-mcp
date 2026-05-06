@@ -1,10 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use remote_exec_proto::rpc::{
-    EmptyResponse, PortForwardProtocol, PortListenCloseRequest, PortListenRequest,
-    PortListenResponse,
-};
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
     model::{CallToolRequestParams, CallToolResult, ClientInfo},
@@ -273,65 +269,6 @@ impl DaemonFixture {
     pub async fn restart(&mut self) {
         self.stop().await;
         self.start().await;
-    }
-
-    pub fn url(&self, path: &str) -> String {
-        format!("http://{}{}", self.addr, path)
-    }
-
-    pub async fn port_listen(
-        &self,
-        endpoint: &str,
-        protocol: PortForwardProtocol,
-    ) -> PortListenResponse {
-        self.client
-            .post(self.url("/v1/port/listen"))
-            .json(&PortListenRequest {
-                endpoint: endpoint.to_string(),
-                protocol,
-                lease: None,
-            })
-            .send()
-            .await
-            .unwrap()
-            .error_for_status()
-            .unwrap()
-            .json()
-            .await
-            .unwrap()
-    }
-
-    pub async fn try_port_listen(
-        &self,
-        endpoint: &str,
-        protocol: PortForwardProtocol,
-    ) -> reqwest::Response {
-        self.client
-            .post(self.url("/v1/port/listen"))
-            .json(&PortListenRequest {
-                endpoint: endpoint.to_string(),
-                protocol,
-                lease: None,
-            })
-            .send()
-            .await
-            .unwrap()
-    }
-
-    pub async fn port_listen_close(&self, bind_id: &str) {
-        self.client
-            .post(self.url("/v1/port/listen/close"))
-            .json(&PortListenCloseRequest {
-                bind_id: bind_id.to_string(),
-            })
-            .send()
-            .await
-            .unwrap()
-            .error_for_status()
-            .unwrap()
-            .json::<EmptyResponse>()
-            .await
-            .unwrap();
     }
 
     pub fn target_config_fragment(&self) -> String {

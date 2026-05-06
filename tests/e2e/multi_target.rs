@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use remote_exec_broker::client::{Connection, RemoteExecClient};
 use remote_exec_proto::public::{ForwardPortProtocol, ForwardPortSpec, ForwardPortsInput};
-use remote_exec_proto::rpc::{PortForwardProtocol, PortListenResponse};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -213,15 +212,7 @@ async fn forward_ports_release_remote_listeners_when_broker_stops() {
 
     cluster.broker.stop().await;
 
-    let rebound = cluster
-        .daemon_a
-        .port_listen(
-            &listen_addr.to_string(),
-            remote_exec_proto::rpc::PortForwardProtocol::Tcp,
-        )
-        .await;
-    assert_eq!(rebound.endpoint, listen_addr.to_string());
-    cluster.daemon_a.port_listen_close(&rebound.bind_id).await;
+    wait_for_daemon_listener_rebind(&listen_addr.to_string(), Duration::from_secs(10)).await;
 }
 
 #[tokio::test]
@@ -256,13 +247,7 @@ async fn forward_ports_release_remote_listeners_after_broker_crash() {
     tokio::time::sleep(Duration::from_millis(200)).await;
     broker.kill().await;
 
-    let rebound = wait_for_daemon_listener_rebind(
-        &daemon_a,
-        &listen_addr.to_string(),
-        Duration::from_secs(10),
-    )
-    .await;
-    daemon_a.port_listen_close(&rebound.bind_id).await;
+    wait_for_daemon_listener_rebind(&listen_addr.to_string(), Duration::from_secs(10)).await;
 
     let reopened_broker = support::BrokerFixture::spawn(&daemon_a, &daemon_b).await;
     let reopened = reopened_broker
@@ -364,6 +349,25 @@ async fn forward_ports_fail_cleanly_after_daemon_restart_and_can_reopen() {
 
     cluster.daemon_a.restart().await;
 
+    let failed = wait_for_forward_status_timeout(
+        &cluster.broker,
+        &forward_id,
+        "failed",
+        Duration::from_secs(5),
+    )
+    .await;
+    let failed = failed.expect("forward should fail after daemon restart");
+    assert_eq!(failed["status"], "failed");
+    let last_error = failed["last_error"].as_str().unwrap_or_default();
+    assert!(
+        last_error.contains("daemon transport error")
+            || last_error.contains("port tunnel closed")
+            || last_error.contains("reading tcp listen tunnel")
+            || last_error.contains("port_bind_closed")
+            || last_error.contains("port_accept_failed"),
+        "unexpected restart failure error: {last_error}"
+    );
+
     let after_restart = tokio::time::timeout(
         Duration::from_secs(2),
         tokio::net::TcpStream::connect(&listen_endpoint),
@@ -373,24 +377,6 @@ async fn forward_ports_fail_cleanly_after_daemon_restart_and_can_reopen() {
         after_restart.is_err() || after_restart.unwrap().is_err(),
         "stale forwarded listener should stop accepting connections after daemon restart"
     );
-
-    let failed = wait_for_forward_status_timeout(
-        &cluster.broker,
-        &forward_id,
-        "failed",
-        Duration::from_secs(5),
-    )
-    .await;
-    if let Some(failed) = failed {
-        assert_eq!(failed["status"], "failed");
-        let last_error = failed["last_error"].as_str().unwrap_or_default();
-        assert!(
-            last_error.contains("daemon transport error")
-                || last_error.contains("port_bind_closed")
-                || last_error.contains("port_accept_failed"),
-            "unexpected restart failure error: {last_error}"
-        );
-    }
 
     let reopened = cluster
         .broker
@@ -668,24 +654,14 @@ async fn wait_for_forward_status_timeout(
     None
 }
 
-async fn wait_for_daemon_listener_rebind(
-    daemon: &support::DaemonFixture,
-    endpoint: &str,
-    timeout: Duration,
-) -> PortListenResponse {
+async fn wait_for_daemon_listener_rebind(endpoint: &str, timeout: Duration) {
     let started = std::time::Instant::now();
     loop {
-        let response = daemon
-            .try_port_listen(endpoint, PortForwardProtocol::Tcp)
-            .await;
-        if response.status().is_success() {
-            return response.json::<PortListenResponse>().await.unwrap();
+        if tokio::net::TcpListener::bind(endpoint).await.is_ok() {
+            return;
         }
         if started.elapsed() >= timeout {
-            panic!(
-                "daemon listener on {endpoint} was not released after broker crash; last status={}",
-                response.status()
-            );
+            panic!("daemon listener on {endpoint} was not released after broker crash");
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }

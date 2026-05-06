@@ -124,7 +124,7 @@ where
     let (tx, mut rx) = mpsc::channel::<Frame>(128);
     let tunnel = Arc::new(TunnelState {
         target: state.config.target.clone(),
-        cancel: CancellationToken::new(),
+        cancel: state.shutdown.child_token(),
         tx: tx.clone(),
         tcp_writers: Mutex::new(HashMap::new()),
         udp_sockets: Mutex::new(HashMap::new()),
@@ -161,18 +161,25 @@ where
     R: AsyncRead + Unpin,
 {
     loop {
-        let frame = match read_frame(reader).await {
-            Ok(frame) => frame,
-            Err(err) if err.kind() == ErrorKind::UnexpectedEof => return Ok(()),
-            Err(err) => {
-                let _ = send_tunnel_error(&tunnel, 0, "invalid_port_tunnel", err.to_string(), true)
-                    .await;
-                return Err(rpc_error("invalid_port_tunnel", err.to_string()));
+        let frame = tokio::select! {
+            _ = tunnel.cancel.cancelled() => return Ok(()),
+            frame = read_frame(reader) => {
+                match frame {
+                    Ok(frame) => frame,
+                    Err(err) if err.kind() == ErrorKind::UnexpectedEof => return Ok(()),
+                    Err(err) => {
+                        let _ = send_tunnel_error(&tunnel, 0, "invalid_port_tunnel", err.to_string(), true)
+                            .await;
+                        return Err(rpc_error("invalid_port_tunnel", err.to_string()));
+                    }
+                }
             }
         };
 
+        let stream_id = frame.stream_id;
         if let Err(err) = handle_tunnel_frame(tunnel.clone(), frame).await {
-            let _ = send_tunnel_error(&tunnel, 0, err.code, err.message.clone(), false).await;
+            let _ =
+                send_tunnel_error(&tunnel, stream_id, err.code, err.message.clone(), false).await;
         }
     }
 }
@@ -1406,6 +1413,50 @@ mod port_tunnel_tests {
             sorted_payloads([first.data, second.data]),
             vec![b"from-a".to_vec(), b"from-b".to_vec()]
         );
+    }
+
+    #[tokio::test]
+    async fn tunnel_reports_tcp_listen_errors_on_request_stream() {
+        let state = test_state();
+        let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let occupied_endpoint = occupied.local_addr().unwrap().to_string();
+        let (mut broker_side, daemon_side) = tokio::io::duplex(64 * 1024);
+        tokio::spawn(serve_tunnel(state, daemon_side));
+
+        write_preface(&mut broker_side).await.unwrap();
+        write_frame(
+            &mut broker_side,
+            &json_frame(
+                FrameType::TcpListen,
+                7,
+                serde_json::json!({ "endpoint": occupied_endpoint }),
+            ),
+        )
+        .await
+        .unwrap();
+
+        let error = tokio::time::timeout(Duration::from_secs(1), read_frame(&mut broker_side))
+            .await
+            .expect("listen error frame should arrive")
+            .unwrap();
+        assert_eq!(error.frame_type, FrameType::Error);
+        assert_eq!(error.stream_id, 7);
+    }
+
+    #[tokio::test]
+    async fn tunnel_exits_promptly_when_host_shuts_down() {
+        let state = test_state();
+        let (mut broker_side, daemon_side) = tokio::io::duplex(64 * 1024);
+        let tunnel_task = tokio::spawn(serve_tunnel(state.clone(), daemon_side));
+
+        write_preface(&mut broker_side).await.unwrap();
+        shutdown_local(&state).await;
+
+        let result = tokio::time::timeout(Duration::from_secs(1), tunnel_task)
+            .await
+            .expect("tunnel should exit after host shutdown")
+            .unwrap();
+        result.unwrap();
     }
 
     fn test_state() -> Arc<AppState> {

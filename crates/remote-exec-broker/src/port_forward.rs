@@ -5,7 +5,7 @@ use anyhow::Context;
 use remote_exec_proto::port_forward::{
     ensure_nonzero_connect_endpoint, normalize_endpoint, udp_connector_endpoint,
 };
-use remote_exec_proto::port_tunnel::{Frame, read_frame, write_frame, write_preface};
+use remote_exec_proto::port_tunnel::{Frame, FrameType, read_frame, write_frame, write_preface};
 use remote_exec_proto::public::{
     ForwardPortEntry, ForwardPortProtocol as PublicForwardPortProtocol, ForwardPortSpec,
     ForwardPortStatus,
@@ -18,6 +18,7 @@ use remote_exec_proto::rpc::{
     PortListenResponse, PortUdpDatagramReadRequest, PortUdpDatagramReadResponse,
     PortUdpDatagramWriteRequest,
 };
+use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, RwLock, mpsc};
 use tokio_util::sync::CancellationToken;
@@ -184,11 +185,23 @@ impl PortTunnel {
         });
         tokio::spawn(async move {
             loop {
-                let frame = read_frame(&mut reader).await.map_err(anyhow::Error::from);
-                let stop = frame.is_err();
-                if read_tx.send(frame).await.is_err() || stop {
-                    return;
-                }
+                match read_frame(&mut reader).await {
+                    Ok(frame) => {
+                        if read_tx.send(Ok(frame)).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
+                        let _ = read_tx
+                            .send(Err(anyhow::anyhow!("port tunnel closed")))
+                            .await;
+                        return;
+                    }
+                    Err(err) => {
+                        let _ = read_tx.send(Err(err.into())).await;
+                        return;
+                    }
+                };
             }
         });
         Ok(Self {
@@ -326,6 +339,8 @@ pub struct PortForwardRecord {
     pub lease_ids: Vec<LeaseOwner>,
     pub connect_side: SideHandle,
     pub listen_side: SideHandle,
+    pub listen_tunnel: Option<Arc<PortTunnel>>,
+    pub connect_tunnel: Option<Arc<PortTunnel>>,
     pub cancel: CancellationToken,
 }
 
@@ -343,6 +358,8 @@ struct ForwardRuntime {
     connect_bind_id: Option<String>,
     connect_endpoint: String,
     lease_ids: Vec<LeaseOwner>,
+    listen_tunnel: Option<Arc<PortTunnel>>,
+    connect_tunnel: Option<Arc<PortTunnel>>,
     cancel: CancellationToken,
 }
 
@@ -350,6 +367,17 @@ struct ForwardRuntime {
 pub struct LeaseOwner {
     side: SideHandle,
     lease_id: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct EndpointMeta {
+    endpoint: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TcpAcceptMeta {
+    listener_stream_id: u32,
+    peer: Option<String>,
 }
 
 pub async fn open_forward(
@@ -361,6 +389,17 @@ pub async fn open_forward(
     let listen_endpoint = normalize_endpoint(&spec.listen_endpoint)?;
     let connect_endpoint = ensure_nonzero_connect_endpoint(&spec.connect_endpoint)?;
     let protocol = rpc_protocol(spec.protocol);
+    if spec.protocol == PublicForwardPortProtocol::Tcp {
+        return open_tcp_forward(
+            store,
+            listen_side,
+            connect_side,
+            listen_endpoint,
+            connect_endpoint,
+            spec.clone(),
+        )
+        .await;
+    }
     let listen_lease_id = format!("lease_{}", uuid::Uuid::new_v4().simple());
     let mut lease_ids = vec![LeaseOwner {
         side: listen_side.clone(),
@@ -421,6 +460,8 @@ pub async fn open_forward(
         connect_bind_id: connect_bind_id.clone(),
         connect_endpoint: connect_endpoint.clone(),
         lease_ids: lease_ids.clone(),
+        listen_tunnel: None,
+        connect_tunnel: None,
         cancel: cancel.clone(),
     };
     spawn_forward(runtime, store);
@@ -444,6 +485,110 @@ pub async fn open_forward(
             lease_ids,
             connect_side,
             listen_side,
+            listen_tunnel: None,
+            connect_tunnel: None,
+            cancel,
+        },
+    })
+}
+
+async fn open_tcp_forward(
+    store: PortForwardStore,
+    listen_side: SideHandle,
+    connect_side: SideHandle,
+    listen_endpoint: String,
+    connect_endpoint: String,
+    spec: ForwardPortSpec,
+) -> anyhow::Result<OpenedForward> {
+    let listen_tunnel = Arc::new(
+        listen_side
+            .port_tunnel()
+            .await
+            .with_context(|| format!("opening port tunnel to `{}`", listen_side.name()))?,
+    );
+    let connect_tunnel = Arc::new(
+        connect_side
+            .port_tunnel()
+            .await
+            .with_context(|| format!("opening port tunnel to `{}`", connect_side.name()))?,
+    );
+    let listener_stream_id = 1;
+    listen_tunnel
+        .send(Frame {
+            frame_type: FrameType::TcpListen,
+            flags: 0,
+            stream_id: listener_stream_id,
+            meta: encode_tunnel_meta(&EndpointMeta {
+                endpoint: listen_endpoint.clone(),
+            })?,
+            data: Vec::new(),
+        })
+        .await
+        .with_context(|| {
+            format!(
+                "opening tcp listener on `{}` at `{listen_endpoint}`",
+                listen_side.name()
+            )
+        })?;
+    let listen_response = loop {
+        let frame = listen_tunnel.recv().await.with_context(|| {
+            format!(
+                "waiting for tcp listener on `{}` at `{listen_endpoint}`",
+                listen_side.name()
+            )
+        })?;
+        match frame.frame_type {
+            FrameType::TcpListenOk if frame.stream_id == listener_stream_id => {
+                break decode_tunnel_meta::<EndpointMeta>(&frame)?.endpoint;
+            }
+            FrameType::Error if frame.stream_id == listener_stream_id => {
+                return Err(tunnel_error(&frame)).with_context(|| {
+                    format!(
+                        "opening tcp listener on `{}` at `{listen_endpoint}`",
+                        listen_side.name()
+                    )
+                });
+            }
+            _ => {}
+        }
+    };
+
+    let forward_id = format!("fwd_{}", uuid::Uuid::new_v4().simple());
+    let cancel = CancellationToken::new();
+    let runtime = ForwardRuntime {
+        forward_id: forward_id.clone(),
+        listen_side: listen_side.clone(),
+        connect_side: connect_side.clone(),
+        protocol: RpcPortForwardProtocol::Tcp,
+        bind_id: listener_stream_id.to_string(),
+        connect_bind_id: None,
+        connect_endpoint: connect_endpoint.clone(),
+        lease_ids: Vec::new(),
+        listen_tunnel: Some(listen_tunnel.clone()),
+        connect_tunnel: Some(connect_tunnel.clone()),
+        cancel: cancel.clone(),
+    };
+    spawn_forward(runtime, store);
+
+    Ok(OpenedForward {
+        record: PortForwardRecord {
+            entry: ForwardPortEntry {
+                forward_id,
+                listen_side: listen_side.name().to_string(),
+                listen_endpoint: listen_response,
+                connect_side: connect_side.name().to_string(),
+                connect_endpoint,
+                protocol: spec.protocol,
+                status: ForwardPortStatus::Open,
+                last_error: None,
+            },
+            bind_id: listener_stream_id.to_string(),
+            connect_bind_id: None,
+            lease_ids: Vec::new(),
+            connect_side,
+            listen_side,
+            listen_tunnel: Some(listen_tunnel),
+            connect_tunnel: Some(connect_tunnel),
             cancel,
         },
     })
@@ -451,19 +596,25 @@ pub async fn open_forward(
 
 pub async fn close_record(record: PortForwardRecord) -> ForwardPortEntry {
     record.cancel.cancel();
-    let _ = record
-        .listen_side
-        .port_listen_close(&PortListenCloseRequest {
-            bind_id: record.bind_id,
-        })
-        .await;
-    if let Some(connect_bind_id) = record.connect_bind_id {
+    if let Some(tunnel) = &record.listen_tunnel {
+        if let Ok(stream_id) = record.bind_id.parse::<u32>() {
+            let _ = tunnel.close_stream(stream_id).await;
+        }
+    } else {
         let _ = record
-            .connect_side
+            .listen_side
             .port_listen_close(&PortListenCloseRequest {
-                bind_id: connect_bind_id,
+                bind_id: record.bind_id,
             })
             .await;
+        if let Some(connect_bind_id) = record.connect_bind_id {
+            let _ = record
+                .connect_side
+                .port_listen_close(&PortListenCloseRequest {
+                    bind_id: connect_bind_id,
+                })
+                .await;
+        }
     }
     let mut entry = record.entry;
     entry.status = ForwardPortStatus::Closed;
@@ -511,6 +662,10 @@ fn spawn_forward(runtime: ForwardRuntime, store: PortForwardStore) {
 }
 
 async fn run_tcp_forward(runtime: ForwardRuntime) -> anyhow::Result<()> {
+    if runtime.listen_tunnel.is_some() || runtime.connect_tunnel.is_some() {
+        return run_tcp_tunnel_forward(runtime).await;
+    }
+
     loop {
         tokio::select! {
             _ = runtime.cancel.cancelled() => return Ok(()),
@@ -553,6 +708,143 @@ async fn run_tcp_forward(runtime: ForwardRuntime) -> anyhow::Result<()> {
                     connect_response.connection_id,
                     connection_lease_owner,
                 );
+            }
+        }
+    }
+}
+
+async fn run_tcp_tunnel_forward(runtime: ForwardRuntime) -> anyhow::Result<()> {
+    let listen_tunnel = runtime
+        .listen_tunnel
+        .clone()
+        .context("tcp forward missing listen tunnel")?;
+    let connect_tunnel = runtime
+        .connect_tunnel
+        .clone()
+        .context("tcp forward missing connect tunnel")?;
+    let paired = Arc::new(Mutex::new(HashMap::<u32, u32>::new()));
+    let connect_streams = Arc::new(Mutex::new(HashMap::<u32, u32>::new()));
+    let connect_reader = relay_connect_tunnel_to_listen(
+        runtime.forward_id.clone(),
+        listen_tunnel.clone(),
+        connect_tunnel.clone(),
+        paired.clone(),
+        connect_streams.clone(),
+        runtime.cancel.clone(),
+    );
+    tokio::pin!(connect_reader);
+
+    let mut next_connect_stream_id = 1u32;
+    loop {
+        tokio::select! {
+            _ = runtime.cancel.cancelled() => return Ok(()),
+            result = &mut connect_reader => return result,
+            frame = listen_tunnel.recv() => {
+                let frame = frame.context("reading tcp listen tunnel")?;
+                match frame.frame_type {
+                    FrameType::TcpAccept => {
+                        let accept: TcpAcceptMeta = decode_tunnel_meta(&frame)?;
+                        let _ = &accept.peer;
+                        let connect_stream_id = next_connect_stream_id;
+                        next_connect_stream_id = next_connect_stream_id.checked_add(2).unwrap_or(1);
+                        connect_tunnel.send(Frame {
+                            frame_type: FrameType::TcpConnect,
+                            flags: 0,
+                            stream_id: connect_stream_id,
+                            meta: encode_tunnel_meta(&EndpointMeta {
+                                endpoint: runtime.connect_endpoint.clone(),
+                            })?,
+                            data: Vec::new(),
+                        }).await.context("connecting tcp forward destination")?;
+                        paired.lock().await.insert(frame.stream_id, connect_stream_id);
+                        connect_streams.lock().await.insert(connect_stream_id, frame.stream_id);
+                        tracing::debug!(
+                            forward_id = %runtime.forward_id,
+                            listener_stream_id = accept.listener_stream_id,
+                            accepted_stream_id = frame.stream_id,
+                            connect_stream_id,
+                            "paired tcp tunnel streams"
+                        );
+                    }
+                    FrameType::TcpData => {
+                        if let Some(connect_stream_id) = paired.lock().await.get(&frame.stream_id).copied() {
+                            connect_tunnel.send(Frame {
+                                stream_id: connect_stream_id,
+                                ..frame
+                            }).await.context("relaying tcp data to connect tunnel")?;
+                        }
+                    }
+                    FrameType::TcpEof => {
+                        if let Some(connect_stream_id) = paired.lock().await.get(&frame.stream_id).copied() {
+                            let _ = connect_tunnel.send(Frame {
+                                frame_type: frame.frame_type,
+                                flags: 0,
+                                stream_id: connect_stream_id,
+                                meta: Vec::new(),
+                                data: Vec::new(),
+                            }).await;
+                        }
+                    }
+                    FrameType::Close => {
+                        if let Some(connect_stream_id) = paired.lock().await.remove(&frame.stream_id) {
+                            connect_streams.lock().await.remove(&connect_stream_id);
+                            let _ = connect_tunnel.close_stream(connect_stream_id).await;
+                        }
+                    }
+                    FrameType::Error => return Err(tunnel_error(&frame)).context("listen-side tcp tunnel error"),
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+async fn relay_connect_tunnel_to_listen(
+    _forward_id: String,
+    listen_tunnel: Arc<PortTunnel>,
+    connect_tunnel: Arc<PortTunnel>,
+    listen_to_connect: Arc<Mutex<HashMap<u32, u32>>>,
+    connect_to_listen: Arc<Mutex<HashMap<u32, u32>>>,
+    cancel: CancellationToken,
+) -> anyhow::Result<()> {
+    loop {
+        tokio::select! {
+            _ = cancel.cancelled() => return Ok(()),
+            frame = connect_tunnel.recv() => {
+                let frame = frame.context("reading tcp connect tunnel")?;
+                match frame.frame_type {
+                    FrameType::TcpConnectOk => {}
+                    FrameType::TcpData => {
+                        if let Some(listen_stream_id) = connect_to_listen.lock().await.get(&frame.stream_id).copied() {
+                            listen_tunnel.send(Frame {
+                                stream_id: listen_stream_id,
+                                ..frame
+                            }).await.context("relaying tcp data to listen tunnel")?;
+                        }
+                    }
+                    FrameType::TcpEof => {
+                        if let Some(listen_stream_id) = connect_to_listen.lock().await.get(&frame.stream_id).copied() {
+                            let _ = listen_tunnel.send(Frame {
+                                frame_type: frame.frame_type,
+                                flags: 0,
+                                stream_id: listen_stream_id,
+                                meta: Vec::new(),
+                                data: Vec::new(),
+                            }).await;
+                        }
+                    }
+                    FrameType::Close => {
+                        if let Some(listen_stream_id) = connect_to_listen.lock().await.remove(&frame.stream_id) {
+                            listen_to_connect.lock().await.remove(&listen_stream_id);
+                            let _ = listen_tunnel.close_stream(listen_stream_id).await;
+                        }
+                    }
+                    FrameType::Error => {
+                        return Err(tunnel_error(&frame))
+                            .context("connecting tcp forward destination");
+                    }
+                    _ => {}
+                }
             }
         }
     }
@@ -796,6 +1088,30 @@ fn rpc_protocol(protocol: PublicForwardPortProtocol) -> RpcPortForwardProtocol {
     match protocol {
         PublicForwardPortProtocol::Tcp => RpcPortForwardProtocol::Tcp,
         PublicForwardPortProtocol::Udp => RpcPortForwardProtocol::Udp,
+    }
+}
+
+fn encode_tunnel_meta<T: Serialize>(meta: &T) -> anyhow::Result<Vec<u8>> {
+    serde_json::to_vec(meta).map_err(anyhow::Error::from)
+}
+
+fn decode_tunnel_meta<T: for<'de> Deserialize<'de>>(frame: &Frame) -> anyhow::Result<T> {
+    serde_json::from_slice(&frame.meta).map_err(anyhow::Error::from)
+}
+
+fn tunnel_error(frame: &Frame) -> anyhow::Error {
+    let fallback = || anyhow::anyhow!("port tunnel returned error on stream {}", frame.stream_id);
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&frame.meta) else {
+        return fallback();
+    };
+    let message = value
+        .get("message")
+        .and_then(|message| message.as_str())
+        .unwrap_or("port tunnel error");
+    let code = value.get("code").and_then(|code| code.as_str());
+    match code {
+        Some(code) => anyhow::anyhow!("{code}: {message}"),
+        None => anyhow::anyhow!("{message}"),
     }
 }
 

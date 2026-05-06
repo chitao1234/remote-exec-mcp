@@ -29,9 +29,9 @@ async fn forward_ports_opens_lists_and_closes_local_tcp_forward() {
     let echo_addr = echo_listener.local_addr().unwrap();
     tokio::spawn(async move {
         let (mut stream, _) = echo_listener.accept().await.unwrap();
-        let mut buf = vec![0u8; 64];
-        let read = stream.read(&mut buf).await.unwrap();
-        stream.write_all(&buf[..read]).await.unwrap();
+        let mut buf = Vec::new();
+        stream.read_to_end(&mut buf).await.unwrap();
+        stream.write_all(&buf).await.unwrap();
     });
 
     let open = fixture
@@ -62,10 +62,14 @@ async fn forward_ports_opens_lists_and_closes_local_tcp_forward() {
     let mut stream = tokio::net::TcpStream::connect(&listen_endpoint)
         .await
         .unwrap();
-    stream.write_all(b"hello").await.unwrap();
-    let mut buf = [0u8; 5];
-    stream.read_exact(&mut buf).await.unwrap();
-    assert_eq!(&buf, b"hello");
+    let mut payload = Vec::with_capacity(96 * 1024 + 4);
+    payload.extend_from_slice(&[0, 1, 2, 255]);
+    payload.extend((0..96 * 1024).map(|idx| (idx % 251) as u8));
+    stream.write_all(&payload).await.unwrap();
+    stream.shutdown().await.unwrap();
+    let mut echoed = Vec::new();
+    stream.read_to_end(&mut echoed).await.unwrap();
+    assert_eq!(echoed, payload);
 
     let list = fixture
         .call_tool(
