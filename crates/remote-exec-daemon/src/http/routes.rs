@@ -52,6 +52,7 @@ pub(crate) fn router(state: Arc<AppState>, daemon_config: Arc<DaemonConfig>) -> 
             "/v1/port/udp/write",
             post(crate::port_forward::udp_datagram_write),
         )
+        .layer(middleware::from_fn(super::version::require_http_11))
         .layer(middleware::from_fn_with_state(
             daemon_config,
             super::auth::require_http_auth,

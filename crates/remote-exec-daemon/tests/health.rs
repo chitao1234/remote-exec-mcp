@@ -8,6 +8,7 @@ use remote_exec_daemon::config::{
 use remote_exec_proto::rpc::TargetInfoResponse;
 use reqwest::StatusCode;
 use reqwest::header::{AUTHORIZATION, WWW_AUTHENTICATE};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 fn startup_validation_config() -> DaemonConfig {
     DaemonConfig {
@@ -27,6 +28,16 @@ fn startup_validation_config() -> DaemonConfig {
         process_environment: ProcessEnvironment::capture_current(),
         tls: None,
     }
+}
+
+async fn raw_http_request(addr: SocketAddr, request: &str) -> String {
+    let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+    stream.write_all(request.as_bytes()).await.unwrap();
+    stream.shutdown().await.unwrap();
+
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.unwrap();
+    String::from_utf8(response).unwrap()
 }
 
 #[tokio::test]
@@ -66,6 +77,26 @@ async fn target_info_is_available_over_plain_http() {
     );
     assert!(info.supports_image_read);
     assert!(info.supports_transfer_compression);
+}
+
+#[tokio::test]
+async fn daemon_rejects_http_1_0_rpc_requests() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+
+    let response = raw_http_request(
+        fixture.addr,
+        "POST /v1/target-info HTTP/1.0\r\nHost: localhost\r\nContent-Length: 2\r\n\r\n{}",
+    )
+    .await;
+
+    if !response.is_empty() {
+        assert!(
+            response.starts_with("HTTP/1.0 400 Bad Request\r\n")
+                || response.starts_with("HTTP/1.1 400 Bad Request\r\n"),
+            "{response}"
+        );
+        assert!(response.contains("\"code\":\"bad_request\""), "{response}");
+    }
 }
 
 #[tokio::test]
