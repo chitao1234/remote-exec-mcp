@@ -40,6 +40,7 @@ HOST_SERVER_STREAMING := $(BUILD_DIR)/test_server_streaming
 HOST_SESSION_STORE := $(BUILD_DIR)/test_session_store
 HOST_SERVER_ROUTES := $(BUILD_DIR)/test_server_routes
 HOST_SANDBOX := $(BUILD_DIR)/test_sandbox
+HOST_PORT_TUNNEL_FRAME := $(BUILD_DIR)/test_port_tunnel_frame
 XP_SESSION_STORE := $(BUILD_DIR)/test_session_store-xp.exe
 XP_TRANSFER := $(BUILD_DIR)/test_transfer-xp.exe
 WINE ?= wine
@@ -53,6 +54,7 @@ HOST_SERVER_STREAMING_SRCS := $(MAKEFILE_DIR)tests/test_server_streaming.cpp $(R
 HOST_SESSION_STORE_SRCS := $(addprefix $(MAKEFILE_DIR),tests/test_session_store.cpp src/session_store.cpp src/process_session_posix.cpp src/platform.cpp src/shell_policy.cpp src/basic_mutex.cpp src/logging.cpp src/config.cpp src/text_utils.cpp)
 HOST_SERVER_ROUTES_SRCS := $(MAKEFILE_DIR)tests/test_server_routes.cpp $(ROUTE_SRCS) $(addprefix $(MAKEFILE_DIR),src/http_helpers.cpp src/session_store.cpp src/process_session_posix.cpp src/platform.cpp src/shell_policy.cpp src/patch_engine.cpp src/server_transport.cpp src/basic_mutex.cpp src/logging.cpp src/config.cpp src/text_utils.cpp) $(TRANSFER_SRCS) $(POLICY_SRCS) $(RPC_FAILURE_SRCS) $(PORT_FORWARD_SRCS)
 HOST_SANDBOX_SRCS := $(MAKEFILE_DIR)tests/test_sandbox.cpp $(POLICY_SRCS)
+HOST_PORT_TUNNEL_FRAME_SRCS := $(addprefix $(MAKEFILE_DIR),tests/test_port_tunnel_frame.cpp src/port_tunnel_frame.cpp)
 XP_SESSION_STORE_SRCS := $(addprefix $(MAKEFILE_DIR),tests/test_session_store.cpp src/session_store.cpp src/process_session_win32.cpp src/platform.cpp src/shell_policy.cpp src/console_output.cpp src/basic_mutex.cpp src/logging.cpp src/win32_error.cpp src/config.cpp src/text_utils.cpp)
 XP_TRANSFER_SRCS := $(MAKEFILE_DIR)tests/test_transfer.cpp $(TRANSFER_SRCS) $(RPC_FAILURE_SRCS)
 
@@ -72,6 +74,7 @@ HOST_SERVER_STREAMING_OBJS := $(sort $(call host_test_objs,$(HOST_SERVER_STREAMI
 HOST_SESSION_STORE_OBJS := $(sort $(call host_test_objs,$(HOST_SESSION_STORE_SRCS)))
 HOST_SERVER_ROUTES_OBJS := $(sort $(call host_test_objs,$(HOST_SERVER_ROUTES_SRCS)))
 HOST_SANDBOX_OBJS := $(sort $(call host_test_objs,$(HOST_SANDBOX_SRCS)))
+HOST_PORT_TUNNEL_FRAME_OBJS := $(sort $(call host_test_objs,$(HOST_PORT_TUNNEL_FRAME_SRCS)))
 XP_SESSION_STORE_OBJS := $(sort $(call windows_xp_test_objs,$(XP_SESSION_STORE_SRCS)))
 XP_TRANSFER_OBJS := $(sort $(call windows_xp_test_objs,$(XP_TRANSFER_SRCS)))
 
@@ -87,6 +90,7 @@ DEP_FILES := $(sort \
 	$(HOST_SESSION_STORE_OBJS:.o=.d) \
 	$(HOST_SERVER_ROUTES_OBJS:.o=.d) \
 	$(HOST_SANDBOX_OBJS:.o=.d) \
+	$(HOST_PORT_TUNNEL_FRAME_OBJS:.o=.d) \
 	$(XP_SESSION_STORE_OBJS:.o=.d) \
 	$(XP_TRANSFER_OBJS:.o=.d))
 
@@ -186,6 +190,13 @@ $(HOST_SANDBOX): $(HOST_SANDBOX_OBJS)
 	mkdir -p $(dir $@)
 	$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -o $@ $^
 
+test-port-tunnel-frame: $(HOST_PORT_TUNNEL_FRAME)
+	$(HOST_PORT_TUNNEL_FRAME)
+
+$(HOST_PORT_TUNNEL_FRAME): $(HOST_PORT_TUNNEL_FRAME_OBJS)
+	mkdir -p $(dir $@)
+	$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -o $@ $^
+
 test-wine-session-store: $(XP_SESSION_STORE)
 	$(WINE) $(XP_SESSION_STORE)
 
@@ -200,7 +211,7 @@ $(XP_TRANSFER): $(XP_TRANSFER_OBJS)
 	mkdir -p $(dir $@)
 	$(CXX) $(WINDOWS_XP_TEST_CXXFLAGS) $(WINDOWS_XP_LDFLAGS) -o $@ $^ $(WIN_LIBS)
 
-check-posix: test-host-patch test-host-transfer test-host-config test-host-http-request test-host-server-transport test-host-server-streaming test-host-session-store test-host-server-routes test-host-sandbox all-posix
+check-posix: test-host-patch test-host-transfer test-host-config test-host-http-request test-host-server-transport test-host-server-streaming test-host-session-store test-host-server-routes test-host-sandbox test-port-tunnel-frame all-posix
 
 check-windows-xp: all-windows-xp $(XP_TRANSFER)
 
@@ -208,4 +219,4 @@ check: check-posix
 
 -include $(DEP_FILES)
 
-.PHONY: all all-posix all-windows-xp clean test-host-patch test-host-transfer test-host-config test-host-http-request test-host-server-transport test-host-server-streaming test-host-session-store test-host-server-routes test-host-sandbox test-wine-session-store test-wine-transfer check-posix check-windows-xp check
+.PHONY: all all-posix all-windows-xp clean test-host-patch test-host-transfer test-host-config test-host-http-request test-host-server-transport test-host-server-streaming test-host-session-store test-host-server-routes test-host-sandbox test-port-tunnel-frame test-wine-session-store test-wine-transfer check-posix check-windows-xp check
