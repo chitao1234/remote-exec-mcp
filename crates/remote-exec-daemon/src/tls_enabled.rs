@@ -94,7 +94,9 @@ where
                         let app = app.clone();
                         async move { app.oneshot(request.map(Body::new)).await }
                     });
-                    let connection = http1::Builder::new().serve_connection(io, service);
+                    let connection = http1::Builder::new()
+                        .serve_connection(io, service)
+                        .with_upgrades();
                     tokio::pin!(connection);
 
                     tokio::select! {

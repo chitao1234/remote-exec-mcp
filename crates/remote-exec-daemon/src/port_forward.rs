@@ -1,114 +1,95 @@
 use std::sync::Arc;
 
 use axum::Json;
+use axum::body::Body;
 use axum::extract::State;
-use axum::http::StatusCode;
-use remote_exec_proto::rpc::{
-    EmptyResponse, PortConnectRequest, PortConnectResponse, PortConnectionCloseRequest,
-    PortConnectionReadRequest, PortConnectionReadResponse, PortConnectionWriteRequest,
-    PortLeaseRenewRequest, PortListenAcceptRequest, PortListenAcceptResponse,
-    PortListenCloseRequest, PortListenRequest, PortListenResponse, PortUdpDatagramReadRequest,
-    PortUdpDatagramReadResponse, PortUdpDatagramWriteRequest, RpcErrorBody,
+use axum::http::header::{CONNECTION, UPGRADE};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use hyper::upgrade;
+use hyper_util::rt::TokioIo;
+use remote_exec_proto::port_tunnel::{
+    TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, UPGRADE_TOKEN,
 };
+use remote_exec_proto::rpc::RpcErrorBody;
 
 pub use remote_exec_host::port_forward::PortForwardState;
 
-pub async fn listen(
+pub async fn tunnel(
     State(state): State<Arc<crate::AppState>>,
-    Json(req): Json<PortListenRequest>,
-) -> Result<Json<PortListenResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    remote_exec_host::port_forward::listen_local(state, req)
-        .await
-        .map(Json)
-        .map_err(crate::rpc_error::host_rpc_error_response)
+    headers: HeaderMap,
+    request: axum::extract::Request,
+) -> Result<Response, (StatusCode, Json<RpcErrorBody>)> {
+    validate_upgrade_headers(&headers)?;
+    let on_upgrade = upgrade::on(request);
+
+    tokio::spawn(async move {
+        match on_upgrade.await {
+            Ok(upgraded) => {
+                if let Err(err) =
+                    remote_exec_host::port_forward::serve_tunnel(state, TokioIo::new(upgraded))
+                        .await
+                {
+                    tracing::warn!(error = %err.message, code = err.code, "port tunnel ended with error");
+                }
+            }
+            Err(err) => {
+                tracing::warn!(error = %err, "port tunnel upgrade failed");
+            }
+        }
+    });
+
+    Ok((
+        StatusCode::SWITCHING_PROTOCOLS,
+        [(CONNECTION, "Upgrade"), (UPGRADE, UPGRADE_TOKEN)],
+        Body::empty(),
+    )
+        .into_response())
 }
 
-pub async fn listen_accept(
-    State(state): State<Arc<crate::AppState>>,
-    Json(req): Json<PortListenAcceptRequest>,
-) -> Result<Json<PortListenAcceptResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    remote_exec_host::port_forward::listen_accept_local(state, req)
-        .await
-        .map(Json)
-        .map_err(crate::rpc_error::host_rpc_error_response)
+fn validate_upgrade_headers(headers: &HeaderMap) -> Result<(), (StatusCode, Json<RpcErrorBody>)> {
+    if !header_contains_token(headers, CONNECTION.as_str(), "upgrade") {
+        return Err(bad_upgrade_request("missing `Connection: Upgrade` header"));
+    }
+    if !header_eq(headers, UPGRADE.as_str(), UPGRADE_TOKEN) {
+        return Err(bad_upgrade_request(format!(
+            "missing `Upgrade: {UPGRADE_TOKEN}` header"
+        )));
+    }
+    if !header_eq(
+        headers,
+        TUNNEL_PROTOCOL_VERSION_HEADER,
+        TUNNEL_PROTOCOL_VERSION,
+    ) {
+        return Err(bad_upgrade_request(format!(
+            "missing `{TUNNEL_PROTOCOL_VERSION_HEADER}: {TUNNEL_PROTOCOL_VERSION}` header"
+        )));
+    }
+    Ok(())
 }
 
-pub async fn listen_close(
-    State(state): State<Arc<crate::AppState>>,
-    Json(req): Json<PortListenCloseRequest>,
-) -> Result<Json<EmptyResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    remote_exec_host::port_forward::listen_close_local(state, req)
-        .await
-        .map(Json)
-        .map_err(crate::rpc_error::host_rpc_error_response)
+fn header_contains_token(headers: &HeaderMap, name: &str, expected: &str) -> bool {
+    headers
+        .get_all(name)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .any(|token| token.trim().eq_ignore_ascii_case(expected))
 }
 
-pub async fn lease_renew(
-    State(state): State<Arc<crate::AppState>>,
-    Json(req): Json<PortLeaseRenewRequest>,
-) -> Result<Json<EmptyResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    remote_exec_host::port_forward::lease_renew_local(state, req)
-        .await
-        .map(Json)
-        .map_err(crate::rpc_error::host_rpc_error_response)
+fn header_eq(headers: &HeaderMap, name: &str, expected: &str) -> bool {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.eq_ignore_ascii_case(expected))
 }
 
-pub async fn connect(
-    State(state): State<Arc<crate::AppState>>,
-    Json(req): Json<PortConnectRequest>,
-) -> Result<Json<PortConnectResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    remote_exec_host::port_forward::connect_local(state, req)
-        .await
-        .map(Json)
-        .map_err(crate::rpc_error::host_rpc_error_response)
-}
-
-pub async fn connection_read(
-    State(state): State<Arc<crate::AppState>>,
-    Json(req): Json<PortConnectionReadRequest>,
-) -> Result<Json<PortConnectionReadResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    remote_exec_host::port_forward::connection_read_local(state, req)
-        .await
-        .map(Json)
-        .map_err(crate::rpc_error::host_rpc_error_response)
-}
-
-pub async fn connection_write(
-    State(state): State<Arc<crate::AppState>>,
-    Json(req): Json<PortConnectionWriteRequest>,
-) -> Result<Json<EmptyResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    remote_exec_host::port_forward::connection_write_local(state, req)
-        .await
-        .map(Json)
-        .map_err(crate::rpc_error::host_rpc_error_response)
-}
-
-pub async fn connection_close(
-    State(state): State<Arc<crate::AppState>>,
-    Json(req): Json<PortConnectionCloseRequest>,
-) -> Result<Json<EmptyResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    remote_exec_host::port_forward::connection_close_local(state, req)
-        .await
-        .map(Json)
-        .map_err(crate::rpc_error::host_rpc_error_response)
-}
-
-pub async fn udp_datagram_read(
-    State(state): State<Arc<crate::AppState>>,
-    Json(req): Json<PortUdpDatagramReadRequest>,
-) -> Result<Json<PortUdpDatagramReadResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    remote_exec_host::port_forward::udp_datagram_read_local(state, req)
-        .await
-        .map(Json)
-        .map_err(crate::rpc_error::host_rpc_error_response)
-}
-
-pub async fn udp_datagram_write(
-    State(state): State<Arc<crate::AppState>>,
-    Json(req): Json<PortUdpDatagramWriteRequest>,
-) -> Result<Json<EmptyResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    remote_exec_host::port_forward::udp_datagram_write_local(state, req)
-        .await
-        .map(Json)
-        .map_err(crate::rpc_error::host_rpc_error_response)
+fn bad_upgrade_request(message: impl Into<String>) -> (StatusCode, Json<RpcErrorBody>) {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(RpcErrorBody {
+            code: "bad_request".to_string(),
+            message: message.into(),
+        }),
+    )
 }

@@ -1,535 +1,157 @@
 mod support;
 
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::net::SocketAddr;
+use std::time::Duration;
 
-use base64::Engine;
-use remote_exec_daemon::config::{DaemonConfig, DaemonTransport, ProcessEnvironment, PtyMode};
-use remote_exec_proto::rpc::{
-    EmptyResponse, PortConnectionCloseRequest, PortConnectionReadRequest,
-    PortConnectionReadResponse, PortConnectionWriteRequest, PortForwardLease, PortForwardProtocol,
-    PortLeaseRenewRequest, PortListenAcceptRequest, PortListenCloseRequest, PortListenRequest,
-    PortListenResponse, PortUdpDatagramReadRequest,
+use remote_exec_proto::port_tunnel::{
+    Frame, FrameType, TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, UPGRADE_TOKEN,
+    read_frame, write_frame, write_preface,
 };
+use reqwest::StatusCode;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::test]
-async fn port_forward_listen_normalizes_bare_port_and_closes() {
+async fn port_tunnel_upgrade_accepts_http11_and_binds_tcp_listener() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
-    let response = fixture
-        .client
-        .post(fixture.url("/v1/port/listen"))
-        .json(&PortListenRequest {
-            endpoint: "0".to_string(),
-            protocol: PortForwardProtocol::Tcp,
-            lease: None,
-        })
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), reqwest::StatusCode::OK);
-    let listen = response.json::<PortListenResponse>().await.unwrap();
-    assert!(
-        listen.endpoint.starts_with("127.0.0.1:"),
-        "unexpected endpoint {}",
-        listen.endpoint
-    );
-    assert_ne!(listen.endpoint, "127.0.0.1:0");
+    let mut stream = open_tunnel(fixture.addr).await;
 
-    let close = fixture
-        .client
-        .post(fixture.url("/v1/port/listen/close"))
-        .json(&remote_exec_proto::rpc::PortListenCloseRequest {
-            bind_id: listen.bind_id,
-        })
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(close.status(), reqwest::StatusCode::OK);
-    close.json::<EmptyResponse>().await.unwrap();
-}
-
-#[tokio::test]
-async fn port_forward_accept_read_write_and_close_tcp_connection() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
-    let listen = fixture
-        .client
-        .post(fixture.url("/v1/port/listen"))
-        .json(&PortListenRequest {
-            endpoint: "127.0.0.1:0".to_string(),
-            protocol: PortForwardProtocol::Tcp,
-            lease: None,
-        })
-        .send()
-        .await
-        .unwrap()
-        .json::<PortListenResponse>()
-        .await
-        .unwrap();
-
-    let client = fixture.client.clone();
-    let accept_url = fixture.url("/v1/port/listen/accept");
-    let bind_id = listen.bind_id.clone();
-    let accept_task = tokio::spawn(async move {
-        client
-            .post(accept_url)
-            .json(&PortListenAcceptRequest { bind_id })
-            .send()
-            .await
-            .unwrap()
-            .json::<remote_exec_proto::rpc::PortListenAcceptResponse>()
-            .await
-            .unwrap()
-    });
-
-    let mut stream = tokio::net::TcpStream::connect(&listen.endpoint)
-        .await
-        .unwrap();
-    let accepted = accept_task.await.unwrap();
-    stream.write_all(b"ping").await.unwrap();
-
-    let read = fixture
-        .client
-        .post(fixture.url("/v1/port/connection/read"))
-        .json(&PortConnectionReadRequest {
-            connection_id: accepted.connection_id.clone(),
-        })
-        .send()
-        .await
-        .unwrap()
-        .json::<PortConnectionReadResponse>()
-        .await
-        .unwrap();
-    assert!(!read.eof);
-    assert_eq!(
-        base64::engine::general_purpose::STANDARD
-            .decode(read.data)
-            .unwrap(),
-        b"ping"
-    );
-
-    fixture
-        .client
-        .post(fixture.url("/v1/port/connection/write"))
-        .json(&PortConnectionWriteRequest {
-            connection_id: accepted.connection_id.clone(),
-            data: base64::engine::general_purpose::STANDARD.encode(b"pong"),
-        })
-        .send()
-        .await
-        .unwrap()
-        .json::<EmptyResponse>()
-        .await
-        .unwrap();
-    let mut buf = [0u8; 4];
-    stream.read_exact(&mut buf).await.unwrap();
-    assert_eq!(&buf, b"pong");
-
-    fixture
-        .client
-        .post(fixture.url("/v1/port/connection/close"))
-        .json(&PortConnectionCloseRequest {
-            connection_id: accepted.connection_id,
-        })
-        .send()
-        .await
-        .unwrap()
-        .json::<EmptyResponse>()
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
-async fn port_forward_pending_accept_returns_closed_after_listen_close() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
-    let listen = fixture
-        .client
-        .post(fixture.url("/v1/port/listen"))
-        .json(&PortListenRequest {
-            endpoint: "127.0.0.1:0".to_string(),
-            protocol: PortForwardProtocol::Tcp,
-            lease: None,
-        })
-        .send()
-        .await
-        .unwrap()
-        .json::<PortListenResponse>()
-        .await
-        .unwrap();
-
-    let client = fixture.client.clone();
-    let accept_url = fixture.url("/v1/port/listen/accept");
-    let bind_id = listen.bind_id.clone();
-    let accept_task = tokio::spawn(async move {
-        client
-            .post(accept_url)
-            .json(&PortListenAcceptRequest { bind_id })
-            .send()
-            .await
-            .unwrap()
-    });
-
-    tokio::time::sleep(Duration::from_millis(50)).await;
-
-    fixture
-        .client
-        .post(fixture.url("/v1/port/listen/close"))
-        .json(&remote_exec_proto::rpc::PortListenCloseRequest {
-            bind_id: listen.bind_id,
-        })
-        .send()
-        .await
-        .unwrap()
-        .json::<EmptyResponse>()
-        .await
-        .unwrap();
-
-    let response = tokio::time::timeout(Duration::from_secs(2), accept_task)
-        .await
-        .expect("accept should return after close")
-        .unwrap();
-    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
-    let err = response
-        .json::<remote_exec_proto::rpc::RpcErrorBody>()
-        .await
-        .unwrap();
-    assert_eq!(err.code, "port_bind_closed");
-}
-
-#[tokio::test]
-async fn port_forward_pending_accept_returns_closed_after_daemon_shutdown() {
-    let tempdir = tempfile::tempdir().unwrap();
-    let workdir = tempdir.path().join("workdir");
-    std::fs::create_dir_all(&workdir).unwrap();
-    let state = Arc::new(
-        remote_exec_daemon::build_app_state(DaemonConfig {
-            target: "builder-a".to_string(),
-            listen: "127.0.0.1:0".parse().unwrap(),
-            default_workdir: workdir,
-            windows_posix_root: None,
-            transport: DaemonTransport::Http,
-            http_auth: None,
-            sandbox: None,
-            enable_transfer_compression: true,
-            allow_login_shell: true,
-            pty: PtyMode::Auto,
-            default_shell: None,
-            yield_time: remote_exec_daemon::config::YieldTimeConfig::default(),
-            experimental_apply_patch_target_encoding_autodetect: false,
-            process_environment: ProcessEnvironment::capture_current(),
-            tls: None,
-        })
-        .unwrap(),
-    );
-
-    let listen = remote_exec_host::port_forward::listen_local(
-        state.clone(),
-        PortListenRequest {
-            endpoint: "127.0.0.1:0".to_string(),
-            protocol: PortForwardProtocol::Tcp,
-            lease: None,
-        },
+    write_preface(&mut stream).await.unwrap();
+    write_frame(
+        &mut stream,
+        &json_frame(
+            FrameType::TcpListen,
+            1,
+            serde_json::json!({ "endpoint": "127.0.0.1:0" }),
+        ),
     )
     .await
     .unwrap();
 
-    let accept_state = state.clone();
-    let bind_id = listen.bind_id.clone();
-    let accept_task = tokio::spawn(async move {
-        remote_exec_host::port_forward::listen_accept_local(
-            accept_state,
-            PortListenAcceptRequest { bind_id },
-        )
-        .await
-    });
-
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    remote_exec_host::port_forward::shutdown_local(&state).await;
-
-    let err = tokio::time::timeout(Duration::from_secs(2), accept_task)
-        .await
-        .expect("accept should return after daemon shutdown")
-        .unwrap()
-        .unwrap_err();
-    assert_eq!(err.code, "port_bind_closed");
+    let ok = read_frame(&mut stream).await.unwrap();
+    assert_eq!(ok.frame_type, FrameType::TcpListenOk);
+    let endpoint = endpoint_from_frame(&ok);
+    let _probe = tokio::net::TcpStream::connect(endpoint).await.unwrap();
 }
 
 #[tokio::test]
-async fn port_forward_pending_udp_read_returns_closed_after_listen_close() {
+async fn port_tunnel_rejects_http10_upgrade_request() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
-    let listen = fixture
-        .client
-        .post(fixture.url("/v1/port/listen"))
-        .json(&PortListenRequest {
-            endpoint: "127.0.0.1:0".to_string(),
-            protocol: PortForwardProtocol::Udp,
-            lease: None,
-        })
-        .send()
-        .await
-        .unwrap()
-        .json::<PortListenResponse>()
-        .await
-        .unwrap();
+    let response = raw_http_request(
+        fixture.addr,
+        &format!(
+            "POST /v1/port/tunnel HTTP/1.0\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: {UPGRADE_TOKEN}\r\n{TUNNEL_PROTOCOL_VERSION_HEADER}: {TUNNEL_PROTOCOL_VERSION}\r\nContent-Length: 0\r\n\r\n"
+        ),
+    )
+    .await;
 
-    let client = fixture.client.clone();
-    let read_url = fixture.url("/v1/port/udp/read");
-    let bind_id = listen.bind_id.clone();
-    let read_task = tokio::spawn(async move {
-        client
-            .post(read_url)
-            .json(&PortUdpDatagramReadRequest { bind_id })
-            .send()
-            .await
-            .unwrap()
-    });
-
-    tokio::time::sleep(Duration::from_millis(50)).await;
-
-    fixture
-        .client
-        .post(fixture.url("/v1/port/listen/close"))
-        .json(&PortListenCloseRequest {
-            bind_id: listen.bind_id,
-        })
-        .send()
-        .await
-        .unwrap()
-        .json::<EmptyResponse>()
-        .await
-        .unwrap();
-
-    let response = tokio::time::timeout(Duration::from_secs(2), read_task)
-        .await
-        .expect("udp read should return after close")
-        .unwrap();
-    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
-    let err = response
-        .json::<remote_exec_proto::rpc::RpcErrorBody>()
-        .await
-        .unwrap();
-    assert_eq!(err.code, "port_bind_closed");
+    if !response.is_empty() {
+        assert!(
+            response.starts_with("HTTP/1.0 400 Bad Request\r\n")
+                || response.starts_with("HTTP/1.1 400 Bad Request\r\n"),
+            "{response}"
+        );
+    }
 }
 
 #[tokio::test]
-async fn port_forward_pending_connection_read_returns_closed_after_connection_close() {
+async fn legacy_port_forward_routes_are_not_found() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
-    let listen = fixture
-        .client
-        .post(fixture.url("/v1/port/listen"))
-        .json(&PortListenRequest {
-            endpoint: "127.0.0.1:0".to_string(),
-            protocol: PortForwardProtocol::Tcp,
-            lease: None,
-        })
-        .send()
-        .await
-        .unwrap()
-        .json::<PortListenResponse>()
-        .await
-        .unwrap();
-
-    let client = fixture.client.clone();
-    let accept_url = fixture.url("/v1/port/listen/accept");
-    let bind_id = listen.bind_id.clone();
-    let accept_task = tokio::spawn(async move {
-        client
-            .post(accept_url)
-            .json(&PortListenAcceptRequest { bind_id })
-            .send()
-            .await
-            .unwrap()
-            .json::<remote_exec_proto::rpc::PortListenAcceptResponse>()
-            .await
-            .unwrap()
-    });
-
-    let _stream = tokio::net::TcpStream::connect(&listen.endpoint)
-        .await
-        .unwrap();
-    let accepted = accept_task.await.unwrap();
-
-    let client = fixture.client.clone();
-    let read_url = fixture.url("/v1/port/connection/read");
-    let connection_id = accepted.connection_id.clone();
-    let read_task = tokio::spawn(async move {
-        client
-            .post(read_url)
-            .json(&PortConnectionReadRequest { connection_id })
-            .send()
-            .await
-            .unwrap()
-    });
-
-    tokio::time::sleep(Duration::from_millis(50)).await;
-
-    fixture
-        .client
-        .post(fixture.url("/v1/port/connection/close"))
-        .json(&PortConnectionCloseRequest {
-            connection_id: accepted.connection_id,
-        })
-        .send()
-        .await
-        .unwrap()
-        .json::<EmptyResponse>()
-        .await
-        .unwrap();
-
-    let response = tokio::time::timeout(Duration::from_secs(2), read_task)
-        .await
-        .expect("connection read should return after close")
-        .unwrap();
-    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
-    let err = response
-        .json::<remote_exec_proto::rpc::RpcErrorBody>()
-        .await
-        .unwrap();
-    assert_eq!(err.code, "port_connection_closed");
-}
-
-#[tokio::test]
-async fn leased_port_forward_listener_can_be_reclaimed_after_expiry() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
-    let reserved = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let endpoint = reserved.local_addr().unwrap().to_string();
-    drop(reserved);
 
     let response = fixture
-        .client
-        .post(fixture.url("/v1/port/listen"))
-        .json(&PortListenRequest {
-            endpoint: endpoint.clone(),
-            protocol: PortForwardProtocol::Tcp,
-            lease: Some(PortForwardLease {
-                lease_id: "lease-test".to_string(),
-                ttl_ms: 300,
-            }),
-        })
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), reqwest::StatusCode::OK);
-    let listen = response.json::<PortListenResponse>().await.unwrap();
-    assert_eq!(listen.endpoint, endpoint);
-
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    let rebound = wait_for_tcp_listener_rebind(&fixture, &endpoint, Duration::from_secs(5))
-        .await
-        .unwrap_or_else(|last_response| {
-            panic!("listener on {endpoint} was not reclaimed after lease expiry; {last_response}")
-        });
-    assert_eq!(rebound.endpoint, endpoint);
-
-    fixture
-        .client
-        .post(fixture.url("/v1/port/listen/close"))
-        .json(&PortListenCloseRequest {
-            bind_id: rebound.bind_id,
-        })
-        .send()
-        .await
-        .unwrap()
-        .json::<EmptyResponse>()
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
-async fn late_port_forward_lease_renew_is_ignored_after_expiry() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
-    let reserved = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let endpoint = reserved.local_addr().unwrap().to_string();
-    drop(reserved);
-
-    let response = fixture
-        .client
-        .post(fixture.url("/v1/port/listen"))
-        .json(&PortListenRequest {
-            endpoint: endpoint.clone(),
-            protocol: PortForwardProtocol::Tcp,
-            lease: Some(PortForwardLease {
-                lease_id: "lease-late-renew".to_string(),
-                ttl_ms: 300,
-            }),
-        })
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), reqwest::StatusCode::OK);
-    let listen = response.json::<PortListenResponse>().await.unwrap();
-    assert_eq!(listen.endpoint, endpoint);
-
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    let renew = fixture
         .client
         .post(fixture.url("/v1/port/lease/renew"))
-        .json(&PortLeaseRenewRequest {
-            lease_id: "lease-late-renew".to_string(),
-            ttl_ms: 300,
-        })
+        .json(&serde_json::json!({ "lease_id": "old", "ttl_ms": 4000 }))
         .send()
         .await
         .unwrap();
-    assert_eq!(renew.status(), reqwest::StatusCode::OK);
-    renew.json::<EmptyResponse>().await.unwrap();
 
-    let rebound = wait_for_tcp_listener_rebind(&fixture, &endpoint, Duration::from_secs(5))
-        .await
-        .unwrap_or_else(|last_response| {
-            panic!(
-                "listener on {endpoint} was not reclaimed after late lease renew; {last_response}"
-            )
-        });
-    assert_eq!(rebound.endpoint, endpoint);
-
-    fixture
-        .client
-        .post(fixture.url("/v1/port/listen/close"))
-        .json(&PortListenCloseRequest {
-            bind_id: rebound.bind_id,
-        })
-        .send()
-        .await
-        .unwrap()
-        .json::<EmptyResponse>()
-        .await
-        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
-async fn wait_for_tcp_listener_rebind(
-    fixture: &support::fixture::DaemonFixture,
-    endpoint: &str,
-    timeout: Duration,
-) -> Result<PortListenResponse, String> {
-    let started = Instant::now();
-    let mut last_response = "no rebind attempt was made".to_string();
+#[tokio::test]
+async fn dropping_port_tunnel_releases_tcp_listener_without_lease_expiry() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let mut stream = open_tunnel(fixture.addr).await;
 
-    while started.elapsed() < timeout {
-        let response = fixture
-            .client
-            .post(fixture.url("/v1/port/listen"))
-            .json(&PortListenRequest {
-                endpoint: endpoint.to_string(),
-                protocol: PortForwardProtocol::Tcp,
-                lease: None,
-            })
-            .send()
-            .await
-            .unwrap();
-        let status = response.status();
-        if status.is_success() {
-            return Ok(response.json::<PortListenResponse>().await.unwrap());
-        }
-        let body = response
-            .text()
-            .await
-            .unwrap_or_else(|err| format!("failed to read response body: {err}"));
-        last_response = format!("last rebind response status={status}, body={body}");
-        tokio::time::sleep(Duration::from_millis(100)).await;
+    write_preface(&mut stream).await.unwrap();
+    write_frame(
+        &mut stream,
+        &json_frame(
+            FrameType::TcpListen,
+            1,
+            serde_json::json!({ "endpoint": "127.0.0.1:0" }),
+        ),
+    )
+    .await
+    .unwrap();
+    let ok = read_frame(&mut stream).await.unwrap();
+    let endpoint = endpoint_from_frame(&ok);
+
+    drop(stream);
+    wait_until_bindable(&endpoint).await;
+}
+
+async fn open_tunnel(addr: SocketAddr) -> tokio::net::TcpStream {
+    let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let request = format!(
+        "POST /v1/port/tunnel HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: {UPGRADE_TOKEN}\r\n{TUNNEL_PROTOCOL_VERSION_HEADER}: {TUNNEL_PROTOCOL_VERSION}\r\nContent-Length: 0\r\n\r\n"
+    );
+    stream.write_all(request.as_bytes()).await.unwrap();
+
+    let mut response = Vec::new();
+    let mut buf = [0u8; 1];
+    while !response.ends_with(b"\r\n\r\n") {
+        let read = stream.read(&mut buf).await.unwrap();
+        assert_ne!(read, 0, "unexpected EOF before upgrade response");
+        response.extend_from_slice(&buf[..read]);
     }
+    let response = String::from_utf8(response).unwrap();
+    assert!(
+        response.starts_with("HTTP/1.1 101 Switching Protocols\r\n"),
+        "{response}"
+    );
+    assert!(
+        response
+            .to_ascii_lowercase()
+            .contains("upgrade: remote-exec-port-tunnel"),
+        "{response}"
+    );
+    stream
+}
 
-    Err(last_response)
+async fn raw_http_request(addr: SocketAddr, request: &str) -> String {
+    let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+    stream.write_all(request.as_bytes()).await.unwrap();
+    stream.shutdown().await.unwrap();
+
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.unwrap();
+    String::from_utf8(response).unwrap()
+}
+
+fn json_frame(frame_type: FrameType, stream_id: u32, meta: serde_json::Value) -> Frame {
+    Frame {
+        frame_type,
+        flags: 0,
+        stream_id,
+        meta: serde_json::to_vec(&meta).unwrap(),
+        data: Vec::new(),
+    }
+}
+
+fn endpoint_from_frame(frame: &Frame) -> String {
+    serde_json::from_slice::<serde_json::Value>(&frame.meta).unwrap()["endpoint"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+async fn wait_until_bindable(endpoint: &str) {
+    for _ in 0..40 {
+        if tokio::net::TcpListener::bind(endpoint).await.is_ok() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("endpoint `{endpoint}` did not become bindable");
 }
