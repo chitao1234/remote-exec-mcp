@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -73,6 +74,54 @@ static std::string read_all_from_socket(SOCKET socket) {
         output.append(buffer, static_cast<std::size_t>(received));
     }
     return output;
+}
+
+static void recv_exact_or_assert(SOCKET socket, char* data, std::size_t size) {
+    std::size_t offset = 0;
+    while (offset < size) {
+        const int received = recv(
+            socket,
+            data + offset,
+            static_cast<int>(size - offset),
+            0
+        );
+        assert(received > 0);
+        offset += static_cast<std::size_t>(received);
+    }
+}
+
+static std::size_t response_content_length(const std::string& header_block) {
+    const std::string marker = "\r\nContent-Length: ";
+    const std::size_t start = header_block.find(marker);
+    assert(start != std::string::npos);
+    const std::size_t value_start = start + marker.size();
+    const std::size_t value_end = header_block.find("\r\n", value_start);
+    assert(value_end != std::string::npos);
+    return static_cast<std::size_t>(
+        std::strtoull(header_block.substr(value_start, value_end - value_start).c_str(), NULL, 10)
+    );
+}
+
+static std::string read_content_length_response_from_socket(SOCKET socket) {
+    std::string response;
+    while (response.find("\r\n\r\n") == std::string::npos) {
+        char ch = '\0';
+        recv_exact_or_assert(socket, &ch, 1);
+        response.push_back(ch);
+    }
+
+    const std::size_t header_end = response.find("\r\n\r\n");
+    const std::size_t content_length = response_content_length(response.substr(0, header_end));
+    const std::size_t total_size = header_end + 4U + content_length;
+    while (response.size() < total_size) {
+        char buffer[4096];
+        const std::size_t remaining = total_size - response.size();
+        const std::size_t request_size = std::min<std::size_t>(remaining, sizeof(buffer));
+        recv_exact_or_assert(socket, buffer, request_size);
+        response.append(buffer, request_size);
+    }
+
+    return response;
 }
 
 static std::string read_text_file(const fs::path& path) {
@@ -245,11 +294,68 @@ static std::string json_post_request(const std::string& path, const Json& body) 
     return request.str();
 }
 
+static std::string json_post_request_with_extra_headers(
+    const std::string& path,
+    const Json& body,
+    const std::string& extra_headers
+) {
+    const std::string payload = body.dump();
+    std::ostringstream request;
+    request << "POST " << path << " HTTP/1.1\r\n"
+            << "Content-Length: " << payload.size() << "\r\n"
+            << extra_headers
+            << "\r\n"
+            << payload;
+    return request.str();
+}
+
+static void assert_persistent_json_requests_reuse_socket(AppState& state) {
+    int sockets[2];
+    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
+
+    UniqueSocket server_socket(sockets[0]);
+    UniqueSocket client_socket(sockets[1]);
+    std::thread server_thread(
+        [&state](SOCKET socket) {
+            UniqueSocket owned_socket(socket);
+            handle_client(state, std::move(owned_socket));
+        },
+        server_socket.release()
+    );
+
+    send_all(client_socket.get(), json_post_request("/v1/health", Json::object()));
+    const std::string first_response =
+        read_content_length_response_from_socket(client_socket.get());
+    assert(first_response.find("HTTP/1.1 200 OK\r\n") == 0);
+    assert(first_response.find("Connection: close\r\n") == std::string::npos);
+    assert(Json::parse(response_body(first_response)).at("status").get<std::string>() == "ok");
+
+    send_all(
+        client_socket.get(),
+        json_post_request_with_extra_headers(
+            "/v1/target-info",
+            Json::object(),
+            "Connection: close\r\n"
+        )
+    );
+    const std::string second_response =
+        read_content_length_response_from_socket(client_socket.get());
+    assert(second_response.find("HTTP/1.1 200 OK\r\n") == 0);
+    assert(second_response.find("Connection: close\r\n") == std::string::npos);
+    assert(Json::parse(response_body(second_response)).at("target").get<std::string>() == "cpp-test");
+
+    char extra = '\0';
+    assert(recv(client_socket.get(), &extra, 1, 0) == 0);
+    server_thread.join();
+}
+
 int main() {
     NetworkSession network;
     const fs::path root = make_test_root();
     AppState state;
     initialize_state(state, root);
+
+    assert_persistent_json_requests_reuse_socket(state);
 
     const std::string archive = tar_with_single_file("streamed import");
     const fs::path imported_path = root / "imported.txt";
@@ -281,6 +387,7 @@ int main() {
     const std::string export_response = run_single_request(state, export_request.str());
     assert(export_response.find("HTTP/1.1 200 OK\r\n") == 0);
     assert(export_response.find("Transfer-Encoding: chunked\r\n") != std::string::npos);
+    assert(export_response.find("Connection: close\r\n") == std::string::npos);
     assert(export_response.find("Content-Length:") == std::string::npos);
     assert(export_response.find("x-remote-exec-source-type: file\r\n") != std::string::npos);
     assert(single_file_tar_body(decode_chunked_response_body(export_response)) == "streamed export");
