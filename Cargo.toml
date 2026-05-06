@@ -51,7 +51,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tar = "0.4"
 tempfile = "3"
-tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "ring", "tls12"] }
 tokio-util = { version = "0.7", features = ["io", "io-util"] }
 toml = "1.1"
