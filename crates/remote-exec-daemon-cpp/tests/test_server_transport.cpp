@@ -33,7 +33,7 @@ int main() {
 
     const HttpRequest request = parse_http_request_head(head.raw_headers);
     const HttpRequestBodyFraming framing =
-        request_body_framing_from_headers(head.raw_headers);
+        request_body_framing_from_headers(request.headers);
     HttpRequestBodyStream body(reader.get(), head.initial_body, framing, 1024);
 
     std::string decoded;

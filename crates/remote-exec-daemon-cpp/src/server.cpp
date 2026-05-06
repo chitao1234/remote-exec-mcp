@@ -162,6 +162,16 @@ void authorize_sandbox_path(
     authorize_path(host_path_policy(), active_sandbox(state), access, path);
 }
 
+HttpRequestBodyFraming parse_request_body_framing_or_throw_bad_request(
+    const HttpRequest& request
+) {
+    try {
+        return request_body_framing_from_headers(request.headers);
+    } catch (const HttpProtocolError& ex) {
+        throw BadHttpRequest(ex.what());
+    }
+}
+
 std::string resolve_absolute_transfer_path(const std::string& path) {
     const PathPolicy policy = host_path_policy();
     if (!is_absolute_for_policy(policy, path)) {
@@ -384,7 +394,7 @@ int handle_client_request(
     HttpRequest request = parse_http_request_head(request_head.raw_headers);
     *close_after_response = request_connection_close_requested(request);
     const HttpRequestBodyFraming framing =
-        request_body_framing_from_headers(request_head.raw_headers);
+        parse_request_body_framing_or_throw_bad_request(request);
     HttpRequestBodyStream body(
         client,
         request_head.initial_body,

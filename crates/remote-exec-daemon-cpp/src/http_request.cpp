@@ -5,23 +5,11 @@
 #include <stdexcept>
 #include <string>
 
+#include "http_codec.h"
 #include "http_request.h"
 #include "text_utils.h"
 
 namespace {
-
-int hex_digit_value(char ch) {
-    if (ch >= '0' && ch <= '9') {
-        return ch - '0';
-    }
-    if (ch >= 'a' && ch <= 'f') {
-        return ch - 'a' + 10;
-    }
-    if (ch >= 'A' && ch <= 'F') {
-        return ch - 'A' + 10;
-    }
-    return -1;
-}
 
 bool is_http_token_char(char ch) {
     const unsigned char value = static_cast<unsigned char>(ch);
@@ -50,16 +38,6 @@ bool is_http_token_char(char ch) {
     }
 }
 
-bool is_valid_header_value(const std::string& value) {
-    for (std::size_t i = 0; i < value.size(); ++i) {
-        const unsigned char ch = static_cast<unsigned char>(value[i]);
-        if ((ch < 32U && ch != '\t') || ch == 127U) {
-            return false;
-        }
-    }
-    return true;
-}
-
 void validate_token(const std::string& value, const std::string& error_message) {
     if (value.empty()) {
         throw HttpParseError(error_message);
@@ -86,129 +64,6 @@ void validate_request_target(const std::string& value) {
 void validate_http_version(const std::string& value) {
     if (value != "HTTP/1.1") {
         throw HttpParseError("unsupported http version");
-    }
-}
-
-std::size_t parse_content_length_value(const std::string& raw) {
-    if (raw.empty()) {
-        throw HttpParseError("invalid Content-Length");
-    }
-
-    std::size_t value = 0;
-    for (std::size_t i = 0; i < raw.size(); ++i) {
-        const char ch = raw[i];
-        if (ch < '0' || ch > '9') {
-            throw HttpParseError("invalid Content-Length");
-        }
-        const std::size_t digit = static_cast<std::size_t>(ch - '0');
-        if (value > (std::numeric_limits<std::size_t>::max() - digit) / 10U) {
-            throw HttpParseError("Content-Length is too large");
-        }
-        value = value * 10U + digit;
-    }
-    return value;
-}
-
-void parse_header_line_into(
-    const std::string& header_line,
-    std::map<std::string, std::string>* headers
-) {
-    const std::size_t colon = header_line.find(':');
-    if (colon == std::string::npos) {
-        throw HttpParseError("invalid header line");
-    }
-
-    const std::string raw_name = header_line.substr(0, colon);
-    if (raw_name.empty() || trim_ascii(raw_name) != raw_name) {
-        throw HttpParseError("invalid header name");
-    }
-    validate_token(raw_name, "invalid header name");
-
-    const std::string name = lowercase_ascii(raw_name);
-    if (headers->find(name) != headers->end()) {
-        throw HttpParseError("duplicate header");
-    }
-
-    const std::string value = trim_ascii(header_line.substr(colon + 1));
-    if (!is_valid_header_value(value)) {
-        throw HttpParseError("invalid header value");
-    }
-    (*headers)[name] = value;
-}
-
-std::size_t parse_chunk_size_line(const std::string& line) {
-    const std::size_t extension = line.find(';');
-    const std::string size_text =
-        trim_ascii(extension == std::string::npos ? line : line.substr(0, extension));
-    if (size_text.empty()) {
-        throw HttpParseError("invalid chunk size");
-    }
-
-    std::size_t value = 0;
-    for (std::size_t i = 0; i < size_text.size(); ++i) {
-        const int digit = hex_digit_value(size_text[i]);
-        if (digit < 0) {
-            throw HttpParseError("invalid chunk size");
-        }
-        const std::size_t chunk_digit = static_cast<std::size_t>(digit);
-        if (value > (std::numeric_limits<std::size_t>::max() - chunk_digit) / 16U) {
-            throw HttpParseError("chunk size is too large");
-        }
-        value = value * 16U + chunk_digit;
-    }
-    return value;
-}
-
-std::string decode_chunked_body(const std::string& body) {
-    std::string decoded;
-    std::size_t offset = 0;
-    std::map<std::string, std::string> trailers;
-
-    for (;;) {
-        const std::size_t line_end = body.find("\r\n", offset);
-        if (line_end == std::string::npos) {
-            throw HttpParseError("incomplete chunked body");
-        }
-
-        const std::size_t chunk_size =
-            parse_chunk_size_line(body.substr(offset, line_end - offset));
-        offset = line_end + 2U;
-
-        if (chunk_size == 0U) {
-            for (;;) {
-                const std::size_t trailer_line_end = body.find("\r\n", offset);
-                if (trailer_line_end == std::string::npos) {
-                    throw HttpParseError("incomplete chunked body");
-                }
-                if (trailer_line_end == offset) {
-                    offset += 2U;
-                    if (offset != body.size()) {
-                        throw HttpParseError("extra data after chunked body");
-                    }
-                    return decoded;
-                }
-
-                parse_header_line_into(
-                    body.substr(offset, trailer_line_end - offset),
-                    &trailers
-                );
-                offset = trailer_line_end + 2U;
-            }
-        }
-
-        if (chunk_size > body.size() - offset) {
-            throw HttpParseError("incomplete chunked body");
-        }
-        const std::size_t chunk_end = offset + chunk_size;
-        if (body.size() - chunk_end < 2U) {
-            throw HttpParseError("incomplete chunked body");
-        }
-        if (body.compare(chunk_end, 2U, "\r\n") != 0) {
-            throw HttpParseError("invalid chunked body");
-        }
-
-        decoded.append(body, offset, chunk_size);
-        offset = chunk_end + 2U;
     }
 }
 
@@ -249,7 +104,11 @@ HttpRequest parse_http_request_head(const std::string& raw_headers) {
             continue;
         }
 
-        parse_header_line_into(header_line, &request.headers);
+        try {
+            parse_http_header_line(header_line, &request.headers);
+        } catch (const HttpProtocolError& ex) {
+            throw HttpParseError(ex.what());
+        }
     }
 
     return request;
@@ -262,26 +121,23 @@ HttpRequest parse_http_request(const std::string& raw) {
     }
 
     HttpRequest request = parse_http_request_head(raw.substr(0, header_end));
-    const std::string transfer_encoding =
-        lowercase_ascii(trim_ascii(request.header("transfer-encoding")));
     const std::string raw_body = raw.substr(header_end + 4U);
-    if (!transfer_encoding.empty()) {
-        if (transfer_encoding != "chunked") {
-            throw HttpParseError("unsupported transfer encoding");
-        }
-        if (!request.header("content-length").empty()) {
-            throw HttpParseError("chunked request cannot include Content-Length");
-        }
-        request.body = decode_chunked_body(raw_body);
-    } else {
-        const std::string content_length = request.header("content-length");
-        if (!content_length.empty()) {
-            const std::size_t expected_body_size = parse_content_length_value(content_length);
-            if (raw_body.size() != expected_body_size) {
+
+    try {
+        const HttpRequestBodyFraming framing =
+            request_body_framing_from_headers(request.headers);
+        if (framing.chunked) {
+            request.body = decode_http_chunked_body(raw_body);
+        } else {
+            if (framing.has_content_length &&
+                raw_body.size() != framing.content_length) {
                 throw HttpParseError("Content-Length does not match body size");
             }
+            request.body = raw_body;
         }
-        request.body = raw_body;
+    } catch (const HttpProtocolError& ex) {
+        throw HttpParseError(ex.what());
     }
+
     return request;
 }
