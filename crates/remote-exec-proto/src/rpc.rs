@@ -22,6 +22,8 @@ pub struct TargetInfoResponse {
     pub supports_transfer_compression: bool,
     #[serde(default)]
     pub supports_port_forward: bool,
+    #[serde(default)]
+    pub port_forward_protocol_version: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
