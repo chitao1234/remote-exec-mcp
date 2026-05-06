@@ -20,6 +20,7 @@
 #include "json.hpp"
 #include "logging.h"
 #include "port_forward_endpoint.h"
+#include "port_forward_error.h"
 #include "port_forward_socket_ops.h"
 #include "port_tunnel_frame.h"
 #include "server_transport.h"

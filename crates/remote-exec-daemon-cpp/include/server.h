@@ -4,7 +4,6 @@
 
 #include "config.h"
 #include "filesystem_sandbox.h"
-#include "port_forward.h"
 #include "session_store.h"
 #include "server_transport.h"
 
@@ -16,7 +15,6 @@ struct AppState {
     bool sandbox_enabled = false;
     CompiledFilesystemSandbox sandbox;
     SessionStore sessions;
-    PortForwardStore port_forwards;
 };
 
 void handle_client(AppState& state, UniqueSocket client);

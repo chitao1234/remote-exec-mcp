@@ -56,10 +56,5 @@ where
         daemon_instance_id = %state.daemon_instance_id,
         "starting daemon"
     );
-    let shutdown_state = state.clone();
-    let shutdown = async move {
-        shutdown.await;
-        remote_exec_host::port_forward::shutdown_local(&shutdown_state).await;
-    };
     server::serve_with_shutdown(state, daemon_config, shutdown).await
 }

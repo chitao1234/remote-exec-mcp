@@ -7,7 +7,6 @@ use remote_exec_proto::port_tunnel::{
     Frame, FrameType, TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, UPGRADE_TOKEN,
     read_frame, write_frame, write_preface,
 };
-use reqwest::StatusCode;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::test]
@@ -54,22 +53,7 @@ async fn port_tunnel_rejects_http10_upgrade_request() {
 }
 
 #[tokio::test]
-async fn legacy_port_forward_routes_are_not_found() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
-
-    let response = fixture
-        .client
-        .post(fixture.url("/v1/port/lease/renew"))
-        .json(&serde_json::json!({ "lease_id": "old", "ttl_ms": 4000 }))
-        .send()
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn dropping_port_tunnel_releases_tcp_listener_without_lease_expiry() {
+async fn dropping_port_tunnel_releases_tcp_listener_when_tunnel_closes() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let mut stream = open_tunnel(fixture.addr).await;
 

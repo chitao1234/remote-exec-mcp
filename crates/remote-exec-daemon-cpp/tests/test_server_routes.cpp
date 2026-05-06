@@ -11,7 +11,7 @@
 #include "http_helpers.h"
 #include "path_policy.h"
 #include "platform.h"
-#include "port_forward_codec.h"
+#include "base64_codec.h"
 #include "port_forward_endpoint.h"
 #include "process_session.h"
 #include "server_routes.h"
@@ -152,33 +152,6 @@ int main() {
 
     assert(normalize_port_forward_endpoint("8080") == "127.0.0.1:8080");
     assert(base64_decode_bytes(base64_encode_bytes(std::string("hello\0world", 11))).size() == 11);
-
-    const HttpResponse listen_response = route_request(
-        state,
-        json_request(
-            "/v1/port/listen",
-            Json{{"endpoint", "127.0.0.1:0"}, {"protocol", "tcp"}}
-        )
-    );
-    assert(listen_response.status == 404);
-
-    const HttpResponse zero_connect_response = route_request(
-        state,
-        json_request(
-            "/v1/port/connect",
-            Json{{"endpoint", "127.0.0.1:0"}, {"protocol", "tcp"}}
-        )
-    );
-    assert(zero_connect_response.status == 404);
-
-    const HttpResponse udp_listen_response = route_request(
-        state,
-        json_request(
-            "/v1/port/listen",
-            Json{{"endpoint", "127.0.0.1:0"}, {"protocol", "udp"}}
-        )
-    );
-    assert(udp_listen_response.status == 404);
 
     const HttpResponse compression_response = route_request(
         state,

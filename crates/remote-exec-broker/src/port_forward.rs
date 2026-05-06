@@ -11,14 +11,6 @@ use remote_exec_proto::public::{
     ForwardPortEntry, ForwardPortProtocol as PublicForwardPortProtocol, ForwardPortSpec,
     ForwardPortStatus,
 };
-use remote_exec_proto::rpc::{
-    EmptyResponse, PortConnectRequest, PortConnectResponse, PortConnectionCloseRequest,
-    PortConnectionReadRequest, PortConnectionReadResponse, PortConnectionWriteRequest,
-    PortForwardLease, PortForwardProtocol as RpcPortForwardProtocol, PortLeaseRenewRequest,
-    PortListenAcceptRequest, PortListenAcceptResponse, PortListenCloseRequest, PortListenRequest,
-    PortListenResponse, PortUdpDatagramReadRequest, PortUdpDatagramReadResponse,
-    PortUdpDatagramWriteRequest,
-};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, RwLock, mpsc};
@@ -28,10 +20,6 @@ use crate::TargetHandle;
 use crate::daemon_client::DaemonClientError;
 use crate::local_port_backend::LocalPortClient;
 
-const PORT_BIND_CLOSED_CODE: &str = "port_bind_closed";
-const PORT_CONNECTION_CLOSED_CODE: &str = "port_connection_closed";
-const FORWARD_LEASE_TTL_MS: u64 = 4_000;
-const FORWARD_LEASE_RENEW_INTERVAL_MS: u64 = 1_000;
 const UDP_CONNECTOR_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 const UDP_CONNECTOR_IDLE_SWEEP_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -54,106 +42,6 @@ impl SideHandle {
         match self {
             Self::Target { name, .. } => name,
             Self::Local(_) => "local",
-        }
-    }
-
-    pub async fn port_listen(
-        &self,
-        req: &PortListenRequest,
-    ) -> Result<PortListenResponse, DaemonClientError> {
-        match self {
-            Self::Target { handle, .. } => handle.port_listen(req).await,
-            Self::Local(client) => client.port_listen(req).await,
-        }
-    }
-
-    pub async fn port_listen_accept(
-        &self,
-        req: &PortListenAcceptRequest,
-    ) -> Result<PortListenAcceptResponse, DaemonClientError> {
-        match self {
-            Self::Target { handle, .. } => handle.port_listen_accept(req).await,
-            Self::Local(client) => client.port_listen_accept(req).await,
-        }
-    }
-
-    pub async fn port_listen_close(
-        &self,
-        req: &PortListenCloseRequest,
-    ) -> Result<EmptyResponse, DaemonClientError> {
-        match self {
-            Self::Target { handle, .. } => handle.port_listen_close(req).await,
-            Self::Local(client) => client.port_listen_close(req).await,
-        }
-    }
-
-    pub async fn port_lease_renew(
-        &self,
-        req: &PortLeaseRenewRequest,
-    ) -> Result<EmptyResponse, DaemonClientError> {
-        match self {
-            Self::Target { handle, .. } => handle.port_lease_renew(req).await,
-            Self::Local(client) => client.port_lease_renew(req).await,
-        }
-    }
-
-    pub async fn port_connect(
-        &self,
-        req: &PortConnectRequest,
-    ) -> Result<PortConnectResponse, DaemonClientError> {
-        match self {
-            Self::Target { handle, .. } => handle.port_connect(req).await,
-            Self::Local(client) => client.port_connect(req).await,
-        }
-    }
-
-    pub async fn port_connection_read(
-        &self,
-        req: &PortConnectionReadRequest,
-    ) -> Result<PortConnectionReadResponse, DaemonClientError> {
-        match self {
-            Self::Target { handle, .. } => handle.port_connection_read(req).await,
-            Self::Local(client) => client.port_connection_read(req).await,
-        }
-    }
-
-    pub async fn port_connection_write(
-        &self,
-        req: &PortConnectionWriteRequest,
-    ) -> Result<EmptyResponse, DaemonClientError> {
-        match self {
-            Self::Target { handle, .. } => handle.port_connection_write(req).await,
-            Self::Local(client) => client.port_connection_write(req).await,
-        }
-    }
-
-    pub async fn port_connection_close(
-        &self,
-        req: &PortConnectionCloseRequest,
-    ) -> Result<EmptyResponse, DaemonClientError> {
-        match self {
-            Self::Target { handle, .. } => handle.port_connection_close(req).await,
-            Self::Local(client) => client.port_connection_close(req).await,
-        }
-    }
-
-    pub async fn port_udp_datagram_read(
-        &self,
-        req: &PortUdpDatagramReadRequest,
-    ) -> Result<PortUdpDatagramReadResponse, DaemonClientError> {
-        match self {
-            Self::Target { handle, .. } => handle.port_udp_datagram_read(req).await,
-            Self::Local(client) => client.port_udp_datagram_read(req).await,
-        }
-    }
-
-    pub async fn port_udp_datagram_write(
-        &self,
-        req: &PortUdpDatagramWriteRequest,
-    ) -> Result<EmptyResponse, DaemonClientError> {
-        match self {
-            Self::Target { handle, .. } => handle.port_udp_datagram_write(req).await,
-            Self::Local(client) => client.port_udp_datagram_write(req).await,
         }
     }
 
@@ -337,13 +225,8 @@ impl PortForwardFilter {
 
 pub struct PortForwardRecord {
     pub entry: ForwardPortEntry,
-    pub bind_id: String,
-    pub connect_bind_id: Option<String>,
-    pub lease_ids: Vec<LeaseOwner>,
-    pub connect_side: SideHandle,
-    pub listen_side: SideHandle,
-    pub listen_tunnel: Option<Arc<PortTunnel>>,
-    pub connect_tunnel: Option<Arc<PortTunnel>>,
+    pub listener_stream_id: u32,
+    pub listen_tunnel: Arc<PortTunnel>,
     pub cancel: CancellationToken,
 }
 
@@ -356,20 +239,11 @@ struct ForwardRuntime {
     forward_id: String,
     listen_side: SideHandle,
     connect_side: SideHandle,
-    protocol: RpcPortForwardProtocol,
-    bind_id: String,
-    connect_bind_id: Option<String>,
+    protocol: PublicForwardPortProtocol,
     connect_endpoint: String,
-    lease_ids: Vec<LeaseOwner>,
-    listen_tunnel: Option<Arc<PortTunnel>>,
-    connect_tunnel: Option<Arc<PortTunnel>>,
+    listen_tunnel: Arc<PortTunnel>,
+    connect_tunnel: Arc<PortTunnel>,
     cancel: CancellationToken,
-}
-
-#[derive(Clone)]
-pub struct LeaseOwner {
-    side: SideHandle,
-    lease_id: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -380,7 +254,6 @@ struct EndpointMeta {
 #[derive(Debug, Deserialize)]
 struct TcpAcceptMeta {
     listener_stream_id: u32,
-    peer: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -401,119 +274,30 @@ pub async fn open_forward(
 ) -> anyhow::Result<OpenedForward> {
     let listen_endpoint = normalize_endpoint(&spec.listen_endpoint)?;
     let connect_endpoint = ensure_nonzero_connect_endpoint(&spec.connect_endpoint)?;
-    let protocol = rpc_protocol(spec.protocol);
-    if spec.protocol == PublicForwardPortProtocol::Tcp {
-        return open_tcp_forward(
-            store,
-            listen_side,
-            connect_side,
-            listen_endpoint,
-            connect_endpoint,
-            spec.clone(),
-        )
-        .await;
-    }
-    if spec.protocol == PublicForwardPortProtocol::Udp {
-        return open_udp_forward(
-            store,
-            listen_side,
-            connect_side,
-            listen_endpoint,
-            connect_endpoint,
-            spec.clone(),
-        )
-        .await;
-    }
-    let listen_lease_id = format!("lease_{}", uuid::Uuid::new_v4().simple());
-    let mut lease_ids = vec![LeaseOwner {
-        side: listen_side.clone(),
-        lease_id: listen_lease_id.clone(),
-    }];
-    if spec.protocol == PublicForwardPortProtocol::Udp {
-        validate_udp_connector_endpoint(&connect_endpoint)?;
-    }
-    let connect_bind_id = if spec.protocol == PublicForwardPortProtocol::Udp {
-        let connector_lease_id = format!("lease_{}", uuid::Uuid::new_v4().simple());
-        let bind_id =
-            open_udp_connector(&connect_side, &connect_endpoint, connector_lease_id.clone())
-                .await?;
-        lease_ids.push(LeaseOwner {
-            side: connect_side.clone(),
-            lease_id: connector_lease_id,
-        });
-        Some(bind_id)
-    } else {
-        None
-    };
-
-    let listen_response = match listen_side
-        .port_listen(&PortListenRequest {
-            endpoint: listen_endpoint.clone(),
-            protocol: protocol.clone(),
-            lease: Some(port_forward_lease(listen_lease_id)),
-        })
-        .await
-        .with_context(|| {
-            format!(
-                "opening {} listener on `{}` at `{listen_endpoint}`",
-                format_protocol(spec.protocol),
-                listen_side.name()
+    match spec.protocol {
+        PublicForwardPortProtocol::Tcp => {
+            open_tcp_forward(
+                store,
+                listen_side,
+                connect_side,
+                listen_endpoint,
+                connect_endpoint,
+                spec.clone(),
             )
-        }) {
-        Ok(response) => response,
-        Err(err) => {
-            if let Some(connect_bind_id) = connect_bind_id {
-                let _ = connect_side
-                    .port_listen_close(&PortListenCloseRequest {
-                        bind_id: connect_bind_id,
-                    })
-                    .await;
-            }
-            return Err(err);
+            .await
         }
-    };
-
-    let forward_id = format!("fwd_{}", uuid::Uuid::new_v4().simple());
-    let cancel = CancellationToken::new();
-    let runtime = ForwardRuntime {
-        forward_id: forward_id.clone(),
-        listen_side: listen_side.clone(),
-        connect_side: connect_side.clone(),
-        protocol: protocol.clone(),
-        bind_id: listen_response.bind_id.clone(),
-        connect_bind_id: connect_bind_id.clone(),
-        connect_endpoint: connect_endpoint.clone(),
-        lease_ids: lease_ids.clone(),
-        listen_tunnel: None,
-        connect_tunnel: None,
-        cancel: cancel.clone(),
-    };
-    spawn_forward(runtime, store);
-
-    let entry = ForwardPortEntry {
-        forward_id,
-        listen_side: listen_side.name().to_string(),
-        listen_endpoint: listen_response.endpoint.clone(),
-        connect_side: connect_side.name().to_string(),
-        connect_endpoint,
-        protocol: spec.protocol,
-        status: ForwardPortStatus::Open,
-        last_error: None,
-    };
-
-    Ok(OpenedForward {
-        record: PortForwardRecord {
-            entry,
-            bind_id: listen_response.bind_id,
-            connect_bind_id,
-            lease_ids,
-            connect_side,
-            listen_side,
-            listen_tunnel: None,
-            connect_tunnel: None,
-            cancel,
-        },
-    })
+        PublicForwardPortProtocol::Udp => {
+            open_udp_forward(
+                store,
+                listen_side,
+                connect_side,
+                listen_endpoint,
+                connect_endpoint,
+                spec.clone(),
+            )
+            .await
+        }
+    }
 }
 
 async fn open_tcp_forward(
@@ -583,13 +367,10 @@ async fn open_tcp_forward(
         forward_id: forward_id.clone(),
         listen_side: listen_side.clone(),
         connect_side: connect_side.clone(),
-        protocol: RpcPortForwardProtocol::Tcp,
-        bind_id: listener_stream_id.to_string(),
-        connect_bind_id: None,
+        protocol: PublicForwardPortProtocol::Tcp,
         connect_endpoint: connect_endpoint.clone(),
-        lease_ids: Vec::new(),
-        listen_tunnel: Some(listen_tunnel.clone()),
-        connect_tunnel: Some(connect_tunnel.clone()),
+        listen_tunnel: listen_tunnel.clone(),
+        connect_tunnel,
         cancel: cancel.clone(),
     };
     spawn_forward(runtime, store);
@@ -606,13 +387,8 @@ async fn open_tcp_forward(
                 status: ForwardPortStatus::Open,
                 last_error: None,
             },
-            bind_id: listener_stream_id.to_string(),
-            connect_bind_id: None,
-            lease_ids: Vec::new(),
-            connect_side,
-            listen_side,
-            listen_tunnel: Some(listen_tunnel),
-            connect_tunnel: Some(connect_tunnel),
+            listener_stream_id,
+            listen_tunnel,
             cancel,
         },
     })
@@ -685,13 +461,10 @@ async fn open_udp_forward(
         forward_id: forward_id.clone(),
         listen_side: listen_side.clone(),
         connect_side: connect_side.clone(),
-        protocol: RpcPortForwardProtocol::Udp,
-        bind_id: listener_stream_id.to_string(),
-        connect_bind_id: None,
+        protocol: PublicForwardPortProtocol::Udp,
         connect_endpoint: connect_endpoint.clone(),
-        lease_ids: Vec::new(),
-        listen_tunnel: Some(listen_tunnel.clone()),
-        connect_tunnel: Some(connect_tunnel.clone()),
+        listen_tunnel: listen_tunnel.clone(),
+        connect_tunnel,
         cancel: cancel.clone(),
     };
     spawn_forward(runtime, store);
@@ -708,13 +481,8 @@ async fn open_udp_forward(
                 status: ForwardPortStatus::Open,
                 last_error: None,
             },
-            bind_id: listener_stream_id.to_string(),
-            connect_bind_id: None,
-            lease_ids: Vec::new(),
-            connect_side,
-            listen_side,
-            listen_tunnel: Some(listen_tunnel),
-            connect_tunnel: Some(connect_tunnel),
+            listener_stream_id,
+            listen_tunnel,
             cancel,
         },
     })
@@ -722,26 +490,10 @@ async fn open_udp_forward(
 
 pub async fn close_record(record: PortForwardRecord) -> ForwardPortEntry {
     record.cancel.cancel();
-    if let Some(tunnel) = &record.listen_tunnel {
-        if let Ok(stream_id) = record.bind_id.parse::<u32>() {
-            let _ = tunnel.close_stream(stream_id).await;
-        }
-    } else {
-        let _ = record
-            .listen_side
-            .port_listen_close(&PortListenCloseRequest {
-                bind_id: record.bind_id,
-            })
-            .await;
-        if let Some(connect_bind_id) = record.connect_bind_id {
-            let _ = record
-                .connect_side
-                .port_listen_close(&PortListenCloseRequest {
-                    bind_id: connect_bind_id,
-                })
-                .await;
-        }
-    }
+    let _ = record
+        .listen_tunnel
+        .close_stream(record.listener_stream_id)
+        .await;
     let mut entry = record.entry;
     entry.status = ForwardPortStatus::Closed;
     entry.last_error = None;
@@ -756,22 +508,11 @@ pub async fn close_all(store: &PortForwardStore) {
 
 fn spawn_forward(runtime: ForwardRuntime, store: PortForwardStore) {
     tokio::spawn(async move {
-        spawn_lease_renewer(runtime.lease_ids.clone(), runtime.cancel.clone());
         let result = match runtime.protocol {
-            RpcPortForwardProtocol::Tcp => run_tcp_forward(runtime.clone()).await,
-            RpcPortForwardProtocol::Udp => run_udp_forward(runtime.clone()).await,
+            PublicForwardPortProtocol::Tcp => run_tcp_forward(runtime.clone()).await,
+            PublicForwardPortProtocol::Udp => run_udp_forward(runtime.clone()).await,
         };
         if let Err(err) = result {
-            if is_expected_close_interruption(&err) {
-                tracing::debug!(
-                    forward_id = %runtime.forward_id,
-                    listen_side = %runtime.listen_side.name(),
-                    connect_side = %runtime.connect_side.name(),
-                    error = %err,
-                    "port forward task stopped during close"
-                );
-                return;
-            }
             runtime.cancel.cancel();
             store
                 .mark_failed(&runtime.forward_id, err.to_string())
@@ -788,70 +529,11 @@ fn spawn_forward(runtime: ForwardRuntime, store: PortForwardStore) {
 }
 
 async fn run_tcp_forward(runtime: ForwardRuntime) -> anyhow::Result<()> {
-    if runtime.listen_tunnel.is_some() || runtime.connect_tunnel.is_some() {
-        return run_tcp_tunnel_forward(runtime).await;
-    }
-
-    loop {
-        tokio::select! {
-            _ = runtime.cancel.cancelled() => return Ok(()),
-            accepted = async {
-                runtime.listen_side.port_listen_accept(&PortListenAcceptRequest {
-                    bind_id: runtime.bind_id.clone(),
-                }).await
-            } => {
-                let accepted = accepted.with_context(|| {
-                    format!(
-                        "accepting tcp connection on `{}` bind `{}`",
-                        runtime.listen_side.name(),
-                        runtime.bind_id
-                    )
-                })?;
-                let connection_lease_id = format!("lease_{}", uuid::Uuid::new_v4().simple());
-                let connection_lease = port_forward_lease(connection_lease_id.clone());
-                let connection_lease_owner = LeaseOwner {
-                    side: runtime.connect_side.clone(),
-                    lease_id: connection_lease_id,
-                };
-                let connect_response = match runtime.connect_side.port_connect(&PortConnectRequest {
-                    endpoint: runtime.connect_endpoint.clone(),
-                    protocol: RpcPortForwardProtocol::Tcp,
-                    lease: Some(connection_lease),
-                }).await {
-                    Ok(response) => response,
-                    Err(err) => {
-                        let _ = runtime.listen_side.port_connection_close(&PortConnectionCloseRequest {
-                            connection_id: accepted.connection_id,
-                        }).await;
-                        return Err(err).context("connecting tcp forward destination");
-                    }
-                };
-                spawn_tcp_connection_pumps(
-                    runtime.forward_id.clone(),
-                    runtime.listen_side.clone(),
-                    accepted.connection_id,
-                    runtime.connect_side.clone(),
-                    connect_response.connection_id,
-                    connection_lease_owner,
-                );
-            }
-        }
-    }
-}
-
-async fn run_tcp_tunnel_forward(runtime: ForwardRuntime) -> anyhow::Result<()> {
-    let listen_tunnel = runtime
-        .listen_tunnel
-        .clone()
-        .context("tcp forward missing listen tunnel")?;
-    let connect_tunnel = runtime
-        .connect_tunnel
-        .clone()
-        .context("tcp forward missing connect tunnel")?;
+    let listen_tunnel = runtime.listen_tunnel.clone();
+    let connect_tunnel = runtime.connect_tunnel.clone();
     let paired = Arc::new(Mutex::new(HashMap::<u32, u32>::new()));
     let connect_streams = Arc::new(Mutex::new(HashMap::<u32, u32>::new()));
     let connect_reader = relay_connect_tunnel_to_listen(
-        runtime.forward_id.clone(),
         listen_tunnel.clone(),
         connect_tunnel.clone(),
         paired.clone(),
@@ -870,7 +552,6 @@ async fn run_tcp_tunnel_forward(runtime: ForwardRuntime) -> anyhow::Result<()> {
                 match frame.frame_type {
                     FrameType::TcpAccept => {
                         let accept: TcpAcceptMeta = decode_tunnel_meta(&frame)?;
-                        let _ = &accept.peer;
                         let connect_stream_id = next_connect_stream_id;
                         next_connect_stream_id = next_connect_stream_id.checked_add(2).unwrap_or(1);
                         connect_tunnel.send(Frame {
@@ -926,7 +607,6 @@ async fn run_tcp_tunnel_forward(runtime: ForwardRuntime) -> anyhow::Result<()> {
 }
 
 async fn relay_connect_tunnel_to_listen(
-    _forward_id: String,
     listen_tunnel: Arc<PortTunnel>,
     connect_tunnel: Arc<PortTunnel>,
     listen_to_connect: Arc<Mutex<HashMap<u32, u32>>>,
@@ -977,55 +657,12 @@ async fn relay_connect_tunnel_to_listen(
 }
 
 async fn run_udp_forward(runtime: ForwardRuntime) -> anyhow::Result<()> {
-    if runtime.listen_tunnel.is_some() || runtime.connect_tunnel.is_some() {
-        return run_udp_tunnel_forward(runtime).await;
-    }
-
-    let connect_bind = runtime
-        .connect_bind_id
-        .clone()
-        .context("udp forward missing connector bind")?;
-    loop {
-        tokio::select! {
-            _ = runtime.cancel.cancelled() => {
-                return Ok(());
-            }
-            datagram = async {
-                runtime.listen_side.port_udp_datagram_read(&PortUdpDatagramReadRequest {
-                    bind_id: runtime.bind_id.clone(),
-                }).await
-            } => {
-                let datagram = datagram.context("reading udp datagram from listener")?;
-                runtime.connect_side.port_udp_datagram_write(&PortUdpDatagramWriteRequest {
-                    bind_id: connect_bind.clone(),
-                    peer: runtime.connect_endpoint.clone(),
-                    data: datagram.data.clone(),
-                }).await.context("writing udp datagram to connector")?;
-                let reply = runtime.connect_side.port_udp_datagram_read(&PortUdpDatagramReadRequest {
-                    bind_id: connect_bind.clone(),
-                }).await.context("reading udp reply from connector")?;
-                runtime.listen_side.port_udp_datagram_write(&PortUdpDatagramWriteRequest {
-                    bind_id: runtime.bind_id.clone(),
-                    peer: datagram.peer,
-                    data: reply.data,
-                }).await.context("writing udp reply to listener peer")?;
-            }
-        }
-    }
-}
-
-async fn run_udp_tunnel_forward(runtime: ForwardRuntime) -> anyhow::Result<()> {
-    let listen_tunnel = runtime
-        .listen_tunnel
-        .clone()
-        .context("udp forward missing listen tunnel")?;
-    let connect_tunnel = runtime
-        .connect_tunnel
-        .clone()
-        .context("udp forward missing connect tunnel")?;
-    let connector_by_peer = Arc::new(Mutex::new(HashMap::<String, UdpPeerConnector>::new()));
-    let peer_by_connector = Arc::new(Mutex::new(HashMap::<u32, String>::new()));
+    let listen_tunnel = runtime.listen_tunnel.clone();
+    let connect_tunnel = runtime.connect_tunnel.clone();
     let connector_bind_endpoint = udp_connector_endpoint(&runtime.connect_endpoint)?.to_string();
+    let connector_by_peer: Arc<Mutex<HashMap<String, UdpPeerConnector>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+    let peer_by_connector: Arc<Mutex<HashMap<u32, String>>> = Arc::new(Mutex::new(HashMap::new()));
     let connect_reader = relay_udp_connect_tunnel_to_listen(
         listen_tunnel.clone(),
         connect_tunnel.clone(),
@@ -1035,15 +672,15 @@ async fn run_udp_tunnel_forward(runtime: ForwardRuntime) -> anyhow::Result<()> {
     );
     tokio::pin!(connect_reader);
 
-    let mut next_connector_stream_id = 1u32;
-    let mut idle_sweep = tokio::time::interval(UDP_CONNECTOR_IDLE_SWEEP_INTERVAL);
-    idle_sweep.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut next_connector_stream_id = 3;
+    let mut sweep = tokio::time::interval(UDP_CONNECTOR_IDLE_SWEEP_INTERVAL);
+    sweep.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
         tokio::select! {
             _ = runtime.cancel.cancelled() => return Ok(()),
             result = &mut connect_reader => return result,
-            _ = idle_sweep.tick() => {
+            _ = sweep.tick() => {
                 sweep_idle_udp_connectors(
                     &connect_tunnel,
                     &connector_by_peer,
@@ -1191,213 +828,6 @@ async fn sweep_idle_udp_connectors(
     }
 }
 
-async fn open_udp_connector(
-    connect_side: &SideHandle,
-    connect_endpoint: &str,
-    lease_id: String,
-) -> anyhow::Result<String> {
-    let bind_endpoint = udp_connector_endpoint(connect_endpoint)?;
-    let response = connect_side
-        .port_listen(&PortListenRequest {
-            endpoint: bind_endpoint.to_string(),
-            protocol: RpcPortForwardProtocol::Udp,
-            lease: Some(port_forward_lease(lease_id)),
-        })
-        .await
-        .with_context(|| format!("opening udp connector on `{}`", connect_side.name()))?;
-    Ok(response.bind_id)
-}
-
-fn spawn_tcp_connection_pumps(
-    forward_id: String,
-    left_side: SideHandle,
-    left_connection_id: String,
-    right_side: SideHandle,
-    right_connection_id: String,
-    lease_owner: LeaseOwner,
-) {
-    let cleanup_left_side = left_side.clone();
-    let cleanup_right_side = right_side.clone();
-    let log_left_connection_id = left_connection_id.clone();
-    let log_right_connection_id = right_connection_id.clone();
-    let cleanup_left_connection_id = left_connection_id.clone();
-    let cleanup_right_connection_id = right_connection_id.clone();
-    let left_to_right = pump_tcp_bytes(
-        forward_id.clone(),
-        left_side.clone(),
-        left_connection_id.clone(),
-        right_side.clone(),
-        right_connection_id.clone(),
-    );
-    let right_to_left = pump_tcp_bytes(
-        forward_id,
-        right_side.clone(),
-        right_connection_id.clone(),
-        left_side.clone(),
-        left_connection_id.clone(),
-    );
-    tokio::spawn(async move {
-        let renew_cancel = CancellationToken::new();
-        spawn_lease_renewer(vec![lease_owner], renew_cancel.clone());
-        tokio::select! {
-            result = left_to_right => {
-                log_pump_result(&log_left_connection_id, &log_right_connection_id, result);
-            }
-            result = right_to_left => {
-                log_pump_result(&log_right_connection_id, &log_left_connection_id, result);
-            }
-        }
-        renew_cancel.cancel();
-        close_connection_pair(
-            cleanup_left_side,
-            cleanup_left_connection_id,
-            cleanup_right_side,
-            cleanup_right_connection_id,
-        )
-        .await;
-    });
-}
-
-async fn pump_tcp_bytes(
-    forward_id: String,
-    read_side: SideHandle,
-    read_connection_id: String,
-    write_side: SideHandle,
-    write_connection_id: String,
-) -> anyhow::Result<()> {
-    loop {
-        let chunk = read_side
-            .port_connection_read(&PortConnectionReadRequest {
-                connection_id: read_connection_id.clone(),
-            })
-            .await
-            .with_context(|| {
-                format!(
-                    "reading tcp bytes for forward `{forward_id}` from `{}`",
-                    read_side.name()
-                )
-            })?;
-        if chunk.eof {
-            return Ok(());
-        }
-        write_side
-            .port_connection_write(&PortConnectionWriteRequest {
-                connection_id: write_connection_id.clone(),
-                data: chunk.data,
-            })
-            .await
-            .with_context(|| {
-                format!(
-                    "writing tcp bytes for forward `{forward_id}` to `{}`",
-                    write_side.name()
-                )
-            })?;
-    }
-}
-
-async fn close_connection_pair(
-    left_side: SideHandle,
-    left_connection_id: String,
-    right_side: SideHandle,
-    right_connection_id: String,
-) {
-    let _ = left_side
-        .port_connection_close(&PortConnectionCloseRequest {
-            connection_id: left_connection_id.clone(),
-        })
-        .await;
-    let _ = right_side
-        .port_connection_close(&PortConnectionCloseRequest {
-            connection_id: right_connection_id.clone(),
-        })
-        .await;
-    tracing::debug!(
-        left_connection_id = %left_connection_id,
-        right_connection_id = %right_connection_id,
-        "tcp port forward connection pair ended"
-    );
-}
-
-fn spawn_lease_renewer(lease_ids: Vec<LeaseOwner>, cancel: CancellationToken) {
-    if lease_ids.is_empty() {
-        return;
-    }
-
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_millis(
-            FORWARD_LEASE_RENEW_INTERVAL_MS,
-        ));
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        loop {
-            tokio::select! {
-                _ = cancel.cancelled() => return,
-                _ = interval.tick() => {}
-            }
-
-            for lease in &lease_ids {
-                let result = lease
-                    .side
-                    .port_lease_renew(&PortLeaseRenewRequest {
-                        lease_id: lease.lease_id.clone(),
-                        ttl_ms: FORWARD_LEASE_TTL_MS,
-                    })
-                    .await;
-                if let Err(err) = result {
-                    tracing::debug!(
-                        lease_id = %lease.lease_id,
-                        side = %lease.side.name(),
-                        error = %err,
-                        "port forward lease renew stopped"
-                    );
-                    cancel.cancel();
-                    return;
-                }
-            }
-        }
-    });
-}
-
-fn log_pump_result(from: &str, to: &str, result: anyhow::Result<()>) {
-    if let Err(err) = result {
-        tracing::debug!(
-            from_connection_id = %from,
-            to_connection_id = %to,
-            error = %err,
-            "tcp port forward pump stopped"
-        );
-    }
-}
-
-fn validate_udp_connector_endpoint(connect_endpoint: &str) -> anyhow::Result<()> {
-    ensure_nonzero_connect_endpoint(connect_endpoint)?;
-    Ok(())
-}
-
-fn is_expected_close_interruption(err: &anyhow::Error) -> bool {
-    err.chain().any(|cause| {
-        cause
-            .downcast_ref::<DaemonClientError>()
-            .and_then(DaemonClientError::rpc_code)
-            .is_some_and(|code| {
-                code == PORT_BIND_CLOSED_CODE || code == PORT_CONNECTION_CLOSED_CODE
-            })
-    })
-}
-
-fn port_forward_lease(lease_id: String) -> PortForwardLease {
-    PortForwardLease {
-        lease_id,
-        ttl_ms: FORWARD_LEASE_TTL_MS,
-    }
-}
-
-fn rpc_protocol(protocol: PublicForwardPortProtocol) -> RpcPortForwardProtocol {
-    match protocol {
-        PublicForwardPortProtocol::Tcp => RpcPortForwardProtocol::Tcp,
-        PublicForwardPortProtocol::Udp => RpcPortForwardProtocol::Udp,
-    }
-}
-
 fn encode_tunnel_meta<T: Serialize>(meta: &T) -> anyhow::Result<Vec<u8>> {
     serde_json::to_vec(meta).map_err(anyhow::Error::from)
 }
@@ -1419,13 +849,6 @@ fn tunnel_error(frame: &Frame) -> anyhow::Error {
     match code {
         Some(code) => anyhow::anyhow!("{code}: {message}"),
         None => anyhow::anyhow!("{message}"),
-    }
-}
-
-fn format_protocol(protocol: PublicForwardPortProtocol) -> &'static str {
-    match protocol {
-        PublicForwardPortProtocol::Tcp => "tcp",
-        PublicForwardPortProtocol::Udp => "udp",
     }
 }
 

@@ -19,7 +19,6 @@ pub struct HostRuntimeState {
     pub daemon_instance_id: String,
     pub shutdown: CancellationToken,
     pub sessions: crate::exec::store::SessionStore,
-    pub port_forwards: crate::port_forward::PortForwardState,
 }
 
 pub fn build_runtime_state(mut config: HostRuntimeConfig) -> anyhow::Result<HostRuntimeState> {
@@ -51,7 +50,6 @@ pub fn build_runtime_state(mut config: HostRuntimeConfig) -> anyhow::Result<Host
         daemon_instance_id: uuid::Uuid::new_v4().to_string(),
         shutdown: CancellationToken::new(),
         sessions: crate::exec::store::SessionStore::new(64),
-        port_forwards: crate::port_forward::PortForwardState::default(),
     })
 }
 

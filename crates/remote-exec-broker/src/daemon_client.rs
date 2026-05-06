@@ -3,15 +3,10 @@ use remote_exec_proto::port_tunnel::{
     TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, UPGRADE_TOKEN, write_preface,
 };
 use remote_exec_proto::rpc::{
-    EmptyResponse, ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest,
-    ImageReadResponse, PatchApplyRequest, PatchApplyResponse, PortConnectRequest,
-    PortConnectResponse, PortConnectionCloseRequest, PortConnectionReadRequest,
-    PortConnectionReadResponse, PortConnectionWriteRequest, PortLeaseRenewRequest,
-    PortListenAcceptRequest, PortListenAcceptResponse, PortListenCloseRequest, PortListenRequest,
-    PortListenResponse, PortUdpDatagramReadRequest, PortUdpDatagramReadResponse,
-    PortUdpDatagramWriteRequest, RpcErrorBody, TargetInfoResponse, TransferExportMetadata,
-    TransferExportRequest, TransferImportMetadata, TransferImportRequest, TransferImportResponse,
-    TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType,
+    ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
+    PatchApplyRequest, PatchApplyResponse, RpcErrorBody, TargetInfoResponse,
+    TransferExportMetadata, TransferExportRequest, TransferImportMetadata, TransferImportRequest,
+    TransferImportResponse, TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType,
 };
 use reqwest::header::{AUTHORIZATION, CONNECTION, CONTENT_LENGTH, HeaderValue, UPGRADE};
 
@@ -178,76 +173,6 @@ impl DaemonClient {
             .await
             .map_err(|err| DaemonClientError::Transport(err.into()))?;
         Ok(upgraded)
-    }
-
-    pub async fn port_listen(
-        &self,
-        req: &PortListenRequest,
-    ) -> Result<PortListenResponse, DaemonClientError> {
-        self.post("/v1/port/listen", req).await
-    }
-
-    pub async fn port_listen_accept(
-        &self,
-        req: &PortListenAcceptRequest,
-    ) -> Result<PortListenAcceptResponse, DaemonClientError> {
-        self.post("/v1/port/listen/accept", req).await
-    }
-
-    pub async fn port_listen_close(
-        &self,
-        req: &PortListenCloseRequest,
-    ) -> Result<EmptyResponse, DaemonClientError> {
-        self.post("/v1/port/listen/close", req).await
-    }
-
-    pub async fn port_lease_renew(
-        &self,
-        req: &PortLeaseRenewRequest,
-    ) -> Result<EmptyResponse, DaemonClientError> {
-        self.post("/v1/port/lease/renew", req).await
-    }
-
-    pub async fn port_connect(
-        &self,
-        req: &PortConnectRequest,
-    ) -> Result<PortConnectResponse, DaemonClientError> {
-        self.post("/v1/port/connect", req).await
-    }
-
-    pub async fn port_connection_read(
-        &self,
-        req: &PortConnectionReadRequest,
-    ) -> Result<PortConnectionReadResponse, DaemonClientError> {
-        self.post("/v1/port/connection/read", req).await
-    }
-
-    pub async fn port_connection_write(
-        &self,
-        req: &PortConnectionWriteRequest,
-    ) -> Result<EmptyResponse, DaemonClientError> {
-        self.post("/v1/port/connection/write", req).await
-    }
-
-    pub async fn port_connection_close(
-        &self,
-        req: &PortConnectionCloseRequest,
-    ) -> Result<EmptyResponse, DaemonClientError> {
-        self.post("/v1/port/connection/close", req).await
-    }
-
-    pub async fn port_udp_datagram_read(
-        &self,
-        req: &PortUdpDatagramReadRequest,
-    ) -> Result<PortUdpDatagramReadResponse, DaemonClientError> {
-        self.post("/v1/port/udp/read", req).await
-    }
-
-    pub async fn port_udp_datagram_write(
-        &self,
-        req: &PortUdpDatagramWriteRequest,
-    ) -> Result<EmptyResponse, DaemonClientError> {
-        self.post("/v1/port/udp/write", req).await
     }
 
     pub async fn transfer_export_to_file(

@@ -14,8 +14,8 @@
 #include <unistd.h>
 #endif
 
-#include "port_forward.h"
 #include "port_forward_endpoint.h"
+#include "port_forward_error.h"
 
 namespace {
 

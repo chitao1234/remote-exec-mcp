@@ -325,17 +325,6 @@ static std::string run_single_request(AppState& state, const std::string& reques
     return read_all_from_socket(client_socket.get());
 }
 
-static void run_single_request_and_abort_client(AppState& state, const std::string& request) {
-    int sockets[2];
-    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
-
-    UniqueSocket server_socket(sockets[0]);
-    UniqueSocket client_socket(sockets[1]);
-    send_request_and_close_writer(client_socket.get(), request);
-    client_socket.reset();
-    handle_client(state, std::move(server_socket));
-}
-
 static std::string json_post_request(const std::string& path, const Json& body) {
     const std::string payload = body.dump();
     std::ostringstream request;
@@ -636,26 +625,9 @@ int main() {
     assert(Json::parse(response_body(denied_import_response)).at("code").get<std::string>() == "sandbox_denied");
     assert(!fs::exists(outside / "imported.txt"));
 
-    const std::string renew_response = run_single_request(
-        state,
-        json_post_request(
-            "/v1/port/lease/renew",
-            Json{{"lease_id", "lease-late-renew"}, {"ttl_ms", 300}}
-        )
-    );
-    assert(renew_response.find("HTTP/1.1 404 Not Found\r\n") == 0);
-
     assert_tunnel_releases_tcp_listener_on_close(state);
     assert_tunnel_tcp_connect_echoes_binary_data(state);
     assert_tunnel_udp_bind_emits_two_peer_datagrams(state);
-
-    run_single_request_and_abort_client(
-        state,
-        json_post_request(
-            "/v1/port/connection/read",
-            Json{{"connection_id", "missing-connection"}}
-        )
-    );
 
     return 0;
 }

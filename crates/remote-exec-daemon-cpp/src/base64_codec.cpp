@@ -1,8 +1,7 @@
-#include "port_forward_codec.h"
+#include "base64_codec.h"
 
+#include <stdexcept>
 #include <vector>
-
-#include "port_forward.h"
 
 namespace {
 
@@ -27,7 +26,7 @@ int base64_value(unsigned char ch) {
 
 std::vector<unsigned char> decode_base64_values(const std::string& data) {
     if (data.size() % 4U != 0U) {
-        throw PortForwardError(400, "invalid_port_data", "invalid base64 length");
+        throw std::runtime_error("invalid base64 length");
     }
 
     std::vector<unsigned char> bytes;
@@ -44,13 +43,13 @@ std::vector<unsigned char> decode_base64_values(const std::string& data) {
             } else {
                 const int value = base64_value(ch);
                 if (value < 0) {
-                    throw PortForwardError(400, "invalid_port_data", "invalid base64 data");
+                    throw std::runtime_error("invalid base64 data");
                 }
                 values[index] = value;
             }
         }
         if (padding > 2 || (padding > 0 && offset + 4U != data.size())) {
-            throw PortForwardError(400, "invalid_port_data", "invalid base64 padding");
+            throw std::runtime_error("invalid base64 padding");
         }
         bytes.push_back(static_cast<unsigned char>((values[0] << 2) | (values[1] >> 4)));
         if (padding < 2) {

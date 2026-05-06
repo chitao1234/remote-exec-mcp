@@ -13,8 +13,6 @@ use remote_exec_proto::port_tunnel::{
 };
 use remote_exec_proto::rpc::RpcErrorBody;
 
-pub use remote_exec_host::port_forward::PortForwardState;
-
 pub async fn tunnel(
     State(state): State<Arc<crate::AppState>>,
     headers: HeaderMap,

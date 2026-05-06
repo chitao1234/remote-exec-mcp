@@ -1,14 +1,10 @@
 use std::sync::Arc;
 
 use remote_exec_proto::rpc::{
-    EmptyResponse, ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest,
-    ImageReadResponse, PatchApplyRequest, PatchApplyResponse, PortConnectRequest,
-    PortConnectResponse, PortConnectionCloseRequest, PortConnectionReadRequest,
-    PortConnectionReadResponse, PortConnectionWriteRequest, PortLeaseRenewRequest,
-    PortListenAcceptRequest, PortListenAcceptResponse, PortListenCloseRequest, PortListenRequest,
-    PortListenResponse, PortUdpDatagramReadRequest, PortUdpDatagramReadResponse,
-    PortUdpDatagramWriteRequest, TargetInfoResponse, TransferExportRequest, TransferImportRequest,
-    TransferImportResponse, TransferPathInfoRequest, TransferPathInfoResponse,
+    ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
+    PatchApplyRequest, PatchApplyResponse, TargetInfoResponse, TransferExportRequest,
+    TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
+    TransferPathInfoResponse,
 };
 use tokio::sync::Mutex;
 
@@ -192,16 +188,6 @@ impl TargetHandle {
         }
     }
 
-    pub async fn port_listen(
-        &self,
-        req: &PortListenRequest,
-    ) -> Result<PortListenResponse, DaemonClientError> {
-        match &self.backend {
-            TargetBackend::Remote(client) => client.port_listen(req).await,
-            TargetBackend::Local(client) => client.port_listen(req).await,
-        }
-    }
-
     pub async fn port_tunnel(&self) -> Result<crate::port_forward::PortTunnel, DaemonClientError> {
         match &self.backend {
             TargetBackend::Remote(client) => {
@@ -210,96 +196,6 @@ impl TargetHandle {
             TargetBackend::Local(client) => {
                 crate::port_forward::PortTunnel::local(client.port_tunnel_state()).await
             }
-        }
-    }
-
-    pub async fn port_listen_accept(
-        &self,
-        req: &PortListenAcceptRequest,
-    ) -> Result<PortListenAcceptResponse, DaemonClientError> {
-        match &self.backend {
-            TargetBackend::Remote(client) => client.port_listen_accept(req).await,
-            TargetBackend::Local(client) => client.port_listen_accept(req).await,
-        }
-    }
-
-    pub async fn port_listen_close(
-        &self,
-        req: &PortListenCloseRequest,
-    ) -> Result<EmptyResponse, DaemonClientError> {
-        match &self.backend {
-            TargetBackend::Remote(client) => client.port_listen_close(req).await,
-            TargetBackend::Local(client) => client.port_listen_close(req).await,
-        }
-    }
-
-    pub async fn port_lease_renew(
-        &self,
-        req: &PortLeaseRenewRequest,
-    ) -> Result<EmptyResponse, DaemonClientError> {
-        match &self.backend {
-            TargetBackend::Remote(client) => client.port_lease_renew(req).await,
-            TargetBackend::Local(client) => client.port_lease_renew(req).await,
-        }
-    }
-
-    pub async fn port_connect(
-        &self,
-        req: &PortConnectRequest,
-    ) -> Result<PortConnectResponse, DaemonClientError> {
-        match &self.backend {
-            TargetBackend::Remote(client) => client.port_connect(req).await,
-            TargetBackend::Local(client) => client.port_connect(req).await,
-        }
-    }
-
-    pub async fn port_connection_read(
-        &self,
-        req: &PortConnectionReadRequest,
-    ) -> Result<PortConnectionReadResponse, DaemonClientError> {
-        match &self.backend {
-            TargetBackend::Remote(client) => client.port_connection_read(req).await,
-            TargetBackend::Local(client) => client.port_connection_read(req).await,
-        }
-    }
-
-    pub async fn port_connection_write(
-        &self,
-        req: &PortConnectionWriteRequest,
-    ) -> Result<EmptyResponse, DaemonClientError> {
-        match &self.backend {
-            TargetBackend::Remote(client) => client.port_connection_write(req).await,
-            TargetBackend::Local(client) => client.port_connection_write(req).await,
-        }
-    }
-
-    pub async fn port_connection_close(
-        &self,
-        req: &PortConnectionCloseRequest,
-    ) -> Result<EmptyResponse, DaemonClientError> {
-        match &self.backend {
-            TargetBackend::Remote(client) => client.port_connection_close(req).await,
-            TargetBackend::Local(client) => client.port_connection_close(req).await,
-        }
-    }
-
-    pub async fn port_udp_datagram_read(
-        &self,
-        req: &PortUdpDatagramReadRequest,
-    ) -> Result<PortUdpDatagramReadResponse, DaemonClientError> {
-        match &self.backend {
-            TargetBackend::Remote(client) => client.port_udp_datagram_read(req).await,
-            TargetBackend::Local(client) => client.port_udp_datagram_read(req).await,
-        }
-    }
-
-    pub async fn port_udp_datagram_write(
-        &self,
-        req: &PortUdpDatagramWriteRequest,
-    ) -> Result<EmptyResponse, DaemonClientError> {
-        match &self.backend {
-            TargetBackend::Remote(client) => client.port_udp_datagram_write(req).await,
-            TargetBackend::Local(client) => client.port_udp_datagram_write(req).await,
         }
     }
 
