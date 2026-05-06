@@ -65,6 +65,14 @@ int main() {
     assert(unauthorized.headers["WWW-Authenticate"] == "Bearer");
     assert(unauthorized.body.find("\"code\":\"unauthorized\"") != std::string::npos);
 
+    HttpResponse ok;
+    write_json(ok, Json{{"status", "ok"}});
+    const std::string rendered = render_http_response(ok);
+    assert(rendered.find("HTTP/1.1 200 OK\r\n") == 0);
+    assert(rendered.find("Content-Type: application/json\r\n") != std::string::npos);
+    assert(rendered.find("Content-Length: ") != std::string::npos);
+    assert(rendered.find("Connection: close\r\n") == std::string::npos);
+
     assert_rejects("invalid");
     assert_rejects(
         "POST /v1/exec/start\r\n"
@@ -76,6 +84,10 @@ int main() {
     );
     assert_rejects(
         "POST /v1/exec/start HTTP/2.0\r\n"
+        "\r\n"
+    );
+    assert_rejects(
+        "POST /v1/exec/start HTTP/1.0\r\n"
         "\r\n"
     );
     assert_rejects(
