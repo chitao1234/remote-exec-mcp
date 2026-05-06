@@ -11,7 +11,7 @@ use super::fixture::{BrokerFixture, DummyClientHandler};
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
 use super::stub_daemon::spawn_stub_daemon;
 use super::stub_daemon::{
-    ExecWriteBehavior, StubDaemonState, set_required_bearer_token,
+    ExecWriteBehavior, StubDaemonState, set_port_forward_support, set_required_bearer_token,
     set_transfer_compression_support, spawn_named_plain_http_daemon_on_addr,
     spawn_plain_http_daemon_with_platform, spawn_plain_http_retryable_exec_write_daemon,
     spawn_plain_http_stub_daemon, spawn_plain_http_unknown_session_exec_write_daemon,
@@ -416,6 +416,43 @@ pub async fn spawn_broker_with_stub_daemon_platform(
     let (addr, stub_state) =
         spawn_plain_http_daemon_with_platform(ExecWriteBehavior::Success, platform, supports_pty)
             .await;
+    let broker_config = tempdir.path().join("broker.toml");
+    write_broker_config(
+        &broker_config,
+        &[BrokerConfigTarget {
+            name: "builder-a",
+            addr,
+            transport: BrokerTargetTransport::Http,
+            extra_config: None,
+        }],
+        None,
+        None,
+        None,
+    );
+
+    let client = spawn_broker_child(&broker_config).await;
+
+    BrokerFixture {
+        _tempdir: tempdir,
+        client,
+        stub_state,
+    }
+}
+
+pub async fn spawn_broker_with_stub_port_forward_version(version: u32) -> BrokerFixture {
+    let tempdir = tempfile::tempdir().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let mut stub_state = stub_daemon_state("builder-a", ExecWriteBehavior::Success, "linux", true);
+    set_port_forward_support(&mut stub_state, true, version);
+    let app = stub_router(stub_state.clone());
+
+    tokio::spawn(async move {
+        serve(listener, app).await.unwrap();
+    });
+
+    wait_until_ready_http(addr).await;
+
     let broker_config = tempdir.path().join("broker.toml");
     write_broker_config(
         &broker_config,

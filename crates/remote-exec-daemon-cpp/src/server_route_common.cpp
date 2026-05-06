@@ -77,6 +77,7 @@ HttpResponse handle_target_info(const AppState& state) {
             {"supports_image_read", true},
             {"supports_transfer_compression", false},
             {"supports_port_forward", true},
+            {"port_forward_protocol_version", 2},
         }
     );
     return response;

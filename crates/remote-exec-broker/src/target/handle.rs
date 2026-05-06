@@ -25,6 +25,7 @@ pub struct CachedDaemonInfo {
     pub supports_pty: bool,
     pub supports_transfer_compression: bool,
     pub supports_port_forward: bool,
+    pub port_forward_protocol_version: u32,
 }
 
 #[derive(Clone)]
@@ -79,6 +80,7 @@ impl TargetHandle {
             supports_pty: info.supports_pty,
             supports_transfer_compression: info.supports_transfer_compression,
             supports_port_forward: info.supports_port_forward,
+            port_forward_protocol_version: info.port_forward_protocol_version,
         }
     }
 

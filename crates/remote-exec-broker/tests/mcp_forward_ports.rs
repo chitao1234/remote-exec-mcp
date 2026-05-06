@@ -191,6 +191,32 @@ async fn forward_ports_marks_forward_failed_after_background_connect_error() {
     );
 }
 
+#[tokio::test]
+async fn forward_ports_rejects_targets_without_tunnel_protocol_version() {
+    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(1).await;
+
+    let error = fixture
+        .call_tool_error(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "builder-a",
+                "connect_side": "local",
+                "forwards": [{
+                    "listen_endpoint": "127.0.0.1:0",
+                    "connect_endpoint": "127.0.0.1:1",
+                    "protocol": "tcp"
+                }]
+            }),
+        )
+        .await;
+
+    assert!(
+        error.contains("does not support port forward protocol version 2"),
+        "unexpected error: {error}"
+    );
+}
+
 async fn wait_for_forward_status(
     fixture: &support::fixture::BrokerFixture,
     forward_id: &str,

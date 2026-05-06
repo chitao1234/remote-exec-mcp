@@ -67,5 +67,6 @@ pub fn target_info_response(state: &HostRuntimeState, daemon_version: &str) -> T
         supports_image_read: true,
         supports_transfer_compression: state.supports_transfer_compression,
         supports_port_forward: true,
+        port_forward_protocol_version: 2,
     }
 }

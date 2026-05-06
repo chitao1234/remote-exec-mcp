@@ -50,6 +50,8 @@ pub(crate) struct StubDaemonState {
     target_arch: String,
     target_supports_pty: bool,
     pub(super) target_supports_transfer_compression: bool,
+    target_supports_port_forward: bool,
+    target_port_forward_protocol_version: u32,
     required_bearer_token: Option<String>,
     pub(super) exec_write_behavior: Arc<Mutex<ExecWriteBehavior>>,
     pub(super) exec_start_behavior: Arc<Mutex<ExecStartBehavior>>,
@@ -77,6 +79,8 @@ pub(super) fn stub_daemon_state(
         target_arch: "x86_64".to_string(),
         target_supports_pty: supports_pty,
         target_supports_transfer_compression: true,
+        target_supports_port_forward: false,
+        target_port_forward_protocol_version: 0,
         required_bearer_token: None,
         exec_write_behavior: Arc::new(Mutex::new(exec_write_behavior)),
         exec_start_behavior: Arc::new(Mutex::new(ExecStartBehavior::Success)),
@@ -102,6 +106,11 @@ pub(super) fn stub_daemon_state(
 
 pub(super) fn set_transfer_compression_support(state: &mut StubDaemonState, enabled: bool) {
     state.target_supports_transfer_compression = enabled;
+}
+
+pub(super) fn set_port_forward_support(state: &mut StubDaemonState, enabled: bool, version: u32) {
+    state.target_supports_port_forward = enabled;
+    state.target_port_forward_protocol_version = version;
 }
 
 pub(super) fn set_required_bearer_token(state: &mut StubDaemonState, token: &str) {
@@ -323,7 +332,8 @@ async fn target_info(State(state): State<StubDaemonState>) -> Json<TargetInfoRes
         supports_pty: state.target_supports_pty,
         supports_image_read: true,
         supports_transfer_compression: state.target_supports_transfer_compression,
-        supports_port_forward: false,
+        supports_port_forward: state.target_supports_port_forward,
+        port_forward_protocol_version: state.target_port_forward_protocol_version,
     })
 }
 

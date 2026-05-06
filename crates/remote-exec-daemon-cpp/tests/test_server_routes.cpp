@@ -148,6 +148,7 @@ int main() {
     assert(info.at("supports_pty").get<bool>() == process_session_supports_pty());
     assert(info.at("supports_image_read").get<bool>());
     assert(info.at("supports_port_forward").get<bool>());
+    assert(info.at("port_forward_protocol_version").get<int>() == 2);
 
     assert(normalize_port_forward_endpoint("8080") == "127.0.0.1:8080");
     assert(base64_decode_bytes(base64_encode_bytes(std::string("hello\0world", 11))).size() == 11);
