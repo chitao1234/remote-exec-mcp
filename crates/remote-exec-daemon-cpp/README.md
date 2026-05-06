@@ -168,6 +168,7 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
 ## Limitations
 
 - plain HTTP only, with optional bearer-auth request authentication
+- daemon RPC is HTTP/1.1-only; sequential requests may reuse a persistent connection, but HTTP pipelining is not supported
 - no TLS support
 - PTY support is POSIX-only and depends on host PTY allocation
 - no PTY support in Windows XP-compatible builds

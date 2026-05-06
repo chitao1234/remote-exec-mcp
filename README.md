@@ -55,6 +55,7 @@ Everything under `docs/` is historical implementation detail and planning contex
 - When broker `[local]` config is enabled, `list_targets` also includes `local` for the broker host.
 - `list_targets` is broker-local and does not probe daemons at read time.
 - The broker validates `target`, forwards the request to the selected daemon, and returns MCP-compatible content plus structured JSON for tools that expose it unless `disable_structured_content = true` is configured.
+- Broker-daemon RPC uses HTTP/1.1 only. The broker keeps daemon connections eligible for client-side pooling instead of forcing every request to close the TCP connection.
 - For the optional `local` target, the broker reuses the shared Rust host runtime in-process instead of asking operators to run a second same-host daemon manually.
 - Each daemon serves exactly one configured target machine.
 - Live exec sessions are broker-routed by opaque public `session_id`, not by daemon-local process identifiers.
