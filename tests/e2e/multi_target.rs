@@ -185,6 +185,87 @@ async fn forward_ports_reports_daemon_listen_port_conflicts_cleanly() {
 }
 
 #[tokio::test]
+async fn forward_ports_relays_remote_udp_datagrams_from_two_peers_full_duplex() {
+    let cluster = support::spawn_cluster().await;
+    let echo_socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let echo_addr = echo_socket.local_addr().unwrap();
+    tokio::spawn(async move {
+        let mut buf = [0u8; 1024];
+        let first = echo_socket.recv_from(&mut buf).await.unwrap();
+        let first_payload = buf[..first.0].to_vec();
+        let second = echo_socket.recv_from(&mut buf).await.unwrap();
+        let second_payload = buf[..second.0].to_vec();
+        echo_socket.send_to(&first_payload, first.1).await.unwrap();
+        echo_socket
+            .send_to(&second_payload, second.1)
+            .await
+            .unwrap();
+    });
+
+    let open = cluster
+        .broker
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "builder-a",
+                "connect_side": "local",
+                "forwards": [{
+                    "listen_endpoint": "127.0.0.1:0",
+                    "connect_endpoint": echo_addr.to_string(),
+                    "protocol": "udp"
+                }]
+            }),
+        )
+        .await;
+    let forward_id = open.structured_content["forwards"][0]["forward_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let listen_endpoint = open.structured_content["forwards"][0]["listen_endpoint"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let client_a = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let client_b = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    client_a
+        .send_to(b"remote-udp-a", &listen_endpoint)
+        .await
+        .unwrap();
+    client_b
+        .send_to(b"remote-udp-b", &listen_endpoint)
+        .await
+        .unwrap();
+
+    let mut buf = [0u8; 64];
+    let read_a = tokio::time::timeout(Duration::from_secs(2), client_a.recv_from(&mut buf))
+        .await
+        .expect("client a should receive udp reply")
+        .unwrap()
+        .0;
+    assert_eq!(&buf[..read_a], b"remote-udp-a");
+    let read_b = tokio::time::timeout(Duration::from_secs(2), client_b.recv_from(&mut buf))
+        .await
+        .expect("client b should receive udp reply")
+        .unwrap()
+        .0;
+    assert_eq!(&buf[..read_b], b"remote-udp-b");
+
+    let closed = cluster
+        .broker
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "close",
+                "forward_ids": [forward_id]
+            }),
+        )
+        .await;
+    assert_eq!(closed.structured_content["forwards"][0]["status"], "closed");
+}
+
+#[tokio::test]
 async fn forward_ports_release_remote_listeners_when_broker_stops() {
     let mut cluster = support::spawn_cluster().await;
     let listen_addr = support::allocate_addr();

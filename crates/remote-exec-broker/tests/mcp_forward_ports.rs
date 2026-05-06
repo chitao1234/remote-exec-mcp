@@ -101,8 +101,15 @@ async fn forward_ports_forwards_local_udp_datagrams() {
     let echo_addr = echo_socket.local_addr().unwrap();
     tokio::spawn(async move {
         let mut buf = [0u8; 1024];
-        let (len, peer) = echo_socket.recv_from(&mut buf).await.unwrap();
-        echo_socket.send_to(&buf[..len], peer).await.unwrap();
+        let first = echo_socket.recv_from(&mut buf).await.unwrap();
+        let first_payload = buf[..first.0].to_vec();
+        let second = echo_socket.recv_from(&mut buf).await.unwrap();
+        let second_payload = buf[..second.0].to_vec();
+        echo_socket.send_to(&first_payload, first.1).await.unwrap();
+        echo_socket
+            .send_to(&second_payload, second.1)
+            .await
+            .unwrap();
     });
 
     let open = fixture
@@ -129,14 +136,29 @@ async fn forward_ports_forwards_local_udp_datagrams() {
         .unwrap()
         .to_string();
 
-    let client = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    client
-        .send_to(b"hello-udp", &listen_endpoint)
+    let client_a = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let client_b = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    client_a
+        .send_to(b"hello-udp-a", &listen_endpoint)
+        .await
+        .unwrap();
+    client_b
+        .send_to(b"hello-udp-b", &listen_endpoint)
         .await
         .unwrap();
     let mut buf = [0u8; 64];
-    let (read, _) = client.recv_from(&mut buf).await.unwrap();
-    assert_eq!(&buf[..read], b"hello-udp");
+    let read_a = tokio::time::timeout(Duration::from_secs(2), client_a.recv_from(&mut buf))
+        .await
+        .expect("client a should receive udp reply")
+        .unwrap()
+        .0;
+    assert_eq!(&buf[..read_a], b"hello-udp-a");
+    let read_b = tokio::time::timeout(Duration::from_secs(2), client_b.recv_from(&mut buf))
+        .await
+        .expect("client b should receive udp reply")
+        .unwrap()
+        .0;
+    assert_eq!(&buf[..read_b], b"hello-udp-b");
 
     let close = fixture
         .call_tool(
