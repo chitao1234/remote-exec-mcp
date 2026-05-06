@@ -77,15 +77,17 @@ interactive commands with `tty=true` when later `write_stdin` input is needed.
 Windows XP-compatible non-TTY exec intentionally keeps its pipe-backed stdin
 open to preserve the original XP daemon behavior.
 
-The C++ daemon implements the daemon-side port RPCs used by broker
-`forward_ports`: TCP listeners/connectors, UDP datagram sockets, non-loopback
-listen binds, and the same bare-port normalization where `8080` means
-`127.0.0.1:8080`.
+The C++ daemon implements the same daemon-side HTTP/1.1 Upgrade tunnel used by
+broker `forward_ports`: TCP listeners/connectors, full-duplex UDP datagram
+sockets, non-loopback listen binds, and the same bare-port normalization where
+`8080` means `127.0.0.1:8080`. The older lease-renewed port-forward routes are
+not exposed.
 
-Live forwarded sockets are in-memory daemon state. A broker restart drops the
-broker-owned `forward_id` mapping, and if the broker disappears without closing
-the forward the daemon eventually reclaims the listener/connection state after
-lease renewal stops. Daemon shutdown closes live forwarded sockets promptly.
+Live forwarded sockets are tunnel-owned in-memory daemon state. A broker restart
+drops the broker-owned `forward_id` mapping, and if the broker disappears
+without closing the forward the daemon reclaims listeners, UDP sockets, and TCP
+connections when the tunnel closes. Daemon shutdown closes live forwarded
+sockets promptly.
 Recoverable peer abort/reset errors during forwarding are reported as normal
 request failures and do not terminate the daemon process.
 

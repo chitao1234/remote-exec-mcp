@@ -13,7 +13,9 @@
 #sse_retry_ms = 3000
 #
 # Live exec sessions and port forwards are broker memory only. Restarting the
-# broker drops existing `session_id` and `forward_id` state.
+# broker drops existing `session_id` and `forward_id` state. Remote daemon
+# port-forward resources are reclaimed when their internal HTTP/1.1 Upgrade
+# tunnels close.
 
 [targets.builder-a]
 # Requires the broker to be built with its default `broker-tls` Cargo feature.

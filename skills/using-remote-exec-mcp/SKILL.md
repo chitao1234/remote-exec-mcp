@@ -503,7 +503,7 @@ How to use it:
 - Keep the returned `forward_id`; use it to close the forward explicitly.
 - `forward_id` is broker runtime state only. If the broker restarts, reopen the forward instead of trying to reuse the old id.
 - If the daemon restarts or the broker loses the forward, treat that forward as gone and open a new one.
-- If the broker crashes without a clean close, daemon-side listeners are eventually reclaimed automatically after lease renewal stops, but reopening still creates a fresh `forward_id`.
+- If the broker crashes without a clean close, daemon-side listeners are reclaimed automatically when the internal HTTP/1.1 Upgrade tunnel closes, but reopening still creates a fresh `forward_id`.
 
 Structured result fields:
 
@@ -567,7 +567,7 @@ Structured result fields:
 - On POSIX C++ daemon targets, transfer symlink modes are supported.
 - On Windows XP-compatible C++ daemon targets, symlink entries inside directory transfers and import archives are skipped with warnings when preservation is unavailable; use `symlink_mode: "follow"` to copy regular-file and directory targets when the platform exposes them.
 - On C++ daemon targets, transfer compression is never used; the broker falls back automatically.
-- On C++ daemon targets, `forward_ports` is available through the same broker-owned `forward_id` lifecycle.
+- On C++ daemon targets, `forward_ports` uses the same daemon-private HTTP/1.1 Upgrade tunnel and broker-owned `forward_id` lifecycle as the Rust daemon.
 - On C++ daemon targets, recoverable peer abort/reset errors during forwarding surface as normal tool errors and do not terminate the daemon.
 - Do not assume hard links, sparse files, or special files transfer on C++ daemon targets; special files are skipped during export.
 

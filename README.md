@@ -378,8 +378,8 @@ cargo fmt --all --check
 - `transfer_files` uses broker-mediated copy for `local -> remote`, `remote -> local`, `remote -> remote`, and `local -> local`.
 - `forward_ports` uses broker-mediated TCP/UDP forwarding between a `listen_side` and `connect_side`; either side may be a configured target or `"local"`.
 - Public `session_id` and `forward_id` values are broker-owned in-memory runtime state. A broker restart drops those mappings, so live exec sessions and port forwards must be reopened after restart.
-- If a broker disappears without closing a port forward, daemon-side forward leases eventually expire and reclaim the listener/connection state so the same endpoint can be rebound later.
-- Rust daemon shutdown now cancels pending port-forward accept/read/write work promptly and closes live forwarded listeners, UDP sockets, and TCP connections before the daemon exits.
+- Remote daemon port-forward resources are owned by daemon-private HTTP/1.1 Upgrade tunnels. If the broker disappears without closing a port forward, the tunnel closes and the daemon reclaims listeners, UDP sockets, and TCP connections so the same endpoint can be rebound later.
+- Rust daemon shutdown now cancels pending tunnel accept/read/write work promptly and closes live forwarded listeners, UDP sockets, and TCP connections before the daemon exits.
 - Recoverable peer aborts or resets during C++ daemon forwarding are surfaced as normal forward errors and do not terminate the daemon process.
 - Internal transfer transport uses GNU tar for both files and directories. Single-file transfers use one fixed archive entry named `.remote-exec-file`. Non-fatal export warnings are carried in a reserved `.remote-exec-transfer-summary.json` archive entry that import consumes and never writes to the destination.
 - `transfer_files` accepts either a single `source` or a `sources` array. The optional `destination_mode` defaults to `auto`: single-source transfers behave like `cp` by copying under `destination.path` when it is an existing directory or ends in a path separator, otherwise using it as the exact final path; multi-source transfers use it as a directory root and place each source under its basename. Use `destination_mode = "into_directory"` to copy under `destination.path` by basename, or `destination_mode = "exact"` to force exact-path semantics.
@@ -496,7 +496,7 @@ cargo run -p remote-exec-broker --bin remote-exec -- \
   --forward tcp:127.0.0.1:15432=127.0.0.1:5432
 ```
 
-`forward-ports` state lives in the long-running broker process. In `--broker-config` mode, `remote-exec` rebuilds broker state for that one invocation, so forwards do not persist across separate CLI runs there. If the broker dies without a clean close, daemon-side listeners are reclaimed automatically after lease renewal stops, but reopening still creates a new `forward_id`.
+`forward-ports` state lives in the long-running broker process. In `--broker-config` mode, `remote-exec` rebuilds broker state for that one invocation, so forwards do not persist across separate CLI runs there. If the broker dies without a clean close, daemon-side listeners are reclaimed automatically when the internal HTTP/1.1 Upgrade tunnel closes, but reopening still creates a new `forward_id`.
 
 Expose the broker over streamable HTTP instead of stdio:
 
