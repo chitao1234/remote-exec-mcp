@@ -206,10 +206,7 @@ async fn handle_tunnel_frame(tunnel: Arc<TunnelState>, frame: Frame) -> Result<(
     }
 }
 
-async fn tunnel_session_open(
-    tunnel: Arc<TunnelState>,
-    frame: Frame,
-) -> Result<(), HostRpcError> {
+async fn tunnel_session_open(tunnel: Arc<TunnelState>, frame: Frame) -> Result<(), HostRpcError> {
     if frame.stream_id != 0 {
         return Err(rpc_error(
             "invalid_port_tunnel",
@@ -246,10 +243,7 @@ async fn tunnel_session_open(
         .await
 }
 
-async fn tunnel_session_resume(
-    tunnel: Arc<TunnelState>,
-    frame: Frame,
-) -> Result<(), HostRpcError> {
+async fn tunnel_session_resume(tunnel: Arc<TunnelState>, frame: Frame) -> Result<(), HostRpcError> {
     if frame.stream_id != 0 {
         return Err(rpc_error(
             "invalid_port_tunnel",
@@ -376,10 +370,7 @@ async fn tunnel_tcp_listen_transport_owned(
     Ok(())
 }
 
-async fn tunnel_tcp_accept_loop(
-    session: Arc<SessionState>,
-    listener: Arc<TcpListener>,
-) {
+async fn tunnel_tcp_accept_loop(session: Arc<SessionState>, listener: Arc<TcpListener>) {
     loop {
         let Some(attachment) = wait_for_session_attachment(&session).await else {
             return;
@@ -407,7 +398,9 @@ async fn tunnel_tcp_accept_loop(
             drop(stream);
             continue;
         }
-        let stream_id = session.next_daemon_stream_id.fetch_add(2, Ordering::Relaxed);
+        let stream_id = session
+            .next_daemon_stream_id
+            .fetch_add(2, Ordering::Relaxed);
         let listener_stream_id = listener_stream_id(&session).await.unwrap_or(0);
         let (reader, writer) = stream.into_split();
         attachment
@@ -440,7 +433,7 @@ async fn tunnel_tcp_accept_loop(
                             err.message,
                             false,
                         )
-                            .await;
+                        .await;
                         continue;
                     }
                 },
@@ -509,14 +502,8 @@ async fn tunnel_tcp_accept_loop_transport_owned(
                 }) {
                     Ok(meta) => meta,
                     Err(err) => {
-                        let _ = send_tunnel_error(
-                            &tunnel,
-                            stream_id,
-                            err.code,
-                            err.message,
-                            false,
-                        )
-                        .await;
+                        let _ = send_tunnel_error(&tunnel, stream_id, err.code, err.message, false)
+                            .await;
                         continue;
                     }
                 },
@@ -745,10 +732,9 @@ async fn tunnel_tcp_data(
 ) -> Result<(), HostRpcError> {
     let writer = match tunnel_mode(tunnel).await {
         TunnelMode::Session(session) => {
-            let attachment = session
-                .current_attachment()
-                .await
-                .ok_or_else(|| rpc_error("port_tunnel_closed", "port tunnel attachment is closed"))?;
+            let attachment = session.current_attachment().await.ok_or_else(|| {
+                rpc_error("port_tunnel_closed", "port tunnel attachment is closed")
+            })?;
             attachment
                 .tcp_writers
                 .lock()
@@ -858,7 +844,9 @@ async fn tunnel_udp_bind(tunnel: Arc<TunnelState>, frame: Frame) -> Result<(), H
         .local_addr()
         .map_err(|err| rpc_error("port_bind_failed", err.to_string()))?
         .to_string();
-    session.replace_udp_bind(frame.stream_id, socket.clone()).await;
+    session
+        .replace_udp_bind(frame.stream_id, socket.clone())
+        .await;
     tunnel
         .send(Frame {
             frame_type: FrameType::UdpBindOk,
@@ -1002,7 +990,14 @@ async fn tunnel_udp_read_loop_session_owned(
         }) {
             Ok(meta) => meta,
             Err(err) => {
-                let _ = send_tunnel_error_with_sender(&attachment.tx, stream_id, err.code, err.message, false).await;
+                let _ = send_tunnel_error_with_sender(
+                    &attachment.tx,
+                    stream_id,
+                    err.code,
+                    err.message,
+                    false,
+                )
+                .await;
                 return;
             }
         };
@@ -1026,15 +1021,14 @@ async fn tunnel_udp_read_loop_session_owned(
 async fn tunnel_udp_datagram(tunnel: &Arc<TunnelState>, frame: Frame) -> Result<(), HostRpcError> {
     let meta: UdpDatagramMeta = decode_frame_meta(&frame)?;
     let socket = match tunnel_mode(tunnel).await {
-        TunnelMode::Session(session) => session
-            .udp_socket(frame.stream_id)
-            .await
-            .ok_or_else(|| {
+        TunnelMode::Session(session) => {
+            session.udp_socket(frame.stream_id).await.ok_or_else(|| {
                 rpc_error(
                     "unknown_port_bind",
                     format!("unknown tunnel udp stream `{}`", frame.stream_id),
                 )
-            })?,
+            })?
+        }
         TunnelMode::Transport => tunnel
             .udp_sockets
             .lock()
@@ -1066,7 +1060,10 @@ impl TunnelState {
 
 impl TunnelSessionStore {
     async fn insert(&self, session: Arc<SessionState>) {
-        self.sessions.lock().await.insert(session.id.clone(), session);
+        self.sessions
+            .lock()
+            .await
+            .insert(session.id.clone(), session);
     }
 
     async fn get(&self, session_id: &str) -> Option<Arc<SessionState>> {
@@ -1104,20 +1101,20 @@ impl SessionState {
 
     async fn udp_socket(&self, stream_id: u32) -> Option<Arc<UdpSocket>> {
         match self.retained_udp_bind.lock().await.as_ref() {
-            Some(RetainedUdpBind::Udp { stream_id: retained_stream_id, socket })
-                if *retained_stream_id == stream_id =>
-            {
-                Some(socket.clone())
-            }
+            Some(RetainedUdpBind::Udp {
+                stream_id: retained_stream_id,
+                socket,
+            }) if *retained_stream_id == stream_id => Some(socket.clone()),
             _ => None,
         }
     }
 
     async fn udp_bind_snapshot(&self) -> Option<(u32, Arc<UdpSocket>)> {
-        match self.retained_udp_bind.lock().await.as_ref() {
-            Some(RetainedUdpBind::Udp { stream_id, socket }) => Some((*stream_id, socket.clone())),
-            None => None,
-        }
+        self.retained_udp_bind
+            .lock()
+            .await
+            .as_ref()
+            .map(|RetainedUdpBind::Udp { stream_id, socket }| (*stream_id, socket.clone()))
     }
 
     async fn clear_udp_bind(&self) {
@@ -1195,15 +1192,15 @@ async fn detach_attached_session(tunnel: &Arc<TunnelState>) {
 }
 
 async fn listener_stream_id(session: &Arc<SessionState>) -> Option<u32> {
-    match session.retained_listener.lock().await.as_ref() {
-        Some(RetainedListener::Tcp { stream_id, .. }) => Some(*stream_id),
-        None => None,
-    }
+    session
+        .retained_listener
+        .lock()
+        .await
+        .as_ref()
+        .map(|RetainedListener::Tcp { stream_id, .. }| *stream_id)
 }
 
-async fn wait_for_session_attachment(
-    session: &Arc<SessionState>,
-) -> Option<Arc<AttachmentState>> {
+async fn wait_for_session_attachment(session: &Arc<SessionState>) -> Option<Arc<AttachmentState>> {
     loop {
         if let Some(attachment) = session.current_attachment().await {
             return Some(attachment);
@@ -1216,10 +1213,12 @@ async fn wait_for_session_attachment(
 }
 
 async fn udp_bind_stream_id(session: &Arc<SessionState>) -> Option<u32> {
-    match session.retained_udp_bind.lock().await.as_ref() {
-        Some(RetainedUdpBind::Udp { stream_id, .. }) => Some(*stream_id),
-        None => None,
-    }
+    session
+        .retained_udp_bind
+        .lock()
+        .await
+        .as_ref()
+        .map(|RetainedUdpBind::Udp { stream_id, .. }| *stream_id)
 }
 
 fn schedule_session_expiry(store: TunnelSessionStore, session: Arc<SessionState>) {
@@ -1473,7 +1472,10 @@ mod port_tunnel_tests {
 
         let mut resumed = resume_session(&state, &session_id).await;
         let sender = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        sender.send_to(b"ping", &listen_bound_endpoint).await.unwrap();
+        sender
+            .send_to(b"ping", &listen_bound_endpoint)
+            .await
+            .unwrap();
 
         let frame = read_frame(&mut resumed).await.unwrap();
         assert_eq!(frame.frame_type, FrameType::UdpDatagram);
@@ -1484,7 +1486,8 @@ mod port_tunnel_tests {
     async fn expired_detached_listener_is_released() {
         let state = test_state();
         let listen_endpoint = free_loopback_endpoint().await;
-        let (bound_endpoint, _session_id) = open_resumable_tcp_listener(&state, &listen_endpoint).await;
+        let (bound_endpoint, _session_id) =
+            open_resumable_tcp_listener(&state, &listen_endpoint).await;
 
         tokio::time::sleep(Duration::from_millis(250)).await;
 
@@ -1495,10 +1498,13 @@ mod port_tunnel_tests {
     async fn detached_tcp_listener_accepts_after_resume_not_before() {
         let state = test_state();
         let listen_endpoint = free_loopback_endpoint().await;
-        let (bound_endpoint, session_id) = open_resumable_tcp_listener(&state, &listen_endpoint).await;
+        let (bound_endpoint, session_id) =
+            open_resumable_tcp_listener(&state, &listen_endpoint).await;
 
         tokio::time::sleep(Duration::from_millis(20)).await;
-        let client = tokio::net::TcpStream::connect(&bound_endpoint).await.unwrap();
+        let client = tokio::net::TcpStream::connect(&bound_endpoint)
+            .await
+            .unwrap();
         let mut resumed = resume_session(&state, &session_id).await;
 
         let frame = tokio::time::timeout(Duration::from_secs(1), read_frame(&mut resumed))
@@ -1603,8 +1609,7 @@ mod port_tunnel_tests {
         .await
         .unwrap();
         let ready = read_frame(&mut broker_side).await.unwrap();
-        let session_id = serde_json::from_slice::<Value>(&ready.meta)
-            .unwrap()["session_id"]
+        let session_id = serde_json::from_slice::<Value>(&ready.meta).unwrap()["session_id"]
             .as_str()
             .unwrap()
             .to_string();
@@ -1639,8 +1644,7 @@ mod port_tunnel_tests {
         .await
         .unwrap();
         let ready = read_frame(&mut broker_side).await.unwrap();
-        let session_id = serde_json::from_slice::<Value>(&ready.meta)
-            .unwrap()["session_id"]
+        let session_id = serde_json::from_slice::<Value>(&ready.meta).unwrap()["session_id"]
             .as_str()
             .unwrap()
             .to_string();

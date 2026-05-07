@@ -615,7 +615,7 @@ mod tests {
             assert!(
                 request
                     .to_ascii_lowercase()
-                    .contains("x-remote-exec-port-tunnel-version: 1")
+                    .contains("x-remote-exec-port-tunnel-version: 2")
             );
 
             stream

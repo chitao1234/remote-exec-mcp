@@ -322,7 +322,9 @@ async fn cpp_forward_ports_reconnect_after_tunnel_drop() {
 
     fixture.drop_port_tunnels().await;
 
-    let mut stream = tokio::net::TcpStream::connect(&listen_endpoint).await.unwrap();
+    let mut stream = tokio::net::TcpStream::connect(&listen_endpoint)
+        .await
+        .unwrap();
     stream.write_all(b"after").await.unwrap();
     let mut echoed = [0u8; 5];
     stream.read_exact(&mut echoed).await.unwrap();

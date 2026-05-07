@@ -247,7 +247,7 @@ Errors are scoped as narrowly as possible:
 - A malformed tunnel preface or frame header is a fatal tunnel error.
 - Invalid `TCP_LISTEN`, `TCP_CONNECT`, or `UDP_BIND` metadata returns an `ERROR` for that `stream_id`.
 - Socket read/write errors produce `ERROR` or `CLOSE` and release the affected stream.
-- Tunnel read/write failure releases every resource owned by that tunnel.
+- Tunnel read/write failure no longer necessarily releases every resource immediately. The later reconnect design in `2026-05-06-port-forward-reconnect-design.md` refines this so listen-side session resources may remain detached for a bounded reconnect window while transport-owned connection state is still dropped.
 - Broker-visible public forward status becomes `Failed` when a background tunnel or paired stream fails outside an intentional close.
 
 Existing error wording that public tests depend on should remain stable at the public `forward_ports` layer where practical.
@@ -267,7 +267,7 @@ The tunnel does not grant new permissions beyond existing `forward_ports`: selec
 
 Update:
 
-- `README.md`: explain that `forward_ports` uses an internal HTTP/1.1 Upgrade tunnel, no public schema changes, and daemon resources are cleaned up on tunnel drop rather than lease expiry.
+- `README.md`: explain that `forward_ports` uses an internal HTTP/1.1 Upgrade tunnel, no public schema changes, and that the newer reconnect design retains listen-side resources across transient transport drops within a bounded reconnect window instead of treating all tunnel loss as immediate cleanup.
 - `configs/broker.example.toml`: update comments that mention lease-based daemon reclamation.
 - `crates/remote-exec-daemon-cpp/README.md`: document the C++ tunnel support and removal of lease renewal behavior.
 - `skills/using-remote-exec-mcp/SKILL.md` if it documents `forward_ports` lifecycle semantics.
@@ -286,13 +286,13 @@ Use TDD at clear seams:
    - HTTP/1.0 or missing upgrade headers fail.
    - TCP listen/connect/data forwarding works over frames.
    - UDP full-duplex datagrams work with at least two peers.
-   - Dropping the upgraded tunnel promptly releases listeners and sockets.
+   - Dropping the upgraded tunnel promptly releases listeners and sockets in the original tunnel-only design; the newer reconnect design intentionally relaxes this for detached listen-side sessions within the bounded reconnect window.
 
 3. C++ daemon tunnel tests:
    - HTTP Upgrade response is correct.
    - TCP full-duplex data flow works over frames.
    - UDP full-duplex per-peer connector flow works.
-   - Dropping the upgraded socket reclaims listeners without lease expiry.
+   - Dropping the upgraded socket reclaims listeners without lease expiry in the original tunnel-only design; the newer reconnect design intentionally keeps detached listen-side sessions until resume or timeout.
 
 4. Broker public tests:
    - Existing public `forward_ports` tests continue to pass unchanged from the MCP caller perspective.

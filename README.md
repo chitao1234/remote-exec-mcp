@@ -378,7 +378,9 @@ cargo fmt --all --check
 - `transfer_files` uses broker-mediated copy for `local -> remote`, `remote -> local`, `remote -> remote`, and `local -> local`.
 - `forward_ports` uses broker-mediated TCP/UDP forwarding between a `listen_side` and `connect_side`; either side may be a configured target or `"local"`.
 - Public `session_id` and `forward_id` values are broker-owned in-memory runtime state. A broker restart drops those mappings, so live exec sessions and port forwards must be reopened after restart.
-- Remote daemon port-forward resources are owned by daemon-private HTTP/1.1 Upgrade tunnels. If the broker disappears without closing a port forward, the tunnel closes and the daemon reclaims listeners, UDP sockets, and TCP connections so the same endpoint can be rebound later.
+- `forward_ports` survives transient broker-daemon transport disconnects when the daemon stays alive. The daemon retains the forward itself plus future TCP accepts or future UDP datagrams on the listen side, but active TCP streams and UDP per-peer connector state are not preserved across reconnect.
+- Remote daemon port-forward resources are coordinated through daemon-private HTTP/1.1 Upgrade tunnels. If the broker disappears without closing a port forward, the daemon keeps detached listen-side resources only until the reconnect grace window expires, then reclaims listeners and UDP sockets so the same endpoint can be rebound later.
+- A daemon restart still destroys the forward. Unexpected broker loss may therefore delay remote listener cleanup until the reconnect grace window expires, but reopening after broker or daemon restart still creates a new `forward_id`.
 - Rust daemon shutdown now cancels pending tunnel accept/read/write work promptly and closes live forwarded listeners, UDP sockets, and TCP connections before the daemon exits.
 - Recoverable peer aborts or resets during C++ daemon forwarding are surfaced as normal forward errors and do not terminate the daemon process.
 - Internal transfer transport uses GNU tar for both files and directories. Single-file transfers use one fixed archive entry named `.remote-exec-file`. Non-fatal export warnings are carried in a reserved `.remote-exec-transfer-summary.json` archive entry that import consumes and never writes to the destination.
@@ -496,7 +498,7 @@ cargo run -p remote-exec-broker --bin remote-exec -- \
   --forward tcp:127.0.0.1:15432=127.0.0.1:5432
 ```
 
-`forward-ports` state lives in the long-running broker process. In `--broker-config` mode, `remote-exec` rebuilds broker state for that one invocation, so forwards do not persist across separate CLI runs there. If the broker dies without a clean close, daemon-side listeners are reclaimed automatically when the internal HTTP/1.1 Upgrade tunnel closes, but reopening still creates a new `forward_id`.
+`forward-ports` state lives in the long-running broker process. In `--broker-config` mode, `remote-exec` rebuilds broker state for that one invocation, so forwards do not persist across separate CLI runs there. If the broker loses only the daemon transport while the daemon stays alive, the broker can reconnect the forward and preserve future listen-side traffic, but active TCP streams and UDP per-peer connector state are still lost. If the broker dies without reconnecting, daemon-side listeners are reclaimed after the reconnect grace window expires, and reopening still creates a new `forward_id`.
 
 Expose the broker over streamable HTTP instead of stdio:
 

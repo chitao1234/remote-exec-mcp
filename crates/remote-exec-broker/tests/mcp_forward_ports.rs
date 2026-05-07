@@ -256,13 +256,16 @@ async fn forward_ports_keeps_forward_open_after_listen_tunnel_drop() {
         stream.write_all(&buf).await.unwrap();
     });
 
-    let open = fixture.open_remote_tcp_forward(&echo_addr.to_string()).await;
+    let open = fixture
+        .open_remote_tcp_forward(&echo_addr.to_string())
+        .await;
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
 
     support::stub_daemon::force_close_port_tunnel_transport(&fixture.stub_state).await;
 
-    let forward = wait_for_forward_status(&fixture, &forward_id, "open", Duration::from_secs(5)).await;
+    let forward =
+        wait_for_forward_status(&fixture, &forward_id, "open", Duration::from_secs(5)).await;
     assert_eq!(forward["status"], "open");
 
     let mut stream = tokio::net::TcpStream::connect(&listen_endpoint)

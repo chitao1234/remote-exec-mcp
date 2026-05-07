@@ -558,7 +558,9 @@ fn spawn_forward(runtime: ForwardRuntime, store: PortForwardStore) {
         if let Err(err) = result {
             let error_text = format!("{err:#}");
             runtime.cancel.cancel();
-            store.mark_failed(&runtime.forward_id, error_text.clone()).await;
+            store
+                .mark_failed(&runtime.forward_id, error_text.clone())
+                .await;
             tracing::warn!(
                 forward_id = %runtime.forward_id,
                 listen_side = %runtime.listen_side.name(),
@@ -579,30 +581,25 @@ async fn run_tcp_forward(runtime: ForwardRuntime) -> anyhow::Result<()> {
     let mut connect_tunnel = runtime.initial_connect_tunnel.clone();
 
     loop {
-        match run_tcp_forward_epoch(
-            &runtime,
-            listen_tunnel.clone(),
-            connect_tunnel.clone(),
-        )
-        .await?
+        match run_tcp_forward_epoch(&runtime, listen_tunnel.clone(), connect_tunnel.clone()).await?
         {
             ForwardLoopControl::Cancelled => return Ok(()),
             ForwardLoopControl::ReconnectListenTunnel => {
-                let Some(resumed_tunnel) = reconnect_listen_tunnel(
-                    runtime.listen_session.clone(),
-                    runtime.cancel.clone(),
-                )
-                .await?
+                let Some(resumed_tunnel) =
+                    reconnect_listen_tunnel(runtime.listen_session.clone(), runtime.cancel.clone())
+                        .await?
                 else {
                     return Ok(());
                 };
                 listen_tunnel = resumed_tunnel;
-                connect_tunnel = open_connect_tunnel(&runtime.connect_side).await.with_context(|| {
-                    format!(
-                        "reopening port tunnel to `{}` after listen-side reconnect",
-                        runtime.connect_side.name()
-                    )
-                })?;
+                connect_tunnel = open_connect_tunnel(&runtime.connect_side)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "reopening port tunnel to `{}` after listen-side reconnect",
+                            runtime.connect_side.name()
+                        )
+                    })?;
             }
         }
     }
@@ -836,30 +833,25 @@ async fn run_udp_forward(runtime: ForwardRuntime) -> anyhow::Result<()> {
     let mut connect_tunnel = runtime.initial_connect_tunnel.clone();
 
     loop {
-        match run_udp_forward_epoch(
-            &runtime,
-            listen_tunnel.clone(),
-            connect_tunnel.clone(),
-        )
-        .await?
+        match run_udp_forward_epoch(&runtime, listen_tunnel.clone(), connect_tunnel.clone()).await?
         {
             ForwardLoopControl::Cancelled => return Ok(()),
             ForwardLoopControl::ReconnectListenTunnel => {
-                let Some(resumed_tunnel) = reconnect_listen_tunnel(
-                    runtime.listen_session.clone(),
-                    runtime.cancel.clone(),
-                )
-                .await?
+                let Some(resumed_tunnel) =
+                    reconnect_listen_tunnel(runtime.listen_session.clone(), runtime.cancel.clone())
+                        .await?
                 else {
                     return Ok(());
                 };
                 listen_tunnel = resumed_tunnel;
-                connect_tunnel = open_connect_tunnel(&runtime.connect_side).await.with_context(|| {
-                    format!(
-                        "reopening port tunnel to `{}` after listen-side reconnect",
-                        runtime.connect_side.name()
-                    )
-                })?;
+                connect_tunnel = open_connect_tunnel(&runtime.connect_side)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "reopening port tunnel to `{}` after listen-side reconnect",
+                            runtime.connect_side.name()
+                        )
+                    })?;
             }
         }
     }
@@ -1045,10 +1037,8 @@ async fn open_listen_session(side: &SideHandle) -> anyhow::Result<OpenListenSess
                 resume_timeout: Duration::from_millis(ready.resume_timeout_ms),
             })
         }
-        FrameType::Error if frame.stream_id == 0 => {
-            Err(tunnel_error(&frame))
-                .with_context(|| format!("opening port tunnel session on `{}`", side.name()))
-        }
+        FrameType::Error if frame.stream_id == 0 => Err(tunnel_error(&frame))
+            .with_context(|| format!("opening port tunnel session on `{}`", side.name())),
         _ => Err(anyhow::anyhow!(
             "unexpected port tunnel session response `{:?}` on `{}`",
             frame.frame_type,
@@ -1058,11 +1048,9 @@ async fn open_listen_session(side: &SideHandle) -> anyhow::Result<OpenListenSess
 }
 
 async fn open_connect_tunnel(side: &SideHandle) -> anyhow::Result<Arc<PortTunnel>> {
-    Ok(Arc::new(
-        side.port_tunnel()
-            .await
-            .with_context(|| format!("opening port tunnel to `{}`", side.name()))?,
-    ))
+    Ok(Arc::new(side.port_tunnel().await.with_context(|| {
+        format!("opening port tunnel to `{}`", side.name())
+    })?))
 }
 
 async fn wait_for_listener_ready(
@@ -1102,17 +1090,16 @@ async fn resume_listen_session_inner(
         })
         .await
         .with_context(|| format!("resuming port tunnel session on `{}`", control.side.name()))?;
-    let frame = tunnel
-        .recv()
-        .await
-        .with_context(|| format!("waiting to resume port tunnel session on `{}`", control.side.name()))?;
+    let frame = tunnel.recv().await.with_context(|| {
+        format!(
+            "waiting to resume port tunnel session on `{}`",
+            control.side.name()
+        )
+    })?;
     match frame.frame_type {
         FrameType::SessionResumed if frame.stream_id == 0 => Ok(tunnel),
-        FrameType::Error if frame.stream_id == 0 => {
-            Err(tunnel_error(&frame)).with_context(|| {
-                format!("resuming port tunnel session on `{}`", control.side.name())
-            })
-        }
+        FrameType::Error if frame.stream_id == 0 => Err(tunnel_error(&frame))
+            .with_context(|| format!("resuming port tunnel session on `{}`", control.side.name())),
         _ => Err(anyhow::anyhow!(
             "unexpected port tunnel resume response `{:?}` on `{}`",
             frame.frame_type,
@@ -1169,7 +1156,11 @@ async fn reconnect_listen_tunnel(
 async fn close_listen_session(control: Arc<ListenSessionControl>) -> anyhow::Result<()> {
     let _guard = control.op_lock.lock().await;
     if let Some(tunnel) = control.current_tunnel().await {
-        if tunnel.close_stream(control.listener_stream_id).await.is_ok() {
+        if tunnel
+            .close_stream(control.listener_stream_id)
+            .await
+            .is_ok()
+        {
             return Ok(());
         }
     }
@@ -1223,9 +1214,7 @@ fn is_retryable_listen_transport_error(err: &anyhow::Error) -> bool {
         let message = cause.to_string();
         if matches!(
             message.as_str(),
-            "port tunnel closed"
-                | "port tunnel reader is closed"
-                | "port tunnel writer is closed"
+            "port tunnel closed" | "port tunnel reader is closed" | "port tunnel writer is closed"
         ) {
             return true;
         }

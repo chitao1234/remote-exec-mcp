@@ -83,11 +83,15 @@ sockets, non-loopback listen binds, and the same bare-port normalization where
 `8080` means `127.0.0.1:8080`. The older lease-renewed port-forward routes are
 not exposed.
 
-Live forwarded sockets are tunnel-owned in-memory daemon state. A broker restart
-drops the broker-owned `forward_id` mapping, and if the broker disappears
-without closing the forward the daemon reclaims listeners, UDP sockets, and TCP
-connections when the tunnel closes. Daemon shutdown closes live forwarded
-sockets promptly.
+Live forwarded sockets are reconnect-aware in-memory daemon state. When only the
+broker-daemon transport drops and the daemon stays alive, the daemon retains the
+forward itself plus future TCP accepts or future UDP datagrams on the listen
+side so the broker can resume the tunnel. Active TCP streams and UDP per-peer
+connector state are not preserved across reconnect. A broker restart still drops
+the broker-owned `forward_id` mapping, and a daemon restart still destroys the
+forward. If the broker disappears without reconnecting, the daemon reclaims
+detached listeners and UDP sockets after the reconnect grace window expires.
+Daemon shutdown closes live forwarded sockets promptly.
 Recoverable peer abort/reset errors during forwarding are reported as normal
 request failures and do not terminate the daemon process.
 
@@ -177,6 +181,7 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
 - `view_image` supports passthrough PNG, JPEG, and WebP only
 - omitted `view_image.detail` defaults to `original` because no resize/re-encode path exists
 - broker-owned `forward_id` values do not persist across broker restart
+- transient broker-daemon transport drops preserve only the forward itself plus future listen-side TCP accepts or UDP datagrams; active TCP streams and UDP per-peer connector state are lost
 - transfer compression is not supported
 - `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles
 - `transfer_files` accepts an optional export-side `exclude` array. Patterns match paths relative to each source root, use `/` as the logical separator on all platforms, and support `*`, `?`, `**`, `[abc]`, `[a-z]`, `[!abc]`, `[!a-c]`, `[^abc]`, and `[^a-c]`

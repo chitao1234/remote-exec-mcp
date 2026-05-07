@@ -545,10 +545,7 @@ fn build_stub_port_tunnel_state(target: &str) -> Arc<remote_exec_host::HostRunti
     )
 }
 
-async fn handle_port_tunnel_upgrade<S>(
-    state: StubDaemonState,
-    mut stream: S,
-) -> anyhow::Result<()>
+async fn handle_port_tunnel_upgrade<S>(state: StubDaemonState, mut stream: S) -> anyhow::Result<()>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
@@ -556,7 +553,13 @@ where
     let first_frame = read_frame(&mut stream).await?;
 
     if first_frame.frame_type == FrameType::SessionResume {
-        match state.port_tunnel_control.lock().await.resume_behavior.clone() {
+        match state
+            .port_tunnel_control
+            .lock()
+            .await
+            .resume_behavior
+            .clone()
+        {
             ResumeBehavior::PassThrough => {}
             ResumeBehavior::DropTransport => return Ok(()),
             ResumeBehavior::SendError { code, message } => {
@@ -609,7 +612,9 @@ fn validate_port_tunnel_upgrade_headers(
     headers: &HeaderMap,
 ) -> Result<(), (StatusCode, Json<RpcErrorBody>)> {
     if !header_contains_token(headers, CONNECTION.as_str(), "upgrade") {
-        return Err(bad_port_tunnel_request("missing `Connection: Upgrade` header"));
+        return Err(bad_port_tunnel_request(
+            "missing `Connection: Upgrade` header",
+        ));
     }
     if !header_eq(headers, UPGRADE.as_str(), UPGRADE_TOKEN) {
         return Err(bad_port_tunnel_request(format!(
