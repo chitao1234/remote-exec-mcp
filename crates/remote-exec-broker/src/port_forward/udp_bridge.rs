@@ -7,10 +7,12 @@ use remote_exec_proto::port_forward::udp_connector_endpoint;
 use remote_exec_proto::port_tunnel::{Frame, FrameType};
 use tokio::sync::Mutex;
 
-use super::events::{ForwardLoopControl, ForwardSideEvent, classify_listen_transport_failure};
+use super::events::{
+    ForwardLoopControl, ForwardSideEvent, TunnelRole, classify_transport_failure,
+};
 use super::supervisor::{ForwardRuntime, open_connect_tunnel, reconnect_listen_tunnel};
 use super::tunnel::{
-    EndpointMeta, PortTunnel, UdpDatagramMeta, classify_listen_tunnel_event,
+    EndpointMeta, PortTunnel, UdpDatagramMeta, classify_recoverable_tunnel_event,
     classify_terminal_tunnel_event, decode_tunnel_meta, encode_tunnel_meta,
     format_terminal_tunnel_error,
 };
@@ -35,7 +37,7 @@ pub(super) async fn run_udp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
         match run_udp_forward_epoch(&runtime, listen_tunnel.clone(), connect_tunnel.clone()).await?
         {
             ForwardLoopControl::Cancelled => return Ok(()),
-            ForwardLoopControl::ReconnectListenTunnel => {
+            ForwardLoopControl::RecoverTunnel(TunnelRole::Listen) => {
                 let Some(resumed_tunnel) =
                     reconnect_listen_tunnel(runtime.listen_session.clone(), runtime.cancel.clone())
                         .await?
@@ -51,6 +53,9 @@ pub(super) async fn run_udp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
                             runtime.connect_side.name()
                         )
                     })?;
+            }
+            ForwardLoopControl::RecoverTunnel(TunnelRole::Connect) => {
+                unreachable!("connect tunnel recovery is introduced in a later task")
             }
         }
     }
@@ -80,10 +85,10 @@ async fn run_udp_forward_epoch(
                 ).await;
             }
             frame = listen_tunnel.recv() => {
-                let frame = match classify_listen_tunnel_event(frame) {
+                let frame = match classify_recoverable_tunnel_event(frame) {
                     ForwardSideEvent::Frame(frame) => frame,
                     ForwardSideEvent::RetryableTransportLoss => {
-                        return Ok(ForwardLoopControl::ReconnectListenTunnel);
+                        return Ok(ForwardLoopControl::RecoverTunnel(TunnelRole::Listen));
                     }
                     ForwardSideEvent::TerminalTransportError(err) => {
                         return Err(err).context("reading udp listen tunnel");
@@ -146,7 +151,11 @@ async fn run_udp_forward_epoch(
                             meta: encode_tunnel_meta(&UdpDatagramMeta { peer })?,
                             data: frame.data,
                         }).await {
-                            return classify_listen_transport_failure(err, "relaying udp datagram to listen tunnel");
+                            return classify_transport_failure(
+                                err,
+                                "relaying udp datagram to listen tunnel",
+                                TunnelRole::Listen,
+                            );
                         }
                     }
                     FrameType::Close => {

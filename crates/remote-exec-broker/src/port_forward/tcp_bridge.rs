@@ -4,10 +4,12 @@ use std::sync::Arc;
 use anyhow::Context;
 use remote_exec_proto::port_tunnel::{Frame, FrameType};
 
-use super::events::{ForwardLoopControl, ForwardSideEvent, classify_listen_transport_failure};
+use super::events::{
+    ForwardLoopControl, ForwardSideEvent, TunnelRole, classify_transport_failure,
+};
 use super::supervisor::{ForwardRuntime, open_connect_tunnel, reconnect_listen_tunnel};
 use super::tunnel::{
-    EndpointMeta, PortTunnel, TcpAcceptMeta, classify_listen_tunnel_event,
+    EndpointMeta, PortTunnel, TcpAcceptMeta, classify_recoverable_tunnel_event,
     classify_terminal_tunnel_event, decode_tunnel_meta, encode_tunnel_meta,
     format_terminal_tunnel_error,
 };
@@ -37,7 +39,7 @@ pub(super) async fn run_tcp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
         match run_tcp_forward_epoch(&runtime, listen_tunnel.clone(), connect_tunnel.clone()).await?
         {
             ForwardLoopControl::Cancelled => return Ok(()),
-            ForwardLoopControl::ReconnectListenTunnel => {
+            ForwardLoopControl::RecoverTunnel(TunnelRole::Listen) => {
                 let Some(resumed_tunnel) =
                     reconnect_listen_tunnel(runtime.listen_session.clone(), runtime.cancel.clone())
                         .await?
@@ -53,6 +55,9 @@ pub(super) async fn run_tcp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
                             runtime.connect_side.name()
                         )
                     })?;
+            }
+            ForwardLoopControl::RecoverTunnel(TunnelRole::Connect) => {
+                unreachable!("connect tunnel recovery is introduced in a later task")
             }
         }
     }
@@ -72,10 +77,10 @@ async fn run_tcp_forward_epoch(
         tokio::select! {
             _ = runtime.cancel.cancelled() => return Ok(ForwardLoopControl::Cancelled),
             frame = listen_tunnel.recv() => {
-                let frame = match classify_listen_tunnel_event(frame) {
+                let frame = match classify_recoverable_tunnel_event(frame) {
                     ForwardSideEvent::Frame(frame) => frame,
                     ForwardSideEvent::RetryableTransportLoss => {
-                        return Ok(ForwardLoopControl::ReconnectListenTunnel);
+                        return Ok(ForwardLoopControl::RecoverTunnel(TunnelRole::Listen));
                     }
                     ForwardSideEvent::TerminalTransportError(err) => {
                         return Err(err).context("reading tcp listen tunnel");
@@ -221,7 +226,11 @@ async fn run_tcp_forward_epoch(
                                 stream_id: listen_stream_id,
                                 ..frame
                             }).await {
-                                return classify_listen_transport_failure(err, "relaying tcp data to listen tunnel");
+                                return classify_transport_failure(
+                                    err,
+                                    "relaying tcp data to listen tunnel",
+                                    TunnelRole::Listen,
+                                );
                             }
                         }
                     }
@@ -237,7 +246,11 @@ async fn run_tcp_forward_epoch(
                                 meta: Vec::new(),
                                 data: Vec::new(),
                             }).await {
-                                return classify_listen_transport_failure(err, "relaying tcp eof to listen tunnel");
+                                return classify_transport_failure(
+                                    err,
+                                    "relaying tcp eof to listen tunnel",
+                                    TunnelRole::Listen,
+                                );
                             }
                         }
                     }
@@ -251,7 +264,11 @@ async fn run_tcp_forward_epoch(
                         {
                             listen_to_connect.remove(&listen_stream_id);
                             if let Err(err) = listen_tunnel.close_stream(listen_stream_id).await {
-                                return classify_listen_transport_failure(err, "closing tcp listen stream");
+                                return classify_transport_failure(
+                                    err,
+                                    "closing tcp listen stream",
+                                    TunnelRole::Listen,
+                                );
                             }
                         }
                     }

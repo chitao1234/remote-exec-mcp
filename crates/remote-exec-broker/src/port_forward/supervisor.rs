@@ -16,7 +16,7 @@ use super::store::{OpenedForward, PortForwardRecord, PortForwardStore};
 use super::tcp_bridge::run_tcp_forward;
 use super::tunnel::{
     EndpointMeta, PortTunnel, SessionReadyMeta, SessionResumeMeta, decode_tunnel_meta,
-    encode_tunnel_meta, is_retryable_listen_transport_error, tunnel_error,
+    encode_tunnel_meta, is_retryable_transport_error, tunnel_error,
 };
 use super::udp_bridge::run_udp_forward;
 use super::{
@@ -421,7 +421,7 @@ pub(super) async fn reconnect_listen_tunnel(
         }
         match try_resume_listen_tunnel(&control).await {
             Ok(tunnel) => return Ok(Some(tunnel)),
-            Err(err) if is_retryable_listen_transport_error(&err) => {
+            Err(err) if is_retryable_transport_error(&err) => {
                 if Instant::now() >= deadline {
                     break;
                 }

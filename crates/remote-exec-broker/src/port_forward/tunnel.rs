@@ -185,13 +185,13 @@ pub(super) fn format_terminal_tunnel_error(meta: &TunnelErrorMeta) -> anyhow::Er
     }
 }
 
-pub(super) fn classify_listen_tunnel_event(result: anyhow::Result<Frame>) -> ForwardSideEvent {
+pub(super) fn classify_recoverable_tunnel_event(result: anyhow::Result<Frame>) -> ForwardSideEvent {
     match result {
         Ok(frame) if frame.frame_type == FrameType::Error => {
             ForwardSideEvent::TerminalTunnelError(decode_tunnel_error_frame(&frame))
         }
         Ok(frame) => ForwardSideEvent::Frame(frame),
-        Err(err) if is_retryable_listen_transport_error(&err) => {
+        Err(err) if is_retryable_transport_error(&err) => {
             ForwardSideEvent::RetryableTransportLoss
         }
         Err(err) => ForwardSideEvent::TerminalTransportError(err),
@@ -208,7 +208,7 @@ pub(super) fn classify_terminal_tunnel_event(result: anyhow::Result<Frame>) -> F
     }
 }
 
-pub(super) fn is_retryable_listen_transport_error(err: &anyhow::Error) -> bool {
+pub(super) fn is_retryable_transport_error(err: &anyhow::Error) -> bool {
     for cause in err.chain() {
         if let Some(daemon_error) = cause.downcast_ref::<DaemonClientError>() {
             if daemon_error.is_transport() {
