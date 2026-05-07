@@ -351,6 +351,106 @@ async fn cpp_forward_ports_reconnect_after_tunnel_drop() {
 }
 
 #[tokio::test]
+async fn cpp_forward_ports_reconnect_after_connect_tunnel_drop() {
+    let fixture = CppDaemonBrokerFixture::spawn().await;
+    let echo_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let echo_addr = echo_listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let (mut stream, _) = match echo_listener.accept().await {
+                Ok(value) => value,
+                Err(_) => return,
+            };
+            tokio::spawn(async move {
+                let mut buf = Vec::new();
+                stream.read_to_end(&mut buf).await.unwrap();
+                stream.write_all(&buf).await.unwrap();
+            });
+        }
+    });
+
+    let open = fixture
+        .open_tcp_forward_local_to_cpp(&echo_addr.to_string())
+        .await;
+    assert!(!open.is_error, "open failed: {}", open.text_output);
+    let forward_id = open.structured_content["forwards"][0]["forward_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let listen_endpoint = open.structured_content["forwards"][0]["listen_endpoint"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    fixture.drop_port_tunnels().await;
+
+    let mut trigger = tokio::net::TcpStream::connect(&listen_endpoint)
+        .await
+        .unwrap();
+    trigger.write_all(b"trigger").await.unwrap();
+    trigger.shutdown().await.unwrap();
+    let _ = tokio::time::timeout(Duration::from_millis(250), async {
+        let mut ignored = Vec::new();
+        let _ = trigger.read_to_end(&mut ignored).await;
+    })
+    .await;
+
+    let mut stream = tokio::net::TcpStream::connect(&listen_endpoint)
+        .await
+        .unwrap();
+    stream.write_all(b"after").await.unwrap();
+    stream.shutdown().await.unwrap();
+    let mut echoed = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut echoed))
+        .await
+        .expect("future tcp connection should succeed after connect-side reconnect")
+        .unwrap();
+    assert_eq!(echoed, b"after");
+
+    tokio::time::sleep(Duration::from_millis(250)).await;
+
+    let mut later = tokio::net::TcpStream::connect(&listen_endpoint)
+        .await
+        .unwrap();
+    later.write_all(b"later").await.unwrap();
+    later.shutdown().await.unwrap();
+    let mut echoed_later = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), later.read_to_end(&mut echoed_later))
+        .await
+        .expect("forward should stay usable after connect-side reconnect settles")
+        .unwrap();
+    assert_eq!(echoed_later, b"later");
+
+    let listed = fixture
+        .client
+        .call_tool(
+            "forward_ports",
+            &ForwardPortsInput::List {
+                forward_ids: vec![forward_id.clone()],
+                listen_side: None,
+                connect_side: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(!listed.is_error, "list failed: {}", listed.text_output);
+    assert_eq!(listed.structured_content["forwards"][0]["status"], "open");
+
+    let close = fixture
+        .client
+        .call_tool(
+            "forward_ports",
+            &ForwardPortsInput::Close {
+                forward_ids: vec![forward_id],
+            },
+        )
+        .await
+        .unwrap();
+    assert!(!close.is_error, "close failed: {}", close.text_output);
+    assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
+}
+
+#[tokio::test]
 async fn real_cpp_daemon_releases_listener_after_broker_crash() {
     let mut fixture = CrashableCppDaemonBrokerFixture::spawn().await;
     let listen_addr = allocate_addr();
@@ -478,6 +578,27 @@ pty = "none"
                 &ForwardPortsInput::Open {
                     listen_side: "builder-cpp".to_string(),
                     connect_side: "local".to_string(),
+                    forwards: vec![remote_exec_proto::public::ForwardPortSpec {
+                        listen_endpoint: "127.0.0.1:0".to_string(),
+                        connect_endpoint: connect_endpoint.to_string(),
+                        protocol: ForwardPortProtocol::Tcp,
+                    }],
+                },
+            )
+            .await
+            .unwrap()
+    }
+
+    async fn open_tcp_forward_local_to_cpp(
+        &self,
+        connect_endpoint: &str,
+    ) -> remote_exec_broker::client::ToolResponse {
+        self.client
+            .call_tool(
+                "forward_ports",
+                &ForwardPortsInput::Open {
+                    listen_side: "local".to_string(),
+                    connect_side: "builder-cpp".to_string(),
                     forwards: vec![remote_exec_proto::public::ForwardPortSpec {
                         listen_endpoint: "127.0.0.1:0".to_string(),
                         connect_endpoint: connect_endpoint.to_string(),

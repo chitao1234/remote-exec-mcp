@@ -84,13 +84,14 @@ sockets, non-loopback listen binds, and the same bare-port normalization where
 not exposed.
 
 Live forwarded sockets are reconnect-aware in-memory daemon state. When only the
-broker-daemon transport drops and the daemon stays alive, the daemon retains the
-forward itself plus future TCP accepts or future UDP datagrams on the listen
-side so the broker can resume the tunnel. Active TCP streams and UDP per-peer
-connector state are not preserved across reconnect. A broker restart still drops
-the broker-owned `forward_id` mapping, and a daemon restart still destroys the
-forward. If the broker disappears without reconnecting, the daemon reclaims
-detached listeners and UDP sockets after the reconnect grace window expires.
+broker-daemon transport drops and the daemon stays alive, the broker may
+recover from transport loss on either forwarding side while the daemon retains
+the forward itself plus future TCP accepts or future UDP datagrams on the
+listen side. Active TCP streams and UDP per-peer connector state are not
+preserved across reconnect. A broker restart still drops the broker-owned
+`forward_id` mapping, and a daemon restart still destroys the forward. If the
+broker disappears without reconnecting, the daemon reclaims detached listeners
+and UDP sockets after the reconnect grace window expires.
 Daemon shutdown closes live forwarded sockets promptly.
 Recoverable peer abort/reset errors during forwarding are reported as normal
 request failures and do not terminate the daemon process.

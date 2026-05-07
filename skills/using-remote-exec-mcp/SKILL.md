@@ -507,7 +507,7 @@ How to use it:
 - Supported `protocol` values are `tcp` and `udp`.
 - Keep the returned `forward_id`; use it to close the forward explicitly.
 - `forward_id` is broker runtime state only. If the broker restarts, reopen the forward instead of trying to reuse the old id.
-- If only the broker-daemon transport drops while the daemon stays alive, the broker may resume the same forward and preserve future listen-side TCP accepts or UDP datagrams.
+- If only the broker-daemon transport drops while the daemon stays alive, the broker may resume the same forward after transport loss on either forwarding side and preserve future listen-side TCP accepts or UDP datagrams.
 - Do not expect active TCP streams or UDP per-peer connector state to survive a reconnect; treat those as lost and let future connections recreate them.
 - If the daemon restarts, or if the broker restarts and loses the broker-owned mapping, treat that forward as gone and open a new one.
 - If the broker crashes without reconnecting, daemon-side listeners are reclaimed after the internal reconnect grace window expires, and reopening still creates a fresh `forward_id`.
@@ -574,7 +574,7 @@ Structured result fields:
 - On POSIX C++ daemon targets, transfer symlink modes are supported.
 - On Windows XP-compatible C++ daemon targets, symlink entries inside directory transfers and import archives are skipped with warnings when preservation is unavailable; use `symlink_mode: "follow"` to copy regular-file and directory targets when the platform exposes them.
 - On C++ daemon targets, transfer compression is never used; the broker falls back automatically.
-- On C++ daemon targets, `forward_ports` uses the same daemon-private HTTP/1.1 Upgrade tunnel, reconnect behavior, and broker-owned `forward_id` lifecycle as the Rust daemon.
+- On C++ daemon targets, `forward_ports` uses the same daemon-private HTTP/1.1 Upgrade tunnel, both-side reconnect behavior, and broker-owned `forward_id` lifecycle as the Rust daemon.
 - On C++ daemon targets, recoverable peer abort/reset errors during forwarding surface as normal tool errors and do not terminate the daemon.
 - Do not assume hard links, sparse files, or special files transfer on C++ daemon targets; special files are skipped during export.
 
