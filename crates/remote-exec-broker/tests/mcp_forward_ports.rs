@@ -443,6 +443,36 @@ async fn forward_ports_fails_when_resume_deadline_expires() {
 }
 
 #[tokio::test]
+async fn forward_ports_times_out_stalled_resume_attempts() {
+    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(3).await;
+    support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
+    support::stub_daemon::set_session_resume_timeout(
+        &fixture.stub_state,
+        Duration::from_millis(350),
+    )
+    .await;
+    support::stub_daemon::hang_session_resume(&fixture.stub_state).await;
+    let blackhole = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let blackhole_addr = blackhole.local_addr().unwrap();
+    drop(blackhole);
+
+    let open = fixture
+        .open_remote_tcp_forward(&blackhole_addr.to_string())
+        .await;
+    let forward_id = forward_id_from(&open);
+
+    support::stub_daemon::force_close_port_tunnel_transport(&fixture.stub_state).await;
+
+    let failed =
+        wait_for_forward_status(&fixture, &forward_id, "failed", Duration::from_secs(3)).await;
+    let error = failed["last_error"].as_str().unwrap_or_default();
+    assert!(
+        error.contains("reconnect timed out") || error.contains("resume attempt timed out"),
+        "unexpected error: {error}"
+    );
+}
+
+#[tokio::test]
 async fn forward_ports_does_not_retry_stream_error_frames() {
     let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(3).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;

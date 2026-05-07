@@ -57,6 +57,7 @@ pub(crate) use stub_daemon_transfer::{
 enum ResumeBehavior {
     PassThrough,
     DropTransport,
+    HangTransport,
     SendError { code: String, message: String },
 }
 
@@ -81,6 +82,7 @@ struct StubPortTunnelControl {
     close_transports_on_second_session_open: bool,
     session_open_count: usize,
     delay_session_ready_after_first: Option<Duration>,
+    override_session_ready_resume_timeout_ms: Option<u64>,
     session_ready_count: usize,
     active_transports: Vec<CancellationToken>,
     active_udp_connector_streams: HashSet<u32>,
@@ -98,6 +100,7 @@ impl Default for StubPortTunnelControl {
             close_transports_on_second_session_open: false,
             session_open_count: 0,
             delay_session_ready_after_first: None,
+            override_session_ready_resume_timeout_ms: None,
             session_ready_count: 0,
             active_transports: Vec::new(),
             active_udp_connector_streams: HashSet::new(),
@@ -204,6 +207,18 @@ pub(crate) async fn force_close_port_tunnel_transport(state: &StubDaemonState) {
 
 pub(crate) async fn block_session_resume(state: &StubDaemonState) {
     state.port_tunnel_control.lock().await.resume_behavior = ResumeBehavior::DropTransport;
+}
+
+pub(crate) async fn hang_session_resume(state: &StubDaemonState) {
+    state.port_tunnel_control.lock().await.resume_behavior = ResumeBehavior::HangTransport;
+}
+
+pub(crate) async fn set_session_resume_timeout(state: &StubDaemonState, timeout: Duration) {
+    state
+        .port_tunnel_control
+        .lock()
+        .await
+        .override_session_ready_resume_timeout_ms = Some(timeout.as_millis() as u64);
 }
 
 pub(crate) async fn set_port_tunnel_resume_error(
@@ -629,6 +644,10 @@ where
         {
             ResumeBehavior::PassThrough => {}
             ResumeBehavior::DropTransport => return Ok(()),
+            ResumeBehavior::HangTransport => {
+                std::future::pending::<()>().await;
+                return Ok(());
+            }
             ResumeBehavior::SendError { code, message } => {
                 write_frame(
                     &mut stream,
@@ -716,7 +735,7 @@ where
                 let Some(frame) = frame_from_result(frame)? else {
                     return Ok(());
                 };
-                if should_forward_daemon_to_broker_frame(&state, &frame).await {
+                if let Some(frame) = daemon_to_broker_frame(&state, frame).await? {
                     write_frame(&mut external, &frame).await?;
                 }
             }
@@ -787,8 +806,11 @@ async fn observe_broker_to_daemon_frame(
     Ok(observed)
 }
 
-async fn should_forward_daemon_to_broker_frame(state: &StubDaemonState, frame: &Frame) -> bool {
-    let (delay, should_forward) = {
+async fn daemon_to_broker_frame(
+    state: &StubDaemonState,
+    mut frame: Frame,
+) -> anyhow::Result<Option<Frame>> {
+    let (delay, should_forward, resume_timeout_ms) = {
         let mut control = state.port_tunnel_control.lock().await;
         if frame.frame_type == FrameType::Close {
             control
@@ -806,17 +828,30 @@ async fn should_forward_daemon_to_broker_frame(state: &StubDaemonState, frame: &
         } else {
             None
         };
+        let resume_timeout_ms = if frame.frame_type == FrameType::SessionReady {
+            control.override_session_ready_resume_timeout_ms
+        } else {
+            None
+        };
         let should_forward = !(frame.frame_type == FrameType::TcpConnectOk
             && matches!(
                 control.tcp_connect_ok_behavior,
                 TcpConnectOkBehavior::DropAll
             ));
-        (delay, should_forward)
+        (delay, should_forward, resume_timeout_ms)
     };
     if let Some(delay) = delay {
         tokio::time::sleep(delay).await;
     }
-    should_forward
+    if !should_forward {
+        return Ok(None);
+    }
+    if let Some(resume_timeout_ms) = resume_timeout_ms {
+        let mut meta: serde_json::Value = serde_json::from_slice(&frame.meta)?;
+        meta["resume_timeout_ms"] = serde_json::json!(resume_timeout_ms);
+        frame.meta = serde_json::to_vec(&meta)?;
+    }
+    Ok(Some(frame))
 }
 
 fn validate_port_tunnel_upgrade_headers(

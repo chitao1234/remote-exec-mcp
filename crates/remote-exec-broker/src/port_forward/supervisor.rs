@@ -447,9 +447,18 @@ pub(super) async fn reconnect_listen_tunnel(
         if cancel.is_cancelled() {
             return Ok(None);
         }
-        match try_resume_listen_tunnel(&control).await {
-            Ok(tunnel) => return Ok(Some(tunnel)),
-            Err(err) if is_retryable_transport_error(&err) => {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        let attempt = tokio::select! {
+            _ = cancel.cancelled() => return Ok(None),
+            attempt = tokio::time::timeout(remaining, try_resume_listen_tunnel(&control)) => attempt,
+        };
+        match attempt {
+            Err(_) => break,
+            Ok(Ok(tunnel)) => return Ok(Some(tunnel)),
+            Ok(Err(err)) if is_retryable_transport_error(&err) => {
                 if Instant::now() >= deadline {
                     break;
                 }
@@ -464,7 +473,7 @@ pub(super) async fn reconnect_listen_tunnel(
                 }
                 backoff = std::cmp::min(backoff + backoff, LISTEN_RECONNECT_MAX_BACKOFF);
             }
-            Err(err) => return Err(err),
+            Ok(Err(err)) => return Err(err),
         }
     }
 
