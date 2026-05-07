@@ -589,16 +589,13 @@ async fn proxy_port_tunnel_streams(
                             0,
                         ])
                         .await?;
-                    match tokio::time::timeout(
+                    if let Ok(Ok(frame)) = tokio::time::timeout(
                         Duration::from_secs(1),
                         read_frame(&mut backend_stream),
                     )
-                        .await
+                    .await
                     {
-                        Ok(Ok(frame)) => {
-                            write_frame(&mut client_stream, &frame).await?;
-                        }
-                        Ok(Err(_)) | Err(_) => {}
+                        write_frame(&mut client_stream, &frame).await?;
                     }
                     let _ = backend_stream.shutdown().await;
                     let _ = client_stream.shutdown().await;

@@ -188,7 +188,11 @@ async fn terminal_port_tunnel_error_returns_fatal_error_frame_before_closing() {
     let meta = serde_json::from_slice::<serde_json::Value>(&error.meta).unwrap();
     assert_eq!(meta["code"], "invalid_port_tunnel");
     assert_eq!(meta["fatal"], true);
-    assert!(meta["message"].as_str().is_some_and(|message| !message.is_empty()));
+    assert!(
+        meta["message"]
+            .as_str()
+            .is_some_and(|message| !message.is_empty())
+    );
 
     wait_until_bindable(&endpoint).await;
 }

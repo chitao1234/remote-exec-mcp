@@ -298,7 +298,8 @@ async fn forward_ports_reconnect_after_live_tunnel_drop_and_accept_new_tcp_conne
 }
 
 #[tokio::test]
-async fn terminal_port_tunnel_corruption_releases_remote_listener_without_waiting_for_resume_timeout() {
+async fn terminal_port_tunnel_corruption_releases_remote_listener_without_waiting_for_resume_timeout()
+ {
     let cluster = support::spawn_cluster().await;
     let echo_addr = support::spawn_tcp_echo().await;
 

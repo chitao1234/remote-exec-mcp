@@ -1,6 +1,6 @@
+use std::collections::HashSet;
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
 use std::path::PathBuf;
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -208,7 +208,11 @@ pub(crate) async fn set_port_tunnel_resume_error(
 }
 
 pub(crate) async fn drop_tcp_connect_ok_frames(state: &StubDaemonState) {
-    state.port_tunnel_control.lock().await.tcp_connect_ok_behavior = TcpConnectOkBehavior::DropAll;
+    state
+        .port_tunnel_control
+        .lock()
+        .await
+        .tcp_connect_ok_behavior = TcpConnectOkBehavior::DropAll;
 }
 
 pub(crate) async fn udp_connector_stats(state: &StubDaemonState) -> UdpConnectorStats {
@@ -689,22 +693,26 @@ async fn observe_broker_to_daemon_frame(state: &StubDaemonState, frame: &Frame) 
                 .max(control.active_udp_connector_streams.len());
         }
         FrameType::Close => {
-            control.active_udp_connector_streams.remove(&frame.stream_id);
+            control
+                .active_udp_connector_streams
+                .remove(&frame.stream_id);
         }
         _ => {}
     }
 }
 
-async fn should_forward_daemon_to_broker_frame(
-    state: &StubDaemonState,
-    frame: &Frame,
-) -> bool {
+async fn should_forward_daemon_to_broker_frame(state: &StubDaemonState, frame: &Frame) -> bool {
     let mut control = state.port_tunnel_control.lock().await;
     if frame.frame_type == FrameType::Close {
-        control.active_udp_connector_streams.remove(&frame.stream_id);
+        control
+            .active_udp_connector_streams
+            .remove(&frame.stream_id);
     }
     if frame.frame_type == FrameType::TcpConnectOk
-        && matches!(control.tcp_connect_ok_behavior, TcpConnectOkBehavior::DropAll)
+        && matches!(
+            control.tcp_connect_ok_behavior,
+            TcpConnectOkBehavior::DropAll
+        )
     {
         return false;
     }

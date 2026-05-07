@@ -476,9 +476,7 @@ pub async fn spawn_broker_with_stub_port_forward_version(version: u32) -> Broker
     }
 }
 
-pub async fn spawn_broker_with_local_and_stub_port_forward_version(
-    version: u32,
-) -> BrokerFixture {
+pub async fn spawn_broker_with_local_and_stub_port_forward_version(version: u32) -> BrokerFixture {
     remote_exec_daemon::install_crypto_provider();
 
     let tempdir = tempfile::tempdir().unwrap();
