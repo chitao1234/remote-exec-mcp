@@ -16,8 +16,7 @@ use super::stub_daemon::{
 pub struct BrokerFixture {
     pub _tempdir: TempDir,
     pub client: RunningService<RoleClient, DummyClientHandler>,
-    #[allow(dead_code, reason = "Shared across broker integration test crates")]
-    pub(super) stub_state: StubDaemonState,
+    pub(crate) stub_state: StubDaemonState,
 }
 
 impl BrokerFixture {
@@ -46,6 +45,40 @@ impl BrokerFixture {
             .unwrap();
 
         ToolResult::from_call_tool_result(result)
+    }
+
+    pub async fn open_remote_tcp_forward(&self, connect_endpoint: &str) -> ToolResult {
+        self.call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "builder-a",
+                "connect_side": "local",
+                "forwards": [{
+                    "listen_endpoint": "127.0.0.1:0",
+                    "connect_endpoint": connect_endpoint,
+                    "protocol": "tcp"
+                }]
+            }),
+        )
+        .await
+    }
+
+    pub async fn open_remote_udp_forward(&self, connect_endpoint: &str) -> ToolResult {
+        self.call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "builder-a",
+                "connect_side": "local",
+                "forwards": [{
+                    "listen_endpoint": "127.0.0.1:0",
+                    "connect_endpoint": connect_endpoint,
+                    "protocol": "udp"
+                }]
+            }),
+        )
+        .await
     }
 }
 

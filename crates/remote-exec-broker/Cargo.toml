@@ -23,6 +23,8 @@ base64 = { workspace = true }
 clap = { workspace = true }
 futures-util = { workspace = true }
 http-body-util = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
 remote-exec-host = { path = "../remote-exec-host", default-features = false }
 remote-exec-proto = { path = "../remote-exec-proto" }
 reqwest = { workspace = true }

@@ -3,19 +3,30 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::body::Body;
 use axum::extract::Request;
 use axum::extract::State;
-use axum::http::StatusCode;
-use axum::http::header::{AUTHORIZATION, WWW_AUTHENTICATE};
+use axum::http::header::{AUTHORIZATION, CONNECTION, UPGRADE, WWW_AUTHENTICATE};
+use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
+use hyper::upgrade;
+use hyper_util::rt::TokioIo;
+use remote_exec_host::{
+    HostRuntimeConfig, ProcessEnvironment, PtyMode, YieldTimeConfig, build_runtime_state,
+};
+use remote_exec_proto::port_tunnel::{
+    Frame, FrameType, TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, UPGRADE_TOKEN,
+    read_frame, read_preface, write_frame, write_preface,
+};
 use remote_exec_proto::rpc::{
     ExecWarning, HealthCheckResponse, ImageReadResponse, PatchApplyRequest, PatchApplyResponse,
     RpcErrorBody, TargetInfoResponse,
 };
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
 use super::certs::TestCerts;
@@ -42,6 +53,30 @@ pub(crate) use stub_daemon_transfer::{
 };
 
 #[derive(Clone)]
+enum ResumeBehavior {
+    PassThrough,
+    DropTransport,
+    SendError { code: String, message: String },
+}
+
+#[derive(Clone)]
+struct StubPortTunnelControl {
+    enabled: bool,
+    resume_behavior: ResumeBehavior,
+    active_transports: Vec<CancellationToken>,
+}
+
+impl Default for StubPortTunnelControl {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            resume_behavior: ResumeBehavior::PassThrough,
+            active_transports: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone)]
 pub(crate) struct StubDaemonState {
     pub(super) target: String,
     pub(super) daemon_instance_id: Arc<Mutex<String>>,
@@ -63,6 +98,8 @@ pub(crate) struct StubDaemonState {
     pub(super) image_read_response: Arc<Mutex<StubImageReadResponse>>,
     transfer_export_response: Arc<Mutex<stub_daemon_transfer::StubTransferExportResponse>>,
     transfer_path_info_response: Arc<Mutex<StubTransferPathInfoResponse>>,
+    port_tunnel_state: Arc<remote_exec_host::HostRuntimeState>,
+    port_tunnel_control: Arc<Mutex<StubPortTunnelControl>>,
 }
 
 pub(super) fn stub_daemon_state(
@@ -101,6 +138,8 @@ pub(super) fn stub_daemon_state(
         transfer_path_info_response: Arc::new(Mutex::new(
             stub_daemon_transfer::default_transfer_path_info_response(),
         )),
+        port_tunnel_state: build_stub_port_tunnel_state(target),
+        port_tunnel_control: Arc::new(Mutex::new(StubPortTunnelControl::default())),
     }
 }
 
@@ -115,6 +154,35 @@ pub(super) fn set_port_forward_support(state: &mut StubDaemonState, enabled: boo
 
 pub(super) fn set_required_bearer_token(state: &mut StubDaemonState, token: &str) {
     state.required_bearer_token = Some(token.to_string());
+}
+
+pub(crate) async fn enable_reconnectable_port_tunnel(state: &StubDaemonState) {
+    state.port_tunnel_control.lock().await.enabled = true;
+}
+
+pub(crate) async fn force_close_port_tunnel_transport(state: &StubDaemonState) {
+    let active_transports = {
+        let mut control = state.port_tunnel_control.lock().await;
+        std::mem::take(&mut control.active_transports)
+    };
+    for transport in active_transports {
+        transport.cancel();
+    }
+}
+
+pub(crate) async fn block_session_resume(state: &StubDaemonState) {
+    state.port_tunnel_control.lock().await.resume_behavior = ResumeBehavior::DropTransport;
+}
+
+pub(crate) async fn set_port_tunnel_resume_error(
+    state: &StubDaemonState,
+    code: &str,
+    message: &str,
+) {
+    state.port_tunnel_control.lock().await.resume_behavior = ResumeBehavior::SendError {
+        code: code.to_string(),
+        message: message.to_string(),
+    };
 }
 
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
@@ -259,6 +327,7 @@ pub(super) fn stub_router(state: StubDaemonState) -> Router {
     Router::new()
         .route("/v1/health", post(health))
         .route("/v1/target-info", post(target_info))
+        .route("/v1/port/tunnel", post(port_tunnel))
         .route("/v1/exec/start", post(stub_daemon_exec::exec_start))
         .route("/v1/exec/write", post(stub_daemon_exec::exec_write))
         .route("/v1/patch/apply", post(patch_apply))
@@ -337,6 +406,45 @@ async fn target_info(State(state): State<StubDaemonState>) -> Json<TargetInfoRes
     })
 }
 
+async fn port_tunnel(
+    State(state): State<StubDaemonState>,
+    headers: HeaderMap,
+    request: Request,
+) -> Result<Response, (StatusCode, Json<RpcErrorBody>)> {
+    {
+        let control = state.port_tunnel_control.lock().await;
+        if !control.enabled {
+            return Err(unsupported_port_tunnel_request());
+        }
+    }
+
+    validate_port_tunnel_upgrade_headers(&headers)?;
+    let on_upgrade = upgrade::on(request);
+    let handler_state = state.clone();
+
+    tokio::spawn(async move {
+        match on_upgrade.await {
+            Ok(upgraded) => {
+                if let Err(err) =
+                    handle_port_tunnel_upgrade(handler_state, TokioIo::new(upgraded)).await
+                {
+                    tracing::warn!(error = %err, "stub port tunnel upgrade failed");
+                }
+            }
+            Err(err) => {
+                tracing::warn!(error = %err, "stub port tunnel upgrade failed");
+            }
+        }
+    });
+
+    Ok((
+        StatusCode::SWITCHING_PROTOCOLS,
+        [(CONNECTION, "Upgrade"), (UPGRADE, UPGRADE_TOKEN)],
+        Body::empty(),
+    )
+        .into_response())
+}
+
 async fn patch_apply(
     State(state): State<StubDaemonState>,
     Json(req): Json<PatchApplyRequest>,
@@ -411,4 +519,147 @@ async fn wait_until_ready_http(addr: std::net::SocketAddr) {
     }
 
     panic!("plain http stub daemon did not become ready");
+}
+
+fn build_stub_port_tunnel_state(target: &str) -> Arc<remote_exec_host::HostRuntimeState> {
+    let workdir = std::env::temp_dir().join(format!(
+        "remote-exec-broker-stub-port-tunnel-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&workdir).unwrap();
+    Arc::new(
+        build_runtime_state(HostRuntimeConfig {
+            target: target.to_string(),
+            default_workdir: workdir,
+            windows_posix_root: None,
+            sandbox: None,
+            enable_transfer_compression: true,
+            allow_login_shell: true,
+            pty: PtyMode::None,
+            default_shell: None,
+            yield_time: YieldTimeConfig::default(),
+            experimental_apply_patch_target_encoding_autodetect: false,
+            process_environment: ProcessEnvironment::capture_current(),
+        })
+        .unwrap(),
+    )
+}
+
+async fn handle_port_tunnel_upgrade<S>(
+    state: StubDaemonState,
+    mut stream: S,
+) -> anyhow::Result<()>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    read_preface(&mut stream).await?;
+    let first_frame = read_frame(&mut stream).await?;
+
+    if first_frame.frame_type == FrameType::SessionResume {
+        match state.port_tunnel_control.lock().await.resume_behavior.clone() {
+            ResumeBehavior::PassThrough => {}
+            ResumeBehavior::DropTransport => return Ok(()),
+            ResumeBehavior::SendError { code, message } => {
+                write_frame(
+                    &mut stream,
+                    &Frame {
+                        frame_type: FrameType::Error,
+                        flags: 0,
+                        stream_id: 0,
+                        meta: serde_json::to_vec(&serde_json::json!({
+                            "code": code,
+                            "message": message,
+                            "fatal": false,
+                        }))?,
+                        data: Vec::new(),
+                    },
+                )
+                .await?;
+                return Ok(());
+            }
+        }
+    }
+
+    let (mut broker_side, daemon_side) = tokio::io::duplex(256 * 1024);
+    let tunnel_state = state.port_tunnel_state.clone();
+    tokio::spawn(async move {
+        let _ = remote_exec_host::port_forward::serve_tunnel(tunnel_state, daemon_side).await;
+    });
+    write_preface(&mut broker_side).await?;
+    write_frame(&mut broker_side, &first_frame).await?;
+
+    let cancel = CancellationToken::new();
+    state
+        .port_tunnel_control
+        .lock()
+        .await
+        .active_transports
+        .push(cancel.clone());
+
+    tokio::select! {
+        _ = cancel.cancelled() => {}
+        result = tokio::io::copy_bidirectional(&mut stream, &mut broker_side) => {
+            result?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_port_tunnel_upgrade_headers(
+    headers: &HeaderMap,
+) -> Result<(), (StatusCode, Json<RpcErrorBody>)> {
+    if !header_contains_token(headers, CONNECTION.as_str(), "upgrade") {
+        return Err(bad_port_tunnel_request("missing `Connection: Upgrade` header"));
+    }
+    if !header_eq(headers, UPGRADE.as_str(), UPGRADE_TOKEN) {
+        return Err(bad_port_tunnel_request(format!(
+            "missing `Upgrade: {UPGRADE_TOKEN}` header"
+        )));
+    }
+    if !header_eq(
+        headers,
+        TUNNEL_PROTOCOL_VERSION_HEADER,
+        TUNNEL_PROTOCOL_VERSION,
+    ) {
+        return Err(bad_port_tunnel_request(format!(
+            "missing `{TUNNEL_PROTOCOL_VERSION_HEADER}: {TUNNEL_PROTOCOL_VERSION}` header"
+        )));
+    }
+    Ok(())
+}
+
+fn header_contains_token(headers: &HeaderMap, name: &str, expected: &str) -> bool {
+    headers
+        .get_all(name)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .any(|token| token.trim().eq_ignore_ascii_case(expected))
+}
+
+fn header_eq(headers: &HeaderMap, name: &str, expected: &str) -> bool {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.eq_ignore_ascii_case(expected))
+}
+
+fn unsupported_port_tunnel_request() -> (StatusCode, Json<RpcErrorBody>) {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(RpcErrorBody {
+            code: "unsupported_operation".to_string(),
+            message: "stub port tunnel support is disabled".to_string(),
+        }),
+    )
+}
+
+fn bad_port_tunnel_request(message: impl Into<String>) -> (StatusCode, Json<RpcErrorBody>) {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(RpcErrorBody {
+            code: "bad_request".to_string(),
+            message: message.into(),
+        }),
+    )
 }

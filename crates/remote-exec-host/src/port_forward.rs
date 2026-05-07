@@ -42,6 +42,7 @@ struct SessionState {
     id: String,
     root_cancel: CancellationToken,
     attachment: Mutex<Option<Arc<AttachmentState>>>,
+    attachment_notify: tokio::sync::Notify,
     resume_deadline: Mutex<Option<Instant>>,
     retained_listener: Mutex<Option<RetainedListener>>,
     retained_udp_bind: Mutex<Option<RetainedUdpBind>>,
@@ -219,6 +220,7 @@ async fn tunnel_session_open(
         id: format!("sess_{}", uuid::Uuid::new_v4().simple()),
         root_cancel: tunnel.state.shutdown.child_token(),
         attachment: Mutex::new(None),
+        attachment_notify: tokio::sync::Notify::new(),
         resume_deadline: Mutex::new(None),
         retained_listener: Mutex::new(None),
         retained_udp_bind: Mutex::new(None),
@@ -379,30 +381,32 @@ async fn tunnel_tcp_accept_loop(
     listener: Arc<TcpListener>,
 ) {
     loop {
+        let Some(attachment) = wait_for_session_attachment(&session).await else {
+            return;
+        };
         let accepted = tokio::select! {
             _ = session.root_cancel.cancelled() => return,
+            _ = attachment.cancel.cancelled() => continue,
             accepted = listener.accept() => accepted,
         };
         let (stream, peer) = match accepted {
             Ok(accepted) => accepted,
             Err(err) => {
-                if let Some(attachment) = session.current_attachment().await {
-                    let _ = send_tunnel_error_with_sender(
-                        &attachment.tx,
-                        listener_stream_id(&session).await.unwrap_or(0),
-                        "port_accept_failed",
-                        err.to_string(),
-                        false,
-                    )
-                    .await;
-                }
+                let _ = send_tunnel_error_with_sender(
+                    &attachment.tx,
+                    listener_stream_id(&session).await.unwrap_or(0),
+                    "port_accept_failed",
+                    err.to_string(),
+                    false,
+                )
+                .await;
                 return;
             }
         };
-        let Some(attachment) = session.current_attachment().await else {
+        if attachment.cancel.is_cancelled() {
             drop(stream);
             continue;
-        };
+        }
         let stream_id = session.next_daemon_stream_id.fetch_add(2, Ordering::Relaxed);
         let listener_stream_id = listener_stream_id(&session).await.unwrap_or(0);
         let (reader, writer) = stream.into_split();
@@ -639,6 +643,7 @@ async fn tunnel_tcp_read_loop_transport_owned(
                         data: Vec::new(),
                     })
                     .await;
+                let _ = tunnel.stream_cancels.lock().await.remove(&stream_id);
                 return;
             }
             Ok(read) => {
@@ -695,7 +700,6 @@ async fn tunnel_tcp_read_loop_session_owned(
                         data: Vec::new(),
                     })
                     .await;
-                let _ = attachment.tcp_writers.lock().await.remove(&stream_id);
                 let _ = attachment.stream_cancels.lock().await.remove(&stream_id);
                 return;
             }
@@ -1171,6 +1175,7 @@ async fn attach_session_to_tunnel(
     }
     *session.resume_deadline.lock().await = None;
     *tunnel.attached_session.lock().await = Some(session.clone());
+    session.attachment_notify.notify_waiters();
     Ok(())
 }
 
@@ -1193,6 +1198,20 @@ async fn listener_stream_id(session: &Arc<SessionState>) -> Option<u32> {
     match session.retained_listener.lock().await.as_ref() {
         Some(RetainedListener::Tcp { stream_id, .. }) => Some(*stream_id),
         None => None,
+    }
+}
+
+async fn wait_for_session_attachment(
+    session: &Arc<SessionState>,
+) -> Option<Arc<AttachmentState>> {
+    loop {
+        if let Some(attachment) = session.current_attachment().await {
+            return Some(attachment);
+        }
+        tokio::select! {
+            _ = session.root_cancel.cancelled() => return None,
+            _ = session.attachment_notify.notified() => {}
+        }
     }
 }
 
@@ -1470,6 +1489,25 @@ mod port_tunnel_tests {
         tokio::time::sleep(Duration::from_millis(250)).await;
 
         wait_until_bindable(&bound_endpoint).await;
+    }
+
+    #[tokio::test]
+    async fn detached_tcp_listener_accepts_after_resume_not_before() {
+        let state = test_state();
+        let listen_endpoint = free_loopback_endpoint().await;
+        let (bound_endpoint, session_id) = open_resumable_tcp_listener(&state, &listen_endpoint).await;
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let client = tokio::net::TcpStream::connect(&bound_endpoint).await.unwrap();
+        let mut resumed = resume_session(&state, &session_id).await;
+
+        let frame = tokio::time::timeout(Duration::from_secs(1), read_frame(&mut resumed))
+            .await
+            .expect("accept should arrive after resume")
+            .unwrap();
+        assert_eq!(frame.frame_type, FrameType::TcpAccept);
+
+        drop(client);
     }
 
     #[tokio::test]
