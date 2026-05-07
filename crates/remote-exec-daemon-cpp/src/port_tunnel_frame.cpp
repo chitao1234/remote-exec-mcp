@@ -26,6 +26,14 @@ PortTunnelFrameType frame_type_from_byte(unsigned char value) {
             return PortTunnelFrameType::Error;
         case 2:
             return PortTunnelFrameType::Close;
+        case 3:
+            return PortTunnelFrameType::SessionOpen;
+        case 4:
+            return PortTunnelFrameType::SessionReady;
+        case 5:
+            return PortTunnelFrameType::SessionResume;
+        case 6:
+            return PortTunnelFrameType::SessionResumed;
         case 10:
             return PortTunnelFrameType::TcpListen;
         case 11:

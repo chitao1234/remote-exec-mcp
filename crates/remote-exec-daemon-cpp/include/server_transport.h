@@ -97,6 +97,7 @@ private:
 
 int last_socket_error();
 bool would_block_error(int error);
+bool receive_timeout_error(int error);
 std::string socket_error_message(const std::string& operation);
 void close_socket(SOCKET socket);
 void shutdown_socket(SOCKET socket);

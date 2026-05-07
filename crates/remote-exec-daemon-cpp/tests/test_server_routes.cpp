@@ -13,6 +13,7 @@
 #include "platform.h"
 #include "base64_codec.h"
 #include "port_forward_endpoint.h"
+#include "port_tunnel.h"
 #include "process_session.h"
 #include "server_routes.h"
 #include "transfer_ops.h"
@@ -47,6 +48,7 @@ static void initialize_state(AppState& state, const fs::path& root) {
     state.daemon_instance_id = "test-instance";
     state.hostname = "test-host";
     state.default_shell = platform::resolve_default_shell("");
+    state.port_tunnel_service = create_port_tunnel_service();
 }
 
 static void enable_sandbox(AppState& state) {

@@ -21,6 +21,7 @@
 #include "platform.h"
 #include "port_forward_endpoint.h"
 #include "port_forward_socket_ops.h"
+#include "port_tunnel.h"
 #include "port_tunnel_frame.h"
 #include "process_session.h"
 #include "server.h"
@@ -56,6 +57,7 @@ static void initialize_state(AppState& state, const fs::path& root) {
     state.daemon_instance_id = "test-instance";
     state.hostname = "test-host";
     state.default_shell = platform::resolve_default_shell("");
+    state.port_tunnel_service = create_port_tunnel_service();
 }
 
 static void enable_sandbox(AppState& state) {
@@ -413,7 +415,7 @@ static void open_tunnel(AppState& state, UniqueSocket* client_socket, std::threa
         "POST /v1/port/tunnel HTTP/1.1\r\n"
         "Connection: Upgrade\r\n"
         "Upgrade: remote-exec-port-tunnel\r\n"
-        "X-Remote-Exec-Port-Tunnel-Version: 1\r\n"
+        "X-Remote-Exec-Port-Tunnel-Version: 2\r\n"
         "\r\n"
     );
     const std::string response = read_http_head_from_socket(client_socket->get());
@@ -538,6 +540,89 @@ static void assert_tunnel_udp_bind_emits_two_peer_datagrams(AppState& state) {
     close_tunnel(&client_socket, &server_thread);
 }
 
+static void assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(AppState& state) {
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_tunnel(state, &client_socket, &server_thread);
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::SessionOpen, 0U, Json::object())
+    );
+    const PortTunnelFrame ready = read_tunnel_frame(client_socket.get());
+    assert(ready.type == PortTunnelFrameType::SessionReady);
+    const Json ready_meta = Json::parse(ready.meta);
+    const std::string session_id = ready_meta.at("session_id").get<std::string>();
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}})
+    );
+    const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
+    assert(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
+
+    close_tunnel(&client_socket, &server_thread);
+
+    open_tunnel(state, &client_socket, &server_thread);
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::SessionResume, 0U, Json{{"session_id", session_id}})
+    );
+    const PortTunnelFrame resumed = read_tunnel_frame(client_socket.get());
+    assert(resumed.type == PortTunnelFrameType::SessionResumed);
+
+    UniqueSocket peer(connect_port_forward_socket(endpoint, "tcp"));
+    assert(peer.valid());
+    const PortTunnelFrame accepted = read_tunnel_frame(client_socket.get());
+    assert(accepted.type == PortTunnelFrameType::TcpAccept);
+
+    close_tunnel(&client_socket, &server_thread);
+}
+
+static void assert_expired_tunnel_session_is_released(AppState& state) {
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_tunnel(state, &client_socket, &server_thread);
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::SessionOpen, 0U, Json::object())
+    );
+    const PortTunnelFrame ready = read_tunnel_frame(client_socket.get());
+    assert(ready.type == PortTunnelFrameType::SessionReady);
+    const Json ready_meta = Json::parse(ready.meta);
+    const std::string session_id = ready_meta.at("session_id").get<std::string>();
+    const unsigned long resume_timeout_ms =
+        ready_meta.at("resume_timeout_ms").get<unsigned long>();
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}})
+    );
+    const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
+    assert(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
+
+    close_tunnel(&client_socket, &server_thread);
+    platform::sleep_ms(resume_timeout_ms + 200UL);
+
+    open_tunnel(state, &client_socket, &server_thread);
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::SessionResume, 0U, Json{{"session_id", session_id}})
+    );
+    const PortTunnelFrame error = read_tunnel_frame(client_socket.get());
+    assert(error.type == PortTunnelFrameType::Error);
+    const Json error_meta = Json::parse(error.meta);
+    assert(error_meta.at("code").get<std::string>() == "port_tunnel_resume_expired");
+
+    close_tunnel(&client_socket, &server_thread);
+
+    UniqueSocket rebound(bind_port_forward_socket(endpoint, "tcp"));
+    assert(rebound.valid());
+}
+
 int main() {
     NetworkSession network;
     const fs::path root = make_test_root();
@@ -628,6 +713,8 @@ int main() {
     assert_tunnel_releases_tcp_listener_on_close(state);
     assert_tunnel_tcp_connect_echoes_binary_data(state);
     assert_tunnel_udp_bind_emits_two_peer_datagrams(state);
+    assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(state);
+    assert_expired_tunnel_session_is_released(state);
 
     return 0;
 }

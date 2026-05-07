@@ -18,6 +18,7 @@
 #include "logging.h"
 #include "path_policy.h"
 #include "platform.h"
+#include "port_tunnel.h"
 
 namespace {
 
@@ -80,6 +81,7 @@ ServerRuntime::ServerRuntime(const DaemonConfig& config)
     if (state_.sandbox_enabled) {
         state_.sandbox = compile_filesystem_sandbox(host_path_policy(), config.sandbox);
     }
+    state_.port_tunnel_service = create_port_tunnel_service();
 }
 
 ServerRuntime::~ServerRuntime() {

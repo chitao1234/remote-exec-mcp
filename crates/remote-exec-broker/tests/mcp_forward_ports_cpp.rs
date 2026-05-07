@@ -4,6 +4,7 @@
 mod support;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -13,6 +14,8 @@ use remote_exec_proto::public::{
 };
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+use tokio::sync::{Mutex, oneshot};
 
 #[tokio::test]
 async fn broker_forwards_ports_through_real_cpp_daemon_and_handles_port_conflicts() {
@@ -285,6 +288,48 @@ async fn broker_forwards_udp_datagrams_through_real_cpp_daemon_full_duplex() {
 }
 
 #[tokio::test]
+async fn cpp_forward_ports_reconnect_after_tunnel_drop() {
+    let fixture = CppDaemonBrokerFixture::spawn().await;
+    let echo_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let echo_addr = echo_listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let (mut stream, _) = match echo_listener.accept().await {
+                Ok(value) => value,
+                Err(_) => return,
+            };
+            tokio::spawn(async move {
+                let mut buf = [0u8; 1024];
+                loop {
+                    let read = match stream.read(&mut buf).await {
+                        Ok(0) => return,
+                        Ok(read) => read,
+                        Err(_) => return,
+                    };
+                    if stream.write_all(&buf[..read]).await.is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+    });
+
+    let open = fixture.open_tcp_forward(&echo_addr.to_string()).await;
+    let listen_endpoint = open.structured_content["forwards"][0]["listen_endpoint"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    fixture.drop_port_tunnels().await;
+
+    let mut stream = tokio::net::TcpStream::connect(&listen_endpoint).await.unwrap();
+    stream.write_all(b"after").await.unwrap();
+    let mut echoed = [0u8; 5];
+    stream.read_exact(&mut echoed).await.unwrap();
+    assert_eq!(&echoed, b"after");
+}
+
+#[tokio::test]
 async fn real_cpp_daemon_releases_listener_after_broker_crash() {
     let mut fixture = CrashableCppDaemonBrokerFixture::spawn().await;
     let listen_addr = allocate_addr();
@@ -330,6 +375,7 @@ async fn real_cpp_daemon_releases_listener_after_broker_crash() {
 struct CppDaemonBrokerFixture {
     _tempdir: TempDir,
     client: RemoteExecClient,
+    proxy: TunnelDropProxy,
     daemon: tokio::process::Child,
 }
 
@@ -350,11 +396,13 @@ impl CppDaemonBrokerFixture {
         std::fs::create_dir_all(&daemon_workdir).unwrap();
 
         let daemon_addr = allocate_addr();
+        let backend_addr = allocate_addr();
+        let proxy = TunnelDropProxy::spawn(daemon_addr, backend_addr).await;
         std::fs::write(
             &daemon_config,
             format!(
                 "target = builder-cpp\nlisten_host = 127.0.0.1\nlisten_port = {}\ndefault_workdir = {}\n{}",
-                daemon_addr.port(),
+                backend_addr.port(),
                 daemon_workdir.display(),
                 extra_daemon_config
             ),
@@ -394,15 +442,48 @@ pty = "none"
         Self {
             _tempdir: tempdir,
             client,
+            proxy,
             daemon,
         }
+    }
+
+    async fn open_tcp_forward(
+        &self,
+        connect_endpoint: &str,
+    ) -> remote_exec_broker::client::ToolResponse {
+        self.client
+            .call_tool(
+                "forward_ports",
+                &ForwardPortsInput::Open {
+                    listen_side: "builder-cpp".to_string(),
+                    connect_side: "local".to_string(),
+                    forwards: vec![remote_exec_proto::public::ForwardPortSpec {
+                        listen_endpoint: "127.0.0.1:0".to_string(),
+                        connect_endpoint: connect_endpoint.to_string(),
+                        protocol: ForwardPortProtocol::Tcp,
+                    }],
+                },
+            )
+            .await
+            .unwrap()
+    }
+
+    async fn drop_port_tunnels(&self) {
+        self.proxy.drop_port_tunnels().await;
     }
 }
 
 impl Drop for CppDaemonBrokerFixture {
     fn drop(&mut self) {
+        self.proxy.stop();
         let _ = self.daemon.start_kill();
     }
+}
+
+struct TunnelDropProxy {
+    active_port_tunnels: Arc<Mutex<Vec<oneshot::Sender<()>>>>,
+    shutdown: Option<oneshot::Sender<()>>,
+    handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 struct CrashableCppDaemonBrokerFixture {
@@ -556,6 +637,124 @@ impl Drop for CrashableCppDaemonBrokerFixture {
     }
 }
 
+impl TunnelDropProxy {
+    async fn spawn(listen_addr: std::net::SocketAddr, daemon_addr: std::net::SocketAddr) -> Self {
+        let listener = TcpListener::bind(listen_addr).await.unwrap();
+        let active_port_tunnels = Arc::new(Mutex::new(Vec::new()));
+        let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+        let active_port_tunnels_task = active_port_tunnels.clone();
+        let handle = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = &mut shutdown_rx => {
+                        break;
+                    }
+                    accepted = listener.accept() => {
+                        let (stream, _) = match accepted {
+                            Ok(value) => value,
+                            Err(_) => break,
+                        };
+                        let active_port_tunnels = active_port_tunnels_task.clone();
+                        tokio::spawn(async move {
+                            let _ = proxy_connection(stream, daemon_addr, active_port_tunnels).await;
+                        });
+                    }
+                }
+            }
+        });
+
+        Self {
+            active_port_tunnels,
+            shutdown: Some(shutdown_tx),
+            handle: Some(handle),
+        }
+    }
+
+    async fn drop_port_tunnels(&self) {
+        let mut active = self.active_port_tunnels.lock().await;
+        for shutdown in active.drain(..) {
+            let _ = shutdown.send(());
+        }
+    }
+
+    fn stop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        if let Some(handle) = self.handle.take() {
+            handle.abort();
+        }
+    }
+}
+
+async fn proxy_connection(
+    mut client_stream: tokio::net::TcpStream,
+    daemon_addr: std::net::SocketAddr,
+    active_port_tunnels: Arc<Mutex<Vec<oneshot::Sender<()>>>>,
+) -> std::io::Result<()> {
+    let mut backend_stream = tokio::net::TcpStream::connect(daemon_addr).await?;
+    let mut request = Vec::new();
+    let mut byte = [0u8; 1];
+
+    loop {
+        let read = client_stream.read(&mut byte).await?;
+        if read == 0 {
+            return Ok(());
+        }
+        request.push(byte[0]);
+        if request.ends_with(b"\r\n\r\n") {
+            break;
+        }
+    }
+
+    let request_text = String::from_utf8_lossy(&request);
+    let is_port_tunnel = is_port_tunnel_upgrade_request(&request_text);
+
+    backend_stream.write_all(&request).await?;
+
+    if is_port_tunnel {
+        let (drop_tx, drop_rx) = oneshot::channel();
+        active_port_tunnels.lock().await.push(drop_tx);
+        proxy_port_tunnel_streams(client_stream, backend_stream, drop_rx).await
+    } else {
+        proxy_plain_streams(client_stream, backend_stream).await
+    }
+}
+
+fn is_port_tunnel_upgrade_request(request: &str) -> bool {
+    let lower = request.to_ascii_lowercase();
+    let first_line = lower.lines().next().unwrap_or_default();
+    first_line.starts_with("post /v1/port/tunnel ")
+        && lower.contains("\r\nconnection: upgrade\r\n")
+        && lower.contains("\r\nupgrade: remote-exec-port-tunnel\r\n")
+}
+
+async fn proxy_plain_streams(
+    mut client_stream: tokio::net::TcpStream,
+    mut backend_stream: tokio::net::TcpStream,
+) -> std::io::Result<()> {
+    let _ = tokio::io::copy_bidirectional(&mut client_stream, &mut backend_stream).await?;
+    Ok(())
+}
+
+async fn proxy_port_tunnel_streams(
+    mut client_stream: tokio::net::TcpStream,
+    mut backend_stream: tokio::net::TcpStream,
+    mut drop_rx: oneshot::Receiver<()>,
+) -> std::io::Result<()> {
+    tokio::select! {
+        result = tokio::io::copy_bidirectional(&mut client_stream, &mut backend_stream) => {
+            let _ = result?;
+        }
+        _ = &mut drop_rx => {
+            let _ = client_stream.shutdown().await;
+            let _ = backend_stream.shutdown().await;
+        }
+    }
+
+    Ok(())
+}
+
 fn cpp_daemon_binary() -> PathBuf {
     cpp_daemon_dir().join("build/remote-exec-daemon-cpp")
 }
@@ -576,10 +775,6 @@ async fn ensure_cpp_daemon_built() {
         .get_or_init(|| tokio::sync::Mutex::new(()))
         .lock()
         .await;
-
-    if cpp_daemon_binary().exists() {
-        return;
-    }
 
     let cpp_daemon_dir = cpp_daemon_dir();
     let status = tokio::process::Command::new("make")

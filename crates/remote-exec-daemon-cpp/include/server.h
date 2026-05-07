@@ -1,11 +1,14 @@
 #pragma once
 
+#include <memory>
 #include <string>
 
 #include "config.h"
 #include "filesystem_sandbox.h"
 #include "session_store.h"
 #include "server_transport.h"
+
+class PortTunnelService;
 
 struct AppState {
     DaemonConfig config;
@@ -15,6 +18,7 @@ struct AppState {
     bool sandbox_enabled = false;
     CompiledFilesystemSandbox sandbox;
     SessionStore sessions;
+    std::shared_ptr<PortTunnelService> port_tunnel_service;
 };
 
 void handle_client(AppState& state, UniqueSocket client);
