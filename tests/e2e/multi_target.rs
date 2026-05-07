@@ -298,6 +298,80 @@ async fn forward_ports_reconnect_after_live_tunnel_drop_and_accept_new_tcp_conne
 }
 
 #[tokio::test]
+async fn forward_ports_reconnect_after_connect_side_tunnel_drop_and_accept_new_tcp_connections() {
+    let cluster = support::spawn_cluster().await;
+    let echo_addr = support::spawn_tcp_echo().await;
+
+    let open = cluster
+        .broker
+        .open_tcp_forward("local", "builder-a", "127.0.0.1:0", &echo_addr.to_string())
+        .await;
+    let forward_id = open.forward_id();
+    let listen_endpoint = open.listen_endpoint();
+
+    cluster.daemon_a.drop_port_tunnels().await;
+
+    let mut trigger = tokio::net::TcpStream::connect(&listen_endpoint)
+        .await
+        .unwrap();
+    trigger.write_all(b"trigger").await.unwrap();
+    trigger.shutdown().await.unwrap();
+    let _ = tokio::time::timeout(Duration::from_millis(250), async {
+        let mut ignored = Vec::new();
+        let _ = trigger.read_to_end(&mut ignored).await;
+    })
+    .await;
+
+    let mut stream = tokio::net::TcpStream::connect(&listen_endpoint)
+        .await
+        .unwrap();
+    stream.write_all(b"after").await.unwrap();
+    stream.shutdown().await.unwrap();
+    let mut echoed = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut echoed))
+        .await
+        .expect("future tcp connection should succeed after connect-side reconnect")
+        .unwrap();
+    assert_eq!(echoed, b"after");
+
+    tokio::time::sleep(Duration::from_millis(250)).await;
+
+    let mut later = tokio::net::TcpStream::connect(&listen_endpoint)
+        .await
+        .unwrap();
+    later.write_all(b"later").await.unwrap();
+    later.shutdown().await.unwrap();
+    let mut echoed_later = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), later.read_to_end(&mut echoed_later))
+        .await
+        .expect("forward should stay usable after connect-side reconnect settles")
+        .unwrap();
+    assert_eq!(echoed_later, b"later");
+
+    let forward = support::wait_for_forward_status_timeout(
+        &cluster.broker,
+        &forward_id,
+        "open",
+        Duration::from_secs(5),
+    )
+    .await
+    .expect("forward should stay open after connect-side reconnect");
+    assert_eq!(forward["status"], "open");
+
+    let closed = cluster
+        .broker
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "close",
+                "forward_ids": [forward_id]
+            }),
+        )
+        .await;
+    assert_eq!(closed.structured_content["forwards"][0]["status"], "closed");
+}
+
+#[tokio::test]
 async fn terminal_port_tunnel_corruption_releases_remote_listener_without_waiting_for_resume_timeout()
  {
     let cluster = support::spawn_cluster().await;

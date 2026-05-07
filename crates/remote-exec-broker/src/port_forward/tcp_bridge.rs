@@ -10,8 +10,8 @@ use super::events::{
 use super::supervisor::{ForwardRuntime, open_connect_tunnel, reconnect_listen_tunnel};
 use super::tunnel::{
     EndpointMeta, PortTunnel, TcpAcceptMeta, classify_recoverable_tunnel_event,
-    classify_terminal_tunnel_event, decode_tunnel_meta, encode_tunnel_meta,
-    format_terminal_tunnel_error,
+    decode_tunnel_meta, encode_tunnel_meta, format_terminal_tunnel_error,
+    is_retryable_transport_error,
 };
 use super::{MAX_PENDING_TCP_BYTES_PER_FORWARD, MAX_PENDING_TCP_BYTES_PER_STREAM};
 
@@ -57,10 +57,23 @@ pub(super) async fn run_tcp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
                     })?;
             }
             ForwardLoopControl::RecoverTunnel(TunnelRole::Connect) => {
-                unreachable!("connect tunnel recovery is introduced in a later task")
+                connect_tunnel = reopen_connect_tunnel(
+                    &runtime,
+                    "after connect-side reconnect",
+                )
+                .await?;
             }
         }
     }
+}
+
+async fn reopen_connect_tunnel(
+    runtime: &ForwardRuntime,
+    reason: &str,
+) -> anyhow::Result<Arc<PortTunnel>> {
+    open_connect_tunnel(&runtime.connect_side)
+        .await
+        .with_context(|| format!("reopening port tunnel to `{}` {reason}", runtime.connect_side.name()))
 }
 
 async fn run_tcp_forward_epoch(
@@ -186,8 +199,11 @@ async fn run_tcp_forward_epoch(
                 }
             }
             frame = connect_tunnel.recv() => {
-                let frame = match classify_terminal_tunnel_event(frame) {
+                let frame = match classify_recoverable_tunnel_event(frame) {
                     ForwardSideEvent::Frame(frame) => frame,
+                    ForwardSideEvent::RetryableTransportLoss => {
+                        return Ok(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect));
+                    }
                     ForwardSideEvent::TerminalTransportError(err) => {
                         return Err(err).context("reading tcp connect tunnel");
                     }
@@ -195,7 +211,6 @@ async fn run_tcp_forward_epoch(
                         return Err(format_terminal_tunnel_error(&meta))
                             .context("connecting tcp forward destination");
                     }
-                    ForwardSideEvent::RetryableTransportLoss => unreachable!("terminal classifier never returns retryable transport loss"),
                 };
                 match frame.frame_type {
                     FrameType::TcpConnectOk => {
@@ -292,10 +307,16 @@ async fn queue_or_send_tcp_connect_frame(
         return Ok(());
     };
     if stream.ready {
-        connect_tunnel
+        if let Err(err) = connect_tunnel
             .send(frame)
             .await
-            .context("relaying tcp data to connect tunnel")?;
+            .context("relaying tcp data to connect tunnel")
+        {
+            if is_retryable_transport_error(&err) {
+                return Ok(());
+            }
+            return Err(err);
+        }
     } else {
         let added = frame_data_bytes(&frame);
         let next_stream_total = stream.pending_bytes.saturating_add(added);
@@ -332,10 +353,16 @@ async fn flush_pending_tcp_connect_frames(
     let mut should_remove = false;
     for frame in pending_frames {
         let is_close = frame.frame_type == FrameType::Close;
-        connect_tunnel
+        if let Err(err) = connect_tunnel
             .send(frame)
             .await
-            .context("relaying tcp data to connect tunnel")?;
+            .context("relaying tcp data to connect tunnel")
+        {
+            if is_retryable_transport_error(&err) {
+                return Ok(false);
+            }
+            return Err(err);
+        }
         if is_close {
             if let Some(listen_stream_id) = connect_streams
                 .get(&connect_stream_id)
