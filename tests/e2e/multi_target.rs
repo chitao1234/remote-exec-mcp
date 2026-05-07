@@ -298,6 +298,22 @@ async fn forward_ports_reconnect_after_live_tunnel_drop_and_accept_new_tcp_conne
 }
 
 #[tokio::test]
+async fn terminal_port_tunnel_corruption_releases_remote_listener_without_waiting_for_resume_timeout() {
+    let cluster = support::spawn_cluster().await;
+    let echo_addr = support::spawn_tcp_echo().await;
+
+    let open = cluster
+        .broker
+        .open_tcp_forward("builder-a", "local", "127.0.0.1:0", &echo_addr.to_string())
+        .await;
+    let listen_endpoint = open.listen_endpoint();
+
+    cluster.daemon_a.corrupt_port_tunnels().await;
+
+    support::wait_for_daemon_listener_rebind(&listen_endpoint, Duration::from_secs(2)).await;
+}
+
+#[tokio::test]
 async fn forward_ports_reconnect_after_live_tunnel_drop_and_relays_future_udp_datagrams() {
     let cluster = support::spawn_cluster().await;
     let udp_echo = support::spawn_udp_echo().await;

@@ -75,6 +75,124 @@ async fn dropping_port_tunnel_releases_tcp_listener_when_tunnel_closes() {
     wait_until_bindable(&endpoint).await;
 }
 
+#[tokio::test]
+async fn terminal_port_tunnel_error_releases_tcp_listener_without_waiting_for_resume_timeout() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let mut stream = open_tunnel(fixture.addr).await;
+
+    write_preface(&mut stream).await.unwrap();
+    write_frame(
+        &mut stream,
+        &json_frame(FrameType::SessionOpen, 0, serde_json::json!({})),
+    )
+    .await
+    .unwrap();
+    let ready = read_frame(&mut stream).await.unwrap();
+    assert_eq!(ready.frame_type, FrameType::SessionReady);
+
+    write_frame(
+        &mut stream,
+        &json_frame(
+            FrameType::TcpListen,
+            1,
+            serde_json::json!({ "endpoint": "127.0.0.1:0" }),
+        ),
+    )
+    .await
+    .unwrap();
+    let ok = read_frame(&mut stream).await.unwrap();
+    let endpoint = endpoint_from_frame(&ok);
+
+    stream
+        .write_all(&[
+            FrameType::TcpData as u8,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ])
+        .await
+        .unwrap();
+
+    wait_until_bindable(&endpoint).await;
+}
+
+#[tokio::test]
+async fn terminal_port_tunnel_error_returns_fatal_error_frame_before_closing() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let mut stream = open_tunnel(fixture.addr).await;
+
+    write_preface(&mut stream).await.unwrap();
+    write_frame(
+        &mut stream,
+        &json_frame(FrameType::SessionOpen, 0, serde_json::json!({})),
+    )
+    .await
+    .unwrap();
+    let ready = read_frame(&mut stream).await.unwrap();
+    assert_eq!(ready.frame_type, FrameType::SessionReady);
+
+    write_frame(
+        &mut stream,
+        &json_frame(
+            FrameType::TcpListen,
+            1,
+            serde_json::json!({ "endpoint": "127.0.0.1:0" }),
+        ),
+    )
+    .await
+    .unwrap();
+    let ok = read_frame(&mut stream).await.unwrap();
+    let endpoint = endpoint_from_frame(&ok);
+
+    stream
+        .write_all(&[
+            FrameType::TcpData as u8,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ])
+        .await
+        .unwrap();
+
+    let error = tokio::time::timeout(Duration::from_secs(1), read_frame(&mut stream))
+        .await
+        .expect("daemon should return an error frame before closing")
+        .expect("daemon should return a valid error frame");
+    assert_eq!(error.frame_type, FrameType::Error);
+    assert_eq!(error.stream_id, 0);
+
+    let meta = serde_json::from_slice::<serde_json::Value>(&error.meta).unwrap();
+    assert_eq!(meta["code"], "invalid_port_tunnel");
+    assert_eq!(meta["fatal"], true);
+    assert!(meta["message"].as_str().is_some_and(|message| !message.is_empty()));
+
+    wait_until_bindable(&endpoint).await;
+}
+
 async fn open_tunnel(addr: SocketAddr) -> tokio::net::TcpStream {
     let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
     let request = format!(

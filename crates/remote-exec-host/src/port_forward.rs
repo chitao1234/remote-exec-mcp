@@ -114,6 +114,13 @@ enum TunnelMode {
     Session(Arc<SessionState>),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SessionCloseMode {
+    GracefulClose,
+    RetryableDetach,
+    TerminalFailure,
+}
+
 pub async fn serve_tunnel<S>(state: Arc<AppState>, stream: S) -> Result<(), HostRpcError>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -138,7 +145,6 @@ where
     let writer_task = tokio::spawn(async move {
         loop {
             tokio::select! {
-                _ = writer_cancel.cancelled() => return,
                 frame = rx.recv() => {
                     let Some(frame) = frame else {
                         return;
@@ -148,15 +154,23 @@ where
                         return;
                     }
                 }
+                _ = writer_cancel.cancelled() => {
+                    while let Ok(frame) = rx.try_recv() {
+                        if write_frame(&mut writer, &frame).await.is_err() {
+                            return;
+                        }
+                    }
+                    return;
+                }
             }
         }
     });
 
     let result = tunnel_read_loop(tunnel.clone(), &mut reader).await;
-    detach_attached_session(&tunnel).await;
+    close_attached_session(&tunnel, close_mode_for_tunnel_result(&result)).await;
     tunnel.cancel.cancel();
     drop(tx);
-    writer_task.abort();
+    let _ = tokio::time::timeout(Duration::from_millis(100), writer_task).await;
     result
 }
 
@@ -804,16 +818,12 @@ async fn tunnel_close_stream(
             }
             if let Some(bind_stream_id) = udp_bind_stream_id(&session).await {
                 if bind_stream_id == stream_id {
-                    session.clear_udp_bind().await;
-                    tunnel.state.port_forward_sessions.remove(&session.id).await;
-                    session.root_cancel.cancel();
+                    close_attached_session(tunnel, SessionCloseMode::GracefulClose).await;
                 }
             }
             if let Some(listener_stream_id) = listener_stream_id(&session).await {
                 if listener_stream_id == stream_id {
-                    session.clear_listener().await;
-                    tunnel.state.port_forward_sessions.remove(&session.id).await;
-                    session.root_cancel.cancel();
+                    close_attached_session(tunnel, SessionCloseMode::GracefulClose).await;
                 }
             }
         }
@@ -1117,14 +1127,6 @@ impl SessionState {
             .map(|RetainedUdpBind::Udp { stream_id, socket }| (*stream_id, socket.clone()))
     }
 
-    async fn clear_udp_bind(&self) {
-        *self.retained_udp_bind.lock().await = None;
-    }
-
-    async fn clear_listener(&self) {
-        *self.retained_listener.lock().await = None;
-    }
-
     async fn close_non_resumable_streams(&self) {
         if let Some(attachment) = self.attachment.lock().await.clone() {
             for (_, cancel) in attachment.stream_cancels.lock().await.drain() {
@@ -1165,7 +1167,7 @@ async fn attach_session_to_tunnel(
         }
         *attachment = Some(Arc::new(AttachmentState {
             tx: tunnel.tx.clone(),
-            cancel: tunnel.cancel.clone(),
+            cancel: tunnel.cancel.child_token(),
             tcp_writers: Mutex::new(HashMap::new()),
             stream_cancels: Mutex::new(HashMap::new()),
         }));
@@ -1176,11 +1178,10 @@ async fn attach_session_to_tunnel(
     Ok(())
 }
 
-async fn detach_attached_session(tunnel: &Arc<TunnelState>) {
+async fn close_attached_session(tunnel: &Arc<TunnelState>, mode: SessionCloseMode) {
     let Some(session) = tunnel.attached_session.lock().await.take() else {
         return;
     };
-    *session.resume_deadline.lock().await = Some(Instant::now() + RESUME_TIMEOUT);
     if let Some(attachment) = session.attachment.lock().await.take() {
         attachment.cancel.cancel();
         for (_, cancel) in attachment.stream_cancels.lock().await.drain() {
@@ -1188,7 +1189,26 @@ async fn detach_attached_session(tunnel: &Arc<TunnelState>) {
         }
         attachment.tcp_writers.lock().await.clear();
     }
-    schedule_session_expiry(tunnel.state.port_forward_sessions.clone(), session);
+
+    match mode {
+        SessionCloseMode::RetryableDetach => {
+            *session.resume_deadline.lock().await = Some(Instant::now() + RESUME_TIMEOUT);
+            schedule_session_expiry(tunnel.state.port_forward_sessions.clone(), session);
+        }
+        SessionCloseMode::GracefulClose | SessionCloseMode::TerminalFailure => {
+            *session.resume_deadline.lock().await = None;
+            tunnel.state.port_forward_sessions.remove(&session.id).await;
+            session.close_retained_resources().await;
+            session.root_cancel.cancel();
+        }
+    }
+}
+
+fn close_mode_for_tunnel_result(result: &Result<(), HostRpcError>) -> SessionCloseMode {
+    match result {
+        Ok(()) => SessionCloseMode::RetryableDetach,
+        Err(_) => SessionCloseMode::TerminalFailure,
+    }
 }
 
 async fn listener_stream_id(session: &Arc<SessionState>) -> Option<u32> {

@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use remote_exec_proto::port_tunnel::{read_frame, write_frame};
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
     model::{CallToolRequestParams, CallToolResult, ClientInfo},
@@ -312,9 +313,14 @@ pub struct DaemonFixture {
 }
 
 struct TunnelDropProxy {
-    active_port_tunnels: Arc<Mutex<Vec<oneshot::Sender<()>>>>,
+    active_port_tunnels: Arc<Mutex<Vec<oneshot::Sender<PortTunnelAction>>>>,
     shutdown: Option<oneshot::Sender<()>>,
     handle: Option<JoinHandle<()>>,
+}
+
+enum PortTunnelAction {
+    Drop,
+    Corrupt,
 }
 
 impl DaemonFixture {
@@ -349,6 +355,10 @@ impl DaemonFixture {
 
     pub async fn drop_port_tunnels(&self) {
         self.proxy.drop_port_tunnels().await;
+    }
+
+    pub async fn corrupt_port_tunnels(&self) {
+        self.proxy.corrupt_port_tunnels().await;
     }
 
     pub fn target_config_fragment(&self) -> String {
@@ -452,7 +462,14 @@ impl TunnelDropProxy {
     async fn drop_port_tunnels(&self) {
         let mut active = self.active_port_tunnels.lock().await;
         for shutdown in active.drain(..) {
-            let _ = shutdown.send(());
+            let _ = shutdown.send(PortTunnelAction::Drop);
+        }
+    }
+
+    async fn corrupt_port_tunnels(&self) {
+        let mut active = self.active_port_tunnels.lock().await;
+        for shutdown in active.drain(..) {
+            let _ = shutdown.send(PortTunnelAction::Corrupt);
         }
     }
 
@@ -469,7 +486,7 @@ impl TunnelDropProxy {
 async fn proxy_connection(
     mut client_stream: tokio::net::TcpStream,
     daemon_addr: std::net::SocketAddr,
-    active_port_tunnels: Arc<Mutex<Vec<oneshot::Sender<()>>>>,
+    active_port_tunnels: Arc<Mutex<Vec<oneshot::Sender<PortTunnelAction>>>>,
 ) -> std::io::Result<()> {
     let mut backend_stream = tokio::net::TcpStream::connect(daemon_addr).await?;
     let mut request = Vec::new();
@@ -489,13 +506,14 @@ async fn proxy_connection(
     let request_text = String::from_utf8_lossy(&request);
     let is_port_tunnel = is_port_tunnel_upgrade_request(&request_text);
 
-    backend_stream.write_all(&request).await?;
-
     if is_port_tunnel {
+        backend_stream.write_all(&request).await?;
         let (drop_tx, drop_rx) = oneshot::channel();
         active_port_tunnels.lock().await.push(drop_tx);
         proxy_port_tunnel_streams(client_stream, backend_stream, drop_rx).await
     } else {
+        let request = rewrite_request_connection_close(&request_text);
+        backend_stream.write_all(&request).await?;
         proxy_plain_streams(client_stream, backend_stream).await
     }
 }
@@ -506,6 +524,25 @@ fn is_port_tunnel_upgrade_request(request: &str) -> bool {
     first_line.starts_with("post /v1/port/tunnel ")
         && lower.contains("\r\nconnection: upgrade\r\n")
         && lower.contains("\r\nupgrade: remote-exec-port-tunnel\r\n")
+}
+
+fn rewrite_request_connection_close(request: &str) -> Vec<u8> {
+    let (headers, _) = request.split_once("\r\n\r\n").unwrap_or((request, ""));
+    let mut lines = headers.lines();
+    let mut rewritten = String::new();
+    if let Some(first_line) = lines.next() {
+        rewritten.push_str(first_line);
+        rewritten.push_str("\r\n");
+    }
+    for line in lines {
+        if line.to_ascii_lowercase().starts_with("connection:") {
+            continue;
+        }
+        rewritten.push_str(line);
+        rewritten.push_str("\r\n");
+    }
+    rewritten.push_str("Connection: close\r\n\r\n");
+    rewritten.into_bytes()
 }
 
 async fn proxy_plain_streams(
@@ -519,15 +556,54 @@ async fn proxy_plain_streams(
 async fn proxy_port_tunnel_streams(
     mut client_stream: tokio::net::TcpStream,
     mut backend_stream: tokio::net::TcpStream,
-    mut drop_rx: oneshot::Receiver<()>,
+    mut drop_rx: oneshot::Receiver<PortTunnelAction>,
 ) -> std::io::Result<()> {
     tokio::select! {
         result = tokio::io::copy_bidirectional(&mut client_stream, &mut backend_stream) => {
             let _ = result?;
         }
-        _ = &mut drop_rx => {
-            let _ = client_stream.shutdown().await;
-            let _ = backend_stream.shutdown().await;
+        action = &mut drop_rx => {
+            match action {
+                Ok(PortTunnelAction::Drop) | Err(_) => {
+                    let _ = client_stream.shutdown().await;
+                    let _ = backend_stream.shutdown().await;
+                }
+                Ok(PortTunnelAction::Corrupt) => {
+                    backend_stream
+                        .write_all(&[
+                            remote_exec_proto::port_tunnel::FrameType::TcpData as u8,
+                            0,
+                            1,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                        ])
+                        .await?;
+                    match tokio::time::timeout(
+                        Duration::from_secs(1),
+                        read_frame(&mut backend_stream),
+                    )
+                        .await
+                    {
+                        Ok(Ok(frame)) => {
+                            write_frame(&mut client_stream, &frame).await?;
+                        }
+                        Ok(Err(_)) | Err(_) => {}
+                    }
+                    let _ = backend_stream.shutdown().await;
+                    let _ = client_stream.shutdown().await;
+                }
+            }
         }
     }
 
