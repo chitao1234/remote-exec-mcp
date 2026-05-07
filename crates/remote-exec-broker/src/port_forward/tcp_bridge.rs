@@ -244,16 +244,22 @@ async fn run_tcp_forward_epoch(
                         stream.ready = true;
                         let mut pending = Vec::new();
                         std::mem::swap(&mut pending, &mut stream.pending_frames);
-                        let should_remove = flush_pending_tcp_connect_frames(
+                        let flush_result = flush_pending_tcp_connect_frames(
                             &connect_tunnel,
+                            &listen_tunnel,
                             &mut listen_to_connect,
                             &mut connect_streams,
                             &mut pending_budget,
                             frame.stream_id,
                             pending,
                         ).await?;
-                        if should_remove {
-                            connect_streams.remove(&frame.stream_id);
+                        match flush_result {
+                            TcpFlushResult::Sent { should_remove } => {
+                                if should_remove {
+                                    connect_streams.remove(&frame.stream_id);
+                                }
+                            }
+                            TcpFlushResult::Recover(control) => return Ok(control),
                         }
                     }
                     FrameType::Error => {
@@ -410,12 +416,13 @@ async fn queue_or_send_tcp_connect_frame(
 
 async fn flush_pending_tcp_connect_frames(
     connect_tunnel: &Arc<PortTunnel>,
+    listen_tunnel: &Arc<PortTunnel>,
     listen_to_connect: &mut HashMap<u32, u32>,
     connect_streams: &mut HashMap<u32, TcpConnectStream>,
     pending_budget: &mut PendingTcpBudget,
     connect_stream_id: u32,
     pending_frames: Vec<Frame>,
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<TcpFlushResult> {
     if let Some(stream) = connect_streams.get_mut(&connect_stream_id) {
         release_pending_budget(pending_budget, stream);
     }
@@ -428,7 +435,16 @@ async fn flush_pending_tcp_connect_frames(
             .context("relaying tcp data to connect tunnel")
         {
             if is_retryable_transport_error(&err) {
-                return Ok(false);
+                close_active_tcp_listen_streams(
+                    listen_tunnel,
+                    listen_to_connect,
+                    connect_streams,
+                    pending_budget,
+                )
+                .await?;
+                return Ok(TcpFlushResult::Recover(ForwardLoopControl::RecoverTunnel(
+                    TunnelRole::Connect,
+                )));
             }
             return Err(err);
         }
@@ -442,7 +458,12 @@ async fn flush_pending_tcp_connect_frames(
             should_remove = true;
         }
     }
-    Ok(should_remove)
+    Ok(TcpFlushResult::Sent { should_remove })
+}
+
+enum TcpFlushResult {
+    Sent { should_remove: bool },
+    Recover(ForwardLoopControl),
 }
 
 async fn close_tcp_pair_after_connect_error(
@@ -817,6 +838,93 @@ mod tests {
             .expect("tcp epoch should finish after retryable data send failure")
             .unwrap()
             .expect("retryable data send failure should recover connect tunnel");
+        assert!(matches!(
+            control,
+            ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)
+        ));
+    }
+
+    #[tokio::test]
+    async fn pending_tcp_flush_send_failure_recovers_connect_tunnel() {
+        let (listen_broker_side, mut listen_daemon_side) = tokio::io::duplex(4096);
+        let listen_tunnel = Arc::new(PortTunnel::from_stream(listen_broker_side).unwrap());
+        let connect_io = ScriptedTunnelIo::default();
+        let connect_tunnel = Arc::new(PortTunnel::from_stream(connect_io.clone()).unwrap());
+
+        let listen_session = Arc::new(ListenSessionControl {
+            side: SideHandle::local(),
+            session_id: "test-session".to_string(),
+            listener_stream_id: 1,
+            resume_timeout: Duration::from_secs(30),
+            current_tunnel: TokioMutex::new(Some(listen_tunnel.clone())),
+            op_lock: TokioMutex::new(()),
+        });
+        let cancel = CancellationToken::new();
+        let runtime = ForwardRuntime {
+            forward_id: "fwd_test".to_string(),
+            listen_side: SideHandle::local(),
+            connect_side: SideHandle::local(),
+            protocol: PublicForwardPortProtocol::Tcp,
+            connect_endpoint: "127.0.0.1:1".to_string(),
+            listen_session,
+            initial_connect_tunnel: connect_tunnel.clone(),
+            cancel,
+        };
+
+        let epoch = tokio::spawn({
+            let listen_tunnel = listen_tunnel.clone();
+            let connect_tunnel = connect_tunnel.clone();
+            async move { run_tcp_forward_epoch(&runtime, listen_tunnel, connect_tunnel).await }
+        });
+
+        write_frame(
+            &mut listen_daemon_side,
+            &Frame {
+                frame_type: FrameType::TcpAccept,
+                flags: 0,
+                stream_id: 11,
+                meta: serde_json::to_vec(&serde_json::json!({
+                    "listener_stream_id": 1
+                }))
+                .unwrap(),
+                data: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+        connect_io
+            .wait_for_written_frame(FrameType::TcpConnect, 1)
+            .await;
+
+        write_frame(
+            &mut listen_daemon_side,
+            &Frame {
+                frame_type: FrameType::TcpData,
+                flags: 0,
+                stream_id: 11,
+                meta: Vec::new(),
+                data: b"pending".to_vec(),
+            },
+        )
+        .await
+        .unwrap();
+        tokio::task::yield_now().await;
+
+        connect_io.fail_writes();
+        wait_until_send_fails(&connect_tunnel).await;
+        connect_io.push_read_frame(&Frame {
+            frame_type: FrameType::TcpConnectOk,
+            flags: 0,
+            stream_id: 1,
+            meta: Vec::new(),
+            data: Vec::new(),
+        });
+
+        let control = tokio::time::timeout(Duration::from_secs(1), epoch)
+            .await
+            .expect("tcp epoch should finish after retryable pending flush failure")
+            .unwrap()
+            .expect("retryable pending flush failure should recover connect tunnel");
         assert!(matches!(
             control,
             ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)
