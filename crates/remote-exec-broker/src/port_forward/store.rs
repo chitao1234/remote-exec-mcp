@@ -42,9 +42,11 @@ impl PortForwardStore {
         let mut closed = Vec::with_capacity(forward_ids.len());
         for forward_id in &forward_ids {
             let candidate = self.close_candidate(forward_id).await?;
-            close_handle(&candidate.handle).await.map_err(|err| {
-                anyhow::anyhow!("closing port forward `{}`: {err:#}", candidate.forward_id)
-            })?;
+            if let Err(err) = close_handle(&candidate.handle).await {
+                let error = format!("closing port forward `{}`: {err:#}", candidate.forward_id);
+                self.mark_failed(&candidate.forward_id, error.clone()).await;
+                return Err(anyhow::anyhow!(error));
+            }
             closed.push(self.remove_closed_candidate(candidate).await);
         }
         Ok(closed)

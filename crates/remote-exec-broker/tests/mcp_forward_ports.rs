@@ -507,6 +507,57 @@ async fn forward_ports_close_reports_listen_cleanup_failures() {
 }
 
 #[tokio::test]
+async fn forward_ports_marks_forward_failed_when_close_cleanup_fails() {
+    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(3).await;
+    support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
+    support::stub_daemon::block_session_resume(&fixture.stub_state).await;
+    let blackhole = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let blackhole_addr = blackhole.local_addr().unwrap();
+    drop(blackhole);
+
+    let open = fixture
+        .open_remote_tcp_forward(&blackhole_addr.to_string())
+        .await;
+    let forward_id = forward_id_from(&open);
+
+    support::stub_daemon::force_close_port_tunnel_transport(&fixture.stub_state).await;
+
+    let close_error = fixture
+        .call_tool_error(
+            "forward_ports",
+            serde_json::json!({
+                "action": "close",
+                "forward_ids": [forward_id.clone()]
+            }),
+        )
+        .await;
+    assert!(
+        close_error.contains("closing port forward"),
+        "unexpected close error: {close_error}"
+    );
+
+    let listed = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "list",
+                "forward_ids": [forward_id]
+            }),
+        )
+        .await;
+    let forward = &listed.structured_content["forwards"][0];
+    assert_eq!(forward["status"], "failed");
+    let last_error = forward["last_error"].as_str().unwrap_or_default();
+    assert!(
+        last_error.contains("closing port forward")
+            && (last_error.contains("port tunnel closed")
+                || last_error.contains("resuming port tunnel session")
+                || last_error.contains("waiting to resume port tunnel session")),
+        "unexpected last_error: {last_error}"
+    );
+}
+
+#[tokio::test]
 async fn forward_ports_records_failure_when_runtime_fails_before_multi_open_finishes() {
     let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(3).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
