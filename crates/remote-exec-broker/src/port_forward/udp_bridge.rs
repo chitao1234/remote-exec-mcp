@@ -13,8 +13,7 @@ use super::events::{
 use super::supervisor::{ForwardRuntime, open_connect_tunnel, reconnect_listen_tunnel};
 use super::tunnel::{
     EndpointMeta, PortTunnel, UdpDatagramMeta, classify_recoverable_tunnel_event,
-    classify_terminal_tunnel_event, decode_tunnel_meta, encode_tunnel_meta,
-    format_terminal_tunnel_error,
+    decode_tunnel_meta, encode_tunnel_meta, format_terminal_tunnel_error,
 };
 use super::{
     MAX_UDP_CONNECTORS_PER_FORWARD, UDP_CONNECTOR_IDLE_SWEEP_INTERVAL, UDP_CONNECTOR_IDLE_TIMEOUT,
@@ -55,10 +54,23 @@ pub(super) async fn run_udp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
                     })?;
             }
             ForwardLoopControl::RecoverTunnel(TunnelRole::Connect) => {
-                unreachable!("connect tunnel recovery is introduced in a later task")
+                connect_tunnel = reopen_connect_tunnel(
+                    &runtime,
+                    "after connect-side reconnect",
+                )
+                .await?;
             }
         }
     }
+}
+
+async fn reopen_connect_tunnel(
+    runtime: &ForwardRuntime,
+    reason: &str,
+) -> anyhow::Result<Arc<PortTunnel>> {
+    open_connect_tunnel(&runtime.connect_side)
+        .await
+        .with_context(|| format!("reopening port tunnel to `{}` {reason}", runtime.connect_side.name()))
 }
 
 async fn run_udp_forward_epoch(
@@ -124,8 +136,11 @@ async fn run_udp_forward_epoch(
                 }
             }
             frame = connect_tunnel.recv() => {
-                let frame = match classify_terminal_tunnel_event(frame) {
+                let frame = match classify_recoverable_tunnel_event(frame) {
                     ForwardSideEvent::Frame(frame) => frame,
+                    ForwardSideEvent::RetryableTransportLoss => {
+                        return Ok(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect));
+                    }
                     ForwardSideEvent::TerminalTransportError(err) => {
                         return Err(err).context("reading udp connect tunnel");
                     }
@@ -133,7 +148,6 @@ async fn run_udp_forward_epoch(
                         return Err(format_terminal_tunnel_error(&meta))
                             .context("connect-side udp tunnel error");
                     }
-                    ForwardSideEvent::RetryableTransportLoss => unreachable!("terminal classifier never returns retryable transport loss"),
                 };
                 match frame.frame_type {
                     FrameType::UdpBindOk => {}

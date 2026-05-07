@@ -198,16 +198,6 @@ pub(super) fn classify_recoverable_tunnel_event(result: anyhow::Result<Frame>) -
     }
 }
 
-pub(super) fn classify_terminal_tunnel_event(result: anyhow::Result<Frame>) -> ForwardSideEvent {
-    match result {
-        Ok(frame) if frame.frame_type == FrameType::Error => {
-            ForwardSideEvent::TerminalTunnelError(decode_tunnel_error_frame(&frame))
-        }
-        Ok(frame) => ForwardSideEvent::Frame(frame),
-        Err(err) => ForwardSideEvent::TerminalTransportError(err),
-    }
-}
-
 pub(super) fn is_retryable_transport_error(err: &anyhow::Error) -> bool {
     for cause in err.chain() {
         if let Some(daemon_error) = cause.downcast_ref::<DaemonClientError>() {

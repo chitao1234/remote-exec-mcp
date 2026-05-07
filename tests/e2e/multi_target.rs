@@ -413,6 +413,65 @@ async fn forward_ports_reconnect_after_live_tunnel_drop_and_relays_future_udp_da
 }
 
 #[tokio::test]
+async fn forward_ports_reconnect_after_connect_side_tunnel_drop_and_relays_future_udp_datagrams() {
+    let cluster = support::spawn_cluster().await;
+    let udp_echo = support::spawn_udp_echo().await;
+
+    let open = cluster
+        .broker
+        .open_udp_forward("local", "builder-a", "127.0.0.1:0", &udp_echo.to_string())
+        .await;
+    let forward_id = open.forward_id();
+    let listen_endpoint = open.listen_endpoint();
+
+    cluster.daemon_a.drop_port_tunnels().await;
+
+    let sender = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    sender.send_to(b"trigger", &listen_endpoint).await.unwrap();
+    let mut ignored = [0u8; 32];
+    let _ = tokio::time::timeout(Duration::from_millis(250), sender.recv_from(&mut ignored)).await;
+
+    sender.send_to(b"after", &listen_endpoint).await.unwrap();
+    let mut buf = [0u8; 32];
+    let (read, _) = tokio::time::timeout(Duration::from_secs(5), sender.recv_from(&mut buf))
+        .await
+        .expect("future udp datagram should relay after connect-side reconnect")
+        .unwrap();
+    assert_eq!(&buf[..read], b"after");
+
+    tokio::time::sleep(Duration::from_millis(250)).await;
+
+    sender.send_to(b"later", &listen_endpoint).await.unwrap();
+    let (read_later, _) = tokio::time::timeout(Duration::from_secs(5), sender.recv_from(&mut buf))
+        .await
+        .expect("udp forward should stay usable after connect-side reconnect settles")
+        .unwrap();
+    assert_eq!(&buf[..read_later], b"later");
+
+    let forward = support::wait_for_forward_status_timeout(
+        &cluster.broker,
+        &forward_id,
+        "open",
+        Duration::from_secs(5),
+    )
+    .await
+    .expect("udp forward should stay open after connect-side reconnect");
+    assert_eq!(forward["status"], "open");
+
+    let closed = cluster
+        .broker
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "close",
+                "forward_ids": [forward_id]
+            }),
+        )
+        .await;
+    assert_eq!(closed.structured_content["forwards"][0]["status"], "closed");
+}
+
+#[tokio::test]
 async fn forward_ports_release_remote_listeners_when_broker_stops() {
     let mut cluster = support::spawn_cluster().await;
     let listen_addr = support::allocate_addr();
