@@ -54,6 +54,10 @@ impl DaemonClientError {
             _ => None,
         }
     }
+
+    pub fn is_transport(&self) -> bool {
+        matches!(self, Self::Transport(_))
+    }
 }
 
 impl std::fmt::Display for DaemonClientError {
