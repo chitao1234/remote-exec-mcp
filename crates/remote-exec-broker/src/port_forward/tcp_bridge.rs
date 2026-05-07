@@ -149,7 +149,7 @@ async fn run_tcp_forward_epoch(
                                 stream_id: connect_stream_id,
                                 ..frame
                             };
-                            queue_or_send_tcp_connect_frame(
+                            if let Some(control) = queue_or_send_tcp_connect_frame(
                                 &connect_tunnel,
                                 &listen_tunnel,
                                 &mut listen_to_connect,
@@ -157,7 +157,9 @@ async fn run_tcp_forward_epoch(
                                 &mut pending_budget,
                                 connect_stream_id,
                                 remapped,
-                            ).await?;
+                            ).await? {
+                                return Ok(control);
+                            }
                         }
                     }
                     FrameType::TcpEof => {
@@ -169,7 +171,7 @@ async fn run_tcp_forward_epoch(
                                 meta: Vec::new(),
                                 data: Vec::new(),
                             };
-                            queue_or_send_tcp_connect_frame(
+                            if let Some(control) = queue_or_send_tcp_connect_frame(
                                 &connect_tunnel,
                                 &listen_tunnel,
                                 &mut listen_to_connect,
@@ -177,7 +179,9 @@ async fn run_tcp_forward_epoch(
                                 &mut pending_budget,
                                 connect_stream_id,
                                 eof,
-                            ).await?;
+                            ).await? {
+                                return Ok(control);
+                            }
                         }
                     }
                     FrameType::Close => {
@@ -187,7 +191,7 @@ async fn run_tcp_forward_epoch(
                                     let _ = connect_tunnel.close_stream(connect_stream_id).await;
                                     connect_streams.remove(&connect_stream_id);
                                 } else {
-                                    queue_or_send_tcp_connect_frame(
+                                    if let Some(control) = queue_or_send_tcp_connect_frame(
                                         &connect_tunnel,
                                         &listen_tunnel,
                                         &mut listen_to_connect,
@@ -201,7 +205,9 @@ async fn run_tcp_forward_epoch(
                                             meta: Vec::new(),
                                             data: Vec::new(),
                                         },
-                                    ).await?;
+                                    ).await? {
+                                        return Ok(control);
+                                    }
                                 }
                             }
                         }
@@ -352,22 +358,35 @@ async fn queue_or_send_tcp_connect_frame(
     pending_budget: &mut PendingTcpBudget,
     connect_stream_id: u32,
     frame: Frame,
-) -> anyhow::Result<()> {
-    let Some(stream) = connect_streams.get_mut(&connect_stream_id) else {
-        return Ok(());
+) -> anyhow::Result<Option<ForwardLoopControl>> {
+    let Some(stream_ready) = connect_streams
+        .get(&connect_stream_id)
+        .map(|stream| stream.ready)
+    else {
+        return Ok(None);
     };
-    if stream.ready {
+    if stream_ready {
         if let Err(err) = connect_tunnel
             .send(frame)
             .await
             .context("relaying tcp data to connect tunnel")
         {
             if is_retryable_transport_error(&err) {
-                return Ok(());
+                close_active_tcp_listen_streams(
+                    listen_tunnel,
+                    listen_to_connect,
+                    connect_streams,
+                    pending_budget,
+                )
+                .await?;
+                return Ok(Some(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)));
             }
             return Err(err);
         }
     } else {
+        let Some(stream) = connect_streams.get_mut(&connect_stream_id) else {
+            return Ok(None);
+        };
         let added = frame_data_bytes(&frame);
         let next_stream_total = stream.pending_bytes.saturating_add(added);
         let next_forward_total = pending_budget.total_bytes.saturating_add(added);
@@ -380,13 +399,13 @@ async fn queue_or_send_tcp_connect_frame(
             listen_to_connect.remove(&listen_stream_id);
             let _ = connect_tunnel.close_stream(connect_stream_id).await;
             let _ = listen_tunnel.close_stream(listen_stream_id).await;
-            return Ok(());
+            return Ok(None);
         }
         stream.pending_bytes = next_stream_total;
         pending_budget.total_bytes = next_forward_total;
         stream.pending_frames.push(frame);
     }
-    Ok(())
+    Ok(None)
 }
 
 async fn flush_pending_tcp_connect_frames(
@@ -462,15 +481,16 @@ fn release_pending_budget(pending_budget: &mut PendingTcpBudget, stream: &mut Tc
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::pin::Pin;
-    use std::sync::Arc;
-    use std::task::{Context as TaskContext, Poll};
+    use std::sync::{Arc, Mutex as StdMutex};
+    use std::task::{Context as TaskContext, Poll, Waker};
     use std::time::Duration;
 
-    use remote_exec_proto::port_tunnel::{Frame, FrameType, read_frame, write_frame};
+    use remote_exec_proto::port_tunnel::{Frame, FrameType, HEADER_LEN, read_frame, write_frame};
     use remote_exec_proto::public::ForwardPortProtocol as PublicForwardPortProtocol;
     use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-    use tokio::sync::Mutex;
+    use tokio::sync::Mutex as TokioMutex;
     use tokio_util::sync::CancellationToken;
 
     use super::super::side::SideHandle;
@@ -517,6 +537,127 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Default)]
+    struct ScriptedTunnelIo {
+        state: Arc<StdMutex<ScriptedTunnelState>>,
+    }
+
+    #[derive(Default)]
+    struct ScriptedTunnelState {
+        read_bytes: VecDeque<u8>,
+        written_bytes: Vec<u8>,
+        fail_writes: bool,
+        read_waker: Option<Waker>,
+    }
+
+    impl ScriptedTunnelIo {
+        fn fail_writes(&self) {
+            self.state.lock().unwrap().fail_writes = true;
+        }
+
+        fn push_read_frame(&self, frame: &Frame) {
+            let mut state = self.state.lock().unwrap();
+            state.read_bytes.extend(frame_bytes(frame));
+            if let Some(waker) = state.read_waker.take() {
+                waker.wake();
+            }
+        }
+
+        async fn wait_for_written_frame(&self, frame_type: FrameType, stream_id: u32) {
+            tokio::time::timeout(Duration::from_secs(1), async {
+                loop {
+                    if self.pop_matching_written_frame(frame_type, stream_id) {
+                        return;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("expected tunnel frame should be written");
+        }
+
+        fn pop_matching_written_frame(&self, frame_type: FrameType, stream_id: u32) -> bool {
+            let mut state = self.state.lock().unwrap();
+            if state.written_bytes.len() < HEADER_LEN {
+                return false;
+            }
+            let meta_len = u32::from_be_bytes(
+                state.written_bytes[8..12]
+                    .try_into()
+                    .expect("header slice length"),
+            ) as usize;
+            let data_len = u32::from_be_bytes(
+                state.written_bytes[12..16]
+                    .try_into()
+                    .expect("header slice length"),
+            ) as usize;
+            let frame_len = HEADER_LEN + meta_len + data_len;
+            if state.written_bytes.len() < frame_len {
+                return false;
+            }
+            let written_frame_type = state.written_bytes[0];
+            let written_stream_id = u32::from_be_bytes(
+                state.written_bytes[4..8]
+                    .try_into()
+                    .expect("header slice length"),
+            );
+            assert_eq!(written_frame_type, frame_type as u8);
+            assert_eq!(written_stream_id, stream_id);
+            state.written_bytes.drain(..frame_len);
+            true
+        }
+    }
+
+    impl AsyncRead for ScriptedTunnelIo {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            cx: &mut TaskContext<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            let mut state = self.state.lock().unwrap();
+            if state.read_bytes.is_empty() {
+                state.read_waker = Some(cx.waker().clone());
+                return Poll::Pending;
+            }
+            let read = buf.remaining().min(state.read_bytes.len());
+            let bytes: Vec<u8> = state.read_bytes.drain(..read).collect();
+            buf.put_slice(&bytes);
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    impl AsyncWrite for ScriptedTunnelIo {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            _cx: &mut TaskContext<'_>,
+            buf: &[u8],
+        ) -> Poll<std::io::Result<usize>> {
+            let mut state = self.state.lock().unwrap();
+            if state.fail_writes {
+                return Poll::Ready(Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "forced closed writer",
+                )));
+            }
+            state.written_bytes.extend_from_slice(buf);
+            Poll::Ready(Ok(buf.len()))
+        }
+
+        fn poll_flush(
+            self: Pin<&mut Self>,
+            _cx: &mut TaskContext<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(
+            self: Pin<&mut Self>,
+            _cx: &mut TaskContext<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
     #[tokio::test]
     async fn tcp_accept_send_failure_recovers_connect_tunnel_and_closes_listen_stream() {
         let (listen_broker_side, mut listen_daemon_side) = tokio::io::duplex(4096);
@@ -529,8 +670,8 @@ mod tests {
             session_id: "test-session".to_string(),
             listener_stream_id: 1,
             resume_timeout: Duration::from_secs(30),
-            current_tunnel: Mutex::new(Some(listen_tunnel.clone())),
-            op_lock: Mutex::new(()),
+            current_tunnel: TokioMutex::new(Some(listen_tunnel.clone())),
+            op_lock: TokioMutex::new(()),
         });
         let cancel = CancellationToken::new();
         let runtime = ForwardRuntime {
@@ -581,6 +722,107 @@ mod tests {
         assert_eq!(close.stream_id, 11);
     }
 
+    #[tokio::test]
+    async fn ready_tcp_data_send_failure_recovers_connect_tunnel() {
+        let (listen_broker_side, mut listen_daemon_side) = tokio::io::duplex(4096);
+        let listen_tunnel = Arc::new(PortTunnel::from_stream(listen_broker_side).unwrap());
+        let connect_io = ScriptedTunnelIo::default();
+        let connect_tunnel = Arc::new(PortTunnel::from_stream(connect_io.clone()).unwrap());
+
+        let listen_session = Arc::new(ListenSessionControl {
+            side: SideHandle::local(),
+            session_id: "test-session".to_string(),
+            listener_stream_id: 1,
+            resume_timeout: Duration::from_secs(30),
+            current_tunnel: TokioMutex::new(Some(listen_tunnel.clone())),
+            op_lock: TokioMutex::new(()),
+        });
+        let cancel = CancellationToken::new();
+        let runtime = ForwardRuntime {
+            forward_id: "fwd_test".to_string(),
+            listen_side: SideHandle::local(),
+            connect_side: SideHandle::local(),
+            protocol: PublicForwardPortProtocol::Tcp,
+            connect_endpoint: "127.0.0.1:1".to_string(),
+            listen_session,
+            initial_connect_tunnel: connect_tunnel.clone(),
+            cancel,
+        };
+
+        let epoch = tokio::spawn({
+            let listen_tunnel = listen_tunnel.clone();
+            let connect_tunnel = connect_tunnel.clone();
+            async move { run_tcp_forward_epoch(&runtime, listen_tunnel, connect_tunnel).await }
+        });
+
+        write_frame(
+            &mut listen_daemon_side,
+            &Frame {
+                frame_type: FrameType::TcpAccept,
+                flags: 0,
+                stream_id: 11,
+                meta: serde_json::to_vec(&serde_json::json!({
+                    "listener_stream_id": 1
+                }))
+                .unwrap(),
+                data: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+        connect_io
+            .wait_for_written_frame(FrameType::TcpConnect, 1)
+            .await;
+        connect_io.push_read_frame(&Frame {
+            frame_type: FrameType::TcpConnectOk,
+            flags: 0,
+            stream_id: 1,
+            meta: Vec::new(),
+            data: Vec::new(),
+        });
+        connect_io.push_read_frame(&Frame {
+            frame_type: FrameType::TcpData,
+            flags: 0,
+            stream_id: 1,
+            meta: Vec::new(),
+            data: b"ready".to_vec(),
+        });
+
+        let relayed =
+            tokio::time::timeout(Duration::from_secs(1), read_frame(&mut listen_daemon_side))
+                .await
+                .expect("connect-side data should relay after TcpConnectOk")
+                .unwrap();
+        assert_eq!(relayed.frame_type, FrameType::TcpData);
+        assert_eq!(relayed.stream_id, 11);
+        assert_eq!(relayed.data, b"ready");
+
+        connect_io.fail_writes();
+        wait_until_send_fails(&connect_tunnel).await;
+        write_frame(
+            &mut listen_daemon_side,
+            &Frame {
+                frame_type: FrameType::TcpData,
+                flags: 0,
+                stream_id: 11,
+                meta: Vec::new(),
+                data: b"after-loss".to_vec(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let control = tokio::time::timeout(Duration::from_secs(1), epoch)
+            .await
+            .expect("tcp epoch should finish after retryable data send failure")
+            .unwrap()
+            .expect("retryable data send failure should recover connect tunnel");
+        assert!(matches!(
+            control,
+            ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)
+        ));
+    }
+
     async fn wait_until_send_fails(tunnel: &PortTunnel) {
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
@@ -601,5 +843,17 @@ mod tests {
         })
         .await
         .expect("connect tunnel writer should close after forced write failure");
+    }
+
+    fn frame_bytes(frame: &Frame) -> Vec<u8> {
+        let mut bytes = vec![0; HEADER_LEN];
+        bytes[0] = frame.frame_type as u8;
+        bytes[1] = frame.flags;
+        bytes[4..8].copy_from_slice(&frame.stream_id.to_be_bytes());
+        bytes[8..12].copy_from_slice(&(frame.meta.len() as u32).to_be_bytes());
+        bytes[12..16].copy_from_slice(&(frame.data.len() as u32).to_be_bytes());
+        bytes.extend_from_slice(&frame.meta);
+        bytes.extend_from_slice(&frame.data);
+        bytes
     }
 }
