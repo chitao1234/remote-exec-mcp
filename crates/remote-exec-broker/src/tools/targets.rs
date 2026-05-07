@@ -21,6 +21,9 @@ pub async fn list_targets(
                 arch: info.arch,
                 supports_pty: info.supports_pty,
                 supports_port_forward: info.supports_port_forward,
+                port_forward_protocol_version: info
+                    .supports_port_forward
+                    .then_some(info.port_forward_protocol_version),
             });
         targets.push(ListTargetEntry {
             name: name.clone(),
@@ -54,7 +57,7 @@ fn format_targets_text(targets: &[ListTargetEntry]) -> String {
         .iter()
         .map(|target| match &target.daemon_info {
             Some(info) => format!(
-                "- {}: {}/{}, host={}, version={}, pty={}, forward_ports={}",
+                "- {}: {}/{}, host={}, version={}, pty={}, forward_ports={}{}",
                 target.name,
                 info.platform,
                 info.arch,
@@ -66,6 +69,9 @@ fn format_targets_text(targets: &[ListTargetEntry]) -> String {
                 } else {
                     "no"
                 },
+                info.port_forward_protocol_version
+                    .map(|version| format!(", forward_protocol=v{version}"))
+                    .unwrap_or_default(),
             ),
             None => format!("- {}", target.name),
         })

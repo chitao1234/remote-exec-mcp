@@ -86,7 +86,9 @@ Structured result shape:
         "hostname": "builder-a-host",
         "platform": "linux",
         "arch": "x86_64",
-        "supports_pty": true
+        "supports_pty": true,
+        "supports_port_forward": true,
+        "port_forward_protocol_version": 3
       }
     },
     {
@@ -102,6 +104,9 @@ Use the result this way:
 - Reuse `targets[].name` exactly in later tool calls.
 - Read `daemon_info.platform` to choose endpoint-native absolute paths for `transfer_files`.
 - Read `daemon_info.supports_pty` before using `tty: true`.
+- Read `daemon_info.supports_port_forward` and `daemon_info.port_forward_protocol_version` before planning remote `forward_ports` use.
+- `forward_ports=yes` means the daemon reports port-forward support.
+- `port_forward_protocol_version` and text like `forward_protocol=v3` show the cached internal broker-daemon forwarding protocol version for that target.
 - If `daemon_info` is `null`, do not invent your own meaning. It only means the broker has no current cached metadata.
 - If broker-host exec support is enabled, `local` appears here as a normal target entry.
 

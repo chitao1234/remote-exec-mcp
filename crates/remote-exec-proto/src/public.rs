@@ -62,6 +62,8 @@ pub struct ListTargetDaemonInfo {
     pub arch: String,
     pub supports_pty: bool,
     pub supports_port_forward: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port_forward_protocol_version: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]

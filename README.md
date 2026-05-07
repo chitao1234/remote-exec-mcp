@@ -54,6 +54,7 @@ Everything under `docs/` is historical implementation detail and planning contex
 - Agents can call `list_targets` to discover configured logical target names and cached daemon metadata when available.
 - When broker `[local]` config is enabled, `list_targets` also includes `local` for the broker host.
 - `list_targets` is broker-local and does not probe daemons at read time.
+- `list_targets` reports both `forward_ports=yes|no` and, when forwarding is supported, `forward_protocol=vN` for the cached broker-daemon port-forward protocol version on that target.
 - The broker validates `target`, forwards the request to the selected daemon, and returns MCP-compatible content plus structured JSON for tools that expose it unless `disable_structured_content = true` is configured.
 - Broker-daemon RPC uses HTTP/1.1 only. The broker keeps daemon connections eligible for client-side pooling instead of forcing every request to close the TCP connection.
 - For the optional `local` target, the broker reuses the shared Rust host runtime in-process instead of asking operators to run a second same-host daemon manually.
