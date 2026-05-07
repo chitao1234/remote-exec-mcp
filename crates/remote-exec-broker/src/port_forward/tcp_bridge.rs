@@ -107,7 +107,7 @@ async fn run_tcp_forward_epoch(
                         let accept: TcpAcceptMeta = decode_tunnel_meta(&frame)?;
                         let connect_stream_id = next_connect_stream_id;
                         next_connect_stream_id = next_connect_stream_id.checked_add(2).unwrap_or(1);
-                        connect_tunnel.send(Frame {
+                        if let Err(err) = connect_tunnel.send(Frame {
                             frame_type: FrameType::TcpConnect,
                             flags: 0,
                             stream_id: connect_stream_id,
@@ -115,7 +115,19 @@ async fn run_tcp_forward_epoch(
                                 endpoint: runtime.connect_endpoint.clone(),
                             })?,
                             data: Vec::new(),
-                        }).await.context("connecting tcp forward destination")?;
+                        }).await {
+                            if is_retryable_transport_error(&err) {
+                                if let Err(close_err) = listen_tunnel.close_stream(frame.stream_id).await {
+                                    return classify_transport_failure(
+                                        close_err,
+                                        "closing tcp listen stream after connect tunnel loss",
+                                        TunnelRole::Listen,
+                                    );
+                                }
+                                return Ok(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect));
+                            }
+                            return Err(err).context("connecting tcp forward destination");
+                        }
                         listen_to_connect.insert(frame.stream_id, connect_stream_id);
                         connect_streams.insert(connect_stream_id, TcpConnectStream {
                             listen_stream_id: frame.stream_id,
@@ -446,4 +458,148 @@ fn release_pending_budget(pending_budget: &mut PendingTcpBudget, stream: &mut Tc
         .total_bytes
         .saturating_sub(stream.pending_bytes);
     stream.pending_bytes = 0;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::pin::Pin;
+    use std::sync::Arc;
+    use std::task::{Context as TaskContext, Poll};
+    use std::time::Duration;
+
+    use remote_exec_proto::port_tunnel::{Frame, FrameType, read_frame, write_frame};
+    use remote_exec_proto::public::ForwardPortProtocol as PublicForwardPortProtocol;
+    use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+    use tokio::sync::Mutex;
+    use tokio_util::sync::CancellationToken;
+
+    use super::super::side::SideHandle;
+    use super::super::supervisor::{ForwardRuntime, ListenSessionControl};
+    use super::super::tunnel::PortTunnel;
+    use super::*;
+
+    struct PendingReadBrokenWrite;
+
+    impl AsyncRead for PendingReadBrokenWrite {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _cx: &mut TaskContext<'_>,
+            _buf: &mut ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Poll::Pending
+        }
+    }
+
+    impl AsyncWrite for PendingReadBrokenWrite {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            _cx: &mut TaskContext<'_>,
+            _buf: &[u8],
+        ) -> Poll<std::io::Result<usize>> {
+            Poll::Ready(Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "forced closed writer",
+            )))
+        }
+
+        fn poll_flush(
+            self: Pin<&mut Self>,
+            _cx: &mut TaskContext<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(
+            self: Pin<&mut Self>,
+            _cx: &mut TaskContext<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    #[tokio::test]
+    async fn tcp_accept_send_failure_recovers_connect_tunnel_and_closes_listen_stream() {
+        let (listen_broker_side, mut listen_daemon_side) = tokio::io::duplex(4096);
+        let listen_tunnel = Arc::new(PortTunnel::from_stream(listen_broker_side).unwrap());
+        let connect_tunnel = Arc::new(PortTunnel::from_stream(PendingReadBrokenWrite).unwrap());
+        wait_until_send_fails(&connect_tunnel).await;
+
+        let listen_session = Arc::new(ListenSessionControl {
+            side: SideHandle::local(),
+            session_id: "test-session".to_string(),
+            listener_stream_id: 1,
+            resume_timeout: Duration::from_secs(30),
+            current_tunnel: Mutex::new(Some(listen_tunnel.clone())),
+            op_lock: Mutex::new(()),
+        });
+        let cancel = CancellationToken::new();
+        let runtime = ForwardRuntime {
+            forward_id: "fwd_test".to_string(),
+            listen_side: SideHandle::local(),
+            connect_side: SideHandle::local(),
+            protocol: PublicForwardPortProtocol::Tcp,
+            connect_endpoint: "127.0.0.1:1".to_string(),
+            listen_session,
+            initial_connect_tunnel: connect_tunnel.clone(),
+            cancel,
+        };
+
+        write_frame(
+            &mut listen_daemon_side,
+            &Frame {
+                frame_type: FrameType::TcpAccept,
+                flags: 0,
+                stream_id: 11,
+                meta: serde_json::to_vec(&serde_json::json!({
+                    "listener_stream_id": 1
+                }))
+                .unwrap(),
+                data: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let control = tokio::time::timeout(
+            Duration::from_secs(1),
+            run_tcp_forward_epoch(&runtime, listen_tunnel, connect_tunnel),
+        )
+        .await
+        .expect("tcp epoch should finish after retryable send failure")
+        .expect("retryable connect send failure should recover connect tunnel");
+        assert!(matches!(
+            control,
+            ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)
+        ));
+
+        let close =
+            tokio::time::timeout(Duration::from_secs(1), read_frame(&mut listen_daemon_side))
+                .await
+                .expect("listen stream should be closed after failed connect send")
+                .unwrap();
+        assert_eq!(close.frame_type, FrameType::Close);
+        assert_eq!(close.stream_id, 11);
+    }
+
+    async fn wait_until_send_fails(tunnel: &PortTunnel) {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let result = tunnel
+                    .send(Frame {
+                        frame_type: FrameType::Close,
+                        flags: 0,
+                        stream_id: 99,
+                        meta: Vec::new(),
+                        data: Vec::new(),
+                    })
+                    .await;
+                if result.is_err() {
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("connect tunnel writer should close after forced write failure");
+    }
 }
