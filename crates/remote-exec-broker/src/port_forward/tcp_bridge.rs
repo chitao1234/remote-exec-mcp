@@ -201,6 +201,13 @@ async fn run_tcp_forward_epoch(
                 let frame = match classify_recoverable_tunnel_event(frame) {
                     ForwardSideEvent::Frame(frame) => frame,
                     ForwardSideEvent::RetryableTransportLoss => {
+                        close_active_tcp_listen_streams(
+                            &listen_tunnel,
+                            &mut listen_to_connect,
+                            &mut connect_streams,
+                            &mut pending_budget,
+                        )
+                        .await?;
                         return Ok(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect));
                     }
                     ForwardSideEvent::TerminalTransportError(err) => {
@@ -301,6 +308,28 @@ async fn run_tcp_forward_epoch(
             }
         }
     }
+}
+
+async fn close_active_tcp_listen_streams(
+    listen_tunnel: &Arc<PortTunnel>,
+    listen_to_connect: &mut HashMap<u32, u32>,
+    connect_streams: &mut HashMap<u32, TcpConnectStream>,
+    pending_budget: &mut PendingTcpBudget,
+) -> anyhow::Result<()> {
+    let streams = std::mem::take(connect_streams);
+    listen_to_connect.clear();
+    for (_, mut stream) in streams {
+        release_pending_budget(pending_budget, &mut stream);
+        if let Err(err) = listen_tunnel.close_stream(stream.listen_stream_id).await {
+            return classify_transport_failure(
+                err,
+                "closing tcp listen stream after connect tunnel loss",
+                TunnelRole::Listen,
+            )
+            .map(|_| ());
+        }
+    }
+    Ok(())
 }
 
 async fn queue_or_send_tcp_connect_frame(

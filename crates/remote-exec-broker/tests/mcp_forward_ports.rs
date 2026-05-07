@@ -318,6 +318,104 @@ async fn forward_ports_keeps_forward_open_after_listen_tunnel_drop() {
 }
 
 #[tokio::test]
+async fn forward_ports_closes_active_tcp_streams_after_connect_tunnel_drop() {
+    let fixture = support::spawners::spawn_broker_with_local_and_stub_port_forward_version(3).await;
+    support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
+    let echo_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let echo_addr = echo_listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let (mut stream, _) = match echo_listener.accept().await {
+                Ok(value) => value,
+                Err(_) => return,
+            };
+            tokio::spawn(async move {
+                let mut buf = [0u8; 1024];
+                loop {
+                    let read = match stream.read(&mut buf).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(read) => read,
+                    };
+                    if stream.write_all(&buf[..read]).await.is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+    });
+
+    let open = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "local",
+                "connect_side": "builder-a",
+                "forwards": [{
+                    "listen_endpoint": "127.0.0.1:0",
+                    "connect_endpoint": echo_addr.to_string(),
+                    "protocol": "tcp"
+                }]
+            }),
+        )
+        .await;
+    let forward_id = forward_id_from(&open);
+    let listen_endpoint = listen_endpoint_from(&open);
+
+    let mut active = tokio::net::TcpStream::connect(&listen_endpoint)
+        .await
+        .unwrap();
+    active.write_all(b"before").await.unwrap();
+    let mut echoed = [0u8; 6];
+    active.read_exact(&mut echoed).await.unwrap();
+    assert_eq!(&echoed, b"before");
+
+    support::stub_daemon::force_close_port_tunnel_transport(&fixture.stub_state).await;
+    let read_after_drop = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut buf = [0u8; 1];
+        active.read(&mut buf).await
+    })
+    .await
+    .expect("active tcp stream should close when connect-side tunnel drops");
+    match read_after_drop {
+        Ok(0) => {}
+        Err(err)
+            if matches!(
+                err.kind(),
+                std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::NotConnected
+                    | std::io::ErrorKind::UnexpectedEof
+            ) => {}
+        Ok(read) => panic!("expected active tcp stream to close, read {read} byte(s) instead"),
+        Err(err) => panic!("unexpected active tcp stream read error: {err}"),
+    }
+
+    let forward =
+        wait_for_forward_status(&fixture, &forward_id, "open", Duration::from_secs(5)).await;
+    assert_eq!(forward["status"], "open");
+
+    let mut later = tokio::net::TcpStream::connect(&listen_endpoint)
+        .await
+        .unwrap();
+    later.write_all(b"after").await.unwrap();
+    let mut echoed_later = [0u8; 5];
+    later.read_exact(&mut echoed_later).await.unwrap();
+    assert_eq!(&echoed_later, b"after");
+
+    let close = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "close",
+                "forward_ids": [forward_id]
+            }),
+        )
+        .await;
+    assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
+}
+
+#[tokio::test]
 async fn forward_ports_fails_when_resume_deadline_expires() {
     let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(3).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
