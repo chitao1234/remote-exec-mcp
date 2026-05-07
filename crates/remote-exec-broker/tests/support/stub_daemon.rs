@@ -78,6 +78,10 @@ struct StubPortTunnelControl {
     enabled: bool,
     resume_behavior: ResumeBehavior,
     tcp_connect_ok_behavior: TcpConnectOkBehavior,
+    close_transports_on_second_session_open: bool,
+    session_open_count: usize,
+    delay_session_ready_after_first: Option<Duration>,
+    session_ready_count: usize,
     active_transports: Vec<CancellationToken>,
     active_udp_connector_streams: HashSet<u32>,
     max_observed_udp_connector_streams: usize,
@@ -90,6 +94,10 @@ impl Default for StubPortTunnelControl {
             enabled: false,
             resume_behavior: ResumeBehavior::PassThrough,
             tcp_connect_ok_behavior: TcpConnectOkBehavior::PassThrough,
+            close_transports_on_second_session_open: false,
+            session_open_count: 0,
+            delay_session_ready_after_first: None,
+            session_ready_count: 0,
             active_transports: Vec::new(),
             active_udp_connector_streams: HashSet::new(),
             max_observed_udp_connector_streams: 0,
@@ -213,6 +221,16 @@ pub(crate) async fn drop_tcp_connect_ok_frames(state: &StubDaemonState) {
         .lock()
         .await
         .tcp_connect_ok_behavior = TcpConnectOkBehavior::DropAll;
+}
+
+pub(crate) async fn fail_first_forward_runtime_before_multi_open_finishes(state: &StubDaemonState) {
+    let mut control = state.port_tunnel_control.lock().await;
+    control.close_transports_on_second_session_open = true;
+    control.delay_session_ready_after_first = Some(Duration::from_millis(500));
+    control.resume_behavior = ResumeBehavior::SendError {
+        code: "forced_resume_failure".to_string(),
+        message: "forced resume failure".to_string(),
+    };
 }
 
 pub(crate) async fn udp_connector_stats(state: &StubDaemonState) -> UdpConnectorStats {
@@ -683,40 +701,72 @@ fn frame_from_result(result: std::io::Result<Frame>) -> anyhow::Result<Option<Fr
 }
 
 async fn observe_broker_to_daemon_frame(state: &StubDaemonState, frame: &Frame) {
-    let mut control = state.port_tunnel_control.lock().await;
-    match frame.frame_type {
-        FrameType::UdpBind if frame.stream_id >= 3 => {
-            control.active_udp_connector_streams.insert(frame.stream_id);
-            control.opened_udp_connector_streams += 1;
-            control.max_observed_udp_connector_streams = control
-                .max_observed_udp_connector_streams
-                .max(control.active_udp_connector_streams.len());
+    let transports_to_cancel = {
+        let mut control = state.port_tunnel_control.lock().await;
+        match frame.frame_type {
+            FrameType::SessionOpen => {
+                control.session_open_count += 1;
+                if control.close_transports_on_second_session_open
+                    && control.session_open_count == 2
+                {
+                    control.close_transports_on_second_session_open = false;
+                    std::mem::take(&mut control.active_transports)
+                } else {
+                    Vec::new()
+                }
+            }
+            FrameType::UdpBind if frame.stream_id >= 3 => {
+                control.active_udp_connector_streams.insert(frame.stream_id);
+                control.opened_udp_connector_streams += 1;
+                control.max_observed_udp_connector_streams = control
+                    .max_observed_udp_connector_streams
+                    .max(control.active_udp_connector_streams.len());
+                Vec::new()
+            }
+            FrameType::Close => {
+                control
+                    .active_udp_connector_streams
+                    .remove(&frame.stream_id);
+                Vec::new()
+            }
+            _ => Vec::new(),
         }
-        FrameType::Close => {
-            control
-                .active_udp_connector_streams
-                .remove(&frame.stream_id);
-        }
-        _ => {}
+    };
+    for transport in transports_to_cancel {
+        transport.cancel();
     }
 }
 
 async fn should_forward_daemon_to_broker_frame(state: &StubDaemonState, frame: &Frame) -> bool {
-    let mut control = state.port_tunnel_control.lock().await;
-    if frame.frame_type == FrameType::Close {
-        control
-            .active_udp_connector_streams
-            .remove(&frame.stream_id);
+    let (delay, should_forward) = {
+        let mut control = state.port_tunnel_control.lock().await;
+        if frame.frame_type == FrameType::Close {
+            control
+                .active_udp_connector_streams
+                .remove(&frame.stream_id);
+        }
+        let delay = if frame.frame_type == FrameType::SessionReady {
+            let delay = if control.session_ready_count > 0 {
+                control.delay_session_ready_after_first
+            } else {
+                None
+            };
+            control.session_ready_count += 1;
+            delay
+        } else {
+            None
+        };
+        let should_forward = !(frame.frame_type == FrameType::TcpConnectOk
+            && matches!(
+                control.tcp_connect_ok_behavior,
+                TcpConnectOkBehavior::DropAll
+            ));
+        (delay, should_forward)
+    };
+    if let Some(delay) = delay {
+        tokio::time::sleep(delay).await;
     }
-    if frame.frame_type == FrameType::TcpConnectOk
-        && matches!(
-            control.tcp_connect_ok_behavior,
-            TcpConnectOkBehavior::DropAll
-        )
-    {
-        return false;
-    }
-    true
+    should_forward
 }
 
 fn validate_port_tunnel_upgrade_headers(

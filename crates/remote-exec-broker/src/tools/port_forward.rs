@@ -61,14 +61,7 @@ async fn open_forwards(
     let mut opened = Vec::with_capacity(forwards.len());
 
     for spec in &forwards {
-        match open_forward(
-            state.port_forwards.clone(),
-            listen_side.clone(),
-            connect_side.clone(),
-            spec,
-        )
-        .await
-        {
+        match open_forward(listen_side.clone(), connect_side.clone(), spec).await {
             Ok(forward) => opened.push(forward),
             Err(err) => {
                 for forward in opened {
@@ -81,8 +74,10 @@ async fn open_forwards(
 
     let mut result_entries = Vec::with_capacity(opened.len());
     for forward in opened {
-        result_entries.push(forward.record.entry.clone());
-        state.port_forwards.insert(forward.record).await;
+        result_entries.push(forward.entry().clone());
+        forward
+            .register_and_start(state.port_forwards.clone())
+            .await;
     }
 
     tracing::info!(
@@ -141,11 +136,7 @@ async fn close_forwards(
         forward_count = forward_ids.len(),
         "broker tool started"
     );
-    let records = state.port_forwards.close(&forward_ids).await?;
-    let mut entries = Vec::with_capacity(records.len());
-    for record in records {
-        entries.push(close_record(record).await);
-    }
+    let entries = state.port_forwards.close(&forward_ids).await?;
     tracing::info!(
         tool = "forward_ports",
         action = "close",

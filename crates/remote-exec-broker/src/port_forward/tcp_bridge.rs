@@ -4,14 +4,11 @@ use std::sync::Arc;
 use anyhow::Context;
 use remote_exec_proto::port_tunnel::{Frame, FrameType};
 
-use super::events::{
-    ForwardLoopControl, ForwardSideEvent, TunnelRole, classify_transport_failure,
-};
+use super::events::{ForwardLoopControl, ForwardSideEvent, TunnelRole, classify_transport_failure};
 use super::supervisor::{ForwardRuntime, open_connect_tunnel, reconnect_listen_tunnel};
 use super::tunnel::{
-    EndpointMeta, PortTunnel, TcpAcceptMeta, classify_recoverable_tunnel_event,
-    decode_tunnel_meta, encode_tunnel_meta, format_terminal_tunnel_error,
-    is_retryable_transport_error,
+    EndpointMeta, PortTunnel, TcpAcceptMeta, classify_recoverable_tunnel_event, decode_tunnel_meta,
+    encode_tunnel_meta, format_terminal_tunnel_error, is_retryable_transport_error,
 };
 use super::{MAX_PENDING_TCP_BYTES_PER_FORWARD, MAX_PENDING_TCP_BYTES_PER_STREAM};
 
@@ -57,11 +54,8 @@ pub(super) async fn run_tcp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
                     })?;
             }
             ForwardLoopControl::RecoverTunnel(TunnelRole::Connect) => {
-                connect_tunnel = reopen_connect_tunnel(
-                    &runtime,
-                    "after connect-side reconnect",
-                )
-                .await?;
+                connect_tunnel =
+                    reopen_connect_tunnel(&runtime, "after connect-side reconnect").await?;
             }
         }
     }
@@ -73,7 +67,12 @@ async fn reopen_connect_tunnel(
 ) -> anyhow::Result<Arc<PortTunnel>> {
     open_connect_tunnel(&runtime.connect_side)
         .await
-        .with_context(|| format!("reopening port tunnel to `{}` {reason}", runtime.connect_side.name()))
+        .with_context(|| {
+            format!(
+                "reopening port tunnel to `{}` {reason}",
+                runtime.connect_side.name()
+            )
+        })
 }
 
 async fn run_tcp_forward_epoch(
@@ -232,6 +231,16 @@ async fn run_tcp_forward_epoch(
                             connect_streams.remove(&frame.stream_id);
                         }
                     }
+                    FrameType::Error => {
+                        close_tcp_pair_after_connect_error(
+                            &listen_tunnel,
+                            &mut listen_to_connect,
+                            &mut connect_streams,
+                            &mut pending_budget,
+                            frame.stream_id,
+                        )
+                        .await?;
+                    }
                     FrameType::TcpData => {
                         if let Some(listen_stream_id) = connect_streams
                             .get(&frame.stream_id)
@@ -374,6 +383,29 @@ async fn flush_pending_tcp_connect_frames(
         }
     }
     Ok(should_remove)
+}
+
+async fn close_tcp_pair_after_connect_error(
+    listen_tunnel: &Arc<PortTunnel>,
+    listen_to_connect: &mut HashMap<u32, u32>,
+    connect_streams: &mut HashMap<u32, TcpConnectStream>,
+    pending_budget: &mut PendingTcpBudget,
+    connect_stream_id: u32,
+) -> anyhow::Result<()> {
+    let Some(mut stream) = connect_streams.remove(&connect_stream_id) else {
+        return Ok(());
+    };
+    release_pending_budget(pending_budget, &mut stream);
+    listen_to_connect.remove(&stream.listen_stream_id);
+    if let Err(err) = listen_tunnel.close_stream(stream.listen_stream_id).await {
+        return classify_transport_failure(
+            err,
+            "closing tcp listen stream after connect error",
+            TunnelRole::Listen,
+        )
+        .map(|_| ());
+    }
+    Ok(())
 }
 
 fn frame_data_bytes(frame: &Frame) -> usize {

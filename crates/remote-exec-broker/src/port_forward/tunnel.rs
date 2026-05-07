@@ -188,12 +188,15 @@ pub(super) fn format_terminal_tunnel_error(meta: &TunnelErrorMeta) -> anyhow::Er
 pub(super) fn classify_recoverable_tunnel_event(result: anyhow::Result<Frame>) -> ForwardSideEvent {
     match result {
         Ok(frame) if frame.frame_type == FrameType::Error => {
-            ForwardSideEvent::TerminalTunnelError(decode_tunnel_error_frame(&frame))
+            let meta = decode_tunnel_error_frame(&frame);
+            if meta.fatal {
+                ForwardSideEvent::TerminalTunnelError(meta)
+            } else {
+                ForwardSideEvent::Frame(frame)
+            }
         }
         Ok(frame) => ForwardSideEvent::Frame(frame),
-        Err(err) if is_retryable_transport_error(&err) => {
-            ForwardSideEvent::RetryableTransportLoss
-        }
+        Err(err) if is_retryable_transport_error(&err) => ForwardSideEvent::RetryableTransportLoss,
         Err(err) => ForwardSideEvent::TerminalTransportError(err),
     }
 }

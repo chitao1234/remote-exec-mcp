@@ -509,6 +509,8 @@ How to use it:
 - `forward_id` is broker runtime state only. If the broker restarts, reopen the forward instead of trying to reuse the old id.
 - If only the broker-daemon transport drops while the daemon stays alive, the broker may resume the same forward after transport loss on either forwarding side and preserve future listen-side TCP accepts or UDP datagrams.
 - Do not expect active TCP streams or UDP per-peer connector state to survive a reconnect; treat those as lost and let future connections recreate them.
+- Per-stream TCP connect failures close that accepted TCP stream but leave the parent forward open for later connections.
+- Explicit close may return an error if daemon-side listener cleanup cannot be confirmed; retry close or inspect `list` before assuming the listener was released.
 - If the daemon restarts, or if the broker restarts and loses the broker-owned mapping, treat that forward as gone and open a new one.
 - If the broker crashes without reconnecting, daemon-side listeners are reclaimed after the internal reconnect grace window expires, and reopening still creates a fresh `forward_id`.
 

@@ -7,9 +7,7 @@ use remote_exec_proto::port_forward::udp_connector_endpoint;
 use remote_exec_proto::port_tunnel::{Frame, FrameType};
 use tokio::sync::Mutex;
 
-use super::events::{
-    ForwardLoopControl, ForwardSideEvent, TunnelRole, classify_transport_failure,
-};
+use super::events::{ForwardLoopControl, ForwardSideEvent, TunnelRole, classify_transport_failure};
 use super::supervisor::{ForwardRuntime, open_connect_tunnel, reconnect_listen_tunnel};
 use super::tunnel::{
     EndpointMeta, PortTunnel, UdpDatagramMeta, classify_recoverable_tunnel_event,
@@ -54,11 +52,8 @@ pub(super) async fn run_udp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
                     })?;
             }
             ForwardLoopControl::RecoverTunnel(TunnelRole::Connect) => {
-                connect_tunnel = reopen_connect_tunnel(
-                    &runtime,
-                    "after connect-side reconnect",
-                )
-                .await?;
+                connect_tunnel =
+                    reopen_connect_tunnel(&runtime, "after connect-side reconnect").await?;
             }
         }
     }
@@ -70,7 +65,12 @@ async fn reopen_connect_tunnel(
 ) -> anyhow::Result<Arc<PortTunnel>> {
     open_connect_tunnel(&runtime.connect_side)
         .await
-        .with_context(|| format!("reopening port tunnel to `{}` {reason}", runtime.connect_side.name()))
+        .with_context(|| {
+            format!(
+                "reopening port tunnel to `{}` {reason}",
+                runtime.connect_side.name()
+            )
+        })
 }
 
 async fn run_udp_forward_epoch(

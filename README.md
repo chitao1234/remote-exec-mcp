@@ -380,6 +380,7 @@ cargo fmt --all --check
 - `forward_ports` uses broker-mediated TCP/UDP forwarding between a `listen_side` and `connect_side`; either side may be a configured target or `"local"`.
 - Public `session_id` and `forward_id` values are broker-owned in-memory runtime state. A broker restart drops those mappings, so live exec sessions and port forwards must be reopened after restart.
 - `forward_ports` survives transient broker-daemon transport disconnects when the daemon stays alive. The broker may recover from transport loss on either forwarding side, and the daemon retains the forward itself plus future TCP accepts or future UDP datagrams on the listen side, but active TCP streams and UDP per-peer connector state are not preserved across reconnect.
+- Per-stream TCP connect failures close only that accepted TCP stream; the parent forward remains open for later connections.
 - Remote daemon port-forward resources are coordinated through daemon-private HTTP/1.1 Upgrade tunnels. If the broker disappears without closing a port forward, the daemon keeps detached listen-side resources only until the reconnect grace window expires, then reclaims listeners and UDP sockets so the same endpoint can be rebound later.
 - A daemon restart still destroys the forward. Unexpected broker loss may therefore delay remote listener cleanup until the reconnect grace window expires, but reopening after broker or daemon restart still creates a new `forward_id`.
 - Rust daemon shutdown now cancels pending tunnel accept/read/write work promptly and closes live forwarded listeners, UDP sockets, and TCP connections before the daemon exits.
@@ -415,6 +416,7 @@ cargo fmt --all --check
 - `forward_ports` accepts `action = "open" | "list" | "close"`; `open` requires `listen_side`, `connect_side`, and one or more `forwards`, `list` can filter by side or `forward_ids`, and `close` requires explicit `forward_ids`.
 - `forward_ports` endpoint strings accept a bare port such as `"8080"` as shorthand for `"127.0.0.1:8080"`. Non-loopback bind addresses such as `"0.0.0.0:8080"` are allowed. `listen_endpoint` may use port `0`; `connect_endpoint` must use a nonzero port.
 - Failed `forward_ports` initialization is all-or-nothing: any listeners created by the failed call are closed and no failed forward remains listed.
+- Explicit `forward_ports` close reports an error if daemon-side listener cleanup cannot be confirmed; failed forwards remain listed so callers can retry or inspect them.
 - Executable preservation is best effort and only restored on platforms that expose executable mode bits.
 - `allow_login_shell` controls daemon login-shell policy and defaults to `true`; explicit `login=true` is rejected only when the daemon disables it.
 - `default_shell` lets the daemon pin its fallback shell on both Unix and Windows. Startup now fails if the configured shell, or the auto-detected fallback when `default_shell` is omitted, is not usable on that host. Set this to `powershell.exe` or `cmd.exe` on Windows if you do not want the new Git Bash-first default.
@@ -499,7 +501,7 @@ cargo run -p remote-exec-broker --bin remote-exec -- \
   --forward tcp:127.0.0.1:15432=127.0.0.1:5432
 ```
 
-`forward-ports` state lives in the long-running broker process. In `--broker-config` mode, `remote-exec` rebuilds broker state for that one invocation, so forwards do not persist across separate CLI runs there. If the broker loses only the daemon transport while the daemon stays alive, the broker can reconnect the forward after transport loss on either forwarding side and preserve future listen-side traffic, but active TCP streams and UDP per-peer connector state are still lost. If the broker dies without reconnecting, daemon-side listeners are reclaimed after the reconnect grace window expires, and reopening still creates a new `forward_id`.
+`forward-ports` state lives in the long-running broker process. In `--broker-config` mode, `remote-exec` rebuilds broker state for that one invocation, so forwards do not persist across separate CLI runs there. If the broker loses only the daemon transport while the daemon stays alive, the broker can reconnect the forward after transport loss on either forwarding side and preserve future listen-side traffic, but active TCP streams and UDP per-peer connector state are still lost. Per-stream TCP connect failures close only that accepted TCP stream and leave the parent forward open. If the broker dies without reconnecting, daemon-side listeners are reclaimed after the reconnect grace window expires, and reopening still creates a new `forward_id`.
 
 Expose the broker over streamable HTTP instead of stdio:
 

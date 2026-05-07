@@ -17,7 +17,10 @@ pub(super) struct TunnelErrorMeta {
     pub(super) stream_id: u32,
 }
 
-#[allow(dead_code, reason = "Connect-side recovery is introduced in follow-up tasks")]
+#[allow(
+    dead_code,
+    reason = "Connect-side recovery is introduced in follow-up tasks"
+)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum TunnelRole {
     Listen,

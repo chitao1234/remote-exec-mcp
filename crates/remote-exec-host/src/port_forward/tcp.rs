@@ -569,5 +569,14 @@ pub(super) async fn tunnel_close_stream(
             tunnel.udp_sockets.lock().await.remove(&stream_id);
         }
     }
+    tunnel
+        .send(Frame {
+            frame_type: FrameType::Close,
+            flags: 0,
+            stream_id,
+            meta: Vec::new(),
+            data: Vec::new(),
+        })
+        .await?;
     Ok(())
 }

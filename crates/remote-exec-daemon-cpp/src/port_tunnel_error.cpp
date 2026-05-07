@@ -70,6 +70,7 @@ void PortTunnelConnection::close_stream(uint32_t stream_id) {
         if (close_session_now) {
             service_->close_session(session);
         }
+        send_frame(make_empty_frame(PortTunnelFrameType::Close, stream_id));
         return;
     }
 
@@ -92,6 +93,7 @@ void PortTunnelConnection::close_stream(uint32_t stream_id) {
     if (udp_socket.get() != NULL) {
         mark_udp_socket_closed(udp_socket);
     }
+    send_frame(make_empty_frame(PortTunnelFrameType::Close, stream_id));
 }
 
 void PortTunnelConnection::close_current_session(PortTunnelCloseMode mode) {

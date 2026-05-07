@@ -9,10 +9,11 @@ use remote_exec_proto::public::{
     ForwardPortStatus,
 };
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::side::SideHandle;
-use super::store::{OpenedForward, PortForwardRecord, PortForwardStore};
+use super::store::PortForwardRecord;
 use super::tcp_bridge::run_tcp_forward;
 use super::tunnel::{
     EndpointMeta, PortTunnel, SessionReadyMeta, SessionResumeMeta, decode_tunnel_meta,
@@ -20,7 +21,8 @@ use super::tunnel::{
 };
 use super::udp_bridge::run_udp_forward;
 use super::{
-    LISTEN_RECONNECT_INITIAL_BACKOFF, LISTEN_RECONNECT_MAX_BACKOFF, LISTEN_RECONNECT_SAFETY_MARGIN,
+    FORWARD_TASK_STOP_TIMEOUT, LISTEN_CLOSE_ACK_TIMEOUT, LISTEN_RECONNECT_INITIAL_BACKOFF,
+    LISTEN_RECONNECT_MAX_BACKOFF, LISTEN_RECONNECT_SAFETY_MARGIN,
 };
 
 #[derive(Clone)]
@@ -42,6 +44,26 @@ pub(super) struct ListenSessionControl {
     pub(super) resume_timeout: Duration,
     pub(super) current_tunnel: Mutex<Option<Arc<PortTunnel>>>,
     pub(super) op_lock: Mutex<()>,
+}
+
+pub struct OpenedForward {
+    pub record: PortForwardRecord,
+    runtime: ForwardRuntime,
+    task_done: Arc<Mutex<Option<JoinHandle<()>>>>,
+}
+
+impl OpenedForward {
+    pub fn entry(&self) -> &ForwardPortEntry {
+        &self.record.entry
+    }
+
+    pub async fn register_and_start(self, store: super::store::PortForwardStore) {
+        let runtime = self.runtime;
+        let task_done = self.task_done.clone();
+        store.insert(self.record).await;
+        let task = spawn_forward(runtime, store);
+        *task_done.lock().await = Some(task);
+    }
 }
 
 impl ListenSessionControl {
@@ -74,7 +96,6 @@ struct OpenListenSession {
 }
 
 pub async fn open_forward(
-    store: PortForwardStore,
     listen_side: SideHandle,
     connect_side: SideHandle,
     spec: &ForwardPortSpec,
@@ -84,7 +105,6 @@ pub async fn open_forward(
     match spec.protocol {
         PublicForwardPortProtocol::Tcp => {
             open_tcp_forward(
-                store,
                 listen_side,
                 connect_side,
                 listen_endpoint,
@@ -95,7 +115,6 @@ pub async fn open_forward(
         }
         PublicForwardPortProtocol::Udp => {
             open_udp_forward(
-                store,
                 listen_side,
                 connect_side,
                 listen_endpoint,
@@ -108,7 +127,6 @@ pub async fn open_forward(
 }
 
 async fn open_tcp_forward(
-    store: PortForwardStore,
     listen_side: SideHandle,
     connect_side: SideHandle,
     listen_endpoint: String,
@@ -163,6 +181,7 @@ async fn open_tcp_forward(
 
     let forward_id = format!("fwd_{}", uuid::Uuid::new_v4().simple());
     let cancel = CancellationToken::new();
+    let task_done = Arc::new(Mutex::new(None));
     let runtime = ForwardRuntime {
         forward_id: forward_id.clone(),
         listen_side: listen_side.clone(),
@@ -173,9 +192,8 @@ async fn open_tcp_forward(
         initial_connect_tunnel: connect_tunnel,
         cancel: cancel.clone(),
     };
-    spawn_forward(runtime, store);
-
     Ok(OpenedForward {
+        task_done: task_done.clone(),
         record: PortForwardRecord {
             entry: ForwardPortEntry {
                 forward_id,
@@ -189,12 +207,13 @@ async fn open_tcp_forward(
             },
             listen_session,
             cancel,
+            task_done,
         },
+        runtime,
     })
 }
 
 async fn open_udp_forward(
-    store: PortForwardStore,
     listen_side: SideHandle,
     connect_side: SideHandle,
     listen_endpoint: String,
@@ -249,6 +268,7 @@ async fn open_udp_forward(
 
     let forward_id = format!("fwd_{}", uuid::Uuid::new_v4().simple());
     let cancel = CancellationToken::new();
+    let task_done = Arc::new(Mutex::new(None));
     let runtime = ForwardRuntime {
         forward_id: forward_id.clone(),
         listen_side: listen_side.clone(),
@@ -259,9 +279,8 @@ async fn open_udp_forward(
         initial_connect_tunnel: connect_tunnel,
         cancel: cancel.clone(),
     };
-    spawn_forward(runtime, store);
-
     Ok(OpenedForward {
+        task_done: task_done.clone(),
         record: PortForwardRecord {
             entry: ForwardPortEntry {
                 forward_id,
@@ -275,11 +294,13 @@ async fn open_udp_forward(
             },
             listen_session,
             cancel,
+            task_done,
         },
+        runtime,
     })
 }
 
-fn spawn_forward(runtime: ForwardRuntime, store: PortForwardStore) {
+fn spawn_forward(runtime: ForwardRuntime, store: super::store::PortForwardStore) -> JoinHandle<()> {
     tokio::spawn(async move {
         let result = match runtime.protocol {
             PublicForwardPortProtocol::Tcp => run_tcp_forward(runtime.clone()).await,
@@ -299,7 +320,14 @@ fn spawn_forward(runtime: ForwardRuntime, store: PortForwardStore) {
                 "port forward task stopped"
             );
         }
-    });
+    })
+}
+
+pub(super) async fn wait_for_forward_task_stop(task: JoinHandle<()>) -> anyhow::Result<()> {
+    tokio::time::timeout(FORWARD_TASK_STOP_TIMEOUT, task)
+        .await
+        .map_err(|_| anyhow::anyhow!("timed out waiting for port forward task to stop"))?
+        .map_err(|err| anyhow::anyhow!("waiting for port forward task to stop: {err}"))
 }
 
 async fn open_listen_session(side: &SideHandle) -> anyhow::Result<OpenListenSession> {
@@ -446,18 +474,37 @@ pub(super) async fn reconnect_listen_tunnel(
 pub(super) async fn close_listen_session(control: Arc<ListenSessionControl>) -> anyhow::Result<()> {
     let _guard = control.op_lock.lock().await;
     if let Some(tunnel) = control.current_tunnel().await {
-        if tunnel
-            .close_stream(control.listener_stream_id)
-            .await
-            .is_ok()
-        {
-            return Ok(());
+        match close_listener_on_tunnel(&tunnel, control.listener_stream_id).await {
+            Ok(()) => return Ok(()),
+            Err(err) if is_retryable_transport_error(&err) => {}
+            Err(err) => return Err(err),
         }
     }
-
     let tunnel = resume_listen_session_inner(&control).await?;
     *control.current_tunnel.lock().await = Some(tunnel.clone());
-    tunnel.close_stream(control.listener_stream_id).await
+    close_listener_on_tunnel(&tunnel, control.listener_stream_id).await
+}
+
+async fn close_listener_on_tunnel(tunnel: &Arc<PortTunnel>, stream_id: u32) -> anyhow::Result<()> {
+    tunnel.close_stream(stream_id).await?;
+    wait_for_close_ack(tunnel, stream_id).await
+}
+
+async fn wait_for_close_ack(tunnel: &Arc<PortTunnel>, stream_id: u32) -> anyhow::Result<()> {
+    tokio::time::timeout(LISTEN_CLOSE_ACK_TIMEOUT, async {
+        loop {
+            let frame = tunnel.recv().await?;
+            match frame.frame_type {
+                FrameType::Close if frame.stream_id == stream_id => return Ok(()),
+                FrameType::Error if frame.stream_id == stream_id => {
+                    return Err(tunnel_error(&frame));
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .map_err(|_| anyhow::anyhow!("timed out waiting for port forward close acknowledgement"))?
 }
 
 fn effective_resume_timeout(resume_timeout: Duration) -> Duration {

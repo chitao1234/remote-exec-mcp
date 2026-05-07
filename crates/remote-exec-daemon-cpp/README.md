@@ -88,7 +88,8 @@ broker-daemon transport drops and the daemon stays alive, the broker may
 recover from transport loss on either forwarding side while the daemon retains
 the forward itself plus future TCP accepts or future UDP datagrams on the
 listen side. Active TCP streams and UDP per-peer connector state are not
-preserved across reconnect. A broker restart still drops the broker-owned
+preserved across reconnect. Per-stream TCP connect failures close only that
+accepted TCP stream and leave the parent forward open. A broker restart still drops the broker-owned
 `forward_id` mapping, and a daemon restart still destroys the forward. If the
 broker disappears without reconnecting, the daemon reclaims detached listeners
 and UDP sockets after the reconnect grace window expires.
@@ -183,6 +184,7 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
 - omitted `view_image.detail` defaults to `original` because no resize/re-encode path exists
 - broker-owned `forward_id` values do not persist across broker restart
 - transient broker-daemon transport drops preserve only the forward itself plus future listen-side TCP accepts or UDP datagrams; active TCP streams and UDP per-peer connector state are lost
+- per-stream TCP connect failures close only that accepted TCP stream and leave the parent forward open
 - transfer compression is not supported
 - `transfer_files` supports regular files, directory trees, and broker-built multi-source bundles
 - `transfer_files` accepts an optional export-side `exclude` array. Patterns match paths relative to each source root, use `/` as the logical separator on all platforms, and support `*`, `?`, `**`, `[abc]`, `[a-z]`, `[!abc]`, `[!a-c]`, `[^abc]`, and `[^a-c]`

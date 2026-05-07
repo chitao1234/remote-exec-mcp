@@ -173,11 +173,11 @@ async fn forward_ports_forwards_local_udp_datagrams() {
 }
 
 #[tokio::test]
-async fn forward_ports_marks_forward_failed_after_background_connect_error() {
+async fn forward_ports_keeps_forward_open_after_stream_connect_error() {
     let fixture = support::spawners::spawn_broker_local_only().await;
-    let blackhole = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let blackhole_addr = blackhole.local_addr().unwrap();
-    drop(blackhole);
+    let destination_probe = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let destination_addr = destination_probe.local_addr().unwrap();
+    drop(destination_probe);
 
     let open = fixture
         .call_tool(
@@ -188,7 +188,7 @@ async fn forward_ports_marks_forward_failed_after_background_connect_error() {
                 "connect_side": "local",
                 "forwards": [{
                     "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": blackhole_addr.to_string(),
+                    "connect_endpoint": destination_addr.to_string(),
                     "protocol": "tcp"
                 }]
             }),
@@ -207,14 +207,53 @@ async fn forward_ports_marks_forward_failed_after_background_connect_error() {
         .await
         .unwrap();
 
-    let failed =
-        wait_for_forward_status(&fixture, &forward_id, "failed", Duration::from_secs(5)).await;
-    assert_eq!(failed["status"], "failed");
-    let error = failed["last_error"].as_str().unwrap_or_default();
-    assert!(
-        error.contains("connecting tcp forward destination"),
-        "unexpected error: {error}"
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    let listed = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "list",
+                "forward_ids": [forward_id.clone()]
+            }),
+        )
+        .await;
+    assert_eq!(listed.structured_content["forwards"][0]["status"], "open");
+    assert_eq!(
+        listed.structured_content["forwards"][0]
+            .get("last_error")
+            .and_then(|value| value.as_str()),
+        None
     );
+
+    let echo_listener = tokio::net::TcpListener::bind(destination_addr)
+        .await
+        .unwrap();
+    tokio::spawn(async move {
+        let (mut stream, _) = echo_listener.accept().await.unwrap();
+        let mut buf = Vec::new();
+        stream.read_to_end(&mut buf).await.unwrap();
+        stream.write_all(&buf).await.unwrap();
+    });
+
+    let mut stream = tokio::net::TcpStream::connect(&listen_endpoint)
+        .await
+        .unwrap();
+    stream.write_all(b"after-error").await.unwrap();
+    stream.shutdown().await.unwrap();
+    let mut echoed = Vec::new();
+    stream.read_to_end(&mut echoed).await.unwrap();
+    assert_eq!(echoed, b"after-error");
+
+    let close = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "close",
+                "forward_ids": [forward_id]
+            }),
+        )
+        .await;
+    assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
 #[tokio::test]
@@ -331,6 +370,93 @@ async fn forward_ports_does_not_retry_stream_error_frames() {
     assert!(
         error.contains("port_bind_failed") || error.contains("boom"),
         "unexpected error: {error}"
+    );
+}
+
+#[tokio::test]
+async fn forward_ports_close_reports_listen_cleanup_failures() {
+    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(3).await;
+    support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
+    support::stub_daemon::block_session_resume(&fixture.stub_state).await;
+    let blackhole = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let blackhole_addr = blackhole.local_addr().unwrap();
+    drop(blackhole);
+
+    let open = fixture
+        .open_remote_tcp_forward(&blackhole_addr.to_string())
+        .await;
+    let forward_id = forward_id_from(&open);
+
+    support::stub_daemon::force_close_port_tunnel_transport(&fixture.stub_state).await;
+
+    let error = fixture
+        .call_tool_error(
+            "forward_ports",
+            serde_json::json!({
+                "action": "close",
+                "forward_ids": [forward_id]
+            }),
+        )
+        .await;
+
+    assert!(
+        error.contains("closing port forward")
+            && (error.contains("port tunnel closed")
+                || error.contains("resuming port tunnel session")
+                || error.contains("waiting to resume port tunnel session")),
+        "unexpected close error: {error}"
+    );
+}
+
+#[tokio::test]
+async fn forward_ports_records_failure_when_runtime_fails_before_multi_open_finishes() {
+    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(3).await;
+    support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
+    support::stub_daemon::fail_first_forward_runtime_before_multi_open_finishes(
+        &fixture.stub_state,
+    )
+    .await;
+    let blackhole = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let blackhole_addr = blackhole.local_addr().unwrap();
+    drop(blackhole);
+
+    let open = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "builder-a",
+                "connect_side": "local",
+                "forwards": [
+                    {
+                        "listen_endpoint": "127.0.0.1:0",
+                        "connect_endpoint": blackhole_addr.to_string(),
+                        "protocol": "tcp"
+                    },
+                    {
+                        "listen_endpoint": "127.0.0.1:0",
+                        "connect_endpoint": blackhole_addr.to_string(),
+                        "protocol": "tcp"
+                    }
+                ]
+            }),
+        )
+        .await;
+    let first_forward_id = forward_id_at(&open, 0);
+
+    let failed = wait_for_forward_status(
+        &fixture,
+        &first_forward_id,
+        "failed",
+        Duration::from_secs(5),
+    )
+    .await;
+    let error = failed["last_error"].as_str().unwrap_or_default();
+    assert!(
+        error.contains("forced_resume_failure")
+            || error.contains("forced resume failure")
+            || error.contains("port tunnel closed"),
+        "unexpected failure error: {error}"
     );
 }
 
@@ -530,7 +656,11 @@ async fn wait_for_forward_status(
 }
 
 fn forward_id_from(result: &support::fixture::ToolResult) -> String {
-    result.structured_content["forwards"][0]["forward_id"]
+    forward_id_at(result, 0)
+}
+
+fn forward_id_at(result: &support::fixture::ToolResult, index: usize) -> String {
+    result.structured_content["forwards"][index]["forward_id"]
         .as_str()
         .unwrap()
         .to_string()
