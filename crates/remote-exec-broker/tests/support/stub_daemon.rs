@@ -86,6 +86,7 @@ struct StubPortTunnelControl {
     active_udp_connector_streams: HashSet<u32>,
     max_observed_udp_connector_streams: usize,
     opened_udp_connector_streams: usize,
+    udp_connector_bind_errors_remaining: usize,
 }
 
 impl Default for StubPortTunnelControl {
@@ -102,6 +103,7 @@ impl Default for StubPortTunnelControl {
             active_udp_connector_streams: HashSet::new(),
             max_observed_udp_connector_streams: 0,
             opened_udp_connector_streams: 0,
+            udp_connector_bind_errors_remaining: 0,
         }
     }
 }
@@ -221,6 +223,14 @@ pub(crate) async fn drop_tcp_connect_ok_frames(state: &StubDaemonState) {
         .lock()
         .await
         .tcp_connect_ok_behavior = TcpConnectOkBehavior::DropAll;
+}
+
+pub(crate) async fn fail_next_udp_connector_bind(state: &StubDaemonState) {
+    state
+        .port_tunnel_control
+        .lock()
+        .await
+        .udp_connector_bind_errors_remaining += 1;
 }
 
 pub(crate) async fn fail_first_forward_runtime_before_multi_open_finishes(state: &StubDaemonState) {
@@ -646,8 +656,16 @@ where
         let _ = remote_exec_host::port_forward::serve_tunnel(tunnel_state, daemon_side).await;
     });
     write_preface(&mut broker_side).await?;
-    observe_broker_to_daemon_frame(&state, &first_frame).await;
-    write_frame(&mut broker_side, &first_frame).await?;
+    let observed = observe_broker_to_daemon_frame(&state, &first_frame).await?;
+    for transport in observed.transports_to_cancel {
+        transport.cancel();
+    }
+    if let Some(error) = observed.error {
+        write_frame(&mut stream, &error).await?;
+    }
+    if observed.forward {
+        write_frame(&mut broker_side, &first_frame).await?;
+    }
 
     let cancel = CancellationToken::new();
     state
@@ -658,6 +676,12 @@ where
         .push(cancel.clone());
 
     relay_port_tunnel_frames(state, stream, broker_side, cancel).await
+}
+
+struct ObservedBrokerFrame {
+    forward: bool,
+    error: Option<Frame>,
+    transports_to_cancel: Vec<CancellationToken>,
 }
 
 async fn relay_port_tunnel_frames<S1, S2>(
@@ -677,8 +701,16 @@ where
                 let Some(frame) = frame_from_result(frame)? else {
                     return Ok(());
                 };
-                observe_broker_to_daemon_frame(&state, &frame).await;
-                write_frame(&mut internal, &frame).await?;
+                let observed = observe_broker_to_daemon_frame(&state, &frame).await?;
+                for transport in observed.transports_to_cancel {
+                    transport.cancel();
+                }
+                if let Some(error) = observed.error {
+                    write_frame(&mut external, &error).await?;
+                }
+                if observed.forward {
+                    write_frame(&mut internal, &frame).await?;
+                }
             }
             frame = read_frame(&mut internal) => {
                 let Some(frame) = frame_from_result(frame)? else {
@@ -700,8 +732,16 @@ fn frame_from_result(result: std::io::Result<Frame>) -> anyhow::Result<Option<Fr
     }
 }
 
-async fn observe_broker_to_daemon_frame(state: &StubDaemonState, frame: &Frame) {
-    let transports_to_cancel = {
+async fn observe_broker_to_daemon_frame(
+    state: &StubDaemonState,
+    frame: &Frame,
+) -> anyhow::Result<ObservedBrokerFrame> {
+    let mut observed = ObservedBrokerFrame {
+        forward: true,
+        error: None,
+        transports_to_cancel: Vec::new(),
+    };
+    {
         let mut control = state.port_tunnel_control.lock().await;
         match frame.frame_type {
             FrameType::SessionOpen => {
@@ -710,31 +750,41 @@ async fn observe_broker_to_daemon_frame(state: &StubDaemonState, frame: &Frame) 
                     && control.session_open_count == 2
                 {
                     control.close_transports_on_second_session_open = false;
-                    std::mem::take(&mut control.active_transports)
-                } else {
-                    Vec::new()
+                    observed.transports_to_cancel = std::mem::take(&mut control.active_transports);
                 }
             }
             FrameType::UdpBind if frame.stream_id >= 3 => {
-                control.active_udp_connector_streams.insert(frame.stream_id);
-                control.opened_udp_connector_streams += 1;
-                control.max_observed_udp_connector_streams = control
-                    .max_observed_udp_connector_streams
-                    .max(control.active_udp_connector_streams.len());
-                Vec::new()
+                if control.udp_connector_bind_errors_remaining > 0 {
+                    control.udp_connector_bind_errors_remaining -= 1;
+                    observed.forward = false;
+                    observed.error = Some(Frame {
+                        frame_type: FrameType::Error,
+                        flags: 0,
+                        stream_id: frame.stream_id,
+                        meta: serde_json::to_vec(&serde_json::json!({
+                            "code": "port_bind_failed",
+                            "message": "forced udp connector bind failure",
+                            "fatal": false,
+                        }))?,
+                        data: Vec::new(),
+                    });
+                } else {
+                    control.active_udp_connector_streams.insert(frame.stream_id);
+                    control.opened_udp_connector_streams += 1;
+                    control.max_observed_udp_connector_streams = control
+                        .max_observed_udp_connector_streams
+                        .max(control.active_udp_connector_streams.len());
+                }
             }
             FrameType::Close => {
                 control
                     .active_udp_connector_streams
                     .remove(&frame.stream_id);
-                Vec::new()
             }
-            _ => Vec::new(),
+            _ => {}
         }
-    };
-    for transport in transports_to_cancel {
-        transport.cancel();
     }
+    Ok(observed)
 }
 
 async fn should_forward_daemon_to_broker_frame(state: &StubDaemonState, frame: &Frame) -> bool {

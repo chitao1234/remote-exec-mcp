@@ -151,6 +151,14 @@ async fn run_udp_forward_epoch(
                 };
                 match frame.frame_type {
                     FrameType::UdpBindOk => {}
+                    FrameType::Error => {
+                        remove_udp_connector(
+                            &connector_by_peer,
+                            &peer_by_connector,
+                            frame.stream_id,
+                        )
+                        .await;
+                    }
                     FrameType::UdpDatagram => {
                         let Some(peer) = peer_by_connector.lock().await.get(&frame.stream_id).cloned() else {
                             continue;
@@ -222,6 +230,16 @@ async fn udp_connector_stream_id(
     );
     peer_by_connector.lock().await.insert(stream_id, peer);
     Ok(stream_id)
+}
+
+async fn remove_udp_connector(
+    connector_by_peer: &Arc<Mutex<HashMap<String, UdpPeerConnector>>>,
+    peer_by_connector: &Arc<Mutex<HashMap<u32, String>>>,
+    stream_id: u32,
+) {
+    if let Some(peer) = peer_by_connector.lock().await.remove(&stream_id) {
+        connector_by_peer.lock().await.remove(&peer);
+    }
 }
 
 async fn evict_udp_connector_if_needed(

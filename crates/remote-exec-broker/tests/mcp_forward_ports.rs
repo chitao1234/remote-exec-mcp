@@ -765,6 +765,74 @@ async fn forward_ports_stays_open_during_heavy_local_udp_peer_churn() {
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
+#[tokio::test]
+async fn forward_ports_retries_udp_connector_after_bind_error() {
+    let fixture = support::spawners::spawn_broker_with_local_and_stub_port_forward_version(3).await;
+    support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
+    support::stub_daemon::fail_next_udp_connector_bind(&fixture.stub_state).await;
+
+    let echo_socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let echo_addr = echo_socket.local_addr().unwrap();
+    tokio::spawn(async move {
+        let mut buf = [0u8; 1024];
+        loop {
+            let (read, peer) = match echo_socket.recv_from(&mut buf).await {
+                Ok(value) => value,
+                Err(_) => return,
+            };
+            if echo_socket.send_to(&buf[..read], peer).await.is_err() {
+                return;
+            }
+        }
+    });
+
+    let open = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "local",
+                "connect_side": "builder-a",
+                "forwards": [{
+                    "listen_endpoint": "127.0.0.1:0",
+                    "connect_endpoint": echo_addr.to_string(),
+                    "protocol": "udp"
+                }]
+            }),
+        )
+        .await;
+    let forward_id = forward_id_from(&open);
+    let listen_endpoint = listen_endpoint_from(&open);
+
+    let client = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    client.send_to(b"first", &listen_endpoint).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    client.send_to(b"second", &listen_endpoint).await.unwrap();
+
+    let mut buf = [0u8; 64];
+    let read = tokio::time::timeout(Duration::from_secs(5), client.recv_from(&mut buf))
+        .await
+        .expect("udp connector should retry after bind error")
+        .unwrap()
+        .0;
+    assert_eq!(&buf[..read], b"second");
+
+    let stats = support::stub_daemon::udp_connector_stats(&fixture.stub_state).await;
+    assert_eq!(stats.opened, 1);
+    assert_eq!(stats.active, 1);
+
+    let close = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "close",
+                "forward_ids": [forward_id]
+            }),
+        )
+        .await;
+    assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
+}
+
 async fn wait_for_forward_status(
     fixture: &support::fixture::BrokerFixture,
     forward_id: &str,
