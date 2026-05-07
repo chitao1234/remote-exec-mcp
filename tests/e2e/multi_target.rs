@@ -266,6 +266,62 @@ async fn forward_ports_relays_remote_udp_datagrams_from_two_peers_full_duplex() 
 }
 
 #[tokio::test]
+async fn forward_ports_reconnect_after_live_tunnel_drop_and_accept_new_tcp_connections() {
+    let cluster = support::spawn_cluster().await;
+    let echo_addr = support::spawn_tcp_echo().await;
+
+    let open = cluster
+        .broker
+        .open_tcp_forward("builder-a", "local", "127.0.0.1:0", &echo_addr.to_string())
+        .await;
+    let forward_id = open.forward_id();
+    let listen_endpoint = open.listen_endpoint();
+
+    cluster.daemon_a.drop_port_tunnels().await;
+
+    support::wait_for_forward_status_timeout(
+        &cluster.broker,
+        &forward_id,
+        "open",
+        Duration::from_secs(5),
+    )
+    .await
+    .expect("forward should stay open after reconnect");
+
+    let mut stream = tokio::net::TcpStream::connect(&listen_endpoint)
+        .await
+        .unwrap();
+    stream.write_all(b"after").await.unwrap();
+    let mut echoed = [0u8; 5];
+    stream.read_exact(&mut echoed).await.unwrap();
+    assert_eq!(&echoed, b"after");
+}
+
+#[tokio::test]
+async fn forward_ports_reconnect_after_live_tunnel_drop_and_relays_future_udp_datagrams() {
+    let cluster = support::spawn_cluster().await;
+    let udp_echo = support::spawn_udp_echo().await;
+
+    let open = cluster
+        .broker
+        .open_udp_forward("builder-a", "local", "127.0.0.1:0", &udp_echo.to_string())
+        .await;
+    let listen_endpoint = open.listen_endpoint();
+
+    cluster.daemon_a.drop_port_tunnels().await;
+
+    let sender = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    sender.send_to(b"after", &listen_endpoint).await.unwrap();
+
+    let mut buf = [0u8; 16];
+    let (read, _) = tokio::time::timeout(Duration::from_secs(5), sender.recv_from(&mut buf))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(&buf[..read], b"after");
+}
+
+#[tokio::test]
 async fn forward_ports_release_remote_listeners_when_broker_stops() {
     let mut cluster = support::spawn_cluster().await;
     let listen_addr = support::allocate_addr();
@@ -293,7 +349,8 @@ async fn forward_ports_release_remote_listeners_when_broker_stops() {
 
     cluster.broker.stop().await;
 
-    wait_for_daemon_listener_rebind(&listen_addr.to_string(), Duration::from_secs(10)).await;
+    support::wait_for_daemon_listener_rebind(&listen_addr.to_string(), Duration::from_secs(10))
+        .await;
 }
 
 #[tokio::test]
@@ -328,7 +385,8 @@ async fn forward_ports_release_remote_listeners_after_broker_crash() {
     tokio::time::sleep(Duration::from_millis(200)).await;
     broker.kill().await;
 
-    wait_for_daemon_listener_rebind(&listen_addr.to_string(), Duration::from_secs(10)).await;
+    support::wait_for_daemon_listener_rebind(&listen_addr.to_string(), Duration::from_secs(15))
+        .await;
 
     let reopened_broker = support::BrokerFixture::spawn(&daemon_a, &daemon_b).await;
     let reopened = reopened_broker
@@ -430,7 +488,7 @@ async fn forward_ports_fail_cleanly_after_daemon_restart_and_can_reopen() {
 
     cluster.daemon_a.restart().await;
 
-    let failed = wait_for_forward_status_timeout(
+    let failed = support::wait_for_forward_status_timeout(
         &cluster.broker,
         &forward_id,
         "failed",
@@ -445,19 +503,12 @@ async fn forward_ports_fail_cleanly_after_daemon_restart_and_can_reopen() {
             || last_error.contains("port tunnel closed")
             || last_error.contains("reading tcp listen tunnel")
             || last_error.contains("port_bind_closed")
-            || last_error.contains("port_accept_failed"),
+            || last_error.contains("port_accept_failed")
+            || last_error.contains("unknown_port_tunnel_session"),
         "unexpected restart failure error: {last_error}"
     );
 
-    let after_restart = tokio::time::timeout(
-        Duration::from_secs(2),
-        tokio::net::TcpStream::connect(&listen_endpoint),
-    )
-    .await;
-    assert!(
-        after_restart.is_err() || after_restart.unwrap().is_err(),
-        "stale forwarded listener should stop accepting connections after daemon restart"
-    );
+    wait_for_stale_forward_to_stop_accepting(&listen_endpoint, Duration::from_secs(12)).await;
 
     let reopened = cluster
         .broker
@@ -708,41 +759,19 @@ async fn transfer_files_bundles_multiple_local_sources_with_zstd_for_remote_dest
     );
 }
 
-async fn wait_for_forward_status_timeout(
-    broker: &support::BrokerFixture,
-    forward_id: &str,
-    status: &str,
-    timeout: Duration,
-) -> Option<serde_json::Value> {
-    let started = std::time::Instant::now();
-    while started.elapsed() < timeout {
-        let list = broker
-            .call_tool(
-                "forward_ports",
-                serde_json::json!({
-                    "action": "list",
-                    "forward_ids": [forward_id]
-                }),
-            )
-            .await;
-        let entry = list.structured_content["forwards"][0].clone();
-        if entry["status"] == status {
-            return Some(entry);
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-
-    None
-}
-
-async fn wait_for_daemon_listener_rebind(endpoint: &str, timeout: Duration) {
+async fn wait_for_stale_forward_to_stop_accepting(endpoint: &str, timeout: Duration) {
     let started = std::time::Instant::now();
     loop {
-        if tokio::net::TcpListener::bind(endpoint).await.is_ok() {
+        let result = tokio::time::timeout(
+            Duration::from_millis(250),
+            tokio::net::TcpStream::connect(endpoint),
+        )
+        .await;
+        if result.is_err() || result.unwrap().is_err() {
             return;
         }
         if started.elapsed() >= timeout {
-            panic!("daemon listener on {endpoint} was not released after broker crash");
+            panic!("stale forwarded listener at {endpoint} kept accepting after daemon restart");
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }

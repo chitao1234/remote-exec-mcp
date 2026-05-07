@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use rmcp::{
@@ -8,6 +9,9 @@ use rmcp::{
     transport::TokioChildProcess,
 };
 use tempfile::TempDir;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
 
 pub struct ClusterFixture {
@@ -116,6 +120,52 @@ impl BrokerFixture {
         result.text_output
     }
 
+    pub async fn open_tcp_forward(
+        &self,
+        listen_side: &str,
+        connect_side: &str,
+        listen_endpoint: &str,
+        connect_endpoint: &str,
+    ) -> ToolResult {
+        self.call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": listen_side,
+                "connect_side": connect_side,
+                "forwards": [{
+                    "listen_endpoint": listen_endpoint,
+                    "connect_endpoint": connect_endpoint,
+                    "protocol": "tcp"
+                }]
+            }),
+        )
+        .await
+    }
+
+    pub async fn open_udp_forward(
+        &self,
+        listen_side: &str,
+        connect_side: &str,
+        listen_endpoint: &str,
+        connect_endpoint: &str,
+    ) -> ToolResult {
+        self.call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": listen_side,
+                "connect_side": connect_side,
+                "forwards": [{
+                    "listen_endpoint": listen_endpoint,
+                    "connect_endpoint": connect_endpoint,
+                    "protocol": "udp"
+                }]
+            }),
+        )
+        .await
+    }
+
     pub async fn stop(&mut self) {
         self.client.close().await.unwrap();
     }
@@ -206,6 +256,20 @@ impl ToolResult {
             raw_content,
         }
     }
+
+    pub fn forward_id(&self) -> String {
+        self.structured_content["forwards"][0]["forward_id"]
+            .as_str()
+            .expect("forward result should include forward_id")
+            .to_string()
+    }
+
+    pub fn listen_endpoint(&self) -> String {
+        self.structured_content["forwards"][0]["listen_endpoint"]
+            .as_str()
+            .expect("forward result should include listen_endpoint")
+            .to_string()
+    }
 }
 
 fn normalize_content(content: &rmcp::model::Content) -> serde_json::Value {
@@ -239,26 +303,38 @@ pub struct DaemonFixture {
     _tempdir: TempDir,
     pub target: String,
     pub addr: std::net::SocketAddr,
+    backend_addr: std::net::SocketAddr,
     pub workdir: PathBuf,
     client: reqwest::Client,
+    proxy: TunnelDropProxy,
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     handle: Option<JoinHandle<anyhow::Result<()>>>,
+}
+
+struct TunnelDropProxy {
+    active_port_tunnels: Arc<Mutex<Vec<oneshot::Sender<()>>>>,
+    shutdown: Option<oneshot::Sender<()>>,
+    handle: Option<JoinHandle<()>>,
 }
 
 impl DaemonFixture {
     pub async fn spawn(target: &str) -> Self {
         let tempdir = tempfile::tempdir().unwrap();
         let addr = allocate_addr();
+        let backend_addr = allocate_addr();
         let workdir = tempdir.path().join("workdir");
         std::fs::create_dir_all(&workdir).unwrap();
         let client = build_http_client();
+        let proxy = TunnelDropProxy::spawn(addr, backend_addr).await;
 
         let mut fixture = Self {
             _tempdir: tempdir,
             target: target.to_string(),
             addr,
+            backend_addr,
             workdir,
             client,
+            proxy,
             shutdown: None,
             handle: None,
         };
@@ -269,6 +345,10 @@ impl DaemonFixture {
     pub async fn restart(&mut self) {
         self.stop().await;
         self.start().await;
+    }
+
+    pub async fn drop_port_tunnels(&self) {
+        self.proxy.drop_port_tunnels().await;
     }
 
     pub fn target_config_fragment(&self) -> String {
@@ -287,7 +367,7 @@ expected_daemon_name = {expected_daemon_name}
     async fn start(&mut self) {
         let config = remote_exec_daemon::config::DaemonConfig {
             target: self.target.clone(),
-            listen: self.addr,
+            listen: self.backend_addr,
             default_workdir: self.workdir.clone(),
             windows_posix_root: None,
             transport: remote_exec_daemon::config::DaemonTransport::Http,
@@ -319,7 +399,7 @@ expected_daemon_name = {expected_daemon_name}
         }
         if let Some(handle) = self.handle.take() {
             let _ = handle.await;
-            wait_for_listener_release(self.addr).await;
+            wait_for_listener_release(self.backend_addr).await;
         }
     }
 }
@@ -332,7 +412,126 @@ impl Drop for DaemonFixture {
         if let Some(handle) = self.handle.take() {
             handle.abort();
         }
+        self.proxy.stop();
     }
+}
+
+impl TunnelDropProxy {
+    async fn spawn(listen_addr: std::net::SocketAddr, daemon_addr: std::net::SocketAddr) -> Self {
+        let listener = TcpListener::bind(listen_addr).await.unwrap();
+        let active_port_tunnels = Arc::new(Mutex::new(Vec::new()));
+        let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+        let active_port_tunnels_task = active_port_tunnels.clone();
+        let handle = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = &mut shutdown_rx => {
+                        break;
+                    }
+                    accepted = listener.accept() => {
+                        let (stream, _) = match accepted {
+                            Ok(value) => value,
+                            Err(_) => break,
+                        };
+                        let active_port_tunnels = active_port_tunnels_task.clone();
+                        tokio::spawn(async move {
+                            let _ = proxy_connection(stream, daemon_addr, active_port_tunnels).await;
+                        });
+                    }
+                }
+            }
+        });
+
+        Self {
+            active_port_tunnels,
+            shutdown: Some(shutdown_tx),
+            handle: Some(handle),
+        }
+    }
+
+    async fn drop_port_tunnels(&self) {
+        let mut active = self.active_port_tunnels.lock().await;
+        for shutdown in active.drain(..) {
+            let _ = shutdown.send(());
+        }
+    }
+
+    fn stop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        if let Some(handle) = self.handle.take() {
+            handle.abort();
+        }
+    }
+}
+
+async fn proxy_connection(
+    mut client_stream: tokio::net::TcpStream,
+    daemon_addr: std::net::SocketAddr,
+    active_port_tunnels: Arc<Mutex<Vec<oneshot::Sender<()>>>>,
+) -> std::io::Result<()> {
+    let mut backend_stream = tokio::net::TcpStream::connect(daemon_addr).await?;
+    let mut request = Vec::new();
+    let mut byte = [0u8; 1];
+
+    loop {
+        let read = client_stream.read(&mut byte).await?;
+        if read == 0 {
+            return Ok(());
+        }
+        request.push(byte[0]);
+        if request.ends_with(b"\r\n\r\n") {
+            break;
+        }
+    }
+
+    let request_text = String::from_utf8_lossy(&request);
+    let is_port_tunnel = is_port_tunnel_upgrade_request(&request_text);
+
+    backend_stream.write_all(&request).await?;
+
+    if is_port_tunnel {
+        let (drop_tx, drop_rx) = oneshot::channel();
+        active_port_tunnels.lock().await.push(drop_tx);
+        proxy_port_tunnel_streams(client_stream, backend_stream, drop_rx).await
+    } else {
+        proxy_plain_streams(client_stream, backend_stream).await
+    }
+}
+
+fn is_port_tunnel_upgrade_request(request: &str) -> bool {
+    let lower = request.to_ascii_lowercase();
+    let first_line = lower.lines().next().unwrap_or_default();
+    first_line.starts_with("post /v1/port/tunnel ")
+        && lower.contains("\r\nconnection: upgrade\r\n")
+        && lower.contains("\r\nupgrade: remote-exec-port-tunnel\r\n")
+}
+
+async fn proxy_plain_streams(
+    mut client_stream: tokio::net::TcpStream,
+    mut backend_stream: tokio::net::TcpStream,
+) -> std::io::Result<()> {
+    let _ = tokio::io::copy_bidirectional(&mut client_stream, &mut backend_stream).await?;
+    Ok(())
+}
+
+async fn proxy_port_tunnel_streams(
+    mut client_stream: tokio::net::TcpStream,
+    mut backend_stream: tokio::net::TcpStream,
+    mut drop_rx: oneshot::Receiver<()>,
+) -> std::io::Result<()> {
+    tokio::select! {
+        result = tokio::io::copy_bidirectional(&mut client_stream, &mut backend_stream) => {
+            let _ = result?;
+        }
+        _ = &mut drop_rx => {
+            let _ = client_stream.shutdown().await;
+            let _ = backend_stream.shutdown().await;
+        }
+    }
+
+    Ok(())
 }
 
 pub async fn write_png(path: &Path, width: u32, height: u32) {
@@ -344,6 +543,51 @@ pub fn allocate_addr() -> std::net::SocketAddr {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
     drop(listener);
+    addr
+}
+
+pub async fn spawn_tcp_echo() -> std::net::SocketAddr {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let (mut stream, _) = match listener.accept().await {
+                Ok(value) => value,
+                Err(_) => return,
+            };
+            tokio::spawn(async move {
+                let mut buf = [0u8; 1024];
+                loop {
+                    let read = match stream.read(&mut buf).await {
+                        Ok(0) => return,
+                        Ok(read) => read,
+                        Err(_) => return,
+                    };
+                    if stream.write_all(&buf[..read]).await.is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+    });
+    addr
+}
+
+pub async fn spawn_udp_echo() -> std::net::SocketAddr {
+    let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let addr = socket.local_addr().unwrap();
+    tokio::spawn(async move {
+        let mut buf = [0u8; 1024];
+        loop {
+            let (read, peer) = match socket.recv_from(&mut buf).await {
+                Ok(value) => value,
+                Err(_) => return,
+            };
+            if socket.send_to(&buf[..read], peer).await.is_err() {
+                return;
+            }
+        }
+    });
     addr
 }
 
@@ -416,10 +660,54 @@ async fn wait_for_listener_release(addr: std::net::SocketAddr) {
     panic!("daemon listener was not released");
 }
 
+pub async fn wait_for_forward_status_timeout(
+    broker: &BrokerFixture,
+    forward_id: &str,
+    status: &str,
+    timeout: Duration,
+) -> Option<serde_json::Value> {
+    let started = std::time::Instant::now();
+    while started.elapsed() < timeout {
+        let list = broker
+            .call_tool(
+                "forward_ports",
+                serde_json::json!({
+                    "action": "list",
+                    "forward_ids": [forward_id]
+                }),
+            )
+            .await;
+        let entry = list.structured_content["forwards"][0].clone();
+        if entry["status"] == status {
+            return Some(entry);
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    None
+}
+
+pub async fn wait_for_daemon_listener_rebind(endpoint: &str, timeout: Duration) {
+    let started = std::time::Instant::now();
+    loop {
+        if tokio::net::TcpListener::bind(endpoint).await.is_ok() {
+            return;
+        }
+        if started.elapsed() >= timeout {
+            panic!("daemon listener on {endpoint} was not released after broker crash");
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{DaemonFixture, build_http_client};
     use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use tokio::sync::Mutex;
+
+    use super::{DaemonFixture, TunnelDropProxy, build_http_client};
 
     #[test]
     fn target_config_fragment_renders_insecure_http_target() {
@@ -427,8 +715,14 @@ mod tests {
             _tempdir: tempfile::tempdir().unwrap(),
             target: "builder-a".to_string(),
             addr: "127.0.0.1:9443".parse().unwrap(),
+            backend_addr: "127.0.0.1:9444".parse().unwrap(),
             workdir: PathBuf::from("/tmp/workdir"),
             client: build_http_client(),
+            proxy: TunnelDropProxy {
+                active_port_tunnels: Arc::new(Mutex::new(Vec::new())),
+                shutdown: None,
+                handle: None,
+            },
             shutdown: None,
             handle: None,
         };
