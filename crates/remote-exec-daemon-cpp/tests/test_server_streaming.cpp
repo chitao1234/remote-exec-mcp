@@ -456,6 +456,21 @@ static void close_tunnel(UniqueSocket* client_socket, std::thread* server_thread
     server_thread->join();
 }
 
+static void wait_until_bindable(const std::string& endpoint) {
+    for (int attempt = 0; attempt < 40; ++attempt) {
+        try {
+            UniqueSocket rebound(bind_port_forward_socket(endpoint, "tcp"));
+            if (rebound.valid()) {
+                return;
+            }
+        } catch (const std::exception&) {
+        }
+        platform::sleep_ms(25UL);
+    }
+    std::fprintf(stderr, "endpoint `%s` did not become bindable\n", endpoint.c_str());
+    std::abort();
+}
+
 static void assert_tunnel_releases_tcp_listener_on_close(AppState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
@@ -472,6 +487,61 @@ static void assert_tunnel_releases_tcp_listener_on_close(AppState& state) {
 
     UniqueSocket rebound(bind_port_forward_socket(endpoint, "tcp"));
     assert(rebound.valid());
+}
+
+static void assert_terminal_tunnel_error_releases_tcp_listener_immediately(AppState& state) {
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_tunnel(state, &client_socket, &server_thread);
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::SessionOpen, 0U, Json::object())
+    );
+    const PortTunnelFrame ready = read_tunnel_frame(client_socket.get());
+    assert(ready.type == PortTunnelFrameType::SessionReady);
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}})
+    );
+    const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
+    assert(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
+
+    const unsigned char invalid_frame[PORT_TUNNEL_HEADER_LEN] = {
+        static_cast<unsigned char>(PortTunnelFrameType::TcpData),
+        0U,
+        1U,
+        0U,
+        0U,
+        0U,
+        0U,
+        0U,
+        0U,
+        0U,
+        0U,
+        0U,
+        0U,
+        0U,
+        0U,
+        0U,
+    };
+    send_all_bytes(
+        client_socket.get(),
+        reinterpret_cast<const char*>(invalid_frame),
+        sizeof(invalid_frame)
+    );
+
+    const PortTunnelFrame error = read_tunnel_frame(client_socket.get());
+    assert(error.type == PortTunnelFrameType::Error);
+    assert(error.stream_id == 0U);
+    const Json error_meta = Json::parse(error.meta);
+    assert(error_meta.at("code").get<std::string>() == "invalid_port_tunnel");
+    assert(error_meta.at("fatal").get<bool>());
+
+    close_tunnel(&client_socket, &server_thread);
+    wait_until_bindable(endpoint);
 }
 
 static void assert_tunnel_tcp_connect_echoes_binary_data(AppState& state) {
@@ -711,6 +781,7 @@ int main() {
     assert(!fs::exists(outside / "imported.txt"));
 
     assert_tunnel_releases_tcp_listener_on_close(state);
+    assert_terminal_tunnel_error_releases_tcp_listener_immediately(state);
     assert_tunnel_tcp_connect_echoes_binary_data(state);
     assert_tunnel_udp_bind_emits_two_peer_datagrams(state);
     assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(state);

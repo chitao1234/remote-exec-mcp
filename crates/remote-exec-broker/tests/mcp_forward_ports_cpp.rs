@@ -118,6 +118,21 @@ async fn broker_forwards_ports_through_real_cpp_daemon_and_handles_port_conflict
 }
 
 #[tokio::test]
+async fn list_targets_reports_port_forward_protocol_version_for_real_cpp_daemon() {
+    let fixture = CppDaemonBrokerFixture::spawn().await;
+    let result = fixture
+        .client
+        .call_tool("list_targets", &serde_json::json!({}))
+        .await
+        .unwrap();
+    assert!(!result.is_error, "list_targets failed: {}", result.text_output);
+    assert_eq!(
+        result.structured_content["targets"][0]["daemon_info"]["port_forward_protocol_version"],
+        3
+    );
+}
+
+#[tokio::test]
 async fn broker_prunes_cpp_exec_sessions_when_daemon_limit_is_reached() {
     let fixture = CppDaemonBrokerFixture::spawn_with_daemon_config(
         "max_open_sessions = 2\n\

@@ -1,0 +1,230 @@
+#include "port_tunnel_internal.h"
+
+void PortTunnelConnection::send_error(
+    uint32_t stream_id,
+    const std::string& code,
+    const std::string& message
+) {
+    PortTunnelFrame frame;
+    frame.type = PortTunnelFrameType::Error;
+    frame.flags = 0U;
+    frame.stream_id = stream_id;
+    frame.meta = Json{{"code", code}, {"message", message}, {"fatal", false}}.dump();
+    try {
+        send_frame(frame);
+    } catch (const std::exception&) {
+    }
+}
+
+void PortTunnelConnection::send_terminal_error(
+    uint32_t stream_id,
+    const std::string& code,
+    const std::string& message
+) {
+    PortTunnelFrame frame;
+    frame.type = PortTunnelFrameType::Error;
+    frame.flags = 0U;
+    frame.stream_id = stream_id;
+    frame.meta = Json{{"code", code}, {"message", message}, {"fatal", true}}.dump();
+    try {
+        send_frame(frame);
+    } catch (const std::exception&) {
+    }
+}
+
+void PortTunnelConnection::close_stream(uint32_t stream_id) {
+    std::shared_ptr<TunnelTcpStream> tcp_stream;
+    {
+        BasicLockGuard lock(state_mutex_);
+        std::map<uint32_t, std::shared_ptr<TunnelTcpStream> >::iterator tcp =
+            tcp_streams_.find(stream_id);
+        if (tcp != tcp_streams_.end()) {
+            tcp_stream = tcp->second;
+            tcp_streams_.erase(tcp);
+        }
+    }
+    if (tcp_stream.get() != NULL) {
+        mark_tcp_stream_closed(tcp_stream);
+    }
+
+    if (session_mode_active()) {
+        std::shared_ptr<PortTunnelSession> session = current_session();
+        bool close_session_now = false;
+        {
+            BasicLockGuard lock(session->mutex);
+            std::map<uint32_t, std::shared_ptr<RetainedTcpListener> >::iterator listener =
+                session->tcp_listeners.find(stream_id);
+            if (listener != session->tcp_listeners.end()) {
+                mark_retained_listener_closed(listener->second);
+                session->tcp_listeners.erase(listener);
+                close_session_now = true;
+            }
+            std::map<uint32_t, std::shared_ptr<TunnelUdpSocket> >::iterator udp =
+                session->udp_binds.find(stream_id);
+            if (udp != session->udp_binds.end()) {
+                mark_udp_socket_closed(udp->second);
+                session->udp_binds.erase(udp);
+                close_session_now = true;
+            }
+        }
+        if (close_session_now) {
+            service_->close_session(session);
+        }
+        return;
+    }
+
+    std::shared_ptr<TunnelUdpSocket> udp_socket;
+    {
+        BasicLockGuard lock(state_mutex_);
+        std::map<uint32_t, UniqueSocket>::iterator listener = tcp_listeners_.find(stream_id);
+        if (listener != tcp_listeners_.end()) {
+            shutdown_socket(listener->second.get());
+            listener->second.reset();
+            tcp_listeners_.erase(listener);
+        }
+        std::map<uint32_t, std::shared_ptr<TunnelUdpSocket> >::iterator udp =
+            udp_sockets_.find(stream_id);
+        if (udp != udp_sockets_.end()) {
+            udp_socket = udp->second;
+            udp_sockets_.erase(udp);
+        }
+    }
+    if (udp_socket.get() != NULL) {
+        mark_udp_socket_closed(udp_socket);
+    }
+}
+
+void PortTunnelConnection::close_current_session(PortTunnelCloseMode mode) {
+    std::shared_ptr<PortTunnelSession> session = current_session();
+    if (session.get() != NULL) {
+        if (mode == PortTunnelCloseMode::RetryableDetach) {
+            service_->detach_session(session);
+        } else {
+            service_->close_session(session);
+        }
+    }
+}
+
+void PortTunnelConnection::close_transport_owned_state() {
+    std::map<uint32_t, UniqueSocket> tcp_listeners;
+    std::vector<std::shared_ptr<TunnelTcpStream> > tcp_streams;
+    std::vector<std::shared_ptr<TunnelUdpSocket> > udp_sockets;
+    bool session_mode = false;
+    {
+        BasicLockGuard lock(state_mutex_);
+        closed_.store(true);
+        session_mode = session_.get() != NULL;
+        if (!session_mode) {
+            tcp_listeners.swap(tcp_listeners_);
+        }
+        for (std::map<uint32_t, std::shared_ptr<TunnelTcpStream> >::iterator it =
+                 tcp_streams_.begin();
+             it != tcp_streams_.end();
+             ++it) {
+            tcp_streams.push_back(it->second);
+        }
+        tcp_streams_.clear();
+        for (std::map<uint32_t, std::shared_ptr<TunnelUdpSocket> >::iterator it =
+                 udp_sockets_.begin();
+             it != udp_sockets_.end();
+             ++it) {
+            udp_sockets.push_back(it->second);
+        }
+        udp_sockets_.clear();
+    }
+    for (std::map<uint32_t, UniqueSocket>::iterator it = tcp_listeners.begin();
+         it != tcp_listeners.end();
+         ++it) {
+        shutdown_socket(it->second.get());
+        it->second.reset();
+    }
+    for (std::size_t i = 0; i < tcp_streams.size(); ++i) {
+        mark_tcp_stream_closed(tcp_streams[i]);
+    }
+    for (std::size_t i = 0; i < udp_sockets.size(); ++i) {
+        mark_udp_socket_closed(udp_sockets[i]);
+    }
+}
+
+std::shared_ptr<PortTunnelSession> PortTunnelConnection::current_session() {
+    BasicLockGuard lock(state_mutex_);
+    return session_;
+}
+
+bool PortTunnelConnection::session_mode_active() {
+    return current_session().get() != NULL;
+}
+
+bool PortTunnelConnection::owns_session(const std::shared_ptr<PortTunnelSession>& session) {
+    BasicLockGuard lock(state_mutex_);
+    return !closed_.load() && session_.get() == session.get();
+}
+
+bool PortTunnelConnection::accept_session_tcp_stream(
+    const std::shared_ptr<PortTunnelSession>& session,
+    uint32_t listener_stream_id,
+    UniqueSocket accepted_socket,
+    const std::string& peer
+) {
+    uint32_t stream_id = 0U;
+    {
+        BasicLockGuard lock(session->mutex);
+        if (session->closed || session->expired) {
+            return false;
+        }
+        stream_id = session->next_daemon_stream_id;
+        session->next_daemon_stream_id += 2U;
+    }
+
+    std::shared_ptr<TunnelTcpStream> stream(new TunnelTcpStream(accepted_socket.release()));
+    {
+        BasicLockGuard lock(state_mutex_);
+        if (closed_.load() || session_.get() != session.get()) {
+            mark_tcp_stream_closed(stream);
+            return false;
+        }
+        tcp_streams_[stream_id] = stream;
+    }
+
+    PortTunnelFrame frame = make_empty_frame(PortTunnelFrameType::TcpAccept, stream_id);
+    frame.meta = Json{
+        {"listener_stream_id", listener_stream_id},
+        {"peer", peer}
+    }.dump();
+    send_frame(frame);
+    if (!owns_session(session) || closed_.load()) {
+        std::shared_ptr<TunnelTcpStream> removed_stream;
+        {
+            BasicLockGuard lock(state_mutex_);
+            std::map<uint32_t, std::shared_ptr<TunnelTcpStream> >::iterator it =
+                tcp_streams_.find(stream_id);
+            if (it != tcp_streams_.end()) {
+                removed_stream = it->second;
+                tcp_streams_.erase(it);
+            }
+        }
+        if (removed_stream.get() != NULL) {
+            mark_tcp_stream_closed(removed_stream);
+        }
+        return false;
+    }
+
+    spawn_tcp_read_thread(shared_from_this(), stream_id, stream);
+    return true;
+}
+
+bool PortTunnelConnection::emit_session_udp_datagram(
+    const std::shared_ptr<PortTunnelSession>& session,
+    uint32_t stream_id,
+    const std::string& peer,
+    const std::vector<unsigned char>& data
+) {
+    if (!owns_session(session)) {
+        return false;
+    }
+    PortTunnelFrame frame = make_empty_frame(PortTunnelFrameType::UdpDatagram, stream_id);
+    frame.meta = Json{{"peer", peer}}.dump();
+    frame.data = data;
+    send_frame(frame);
+    return owns_session(session) && !closed_.load();
+}
