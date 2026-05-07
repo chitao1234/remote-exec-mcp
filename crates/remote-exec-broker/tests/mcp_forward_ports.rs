@@ -334,6 +334,162 @@ async fn forward_ports_does_not_retry_stream_error_frames() {
     );
 }
 
+#[tokio::test]
+async fn forward_ports_closes_pending_tcp_stream_when_remote_connect_never_acknowledges() {
+    const MAX_PENDING_TCP_BYTES_PER_STREAM: usize = 256 * 1024;
+
+    let fixture = support::spawners::spawn_broker_with_local_and_stub_port_forward_version(3).await;
+    support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
+    support::stub_daemon::drop_tcp_connect_ok_frames(&fixture.stub_state).await;
+
+    let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_addr = upstream.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut stream, _) = upstream.accept().await.unwrap();
+        let mut buf = [0u8; 1024];
+        loop {
+            match tokio::time::timeout(Duration::from_secs(5), stream.read(&mut buf)).await {
+                Ok(Ok(0)) | Ok(Err(_)) | Err(_) => return,
+                Ok(Ok(_)) => {}
+            }
+        }
+    });
+
+    let open = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "local",
+                "connect_side": "builder-a",
+                "forwards": [{
+                    "listen_endpoint": "127.0.0.1:0",
+                    "connect_endpoint": upstream_addr.to_string(),
+                    "protocol": "tcp"
+                }]
+            }),
+        )
+        .await;
+    let forward_id = forward_id_from(&open);
+    let listen_endpoint = listen_endpoint_from(&open);
+
+    let mut client = tokio::net::TcpStream::connect(&listen_endpoint)
+        .await
+        .unwrap();
+    let oversized = vec![7u8; MAX_PENDING_TCP_BYTES_PER_STREAM + 64 * 1024];
+    let _ = client.write_all(&oversized).await;
+
+    let close_result = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut buf = [0u8; 1];
+        client.read(&mut buf).await
+    })
+    .await
+    .expect("pending tcp stream should close once the buffer limit is exceeded");
+    match close_result {
+        Ok(0) => {}
+        Err(err)
+            if matches!(
+                err.kind(),
+                std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::NotConnected
+                    | std::io::ErrorKind::UnexpectedEof
+            ) => {}
+        Ok(read) => panic!("expected pending tcp stream to close, read {read} byte(s) instead"),
+        Err(err) => panic!("unexpected pending tcp stream read error: {err}"),
+    }
+
+    let list = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "list",
+                "forward_ids": [forward_id.clone()]
+            }),
+        )
+        .await;
+    assert_eq!(list.structured_content["forwards"][0]["status"], "open");
+
+    let close = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "close",
+                "forward_ids": [forward_id]
+            }),
+        )
+        .await;
+    assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
+}
+
+#[tokio::test]
+async fn forward_ports_stays_open_during_heavy_local_udp_peer_churn() {
+    const UDP_PEER_COUNT: usize = 320;
+
+    let fixture = support::spawners::spawn_broker_local_only().await;
+    let echo_socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let echo_addr = echo_socket.local_addr().unwrap();
+    tokio::spawn(async move {
+        let mut buf = [0u8; 1024];
+        loop {
+            let (read, peer) = match echo_socket.recv_from(&mut buf).await {
+                Ok(value) => value,
+                Err(_) => return,
+            };
+            if echo_socket.send_to(&buf[..read], peer).await.is_err() {
+                return;
+            }
+        }
+    });
+
+    let open = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "local",
+                "connect_side": "local",
+                "forwards": [{
+                    "listen_endpoint": "127.0.0.1:0",
+                    "connect_endpoint": echo_addr.to_string(),
+                    "protocol": "udp"
+                }]
+            }),
+        )
+        .await;
+    let forward_id = forward_id_from(&open);
+    let listen_endpoint = listen_endpoint_from(&open);
+
+    let mut peers = Vec::with_capacity(UDP_PEER_COUNT);
+    for _ in 0..UDP_PEER_COUNT {
+        let peer = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        peer.send_to(b"peer", &listen_endpoint).await.unwrap();
+        peers.push(peer);
+    }
+
+    let list = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "list",
+                "forward_ids": [forward_id.clone()]
+            }),
+        )
+        .await;
+    assert_eq!(list.structured_content["forwards"][0]["status"], "open");
+
+    let close = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "close",
+                "forward_ids": [forward_id]
+            }),
+        )
+        .await;
+    assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
+}
+
 async fn wait_for_forward_status(
     fixture: &support::fixture::BrokerFixture,
     forward_id: &str,

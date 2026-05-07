@@ -25,6 +25,9 @@ const UDP_CONNECTOR_IDLE_SWEEP_INTERVAL: Duration = Duration::from_secs(5);
 const LISTEN_RECONNECT_INITIAL_BACKOFF: Duration = Duration::from_millis(50);
 const LISTEN_RECONNECT_MAX_BACKOFF: Duration = Duration::from_millis(500);
 const LISTEN_RECONNECT_SAFETY_MARGIN: Duration = Duration::from_millis(250);
+const MAX_PENDING_TCP_BYTES_PER_STREAM: usize = 256 * 1024;
+const MAX_PENDING_TCP_BYTES_PER_FORWARD: usize = 2 * 1024 * 1024;
+const MAX_UDP_CONNECTORS_PER_FORWARD: usize = 256;
 
 #[derive(Clone)]
 pub enum SideHandle {
@@ -328,6 +331,12 @@ struct TcpConnectStream {
     listen_stream_id: u32,
     ready: bool,
     pending_frames: Vec<Frame>,
+    pending_bytes: usize,
+}
+
+#[derive(Default)]
+struct PendingTcpBudget {
+    total_bytes: usize,
 }
 
 enum ForwardSideEvent {
@@ -634,6 +643,7 @@ async fn run_tcp_forward_epoch(
 ) -> anyhow::Result<ForwardLoopControl> {
     let mut listen_to_connect = HashMap::<u32, u32>::new();
     let mut connect_streams = HashMap::<u32, TcpConnectStream>::new();
+    let mut pending_budget = PendingTcpBudget::default();
     let mut next_connect_stream_id = 1u32;
 
     loop {
@@ -672,6 +682,7 @@ async fn run_tcp_forward_epoch(
                             listen_stream_id: frame.stream_id,
                             ready: false,
                             pending_frames: Vec::new(),
+                            pending_bytes: 0,
                         });
                         tracing::debug!(
                             forward_id = %runtime.forward_id,
@@ -689,7 +700,10 @@ async fn run_tcp_forward_epoch(
                             };
                             queue_or_send_tcp_connect_frame(
                                 &connect_tunnel,
+                                &listen_tunnel,
+                                &mut listen_to_connect,
                                 &mut connect_streams,
+                                &mut pending_budget,
                                 connect_stream_id,
                                 remapped,
                             ).await?;
@@ -706,7 +720,10 @@ async fn run_tcp_forward_epoch(
                             };
                             queue_or_send_tcp_connect_frame(
                                 &connect_tunnel,
+                                &listen_tunnel,
+                                &mut listen_to_connect,
                                 &mut connect_streams,
+                                &mut pending_budget,
                                 connect_stream_id,
                                 eof,
                             ).await?;
@@ -719,13 +736,21 @@ async fn run_tcp_forward_epoch(
                                     let _ = connect_tunnel.close_stream(connect_stream_id).await;
                                     connect_streams.remove(&connect_stream_id);
                                 } else {
-                                    stream.pending_frames.push(Frame {
-                                        frame_type: FrameType::Close,
-                                        flags: 0,
-                                        stream_id: connect_stream_id,
-                                        meta: Vec::new(),
-                                        data: Vec::new(),
-                                    });
+                                    queue_or_send_tcp_connect_frame(
+                                        &connect_tunnel,
+                                        &listen_tunnel,
+                                        &mut listen_to_connect,
+                                        &mut connect_streams,
+                                        &mut pending_budget,
+                                        connect_stream_id,
+                                        Frame {
+                                            frame_type: FrameType::Close,
+                                            flags: 0,
+                                            stream_id: connect_stream_id,
+                                            meta: Vec::new(),
+                                            data: Vec::new(),
+                                        },
+                                    ).await?;
                                 }
                             }
                         }
@@ -758,6 +783,7 @@ async fn run_tcp_forward_epoch(
                             &connect_tunnel,
                             &mut listen_to_connect,
                             &mut connect_streams,
+                            &mut pending_budget,
                             frame.stream_id,
                             pending,
                         ).await?;
@@ -797,7 +823,10 @@ async fn run_tcp_forward_epoch(
                     FrameType::Close => {
                         if let Some(listen_stream_id) = connect_streams
                             .remove(&frame.stream_id)
-                            .map(|stream| stream.listen_stream_id)
+                            .map(|mut stream| {
+                                release_pending_budget(&mut pending_budget, &mut stream);
+                                stream.listen_stream_id
+                            })
                         {
                             listen_to_connect.remove(&listen_stream_id);
                             if let Err(err) = listen_tunnel.close_stream(listen_stream_id).await {
@@ -814,7 +843,10 @@ async fn run_tcp_forward_epoch(
 
 async fn queue_or_send_tcp_connect_frame(
     connect_tunnel: &Arc<PortTunnel>,
+    listen_tunnel: &Arc<PortTunnel>,
+    listen_to_connect: &mut HashMap<u32, u32>,
     connect_streams: &mut HashMap<u32, TcpConnectStream>,
+    pending_budget: &mut PendingTcpBudget,
     connect_stream_id: u32,
     frame: Frame,
 ) -> anyhow::Result<()> {
@@ -827,6 +859,22 @@ async fn queue_or_send_tcp_connect_frame(
             .await
             .context("relaying tcp data to connect tunnel")?;
     } else {
+        let added = frame_data_bytes(&frame);
+        let next_stream_total = stream.pending_bytes.saturating_add(added);
+        let next_forward_total = pending_budget.total_bytes.saturating_add(added);
+        if next_stream_total > MAX_PENDING_TCP_BYTES_PER_STREAM
+            || next_forward_total > MAX_PENDING_TCP_BYTES_PER_FORWARD
+        {
+            let listen_stream_id = stream.listen_stream_id;
+            release_pending_budget(pending_budget, stream);
+            connect_streams.remove(&connect_stream_id);
+            listen_to_connect.remove(&listen_stream_id);
+            let _ = connect_tunnel.close_stream(connect_stream_id).await;
+            let _ = listen_tunnel.close_stream(listen_stream_id).await;
+            return Ok(());
+        }
+        stream.pending_bytes = next_stream_total;
+        pending_budget.total_bytes = next_forward_total;
         stream.pending_frames.push(frame);
     }
     Ok(())
@@ -837,9 +885,13 @@ async fn flush_pending_tcp_connect_frames(
     connect_tunnel: &Arc<PortTunnel>,
     listen_to_connect: &mut HashMap<u32, u32>,
     connect_streams: &mut HashMap<u32, TcpConnectStream>,
+    pending_budget: &mut PendingTcpBudget,
     connect_stream_id: u32,
     pending_frames: Vec<Frame>,
 ) -> anyhow::Result<bool> {
+    if let Some(stream) = connect_streams.get_mut(&connect_stream_id) {
+        release_pending_budget(pending_budget, stream);
+    }
     let mut should_remove = false;
     for frame in pending_frames {
         let is_close = frame.frame_type == FrameType::Close;
@@ -858,6 +910,15 @@ async fn flush_pending_tcp_connect_frames(
         }
     }
     Ok(should_remove)
+}
+
+fn frame_data_bytes(frame: &Frame) -> usize {
+    frame.meta.len().saturating_add(frame.data.len())
+}
+
+fn release_pending_budget(pending_budget: &mut PendingTcpBudget, stream: &mut TcpConnectStream) {
+    pending_budget.total_bytes = pending_budget.total_bytes.saturating_sub(stream.pending_bytes);
+    stream.pending_bytes = 0;
 }
 
 async fn run_udp_forward(runtime: ForwardRuntime) -> anyhow::Result<()> {
@@ -1011,6 +1072,12 @@ async fn udp_connector_stream_id(
         return Ok(connector.stream_id);
     }
 
+    evict_udp_connector_if_needed(
+        connect_tunnel,
+        connector_by_peer,
+        peer_by_connector,
+    ).await;
+
     let stream_id = *next_connector_stream_id;
     *next_connector_stream_id = next_connector_stream_id.checked_add(2).unwrap_or(1);
     connect_tunnel
@@ -1034,6 +1101,30 @@ async fn udp_connector_stream_id(
     );
     peer_by_connector.lock().await.insert(stream_id, peer);
     Ok(stream_id)
+}
+
+async fn evict_udp_connector_if_needed(
+    connect_tunnel: &Arc<PortTunnel>,
+    connector_by_peer: &Arc<Mutex<HashMap<String, UdpPeerConnector>>>,
+    peer_by_connector: &Arc<Mutex<HashMap<u32, String>>>,
+) {
+    let candidate = {
+        let connectors = connector_by_peer.lock().await;
+        if connectors.len() < MAX_UDP_CONNECTORS_PER_FORWARD {
+            return;
+        }
+        connectors
+            .iter()
+            .min_by_key(|(_, connector)| connector.last_used)
+            .map(|(peer, connector)| (peer.clone(), connector.stream_id))
+    };
+    let Some((peer, stream_id)) = candidate else {
+        return;
+    };
+
+    connector_by_peer.lock().await.remove(&peer);
+    peer_by_connector.lock().await.remove(&stream_id);
+    let _ = connect_tunnel.close_stream(stream_id).await;
 }
 
 async fn sweep_idle_udp_connectors(
@@ -1344,7 +1435,12 @@ fn format_terminal_tunnel_error(meta: &TunnelErrorMeta) -> anyhow::Error {
 
 #[cfg(test)]
 mod port_tunnel_tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
     use remote_exec_proto::port_tunnel::{Frame, FrameType};
+    use tokio::sync::Mutex;
 
     use super::*;
 
@@ -1368,5 +1464,60 @@ mod port_tunnel_tests {
         let frame = tunnel.recv().await.unwrap();
 
         assert_eq!(frame.frame_type, FrameType::TcpListenOk);
+    }
+
+    #[tokio::test]
+    async fn udp_connector_limit_evicts_stalest_peer() {
+        let tunnel = SideHandle::local().port_tunnel().await.unwrap();
+        let connector_by_peer: Arc<Mutex<HashMap<String, UdpPeerConnector>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let peer_by_connector: Arc<Mutex<HashMap<u32, String>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+
+        for idx in 0..MAX_UDP_CONNECTORS_PER_FORWARD {
+            let stream_id = (idx as u32 * 2) + 3;
+            let last_used = Instant::now() - Duration::from_secs((idx + 1) as u64);
+            let peer = format!("127.0.0.1:{}", 10_000 + idx);
+            connector_by_peer.lock().await.insert(
+                peer.clone(),
+                UdpPeerConnector {
+                    stream_id,
+                    last_used,
+                },
+            );
+            peer_by_connector.lock().await.insert(stream_id, peer);
+        }
+
+        let stalest_peer = connector_by_peer
+            .lock()
+            .await
+            .iter()
+            .min_by_key(|(_, connector)| connector.last_used)
+            .map(|(peer, connector)| (peer.clone(), connector.stream_id))
+            .unwrap();
+
+        let mut next_connector_stream_id = ((MAX_UDP_CONNECTORS_PER_FORWARD as u32) * 2) + 3;
+        let created_stream_id = udp_connector_stream_id(
+            &Arc::new(tunnel),
+            &connector_by_peer,
+            &peer_by_connector,
+            &mut next_connector_stream_id,
+            "127.0.0.1:0",
+            "127.0.0.1:65535".to_string(),
+        )
+        .await
+        .unwrap();
+
+        let connectors = connector_by_peer.lock().await;
+        assert_eq!(connectors.len(), MAX_UDP_CONNECTORS_PER_FORWARD);
+        assert!(!connectors.contains_key(&stalest_peer.0));
+        assert!(connectors.contains_key("127.0.0.1:65535"));
+        assert_eq!(connectors["127.0.0.1:65535"].stream_id, created_stream_id);
+        drop(connectors);
+
+        let peers = peer_by_connector.lock().await;
+        assert_eq!(peers.len(), MAX_UDP_CONNECTORS_PER_FORWARD);
+        assert!(!peers.contains_key(&stalest_peer.1));
+        assert_eq!(peers.get(&created_stream_id).map(String::as_str), Some("127.0.0.1:65535"));
     }
 }

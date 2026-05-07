@@ -476,6 +476,53 @@ pub async fn spawn_broker_with_stub_port_forward_version(version: u32) -> Broker
     }
 }
 
+pub async fn spawn_broker_with_local_and_stub_port_forward_version(
+    version: u32,
+) -> BrokerFixture {
+    remote_exec_daemon::install_crypto_provider();
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let local_workdir = tempdir.path().join("local-work");
+    std::fs::create_dir_all(&local_workdir).unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let mut stub_state = stub_daemon_state("builder-a", ExecWriteBehavior::Success, "linux", true);
+    set_port_forward_support(&mut stub_state, true, version);
+    let app = stub_router(stub_state.clone());
+
+    tokio::spawn(async move {
+        serve(listener, app).await.unwrap();
+    });
+
+    wait_until_ready_http(addr).await;
+
+    let broker_config = tempdir.path().join("broker.toml");
+    write_broker_config(
+        &broker_config,
+        &[BrokerConfigTarget {
+            name: "builder-a",
+            addr,
+            transport: BrokerTargetTransport::Http,
+            extra_config: None,
+        }],
+        Some(&LocalBrokerConfig {
+            default_workdir: &local_workdir,
+            experimental_apply_patch_target_encoding_autodetect: false,
+            extra_config: None,
+        }),
+        None,
+        None,
+    );
+
+    let client = spawn_broker_child(&broker_config).await;
+
+    BrokerFixture {
+        _tempdir: tempdir,
+        client,
+        stub_state,
+    }
+}
+
 pub async fn spawn_broker_with_plain_http_stub_daemon() -> BrokerFixture {
     let tempdir = tempfile::tempdir().unwrap();
     let mut stub_state =

@@ -1,5 +1,6 @@
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
 use std::path::PathBuf;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -59,11 +60,28 @@ enum ResumeBehavior {
     SendError { code: String, message: String },
 }
 
+#[derive(Clone, Copy)]
+enum TcpConnectOkBehavior {
+    PassThrough,
+    DropAll,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct UdpConnectorStats {
+    pub active: usize,
+    pub max_observed: usize,
+    pub opened: usize,
+}
+
 #[derive(Clone)]
 struct StubPortTunnelControl {
     enabled: bool,
     resume_behavior: ResumeBehavior,
+    tcp_connect_ok_behavior: TcpConnectOkBehavior,
     active_transports: Vec<CancellationToken>,
+    active_udp_connector_streams: HashSet<u32>,
+    max_observed_udp_connector_streams: usize,
+    opened_udp_connector_streams: usize,
 }
 
 impl Default for StubPortTunnelControl {
@@ -71,7 +89,11 @@ impl Default for StubPortTunnelControl {
         Self {
             enabled: false,
             resume_behavior: ResumeBehavior::PassThrough,
+            tcp_connect_ok_behavior: TcpConnectOkBehavior::PassThrough,
             active_transports: Vec::new(),
+            active_udp_connector_streams: HashSet::new(),
+            max_observed_udp_connector_streams: 0,
+            opened_udp_connector_streams: 0,
         }
     }
 }
@@ -183,6 +205,19 @@ pub(crate) async fn set_port_tunnel_resume_error(
         code: code.to_string(),
         message: message.to_string(),
     };
+}
+
+pub(crate) async fn drop_tcp_connect_ok_frames(state: &StubDaemonState) {
+    state.port_tunnel_control.lock().await.tcp_connect_ok_behavior = TcpConnectOkBehavior::DropAll;
+}
+
+pub(crate) async fn udp_connector_stats(state: &StubDaemonState) -> UdpConnectorStats {
+    let control = state.port_tunnel_control.lock().await;
+    UdpConnectorStats {
+        active: control.active_udp_connector_streams.len(),
+        max_observed: control.max_observed_udp_connector_streams,
+        opened: control.opened_udp_connector_streams,
+    }
 }
 
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
@@ -589,6 +624,7 @@ where
         let _ = remote_exec_host::port_forward::serve_tunnel(tunnel_state, daemon_side).await;
     });
     write_preface(&mut broker_side).await?;
+    observe_broker_to_daemon_frame(&state, &first_frame).await;
     write_frame(&mut broker_side, &first_frame).await?;
 
     let cancel = CancellationToken::new();
@@ -599,13 +635,80 @@ where
         .active_transports
         .push(cancel.clone());
 
-    tokio::select! {
-        _ = cancel.cancelled() => {}
-        result = tokio::io::copy_bidirectional(&mut stream, &mut broker_side) => {
-            result?;
+    relay_port_tunnel_frames(state, stream, broker_side, cancel).await
+}
+
+async fn relay_port_tunnel_frames<S1, S2>(
+    state: StubDaemonState,
+    mut external: S1,
+    mut internal: S2,
+    cancel: CancellationToken,
+) -> anyhow::Result<()>
+where
+    S1: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    S2: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    loop {
+        tokio::select! {
+            _ = cancel.cancelled() => return Ok(()),
+            frame = read_frame(&mut external) => {
+                let Some(frame) = frame_from_result(frame)? else {
+                    return Ok(());
+                };
+                observe_broker_to_daemon_frame(&state, &frame).await;
+                write_frame(&mut internal, &frame).await?;
+            }
+            frame = read_frame(&mut internal) => {
+                let Some(frame) = frame_from_result(frame)? else {
+                    return Ok(());
+                };
+                if should_forward_daemon_to_broker_frame(&state, &frame).await {
+                    write_frame(&mut external, &frame).await?;
+                }
+            }
         }
     }
-    Ok(())
+}
+
+fn frame_from_result(result: std::io::Result<Frame>) -> anyhow::Result<Option<Frame>> {
+    match result {
+        Ok(frame) => Ok(Some(frame)),
+        Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => Ok(None),
+        Err(err) => Err(err.into()),
+    }
+}
+
+async fn observe_broker_to_daemon_frame(state: &StubDaemonState, frame: &Frame) {
+    let mut control = state.port_tunnel_control.lock().await;
+    match frame.frame_type {
+        FrameType::UdpBind if frame.stream_id >= 3 => {
+            control.active_udp_connector_streams.insert(frame.stream_id);
+            control.opened_udp_connector_streams += 1;
+            control.max_observed_udp_connector_streams = control
+                .max_observed_udp_connector_streams
+                .max(control.active_udp_connector_streams.len());
+        }
+        FrameType::Close => {
+            control.active_udp_connector_streams.remove(&frame.stream_id);
+        }
+        _ => {}
+    }
+}
+
+async fn should_forward_daemon_to_broker_frame(
+    state: &StubDaemonState,
+    frame: &Frame,
+) -> bool {
+    let mut control = state.port_tunnel_control.lock().await;
+    if frame.frame_type == FrameType::Close {
+        control.active_udp_connector_streams.remove(&frame.stream_id);
+    }
+    if frame.frame_type == FrameType::TcpConnectOk
+        && matches!(control.tcp_connect_ok_behavior, TcpConnectOkBehavior::DropAll)
+    {
+        return false;
+    }
+    true
 }
 
 fn validate_port_tunnel_upgrade_headers(
