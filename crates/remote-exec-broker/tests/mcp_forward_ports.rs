@@ -434,8 +434,12 @@ async fn forward_ports_closes_active_tcp_streams_after_connect_tunnel_drop() {
     }
 
     let forward =
-        wait_for_forward_status(&fixture, &forward_id, "open", Duration::from_secs(5)).await;
+        wait_for_forward_phase(&fixture, &forward_id, "ready", Duration::from_secs(5)).await;
     assert_eq!(forward["status"], "open");
+    assert_eq!(forward["phase"], "ready");
+    assert_eq!(forward["dropped_tcp_streams"], 1);
+    assert!(forward["reconnect_attempts"].as_u64().unwrap() >= 1);
+    assert_eq!(forward["connect_state"]["health"], "ready");
 
     let mut later = tokio::net::TcpStream::connect(&listen_endpoint)
         .await
@@ -893,6 +897,16 @@ async fn forward_ports_retries_udp_connector_after_bind_error() {
     assert_eq!(stats.opened, 1);
     assert_eq!(stats.active, 1);
 
+    let forward =
+        wait_for_forward_status(&fixture, &forward_id, "open", Duration::from_secs(5)).await;
+    assert!(
+        forward["dropped_udp_datagrams"]
+            .as_u64()
+            .unwrap_or_default()
+            >= 1,
+        "expected at least one dropped UDP datagram during retry"
+    );
+
     let close = fixture
         .call_tool(
             "forward_ports",
@@ -941,6 +955,49 @@ async fn wait_for_forward_status(
         .unwrap_or_default();
     panic!(
         "forward `{forward_id}` did not reach status `{status}` within {timeout:?}; last_status={last_status} last_error={last_error}"
+    );
+}
+
+async fn wait_for_forward_phase(
+    fixture: &support::fixture::BrokerFixture,
+    forward_id: &str,
+    phase: &str,
+    timeout: Duration,
+) -> serde_json::Value {
+    let started = std::time::Instant::now();
+    let mut last_entry = None;
+    while started.elapsed() < timeout {
+        let list = fixture
+            .call_tool(
+                "forward_ports",
+                serde_json::json!({
+                    "action": "list",
+                    "forward_ids": [forward_id]
+                }),
+            )
+            .await;
+        let entry = list.structured_content["forwards"][0].clone();
+        last_entry = Some(entry.clone());
+        if entry["phase"] == phase {
+            return entry;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    let last_phase = last_entry
+        .as_ref()
+        .and_then(|entry| entry["phase"].as_str())
+        .unwrap_or("<missing>");
+    let last_status = last_entry
+        .as_ref()
+        .and_then(|entry| entry["status"].as_str())
+        .unwrap_or("<missing>");
+    let last_error = last_entry
+        .as_ref()
+        .and_then(|entry| entry["last_error"].as_str())
+        .unwrap_or_default();
+    panic!(
+        "forward `{forward_id}` did not reach phase `{phase}` within {timeout:?}; last_phase={last_phase} last_status={last_status} last_error={last_error}"
     );
 }
 

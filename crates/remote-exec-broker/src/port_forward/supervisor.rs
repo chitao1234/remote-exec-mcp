@@ -16,7 +16,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::side::SideHandle;
-use super::store::PortForwardRecord;
+use super::store::{PortForwardRecord, PortForwardStore};
 use super::tcp_bridge::run_tcp_forward;
 use super::tunnel::{
     EndpointMeta, PortTunnel, SessionResumeMeta, decode_tunnel_meta, encode_tunnel_meta,
@@ -35,6 +35,7 @@ pub(super) struct ForwardRuntime {
     pub(super) connect_side: SideHandle,
     pub(super) protocol: PublicForwardPortProtocol,
     pub(super) connect_endpoint: String,
+    pub(super) store: PortForwardStore,
     pub(super) listen_session: Arc<ListenSessionControl>,
     pub(super) initial_connect_tunnel: Arc<PortTunnel>,
     pub(super) cancel: CancellationToken,
@@ -105,6 +106,7 @@ struct OpenListenSession {
 }
 
 pub async fn open_forward(
+    store: PortForwardStore,
     listen_side: SideHandle,
     connect_side: SideHandle,
     spec: &ForwardPortSpec,
@@ -116,6 +118,7 @@ pub async fn open_forward(
             open_tcp_forward(
                 listen_side,
                 connect_side,
+                store,
                 listen_endpoint,
                 connect_endpoint,
                 spec.clone(),
@@ -126,6 +129,7 @@ pub async fn open_forward(
             open_udp_forward(
                 listen_side,
                 connect_side,
+                store,
                 listen_endpoint,
                 connect_endpoint,
                 spec.clone(),
@@ -138,6 +142,7 @@ pub async fn open_forward(
 async fn open_tcp_forward(
     listen_side: SideHandle,
     connect_side: SideHandle,
+    store: PortForwardStore,
     listen_endpoint: String,
     connect_endpoint: String,
     spec: ForwardPortSpec,
@@ -212,6 +217,7 @@ async fn open_tcp_forward(
         connect_side: connect_side.clone(),
         protocol: PublicForwardPortProtocol::Tcp,
         connect_endpoint: connect_endpoint.clone(),
+        store,
         listen_session: listen_session.clone(),
         initial_connect_tunnel: connect_tunnel,
         cancel: cancel.clone(),
@@ -239,6 +245,7 @@ async fn open_tcp_forward(
 async fn open_udp_forward(
     listen_side: SideHandle,
     connect_side: SideHandle,
+    store: PortForwardStore,
     listen_endpoint: String,
     connect_endpoint: String,
     spec: ForwardPortSpec,
@@ -313,6 +320,7 @@ async fn open_udp_forward(
         connect_side: connect_side.clone(),
         protocol: PublicForwardPortProtocol::Udp,
         connect_endpoint: connect_endpoint.clone(),
+        store,
         listen_session: listen_session.clone(),
         initial_connect_tunnel: connect_tunnel,
         cancel: cancel.clone(),

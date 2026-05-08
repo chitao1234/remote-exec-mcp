@@ -3,7 +3,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use remote_exec_proto::public::{
-    ForwardPortEntry, ForwardPortPhase, ForwardPortSideHealth, ForwardPortStatus,
+    ForwardPortEntry, ForwardPortPhase, ForwardPortSideHealth, ForwardPortSideRole,
+    ForwardPortStatus,
 };
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
@@ -120,6 +121,46 @@ impl PortForwardStore {
         }
     }
 
+    pub async fn update_entry(&self, forward_id: &str, update: impl FnOnce(&mut ForwardPortEntry)) {
+        let mut entries = self.entries.write().await;
+        if let Some(record) = entries.get_mut(forward_id) {
+            update(&mut record.entry);
+        }
+    }
+
+    pub async fn mark_reconnecting(
+        &self,
+        forward_id: &str,
+        role: ForwardPortSideRole,
+        error: String,
+    ) {
+        self.update_entry(forward_id, |entry| {
+            entry.phase = ForwardPortPhase::Reconnecting;
+            entry.reconnect_attempts += 1;
+            entry.last_reconnect_at = Some(unix_timestamp_string());
+            let side = match role {
+                ForwardPortSideRole::Listen => &mut entry.listen_state,
+                ForwardPortSideRole::Connect => &mut entry.connect_state,
+            };
+            side.health = ForwardPortSideHealth::Reconnecting;
+            side.last_error = Some(error);
+        })
+        .await;
+    }
+
+    pub async fn mark_ready(&self, forward_id: &str, role: ForwardPortSideRole) {
+        self.update_entry(forward_id, |entry| {
+            entry.phase = ForwardPortPhase::Ready;
+            let side = match role {
+                ForwardPortSideRole::Listen => &mut entry.listen_state,
+                ForwardPortSideRole::Connect => &mut entry.connect_state,
+            };
+            side.health = ForwardPortSideHealth::Ready;
+            side.last_error = None;
+        })
+        .await;
+    }
+
     pub async fn drain(&self) -> Vec<PortForwardRecord> {
         self.entries
             .write()
@@ -128,6 +169,14 @@ impl PortForwardStore {
             .map(|(_, record)| record)
             .collect()
     }
+}
+
+fn unix_timestamp_string() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .to_string()
 }
 
 pub struct PortForwardFilter {

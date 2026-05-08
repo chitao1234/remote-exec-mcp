@@ -1,5 +1,6 @@
 use remote_exec_proto::public::{
-    ForwardPortEntry, ForwardPortStatus, ForwardPortsAction, ForwardPortsInput, ForwardPortsResult,
+    ForwardPortEntry, ForwardPortPhase, ForwardPortStatus, ForwardPortsAction, ForwardPortsInput,
+    ForwardPortsResult,
 };
 
 use crate::mcp_server::ToolCallOutput;
@@ -61,7 +62,14 @@ async fn open_forwards(
     let mut opened = Vec::with_capacity(forwards.len());
 
     for spec in &forwards {
-        match open_forward(listen_side.clone(), connect_side.clone(), spec).await {
+        match open_forward(
+            state.port_forwards.clone(),
+            listen_side.clone(),
+            connect_side.clone(),
+            spec,
+        )
+        .await
+        {
             Ok(forward) => opened.push(forward),
             Err(err) => {
                 for forward in opened {
@@ -172,8 +180,14 @@ fn format_forward_ports_text(result: &ForwardPortsResult) -> String {
         .forwards
         .iter()
         .map(|entry| {
+            let phase_suffix = match entry.phase {
+                ForwardPortPhase::Ready | ForwardPortPhase::Closed | ForwardPortPhase::Failed => {
+                    String::new()
+                }
+                phase => format!(", phase={}", format_phase(phase)),
+            };
             format!(
-                "- {}: {} on `{}` -> {} on `{}` ({}, {}){}",
+                "- {}: {} on `{}` -> {} on `{}` ({}, {}){}{}",
                 entry.forward_id,
                 entry.listen_endpoint,
                 entry.listen_side,
@@ -181,6 +195,7 @@ fn format_forward_ports_text(result: &ForwardPortsResult) -> String {
                 entry.connect_side,
                 format_protocol(entry.protocol),
                 format_status(&entry.status),
+                phase_suffix,
                 entry
                     .last_error
                     .as_ref()
@@ -196,6 +211,18 @@ fn format_protocol(protocol: remote_exec_proto::public::ForwardPortProtocol) -> 
     match protocol {
         remote_exec_proto::public::ForwardPortProtocol::Tcp => "tcp",
         remote_exec_proto::public::ForwardPortProtocol::Udp => "udp",
+    }
+}
+
+fn format_phase(phase: ForwardPortPhase) -> &'static str {
+    match phase {
+        ForwardPortPhase::Opening => "opening",
+        ForwardPortPhase::Ready => "ready",
+        ForwardPortPhase::Reconnecting => "reconnecting",
+        ForwardPortPhase::Draining => "draining",
+        ForwardPortPhase::Closing => "closing",
+        ForwardPortPhase::Closed => "closed",
+        ForwardPortPhase::Failed => "failed",
     }
 }
 

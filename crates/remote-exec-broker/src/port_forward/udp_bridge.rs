@@ -5,6 +5,7 @@ use std::time::Instant;
 use anyhow::Context;
 use remote_exec_proto::port_forward::udp_connector_endpoint;
 use remote_exec_proto::port_tunnel::{Frame, FrameType};
+use remote_exec_proto::public::ForwardPortSideRole;
 use tokio::sync::Mutex;
 
 use super::events::{ForwardLoopControl, ForwardSideEvent, TunnelRole, classify_transport_failure};
@@ -36,6 +37,14 @@ pub(super) async fn run_udp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
         {
             ForwardLoopControl::Cancelled => return Ok(()),
             ForwardLoopControl::RecoverTunnel(TunnelRole::Listen) => {
+                runtime
+                    .store
+                    .mark_reconnecting(
+                        &runtime.forward_id,
+                        ForwardPortSideRole::Listen,
+                        "listen-side tunnel lost".to_string(),
+                    )
+                    .await;
                 let Some(resumed_tunnel) =
                     reconnect_listen_tunnel(runtime.listen_session.clone(), runtime.cancel.clone())
                         .await?
@@ -43,6 +52,10 @@ pub(super) async fn run_udp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
                     return Ok(());
                 };
                 listen_tunnel = resumed_tunnel;
+                runtime
+                    .store
+                    .mark_ready(&runtime.forward_id, ForwardPortSideRole::Listen)
+                    .await;
                 connect_tunnel = open_connect_tunnel(&runtime.connect_side)
                     .await
                     .with_context(|| {
@@ -51,10 +64,26 @@ pub(super) async fn run_udp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
                             runtime.connect_side.name()
                         )
                     })?;
+                runtime
+                    .store
+                    .mark_ready(&runtime.forward_id, ForwardPortSideRole::Connect)
+                    .await;
             }
             ForwardLoopControl::RecoverTunnel(TunnelRole::Connect) => {
+                runtime
+                    .store
+                    .mark_reconnecting(
+                        &runtime.forward_id,
+                        ForwardPortSideRole::Connect,
+                        "connect-side tunnel lost".to_string(),
+                    )
+                    .await;
                 connect_tunnel =
                     reopen_connect_tunnel(&runtime, "after connect-side reconnect").await?;
+                runtime
+                    .store
+                    .mark_ready(&runtime.forward_id, ForwardPortSideRole::Connect)
+                    .await;
             }
         }
     }
@@ -124,6 +153,12 @@ async fn run_udp_forward_epoch(
                         ).await {
                             Ok(stream_id) => stream_id,
                             Err(err) => {
+                                runtime
+                                    .store
+                                    .update_entry(&runtime.forward_id, |entry| {
+                                        entry.dropped_udp_datagrams += 1;
+                                    })
+                                    .await;
                                 return classify_transport_failure(
                                     err,
                                     "opening udp connector stream",
@@ -140,6 +175,12 @@ async fn run_udp_forward_epoch(
                             })?,
                             data: frame.data,
                         }).await {
+                            runtime
+                                .store
+                                .update_entry(&runtime.forward_id, |entry| {
+                                    entry.dropped_udp_datagrams += 1;
+                                })
+                                .await;
                             return classify_transport_failure(
                                 err,
                                 "relaying udp datagram to connect tunnel",
@@ -174,6 +215,12 @@ async fn run_udp_forward_epoch(
                 match frame.frame_type {
                     FrameType::UdpBindOk => {}
                     FrameType::Error => {
+                        runtime
+                            .store
+                            .update_entry(&runtime.forward_id, |entry| {
+                                entry.dropped_udp_datagrams += 1;
+                            })
+                            .await;
                         remove_udp_connector(
                             &connector_by_peer,
                             &peer_by_connector,
@@ -660,7 +707,9 @@ mod tests {
     ) -> ForwardRuntime {
         let listen_session = Arc::new(ListenSessionControl {
             side: SideHandle::local(),
+            forward_id: "fwd_test".to_string(),
             session_id: "test-session".to_string(),
+            generation: 1,
             listener_stream_id: 1,
             resume_timeout: Duration::from_secs(30),
             current_tunnel: TokioMutex::new(Some(listen_tunnel)),
@@ -672,6 +721,7 @@ mod tests {
             connect_side: SideHandle::local(),
             protocol: PublicForwardPortProtocol::Udp,
             connect_endpoint: "127.0.0.1:1".to_string(),
+            store: Default::default(),
             listen_session,
             initial_connect_tunnel: connect_tunnel,
             cancel: CancellationToken::new(),

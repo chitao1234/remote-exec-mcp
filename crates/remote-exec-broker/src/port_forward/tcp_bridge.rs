@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use remote_exec_proto::port_tunnel::{Frame, FrameType};
+use remote_exec_proto::public::ForwardPortSideRole;
 
 use super::events::{ForwardLoopControl, ForwardSideEvent, TunnelRole, classify_transport_failure};
 use super::supervisor::{ForwardRuntime, open_connect_tunnel, reconnect_listen_tunnel};
@@ -38,6 +39,14 @@ pub(super) async fn run_tcp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
         {
             ForwardLoopControl::Cancelled => return Ok(()),
             ForwardLoopControl::RecoverTunnel(TunnelRole::Listen) => {
+                runtime
+                    .store
+                    .mark_reconnecting(
+                        &runtime.forward_id,
+                        ForwardPortSideRole::Listen,
+                        "listen-side tunnel lost".to_string(),
+                    )
+                    .await;
                 let Some(resumed_tunnel) =
                     reconnect_listen_tunnel(runtime.listen_session.clone(), runtime.cancel.clone())
                         .await?
@@ -45,6 +54,10 @@ pub(super) async fn run_tcp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
                     return Ok(());
                 };
                 listen_tunnel = resumed_tunnel;
+                runtime
+                    .store
+                    .mark_ready(&runtime.forward_id, ForwardPortSideRole::Listen)
+                    .await;
                 connect_tunnel = open_connect_tunnel(&runtime.connect_side)
                     .await
                     .with_context(|| {
@@ -53,10 +66,26 @@ pub(super) async fn run_tcp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
                             runtime.connect_side.name()
                         )
                     })?;
+                runtime
+                    .store
+                    .mark_ready(&runtime.forward_id, ForwardPortSideRole::Connect)
+                    .await;
             }
             ForwardLoopControl::RecoverTunnel(TunnelRole::Connect) => {
+                runtime
+                    .store
+                    .mark_reconnecting(
+                        &runtime.forward_id,
+                        ForwardPortSideRole::Connect,
+                        "connect-side tunnel lost".to_string(),
+                    )
+                    .await;
                 connect_tunnel =
                     reopen_connect_tunnel(&runtime, "after connect-side reconnect").await?;
+                runtime
+                    .store
+                    .mark_ready(&runtime.forward_id, ForwardPortSideRole::Connect)
+                    .await;
             }
         }
     }
@@ -151,6 +180,7 @@ async fn run_tcp_forward_epoch(
                                 ..frame
                             };
                             if let Some(control) = queue_or_send_tcp_connect_frame(
+                                runtime,
                                 &connect_tunnel,
                                 &listen_tunnel,
                                 &mut listen_to_connect,
@@ -173,6 +203,7 @@ async fn run_tcp_forward_epoch(
                                 data: Vec::new(),
                             };
                             if let Some(control) = queue_or_send_tcp_connect_frame(
+                                runtime,
                                 &connect_tunnel,
                                 &listen_tunnel,
                                 &mut listen_to_connect,
@@ -193,6 +224,7 @@ async fn run_tcp_forward_epoch(
                                     connect_streams.remove(&connect_stream_id);
                                 } else {
                                     if let Some(control) = queue_or_send_tcp_connect_frame(
+                                        runtime,
                                         &connect_tunnel,
                                         &listen_tunnel,
                                         &mut listen_to_connect,
@@ -241,6 +273,7 @@ async fn run_tcp_forward_epoch(
                     ForwardSideEvent::Frame(frame) => frame,
                     ForwardSideEvent::RetryableTransportLoss => {
                         close_active_tcp_listen_streams(
+                            runtime,
                             &listen_tunnel,
                             &mut listen_to_connect,
                             &mut connect_streams,
@@ -266,6 +299,7 @@ async fn run_tcp_forward_epoch(
                         let mut pending = Vec::new();
                         std::mem::swap(&mut pending, &mut stream.pending_frames);
                         let flush_result = flush_pending_tcp_connect_frames(
+                            runtime,
                             &connect_tunnel,
                             &listen_tunnel,
                             &mut listen_to_connect,
@@ -356,12 +390,14 @@ async fn run_tcp_forward_epoch(
 }
 
 async fn close_active_tcp_listen_streams(
+    runtime: &ForwardRuntime,
     listen_tunnel: &Arc<PortTunnel>,
     listen_to_connect: &mut HashMap<u32, u32>,
     connect_streams: &mut HashMap<u32, TcpConnectStream>,
     pending_budget: &mut PendingTcpBudget,
 ) -> anyhow::Result<()> {
     let streams = std::mem::take(connect_streams);
+    let dropped_count = streams.len() as u64;
     listen_to_connect.clear();
     for (_, mut stream) in streams {
         release_pending_budget(pending_budget, &mut stream);
@@ -374,10 +410,20 @@ async fn close_active_tcp_listen_streams(
             .map(|_| ());
         }
     }
+    if dropped_count > 0 {
+        runtime
+            .store
+            .update_entry(&runtime.forward_id, |entry| {
+                entry.dropped_tcp_streams += dropped_count;
+                entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(dropped_count);
+            })
+            .await;
+    }
     Ok(())
 }
 
 async fn queue_or_send_tcp_connect_frame(
+    runtime: &ForwardRuntime,
     connect_tunnel: &Arc<PortTunnel>,
     listen_tunnel: &Arc<PortTunnel>,
     listen_to_connect: &mut HashMap<u32, u32>,
@@ -400,6 +446,7 @@ async fn queue_or_send_tcp_connect_frame(
         {
             if is_retryable_transport_error(&err) {
                 close_active_tcp_listen_streams(
+                    runtime,
                     listen_tunnel,
                     listen_to_connect,
                     connect_streams,
@@ -436,6 +483,7 @@ async fn queue_or_send_tcp_connect_frame(
 }
 
 async fn flush_pending_tcp_connect_frames(
+    runtime: &ForwardRuntime,
     connect_tunnel: &Arc<PortTunnel>,
     listen_tunnel: &Arc<PortTunnel>,
     listen_to_connect: &mut HashMap<u32, u32>,
@@ -457,6 +505,7 @@ async fn flush_pending_tcp_connect_frames(
         {
             if is_retryable_transport_error(&err) {
                 close_active_tcp_listen_streams(
+                    runtime,
                     listen_tunnel,
                     listen_to_connect,
                     connect_streams,
@@ -709,7 +758,9 @@ mod tests {
 
         let listen_session = Arc::new(ListenSessionControl {
             side: SideHandle::local(),
+            forward_id: "fwd_test".to_string(),
             session_id: "test-session".to_string(),
+            generation: 1,
             listener_stream_id: 1,
             resume_timeout: Duration::from_secs(30),
             current_tunnel: TokioMutex::new(Some(listen_tunnel.clone())),
@@ -722,6 +773,7 @@ mod tests {
             connect_side: SideHandle::local(),
             protocol: PublicForwardPortProtocol::Tcp,
             connect_endpoint: "127.0.0.1:1".to_string(),
+            store: Default::default(),
             listen_session,
             initial_connect_tunnel: connect_tunnel.clone(),
             cancel,
@@ -773,7 +825,9 @@ mod tests {
 
         let listen_session = Arc::new(ListenSessionControl {
             side: SideHandle::local(),
+            forward_id: "fwd_test".to_string(),
             session_id: "test-session".to_string(),
+            generation: 1,
             listener_stream_id: 1,
             resume_timeout: Duration::from_secs(30),
             current_tunnel: TokioMutex::new(Some(listen_tunnel.clone())),
@@ -786,6 +840,7 @@ mod tests {
             connect_side: SideHandle::local(),
             protocol: PublicForwardPortProtocol::Tcp,
             connect_endpoint: "127.0.0.1:1".to_string(),
+            store: Default::default(),
             listen_session,
             initial_connect_tunnel: connect_tunnel.clone(),
             cancel,
@@ -874,7 +929,9 @@ mod tests {
 
         let listen_session = Arc::new(ListenSessionControl {
             side: SideHandle::local(),
+            forward_id: "fwd_test".to_string(),
             session_id: "test-session".to_string(),
+            generation: 1,
             listener_stream_id: 1,
             resume_timeout: Duration::from_secs(30),
             current_tunnel: TokioMutex::new(Some(listen_tunnel.clone())),
@@ -887,6 +944,7 @@ mod tests {
             connect_side: SideHandle::local(),
             protocol: PublicForwardPortProtocol::Tcp,
             connect_endpoint: "127.0.0.1:1".to_string(),
+            store: Default::default(),
             listen_session,
             initial_connect_tunnel: connect_tunnel.clone(),
             cancel,
@@ -1063,7 +1121,9 @@ mod tests {
     ) -> ForwardRuntime {
         let listen_session = Arc::new(ListenSessionControl {
             side: SideHandle::local(),
+            forward_id: "fwd_test".to_string(),
             session_id: "test-session".to_string(),
+            generation: 1,
             listener_stream_id: 1,
             resume_timeout: Duration::from_secs(30),
             current_tunnel: TokioMutex::new(Some(listen_tunnel)),
@@ -1075,6 +1135,7 @@ mod tests {
             connect_side: SideHandle::local(),
             protocol: PublicForwardPortProtocol::Tcp,
             connect_endpoint: "127.0.0.1:1".to_string(),
+            store: Default::default(),
             listen_session,
             initial_connect_tunnel: connect_tunnel,
             cancel: CancellationToken::new(),
