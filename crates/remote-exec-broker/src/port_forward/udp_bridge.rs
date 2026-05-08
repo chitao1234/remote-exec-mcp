@@ -18,9 +18,7 @@ use super::tunnel::{
     decode_tunnel_error_frame, decode_tunnel_meta, encode_tunnel_meta,
     format_terminal_tunnel_error, is_backpressure_error,
 };
-use super::{
-    MAX_UDP_CONNECTORS_PER_FORWARD, UDP_CONNECTOR_IDLE_SWEEP_INTERVAL, UDP_CONNECTOR_IDLE_TIMEOUT,
-};
+use super::{UDP_CONNECTOR_IDLE_SWEEP_INTERVAL, UDP_CONNECTOR_IDLE_TIMEOUT};
 
 struct UdpPeerConnector {
     stream_id: u32,
@@ -145,9 +143,19 @@ async fn run_udp_forward_epoch(
                             &mut connector_stream_ids,
                             &connector_bind_endpoint,
                             datagram.peer.clone(),
+                            runtime.max_udp_peers_per_forward,
                         ).await {
                             Ok(stream_id) => stream_id,
-                            Err(err) => {
+                            Err(UdpConnectorError::LimitExceeded) => {
+                                runtime
+                                    .store
+                                    .update_entry(&runtime.forward_id, |entry| {
+                                        entry.dropped_udp_datagrams += 1;
+                                    })
+                                    .await;
+                                continue;
+                            }
+                            Err(UdpConnectorError::Transport(err)) => {
                                 runtime
                                     .store
                                     .update_entry(&runtime.forward_id, |entry| {
@@ -266,17 +274,22 @@ async fn udp_connector_stream_id(
     connector_stream_ids: &mut StreamIdAllocator,
     connector_bind_endpoint: &str,
     peer: String,
-) -> anyhow::Result<u32> {
+    max_udp_peers: usize,
+) -> Result<u32, UdpConnectorError> {
     if let Some(connector) = connector_by_peer.lock().await.get_mut(&peer) {
         connector.last_used = Instant::now();
         return Ok(connector.stream_id);
     }
 
-    evict_udp_connector_if_needed(connect_tunnel, connector_by_peer, peer_by_connector).await;
+    if connector_by_peer.lock().await.len() >= max_udp_peers {
+        return Err(UdpConnectorError::LimitExceeded);
+    }
 
     let stream_id = connector_stream_ids.next().ok_or_else(|| {
         debug_assert!(connector_stream_ids.needs_generation_rotation());
-        anyhow::anyhow!("port tunnel stream id generation exhausted")
+        UdpConnectorError::Transport(anyhow::anyhow!(
+            "port tunnel stream id generation exhausted"
+        ))
     })?;
     connect_tunnel
         .send(Frame {
@@ -285,10 +298,12 @@ async fn udp_connector_stream_id(
             stream_id,
             meta: encode_tunnel_meta(&EndpointMeta {
                 endpoint: connector_bind_endpoint.to_string(),
-            })?,
+            })
+            .map_err(UdpConnectorError::Transport)?,
             data: Vec::new(),
         })
-        .await?;
+        .await
+        .map_err(UdpConnectorError::Transport)?;
     connector_by_peer.lock().await.insert(
         peer.clone(),
         UdpPeerConnector {
@@ -300,6 +315,11 @@ async fn udp_connector_stream_id(
     Ok(stream_id)
 }
 
+enum UdpConnectorError {
+    LimitExceeded,
+    Transport(anyhow::Error),
+}
+
 async fn remove_udp_connector(
     connector_by_peer: &Arc<Mutex<HashMap<String, UdpPeerConnector>>>,
     peer_by_connector: &Arc<Mutex<HashMap<u32, String>>>,
@@ -308,30 +328,6 @@ async fn remove_udp_connector(
     if let Some(peer) = peer_by_connector.lock().await.remove(&stream_id) {
         connector_by_peer.lock().await.remove(&peer);
     }
-}
-
-async fn evict_udp_connector_if_needed(
-    connect_tunnel: &Arc<PortTunnel>,
-    connector_by_peer: &Arc<Mutex<HashMap<String, UdpPeerConnector>>>,
-    peer_by_connector: &Arc<Mutex<HashMap<u32, String>>>,
-) {
-    let candidate = {
-        let connectors = connector_by_peer.lock().await;
-        if connectors.len() < MAX_UDP_CONNECTORS_PER_FORWARD {
-            return;
-        }
-        connectors
-            .iter()
-            .min_by_key(|(_, connector)| connector.last_used)
-            .map(|(peer, connector)| (peer.clone(), connector.stream_id))
-    };
-    let Some((peer, stream_id)) = candidate else {
-        return;
-    };
-
-    connector_by_peer.lock().await.remove(&peer);
-    peer_by_connector.lock().await.remove(&stream_id);
-    let _ = connect_tunnel.close_stream(stream_id).await;
 }
 
 async fn sweep_idle_udp_connectors(
@@ -497,7 +493,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn udp_connector_limit_evicts_stalest_peer() {
+    async fn udp_connector_limit_refuses_new_peer_without_evicting_existing_peer() {
         let tunnel = SideHandle::local()
             .port_tunnel(PortTunnel::DEFAULT_MAX_QUEUED_BYTES)
             .await
@@ -507,7 +503,8 @@ mod tests {
         let peer_by_connector: Arc<Mutex<HashMap<u32, String>>> =
             Arc::new(Mutex::new(HashMap::new()));
 
-        for idx in 0..MAX_UDP_CONNECTORS_PER_FORWARD {
+        const MAX_UDP_PEERS: usize = 3;
+        for idx in 0..MAX_UDP_PEERS {
             let stream_id = (idx as u32 * 2) + 3;
             let last_used = Instant::now() - Duration::from_secs((idx + 1) as u64);
             let peer = format!("127.0.0.1:{}", 10_000 + idx);
@@ -521,41 +518,26 @@ mod tests {
             peer_by_connector.lock().await.insert(stream_id, peer);
         }
 
-        let stalest_peer = connector_by_peer
-            .lock()
-            .await
-            .iter()
-            .min_by_key(|(_, connector)| connector.last_used)
-            .map(|(peer, connector)| (peer.clone(), connector.stream_id))
-            .unwrap();
-
-        let mut connector_stream_ids =
-            StreamIdAllocator::new_odd_from(((MAX_UDP_CONNECTORS_PER_FORWARD as u32) * 2) + 3);
-        let created_stream_id = udp_connector_stream_id(
+        let mut connector_stream_ids = StreamIdAllocator::new_odd_from(9);
+        let result = udp_connector_stream_id(
             &Arc::new(tunnel),
             &connector_by_peer,
             &peer_by_connector,
             &mut connector_stream_ids,
             "127.0.0.1:0",
             "127.0.0.1:65535".to_string(),
+            MAX_UDP_PEERS,
         )
-        .await
-        .unwrap();
+        .await;
+        assert!(matches!(result, Err(UdpConnectorError::LimitExceeded)));
 
         let connectors = connector_by_peer.lock().await;
-        assert_eq!(connectors.len(), MAX_UDP_CONNECTORS_PER_FORWARD);
-        assert!(!connectors.contains_key(&stalest_peer.0));
-        assert!(connectors.contains_key("127.0.0.1:65535"));
-        assert_eq!(connectors["127.0.0.1:65535"].stream_id, created_stream_id);
+        assert_eq!(connectors.len(), MAX_UDP_PEERS);
+        assert!(!connectors.contains_key("127.0.0.1:65535"));
         drop(connectors);
 
         let peers = peer_by_connector.lock().await;
-        assert_eq!(peers.len(), MAX_UDP_CONNECTORS_PER_FORWARD);
-        assert!(!peers.contains_key(&stalest_peer.1));
-        assert_eq!(
-            peers.get(&created_stream_id).map(String::as_str),
-            Some("127.0.0.1:65535")
-        );
+        assert_eq!(peers.len(), MAX_UDP_PEERS);
     }
 
     #[tokio::test]
@@ -726,6 +708,10 @@ mod tests {
             connect_side: SideHandle::local(),
             protocol: PublicForwardPortProtocol::Udp,
             connect_endpoint: "127.0.0.1:1".to_string(),
+            max_active_tcp_streams_per_forward: 256,
+            max_pending_tcp_bytes_per_stream: 256 * 1024,
+            max_pending_tcp_bytes_per_forward: 2 * 1024 * 1024,
+            max_udp_peers_per_forward: 256,
             max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
             store: Default::default(),
             listen_session,

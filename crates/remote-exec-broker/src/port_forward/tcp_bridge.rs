@@ -15,11 +15,12 @@ use super::tunnel::{
     decode_tunnel_error_frame, decode_tunnel_meta, encode_tunnel_meta,
     format_terminal_tunnel_error, is_backpressure_error, is_retryable_transport_error,
 };
-use super::{MAX_PENDING_TCP_BYTES_PER_FORWARD, MAX_PENDING_TCP_BYTES_PER_STREAM};
 
 struct TcpConnectStream {
     listen_stream_id: u32,
     ready: bool,
+    listen_eof: bool,
+    connect_eof: bool,
     pending_frames: Vec<Frame>,
     pending_bytes: usize,
 }
@@ -129,9 +130,20 @@ async fn run_tcp_forward_epoch(
                 match frame.frame_type {
                     FrameType::TcpAccept => {
                         let accept: TcpAcceptMeta = decode_tunnel_meta(&frame)?;
+                        if !try_reserve_active_tcp_stream(runtime).await {
+                            let _ = listen_tunnel.close_stream(frame.stream_id).await;
+                            runtime
+                                .store
+                                .update_entry(&runtime.forward_id, |entry| {
+                                    entry.dropped_tcp_streams += 1;
+                                })
+                                .await;
+                            continue;
+                        }
                         let Some(connect_stream_id) = connect_stream_ids.next() else {
                             debug_assert!(connect_stream_ids.needs_generation_rotation());
                             let _ = listen_tunnel.close_stream(frame.stream_id).await;
+                            release_active_tcp_stream(runtime).await;
                             close_active_tcp_listen_streams(
                                 runtime,
                                 &listen_tunnel,
@@ -151,20 +163,25 @@ async fn run_tcp_forward_epoch(
                         }).await {
                             if is_retryable_transport_error(&err) {
                                 if let Err(close_err) = listen_tunnel.close_stream(frame.stream_id).await {
+                                    release_active_tcp_stream(runtime).await;
                                     return classify_transport_failure(
                                         close_err,
                                         "closing tcp listen stream after connect tunnel loss",
                                         TunnelRole::Listen,
                                     );
                                 }
+                                release_active_tcp_stream(runtime).await;
                                 return Ok(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect));
                             }
+                            release_active_tcp_stream(runtime).await;
                             return Err(err).context("connecting tcp forward destination");
                         }
                         state.listen_to_connect.insert(frame.stream_id, connect_stream_id);
                         state.connect_streams.insert(connect_stream_id, TcpConnectStream {
                             listen_stream_id: frame.stream_id,
                             ready: false,
+                            listen_eof: false,
+                            connect_eof: false,
                             pending_frames: Vec::new(),
                             pending_bytes: 0,
                         });
@@ -196,6 +213,9 @@ async fn run_tcp_forward_epoch(
                     }
                     FrameType::TcpEof => {
                         if let Some(connect_stream_id) = state.listen_to_connect.get(&frame.stream_id).copied() {
+                            if let Some(stream) = state.connect_streams.get_mut(&connect_stream_id) {
+                                stream.listen_eof = true;
+                            }
                             let eof = Frame {
                                 frame_type: frame.frame_type,
                                 flags: 0,
@@ -213,6 +233,8 @@ async fn run_tcp_forward_epoch(
                             ).await? {
                                 return Ok(control);
                             }
+                            release_tcp_pair_if_fully_eof(runtime, &mut state, connect_stream_id)
+                                .await;
                         }
                     }
                     FrameType::Close => {
@@ -221,6 +243,7 @@ async fn run_tcp_forward_epoch(
                                 if stream.ready {
                                     let _ = connect_tunnel.close_stream(connect_stream_id).await;
                                     state.connect_streams.remove(&connect_stream_id);
+                                    release_active_tcp_stream(runtime).await;
                                 } else {
                                     if let Some(control) = queue_or_send_tcp_connect_frame(
                                         runtime,
@@ -252,6 +275,7 @@ async fn run_tcp_forward_epoch(
                         if let Some(connect_stream_id) = state.listen_to_connect.remove(&frame.stream_id) {
                             if let Some(mut stream) = state.connect_streams.remove(&connect_stream_id) {
                                 release_pending_budget(&mut state.pending_budget, &mut stream);
+                                release_active_tcp_stream(runtime).await;
                             }
                             if let Err(err) = connect_tunnel.close_stream(connect_stream_id).await {
                                 return classify_transport_failure(
@@ -312,6 +336,7 @@ async fn run_tcp_forward_epoch(
                     }
                     FrameType::Error => {
                         close_tcp_pair_after_connect_error(
+                            runtime,
                             &listen_tunnel,
                             &mut state,
                             frame.stream_id,
@@ -336,10 +361,15 @@ async fn run_tcp_forward_epoch(
                         }
                     }
                     FrameType::TcpEof => {
-                        if let Some(listen_stream_id) = state.connect_streams
-                            .get(&frame.stream_id)
-                            .map(|stream| stream.listen_stream_id)
-                        {
+                        let Some(listen_stream_id) = state.connect_streams
+                            .get_mut(&frame.stream_id)
+                            .map(|stream| {
+                                stream.connect_eof = true;
+                                stream.listen_stream_id
+                            })
+                        else {
+                            continue;
+                        };
                             if let Err(err) = listen_tunnel.send(Frame {
                                 frame_type: frame.frame_type,
                                 flags: 0,
@@ -353,7 +383,7 @@ async fn run_tcp_forward_epoch(
                                     TunnelRole::Listen,
                                 );
                             }
-                        }
+                        release_tcp_pair_if_fully_eof(runtime, &mut state, frame.stream_id).await;
                     }
                     FrameType::Close => {
                         if let Some(listen_stream_id) = state.connect_streams
@@ -364,6 +394,7 @@ async fn run_tcp_forward_epoch(
                             })
                         {
                             state.listen_to_connect.remove(&listen_stream_id);
+                            release_active_tcp_stream(runtime).await;
                             if let Err(err) = listen_tunnel.close_stream(listen_stream_id).await {
                                 return classify_transport_failure(
                                     err,
@@ -456,8 +487,8 @@ async fn queue_or_send_tcp_connect_frame(
         let added = frame_data_bytes(&frame);
         let next_stream_total = stream.pending_bytes.saturating_add(added);
         let next_forward_total = state.pending_budget.total_bytes.saturating_add(added);
-        if next_stream_total > MAX_PENDING_TCP_BYTES_PER_STREAM
-            || next_forward_total > MAX_PENDING_TCP_BYTES_PER_FORWARD
+        if next_stream_total > runtime.max_pending_tcp_bytes_per_stream
+            || next_forward_total > runtime.max_pending_tcp_bytes_per_forward
         {
             let listen_stream_id = stream.listen_stream_id;
             release_pending_budget(&mut state.pending_budget, stream);
@@ -469,9 +500,9 @@ async fn queue_or_send_tcp_connect_frame(
                 .store
                 .update_entry(&runtime.forward_id, |entry| {
                     entry.dropped_tcp_streams += 1;
-                    entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(1);
                 })
                 .await;
+            release_active_tcp_stream(runtime).await;
             return Ok(None);
         }
         stream.pending_bytes = next_stream_total;
@@ -529,6 +560,7 @@ async fn flush_pending_tcp_connect_frames(
             {
                 state.listen_to_connect.remove(&listen_stream_id);
             }
+            release_active_tcp_stream(runtime).await;
             should_remove = true;
         }
     }
@@ -541,6 +573,7 @@ enum TcpFlushResult {
 }
 
 async fn close_tcp_pair_after_connect_error(
+    runtime: &ForwardRuntime,
     listen_tunnel: &Arc<PortTunnel>,
     state: &mut TcpForwardState,
     connect_stream_id: u32,
@@ -550,6 +583,7 @@ async fn close_tcp_pair_after_connect_error(
     };
     release_pending_budget(&mut state.pending_budget, &mut stream);
     state.listen_to_connect.remove(&stream.listen_stream_id);
+    release_active_tcp_stream(runtime).await;
     if let Err(err) = listen_tunnel.close_stream(stream.listen_stream_id).await {
         return classify_transport_failure(
             err,
@@ -579,10 +613,35 @@ async fn close_tcp_pair_after_connect_pressure(
         .store
         .update_entry(&runtime.forward_id, |entry| {
             entry.dropped_tcp_streams += 1;
-            entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(1);
         })
         .await;
+    release_active_tcp_stream(runtime).await;
     Ok(())
+}
+
+async fn release_tcp_pair_if_fully_eof(
+    runtime: &ForwardRuntime,
+    state: &mut TcpForwardState,
+    connect_stream_id: u32,
+) {
+    let Some((listen_stream_id, fully_eof)) =
+        state.connect_streams.get(&connect_stream_id).map(|stream| {
+            (
+                stream.listen_stream_id,
+                stream.listen_eof && stream.connect_eof,
+            )
+        })
+    else {
+        return;
+    };
+    if !fully_eof {
+        return;
+    }
+    if let Some(mut stream) = state.connect_streams.remove(&connect_stream_id) {
+        release_pending_budget(&mut state.pending_budget, &mut stream);
+    }
+    state.listen_to_connect.remove(&listen_stream_id);
+    release_active_tcp_stream(runtime).await;
 }
 
 fn frame_data_bytes(frame: &Frame) -> usize {
@@ -594,6 +653,31 @@ fn release_pending_budget(pending_budget: &mut PendingTcpBudget, stream: &mut Tc
         .total_bytes
         .saturating_sub(stream.pending_bytes);
     stream.pending_bytes = 0;
+}
+
+async fn try_reserve_active_tcp_stream(runtime: &ForwardRuntime) -> bool {
+    let mut reserved = false;
+    let mut saw_entry = false;
+    runtime
+        .store
+        .update_entry(&runtime.forward_id, |entry| {
+            saw_entry = true;
+            if entry.active_tcp_streams < runtime.max_active_tcp_streams_per_forward {
+                entry.active_tcp_streams += 1;
+                reserved = true;
+            }
+        })
+        .await;
+    !saw_entry || reserved
+}
+
+async fn release_active_tcp_stream(runtime: &ForwardRuntime) {
+    runtime
+        .store
+        .update_entry(&runtime.forward_id, |entry| {
+            entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(1);
+        })
+        .await;
 }
 
 #[cfg(test)]
@@ -800,6 +884,10 @@ mod tests {
             connect_side: SideHandle::local(),
             protocol: PublicForwardPortProtocol::Tcp,
             connect_endpoint: "127.0.0.1:1".to_string(),
+            max_active_tcp_streams_per_forward: 256,
+            max_pending_tcp_bytes_per_stream: 256 * 1024,
+            max_pending_tcp_bytes_per_forward: 2 * 1024 * 1024,
+            max_udp_peers_per_forward: 256,
             max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
             store: Default::default(),
             listen_session,
@@ -871,6 +959,10 @@ mod tests {
             connect_side: SideHandle::local(),
             protocol: PublicForwardPortProtocol::Tcp,
             connect_endpoint: "127.0.0.1:1".to_string(),
+            max_active_tcp_streams_per_forward: 256,
+            max_pending_tcp_bytes_per_stream: 256 * 1024,
+            max_pending_tcp_bytes_per_forward: 2 * 1024 * 1024,
+            max_udp_peers_per_forward: 256,
             max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
             store: Default::default(),
             listen_session,
@@ -977,6 +1069,10 @@ mod tests {
             connect_side: SideHandle::local(),
             protocol: PublicForwardPortProtocol::Tcp,
             connect_endpoint: "127.0.0.1:1".to_string(),
+            max_active_tcp_streams_per_forward: 256,
+            max_pending_tcp_bytes_per_stream: 256 * 1024,
+            max_pending_tcp_bytes_per_forward: 2 * 1024 * 1024,
+            max_udp_peers_per_forward: 256,
             max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
             store: Default::default(),
             listen_session,
@@ -1170,6 +1266,10 @@ mod tests {
             connect_side: SideHandle::local(),
             protocol: PublicForwardPortProtocol::Tcp,
             connect_endpoint: "127.0.0.1:1".to_string(),
+            max_active_tcp_streams_per_forward: 256,
+            max_pending_tcp_bytes_per_stream: 256 * 1024,
+            max_pending_tcp_bytes_per_forward: 2 * 1024 * 1024,
+            max_udp_peers_per_forward: 256,
             max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
             store: Default::default(),
             listen_session,

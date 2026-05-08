@@ -874,6 +874,288 @@ async fn forward_ports_closes_pending_tcp_stream_when_remote_connect_never_ackno
 }
 
 #[tokio::test]
+async fn forward_ports_enforces_configured_active_tcp_stream_limit() {
+    let fixture = support::spawners::spawn_broker_local_only_with_port_forward_limits(
+        r#"[port_forward_limits]
+max_active_tcp_streams_per_forward = 1
+max_pending_tcp_bytes_per_stream = 64
+max_pending_tcp_bytes_per_forward = 64
+max_udp_peers_per_forward = 1
+max_tunnel_queued_bytes = 4096
+"#,
+    )
+    .await;
+    let hold_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let hold_addr = hold_listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let (mut stream, _) = match hold_listener.accept().await {
+                Ok(value) => value,
+                Err(_) => return,
+            };
+            tokio::spawn(async move {
+                let mut buf = [0u8; 1];
+                let _ = stream.read(&mut buf).await;
+            });
+        }
+    });
+
+    let open = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "local",
+                "connect_side": "local",
+                "forwards": [{
+                    "listen_endpoint": "127.0.0.1:0",
+                    "connect_endpoint": hold_addr.to_string(),
+                    "protocol": "tcp"
+                }]
+            }),
+        )
+        .await;
+    let forward_id = forward_id_from(&open);
+    let listen_endpoint = listen_endpoint_from(&open);
+    assert_eq!(
+        open.structured_content["forwards"][0]["limits"]["max_active_tcp_streams"],
+        1
+    );
+
+    let mut first = tokio::net::TcpStream::connect(&listen_endpoint)
+        .await
+        .unwrap();
+    first.write_all(b"a").await.unwrap();
+    let active =
+        wait_for_active_tcp_streams(&fixture, &forward_id, 1, Duration::from_secs(5)).await;
+    assert_eq!(active["active_tcp_streams"], 1);
+
+    let mut second = tokio::net::TcpStream::connect(&listen_endpoint)
+        .await
+        .unwrap();
+    let second_closed = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut buf = [0u8; 1];
+        second.read(&mut buf).await
+    })
+    .await
+    .expect("second tcp stream should be closed when active stream limit is reached");
+    match second_closed {
+        Ok(0) => {}
+        Err(err)
+            if matches!(
+                err.kind(),
+                std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::NotConnected
+                    | std::io::ErrorKind::UnexpectedEof
+            ) => {}
+        Ok(read) => panic!("expected second tcp stream to close, read {read} byte(s) instead"),
+        Err(err) => panic!("unexpected second tcp stream read error: {err}"),
+    }
+
+    let limited = wait_for_tcp_drop_count(&fixture, &forward_id, 1, Duration::from_secs(5)).await;
+    assert_eq!(limited["active_tcp_streams"], 1);
+
+    drop(first);
+    let released =
+        wait_for_active_tcp_streams(&fixture, &forward_id, 0, Duration::from_secs(5)).await;
+    assert_eq!(released["active_tcp_streams"], 0);
+
+    let close = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "close",
+                "forward_ids": [forward_id]
+            }),
+        )
+        .await;
+    assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
+}
+
+#[tokio::test]
+async fn forward_ports_enforces_configured_pending_tcp_byte_limit() {
+    let fixture =
+        support::spawners::spawn_broker_with_local_and_stub_port_forward_version_and_port_forward_limits(
+            4,
+            r#"[port_forward_limits]
+max_active_tcp_streams_per_forward = 8
+max_pending_tcp_bytes_per_stream = 64
+max_pending_tcp_bytes_per_forward = 64
+max_udp_peers_per_forward = 8
+max_tunnel_queued_bytes = 4096
+"#,
+        )
+        .await;
+    support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
+    support::stub_daemon::drop_tcp_connect_ok_frames(&fixture.stub_state).await;
+
+    let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_addr = upstream.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut stream, _) = upstream.accept().await.unwrap();
+        let mut buf = [0u8; 1024];
+        loop {
+            match tokio::time::timeout(Duration::from_secs(5), stream.read(&mut buf)).await {
+                Ok(Ok(0)) | Ok(Err(_)) | Err(_) => return,
+                Ok(Ok(_)) => {}
+            }
+        }
+    });
+
+    let open = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "local",
+                "connect_side": "builder-a",
+                "forwards": [{
+                    "listen_endpoint": "127.0.0.1:0",
+                    "connect_endpoint": upstream_addr.to_string(),
+                    "protocol": "tcp"
+                }]
+            }),
+        )
+        .await;
+    let forward_id = forward_id_from(&open);
+    let listen_endpoint = listen_endpoint_from(&open);
+    assert_eq!(
+        open.structured_content["forwards"][0]["limits"]["max_pending_tcp_bytes_per_stream"],
+        64
+    );
+
+    let mut client = tokio::net::TcpStream::connect(&listen_endpoint)
+        .await
+        .unwrap();
+    client.write_all(&vec![7u8; 128]).await.unwrap();
+
+    let close_result = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut buf = [0u8; 1];
+        client.read(&mut buf).await
+    })
+    .await
+    .expect("pending tcp stream should close once the configured byte limit is exceeded");
+    match close_result {
+        Ok(0) => {}
+        Err(err)
+            if matches!(
+                err.kind(),
+                std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::NotConnected
+                    | std::io::ErrorKind::UnexpectedEof
+            ) => {}
+        Ok(read) => panic!("expected pending tcp stream to close, read {read} byte(s) instead"),
+        Err(err) => panic!("unexpected pending tcp stream read error: {err}"),
+    }
+
+    let dropped = wait_for_tcp_drop_count(&fixture, &forward_id, 1, Duration::from_secs(5)).await;
+    assert_eq!(dropped["status"], "open");
+
+    let close = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "close",
+                "forward_ids": [forward_id]
+            }),
+        )
+        .await;
+    assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
+}
+
+#[tokio::test]
+async fn forward_ports_enforces_configured_udp_peer_limit() {
+    let fixture =
+        support::spawners::spawn_broker_with_local_and_stub_port_forward_version_and_port_forward_limits(
+            4,
+            r#"[port_forward_limits]
+max_active_tcp_streams_per_forward = 8
+max_pending_tcp_bytes_per_stream = 64
+max_pending_tcp_bytes_per_forward = 64
+max_udp_peers_per_forward = 1
+max_tunnel_queued_bytes = 4096
+"#,
+        )
+        .await;
+    support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
+
+    let echo_socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let echo_addr = echo_socket.local_addr().unwrap();
+    tokio::spawn(async move {
+        let mut buf = [0u8; 1024];
+        loop {
+            let (read, peer) = match echo_socket.recv_from(&mut buf).await {
+                Ok(value) => value,
+                Err(_) => return,
+            };
+            if echo_socket.send_to(&buf[..read], peer).await.is_err() {
+                return;
+            }
+        }
+    });
+
+    let open = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "local",
+                "connect_side": "builder-a",
+                "forwards": [{
+                    "listen_endpoint": "127.0.0.1:0",
+                    "connect_endpoint": echo_addr.to_string(),
+                    "protocol": "udp"
+                }]
+            }),
+        )
+        .await;
+    let forward_id = forward_id_from(&open);
+    let listen_endpoint = listen_endpoint_from(&open);
+    assert_eq!(
+        open.structured_content["forwards"][0]["limits"]["max_udp_peers"],
+        1
+    );
+
+    let first = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let second = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    first.send_to(b"first", &listen_endpoint).await.unwrap();
+    second.send_to(b"second", &listen_endpoint).await.unwrap();
+
+    let mut buf = [0u8; 64];
+    let read = tokio::time::timeout(Duration::from_secs(5), first.recv_from(&mut buf))
+        .await
+        .expect("first udp peer should receive reply")
+        .unwrap()
+        .0;
+    assert_eq!(&buf[..read], b"first");
+    let second_read =
+        tokio::time::timeout(Duration::from_millis(300), second.recv_from(&mut buf)).await;
+    assert!(
+        second_read.is_err(),
+        "second udp peer should not receive a reply after configured peer limit is reached"
+    );
+
+    let stats = support::stub_daemon::udp_connector_stats(&fixture.stub_state).await;
+    assert_eq!(stats.max_observed, 1);
+    assert_eq!(stats.opened, 1);
+    let dropped = wait_for_udp_drop_count(&fixture, &forward_id, Duration::from_secs(5)).await;
+    assert_eq!(dropped["status"], "open");
+
+    let close = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "close",
+                "forward_ids": [forward_id]
+            }),
+        )
+        .await;
+    assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
+}
+
+#[tokio::test]
 async fn forward_ports_stays_open_during_heavy_local_udp_peer_churn() {
     const UDP_PEER_COUNT: usize = 320;
 
@@ -1194,6 +1476,98 @@ async fn wait_for_udp_drop_count(
         .unwrap_or_default();
     panic!(
         "forward `{forward_id}` did not record UDP drops within {timeout:?}; last_status={last_status} dropped_udp_datagrams={drops} last_error={last_error}"
+    );
+}
+
+async fn wait_for_tcp_drop_count(
+    fixture: &support::fixture::BrokerFixture,
+    forward_id: &str,
+    dropped_tcp_streams: u64,
+    timeout: Duration,
+) -> serde_json::Value {
+    let started = std::time::Instant::now();
+    let mut last_entry = None;
+    while started.elapsed() < timeout {
+        let list = fixture
+            .call_tool(
+                "forward_ports",
+                serde_json::json!({
+                    "action": "list",
+                    "forward_ids": [forward_id]
+                }),
+            )
+            .await;
+        let entry = list.structured_content["forwards"][0].clone();
+        last_entry = Some(entry.clone());
+        if entry["dropped_tcp_streams"].as_u64().unwrap_or_default() >= dropped_tcp_streams {
+            return entry;
+        }
+        if entry["status"] == "failed" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    let last_status = last_entry
+        .as_ref()
+        .and_then(|entry| entry["status"].as_str())
+        .unwrap_or("<missing>");
+    let drops = last_entry
+        .as_ref()
+        .and_then(|entry| entry["dropped_tcp_streams"].as_u64())
+        .unwrap_or_default();
+    let last_error = last_entry
+        .as_ref()
+        .and_then(|entry| entry["last_error"].as_str())
+        .unwrap_or_default();
+    panic!(
+        "forward `{forward_id}` did not record {dropped_tcp_streams} TCP drops within {timeout:?}; last_status={last_status} dropped_tcp_streams={drops} last_error={last_error}"
+    );
+}
+
+async fn wait_for_active_tcp_streams(
+    fixture: &support::fixture::BrokerFixture,
+    forward_id: &str,
+    active_tcp_streams: u64,
+    timeout: Duration,
+) -> serde_json::Value {
+    let started = std::time::Instant::now();
+    let mut last_entry = None;
+    while started.elapsed() < timeout {
+        let list = fixture
+            .call_tool(
+                "forward_ports",
+                serde_json::json!({
+                    "action": "list",
+                    "forward_ids": [forward_id]
+                }),
+            )
+            .await;
+        let entry = list.structured_content["forwards"][0].clone();
+        last_entry = Some(entry.clone());
+        if entry["active_tcp_streams"].as_u64().unwrap_or_default() == active_tcp_streams {
+            return entry;
+        }
+        if entry["status"] == "failed" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    let last_status = last_entry
+        .as_ref()
+        .and_then(|entry| entry["status"].as_str())
+        .unwrap_or("<missing>");
+    let active = last_entry
+        .as_ref()
+        .and_then(|entry| entry["active_tcp_streams"].as_u64())
+        .unwrap_or_default();
+    let last_error = last_entry
+        .as_ref()
+        .and_then(|entry| entry["last_error"].as_str())
+        .unwrap_or_default();
+    panic!(
+        "forward `{forward_id}` did not reach {active_tcp_streams} active TCP streams within {timeout:?}; last_status={last_status} active_tcp_streams={active} last_error={last_error}"
     );
 }
 

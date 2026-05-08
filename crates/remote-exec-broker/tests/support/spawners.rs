@@ -369,6 +369,17 @@ pub async fn spawn_broker_local_only() -> BrokerFixture {
 }
 
 pub async fn spawn_broker_local_only_with_port_forward_limit(limit: usize) -> BrokerFixture {
+    spawn_broker_local_only_with_port_forward_limits(&format!(
+        r#"[port_forward_limits]
+max_open_forwards_total = {limit}
+"#,
+    ))
+    .await
+}
+
+pub async fn spawn_broker_local_only_with_port_forward_limits(
+    extra_top_level: &str,
+) -> BrokerFixture {
     let tempdir = tempfile::tempdir().unwrap();
     let local_workdir = tempdir.path().join("local-work");
     std::fs::create_dir_all(&local_workdir).unwrap();
@@ -382,11 +393,7 @@ pub async fn spawn_broker_local_only_with_port_forward_limit(limit: usize) -> Br
             extra_config: None,
         }),
         None,
-        Some(&format!(
-            r#"[port_forward_limits]
-max_open_forwards_total = {limit}
-"#,
-        )),
+        Some(extra_top_level),
     );
 
     let client = spawn_broker_child(&broker_config).await;
@@ -521,6 +528,17 @@ pub async fn spawn_broker_with_local_and_stub_port_forward_version_and_tunnel_qu
 max_tunnel_queued_bytes = {max_tunnel_queued_bytes}
 "#,
         )),
+    )
+    .await
+}
+
+pub async fn spawn_broker_with_local_and_stub_port_forward_version_and_port_forward_limits(
+    version: u32,
+    extra_top_level: &str,
+) -> BrokerFixture {
+    spawn_broker_with_local_and_stub_port_forward_version_and_extra_config(
+        version,
+        Some(extra_top_level),
     )
     .await
 }

@@ -25,6 +25,3 @@ const LISTEN_CLOSE_ACK_TIMEOUT: Duration = Duration::from_secs(2);
 const PORT_FORWARD_OPEN_ACK_TIMEOUT: Duration = Duration::from_secs(5);
 const PORT_FORWARD_TUNNEL_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const FORWARD_TASK_STOP_TIMEOUT: Duration = Duration::from_secs(2);
-const MAX_PENDING_TCP_BYTES_PER_STREAM: usize = 256 * 1024;
-const MAX_PENDING_TCP_BYTES_PER_FORWARD: usize = 2 * 1024 * 1024;
-const MAX_UDP_CONNECTORS_PER_FORWARD: usize = 256;
