@@ -2,7 +2,10 @@ use std::io::ErrorKind;
 use std::sync::Arc;
 
 use crate::{AppState, HostRpcError};
-use remote_exec_proto::port_tunnel::{Frame, FrameType, read_frame, read_preface, write_frame};
+use remote_exec_proto::port_tunnel::{
+    Frame, FrameType, TunnelCloseMeta, TunnelForwardProtocol, TunnelLimitSummary, TunnelOpenMeta,
+    TunnelReadyMeta, TunnelRole, read_frame, read_preface, write_frame,
+};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, mpsc};
 
@@ -107,6 +110,19 @@ pub(super) async fn handle_tunnel_frame(
     frame: Frame,
 ) -> Result<(), HostRpcError> {
     match frame.frame_type {
+        FrameType::TunnelOpen => tunnel_open(tunnel, frame).await,
+        FrameType::TunnelClose => tunnel_close(tunnel, frame).await,
+        FrameType::TunnelHeartbeat => {
+            tunnel
+                .send(Frame {
+                    frame_type: FrameType::TunnelHeartbeatAck,
+                    flags: 0,
+                    stream_id: 0,
+                    meta: frame.meta,
+                    data: Vec::new(),
+                })
+                .await
+        }
         FrameType::SessionOpen => tunnel_session_open(tunnel, frame).await,
         FrameType::SessionResume => tunnel_session_resume(tunnel, frame).await,
         FrameType::TcpListen => tunnel_tcp_listen(tunnel, frame).await,
@@ -123,6 +139,118 @@ pub(super) async fn handle_tunnel_frame(
     }
 }
 
+pub(super) async fn tunnel_open(
+    tunnel: Arc<TunnelState>,
+    frame: Frame,
+) -> Result<(), HostRpcError> {
+    if frame.stream_id != 0 {
+        return Err(rpc_error(
+            "invalid_port_tunnel",
+            "tunnel open must use stream_id 0",
+        ));
+    }
+    let meta: TunnelOpenMeta = decode_frame_meta(&frame)?;
+    match meta.role {
+        TunnelRole::Listen => tunnel_open_listen(tunnel, meta).await,
+        TunnelRole::Connect => tunnel_open_connect(tunnel, meta).await,
+    }
+}
+
+async fn tunnel_open_listen(
+    tunnel: Arc<TunnelState>,
+    meta: TunnelOpenMeta,
+) -> Result<(), HostRpcError> {
+    let session = match meta.resume_session_id {
+        Some(session_id) => {
+            let session = tunnel
+                .state
+                .port_forward_sessions
+                .get(&session_id)
+                .await
+                .ok_or_else(|| {
+                    rpc_error("unknown_port_tunnel_session", "unknown port tunnel session")
+                })?;
+            if session.is_expired().await {
+                tunnel.state.port_forward_sessions.remove(&session_id).await;
+                session.close_retained_resources().await;
+                return Err(rpc_error(
+                    "port_tunnel_resume_expired",
+                    "port tunnel resume expired",
+                ));
+            }
+            session
+        }
+        None => {
+            let session = new_session(&tunnel);
+            tunnel
+                .state
+                .port_forward_sessions
+                .insert(session.clone())
+                .await;
+            session
+        }
+    };
+    attach_session_to_tunnel(&session, &tunnel).await?;
+    tunnel
+        .send(Frame {
+            frame_type: FrameType::TunnelReady,
+            flags: 0,
+            stream_id: 0,
+            meta: encode_frame_meta(&TunnelReadyMeta {
+                generation: meta.generation,
+                session_id: Some(session.id.clone()),
+                resume_timeout_ms: Some(super::RESUME_TIMEOUT.as_millis() as u64),
+                limits: default_tunnel_limit_summary(),
+            })?,
+            data: Vec::new(),
+        })
+        .await?;
+    if meta.protocol == TunnelForwardProtocol::Udp {
+        reactivate_retained_udp_bind(&session).await?;
+    }
+    Ok(())
+}
+
+async fn tunnel_open_connect(
+    tunnel: Arc<TunnelState>,
+    meta: TunnelOpenMeta,
+) -> Result<(), HostRpcError> {
+    tunnel
+        .send(Frame {
+            frame_type: FrameType::TunnelReady,
+            flags: 0,
+            stream_id: 0,
+            meta: encode_frame_meta(&TunnelReadyMeta {
+                generation: meta.generation,
+                session_id: None,
+                resume_timeout_ms: None,
+                limits: default_tunnel_limit_summary(),
+            })?,
+            data: Vec::new(),
+        })
+        .await
+}
+
+async fn tunnel_close(tunnel: Arc<TunnelState>, frame: Frame) -> Result<(), HostRpcError> {
+    if frame.stream_id != 0 {
+        return Err(rpc_error(
+            "invalid_port_tunnel",
+            "tunnel close must use stream_id 0",
+        ));
+    }
+    let meta: TunnelCloseMeta = decode_frame_meta(&frame)?;
+    close_attached_session(&tunnel, super::error::SessionCloseMode::GracefulClose).await;
+    tunnel
+        .send(Frame {
+            frame_type: FrameType::TunnelClosed,
+            flags: 0,
+            stream_id: 0,
+            meta: encode_frame_meta(&meta)?,
+            data: Vec::new(),
+        })
+        .await
+}
+
 pub(super) async fn tunnel_session_open(
     tunnel: Arc<TunnelState>,
     frame: Frame,
@@ -133,16 +261,7 @@ pub(super) async fn tunnel_session_open(
             "session open must use stream_id 0",
         ));
     }
-    let session = Arc::new(SessionState {
-        id: format!("sess_{}", uuid::Uuid::new_v4().simple()),
-        root_cancel: tunnel.state.shutdown.child_token(),
-        attachment: Mutex::new(None),
-        attachment_notify: tokio::sync::Notify::new(),
-        resume_deadline: Mutex::new(None),
-        retained_listener: Mutex::new(None),
-        retained_udp_bind: Mutex::new(None),
-        next_daemon_stream_id: std::sync::atomic::AtomicU32::new(2),
-    });
+    let session = new_session(&tunnel);
     attach_session_to_tunnel(&session, &tunnel).await?;
     tunnel
         .state
@@ -161,6 +280,27 @@ pub(super) async fn tunnel_session_open(
             data: Vec::new(),
         })
         .await
+}
+
+fn new_session(tunnel: &Arc<TunnelState>) -> Arc<SessionState> {
+    Arc::new(SessionState {
+        id: format!("sess_{}", uuid::Uuid::new_v4().simple()),
+        root_cancel: tunnel.state.shutdown.child_token(),
+        attachment: Mutex::new(None),
+        attachment_notify: tokio::sync::Notify::new(),
+        resume_deadline: Mutex::new(None),
+        retained_listener: Mutex::new(None),
+        retained_udp_bind: Mutex::new(None),
+        next_daemon_stream_id: std::sync::atomic::AtomicU32::new(2),
+    })
+}
+
+fn default_tunnel_limit_summary() -> TunnelLimitSummary {
+    TunnelLimitSummary {
+        max_active_tcp_streams: 256,
+        max_udp_peers: 256,
+        max_queued_bytes: 8 * 1024 * 1024,
+    }
 }
 
 pub(super) async fn tunnel_session_resume(

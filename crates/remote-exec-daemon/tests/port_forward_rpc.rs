@@ -4,8 +4,9 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use remote_exec_proto::port_tunnel::{
-    Frame, FrameType, TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, UPGRADE_TOKEN,
-    read_frame, write_frame, write_preface,
+    Frame, FrameType, TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, TunnelCloseMeta,
+    TunnelForwardProtocol, TunnelOpenMeta, TunnelReadyMeta, TunnelRole, UPGRADE_TOKEN, read_frame,
+    write_frame, write_preface,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -50,6 +51,84 @@ async fn port_tunnel_rejects_http10_upgrade_request() {
             "{response}"
         );
     }
+}
+
+#[tokio::test]
+async fn port_tunnel_requires_v4_header() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let response = fixture
+        .client
+        .post(fixture.url("/v1/port/tunnel"))
+        .header(reqwest::header::CONNECTION, "Upgrade")
+        .header(reqwest::header::UPGRADE, UPGRADE_TOKEN)
+        .header(TUNNEL_PROTOCOL_VERSION_HEADER, "3")
+        .header(reqwest::header::CONTENT_LENGTH, "0")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let body: remote_exec_proto::rpc::RpcErrorBody = response.json().await.unwrap();
+    assert_eq!(body.code, "bad_request");
+    assert!(
+        body.message
+            .contains("x-remote-exec-port-tunnel-version: 4")
+    );
+}
+
+#[tokio::test]
+async fn tunnel_open_ready_and_close_round_trip() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let mut stream = open_tunnel(fixture.addr).await;
+
+    write_preface(&mut stream).await.unwrap();
+    write_frame(
+        &mut stream,
+        &Frame {
+            frame_type: FrameType::TunnelOpen,
+            flags: 0,
+            stream_id: 0,
+            meta: serde_json::to_vec(&TunnelOpenMeta {
+                forward_id: "fwd_test".to_string(),
+                role: TunnelRole::Listen,
+                side: "builder-a".to_string(),
+                generation: 1,
+                protocol: TunnelForwardProtocol::Tcp,
+                resume_session_id: None,
+            })
+            .unwrap(),
+            data: Vec::new(),
+        },
+    )
+    .await
+    .unwrap();
+
+    let ready = read_frame(&mut stream).await.unwrap();
+    assert_eq!(ready.frame_type, FrameType::TunnelReady);
+    let ready_meta: TunnelReadyMeta = serde_json::from_slice(&ready.meta).unwrap();
+    assert_eq!(ready_meta.generation, 1);
+    assert!(ready_meta.session_id.is_some());
+
+    write_frame(
+        &mut stream,
+        &Frame {
+            frame_type: FrameType::TunnelClose,
+            flags: 0,
+            stream_id: 0,
+            meta: serde_json::to_vec(&TunnelCloseMeta {
+                forward_id: "fwd_test".to_string(),
+                generation: 1,
+                reason: "operator_close".to_string(),
+            })
+            .unwrap(),
+            data: Vec::new(),
+        },
+    )
+    .await
+    .unwrap();
+
+    let closed = read_frame(&mut stream).await.unwrap();
+    assert_eq!(closed.frame_type, FrameType::TunnelClosed);
 }
 
 #[tokio::test]
