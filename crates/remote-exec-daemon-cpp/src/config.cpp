@@ -203,6 +203,7 @@ PortForwardLimitConfig default_port_forward_limit_config() {
     config.max_active_tcp_streams = DEFAULT_PORT_FORWARD_MAX_ACTIVE_TCP_STREAMS;
     config.max_tunnel_queued_bytes = DEFAULT_PORT_FORWARD_MAX_TUNNEL_QUEUED_BYTES;
     config.tunnel_io_timeout_ms = DEFAULT_PORT_FORWARD_TUNNEL_IO_TIMEOUT_MS;
+    config.connect_timeout_ms = DEFAULT_PORT_FORWARD_CONNECT_TIMEOUT_MS;
     return config;
 }
 
@@ -329,6 +330,11 @@ DaemonConfig load_config(const std::string& path) {
         "port_forward_tunnel_io_timeout_ms",
         config.port_forward_limits.tunnel_io_timeout_ms
     );
+    config.port_forward_limits.connect_timeout_ms = read_optional_unsigned_long(
+        values,
+        "port_forward_connect_timeout_ms",
+        config.port_forward_limits.connect_timeout_ms
+    );
     config.port_forward_max_worker_threads = config.port_forward_limits.max_worker_threads;
     if (config.max_request_header_bytes == 0) {
         throw std::runtime_error("max_request_header_bytes must be greater than zero");
@@ -366,6 +372,10 @@ DaemonConfig load_config(const std::string& path) {
     validate_port_forward_limit(
         config.port_forward_limits.tunnel_io_timeout_ms,
         "port_forward_tunnel_io_timeout_ms"
+    );
+    validate_port_forward_limit(
+        config.port_forward_limits.connect_timeout_ms,
+        "port_forward_connect_timeout_ms"
     );
     config.yield_time = default_yield_time_config();
     config.yield_time.exec_command = read_yield_time_operation(

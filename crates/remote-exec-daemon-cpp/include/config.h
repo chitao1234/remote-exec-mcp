@@ -25,6 +25,7 @@ struct PortForwardLimitConfig {
     unsigned long max_active_tcp_streams;
     unsigned long max_tunnel_queued_bytes;
     unsigned long tunnel_io_timeout_ms;
+    unsigned long connect_timeout_ms;
 };
 
 struct DaemonConfig {
@@ -52,6 +53,7 @@ static const unsigned long DEFAULT_PORT_FORWARD_MAX_UDP_BINDS = 64UL;
 static const unsigned long DEFAULT_PORT_FORWARD_MAX_ACTIVE_TCP_STREAMS = 1024UL;
 static const unsigned long DEFAULT_PORT_FORWARD_MAX_TUNNEL_QUEUED_BYTES = 8UL * 1024UL * 1024UL;
 static const unsigned long DEFAULT_PORT_FORWARD_TUNNEL_IO_TIMEOUT_MS = 30000UL;
+static const unsigned long DEFAULT_PORT_FORWARD_CONNECT_TIMEOUT_MS = 10000UL;
 
 YieldTimeConfig default_yield_time_config();
 PortForwardLimitConfig default_port_forward_limit_config();

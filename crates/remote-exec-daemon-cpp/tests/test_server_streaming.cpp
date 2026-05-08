@@ -990,6 +990,13 @@ static std::thread accept_and_send_tcp_payload(
     });
 }
 
+static std::string closed_loopback_tcp_endpoint() {
+    UniqueSocket listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
+    const std::string endpoint = socket_local_endpoint(listener.get());
+    listener.reset();
+    return endpoint;
+}
+
 static void assert_active_tcp_stream_limit_is_enforced_and_released(const fs::path& root) {
     PortForwardLimitConfig limits = default_port_forward_limit_config();
     limits.max_active_tcp_streams = 1UL;
@@ -1004,6 +1011,17 @@ static void assert_active_tcp_stream_limit_is_enforced_and_released(const fs::pa
     UniqueSocket client_socket;
     std::thread server_thread;
     open_tunnel(state, &client_socket, &server_thread);
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(
+            PortTunnelFrameType::TcpConnect,
+            7U,
+            Json{{"endpoint", closed_loopback_tcp_endpoint()}}
+        )
+    );
+    assert_tunnel_error_code(read_tunnel_frame(client_socket.get()), "port_connect_failed");
+
     send_tunnel_frame(
         client_socket.get(),
         json_frame(PortTunnelFrameType::TcpConnect, 1U, Json{{"endpoint", endpoint}})

@@ -8,6 +8,7 @@
 #include <ws2tcpip.h>
 #else
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -84,6 +85,99 @@ addrinfo* resolve_endpoint(
         throw PortForwardError(400, error_code, message.str());
     }
     return result;
+}
+
+bool connect_in_progress_error(int error) {
+#ifdef _WIN32
+    return error == WSAEWOULDBLOCK || error == WSAEINPROGRESS;
+#else
+    return error == EINPROGRESS;
+#endif
+}
+
+void set_socket_nonblocking(SOCKET socket, bool enabled) {
+#ifdef _WIN32
+    u_long mode = enabled ? 1UL : 0UL;
+    if (ioctlsocket(socket, FIONBIO, &mode) != 0) {
+        throw PortForwardError(400, "port_connect_failed", socket_error_message("ioctlsocket"));
+    }
+#else
+    const int flags = fcntl(socket, F_GETFL, 0);
+    if (flags < 0) {
+        throw PortForwardError(400, "port_connect_failed", socket_error_message("fcntl"));
+    }
+    const int updated = enabled ? (flags | O_NONBLOCK) : (flags & ~O_NONBLOCK);
+    if (fcntl(socket, F_SETFL, updated) != 0) {
+        throw PortForwardError(400, "port_connect_failed", socket_error_message("fcntl"));
+    }
+#endif
+}
+
+bool wait_for_connect(SOCKET socket, unsigned long timeout_ms) {
+    fd_set writefds;
+    FD_ZERO(&writefds);
+    FD_SET(socket, &writefds);
+
+    timeval timeout;
+    timeout.tv_sec = static_cast<long>(timeout_ms / 1000UL);
+    timeout.tv_usec = static_cast<long>((timeout_ms % 1000UL) * 1000UL);
+
+#ifdef _WIN32
+    const int selected = select(0, NULL, &writefds, NULL, &timeout);
+#else
+    const int selected = select(socket + 1, NULL, &writefds, NULL, &timeout);
+#endif
+    if (selected < 0) {
+        throw PortForwardError(400, "port_connect_failed", socket_error_message("select"));
+    }
+    return selected > 0 && FD_ISSET(socket, &writefds);
+}
+
+bool tcp_connect_with_timeout(
+    SOCKET socket,
+    const sockaddr* address,
+    socklen_t address_len,
+    unsigned long timeout_ms
+) {
+    set_socket_nonblocking(socket, true);
+    if (connect(socket, address, static_cast<int>(address_len)) == 0) {
+        set_socket_nonblocking(socket, false);
+        return true;
+    }
+
+    const int connect_error = last_socket_error();
+    if (!connect_in_progress_error(connect_error)) {
+        set_socket_nonblocking(socket, false);
+        return false;
+    }
+
+    if (!wait_for_connect(socket, timeout_ms)) {
+        set_socket_nonblocking(socket, false);
+        throw PortForwardError(400, "port_connect_failed", "tcp connect timed out");
+    }
+
+    int socket_error = 0;
+    socklen_t socket_error_len = static_cast<socklen_t>(sizeof(socket_error));
+    if (getsockopt(
+            socket,
+            SOL_SOCKET,
+            SO_ERROR,
+            reinterpret_cast<char*>(&socket_error),
+            &socket_error_len
+        ) != 0) {
+        set_socket_nonblocking(socket, false);
+        throw PortForwardError(400, "port_connect_failed", socket_error_message("getsockopt"));
+    }
+    set_socket_nonblocking(socket, false);
+    if (socket_error != 0) {
+#ifdef _WIN32
+        WSASetLastError(socket_error);
+#else
+        errno = socket_error;
+#endif
+        return false;
+    }
+    return true;
 }
 
 }  // namespace
@@ -165,7 +259,11 @@ SOCKET bind_port_forward_socket(const std::string& endpoint, const std::string& 
     return bound_socket;
 }
 
-SOCKET connect_port_forward_socket(const std::string& endpoint, const std::string& protocol) {
+SOCKET connect_port_forward_socket(
+    const std::string& endpoint,
+    const std::string& protocol,
+    unsigned long timeout_ms
+) {
     addrinfo* result = resolve_endpoint(endpoint, protocol, 0, "invalid_endpoint");
     SOCKET connected_socket = INVALID_SOCKET;
 
@@ -175,12 +273,31 @@ SOCKET connect_port_forward_socket(const std::string& endpoint, const std::strin
             continue;
         }
 
-        if (connect(
-                connected_socket,
-                current->ai_addr,
-                static_cast<int>(current->ai_addrlen)
-            ) == 0) {
-            break;
+        bool connected = false;
+        try {
+            if (protocol == "tcp") {
+                connected = tcp_connect_with_timeout(
+                    connected_socket,
+                    current->ai_addr,
+                    static_cast<socklen_t>(current->ai_addrlen),
+                    timeout_ms
+                );
+            } else {
+                connected =
+                    connect(
+                        connected_socket,
+                        current->ai_addr,
+                        static_cast<int>(current->ai_addrlen)
+                    ) == 0;
+            }
+        } catch (...) {
+            close_socket(connected_socket);
+            freeaddrinfo(result);
+            throw;
+        }
+        if (connected) {
+            freeaddrinfo(result);
+            return connected_socket;
         }
 
         close_socket(connected_socket);

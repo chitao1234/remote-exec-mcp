@@ -595,7 +595,7 @@ reconnecting-forward budgets are broker-owned.
 - On Windows XP-compatible C++ daemon targets, symlink entries inside directory transfers and import archives are skipped with warnings when preservation is unavailable; use `symlink_mode: "follow"` to copy regular-file and directory targets when the platform exposes them.
 - On C++ daemon targets, transfer compression is never used; the broker falls back automatically.
 - On C++ daemon targets, `forward_ports` uses the same daemon-private HTTP/1.1 Upgrade tunnel, both-side reconnect behavior, and broker-owned `forward_id` lifecycle as the Rust daemon.
-- On C++ daemon targets, v4 `TunnelReady.limits` is truthful for configured active TCP stream, UDP bind, and queued-byte limits. The daemon enforces retained session/listener, UDP bind, active TCP stream, queued-byte, worker-thread, and tunnel I/O timeout limits.
+- On C++ daemon targets, v4 `TunnelReady.limits` is truthful for configured active TCP stream, UDP bind, and queued-byte limits. The daemon enforces retained session/listener, UDP bind, active TCP stream, queued-byte, worker-thread, tunnel I/O timeout, and TCP connect timeout limits; active TCP stream limits count established streams rather than pending connect attempts.
 - On C++ daemon targets, recoverable peer abort/reset errors during forwarding surface as normal tool errors and do not terminate the daemon.
 - Do not assume hard links, sparse files, or special files transfer on C++ daemon targets; special files are skipped during export.
 

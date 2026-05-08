@@ -55,6 +55,7 @@ int main() {
         "port_forward_max_active_tcp_streams = 19\n"
         "port_forward_max_tunnel_queued_bytes = 2097152\n"
         "port_forward_tunnel_io_timeout_ms = 7000\n"
+        "port_forward_connect_timeout_ms = 8000\n"
         "yield_time_exec_command_default_ms = 15000\n"
         "yield_time_exec_command_max_ms = 60000\n"
         "yield_time_exec_command_min_ms = 500\n"
@@ -81,6 +82,7 @@ int main() {
     assert(config.port_forward_limits.max_active_tcp_streams == 19UL);
     assert(config.port_forward_limits.max_tunnel_queued_bytes == 2097152UL);
     assert(config.port_forward_limits.tunnel_io_timeout_ms == 7000UL);
+    assert(config.port_forward_limits.connect_timeout_ms == 8000UL);
     assert(config.yield_time.exec_command.default_ms == 15000UL);
     assert(config.yield_time.exec_command.max_ms == 60000UL);
     assert(config.yield_time.exec_command.min_ms == 500UL);
@@ -115,6 +117,7 @@ int main() {
     assert(sandbox_config.port_forward_limits.max_active_tcp_streams == DEFAULT_PORT_FORWARD_MAX_ACTIVE_TCP_STREAMS);
     assert(sandbox_config.port_forward_limits.max_tunnel_queued_bytes == DEFAULT_PORT_FORWARD_MAX_TUNNEL_QUEUED_BYTES);
     assert(sandbox_config.port_forward_limits.tunnel_io_timeout_ms == DEFAULT_PORT_FORWARD_TUNNEL_IO_TIMEOUT_MS);
+    assert(sandbox_config.port_forward_limits.connect_timeout_ms == DEFAULT_PORT_FORWARD_CONNECT_TIMEOUT_MS);
     assert(sandbox_config.sandbox_configured);
     assert(sandbox_config.sandbox.exec_cwd.allow.size() == 2);
     assert(sandbox_config.sandbox.exec_cwd.allow[0] == "/work");
@@ -156,6 +159,7 @@ int main() {
         "port_forward_max_active_tcp_streams",
         "port_forward_max_tunnel_queued_bytes",
         "port_forward_tunnel_io_timeout_ms",
+        "port_forward_connect_timeout_ms",
     };
     for (std::size_t index = 0;
          index < sizeof(invalid_limit_keys) / sizeof(invalid_limit_keys[0]);
