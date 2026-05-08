@@ -280,6 +280,8 @@ bool PortTunnelConnection::emit_session_udp_datagram(
     PortTunnelFrame frame = make_empty_frame(PortTunnelFrameType::UdpDatagram, stream_id);
     frame.meta = Json{{"peer", peer}}.dump();
     frame.data = data;
-    send_frame(frame);
+    if (!send_data_frame_or_limit_error(frame)) {
+        return false;
+    }
     return owns_session(session) && !closed_.load();
 }

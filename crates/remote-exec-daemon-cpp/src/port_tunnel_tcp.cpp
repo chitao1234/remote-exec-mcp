@@ -290,7 +290,10 @@ void PortTunnelConnection::tcp_read_loop(
         }
         PortTunnelFrame frame = make_empty_frame(PortTunnelFrameType::TcpData, stream_id);
         frame.data.assign(buffer.begin(), buffer.begin() + received);
-        send_frame(frame);
+        if (!send_data_frame_or_limit_error(frame)) {
+            mark_tcp_stream_closed(stream);
+            return;
+        }
     }
 }
 

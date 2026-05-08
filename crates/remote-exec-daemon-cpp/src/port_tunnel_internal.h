@@ -243,6 +243,7 @@ public:
           service_(service),
           closed_(false),
           generation_(0ULL),
+          queued_bytes_(0UL),
           next_daemon_stream_id_(2U) {}
 
     void run();
@@ -280,6 +281,7 @@ private:
     bool read_preface();
     bool read_frame(PortTunnelFrame* frame);
     void send_frame(const PortTunnelFrame& frame);
+    bool send_data_frame_or_limit_error(const PortTunnelFrame& frame);
     void handle_frame(const PortTunnelFrame& frame);
     void tunnel_open(const PortTunnelFrame& frame);
     void tunnel_close(const PortTunnelFrame& frame);
@@ -308,6 +310,7 @@ private:
     BasicMutex state_mutex_;
     std::atomic<bool> closed_;
     std::atomic<std::uint64_t> generation_;
+    std::atomic<unsigned long> queued_bytes_;
     std::shared_ptr<PortTunnelSession> session_;
     std::map<uint32_t, UniqueSocket> tcp_listeners_;
     std::map<uint32_t, std::shared_ptr<TunnelTcpStream> > tcp_streams_;

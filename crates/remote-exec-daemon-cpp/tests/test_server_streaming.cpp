@@ -856,6 +856,22 @@ static std::thread accept_and_hold_tcp_connections(SOCKET listener_socket, int c
     });
 }
 
+static std::thread accept_and_send_tcp_payload(
+    SOCKET listener_socket,
+    const std::vector<unsigned char>& payload
+) {
+    return std::thread([listener_socket, payload]() {
+        UniqueSocket accepted(accept(listener_socket, NULL, NULL));
+        assert(accepted.valid());
+        send_all_bytes(
+            accepted.get(),
+            reinterpret_cast<const char*>(payload.data()),
+            payload.size()
+        );
+        platform::sleep_ms(100UL);
+    });
+}
+
 static void assert_active_tcp_stream_limit_is_enforced_and_released(const fs::path& root) {
     PortForwardLimitConfig limits = default_port_forward_limit_config();
     limits.max_active_tcp_streams = 1UL;
@@ -940,6 +956,37 @@ static void assert_active_tcp_accept_limit_is_enforced_and_released(const fs::pa
     assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpAccept);
 
     close_tunnel(&client_socket, &server_thread);
+}
+
+static void assert_tunnel_queued_byte_limit_is_enforced(const fs::path& root) {
+    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    limits.max_tunnel_queued_bytes = 128UL;
+
+    AppState state;
+    initialize_state_with_port_forward_limits(state, root, limits);
+
+    UniqueSocket payload_listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
+    const std::string endpoint = socket_local_endpoint(payload_listener.get());
+    std::vector<unsigned char> payload(512U, 42U);
+    std::thread sender_thread = accept_and_send_tcp_payload(payload_listener.get(), payload);
+
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_tunnel(state, &client_socket, &server_thread);
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TcpConnect, 1U, Json{{"endpoint", endpoint}})
+    );
+    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpConnectOk);
+
+    assert_tunnel_error_code(
+        read_tunnel_frame(client_socket.get()),
+        "port_tunnel_limit_exceeded"
+    );
+
+    close_tunnel(&client_socket, &server_thread);
+    payload_listener.reset();
+    sender_thread.join();
 }
 
 static void assert_partial_tunnel_frame_times_out(const fs::path& root) {
@@ -1227,6 +1274,7 @@ int main() {
     assert_udp_bind_limit_is_enforced_and_released(root);
     assert_active_tcp_stream_limit_is_enforced_and_released(root);
     assert_active_tcp_accept_limit_is_enforced_and_released(root);
+    assert_tunnel_queued_byte_limit_is_enforced(root);
     assert_partial_tunnel_frame_times_out(root);
     assert_tunnel_tcp_connect_echoes_binary_data(state);
     assert_tunnel_udp_bind_emits_two_peer_datagrams(state);

@@ -1,5 +1,7 @@
 #include "port_tunnel_internal.h"
 
+#include <limits>
+
 #ifdef _WIN32
 struct TcpAcceptContext {
     std::shared_ptr<PortTunnelService> service;
@@ -268,6 +270,54 @@ void PortTunnelConnection::send_frame(const PortTunnelFrame& frame) {
         closed_.store(true);
         shutdown_socket(client_);
     }
+}
+
+bool PortTunnelConnection::send_data_frame_or_limit_error(const PortTunnelFrame& frame) {
+    const std::size_t charge =
+        PORT_TUNNEL_HEADER_LEN + frame.meta.size() + frame.data.size();
+    if (charge > static_cast<std::size_t>(std::numeric_limits<unsigned long>::max())) {
+        send_error(
+            frame.stream_id,
+            "port_tunnel_limit_exceeded",
+            "port tunnel queued byte limit reached"
+        );
+        return false;
+    }
+    const unsigned long charge_value = static_cast<unsigned long>(charge);
+    const unsigned long limit = service_->limits().max_tunnel_queued_bytes;
+    if (charge_value > limit) {
+        send_error(
+            frame.stream_id,
+            "port_tunnel_limit_exceeded",
+            "port tunnel queued byte limit reached"
+        );
+        return false;
+    }
+    unsigned long current = queued_bytes_.load();
+    for (;;) {
+        if (current > limit || current > limit - charge_value) {
+            send_error(
+                frame.stream_id,
+                "port_tunnel_limit_exceeded",
+                "port tunnel queued byte limit reached"
+            );
+            return false;
+        }
+        if (queued_bytes_.compare_exchange_weak(
+                current,
+                current + charge_value
+            )) {
+            break;
+        }
+    }
+    try {
+        send_frame(frame);
+    } catch (...) {
+        queued_bytes_.fetch_sub(charge_value);
+        throw;
+    }
+    queued_bytes_.fetch_sub(charge_value);
+    return !closed_.load();
 }
 
 void PortTunnelConnection::run() {
