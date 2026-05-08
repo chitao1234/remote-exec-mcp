@@ -42,6 +42,7 @@ pub async fn build_state(mut config: config::BrokerConfig) -> anyhow::Result<Bro
     Ok(BrokerState {
         enable_transfer_compression: config.enable_transfer_compression,
         disable_structured_content: config.disable_structured_content,
+        port_forward_limits: config.port_forward_limits,
         host_sandbox,
         sessions: SessionStore::default(),
         port_forwards: port_forward::PortForwardStore::default(),
@@ -208,6 +209,7 @@ mod tests {
             host_sandbox: None,
             enable_transfer_compression: true,
             disable_structured_content: false,
+            port_forward_limits: Default::default(),
             targets: BTreeMap::new(),
             local: Some(LocalTargetConfig {
                 default_workdir: tempdir.path().to_path_buf(),
@@ -216,6 +218,7 @@ mod tests {
                 pty: remote_exec_host::PtyMode::Auto,
                 default_shell: Some(missing_shell.to_string()),
                 yield_time: remote_exec_host::YieldTimeConfig::default(),
+                port_forward_limits: remote_exec_host::HostPortForwardLimits::default(),
                 experimental_apply_patch_target_encoding_autodetect: false,
             }),
         })

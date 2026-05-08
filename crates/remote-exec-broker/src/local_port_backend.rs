@@ -28,6 +28,7 @@ impl LocalPortClient {
                     pty: remote_exec_host::PtyMode::None,
                     default_shell: None,
                     yield_time: remote_exec_host::YieldTimeConfig::default(),
+                    port_forward_limits: remote_exec_host::HostPortForwardLimits::default(),
                     experimental_apply_patch_target_encoding_autodetect: false,
                     process_environment: remote_exec_host::ProcessEnvironment::capture_current(),
                 };

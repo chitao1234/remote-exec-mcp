@@ -104,6 +104,57 @@ async fn forward_ports_opens_lists_and_closes_local_tcp_forward() {
 }
 
 #[tokio::test]
+async fn forward_ports_rejects_open_when_forward_limit_is_reached() {
+    let fixture = support::spawners::spawn_broker_local_only_with_port_forward_limit(1).await;
+    let first = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "local",
+                "connect_side": "local",
+                "forwards": [{
+                    "listen_endpoint": "127.0.0.1:0",
+                    "connect_endpoint": "127.0.0.1:9",
+                    "protocol": "tcp"
+                }]
+            }),
+        )
+        .await;
+    let first_id = forward_id_from(&first);
+
+    let error = fixture
+        .call_tool_error(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "local",
+                "connect_side": "local",
+                "forwards": [{
+                    "listen_endpoint": "127.0.0.1:0",
+                    "connect_endpoint": "127.0.0.1:9",
+                    "protocol": "tcp"
+                }]
+            }),
+        )
+        .await;
+    assert!(
+        error.contains("port_forward_limit_exceeded"),
+        "unexpected error: {error}"
+    );
+
+    let _ = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "close",
+                "forward_ids": [first_id]
+            }),
+        )
+        .await;
+}
+
+#[tokio::test]
 async fn forward_ports_forwards_local_udp_datagrams() {
     let fixture = support::spawners::spawn_broker_local_only().await;
     let echo_socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();

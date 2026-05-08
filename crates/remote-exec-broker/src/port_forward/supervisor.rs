@@ -139,6 +139,7 @@ struct OpenListenSession {
 
 pub async fn open_forward(
     store: PortForwardStore,
+    limits: ForwardPortLimitSummary,
     listen_side: SideHandle,
     connect_side: SideHandle,
     spec: &ForwardPortSpec,
@@ -153,6 +154,7 @@ pub async fn open_forward(
                 store,
                 listen_endpoint,
                 connect_endpoint,
+                limits,
                 spec.clone(),
             )
             .await
@@ -164,6 +166,7 @@ pub async fn open_forward(
                 store,
                 listen_endpoint,
                 connect_endpoint,
+                limits,
                 spec.clone(),
             )
             .await
@@ -177,6 +180,7 @@ async fn open_tcp_forward(
     store: PortForwardStore,
     listen_endpoint: String,
     connect_endpoint: String,
+    limits: ForwardPortLimitSummary,
     spec: ForwardPortSpec,
 ) -> anyhow::Result<OpenedForward> {
     let forward_id = format!("fwd_{}", uuid::Uuid::new_v4().simple());
@@ -264,7 +268,7 @@ async fn open_tcp_forward(
                 connect_side.name().to_string(),
                 connect_endpoint,
                 spec.protocol,
-                default_forward_limit_summary(),
+                limits,
             ),
             listen_session,
             cancel,
@@ -280,6 +284,7 @@ async fn open_udp_forward(
     store: PortForwardStore,
     listen_endpoint: String,
     connect_endpoint: String,
+    limits: ForwardPortLimitSummary,
     spec: ForwardPortSpec,
 ) -> anyhow::Result<OpenedForward> {
     let forward_id = format!("fwd_{}", uuid::Uuid::new_v4().simple());
@@ -367,7 +372,7 @@ async fn open_udp_forward(
                 connect_side.name().to_string(),
                 connect_endpoint,
                 spec.protocol,
-                default_forward_limit_summary(),
+                limits,
             ),
             listen_session,
             cancel,
@@ -375,16 +380,6 @@ async fn open_udp_forward(
         },
         runtime,
     })
-}
-
-fn default_forward_limit_summary() -> ForwardPortLimitSummary {
-    ForwardPortLimitSummary {
-        max_active_tcp_streams: 256,
-        max_udp_peers: 256,
-        max_pending_tcp_bytes_per_stream: 256 * 1024,
-        max_pending_tcp_bytes_per_forward: 2 * 1024 * 1024,
-        max_tunnel_queued_bytes: 8 * 1024 * 1024,
-    }
 }
 
 fn spawn_forward(runtime: ForwardRuntime, store: super::store::PortForwardStore) -> JoinHandle<()> {

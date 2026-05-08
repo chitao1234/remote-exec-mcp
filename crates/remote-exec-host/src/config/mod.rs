@@ -37,6 +37,7 @@ pub struct HostRuntimeConfig {
     pub pty: PtyMode,
     pub default_shell: Option<String>,
     pub yield_time: YieldTimeConfig,
+    pub port_forward_limits: HostPortForwardLimits,
     pub experimental_apply_patch_target_encoding_autodetect: bool,
     pub process_environment: ProcessEnvironment,
 }
@@ -52,8 +53,63 @@ pub struct EmbeddedHostConfig {
     pub pty: PtyMode,
     pub default_shell: Option<String>,
     pub yield_time: YieldTimeConfig,
+    pub port_forward_limits: HostPortForwardLimits,
     pub experimental_apply_patch_target_encoding_autodetect: bool,
     pub process_environment: ProcessEnvironment,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(default)]
+pub struct HostPortForwardLimits {
+    pub max_tunnel_connections: usize,
+    pub max_retained_sessions: usize,
+    pub max_retained_listeners: usize,
+    pub max_udp_binds: usize,
+    pub max_active_tcp_streams: usize,
+    pub max_tunnel_queued_bytes: usize,
+}
+
+impl Default for HostPortForwardLimits {
+    fn default() -> Self {
+        Self {
+            max_tunnel_connections: 128,
+            max_retained_sessions: 64,
+            max_retained_listeners: 64,
+            max_udp_binds: 64,
+            max_active_tcp_streams: 1024,
+            max_tunnel_queued_bytes: 8 * 1024 * 1024,
+        }
+    }
+}
+
+impl HostPortForwardLimits {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.max_tunnel_connections > 0,
+            "port_forward_limits.max_tunnel_connections must be greater than zero"
+        );
+        anyhow::ensure!(
+            self.max_retained_sessions > 0,
+            "port_forward_limits.max_retained_sessions must be greater than zero"
+        );
+        anyhow::ensure!(
+            self.max_retained_listeners > 0,
+            "port_forward_limits.max_retained_listeners must be greater than zero"
+        );
+        anyhow::ensure!(
+            self.max_udp_binds > 0,
+            "port_forward_limits.max_udp_binds must be greater than zero"
+        );
+        anyhow::ensure!(
+            self.max_active_tcp_streams > 0,
+            "port_forward_limits.max_active_tcp_streams must be greater than zero"
+        );
+        anyhow::ensure!(
+            self.max_tunnel_queued_bytes > 0,
+            "port_forward_limits.max_tunnel_queued_bytes must be greater than zero"
+        );
+        Ok(())
+    }
 }
 
 impl EmbeddedHostConfig {
@@ -68,6 +124,7 @@ impl EmbeddedHostConfig {
             pty: self.pty,
             default_shell: self.default_shell,
             yield_time: self.yield_time,
+            port_forward_limits: self.port_forward_limits,
             experimental_apply_patch_target_encoding_autodetect: self
                 .experimental_apply_patch_target_encoding_autodetect,
             process_environment: self.process_environment,
@@ -100,6 +157,7 @@ impl HostRuntimeConfig {
         self.validate_windows_posix_root()?;
         validate_existing_directory(&self.normalized_default_workdir(), "default_workdir")?;
         self.yield_time.validate()?;
+        self.port_forward_limits.validate()?;
         Ok(())
     }
 }

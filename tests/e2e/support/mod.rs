@@ -388,6 +388,7 @@ expected_daemon_name = {expected_daemon_name}
             pty: remote_exec_daemon::config::PtyMode::Auto,
             default_shell: None,
             yield_time: remote_exec_daemon::config::YieldTimeConfig::default(),
+            port_forward_limits: remote_exec_daemon::config::HostPortForwardLimits::default(),
             experimental_apply_patch_target_encoding_autodetect: false,
             process_environment: remote_exec_daemon::config::ProcessEnvironment::capture_current(),
             tls: None,

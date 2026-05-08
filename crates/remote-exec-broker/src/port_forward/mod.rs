@@ -1,4 +1,5 @@
 mod events;
+mod limits;
 mod side;
 mod store;
 mod supervisor;
@@ -8,6 +9,7 @@ mod udp_bridge;
 
 use std::time::Duration;
 
+pub use limits::BrokerPortForwardLimits;
 pub use side::SideHandle;
 pub use store::{PortForwardFilter, PortForwardRecord, PortForwardStore, close_all, close_record};
 pub use supervisor::{OpenedForward, open_forward};

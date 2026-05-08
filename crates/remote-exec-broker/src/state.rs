@@ -9,6 +9,7 @@ use crate::{port_forward, session_store::SessionStore, target::TargetHandle};
 pub struct BrokerState {
     pub enable_transfer_compression: bool,
     pub disable_structured_content: bool,
+    pub port_forward_limits: port_forward::BrokerPortForwardLimits,
     pub host_sandbox: Option<CompiledFilesystemSandbox>,
     pub sessions: SessionStore,
     pub port_forwards: port_forward::PortForwardStore,

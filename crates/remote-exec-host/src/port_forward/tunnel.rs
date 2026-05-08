@@ -185,8 +185,15 @@ async fn tunnel_open_listen(
             tunnel
                 .state
                 .port_forward_sessions
-                .insert(session.clone())
-                .await;
+                .try_insert(
+                    session.clone(),
+                    tunnel
+                        .state
+                        .config
+                        .port_forward_limits
+                        .max_retained_sessions,
+                )
+                .await?;
             session
         }
     };
@@ -200,7 +207,7 @@ async fn tunnel_open_listen(
                 generation: meta.generation,
                 session_id: Some(session.id.clone()),
                 resume_timeout_ms: Some(super::RESUME_TIMEOUT.as_millis() as u64),
-                limits: default_tunnel_limit_summary(),
+                limits: tunnel_limit_summary(&tunnel),
             })?,
             data: Vec::new(),
         })
@@ -224,7 +231,7 @@ async fn tunnel_open_connect(
                 generation: meta.generation,
                 session_id: None,
                 resume_timeout_ms: None,
-                limits: default_tunnel_limit_summary(),
+                limits: tunnel_limit_summary(&tunnel),
             })?,
             data: Vec::new(),
         })
@@ -262,12 +269,19 @@ pub(super) async fn tunnel_session_open(
         ));
     }
     let session = new_session(&tunnel);
-    attach_session_to_tunnel(&session, &tunnel).await?;
     tunnel
         .state
         .port_forward_sessions
-        .insert(session.clone())
-        .await;
+        .try_insert(
+            session.clone(),
+            tunnel
+                .state
+                .config
+                .port_forward_limits
+                .max_retained_sessions,
+        )
+        .await?;
+    attach_session_to_tunnel(&session, &tunnel).await?;
     tunnel
         .send(Frame {
             frame_type: FrameType::SessionReady,
@@ -295,11 +309,12 @@ fn new_session(tunnel: &Arc<TunnelState>) -> Arc<SessionState> {
     })
 }
 
-fn default_tunnel_limit_summary() -> TunnelLimitSummary {
+fn tunnel_limit_summary(tunnel: &TunnelState) -> TunnelLimitSummary {
+    let limits = tunnel.state.config.port_forward_limits;
     TunnelLimitSummary {
-        max_active_tcp_streams: 256,
-        max_udp_peers: 256,
-        max_queued_bytes: 8 * 1024 * 1024,
+        max_active_tcp_streams: limits.max_active_tcp_streams as u64,
+        max_udp_peers: limits.max_udp_binds as u64,
+        max_queued_bytes: limits.max_tunnel_queued_bytes as u64,
     }
 }
 

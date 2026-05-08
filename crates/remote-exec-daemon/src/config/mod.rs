@@ -10,8 +10,8 @@ use serde::Deserialize;
 mod tests;
 
 pub use remote_exec_host::{
-    ProcessEnvironment, PtyMode, WindowsPtyBackendOverride, YieldTimeConfig, YieldTimeOperation,
-    YieldTimeOperationConfig,
+    HostPortForwardLimits, ProcessEnvironment, PtyMode, WindowsPtyBackendOverride, YieldTimeConfig,
+    YieldTimeOperation, YieldTimeOperationConfig,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
@@ -46,6 +46,8 @@ pub struct DaemonConfig {
     #[serde(default)]
     pub yield_time: YieldTimeConfig,
     #[serde(default)]
+    pub port_forward_limits: HostPortForwardLimits,
+    #[serde(default)]
     pub experimental_apply_patch_target_encoding_autodetect: bool,
     #[serde(skip, default = "ProcessEnvironment::capture_current")]
     pub process_environment: ProcessEnvironment,
@@ -78,6 +80,7 @@ pub struct EmbeddedDaemonConfig {
     pub pty: PtyMode,
     pub default_shell: Option<String>,
     pub yield_time: YieldTimeConfig,
+    pub port_forward_limits: HostPortForwardLimits,
     pub experimental_apply_patch_target_encoding_autodetect: bool,
     pub process_environment: ProcessEnvironment,
 }
@@ -94,6 +97,7 @@ impl EmbeddedDaemonConfig {
             pty: self.pty,
             default_shell: self.default_shell,
             yield_time: self.yield_time,
+            port_forward_limits: self.port_forward_limits,
             experimental_apply_patch_target_encoding_autodetect: self
                 .experimental_apply_patch_target_encoding_autodetect,
             process_environment: self.process_environment,
@@ -114,6 +118,7 @@ impl EmbeddedDaemonConfig {
             pty: self.pty,
             default_shell: self.default_shell,
             yield_time: self.yield_time,
+            port_forward_limits: self.port_forward_limits,
             experimental_apply_patch_target_encoding_autodetect: self
                 .experimental_apply_patch_target_encoding_autodetect,
             process_environment: self.process_environment,
@@ -134,6 +139,7 @@ impl From<EmbeddedHostConfig> for EmbeddedDaemonConfig {
             pty: value.pty,
             default_shell: value.default_shell,
             yield_time: value.yield_time,
+            port_forward_limits: value.port_forward_limits,
             experimental_apply_patch_target_encoding_autodetect: value
                 .experimental_apply_patch_target_encoding_autodetect,
             process_environment: value.process_environment,
@@ -159,6 +165,7 @@ impl DaemonConfig {
             pty: self.pty,
             default_shell: self.default_shell.clone(),
             yield_time: self.yield_time,
+            port_forward_limits: self.port_forward_limits,
             experimental_apply_patch_target_encoding_autodetect: self
                 .experimental_apply_patch_target_encoding_autodetect,
             process_environment: self.process_environment.clone(),
@@ -176,6 +183,7 @@ impl DaemonConfig {
             pty: self.pty,
             default_shell: self.default_shell,
             yield_time: self.yield_time,
+            port_forward_limits: self.port_forward_limits,
             experimental_apply_patch_target_encoding_autodetect: self
                 .experimental_apply_patch_target_encoding_autodetect,
             process_environment: self.process_environment,

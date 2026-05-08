@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use remote_exec_proto::port_tunnel::{
     Frame, FrameType, TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, TunnelCloseMeta,
-    TunnelForwardProtocol, TunnelOpenMeta, TunnelReadyMeta, TunnelRole, UPGRADE_TOKEN, read_frame,
-    write_frame, write_preface,
+    TunnelErrorMeta, TunnelForwardProtocol, TunnelOpenMeta, TunnelReadyMeta, TunnelRole,
+    UPGRADE_TOKEN, read_frame, write_frame, write_preface,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -129,6 +129,31 @@ async fn tunnel_open_ready_and_close_round_trip() {
 
     let closed = read_frame(&mut stream).await.unwrap();
     assert_eq!(closed.frame_type, FrameType::TunnelClosed);
+}
+
+#[tokio::test]
+async fn port_tunnel_rejects_retained_session_limit() {
+    let fixture = support::spawn::spawn_daemon_with_extra_config(
+        "builder-a",
+        r#"[port_forward_limits]
+max_retained_sessions = 1
+"#,
+    )
+    .await;
+
+    let mut first = open_tunnel(fixture.addr).await;
+    write_preface(&mut first).await.unwrap();
+    open_listen_tunnel(&mut first, "fwd_first").await;
+
+    let mut second = open_tunnel(fixture.addr).await;
+    write_preface(&mut second).await.unwrap();
+    write_tunnel_open(&mut second, "fwd_second").await;
+
+    let error = read_frame(&mut second).await.unwrap();
+    assert_eq!(error.frame_type, FrameType::Error);
+    assert_eq!(error.stream_id, 0);
+    let error_meta: TunnelErrorMeta = serde_json::from_slice(&error.meta).unwrap();
+    assert_eq!(error_meta.code, "port_tunnel_limit_exceeded");
 }
 
 #[tokio::test]
@@ -274,6 +299,35 @@ async fn terminal_port_tunnel_error_returns_fatal_error_frame_before_closing() {
     );
 
     wait_until_bindable(&endpoint).await;
+}
+
+async fn open_listen_tunnel(stream: &mut tokio::net::TcpStream, forward_id: &str) {
+    write_tunnel_open(stream, forward_id).await;
+    let ready = read_frame(stream).await.unwrap();
+    assert_eq!(ready.frame_type, FrameType::TunnelReady);
+}
+
+async fn write_tunnel_open(stream: &mut tokio::net::TcpStream, forward_id: &str) {
+    write_frame(
+        stream,
+        &Frame {
+            frame_type: FrameType::TunnelOpen,
+            flags: 0,
+            stream_id: 0,
+            meta: serde_json::to_vec(&TunnelOpenMeta {
+                forward_id: forward_id.to_string(),
+                role: TunnelRole::Listen,
+                side: "builder-a".to_string(),
+                generation: 1,
+                protocol: TunnelForwardProtocol::Tcp,
+                resume_session_id: None,
+            })
+            .unwrap(),
+            data: Vec::new(),
+        },
+    )
+    .await
+    .unwrap();
 }
 
 async fn open_tunnel(addr: SocketAddr) -> tokio::net::TcpStream {

@@ -3,9 +3,13 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use remote_exec_host::{EmbeddedHostConfig, ProcessEnvironment, PtyMode, YieldTimeConfig};
+use remote_exec_host::{
+    EmbeddedHostConfig, HostPortForwardLimits, ProcessEnvironment, PtyMode, YieldTimeConfig,
+};
 use remote_exec_proto::sandbox::FilesystemSandbox;
 use serde::Deserialize;
+
+use crate::port_forward::BrokerPortForwardLimits;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BrokerConfig {
@@ -21,6 +25,8 @@ pub struct BrokerConfig {
     pub enable_transfer_compression: bool,
     #[serde(default)]
     pub disable_structured_content: bool,
+    #[serde(default)]
+    pub port_forward_limits: BrokerPortForwardLimits,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -85,6 +91,8 @@ pub struct LocalTargetConfig {
     pub default_shell: Option<String>,
     #[serde(default)]
     pub yield_time: YieldTimeConfig,
+    #[serde(default)]
+    pub port_forward_limits: HostPortForwardLimits,
     #[serde(default)]
     pub experimental_apply_patch_target_encoding_autodetect: bool,
 }
@@ -176,6 +184,7 @@ impl LocalTargetConfig {
             pty: self.pty,
             default_shell: self.default_shell.clone(),
             yield_time: self.yield_time,
+            port_forward_limits: self.port_forward_limits,
             experimental_apply_patch_target_encoding_autodetect: self
                 .experimental_apply_patch_target_encoding_autodetect,
             process_environment: ProcessEnvironment::capture_current(),
@@ -207,6 +216,7 @@ impl BrokerConfig {
 
     pub(crate) fn validate(&self) -> anyhow::Result<()> {
         self.mcp.validate()?;
+        self.port_forward_limits.validate()?;
         anyhow::ensure!(
             !self.targets.contains_key("local"),
             "configured target name `local` is reserved for broker-host filesystem access"

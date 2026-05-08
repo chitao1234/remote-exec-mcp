@@ -10,8 +10,8 @@ pub mod state;
 pub mod transfer;
 
 pub use config::{
-    EmbeddedHostConfig, HostRuntimeConfig, ProcessEnvironment, PtyMode, WindowsPtyBackendOverride,
-    YieldTimeConfig, YieldTimeOperation, YieldTimeOperationConfig,
+    EmbeddedHostConfig, HostPortForwardLimits, HostRuntimeConfig, ProcessEnvironment, PtyMode,
+    WindowsPtyBackendOverride, YieldTimeConfig, YieldTimeOperation, YieldTimeOperationConfig,
 };
 pub use error::{HostRpcError, ImageError, ImageErrorKind, TransferError, TransferErrorKind};
 pub use state::{HostRuntimeState, build_runtime_state, target_info_response};

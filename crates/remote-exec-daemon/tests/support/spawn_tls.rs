@@ -57,6 +57,7 @@ async fn spawn_daemon_with_tls_pty_mode(
             pty,
             default_shell: None,
             yield_time: remote_exec_daemon::config::YieldTimeConfig::default(),
+            port_forward_limits: remote_exec_daemon::config::HostPortForwardLimits::default(),
             experimental_apply_patch_target_encoding_autodetect: false,
             process_environment: process_environment.clone(),
             tls: Some(remote_exec_daemon::config::TlsConfig {
@@ -149,6 +150,7 @@ pub async fn spawn_daemon_with_pinned_client_cert(
             pty: PtyMode::Auto,
             default_shell: None,
             yield_time: remote_exec_daemon::config::YieldTimeConfig::default(),
+            port_forward_limits: remote_exec_daemon::config::HostPortForwardLimits::default(),
             experimental_apply_patch_target_encoding_autodetect: false,
             process_environment: ProcessEnvironment::capture_current(),
             tls: Some(remote_exec_daemon::config::TlsConfig {

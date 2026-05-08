@@ -39,6 +39,21 @@ impl PortForwardStore {
         entries
     }
 
+    pub async fn open_count(&self) -> usize {
+        self.entries.read().await.len()
+    }
+
+    pub async fn side_pair_count(&self, listen_side: &str, connect_side: &str) -> usize {
+        self.entries
+            .read()
+            .await
+            .values()
+            .filter(|record| {
+                record.entry.listen_side == listen_side && record.entry.connect_side == connect_side
+            })
+            .count()
+    }
+
     pub async fn close(&self, forward_ids: &[String]) -> anyhow::Result<Vec<ForwardPortEntry>> {
         let _close_guard = self.close_lock.lock().await;
         let forward_ids = self.validated_unique_close_ids(forward_ids).await?;

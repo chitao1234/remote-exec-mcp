@@ -368,6 +368,36 @@ pub async fn spawn_broker_local_only() -> BrokerFixture {
     }
 }
 
+pub async fn spawn_broker_local_only_with_port_forward_limit(limit: usize) -> BrokerFixture {
+    let tempdir = tempfile::tempdir().unwrap();
+    let local_workdir = tempdir.path().join("local-work");
+    std::fs::create_dir_all(&local_workdir).unwrap();
+    let broker_config = tempdir.path().join("broker.toml");
+    write_broker_config(
+        &broker_config,
+        &[],
+        Some(&LocalBrokerConfig {
+            default_workdir: &local_workdir,
+            experimental_apply_patch_target_encoding_autodetect: false,
+            extra_config: None,
+        }),
+        None,
+        Some(&format!(
+            r#"[port_forward_limits]
+max_open_forwards_total = {limit}
+"#,
+        )),
+    );
+
+    let client = spawn_broker_child(&broker_config).await;
+
+    BrokerFixture {
+        _tempdir: tempdir,
+        client,
+        stub_state: stub_daemon_state("local", ExecWriteBehavior::Success, "local", true),
+    }
+}
+
 pub async fn spawn_streamable_http_broker_with_stub_daemon() -> HttpBrokerFixture {
     let tempdir = tempfile::tempdir().unwrap();
     let (daemon_addr, stub_state) = spawn_plain_http_stub_daemon().await;

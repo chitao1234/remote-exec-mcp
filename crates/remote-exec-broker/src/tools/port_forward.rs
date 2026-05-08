@@ -59,11 +59,13 @@ async fn open_forwards(
 
     let listen_side = state.forwarding_side(&listen_side_name).await?;
     let connect_side = state.forwarding_side(&connect_side_name).await?;
+    enforce_open_limits(state, &listen_side_name, &connect_side_name, forwards.len()).await?;
     let mut opened = Vec::with_capacity(forwards.len());
 
     for spec in &forwards {
         match open_forward(
             state.port_forwards.clone(),
+            state.port_forward_limits.public_summary(),
             listen_side.clone(),
             connect_side.clone(),
             spec,
@@ -97,6 +99,30 @@ async fn open_forwards(
     );
 
     finish_forward_ports(ForwardPortsAction::Open, result_entries)
+}
+
+async fn enforce_open_limits(
+    state: &crate::BrokerState,
+    listen_side: &str,
+    connect_side: &str,
+    requested_forwards: usize,
+) -> anyhow::Result<()> {
+    let limits = state.port_forward_limits;
+    anyhow::ensure!(
+        state.port_forwards.open_count().await + requested_forwards
+            <= limits.max_open_forwards_total,
+        "port_forward_limit_exceeded: broker open forward limit reached"
+    );
+    anyhow::ensure!(
+        state
+            .port_forwards
+            .side_pair_count(listen_side, connect_side)
+            .await
+            + requested_forwards
+            <= limits.max_forwards_per_side_pair,
+        "port_forward_limit_exceeded: broker side-pair forward limit reached"
+    );
+    Ok(())
 }
 
 async fn list_forwards(

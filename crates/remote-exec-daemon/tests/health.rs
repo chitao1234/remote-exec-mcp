@@ -3,7 +3,8 @@ mod support;
 use std::net::{Ipv4Addr, SocketAddr};
 
 use remote_exec_daemon::config::{
-    DaemonConfig, DaemonTransport, ProcessEnvironment, PtyMode, YieldTimeConfig,
+    DaemonConfig, DaemonTransport, HostPortForwardLimits, ProcessEnvironment, PtyMode,
+    YieldTimeConfig,
 };
 use remote_exec_proto::rpc::TargetInfoResponse;
 use reqwest::StatusCode;
@@ -24,6 +25,7 @@ fn startup_validation_config() -> DaemonConfig {
         pty: PtyMode::Auto,
         default_shell: None,
         yield_time: YieldTimeConfig::default(),
+        port_forward_limits: HostPortForwardLimits::default(),
         experimental_apply_patch_target_encoding_autodetect: false,
         process_environment: ProcessEnvironment::capture_current(),
         tls: None,
