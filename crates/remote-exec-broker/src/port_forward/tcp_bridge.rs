@@ -7,8 +7,9 @@ use remote_exec_proto::port_tunnel::{Frame, FrameType};
 use super::events::{ForwardLoopControl, ForwardSideEvent, TunnelRole, classify_transport_failure};
 use super::supervisor::{ForwardRuntime, open_connect_tunnel, reconnect_listen_tunnel};
 use super::tunnel::{
-    EndpointMeta, PortTunnel, TcpAcceptMeta, classify_recoverable_tunnel_event, decode_tunnel_meta,
-    encode_tunnel_meta, format_terminal_tunnel_error, is_retryable_transport_error,
+    EndpointMeta, PortTunnel, TcpAcceptMeta, classify_recoverable_tunnel_event,
+    decode_tunnel_error_frame, decode_tunnel_meta, encode_tunnel_meta,
+    format_terminal_tunnel_error, is_retryable_transport_error,
 };
 use super::{MAX_PENDING_TCP_BYTES_PER_FORWARD, MAX_PENDING_TCP_BYTES_PER_STREAM};
 
@@ -209,6 +210,26 @@ async fn run_tcp_forward_epoch(
                                         return Ok(control);
                                     }
                                 }
+                            }
+                        }
+                    }
+                    FrameType::Error => {
+                        if frame.stream_id == runtime.listen_session.listener_stream_id {
+                            return Err(format_terminal_tunnel_error(
+                                &decode_tunnel_error_frame(&frame),
+                            ))
+                            .context("listen-side tcp tunnel error");
+                        }
+                        if let Some(connect_stream_id) = listen_to_connect.remove(&frame.stream_id) {
+                            if let Some(mut stream) = connect_streams.remove(&connect_stream_id) {
+                                release_pending_budget(&mut pending_budget, &mut stream);
+                            }
+                            if let Err(err) = connect_tunnel.close_stream(connect_stream_id).await {
+                                return classify_transport_failure(
+                                    err,
+                                    "closing tcp connect stream after listen error",
+                                    TunnelRole::Connect,
+                                );
                             }
                         }
                     }
@@ -929,6 +950,135 @@ mod tests {
             control,
             ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)
         ));
+    }
+
+    #[tokio::test]
+    async fn tcp_listener_error_fails_forward() {
+        let (listen_broker_side, mut listen_daemon_side) = tokio::io::duplex(4096);
+        let listen_tunnel = Arc::new(PortTunnel::from_stream(listen_broker_side).unwrap());
+        let connect_io = ScriptedTunnelIo::default();
+        let connect_tunnel = Arc::new(PortTunnel::from_stream(connect_io).unwrap());
+        let runtime = tcp_test_runtime(listen_tunnel.clone(), connect_tunnel.clone());
+
+        write_frame(
+            &mut listen_daemon_side,
+            &Frame {
+                frame_type: FrameType::Error,
+                flags: 0,
+                stream_id: 1,
+                meta: serde_json::to_vec(&serde_json::json!({
+                    "code": "port_accept_failed",
+                    "message": "accept loop stopped",
+                    "fatal": false
+                }))
+                .unwrap(),
+                data: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            run_tcp_forward_epoch(&runtime, listen_tunnel, connect_tunnel),
+        )
+        .await
+        .expect("tcp epoch should finish after listener error");
+        let err = match result {
+            Ok(_) => panic!("listener stream error should fail the forward"),
+            Err(err) => err,
+        };
+        assert_eq!(
+            format!("{err:#}"),
+            "listen-side tcp tunnel error: port_accept_failed: accept loop stopped"
+        );
+    }
+
+    #[tokio::test]
+    async fn tcp_accepted_stream_error_closes_pair_without_failing_forward() {
+        let (listen_broker_side, mut listen_daemon_side) = tokio::io::duplex(4096);
+        let listen_tunnel = Arc::new(PortTunnel::from_stream(listen_broker_side).unwrap());
+        let connect_io = ScriptedTunnelIo::default();
+        let connect_tunnel = Arc::new(PortTunnel::from_stream(connect_io.clone()).unwrap());
+        let runtime = tcp_test_runtime(listen_tunnel.clone(), connect_tunnel.clone());
+        let cancel = runtime.cancel.clone();
+
+        let epoch = tokio::spawn({
+            let listen_tunnel = listen_tunnel.clone();
+            let connect_tunnel = connect_tunnel.clone();
+            async move { run_tcp_forward_epoch(&runtime, listen_tunnel, connect_tunnel).await }
+        });
+
+        write_frame(
+            &mut listen_daemon_side,
+            &Frame {
+                frame_type: FrameType::TcpAccept,
+                flags: 0,
+                stream_id: 11,
+                meta: serde_json::to_vec(&serde_json::json!({
+                    "listener_stream_id": 1
+                }))
+                .unwrap(),
+                data: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+        connect_io
+            .wait_for_written_frame(FrameType::TcpConnect, 1)
+            .await;
+
+        write_frame(
+            &mut listen_daemon_side,
+            &Frame {
+                frame_type: FrameType::Error,
+                flags: 0,
+                stream_id: 11,
+                meta: serde_json::to_vec(&serde_json::json!({
+                    "code": "port_read_failed",
+                    "message": "accepted stream read failed",
+                    "fatal": false
+                }))
+                .unwrap(),
+                data: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+        connect_io.wait_for_written_frame(FrameType::Close, 1).await;
+
+        cancel.cancel();
+
+        let control = tokio::time::timeout(Duration::from_secs(1), epoch)
+            .await
+            .expect("tcp epoch should remain running until cancellation")
+            .unwrap()
+            .expect("accepted stream error should not fail the forward");
+        assert!(matches!(control, ForwardLoopControl::Cancelled));
+    }
+
+    fn tcp_test_runtime(
+        listen_tunnel: Arc<PortTunnel>,
+        connect_tunnel: Arc<PortTunnel>,
+    ) -> ForwardRuntime {
+        let listen_session = Arc::new(ListenSessionControl {
+            side: SideHandle::local(),
+            session_id: "test-session".to_string(),
+            listener_stream_id: 1,
+            resume_timeout: Duration::from_secs(30),
+            current_tunnel: TokioMutex::new(Some(listen_tunnel)),
+            op_lock: TokioMutex::new(()),
+        });
+        ForwardRuntime {
+            forward_id: "fwd_test".to_string(),
+            listen_side: SideHandle::local(),
+            connect_side: SideHandle::local(),
+            protocol: PublicForwardPortProtocol::Tcp,
+            connect_endpoint: "127.0.0.1:1".to_string(),
+            listen_session,
+            initial_connect_tunnel: connect_tunnel,
+            cancel: CancellationToken::new(),
+        }
     }
 
     async fn wait_until_send_fails(tunnel: &PortTunnel) {

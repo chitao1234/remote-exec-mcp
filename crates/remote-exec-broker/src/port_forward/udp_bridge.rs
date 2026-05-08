@@ -11,7 +11,8 @@ use super::events::{ForwardLoopControl, ForwardSideEvent, TunnelRole, classify_t
 use super::supervisor::{ForwardRuntime, open_connect_tunnel, reconnect_listen_tunnel};
 use super::tunnel::{
     EndpointMeta, PortTunnel, UdpDatagramMeta, classify_recoverable_tunnel_event,
-    decode_tunnel_meta, encode_tunnel_meta, format_terminal_tunnel_error,
+    decode_tunnel_error_frame, decode_tunnel_meta, encode_tunnel_meta,
+    format_terminal_tunnel_error,
 };
 use super::{
     MAX_UDP_CONNECTORS_PER_FORWARD, UDP_CONNECTOR_IDLE_SWEEP_INTERVAL, UDP_CONNECTOR_IDLE_TIMEOUT,
@@ -147,6 +148,12 @@ async fn run_udp_forward_epoch(
                         }
                     }
                     FrameType::Close => return Ok(ForwardLoopControl::Cancelled),
+                    FrameType::Error if frame.stream_id == runtime.listen_session.listener_stream_id => {
+                        return Err(format_terminal_tunnel_error(
+                            &decode_tunnel_error_frame(&frame),
+                        ))
+                        .context("listen-side udp tunnel error");
+                    }
                     _ => {}
                 }
             }
@@ -603,6 +610,48 @@ mod tests {
             control,
             ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)
         ));
+    }
+
+    #[tokio::test]
+    async fn udp_listener_error_fails_forward() {
+        let (listen_broker_side, mut listen_daemon_side) = tokio::io::duplex(4096);
+        let listen_tunnel = Arc::new(PortTunnel::from_stream(listen_broker_side).unwrap());
+        let connect_io = ScriptedTunnelIo::default();
+        let connect_tunnel = Arc::new(PortTunnel::from_stream(connect_io).unwrap());
+        let runtime = udp_test_runtime(listen_tunnel.clone(), connect_tunnel.clone());
+
+        write_frame(
+            &mut listen_daemon_side,
+            &Frame {
+                frame_type: FrameType::Error,
+                flags: 0,
+                stream_id: 1,
+                meta: serde_json::to_vec(&serde_json::json!({
+                    "code": "port_read_failed",
+                    "message": "udp read loop stopped",
+                    "fatal": false
+                }))
+                .unwrap(),
+                data: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            run_udp_forward_epoch(&runtime, listen_tunnel, connect_tunnel),
+        )
+        .await
+        .expect("udp epoch should finish after listener error");
+        let err = match result {
+            Ok(_) => panic!("listener stream error should fail the forward"),
+            Err(err) => err,
+        };
+        assert_eq!(
+            format!("{err:#}"),
+            "listen-side udp tunnel error: port_read_failed: udp read loop stopped"
+        );
     }
 
     fn udp_test_runtime(
