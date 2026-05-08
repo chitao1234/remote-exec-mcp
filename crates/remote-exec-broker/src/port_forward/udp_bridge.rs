@@ -9,6 +9,7 @@ use remote_exec_proto::public::ForwardPortSideRole;
 use tokio::sync::Mutex;
 
 use super::events::{ForwardLoopControl, ForwardSideEvent, TunnelRole, classify_transport_failure};
+use super::generation::StreamIdAllocator;
 use super::supervisor::{
     ForwardRuntime, open_data_tunnel, reconnect_connect_tunnel, reconnect_listen_tunnel,
 };
@@ -100,7 +101,7 @@ async fn run_udp_forward_epoch(
     let connector_by_peer: Arc<Mutex<HashMap<String, UdpPeerConnector>>> =
         Arc::new(Mutex::new(HashMap::new()));
     let peer_by_connector: Arc<Mutex<HashMap<u32, String>>> = Arc::new(Mutex::new(HashMap::new()));
-    let mut next_connector_stream_id = 3;
+    let mut connector_stream_ids = StreamIdAllocator::new_odd_from(3);
     let mut sweep = tokio::time::interval(UDP_CONNECTOR_IDLE_SWEEP_INTERVAL);
     sweep.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -135,7 +136,7 @@ async fn run_udp_forward_epoch(
                             &connect_tunnel,
                             &connector_by_peer,
                             &peer_by_connector,
-                            &mut next_connector_stream_id,
+                            &mut connector_stream_ids,
                             &connector_bind_endpoint,
                             datagram.peer.clone(),
                         ).await {
@@ -256,7 +257,7 @@ async fn udp_connector_stream_id(
     connect_tunnel: &Arc<PortTunnel>,
     connector_by_peer: &Arc<Mutex<HashMap<String, UdpPeerConnector>>>,
     peer_by_connector: &Arc<Mutex<HashMap<u32, String>>>,
-    next_connector_stream_id: &mut u32,
+    connector_stream_ids: &mut StreamIdAllocator,
     connector_bind_endpoint: &str,
     peer: String,
 ) -> anyhow::Result<u32> {
@@ -267,8 +268,10 @@ async fn udp_connector_stream_id(
 
     evict_udp_connector_if_needed(connect_tunnel, connector_by_peer, peer_by_connector).await;
 
-    let stream_id = *next_connector_stream_id;
-    *next_connector_stream_id = next_connector_stream_id.checked_add(2).unwrap_or(1);
+    let stream_id = connector_stream_ids.next().ok_or_else(|| {
+        debug_assert!(connector_stream_ids.needs_generation_rotation());
+        anyhow::anyhow!("port tunnel stream id generation exhausted")
+    })?;
     connect_tunnel
         .send(Frame {
             frame_type: FrameType::UdpBind,
@@ -520,12 +523,13 @@ mod tests {
             .map(|(peer, connector)| (peer.clone(), connector.stream_id))
             .unwrap();
 
-        let mut next_connector_stream_id = ((MAX_UDP_CONNECTORS_PER_FORWARD as u32) * 2) + 3;
+        let mut connector_stream_ids =
+            StreamIdAllocator::new_odd_from(((MAX_UDP_CONNECTORS_PER_FORWARD as u32) * 2) + 3);
         let created_stream_id = udp_connector_stream_id(
             &Arc::new(tunnel),
             &connector_by_peer,
             &peer_by_connector,
-            &mut next_connector_stream_id,
+            &mut connector_stream_ids,
             "127.0.0.1:0",
             "127.0.0.1:65535".to_string(),
         )

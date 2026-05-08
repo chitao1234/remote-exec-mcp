@@ -157,6 +157,61 @@ max_retained_sessions = 1
 }
 
 #[tokio::test]
+async fn port_tunnel_rejects_old_generation_frames() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let mut stream = open_tunnel(fixture.addr).await;
+
+    write_preface(&mut stream).await.unwrap();
+    write_frame(
+        &mut stream,
+        &Frame {
+            frame_type: FrameType::TunnelOpen,
+            flags: 0,
+            stream_id: 0,
+            meta: serde_json::to_vec(&TunnelOpenMeta {
+                forward_id: "fwd_test".to_string(),
+                role: TunnelRole::Listen,
+                side: "builder-a".to_string(),
+                generation: 2,
+                protocol: TunnelForwardProtocol::Tcp,
+                resume_session_id: None,
+            })
+            .unwrap(),
+            data: Vec::new(),
+        },
+    )
+    .await
+    .unwrap();
+    let ready = read_frame(&mut stream).await.unwrap();
+    assert_eq!(ready.frame_type, FrameType::TunnelReady);
+
+    write_frame(
+        &mut stream,
+        &Frame {
+            frame_type: FrameType::TunnelClose,
+            flags: 0,
+            stream_id: 0,
+            meta: serde_json::to_vec(&TunnelCloseMeta {
+                forward_id: "fwd_test".to_string(),
+                generation: 1,
+                reason: "stale_close".to_string(),
+            })
+            .unwrap(),
+            data: Vec::new(),
+        },
+    )
+    .await
+    .unwrap();
+
+    let error = read_frame(&mut stream).await.unwrap();
+    assert_eq!(error.frame_type, FrameType::Error);
+    assert_eq!(error.stream_id, 0);
+    let error_meta: TunnelErrorMeta = serde_json::from_slice(&error.meta).unwrap();
+    assert_eq!(error_meta.code, "port_tunnel_generation_mismatch");
+    assert_eq!(error_meta.generation, Some(2));
+}
+
+#[tokio::test]
 async fn dropping_port_tunnel_releases_tcp_listener_when_tunnel_closes() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let mut stream = open_tunnel(fixture.addr).await;

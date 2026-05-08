@@ -8,7 +8,7 @@ mod udp;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicU32, AtomicU64};
 use std::time::Duration;
 
 use remote_exec_proto::port_tunnel::Frame;
@@ -37,6 +37,7 @@ struct TunnelState {
     udp_sockets: Mutex<HashMap<u32, Arc<UdpSocket>>>,
     stream_cancels: Mutex<HashMap<u32, CancellationToken>>,
     next_daemon_stream_id: AtomicU32,
+    generation: AtomicU64,
     attached_session: Mutex<Option<Arc<session::SessionState>>>,
 }
 
@@ -66,6 +67,8 @@ struct ErrorMeta {
     code: String,
     message: String,
     fatal: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generation: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]

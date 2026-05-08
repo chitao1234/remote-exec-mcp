@@ -1,5 +1,6 @@
 use std::io::ErrorKind;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use crate::{AppState, HostRpcError};
 use remote_exec_proto::port_tunnel::{
@@ -39,6 +40,7 @@ where
         udp_sockets: Mutex::new(std::collections::HashMap::new()),
         stream_cancels: Mutex::new(std::collections::HashMap::new()),
         next_daemon_stream_id: std::sync::atomic::AtomicU32::new(2),
+        generation: std::sync::atomic::AtomicU64::new(0),
         attached_session: Mutex::new(None),
     });
     let writer_cancel = tunnel.cancel.clone();
@@ -150,6 +152,7 @@ pub(super) async fn tunnel_open(
         ));
     }
     let meta: TunnelOpenMeta = decode_frame_meta(&frame)?;
+    tunnel.generation.store(meta.generation, Ordering::Release);
     match meta.role {
         TunnelRole::Listen => tunnel_open_listen(tunnel, meta).await,
         TunnelRole::Connect => tunnel_open_connect(tunnel, meta).await,
@@ -197,6 +200,7 @@ async fn tunnel_open_listen(
             session
         }
     };
+    session.generation.store(meta.generation, Ordering::Release);
     attach_session_to_tunnel(&session, &tunnel).await?;
     tunnel
         .send(Frame {
@@ -246,6 +250,7 @@ async fn tunnel_close(tunnel: Arc<TunnelState>, frame: Frame) -> Result<(), Host
         ));
     }
     let meta: TunnelCloseMeta = decode_frame_meta(&frame)?;
+    ensure_tunnel_generation(&tunnel, meta.generation)?;
     close_attached_session(&tunnel, super::error::SessionCloseMode::GracefulClose).await;
     tunnel
         .send(Frame {
@@ -306,6 +311,7 @@ fn new_session(tunnel: &Arc<TunnelState>) -> Arc<SessionState> {
         retained_listener: Mutex::new(None),
         retained_udp_bind: Mutex::new(None),
         next_daemon_stream_id: std::sync::atomic::AtomicU32::new(2),
+        generation: std::sync::atomic::AtomicU64::new(0),
     })
 }
 
@@ -360,6 +366,22 @@ pub(super) async fn tunnel_session_resume(
     reactivate_retained_udp_bind(&session).await
 }
 
+fn ensure_tunnel_generation(
+    tunnel: &TunnelState,
+    frame_generation: u64,
+) -> Result<(), HostRpcError> {
+    let current_generation = tunnel.generation.load(Ordering::Acquire);
+    if frame_generation != current_generation {
+        return Err(rpc_error(
+            "port_tunnel_generation_mismatch",
+            format!(
+                "frame generation `{frame_generation}` does not match tunnel generation `{current_generation}`"
+            ),
+        ));
+    }
+    Ok(())
+}
+
 pub(super) async fn tunnel_mode(tunnel: &Arc<TunnelState>) -> TunnelMode {
     match explicit_session(tunnel).await {
         Some(session) => TunnelMode::Session(session),
@@ -378,6 +400,7 @@ pub(super) async fn send_tunnel_error(
         code: code.into(),
         message: message.into(),
         fatal,
+        generation: Some(tunnel.generation.load(Ordering::Acquire)),
     })?;
     tunnel
         .send(Frame {

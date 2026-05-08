@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicU32, AtomicU64};
 use std::time::Instant;
 
 use remote_exec_proto::port_tunnel::{Frame, FrameType};
@@ -25,6 +25,7 @@ pub(super) struct SessionState {
     pub(super) retained_listener: Mutex<Option<RetainedListener>>,
     pub(super) retained_udp_bind: Mutex<Option<RetainedUdpBind>>,
     pub(super) next_daemon_stream_id: AtomicU32,
+    pub(super) generation: AtomicU64,
 }
 
 pub(super) struct AttachmentState {
@@ -249,6 +250,7 @@ pub(super) async fn send_tunnel_error_with_sender(
         code: code.into(),
         message: message.into(),
         fatal,
+        generation: None,
     })?;
     tx.send(Frame {
         frame_type: FrameType::Error,

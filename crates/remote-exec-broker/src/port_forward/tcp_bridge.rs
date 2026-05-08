@@ -6,6 +6,7 @@ use remote_exec_proto::port_tunnel::{Frame, FrameType};
 use remote_exec_proto::public::ForwardPortSideRole;
 
 use super::events::{ForwardLoopControl, ForwardSideEvent, TunnelRole, classify_transport_failure};
+use super::generation::StreamIdAllocator;
 use super::supervisor::{
     ForwardRuntime, open_data_tunnel, reconnect_connect_tunnel, reconnect_listen_tunnel,
 };
@@ -101,7 +102,7 @@ async fn run_tcp_forward_epoch(
     let mut listen_to_connect = HashMap::<u32, u32>::new();
     let mut connect_streams = HashMap::<u32, TcpConnectStream>::new();
     let mut pending_budget = PendingTcpBudget::default();
-    let mut next_connect_stream_id = 1u32;
+    let mut connect_stream_ids = StreamIdAllocator::new_odd();
 
     loop {
         tokio::select! {
@@ -123,8 +124,19 @@ async fn run_tcp_forward_epoch(
                 match frame.frame_type {
                     FrameType::TcpAccept => {
                         let accept: TcpAcceptMeta = decode_tunnel_meta(&frame)?;
-                        let connect_stream_id = next_connect_stream_id;
-                        next_connect_stream_id = next_connect_stream_id.checked_add(2).unwrap_or(1);
+                        let Some(connect_stream_id) = connect_stream_ids.next() else {
+                            debug_assert!(connect_stream_ids.needs_generation_rotation());
+                            let _ = listen_tunnel.close_stream(frame.stream_id).await;
+                            close_active_tcp_listen_streams(
+                                runtime,
+                                &listen_tunnel,
+                                &mut listen_to_connect,
+                                &mut connect_streams,
+                                &mut pending_budget,
+                            )
+                            .await?;
+                            return Ok(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect));
+                        };
                         if let Err(err) = connect_tunnel.send(Frame {
                             frame_type: FrameType::TcpConnect,
                             flags: 0,

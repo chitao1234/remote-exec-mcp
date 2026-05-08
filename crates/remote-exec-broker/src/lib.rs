@@ -21,3 +21,13 @@ pub use target::{CachedDaemonInfo, TargetHandle};
 pub fn install_crypto_provider() {
     broker_tls::install_crypto_provider();
 }
+
+#[cfg(test)]
+#[test]
+fn stream_id_allocator_rotates_before_wrap() {
+    let mut allocator = port_forward::generation::StreamIdAllocator::new_odd();
+    allocator.set_next_for_test(u32::MAX - 2);
+    assert_eq!(allocator.next().unwrap(), u32::MAX - 2);
+    assert!(allocator.next().is_none());
+    assert!(allocator.needs_generation_rotation());
+}
