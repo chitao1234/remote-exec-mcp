@@ -68,6 +68,7 @@ allow_login_shell = true
 #max_udp_binds = 64
 #max_active_tcp_streams = 1024
 #max_tunnel_queued_bytes = 8388608
+#connect_timeout_ms = 10000
 
 # Optional static path sandbox. Missing `allow` or `allow = []` means "allow all",
 # then `deny` can carve out exclusions.

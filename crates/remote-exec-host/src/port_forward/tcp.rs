@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use remote_exec_proto::port_forward::{ensure_nonzero_connect_endpoint, normalize_endpoint};
 use remote_exec_proto::port_tunnel::{Frame, FrameType};
@@ -20,6 +21,18 @@ use super::session::{
 use super::tunnel::send_tunnel_error;
 use super::tunnel::tunnel_mode;
 use super::{EndpointMeta, EndpointOkMeta, READ_BUF_SIZE, TcpAcceptMeta, TunnelMode, TunnelState};
+
+async fn tcp_connect_with_timeout(
+    tunnel: &TunnelState,
+    endpoint: &str,
+) -> Result<TcpStream, HostRpcError> {
+    let connect_timeout =
+        Duration::from_millis(tunnel.state.config.port_forward_limits.connect_timeout_ms);
+    tokio::time::timeout(connect_timeout, TcpStream::connect(endpoint))
+        .await
+        .map_err(|_| rpc_error("port_connect_failed", "tcp connect timed out"))?
+        .map_err(|err| rpc_error("port_connect_failed", err.to_string()))
+}
 
 pub(super) async fn tunnel_tcp_listen(
     tunnel: Arc<TunnelState>,
@@ -338,9 +351,7 @@ pub(super) async fn tunnel_tcp_connect(
     let meta: EndpointMeta = decode_frame_meta(&frame)?;
     let endpoint = ensure_nonzero_connect_endpoint(&meta.endpoint)
         .map_err(|err| rpc_error("invalid_endpoint", err.to_string()))?;
-    let stream = TcpStream::connect(endpoint.as_str())
-        .await
-        .map_err(|err| rpc_error("port_connect_failed", err.to_string()))?;
+    let stream = tcp_connect_with_timeout(&tunnel, endpoint.as_str()).await?;
     let stream_permit = tunnel
         .state
         .port_forward_limiter
@@ -391,9 +402,7 @@ pub(super) async fn tunnel_tcp_connect_transport_owned(
     let meta: EndpointMeta = decode_frame_meta(&frame)?;
     let endpoint = ensure_nonzero_connect_endpoint(&meta.endpoint)
         .map_err(|err| rpc_error("invalid_endpoint", err.to_string()))?;
-    let stream = TcpStream::connect(endpoint.as_str())
-        .await
-        .map_err(|err| rpc_error("port_connect_failed", err.to_string()))?;
+    let stream = tcp_connect_with_timeout(&tunnel, endpoint.as_str()).await?;
     let stream_permit = tunnel
         .state
         .port_forward_limiter

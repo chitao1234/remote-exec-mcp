@@ -373,8 +373,10 @@ mod port_tunnel_tests {
             max_active_tcp_streams: 3,
             max_udp_binds: 5,
             max_tunnel_queued_bytes: 4096,
+            connect_timeout_ms: 7_000,
             ..crate::HostPortForwardLimits::default()
         });
+        assert_eq!(state.config.port_forward_limits.connect_timeout_ms, 7_000);
         let mut broker_side = start_tunnel(state).await;
 
         write_frame(

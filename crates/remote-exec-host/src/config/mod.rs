@@ -67,6 +67,7 @@ pub struct HostPortForwardLimits {
     pub max_udp_binds: usize,
     pub max_active_tcp_streams: usize,
     pub max_tunnel_queued_bytes: usize,
+    pub connect_timeout_ms: u64,
 }
 
 impl Default for HostPortForwardLimits {
@@ -78,6 +79,7 @@ impl Default for HostPortForwardLimits {
             max_udp_binds: 64,
             max_active_tcp_streams: 1024,
             max_tunnel_queued_bytes: 8 * 1024 * 1024,
+            connect_timeout_ms: 10_000,
         }
     }
 }
@@ -107,6 +109,10 @@ impl HostPortForwardLimits {
         anyhow::ensure!(
             self.max_tunnel_queued_bytes > 0,
             "port_forward_limits.max_tunnel_queued_bytes must be greater than zero"
+        );
+        anyhow::ensure!(
+            self.connect_timeout_ms > 0,
+            "port_forward_limits.connect_timeout_ms must be greater than zero"
         );
         Ok(())
     }
