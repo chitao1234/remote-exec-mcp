@@ -119,6 +119,9 @@ void PortTunnelService::udp_read_loop(
             }
             return;
         }
+        if (udp_socket_closed(socket_value) || session_is_unavailable(session)) {
+            return;
+        }
         if (!connection->owns_session(session)) {
             continue;
         }
@@ -138,9 +141,25 @@ void PortTunnelService::udp_read_loop(
 
 void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
     const std::string endpoint = normalize_port_forward_endpoint(frame_meta_string(frame, "endpoint"));
-    std::shared_ptr<TunnelUdpSocket> socket_value(
-        new TunnelUdpSocket(bind_port_forward_socket(endpoint, "udp"))
-    );
+    if (!service_->try_acquire_udp_bind()) {
+        throw PortForwardError(
+            400,
+            "port_tunnel_limit_exceeded",
+            "port tunnel udp bind limit reached"
+        );
+    }
+
+    std::shared_ptr<TunnelUdpSocket> socket_value;
+    try {
+        socket_value.reset(new TunnelUdpSocket(
+            bind_port_forward_socket(endpoint, "udp"),
+            service_,
+            true
+        ));
+    } catch (...) {
+        service_->release_udp_bind();
+        throw;
+    }
     const std::string bound_endpoint = socket_local_endpoint(socket_value->socket.get());
 
     if (session_mode_active()) {
@@ -190,6 +209,9 @@ void PortTunnelConnection::udp_read_loop_transport_owned(
             if (!udp_socket_closed(socket_value)) {
                 send_error(stream_id, "port_read_failed", socket_error_message("recvfrom"));
             }
+            return;
+        }
+        if (udp_socket_closed(socket_value)) {
             return;
         }
         PortTunnelFrame frame = make_empty_frame(PortTunnelFrameType::UdpDatagram, stream_id);

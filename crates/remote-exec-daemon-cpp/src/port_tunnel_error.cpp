@@ -207,16 +207,28 @@ bool PortTunnelConnection::accept_session_tcp_stream(
     const std::string& peer
 ) {
     uint32_t stream_id = 0U;
+    if (!service_->try_acquire_active_tcp_stream()) {
+        send_error(
+            listener_stream_id,
+            "port_tunnel_limit_exceeded",
+            "port tunnel active tcp stream limit reached"
+        );
+        return false;
+    }
+
     {
         BasicLockGuard lock(session->mutex);
         if (session->closed || session->expired) {
+            service_->release_active_tcp_stream();
             return false;
         }
         stream_id = session->next_daemon_stream_id;
         session->next_daemon_stream_id += 2U;
     }
 
-    std::shared_ptr<TunnelTcpStream> stream(new TunnelTcpStream(accepted_socket.release()));
+    std::shared_ptr<TunnelTcpStream> stream(
+        new TunnelTcpStream(accepted_socket.release(), service_, true)
+    );
     {
         BasicLockGuard lock(state_mutex_);
         if (closed_.load() || session_.get() != session.get()) {

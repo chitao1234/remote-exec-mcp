@@ -35,51 +35,86 @@ extern const std::size_t READ_BUF_SIZE;
 extern const unsigned long RETAINED_SOCKET_POLL_TIMEOUT_MS;
 extern const unsigned long RESUME_TIMEOUT_MS;
 
+class PortTunnelConnection;
+class PortTunnelService;
+
 enum class PortTunnelCloseMode {
     RetryableDetach,
     TerminalFailure,
 };
 
 struct TunnelTcpStream {
-    explicit TunnelTcpStream(SOCKET socket_value) : socket(socket_value), closed(false) {}
+    TunnelTcpStream(
+        SOCKET socket_value,
+        const std::shared_ptr<PortTunnelService>& service_value,
+        bool active_stream_budget
+    ) : socket(socket_value),
+        service(service_value),
+        closed(false),
+        active_stream_budget_acquired(active_stream_budget) {}
 
     UniqueSocket socket;
+    std::weak_ptr<PortTunnelService> service;
     BasicMutex mutex;
     bool closed;
+    bool active_stream_budget_acquired;
 };
 
 struct TunnelUdpSocket {
-    explicit TunnelUdpSocket(SOCKET socket_value) : socket(socket_value), closed(false) {}
+    TunnelUdpSocket(
+        SOCKET socket_value,
+        const std::shared_ptr<PortTunnelService>& service_value,
+        bool udp_bind_budget
+    ) : socket(socket_value),
+        service(service_value),
+        closed(false),
+        udp_bind_budget_acquired(udp_bind_budget) {}
 
     UniqueSocket socket;
+    std::weak_ptr<PortTunnelService> service;
     BasicMutex mutex;
     bool closed;
+    bool udp_bind_budget_acquired;
 };
 
 struct RetainedTcpListener {
-    RetainedTcpListener(uint32_t stream_id_value, SOCKET listener_socket)
-        : stream_id(stream_id_value), listener(listener_socket), closed(false) {}
+    RetainedTcpListener(
+        uint32_t stream_id_value,
+        SOCKET listener_socket,
+        const std::shared_ptr<PortTunnelService>& service_value,
+        bool retained_listener_budget
+    ) : stream_id(stream_id_value),
+        listener(listener_socket),
+        service(service_value),
+        closed(false),
+        retained_listener_budget_acquired(retained_listener_budget) {}
 
     uint32_t stream_id;
     UniqueSocket listener;
+    std::weak_ptr<PortTunnelService> service;
     BasicMutex mutex;
     bool closed;
+    bool retained_listener_budget_acquired;
 };
 
-class PortTunnelConnection;
-class PortTunnelService;
-
 struct PortTunnelSession {
-    explicit PortTunnelSession(const std::string& session_id_value)
+    PortTunnelSession(
+        const std::string& session_id_value,
+        const std::shared_ptr<PortTunnelService>& service_value,
+        bool retained_budget
+    )
         : session_id(session_id_value),
+          service(service_value),
           attached(false),
           closed(false),
           expired(false),
           resume_deadline_ms(0ULL),
           generation(0ULL),
+          retained_session_budget_acquired(retained_budget),
           next_daemon_stream_id(2U) {}
 
     std::string session_id;
+    std::weak_ptr<PortTunnelService> service;
     BasicMutex mutex;
     BasicCondVar state_changed;
     bool attached;
@@ -87,6 +122,7 @@ struct PortTunnelSession {
     bool expired;
     std::uint64_t resume_deadline_ms;
     std::uint64_t generation;
+    bool retained_session_budget_acquired;
     std::weak_ptr<PortTunnelConnection> connection;
     std::map<uint32_t, std::shared_ptr<RetainedTcpListener> > tcp_listeners;
     std::map<uint32_t, std::shared_ptr<TunnelUdpSocket> > udp_binds;
@@ -149,6 +185,14 @@ public:
     void release_worker();
     unsigned long max_workers() const;
     const PortForwardLimitConfig& limits() const;
+    bool try_acquire_retained_session();
+    void release_retained_session();
+    bool try_acquire_retained_listener();
+    void release_retained_listener();
+    bool try_acquire_udp_bind();
+    void release_udp_bind();
+    bool try_acquire_active_tcp_stream();
+    void release_active_tcp_stream();
 
 private:
     PortTunnelService(const PortTunnelService&);
@@ -171,6 +215,10 @@ private:
 
     BasicMutex mutex_;
     std::atomic<unsigned long> active_workers_;
+    std::atomic<unsigned long> retained_sessions_;
+    std::atomic<unsigned long> retained_listeners_;
+    std::atomic<unsigned long> udp_binds_;
+    std::atomic<unsigned long> active_tcp_streams_;
     PortForwardLimitConfig limits_;
     std::map<std::string, std::shared_ptr<PortTunnelSession> > sessions_;
     std::uint64_t next_session_sequence_;

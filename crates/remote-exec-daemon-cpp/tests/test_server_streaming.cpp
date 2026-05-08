@@ -170,6 +170,15 @@ static PortTunnelFrame read_tunnel_frame(SOCKET socket) {
     return decode_port_tunnel_frame(bytes);
 }
 
+static void assert_tunnel_error_code(
+    const PortTunnelFrame& frame,
+    const std::string& code
+) {
+    assert(frame.type == PortTunnelFrameType::Error);
+    const Json meta = Json::parse(frame.meta);
+    assert(meta.at("code").get<std::string>() == code);
+}
+
 static std::size_t response_content_length(const std::string& header_block) {
     const std::string marker = "\r\nContent-Length: ";
     const std::size_t start = header_block.find(marker);
@@ -477,6 +486,14 @@ static PortTunnelFrame data_frame(
     return frame;
 }
 
+static PortTunnelFrame empty_frame(PortTunnelFrameType type, uint32_t stream_id) {
+    PortTunnelFrame frame;
+    frame.type = type;
+    frame.flags = 0U;
+    frame.stream_id = stream_id;
+    return frame;
+}
+
 static Json tunnel_open_meta(
     const std::string& role,
     const std::string& protocol,
@@ -700,6 +717,227 @@ static void assert_tunnel_ready_reports_configured_limits(const fs::path& root) 
     assert(ready_limits.at("max_active_tcp_streams").get<unsigned long>() == 3UL);
     assert(ready_limits.at("max_udp_peers").get<unsigned long>() == 5UL);
     assert(ready_limits.at("max_queued_bytes").get<unsigned long>() == 4096UL);
+
+    close_tunnel(&client_socket, &server_thread);
+}
+
+static void assert_retained_session_limit_is_enforced(const fs::path& root) {
+    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    limits.max_retained_sessions = 1UL;
+
+    AppState state;
+    initialize_state_with_port_forward_limits(state, root, limits);
+
+    UniqueSocket first_client;
+    std::thread first_thread;
+    open_tunnel(state, &first_client, &first_thread);
+    send_tunnel_frame(
+        first_client.get(),
+        json_frame(PortTunnelFrameType::SessionOpen, 0U, Json::object())
+    );
+    assert(read_tunnel_frame(first_client.get()).type == PortTunnelFrameType::SessionReady);
+
+    UniqueSocket second_client;
+    std::thread second_thread;
+    open_tunnel(state, &second_client, &second_thread);
+    send_tunnel_frame(
+        second_client.get(),
+        json_frame(PortTunnelFrameType::SessionOpen, 0U, Json::object())
+    );
+    assert_tunnel_error_code(
+        read_tunnel_frame(second_client.get()),
+        "port_tunnel_limit_exceeded"
+    );
+
+    close_tunnel(&second_client, &second_thread);
+    close_tunnel(&first_client, &first_thread);
+}
+
+static void assert_retained_listener_limit_is_enforced_and_released(const fs::path& root) {
+    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    limits.max_retained_sessions = 2UL;
+    limits.max_retained_listeners = 1UL;
+
+    AppState state;
+    initialize_state_with_port_forward_limits(state, root, limits);
+
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_tunnel(state, &client_socket, &server_thread);
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::SessionOpen, 0U, Json::object())
+    );
+    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::SessionReady);
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}})
+    );
+    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpListenOk);
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TcpListen, 3U, Json{{"endpoint", "127.0.0.1:0"}})
+    );
+    assert_tunnel_error_code(
+        read_tunnel_frame(client_socket.get()),
+        "port_tunnel_limit_exceeded"
+    );
+
+    send_tunnel_frame(
+        client_socket.get(),
+        empty_frame(PortTunnelFrameType::Close, 1U)
+    );
+    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::Close);
+    close_tunnel(&client_socket, &server_thread);
+
+    open_tunnel(state, &client_socket, &server_thread);
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::SessionOpen, 0U, Json::object())
+    );
+    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::SessionReady);
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}})
+    );
+    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpListenOk);
+
+    close_tunnel(&client_socket, &server_thread);
+}
+
+static void assert_udp_bind_limit_is_enforced_and_released(const fs::path& root) {
+    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    limits.max_udp_binds = 1UL;
+
+    AppState state;
+    initialize_state_with_port_forward_limits(state, root, limits);
+
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_tunnel(state, &client_socket, &server_thread);
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::UdpBind, 1U, Json{{"endpoint", "127.0.0.1:0"}})
+    );
+    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::UdpBindOk);
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::UdpBind, 3U, Json{{"endpoint", "127.0.0.1:0"}})
+    );
+    assert_tunnel_error_code(
+        read_tunnel_frame(client_socket.get()),
+        "port_tunnel_limit_exceeded"
+    );
+
+    send_tunnel_frame(
+        client_socket.get(),
+        empty_frame(PortTunnelFrameType::Close, 1U)
+    );
+    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::Close);
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::UdpBind, 5U, Json{{"endpoint", "127.0.0.1:0"}})
+    );
+    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::UdpBindOk);
+
+    close_tunnel(&client_socket, &server_thread);
+}
+
+static std::thread accept_and_hold_tcp_connections(SOCKET listener_socket, int count) {
+    return std::thread([listener_socket, count]() {
+        std::vector<UniqueSocket> accepted;
+        for (int index = 0; index < count; ++index) {
+            const SOCKET socket = accept(listener_socket, NULL, NULL);
+            assert(socket != INVALID_SOCKET);
+            accepted.push_back(UniqueSocket(socket));
+        }
+        platform::sleep_ms(100UL);
+    });
+}
+
+static void assert_active_tcp_stream_limit_is_enforced_and_released(const fs::path& root) {
+    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    limits.max_active_tcp_streams = 1UL;
+
+    AppState state;
+    initialize_state_with_port_forward_limits(state, root, limits);
+
+    UniqueSocket echo_listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
+    const std::string endpoint = socket_local_endpoint(echo_listener.get());
+    std::thread accept_thread = accept_and_hold_tcp_connections(echo_listener.get(), 2);
+
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_tunnel(state, &client_socket, &server_thread);
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TcpConnect, 1U, Json{{"endpoint", endpoint}})
+    );
+    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpConnectOk);
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TcpConnect, 3U, Json{{"endpoint", endpoint}})
+    );
+    assert_tunnel_error_code(
+        read_tunnel_frame(client_socket.get()),
+        "port_tunnel_limit_exceeded"
+    );
+
+    send_tunnel_frame(
+        client_socket.get(),
+        empty_frame(PortTunnelFrameType::Close, 1U)
+    );
+    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::Close);
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TcpConnect, 5U, Json{{"endpoint", endpoint}})
+    );
+    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpConnectOk);
+
+    close_tunnel(&client_socket, &server_thread);
+    echo_listener.reset();
+    accept_thread.join();
+}
+
+static void assert_active_tcp_accept_limit_is_enforced_and_released(const fs::path& root) {
+    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    limits.max_active_tcp_streams = 1UL;
+
+    AppState state;
+    initialize_state_with_port_forward_limits(state, root, limits);
+
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_tunnel(state, &client_socket, &server_thread);
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}})
+    );
+    const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
+    assert(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
+
+    UniqueSocket first_peer(connect_port_forward_socket(endpoint, "tcp"));
+    const PortTunnelFrame first_accept = read_tunnel_frame(client_socket.get());
+    assert(first_accept.type == PortTunnelFrameType::TcpAccept);
+
+    UniqueSocket refused_peer(connect_port_forward_socket(endpoint, "tcp"));
+    assert_tunnel_error_code(
+        read_tunnel_frame(client_socket.get()),
+        "port_tunnel_limit_exceeded"
+    );
+    refused_peer.reset();
+
+    send_tunnel_frame(
+        client_socket.get(),
+        empty_frame(PortTunnelFrameType::Close, first_accept.stream_id)
+    );
+    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::Close);
+    first_peer.reset();
+
+    UniqueSocket second_peer(connect_port_forward_socket(endpoint, "tcp"));
+    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpAccept);
 
     close_tunnel(&client_socket, &server_thread);
 }
@@ -945,6 +1183,11 @@ int main() {
     assert_tunnel_open_ready_and_close_round_trip(state);
     assert_port_tunnel_worker_limit_is_reported(root);
     assert_tunnel_ready_reports_configured_limits(root);
+    assert_retained_session_limit_is_enforced(root);
+    assert_retained_listener_limit_is_enforced_and_released(root);
+    assert_udp_bind_limit_is_enforced_and_released(root);
+    assert_active_tcp_stream_limit_is_enforced_and_released(root);
+    assert_active_tcp_accept_limit_is_enforced_and_released(root);
     assert_tunnel_tcp_connect_echoes_binary_data(state);
     assert_tunnel_udp_bind_emits_two_peer_datagrams(state);
     assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(state);

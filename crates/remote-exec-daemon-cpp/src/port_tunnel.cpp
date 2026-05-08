@@ -10,21 +10,41 @@ const unsigned long RESUME_TIMEOUT_MS = 10000UL;
 
 PortTunnelService::PortTunnelService(const PortForwardLimitConfig& limits)
     : active_workers_(0UL),
+      retained_sessions_(0UL),
+      retained_listeners_(0UL),
+      udp_binds_(0UL),
+      active_tcp_streams_(0UL),
       limits_(limits),
       next_session_sequence_(1ULL) {}
 
-bool PortTunnelService::try_acquire_worker() {
-    unsigned long current = active_workers_.load();
-    while (current < limits_.max_worker_threads) {
-        if (active_workers_.compare_exchange_weak(current, current + 1UL)) {
+static bool try_acquire_counter(
+    std::atomic<unsigned long>& counter,
+    unsigned long limit
+) {
+    unsigned long current = counter.load();
+    while (current < limit) {
+        if (counter.compare_exchange_weak(current, current + 1UL)) {
             return true;
         }
     }
     return false;
 }
 
+static void release_counter(std::atomic<unsigned long>& counter) {
+    unsigned long current = counter.load();
+    while (current > 0UL) {
+        if (counter.compare_exchange_weak(current, current - 1UL)) {
+            return;
+        }
+    }
+}
+
+bool PortTunnelService::try_acquire_worker() {
+    return try_acquire_counter(active_workers_, limits_.max_worker_threads);
+}
+
 void PortTunnelService::release_worker() {
-    active_workers_.fetch_sub(1UL);
+    release_counter(active_workers_);
 }
 
 unsigned long PortTunnelService::max_workers() const {
@@ -33,6 +53,38 @@ unsigned long PortTunnelService::max_workers() const {
 
 const PortForwardLimitConfig& PortTunnelService::limits() const {
     return limits_;
+}
+
+bool PortTunnelService::try_acquire_retained_session() {
+    return try_acquire_counter(retained_sessions_, limits_.max_retained_sessions);
+}
+
+void PortTunnelService::release_retained_session() {
+    release_counter(retained_sessions_);
+}
+
+bool PortTunnelService::try_acquire_retained_listener() {
+    return try_acquire_counter(retained_listeners_, limits_.max_retained_listeners);
+}
+
+void PortTunnelService::release_retained_listener() {
+    release_counter(retained_listeners_);
+}
+
+bool PortTunnelService::try_acquire_udp_bind() {
+    return try_acquire_counter(udp_binds_, limits_.max_udp_binds);
+}
+
+void PortTunnelService::release_udp_bind() {
+    release_counter(udp_binds_);
+}
+
+bool PortTunnelService::try_acquire_active_tcp_stream() {
+    return try_acquire_counter(active_tcp_streams_, limits_.max_active_tcp_streams);
+}
+
+void PortTunnelService::release_active_tcp_stream() {
+    release_counter(active_tcp_streams_);
 }
 
 PortTunnelWorkerLease::PortTunnelWorkerLease(
@@ -81,20 +133,36 @@ PortTunnelFrame make_empty_frame(PortTunnelFrameType type, uint32_t stream_id) {
 }
 
 void mark_tcp_stream_closed(const std::shared_ptr<TunnelTcpStream>& stream) {
+    std::shared_ptr<PortTunnelService> service_to_release;
     BasicLockGuard lock(stream->mutex);
     if (!stream->closed) {
         stream->closed = true;
         shutdown_socket(stream->socket.get());
         stream->socket.reset();
+        if (stream->active_stream_budget_acquired) {
+            stream->active_stream_budget_acquired = false;
+            service_to_release = stream->service.lock();
+        }
+    }
+    if (service_to_release.get() != NULL) {
+        service_to_release->release_active_tcp_stream();
     }
 }
 
 void mark_udp_socket_closed(const std::shared_ptr<TunnelUdpSocket>& socket_value) {
+    std::shared_ptr<PortTunnelService> service_to_release;
     BasicLockGuard lock(socket_value->mutex);
     if (!socket_value->closed) {
         socket_value->closed = true;
         shutdown_socket(socket_value->socket.get());
         socket_value->socket.reset();
+        if (socket_value->udp_bind_budget_acquired) {
+            socket_value->udp_bind_budget_acquired = false;
+            service_to_release = socket_value->service.lock();
+        }
+    }
+    if (service_to_release.get() != NULL) {
+        service_to_release->release_udp_bind();
     }
 }
 
@@ -135,11 +203,19 @@ int wait_socket_readable(SOCKET socket, unsigned long timeout_ms) {
 }
 
 void mark_retained_listener_closed(const std::shared_ptr<RetainedTcpListener>& listener) {
+    std::shared_ptr<PortTunnelService> service_to_release;
     BasicLockGuard lock(listener->mutex);
     if (!listener->closed) {
         listener->closed = true;
         shutdown_socket(listener->listener.get());
         listener->listener.reset();
+        if (listener->retained_listener_budget_acquired) {
+            listener->retained_listener_budget_acquired = false;
+            service_to_release = listener->service.lock();
+        }
+    }
+    if (service_to_release.get() != NULL) {
+        service_to_release->release_retained_listener();
     }
 }
 

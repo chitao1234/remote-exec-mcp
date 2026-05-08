@@ -130,10 +130,27 @@ void PortTunnelConnection::tcp_listen(const PortTunnelFrame& frame) {
     std::string bound_endpoint;
 
     if (session_mode_active()) {
+        if (!service_->try_acquire_retained_listener()) {
+            throw PortForwardError(
+                400,
+                "port_tunnel_limit_exceeded",
+                "port tunnel retained listener limit reached"
+            );
+        }
         std::shared_ptr<PortTunnelSession> session = current_session();
-        std::shared_ptr<RetainedTcpListener> listener(
-            new RetainedTcpListener(frame.stream_id, bind_port_forward_socket(endpoint, "tcp"))
-        );
+        std::shared_ptr<RetainedTcpListener> listener;
+        try {
+            UniqueSocket listener_socket(bind_port_forward_socket(endpoint, "tcp"));
+            listener.reset(new RetainedTcpListener(
+                frame.stream_id,
+                listener_socket.release(),
+                service_,
+                true
+            ));
+        } catch (...) {
+            service_->release_retained_listener();
+            throw;
+        }
         bound_endpoint = socket_local_endpoint(listener->listener.get());
         {
             BasicLockGuard lock(session->mutex);
@@ -179,7 +196,18 @@ void PortTunnelConnection::tcp_accept_loop_transport_owned(
             return;
         }
         const uint32_t stream_id = next_daemon_stream_id_.fetch_add(2U);
-        std::shared_ptr<TunnelTcpStream> stream(new TunnelTcpStream(accepted));
+        if (!service_->try_acquire_active_tcp_stream()) {
+            UniqueSocket refused_socket(accepted);
+            send_error(
+                stream_id,
+                "port_tunnel_limit_exceeded",
+                "port tunnel active tcp stream limit reached"
+            );
+            continue;
+        }
+        std::shared_ptr<TunnelTcpStream> stream(
+            new TunnelTcpStream(accepted, service_, true)
+        );
         {
             BasicLockGuard lock(state_mutex_);
             if (closed_.load()) {
@@ -203,9 +231,25 @@ void PortTunnelConnection::tcp_accept_loop_transport_owned(
 
 void PortTunnelConnection::tcp_connect(const PortTunnelFrame& frame) {
     const std::string endpoint = ensure_nonzero_connect_endpoint(frame_meta_string(frame, "endpoint"));
-    std::shared_ptr<TunnelTcpStream> stream(
-        new TunnelTcpStream(connect_port_forward_socket(endpoint, "tcp"))
-    );
+    if (!service_->try_acquire_active_tcp_stream()) {
+        throw PortForwardError(
+            400,
+            "port_tunnel_limit_exceeded",
+            "port tunnel active tcp stream limit reached"
+        );
+    }
+
+    std::shared_ptr<TunnelTcpStream> stream;
+    try {
+        stream.reset(new TunnelTcpStream(
+            connect_port_forward_socket(endpoint, "tcp"),
+            service_,
+            true
+        ));
+    } catch (...) {
+        service_->release_active_tcp_stream();
+        throw;
+    }
     {
         BasicLockGuard lock(state_mutex_);
         tcp_streams_[frame.stream_id] = stream;
@@ -229,6 +273,9 @@ void PortTunnelConnection::tcp_read_loop(
             0
         );
         if (received == 0) {
+            if (tcp_stream_closed(stream)) {
+                return;
+            }
             send_frame(make_empty_frame(PortTunnelFrameType::TcpEof, stream_id));
             return;
         }
@@ -236,6 +283,9 @@ void PortTunnelConnection::tcp_read_loop(
             if (!tcp_stream_closed(stream)) {
                 send_error(stream_id, "port_read_failed", socket_error_message("recv"));
             }
+            return;
+        }
+        if (tcp_stream_closed(stream)) {
             return;
         }
         PortTunnelFrame frame = make_empty_frame(PortTunnelFrameType::TcpData, stream_id);

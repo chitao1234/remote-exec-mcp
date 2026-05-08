@@ -1,12 +1,21 @@
 #include "port_tunnel_internal.h"
 
 std::shared_ptr<PortTunnelSession> PortTunnelService::create_session() {
+    if (!try_acquire_retained_session()) {
+        throw PortForwardError(
+            400,
+            "port_tunnel_limit_exceeded",
+            "port tunnel retained session limit reached"
+        );
+    }
+
     std::shared_ptr<PortTunnelSession> session;
+    std::shared_ptr<PortTunnelService> service = shared_from_this();
     {
         BasicLockGuard lock(mutex_);
         std::ostringstream out;
         out << "sess_cpp_" << platform::monotonic_ms() << "_" << next_session_sequence_++;
-        session.reset(new PortTunnelSession(out.str()));
+        session.reset(new PortTunnelSession(out.str(), service, true));
         sessions_[session->session_id] = session;
     }
     return session;
@@ -61,6 +70,7 @@ void PortTunnelService::close_session(const std::shared_ptr<PortTunnelSession>& 
 
     std::vector<std::shared_ptr<RetainedTcpListener> > listeners;
     std::vector<std::shared_ptr<TunnelUdpSocket> > udp_binds;
+    std::shared_ptr<PortTunnelService> retained_session_service;
     {
         BasicLockGuard lock(session->mutex);
         if (session->closed) {
@@ -71,6 +81,10 @@ void PortTunnelService::close_session(const std::shared_ptr<PortTunnelSession>& 
         session->attached = false;
         session->resume_deadline_ms = 0ULL;
         session->connection.reset();
+        if (session->retained_session_budget_acquired) {
+            session->retained_session_budget_acquired = false;
+            retained_session_service = session->service.lock();
+        }
         for (std::map<uint32_t, std::shared_ptr<RetainedTcpListener> >::iterator it =
                  session->tcp_listeners.begin();
              it != session->tcp_listeners.end();
@@ -88,6 +102,9 @@ void PortTunnelService::close_session(const std::shared_ptr<PortTunnelSession>& 
         session->state_changed.broadcast();
     }
 
+    if (retained_session_service.get() != NULL) {
+        retained_session_service->release_retained_session();
+    }
     for (std::size_t i = 0; i < listeners.size(); ++i) {
         mark_retained_listener_closed(listeners[i]);
     }
@@ -150,6 +167,7 @@ void PortTunnelService::expire_session_if_needed(
 ) {
     std::vector<std::shared_ptr<RetainedTcpListener> > listeners;
     std::vector<std::shared_ptr<TunnelUdpSocket> > udp_binds;
+    std::shared_ptr<PortTunnelService> retained_session_service;
     {
         BasicLockGuard lock(session->mutex);
         if (session->closed || session->expired || session->attached) {
@@ -162,6 +180,10 @@ void PortTunnelService::expire_session_if_needed(
         session->expired = true;
         session->resume_deadline_ms = 0ULL;
         session->connection.reset();
+        if (session->retained_session_budget_acquired) {
+            session->retained_session_budget_acquired = false;
+            retained_session_service = session->service.lock();
+        }
         for (std::map<uint32_t, std::shared_ptr<RetainedTcpListener> >::iterator it =
                  session->tcp_listeners.begin();
              it != session->tcp_listeners.end();
@@ -179,6 +201,9 @@ void PortTunnelService::expire_session_if_needed(
         session->state_changed.broadcast();
     }
 
+    if (retained_session_service.get() != NULL) {
+        retained_session_service->release_retained_session();
+    }
     for (std::size_t i = 0; i < listeners.size(); ++i) {
         mark_retained_listener_closed(listeners[i]);
     }
