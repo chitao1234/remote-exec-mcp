@@ -16,6 +16,19 @@ void assert_decode_rejects(const std::vector<unsigned char>& bytes) {
     assert(rejected);
 }
 
+void assert_control_frame_round_trips(PortTunnelFrameType type) {
+    PortTunnelFrame frame;
+    frame.type = type;
+    frame.flags = 0U;
+    frame.stream_id = 0U;
+    frame.meta = "{\"forward_id\":\"fwd_test\",\"generation\":1}";
+    const std::vector<unsigned char> bytes = encode_port_tunnel_frame(frame);
+    const PortTunnelFrame decoded = decode_port_tunnel_frame(bytes);
+    assert(decoded.type == type);
+    assert(decoded.stream_id == 0U);
+    assert(decoded.meta == frame.meta);
+}
+
 std::vector<unsigned char> frame_header(
     unsigned char frame_type,
     uint32_t stream_id,
@@ -58,6 +71,11 @@ int main() {
     assert(decoded.stream_id == 3U);
     assert(decoded.meta == "{\"note\":\"binary\"}");
     assert(decoded.data == frame.data);
+
+    assert_control_frame_round_trips(PortTunnelFrameType::TunnelOpen);
+    assert_control_frame_round_trips(PortTunnelFrameType::TunnelReady);
+    assert_control_frame_round_trips(PortTunnelFrameType::TunnelClose);
+    assert_control_frame_round_trips(PortTunnelFrameType::TunnelClosed);
 
     assert_decode_rejects(frame_header(99U, 1U, 0U, 0U));
     assert_decode_rejects(frame_header(

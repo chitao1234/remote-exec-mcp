@@ -1,10 +1,14 @@
 #include "port_tunnel_internal.h"
 
-void PortTunnelService::spawn_udp_bind_loop(
+bool PortTunnelService::spawn_udp_bind_loop(
     const std::shared_ptr<PortTunnelSession>& session,
     uint32_t stream_id,
     const std::shared_ptr<TunnelUdpSocket>& socket_value
 ) {
+    std::shared_ptr<PortTunnelService> service = shared_from_this();
+    if (!service->try_acquire_worker()) {
+        return false;
+    }
 #ifdef _WIN32
     struct Context {
         std::shared_ptr<PortTunnelService> service;
@@ -16,6 +20,7 @@ void PortTunnelService::spawn_udp_bind_loop(
     struct ThreadEntry {
         static DWORD WINAPI entry(LPVOID raw_context) {
             std::unique_ptr<Context> context(static_cast<Context*>(raw_context));
+            PortTunnelWorkerLease lease(context->service);
             context->service->udp_read_loop(
                 context->session,
                 context->stream_id,
@@ -26,7 +31,7 @@ void PortTunnelService::spawn_udp_bind_loop(
     };
 
     std::unique_ptr<Context> context(new Context());
-    context->service = shared_from_this();
+    context->service = service;
     context->session = session;
     context->stream_id = stream_id;
     context->socket_value = socket_value;
@@ -34,12 +39,21 @@ void PortTunnelService::spawn_udp_bind_loop(
     if (handle != NULL) {
         context.release();
         CloseHandle(handle);
+        return true;
     }
+    service->release_worker();
+    return false;
 #else
-    std::shared_ptr<PortTunnelService> service = shared_from_this();
-    std::thread([service, session, stream_id, socket_value]() {
-        service->udp_read_loop(session, stream_id, socket_value);
-    }).detach();
+    try {
+        std::thread([service, session, stream_id, socket_value]() {
+            PortTunnelWorkerLease lease(service);
+            service->udp_read_loop(session, stream_id, socket_value);
+        }).detach();
+    } catch (...) {
+        service->release_worker();
+        throw;
+    }
+    return true;
 #endif
 }
 
@@ -135,13 +149,19 @@ void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
             BasicLockGuard lock(session->mutex);
             session->udp_binds[frame.stream_id] = socket_value;
         }
-        service_->spawn_udp_bind_loop(session, frame.stream_id, socket_value);
+        if (!service_->spawn_udp_bind_loop(session, frame.stream_id, socket_value)) {
+            fail_worker_limit(frame.stream_id);
+            return;
+        }
     } else {
         {
             BasicLockGuard lock(state_mutex_);
             udp_sockets_[frame.stream_id] = socket_value;
         }
-        spawn_udp_read_thread(shared_from_this(), frame.stream_id, socket_value);
+        if (!spawn_udp_read_thread(service_, shared_from_this(), frame.stream_id, socket_value)) {
+            fail_worker_limit(frame.stream_id);
+            return;
+        }
     }
 
     PortTunnelFrame ok = make_empty_frame(PortTunnelFrameType::UdpBindOk, frame.stream_id);

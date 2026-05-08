@@ -8,6 +8,39 @@ const unsigned long RESUME_TIMEOUT_MS = 100UL;
 const unsigned long RESUME_TIMEOUT_MS = 10000UL;
 #endif
 
+PortTunnelService::PortTunnelService(unsigned long max_workers)
+    : active_workers_(0UL),
+      max_workers_(max_workers == 0UL ? 1UL : max_workers),
+      next_session_sequence_(1ULL) {}
+
+bool PortTunnelService::try_acquire_worker() {
+    unsigned long current = active_workers_.load();
+    while (current < max_workers_) {
+        if (active_workers_.compare_exchange_weak(current, current + 1UL)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void PortTunnelService::release_worker() {
+    active_workers_.fetch_sub(1UL);
+}
+
+unsigned long PortTunnelService::max_workers() const {
+    return max_workers_;
+}
+
+PortTunnelWorkerLease::PortTunnelWorkerLease(
+    const std::shared_ptr<PortTunnelService>& service
+) : service_(service) {}
+
+PortTunnelWorkerLease::~PortTunnelWorkerLease() {
+    if (service_.get() != NULL) {
+        service_->release_worker();
+    }
+}
+
 std::string header_token_lower(const HttpRequest& request, const std::string& name) {
     return lowercase_ascii(request.header(name));
 }
@@ -110,6 +143,6 @@ bool is_port_tunnel_upgrade_request(const HttpRequest& request) {
     return request.method == "POST" && request.path == "/v1/port/tunnel";
 }
 
-std::shared_ptr<PortTunnelService> create_port_tunnel_service() {
-    return std::shared_ptr<PortTunnelService>(new PortTunnelService());
+std::shared_ptr<PortTunnelService> create_port_tunnel_service(unsigned long max_workers) {
+    return std::shared_ptr<PortTunnelService>(new PortTunnelService(max_workers));
 }

@@ -28,10 +28,13 @@ struct DaemonConfig {
     std::size_t max_request_header_bytes;
     std::size_t max_request_body_bytes;
     unsigned long max_open_sessions;
+    unsigned long port_forward_max_worker_threads;
     YieldTimeConfig yield_time;
     bool sandbox_configured = false;
     FilesystemSandbox sandbox;
 };
+
+static const unsigned long DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS = 256UL;
 
 YieldTimeConfig default_yield_time_config();
 unsigned long resolve_yield_time_ms(

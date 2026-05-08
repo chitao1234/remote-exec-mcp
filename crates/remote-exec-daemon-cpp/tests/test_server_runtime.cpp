@@ -57,6 +57,7 @@ int main() {
     config.max_request_header_bytes = 65536;
     config.max_request_body_bytes = 65536;
     config.max_open_sessions = 64;
+    config.port_forward_max_worker_threads = DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS;
     config.yield_time = default_yield_time_config();
 
     ServerRuntime runtime(config);

@@ -9,7 +9,12 @@ void PortTunnelConnection::send_error(
     frame.type = PortTunnelFrameType::Error;
     frame.flags = 0U;
     frame.stream_id = stream_id;
-    frame.meta = Json{{"code", code}, {"message", message}, {"fatal", false}}.dump();
+    frame.meta = Json{
+        {"code", code},
+        {"message", message},
+        {"fatal", false},
+        {"generation", current_generation()}
+    }.dump();
     try {
         send_frame(frame);
     } catch (const std::exception&) {
@@ -25,7 +30,12 @@ void PortTunnelConnection::send_terminal_error(
     frame.type = PortTunnelFrameType::Error;
     frame.flags = 0U;
     frame.stream_id = stream_id;
-    frame.meta = Json{{"code", code}, {"message", message}, {"fatal", true}}.dump();
+    frame.meta = Json{
+        {"code", code},
+        {"message", message},
+        {"fatal", true},
+        {"generation", current_generation()}
+    }.dump();
     try {
         send_frame(frame);
     } catch (const std::exception&) {
@@ -96,6 +106,16 @@ void PortTunnelConnection::close_stream(uint32_t stream_id) {
     send_frame(make_empty_frame(PortTunnelFrameType::Close, stream_id));
 }
 
+void PortTunnelConnection::fail_worker_limit(uint32_t stream_id) {
+    send_terminal_error(
+        stream_id,
+        "port_tunnel_limit_exceeded",
+        "port tunnel worker limit reached"
+    );
+    close_current_session(PortTunnelCloseMode::TerminalFailure);
+    close_transport_owned_state();
+}
+
 void PortTunnelConnection::close_current_session(PortTunnelCloseMode mode) {
     std::shared_ptr<PortTunnelSession> session = current_session();
     if (session.get() != NULL) {
@@ -157,6 +177,24 @@ bool PortTunnelConnection::session_mode_active() {
     return current_session().get() != NULL;
 }
 
+std::uint64_t PortTunnelConnection::current_generation() const {
+    return generation_.load();
+}
+
+void PortTunnelConnection::set_generation(std::uint64_t generation) {
+    generation_.store(generation);
+}
+
+void PortTunnelConnection::ensure_generation(std::uint64_t frame_generation) const {
+    const std::uint64_t generation = current_generation();
+    if (frame_generation != generation) {
+        std::ostringstream message;
+        message << "frame generation `" << frame_generation
+                << "` does not match tunnel generation `" << generation << "`";
+        throw PortForwardError(400, "port_tunnel_generation_mismatch", message.str());
+    }
+}
+
 bool PortTunnelConnection::owns_session(const std::shared_ptr<PortTunnelSession>& session) {
     BasicLockGuard lock(state_mutex_);
     return !closed_.load() && session_.get() == session.get();
@@ -211,7 +249,10 @@ bool PortTunnelConnection::accept_session_tcp_stream(
         return false;
     }
 
-    spawn_tcp_read_thread(shared_from_this(), stream_id, stream);
+    if (!spawn_tcp_read_thread(service_, shared_from_this(), stream_id, stream)) {
+        fail_worker_limit(stream_id);
+        return false;
+    }
     return true;
 }
 

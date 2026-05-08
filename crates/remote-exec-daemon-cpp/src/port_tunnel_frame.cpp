@@ -34,6 +34,12 @@ PortTunnelFrameType frame_type_from_byte(unsigned char value) {
             return PortTunnelFrameType::SessionResume;
         case 6:
             return PortTunnelFrameType::SessionResumed;
+        case 7:
+            return PortTunnelFrameType::TunnelOpen;
+        case 8:
+            return PortTunnelFrameType::TunnelReady;
+        case 9:
+            return PortTunnelFrameType::TunnelClose;
         case 10:
             return PortTunnelFrameType::TcpListen;
         case 11:
@@ -48,6 +54,16 @@ PortTunnelFrameType frame_type_from_byte(unsigned char value) {
             return PortTunnelFrameType::TcpData;
         case 16:
             return PortTunnelFrameType::TcpEof;
+        case 17:
+            return PortTunnelFrameType::TunnelClosed;
+        case 18:
+            return PortTunnelFrameType::TunnelHeartbeat;
+        case 19:
+            return PortTunnelFrameType::TunnelHeartbeatAck;
+        case 20:
+            return PortTunnelFrameType::ForwardRecovering;
+        case 21:
+            return PortTunnelFrameType::ForwardRecovered;
         case 30:
             return PortTunnelFrameType::UdpBind;
         case 31:

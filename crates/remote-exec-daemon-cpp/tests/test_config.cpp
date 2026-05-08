@@ -32,6 +32,7 @@ int main() {
         "max_request_header_bytes = 32768\n"
         "max_request_body_bytes = 1048576\n"
         "max_open_sessions = 12\n"
+        "port_forward_max_worker_threads = 17\n"
         "yield_time_exec_command_default_ms = 15000\n"
         "yield_time_exec_command_max_ms = 60000\n"
         "yield_time_exec_command_min_ms = 500\n"
@@ -50,6 +51,7 @@ int main() {
     assert(config.max_request_header_bytes == 32768UL);
     assert(config.max_request_body_bytes == 1048576UL);
     assert(config.max_open_sessions == 12UL);
+    assert(config.port_forward_max_worker_threads == 17UL);
     assert(config.yield_time.exec_command.default_ms == 15000UL);
     assert(config.yield_time.exec_command.max_ms == 60000UL);
     assert(config.yield_time.exec_command.min_ms == 500UL);
@@ -76,6 +78,7 @@ int main() {
         "sandbox_write_deny = /work/.git;/work/readonly\n"
     );
     const DaemonConfig sandbox_config = load_config(sandbox_config_path.string());
+    assert(sandbox_config.port_forward_max_worker_threads == DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS);
     assert(sandbox_config.sandbox_configured);
     assert(sandbox_config.sandbox.exec_cwd.allow.size() == 2);
     assert(sandbox_config.sandbox.exec_cwd.allow[0] == "/work");
@@ -100,6 +103,23 @@ int main() {
     bool rejected = false;
     try {
         (void)load_config(invalid_path.string());
+    } catch (...) {
+        rejected = true;
+    }
+    assert(rejected);
+
+    const fs::path invalid_worker_limit_path = root / "invalid-worker-limit.ini";
+    write_text(
+        invalid_worker_limit_path,
+        "target = builder-cpp\n"
+        "listen_host = 0.0.0.0\n"
+        "listen_port = 8181\n"
+        "default_workdir = C:\\work\n"
+        "port_forward_max_worker_threads = 0\n"
+    );
+    rejected = false;
+    try {
+        (void)load_config(invalid_worker_limit_path.string());
     } catch (...) {
         rejected = true;
     }

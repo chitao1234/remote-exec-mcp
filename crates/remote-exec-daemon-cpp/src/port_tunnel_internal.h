@@ -67,6 +67,7 @@ struct RetainedTcpListener {
 };
 
 class PortTunnelConnection;
+class PortTunnelService;
 
 struct PortTunnelSession {
     explicit PortTunnelSession(const std::string& session_id_value)
@@ -75,6 +76,7 @@ struct PortTunnelSession {
           closed(false),
           expired(false),
           resume_deadline_ms(0ULL),
+          generation(0ULL),
           next_daemon_stream_id(2U) {}
 
     std::string session_id;
@@ -84,6 +86,7 @@ struct PortTunnelSession {
     bool closed;
     bool expired;
     std::uint64_t resume_deadline_ms;
+    std::uint64_t generation;
     std::weak_ptr<PortTunnelConnection> connection;
     std::map<uint32_t, std::shared_ptr<RetainedTcpListener> > tcp_listeners;
     std::map<uint32_t, std::shared_ptr<TunnelUdpSocket> > udp_binds;
@@ -102,17 +105,20 @@ bool retained_listener_closed(const std::shared_ptr<RetainedTcpListener>& listen
 bool session_is_unavailable(const std::shared_ptr<PortTunnelSession>& session);
 int wait_socket_readable(SOCKET socket, unsigned long timeout_ms);
 void mark_retained_listener_closed(const std::shared_ptr<RetainedTcpListener>& listener);
-void spawn_tcp_accept_thread(
+bool spawn_tcp_accept_thread(
+    const std::shared_ptr<PortTunnelService>& service,
     const std::shared_ptr<PortTunnelConnection>& tunnel,
     uint32_t stream_id,
     SOCKET socket
 );
-void spawn_tcp_read_thread(
+bool spawn_tcp_read_thread(
+    const std::shared_ptr<PortTunnelService>& service,
     const std::shared_ptr<PortTunnelConnection>& tunnel,
     uint32_t stream_id,
     const std::shared_ptr<TunnelTcpStream>& stream
 );
-void spawn_udp_read_thread(
+bool spawn_udp_read_thread(
+    const std::shared_ptr<PortTunnelService>& service,
     const std::shared_ptr<PortTunnelConnection>& tunnel,
     uint32_t stream_id,
     const std::shared_ptr<TunnelUdpSocket>& socket_value
@@ -120,7 +126,7 @@ void spawn_udp_read_thread(
 
 class PortTunnelService : public std::enable_shared_from_this<PortTunnelService> {
 public:
-    PortTunnelService() : next_session_sequence_(1ULL) {}
+    explicit PortTunnelService(unsigned long max_workers);
 
     std::shared_ptr<PortTunnelSession> create_session();
     std::shared_ptr<PortTunnelSession> find_session(const std::string& session_id);
@@ -130,21 +136,24 @@ public:
     );
     void detach_session(const std::shared_ptr<PortTunnelSession>& session);
     void close_session(const std::shared_ptr<PortTunnelSession>& session);
-    void spawn_tcp_listener_loop(
+    bool spawn_tcp_listener_loop(
         const std::shared_ptr<PortTunnelSession>& session,
         const std::shared_ptr<RetainedTcpListener>& listener
     );
-    void spawn_udp_bind_loop(
+    bool spawn_udp_bind_loop(
         const std::shared_ptr<PortTunnelSession>& session,
         uint32_t stream_id,
         const std::shared_ptr<TunnelUdpSocket>& socket_value
     );
+    bool try_acquire_worker();
+    void release_worker();
+    unsigned long max_workers() const;
 
 private:
     PortTunnelService(const PortTunnelService&);
     PortTunnelService& operator=(const PortTunnelService&);
 
-    void schedule_session_expiry(const std::shared_ptr<PortTunnelSession>& session);
+    bool schedule_session_expiry(const std::shared_ptr<PortTunnelSession>& session);
     void expire_session_if_needed(const std::shared_ptr<PortTunnelSession>& session);
     std::shared_ptr<PortTunnelConnection> wait_for_attachment(
         const std::shared_ptr<PortTunnelSession>& session
@@ -160,8 +169,22 @@ private:
     );
 
     BasicMutex mutex_;
+    std::atomic<unsigned long> active_workers_;
+    unsigned long max_workers_;
     std::map<std::string, std::shared_ptr<PortTunnelSession> > sessions_;
     std::uint64_t next_session_sequence_;
+};
+
+class PortTunnelWorkerLease {
+public:
+    explicit PortTunnelWorkerLease(const std::shared_ptr<PortTunnelService>& service);
+    ~PortTunnelWorkerLease();
+
+private:
+    PortTunnelWorkerLease(const PortTunnelWorkerLease&);
+    PortTunnelWorkerLease& operator=(const PortTunnelWorkerLease&);
+
+    std::shared_ptr<PortTunnelService> service_;
 };
 
 class PortTunnelConnection : public std::enable_shared_from_this<PortTunnelConnection> {
@@ -170,6 +193,7 @@ public:
         : client_(client),
           service_(service),
           closed_(false),
+          generation_(0ULL),
           next_daemon_stream_id_(2U) {}
 
     void run();
@@ -208,6 +232,9 @@ private:
     bool read_frame(PortTunnelFrame* frame);
     void send_frame(const PortTunnelFrame& frame);
     void handle_frame(const PortTunnelFrame& frame);
+    void tunnel_open(const PortTunnelFrame& frame);
+    void tunnel_close(const PortTunnelFrame& frame);
+    void tunnel_heartbeat(const PortTunnelFrame& frame);
     void session_open(const PortTunnelFrame& frame);
     void session_resume(const PortTunnelFrame& frame);
     void tcp_listen(const PortTunnelFrame& frame);
@@ -217,6 +244,10 @@ private:
     void udp_bind(const PortTunnelFrame& frame);
     void udp_datagram(const PortTunnelFrame& frame);
     void close_stream(uint32_t stream_id);
+    void fail_worker_limit(uint32_t stream_id);
+    std::uint64_t current_generation() const;
+    void set_generation(std::uint64_t generation);
+    void ensure_generation(std::uint64_t frame_generation) const;
     void close_current_session(PortTunnelCloseMode mode);
     void close_transport_owned_state();
     std::shared_ptr<PortTunnelSession> current_session();
@@ -227,6 +258,7 @@ private:
     BasicMutex writer_mutex_;
     BasicMutex state_mutex_;
     std::atomic<bool> closed_;
+    std::atomic<std::uint64_t> generation_;
     std::shared_ptr<PortTunnelSession> session_;
     std::map<uint32_t, UniqueSocket> tcp_listeners_;
     std::map<uint32_t, std::shared_ptr<TunnelTcpStream> > tcp_streams_;

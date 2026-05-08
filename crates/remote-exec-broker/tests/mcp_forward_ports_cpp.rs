@@ -62,6 +62,9 @@ async fn broker_forwards_ports_through_real_cpp_daemon_and_handles_port_conflict
         .unwrap();
     assert!(!open.is_error, "open failed: {}", open.text_output);
     let opened = &open.structured_content["forwards"][0];
+    assert_eq!(opened["phase"], "ready");
+    assert_eq!(opened["listen_state"]["generation"], 1);
+    assert_eq!(opened["connect_state"]["generation"], 1);
     let opened_forward_id = opened["forward_id"].as_str().unwrap().to_string();
     let opened_listen_endpoint = opened["listen_endpoint"].as_str().unwrap().to_string();
 

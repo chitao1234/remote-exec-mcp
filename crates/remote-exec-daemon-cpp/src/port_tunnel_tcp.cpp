@@ -1,9 +1,13 @@
 #include "port_tunnel_internal.h"
 
-void PortTunnelService::spawn_tcp_listener_loop(
+bool PortTunnelService::spawn_tcp_listener_loop(
     const std::shared_ptr<PortTunnelSession>& session,
     const std::shared_ptr<RetainedTcpListener>& listener
 ) {
+    std::shared_ptr<PortTunnelService> service = shared_from_this();
+    if (!service->try_acquire_worker()) {
+        return false;
+    }
 #ifdef _WIN32
     struct Context {
         std::shared_ptr<PortTunnelService> service;
@@ -14,25 +18,35 @@ void PortTunnelService::spawn_tcp_listener_loop(
     struct ThreadEntry {
         static DWORD WINAPI entry(LPVOID raw_context) {
             std::unique_ptr<Context> context(static_cast<Context*>(raw_context));
+            PortTunnelWorkerLease lease(context->service);
             context->service->tcp_accept_loop(context->session, context->listener);
             return 0;
         }
     };
 
     std::unique_ptr<Context> context(new Context());
-    context->service = shared_from_this();
+    context->service = service;
     context->session = session;
     context->listener = listener;
     HANDLE handle = CreateThread(NULL, 0, &ThreadEntry::entry, context.get(), 0, NULL);
     if (handle != NULL) {
         context.release();
         CloseHandle(handle);
+        return true;
     }
+    service->release_worker();
+    return false;
 #else
-    std::shared_ptr<PortTunnelService> service = shared_from_this();
-    std::thread([service, session, listener]() {
-        service->tcp_accept_loop(session, listener);
-    }).detach();
+    try {
+        std::thread([service, session, listener]() {
+            PortTunnelWorkerLease lease(service);
+            service->tcp_accept_loop(session, listener);
+        }).detach();
+    } catch (...) {
+        service->release_worker();
+        throw;
+    }
+    return true;
 #endif
 }
 
@@ -125,7 +139,10 @@ void PortTunnelConnection::tcp_listen(const PortTunnelFrame& frame) {
             BasicLockGuard lock(session->mutex);
             session->tcp_listeners[frame.stream_id] = listener;
         }
-        service_->spawn_tcp_listener_loop(session, listener);
+        if (!service_->spawn_tcp_listener_loop(session, listener)) {
+            fail_worker_limit(frame.stream_id);
+            return;
+        }
     } else {
         UniqueSocket listener(bind_port_forward_socket(endpoint, "tcp"));
         const SOCKET listener_socket = listener.get();
@@ -134,7 +151,10 @@ void PortTunnelConnection::tcp_listen(const PortTunnelFrame& frame) {
             BasicLockGuard lock(state_mutex_);
             tcp_listeners_[frame.stream_id].reset(listener.release());
         }
-        spawn_tcp_accept_thread(shared_from_this(), frame.stream_id, listener_socket);
+        if (!spawn_tcp_accept_thread(service_, shared_from_this(), frame.stream_id, listener_socket)) {
+            fail_worker_limit(frame.stream_id);
+            return;
+        }
     }
 
     PortTunnelFrame ok = make_empty_frame(PortTunnelFrameType::TcpListenOk, frame.stream_id);
@@ -174,7 +194,10 @@ void PortTunnelConnection::tcp_accept_loop_transport_owned(
             {"peer", printable_port_forward_endpoint(reinterpret_cast<sockaddr*>(&peer_address), peer_len)}
         }.dump();
         send_frame(frame);
-        spawn_tcp_read_thread(shared_from_this(), stream_id, stream);
+        if (!spawn_tcp_read_thread(service_, shared_from_this(), stream_id, stream)) {
+            fail_worker_limit(stream_id);
+            return;
+        }
     }
 }
 
@@ -188,7 +211,9 @@ void PortTunnelConnection::tcp_connect(const PortTunnelFrame& frame) {
         tcp_streams_[frame.stream_id] = stream;
     }
     send_frame(make_empty_frame(PortTunnelFrameType::TcpConnectOk, frame.stream_id));
-    spawn_tcp_read_thread(shared_from_this(), frame.stream_id, stream);
+    if (!spawn_tcp_read_thread(service_, shared_from_this(), frame.stream_id, stream)) {
+        fail_worker_limit(frame.stream_id);
+    }
 }
 
 void PortTunnelConnection::tcp_read_loop(

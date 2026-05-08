@@ -48,7 +48,9 @@ void PortTunnelService::detach_session(const std::shared_ptr<PortTunnelSession>&
         session->connection.reset();
         session->state_changed.broadcast();
     }
-    schedule_session_expiry(session);
+    if (!schedule_session_expiry(session)) {
+        close_session(session);
+    }
 }
 
 void PortTunnelService::close_session(const std::shared_ptr<PortTunnelSession>& session) {
@@ -94,9 +96,13 @@ void PortTunnelService::close_session(const std::shared_ptr<PortTunnelSession>& 
     }
 }
 
-void PortTunnelService::schedule_session_expiry(
+bool PortTunnelService::schedule_session_expiry(
     const std::shared_ptr<PortTunnelSession>& session
 ) {
+    std::shared_ptr<PortTunnelService> service = shared_from_this();
+    if (!service->try_acquire_worker()) {
+        return false;
+    }
 #ifdef _WIN32
     struct ExpiryContext {
         std::shared_ptr<PortTunnelService> service;
@@ -106,6 +112,7 @@ void PortTunnelService::schedule_session_expiry(
     struct ExpiryThread {
         static DWORD WINAPI entry(LPVOID raw_context) {
             std::unique_ptr<ExpiryContext> context(static_cast<ExpiryContext*>(raw_context));
+            PortTunnelWorkerLease lease(context->service);
             platform::sleep_ms(RESUME_TIMEOUT_MS);
             context->service->expire_session_if_needed(context->session);
             return 0;
@@ -113,19 +120,28 @@ void PortTunnelService::schedule_session_expiry(
     };
 
     std::unique_ptr<ExpiryContext> context(new ExpiryContext());
-    context->service = shared_from_this();
+    context->service = service;
     context->session = session;
     HANDLE handle = CreateThread(NULL, 0, &ExpiryThread::entry, context.get(), 0, NULL);
     if (handle != NULL) {
         context.release();
         CloseHandle(handle);
+        return true;
     }
+    service->release_worker();
+    return false;
 #else
-    std::shared_ptr<PortTunnelService> service = shared_from_this();
-    std::thread([service, session]() {
-        platform::sleep_ms(RESUME_TIMEOUT_MS);
-        service->expire_session_if_needed(session);
-    }).detach();
+    try {
+        std::thread([service, session]() {
+            PortTunnelWorkerLease lease(service);
+            platform::sleep_ms(RESUME_TIMEOUT_MS);
+            service->expire_session_if_needed(session);
+        }).detach();
+    } catch (...) {
+        service->release_worker();
+        throw;
+    }
+    return true;
 #endif
 }
 

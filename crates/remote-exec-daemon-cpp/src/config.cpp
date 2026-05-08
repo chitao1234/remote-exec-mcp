@@ -272,6 +272,11 @@ DaemonConfig load_config(const std::string& path) {
         512UL * 1024UL * 1024UL
     );
     config.max_open_sessions = read_optional_unsigned_long(values, "max_open_sessions", 64UL);
+    config.port_forward_max_worker_threads = read_optional_unsigned_long(
+        values,
+        "port_forward_max_worker_threads",
+        DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS
+    );
     if (config.max_request_header_bytes == 0) {
         throw std::runtime_error("max_request_header_bytes must be greater than zero");
     }
@@ -280,6 +285,9 @@ DaemonConfig load_config(const std::string& path) {
     }
     if (config.max_open_sessions == 0) {
         throw std::runtime_error("max_open_sessions must be greater than zero");
+    }
+    if (config.port_forward_max_worker_threads == 0) {
+        throw std::runtime_error("port_forward_max_worker_threads must be greater than zero");
     }
     config.yield_time = default_yield_time_config();
     config.yield_time.exec_command = read_yield_time_operation(

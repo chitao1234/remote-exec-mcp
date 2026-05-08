@@ -48,16 +48,30 @@ static DaemonConfig make_config(const fs::path& root) {
     config.max_request_header_bytes = 65536;
     config.max_request_body_bytes = 536870912;
     config.max_open_sessions = 64;
+    config.port_forward_max_worker_threads = DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS;
     config.yield_time = default_yield_time_config();
     return config;
 }
 
-static void initialize_state(AppState& state, const fs::path& root) {
+static void initialize_state_with_worker_limit(
+    AppState& state,
+    const fs::path& root,
+    unsigned long max_workers
+) {
     state.config = make_config(root);
+    state.config.port_forward_max_worker_threads = max_workers;
     state.daemon_instance_id = "test-instance";
     state.hostname = "test-host";
     state.default_shell = platform::resolve_default_shell("");
-    state.port_tunnel_service = create_port_tunnel_service();
+    state.port_tunnel_service = create_port_tunnel_service(max_workers);
+}
+
+static void initialize_state(AppState& state, const fs::path& root) {
+    initialize_state_with_worker_limit(
+        state,
+        root,
+        DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS
+    );
 }
 
 static void enable_sandbox(AppState& state) {
@@ -415,7 +429,7 @@ static void open_tunnel(AppState& state, UniqueSocket* client_socket, std::threa
         "POST /v1/port/tunnel HTTP/1.1\r\n"
         "Connection: Upgrade\r\n"
         "Upgrade: remote-exec-port-tunnel\r\n"
-        "X-Remote-Exec-Port-Tunnel-Version: 2\r\n"
+        "X-Remote-Exec-Port-Tunnel-Version: 4\r\n"
         "\r\n"
     );
     const std::string response = read_http_head_from_socket(client_socket->get());
@@ -449,6 +463,25 @@ static PortTunnelFrame data_frame(
     frame.stream_id = stream_id;
     frame.data = data;
     return frame;
+}
+
+static Json tunnel_open_meta(
+    const std::string& role,
+    const std::string& protocol,
+    uint64_t generation,
+    const std::string& resume_session_id = std::string()
+) {
+    Json meta{
+        {"forward_id", "fwd_cpp_test"},
+        {"role", role},
+        {"side", "cpp-test"},
+        {"generation", generation},
+        {"protocol", protocol}
+    };
+    if (!resume_session_id.empty()) {
+        meta["resume_session_id"] = resume_session_id;
+    }
+    return meta;
 }
 
 static void close_tunnel(UniqueSocket* client_socket, std::thread* server_thread) {
@@ -542,6 +575,85 @@ static void assert_terminal_tunnel_error_releases_tcp_listener_immediately(AppSt
 
     close_tunnel(&client_socket, &server_thread);
     wait_until_bindable(endpoint);
+}
+
+static void assert_tunnel_open_ready_and_close_round_trip(AppState& state) {
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_tunnel(state, &client_socket, &server_thread);
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(
+            PortTunnelFrameType::TunnelOpen,
+            0U,
+            tunnel_open_meta("listen", "tcp", 1ULL)
+        )
+    );
+    const PortTunnelFrame ready = read_tunnel_frame(client_socket.get());
+    assert(ready.type == PortTunnelFrameType::TunnelReady);
+    const Json ready_meta = Json::parse(ready.meta);
+    assert(ready_meta.at("generation").get<uint64_t>() == 1ULL);
+    assert(ready_meta.at("session_id").get<std::string>().find("sess_cpp_") == 0);
+    assert(ready_meta.at("resume_timeout_ms").get<unsigned long>() > 0UL);
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(
+            PortTunnelFrameType::TunnelClose,
+            0U,
+            Json{
+                {"forward_id", "fwd_cpp_test"},
+                {"generation", 1ULL},
+                {"reason", "operator_close"}
+            }
+        )
+    );
+    const PortTunnelFrame closed = read_tunnel_frame(client_socket.get());
+    assert(closed.type == PortTunnelFrameType::TunnelClosed);
+    assert(closed.stream_id == 0U);
+    assert(Json::parse(closed.meta).at("generation").get<uint64_t>() == 1ULL);
+
+    close_tunnel(&client_socket, &server_thread);
+}
+
+static void assert_port_tunnel_worker_limit_is_reported(const fs::path& root) {
+    AppState state;
+    initialize_state_with_worker_limit(state, root, 1UL);
+
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_tunnel(state, &client_socket, &server_thread);
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(
+            PortTunnelFrameType::TunnelOpen,
+            0U,
+            tunnel_open_meta("listen", "tcp", 1ULL)
+        )
+    );
+    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TunnelReady);
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}})
+    );
+    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpListenOk);
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TcpListen, 3U, Json{{"endpoint", "127.0.0.1:0"}})
+    );
+    const PortTunnelFrame error = read_tunnel_frame(client_socket.get());
+    assert(error.type == PortTunnelFrameType::Error);
+    assert(error.stream_id == 3U);
+    const Json error_meta = Json::parse(error.meta);
+    assert(error_meta.at("code").get<std::string>() == "port_tunnel_limit_exceeded");
+    assert(error_meta.at("message").get<std::string>() == "port tunnel worker limit reached");
+    assert(error_meta.at("fatal").get<bool>());
+
+    close_tunnel(&client_socket, &server_thread);
 }
 
 static void assert_tunnel_tcp_connect_echoes_binary_data(AppState& state) {
@@ -782,6 +894,8 @@ int main() {
 
     assert_tunnel_releases_tcp_listener_on_close(state);
     assert_terminal_tunnel_error_releases_tcp_listener_immediately(state);
+    assert_tunnel_open_ready_and_close_round_trip(state);
+    assert_port_tunnel_worker_limit_is_reported(root);
     assert_tunnel_tcp_connect_echoes_binary_data(state);
     assert_tunnel_udp_bind_emits_two_peer_datagrams(state);
     assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(state);

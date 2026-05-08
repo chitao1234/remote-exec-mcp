@@ -39,6 +39,7 @@ static DaemonConfig make_config(const fs::path& root) {
     config.max_request_header_bytes = 65536;
     config.max_request_body_bytes = 536870912;
     config.max_open_sessions = 64;
+    config.port_forward_max_worker_threads = DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS;
     config.yield_time = default_yield_time_config();
     return config;
 }
@@ -48,7 +49,8 @@ static void initialize_state(AppState& state, const fs::path& root) {
     state.daemon_instance_id = "test-instance";
     state.hostname = "test-host";
     state.default_shell = platform::resolve_default_shell("");
-    state.port_tunnel_service = create_port_tunnel_service();
+    state.port_tunnel_service =
+        create_port_tunnel_service(state.config.port_forward_max_worker_threads);
 }
 
 static void enable_sandbox(AppState& state) {
