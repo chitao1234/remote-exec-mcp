@@ -258,7 +258,7 @@ async fn forward_ports_keeps_forward_open_after_stream_connect_error() {
 
 #[tokio::test]
 async fn forward_ports_rejects_targets_without_tunnel_protocol_version() {
-    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(1).await;
+    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(3).await;
 
     let error = fixture
         .call_tool_error(
@@ -277,14 +277,14 @@ async fn forward_ports_rejects_targets_without_tunnel_protocol_version() {
         .await;
 
     assert!(
-        error.contains("does not support port forward protocol version 3"),
+        error.contains("does not support port forward protocol version 4"),
         "unexpected error: {error}"
     );
 }
 
 #[tokio::test]
 async fn forward_ports_keeps_forward_open_after_listen_tunnel_drop() {
-    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(3).await;
+    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
     let echo_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let echo_addr = echo_listener.local_addr().unwrap();
@@ -319,7 +319,7 @@ async fn forward_ports_keeps_forward_open_after_listen_tunnel_drop() {
 
 #[tokio::test]
 async fn forward_ports_closes_active_tcp_streams_after_connect_tunnel_drop() {
-    let fixture = support::spawners::spawn_broker_with_local_and_stub_port_forward_version(3).await;
+    let fixture = support::spawners::spawn_broker_with_local_and_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
     let echo_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let echo_addr = echo_listener.local_addr().unwrap();
@@ -417,7 +417,7 @@ async fn forward_ports_closes_active_tcp_streams_after_connect_tunnel_drop() {
 
 #[tokio::test]
 async fn forward_ports_fails_when_resume_deadline_expires() {
-    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(3).await;
+    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
     support::stub_daemon::block_session_resume(&fixture.stub_state).await;
     let blackhole = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -444,7 +444,7 @@ async fn forward_ports_fails_when_resume_deadline_expires() {
 
 #[tokio::test]
 async fn forward_ports_times_out_stalled_resume_attempts() {
-    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(3).await;
+    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
     support::stub_daemon::set_session_resume_timeout(
         &fixture.stub_state,
@@ -474,7 +474,7 @@ async fn forward_ports_times_out_stalled_resume_attempts() {
 
 #[tokio::test]
 async fn forward_ports_does_not_retry_stream_error_frames() {
-    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(3).await;
+    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
     support::stub_daemon::set_port_tunnel_resume_error(
         &fixture.stub_state,
@@ -503,7 +503,7 @@ async fn forward_ports_does_not_retry_stream_error_frames() {
 
 #[tokio::test]
 async fn forward_ports_close_reports_listen_cleanup_failures() {
-    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(3).await;
+    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
     support::stub_daemon::block_session_resume(&fixture.stub_state).await;
     let blackhole = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -538,7 +538,7 @@ async fn forward_ports_close_reports_listen_cleanup_failures() {
 
 #[tokio::test]
 async fn forward_ports_marks_forward_failed_when_close_cleanup_fails() {
-    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(3).await;
+    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
     support::stub_daemon::block_session_resume(&fixture.stub_state).await;
     let blackhole = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -589,7 +589,7 @@ async fn forward_ports_marks_forward_failed_when_close_cleanup_fails() {
 
 #[tokio::test]
 async fn forward_ports_records_failure_when_runtime_fails_before_multi_open_finishes() {
-    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(3).await;
+    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
     support::stub_daemon::fail_first_forward_runtime_before_multi_open_finishes(
         &fixture.stub_state,
@@ -643,7 +643,7 @@ async fn forward_ports_records_failure_when_runtime_fails_before_multi_open_fini
 async fn forward_ports_closes_pending_tcp_stream_when_remote_connect_never_acknowledges() {
     const MAX_PENDING_TCP_BYTES_PER_STREAM: usize = 256 * 1024;
 
-    let fixture = support::spawners::spawn_broker_with_local_and_stub_port_forward_version(3).await;
+    let fixture = support::spawners::spawn_broker_with_local_and_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
     support::stub_daemon::drop_tcp_connect_ok_frames(&fixture.stub_state).await;
 
@@ -797,7 +797,7 @@ async fn forward_ports_stays_open_during_heavy_local_udp_peer_churn() {
 
 #[tokio::test]
 async fn forward_ports_retries_udp_connector_after_bind_error() {
-    let fixture = support::spawners::spawn_broker_with_local_and_stub_port_forward_version(3).await;
+    let fixture = support::spawners::spawn_broker_with_local_and_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
     support::stub_daemon::fail_next_udp_connector_bind(&fixture.stub_state).await;
 

@@ -132,7 +132,7 @@ async fn list_targets_reports_port_forward_protocol_version_for_real_cpp_daemon(
     );
     assert_eq!(
         result.structured_content["targets"][0]["daemon_info"]["port_forward_protocol_version"],
-        3
+        4
     );
 }
 

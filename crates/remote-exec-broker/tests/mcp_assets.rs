@@ -155,18 +155,18 @@ async fn list_targets_formats_windows_metadata_and_truthful_pty_support() {
 
 #[tokio::test]
 async fn list_targets_reports_port_forward_protocol_version_when_available() {
-    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(3).await;
+    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
     let result = fixture
         .call_tool("list_targets", serde_json::json!({}))
         .await;
 
     assert_eq!(
         result.structured_content["targets"][0]["daemon_info"]["port_forward_protocol_version"],
-        serde_json::json!(3)
+        serde_json::json!(4)
     );
     assert!(
         result.text_output.contains("forward_ports=yes")
-            && result.text_output.contains("forward_protocol=v3"),
+            && result.text_output.contains("forward_protocol=v4"),
         "unexpected text: {}",
         result.text_output
     );
