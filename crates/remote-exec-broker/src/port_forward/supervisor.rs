@@ -72,6 +72,7 @@ pub(super) struct ForwardRuntime {
     pub(super) max_pending_tcp_bytes_per_forward: usize,
     pub(super) max_udp_peers_per_forward: usize,
     pub(super) max_tunnel_queued_bytes: usize,
+    pub(super) max_reconnecting_forwards: usize,
     pub(super) store: PortForwardStore,
     pub(super) listen_session: Arc<ListenSessionControl>,
     pub(super) initial_connect_tunnel: Arc<PortTunnel>,
@@ -271,6 +272,7 @@ async fn open_tcp_forward(
         max_pending_tcp_bytes_per_forward: limits.max_pending_tcp_bytes_per_forward as usize,
         max_udp_peers_per_forward: limits.max_udp_peers as usize,
         max_tunnel_queued_bytes: limits.max_tunnel_queued_bytes as usize,
+        max_reconnecting_forwards: limits.max_reconnecting_forwards,
         store,
         listen_session: listen_session.clone(),
         initial_connect_tunnel: connect_tunnel,
@@ -383,6 +385,7 @@ async fn open_udp_forward(
         max_pending_tcp_bytes_per_forward: limits.max_pending_tcp_bytes_per_forward as usize,
         max_udp_peers_per_forward: limits.max_udp_peers as usize,
         max_tunnel_queued_bytes: limits.max_tunnel_queued_bytes as usize,
+        max_reconnecting_forwards: limits.max_reconnecting_forwards,
         store,
         listen_session: listen_session.clone(),
         initial_connect_tunnel: connect_tunnel,
@@ -652,8 +655,9 @@ pub(super) async fn reconnect_connect_tunnel(
             &runtime.forward_id,
             ForwardPortSideRole::Connect,
             "connect-side transport loss".to_string(),
+            runtime.max_reconnecting_forwards,
         )
-        .await;
+        .await?;
     retry_reconnect(
         runtime.cancel.clone(),
         PortForwardReconnectPolicy::connect(),

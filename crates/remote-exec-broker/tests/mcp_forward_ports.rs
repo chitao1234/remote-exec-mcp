@@ -562,6 +562,134 @@ async fn forward_ports_connect_side_reconnect_retries_transient_open_failures() 
 }
 
 #[tokio::test]
+async fn forward_ports_reports_reconnecting_until_connect_side_is_ready() {
+    let fixture = support::spawners::spawn_broker_with_local_and_stub_port_forward_version(4).await;
+    support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
+
+    let echo = spawn_tcp_echo().await;
+    let open = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "local",
+                "connect_side": "builder-a",
+                "forwards": [{
+                    "listen_endpoint": "127.0.0.1:0",
+                    "connect_endpoint": echo.to_string(),
+                    "protocol": "tcp"
+                }]
+            }),
+        )
+        .await;
+    let forward_id = forward_id_from(&open);
+    let listen_endpoint = listen_endpoint_from(&open);
+
+    support::stub_daemon::fail_next_port_tunnel_upgrades(&fixture.stub_state, 2).await;
+    support::stub_daemon::force_close_port_tunnel_transport(&fixture.stub_state).await;
+    let mut stream = tokio::net::TcpStream::connect(&listen_endpoint)
+        .await
+        .unwrap();
+    let _ = stream.write_all(b"trigger").await;
+    drop(stream);
+
+    let reconnecting = wait_for_forward_phase(
+        &fixture,
+        &forward_id,
+        "reconnecting",
+        Duration::from_secs(5),
+    )
+    .await;
+    assert_eq!(reconnecting["status"], "open");
+    assert_eq!(reconnecting["listen_state"]["health"], "ready");
+    assert_eq!(reconnecting["connect_state"]["health"], "reconnecting");
+
+    let ready =
+        wait_for_forward_ready_after_reconnect(&fixture, &forward_id, Duration::from_secs(5)).await;
+    assert_eq!(ready["status"], "open");
+    assert_eq!(ready["phase"], "ready");
+    assert_eq!(ready["listen_state"]["health"], "ready");
+    assert_eq!(ready["connect_state"]["health"], "ready");
+
+    let close = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "close",
+                "forward_ids": [forward_id]
+            }),
+        )
+        .await;
+    assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
+}
+
+#[tokio::test]
+async fn forward_ports_enforces_configured_reconnecting_forward_limit() {
+    let fixture =
+        support::spawners::spawn_broker_with_local_and_stub_port_forward_version_and_port_forward_limits(
+            4,
+            r#"[port_forward_limits]
+max_open_forwards_total = 2
+max_forwards_per_side_pair = 2
+max_reconnecting_forwards = 1
+"#,
+        )
+        .await;
+    support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
+
+    let echo = spawn_tcp_echo().await;
+    let open = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "local",
+                "connect_side": "builder-a",
+                "forwards": [
+                    {
+                        "listen_endpoint": "127.0.0.1:0",
+                        "connect_endpoint": echo.to_string(),
+                        "protocol": "tcp"
+                    },
+                    {
+                        "listen_endpoint": "127.0.0.1:0",
+                        "connect_endpoint": echo.to_string(),
+                        "protocol": "tcp"
+                    }
+                ]
+            }),
+        )
+        .await;
+    assert_eq!(
+        open.structured_content["forwards"][0]["limits"]["max_reconnecting_forwards"],
+        1
+    );
+    let forward_ids = vec![forward_id_at(&open, 0), forward_id_at(&open, 1)];
+
+    support::stub_daemon::fail_next_port_tunnel_upgrades(&fixture.stub_state, 100).await;
+    support::stub_daemon::force_close_port_tunnel_transport(&fixture.stub_state).await;
+
+    let entries =
+        wait_for_reconnect_limit_failure(&fixture, &forward_ids, Duration::from_secs(5)).await;
+    let failed = entries
+        .iter()
+        .filter(|entry| entry["status"] == "failed")
+        .collect::<Vec<_>>();
+    assert_eq!(failed.len(), 1);
+    let error = failed[0]["last_error"].as_str().unwrap_or_default();
+    assert!(
+        error.contains("port_forward_limit_exceeded"),
+        "unexpected reconnect limit error: {error}"
+    );
+
+    let reconnecting = entries
+        .iter()
+        .filter(|entry| entry["status"] == "open" && entry["phase"] == "reconnecting")
+        .collect::<Vec<_>>();
+    assert_eq!(reconnecting.len(), 1);
+}
+
+#[tokio::test]
 async fn forward_ports_fails_when_resume_deadline_expires() {
     let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
@@ -1618,6 +1746,47 @@ async fn wait_for_forward_ready_after_reconnect(
         .unwrap_or_default();
     panic!(
         "forward `{forward_id}` did not return to ready after reconnect within {timeout:?}; last_phase={last_phase} last_status={last_status} reconnect_attempts={reconnect_attempts} last_error={last_error}"
+    );
+}
+
+async fn wait_for_reconnect_limit_failure(
+    fixture: &support::fixture::BrokerFixture,
+    forward_ids: &[String],
+    timeout: Duration,
+) -> Vec<serde_json::Value> {
+    let started = std::time::Instant::now();
+    let mut last_entries = Vec::new();
+    while started.elapsed() < timeout {
+        let list = fixture
+            .call_tool(
+                "forward_ports",
+                serde_json::json!({
+                    "action": "list",
+                    "forward_ids": forward_ids
+                }),
+            )
+            .await;
+        let entries = list.structured_content["forwards"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        last_entries = entries.clone();
+        let failed = entries
+            .iter()
+            .filter(|entry| entry["status"] == "failed")
+            .count();
+        let reconnecting = entries
+            .iter()
+            .filter(|entry| entry["status"] == "open" && entry["phase"] == "reconnecting")
+            .count();
+        if failed == 1 && reconnecting == 1 {
+            return entries;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    panic!(
+        "forwards did not reach one failed and one reconnecting within {timeout:?}; last_entries={last_entries:?}"
     );
 }
 

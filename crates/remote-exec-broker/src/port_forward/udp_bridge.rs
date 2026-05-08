@@ -44,8 +44,9 @@ pub(super) async fn run_udp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
                         &runtime.forward_id,
                         ForwardPortSideRole::Listen,
                         "listen-side tunnel lost".to_string(),
+                        runtime.max_reconnecting_forwards,
                     )
-                    .await;
+                    .await?;
                 let Some(resumed_tunnel) =
                     reconnect_listen_tunnel(runtime.listen_session.clone(), runtime.cancel.clone())
                         .await?
@@ -713,6 +714,7 @@ mod tests {
             max_pending_tcp_bytes_per_forward: 2 * 1024 * 1024,
             max_udp_peers_per_forward: 256,
             max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
+            max_reconnecting_forwards: 16,
             store: Default::default(),
             listen_session,
             initial_connect_tunnel: connect_tunnel,

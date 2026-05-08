@@ -37,6 +37,7 @@ impl BrokerPortForwardLimits {
             max_pending_tcp_bytes_per_stream: self.max_pending_tcp_bytes_per_stream,
             max_pending_tcp_bytes_per_forward: self.max_pending_tcp_bytes_per_forward,
             max_tunnel_queued_bytes: self.max_tunnel_queued_bytes,
+            max_reconnecting_forwards: self.max_reconnecting_forwards,
         }
     }
 

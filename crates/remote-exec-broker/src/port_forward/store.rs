@@ -12,6 +12,9 @@ use tokio_util::sync::CancellationToken;
 
 use super::supervisor::{ListenSessionControl, close_listen_session, wait_for_forward_task_stop};
 
+const RECONNECT_LIMIT_EXCEEDED: &str =
+    "port_forward_limit_exceeded: broker reconnecting forward limit reached";
+
 #[derive(Clone, Default)]
 pub struct PortForwardStore {
     entries: Arc<RwLock<HashMap<String, PortForwardRecord>>>,
@@ -128,11 +131,7 @@ impl PortForwardStore {
     pub async fn mark_failed(&self, forward_id: &str, error: String) {
         let mut entries = self.entries.write().await;
         if let Some(record) = entries.get_mut(forward_id) {
-            record.entry.status = ForwardPortStatus::Failed;
-            record.entry.phase = ForwardPortPhase::Failed;
-            record.entry.listen_state.health = ForwardPortSideHealth::Failed;
-            record.entry.connect_state.health = ForwardPortSideHealth::Failed;
-            record.entry.last_error = Some(error);
+            mark_entry_failed(&mut record.entry, error);
         }
     }
 
@@ -148,9 +147,35 @@ impl PortForwardStore {
         forward_id: &str,
         role: ForwardPortSideRole,
         error: String,
-    ) {
-        self.update_entry(forward_id, |entry| {
-            entry.phase = ForwardPortPhase::Reconnecting;
+        max_reconnecting_forwards: usize,
+    ) -> anyhow::Result<()> {
+        let mut entries = self.entries.write().await;
+        let Some(record) = entries.get(forward_id) else {
+            return Ok(());
+        };
+        if record.entry.status != ForwardPortStatus::Open {
+            return Ok(());
+        }
+
+        let already_reconnecting = derive_phase(&record.entry) == ForwardPortPhase::Reconnecting;
+        if !already_reconnecting {
+            let reconnecting_count = entries
+                .values()
+                .filter(|record| {
+                    record.entry.status == ForwardPortStatus::Open
+                        && derive_phase(&record.entry) == ForwardPortPhase::Reconnecting
+                })
+                .count();
+            if reconnecting_count >= max_reconnecting_forwards {
+                if let Some(record) = entries.get_mut(forward_id) {
+                    mark_entry_failed(&mut record.entry, RECONNECT_LIMIT_EXCEEDED.to_string());
+                }
+                return Err(anyhow::anyhow!(RECONNECT_LIMIT_EXCEEDED));
+            }
+        }
+
+        if let Some(record) = entries.get_mut(forward_id) {
+            let entry = &mut record.entry;
             entry.reconnect_attempts += 1;
             entry.last_reconnect_at = Some(unix_timestamp_string());
             let side = match role {
@@ -159,19 +184,23 @@ impl PortForwardStore {
             };
             side.health = ForwardPortSideHealth::Reconnecting;
             side.last_error = Some(error);
-        })
-        .await;
+            entry.phase = derive_phase(entry);
+        }
+        Ok(())
     }
 
     pub async fn mark_ready(&self, forward_id: &str, role: ForwardPortSideRole) {
         self.update_entry(forward_id, |entry| {
-            entry.phase = ForwardPortPhase::Ready;
+            if entry.status != ForwardPortStatus::Open {
+                return;
+            }
             let side = match role {
                 ForwardPortSideRole::Listen => &mut entry.listen_state,
                 ForwardPortSideRole::Connect => &mut entry.connect_state,
             };
             side.health = ForwardPortSideHealth::Ready;
             side.last_error = None;
+            entry.phase = derive_phase(entry);
         })
         .await;
     }
@@ -274,8 +303,173 @@ fn closed_entry(mut entry: ForwardPortEntry) -> ForwardPortEntry {
     entry
 }
 
+fn mark_entry_failed(entry: &mut ForwardPortEntry, error: String) {
+    entry.status = ForwardPortStatus::Failed;
+    entry.phase = ForwardPortPhase::Failed;
+    entry.listen_state.health = ForwardPortSideHealth::Failed;
+    entry.connect_state.health = ForwardPortSideHealth::Failed;
+    entry.last_error = Some(error);
+}
+
+fn derive_phase(entry: &ForwardPortEntry) -> ForwardPortPhase {
+    if entry.listen_state.health == ForwardPortSideHealth::Failed
+        || entry.connect_state.health == ForwardPortSideHealth::Failed
+    {
+        ForwardPortPhase::Failed
+    } else if entry.listen_state.health == ForwardPortSideHealth::Closed
+        && entry.connect_state.health == ForwardPortSideHealth::Closed
+    {
+        ForwardPortPhase::Closed
+    } else if entry.listen_state.health == ForwardPortSideHealth::Ready
+        && entry.connect_state.health == ForwardPortSideHealth::Ready
+    {
+        ForwardPortPhase::Ready
+    } else {
+        ForwardPortPhase::Reconnecting
+    }
+}
+
 pub async fn close_all(store: &PortForwardStore) {
     for record in store.drain().await {
         let _ = close_record(record).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use remote_exec_proto::public::{
+        ForwardPortEntry, ForwardPortLimitSummary, ForwardPortPhase, ForwardPortProtocol,
+        ForwardPortSideHealth, ForwardPortSideRole, ForwardPortStatus,
+    };
+    use tokio::sync::Mutex;
+    use tokio_util::sync::CancellationToken;
+
+    use super::*;
+    use crate::port_forward::SideHandle;
+
+    #[tokio::test]
+    async fn mark_ready_keeps_forward_reconnecting_until_both_sides_ready() {
+        let store = PortForwardStore::default();
+        store.insert(test_record("fwd_state")).await;
+
+        store
+            .mark_reconnecting(
+                "fwd_state",
+                ForwardPortSideRole::Connect,
+                "connect-side tunnel lost".to_string(),
+                16,
+            )
+            .await
+            .unwrap();
+        store
+            .mark_ready("fwd_state", ForwardPortSideRole::Listen)
+            .await;
+
+        let reconnecting = store.list(&filter_one("fwd_state")).await.remove(0);
+        assert_eq!(reconnecting.status, ForwardPortStatus::Open);
+        assert_eq!(reconnecting.phase, ForwardPortPhase::Reconnecting);
+        assert_eq!(
+            reconnecting.listen_state.health,
+            ForwardPortSideHealth::Ready
+        );
+        assert_eq!(
+            reconnecting.connect_state.health,
+            ForwardPortSideHealth::Reconnecting
+        );
+
+        store
+            .mark_ready("fwd_state", ForwardPortSideRole::Connect)
+            .await;
+
+        let ready = store.list(&filter_one("fwd_state")).await.remove(0);
+        assert_eq!(ready.status, ForwardPortStatus::Open);
+        assert_eq!(ready.phase, ForwardPortPhase::Ready);
+        assert_eq!(ready.listen_state.health, ForwardPortSideHealth::Ready);
+        assert_eq!(ready.connect_state.health, ForwardPortSideHealth::Ready);
+    }
+
+    #[tokio::test]
+    async fn mark_reconnecting_fails_new_forward_when_reconnect_limit_is_reached() {
+        let store = PortForwardStore::default();
+        store.insert(test_record("fwd_first")).await;
+        store.insert(test_record("fwd_second")).await;
+
+        store
+            .mark_reconnecting(
+                "fwd_first",
+                ForwardPortSideRole::Connect,
+                "connect-side tunnel lost".to_string(),
+                1,
+            )
+            .await
+            .unwrap();
+        let error = store
+            .mark_reconnecting(
+                "fwd_second",
+                ForwardPortSideRole::Listen,
+                "listen-side tunnel lost".to_string(),
+                1,
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("port_forward_limit_exceeded"));
+        let first = store.list(&filter_one("fwd_first")).await.remove(0);
+        assert_eq!(first.status, ForwardPortStatus::Open);
+        assert_eq!(first.phase, ForwardPortPhase::Reconnecting);
+
+        let second = store.list(&filter_one("fwd_second")).await.remove(0);
+        assert_eq!(second.status, ForwardPortStatus::Failed);
+        assert_eq!(second.phase, ForwardPortPhase::Failed);
+        assert_eq!(
+            second.last_error.as_deref(),
+            Some("port_forward_limit_exceeded: broker reconnecting forward limit reached")
+        );
+    }
+
+    fn filter_one(forward_id: &str) -> PortForwardFilter {
+        PortForwardFilter {
+            listen_side: None,
+            connect_side: None,
+            forward_ids: vec![forward_id.to_string()],
+        }
+    }
+
+    fn test_record(forward_id: &str) -> PortForwardRecord {
+        PortForwardRecord {
+            entry: ForwardPortEntry::new_open(
+                forward_id.to_string(),
+                "local".to_string(),
+                "127.0.0.1:10000".to_string(),
+                "builder-a".to_string(),
+                "127.0.0.1:10001".to_string(),
+                ForwardPortProtocol::Tcp,
+                ForwardPortLimitSummary {
+                    max_active_tcp_streams: 256,
+                    max_udp_peers: 256,
+                    max_pending_tcp_bytes_per_stream: 256 * 1024,
+                    max_pending_tcp_bytes_per_forward: 2 * 1024 * 1024,
+                    max_tunnel_queued_bytes: 8 * 1024 * 1024,
+                    max_reconnecting_forwards: 16,
+                },
+            ),
+            listen_session: Arc::new(ListenSessionControl {
+                side: SideHandle::local(),
+                forward_id: forward_id.to_string(),
+                session_id: format!("session-{forward_id}"),
+                generation: 1,
+                listener_stream_id: 1,
+                resume_timeout: Duration::from_secs(5),
+                max_tunnel_queued_bytes: 8 * 1024 * 1024,
+                current_tunnel: Mutex::new(None),
+                op_lock: Mutex::new(()),
+            }),
+            cancel: CancellationToken::new(),
+            task_done: Arc::new(Mutex::new(None)),
+        }
     }
 }

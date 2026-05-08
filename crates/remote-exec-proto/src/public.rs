@@ -312,6 +312,7 @@ pub struct ForwardPortLimitSummary {
     pub max_pending_tcp_bytes_per_stream: u64,
     pub max_pending_tcp_bytes_per_forward: u64,
     pub max_tunnel_queued_bytes: u64,
+    pub max_reconnecting_forwards: usize,
 }
 
 impl ForwardPortEntry {
@@ -399,6 +400,7 @@ mod tests {
                 max_pending_tcp_bytes_per_stream: 262144,
                 max_pending_tcp_bytes_per_forward: 2097152,
                 max_tunnel_queued_bytes: 8388608,
+                max_reconnecting_forwards: 16,
             },
         };
 
@@ -407,5 +409,6 @@ mod tests {
         assert_eq!(value["connect_state"]["health"], "reconnecting");
         assert_eq!(value["dropped_tcp_streams"], 2);
         assert_eq!(value["limits"]["max_tunnel_queued_bytes"], 8388608);
+        assert_eq!(value["limits"]["max_reconnecting_forwards"], 16);
     }
 }
