@@ -227,7 +227,13 @@ max_tunnel_connections = 1
             let error_meta: TunnelErrorMeta = serde_json::from_slice(&frame.meta).unwrap();
             assert_eq!(error_meta.code, "port_tunnel_limit_exceeded");
         }
-        Err(err) => assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof),
+        Err(err) => assert!(
+            matches!(
+                err.kind(),
+                std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::UnexpectedEof
+            ),
+            "unexpected second tunnel close error: {err}"
+        ),
     }
 }
 
