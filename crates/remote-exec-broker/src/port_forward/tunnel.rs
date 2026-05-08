@@ -249,6 +249,12 @@ pub(super) fn is_retryable_transport_error(err: &anyhow::Error) -> bool {
             if daemon_error.is_transport() {
                 return true;
             }
+            if matches!(
+                daemon_error.rpc_code(),
+                Some("invalid_port_tunnel" | "port_tunnel_unavailable")
+            ) {
+                return true;
+            }
         }
         if let Some(io_error) = cause.downcast_ref::<std::io::Error>() {
             if matches!(

@@ -82,6 +82,7 @@ struct StubPortTunnelControl {
     close_transports_on_second_session_open: bool,
     session_open_count: usize,
     tunnel_open_count: usize,
+    port_tunnel_upgrades_to_fail: usize,
     delay_session_ready_after_first: Option<Duration>,
     override_session_ready_resume_timeout_ms: Option<u64>,
     session_ready_count: usize,
@@ -101,6 +102,7 @@ impl Default for StubPortTunnelControl {
             close_transports_on_second_session_open: false,
             session_open_count: 0,
             tunnel_open_count: 0,
+            port_tunnel_upgrades_to_fail: 0,
             delay_session_ready_after_first: None,
             override_session_ready_resume_timeout_ms: None,
             session_ready_count: 0,
@@ -205,6 +207,14 @@ pub(crate) async fn force_close_port_tunnel_transport(state: &StubDaemonState) {
     for transport in active_transports {
         transport.cancel();
     }
+}
+
+pub(crate) async fn fail_next_port_tunnel_upgrades(state: &StubDaemonState, count: usize) {
+    state
+        .port_tunnel_control
+        .lock()
+        .await
+        .port_tunnel_upgrades_to_fail += count;
 }
 
 pub(crate) async fn block_session_resume(state: &StubDaemonState) {
@@ -500,9 +510,15 @@ async fn port_tunnel(
     request: Request,
 ) -> Result<Response, (StatusCode, Json<RpcErrorBody>)> {
     {
-        let control = state.port_tunnel_control.lock().await;
+        let mut control = state.port_tunnel_control.lock().await;
         if !control.enabled {
             return Err(unsupported_port_tunnel_request());
+        }
+        if control.port_tunnel_upgrades_to_fail > 0 {
+            control.port_tunnel_upgrades_to_fail -= 1;
+            return Err(port_tunnel_unavailable_request(
+                "forced transient port tunnel upgrade failure",
+            ));
         }
     }
 
@@ -930,6 +946,16 @@ fn bad_port_tunnel_request(message: impl Into<String>) -> (StatusCode, Json<RpcE
         StatusCode::BAD_REQUEST,
         Json(RpcErrorBody {
             code: "bad_request".to_string(),
+            message: message.into(),
+        }),
+    )
+}
+
+fn port_tunnel_unavailable_request(message: impl Into<String>) -> (StatusCode, Json<RpcErrorBody>) {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(RpcErrorBody {
+            code: "port_tunnel_unavailable".to_string(),
             message: message.into(),
         }),
     )

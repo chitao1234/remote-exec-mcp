@@ -6,7 +6,9 @@ use remote_exec_proto::port_tunnel::{Frame, FrameType};
 use remote_exec_proto::public::ForwardPortSideRole;
 
 use super::events::{ForwardLoopControl, ForwardSideEvent, TunnelRole, classify_transport_failure};
-use super::supervisor::{ForwardRuntime, open_connect_tunnel, reconnect_listen_tunnel};
+use super::supervisor::{
+    ForwardRuntime, open_data_tunnel, reconnect_connect_tunnel, reconnect_listen_tunnel,
+};
 use super::tunnel::{
     EndpointMeta, PortTunnel, TcpAcceptMeta, classify_recoverable_tunnel_event,
     decode_tunnel_error_frame, decode_tunnel_meta, encode_tunnel_meta,
@@ -58,30 +60,29 @@ pub(super) async fn run_tcp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
                     .store
                     .mark_ready(&runtime.forward_id, ForwardPortSideRole::Listen)
                     .await;
-                connect_tunnel = open_connect_tunnel(&runtime.connect_side)
-                    .await
-                    .with_context(|| {
-                        format!(
-                            "reopening port tunnel to `{}` after listen-side reconnect",
-                            runtime.connect_side.name()
-                        )
-                    })?;
+                connect_tunnel = open_data_tunnel(
+                    &runtime.connect_side,
+                    &runtime.forward_id,
+                    runtime.protocol,
+                    1,
+                )
+                .await
+                .with_context(|| {
+                    format!(
+                        "reopening port tunnel to `{}` after listen-side reconnect",
+                        runtime.connect_side.name()
+                    )
+                })?;
                 runtime
                     .store
                     .mark_ready(&runtime.forward_id, ForwardPortSideRole::Connect)
                     .await;
             }
             ForwardLoopControl::RecoverTunnel(TunnelRole::Connect) => {
-                runtime
-                    .store
-                    .mark_reconnecting(
-                        &runtime.forward_id,
-                        ForwardPortSideRole::Connect,
-                        "connect-side tunnel lost".to_string(),
-                    )
-                    .await;
-                connect_tunnel =
-                    reopen_connect_tunnel(&runtime, "after connect-side reconnect").await?;
+                let Some(reconnected_tunnel) = reconnect_connect_tunnel(&runtime).await? else {
+                    return Ok(());
+                };
+                connect_tunnel = reconnected_tunnel;
                 runtime
                     .store
                     .mark_ready(&runtime.forward_id, ForwardPortSideRole::Connect)
@@ -89,20 +90,6 @@ pub(super) async fn run_tcp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
             }
         }
     }
-}
-
-async fn reopen_connect_tunnel(
-    runtime: &ForwardRuntime,
-    reason: &str,
-) -> anyhow::Result<Arc<PortTunnel>> {
-    open_connect_tunnel(&runtime.connect_side)
-        .await
-        .with_context(|| {
-            format!(
-                "reopening port tunnel to `{}` {reason}",
-                runtime.connect_side.name()
-            )
-        })
 }
 
 async fn run_tcp_forward_epoch(
@@ -750,7 +737,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tcp_accept_send_failure_recovers_connect_tunnel_and_closes_listen_stream() {
+    async fn tcp_accept_send_failure_recovers_connect_tunnel() {
         let (listen_broker_side, mut listen_daemon_side) = tokio::io::duplex(4096);
         let listen_tunnel = Arc::new(PortTunnel::from_stream(listen_broker_side).unwrap());
         let connect_tunnel = Arc::new(PortTunnel::from_stream(PendingReadBrokenWrite).unwrap());
@@ -807,13 +794,15 @@ mod tests {
             ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)
         ));
 
-        let close =
-            tokio::time::timeout(Duration::from_secs(1), read_frame(&mut listen_daemon_side))
-                .await
-                .expect("listen stream should be closed after failed connect send")
-                .unwrap();
-        assert_eq!(close.frame_type, FrameType::Close);
-        assert_eq!(close.stream_id, 11);
+        let no_close = tokio::time::timeout(
+            Duration::from_millis(50),
+            read_frame(&mut listen_daemon_side),
+        )
+        .await;
+        assert!(
+            no_close.is_err(),
+            "listen stream close is deferred to the reconnect epoch"
+        );
     }
 
     #[tokio::test]

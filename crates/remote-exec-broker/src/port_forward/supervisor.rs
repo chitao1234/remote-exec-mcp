@@ -9,7 +9,7 @@ use remote_exec_proto::port_tunnel::{
 };
 use remote_exec_proto::public::{
     ForwardPortEntry, ForwardPortLimitSummary, ForwardPortProtocol as PublicForwardPortProtocol,
-    ForwardPortSpec,
+    ForwardPortSideRole, ForwardPortSpec,
 };
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -25,8 +25,40 @@ use super::tunnel::{
 use super::udp_bridge::run_udp_forward;
 use super::{
     FORWARD_TASK_STOP_TIMEOUT, LISTEN_CLOSE_ACK_TIMEOUT, LISTEN_RECONNECT_INITIAL_BACKOFF,
-    LISTEN_RECONNECT_MAX_BACKOFF, LISTEN_RECONNECT_SAFETY_MARGIN,
+    LISTEN_RECONNECT_MAX_BACKOFF, LISTEN_RECONNECT_SAFETY_MARGIN, PORT_FORWARD_OPEN_ACK_TIMEOUT,
+    PORT_FORWARD_TUNNEL_READY_TIMEOUT,
 };
+
+#[derive(Clone, Copy)]
+pub(super) struct PortForwardReconnectPolicy {
+    pub initial_backoff: Duration,
+    pub max_backoff: Duration,
+    pub attempt_timeout: Duration,
+    pub total_timeout: Duration,
+    pub max_attempts: Option<u32>,
+}
+
+impl PortForwardReconnectPolicy {
+    pub(super) fn listen(resume_timeout: Duration) -> Self {
+        Self {
+            initial_backoff: LISTEN_RECONNECT_INITIAL_BACKOFF,
+            max_backoff: LISTEN_RECONNECT_MAX_BACKOFF,
+            attempt_timeout: Duration::from_secs(2),
+            total_timeout: effective_resume_timeout(resume_timeout),
+            max_attempts: None,
+        }
+    }
+
+    pub(super) fn connect() -> Self {
+        Self {
+            initial_backoff: LISTEN_RECONNECT_INITIAL_BACKOFF,
+            max_backoff: LISTEN_RECONNECT_MAX_BACKOFF,
+            attempt_timeout: Duration::from_secs(2),
+            total_timeout: Duration::from_secs(10),
+            max_attempts: None,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub(super) struct ForwardRuntime {
@@ -410,9 +442,9 @@ async fn open_listen_session(
         })
         .await
         .with_context(|| format!("opening port tunnel session on `{}`", side.name()))?;
-    let frame = tunnel
-        .recv()
+    let frame = tokio::time::timeout(PORT_FORWARD_TUNNEL_READY_TIMEOUT, tunnel.recv())
         .await
+        .map_err(|_| anyhow::anyhow!("timed out waiting for port tunnel ready"))?
         .with_context(|| format!("waiting for port tunnel session on `{}`", side.name()))?;
     match frame.frame_type {
         FrameType::TunnelReady if frame.stream_id == 0 => {
@@ -476,9 +508,9 @@ pub(super) async fn open_data_tunnel(
         })
         .await
         .with_context(|| format!("opening data port tunnel on `{}`", side.name()))?;
-    let frame = tunnel
-        .recv()
+    let frame = tokio::time::timeout(PORT_FORWARD_TUNNEL_READY_TIMEOUT, tunnel.recv())
         .await
+        .map_err(|_| anyhow::anyhow!("timed out waiting for data port tunnel ready"))?
         .with_context(|| format!("waiting for data port tunnel on `{}`", side.name()))?;
     match frame.frame_type {
         FrameType::TunnelReady if frame.stream_id == 0 => {
@@ -510,7 +542,12 @@ async fn wait_for_listener_ready(
     wait_context: String,
 ) -> anyhow::Result<String> {
     loop {
-        let frame = tunnel.recv().await.with_context(|| wait_context.clone())?;
+        let frame = tokio::time::timeout(PORT_FORWARD_OPEN_ACK_TIMEOUT, tunnel.recv())
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!("timed out waiting for port forward listener acknowledgement")
+            })?
+            .with_context(|| wait_context.clone())?;
         match frame.frame_type {
             frame_type if frame_type == ok_type && frame.stream_id == stream_id => {
                 return Ok(decode_tunnel_meta::<EndpointMeta>(&frame)?.endpoint);
@@ -570,45 +607,85 @@ pub(super) async fn reconnect_listen_tunnel(
     control: Arc<ListenSessionControl>,
     cancel: CancellationToken,
 ) -> anyhow::Result<Option<Arc<PortTunnel>>> {
-    let reconnect_window = effective_resume_timeout(control.resume_timeout);
-    let deadline = Instant::now() + reconnect_window;
-    let mut backoff = LISTEN_RECONNECT_INITIAL_BACKOFF;
+    retry_reconnect(
+        cancel,
+        PortForwardReconnectPolicy::listen(control.resume_timeout),
+        || try_resume_listen_tunnel(&control),
+    )
+    .await
+}
 
+pub(super) async fn reconnect_connect_tunnel(
+    runtime: &ForwardRuntime,
+) -> anyhow::Result<Option<Arc<PortTunnel>>> {
+    runtime
+        .store
+        .mark_reconnecting(
+            &runtime.forward_id,
+            ForwardPortSideRole::Connect,
+            "connect-side transport loss".to_string(),
+        )
+        .await;
+    retry_reconnect(
+        runtime.cancel.clone(),
+        PortForwardReconnectPolicy::connect(),
+        || async {
+            open_data_tunnel(
+                &runtime.connect_side,
+                &runtime.forward_id,
+                runtime.protocol,
+                1,
+            )
+            .await
+        },
+    )
+    .await
+}
+
+async fn retry_reconnect<T, Fut>(
+    cancel: CancellationToken,
+    policy: PortForwardReconnectPolicy,
+    mut attempt_fn: impl FnMut() -> Fut,
+) -> anyhow::Result<Option<T>>
+where
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    let deadline = Instant::now() + policy.total_timeout;
+    let mut backoff = policy.initial_backoff;
+    let mut attempts = 0u32;
     loop {
         if cancel.is_cancelled() {
             return Ok(None);
         }
+        if policy.max_attempts.is_some_and(|max| attempts >= max) {
+            return Err(anyhow::anyhow!("port forward reconnect attempts exhausted"));
+        }
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
-            break;
+            return Err(anyhow::anyhow!("port tunnel reconnect timed out"));
         }
-        let attempt = tokio::select! {
+        attempts += 1;
+        let attempt_timeout = policy.attempt_timeout.min(remaining);
+        let result = tokio::select! {
             _ = cancel.cancelled() => return Ok(None),
-            attempt = tokio::time::timeout(remaining, try_resume_listen_tunnel(&control)) => attempt,
+            result = tokio::time::timeout(attempt_timeout, attempt_fn()) => result,
         };
-        match attempt {
-            Err(_) => break,
-            Ok(Ok(tunnel)) => return Ok(Some(tunnel)),
-            Ok(Err(err)) if is_retryable_transport_error(&err) => {
-                if Instant::now() >= deadline {
-                    break;
-                }
-                let remaining = deadline.saturating_duration_since(Instant::now());
-                let sleep_for = backoff.min(remaining);
-                if sleep_for.is_zero() {
-                    break;
-                }
-                tokio::select! {
-                    _ = cancel.cancelled() => return Ok(None),
-                    _ = tokio::time::sleep(sleep_for) => {}
-                }
-                backoff = std::cmp::min(backoff + backoff, LISTEN_RECONNECT_MAX_BACKOFF);
-            }
+        match result {
+            Ok(Ok(value)) => return Ok(Some(value)),
+            Ok(Err(err)) if is_retryable_transport_error(&err) => {}
             Ok(Err(err)) => return Err(err),
+            Err(_) => {}
         }
+        let sleep_for = backoff.min(deadline.saturating_duration_since(Instant::now()));
+        if sleep_for.is_zero() {
+            continue;
+        }
+        tokio::select! {
+            _ = cancel.cancelled() => return Ok(None),
+            _ = tokio::time::sleep(sleep_for) => {}
+        }
+        backoff = std::cmp::min(backoff + backoff, policy.max_backoff);
     }
-
-    Err(anyhow::anyhow!("port tunnel reconnect timed out"))
 }
 
 pub(super) async fn close_listen_session(control: Arc<ListenSessionControl>) -> anyhow::Result<()> {
