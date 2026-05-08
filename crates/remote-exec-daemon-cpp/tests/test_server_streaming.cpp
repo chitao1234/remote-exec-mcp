@@ -646,6 +646,50 @@ static void assert_tunnel_open_ready_and_close_round_trip(AppState& state) {
     close_tunnel(&client_socket, &server_thread);
 }
 
+static void assert_tunnel_close_releases_retained_listener_immediately(AppState& state) {
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_tunnel(state, &client_socket, &server_thread);
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(
+            PortTunnelFrameType::TunnelOpen,
+            0U,
+            tunnel_open_meta("listen", "tcp", 1ULL)
+        )
+    );
+    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TunnelReady);
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}})
+    );
+    const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
+    assert(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(
+            PortTunnelFrameType::TunnelClose,
+            0U,
+            Json{
+                {"forward_id", "fwd_cpp_test"},
+                {"generation", 1ULL},
+                {"reason", "operator_close"}
+            }
+        )
+    );
+    const PortTunnelFrame closed = read_tunnel_frame(client_socket.get());
+    assert(closed.type == PortTunnelFrameType::TunnelClosed);
+    assert(closed.stream_id == 0U);
+
+    close_tunnel(&client_socket, &server_thread);
+    UniqueSocket rebound(bind_port_forward_socket(endpoint, "tcp"));
+    assert(rebound.valid());
+}
+
 static void assert_port_tunnel_worker_limit_is_reported(const fs::path& root) {
     AppState state;
     initialize_state_with_worker_limit(state, root, 1UL);
@@ -680,7 +724,81 @@ static void assert_port_tunnel_worker_limit_is_reported(const fs::path& root) {
     const Json error_meta = Json::parse(error.meta);
     assert(error_meta.at("code").get<std::string>() == "port_tunnel_limit_exceeded");
     assert(error_meta.at("message").get<std::string>() == "port tunnel worker limit reached");
-    assert(error_meta.at("fatal").get<bool>());
+    assert(!error_meta.at("fatal").get<bool>());
+
+    close_tunnel(&client_socket, &server_thread);
+}
+
+static void assert_tcp_connect_worker_limit_errors_before_success(const fs::path& root) {
+    AppState state;
+    initialize_state_with_worker_limit(state, root, 1UL);
+
+    UniqueSocket listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
+    const std::string endpoint = socket_local_endpoint(listener.get());
+
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_tunnel(state, &client_socket, &server_thread);
+
+    UniqueSocket worker_holder;
+    std::thread worker_holder_thread;
+    open_tunnel(state, &worker_holder, &worker_holder_thread);
+    send_tunnel_frame(
+        worker_holder.get(),
+        json_frame(PortTunnelFrameType::TcpListen, 99U, Json{{"endpoint", "127.0.0.1:0"}})
+    );
+    assert(read_tunnel_frame(worker_holder.get()).type == PortTunnelFrameType::TcpListenOk);
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TcpConnect, 1U, Json{{"endpoint", endpoint}})
+    );
+    const PortTunnelFrame response = read_tunnel_frame(client_socket.get());
+    assert(response.type == PortTunnelFrameType::Error);
+    assert(response.stream_id == 1U);
+    const Json meta = Json::parse(response.meta);
+    assert(meta.at("code").get<std::string>() == "port_tunnel_limit_exceeded");
+    assert(meta.at("message").get<std::string>() == "port tunnel worker limit reached");
+    assert(!meta.at("fatal").get<bool>());
+
+    close_tunnel(&worker_holder, &worker_holder_thread);
+    close_tunnel(&client_socket, &server_thread);
+}
+
+static void assert_retained_tcp_accept_worker_limit_errors_before_success(const fs::path& root) {
+    AppState state;
+    initialize_state_with_worker_limit(state, root, 1UL);
+
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_tunnel(state, &client_socket, &server_thread);
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(
+            PortTunnelFrameType::TunnelOpen,
+            0U,
+            tunnel_open_meta("listen", "tcp", 1ULL)
+        )
+    );
+    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TunnelReady);
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}})
+    );
+    const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
+    assert(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
+
+    UniqueSocket peer(connect_port_forward_socket(endpoint, "tcp"));
+    const PortTunnelFrame response = read_tunnel_frame(client_socket.get());
+    assert(response.type == PortTunnelFrameType::Error);
+    assert(response.stream_id == 1U);
+    const Json meta = Json::parse(response.meta);
+    assert(meta.at("code").get<std::string>() == "port_tunnel_limit_exceeded");
+    assert(meta.at("message").get<std::string>() == "port tunnel worker limit reached");
+    assert(!meta.at("fatal").get<bool>());
 
     close_tunnel(&client_socket, &server_thread);
 }
@@ -1267,7 +1385,10 @@ int main() {
     assert_tunnel_releases_tcp_listener_on_close(state);
     assert_terminal_tunnel_error_releases_tcp_listener_immediately(state);
     assert_tunnel_open_ready_and_close_round_trip(state);
+    assert_tunnel_close_releases_retained_listener_immediately(state);
     assert_port_tunnel_worker_limit_is_reported(root);
+    assert_tcp_connect_worker_limit_errors_before_success(root);
+    assert_retained_tcp_accept_worker_limit_errors_before_success(root);
     assert_tunnel_ready_reports_configured_limits(root);
     assert_retained_session_limit_is_enforced(root);
     assert_retained_listener_limit_is_enforced_and_released(root);

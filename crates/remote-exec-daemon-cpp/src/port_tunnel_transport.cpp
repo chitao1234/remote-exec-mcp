@@ -22,9 +22,10 @@ bool spawn_tcp_accept_thread(
     const std::shared_ptr<PortTunnelService>& service,
     const std::shared_ptr<PortTunnelConnection>& tunnel,
     uint32_t stream_id,
-    SOCKET socket
+    SOCKET socket,
+    bool worker_acquired
 ) {
-    if (!service->try_acquire_worker()) {
+    if (!worker_acquired && !service->try_acquire_worker()) {
         return false;
     }
 #ifdef _WIN32
@@ -49,7 +50,7 @@ bool spawn_tcp_accept_thread(
         }).detach();
     } catch (...) {
         service->release_worker();
-        throw;
+        return false;
     }
     return true;
 #endif
@@ -75,9 +76,10 @@ bool spawn_tcp_read_thread(
     const std::shared_ptr<PortTunnelService>& service,
     const std::shared_ptr<PortTunnelConnection>& tunnel,
     uint32_t stream_id,
-    const std::shared_ptr<TunnelTcpStream>& stream
+    const std::shared_ptr<TunnelTcpStream>& stream,
+    bool worker_acquired
 ) {
-    if (!service->try_acquire_worker()) {
+    if (!worker_acquired && !service->try_acquire_worker()) {
         return false;
     }
 #ifdef _WIN32
@@ -102,7 +104,7 @@ bool spawn_tcp_read_thread(
         }).detach();
     } catch (...) {
         service->release_worker();
-        throw;
+        return false;
     }
     return true;
 #endif
@@ -128,9 +130,10 @@ bool spawn_udp_read_thread(
     const std::shared_ptr<PortTunnelService>& service,
     const std::shared_ptr<PortTunnelConnection>& tunnel,
     uint32_t stream_id,
-    const std::shared_ptr<TunnelUdpSocket>& socket_value
+    const std::shared_ptr<TunnelUdpSocket>& socket_value,
+    bool worker_acquired
 ) {
-    if (!service->try_acquire_worker()) {
+    if (!worker_acquired && !service->try_acquire_worker()) {
         return false;
     }
 #ifdef _WIN32
@@ -155,7 +158,7 @@ bool spawn_udp_read_thread(
         }).detach();
     } catch (...) {
         service->release_worker();
-        throw;
+        return false;
     }
     return true;
 #endif
@@ -513,7 +516,7 @@ void PortTunnelConnection::tunnel_close(const PortTunnelFrame& frame) {
     PortTunnelFrame closed = make_empty_frame(PortTunnelFrameType::TunnelClosed, 0U);
     closed.meta = frame.meta;
     send_frame(closed);
-    close_current_session(PortTunnelCloseMode::TerminalFailure);
+    close_current_session(PortTunnelCloseMode::GracefulClose);
     close_transport_owned_state();
 }
 

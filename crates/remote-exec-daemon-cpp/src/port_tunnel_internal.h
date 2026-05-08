@@ -40,6 +40,7 @@ class PortTunnelService;
 
 enum class PortTunnelCloseMode {
     RetryableDetach,
+    GracefulClose,
     TerminalFailure,
 };
 
@@ -145,19 +146,22 @@ bool spawn_tcp_accept_thread(
     const std::shared_ptr<PortTunnelService>& service,
     const std::shared_ptr<PortTunnelConnection>& tunnel,
     uint32_t stream_id,
-    SOCKET socket
+    SOCKET socket,
+    bool worker_acquired = false
 );
 bool spawn_tcp_read_thread(
     const std::shared_ptr<PortTunnelService>& service,
     const std::shared_ptr<PortTunnelConnection>& tunnel,
     uint32_t stream_id,
-    const std::shared_ptr<TunnelTcpStream>& stream
+    const std::shared_ptr<TunnelTcpStream>& stream,
+    bool worker_acquired = false
 );
 bool spawn_udp_read_thread(
     const std::shared_ptr<PortTunnelService>& service,
     const std::shared_ptr<PortTunnelConnection>& tunnel,
     uint32_t stream_id,
-    const std::shared_ptr<TunnelUdpSocket>& socket_value
+    const std::shared_ptr<TunnelUdpSocket>& socket_value,
+    bool worker_acquired = false
 );
 
 class PortTunnelService : public std::enable_shared_from_this<PortTunnelService> {
@@ -174,12 +178,14 @@ public:
     void close_session(const std::shared_ptr<PortTunnelSession>& session);
     bool spawn_tcp_listener_loop(
         const std::shared_ptr<PortTunnelSession>& session,
-        const std::shared_ptr<RetainedTcpListener>& listener
+        const std::shared_ptr<RetainedTcpListener>& listener,
+        bool worker_acquired = false
     );
     bool spawn_udp_bind_loop(
         const std::shared_ptr<PortTunnelSession>& session,
         uint32_t stream_id,
-        const std::shared_ptr<TunnelUdpSocket>& socket_value
+        const std::shared_ptr<TunnelUdpSocket>& socket_value,
+        bool worker_acquired = false
     );
     bool try_acquire_worker();
     void release_worker();
@@ -295,7 +301,7 @@ private:
     void udp_bind(const PortTunnelFrame& frame);
     void udp_datagram(const PortTunnelFrame& frame);
     void close_stream(uint32_t stream_id);
-    void fail_worker_limit(uint32_t stream_id);
+    void send_worker_limit(uint32_t stream_id);
     std::uint64_t current_generation() const;
     void set_generation(std::uint64_t generation);
     void ensure_generation(std::uint64_t frame_generation) const;

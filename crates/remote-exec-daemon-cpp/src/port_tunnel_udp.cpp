@@ -3,10 +3,11 @@
 bool PortTunnelService::spawn_udp_bind_loop(
     const std::shared_ptr<PortTunnelSession>& session,
     uint32_t stream_id,
-    const std::shared_ptr<TunnelUdpSocket>& socket_value
+    const std::shared_ptr<TunnelUdpSocket>& socket_value,
+    bool worker_acquired
 ) {
     std::shared_ptr<PortTunnelService> service = shared_from_this();
-    if (!service->try_acquire_worker()) {
+    if (!worker_acquired && !service->try_acquire_worker()) {
         return false;
     }
 #ifdef _WIN32
@@ -51,7 +52,7 @@ bool PortTunnelService::spawn_udp_bind_loop(
         }).detach();
     } catch (...) {
         service->release_worker();
-        throw;
+        return false;
     }
     return true;
 #endif
@@ -164,21 +165,51 @@ void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
 
     if (session_mode_active()) {
         std::shared_ptr<PortTunnelSession> session = current_session();
+        if (!service_->try_acquire_worker()) {
+            mark_udp_socket_closed(socket_value);
+            send_worker_limit(frame.stream_id);
+            return;
+        }
         {
             BasicLockGuard lock(session->mutex);
             session->udp_binds[frame.stream_id] = socket_value;
         }
-        if (!service_->spawn_udp_bind_loop(session, frame.stream_id, socket_value)) {
-            fail_worker_limit(frame.stream_id);
+        if (!service_->spawn_udp_bind_loop(session, frame.stream_id, socket_value, true)) {
+            {
+                BasicLockGuard lock(session->mutex);
+                session->udp_binds.erase(frame.stream_id);
+            }
+            mark_udp_socket_closed(socket_value);
+            send_worker_limit(frame.stream_id);
             return;
         }
     } else {
+        if (!service_->try_acquire_worker()) {
+            mark_udp_socket_closed(socket_value);
+            send_worker_limit(frame.stream_id);
+            return;
+        }
         {
             BasicLockGuard lock(state_mutex_);
             udp_sockets_[frame.stream_id] = socket_value;
         }
-        if (!spawn_udp_read_thread(service_, shared_from_this(), frame.stream_id, socket_value)) {
-            fail_worker_limit(frame.stream_id);
+        if (!spawn_udp_read_thread(service_, shared_from_this(), frame.stream_id, socket_value, true)) {
+            std::shared_ptr<TunnelUdpSocket> removed_socket;
+            {
+                BasicLockGuard lock(state_mutex_);
+                std::map<uint32_t, std::shared_ptr<TunnelUdpSocket> >::iterator it =
+                    udp_sockets_.find(frame.stream_id);
+                if (it != udp_sockets_.end()) {
+                    removed_socket = it->second;
+                    udp_sockets_.erase(it);
+                }
+            }
+            if (removed_socket.get() != NULL) {
+                mark_udp_socket_closed(removed_socket);
+            } else {
+                mark_udp_socket_closed(socket_value);
+            }
+            send_worker_limit(frame.stream_id);
             return;
         }
     }
