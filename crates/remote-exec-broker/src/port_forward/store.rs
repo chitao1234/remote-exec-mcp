@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use remote_exec_proto::public::{ForwardPortEntry, ForwardPortStatus};
+use remote_exec_proto::public::{
+    ForwardPortEntry, ForwardPortPhase, ForwardPortSideHealth, ForwardPortStatus,
+};
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -100,6 +102,9 @@ impl PortForwardStore {
             .unwrap_or(candidate.record);
         let mut entry = record.entry;
         entry.status = ForwardPortStatus::Closed;
+        entry.phase = ForwardPortPhase::Closed;
+        entry.listen_state.health = ForwardPortSideHealth::Closed;
+        entry.connect_state.health = ForwardPortSideHealth::Closed;
         entry.last_error = None;
         entry
     }
@@ -108,6 +113,9 @@ impl PortForwardStore {
         let mut entries = self.entries.write().await;
         if let Some(record) = entries.get_mut(forward_id) {
             record.entry.status = ForwardPortStatus::Failed;
+            record.entry.phase = ForwardPortPhase::Failed;
+            record.entry.listen_state.health = ForwardPortSideHealth::Failed;
+            record.entry.connect_state.health = ForwardPortSideHealth::Failed;
             record.entry.last_error = Some(error);
         }
     }
@@ -195,6 +203,9 @@ async fn close_handle(handle: &PortForwardCloseHandle) -> anyhow::Result<()> {
 
 fn closed_entry(mut entry: ForwardPortEntry) -> ForwardPortEntry {
     entry.status = ForwardPortStatus::Closed;
+    entry.phase = ForwardPortPhase::Closed;
+    entry.listen_state.health = ForwardPortSideHealth::Closed;
+    entry.connect_state.health = ForwardPortSideHealth::Closed;
     entry.last_error = None;
     entry
 }

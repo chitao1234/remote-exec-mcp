@@ -1,5 +1,6 @@
 use std::io::{self, ErrorKind};
 
+use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const PREFACE: &[u8; 8] = b"REPFWD1\n";
@@ -7,7 +8,7 @@ pub const HEADER_LEN: usize = 16;
 pub const MAX_META_LEN: usize = 16 * 1024;
 pub const MAX_DATA_LEN: usize = 256 * 1024;
 pub const TUNNEL_PROTOCOL_VERSION_HEADER: &str = "x-remote-exec-port-tunnel-version";
-pub const TUNNEL_PROTOCOL_VERSION: &str = "2";
+pub const TUNNEL_PROTOCOL_VERSION: &str = "4";
 pub const UPGRADE_TOKEN: &str = "remote-exec-port-tunnel";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +20,9 @@ pub enum FrameType {
     SessionReady = 4,
     SessionResume = 5,
     SessionResumed = 6,
+    TunnelOpen = 7,
+    TunnelReady = 8,
+    TunnelClose = 9,
     TcpListen = 10,
     TcpListenOk = 11,
     TcpAccept = 12,
@@ -26,6 +30,11 @@ pub enum FrameType {
     TcpConnectOk = 14,
     TcpData = 15,
     TcpEof = 16,
+    TunnelClosed = 17,
+    TunnelHeartbeat = 18,
+    TunnelHeartbeatAck = 19,
+    ForwardRecovering = 20,
+    ForwardRecovered = 21,
     UdpBind = 30,
     UdpBindOk = 31,
     UdpDatagram = 32,
@@ -40,6 +49,9 @@ impl FrameType {
             4 => Ok(Self::SessionReady),
             5 => Ok(Self::SessionResume),
             6 => Ok(Self::SessionResumed),
+            7 => Ok(Self::TunnelOpen),
+            8 => Ok(Self::TunnelReady),
+            9 => Ok(Self::TunnelClose),
             10 => Ok(Self::TcpListen),
             11 => Ok(Self::TcpListenOk),
             12 => Ok(Self::TcpAccept),
@@ -47,6 +59,11 @@ impl FrameType {
             14 => Ok(Self::TcpConnectOk),
             15 => Ok(Self::TcpData),
             16 => Ok(Self::TcpEof),
+            17 => Ok(Self::TunnelClosed),
+            18 => Ok(Self::TunnelHeartbeat),
+            19 => Ok(Self::TunnelHeartbeatAck),
+            20 => Ok(Self::ForwardRecovering),
+            21 => Ok(Self::ForwardRecovered),
             30 => Ok(Self::UdpBind),
             31 => Ok(Self::UdpBindOk),
             32 => Ok(Self::UdpDatagram),
@@ -56,6 +73,79 @@ impl FrameType {
             )),
         }
     }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TunnelRole {
+    Listen,
+    Connect,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TunnelForwardProtocol {
+    Tcp,
+    Udp,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TunnelOpenMeta {
+    pub forward_id: String,
+    pub role: TunnelRole,
+    pub side: String,
+    pub generation: u64,
+    pub protocol: TunnelForwardProtocol,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TunnelReadyMeta {
+    pub generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_timeout_ms: Option<u64>,
+    pub limits: TunnelLimitSummary,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TunnelLimitSummary {
+    pub max_active_tcp_streams: u64,
+    pub max_udp_peers: u64,
+    pub max_queued_bytes: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TunnelCloseMeta {
+    pub forward_id: String,
+    pub generation: u64,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ForwardRecoveringMeta {
+    pub forward_id: String,
+    pub role: TunnelRole,
+    pub old_generation: u64,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ForwardRecoveredMeta {
+    pub forward_id: String,
+    pub role: TunnelRole,
+    pub generation: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TunnelErrorMeta {
+    pub code: String,
+    pub message: String,
+    pub fatal: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,6 +258,51 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn v4_control_frames_round_trip() {
+        let (mut client, mut server) = tokio::io::duplex(4096);
+        let writer = tokio::spawn(async move {
+            write_frame(
+                &mut client,
+                &Frame {
+                    frame_type: FrameType::TunnelOpen,
+                    flags: 0,
+                    stream_id: 0,
+                    meta: serde_json::to_vec(&TunnelOpenMeta {
+                        forward_id: "fwd_test".to_string(),
+                        role: TunnelRole::Listen,
+                        side: "builder-a".to_string(),
+                        generation: 4,
+                        protocol: TunnelForwardProtocol::Tcp,
+                        resume_session_id: Some("sess_test".to_string()),
+                    })
+                    .unwrap(),
+                    data: Vec::new(),
+                },
+            )
+            .await
+        });
+
+        let frame = read_frame(&mut server).await.unwrap();
+        writer.await.unwrap().unwrap();
+        assert_eq!(frame.frame_type, FrameType::TunnelOpen);
+        assert_eq!(frame.stream_id, 0);
+        let meta: TunnelOpenMeta = serde_json::from_slice(&frame.meta).unwrap();
+        assert_eq!(meta.forward_id, "fwd_test");
+        assert_eq!(meta.role, TunnelRole::Listen);
+        assert_eq!(meta.generation, 4);
+        assert_eq!(meta.resume_session_id.as_deref(), Some("sess_test"));
+    }
+
+    #[test]
+    fn tunnel_protocol_version_is_aligned_to_v4() {
+        assert_eq!(TUNNEL_PROTOCOL_VERSION, "4");
+        assert_eq!(
+            TUNNEL_PROTOCOL_VERSION_HEADER,
+            "x-remote-exec-port-tunnel-version"
+        );
+    }
 
     #[tokio::test]
     async fn session_control_frames_round_trip() {

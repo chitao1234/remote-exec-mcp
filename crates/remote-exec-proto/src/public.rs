@@ -245,6 +245,16 @@ pub struct ForwardPortEntry {
     pub status: ForwardPortStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
+    pub phase: ForwardPortPhase,
+    pub listen_state: ForwardPortSideState,
+    pub connect_state: ForwardPortSideState,
+    pub active_tcp_streams: u64,
+    pub dropped_tcp_streams: u64,
+    pub dropped_udp_datagrams: u64,
+    pub reconnect_attempts: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_reconnect_at: Option<String>,
+    pub limits: ForwardPortLimitSummary,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
@@ -253,4 +263,149 @@ pub enum ForwardPortStatus {
     Open,
     Closed,
     Failed,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ForwardPortPhase {
+    Opening,
+    Ready,
+    Reconnecting,
+    Draining,
+    Closing,
+    Closed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ForwardPortSideRole {
+    Listen,
+    Connect,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ForwardPortSideHealth {
+    Starting,
+    Ready,
+    Reconnecting,
+    Degraded,
+    Closed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct ForwardPortSideState {
+    pub side: String,
+    pub role: ForwardPortSideRole,
+    pub generation: u64,
+    pub health: ForwardPortSideHealth,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct ForwardPortLimitSummary {
+    pub max_active_tcp_streams: u64,
+    pub max_udp_peers: u64,
+    pub max_pending_tcp_bytes_per_stream: u64,
+    pub max_pending_tcp_bytes_per_forward: u64,
+    pub max_tunnel_queued_bytes: u64,
+}
+
+impl ForwardPortEntry {
+    pub fn new_open(
+        forward_id: String,
+        listen_side: String,
+        listen_endpoint: String,
+        connect_side: String,
+        connect_endpoint: String,
+        protocol: ForwardPortProtocol,
+        limits: ForwardPortLimitSummary,
+    ) -> Self {
+        Self {
+            forward_id,
+            listen_side: listen_side.clone(),
+            listen_endpoint,
+            connect_side: connect_side.clone(),
+            connect_endpoint,
+            protocol,
+            status: ForwardPortStatus::Open,
+            last_error: None,
+            phase: ForwardPortPhase::Ready,
+            listen_state: ForwardPortSideState {
+                side: listen_side,
+                role: ForwardPortSideRole::Listen,
+                generation: 1,
+                health: ForwardPortSideHealth::Ready,
+                last_error: None,
+            },
+            connect_state: ForwardPortSideState {
+                side: connect_side,
+                role: ForwardPortSideRole::Connect,
+                generation: 1,
+                health: ForwardPortSideHealth::Ready,
+                last_error: None,
+            },
+            active_tcp_streams: 0,
+            dropped_tcp_streams: 0,
+            dropped_udp_datagrams: 0,
+            reconnect_attempts: 0,
+            last_reconnect_at: None,
+            limits,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forward_port_entry_serializes_additive_v4_state() {
+        let entry = ForwardPortEntry {
+            forward_id: "fwd_test".to_string(),
+            listen_side: "local".to_string(),
+            listen_endpoint: "127.0.0.1:10000".to_string(),
+            connect_side: "builder-a".to_string(),
+            connect_endpoint: "127.0.0.1:10001".to_string(),
+            protocol: ForwardPortProtocol::Tcp,
+            status: ForwardPortStatus::Open,
+            last_error: None,
+            phase: ForwardPortPhase::Reconnecting,
+            listen_state: ForwardPortSideState {
+                side: "local".to_string(),
+                role: ForwardPortSideRole::Listen,
+                generation: 2,
+                health: ForwardPortSideHealth::Ready,
+                last_error: None,
+            },
+            connect_state: ForwardPortSideState {
+                side: "builder-a".to_string(),
+                role: ForwardPortSideRole::Connect,
+                generation: 3,
+                health: ForwardPortSideHealth::Reconnecting,
+                last_error: Some("transport loss".to_string()),
+            },
+            active_tcp_streams: 1,
+            dropped_tcp_streams: 2,
+            dropped_udp_datagrams: 3,
+            reconnect_attempts: 4,
+            last_reconnect_at: Some("2026-05-08T00:00:00Z".to_string()),
+            limits: ForwardPortLimitSummary {
+                max_active_tcp_streams: 256,
+                max_udp_peers: 256,
+                max_pending_tcp_bytes_per_stream: 262144,
+                max_pending_tcp_bytes_per_forward: 2097152,
+                max_tunnel_queued_bytes: 8388608,
+            },
+        };
+
+        let value = serde_json::to_value(entry).unwrap();
+        assert_eq!(value["phase"], "reconnecting");
+        assert_eq!(value["connect_state"]["health"], "reconnecting");
+        assert_eq!(value["dropped_tcp_streams"], 2);
+        assert_eq!(value["limits"]["max_tunnel_queued_bytes"], 8388608);
+    }
 }

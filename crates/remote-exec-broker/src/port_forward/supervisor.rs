@@ -5,8 +5,8 @@ use anyhow::Context;
 use remote_exec_proto::port_forward::{ensure_nonzero_connect_endpoint, normalize_endpoint};
 use remote_exec_proto::port_tunnel::{Frame, FrameType};
 use remote_exec_proto::public::{
-    ForwardPortEntry, ForwardPortProtocol as PublicForwardPortProtocol, ForwardPortSpec,
-    ForwardPortStatus,
+    ForwardPortEntry, ForwardPortLimitSummary, ForwardPortProtocol as PublicForwardPortProtocol,
+    ForwardPortSpec,
 };
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -195,16 +195,15 @@ async fn open_tcp_forward(
     Ok(OpenedForward {
         task_done: task_done.clone(),
         record: PortForwardRecord {
-            entry: ForwardPortEntry {
+            entry: ForwardPortEntry::new_open(
                 forward_id,
-                listen_side: listen_side.name().to_string(),
-                listen_endpoint: listen_response,
-                connect_side: connect_side.name().to_string(),
+                listen_side.name().to_string(),
+                listen_response,
+                connect_side.name().to_string(),
                 connect_endpoint,
-                protocol: spec.protocol,
-                status: ForwardPortStatus::Open,
-                last_error: None,
-            },
+                spec.protocol,
+                default_forward_limit_summary(),
+            ),
             listen_session,
             cancel,
             task_done,
@@ -282,22 +281,31 @@ async fn open_udp_forward(
     Ok(OpenedForward {
         task_done: task_done.clone(),
         record: PortForwardRecord {
-            entry: ForwardPortEntry {
+            entry: ForwardPortEntry::new_open(
                 forward_id,
-                listen_side: listen_side.name().to_string(),
-                listen_endpoint: listen_response,
-                connect_side: connect_side.name().to_string(),
+                listen_side.name().to_string(),
+                listen_response,
+                connect_side.name().to_string(),
                 connect_endpoint,
-                protocol: spec.protocol,
-                status: ForwardPortStatus::Open,
-                last_error: None,
-            },
+                spec.protocol,
+                default_forward_limit_summary(),
+            ),
             listen_session,
             cancel,
             task_done,
         },
         runtime,
     })
+}
+
+fn default_forward_limit_summary() -> ForwardPortLimitSummary {
+    ForwardPortLimitSummary {
+        max_active_tcp_streams: 256,
+        max_udp_peers: 256,
+        max_pending_tcp_bytes_per_stream: 256 * 1024,
+        max_pending_tcp_bytes_per_forward: 2 * 1024 * 1024,
+        max_tunnel_queued_bytes: 8 * 1024 * 1024,
+    }
 }
 
 fn spawn_forward(runtime: ForwardRuntime, store: super::store::PortForwardStore) -> JoinHandle<()> {
