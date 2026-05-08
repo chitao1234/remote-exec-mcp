@@ -94,6 +94,7 @@ mod tests {
         let state = BrokerState {
             enable_transfer_compression: true,
             disable_structured_content: false,
+            port_forward_limits: crate::port_forward::BrokerPortForwardLimits::default(),
             host_sandbox: None,
             sessions: SessionStore::default(),
             port_forwards: crate::port_forward::PortForwardStore::default(),

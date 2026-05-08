@@ -67,6 +67,7 @@ pub(super) struct ForwardRuntime {
     pub(super) connect_side: SideHandle,
     pub(super) protocol: PublicForwardPortProtocol,
     pub(super) connect_endpoint: String,
+    pub(super) max_tunnel_queued_bytes: usize,
     pub(super) store: PortForwardStore,
     pub(super) listen_session: Arc<ListenSessionControl>,
     pub(super) initial_connect_tunnel: Arc<PortTunnel>,
@@ -80,6 +81,7 @@ pub(super) struct ListenSessionControl {
     pub(super) generation: u64,
     pub(super) listener_stream_id: u32,
     pub(super) resume_timeout: Duration,
+    pub(super) max_tunnel_queued_bytes: usize,
     pub(super) current_tunnel: Mutex<Option<Arc<PortTunnel>>>,
     pub(super) op_lock: Mutex<()>,
 }
@@ -112,6 +114,7 @@ impl ListenSessionControl {
         generation: u64,
         listener_stream_id: u32,
         resume_timeout: Duration,
+        max_tunnel_queued_bytes: usize,
         tunnel: Arc<PortTunnel>,
     ) -> Self {
         Self {
@@ -121,6 +124,7 @@ impl ListenSessionControl {
             generation,
             listener_stream_id,
             resume_timeout,
+            max_tunnel_queued_bytes,
             current_tunnel: Mutex::new(Some(tunnel)),
             op_lock: Mutex::new(()),
         }
@@ -194,6 +198,7 @@ async fn open_tcp_forward(
         PublicForwardPortProtocol::Tcp,
         1,
         None,
+        limits.max_tunnel_queued_bytes as usize,
     )
     .await?;
     let connect_tunnel = open_data_tunnel(
@@ -201,6 +206,7 @@ async fn open_tcp_forward(
         &forward_id,
         PublicForwardPortProtocol::Tcp,
         1,
+        limits.max_tunnel_queued_bytes as usize,
     )
     .await?;
     let listener_stream_id = 1;
@@ -242,6 +248,7 @@ async fn open_tcp_forward(
         1,
         listener_stream_id,
         resume_timeout,
+        limits.max_tunnel_queued_bytes as usize,
         listen_tunnel,
     ));
 
@@ -253,6 +260,7 @@ async fn open_tcp_forward(
         connect_side: connect_side.clone(),
         protocol: PublicForwardPortProtocol::Tcp,
         connect_endpoint: connect_endpoint.clone(),
+        max_tunnel_queued_bytes: limits.max_tunnel_queued_bytes as usize,
         store,
         listen_session: listen_session.clone(),
         initial_connect_tunnel: connect_tunnel,
@@ -298,6 +306,7 @@ async fn open_udp_forward(
         PublicForwardPortProtocol::Udp,
         1,
         None,
+        limits.max_tunnel_queued_bytes as usize,
     )
     .await?;
     let connect_tunnel = open_data_tunnel(
@@ -305,6 +314,7 @@ async fn open_udp_forward(
         &forward_id,
         PublicForwardPortProtocol::Udp,
         1,
+        limits.max_tunnel_queued_bytes as usize,
     )
     .await?;
     let listener_stream_id = 1;
@@ -346,6 +356,7 @@ async fn open_udp_forward(
         1,
         listener_stream_id,
         resume_timeout,
+        limits.max_tunnel_queued_bytes as usize,
         listen_tunnel,
     ));
 
@@ -357,6 +368,7 @@ async fn open_udp_forward(
         connect_side: connect_side.clone(),
         protocol: PublicForwardPortProtocol::Udp,
         connect_endpoint: connect_endpoint.clone(),
+        max_tunnel_queued_bytes: limits.max_tunnel_queued_bytes as usize,
         store,
         listen_session: listen_session.clone(),
         initial_connect_tunnel: connect_tunnel,
@@ -418,8 +430,9 @@ async fn open_listen_session(
     protocol: PublicForwardPortProtocol,
     generation: u64,
     resume_session_id: Option<String>,
+    max_queued_bytes: usize,
 ) -> anyhow::Result<OpenListenSession> {
-    let tunnel = open_connect_tunnel(side).await?;
+    let tunnel = open_connect_tunnel(side, max_queued_bytes).await?;
     tunnel
         .send(Frame {
             frame_type: FrameType::TunnelOpen,
@@ -473,10 +486,15 @@ fn tunnel_protocol(protocol: PublicForwardPortProtocol) -> TunnelForwardProtocol
     }
 }
 
-pub(super) async fn open_connect_tunnel(side: &SideHandle) -> anyhow::Result<Arc<PortTunnel>> {
-    Ok(Arc::new(side.port_tunnel().await.with_context(|| {
-        format!("opening port tunnel to `{}`", side.name())
-    })?))
+pub(super) async fn open_connect_tunnel(
+    side: &SideHandle,
+    max_queued_bytes: usize,
+) -> anyhow::Result<Arc<PortTunnel>> {
+    Ok(Arc::new(
+        side.port_tunnel(max_queued_bytes)
+            .await
+            .with_context(|| format!("opening port tunnel to `{}`", side.name()))?,
+    ))
 }
 
 pub(super) async fn open_data_tunnel(
@@ -484,8 +502,9 @@ pub(super) async fn open_data_tunnel(
     forward_id: &str,
     protocol: PublicForwardPortProtocol,
     generation: u64,
+    max_queued_bytes: usize,
 ) -> anyhow::Result<Arc<PortTunnel>> {
-    let tunnel = open_connect_tunnel(side).await?;
+    let tunnel = open_connect_tunnel(side, max_queued_bytes).await?;
     tunnel
         .send(Frame {
             frame_type: FrameType::TunnelOpen,
@@ -558,7 +577,7 @@ async fn wait_for_listener_ready(
 async fn resume_listen_session_inner(
     control: &ListenSessionControl,
 ) -> anyhow::Result<Arc<PortTunnel>> {
-    let tunnel = open_connect_tunnel(&control.side).await?;
+    let tunnel = open_connect_tunnel(&control.side, control.max_tunnel_queued_bytes).await?;
     tunnel
         .send(Frame {
             frame_type: FrameType::SessionResume,
@@ -630,6 +649,7 @@ pub(super) async fn reconnect_connect_tunnel(
                 &runtime.forward_id,
                 runtime.protocol,
                 1,
+                runtime.max_tunnel_queued_bytes,
             )
             .await
         },

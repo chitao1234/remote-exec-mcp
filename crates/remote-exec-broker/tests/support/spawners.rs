@@ -507,6 +507,28 @@ pub async fn spawn_broker_with_stub_port_forward_version(version: u32) -> Broker
 }
 
 pub async fn spawn_broker_with_local_and_stub_port_forward_version(version: u32) -> BrokerFixture {
+    spawn_broker_with_local_and_stub_port_forward_version_and_extra_config(version, None).await
+}
+
+pub async fn spawn_broker_with_local_and_stub_port_forward_version_and_tunnel_queue_limit(
+    version: u32,
+    max_tunnel_queued_bytes: usize,
+) -> BrokerFixture {
+    spawn_broker_with_local_and_stub_port_forward_version_and_extra_config(
+        version,
+        Some(&format!(
+            r#"[port_forward_limits]
+max_tunnel_queued_bytes = {max_tunnel_queued_bytes}
+"#,
+        )),
+    )
+    .await
+}
+
+async fn spawn_broker_with_local_and_stub_port_forward_version_and_extra_config(
+    version: u32,
+    extra_top_level: Option<&str>,
+) -> BrokerFixture {
     remote_exec_daemon::install_crypto_provider();
 
     let tempdir = tempfile::tempdir().unwrap();
@@ -539,7 +561,7 @@ pub async fn spawn_broker_with_local_and_stub_port_forward_version(version: u32)
             extra_config: None,
         }),
         None,
-        None,
+        extra_top_level,
     );
 
     let client = spawn_broker_child(&broker_config).await;

@@ -1019,6 +1019,57 @@ async fn forward_ports_retries_udp_connector_after_bind_error() {
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
+#[tokio::test]
+async fn forward_ports_drops_udp_datagrams_under_pressure() {
+    let fixture =
+        support::spawners::spawn_broker_with_local_and_stub_port_forward_version_and_tunnel_queue_limit(
+            4,
+            512,
+        )
+        .await;
+    support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
+
+    let open = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "local",
+                "connect_side": "builder-a",
+                "forwards": [{
+                    "listen_endpoint": "127.0.0.1:0",
+                    "connect_endpoint": "127.0.0.1:9",
+                    "protocol": "udp"
+                }]
+            }),
+        )
+        .await;
+    let forward_id = forward_id_from(&open);
+    let listen_endpoint = listen_endpoint_from(&open);
+
+    let client = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    client
+        .send_to(&vec![9u8; 1024], &listen_endpoint)
+        .await
+        .unwrap();
+
+    let forward = wait_for_udp_drop_count(&fixture, &forward_id, Duration::from_secs(5)).await;
+    let drops = forward["dropped_udp_datagrams"].as_u64().unwrap();
+    assert!(drops > 0, "expected UDP drops under pressure");
+    assert_eq!(forward["status"], "open");
+
+    let close = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "close",
+                "forward_ids": [forward_id]
+            }),
+        )
+        .await;
+    assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
+}
+
 async fn wait_for_forward_status(
     fixture: &support::fixture::BrokerFixture,
     forward_id: &str,
@@ -1098,6 +1149,51 @@ async fn wait_for_forward_phase(
         .unwrap_or_default();
     panic!(
         "forward `{forward_id}` did not reach phase `{phase}` within {timeout:?}; last_phase={last_phase} last_status={last_status} last_error={last_error}"
+    );
+}
+
+async fn wait_for_udp_drop_count(
+    fixture: &support::fixture::BrokerFixture,
+    forward_id: &str,
+    timeout: Duration,
+) -> serde_json::Value {
+    let started = std::time::Instant::now();
+    let mut last_entry = None;
+    while started.elapsed() < timeout {
+        let list = fixture
+            .call_tool(
+                "forward_ports",
+                serde_json::json!({
+                    "action": "list",
+                    "forward_ids": [forward_id]
+                }),
+            )
+            .await;
+        let entry = list.structured_content["forwards"][0].clone();
+        last_entry = Some(entry.clone());
+        if entry["dropped_udp_datagrams"].as_u64().unwrap_or_default() > 0 {
+            return entry;
+        }
+        if entry["status"] == "failed" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    let last_status = last_entry
+        .as_ref()
+        .and_then(|entry| entry["status"].as_str())
+        .unwrap_or("<missing>");
+    let drops = last_entry
+        .as_ref()
+        .and_then(|entry| entry["dropped_udp_datagrams"].as_u64())
+        .unwrap_or_default();
+    let last_error = last_entry
+        .as_ref()
+        .and_then(|entry| entry["last_error"].as_str())
+        .unwrap_or_default();
+    panic!(
+        "forward `{forward_id}` did not record UDP drops within {timeout:?}; last_status={last_status} dropped_udp_datagrams={drops} last_error={last_error}"
     );
 }
 

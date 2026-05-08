@@ -26,10 +26,13 @@ impl SideHandle {
         }
     }
 
-    pub async fn port_tunnel(&self) -> Result<PortTunnel, DaemonClientError> {
+    pub async fn port_tunnel(
+        &self,
+        max_queued_bytes: usize,
+    ) -> Result<PortTunnel, DaemonClientError> {
         match self {
-            Self::Target { handle, .. } => handle.port_tunnel().await,
-            Self::Local(client) => PortTunnel::local(client.state()).await,
+            Self::Target { handle, .. } => handle.port_tunnel(max_queued_bytes).await,
+            Self::Local(client) => PortTunnel::local(client.state(), max_queued_bytes).await,
         }
     }
 }

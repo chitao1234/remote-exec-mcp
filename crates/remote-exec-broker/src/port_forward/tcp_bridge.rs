@@ -12,7 +12,7 @@ use super::supervisor::{
 use super::tunnel::{
     EndpointMeta, PortTunnel, TcpAcceptMeta, classify_recoverable_tunnel_event,
     decode_tunnel_error_frame, decode_tunnel_meta, encode_tunnel_meta,
-    format_terminal_tunnel_error, is_retryable_transport_error,
+    format_terminal_tunnel_error, is_backpressure_error, is_retryable_transport_error,
 };
 use super::{MAX_PENDING_TCP_BYTES_PER_FORWARD, MAX_PENDING_TCP_BYTES_PER_STREAM};
 
@@ -65,6 +65,7 @@ pub(super) async fn run_tcp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
                     &runtime.forward_id,
                     runtime.protocol,
                     1,
+                    runtime.max_tunnel_queued_bytes,
                 )
                 .await
                 .with_context(|| {
@@ -431,6 +432,19 @@ async fn queue_or_send_tcp_connect_frame(
             .await
             .context("relaying tcp data to connect tunnel")
         {
+            if is_backpressure_error(&err) {
+                close_tcp_pair_after_connect_pressure(
+                    runtime,
+                    connect_tunnel,
+                    listen_tunnel,
+                    listen_to_connect,
+                    connect_streams,
+                    pending_budget,
+                    connect_stream_id,
+                )
+                .await?;
+                return Ok(None);
+            }
             if is_retryable_transport_error(&err) {
                 close_active_tcp_listen_streams(
                     runtime,
@@ -460,6 +474,13 @@ async fn queue_or_send_tcp_connect_frame(
             listen_to_connect.remove(&listen_stream_id);
             let _ = connect_tunnel.close_stream(connect_stream_id).await;
             let _ = listen_tunnel.close_stream(listen_stream_id).await;
+            runtime
+                .store
+                .update_entry(&runtime.forward_id, |entry| {
+                    entry.dropped_tcp_streams += 1;
+                    entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(1);
+                })
+                .await;
             return Ok(None);
         }
         stream.pending_bytes = next_stream_total;
@@ -490,6 +511,21 @@ async fn flush_pending_tcp_connect_frames(
             .await
             .context("relaying tcp data to connect tunnel")
         {
+            if is_backpressure_error(&err) {
+                close_tcp_pair_after_connect_pressure(
+                    runtime,
+                    connect_tunnel,
+                    listen_tunnel,
+                    listen_to_connect,
+                    connect_streams,
+                    pending_budget,
+                    connect_stream_id,
+                )
+                .await?;
+                return Ok(TcpFlushResult::Sent {
+                    should_remove: true,
+                });
+            }
             if is_retryable_transport_error(&err) {
                 close_active_tcp_listen_streams(
                     runtime,
@@ -543,6 +579,32 @@ async fn close_tcp_pair_after_connect_error(
         )
         .map(|_| ());
     }
+    Ok(())
+}
+
+async fn close_tcp_pair_after_connect_pressure(
+    runtime: &ForwardRuntime,
+    connect_tunnel: &Arc<PortTunnel>,
+    listen_tunnel: &Arc<PortTunnel>,
+    listen_to_connect: &mut HashMap<u32, u32>,
+    connect_streams: &mut HashMap<u32, TcpConnectStream>,
+    pending_budget: &mut PendingTcpBudget,
+    connect_stream_id: u32,
+) -> anyhow::Result<()> {
+    let Some(mut stream) = connect_streams.remove(&connect_stream_id) else {
+        return Ok(());
+    };
+    release_pending_budget(pending_budget, &mut stream);
+    listen_to_connect.remove(&stream.listen_stream_id);
+    let _ = connect_tunnel.close_stream(connect_stream_id).await;
+    let _ = listen_tunnel.close_stream(stream.listen_stream_id).await;
+    runtime
+        .store
+        .update_entry(&runtime.forward_id, |entry| {
+            entry.dropped_tcp_streams += 1;
+            entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(1);
+        })
+        .await;
     Ok(())
 }
 
@@ -750,6 +812,7 @@ mod tests {
             generation: 1,
             listener_stream_id: 1,
             resume_timeout: Duration::from_secs(30),
+            max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
             current_tunnel: TokioMutex::new(Some(listen_tunnel.clone())),
             op_lock: TokioMutex::new(()),
         });
@@ -760,6 +823,7 @@ mod tests {
             connect_side: SideHandle::local(),
             protocol: PublicForwardPortProtocol::Tcp,
             connect_endpoint: "127.0.0.1:1".to_string(),
+            max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
             store: Default::default(),
             listen_session,
             initial_connect_tunnel: connect_tunnel.clone(),
@@ -819,6 +883,7 @@ mod tests {
             generation: 1,
             listener_stream_id: 1,
             resume_timeout: Duration::from_secs(30),
+            max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
             current_tunnel: TokioMutex::new(Some(listen_tunnel.clone())),
             op_lock: TokioMutex::new(()),
         });
@@ -829,6 +894,7 @@ mod tests {
             connect_side: SideHandle::local(),
             protocol: PublicForwardPortProtocol::Tcp,
             connect_endpoint: "127.0.0.1:1".to_string(),
+            max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
             store: Default::default(),
             listen_session,
             initial_connect_tunnel: connect_tunnel.clone(),
@@ -923,6 +989,7 @@ mod tests {
             generation: 1,
             listener_stream_id: 1,
             resume_timeout: Duration::from_secs(30),
+            max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
             current_tunnel: TokioMutex::new(Some(listen_tunnel.clone())),
             op_lock: TokioMutex::new(()),
         });
@@ -933,6 +1000,7 @@ mod tests {
             connect_side: SideHandle::local(),
             protocol: PublicForwardPortProtocol::Tcp,
             connect_endpoint: "127.0.0.1:1".to_string(),
+            max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
             store: Default::default(),
             listen_session,
             initial_connect_tunnel: connect_tunnel.clone(),
@@ -1115,6 +1183,7 @@ mod tests {
             generation: 1,
             listener_stream_id: 1,
             resume_timeout: Duration::from_secs(30),
+            max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
             current_tunnel: TokioMutex::new(Some(listen_tunnel)),
             op_lock: TokioMutex::new(()),
         });
@@ -1124,6 +1193,7 @@ mod tests {
             connect_side: SideHandle::local(),
             protocol: PublicForwardPortProtocol::Tcp,
             connect_endpoint: "127.0.0.1:1".to_string(),
+            max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
             store: Default::default(),
             listen_session,
             initial_connect_tunnel: connect_tunnel,

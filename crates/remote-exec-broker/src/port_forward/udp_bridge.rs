@@ -15,7 +15,7 @@ use super::supervisor::{
 use super::tunnel::{
     EndpointMeta, PortTunnel, UdpDatagramMeta, classify_recoverable_tunnel_event,
     decode_tunnel_error_frame, decode_tunnel_meta, encode_tunnel_meta,
-    format_terminal_tunnel_error,
+    format_terminal_tunnel_error, is_backpressure_error,
 };
 use super::{
     MAX_UDP_CONNECTORS_PER_FORWARD, UDP_CONNECTOR_IDLE_SWEEP_INTERVAL, UDP_CONNECTOR_IDLE_TIMEOUT,
@@ -63,6 +63,7 @@ pub(super) async fn run_udp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
                     &runtime.forward_id,
                     runtime.protocol,
                     1,
+                    runtime.max_tunnel_queued_bytes,
                 )
                 .await
                 .with_context(|| {
@@ -168,6 +169,9 @@ async fn run_udp_forward_epoch(
                                     entry.dropped_udp_datagrams += 1;
                                 })
                                 .await;
+                            if is_backpressure_error(&err) {
+                                continue;
+                            }
                             return classify_transport_failure(
                                 err,
                                 "relaying udp datagram to connect tunnel",
@@ -485,7 +489,10 @@ mod tests {
 
     #[tokio::test]
     async fn udp_connector_limit_evicts_stalest_peer() {
-        let tunnel = SideHandle::local().port_tunnel().await.unwrap();
+        let tunnel = SideHandle::local()
+            .port_tunnel(PortTunnel::DEFAULT_MAX_QUEUED_BYTES)
+            .await
+            .unwrap();
         let connector_by_peer: Arc<Mutex<HashMap<String, UdpPeerConnector>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let peer_by_connector: Arc<Mutex<HashMap<u32, String>>> =
@@ -699,6 +706,7 @@ mod tests {
             generation: 1,
             listener_stream_id: 1,
             resume_timeout: Duration::from_secs(30),
+            max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
             current_tunnel: TokioMutex::new(Some(listen_tunnel)),
             op_lock: TokioMutex::new(()),
         });
@@ -708,6 +716,7 @@ mod tests {
             connect_side: SideHandle::local(),
             protocol: PublicForwardPortProtocol::Udp,
             connect_endpoint: "127.0.0.1:1".to_string(),
+            max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
             store: Default::default(),
             listen_session,
             initial_connect_tunnel: connect_tunnel,

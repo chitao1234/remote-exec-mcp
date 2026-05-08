@@ -1,7 +1,10 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use remote_exec_proto::port_tunnel::{Frame, FrameType, read_frame, write_frame, write_preface};
+use remote_exec_proto::port_tunnel::{
+    Frame, FrameType, HEADER_LEN, read_frame, write_frame, write_preface,
+};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, mpsc};
@@ -13,31 +16,55 @@ use crate::daemon_client::DaemonClientError;
 use super::events::{ForwardSideEvent, TunnelErrorMeta};
 
 pub struct PortTunnel {
-    tx: mpsc::Sender<Frame>,
+    tx: mpsc::Sender<QueuedFrame>,
     rx: Mutex<mpsc::Receiver<anyhow::Result<Frame>>>,
     cancel: CancellationToken,
     reader_task: Mutex<Option<JoinHandle<()>>>,
     writer_task: Mutex<Option<JoinHandle<()>>>,
+    queued_bytes: Arc<AtomicUsize>,
+    max_queued_bytes: usize,
+}
+
+struct QueuedFrame {
+    frame: Frame,
+    charge: usize,
 }
 
 impl PortTunnel {
+    pub const DEFAULT_MAX_QUEUED_BYTES: usize = 8 * 1024 * 1024;
+
     pub fn from_stream<S>(stream: S) -> Result<Self, DaemonClientError>
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
+        Self::from_stream_with_max_queued_bytes(stream, Self::DEFAULT_MAX_QUEUED_BYTES)
+    }
+
+    pub fn from_stream_with_max_queued_bytes<S>(
+        stream: S,
+        max_queued_bytes: usize,
+    ) -> Result<Self, DaemonClientError>
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    {
         let (mut reader, mut writer) = tokio::io::split(stream);
-        let (tx, mut write_rx) = mpsc::channel::<Frame>(128);
+        let (tx, mut write_rx) = mpsc::channel::<QueuedFrame>(128);
         let (read_tx, read_rx) = mpsc::channel::<anyhow::Result<Frame>>(128);
         let cancel = CancellationToken::new();
         let writer_cancel = cancel.clone();
+        let queued_bytes = Arc::new(AtomicUsize::new(0));
+        let writer_queued_bytes = queued_bytes.clone();
         let writer_task = tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    frame = write_rx.recv() => {
-                        let Some(frame) = frame else {
+                    queued = write_rx.recv() => {
+                        let Some(queued) = queued else {
                             return;
                         };
-                        if let Err(err) = write_frame(&mut writer, &frame).await {
+                        let QueuedFrame { frame, charge } = queued;
+                        let result = write_frame(&mut writer, &frame).await;
+                        release_queued_bytes(&writer_queued_bytes, charge);
+                        if let Err(err) = result {
                             tracing::debug!(error = %err, "port tunnel writer stopped");
                             writer_cancel.cancel();
                             return;
@@ -86,11 +113,14 @@ impl PortTunnel {
             cancel,
             reader_task: Mutex::new(Some(reader_task)),
             writer_task: Mutex::new(Some(writer_task)),
+            queued_bytes,
+            max_queued_bytes,
         })
     }
 
     pub async fn local(
         state: Arc<remote_exec_host::HostRuntimeState>,
+        max_queued_bytes: usize,
     ) -> Result<Self, DaemonClientError> {
         let (mut broker_side, daemon_side) = tokio::io::duplex(256 * 1024);
         tokio::spawn(remote_exec_host::port_forward::serve_tunnel(
@@ -100,17 +130,27 @@ impl PortTunnel {
         write_preface(&mut broker_side)
             .await
             .map_err(|err| DaemonClientError::Transport(err.into()))?;
-        Self::from_stream(broker_side)
+        Self::from_stream_with_max_queued_bytes(broker_side, max_queued_bytes)
     }
 
     pub async fn send(&self, frame: Frame) -> anyhow::Result<()> {
-        self.tx.send(frame).await.map_err(|_| {
-            std::io::Error::new(
+        let charge = data_frame_charge(&frame);
+        if charge > self.max_queued_bytes {
+            return Err(backpressure_error());
+        }
+        if charge > 0 {
+            reserve_queued_bytes(&self.queued_bytes, charge, self.max_queued_bytes)?;
+        }
+        let queued = QueuedFrame { frame, charge };
+        if self.tx.send(queued).await.is_err() {
+            release_queued_bytes(&self.queued_bytes, charge);
+            return Err(std::io::Error::new(
                 std::io::ErrorKind::BrokenPipe,
                 "port tunnel writer is closed",
             )
-            .into()
-        })
+            .into());
+        }
+        Ok(())
     }
 
     pub async fn recv(&self) -> anyhow::Result<Frame> {
@@ -152,6 +192,55 @@ impl PortTunnel {
         }
         Ok(())
     }
+}
+
+pub(super) fn is_backpressure_error(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .to_string()
+            .contains("port_forward_backpressure_exceeded")
+    })
+}
+
+fn data_frame_charge(frame: &Frame) -> usize {
+    if frame.stream_id == 0 {
+        0
+    } else {
+        HEADER_LEN
+            .saturating_add(frame.meta.len())
+            .saturating_add(frame.data.len())
+    }
+}
+
+fn reserve_queued_bytes(
+    queued_bytes: &AtomicUsize,
+    charge: usize,
+    max_queued_bytes: usize,
+) -> anyhow::Result<()> {
+    let mut current = queued_bytes.load(Ordering::Relaxed);
+    loop {
+        let Some(next) = current.checked_add(charge) else {
+            return Err(backpressure_error());
+        };
+        if next > max_queued_bytes {
+            return Err(backpressure_error());
+        }
+        match queued_bytes.compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Relaxed)
+        {
+            Ok(_) => return Ok(()),
+            Err(observed) => current = observed,
+        }
+    }
+}
+
+fn release_queued_bytes(queued_bytes: &AtomicUsize, charge: usize) {
+    if charge > 0 {
+        queued_bytes.fetch_sub(charge, Ordering::AcqRel);
+    }
+}
+
+fn backpressure_error() -> anyhow::Error {
+    anyhow::anyhow!("port_forward_backpressure_exceeded: tunnel queue byte budget exceeded")
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -314,7 +403,10 @@ mod tests {
 
     #[tokio::test]
     async fn local_port_tunnel_binds_tcp_listener() {
-        let tunnel = SideHandle::local().port_tunnel().await.unwrap();
+        let tunnel = SideHandle::local()
+            .port_tunnel(PortTunnel::DEFAULT_MAX_QUEUED_BYTES)
+            .await
+            .unwrap();
         tunnel
             .send(Frame {
                 frame_type: FrameType::TcpListen,

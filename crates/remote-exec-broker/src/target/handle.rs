@@ -188,13 +188,20 @@ impl TargetHandle {
         }
     }
 
-    pub async fn port_tunnel(&self) -> Result<crate::port_forward::PortTunnel, DaemonClientError> {
+    pub async fn port_tunnel(
+        &self,
+        max_queued_bytes: usize,
+    ) -> Result<crate::port_forward::PortTunnel, DaemonClientError> {
         match &self.backend {
             TargetBackend::Remote(client) => {
-                crate::port_forward::PortTunnel::from_stream(client.port_tunnel().await?)
+                crate::port_forward::PortTunnel::from_stream_with_max_queued_bytes(
+                    client.port_tunnel().await?,
+                    max_queued_bytes,
+                )
             }
             TargetBackend::Local(client) => {
-                crate::port_forward::PortTunnel::local(client.port_tunnel_state()).await
+                crate::port_forward::PortTunnel::local(client.port_tunnel_state(), max_queued_bytes)
+                    .await
             }
         }
     }
