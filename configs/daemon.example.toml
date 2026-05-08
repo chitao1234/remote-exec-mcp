@@ -59,6 +59,8 @@ allow_login_shell = true
 #min_ms = 250
 
 # Optional daemon-side forwarding limits.
+# Rust daemons enforce all values below daemon-wide. C++ daemon builds expose
+# matching flat INI keys in crates/remote-exec-daemon-cpp/config/daemon-cpp.example.ini.
 #[port_forward_limits]
 #max_tunnel_connections = 128
 #max_retained_sessions = 64

@@ -509,8 +509,8 @@ How to use it:
 - `forward_id` is broker runtime state only. If the broker restarts, reopen the forward instead of trying to reuse the old id.
 - If only the broker-daemon transport drops while the daemon stays alive, the broker may resume the same forward after transport loss on either forwarding side and preserve future listen-side TCP accepts or UDP datagrams.
 - Prefer checking `phase` and side health, not only legacy `status`, when waiting for forwarded services to be ready.
-- `status = "open"` is compatible with older clients; `phase = "reconnecting"` means new work may fail until recovery returns to `phase = "ready"`.
-- For v4 targets, `port_forward_protocol_version` and `x-remote-exec-port-tunnel-version` are both `4`.
+- `phase` is derived from both forwarding sides. `status = "open"` is compatible with older clients and can coexist with `phase = "reconnecting"` while one side is still recovering. Treat the forward as ready only when `phase = "ready"`.
+- For v4 targets, `port_forward_protocol_version` and `X-Remote-Exec-Port-Tunnel-Version` are both `4`.
 - Do not expect active TCP streams or UDP per-peer connector state to survive a reconnect; treat those as lost and let future connections recreate them.
 - Per-stream TCP connect failures close that accepted TCP stream but leave the parent forward open for later connections.
 - Explicit close may return an error if daemon-side listener cleanup cannot be confirmed; retry close or inspect `list` before assuming the listener was released.
@@ -589,6 +589,7 @@ Structured result fields:
 - On Windows XP-compatible C++ daemon targets, symlink entries inside directory transfers and import archives are skipped with warnings when preservation is unavailable; use `symlink_mode: "follow"` to copy regular-file and directory targets when the platform exposes them.
 - On C++ daemon targets, transfer compression is never used; the broker falls back automatically.
 - On C++ daemon targets, `forward_ports` uses the same daemon-private HTTP/1.1 Upgrade tunnel, both-side reconnect behavior, and broker-owned `forward_id` lifecycle as the Rust daemon.
+- On C++ daemon targets, v4 `TunnelReady.limits` is truthful for configured active TCP stream, UDP bind, and queued-byte limits. The daemon enforces retained session/listener, UDP bind, active TCP stream, queued-byte, worker-thread, and tunnel I/O timeout limits.
 - On C++ daemon targets, recoverable peer abort/reset errors during forwarding surface as normal tool errors and do not terminate the daemon.
 - Do not assume hard links, sparse files, or special files transfer on C++ daemon targets; special files are skipped during export.
 

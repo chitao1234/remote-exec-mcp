@@ -91,15 +91,15 @@ listen side. Active TCP streams and UDP per-peer connector state are not
 preserved across reconnect. C++ forwarding worker threads are capped by
 `port_forward_max_worker_threads`, and v4 `TunnelReady.limits` truthfully report
 the configured active TCP stream, UDP bind, and tunnel queued-byte limits.
-Retained sessions, retained listeners, UDP binds, and active TCP streams are
-enforced daemon-wide. Upgraded tunnel socket reads and writes are bounded by
-`port_forward_tunnel_io_timeout_ms`, so a peer that sends an incomplete v4 frame
-cannot occupy a daemon worker indefinitely. Per-stream TCP connect failures
-close only that accepted TCP stream and leave the parent forward open. A broker
-restart still drops the broker-owned `forward_id` mapping, and a daemon restart
-still destroys the forward. If the broker disappears without reconnecting, the
-daemon reclaims detached listeners and UDP sockets after the reconnect grace
-window expires.
+Retained sessions, retained listeners, UDP binds, active TCP streams, and
+outbound queued tunnel bytes are enforced daemon-wide. Upgraded tunnel socket
+reads and writes are bounded by `port_forward_tunnel_io_timeout_ms`, so a peer
+that sends an incomplete v4 frame cannot occupy a daemon worker indefinitely.
+Per-stream TCP connect failures close only that accepted TCP stream and leave
+the parent forward open. A broker restart still drops the broker-owned
+`forward_id` mapping, and a daemon restart still destroys the forward. If the
+broker disappears without reconnecting, the daemon reclaims detached listeners
+and UDP sockets after the reconnect grace window expires.
 Daemon shutdown closes live forwarded sockets promptly.
 Recoverable peer abort/reset errors during forwarding are reported as normal
 request failures and do not terminate the daemon process.
