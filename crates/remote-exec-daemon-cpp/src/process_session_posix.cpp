@@ -383,6 +383,16 @@ public:
         reaped_ = true;
     }
 
+    bool terminate_descendants() override {
+        if (pid_ > 0) {
+            kill(-pid_, SIGTERM);
+            platform::sleep_ms(50);
+            kill(-pid_, SIGKILL);
+            return true;
+        }
+        return false;
+    }
+
 private:
     pid_t pid_;
     UniqueFd input_write_;

@@ -189,6 +189,21 @@ int main() {
     assert(late_output.at("exit_code").get<int>() == 0);
     assert(late_output.at("output").get<std::string>() == "late tail");
 
+    const Json stdout_held_open = start_test_command(
+        store,
+        "exec 3>&1; (sleep 30 >&3) & printf 'done\\n'; sleep 0.05",
+        root.string(),
+        shell,
+        false,
+        250UL,
+        DEFAULT_MAX_OUTPUT_TOKENS,
+        yield_time,
+        64UL
+    );
+    assert(!stdout_held_open.at("running").get<bool>());
+    assert(stdout_held_open.at("exit_code").get<int>() == 0);
+    assert(stdout_held_open.at("output").get<std::string>() == "done\n");
+
     const Json newline_preserved = start_test_command(
         store,
         "printf 'one two\\n'",

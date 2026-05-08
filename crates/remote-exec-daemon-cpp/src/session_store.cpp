@@ -35,6 +35,7 @@ struct PollResult {
 
 const unsigned long EXIT_DRAIN_INITIAL_WAIT_MS = 125UL;
 const unsigned long EXIT_DRAIN_QUIET_MS = 25UL;
+const unsigned long EXIT_POLL_INTERVAL_MS = 25UL;
 const unsigned long RECENT_PROTECTION_COUNT = 8UL;
 const unsigned long WARNING_THRESHOLD = 60UL;
 
@@ -178,10 +179,6 @@ std::shared_ptr<LiveSession> launch_live_session(
     return session;
 }
 
-bool session_finished(const SessionSnapshot& snapshot) {
-    return snapshot.eof && snapshot.exited;
-}
-
 SessionSnapshot session_snapshot_locked(const LiveSession& session) {
     SessionSnapshot snapshot;
     snapshot.buffered_output = session.output_.buffered_output;
@@ -192,22 +189,25 @@ SessionSnapshot session_snapshot_locked(const LiveSession& session) {
     return snapshot;
 }
 
-bool wait_for_generation_change_locked(
+void wait_for_generation_change_locked(
     LiveSession* session,
     std::uint64_t baseline_generation,
-    std::uint64_t deadline_ms
+    std::uint64_t deadline_ms,
+    unsigned long max_wait_ms
 ) {
     while (!session->closing && session->output_.generation == baseline_generation) {
         const std::uint64_t now = platform::monotonic_ms();
         if (now >= deadline_ms) {
-            return false;
+            return;
         }
-        const unsigned long remaining = static_cast<unsigned long>(deadline_ms - now);
+        unsigned long remaining = static_cast<unsigned long>(deadline_ms - now);
+        if (max_wait_ms > 0UL) {
+            remaining = std::min(remaining, max_wait_ms);
+        }
         if (!session->cond_.timed_wait_ms(session->mutex_, remaining)) {
-            return false;
+            return;
         }
     }
-    return session->output_.generation != baseline_generation || session->closing;
 }
 
 void append_session_output_locked(
@@ -221,12 +221,19 @@ void append_session_output_locked(
     }
 }
 
-void mark_session_exit_locked(LiveSession* session) {
+bool mark_session_exit_locked(LiveSession* session) {
+    if (session->output_.exited) {
+        return false;
+    }
     int exit_code = session->output_.exit_code;
     if (session->process->has_exited(&exit_code)) {
         session->output_.exited = true;
         session->output_.exit_code = exit_code;
+        ++session->output_.generation;
+        session->cond_.broadcast();
+        return true;
     }
+    return false;
 }
 
 void finish_session_output_locked(LiveSession* session) {
@@ -238,6 +245,13 @@ void finish_session_output_locked(LiveSession* session) {
     mark_session_exit_locked(session);
     ++session->output_.generation;
     session->cond_.broadcast();
+}
+
+bool terminate_descendants_after_exit_locked(LiveSession* session) {
+    if (session->process.get() != NULL) {
+        return session->process->terminate_descendants();
+    }
+    return false;
 }
 
 void pump_session_output(const std::shared_ptr<LiveSession>& session) {
@@ -357,6 +371,40 @@ std::string take_session_output_locked(
     return output;
 }
 
+bool drain_exited_session_output_locked(
+    LiveSession* session,
+    std::string* output,
+    unsigned long max_output_tokens
+) {
+    bool signaled_descendants = false;
+    std::uint64_t deadline = platform::monotonic_ms() + EXIT_DRAIN_INITIAL_WAIT_MS;
+
+    for (;;) {
+        if (!session->output_.buffered_output.empty()) {
+            *output += take_session_output_locked(session, max_output_tokens);
+        }
+        if (session->output_.eof || session->closing) {
+            return true;
+        }
+
+        const std::uint64_t now = platform::monotonic_ms();
+        if (now >= deadline) {
+            if (signaled_descendants) {
+                return session->output_.eof || session->closing;
+            }
+            if (!terminate_descendants_after_exit_locked(session)) {
+                return false;
+            }
+            signaled_descendants = true;
+            deadline = platform::monotonic_ms() + EXIT_DRAIN_QUIET_MS;
+            continue;
+        }
+
+        const std::uint64_t seen_generation = session->output_.generation;
+        wait_for_generation_change_locked(session, seen_generation, deadline, 0UL);
+    }
+}
+
 PollResult wait_for_session_activity(
     const std::shared_ptr<LiveSession>& session,
     unsigned long timeout_ms,
@@ -374,8 +422,16 @@ PollResult wait_for_session_activity(
             output += take_session_output_locked(session.get(), max_output_tokens);
             seen_generation = session->output_.generation;
         }
-        if (session_finished(snapshot)) {
-            return PollResult{output, true, snapshot.exit_code};
+        if (snapshot.exited) {
+            if (!drain_exited_session_output_locked(
+                    session.get(),
+                    &output,
+                    max_output_tokens
+                )) {
+                return PollResult{output, false, 0};
+            }
+            const SessionSnapshot completed = session_snapshot_locked(*session);
+            return PollResult{output, true, completed.exit_code};
         }
 
         const std::uint64_t now = platform::monotonic_ms();
@@ -383,9 +439,12 @@ PollResult wait_for_session_activity(
             return PollResult{output, false, 0};
         }
 
-        if (!wait_for_generation_change_locked(session.get(), seen_generation, deadline)) {
-            return PollResult{output, false, 0};
-        }
+        wait_for_generation_change_locked(
+            session.get(),
+            seen_generation,
+            deadline,
+            EXIT_POLL_INTERVAL_MS
+        );
     }
 }
 

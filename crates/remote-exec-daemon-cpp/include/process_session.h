@@ -30,6 +30,9 @@ public:
     virtual std::string flush_carry(std::string* carry) = 0;
     virtual bool has_exited(int* exit_code) = 0;
     virtual void terminate() = 0;
+    virtual bool terminate_descendants() {
+        return false;
+    }
 
 protected:
     ProcessSession() {}
