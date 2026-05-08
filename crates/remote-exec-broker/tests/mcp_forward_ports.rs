@@ -1156,7 +1156,7 @@ max_tunnel_queued_bytes = 4096
     let mut client = tokio::net::TcpStream::connect(&listen_endpoint)
         .await
         .unwrap();
-    client.write_all(&vec![7u8; 128]).await.unwrap();
+    client.write_all(&[7u8; 128]).await.unwrap();
 
     let close_result = tokio::time::timeout(Duration::from_secs(5), async {
         let mut buf = [0u8; 1];

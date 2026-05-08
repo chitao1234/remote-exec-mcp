@@ -144,7 +144,7 @@ async fn run_tcp_forward_epoch(
                         let Some(connect_stream_id) = connect_stream_ids.next() else {
                             debug_assert!(connect_stream_ids.needs_generation_rotation());
                             let _ = listen_tunnel.close_stream(frame.stream_id).await;
-                            release_active_tcp_stream(runtime).await;
+                            drop_active_tcp_stream(runtime).await;
                             close_active_tcp_listen_streams(
                                 runtime,
                                 &listen_tunnel,
@@ -164,17 +164,17 @@ async fn run_tcp_forward_epoch(
                         }).await {
                             if is_retryable_transport_error(&err) {
                                 if let Err(close_err) = listen_tunnel.close_stream(frame.stream_id).await {
-                                    release_active_tcp_stream(runtime).await;
+                                    drop_active_tcp_stream(runtime).await;
                                     return classify_transport_failure(
                                         close_err,
                                         "closing tcp listen stream after connect tunnel loss",
                                         TunnelRole::Listen,
                                     );
                                 }
-                                release_active_tcp_stream(runtime).await;
+                                drop_active_tcp_stream(runtime).await;
                                 return Ok(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect));
                             }
-                            release_active_tcp_stream(runtime).await;
+                            drop_active_tcp_stream(runtime).await;
                             return Err(err).context("connecting tcp forward destination");
                         }
                         state.listen_to_connect.insert(frame.stream_id, connect_stream_id);
@@ -681,6 +681,16 @@ async fn release_active_tcp_stream(runtime: &ForwardRuntime) {
         .await;
 }
 
+async fn drop_active_tcp_stream(runtime: &ForwardRuntime) {
+    runtime
+        .store
+        .update_entry(&runtime.forward_id, |entry| {
+            entry.dropped_tcp_streams += 1;
+            entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(1);
+        })
+        .await;
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
@@ -690,7 +700,9 @@ mod tests {
     use std::time::Duration;
 
     use remote_exec_proto::port_tunnel::{Frame, FrameType, HEADER_LEN, read_frame, write_frame};
-    use remote_exec_proto::public::ForwardPortProtocol as PublicForwardPortProtocol;
+    use remote_exec_proto::public::{
+        ForwardPortEntry, ForwardPortLimitSummary, ForwardPortProtocol as PublicForwardPortProtocol,
+    };
     use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
     use tokio::sync::Mutex as TokioMutex;
     use tokio_util::sync::CancellationToken;
@@ -896,7 +908,6 @@ mod tests {
             initial_connect_tunnel: connect_tunnel.clone(),
             cancel,
         };
-
         write_frame(
             &mut listen_daemon_side,
             &Frame {
@@ -934,6 +945,56 @@ mod tests {
             no_close.is_err(),
             "listen stream close is deferred to the reconnect epoch"
         );
+    }
+
+    #[tokio::test]
+    async fn tcp_accept_send_backpressure_counts_dropped_stream() {
+        let (listen_broker_side, mut listen_daemon_side) = tokio::io::duplex(4096);
+        let listen_tunnel = Arc::new(PortTunnel::from_stream(listen_broker_side).unwrap());
+        let (connect_broker_side, _connect_daemon_side) = tokio::io::duplex(4096);
+        let connect_tunnel = Arc::new(
+            PortTunnel::from_stream_with_max_queued_bytes(connect_broker_side, 1).unwrap(),
+        );
+        let runtime = tcp_test_runtime(listen_tunnel.clone(), connect_tunnel.clone());
+        runtime
+            .store
+            .insert(test_record(&runtime, "127.0.0.1:10000"))
+            .await;
+
+        write_frame(
+            &mut listen_daemon_side,
+            &Frame {
+                frame_type: FrameType::TcpAccept,
+                flags: 0,
+                stream_id: 11,
+                meta: serde_json::to_vec(&serde_json::json!({
+                    "listener_stream_id": 1
+                }))
+                .unwrap(),
+                data: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            run_tcp_forward_epoch(&runtime, listen_tunnel, connect_tunnel),
+        )
+        .await
+        .expect("tcp epoch should finish after immediate connect send backpressure");
+        let error = match result {
+            Ok(_) => panic!("connect send backpressure should fail the tcp epoch"),
+            Err(error) => error,
+        };
+        assert!(
+            format!("{error:#}").contains("port_forward_backpressure_exceeded"),
+            "unexpected error: {error:#}"
+        );
+
+        let entries = runtime.store.list(&filter_one(&runtime.forward_id)).await;
+        assert_eq!(entries[0].active_tcp_streams, 0);
+        assert_eq!(entries[0].dropped_tcp_streams, 1);
     }
 
     #[tokio::test]
@@ -1280,6 +1341,43 @@ mod tests {
             listen_session,
             initial_connect_tunnel: connect_tunnel,
             cancel: CancellationToken::new(),
+        }
+    }
+
+    fn filter_one(forward_id: &str) -> super::super::store::PortForwardFilter {
+        super::super::store::PortForwardFilter {
+            listen_side: None,
+            connect_side: None,
+            forward_ids: vec![forward_id.to_string()],
+        }
+    }
+
+    fn test_record(
+        runtime: &ForwardRuntime,
+        listen_endpoint: &str,
+    ) -> super::super::store::PortForwardRecord {
+        super::super::store::PortForwardRecord {
+            entry: ForwardPortEntry::new_open(
+                runtime.forward_id.clone(),
+                runtime.listen_side.name().to_string(),
+                listen_endpoint.to_string(),
+                runtime.connect_side.name().to_string(),
+                runtime.connect_endpoint.clone(),
+                runtime.protocol,
+                ForwardPortLimitSummary {
+                    max_active_tcp_streams: runtime.max_active_tcp_streams_per_forward,
+                    max_udp_peers: runtime.max_udp_peers_per_forward as u64,
+                    max_pending_tcp_bytes_per_stream: runtime.max_pending_tcp_bytes_per_stream
+                        as u64,
+                    max_pending_tcp_bytes_per_forward: runtime.max_pending_tcp_bytes_per_forward
+                        as u64,
+                    max_tunnel_queued_bytes: runtime.max_tunnel_queued_bytes as u64,
+                    max_reconnecting_forwards: runtime.max_reconnecting_forwards,
+                },
+            ),
+            listen_session: runtime.listen_session.clone(),
+            cancel: runtime.cancel.clone(),
+            task_done: Arc::new(TokioMutex::new(None)),
         }
     }
 

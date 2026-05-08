@@ -309,18 +309,35 @@ async fn forward_ports_reconnect_after_connect_side_tunnel_drop_and_accept_new_t
     let forward_id = open.forward_id();
     let listen_endpoint = open.listen_endpoint();
 
-    cluster.daemon_a.drop_port_tunnels().await;
-
-    let mut trigger = tokio::net::TcpStream::connect(&listen_endpoint)
+    let mut active = tokio::net::TcpStream::connect(&listen_endpoint)
         .await
         .unwrap();
-    trigger.write_all(b"trigger").await.unwrap();
-    trigger.shutdown().await.unwrap();
-    let _ = tokio::time::timeout(Duration::from_millis(250), async {
-        let mut ignored = Vec::new();
-        let _ = trigger.read_to_end(&mut ignored).await;
+    active.write_all(b"before").await.unwrap();
+    let mut echoed_before = [0u8; 6];
+    active.read_exact(&mut echoed_before).await.unwrap();
+    assert_eq!(&echoed_before, b"before");
+
+    cluster.daemon_a.drop_port_tunnels().await;
+
+    let read_after_drop = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut buf = [0u8; 1];
+        active.read(&mut buf).await
     })
-    .await;
+    .await
+    .expect("active tcp stream should close when connect-side tunnel drops");
+    match read_after_drop {
+        Ok(0) => {}
+        Err(err)
+            if matches!(
+                err.kind(),
+                std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::NotConnected
+                    | std::io::ErrorKind::UnexpectedEof
+            ) => {}
+        Ok(read) => panic!("expected active tcp stream to close, read {read} byte(s) instead"),
+        Err(err) => panic!("unexpected active tcp stream read error: {err}"),
+    }
 
     let mut stream = tokio::net::TcpStream::connect(&listen_endpoint)
         .await
