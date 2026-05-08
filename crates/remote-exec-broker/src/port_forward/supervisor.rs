@@ -86,6 +86,17 @@ pub(super) struct ListenSessionControl {
     pub(super) op_lock: Mutex<()>,
 }
 
+struct ListenSessionParams {
+    side: SideHandle,
+    forward_id: String,
+    session_id: String,
+    generation: u64,
+    listener_stream_id: u32,
+    resume_timeout: Duration,
+    max_tunnel_queued_bytes: usize,
+    tunnel: Arc<PortTunnel>,
+}
+
 pub struct OpenedForward {
     pub record: PortForwardRecord,
     runtime: ForwardRuntime,
@@ -107,25 +118,16 @@ impl OpenedForward {
 }
 
 impl ListenSessionControl {
-    fn new(
-        side: SideHandle,
-        forward_id: String,
-        session_id: String,
-        generation: u64,
-        listener_stream_id: u32,
-        resume_timeout: Duration,
-        max_tunnel_queued_bytes: usize,
-        tunnel: Arc<PortTunnel>,
-    ) -> Self {
+    fn new(params: ListenSessionParams) -> Self {
         Self {
-            side,
-            forward_id,
-            session_id,
-            generation,
-            listener_stream_id,
-            resume_timeout,
-            max_tunnel_queued_bytes,
-            current_tunnel: Mutex::new(Some(tunnel)),
+            side: params.side,
+            forward_id: params.forward_id,
+            session_id: params.session_id,
+            generation: params.generation,
+            listener_stream_id: params.listener_stream_id,
+            resume_timeout: params.resume_timeout,
+            max_tunnel_queued_bytes: params.max_tunnel_queued_bytes,
+            current_tunnel: Mutex::new(Some(params.tunnel)),
             op_lock: Mutex::new(()),
         }
     }
@@ -241,16 +243,16 @@ async fn open_tcp_forward(
         ),
     )
     .await?;
-    let listen_session = Arc::new(ListenSessionControl::new(
-        listen_side.clone(),
-        forward_id.clone(),
+    let listen_session = Arc::new(ListenSessionControl::new(ListenSessionParams {
+        side: listen_side.clone(),
+        forward_id: forward_id.clone(),
         session_id,
-        1,
+        generation: 1,
         listener_stream_id,
         resume_timeout,
-        limits.max_tunnel_queued_bytes as usize,
-        listen_tunnel,
-    ));
+        max_tunnel_queued_bytes: limits.max_tunnel_queued_bytes as usize,
+        tunnel: listen_tunnel,
+    }));
 
     let cancel = CancellationToken::new();
     let task_done = Arc::new(Mutex::new(None));
@@ -349,16 +351,16 @@ async fn open_udp_forward(
         ),
     )
     .await?;
-    let listen_session = Arc::new(ListenSessionControl::new(
-        listen_side.clone(),
-        forward_id.clone(),
+    let listen_session = Arc::new(ListenSessionControl::new(ListenSessionParams {
+        side: listen_side.clone(),
+        forward_id: forward_id.clone(),
         session_id,
-        1,
+        generation: 1,
         listener_stream_id,
         resume_timeout,
-        limits.max_tunnel_queued_bytes as usize,
-        listen_tunnel,
-    ));
+        max_tunnel_queued_bytes: limits.max_tunnel_queued_bytes as usize,
+        tunnel: listen_tunnel,
+    }));
 
     let cancel = CancellationToken::new();
     let task_done = Arc::new(Mutex::new(None));

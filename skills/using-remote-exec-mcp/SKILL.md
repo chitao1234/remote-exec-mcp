@@ -88,7 +88,7 @@ Structured result shape:
         "arch": "x86_64",
         "supports_pty": true,
         "supports_port_forward": true,
-        "port_forward_protocol_version": 3
+        "port_forward_protocol_version": 4
       }
     },
     {
@@ -106,7 +106,7 @@ Use the result this way:
 - Read `daemon_info.supports_pty` before using `tty: true`.
 - Read `daemon_info.supports_port_forward` and `daemon_info.port_forward_protocol_version` before planning remote `forward_ports` use.
 - `forward_ports=yes` means the daemon reports port-forward support.
-- `port_forward_protocol_version` and text like `forward_protocol=v3` show the cached internal broker-daemon forwarding protocol version for that target.
+- `port_forward_protocol_version` and text like `forward_protocol=v4` show the cached internal broker-daemon forwarding protocol version for that target.
 - If `daemon_info` is `null`, do not invent your own meaning. It only means the broker has no current cached metadata.
 - If broker-host exec support is enabled, `local` appears here as a normal target entry.
 
@@ -508,6 +508,9 @@ How to use it:
 - Keep the returned `forward_id`; use it to close the forward explicitly.
 - `forward_id` is broker runtime state only. If the broker restarts, reopen the forward instead of trying to reuse the old id.
 - If only the broker-daemon transport drops while the daemon stays alive, the broker may resume the same forward after transport loss on either forwarding side and preserve future listen-side TCP accepts or UDP datagrams.
+- Prefer checking `phase` and side health, not only legacy `status`, when waiting for forwarded services to be ready.
+- `status = "open"` is compatible with older clients; `phase = "reconnecting"` means new work may fail until recovery returns to `phase = "ready"`.
+- For v4 targets, `port_forward_protocol_version` and `x-remote-exec-port-tunnel-version` are both `4`.
 - Do not expect active TCP streams or UDP per-peer connector state to survive a reconnect; treat those as lost and let future connections recreate them.
 - Per-stream TCP connect failures close that accepted TCP stream but leave the parent forward open for later connections.
 - Explicit close may return an error if daemon-side listener cleanup cannot be confirmed; retry close or inspect `list` before assuming the listener was released.
@@ -525,6 +528,15 @@ Structured result fields:
 - `forwards[].protocol`
 - `forwards[].status`
 - `forwards[].last_error`
+- `forwards[].phase`
+- `forwards[].listen_state`
+- `forwards[].connect_state`
+- `forwards[].active_tcp_streams`
+- `forwards[].dropped_tcp_streams`
+- `forwards[].dropped_udp_datagrams`
+- `forwards[].reconnect_attempts`
+- `forwards[].last_reconnect_at`
+- `forwards[].limits`
 
 ## Standard Workflows
 

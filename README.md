@@ -379,7 +379,12 @@ cargo fmt --all --check
 - `transfer_files` uses broker-mediated copy for `local -> remote`, `remote -> local`, `remote -> remote`, and `local -> local`.
 - `forward_ports` uses broker-mediated TCP/UDP forwarding between a `listen_side` and `connect_side`; either side may be a configured target or `"local"`.
 - Public `session_id` and `forward_id` values are broker-owned in-memory runtime state. A broker restart drops those mappings, so live exec sessions and port forwards must be reopened after restart.
+- `forward_ports` v4 uses `x-remote-exec-port-tunnel-version: 4` for daemon-private HTTP/1.1 Upgrade tunnels.
+- `forward_ports list` includes `phase`, per-side health, generation, reconnect counters, dropped TCP stream counters, dropped UDP datagram counters, and effective limits.
+- A forward with legacy `status = "open"` may have `phase = "reconnecting"` while the broker is recovering a tunnel.
 - `forward_ports` survives transient broker-daemon transport disconnects when the daemon stays alive. The broker may recover from transport loss on either forwarding side, and the daemon retains the forward itself plus future TCP accepts or future UDP datagrams on the listen side, but active TCP streams and UDP per-peer connector state are not preserved across reconnect.
+- Active TCP streams are closed across listen-side or connect-side tunnel reconnect. UDP per-peer connector state is recreated after reconnect, and datagrams that cannot be relayed under pressure are counted as drops.
+- Broker and daemon forwarding limits protect open forwards, retained sessions, active TCP streams, UDP peers, queued tunnel bytes, and C++ forwarding worker threads.
 - Per-stream TCP connect failures close only that accepted TCP stream; the parent forward remains open for later connections.
 - Remote daemon port-forward resources are coordinated through daemon-private HTTP/1.1 Upgrade tunnels. If the broker disappears without closing a port forward, the daemon keeps detached listen-side resources only until the reconnect grace window expires, then reclaims listeners and UDP sockets so the same endpoint can be rebound later.
 - A daemon restart still destroys the forward. Unexpected broker loss may therefore delay remote listener cleanup until the reconnect grace window expires, but reopening after broker or daemon restart still creates a new `forward_id`.
@@ -528,7 +533,7 @@ Selecting `target: "local"` in `transfer_files` uses broker-host filesystem acce
 
 When broker `[local]` config is enabled, selecting `target: "local"` in `exec_command`, `write_stdin`, `apply_patch`, or `view_image` uses the broker host and the same optional broker `host_sandbox` rules.
 
-Selecting side `"local"` in `forward_ports` uses broker-host network access regardless of broker `[local]` exec configuration. `forward_ports` is not restricted by filesystem sandbox rules.
+Selecting side `"local"` in `forward_ports` uses broker-host network access regardless of broker `[local]` exec configuration. `forward_ports` network access is controlled by target selection and static forwarding limits, not filesystem sandbox rules.
 
 In v1:
 

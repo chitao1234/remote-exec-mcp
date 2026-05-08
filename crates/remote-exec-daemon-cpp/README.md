@@ -88,11 +88,13 @@ broker-daemon transport drops and the daemon stays alive, the broker may
 recover from transport loss on either forwarding side while the daemon retains
 the forward itself plus future TCP accepts or future UDP datagrams on the
 listen side. Active TCP streams and UDP per-peer connector state are not
-preserved across reconnect. Per-stream TCP connect failures close only that
-accepted TCP stream and leave the parent forward open. A broker restart still drops the broker-owned
-`forward_id` mapping, and a daemon restart still destroys the forward. If the
-broker disappears without reconnecting, the daemon reclaims detached listeners
-and UDP sockets after the reconnect grace window expires.
+preserved across reconnect. C++ forwarding worker threads are capped by
+`port_forward_max_worker_threads`. Per-stream TCP connect failures close only
+that accepted TCP stream and leave the parent forward open. A broker restart
+still drops the broker-owned `forward_id` mapping, and a daemon restart still
+destroys the forward. If the broker disappears without reconnecting, the
+daemon reclaims detached listeners and UDP sockets after the reconnect grace
+window expires.
 Daemon shutdown closes live forwarded sockets promptly.
 Recoverable peer abort/reset errors during forwarding are reported as normal
 request failures and do not terminate the daemon process.
@@ -129,6 +131,8 @@ default_workdir = /work
 # max_request_header_bytes = 65536
 # max_request_body_bytes = 536870912
 # max_open_sessions = 64
+# C++ forwarding uses detached worker threads for retained listener, UDP, TCP
+# stream, and reconnect-expiry work.
 # port_forward_max_worker_threads = 256
 
 # Optional per-operation yield-time policy overrides.

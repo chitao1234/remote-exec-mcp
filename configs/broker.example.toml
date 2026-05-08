@@ -58,6 +58,17 @@ expected_daemon_name = "builder-xp"
 # tool results and only returns normal content items.
 disable_structured_content = true
 
+# Optional broker-owned forwarding limits.
+#[port_forward_limits]
+#max_open_forwards_total = 64
+#max_forwards_per_side_pair = 16
+#max_active_tcp_streams_per_forward = 256
+#max_pending_tcp_bytes_per_stream = 262144
+#max_pending_tcp_bytes_per_forward = 2097152
+#max_udp_peers_per_forward = 256
+#max_tunnel_queued_bytes = 8388608
+#max_reconnecting_forwards = 16
+
 # Optional broker-host sandbox for broker-local filesystem access.
 # This applies to `transfer_files` endpoints with `target: "local"` and, when `[local]`
 # is enabled, also applies to the embedded local target.

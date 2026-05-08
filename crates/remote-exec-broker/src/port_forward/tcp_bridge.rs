@@ -29,6 +29,13 @@ struct PendingTcpBudget {
     total_bytes: usize,
 }
 
+#[derive(Default)]
+struct TcpForwardState {
+    listen_to_connect: HashMap<u32, u32>,
+    connect_streams: HashMap<u32, TcpConnectStream>,
+    pending_budget: PendingTcpBudget,
+}
+
 pub(super) async fn run_tcp_forward(runtime: ForwardRuntime) -> anyhow::Result<()> {
     let mut listen_tunnel = runtime
         .listen_session
@@ -99,9 +106,7 @@ async fn run_tcp_forward_epoch(
     listen_tunnel: Arc<PortTunnel>,
     connect_tunnel: Arc<PortTunnel>,
 ) -> anyhow::Result<ForwardLoopControl> {
-    let mut listen_to_connect = HashMap::<u32, u32>::new();
-    let mut connect_streams = HashMap::<u32, TcpConnectStream>::new();
-    let mut pending_budget = PendingTcpBudget::default();
+    let mut state = TcpForwardState::default();
     let mut connect_stream_ids = StreamIdAllocator::new_odd();
 
     loop {
@@ -130,9 +135,7 @@ async fn run_tcp_forward_epoch(
                             close_active_tcp_listen_streams(
                                 runtime,
                                 &listen_tunnel,
-                                &mut listen_to_connect,
-                                &mut connect_streams,
-                                &mut pending_budget,
+                                &mut state,
                             )
                             .await?;
                             return Ok(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect));
@@ -158,8 +161,8 @@ async fn run_tcp_forward_epoch(
                             }
                             return Err(err).context("connecting tcp forward destination");
                         }
-                        listen_to_connect.insert(frame.stream_id, connect_stream_id);
-                        connect_streams.insert(connect_stream_id, TcpConnectStream {
+                        state.listen_to_connect.insert(frame.stream_id, connect_stream_id);
+                        state.connect_streams.insert(connect_stream_id, TcpConnectStream {
                             listen_stream_id: frame.stream_id,
                             ready: false,
                             pending_frames: Vec::new(),
@@ -174,7 +177,7 @@ async fn run_tcp_forward_epoch(
                         );
                     }
                     FrameType::TcpData => {
-                        if let Some(connect_stream_id) = listen_to_connect.get(&frame.stream_id).copied() {
+                        if let Some(connect_stream_id) = state.listen_to_connect.get(&frame.stream_id).copied() {
                             let remapped = Frame {
                                 stream_id: connect_stream_id,
                                 ..frame
@@ -183,9 +186,7 @@ async fn run_tcp_forward_epoch(
                                 runtime,
                                 &connect_tunnel,
                                 &listen_tunnel,
-                                &mut listen_to_connect,
-                                &mut connect_streams,
-                                &mut pending_budget,
+                                &mut state,
                                 connect_stream_id,
                                 remapped,
                             ).await? {
@@ -194,7 +195,7 @@ async fn run_tcp_forward_epoch(
                         }
                     }
                     FrameType::TcpEof => {
-                        if let Some(connect_stream_id) = listen_to_connect.get(&frame.stream_id).copied() {
+                        if let Some(connect_stream_id) = state.listen_to_connect.get(&frame.stream_id).copied() {
                             let eof = Frame {
                                 frame_type: frame.frame_type,
                                 flags: 0,
@@ -206,9 +207,7 @@ async fn run_tcp_forward_epoch(
                                 runtime,
                                 &connect_tunnel,
                                 &listen_tunnel,
-                                &mut listen_to_connect,
-                                &mut connect_streams,
-                                &mut pending_budget,
+                                &mut state,
                                 connect_stream_id,
                                 eof,
                             ).await? {
@@ -217,19 +216,17 @@ async fn run_tcp_forward_epoch(
                         }
                     }
                     FrameType::Close => {
-                        if let Some(connect_stream_id) = listen_to_connect.remove(&frame.stream_id) {
-                            if let Some(stream) = connect_streams.get_mut(&connect_stream_id) {
+                        if let Some(connect_stream_id) = state.listen_to_connect.remove(&frame.stream_id) {
+                            if let Some(stream) = state.connect_streams.get_mut(&connect_stream_id) {
                                 if stream.ready {
                                     let _ = connect_tunnel.close_stream(connect_stream_id).await;
-                                    connect_streams.remove(&connect_stream_id);
+                                    state.connect_streams.remove(&connect_stream_id);
                                 } else {
                                     if let Some(control) = queue_or_send_tcp_connect_frame(
                                         runtime,
                                         &connect_tunnel,
                                         &listen_tunnel,
-                                        &mut listen_to_connect,
-                                        &mut connect_streams,
-                                        &mut pending_budget,
+                                        &mut state,
                                         connect_stream_id,
                                         Frame {
                                             frame_type: FrameType::Close,
@@ -252,9 +249,9 @@ async fn run_tcp_forward_epoch(
                             ))
                             .context("listen-side tcp tunnel error");
                         }
-                        if let Some(connect_stream_id) = listen_to_connect.remove(&frame.stream_id) {
-                            if let Some(mut stream) = connect_streams.remove(&connect_stream_id) {
-                                release_pending_budget(&mut pending_budget, &mut stream);
+                        if let Some(connect_stream_id) = state.listen_to_connect.remove(&frame.stream_id) {
+                            if let Some(mut stream) = state.connect_streams.remove(&connect_stream_id) {
+                                release_pending_budget(&mut state.pending_budget, &mut stream);
                             }
                             if let Err(err) = connect_tunnel.close_stream(connect_stream_id).await {
                                 return classify_transport_failure(
@@ -275,9 +272,7 @@ async fn run_tcp_forward_epoch(
                         close_active_tcp_listen_streams(
                             runtime,
                             &listen_tunnel,
-                            &mut listen_to_connect,
-                            &mut connect_streams,
-                            &mut pending_budget,
+                            &mut state,
                         )
                         .await?;
                         return Ok(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect));
@@ -292,7 +287,7 @@ async fn run_tcp_forward_epoch(
                 };
                 match frame.frame_type {
                     FrameType::TcpConnectOk => {
-                        let Some(stream) = connect_streams.get_mut(&frame.stream_id) else {
+                        let Some(stream) = state.connect_streams.get_mut(&frame.stream_id) else {
                             continue;
                         };
                         stream.ready = true;
@@ -302,16 +297,14 @@ async fn run_tcp_forward_epoch(
                             runtime,
                             &connect_tunnel,
                             &listen_tunnel,
-                            &mut listen_to_connect,
-                            &mut connect_streams,
-                            &mut pending_budget,
+                            &mut state,
                             frame.stream_id,
                             pending,
                         ).await?;
                         match flush_result {
                             TcpFlushResult::Sent { should_remove } => {
                                 if should_remove {
-                                    connect_streams.remove(&frame.stream_id);
+                                    state.connect_streams.remove(&frame.stream_id);
                                 }
                             }
                             TcpFlushResult::Recover(control) => return Ok(control),
@@ -320,15 +313,13 @@ async fn run_tcp_forward_epoch(
                     FrameType::Error => {
                         close_tcp_pair_after_connect_error(
                             &listen_tunnel,
-                            &mut listen_to_connect,
-                            &mut connect_streams,
-                            &mut pending_budget,
+                            &mut state,
                             frame.stream_id,
                         )
                         .await?;
                     }
                     FrameType::TcpData => {
-                        if let Some(listen_stream_id) = connect_streams
+                        if let Some(listen_stream_id) = state.connect_streams
                             .get(&frame.stream_id)
                             .map(|stream| stream.listen_stream_id)
                         {
@@ -345,7 +336,7 @@ async fn run_tcp_forward_epoch(
                         }
                     }
                     FrameType::TcpEof => {
-                        if let Some(listen_stream_id) = connect_streams
+                        if let Some(listen_stream_id) = state.connect_streams
                             .get(&frame.stream_id)
                             .map(|stream| stream.listen_stream_id)
                         {
@@ -365,14 +356,14 @@ async fn run_tcp_forward_epoch(
                         }
                     }
                     FrameType::Close => {
-                        if let Some(listen_stream_id) = connect_streams
+                        if let Some(listen_stream_id) = state.connect_streams
                             .remove(&frame.stream_id)
                             .map(|mut stream| {
-                                release_pending_budget(&mut pending_budget, &mut stream);
+                                release_pending_budget(&mut state.pending_budget, &mut stream);
                                 stream.listen_stream_id
                             })
                         {
-                            listen_to_connect.remove(&listen_stream_id);
+                            state.listen_to_connect.remove(&listen_stream_id);
                             if let Err(err) = listen_tunnel.close_stream(listen_stream_id).await {
                                 return classify_transport_failure(
                                     err,
@@ -392,15 +383,13 @@ async fn run_tcp_forward_epoch(
 async fn close_active_tcp_listen_streams(
     runtime: &ForwardRuntime,
     listen_tunnel: &Arc<PortTunnel>,
-    listen_to_connect: &mut HashMap<u32, u32>,
-    connect_streams: &mut HashMap<u32, TcpConnectStream>,
-    pending_budget: &mut PendingTcpBudget,
+    state: &mut TcpForwardState,
 ) -> anyhow::Result<()> {
-    let streams = std::mem::take(connect_streams);
+    let streams = std::mem::take(&mut state.connect_streams);
     let dropped_count = streams.len() as u64;
-    listen_to_connect.clear();
+    state.listen_to_connect.clear();
     for (_, mut stream) in streams {
-        release_pending_budget(pending_budget, &mut stream);
+        release_pending_budget(&mut state.pending_budget, &mut stream);
         if let Err(err) = listen_tunnel.close_stream(stream.listen_stream_id).await {
             return classify_transport_failure(
                 err,
@@ -426,13 +415,12 @@ async fn queue_or_send_tcp_connect_frame(
     runtime: &ForwardRuntime,
     connect_tunnel: &Arc<PortTunnel>,
     listen_tunnel: &Arc<PortTunnel>,
-    listen_to_connect: &mut HashMap<u32, u32>,
-    connect_streams: &mut HashMap<u32, TcpConnectStream>,
-    pending_budget: &mut PendingTcpBudget,
+    state: &mut TcpForwardState,
     connect_stream_id: u32,
     frame: Frame,
 ) -> anyhow::Result<Option<ForwardLoopControl>> {
-    let Some(stream_ready) = connect_streams
+    let Some(stream_ready) = state
+        .connect_streams
         .get(&connect_stream_id)
         .map(|stream| stream.ready)
     else {
@@ -449,41 +437,32 @@ async fn queue_or_send_tcp_connect_frame(
                     runtime,
                     connect_tunnel,
                     listen_tunnel,
-                    listen_to_connect,
-                    connect_streams,
-                    pending_budget,
+                    state,
                     connect_stream_id,
                 )
                 .await?;
                 return Ok(None);
             }
             if is_retryable_transport_error(&err) {
-                close_active_tcp_listen_streams(
-                    runtime,
-                    listen_tunnel,
-                    listen_to_connect,
-                    connect_streams,
-                    pending_budget,
-                )
-                .await?;
+                close_active_tcp_listen_streams(runtime, listen_tunnel, state).await?;
                 return Ok(Some(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)));
             }
             return Err(err);
         }
     } else {
-        let Some(stream) = connect_streams.get_mut(&connect_stream_id) else {
+        let Some(stream) = state.connect_streams.get_mut(&connect_stream_id) else {
             return Ok(None);
         };
         let added = frame_data_bytes(&frame);
         let next_stream_total = stream.pending_bytes.saturating_add(added);
-        let next_forward_total = pending_budget.total_bytes.saturating_add(added);
+        let next_forward_total = state.pending_budget.total_bytes.saturating_add(added);
         if next_stream_total > MAX_PENDING_TCP_BYTES_PER_STREAM
             || next_forward_total > MAX_PENDING_TCP_BYTES_PER_FORWARD
         {
             let listen_stream_id = stream.listen_stream_id;
-            release_pending_budget(pending_budget, stream);
-            connect_streams.remove(&connect_stream_id);
-            listen_to_connect.remove(&listen_stream_id);
+            release_pending_budget(&mut state.pending_budget, stream);
+            state.connect_streams.remove(&connect_stream_id);
+            state.listen_to_connect.remove(&listen_stream_id);
             let _ = connect_tunnel.close_stream(connect_stream_id).await;
             let _ = listen_tunnel.close_stream(listen_stream_id).await;
             runtime
@@ -496,7 +475,7 @@ async fn queue_or_send_tcp_connect_frame(
             return Ok(None);
         }
         stream.pending_bytes = next_stream_total;
-        pending_budget.total_bytes = next_forward_total;
+        state.pending_budget.total_bytes = next_forward_total;
         stream.pending_frames.push(frame);
     }
     Ok(None)
@@ -506,14 +485,12 @@ async fn flush_pending_tcp_connect_frames(
     runtime: &ForwardRuntime,
     connect_tunnel: &Arc<PortTunnel>,
     listen_tunnel: &Arc<PortTunnel>,
-    listen_to_connect: &mut HashMap<u32, u32>,
-    connect_streams: &mut HashMap<u32, TcpConnectStream>,
-    pending_budget: &mut PendingTcpBudget,
+    state: &mut TcpForwardState,
     connect_stream_id: u32,
     pending_frames: Vec<Frame>,
 ) -> anyhow::Result<TcpFlushResult> {
-    if let Some(stream) = connect_streams.get_mut(&connect_stream_id) {
-        release_pending_budget(pending_budget, stream);
+    if let Some(stream) = state.connect_streams.get_mut(&connect_stream_id) {
+        release_pending_budget(&mut state.pending_budget, stream);
     }
     let mut should_remove = false;
     for frame in pending_frames {
@@ -528,9 +505,7 @@ async fn flush_pending_tcp_connect_frames(
                     runtime,
                     connect_tunnel,
                     listen_tunnel,
-                    listen_to_connect,
-                    connect_streams,
-                    pending_budget,
+                    state,
                     connect_stream_id,
                 )
                 .await?;
@@ -539,14 +514,7 @@ async fn flush_pending_tcp_connect_frames(
                 });
             }
             if is_retryable_transport_error(&err) {
-                close_active_tcp_listen_streams(
-                    runtime,
-                    listen_tunnel,
-                    listen_to_connect,
-                    connect_streams,
-                    pending_budget,
-                )
-                .await?;
+                close_active_tcp_listen_streams(runtime, listen_tunnel, state).await?;
                 return Ok(TcpFlushResult::Recover(ForwardLoopControl::RecoverTunnel(
                     TunnelRole::Connect,
                 )));
@@ -554,11 +522,12 @@ async fn flush_pending_tcp_connect_frames(
             return Err(err);
         }
         if is_close {
-            if let Some(listen_stream_id) = connect_streams
+            if let Some(listen_stream_id) = state
+                .connect_streams
                 .get(&connect_stream_id)
                 .map(|stream| stream.listen_stream_id)
             {
-                listen_to_connect.remove(&listen_stream_id);
+                state.listen_to_connect.remove(&listen_stream_id);
             }
             should_remove = true;
         }
@@ -573,16 +542,14 @@ enum TcpFlushResult {
 
 async fn close_tcp_pair_after_connect_error(
     listen_tunnel: &Arc<PortTunnel>,
-    listen_to_connect: &mut HashMap<u32, u32>,
-    connect_streams: &mut HashMap<u32, TcpConnectStream>,
-    pending_budget: &mut PendingTcpBudget,
+    state: &mut TcpForwardState,
     connect_stream_id: u32,
 ) -> anyhow::Result<()> {
-    let Some(mut stream) = connect_streams.remove(&connect_stream_id) else {
+    let Some(mut stream) = state.connect_streams.remove(&connect_stream_id) else {
         return Ok(());
     };
-    release_pending_budget(pending_budget, &mut stream);
-    listen_to_connect.remove(&stream.listen_stream_id);
+    release_pending_budget(&mut state.pending_budget, &mut stream);
+    state.listen_to_connect.remove(&stream.listen_stream_id);
     if let Err(err) = listen_tunnel.close_stream(stream.listen_stream_id).await {
         return classify_transport_failure(
             err,
@@ -598,16 +565,14 @@ async fn close_tcp_pair_after_connect_pressure(
     runtime: &ForwardRuntime,
     connect_tunnel: &Arc<PortTunnel>,
     listen_tunnel: &Arc<PortTunnel>,
-    listen_to_connect: &mut HashMap<u32, u32>,
-    connect_streams: &mut HashMap<u32, TcpConnectStream>,
-    pending_budget: &mut PendingTcpBudget,
+    state: &mut TcpForwardState,
     connect_stream_id: u32,
 ) -> anyhow::Result<()> {
-    let Some(mut stream) = connect_streams.remove(&connect_stream_id) else {
+    let Some(mut stream) = state.connect_streams.remove(&connect_stream_id) else {
         return Ok(());
     };
-    release_pending_budget(pending_budget, &mut stream);
-    listen_to_connect.remove(&stream.listen_stream_id);
+    release_pending_budget(&mut state.pending_budget, &mut stream);
+    state.listen_to_connect.remove(&stream.listen_stream_id);
     let _ = connect_tunnel.close_stream(connect_stream_id).await;
     let _ = listen_tunnel.close_stream(stream.listen_stream_id).await;
     runtime

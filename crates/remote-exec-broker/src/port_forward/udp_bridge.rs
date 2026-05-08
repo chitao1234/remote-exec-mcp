@@ -79,6 +79,12 @@ pub(super) async fn run_udp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
                     .await;
             }
             ForwardLoopControl::RecoverTunnel(TunnelRole::Connect) => {
+                runtime
+                    .store
+                    .update_entry(&runtime.forward_id, |entry| {
+                        entry.dropped_udp_datagrams += 1;
+                    })
+                    .await;
                 let Some(reconnected_tunnel) = reconnect_connect_tunnel(&runtime).await? else {
                     return Ok(());
                 };

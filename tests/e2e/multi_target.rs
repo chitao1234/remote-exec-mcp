@@ -279,14 +279,14 @@ async fn forward_ports_reconnect_after_live_tunnel_drop_and_accept_new_tcp_conne
 
     cluster.daemon_a.drop_port_tunnels().await;
 
-    support::wait_for_forward_status_timeout(
+    let forward = support::wait_for_forward_ready_after_reconnect(
         &cluster.broker,
         &forward_id,
-        "open",
         Duration::from_secs(5),
     )
-    .await
-    .expect("forward should stay open after reconnect");
+    .await;
+    assert_eq!(forward["status"], "open");
+    assert_eq!(forward["phase"], "ready");
 
     let mut stream = tokio::net::TcpStream::connect(&listen_endpoint)
         .await
@@ -348,15 +348,15 @@ async fn forward_ports_reconnect_after_connect_side_tunnel_drop_and_accept_new_t
         .unwrap();
     assert_eq!(echoed_later, b"later");
 
-    let forward = support::wait_for_forward_status_timeout(
+    let forward = support::wait_for_forward_ready_after_reconnect(
         &cluster.broker,
         &forward_id,
-        "open",
         Duration::from_secs(5),
     )
-    .await
-    .expect("forward should stay open after connect-side reconnect");
+    .await;
     assert_eq!(forward["status"], "open");
+    assert_eq!(forward["phase"], "ready");
+    assert!(forward["dropped_tcp_streams"].as_u64().unwrap_or_default() >= 1);
 
     let closed = cluster
         .broker
@@ -397,9 +397,19 @@ async fn forward_ports_reconnect_after_live_tunnel_drop_and_relays_future_udp_da
         .broker
         .open_udp_forward("builder-a", "local", "127.0.0.1:0", &udp_echo.to_string())
         .await;
+    let forward_id = open.forward_id();
     let listen_endpoint = open.listen_endpoint();
 
     cluster.daemon_a.drop_port_tunnels().await;
+
+    let forward = support::wait_for_forward_ready_after_reconnect(
+        &cluster.broker,
+        &forward_id,
+        Duration::from_secs(5),
+    )
+    .await;
+    assert_eq!(forward["status"], "open");
+    assert_eq!(forward["phase"], "ready");
 
     let sender = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     sender.send_to(b"after", &listen_endpoint).await.unwrap();
@@ -424,15 +434,21 @@ async fn forward_ports_reconnect_after_connect_side_tunnel_drop_and_relays_futur
     let forward_id = open.forward_id();
     let listen_endpoint = open.listen_endpoint();
 
+    let sender = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    sender.send_to(b"before", &listen_endpoint).await.unwrap();
+    let mut buf = [0u8; 32];
+    let (read_before, _) = tokio::time::timeout(Duration::from_secs(5), sender.recv_from(&mut buf))
+        .await
+        .expect("initial udp datagram should establish a peer connector")
+        .unwrap();
+    assert_eq!(&buf[..read_before], b"before");
+
     cluster.daemon_a.drop_port_tunnels().await;
 
-    let sender = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     sender.send_to(b"trigger", &listen_endpoint).await.unwrap();
-    let mut ignored = [0u8; 32];
-    let _ = tokio::time::timeout(Duration::from_millis(250), sender.recv_from(&mut ignored)).await;
+    let _ = tokio::time::timeout(Duration::from_millis(250), sender.recv_from(&mut buf)).await;
 
     sender.send_to(b"after", &listen_endpoint).await.unwrap();
-    let mut buf = [0u8; 32];
     let (read, _) = tokio::time::timeout(Duration::from_secs(5), sender.recv_from(&mut buf))
         .await
         .expect("future udp datagram should relay after connect-side reconnect")
@@ -448,15 +464,20 @@ async fn forward_ports_reconnect_after_connect_side_tunnel_drop_and_relays_futur
         .unwrap();
     assert_eq!(&buf[..read_later], b"later");
 
-    let forward = support::wait_for_forward_status_timeout(
+    let forward = support::wait_for_forward_ready_after_reconnect(
         &cluster.broker,
         &forward_id,
-        "open",
         Duration::from_secs(5),
     )
-    .await
-    .expect("udp forward should stay open after connect-side reconnect");
+    .await;
     assert_eq!(forward["status"], "open");
+    assert_eq!(forward["phase"], "ready");
+    assert!(
+        forward["dropped_udp_datagrams"]
+            .as_u64()
+            .unwrap_or_default()
+            >= 1
+    );
 
     let closed = cluster
         .broker

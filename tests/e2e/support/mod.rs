@@ -761,6 +761,45 @@ pub async fn wait_for_forward_status_timeout(
     None
 }
 
+pub async fn wait_for_forward_ready_after_reconnect(
+    broker: &BrokerFixture,
+    forward_id: &str,
+    timeout: Duration,
+) -> serde_json::Value {
+    let started = std::time::Instant::now();
+    let mut last_entry = serde_json::Value::Null;
+    while started.elapsed() < timeout {
+        let list = broker
+            .call_tool(
+                "forward_ports",
+                serde_json::json!({
+                    "action": "list",
+                    "forward_ids": [forward_id]
+                }),
+            )
+            .await;
+        let entry = list.structured_content["forwards"][0].clone();
+        if entry["phase"] == "ready" && entry["reconnect_attempts"].as_u64().unwrap_or_default() > 0
+        {
+            return entry;
+        }
+        last_entry = entry;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    panic!(
+        "forward `{}` did not return to ready after reconnect within {:?}; last_status={} last_phase={} reconnect_attempts={} last_error={}",
+        forward_id,
+        timeout,
+        last_entry["status"].as_str().unwrap_or("<missing>"),
+        last_entry["phase"].as_str().unwrap_or("<missing>"),
+        last_entry["reconnect_attempts"]
+            .as_u64()
+            .unwrap_or_default(),
+        last_entry["last_error"].as_str().unwrap_or("<none>")
+    );
+}
+
 pub async fn wait_for_daemon_listener_rebind(endpoint: &str, timeout: Duration) {
     let started = std::time::Instant::now();
     loop {

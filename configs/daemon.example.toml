@@ -58,6 +58,15 @@ allow_login_shell = true
 #max_ms = 30000
 #min_ms = 250
 
+# Optional daemon-side forwarding limits.
+#[port_forward_limits]
+#max_tunnel_connections = 128
+#max_retained_sessions = 64
+#max_retained_listeners = 64
+#max_udp_binds = 64
+#max_active_tcp_streams = 1024
+#max_tunnel_queued_bytes = 8388608
+
 # Optional static path sandbox. Missing `allow` or `allow = []` means "allow all",
 # then `deny` can carve out exclusions.
 # `exec_cwd` applies only to the resolved starting cwd for `exec_command`.
