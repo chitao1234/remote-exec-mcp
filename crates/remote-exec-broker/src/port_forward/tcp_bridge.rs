@@ -241,28 +241,14 @@ async fn run_tcp_forward_epoch(
                     }
                     FrameType::Close => {
                         if let Some(connect_stream_id) = state.listen_to_connect.remove(&frame.stream_id) {
-                            if let Some(stream) = state.connect_streams.get_mut(&connect_stream_id) {
+                            if let Some(mut stream) = state.connect_streams.remove(&connect_stream_id) {
                                 if stream.ready {
                                     let _ = connect_tunnel.close_stream(connect_stream_id).await;
-                                    state.connect_streams.remove(&connect_stream_id);
                                     release_active_tcp_stream(runtime).await;
                                 } else {
-                                    if let Some(control) = queue_or_send_tcp_connect_frame(
-                                        runtime,
-                                        &connect_tunnel,
-                                        &listen_tunnel,
-                                        &mut state,
-                                        connect_stream_id,
-                                        Frame {
-                                            frame_type: FrameType::Close,
-                                            flags: 0,
-                                            stream_id: connect_stream_id,
-                                            meta: Vec::new(),
-                                            data: Vec::new(),
-                                        },
-                                    ).await? {
-                                        return Ok(control);
-                                    }
+                                    release_pending_budget(&mut state.pending_budget, &mut stream);
+                                    let _ = connect_tunnel.close_stream(connect_stream_id).await;
+                                    release_active_tcp_stream(runtime).await;
                                 }
                             }
                         }
@@ -1204,6 +1190,92 @@ mod tests {
             control,
             ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)
         ));
+    }
+
+    #[tokio::test]
+    async fn listen_close_before_connect_ready_releases_active_stream() {
+        let (listen_broker_side, mut listen_daemon_side) = tokio::io::duplex(4096);
+        let listen_tunnel = Arc::new(PortTunnel::from_stream(listen_broker_side).unwrap());
+        let connect_io = ScriptedTunnelIo::default();
+        let connect_tunnel = Arc::new(PortTunnel::from_stream(connect_io.clone()).unwrap());
+        let runtime = tcp_test_runtime(listen_tunnel.clone(), connect_tunnel.clone());
+        runtime
+            .store
+            .insert(test_record(&runtime, "127.0.0.1:10000"))
+            .await;
+        let cancel = runtime.cancel.clone();
+
+        let epoch_runtime = runtime.clone();
+        let epoch = tokio::spawn({
+            let listen_tunnel = listen_tunnel.clone();
+            let connect_tunnel = connect_tunnel.clone();
+            async move { run_tcp_forward_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
+        });
+
+        write_frame(
+            &mut listen_daemon_side,
+            &Frame {
+                frame_type: FrameType::TcpAccept,
+                flags: 0,
+                stream_id: 11,
+                meta: serde_json::to_vec(&serde_json::json!({
+                    "listener_stream_id": 1
+                }))
+                .unwrap(),
+                data: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+        connect_io
+            .wait_for_written_frame(FrameType::TcpConnect, 1)
+            .await;
+
+        write_frame(
+            &mut listen_daemon_side,
+            &Frame {
+                frame_type: FrameType::Close,
+                flags: 0,
+                stream_id: 11,
+                meta: Vec::new(),
+                data: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+        connect_io.wait_for_written_frame(FrameType::Close, 1).await;
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let entries = runtime.store.list(&filter_one(&runtime.forward_id)).await;
+                if entries[0].active_tcp_streams == 0 {
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("listen close should release active stream before TcpConnectOk");
+
+        connect_io.push_read_frame(&Frame {
+            frame_type: FrameType::TcpConnectOk,
+            flags: 0,
+            stream_id: 1,
+            meta: Vec::new(),
+            data: Vec::new(),
+        });
+        tokio::task::yield_now().await;
+        let entries = runtime.store.list(&filter_one("fwd_test")).await;
+        assert_eq!(entries[0].active_tcp_streams, 0);
+        assert_eq!(entries[0].dropped_tcp_streams, 0);
+
+        cancel.cancel();
+        let control = tokio::time::timeout(Duration::from_secs(1), epoch)
+            .await
+            .expect("tcp epoch should stop after cancellation")
+            .unwrap()
+            .expect("pending close should not fail the forward");
+        assert!(matches!(control, ForwardLoopControl::Cancelled));
     }
 
     #[tokio::test]
