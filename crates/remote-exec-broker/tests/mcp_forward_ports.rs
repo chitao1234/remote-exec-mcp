@@ -53,6 +53,13 @@ async fn forward_ports_opens_lists_and_closes_local_tcp_forward() {
         .as_str()
         .unwrap()
         .to_string();
+    let open_entry = &open.structured_content["forwards"][0];
+    assert_eq!(open_entry["status"], "open");
+    assert_eq!(open_entry["phase"], "ready");
+    assert_eq!(open_entry["listen_state"]["health"], "ready");
+    assert_eq!(open_entry["connect_state"]["health"], "ready");
+    assert_eq!(open_entry["listen_state"]["generation"], 1);
+    assert_eq!(open_entry["connect_state"]["generation"], 1);
     let listen_endpoint = open.structured_content["forwards"][0]["listen_endpoint"]
         .as_str()
         .unwrap()
@@ -81,6 +88,7 @@ async fn forward_ports_opens_lists_and_closes_local_tcp_forward() {
         )
         .await;
     assert_eq!(list.structured_content["forwards"][0]["status"], "open");
+    assert_eq!(list.structured_content["forwards"][0]["phase"], "ready");
 
     let close = fixture
         .call_tool(
@@ -92,6 +100,7 @@ async fn forward_ports_opens_lists_and_closes_local_tcp_forward() {
         )
         .await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
+    assert_eq!(close.structured_content["forwards"][0]["phase"], "closed");
 }
 
 #[tokio::test]
@@ -280,6 +289,39 @@ async fn forward_ports_rejects_targets_without_tunnel_protocol_version() {
         error.contains("does not support port forward protocol version 4"),
         "unexpected error: {error}"
     );
+}
+
+#[tokio::test]
+async fn forward_ports_opens_remote_forward_with_v4_tunnel_open() {
+    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
+    support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
+    let echo_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let echo_addr = echo_listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut stream, _) = echo_listener.accept().await.unwrap();
+        let mut buf = Vec::new();
+        stream.read_to_end(&mut buf).await.unwrap();
+        stream.write_all(&buf).await.unwrap();
+    });
+
+    let open = fixture
+        .open_remote_tcp_forward(&echo_addr.to_string())
+        .await;
+    assert_eq!(
+        support::stub_daemon::tunnel_open_count(&fixture.stub_state).await,
+        1
+    );
+
+    let close = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "close",
+                "forward_ids": [forward_id_from(&open)]
+            }),
+        )
+        .await;
+    assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
 #[tokio::test]

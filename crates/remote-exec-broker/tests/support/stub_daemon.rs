@@ -81,6 +81,7 @@ struct StubPortTunnelControl {
     tcp_connect_ok_behavior: TcpConnectOkBehavior,
     close_transports_on_second_session_open: bool,
     session_open_count: usize,
+    tunnel_open_count: usize,
     delay_session_ready_after_first: Option<Duration>,
     override_session_ready_resume_timeout_ms: Option<u64>,
     session_ready_count: usize,
@@ -99,6 +100,7 @@ impl Default for StubPortTunnelControl {
             tcp_connect_ok_behavior: TcpConnectOkBehavior::PassThrough,
             close_transports_on_second_session_open: false,
             session_open_count: 0,
+            tunnel_open_count: 0,
             delay_session_ready_after_first: None,
             override_session_ready_resume_timeout_ms: None,
             session_ready_count: 0,
@@ -265,6 +267,10 @@ pub(crate) async fn udp_connector_stats(state: &StubDaemonState) -> UdpConnector
         max_observed: control.max_observed_udp_connector_streams,
         opened: control.opened_udp_connector_streams,
     }
+}
+
+pub(crate) async fn tunnel_open_count(state: &StubDaemonState) -> usize {
+    state.port_tunnel_control.lock().await.tunnel_open_count
 }
 
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
@@ -763,6 +769,14 @@ async fn observe_broker_to_daemon_frame(
     {
         let mut control = state.port_tunnel_control.lock().await;
         match frame.frame_type {
+            FrameType::TunnelOpen => {
+                control.tunnel_open_count += 1;
+                if control.close_transports_on_second_session_open && control.tunnel_open_count == 2
+                {
+                    control.close_transports_on_second_session_open = false;
+                    observed.transports_to_cancel = std::mem::take(&mut control.active_transports);
+                }
+            }
             FrameType::SessionOpen => {
                 control.session_open_count += 1;
                 if control.close_transports_on_second_session_open
@@ -817,7 +831,10 @@ async fn daemon_to_broker_frame(
                 .active_udp_connector_streams
                 .remove(&frame.stream_id);
         }
-        let delay = if frame.frame_type == FrameType::SessionReady {
+        let delay = if matches!(
+            frame.frame_type,
+            FrameType::SessionReady | FrameType::TunnelReady
+        ) {
             let delay = if control.session_ready_count > 0 {
                 control.delay_session_ready_after_first
             } else {
@@ -828,7 +845,10 @@ async fn daemon_to_broker_frame(
         } else {
             None
         };
-        let resume_timeout_ms = if frame.frame_type == FrameType::SessionReady {
+        let resume_timeout_ms = if matches!(
+            frame.frame_type,
+            FrameType::SessionReady | FrameType::TunnelReady
+        ) {
             control.override_session_ready_resume_timeout_ms
         } else {
             None

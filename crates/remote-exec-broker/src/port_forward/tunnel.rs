@@ -159,12 +159,6 @@ pub(super) struct EndpointMeta {
     pub(super) endpoint: String,
 }
 
-#[derive(Debug, Deserialize)]
-pub(super) struct SessionReadyMeta {
-    pub(super) session_id: String,
-    pub(super) resume_timeout_ms: u64,
-}
-
 #[derive(Debug, Serialize)]
 pub(super) struct SessionResumeMeta {
     pub(super) session_id: String,

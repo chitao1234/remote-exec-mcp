@@ -3,7 +3,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use remote_exec_proto::port_forward::{ensure_nonzero_connect_endpoint, normalize_endpoint};
-use remote_exec_proto::port_tunnel::{Frame, FrameType};
+use remote_exec_proto::port_tunnel::{
+    Frame, FrameType, TunnelCloseMeta, TunnelForwardProtocol, TunnelOpenMeta, TunnelReadyMeta,
+    TunnelRole,
+};
 use remote_exec_proto::public::{
     ForwardPortEntry, ForwardPortLimitSummary, ForwardPortProtocol as PublicForwardPortProtocol,
     ForwardPortSpec,
@@ -16,8 +19,8 @@ use super::side::SideHandle;
 use super::store::PortForwardRecord;
 use super::tcp_bridge::run_tcp_forward;
 use super::tunnel::{
-    EndpointMeta, PortTunnel, SessionReadyMeta, SessionResumeMeta, decode_tunnel_meta,
-    encode_tunnel_meta, is_retryable_transport_error, tunnel_error,
+    EndpointMeta, PortTunnel, SessionResumeMeta, decode_tunnel_meta, encode_tunnel_meta,
+    is_retryable_transport_error, tunnel_error,
 };
 use super::udp_bridge::run_udp_forward;
 use super::{
@@ -39,7 +42,9 @@ pub(super) struct ForwardRuntime {
 
 pub(super) struct ListenSessionControl {
     pub(super) side: SideHandle,
+    pub(super) forward_id: String,
     pub(super) session_id: String,
+    pub(super) generation: u64,
     pub(super) listener_stream_id: u32,
     pub(super) resume_timeout: Duration,
     pub(super) current_tunnel: Mutex<Option<Arc<PortTunnel>>>,
@@ -69,14 +74,18 @@ impl OpenedForward {
 impl ListenSessionControl {
     fn new(
         side: SideHandle,
+        forward_id: String,
         session_id: String,
+        generation: u64,
         listener_stream_id: u32,
         resume_timeout: Duration,
         tunnel: Arc<PortTunnel>,
     ) -> Self {
         Self {
             side,
+            forward_id,
             session_id,
+            generation,
             listener_stream_id,
             resume_timeout,
             current_tunnel: Mutex::new(Some(tunnel)),
@@ -133,12 +142,26 @@ async fn open_tcp_forward(
     connect_endpoint: String,
     spec: ForwardPortSpec,
 ) -> anyhow::Result<OpenedForward> {
+    let forward_id = format!("fwd_{}", uuid::Uuid::new_v4().simple());
     let OpenListenSession {
         tunnel: listen_tunnel,
         session_id,
         resume_timeout,
-    } = open_listen_session(&listen_side).await?;
-    let connect_tunnel = open_connect_tunnel(&connect_side).await?;
+    } = open_listen_session(
+        &listen_side,
+        &forward_id,
+        PublicForwardPortProtocol::Tcp,
+        1,
+        None,
+    )
+    .await?;
+    let connect_tunnel = open_data_tunnel(
+        &connect_side,
+        &forward_id,
+        PublicForwardPortProtocol::Tcp,
+        1,
+    )
+    .await?;
     let listener_stream_id = 1;
     listen_tunnel
         .send(Frame {
@@ -173,13 +196,14 @@ async fn open_tcp_forward(
     .await?;
     let listen_session = Arc::new(ListenSessionControl::new(
         listen_side.clone(),
+        forward_id.clone(),
         session_id,
+        1,
         listener_stream_id,
         resume_timeout,
         listen_tunnel,
     ));
 
-    let forward_id = format!("fwd_{}", uuid::Uuid::new_v4().simple());
     let cancel = CancellationToken::new();
     let task_done = Arc::new(Mutex::new(None));
     let runtime = ForwardRuntime {
@@ -219,12 +243,26 @@ async fn open_udp_forward(
     connect_endpoint: String,
     spec: ForwardPortSpec,
 ) -> anyhow::Result<OpenedForward> {
+    let forward_id = format!("fwd_{}", uuid::Uuid::new_v4().simple());
     let OpenListenSession {
         tunnel: listen_tunnel,
         session_id,
         resume_timeout,
-    } = open_listen_session(&listen_side).await?;
-    let connect_tunnel = open_connect_tunnel(&connect_side).await?;
+    } = open_listen_session(
+        &listen_side,
+        &forward_id,
+        PublicForwardPortProtocol::Udp,
+        1,
+        None,
+    )
+    .await?;
+    let connect_tunnel = open_data_tunnel(
+        &connect_side,
+        &forward_id,
+        PublicForwardPortProtocol::Udp,
+        1,
+    )
+    .await?;
     let listener_stream_id = 1;
     listen_tunnel
         .send(Frame {
@@ -259,13 +297,14 @@ async fn open_udp_forward(
     .await?;
     let listen_session = Arc::new(ListenSessionControl::new(
         listen_side.clone(),
+        forward_id.clone(),
         session_id,
+        1,
         listener_stream_id,
         resume_timeout,
         listen_tunnel,
     ));
 
-    let forward_id = format!("fwd_{}", uuid::Uuid::new_v4().simple());
     let cancel = CancellationToken::new();
     let task_done = Arc::new(Mutex::new(None));
     let runtime = ForwardRuntime {
@@ -338,14 +377,27 @@ pub(super) async fn wait_for_forward_task_stop(task: JoinHandle<()>) -> anyhow::
         .map_err(|err| anyhow::anyhow!("waiting for port forward task to stop: {err}"))
 }
 
-async fn open_listen_session(side: &SideHandle) -> anyhow::Result<OpenListenSession> {
+async fn open_listen_session(
+    side: &SideHandle,
+    forward_id: &str,
+    protocol: PublicForwardPortProtocol,
+    generation: u64,
+    resume_session_id: Option<String>,
+) -> anyhow::Result<OpenListenSession> {
     let tunnel = open_connect_tunnel(side).await?;
     tunnel
         .send(Frame {
-            frame_type: FrameType::SessionOpen,
+            frame_type: FrameType::TunnelOpen,
             flags: 0,
             stream_id: 0,
-            meta: Vec::new(),
+            meta: encode_tunnel_meta(&TunnelOpenMeta {
+                forward_id: forward_id.to_string(),
+                role: TunnelRole::Listen,
+                side: side.name().to_string(),
+                generation,
+                protocol: tunnel_protocol(protocol),
+                resume_session_id,
+            })?,
             data: Vec::new(),
         })
         .await
@@ -355,12 +407,18 @@ async fn open_listen_session(side: &SideHandle) -> anyhow::Result<OpenListenSess
         .await
         .with_context(|| format!("waiting for port tunnel session on `{}`", side.name()))?;
     match frame.frame_type {
-        FrameType::SessionReady if frame.stream_id == 0 => {
-            let ready: SessionReadyMeta = decode_tunnel_meta(&frame)?;
+        FrameType::TunnelReady if frame.stream_id == 0 => {
+            let ready: TunnelReadyMeta = decode_tunnel_meta(&frame)?;
+            let session_id = ready
+                .session_id
+                .ok_or_else(|| anyhow::anyhow!("listen tunnel ready did not include session_id"))?;
+            let resume_timeout_ms = ready.resume_timeout_ms.ok_or_else(|| {
+                anyhow::anyhow!("listen tunnel ready did not include resume_timeout_ms")
+            })?;
             Ok(OpenListenSession {
                 tunnel,
-                session_id: ready.session_id,
-                resume_timeout: Duration::from_millis(ready.resume_timeout_ms),
+                session_id,
+                resume_timeout: Duration::from_millis(resume_timeout_ms),
             })
         }
         FrameType::Error if frame.stream_id == 0 => Err(tunnel_error(&frame))
@@ -373,10 +431,67 @@ async fn open_listen_session(side: &SideHandle) -> anyhow::Result<OpenListenSess
     }
 }
 
+fn tunnel_protocol(protocol: PublicForwardPortProtocol) -> TunnelForwardProtocol {
+    match protocol {
+        PublicForwardPortProtocol::Tcp => TunnelForwardProtocol::Tcp,
+        PublicForwardPortProtocol::Udp => TunnelForwardProtocol::Udp,
+    }
+}
+
 pub(super) async fn open_connect_tunnel(side: &SideHandle) -> anyhow::Result<Arc<PortTunnel>> {
     Ok(Arc::new(side.port_tunnel().await.with_context(|| {
         format!("opening port tunnel to `{}`", side.name())
     })?))
+}
+
+pub(super) async fn open_data_tunnel(
+    side: &SideHandle,
+    forward_id: &str,
+    protocol: PublicForwardPortProtocol,
+    generation: u64,
+) -> anyhow::Result<Arc<PortTunnel>> {
+    let tunnel = open_connect_tunnel(side).await?;
+    tunnel
+        .send(Frame {
+            frame_type: FrameType::TunnelOpen,
+            flags: 0,
+            stream_id: 0,
+            meta: encode_tunnel_meta(&TunnelOpenMeta {
+                forward_id: forward_id.to_string(),
+                role: TunnelRole::Connect,
+                side: side.name().to_string(),
+                generation,
+                protocol: tunnel_protocol(protocol),
+                resume_session_id: None,
+            })?,
+            data: Vec::new(),
+        })
+        .await
+        .with_context(|| format!("opening data port tunnel on `{}`", side.name()))?;
+    let frame = tunnel
+        .recv()
+        .await
+        .with_context(|| format!("waiting for data port tunnel on `{}`", side.name()))?;
+    match frame.frame_type {
+        FrameType::TunnelReady if frame.stream_id == 0 => {
+            let ready: TunnelReadyMeta = decode_tunnel_meta(&frame)?;
+            if ready.generation != generation {
+                anyhow::bail!(
+                    "data port tunnel on `{}` returned generation `{}` instead of `{generation}`",
+                    side.name(),
+                    ready.generation
+                );
+            }
+            Ok(tunnel)
+        }
+        FrameType::Error if frame.stream_id == 0 => Err(tunnel_error(&frame))
+            .with_context(|| format!("opening data port tunnel on `{}`", side.name())),
+        _ => Err(anyhow::anyhow!(
+            "unexpected data port tunnel response `{:?}` on `{}`",
+            frame.frame_type,
+            side.name()
+        )),
+    }
 }
 
 async fn wait_for_listener_ready(
@@ -492,19 +607,76 @@ pub(super) async fn close_listen_session(control: Arc<ListenSessionControl>) -> 
     let _guard = control.op_lock.lock().await;
     if let Some(tunnel) = control.current_tunnel().await {
         match close_listener_on_tunnel(&tunnel, control.listener_stream_id).await {
-            Ok(()) => return Ok(()),
+            Ok(()) => {
+                return close_tunnel_generation(
+                    &tunnel,
+                    &control.forward_id,
+                    control.generation,
+                    "operator_close",
+                )
+                .await;
+            }
             Err(err) if is_retryable_transport_error(&err) => {}
             Err(err) => return Err(err),
         }
     }
     let tunnel = resume_listen_session_inner(&control).await?;
     *control.current_tunnel.lock().await = Some(tunnel.clone());
-    close_listener_on_tunnel(&tunnel, control.listener_stream_id).await
+    close_listener_on_tunnel(&tunnel, control.listener_stream_id).await?;
+    close_tunnel_generation(
+        &tunnel,
+        &control.forward_id,
+        control.generation,
+        "operator_close",
+    )
+    .await
 }
 
 async fn close_listener_on_tunnel(tunnel: &Arc<PortTunnel>, stream_id: u32) -> anyhow::Result<()> {
     tunnel.close_stream(stream_id).await?;
     wait_for_close_ack(tunnel, stream_id).await
+}
+
+async fn close_tunnel_generation(
+    tunnel: &Arc<PortTunnel>,
+    forward_id: &str,
+    generation: u64,
+    reason: &str,
+) -> anyhow::Result<()> {
+    tunnel
+        .send(Frame {
+            frame_type: FrameType::TunnelClose,
+            flags: 0,
+            stream_id: 0,
+            meta: encode_tunnel_meta(&TunnelCloseMeta {
+                forward_id: forward_id.to_string(),
+                generation,
+                reason: reason.to_string(),
+            })?,
+            data: Vec::new(),
+        })
+        .await?;
+    wait_for_tunnel_closed(tunnel, generation).await
+}
+
+async fn wait_for_tunnel_closed(tunnel: &Arc<PortTunnel>, generation: u64) -> anyhow::Result<()> {
+    tokio::time::timeout(LISTEN_CLOSE_ACK_TIMEOUT, async {
+        loop {
+            let frame = tunnel.recv().await?;
+            match frame.frame_type {
+                FrameType::TunnelClosed if frame.stream_id == 0 => {
+                    let closed: TunnelCloseMeta = decode_tunnel_meta(&frame)?;
+                    if closed.generation == generation {
+                        return Ok(());
+                    }
+                }
+                FrameType::Error if frame.stream_id == 0 => return Err(tunnel_error(&frame)),
+                _ => {}
+            }
+        }
+    })
+    .await
+    .map_err(|_| anyhow::anyhow!("timed out waiting for port tunnel close acknowledgement"))?
 }
 
 async fn wait_for_close_ack(tunnel: &Arc<PortTunnel>, stream_id: u32) -> anyhow::Result<()> {
