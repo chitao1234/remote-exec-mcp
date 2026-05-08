@@ -13,6 +13,9 @@ use reqwest::header::{AUTHORIZATION, CONNECTION, CONTENT_LENGTH, HeaderValue, UP
 use crate::config::{TargetConfig, TargetTransportKind};
 use crate::tools::transfer::codec;
 
+const PORT_TUNNEL_UPGRADE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const PORT_TUNNEL_PREFACE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 #[derive(Debug, Clone)]
 pub struct TransferExportResponse {
     pub source_type: TransferSourceType,
@@ -157,24 +160,32 @@ impl DaemonClient {
 
     pub async fn port_tunnel(&self) -> Result<reqwest::Upgraded, DaemonClientError> {
         let started = std::time::Instant::now();
-        let response = self
+        let request = self
             .request("/v1/port/tunnel")
             .header(CONNECTION, "Upgrade")
             .header(UPGRADE, UPGRADE_TOKEN)
             .header(TUNNEL_PROTOCOL_VERSION_HEADER, TUNNEL_PROTOCOL_VERSION)
-            .header(CONTENT_LENGTH, "0")
-            .send()
+            .header(CONTENT_LENGTH, "0");
+        let response = tokio::time::timeout(PORT_TUNNEL_UPGRADE_TIMEOUT, request.send())
             .await
+            .map_err(|_| {
+                DaemonClientError::Transport(anyhow::anyhow!("port tunnel upgrade timed out"))
+            })?
             .map_err(|err| self.rpc_transport_error("/v1/port/tunnel", started, err))?;
         if response.status() != reqwest::StatusCode::SWITCHING_PROTOCOLS {
             return Err(decode_rpc_error(response).await);
         }
-        let mut upgraded = response
-            .upgrade()
+        let mut upgraded = tokio::time::timeout(PORT_TUNNEL_UPGRADE_TIMEOUT, response.upgrade())
             .await
+            .map_err(|_| {
+                DaemonClientError::Transport(anyhow::anyhow!("port tunnel upgrade timed out"))
+            })?
             .map_err(|err| DaemonClientError::Transport(err.into()))?;
-        write_preface(&mut upgraded)
+        tokio::time::timeout(PORT_TUNNEL_PREFACE_TIMEOUT, write_preface(&mut upgraded))
             .await
+            .map_err(|_| {
+                DaemonClientError::Transport(anyhow::anyhow!("port tunnel preface timed out"))
+            })?
             .map_err(|err| DaemonClientError::Transport(err.into()))?;
         Ok(upgraded)
     }
