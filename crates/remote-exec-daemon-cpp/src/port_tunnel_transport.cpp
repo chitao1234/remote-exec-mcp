@@ -188,6 +188,7 @@ int handle_port_tunnel_upgrade(AppState& state, SOCKET client, const HttpRequest
         state.port_tunnel_service =
             create_port_tunnel_service(state.config.port_forward_limits);
     }
+    set_socket_timeout_ms(client, state.config.port_forward_limits.tunnel_io_timeout_ms);
     std::shared_ptr<PortTunnelConnection> tunnel(
         new PortTunnelConnection(client, state.port_tunnel_service)
     );
@@ -198,6 +199,12 @@ int handle_port_tunnel_upgrade(AppState& state, SOCKET client, const HttpRequest
 bool PortTunnelConnection::read_exact(unsigned char* data, std::size_t size) {
     std::size_t offset = 0;
     while (offset < size) {
+        const int ready = wait_socket_readable(client_, service_->limits().tunnel_io_timeout_ms);
+        if (ready <= 0) {
+            closed_.store(true);
+            shutdown_socket(client_);
+            return false;
+        }
         const int received = recv(
             client_,
             reinterpret_cast<char*>(data + offset),

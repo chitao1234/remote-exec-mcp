@@ -89,10 +89,15 @@ recover from transport loss on either forwarding side while the daemon retains
 the forward itself plus future TCP accepts or future UDP datagrams on the
 listen side. Active TCP streams and UDP per-peer connector state are not
 preserved across reconnect. C++ forwarding worker threads are capped by
-`port_forward_max_worker_threads`. Per-stream TCP connect failures close only
-that accepted TCP stream and leave the parent forward open. A broker restart
-still drops the broker-owned `forward_id` mapping, and a daemon restart still
-destroys the forward. If the broker disappears without reconnecting, the
+`port_forward_max_worker_threads`, and v4 `TunnelReady.limits` truthfully report
+the configured active TCP stream, UDP bind, and tunnel queued-byte limits.
+Retained sessions, retained listeners, UDP binds, and active TCP streams are
+enforced daemon-wide. Upgraded tunnel socket reads and writes are bounded by
+`port_forward_tunnel_io_timeout_ms`, so a peer that sends an incomplete v4 frame
+cannot occupy a daemon worker indefinitely. Per-stream TCP connect failures
+close only that accepted TCP stream and leave the parent forward open. A broker
+restart still drops the broker-owned `forward_id` mapping, and a daemon restart
+still destroys the forward. If the broker disappears without reconnecting, the
 daemon reclaims detached listeners and UDP sockets after the reconnect grace
 window expires.
 Daemon shutdown closes live forwarded sockets promptly.
@@ -134,6 +139,12 @@ default_workdir = /work
 # C++ forwarding uses detached worker threads for retained listener, UDP, TCP
 # stream, and reconnect-expiry work.
 # port_forward_max_worker_threads = 256
+# port_forward_max_retained_sessions = 64
+# port_forward_max_retained_listeners = 64
+# port_forward_max_udp_binds = 64
+# port_forward_max_active_tcp_streams = 1024
+# port_forward_max_tunnel_queued_bytes = 8388608
+# port_forward_tunnel_io_timeout_ms = 30000
 
 # Optional per-operation yield-time policy overrides.
 # yield_time_exec_command_default_ms = 10000

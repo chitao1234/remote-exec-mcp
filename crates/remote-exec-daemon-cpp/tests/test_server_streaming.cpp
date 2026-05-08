@@ -942,6 +942,45 @@ static void assert_active_tcp_accept_limit_is_enforced_and_released(const fs::pa
     close_tunnel(&client_socket, &server_thread);
 }
 
+static void assert_partial_tunnel_frame_times_out(const fs::path& root) {
+    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    limits.tunnel_io_timeout_ms = 50UL;
+
+    AppState state;
+    initialize_state_with_port_forward_limits(state, root, limits);
+
+    int sockets[2];
+    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
+
+    UniqueSocket server_socket(sockets[0]);
+    UniqueSocket client_socket(sockets[1]);
+    std::thread server_thread = start_server_thread(state, &server_socket);
+
+    send_all(
+        client_socket.get(),
+        "POST /v1/port/tunnel HTTP/1.1\r\n"
+        "Connection: Upgrade\r\n"
+        "Upgrade: remote-exec-port-tunnel\r\n"
+        "X-Remote-Exec-Port-Tunnel-Version: 4\r\n"
+        "\r\n"
+    );
+    const std::string response = read_http_head_from_socket(client_socket.get());
+    assert(response.find("HTTP/1.1 101 Switching Protocols\r\n") == 0);
+    send_preface(client_socket.get());
+
+    const unsigned char partial_header[2] = {
+        static_cast<unsigned char>(PortTunnelFrameType::TcpData),
+        0U,
+    };
+    send_all_bytes(
+        client_socket.get(),
+        reinterpret_cast<const char*>(partial_header),
+        sizeof(partial_header)
+    );
+
+    server_thread.join();
+}
+
 static void assert_tunnel_tcp_connect_echoes_binary_data(AppState& state) {
     UniqueSocket echo_listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
     const std::string echo_endpoint = socket_local_endpoint(echo_listener.get());
@@ -1188,6 +1227,7 @@ int main() {
     assert_udp_bind_limit_is_enforced_and_released(root);
     assert_active_tcp_stream_limit_is_enforced_and_released(root);
     assert_active_tcp_accept_limit_is_enforced_and_released(root);
+    assert_partial_tunnel_frame_times_out(root);
     assert_tunnel_tcp_connect_echoes_binary_data(state);
     assert_tunnel_udp_bind_emits_two_peer_datagrams(state);
     assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(state);
