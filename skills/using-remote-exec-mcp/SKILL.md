@@ -538,6 +538,12 @@ Structured result fields:
 - `forwards[].last_reconnect_at`
 - `forwards[].limits`
 
+`forwards[].limits` is the effective per-forward ceiling. The broker computes
+it from broker config plus both listen-side and connect-side daemon
+`TunnelReady.limits`; active TCP stream, UDP peer/bind, and tunnel queued-byte
+budgets use the strictest side. Pending TCP byte budgets and
+reconnecting-forward budgets are broker-owned.
+
 ## Standard Workflows
 
 ### Inspect And Edit Remote Code

@@ -1,3 +1,4 @@
+use remote_exec_proto::port_tunnel::TunnelLimitSummary;
 use remote_exec_proto::public::ForwardPortLimitSummary;
 use serde::Deserialize;
 
@@ -75,5 +76,29 @@ impl BrokerPortForwardLimits {
             "port_forward_limits.max_reconnecting_forwards must be greater than zero"
         );
         Ok(())
+    }
+}
+
+pub(super) fn effective_forward_limits(
+    broker: ForwardPortLimitSummary,
+    listen: &TunnelLimitSummary,
+    connect: &TunnelLimitSummary,
+) -> ForwardPortLimitSummary {
+    ForwardPortLimitSummary {
+        max_active_tcp_streams: broker
+            .max_active_tcp_streams
+            .min(listen.max_active_tcp_streams)
+            .min(connect.max_active_tcp_streams),
+        max_udp_peers: broker
+            .max_udp_peers
+            .min(listen.max_udp_peers)
+            .min(connect.max_udp_peers),
+        max_pending_tcp_bytes_per_stream: broker.max_pending_tcp_bytes_per_stream,
+        max_pending_tcp_bytes_per_forward: broker.max_pending_tcp_bytes_per_forward,
+        max_tunnel_queued_bytes: broker
+            .max_tunnel_queued_bytes
+            .min(listen.max_queued_bytes)
+            .min(connect.max_queued_bytes),
+        max_reconnecting_forwards: broker.max_reconnecting_forwards,
     }
 }

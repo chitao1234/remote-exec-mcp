@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use remote_exec_proto::port_forward::{ensure_nonzero_connect_endpoint, normalize_endpoint};
 use remote_exec_proto::port_tunnel::{
-    Frame, FrameType, TunnelCloseMeta, TunnelForwardProtocol, TunnelOpenMeta, TunnelReadyMeta,
-    TunnelRole,
+    Frame, FrameType, TunnelCloseMeta, TunnelForwardProtocol, TunnelLimitSummary, TunnelOpenMeta,
+    TunnelReadyMeta, TunnelRole,
 };
 use remote_exec_proto::public::{
     ForwardPortEntry, ForwardPortLimitSummary, ForwardPortProtocol as PublicForwardPortProtocol,
@@ -15,6 +15,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use super::limits::effective_forward_limits;
 use super::side::SideHandle;
 use super::store::{PortForwardRecord, PortForwardStore};
 use super::tcp_bridge::run_tcp_forward;
@@ -146,6 +147,12 @@ struct OpenListenSession {
     tunnel: Arc<PortTunnel>,
     session_id: String,
     resume_timeout: Duration,
+    limits: TunnelLimitSummary,
+}
+
+pub(super) struct OpenDataTunnel {
+    pub(super) tunnel: Arc<PortTunnel>,
+    pub(super) limits: TunnelLimitSummary,
 }
 
 pub async fn open_forward(
@@ -199,6 +206,7 @@ async fn open_tcp_forward(
         tunnel: listen_tunnel,
         session_id,
         resume_timeout,
+        limits: listen_limits,
     } = open_listen_session(
         &listen_side,
         &forward_id,
@@ -208,7 +216,7 @@ async fn open_tcp_forward(
         limits.max_tunnel_queued_bytes as usize,
     )
     .await?;
-    let connect_tunnel = open_data_tunnel(
+    let connect = open_data_tunnel(
         &connect_side,
         &forward_id,
         PublicForwardPortProtocol::Tcp,
@@ -216,6 +224,8 @@ async fn open_tcp_forward(
         limits.max_tunnel_queued_bytes as usize,
     )
     .await?;
+    let limits = effective_forward_limits(limits, &listen_limits, &connect.limits);
+    let connect_tunnel = connect.tunnel;
     let listener_stream_id = 1;
     listen_tunnel
         .send(Frame {
@@ -312,6 +322,7 @@ async fn open_udp_forward(
         tunnel: listen_tunnel,
         session_id,
         resume_timeout,
+        limits: listen_limits,
     } = open_listen_session(
         &listen_side,
         &forward_id,
@@ -321,7 +332,7 @@ async fn open_udp_forward(
         limits.max_tunnel_queued_bytes as usize,
     )
     .await?;
-    let connect_tunnel = open_data_tunnel(
+    let connect = open_data_tunnel(
         &connect_side,
         &forward_id,
         PublicForwardPortProtocol::Udp,
@@ -329,6 +340,8 @@ async fn open_udp_forward(
         limits.max_tunnel_queued_bytes as usize,
     )
     .await?;
+    let limits = effective_forward_limits(limits, &listen_limits, &connect.limits);
+    let connect_tunnel = connect.tunnel;
     let listener_stream_id = 1;
     listen_tunnel
         .send(Frame {
@@ -484,6 +497,7 @@ async fn open_listen_session(
                 tunnel,
                 session_id,
                 resume_timeout: Duration::from_millis(resume_timeout_ms),
+                limits: ready.limits,
             })
         }
         FrameType::Error if frame.stream_id == 0 => Err(tunnel_error(&frame))
@@ -520,7 +534,7 @@ pub(super) async fn open_data_tunnel(
     protocol: PublicForwardPortProtocol,
     generation: u64,
     max_queued_bytes: usize,
-) -> anyhow::Result<Arc<PortTunnel>> {
+) -> anyhow::Result<OpenDataTunnel> {
     let tunnel = open_connect_tunnel(side, max_queued_bytes).await?;
     tunnel
         .send(Frame {
@@ -553,7 +567,10 @@ pub(super) async fn open_data_tunnel(
                     ready.generation
                 );
             }
-            Ok(tunnel)
+            Ok(OpenDataTunnel {
+                tunnel,
+                limits: ready.limits,
+            })
         }
         FrameType::Error if frame.stream_id == 0 => Err(tunnel_error(&frame))
             .with_context(|| format!("opening data port tunnel on `{}`", side.name())),
@@ -670,6 +687,7 @@ pub(super) async fn reconnect_connect_tunnel(
                 runtime.max_tunnel_queued_bytes,
             )
             .await
+            .map(|opened| opened.tunnel)
         },
     )
     .await

@@ -343,6 +343,85 @@ async fn forward_ports_rejects_targets_without_tunnel_protocol_version() {
 }
 
 #[tokio::test]
+async fn forward_ports_reports_effective_daemon_limits() {
+    let fixture =
+        support::spawners::spawn_broker_with_local_and_stub_port_forward_version_and_port_forward_limits(
+            4,
+            r#"[port_forward_limits]
+max_active_tcp_streams_per_forward = 100
+max_pending_tcp_bytes_per_stream = 4096
+max_pending_tcp_bytes_per_forward = 8192
+max_udp_peers_per_forward = 100
+max_tunnel_queued_bytes = 10000
+max_reconnecting_forwards = 7
+"#,
+        )
+        .await;
+    support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
+    support::stub_daemon::override_tunnel_ready_limits(
+        &fixture.stub_state,
+        remote_exec_proto::port_tunnel::TunnelLimitSummary {
+            max_active_tcp_streams: 3,
+            max_udp_peers: 5,
+            max_queued_bytes: 4096,
+        },
+    )
+    .await;
+
+    let echo_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let echo_addr = echo_listener.local_addr().unwrap();
+
+    let open = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "builder-a",
+                "connect_side": "local",
+                "forwards": [{
+                    "listen_endpoint": "127.0.0.1:0",
+                    "connect_endpoint": echo_addr.to_string(),
+                    "protocol": "tcp"
+                }]
+            }),
+        )
+        .await;
+    let forward_id = forward_id_from(&open);
+    let limits = &open.structured_content["forwards"][0]["limits"];
+    assert_eq!(limits["max_active_tcp_streams"], 3);
+    assert_eq!(limits["max_udp_peers"], 5);
+    assert_eq!(limits["max_tunnel_queued_bytes"], 4096);
+    assert_eq!(limits["max_pending_tcp_bytes_per_stream"], 4096);
+    assert_eq!(limits["max_pending_tcp_bytes_per_forward"], 8192);
+    assert_eq!(limits["max_reconnecting_forwards"], 7);
+
+    let list = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "list",
+                "forward_ids": [forward_id.clone()]
+            }),
+        )
+        .await;
+    assert_eq!(
+        list.structured_content["forwards"][0]["limits"],
+        open.structured_content["forwards"][0]["limits"]
+    );
+
+    let close = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "close",
+                "forward_ids": [forward_id]
+            }),
+        )
+        .await;
+    assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
+}
+
+#[tokio::test]
 async fn forward_ports_opens_remote_forward_with_v4_tunnel_open() {
     let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;

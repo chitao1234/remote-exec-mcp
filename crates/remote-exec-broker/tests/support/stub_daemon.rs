@@ -19,8 +19,8 @@ use remote_exec_host::{
     HostRuntimeConfig, ProcessEnvironment, PtyMode, YieldTimeConfig, build_runtime_state,
 };
 use remote_exec_proto::port_tunnel::{
-    Frame, FrameType, TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, UPGRADE_TOKEN,
-    read_frame, read_preface, write_frame, write_preface,
+    Frame, FrameType, TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, TunnelLimitSummary,
+    UPGRADE_TOKEN, read_frame, read_preface, write_frame, write_preface,
 };
 use remote_exec_proto::rpc::{
     ExecWarning, HealthCheckResponse, ImageReadResponse, PatchApplyRequest, PatchApplyResponse,
@@ -85,6 +85,7 @@ struct StubPortTunnelControl {
     port_tunnel_upgrades_to_fail: usize,
     delay_session_ready_after_first: Option<Duration>,
     override_session_ready_resume_timeout_ms: Option<u64>,
+    override_tunnel_ready_limits: Option<TunnelLimitSummary>,
     session_ready_count: usize,
     active_transports: Vec<CancellationToken>,
     active_udp_connector_streams: HashSet<u32>,
@@ -105,6 +106,7 @@ impl Default for StubPortTunnelControl {
             port_tunnel_upgrades_to_fail: 0,
             delay_session_ready_after_first: None,
             override_session_ready_resume_timeout_ms: None,
+            override_tunnel_ready_limits: None,
             session_ready_count: 0,
             active_transports: Vec::new(),
             active_udp_connector_streams: HashSet::new(),
@@ -231,6 +233,17 @@ pub(crate) async fn set_session_resume_timeout(state: &StubDaemonState, timeout:
         .lock()
         .await
         .override_session_ready_resume_timeout_ms = Some(timeout.as_millis() as u64);
+}
+
+pub(crate) async fn override_tunnel_ready_limits(
+    state: &StubDaemonState,
+    limits: TunnelLimitSummary,
+) {
+    state
+        .port_tunnel_control
+        .lock()
+        .await
+        .override_tunnel_ready_limits = Some(limits);
 }
 
 pub(crate) async fn set_port_tunnel_resume_error(
@@ -842,7 +855,7 @@ async fn daemon_to_broker_frame(
     state: &StubDaemonState,
     mut frame: Frame,
 ) -> anyhow::Result<Option<Frame>> {
-    let (delay, should_forward, resume_timeout_ms) = {
+    let (delay, should_forward, resume_timeout_ms, override_tunnel_ready_limits) = {
         let mut control = state.port_tunnel_control.lock().await;
         if frame.frame_type == FrameType::Close {
             control
@@ -871,12 +884,22 @@ async fn daemon_to_broker_frame(
         } else {
             None
         };
+        let override_tunnel_ready_limits = if frame.frame_type == FrameType::TunnelReady {
+            control.override_tunnel_ready_limits.clone()
+        } else {
+            None
+        };
         let should_forward = !(frame.frame_type == FrameType::TcpConnectOk
             && matches!(
                 control.tcp_connect_ok_behavior,
                 TcpConnectOkBehavior::DropAll
             ));
-        (delay, should_forward, resume_timeout_ms)
+        (
+            delay,
+            should_forward,
+            resume_timeout_ms,
+            override_tunnel_ready_limits,
+        )
     };
     if let Some(delay) = delay {
         tokio::time::sleep(delay).await;
@@ -887,6 +910,11 @@ async fn daemon_to_broker_frame(
     if let Some(resume_timeout_ms) = resume_timeout_ms {
         let mut meta: serde_json::Value = serde_json::from_slice(&frame.meta)?;
         meta["resume_timeout_ms"] = serde_json::json!(resume_timeout_ms);
+        frame.meta = serde_json::to_vec(&meta)?;
+    }
+    if let Some(limits) = override_tunnel_ready_limits {
+        let mut meta: serde_json::Value = serde_json::from_slice(&frame.meta)?;
+        meta["limits"] = serde_json::to_value(limits)?;
         frame.meta = serde_json::to_vec(&meta)?;
     }
     Ok(Some(frame))

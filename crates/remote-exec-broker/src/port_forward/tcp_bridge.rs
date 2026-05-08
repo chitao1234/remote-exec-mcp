@@ -83,7 +83,8 @@ pub(super) async fn run_tcp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
                         "reopening port tunnel to `{}` after listen-side reconnect",
                         runtime.connect_side.name()
                     )
-                })?;
+                })?
+                .tunnel;
                 runtime
                     .store
                     .mark_ready(&runtime.forward_id, ForwardPortSideRole::Connect)
