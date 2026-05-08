@@ -14,7 +14,8 @@ use super::session::{AttachmentState, reactivate_retained_udp_bind};
 use super::tunnel::send_tunnel_error;
 use super::tunnel::tunnel_mode;
 use super::{
-    EndpointMeta, EndpointOkMeta, READ_BUF_SIZE, TunnelMode, TunnelState, UdpDatagramMeta,
+    EndpointMeta, EndpointOkMeta, READ_BUF_SIZE, TransportUdpBind, TunnelMode, TunnelState,
+    UdpDatagramMeta,
 };
 
 pub(super) async fn tunnel_udp_bind(
@@ -37,8 +38,12 @@ pub(super) async fn tunnel_udp_bind(
         .map_err(|err| rpc_error("port_bind_failed", err.to_string()))?
         .to_string();
     session
-        .replace_udp_bind(frame.stream_id, socket.clone())
-        .await;
+        .replace_udp_bind(
+            frame.stream_id,
+            socket.clone(),
+            &tunnel.state.port_forward_limiter,
+        )
+        .await?;
     tunnel
         .send(Frame {
             frame_type: FrameType::UdpBindOk,
@@ -69,11 +74,14 @@ pub(super) async fn tunnel_udp_bind_transport_owned(
         .local_addr()
         .map_err(|err| rpc_error("port_bind_failed", err.to_string()))?
         .to_string();
-    tunnel
-        .udp_sockets
-        .lock()
-        .await
-        .insert(frame.stream_id, socket.clone());
+    let permit = tunnel.state.port_forward_limiter.try_acquire_udp_bind()?;
+    tunnel.udp_sockets.lock().await.insert(
+        frame.stream_id,
+        TransportUdpBind {
+            socket: socket.clone(),
+            _permit: permit,
+        },
+    );
     let stream_cancel = tunnel.cancel.child_token();
     tunnel
         .stream_cancels
@@ -135,7 +143,7 @@ pub(super) async fn tunnel_udp_read_loop_transport_owned(
                 return;
             }
         };
-        if tunnel
+        if let Err(err) = tunnel
             .send(Frame {
                 frame_type: FrameType::UdpDatagram,
                 flags: 0,
@@ -144,8 +152,12 @@ pub(super) async fn tunnel_udp_read_loop_transport_owned(
                 data: buf[..read].to_vec(),
             })
             .await
-            .is_err()
         {
+            let _ = send_tunnel_error(&tunnel, stream_id, err.code, err.message, false).await;
+            if let Some(cancel) = tunnel.stream_cancels.lock().await.remove(&stream_id) {
+                cancel.cancel();
+            }
+            let _ = tunnel.udp_sockets.lock().await.remove(&stream_id);
             return;
         }
     }
@@ -193,7 +205,7 @@ pub(super) async fn tunnel_udp_read_loop_session_owned(
                 return;
             }
         };
-        if attachment
+        if let Err(err) = attachment
             .tx
             .send(Frame {
                 frame_type: FrameType::UdpDatagram,
@@ -203,8 +215,18 @@ pub(super) async fn tunnel_udp_read_loop_session_owned(
                 data: buf[..read].to_vec(),
             })
             .await
-            .is_err()
         {
+            let _ = send_tunnel_error_with_sender(
+                &attachment.tx,
+                stream_id,
+                err.code,
+                err.message,
+                false,
+            )
+            .await;
+            if let Some(cancel) = attachment.stream_cancels.lock().await.remove(&stream_id) {
+                cancel.cancel();
+            }
             return;
         }
     }
@@ -229,7 +251,7 @@ pub(super) async fn tunnel_udp_datagram(
             .lock()
             .await
             .get(&frame.stream_id)
-            .cloned()
+            .map(|bind| bind.socket.clone())
             .ok_or_else(|| {
                 rpc_error(
                     "unknown_port_bind",

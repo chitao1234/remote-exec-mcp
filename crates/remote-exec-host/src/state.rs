@@ -20,6 +20,7 @@ pub struct HostRuntimeState {
     pub shutdown: CancellationToken,
     pub sessions: crate::exec::store::SessionStore,
     pub port_forward_sessions: crate::port_forward::TunnelSessionStore,
+    pub port_forward_limiter: Arc<crate::port_forward::PortForwardLimiter>,
 }
 
 pub fn build_runtime_state(mut config: HostRuntimeConfig) -> anyhow::Result<HostRuntimeState> {
@@ -41,6 +42,8 @@ pub fn build_runtime_state(mut config: HostRuntimeConfig) -> anyhow::Result<Host
     let windows_pty_backend_override =
         crate::exec::session::windows_pty_backend_override_for_mode(config.pty)?;
 
+    let port_forward_limits = config.port_forward_limits;
+
     Ok(HostRuntimeState {
         config: Arc::new(config),
         default_shell,
@@ -52,6 +55,9 @@ pub fn build_runtime_state(mut config: HostRuntimeConfig) -> anyhow::Result<Host
         shutdown: CancellationToken::new(),
         sessions: crate::exec::store::SessionStore::new(64),
         port_forward_sessions: crate::port_forward::TunnelSessionStore::default(),
+        port_forward_limiter: Arc::new(crate::port_forward::PortForwardLimiter::new(
+            port_forward_limits,
+        )),
     })
 }
 

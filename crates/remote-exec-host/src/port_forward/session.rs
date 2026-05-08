@@ -5,16 +5,17 @@ use std::time::Instant;
 
 use remote_exec_proto::port_tunnel::{Frame, FrameType};
 use tokio::net::{TcpListener, UdpSocket};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use crate::HostRpcError;
 
 use super::codec::encode_frame_meta;
 use super::error::{SessionCloseMode, rpc_error};
+use super::limiter::{PortForwardLimiter, PortForwardPermit};
 use super::session_store::TunnelSessionStore;
 use super::udp::tunnel_udp_read_loop_session_owned;
-use super::{ErrorMeta, RESUME_TIMEOUT, TunnelState};
+use super::{ErrorMeta, RESUME_TIMEOUT, TunnelSender, TunnelState};
 
 pub(super) struct SessionState {
     pub(super) id: String,
@@ -29,9 +30,10 @@ pub(super) struct SessionState {
 }
 
 pub(super) struct AttachmentState {
-    pub(super) tx: mpsc::Sender<Frame>,
+    pub(super) tx: TunnelSender,
     pub(super) cancel: CancellationToken,
     pub(super) tcp_writers: Mutex<HashMap<u32, Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>>>,
+    pub(super) tcp_stream_permits: Mutex<HashMap<u32, PortForwardPermit>>,
     pub(super) stream_cancels: Mutex<HashMap<u32, CancellationToken>>,
 }
 
@@ -39,6 +41,7 @@ pub(super) enum RetainedListener {
     Tcp {
         stream_id: u32,
         _listener: Arc<TcpListener>,
+        _permit: PortForwardPermit,
     },
 }
 
@@ -46,6 +49,7 @@ pub(super) enum RetainedUdpBind {
     Udp {
         stream_id: u32,
         socket: Arc<UdpSocket>,
+        _permit: PortForwardPermit,
     },
 }
 
@@ -62,15 +66,42 @@ impl SessionState {
             .is_some_and(|deadline| Instant::now() >= *deadline)
     }
 
-    pub(super) async fn replace_listener(&self, stream_id: u32, listener: Arc<TcpListener>) {
-        *self.retained_listener.lock().await = Some(RetainedListener::Tcp {
+    pub(super) async fn replace_listener(
+        &self,
+        stream_id: u32,
+        listener: Arc<TcpListener>,
+        limiter: &Arc<PortForwardLimiter>,
+    ) -> Result<(), HostRpcError> {
+        let mut retained_listener = self.retained_listener.lock().await;
+        let permit = match retained_listener.take() {
+            Some(RetainedListener::Tcp { _permit, .. }) => _permit,
+            None => limiter.try_acquire_retained_listener()?,
+        };
+        *retained_listener = Some(RetainedListener::Tcp {
             stream_id,
             _listener: listener,
+            _permit: permit,
         });
+        Ok(())
     }
 
-    pub(super) async fn replace_udp_bind(&self, stream_id: u32, socket: Arc<UdpSocket>) {
-        *self.retained_udp_bind.lock().await = Some(RetainedUdpBind::Udp { stream_id, socket });
+    pub(super) async fn replace_udp_bind(
+        &self,
+        stream_id: u32,
+        socket: Arc<UdpSocket>,
+        limiter: &Arc<PortForwardLimiter>,
+    ) -> Result<(), HostRpcError> {
+        let mut retained_udp_bind = self.retained_udp_bind.lock().await;
+        let permit = match retained_udp_bind.take() {
+            Some(RetainedUdpBind::Udp { _permit, .. }) => _permit,
+            None => limiter.try_acquire_udp_bind()?,
+        };
+        *retained_udp_bind = Some(RetainedUdpBind::Udp {
+            stream_id,
+            socket,
+            _permit: permit,
+        });
+        Ok(())
     }
 
     pub(super) async fn udp_socket(&self, stream_id: u32) -> Option<Arc<UdpSocket>> {
@@ -78,17 +109,18 @@ impl SessionState {
             Some(RetainedUdpBind::Udp {
                 stream_id: retained_stream_id,
                 socket,
+                ..
             }) if *retained_stream_id == stream_id => Some(socket.clone()),
             _ => None,
         }
     }
 
     pub(super) async fn udp_bind_snapshot(&self) -> Option<(u32, Arc<UdpSocket>)> {
-        self.retained_udp_bind
-            .lock()
-            .await
-            .as_ref()
-            .map(|RetainedUdpBind::Udp { stream_id, socket }| (*stream_id, socket.clone()))
+        self.retained_udp_bind.lock().await.as_ref().map(
+            |RetainedUdpBind::Udp {
+                 stream_id, socket, ..
+             }| { (*stream_id, socket.clone()) },
+        )
     }
 
     pub(super) async fn close_non_resumable_streams(&self) {
@@ -97,6 +129,7 @@ impl SessionState {
                 cancel.cancel();
             }
             attachment.tcp_writers.lock().await.clear();
+            attachment.tcp_stream_permits.lock().await.clear();
         }
     }
 
@@ -126,6 +159,7 @@ pub(super) async fn attach_session_to_tunnel(
             tx: tunnel.tx.clone(),
             cancel: tunnel.cancel.child_token(),
             tcp_writers: Mutex::new(HashMap::new()),
+            tcp_stream_permits: Mutex::new(HashMap::new()),
             stream_cancels: Mutex::new(HashMap::new()),
         }));
     }
@@ -145,6 +179,7 @@ pub(super) async fn close_attached_session(tunnel: &Arc<TunnelState>, mode: Sess
             cancel.cancel();
         }
         attachment.tcp_writers.lock().await.clear();
+        attachment.tcp_stream_permits.lock().await.clear();
     }
 
     match mode {
@@ -240,7 +275,7 @@ pub(super) async fn reactivate_retained_udp_bind(
 }
 
 pub(super) async fn send_tunnel_error_with_sender(
-    tx: &mpsc::Sender<Frame>,
+    tx: &TunnelSender,
     stream_id: u32,
     code: impl Into<String>,
     message: impl Into<String>,

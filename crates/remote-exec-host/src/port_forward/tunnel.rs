@@ -20,44 +20,55 @@ use super::tcp::{
     tunnel_close_stream, tunnel_tcp_connect, tunnel_tcp_data, tunnel_tcp_eof, tunnel_tcp_listen,
 };
 use super::udp::{tunnel_udp_bind, tunnel_udp_datagram};
-use super::{SessionReadyMeta, SessionResumeMeta, TunnelMode, TunnelState};
+use super::{
+    QueuedFrame, SessionReadyMeta, SessionResumeMeta, TunnelMode, TunnelSender, TunnelState,
+};
 
 pub async fn serve_tunnel<S>(state: Arc<AppState>, stream: S) -> Result<(), HostRpcError>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
+    let connection_permit = state.port_forward_limiter.try_acquire_tunnel_connection()?;
     let (mut reader, mut writer) = tokio::io::split(stream);
     read_preface(&mut reader)
         .await
         .map_err(|err| rpc_error("invalid_port_tunnel", err.to_string()))?;
 
-    let (tx, mut rx) = mpsc::channel::<Frame>(128);
+    let (tx, mut rx) = mpsc::channel::<QueuedFrame>(128);
+    let sender = TunnelSender {
+        tx: tx.clone(),
+        limiter: state.port_forward_limiter.clone(),
+    };
     let tunnel = Arc::new(TunnelState {
         state: state.clone(),
         cancel: state.shutdown.child_token(),
-        tx: tx.clone(),
+        tx: sender,
         tcp_writers: Mutex::new(std::collections::HashMap::new()),
+        tcp_stream_permits: Mutex::new(std::collections::HashMap::new()),
         udp_sockets: Mutex::new(std::collections::HashMap::new()),
         stream_cancels: Mutex::new(std::collections::HashMap::new()),
         next_daemon_stream_id: std::sync::atomic::AtomicU32::new(2),
         generation: std::sync::atomic::AtomicU64::new(0),
         attached_session: Mutex::new(None),
+        _connection_permit: connection_permit,
     });
     let writer_cancel = tunnel.cancel.clone();
     let writer_task = tokio::spawn(async move {
         loop {
             tokio::select! {
-                frame = rx.recv() => {
-                    let Some(frame) = frame else {
+                queued = rx.recv() => {
+                    let Some(queued) = queued else {
                         return;
                     };
+                    let QueuedFrame { frame, .. } = queued;
                     if write_frame(&mut writer, &frame).await.is_err() {
                         writer_cancel.cancel();
                         return;
                     }
                 }
                 _ = writer_cancel.cancelled() => {
-                    while let Ok(frame) = rx.try_recv() {
+                    while let Ok(queued) = rx.try_recv() {
+                        let QueuedFrame { frame, .. } = queued;
                         if write_frame(&mut writer, &frame).await.is_err() {
                             return;
                         }

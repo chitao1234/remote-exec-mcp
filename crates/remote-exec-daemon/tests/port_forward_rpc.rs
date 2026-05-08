@@ -132,6 +132,50 @@ async fn tunnel_open_ready_and_close_round_trip() {
 }
 
 #[tokio::test]
+async fn tunnel_open_ready_reports_configured_limits() {
+    let fixture = support::spawn::spawn_daemon_with_extra_config(
+        "builder-a",
+        r#"[port_forward_limits]
+max_active_tcp_streams = 3
+max_udp_binds = 5
+max_tunnel_queued_bytes = 4096
+"#,
+    )
+    .await;
+    let mut stream = open_tunnel(fixture.addr).await;
+
+    write_preface(&mut stream).await.unwrap();
+    write_frame(
+        &mut stream,
+        &Frame {
+            frame_type: FrameType::TunnelOpen,
+            flags: 0,
+            stream_id: 0,
+            meta: serde_json::to_vec(&TunnelOpenMeta {
+                forward_id: "fwd_limits".to_string(),
+                role: TunnelRole::Connect,
+                side: "builder-a".to_string(),
+                generation: 7,
+                protocol: TunnelForwardProtocol::Tcp,
+                resume_session_id: None,
+            })
+            .unwrap(),
+            data: Vec::new(),
+        },
+    )
+    .await
+    .unwrap();
+
+    let ready = read_frame(&mut stream).await.unwrap();
+    assert_eq!(ready.frame_type, FrameType::TunnelReady);
+    let ready_meta: TunnelReadyMeta = serde_json::from_slice(&ready.meta).unwrap();
+    assert_eq!(ready_meta.generation, 7);
+    assert_eq!(ready_meta.limits.max_active_tcp_streams, 3);
+    assert_eq!(ready_meta.limits.max_udp_peers, 5);
+    assert_eq!(ready_meta.limits.max_queued_bytes, 4096);
+}
+
+#[tokio::test]
 async fn port_tunnel_rejects_retained_session_limit() {
     let fixture = support::spawn::spawn_daemon_with_extra_config(
         "builder-a",
@@ -154,6 +198,37 @@ max_retained_sessions = 1
     assert_eq!(error.stream_id, 0);
     let error_meta: TunnelErrorMeta = serde_json::from_slice(&error.meta).unwrap();
     assert_eq!(error_meta.code, "port_tunnel_limit_exceeded");
+}
+
+#[tokio::test]
+async fn port_tunnel_rejects_second_concurrent_tunnel_limit() {
+    let fixture = support::spawn::spawn_daemon_with_extra_config(
+        "builder-a",
+        r#"[port_forward_limits]
+max_tunnel_connections = 1
+"#,
+    )
+    .await;
+
+    let mut first = open_tunnel(fixture.addr).await;
+    write_preface(&mut first).await.unwrap();
+
+    let mut second = open_tunnel(fixture.addr).await;
+    let second_result = tokio::time::timeout(Duration::from_secs(1), async {
+        write_preface(&mut second).await.unwrap();
+        read_frame(&mut second).await
+    })
+    .await
+    .expect("second tunnel should close promptly");
+
+    match second_result {
+        Ok(frame) => {
+            assert_eq!(frame.frame_type, FrameType::Error);
+            let error_meta: TunnelErrorMeta = serde_json::from_slice(&frame.meta).unwrap();
+            assert_eq!(error_meta.code, "port_tunnel_limit_exceeded");
+        }
+        Err(err) => assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof),
+    }
 }
 
 #[tokio::test]

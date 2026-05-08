@@ -1,5 +1,6 @@
 mod codec;
 mod error;
+mod limiter;
 mod session;
 mod session_store;
 mod tcp;
@@ -11,7 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64};
 use std::time::Duration;
 
-use remote_exec_proto::port_tunnel::Frame;
+use remote_exec_proto::port_tunnel::{Frame, HEADER_LEN};
 use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
 use tokio::net::tcp::OwnedWriteHalf;
@@ -23,6 +24,8 @@ use crate::AppState;
 pub use session_store::TunnelSessionStore;
 pub use tunnel::serve_tunnel;
 
+pub use limiter::PortForwardLimiter;
+
 const READ_BUF_SIZE: usize = 64 * 1024;
 #[cfg(not(test))]
 const RESUME_TIMEOUT: Duration = Duration::from_secs(10);
@@ -32,13 +35,31 @@ const RESUME_TIMEOUT: Duration = Duration::from_millis(100);
 struct TunnelState {
     state: Arc<AppState>,
     cancel: CancellationToken,
-    tx: mpsc::Sender<Frame>,
+    tx: TunnelSender,
     tcp_writers: Mutex<HashMap<u32, Arc<Mutex<OwnedWriteHalf>>>>,
-    udp_sockets: Mutex<HashMap<u32, Arc<UdpSocket>>>,
+    tcp_stream_permits: Mutex<HashMap<u32, limiter::PortForwardPermit>>,
+    udp_sockets: Mutex<HashMap<u32, TransportUdpBind>>,
     stream_cancels: Mutex<HashMap<u32, CancellationToken>>,
     next_daemon_stream_id: AtomicU32,
     generation: AtomicU64,
     attached_session: Mutex<Option<Arc<session::SessionState>>>,
+    _connection_permit: limiter::PortForwardPermit,
+}
+
+#[derive(Clone)]
+struct TunnelSender {
+    tx: mpsc::Sender<QueuedFrame>,
+    limiter: Arc<PortForwardLimiter>,
+}
+
+struct QueuedFrame {
+    frame: Frame,
+    _permit: Option<limiter::PortForwardPermit>,
+}
+
+struct TransportUdpBind {
+    socket: Arc<UdpSocket>,
+    _permit: limiter::PortForwardPermit,
 }
 
 #[derive(Debug, Deserialize)]
@@ -89,10 +110,31 @@ enum TunnelMode {
 
 impl TunnelState {
     async fn send(&self, frame: Frame) -> Result<(), crate::HostRpcError> {
+        self.tx.send(frame).await
+    }
+}
+
+impl TunnelSender {
+    async fn send(&self, frame: Frame) -> Result<(), crate::HostRpcError> {
+        let permit = self.limiter.try_acquire_queued_frame(&frame)?;
+        let queued = QueuedFrame {
+            frame,
+            _permit: permit,
+        };
         self.tx
-            .send(frame)
+            .send(queued)
             .await
             .map_err(|_| error::rpc_error("port_tunnel_closed", "port tunnel writer is closed"))
+    }
+}
+
+fn queued_frame_charge(frame: &Frame) -> usize {
+    if frame.data.is_empty() {
+        0
+    } else {
+        HEADER_LEN
+            .saturating_add(frame.meta.len())
+            .saturating_add(frame.data.len())
     }
 }
 
@@ -102,7 +144,8 @@ mod port_tunnel_tests {
     use std::time::Duration;
 
     use remote_exec_proto::port_tunnel::{
-        Frame, FrameType, read_frame, write_frame, write_preface,
+        Frame, FrameType, TunnelForwardProtocol, TunnelOpenMeta, TunnelReadyMeta, TunnelRole,
+        read_frame, write_frame, write_preface,
     };
     use serde_json::Value;
     use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
@@ -324,7 +367,212 @@ mod port_tunnel_tests {
         result.unwrap();
     }
 
+    #[tokio::test]
+    async fn tunnel_ready_reports_configured_limits() {
+        let state = test_state_with_limits(crate::HostPortForwardLimits {
+            max_active_tcp_streams: 3,
+            max_udp_binds: 5,
+            max_tunnel_queued_bytes: 4096,
+            ..crate::HostPortForwardLimits::default()
+        });
+        let mut broker_side = start_tunnel(state).await;
+
+        write_frame(
+            &mut broker_side,
+            &Frame {
+                frame_type: FrameType::TunnelOpen,
+                flags: 0,
+                stream_id: 0,
+                meta: serde_json::to_vec(&TunnelOpenMeta {
+                    forward_id: "fwd_limits".to_string(),
+                    role: TunnelRole::Connect,
+                    side: "test".to_string(),
+                    generation: 7,
+                    protocol: TunnelForwardProtocol::Tcp,
+                    resume_session_id: None,
+                })
+                .unwrap(),
+                data: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let ready = read_frame(&mut broker_side).await.unwrap();
+        assert_eq!(ready.frame_type, FrameType::TunnelReady);
+        let meta: TunnelReadyMeta = serde_json::from_slice(&ready.meta).unwrap();
+        assert_eq!(meta.generation, 7);
+        assert_eq!(meta.limits.max_active_tcp_streams, 3);
+        assert_eq!(meta.limits.max_udp_peers, 5);
+        assert_eq!(meta.limits.max_queued_bytes, 4096);
+    }
+
+    #[tokio::test]
+    async fn retained_tcp_listener_limit_rejects_second_session_listener() {
+        let state = test_state_with_limits(crate::HostPortForwardLimits {
+            max_retained_sessions: 2,
+            max_retained_listeners: 1,
+            ..crate::HostPortForwardLimits::default()
+        });
+        let first_endpoint = free_loopback_endpoint().await;
+        let second_endpoint = free_loopback_endpoint().await;
+        let (_first_bound, _first_session_id) =
+            open_resumable_tcp_listener(&state, &first_endpoint).await;
+
+        let mut second = start_tunnel(state).await;
+        write_frame(
+            &mut second,
+            &json_frame(FrameType::SessionOpen, 0, serde_json::json!({})),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            read_frame(&mut second).await.unwrap().frame_type,
+            FrameType::SessionReady
+        );
+        write_frame(
+            &mut second,
+            &json_frame(
+                FrameType::TcpListen,
+                1,
+                serde_json::json!({ "endpoint": second_endpoint }),
+            ),
+        )
+        .await
+        .unwrap();
+
+        let error = read_frame(&mut second).await.unwrap();
+        assert_limit_error(error, 1);
+    }
+
+    #[tokio::test]
+    async fn udp_bind_limit_rejects_second_bind() {
+        let state = test_state_with_limits(crate::HostPortForwardLimits {
+            max_udp_binds: 1,
+            ..crate::HostPortForwardLimits::default()
+        });
+        let mut broker_side = start_tunnel(state).await;
+
+        write_frame(
+            &mut broker_side,
+            &json_frame(
+                FrameType::UdpBind,
+                1,
+                serde_json::json!({ "endpoint": "127.0.0.1:0" }),
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            read_frame(&mut broker_side).await.unwrap().frame_type,
+            FrameType::UdpBindOk
+        );
+
+        write_frame(
+            &mut broker_side,
+            &json_frame(
+                FrameType::UdpBind,
+                3,
+                serde_json::json!({ "endpoint": "127.0.0.1:0" }),
+            ),
+        )
+        .await
+        .unwrap();
+
+        let error = read_frame(&mut broker_side).await.unwrap();
+        assert_limit_error(error, 3);
+    }
+
+    #[tokio::test]
+    async fn active_tcp_stream_limit_rejects_second_connect() {
+        let state = test_state_with_limits(crate::HostPortForwardLimits {
+            max_active_tcp_streams: 1,
+            ..crate::HostPortForwardLimits::default()
+        });
+        let destination = spawn_tcp_hold_server().await;
+        let mut broker_side = start_tunnel(state).await;
+
+        write_frame(
+            &mut broker_side,
+            &json_frame(
+                FrameType::TcpConnect,
+                1,
+                serde_json::json!({ "endpoint": destination }),
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            read_frame(&mut broker_side).await.unwrap().frame_type,
+            FrameType::TcpConnectOk
+        );
+
+        write_frame(
+            &mut broker_side,
+            &json_frame(
+                FrameType::TcpConnect,
+                3,
+                serde_json::json!({ "endpoint": destination }),
+            ),
+        )
+        .await
+        .unwrap();
+
+        let error = read_frame(&mut broker_side).await.unwrap();
+        assert_limit_error(error, 3);
+    }
+
+    #[tokio::test]
+    async fn tunnel_connection_limit_rejects_second_concurrent_tunnel() {
+        let state = test_state_with_limits(crate::HostPortForwardLimits {
+            max_tunnel_connections: 1,
+            ..crate::HostPortForwardLimits::default()
+        });
+        let _first = start_tunnel(state.clone()).await;
+        let (_second_broker, second_daemon) = tokio::io::duplex(64 * 1024);
+        let second_task = tokio::spawn(serve_tunnel(state, second_daemon));
+
+        let result = tokio::time::timeout(Duration::from_secs(1), second_task)
+            .await
+            .expect("second tunnel should be rejected promptly")
+            .unwrap();
+        let error = result.expect_err("second tunnel should exceed the connection limit");
+        assert_eq!(error.code, "port_tunnel_limit_exceeded");
+    }
+
+    #[tokio::test]
+    async fn queued_byte_limit_reports_backpressure_error() {
+        let state = test_state_with_limits(crate::HostPortForwardLimits {
+            max_tunnel_queued_bytes: 128,
+            ..crate::HostPortForwardLimits::default()
+        });
+        let destination = spawn_tcp_one_shot_sender(vec![42u8; 512]).await;
+        let mut broker_side = start_tunnel(state).await;
+
+        write_frame(
+            &mut broker_side,
+            &json_frame(
+                FrameType::TcpConnect,
+                1,
+                serde_json::json!({ "endpoint": destination }),
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            read_frame(&mut broker_side).await.unwrap().frame_type,
+            FrameType::TcpConnectOk
+        );
+
+        let error = read_frame(&mut broker_side).await.unwrap();
+        assert_limit_error(error, 1);
+    }
+
     fn test_state() -> Arc<AppState> {
+        test_state_with_limits(crate::HostPortForwardLimits::default())
+    }
+
+    fn test_state_with_limits(port_forward_limits: crate::HostPortForwardLimits) -> Arc<AppState> {
         let workdir = std::env::temp_dir().join(format!(
             "remote-exec-host-port-tunnel-test-{}",
             uuid::Uuid::new_v4()
@@ -341,7 +589,7 @@ mod port_tunnel_tests {
                 pty: PtyMode::None,
                 default_shell: None,
                 yield_time: YieldTimeConfig::default(),
-                port_forward_limits: crate::HostPortForwardLimits::default(),
+                port_forward_limits,
                 experimental_apply_patch_target_encoding_autodetect: false,
                 process_environment: ProcessEnvironment::capture_current(),
             })
@@ -475,6 +723,35 @@ mod port_tunnel_tests {
         endpoint
     }
 
+    async fn spawn_tcp_hold_server() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = listener.local_addr().unwrap().to_string();
+        tokio::spawn(async move {
+            loop {
+                let (mut stream, _) = match listener.accept().await {
+                    Ok(value) => value,
+                    Err(_) => return,
+                };
+                tokio::spawn(async move {
+                    let mut buf = [0; 1];
+                    let _ = stream.read(&mut buf).await;
+                });
+            }
+        });
+        endpoint
+    }
+
+    async fn spawn_tcp_one_shot_sender(payload: Vec<u8>) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = listener.local_addr().unwrap().to_string();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            stream.write_all(&payload).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        });
+        endpoint
+    }
+
     fn json_frame(frame_type: FrameType, stream_id: u32, meta: Value) -> Frame {
         Frame {
             frame_type,
@@ -500,6 +777,14 @@ mod port_tunnel_tests {
             .as_str()
             .unwrap()
             .to_string()
+    }
+
+    fn assert_limit_error(frame: Frame, stream_id: u32) {
+        assert_eq!(frame.frame_type, FrameType::Error);
+        assert_eq!(frame.stream_id, stream_id);
+        let meta = serde_json::from_slice::<Value>(&frame.meta).unwrap();
+        assert_eq!(meta["code"], "port_tunnel_limit_exceeded");
+        assert_eq!(meta["fatal"], false);
     }
 
     fn sorted_payloads<const N: usize>(payloads: [Vec<u8>; N]) -> Vec<Vec<u8>> {
