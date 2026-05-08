@@ -126,7 +126,7 @@ bool spawn_udp_read_thread(
 
 class PortTunnelService : public std::enable_shared_from_this<PortTunnelService> {
 public:
-    explicit PortTunnelService(unsigned long max_workers);
+    explicit PortTunnelService(const PortForwardLimitConfig& limits);
 
     std::shared_ptr<PortTunnelSession> create_session();
     std::shared_ptr<PortTunnelSession> find_session(const std::string& session_id);
@@ -148,6 +148,7 @@ public:
     bool try_acquire_worker();
     void release_worker();
     unsigned long max_workers() const;
+    const PortForwardLimitConfig& limits() const;
 
 private:
     PortTunnelService(const PortTunnelService&);
@@ -170,7 +171,7 @@ private:
 
     BasicMutex mutex_;
     std::atomic<unsigned long> active_workers_;
-    unsigned long max_workers_;
+    PortForwardLimitConfig limits_;
     std::map<std::string, std::shared_ptr<PortTunnelSession> > sessions_;
     std::uint64_t next_session_sequence_;
 };

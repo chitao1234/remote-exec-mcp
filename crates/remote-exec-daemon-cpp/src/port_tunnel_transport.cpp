@@ -186,7 +186,7 @@ int handle_port_tunnel_upgrade(AppState& state, SOCKET client, const HttpRequest
     );
     if (!state.port_tunnel_service) {
         state.port_tunnel_service =
-            create_port_tunnel_service(state.config.port_forward_max_worker_threads);
+            create_port_tunnel_service(state.config.port_forward_limits);
     }
     std::shared_ptr<PortTunnelConnection> tunnel(
         new PortTunnelConnection(client, state.port_tunnel_service)
@@ -413,15 +413,16 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
         }
         service_->attach_session(session, shared_from_this());
 
+        const PortForwardLimitConfig& limits = service_->limits();
         PortTunnelFrame ready = make_empty_frame(PortTunnelFrameType::TunnelReady, 0U);
         ready.meta = Json{
             {"generation", generation},
             {"session_id", session->session_id},
             {"resume_timeout_ms", RESUME_TIMEOUT_MS},
             {"limits", Json{
-                {"max_active_tcp_streams", 256},
-                {"max_udp_peers", 256},
-                {"max_queued_bytes", 8388608}
+                {"max_active_tcp_streams", limits.max_active_tcp_streams},
+                {"max_udp_peers", limits.max_udp_binds},
+                {"max_queued_bytes", limits.max_tunnel_queued_bytes}
             }}
         }.dump();
         send_frame(ready);
@@ -429,13 +430,14 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
     }
 
     if (role == "connect") {
+        const PortForwardLimitConfig& limits = service_->limits();
         PortTunnelFrame ready = make_empty_frame(PortTunnelFrameType::TunnelReady, 0U);
         ready.meta = Json{
             {"generation", generation},
             {"limits", Json{
-                {"max_active_tcp_streams", 256},
-                {"max_udp_peers", 256},
-                {"max_queued_bytes", 8388608}
+                {"max_active_tcp_streams", limits.max_active_tcp_streams},
+                {"max_udp_peers", limits.max_udp_binds},
+                {"max_queued_bytes", limits.max_tunnel_queued_bytes}
             }}
         }.dump();
         send_frame(ready);

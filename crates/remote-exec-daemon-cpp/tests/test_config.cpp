@@ -13,6 +13,22 @@ static void write_text(const fs::path& path, const std::string& value) {
     output << value;
 }
 
+static std::string minimal_config_text() {
+    return "target = builder-cpp\n"
+           "listen_host = 0.0.0.0\n"
+           "listen_port = 8181\n"
+           "default_workdir = C:\\work\n";
+}
+
+static bool config_rejected(const fs::path& path) {
+    try {
+        (void)load_config(path.string());
+    } catch (...) {
+        return true;
+    }
+    return false;
+}
+
 int main() {
     const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-config-test";
     fs::remove_all(root);
@@ -33,6 +49,12 @@ int main() {
         "max_request_body_bytes = 1048576\n"
         "max_open_sessions = 12\n"
         "port_forward_max_worker_threads = 17\n"
+        "port_forward_max_retained_sessions = 11\n"
+        "port_forward_max_retained_listeners = 13\n"
+        "port_forward_max_udp_binds = 15\n"
+        "port_forward_max_active_tcp_streams = 19\n"
+        "port_forward_max_tunnel_queued_bytes = 2097152\n"
+        "port_forward_tunnel_io_timeout_ms = 7000\n"
         "yield_time_exec_command_default_ms = 15000\n"
         "yield_time_exec_command_max_ms = 60000\n"
         "yield_time_exec_command_min_ms = 500\n"
@@ -52,6 +74,13 @@ int main() {
     assert(config.max_request_body_bytes == 1048576UL);
     assert(config.max_open_sessions == 12UL);
     assert(config.port_forward_max_worker_threads == 17UL);
+    assert(config.port_forward_limits.max_worker_threads == 17UL);
+    assert(config.port_forward_limits.max_retained_sessions == 11UL);
+    assert(config.port_forward_limits.max_retained_listeners == 13UL);
+    assert(config.port_forward_limits.max_udp_binds == 15UL);
+    assert(config.port_forward_limits.max_active_tcp_streams == 19UL);
+    assert(config.port_forward_limits.max_tunnel_queued_bytes == 2097152UL);
+    assert(config.port_forward_limits.tunnel_io_timeout_ms == 7000UL);
     assert(config.yield_time.exec_command.default_ms == 15000UL);
     assert(config.yield_time.exec_command.max_ms == 60000UL);
     assert(config.yield_time.exec_command.min_ms == 500UL);
@@ -79,6 +108,13 @@ int main() {
     );
     const DaemonConfig sandbox_config = load_config(sandbox_config_path.string());
     assert(sandbox_config.port_forward_max_worker_threads == DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS);
+    assert(sandbox_config.port_forward_limits.max_worker_threads == DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS);
+    assert(sandbox_config.port_forward_limits.max_retained_sessions == DEFAULT_PORT_FORWARD_MAX_RETAINED_SESSIONS);
+    assert(sandbox_config.port_forward_limits.max_retained_listeners == DEFAULT_PORT_FORWARD_MAX_RETAINED_LISTENERS);
+    assert(sandbox_config.port_forward_limits.max_udp_binds == DEFAULT_PORT_FORWARD_MAX_UDP_BINDS);
+    assert(sandbox_config.port_forward_limits.max_active_tcp_streams == DEFAULT_PORT_FORWARD_MAX_ACTIVE_TCP_STREAMS);
+    assert(sandbox_config.port_forward_limits.max_tunnel_queued_bytes == DEFAULT_PORT_FORWARD_MAX_TUNNEL_QUEUED_BYTES);
+    assert(sandbox_config.port_forward_limits.tunnel_io_timeout_ms == DEFAULT_PORT_FORWARD_TUNNEL_IO_TIMEOUT_MS);
     assert(sandbox_config.sandbox_configured);
     assert(sandbox_config.sandbox.exec_cwd.allow.size() == 2);
     assert(sandbox_config.sandbox.exec_cwd.allow[0] == "/work");
@@ -100,13 +136,7 @@ int main() {
 
     const fs::path invalid_path = root / "invalid.ini";
     write_text(invalid_path, "target builder-cpp\n");
-    bool rejected = false;
-    try {
-        (void)load_config(invalid_path.string());
-    } catch (...) {
-        rejected = true;
-    }
-    assert(rejected);
+    assert(config_rejected(invalid_path));
 
     const fs::path invalid_worker_limit_path = root / "invalid-worker-limit.ini";
     write_text(
@@ -117,13 +147,27 @@ int main() {
         "default_workdir = C:\\work\n"
         "port_forward_max_worker_threads = 0\n"
     );
-    rejected = false;
-    try {
-        (void)load_config(invalid_worker_limit_path.string());
-    } catch (...) {
-        rejected = true;
+    assert(config_rejected(invalid_worker_limit_path));
+
+    const char* invalid_limit_keys[] = {
+        "port_forward_max_retained_sessions",
+        "port_forward_max_retained_listeners",
+        "port_forward_max_udp_binds",
+        "port_forward_max_active_tcp_streams",
+        "port_forward_max_tunnel_queued_bytes",
+        "port_forward_tunnel_io_timeout_ms",
+    };
+    for (std::size_t index = 0;
+         index < sizeof(invalid_limit_keys) / sizeof(invalid_limit_keys[0]);
+         ++index) {
+        const fs::path invalid_limit_path =
+            root / ("invalid-" + std::string(invalid_limit_keys[index]) + ".ini");
+        write_text(
+            invalid_limit_path,
+            minimal_config_text() + invalid_limit_keys[index] + " = 0\n"
+        );
+        assert(config_rejected(invalid_limit_path));
     }
-    assert(rejected);
 
     const fs::path invalid_yield_path = root / "invalid-yield.ini";
     write_text(
@@ -135,13 +179,7 @@ int main() {
         "yield_time_exec_command_default_ms = 10\n"
         "yield_time_exec_command_min_ms = 20\n"
     );
-    rejected = false;
-    try {
-        (void)load_config(invalid_yield_path.string());
-    } catch (...) {
-        rejected = true;
-    }
-    assert(rejected);
+    assert(config_rejected(invalid_yield_path));
 
     const fs::path invalid_auth_path = root / "invalid-auth.ini";
     write_text(
@@ -152,13 +190,7 @@ int main() {
         "default_workdir = C:\\work\n"
         "http_auth_bearer_token = bad token\n"
     );
-    rejected = false;
-    try {
-        (void)load_config(invalid_auth_path.string());
-    } catch (...) {
-        rejected = true;
-    }
-    assert(rejected);
+    assert(config_rejected(invalid_auth_path));
 
     const fs::path invalid_port_path = root / "invalid-port.ini";
     write_text(
@@ -168,13 +200,7 @@ int main() {
         "listen_port = 70000\n"
         "default_workdir = C:\\work\n"
     );
-    rejected = false;
-    try {
-        (void)load_config(invalid_port_path.string());
-    } catch (...) {
-        rejected = true;
-    }
-    assert(rejected);
+    assert(config_rejected(invalid_port_path));
 
     return 0;
 }

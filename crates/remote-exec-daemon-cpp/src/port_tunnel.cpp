@@ -8,14 +8,14 @@ const unsigned long RESUME_TIMEOUT_MS = 100UL;
 const unsigned long RESUME_TIMEOUT_MS = 10000UL;
 #endif
 
-PortTunnelService::PortTunnelService(unsigned long max_workers)
+PortTunnelService::PortTunnelService(const PortForwardLimitConfig& limits)
     : active_workers_(0UL),
-      max_workers_(max_workers == 0UL ? 1UL : max_workers),
+      limits_(limits),
       next_session_sequence_(1ULL) {}
 
 bool PortTunnelService::try_acquire_worker() {
     unsigned long current = active_workers_.load();
-    while (current < max_workers_) {
+    while (current < limits_.max_worker_threads) {
         if (active_workers_.compare_exchange_weak(current, current + 1UL)) {
             return true;
         }
@@ -28,7 +28,11 @@ void PortTunnelService::release_worker() {
 }
 
 unsigned long PortTunnelService::max_workers() const {
-    return max_workers_;
+    return limits_.max_worker_threads;
+}
+
+const PortForwardLimitConfig& PortTunnelService::limits() const {
+    return limits_;
 }
 
 PortTunnelWorkerLease::PortTunnelWorkerLease(
@@ -143,6 +147,8 @@ bool is_port_tunnel_upgrade_request(const HttpRequest& request) {
     return request.method == "POST" && request.path == "/v1/port/tunnel";
 }
 
-std::shared_ptr<PortTunnelService> create_port_tunnel_service(unsigned long max_workers) {
-    return std::shared_ptr<PortTunnelService>(new PortTunnelService(max_workers));
+std::shared_ptr<PortTunnelService> create_port_tunnel_service(
+    const PortForwardLimitConfig& limits
+) {
+    return std::shared_ptr<PortTunnelService>(new PortTunnelService(limits));
 }

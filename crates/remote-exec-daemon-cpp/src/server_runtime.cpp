@@ -82,7 +82,7 @@ ServerRuntime::ServerRuntime(const DaemonConfig& config)
         state_.sandbox = compile_filesystem_sandbox(host_path_policy(), config.sandbox);
     }
     state_.port_tunnel_service =
-        create_port_tunnel_service(config.port_forward_max_worker_threads);
+        create_port_tunnel_service(config.port_forward_limits);
 }
 
 ServerRuntime::~ServerRuntime() {

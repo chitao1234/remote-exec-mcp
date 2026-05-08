@@ -49,8 +49,23 @@ static DaemonConfig make_config(const fs::path& root) {
     config.max_request_body_bytes = 536870912;
     config.max_open_sessions = 64;
     config.port_forward_max_worker_threads = DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS;
+    config.port_forward_limits = default_port_forward_limit_config();
     config.yield_time = default_yield_time_config();
     return config;
+}
+
+static void initialize_state_with_port_forward_limits(
+    AppState& state,
+    const fs::path& root,
+    const PortForwardLimitConfig& limits
+) {
+    state.config = make_config(root);
+    state.config.port_forward_limits = limits;
+    state.config.port_forward_max_worker_threads = limits.max_worker_threads;
+    state.daemon_instance_id = "test-instance";
+    state.hostname = "test-host";
+    state.default_shell = platform::resolve_default_shell("");
+    state.port_tunnel_service = create_port_tunnel_service(limits);
 }
 
 static void initialize_state_with_worker_limit(
@@ -58,12 +73,9 @@ static void initialize_state_with_worker_limit(
     const fs::path& root,
     unsigned long max_workers
 ) {
-    state.config = make_config(root);
-    state.config.port_forward_max_worker_threads = max_workers;
-    state.daemon_instance_id = "test-instance";
-    state.hostname = "test-host";
-    state.default_shell = platform::resolve_default_shell("");
-    state.port_tunnel_service = create_port_tunnel_service(max_workers);
+    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    limits.max_worker_threads = max_workers;
+    initialize_state_with_port_forward_limits(state, root, limits);
 }
 
 static void initialize_state(AppState& state, const fs::path& root) {
@@ -656,6 +668,42 @@ static void assert_port_tunnel_worker_limit_is_reported(const fs::path& root) {
     close_tunnel(&client_socket, &server_thread);
 }
 
+static void assert_tunnel_ready_reports_configured_limits(const fs::path& root) {
+    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    limits.max_worker_threads = 7UL;
+    limits.max_retained_sessions = 2UL;
+    limits.max_retained_listeners = 4UL;
+    limits.max_udp_binds = 5UL;
+    limits.max_active_tcp_streams = 3UL;
+    limits.max_tunnel_queued_bytes = 4096UL;
+    limits.tunnel_io_timeout_ms = 6000UL;
+
+    AppState state;
+    initialize_state_with_port_forward_limits(state, root, limits);
+
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_tunnel(state, &client_socket, &server_thread);
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(
+            PortTunnelFrameType::TunnelOpen,
+            0U,
+            tunnel_open_meta("listen", "tcp", 1ULL)
+        )
+    );
+    const PortTunnelFrame ready = read_tunnel_frame(client_socket.get());
+    assert(ready.type == PortTunnelFrameType::TunnelReady);
+    const Json ready_meta = Json::parse(ready.meta);
+    const Json ready_limits = ready_meta.at("limits");
+    assert(ready_limits.at("max_active_tcp_streams").get<unsigned long>() == 3UL);
+    assert(ready_limits.at("max_udp_peers").get<unsigned long>() == 5UL);
+    assert(ready_limits.at("max_queued_bytes").get<unsigned long>() == 4096UL);
+
+    close_tunnel(&client_socket, &server_thread);
+}
+
 static void assert_tunnel_tcp_connect_echoes_binary_data(AppState& state) {
     UniqueSocket echo_listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
     const std::string echo_endpoint = socket_local_endpoint(echo_listener.get());
@@ -896,6 +944,7 @@ int main() {
     assert_terminal_tunnel_error_releases_tcp_listener_immediately(state);
     assert_tunnel_open_ready_and_close_round_trip(state);
     assert_port_tunnel_worker_limit_is_reported(root);
+    assert_tunnel_ready_reports_configured_limits(root);
     assert_tunnel_tcp_connect_echoes_binary_data(state);
     assert_tunnel_udp_bind_emits_two_peer_datagrams(state);
     assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(state);

@@ -194,6 +194,27 @@ YieldTimeConfig default_yield_time_config() {
     return config;
 }
 
+PortForwardLimitConfig default_port_forward_limit_config() {
+    PortForwardLimitConfig config;
+    config.max_worker_threads = DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS;
+    config.max_retained_sessions = DEFAULT_PORT_FORWARD_MAX_RETAINED_SESSIONS;
+    config.max_retained_listeners = DEFAULT_PORT_FORWARD_MAX_RETAINED_LISTENERS;
+    config.max_udp_binds = DEFAULT_PORT_FORWARD_MAX_UDP_BINDS;
+    config.max_active_tcp_streams = DEFAULT_PORT_FORWARD_MAX_ACTIVE_TCP_STREAMS;
+    config.max_tunnel_queued_bytes = DEFAULT_PORT_FORWARD_MAX_TUNNEL_QUEUED_BYTES;
+    config.tunnel_io_timeout_ms = DEFAULT_PORT_FORWARD_TUNNEL_IO_TIMEOUT_MS;
+    return config;
+}
+
+static void validate_port_forward_limit(
+    unsigned long value,
+    const std::string& key
+) {
+    if (value == 0UL) {
+        throw std::runtime_error(key + " must be greater than zero");
+    }
+}
+
 unsigned long resolve_yield_time_ms(
     const YieldTimeOperationConfig& config,
     bool has_requested_ms,
@@ -272,11 +293,43 @@ DaemonConfig load_config(const std::string& path) {
         512UL * 1024UL * 1024UL
     );
     config.max_open_sessions = read_optional_unsigned_long(values, "max_open_sessions", 64UL);
-    config.port_forward_max_worker_threads = read_optional_unsigned_long(
+    config.port_forward_limits = default_port_forward_limit_config();
+    config.port_forward_limits.max_worker_threads = read_optional_unsigned_long(
         values,
         "port_forward_max_worker_threads",
-        DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS
+        config.port_forward_limits.max_worker_threads
     );
+    config.port_forward_limits.max_retained_sessions = read_optional_unsigned_long(
+        values,
+        "port_forward_max_retained_sessions",
+        config.port_forward_limits.max_retained_sessions
+    );
+    config.port_forward_limits.max_retained_listeners = read_optional_unsigned_long(
+        values,
+        "port_forward_max_retained_listeners",
+        config.port_forward_limits.max_retained_listeners
+    );
+    config.port_forward_limits.max_udp_binds = read_optional_unsigned_long(
+        values,
+        "port_forward_max_udp_binds",
+        config.port_forward_limits.max_udp_binds
+    );
+    config.port_forward_limits.max_active_tcp_streams = read_optional_unsigned_long(
+        values,
+        "port_forward_max_active_tcp_streams",
+        config.port_forward_limits.max_active_tcp_streams
+    );
+    config.port_forward_limits.max_tunnel_queued_bytes = read_optional_unsigned_long(
+        values,
+        "port_forward_max_tunnel_queued_bytes",
+        config.port_forward_limits.max_tunnel_queued_bytes
+    );
+    config.port_forward_limits.tunnel_io_timeout_ms = read_optional_unsigned_long(
+        values,
+        "port_forward_tunnel_io_timeout_ms",
+        config.port_forward_limits.tunnel_io_timeout_ms
+    );
+    config.port_forward_max_worker_threads = config.port_forward_limits.max_worker_threads;
     if (config.max_request_header_bytes == 0) {
         throw std::runtime_error("max_request_header_bytes must be greater than zero");
     }
@@ -286,9 +339,34 @@ DaemonConfig load_config(const std::string& path) {
     if (config.max_open_sessions == 0) {
         throw std::runtime_error("max_open_sessions must be greater than zero");
     }
-    if (config.port_forward_max_worker_threads == 0) {
-        throw std::runtime_error("port_forward_max_worker_threads must be greater than zero");
-    }
+    validate_port_forward_limit(
+        config.port_forward_limits.max_worker_threads,
+        "port_forward_max_worker_threads"
+    );
+    validate_port_forward_limit(
+        config.port_forward_limits.max_retained_sessions,
+        "port_forward_max_retained_sessions"
+    );
+    validate_port_forward_limit(
+        config.port_forward_limits.max_retained_listeners,
+        "port_forward_max_retained_listeners"
+    );
+    validate_port_forward_limit(
+        config.port_forward_limits.max_udp_binds,
+        "port_forward_max_udp_binds"
+    );
+    validate_port_forward_limit(
+        config.port_forward_limits.max_active_tcp_streams,
+        "port_forward_max_active_tcp_streams"
+    );
+    validate_port_forward_limit(
+        config.port_forward_limits.max_tunnel_queued_bytes,
+        "port_forward_max_tunnel_queued_bytes"
+    );
+    validate_port_forward_limit(
+        config.port_forward_limits.tunnel_io_timeout_ms,
+        "port_forward_tunnel_io_timeout_ms"
+    );
     config.yield_time = default_yield_time_config();
     config.yield_time.exec_command = read_yield_time_operation(
         values,
