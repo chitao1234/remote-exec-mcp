@@ -141,6 +141,21 @@ void PortTunnelService::udp_read_loop(
 }
 
 void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
+    const PortTunnelMode mode = current_mode();
+    if (mode == PortTunnelMode::Listen) {
+        require_mode(
+            PortTunnelMode::Listen,
+            PortTunnelProtocol::Udp,
+            "udp bind requires an open udp listen tunnel"
+        );
+    } else {
+        require_mode(
+            PortTunnelMode::Connect,
+            PortTunnelProtocol::Udp,
+            "udp bind requires an open udp connect tunnel"
+        );
+    }
+
     const std::string endpoint = normalize_port_forward_endpoint(frame_meta_string(frame, "endpoint"));
     if (!service_->try_acquire_udp_bind()) {
         throw PortForwardError(
@@ -257,6 +272,21 @@ void PortTunnelConnection::udp_read_loop_transport_owned(
 }
 
 void PortTunnelConnection::udp_datagram(const PortTunnelFrame& frame) {
+    const PortTunnelMode mode = current_mode();
+    if (mode == PortTunnelMode::Listen) {
+        require_mode(
+            PortTunnelMode::Listen,
+            PortTunnelProtocol::Udp,
+            "udp datagram requires an open udp tunnel"
+        );
+    } else {
+        require_mode(
+            PortTunnelMode::Connect,
+            PortTunnelProtocol::Udp,
+            "udp datagram requires an open udp tunnel"
+        );
+    }
+
     std::shared_ptr<TunnelUdpSocket> socket_value;
     if (session_mode_active()) {
         std::shared_ptr<PortTunnelSession> session = current_session();

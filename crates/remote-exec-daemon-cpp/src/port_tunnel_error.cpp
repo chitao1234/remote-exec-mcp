@@ -109,12 +109,6 @@ void PortTunnelConnection::close_stream(uint32_t stream_id) {
     std::shared_ptr<TunnelUdpSocket> udp_socket;
     {
         BasicLockGuard lock(state_mutex_);
-        std::map<uint32_t, UniqueSocket>::iterator listener = tcp_listeners_.find(stream_id);
-        if (listener != tcp_listeners_.end()) {
-            shutdown_socket(listener->second.get());
-            listener->second.reset();
-            tcp_listeners_.erase(listener);
-        }
         std::map<uint32_t, std::shared_ptr<TunnelUdpSocket> >::iterator udp =
             udp_sockets_.find(stream_id);
         if (udp != udp_sockets_.end()) {
@@ -202,17 +196,11 @@ void PortTunnelConnection::close_current_session(PortTunnelCloseMode mode) {
 }
 
 void PortTunnelConnection::close_transport_owned_state() {
-    std::map<uint32_t, UniqueSocket> tcp_listeners;
     std::vector<std::shared_ptr<TunnelTcpStream> > tcp_streams;
     std::vector<std::shared_ptr<TunnelUdpSocket> > udp_sockets;
-    bool session_mode = false;
     {
         BasicLockGuard lock(state_mutex_);
         closed_.store(true);
-        session_mode = session_.get() != NULL;
-        if (!session_mode) {
-            tcp_listeners.swap(tcp_listeners_);
-        }
         for (std::map<uint32_t, std::shared_ptr<TunnelTcpStream> >::iterator it =
                  tcp_streams_.begin();
              it != tcp_streams_.end();
@@ -228,12 +216,6 @@ void PortTunnelConnection::close_transport_owned_state() {
         }
         udp_sockets_.clear();
     }
-    for (std::map<uint32_t, UniqueSocket>::iterator it = tcp_listeners.begin();
-         it != tcp_listeners.end();
-         ++it) {
-        shutdown_socket(it->second.get());
-        it->second.reset();
-    }
     for (std::size_t i = 0; i < tcp_streams.size(); ++i) {
         mark_tcp_stream_closed(tcp_streams[i]);
     }
@@ -245,6 +227,22 @@ void PortTunnelConnection::close_transport_owned_state() {
 std::shared_ptr<PortTunnelSession> PortTunnelConnection::current_session() {
     BasicLockGuard lock(state_mutex_);
     return session_;
+}
+
+PortTunnelMode PortTunnelConnection::current_mode() {
+    BasicLockGuard lock(state_mutex_);
+    return mode_;
+}
+
+void PortTunnelConnection::require_mode(
+    PortTunnelMode mode,
+    PortTunnelProtocol protocol,
+    const std::string& message
+) {
+    BasicLockGuard lock(state_mutex_);
+    if (mode_ != mode || protocol_ != protocol) {
+        throw PortForwardError(400, "invalid_port_tunnel", message);
+    }
 }
 
 bool PortTunnelConnection::session_mode_active() {

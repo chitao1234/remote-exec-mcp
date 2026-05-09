@@ -797,6 +797,7 @@ mod tests {
             side: SideHandle::local(),
             forward_id: "fwd_test".to_string(),
             session_id: "test-session".to_string(),
+            protocol: PublicForwardPortProtocol::Udp,
             generation: 1,
             listener_stream_id: 1,
             resume_timeout: Duration::from_secs(30),

@@ -46,6 +46,18 @@ enum class PortTunnelCloseMode {
     TerminalFailure,
 };
 
+enum class PortTunnelProtocol {
+    None,
+    Tcp,
+    Udp,
+};
+
+enum class PortTunnelMode {
+    Unopened,
+    Listen,
+    Connect,
+};
+
 struct TunnelTcpStream {
     TunnelTcpStream(
         SOCKET socket_value,
@@ -150,13 +162,6 @@ bool retained_listener_closed(const std::shared_ptr<RetainedTcpListener>& listen
 bool session_is_unavailable(const std::shared_ptr<PortTunnelSession>& session);
 int wait_socket_readable(SOCKET socket, unsigned long timeout_ms);
 void mark_retained_listener_closed(const std::shared_ptr<RetainedTcpListener>& listener);
-bool spawn_tcp_accept_thread(
-    const std::shared_ptr<PortTunnelService>& service,
-    const std::shared_ptr<PortTunnelConnection>& tunnel,
-    uint32_t stream_id,
-    SOCKET socket,
-    bool worker_acquired = false
-);
 bool spawn_tcp_read_thread(
     const std::shared_ptr<PortTunnelService>& service,
     const std::shared_ptr<PortTunnelConnection>& tunnel,
@@ -282,10 +287,10 @@ public:
           closed_(false),
           generation_(0ULL),
           queued_bytes_(0UL),
-          next_daemon_stream_id_(2U) {}
+          mode_(PortTunnelMode::Unopened),
+          protocol_(PortTunnelProtocol::None) {}
 
     void run();
-    void tcp_accept_loop_transport_owned(uint32_t listener_stream_id, SOCKET listener_socket);
     void tcp_read_loop(uint32_t stream_id, std::shared_ptr<TunnelTcpStream> stream);
     void tcp_write_loop(uint32_t stream_id, std::shared_ptr<TunnelTcpStream> stream);
     void udp_read_loop_transport_owned(
@@ -341,8 +346,6 @@ private:
     void tunnel_open(const PortTunnelFrame& frame);
     void tunnel_close(const PortTunnelFrame& frame);
     void tunnel_heartbeat(const PortTunnelFrame& frame);
-    void session_open(const PortTunnelFrame& frame);
-    void session_resume(const PortTunnelFrame& frame);
     void tcp_listen(const PortTunnelFrame& frame);
     void tcp_connect(const PortTunnelFrame& frame);
     void tcp_data(uint32_t stream_id, const std::vector<unsigned char>& data);
@@ -357,6 +360,12 @@ private:
     void close_current_session(PortTunnelCloseMode mode);
     void close_transport_owned_state();
     std::shared_ptr<PortTunnelSession> current_session();
+    PortTunnelMode current_mode();
+    void require_mode(
+        PortTunnelMode mode,
+        PortTunnelProtocol protocol,
+        const std::string& message
+    );
     bool session_mode_active();
 
     SOCKET client_;
@@ -367,8 +376,8 @@ private:
     std::atomic<std::uint64_t> generation_;
     std::atomic<unsigned long> queued_bytes_;
     std::shared_ptr<PortTunnelSession> session_;
-    std::map<uint32_t, UniqueSocket> tcp_listeners_;
     std::map<uint32_t, std::shared_ptr<TunnelTcpStream> > tcp_streams_;
     std::map<uint32_t, std::shared_ptr<TunnelUdpSocket> > udp_sockets_;
-    std::atomic<uint32_t> next_daemon_stream_id_;
+    PortTunnelMode mode_;
+    PortTunnelProtocol protocol_;
 };

@@ -140,10 +140,6 @@ impl SessionState {
     }
 }
 
-pub(super) async fn explicit_session(tunnel: &Arc<TunnelState>) -> Option<Arc<SessionState>> {
-    tunnel.attached_session.lock().await.clone()
-}
-
 pub(super) async fn attach_session_to_tunnel(
     session: &Arc<SessionState>,
     tunnel: &Arc<TunnelState>,

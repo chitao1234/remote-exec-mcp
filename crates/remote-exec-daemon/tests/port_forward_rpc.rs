@@ -16,6 +16,7 @@ async fn port_tunnel_upgrade_accepts_http11_and_binds_tcp_listener() {
     let mut stream = open_tunnel(fixture.addr).await;
 
     write_preface(&mut stream).await.unwrap();
+    open_listen_tunnel(&mut stream, "fwd_bind").await;
     write_frame(
         &mut stream,
         &json_frame(
@@ -293,11 +294,12 @@ async fn port_tunnel_rejects_old_generation_frames() {
 }
 
 #[tokio::test]
-async fn dropping_port_tunnel_releases_tcp_listener_when_tunnel_closes() {
+async fn tunnel_close_releases_tcp_listener() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let mut stream = open_tunnel(fixture.addr).await;
 
     write_preface(&mut stream).await.unwrap();
+    open_listen_tunnel(&mut stream, "fwd_close_release").await;
     write_frame(
         &mut stream,
         &json_frame(
@@ -311,6 +313,26 @@ async fn dropping_port_tunnel_releases_tcp_listener_when_tunnel_closes() {
     let ok = read_frame(&mut stream).await.unwrap();
     let endpoint = endpoint_from_frame(&ok);
 
+    write_frame(
+        &mut stream,
+        &Frame {
+            frame_type: FrameType::TunnelClose,
+            flags: 0,
+            stream_id: 0,
+            meta: serde_json::to_vec(&TunnelCloseMeta {
+                forward_id: "fwd_close_release".to_string(),
+                generation: 1,
+                reason: "operator_close".to_string(),
+            })
+            .unwrap(),
+            data: Vec::new(),
+        },
+    )
+    .await
+    .unwrap();
+    let closed = read_frame(&mut stream).await.unwrap();
+    assert_eq!(closed.frame_type, FrameType::TunnelClosed);
+
     drop(stream);
     wait_until_bindable(&endpoint).await;
 }
@@ -321,14 +343,7 @@ async fn terminal_port_tunnel_error_releases_tcp_listener_without_waiting_for_re
     let mut stream = open_tunnel(fixture.addr).await;
 
     write_preface(&mut stream).await.unwrap();
-    write_frame(
-        &mut stream,
-        &json_frame(FrameType::SessionOpen, 0, serde_json::json!({})),
-    )
-    .await
-    .unwrap();
-    let ready = read_frame(&mut stream).await.unwrap();
-    assert_eq!(ready.frame_type, FrameType::SessionReady);
+    open_listen_tunnel(&mut stream, "fwd_terminal_release").await;
 
     write_frame(
         &mut stream,
@@ -374,14 +389,7 @@ async fn terminal_port_tunnel_error_returns_fatal_error_frame_before_closing() {
     let mut stream = open_tunnel(fixture.addr).await;
 
     write_preface(&mut stream).await.unwrap();
-    write_frame(
-        &mut stream,
-        &json_frame(FrameType::SessionOpen, 0, serde_json::json!({})),
-    )
-    .await
-    .unwrap();
-    let ready = read_frame(&mut stream).await.unwrap();
-    assert_eq!(ready.frame_type, FrameType::SessionReady);
+    open_listen_tunnel(&mut stream, "fwd_terminal_error").await;
 
     write_frame(
         &mut stream,

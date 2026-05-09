@@ -80,7 +80,6 @@ struct StubPortTunnelControl {
     resume_behavior: ResumeBehavior,
     tcp_connect_ok_behavior: TcpConnectOkBehavior,
     close_transports_on_second_session_open: bool,
-    session_open_count: usize,
     tunnel_open_count: usize,
     port_tunnel_upgrades_to_fail: usize,
     connect_tunnel_opens_to_drop: usize,
@@ -104,7 +103,6 @@ impl Default for StubPortTunnelControl {
             resume_behavior: ResumeBehavior::PassThrough,
             tcp_connect_ok_behavior: TcpConnectOkBehavior::PassThrough,
             close_transports_on_second_session_open: false,
-            session_open_count: 0,
             tunnel_open_count: 0,
             port_tunnel_upgrades_to_fail: 0,
             connect_tunnel_opens_to_drop: 0,
@@ -703,7 +701,16 @@ where
     read_preface(&mut stream).await?;
     let first_frame = read_frame(&mut stream).await?;
 
-    if first_frame.frame_type == FrameType::SessionResume {
+    let first_frame_meta = if first_frame.frame_type == FrameType::TunnelOpen {
+        serde_json::from_slice::<serde_json::Value>(&first_frame.meta).ok()
+    } else {
+        None
+    };
+    let is_resume_open = first_frame_meta
+        .as_ref()
+        .and_then(|meta| meta.get("resume_session_id"))
+        .is_some_and(|value| !value.is_null());
+    if is_resume_open {
         match state
             .port_tunnel_control
             .lock()
@@ -858,15 +865,6 @@ async fn observe_broker_to_daemon_frame(
                     observed.transports_to_cancel = std::mem::take(&mut control.active_transports);
                 }
             }
-            FrameType::SessionOpen => {
-                control.session_open_count += 1;
-                if control.close_transports_on_second_session_open
-                    && control.session_open_count == 2
-                {
-                    control.close_transports_on_second_session_open = false;
-                    observed.transports_to_cancel = std::mem::take(&mut control.active_transports);
-                }
-            }
             FrameType::TunnelHeartbeat if control.heartbeat_acks_to_drop > 0 => {
                 control.heartbeat_acks_to_drop -= 1;
                 observed.forward = false;
@@ -916,10 +914,7 @@ async fn daemon_to_broker_frame(
                 .active_udp_connector_streams
                 .remove(&frame.stream_id);
         }
-        let delay = if matches!(
-            frame.frame_type,
-            FrameType::SessionReady | FrameType::TunnelReady
-        ) {
+        let delay = if frame.frame_type == FrameType::TunnelReady {
             let delay = if control.session_ready_count > 0 {
                 control.delay_session_ready_after_first
             } else {
@@ -930,10 +925,7 @@ async fn daemon_to_broker_frame(
         } else {
             None
         };
-        let resume_timeout_ms = if matches!(
-            frame.frame_type,
-            FrameType::SessionReady | FrameType::TunnelReady
-        ) {
+        let resume_timeout_ms = if frame.frame_type == FrameType::TunnelReady {
             control.override_session_ready_resume_timeout_ms
         } else {
             None

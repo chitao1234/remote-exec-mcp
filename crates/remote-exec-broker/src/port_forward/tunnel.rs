@@ -370,11 +370,6 @@ pub(super) struct EndpointMeta {
     pub(super) endpoint: String,
 }
 
-#[derive(Debug, Serialize)]
-pub(super) struct SessionResumeMeta {
-    pub(super) session_id: String,
-}
-
 #[derive(Debug, Deserialize)]
 pub(super) struct TcpAcceptMeta {
     pub(super) listener_stream_id: u32,
@@ -486,7 +481,9 @@ pub(super) fn is_retryable_transport_error(err: &anyhow::Error) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use remote_exec_proto::port_tunnel::{Frame, FrameType};
+    use remote_exec_proto::port_tunnel::{
+        Frame, FrameType, TunnelForwardProtocol, TunnelOpenMeta, TunnelRole,
+    };
 
     use super::super::side::SideHandle;
     use super::*;
@@ -529,6 +526,28 @@ mod tests {
             .port_tunnel(PortTunnel::DEFAULT_MAX_QUEUED_BYTES)
             .await
             .unwrap();
+        tunnel
+            .send(Frame {
+                frame_type: FrameType::TunnelOpen,
+                flags: 0,
+                stream_id: 0,
+                meta: serde_json::to_vec(&TunnelOpenMeta {
+                    forward_id: "fwd_test".to_string(),
+                    role: TunnelRole::Listen,
+                    side: "local".to_string(),
+                    generation: 1,
+                    protocol: TunnelForwardProtocol::Tcp,
+                    resume_session_id: None,
+                })
+                .unwrap(),
+                data: Vec::new(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            tunnel.recv().await.unwrap().frame_type,
+            FrameType::TunnelReady
+        );
         tunnel
             .send(Frame {
                 frame_type: FrameType::TcpListen,

@@ -20,8 +20,8 @@ use super::side::SideHandle;
 use super::store::{PortForwardRecord, PortForwardStore};
 use super::tcp_bridge::run_tcp_forward;
 use super::tunnel::{
-    EndpointMeta, PortTunnel, SessionResumeMeta, decode_tunnel_meta, encode_tunnel_meta,
-    is_retryable_transport_error, tunnel_error,
+    EndpointMeta, PortTunnel, decode_tunnel_meta, encode_tunnel_meta, is_retryable_transport_error,
+    tunnel_error,
 };
 use super::udp_bridge::run_udp_forward;
 use super::{
@@ -84,6 +84,7 @@ pub(super) struct ListenSessionControl {
     pub(super) side: SideHandle,
     pub(super) forward_id: String,
     pub(super) session_id: String,
+    pub(super) protocol: PublicForwardPortProtocol,
     pub(super) generation: u64,
     pub(super) listener_stream_id: u32,
     pub(super) resume_timeout: Duration,
@@ -96,6 +97,7 @@ struct ListenSessionParams {
     side: SideHandle,
     forward_id: String,
     session_id: String,
+    protocol: PublicForwardPortProtocol,
     generation: u64,
     listener_stream_id: u32,
     resume_timeout: Duration,
@@ -129,6 +131,7 @@ impl ListenSessionControl {
             side: params.side,
             forward_id: params.forward_id,
             session_id: params.session_id,
+            protocol: params.protocol,
             generation: params.generation,
             listener_stream_id: params.listener_stream_id,
             resume_timeout: params.resume_timeout,
@@ -267,6 +270,7 @@ async fn open_tcp_forward(
         side: listen_side.clone(),
         forward_id: forward_id.clone(),
         session_id,
+        protocol: PublicForwardPortProtocol::Tcp,
         generation: 1,
         listener_stream_id,
         resume_timeout,
@@ -383,6 +387,7 @@ async fn open_udp_forward(
         side: listen_side.clone(),
         forward_id: forward_id.clone(),
         session_id,
+        protocol: PublicForwardPortProtocol::Udp,
         generation: 1,
         listener_stream_id,
         resume_timeout,
@@ -616,35 +621,17 @@ async fn wait_for_listener_ready(
 async fn resume_listen_session_inner(
     control: &ListenSessionControl,
 ) -> anyhow::Result<Arc<PortTunnel>> {
-    let tunnel = open_connect_tunnel(&control.side, control.max_tunnel_queued_bytes).await?;
-    tunnel
-        .send(Frame {
-            frame_type: FrameType::SessionResume,
-            flags: 0,
-            stream_id: 0,
-            meta: encode_tunnel_meta(&SessionResumeMeta {
-                session_id: control.session_id.clone(),
-            })?,
-            data: Vec::new(),
-        })
-        .await
-        .with_context(|| format!("resuming port tunnel session on `{}`", control.side.name()))?;
-    let frame = tunnel.recv().await.with_context(|| {
-        format!(
-            "waiting to resume port tunnel session on `{}`",
-            control.side.name()
-        )
-    })?;
-    match frame.frame_type {
-        FrameType::SessionResumed if frame.stream_id == 0 => Ok(tunnel),
-        FrameType::Error if frame.stream_id == 0 => Err(tunnel_error(&frame))
-            .with_context(|| format!("resuming port tunnel session on `{}`", control.side.name())),
-        _ => Err(anyhow::anyhow!(
-            "unexpected port tunnel resume response `{:?}` on `{}`",
-            frame.frame_type,
-            control.side.name()
-        )),
-    }
+    let opened = open_listen_session(
+        &control.side,
+        &control.forward_id,
+        control.protocol,
+        control.generation,
+        Some(control.session_id.clone()),
+        control.max_tunnel_queued_bytes,
+    )
+    .await
+    .with_context(|| format!("resuming port tunnel session on `{}`", control.side.name()))?;
+    Ok(opened.tunnel)
 }
 
 async fn try_resume_listen_tunnel(

@@ -9,11 +9,11 @@ mod udp;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU64};
+use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 use remote_exec_proto::port_tunnel::{
-    ForwardDropKind, ForwardDropMeta, Frame, FrameType, HEADER_LEN,
+    ForwardDropKind, ForwardDropMeta, Frame, FrameType, HEADER_LEN, TunnelForwardProtocol,
 };
 use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
@@ -38,11 +38,11 @@ struct TunnelState {
     state: Arc<AppState>,
     cancel: CancellationToken,
     tx: TunnelSender,
+    open_mode: Mutex<TunnelMode>,
     tcp_writers: Mutex<HashMap<u32, TcpWriterHandle>>,
     tcp_stream_permits: Mutex<HashMap<u32, limiter::PortForwardPermit>>,
     udp_sockets: Mutex<HashMap<u32, TransportUdpBind>>,
     stream_cancels: Mutex<HashMap<u32, CancellationToken>>,
-    next_daemon_stream_id: AtomicU32,
     generation: AtomicU64,
     attached_session: Mutex<Option<Arc<session::SessionState>>>,
     _connection_permit: limiter::PortForwardPermit,
@@ -105,20 +105,16 @@ struct ErrorMeta {
     generation: Option<u64>,
 }
 
-#[derive(Debug, Deserialize)]
-struct SessionResumeMeta {
-    session_id: String,
-}
-
-#[derive(Debug, Serialize)]
-struct SessionReadyMeta {
-    session_id: String,
-    resume_timeout_ms: u64,
-}
-
+#[derive(Clone)]
 enum TunnelMode {
-    Transport,
-    Session(Arc<session::SessionState>),
+    Unopened,
+    Connect {
+        protocol: TunnelForwardProtocol,
+    },
+    Listen {
+        protocol: TunnelForwardProtocol,
+        session: Arc<session::SessionState>,
+    },
 }
 
 impl TunnelState {
@@ -196,10 +192,8 @@ mod port_tunnel_tests {
     async fn tunnel_binds_tcp_listener_and_releases_it_on_drop() {
         let state = test_state();
         let listen_endpoint = free_loopback_endpoint().await;
-        let (mut broker_side, daemon_side) = tokio::io::duplex(64 * 1024);
-        tokio::spawn(serve_tunnel(state.clone(), daemon_side));
-
-        write_preface(&mut broker_side).await.unwrap();
+        let mut broker_side =
+            start_open_listen_tunnel(state.clone(), TunnelForwardProtocol::Tcp).await;
         write_frame(
             &mut broker_side,
             &json_frame(
@@ -223,10 +217,7 @@ mod port_tunnel_tests {
     async fn tunnel_tcp_connect_echoes_binary_data_full_duplex() {
         let state = test_state();
         let echo_endpoint = spawn_tcp_echo_server().await;
-        let (mut broker_side, daemon_side) = tokio::io::duplex(64 * 1024);
-        tokio::spawn(serve_tunnel(state, daemon_side));
-
-        write_preface(&mut broker_side).await.unwrap();
+        let mut broker_side = start_open_connect_tunnel(state, TunnelForwardProtocol::Tcp).await;
         write_frame(
             &mut broker_side,
             &json_frame(
@@ -262,6 +253,17 @@ mod port_tunnel_tests {
         let (mut broker_read, mut broker_write) = tokio::io::split(broker_side);
 
         write_preface(&mut broker_write).await.unwrap();
+        write_tunnel_open_on_writer(
+            &mut broker_write,
+            TunnelRole::Connect,
+            TunnelForwardProtocol::Tcp,
+            None,
+        )
+        .await;
+        assert_eq!(
+            read_frame(&mut broker_read).await.unwrap().frame_type,
+            FrameType::TunnelReady
+        );
         write_frame(
             &mut broker_write,
             &json_frame(
@@ -332,6 +334,17 @@ mod port_tunnel_tests {
         let (mut broker_read, mut broker_write) = tokio::io::split(broker_side);
 
         write_preface(&mut broker_write).await.unwrap();
+        write_tunnel_open_on_writer(
+            &mut broker_write,
+            TunnelRole::Connect,
+            TunnelForwardProtocol::Tcp,
+            None,
+        )
+        .await;
+        assert_eq!(
+            read_frame(&mut broker_read).await.unwrap().frame_type,
+            FrameType::TunnelReady
+        );
         write_frame(
             &mut broker_write,
             &json_frame(
@@ -400,10 +413,7 @@ mod port_tunnel_tests {
     async fn tunnel_udp_bind_relays_datagrams_from_two_peers() {
         let state = test_state();
         let endpoint = free_loopback_endpoint().await;
-        let (mut broker_side, daemon_side) = tokio::io::duplex(64 * 1024);
-        tokio::spawn(serve_tunnel(state, daemon_side));
-
-        write_preface(&mut broker_side).await.unwrap();
+        let mut broker_side = start_open_connect_tunnel(state, TunnelForwardProtocol::Udp).await;
         write_frame(
             &mut broker_side,
             &json_frame(
@@ -440,7 +450,7 @@ mod port_tunnel_tests {
         let (listen_bound_endpoint, session_id) =
             open_resumable_tcp_listener(&state, &listen_endpoint).await;
 
-        let mut resumed = resume_session(&state, &session_id).await;
+        let mut resumed = resume_session(&state, &session_id, TunnelForwardProtocol::Tcp).await;
         let accept = tokio::net::TcpStream::connect(&listen_bound_endpoint)
             .await
             .unwrap();
@@ -457,7 +467,7 @@ mod port_tunnel_tests {
         let (_listen_bound_endpoint, session_id) =
             open_v4_resumable_tcp_listener(&state, &listen_endpoint).await;
 
-        let mut resumed = resume_session(&state, &session_id).await;
+        let mut resumed = resume_session(&state, &session_id, TunnelForwardProtocol::Tcp).await;
         write_frame(
             &mut resumed,
             &json_frame(
@@ -484,7 +494,7 @@ mod port_tunnel_tests {
         let (listen_bound_endpoint, session_id) =
             open_resumable_udp_bind(&state, &listen_endpoint).await;
 
-        let mut resumed = resume_session(&state, &session_id).await;
+        let mut resumed = resume_session(&state, &session_id, TunnelForwardProtocol::Udp).await;
         let sender = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
         sender
             .send_to(b"ping", &listen_bound_endpoint)
@@ -519,7 +529,7 @@ mod port_tunnel_tests {
         let client = tokio::net::TcpStream::connect(&bound_endpoint)
             .await
             .unwrap();
-        let mut resumed = resume_session(&state, &session_id).await;
+        let mut resumed = resume_session(&state, &session_id, TunnelForwardProtocol::Tcp).await;
 
         let frame = tokio::time::timeout(Duration::from_secs(1), read_frame(&mut resumed))
             .await
@@ -535,10 +545,7 @@ mod port_tunnel_tests {
         let state = test_state();
         let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let occupied_endpoint = occupied.local_addr().unwrap().to_string();
-        let (mut broker_side, daemon_side) = tokio::io::duplex(64 * 1024);
-        tokio::spawn(serve_tunnel(state, daemon_side));
-
-        write_preface(&mut broker_side).await.unwrap();
+        let mut broker_side = start_open_listen_tunnel(state, TunnelForwardProtocol::Tcp).await;
         write_frame(
             &mut broker_side,
             &json_frame(
@@ -617,6 +624,63 @@ mod port_tunnel_tests {
     }
 
     #[tokio::test]
+    async fn legacy_session_frames_are_reserved_but_unsupported() {
+        for frame_type in [FrameType::SessionOpen, FrameType::SessionResume] {
+            let state = test_state();
+            let mut broker_side = start_tunnel(state).await;
+            write_frame(
+                &mut broker_side,
+                &json_frame(
+                    frame_type,
+                    0,
+                    serde_json::json!({ "session_id": "legacy_session" }),
+                ),
+            )
+            .await
+            .unwrap();
+
+            let error = read_frame(&mut broker_side).await.unwrap();
+            assert_eq!(error.frame_type, FrameType::Error);
+            assert_eq!(error.stream_id, 0);
+            let meta: serde_json::Value = serde_json::from_slice(&error.meta).unwrap();
+            assert_eq!(meta["code"], "invalid_port_tunnel");
+        }
+    }
+
+    #[tokio::test]
+    async fn tunnel_rejects_frames_for_wrong_protocol() {
+        let state = test_state();
+        let mut tcp_connect =
+            start_open_connect_tunnel(state.clone(), TunnelForwardProtocol::Tcp).await;
+        write_frame(
+            &mut tcp_connect,
+            &json_frame(
+                FrameType::UdpBind,
+                1,
+                serde_json::json!({ "endpoint": "127.0.0.1:0" }),
+            ),
+        )
+        .await
+        .unwrap();
+        let error = read_frame(&mut tcp_connect).await.unwrap();
+        assert_error_code(error, 1, "invalid_port_tunnel");
+
+        let mut udp_listen = start_open_listen_tunnel(state, TunnelForwardProtocol::Udp).await;
+        write_frame(
+            &mut udp_listen,
+            &json_frame(
+                FrameType::TcpListen,
+                1,
+                serde_json::json!({ "endpoint": "127.0.0.1:0" }),
+            ),
+        )
+        .await
+        .unwrap();
+        let error = read_frame(&mut udp_listen).await.unwrap();
+        assert_error_code(error, 1, "invalid_port_tunnel");
+    }
+
+    #[tokio::test]
     async fn retained_tcp_listener_limit_rejects_second_session_listener() {
         let state = test_state_with_limits(crate::HostPortForwardLimits {
             max_retained_sessions: 2,
@@ -628,17 +692,7 @@ mod port_tunnel_tests {
         let (_first_bound, _first_session_id) =
             open_resumable_tcp_listener(&state, &first_endpoint).await;
 
-        let mut second = start_tunnel(state).await;
-        write_frame(
-            &mut second,
-            &json_frame(FrameType::SessionOpen, 0, serde_json::json!({})),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            read_frame(&mut second).await.unwrap().frame_type,
-            FrameType::SessionReady
-        );
+        let mut second = start_open_listen_tunnel(state, TunnelForwardProtocol::Tcp).await;
         write_frame(
             &mut second,
             &json_frame(
@@ -660,7 +714,7 @@ mod port_tunnel_tests {
             max_udp_binds: 1,
             ..crate::HostPortForwardLimits::default()
         });
-        let mut broker_side = start_tunnel(state).await;
+        let mut broker_side = start_open_connect_tunnel(state, TunnelForwardProtocol::Udp).await;
 
         write_frame(
             &mut broker_side,
@@ -699,7 +753,7 @@ mod port_tunnel_tests {
             ..crate::HostPortForwardLimits::default()
         });
         let destination = spawn_tcp_hold_server().await;
-        let mut broker_side = start_tunnel(state).await;
+        let mut broker_side = start_open_connect_tunnel(state, TunnelForwardProtocol::Tcp).await;
 
         write_frame(
             &mut broker_side,
@@ -738,10 +792,11 @@ mod port_tunnel_tests {
             ..crate::HostPortForwardLimits::default()
         });
         let destination = spawn_tcp_hold_server().await;
-        let mut broker_side = start_tunnel(state).await;
+        let mut connect_side =
+            start_open_connect_tunnel(state.clone(), TunnelForwardProtocol::Tcp).await;
 
         write_frame(
-            &mut broker_side,
+            &mut connect_side,
             &json_frame(
                 FrameType::TcpConnect,
                 3,
@@ -751,10 +806,11 @@ mod port_tunnel_tests {
         .await
         .unwrap();
         assert_eq!(
-            read_frame(&mut broker_side).await.unwrap().frame_type,
+            read_frame(&mut connect_side).await.unwrap().frame_type,
             FrameType::TcpConnectOk
         );
 
+        let mut broker_side = start_open_listen_tunnel(state, TunnelForwardProtocol::Tcp).await;
         write_frame(
             &mut broker_side,
             &json_frame(
@@ -815,7 +871,7 @@ mod port_tunnel_tests {
             ..crate::HostPortForwardLimits::default()
         });
         let destination = spawn_tcp_one_shot_sender(vec![42u8; 512]).await;
-        let mut broker_side = start_tunnel(state).await;
+        let mut broker_side = start_open_connect_tunnel(state, TunnelForwardProtocol::Tcp).await;
 
         write_frame(
             &mut broker_side,
@@ -939,24 +995,82 @@ mod port_tunnel_tests {
         broker_side
     }
 
-    async fn open_resumable_tcp_listener(
-        state: &Arc<AppState>,
-        endpoint: &str,
-    ) -> (String, String) {
-        let mut broker_side = start_tunnel(state.clone()).await;
+    async fn start_open_listen_tunnel(
+        state: Arc<AppState>,
+        protocol: TunnelForwardProtocol,
+    ) -> DuplexStream {
+        start_open_listen_tunnel_with_ready(state, protocol).await.0
+    }
+
+    async fn start_open_listen_tunnel_with_ready(
+        state: Arc<AppState>,
+        protocol: TunnelForwardProtocol,
+    ) -> (DuplexStream, Frame) {
+        let mut broker_side = start_tunnel(state).await;
+        write_tunnel_open(&mut broker_side, TunnelRole::Listen, protocol, None).await;
+        let ready = read_frame(&mut broker_side).await.unwrap();
+        assert_eq!(ready.frame_type, FrameType::TunnelReady);
+        (broker_side, ready)
+    }
+
+    async fn start_open_connect_tunnel(
+        state: Arc<AppState>,
+        protocol: TunnelForwardProtocol,
+    ) -> DuplexStream {
+        let mut broker_side = start_tunnel(state).await;
+        write_tunnel_open(&mut broker_side, TunnelRole::Connect, protocol, None).await;
+        assert_eq!(
+            read_frame(&mut broker_side).await.unwrap().frame_type,
+            FrameType::TunnelReady
+        );
+        broker_side
+    }
+
+    async fn write_tunnel_open(
+        writer: &mut DuplexStream,
+        role: TunnelRole,
+        protocol: TunnelForwardProtocol,
+        resume_session_id: Option<String>,
+    ) {
+        write_tunnel_open_on_writer(writer, role, protocol, resume_session_id).await;
+    }
+
+    async fn write_tunnel_open_on_writer<W>(
+        writer: &mut W,
+        role: TunnelRole,
+        protocol: TunnelForwardProtocol,
+        resume_session_id: Option<String>,
+    ) where
+        W: tokio::io::AsyncWrite + Unpin,
+    {
         write_frame(
-            &mut broker_side,
+            writer,
             &Frame {
-                frame_type: FrameType::SessionOpen,
+                frame_type: FrameType::TunnelOpen,
                 flags: 0,
                 stream_id: 0,
-                meta: Vec::new(),
+                meta: serde_json::to_vec(&TunnelOpenMeta {
+                    forward_id: "fwd_test".to_string(),
+                    role,
+                    side: "test".to_string(),
+                    generation: 1,
+                    protocol,
+                    resume_session_id,
+                })
+                .unwrap(),
                 data: Vec::new(),
             },
         )
         .await
         .unwrap();
-        let ready = read_frame(&mut broker_side).await.unwrap();
+    }
+
+    async fn open_resumable_tcp_listener(
+        state: &Arc<AppState>,
+        endpoint: &str,
+    ) -> (String, String) {
+        let (mut broker_side, ready) =
+            start_open_listen_tunnel_with_ready(state.clone(), TunnelForwardProtocol::Tcp).await;
         let session_id = serde_json::from_slice::<Value>(&ready.meta).unwrap()["session_id"]
             .as_str()
             .unwrap()
@@ -981,64 +1095,12 @@ mod port_tunnel_tests {
         state: &Arc<AppState>,
         endpoint: &str,
     ) -> (String, String) {
-        let mut broker_side = start_tunnel(state.clone()).await;
-        write_frame(
-            &mut broker_side,
-            &Frame {
-                frame_type: FrameType::TunnelOpen,
-                flags: 0,
-                stream_id: 0,
-                meta: serde_json::to_vec(&TunnelOpenMeta {
-                    forward_id: "fwd_test".to_string(),
-                    role: TunnelRole::Listen,
-                    side: "test".to_string(),
-                    generation: 1,
-                    protocol: TunnelForwardProtocol::Tcp,
-                    resume_session_id: None,
-                })
-                .unwrap(),
-                data: Vec::new(),
-            },
-        )
-        .await
-        .unwrap();
-        let ready = read_frame(&mut broker_side).await.unwrap();
-        assert_eq!(ready.frame_type, FrameType::TunnelReady);
-        let session_id = serde_json::from_slice::<Value>(&ready.meta).unwrap()["session_id"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        write_frame(
-            &mut broker_side,
-            &json_frame(
-                FrameType::TcpListen,
-                1,
-                serde_json::json!({ "endpoint": endpoint }),
-            ),
-        )
-        .await
-        .unwrap();
-        let ok = read_frame(&mut broker_side).await.unwrap();
-        let bound_endpoint = endpoint_from_frame(&ok);
-        drop(broker_side);
-        (bound_endpoint, session_id)
+        open_resumable_tcp_listener(state, endpoint).await
     }
 
     async fn open_resumable_udp_bind(state: &Arc<AppState>, endpoint: &str) -> (String, String) {
-        let mut broker_side = start_tunnel(state.clone()).await;
-        write_frame(
-            &mut broker_side,
-            &Frame {
-                frame_type: FrameType::SessionOpen,
-                flags: 0,
-                stream_id: 0,
-                meta: Vec::new(),
-                data: Vec::new(),
-            },
-        )
-        .await
-        .unwrap();
-        let ready = read_frame(&mut broker_side).await.unwrap();
+        let (mut broker_side, ready) =
+            start_open_listen_tunnel_with_ready(state.clone(), TunnelForwardProtocol::Udp).await;
         let session_id = serde_json::from_slice::<Value>(&ready.meta).unwrap()["session_id"]
             .as_str()
             .unwrap()
@@ -1059,20 +1121,21 @@ mod port_tunnel_tests {
         (bound_endpoint, session_id)
     }
 
-    async fn resume_session(state: &Arc<AppState>, session_id: &str) -> DuplexStream {
+    async fn resume_session(
+        state: &Arc<AppState>,
+        session_id: &str,
+        protocol: TunnelForwardProtocol,
+    ) -> DuplexStream {
         let mut broker_side = start_tunnel(state.clone()).await;
-        write_frame(
+        write_tunnel_open(
             &mut broker_side,
-            &json_frame(
-                FrameType::SessionResume,
-                0,
-                serde_json::json!({ "session_id": session_id }),
-            ),
+            TunnelRole::Listen,
+            protocol,
+            Some(session_id.to_string()),
         )
-        .await
-        .unwrap();
-        let resumed = read_frame(&mut broker_side).await.unwrap();
-        assert_eq!(resumed.frame_type, FrameType::SessionResumed);
+        .await;
+        let ready = read_frame(&mut broker_side).await.unwrap();
+        assert_eq!(ready.frame_type, FrameType::TunnelReady);
         broker_side
     }
 
@@ -1195,10 +1258,14 @@ mod port_tunnel_tests {
     }
 
     fn assert_limit_error(frame: Frame, stream_id: u32) {
+        assert_error_code(frame, stream_id, "port_tunnel_limit_exceeded");
+    }
+
+    fn assert_error_code(frame: Frame, stream_id: u32, code: &str) {
         assert_eq!(frame.frame_type, FrameType::Error);
         assert_eq!(frame.stream_id, stream_id);
         let meta = serde_json::from_slice::<Value>(&frame.meta).unwrap();
-        assert_eq!(meta["code"], "port_tunnel_limit_exceeded");
+        assert_eq!(meta["code"], code);
         assert_eq!(meta["fatal"], false);
     }
 

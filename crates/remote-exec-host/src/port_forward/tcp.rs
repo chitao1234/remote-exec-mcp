@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use remote_exec_proto::port_forward::{ensure_nonzero_connect_endpoint, normalize_endpoint};
-use remote_exec_proto::port_tunnel::{ForwardDropKind, Frame, FrameType};
+use remote_exec_proto::port_tunnel::{ForwardDropKind, Frame, FrameType, TunnelForwardProtocol};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
@@ -47,8 +47,29 @@ pub(super) async fn tunnel_tcp_listen(
     tunnel: Arc<TunnelState>,
     frame: Frame,
 ) -> Result<(), HostRpcError> {
-    let TunnelMode::Session(session) = tunnel_mode(&tunnel).await else {
-        return tunnel_tcp_listen_transport_owned(tunnel, frame).await;
+    let session = match tunnel_mode(&tunnel).await {
+        TunnelMode::Listen {
+            protocol: TunnelForwardProtocol::Tcp,
+            session,
+        } => session,
+        TunnelMode::Listen { .. } => {
+            return Err(rpc_error(
+                "invalid_port_tunnel",
+                "tcp listen requires an open tcp listen tunnel",
+            ));
+        }
+        TunnelMode::Connect { .. } => {
+            return Err(rpc_error(
+                "invalid_port_tunnel",
+                "tcp listen requires an open listen tunnel",
+            ));
+        }
+        TunnelMode::Unopened => {
+            return Err(rpc_error(
+                "invalid_port_tunnel",
+                "tcp listen requires tunnel open",
+            ));
+        }
     };
     let meta: EndpointMeta = decode_frame_meta(&frame)?;
     let endpoint = normalize_endpoint(&meta.endpoint)
@@ -88,53 +109,6 @@ pub(super) async fn tunnel_tcp_listen(
         "opened port tunnel tcp listener"
     );
     tokio::spawn(tunnel_tcp_accept_loop(session, listener));
-    Ok(())
-}
-
-pub(super) async fn tunnel_tcp_listen_transport_owned(
-    tunnel: Arc<TunnelState>,
-    frame: Frame,
-) -> Result<(), HostRpcError> {
-    let meta: EndpointMeta = decode_frame_meta(&frame)?;
-    let endpoint = normalize_endpoint(&meta.endpoint)
-        .map_err(|err| rpc_error("invalid_endpoint", err.to_string()))?;
-    let listener = TcpListener::bind(&endpoint)
-        .await
-        .map_err(|err| rpc_error("port_bind_failed", err.to_string()))?;
-    let bound_endpoint = listener
-        .local_addr()
-        .map_err(|err| rpc_error("port_bind_failed", err.to_string()))?
-        .to_string();
-    let stream_cancel = tunnel.cancel.child_token();
-    tunnel
-        .stream_cancels
-        .lock()
-        .await
-        .insert(frame.stream_id, stream_cancel.clone());
-    tunnel
-        .send(Frame {
-            frame_type: FrameType::TcpListenOk,
-            flags: 0,
-            stream_id: frame.stream_id,
-            meta: encode_frame_meta(&EndpointOkMeta {
-                endpoint: bound_endpoint.clone(),
-            })?,
-            data: Vec::new(),
-        })
-        .await?;
-
-    tracing::info!(
-        target = %tunnel.state.config.target,
-        stream_id = frame.stream_id,
-        endpoint = %bound_endpoint,
-        "opened port tunnel tcp listener"
-    );
-    tokio::spawn(tunnel_tcp_accept_loop_transport_owned(
-        tunnel,
-        frame.stream_id,
-        listener,
-        stream_cancel,
-    ));
     Ok(())
 }
 
@@ -259,161 +233,27 @@ pub(super) async fn tunnel_tcp_accept_loop(session: Arc<SessionState>, listener:
     }
 }
 
-pub(super) async fn tunnel_tcp_accept_loop_transport_owned(
-    tunnel: Arc<TunnelState>,
-    listener_stream_id: u32,
-    listener: TcpListener,
-    cancel: CancellationToken,
-) {
-    loop {
-        let accepted = tokio::select! {
-            _ = cancel.cancelled() => return,
-            accepted = listener.accept() => accepted,
-        };
-        let (stream, peer) = match accepted {
-            Ok(accepted) => accepted,
-            Err(err) => {
-                let _ = send_tunnel_error(
-                    &tunnel,
-                    listener_stream_id,
-                    "port_accept_failed",
-                    err.to_string(),
-                    false,
-                )
-                .await;
-                return;
-            }
-        };
-        let stream_id = tunnel.next_daemon_stream_id.fetch_add(2, Ordering::Relaxed);
-        let stream_permit = match tunnel
-            .state
-            .port_forward_limiter
-            .try_acquire_active_tcp_stream()
-        {
-            Ok(permit) => permit,
-            Err(err) => {
-                drop(stream);
-                let _ = send_forward_drop_report(
-                    &tunnel.tx,
-                    listener_stream_id,
-                    ForwardDropKind::TcpStream,
-                    err.code,
-                    err.message.clone(),
-                )
-                .await;
-                tracing::debug!(
-                    code = err.code,
-                    message = %err.message,
-                    "dropping accepted tcp stream due to local port tunnel pressure"
-                );
-                continue;
-            }
-        };
-        let (reader, writer) = stream.into_split();
-        let stream_cancel = tunnel.cancel.child_token();
-        tunnel.tcp_writers.lock().await.insert(
-            stream_id,
-            spawn_tcp_writer_task(writer, stream_cancel.clone()),
-        );
-        tunnel
-            .tcp_stream_permits
-            .lock()
-            .await
-            .insert(stream_id, stream_permit);
-        tunnel
-            .stream_cancels
-            .lock()
-            .await
-            .insert(stream_id, stream_cancel.clone());
-        if tunnel
-            .send(Frame {
-                frame_type: FrameType::TcpAccept,
-                flags: 0,
-                stream_id,
-                meta: match encode_frame_meta(&TcpAcceptMeta {
-                    listener_stream_id,
-                    peer: peer.to_string(),
-                }) {
-                    Ok(meta) => meta,
-                    Err(err) => {
-                        let _ = tunnel.tcp_writers.lock().await.remove(&stream_id);
-                        let _ = tunnel.tcp_stream_permits.lock().await.remove(&stream_id);
-                        let _ = tunnel.stream_cancels.lock().await.remove(&stream_id);
-                        let _ = send_tunnel_error(&tunnel, stream_id, err.code, err.message, false)
-                            .await;
-                        continue;
-                    }
-                },
-                data: Vec::new(),
-            })
-            .await
-            .is_err()
-        {
-            let _ = tunnel.tcp_writers.lock().await.remove(&stream_id);
-            let _ = tunnel.tcp_stream_permits.lock().await.remove(&stream_id);
-            let _ = tunnel.stream_cancels.lock().await.remove(&stream_id);
-            return;
-        }
-        tokio::spawn(tunnel_tcp_read_loop_transport_owned(
-            tunnel.clone(),
-            stream_id,
-            reader,
-            stream_cancel,
-        ));
-    }
-}
-
 pub(super) async fn tunnel_tcp_connect(
     tunnel: Arc<TunnelState>,
     frame: Frame,
 ) -> Result<(), HostRpcError> {
-    let TunnelMode::Session(session) = tunnel_mode(&tunnel).await else {
-        return tunnel_tcp_connect_transport_owned(tunnel, frame).await;
-    };
-    let meta: EndpointMeta = decode_frame_meta(&frame)?;
-    let endpoint = ensure_nonzero_connect_endpoint(&meta.endpoint)
-        .map_err(|err| rpc_error("invalid_endpoint", err.to_string()))?;
-    let stream = tcp_connect_with_timeout(&tunnel, endpoint.as_str()).await?;
-    let stream_permit = tunnel
-        .state
-        .port_forward_limiter
-        .try_acquire_active_tcp_stream()?;
-    let (reader, writer) = stream.into_split();
-    let attachment = session
-        .current_attachment()
-        .await
-        .ok_or_else(|| rpc_error("port_tunnel_closed", "port tunnel attachment is closed"))?;
-    let stream_cancel = attachment.cancel.child_token();
-    attachment.tcp_writers.lock().await.insert(
-        frame.stream_id,
-        spawn_tcp_writer_task(writer, stream_cancel.clone()),
-    );
-    attachment
-        .tcp_stream_permits
-        .lock()
-        .await
-        .insert(frame.stream_id, stream_permit);
-    attachment
-        .stream_cancels
-        .lock()
-        .await
-        .insert(frame.stream_id, stream_cancel.clone());
-    tunnel
-        .send(Frame {
-            frame_type: FrameType::TcpConnectOk,
-            flags: 0,
-            stream_id: frame.stream_id,
-            meta: Vec::new(),
-            data: Vec::new(),
-        })
-        .await?;
-    tokio::spawn(tunnel_tcp_read_loop_session_owned(
-        attachment,
-        frame.stream_id,
-        reader,
-        stream_cancel,
-    ));
-    Ok(())
+    match tunnel_mode(&tunnel).await {
+        TunnelMode::Connect {
+            protocol: TunnelForwardProtocol::Tcp,
+        } => tunnel_tcp_connect_transport_owned(tunnel, frame).await,
+        TunnelMode::Connect { .. } => Err(rpc_error(
+            "invalid_port_tunnel",
+            "tcp connect requires an open tcp connect tunnel",
+        )),
+        TunnelMode::Listen { .. } => Err(rpc_error(
+            "invalid_port_tunnel",
+            "tcp connect requires an open connect tunnel",
+        )),
+        TunnelMode::Unopened => Err(rpc_error(
+            "invalid_port_tunnel",
+            "tcp connect requires tunnel open",
+        )),
+    }
 }
 
 pub(super) async fn tunnel_tcp_connect_transport_owned(
@@ -637,7 +477,10 @@ pub(super) async fn tunnel_tcp_data(
     data: &[u8],
 ) -> Result<(), HostRpcError> {
     let writer = match tunnel_mode(tunnel).await {
-        TunnelMode::Session(session) => {
+        TunnelMode::Listen {
+            protocol: TunnelForwardProtocol::Tcp,
+            session,
+        } => {
             let attachment = session.current_attachment().await.ok_or_else(|| {
                 rpc_error("port_tunnel_closed", "port tunnel attachment is closed")
             })?;
@@ -654,7 +497,18 @@ pub(super) async fn tunnel_tcp_data(
                     )
                 })?
         }
-        TunnelMode::Transport => tunnel
+        TunnelMode::Listen { .. }
+        | TunnelMode::Connect {
+            protocol: TunnelForwardProtocol::Udp,
+        } => {
+            return Err(rpc_error(
+                "invalid_port_tunnel",
+                "tcp data requires an open tcp tunnel",
+            ));
+        }
+        TunnelMode::Connect {
+            protocol: TunnelForwardProtocol::Tcp,
+        } => tunnel
             .tcp_writers
             .lock()
             .await
@@ -666,6 +520,12 @@ pub(super) async fn tunnel_tcp_data(
                     format!("unknown tunnel tcp stream `{stream_id}`"),
                 )
             })?,
+        TunnelMode::Unopened => {
+            return Err(rpc_error(
+                "invalid_port_tunnel",
+                "tcp data requires tunnel open",
+            ));
+        }
     };
     writer
         .tx
@@ -725,13 +585,20 @@ pub(super) async fn tunnel_tcp_eof(
     stream_id: u32,
 ) -> Result<(), HostRpcError> {
     let writer = match tunnel_mode(tunnel).await {
-        TunnelMode::Session(session) => {
+        TunnelMode::Listen {
+            protocol: TunnelForwardProtocol::Tcp,
+            session,
+        } => {
             let Some(attachment) = session.current_attachment().await else {
                 return Ok(());
             };
             attachment.tcp_writers.lock().await.get(&stream_id).cloned()
         }
-        TunnelMode::Transport => tunnel.tcp_writers.lock().await.get(&stream_id).cloned(),
+        TunnelMode::Connect {
+            protocol: TunnelForwardProtocol::Tcp,
+        } => tunnel.tcp_writers.lock().await.get(&stream_id).cloned(),
+        TunnelMode::Listen { .. } | TunnelMode::Connect { .. } => None,
+        TunnelMode::Unopened => None,
     };
     if let Some(writer) = writer {
         let _ = writer.tx.try_send(TcpWriteCommand::Shutdown);
@@ -744,7 +611,14 @@ pub(super) async fn tunnel_close_stream(
     stream_id: u32,
 ) -> Result<(), HostRpcError> {
     match tunnel_mode(tunnel).await {
-        TunnelMode::Session(session) => {
+        TunnelMode::Listen {
+            protocol: TunnelForwardProtocol::Tcp,
+            session,
+        }
+        | TunnelMode::Listen {
+            protocol: TunnelForwardProtocol::Udp,
+            session,
+        } => {
             if let Some(attachment) = session.current_attachment().await {
                 if let Some(cancel) = attachment.stream_cancels.lock().await.remove(&stream_id) {
                     cancel.cancel();
@@ -767,7 +641,7 @@ pub(super) async fn tunnel_close_stream(
                 }
             }
         }
-        TunnelMode::Transport => {
+        TunnelMode::Connect { .. } => {
             if let Some(cancel) = tunnel.stream_cancels.lock().await.remove(&stream_id) {
                 cancel.cancel();
             }
@@ -775,6 +649,7 @@ pub(super) async fn tunnel_close_stream(
             tunnel.tcp_stream_permits.lock().await.remove(&stream_id);
             tunnel.udp_sockets.lock().await.remove(&stream_id);
         }
+        TunnelMode::Unopened => {}
     }
     tunnel
         .send(Frame {

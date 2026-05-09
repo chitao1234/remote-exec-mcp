@@ -36,60 +36,6 @@ void TcpReadStartGate::wait() {
 }
 
 #ifdef _WIN32
-struct TcpAcceptContext {
-    std::shared_ptr<PortTunnelService> service;
-    std::shared_ptr<PortTunnelConnection> tunnel;
-    uint32_t stream_id;
-    SOCKET socket;
-};
-
-DWORD WINAPI tcp_accept_thread_entry(LPVOID raw_context) {
-    std::unique_ptr<TcpAcceptContext> context(static_cast<TcpAcceptContext*>(raw_context));
-    PortTunnelWorkerLease lease(context->service);
-    context->tunnel->tcp_accept_loop_transport_owned(context->stream_id, context->socket);
-    return 0;
-}
-#endif
-
-bool spawn_tcp_accept_thread(
-    const std::shared_ptr<PortTunnelService>& service,
-    const std::shared_ptr<PortTunnelConnection>& tunnel,
-    uint32_t stream_id,
-    SOCKET socket,
-    bool worker_acquired
-) {
-    if (!worker_acquired && !service->try_acquire_worker()) {
-        return false;
-    }
-#ifdef _WIN32
-    std::unique_ptr<TcpAcceptContext> context(new TcpAcceptContext());
-    context->service = service;
-    context->tunnel = tunnel;
-    context->stream_id = stream_id;
-    context->socket = socket;
-    HANDLE handle = CreateThread(NULL, 0, tcp_accept_thread_entry, context.get(), 0, NULL);
-    if (handle != NULL) {
-        context.release();
-        CloseHandle(handle);
-        return true;
-    }
-    service->release_worker();
-    return false;
-#else
-    try {
-        std::thread([service, tunnel, stream_id, socket]() {
-            PortTunnelWorkerLease lease(service);
-            tunnel->tcp_accept_loop_transport_owned(stream_id, socket);
-        }).detach();
-    } catch (...) {
-        service->release_worker();
-        return false;
-    }
-    return true;
-#endif
-}
-
-#ifdef _WIN32
 struct TcpReadContext {
     std::shared_ptr<PortTunnelService> service;
     std::shared_ptr<PortTunnelConnection> tunnel;
@@ -485,12 +431,6 @@ void PortTunnelConnection::handle_frame(const PortTunnelFrame& frame) {
         case PortTunnelFrameType::TunnelHeartbeat:
             tunnel_heartbeat(frame);
             break;
-        case PortTunnelFrameType::SessionOpen:
-            session_open(frame);
-            break;
-        case PortTunnelFrameType::SessionResume:
-            session_resume(frame);
-            break;
         case PortTunnelFrameType::TcpListen:
             tcp_listen(frame);
             break;
@@ -527,19 +467,27 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
     if (frame.stream_id != 0U) {
         throw PortForwardError(400, "invalid_port_tunnel", "tunnel open must use stream_id 0");
     }
-    if (session_mode_active()) {
-        throw PortForwardError(
-            400,
-            "port_tunnel_already_attached",
-            "port tunnel session already attached"
-        );
+    {
+        BasicLockGuard lock(state_mutex_);
+        if (mode_ != PortTunnelMode::Unopened || session_.get() != NULL) {
+            throw PortForwardError(
+                400,
+                "port_tunnel_already_attached",
+                "port tunnel is already open"
+            );
+        }
     }
 
     const Json meta = Json::parse(frame.meta);
     const std::string role = meta.at("role").get<std::string>();
     const std::uint64_t generation = meta.at("generation").get<std::uint64_t>();
     const std::string protocol = meta.at("protocol").get<std::string>();
-    if (protocol != "tcp" && protocol != "udp") {
+    PortTunnelProtocol tunnel_protocol = PortTunnelProtocol::None;
+    if (protocol == "tcp") {
+        tunnel_protocol = PortTunnelProtocol::Tcp;
+    } else if (protocol == "udp") {
+        tunnel_protocol = PortTunnelProtocol::Udp;
+    } else {
         throw PortForwardError(400, "invalid_port_tunnel", "unknown tunnel protocol");
     }
     set_generation(generation);
@@ -598,6 +546,8 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
         {
             BasicLockGuard lock(state_mutex_);
             session_ = session;
+            mode_ = PortTunnelMode::Listen;
+            protocol_ = tunnel_protocol;
         }
         service_->attach_session(session, shared_from_this());
 
@@ -618,6 +568,11 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
     }
 
     if (role == "connect") {
+        {
+            BasicLockGuard lock(state_mutex_);
+            mode_ = PortTunnelMode::Connect;
+            protocol_ = tunnel_protocol;
+        }
         const PortForwardLimitConfig& limits = service_->limits();
         PortTunnelFrame ready = make_empty_frame(PortTunnelFrameType::TunnelReady, 0U);
         ready.meta = Json{
@@ -652,93 +607,4 @@ void PortTunnelConnection::tunnel_heartbeat(const PortTunnelFrame& frame) {
     PortTunnelFrame ack = make_empty_frame(PortTunnelFrameType::TunnelHeartbeatAck, 0U);
     ack.meta = frame.meta;
     send_frame(ack);
-}
-
-void PortTunnelConnection::session_open(const PortTunnelFrame& frame) {
-    if (frame.stream_id != 0U) {
-        throw PortForwardError(400, "invalid_port_tunnel", "session open must use stream_id 0");
-    }
-    if (session_mode_active()) {
-        throw PortForwardError(
-            400,
-            "port_tunnel_already_attached",
-            "port tunnel session already attached"
-        );
-    }
-    std::shared_ptr<PortTunnelSession> session = service_->create_session();
-    {
-        BasicLockGuard lock(state_mutex_);
-        session_ = session;
-    }
-    service_->attach_session(session, shared_from_this());
-
-    PortTunnelFrame ready = make_empty_frame(PortTunnelFrameType::SessionReady, 0U);
-    ready.meta = Json{
-        {"session_id", session->session_id},
-        {"resume_timeout_ms", RESUME_TIMEOUT_MS}
-    }.dump();
-    send_frame(ready);
-}
-
-void PortTunnelConnection::session_resume(const PortTunnelFrame& frame) {
-    if (frame.stream_id != 0U) {
-        throw PortForwardError(400, "invalid_port_tunnel", "session resume must use stream_id 0");
-    }
-    if (session_mode_active()) {
-        throw PortForwardError(
-            400,
-            "port_tunnel_already_attached",
-            "port tunnel session already attached"
-        );
-    }
-
-    const std::string session_id = frame_meta_string(frame, "session_id");
-    std::shared_ptr<PortTunnelSession> session = service_->find_session(session_id);
-    if (session.get() == NULL) {
-        throw PortForwardError(
-            400,
-            "unknown_port_tunnel_session",
-            "unknown port tunnel session"
-        );
-    }
-
-    bool expired = false;
-    std::uint64_t generation = 0ULL;
-    {
-        BasicLockGuard lock(session->mutex);
-        if (session->closed) {
-            throw PortForwardError(
-                400,
-                "unknown_port_tunnel_session",
-                "unknown port tunnel session"
-            );
-        }
-        if (session->attached) {
-            throw PortForwardError(
-                400,
-                "port_tunnel_already_attached",
-                "port tunnel session is already attached"
-            );
-        }
-        expired = session->expired ||
-                  (session->resume_deadline_ms != 0ULL &&
-                   platform::monotonic_ms() >= session->resume_deadline_ms);
-        generation = session->generation;
-    }
-    if (expired) {
-        service_->close_session(session);
-        throw PortForwardError(
-            400,
-            "port_tunnel_resume_expired",
-            "port tunnel resume expired"
-        );
-    }
-
-    set_generation(generation);
-    {
-        BasicLockGuard lock(state_mutex_);
-        session_ = session;
-    }
-    service_->attach_session(session, shared_from_this());
-    send_frame(make_empty_frame(PortTunnelFrameType::SessionResumed, 0U));
 }

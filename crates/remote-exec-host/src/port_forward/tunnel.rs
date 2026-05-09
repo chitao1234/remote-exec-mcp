@@ -14,15 +14,13 @@ use super::codec::{decode_frame_meta, encode_frame_meta};
 use super::error::rpc_error;
 use super::session::{
     SessionState, attach_session_to_tunnel, close_attached_session, close_mode_for_tunnel_result,
-    explicit_session, reactivate_retained_udp_bind,
+    reactivate_retained_udp_bind,
 };
 use super::tcp::{
     tunnel_close_stream, tunnel_tcp_connect, tunnel_tcp_data, tunnel_tcp_eof, tunnel_tcp_listen,
 };
 use super::udp::{tunnel_udp_bind, tunnel_udp_datagram};
-use super::{
-    QueuedFrame, SessionReadyMeta, SessionResumeMeta, TunnelMode, TunnelSender, TunnelState,
-};
+use super::{QueuedFrame, TunnelMode, TunnelSender, TunnelState};
 
 pub async fn serve_tunnel<S>(state: Arc<AppState>, stream: S) -> Result<(), HostRpcError>
 where
@@ -43,11 +41,11 @@ where
         state: state.clone(),
         cancel: state.shutdown.child_token(),
         tx: sender,
+        open_mode: tokio::sync::Mutex::new(TunnelMode::Unopened),
         tcp_writers: Mutex::new(std::collections::HashMap::new()),
         tcp_stream_permits: Mutex::new(std::collections::HashMap::new()),
         udp_sockets: Mutex::new(std::collections::HashMap::new()),
         stream_cancels: Mutex::new(std::collections::HashMap::new()),
-        next_daemon_stream_id: std::sync::atomic::AtomicU32::new(2),
         generation: std::sync::atomic::AtomicU64::new(0),
         attached_session: Mutex::new(None),
         _connection_permit: connection_permit,
@@ -136,8 +134,6 @@ pub(super) async fn handle_tunnel_frame(
                 })
                 .await
         }
-        FrameType::SessionOpen => tunnel_session_open(tunnel, frame).await,
-        FrameType::SessionResume => tunnel_session_resume(tunnel, frame).await,
         FrameType::TcpListen => tunnel_tcp_listen(tunnel, frame).await,
         FrameType::TcpConnect => tunnel_tcp_connect(tunnel, frame).await,
         FrameType::TcpData => tunnel_tcp_data(&tunnel, frame.stream_id, &frame.data).await,
@@ -174,6 +170,12 @@ async fn tunnel_open_listen(
     tunnel: Arc<TunnelState>,
     meta: TunnelOpenMeta,
 ) -> Result<(), HostRpcError> {
+    if !matches!(*tunnel.open_mode.lock().await, TunnelMode::Unopened) {
+        return Err(rpc_error(
+            "port_tunnel_already_attached",
+            "port tunnel is already open",
+        ));
+    }
     let session = match meta.resume_session_id {
         Some(session_id) => {
             let session = tunnel
@@ -213,6 +215,10 @@ async fn tunnel_open_listen(
     };
     session.generation.store(meta.generation, Ordering::Release);
     attach_session_to_tunnel(&session, &tunnel).await?;
+    *tunnel.open_mode.lock().await = TunnelMode::Listen {
+        protocol: meta.protocol.clone(),
+        session: session.clone(),
+    };
     tunnel
         .send(Frame {
             frame_type: FrameType::TunnelReady,
@@ -237,6 +243,15 @@ async fn tunnel_open_connect(
     tunnel: Arc<TunnelState>,
     meta: TunnelOpenMeta,
 ) -> Result<(), HostRpcError> {
+    if !matches!(*tunnel.open_mode.lock().await, TunnelMode::Unopened) {
+        return Err(rpc_error(
+            "port_tunnel_already_attached",
+            "port tunnel is already open",
+        ));
+    }
+    *tunnel.open_mode.lock().await = TunnelMode::Connect {
+        protocol: meta.protocol,
+    };
     tunnel
         .send(Frame {
             frame_type: FrameType::TunnelReady,
@@ -274,44 +289,6 @@ async fn tunnel_close(tunnel: Arc<TunnelState>, frame: Frame) -> Result<(), Host
         .await
 }
 
-pub(super) async fn tunnel_session_open(
-    tunnel: Arc<TunnelState>,
-    frame: Frame,
-) -> Result<(), HostRpcError> {
-    if frame.stream_id != 0 {
-        return Err(rpc_error(
-            "invalid_port_tunnel",
-            "session open must use stream_id 0",
-        ));
-    }
-    let session = new_session(&tunnel);
-    tunnel
-        .state
-        .port_forward_sessions
-        .try_insert(
-            session.clone(),
-            tunnel
-                .state
-                .config
-                .port_forward_limits
-                .max_retained_sessions,
-        )
-        .await?;
-    attach_session_to_tunnel(&session, &tunnel).await?;
-    tunnel
-        .send(Frame {
-            frame_type: FrameType::SessionReady,
-            flags: 0,
-            stream_id: 0,
-            meta: encode_frame_meta(&SessionReadyMeta {
-                session_id: session.id.clone(),
-                resume_timeout_ms: super::RESUME_TIMEOUT.as_millis() as u64,
-            })?,
-            data: Vec::new(),
-        })
-        .await
-}
-
 fn new_session(tunnel: &Arc<TunnelState>) -> Arc<SessionState> {
     Arc::new(SessionState {
         id: format!("sess_{}", uuid::Uuid::new_v4().simple()),
@@ -335,52 +312,6 @@ fn tunnel_limit_summary(tunnel: &TunnelState) -> TunnelLimitSummary {
     }
 }
 
-pub(super) async fn tunnel_session_resume(
-    tunnel: Arc<TunnelState>,
-    frame: Frame,
-) -> Result<(), HostRpcError> {
-    if frame.stream_id != 0 {
-        return Err(rpc_error(
-            "invalid_port_tunnel",
-            "session resume must use stream_id 0",
-        ));
-    }
-    let meta: SessionResumeMeta = decode_frame_meta(&frame)?;
-    let session = tunnel
-        .state
-        .port_forward_sessions
-        .get(&meta.session_id)
-        .await
-        .ok_or_else(|| rpc_error("unknown_port_tunnel_session", "unknown port tunnel session"))?;
-    if session.is_expired().await {
-        tunnel
-            .state
-            .port_forward_sessions
-            .remove(&meta.session_id)
-            .await;
-        session.close_retained_resources().await;
-        return Err(rpc_error(
-            "port_tunnel_resume_expired",
-            "port tunnel resume expired",
-        ));
-    }
-    tunnel.generation.store(
-        session.generation.load(Ordering::Acquire),
-        Ordering::Release,
-    );
-    attach_session_to_tunnel(&session, &tunnel).await?;
-    tunnel
-        .send(Frame {
-            frame_type: FrameType::SessionResumed,
-            flags: 0,
-            stream_id: 0,
-            meta: Vec::new(),
-            data: Vec::new(),
-        })
-        .await?;
-    reactivate_retained_udp_bind(&session).await
-}
-
 fn ensure_tunnel_generation(
     tunnel: &TunnelState,
     frame_generation: u64,
@@ -398,10 +329,7 @@ fn ensure_tunnel_generation(
 }
 
 pub(super) async fn tunnel_mode(tunnel: &Arc<TunnelState>) -> TunnelMode {
-    match explicit_session(tunnel).await {
-        Some(session) => TunnelMode::Session(session),
-        None => TunnelMode::Transport,
-    }
+    tunnel.open_mode.lock().await.clone()
 }
 
 pub(super) async fn send_tunnel_error(

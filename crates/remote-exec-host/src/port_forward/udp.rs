@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use remote_exec_proto::port_forward::normalize_endpoint;
-use remote_exec_proto::port_tunnel::{ForwardDropKind, Frame, FrameType};
+use remote_exec_proto::port_tunnel::{ForwardDropKind, Frame, FrameType, TunnelForwardProtocol};
 use tokio::net::UdpSocket;
 use tokio_util::sync::CancellationToken;
 
@@ -22,40 +22,59 @@ pub(super) async fn tunnel_udp_bind(
     tunnel: Arc<TunnelState>,
     frame: Frame,
 ) -> Result<(), HostRpcError> {
-    let TunnelMode::Session(session) = tunnel_mode(&tunnel).await else {
-        return tunnel_udp_bind_transport_owned(tunnel, frame).await;
-    };
-    let meta: EndpointMeta = decode_frame_meta(&frame)?;
-    let endpoint = normalize_endpoint(&meta.endpoint)
-        .map_err(|err| rpc_error("invalid_endpoint", err.to_string()))?;
-    let socket = Arc::new(
-        UdpSocket::bind(&endpoint)
-            .await
-            .map_err(|err| rpc_error("port_bind_failed", err.to_string()))?,
-    );
-    let bound_endpoint = socket
-        .local_addr()
-        .map_err(|err| rpc_error("port_bind_failed", err.to_string()))?
-        .to_string();
-    session
-        .replace_udp_bind(
-            frame.stream_id,
-            socket.clone(),
-            &tunnel.state.port_forward_limiter,
-        )
-        .await?;
-    tunnel
-        .send(Frame {
-            frame_type: FrameType::UdpBindOk,
-            flags: 0,
-            stream_id: frame.stream_id,
-            meta: encode_frame_meta(&EndpointOkMeta {
-                endpoint: bound_endpoint,
-            })?,
-            data: Vec::new(),
-        })
-        .await?;
-    reactivate_retained_udp_bind(&session).await
+    match tunnel_mode(&tunnel).await {
+        TunnelMode::Listen {
+            protocol: TunnelForwardProtocol::Udp,
+            session,
+        } => {
+            let meta: EndpointMeta = decode_frame_meta(&frame)?;
+            let endpoint = normalize_endpoint(&meta.endpoint)
+                .map_err(|err| rpc_error("invalid_endpoint", err.to_string()))?;
+            let socket = Arc::new(
+                UdpSocket::bind(&endpoint)
+                    .await
+                    .map_err(|err| rpc_error("port_bind_failed", err.to_string()))?,
+            );
+            let bound_endpoint = socket
+                .local_addr()
+                .map_err(|err| rpc_error("port_bind_failed", err.to_string()))?
+                .to_string();
+            session
+                .replace_udp_bind(
+                    frame.stream_id,
+                    socket.clone(),
+                    &tunnel.state.port_forward_limiter,
+                )
+                .await?;
+            tunnel
+                .send(Frame {
+                    frame_type: FrameType::UdpBindOk,
+                    flags: 0,
+                    stream_id: frame.stream_id,
+                    meta: encode_frame_meta(&EndpointOkMeta {
+                        endpoint: bound_endpoint,
+                    })?,
+                    data: Vec::new(),
+                })
+                .await?;
+            reactivate_retained_udp_bind(&session).await
+        }
+        TunnelMode::Listen { .. } => Err(rpc_error(
+            "invalid_port_tunnel",
+            "udp bind requires an open udp listen tunnel",
+        )),
+        TunnelMode::Connect {
+            protocol: TunnelForwardProtocol::Udp,
+        } => tunnel_udp_bind_transport_owned(tunnel, frame).await,
+        TunnelMode::Connect { .. } => Err(rpc_error(
+            "invalid_port_tunnel",
+            "udp bind requires an open udp connect tunnel",
+        )),
+        TunnelMode::Unopened => Err(rpc_error(
+            "invalid_port_tunnel",
+            "udp bind requires tunnel open",
+        )),
+    }
 }
 
 pub(super) async fn tunnel_udp_bind_transport_owned(
@@ -270,15 +289,24 @@ pub(super) async fn tunnel_udp_datagram(
 ) -> Result<(), HostRpcError> {
     let meta: UdpDatagramMeta = decode_frame_meta(&frame)?;
     let socket = match tunnel_mode(tunnel).await {
-        TunnelMode::Session(session) => {
-            session.udp_socket(frame.stream_id).await.ok_or_else(|| {
-                rpc_error(
-                    "unknown_port_bind",
-                    format!("unknown tunnel udp stream `{}`", frame.stream_id),
-                )
-            })?
+        TunnelMode::Listen {
+            protocol: TunnelForwardProtocol::Udp,
+            session,
+        } => session.udp_socket(frame.stream_id).await.ok_or_else(|| {
+            rpc_error(
+                "unknown_port_bind",
+                format!("unknown tunnel udp stream `{}`", frame.stream_id),
+            )
+        })?,
+        TunnelMode::Listen { .. } => {
+            return Err(rpc_error(
+                "invalid_port_tunnel",
+                "udp datagram requires an open udp tunnel",
+            ));
         }
-        TunnelMode::Transport => tunnel
+        TunnelMode::Connect {
+            protocol: TunnelForwardProtocol::Udp,
+        } => tunnel
             .udp_sockets
             .lock()
             .await
@@ -290,6 +318,18 @@ pub(super) async fn tunnel_udp_datagram(
                     format!("unknown tunnel udp stream `{}`", frame.stream_id),
                 )
             })?,
+        TunnelMode::Connect { .. } => {
+            return Err(rpc_error(
+                "invalid_port_tunnel",
+                "udp datagram requires an open udp tunnel",
+            ));
+        }
+        TunnelMode::Unopened => {
+            return Err(rpc_error(
+                "invalid_port_tunnel",
+                "udp datagram requires tunnel open",
+            ));
+        }
     };
     socket
         .send_to(&frame.data, &meta.peer)

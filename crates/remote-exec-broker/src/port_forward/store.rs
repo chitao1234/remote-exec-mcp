@@ -539,6 +539,7 @@ mod tests {
                 side: SideHandle::local(),
                 forward_id: forward_id.to_string(),
                 session_id: format!("session-{forward_id}"),
+                protocol: ForwardPortProtocol::Tcp,
                 generation: 1,
                 listener_stream_id: 1,
                 resume_timeout: Duration::from_secs(5),
