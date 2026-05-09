@@ -173,7 +173,9 @@ async fn send_forward_drop_report(
 
 #[cfg(test)]
 mod port_tunnel_tests {
+    use std::collections::HashMap;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicU64;
     use std::time::Duration;
 
     use remote_exec_proto::port_tunnel::{
@@ -183,6 +185,7 @@ mod port_tunnel_tests {
     use serde_json::Value;
     use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 
+    use super::tcp::{tunnel_close_stream, tunnel_tcp_eof};
     use super::*;
     use crate::{
         HostRuntimeConfig, ProcessEnvironment, PtyMode, YieldTimeConfig, build_runtime_state,
@@ -890,6 +893,55 @@ mod port_tunnel_tests {
 
         let error = read_frame(&mut broker_side).await.unwrap();
         assert_limit_error(error, 1);
+    }
+
+    #[tokio::test]
+    async fn tcp_close_after_peer_eof_does_not_cancel_queued_writer_shutdown() {
+        let state = test_state();
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<QueuedFrame>(8);
+        let stream_cancel = state.shutdown.child_token();
+        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(TCP_WRITE_QUEUE_FRAMES);
+        let tunnel = Arc::new(TunnelState {
+            state: state.clone(),
+            cancel: state.shutdown.child_token(),
+            tx: TunnelSender {
+                tx,
+                limiter: state.port_forward_limiter.clone(),
+            },
+            open_mode: tokio::sync::Mutex::new(TunnelMode::Connect {
+                protocol: TunnelForwardProtocol::Tcp,
+            }),
+            tcp_writers: tokio::sync::Mutex::new(HashMap::from([(
+                1,
+                TcpWriterHandle {
+                    tx: writer_tx,
+                    cancel: stream_cancel.clone(),
+                },
+            )])),
+            tcp_stream_permits: tokio::sync::Mutex::new(HashMap::new()),
+            udp_sockets: tokio::sync::Mutex::new(HashMap::new()),
+            stream_cancels: tokio::sync::Mutex::new(HashMap::from([(1, stream_cancel.clone())])),
+            generation: AtomicU64::new(1),
+            attached_session: tokio::sync::Mutex::new(None),
+            _connection_permit: state
+                .port_forward_limiter
+                .try_acquire_tunnel_connection()
+                .unwrap(),
+        });
+
+        tunnel_tcp_eof(&tunnel, 1).await.unwrap();
+        tunnel_close_stream(&tunnel, 1).await.unwrap();
+
+        assert!(
+            !stream_cancel.is_cancelled(),
+            "cleanup Close after peer EOF must not abort the queued writer shutdown"
+        );
+        let Some(TcpWriteCommand::Shutdown) = writer_rx.recv().await else {
+            panic!("expected writer shutdown command");
+        };
+        let close = rx.recv().await.expect("close frame").frame;
+        assert_eq!(close.frame_type, FrameType::Close);
+        assert_eq!(close.stream_id, 1);
     }
 
     #[tokio::test]

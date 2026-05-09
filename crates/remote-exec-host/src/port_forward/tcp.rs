@@ -584,7 +584,7 @@ pub(super) async fn tunnel_tcp_eof(
     tunnel: &Arc<TunnelState>,
     stream_id: u32,
 ) -> Result<(), HostRpcError> {
-    let writer = match tunnel_mode(tunnel).await {
+    match tunnel_mode(tunnel).await {
         TunnelMode::Listen {
             protocol: TunnelForwardProtocol::Tcp,
             session,
@@ -592,16 +592,22 @@ pub(super) async fn tunnel_tcp_eof(
             let Some(attachment) = session.current_attachment().await else {
                 return Ok(());
             };
-            attachment.tcp_writers.lock().await.get(&stream_id).cloned()
+            if let Some(writer) = attachment.tcp_writers.lock().await.get(&stream_id).cloned()
+                && writer.tx.try_send(TcpWriteCommand::Shutdown).is_ok()
+            {
+                let _ = attachment.stream_cancels.lock().await.remove(&stream_id);
+            }
         }
         TunnelMode::Connect {
             protocol: TunnelForwardProtocol::Tcp,
-        } => tunnel.tcp_writers.lock().await.get(&stream_id).cloned(),
-        TunnelMode::Listen { .. } | TunnelMode::Connect { .. } => None,
-        TunnelMode::Unopened => None,
-    };
-    if let Some(writer) = writer {
-        let _ = writer.tx.try_send(TcpWriteCommand::Shutdown);
+        } => {
+            if let Some(writer) = tunnel.tcp_writers.lock().await.get(&stream_id).cloned()
+                && writer.tx.try_send(TcpWriteCommand::Shutdown).is_ok()
+            {
+                let _ = tunnel.stream_cancels.lock().await.remove(&stream_id);
+            }
+        }
+        TunnelMode::Listen { .. } | TunnelMode::Connect { .. } | TunnelMode::Unopened => {}
     }
     Ok(())
 }
