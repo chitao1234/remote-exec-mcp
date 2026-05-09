@@ -83,11 +83,13 @@ struct StubPortTunnelControl {
     session_open_count: usize,
     tunnel_open_count: usize,
     port_tunnel_upgrades_to_fail: usize,
+    connect_tunnel_opens_to_drop: usize,
     delay_session_ready_after_first: Option<Duration>,
     override_session_ready_resume_timeout_ms: Option<u64>,
     override_tunnel_ready_limits: Option<TunnelLimitSummary>,
     session_ready_count: usize,
     active_transports: Vec<CancellationToken>,
+    active_listen_transports: Vec<CancellationToken>,
     active_udp_connector_streams: HashSet<u32>,
     max_observed_udp_connector_streams: usize,
     opened_udp_connector_streams: usize,
@@ -104,11 +106,13 @@ impl Default for StubPortTunnelControl {
             session_open_count: 0,
             tunnel_open_count: 0,
             port_tunnel_upgrades_to_fail: 0,
+            connect_tunnel_opens_to_drop: 0,
             delay_session_ready_after_first: None,
             override_session_ready_resume_timeout_ms: None,
             override_tunnel_ready_limits: None,
             session_ready_count: 0,
             active_transports: Vec::new(),
+            active_listen_transports: Vec::new(),
             active_udp_connector_streams: HashSet::new(),
             max_observed_udp_connector_streams: 0,
             opened_udp_connector_streams: 0,
@@ -211,12 +215,30 @@ pub(crate) async fn force_close_port_tunnel_transport(state: &StubDaemonState) {
     }
 }
 
+pub(crate) async fn force_close_listen_port_tunnel_transport(state: &StubDaemonState) {
+    let active_transports = {
+        let mut control = state.port_tunnel_control.lock().await;
+        std::mem::take(&mut control.active_listen_transports)
+    };
+    for transport in active_transports {
+        transport.cancel();
+    }
+}
+
 pub(crate) async fn fail_next_port_tunnel_upgrades(state: &StubDaemonState, count: usize) {
     state
         .port_tunnel_control
         .lock()
         .await
         .port_tunnel_upgrades_to_fail += count;
+}
+
+pub(crate) async fn drop_next_connect_tunnel_opens(state: &StubDaemonState, count: usize) {
+    state
+        .port_tunnel_control
+        .lock()
+        .await
+        .connect_tunnel_opens_to_drop += count;
 }
 
 pub(crate) async fn block_session_resume(state: &StubDaemonState) {
@@ -712,9 +734,13 @@ where
         let _ = remote_exec_host::port_forward::serve_tunnel(tunnel_state, daemon_side).await;
     });
     write_preface(&mut broker_side).await?;
+    let cancel = CancellationToken::new();
     let observed = observe_broker_to_daemon_frame(&state, &first_frame).await?;
     for transport in observed.transports_to_cancel {
         transport.cancel();
+    }
+    if observed.cancel_current_transport {
+        cancel.cancel();
     }
     if let Some(error) = observed.error {
         write_frame(&mut stream, &error).await?;
@@ -723,13 +749,13 @@ where
         write_frame(&mut broker_side, &first_frame).await?;
     }
 
-    let cancel = CancellationToken::new();
-    state
-        .port_tunnel_control
-        .lock()
-        .await
-        .active_transports
-        .push(cancel.clone());
+    {
+        let mut control = state.port_tunnel_control.lock().await;
+        control.active_transports.push(cancel.clone());
+        if observed.listen_role_transport {
+            control.active_listen_transports.push(cancel.clone());
+        }
+    }
 
     relay_port_tunnel_frames(state, stream, broker_side, cancel).await
 }
@@ -738,6 +764,8 @@ struct ObservedBrokerFrame {
     forward: bool,
     error: Option<Frame>,
     transports_to_cancel: Vec<CancellationToken>,
+    cancel_current_transport: bool,
+    listen_role_transport: bool,
 }
 
 async fn relay_port_tunnel_frames<S1, S2>(
@@ -796,12 +824,24 @@ async fn observe_broker_to_daemon_frame(
         forward: true,
         error: None,
         transports_to_cancel: Vec::new(),
+        cancel_current_transport: false,
+        listen_role_transport: false,
     };
     {
         let mut control = state.port_tunnel_control.lock().await;
         match frame.frame_type {
             FrameType::TunnelOpen => {
                 control.tunnel_open_count += 1;
+                let meta: serde_json::Value = serde_json::from_slice(&frame.meta)?;
+                observed.listen_role_transport =
+                    meta.get("role").and_then(|role| role.as_str()) == Some("listen");
+                if meta.get("role").and_then(|role| role.as_str()) == Some("connect")
+                    && control.connect_tunnel_opens_to_drop > 0
+                {
+                    control.connect_tunnel_opens_to_drop -= 1;
+                    observed.forward = false;
+                    observed.cancel_current_transport = true;
+                }
                 if control.close_transports_on_second_session_open && control.tunnel_open_count == 2
                 {
                     control.close_transports_on_second_session_open = false;

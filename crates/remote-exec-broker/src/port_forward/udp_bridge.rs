@@ -5,14 +5,11 @@ use std::time::Instant;
 use anyhow::Context;
 use remote_exec_proto::port_forward::udp_connector_endpoint;
 use remote_exec_proto::port_tunnel::{Frame, FrameType};
-use remote_exec_proto::public::ForwardPortSideRole;
 use tokio::sync::Mutex;
 
 use super::events::{ForwardLoopControl, ForwardSideEvent, TunnelRole, classify_transport_failure};
 use super::generation::StreamIdAllocator;
-use super::supervisor::{
-    ForwardRuntime, open_data_tunnel, reconnect_connect_tunnel, reconnect_listen_tunnel,
-};
+use super::supervisor::{ForwardRuntime, reconnect_connect_tunnel, recover_listen_side_tunnels};
 use super::tunnel::{
     EndpointMeta, PortTunnel, UdpDatagramMeta, classify_recoverable_tunnel_event,
     decode_tunnel_error_frame, decode_tunnel_meta, encode_tunnel_meta,
@@ -38,45 +35,11 @@ pub(super) async fn run_udp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
         {
             ForwardLoopControl::Cancelled => return Ok(()),
             ForwardLoopControl::RecoverTunnel(TunnelRole::Listen) => {
-                runtime
-                    .store
-                    .mark_reconnecting(
-                        &runtime.forward_id,
-                        ForwardPortSideRole::Listen,
-                        "listen-side tunnel lost".to_string(),
-                        runtime.max_reconnecting_forwards,
-                    )
-                    .await?;
-                let Some(resumed_tunnel) =
-                    reconnect_listen_tunnel(runtime.listen_session.clone(), runtime.cancel.clone())
-                        .await?
-                else {
+                let Some(recovered) = recover_listen_side_tunnels(&runtime).await? else {
                     return Ok(());
                 };
-                listen_tunnel = resumed_tunnel;
-                runtime
-                    .store
-                    .mark_ready(&runtime.forward_id, ForwardPortSideRole::Listen)
-                    .await;
-                connect_tunnel = open_data_tunnel(
-                    &runtime.connect_side,
-                    &runtime.forward_id,
-                    runtime.protocol,
-                    1,
-                    runtime.max_tunnel_queued_bytes,
-                )
-                .await
-                .with_context(|| {
-                    format!(
-                        "reopening port tunnel to `{}` after listen-side reconnect",
-                        runtime.connect_side.name()
-                    )
-                })?
-                .tunnel;
-                runtime
-                    .store
-                    .mark_ready(&runtime.forward_id, ForwardPortSideRole::Connect)
-                    .await;
+                listen_tunnel = recovered.listen_tunnel;
+                connect_tunnel = recovered.connect_tunnel;
             }
             ForwardLoopControl::RecoverTunnel(TunnelRole::Connect) => {
                 runtime
@@ -89,10 +52,6 @@ pub(super) async fn run_udp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
                     return Ok(());
                 };
                 connect_tunnel = reconnected_tunnel;
-                runtime
-                    .store
-                    .mark_ready(&runtime.forward_id, ForwardPortSideRole::Connect)
-                    .await;
             }
         }
     }

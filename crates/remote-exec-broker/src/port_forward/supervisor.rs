@@ -155,6 +155,11 @@ pub(super) struct OpenDataTunnel {
     pub(super) limits: TunnelLimitSummary,
 }
 
+pub(super) struct RecoveredForwardTunnels {
+    pub(super) listen_tunnel: Arc<PortTunnel>,
+    pub(super) connect_tunnel: Arc<PortTunnel>,
+}
+
 pub async fn open_forward(
     store: PortForwardStore,
     limits: ForwardPortLimitSummary,
@@ -666,15 +671,74 @@ pub(super) async fn reconnect_listen_tunnel(
 pub(super) async fn reconnect_connect_tunnel(
     runtime: &ForwardRuntime,
 ) -> anyhow::Result<Option<Arc<PortTunnel>>> {
+    recover_connect_side_tunnel(runtime, "connect-side transport loss").await
+}
+
+pub(super) async fn recover_listen_side_tunnels(
+    runtime: &ForwardRuntime,
+) -> anyhow::Result<Option<RecoveredForwardTunnels>> {
+    runtime
+        .store
+        .mark_reconnecting(
+            &runtime.forward_id,
+            ForwardPortSideRole::Listen,
+            "listen-side tunnel lost".to_string(),
+            runtime.max_reconnecting_forwards,
+        )
+        .await?;
+    let Some(listen_tunnel) =
+        reconnect_listen_tunnel(runtime.listen_session.clone(), runtime.cancel.clone()).await?
+    else {
+        return Ok(None);
+    };
+    let Some(connect_tunnel) = recover_connect_side_tunnel(
+        runtime,
+        "connect-side tunnel reopening after listen-side recovery",
+    )
+    .await?
+    else {
+        return Ok(None);
+    };
+    runtime
+        .store
+        .mark_ready(&runtime.forward_id, ForwardPortSideRole::Listen)
+        .await;
+    Ok(Some(RecoveredForwardTunnels {
+        listen_tunnel,
+        connect_tunnel,
+    }))
+}
+
+async fn recover_connect_side_tunnel(
+    runtime: &ForwardRuntime,
+    reason: &str,
+) -> anyhow::Result<Option<Arc<PortTunnel>>> {
+    mark_connect_reconnecting(runtime, reason).await?;
+    let Some(connect_tunnel) = retry_open_connect_tunnel(runtime).await? else {
+        return Ok(None);
+    };
+    runtime
+        .store
+        .mark_ready(&runtime.forward_id, ForwardPortSideRole::Connect)
+        .await;
+    Ok(Some(connect_tunnel))
+}
+
+async fn mark_connect_reconnecting(runtime: &ForwardRuntime, reason: &str) -> anyhow::Result<()> {
     runtime
         .store
         .mark_reconnecting(
             &runtime.forward_id,
             ForwardPortSideRole::Connect,
-            "connect-side transport loss".to_string(),
+            reason.to_string(),
             runtime.max_reconnecting_forwards,
         )
-        .await?;
+        .await
+}
+
+async fn retry_open_connect_tunnel(
+    runtime: &ForwardRuntime,
+) -> anyhow::Result<Option<Arc<PortTunnel>>> {
     retry_reconnect(
         runtime.cancel.clone(),
         PortForwardReconnectPolicy::connect(),
