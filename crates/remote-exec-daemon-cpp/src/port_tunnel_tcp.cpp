@@ -227,6 +227,12 @@ void PortTunnelConnection::tcp_accept_loop_transport_owned(
         }
         const uint32_t stream_id = next_daemon_stream_id_.fetch_add(2U);
         if (!service_->try_acquire_active_tcp_stream()) {
+            send_forward_drop(
+                listener_stream_id,
+                "tcp_stream",
+                "port_tunnel_limit_exceeded",
+                "port tunnel active tcp stream limit reached"
+            );
             UniqueSocket refused_socket(accepted);
             continue;
         }
@@ -234,6 +240,12 @@ void PortTunnelConnection::tcp_accept_loop_transport_owned(
             new TunnelTcpStream(accepted, service_, true)
         );
         if (!service_->try_acquire_worker()) {
+            send_forward_drop(
+                listener_stream_id,
+                "tcp_stream",
+                "port_tunnel_limit_exceeded",
+                "port tunnel worker limit reached"
+            );
             mark_tcp_stream_closed(stream);
             continue;
         }

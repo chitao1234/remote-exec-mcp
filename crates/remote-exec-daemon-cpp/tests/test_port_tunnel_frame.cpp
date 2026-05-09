@@ -76,6 +76,7 @@ int main() {
     assert_control_frame_round_trips(PortTunnelFrameType::TunnelReady);
     assert_control_frame_round_trips(PortTunnelFrameType::TunnelClose);
     assert_control_frame_round_trips(PortTunnelFrameType::TunnelClosed);
+    assert_control_frame_round_trips(PortTunnelFrameType::ForwardDrop);
 
     assert_decode_rejects(frame_header(99U, 1U, 0U, 0U));
     assert_decode_rejects(frame_header(

@@ -251,8 +251,7 @@ void PortTunnelConnection::udp_read_loop_transport_owned(
         }.dump();
         frame.data.assign(buffer.begin(), buffer.begin() + received);
         if (!send_data_frame_or_drop_on_limit(frame)) {
-            mark_udp_socket_closed(socket_value);
-            return;
+            continue;
         }
     }
 }

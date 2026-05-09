@@ -538,6 +538,10 @@ Structured result fields:
 - `forwards[].last_reconnect_at`
 - `forwards[].limits`
 
+`forwards[].dropped_tcp_streams` and `forwards[].dropped_udp_datagrams` include
+broker-observed drops and daemon-reported recoverable local drops, such as TCP
+accepts or UDP datagrams rejected under daemon-side forwarding pressure.
+
 `forwards[].limits` is the effective per-forward ceiling. The broker computes
 it from broker config plus both listen-side and connect-side daemon
 `TunnelReady.limits`; active TCP stream, UDP peer/bind, and tunnel queued-byte

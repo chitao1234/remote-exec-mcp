@@ -64,6 +64,8 @@ PortTunnelFrameType frame_type_from_byte(unsigned char value) {
             return PortTunnelFrameType::ForwardRecovering;
         case 21:
             return PortTunnelFrameType::ForwardRecovered;
+        case 22:
+            return PortTunnelFrameType::ForwardDrop;
         case 30:
             return PortTunnelFrameType::UdpBind;
         case 31:

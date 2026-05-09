@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use remote_exec_proto::port_forward::normalize_endpoint;
-use remote_exec_proto::port_tunnel::{Frame, FrameType};
+use remote_exec_proto::port_tunnel::{ForwardDropKind, Frame, FrameType};
 use tokio::net::UdpSocket;
 use tokio_util::sync::CancellationToken;
 
@@ -15,7 +15,7 @@ use super::tunnel::send_tunnel_error;
 use super::tunnel::tunnel_mode;
 use super::{
     EndpointMeta, EndpointOkMeta, READ_BUF_SIZE, TransportUdpBind, TunnelMode, TunnelState,
-    UdpDatagramMeta,
+    UdpDatagramMeta, send_forward_drop_report,
 };
 
 pub(super) async fn tunnel_udp_bind(
@@ -154,6 +154,14 @@ pub(super) async fn tunnel_udp_read_loop_transport_owned(
             .await
         {
             if is_recoverable_pressure_error(&err) {
+                let _ = send_forward_drop_report(
+                    &tunnel.tx,
+                    stream_id,
+                    ForwardDropKind::UdpDatagram,
+                    err.code,
+                    err.message.clone(),
+                )
+                .await;
                 tracing::debug!(
                     code = err.code,
                     message = %err.message,
@@ -225,6 +233,14 @@ pub(super) async fn tunnel_udp_read_loop_session_owned(
             .await
         {
             if is_recoverable_pressure_error(&err) {
+                let _ = send_forward_drop_report(
+                    &attachment.tx,
+                    stream_id,
+                    ForwardDropKind::UdpDatagram,
+                    err.code,
+                    err.message.clone(),
+                )
+                .await;
                 tracing::debug!(
                     code = err.code,
                     message = %err.message,

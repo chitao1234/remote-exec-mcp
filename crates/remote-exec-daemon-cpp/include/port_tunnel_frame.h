@@ -32,6 +32,7 @@ enum class PortTunnelFrameType : unsigned char {
     TunnelHeartbeatAck = 19,
     ForwardRecovering = 20,
     ForwardRecovered = 21,
+    ForwardDrop = 22,
     UdpBind = 30,
     UdpBindOk = 31,
     UdpDatagram = 32

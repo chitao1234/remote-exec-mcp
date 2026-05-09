@@ -97,8 +97,10 @@ reads and writes are bounded by `port_forward_tunnel_io_timeout_ms`, so a peer
 that sends an incomplete v4 frame cannot occupy a daemon worker indefinitely.
 Outbound TCP connect attempts are bounded by `port_forward_connect_timeout_ms`,
 and active TCP stream limits count established streams rather than pending
-connect attempts. Per-stream TCP connect failures close only that accepted TCP
-stream and leave the parent forward open. A broker restart still drops the broker-owned
+connect attempts. Recoverable daemon-local pressure drops, such as rejected TCP
+accepts or UDP datagrams, are reported back to the broker for public drop
+counters. Per-stream TCP connect failures close only that accepted TCP stream
+and leave the parent forward open. A broker restart still drops the broker-owned
 `forward_id` mapping, and a daemon restart still destroys the forward. If the
 broker disappears without reconnecting, the daemon reclaims detached listeners
 and UDP sockets after the reconnect grace window expires.

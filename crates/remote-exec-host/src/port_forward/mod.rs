@@ -12,7 +12,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64};
 use std::time::Duration;
 
-use remote_exec_proto::port_tunnel::{Frame, HEADER_LEN};
+use remote_exec_proto::port_tunnel::{
+    ForwardDropKind, ForwardDropMeta, Frame, FrameType, HEADER_LEN,
+};
 use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
 use tokio::net::tcp::OwnedWriteHalf;
@@ -136,6 +138,30 @@ fn queued_frame_charge(frame: &Frame) -> usize {
             .saturating_add(frame.meta.len())
             .saturating_add(frame.data.len())
     }
+}
+
+async fn send_forward_drop_report(
+    tx: &TunnelSender,
+    stream_id: u32,
+    kind: ForwardDropKind,
+    reason: impl Into<String>,
+    message: impl Into<String>,
+) -> Result<(), crate::HostRpcError> {
+    let meta = serde_json::to_vec(&ForwardDropMeta {
+        kind,
+        count: 1,
+        reason: reason.into(),
+        message: Some(message.into()),
+    })
+    .map_err(|err| error::rpc_error("invalid_port_tunnel", err.to_string()))?;
+    tx.send(Frame {
+        frame_type: FrameType::ForwardDrop,
+        flags: 0,
+        stream_id,
+        meta,
+        data: Vec::new(),
+    })
+    .await
 }
 
 #[cfg(test)]
@@ -594,12 +620,20 @@ mod port_tunnel_tests {
             .unwrap();
         drop(refused);
 
-        let no_listener_error =
-            tokio::time::timeout(Duration::from_millis(100), read_frame(&mut broker_side)).await;
-        assert!(
-            no_listener_error.is_err(),
-            "listener stream should not receive recoverable pressure errors"
-        );
+        let drop_report = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let frame = read_frame(&mut broker_side).await.unwrap();
+                if frame.frame_type == FrameType::ForwardDrop {
+                    return frame;
+                }
+            }
+        })
+        .await
+        .expect("listener pressure should emit drop telemetry");
+        let meta: ForwardDropMeta = serde_json::from_slice(&drop_report.meta).unwrap();
+        assert_eq!(meta.kind, ForwardDropKind::TcpStream);
+        assert_eq!(meta.count, 1);
+        assert_eq!(meta.reason, "port_tunnel_limit_exceeded");
     }
 
     #[tokio::test]
@@ -646,6 +680,73 @@ mod port_tunnel_tests {
 
         let error = read_frame(&mut broker_side).await.unwrap();
         assert_limit_error(error, 1);
+    }
+
+    #[tokio::test]
+    async fn retained_udp_queued_byte_pressure_reports_drop() {
+        let state = test_state_with_limits(crate::HostPortForwardLimits {
+            max_tunnel_queued_bytes: 128,
+            ..crate::HostPortForwardLimits::default()
+        });
+        let mut broker_side = start_tunnel(state.clone()).await;
+        write_frame(
+            &mut broker_side,
+            &Frame {
+                frame_type: FrameType::TunnelOpen,
+                flags: 0,
+                stream_id: 0,
+                meta: serde_json::to_vec(&TunnelOpenMeta {
+                    forward_id: "fwd_test".to_string(),
+                    role: TunnelRole::Listen,
+                    side: "test".to_string(),
+                    generation: 1,
+                    protocol: TunnelForwardProtocol::Udp,
+                    resume_session_id: None,
+                })
+                .unwrap(),
+                data: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            read_frame(&mut broker_side).await.unwrap().frame_type,
+            FrameType::TunnelReady
+        );
+        write_frame(
+            &mut broker_side,
+            &json_frame(
+                FrameType::UdpBind,
+                1,
+                serde_json::json!({ "endpoint": "127.0.0.1:0" }),
+            ),
+        )
+        .await
+        .unwrap();
+        let bind_ok = read_frame(&mut broker_side).await.unwrap();
+        assert_eq!(bind_ok.frame_type, FrameType::UdpBindOk);
+        let bound_endpoint = endpoint_from_frame(&bind_ok);
+
+        let sender = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        sender
+            .send_to(&vec![42u8; 512], &bound_endpoint)
+            .await
+            .unwrap();
+
+        let drop_report = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let frame = read_frame(&mut broker_side).await.unwrap();
+                if frame.frame_type == FrameType::ForwardDrop {
+                    return frame;
+                }
+            }
+        })
+        .await
+        .expect("udp pressure should emit drop telemetry");
+        let meta: ForwardDropMeta = serde_json::from_slice(&drop_report.meta).unwrap();
+        assert_eq!(meta.kind, ForwardDropKind::UdpDatagram);
+        assert_eq!(meta.count, 1);
+        assert_eq!(meta.reason, "port_tunnel_limit_exceeded");
     }
 
     fn test_state() -> Arc<AppState> {

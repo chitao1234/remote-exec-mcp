@@ -10,6 +10,8 @@ mod udp_bridge;
 
 use std::time::Duration;
 
+use remote_exec_proto::port_tunnel::{ForwardDropKind, ForwardDropMeta, Frame};
+
 pub use limits::BrokerPortForwardLimits;
 pub use side::SideHandle;
 pub use store::{PortForwardFilter, PortForwardRecord, PortForwardStore, close_all, close_record};
@@ -25,3 +27,23 @@ const LISTEN_CLOSE_ACK_TIMEOUT: Duration = Duration::from_secs(2);
 const PORT_FORWARD_OPEN_ACK_TIMEOUT: Duration = Duration::from_secs(5);
 const PORT_FORWARD_TUNNEL_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const FORWARD_TASK_STOP_TIMEOUT: Duration = Duration::from_secs(2);
+
+async fn apply_forward_drop_report(
+    store: &PortForwardStore,
+    forward_id: &str,
+    frame: &Frame,
+) -> anyhow::Result<()> {
+    let meta: ForwardDropMeta = serde_json::from_slice(&frame.meta)?;
+    let count = meta.count.max(1);
+    store
+        .update_entry(forward_id, |entry| match meta.kind {
+            ForwardDropKind::TcpStream => {
+                entry.dropped_tcp_streams = entry.dropped_tcp_streams.saturating_add(count);
+            }
+            ForwardDropKind::UdpDatagram => {
+                entry.dropped_udp_datagrams = entry.dropped_udp_datagrams.saturating_add(count);
+            }
+        })
+        .await;
+    Ok(())
+}

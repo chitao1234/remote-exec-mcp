@@ -42,6 +42,28 @@ void PortTunnelConnection::send_terminal_error(
     }
 }
 
+void PortTunnelConnection::send_forward_drop(
+    uint32_t stream_id,
+    const std::string& kind,
+    const std::string& reason,
+    const std::string& message
+) {
+    PortTunnelFrame frame;
+    frame.type = PortTunnelFrameType::ForwardDrop;
+    frame.flags = 0U;
+    frame.stream_id = stream_id;
+    frame.meta = Json{
+        {"kind", kind},
+        {"count", 1U},
+        {"reason", reason},
+        {"message", message}
+    }.dump();
+    try {
+        send_frame(frame);
+    } catch (const std::exception&) {
+    }
+}
+
 void PortTunnelConnection::close_stream(uint32_t stream_id) {
     std::shared_ptr<TunnelTcpStream> tcp_stream;
     {
@@ -254,6 +276,12 @@ bool PortTunnelConnection::accept_session_tcp_stream(
     uint32_t stream_id = 0U;
     bool worker_acquired = false;
     if (!service_->try_acquire_active_tcp_stream()) {
+        send_forward_drop(
+            listener_stream_id,
+            "tcp_stream",
+            "port_tunnel_limit_exceeded",
+            "port tunnel active tcp stream limit reached"
+        );
         return false;
     }
 
@@ -269,6 +297,12 @@ bool PortTunnelConnection::accept_session_tcp_stream(
 
     if (!service_->try_acquire_worker()) {
         service_->release_active_tcp_stream();
+        send_forward_drop(
+            listener_stream_id,
+            "tcp_stream",
+            "port_tunnel_limit_exceeded",
+            "port tunnel worker limit reached"
+        );
         return false;
     }
     worker_acquired = true;

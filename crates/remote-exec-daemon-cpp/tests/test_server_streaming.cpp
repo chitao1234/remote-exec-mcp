@@ -200,6 +200,18 @@ static void assert_tunnel_error_code(
     assert(meta.at("code").get<std::string>() == code);
 }
 
+static void assert_forward_drop(
+    const PortTunnelFrame& frame,
+    const std::string& kind,
+    const std::string& reason
+) {
+    assert(frame.type == PortTunnelFrameType::ForwardDrop);
+    const Json meta = Json::parse(frame.meta);
+    assert(meta.at("kind").get<std::string>() == kind);
+    assert(meta.at("count").get<unsigned long>() == 1UL);
+    assert(meta.at("reason").get<std::string>() == reason);
+}
+
 static std::size_t response_content_length(const std::string& header_block) {
     const std::string marker = "\r\nContent-Length: ";
     const std::size_t start = header_block.find(marker);
@@ -904,8 +916,9 @@ static void assert_retained_tcp_accept_worker_pressure_is_local_drop(const fs::p
     const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
 
     UniqueSocket peer(connect_port_forward_socket(endpoint, "tcp"));
-    PortTunnelFrame unexpected;
-    assert(!try_read_tunnel_frame_with_timeout(client_socket.get(), 100UL, &unexpected));
+    PortTunnelFrame drop_report;
+    assert(try_read_tunnel_frame_with_timeout(client_socket.get(), 1000UL, &drop_report));
+    assert_forward_drop(drop_report, "tcp_stream", "port_tunnel_limit_exceeded");
 
     close_tunnel(&client_socket, &server_thread);
 }
@@ -952,8 +965,9 @@ static void assert_retained_tcp_accept_pressure_is_local_drop(const fs::path& ro
 
     UniqueSocket refused_peer(connect_port_forward_socket(endpoint, "tcp"));
     assert(refused_peer.valid());
-    PortTunnelFrame unexpected;
-    assert(!try_read_tunnel_frame_with_timeout(client_socket.get(), 100UL, &unexpected));
+    PortTunnelFrame drop_report;
+    assert(try_read_tunnel_frame_with_timeout(client_socket.get(), 1000UL, &drop_report));
+    assert_forward_drop(drop_report, "tcp_stream", "port_tunnel_limit_exceeded");
 
     close_tunnel(&client_socket, &server_thread);
 }
@@ -1230,8 +1244,9 @@ static void assert_active_tcp_accept_limit_is_enforced_and_released(const fs::pa
     assert(first_accept.type == PortTunnelFrameType::TcpAccept);
 
     UniqueSocket refused_peer(connect_port_forward_socket(endpoint, "tcp"));
-    PortTunnelFrame unexpected;
-    assert(!try_read_tunnel_frame_with_timeout(client_socket.get(), 100UL, &unexpected));
+    PortTunnelFrame drop_report;
+    assert(try_read_tunnel_frame_with_timeout(client_socket.get(), 1000UL, &drop_report));
+    assert_forward_drop(drop_report, "tcp_stream", "port_tunnel_limit_exceeded");
     refused_peer.reset();
 
     send_tunnel_frame(
@@ -1276,6 +1291,44 @@ static void assert_tunnel_queued_byte_limit_is_enforced(const fs::path& root) {
     close_tunnel(&client_socket, &server_thread);
     payload_listener.reset();
     sender_thread.join();
+}
+
+static void assert_udp_queued_byte_pressure_reports_drop(const fs::path& root) {
+    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    limits.max_tunnel_queued_bytes = 128UL;
+
+    AppState state;
+    initialize_state_with_port_forward_limits(state, root, limits);
+
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_tunnel(state, &client_socket, &server_thread);
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::UdpBind, 1U, Json{{"endpoint", "127.0.0.1:0"}})
+    );
+    const PortTunnelFrame bind_ok = read_tunnel_frame(client_socket.get());
+    assert(bind_ok.type == PortTunnelFrameType::UdpBindOk);
+    const std::string endpoint = Json::parse(bind_ok.meta).at("endpoint").get<std::string>();
+
+    UniqueSocket peer(bind_port_forward_socket("127.0.0.1:0", "udp"));
+    socklen_t peer_len = 0;
+    const sockaddr_storage destination = parse_port_forward_peer(endpoint, &peer_len);
+    std::vector<unsigned char> payload(512U, 7U);
+    assert(sendto(
+        peer.get(),
+        reinterpret_cast<const char*>(payload.data()),
+        static_cast<int>(payload.size()),
+        0,
+        reinterpret_cast<const sockaddr*>(&destination),
+        peer_len
+    ) == static_cast<int>(payload.size()));
+
+    PortTunnelFrame drop_report;
+    assert(try_read_tunnel_frame_with_timeout(client_socket.get(), 1000UL, &drop_report));
+    assert_forward_drop(drop_report, "udp_datagram", "port_tunnel_limit_exceeded");
+
+    close_tunnel(&client_socket, &server_thread);
 }
 
 static void assert_partial_tunnel_frame_times_out(const fs::path& root) {
@@ -1591,6 +1644,7 @@ int main() {
     assert_active_tcp_stream_limit_is_enforced_and_released(root);
     assert_active_tcp_accept_limit_is_enforced_and_released(root);
     assert_tunnel_queued_byte_limit_is_enforced(root);
+    assert_udp_queued_byte_pressure_reports_drop(root);
     assert_partial_tunnel_frame_times_out(root);
     assert_tunnel_tcp_connect_echoes_binary_data(state);
     assert_tunnel_udp_bind_emits_two_peer_datagrams(state);

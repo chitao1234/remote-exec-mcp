@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use remote_exec_proto::port_forward::{ensure_nonzero_connect_endpoint, normalize_endpoint};
-use remote_exec_proto::port_tunnel::{Frame, FrameType};
+use remote_exec_proto::port_tunnel::{ForwardDropKind, Frame, FrameType};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::{TcpListener, TcpStream};
@@ -20,7 +20,10 @@ use super::session::{
 };
 use super::tunnel::send_tunnel_error;
 use super::tunnel::tunnel_mode;
-use super::{EndpointMeta, EndpointOkMeta, READ_BUF_SIZE, TcpAcceptMeta, TunnelMode, TunnelState};
+use super::{
+    EndpointMeta, EndpointOkMeta, READ_BUF_SIZE, TcpAcceptMeta, TunnelMode, TunnelState,
+    send_forward_drop_report,
+};
 
 async fn tcp_connect_with_timeout(
     tunnel: &TunnelState,
@@ -161,6 +164,14 @@ pub(super) async fn tunnel_tcp_accept_loop(session: Arc<SessionState>, listener:
             Ok(permit) => permit,
             Err(err) => {
                 drop(stream);
+                let _ = send_forward_drop_report(
+                    &attachment.tx,
+                    listener_stream_id(&session).await.unwrap_or(0),
+                    ForwardDropKind::TcpStream,
+                    err.code,
+                    err.message.clone(),
+                )
+                .await;
                 tracing::debug!(
                     code = err.code,
                     message = %err.message,
@@ -277,6 +288,14 @@ pub(super) async fn tunnel_tcp_accept_loop_transport_owned(
             Ok(permit) => permit,
             Err(err) => {
                 drop(stream);
+                let _ = send_forward_drop_report(
+                    &tunnel.tx,
+                    listener_stream_id,
+                    ForwardDropKind::TcpStream,
+                    err.code,
+                    err.message.clone(),
+                )
+                .await;
                 tracing::debug!(
                     code = err.code,
                     message = %err.message,

@@ -35,6 +35,7 @@ pub enum FrameType {
     TunnelHeartbeatAck = 19,
     ForwardRecovering = 20,
     ForwardRecovered = 21,
+    ForwardDrop = 22,
     UdpBind = 30,
     UdpBindOk = 31,
     UdpDatagram = 32,
@@ -64,6 +65,7 @@ impl FrameType {
             19 => Ok(Self::TunnelHeartbeatAck),
             20 => Ok(Self::ForwardRecovering),
             21 => Ok(Self::ForwardRecovered),
+            22 => Ok(Self::ForwardDrop),
             30 => Ok(Self::UdpBind),
             31 => Ok(Self::UdpBindOk),
             32 => Ok(Self::UdpDatagram),
@@ -137,6 +139,22 @@ pub struct ForwardRecoveredMeta {
     pub forward_id: String,
     pub role: TunnelRole,
     pub generation: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ForwardDropKind {
+    TcpStream,
+    UdpDatagram,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ForwardDropMeta {
+    pub kind: ForwardDropKind,
+    pub count: u64,
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -293,6 +311,39 @@ mod tests {
         assert_eq!(meta.role, TunnelRole::Listen);
         assert_eq!(meta.generation, 4);
         assert_eq!(meta.resume_session_id.as_deref(), Some("sess_test"));
+    }
+
+    #[tokio::test]
+    async fn forward_drop_frame_round_trip() {
+        let (mut client, mut server) = tokio::io::duplex(1024);
+        let writer = tokio::spawn(async move {
+            write_frame(
+                &mut client,
+                &Frame {
+                    frame_type: FrameType::ForwardDrop,
+                    flags: 0,
+                    stream_id: 1,
+                    meta: serde_json::to_vec(&ForwardDropMeta {
+                        kind: ForwardDropKind::TcpStream,
+                        count: 2,
+                        reason: "port_tunnel_limit_exceeded".to_string(),
+                        message: Some("port tunnel active tcp stream limit reached".to_string()),
+                    })
+                    .unwrap(),
+                    data: Vec::new(),
+                },
+            )
+            .await
+        });
+
+        let frame = read_frame(&mut server).await.unwrap();
+        writer.await.unwrap().unwrap();
+        assert_eq!(frame.frame_type, FrameType::ForwardDrop);
+        assert_eq!(frame.stream_id, 1);
+        let meta: ForwardDropMeta = serde_json::from_slice(&frame.meta).unwrap();
+        assert_eq!(meta.kind, ForwardDropKind::TcpStream);
+        assert_eq!(meta.count, 2);
+        assert_eq!(meta.reason, "port_tunnel_limit_exceeded");
     }
 
     #[test]

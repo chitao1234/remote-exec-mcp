@@ -7,6 +7,7 @@ use remote_exec_proto::port_forward::udp_connector_endpoint;
 use remote_exec_proto::port_tunnel::{Frame, FrameType};
 use tokio::sync::Mutex;
 
+use super::apply_forward_drop_report;
 use super::events::{ForwardLoopControl, ForwardSideEvent, TunnelRole, classify_transport_failure};
 use super::generation::StreamIdAllocator;
 use super::supervisor::{ForwardRuntime, reconnect_connect_tunnel, recover_listen_side_tunnels};
@@ -169,6 +170,14 @@ async fn run_udp_forward_epoch(
                         }
                         return Err(format_terminal_tunnel_error(&meta))
                             .context("listen-side udp tunnel error");
+                    }
+                    FrameType::ForwardDrop => {
+                        apply_forward_drop_report(
+                            &runtime.store,
+                            &runtime.forward_id,
+                            &frame,
+                        )
+                        .await?;
                     }
                     _ => {}
                 }
@@ -336,7 +345,9 @@ mod tests {
     use std::task::{Context as TaskContext, Poll, Waker};
     use std::time::{Duration, Instant};
 
-    use remote_exec_proto::port_tunnel::{HEADER_LEN, write_frame};
+    use remote_exec_proto::port_tunnel::{
+        ForwardDropKind, ForwardDropMeta, HEADER_LEN, write_frame,
+    };
     use remote_exec_proto::public::{
         ForwardPortEntry, ForwardPortLimitSummary, ForwardPortProtocol as PublicForwardPortProtocol,
     };
@@ -715,6 +726,66 @@ mod tests {
             .expect("udp epoch should stay alive after pressure error")
             .unwrap()
             .expect("pressure error should not fail the forward");
+        assert!(matches!(control, ForwardLoopControl::Cancelled));
+    }
+
+    #[tokio::test]
+    async fn udp_listener_forward_drop_counts_drop_without_failing_forward() {
+        let (listen_broker_side, mut listen_daemon_side) = tokio::io::duplex(4096);
+        let listen_tunnel = Arc::new(PortTunnel::from_stream(listen_broker_side).unwrap());
+        let connect_io = ScriptedTunnelIo::default();
+        let connect_tunnel = Arc::new(PortTunnel::from_stream(connect_io).unwrap());
+        let runtime = udp_test_runtime(listen_tunnel.clone(), connect_tunnel.clone());
+        runtime
+            .store
+            .insert(test_record(&runtime, "127.0.0.1:10000"))
+            .await;
+        let cancel = runtime.cancel.clone();
+
+        let epoch_runtime = runtime.clone();
+        let epoch = tokio::spawn({
+            let listen_tunnel = listen_tunnel.clone();
+            let connect_tunnel = connect_tunnel.clone();
+            async move { run_udp_forward_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
+        });
+
+        write_frame(
+            &mut listen_daemon_side,
+            &Frame {
+                frame_type: FrameType::ForwardDrop,
+                flags: 0,
+                stream_id: 1,
+                meta: serde_json::to_vec(&ForwardDropMeta {
+                    kind: ForwardDropKind::UdpDatagram,
+                    count: 3,
+                    reason: "port_tunnel_limit_exceeded".to_string(),
+                    message: Some("port tunnel queued byte limit reached".to_string()),
+                })
+                .unwrap(),
+                data: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let entries = runtime.store.list(&filter_one(&runtime.forward_id)).await;
+                if entries[0].dropped_udp_datagrams == 3 {
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("listener drop telemetry should count dropped udp datagrams");
+
+        cancel.cancel();
+        let control = tokio::time::timeout(Duration::from_secs(1), epoch)
+            .await
+            .expect("udp epoch should stay alive after drop telemetry")
+            .unwrap()
+            .expect("drop telemetry should not fail the forward");
         assert!(matches!(control, ForwardLoopControl::Cancelled));
     }
 

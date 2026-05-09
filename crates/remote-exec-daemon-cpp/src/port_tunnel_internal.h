@@ -283,6 +283,12 @@ public:
         const std::string& code,
         const std::string& message
     );
+    void send_forward_drop(
+        uint32_t stream_id,
+        const std::string& kind,
+        const std::string& reason,
+        const std::string& message
+    );
     bool owns_session(const std::shared_ptr<PortTunnelSession>& session);
     bool accept_session_tcp_stream(
         const std::shared_ptr<PortTunnelSession>& session,

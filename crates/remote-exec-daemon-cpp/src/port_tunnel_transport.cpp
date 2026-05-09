@@ -379,6 +379,14 @@ bool PortTunnelConnection::send_data_frame_or_limit_error(const PortTunnelFrame&
 bool PortTunnelConnection::send_data_frame_or_drop_on_limit(const PortTunnelFrame& frame) {
     unsigned long charge_value = 0UL;
     if (!try_reserve_data_frame(frame, &charge_value)) {
+        if (frame.type == PortTunnelFrameType::UdpDatagram) {
+            send_forward_drop(
+                frame.stream_id,
+                "udp_datagram",
+                "port_tunnel_limit_exceeded",
+                "port tunnel queued byte limit reached"
+            );
+        }
         return true;
     }
     try {
