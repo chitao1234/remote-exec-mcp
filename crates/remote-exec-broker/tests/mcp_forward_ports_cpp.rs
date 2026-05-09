@@ -44,22 +44,7 @@ async fn broker_forwards_ports_through_real_cpp_daemon_and_handles_port_conflict
         }
     });
 
-    let open = fixture
-        .client
-        .call_tool(
-            "forward_ports",
-            &ForwardPortsInput::Open {
-                listen_side: "builder-cpp".to_string(),
-                connect_side: "local".to_string(),
-                forwards: vec![remote_exec_proto::public::ForwardPortSpec {
-                    listen_endpoint: "127.0.0.1:0".to_string(),
-                    connect_endpoint: echo_addr.to_string(),
-                    protocol: ForwardPortProtocol::Tcp,
-                }],
-            },
-        )
-        .await
-        .unwrap();
+    let open = fixture.open_tcp_forward(&echo_addr.to_string()).await;
     assert!(!open.is_error, "open failed: {}", open.text_output);
     let opened = &open.structured_content["forwards"][0];
     assert_eq!(opened["phase"], "ready");
@@ -106,16 +91,7 @@ async fn broker_forwards_ports_through_real_cpp_daemon_and_handles_port_conflict
         occupied_open.text_output
     );
 
-    let close = fixture
-        .client
-        .call_tool(
-            "forward_ports",
-            &ForwardPortsInput::Close {
-                forward_ids: vec![opened_forward_id],
-            },
-        )
-        .await
-        .unwrap();
+    let close = fixture.close_forward(opened_forward_id).await;
     assert!(!close.is_error, "close failed: {}", close.text_output);
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
@@ -247,21 +223,14 @@ async fn broker_forwards_udp_datagrams_through_real_cpp_daemon_full_duplex() {
     });
 
     let open = fixture
-        .client
-        .call_tool(
-            "forward_ports",
-            &ForwardPortsInput::Open {
-                listen_side: "builder-cpp".to_string(),
-                connect_side: "local".to_string(),
-                forwards: vec![remote_exec_proto::public::ForwardPortSpec {
-                    listen_endpoint: "127.0.0.1:0".to_string(),
-                    connect_endpoint: echo_addr.to_string(),
-                    protocol: ForwardPortProtocol::Udp,
-                }],
-            },
+        .open_forward(
+            "builder-cpp",
+            "local",
+            "127.0.0.1:0".to_string(),
+            echo_addr.to_string(),
+            ForwardPortProtocol::Udp,
         )
-        .await
-        .unwrap();
+        .await;
     assert!(!open.is_error, "open failed: {}", open.text_output);
     let forward_id = open.structured_content["forwards"][0]["forward_id"]
         .as_str()
@@ -295,16 +264,7 @@ async fn broker_forwards_udp_datagrams_through_real_cpp_daemon_full_duplex() {
         .unwrap();
     assert_eq!(&buf[..read_b], b"cpp-udp-b");
 
-    let close = fixture
-        .client
-        .call_tool(
-            "forward_ports",
-            &ForwardPortsInput::Close {
-                forward_ids: vec![forward_id],
-            },
-        )
-        .await
-        .unwrap();
+    let close = fixture.close_forward(forward_id).await;
     assert!(!close.is_error, "close failed: {}", close.text_output);
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
@@ -356,16 +316,7 @@ async fn cpp_forward_ports_reconnect_after_tunnel_drop() {
     stream.read_exact(&mut echoed).await.unwrap();
     assert_eq!(&echoed, b"after");
 
-    let close = fixture
-        .client
-        .call_tool(
-            "forward_ports",
-            &ForwardPortsInput::Close {
-                forward_ids: vec![forward_id],
-            },
-        )
-        .await
-        .unwrap();
+    let close = fixture.close_forward(forward_id).await;
     assert!(!close.is_error, "close failed: {}", close.text_output);
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
@@ -441,31 +392,11 @@ async fn cpp_forward_ports_reconnect_after_connect_tunnel_drop() {
         .unwrap();
     assert_eq!(echoed_later, b"later");
 
-    let listed = fixture
-        .client
-        .call_tool(
-            "forward_ports",
-            &ForwardPortsInput::List {
-                forward_ids: vec![forward_id.clone()],
-                listen_side: None,
-                connect_side: None,
-            },
-        )
-        .await
-        .unwrap();
+    let listed = fixture.list_forward(forward_id.clone()).await;
     assert!(!listed.is_error, "list failed: {}", listed.text_output);
     assert_eq!(listed.structured_content["forwards"][0]["status"], "open");
 
-    let close = fixture
-        .client
-        .call_tool(
-            "forward_ports",
-            &ForwardPortsInput::Close {
-                forward_ids: vec![forward_id],
-            },
-        )
-        .await
-        .unwrap();
+    let close = fixture.close_forward(forward_id).await;
     assert!(!close.is_error, "close failed: {}", close.text_output);
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
@@ -588,20 +519,24 @@ pty = "none"
         }
     }
 
-    async fn open_tcp_forward(
+    async fn open_forward(
         &self,
-        connect_endpoint: &str,
+        listen_side: &str,
+        connect_side: &str,
+        listen_endpoint: String,
+        connect_endpoint: String,
+        protocol: ForwardPortProtocol,
     ) -> remote_exec_broker::client::ToolResponse {
         self.client
             .call_tool(
                 "forward_ports",
                 &ForwardPortsInput::Open {
-                    listen_side: "builder-cpp".to_string(),
-                    connect_side: "local".to_string(),
+                    listen_side: listen_side.to_string(),
+                    connect_side: connect_side.to_string(),
                     forwards: vec![remote_exec_proto::public::ForwardPortSpec {
-                        listen_endpoint: "127.0.0.1:0".to_string(),
-                        connect_endpoint: connect_endpoint.to_string(),
-                        protocol: ForwardPortProtocol::Tcp,
+                        listen_endpoint,
+                        connect_endpoint,
+                        protocol,
                     }],
                 },
             )
@@ -609,21 +544,57 @@ pty = "none"
             .unwrap()
     }
 
+    async fn open_tcp_forward(
+        &self,
+        connect_endpoint: &str,
+    ) -> remote_exec_broker::client::ToolResponse {
+        self.open_forward(
+            "builder-cpp",
+            "local",
+            "127.0.0.1:0".to_string(),
+            connect_endpoint.to_string(),
+            ForwardPortProtocol::Tcp,
+        )
+        .await
+    }
+
     async fn open_tcp_forward_local_to_cpp(
         &self,
         connect_endpoint: &str,
     ) -> remote_exec_broker::client::ToolResponse {
+        self.open_forward(
+            "local",
+            "builder-cpp",
+            "127.0.0.1:0".to_string(),
+            connect_endpoint.to_string(),
+            ForwardPortProtocol::Tcp,
+        )
+        .await
+    }
+
+    async fn close_forward(
+        &self,
+        forward_id: String,
+    ) -> remote_exec_broker::client::ToolResponse {
         self.client
             .call_tool(
                 "forward_ports",
-                &ForwardPortsInput::Open {
-                    listen_side: "local".to_string(),
-                    connect_side: "builder-cpp".to_string(),
-                    forwards: vec![remote_exec_proto::public::ForwardPortSpec {
-                        listen_endpoint: "127.0.0.1:0".to_string(),
-                        connect_endpoint: connect_endpoint.to_string(),
-                        protocol: ForwardPortProtocol::Tcp,
-                    }],
+                &ForwardPortsInput::Close {
+                    forward_ids: vec![forward_id],
+                },
+            )
+            .await
+            .unwrap()
+    }
+
+    async fn list_forward(&self, forward_id: String) -> remote_exec_broker::client::ToolResponse {
+        self.client
+            .call_tool(
+                "forward_ports",
+                &ForwardPortsInput::List {
+                    forward_ids: vec![forward_id],
+                    listen_side: None,
+                    connect_side: None,
                 },
             )
             .await
