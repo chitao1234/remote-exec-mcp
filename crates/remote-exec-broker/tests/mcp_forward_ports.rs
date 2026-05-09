@@ -34,25 +34,8 @@ async fn forward_ports_opens_lists_and_closes_local_tcp_forward() {
         stream.write_all(&buf).await.unwrap();
     });
 
-    let open = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": "local",
-                "connect_side": "local",
-                "forwards": [{
-                    "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": echo_addr.to_string(),
-                    "protocol": "tcp"
-                }]
-            }),
-        )
-        .await;
-    let forward_id = open.structured_content["forwards"][0]["forward_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let open = open_tcp_forward(&fixture, "local", "local", echo_addr).await;
+    let forward_id = forward_id_from(&open);
     let open_entry = &open.structured_content["forwards"][0];
     assert_eq!(open_entry["status"], "open");
     assert_eq!(open_entry["phase"], "ready");
@@ -60,10 +43,7 @@ async fn forward_ports_opens_lists_and_closes_local_tcp_forward() {
     assert_eq!(open_entry["connect_state"]["health"], "ready");
     assert_eq!(open_entry["listen_state"]["generation"], 1);
     assert_eq!(open_entry["connect_state"]["generation"], 1);
-    let listen_endpoint = open.structured_content["forwards"][0]["listen_endpoint"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let listen_endpoint = listen_endpoint_from(&open);
     assert_ne!(listen_endpoint, "127.0.0.1:0");
 
     let mut stream = tokio::net::TcpStream::connect(&listen_endpoint)
@@ -78,27 +58,11 @@ async fn forward_ports_opens_lists_and_closes_local_tcp_forward() {
     stream.read_to_end(&mut echoed).await.unwrap();
     assert_eq!(echoed, payload);
 
-    let list = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "list",
-                "forward_ids": [forward_id.clone()]
-            }),
-        )
-        .await;
-    assert_eq!(list.structured_content["forwards"][0]["status"], "open");
-    assert_eq!(list.structured_content["forwards"][0]["phase"], "ready");
+    let listed = list_forward(&fixture, &forward_id).await;
+    assert_eq!(listed["status"], "open");
+    assert_eq!(listed["phase"], "ready");
 
-    let close = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "close",
-                "forward_ids": [forward_id]
-            }),
-        )
-        .await;
+    let close = close_forward(&fixture, forward_id).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
     assert_eq!(close.structured_content["forwards"][0]["phase"], "closed");
 }
@@ -106,21 +70,7 @@ async fn forward_ports_opens_lists_and_closes_local_tcp_forward() {
 #[tokio::test]
 async fn forward_ports_rejects_open_when_forward_limit_is_reached() {
     let fixture = support::spawners::spawn_broker_local_only_with_port_forward_limit(1).await;
-    let first = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": "local",
-                "connect_side": "local",
-                "forwards": [{
-                    "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": "127.0.0.1:9",
-                    "protocol": "tcp"
-                }]
-            }),
-        )
-        .await;
+    let first = open_tcp_forward(&fixture, "local", "local", "127.0.0.1:9").await;
     let first_id = forward_id_from(&first);
 
     let error = fixture
@@ -143,15 +93,7 @@ async fn forward_ports_rejects_open_when_forward_limit_is_reached() {
         "unexpected error: {error}"
     );
 
-    let _ = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "close",
-                "forward_ids": [first_id]
-            }),
-        )
-        .await;
+    let _ = close_forward(&fixture, first_id).await;
 }
 
 #[tokio::test]
@@ -172,29 +114,9 @@ async fn forward_ports_forwards_local_udp_datagrams() {
             .unwrap();
     });
 
-    let open = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": "local",
-                "connect_side": "local",
-                "forwards": [{
-                    "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": echo_addr.to_string(),
-                    "protocol": "udp"
-                }]
-            }),
-        )
-        .await;
-    let forward_id = open.structured_content["forwards"][0]["forward_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let listen_endpoint = open.structured_content["forwards"][0]["listen_endpoint"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let open = open_udp_forward(&fixture, "local", "local", echo_addr).await;
+    let forward_id = forward_id_from(&open);
+    let listen_endpoint = listen_endpoint_from(&open);
 
     let client_a = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let client_b = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
@@ -220,15 +142,7 @@ async fn forward_ports_forwards_local_udp_datagrams() {
         .0;
     assert_eq!(&buf[..read_b], b"hello-udp-b");
 
-    let close = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "close",
-                "forward_ids": [forward_id]
-            }),
-        )
-        .await;
+    let close = close_forward(&fixture, forward_id).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
@@ -239,49 +153,19 @@ async fn forward_ports_keeps_forward_open_after_stream_connect_error() {
     let destination_addr = destination_probe.local_addr().unwrap();
     drop(destination_probe);
 
-    let open = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": "local",
-                "connect_side": "local",
-                "forwards": [{
-                    "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": destination_addr.to_string(),
-                    "protocol": "tcp"
-                }]
-            }),
-        )
-        .await;
-    let forward_id = open.structured_content["forwards"][0]["forward_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let listen_endpoint = open.structured_content["forwards"][0]["listen_endpoint"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let open = open_tcp_forward(&fixture, "local", "local", destination_addr).await;
+    let forward_id = forward_id_from(&open);
+    let listen_endpoint = listen_endpoint_from(&open);
 
     let _client = tokio::net::TcpStream::connect(&listen_endpoint)
         .await
         .unwrap();
 
     tokio::time::sleep(Duration::from_millis(250)).await;
-    let listed = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "list",
-                "forward_ids": [forward_id.clone()]
-            }),
-        )
-        .await;
-    assert_eq!(listed.structured_content["forwards"][0]["status"], "open");
+    let listed = list_forward(&fixture, &forward_id).await;
+    assert_eq!(listed["status"], "open");
     assert_eq!(
-        listed.structured_content["forwards"][0]
-            .get("last_error")
-            .and_then(|value| value.as_str()),
+        listed.get("last_error").and_then(|value| value.as_str()),
         None
     );
 
@@ -304,15 +188,7 @@ async fn forward_ports_keeps_forward_open_after_stream_connect_error() {
     stream.read_to_end(&mut echoed).await.unwrap();
     assert_eq!(echoed, b"after-error");
 
-    let close = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "close",
-                "forward_ids": [forward_id]
-            }),
-        )
-        .await;
+    let close = close_forward(&fixture, forward_id).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
@@ -371,21 +247,7 @@ max_reconnecting_forwards = 7
     let echo_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let echo_addr = echo_listener.local_addr().unwrap();
 
-    let open = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": "builder-a",
-                "connect_side": "local",
-                "forwards": [{
-                    "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": echo_addr.to_string(),
-                    "protocol": "tcp"
-                }]
-            }),
-        )
-        .await;
+    let open = open_tcp_forward(&fixture, "builder-a", "local", echo_addr).await;
     let forward_id = forward_id_from(&open);
     let limits = &open.structured_content["forwards"][0]["limits"];
     assert_eq!(limits["max_active_tcp_streams"], 3);
@@ -395,29 +257,10 @@ max_reconnecting_forwards = 7
     assert_eq!(limits["max_pending_tcp_bytes_per_forward"], 8192);
     assert_eq!(limits["max_reconnecting_forwards"], 7);
 
-    let list = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "list",
-                "forward_ids": [forward_id.clone()]
-            }),
-        )
-        .await;
-    assert_eq!(
-        list.structured_content["forwards"][0]["limits"],
-        open.structured_content["forwards"][0]["limits"]
-    );
+    let listed = list_forward(&fixture, &forward_id).await;
+    assert_eq!(listed["limits"], open.structured_content["forwards"][0]["limits"]);
 
-    let close = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "close",
-                "forward_ids": [forward_id]
-            }),
-        )
-        .await;
+    let close = close_forward(&fixture, forward_id).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
@@ -442,15 +285,7 @@ async fn forward_ports_opens_remote_forward_with_v4_tunnel_open() {
         1
     );
 
-    let close = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "close",
-                "forward_ids": [forward_id_from(&open)]
-            }),
-        )
-        .await;
+    let close = close_forward(&fixture, forward_id_from(&open)).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
@@ -516,21 +351,7 @@ async fn forward_ports_closes_active_tcp_streams_after_connect_tunnel_drop() {
         }
     });
 
-    let open = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": "local",
-                "connect_side": "builder-a",
-                "forwards": [{
-                    "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": echo_addr.to_string(),
-                    "protocol": "tcp"
-                }]
-            }),
-        )
-        .await;
+    let open = open_tcp_forward(&fixture, "local", "builder-a", echo_addr).await;
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
 
@@ -579,15 +400,7 @@ async fn forward_ports_closes_active_tcp_streams_after_connect_tunnel_drop() {
     later.read_exact(&mut echoed_later).await.unwrap();
     assert_eq!(&echoed_later, b"after");
 
-    let close = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "close",
-                "forward_ids": [forward_id]
-            }),
-        )
-        .await;
+    let close = close_forward(&fixture, forward_id).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
@@ -597,21 +410,7 @@ async fn forward_ports_connect_side_reconnect_retries_transient_open_failures() 
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
 
     let echo = spawn_tcp_echo().await;
-    let open = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": "local",
-                "connect_side": "builder-a",
-                "forwards": [{
-                    "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": echo.to_string(),
-                    "protocol": "tcp"
-                }]
-            }),
-        )
-        .await;
+    let open = open_tcp_forward(&fixture, "local", "builder-a", echo).await;
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
     support::stub_daemon::fail_next_port_tunnel_upgrades(&fixture.stub_state, 2).await;
@@ -628,15 +427,7 @@ async fn forward_ports_connect_side_reconnect_retries_transient_open_failures() 
     assert_eq!(forward["status"], "open");
     assert!(forward["reconnect_attempts"].as_u64().unwrap() >= 1);
 
-    let close = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "close",
-                "forward_ids": [forward_id]
-            }),
-        )
-        .await;
+    let close = close_forward(&fixture, forward_id).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
@@ -650,21 +441,7 @@ async fn forward_ports_recovers_idle_connect_tunnel_after_heartbeat_timeout() {
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
 
     let echo = spawn_tcp_echo().await;
-    let open = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": "local",
-                "connect_side": "builder-a",
-                "forwards": [{
-                    "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": echo.to_string(),
-                    "protocol": "tcp"
-                }]
-            }),
-        )
-        .await;
+    let open = open_tcp_forward(&fixture, "local", "builder-a", echo).await;
     let forward_id = forward_id_from(&open);
 
     support::stub_daemon::drop_next_port_tunnel_heartbeat_ack(&fixture.stub_state).await;
@@ -685,15 +462,7 @@ async fn forward_ports_recovers_idle_connect_tunnel_after_heartbeat_timeout() {
     assert_eq!(ready["phase"], "ready");
     assert_eq!(ready["connect_state"]["health"], "ready");
 
-    let close = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "close",
-                "forward_ids": [forward_id]
-            }),
-        )
-        .await;
+    let close = close_forward(&fixture, forward_id).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
@@ -703,21 +472,7 @@ async fn forward_ports_listen_side_recovery_retries_transient_connect_reopen_fai
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
 
     let echo = spawn_tcp_echo().await;
-    let open = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": "builder-a",
-                "connect_side": "builder-a",
-                "forwards": [{
-                    "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": echo.to_string(),
-                    "protocol": "tcp"
-                }]
-            }),
-        )
-        .await;
+    let open = open_tcp_forward(&fixture, "builder-a", "builder-a", echo).await;
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
     support::stub_daemon::drop_next_connect_tunnel_opens(&fixture.stub_state, 2).await;
@@ -738,15 +493,7 @@ async fn forward_ports_listen_side_recovery_retries_transient_connect_reopen_fai
     stream.read_to_end(&mut echoed).await.unwrap();
     assert_eq!(echoed, b"after");
 
-    let close = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "close",
-                "forward_ids": [forward_id]
-            }),
-        )
-        .await;
+    let close = close_forward(&fixture, forward_id).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
@@ -756,21 +503,7 @@ async fn forward_ports_reports_resumed_listen_ready_while_connect_reopens_after_
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
 
     let echo = spawn_tcp_echo().await;
-    let open = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": "builder-a",
-                "connect_side": "builder-a",
-                "forwards": [{
-                    "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": echo.to_string(),
-                    "protocol": "tcp"
-                }]
-            }),
-        )
-        .await;
+    let open = open_tcp_forward(&fixture, "builder-a", "builder-a", echo).await;
     let forward_id = forward_id_from(&open);
     support::stub_daemon::drop_next_connect_tunnel_opens(&fixture.stub_state, 100).await;
 
@@ -789,15 +522,7 @@ async fn forward_ports_reports_resumed_listen_ready_while_connect_reopens_after_
     assert_eq!(reconnecting["listen_state"]["health"], "ready");
     assert_eq!(reconnecting["connect_state"]["health"], "reconnecting");
 
-    let close = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "close",
-                "forward_ids": [forward_id]
-            }),
-        )
-        .await;
+    let close = close_forward(&fixture, forward_id).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
@@ -807,21 +532,7 @@ async fn forward_ports_reports_reconnecting_until_connect_side_is_ready() {
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
 
     let echo = spawn_tcp_echo().await;
-    let open = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": "local",
-                "connect_side": "builder-a",
-                "forwards": [{
-                    "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": echo.to_string(),
-                    "protocol": "tcp"
-                }]
-            }),
-        )
-        .await;
+    let open = open_tcp_forward(&fixture, "local", "builder-a", echo).await;
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
 
@@ -851,15 +562,7 @@ async fn forward_ports_reports_reconnecting_until_connect_side_is_ready() {
     assert_eq!(ready["listen_state"]["health"], "ready");
     assert_eq!(ready["connect_state"]["health"], "ready");
 
-    let close = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "close",
-                "forward_ids": [forward_id]
-            }),
-        )
-        .await;
+    let close = close_forward(&fixture, forward_id).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
@@ -1080,16 +783,7 @@ async fn forward_ports_marks_forward_failed_when_close_cleanup_fails() {
         "unexpected close error: {close_error}"
     );
 
-    let listed = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "list",
-                "forward_ids": [forward_id]
-            }),
-        )
-        .await;
-    let forward = &listed.structured_content["forwards"][0];
+    let forward = list_forward(&fixture, &forward_id).await;
     assert_eq!(forward["status"], "failed");
     let last_error = forward["last_error"].as_str().unwrap_or_default();
     assert!(
@@ -1174,21 +868,7 @@ async fn forward_ports_closes_pending_tcp_stream_when_remote_connect_never_ackno
         }
     });
 
-    let open = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": "local",
-                "connect_side": "builder-a",
-                "forwards": [{
-                    "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": upstream_addr.to_string(),
-                    "protocol": "tcp"
-                }]
-            }),
-        )
-        .await;
+    let open = open_tcp_forward(&fixture, "local", "builder-a", upstream_addr).await;
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
 
@@ -1218,26 +898,10 @@ async fn forward_ports_closes_pending_tcp_stream_when_remote_connect_never_ackno
         Err(err) => panic!("unexpected pending tcp stream read error: {err}"),
     }
 
-    let list = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "list",
-                "forward_ids": [forward_id.clone()]
-            }),
-        )
-        .await;
-    assert_eq!(list.structured_content["forwards"][0]["status"], "open");
+    let listed = list_forward(&fixture, &forward_id).await;
+    assert_eq!(listed["status"], "open");
 
-    let close = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "close",
-                "forward_ids": [forward_id]
-            }),
-        )
-        .await;
+    let close = close_forward(&fixture, forward_id).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
@@ -1268,21 +932,7 @@ max_tunnel_queued_bytes = 4096
         }
     });
 
-    let open = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": "local",
-                "connect_side": "local",
-                "forwards": [{
-                    "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": hold_addr.to_string(),
-                    "protocol": "tcp"
-                }]
-            }),
-        )
-        .await;
+    let open = open_tcp_forward(&fixture, "local", "local", hold_addr).await;
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
     assert_eq!(
@@ -1329,15 +979,7 @@ max_tunnel_queued_bytes = 4096
         wait_for_active_tcp_streams(&fixture, &forward_id, 0, Duration::from_secs(5)).await;
     assert_eq!(released["active_tcp_streams"], 0);
 
-    let close = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "close",
-                "forward_ids": [forward_id]
-            }),
-        )
-        .await;
+    let close = close_forward(&fixture, forward_id).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
@@ -1371,21 +1013,7 @@ max_tunnel_queued_bytes = 4096
         }
     });
 
-    let open = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": "local",
-                "connect_side": "builder-a",
-                "forwards": [{
-                    "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": upstream_addr.to_string(),
-                    "protocol": "tcp"
-                }]
-            }),
-        )
-        .await;
+    let open = open_tcp_forward(&fixture, "local", "builder-a", upstream_addr).await;
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
     assert_eq!(
@@ -1421,15 +1049,7 @@ max_tunnel_queued_bytes = 4096
     let dropped = wait_for_tcp_drop_count(&fixture, &forward_id, 1, Duration::from_secs(5)).await;
     assert_eq!(dropped["status"], "open");
 
-    let close = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "close",
-                "forward_ids": [forward_id]
-            }),
-        )
-        .await;
+    let close = close_forward(&fixture, forward_id).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
@@ -1464,21 +1084,7 @@ max_tunnel_queued_bytes = 4096
         }
     });
 
-    let open = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": "local",
-                "connect_side": "builder-a",
-                "forwards": [{
-                    "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": echo_addr.to_string(),
-                    "protocol": "udp"
-                }]
-            }),
-        )
-        .await;
+    let open = open_udp_forward(&fixture, "local", "builder-a", echo_addr).await;
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
     assert_eq!(
@@ -1511,15 +1117,7 @@ max_tunnel_queued_bytes = 4096
     let dropped = wait_for_udp_drop_count(&fixture, &forward_id, Duration::from_secs(5)).await;
     assert_eq!(dropped["status"], "open");
 
-    let close = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "close",
-                "forward_ids": [forward_id]
-            }),
-        )
-        .await;
+    let close = close_forward(&fixture, forward_id).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
@@ -1543,21 +1141,7 @@ async fn forward_ports_stays_open_during_heavy_local_udp_peer_churn() {
         }
     });
 
-    let open = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": "local",
-                "connect_side": "local",
-                "forwards": [{
-                    "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": echo_addr.to_string(),
-                    "protocol": "udp"
-                }]
-            }),
-        )
-        .await;
+    let open = open_udp_forward(&fixture, "local", "local", echo_addr).await;
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
 
@@ -1568,26 +1152,10 @@ async fn forward_ports_stays_open_during_heavy_local_udp_peer_churn() {
         peers.push(peer);
     }
 
-    let list = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "list",
-                "forward_ids": [forward_id.clone()]
-            }),
-        )
-        .await;
-    assert_eq!(list.structured_content["forwards"][0]["status"], "open");
+    let listed = list_forward(&fixture, &forward_id).await;
+    assert_eq!(listed["status"], "open");
 
-    let close = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "close",
-                "forward_ids": [forward_id]
-            }),
-        )
-        .await;
+    let close = close_forward(&fixture, forward_id).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
@@ -1612,21 +1180,7 @@ async fn forward_ports_retries_udp_connector_after_bind_error() {
         }
     });
 
-    let open = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": "local",
-                "connect_side": "builder-a",
-                "forwards": [{
-                    "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": echo_addr.to_string(),
-                    "protocol": "udp"
-                }]
-            }),
-        )
-        .await;
+    let open = open_udp_forward(&fixture, "local", "builder-a", echo_addr).await;
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
 
@@ -1657,15 +1211,7 @@ async fn forward_ports_retries_udp_connector_after_bind_error() {
         "expected at least one dropped UDP datagram during retry"
     );
 
-    let close = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "close",
-                "forward_ids": [forward_id]
-            }),
-        )
-        .await;
+    let close = close_forward(&fixture, forward_id).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
@@ -1679,21 +1225,7 @@ async fn forward_ports_drops_udp_datagrams_under_pressure() {
         .await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
 
-    let open = fixture
-        .call_tool(
-            "forward_ports",
-            serde_json::json!({
-                "action": "open",
-                "listen_side": "local",
-                "connect_side": "builder-a",
-                "forwards": [{
-                    "listen_endpoint": "127.0.0.1:0",
-                    "connect_endpoint": "127.0.0.1:9",
-                    "protocol": "udp"
-                }]
-            }),
-        )
-        .await;
+    let open = open_udp_forward(&fixture, "local", "builder-a", "127.0.0.1:9").await;
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
 
@@ -1708,16 +1240,98 @@ async fn forward_ports_drops_udp_datagrams_under_pressure() {
     assert!(drops > 0, "expected UDP drops under pressure");
     assert_eq!(forward["status"], "open");
 
-    let close = fixture
+    let close = close_forward(&fixture, forward_id).await;
+    assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
+}
+
+async fn open_forward(
+    fixture: &support::fixture::BrokerFixture,
+    listen_side: &str,
+    connect_side: &str,
+    listen_endpoint: &str,
+    connect_endpoint: impl ToString,
+    protocol: &str,
+) -> support::fixture::ToolResult {
+    fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": listen_side,
+                "connect_side": connect_side,
+                "forwards": [{
+                    "listen_endpoint": listen_endpoint,
+                    "connect_endpoint": connect_endpoint.to_string(),
+                    "protocol": protocol
+                }]
+            }),
+        )
+        .await
+}
+
+async fn open_tcp_forward(
+    fixture: &support::fixture::BrokerFixture,
+    listen_side: &str,
+    connect_side: &str,
+    connect_endpoint: impl ToString,
+) -> support::fixture::ToolResult {
+    open_forward(
+        fixture,
+        listen_side,
+        connect_side,
+        "127.0.0.1:0",
+        connect_endpoint,
+        "tcp",
+    )
+    .await
+}
+
+async fn open_udp_forward(
+    fixture: &support::fixture::BrokerFixture,
+    listen_side: &str,
+    connect_side: &str,
+    connect_endpoint: impl ToString,
+) -> support::fixture::ToolResult {
+    open_forward(
+        fixture,
+        listen_side,
+        connect_side,
+        "127.0.0.1:0",
+        connect_endpoint,
+        "udp",
+    )
+    .await
+}
+
+async fn close_forward(
+    fixture: &support::fixture::BrokerFixture,
+    forward_id: impl ToString,
+) -> support::fixture::ToolResult {
+    fixture
         .call_tool(
             "forward_ports",
             serde_json::json!({
                 "action": "close",
+                "forward_ids": [forward_id.to_string()]
+            }),
+        )
+        .await
+}
+
+async fn list_forward(
+    fixture: &support::fixture::BrokerFixture,
+    forward_id: &str,
+) -> serde_json::Value {
+    let list = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "list",
                 "forward_ids": [forward_id]
             }),
         )
         .await;
-    assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
+    list.structured_content["forwards"][0].clone()
 }
 
 async fn wait_for_forward_status(
@@ -1729,16 +1343,7 @@ async fn wait_for_forward_status(
     let started = std::time::Instant::now();
     let mut last_entry = None;
     while started.elapsed() < timeout {
-        let list = fixture
-            .call_tool(
-                "forward_ports",
-                serde_json::json!({
-                    "action": "list",
-                    "forward_ids": [forward_id]
-                }),
-            )
-            .await;
-        let entry = list.structured_content["forwards"][0].clone();
+        let entry = list_forward(fixture, forward_id).await;
         last_entry = Some(entry.clone());
         if entry["status"] == status {
             return entry;
@@ -1768,16 +1373,7 @@ async fn wait_for_forward_phase(
     let started = std::time::Instant::now();
     let mut last_entry = None;
     while started.elapsed() < timeout {
-        let list = fixture
-            .call_tool(
-                "forward_ports",
-                serde_json::json!({
-                    "action": "list",
-                    "forward_ids": [forward_id]
-                }),
-            )
-            .await;
-        let entry = list.structured_content["forwards"][0].clone();
+        let entry = list_forward(fixture, forward_id).await;
         last_entry = Some(entry.clone());
         if entry["phase"] == phase {
             return entry;
@@ -1812,16 +1408,7 @@ async fn wait_for_forward_side_health(
     let started = std::time::Instant::now();
     let mut last_entry = None;
     while started.elapsed() < timeout {
-        let list = fixture
-            .call_tool(
-                "forward_ports",
-                serde_json::json!({
-                    "action": "list",
-                    "forward_ids": [forward_id]
-                }),
-            )
-            .await;
-        let entry = list.structured_content["forwards"][0].clone();
+        let entry = list_forward(fixture, forward_id).await;
         last_entry = Some(entry.clone());
         if entry[side_state]["health"] == health {
             return entry;
@@ -1861,16 +1448,7 @@ async fn wait_for_udp_drop_count(
     let started = std::time::Instant::now();
     let mut last_entry = None;
     while started.elapsed() < timeout {
-        let list = fixture
-            .call_tool(
-                "forward_ports",
-                serde_json::json!({
-                    "action": "list",
-                    "forward_ids": [forward_id]
-                }),
-            )
-            .await;
-        let entry = list.structured_content["forwards"][0].clone();
+        let entry = list_forward(fixture, forward_id).await;
         last_entry = Some(entry.clone());
         if entry["dropped_udp_datagrams"].as_u64().unwrap_or_default() > 0 {
             return entry;
@@ -1907,16 +1485,7 @@ async fn wait_for_tcp_drop_count(
     let started = std::time::Instant::now();
     let mut last_entry = None;
     while started.elapsed() < timeout {
-        let list = fixture
-            .call_tool(
-                "forward_ports",
-                serde_json::json!({
-                    "action": "list",
-                    "forward_ids": [forward_id]
-                }),
-            )
-            .await;
-        let entry = list.structured_content["forwards"][0].clone();
+        let entry = list_forward(fixture, forward_id).await;
         last_entry = Some(entry.clone());
         if entry["dropped_tcp_streams"].as_u64().unwrap_or_default() >= dropped_tcp_streams {
             return entry;
@@ -1953,16 +1522,7 @@ async fn wait_for_active_tcp_streams(
     let started = std::time::Instant::now();
     let mut last_entry = None;
     while started.elapsed() < timeout {
-        let list = fixture
-            .call_tool(
-                "forward_ports",
-                serde_json::json!({
-                    "action": "list",
-                    "forward_ids": [forward_id]
-                }),
-            )
-            .await;
-        let entry = list.structured_content["forwards"][0].clone();
+        let entry = list_forward(fixture, forward_id).await;
         last_entry = Some(entry.clone());
         if entry["active_tcp_streams"].as_u64().unwrap_or_default() == active_tcp_streams {
             return entry;
@@ -1998,16 +1558,7 @@ async fn wait_for_forward_ready_after_reconnect(
     let started = std::time::Instant::now();
     let mut last_entry = None;
     while started.elapsed() < timeout {
-        let list = fixture
-            .call_tool(
-                "forward_ports",
-                serde_json::json!({
-                    "action": "list",
-                    "forward_ids": [forward_id]
-                }),
-            )
-            .await;
-        let entry = list.structured_content["forwards"][0].clone();
+        let entry = list_forward(fixture, forward_id).await;
         last_entry = Some(entry.clone());
         if entry["phase"] == "ready" && entry["reconnect_attempts"].as_u64().unwrap_or_default() > 0
         {
