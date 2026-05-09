@@ -15,7 +15,7 @@ use super::error::{SessionCloseMode, rpc_error};
 use super::limiter::{PortForwardLimiter, PortForwardPermit};
 use super::session_store::TunnelSessionStore;
 use super::udp::tunnel_udp_read_loop_session_owned;
-use super::{ErrorMeta, RESUME_TIMEOUT, TunnelSender, TunnelState};
+use super::{ErrorMeta, RESUME_TIMEOUT, TcpWriterHandle, TunnelSender, TunnelState};
 
 pub(super) struct SessionState {
     pub(super) id: String,
@@ -32,7 +32,7 @@ pub(super) struct SessionState {
 pub(super) struct AttachmentState {
     pub(super) tx: TunnelSender,
     pub(super) cancel: CancellationToken,
-    pub(super) tcp_writers: Mutex<HashMap<u32, Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>>>,
+    pub(super) tcp_writers: Mutex<HashMap<u32, TcpWriterHandle>>,
     pub(super) tcp_stream_permits: Mutex<HashMap<u32, PortForwardPermit>>,
     pub(super) stream_cancels: Mutex<HashMap<u32, CancellationToken>>,
 }

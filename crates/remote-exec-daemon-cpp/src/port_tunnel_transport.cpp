@@ -107,6 +107,20 @@ DWORD WINAPI tcp_read_thread_entry(LPVOID raw_context) {
     context->tunnel->tcp_read_loop(context->stream_id, context->stream);
     return 0;
 }
+
+struct TcpWriteContext {
+    std::shared_ptr<PortTunnelService> service;
+    std::shared_ptr<PortTunnelConnection> tunnel;
+    uint32_t stream_id;
+    std::shared_ptr<TunnelTcpStream> stream;
+};
+
+DWORD WINAPI tcp_write_thread_entry(LPVOID raw_context) {
+    std::unique_ptr<TcpWriteContext> context(static_cast<TcpWriteContext*>(raw_context));
+    PortTunnelWorkerLease lease(context->service);
+    context->tunnel->tcp_write_loop(context->stream_id, context->stream);
+    return 0;
+}
 #endif
 
 bool spawn_tcp_read_thread(
@@ -149,6 +163,44 @@ bool spawn_tcp_read_thread(
                 start_gate->wait();
             }
             tunnel->tcp_read_loop(stream_id, stream);
+        }).detach();
+    } catch (...) {
+        service->release_worker();
+        return false;
+    }
+    return true;
+#endif
+}
+
+bool spawn_tcp_write_thread(
+    const std::shared_ptr<PortTunnelService>& service,
+    const std::shared_ptr<PortTunnelConnection>& tunnel,
+    uint32_t stream_id,
+    const std::shared_ptr<TunnelTcpStream>& stream,
+    bool worker_acquired
+) {
+    if (!worker_acquired && !service->try_acquire_worker()) {
+        return false;
+    }
+#ifdef _WIN32
+    std::unique_ptr<TcpWriteContext> context(new TcpWriteContext());
+    context->service = service;
+    context->tunnel = tunnel;
+    context->stream_id = stream_id;
+    context->stream = stream;
+    HANDLE handle = CreateThread(NULL, 0, tcp_write_thread_entry, context.get(), 0, NULL);
+    if (handle != NULL) {
+        context.release();
+        CloseHandle(handle);
+        return true;
+    }
+    service->release_worker();
+    return false;
+#else
+    try {
+        std::thread([service, tunnel, stream_id, stream]() {
+            PortTunnelWorkerLease lease(service);
+            tunnel->tcp_write_loop(stream_id, stream);
         }).detach();
     } catch (...) {
         service->release_worker();

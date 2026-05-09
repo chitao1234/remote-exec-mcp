@@ -17,7 +17,6 @@ use remote_exec_proto::port_tunnel::{
 };
 use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
-use tokio::net::tcp::OwnedWriteHalf;
 use tokio::sync::{Mutex, mpsc};
 use tokio_util::sync::CancellationToken;
 
@@ -29,6 +28,7 @@ pub use tunnel::serve_tunnel;
 pub use limiter::PortForwardLimiter;
 
 const READ_BUF_SIZE: usize = 64 * 1024;
+const TCP_WRITE_QUEUE_FRAMES: usize = 8;
 #[cfg(not(test))]
 const RESUME_TIMEOUT: Duration = Duration::from_secs(10);
 #[cfg(test)]
@@ -38,7 +38,7 @@ struct TunnelState {
     state: Arc<AppState>,
     cancel: CancellationToken,
     tx: TunnelSender,
-    tcp_writers: Mutex<HashMap<u32, Arc<Mutex<OwnedWriteHalf>>>>,
+    tcp_writers: Mutex<HashMap<u32, TcpWriterHandle>>,
     tcp_stream_permits: Mutex<HashMap<u32, limiter::PortForwardPermit>>,
     udp_sockets: Mutex<HashMap<u32, TransportUdpBind>>,
     stream_cancels: Mutex<HashMap<u32, CancellationToken>>,
@@ -57,6 +57,17 @@ struct TunnelSender {
 struct QueuedFrame {
     frame: Frame,
     _permit: Option<limiter::PortForwardPermit>,
+}
+
+#[derive(Clone)]
+struct TcpWriterHandle {
+    tx: mpsc::Sender<TcpWriteCommand>,
+    cancel: CancellationToken,
+}
+
+enum TcpWriteCommand {
+    Data(Vec<u8>),
+    Shutdown,
 }
 
 struct TransportUdpBind {
@@ -170,8 +181,8 @@ mod port_tunnel_tests {
     use std::time::Duration;
 
     use remote_exec_proto::port_tunnel::{
-        Frame, FrameType, TunnelForwardProtocol, TunnelOpenMeta, TunnelReadyMeta, TunnelRole,
-        read_frame, write_frame, write_preface,
+        Frame, FrameType, MAX_DATA_LEN, TunnelForwardProtocol, TunnelOpenMeta, TunnelReadyMeta,
+        TunnelRole, read_frame, write_frame, write_preface,
     };
     use serde_json::Value;
     use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
@@ -240,6 +251,149 @@ mod port_tunnel_tests {
         let echoed = read_frame(&mut broker_side).await.unwrap();
         assert_eq!(echoed.frame_type, FrameType::TcpData);
         assert_eq!(echoed.data, b"\0hello\xff");
+    }
+
+    #[tokio::test]
+    async fn tunnel_tcp_data_write_pressure_does_not_block_control_frames() {
+        let state = test_state();
+        let endpoint = spawn_tcp_non_draining_server().await;
+        let (broker_side, daemon_side) = tokio::io::duplex(32 * 1024 * 1024);
+        tokio::spawn(serve_tunnel(state, daemon_side));
+        let (mut broker_read, mut broker_write) = tokio::io::split(broker_side);
+
+        write_preface(&mut broker_write).await.unwrap();
+        write_frame(
+            &mut broker_write,
+            &json_frame(
+                FrameType::TcpConnect,
+                1,
+                serde_json::json!({ "endpoint": endpoint }),
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            read_frame(&mut broker_read).await.unwrap().frame_type,
+            FrameType::TcpConnectOk
+        );
+
+        let heartbeat_meta = br#"{"nonce":1}"#.to_vec();
+        let writer = tokio::spawn({
+            let heartbeat_meta = heartbeat_meta.clone();
+            async move {
+                let payload = vec![0x7b; MAX_DATA_LEN];
+                for _ in 0..64 {
+                    write_frame(
+                        &mut broker_write,
+                        &data_frame(FrameType::TcpData, 1, payload.clone()),
+                    )
+                    .await
+                    .unwrap();
+                }
+                write_frame(
+                    &mut broker_write,
+                    &Frame {
+                        frame_type: FrameType::TunnelHeartbeat,
+                        flags: 0,
+                        stream_id: 0,
+                        meta: heartbeat_meta,
+                        data: Vec::new(),
+                    },
+                )
+                .await
+                .unwrap();
+            }
+        });
+
+        let ack = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let frame = read_frame(&mut broker_read).await.unwrap();
+                if frame.frame_type == FrameType::TunnelHeartbeatAck {
+                    return frame;
+                }
+            }
+        })
+        .await
+        .expect("tcp data writes must not block tunnel control frames");
+        writer.abort();
+        assert_eq!(ack.meta, heartbeat_meta);
+    }
+
+    #[tokio::test]
+    async fn tcp_write_queue_limit_releases_active_stream_capacity() {
+        let state = test_state_with_limits(crate::HostPortForwardLimits {
+            max_active_tcp_streams: 1,
+            ..crate::HostPortForwardLimits::default()
+        });
+        let pressured_endpoint = spawn_tcp_non_draining_server().await;
+        let replacement_endpoint = spawn_tcp_hold_server().await;
+        let (broker_side, daemon_side) = tokio::io::duplex(32 * 1024 * 1024);
+        tokio::spawn(serve_tunnel(state, daemon_side));
+        let (mut broker_read, mut broker_write) = tokio::io::split(broker_side);
+
+        write_preface(&mut broker_write).await.unwrap();
+        write_frame(
+            &mut broker_write,
+            &json_frame(
+                FrameType::TcpConnect,
+                1,
+                serde_json::json!({ "endpoint": pressured_endpoint }),
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            read_frame(&mut broker_read).await.unwrap().frame_type,
+            FrameType::TcpConnectOk
+        );
+
+        let writer = tokio::spawn(async move {
+            let payload = vec![0x33; MAX_DATA_LEN];
+            for _ in 0..64 {
+                write_frame(
+                    &mut broker_write,
+                    &data_frame(FrameType::TcpData, 1, payload.clone()),
+                )
+                .await
+                .unwrap();
+            }
+            write_frame(
+                &mut broker_write,
+                &json_frame(
+                    FrameType::TcpConnect,
+                    3,
+                    serde_json::json!({ "endpoint": replacement_endpoint }),
+                ),
+            )
+            .await
+            .unwrap();
+        });
+
+        let mut saw_queue_limit = false;
+        let mut saw_replacement_connect = false;
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let frame = read_frame(&mut broker_read).await.unwrap();
+                match frame.frame_type {
+                    FrameType::Error if frame.stream_id == 1 => {
+                        let meta = serde_json::from_slice::<Value>(&frame.meta).unwrap();
+                        if meta["code"] == "port_tunnel_limit_exceeded" {
+                            saw_queue_limit = true;
+                        }
+                    }
+                    FrameType::TcpConnectOk if frame.stream_id == 3 => {
+                        saw_replacement_connect = true;
+                    }
+                    _ => {}
+                }
+                if saw_queue_limit && saw_replacement_connect {
+                    return;
+                }
+            }
+        })
+        .await
+        .expect("queue-full stream should release active stream capacity");
+        writer.await.unwrap();
     }
 
     #[tokio::test]
@@ -968,6 +1122,39 @@ mod port_tunnel_tests {
         });
         endpoint
     }
+
+    async fn spawn_tcp_non_draining_server() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = listener.local_addr().unwrap().to_string();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            set_small_tcp_recv_buffer(&stream);
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            drop(stream);
+        });
+        endpoint
+    }
+
+    #[cfg(unix)]
+    fn set_small_tcp_recv_buffer(stream: &tokio::net::TcpStream) {
+        use std::mem;
+        use std::os::fd::AsRawFd;
+
+        let size: nix::libc::c_int = 1024;
+        let rc = unsafe {
+            nix::libc::setsockopt(
+                stream.as_raw_fd(),
+                nix::libc::SOL_SOCKET,
+                nix::libc::SO_RCVBUF,
+                &size as *const _ as *const nix::libc::c_void,
+                mem::size_of_val(&size) as nix::libc::socklen_t,
+            )
+        };
+        assert_eq!(rc, 0, "setsockopt(SO_RCVBUF) should succeed");
+    }
+
+    #[cfg(not(unix))]
+    fn set_small_tcp_recv_buffer(_stream: &tokio::net::TcpStream) {}
 
     async fn spawn_tcp_one_shot_sender(payload: Vec<u8>) -> String {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

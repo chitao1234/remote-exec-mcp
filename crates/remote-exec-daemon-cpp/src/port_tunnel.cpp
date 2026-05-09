@@ -1,6 +1,7 @@
 #include "port_tunnel_internal.h"
 
 const std::size_t READ_BUF_SIZE = 64U * 1024U;
+const std::size_t TCP_WRITE_QUEUE_LIMIT = 8U;
 const unsigned long RETAINED_SOCKET_POLL_TIMEOUT_MS = 100UL;
 #ifdef REMOTE_EXEC_CPP_TESTING
 const unsigned long RESUME_TIMEOUT_MS = 100UL;
@@ -137,6 +138,10 @@ void mark_tcp_stream_closed(const std::shared_ptr<TunnelTcpStream>& stream) {
     BasicLockGuard lock(stream->mutex);
     if (!stream->closed) {
         stream->closed = true;
+        stream->writer_closed = true;
+        stream->writer_shutdown_requested = true;
+        stream->write_queue.clear();
+        stream->writer_cond.broadcast();
         shutdown_socket(stream->socket.get());
         stream->socket.reset();
         if (stream->active_stream_budget_acquired) {

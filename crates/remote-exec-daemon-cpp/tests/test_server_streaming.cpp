@@ -14,6 +14,7 @@
 #include <netdb.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 
 #include "config.h"
 #include "filesystem_sandbox.h"
@@ -925,7 +926,7 @@ static void assert_retained_tcp_accept_worker_pressure_is_local_drop(const fs::p
 
 static void assert_retained_tcp_accept_pressure_is_local_drop(const fs::path& root) {
     PortForwardLimitConfig limits = default_port_forward_limit_config();
-    limits.max_worker_threads = 2UL;
+    limits.max_worker_threads = 3UL;
     limits.max_active_tcp_streams = 1UL;
 
     AppState state;
@@ -1403,6 +1404,66 @@ static void assert_tunnel_tcp_connect_echoes_binary_data(AppState& state) {
     echo_thread.join();
 }
 
+static void assert_tcp_data_write_pressure_does_not_block_control_frames(AppState& state) {
+    UniqueSocket hold_listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
+    const std::string hold_endpoint = socket_local_endpoint(hold_listener.get());
+    std::thread hold_thread([&]() {
+        UniqueSocket accepted(accept(hold_listener.get(), NULL, NULL));
+        assert(accepted.valid());
+        int buffer_size = 1024;
+        setsockopt(
+            accepted.get(),
+            SOL_SOCKET,
+            SO_RCVBUF,
+            reinterpret_cast<const char*>(&buffer_size),
+            sizeof(buffer_size)
+        );
+        platform::sleep_ms(5000UL);
+    });
+
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_tunnel(state, &client_socket, &server_thread);
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TcpConnect, 1U, Json{{"endpoint", hold_endpoint}})
+    );
+    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpConnectOk);
+
+    std::vector<unsigned char> payload(PORT_TUNNEL_MAX_DATA_LEN, 0x51U);
+    PortTunnelFrame heartbeat = empty_frame(PortTunnelFrameType::TunnelHeartbeat, 0U);
+    heartbeat.meta = Json{{"nonce", 1}}.dump();
+    std::thread writer_thread([&]() {
+        for (int i = 0; i < 64; ++i) {
+            send_tunnel_frame(
+                client_socket.get(),
+                data_frame(PortTunnelFrameType::TcpData, 1U, payload)
+            );
+        }
+        send_tunnel_frame(client_socket.get(), heartbeat);
+    });
+
+    const std::uint64_t deadline = platform::monotonic_ms() + 2000ULL;
+    bool saw_ack = false;
+    while (platform::monotonic_ms() < deadline) {
+        PortTunnelFrame frame;
+        if (!try_read_tunnel_frame_with_timeout(client_socket.get(), 100UL, &frame)) {
+            continue;
+        }
+        if (frame.type == PortTunnelFrameType::TunnelHeartbeatAck) {
+            assert(frame.meta == heartbeat.meta);
+            saw_ack = true;
+            break;
+        }
+    }
+    assert(saw_ack);
+
+    close_tunnel(&client_socket, &server_thread);
+    hold_listener.reset();
+    hold_thread.join();
+    writer_thread.join();
+}
+
 static void assert_tunnel_udp_bind_emits_two_peer_datagrams(AppState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
@@ -1647,6 +1708,7 @@ int main() {
     assert_udp_queued_byte_pressure_reports_drop(root);
     assert_partial_tunnel_frame_times_out(root);
     assert_tunnel_tcp_connect_echoes_binary_data(state);
+    assert_tcp_data_write_pressure_does_not_block_control_frames(state);
     assert_tunnel_udp_bind_emits_two_peer_datagrams(state);
     assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(state);
     assert_expired_tunnel_session_is_released(state);

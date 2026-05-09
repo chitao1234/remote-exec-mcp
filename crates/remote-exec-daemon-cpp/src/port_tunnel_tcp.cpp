@@ -263,7 +263,7 @@ void PortTunnelConnection::tcp_accept_loop_transport_owned(
             {"listener_stream_id", listener_stream_id},
             {"peer", printable_port_forward_endpoint(reinterpret_cast<sockaddr*>(&peer_address), peer_len)}
         }.dump();
-        if (!send_tcp_success_after_read_thread_started(frame, stream_id, stream, true)) {
+        if (!send_tcp_success_after_io_threads_started(frame, stream_id, stream, true)) {
             continue;
         }
     }
@@ -301,7 +301,7 @@ void PortTunnelConnection::tcp_connect(const PortTunnelFrame& frame) {
         send_worker_limit(frame.stream_id);
         return;
     }
-    if (!send_tcp_success_after_read_thread_started(
+    if (!send_tcp_success_after_io_threads_started(
             make_empty_frame(PortTunnelFrameType::TcpConnectOk, frame.stream_id),
             frame.stream_id,
             stream,
@@ -349,6 +349,52 @@ void PortTunnelConnection::tcp_read_loop(
     }
 }
 
+void PortTunnelConnection::tcp_write_loop(
+    uint32_t stream_id,
+    std::shared_ptr<TunnelTcpStream> stream
+) {
+    for (;;) {
+        std::vector<unsigned char> data;
+        {
+            BasicLockGuard lock(stream->mutex);
+            while (!stream->closed &&
+                   stream->write_queue.empty() &&
+                   !stream->writer_closed &&
+                   !stream->writer_shutdown_requested) {
+                stream->writer_cond.wait(stream->mutex);
+            }
+            if (stream->closed || stream->writer_closed) {
+                return;
+            }
+            if (stream->write_queue.empty() && stream->writer_shutdown_requested) {
+                stream->writer_closed = true;
+                break;
+            }
+            data.swap(stream->write_queue.front());
+            stream->write_queue.erase(stream->write_queue.begin());
+            stream->writer_cond.signal();
+        }
+        try {
+            send_all_bytes(
+                stream->socket.get(),
+                reinterpret_cast<const char*>(data.data()),
+                data.size()
+            );
+        } catch (const std::exception& ex) {
+            if (!tcp_stream_closed(stream)) {
+                send_error(stream_id, "port_write_failed", ex.what());
+            }
+            mark_tcp_stream_closed(stream);
+            return;
+        }
+    }
+#ifdef _WIN32
+    shutdown(stream->socket.get(), SD_SEND);
+#else
+    shutdown(stream->socket.get(), SHUT_WR);
+#endif
+}
+
 void PortTunnelConnection::tcp_data(uint32_t stream_id, const std::vector<unsigned char>& data) {
     std::shared_ptr<TunnelTcpStream> stream;
     {
@@ -360,14 +406,25 @@ void PortTunnelConnection::tcp_data(uint32_t stream_id, const std::vector<unsign
         }
         stream = it->second;
     }
-    BasicLockGuard lock(stream->mutex);
-    if (stream->closed) {
-        throw PortForwardError(400, "port_connection_closed", "connection was closed");
+    {
+        BasicLockGuard lock(stream->mutex);
+        if (stream->closed || stream->writer_closed || stream->writer_shutdown_requested) {
+            throw PortForwardError(400, "port_connection_closed", "connection was closed");
+        }
+        if (stream->write_queue.size() >= TCP_WRITE_QUEUE_LIMIT) {
+            stream->writer_closed = true;
+            stream->writer_cond.broadcast();
+        } else {
+            stream->write_queue.push_back(data);
+            stream->writer_cond.signal();
+            return;
+        }
     }
-    send_all_bytes(
-        stream->socket.get(),
-        reinterpret_cast<const char*>(data.data()),
-        data.size()
+    mark_tcp_stream_closed(stream);
+    throw PortForwardError(
+        400,
+        "port_tunnel_limit_exceeded",
+        "tcp write queue limit reached"
     );
 }
 
@@ -382,9 +439,9 @@ void PortTunnelConnection::tcp_eof(uint32_t stream_id) {
         }
         stream = it->second;
     }
-#ifdef _WIN32
-    shutdown(stream->socket.get(), SD_SEND);
-#else
-    shutdown(stream->socket.get(), SHUT_WR);
-#endif
+    {
+        BasicLockGuard lock(stream->mutex);
+        stream->writer_shutdown_requested = true;
+        stream->writer_cond.broadcast();
+    }
 }

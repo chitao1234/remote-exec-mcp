@@ -196,8 +196,17 @@ async fn run_tcp_forward_epoch(
                             ).await? {
                                 return Ok(control);
                             }
-                            release_tcp_pair_if_fully_eof(runtime, &mut state, connect_stream_id)
-                                .await;
+                            if let Some(control) = close_tcp_pair_if_fully_eof(
+                                runtime,
+                                &connect_tunnel,
+                                &listen_tunnel,
+                                &mut state,
+                                connect_stream_id,
+                            )
+                            .await?
+                            {
+                                return Ok(control);
+                            }
                         }
                     }
                     FrameType::Close => {
@@ -348,7 +357,17 @@ async fn run_tcp_forward_epoch(
                                     TunnelRole::Listen,
                                 );
                             }
-                        release_tcp_pair_if_fully_eof(runtime, &mut state, frame.stream_id).await;
+                        if let Some(control) = close_tcp_pair_if_fully_eof(
+                            runtime,
+                            &connect_tunnel,
+                            &listen_tunnel,
+                            &mut state,
+                            frame.stream_id,
+                        )
+                        .await?
+                        {
+                            return Ok(control);
+                        }
                     }
                     FrameType::Close => {
                         if let Some(listen_stream_id) = state.connect_streams
@@ -584,11 +603,13 @@ async fn close_tcp_pair_after_connect_pressure(
     Ok(())
 }
 
-async fn release_tcp_pair_if_fully_eof(
+async fn close_tcp_pair_if_fully_eof(
     runtime: &ForwardRuntime,
+    connect_tunnel: &Arc<PortTunnel>,
+    listen_tunnel: &Arc<PortTunnel>,
     state: &mut TcpForwardState,
     connect_stream_id: u32,
-) {
+) -> anyhow::Result<Option<ForwardLoopControl>> {
     let Some((listen_stream_id, fully_eof)) =
         state.connect_streams.get(&connect_stream_id).map(|stream| {
             (
@@ -597,16 +618,41 @@ async fn release_tcp_pair_if_fully_eof(
             )
         })
     else {
-        return;
+        return Ok(None);
     };
     if !fully_eof {
-        return;
+        return Ok(None);
     }
     if let Some(mut stream) = state.connect_streams.remove(&connect_stream_id) {
         release_pending_budget(&mut state.pending_budget, &mut stream);
     }
     state.listen_to_connect.remove(&listen_stream_id);
+    if let Err(err) = connect_tunnel.close_stream(connect_stream_id).await {
+        release_active_tcp_stream(runtime).await;
+        if is_retryable_transport_error(&err) {
+            if let Err(listen_err) = listen_tunnel.close_stream(listen_stream_id).await {
+                return classify_transport_failure(
+                    listen_err,
+                    "closing fully drained tcp listen stream after connect tunnel loss",
+                    TunnelRole::Listen,
+                )
+                .map(Some);
+            }
+            return Ok(Some(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)));
+        }
+        return Err(err).context("closing fully drained tcp connect stream");
+    }
+    if let Err(err) = listen_tunnel.close_stream(listen_stream_id).await {
+        release_active_tcp_stream(runtime).await;
+        return classify_transport_failure(
+            err,
+            "closing fully drained tcp listen stream",
+            TunnelRole::Listen,
+        )
+        .map(Some);
+    }
     release_active_tcp_stream(runtime).await;
+    Ok(None)
 }
 
 fn frame_data_bytes(frame: &Frame) -> usize {
@@ -1256,6 +1302,112 @@ mod tests {
             .expect("tcp epoch should stop after cancellation")
             .unwrap()
             .expect("pending close should not fail the forward");
+        assert!(matches!(control, ForwardLoopControl::Cancelled));
+    }
+
+    #[tokio::test]
+    async fn fully_drained_tcp_pair_closes_both_daemon_streams() {
+        let (listen_broker_side, mut listen_daemon_side) = tokio::io::duplex(4096);
+        let listen_tunnel = Arc::new(PortTunnel::from_stream(listen_broker_side).unwrap());
+        let connect_io = ScriptedTunnelIo::default();
+        let connect_tunnel = Arc::new(PortTunnel::from_stream(connect_io.clone()).unwrap());
+        let runtime = tcp_test_runtime(listen_tunnel.clone(), connect_tunnel.clone());
+        runtime
+            .store
+            .insert(test_record(&runtime, "127.0.0.1:10000"))
+            .await;
+        let cancel = runtime.cancel.clone();
+
+        let epoch_runtime = runtime.clone();
+        let epoch = tokio::spawn({
+            let listen_tunnel = listen_tunnel.clone();
+            let connect_tunnel = connect_tunnel.clone();
+            async move { run_tcp_forward_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
+        });
+
+        write_frame(
+            &mut listen_daemon_side,
+            &Frame {
+                frame_type: FrameType::TcpAccept,
+                flags: 0,
+                stream_id: 11,
+                meta: serde_json::to_vec(&serde_json::json!({
+                    "listener_stream_id": 1
+                }))
+                .unwrap(),
+                data: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+        connect_io
+            .wait_for_written_frame(FrameType::TcpConnect, 1)
+            .await;
+        connect_io.push_read_frame(&Frame {
+            frame_type: FrameType::TcpConnectOk,
+            flags: 0,
+            stream_id: 1,
+            meta: Vec::new(),
+            data: Vec::new(),
+        });
+
+        write_frame(
+            &mut listen_daemon_side,
+            &Frame {
+                frame_type: FrameType::TcpEof,
+                flags: 0,
+                stream_id: 11,
+                meta: Vec::new(),
+                data: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+        connect_io
+            .wait_for_written_frame(FrameType::TcpEof, 1)
+            .await;
+
+        connect_io.push_read_frame(&Frame {
+            frame_type: FrameType::TcpEof,
+            flags: 0,
+            stream_id: 1,
+            meta: Vec::new(),
+            data: Vec::new(),
+        });
+        connect_io.wait_for_written_frame(FrameType::Close, 1).await;
+        let listen_eof =
+            tokio::time::timeout(Duration::from_secs(1), read_frame(&mut listen_daemon_side))
+                .await
+                .expect("connect-side EOF should relay to the listen-side stream")
+                .unwrap();
+        assert_eq!(listen_eof.frame_type, FrameType::TcpEof);
+        assert_eq!(listen_eof.stream_id, 11);
+        let listen_close =
+            tokio::time::timeout(Duration::from_secs(1), read_frame(&mut listen_daemon_side))
+                .await
+                .expect("fully drained listen-side stream should be closed after EOF relay")
+                .unwrap();
+        assert_eq!(listen_close.frame_type, FrameType::Close);
+        assert_eq!(listen_close.stream_id, 11);
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let entries = runtime.store.list(&filter_one(&runtime.forward_id)).await;
+                if entries[0].active_tcp_streams == 0 {
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("fully drained pair should release active stream accounting");
+
+        cancel.cancel();
+        let control = tokio::time::timeout(Duration::from_secs(1), epoch)
+            .await
+            .expect("tcp epoch should stop after cancellation")
+            .unwrap()
+            .expect("fully drained close should not fail the forward");
         assert!(matches!(control, ForwardLoopControl::Cancelled));
     }
 

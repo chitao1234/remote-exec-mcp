@@ -157,13 +157,20 @@ void PortTunnelConnection::drop_tcp_stream(
     }
 }
 
-bool PortTunnelConnection::send_tcp_success_after_read_thread_started(
+bool PortTunnelConnection::send_tcp_success_after_io_threads_started(
     const PortTunnelFrame& success,
     uint32_t stream_id,
     const std::shared_ptr<TunnelTcpStream>& stream,
     bool worker_acquired
 ) {
     std::shared_ptr<TcpReadStartGate> start_gate(new TcpReadStartGate());
+    if (!spawn_tcp_write_thread(service_, shared_from_this(), stream_id, stream, false)) {
+        drop_tcp_stream(stream_id, stream);
+        if (worker_acquired) {
+            service_->release_worker();
+        }
+        return false;
+    }
     if (!spawn_tcp_read_thread(
             service_,
             shared_from_this(),
@@ -331,7 +338,7 @@ bool PortTunnelConnection::accept_session_tcp_stream(
         return false;
     }
 
-    if (!send_tcp_success_after_read_thread_started(frame, stream_id, stream, worker_acquired)) {
+    if (!send_tcp_success_after_io_threads_started(frame, stream_id, stream, worker_acquired)) {
         return false;
     }
     return true;

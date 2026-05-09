@@ -89,8 +89,10 @@ recover from transport loss on either forwarding side while the daemon retains
 the forward itself plus future TCP accepts or future UDP datagrams on the
 listen side. Active TCP streams and UDP per-peer connector state are not
 preserved across reconnect. C++ forwarding worker threads are capped by
-`port_forward_max_worker_threads`, and v4 `TunnelReady.limits` truthfully report
-the configured active TCP stream, UDP bind, and tunnel queued-byte limits.
+`port_forward_max_worker_threads`; each active forwarded TCP stream uses
+separate read and write workers so slow peer writes cannot block the tunnel
+control reader. v4 `TunnelReady.limits` truthfully report the configured active
+TCP stream, UDP bind, and tunnel queued-byte limits.
 Retained sessions, retained listeners, UDP binds, active TCP streams, and
 outbound queued tunnel bytes are enforced daemon-wide. Upgraded tunnel socket
 reads and writes are bounded by `port_forward_tunnel_io_timeout_ms`, so a peer
@@ -140,8 +142,9 @@ default_workdir = /work
 # max_request_header_bytes = 65536
 # max_request_body_bytes = 536870912
 # max_open_sessions = 64
-# C++ forwarding uses detached worker threads for retained listener, UDP, TCP
-# stream, and reconnect-expiry work.
+# C++ forwarding uses detached worker threads for retained listener, UDP,
+# reconnect-expiry, and TCP stream work. Each active TCP stream uses separate
+# read and write workers.
 # port_forward_max_worker_threads = 256
 # port_forward_max_retained_sessions = 64
 # port_forward_max_retained_listeners = 64

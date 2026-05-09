@@ -32,6 +32,7 @@
 using Json = nlohmann::json;
 
 extern const std::size_t READ_BUF_SIZE;
+extern const std::size_t TCP_WRITE_QUEUE_LIMIT;
 extern const unsigned long RETAINED_SOCKET_POLL_TIMEOUT_MS;
 extern const unsigned long RESUME_TIMEOUT_MS;
 
@@ -53,13 +54,19 @@ struct TunnelTcpStream {
     ) : socket(socket_value),
         service(service_value),
         closed(false),
-        active_stream_budget_acquired(active_stream_budget) {}
+        active_stream_budget_acquired(active_stream_budget),
+        writer_closed(false),
+        writer_shutdown_requested(false) {}
 
     UniqueSocket socket;
     std::weak_ptr<PortTunnelService> service;
     BasicMutex mutex;
+    BasicCondVar writer_cond;
+    std::vector<std::vector<unsigned char> > write_queue;
     bool closed;
     bool active_stream_budget_acquired;
+    bool writer_closed;
+    bool writer_shutdown_requested;
 };
 
 struct TunnelUdpSocket {
@@ -157,6 +164,13 @@ bool spawn_tcp_read_thread(
     const std::shared_ptr<TunnelTcpStream>& stream,
     bool worker_acquired = false,
     const std::shared_ptr<TcpReadStartGate>& start_gate = std::shared_ptr<TcpReadStartGate>()
+);
+bool spawn_tcp_write_thread(
+    const std::shared_ptr<PortTunnelService>& service,
+    const std::shared_ptr<PortTunnelConnection>& tunnel,
+    uint32_t stream_id,
+    const std::shared_ptr<TunnelTcpStream>& stream,
+    bool worker_acquired = false
 );
 bool spawn_udp_read_thread(
     const std::shared_ptr<PortTunnelService>& service,
@@ -273,6 +287,7 @@ public:
     void run();
     void tcp_accept_loop_transport_owned(uint32_t listener_stream_id, SOCKET listener_socket);
     void tcp_read_loop(uint32_t stream_id, std::shared_ptr<TunnelTcpStream> stream);
+    void tcp_write_loop(uint32_t stream_id, std::shared_ptr<TunnelTcpStream> stream);
     void udp_read_loop_transport_owned(
         uint32_t stream_id,
         std::shared_ptr<TunnelUdpSocket> socket_value
@@ -315,7 +330,7 @@ private:
     void release_data_frame_reservation(unsigned long charge_value);
     bool send_data_frame_or_limit_error(const PortTunnelFrame& frame);
     bool send_data_frame_or_drop_on_limit(const PortTunnelFrame& frame);
-    bool send_tcp_success_after_read_thread_started(
+    bool send_tcp_success_after_io_threads_started(
         const PortTunnelFrame& success,
         uint32_t stream_id,
         const std::shared_ptr<TunnelTcpStream>& stream,
