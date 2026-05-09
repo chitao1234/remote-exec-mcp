@@ -572,10 +572,7 @@ pty = "none"
         .await
     }
 
-    async fn close_forward(
-        &self,
-        forward_id: String,
-    ) -> remote_exec_broker::client::ToolResponse {
+    async fn close_forward(&self, forward_id: String) -> remote_exec_broker::client::ToolResponse {
         self.client
             .call_tool(
                 "forward_ports",

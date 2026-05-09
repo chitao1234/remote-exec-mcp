@@ -258,7 +258,10 @@ max_reconnecting_forwards = 7
     assert_eq!(limits["max_reconnecting_forwards"], 7);
 
     let listed = list_forward(&fixture, &forward_id).await;
-    assert_eq!(listed["limits"], open.structured_content["forwards"][0]["limits"]);
+    assert_eq!(
+        listed["limits"],
+        open.structured_content["forwards"][0]["limits"]
+    );
 
     let close = close_forward(&fixture, forward_id).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
