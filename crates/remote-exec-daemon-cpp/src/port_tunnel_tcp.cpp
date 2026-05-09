@@ -251,24 +251,7 @@ void PortTunnelConnection::tcp_accept_loop_transport_owned(
             {"listener_stream_id", listener_stream_id},
             {"peer", printable_port_forward_endpoint(reinterpret_cast<sockaddr*>(&peer_address), peer_len)}
         }.dump();
-        send_frame(frame);
-        if (!spawn_tcp_read_thread(service_, shared_from_this(), stream_id, stream, true)) {
-            std::shared_ptr<TunnelTcpStream> removed_stream;
-            {
-                BasicLockGuard lock(state_mutex_);
-                std::map<uint32_t, std::shared_ptr<TunnelTcpStream> >::iterator it =
-                    tcp_streams_.find(stream_id);
-                if (it != tcp_streams_.end()) {
-                    removed_stream = it->second;
-                    tcp_streams_.erase(it);
-                }
-            }
-            if (removed_stream.get() != NULL) {
-                mark_tcp_stream_closed(removed_stream);
-            } else {
-                mark_tcp_stream_closed(stream);
-            }
-            send_worker_limit(stream_id);
+        if (!send_tcp_success_after_read_thread_started(frame, stream_id, stream, true)) {
             continue;
         }
     }
@@ -302,41 +285,16 @@ void PortTunnelConnection::tcp_connect(const PortTunnelFrame& frame) {
         tcp_streams_[frame.stream_id] = stream;
     }
     if (!service_->try_acquire_worker()) {
-        std::shared_ptr<TunnelTcpStream> removed_stream;
-        {
-            BasicLockGuard lock(state_mutex_);
-            std::map<uint32_t, std::shared_ptr<TunnelTcpStream> >::iterator it =
-                tcp_streams_.find(frame.stream_id);
-            if (it != tcp_streams_.end()) {
-                removed_stream = it->second;
-                tcp_streams_.erase(it);
-            }
-        }
-        if (removed_stream.get() != NULL) {
-            mark_tcp_stream_closed(removed_stream);
-        } else {
-            mark_tcp_stream_closed(stream);
-        }
+        drop_tcp_stream(frame.stream_id, stream);
         send_worker_limit(frame.stream_id);
         return;
     }
-    send_frame(make_empty_frame(PortTunnelFrameType::TcpConnectOk, frame.stream_id));
-    if (!spawn_tcp_read_thread(service_, shared_from_this(), frame.stream_id, stream, true)) {
-        std::shared_ptr<TunnelTcpStream> removed_stream;
-        {
-            BasicLockGuard lock(state_mutex_);
-            std::map<uint32_t, std::shared_ptr<TunnelTcpStream> >::iterator it =
-                tcp_streams_.find(frame.stream_id);
-            if (it != tcp_streams_.end()) {
-                removed_stream = it->second;
-                tcp_streams_.erase(it);
-            }
-        }
-        if (removed_stream.get() != NULL) {
-            mark_tcp_stream_closed(removed_stream);
-        } else {
-            mark_tcp_stream_closed(stream);
-        }
+    if (!send_tcp_success_after_read_thread_started(
+            make_empty_frame(PortTunnelFrameType::TcpConnectOk, frame.stream_id),
+            frame.stream_id,
+            stream,
+            true
+        )) {
         send_worker_limit(frame.stream_id);
         return;
     }

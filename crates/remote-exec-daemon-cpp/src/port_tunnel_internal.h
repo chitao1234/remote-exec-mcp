@@ -37,6 +37,7 @@ extern const unsigned long RESUME_TIMEOUT_MS;
 
 class PortTunnelConnection;
 class PortTunnelService;
+class TcpReadStartGate;
 
 enum class PortTunnelCloseMode {
     RetryableDetach,
@@ -154,7 +155,8 @@ bool spawn_tcp_read_thread(
     const std::shared_ptr<PortTunnelConnection>& tunnel,
     uint32_t stream_id,
     const std::shared_ptr<TunnelTcpStream>& stream,
-    bool worker_acquired = false
+    bool worker_acquired = false,
+    const std::shared_ptr<TcpReadStartGate>& start_gate = std::shared_ptr<TcpReadStartGate>()
 );
 bool spawn_udp_read_thread(
     const std::shared_ptr<PortTunnelService>& service,
@@ -242,6 +244,22 @@ private:
     std::shared_ptr<PortTunnelService> service_;
 };
 
+class TcpReadStartGate {
+public:
+    TcpReadStartGate();
+
+    void release();
+    void wait();
+
+private:
+    TcpReadStartGate(const TcpReadStartGate&);
+    TcpReadStartGate& operator=(const TcpReadStartGate&);
+
+    BasicMutex mutex_;
+    BasicCondVar cond_;
+    bool released_;
+};
+
 class PortTunnelConnection : public std::enable_shared_from_this<PortTunnelConnection> {
 public:
     PortTunnelConnection(SOCKET client, const std::shared_ptr<PortTunnelService>& service)
@@ -291,6 +309,13 @@ private:
     void release_data_frame_reservation(unsigned long charge_value);
     bool send_data_frame_or_limit_error(const PortTunnelFrame& frame);
     bool send_data_frame_or_drop_on_limit(const PortTunnelFrame& frame);
+    bool send_tcp_success_after_read_thread_started(
+        const PortTunnelFrame& success,
+        uint32_t stream_id,
+        const std::shared_ptr<TunnelTcpStream>& stream,
+        bool worker_acquired
+    );
+    void drop_tcp_stream(uint32_t stream_id, const std::shared_ptr<TunnelTcpStream>& fallback);
     void handle_frame(const PortTunnelFrame& frame);
     void tunnel_open(const PortTunnelFrame& frame);
     void tunnel_close(const PortTunnelFrame& frame);

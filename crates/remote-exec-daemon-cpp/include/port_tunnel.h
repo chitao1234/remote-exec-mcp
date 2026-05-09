@@ -13,3 +13,7 @@ int handle_port_tunnel_upgrade(AppState& state, SOCKET client, const HttpRequest
 std::shared_ptr<PortTunnelService> create_port_tunnel_service(
     const PortForwardLimitConfig& limits = default_port_forward_limit_config()
 );
+
+#ifdef REMOTE_EXEC_CPP_TESTING
+void set_forced_tcp_read_thread_failures(unsigned long count);
+#endif

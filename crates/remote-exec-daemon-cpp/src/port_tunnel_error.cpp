@@ -114,6 +114,50 @@ void PortTunnelConnection::send_worker_limit(uint32_t stream_id) {
     );
 }
 
+void PortTunnelConnection::drop_tcp_stream(
+    uint32_t stream_id,
+    const std::shared_ptr<TunnelTcpStream>& fallback
+) {
+    std::shared_ptr<TunnelTcpStream> removed_stream;
+    {
+        BasicLockGuard lock(state_mutex_);
+        std::map<uint32_t, std::shared_ptr<TunnelTcpStream> >::iterator it =
+            tcp_streams_.find(stream_id);
+        if (it != tcp_streams_.end()) {
+            removed_stream = it->second;
+            tcp_streams_.erase(it);
+        }
+    }
+    if (removed_stream.get() != NULL) {
+        mark_tcp_stream_closed(removed_stream);
+    } else if (fallback.get() != NULL) {
+        mark_tcp_stream_closed(fallback);
+    }
+}
+
+bool PortTunnelConnection::send_tcp_success_after_read_thread_started(
+    const PortTunnelFrame& success,
+    uint32_t stream_id,
+    const std::shared_ptr<TunnelTcpStream>& stream,
+    bool worker_acquired
+) {
+    std::shared_ptr<TcpReadStartGate> start_gate(new TcpReadStartGate());
+    if (!spawn_tcp_read_thread(
+            service_,
+            shared_from_this(),
+            stream_id,
+            stream,
+            worker_acquired,
+            start_gate
+        )) {
+        drop_tcp_stream(stream_id, stream);
+        return false;
+    }
+    send_frame(success);
+    start_gate->release();
+    return true;
+}
+
 void PortTunnelConnection::close_current_session(PortTunnelCloseMode mode) {
     std::shared_ptr<PortTunnelSession> session = current_session();
     if (session.get() != NULL) {
@@ -247,42 +291,13 @@ bool PortTunnelConnection::accept_session_tcp_stream(
         {"listener_stream_id", listener_stream_id},
         {"peer", peer}
     }.dump();
-    send_frame(frame);
     if (!owns_session(session) || closed_.load()) {
-        std::shared_ptr<TunnelTcpStream> removed_stream;
-        {
-            BasicLockGuard lock(state_mutex_);
-            std::map<uint32_t, std::shared_ptr<TunnelTcpStream> >::iterator it =
-                tcp_streams_.find(stream_id);
-            if (it != tcp_streams_.end()) {
-                removed_stream = it->second;
-                tcp_streams_.erase(it);
-            }
-        }
-        if (removed_stream.get() != NULL) {
-            mark_tcp_stream_closed(removed_stream);
-        }
+        drop_tcp_stream(stream_id, stream);
         service_->release_worker();
         return false;
     }
 
-    if (!spawn_tcp_read_thread(service_, shared_from_this(), stream_id, stream, worker_acquired)) {
-        std::shared_ptr<TunnelTcpStream> removed_stream;
-        {
-            BasicLockGuard lock(state_mutex_);
-            std::map<uint32_t, std::shared_ptr<TunnelTcpStream> >::iterator it =
-                tcp_streams_.find(stream_id);
-            if (it != tcp_streams_.end()) {
-                removed_stream = it->second;
-                tcp_streams_.erase(it);
-            }
-        }
-        if (removed_stream.get() != NULL) {
-            mark_tcp_stream_closed(removed_stream);
-        } else {
-            mark_tcp_stream_closed(stream);
-        }
-        send_worker_limit(stream_id);
+    if (!send_tcp_success_after_read_thread_started(frame, stream_id, stream, worker_acquired)) {
         return false;
     }
     return true;

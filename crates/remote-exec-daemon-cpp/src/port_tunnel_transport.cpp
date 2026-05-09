@@ -2,6 +2,39 @@
 
 #include <limits>
 
+#ifdef REMOTE_EXEC_CPP_TESTING
+static std::atomic<unsigned long> g_forced_tcp_read_thread_failures(0UL);
+
+void set_forced_tcp_read_thread_failures(unsigned long count) {
+    g_forced_tcp_read_thread_failures.store(count);
+}
+
+static bool consume_forced_tcp_read_thread_failure() {
+    unsigned long current = g_forced_tcp_read_thread_failures.load();
+    while (current > 0UL) {
+        if (g_forced_tcp_read_thread_failures.compare_exchange_weak(current, current - 1UL)) {
+            return true;
+        }
+    }
+    return false;
+}
+#endif
+
+TcpReadStartGate::TcpReadStartGate() : released_(false) {}
+
+void TcpReadStartGate::release() {
+    BasicLockGuard lock(mutex_);
+    released_ = true;
+    cond_.broadcast();
+}
+
+void TcpReadStartGate::wait() {
+    BasicLockGuard lock(mutex_);
+    while (!released_) {
+        cond_.wait(mutex_);
+    }
+}
+
 #ifdef _WIN32
 struct TcpAcceptContext {
     std::shared_ptr<PortTunnelService> service;
@@ -62,11 +95,15 @@ struct TcpReadContext {
     std::shared_ptr<PortTunnelConnection> tunnel;
     uint32_t stream_id;
     std::shared_ptr<TunnelTcpStream> stream;
+    std::shared_ptr<TcpReadStartGate> start_gate;
 };
 
 DWORD WINAPI tcp_read_thread_entry(LPVOID raw_context) {
     std::unique_ptr<TcpReadContext> context(static_cast<TcpReadContext*>(raw_context));
     PortTunnelWorkerLease lease(context->service);
+    if (context->start_gate.get() != NULL) {
+        context->start_gate->wait();
+    }
     context->tunnel->tcp_read_loop(context->stream_id, context->stream);
     return 0;
 }
@@ -77,17 +114,25 @@ bool spawn_tcp_read_thread(
     const std::shared_ptr<PortTunnelConnection>& tunnel,
     uint32_t stream_id,
     const std::shared_ptr<TunnelTcpStream>& stream,
-    bool worker_acquired
+    bool worker_acquired,
+    const std::shared_ptr<TcpReadStartGate>& start_gate
 ) {
     if (!worker_acquired && !service->try_acquire_worker()) {
         return false;
     }
+#ifdef REMOTE_EXEC_CPP_TESTING
+    if (consume_forced_tcp_read_thread_failure()) {
+        service->release_worker();
+        return false;
+    }
+#endif
 #ifdef _WIN32
     std::unique_ptr<TcpReadContext> context(new TcpReadContext());
     context->service = service;
     context->tunnel = tunnel;
     context->stream_id = stream_id;
     context->stream = stream;
+    context->start_gate = start_gate;
     HANDLE handle = CreateThread(NULL, 0, tcp_read_thread_entry, context.get(), 0, NULL);
     if (handle != NULL) {
         context.release();
@@ -98,8 +143,11 @@ bool spawn_tcp_read_thread(
     return false;
 #else
     try {
-        std::thread([service, tunnel, stream_id, stream]() {
+        std::thread([service, tunnel, stream_id, stream, start_gate]() {
             PortTunnelWorkerLease lease(service);
+            if (start_gate.get() != NULL) {
+                start_gate->wait();
+            }
             tunnel->tcp_read_loop(stream_id, stream);
         }).detach();
     } catch (...) {
