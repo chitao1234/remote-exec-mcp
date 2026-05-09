@@ -694,6 +694,57 @@ async fn forward_ports_listen_side_recovery_retries_transient_connect_reopen_fai
 }
 
 #[tokio::test]
+async fn forward_ports_reports_resumed_listen_ready_while_connect_reopens_after_listen_recovery() {
+    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
+    support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
+
+    let echo = spawn_tcp_echo().await;
+    let open = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "builder-a",
+                "connect_side": "builder-a",
+                "forwards": [{
+                    "listen_endpoint": "127.0.0.1:0",
+                    "connect_endpoint": echo.to_string(),
+                    "protocol": "tcp"
+                }]
+            }),
+        )
+        .await;
+    let forward_id = forward_id_from(&open);
+    support::stub_daemon::drop_next_connect_tunnel_opens(&fixture.stub_state, 100).await;
+
+    support::stub_daemon::force_close_listen_port_tunnel_transport(&fixture.stub_state).await;
+
+    let reconnecting = wait_for_forward_side_health(
+        &fixture,
+        &forward_id,
+        "connect_state",
+        "reconnecting",
+        Duration::from_secs(5),
+    )
+    .await;
+    assert_eq!(reconnecting["status"], "open");
+    assert_eq!(reconnecting["phase"], "reconnecting");
+    assert_eq!(reconnecting["listen_state"]["health"], "ready");
+    assert_eq!(reconnecting["connect_state"]["health"], "reconnecting");
+
+    let close = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "close",
+                "forward_ids": [forward_id]
+            }),
+        )
+        .await;
+    assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
+}
+
+#[tokio::test]
 async fn forward_ports_reports_reconnecting_until_connect_side_is_ready() {
     let fixture = support::spawners::spawn_broker_with_local_and_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
@@ -1691,6 +1742,57 @@ async fn wait_for_forward_phase(
         .unwrap_or_default();
     panic!(
         "forward `{forward_id}` did not reach phase `{phase}` within {timeout:?}; last_phase={last_phase} last_status={last_status} last_error={last_error}"
+    );
+}
+
+async fn wait_for_forward_side_health(
+    fixture: &support::fixture::BrokerFixture,
+    forward_id: &str,
+    side_state: &str,
+    health: &str,
+    timeout: Duration,
+) -> serde_json::Value {
+    let started = std::time::Instant::now();
+    let mut last_entry = None;
+    while started.elapsed() < timeout {
+        let list = fixture
+            .call_tool(
+                "forward_ports",
+                serde_json::json!({
+                    "action": "list",
+                    "forward_ids": [forward_id]
+                }),
+            )
+            .await;
+        let entry = list.structured_content["forwards"][0].clone();
+        last_entry = Some(entry.clone());
+        if entry[side_state]["health"] == health {
+            return entry;
+        }
+        if entry["status"] == "failed" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    let last_side_health = last_entry
+        .as_ref()
+        .and_then(|entry| entry[side_state]["health"].as_str())
+        .unwrap_or("<missing>");
+    let last_phase = last_entry
+        .as_ref()
+        .and_then(|entry| entry["phase"].as_str())
+        .unwrap_or("<missing>");
+    let last_status = last_entry
+        .as_ref()
+        .and_then(|entry| entry["status"].as_str())
+        .unwrap_or("<missing>");
+    let last_error = last_entry
+        .as_ref()
+        .and_then(|entry| entry["last_error"].as_str())
+        .unwrap_or_default();
+    panic!(
+        "forward `{forward_id}` {side_state} did not reach health `{health}` within {timeout:?}; last_health={last_side_health} last_phase={last_phase} last_status={last_status} last_error={last_error}"
     );
 }
 
