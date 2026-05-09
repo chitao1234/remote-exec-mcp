@@ -271,6 +271,33 @@ mod port_tunnel_tests {
     }
 
     #[tokio::test]
+    async fn resumed_tcp_listener_session_closes_with_retained_generation() {
+        let state = test_state();
+        let listen_endpoint = free_loopback_endpoint().await;
+        let (_listen_bound_endpoint, session_id) =
+            open_v4_resumable_tcp_listener(&state, &listen_endpoint).await;
+
+        let mut resumed = resume_session(&state, &session_id).await;
+        write_frame(
+            &mut resumed,
+            &json_frame(
+                FrameType::TunnelClose,
+                0,
+                serde_json::json!({
+                    "forward_id": "fwd_test",
+                    "generation": 1,
+                    "reason": "operator_close"
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+
+        let frame = read_frame(&mut resumed).await.unwrap();
+        assert_eq!(frame.frame_type, FrameType::TunnelClosed);
+    }
+
+    #[tokio::test]
     async fn udp_bind_session_can_resume_after_transport_drop() {
         let state = test_state();
         let listen_endpoint = free_loopback_endpoint().await;
@@ -624,6 +651,53 @@ mod port_tunnel_tests {
         .await
         .unwrap();
         let ready = read_frame(&mut broker_side).await.unwrap();
+        let session_id = serde_json::from_slice::<Value>(&ready.meta).unwrap()["session_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        write_frame(
+            &mut broker_side,
+            &json_frame(
+                FrameType::TcpListen,
+                1,
+                serde_json::json!({ "endpoint": endpoint }),
+            ),
+        )
+        .await
+        .unwrap();
+        let ok = read_frame(&mut broker_side).await.unwrap();
+        let bound_endpoint = endpoint_from_frame(&ok);
+        drop(broker_side);
+        (bound_endpoint, session_id)
+    }
+
+    async fn open_v4_resumable_tcp_listener(
+        state: &Arc<AppState>,
+        endpoint: &str,
+    ) -> (String, String) {
+        let mut broker_side = start_tunnel(state.clone()).await;
+        write_frame(
+            &mut broker_side,
+            &Frame {
+                frame_type: FrameType::TunnelOpen,
+                flags: 0,
+                stream_id: 0,
+                meta: serde_json::to_vec(&TunnelOpenMeta {
+                    forward_id: "fwd_test".to_string(),
+                    role: TunnelRole::Listen,
+                    side: "test".to_string(),
+                    generation: 1,
+                    protocol: TunnelForwardProtocol::Tcp,
+                    resume_session_id: None,
+                })
+                .unwrap(),
+                data: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+        let ready = read_frame(&mut broker_side).await.unwrap();
+        assert_eq!(ready.frame_type, FrameType::TunnelReady);
         let session_id = serde_json::from_slice::<Value>(&ready.meta).unwrap()["session_id"]
             .as_str()
             .unwrap()

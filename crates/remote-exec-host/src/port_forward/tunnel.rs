@@ -364,6 +364,10 @@ pub(super) async fn tunnel_session_resume(
             "port tunnel resume expired",
         ));
     }
+    tunnel.generation.store(
+        session.generation.load(Ordering::Acquire),
+        Ordering::Release,
+    );
     attach_session_to_tunnel(&session, &tunnel).await?;
     tunnel
         .send(Frame {

@@ -575,6 +575,7 @@ void PortTunnelConnection::session_resume(const PortTunnelFrame& frame) {
     }
 
     bool expired = false;
+    std::uint64_t generation = 0ULL;
     {
         BasicLockGuard lock(session->mutex);
         if (session->closed) {
@@ -594,6 +595,7 @@ void PortTunnelConnection::session_resume(const PortTunnelFrame& frame) {
         expired = session->expired ||
                   (session->resume_deadline_ms != 0ULL &&
                    platform::monotonic_ms() >= session->resume_deadline_ms);
+        generation = session->generation;
     }
     if (expired) {
         service_->close_session(session);
@@ -604,6 +606,7 @@ void PortTunnelConnection::session_resume(const PortTunnelFrame& frame) {
         );
     }
 
+    set_generation(generation);
     {
         BasicLockGuard lock(state_mutex_);
         session_ = session;

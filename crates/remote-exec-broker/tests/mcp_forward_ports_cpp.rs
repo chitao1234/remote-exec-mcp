@@ -337,6 +337,10 @@ async fn cpp_forward_ports_reconnect_after_tunnel_drop() {
     });
 
     let open = fixture.open_tcp_forward(&echo_addr.to_string()).await;
+    let forward_id = open.structured_content["forwards"][0]["forward_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let listen_endpoint = open.structured_content["forwards"][0]["listen_endpoint"]
         .as_str()
         .unwrap()
@@ -351,6 +355,19 @@ async fn cpp_forward_ports_reconnect_after_tunnel_drop() {
     let mut echoed = [0u8; 5];
     stream.read_exact(&mut echoed).await.unwrap();
     assert_eq!(&echoed, b"after");
+
+    let close = fixture
+        .client
+        .call_tool(
+            "forward_ports",
+            &ForwardPortsInput::Close {
+                forward_ids: vec![forward_id],
+            },
+        )
+        .await
+        .unwrap();
+    assert!(!close.is_error, "close failed: {}", close.text_output);
+    assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
 #[tokio::test]

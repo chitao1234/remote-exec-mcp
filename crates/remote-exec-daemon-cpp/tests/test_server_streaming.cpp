@@ -1237,10 +1237,14 @@ static void assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(A
 
     send_tunnel_frame(
         client_socket.get(),
-        json_frame(PortTunnelFrameType::SessionOpen, 0U, Json::object())
+        json_frame(
+            PortTunnelFrameType::TunnelOpen,
+            0U,
+            tunnel_open_meta("listen", "tcp", 1ULL)
+        )
     );
     const PortTunnelFrame ready = read_tunnel_frame(client_socket.get());
-    assert(ready.type == PortTunnelFrameType::SessionReady);
+    assert(ready.type == PortTunnelFrameType::TunnelReady);
     const Json ready_meta = Json::parse(ready.meta);
     const std::string session_id = ready_meta.at("session_id").get<std::string>();
 
@@ -1266,6 +1270,22 @@ static void assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(A
     assert(peer.valid());
     const PortTunnelFrame accepted = read_tunnel_frame(client_socket.get());
     assert(accepted.type == PortTunnelFrameType::TcpAccept);
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(
+            PortTunnelFrameType::TunnelClose,
+            0U,
+            Json{
+                {"forward_id", "fwd_cpp_test"},
+                {"generation", 1ULL},
+                {"reason", "operator_close"}
+            }
+        )
+    );
+    const PortTunnelFrame closed = read_tunnel_frame(client_socket.get());
+    assert(closed.type == PortTunnelFrameType::TunnelClosed);
+    assert(Json::parse(closed.meta).at("generation").get<uint64_t>() == 1ULL);
 
     close_tunnel(&client_socket, &server_thread);
 }
