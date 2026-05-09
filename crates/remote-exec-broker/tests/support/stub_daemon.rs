@@ -26,7 +26,7 @@ use remote_exec_proto::rpc::{
     ExecWarning, HealthCheckResponse, ImageReadResponse, PatchApplyRequest, PatchApplyResponse,
     RpcErrorBody, TargetInfoResponse,
 };
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
@@ -89,6 +89,7 @@ struct StubPortTunnelControl {
     session_ready_count: usize,
     active_transports: Vec<CancellationToken>,
     active_listen_transports: Vec<CancellationToken>,
+    active_connect_transports: Vec<CancellationToken>,
     active_udp_connector_streams: HashSet<u32>,
     max_observed_udp_connector_streams: usize,
     opened_udp_connector_streams: usize,
@@ -112,6 +113,7 @@ impl Default for StubPortTunnelControl {
             session_ready_count: 0,
             active_transports: Vec::new(),
             active_listen_transports: Vec::new(),
+            active_connect_transports: Vec::new(),
             active_udp_connector_streams: HashSet::new(),
             max_observed_udp_connector_streams: 0,
             opened_udp_connector_streams: 0,
@@ -145,6 +147,7 @@ pub(crate) struct StubDaemonState {
     transfer_path_info_response: Arc<Mutex<StubTransferPathInfoResponse>>,
     port_tunnel_state: Arc<remote_exec_host::HostRuntimeState>,
     port_tunnel_control: Arc<Mutex<StubPortTunnelControl>>,
+    port_tunnel_notify: Arc<Notify>,
 }
 
 pub(super) fn stub_daemon_state(
@@ -185,6 +188,7 @@ pub(super) fn stub_daemon_state(
         )),
         port_tunnel_state: build_stub_port_tunnel_state(target),
         port_tunnel_control: Arc::new(Mutex::new(StubPortTunnelControl::default())),
+        port_tunnel_notify: Arc::new(Notify::new()),
     }
 }
 
@@ -208,6 +212,8 @@ pub(crate) async fn enable_reconnectable_port_tunnel(state: &StubDaemonState) {
 pub(crate) async fn force_close_port_tunnel_transport(state: &StubDaemonState) {
     let active_transports = {
         let mut control = state.port_tunnel_control.lock().await;
+        control.active_listen_transports.clear();
+        control.active_connect_transports.clear();
         std::mem::take(&mut control.active_transports)
     };
     for transport in active_transports {
@@ -223,6 +229,46 @@ pub(crate) async fn force_close_listen_port_tunnel_transport(state: &StubDaemonS
     for transport in active_transports {
         transport.cancel();
     }
+}
+
+pub(crate) async fn force_close_connect_port_tunnel_transport(state: &StubDaemonState) {
+    let active_transports = {
+        let mut control = state.port_tunnel_control.lock().await;
+        std::mem::take(&mut control.active_connect_transports)
+    };
+    for transport in active_transports {
+        transport.cancel();
+    }
+}
+
+pub(crate) async fn wait_for_port_tunnel_transports(state: &StubDaemonState, count: usize) {
+    wait_for_port_tunnel_condition(state, |control| control.active_transports.len() >= count).await;
+}
+
+pub(crate) async fn wait_for_connect_port_tunnel_transports(state: &StubDaemonState, count: usize) {
+    wait_for_port_tunnel_condition(state, |control| {
+        control.active_connect_transports.len() >= count
+    })
+    .await;
+}
+
+async fn wait_for_port_tunnel_condition(
+    state: &StubDaemonState,
+    mut condition: impl FnMut(&StubPortTunnelControl) -> bool,
+) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            {
+                let control = state.port_tunnel_control.lock().await;
+                if condition(&control) {
+                    return;
+                }
+            }
+            state.port_tunnel_notify.notified().await;
+        }
+    })
+    .await
+    .expect("stub port tunnel condition should become true");
 }
 
 pub(crate) async fn fail_next_port_tunnel_upgrades(state: &StubDaemonState, count: usize) {
@@ -255,6 +301,14 @@ pub(crate) async fn set_session_resume_timeout(state: &StubDaemonState, timeout:
         .lock()
         .await
         .override_session_ready_resume_timeout_ms = Some(timeout.as_millis() as u64);
+}
+
+pub(crate) async fn delay_session_ready_after_first(state: &StubDaemonState, delay: Duration) {
+    state
+        .port_tunnel_control
+        .lock()
+        .await
+        .delay_session_ready_after_first = Some(delay);
 }
 
 pub(crate) async fn override_tunnel_ready_limits(
@@ -771,8 +825,11 @@ where
         control.active_transports.push(cancel.clone());
         if observed.listen_role_transport {
             control.active_listen_transports.push(cancel.clone());
+        } else {
+            control.active_connect_transports.push(cancel.clone());
         }
     }
+    state.port_tunnel_notify.notify_waiters();
 
     relay_port_tunnel_frames(state, stream, broker_side, cancel).await
 }

@@ -485,6 +485,42 @@ pub async fn spawn_broker_with_stub_daemon_platform(
 }
 
 pub async fn spawn_broker_with_stub_port_forward_version(version: u32) -> BrokerFixture {
+    spawn_broker_with_stub_port_forward_version_and_env(version, &[]).await
+}
+
+pub async fn spawn_broker_with_stub_port_forward_version_and_fast_heartbeat(
+    version: u32,
+) -> BrokerFixture {
+    spawn_broker_with_stub_port_forward_version_and_heartbeat(version, 25, 250).await
+}
+
+pub async fn spawn_broker_with_stub_port_forward_version_and_heartbeat(
+    version: u32,
+    heartbeat_interval_ms: u64,
+    heartbeat_timeout_ms: u64,
+) -> BrokerFixture {
+    let heartbeat_interval_ms = heartbeat_interval_ms.to_string();
+    let heartbeat_timeout_ms = heartbeat_timeout_ms.to_string();
+    spawn_broker_with_stub_port_forward_version_and_env(
+        version,
+        &[
+            (
+                "REMOTE_EXEC_TEST_PORT_TUNNEL_HEARTBEAT_INTERVAL_MS",
+                heartbeat_interval_ms.as_str(),
+            ),
+            (
+                "REMOTE_EXEC_TEST_PORT_TUNNEL_HEARTBEAT_TIMEOUT_MS",
+                heartbeat_timeout_ms.as_str(),
+            ),
+        ],
+    )
+    .await
+}
+
+async fn spawn_broker_with_stub_port_forward_version_and_env(
+    version: u32,
+    env: &[(&str, &str)],
+) -> BrokerFixture {
     let tempdir = tempfile::tempdir().unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -512,7 +548,7 @@ pub async fn spawn_broker_with_stub_port_forward_version(version: u32) -> Broker
         None,
     );
 
-    let client = spawn_broker_child(&broker_config).await;
+    let client = spawn_broker_child_with_env(&broker_config, env).await;
 
     BrokerFixture {
         _tempdir: tempdir,
@@ -528,12 +564,28 @@ pub async fn spawn_broker_with_local_and_stub_port_forward_version(version: u32)
 pub async fn spawn_broker_with_local_and_stub_port_forward_version_and_fast_heartbeat(
     version: u32,
 ) -> BrokerFixture {
+    spawn_broker_with_local_and_stub_port_forward_version_and_heartbeat(version, 25, 250).await
+}
+
+pub async fn spawn_broker_with_local_and_stub_port_forward_version_and_heartbeat(
+    version: u32,
+    heartbeat_interval_ms: u64,
+    heartbeat_timeout_ms: u64,
+) -> BrokerFixture {
+    let heartbeat_interval_ms = heartbeat_interval_ms.to_string();
+    let heartbeat_timeout_ms = heartbeat_timeout_ms.to_string();
     spawn_broker_with_local_and_stub_port_forward_version_and_extra_config_and_env(
         version,
         None,
         &[
-            ("REMOTE_EXEC_TEST_PORT_TUNNEL_HEARTBEAT_INTERVAL_MS", "25"),
-            ("REMOTE_EXEC_TEST_PORT_TUNNEL_HEARTBEAT_TIMEOUT_MS", "250"),
+            (
+                "REMOTE_EXEC_TEST_PORT_TUNNEL_HEARTBEAT_INTERVAL_MS",
+                heartbeat_interval_ms.as_str(),
+            ),
+            (
+                "REMOTE_EXEC_TEST_PORT_TUNNEL_HEARTBEAT_TIMEOUT_MS",
+                heartbeat_timeout_ms.as_str(),
+            ),
         ],
     )
     .await

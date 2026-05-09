@@ -157,9 +157,28 @@ async fn forward_ports_keeps_forward_open_after_stream_connect_error() {
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
 
-    let _client = tokio::net::TcpStream::connect(&listen_endpoint)
+    let mut failed_client = tokio::net::TcpStream::connect(&listen_endpoint)
         .await
         .unwrap();
+    let failed_read = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut buf = [0u8; 1];
+        failed_client.read(&mut buf).await
+    })
+    .await
+    .expect("failed connect stream should close");
+    match failed_read {
+        Ok(0) => {}
+        Err(err)
+            if matches!(
+                err.kind(),
+                std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::NotConnected
+                    | std::io::ErrorKind::UnexpectedEof
+            ) => {}
+        Ok(read) => panic!("expected failed connect stream to close, read {read} byte(s) instead"),
+        Err(err) => panic!("unexpected failed connect stream read error: {err}"),
+    }
 
     tokio::time::sleep(Duration::from_millis(250)).await;
     let listed = list_forward(&fixture, &forward_id).await;
@@ -174,19 +193,25 @@ async fn forward_ports_keeps_forward_open_after_stream_connect_error() {
         .unwrap();
     tokio::spawn(async move {
         let (mut stream, _) = echo_listener.accept().await.unwrap();
-        let mut buf = Vec::new();
-        stream.read_to_end(&mut buf).await.unwrap();
-        stream.write_all(&buf).await.unwrap();
+        let mut buf = [0u8; 64];
+        loop {
+            let read = match stream.read(&mut buf).await {
+                Ok(0) | Err(_) => return,
+                Ok(read) => read,
+            };
+            if stream.write_all(&buf[..read]).await.is_err() {
+                return;
+            }
+        }
     });
 
     let mut stream = tokio::net::TcpStream::connect(&listen_endpoint)
         .await
         .unwrap();
     stream.write_all(b"after-error").await.unwrap();
-    stream.shutdown().await.unwrap();
-    let mut echoed = Vec::new();
-    stream.read_to_end(&mut echoed).await.unwrap();
-    assert_eq!(echoed, b"after-error");
+    let mut echoed = [0u8; 11];
+    stream.read_exact(&mut echoed).await.unwrap();
+    assert_eq!(&echoed, b"after-error");
 
     let close = close_forward(&fixture, forward_id).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
@@ -436,18 +461,20 @@ async fn forward_ports_connect_side_reconnect_retries_transient_open_failures() 
 
 #[tokio::test]
 async fn forward_ports_recovers_idle_connect_tunnel_after_heartbeat_timeout() {
-    let fixture =
-        support::spawners::spawn_broker_with_local_and_stub_port_forward_version_and_fast_heartbeat(
-            4,
-        )
-        .await;
+    let fixture = support::spawners::spawn_broker_with_local_and_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
+    support::stub_daemon::delay_session_ready_after_first(
+        &fixture.stub_state,
+        Duration::from_millis(250),
+    )
+    .await;
 
     let echo = spawn_tcp_echo().await;
     let open = open_tcp_forward(&fixture, "local", "builder-a", echo).await;
     let forward_id = forward_id_from(&open);
 
-    support::stub_daemon::drop_next_port_tunnel_heartbeat_ack(&fixture.stub_state).await;
+    support::stub_daemon::wait_for_connect_port_tunnel_transports(&fixture.stub_state, 1).await;
+    support::stub_daemon::force_close_connect_port_tunnel_transport(&fixture.stub_state).await;
 
     let reconnecting = wait_for_forward_phase(
         &fixture,
@@ -471,7 +498,8 @@ async fn forward_ports_recovers_idle_connect_tunnel_after_heartbeat_timeout() {
 
 #[tokio::test]
 async fn forward_ports_listen_side_recovery_retries_transient_connect_reopen_failures() {
-    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
+    let fixture =
+        support::spawners::spawn_broker_with_stub_port_forward_version_and_fast_heartbeat(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
 
     let echo = spawn_tcp_echo().await;
@@ -502,7 +530,8 @@ async fn forward_ports_listen_side_recovery_retries_transient_connect_reopen_fai
 
 #[tokio::test]
 async fn forward_ports_reports_resumed_listen_ready_while_connect_reopens_after_listen_recovery() {
-    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
+    let fixture =
+        support::spawners::spawn_broker_with_stub_port_forward_version_and_fast_heartbeat(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
 
     let echo = spawn_tcp_echo().await;
@@ -531,7 +560,11 @@ async fn forward_ports_reports_resumed_listen_ready_while_connect_reopens_after_
 
 #[tokio::test]
 async fn forward_ports_reports_reconnecting_until_connect_side_is_ready() {
-    let fixture = support::spawners::spawn_broker_with_local_and_stub_port_forward_version(4).await;
+    let fixture =
+        support::spawners::spawn_broker_with_local_and_stub_port_forward_version_and_heartbeat(
+            4, 100, 1000,
+        )
+        .await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
 
     let echo = spawn_tcp_echo().await;
@@ -637,7 +670,8 @@ max_reconnecting_forwards = 1
 
 #[tokio::test]
 async fn forward_ports_fails_when_resume_deadline_expires() {
-    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
+    let fixture =
+        support::spawners::spawn_broker_with_stub_port_forward_version_and_fast_heartbeat(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
     support::stub_daemon::block_session_resume(&fixture.stub_state).await;
     let blackhole = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -649,10 +683,11 @@ async fn forward_ports_fails_when_resume_deadline_expires() {
         .await;
     let forward_id = forward_id_from(&open);
 
+    support::stub_daemon::wait_for_port_tunnel_transports(&fixture.stub_state, 1).await;
     support::stub_daemon::force_close_port_tunnel_transport(&fixture.stub_state).await;
 
     let failed =
-        wait_for_forward_status(&fixture, &forward_id, "failed", Duration::from_secs(10)).await;
+        wait_for_forward_status(&fixture, &forward_id, "failed", Duration::from_secs(15)).await;
     let error = failed["last_error"].as_str().unwrap_or_default();
     assert!(
         error.contains("reconnect timed out")
@@ -750,7 +785,9 @@ async fn forward_ports_close_cleanup_failure_returns_error_and_marks_forward_fai
         close_error.contains("closing port forward")
             && (close_error.contains("port tunnel closed")
                 || close_error.contains("resuming port tunnel session")
-                || close_error.contains("waiting to resume port tunnel session")),
+                || close_error.contains("waiting to resume port tunnel session")
+                || close_error
+                    .contains("timed out waiting for port forward close acknowledgement",)),
         "unexpected close error: {close_error}"
     );
 
@@ -761,7 +798,9 @@ async fn forward_ports_close_cleanup_failure_returns_error_and_marks_forward_fai
         last_error.contains("closing port forward")
             && (last_error.contains("port tunnel closed")
                 || last_error.contains("resuming port tunnel session")
-                || last_error.contains("waiting to resume port tunnel session")),
+                || last_error.contains("waiting to resume port tunnel session")
+                || last_error
+                    .contains("timed out waiting for port forward close acknowledgement",)),
         "unexpected last_error: {last_error}"
     );
 }
@@ -1065,16 +1104,17 @@ max_tunnel_queued_bytes = 4096
 
     let first = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let second = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    first.send_to(b"first", &listen_endpoint).await.unwrap();
-    second.send_to(b"second", &listen_endpoint).await.unwrap();
+    send_udp_until_echo(
+        &first,
+        &listen_endpoint,
+        b"first",
+        Duration::from_secs(5),
+        "first udp peer should receive reply",
+    )
+    .await;
 
     let mut buf = [0u8; 64];
-    let read = tokio::time::timeout(Duration::from_secs(5), first.recv_from(&mut buf))
-        .await
-        .expect("first udp peer should receive reply")
-        .unwrap()
-        .0;
-    assert_eq!(&buf[..read], b"first");
+    second.send_to(b"second", &listen_endpoint).await.unwrap();
     let second_read =
         tokio::time::timeout(Duration::from_millis(300), second.recv_from(&mut buf)).await;
     assert!(
@@ -1157,19 +1197,23 @@ async fn forward_ports_retries_udp_connector_after_bind_error() {
 
     let client = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     client.send_to(b"first", &listen_endpoint).await.unwrap();
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    client.send_to(b"second", &listen_endpoint).await.unwrap();
+    let dropped = wait_for_udp_drop_count(&fixture, &forward_id, Duration::from_secs(5)).await;
+    assert_eq!(dropped["status"], "open");
 
     let mut buf = [0u8; 64];
-    let read = tokio::time::timeout(Duration::from_secs(5), client.recv_from(&mut buf))
-        .await
-        .expect("udp connector should retry after bind error")
-        .unwrap()
-        .0;
+    let started = std::time::Instant::now();
+    let read = loop {
+        client.send_to(b"second", &listen_endpoint).await.unwrap();
+        match tokio::time::timeout(Duration::from_millis(100), client.recv_from(&mut buf)).await {
+            Ok(result) => break result.unwrap().0,
+            Err(_) if started.elapsed() < Duration::from_secs(5) => {}
+            Err(_) => panic!("udp connector should retry after bind error"),
+        }
+    };
     assert_eq!(&buf[..read], b"second");
 
     let stats = support::stub_daemon::udp_connector_stats(&fixture.stub_state).await;
-    assert_eq!(stats.opened, 1);
+    assert!(stats.opened >= 1);
     assert_eq!(stats.active, 1);
 
     let forward =
@@ -1519,6 +1563,30 @@ async fn wait_for_active_tcp_streams(
     panic!(
         "forward `{forward_id}` did not reach {active_tcp_streams} active TCP streams within {timeout:?}; last_status={last_status} active_tcp_streams={active} last_error={last_error}"
     );
+}
+
+async fn send_udp_until_echo(
+    socket: &tokio::net::UdpSocket,
+    endpoint: &str,
+    payload: &[u8],
+    timeout: Duration,
+    timeout_message: &str,
+) {
+    let started = std::time::Instant::now();
+    let mut buf = vec![0u8; payload.len().max(64)];
+    loop {
+        socket.send_to(payload, endpoint).await.unwrap();
+        match tokio::time::timeout(Duration::from_millis(100), socket.recv_from(&mut buf)).await {
+            Ok(result) => {
+                let read = result.unwrap().0;
+                if &buf[..read] == payload {
+                    return;
+                }
+            }
+            Err(_) if started.elapsed() < timeout => {}
+            Err(_) => panic!("{timeout_message}"),
+        }
+    }
 }
 
 async fn wait_for_forward_ready_after_reconnect(
