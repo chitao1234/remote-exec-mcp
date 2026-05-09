@@ -3,17 +3,18 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use remote_exec_proto::port_tunnel::{
-    Frame, FrameType, HEADER_LEN, read_frame, write_frame, write_preface,
+    Frame, FrameType, HEADER_LEN, TunnelHeartbeatMeta, read_frame, write_frame, write_preface,
 };
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::daemon_client::DaemonClientError;
 
 use super::events::{ForwardSideEvent, TunnelErrorMeta};
+use super::{port_tunnel_heartbeat_interval, port_tunnel_heartbeat_timeout};
 
 pub struct PortTunnel {
     tx: mpsc::Sender<QueuedFrame>,
@@ -21,6 +22,7 @@ pub struct PortTunnel {
     cancel: CancellationToken,
     reader_task: Mutex<Option<JoinHandle<()>>>,
     writer_task: Mutex<Option<JoinHandle<()>>>,
+    heartbeat_task: Mutex<Option<JoinHandle<()>>>,
     queued_bytes: Arc<AtomicUsize>,
     max_queued_bytes: usize,
 }
@@ -50,10 +52,20 @@ impl PortTunnel {
         let (mut reader, mut writer) = tokio::io::split(stream);
         let (tx, mut write_rx) = mpsc::channel::<QueuedFrame>(128);
         let (read_tx, read_rx) = mpsc::channel::<anyhow::Result<Frame>>(128);
+        let (heartbeat_ack_tx, heartbeat_ack_rx) = watch::channel(0u64);
         let cancel = CancellationToken::new();
         let writer_cancel = cancel.clone();
         let queued_bytes = Arc::new(AtomicUsize::new(0));
         let writer_queued_bytes = queued_bytes.clone();
+        let heartbeat_tx = tx.clone();
+        let heartbeat_read_tx = read_tx.clone();
+        let heartbeat_cancel = cancel.clone();
+        let heartbeat_task = tokio::spawn(run_heartbeat_loop(
+            heartbeat_tx,
+            heartbeat_read_tx,
+            heartbeat_ack_rx,
+            heartbeat_cancel,
+        ));
         let writer_task = tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -75,13 +87,37 @@ impl PortTunnel {
             }
         });
         let reader_cancel = cancel.clone();
+        let reader_tx = tx.clone();
         let reader_task = tokio::spawn(async move {
+            let heartbeat_ack_tx = heartbeat_ack_tx;
             loop {
                 tokio::select! {
                     _ = reader_cancel.cancelled() => return,
                     frame = read_frame(&mut reader) => {
                         match frame {
                             Ok(frame) => {
+                                match frame.frame_type {
+                                    FrameType::TunnelHeartbeatAck => {
+                                        if let Ok(meta) =
+                                            serde_json::from_slice::<TunnelHeartbeatMeta>(&frame.meta)
+                                        {
+                                            let _ = heartbeat_ack_tx.send(meta.nonce);
+                                        }
+                                        continue;
+                                    }
+                                    FrameType::TunnelHeartbeat => {
+                                        let ack = Frame {
+                                            frame_type: FrameType::TunnelHeartbeatAck,
+                                            flags: 0,
+                                            stream_id: 0,
+                                            meta: frame.meta,
+                                            data: Vec::new(),
+                                        };
+                                        let _ = reader_tx.try_send(QueuedFrame { frame: ack, charge: 0 });
+                                        continue;
+                                    }
+                                    _ => {}
+                                }
                                 if read_tx.send(Ok(frame)).await.is_err() {
                                     return;
                                 }
@@ -113,6 +149,7 @@ impl PortTunnel {
             cancel,
             reader_task: Mutex::new(Some(reader_task)),
             writer_task: Mutex::new(Some(writer_task)),
+            heartbeat_task: Mutex::new(Some(heartbeat_task)),
             queued_bytes,
             max_queued_bytes,
         })
@@ -190,7 +227,88 @@ impl PortTunnel {
                 .map_err(|_| anyhow::anyhow!("timed out waiting for port tunnel writer task"))?
                 .map_err(|err| anyhow::anyhow!("port tunnel writer task join failed: {err}"))?;
         }
+        if let Some(task) = self.heartbeat_task.lock().await.take() {
+            tokio::time::timeout(timeout, task)
+                .await
+                .map_err(|_| anyhow::anyhow!("timed out waiting for port tunnel heartbeat task"))?
+                .map_err(|err| anyhow::anyhow!("port tunnel heartbeat task join failed: {err}"))?;
+        }
         Ok(())
+    }
+}
+
+async fn run_heartbeat_loop(
+    tx: mpsc::Sender<QueuedFrame>,
+    read_tx: mpsc::Sender<anyhow::Result<Frame>>,
+    mut ack_rx: watch::Receiver<u64>,
+    cancel: CancellationToken,
+) {
+    let heartbeat_interval = port_tunnel_heartbeat_interval();
+    let heartbeat_timeout = port_tunnel_heartbeat_timeout();
+    let mut next_nonce = 1u64;
+    loop {
+        tokio::select! {
+            _ = cancel.cancelled() => return,
+            _ = tokio::time::sleep(heartbeat_interval) => {}
+        }
+
+        let current_nonce = next_nonce;
+        next_nonce = next_nonce.saturating_add(1);
+        let frame = Frame {
+            frame_type: FrameType::TunnelHeartbeat,
+            flags: 0,
+            stream_id: 0,
+            meta: match serde_json::to_vec(&TunnelHeartbeatMeta {
+                nonce: current_nonce,
+            }) {
+                Ok(meta) => meta,
+                Err(err) => {
+                    let _ = read_tx.send(Err(err.into())).await;
+                    cancel.cancel();
+                    return;
+                }
+            },
+            data: Vec::new(),
+        };
+        let send_result =
+            tokio::time::timeout(heartbeat_timeout, tx.send(QueuedFrame { frame, charge: 0 }))
+                .await;
+        if !matches!(send_result, Ok(Ok(()))) {
+            let _ = read_tx
+                .send(Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "port tunnel heartbeat could not be queued",
+                )
+                .into()))
+                .await;
+            cancel.cancel();
+            return;
+        }
+
+        let acknowledged = tokio::time::timeout(heartbeat_timeout, async {
+            loop {
+                if *ack_rx.borrow_and_update() == current_nonce {
+                    return true;
+                }
+                if ack_rx.changed().await.is_err() {
+                    return false;
+                }
+            }
+        })
+        .await
+        .unwrap_or(false);
+
+        if !acknowledged {
+            let _ = read_tx
+                .send(Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "port tunnel heartbeat timed out",
+                )
+                .into()))
+                .await;
+            cancel.cancel();
+            return;
+        }
     }
 }
 
@@ -428,5 +546,74 @@ mod tests {
         let frame = tunnel.recv().await.unwrap();
 
         assert_eq!(frame.frame_type, FrameType::TcpListenOk);
+    }
+
+    #[tokio::test]
+    async fn heartbeat_ack_frames_are_consumed_by_port_tunnel() {
+        let (broker_side, mut daemon_side) = tokio::io::duplex(4096);
+        let tunnel = PortTunnel::from_stream(broker_side).unwrap();
+        let heartbeat_meta = serde_json::to_vec(&serde_json::json!({ "nonce": 1 })).unwrap();
+        remote_exec_proto::port_tunnel::write_frame(
+            &mut daemon_side,
+            &Frame {
+                frame_type: FrameType::TunnelHeartbeatAck,
+                flags: 0,
+                stream_id: 0,
+                meta: heartbeat_meta,
+                data: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+        remote_exec_proto::port_tunnel::write_frame(
+            &mut daemon_side,
+            &Frame {
+                frame_type: FrameType::TunnelReady,
+                flags: 0,
+                stream_id: 0,
+                meta: serde_json::to_vec(&remote_exec_proto::port_tunnel::TunnelReadyMeta {
+                    generation: 1,
+                    session_id: None,
+                    resume_timeout_ms: None,
+                    limits: remote_exec_proto::port_tunnel::TunnelLimitSummary::default(),
+                })
+                .unwrap(),
+                data: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(1), tunnel.recv())
+            .await
+            .expect("heartbeat ack should not block data-plane frame")
+            .unwrap();
+        assert_eq!(frame.frame_type, FrameType::TunnelReady);
+    }
+
+    #[tokio::test]
+    async fn heartbeat_timeout_surfaces_retryable_transport_error() {
+        let (broker_side, mut daemon_side) = tokio::io::duplex(4096);
+        let tunnel = PortTunnel::from_stream(broker_side).unwrap();
+
+        let heartbeat = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                let frame = remote_exec_proto::port_tunnel::read_frame(&mut daemon_side)
+                    .await
+                    .unwrap();
+                if frame.frame_type == FrameType::TunnelHeartbeat {
+                    return frame;
+                }
+            }
+        })
+        .await
+        .expect("broker should send heartbeat");
+        assert_eq!(heartbeat.stream_id, 0);
+
+        let err = tokio::time::timeout(std::time::Duration::from_secs(1), tunnel.recv())
+            .await
+            .expect("heartbeat timeout should wake tunnel receiver")
+            .unwrap_err();
+        assert!(is_retryable_transport_error(&err), "{err:#}");
     }
 }

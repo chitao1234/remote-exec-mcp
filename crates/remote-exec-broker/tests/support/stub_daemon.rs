@@ -94,6 +94,7 @@ struct StubPortTunnelControl {
     max_observed_udp_connector_streams: usize,
     opened_udp_connector_streams: usize,
     udp_connector_bind_errors_remaining: usize,
+    heartbeat_acks_to_drop: usize,
 }
 
 impl Default for StubPortTunnelControl {
@@ -117,6 +118,7 @@ impl Default for StubPortTunnelControl {
             max_observed_udp_connector_streams: 0,
             opened_udp_connector_streams: 0,
             udp_connector_bind_errors_remaining: 0,
+            heartbeat_acks_to_drop: 0,
         }
     }
 }
@@ -293,6 +295,14 @@ pub(crate) async fn fail_next_udp_connector_bind(state: &StubDaemonState) {
         .lock()
         .await
         .udp_connector_bind_errors_remaining += 1;
+}
+
+pub(crate) async fn drop_next_port_tunnel_heartbeat_ack(state: &StubDaemonState) {
+    state
+        .port_tunnel_control
+        .lock()
+        .await
+        .heartbeat_acks_to_drop += 1;
 }
 
 pub(crate) async fn fail_first_forward_runtime_before_multi_open_finishes(state: &StubDaemonState) {
@@ -856,6 +866,10 @@ async fn observe_broker_to_daemon_frame(
                     control.close_transports_on_second_session_open = false;
                     observed.transports_to_cancel = std::mem::take(&mut control.active_transports);
                 }
+            }
+            FrameType::TunnelHeartbeat if control.heartbeat_acks_to_drop > 0 => {
+                control.heartbeat_acks_to_drop -= 1;
+                observed.forward = false;
             }
             FrameType::UdpBind if frame.stream_id >= 3 => {
                 if control.udp_connector_bind_errors_remaining > 0 {

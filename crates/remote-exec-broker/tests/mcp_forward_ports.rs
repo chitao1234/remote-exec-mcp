@@ -641,6 +641,63 @@ async fn forward_ports_connect_side_reconnect_retries_transient_open_failures() 
 }
 
 #[tokio::test]
+async fn forward_ports_recovers_idle_connect_tunnel_after_heartbeat_timeout() {
+    let fixture =
+        support::spawners::spawn_broker_with_local_and_stub_port_forward_version_and_fast_heartbeat(
+            4,
+        )
+        .await;
+    support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
+
+    let echo = spawn_tcp_echo().await;
+    let open = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "open",
+                "listen_side": "local",
+                "connect_side": "builder-a",
+                "forwards": [{
+                    "listen_endpoint": "127.0.0.1:0",
+                    "connect_endpoint": echo.to_string(),
+                    "protocol": "tcp"
+                }]
+            }),
+        )
+        .await;
+    let forward_id = forward_id_from(&open);
+
+    support::stub_daemon::drop_next_port_tunnel_heartbeat_ack(&fixture.stub_state).await;
+
+    let reconnecting = wait_for_forward_phase(
+        &fixture,
+        &forward_id,
+        "reconnecting",
+        Duration::from_secs(5),
+    )
+    .await;
+    assert_eq!(reconnecting["status"], "open");
+    assert_eq!(reconnecting["connect_state"]["health"], "reconnecting");
+
+    let ready =
+        wait_for_forward_ready_after_reconnect(&fixture, &forward_id, Duration::from_secs(5)).await;
+    assert_eq!(ready["status"], "open");
+    assert_eq!(ready["phase"], "ready");
+    assert_eq!(ready["connect_state"]["health"], "ready");
+
+    let close = fixture
+        .call_tool(
+            "forward_ports",
+            serde_json::json!({
+                "action": "close",
+                "forward_ids": [forward_id]
+            }),
+        )
+        .await;
+    assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
+}
+
+#[tokio::test]
 async fn forward_ports_listen_side_recovery_retries_transient_connect_reopen_failures() {
     let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;

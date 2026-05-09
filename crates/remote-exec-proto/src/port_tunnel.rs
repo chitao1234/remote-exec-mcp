@@ -126,6 +126,11 @@ pub struct TunnelCloseMeta {
     pub reason: String,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TunnelHeartbeatMeta {
+    pub nonce: u64,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ForwardRecoveringMeta {
     pub forward_id: String,

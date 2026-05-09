@@ -85,9 +85,10 @@ not exposed.
 
 Live forwarded sockets are reconnect-aware in-memory daemon state. When only the
 broker-daemon transport drops and the daemon stays alive, the broker may
-recover from transport loss on either forwarding side while the daemon retains
-the forward itself plus future TCP accepts or future UDP datagrams on the
-listen side. Active TCP streams and UDP per-peer connector state are not
+recover from transport loss or missed heartbeat acknowledgements on either
+forwarding side while the daemon retains the forward itself plus future TCP
+accepts or future UDP datagrams on the listen side. Active TCP streams and UDP
+per-peer connector state are not
 preserved across reconnect. C++ forwarding worker threads are capped by
 `port_forward_max_worker_threads`; each active forwarded TCP stream uses
 separate read and write workers so slow peer writes cannot block the tunnel
