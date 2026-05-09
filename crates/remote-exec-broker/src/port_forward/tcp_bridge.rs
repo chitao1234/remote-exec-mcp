@@ -13,7 +13,8 @@ use super::supervisor::{
 use super::tunnel::{
     EndpointMeta, PortTunnel, TcpAcceptMeta, classify_recoverable_tunnel_event,
     decode_tunnel_error_frame, decode_tunnel_meta, encode_tunnel_meta,
-    format_terminal_tunnel_error, is_backpressure_error, is_retryable_transport_error,
+    format_terminal_tunnel_error, is_backpressure_error, is_recoverable_pressure_tunnel_error,
+    is_retryable_transport_error,
 };
 
 struct TcpConnectStream {
@@ -255,10 +256,18 @@ async fn run_tcp_forward_epoch(
                     }
                     FrameType::Error => {
                         if frame.stream_id == runtime.listen_session.listener_stream_id {
-                            return Err(format_terminal_tunnel_error(
-                                &decode_tunnel_error_frame(&frame),
-                            ))
-                            .context("listen-side tcp tunnel error");
+                            let meta = decode_tunnel_error_frame(&frame);
+                            if is_recoverable_pressure_tunnel_error(&meta) {
+                                runtime
+                                    .store
+                                    .update_entry(&runtime.forward_id, |entry| {
+                                        entry.dropped_tcp_streams += 1;
+                                    })
+                                    .await;
+                                continue;
+                            }
+                            return Err(format_terminal_tunnel_error(&meta))
+                                .context("listen-side tcp tunnel error");
                         }
                         if let Some(connect_stream_id) = state.listen_to_connect.remove(&frame.stream_id) {
                             if let Some(mut stream) = state.connect_streams.remove(&connect_stream_id) {
@@ -1021,10 +1030,11 @@ mod tests {
             cancel,
         };
 
+        let epoch_runtime = runtime.clone();
         let epoch = tokio::spawn({
             let listen_tunnel = listen_tunnel.clone();
             let connect_tunnel = connect_tunnel.clone();
-            async move { run_tcp_forward_epoch(&runtime, listen_tunnel, connect_tunnel).await }
+            async move { run_tcp_forward_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
         });
 
         write_frame(
@@ -1132,10 +1142,11 @@ mod tests {
             cancel,
         };
 
+        let epoch_runtime = runtime.clone();
         let epoch = tokio::spawn({
             let listen_tunnel = listen_tunnel.clone();
             let connect_tunnel = connect_tunnel.clone();
-            async move { run_tcp_forward_epoch(&runtime, listen_tunnel, connect_tunnel).await }
+            async move { run_tcp_forward_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
         });
 
         write_frame(
@@ -1318,6 +1329,65 @@ mod tests {
             format!("{err:#}"),
             "listen-side tcp tunnel error: port_accept_failed: accept loop stopped"
         );
+    }
+
+    #[tokio::test]
+    async fn tcp_listener_pressure_error_counts_drop_without_failing_forward() {
+        let (listen_broker_side, mut listen_daemon_side) = tokio::io::duplex(4096);
+        let listen_tunnel = Arc::new(PortTunnel::from_stream(listen_broker_side).unwrap());
+        let connect_io = ScriptedTunnelIo::default();
+        let connect_tunnel = Arc::new(PortTunnel::from_stream(connect_io).unwrap());
+        let runtime = tcp_test_runtime(listen_tunnel.clone(), connect_tunnel.clone());
+        runtime
+            .store
+            .insert(test_record(&runtime, "127.0.0.1:10000"))
+            .await;
+        let cancel = runtime.cancel.clone();
+
+        let epoch_runtime = runtime.clone();
+        let epoch = tokio::spawn({
+            let listen_tunnel = listen_tunnel.clone();
+            let connect_tunnel = connect_tunnel.clone();
+            async move { run_tcp_forward_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
+        });
+
+        write_frame(
+            &mut listen_daemon_side,
+            &Frame {
+                frame_type: FrameType::Error,
+                flags: 0,
+                stream_id: 1,
+                meta: serde_json::to_vec(&serde_json::json!({
+                    "code": "port_tunnel_limit_exceeded",
+                    "message": "port tunnel active tcp stream limit reached",
+                    "fatal": false
+                }))
+                .unwrap(),
+                data: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let entries = runtime.store.list(&filter_one(&runtime.forward_id)).await;
+                if entries[0].dropped_tcp_streams == 1 {
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("listener pressure error should count a dropped tcp stream");
+
+        cancel.cancel();
+        let control = tokio::time::timeout(Duration::from_secs(1), epoch)
+            .await
+            .expect("tcp epoch should stay alive after pressure error")
+            .unwrap()
+            .expect("pressure error should not fail the forward");
+        assert!(matches!(control, ForwardLoopControl::Cancelled));
     }
 
     #[tokio::test]

@@ -250,7 +250,7 @@ void PortTunnelConnection::udp_read_loop_transport_owned(
             {"peer", printable_port_forward_endpoint(reinterpret_cast<sockaddr*>(&peer_address), peer_len)}
         }.dump();
         frame.data.assign(buffer.begin(), buffer.begin() + received);
-        if (!send_data_frame_or_limit_error(frame)) {
+        if (!send_data_frame_or_drop_on_limit(frame)) {
             mark_udp_socket_closed(socket_value);
             return;
         }

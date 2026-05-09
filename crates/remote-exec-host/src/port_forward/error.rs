@@ -16,3 +16,7 @@ pub(super) fn rpc_error(code: &'static str, message: impl Into<String>) -> HostR
         message,
     }
 }
+
+pub(super) fn is_recoverable_pressure_error(error: &HostRpcError) -> bool {
+    error.code == "port_tunnel_limit_exceeded"
+}

@@ -287,7 +287,10 @@ private:
     bool read_preface();
     bool read_frame(PortTunnelFrame* frame);
     void send_frame(const PortTunnelFrame& frame);
+    bool try_reserve_data_frame(const PortTunnelFrame& frame, unsigned long* charge_value);
+    void release_data_frame_reservation(unsigned long charge_value);
     bool send_data_frame_or_limit_error(const PortTunnelFrame& frame);
+    bool send_data_frame_or_drop_on_limit(const PortTunnelFrame& frame);
     void handle_frame(const PortTunnelFrame& frame);
     void tunnel_open(const PortTunnelFrame& frame);
     void tunnel_close(const PortTunnelFrame& frame);

@@ -275,51 +275,71 @@ void PortTunnelConnection::send_frame(const PortTunnelFrame& frame) {
     }
 }
 
-bool PortTunnelConnection::send_data_frame_or_limit_error(const PortTunnelFrame& frame) {
+bool PortTunnelConnection::try_reserve_data_frame(
+    const PortTunnelFrame& frame,
+    unsigned long* charge_value
+) {
     const std::size_t charge =
         PORT_TUNNEL_HEADER_LEN + frame.meta.size() + frame.data.size();
     if (charge > static_cast<std::size_t>(std::numeric_limits<unsigned long>::max())) {
-        send_error(
-            frame.stream_id,
-            "port_tunnel_limit_exceeded",
-            "port tunnel queued byte limit reached"
-        );
         return false;
     }
-    const unsigned long charge_value = static_cast<unsigned long>(charge);
+    *charge_value = static_cast<unsigned long>(charge);
     const unsigned long limit = service_->limits().max_tunnel_queued_bytes;
-    if (charge_value > limit) {
-        send_error(
-            frame.stream_id,
-            "port_tunnel_limit_exceeded",
-            "port tunnel queued byte limit reached"
-        );
+    if (*charge_value > limit) {
         return false;
     }
     unsigned long current = queued_bytes_.load();
     for (;;) {
-        if (current > limit || current > limit - charge_value) {
-            send_error(
-                frame.stream_id,
-                "port_tunnel_limit_exceeded",
-                "port tunnel queued byte limit reached"
-            );
+        if (current > limit || current > limit - *charge_value) {
             return false;
         }
         if (queued_bytes_.compare_exchange_weak(
                 current,
-                current + charge_value
+                current + *charge_value
             )) {
             break;
         }
     }
+    return true;
+}
+
+void PortTunnelConnection::release_data_frame_reservation(unsigned long charge_value) {
+    queued_bytes_.fetch_sub(charge_value);
+}
+
+bool PortTunnelConnection::send_data_frame_or_limit_error(const PortTunnelFrame& frame) {
+    unsigned long charge_value = 0UL;
+    if (!try_reserve_data_frame(frame, &charge_value)) {
+        send_error(
+            frame.stream_id,
+            "port_tunnel_limit_exceeded",
+            "port tunnel queued byte limit reached"
+        );
+        return false;
+    }
     try {
         send_frame(frame);
     } catch (...) {
-        queued_bytes_.fetch_sub(charge_value);
+        release_data_frame_reservation(charge_value);
         throw;
     }
-    queued_bytes_.fetch_sub(charge_value);
+    release_data_frame_reservation(charge_value);
+    return !closed_.load();
+}
+
+bool PortTunnelConnection::send_data_frame_or_drop_on_limit(const PortTunnelFrame& frame) {
+    unsigned long charge_value = 0UL;
+    if (!try_reserve_data_frame(frame, &charge_value)) {
+        return true;
+    }
+    try {
+        send_frame(frame);
+    } catch (...) {
+        release_data_frame_reservation(charge_value);
+        throw;
+    }
+    release_data_frame_reservation(charge_value);
     return !closed_.load();
 }
 

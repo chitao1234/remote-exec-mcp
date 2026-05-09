@@ -228,11 +228,6 @@ void PortTunnelConnection::tcp_accept_loop_transport_owned(
         const uint32_t stream_id = next_daemon_stream_id_.fetch_add(2U);
         if (!service_->try_acquire_active_tcp_stream()) {
             UniqueSocket refused_socket(accepted);
-            send_error(
-                listener_stream_id,
-                "port_tunnel_limit_exceeded",
-                "port tunnel active tcp stream limit reached"
-            );
             continue;
         }
         std::shared_ptr<TunnelTcpStream> stream(
@@ -240,7 +235,6 @@ void PortTunnelConnection::tcp_accept_loop_transport_owned(
         );
         if (!service_->try_acquire_worker()) {
             mark_tcp_stream_closed(stream);
-            send_worker_limit(listener_stream_id);
             continue;
         }
         {

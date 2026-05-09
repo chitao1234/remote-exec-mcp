@@ -16,7 +16,7 @@ use super::supervisor::{
 use super::tunnel::{
     EndpointMeta, PortTunnel, UdpDatagramMeta, classify_recoverable_tunnel_event,
     decode_tunnel_error_frame, decode_tunnel_meta, encode_tunnel_meta,
-    format_terminal_tunnel_error, is_backpressure_error,
+    format_terminal_tunnel_error, is_backpressure_error, is_recoverable_pressure_tunnel_error,
 };
 use super::{UDP_CONNECTOR_IDLE_SWEEP_INTERVAL, UDP_CONNECTOR_IDLE_TIMEOUT};
 
@@ -198,10 +198,18 @@ async fn run_udp_forward_epoch(
                     }
                     FrameType::Close => return Ok(ForwardLoopControl::Cancelled),
                     FrameType::Error if frame.stream_id == runtime.listen_session.listener_stream_id => {
-                        return Err(format_terminal_tunnel_error(
-                            &decode_tunnel_error_frame(&frame),
-                        ))
-                        .context("listen-side udp tunnel error");
+                        let meta = decode_tunnel_error_frame(&frame);
+                        if is_recoverable_pressure_tunnel_error(&meta) {
+                            runtime
+                                .store
+                                .update_entry(&runtime.forward_id, |entry| {
+                                    entry.dropped_udp_datagrams += 1;
+                                })
+                                .await;
+                            continue;
+                        }
+                        return Err(format_terminal_tunnel_error(&meta))
+                            .context("listen-side udp tunnel error");
                     }
                     _ => {}
                 }
@@ -370,7 +378,9 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use remote_exec_proto::port_tunnel::{HEADER_LEN, write_frame};
-    use remote_exec_proto::public::ForwardPortProtocol as PublicForwardPortProtocol;
+    use remote_exec_proto::public::{
+        ForwardPortEntry, ForwardPortLimitSummary, ForwardPortProtocol as PublicForwardPortProtocol,
+    };
     use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
     use tokio::sync::Mutex;
     use tokio::sync::Mutex as TokioMutex;
@@ -590,10 +600,11 @@ mod tests {
         let connect_tunnel = Arc::new(PortTunnel::from_stream(connect_io.clone()).unwrap());
         let runtime = udp_test_runtime(listen_tunnel.clone(), connect_tunnel.clone());
 
+        let epoch_runtime = runtime.clone();
         let epoch = tokio::spawn({
             let listen_tunnel = listen_tunnel.clone();
             let connect_tunnel = connect_tunnel.clone();
-            async move { run_udp_forward_epoch(&runtime, listen_tunnel, connect_tunnel).await }
+            async move { run_udp_forward_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
         });
 
         write_frame(
@@ -689,6 +700,65 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn udp_listener_pressure_error_counts_drop_without_failing_forward() {
+        let (listen_broker_side, mut listen_daemon_side) = tokio::io::duplex(4096);
+        let listen_tunnel = Arc::new(PortTunnel::from_stream(listen_broker_side).unwrap());
+        let connect_io = ScriptedTunnelIo::default();
+        let connect_tunnel = Arc::new(PortTunnel::from_stream(connect_io).unwrap());
+        let runtime = udp_test_runtime(listen_tunnel.clone(), connect_tunnel.clone());
+        runtime
+            .store
+            .insert(test_record(&runtime, "127.0.0.1:10000"))
+            .await;
+        let cancel = runtime.cancel.clone();
+
+        let epoch_runtime = runtime.clone();
+        let epoch = tokio::spawn({
+            let listen_tunnel = listen_tunnel.clone();
+            let connect_tunnel = connect_tunnel.clone();
+            async move { run_udp_forward_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
+        });
+
+        write_frame(
+            &mut listen_daemon_side,
+            &Frame {
+                frame_type: FrameType::Error,
+                flags: 0,
+                stream_id: 1,
+                meta: serde_json::to_vec(&serde_json::json!({
+                    "code": "port_tunnel_limit_exceeded",
+                    "message": "port tunnel queued byte limit reached",
+                    "fatal": false
+                }))
+                .unwrap(),
+                data: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let entries = runtime.store.list(&filter_one(&runtime.forward_id)).await;
+                if entries[0].dropped_udp_datagrams == 1 {
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("listener pressure error should count a dropped udp datagram");
+
+        cancel.cancel();
+        let control = tokio::time::timeout(Duration::from_secs(1), epoch)
+            .await
+            .expect("udp epoch should stay alive after pressure error")
+            .unwrap()
+            .expect("pressure error should not fail the forward");
+        assert!(matches!(control, ForwardLoopControl::Cancelled));
+    }
+
     fn udp_test_runtime(
         listen_tunnel: Arc<PortTunnel>,
         connect_tunnel: Arc<PortTunnel>,
@@ -720,6 +790,43 @@ mod tests {
             listen_session,
             initial_connect_tunnel: connect_tunnel,
             cancel: CancellationToken::new(),
+        }
+    }
+
+    fn filter_one(forward_id: &str) -> super::super::store::PortForwardFilter {
+        super::super::store::PortForwardFilter {
+            listen_side: None,
+            connect_side: None,
+            forward_ids: vec![forward_id.to_string()],
+        }
+    }
+
+    fn test_record(
+        runtime: &ForwardRuntime,
+        listen_endpoint: &str,
+    ) -> super::super::store::PortForwardRecord {
+        super::super::store::PortForwardRecord {
+            entry: ForwardPortEntry::new_open(
+                runtime.forward_id.clone(),
+                runtime.listen_side.name().to_string(),
+                listen_endpoint.to_string(),
+                runtime.connect_side.name().to_string(),
+                runtime.connect_endpoint.clone(),
+                runtime.protocol,
+                ForwardPortLimitSummary {
+                    max_active_tcp_streams: runtime.max_active_tcp_streams_per_forward,
+                    max_udp_peers: runtime.max_udp_peers_per_forward as u64,
+                    max_pending_tcp_bytes_per_stream: runtime.max_pending_tcp_bytes_per_stream
+                        as u64,
+                    max_pending_tcp_bytes_per_forward: runtime.max_pending_tcp_bytes_per_forward
+                        as u64,
+                    max_tunnel_queued_bytes: runtime.max_tunnel_queued_bytes as u64,
+                    max_reconnecting_forwards: runtime.max_reconnecting_forwards,
+                },
+            ),
+            listen_session: runtime.listen_session.clone(),
+            cancel: runtime.cancel.clone(),
+            task_done: Arc::new(TokioMutex::new(None)),
         }
     }
 

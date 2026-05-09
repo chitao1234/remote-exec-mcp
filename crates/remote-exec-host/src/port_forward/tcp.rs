@@ -161,14 +161,11 @@ pub(super) async fn tunnel_tcp_accept_loop(session: Arc<SessionState>, listener:
             Ok(permit) => permit,
             Err(err) => {
                 drop(stream);
-                let _ = send_tunnel_error_with_sender(
-                    &attachment.tx,
-                    listener_stream_id(&session).await.unwrap_or(0),
-                    err.code,
-                    err.message,
-                    false,
-                )
-                .await;
+                tracing::debug!(
+                    code = err.code,
+                    message = %err.message,
+                    "dropping accepted tcp stream due to local port tunnel pressure"
+                );
                 continue;
             }
         };
@@ -280,9 +277,11 @@ pub(super) async fn tunnel_tcp_accept_loop_transport_owned(
             Ok(permit) => permit,
             Err(err) => {
                 drop(stream);
-                let _ =
-                    send_tunnel_error(&tunnel, listener_stream_id, err.code, err.message, false)
-                        .await;
+                tracing::debug!(
+                    code = err.code,
+                    message = %err.message,
+                    "dropping accepted tcp stream due to local port tunnel pressure"
+                );
                 continue;
             }
         };

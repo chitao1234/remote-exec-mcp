@@ -552,6 +552,57 @@ mod port_tunnel_tests {
     }
 
     #[tokio::test]
+    async fn active_tcp_accept_limit_drops_accept_without_listener_error() {
+        let state = test_state_with_limits(crate::HostPortForwardLimits {
+            max_active_tcp_streams: 1,
+            ..crate::HostPortForwardLimits::default()
+        });
+        let destination = spawn_tcp_hold_server().await;
+        let mut broker_side = start_tunnel(state).await;
+
+        write_frame(
+            &mut broker_side,
+            &json_frame(
+                FrameType::TcpConnect,
+                3,
+                serde_json::json!({ "endpoint": destination }),
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            read_frame(&mut broker_side).await.unwrap().frame_type,
+            FrameType::TcpConnectOk
+        );
+
+        write_frame(
+            &mut broker_side,
+            &json_frame(
+                FrameType::TcpListen,
+                1,
+                serde_json::json!({ "endpoint": "127.0.0.1:0" }),
+            ),
+        )
+        .await
+        .unwrap();
+        let listen_ok = read_frame(&mut broker_side).await.unwrap();
+        assert_eq!(listen_ok.frame_type, FrameType::TcpListenOk);
+        let bound_endpoint = endpoint_from_frame(&listen_ok);
+
+        let refused = tokio::net::TcpStream::connect(&bound_endpoint)
+            .await
+            .unwrap();
+        drop(refused);
+
+        let no_listener_error =
+            tokio::time::timeout(Duration::from_millis(100), read_frame(&mut broker_side)).await;
+        assert!(
+            no_listener_error.is_err(),
+            "listener stream should not receive recoverable pressure errors"
+        );
+    }
+
+    #[tokio::test]
     async fn tunnel_connection_limit_rejects_second_concurrent_tunnel() {
         let state = test_state_with_limits(crate::HostPortForwardLimits {
             max_tunnel_connections: 1,

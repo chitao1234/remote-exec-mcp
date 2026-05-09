@@ -210,11 +210,6 @@ bool PortTunnelConnection::accept_session_tcp_stream(
     uint32_t stream_id = 0U;
     bool worker_acquired = false;
     if (!service_->try_acquire_active_tcp_stream()) {
-        send_error(
-            listener_stream_id,
-            "port_tunnel_limit_exceeded",
-            "port tunnel active tcp stream limit reached"
-        );
         return false;
     }
 
@@ -230,7 +225,6 @@ bool PortTunnelConnection::accept_session_tcp_stream(
 
     if (!service_->try_acquire_worker()) {
         service_->release_active_tcp_stream();
-        send_worker_limit(listener_stream_id);
         return false;
     }
     worker_acquired = true;
@@ -306,7 +300,7 @@ bool PortTunnelConnection::emit_session_udp_datagram(
     PortTunnelFrame frame = make_empty_frame(PortTunnelFrameType::UdpDatagram, stream_id);
     frame.meta = Json{{"peer", peer}}.dump();
     frame.data = data;
-    if (!send_data_frame_or_limit_error(frame)) {
+    if (!send_data_frame_or_drop_on_limit(frame)) {
         return false;
     }
     return owns_session(session) && !closed_.load();

@@ -202,6 +202,10 @@ pub(super) fn is_backpressure_error(err: &anyhow::Error) -> bool {
     })
 }
 
+pub(super) fn is_recoverable_pressure_tunnel_error(meta: &TunnelErrorMeta) -> bool {
+    matches!(meta.code.as_deref(), Some("port_tunnel_limit_exceeded"))
+}
+
 fn data_frame_charge(frame: &Frame) -> usize {
     if frame.stream_id == 0 {
         0

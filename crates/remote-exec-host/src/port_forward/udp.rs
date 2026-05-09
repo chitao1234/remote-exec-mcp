@@ -8,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 use crate::HostRpcError;
 
 use super::codec::{decode_frame_meta, encode_frame_meta};
-use super::error::rpc_error;
+use super::error::{is_recoverable_pressure_error, rpc_error};
 use super::session::send_tunnel_error_with_sender;
 use super::session::{AttachmentState, reactivate_retained_udp_bind};
 use super::tunnel::send_tunnel_error;
@@ -153,6 +153,14 @@ pub(super) async fn tunnel_udp_read_loop_transport_owned(
             })
             .await
         {
+            if is_recoverable_pressure_error(&err) {
+                tracing::debug!(
+                    code = err.code,
+                    message = %err.message,
+                    "dropping udp datagram due to local port tunnel pressure"
+                );
+                continue;
+            }
             let _ = send_tunnel_error(&tunnel, stream_id, err.code, err.message, false).await;
             if let Some(cancel) = tunnel.stream_cancels.lock().await.remove(&stream_id) {
                 cancel.cancel();
@@ -216,6 +224,14 @@ pub(super) async fn tunnel_udp_read_loop_session_owned(
             })
             .await
         {
+            if is_recoverable_pressure_error(&err) {
+                tracing::debug!(
+                    code = err.code,
+                    message = %err.message,
+                    "dropping udp datagram due to local port tunnel pressure"
+                );
+                continue;
+            }
             let _ = send_tunnel_error_with_sender(
                 &attachment.tx,
                 stream_id,
