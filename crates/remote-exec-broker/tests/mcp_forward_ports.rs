@@ -719,7 +719,7 @@ async fn forward_ports_does_not_retry_stream_error_frames() {
 }
 
 #[tokio::test]
-async fn forward_ports_close_reports_listen_cleanup_failures() {
+async fn forward_ports_close_cleanup_failure_returns_error_and_marks_forward_failed() {
     let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
     support::stub_daemon::block_session_resume(&fixture.stub_state).await;
@@ -732,42 +732,7 @@ async fn forward_ports_close_reports_listen_cleanup_failures() {
         .await;
     let forward_id = forward_id_from(&open);
 
-    support::stub_daemon::force_close_port_tunnel_transport(&fixture.stub_state).await;
-
-    let error = fixture
-        .call_tool_error(
-            "forward_ports",
-            serde_json::json!({
-                "action": "close",
-                "forward_ids": [forward_id]
-            }),
-        )
-        .await;
-
-    assert!(
-        error.contains("closing port forward")
-            && (error.contains("port tunnel closed")
-                || error.contains("resuming port tunnel session")
-                || error.contains("waiting to resume port tunnel session")),
-        "unexpected close error: {error}"
-    );
-}
-
-#[tokio::test]
-async fn forward_ports_marks_forward_failed_when_close_cleanup_fails() {
-    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
-    support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
-    support::stub_daemon::block_session_resume(&fixture.stub_state).await;
-    let blackhole = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let blackhole_addr = blackhole.local_addr().unwrap();
-    drop(blackhole);
-
-    let open = fixture
-        .open_remote_tcp_forward(&blackhole_addr.to_string())
-        .await;
-    let forward_id = forward_id_from(&open);
-
-    support::stub_daemon::force_close_port_tunnel_transport(&fixture.stub_state).await;
+    support::stub_daemon::force_close_listen_port_tunnel_transport(&fixture.stub_state).await;
 
     let close_error = fixture
         .call_tool_error(
@@ -779,7 +744,10 @@ async fn forward_ports_marks_forward_failed_when_close_cleanup_fails() {
         )
         .await;
     assert!(
-        close_error.contains("closing port forward"),
+        close_error.contains("closing port forward")
+            && (close_error.contains("port tunnel closed")
+                || close_error.contains("resuming port tunnel session")
+                || close_error.contains("waiting to resume port tunnel session")),
         "unexpected close error: {close_error}"
     );
 
