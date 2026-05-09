@@ -138,6 +138,11 @@ impl SessionState {
         *self.retained_udp_bind.lock().await = None;
         self.close_non_resumable_streams().await;
     }
+
+    #[cfg(test)]
+    pub(super) async fn has_retained_listener(&self) -> bool {
+        self.retained_listener.lock().await.is_some()
+    }
 }
 
 pub(super) async fn attach_session_to_tunnel(

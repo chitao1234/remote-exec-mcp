@@ -20,13 +20,28 @@ use super::tcp::{
     tunnel_close_stream, tunnel_tcp_connect, tunnel_tcp_data, tunnel_tcp_eof, tunnel_tcp_listen,
 };
 use super::udp::{tunnel_udp_bind, tunnel_udp_datagram};
-use super::{QueuedFrame, TunnelMode, TunnelSender, TunnelState};
+use super::{PortForwardPermit, QueuedFrame, TunnelMode, TunnelSender, TunnelState};
 
 pub async fn serve_tunnel<S>(state: Arc<AppState>, stream: S) -> Result<(), HostRpcError>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let connection_permit = state.port_forward_limiter.try_acquire_tunnel_connection()?;
+    serve_tunnel_with_permit(state, stream, connection_permit).await
+}
+
+pub fn reserve_tunnel_connection(state: &AppState) -> Result<PortForwardPermit, HostRpcError> {
+    state.port_forward_limiter.try_acquire_tunnel_connection()
+}
+
+pub async fn serve_tunnel_with_permit<S>(
+    state: Arc<AppState>,
+    stream: S,
+    connection_permit: PortForwardPermit,
+) -> Result<(), HostRpcError>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     let (mut reader, mut writer) = tokio::io::split(stream);
     read_preface(&mut reader)
         .await

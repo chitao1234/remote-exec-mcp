@@ -37,4 +37,9 @@ impl TunnelSessionStore {
     pub(super) async fn remove(&self, session_id: &str) -> Option<Arc<SessionState>> {
         self.sessions.lock().await.remove(session_id)
     }
+
+    #[cfg(test)]
+    pub(super) async fn contains(&self, session_id: &str) -> bool {
+        self.sessions.lock().await.contains_key(session_id)
+    }
 }

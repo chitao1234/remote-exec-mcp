@@ -18,7 +18,7 @@ pub struct PortForwardLimiter {
     queued_bytes: AtomicUsize,
 }
 
-pub(crate) struct PortForwardPermit {
+pub struct PortForwardPermit {
     limiter: Arc<PortForwardLimiter>,
     kind: PermitKind,
     amount: usize,

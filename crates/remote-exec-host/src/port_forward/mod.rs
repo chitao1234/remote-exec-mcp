@@ -23,9 +23,9 @@ use tokio_util::sync::CancellationToken;
 use crate::AppState;
 
 pub use session_store::TunnelSessionStore;
-pub use tunnel::serve_tunnel;
+pub use tunnel::{reserve_tunnel_connection, serve_tunnel, serve_tunnel_with_permit};
 
-pub use limiter::PortForwardLimiter;
+pub use limiter::{PortForwardLimiter, PortForwardPermit};
 
 const READ_BUF_SIZE: usize = 64 * 1024;
 const TCP_WRITE_QUEUE_FRAMES: usize = 8;
@@ -190,13 +190,16 @@ mod port_tunnel_tests {
     use crate::{
         HostRuntimeConfig, ProcessEnvironment, PtyMode, YieldTimeConfig, build_runtime_state,
     };
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static NEXT_LOOPBACK_HOST: AtomicU32 = AtomicU32::new(1);
 
     #[tokio::test]
     async fn tunnel_binds_tcp_listener_and_releases_it_on_drop() {
         let state = test_state();
-        let listen_endpoint = free_loopback_endpoint().await;
-        let mut broker_side =
-            start_open_listen_tunnel(state.clone(), TunnelForwardProtocol::Tcp).await;
+        let listen_endpoint = free_loopback_endpoint();
+        let (mut broker_side, ready) =
+            start_open_listen_tunnel_with_ready(state.clone(), TunnelForwardProtocol::Tcp).await;
         write_frame(
             &mut broker_side,
             &json_frame(
@@ -210,10 +213,9 @@ mod port_tunnel_tests {
 
         let ok = read_frame(&mut broker_side).await.unwrap();
         assert_eq!(ok.frame_type, FrameType::TcpListenOk);
-        let bound_endpoint = endpoint_from_frame(&ok);
         drop(broker_side);
 
-        wait_until_bindable(&bound_endpoint).await;
+        wait_until_session_removed(&state, &session_id_from_ready(&ready)).await;
     }
 
     #[tokio::test]
@@ -415,7 +417,7 @@ mod port_tunnel_tests {
     #[tokio::test]
     async fn tunnel_udp_bind_relays_datagrams_from_two_peers() {
         let state = test_state();
-        let endpoint = free_loopback_endpoint().await;
+        let endpoint = free_loopback_endpoint();
         let mut broker_side = start_open_connect_tunnel(state, TunnelForwardProtocol::Udp).await;
         write_frame(
             &mut broker_side,
@@ -449,7 +451,7 @@ mod port_tunnel_tests {
     #[tokio::test]
     async fn tcp_listener_session_can_resume_after_transport_drop() {
         let state = test_state();
-        let listen_endpoint = free_loopback_endpoint().await;
+        let listen_endpoint = free_loopback_endpoint();
         let (listen_bound_endpoint, session_id) =
             open_resumable_tcp_listener(&state, &listen_endpoint).await;
 
@@ -466,7 +468,7 @@ mod port_tunnel_tests {
     #[tokio::test]
     async fn resumed_tcp_listener_session_closes_with_retained_generation() {
         let state = test_state();
-        let listen_endpoint = free_loopback_endpoint().await;
+        let listen_endpoint = free_loopback_endpoint();
         let (_listen_bound_endpoint, session_id) =
             open_v4_resumable_tcp_listener(&state, &listen_endpoint).await;
 
@@ -493,7 +495,7 @@ mod port_tunnel_tests {
     #[tokio::test]
     async fn udp_bind_session_can_resume_after_transport_drop() {
         let state = test_state();
-        let listen_endpoint = free_loopback_endpoint().await;
+        let listen_endpoint = free_loopback_endpoint();
         let (listen_bound_endpoint, session_id) =
             open_resumable_udp_bind(&state, &listen_endpoint).await;
 
@@ -512,19 +514,19 @@ mod port_tunnel_tests {
     #[tokio::test]
     async fn expired_detached_listener_is_released() {
         let state = test_state();
-        let listen_endpoint = free_loopback_endpoint().await;
-        let (bound_endpoint, _session_id) =
+        let listen_endpoint = free_loopback_endpoint();
+        let (_bound_endpoint, session_id) =
             open_resumable_tcp_listener(&state, &listen_endpoint).await;
 
         tokio::time::sleep(Duration::from_millis(250)).await;
 
-        wait_until_bindable(&bound_endpoint).await;
+        wait_until_session_removed(&state, &session_id).await;
     }
 
     #[tokio::test]
     async fn detached_tcp_listener_accepts_after_resume_not_before() {
         let state = test_state();
-        let listen_endpoint = free_loopback_endpoint().await;
+        let listen_endpoint = free_loopback_endpoint();
         let (bound_endpoint, session_id) =
             open_resumable_tcp_listener(&state, &listen_endpoint).await;
 
@@ -690,8 +692,8 @@ mod port_tunnel_tests {
             max_retained_listeners: 1,
             ..crate::HostPortForwardLimits::default()
         });
-        let first_endpoint = free_loopback_endpoint().await;
-        let second_endpoint = free_loopback_endpoint().await;
+        let first_endpoint = free_loopback_endpoint();
+        let second_endpoint = free_loopback_endpoint();
         let (_first_bound, _first_session_id) =
             open_resumable_tcp_listener(&state, &first_endpoint).await;
 
@@ -1123,10 +1125,7 @@ mod port_tunnel_tests {
     ) -> (String, String) {
         let (mut broker_side, ready) =
             start_open_listen_tunnel_with_ready(state.clone(), TunnelForwardProtocol::Tcp).await;
-        let session_id = serde_json::from_slice::<Value>(&ready.meta).unwrap()["session_id"]
-            .as_str()
-            .unwrap()
-            .to_string();
+        let session_id = session_id_from_ready(&ready);
         write_frame(
             &mut broker_side,
             &json_frame(
@@ -1153,10 +1152,7 @@ mod port_tunnel_tests {
     async fn open_resumable_udp_bind(state: &Arc<AppState>, endpoint: &str) -> (String, String) {
         let (mut broker_side, ready) =
             start_open_listen_tunnel_with_ready(state.clone(), TunnelForwardProtocol::Udp).await;
-        let session_id = serde_json::from_slice::<Value>(&ready.meta).unwrap()["session_id"]
-            .as_str()
-            .unwrap()
-            .to_string();
+        let session_id = session_id_from_ready(&ready);
         write_frame(
             &mut broker_side,
             &json_frame(
@@ -1191,21 +1187,71 @@ mod port_tunnel_tests {
         broker_side
     }
 
-    async fn free_loopback_endpoint() -> String {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let endpoint = listener.local_addr().unwrap().to_string();
-        drop(listener);
-        endpoint
+    fn session_id_from_ready(frame: &Frame) -> String {
+        serde_json::from_slice::<Value>(&frame.meta).unwrap()["session_id"]
+            .as_str()
+            .unwrap()
+            .to_string()
     }
 
-    async fn wait_until_bindable(endpoint: &str) {
-        for _ in 0..40 {
-            if tokio::net::TcpListener::bind(endpoint).await.is_ok() {
+    fn free_loopback_endpoint() -> String {
+        #[cfg(windows)]
+        {
+            free_windows_loopback_endpoint()
+        }
+        #[cfg(not(windows))]
+        {
+            unique_loopback_bind_endpoint()
+        }
+    }
+
+    #[cfg(windows)]
+    fn free_windows_loopback_endpoint() -> String {
+        for _ in 0..512 {
+            let value = NEXT_LOOPBACK_HOST.fetch_add(1, Ordering::Relaxed);
+            let third_octet = (value / 254) % 254 + 1;
+            let fourth_octet = value % 254 + 1;
+            let port = 700 + (value % 300);
+            let endpoint = format!("127.42.{third_octet}.{fourth_octet}:{port}");
+            let Ok(tcp_listener) = std::net::TcpListener::bind(&endpoint) else {
+                continue;
+            };
+            let Ok(udp_socket) = std::net::UdpSocket::bind(&endpoint) else {
+                drop(tcp_listener);
+                continue;
+            };
+            drop(udp_socket);
+            drop(tcp_listener);
+            return endpoint;
+        }
+        panic!("could not find a free low loopback endpoint");
+    }
+
+    #[cfg(not(windows))]
+    fn unique_loopback_bind_endpoint() -> String {
+        let value = NEXT_LOOPBACK_HOST.fetch_add(1, Ordering::Relaxed);
+        let third_octet = (value / 254) % 254 + 1;
+        let fourth_octet = value % 254 + 1;
+        format!("127.42.{third_octet}.{fourth_octet}:0")
+    }
+
+    async fn wait_until_session_removed(state: &AppState, session_id: &str) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if !state.port_forward_sessions.contains(session_id).await {
                 return;
+            }
+            if let Some(session) = state.port_forward_sessions.get(session_id).await
+                && !session.has_retained_listener().await
+            {
+                return;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                break;
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
-        panic!("endpoint `{endpoint}` did not become bindable");
+        panic!("session `{session_id}` retained listener did not close");
     }
 
     async fn spawn_tcp_echo_server() -> String {

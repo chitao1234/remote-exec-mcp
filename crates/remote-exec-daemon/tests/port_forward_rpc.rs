@@ -241,28 +241,12 @@ max_tunnel_connections = 1
     let mut first = open_tunnel(fixture.addr).await;
     write_preface(&mut first).await.unwrap();
 
-    let mut second = open_tunnel(fixture.addr).await;
-    let second_result = tokio::time::timeout(Duration::from_secs(1), async {
-        write_preface(&mut second).await.unwrap();
-        read_frame(&mut second).await
-    })
-    .await
-    .expect("second tunnel should close promptly");
-
-    match second_result {
-        Ok(frame) => {
-            assert_eq!(frame.frame_type, FrameType::Error);
-            let error_meta: TunnelErrorMeta = serde_json::from_slice(&frame.meta).unwrap();
-            assert_eq!(error_meta.code, "port_tunnel_limit_exceeded");
-        }
-        Err(err) => assert!(
-            matches!(
-                err.kind(),
-                std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::UnexpectedEof
-            ),
-            "unexpected second tunnel close error: {err}"
-        ),
-    }
+    let response = tokio::time::timeout(Duration::from_secs(1), rejected_tunnel(fixture.addr))
+        .await
+        .expect("second tunnel should be rejected promptly");
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let error: remote_exec_proto::rpc::RpcErrorBody = response.json().await.unwrap();
+    assert_eq!(error.code, "port_tunnel_limit_exceeded");
 }
 
 #[tokio::test]
@@ -527,6 +511,18 @@ async fn open_tunnel(addr: SocketAddr) -> tokio::net::TcpStream {
         "{response}"
     );
     stream
+}
+
+async fn rejected_tunnel(addr: SocketAddr) -> reqwest::Response {
+    reqwest::Client::new()
+        .post(format!("http://{addr}/v1/port/tunnel"))
+        .header(reqwest::header::CONNECTION, "Upgrade")
+        .header(reqwest::header::UPGRADE, UPGRADE_TOKEN)
+        .header(TUNNEL_PROTOCOL_VERSION_HEADER, TUNNEL_PROTOCOL_VERSION)
+        .header(reqwest::header::CONTENT_LENGTH, "0")
+        .send()
+        .await
+        .unwrap()
 }
 
 async fn raw_http_request(addr: SocketAddr, request: &str) -> String {

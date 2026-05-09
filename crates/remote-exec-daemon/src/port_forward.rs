@@ -19,14 +19,19 @@ pub async fn tunnel(
     request: axum::extract::Request,
 ) -> Result<Response, (StatusCode, Json<RpcErrorBody>)> {
     validate_upgrade_headers(&headers)?;
+    let connection_permit = remote_exec_host::port_forward::reserve_tunnel_connection(&state)
+        .map_err(crate::rpc_error::host_rpc_error_response)?;
     let on_upgrade = upgrade::on(request);
 
     tokio::spawn(async move {
         match on_upgrade.await {
             Ok(upgraded) => {
-                if let Err(err) =
-                    remote_exec_host::port_forward::serve_tunnel(state, TokioIo::new(upgraded))
-                        .await
+                if let Err(err) = remote_exec_host::port_forward::serve_tunnel_with_permit(
+                    state,
+                    TokioIo::new(upgraded),
+                    connection_permit,
+                )
+                .await
                 {
                     tracing::warn!(error = %err.message, code = err.code, "port tunnel ended with error");
                 }
