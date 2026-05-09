@@ -33,6 +33,8 @@ pub enum FrameType {
     TunnelClosed = 17,
     TunnelHeartbeat = 18,
     TunnelHeartbeatAck = 19,
+    // Reserved in v4. Public state changes are currently reported through
+    // broker-owned forward state, not daemon-emitted recovery frames.
     ForwardRecovering = 20,
     ForwardRecovered = 21,
     ForwardDrop = 22,

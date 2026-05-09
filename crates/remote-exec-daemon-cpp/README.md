@@ -83,6 +83,11 @@ sockets, non-loopback listen binds, and the same bare-port normalization where
 `8080` means `127.0.0.1:8080`. The older lease-renewed port-forward routes are
 not exposed.
 
+The v4 frame numbers for `ForwardRecovering` and `ForwardRecovered` are
+reserved for compatibility with the Rust protocol table. Current C++ and Rust
+implementations report recovery through broker-owned `forward_ports list` state
+instead of daemon-emitted recovery frames.
+
 Live forwarded sockets are reconnect-aware in-memory daemon state. When only the
 broker-daemon transport drops and the daemon stays alive, the broker may
 recover from transport loss or missed heartbeat acknowledgements on either

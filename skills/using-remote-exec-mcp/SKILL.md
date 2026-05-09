@@ -511,6 +511,7 @@ How to use it:
 - Prefer checking `phase` and side health, not only legacy `status`, when waiting for forwarded services to be ready.
 - `phase` is derived from both forwarding sides. `status = "open"` is compatible with older clients and can coexist with `phase = "reconnecting"` while one side is still recovering. Treat the forward as ready only when `phase = "ready"`.
 - For v4 targets, `port_forward_protocol_version` and `X-Remote-Exec-Port-Tunnel-Version` are both `4`.
+- v4 frame numbers `ForwardRecovering` and `ForwardRecovered` are reserved; use `forward_ports list` `phase` and side health for recovery state.
 - Do not expect active TCP streams or UDP per-peer connector state to survive a reconnect; treat those as lost and let future connections recreate them.
 - Per-stream TCP connect failures close that accepted TCP stream but leave the parent forward open for later connections.
 - Explicit close may return an error if daemon-side listener cleanup cannot be confirmed; retry close or inspect `list` before assuming the listener was released.
