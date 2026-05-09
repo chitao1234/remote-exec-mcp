@@ -125,16 +125,12 @@ async fn run_tcp_forward_epoch(
                             data: Vec::new(),
                         }).await {
                             if is_retryable_transport_error(&err) {
-                                if let Err(close_err) = listen_tunnel.close_stream(frame.stream_id).await {
-                                    drop_active_tcp_stream(runtime).await;
-                                    return classify_transport_failure(
-                                        close_err,
-                                        "closing tcp listen stream after connect tunnel loss",
-                                        TunnelRole::Listen,
-                                    );
-                                }
-                                drop_active_tcp_stream(runtime).await;
-                                return Ok(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect));
+                                return close_unpaired_listen_stream_after_connect_loss(
+                                    runtime,
+                                    &listen_tunnel,
+                                    frame.stream_id,
+                                )
+                                .await;
                             }
                             drop_active_tcp_stream(runtime).await;
                             return Err(err).context("connecting tcp forward destination");
@@ -424,6 +420,23 @@ async fn close_active_tcp_listen_streams(
             .await;
     }
     Ok(())
+}
+
+async fn close_unpaired_listen_stream_after_connect_loss(
+    runtime: &ForwardRuntime,
+    listen_tunnel: &Arc<PortTunnel>,
+    listen_stream_id: u32,
+) -> anyhow::Result<ForwardLoopControl> {
+    let close_result = listen_tunnel.close_stream(listen_stream_id).await;
+    drop_active_tcp_stream(runtime).await;
+    if let Err(err) = close_result {
+        return classify_transport_failure(
+            err,
+            "closing tcp listen stream after connect tunnel loss",
+            TunnelRole::Listen,
+        );
+    }
+    Ok(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect))
 }
 
 async fn queue_or_send_tcp_connect_frame(
@@ -885,41 +898,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tcp_accept_send_failure_recovers_connect_tunnel() {
+    async fn tcp_accept_send_failure_recovers_connect_tunnel_without_leaking_active_stream() {
         let (listen_broker_side, mut listen_daemon_side) = tokio::io::duplex(4096);
         let listen_tunnel = Arc::new(PortTunnel::from_stream(listen_broker_side).unwrap());
         let connect_tunnel = Arc::new(PortTunnel::from_stream(PendingReadBrokenWrite).unwrap());
         wait_until_send_fails(&connect_tunnel).await;
+        let runtime = tcp_test_runtime(listen_tunnel.clone(), connect_tunnel.clone());
+        runtime
+            .store
+            .insert(test_record(&runtime, "127.0.0.1:10000"))
+            .await;
 
-        let listen_session = Arc::new(ListenSessionControl {
-            side: SideHandle::local(),
-            forward_id: "fwd_test".to_string(),
-            session_id: "test-session".to_string(),
-            generation: 1,
-            listener_stream_id: 1,
-            resume_timeout: Duration::from_secs(30),
-            max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
-            current_tunnel: TokioMutex::new(Some(listen_tunnel.clone())),
-            op_lock: TokioMutex::new(()),
-        });
-        let cancel = CancellationToken::new();
-        let runtime = ForwardRuntime {
-            forward_id: "fwd_test".to_string(),
-            listen_side: SideHandle::local(),
-            connect_side: SideHandle::local(),
-            protocol: PublicForwardPortProtocol::Tcp,
-            connect_endpoint: "127.0.0.1:1".to_string(),
-            max_active_tcp_streams_per_forward: 256,
-            max_pending_tcp_bytes_per_stream: 256 * 1024,
-            max_pending_tcp_bytes_per_forward: 2 * 1024 * 1024,
-            max_udp_peers_per_forward: 256,
-            max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
-            max_reconnecting_forwards: 16,
-            store: Default::default(),
-            listen_session,
-            initial_connect_tunnel: connect_tunnel.clone(),
-            cancel,
-        };
         write_frame(
             &mut listen_daemon_side,
             &Frame {
@@ -948,15 +937,10 @@ mod tests {
             ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)
         ));
 
-        let no_close = tokio::time::timeout(
-            Duration::from_millis(50),
-            read_frame(&mut listen_daemon_side),
-        )
-        .await;
-        assert!(
-            no_close.is_err(),
-            "listen stream close is deferred to the reconnect epoch"
-        );
+        // The failed connect tunnel and queued listen accept may be observed in
+        // either order; neither path may leak active stream accounting.
+        let entries = runtime.store.list(&filter_one(&runtime.forward_id)).await;
+        assert_eq!(entries[0].active_tcp_streams, 0);
     }
 
     #[tokio::test]
