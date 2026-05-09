@@ -150,31 +150,8 @@ impl PortForwardStore {
         max_reconnecting_forwards: usize,
     ) -> anyhow::Result<()> {
         let mut entries = self.entries.write().await;
-        let Some(record) = entries.get(forward_id) else {
-            return Ok(());
-        };
-        if record.entry.status != ForwardPortStatus::Open {
-            return Ok(());
-        }
-
-        let already_reconnecting = derive_phase(&record.entry) == ForwardPortPhase::Reconnecting;
-        if !already_reconnecting {
-            let reconnecting_count = entries
-                .values()
-                .filter(|record| {
-                    record.entry.status == ForwardPortStatus::Open
-                        && derive_phase(&record.entry) == ForwardPortPhase::Reconnecting
-                })
-                .count();
-            if reconnecting_count >= max_reconnecting_forwards {
-                if let Some(record) = entries.get_mut(forward_id) {
-                    mark_entry_failed(&mut record.entry, RECONNECT_LIMIT_EXCEEDED.to_string());
-                }
-                return Err(anyhow::anyhow!(RECONNECT_LIMIT_EXCEEDED));
-            }
-        }
-
-        if let Some(record) = entries.get_mut(forward_id) {
+        ensure_reconnect_capacity(&mut entries, forward_id, max_reconnecting_forwards)?;
+        if let Some(record) = open_record_mut(&mut entries, forward_id) {
             let entry = &mut record.entry;
             entry.reconnect_attempts += 1;
             entry.last_reconnect_at = Some(unix_timestamp_string());
@@ -184,6 +161,27 @@ impl PortForwardStore {
             };
             side.health = ForwardPortSideHealth::Reconnecting;
             side.last_error = Some(error);
+            entry.phase = derive_phase(entry);
+        }
+        Ok(())
+    }
+
+    pub async fn mark_connect_reopening_after_listen_recovery(
+        &self,
+        forward_id: &str,
+        error: String,
+        max_reconnecting_forwards: usize,
+    ) -> anyhow::Result<()> {
+        let mut entries = self.entries.write().await;
+        ensure_reconnect_capacity(&mut entries, forward_id, max_reconnecting_forwards)?;
+        if let Some(record) = open_record_mut(&mut entries, forward_id) {
+            let entry = &mut record.entry;
+            entry.reconnect_attempts += 1;
+            entry.last_reconnect_at = Some(unix_timestamp_string());
+            entry.listen_state.health = ForwardPortSideHealth::Ready;
+            entry.listen_state.last_error = None;
+            entry.connect_state.health = ForwardPortSideHealth::Reconnecting;
+            entry.connect_state.last_error = Some(error);
             entry.phase = derive_phase(entry);
         }
         Ok(())
@@ -221,6 +219,45 @@ fn unix_timestamp_string() -> String {
         .unwrap_or_default()
         .as_secs()
         .to_string()
+}
+
+fn ensure_reconnect_capacity(
+    entries: &mut HashMap<String, PortForwardRecord>,
+    forward_id: &str,
+    max_reconnecting_forwards: usize,
+) -> anyhow::Result<()> {
+    let Some(record) = entries.get(forward_id) else {
+        return Ok(());
+    };
+    if record.entry.status != ForwardPortStatus::Open {
+        return Ok(());
+    }
+
+    let already_reconnecting = derive_phase(&record.entry) == ForwardPortPhase::Reconnecting;
+    if !already_reconnecting {
+        let reconnecting_count = entries
+            .values()
+            .filter(|record| {
+                record.entry.status == ForwardPortStatus::Open
+                    && derive_phase(&record.entry) == ForwardPortPhase::Reconnecting
+            })
+            .count();
+        if reconnecting_count >= max_reconnecting_forwards {
+            if let Some(record) = entries.get_mut(forward_id) {
+                mark_entry_failed(&mut record.entry, RECONNECT_LIMIT_EXCEEDED.to_string());
+            }
+            return Err(anyhow::anyhow!(RECONNECT_LIMIT_EXCEEDED));
+        }
+    }
+    Ok(())
+}
+
+fn open_record_mut<'a>(
+    entries: &'a mut HashMap<String, PortForwardRecord>,
+    forward_id: &str,
+) -> Option<&'a mut PortForwardRecord> {
+    let record = entries.get_mut(forward_id)?;
+    (record.entry.status == ForwardPortStatus::Open).then_some(record)
 }
 
 pub struct PortForwardFilter {
@@ -389,6 +426,47 @@ mod tests {
         assert_eq!(ready.phase, ForwardPortPhase::Ready);
         assert_eq!(ready.listen_state.health, ForwardPortSideHealth::Ready);
         assert_eq!(ready.connect_state.health, ForwardPortSideHealth::Ready);
+    }
+
+    #[tokio::test]
+    async fn mark_connect_reopening_after_listen_recovery_is_atomic() {
+        let store = PortForwardStore::default();
+        store.insert(test_record("fwd_staged")).await;
+
+        store
+            .mark_reconnecting(
+                "fwd_staged",
+                ForwardPortSideRole::Listen,
+                "listen-side tunnel lost".to_string(),
+                16,
+            )
+            .await
+            .unwrap();
+        store
+            .mark_connect_reopening_after_listen_recovery(
+                "fwd_staged",
+                "connect-side tunnel reopening after listen-side recovery".to_string(),
+                16,
+            )
+            .await
+            .unwrap();
+
+        let reconnecting = store.list(&filter_one("fwd_staged")).await.remove(0);
+        assert_eq!(reconnecting.status, ForwardPortStatus::Open);
+        assert_eq!(reconnecting.phase, ForwardPortPhase::Reconnecting);
+        assert_eq!(
+            reconnecting.listen_state.health,
+            ForwardPortSideHealth::Ready
+        );
+        assert_eq!(reconnecting.listen_state.last_error, None);
+        assert_eq!(
+            reconnecting.connect_state.health,
+            ForwardPortSideHealth::Reconnecting
+        );
+        assert_eq!(
+            reconnecting.connect_state.last_error.as_deref(),
+            Some("connect-side tunnel reopening after listen-side recovery")
+        );
     }
 
     #[tokio::test]

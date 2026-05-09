@@ -709,11 +709,14 @@ async fn recover_connect_side_tunnel_after_listen_recovery(
     runtime: &ForwardRuntime,
     reason: &str,
 ) -> anyhow::Result<Option<Arc<PortTunnel>>> {
-    mark_connect_reconnecting(runtime, reason).await?;
     runtime
         .store
-        .mark_ready(&runtime.forward_id, ForwardPortSideRole::Listen)
-        .await;
+        .mark_connect_reopening_after_listen_recovery(
+            &runtime.forward_id,
+            reason.to_string(),
+            runtime.max_reconnecting_forwards,
+        )
+        .await?;
     let Some(connect_tunnel) = retry_open_connect_tunnel(runtime).await? else {
         return Ok(None);
     };
