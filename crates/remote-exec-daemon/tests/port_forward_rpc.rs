@@ -78,6 +78,33 @@ async fn port_tunnel_requires_v4_header() {
 }
 
 #[tokio::test]
+async fn port_tunnel_rejects_reserved_legacy_session_frames() {
+    for frame_type in [FrameType::SessionOpen, FrameType::SessionResume] {
+        let fixture = support::spawn::spawn_daemon("builder-a").await;
+        let mut stream = open_tunnel(fixture.addr).await;
+
+        write_preface(&mut stream).await.unwrap();
+        write_frame(
+            &mut stream,
+            &json_frame(frame_type, 0, serde_json::json!({ "session_id": "legacy" })),
+        )
+        .await
+        .unwrap();
+
+        let error = read_frame(&mut stream).await.unwrap();
+        assert_eq!(error.frame_type, FrameType::Error);
+        assert_eq!(error.stream_id, 0);
+        let error_meta: TunnelErrorMeta = serde_json::from_slice(&error.meta).unwrap();
+        assert_eq!(error_meta.code, "invalid_port_tunnel");
+        assert!(
+            error_meta.message.contains("unexpected frame type"),
+            "unexpected legacy-frame error message: {}",
+            error_meta.message
+        );
+    }
+}
+
+#[tokio::test]
 async fn tunnel_open_ready_and_close_round_trip() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let mut stream = open_tunnel(fixture.addr).await;
