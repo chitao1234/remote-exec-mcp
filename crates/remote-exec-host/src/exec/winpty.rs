@@ -18,7 +18,10 @@ fn map_winpty_error(err: winptyrs::Error) -> anyhow::Error {
     anyhow::anyhow!(err.to_string())
 }
 
-fn lock_winpty<'a, T>(mutex: &'a Mutex<T>, name: &'static str) -> anyhow::Result<MutexGuard<'a, T>> {
+fn lock_winpty<'a, T>(
+    mutex: &'a Mutex<T>,
+    name: &'static str,
+) -> anyhow::Result<MutexGuard<'a, T>> {
     mutex
         .lock()
         .map_err(|_| anyhow::anyhow!("winpty {name} mutex poisoned"))

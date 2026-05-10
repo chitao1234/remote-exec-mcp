@@ -522,7 +522,8 @@ mod tests {
 
     #[tokio::test]
     async fn local_port_tunnel_binds_tcp_listener() {
-        let tunnel = SideHandle::local().unwrap()
+        let tunnel = SideHandle::local()
+            .unwrap()
             .port_tunnel(PortTunnel::DEFAULT_MAX_QUEUED_BYTES)
             .await
             .unwrap();
