@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use remote_exec_proto::public::{
     ForwardPortEntry, ForwardPortPhase, ForwardPortSideHealth, ForwardPortSideRole,
-    ForwardPortStatus,
+    ForwardPortStatus, Timestamp,
 };
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
@@ -154,7 +154,7 @@ impl PortForwardStore {
         if let Some(record) = open_record_mut(&mut entries, forward_id) {
             let entry = &mut record.entry;
             entry.reconnect_attempts += 1;
-            entry.last_reconnect_at = Some(unix_timestamp_string());
+            entry.last_reconnect_at = Some(Timestamp(unix_timestamp_string()));
             let side = match role {
                 ForwardPortSideRole::Listen => &mut entry.listen_state,
                 ForwardPortSideRole::Connect => &mut entry.connect_state,
@@ -177,7 +177,7 @@ impl PortForwardStore {
         if let Some(record) = open_record_mut(&mut entries, forward_id) {
             let entry = &mut record.entry;
             entry.reconnect_attempts += 1;
-            entry.last_reconnect_at = Some(unix_timestamp_string());
+            entry.last_reconnect_at = Some(Timestamp(unix_timestamp_string()));
             entry.listen_state.health = ForwardPortSideHealth::Ready;
             entry.listen_state.last_error = None;
             entry.connect_state.health = ForwardPortSideHealth::Reconnecting;

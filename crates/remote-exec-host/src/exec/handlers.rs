@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use remote_exec_proto::rpc::{
-    ExecResponse, ExecStartRequest, ExecWarning, ExecWriteRequest, RpcErrorCode,
+    ExecResponse, ExecStartRequest, ExecStartResponse, ExecWarning, ExecWriteRequest, RpcErrorCode,
 };
 use remote_exec_proto::sandbox::SandboxAccess;
 
@@ -57,17 +57,17 @@ pub async fn exec_start_local(
         tokio::time::sleep(Duration::from_millis(EXEC_START_POLL_INTERVAL_MS)).await;
     }
 
-    let (daemon_session_id, warnings, response) =
+    let started =
         store_running_session(state.as_ref(), session, output, req.max_output_tokens).await?;
     tracing::info!(
         target = %state.config.target,
-        daemon_session_id = %daemon_session_id,
-        warnings = warnings.len(),
-        wall_time_seconds = response.wall_time_seconds,
-        output_bytes = response.output.len(),
+        daemon_session_id = %started.daemon_session_id,
+        warnings = started.response.warnings.len(),
+        wall_time_seconds = started.response.wall_time_seconds,
+        output_bytes = started.response.output.len(),
         "exec_start left process running"
     );
-    Ok(response)
+    Ok(started.response)
 }
 
 pub async fn exec_write_local(
@@ -235,7 +235,7 @@ async fn store_running_session(
     session: session::LiveSession,
     output: String,
     max_output_tokens: Option<u32>,
-) -> Result<(String, Vec<ExecWarning>, ExecResponse), HostRpcError> {
+) -> Result<ExecStartResponse, HostRpcError> {
     let daemon_session_id = crate::ids::new_exec_session_id();
     let insert_outcome = state
         .sessions
@@ -255,7 +255,10 @@ async fn store_running_session(
         max_output_tokens,
         warnings.clone(),
     );
-    Ok((daemon_session_id, warnings, response))
+    Ok(ExecStartResponse {
+        daemon_session_id,
+        response,
+    })
 }
 
 fn running_session_response(

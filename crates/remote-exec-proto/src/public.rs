@@ -63,8 +63,7 @@ pub struct ListTargetDaemonInfo {
     pub arch: String,
     pub supports_pty: bool,
     pub supports_port_forward: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub port_forward_protocol_version: Option<u32>,
+    pub port_forward_protocol_version: u32,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -228,9 +227,13 @@ pub struct ForwardPortEntry {
     pub dropped_udp_datagrams: u64,
     pub reconnect_attempts: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_reconnect_at: Option<String>,
+    pub last_reconnect_at: Option<Timestamp>,
     pub limits: ForwardPortLimitSummary,
 }
+
+#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct Timestamp(pub String);
 
 #[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -368,7 +371,7 @@ mod tests {
             dropped_tcp_streams: 2,
             dropped_udp_datagrams: 3,
             reconnect_attempts: 4,
-            last_reconnect_at: Some("2026-05-08T00:00:00Z".to_string()),
+            last_reconnect_at: Some(Timestamp("2026-05-08T00:00:00Z".to_string())),
             limits: ForwardPortLimitSummary {
                 max_active_tcp_streams: 256,
                 max_udp_peers: 256,

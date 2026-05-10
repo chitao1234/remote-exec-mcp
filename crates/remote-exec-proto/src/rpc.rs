@@ -71,6 +71,17 @@ pub struct ExecResponse {
     pub warnings: Vec<ExecWarning>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExecStartResponse {
+    pub daemon_session_id: String,
+    pub response: ExecResponse,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExecWriteResponse {
+    pub response: ExecResponse,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct ExecWarning {
     pub code: String,

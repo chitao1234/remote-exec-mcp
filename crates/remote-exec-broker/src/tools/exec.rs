@@ -4,7 +4,8 @@ use std::time::Instant;
 use remote_exec_proto::path::{PathPolicy, linux_path_policy, windows_path_policy};
 use remote_exec_proto::public::{CommandToolResult, ExecCommandInput, WriteStdinInput};
 use remote_exec_proto::rpc::{
-    ExecResponse, ExecStartRequest, ExecWarning, ExecWriteRequest, RpcErrorCode,
+    ExecResponse, ExecStartRequest, ExecStartResponse, ExecWarning, ExecWriteRequest,
+    ExecWriteResponse, RpcErrorCode,
 };
 
 use super::exec_format::{
@@ -57,11 +58,15 @@ pub async fn exec_command(
             return Err(err);
         }
     };
-    validate_exec_response(&response)?;
+    validate_exec_start_response(&response)?;
 
     let session_command = input.cmd.clone();
-    let session_id =
-        register_public_session(state, &input.target, &session_command, &response).await;
+    let session_id = if response.running {
+        let start_response = exec_start_response(response.clone())?;
+        register_public_session(state, &input.target, &session_command, &start_response).await
+    } else {
+        None
+    };
 
     tracing::info!(
         tool = "exec_command",
@@ -143,16 +148,17 @@ async fn write_stdin_inner(
 
     let target = state.target(&record.target)?;
     let response = forward_exec_write(state, target, &record, input).await?;
-    validate_exec_response(&response)?;
+    validate_exec_write_response(&response)?;
+    let write_response = ExecWriteResponse { response };
 
-    let session_id = if response.running {
+    let session_id = if write_response.response.running {
         Some(record.session_id.clone())
     } else {
         state.sessions.remove(&record.session_id).await;
         None
     };
 
-    write_stdin_output(record, response, session_id)
+    write_stdin_output(record, write_response.response, session_id)
 }
 
 async fn maybe_intercepted_exec_output(
@@ -237,23 +243,19 @@ async fn register_public_session(
     state: &crate::BrokerState,
     target: &str,
     session_command: &str,
-    response: &ExecResponse,
+    response: &ExecStartResponse,
 ) -> Option<String> {
-    if !response.running {
+    if !response.response.running {
         return None;
     }
 
-    let daemon_session_id = response
-        .daemon_session_id
-        .clone()
-        .expect("daemon session id");
     Some(
         state
             .sessions
             .insert(
                 target.to_string(),
-                daemon_session_id,
-                response.daemon_instance_id.clone(),
+                response.daemon_session_id.clone(),
+                response.response.daemon_instance_id.clone(),
                 session_command.to_string(),
             )
             .await
@@ -362,7 +364,17 @@ fn unknown_process_id_message(session_id: &str) -> String {
     format!("Unknown process id {session_id}")
 }
 
-fn validate_exec_response(response: &ExecResponse) -> anyhow::Result<()> {
+fn exec_start_response(response: ExecResponse) -> anyhow::Result<ExecStartResponse> {
+    let daemon_session_id = response.daemon_session_id.clone().context(
+        "daemon returned malformed exec response: running response missing daemon_session_id",
+    )?;
+    Ok(ExecStartResponse {
+        daemon_session_id,
+        response,
+    })
+}
+
+fn validate_exec_start_response(response: &ExecResponse) -> anyhow::Result<()> {
     if response.running {
         anyhow::ensure!(
             response.exit_code.is_none(),
@@ -374,6 +386,26 @@ fn validate_exec_response(response: &ExecResponse) -> anyhow::Result<()> {
                 .as_deref()
                 .is_some_and(|session_id| !session_id.is_empty()),
             "daemon returned malformed exec response: running response missing daemon_session_id"
+        );
+        return Ok(());
+    }
+
+    anyhow::ensure!(
+        response.exit_code.is_some(),
+        "daemon returned malformed exec response: completed response missing exit_code"
+    );
+    anyhow::ensure!(
+        response.daemon_session_id.is_none(),
+        "daemon returned malformed exec response: completed response unexpectedly included daemon_session_id"
+    );
+    Ok(())
+}
+
+fn validate_exec_write_response(response: &ExecResponse) -> anyhow::Result<()> {
+    if response.running {
+        anyhow::ensure!(
+            response.exit_code.is_none(),
+            "daemon returned malformed exec response: running response unexpectedly included exit_code"
         );
         return Ok(());
     }
