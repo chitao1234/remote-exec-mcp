@@ -71,57 +71,45 @@ pub struct TlsConfig {
 
 #[derive(Debug, Clone)]
 pub struct EmbeddedDaemonConfig {
-    pub target: String,
-    pub default_workdir: PathBuf,
-    pub windows_posix_root: Option<PathBuf>,
-    pub sandbox: Option<FilesystemSandbox>,
-    pub enable_transfer_compression: bool,
-    pub allow_login_shell: bool,
-    pub pty: PtyMode,
-    pub default_shell: Option<String>,
-    pub yield_time: YieldTimeConfig,
-    pub port_forward_limits: HostPortForwardLimits,
-    pub experimental_apply_patch_target_encoding_autodetect: bool,
-    pub process_environment: ProcessEnvironment,
+    pub host: EmbeddedHostConfig,
 }
 
 impl EmbeddedDaemonConfig {
     pub fn into_host_config(self) -> EmbeddedHostConfig {
-        EmbeddedHostConfig {
-            target: self.target,
-            default_workdir: self.default_workdir,
-            windows_posix_root: self.windows_posix_root,
-            sandbox: self.sandbox,
-            enable_transfer_compression: self.enable_transfer_compression,
-            allow_login_shell: self.allow_login_shell,
-            pty: self.pty,
-            default_shell: self.default_shell,
-            yield_time: self.yield_time,
-            port_forward_limits: self.port_forward_limits,
-            experimental_apply_patch_target_encoding_autodetect: self
-                .experimental_apply_patch_target_encoding_autodetect,
-            process_environment: self.process_environment,
-        }
+        self.host
     }
 
     pub fn into_daemon_config(self) -> DaemonConfig {
+        let EmbeddedHostConfig {
+            target,
+            default_workdir,
+            windows_posix_root,
+            sandbox,
+            enable_transfer_compression,
+            allow_login_shell,
+            pty,
+            default_shell,
+            yield_time,
+            port_forward_limits,
+            experimental_apply_patch_target_encoding_autodetect,
+            process_environment,
+        } = self.host;
         DaemonConfig {
-            target: self.target,
+            target,
             listen: SocketAddr::from(([127, 0, 0, 1], 0)),
-            default_workdir: self.default_workdir,
-            windows_posix_root: self.windows_posix_root,
+            default_workdir,
+            windows_posix_root,
             transport: DaemonTransport::Http,
             http_auth: None,
-            sandbox: self.sandbox,
-            enable_transfer_compression: self.enable_transfer_compression,
-            allow_login_shell: self.allow_login_shell,
-            pty: self.pty,
-            default_shell: self.default_shell,
-            yield_time: self.yield_time,
-            port_forward_limits: self.port_forward_limits,
-            experimental_apply_patch_target_encoding_autodetect: self
-                .experimental_apply_patch_target_encoding_autodetect,
-            process_environment: self.process_environment,
+            sandbox,
+            enable_transfer_compression,
+            allow_login_shell,
+            pty,
+            default_shell,
+            yield_time,
+            port_forward_limits,
+            experimental_apply_patch_target_encoding_autodetect,
+            process_environment,
             tls: None,
         }
     }
@@ -129,21 +117,7 @@ impl EmbeddedDaemonConfig {
 
 impl From<EmbeddedHostConfig> for EmbeddedDaemonConfig {
     fn from(value: EmbeddedHostConfig) -> Self {
-        Self {
-            target: value.target,
-            default_workdir: value.default_workdir,
-            windows_posix_root: value.windows_posix_root,
-            sandbox: value.sandbox,
-            enable_transfer_compression: value.enable_transfer_compression,
-            allow_login_shell: value.allow_login_shell,
-            pty: value.pty,
-            default_shell: value.default_shell,
-            yield_time: value.yield_time,
-            port_forward_limits: value.port_forward_limits,
-            experimental_apply_patch_target_encoding_autodetect: value
-                .experimental_apply_patch_target_encoding_autodetect,
-            process_environment: value.process_environment,
-        }
+        Self { host: value }
     }
 }
 
