@@ -52,114 +52,76 @@ enum LineEndingKind {
     LINE_ENDING_CRLF,
 };
 
-std::string normalize_relative_path(const std::string& raw) {
-    if (raw.empty()) {
-        throw std::runtime_error("patch path is empty");
+enum NormalizedPathKind {
+    NORMALIZED_RELATIVE_PATH,
+    NORMALIZED_ABSOLUTE_PATH,
+};
+
+struct NormalizedPathPrefix {
+    std::string value;
+    std::size_t start;
+};
+
+NormalizedPathPrefix normalized_path_prefix(
+    const std::string& raw,
+    NormalizedPathKind kind
+) {
+    NormalizedPathPrefix prefix;
+    prefix.start = 0;
+
+    if (kind == NORMALIZED_RELATIVE_PATH) {
+        return prefix;
     }
 
-    std::vector<std::string> parts;
-    std::string current;
-    for (std::size_t i = 0; i < raw.size(); ++i) {
-        const char ch = raw[i];
-        if (ch == '/' || ch == '\\') {
-            if (!current.empty()) {
-                if (current == "..") {
-                    if (parts.empty()) {
-                        throw std::runtime_error("path traversal is not supported");
-                    }
-                    parts.pop_back();
-                } else if (current != ".") {
-                    parts.push_back(current);
-                }
-                current.clear();
-            }
-        } else {
-            current.push_back(ch);
-        }
-    }
-    if (!current.empty()) {
-        if (current == "..") {
-            if (parts.empty()) {
-                throw std::runtime_error("path traversal is not supported");
-            }
-            parts.pop_back();
-        } else if (current != ".") {
-            parts.push_back(current);
-        }
-    }
-    if (parts.empty()) {
-        throw std::runtime_error("patch path is empty");
-    }
-
-    std::ostringstream out;
-    for (std::size_t i = 0; i < parts.size(); ++i) {
-        if (i != 0) {
-            out << path_utils::native_separator();
-        }
-        out << parts[i];
-    }
-    return out.str();
-}
-
-std::string normalize_absolute_path(const std::string& raw) {
-    if (raw.empty()) {
-        throw std::runtime_error("patch path is empty");
-    }
-
-    std::string prefix;
-    std::size_t start = 0;
 #ifdef _WIN32
     if (raw.size() >= 3 && std::isalpha(static_cast<unsigned char>(raw[0])) != 0 &&
         raw[1] == ':' && (raw[2] == '\\' || raw[2] == '/')) {
-        prefix = raw.substr(0, 2);
-        prefix.push_back(path_utils::native_separator());
-        start = 3;
-    } else if (raw.rfind("\\\\", 0) == 0 || raw.rfind("//", 0) == 0) {
-        prefix = "\\\\";
-        start = 2;
-    } else {
-        throw std::runtime_error("absolute patch path is not supported");
+        prefix.value = raw.substr(0, 2);
+        prefix.value.push_back(path_utils::native_separator());
+        prefix.start = 3;
+        return prefix;
+    }
+    if (raw.rfind("\\\\", 0) == 0 || raw.rfind("//", 0) == 0) {
+        prefix.value = "\\\\";
+        prefix.start = 2;
+        return prefix;
     }
 #else
-    if (raw[0] != '/') {
-        throw std::runtime_error("absolute patch path is not supported");
+    if (!raw.empty() && raw[0] == '/') {
+        prefix.value = "/";
+        prefix.start = 1;
+        return prefix;
     }
-    prefix = "/";
-    start = 1;
 #endif
 
-    std::vector<std::string> parts;
-    std::string current;
-    for (std::size_t i = start; i < raw.size(); ++i) {
-        const char ch = raw[i];
-        if (ch == '/' || ch == '\\') {
-            if (!current.empty()) {
-                if (current == "..") {
-                    if (!parts.empty()) {
-                        parts.pop_back();
-                    }
-                } else if (current != ".") {
-                    parts.push_back(current);
-                }
-                current.clear();
+    throw std::runtime_error("absolute patch path is not supported");
+}
+
+void push_normalized_segment(
+    std::vector<std::string>* parts,
+    const std::string& segment,
+    NormalizedPathKind kind
+) {
+    if (segment.empty() || segment == ".") {
+        return;
+    }
+    if (segment == "..") {
+        if (parts->empty()) {
+            if (kind == NORMALIZED_RELATIVE_PATH) {
+                throw std::runtime_error("path traversal is not supported");
             }
         } else {
-            current.push_back(ch);
+            parts->pop_back();
         }
+        return;
     }
-    if (!current.empty()) {
-        if (current == "..") {
-            if (!parts.empty()) {
-                parts.pop_back();
-            }
-        } else if (current != ".") {
-            parts.push_back(current);
-        }
-    }
-    if (parts.empty()) {
-        throw std::runtime_error("patch path is empty");
-    }
+    parts->push_back(segment);
+}
 
+std::string build_normalized_path(
+    const std::vector<std::string>& parts,
+    const std::string& prefix
+) {
     std::ostringstream out;
     out << prefix;
     for (std::size_t i = 0; i < parts.size(); ++i) {
@@ -170,6 +132,44 @@ std::string normalize_absolute_path(const std::string& raw) {
         out << parts[i];
     }
     return out.str();
+}
+
+std::string normalize_path_segments(
+    const std::string& raw,
+    NormalizedPathKind kind
+) {
+    if (raw.empty()) {
+        throw std::runtime_error("patch path is empty");
+    }
+
+    const NormalizedPathPrefix prefix = normalized_path_prefix(raw, kind);
+
+    std::vector<std::string> parts;
+    std::string current;
+    for (std::size_t i = prefix.start; i < raw.size(); ++i) {
+        const char ch = raw[i];
+        if (ch == '/' || ch == '\\') {
+            push_normalized_segment(&parts, current, kind);
+            current.clear();
+        } else {
+            current.push_back(ch);
+        }
+    }
+    push_normalized_segment(&parts, current, kind);
+
+    if (parts.empty()) {
+        throw std::runtime_error("patch path is empty");
+    }
+
+    return build_normalized_path(parts, prefix.value);
+}
+
+std::string normalize_relative_path(const std::string& raw) {
+    return normalize_path_segments(raw, NORMALIZED_RELATIVE_PATH);
+}
+
+std::string normalize_absolute_path(const std::string& raw) {
+    return normalize_path_segments(raw, NORMALIZED_ABSOLUTE_PATH);
 }
 
 std::string normalize_patch_path(const std::string& raw) {

@@ -65,13 +65,6 @@ char policy_separator(PathPolicy policy) {
     return policy.style == PATH_STYLE_WINDOWS ? '\\' : '/';
 }
 
-std::string lowercase_ascii(std::string value) {
-    for (std::size_t i = 0; i < value.size(); ++i) {
-        value[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(value[i])));
-    }
-    return value;
-}
-
 std::string join_components(
     PathPolicy policy,
     const std::string& prefix,
@@ -247,17 +240,17 @@ std::string canonicalize_for_sandbox(PathPolicy policy, const std::string& path)
 #endif
 }
 
-std::string comparison_key(PathPolicy policy, const std::string& path) {
+std::string sandbox_comparison_key(PathPolicy policy, const std::string& path) {
     std::string key = lexical_normalize_for_policy(policy, path);
     if (policy.comparison == PATH_COMPARISON_CASE_INSENSITIVE) {
-        key = lowercase_ascii(key);
+        key = path_policy_lowercase_ascii(key);
     }
     return key;
 }
 
 bool path_is_within(PathPolicy policy, const std::string& root, const std::string& path) {
-    std::string root_key = comparison_key(policy, root);
-    const std::string path_key = comparison_key(policy, path);
+    std::string root_key = sandbox_comparison_key(policy, root);
+    const std::string path_key = sandbox_comparison_key(policy, path);
 
     if (root_key == path_key) {
         return true;

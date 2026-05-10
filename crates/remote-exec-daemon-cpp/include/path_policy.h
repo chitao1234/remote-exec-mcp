@@ -21,6 +21,8 @@ PathPolicy posix_path_policy();
 PathPolicy windows_path_policy();
 PathPolicy host_path_policy();
 
+std::string path_policy_lowercase_ascii(std::string value);
+std::string path_policy_comparison_key(PathPolicy policy, const std::string& raw);
 bool is_absolute_for_policy(PathPolicy policy, const std::string& raw);
 std::string normalize_for_system(PathPolicy policy, const std::string& raw);
 std::string join_for_policy(

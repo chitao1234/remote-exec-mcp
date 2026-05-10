@@ -10,13 +10,6 @@ bool is_ascii_alpha(char ch) {
     return std::isalpha(static_cast<unsigned char>(ch)) != 0;
 }
 
-std::string lowercase_ascii(std::string value) {
-    for (std::size_t i = 0; i < value.size(); ++i) {
-        value[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(value[i])));
-    }
-    return value;
-}
-
 std::string normalize_windows_path_chars(std::string value) {
     std::replace(value.begin(), value.end(), '/', '\\');
     return value;
@@ -45,7 +38,7 @@ bool translate_windows_posix_drive_path(const std::string& raw, std::string* out
     }
 
     const std::string prefix = "/cygdrive/";
-    const std::string lower = lowercase_ascii(raw);
+    const std::string lower = path_policy_lowercase_ascii(raw);
     if (lower.rfind(prefix, 0) != 0) {
         return false;
     }
@@ -61,14 +54,6 @@ bool translate_windows_posix_drive_path(const std::string& raw, std::string* out
         raw.substr(raw.size() == prefix.size() + 1 ? prefix.size() + 1 : prefix.size() + 2)
     );
     return true;
-}
-
-std::string comparison_key(PathPolicy policy, const std::string& raw) {
-    std::string normalized = normalize_for_system(policy, raw);
-    if (policy.comparison == PATH_COMPARISON_CASE_INSENSITIVE) {
-        normalized = lowercase_ascii(normalized);
-    }
-    return normalized;
 }
 
 }  // namespace
@@ -93,6 +78,21 @@ PathPolicy host_path_policy() {
 #else
     return posix_path_policy();
 #endif
+}
+
+std::string path_policy_lowercase_ascii(std::string value) {
+    for (std::size_t i = 0; i < value.size(); ++i) {
+        value[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(value[i])));
+    }
+    return value;
+}
+
+std::string path_policy_comparison_key(PathPolicy policy, const std::string& raw) {
+    std::string normalized = normalize_for_system(policy, raw);
+    if (policy.comparison == PATH_COMPARISON_CASE_INSENSITIVE) {
+        normalized = path_policy_lowercase_ascii(normalized);
+    }
+    return normalized;
 }
 
 bool is_absolute_for_policy(PathPolicy policy, const std::string& raw) {
@@ -151,5 +151,5 @@ bool same_path_for_policy(
     const std::string& left,
     const std::string& right
 ) {
-    return comparison_key(policy, left) == comparison_key(policy, right);
+    return path_policy_comparison_key(policy, left) == path_policy_comparison_key(policy, right);
 }
