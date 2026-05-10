@@ -20,6 +20,7 @@
 
 #include "patch_engine.h"
 #include "path_policy.h"
+#include "path_utils.h"
 #include "platform.h"
 
 namespace {
@@ -50,14 +51,6 @@ enum LineEndingKind {
     LINE_ENDING_LF,
     LINE_ENDING_CRLF,
 };
-
-char native_separator() {
-#ifdef _WIN32
-    return '\\';
-#else
-    return '/';
-#endif
-}
 
 std::string normalize_relative_path(const std::string& raw) {
     if (raw.empty()) {
@@ -101,7 +94,7 @@ std::string normalize_relative_path(const std::string& raw) {
     std::ostringstream out;
     for (std::size_t i = 0; i < parts.size(); ++i) {
         if (i != 0) {
-            out << native_separator();
+            out << path_utils::native_separator();
         }
         out << parts[i];
     }
@@ -119,7 +112,7 @@ std::string normalize_absolute_path(const std::string& raw) {
     if (raw.size() >= 3 && std::isalpha(static_cast<unsigned char>(raw[0])) != 0 &&
         raw[1] == ':' && (raw[2] == '\\' || raw[2] == '/')) {
         prefix = raw.substr(0, 2);
-        prefix.push_back(native_separator());
+        prefix.push_back(path_utils::native_separator());
         start = 3;
     } else if (raw.rfind("\\\\", 0) == 0 || raw.rfind("//", 0) == 0) {
         prefix = "\\\\";
@@ -170,8 +163,9 @@ std::string normalize_absolute_path(const std::string& raw) {
     std::ostringstream out;
     out << prefix;
     for (std::size_t i = 0; i < parts.size(); ++i) {
-        if (i != 0 || (!prefix.empty() && prefix[prefix.size() - 1] != native_separator())) {
-            out << native_separator();
+        if (i != 0 ||
+            (!prefix.empty() && prefix[prefix.size() - 1] != path_utils::native_separator())) {
+            out << path_utils::native_separator();
         }
         out << parts[i];
     }
@@ -190,32 +184,11 @@ std::string normalize_patch_path(const std::string& raw) {
     return normalize_relative_path(normalized);
 }
 
-std::string join_path(const std::string& base, const std::string& relative) {
-    if (base.empty()) {
-        return relative;
-    }
-    std::string joined = base;
-    const char sep = native_separator();
-    if (joined[joined.size() - 1] != '/' && joined[joined.size() - 1] != '\\') {
-        joined.push_back(sep);
-    }
-    joined += relative;
-    return joined;
-}
-
 std::string resolve_patch_path(const std::string& root, const std::string& path) {
     if (is_absolute_for_policy(host_path_policy(), path)) {
         return path;
     }
-    return join_path(root, path);
-}
-
-std::string parent_directory(const std::string& path) {
-    const std::size_t slash = path.find_last_of("/\\");
-    if (slash == std::string::npos) {
-        return "";
-    }
-    return path.substr(0, slash);
+    return path_utils::join_path(root, path);
 }
 
 void make_directory_if_missing(const std::string& path) {
@@ -232,7 +205,7 @@ void make_directory_if_missing(const std::string& path) {
 }
 
 void create_parent_directories(const std::string& path) {
-    const std::string parent = parent_directory(path);
+    const std::string parent = path_utils::parent_directory(path);
     if (parent.empty()) {
         return;
     }

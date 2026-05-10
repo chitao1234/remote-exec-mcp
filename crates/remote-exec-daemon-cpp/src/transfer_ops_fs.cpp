@@ -18,6 +18,7 @@
 #endif
 
 #include "rpc_failures.h"
+#include "path_utils.h"
 #include "transfer_ops_internal.h"
 
 namespace transfer_ops_internal {
@@ -34,14 +35,6 @@ bool is_absolute_path(const std::string& path) {
 
 namespace {
 
-std::string parent_directory(const std::string& path) {
-    const std::size_t slash = path.find_last_of("/\\");
-    if (slash == std::string::npos) {
-        return "";
-    }
-    return path.substr(0, slash);
-}
-
 bool stat_path_no_follow(const std::string& path, struct stat* st) {
 #ifdef _WIN32
     return stat(path.c_str(), st) == 0;
@@ -56,14 +49,6 @@ bool stat_is_regular_file(const struct stat& st) {
 
 bool stat_is_directory(const struct stat& st) {
     return (st.st_mode & S_IFMT) == S_IFDIR;
-}
-
-char os_separator() {
-#ifdef _WIN32
-    return '\\';
-#else
-    return '/';
-#endif
 }
 
 void remove_existing_path(const std::string& path) {
@@ -130,15 +115,7 @@ bool is_directory_follow(const std::string& path) {
 }
 
 std::string join_path(const std::string& base, const std::string& child) {
-    if (base.empty()) {
-        return child;
-    }
-    std::string joined = base;
-    if (!joined.empty() && joined[joined.size() - 1] != '/' && joined[joined.size() - 1] != '\\') {
-        joined.push_back(os_separator());
-    }
-    joined += child;
-    return joined;
+    return path_utils::join_path(base, child);
 }
 
 void make_directory_if_missing(const std::string& path) {
@@ -155,7 +132,7 @@ void make_directory_if_missing(const std::string& path) {
 }
 
 void ensure_parent_directory(const std::string& path, bool create_parent) {
-    const std::string parent = parent_directory(path);
+    const std::string parent = path_utils::parent_directory(path);
     if (parent.empty()) {
         return;
     }

@@ -41,6 +41,7 @@ XP_SESSION_STORE_SRCS := \
 
 XP_TRANSFER_SRCS := \
 	$(MAKEFILE_DIR)tests/test_transfer.cpp \
+	$(PATH_UTILS_SRCS) \
 	$(TRANSFER_SRCS) \
 	$(RPC_FAILURE_SRCS)
 

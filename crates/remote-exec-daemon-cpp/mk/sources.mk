@@ -39,6 +39,8 @@ PORT_FORWARD_SRCS = \
 
 BASE64_SRCS = $(SOURCE_PREFIX)src/base64_codec.cpp
 
+PATH_UTILS_SRCS = $(SOURCE_PREFIX)src/path_utils.cpp
+
 BASE_SRCS = \
 	$(SOURCE_PREFIX)src/config.cpp \
 	$(SOURCE_PREFIX)src/http_codec.cpp \
@@ -48,6 +50,7 @@ BASE_SRCS = \
 	$(SOURCE_PREFIX)src/logging.cpp \
 	$(SOURCE_PREFIX)src/text_utils.cpp \
 	$(SOURCE_PREFIX)src/platform.cpp \
+	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/shell_policy.cpp \
 	$(SOURCE_PREFIX)src/server.cpp \
 	$(SOURCE_PREFIX)src/server_request_utils.cpp \
@@ -73,10 +76,12 @@ HOST_PATCH_SRCS = \
 	$(SOURCE_PREFIX)tests/test_patch.cpp \
 	$(SOURCE_PREFIX)src/patch_engine.cpp \
 	$(SOURCE_PREFIX)src/platform.cpp \
+	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/path_policy.cpp
 
 HOST_TRANSFER_SRCS = \
 	$(SOURCE_PREFIX)tests/test_transfer.cpp \
+	$(PATH_UTILS_SRCS) \
 	$(TRANSFER_SRCS) \
 	$(RPC_FAILURE_SRCS)
 
@@ -118,6 +123,7 @@ HOST_SERVER_STREAMING_SRCS = \
 	$(SOURCE_PREFIX)src/session_store.cpp \
 	$(SOURCE_PREFIX)src/process_session_posix.cpp \
 	$(SOURCE_PREFIX)src/platform.cpp \
+	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/shell_policy.cpp \
 	$(SOURCE_PREFIX)src/patch_engine.cpp \
 	$(SOURCE_PREFIX)src/server_request_utils.cpp \
@@ -168,6 +174,7 @@ HOST_SERVER_RUNTIME_SRCS = \
 	$(SOURCE_PREFIX)src/session_store.cpp \
 	$(SOURCE_PREFIX)src/process_session_posix.cpp \
 	$(SOURCE_PREFIX)src/platform.cpp \
+	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/shell_policy.cpp \
 	$(SOURCE_PREFIX)src/patch_engine.cpp \
 	$(SOURCE_PREFIX)src/basic_mutex.cpp \
@@ -190,6 +197,7 @@ HOST_SERVER_ROUTES_SRCS = \
 	$(SOURCE_PREFIX)src/session_store.cpp \
 	$(SOURCE_PREFIX)src/process_session_posix.cpp \
 	$(SOURCE_PREFIX)src/platform.cpp \
+	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/shell_policy.cpp \
 	$(SOURCE_PREFIX)src/patch_engine.cpp \
 	$(SOURCE_PREFIX)src/server_request_utils.cpp \
