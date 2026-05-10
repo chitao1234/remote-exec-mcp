@@ -15,7 +15,7 @@ use super::error::{SessionCloseMode, rpc_error};
 use super::limiter::{PortForwardLimiter, PortForwardPermit};
 use super::session_store::TunnelSessionStore;
 use super::udp::tunnel_udp_read_loop_session_owned;
-use super::{ErrorMeta, RESUME_TIMEOUT, TcpWriterHandle, TunnelSender, TunnelState};
+use super::{ErrorMeta, RESUME_TIMEOUT, TcpStreamEntry, TunnelSender, TunnelState, UdpReaderEntry};
 
 pub(super) struct SessionState {
     pub(super) id: String,
@@ -32,9 +32,8 @@ pub(super) struct SessionState {
 pub(super) struct AttachmentState {
     pub(super) tx: TunnelSender,
     pub(super) cancel: CancellationToken,
-    pub(super) tcp_writers: Mutex<HashMap<u32, TcpWriterHandle>>,
-    pub(super) tcp_stream_permits: Mutex<HashMap<u32, PortForwardPermit>>,
-    pub(super) stream_cancels: Mutex<HashMap<u32, CancellationToken>>,
+    pub(super) tcp_streams: Mutex<HashMap<u32, TcpStreamEntry>>,
+    pub(super) udp_readers: Mutex<HashMap<u32, UdpReaderEntry>>,
 }
 
 pub(super) enum RetainedListener {
@@ -125,11 +124,14 @@ impl SessionState {
 
     pub(super) async fn close_non_resumable_streams(&self) {
         if let Some(attachment) = self.attachment.lock().await.clone() {
-            for (_, cancel) in attachment.stream_cancels.lock().await.drain() {
-                cancel.cancel();
+            for (_, mut stream) in attachment.tcp_streams.lock().await.drain() {
+                if let Some(cancel) = stream.cancel.take() {
+                    cancel.cancel();
+                }
             }
-            attachment.tcp_writers.lock().await.clear();
-            attachment.tcp_stream_permits.lock().await.clear();
+            for (_, reader) in attachment.udp_readers.lock().await.drain() {
+                reader.cancel.cancel();
+            }
         }
     }
 
@@ -159,9 +161,8 @@ pub(super) async fn attach_session_to_tunnel(
         *attachment = Some(Arc::new(AttachmentState {
             tx: tunnel.tx.clone(),
             cancel: tunnel.cancel.child_token(),
-            tcp_writers: Mutex::new(HashMap::new()),
-            tcp_stream_permits: Mutex::new(HashMap::new()),
-            stream_cancels: Mutex::new(HashMap::new()),
+            tcp_streams: Mutex::new(HashMap::new()),
+            udp_readers: Mutex::new(HashMap::new()),
         }));
     }
     *session.resume_deadline.lock().await = None;
@@ -176,11 +177,14 @@ pub(super) async fn close_attached_session(tunnel: &Arc<TunnelState>, mode: Sess
     };
     if let Some(attachment) = session.attachment.lock().await.take() {
         attachment.cancel.cancel();
-        for (_, cancel) in attachment.stream_cancels.lock().await.drain() {
-            cancel.cancel();
+        for (_, mut stream) in attachment.tcp_streams.lock().await.drain() {
+            if let Some(cancel) = stream.cancel.take() {
+                cancel.cancel();
+            }
         }
-        attachment.tcp_writers.lock().await.clear();
-        attachment.tcp_stream_permits.lock().await.clear();
+        for (_, reader) in attachment.udp_readers.lock().await.drain() {
+            reader.cancel.cancel();
+        }
     }
 
     match mode {
@@ -264,13 +268,13 @@ pub(super) async fn reactivate_retained_udp_bind(
         .await
         .ok_or_else(|| rpc_error("port_tunnel_closed", "port tunnel attachment is closed"))?;
     let stream_cancel = attachment.cancel.child_token();
-    if let Some(existing) = attachment
-        .stream_cancels
-        .lock()
-        .await
-        .insert(stream_id, stream_cancel.clone())
-    {
-        existing.cancel();
+    if let Some(existing) = attachment.udp_readers.lock().await.insert(
+        stream_id,
+        UdpReaderEntry {
+            cancel: stream_cancel.clone(),
+        },
+    ) {
+        existing.cancel.cancel();
     }
     tokio::spawn(tunnel_udp_read_loop_session_owned(
         attachment,

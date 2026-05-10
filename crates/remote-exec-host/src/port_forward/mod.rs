@@ -39,10 +39,8 @@ struct TunnelState {
     cancel: CancellationToken,
     tx: TunnelSender,
     open_mode: Mutex<TunnelMode>,
-    tcp_writers: Mutex<HashMap<u32, TcpWriterHandle>>,
-    tcp_stream_permits: Mutex<HashMap<u32, limiter::PortForwardPermit>>,
-    udp_sockets: Mutex<HashMap<u32, TransportUdpBind>>,
-    stream_cancels: Mutex<HashMap<u32, CancellationToken>>,
+    tcp_streams: Mutex<HashMap<u32, TcpStreamEntry>>,
+    udp_binds: Mutex<HashMap<u32, TransportUdpBind>>,
     generation: AtomicU64,
     attached_session: Mutex<Option<Arc<session::SessionState>>>,
     _connection_permit: limiter::PortForwardPermit,
@@ -65,6 +63,12 @@ struct TcpWriterHandle {
     cancel: CancellationToken,
 }
 
+struct TcpStreamEntry {
+    writer: TcpWriterHandle,
+    _permit: limiter::PortForwardPermit,
+    cancel: Option<CancellationToken>,
+}
+
 enum TcpWriteCommand {
     Data(Vec<u8>),
     Shutdown,
@@ -73,6 +77,11 @@ enum TcpWriteCommand {
 struct TransportUdpBind {
     socket: Arc<UdpSocket>,
     _permit: limiter::PortForwardPermit,
+    cancel: CancellationToken,
+}
+
+struct UdpReaderEntry {
+    cancel: CancellationToken,
 }
 
 #[derive(Debug, Deserialize)]
@@ -944,16 +953,21 @@ mod port_tunnel_tests {
             open_mode: tokio::sync::Mutex::new(TunnelMode::Connect {
                 protocol: TunnelForwardProtocol::Tcp,
             }),
-            tcp_writers: tokio::sync::Mutex::new(HashMap::from([(
+            tcp_streams: tokio::sync::Mutex::new(HashMap::from([(
                 1,
-                TcpWriterHandle {
-                    tx: writer_tx,
-                    cancel: stream_cancel.clone(),
+                TcpStreamEntry {
+                    writer: TcpWriterHandle {
+                        tx: writer_tx,
+                        cancel: stream_cancel.clone(),
+                    },
+                    _permit: state
+                        .port_forward_limiter
+                        .try_acquire_active_tcp_stream()
+                        .unwrap(),
+                    cancel: Some(stream_cancel.clone()),
                 },
             )])),
-            tcp_stream_permits: tokio::sync::Mutex::new(HashMap::new()),
-            udp_sockets: tokio::sync::Mutex::new(HashMap::new()),
-            stream_cancels: tokio::sync::Mutex::new(HashMap::from([(1, stream_cancel.clone())])),
+            udp_binds: tokio::sync::Mutex::new(HashMap::new()),
             generation: AtomicU64::new(1),
             attached_session: tokio::sync::Mutex::new(None),
             _connection_permit: state

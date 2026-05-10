@@ -94,19 +94,15 @@ pub(super) async fn tunnel_udp_bind_transport_owned(
         .map_err(|err| rpc_error("port_bind_failed", err.to_string()))?
         .to_string();
     let permit = tunnel.state.port_forward_limiter.try_acquire_udp_bind()?;
-    tunnel.udp_sockets.lock().await.insert(
+    let stream_cancel = tunnel.cancel.child_token();
+    tunnel.udp_binds.lock().await.insert(
         frame.stream_id,
         TransportUdpBind {
             socket: socket.clone(),
             _permit: permit,
+            cancel: stream_cancel.clone(),
         },
     );
-    let stream_cancel = tunnel.cancel.child_token();
-    tunnel
-        .stream_cancels
-        .lock()
-        .await
-        .insert(frame.stream_id, stream_cancel.clone());
     tunnel
         .send(Frame {
             frame_type: FrameType::UdpBindOk,
@@ -189,10 +185,9 @@ pub(super) async fn tunnel_udp_read_loop_transport_owned(
                 continue;
             }
             let _ = send_tunnel_error(&tunnel, stream_id, err.code, err.message, false).await;
-            if let Some(cancel) = tunnel.stream_cancels.lock().await.remove(&stream_id) {
-                cancel.cancel();
+            if let Some(bind) = tunnel.udp_binds.lock().await.remove(&stream_id) {
+                bind.cancel.cancel();
             }
-            let _ = tunnel.udp_sockets.lock().await.remove(&stream_id);
             return;
         }
     }
@@ -275,8 +270,8 @@ pub(super) async fn tunnel_udp_read_loop_session_owned(
                 false,
             )
             .await;
-            if let Some(cancel) = attachment.stream_cancels.lock().await.remove(&stream_id) {
-                cancel.cancel();
+            if let Some(reader) = attachment.udp_readers.lock().await.remove(&stream_id) {
+                reader.cancel.cancel();
             }
             return;
         }
@@ -307,7 +302,7 @@ pub(super) async fn tunnel_udp_datagram(
         TunnelMode::Connect {
             protocol: TunnelForwardProtocol::Udp,
         } => tunnel
-            .udp_sockets
+            .udp_binds
             .lock()
             .await
             .get(&frame.stream_id)
