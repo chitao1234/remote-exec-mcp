@@ -313,13 +313,13 @@ void consume_file_archive_tail(
     std::vector<TransferWarning>* warnings
 ) {
     std::string pending_long_name;
-    char block[TAR_BLOCK_SIZE];
-    while (reader.read_exact_or_eof(block, TAR_BLOCK_SIZE)) {
-        if (is_zero_block(block)) {
+    std::vector<char> block(TAR_BLOCK_SIZE);
+    while (reader.read_exact_or_eof(block.data(), block.size())) {
+        if (is_zero_block(block.data())) {
             continue;
         }
 
-        const TarHeaderView header = parse_header(block);
+        const TarHeaderView header = parse_header(block.data());
 
         if (header.typeflag == 'L') {
             pending_long_name = read_gnu_long_name_from_reader(reader, header.size);
@@ -359,9 +359,9 @@ ImportSummary import_file_from_tar(
     const bool replaced = prepare_destination_path(absolute_path, "file", overwrite_mode, create_parent);
     ensure_not_existing_symlink(absolute_path);
 
-    char block[TAR_BLOCK_SIZE];
-    read_exact_or_throw(reader, block, TAR_BLOCK_SIZE, "archive is empty");
-    const TarHeaderView header = parse_header(block);
+    std::vector<char> block(TAR_BLOCK_SIZE);
+    read_exact_or_throw(reader, block.data(), block.size(), "archive is empty");
+    const TarHeaderView header = parse_header(block.data());
     if (header.typeflag != '0' && header.typeflag != '2') {
         throw TransferFailure(
             TransferRpcCode::SourceUnsupported,
@@ -419,14 +419,14 @@ ImportSummary import_directory_from_tar(
 
     ImportSummary summary = {source_type, 0, 0, 1, replaced, std::vector<TransferWarning>()};
     std::string pending_long_name;
-    char block[TAR_BLOCK_SIZE];
+    std::vector<char> block(TAR_BLOCK_SIZE);
 
-    while (reader.read_exact_or_eof(block, TAR_BLOCK_SIZE)) {
-        if (is_zero_block(block)) {
+    while (reader.read_exact_or_eof(block.data(), block.size())) {
+        if (is_zero_block(block.data())) {
             break;
         }
 
-        const TarHeaderView header = parse_header(block);
+        const TarHeaderView header = parse_header(block.data());
 
         if (header.typeflag == 'L') {
             pending_long_name = read_gnu_long_name_from_reader(reader, header.size);

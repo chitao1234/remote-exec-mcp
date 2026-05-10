@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cstdint>
+#include <cctype>
 #include <string>
 
 #ifdef _WIN32

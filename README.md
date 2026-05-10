@@ -30,7 +30,7 @@ Everything under `docs/` is historical implementation detail and planning contex
   - Shared Rust host runtime used by broker-host `local` behavior and the Rust daemon.
   - Owns transport-neutral host config, path handling, and the extracted host-local capability runtime as that boundary is cleaned up.
 - `remote-exec-daemon-cpp`
-  - Standalone C++ daemon over plain HTTP, with native POSIX and Windows XP-compatible build paths.
+  - Standalone C++ daemon over plain HTTP, with native POSIX and Windows XP-compatible MinGW/MSVC build paths.
   - Supports `exec_command`, `write_stdin`, `apply_patch`, `transfer_files` for files/directories/broker-built multi-source bundles, and `forward_ports`.
   - Supports POSIX PTY sessions when the host can allocate a PTY; Windows XP-compatible PTY sessions and image reads remain unsupported.
   - Intentionally closes stdin for POSIX non-PTY exec, while keeping Windows XP-compatible non-PTY stdin open for original-daemon compatibility.
@@ -449,6 +449,8 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 make -C crates/remote-exec-daemon-cpp check-posix
 make -C crates/remote-exec-daemon-cpp check-windows-xp
+# From an x86 Visual Studio developer prompt with the v141_xp-capable toolset:
+nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-xp
 ```
 
 Run the broker end-to-end test only:
