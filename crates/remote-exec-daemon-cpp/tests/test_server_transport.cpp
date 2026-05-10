@@ -1,12 +1,21 @@
 #include <cassert>
 #include <string>
 
+#include <stdexcept>
 #include <sys/socket.h>
 
 #include "http_request.h"
 #include "server_transport.h"
 
 int main() {
+    bool rejected_invalid_timeout_socket = false;
+    try {
+        set_socket_timeout_ms(INVALID_SOCKET, 1000UL);
+    } catch (const std::runtime_error&) {
+        rejected_invalid_timeout_socket = true;
+    }
+    assert(rejected_invalid_timeout_socket);
+
     int sockets[2];
     assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
 

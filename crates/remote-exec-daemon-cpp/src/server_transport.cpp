@@ -26,6 +26,25 @@
 #include "http_request.h"
 #include "server_transport.h"
 
+namespace {
+
+std::string socket_error_message_from_code(const std::string& operation, int error) {
+    std::ostringstream out;
+    out << operation << " failed";
+#ifndef _WIN32
+    out << ": " << std::strerror(error);
+#else
+    out << ": " << error;
+#endif
+    return out.str();
+}
+
+void throw_socket_option_error(const std::string& option, int error) {
+    throw std::runtime_error(socket_error_message_from_code("setsockopt(" + option + ")", error));
+}
+
+}  // namespace
+
 void close_socket(SOCKET socket) {
 #ifdef _WIN32
     closesocket(socket);
@@ -45,26 +64,34 @@ void shutdown_socket(SOCKET socket) {
 void set_socket_timeout_ms(SOCKET socket, unsigned long timeout_ms) {
 #ifdef _WIN32
     const DWORD value = static_cast<DWORD>(timeout_ms);
-    setsockopt(
+    if (setsockopt(
         socket,
         SOL_SOCKET,
         SO_RCVTIMEO,
         reinterpret_cast<const char*>(&value),
         sizeof(value)
-    );
-    setsockopt(
+    ) != 0) {
+        throw_socket_option_error("SO_RCVTIMEO", WSAGetLastError());
+    }
+    if (setsockopt(
         socket,
         SOL_SOCKET,
         SO_SNDTIMEO,
         reinterpret_cast<const char*>(&value),
         sizeof(value)
-    );
+    ) != 0) {
+        throw_socket_option_error("SO_SNDTIMEO", WSAGetLastError());
+    }
 #else
     timeval value;
     value.tv_sec = static_cast<long>(timeout_ms / 1000UL);
     value.tv_usec = static_cast<long>((timeout_ms % 1000UL) * 1000UL);
-    setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &value, sizeof(value));
-    setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, &value, sizeof(value));
+    if (setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &value, sizeof(value)) != 0) {
+        throw_socket_option_error("SO_RCVTIMEO", errno);
+    }
+    if (setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, &value, sizeof(value)) != 0) {
+        throw_socket_option_error("SO_SNDTIMEO", errno);
+    }
 #endif
 }
 
@@ -77,14 +104,7 @@ int last_socket_error() {
 }
 
 std::string socket_error_message(const std::string& operation) {
-    std::ostringstream out;
-    out << operation << " failed";
-#ifndef _WIN32
-    out << ": " << std::strerror(errno);
-#else
-    out << ": " << WSAGetLastError();
-#endif
-    return out.str();
+    return socket_error_message_from_code(operation, last_socket_error());
 }
 
 bool would_block_error(int error) {
