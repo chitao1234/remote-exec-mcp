@@ -80,7 +80,7 @@ pub fn write_dev_init_bundle(
     write_generated_pair(&broker, &bundle.broker, force, &mut written_paths)?;
     write_generated_daemon_pairs(spec, bundle, &daemon_paths, force, &mut written_paths)?;
 
-    let manifest = build_manifest(spec, out_dir.to_path_buf(), ca, broker, daemon_paths);
+    let manifest = build_manifest(spec, out_dir.to_path_buf(), ca, broker, daemon_paths)?;
     write_tracked_text_file(
         &manifest_path,
         &serde_json::to_string_pretty(&manifest)?,
@@ -145,7 +145,7 @@ fn write_generated_daemon_pairs(
             .with_context(|| format!("missing generated daemon bundle for `{target}`"))?;
         let paths = daemon_paths
             .get(target)
-            .expect("validated daemon paths must exist");
+            .with_context(|| format!("missing validated daemon output paths for `{target}`"))?;
         write_generated_pair(paths, pem_pair, force, written_paths)?;
     }
     Ok(())
@@ -238,7 +238,9 @@ fn write_text_file(
 }
 
 fn temporary_path(path: &Path) -> PathBuf {
-    let file_name = path.file_name().expect("paths must have file names");
+    let file_name = path
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("remote-exec-pki-output"));
     path.with_file_name(format!("{}.tmp", file_name.to_string_lossy()))
 }
 

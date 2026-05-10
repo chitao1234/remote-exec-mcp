@@ -1,9 +1,6 @@
-use std::{
-    collections::BTreeMap,
-    path::PathBuf,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{collections::BTreeMap, path::PathBuf, time::UNIX_EPOCH};
 
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::spec::{DevInitSpec, SubjectAltName};
@@ -41,36 +38,38 @@ pub fn build_manifest(
     ca: KeyPairPaths,
     broker: KeyPairPaths,
     daemons: BTreeMap<String, KeyPairPaths>,
-) -> DevInitManifest {
+) -> anyhow::Result<DevInitManifest> {
     let daemon_entries = spec
         .daemon_specs
         .iter()
         .map(|daemon| {
             let paths = daemons
                 .get(&daemon.target)
-                .expect("daemon artifacts must exist for every daemon spec");
-            (
+                .with_context(|| format!("missing daemon artifacts for `{}`", daemon.target))?;
+            Ok((
                 daemon.target.clone(),
                 DaemonManifestEntry {
                     cert_pem: paths.cert_pem.clone(),
                     key_pem: paths.key_pem.clone(),
                     sans: daemon.sans.clone(),
                 },
-            )
+            ))
         })
-        .collect::<BTreeMap<_, _>>();
+        .collect::<anyhow::Result<BTreeMap<_, _>>>()?;
 
-    DevInitManifest {
-        created_unix_seconds: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock must be after epoch")
-            .as_secs(),
+    let created_unix_seconds = std::time::SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("system clock is before the Unix epoch")?
+        .as_secs();
+
+    Ok(DevInitManifest {
+        created_unix_seconds,
         out_dir,
         ca,
         broker,
         broker_common_name: spec.broker_common_name.clone(),
         daemons: daemon_entries,
-    }
+    })
 }
 
 pub fn render_config_snippets(manifest: &DevInitManifest) -> String {
