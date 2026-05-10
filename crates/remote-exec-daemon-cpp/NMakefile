@@ -40,54 +40,15 @@ MSVC_XP_CXXFLAGS=/nologo /EHsc /MT /W3 /Od /std:c++14
 MSVC_XP_LDLIBS=ws2_32.lib
 MSVC_XP_LDFLAGS=/link /NOLOGO /LIBPATH:"$(MSVC_XP_WINSDK_DIR)\Lib" /SUBSYSTEM:CONSOLE,5.01 /MACHINE:X86
 
+SOURCE_PREFIX=$(DAEMON_CPP_DIR)/
+!include "$(DAEMON_CPP_DIR)\mk\sources.mk"
+
 MSVC_XP_SRCS= \
-    $(DAEMON_CPP_DIR)\src\config.cpp \
-    $(DAEMON_CPP_DIR)\src\http_codec.cpp \
-    $(DAEMON_CPP_DIR)\src\http_connection.cpp \
-    $(DAEMON_CPP_DIR)\src\http_helpers.cpp \
-    $(DAEMON_CPP_DIR)\src\http_request.cpp \
-    $(DAEMON_CPP_DIR)\src\logging.cpp \
-    $(DAEMON_CPP_DIR)\src\text_utils.cpp \
-    $(DAEMON_CPP_DIR)\src\platform.cpp \
-    $(DAEMON_CPP_DIR)\src\shell_policy.cpp \
-    $(DAEMON_CPP_DIR)\src\server.cpp \
-    $(DAEMON_CPP_DIR)\src\server_request_utils.cpp \
-    $(DAEMON_CPP_DIR)\src\server_runtime.cpp \
-    $(DAEMON_CPP_DIR)\src\server_transport.cpp \
-    $(DAEMON_CPP_DIR)\src\session_store.cpp \
-    $(DAEMON_CPP_DIR)\src\patch_engine.cpp \
-    $(DAEMON_CPP_DIR)\src\basic_mutex.cpp \
-    $(DAEMON_CPP_DIR)\src\connection_manager.cpp \
-    $(DAEMON_CPP_DIR)\src\server_routes.cpp \
-    $(DAEMON_CPP_DIR)\src\server_route_common.cpp \
-    $(DAEMON_CPP_DIR)\src\server_route_exec.cpp \
-    $(DAEMON_CPP_DIR)\src\server_route_image.cpp \
-    $(DAEMON_CPP_DIR)\src\server_route_transfer.cpp \
-    $(DAEMON_CPP_DIR)\src\transfer_http_codec.cpp \
-    $(DAEMON_CPP_DIR)\src\port_forward_endpoint.cpp \
-    $(DAEMON_CPP_DIR)\src\port_forward_error.cpp \
-    $(DAEMON_CPP_DIR)\src\port_forward_socket_ops.cpp \
-    $(DAEMON_CPP_DIR)\src\port_tunnel_frame.cpp \
-    $(DAEMON_CPP_DIR)\src\port_tunnel.cpp \
-    $(DAEMON_CPP_DIR)\src\port_tunnel_session.cpp \
-    $(DAEMON_CPP_DIR)\src\port_tunnel_transport.cpp \
-    $(DAEMON_CPP_DIR)\src\port_tunnel_tcp.cpp \
-    $(DAEMON_CPP_DIR)\src\port_tunnel_udp.cpp \
-    $(DAEMON_CPP_DIR)\src\port_tunnel_error.cpp \
-    $(DAEMON_CPP_DIR)\src\base64_codec.cpp \
-    $(DAEMON_CPP_DIR)\src\transfer_ops.cpp \
-    $(DAEMON_CPP_DIR)\src\transfer_ops_fs.cpp \
-    $(DAEMON_CPP_DIR)\src\transfer_ops_tar.cpp \
-    $(DAEMON_CPP_DIR)\src\transfer_ops_export.cpp \
-    $(DAEMON_CPP_DIR)\src\transfer_ops_import.cpp \
-    $(DAEMON_CPP_DIR)\src\transfer_glob.cpp \
-    $(DAEMON_CPP_DIR)\src\path_policy.cpp \
-    $(DAEMON_CPP_DIR)\src\filesystem_sandbox.cpp \
-    $(DAEMON_CPP_DIR)\src\rpc_failures.cpp \
-    $(DAEMON_CPP_DIR)\src\main.cpp \
-    $(DAEMON_CPP_DIR)\src\process_session_win32.cpp \
-    $(DAEMON_CPP_DIR)\src\console_output.cpp \
-    $(DAEMON_CPP_DIR)\src\win32_error.cpp
+    $(BASE_SRCS) \
+    $(SOURCE_PREFIX)src/main.cpp \
+    $(SOURCE_PREFIX)src/process_session_win32.cpp \
+    $(SOURCE_PREFIX)src/console_output.cpp \
+    $(SOURCE_PREFIX)src/win32_error.cpp
 
 all: all-msvc-xp
 

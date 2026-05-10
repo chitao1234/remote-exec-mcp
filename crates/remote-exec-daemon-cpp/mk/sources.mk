@@ -1,11 +1,9 @@
 # Shared C++ source inventory.
 #
-# This file intentionally uses make syntax accepted by both GNU make and BSD
-# make. Rule logic stays in dialect-specific makefiles.
+# This file intentionally uses make syntax accepted by GNU make, BSD make, and
+# NMAKE. Rule logic stays in dialect-specific makefiles.
 
-SOURCE_PREFIX ?=
-
-TRANSFER_SRCS := \
+TRANSFER_SRCS = \
 	$(SOURCE_PREFIX)src/transfer_ops.cpp \
 	$(SOURCE_PREFIX)src/transfer_ops_fs.cpp \
 	$(SOURCE_PREFIX)src/transfer_ops_tar.cpp \
@@ -13,13 +11,13 @@ TRANSFER_SRCS := \
 	$(SOURCE_PREFIX)src/transfer_ops_import.cpp \
 	$(SOURCE_PREFIX)src/transfer_glob.cpp
 
-POLICY_SRCS := \
+POLICY_SRCS = \
 	$(SOURCE_PREFIX)src/path_policy.cpp \
 	$(SOURCE_PREFIX)src/filesystem_sandbox.cpp
 
-RPC_FAILURE_SRCS := $(SOURCE_PREFIX)src/rpc_failures.cpp
+RPC_FAILURE_SRCS = $(SOURCE_PREFIX)src/rpc_failures.cpp
 
-ROUTE_SRCS := \
+ROUTE_SRCS = \
 	$(SOURCE_PREFIX)src/server_routes.cpp \
 	$(SOURCE_PREFIX)src/server_route_common.cpp \
 	$(SOURCE_PREFIX)src/server_route_exec.cpp \
@@ -27,7 +25,7 @@ ROUTE_SRCS := \
 	$(SOURCE_PREFIX)src/server_route_transfer.cpp \
 	$(SOURCE_PREFIX)src/transfer_http_codec.cpp
 
-PORT_FORWARD_SRCS := \
+PORT_FORWARD_SRCS = \
 	$(SOURCE_PREFIX)src/port_forward_endpoint.cpp \
 	$(SOURCE_PREFIX)src/port_forward_error.cpp \
 	$(SOURCE_PREFIX)src/port_forward_socket_ops.cpp \
@@ -39,9 +37,9 @@ PORT_FORWARD_SRCS := \
 	$(SOURCE_PREFIX)src/port_tunnel_udp.cpp \
 	$(SOURCE_PREFIX)src/port_tunnel_error.cpp
 
-BASE64_SRCS := $(SOURCE_PREFIX)src/base64_codec.cpp
+BASE64_SRCS = $(SOURCE_PREFIX)src/base64_codec.cpp
 
-BASE_SRCS := \
+BASE_SRCS = \
 	$(SOURCE_PREFIX)src/config.cpp \
 	$(SOURCE_PREFIX)src/http_codec.cpp \
 	$(SOURCE_PREFIX)src/http_connection.cpp \
@@ -66,40 +64,40 @@ BASE_SRCS := \
 	$(POLICY_SRCS) \
 	$(RPC_FAILURE_SRCS)
 
-POSIX_SRCS := \
+POSIX_SRCS = \
 	$(BASE_SRCS) \
 	$(SOURCE_PREFIX)src/main.cpp \
 	$(SOURCE_PREFIX)src/process_session_posix.cpp
 
-HOST_PATCH_SRCS := \
+HOST_PATCH_SRCS = \
 	$(SOURCE_PREFIX)tests/test_patch.cpp \
 	$(SOURCE_PREFIX)src/patch_engine.cpp \
 	$(SOURCE_PREFIX)src/platform.cpp \
 	$(SOURCE_PREFIX)src/path_policy.cpp
 
-HOST_TRANSFER_SRCS := \
+HOST_TRANSFER_SRCS = \
 	$(SOURCE_PREFIX)tests/test_transfer.cpp \
 	$(TRANSFER_SRCS) \
 	$(RPC_FAILURE_SRCS)
 
-HOST_CONFIG_SRCS := \
+HOST_CONFIG_SRCS = \
 	$(SOURCE_PREFIX)tests/test_config.cpp \
 	$(SOURCE_PREFIX)src/config.cpp \
 	$(SOURCE_PREFIX)src/text_utils.cpp
 
-HOST_BASIC_MUTEX_SRCS := \
+HOST_BASIC_MUTEX_SRCS = \
 	$(SOURCE_PREFIX)tests/test_basic_mutex.cpp \
 	$(SOURCE_PREFIX)src/basic_mutex.cpp \
 	$(SOURCE_PREFIX)src/platform.cpp
 
-HOST_HTTP_REQUEST_SRCS := \
+HOST_HTTP_REQUEST_SRCS = \
 	$(SOURCE_PREFIX)tests/test_http_request.cpp \
 	$(SOURCE_PREFIX)src/http_codec.cpp \
 	$(SOURCE_PREFIX)src/http_request.cpp \
 	$(SOURCE_PREFIX)src/http_helpers.cpp \
 	$(SOURCE_PREFIX)src/text_utils.cpp
 
-HOST_SERVER_TRANSPORT_SRCS := \
+HOST_SERVER_TRANSPORT_SRCS = \
 	$(SOURCE_PREFIX)tests/test_server_transport.cpp \
 	$(SOURCE_PREFIX)src/http_codec.cpp \
 	$(SOURCE_PREFIX)src/server_transport.cpp \
@@ -107,7 +105,7 @@ HOST_SERVER_TRANSPORT_SRCS := \
 	$(SOURCE_PREFIX)src/http_helpers.cpp \
 	$(SOURCE_PREFIX)src/text_utils.cpp
 
-HOST_SERVER_STREAMING_SRCS := \
+HOST_SERVER_STREAMING_SRCS = \
 	$(SOURCE_PREFIX)tests/test_server_streaming.cpp \
 	$(ROUTE_SRCS) \
 	$(SOURCE_PREFIX)src/server.cpp \
@@ -134,7 +132,7 @@ HOST_SERVER_STREAMING_SRCS := \
 	$(PORT_FORWARD_SRCS) \
 	$(BASE64_SRCS)
 
-HOST_SESSION_STORE_SRCS := \
+HOST_SESSION_STORE_SRCS = \
 	$(SOURCE_PREFIX)tests/test_session_store.cpp \
 	$(SOURCE_PREFIX)src/session_store.cpp \
 	$(SOURCE_PREFIX)src/process_session_posix.cpp \
@@ -145,7 +143,7 @@ HOST_SESSION_STORE_SRCS := \
 	$(SOURCE_PREFIX)src/config.cpp \
 	$(SOURCE_PREFIX)src/text_utils.cpp
 
-HOST_CONNECTION_MANAGER_SRCS := \
+HOST_CONNECTION_MANAGER_SRCS = \
 	$(SOURCE_PREFIX)tests/test_connection_manager.cpp \
 	$(SOURCE_PREFIX)src/connection_manager.cpp \
 	$(SOURCE_PREFIX)src/server_transport.cpp \
@@ -157,7 +155,7 @@ HOST_CONNECTION_MANAGER_SRCS := \
 	$(SOURCE_PREFIX)src/platform.cpp \
 	$(SOURCE_PREFIX)src/logging.cpp
 
-HOST_SERVER_RUNTIME_SRCS := \
+HOST_SERVER_RUNTIME_SRCS = \
 	$(SOURCE_PREFIX)tests/test_server_runtime.cpp \
 	$(SOURCE_PREFIX)src/server_runtime.cpp \
 	$(SOURCE_PREFIX)src/connection_manager.cpp \
@@ -184,7 +182,7 @@ HOST_SERVER_RUNTIME_SRCS := \
 	$(PORT_FORWARD_SRCS) \
 	$(BASE64_SRCS)
 
-HOST_SERVER_ROUTES_SRCS := \
+HOST_SERVER_ROUTES_SRCS = \
 	$(SOURCE_PREFIX)tests/test_server_routes.cpp \
 	$(ROUTE_SRCS) \
 	$(SOURCE_PREFIX)src/http_codec.cpp \
@@ -206,10 +204,10 @@ HOST_SERVER_ROUTES_SRCS := \
 	$(PORT_FORWARD_SRCS) \
 	$(BASE64_SRCS)
 
-HOST_SANDBOX_SRCS := \
+HOST_SANDBOX_SRCS = \
 	$(SOURCE_PREFIX)tests/test_sandbox.cpp \
 	$(POLICY_SRCS)
 
-HOST_PORT_TUNNEL_FRAME_SRCS := \
+HOST_PORT_TUNNEL_FRAME_SRCS = \
 	$(SOURCE_PREFIX)tests/test_port_tunnel_frame.cpp \
 	$(SOURCE_PREFIX)src/port_tunnel_frame.cpp
