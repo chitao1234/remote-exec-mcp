@@ -62,9 +62,12 @@ void write_tar_checksum(std::string* header) {
     write_octal_field(header, 148, 8, checksum);
 }
 
-std::string truncate_path_for_header(const std::string& path) {
+std::string path_for_header_name(const std::string& path, bool long_name_emitted) {
     if (path.size() <= 100) {
         return path;
+    }
+    if (!long_name_emitted) {
+        throw std::runtime_error("tar path too long without GNU long name header");
     }
     return path.substr(0, 100);
 }
@@ -94,10 +97,11 @@ void append_tar_header(
     char typeflag,
     std::uint64_t size,
     std::uint64_t mode,
-    const std::string& link_name = std::string()
+    const std::string& link_name = std::string(),
+    bool long_name_emitted = false
 ) {
     std::string header(TAR_BLOCK_SIZE, '\0');
-    write_string_field(&header, 0, 100, truncate_path_for_header(path));
+    write_string_field(&header, 0, 100, path_for_header_name(path, long_name_emitted));
     write_octal_field(&header, 100, 8, mode);
     write_octal_field(&header, 108, 8, 0);
     write_octal_field(&header, 116, 8, 0);
@@ -185,17 +189,27 @@ void append_gnu_long_name(TransferArchiveSink* archive, const std::string& path)
 }
 
 void append_directory_entry(TransferArchiveSink* archive, const std::string& rel_path) {
-    if (rel_path.size() > 100) {
+    const bool long_name_emitted = rel_path.size() > 100;
+    if (long_name_emitted) {
         append_gnu_long_name(archive, rel_path);
     }
-    append_tar_header(archive, rel_path, '5', 0, 0755);
+    append_tar_header(archive, rel_path, '5', 0, 0755, std::string(), long_name_emitted);
 }
 
 void append_file_entry(TransferArchiveSink* archive, const std::string& rel_path, const std::string& body) {
-    if (rel_path.size() > 100) {
+    const bool long_name_emitted = rel_path.size() > 100;
+    if (long_name_emitted) {
         append_gnu_long_name(archive, rel_path);
     }
-    append_tar_header(archive, rel_path, '0', body.size(), 0644);
+    append_tar_header(
+        archive,
+        rel_path,
+        '0',
+        body.size(),
+        0644,
+        std::string(),
+        long_name_emitted
+    );
     append_padded_body(archive, body);
 }
 
@@ -233,10 +247,11 @@ void append_file_entry_from_path(
         throw std::runtime_error("unable to read transfer source");
     }
 
-    if (rel_path.size() > 100) {
+    const bool long_name_emitted = rel_path.size() > 100;
+    if (long_name_emitted) {
         append_gnu_long_name(archive, rel_path);
     }
-    append_tar_header(archive, rel_path, '0', file_size, mode);
+    append_tar_header(archive, rel_path, '0', file_size, mode, std::string(), long_name_emitted);
 
     char buffer[8192];
     std::uint64_t remaining = file_size;
@@ -256,13 +271,14 @@ void append_file_entry_from_path(
 
 #ifndef _WIN32
 void append_symlink_entry(TransferArchiveSink* archive, const std::string& rel_path, const std::string& target) {
-    if (rel_path.size() > 100) {
+    const bool long_name_emitted = rel_path.size() > 100;
+    if (long_name_emitted) {
         append_gnu_long_name(archive, rel_path);
     }
     if (target.size() > 100) {
         throw std::runtime_error("tar symlink target too long");
     }
-    append_tar_header(archive, rel_path, '2', 0, 0777, target);
+    append_tar_header(archive, rel_path, '2', 0, 0777, target, long_name_emitted);
 }
 #endif
 
