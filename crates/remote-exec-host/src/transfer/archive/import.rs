@@ -2,7 +2,7 @@ use std::io::Read;
 use std::path::Path;
 
 use remote_exec_proto::rpc::{
-    TransferImportRequest, TransferImportResponse, TransferOverwriteMode, TransferSourceType,
+    TransferImportRequest, TransferImportResponse, TransferOverwrite, TransferSourceType,
     TransferSymlinkMode, TransferWarning,
 };
 use remote_exec_proto::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
@@ -97,16 +97,16 @@ async fn prepare_destination(
 
     match tokio::fs::symlink_metadata(destination).await {
         Ok(metadata) => match request.overwrite {
-            TransferOverwriteMode::Fail => Err(TransferError::destination_exists(format!(
+            TransferOverwrite::Fail => Err(TransferError::destination_exists(format!(
                 "destination path `{}` already exists",
                 destination.display()
             ))
             .into()),
-            TransferOverwriteMode::Merge => {
+            TransferOverwrite::Merge => {
                 ensure_merge_destination_is_compatible(destination, &metadata, request)?;
                 Ok(false)
             }
-            TransferOverwriteMode::Replace => {
+            TransferOverwrite::Replace => {
                 if metadata.is_dir() {
                     tokio::fs::remove_dir_all(destination).await?;
                 } else {

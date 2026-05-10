@@ -48,7 +48,7 @@ mod tests {
         TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
         TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
         TRANSFER_SYMLINK_MODE_HEADER, TransferCompression, TransferImportMetadata,
-        TransferOverwriteMode, TransferSourceType, TransferSymlinkMode,
+        TransferOverwrite, TransferSourceType, TransferSymlinkMode,
     };
 
     use super::*;
@@ -83,7 +83,7 @@ mod tests {
             client.post("http://127.0.0.1/v1/transfer/import"),
             &TransferImportMetadata {
                 destination_path: "/tmp/out".to_string(),
-                overwrite: TransferOverwriteMode::Replace,
+                overwrite: TransferOverwrite::Replace,
                 create_parent: false,
                 source_type: TransferSourceType::Multiple,
                 compression: TransferCompression::Zstd,

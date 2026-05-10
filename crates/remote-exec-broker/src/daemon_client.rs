@@ -5,8 +5,8 @@ use remote_exec_proto::port_tunnel::{
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
     PatchApplyRequest, PatchApplyResponse, RpcErrorBody, TargetInfoResponse,
-    TransferExportMetadata, TransferExportRequest, TransferImportMetadata, TransferImportRequest,
-    TransferImportResponse, TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType,
+    TransferExportMetadata, TransferExportRequest, TransferImportRequest, TransferImportResponse,
+    TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType,
 };
 use reqwest::header::{AUTHORIZATION, CONNECTION, CONTENT_LENGTH, HeaderValue, UPGRADE};
 
@@ -397,10 +397,8 @@ impl DaemonClient {
         body: reqwest::Body,
         started: std::time::Instant,
     ) -> Result<reqwest::Response, DaemonClientError> {
-        let mut request = codec::apply_import_headers(
-            self.request("/v1/transfer/import"),
-            &TransferImportMetadata::from(req),
-        );
+        let mut request =
+            codec::apply_import_headers(self.request("/v1/transfer/import"), &req.metadata());
         if let Some(file_len) = file_len {
             request = request.header(CONTENT_LENGTH, file_len);
         }

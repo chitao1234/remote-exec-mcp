@@ -1,12 +1,9 @@
 use std::path::Path;
 
-use remote_exec_proto::public::{
-    TransferEndpoint, TransferOverwrite, TransferSymlinkMode as PublicTransferSymlinkMode,
-};
+use remote_exec_proto::public::{TransferEndpoint, TransferOverwrite, TransferSymlinkMode};
 use remote_exec_proto::rpc::{
     TransferCompression as RpcTransferCompression, TransferExportRequest, TransferImportRequest,
-    TransferImportResponse, TransferOverwriteMode, TransferSourceType as RpcTransferSourceType,
-    TransferSymlinkMode as RpcTransferSymlinkMode,
+    TransferImportResponse, TransferSourceType,
 };
 
 use crate::daemon_client::DaemonClientError;
@@ -16,12 +13,12 @@ use super::endpoints::{endpoint_policy, verified_remote_target};
 struct ExportedSourceArchive {
     endpoint: TransferEndpoint,
     source_policy: remote_exec_proto::path::PathPolicy,
-    source_type: RpcTransferSourceType,
+    source_type: TransferSourceType,
     temp_path: tempfile::TempPath,
 }
 
 struct ExportArchiveResult {
-    source_type: RpcTransferSourceType,
+    source_type: TransferSourceType,
 }
 
 #[derive(Clone, Copy)]
@@ -29,7 +26,7 @@ pub(super) struct TransferExecutionOptions<'a> {
     pub(super) overwrite: &'a TransferOverwrite,
     pub(super) compression: &'a RpcTransferCompression,
     pub(super) exclude: &'a [String],
-    pub(super) symlink_mode: &'a PublicTransferSymlinkMode,
+    pub(super) symlink_mode: &'a TransferSymlinkMode,
     pub(super) create_parent: bool,
 }
 
@@ -38,7 +35,7 @@ pub(super) async fn transfer_single_source(
     source: &TransferEndpoint,
     destination: &TransferEndpoint,
     options: TransferExecutionOptions<'_>,
-) -> anyhow::Result<(RpcTransferSourceType, TransferImportResponse)> {
+) -> anyhow::Result<(TransferSourceType, TransferImportResponse)> {
     match (source.target.as_str(), destination.target.as_str()) {
         ("local", "local") => {
             let export_request = build_export_request(
@@ -165,7 +162,7 @@ pub(super) async fn transfer_multiple_sources(
     sources: &[TransferEndpoint],
     destination: &TransferEndpoint,
     options: TransferExecutionOptions<'_>,
-) -> anyhow::Result<(RpcTransferSourceType, TransferImportResponse)> {
+) -> anyhow::Result<(TransferSourceType, TransferImportResponse)> {
     let mut exported_sources = Vec::with_capacity(sources.len());
     for source in sources {
         let temp = tempfile::NamedTempFile::new()?;
@@ -206,7 +203,7 @@ pub(super) async fn transfer_multiple_sources(
     )
     .await?;
 
-    let source_type = RpcTransferSourceType::Multiple;
+    let source_type = TransferSourceType::Multiple;
     let request = build_import_request(
         destination,
         options.overwrite,
@@ -224,12 +221,12 @@ fn build_export_request(
     endpoint: &TransferEndpoint,
     compression: &RpcTransferCompression,
     exclude: &[String],
-    symlink_mode: &PublicTransferSymlinkMode,
+    symlink_mode: &TransferSymlinkMode,
 ) -> TransferExportRequest {
     TransferExportRequest {
         path: endpoint.path.clone(),
         compression: compression.clone(),
-        symlink_mode: to_rpc_symlink_mode(symlink_mode),
+        symlink_mode: symlink_mode.clone(),
         exclude: exclude.to_vec(),
     }
 }
@@ -240,7 +237,7 @@ async fn export_endpoint_to_archive(
     archive_path: &Path,
     compression: &RpcTransferCompression,
     exclude: &[String],
-    symlink_mode: &PublicTransferSymlinkMode,
+    symlink_mode: &TransferSymlinkMode,
 ) -> anyhow::Result<ExportArchiveResult> {
     let request = build_export_request(endpoint, compression, exclude, symlink_mode);
 
@@ -341,30 +338,18 @@ async fn import_remote_body_to_endpoint(
 fn build_import_request(
     endpoint: &TransferEndpoint,
     overwrite: &TransferOverwrite,
-    source_type: RpcTransferSourceType,
+    source_type: TransferSourceType,
     compression: &RpcTransferCompression,
-    symlink_mode: &PublicTransferSymlinkMode,
+    symlink_mode: &TransferSymlinkMode,
     create_parent: bool,
 ) -> TransferImportRequest {
     TransferImportRequest {
         destination_path: endpoint.path.clone(),
-        overwrite: match overwrite {
-            TransferOverwrite::Fail => TransferOverwriteMode::Fail,
-            TransferOverwrite::Merge => TransferOverwriteMode::Merge,
-            TransferOverwrite::Replace => TransferOverwriteMode::Replace,
-        },
+        overwrite: overwrite.clone(),
         create_parent,
         source_type,
         compression: compression.clone(),
-        symlink_mode: to_rpc_symlink_mode(symlink_mode),
-    }
-}
-
-fn to_rpc_symlink_mode(mode: &PublicTransferSymlinkMode) -> RpcTransferSymlinkMode {
-    match mode {
-        PublicTransferSymlinkMode::Preserve => RpcTransferSymlinkMode::Preserve,
-        PublicTransferSymlinkMode::Follow => RpcTransferSymlinkMode::Follow,
-        PublicTransferSymlinkMode::Skip => RpcTransferSymlinkMode::Skip,
+        symlink_mode: symlink_mode.clone(),
     }
 }
 

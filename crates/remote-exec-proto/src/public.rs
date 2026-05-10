@@ -2,6 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::rpc::{ExecWarning, TransferWarning};
+pub use crate::transfer::{TransferOverwrite, TransferSourceType, TransferSymlinkMode};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -79,37 +80,11 @@ pub struct ListTargetsResult {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum TransferOverwrite {
-    Fail,
-    #[default]
-    Merge,
-    Replace,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
 pub enum TransferDestinationMode {
     #[default]
     Auto,
     Exact,
     IntoDirectory,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TransferSymlinkMode {
-    #[default]
-    Preserve,
-    Follow,
-    Skip,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TransferSourceType {
-    File,
-    Directory,
-    Multiple,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]

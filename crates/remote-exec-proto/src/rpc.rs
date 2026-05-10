@@ -1,6 +1,11 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+pub use crate::transfer::{
+    TransferExportMetadata, TransferExportRequest, TransferImportMetadata, TransferImportRequest,
+    TransferOverwrite, TransferSourceType, TransferSymlinkMode,
+};
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HealthCheckResponse {
     pub status: String,
@@ -129,88 +134,6 @@ impl TransferCompression {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum TransferSourceType {
-    File,
-    Directory,
-    Multiple,
-}
-
-impl TransferSourceType {
-    pub fn wire_value(&self) -> &'static str {
-        match self {
-            Self::File => "file",
-            Self::Directory => "directory",
-            Self::Multiple => "multiple",
-        }
-    }
-
-    pub fn from_wire_value(value: &str) -> Option<Self> {
-        match value {
-            "file" => Some(Self::File),
-            "directory" => Some(Self::Directory),
-            "multiple" => Some(Self::Multiple),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum TransferOverwriteMode {
-    Fail,
-    Merge,
-    Replace,
-}
-
-impl TransferOverwriteMode {
-    pub fn wire_value(&self) -> &'static str {
-        match self {
-            Self::Fail => "fail",
-            Self::Merge => "merge",
-            Self::Replace => "replace",
-        }
-    }
-
-    pub fn from_wire_value(value: &str) -> Option<Self> {
-        match value {
-            "fail" => Some(Self::Fail),
-            "merge" => Some(Self::Merge),
-            "replace" => Some(Self::Replace),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum TransferSymlinkMode {
-    #[default]
-    Preserve,
-    Follow,
-    Skip,
-}
-
-impl TransferSymlinkMode {
-    pub fn wire_value(&self) -> &'static str {
-        match self {
-            Self::Preserve => "preserve",
-            Self::Follow => "follow",
-            Self::Skip => "skip",
-        }
-    }
-
-    pub fn from_wire_value(value: &str) -> Option<Self> {
-        match value {
-            "preserve" => Some(Self::Preserve),
-            "follow" => Some(Self::Follow),
-            "skip" => Some(Self::Skip),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct TransferWarning {
     pub code: String,
@@ -234,23 +157,6 @@ impl TransferWarning {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TransferExportRequest {
-    pub path: String,
-    #[serde(default, skip_serializing_if = "TransferCompression::is_none")]
-    pub compression: TransferCompression,
-    #[serde(default)]
-    pub symlink_mode: TransferSymlinkMode,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub exclude: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TransferExportMetadata {
-    pub source_type: TransferSourceType,
-    pub compression: TransferCompression,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransferPathInfoRequest {
     pub path: String,
 }
@@ -259,53 +165,6 @@ pub struct TransferPathInfoRequest {
 pub struct TransferPathInfoResponse {
     pub exists: bool,
     pub is_directory: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TransferImportRequest {
-    pub destination_path: String,
-    pub overwrite: TransferOverwriteMode,
-    pub create_parent: bool,
-    pub source_type: TransferSourceType,
-    pub compression: TransferCompression,
-    #[serde(default)]
-    pub symlink_mode: TransferSymlinkMode,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TransferImportMetadata {
-    pub destination_path: String,
-    pub overwrite: TransferOverwriteMode,
-    pub create_parent: bool,
-    pub source_type: TransferSourceType,
-    pub compression: TransferCompression,
-    pub symlink_mode: TransferSymlinkMode,
-}
-
-impl From<&TransferImportRequest> for TransferImportMetadata {
-    fn from(value: &TransferImportRequest) -> Self {
-        Self {
-            destination_path: value.destination_path.clone(),
-            overwrite: value.overwrite.clone(),
-            create_parent: value.create_parent,
-            source_type: value.source_type.clone(),
-            compression: value.compression.clone(),
-            symlink_mode: value.symlink_mode.clone(),
-        }
-    }
-}
-
-impl From<TransferImportMetadata> for TransferImportRequest {
-    fn from(value: TransferImportMetadata) -> Self {
-        Self {
-            destination_path: value.destination_path,
-            overwrite: value.overwrite,
-            create_parent: value.create_parent,
-            source_type: value.source_type,
-            compression: value.compression,
-            symlink_mode: value.symlink_mode,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -447,12 +306,12 @@ where
     })
 }
 
-fn parse_required_overwrite<F>(header: &mut F) -> Result<TransferOverwriteMode, TransferHeaderError>
+fn parse_required_overwrite<F>(header: &mut F) -> Result<TransferOverwrite, TransferHeaderError>
 where
     F: FnMut(&'static str) -> Result<Option<String>, TransferHeaderError>,
 {
     let raw = required_transfer_header(header, TRANSFER_OVERWRITE_HEADER)?;
-    TransferOverwriteMode::from_wire_value(&raw).ok_or_else(|| {
+    TransferOverwrite::from_wire_value(&raw).ok_or_else(|| {
         invalid_enum_header(
             TRANSFER_OVERWRITE_HEADER,
             "expected one of `fail`, `merge`, `replace`",
@@ -560,10 +419,9 @@ mod tests {
         TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
         TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
         TRANSFER_SYMLINK_MODE_HEADER, TransferCompression, TransferExportMetadata,
-        TransferHeaderError, TransferHeaderErrorKind, TransferImportMetadata,
-        TransferOverwriteMode, TransferSourceType, TransferSymlinkMode,
-        parse_transfer_export_metadata, parse_transfer_import_metadata,
-        transfer_export_header_pairs, transfer_import_header_pairs,
+        TransferHeaderError, TransferHeaderErrorKind, TransferImportMetadata, TransferOverwrite,
+        TransferSourceType, TransferSymlinkMode, parse_transfer_export_metadata,
+        parse_transfer_import_metadata, transfer_export_header_pairs, transfer_import_header_pairs,
     };
 
     fn header_map(headers: &[(&'static str, &'static str)]) -> BTreeMap<&'static str, String> {
@@ -652,7 +510,7 @@ mod tests {
     fn transfer_header_pairs_render_canonical_import_metadata() {
         let metadata = TransferImportMetadata {
             destination_path: "/tmp/output".to_string(),
-            overwrite: TransferOverwriteMode::Replace,
+            overwrite: TransferOverwrite::Replace,
             create_parent: true,
             source_type: TransferSourceType::Directory,
             compression: TransferCompression::Zstd,
@@ -703,7 +561,7 @@ mod tests {
             parsed,
             TransferImportMetadata {
                 destination_path: "/tmp/output".to_string(),
-                overwrite: TransferOverwriteMode::Merge,
+                overwrite: TransferOverwrite::Merge,
                 create_parent: false,
                 source_type: TransferSourceType::File,
                 compression: TransferCompression::None,

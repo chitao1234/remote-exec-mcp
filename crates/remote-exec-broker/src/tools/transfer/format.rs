@@ -1,13 +1,11 @@
 use std::time::Instant;
 
 use remote_exec_proto::public::{
-    TransferDestinationMode, TransferEndpoint, TransferFilesResult,
-    TransferSourceType as PublicTransferSourceType,
+    TransferDestinationMode, TransferEndpoint, TransferFilesResult, TransferSourceType,
     TransferSymlinkMode as PublicTransferSymlinkMode,
 };
 use remote_exec_proto::rpc::{
     TransferCompression as RpcTransferCompression, TransferImportResponse,
-    TransferSourceType as RpcTransferSourceType,
 };
 
 use crate::mcp_server::ToolCallOutput;
@@ -17,7 +15,7 @@ pub(super) struct CompletedTransfer {
     pub destination: TransferEndpoint,
     pub destination_mode: TransferDestinationMode,
     pub symlink_mode: PublicTransferSymlinkMode,
-    pub source_type: RpcTransferSourceType,
+    pub source_type: TransferSourceType,
     pub summary: TransferImportResponse,
 }
 
@@ -35,11 +33,7 @@ pub(super) fn finish_transfer(
         resolved_destination: completed.destination,
         destination_mode: completed.destination_mode,
         symlink_mode: completed.symlink_mode,
-        source_type: match completed.source_type {
-            RpcTransferSourceType::File => PublicTransferSourceType::File,
-            RpcTransferSourceType::Directory => PublicTransferSourceType::Directory,
-            RpcTransferSourceType::Multiple => PublicTransferSourceType::Multiple,
-        },
+        source_type: completed.source_type,
         bytes_copied: completed.summary.bytes_copied,
         files_copied: completed.summary.files_copied,
         directories_copied: completed.summary.directories_copied,
@@ -70,10 +64,10 @@ pub(super) fn format_transfer_compression(compression: &RpcTransferCompression) 
 
 fn format_transfer_text(result: &TransferFilesResult) -> String {
     let source_summary = match (&result.source, &result.source_type) {
-        (Some(source), PublicTransferSourceType::File) => {
+        (Some(source), TransferSourceType::File) => {
             format!("file `{}` from `{}`", source.path, source.target)
         }
-        (Some(source), PublicTransferSourceType::Directory) => {
+        (Some(source), TransferSourceType::Directory) => {
             format!("directory `{}` from `{}`", source.path, source.target)
         }
         _ => format!("{} sources", result.sources.len()),
