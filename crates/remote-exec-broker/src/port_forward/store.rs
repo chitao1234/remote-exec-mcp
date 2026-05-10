@@ -99,13 +99,8 @@ impl PortForwardStore {
             .ok_or_else(|| anyhow::anyhow!("unknown forward_id `{forward_id}`"))?;
         Ok(PortForwardCloseCandidate {
             forward_id: forward_id.to_string(),
-            handle: PortForwardCloseHandle::from(record),
-            record: PortForwardRecord {
-                entry: record.entry.clone(),
-                listen_session: record.listen_session.clone(),
-                cancel: record.cancel.clone(),
-                task_done: record.task_done.clone(),
-            },
+            handle: record.close_handle.clone(),
+            fallback_entry: record.entry.clone(),
         })
     }
 
@@ -113,19 +108,14 @@ impl PortForwardStore {
         &self,
         candidate: PortForwardCloseCandidate,
     ) -> ForwardPortEntry {
-        let record = self
+        let entry = self
             .entries
             .write()
             .await
             .remove(&candidate.forward_id)
-            .unwrap_or(candidate.record);
-        let mut entry = record.entry;
-        entry.status = ForwardPortStatus::Closed;
-        entry.phase = ForwardPortPhase::Closed;
-        entry.listen_state.health = ForwardPortSideHealth::Closed;
-        entry.connect_state.health = ForwardPortSideHealth::Closed;
-        entry.last_error = None;
-        entry
+            .map(|record| record.entry)
+            .unwrap_or(candidate.fallback_entry);
+        closed_entry(entry)
     }
 
     pub async fn mark_failed(&self, forward_id: &str, error: String) {
@@ -284,48 +274,75 @@ impl PortForwardFilter {
 
 pub struct PortForwardRecord {
     pub entry: ForwardPortEntry,
-    pub(super) listen_session: Arc<ListenSessionControl>,
-    pub cancel: CancellationToken,
-    pub(super) task_done: Arc<Mutex<Option<JoinHandle<()>>>>,
+    close_handle: Arc<PortForwardCloseHandle>,
+}
+
+impl PortForwardRecord {
+    pub(super) fn new(
+        entry: ForwardPortEntry,
+        listen_session: Arc<ListenSessionControl>,
+        cancel: CancellationToken,
+    ) -> Self {
+        Self {
+            entry,
+            close_handle: Arc::new(PortForwardCloseHandle::new(listen_session, cancel)),
+        }
+    }
+
+    pub(super) async fn set_task(&self, task: JoinHandle<()>) {
+        self.close_handle.set_task(task).await;
+    }
 }
 
 struct PortForwardCloseCandidate {
     forward_id: String,
-    handle: PortForwardCloseHandle,
-    record: PortForwardRecord,
+    handle: Arc<PortForwardCloseHandle>,
+    fallback_entry: ForwardPortEntry,
 }
 
 struct PortForwardCloseHandle {
     listen_session: Arc<ListenSessionControl>,
     cancel: CancellationToken,
-    task_done: Arc<Mutex<Option<JoinHandle<()>>>>,
+    task: Mutex<Option<JoinHandle<()>>>,
 }
 
-impl From<&PortForwardRecord> for PortForwardCloseHandle {
-    fn from(record: &PortForwardRecord) -> Self {
+impl PortForwardCloseHandle {
+    fn new(listen_session: Arc<ListenSessionControl>, cancel: CancellationToken) -> Self {
         Self {
-            listen_session: record.listen_session.clone(),
-            cancel: record.cancel.clone(),
-            task_done: record.task_done.clone(),
+            listen_session,
+            cancel,
+            task: Mutex::new(None),
         }
+    }
+
+    async fn set_task(&self, task: JoinHandle<()>) {
+        *self.task.lock().await = Some(task);
+    }
+
+    async fn take_task(&self) -> Option<JoinHandle<()>> {
+        self.task.lock().await.take()
     }
 }
 
 pub async fn close_record(record: PortForwardRecord) -> ForwardPortEntry {
-    let result = close_handle(&PortForwardCloseHandle::from(&record)).await;
+    let PortForwardRecord {
+        entry,
+        close_handle: handle,
+    } = record;
+    let result = close_handle(&handle).await;
     if let Err(err) = result {
         tracing::warn!(
-            forward_id = %record.entry.forward_id,
+            forward_id = %entry.forward_id,
             error = %err,
             "failed to close port forward cleanly"
         );
     }
-    closed_entry(record.entry)
+    closed_entry(entry)
 }
 
 async fn close_handle(handle: &PortForwardCloseHandle) -> anyhow::Result<()> {
     handle.cancel.cancel();
-    if let Some(task) = handle.task_done.lock().await.take() {
+    if let Some(task) = handle.take_task().await {
         wait_for_forward_task_stop(task).await?;
     }
     close_listen_session(handle.listen_session.clone()).await
@@ -381,7 +398,6 @@ mod tests {
         ForwardPortEntry, ForwardPortLimitSummary, ForwardPortPhase, ForwardPortProtocol,
         ForwardPortSideHealth, ForwardPortSideRole, ForwardPortStatus,
     };
-    use tokio::sync::Mutex;
     use tokio_util::sync::CancellationToken;
 
     use super::*;
@@ -509,6 +525,21 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn forward_task_handle_is_consumed_once() {
+        let record = test_record("fwd_task");
+        let task = tokio::spawn(async {});
+        record.set_task(task).await;
+
+        let first = record.close_handle.take_task().await;
+        assert!(first.is_some());
+        if let Some(task) = first {
+            task.await.unwrap();
+        }
+
+        assert!(record.close_handle.take_task().await.is_none());
+    }
+
     fn filter_one(forward_id: &str) -> PortForwardFilter {
         PortForwardFilter {
             listen_side: None,
@@ -518,8 +549,8 @@ mod tests {
     }
 
     fn test_record(forward_id: &str) -> PortForwardRecord {
-        PortForwardRecord {
-            entry: ForwardPortEntry::new_open(
+        PortForwardRecord::new(
+            ForwardPortEntry::new_open(
                 forward_id.to_string(),
                 "local".to_string(),
                 "127.0.0.1:10000".to_string(),
@@ -535,7 +566,7 @@ mod tests {
                     max_reconnecting_forwards: 16,
                 },
             ),
-            listen_session: Arc::new(ListenSessionControl::new_for_test(
+            Arc::new(ListenSessionControl::new_for_test(
                 SideHandle::local().unwrap(),
                 forward_id.to_string(),
                 format!("session-{forward_id}"),
@@ -544,8 +575,7 @@ mod tests {
                 8 * 1024 * 1024,
                 None,
             )),
-            cancel: CancellationToken::new(),
-            task_done: Arc::new(Mutex::new(None)),
-        }
+            CancellationToken::new(),
+        )
     }
 }

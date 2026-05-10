@@ -868,7 +868,6 @@ mod tests {
         ForwardPortEntry, ForwardPortLimitSummary, ForwardPortProtocol as PublicForwardPortProtocol,
     };
     use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-    use tokio::sync::Mutex as TokioMutex;
     use tokio_util::sync::CancellationToken;
 
     use super::super::side::SideHandle;
@@ -1798,8 +1797,8 @@ mod tests {
         runtime: &ForwardRuntime,
         listen_endpoint: &str,
     ) -> super::super::store::PortForwardRecord {
-        super::super::store::PortForwardRecord {
-            entry: ForwardPortEntry::new_open(
+        super::super::store::PortForwardRecord::new(
+            ForwardPortEntry::new_open(
                 runtime.forward_id.clone(),
                 runtime.listen_side.name().to_string(),
                 listen_endpoint.to_string(),
@@ -1817,10 +1816,9 @@ mod tests {
                     max_reconnecting_forwards: runtime.max_reconnecting_forwards,
                 },
             ),
-            listen_session: runtime.listen_session.clone(),
-            cancel: runtime.cancel.clone(),
-            task_done: Arc::new(TokioMutex::new(None)),
-        }
+            runtime.listen_session.clone(),
+            runtime.cancel.clone(),
+        )
     }
 
     async fn wait_until_send_fails(tunnel: &PortTunnel) {

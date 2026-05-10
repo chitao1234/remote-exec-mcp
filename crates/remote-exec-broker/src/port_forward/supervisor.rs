@@ -154,8 +154,11 @@ pub(super) struct ListenSessionControl {
     pub(super) listener_stream_id: u32,
     pub(super) resume_timeout: Duration,
     pub(super) max_tunnel_queued_bytes: usize,
-    current_tunnel: Mutex<Option<Arc<PortTunnel>>>,
-    op_lock: Mutex<()>,
+    state: Mutex<ListenSessionState>,
+}
+
+struct ListenSessionState {
+    current_tunnel: Option<Arc<PortTunnel>>,
 }
 
 struct ListenSessionParams {
@@ -173,7 +176,6 @@ struct ListenSessionParams {
 pub struct OpenedForward {
     pub record: PortForwardRecord,
     runtime: ForwardRuntime,
-    task_done: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl OpenedForward {
@@ -183,10 +185,9 @@ impl OpenedForward {
 
     pub async fn register_and_start(self, store: super::store::PortForwardStore) {
         let runtime = self.runtime;
-        let task_done = self.task_done.clone();
+        let task = spawn_forward(runtime, store.clone());
+        self.record.set_task(task).await;
         store.insert(self.record).await;
-        let task = spawn_forward(runtime, store);
-        *task_done.lock().await = Some(task);
     }
 }
 
@@ -201,25 +202,23 @@ impl ListenSessionControl {
             listener_stream_id: params.listener_stream_id,
             resume_timeout: params.resume_timeout,
             max_tunnel_queued_bytes: params.max_tunnel_queued_bytes,
-            current_tunnel: Mutex::new(Some(params.tunnel)),
-            op_lock: Mutex::new(()),
+            state: Mutex::new(ListenSessionState {
+                current_tunnel: Some(params.tunnel),
+            }),
         }
     }
 
     pub(super) async fn current_tunnel(&self) -> Option<Arc<PortTunnel>> {
-        self.current_tunnel.lock().await.clone()
+        self.with_session_state(|state| state.current_tunnel.clone())
+            .await
     }
 
-    async fn replace_current_tunnel(&self, tunnel: Arc<PortTunnel>) {
-        *self.current_tunnel.lock().await = Some(tunnel);
-    }
-
-    async fn with_exclusive_operation<T, Fut>(&self, operation: impl FnOnce() -> Fut) -> T
-    where
-        Fut: std::future::Future<Output = T>,
-    {
-        let _guard = self.op_lock.lock().await;
-        operation().await
+    async fn with_session_state<T>(
+        &self,
+        operation: impl FnOnce(&mut ListenSessionState) -> T,
+    ) -> T {
+        let mut state = self.state.lock().await;
+        operation(&mut state)
     }
 
     #[cfg(test)]
@@ -241,8 +240,9 @@ impl ListenSessionControl {
             listener_stream_id: 1,
             resume_timeout,
             max_tunnel_queued_bytes,
-            current_tunnel: Mutex::new(tunnel),
-            op_lock: Mutex::new(()),
+            state: Mutex::new(ListenSessionState {
+                current_tunnel: tunnel,
+            }),
         }
     }
 }
@@ -367,7 +367,6 @@ async fn open_protocol_forward(
     }));
 
     let cancel = CancellationToken::new();
-    let task_done = Arc::new(Mutex::new(None));
     let runtime = ForwardRuntime::new(ForwardRuntimeParts {
         forward_id: forward_id.clone(),
         listen_side: listen_side.clone(),
@@ -381,9 +380,8 @@ async fn open_protocol_forward(
         cancel: cancel.clone(),
     });
     Ok(OpenedForward {
-        task_done: task_done.clone(),
-        record: PortForwardRecord {
-            entry: ForwardPortEntry::new_open(
+        record: PortForwardRecord::new(
+            ForwardPortEntry::new_open(
                 forward_id,
                 listen_side.name().to_string(),
                 listen_response,
@@ -394,8 +392,7 @@ async fn open_protocol_forward(
             ),
             listen_session,
             cancel,
-            task_done,
-        },
+        ),
         runtime,
     })
 }
@@ -603,13 +600,10 @@ async fn resume_listen_session_inner(
 async fn try_resume_listen_tunnel(
     control: &Arc<ListenSessionControl>,
 ) -> anyhow::Result<Arc<PortTunnel>> {
-    control
-        .with_exclusive_operation(|| async {
-            let tunnel = resume_listen_session_inner(control).await?;
-            control.replace_current_tunnel(tunnel.clone()).await;
-            Ok(tunnel)
-        })
-        .await
+    let mut state = control.state.lock().await;
+    let tunnel = resume_listen_session_inner(control).await?;
+    state.current_tunnel = Some(tunnel.clone());
+    Ok(tunnel)
 }
 
 pub(super) async fn reconnect_listen_tunnel(
@@ -778,35 +772,32 @@ where
 }
 
 pub(super) async fn close_listen_session(control: Arc<ListenSessionControl>) -> anyhow::Result<()> {
-    control
-        .with_exclusive_operation(|| async {
-            if let Some(tunnel) = control.current_tunnel().await {
-                match close_listener_on_tunnel(&tunnel, control.listener_stream_id).await {
-                    Ok(()) => {
-                        return close_tunnel_generation(
-                            &tunnel,
-                            &control.forward_id,
-                            control.generation,
-                            "operator_close",
-                        )
-                        .await;
-                    }
-                    Err(err) if is_retryable_transport_error(&err) => {}
-                    Err(err) => return Err(err),
-                }
+    let mut state = control.state.lock().await;
+    if let Some(tunnel) = state.current_tunnel.clone() {
+        match close_listener_on_tunnel(&tunnel, control.listener_stream_id).await {
+            Ok(()) => {
+                return close_tunnel_generation(
+                    &tunnel,
+                    &control.forward_id,
+                    control.generation,
+                    "operator_close",
+                )
+                .await;
             }
-            let tunnel = resume_listen_session_inner(&control).await?;
-            control.replace_current_tunnel(tunnel.clone()).await;
-            close_listener_on_tunnel(&tunnel, control.listener_stream_id).await?;
-            close_tunnel_generation(
-                &tunnel,
-                &control.forward_id,
-                control.generation,
-                "operator_close",
-            )
-            .await
-        })
-        .await
+            Err(err) if is_retryable_transport_error(&err) => {}
+            Err(err) => return Err(err),
+        }
+    }
+    let tunnel = resume_listen_session_inner(&control).await?;
+    state.current_tunnel = Some(tunnel.clone());
+    close_listener_on_tunnel(&tunnel, control.listener_stream_id).await?;
+    close_tunnel_generation(
+        &tunnel,
+        &control.forward_id,
+        control.generation,
+        "operator_close",
+    )
+    .await
 }
 
 async fn close_listener_on_tunnel(tunnel: &Arc<PortTunnel>, stream_id: u32) -> anyhow::Result<()> {
