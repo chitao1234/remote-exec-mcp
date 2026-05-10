@@ -37,7 +37,7 @@ pub struct DevInitArgs {
     #[arg(long = "target", required = true)]
     pub targets: Vec<String>,
 
-    #[arg(long = "daemon-san")]
+    #[arg(long = "san", visible_alias = "daemon-san")]
     pub daemon_sans: Vec<String>,
 
     #[arg(long, default_value = "remote-exec-broker")]

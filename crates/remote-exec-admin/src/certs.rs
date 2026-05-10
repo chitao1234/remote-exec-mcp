@@ -67,11 +67,11 @@ fn build_daemon_specs(args: &DevInitArgs) -> anyhow::Result<Vec<remote_exec_pki:
 
     for entry in &args.daemon_sans {
         let (target, value) = entry.split_once('=').with_context(|| {
-            format!("invalid --daemon-san `{entry}`; expected target=dns:... or target=ip:...")
+            format!("invalid --san `{entry}`; expected target=dns:... or target=ip:...")
         })?;
         ensure!(
             args.targets.iter().any(|known| known == target),
-            "unknown target `{target}` in --daemon-san"
+            "unknown target `{target}` in --san"
         );
         sans_by_target
             .entry(target.to_string())

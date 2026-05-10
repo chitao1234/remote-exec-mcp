@@ -42,9 +42,9 @@ fn dev_init_writes_expected_files_and_config_snippets() {
         .args([
             "--target",
             "builder-a",
-            "--daemon-san",
+            "--san",
             "builder-a=dns:builder-a.example.com",
-            "--daemon-san",
+            "--san",
             "builder-a=ip:10.0.0.12",
         ])
         .output()
@@ -64,6 +64,32 @@ fn dev_init_writes_expected_files_and_config_snippets() {
     assert!(stdout.contains("client_cert_pem"));
     assert!(stdout.contains("expected_daemon_name = \"builder-a\""));
     assert!(stdout.contains("cert_pem"));
+    assert!(stdout.contains("builder-a.example.com"));
+    assert!(stdout.contains("# base_url = \"https://builder-a.example.com:9443\""));
+    assert!(stdout.contains("# listen = \"0.0.0.0:9443\""));
+    assert!(!stdout.contains("\nbase_url = \"https://builder-a.example.com:9443\""));
+    assert!(!stdout.contains("\nlisten = \"0.0.0.0:9443\""));
+}
+
+#[test]
+fn dev_init_accepts_legacy_daemon_san_alias() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let out_dir = tempdir.path().join("certs");
+
+    let output = admin()
+        .args(["certs", "dev-init", "--out-dir"])
+        .arg(&out_dir)
+        .args([
+            "--target",
+            "builder-a",
+            "--daemon-san",
+            "builder-a=dns:builder-a.example.com",
+        ])
+        .output()
+        .expect("dev-init should run");
+
+    assert_success(&output);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("builder-a.example.com"));
 }
 

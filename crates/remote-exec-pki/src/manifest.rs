@@ -106,7 +106,8 @@ pub fn render_config_snippets(manifest: &DevInitManifest) -> String {
     for target in manifest.daemons.keys() {
         output.push_str(&format!(
             r#"[targets.{target}]
-base_url = {base_url}
+# Set this to the daemon HTTPS endpoint.
+# base_url = {base_url}
 ca_pem = {ca_pem}
 client_cert_pem = {broker_cert}
 client_key_pem = {broker_key}
@@ -126,7 +127,8 @@ expected_daemon_name = {expected_daemon_name}
     for (target, daemon) in &manifest.daemons {
         output.push_str(&format!(
             r#"target = {target}
-listen = {listen}
+# Set this to the daemon bind address.
+# listen = {listen}
 default_workdir = {default_workdir}
 
 [tls]
@@ -203,10 +205,15 @@ mod tests {
             .and_then(|rest| rest.split("Daemon config snippets:\n").next())
             .expect("broker snippet section");
 
-        let parsed = broker_section
+        let uncommented = uncomment_placeholder_lines(broker_section);
+        let parsed = uncommented
             .parse::<toml::Table>()
             .expect("broker snippet should parse as TOML");
 
+        assert_eq!(
+            parsed["targets"]["builder-a"]["base_url"].as_str(),
+            Some("https://builder-a.example.com:9443")
+        );
         assert_eq!(
             parsed["targets"]["builder-a"]["ca_pem"].as_str(),
             Some(r"C:\remote-exec\fixtures\ca.pem")
@@ -229,10 +236,12 @@ mod tests {
             .nth(1)
             .expect("daemon snippet section");
 
-        let parsed = daemon_section
+        let uncommented = uncomment_placeholder_lines(daemon_section);
+        let parsed = uncommented
             .parse::<toml::Table>()
             .expect("daemon snippet should parse as TOML");
 
+        assert_eq!(parsed["listen"].as_str(), Some("0.0.0.0:9443"));
         assert_eq!(
             parsed["tls"]["cert_pem"].as_str(),
             Some(r"C:\remote-exec\fixtures\builder-a.pem")
@@ -245,5 +254,30 @@ mod tests {
             parsed["tls"]["ca_pem"].as_str(),
             Some(r"C:\remote-exec\fixtures\ca.pem")
         );
+    }
+
+    #[test]
+    fn endpoint_and_bind_placeholders_are_commented() {
+        let snippets = render_config_snippets(&sample_manifest());
+        assert!(snippets.contains("# base_url = \"https://builder-a.example.com:9443\""));
+        assert!(snippets.contains("# listen = \"0.0.0.0:9443\""));
+        assert!(!snippets.contains("\nbase_url = \"https://builder-a.example.com:9443\""));
+        assert!(!snippets.contains("\nlisten = \"0.0.0.0:9443\""));
+    }
+
+    fn uncomment_placeholder_lines(input: &str) -> String {
+        input
+            .lines()
+            .map(|line| {
+                if let Some(rest) = line.strip_prefix("# base_url = ") {
+                    format!("base_url = {rest}")
+                } else if let Some(rest) = line.strip_prefix("# listen = ") {
+                    format!("listen = {rest}")
+                } else {
+                    line.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }

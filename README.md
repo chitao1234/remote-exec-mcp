@@ -180,8 +180,8 @@ Add explicit daemon SANs when the broker will connect by DNS name or non-localho
 cargo run -p remote-exec-admin -- certs dev-init \
   --out-dir ./remote-exec-certs \
   --target builder-a \
-  --daemon-san builder-a=dns:builder-a.example.com \
-  --daemon-san builder-a=ip:10.0.0.12
+  --san builder-a=dns:builder-a.example.com \
+  --san builder-a=ip:10.0.0.12
 ```
 
 This command writes:
@@ -223,7 +223,7 @@ cargo run -p remote-exec-admin -- certs issue-daemon \
 
 Notes:
 
-- If a target has no `--daemon-san` entries, `remote-exec-admin` defaults that daemon cert to `DNS:localhost` and `IP:127.0.0.1`.
+- If a target has no `--san` entries, `remote-exec-admin` defaults that daemon cert to `DNS:localhost` and `IP:127.0.0.1`. `certs dev-init` still accepts the old `--daemon-san` spelling as an alias.
 - The command prints broker and daemon config snippets after generation so you can paste the generated file paths directly into `configs/broker.example.toml` and `configs/daemon.example.toml`.
 - Keep `expected_daemon_name` set to the daemon's configured `target`; it is the application-level identity check on top of transport security.
 - `skip_server_name_verification = true` keeps CA, key-usage, and expiry validation but skips matching the broker URL host against the daemon certificate SANs.
