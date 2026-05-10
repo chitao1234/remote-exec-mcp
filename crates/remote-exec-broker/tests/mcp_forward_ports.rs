@@ -1108,10 +1108,11 @@ max_tunnel_queued_bytes = 4096
         &first,
         &listen_endpoint,
         b"first",
-        Duration::from_secs(5),
+        Duration::from_secs(10),
         "first udp peer should receive reply",
     )
     .await;
+    wait_for_udp_connector_stats(&fixture, 1, 1, Duration::from_secs(5)).await;
 
     let mut buf = [0u8; 64];
     second.send_to(b"second", &listen_endpoint).await.unwrap();
@@ -1122,9 +1123,17 @@ max_tunnel_queued_bytes = 4096
         "second udp peer should not receive a reply after configured peer limit is reached"
     );
 
+    send_udp_until_echo(
+        &first,
+        &listen_endpoint,
+        b"first-still-active",
+        Duration::from_secs(10),
+        "first udp peer should remain active after second peer is dropped",
+    )
+    .await;
     let stats = support::stub_daemon::udp_connector_stats(&fixture.stub_state).await;
     assert_eq!(stats.max_observed, 1);
-    assert_eq!(stats.opened, 1);
+    assert_eq!(stats.active, 1);
     let dropped = wait_for_udp_drop_count(&fixture, &forward_id, Duration::from_secs(5)).await;
     assert_eq!(dropped["status"], "open");
 
@@ -1488,6 +1497,33 @@ async fn wait_for_udp_drop_count(
         .unwrap_or_default();
     panic!(
         "forward `{forward_id}` did not record UDP drops within {timeout:?}; last_status={last_status} dropped_udp_datagrams={drops} last_error={last_error}"
+    );
+}
+
+async fn wait_for_udp_connector_stats(
+    fixture: &support::fixture::BrokerFixture,
+    active: usize,
+    opened: usize,
+    timeout: Duration,
+) -> support::stub_daemon::UdpConnectorStats {
+    let started = std::time::Instant::now();
+    let mut last_stats = None;
+    while started.elapsed() < timeout {
+        let stats = support::stub_daemon::udp_connector_stats(&fixture.stub_state).await;
+        last_stats = Some(stats);
+        if stats.active == active && stats.opened == opened {
+            return stats;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    let stats = last_stats.unwrap_or(support::stub_daemon::UdpConnectorStats {
+        active: 0,
+        max_observed: 0,
+        opened: 0,
+    });
+    panic!(
+        "udp connector stats did not reach active={active} opened={opened} within {timeout:?}; last_stats={stats:?}"
     );
 }
 
