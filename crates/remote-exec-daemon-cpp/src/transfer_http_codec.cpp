@@ -1,3 +1,4 @@
+#include <initializer_list>
 #include <sstream>
 #include <string>
 
@@ -48,27 +49,14 @@ std::string optional_header_or(
 void require_one_of(
     const char* name,
     const std::string& value,
-    const char* first,
-    const char* second
+    std::initializer_list<const char*> allowed_values
 ) {
-    if (value == first || value == second) {
-        return;
-    }
-    throw TransferFailure(
-        TransferRpcCode::BadRequest,
-        invalid_header_message(name, "unsupported value `" + value + "`")
-    );
-}
-
-void require_one_of(
-    const char* name,
-    const std::string& value,
-    const char* first,
-    const char* second,
-    const char* third
-) {
-    if (value == first || value == second || value == third) {
-        return;
+    for (std::initializer_list<const char*>::const_iterator it = allowed_values.begin();
+         it != allowed_values.end();
+         ++it) {
+        if (value == *it) {
+            return;
+        }
     }
     throw TransferFailure(
         TransferRpcCode::BadRequest,
@@ -104,7 +92,7 @@ TransferImportMetadata parse_transfer_import_metadata(const HttpRequest& request
     TransferImportMetadata metadata;
     metadata.destination_path = required_header(request, DESTINATION_PATH_HEADER);
     metadata.overwrite = required_header(request, OVERWRITE_HEADER);
-    require_one_of(OVERWRITE_HEADER, metadata.overwrite, "fail", "merge", "replace");
+    require_one_of(OVERWRITE_HEADER, metadata.overwrite, {"fail", "merge", "replace"});
     metadata.create_parent = parse_create_parent(required_header(request, CREATE_PARENT_HEADER));
     const std::string source_type = required_header(request, SOURCE_TYPE_HEADER);
     if (!parse_transfer_source_type_wire_value(source_type, &metadata.source_type)) {
@@ -114,7 +102,7 @@ TransferImportMetadata parse_transfer_import_metadata(const HttpRequest& request
         );
     }
     metadata.compression = optional_header_or(request, COMPRESSION_HEADER, "none");
-    require_one_of(COMPRESSION_HEADER, metadata.compression, "none", "zstd");
+    require_one_of(COMPRESSION_HEADER, metadata.compression, {"none", "zstd"});
     const std::string symlink_mode = optional_header_or(request, SYMLINK_MODE_HEADER, "preserve");
     if (!parse_transfer_symlink_mode_wire_value(symlink_mode, &metadata.symlink_mode)) {
         throw TransferFailure(
