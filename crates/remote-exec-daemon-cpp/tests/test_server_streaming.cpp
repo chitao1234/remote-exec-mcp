@@ -1678,12 +1678,7 @@ static void assert_expired_tunnel_session_is_released(AppState& state) {
     assert(rebound.valid());
 }
 
-int main() {
-    NetworkSession network;
-    const fs::path root = make_test_root();
-    AppState state;
-    initialize_state(state, root);
-
+static void assert_http_streaming_routes(AppState& state, const fs::path& root) {
     assert_persistent_json_requests_reuse_socket(state);
 
     const std::string archive = tar_with_single_file("streamed import");
@@ -1764,35 +1759,73 @@ int main() {
     assert(denied_import_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
     assert(Json::parse(response_body(denied_import_response)).at("code").get<std::string>() == "sandbox_denied");
     assert(!fs::exists(outside / "imported.txt"));
+}
 
+static void assert_tunnel_rejects_invalid_requests(AppState& state) {
+    assert_tunnel_rejects_data_plane_before_open(state);
+    assert_tunnel_rejects_frames_for_wrong_role_or_protocol(state);
+    assert_legacy_session_frames_are_reserved_but_unsupported(state);
+}
+
+static void assert_tunnel_open_ready_and_limits(AppState& state) {
+    const fs::path root(state.config.default_workdir);
+
+    assert_tunnel_open_ready_and_close_round_trip(state);
+    assert_tunnel_ready_reports_configured_limits(root);
+    assert_port_tunnel_worker_limit_is_reported(root);
+    assert_retained_session_limit_is_enforced(root);
+    assert_retained_listener_limit_is_enforced_and_released(root);
+}
+
+static void assert_tunnel_tcp_listener_and_connect_paths(AppState& state) {
     assert_tunnel_close_releases_tcp_listener(state);
     assert_terminal_tunnel_error_releases_tcp_listener_immediately(state);
-    assert_tunnel_open_ready_and_close_round_trip(state);
     assert_tunnel_close_releases_retained_listener_immediately(state);
-    assert_port_tunnel_worker_limit_is_reported(root);
+    assert_tunnel_tcp_connect_echoes_binary_data(state);
+}
+
+static void assert_tunnel_udp_paths(AppState& state) {
+    const fs::path root(state.config.default_workdir);
+
+    assert_udp_bind_limit_is_enforced_and_released(root);
+    assert_tunnel_udp_bind_emits_two_peer_datagrams(state);
+}
+
+static void assert_tunnel_limit_and_pressure_paths(AppState& state) {
+    const fs::path root(state.config.default_workdir);
+
     assert_tcp_connect_worker_limit_errors_before_success(root);
     assert_tcp_connect_read_thread_failure_errors_before_success(root);
     assert_tcp_accept_read_thread_failure_drops_before_accept(root);
     assert_retained_tcp_accept_read_thread_failure_drops_before_accept(root);
     assert_retained_tcp_accept_worker_pressure_is_local_drop(root);
     assert_retained_tcp_accept_pressure_is_local_drop(root);
-    assert_tunnel_ready_reports_configured_limits(root);
-    assert_tunnel_rejects_data_plane_before_open(state);
-    assert_tunnel_rejects_frames_for_wrong_role_or_protocol(state);
-    assert_legacy_session_frames_are_reserved_but_unsupported(state);
-    assert_retained_session_limit_is_enforced(root);
-    assert_retained_listener_limit_is_enforced_and_released(root);
-    assert_udp_bind_limit_is_enforced_and_released(root);
     assert_active_tcp_stream_limit_is_enforced_and_released(root);
     assert_active_tcp_accept_limit_is_enforced_and_released(root);
     assert_tunnel_queued_byte_limit_is_enforced(root);
     assert_udp_queued_byte_pressure_reports_drop(root);
     assert_partial_tunnel_frame_times_out(root);
-    assert_tunnel_tcp_connect_echoes_binary_data(state);
     assert_tcp_data_write_pressure_does_not_block_control_frames(state);
-    assert_tunnel_udp_bind_emits_two_peer_datagrams(state);
+}
+
+static void assert_tunnel_resume_and_expiry_paths(AppState& state) {
     assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(state);
     assert_expired_tunnel_session_is_released(state);
+}
+
+int main() {
+    NetworkSession network;
+    const fs::path root = make_test_root();
+    AppState state;
+    initialize_state(state, root);
+
+    assert_http_streaming_routes(state, root);
+    assert_tunnel_rejects_invalid_requests(state);
+    assert_tunnel_open_ready_and_limits(state);
+    assert_tunnel_tcp_listener_and_connect_paths(state);
+    assert_tunnel_udp_paths(state);
+    assert_tunnel_limit_and_pressure_paths(state);
+    assert_tunnel_resume_and_expiry_paths(state);
 
     return 0;
 }
