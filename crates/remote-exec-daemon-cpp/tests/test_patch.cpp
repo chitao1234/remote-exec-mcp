@@ -234,5 +234,17 @@ int main() {
     expect_patch_failure(root, partial_patch);
     assert(read_text(root / "partial-first.txt") == "after\n");
 
+    const fs::path blocked_path = root / "blocked.txt";
+    fs::create_directories(blocked_path);
+    write_text(blocked_path / "child.txt", "child\n");
+    const std::string blocked_add_patch =
+        "*** Begin Patch\n"
+        "*** Add File: blocked.txt\n"
+        "+blocked\n"
+        "*** End Patch\n";
+
+    expect_patch_failure(root, blocked_add_patch);
+    assert(!fs::exists(root / "blocked.txt.tmp"));
+
     return 0;
 }

@@ -256,6 +256,7 @@ void write_text_atomic(const std::string& path, const std::string& content) {
 
     std::remove(path.c_str());
     if (std::rename(temp_path.c_str(), path.c_str()) != 0) {
+        std::remove(temp_path.c_str());
         throw std::runtime_error("unable to rename " + temp_path + " to " + path);
     }
 }
