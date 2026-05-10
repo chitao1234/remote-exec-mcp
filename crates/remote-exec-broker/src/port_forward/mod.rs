@@ -7,6 +7,7 @@ mod supervisor;
 mod tcp_bridge;
 mod tunnel;
 mod udp_bridge;
+mod udp_connectors;
 
 use std::time::Duration;
 

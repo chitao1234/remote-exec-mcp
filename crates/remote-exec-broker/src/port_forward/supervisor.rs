@@ -116,6 +116,70 @@ impl ForwardRuntime {
             cancel: parts.cancel,
         }
     }
+
+    pub(super) async fn record_dropped_datagram(&self) {
+        self.store
+            .update_entry(&self.forward_id, |entry| {
+                entry.dropped_udp_datagrams += 1;
+            })
+            .await;
+    }
+
+    pub(super) async fn record_dropped_stream(&self) {
+        self.store
+            .update_entry(&self.forward_id, |entry| {
+                entry.dropped_tcp_streams += 1;
+            })
+            .await;
+    }
+
+    pub(super) async fn record_dropped_streams_and_release_active(&self, count: u64) {
+        if count == 0 {
+            return;
+        }
+        self.store
+            .update_entry(&self.forward_id, |entry| {
+                entry.dropped_tcp_streams += count;
+                entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(count);
+            })
+            .await;
+    }
+
+    pub(super) async fn release_active_stream(&self) {
+        self.store
+            .update_entry(&self.forward_id, |entry| {
+                entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(1);
+            })
+            .await;
+    }
+
+    pub(super) async fn record_dropped_active_stream(&self) {
+        self.store
+            .update_entry(&self.forward_id, |entry| {
+                entry.dropped_tcp_streams += 1;
+                entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(1);
+            })
+            .await;
+    }
+
+    pub(super) async fn mark_reconnecting(
+        &self,
+        side: ForwardPortSideRole,
+        reason: &str,
+    ) -> anyhow::Result<()> {
+        self.store
+            .mark_reconnecting(
+                &self.forward_id,
+                side,
+                reason.to_string(),
+                self.max_reconnecting_forwards,
+            )
+            .await
+    }
+
+    pub(super) async fn mark_active(&self, side: ForwardPortSideRole) {
+        self.store.mark_ready(&self.forward_id, side).await;
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -124,6 +188,12 @@ struct ForwardOpenKind {
     listen_frame_type: FrameType,
     listen_ok_frame_type: FrameType,
     noun: &'static str,
+}
+
+#[derive(Clone, Copy)]
+enum ForwardSide {
+    Listen,
+    Connect,
 }
 
 impl ForwardOpenKind {
@@ -295,31 +365,97 @@ async fn open_protocol_forward(
     kind: ForwardOpenKind,
 ) -> anyhow::Result<OpenedForward> {
     let forward_id = remote_exec_host::ids::new_forward_id();
+    let opened_listen = open_listen_session_for_forward(
+        &listen_side,
+        &forward_id,
+        kind,
+        limits.max_tunnel_queued_bytes as usize,
+    )
+    .await?;
+    let opened_connect = open_connect_tunnel_for_forward(
+        &connect_side,
+        &forward_id,
+        kind,
+        limits.max_tunnel_queued_bytes as usize,
+    )
+    .await?;
+    build_opened_forward(
+        store,
+        listen_side,
+        connect_side,
+        forward_id,
+        listen_endpoint,
+        connect_endpoint,
+        limits,
+        kind,
+        opened_listen,
+        opened_connect,
+    )
+    .await
+}
+
+async fn open_listen_session_for_forward(
+    listen_side: &SideHandle,
+    forward_id: &str,
+    kind: ForwardOpenKind,
+    max_queued_bytes: usize,
+) -> anyhow::Result<OpenListenSession> {
+    open_listen_session(
+        listen_side,
+        forward_id,
+        kind.protocol,
+        1,
+        None,
+        max_queued_bytes,
+    )
+    .await
+}
+
+async fn open_connect_tunnel_for_forward(
+    connect_side: &SideHandle,
+    forward_id: &str,
+    kind: ForwardOpenKind,
+    max_queued_bytes: usize,
+) -> anyhow::Result<OpenDataTunnel> {
+    open_data_tunnel(connect_side, forward_id, kind.protocol, 1, max_queued_bytes)
+        .await
+        .with_context(|| {
+            open_context(
+                kind,
+                ForwardSide::Connect,
+                connect_side.name(),
+                "data tunnel",
+            )
+        })
+}
+
+async fn build_opened_forward(
+    store: PortForwardStore,
+    listen_side: SideHandle,
+    connect_side: SideHandle,
+    forward_id: String,
+    listen_endpoint: String,
+    connect_endpoint: String,
+    requested_limits: ForwardPortLimitSummary,
+    kind: ForwardOpenKind,
+    opened_listen: OpenListenSession,
+    opened_connect: OpenDataTunnel,
+) -> anyhow::Result<OpenedForward> {
     let OpenListenSession {
         tunnel: listen_tunnel,
         session_id,
         resume_timeout,
         limits: listen_limits,
-    } = open_listen_session(
-        &listen_side,
-        &forward_id,
-        kind.protocol,
-        1,
-        None,
-        limits.max_tunnel_queued_bytes as usize,
-    )
-    .await?;
-    let connect = open_data_tunnel(
-        &connect_side,
-        &forward_id,
-        kind.protocol,
-        1,
-        limits.max_tunnel_queued_bytes as usize,
-    )
-    .await?;
-    let limits = effective_forward_limits(limits, &listen_limits, &connect.limits);
-    let connect_tunnel = connect.tunnel;
+    } = opened_listen;
+    let limits = effective_forward_limits(requested_limits, &listen_limits, &opened_connect.limits);
+    let connect_tunnel = opened_connect.tunnel;
     let listener_stream_id = 1;
+    let listener_open_context = open_context(
+        kind,
+        ForwardSide::Listen,
+        listen_side.name(),
+        &listen_endpoint,
+    );
     listen_tunnel
         .send(Frame {
             frame_type: kind.listen_frame_type,
@@ -331,26 +467,17 @@ async fn open_protocol_forward(
             data: Vec::new(),
         })
         .await
-        .with_context(|| {
-            format!(
-                "opening {} on `{}` at `{listen_endpoint}`",
-                kind.noun,
-                listen_side.name()
-            )
-        })?;
+        .with_context(|| listener_open_context.clone())?;
     let listen_response = wait_for_listener_ready(
         &listen_tunnel,
         listener_stream_id,
         kind.listen_ok_frame_type,
-        format!(
-            "opening {} on `{}` at `{listen_endpoint}`",
-            kind.noun,
-            listen_side.name()
-        ),
-        format!(
-            "waiting for {} on `{}` at `{listen_endpoint}`",
-            kind.noun,
-            listen_side.name()
+        listener_open_context,
+        open_context(
+            kind,
+            ForwardSide::Listen,
+            listen_side.name(),
+            &listen_endpoint,
         ),
     )
     .await?;
@@ -395,6 +522,23 @@ async fn open_protocol_forward(
         ),
         runtime,
     })
+}
+
+fn open_context(kind: ForwardOpenKind, side: ForwardSide, target: &str, endpoint: &str) -> String {
+    match side {
+        ForwardSide::Listen => format!("opening {} on `{target}` at `{endpoint}`", kind.noun),
+        ForwardSide::Connect => format!(
+            "opening {} data port tunnel on `{target}`",
+            forward_protocol_name(kind.protocol)
+        ),
+    }
+}
+
+fn forward_protocol_name(protocol: PublicForwardPortProtocol) -> &'static str {
+    match protocol {
+        PublicForwardPortProtocol::Tcp => "tcp",
+        PublicForwardPortProtocol::Udp => "udp",
+    }
 }
 
 fn spawn_forward(runtime: ForwardRuntime, store: super::store::PortForwardStore) -> JoinHandle<()> {
@@ -628,13 +772,7 @@ pub(super) async fn recover_listen_side_tunnels(
     runtime: &ForwardRuntime,
 ) -> anyhow::Result<Option<RecoveredForwardTunnels>> {
     runtime
-        .store
-        .mark_reconnecting(
-            &runtime.forward_id,
-            ForwardPortSideRole::Listen,
-            "listen-side tunnel lost".to_string(),
-            runtime.max_reconnecting_forwards,
-        )
+        .mark_reconnecting(ForwardPortSideRole::Listen, "listen-side tunnel lost")
         .await?;
     let Some(listen_tunnel) =
         reconnect_listen_tunnel(runtime.listen_session.clone(), runtime.cancel.clone()).await?
@@ -670,10 +808,7 @@ async fn recover_connect_side_tunnel_after_listen_recovery(
     let Some(connect_tunnel) = retry_open_connect_tunnel(runtime).await? else {
         return Ok(None);
     };
-    runtime
-        .store
-        .mark_ready(&runtime.forward_id, ForwardPortSideRole::Connect)
-        .await;
+    runtime.mark_active(ForwardPortSideRole::Connect).await;
     Ok(Some(connect_tunnel))
 }
 
@@ -685,22 +820,13 @@ async fn recover_connect_side_tunnel(
     let Some(connect_tunnel) = retry_open_connect_tunnel(runtime).await? else {
         return Ok(None);
     };
-    runtime
-        .store
-        .mark_ready(&runtime.forward_id, ForwardPortSideRole::Connect)
-        .await;
+    runtime.mark_active(ForwardPortSideRole::Connect).await;
     Ok(Some(connect_tunnel))
 }
 
 async fn mark_connect_reconnecting(runtime: &ForwardRuntime, reason: &str) -> anyhow::Result<()> {
     runtime
-        .store
-        .mark_reconnecting(
-            &runtime.forward_id,
-            ForwardPortSideRole::Connect,
-            reason.to_string(),
-            runtime.max_reconnecting_forwards,
-        )
+        .mark_reconnecting(ForwardPortSideRole::Connect, reason)
         .await
 }
 

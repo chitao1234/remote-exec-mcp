@@ -205,12 +205,7 @@ async fn handle_listen_tcp_accept(
     let accept: TcpAcceptMeta = decode_tunnel_meta(&frame)?;
     if !try_reserve_active_tcp_stream(runtime).await {
         let _ = listen_tunnel.close_stream(frame.stream_id).await;
-        runtime
-            .store
-            .update_entry(&runtime.forward_id, |entry| {
-                entry.dropped_tcp_streams += 1;
-            })
-            .await;
+        runtime.record_dropped_stream().await;
         return Ok(None);
     }
     let Some(connect_stream_id) = connect_stream_ids.next() else {
@@ -359,12 +354,7 @@ async fn handle_listen_error(
     if frame.stream_id == runtime.listen_session.listener_stream_id {
         let meta = decode_tunnel_error_frame(&frame);
         if is_recoverable_pressure_tunnel_error(&meta) {
-            runtime
-                .store
-                .update_entry(&runtime.forward_id, |entry| {
-                    entry.dropped_tcp_streams += 1;
-                })
-                .await;
+            runtime.record_dropped_stream().await;
             return Ok(None);
         }
         return Err(format_terminal_tunnel_error(&meta)).context("listen-side tcp tunnel error");
@@ -549,15 +539,9 @@ async fn close_active_tcp_listen_streams(
             .map(|_| ());
         }
     }
-    if dropped_count > 0 {
-        runtime
-            .store
-            .update_entry(&runtime.forward_id, |entry| {
-                entry.dropped_tcp_streams += dropped_count;
-                entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(dropped_count);
-            })
-            .await;
-    }
+    runtime
+        .record_dropped_streams_and_release_active(dropped_count)
+        .await;
     Ok(())
 }
 
@@ -632,12 +616,7 @@ async fn queue_or_send_tcp_connect_frame(
             state.listen_to_connect.remove(&listen_stream_id);
             let _ = connect_tunnel.close_stream(connect_stream_id).await;
             let _ = listen_tunnel.close_stream(listen_stream_id).await;
-            runtime
-                .store
-                .update_entry(&runtime.forward_id, |entry| {
-                    entry.dropped_tcp_streams += 1;
-                })
-                .await;
+            runtime.record_dropped_stream().await;
             release_active_tcp_stream(runtime).await;
             return Ok(None);
         }
@@ -745,12 +724,7 @@ async fn close_tcp_pair_after_connect_pressure(
     state.listen_to_connect.remove(&stream.listen_stream_id);
     let _ = connect_tunnel.close_stream(connect_stream_id).await;
     let _ = listen_tunnel.close_stream(stream.listen_stream_id).await;
-    runtime
-        .store
-        .update_entry(&runtime.forward_id, |entry| {
-            entry.dropped_tcp_streams += 1;
-        })
-        .await;
+    runtime.record_dropped_stream().await;
     release_active_tcp_stream(runtime).await;
     Ok(())
 }
@@ -835,22 +809,11 @@ async fn try_reserve_active_tcp_stream(runtime: &ForwardRuntime) -> bool {
 }
 
 async fn release_active_tcp_stream(runtime: &ForwardRuntime) {
-    runtime
-        .store
-        .update_entry(&runtime.forward_id, |entry| {
-            entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(1);
-        })
-        .await;
+    runtime.release_active_stream().await;
 }
 
 async fn drop_active_tcp_stream(runtime: &ForwardRuntime) {
-    runtime
-        .store
-        .update_entry(&runtime.forward_id, |entry| {
-            entry.dropped_tcp_streams += 1;
-            entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(1);
-        })
-        .await;
+    runtime.record_dropped_active_stream().await;
 }
 
 #[cfg(test)]
