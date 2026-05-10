@@ -42,10 +42,11 @@ Windows XP-compatible MSVC/NMAKE build:
 - `nmake /f NMakefile all-msvc-xp`
 - `nmake /f NMakefile check-msvc-xp`
 
-The top-level `Makefile` is the GNU make public entry point. Shared source
+The top-level `GNUmakefile` is the GNU make public entry point. Shared source
 lists live in `mk/sources.mk`, shared GNU make helpers live in `mk/common.mk`,
 host-native rules live in `mk/posix.mk`, and Windows XP cross-build rules live
-in `mk/windows-xp.mk`.
+in `mk/windows-xp.mk`. GNU make prefers `GNUmakefile`, so plain `make` selects
+that file automatically.
 
 `NMakefile` is intentionally separate from the GNU/BSD make entry points and
 builds only the Windows XP-compatible daemon executable with MSVC. It uses the
@@ -55,20 +56,19 @@ minimum subsystem version.
 BSD make has a separate POSIX-only entry point. It intentionally does not expose
 the Windows XP cross-build targets:
 
-- `bmake -f BSDmakefile`
-- `bmake -f BSDmakefile all-posix`
-- `bmake -f BSDmakefile check`
-- `bmake -f BSDmakefile check-posix`
+- `bmake`
+- `bmake all-posix`
+- `bmake check`
+- `bmake check-posix`
 
 Invoke BSD make from this directory, or use `bmake -C
-crates/remote-exec-daemon-cpp -f BSDmakefile ...` from the repository root, so
-the relative source paths and `build/` output tree resolve correctly. Some BSD
-make installations prefer `Makefile` over `BSDmakefile`, so the explicit
-`-f BSDmakefile` form is the portable command.
+crates/remote-exec-daemon-cpp ...` from the repository root, so the relative
+source paths and `build/` output tree resolve correctly. BSD make selects the
+top-level `Makefile` automatically.
 
 Focused host-native tests:
 
-Use the same target names with `bmake -f BSDmakefile ...` for the BSD make path.
+Use the same target names with `bmake ...` for the BSD make path.
 
 - `make test-host-patch`
 - `make test-host-transfer`
