@@ -829,6 +829,41 @@ static void assert_tcp_connect_worker_limit_errors_before_success(const fs::path
     close_tunnel(&client_socket, &server_thread);
 }
 
+static void assert_detached_session_expiry_does_not_consume_worker_budget(const fs::path& root) {
+    AppState state;
+    initialize_state_with_worker_limit(state, root, 2UL);
+
+    UniqueSocket listen_client;
+    std::thread listen_thread;
+    const PortTunnelFrame ready =
+        open_v4_tunnel(state, &listen_client, &listen_thread, "listen", "tcp", 1ULL);
+    const Json ready_meta = Json::parse(ready.meta);
+    const std::string session_id = ready_meta.at("session_id").get<std::string>();
+
+    close_tunnel(&listen_client, &listen_thread);
+
+    UniqueSocket destination(bind_port_forward_socket("127.0.0.1:0", "tcp"));
+    const std::string endpoint = socket_local_endpoint(destination.get());
+
+    UniqueSocket connect_client_socket;
+    std::thread connect_thread;
+    open_v4_tunnel(state, &connect_client_socket, &connect_thread, "connect", "tcp", 1ULL);
+
+    send_tunnel_frame(
+        connect_client_socket.get(),
+        json_frame(PortTunnelFrameType::TcpConnect, 1U, Json{{"endpoint", endpoint}})
+    );
+    const PortTunnelFrame response = read_tunnel_frame(connect_client_socket.get());
+    assert(response.type == PortTunnelFrameType::TcpConnectOk);
+
+    close_tunnel(&connect_client_socket, &connect_thread);
+
+    UniqueSocket resumed_client;
+    std::thread resumed_thread;
+    open_v4_tunnel(state, &resumed_client, &resumed_thread, "listen", "tcp", 2ULL, session_id);
+    close_tunnel(&resumed_client, &resumed_thread);
+}
+
 static void assert_tcp_connect_read_thread_failure_errors_before_success(const fs::path& root) {
     AppState state;
     initialize_state(state, root);
@@ -1795,6 +1830,7 @@ static void assert_tunnel_limit_and_pressure_paths(AppState& state) {
     const fs::path root(state.config.default_workdir);
 
     assert_tcp_connect_worker_limit_errors_before_success(root);
+    assert_detached_session_expiry_does_not_consume_worker_budget(root);
     assert_tcp_connect_read_thread_failure_errors_before_success(root);
     assert_tcp_accept_read_thread_failure_drops_before_accept(root);
     assert_retained_tcp_accept_read_thread_failure_drops_before_accept(root);

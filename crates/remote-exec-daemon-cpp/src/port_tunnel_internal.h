@@ -188,6 +188,7 @@ bool spawn_udp_read_thread(
 class PortTunnelService : public std::enable_shared_from_this<PortTunnelService> {
 public:
     explicit PortTunnelService(const PortForwardLimitConfig& limits);
+    ~PortTunnelService();
 
     std::shared_ptr<PortTunnelSession> create_session();
     std::shared_ptr<PortTunnelSession> find_session(const std::string& session_id);
@@ -226,6 +227,9 @@ private:
     PortTunnelService& operator=(const PortTunnelService&);
 
     bool schedule_session_expiry(const std::shared_ptr<PortTunnelSession>& session);
+    bool ensure_expiry_scheduler_started_locked();
+    void stop_expiry_scheduler();
+    void expiry_scheduler_loop();
     void expire_session_if_needed(const std::shared_ptr<PortTunnelSession>& session);
     std::shared_ptr<PortTunnelConnection> wait_for_attachment(
         const std::shared_ptr<PortTunnelSession>& session
@@ -249,6 +253,17 @@ private:
     PortForwardLimitConfig limits_;
     std::map<std::string, std::shared_ptr<PortTunnelSession> > sessions_;
     std::uint64_t next_session_sequence_;
+    BasicMutex expiry_mutex_;
+    BasicCondVar expiry_cond_;
+    std::vector<std::weak_ptr<PortTunnelSession> > expiry_sessions_;
+    bool expiry_shutdown_;
+    bool expiry_thread_started_;
+#ifdef _WIN32
+    HANDLE expiry_thread_;
+    static DWORD WINAPI expiry_thread_entry(LPVOID raw_context);
+#else
+    std::thread* expiry_thread_;
+#endif
 };
 
 class PortTunnelWorkerLease {

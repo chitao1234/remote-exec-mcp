@@ -16,7 +16,21 @@ PortTunnelService::PortTunnelService(const PortForwardLimitConfig& limits)
       udp_binds_(0UL),
       active_tcp_streams_(0UL),
       limits_(limits),
-      next_session_sequence_(1ULL) {}
+      next_session_sequence_(1ULL),
+      expiry_shutdown_(false),
+      expiry_thread_started_(false)
+#ifdef _WIN32
+      ,
+      expiry_thread_(NULL)
+#else
+      ,
+      expiry_thread_(NULL)
+#endif
+{}
+
+PortTunnelService::~PortTunnelService() {
+    stop_expiry_scheduler();
+}
 
 static bool try_acquire_counter(
     std::atomic<unsigned long>& counter,
