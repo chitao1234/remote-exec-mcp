@@ -100,6 +100,12 @@ UniqueFd open_dev_null_read() {
     return fd;
 }
 
+void kill_process_group(pid_t pid) {
+    kill(-pid, SIGTERM);
+    platform::sleep_ms(kTerminateGraceMs);
+    kill(-pid, SIGKILL);
+}
+
 PosixPtyPair create_posix_pty() {
     UniqueFd master(posix_openpt(O_RDWR | O_NOCTTY));
     if (!master.valid()) {
@@ -393,9 +399,7 @@ public:
         if (pid_ <= 0 || reaped_) {
             return;
         }
-        kill(-pid_, SIGTERM);
-        platform::sleep_ms(kTerminateGraceMs);
-        kill(-pid_, SIGKILL);
+        kill_process_group(pid_);
         int ignored_status = 0;
         const pid_t result = waitpid_retry_on_eintr(pid_, &ignored_status, 0);
         if (result == pid_ || (result < 0 && errno == ECHILD)) {
@@ -405,9 +409,7 @@ public:
 
     bool terminate_descendants() override {
         if (pid_ > 0) {
-            kill(-pid_, SIGTERM);
-            platform::sleep_ms(kTerminateGraceMs);
-            kill(-pid_, SIGKILL);
+            kill_process_group(pid_);
             return true;
         }
         return false;
