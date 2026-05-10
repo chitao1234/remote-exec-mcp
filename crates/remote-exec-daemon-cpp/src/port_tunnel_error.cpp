@@ -65,16 +65,7 @@ void PortTunnelConnection::send_forward_drop(
 }
 
 void PortTunnelConnection::close_stream(uint32_t stream_id) {
-    std::shared_ptr<TunnelTcpStream> tcp_stream;
-    {
-        BasicLockGuard lock(state_mutex_);
-        std::map<uint32_t, std::shared_ptr<TunnelTcpStream> >::iterator tcp =
-            tcp_streams_.find(stream_id);
-        if (tcp != tcp_streams_.end()) {
-            tcp_stream = tcp->second;
-            tcp_streams_.erase(tcp);
-        }
-    }
+    std::shared_ptr<TunnelTcpStream> tcp_stream = transport_streams_.remove_tcp(stream_id);
     if (tcp_stream.get() != NULL) {
         mark_tcp_stream_closed(tcp_stream);
     }
@@ -106,16 +97,7 @@ void PortTunnelConnection::close_stream(uint32_t stream_id) {
         return;
     }
 
-    std::shared_ptr<TunnelUdpSocket> udp_socket;
-    {
-        BasicLockGuard lock(state_mutex_);
-        std::map<uint32_t, std::shared_ptr<TunnelUdpSocket> >::iterator udp =
-            udp_sockets_.find(stream_id);
-        if (udp != udp_sockets_.end()) {
-            udp_socket = udp->second;
-            udp_sockets_.erase(udp);
-        }
-    }
+    std::shared_ptr<TunnelUdpSocket> udp_socket = transport_streams_.remove_udp(stream_id);
     if (udp_socket.get() != NULL) {
         mark_udp_socket_closed(udp_socket);
     }
@@ -134,16 +116,7 @@ void PortTunnelConnection::drop_tcp_stream(
     uint32_t stream_id,
     const std::shared_ptr<TunnelTcpStream>& fallback
 ) {
-    std::shared_ptr<TunnelTcpStream> removed_stream;
-    {
-        BasicLockGuard lock(state_mutex_);
-        std::map<uint32_t, std::shared_ptr<TunnelTcpStream> >::iterator it =
-            tcp_streams_.find(stream_id);
-        if (it != tcp_streams_.end()) {
-            removed_stream = it->second;
-            tcp_streams_.erase(it);
-        }
-    }
+    std::shared_ptr<TunnelTcpStream> removed_stream = transport_streams_.remove_tcp(stream_id);
     if (removed_stream.get() != NULL) {
         mark_tcp_stream_closed(removed_stream);
     } else if (fallback.get() != NULL) {
@@ -198,24 +171,8 @@ void PortTunnelConnection::close_current_session(PortTunnelCloseMode mode) {
 void PortTunnelConnection::close_transport_owned_state() {
     std::vector<std::shared_ptr<TunnelTcpStream> > tcp_streams;
     std::vector<std::shared_ptr<TunnelUdpSocket> > udp_sockets;
-    {
-        BasicLockGuard lock(state_mutex_);
-        closed_.store(true);
-        for (std::map<uint32_t, std::shared_ptr<TunnelTcpStream> >::iterator it =
-                 tcp_streams_.begin();
-             it != tcp_streams_.end();
-             ++it) {
-            tcp_streams.push_back(it->second);
-        }
-        tcp_streams_.clear();
-        for (std::map<uint32_t, std::shared_ptr<TunnelUdpSocket> >::iterator it =
-                 udp_sockets_.begin();
-             it != udp_sockets_.end();
-             ++it) {
-            udp_sockets.push_back(it->second);
-        }
-        udp_sockets_.clear();
-    }
+    mark_closed();
+    transport_streams_.drain(&tcp_streams, &udp_sockets);
     for (std::size_t i = 0; i < tcp_streams.size(); ++i) {
         mark_tcp_stream_closed(tcp_streams[i]);
     }
@@ -269,7 +226,7 @@ void PortTunnelConnection::ensure_generation(std::uint64_t frame_generation) con
 
 bool PortTunnelConnection::owns_session(const std::shared_ptr<PortTunnelSession>& session) {
     BasicLockGuard lock(state_mutex_);
-    return !closed_.load() && session_.get() == session.get();
+    return !closed() && session_.get() == session.get();
 }
 
 bool PortTunnelConnection::accept_session_tcp_stream(
@@ -317,12 +274,12 @@ bool PortTunnelConnection::accept_session_tcp_stream(
     );
     {
         BasicLockGuard lock(state_mutex_);
-        if (closed_.load() || session_.get() != session.get()) {
+        if (closed() || session_.get() != session.get()) {
             mark_tcp_stream_closed(stream);
             service_->release_worker();
             return false;
         }
-        tcp_streams_[stream_id] = stream;
+        transport_streams_.insert_tcp(stream_id, stream);
     }
 
     PortTunnelFrame frame = make_empty_frame(PortTunnelFrameType::TcpAccept, stream_id);
@@ -330,7 +287,7 @@ bool PortTunnelConnection::accept_session_tcp_stream(
         {"listener_stream_id", listener_stream_id},
         {"peer", peer}
     }.dump();
-    if (!owns_session(session) || closed_.load()) {
+    if (!owns_session(session) || closed()) {
         drop_tcp_stream(stream_id, stream);
         service_->release_worker();
         return false;
@@ -357,5 +314,5 @@ bool PortTunnelConnection::emit_session_udp_datagram(
     if (!send_data_frame_or_drop_on_limit(frame)) {
         return false;
     }
-    return owns_session(session) && !closed_.load();
+    return owns_session(session) && !closed();
 }

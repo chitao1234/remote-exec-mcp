@@ -211,10 +211,7 @@ void PortTunnelConnection::tcp_connect(const PortTunnelFrame& frame) {
         );
     }
     stream->active_stream_budget_acquired = true;
-    {
-        BasicLockGuard lock(state_mutex_);
-        tcp_streams_[frame.stream_id] = stream;
-    }
+    transport_streams_.insert_tcp(frame.stream_id, stream);
     if (!service_->try_acquire_worker()) {
         drop_tcp_stream(frame.stream_id, stream);
         send_worker_limit(frame.stream_id);
@@ -316,14 +313,9 @@ void PortTunnelConnection::tcp_write_loop(
 
 void PortTunnelConnection::tcp_data(uint32_t stream_id, const std::vector<unsigned char>& data) {
     std::shared_ptr<TunnelTcpStream> stream;
-    {
-        BasicLockGuard lock(state_mutex_);
-        std::map<uint32_t, std::shared_ptr<TunnelTcpStream> >::iterator it =
-            tcp_streams_.find(stream_id);
-        if (it == tcp_streams_.end()) {
-            throw PortForwardError(400, "unknown_port_connection", "unknown tunnel tcp stream");
-        }
-        stream = it->second;
+    stream = transport_streams_.get_tcp(stream_id);
+    if (stream.get() == NULL) {
+        throw PortForwardError(400, "unknown_port_connection", "unknown tunnel tcp stream");
     }
     {
         BasicLockGuard lock(stream->mutex);
@@ -349,14 +341,9 @@ void PortTunnelConnection::tcp_data(uint32_t stream_id, const std::vector<unsign
 
 void PortTunnelConnection::tcp_eof(uint32_t stream_id) {
     std::shared_ptr<TunnelTcpStream> stream;
-    {
-        BasicLockGuard lock(state_mutex_);
-        std::map<uint32_t, std::shared_ptr<TunnelTcpStream> >::iterator it =
-            tcp_streams_.find(stream_id);
-        if (it == tcp_streams_.end()) {
-            return;
-        }
-        stream = it->second;
+    stream = transport_streams_.get_tcp(stream_id);
+    if (stream.get() == NULL) {
+        return;
     }
     {
         BasicLockGuard lock(stream->mutex);

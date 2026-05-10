@@ -294,14 +294,67 @@ private:
     bool released_;
 };
 
+class PortTunnelSender {
+public:
+    PortTunnelSender(SOCKET client, const std::shared_ptr<PortTunnelService>& service);
+
+    bool closed() const;
+    void mark_closed();
+    void send_frame(const PortTunnelFrame& frame);
+    bool send_data_frame_or_limit_error(
+        PortTunnelConnection& connection,
+        const PortTunnelFrame& frame
+    );
+    bool send_data_frame_or_drop_on_limit(
+        PortTunnelConnection& connection,
+        const PortTunnelFrame& frame
+    );
+
+private:
+    PortTunnelSender(const PortTunnelSender&);
+    PortTunnelSender& operator=(const PortTunnelSender&);
+
+    bool try_reserve_data_frame(const PortTunnelFrame& frame, unsigned long* charge_value);
+    void release_data_frame_reservation(unsigned long charge_value);
+
+    SOCKET client_;
+    std::shared_ptr<PortTunnelService> service_;
+    BasicMutex writer_mutex_;
+    std::atomic<bool> closed_;
+    std::atomic<unsigned long> queued_bytes_;
+};
+
+class TransportOwnedStreams {
+public:
+    TransportOwnedStreams() {}
+
+    void insert_tcp(uint32_t stream_id, const std::shared_ptr<TunnelTcpStream>& stream);
+    std::shared_ptr<TunnelTcpStream> get_tcp(uint32_t stream_id);
+    std::shared_ptr<TunnelTcpStream> remove_tcp(uint32_t stream_id);
+    void insert_udp(uint32_t stream_id, const std::shared_ptr<TunnelUdpSocket>& socket_value);
+    std::shared_ptr<TunnelUdpSocket> get_udp(uint32_t stream_id);
+    std::shared_ptr<TunnelUdpSocket> remove_udp(uint32_t stream_id);
+    void drain(
+        std::vector<std::shared_ptr<TunnelTcpStream> >* tcp_streams,
+        std::vector<std::shared_ptr<TunnelUdpSocket> >* udp_sockets
+    );
+
+private:
+    TransportOwnedStreams(const TransportOwnedStreams&);
+    TransportOwnedStreams& operator=(const TransportOwnedStreams&);
+
+    BasicMutex mutex_;
+    std::map<uint32_t, std::shared_ptr<TunnelTcpStream> > tcp_streams_;
+    std::map<uint32_t, std::shared_ptr<TunnelUdpSocket> > udp_sockets_;
+};
+
 class PortTunnelConnection : public std::enable_shared_from_this<PortTunnelConnection> {
 public:
     PortTunnelConnection(SOCKET client, const std::shared_ptr<PortTunnelService>& service)
         : client_(client),
           service_(service),
-          closed_(false),
+          sender_(client, service),
           generation_(0ULL),
-          queued_bytes_(0UL),
           mode_(PortTunnelMode::Unopened),
           protocol_(PortTunnelProtocol::None) {}
 
@@ -346,10 +399,10 @@ private:
     bool read_preface();
     bool read_frame(PortTunnelFrame* frame);
     void send_frame(const PortTunnelFrame& frame);
-    bool try_reserve_data_frame(const PortTunnelFrame& frame, unsigned long* charge_value);
-    void release_data_frame_reservation(unsigned long charge_value);
     bool send_data_frame_or_limit_error(const PortTunnelFrame& frame);
     bool send_data_frame_or_drop_on_limit(const PortTunnelFrame& frame);
+    bool closed() const;
+    void mark_closed();
     bool send_tcp_success_after_io_threads_started(
         const PortTunnelFrame& success,
         uint32_t stream_id,
@@ -385,14 +438,11 @@ private:
 
     SOCKET client_;
     std::shared_ptr<PortTunnelService> service_;
-    BasicMutex writer_mutex_;
+    PortTunnelSender sender_;
+    TransportOwnedStreams transport_streams_;
     BasicMutex state_mutex_;
-    std::atomic<bool> closed_;
     std::atomic<std::uint64_t> generation_;
-    std::atomic<unsigned long> queued_bytes_;
     std::shared_ptr<PortTunnelSession> session_;
-    std::map<uint32_t, std::shared_ptr<TunnelTcpStream> > tcp_streams_;
-    std::map<uint32_t, std::shared_ptr<TunnelUdpSocket> > udp_sockets_;
     PortTunnelMode mode_;
     PortTunnelProtocol protocol_;
 };

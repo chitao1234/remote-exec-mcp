@@ -252,7 +252,7 @@ bool PortTunnelConnection::read_exact(unsigned char* data, std::size_t size) {
     while (offset < size) {
         const int ready = wait_socket_readable(client_, service_->limits().tunnel_io_timeout_ms);
         if (ready <= 0) {
-            closed_.store(true);
+            mark_closed();
             shutdown_socket(client_);
             return false;
         }
@@ -307,7 +307,23 @@ bool PortTunnelConnection::read_frame(PortTunnelFrame* frame) {
     return true;
 }
 
-void PortTunnelConnection::send_frame(const PortTunnelFrame& frame) {
+PortTunnelSender::PortTunnelSender(
+    SOCKET client,
+    const std::shared_ptr<PortTunnelService>& service
+) : client_(client),
+    service_(service),
+    closed_(false),
+    queued_bytes_(0UL) {}
+
+bool PortTunnelSender::closed() const {
+    return closed_.load();
+}
+
+void PortTunnelSender::mark_closed() {
+    closed_.store(true);
+}
+
+void PortTunnelSender::send_frame(const PortTunnelFrame& frame) {
     const std::vector<unsigned char> bytes = encode_port_tunnel_frame(frame);
     BasicLockGuard lock(writer_mutex_);
     if (closed_.load()) {
@@ -321,7 +337,7 @@ void PortTunnelConnection::send_frame(const PortTunnelFrame& frame) {
     }
 }
 
-bool PortTunnelConnection::try_reserve_data_frame(
+bool PortTunnelSender::try_reserve_data_frame(
     const PortTunnelFrame& frame,
     unsigned long* charge_value
 ) {
@@ -350,14 +366,17 @@ bool PortTunnelConnection::try_reserve_data_frame(
     return true;
 }
 
-void PortTunnelConnection::release_data_frame_reservation(unsigned long charge_value) {
+void PortTunnelSender::release_data_frame_reservation(unsigned long charge_value) {
     queued_bytes_.fetch_sub(charge_value);
 }
 
-bool PortTunnelConnection::send_data_frame_or_limit_error(const PortTunnelFrame& frame) {
+bool PortTunnelSender::send_data_frame_or_limit_error(
+    PortTunnelConnection& connection,
+    const PortTunnelFrame& frame
+) {
     unsigned long charge_value = 0UL;
     if (!try_reserve_data_frame(frame, &charge_value)) {
-        send_error(
+        connection.send_error(
             frame.stream_id,
             "port_tunnel_limit_exceeded",
             "port tunnel queued byte limit reached"
@@ -374,11 +393,14 @@ bool PortTunnelConnection::send_data_frame_or_limit_error(const PortTunnelFrame&
     return !closed_.load();
 }
 
-bool PortTunnelConnection::send_data_frame_or_drop_on_limit(const PortTunnelFrame& frame) {
+bool PortTunnelSender::send_data_frame_or_drop_on_limit(
+    PortTunnelConnection& connection,
+    const PortTunnelFrame& frame
+) {
     unsigned long charge_value = 0UL;
     if (!try_reserve_data_frame(frame, &charge_value)) {
         if (frame.type == PortTunnelFrameType::UdpDatagram) {
-            send_forward_drop(
+            connection.send_forward_drop(
                 frame.stream_id,
                 "udp_datagram",
                 "port_tunnel_limit_exceeded",
@@ -395,6 +417,107 @@ bool PortTunnelConnection::send_data_frame_or_drop_on_limit(const PortTunnelFram
     }
     release_data_frame_reservation(charge_value);
     return !closed_.load();
+}
+
+void PortTunnelConnection::send_frame(const PortTunnelFrame& frame) {
+    sender_.send_frame(frame);
+}
+
+bool PortTunnelConnection::send_data_frame_or_limit_error(const PortTunnelFrame& frame) {
+    return sender_.send_data_frame_or_limit_error(*this, frame);
+}
+
+bool PortTunnelConnection::send_data_frame_or_drop_on_limit(const PortTunnelFrame& frame) {
+    return sender_.send_data_frame_or_drop_on_limit(*this, frame);
+}
+
+bool PortTunnelConnection::closed() const {
+    return sender_.closed();
+}
+
+void PortTunnelConnection::mark_closed() {
+    sender_.mark_closed();
+}
+
+void TransportOwnedStreams::insert_tcp(
+    uint32_t stream_id,
+    const std::shared_ptr<TunnelTcpStream>& stream
+) {
+    BasicLockGuard lock(mutex_);
+    tcp_streams_[stream_id] = stream;
+}
+
+std::shared_ptr<TunnelTcpStream> TransportOwnedStreams::get_tcp(uint32_t stream_id) {
+    BasicLockGuard lock(mutex_);
+    std::map<uint32_t, std::shared_ptr<TunnelTcpStream> >::iterator it =
+        tcp_streams_.find(stream_id);
+    if (it == tcp_streams_.end()) {
+        return std::shared_ptr<TunnelTcpStream>();
+    }
+    return it->second;
+}
+
+std::shared_ptr<TunnelTcpStream> TransportOwnedStreams::remove_tcp(uint32_t stream_id) {
+    BasicLockGuard lock(mutex_);
+    std::map<uint32_t, std::shared_ptr<TunnelTcpStream> >::iterator it =
+        tcp_streams_.find(stream_id);
+    if (it == tcp_streams_.end()) {
+        return std::shared_ptr<TunnelTcpStream>();
+    }
+    std::shared_ptr<TunnelTcpStream> stream = it->second;
+    tcp_streams_.erase(it);
+    return stream;
+}
+
+void TransportOwnedStreams::insert_udp(
+    uint32_t stream_id,
+    const std::shared_ptr<TunnelUdpSocket>& socket_value
+) {
+    BasicLockGuard lock(mutex_);
+    udp_sockets_[stream_id] = socket_value;
+}
+
+std::shared_ptr<TunnelUdpSocket> TransportOwnedStreams::get_udp(uint32_t stream_id) {
+    BasicLockGuard lock(mutex_);
+    std::map<uint32_t, std::shared_ptr<TunnelUdpSocket> >::iterator it =
+        udp_sockets_.find(stream_id);
+    if (it == udp_sockets_.end()) {
+        return std::shared_ptr<TunnelUdpSocket>();
+    }
+    return it->second;
+}
+
+std::shared_ptr<TunnelUdpSocket> TransportOwnedStreams::remove_udp(uint32_t stream_id) {
+    BasicLockGuard lock(mutex_);
+    std::map<uint32_t, std::shared_ptr<TunnelUdpSocket> >::iterator it =
+        udp_sockets_.find(stream_id);
+    if (it == udp_sockets_.end()) {
+        return std::shared_ptr<TunnelUdpSocket>();
+    }
+    std::shared_ptr<TunnelUdpSocket> socket_value = it->second;
+    udp_sockets_.erase(it);
+    return socket_value;
+}
+
+void TransportOwnedStreams::drain(
+    std::vector<std::shared_ptr<TunnelTcpStream> >* tcp_streams,
+    std::vector<std::shared_ptr<TunnelUdpSocket> >* udp_sockets
+) {
+    BasicLockGuard lock(mutex_);
+    for (std::map<uint32_t, std::shared_ptr<TunnelTcpStream> >::iterator it =
+             tcp_streams_.begin();
+         it != tcp_streams_.end();
+         ++it) {
+        tcp_streams->push_back(it->second);
+    }
+    tcp_streams_.clear();
+    for (std::map<uint32_t, std::shared_ptr<TunnelUdpSocket> >::iterator it =
+             udp_sockets_.begin();
+         it != udp_sockets_.end();
+         ++it) {
+        udp_sockets->push_back(it->second);
+    }
+    udp_sockets_.clear();
 }
 
 void PortTunnelConnection::run() {
