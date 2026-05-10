@@ -1,7 +1,24 @@
-use std::process::Command;
+use std::process::{Command, Output};
 
 fn admin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_remote-exec-admin"))
+}
+
+fn assert_success(output: &Output) {
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn init_ca(out_dir: &std::path::Path) {
+    let output = admin()
+        .args(["certs", "init-ca", "--out-dir"])
+        .arg(out_dir)
+        .output()
+        .expect("init-ca runs");
+    assert_success(&output);
 }
 
 #[test]
@@ -9,17 +26,7 @@ fn init_ca_writes_only_ca_files() {
     let tempdir = tempfile::tempdir().expect("tempdir");
     let out_dir = tempdir.path().join("ca");
 
-    let output = admin()
-        .args(["certs", "init-ca", "--out-dir"])
-        .arg(&out_dir)
-        .output()
-        .expect("init-ca runs");
-
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    init_ca(&out_dir);
     assert!(out_dir.join("ca.pem").exists());
     assert!(out_dir.join("ca.key").exists());
     assert!(!out_dir.join("broker.pem").exists());
@@ -32,16 +39,7 @@ fn issue_broker_uses_existing_ca_and_writes_only_broker_files() {
     let ca_dir = tempdir.path().join("ca");
     let broker_dir = tempdir.path().join("broker");
 
-    let init = admin()
-        .args(["certs", "init-ca", "--out-dir"])
-        .arg(&ca_dir)
-        .output()
-        .expect("init-ca runs");
-    assert!(
-        init.status.success(),
-        "{}",
-        String::from_utf8_lossy(&init.stderr)
-    );
+    init_ca(&ca_dir);
 
     let output = admin()
         .args(["certs", "issue-broker", "--ca-cert-pem"])
@@ -53,11 +51,7 @@ fn issue_broker_uses_existing_ca_and_writes_only_broker_files() {
         .output()
         .expect("issue-broker runs");
 
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_success(&output);
     assert!(broker_dir.join("broker.pem").exists());
     assert!(broker_dir.join("broker.key").exists());
     assert!(!broker_dir.join("certs-manifest.json").exists());
@@ -69,16 +63,7 @@ fn issue_daemon_writes_target_named_leaf_files() {
     let ca_dir = tempdir.path().join("ca");
     let daemon_dir = tempdir.path().join("daemon");
 
-    let init = admin()
-        .args(["certs", "init-ca", "--out-dir"])
-        .arg(&ca_dir)
-        .output()
-        .expect("init-ca runs");
-    assert!(
-        init.status.success(),
-        "{}",
-        String::from_utf8_lossy(&init.stderr)
-    );
+    init_ca(&ca_dir);
 
     let output = admin()
         .args(["certs", "issue-daemon", "--ca-cert-pem"])
@@ -91,11 +76,7 @@ fn issue_daemon_writes_target_named_leaf_files() {
         .output()
         .expect("issue-daemon runs");
 
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_success(&output);
     assert!(daemon_dir.join("builder-a.pem").exists());
     assert!(daemon_dir.join("builder-a.key").exists());
     assert!(!daemon_dir.join("certs-manifest.json").exists());

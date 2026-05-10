@@ -2,6 +2,11 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use remote_exec_pki::{DaemonCertSpec, DevInitSpec, SubjectAltName, build_dev_init_bundle};
 
+fn assert_pem_pair(cert_pem: &str, key_pem: &str) {
+    assert!(cert_pem.contains("BEGIN CERTIFICATE"));
+    assert!(key_pem.contains("BEGIN PRIVATE KEY"));
+}
+
 #[test]
 fn rejects_duplicate_targets() {
     let spec = DevInitSpec {
@@ -32,19 +37,11 @@ fn generates_bundle_for_requested_targets() {
     };
 
     let bundle = build_dev_init_bundle(&spec).expect("bundle should generate");
-    assert!(bundle.ca.cert_pem.contains("BEGIN CERTIFICATE"));
-    assert!(bundle.ca.key_pem.contains("BEGIN PRIVATE KEY"));
-    assert!(bundle.broker.cert_pem.contains("BEGIN CERTIFICATE"));
-    assert!(bundle.broker.key_pem.contains("BEGIN PRIVATE KEY"));
+    assert_pem_pair(&bundle.ca.cert_pem, &bundle.ca.key_pem);
+    assert_pem_pair(&bundle.broker.cert_pem, &bundle.broker.key_pem);
     assert!(bundle.daemons.contains_key("builder-a"));
-    assert!(
-        bundle.daemons["builder-a"]
-            .cert_pem
-            .contains("BEGIN CERTIFICATE")
-    );
-    assert!(
-        bundle.daemons["builder-a"]
-            .key_pem
-            .contains("BEGIN PRIVATE KEY")
+    assert_pem_pair(
+        &bundle.daemons["builder-a"].cert_pem,
+        &bundle.daemons["builder-a"].key_pem,
     );
 }

@@ -3,6 +3,11 @@ use remote_exec_pki::{
     issue_daemon_cert, load_ca_from_pem,
 };
 
+fn assert_pem_pair(cert_pem: &str, key_pem: &str) {
+    assert!(cert_pem.contains("BEGIN CERTIFICATE"));
+    assert!(key_pem.contains("BEGIN PRIVATE KEY"));
+}
+
 #[test]
 fn load_ca_from_pem_accepts_generated_material_and_reuses_it_in_bundle_output() {
     let ca = generate_ca("remote-exec-ca").expect("generate CA");
@@ -47,8 +52,6 @@ fn loaded_ca_can_issue_broker_and_daemon_leaf_certificates() {
     let daemon =
         issue_daemon_cert(&loaded, &DaemonCertSpec::localhost("builder-a")).expect("daemon cert");
 
-    assert!(broker.cert_pem.contains("BEGIN CERTIFICATE"));
-    assert!(broker.key_pem.contains("BEGIN PRIVATE KEY"));
-    assert!(daemon.cert_pem.contains("BEGIN CERTIFICATE"));
-    assert!(daemon.key_pem.contains("BEGIN PRIVATE KEY"));
+    assert_pem_pair(&broker.cert_pem, &broker.key_pem);
+    assert_pem_pair(&daemon.cert_pem, &daemon.key_pem);
 }

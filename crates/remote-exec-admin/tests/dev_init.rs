@@ -1,11 +1,42 @@
-use std::process::Command;
+use std::path::Path;
+use std::process::{Command, Output};
+
+fn admin() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_remote-exec-admin"))
+}
+
+fn assert_success(output: &Output) {
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn assert_failure_contains(output: &Output, expected: &str) {
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains(expected),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn run_dev_init(out_dir: &Path, target: &str) -> Output {
+    admin()
+        .args(["certs", "dev-init", "--out-dir"])
+        .arg(out_dir)
+        .args(["--target", target])
+        .output()
+        .expect("dev-init should run")
+}
 
 #[test]
 fn dev_init_writes_expected_files_and_config_snippets() {
     let tempdir = tempfile::tempdir().expect("tempdir");
     let out_dir = tempdir.path().join("certs");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_remote-exec-admin"))
+    let output = admin()
         .args(["certs", "dev-init", "--out-dir"])
         .arg(&out_dir)
         .args([
@@ -19,11 +50,7 @@ fn dev_init_writes_expected_files_and_config_snippets() {
         .output()
         .expect("dev-init should run");
 
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_success(&output);
 
     assert!(out_dir.join("ca.pem").exists());
     assert!(out_dir.join("ca.key").exists());
@@ -45,26 +72,11 @@ fn dev_init_requires_force_to_overwrite_existing_files() {
     let tempdir = tempfile::tempdir().expect("tempdir");
     let out_dir = tempdir.path().join("certs");
 
-    let first = Command::new(env!("CARGO_BIN_EXE_remote-exec-admin"))
-        .args(["certs", "dev-init", "--out-dir"])
-        .arg(&out_dir)
-        .args(["--target", "builder-a"])
-        .output()
-        .expect("initial dev-init should run");
-    assert!(first.status.success());
+    let first = run_dev_init(&out_dir, "builder-a");
+    assert_success(&first);
 
-    let second = Command::new(env!("CARGO_BIN_EXE_remote-exec-admin"))
-        .args(["certs", "dev-init", "--out-dir"])
-        .arg(&out_dir)
-        .args(["--target", "builder-a"])
-        .output()
-        .expect("overwrite check should run");
-    assert!(!second.status.success());
-    assert!(
-        String::from_utf8_lossy(&second.stderr).contains("--force"),
-        "{}",
-        String::from_utf8_lossy(&second.stderr)
-    );
+    let second = run_dev_init(&out_dir, "builder-a");
+    assert_failure_contains(&second, "--force");
 }
 
 #[test]
@@ -73,30 +85,17 @@ fn dev_init_reuses_ca_from_previous_bundle_directory() {
     let source_dir = tempdir.path().join("source");
     let reused_dir = tempdir.path().join("reused");
 
-    let first = Command::new(env!("CARGO_BIN_EXE_remote-exec-admin"))
-        .args(["certs", "dev-init", "--out-dir"])
-        .arg(&source_dir)
-        .args(["--target", "builder-a"])
-        .output()
-        .expect("initial dev-init");
-    assert!(
-        first.status.success(),
-        "{}",
-        String::from_utf8_lossy(&first.stderr)
-    );
+    let first = run_dev_init(&source_dir, "builder-a");
+    assert_success(&first);
 
-    let second = Command::new(env!("CARGO_BIN_EXE_remote-exec-admin"))
+    let second = admin()
         .args(["certs", "dev-init", "--out-dir"])
         .arg(&reused_dir)
         .args(["--target", "builder-b", "--reuse-ca-from-dir"])
         .arg(&source_dir)
         .output()
         .expect("reused dev-init");
-    assert!(
-        second.status.success(),
-        "{}",
-        String::from_utf8_lossy(&second.stderr)
-    );
+    assert_success(&second);
 
     assert_eq!(
         std::fs::read_to_string(source_dir.join("ca.pem")).unwrap(),
@@ -116,19 +115,10 @@ fn dev_init_reuses_ca_from_explicit_pem_paths() {
     let source_dir = tempdir.path().join("source");
     let reused_dir = tempdir.path().join("reused");
 
-    let first = Command::new(env!("CARGO_BIN_EXE_remote-exec-admin"))
-        .args(["certs", "dev-init", "--out-dir"])
-        .arg(&source_dir)
-        .args(["--target", "builder-a"])
-        .output()
-        .expect("initial dev-init");
-    assert!(
-        first.status.success(),
-        "{}",
-        String::from_utf8_lossy(&first.stderr)
-    );
+    let first = run_dev_init(&source_dir, "builder-a");
+    assert_success(&first);
 
-    let second = Command::new(env!("CARGO_BIN_EXE_remote-exec-admin"))
+    let second = admin()
         .args(["certs", "dev-init", "--out-dir"])
         .arg(&reused_dir)
         .args(["--target", "builder-b", "--reuse-ca-cert-pem"])
@@ -137,11 +127,7 @@ fn dev_init_reuses_ca_from_explicit_pem_paths() {
         .arg(source_dir.join("ca.key"))
         .output()
         .expect("explicit CA reuse");
-    assert!(
-        second.status.success(),
-        "{}",
-        String::from_utf8_lossy(&second.stderr)
-    );
+    assert_success(&second);
 
     assert_eq!(
         std::fs::read_to_string(source_dir.join("ca.pem")).unwrap(),
@@ -153,29 +139,19 @@ fn dev_init_reuses_ca_from_explicit_pem_paths() {
 fn dev_init_rejects_partial_or_mixed_reuse_ca_inputs() {
     let tempdir = tempfile::tempdir().expect("tempdir");
     let source_dir = tempdir.path().join("source");
-    let first = Command::new(env!("CARGO_BIN_EXE_remote-exec-admin"))
-        .args(["certs", "dev-init", "--out-dir"])
-        .arg(&source_dir)
-        .args(["--target", "builder-a"])
-        .output()
-        .expect("initial dev-init");
-    assert!(
-        first.status.success(),
-        "{}",
-        String::from_utf8_lossy(&first.stderr)
-    );
+    let first = run_dev_init(&source_dir, "builder-a");
+    assert_success(&first);
 
-    let partial = Command::new(env!("CARGO_BIN_EXE_remote-exec-admin"))
+    let partial = admin()
         .args(["certs", "dev-init", "--out-dir"])
         .arg(tempdir.path().join("partial"))
         .args(["--target", "builder-a", "--reuse-ca-cert-pem"])
         .arg(source_dir.join("ca.pem"))
         .output()
         .expect("partial reuse");
-    assert!(!partial.status.success());
-    assert!(String::from_utf8_lossy(&partial.stderr).contains("--reuse-ca-key-pem"));
+    assert_failure_contains(&partial, "--reuse-ca-key-pem");
 
-    let mixed = Command::new(env!("CARGO_BIN_EXE_remote-exec-admin"))
+    let mixed = admin()
         .args(["certs", "dev-init", "--out-dir"])
         .arg(tempdir.path().join("mixed"))
         .args(["--target", "builder-a", "--reuse-ca-from-dir"])
@@ -186,6 +162,5 @@ fn dev_init_rejects_partial_or_mixed_reuse_ca_inputs() {
         .arg(source_dir.join("ca.key"))
         .output()
         .expect("mixed reuse");
-    assert!(!mixed.status.success());
-    assert!(String::from_utf8_lossy(&mixed.stderr).contains("--reuse-ca-from-dir"));
+    assert_failure_contains(&mixed, "--reuse-ca-from-dir");
 }
