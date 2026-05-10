@@ -83,11 +83,11 @@ impl LocalDaemonClient {
 }
 
 pub(crate) fn map_local_image_error(err: remote_exec_host::ImageError) -> DaemonClientError {
-    map_host_rpc_error(err.into_host_rpc_error())
+    map_host_rpc_error(err.into())
 }
 
 pub(crate) fn map_local_transfer_error(err: remote_exec_host::TransferError) -> DaemonClientError {
-    map_host_rpc_error(err.into_host_rpc_error())
+    map_host_rpc_error(err.into())
 }
 
 pub(crate) fn map_host_rpc_error(err: remote_exec_host::HostRpcError) -> DaemonClientError {

@@ -84,6 +84,7 @@ pub async fn import_archive_from_file(
         None,
     )
     .await
+    .map_err(Into::into)
 }
 
 pub async fn import_archive_from_async_reader<R>(
@@ -98,6 +99,7 @@ where
         reader, request, sandbox, None,
     )
     .await
+    .map_err(Into::into)
 }
 
 pub fn path_info(
@@ -174,4 +176,5 @@ pub async fn bundle_archives_to_file(
         compression,
     )
     .await
+    .map_err(Into::into)
 }
