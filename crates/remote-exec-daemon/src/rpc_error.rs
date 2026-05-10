@@ -8,11 +8,9 @@ pub(crate) fn bad_request(message: impl Into<String>) -> (StatusCode, Json<RpcEr
 }
 
 pub(crate) fn host_rpc_error_response(err: HostRpcError) -> (StatusCode, Json<RpcErrorBody>) {
+    let (status, body) = err.into_rpc_parts();
     (
-        StatusCode::from_u16(err.status).expect("valid host rpc status"),
-        Json(RpcErrorBody {
-            code: err.code.to_string(),
-            message: err.message,
-        }),
+        StatusCode::from_u16(status).expect("valid host rpc status"),
+        Json(body),
     )
 }

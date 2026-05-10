@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
-    PatchApplyRequest, PatchApplyResponse, RpcErrorBody, TargetInfoResponse,
-    TransferPathInfoRequest, TransferPathInfoResponse,
+    PatchApplyRequest, PatchApplyResponse, TargetInfoResponse, TransferPathInfoRequest,
+    TransferPathInfoResponse,
 };
 
 use crate::daemon_client::DaemonClientError;
@@ -91,18 +91,9 @@ pub(crate) fn map_local_transfer_error(err: remote_exec_host::TransferError) -> 
 }
 
 pub(crate) fn map_host_rpc_error(err: remote_exec_host::HostRpcError) -> DaemonClientError {
-    local_rpc_error_body(
-        reqwest::StatusCode::from_u16(err.status).expect("valid status code"),
-        RpcErrorBody {
-            code: err.code.to_string(),
-            message: err.message,
-        },
-    )
-}
-
-fn local_rpc_error_body(status: reqwest::StatusCode, body: RpcErrorBody) -> DaemonClientError {
+    let (status, body) = err.into_rpc_parts();
     DaemonClientError::Rpc {
-        status,
+        status: reqwest::StatusCode::from_u16(status).expect("valid status code"),
         code: Some(body.code),
         message: body.message,
     }

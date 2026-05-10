@@ -1,10 +1,24 @@
 use std::fmt;
 
+use remote_exec_proto::rpc::RpcErrorBody;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostRpcError {
     pub status: u16,
     pub code: &'static str,
     pub message: String,
+}
+
+impl HostRpcError {
+    pub fn into_rpc_parts(self) -> (u16, RpcErrorBody) {
+        (
+            self.status,
+            RpcErrorBody {
+                code: self.code.to_string(),
+                message: self.message,
+            },
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

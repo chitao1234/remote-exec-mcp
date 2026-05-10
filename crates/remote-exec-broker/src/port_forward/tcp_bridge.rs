@@ -1139,18 +1139,15 @@ mod tests {
         let connect_io = ScriptedTunnelIo::default();
         let connect_tunnel = Arc::new(PortTunnel::from_stream(connect_io.clone()).unwrap());
 
-        let listen_session = Arc::new(ListenSessionControl {
-            side: SideHandle::local().unwrap(),
-            forward_id: "fwd_test".to_string(),
-            session_id: "test-session".to_string(),
-            protocol: PublicForwardPortProtocol::Tcp,
-            generation: 1,
-            listener_stream_id: 1,
-            resume_timeout: Duration::from_secs(30),
-            max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
-            current_tunnel: TokioMutex::new(Some(listen_tunnel.clone())),
-            op_lock: TokioMutex::new(()),
-        });
+        let listen_session = Arc::new(ListenSessionControl::new_for_test(
+            SideHandle::local().unwrap(),
+            "fwd_test".to_string(),
+            "test-session".to_string(),
+            PublicForwardPortProtocol::Tcp,
+            Duration::from_secs(30),
+            PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
+            Some(listen_tunnel.clone()),
+        ));
         let cancel = CancellationToken::new();
         let runtime = ForwardRuntime {
             forward_id: "fwd_test".to_string(),
@@ -1252,18 +1249,15 @@ mod tests {
         let connect_io = ScriptedTunnelIo::default();
         let connect_tunnel = Arc::new(PortTunnel::from_stream(connect_io.clone()).unwrap());
 
-        let listen_session = Arc::new(ListenSessionControl {
-            side: SideHandle::local().unwrap(),
-            forward_id: "fwd_test".to_string(),
-            session_id: "test-session".to_string(),
-            protocol: PublicForwardPortProtocol::Tcp,
-            generation: 1,
-            listener_stream_id: 1,
-            resume_timeout: Duration::from_secs(30),
-            max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
-            current_tunnel: TokioMutex::new(Some(listen_tunnel.clone())),
-            op_lock: TokioMutex::new(()),
-        });
+        let listen_session = Arc::new(ListenSessionControl::new_for_test(
+            SideHandle::local().unwrap(),
+            "fwd_test".to_string(),
+            "test-session".to_string(),
+            PublicForwardPortProtocol::Tcp,
+            Duration::from_secs(30),
+            PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
+            Some(listen_tunnel.clone()),
+        ));
         let cancel = CancellationToken::new();
         let runtime = ForwardRuntime {
             forward_id: "fwd_test".to_string(),
@@ -1764,18 +1758,15 @@ mod tests {
         listen_tunnel: Arc<PortTunnel>,
         connect_tunnel: Arc<PortTunnel>,
     ) -> ForwardRuntime {
-        let listen_session = Arc::new(ListenSessionControl {
-            side: SideHandle::local().unwrap(),
-            forward_id: "fwd_test".to_string(),
-            session_id: "test-session".to_string(),
-            protocol: PublicForwardPortProtocol::Tcp,
-            generation: 1,
-            listener_stream_id: 1,
-            resume_timeout: Duration::from_secs(30),
-            max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
-            current_tunnel: TokioMutex::new(Some(listen_tunnel)),
-            op_lock: TokioMutex::new(()),
-        });
+        let listen_session = Arc::new(ListenSessionControl::new_for_test(
+            SideHandle::local().unwrap(),
+            "fwd_test".to_string(),
+            "test-session".to_string(),
+            PublicForwardPortProtocol::Tcp,
+            Duration::from_secs(30),
+            PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
+            Some(listen_tunnel),
+        ));
         ForwardRuntime {
             forward_id: "fwd_test".to_string(),
             listen_side: SideHandle::local().unwrap(),

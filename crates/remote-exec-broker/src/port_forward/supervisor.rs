@@ -220,6 +220,30 @@ impl ListenSessionControl {
         let _guard = self.op_lock.lock().await;
         operation().await
     }
+
+    #[cfg(test)]
+    pub(super) fn new_for_test(
+        side: SideHandle,
+        forward_id: String,
+        session_id: String,
+        protocol: PublicForwardPortProtocol,
+        resume_timeout: Duration,
+        max_tunnel_queued_bytes: usize,
+        tunnel: Option<Arc<PortTunnel>>,
+    ) -> Self {
+        Self {
+            side,
+            forward_id,
+            session_id,
+            protocol,
+            generation: 1,
+            listener_stream_id: 1,
+            resume_timeout,
+            max_tunnel_queued_bytes,
+            current_tunnel: Mutex::new(tunnel),
+            op_lock: Mutex::new(()),
+        }
+    }
 }
 
 struct OpenListenSession {
