@@ -249,7 +249,7 @@ async fn tunnel_open_listen(
             meta: encode_frame_meta(&TunnelReadyMeta {
                 generation: meta.generation,
                 session_id: Some(session.id.clone()),
-                resume_timeout_ms: Some(super::RESUME_TIMEOUT.as_millis() as u64),
+                resume_timeout_ms: Some(super::timings().resume_timeout.as_millis() as u64),
                 limits: tunnel_limit_summary(&tunnel),
             })?,
             data: Vec::new(),

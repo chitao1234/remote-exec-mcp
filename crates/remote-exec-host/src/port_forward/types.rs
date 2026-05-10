@@ -1,0 +1,106 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+
+use remote_exec_proto::port_tunnel::{Frame, TunnelForwardProtocol};
+use serde::{Deserialize, Serialize};
+use tokio::net::UdpSocket;
+use tokio::sync::{Mutex, mpsc};
+use tokio_util::sync::CancellationToken;
+
+use crate::AppState;
+
+use super::limiter::{PortForwardLimiter, PortForwardPermit};
+use super::session;
+
+pub(super) struct TunnelState {
+    pub(super) state: Arc<AppState>,
+    pub(super) cancel: CancellationToken,
+    pub(super) tx: TunnelSender,
+    pub(super) open_mode: Mutex<TunnelMode>,
+    pub(super) tcp_streams: Mutex<HashMap<u32, TcpStreamEntry>>,
+    pub(super) udp_binds: Mutex<HashMap<u32, TransportUdpBind>>,
+    pub(super) generation: AtomicU64,
+    pub(super) attached_session: Mutex<Option<Arc<session::SessionState>>>,
+    pub(super) _connection_permit: PortForwardPermit,
+}
+
+#[derive(Clone)]
+pub(super) struct TunnelSender {
+    pub(super) tx: mpsc::Sender<QueuedFrame>,
+    pub(super) limiter: Arc<PortForwardLimiter>,
+}
+
+pub(super) struct QueuedFrame {
+    pub(super) frame: Frame,
+    pub(super) _permit: Option<PortForwardPermit>,
+}
+
+#[derive(Clone)]
+pub(super) struct TcpWriterHandle {
+    pub(super) tx: mpsc::Sender<TcpWriteCommand>,
+    pub(super) cancel: CancellationToken,
+}
+
+pub(super) struct TcpStreamEntry {
+    pub(super) writer: TcpWriterHandle,
+    pub(super) _permit: PortForwardPermit,
+    pub(super) cancel: Option<CancellationToken>,
+}
+
+pub(super) enum TcpWriteCommand {
+    Data(Vec<u8>),
+    Shutdown,
+}
+
+pub(super) struct TransportUdpBind {
+    pub(super) socket: Arc<UdpSocket>,
+    pub(super) _permit: PortForwardPermit,
+    pub(super) cancel: CancellationToken,
+}
+
+pub(super) struct UdpReaderEntry {
+    pub(super) cancel: CancellationToken,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct EndpointMeta {
+    pub(super) endpoint: String,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct EndpointOkMeta {
+    pub(super) endpoint: String,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct TcpAcceptMeta {
+    pub(super) listener_stream_id: u32,
+    pub(super) peer: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(super) struct UdpDatagramMeta {
+    pub(super) peer: String,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct ErrorMeta {
+    pub(super) code: String,
+    pub(super) message: String,
+    pub(super) fatal: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) generation: Option<u64>,
+}
+
+#[derive(Clone)]
+pub(super) enum TunnelMode {
+    Unopened,
+    Connect {
+        protocol: TunnelForwardProtocol,
+    },
+    Listen {
+        protocol: TunnelForwardProtocol,
+        session: Arc<session::SessionState>,
+    },
+}

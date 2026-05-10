@@ -16,7 +16,7 @@ use super::error::{SessionCloseMode, rpc_error};
 use super::limiter::{PortForwardLimiter, PortForwardPermit};
 use super::session_store::TunnelSessionStore;
 use super::udp::tunnel_udp_read_loop_session_owned;
-use super::{ErrorMeta, RESUME_TIMEOUT, TcpStreamEntry, TunnelSender, TunnelState, UdpReaderEntry};
+use super::{ErrorMeta, TcpStreamEntry, TunnelSender, TunnelState, UdpReaderEntry, timings};
 
 pub(super) struct SessionState {
     pub(super) id: String,
@@ -190,7 +190,7 @@ pub(super) async fn close_attached_session(tunnel: &Arc<TunnelState>, mode: Sess
 
     match mode {
         SessionCloseMode::RetryableDetach => {
-            *session.resume_deadline.lock().await = Some(Instant::now() + RESUME_TIMEOUT);
+            *session.resume_deadline.lock().await = Some(Instant::now() + timings().resume_timeout);
             schedule_session_expiry(tunnel.state.port_forward_sessions.clone(), session);
         }
         SessionCloseMode::GracefulClose | SessionCloseMode::TerminalFailure => {
@@ -249,7 +249,7 @@ pub(super) async fn udp_bind_stream_id(session: &Arc<SessionState>) -> Option<u3
 
 pub(super) fn schedule_session_expiry(store: TunnelSessionStore, session: Arc<SessionState>) {
     tokio::spawn(async move {
-        tokio::time::sleep(RESUME_TIMEOUT).await;
+        tokio::time::sleep(timings().resume_timeout).await;
         if session.is_expired().await && session.current_attachment().await.is_none() {
             store.remove(&session.id).await;
             session.close_retained_resources().await;

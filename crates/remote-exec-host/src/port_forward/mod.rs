@@ -4,128 +4,29 @@ mod limiter;
 mod session;
 mod session_store;
 mod tcp;
+mod timings;
 mod tunnel;
+mod types;
 mod udp;
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-use std::time::Duration;
-
 use remote_exec_proto::port_tunnel::{
-    ForwardDropKind, ForwardDropMeta, Frame, FrameType, HEADER_LEN, TunnelForwardProtocol,
+    ForwardDropKind, ForwardDropMeta, Frame, FrameType, HEADER_LEN,
 };
 use remote_exec_proto::rpc::RpcErrorCode;
-use serde::{Deserialize, Serialize};
-use tokio::net::UdpSocket;
-use tokio::sync::{Mutex, mpsc};
-use tokio_util::sync::CancellationToken;
-
-use crate::AppState;
 
 pub use session_store::TunnelSessionStore;
 pub use tunnel::{reserve_tunnel_connection, serve_tunnel, serve_tunnel_with_permit};
 
 pub use limiter::{PortForwardLimiter, PortForwardPermit};
+use timings::timings;
+use types::{
+    EndpointMeta, EndpointOkMeta, ErrorMeta, QueuedFrame, TcpAcceptMeta, TcpStreamEntry,
+    TcpWriteCommand, TcpWriterHandle, TransportUdpBind, TunnelMode, TunnelSender, TunnelState,
+    UdpDatagramMeta, UdpReaderEntry,
+};
 
 const READ_BUF_SIZE: usize = 64 * 1024;
 const TCP_WRITE_QUEUE_FRAMES: usize = 8;
-#[cfg(not(test))]
-const RESUME_TIMEOUT: Duration = Duration::from_secs(10);
-#[cfg(test)]
-const RESUME_TIMEOUT: Duration = Duration::from_millis(100);
-
-struct TunnelState {
-    state: Arc<AppState>,
-    cancel: CancellationToken,
-    tx: TunnelSender,
-    open_mode: Mutex<TunnelMode>,
-    tcp_streams: Mutex<HashMap<u32, TcpStreamEntry>>,
-    udp_binds: Mutex<HashMap<u32, TransportUdpBind>>,
-    generation: AtomicU64,
-    attached_session: Mutex<Option<Arc<session::SessionState>>>,
-    _connection_permit: limiter::PortForwardPermit,
-}
-
-#[derive(Clone)]
-struct TunnelSender {
-    tx: mpsc::Sender<QueuedFrame>,
-    limiter: Arc<PortForwardLimiter>,
-}
-
-struct QueuedFrame {
-    frame: Frame,
-    _permit: Option<limiter::PortForwardPermit>,
-}
-
-#[derive(Clone)]
-struct TcpWriterHandle {
-    tx: mpsc::Sender<TcpWriteCommand>,
-    cancel: CancellationToken,
-}
-
-struct TcpStreamEntry {
-    writer: TcpWriterHandle,
-    _permit: limiter::PortForwardPermit,
-    cancel: Option<CancellationToken>,
-}
-
-enum TcpWriteCommand {
-    Data(Vec<u8>),
-    Shutdown,
-}
-
-struct TransportUdpBind {
-    socket: Arc<UdpSocket>,
-    _permit: limiter::PortForwardPermit,
-    cancel: CancellationToken,
-}
-
-struct UdpReaderEntry {
-    cancel: CancellationToken,
-}
-
-#[derive(Debug, Deserialize)]
-struct EndpointMeta {
-    endpoint: String,
-}
-
-#[derive(Debug, Serialize)]
-struct EndpointOkMeta {
-    endpoint: String,
-}
-
-#[derive(Debug, Serialize)]
-struct TcpAcceptMeta {
-    listener_stream_id: u32,
-    peer: String,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct UdpDatagramMeta {
-    peer: String,
-}
-
-#[derive(Debug, Serialize)]
-struct ErrorMeta {
-    code: String,
-    message: String,
-    fatal: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    generation: Option<u64>,
-}
-
-#[derive(Clone)]
-enum TunnelMode {
-    Unopened,
-    Connect {
-        protocol: TunnelForwardProtocol,
-    },
-    Listen {
-        protocol: TunnelForwardProtocol,
-        session: Arc<session::SessionState>,
-    },
-}
 
 impl TunnelState {
     async fn send(&self, frame: Frame) -> Result<(), crate::HostRpcError> {
@@ -200,7 +101,8 @@ mod port_tunnel_tests {
     use super::tcp::{tunnel_close_stream, tunnel_tcp_eof};
     use super::*;
     use crate::{
-        HostRuntimeConfig, ProcessEnvironment, PtyMode, YieldTimeConfig, build_runtime_state,
+        AppState, HostRuntimeConfig, ProcessEnvironment, PtyMode, YieldTimeConfig,
+        build_runtime_state,
     };
     use std::sync::atomic::{AtomicU32, Ordering};
 
