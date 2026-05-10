@@ -3,7 +3,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <filesystem>
 #include <fstream>
 #include <string>
 #include <utility>
@@ -16,9 +15,10 @@
 #endif
 
 #include "rpc_failures.h"
+#include "test_filesystem.h"
 #include "transfer_ops.h"
 
-namespace fs = std::filesystem;
+namespace fs = test_fs;
 
 static const char* const SINGLE_FILE_ENTRY = ".remote-exec-file";
 static const char* const TRANSFER_SUMMARY_ENTRY = ".remote-exec-transfer-summary.json";

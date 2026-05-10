@@ -1,5 +1,4 @@
 #include <cassert>
-#include <filesystem>
 #include <string>
 #include <thread>
 #include <vector>
@@ -8,8 +7,9 @@
 #include "platform.h"
 #include "process_session.h"
 #include "session_store.h"
+#include "test_filesystem.h"
 
-namespace fs = std::filesystem;
+namespace fs = test_fs;
 
 static fs::path make_test_root() {
     const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-session-store-test";
