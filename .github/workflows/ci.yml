@@ -196,10 +196,26 @@ jobs:
       - name: Run Linux C++ checks
         if: runner.os == 'Linux'
         run: |
-          make -C crates/remote-exec-daemon-cpp check-posix
-          make -C crates/remote-exec-daemon-cpp check-windows-xp
+          jobs="$(nproc)"
+
+          make -j"${jobs}" -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-posix check-posix &
+          posix_pid="$!"
+
+          make -j"${jobs}" -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-windows-xp check-windows-xp &
+          xp_pid="$!"
+
+          posix_status=0
+          xp_status=0
+          wait "${posix_pid}" || posix_status="$?"
+          wait "${xp_pid}" || xp_status="$?"
+
+          if [ "${posix_status}" -ne 0 ] || [ "${xp_status}" -ne 0 ]; then
+            exit 1
+          fi
 
       - name: Run Windows C++ checks
         if: runner.os == 'Windows'
         shell: msys2 {0}
-        run: make -C crates/remote-exec-daemon-cpp check-windows-xp
+        run: |
+          jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)"
+          make -j"${jobs}" -C crates/remote-exec-daemon-cpp check-windows-xp
