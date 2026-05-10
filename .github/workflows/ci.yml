@@ -64,6 +64,8 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace --locked
+        env:
+          CARGO_PROFILE_TEST_DEBUG: "0"
 
   rust-test-no-default-features:
     name: Rust no-default-features (ubuntu-latest)
