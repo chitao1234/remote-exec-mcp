@@ -33,11 +33,28 @@ Windows XP-compatible cross-build:
 - `make check-windows-xp`
 - `make test-wine-session-store` when `wine` is available
 
-The top-level `Makefile` is the public entry point. Shared source lists live in
-`mk/common.mk`, host-native rules live in `mk/posix.mk`, and Windows XP
-cross-build rules live in `mk/windows-xp.mk`.
+The top-level `Makefile` is the GNU make public entry point. Shared source
+lists live in `mk/sources.mk`, shared GNU make helpers live in `mk/common.mk`,
+host-native rules live in `mk/posix.mk`, and Windows XP cross-build rules live
+in `mk/windows-xp.mk`.
+
+BSD make has a separate POSIX-only entry point. It intentionally does not expose
+the Windows XP cross-build targets:
+
+- `bmake -f BSDmakefile`
+- `bmake -f BSDmakefile all-posix`
+- `bmake -f BSDmakefile check`
+- `bmake -f BSDmakefile check-posix`
+
+Invoke BSD make from this directory, or use `bmake -C
+crates/remote-exec-daemon-cpp -f BSDmakefile ...` from the repository root, so
+the relative source paths and `build/` output tree resolve correctly. Some BSD
+make installations prefer `Makefile` over `BSDmakefile`, so the explicit
+`-f BSDmakefile` form is the portable command.
 
 Focused host-native tests:
+
+Use the same target names with `bmake -f BSDmakefile ...` for the BSD make path.
 
 - `make test-host-patch`
 - `make test-host-transfer`
