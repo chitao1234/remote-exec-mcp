@@ -33,8 +33,8 @@ pub async fn export_path_to_archive(
     exclude: &[String],
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
-) -> anyhow::Result<ExportedArchive> {
-    let temp = tempfile::NamedTempFile::new()?;
+) -> Result<ExportedArchive, TransferError> {
+    let temp = tempfile::NamedTempFile::new().map_err(internal_transfer_error)?;
     let temp_path = temp.into_temp_path();
     let exported = export_path_to_file(
         path,
@@ -63,14 +63,16 @@ pub async fn export_path_to_file(
     exclude: &[String],
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
-) -> anyhow::Result<ExportPathResult> {
-    let prepared =
-        prepare_export_path(path, &symlink_mode, exclude, sandbox, windows_posix_root).await?;
+) -> Result<ExportPathResult, TransferError> {
+    let prepared = prepare_export_path(path, &symlink_mode, exclude, sandbox, windows_posix_root)
+        .await
+        .map_err(archive_error_to_transfer_error)?;
     let archive_path = archive_path.to_path_buf();
     let source_type = prepared.source_type.clone();
 
-    let warnings =
-        write_prepared_export_to_file(prepared, archive_path, compression, symlink_mode).await?;
+    let warnings = write_prepared_export_to_file(prepared, archive_path, compression, symlink_mode)
+        .await
+        .map_err(archive_error_to_transfer_error)?;
 
     Ok(ExportPathResult {
         source_type,
@@ -85,9 +87,10 @@ pub async fn export_path_to_stream(
     exclude: &[String],
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
-) -> anyhow::Result<ExportedArchiveStream> {
-    let prepared =
-        prepare_export_path(path, &symlink_mode, exclude, sandbox, windows_posix_root).await?;
+) -> Result<ExportedArchiveStream, TransferError> {
+    let prepared = prepare_export_path(path, &symlink_mode, exclude, sandbox, windows_posix_root)
+        .await
+        .map_err(archive_error_to_transfer_error)?;
     let source_type = prepared.source_type.clone();
     let (reader, writer) = tokio::io::duplex(STREAM_BUFFER_SIZE);
     let task_compression = compression.clone();
@@ -202,10 +205,10 @@ pub async fn bundle_archives_to_file(
     sources: Vec<BundledArchiveSource>,
     archive_path: &Path,
     compression: TransferCompression,
-) -> anyhow::Result<()> {
+) -> Result<(), TransferError> {
     let archive_path = archive_path.to_path_buf();
 
-    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
         with_archive_builder(&archive_path, &compression, |builder| {
             let mut warnings = Vec::new();
             for source in &sources {
@@ -215,7 +218,9 @@ pub async fn bundle_archives_to_file(
             Ok(())
         })
     })
-    .await??;
+    .await
+    .map_err(internal_transfer_error)?;
+    result.map_err(archive_error_to_transfer_error)?;
 
     Ok(())
 }
@@ -525,4 +530,15 @@ fn append_directory_archive_to_bundle<W: Write, R: Read>(
     }
 
     Ok(warnings)
+}
+
+fn archive_error_to_transfer_error(err: anyhow::Error) -> TransferError {
+    match err.downcast::<TransferError>() {
+        Ok(err) => err,
+        Err(err) => internal_transfer_error(err),
+    }
+}
+
+fn internal_transfer_error(err: impl std::fmt::Display) -> TransferError {
+    TransferError::internal(err.to_string())
 }

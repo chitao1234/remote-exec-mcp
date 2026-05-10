@@ -19,16 +19,19 @@ pub async fn import_archive_from_file(
     request: &TransferImportRequest,
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
-) -> anyhow::Result<TransferImportResponse> {
-    let (destination, replaced) =
-        prepare_import_destination(request, sandbox, windows_posix_root).await?;
+) -> Result<TransferImportResponse, TransferError> {
+    let (destination, replaced) = prepare_import_destination(request, sandbox, windows_posix_root)
+        .await
+        .map_err(archive_error_to_transfer_error)?;
     let archive_path = archive_path.to_path_buf();
     let request = request.clone();
 
     tokio::task::spawn_blocking(move || {
         extract_archive(&archive_path, &destination, &request, replaced)
     })
-    .await?
+    .await
+    .map_err(internal_transfer_error)?
+    .map_err(archive_error_to_transfer_error)
 }
 
 pub async fn import_archive_from_async_reader<R>(
@@ -36,12 +39,13 @@ pub async fn import_archive_from_async_reader<R>(
     request: &TransferImportRequest,
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
-) -> anyhow::Result<TransferImportResponse>
+) -> Result<TransferImportResponse, TransferError>
 where
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
 {
-    let (destination, replaced) =
-        prepare_import_destination(request, sandbox, windows_posix_root).await?;
+    let (destination, replaced) = prepare_import_destination(request, sandbox, windows_posix_root)
+        .await
+        .map_err(archive_error_to_transfer_error)?;
     let request = request.clone();
     let runtime = tokio::runtime::Handle::current();
 
@@ -50,7 +54,9 @@ where
         let reader = wrap_archive_reader(reader, &request.compression)?;
         extract_archive_from_reader(reader, &destination, &request, replaced)
     })
-    .await?
+    .await
+    .map_err(internal_transfer_error)?
+    .map_err(archive_error_to_transfer_error)
 }
 
 async fn prepare_import_destination(
@@ -448,4 +454,15 @@ fn restore_executable_bits(path: &Path, mode: u32) -> anyhow::Result<()> {
 #[cfg(not(unix))]
 fn restore_executable_bits(_path: &Path, _mode: u32) -> anyhow::Result<()> {
     Ok(())
+}
+
+fn archive_error_to_transfer_error(err: anyhow::Error) -> TransferError {
+    match err.downcast::<TransferError>() {
+        Ok(err) => err,
+        Err(err) => internal_transfer_error(err),
+    }
+}
+
+fn internal_transfer_error(err: impl std::fmt::Display) -> TransferError {
+    TransferError::internal(err.to_string())
 }

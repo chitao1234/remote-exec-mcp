@@ -33,6 +33,28 @@ impl HostRpcError {
     }
 }
 
+pub(crate) fn rpc_error(
+    status: u16,
+    code: remote_exec_proto::rpc::RpcErrorCode,
+    message: impl Into<String>,
+) -> HostRpcError {
+    HostRpcError::new(status, code, message)
+}
+
+pub(crate) fn bad_request(
+    code: remote_exec_proto::rpc::RpcErrorCode,
+    message: impl Into<String>,
+) -> HostRpcError {
+    rpc_error(400, code, message)
+}
+
+pub(crate) fn internal(
+    code: remote_exec_proto::rpc::RpcErrorCode,
+    message: impl Into<String>,
+) -> HostRpcError {
+    rpc_error(500, code, message)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransferErrorKind {
     SandboxDenied,
@@ -107,7 +129,7 @@ impl TransferError {
         }
     }
 
-    pub fn into_host_rpc_error(self) -> HostRpcError {
+    fn into_host_rpc_error(self) -> HostRpcError {
         let code = self.code();
         let message = self.message;
         if self.kind == TransferErrorKind::Internal {
@@ -115,15 +137,11 @@ impl TransferError {
         } else {
             tracing::warn!(code = code.wire_value(), %message, "daemon request rejected");
         }
-        HostRpcError::new(
-            if self.kind == TransferErrorKind::Internal {
-                500
-            } else {
-                400
-            },
-            code,
-            message,
-        )
+        if self.kind == TransferErrorKind::Internal {
+            internal(code, message)
+        } else {
+            bad_request(code, message)
+        }
     }
 
     fn new(kind: TransferErrorKind, message: impl Into<String>) -> Self {
@@ -141,6 +159,12 @@ impl fmt::Display for TransferError {
 }
 
 impl std::error::Error for TransferError {}
+
+impl From<TransferError> for HostRpcError {
+    fn from(value: TransferError) -> Self {
+        value.into_host_rpc_error()
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageErrorKind {
@@ -194,7 +218,7 @@ impl ImageError {
         }
     }
 
-    pub fn into_host_rpc_error(self) -> HostRpcError {
+    fn into_host_rpc_error(self) -> HostRpcError {
         let code = self.code();
         let message = self.message;
         if self.kind == ImageErrorKind::Internal {
@@ -202,15 +226,11 @@ impl ImageError {
         } else {
             tracing::warn!(code = code.wire_value(), %message, "daemon request rejected");
         }
-        HostRpcError::new(
-            if self.kind == ImageErrorKind::Internal {
-                500
-            } else {
-                400
-            },
-            code,
-            message,
-        )
+        if self.kind == ImageErrorKind::Internal {
+            internal(code, message)
+        } else {
+            bad_request(code, message)
+        }
     }
 
     fn new(kind: ImageErrorKind, message: impl Into<String>) -> Self {
@@ -229,13 +249,19 @@ impl fmt::Display for ImageError {
 
 impl std::error::Error for ImageError {}
 
+impl From<ImageError> for HostRpcError {
+    fn from(value: ImageError) -> Self {
+        value.into_host_rpc_error()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ImageError, TransferError};
+    use super::{HostRpcError, ImageError, TransferError};
 
     #[test]
     fn transfer_internal_maps_to_internal_error_server_response() {
-        let err = TransferError::internal("transfer boom").into_host_rpc_error();
+        let err: HostRpcError = TransferError::internal("transfer boom").into();
         assert_eq!(err.status, 500);
         assert_eq!(err.code, "internal_error");
         assert_eq!(
@@ -247,7 +273,7 @@ mod tests {
 
     #[test]
     fn image_internal_maps_to_internal_error_server_response() {
-        let err = ImageError::internal("image boom").into_host_rpc_error();
+        let err: HostRpcError = ImageError::internal("image boom").into();
         assert_eq!(err.status, 500);
         assert_eq!(err.code, "internal_error");
         assert_eq!(
@@ -259,7 +285,7 @@ mod tests {
 
     #[test]
     fn image_decode_failed_stays_a_client_error() {
-        let err = ImageError::decode_failed("bad image bytes").into_host_rpc_error();
+        let err: HostRpcError = ImageError::decode_failed("bad image bytes").into();
         assert_eq!(err.status, 400);
         assert_eq!(err.code, "image_decode_failed");
         assert_eq!(

@@ -14,3 +14,10 @@ pub(crate) fn host_rpc_error_response(err: HostRpcError) -> (StatusCode, Json<Rp
         Json(body),
     )
 }
+
+pub(crate) fn domain_error_response<E>(err: E) -> (StatusCode, Json<RpcErrorBody>)
+where
+    E: Into<HostRpcError>,
+{
+    host_rpc_error_response(err.into())
+}

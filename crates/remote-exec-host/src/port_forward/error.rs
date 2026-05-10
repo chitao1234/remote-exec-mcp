@@ -11,7 +11,7 @@ pub(super) enum SessionCloseMode {
 pub(super) fn rpc_error(code: RpcErrorCode, message: impl Into<String>) -> HostRpcError {
     let message = message.into();
     tracing::warn!(code = code.wire_value(), %message, "daemon request rejected");
-    HostRpcError::new(400, code, message)
+    crate::error::bad_request(code, message)
 }
 
 pub(super) fn is_recoverable_pressure_error(error: &HostRpcError) -> bool {

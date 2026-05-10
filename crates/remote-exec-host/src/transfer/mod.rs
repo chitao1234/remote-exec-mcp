@@ -25,7 +25,7 @@ pub fn path_info_for_request(
     }
 
     let path = archive::host_path(&req.path, state.config.windows_posix_root.as_deref())
-        .map_err(classify_transfer_error)?;
+        .map_err(|err| TransferError::internal(err.to_string()))?;
     remote_exec_proto::sandbox::authorize_path(
         archive::host_policy(),
         state.sandbox.as_ref(),
@@ -69,7 +69,6 @@ pub async fn export_path_local(
         state.config.windows_posix_root.as_deref(),
     )
     .await
-    .map_err(classify_transfer_error)
 }
 
 pub async fn import_archive_local(
@@ -85,14 +84,6 @@ pub async fn import_archive_local(
         state.config.windows_posix_root.as_deref(),
     )
     .await
-    .map_err(classify_transfer_error)
-}
-
-pub fn classify_transfer_error(err: anyhow::Error) -> TransferError {
-    match err.downcast::<TransferError>() {
-        Ok(err) => err,
-        Err(err) => TransferError::internal(err.to_string()),
-    }
 }
 
 fn ensure_transfer_compression_supported(

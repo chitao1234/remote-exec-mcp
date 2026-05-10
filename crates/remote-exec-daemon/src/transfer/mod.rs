@@ -17,7 +17,7 @@ use remote_exec_proto::rpc::{
 };
 
 use crate::AppState;
-use crate::rpc_error::host_rpc_error_response;
+use crate::rpc_error::domain_error_response;
 
 pub async fn path_info(
     State(state): State<Arc<AppState>>,
@@ -25,7 +25,7 @@ pub async fn path_info(
 ) -> Result<Json<TransferPathInfoResponse>, (StatusCode, Json<RpcErrorBody>)> {
     remote_exec_host::transfer::path_info_for_request(state.as_ref(), &req)
         .map(Json)
-        .map_err(|err| host_rpc_error_response(err.into_host_rpc_error()))
+        .map_err(domain_error_response)
 }
 
 pub async fn export_path(
@@ -42,7 +42,7 @@ pub async fn export_path(
 
     let exported = remote_exec_host::transfer::export_path_local(state, req)
         .await
-        .map_err(|err| host_rpc_error_response(err.into_host_rpc_error()))?;
+        .map_err(domain_error_response)?;
     let metadata =
         codec::export_metadata(exported.source_type.clone(), exported.compression.clone());
     let stream = tokio_util::io::ReaderStream::new(exported.reader);
@@ -79,7 +79,7 @@ pub async fn import_archive(
     let request = TransferImportRequest::from(metadata.clone());
     let summary = remote_exec_host::transfer::import_archive_local(state, request, reader)
         .await
-        .map_err(|err| host_rpc_error_response(err.into_host_rpc_error()))?;
+        .map_err(domain_error_response)?;
     tracing::info!(
         destination_path = %metadata.destination_path,
         bytes_copied = summary.bytes_copied,
