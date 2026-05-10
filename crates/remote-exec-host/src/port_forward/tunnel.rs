@@ -93,7 +93,11 @@ where
     });
 
     let result = tunnel_read_loop(tunnel.clone(), &mut reader).await;
-    close_attached_session(&tunnel, close_mode_for_tunnel_result(&result)).await;
+    close_attached_session(
+        &tunnel,
+        close_mode_for_tunnel_result(&result, state.shutdown.is_cancelled()),
+    )
+    .await;
     tunnel.cancel.cancel();
     drop(tx);
     let _ = tokio::time::timeout(std::time::Duration::from_millis(100), writer_task).await;
