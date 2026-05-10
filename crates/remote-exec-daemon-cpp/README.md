@@ -20,19 +20,22 @@ invoked from another working directory. Incremental builds reuse cached object
 files under `build/obj/`, so repeated `make` runs only rebuild sources whose
 inputs changed.
 
-POSIX daemon:
+Host-native POSIX daemon:
 
+- `make`
 - `make all-posix`
+- `make check`
 - `make check-posix`
 
-Windows XP-compatible daemon:
+Windows XP-compatible cross-build:
 
 - `make all-windows-xp`
+- `make check-windows-xp`
 - `make test-wine-session-store` when `wine` is available
 
-Default host-native verification:
-
-- `make check`
+The top-level `Makefile` is the public entry point. Shared source lists live in
+`mk/common.mk`, host-native rules live in `mk/posix.mk`, and Windows XP
+cross-build rules live in `mk/windows-xp.mk`.
 
 Focused host-native tests:
 
