@@ -90,12 +90,12 @@ static void assert_unknown_session(
     assert(rejected);
 }
 
-int main() {
-    const fs::path root = make_test_root();
-    SessionStore store;
-    const YieldTimeConfig yield_time = default_yield_time_config();
-    const std::string shell = platform::resolve_default_shell("");
-
+static void assert_completed_command_output(
+    SessionStore& store,
+    const fs::path& root,
+    const std::string& shell,
+    const YieldTimeConfig& yield_time
+) {
 #ifdef _WIN32
     const std::string merge_command =
         "echo stdout-1 & echo stderr-1 1>&2 & echo stdout-2 & echo stderr-2 1>&2";
@@ -124,7 +124,14 @@ int main() {
         normalize_output(response.at("output").get<std::string>()) ==
         "stdout-1\nstderr-1\nstdout-2\nstderr-2\n"
     );
+}
 
+static void assert_token_limiting(
+    SessionStore& store,
+    const fs::path& root,
+    const std::string& shell,
+    const YieldTimeConfig& yield_time
+) {
 #ifdef _WIN32
     const std::string token_command = "echo one two three";
 #else
@@ -158,8 +165,20 @@ int main() {
     );
     assert(zero_limited.at("original_token_count").get<unsigned long>() == 3UL);
     assert(zero_limited.at("output").get<std::string>().empty());
+}
 
-#ifndef _WIN32
+static void assert_posix_locale_and_late_output(
+    SessionStore& store,
+    const fs::path& root,
+    const std::string& shell,
+    const YieldTimeConfig& yield_time
+) {
+#ifdef _WIN32
+    (void)store;
+    (void)root;
+    (void)shell;
+    (void)yield_time;
+#else
     const Json locale_response = start_test_command(
         store,
         "printf '%s %s\\n' \"$LC_ALL\" \"$LANG\"",
@@ -233,7 +252,16 @@ int main() {
     assert(!stdin_closed_response.at("running").get<bool>());
     assert(stdin_closed_response.at("exit_code").get<int>() == 0);
     assert(stdin_closed_response.at("output").get<std::string>() == "stdin:closed\n");
+#endif
+}
 
+static void assert_stdin_and_tty_behavior(
+    SessionStore& store,
+    const fs::path& root,
+    const std::string& shell,
+    const YieldTimeConfig& yield_time
+) {
+#ifndef _WIN32
     const Json non_tty_running = start_test_command(
         store,
         "printf ready; sleep 5",
@@ -379,7 +407,47 @@ int main() {
         assert(normalized_tty_output.find("hello\n") != std::string::npos);
         assert(normalized_tty_output.find("input:hello\n") != std::string::npos);
     }
+#else
+    const Json xp_running = start_test_command(
+        store,
+        "echo ready&set /P line=&call echo got:%line%",
+        root.string(),
+        shell,
+        false,
+        250UL,
+        DEFAULT_MAX_OUTPUT_TOKENS,
+        yield_time,
+        64UL
+    );
+    assert(xp_running.at("running").get<bool>());
+    const std::string xp_initial =
+        normalize_output(xp_running.at("output").get<std::string>());
 
+    const Json xp_completed = store.write_stdin(
+        xp_running.at("daemon_session_id").get<std::string>(),
+        "hello\r\n",
+        true,
+        5000UL,
+        DEFAULT_MAX_OUTPUT_TOKENS,
+        yield_time
+    );
+    assert(!xp_completed.at("running").get<bool>());
+    assert(xp_completed.at("exit_code").get<int>() == 0);
+    const std::string xp_output =
+        xp_initial + normalize_output(xp_completed.at("output").get<std::string>());
+    assert(xp_output.find("ready\n") != std::string::npos);
+    assert(xp_output.find("got:hello\n") != std::string::npos);
+#endif
+}
+
+static void assert_pruning_and_recency_behavior(
+    const fs::path& root,
+    const std::string& shell
+) {
+#ifdef _WIN32
+    (void)root;
+    (void)shell;
+#else
     {
         SessionStore limit_store;
         const YieldTimeConfig fast_yield = fast_yield_time_config();
@@ -643,7 +711,21 @@ int main() {
                 .get<bool>()
         );
     }
+#endif
+}
 
+static void assert_threshold_warnings_and_unknown_sessions(
+    SessionStore& store,
+    const fs::path& root,
+    const std::string& shell,
+    const YieldTimeConfig& yield_time
+) {
+#ifdef _WIN32
+    (void)store;
+    (void)root;
+    (void)shell;
+    (void)yield_time;
+#else
     {
         SessionStore warning_store;
         const YieldTimeConfig fast_yield = fast_yield_time_config();
@@ -692,37 +774,21 @@ int main() {
         unknown_session_rejected = true;
     }
     assert(unknown_session_rejected);
-#else
-    const Json xp_running = start_test_command(
-        store,
-        "echo ready&set /P line=&call echo got:%line%",
-        root.string(),
-        shell,
-        false,
-        250UL,
-        DEFAULT_MAX_OUTPUT_TOKENS,
-        yield_time,
-        64UL
-    );
-    assert(xp_running.at("running").get<bool>());
-    const std::string xp_initial =
-        normalize_output(xp_running.at("output").get<std::string>());
-
-    const Json xp_completed = store.write_stdin(
-        xp_running.at("daemon_session_id").get<std::string>(),
-        "hello\r\n",
-        true,
-        5000UL,
-        DEFAULT_MAX_OUTPUT_TOKENS,
-        yield_time
-    );
-    assert(!xp_completed.at("running").get<bool>());
-    assert(xp_completed.at("exit_code").get<int>() == 0);
-    const std::string xp_output =
-        xp_initial + normalize_output(xp_completed.at("output").get<std::string>());
-    assert(xp_output.find("ready\n") != std::string::npos);
-    assert(xp_output.find("got:hello\n") != std::string::npos);
 #endif
+}
+
+int main() {
+    const fs::path root = make_test_root();
+    SessionStore store;
+    const YieldTimeConfig yield_time = default_yield_time_config();
+    const std::string shell = platform::resolve_default_shell("");
+
+    assert_completed_command_output(store, root, shell, yield_time);
+    assert_token_limiting(store, root, shell, yield_time);
+    assert_posix_locale_and_late_output(store, root, shell, yield_time);
+    assert_stdin_and_tty_behavior(store, root, shell, yield_time);
+    assert_pruning_and_recency_behavior(root, shell);
+    assert_threshold_warnings_and_unknown_sessions(store, root, shell, yield_time);
 
     return 0;
 }
