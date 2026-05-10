@@ -1,0 +1,108 @@
+# MSVC/NMAKE entry point for the Windows XP-compatible daemon binary.
+#
+# Run from an x86 Visual Studio developer prompt with an XP-capable toolset, for
+# example:
+#   vcvarsall.bat x86 -vcvars_ver=14.16
+#   nmake /f NMakefile all-msvc-xp
+#
+# This build path intentionally covers only the Windows XP daemon binary. The
+# POSIX daemon and host-native tests remain on the GNU/BSD make paths.
+
+!IFNDEF DAEMON_CPP_DIR
+!IF EXIST(src\main.cpp)
+DAEMON_CPP_DIR=.
+!ELSEIF EXIST(crates\remote-exec-daemon-cpp\src\main.cpp)
+DAEMON_CPP_DIR=crates\remote-exec-daemon-cpp
+!ELSE
+!ERROR Unable to locate remote-exec-daemon-cpp sources. Run nmake from the daemon directory, run from the repository root, or set DAEMON_CPP_DIR.
+!ENDIF
+!ENDIF
+
+!IFNDEF BUILD_DIR
+BUILD_DIR=$(DAEMON_CPP_DIR)\build
+!ENDIF
+
+MSVC_XP_OBJ_DIR=$(BUILD_DIR)\obj\msvc-xp
+MSVC_XP_TARGET=$(BUILD_DIR)\remote-exec-daemon-cpp-xp-msvc.exe
+
+CXX=cl
+
+!IFNDEF MSVC_XP_WINSDK_DIR
+MSVC_XP_WINSDK_DIR=C:\Program Files (x86)\Microsoft SDKs\Windows\v7.1A
+!ENDIF
+
+MSVC_XP_CPPFLAGS=/I"$(DAEMON_CPP_DIR)\include" /I"$(DAEMON_CPP_DIR)\third_party" /I"$(MSVC_XP_WINSDK_DIR)\Include" \
+    /DWIN32 /D_WINDOWS \
+    /DWINVER=0x0501 /D_WIN32_WINNT=0x0501 /D_USING_V110_SDK71_ \
+    /DNOMINMAX /D_CRT_SECURE_NO_WARNINGS /D_CRT_NONSTDC_NO_DEPRECATE
+
+MSVC_XP_CXXFLAGS=/nologo /EHsc /MT /W3 /Od /std:c++14
+MSVC_XP_LDLIBS=ws2_32.lib
+MSVC_XP_LDFLAGS=/link /NOLOGO /LIBPATH:"$(MSVC_XP_WINSDK_DIR)\Lib" /SUBSYSTEM:CONSOLE,5.01 /MACHINE:X86
+
+MSVC_XP_SRCS= \
+    $(DAEMON_CPP_DIR)\src\config.cpp \
+    $(DAEMON_CPP_DIR)\src\http_codec.cpp \
+    $(DAEMON_CPP_DIR)\src\http_connection.cpp \
+    $(DAEMON_CPP_DIR)\src\http_helpers.cpp \
+    $(DAEMON_CPP_DIR)\src\http_request.cpp \
+    $(DAEMON_CPP_DIR)\src\logging.cpp \
+    $(DAEMON_CPP_DIR)\src\text_utils.cpp \
+    $(DAEMON_CPP_DIR)\src\platform.cpp \
+    $(DAEMON_CPP_DIR)\src\shell_policy.cpp \
+    $(DAEMON_CPP_DIR)\src\server.cpp \
+    $(DAEMON_CPP_DIR)\src\server_request_utils.cpp \
+    $(DAEMON_CPP_DIR)\src\server_runtime.cpp \
+    $(DAEMON_CPP_DIR)\src\server_transport.cpp \
+    $(DAEMON_CPP_DIR)\src\session_store.cpp \
+    $(DAEMON_CPP_DIR)\src\patch_engine.cpp \
+    $(DAEMON_CPP_DIR)\src\basic_mutex.cpp \
+    $(DAEMON_CPP_DIR)\src\connection_manager.cpp \
+    $(DAEMON_CPP_DIR)\src\server_routes.cpp \
+    $(DAEMON_CPP_DIR)\src\server_route_common.cpp \
+    $(DAEMON_CPP_DIR)\src\server_route_exec.cpp \
+    $(DAEMON_CPP_DIR)\src\server_route_image.cpp \
+    $(DAEMON_CPP_DIR)\src\server_route_transfer.cpp \
+    $(DAEMON_CPP_DIR)\src\transfer_http_codec.cpp \
+    $(DAEMON_CPP_DIR)\src\port_forward_endpoint.cpp \
+    $(DAEMON_CPP_DIR)\src\port_forward_error.cpp \
+    $(DAEMON_CPP_DIR)\src\port_forward_socket_ops.cpp \
+    $(DAEMON_CPP_DIR)\src\port_tunnel_frame.cpp \
+    $(DAEMON_CPP_DIR)\src\port_tunnel.cpp \
+    $(DAEMON_CPP_DIR)\src\port_tunnel_session.cpp \
+    $(DAEMON_CPP_DIR)\src\port_tunnel_transport.cpp \
+    $(DAEMON_CPP_DIR)\src\port_tunnel_tcp.cpp \
+    $(DAEMON_CPP_DIR)\src\port_tunnel_udp.cpp \
+    $(DAEMON_CPP_DIR)\src\port_tunnel_error.cpp \
+    $(DAEMON_CPP_DIR)\src\base64_codec.cpp \
+    $(DAEMON_CPP_DIR)\src\transfer_ops.cpp \
+    $(DAEMON_CPP_DIR)\src\transfer_ops_fs.cpp \
+    $(DAEMON_CPP_DIR)\src\transfer_ops_tar.cpp \
+    $(DAEMON_CPP_DIR)\src\transfer_ops_export.cpp \
+    $(DAEMON_CPP_DIR)\src\transfer_ops_import.cpp \
+    $(DAEMON_CPP_DIR)\src\transfer_glob.cpp \
+    $(DAEMON_CPP_DIR)\src\path_policy.cpp \
+    $(DAEMON_CPP_DIR)\src\filesystem_sandbox.cpp \
+    $(DAEMON_CPP_DIR)\src\rpc_failures.cpp \
+    $(DAEMON_CPP_DIR)\src\main.cpp \
+    $(DAEMON_CPP_DIR)\src\process_session_win32.cpp \
+    $(DAEMON_CPP_DIR)\src\console_output.cpp \
+    $(DAEMON_CPP_DIR)\src\win32_error.cpp
+
+all: all-msvc-xp
+
+all-msvc-xp: $(MSVC_XP_TARGET)
+
+check-msvc-xp: all-msvc-xp
+
+$(MSVC_XP_TARGET): $(MSVC_XP_SRCS)
+	@if not exist "$(BUILD_DIR)" mkdir "$(BUILD_DIR)"
+	@if not exist "$(BUILD_DIR)\obj" mkdir "$(BUILD_DIR)\obj"
+	@if not exist "$(MSVC_XP_OBJ_DIR)" mkdir "$(MSVC_XP_OBJ_DIR)"
+	$(CXX) $(MSVC_XP_CXXFLAGS) $(MSVC_XP_CPPFLAGS) /Fo"$(MSVC_XP_OBJ_DIR)\\" /Fe"$@" $(MSVC_XP_SRCS) $(MSVC_XP_LDLIBS) $(MSVC_XP_LDFLAGS)
+
+clean:
+	@if exist "$(MSVC_XP_TARGET)" del /Q "$(MSVC_XP_TARGET)"
+	@if exist "$(MSVC_XP_OBJ_DIR)" rmdir /S /Q "$(MSVC_XP_OBJ_DIR)"
+
+.PHONY: all all-msvc-xp check-msvc-xp clean

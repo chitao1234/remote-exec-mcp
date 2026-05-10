@@ -7,6 +7,7 @@ build paths:
 
 - native POSIX hosts through `g++`
 - Windows XP-compatible hosts through `i686-w64-mingw32-g++`
+- Windows XP-compatible hosts through MSVC/NMAKE with the `v141_xp` toolset
 
 The former `remote-exec-daemon-xp` name referred to the original Windows XP-only
 shape. Current live behavior is documented here and in the repository root
@@ -33,10 +34,23 @@ Windows XP-compatible cross-build:
 - `make check-windows-xp`
 - `make test-wine-session-store` when `wine` is available
 
+Windows XP-compatible MSVC/NMAKE build:
+
+- Open an x86 Visual Studio developer prompt with the XP-capable VS 2017
+  toolset, such as `vcvarsall.bat x86 -vcvars_ver=14.16`.
+- `nmake /f NMakefile`
+- `nmake /f NMakefile all-msvc-xp`
+- `nmake /f NMakefile check-msvc-xp`
+
 The top-level `Makefile` is the GNU make public entry point. Shared source
 lists live in `mk/sources.mk`, shared GNU make helpers live in `mk/common.mk`,
 host-native rules live in `mk/posix.mk`, and Windows XP cross-build rules live
 in `mk/windows-xp.mk`.
+
+`NMakefile` is intentionally separate from the GNU/BSD make entry points and
+builds only the Windows XP-compatible daemon executable with MSVC. It uses the
+static C runtime (`/MT`) and links as an x86 console program with a Windows XP
+minimum subsystem version.
 
 BSD make has a separate POSIX-only entry point. It intentionally does not expose
 the Windows XP cross-build targets:
@@ -77,6 +91,12 @@ Windows XP-compatible:
 
 ```bat
 build\remote-exec-daemon-cpp-xp.exe config\daemon-cpp.example.ini
+```
+
+Windows XP-compatible MSVC/NMAKE:
+
+```bat
+build\remote-exec-daemon-cpp-xp-msvc.exe config\daemon-cpp.example.ini
 ```
 
 Logs go to `stderr`. Set `REMOTE_EXEC_LOG=debug` to raise the level, or use a
