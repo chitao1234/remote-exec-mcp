@@ -410,6 +410,13 @@ bearer_token = "shared-secret"
             .map(|auth| auth.bearer_token.as_str()),
         Some("shared-secret")
     );
+    assert_eq!(
+        config
+            .http_auth
+            .as_ref()
+            .map(|auth| auth.expected_authorization.as_str()),
+        Some("Bearer shared-secret")
+    );
 }
 
 #[tokio::test]

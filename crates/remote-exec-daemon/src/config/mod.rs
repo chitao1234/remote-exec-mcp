@@ -58,6 +58,8 @@ pub struct DaemonConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct HttpAuthConfig {
     pub bearer_token: String,
+    #[serde(skip)]
+    pub expected_authorization: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -152,6 +154,12 @@ impl DaemonConfig {
         self.default_workdir = self.normalized_default_workdir();
     }
 
+    pub fn prepare_runtime_fields(&mut self) {
+        if let Some(http_auth) = &mut self.http_auth {
+            http_auth.prepare_runtime_fields();
+        }
+    }
+
     pub fn validate(&self) -> anyhow::Result<()> {
         self.host_runtime_config().validate()?;
         self.validate_http_auth()?;
@@ -165,6 +173,7 @@ impl DaemonConfig {
             .with_context(|| format!("reading {}", path.as_ref().display()))?;
         let mut config: Self = toml::from_str(&text)?;
         config.normalize_paths();
+        config.prepare_runtime_fields();
         config.validate()?;
         Ok(config)
     }
@@ -195,6 +204,10 @@ pub fn normalize_configured_workdir(path: &Path, windows_posix_root: Option<&Pat
 }
 
 impl HttpAuthConfig {
+    fn prepare_runtime_fields(&mut self) {
+        self.expected_authorization = format!("Bearer {}", self.bearer_token);
+    }
+
     fn validate(&self) -> anyhow::Result<()> {
         anyhow::ensure!(
             !self.bearer_token.is_empty(),

@@ -25,8 +25,7 @@ pub async fn require_http_auth(
         .headers()
         .get(AUTHORIZATION)
         .and_then(|value| value.to_str().ok());
-    let expected = format!("Bearer {}", http_auth.bearer_token);
-    if actual == Some(expected.as_str()) {
+    if actual == Some(http_auth.expected_authorization.as_str()) {
         return next.run(request).await;
     }
 
