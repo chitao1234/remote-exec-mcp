@@ -28,6 +28,9 @@
 #include "port_tunnel_frame.h"
 #include "server_transport.h"
 #include "text_utils.h"
+#ifdef _WIN32
+#include "win32_thread.h"
+#endif
 
 using Json = nlohmann::json;
 
@@ -260,7 +263,7 @@ private:
     bool expiry_thread_started_;
 #ifdef _WIN32
     HANDLE expiry_thread_;
-    static DWORD WINAPI expiry_thread_entry(LPVOID raw_context);
+    static unsigned __stdcall expiry_thread_entry(void* raw_context);
 #else
     std::thread* expiry_thread_;
 #endif

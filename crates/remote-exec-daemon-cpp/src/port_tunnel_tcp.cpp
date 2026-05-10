@@ -17,7 +17,7 @@ bool PortTunnelService::spawn_tcp_listener_loop(
     };
 
     struct ThreadEntry {
-        static DWORD WINAPI entry(LPVOID raw_context) {
+        static unsigned __stdcall entry(void* raw_context) {
             std::unique_ptr<Context> context(static_cast<Context*>(raw_context));
             PortTunnelWorkerLease lease(context->service);
             context->service->tcp_accept_loop(context->session, context->listener);
@@ -29,7 +29,7 @@ bool PortTunnelService::spawn_tcp_listener_loop(
     context->service = service;
     context->session = session;
     context->listener = listener;
-    HANDLE handle = CreateThread(NULL, 0, &ThreadEntry::entry, context.get(), 0, NULL);
+    HANDLE handle = begin_win32_thread(&ThreadEntry::entry, context.get());
     if (handle != NULL) {
         context.release();
         CloseHandle(handle);

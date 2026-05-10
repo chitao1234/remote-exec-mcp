@@ -12,6 +12,9 @@
 
 #include "basic_mutex.h"
 #include "server_transport.h"
+#ifdef _WIN32
+#include "win32_thread.h"
+#endif
 
 typedef void (*ConnectionWorkerMain)(SOCKET socket, void* context);
 
@@ -33,7 +36,7 @@ private:
     struct WorkerRecord;
     void run_worker(const std::shared_ptr<WorkerRecord>& record);
 #ifdef _WIN32
-    static DWORD WINAPI worker_thread_entry(LPVOID raw_context);
+    static unsigned __stdcall worker_thread_entry(void* raw_context);
 #endif
 
     unsigned long max_active_connections_;

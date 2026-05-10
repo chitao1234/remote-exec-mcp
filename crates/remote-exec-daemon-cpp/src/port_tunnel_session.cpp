@@ -177,7 +177,7 @@ bool PortTunnelService::schedule_session_expiry(
 }
 
 #ifdef _WIN32
-DWORD WINAPI PortTunnelService::expiry_thread_entry(LPVOID raw_context) {
+unsigned __stdcall PortTunnelService::expiry_thread_entry(void* raw_context) {
     PortTunnelService* service = static_cast<PortTunnelService*>(raw_context);
     service->expiry_scheduler_loop();
     return 0;
@@ -189,7 +189,8 @@ bool PortTunnelService::ensure_expiry_scheduler_started_locked() {
         return true;
     }
 #ifdef _WIN32
-    HANDLE handle = CreateThread(NULL, 0, &PortTunnelService::expiry_thread_entry, this, 0, NULL);
+    HANDLE handle =
+        begin_win32_thread(&PortTunnelService::expiry_thread_entry, this);
     if (handle == NULL) {
         return false;
     }

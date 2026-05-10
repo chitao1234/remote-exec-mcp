@@ -44,7 +44,7 @@ struct TcpReadContext {
     std::shared_ptr<TcpReadStartGate> start_gate;
 };
 
-DWORD WINAPI tcp_read_thread_entry(LPVOID raw_context) {
+unsigned __stdcall tcp_read_thread_entry(void* raw_context) {
     std::unique_ptr<TcpReadContext> context(static_cast<TcpReadContext*>(raw_context));
     PortTunnelWorkerLease lease(context->service);
     if (context->start_gate.get() != NULL) {
@@ -61,7 +61,7 @@ struct TcpWriteContext {
     std::shared_ptr<TunnelTcpStream> stream;
 };
 
-DWORD WINAPI tcp_write_thread_entry(LPVOID raw_context) {
+unsigned __stdcall tcp_write_thread_entry(void* raw_context) {
     std::unique_ptr<TcpWriteContext> context(static_cast<TcpWriteContext*>(raw_context));
     PortTunnelWorkerLease lease(context->service);
     context->tunnel->tcp_write_loop(context->stream_id, context->stream);
@@ -93,7 +93,7 @@ bool spawn_tcp_read_thread(
     context->stream_id = stream_id;
     context->stream = stream;
     context->start_gate = start_gate;
-    HANDLE handle = CreateThread(NULL, 0, tcp_read_thread_entry, context.get(), 0, NULL);
+    HANDLE handle = begin_win32_thread(tcp_read_thread_entry, context.get());
     if (handle != NULL) {
         context.release();
         CloseHandle(handle);
@@ -134,7 +134,7 @@ bool spawn_tcp_write_thread(
     context->tunnel = tunnel;
     context->stream_id = stream_id;
     context->stream = stream;
-    HANDLE handle = CreateThread(NULL, 0, tcp_write_thread_entry, context.get(), 0, NULL);
+    HANDLE handle = begin_win32_thread(tcp_write_thread_entry, context.get());
     if (handle != NULL) {
         context.release();
         CloseHandle(handle);
@@ -164,7 +164,7 @@ struct UdpReadContext {
     std::shared_ptr<TunnelUdpSocket> socket_value;
 };
 
-DWORD WINAPI udp_read_thread_entry(LPVOID raw_context) {
+unsigned __stdcall udp_read_thread_entry(void* raw_context) {
     std::unique_ptr<UdpReadContext> context(static_cast<UdpReadContext*>(raw_context));
     PortTunnelWorkerLease lease(context->service);
     context->tunnel->udp_read_loop_transport_owned(context->stream_id, context->socket_value);
@@ -188,7 +188,7 @@ bool spawn_udp_read_thread(
     context->tunnel = tunnel;
     context->stream_id = stream_id;
     context->socket_value = socket_value;
-    HANDLE handle = CreateThread(NULL, 0, udp_read_thread_entry, context.get(), 0, NULL);
+    HANDLE handle = begin_win32_thread(udp_read_thread_entry, context.get());
     if (handle != NULL) {
         context.release();
         CloseHandle(handle);
