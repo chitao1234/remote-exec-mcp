@@ -25,8 +25,9 @@ use super::tunnel::{
 };
 use super::udp_bridge::run_udp_forward;
 use super::{
-    FORWARD_TASK_STOP_TIMEOUT, LISTEN_CLOSE_ACK_TIMEOUT, LISTEN_RECONNECT_INITIAL_BACKOFF,
-    LISTEN_RECONNECT_MAX_BACKOFF, LISTEN_RECONNECT_SAFETY_MARGIN, PORT_FORWARD_OPEN_ACK_TIMEOUT,
+    CONNECT_RECONNECT_TOTAL_TIMEOUT, FORWARD_TASK_STOP_TIMEOUT, LISTEN_CLOSE_ACK_TIMEOUT,
+    LISTEN_RECONNECT_INITIAL_BACKOFF, LISTEN_RECONNECT_MAX_BACKOFF, LISTEN_RECONNECT_SAFETY_MARGIN,
+    PORT_FORWARD_OPEN_ACK_TIMEOUT, PORT_FORWARD_RECONNECT_ATTEMPT_TIMEOUT,
     PORT_FORWARD_TUNNEL_READY_TIMEOUT,
 };
 
@@ -44,7 +45,7 @@ impl PortForwardReconnectPolicy {
         Self {
             initial_backoff: LISTEN_RECONNECT_INITIAL_BACKOFF,
             max_backoff: LISTEN_RECONNECT_MAX_BACKOFF,
-            attempt_timeout: Duration::from_secs(2),
+            attempt_timeout: PORT_FORWARD_RECONNECT_ATTEMPT_TIMEOUT,
             total_timeout: effective_resume_timeout(resume_timeout),
             max_attempts: None,
         }
@@ -54,8 +55,8 @@ impl PortForwardReconnectPolicy {
         Self {
             initial_backoff: LISTEN_RECONNECT_INITIAL_BACKOFF,
             max_backoff: LISTEN_RECONNECT_MAX_BACKOFF,
-            attempt_timeout: Duration::from_secs(2),
-            total_timeout: Duration::from_secs(10),
+            attempt_timeout: PORT_FORWARD_RECONNECT_ATTEMPT_TIMEOUT,
+            total_timeout: CONNECT_RECONNECT_TOTAL_TIMEOUT,
             max_attempts: None,
         }
     }

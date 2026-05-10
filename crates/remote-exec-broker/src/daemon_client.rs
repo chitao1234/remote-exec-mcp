@@ -13,7 +13,9 @@ use reqwest::header::{AUTHORIZATION, CONNECTION, CONTENT_LENGTH, HeaderValue, UP
 use crate::config::{TargetConfig, TargetTransportKind};
 use crate::tools::transfer::codec;
 
+// Upgrade covers the HTTP 101 handshake and reqwest's transition into raw I/O.
 const PORT_TUNNEL_UPGRADE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+// Preface covers only the v4 tunnel greeting after the HTTP upgrade succeeds.
 const PORT_TUNNEL_PREFACE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 #[derive(Debug, Clone)]

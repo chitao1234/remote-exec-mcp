@@ -22,6 +22,11 @@
 
 namespace {
 
+const unsigned short kDefaultPtyRows = 24;
+const unsigned short kDefaultPtyCols = 120;
+// Grace period for cooperative shutdown before escalating from SIGTERM to SIGKILL.
+const int kTerminateGraceMs = 50;
+
 class UniqueFd {
 public:
     UniqueFd() : fd_(-1) {}
@@ -114,8 +119,8 @@ PosixPtyPair create_posix_pty() {
 
     struct winsize size;
     std::memset(&size, 0, sizeof(size));
-    size.ws_row = 24;
-    size.ws_col = 120;
+    size.ws_row = kDefaultPtyRows;
+    size.ws_col = kDefaultPtyCols;
     ioctl(master.get(), TIOCSWINSZ, &size);
 
     PosixPtyPair pair;
@@ -389,7 +394,7 @@ public:
             return;
         }
         kill(-pid_, SIGTERM);
-        platform::sleep_ms(50);
+        platform::sleep_ms(kTerminateGraceMs);
         kill(-pid_, SIGKILL);
         int ignored_status = 0;
         const pid_t result = waitpid_retry_on_eintr(pid_, &ignored_status, 0);
@@ -401,7 +406,7 @@ public:
     bool terminate_descendants() override {
         if (pid_ > 0) {
             kill(-pid_, SIGTERM);
-            platform::sleep_ms(50);
+            platform::sleep_ms(kTerminateGraceMs);
             kill(-pid_, SIGKILL);
             return true;
         }

@@ -8,6 +8,9 @@ use anyhow::Context;
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use winptyrs::{AgentBuilder, AgentFlags, Child, EnvBlock, MouseMode, Pty, PtySize, SpawnConfig};
 
+const WINPTY_LIVE_OUTPUT_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const WINPTY_EXIT_DRAIN_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
 pub(crate) struct WinptySession {
     child: Arc<Mutex<Child>>,
     pid: u32,
@@ -177,7 +180,7 @@ pub(crate) fn spawn_winpty(
                     };
                     if child_alive {
                         exit_deadline = None;
-                        std::thread::sleep(Duration::from_millis(25));
+                        std::thread::sleep(WINPTY_LIVE_OUTPUT_POLL_INTERVAL);
                         continue;
                     }
 
@@ -187,7 +190,7 @@ pub(crate) fn spawn_winpty(
                     if Instant::now() >= *deadline {
                         break;
                     }
-                    std::thread::sleep(Duration::from_millis(10));
+                    std::thread::sleep(WINPTY_EXIT_DRAIN_POLL_INTERVAL);
                 }
                 Err(winptyrs::Error::Eof) => break,
                 Err(_) => break,
