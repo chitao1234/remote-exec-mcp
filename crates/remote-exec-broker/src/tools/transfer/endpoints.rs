@@ -8,6 +8,8 @@ use remote_exec_proto::rpc::{
     TransferCompression as RpcTransferCompression, TransferPathInfoRequest,
 };
 
+use crate::daemon_client::RpcErrorCode;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EndpointTargetContext {
     Local {
@@ -259,12 +261,12 @@ fn normalize_path_info_error(err: crate::daemon_client::DaemonClientError) -> an
 
 fn path_info_missing_or_unsupported(err: &crate::daemon_client::DaemonClientError) -> bool {
     match err {
-        crate::daemon_client::DaemonClientError::Rpc { status, code, .. } => {
+        crate::daemon_client::DaemonClientError::Rpc { status, .. } => {
             *status == reqwest::StatusCode::NOT_FOUND
                 || *status == reqwest::StatusCode::METHOD_NOT_ALLOWED
                 || matches!(
-                    code.as_deref(),
-                    Some("not_found") | Some("unknown_endpoint")
+                    err.rpc_error_code(),
+                    Some(RpcErrorCode::NotFound | RpcErrorCode::UnknownEndpoint)
                 )
         }
         _ => false,

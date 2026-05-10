@@ -9,6 +9,7 @@ use super::exec_format::{
     format_command_text, format_intercepted_patch_text, format_poll_text, prepend_warning_text,
 };
 use super::exec_intercept::maybe_intercept_apply_patch;
+use crate::daemon_client::RpcErrorCode;
 use crate::mcp_server::ToolCallOutput;
 
 const APPLY_PATCH_WARNING_CODE: &str = "apply_patch_via_exec_command";
@@ -306,7 +307,7 @@ async fn forward_exec_write(
 
     match response {
         Ok(response) => Ok(response),
-        Err(err) if err.rpc_code() == Some("unknown_session") => {
+        Err(err) if err.is_rpc_error_code(RpcErrorCode::UnknownSession) => {
             state.sessions.remove(&record.session_id).await;
             Err(anyhow::anyhow!(unknown_process_id_message(
                 &record.session_id

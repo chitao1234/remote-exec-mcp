@@ -11,7 +11,7 @@ use tokio::sync::{Mutex, mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::daemon_client::DaemonClientError;
+use crate::daemon_client::{DaemonClientError, RpcErrorCode};
 
 use super::events::{ForwardSideEvent, TunnelErrorMeta};
 use super::{port_tunnel_heartbeat_interval, port_tunnel_heartbeat_timeout};
@@ -456,8 +456,8 @@ pub(super) fn is_retryable_transport_error(err: &anyhow::Error) -> bool {
                 return true;
             }
             if matches!(
-                daemon_error.rpc_code(),
-                Some("invalid_port_tunnel" | "port_tunnel_unavailable")
+                daemon_error.rpc_error_code(),
+                Some(RpcErrorCode::InvalidPortTunnel | RpcErrorCode::PortTunnelUnavailable)
             ) {
                 return true;
             }

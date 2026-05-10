@@ -50,12 +50,52 @@ pub enum DaemonClientError {
     Decode(anyhow::Error),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RpcErrorCode {
+    UnknownSession,
+    NotFound,
+    UnknownEndpoint,
+    InvalidPortTunnel,
+    PortTunnelUnavailable,
+}
+
+impl RpcErrorCode {
+    pub const fn wire_value(self) -> &'static str {
+        match self {
+            Self::UnknownSession => "unknown_session",
+            Self::NotFound => "not_found",
+            Self::UnknownEndpoint => "unknown_endpoint",
+            Self::InvalidPortTunnel => "invalid_port_tunnel",
+            Self::PortTunnelUnavailable => "port_tunnel_unavailable",
+        }
+    }
+
+    fn from_wire_value(value: &str) -> Option<Self> {
+        match value {
+            "unknown_session" => Some(Self::UnknownSession),
+            "not_found" => Some(Self::NotFound),
+            "unknown_endpoint" => Some(Self::UnknownEndpoint),
+            "invalid_port_tunnel" => Some(Self::InvalidPortTunnel),
+            "port_tunnel_unavailable" => Some(Self::PortTunnelUnavailable),
+            _ => None,
+        }
+    }
+}
+
 impl DaemonClientError {
     pub fn rpc_code(&self) -> Option<&str> {
         match self {
             Self::Rpc { code, .. } => code.as_deref(),
             _ => None,
         }
+    }
+
+    pub fn rpc_error_code(&self) -> Option<RpcErrorCode> {
+        self.rpc_code().and_then(RpcErrorCode::from_wire_value)
+    }
+
+    pub fn is_rpc_error_code(&self, expected: RpcErrorCode) -> bool {
+        self.rpc_error_code() == Some(expected)
     }
 
     pub fn is_transport(&self) -> bool {
@@ -604,6 +644,38 @@ mod tests {
             Some("Bearer shared-secret")
         );
         assert!(request.headers().get(reqwest::header::CONNECTION).is_none());
+    }
+
+    #[test]
+    fn rpc_error_code_classifies_known_wire_values() {
+        let err = decode_rpc_error_body(
+            reqwest::StatusCode::NOT_FOUND,
+            serde_json::json!({
+                "code": RpcErrorCode::UnknownEndpoint.wire_value(),
+                "message": "unsupported"
+            })
+            .to_string(),
+        );
+
+        assert_eq!(err.rpc_code(), Some("unknown_endpoint"));
+        assert_eq!(err.rpc_error_code(), Some(RpcErrorCode::UnknownEndpoint));
+        assert!(err.is_rpc_error_code(RpcErrorCode::UnknownEndpoint));
+        assert!(!err.is_rpc_error_code(RpcErrorCode::NotFound));
+    }
+
+    #[test]
+    fn rpc_error_code_leaves_unknown_wire_values_unclassified() {
+        let err = decode_rpc_error_body(
+            reqwest::StatusCode::BAD_REQUEST,
+            serde_json::json!({
+                "code": "future_error_code",
+                "message": "newer daemon"
+            })
+            .to_string(),
+        );
+
+        assert_eq!(err.rpc_code(), Some("future_error_code"));
+        assert_eq!(err.rpc_error_code(), None);
     }
 
     #[tokio::test]
