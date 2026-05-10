@@ -5,10 +5,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use remote_exec_proto::rpc::{ExecResponse, ExecStartRequest, ExecWriteRequest, RpcErrorBody};
 
-pub use remote_exec_host::exec::{
-    ensure_sandbox_access, resolve_input_path, resolve_input_path_with_windows_posix_root,
-    resolve_workdir, session, store, transcript,
-};
+pub use remote_exec_host::exec::session;
 
 pub async fn exec_start(
     State(state): State<Arc<crate::AppState>>,
