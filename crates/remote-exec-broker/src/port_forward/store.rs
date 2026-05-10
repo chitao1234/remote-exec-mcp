@@ -536,7 +536,7 @@ mod tests {
                 },
             ),
             listen_session: Arc::new(ListenSessionControl {
-                side: SideHandle::local(),
+                side: SideHandle::local().unwrap(),
                 forward_id: forward_id.to_string(),
                 session_id: format!("session-{forward_id}"),
                 protocol: ForwardPortProtocol::Tcp,

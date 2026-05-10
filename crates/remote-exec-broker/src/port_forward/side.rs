@@ -11,8 +11,8 @@ pub enum SideHandle {
 }
 
 impl SideHandle {
-    pub fn local() -> Self {
-        Self::Local(LocalPortClient::global())
+    pub fn local() -> anyhow::Result<Self> {
+        Ok(Self::Local(LocalPortClient::global()?))
     }
 
     pub fn target(name: String, handle: TargetHandle) -> Self {

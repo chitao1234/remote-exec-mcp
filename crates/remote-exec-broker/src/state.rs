@@ -25,7 +25,7 @@ impl BrokerState {
 
     pub async fn forwarding_side(&self, name: &str) -> anyhow::Result<port_forward::SideHandle> {
         if name == "local" && !self.targets.contains_key("local") {
-            return Ok(port_forward::SideHandle::local());
+            return port_forward::SideHandle::local();
         }
 
         let handle = self.target(name)?;

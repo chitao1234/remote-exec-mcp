@@ -476,7 +476,7 @@ mod tests {
 
     #[tokio::test]
     async fn udp_connector_limit_refuses_new_peer_without_evicting_existing_peer() {
-        let tunnel = SideHandle::local()
+        let tunnel = SideHandle::local().unwrap()
             .port_tunnel(PortTunnel::DEFAULT_MAX_QUEUED_BYTES)
             .await
             .unwrap();
@@ -794,7 +794,7 @@ mod tests {
         connect_tunnel: Arc<PortTunnel>,
     ) -> ForwardRuntime {
         let listen_session = Arc::new(ListenSessionControl {
-            side: SideHandle::local(),
+            side: SideHandle::local().unwrap(),
             forward_id: "fwd_test".to_string(),
             session_id: "test-session".to_string(),
             protocol: PublicForwardPortProtocol::Udp,
@@ -807,8 +807,8 @@ mod tests {
         });
         ForwardRuntime {
             forward_id: "fwd_test".to_string(),
-            listen_side: SideHandle::local(),
-            connect_side: SideHandle::local(),
+            listen_side: SideHandle::local().unwrap(),
+            connect_side: SideHandle::local().unwrap(),
             protocol: PublicForwardPortProtocol::Udp,
             connect_endpoint: "127.0.0.1:1".to_string(),
             max_active_tcp_streams_per_forward: 256,

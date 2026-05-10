@@ -1001,7 +1001,7 @@ mod tests {
         let connect_tunnel = Arc::new(PortTunnel::from_stream(connect_io.clone()).unwrap());
 
         let listen_session = Arc::new(ListenSessionControl {
-            side: SideHandle::local(),
+            side: SideHandle::local().unwrap(),
             forward_id: "fwd_test".to_string(),
             session_id: "test-session".to_string(),
             protocol: PublicForwardPortProtocol::Tcp,
@@ -1015,8 +1015,8 @@ mod tests {
         let cancel = CancellationToken::new();
         let runtime = ForwardRuntime {
             forward_id: "fwd_test".to_string(),
-            listen_side: SideHandle::local(),
-            connect_side: SideHandle::local(),
+            listen_side: SideHandle::local().unwrap(),
+            connect_side: SideHandle::local().unwrap(),
             protocol: PublicForwardPortProtocol::Tcp,
             connect_endpoint: "127.0.0.1:1".to_string(),
             max_active_tcp_streams_per_forward: 256,
@@ -1114,7 +1114,7 @@ mod tests {
         let connect_tunnel = Arc::new(PortTunnel::from_stream(connect_io.clone()).unwrap());
 
         let listen_session = Arc::new(ListenSessionControl {
-            side: SideHandle::local(),
+            side: SideHandle::local().unwrap(),
             forward_id: "fwd_test".to_string(),
             session_id: "test-session".to_string(),
             protocol: PublicForwardPortProtocol::Tcp,
@@ -1128,8 +1128,8 @@ mod tests {
         let cancel = CancellationToken::new();
         let runtime = ForwardRuntime {
             forward_id: "fwd_test".to_string(),
-            listen_side: SideHandle::local(),
-            connect_side: SideHandle::local(),
+            listen_side: SideHandle::local().unwrap(),
+            connect_side: SideHandle::local().unwrap(),
             protocol: PublicForwardPortProtocol::Tcp,
             connect_endpoint: "127.0.0.1:1".to_string(),
             max_active_tcp_streams_per_forward: 256,
@@ -1626,7 +1626,7 @@ mod tests {
         connect_tunnel: Arc<PortTunnel>,
     ) -> ForwardRuntime {
         let listen_session = Arc::new(ListenSessionControl {
-            side: SideHandle::local(),
+            side: SideHandle::local().unwrap(),
             forward_id: "fwd_test".to_string(),
             session_id: "test-session".to_string(),
             protocol: PublicForwardPortProtocol::Tcp,
@@ -1639,8 +1639,8 @@ mod tests {
         });
         ForwardRuntime {
             forward_id: "fwd_test".to_string(),
-            listen_side: SideHandle::local(),
-            connect_side: SideHandle::local(),
+            listen_side: SideHandle::local().unwrap(),
+            connect_side: SideHandle::local().unwrap(),
             protocol: PublicForwardPortProtocol::Tcp,
             connect_endpoint: "127.0.0.1:1".to_string(),
             max_active_tcp_streams_per_forward: 256,
