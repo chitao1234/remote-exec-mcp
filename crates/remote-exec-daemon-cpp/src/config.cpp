@@ -9,6 +9,8 @@
 #include "config.h"
 #include "text_utils.h"
 
+typedef std::map<std::string, std::string> ConfigValues;
+
 static std::string unquote(const std::string& raw) {
     if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"') {
         return raw.substr(1, raw.size() - 2);
@@ -34,11 +36,11 @@ static unsigned long parse_unsigned_long(
 }
 
 static unsigned long read_optional_unsigned_long(
-    const std::map<std::string, std::string>& values,
+    const ConfigValues& values,
     const std::string& key,
     unsigned long fallback
 ) {
-    const std::map<std::string, std::string>::const_iterator it = values.find(key);
+    const ConfigValues::const_iterator it = values.find(key);
     if (it == values.end()) {
         return fallback;
     }
@@ -46,10 +48,10 @@ static unsigned long read_optional_unsigned_long(
 }
 
 static std::string read_required_string(
-    const std::map<std::string, std::string>& values,
+    const ConfigValues& values,
     const std::string& key
 ) {
-    const std::map<std::string, std::string>::const_iterator it = values.find(key);
+    const ConfigValues::const_iterator it = values.find(key);
     if (it == values.end()) {
         throw std::runtime_error("missing required config key: " + key);
     }
@@ -57,20 +59,20 @@ static std::string read_required_string(
 }
 
 static std::string read_optional_string(
-    const std::map<std::string, std::string>& values,
+    const ConfigValues& values,
     const std::string& key,
     const std::string& fallback
 ) {
-    const std::map<std::string, std::string>::const_iterator it = values.find(key);
+    const ConfigValues::const_iterator it = values.find(key);
     return it == values.end() ? fallback : it->second;
 }
 
 static bool read_optional_bool(
-    const std::map<std::string, std::string>& values,
+    const ConfigValues& values,
     const std::string& key,
     bool fallback
 ) {
-    const std::map<std::string, std::string>::const_iterator it = values.find(key);
+    const ConfigValues::const_iterator it = values.find(key);
     if (it == values.end()) {
         return fallback;
     }
@@ -84,11 +86,11 @@ static bool read_optional_bool(
 }
 
 static std::size_t read_optional_size_t(
-    const std::map<std::string, std::string>& values,
+    const ConfigValues& values,
     const std::string& key,
     std::size_t fallback
 ) {
-    const std::map<std::string, std::string>::const_iterator it = values.find(key);
+    const ConfigValues::const_iterator it = values.find(key);
     if (it == values.end()) {
         return fallback;
     }
@@ -120,10 +122,10 @@ static std::vector<std::string> split_semicolon_list(const std::string& raw) {
 }
 
 static std::vector<std::string> read_optional_path_list(
-    const std::map<std::string, std::string>& values,
+    const ConfigValues& values,
     const std::string& key
 ) {
-    const std::map<std::string, std::string>::const_iterator it = values.find(key);
+    const ConfigValues::const_iterator it = values.find(key);
     if (it == values.end()) {
         return std::vector<std::string>();
     }
@@ -131,10 +133,10 @@ static std::vector<std::string> read_optional_path_list(
 }
 
 static bool has_key_with_prefix(
-    const std::map<std::string, std::string>& values,
+    const ConfigValues& values,
     const std::string& prefix
 ) {
-    for (std::map<std::string, std::string>::const_iterator it = values.begin();
+    for (ConfigValues::const_iterator it = values.begin();
          it != values.end();
          ++it) {
         if (it->first.rfind(prefix, 0) == 0) {
@@ -162,7 +164,7 @@ static void validate_yield_time_operation(
 }
 
 static YieldTimeOperationConfig read_yield_time_operation(
-    const std::map<std::string, std::string>& values,
+    const ConfigValues& values,
     const std::string& key_prefix,
     const YieldTimeOperationConfig& defaults
 ) {
@@ -216,28 +218,13 @@ static void validate_port_forward_limit(
     }
 }
 
-unsigned long resolve_yield_time_ms(
-    const YieldTimeOperationConfig& config,
-    bool has_requested_ms,
-    unsigned long requested_ms
-) {
-    unsigned long value = has_requested_ms ? requested_ms : config.default_ms;
-    if (value < config.min_ms) {
-        value = config.min_ms;
-    }
-    if (value > config.max_ms) {
-        value = config.max_ms;
-    }
-    return value;
-}
-
-DaemonConfig load_config(const std::string& path) {
+static ConfigValues read_config_values(const std::string& path) {
     std::ifstream input(path.c_str());
     if (!input) {
         throw std::runtime_error("unable to open config file: " + path);
     }
 
-    std::map<std::string, std::string> values;
+    ConfigValues values;
     std::string line;
     while (std::getline(input, line)) {
         line = trim_ascii(line);
@@ -254,35 +241,178 @@ DaemonConfig load_config(const std::string& path) {
         const std::string value = unquote(trim_ascii(line.substr(equals + 1)));
         values[key] = value;
     }
+    return values;
+}
 
+static int read_listen_port(const ConfigValues& values) {
+    const unsigned long listen_port =
+        parse_unsigned_long(read_required_string(values, "listen_port"), "listen_port");
+    if (listen_port == 0 || listen_port > 65535UL) {
+        throw std::runtime_error("listen_port must be between 1 and 65535");
+    }
+    return static_cast<int>(listen_port);
+}
+
+static std::string read_http_auth_bearer_token(const ConfigValues& values) {
+    const ConfigValues::const_iterator it = values.find("http_auth_bearer_token");
+    if (it == values.end()) {
+        return "";
+    }
+    if (it->second.empty()) {
+        throw std::runtime_error("http_auth_bearer_token must not be empty");
+    }
+    if (contains_ascii_whitespace(it->second)) {
+        throw std::runtime_error("http_auth_bearer_token must not contain whitespace");
+    }
+    return it->second;
+}
+
+static PortForwardLimitConfig read_port_forward_limits(const ConfigValues& values) {
+    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    limits.max_worker_threads = read_optional_unsigned_long(
+        values,
+        "port_forward_max_worker_threads",
+        limits.max_worker_threads
+    );
+    limits.max_retained_sessions = read_optional_unsigned_long(
+        values,
+        "port_forward_max_retained_sessions",
+        limits.max_retained_sessions
+    );
+    limits.max_retained_listeners = read_optional_unsigned_long(
+        values,
+        "port_forward_max_retained_listeners",
+        limits.max_retained_listeners
+    );
+    limits.max_udp_binds = read_optional_unsigned_long(
+        values,
+        "port_forward_max_udp_binds",
+        limits.max_udp_binds
+    );
+    limits.max_active_tcp_streams = read_optional_unsigned_long(
+        values,
+        "port_forward_max_active_tcp_streams",
+        limits.max_active_tcp_streams
+    );
+    limits.max_tunnel_queued_bytes = read_optional_unsigned_long(
+        values,
+        "port_forward_max_tunnel_queued_bytes",
+        limits.max_tunnel_queued_bytes
+    );
+    limits.tunnel_io_timeout_ms = read_optional_unsigned_long(
+        values,
+        "port_forward_tunnel_io_timeout_ms",
+        limits.tunnel_io_timeout_ms
+    );
+    limits.connect_timeout_ms = read_optional_unsigned_long(
+        values,
+        "port_forward_connect_timeout_ms",
+        limits.connect_timeout_ms
+    );
+    return limits;
+}
+
+static void validate_port_forward_limits(const PortForwardLimitConfig& limits) {
+    validate_port_forward_limit(
+        limits.max_worker_threads,
+        "port_forward_max_worker_threads"
+    );
+    validate_port_forward_limit(
+        limits.max_retained_sessions,
+        "port_forward_max_retained_sessions"
+    );
+    validate_port_forward_limit(
+        limits.max_retained_listeners,
+        "port_forward_max_retained_listeners"
+    );
+    validate_port_forward_limit(limits.max_udp_binds, "port_forward_max_udp_binds");
+    validate_port_forward_limit(
+        limits.max_active_tcp_streams,
+        "port_forward_max_active_tcp_streams"
+    );
+    validate_port_forward_limit(
+        limits.max_tunnel_queued_bytes,
+        "port_forward_max_tunnel_queued_bytes"
+    );
+    validate_port_forward_limit(
+        limits.tunnel_io_timeout_ms,
+        "port_forward_tunnel_io_timeout_ms"
+    );
+    validate_port_forward_limit(
+        limits.connect_timeout_ms,
+        "port_forward_connect_timeout_ms"
+    );
+}
+
+static YieldTimeConfig read_yield_time_config(const ConfigValues& values) {
+    YieldTimeConfig config = default_yield_time_config();
+    config.exec_command = read_yield_time_operation(
+        values,
+        "yield_time_exec_command",
+        config.exec_command
+    );
+    config.write_stdin_poll = read_yield_time_operation(
+        values,
+        "yield_time_write_stdin_poll",
+        config.write_stdin_poll
+    );
+    config.write_stdin_input = read_yield_time_operation(
+        values,
+        "yield_time_write_stdin_input",
+        config.write_stdin_input
+    );
+    return config;
+}
+
+static FilesystemSandbox read_sandbox(const ConfigValues& values) {
+    FilesystemSandbox sandbox;
+    sandbox.exec_cwd.allow = read_optional_path_list(values, "sandbox_exec_cwd_allow");
+    sandbox.exec_cwd.deny = read_optional_path_list(values, "sandbox_exec_cwd_deny");
+    sandbox.read.allow = read_optional_path_list(values, "sandbox_read_allow");
+    sandbox.read.deny = read_optional_path_list(values, "sandbox_read_deny");
+    sandbox.write.allow = read_optional_path_list(values, "sandbox_write_allow");
+    sandbox.write.deny = read_optional_path_list(values, "sandbox_write_deny");
+    return sandbox;
+}
+
+static void validate_daemon_config(const DaemonConfig& config) {
+    if (config.max_request_header_bytes == 0) {
+        throw std::runtime_error("max_request_header_bytes must be greater than zero");
+    }
+    if (config.max_request_body_bytes == 0) {
+        throw std::runtime_error("max_request_body_bytes must be greater than zero");
+    }
+    if (config.max_open_sessions == 0) {
+        throw std::runtime_error("max_open_sessions must be greater than zero");
+    }
+    validate_port_forward_limits(config.port_forward_limits);
+}
+
+unsigned long resolve_yield_time_ms(
+    const YieldTimeOperationConfig& config,
+    bool has_requested_ms,
+    unsigned long requested_ms
+) {
+    unsigned long value = has_requested_ms ? requested_ms : config.default_ms;
+    if (value < config.min_ms) {
+        value = config.min_ms;
+    }
+    if (value > config.max_ms) {
+        value = config.max_ms;
+    }
+    return value;
+}
+
+DaemonConfig load_config(const std::string& path) {
+    const ConfigValues values = read_config_values(path);
     DaemonConfig config;
     config.target = read_required_string(values, "target");
     config.listen_host = read_required_string(values, "listen_host");
-    {
-        const unsigned long listen_port =
-            parse_unsigned_long(read_required_string(values, "listen_port"), "listen_port");
-        if (listen_port == 0 || listen_port > 65535UL) {
-            throw std::runtime_error("listen_port must be between 1 and 65535");
-        }
-        config.listen_port = static_cast<int>(listen_port);
-    }
+    config.listen_port = read_listen_port(values);
     config.default_workdir = read_required_string(values, "default_workdir");
     config.default_shell = read_optional_string(values, "default_shell", "");
     config.allow_login_shell = read_optional_bool(values, "allow_login_shell", true);
-    config.http_auth_bearer_token.clear();
-    {
-        const std::map<std::string, std::string>::const_iterator it =
-            values.find("http_auth_bearer_token");
-        if (it != values.end()) {
-            if (it->second.empty()) {
-                throw std::runtime_error("http_auth_bearer_token must not be empty");
-            }
-            if (contains_ascii_whitespace(it->second)) {
-                throw std::runtime_error("http_auth_bearer_token must not contain whitespace");
-            }
-            config.http_auth_bearer_token = it->second;
-        }
-    }
+    config.http_auth_bearer_token = read_http_auth_bearer_token(values);
     config.max_request_header_bytes = read_optional_size_t(
         values,
         "max_request_header_bytes",
@@ -294,111 +424,11 @@ DaemonConfig load_config(const std::string& path) {
         512UL * 1024UL * 1024UL
     );
     config.max_open_sessions = read_optional_unsigned_long(values, "max_open_sessions", 64UL);
-    config.port_forward_limits = default_port_forward_limit_config();
-    config.port_forward_limits.max_worker_threads = read_optional_unsigned_long(
-        values,
-        "port_forward_max_worker_threads",
-        config.port_forward_limits.max_worker_threads
-    );
-    config.port_forward_limits.max_retained_sessions = read_optional_unsigned_long(
-        values,
-        "port_forward_max_retained_sessions",
-        config.port_forward_limits.max_retained_sessions
-    );
-    config.port_forward_limits.max_retained_listeners = read_optional_unsigned_long(
-        values,
-        "port_forward_max_retained_listeners",
-        config.port_forward_limits.max_retained_listeners
-    );
-    config.port_forward_limits.max_udp_binds = read_optional_unsigned_long(
-        values,
-        "port_forward_max_udp_binds",
-        config.port_forward_limits.max_udp_binds
-    );
-    config.port_forward_limits.max_active_tcp_streams = read_optional_unsigned_long(
-        values,
-        "port_forward_max_active_tcp_streams",
-        config.port_forward_limits.max_active_tcp_streams
-    );
-    config.port_forward_limits.max_tunnel_queued_bytes = read_optional_unsigned_long(
-        values,
-        "port_forward_max_tunnel_queued_bytes",
-        config.port_forward_limits.max_tunnel_queued_bytes
-    );
-    config.port_forward_limits.tunnel_io_timeout_ms = read_optional_unsigned_long(
-        values,
-        "port_forward_tunnel_io_timeout_ms",
-        config.port_forward_limits.tunnel_io_timeout_ms
-    );
-    config.port_forward_limits.connect_timeout_ms = read_optional_unsigned_long(
-        values,
-        "port_forward_connect_timeout_ms",
-        config.port_forward_limits.connect_timeout_ms
-    );
+    config.port_forward_limits = read_port_forward_limits(values);
     config.port_forward_max_worker_threads = config.port_forward_limits.max_worker_threads;
-    if (config.max_request_header_bytes == 0) {
-        throw std::runtime_error("max_request_header_bytes must be greater than zero");
-    }
-    if (config.max_request_body_bytes == 0) {
-        throw std::runtime_error("max_request_body_bytes must be greater than zero");
-    }
-    if (config.max_open_sessions == 0) {
-        throw std::runtime_error("max_open_sessions must be greater than zero");
-    }
-    validate_port_forward_limit(
-        config.port_forward_limits.max_worker_threads,
-        "port_forward_max_worker_threads"
-    );
-    validate_port_forward_limit(
-        config.port_forward_limits.max_retained_sessions,
-        "port_forward_max_retained_sessions"
-    );
-    validate_port_forward_limit(
-        config.port_forward_limits.max_retained_listeners,
-        "port_forward_max_retained_listeners"
-    );
-    validate_port_forward_limit(
-        config.port_forward_limits.max_udp_binds,
-        "port_forward_max_udp_binds"
-    );
-    validate_port_forward_limit(
-        config.port_forward_limits.max_active_tcp_streams,
-        "port_forward_max_active_tcp_streams"
-    );
-    validate_port_forward_limit(
-        config.port_forward_limits.max_tunnel_queued_bytes,
-        "port_forward_max_tunnel_queued_bytes"
-    );
-    validate_port_forward_limit(
-        config.port_forward_limits.tunnel_io_timeout_ms,
-        "port_forward_tunnel_io_timeout_ms"
-    );
-    validate_port_forward_limit(
-        config.port_forward_limits.connect_timeout_ms,
-        "port_forward_connect_timeout_ms"
-    );
-    config.yield_time = default_yield_time_config();
-    config.yield_time.exec_command = read_yield_time_operation(
-        values,
-        "yield_time_exec_command",
-        config.yield_time.exec_command
-    );
-    config.yield_time.write_stdin_poll = read_yield_time_operation(
-        values,
-        "yield_time_write_stdin_poll",
-        config.yield_time.write_stdin_poll
-    );
-    config.yield_time.write_stdin_input = read_yield_time_operation(
-        values,
-        "yield_time_write_stdin_input",
-        config.yield_time.write_stdin_input
-    );
+    config.yield_time = read_yield_time_config(values);
     config.sandbox_configured = has_key_with_prefix(values, "sandbox_");
-    config.sandbox.exec_cwd.allow = read_optional_path_list(values, "sandbox_exec_cwd_allow");
-    config.sandbox.exec_cwd.deny = read_optional_path_list(values, "sandbox_exec_cwd_deny");
-    config.sandbox.read.allow = read_optional_path_list(values, "sandbox_read_allow");
-    config.sandbox.read.deny = read_optional_path_list(values, "sandbox_read_deny");
-    config.sandbox.write.allow = read_optional_path_list(values, "sandbox_write_allow");
-    config.sandbox.write.deny = read_optional_path_list(values, "sandbox_write_deny");
+    config.sandbox = read_sandbox(values);
+    validate_daemon_config(config);
     return config;
 }
