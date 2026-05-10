@@ -687,7 +687,7 @@ static void assert_tunnel_open_ready_and_close_round_trip(AppState& state) {
     assert(ready.type == PortTunnelFrameType::TunnelReady);
     const Json ready_meta = Json::parse(ready.meta);
     assert(ready_meta.at("generation").get<uint64_t>() == 1ULL);
-    assert(ready_meta.at("session_id").get<std::string>().find("sess_cpp_") == 0);
+    assert(ready_meta.at("session_id").get<std::string>().find("ptun_") == 0);
     assert(ready_meta.at("resume_timeout_ms").get<unsigned long>() > 0UL);
 
     send_tunnel_frame(

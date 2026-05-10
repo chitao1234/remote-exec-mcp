@@ -294,7 +294,7 @@ async fn open_protocol_forward(
     limits: ForwardPortLimitSummary,
     kind: ForwardOpenKind,
 ) -> anyhow::Result<OpenedForward> {
-    let forward_id = format!("fwd_{}", uuid::Uuid::new_v4().simple());
+    let forward_id = remote_exec_host::ids::new_forward_id();
     let OpenListenSession {
         tunnel: listen_tunnel,
         session_id,

@@ -2,6 +2,12 @@
 
 namespace {
 
+std::string next_opaque_id(const char* prefix, std::uint64_t sequence) {
+    std::ostringstream out;
+    out << prefix << platform::monotonic_ms() << "_" << sequence;
+    return out.str();
+}
+
 void close_retained_listener_for_service(
     const std::shared_ptr<RetainedTcpListener>& listener,
     PortTunnelService& service
@@ -61,9 +67,9 @@ std::shared_ptr<PortTunnelSession> PortTunnelService::create_session() {
     std::shared_ptr<PortTunnelService> service = shared_from_this();
     {
         BasicLockGuard lock(mutex_);
-        std::ostringstream out;
-        out << "sess_cpp_" << platform::monotonic_ms() << "_" << next_session_sequence_++;
-        session.reset(new PortTunnelSession(out.str(), service, true));
+        const std::string session_id =
+            next_opaque_id("ptun_", next_session_sequence_++);
+        session.reset(new PortTunnelSession(session_id, service, true));
         sessions_[session->session_id] = session;
     }
     return session;

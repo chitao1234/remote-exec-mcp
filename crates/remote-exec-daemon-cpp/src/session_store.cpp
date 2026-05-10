@@ -22,7 +22,13 @@ std::atomic<std::uint64_t> next_touch_order(1ULL);
 
 std::string make_chunk_id() {
     std::ostringstream out;
-    out << "cpp-" << platform::monotonic_ms() << '-' << next_id.fetch_add(1UL);
+    out << platform::monotonic_ms() << '-' << next_id.fetch_add(1UL);
+    return out.str();
+}
+
+std::string make_exec_session_id() {
+    std::ostringstream out;
+    out << "sess_" << platform::monotonic_ms() << "_" << next_id.fetch_add(1UL);
     return out.str();
 }
 
@@ -171,7 +177,7 @@ std::shared_ptr<LiveSession> launch_live_session(
     bool tty
 ) {
     std::shared_ptr<LiveSession> session(new LiveSession());
-    session->id = make_chunk_id();
+    session->id = make_exec_session_id();
     session->process = ProcessSession::launch(command, workdir, shell, login, tty);
     session->started_at_ms = platform::monotonic_ms();
 #ifdef _WIN32

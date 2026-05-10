@@ -236,7 +236,7 @@ async fn store_running_session(
     output: String,
     max_output_tokens: Option<u32>,
 ) -> Result<(String, Vec<ExecWarning>, ExecResponse), HostRpcError> {
-    let daemon_session_id = uuid::Uuid::new_v4().to_string();
+    let daemon_session_id = crate::ids::new_exec_session_id();
     let insert_outcome = state
         .sessions
         .insert(daemon_session_id.clone(), session)

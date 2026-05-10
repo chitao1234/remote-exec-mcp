@@ -25,7 +25,7 @@ impl SessionStore {
         daemon_instance_id: String,
         session_command: String,
     ) -> SessionRecord {
-        let session_id = format!("sess_{}", uuid::Uuid::new_v4().simple());
+        let session_id = remote_exec_host::ids::new_public_session_id();
         let record = SessionRecord {
             session_id: session_id.clone(),
             target,

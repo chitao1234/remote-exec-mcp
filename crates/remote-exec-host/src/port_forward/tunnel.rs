@@ -313,7 +313,7 @@ async fn tunnel_close(tunnel: Arc<TunnelState>, frame: Frame) -> Result<(), Host
 
 fn new_session(tunnel: &Arc<TunnelState>) -> Arc<SessionState> {
     Arc::new(SessionState {
-        id: format!("sess_{}", uuid::Uuid::new_v4().simple()),
+        id: crate::ids::new_tunnel_session_id(),
         root_cancel: tunnel.state.shutdown.child_token(),
         attachment: Mutex::new(None),
         attachment_notify: tokio::sync::Notify::new(),

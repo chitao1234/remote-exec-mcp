@@ -51,7 +51,7 @@ pub fn build_runtime_state(mut config: HostRuntimeConfig) -> anyhow::Result<Host
         supports_pty,
         supports_transfer_compression,
         windows_pty_backend_override,
-        daemon_instance_id: uuid::Uuid::new_v4().to_string(),
+        daemon_instance_id: crate::ids::new_instance_id(),
         shutdown: CancellationToken::new(),
         sessions: crate::exec::store::SessionStore::new(64),
         port_forward_sessions: crate::port_forward::TunnelSessionStore::default(),
