@@ -32,6 +32,20 @@ int main() {
     assert(request.body == "{\"cmd\":\"dir\"}");
     assert(request_has_bearer_auth(request, "shared-secret"));
     assert(!request_has_bearer_auth(request, "wrong-secret"));
+    assert(!request_has_bearer_auth(request, "shared"));
+    assert(!request_has_bearer_auth(request, "shared-secret-extra"));
+
+    HttpRequest wrong_prefix = request;
+    wrong_prefix.headers["authorization"] = "Basic shared-secret";
+    assert(!request_has_bearer_auth(wrong_prefix, "shared-secret"));
+
+    HttpRequest shorter_value = request;
+    shorter_value.headers["authorization"] = "Bearer shared";
+    assert(!request_has_bearer_auth(shorter_value, "shared-secret"));
+
+    HttpRequest longer_value = request;
+    longer_value.headers["authorization"] = "Bearer shared-secret-extra";
+    assert(!request_has_bearer_auth(longer_value, "shared-secret"));
 
     const std::string chunked_raw =
         "POST /v1/exec/start HTTP/1.1\r\n"

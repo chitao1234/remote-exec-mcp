@@ -3,6 +3,26 @@
 
 #include "http_helpers.h"
 
+namespace {
+
+bool constant_time_equals(const std::string& actual, const std::string& expected) {
+    const std::size_t max_size =
+        actual.size() > expected.size() ? actual.size() : expected.size();
+    unsigned int diff = static_cast<unsigned int>(actual.size() ^ expected.size());
+
+    for (std::size_t i = 0; i < max_size; ++i) {
+        const unsigned char actual_byte =
+            i < actual.size() ? static_cast<unsigned char>(actual[i]) : 0U;
+        const unsigned char expected_byte =
+            i < expected.size() ? static_cast<unsigned char>(expected[i]) : 0U;
+        diff |= static_cast<unsigned int>(actual_byte ^ expected_byte);
+    }
+
+    return diff == 0U;
+}
+
+}  // namespace
+
 std::string HttpRequest::header(const std::string& name) const {
     std::map<std::string, std::string>::const_iterator it = headers.find(name);
     if (it == headers.end()) {
@@ -19,7 +39,8 @@ Json parse_json_body(const HttpRequest& req) {
 }
 
 bool request_has_bearer_auth(const HttpRequest& req, const std::string& bearer_token) {
-    return req.header("authorization") == "Bearer " + bearer_token;
+    const std::string expected = "Bearer " + bearer_token;
+    return constant_time_equals(req.header("authorization"), expected);
 }
 
 void write_json(HttpResponse& res, const Json& body) {
