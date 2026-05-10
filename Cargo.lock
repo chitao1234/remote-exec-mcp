@@ -1703,6 +1703,7 @@ dependencies = [
  "rustls-pemfile",
  "serde",
  "serde_json",
+ "tempfile",
  "toml",
  "x509-parser",
  "zeroize",
