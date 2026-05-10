@@ -148,12 +148,7 @@ fn build_single_daemon_spec(
         target: args.target.clone(),
         sans,
     };
-    remote_exec_pki::DevInitSpec {
-        ca_common_name: "unused".to_string(),
-        broker_common_name: "unused".to_string(),
-        daemon_specs: vec![daemon.clone()],
-    }
-    .validate()?;
+    daemon.validate()?;
     Ok(daemon)
 }
 
@@ -169,7 +164,10 @@ fn resolve_dev_init_ca(
     }
 
     if let Some(dir) = args.reuse_ca.reuse_ca_from_dir.as_ref() {
-        return load_ca_from_files(&dir.join("ca.pem"), &dir.join("ca.key"));
+        return load_ca_from_files(
+            &dir.join(remote_exec_pki::CA_CERT_FILENAME),
+            &dir.join(remote_exec_pki::CA_KEY_FILENAME),
+        );
     }
 
     match (

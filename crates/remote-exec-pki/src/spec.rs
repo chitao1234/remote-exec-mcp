@@ -28,6 +28,27 @@ impl DaemonCertSpec {
             ],
         }
     }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        validate_target(&self.target)?;
+        ensure!(
+            !self.sans.is_empty(),
+            "target `{}` must have at least one SAN",
+            self.target
+        );
+
+        for san in &self.sans {
+            if let SubjectAltName::Dns(name) = san {
+                ensure!(
+                    !name.trim().is_empty(),
+                    "target `{}` contains an empty DNS SAN",
+                    self.target
+                );
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,46 +61,39 @@ pub struct DevInitSpec {
 impl DevInitSpec {
     pub fn validate(&self) -> anyhow::Result<()> {
         ensure!(
+            !self.ca_common_name.trim().is_empty(),
+            "CA common name cannot be empty"
+        );
+        ensure!(
+            !self.broker_common_name.trim().is_empty(),
+            "broker common name cannot be empty"
+        );
+        ensure!(
             !self.daemon_specs.is_empty(),
             "dev-init requires at least one daemon target"
         );
 
         let mut seen_targets = BTreeSet::new();
         for daemon in &self.daemon_specs {
-            ensure!(
-                !daemon.target.trim().is_empty(),
-                "target names cannot be empty"
-            );
-            ensure!(
-                daemon
-                    .target
-                    .chars()
-                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'),
-                "target `{}` must be filename-safe and TOML-safe",
-                daemon.target
-            );
+            daemon.validate()?;
             ensure!(
                 seen_targets.insert(daemon.target.clone()),
                 "duplicate target `{}`",
                 daemon.target
             );
-            ensure!(
-                !daemon.sans.is_empty(),
-                "target `{}` must have at least one SAN",
-                daemon.target
-            );
-
-            for san in &daemon.sans {
-                if let SubjectAltName::Dns(name) = san {
-                    ensure!(
-                        !name.trim().is_empty(),
-                        "target `{}` contains an empty DNS SAN",
-                        daemon.target
-                    );
-                }
-            }
         }
 
         Ok(())
     }
+}
+
+fn validate_target(target: &str) -> anyhow::Result<()> {
+    ensure!(!target.trim().is_empty(), "target names cannot be empty");
+    ensure!(
+        target
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'),
+        "target `{target}` must be filename-safe and TOML-safe"
+    );
+    Ok(())
 }

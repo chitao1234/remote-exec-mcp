@@ -107,7 +107,7 @@ fn certificate_public_key_der(cert_pem: &str) -> anyhow::Result<Vec<u8>> {
         .context("reading CA certificate PEM")?
         .context("missing CA certificate PEM block")?;
     let (_, parsed) = x509_parser::parse_x509_certificate(cert.as_ref())
-        .map_err(|_| anyhow::anyhow!("parsing CA certificate DER"))?;
+        .map_err(|err| anyhow::anyhow!("parsing CA certificate DER: {err}"))?;
     Ok(parsed.public_key().raw.to_vec())
 }
 

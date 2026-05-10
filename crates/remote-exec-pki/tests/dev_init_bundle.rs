@@ -23,6 +23,52 @@ fn rejects_duplicate_targets() {
 }
 
 #[test]
+fn rejects_empty_common_names() {
+    let spec = DevInitSpec {
+        ca_common_name: " ".to_string(),
+        broker_common_name: "remote-exec-broker".to_string(),
+        daemon_specs: vec![DaemonCertSpec::localhost("builder-a")],
+    };
+    let error = build_dev_init_bundle(&spec).expect_err("empty CA common name must fail");
+    assert!(error.to_string().contains("CA common name cannot be empty"));
+
+    let spec = DevInitSpec {
+        ca_common_name: "remote-exec-ca".to_string(),
+        broker_common_name: "\t".to_string(),
+        daemon_specs: vec![DaemonCertSpec::localhost("builder-a")],
+    };
+    let error = build_dev_init_bundle(&spec).expect_err("empty broker common name must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("broker common name cannot be empty")
+    );
+}
+
+#[test]
+fn daemon_cert_spec_validates_without_dev_init_wrapper() {
+    let daemon = DaemonCertSpec {
+        target: "bad target".to_string(),
+        sans: vec![SubjectAltName::Dns("builder-a.example.com".to_string())],
+    };
+    let error = daemon
+        .validate()
+        .expect_err("unsafe target names must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("must be filename-safe and TOML-safe")
+    );
+
+    let daemon = DaemonCertSpec {
+        target: "builder-a".to_string(),
+        sans: vec![SubjectAltName::Dns(" ".to_string())],
+    };
+    let error = daemon.validate().expect_err("empty DNS SAN must fail");
+    assert!(error.to_string().contains("contains an empty DNS SAN"));
+}
+
+#[test]
 fn generates_bundle_for_requested_targets() {
     let spec = DevInitSpec {
         ca_common_name: "remote-exec-ca".to_string(),

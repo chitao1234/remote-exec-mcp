@@ -10,4 +10,7 @@ pub use generate::{
 };
 pub use manifest::{DaemonManifestEntry, DevInitManifest, KeyPairPaths, render_config_snippets};
 pub use spec::{DaemonCertSpec, DevInitSpec, SubjectAltName};
-pub use write::{write_broker_pair, write_ca_pair, write_daemon_pair, write_dev_init_bundle};
+pub use write::{
+    CA_CERT_FILENAME, CA_KEY_FILENAME, write_broker_pair, write_ca_pair, write_daemon_pair,
+    write_dev_init_bundle,
+};

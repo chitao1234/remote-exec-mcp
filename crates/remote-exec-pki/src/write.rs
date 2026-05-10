@@ -12,14 +12,17 @@ use crate::{
     spec::DevInitSpec,
 };
 
+pub const CA_CERT_FILENAME: &str = "ca.pem";
+pub const CA_KEY_FILENAME: &str = "ca.key";
+
 pub fn write_ca_pair(
     pair: &crate::GeneratedPemPair,
     out_dir: &Path,
     force: bool,
 ) -> anyhow::Result<KeyPairPaths> {
     let paths = KeyPairPaths {
-        cert_pem: out_dir.join("ca.pem"),
-        key_pem: out_dir.join("ca.key"),
+        cert_pem: out_dir.join(CA_CERT_FILENAME),
+        key_pem: out_dir.join(CA_KEY_FILENAME),
     };
     write_pair(&paths, pair, force)?;
     Ok(paths)
@@ -64,8 +67,8 @@ pub fn write_dev_init_bundle(
         .with_context(|| format!("creating {}", daemon_out_dir.display()))?;
 
     let ca = KeyPairPaths {
-        cert_pem: out_dir.join("ca.pem"),
-        key_pem: out_dir.join("ca.key"),
+        cert_pem: out_dir.join(CA_CERT_FILENAME),
+        key_pem: out_dir.join(CA_KEY_FILENAME),
     };
     let broker = KeyPairPaths {
         cert_pem: out_dir.join("broker.pem"),
