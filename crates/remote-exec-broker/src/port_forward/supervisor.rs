@@ -80,6 +80,70 @@ pub(super) struct ForwardRuntime {
     pub(super) cancel: CancellationToken,
 }
 
+struct ForwardRuntimeParts {
+    forward_id: String,
+    listen_side: SideHandle,
+    connect_side: SideHandle,
+    protocol: PublicForwardPortProtocol,
+    connect_endpoint: String,
+    limits: ForwardPortLimitSummary,
+    store: PortForwardStore,
+    listen_session: Arc<ListenSessionControl>,
+    initial_connect_tunnel: Arc<PortTunnel>,
+    cancel: CancellationToken,
+}
+
+impl ForwardRuntime {
+    fn new(parts: ForwardRuntimeParts) -> Self {
+        Self {
+            forward_id: parts.forward_id,
+            listen_side: parts.listen_side,
+            connect_side: parts.connect_side,
+            protocol: parts.protocol,
+            connect_endpoint: parts.connect_endpoint,
+            max_active_tcp_streams_per_forward: parts.limits.max_active_tcp_streams,
+            max_pending_tcp_bytes_per_stream: parts.limits.max_pending_tcp_bytes_per_stream
+                as usize,
+            max_pending_tcp_bytes_per_forward: parts.limits.max_pending_tcp_bytes_per_forward
+                as usize,
+            max_udp_peers_per_forward: parts.limits.max_udp_peers as usize,
+            max_tunnel_queued_bytes: parts.limits.max_tunnel_queued_bytes as usize,
+            max_reconnecting_forwards: parts.limits.max_reconnecting_forwards,
+            store: parts.store,
+            listen_session: parts.listen_session,
+            initial_connect_tunnel: parts.initial_connect_tunnel,
+            cancel: parts.cancel,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ForwardOpenKind {
+    protocol: PublicForwardPortProtocol,
+    listen_frame_type: FrameType,
+    listen_ok_frame_type: FrameType,
+    noun: &'static str,
+}
+
+impl ForwardOpenKind {
+    fn for_protocol(protocol: PublicForwardPortProtocol) -> Self {
+        match protocol {
+            PublicForwardPortProtocol::Tcp => Self {
+                protocol,
+                listen_frame_type: FrameType::TcpListen,
+                listen_ok_frame_type: FrameType::TcpListenOk,
+                noun: "tcp listener",
+            },
+            PublicForwardPortProtocol::Udp => Self {
+                protocol,
+                listen_frame_type: FrameType::UdpBind,
+                listen_ok_frame_type: FrameType::UdpBindOk,
+                noun: "udp listener",
+            },
+        }
+    }
+}
+
 pub(super) struct ListenSessionControl {
     pub(super) side: SideHandle,
     pub(super) forward_id: String,
@@ -184,42 +248,26 @@ pub async fn open_forward(
 ) -> anyhow::Result<OpenedForward> {
     let listen_endpoint = normalize_endpoint(&spec.listen_endpoint)?;
     let connect_endpoint = ensure_nonzero_connect_endpoint(&spec.connect_endpoint)?;
-    match spec.protocol {
-        PublicForwardPortProtocol::Tcp => {
-            open_tcp_forward(
-                listen_side,
-                connect_side,
-                store,
-                listen_endpoint,
-                connect_endpoint,
-                limits,
-                spec.clone(),
-            )
-            .await
-        }
-        PublicForwardPortProtocol::Udp => {
-            open_udp_forward(
-                listen_side,
-                connect_side,
-                store,
-                listen_endpoint,
-                connect_endpoint,
-                limits,
-                spec.clone(),
-            )
-            .await
-        }
-    }
+    open_protocol_forward(
+        listen_side,
+        connect_side,
+        store,
+        listen_endpoint,
+        connect_endpoint,
+        limits,
+        ForwardOpenKind::for_protocol(spec.protocol),
+    )
+    .await
 }
 
-async fn open_tcp_forward(
+async fn open_protocol_forward(
     listen_side: SideHandle,
     connect_side: SideHandle,
     store: PortForwardStore,
     listen_endpoint: String,
     connect_endpoint: String,
     limits: ForwardPortLimitSummary,
-    spec: ForwardPortSpec,
+    kind: ForwardOpenKind,
 ) -> anyhow::Result<OpenedForward> {
     let forward_id = format!("fwd_{}", uuid::Uuid::new_v4().simple());
     let OpenListenSession {
@@ -230,7 +278,7 @@ async fn open_tcp_forward(
     } = open_listen_session(
         &listen_side,
         &forward_id,
-        PublicForwardPortProtocol::Tcp,
+        kind.protocol,
         1,
         None,
         limits.max_tunnel_queued_bytes as usize,
@@ -239,7 +287,7 @@ async fn open_tcp_forward(
     let connect = open_data_tunnel(
         &connect_side,
         &forward_id,
-        PublicForwardPortProtocol::Tcp,
+        kind.protocol,
         1,
         limits.max_tunnel_queued_bytes as usize,
     )
@@ -249,7 +297,7 @@ async fn open_tcp_forward(
     let listener_stream_id = 1;
     listen_tunnel
         .send(Frame {
-            frame_type: FrameType::TcpListen,
+            frame_type: kind.listen_frame_type,
             flags: 0,
             stream_id: listener_stream_id,
             meta: encode_tunnel_meta(&EndpointMeta {
@@ -260,20 +308,23 @@ async fn open_tcp_forward(
         .await
         .with_context(|| {
             format!(
-                "opening tcp listener on `{}` at `{listen_endpoint}`",
+                "opening {} on `{}` at `{listen_endpoint}`",
+                kind.noun,
                 listen_side.name()
             )
         })?;
     let listen_response = wait_for_listener_ready(
         &listen_tunnel,
         listener_stream_id,
-        FrameType::TcpListenOk,
+        kind.listen_ok_frame_type,
         format!(
-            "opening tcp listener on `{}` at `{listen_endpoint}`",
+            "opening {} on `{}` at `{listen_endpoint}`",
+            kind.noun,
             listen_side.name()
         ),
         format!(
-            "waiting for tcp listener on `{}` at `{listen_endpoint}`",
+            "waiting for {} on `{}` at `{listen_endpoint}`",
+            kind.noun,
             listen_side.name()
         ),
     )
@@ -282,7 +333,7 @@ async fn open_tcp_forward(
         side: listen_side.clone(),
         forward_id: forward_id.clone(),
         session_id,
-        protocol: PublicForwardPortProtocol::Tcp,
+        protocol: kind.protocol,
         generation: 1,
         listener_stream_id,
         resume_timeout,
@@ -292,23 +343,18 @@ async fn open_tcp_forward(
 
     let cancel = CancellationToken::new();
     let task_done = Arc::new(Mutex::new(None));
-    let runtime = ForwardRuntime {
+    let runtime = ForwardRuntime::new(ForwardRuntimeParts {
         forward_id: forward_id.clone(),
         listen_side: listen_side.clone(),
         connect_side: connect_side.clone(),
-        protocol: PublicForwardPortProtocol::Tcp,
+        protocol: kind.protocol,
         connect_endpoint: connect_endpoint.clone(),
-        max_active_tcp_streams_per_forward: limits.max_active_tcp_streams,
-        max_pending_tcp_bytes_per_stream: limits.max_pending_tcp_bytes_per_stream as usize,
-        max_pending_tcp_bytes_per_forward: limits.max_pending_tcp_bytes_per_forward as usize,
-        max_udp_peers_per_forward: limits.max_udp_peers as usize,
-        max_tunnel_queued_bytes: limits.max_tunnel_queued_bytes as usize,
-        max_reconnecting_forwards: limits.max_reconnecting_forwards,
+        limits,
         store,
         listen_session: listen_session.clone(),
         initial_connect_tunnel: connect_tunnel,
         cancel: cancel.clone(),
-    };
+    });
     Ok(OpenedForward {
         task_done: task_done.clone(),
         record: PortForwardRecord {
@@ -318,124 +364,7 @@ async fn open_tcp_forward(
                 listen_response,
                 connect_side.name().to_string(),
                 connect_endpoint,
-                spec.protocol,
-                limits,
-            ),
-            listen_session,
-            cancel,
-            task_done,
-        },
-        runtime,
-    })
-}
-
-async fn open_udp_forward(
-    listen_side: SideHandle,
-    connect_side: SideHandle,
-    store: PortForwardStore,
-    listen_endpoint: String,
-    connect_endpoint: String,
-    limits: ForwardPortLimitSummary,
-    spec: ForwardPortSpec,
-) -> anyhow::Result<OpenedForward> {
-    let forward_id = format!("fwd_{}", uuid::Uuid::new_v4().simple());
-    let OpenListenSession {
-        tunnel: listen_tunnel,
-        session_id,
-        resume_timeout,
-        limits: listen_limits,
-    } = open_listen_session(
-        &listen_side,
-        &forward_id,
-        PublicForwardPortProtocol::Udp,
-        1,
-        None,
-        limits.max_tunnel_queued_bytes as usize,
-    )
-    .await?;
-    let connect = open_data_tunnel(
-        &connect_side,
-        &forward_id,
-        PublicForwardPortProtocol::Udp,
-        1,
-        limits.max_tunnel_queued_bytes as usize,
-    )
-    .await?;
-    let limits = effective_forward_limits(limits, &listen_limits, &connect.limits);
-    let connect_tunnel = connect.tunnel;
-    let listener_stream_id = 1;
-    listen_tunnel
-        .send(Frame {
-            frame_type: FrameType::UdpBind,
-            flags: 0,
-            stream_id: listener_stream_id,
-            meta: encode_tunnel_meta(&EndpointMeta {
-                endpoint: listen_endpoint.clone(),
-            })?,
-            data: Vec::new(),
-        })
-        .await
-        .with_context(|| {
-            format!(
-                "opening udp listener on `{}` at `{listen_endpoint}`",
-                listen_side.name()
-            )
-        })?;
-    let listen_response = wait_for_listener_ready(
-        &listen_tunnel,
-        listener_stream_id,
-        FrameType::UdpBindOk,
-        format!(
-            "opening udp listener on `{}` at `{listen_endpoint}`",
-            listen_side.name()
-        ),
-        format!(
-            "waiting for udp listener on `{}` at `{listen_endpoint}`",
-            listen_side.name()
-        ),
-    )
-    .await?;
-    let listen_session = Arc::new(ListenSessionControl::new(ListenSessionParams {
-        side: listen_side.clone(),
-        forward_id: forward_id.clone(),
-        session_id,
-        protocol: PublicForwardPortProtocol::Udp,
-        generation: 1,
-        listener_stream_id,
-        resume_timeout,
-        max_tunnel_queued_bytes: limits.max_tunnel_queued_bytes as usize,
-        tunnel: listen_tunnel,
-    }));
-
-    let cancel = CancellationToken::new();
-    let task_done = Arc::new(Mutex::new(None));
-    let runtime = ForwardRuntime {
-        forward_id: forward_id.clone(),
-        listen_side: listen_side.clone(),
-        connect_side: connect_side.clone(),
-        protocol: PublicForwardPortProtocol::Udp,
-        connect_endpoint: connect_endpoint.clone(),
-        max_active_tcp_streams_per_forward: limits.max_active_tcp_streams,
-        max_pending_tcp_bytes_per_stream: limits.max_pending_tcp_bytes_per_stream as usize,
-        max_pending_tcp_bytes_per_forward: limits.max_pending_tcp_bytes_per_forward as usize,
-        max_udp_peers_per_forward: limits.max_udp_peers as usize,
-        max_tunnel_queued_bytes: limits.max_tunnel_queued_bytes as usize,
-        max_reconnecting_forwards: limits.max_reconnecting_forwards,
-        store,
-        listen_session: listen_session.clone(),
-        initial_connect_tunnel: connect_tunnel,
-        cancel: cancel.clone(),
-    };
-    Ok(OpenedForward {
-        task_done: task_done.clone(),
-        record: PortForwardRecord {
-            entry: ForwardPortEntry::new_open(
-                forward_id,
-                listen_side.name().to_string(),
-                listen_response,
-                connect_side.name().to_string(),
-                connect_endpoint,
-                spec.protocol,
+                kind.protocol,
                 limits,
             ),
             listen_session,
