@@ -172,24 +172,22 @@ mod tests {
         daemons.insert(
             "builder-a".to_string(),
             DaemonManifestEntry {
-                cert_pem: PathBuf::from(r"C:\Users\chi\AppData\Local\Temp\.tmp-work\builder-a.pem"),
-                key_pem: PathBuf::from(
-                    r"C:\Users\chi\AppData\Local\Temp\.tmp-work\builder-a-key.pem",
-                ),
+                cert_pem: PathBuf::from(r"C:\remote-exec\fixtures\builder-a.pem"),
+                key_pem: PathBuf::from(r"C:\remote-exec\fixtures\builder-a-key.pem"),
                 sans: vec![SubjectAltName::Dns("builder-a".to_string())],
             },
         );
 
         DevInitManifest {
             created_unix_seconds: 0,
-            out_dir: PathBuf::from(r"C:\Users\chi\AppData\Local\Temp\.tmp-work"),
+            out_dir: PathBuf::from(r"C:\remote-exec\fixtures"),
             ca: KeyPairPaths {
-                cert_pem: PathBuf::from(r"C:\Users\chi\AppData\Local\Temp\.tmp-work\ca.pem"),
-                key_pem: PathBuf::from(r"C:\Users\chi\AppData\Local\Temp\.tmp-work\ca-key.pem"),
+                cert_pem: PathBuf::from(r"C:\remote-exec\fixtures\ca.pem"),
+                key_pem: PathBuf::from(r"C:\remote-exec\fixtures\ca-key.pem"),
             },
             broker: KeyPairPaths {
-                cert_pem: PathBuf::from(r"C:\Users\chi\AppData\Local\Temp\.tmp-work\broker.pem"),
-                key_pem: PathBuf::from(r"C:\Users\chi\AppData\Local\Temp\.tmp-work\broker-key.pem"),
+                cert_pem: PathBuf::from(r"C:\remote-exec\fixtures\broker.pem"),
+                key_pem: PathBuf::from(r"C:\remote-exec\fixtures\broker-key.pem"),
             },
             broker_common_name: "remote-exec-broker".to_string(),
             daemons,
@@ -211,15 +209,15 @@ mod tests {
 
         assert_eq!(
             parsed["targets"]["builder-a"]["ca_pem"].as_str(),
-            Some(r"C:\Users\chi\AppData\Local\Temp\.tmp-work\ca.pem")
+            Some(r"C:\remote-exec\fixtures\ca.pem")
         );
         assert_eq!(
             parsed["targets"]["builder-a"]["client_cert_pem"].as_str(),
-            Some(r"C:\Users\chi\AppData\Local\Temp\.tmp-work\broker.pem")
+            Some(r"C:\remote-exec\fixtures\broker.pem")
         );
         assert_eq!(
             parsed["targets"]["builder-a"]["client_key_pem"].as_str(),
-            Some(r"C:\Users\chi\AppData\Local\Temp\.tmp-work\broker-key.pem")
+            Some(r"C:\remote-exec\fixtures\broker-key.pem")
         );
     }
 
@@ -237,15 +235,15 @@ mod tests {
 
         assert_eq!(
             parsed["tls"]["cert_pem"].as_str(),
-            Some(r"C:\Users\chi\AppData\Local\Temp\.tmp-work\builder-a.pem")
+            Some(r"C:\remote-exec\fixtures\builder-a.pem")
         );
         assert_eq!(
             parsed["tls"]["key_pem"].as_str(),
-            Some(r"C:\Users\chi\AppData\Local\Temp\.tmp-work\builder-a-key.pem")
+            Some(r"C:\remote-exec\fixtures\builder-a-key.pem")
         );
         assert_eq!(
             parsed["tls"]["ca_pem"].as_str(),
-            Some(r"C:\Users\chi\AppData\Local\Temp\.tmp-work\ca.pem")
+            Some(r"C:\remote-exec\fixtures\ca.pem")
         );
     }
 }
