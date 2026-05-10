@@ -499,12 +499,41 @@ SessionStore::~SessionStore() {
     }
 }
 
-void release_pending_start(BasicMutex& mutex, unsigned long* pending_starts) {
-    BasicLockGuard lock(mutex);
-    if (*pending_starts > 0UL) {
-        --(*pending_starts);
+class PendingStartReservation {
+public:
+    PendingStartReservation(BasicMutex& mutex, unsigned long* pending_starts)
+        : mutex_(mutex), pending_starts_(pending_starts), active_(true) {}
+
+    ~PendingStartReservation() {
+        release();
     }
-}
+
+    void release() {
+        if (!active_) {
+            return;
+        }
+        BasicLockGuard lock(mutex_);
+        release_locked();
+    }
+
+    void release_locked() {
+        if (!active_) {
+            return;
+        }
+        if (*pending_starts_ > 0UL) {
+            --(*pending_starts_);
+        }
+        active_ = false;
+    }
+
+private:
+    BasicMutex& mutex_;
+    unsigned long* pending_starts_;
+    bool active_;
+
+    PendingStartReservation(const PendingStartReservation&);
+    PendingStartReservation& operator=(const PendingStartReservation&);
+};
 
 void erase_session_if_current(
     BasicMutex& mutex,
@@ -665,6 +694,7 @@ Json SessionStore::start_command(
     if (!reserve_pending_start(max_open_sessions)) {
         throw SessionLimitError("too many open exec sessions");
     }
+    PendingStartReservation pending_start(mutex_, &pending_starts_);
 
     {
         std::ostringstream message;
@@ -674,85 +704,78 @@ Json SessionStore::start_command(
                 << " tty=" << (tty ? "true" : "false");
         log_message(LOG_INFO, "session_store", message.str());
     }
-    try {
-        std::shared_ptr<LiveSession> session =
-            launch_live_session(command, workdir, shell, login, tty);
-        start_session_pump(session);
+    std::shared_ptr<LiveSession> session =
+        launch_live_session(command, workdir, shell, login, tty);
+    start_session_pump(session);
 
-        const unsigned long timeout_ms = resolve_yield_time_ms(
-            yield_time.exec_command,
-            has_yield_time_ms,
-            yield_time_ms
-        );
-        BasicLockGuard operation_lock(session->operation_mutex_);
-        const PollResult poll_result =
-            wait_for_session_activity(session, timeout_ms, max_output_tokens);
+    const unsigned long timeout_ms = resolve_yield_time_ms(
+        yield_time.exec_command,
+        has_yield_time_ms,
+        yield_time_ms
+    );
+    BasicLockGuard operation_lock(session->operation_mutex_);
+    const PollResult poll_result =
+        wait_for_session_activity(session, timeout_ms, max_output_tokens);
 
-        Json warnings = empty_exec_warnings();
+    Json warnings = empty_exec_warnings();
+    {
+        BasicLockGuard lock(mutex_);
+        pending_start.release_locked();
+        if (!poll_result.completed) {
+            const bool crossed_warning_threshold = crosses_warning_threshold(sessions_.size());
+            session->last_touched_order.store(make_touch_order());
+            sessions_[session->id] = session;
+            std::ostringstream message;
+            message << "stored live session daemon_session_id=`" << session->id
+                    << "` open_sessions=" << sessions_.size();
+            log_message(LOG_INFO, "session_store", message.str());
+            if (crossed_warning_threshold) {
+                warnings = session_limit_warning(target);
+            }
+        }
+    }
+
+    if (poll_result.completed) {
         {
-            BasicLockGuard lock(mutex_);
-            if (pending_starts_ > 0UL) {
-                --pending_starts_;
-            }
-            if (!poll_result.completed) {
-                const bool crossed_warning_threshold = crosses_warning_threshold(sessions_.size());
-                session->last_touched_order.store(make_touch_order());
-                sessions_[session->id] = session;
-                std::ostringstream message;
-                message << "stored live session daemon_session_id=`" << session->id
-                        << "` open_sessions=" << sessions_.size();
-                log_message(LOG_INFO, "session_store", message.str());
-                if (crossed_warning_threshold) {
-                    warnings = session_limit_warning(target);
-                }
+            BasicLockGuard session_lock(session->mutex_);
+            session->retired = true;
+            session->closing = true;
+            session->cond_.broadcast();
+            if (session->process.get() != NULL) {
+                session->process->terminate();
             }
         }
-
-        if (poll_result.completed) {
-            {
-                BasicLockGuard session_lock(session->mutex_);
-                session->retired = true;
-                session->closing = true;
-                session->cond_.broadcast();
-                if (session->process.get() != NULL) {
-                    session->process->terminate();
-                }
-            }
-            join_session_pump(session.get());
-            Json response = build_response(
-                NULL,
-                false,
-                session->started_at_ms,
-                true,
-                poll_result.exit_code,
-                poll_result.output,
-                max_output_tokens,
-                empty_exec_warnings()
-            );
-            {
-                std::ostringstream message;
-                message << "command completed before session handoff exit_code="
-                        << poll_result.exit_code
-                        << " output_chars=" << poll_result.output.size();
-                log_message(LOG_INFO, "session_store", message.str());
-            }
-            return response;
-        }
-
-        return build_response(
-            session->id.c_str(),
-            true,
-            session->started_at_ms,
+        join_session_pump(session.get());
+        Json response = build_response(
+            NULL,
             false,
-            0,
+            session->started_at_ms,
+            true,
+            poll_result.exit_code,
             poll_result.output,
             max_output_tokens,
-            warnings
+            empty_exec_warnings()
         );
-    } catch (...) {
-        release_pending_start(mutex_, &pending_starts_);
-        throw;
+        {
+            std::ostringstream message;
+            message << "command completed before session handoff exit_code="
+                    << poll_result.exit_code
+                    << " output_chars=" << poll_result.output.size();
+            log_message(LOG_INFO, "session_store", message.str());
+        }
+        return response;
     }
+
+    return build_response(
+        session->id.c_str(),
+        true,
+        session->started_at_ms,
+        false,
+        0,
+        poll_result.output,
+        max_output_tokens,
+        warnings
+    );
 }
 
 Json SessionStore::write_stdin(
