@@ -1,3 +1,10 @@
+//! Manual Windows PTY diagnostics.
+//!
+//! These tests are intentionally ignored and Windows-only. They are kept under
+//! `tests/` so developers can run them with `cargo test -p remote-exec-daemon
+//! --test windows_pty_debug -- --ignored --nocapture` while debugging ConPTY or
+//! winpty behavior. They are not part of the automated quality gate.
+
 mod support;
 
 #[cfg(windows)]
