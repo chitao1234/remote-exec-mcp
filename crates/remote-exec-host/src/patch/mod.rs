@@ -7,7 +7,7 @@ mod verify;
 use std::path::Path;
 use std::sync::Arc;
 
-use remote_exec_proto::rpc::{PatchApplyRequest, PatchApplyResponse};
+use remote_exec_proto::rpc::{PatchApplyRequest, PatchApplyResponse, RpcErrorCode};
 use remote_exec_proto::sandbox::SandboxError;
 
 use crate::{AppState, HostRpcError};
@@ -28,7 +28,7 @@ pub async fn apply_patch_local(
     let cwd = crate::exec::resolve_workdir(&state, req.workdir.as_deref())
         .map_err(crate::exec::internal_error)?;
     let actions = parser::parse_patch(&req.patch)
-        .map_err(|err| crate::exec::rpc_error("patch_failed", err.to_string()))?;
+        .map_err(|err| crate::exec::rpc_error(RpcErrorCode::PatchFailed, err.to_string()))?;
     let summary = execute_actions(&state, &cwd, actions)
         .await
         .map_err(map_patch_error)?;
@@ -107,9 +107,9 @@ async fn execute_actions(
 
 fn map_patch_error(err: anyhow::Error) -> HostRpcError {
     let code = if err.downcast_ref::<SandboxError>().is_some() {
-        "sandbox_denied"
+        RpcErrorCode::SandboxDenied
     } else {
-        "patch_failed"
+        RpcErrorCode::PatchFailed
     };
     crate::exec::rpc_error(code, err.to_string())
 }

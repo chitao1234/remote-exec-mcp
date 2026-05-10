@@ -102,13 +102,15 @@ pub(crate) fn map_host_rpc_error(err: remote_exec_host::HostRpcError) -> DaemonC
 
 #[cfg(test)]
 mod tests {
+    use remote_exec_proto::rpc::RpcErrorCode;
+
     use super::DaemonClientError;
 
     #[test]
     fn host_internal_errors_preserve_server_status_for_local_backend() {
         let err = super::map_host_rpc_error(remote_exec_host::HostRpcError {
             status: 500,
-            code: "internal_error",
+            code: RpcErrorCode::Internal.wire_value().to_string(),
             message: "boom".to_string(),
         });
 
@@ -130,7 +132,7 @@ mod tests {
     fn invalid_host_status_falls_back_to_internal_server_error() {
         let err = super::map_host_rpc_error(remote_exec_host::HostRpcError {
             status: 42,
-            code: "internal_error",
+            code: RpcErrorCode::Internal.wire_value().to_string(),
             message: "invalid status".to_string(),
         });
 

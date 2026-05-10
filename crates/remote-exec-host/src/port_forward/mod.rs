@@ -15,6 +15,7 @@ use std::time::Duration;
 use remote_exec_proto::port_tunnel::{
     ForwardDropKind, ForwardDropMeta, Frame, FrameType, HEADER_LEN, TunnelForwardProtocol,
 };
+use remote_exec_proto::rpc::RpcErrorCode;
 use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
 use tokio::sync::{Mutex, mpsc};
@@ -139,10 +140,12 @@ impl TunnelSender {
             frame,
             _permit: permit,
         };
-        self.tx
-            .send(queued)
-            .await
-            .map_err(|_| error::rpc_error("port_tunnel_closed", "port tunnel writer is closed"))
+        self.tx.send(queued).await.map_err(|_| {
+            error::rpc_error(
+                RpcErrorCode::PortTunnelClosed,
+                "port tunnel writer is closed",
+            )
+        })
     }
 }
 
@@ -169,7 +172,7 @@ async fn send_forward_drop_report(
         reason: reason.into(),
         message: Some(message.into()),
     })
-    .map_err(|err| error::rpc_error("invalid_port_tunnel", err.to_string()))?;
+    .map_err(|err| error::rpc_error(RpcErrorCode::InvalidPortTunnel, err.to_string()))?;
     tx.send(Frame {
         frame_type: FrameType::ForwardDrop,
         flags: 0,
@@ -404,7 +407,10 @@ mod port_tunnel_tests {
                 match frame.frame_type {
                     FrameType::Error if frame.stream_id == 1 => {
                         let meta = serde_json::from_slice::<Value>(&frame.meta).unwrap();
-                        if meta["code"] == "port_tunnel_limit_exceeded" {
+                        if meta["code"]
+                            == remote_exec_proto::rpc::RpcErrorCode::PortTunnelLimitExceeded
+                                .wire_value()
+                        {
                             saw_queue_limit = true;
                         }
                     }

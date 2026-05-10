@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use remote_exec_proto::port_forward::{ensure_nonzero_connect_endpoint, normalize_endpoint};
 use remote_exec_proto::port_tunnel::{ForwardDropKind, Frame, FrameType, TunnelForwardProtocol};
+use remote_exec_proto::rpc::RpcErrorCode;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
@@ -16,10 +17,11 @@ use super::codec::{decode_frame_meta, encode_frame_meta};
 use super::error::{SessionCloseMode, rpc_error};
 use super::session::{
     AttachmentState, SessionState, close_attached_session, listener_stream_id,
-    send_tunnel_error_with_sender, udp_bind_stream_id, wait_for_session_attachment,
+    send_tunnel_error_code_with_sender, send_tunnel_error_with_sender, udp_bind_stream_id,
+    wait_for_session_attachment,
 };
-use super::tunnel::send_tunnel_error;
 use super::tunnel::tunnel_mode;
+use super::tunnel::{send_tunnel_error, send_tunnel_error_code};
 use super::{
     EndpointMeta, EndpointOkMeta, READ_BUF_SIZE, TCP_WRITE_QUEUE_FRAMES, TcpAcceptMeta,
     TcpStreamEntry, TcpWriteCommand, TcpWriterHandle, TunnelMode, TunnelState,
@@ -40,8 +42,8 @@ async fn tcp_connect_with_timeout(
         Duration::from_millis(tunnel.state.config.port_forward_limits.connect_timeout_ms);
     tokio::time::timeout(connect_timeout, TcpStream::connect(endpoint))
         .await
-        .map_err(|_| rpc_error("port_connect_failed", "tcp connect timed out"))?
-        .map_err(|err| rpc_error("port_connect_failed", err.to_string()))
+        .map_err(|_| rpc_error(RpcErrorCode::PortConnectFailed, "tcp connect timed out"))?
+        .map_err(|err| rpc_error(RpcErrorCode::PortConnectFailed, err.to_string()))
 }
 
 pub(super) async fn tunnel_tcp_listen(
@@ -55,34 +57,34 @@ pub(super) async fn tunnel_tcp_listen(
         } => session,
         TunnelMode::Listen { .. } => {
             return Err(rpc_error(
-                "invalid_port_tunnel",
+                RpcErrorCode::InvalidPortTunnel,
                 "tcp listen requires an open tcp listen tunnel",
             ));
         }
         TunnelMode::Connect { .. } => {
             return Err(rpc_error(
-                "invalid_port_tunnel",
+                RpcErrorCode::InvalidPortTunnel,
                 "tcp listen requires an open listen tunnel",
             ));
         }
         TunnelMode::Unopened => {
             return Err(rpc_error(
-                "invalid_port_tunnel",
+                RpcErrorCode::InvalidPortTunnel,
                 "tcp listen requires tunnel open",
             ));
         }
     };
     let meta: EndpointMeta = decode_frame_meta(&frame)?;
     let endpoint = normalize_endpoint(&meta.endpoint)
-        .map_err(|err| rpc_error("invalid_endpoint", err.to_string()))?;
+        .map_err(|err| rpc_error(RpcErrorCode::InvalidEndpoint, err.to_string()))?;
     let listener = Arc::new(
         TcpListener::bind(&endpoint)
             .await
-            .map_err(|err| rpc_error("port_bind_failed", err.to_string()))?,
+            .map_err(|err| rpc_error(RpcErrorCode::PortBindFailed, err.to_string()))?,
     );
     let bound_endpoint = listener
         .local_addr()
-        .map_err(|err| rpc_error("port_bind_failed", err.to_string()))?
+        .map_err(|err| rpc_error(RpcErrorCode::PortBindFailed, err.to_string()))?
         .to_string();
     session
         .replace_listener(
@@ -129,7 +131,7 @@ pub(super) async fn tunnel_tcp_accept_loop(session: Arc<SessionState>, listener:
                 let _ = send_tunnel_error_with_sender(
                     &attachment.tx,
                     listener_stream_id(&session).await.unwrap_or(0),
-                    "port_accept_failed",
+                    RpcErrorCode::PortAcceptFailed,
                     err.to_string(),
                     false,
                 )
@@ -149,12 +151,12 @@ pub(super) async fn tunnel_tcp_accept_loop(session: Arc<SessionState>, listener:
                     &attachment.tx,
                     listener_stream_id(&session).await.unwrap_or(0),
                     ForwardDropKind::TcpStream,
-                    err.code,
+                    err.code.as_str(),
                     err.message.clone(),
                 )
                 .await;
                 tracing::debug!(
-                    code = err.code,
+                    code = %err.code,
                     message = %err.message,
                     "dropping accepted tcp stream due to local port tunnel pressure"
                 );
@@ -188,10 +190,10 @@ pub(super) async fn tunnel_tcp_accept_loop(session: Arc<SessionState>, listener:
                     Ok(meta) => meta,
                     Err(err) => {
                         cancel_session_tcp_stream(&attachment, stream_id).await;
-                        let _ = send_tunnel_error_with_sender(
+                        let _ = send_tunnel_error_code_with_sender(
                             &attachment.tx,
                             stream_id,
-                            err.code,
+                            err.code.as_str(),
                             err.message,
                             false,
                         )
@@ -225,15 +227,15 @@ pub(super) async fn tunnel_tcp_connect(
             protocol: TunnelForwardProtocol::Tcp,
         } => tunnel_tcp_connect_transport_owned(tunnel, frame).await,
         TunnelMode::Connect { .. } => Err(rpc_error(
-            "invalid_port_tunnel",
+            RpcErrorCode::InvalidPortTunnel,
             "tcp connect requires an open tcp connect tunnel",
         )),
         TunnelMode::Listen { .. } => Err(rpc_error(
-            "invalid_port_tunnel",
+            RpcErrorCode::InvalidPortTunnel,
             "tcp connect requires an open connect tunnel",
         )),
         TunnelMode::Unopened => Err(rpc_error(
-            "invalid_port_tunnel",
+            RpcErrorCode::InvalidPortTunnel,
             "tcp connect requires tunnel open",
         )),
     }
@@ -245,7 +247,7 @@ pub(super) async fn tunnel_tcp_connect_transport_owned(
 ) -> Result<(), HostRpcError> {
     let meta: EndpointMeta = decode_frame_meta(&frame)?;
     let endpoint = ensure_nonzero_connect_endpoint(&meta.endpoint)
-        .map_err(|err| rpc_error("invalid_endpoint", err.to_string()))?;
+        .map_err(|err| rpc_error(RpcErrorCode::InvalidEndpoint, err.to_string()))?;
     let stream = tcp_connect_with_timeout(&tunnel, endpoint.as_str()).await?;
     let stream_permit = tunnel
         .state
@@ -319,8 +321,14 @@ pub(super) async fn tunnel_tcp_read_loop_transport_owned(
                     })
                     .await
                 {
-                    let _ =
-                        send_tunnel_error(&tunnel, stream_id, err.code, err.message, false).await;
+                    let _ = send_tunnel_error_code(
+                        &tunnel,
+                        stream_id,
+                        err.code.as_str(),
+                        err.message,
+                        false,
+                    )
+                    .await;
                     cancel_transport_tcp_stream(&tunnel, stream_id).await;
                     return;
                 }
@@ -329,7 +337,7 @@ pub(super) async fn tunnel_tcp_read_loop_transport_owned(
                 let _ = send_tunnel_error(
                     &tunnel,
                     stream_id,
-                    "port_read_failed",
+                    RpcErrorCode::PortReadFailed,
                     err.to_string(),
                     false,
                 )
@@ -383,10 +391,10 @@ pub(super) async fn tunnel_tcp_read_loop_session_owned(
                     })
                     .await
                 {
-                    let _ = send_tunnel_error_with_sender(
+                    let _ = send_tunnel_error_code_with_sender(
                         &attachment.tx,
                         stream_id,
-                        err.code,
+                        err.code.as_str(),
                         err.message,
                         false,
                     )
@@ -399,7 +407,7 @@ pub(super) async fn tunnel_tcp_read_loop_session_owned(
                 let _ = send_tunnel_error_with_sender(
                     &attachment.tx,
                     stream_id,
-                    "port_read_failed",
+                    RpcErrorCode::PortReadFailed,
                     err.to_string(),
                     false,
                 )
@@ -459,7 +467,10 @@ pub(super) async fn tunnel_tcp_data(
             session,
         } => {
             let attachment = session.current_attachment().await.ok_or_else(|| {
-                rpc_error("port_tunnel_closed", "port tunnel attachment is closed")
+                rpc_error(
+                    RpcErrorCode::PortTunnelClosed,
+                    "port tunnel attachment is closed",
+                )
             })?;
             attachment
                 .tcp_streams
@@ -469,7 +480,7 @@ pub(super) async fn tunnel_tcp_data(
                 .map(|entry| entry.writer.clone())
                 .ok_or_else(|| {
                     rpc_error(
-                        "unknown_port_connection",
+                        RpcErrorCode::UnknownPortConnection,
                         format!("unknown tunnel tcp stream `{stream_id}`"),
                     )
                 })?
@@ -479,7 +490,7 @@ pub(super) async fn tunnel_tcp_data(
             protocol: TunnelForwardProtocol::Udp,
         } => {
             return Err(rpc_error(
-                "invalid_port_tunnel",
+                RpcErrorCode::InvalidPortTunnel,
                 "tcp data requires an open tcp tunnel",
             ));
         }
@@ -493,13 +504,13 @@ pub(super) async fn tunnel_tcp_data(
             .map(|entry| entry.writer.clone())
             .ok_or_else(|| {
                 rpc_error(
-                    "unknown_port_connection",
+                    RpcErrorCode::UnknownPortConnection,
                     format!("unknown tunnel tcp stream `{stream_id}`"),
                 )
             })?,
         TunnelMode::Unopened => {
             return Err(rpc_error(
-                "invalid_port_tunnel",
+                RpcErrorCode::InvalidPortTunnel,
                 "tcp data requires tunnel open",
             ));
         }
@@ -511,12 +522,12 @@ pub(super) async fn tunnel_tcp_data(
             mpsc::error::TrySendError::Full(_) => {
                 writer.cancel.cancel();
                 rpc_error(
-                    "port_tunnel_limit_exceeded",
+                    RpcErrorCode::PortTunnelLimitExceeded,
                     "tcp write queue limit reached",
                 )
             }
             mpsc::error::TrySendError::Closed(_) => {
-                rpc_error("port_connection_closed", "connection was closed")
+                rpc_error(RpcErrorCode::PortConnectionClosed, "connection was closed")
             }
         })
 }

@@ -4,7 +4,7 @@ use remote_exec_proto::port_tunnel::{
 };
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
-    PatchApplyRequest, PatchApplyResponse, RpcErrorBody, TargetInfoResponse,
+    PatchApplyRequest, PatchApplyResponse, RpcErrorBody, RpcErrorCode, TargetInfoResponse,
     TransferExportMetadata, TransferExportRequest, TransferImportRequest, TransferImportResponse,
     TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType,
 };
@@ -50,38 +50,6 @@ pub enum DaemonClientError {
         message: String,
     },
     Decode(anyhow::Error),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RpcErrorCode {
-    UnknownSession,
-    NotFound,
-    UnknownEndpoint,
-    InvalidPortTunnel,
-    PortTunnelUnavailable,
-}
-
-impl RpcErrorCode {
-    pub const fn wire_value(self) -> &'static str {
-        match self {
-            Self::UnknownSession => "unknown_session",
-            Self::NotFound => "not_found",
-            Self::UnknownEndpoint => "unknown_endpoint",
-            Self::InvalidPortTunnel => "invalid_port_tunnel",
-            Self::PortTunnelUnavailable => "port_tunnel_unavailable",
-        }
-    }
-
-    fn from_wire_value(value: &str) -> Option<Self> {
-        match value {
-            "unknown_session" => Some(Self::UnknownSession),
-            "not_found" => Some(Self::NotFound),
-            "unknown_endpoint" => Some(Self::UnknownEndpoint),
-            "invalid_port_tunnel" => Some(Self::InvalidPortTunnel),
-            "port_tunnel_unavailable" => Some(Self::PortTunnelUnavailable),
-            _ => None,
-        }
-    }
 }
 
 impl DaemonClientError {

@@ -5,13 +5,14 @@ use std::time::Duration;
 use remote_exec_proto::port_tunnel::{
     Frame, FrameType, HEADER_LEN, TunnelHeartbeatMeta, read_frame, write_frame, write_preface,
 };
+use remote_exec_proto::rpc::RpcErrorCode;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::daemon_client::{DaemonClientError, RpcErrorCode};
+use crate::daemon_client::DaemonClientError;
 
 use super::events::{ForwardSideEvent, TunnelErrorMeta};
 use super::{port_tunnel_heartbeat_interval, port_tunnel_heartbeat_timeout};
@@ -321,7 +322,8 @@ pub(super) fn is_backpressure_error(err: &anyhow::Error) -> bool {
 }
 
 pub(super) fn is_recoverable_pressure_tunnel_error(meta: &TunnelErrorMeta) -> bool {
-    matches!(meta.code.as_deref(), Some("port_tunnel_limit_exceeded"))
+    meta.code.as_deref().and_then(RpcErrorCode::from_wire_value)
+        == Some(RpcErrorCode::PortTunnelLimitExceeded)
 }
 
 fn data_frame_charge(frame: &Frame) -> usize {

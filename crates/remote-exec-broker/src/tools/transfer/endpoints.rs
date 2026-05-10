@@ -5,10 +5,8 @@ use remote_exec_proto::path::{
 };
 use remote_exec_proto::public::{TransferDestinationMode, TransferEndpoint};
 use remote_exec_proto::rpc::{
-    TransferCompression as RpcTransferCompression, TransferPathInfoRequest,
+    RpcErrorCode, TransferCompression as RpcTransferCompression, TransferPathInfoRequest,
 };
-
-use crate::daemon_client::RpcErrorCode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EndpointTargetContext {

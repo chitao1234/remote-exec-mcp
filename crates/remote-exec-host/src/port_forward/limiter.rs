@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use remote_exec_proto::port_tunnel::Frame;
+use remote_exec_proto::rpc::RpcErrorCode;
 
 use crate::{HostPortForwardLimits, HostRpcError};
 
@@ -169,5 +170,5 @@ impl Drop for PortForwardPermit {
 }
 
 fn limit_error(message: &'static str) -> HostRpcError {
-    rpc_error("port_tunnel_limit_exceeded", message)
+    rpc_error(RpcErrorCode::PortTunnelLimitExceeded, message)
 }

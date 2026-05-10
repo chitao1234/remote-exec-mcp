@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use remote_exec_proto::path::PathPolicy;
-use remote_exec_proto::rpc::{ExecResponse, ExecWarning};
+use remote_exec_proto::rpc::{ExecResponse, ExecWarning, RpcErrorCode};
 use remote_exec_proto::sandbox::{SandboxAccess, SandboxError, authorize_path};
 
 use crate::{AppState, HostRpcError, config::YieldTimeOperation, host_path};
@@ -41,24 +41,16 @@ pub fn ensure_sandbox_access(
     authorize_path(host_path_policy(), state.sandbox.as_ref(), access, path)
 }
 
-pub fn rpc_error(code: &'static str, message: impl Into<String>) -> HostRpcError {
+pub fn rpc_error(code: RpcErrorCode, message: impl Into<String>) -> HostRpcError {
     let message = message.into();
-    tracing::warn!(code, %message, "daemon request rejected");
-    HostRpcError {
-        status: 400,
-        code,
-        message,
-    }
+    tracing::warn!(code = code.wire_value(), %message, "daemon request rejected");
+    HostRpcError::new(400, code, message)
 }
 
 pub fn internal_error(err: anyhow::Error) -> HostRpcError {
     let message = err.to_string();
     tracing::error!(error = %message, "daemon internal error");
-    HostRpcError {
-        status: 500,
-        code: "internal_error",
-        message,
-    }
+    HostRpcError::new(500, RpcErrorCode::Internal, message)
 }
 
 pub(super) async fn poll_once(session: &mut session::LiveSession) -> anyhow::Result<String> {

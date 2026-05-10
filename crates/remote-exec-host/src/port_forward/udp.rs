@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use remote_exec_proto::port_forward::normalize_endpoint;
 use remote_exec_proto::port_tunnel::{ForwardDropKind, Frame, FrameType, TunnelForwardProtocol};
+use remote_exec_proto::rpc::RpcErrorCode;
 use tokio::net::UdpSocket;
 use tokio_util::sync::CancellationToken;
 
@@ -9,10 +10,10 @@ use crate::HostRpcError;
 
 use super::codec::{decode_frame_meta, encode_frame_meta};
 use super::error::{is_recoverable_pressure_error, rpc_error};
-use super::session::send_tunnel_error_with_sender;
 use super::session::{AttachmentState, reactivate_retained_udp_bind};
-use super::tunnel::send_tunnel_error;
+use super::session::{send_tunnel_error_code_with_sender, send_tunnel_error_with_sender};
 use super::tunnel::tunnel_mode;
+use super::tunnel::{send_tunnel_error, send_tunnel_error_code};
 use super::{
     EndpointMeta, EndpointOkMeta, READ_BUF_SIZE, TransportUdpBind, TunnelMode, TunnelState,
     UdpDatagramMeta, send_forward_drop_report,
@@ -29,15 +30,15 @@ pub(super) async fn tunnel_udp_bind(
         } => {
             let meta: EndpointMeta = decode_frame_meta(&frame)?;
             let endpoint = normalize_endpoint(&meta.endpoint)
-                .map_err(|err| rpc_error("invalid_endpoint", err.to_string()))?;
+                .map_err(|err| rpc_error(RpcErrorCode::InvalidEndpoint, err.to_string()))?;
             let socket = Arc::new(
                 UdpSocket::bind(&endpoint)
                     .await
-                    .map_err(|err| rpc_error("port_bind_failed", err.to_string()))?,
+                    .map_err(|err| rpc_error(RpcErrorCode::PortBindFailed, err.to_string()))?,
             );
             let bound_endpoint = socket
                 .local_addr()
-                .map_err(|err| rpc_error("port_bind_failed", err.to_string()))?
+                .map_err(|err| rpc_error(RpcErrorCode::PortBindFailed, err.to_string()))?
                 .to_string();
             session
                 .replace_udp_bind(
@@ -60,18 +61,18 @@ pub(super) async fn tunnel_udp_bind(
             reactivate_retained_udp_bind(&session).await
         }
         TunnelMode::Listen { .. } => Err(rpc_error(
-            "invalid_port_tunnel",
+            RpcErrorCode::InvalidPortTunnel,
             "udp bind requires an open udp listen tunnel",
         )),
         TunnelMode::Connect {
             protocol: TunnelForwardProtocol::Udp,
         } => tunnel_udp_bind_transport_owned(tunnel, frame).await,
         TunnelMode::Connect { .. } => Err(rpc_error(
-            "invalid_port_tunnel",
+            RpcErrorCode::InvalidPortTunnel,
             "udp bind requires an open udp connect tunnel",
         )),
         TunnelMode::Unopened => Err(rpc_error(
-            "invalid_port_tunnel",
+            RpcErrorCode::InvalidPortTunnel,
             "udp bind requires tunnel open",
         )),
     }
@@ -83,15 +84,15 @@ pub(super) async fn tunnel_udp_bind_transport_owned(
 ) -> Result<(), HostRpcError> {
     let meta: EndpointMeta = decode_frame_meta(&frame)?;
     let endpoint = normalize_endpoint(&meta.endpoint)
-        .map_err(|err| rpc_error("invalid_endpoint", err.to_string()))?;
+        .map_err(|err| rpc_error(RpcErrorCode::InvalidEndpoint, err.to_string()))?;
     let socket = Arc::new(
         UdpSocket::bind(&endpoint)
             .await
-            .map_err(|err| rpc_error("port_bind_failed", err.to_string()))?,
+            .map_err(|err| rpc_error(RpcErrorCode::PortBindFailed, err.to_string()))?,
     );
     let bound_endpoint = socket
         .local_addr()
-        .map_err(|err| rpc_error("port_bind_failed", err.to_string()))?
+        .map_err(|err| rpc_error(RpcErrorCode::PortBindFailed, err.to_string()))?
         .to_string();
     let permit = tunnel.state.port_forward_limiter.try_acquire_udp_bind()?;
     let stream_cancel = tunnel.cancel.child_token();
@@ -141,7 +142,7 @@ pub(super) async fn tunnel_udp_read_loop_transport_owned(
                 let _ = send_tunnel_error(
                     &tunnel,
                     stream_id,
-                    "port_read_failed",
+                    RpcErrorCode::PortReadFailed,
                     err.to_string(),
                     false,
                 )
@@ -154,7 +155,14 @@ pub(super) async fn tunnel_udp_read_loop_transport_owned(
         }) {
             Ok(meta) => meta,
             Err(err) => {
-                let _ = send_tunnel_error(&tunnel, stream_id, err.code, err.message, false).await;
+                let _ = send_tunnel_error_code(
+                    &tunnel,
+                    stream_id,
+                    err.code.as_str(),
+                    err.message,
+                    false,
+                )
+                .await;
                 return;
             }
         };
@@ -173,18 +181,20 @@ pub(super) async fn tunnel_udp_read_loop_transport_owned(
                     &tunnel.tx,
                     stream_id,
                     ForwardDropKind::UdpDatagram,
-                    err.code,
+                    err.code.as_str(),
                     err.message.clone(),
                 )
                 .await;
                 tracing::debug!(
-                    code = err.code,
+                    code = %err.code,
                     message = %err.message,
                     "dropping udp datagram due to local port tunnel pressure"
                 );
                 continue;
             }
-            let _ = send_tunnel_error(&tunnel, stream_id, err.code, err.message, false).await;
+            let _ =
+                send_tunnel_error_code(&tunnel, stream_id, err.code.as_str(), err.message, false)
+                    .await;
             if let Some(bind) = tunnel.udp_binds.lock().await.remove(&stream_id) {
                 bind.cancel.cancel();
             }
@@ -211,7 +221,7 @@ pub(super) async fn tunnel_udp_read_loop_session_owned(
                 let _ = send_tunnel_error_with_sender(
                     &attachment.tx,
                     stream_id,
-                    "port_read_failed",
+                    RpcErrorCode::PortReadFailed,
                     err.to_string(),
                     false,
                 )
@@ -224,10 +234,10 @@ pub(super) async fn tunnel_udp_read_loop_session_owned(
         }) {
             Ok(meta) => meta,
             Err(err) => {
-                let _ = send_tunnel_error_with_sender(
+                let _ = send_tunnel_error_code_with_sender(
                     &attachment.tx,
                     stream_id,
-                    err.code,
+                    err.code.as_str(),
                     err.message,
                     false,
                 )
@@ -251,21 +261,21 @@ pub(super) async fn tunnel_udp_read_loop_session_owned(
                     &attachment.tx,
                     stream_id,
                     ForwardDropKind::UdpDatagram,
-                    err.code,
+                    err.code.as_str(),
                     err.message.clone(),
                 )
                 .await;
                 tracing::debug!(
-                    code = err.code,
+                    code = %err.code,
                     message = %err.message,
                     "dropping udp datagram due to local port tunnel pressure"
                 );
                 continue;
             }
-            let _ = send_tunnel_error_with_sender(
+            let _ = send_tunnel_error_code_with_sender(
                 &attachment.tx,
                 stream_id,
-                err.code,
+                err.code.as_str(),
                 err.message,
                 false,
             )
@@ -289,13 +299,13 @@ pub(super) async fn tunnel_udp_datagram(
             session,
         } => session.udp_socket(frame.stream_id).await.ok_or_else(|| {
             rpc_error(
-                "unknown_port_bind",
+                RpcErrorCode::UnknownPortBind,
                 format!("unknown tunnel udp stream `{}`", frame.stream_id),
             )
         })?,
         TunnelMode::Listen { .. } => {
             return Err(rpc_error(
-                "invalid_port_tunnel",
+                RpcErrorCode::InvalidPortTunnel,
                 "udp datagram requires an open udp tunnel",
             ));
         }
@@ -309,19 +319,19 @@ pub(super) async fn tunnel_udp_datagram(
             .map(|bind| bind.socket.clone())
             .ok_or_else(|| {
                 rpc_error(
-                    "unknown_port_bind",
+                    RpcErrorCode::UnknownPortBind,
                     format!("unknown tunnel udp stream `{}`", frame.stream_id),
                 )
             })?,
         TunnelMode::Connect { .. } => {
             return Err(rpc_error(
-                "invalid_port_tunnel",
+                RpcErrorCode::InvalidPortTunnel,
                 "udp datagram requires an open udp tunnel",
             ));
         }
         TunnelMode::Unopened => {
             return Err(rpc_error(
-                "invalid_port_tunnel",
+                RpcErrorCode::InvalidPortTunnel,
                 "udp datagram requires tunnel open",
             ));
         }
@@ -329,6 +339,6 @@ pub(super) async fn tunnel_udp_datagram(
     socket
         .send_to(&frame.data, &meta.peer)
         .await
-        .map_err(|err| rpc_error("port_write_failed", err.to_string()))?;
+        .map_err(|err| rpc_error(RpcErrorCode::PortWriteFailed, err.to_string()))?;
     Ok(())
 }

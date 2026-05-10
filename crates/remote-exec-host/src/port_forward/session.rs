@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicU32, AtomicU64};
 use std::time::Instant;
 
 use remote_exec_proto::port_tunnel::{Frame, FrameType};
+use remote_exec_proto::rpc::RpcErrorCode;
 use tokio::net::{TcpListener, UdpSocket};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -263,10 +264,12 @@ pub(super) async fn reactivate_retained_udp_bind(
     let Some((stream_id, socket)) = session.udp_bind_snapshot().await else {
         return Ok(());
     };
-    let attachment = session
-        .current_attachment()
-        .await
-        .ok_or_else(|| rpc_error("port_tunnel_closed", "port tunnel attachment is closed"))?;
+    let attachment = session.current_attachment().await.ok_or_else(|| {
+        rpc_error(
+            RpcErrorCode::PortTunnelClosed,
+            "port tunnel attachment is closed",
+        )
+    })?;
     let stream_cancel = attachment.cancel.child_token();
     if let Some(existing) = attachment.udp_readers.lock().await.insert(
         stream_id,
@@ -288,6 +291,16 @@ pub(super) async fn reactivate_retained_udp_bind(
 pub(super) async fn send_tunnel_error_with_sender(
     tx: &TunnelSender,
     stream_id: u32,
+    code: RpcErrorCode,
+    message: impl Into<String>,
+    fatal: bool,
+) -> Result<(), HostRpcError> {
+    send_tunnel_error_code_with_sender(tx, stream_id, code.wire_value(), message, fatal).await
+}
+
+pub(super) async fn send_tunnel_error_code_with_sender(
+    tx: &TunnelSender,
+    stream_id: u32,
     code: impl Into<String>,
     message: impl Into<String>,
     fatal: bool,
@@ -306,5 +319,10 @@ pub(super) async fn send_tunnel_error_with_sender(
         data: Vec::new(),
     })
     .await
-    .map_err(|_| rpc_error("port_tunnel_closed", "port tunnel writer is closed"))
+    .map_err(|_| {
+        rpc_error(
+            RpcErrorCode::PortTunnelClosed,
+            "port tunnel writer is closed",
+        )
+    })
 }

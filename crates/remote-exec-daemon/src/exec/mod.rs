@@ -3,7 +3,9 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use remote_exec_proto::rpc::{ExecResponse, ExecStartRequest, ExecWriteRequest, RpcErrorBody};
+use remote_exec_proto::rpc::{
+    ExecResponse, ExecStartRequest, ExecWriteRequest, RpcErrorBody, RpcErrorCode,
+};
 
 pub use remote_exec_host::exec::session;
 
@@ -28,7 +30,7 @@ pub async fn exec_write(
 }
 
 pub(crate) fn rpc_error(
-    code: &'static str,
+    code: RpcErrorCode,
     message: impl Into<String>,
 ) -> (StatusCode, Json<RpcErrorBody>) {
     crate::rpc_error::host_rpc_error_response(remote_exec_host::exec::rpc_error(code, message))

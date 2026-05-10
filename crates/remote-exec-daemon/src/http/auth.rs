@@ -8,7 +8,7 @@ use axum::{
     Json,
     response::{IntoResponse, Response},
 };
-use remote_exec_proto::rpc::RpcErrorBody;
+use remote_exec_proto::rpc::{RpcErrorBody, RpcErrorCode};
 
 use crate::config::DaemonConfig;
 
@@ -33,10 +33,10 @@ pub async fn require_http_auth(
     (
         StatusCode::UNAUTHORIZED,
         [(WWW_AUTHENTICATE, "Bearer")],
-        Json(RpcErrorBody {
-            code: "unauthorized".to_string(),
-            message: "missing or invalid bearer token".to_string(),
-        }),
+        Json(RpcErrorBody::new(
+            RpcErrorCode::Unauthorized,
+            "missing or invalid bearer token",
+        )),
     )
         .into_response()
 }

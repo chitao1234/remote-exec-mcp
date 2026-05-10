@@ -3,6 +3,8 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
+use remote_exec_proto::rpc::RpcErrorCode;
+
 use crate::HostRpcError;
 
 use super::error::rpc_error;
@@ -22,7 +24,7 @@ impl TunnelSessionStore {
         let mut sessions = self.sessions.lock().await;
         if sessions.len() >= max_sessions {
             return Err(rpc_error(
-                "port_tunnel_limit_exceeded",
+                RpcErrorCode::PortTunnelLimitExceeded,
                 "retained port tunnel session limit reached",
             ));
         }

@@ -1,4 +1,5 @@
 use crate::HostRpcError;
+use remote_exec_proto::rpc::RpcErrorCode;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SessionCloseMode {
@@ -7,16 +8,12 @@ pub(super) enum SessionCloseMode {
     TerminalFailure,
 }
 
-pub(super) fn rpc_error(code: &'static str, message: impl Into<String>) -> HostRpcError {
+pub(super) fn rpc_error(code: RpcErrorCode, message: impl Into<String>) -> HostRpcError {
     let message = message.into();
-    tracing::warn!(code, %message, "daemon request rejected");
-    HostRpcError {
-        status: 400,
-        code,
-        message,
-    }
+    tracing::warn!(code = code.wire_value(), %message, "daemon request rejected");
+    HostRpcError::new(400, code, message)
 }
 
 pub(super) fn is_recoverable_pressure_error(error: &HostRpcError) -> bool {
-    error.code == "port_tunnel_limit_exceeded"
+    error.code() == Some(RpcErrorCode::PortTunnelLimitExceeded)
 }

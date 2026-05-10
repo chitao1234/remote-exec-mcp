@@ -3,7 +3,7 @@ use axum::extract::Request;
 use axum::http::{StatusCode, Version};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use remote_exec_proto::rpc::RpcErrorBody;
+use remote_exec_proto::rpc::{RpcErrorBody, RpcErrorCode};
 
 pub async fn require_http_11(request: Request, next: Next) -> Response {
     if request.version() == Version::HTTP_11 {
@@ -12,10 +12,10 @@ pub async fn require_http_11(request: Request, next: Next) -> Response {
 
     (
         StatusCode::BAD_REQUEST,
-        Json(RpcErrorBody {
-            code: "bad_request".to_string(),
-            message: "only HTTP/1.1 is supported".to_string(),
-        }),
+        Json(RpcErrorBody::new(
+            RpcErrorCode::BadRequest,
+            "only HTTP/1.1 is supported",
+        )),
     )
         .into_response()
 }

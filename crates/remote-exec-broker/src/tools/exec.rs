@@ -3,13 +3,14 @@ use std::time::Instant;
 
 use remote_exec_proto::path::{PathPolicy, linux_path_policy, windows_path_policy};
 use remote_exec_proto::public::{CommandToolResult, ExecCommandInput, WriteStdinInput};
-use remote_exec_proto::rpc::{ExecResponse, ExecStartRequest, ExecWarning, ExecWriteRequest};
+use remote_exec_proto::rpc::{
+    ExecResponse, ExecStartRequest, ExecWarning, ExecWriteRequest, RpcErrorCode,
+};
 
 use super::exec_format::{
     format_command_text, format_intercepted_patch_text, format_poll_text, prepend_warning_text,
 };
 use super::exec_intercept::maybe_intercept_apply_patch;
-use crate::daemon_client::RpcErrorCode;
 use crate::mcp_server::ToolCallOutput;
 
 const APPLY_PATCH_WARNING_CODE: &str = "apply_patch_via_exec_command";

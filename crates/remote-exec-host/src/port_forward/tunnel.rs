@@ -7,6 +7,7 @@ use remote_exec_proto::port_tunnel::{
     Frame, FrameType, TunnelCloseMeta, TunnelForwardProtocol, TunnelLimitSummary, TunnelOpenMeta,
     TunnelReadyMeta, TunnelRole, read_frame, read_preface, write_frame,
 };
+use remote_exec_proto::rpc::RpcErrorCode;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, mpsc};
 
@@ -45,7 +46,7 @@ where
     let (mut reader, mut writer) = tokio::io::split(stream);
     read_preface(&mut reader)
         .await
-        .map_err(|err| rpc_error("invalid_port_tunnel", err.to_string()))?;
+        .map_err(|err| rpc_error(RpcErrorCode::InvalidPortTunnel, err.to_string()))?;
 
     let (tx, mut rx) = mpsc::channel::<QueuedFrame>(128);
     let sender = TunnelSender {
@@ -117,9 +118,9 @@ where
                     Ok(frame) => frame,
                     Err(err) if err.kind() == ErrorKind::UnexpectedEof => return Ok(()),
                     Err(err) => {
-                        let _ = send_tunnel_error(&tunnel, 0, "invalid_port_tunnel", err.to_string(), true)
+                        let _ = send_tunnel_error(&tunnel, 0, RpcErrorCode::InvalidPortTunnel, err.to_string(), true)
                             .await;
-                        return Err(rpc_error("invalid_port_tunnel", err.to_string()));
+                        return Err(rpc_error(RpcErrorCode::InvalidPortTunnel, err.to_string()));
                     }
                 }
             }
@@ -128,7 +129,8 @@ where
         let stream_id = frame.stream_id;
         if let Err(err) = handle_tunnel_frame(tunnel.clone(), frame).await {
             let _ =
-                send_tunnel_error(&tunnel, stream_id, err.code, err.message.clone(), false).await;
+                send_tunnel_error_code(&tunnel, stream_id, err.code, err.message.clone(), false)
+                    .await;
         }
     }
 }
@@ -159,7 +161,7 @@ pub(super) async fn handle_tunnel_frame(
         FrameType::UdpBind => tunnel_udp_bind(tunnel, frame).await,
         FrameType::UdpDatagram => tunnel_udp_datagram(&tunnel, frame).await,
         _ => Err(rpc_error(
-            "invalid_port_tunnel",
+            RpcErrorCode::InvalidPortTunnel,
             format!("unexpected frame type `{:?}` from broker", frame.frame_type),
         )),
     }
@@ -171,7 +173,7 @@ pub(super) async fn tunnel_open(
 ) -> Result<(), HostRpcError> {
     if frame.stream_id != 0 {
         return Err(rpc_error(
-            "invalid_port_tunnel",
+            RpcErrorCode::InvalidPortTunnel,
             "tunnel open must use stream_id 0",
         ));
     }
@@ -189,7 +191,7 @@ async fn tunnel_open_listen(
 ) -> Result<(), HostRpcError> {
     if !matches!(*tunnel.open_mode.lock().await, TunnelMode::Unopened) {
         return Err(rpc_error(
-            "port_tunnel_already_attached",
+            RpcErrorCode::PortTunnelAlreadyAttached,
             "port tunnel is already open",
         ));
     }
@@ -201,13 +203,16 @@ async fn tunnel_open_listen(
                 .get(&session_id)
                 .await
                 .ok_or_else(|| {
-                    rpc_error("unknown_port_tunnel_session", "unknown port tunnel session")
+                    rpc_error(
+                        RpcErrorCode::UnknownPortTunnelSession,
+                        "unknown port tunnel session",
+                    )
                 })?;
             if session.is_expired().await {
                 tunnel.state.port_forward_sessions.remove(&session_id).await;
                 session.close_retained_resources().await;
                 return Err(rpc_error(
-                    "port_tunnel_resume_expired",
+                    RpcErrorCode::PortTunnelResumeExpired,
                     "port tunnel resume expired",
                 ));
             }
@@ -262,7 +267,7 @@ async fn tunnel_open_connect(
 ) -> Result<(), HostRpcError> {
     if !matches!(*tunnel.open_mode.lock().await, TunnelMode::Unopened) {
         return Err(rpc_error(
-            "port_tunnel_already_attached",
+            RpcErrorCode::PortTunnelAlreadyAttached,
             "port tunnel is already open",
         ));
     }
@@ -288,7 +293,7 @@ async fn tunnel_open_connect(
 async fn tunnel_close(tunnel: Arc<TunnelState>, frame: Frame) -> Result<(), HostRpcError> {
     if frame.stream_id != 0 {
         return Err(rpc_error(
-            "invalid_port_tunnel",
+            RpcErrorCode::InvalidPortTunnel,
             "tunnel close must use stream_id 0",
         ));
     }
@@ -336,7 +341,7 @@ fn ensure_tunnel_generation(
     let current_generation = tunnel.generation.load(Ordering::Acquire);
     if frame_generation != current_generation {
         return Err(rpc_error(
-            "port_tunnel_generation_mismatch",
+            RpcErrorCode::PortTunnelGenerationMismatch,
             format!(
                 "frame generation `{frame_generation}` does not match tunnel generation `{current_generation}`"
             ),
@@ -350,6 +355,16 @@ pub(super) async fn tunnel_mode(tunnel: &Arc<TunnelState>) -> TunnelMode {
 }
 
 pub(super) async fn send_tunnel_error(
+    tunnel: &TunnelState,
+    stream_id: u32,
+    code: RpcErrorCode,
+    message: impl Into<String>,
+    fatal: bool,
+) -> Result<(), HostRpcError> {
+    send_tunnel_error_code(tunnel, stream_id, code.wire_value(), message, fatal).await
+}
+
+pub(super) async fn send_tunnel_error_code(
     tunnel: &TunnelState,
     stream_id: u32,
     code: impl Into<String>,

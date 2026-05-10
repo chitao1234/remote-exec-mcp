@@ -11,7 +11,7 @@ use hyper_util::rt::TokioIo;
 use remote_exec_proto::port_tunnel::{
     TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, UPGRADE_TOKEN,
 };
-use remote_exec_proto::rpc::RpcErrorBody;
+use remote_exec_proto::rpc::{RpcErrorBody, RpcErrorCode};
 
 pub async fn tunnel(
     State(state): State<Arc<crate::AppState>>,
@@ -33,7 +33,7 @@ pub async fn tunnel(
                 )
                 .await
                 {
-                    tracing::warn!(error = %err.message, code = err.code, "port tunnel ended with error");
+                    tracing::warn!(error = %err.message, code = %err.code, "port tunnel ended with error");
                 }
             }
             Err(err) => {
@@ -90,9 +90,6 @@ fn header_eq(headers: &HeaderMap, name: &str, expected: &str) -> bool {
 fn bad_upgrade_request(message: impl Into<String>) -> (StatusCode, Json<RpcErrorBody>) {
     (
         StatusCode::BAD_REQUEST,
-        Json(RpcErrorBody {
-            code: "bad_request".to_string(),
-            message: message.into(),
-        }),
+        Json(RpcErrorBody::new(RpcErrorCode::BadRequest, message)),
     )
 }

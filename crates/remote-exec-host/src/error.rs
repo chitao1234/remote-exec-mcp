@@ -1,20 +1,32 @@
 use std::fmt;
 
-use remote_exec_proto::rpc::RpcErrorBody;
+use remote_exec_proto::rpc::{RpcErrorBody, RpcErrorCode};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostRpcError {
     pub status: u16,
-    pub code: &'static str,
+    pub code: String,
     pub message: String,
 }
 
 impl HostRpcError {
+    pub fn new(status: u16, code: RpcErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            code: code.wire_value().to_string(),
+            message: message.into(),
+        }
+    }
+
+    pub fn code(&self) -> Option<RpcErrorCode> {
+        RpcErrorCode::from_wire_value(&self.code)
+    }
+
     pub fn into_rpc_parts(self) -> (u16, RpcErrorBody) {
         (
             self.status,
             RpcErrorBody {
-                code: self.code.to_string(),
+                code: self.code,
                 message: self.message,
             },
         )
@@ -77,17 +89,21 @@ impl TransferError {
         Self::new(TransferErrorKind::Internal, message)
     }
 
-    pub fn code(&self) -> &'static str {
+    pub fn code(&self) -> RpcErrorCode {
         match self.kind {
-            TransferErrorKind::SandboxDenied => "sandbox_denied",
-            TransferErrorKind::PathNotAbsolute => "transfer_path_not_absolute",
-            TransferErrorKind::DestinationExists => "transfer_destination_exists",
-            TransferErrorKind::ParentMissing => "transfer_parent_missing",
-            TransferErrorKind::DestinationUnsupported => "transfer_destination_unsupported",
-            TransferErrorKind::CompressionUnsupported => "transfer_compression_unsupported",
-            TransferErrorKind::SourceUnsupported => "transfer_source_unsupported",
-            TransferErrorKind::SourceMissing => "transfer_source_missing",
-            TransferErrorKind::Internal => "internal_error",
+            TransferErrorKind::SandboxDenied => RpcErrorCode::SandboxDenied,
+            TransferErrorKind::PathNotAbsolute => RpcErrorCode::TransferPathNotAbsolute,
+            TransferErrorKind::DestinationExists => RpcErrorCode::TransferDestinationExists,
+            TransferErrorKind::ParentMissing => RpcErrorCode::TransferParentMissing,
+            TransferErrorKind::DestinationUnsupported => {
+                RpcErrorCode::TransferDestinationUnsupported
+            }
+            TransferErrorKind::CompressionUnsupported => {
+                RpcErrorCode::TransferCompressionUnsupported
+            }
+            TransferErrorKind::SourceUnsupported => RpcErrorCode::TransferSourceUnsupported,
+            TransferErrorKind::SourceMissing => RpcErrorCode::TransferSourceMissing,
+            TransferErrorKind::Internal => RpcErrorCode::Internal,
         }
     }
 
@@ -95,19 +111,19 @@ impl TransferError {
         let code = self.code();
         let message = self.message;
         if self.kind == TransferErrorKind::Internal {
-            tracing::error!(code, %message, "daemon internal transfer error");
+            tracing::error!(code = code.wire_value(), %message, "daemon internal transfer error");
         } else {
-            tracing::warn!(code, %message, "daemon request rejected");
+            tracing::warn!(code = code.wire_value(), %message, "daemon request rejected");
         }
-        HostRpcError {
-            status: if self.kind == TransferErrorKind::Internal {
+        HostRpcError::new(
+            if self.kind == TransferErrorKind::Internal {
                 500
             } else {
                 400
             },
             code,
             message,
-        }
+        )
     }
 
     fn new(kind: TransferErrorKind, message: impl Into<String>) -> Self {
@@ -167,14 +183,14 @@ impl ImageError {
         Self::new(ImageErrorKind::Internal, message)
     }
 
-    pub fn code(&self) -> &'static str {
+    pub fn code(&self) -> RpcErrorCode {
         match self.kind {
-            ImageErrorKind::SandboxDenied => "sandbox_denied",
-            ImageErrorKind::InvalidDetail => "invalid_detail",
-            ImageErrorKind::Missing => "image_missing",
-            ImageErrorKind::NotFile => "image_not_file",
-            ImageErrorKind::DecodeFailed => "image_decode_failed",
-            ImageErrorKind::Internal => "internal_error",
+            ImageErrorKind::SandboxDenied => RpcErrorCode::SandboxDenied,
+            ImageErrorKind::InvalidDetail => RpcErrorCode::InvalidDetail,
+            ImageErrorKind::Missing => RpcErrorCode::ImageMissing,
+            ImageErrorKind::NotFile => RpcErrorCode::ImageNotFile,
+            ImageErrorKind::DecodeFailed => RpcErrorCode::ImageDecodeFailed,
+            ImageErrorKind::Internal => RpcErrorCode::Internal,
         }
     }
 
@@ -182,19 +198,19 @@ impl ImageError {
         let code = self.code();
         let message = self.message;
         if self.kind == ImageErrorKind::Internal {
-            tracing::error!(code, %message, "daemon internal image error");
+            tracing::error!(code = code.wire_value(), %message, "daemon internal image error");
         } else {
-            tracing::warn!(code, %message, "daemon request rejected");
+            tracing::warn!(code = code.wire_value(), %message, "daemon request rejected");
         }
-        HostRpcError {
-            status: if self.kind == ImageErrorKind::Internal {
+        HostRpcError::new(
+            if self.kind == ImageErrorKind::Internal {
                 500
             } else {
                 400
             },
             code,
             message,
-        }
+        )
     }
 
     fn new(kind: ImageErrorKind, message: impl Into<String>) -> Self {
@@ -222,6 +238,10 @@ mod tests {
         let err = TransferError::internal("transfer boom").into_host_rpc_error();
         assert_eq!(err.status, 500);
         assert_eq!(err.code, "internal_error");
+        assert_eq!(
+            err.code(),
+            Some(remote_exec_proto::rpc::RpcErrorCode::Internal)
+        );
         assert_eq!(err.message, "transfer boom");
     }
 
@@ -230,6 +250,10 @@ mod tests {
         let err = ImageError::internal("image boom").into_host_rpc_error();
         assert_eq!(err.status, 500);
         assert_eq!(err.code, "internal_error");
+        assert_eq!(
+            err.code(),
+            Some(remote_exec_proto::rpc::RpcErrorCode::Internal)
+        );
         assert_eq!(err.message, "image boom");
     }
 
@@ -238,6 +262,10 @@ mod tests {
         let err = ImageError::decode_failed("bad image bytes").into_host_rpc_error();
         assert_eq!(err.status, 400);
         assert_eq!(err.code, "image_decode_failed");
+        assert_eq!(
+            err.code(),
+            Some(remote_exec_proto::rpc::RpcErrorCode::ImageDecodeFailed)
+        );
         assert_eq!(err.message, "bad image bytes");
     }
 }
