@@ -345,21 +345,19 @@ void start_session_pump(const std::shared_ptr<LiveSession>& session) {
     if (session->pump_started) {
         return;
     }
-    session->pump_thread_ = new std::thread(pump_session_output, session);
+    session->pump_thread_.reset(new std::thread(pump_session_output, session));
     session->pump_started = true;
 }
 
 void join_session_pump(LiveSession* session) {
-    std::thread* thread = NULL;
+    std::unique_ptr<std::thread> thread;
     {
         BasicLockGuard lock(session->mutex_);
-        thread = session->pump_thread_;
-        session->pump_thread_ = NULL;
+        thread.swap(session->pump_thread_);
         session->pump_started = false;
     }
-    if (thread != NULL) {
+    if (thread.get() != NULL) {
         thread->join();
-        delete thread;
     }
 }
 #endif
@@ -464,9 +462,6 @@ LiveSession::LiveSession()
       closing(false),
       pump_started(false)
 #ifdef _WIN32
-      ,
-      pump_thread_(NULL)
-#else
       ,
       pump_thread_(NULL)
 #endif

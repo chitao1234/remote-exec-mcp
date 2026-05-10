@@ -67,7 +67,7 @@ struct LiveSession {
 #ifdef _WIN32
     HANDLE pump_thread_;
 #else
-    std::thread* pump_thread_;
+    std::unique_ptr<std::thread> pump_thread_;
 #endif
 };
 
