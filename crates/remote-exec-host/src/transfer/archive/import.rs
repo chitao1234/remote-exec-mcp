@@ -64,16 +64,14 @@ async fn prepare_import_destination(
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<(std::path::PathBuf, bool)> {
-    if !crate::host_path::is_input_path_absolute(&request.destination_path, windows_posix_root) {
-        return Err(TransferError::path_not_absolute(format!(
-            "transfer destination path `{}` is not absolute",
-            request.destination_path
-        ))
-        .into());
-    }
     let destination = host_path(&request.destination_path, windows_posix_root)?;
-    authorize_path(host_policy(), sandbox, SandboxAccess::Write, &destination)
-        .map_err(|err| TransferError::sandbox_denied(err.to_string()))?;
+    authorize_path(host_policy(), sandbox, SandboxAccess::Write, &destination).map_err(|err| {
+        crate::transfer::transfer_error_from_sandbox_error(
+            "transfer destination path",
+            &request.destination_path,
+            err,
+        )
+    })?;
 
     let replaced = prepare_destination(&destination, request).await?;
     Ok((destination, replaced))

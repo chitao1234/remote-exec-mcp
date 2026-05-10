@@ -118,15 +118,14 @@ async fn prepare_export_path(
     windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<PreparedExport> {
     let source_text = path.to_string();
-    if !crate::host_path::is_input_path_absolute(&source_text, windows_posix_root) {
-        return Err(TransferError::path_not_absolute(format!(
-            "transfer source path `{source_text}` is not absolute"
-        ))
-        .into());
-    }
     let source_path = host_path(&source_text, windows_posix_root)?;
-    authorize_path(host_policy(), sandbox, SandboxAccess::Read, &source_path)
-        .map_err(|err| TransferError::sandbox_denied(err.to_string()))?;
+    authorize_path(host_policy(), sandbox, SandboxAccess::Read, &source_path).map_err(|err| {
+        crate::transfer::transfer_error_from_sandbox_error(
+            "transfer source path",
+            &source_text,
+            err,
+        )
+    })?;
 
     let metadata = tokio::fs::symlink_metadata(&source_path)
         .await
@@ -426,13 +425,13 @@ fn append_source_archive<W: Write>(
     builder: &mut tar::Builder<W>,
     source: &BundledArchiveSource,
 ) -> anyhow::Result<Vec<TransferWarning>> {
-    let root_name =
-        basename_for_policy(source.source_policy, &source.source_path).ok_or_else(|| {
-            anyhow::anyhow!(
-                "transfer source path `{}` has no usable basename for multi-source transfer",
-                source.source_path
-            )
-        })?;
+    let source_path = source.source_path.to_string_lossy();
+    let root_name = basename_for_policy(source.source_policy, &source_path).ok_or_else(|| {
+        anyhow::anyhow!(
+            "transfer source path `{}` has no usable basename for multi-source transfer",
+            source.source_path.display()
+        )
+    })?;
     let reader = open_archive_reader(&source.archive_path, &source.compression)?;
     let mut archive = tar::Archive::new(reader);
 

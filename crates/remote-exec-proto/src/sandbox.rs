@@ -40,7 +40,7 @@ impl SandboxAccess {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CompiledFilesystemSandbox {
     exec_cwd: CompiledSandboxPathList,
     read: CompiledSandboxPathList,
@@ -64,13 +64,14 @@ struct CompiledSandboxPathList {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SandboxError {
-    message: String,
+pub enum SandboxError {
+    Denied { message: String },
+    NotAbsolute { path: PathBuf },
 }
 
 impl SandboxError {
-    fn new(message: impl Into<String>) -> Self {
-        Self {
+    fn denied(message: impl Into<String>) -> Self {
+        Self::Denied {
             message: message.into(),
         }
     }
@@ -78,7 +79,10 @@ impl SandboxError {
 
 impl std::fmt::Display for SandboxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
+        match self {
+            Self::Denied { message } => f.write_str(message),
+            Self::NotAbsolute { path } => write!(f, "path `{}` is not absolute", path.display()),
+        }
     }
 }
 
@@ -101,6 +105,12 @@ pub fn authorize_path(
     access: SandboxAccess,
     path: &Path,
 ) -> Result<(), SandboxError> {
+    if !is_absolute_for_policy(policy, &path.to_string_lossy()) {
+        return Err(SandboxError::NotAbsolute {
+            path: path.to_path_buf(),
+        });
+    }
+
     let Some(sandbox) = sandbox else {
         return Ok(());
     };
@@ -112,7 +122,7 @@ pub fn authorize_path(
         .iter()
         .find(|deny_root| path_is_within(policy, deny_root, &resolved))
     {
-        return Err(SandboxError::new(format!(
+        return Err(SandboxError::denied(format!(
             "{} access to `{}` is denied by sandbox rule `{}`",
             access.label(),
             resolved.display(),
@@ -129,7 +139,7 @@ pub fn authorize_path(
         return Ok(());
     }
 
-    Err(SandboxError::new(format!(
+    Err(SandboxError::denied(format!(
         "{} access to `{}` is outside the configured sandbox",
         access.label(),
         resolved.display()
@@ -162,14 +172,14 @@ fn compile_root(
     raw: &str,
 ) -> Result<PathBuf, SandboxError> {
     if !is_absolute_for_policy(policy, raw) {
-        return Err(SandboxError::new(format!(
+        return Err(SandboxError::denied(format!(
             "sandbox {access_label}.{list_label} path `{raw}` is not absolute"
         )));
     }
 
     let normalized = PathBuf::from(normalize_for_system(policy, raw));
     canonicalize_for_sandbox(&normalized).map_err(|err| {
-        SandboxError::new(format!(
+        SandboxError::denied(format!(
             "sandbox {access_label}.{list_label} path `{}` is invalid: {err}",
             normalized.display()
         ))
@@ -192,21 +202,21 @@ fn canonicalize_for_sandbox(path: &Path) -> Result<PathBuf, SandboxError> {
             }
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                 let component = probe.file_name().ok_or_else(|| {
-                    SandboxError::new(format!(
+                    SandboxError::denied(format!(
                         "unable to resolve an existing ancestor for `{}`",
                         normalized.display()
                     ))
                 })?;
                 missing_components.push(component.to_os_string());
                 probe = probe.parent().ok_or_else(|| {
-                    SandboxError::new(format!(
+                    SandboxError::denied(format!(
                         "unable to resolve an existing ancestor for `{}`",
                         normalized.display()
                     ))
                 })?;
             }
             Err(err) => {
-                return Err(SandboxError::new(format!(
+                return Err(SandboxError::denied(format!(
                     "unable to canonicalize `{}`: {err}",
                     normalized.display()
                 )));
@@ -259,8 +269,8 @@ fn component_eq(policy: PathPolicy, left: Component<'_>, right: Component<'_>) -
 #[cfg(test)]
 mod tests {
     use super::{
-        FilesystemSandbox, SandboxAccess, SandboxPathList, authorize_path,
-        compile_filesystem_sandbox,
+        CompiledFilesystemSandbox, FilesystemSandbox, SandboxAccess, SandboxError, SandboxPathList,
+        authorize_path, compile_filesystem_sandbox,
     };
     #[cfg(not(windows))]
     use crate::path::linux_path_policy;
@@ -276,6 +286,19 @@ mod tests {
         {
             linux_path_policy()
         }
+    }
+
+    #[test]
+    fn authorize_path_rejects_relative_path_with_distinct_error() {
+        let sandbox = CompiledFilesystemSandbox::default();
+        let err = authorize_path(
+            crate::path::linux_path_policy(),
+            Some(&sandbox),
+            SandboxAccess::Read,
+            std::path::Path::new("relative/path"),
+        )
+        .expect_err("relative path should be rejected");
+        assert!(matches!(err, SandboxError::NotAbsolute { .. }));
     }
 
     #[test]

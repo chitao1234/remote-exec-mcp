@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::host_path;
 use remote_exec_proto::path::PathPolicy;
+use remote_exec_proto::path::normalize_for_system;
 use remote_exec_proto::rpc::{TransferCompression, TransferSourceType, TransferWarning};
 
 mod codec;
@@ -33,7 +34,7 @@ pub struct ExportedArchiveStream {
 }
 
 pub struct BundledArchiveSource {
-    pub source_path: String,
+    pub source_path: PathBuf,
     pub source_policy: PathPolicy,
     pub source_type: TransferSourceType,
     pub compression: TransferCompression,
@@ -50,6 +51,9 @@ pub(crate) fn host_policy() -> PathPolicy {
 }
 
 pub(crate) fn host_path(raw: &str, windows_posix_root: Option<&Path>) -> anyhow::Result<PathBuf> {
-    host_path::resolve_absolute_input_path(raw, windows_posix_root)
-        .ok_or_else(|| anyhow::anyhow!("transfer path `{raw}` is not absolute"))
+    let policy = host_policy();
+    Ok(
+        host_path::resolve_absolute_input_path(raw, windows_posix_root)
+            .unwrap_or_else(|| PathBuf::from(normalize_for_system(policy, raw))),
+    )
 }

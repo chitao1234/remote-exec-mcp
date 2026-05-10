@@ -6,6 +6,7 @@ use remote_exec_proto::rpc::{
     TransferCompression, TransferExportRequest, TransferImportRequest, TransferImportResponse,
     TransferPathInfoRequest, TransferPathInfoResponse,
 };
+use remote_exec_proto::sandbox::{SandboxAccess, SandboxError, authorize_path};
 
 use crate::AppState;
 use crate::error::TransferError;
@@ -14,25 +15,15 @@ pub fn path_info_for_request(
     state: &AppState,
     req: &TransferPathInfoRequest,
 ) -> Result<TransferPathInfoResponse, TransferError> {
-    if !crate::host_path::is_input_path_absolute(
-        &req.path,
-        state.config.windows_posix_root.as_deref(),
-    ) {
-        return Err(TransferError::path_not_absolute(format!(
-            "transfer endpoint path `{}` is not absolute",
-            req.path
-        )));
-    }
-
     let path = archive::host_path(&req.path, state.config.windows_posix_root.as_deref())
         .map_err(|err| TransferError::internal(err.to_string()))?;
-    remote_exec_proto::sandbox::authorize_path(
+    authorize_path(
         archive::host_policy(),
         state.sandbox.as_ref(),
-        remote_exec_proto::sandbox::SandboxAccess::Write,
+        SandboxAccess::Write,
         &path,
     )
-    .map_err(|err| TransferError::sandbox_denied(err.to_string()))?;
+    .map_err(|err| transfer_error_from_sandbox_error("transfer endpoint path", &req.path, err))?;
 
     match std::fs::symlink_metadata(&path) {
         Ok(metadata) => {
@@ -96,4 +87,17 @@ fn ensure_transfer_compression_supported(
         ));
     }
     Ok(())
+}
+
+pub(crate) fn transfer_error_from_sandbox_error(
+    label: &str,
+    raw_path: &str,
+    err: SandboxError,
+) -> TransferError {
+    match err {
+        SandboxError::NotAbsolute { .. } => {
+            TransferError::path_not_absolute(format!("{label} `{raw_path}` is not absolute"))
+        }
+        err => TransferError::sandbox_denied(err.to_string()),
+    }
 }
