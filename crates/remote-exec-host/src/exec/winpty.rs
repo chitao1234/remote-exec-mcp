@@ -160,7 +160,7 @@ pub(crate) fn spawn_winpty(
 
         loop {
             let read_result = match lock_winpty(&reader, "pty reader") {
-                Ok(mut pty) => pty.read_nonblocking(),
+                Ok(pty) => pty.read_nonblocking(),
                 Err(_) => break,
             };
             match read_result {
@@ -172,7 +172,7 @@ pub(crate) fn spawn_winpty(
                 }
                 Ok(_) => {
                     let child_alive = match lock_winpty(&reader_child, "child reader") {
-                        Ok(mut child) => child.is_alive().unwrap_or(false),
+                        Ok(child) => child.is_alive().unwrap_or(false),
                         Err(_) => break,
                     };
                     if child_alive {
