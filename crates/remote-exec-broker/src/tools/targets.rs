@@ -21,10 +21,11 @@ pub async fn list_targets(
                 arch: info.arch,
                 supports_pty: info.supports_pty,
                 supports_port_forward: info.supports_port_forward,
-                port_forward_protocol_version: info
-                    .supports_port_forward
-                    .then_some(info.port_forward_protocol_version)
-                    .unwrap_or(0),
+                port_forward_protocol_version: if info.supports_port_forward {
+                    info.port_forward_protocol_version
+                } else {
+                    0
+                },
             });
         targets.push(ListTargetEntry {
             name: name.clone(),

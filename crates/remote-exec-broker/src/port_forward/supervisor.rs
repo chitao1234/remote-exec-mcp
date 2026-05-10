@@ -324,6 +324,22 @@ struct OpenListenSession {
     limits: TunnelLimitSummary,
 }
 
+struct ForwardOpenContext {
+    store: PortForwardStore,
+    listen_side: SideHandle,
+    connect_side: SideHandle,
+    forward_id: String,
+    listen_endpoint: String,
+    connect_endpoint: String,
+    requested_limits: ForwardPortLimitSummary,
+    kind: ForwardOpenKind,
+}
+
+struct OpenedTunnels {
+    listen: OpenListenSession,
+    connect: OpenDataTunnel,
+}
+
 pub(super) struct OpenDataTunnel {
     pub(super) tunnel: Arc<PortTunnel>,
     pub(super) limits: TunnelLimitSummary,
@@ -380,16 +396,20 @@ async fn open_protocol_forward(
     )
     .await?;
     build_opened_forward(
-        store,
-        listen_side,
-        connect_side,
-        forward_id,
-        listen_endpoint,
-        connect_endpoint,
-        limits,
-        kind,
-        opened_listen,
-        opened_connect,
+        ForwardOpenContext {
+            store,
+            listen_side,
+            connect_side,
+            forward_id,
+            listen_endpoint,
+            connect_endpoint,
+            requested_limits: limits,
+            kind,
+        },
+        OpenedTunnels {
+            listen: opened_listen,
+            connect: opened_connect,
+        },
     )
     .await
 }
@@ -430,25 +450,27 @@ async fn open_connect_tunnel_for_forward(
 }
 
 async fn build_opened_forward(
-    store: PortForwardStore,
-    listen_side: SideHandle,
-    connect_side: SideHandle,
-    forward_id: String,
-    listen_endpoint: String,
-    connect_endpoint: String,
-    requested_limits: ForwardPortLimitSummary,
-    kind: ForwardOpenKind,
-    opened_listen: OpenListenSession,
-    opened_connect: OpenDataTunnel,
+    context: ForwardOpenContext,
+    opened: OpenedTunnels,
 ) -> anyhow::Result<OpenedForward> {
+    let ForwardOpenContext {
+        store,
+        listen_side,
+        connect_side,
+        forward_id,
+        listen_endpoint,
+        connect_endpoint,
+        requested_limits,
+        kind,
+    } = context;
     let OpenListenSession {
         tunnel: listen_tunnel,
         session_id,
         resume_timeout,
         limits: listen_limits,
-    } = opened_listen;
-    let limits = effective_forward_limits(requested_limits, &listen_limits, &opened_connect.limits);
-    let connect_tunnel = opened_connect.tunnel;
+    } = opened.listen;
+    let limits = effective_forward_limits(requested_limits, &listen_limits, &opened.connect.limits);
+    let connect_tunnel = opened.connect.tunnel;
     let listener_stream_id = 1;
     let listener_open_context = open_context(
         kind,
