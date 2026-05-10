@@ -313,6 +313,7 @@ pub struct DaemonFixture {
 }
 
 struct TunnelDropProxy {
+    listen_addr: std::net::SocketAddr,
     active_port_tunnels: Arc<Mutex<Vec<oneshot::Sender<PortTunnelAction>>>>,
     shutdown: Option<oneshot::Sender<()>>,
     handle: Option<JoinHandle<()>>,
@@ -326,12 +327,12 @@ enum PortTunnelAction {
 impl DaemonFixture {
     pub async fn spawn(target: &str) -> Self {
         let tempdir = tempfile::tempdir().unwrap();
-        let addr = allocate_addr();
         let backend_addr = allocate_addr();
         let workdir = tempdir.path().join("workdir");
         std::fs::create_dir_all(&workdir).unwrap();
         let client = build_http_client();
-        let proxy = TunnelDropProxy::spawn(addr, backend_addr).await;
+        let proxy = TunnelDropProxy::spawn(backend_addr).await;
+        let addr = proxy.listen_addr;
 
         let mut fixture = Self {
             _tempdir: tempdir,
@@ -428,8 +429,11 @@ impl Drop for DaemonFixture {
 }
 
 impl TunnelDropProxy {
-    async fn spawn(listen_addr: std::net::SocketAddr, daemon_addr: std::net::SocketAddr) -> Self {
-        let listener = TcpListener::bind(listen_addr).await.unwrap();
+    async fn spawn(daemon_addr: std::net::SocketAddr) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind tunnel drop proxy");
+        let listen_addr = listener.local_addr().expect("read tunnel drop proxy addr");
         let active_port_tunnels = Arc::new(Mutex::new(Vec::new()));
         let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
         let active_port_tunnels_task = active_port_tunnels.clone();
@@ -454,6 +458,7 @@ impl TunnelDropProxy {
         });
 
         Self {
+            listen_addr,
             active_port_tunnels,
             shutdown: Some(shutdown_tx),
             handle: Some(handle),
@@ -832,6 +837,7 @@ mod tests {
             workdir: PathBuf::from("/tmp/workdir"),
             client: build_http_client(),
             proxy: TunnelDropProxy {
+                listen_addr: "127.0.0.1:9443".parse().unwrap(),
                 active_port_tunnels: Arc::new(Mutex::new(Vec::new())),
                 shutdown: None,
                 handle: None,
