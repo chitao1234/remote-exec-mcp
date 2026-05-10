@@ -4,12 +4,6 @@ use std::sync::OnceLock;
 
 use anyhow::Context;
 use axum::Router;
-use axum::body::Body;
-use hyper::Request;
-use hyper::body::Incoming;
-use hyper::server::conn::http1;
-use hyper::service::service_fn;
-use hyper_util::rt::TokioIo;
 use rustls::client::danger::HandshakeSignatureValid;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, UnixTime};
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
@@ -17,12 +11,10 @@ use rustls::server::{ParsedCertificate, WebPkiClientVerifier};
 use rustls::{
     DigitallySignedStruct, DistinguishedName, RootCertStore, ServerConfig, SignatureScheme,
 };
-use tokio::sync::watch;
-use tokio::task::JoinSet;
 use tokio_rustls::TlsAcceptor;
-use tower::ServiceExt;
 
 use crate::config::{DaemonConfig, DaemonTransport};
+use crate::http_serve::{AcceptStream, AcceptedStream, serve_http1_connections};
 
 pub(crate) const TLS_CONFIG_REQUIRED_MESSAGE: &str =
     "tls config is required when transport = \"tls\"";
@@ -70,77 +62,19 @@ where
     let listener = super::bind_listener(daemon_config.listen)?;
     tracing::info!(listen = %daemon_config.listen, "daemon tls listener bound");
     let tls = TlsAcceptor::from(Arc::new(server_config(daemon_config.as_ref()).await?));
-    let mut connections = JoinSet::new();
-    let (connection_shutdown_tx, _) = watch::channel(());
-    tokio::pin!(shutdown);
-
-    loop {
-        while let Some(result) = connections.try_join_next() {
-            if let Err(err) = result {
-                tracing::warn!(?err, "connection task failed");
+    let accept_stream: AcceptStream = Arc::new(move |stream| {
+        let tls = tls.clone();
+        Box::pin(async move {
+            match tls.accept(stream).await {
+                Ok(stream) => Ok(Some(Box::new(stream) as AcceptedStream)),
+                Err(err) => {
+                    tracing::warn!(?err, "tls accept failed");
+                    Ok(None)
+                }
             }
-        }
-
-        tokio::select! {
-            _ = &mut shutdown => {
-                break;
-            }
-            accepted = listener.accept() => {
-                let (stream, peer_addr) = accepted?;
-                tracing::debug!(peer = %peer_addr, "accepted tcp connection");
-                let tls = tls.clone();
-                let app = app.clone();
-                let mut connection_shutdown = connection_shutdown_tx.subscribe();
-                connections.spawn(async move {
-                    let stream = match tls.accept(stream).await {
-                        Ok(stream) => stream,
-                        Err(err) => {
-                            tracing::warn!(peer = %peer_addr, ?err, "tls accept failed");
-                            return;
-                        }
-                    };
-
-                    let io = TokioIo::new(stream);
-                    let service = service_fn(move |request: Request<Incoming>| {
-                        let app = app.clone();
-                        async move { app.oneshot(request.map(Body::new)).await }
-                    });
-                    let connection = http1::Builder::new()
-                        .serve_connection(io, service)
-                        .with_upgrades();
-                    tokio::pin!(connection);
-
-                    tokio::select! {
-                        result = &mut connection => {
-                            if let Err(err) = result {
-                                tracing::warn!(peer = %peer_addr, ?err, "http serve failed");
-                            }
-                        }
-                        changed = connection_shutdown.changed() => {
-                            if changed.is_ok() {
-                                connection.as_mut().graceful_shutdown();
-                            }
-                            if let Err(err) = connection.await {
-                                tracing::warn!(peer = %peer_addr, ?err, "http serve failed during shutdown");
-                            }
-                        }
-                    }
-                });
-            }
-        }
-    }
-
-    drop(listener);
-    let _ = connection_shutdown_tx.send(());
-
-    while let Some(result) = connections.join_next().await {
-        if let Err(err) = result {
-            tracing::warn!(?err, "connection task failed during shutdown");
-        }
-    }
-
-    tracing::info!("daemon tls listener stopped");
-    Ok(())
+        })
+    });
+    serve_http1_connections(listener, app, shutdown, accept_stream, "tls").await
 }
 
 async fn server_config(daemon_config: &DaemonConfig) -> anyhow::Result<ServerConfig> {

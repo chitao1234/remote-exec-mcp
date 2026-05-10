@@ -1,6 +1,7 @@
 pub mod config;
 pub mod exec;
 pub mod http;
+pub(crate) mod http_serve;
 pub mod image;
 pub mod logging;
 pub mod patch;
