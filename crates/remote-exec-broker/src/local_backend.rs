@@ -93,7 +93,8 @@ pub(crate) fn map_local_transfer_error(err: remote_exec_host::TransferError) -> 
 pub(crate) fn map_host_rpc_error(err: remote_exec_host::HostRpcError) -> DaemonClientError {
     let (status, body) = err.into_rpc_parts();
     DaemonClientError::Rpc {
-        status: reqwest::StatusCode::from_u16(status).expect("valid status code"),
+        status: reqwest::StatusCode::from_u16(status)
+            .unwrap_or(reqwest::StatusCode::INTERNAL_SERVER_ERROR),
         code: Some(body.code),
         message: body.message,
     }
@@ -120,6 +121,28 @@ mod tests {
                 assert_eq!(status, reqwest::StatusCode::INTERNAL_SERVER_ERROR);
                 assert_eq!(code.as_deref(), Some("internal_error"));
                 assert_eq!(message, "boom");
+            }
+            other => panic!("expected rpc error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn invalid_host_status_falls_back_to_internal_server_error() {
+        let err = super::map_host_rpc_error(remote_exec_host::HostRpcError {
+            status: 42,
+            code: "internal_error",
+            message: "invalid status".to_string(),
+        });
+
+        match err {
+            DaemonClientError::Rpc {
+                status,
+                code,
+                message,
+            } => {
+                assert_eq!(status, reqwest::StatusCode::INTERNAL_SERVER_ERROR);
+                assert_eq!(code.as_deref(), Some("internal_error"));
+                assert_eq!(message, "invalid status");
             }
             other => panic!("expected rpc error, got {other:?}"),
         }
