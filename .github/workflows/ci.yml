@@ -40,6 +40,8 @@ jobs:
     name: Rust test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    env:
+      CARGO_PROFILE_TEST_DEBUG: "0"
 
     strategy:
       fail-fast: false
@@ -61,11 +63,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+          prefix-key: v1-rust-test-nodebug
 
       - name: Run tests
         run: cargo test --workspace --locked
-        env:
-          CARGO_PROFILE_TEST_DEBUG: "0"
 
   rust-test-no-default-features:
     name: Rust no-default-features (ubuntu-latest)

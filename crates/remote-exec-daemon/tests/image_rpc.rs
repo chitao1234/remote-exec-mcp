@@ -57,10 +57,16 @@ async fn assert_default_passthrough(extension: &str, format: ImageFormat, expect
     assert_eq!(response.detail, None);
 }
 
-async fn assert_resized_output(extension: &str, format: ImageFormat, expected_mime: &str) {
+async fn assert_resized_output(
+    extension: &str,
+    format: ImageFormat,
+    expected_mime: &str,
+    width: u32,
+    height: u32,
+) {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let path = fixture.workdir.join(format!("large.{extension}"));
-    write_image(&path, 4096, 4096, format).await;
+    write_image(&path, width, height, format).await;
 
     let response = fixture
         .rpc::<ImageReadRequest, ImageReadResponse>(
@@ -85,7 +91,7 @@ async fn assert_resized_output(extension: &str, format: ImageFormat, expected_mi
 async fn image_read_preserves_large_passthrough_within_2048_square_threshold() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let path = fixture.workdir.join("tall.webp");
-    write_image(&path, 1600, 2000, ImageFormat::WebP).await;
+    write_image(&path, 64, 2048, ImageFormat::WebP).await;
     let original = tokio::fs::read(&path).await.unwrap();
 
     let response = fixture
@@ -116,7 +122,7 @@ async fn image_read_preserves_small_png_jpeg_and_webp_bytes_by_default() {
 async fn image_read_preserves_original_detail_for_passthrough_formats() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let path = fixture.workdir.join("original.webp");
-    write_image(&path, 3000, 2000, ImageFormat::WebP).await;
+    write_image(&path, 2050, 64, ImageFormat::WebP).await;
     let original = tokio::fs::read(&path).await.unwrap();
 
     let response = fixture
@@ -138,12 +144,12 @@ async fn image_read_preserves_original_detail_for_passthrough_formats() {
 
 #[tokio::test]
 async fn image_read_resizes_large_png_and_keeps_png_encoding() {
-    assert_resized_output("png", ImageFormat::Png, "image/png").await;
+    assert_resized_output("png", ImageFormat::Png, "image/png", 2050, 64).await;
 }
 
 #[tokio::test]
 async fn image_read_resizes_large_jpeg_and_keeps_jpeg_encoding() {
-    assert_resized_output("jpg", ImageFormat::Jpeg, "image/jpeg").await;
+    assert_resized_output("jpg", ImageFormat::Jpeg, "image/jpeg", 64, 2050).await;
 }
 
 #[tokio::test]
