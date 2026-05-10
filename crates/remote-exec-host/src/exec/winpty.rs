@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 use std::path::Path;
 use std::process::Command as ProcessCommand;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
@@ -16,6 +16,12 @@ pub(crate) struct WinptySession {
 
 fn map_winpty_error(err: winptyrs::Error) -> anyhow::Error {
     anyhow::anyhow!(err.to_string())
+}
+
+fn lock_winpty<'a, T>(mutex: &'a Mutex<T>, name: &'static str) -> anyhow::Result<MutexGuard<'a, T>> {
+    mutex
+        .lock()
+        .map_err(|_| anyhow::anyhow!("winpty {name} mutex poisoned"))
 }
 
 fn winpty_builder() -> AgentBuilder {
@@ -150,7 +156,10 @@ pub(crate) fn spawn_winpty(
         let mut exit_deadline = None;
 
         loop {
-            let read_result = reader.lock().unwrap().read_nonblocking();
+            let read_result = match lock_winpty(&reader, "pty reader") {
+                Ok(mut pty) => pty.read_nonblocking(),
+                Err(_) => break,
+            };
             match read_result {
                 Ok(chunk) if !chunk.is_empty() => {
                     exit_deadline = None;
@@ -159,7 +168,10 @@ pub(crate) fn spawn_winpty(
                     }
                 }
                 Ok(_) => {
-                    let child_alive = reader_child.lock().unwrap().is_alive().unwrap_or(false);
+                    let child_alive = match lock_winpty(&reader_child, "child reader") {
+                        Ok(mut child) => child.is_alive().unwrap_or(false),
+                        Err(_) => break,
+                    };
                     if child_alive {
                         exit_deadline = None;
                         std::thread::sleep(Duration::from_millis(25));
@@ -185,18 +197,14 @@ pub(crate) fn spawn_winpty(
 
 impl WinptySession {
     pub(crate) fn try_wait(&self) -> anyhow::Result<Option<i32>> {
-        self.child
-            .lock()
-            .unwrap()
+        lock_winpty(&self.child, "child")?
             .try_wait()
             .map(|status| status.map(|value| value as i32))
             .map_err(map_winpty_error)
     }
 
     pub(crate) fn write(&self, chars: &str) -> anyhow::Result<()> {
-        self.pty
-            .lock()
-            .unwrap()
+        lock_winpty(&self.pty, "pty")?
             .write(chars)
             .map(|_| ())
             .map_err(map_winpty_error)
