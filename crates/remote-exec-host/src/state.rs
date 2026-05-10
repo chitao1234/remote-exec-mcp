@@ -4,9 +4,38 @@ use remote_exec_proto::{
     rpc::TargetInfoResponse,
     sandbox::{CompiledFilesystemSandbox, compile_filesystem_sandbox},
 };
+use tokio::sync::Mutex;
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use crate::{HostRuntimeConfig, WindowsPtyBackendOverride};
+
+#[derive(Clone, Default)]
+pub struct BackgroundTasks {
+    tasks: Arc<Mutex<JoinSet<()>>>,
+}
+
+impl BackgroundTasks {
+    pub async fn spawn<F>(&self, name: &'static str, task: F)
+    where
+        F: std::future::Future<Output = anyhow::Result<()>> + Send + 'static,
+    {
+        self.tasks.lock().await.spawn(async move {
+            if let Err(err) = task.await {
+                tracing::warn!(task = name, ?err, "background task failed");
+            }
+        });
+    }
+
+    pub async fn join_all(&self) {
+        let mut tasks = self.tasks.lock().await;
+        while let Some(result) = tasks.join_next().await {
+            if let Err(err) = result {
+                tracing::warn!(?err, "background task join failed");
+            }
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct HostRuntimeState {
@@ -21,6 +50,7 @@ pub struct HostRuntimeState {
     pub sessions: crate::exec::store::SessionStore,
     pub port_forward_sessions: crate::port_forward::TunnelSessionStore,
     pub port_forward_limiter: Arc<crate::port_forward::PortForwardLimiter>,
+    pub background_tasks: BackgroundTasks,
 }
 
 pub fn build_runtime_state(mut config: HostRuntimeConfig) -> anyhow::Result<HostRuntimeState> {
@@ -58,6 +88,7 @@ pub fn build_runtime_state(mut config: HostRuntimeConfig) -> anyhow::Result<Host
         port_forward_limiter: Arc::new(crate::port_forward::PortForwardLimiter::new(
             port_forward_limits,
         )),
+        background_tasks: BackgroundTasks::default(),
     })
 }
 

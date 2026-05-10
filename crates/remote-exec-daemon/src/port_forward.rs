@@ -23,24 +23,34 @@ pub async fn tunnel(
         .map_err(crate::rpc_error::host_rpc_error_response)?;
     let on_upgrade = upgrade::on(request);
 
-    tokio::spawn(async move {
-        match on_upgrade.await {
-            Ok(upgraded) => {
-                if let Err(err) = remote_exec_host::port_forward::serve_tunnel_with_permit(
-                    state,
-                    TokioIo::new(upgraded),
-                    connection_permit,
-                )
-                .await
-                {
-                    tracing::warn!(error = %err.message, code = %err.code, "port tunnel ended with error");
+    let shutdown = state.shutdown.clone();
+    let background_tasks = state.background_tasks.clone();
+    background_tasks
+        .spawn("port-forward tunnel", async move {
+            tokio::select! {
+                upgraded = on_upgrade => {
+                    match upgraded {
+                        Ok(upgraded) => {
+                            if let Err(err) = remote_exec_host::port_forward::serve_tunnel_with_permit(
+                                state,
+                                TokioIo::new(upgraded),
+                                connection_permit,
+                            )
+                            .await
+                            {
+                                tracing::warn!(error = %err.message, code = %err.code, "port tunnel ended with error");
+                            }
+                        }
+                        Err(err) => {
+                            tracing::warn!(error = %err, "port tunnel upgrade failed");
+                        }
+                    }
                 }
+                _ = shutdown.cancelled() => {}
             }
-            Err(err) => {
-                tracing::warn!(error = %err, "port tunnel upgrade failed");
-            }
-        }
-    });
+            Ok(())
+        })
+        .await;
 
     Ok((
         StatusCode::SWITCHING_PROTOCOLS,

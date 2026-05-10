@@ -23,7 +23,9 @@ where
 {
     let state = Arc::new(state);
     let app = crate::http::routes::router(state.clone(), daemon_config.clone());
-    crate::tls::serve_with_shutdown(app, daemon_config, shutdown).await
+    let result = crate::tls::serve_with_shutdown(app, daemon_config, shutdown).await;
+    state.background_tasks.join_all().await;
+    result
 }
 
 pub(crate) async fn health(State(state): State<Arc<AppState>>) -> Json<HealthCheckResponse> {

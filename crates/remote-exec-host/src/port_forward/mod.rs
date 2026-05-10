@@ -535,6 +535,28 @@ mod port_tunnel_tests {
     }
 
     #[tokio::test]
+    async fn background_task_tracker_joins_shutdown_tunnel() {
+        let state = test_state();
+        let (mut broker_side, daemon_side) = tokio::io::duplex(64 * 1024);
+        let tracker = state.background_tasks.clone();
+        let tunnel_state = state.clone();
+        tracker
+            .spawn("test port-forward tunnel", async move {
+                serve_tunnel(tunnel_state, daemon_side)
+                    .await
+                    .map_err(|err| anyhow::anyhow!("{}: {}", err.code, err.message))
+            })
+            .await;
+
+        write_preface(&mut broker_side).await.unwrap();
+        state.shutdown.cancel();
+
+        tokio::time::timeout(Duration::from_secs(1), tracker.join_all())
+            .await
+            .expect("tracked tunnel should join after host shutdown");
+    }
+
+    #[tokio::test]
     async fn tunnel_ready_reports_configured_limits() {
         let state = test_state_with_limits(crate::HostPortForwardLimits {
             max_active_tcp_streams: 3,
