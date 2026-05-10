@@ -22,7 +22,7 @@ HttpResponse handle_transfer_export(AppState& state, const HttpRequest& request)
             LOG_INFO,
             "server",
             "transfer/export path=`" + export_request.path + "` source_type=`" +
-                export_request.source_type + "`"
+                transfer_source_type_wire_value(export_request.source_type) + "`"
         );
         write_transfer_export_headers(
             response,

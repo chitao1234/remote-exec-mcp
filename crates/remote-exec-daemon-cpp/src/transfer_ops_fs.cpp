@@ -301,7 +301,7 @@ std::vector<DirectoryEntry> list_directory_entries(const std::string& path) {
 
 bool prepare_destination_path(
     const std::string& absolute_path,
-    const std::string& source_type,
+    TransferSourceType source_type,
     const std::string& overwrite_mode,
     bool create_parent
 ) {
@@ -323,7 +323,7 @@ bool prepare_destination_path(
 
     if (existed && overwrite_mode == "merge") {
         ensure_not_existing_symlink(absolute_path);
-        if (source_type == "file") {
+        if (source_type == TransferSourceType::File) {
             if (is_directory(absolute_path)) {
                 throw TransferFailure(
                     TransferRpcCode::DestinationUnsupported,
@@ -336,7 +336,10 @@ bool prepare_destination_path(
                     "destination path is not a regular file"
                 );
             }
-        } else if (source_type == "directory" || source_type == "multiple") {
+        } else if (
+            source_type == TransferSourceType::Directory ||
+            source_type == TransferSourceType::Multiple
+        ) {
             if (!is_directory(absolute_path)) {
                 throw TransferFailure(
                     TransferRpcCode::DestinationUnsupported,

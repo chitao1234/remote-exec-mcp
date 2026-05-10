@@ -10,9 +10,9 @@ struct TransferImportMetadata {
     std::string destination_path;
     std::string overwrite;
     bool create_parent;
-    std::string source_type;
+    TransferSourceType source_type;
     std::string compression;
-    std::string symlink_mode;
+    TransferSymlinkMode symlink_mode;
 };
 
 void require_uncompressed_transfer(const std::string& compression);

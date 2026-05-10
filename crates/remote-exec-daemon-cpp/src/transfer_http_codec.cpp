@@ -106,18 +106,29 @@ TransferImportMetadata parse_transfer_import_metadata(const HttpRequest& request
     metadata.overwrite = required_header(request, OVERWRITE_HEADER);
     require_one_of(OVERWRITE_HEADER, metadata.overwrite, "fail", "merge", "replace");
     metadata.create_parent = parse_create_parent(required_header(request, CREATE_PARENT_HEADER));
-    metadata.source_type = required_header(request, SOURCE_TYPE_HEADER);
-    require_one_of(SOURCE_TYPE_HEADER, metadata.source_type, "file", "directory", "multiple");
+    const std::string source_type = required_header(request, SOURCE_TYPE_HEADER);
+    if (!parse_transfer_source_type_wire_value(source_type, &metadata.source_type)) {
+        throw TransferFailure(
+            TransferRpcCode::BadRequest,
+            invalid_header_message(SOURCE_TYPE_HEADER, "unsupported value `" + source_type + "`")
+        );
+    }
     metadata.compression = optional_header_or(request, COMPRESSION_HEADER, "none");
     require_one_of(COMPRESSION_HEADER, metadata.compression, "none", "zstd");
-    metadata.symlink_mode = optional_header_or(request, SYMLINK_MODE_HEADER, "preserve");
-    require_one_of(SYMLINK_MODE_HEADER, metadata.symlink_mode, "preserve", "follow", "skip");
+    const std::string symlink_mode = optional_header_or(request, SYMLINK_MODE_HEADER, "preserve");
+    if (!parse_transfer_symlink_mode_wire_value(symlink_mode, &metadata.symlink_mode)) {
+        throw TransferFailure(
+            TransferRpcCode::BadRequest,
+            invalid_header_message(SYMLINK_MODE_HEADER, "unsupported value `" + symlink_mode + "`")
+        );
+    }
     return metadata;
 }
 
 void write_transfer_export_headers(HttpResponse& response, const ExportedPayload& payload) {
     response.headers["Content-Type"] = "application/octet-stream";
-    response.headers["x-remote-exec-source-type"] = payload.source_type;
+    response.headers["x-remote-exec-source-type"] =
+        transfer_source_type_wire_value(payload.source_type);
     response.headers["x-remote-exec-compression"] = "none";
 }
 
@@ -134,7 +145,7 @@ Json transfer_warnings_json(const std::vector<TransferWarning>& warnings) {
 
 Json transfer_summary_json(const ImportSummary& summary) {
     return Json{
-        {"source_type", summary.source_type},
+        {"source_type", transfer_source_type_wire_value(summary.source_type)},
         {"bytes_copied", summary.bytes_copied},
         {"files_copied", summary.files_copied},
         {"directories_copied", summary.directories_copied},

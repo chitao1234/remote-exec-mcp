@@ -285,7 +285,7 @@ enum SymlinkImportAction {
 };
 
 SymlinkImportAction symlink_import_action(
-    const std::string& symlink_mode,
+    TransferSymlinkMode symlink_mode,
     const std::string& error_path
 ) {
 #ifdef _WIN32
@@ -293,10 +293,10 @@ SymlinkImportAction symlink_import_action(
     (void)error_path;
     return SYMLINK_IMPORT_SKIP;
 #else
-    if (symlink_mode == "skip") {
+    if (symlink_mode == TransferSymlinkMode::Skip) {
         return SYMLINK_IMPORT_SKIP;
     }
-    if (symlink_mode == "preserve") {
+    if (symlink_mode == TransferSymlinkMode::Preserve) {
         return SYMLINK_IMPORT_PRESERVE;
     }
 
@@ -354,9 +354,14 @@ ImportSummary import_file_from_tar(
     const std::string& absolute_path,
     const std::string& overwrite_mode,
     bool create_parent,
-    const std::string& symlink_mode
+    TransferSymlinkMode symlink_mode
 ) {
-    const bool replaced = prepare_destination_path(absolute_path, "file", overwrite_mode, create_parent);
+    const bool replaced = prepare_destination_path(
+        absolute_path,
+        TransferSourceType::File,
+        overwrite_mode,
+        create_parent
+    );
     ensure_not_existing_symlink(absolute_path);
 
     char block[TAR_BLOCK_SIZE];
@@ -397,7 +402,7 @@ ImportSummary import_file_from_tar(
     consume_file_archive_tail(reader, &warnings);
 
     return ImportSummary{
-        "file",
+        TransferSourceType::File,
         bytes_copied,
         files_copied,
         0,
@@ -408,11 +413,11 @@ ImportSummary import_file_from_tar(
 
 ImportSummary import_directory_from_tar(
     TransferArchiveReader& reader,
-    const std::string& source_type,
+    TransferSourceType source_type,
     const std::string& absolute_path,
     const std::string& overwrite_mode,
     bool create_parent,
-    const std::string& symlink_mode
+    TransferSymlinkMode symlink_mode
 ) {
     const bool replaced = prepare_destination_path(absolute_path, source_type, overwrite_mode, create_parent);
     make_directory_if_missing(absolute_path);
@@ -519,11 +524,11 @@ ImportSummary import_directory_from_tar(
 
 ImportSummary import_path(
     const std::string& bytes,
-    const std::string& source_type,
+    TransferSourceType source_type,
     const std::string& absolute_path,
     const std::string& overwrite_mode,
     bool create_parent,
-    const std::string& symlink_mode
+    TransferSymlinkMode symlink_mode
 ) {
     StringTransferArchiveReader reader(&bytes);
     return import_path_from_reader(
@@ -538,14 +543,14 @@ ImportSummary import_path(
 
 ImportSummary import_path_from_reader(
     TransferArchiveReader& reader,
-    const std::string& source_type,
+    TransferSourceType source_type,
     const std::string& absolute_path,
     const std::string& overwrite_mode,
     bool create_parent,
-    const std::string& symlink_mode
+    TransferSymlinkMode symlink_mode
 ) {
     ExportOptions options;
-    options.symlink_mode = symlink_mode.empty() ? "preserve" : symlink_mode;
+    options.symlink_mode = symlink_mode;
     validate_transfer_options(options);
     if (!is_absolute_path(absolute_path)) {
         throw TransferFailure(
@@ -554,7 +559,7 @@ ImportSummary import_path_from_reader(
         );
     }
 
-    if (source_type == "file") {
+    if (source_type == TransferSourceType::File) {
         return import_file_from_tar(
             reader,
             absolute_path,
@@ -563,7 +568,7 @@ ImportSummary import_path_from_reader(
             options.symlink_mode
         );
     }
-    if (source_type == "directory") {
+    if (source_type == TransferSourceType::Directory) {
         return import_directory_from_tar(
             reader,
             source_type,
@@ -573,7 +578,7 @@ ImportSummary import_path_from_reader(
             options.symlink_mode
         );
     }
-    if (source_type == "multiple") {
+    if (source_type == TransferSourceType::Multiple) {
         return import_directory_from_tar(
             reader,
             source_type,

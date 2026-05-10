@@ -137,7 +137,13 @@ TransferExportRequestSpec prepare_transfer_export_request(
         body.at("path").get<std::string>(),
         SANDBOX_READ
     );
-    request.symlink_mode = body.value("symlink_mode", std::string("preserve"));
+    const std::string symlink_mode = body.value("symlink_mode", std::string("preserve"));
+    if (!parse_transfer_symlink_mode_wire_value(symlink_mode, &request.symlink_mode)) {
+        throw TransferFailure(
+            TransferRpcCode::SourceUnsupported,
+            "unsupported transfer symlink mode"
+        );
+    }
     request.exclude = transfer_exclude_or_empty(body);
     request.source_type = export_path_source_type(request.path, request.symlink_mode);
     return request;

@@ -361,7 +361,7 @@ static std::string assert_transfer_export_and_exclude_routes(
     assert(export_excluded_response.status == 200);
     const ImportSummary excluded_import = import_path(
         export_excluded_response.body,
-        "directory",
+        TransferSourceType::Directory,
         (root / "transfer-exclude-dest").string(),
         "replace",
         true

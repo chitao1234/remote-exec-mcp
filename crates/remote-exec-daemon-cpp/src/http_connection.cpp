@@ -222,7 +222,7 @@ int handle_streaming_transfer_export(
             LOG_INFO,
             "server",
             "transfer/export path=`" + export_request.path + "` source_type=`" +
-                export_request.source_type + "`"
+                transfer_source_type_wire_value(export_request.source_type) + "`"
         );
 
         send_transfer_export_headers(

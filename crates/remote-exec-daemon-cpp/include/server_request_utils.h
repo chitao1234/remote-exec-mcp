@@ -12,8 +12,8 @@
 
 struct TransferExportRequestSpec {
     std::string path;
-    std::string source_type;
-    std::string symlink_mode;
+    TransferSourceType source_type;
+    TransferSymlinkMode symlink_mode;
     std::vector<std::string> exclude;
 };
 

@@ -42,7 +42,7 @@ Run:
 
 Expected: all pass.
 
-- [ ] **Step 4: Commit Rust task**
+- [x] **Step 4: Commit Rust task**
 
 Run:
 `git add docs/superpowers/plans/2026-05-10-stringly-typed-review-fixes.md crates/remote-exec-broker/src/daemon_client.rs crates/remote-exec-broker/src/tools/exec.rs crates/remote-exec-broker/src/tools/transfer/endpoints.rs crates/remote-exec-broker/src/port_forward/tunnel.rs`
@@ -70,19 +70,19 @@ Run:
 **Testing approach:** Existing transfer/route integration tests.
 Reason: Wire behavior should remain stable; existing route and transfer tests verify public strings and behavior.
 
-- [ ] **Step 1: Add C++ transfer enums and conversion helpers**
+- [x] **Step 1: Add C++ transfer enums and conversion helpers**
 
 Define `TransferSourceType` and `TransferSymlinkMode`, parse wire values at boundaries, and emit wire values for headers/JSON/logs/tests.
 
-- [ ] **Step 2: Convert transfer internals to enums**
+- [x] **Step 2: Convert transfer internals to enums**
 
 Change transfer structs and function signatures to carry enums internally, including explicit rejection of `TransferSourceType::Multiple` on export.
 
-- [ ] **Step 3: Update C++ tests and route logging**
+- [x] **Step 3: Update C++ tests and route logging**
 
 Compare enum values in direct transfer tests and convert to wire strings where route JSON/headers require strings.
 
-- [ ] **Step 4: Run C++ focused verification**
+- [x] **Step 4: Run C++ focused verification**
 
 Run:
 `make -C crates/remote-exec-daemon-cpp check-posix`
@@ -90,7 +90,7 @@ Run:
 
 Expected: all pass.
 
-- [ ] **Step 5: Commit C++ task**
+- [x] **Step 5: Commit C++ task**
 
 Run:
 `git add crates/remote-exec-daemon-cpp/include/transfer_ops.h crates/remote-exec-daemon-cpp/include/transfer_http_codec.h crates/remote-exec-daemon-cpp/include/server_request_utils.h crates/remote-exec-daemon-cpp/src/transfer_ops.cpp crates/remote-exec-daemon-cpp/src/transfer_ops_internal.h crates/remote-exec-daemon-cpp/src/transfer_ops_export.cpp crates/remote-exec-daemon-cpp/src/transfer_ops_import.cpp crates/remote-exec-daemon-cpp/src/transfer_ops_fs.cpp crates/remote-exec-daemon-cpp/src/transfer_ops_tar.cpp crates/remote-exec-daemon-cpp/src/transfer_http_codec.cpp crates/remote-exec-daemon-cpp/src/server_request_utils.cpp crates/remote-exec-daemon-cpp/src/server_route_transfer.cpp crates/remote-exec-daemon-cpp/src/http_connection.cpp crates/remote-exec-daemon-cpp/tests/test_transfer.cpp`
