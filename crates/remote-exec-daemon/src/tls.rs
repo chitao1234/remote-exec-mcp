@@ -159,61 +159,63 @@ pub(crate) fn bind_listener(addr: std::net::SocketAddr) -> std::io::Result<TcpLi
 #[cfg(test)]
 mod tests {
     #[cfg(not(feature = "tls"))]
-    use std::path::PathBuf;
-    #[cfg(not(feature = "tls"))]
-    use std::sync::Arc;
+    mod tls_disabled {
+        use std::path::PathBuf;
+        use std::sync::Arc;
 
-    #[cfg(not(feature = "tls"))]
-    use axum::Router;
+        use axum::Router;
 
-    #[cfg(not(feature = "tls"))]
-    use crate::config::{
-        DaemonConfig, DaemonTransport, ProcessEnvironment, PtyMode, YieldTimeConfig,
-    };
+        use crate::config::{
+            DaemonConfig, DaemonTransport, ProcessEnvironment, PtyMode, YieldTimeConfig,
+        };
 
-    #[cfg(not(feature = "tls"))]
-    fn tls_transport_config() -> Arc<DaemonConfig> {
-        Arc::new(DaemonConfig {
-            target: "builder-a".to_string(),
-            listen: "127.0.0.1:9443".parse().unwrap(),
-            default_workdir: PathBuf::from("."),
-            windows_posix_root: None,
-            transport: DaemonTransport::Tls,
-            http_auth: None,
-            sandbox: None,
-            enable_transfer_compression: true,
-            allow_login_shell: true,
-            pty: PtyMode::Auto,
-            default_shell: None,
-            yield_time: YieldTimeConfig::default(),
-            port_forward_limits: crate::config::HostPortForwardLimits::default(),
-            experimental_apply_patch_target_encoding_autodetect: false,
-            process_environment: ProcessEnvironment::capture_current(),
-            tls: None,
-        })
-    }
+        fn tls_transport_config() -> Arc<DaemonConfig> {
+            Arc::new(DaemonConfig {
+                target: "builder-a".to_string(),
+                listen: "127.0.0.1:9443".parse().unwrap(),
+                default_workdir: PathBuf::from("."),
+                windows_posix_root: None,
+                transport: DaemonTransport::Tls,
+                http_auth: None,
+                sandbox: None,
+                enable_transfer_compression: true,
+                allow_login_shell: true,
+                pty: PtyMode::Auto,
+                default_shell: None,
+                yield_time: YieldTimeConfig::default(),
+                port_forward_limits: crate::config::HostPortForwardLimits::default(),
+                experimental_apply_patch_target_encoding_autodetect: false,
+                process_environment: ProcessEnvironment::capture_current(),
+                tls: None,
+            })
+        }
 
-    #[cfg(not(feature = "tls"))]
-    #[tokio::test]
-    async fn serve_tls_is_rejected_when_feature_disabled() {
-        let err = super::serve_tls(Router::new(), tls_transport_config())
+        #[tokio::test]
+        async fn serve_tls_is_rejected_when_feature_disabled() {
+            let err = super::super::serve_tls(Router::new(), tls_transport_config())
+                .await
+                .unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains(super::super::FEATURE_REQUIRED_MESSAGE),
+                "unexpected error: {err}",
+            );
+        }
+
+        #[tokio::test]
+        async fn serve_tls_with_shutdown_is_rejected_when_feature_disabled() {
+            let err = super::super::serve_tls_with_shutdown(
+                Router::new(),
+                tls_transport_config(),
+                async {},
+            )
             .await
             .unwrap_err();
-        assert!(
-            err.to_string().contains(super::FEATURE_REQUIRED_MESSAGE),
-            "unexpected error: {err}",
-        );
-    }
-
-    #[cfg(not(feature = "tls"))]
-    #[tokio::test]
-    async fn serve_tls_with_shutdown_is_rejected_when_feature_disabled() {
-        let err = super::serve_tls_with_shutdown(Router::new(), tls_transport_config(), async {})
-            .await
-            .unwrap_err();
-        assert!(
-            err.to_string().contains(super::FEATURE_REQUIRED_MESSAGE),
-            "unexpected error: {err}",
-        );
+            assert!(
+                err.to_string()
+                    .contains(super::super::FEATURE_REQUIRED_MESSAGE),
+                "unexpected error: {err}",
+            );
+        }
     }
 }

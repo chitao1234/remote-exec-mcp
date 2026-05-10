@@ -24,6 +24,9 @@ use tower::ServiceExt;
 
 use crate::config::{DaemonConfig, DaemonTransport};
 
+pub(crate) const TLS_CONFIG_REQUIRED_MESSAGE: &str =
+    "tls config is required when transport = \"tls\"";
+
 pub(crate) fn install_crypto_provider() -> anyhow::Result<()> {
     static INIT: OnceLock<Result<(), String>> = OnceLock::new();
 
@@ -46,10 +49,7 @@ pub(crate) fn install_crypto_provider() -> anyhow::Result<()> {
 
 pub(crate) fn validate_config(config: &DaemonConfig) -> anyhow::Result<()> {
     if matches!(config.transport, DaemonTransport::Tls) {
-        anyhow::ensure!(
-            config.tls.is_some(),
-            "tls config is required when transport = \"tls\""
-        );
+        anyhow::ensure!(config.tls.is_some(), TLS_CONFIG_REQUIRED_MESSAGE);
     }
 
     Ok(())
@@ -147,7 +147,7 @@ async fn server_config(daemon_config: &DaemonConfig) -> anyhow::Result<ServerCon
     let tls = daemon_config
         .tls
         .as_ref()
-        .context("tls config is required when transport = \"tls\"")?;
+        .context(TLS_CONFIG_REQUIRED_MESSAGE)?;
     let (cert_pem, key_pem, ca_pem) = tokio::try_join!(
         tokio::fs::read(&tls.cert_pem),
         tokio::fs::read(&tls.key_pem),
