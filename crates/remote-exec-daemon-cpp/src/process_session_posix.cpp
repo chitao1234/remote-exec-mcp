@@ -253,6 +253,25 @@ void exec_shell_child(
     _exit(127);
 }
 
+pid_t waitpid_retry_on_eintr(pid_t pid, int* status, int options) {
+    for (;;) {
+        const pid_t result = waitpid(pid, status, options);
+        if (result >= 0 || errno != EINTR) {
+            return result;
+        }
+    }
+}
+
+void record_exit_status(int status, int* exit_code) {
+    if (WIFEXITED(status)) {
+        *exit_code = WEXITSTATUS(status);
+    } else if (WIFSIGNALED(status)) {
+        *exit_code = 128 + WTERMSIG(status);
+    } else {
+        *exit_code = 1;
+    }
+}
+
 class PosixProcessSession : public ProcessSession {
 public:
     PosixProcessSession(pid_t pid, UniqueFd input_write, UniqueFd output_read)
@@ -345,7 +364,7 @@ public:
         }
 
         int status = 0;
-        const pid_t result = waitpid(pid_, &status, WNOHANG);
+        const pid_t result = waitpid_retry_on_eintr(pid_, &status, WNOHANG);
         if (result == 0) {
             return false;
         }
@@ -360,13 +379,7 @@ public:
         }
 
         reaped_ = true;
-        if (WIFEXITED(status)) {
-            exit_code_ = WEXITSTATUS(status);
-        } else if (WIFSIGNALED(status)) {
-            exit_code_ = 128 + WTERMSIG(status);
-        } else {
-            exit_code_ = 1;
-        }
+        record_exit_status(status, &exit_code_);
         *exit_code = exit_code_;
         return true;
     }
@@ -379,8 +392,10 @@ public:
         platform::sleep_ms(50);
         kill(-pid_, SIGKILL);
         int ignored_status = 0;
-        waitpid(pid_, &ignored_status, 0);
-        reaped_ = true;
+        const pid_t result = waitpid_retry_on_eintr(pid_, &ignored_status, 0);
+        if (result == pid_ || (result < 0 && errno == ECHILD)) {
+            reaped_ = true;
+        }
     }
 
     bool terminate_descendants() override {
