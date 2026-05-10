@@ -50,7 +50,12 @@ bool PortTunnelService::spawn_udp_bind_loop(
             PortTunnelWorkerLease lease(service);
             service->udp_read_loop(session, stream_id, socket_value);
         }).detach();
+    } catch (const std::exception& ex) {
+        log_tunnel_exception("spawn udp bind thread", ex);
+        service->release_worker();
+        return false;
     } catch (...) {
+        log_unknown_tunnel_exception("spawn udp bind thread");
         service->release_worker();
         return false;
     }
@@ -172,7 +177,12 @@ void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
             service_,
             true
         ));
+    } catch (const std::exception& ex) {
+        log_tunnel_exception("create udp bind socket", ex);
+        service_->release_udp_bind();
+        throw;
     } catch (...) {
+        log_unknown_tunnel_exception("create udp bind socket");
         service_->release_udp_bind();
         throw;
     }

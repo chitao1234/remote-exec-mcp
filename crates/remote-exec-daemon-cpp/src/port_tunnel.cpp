@@ -9,6 +9,22 @@ const unsigned long RESUME_TIMEOUT_MS = 100UL;
 const unsigned long RESUME_TIMEOUT_MS = 10000UL;
 #endif
 
+void log_tunnel_exception(const char* operation, const std::exception& ex) {
+    log_message(
+        LOG_WARN,
+        "port_tunnel",
+        std::string(operation) + " failed: " + ex.what()
+    );
+}
+
+void log_unknown_tunnel_exception(const char* operation) {
+    log_message(
+        LOG_WARN,
+        "port_tunnel",
+        std::string(operation) + " failed with an unknown exception"
+    );
+}
+
 PortTunnelService::PortTunnelService(const PortForwardLimitConfig& limits)
     : active_workers_(0UL),
       retained_sessions_(0UL),
@@ -24,7 +40,7 @@ PortTunnelService::PortTunnelService(const PortForwardLimitConfig& limits)
       expiry_thread_(NULL)
 #else
       ,
-      expiry_thread_(NULL)
+      expiry_thread_()
 #endif
 {}
 

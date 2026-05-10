@@ -110,7 +110,12 @@ bool spawn_tcp_read_thread(
             }
             tunnel->tcp_read_loop(stream_id, stream);
         }).detach();
+    } catch (const std::exception& ex) {
+        log_tunnel_exception("spawn tcp read thread", ex);
+        service->release_worker();
+        return false;
     } catch (...) {
+        log_unknown_tunnel_exception("spawn tcp read thread");
         service->release_worker();
         return false;
     }
@@ -148,7 +153,12 @@ bool spawn_tcp_write_thread(
             PortTunnelWorkerLease lease(service);
             tunnel->tcp_write_loop(stream_id, stream);
         }).detach();
+    } catch (const std::exception& ex) {
+        log_tunnel_exception("spawn tcp write thread", ex);
+        service->release_worker();
+        return false;
     } catch (...) {
+        log_unknown_tunnel_exception("spawn tcp write thread");
         service->release_worker();
         return false;
     }
@@ -202,7 +212,12 @@ bool spawn_udp_read_thread(
             PortTunnelWorkerLease lease(service);
             tunnel->udp_read_loop_transport_owned(stream_id, socket_value);
         }).detach();
+    } catch (const std::exception& ex) {
+        log_tunnel_exception("spawn udp read thread", ex);
+        service->release_worker();
+        return false;
     } catch (...) {
+        log_unknown_tunnel_exception("spawn udp read thread");
         service->release_worker();
         return false;
     }
@@ -331,7 +346,8 @@ void PortTunnelSender::send_frame(const PortTunnelFrame& frame) {
     }
     try {
         send_all_bytes(client_, reinterpret_cast<const char*>(bytes.data()), bytes.size());
-    } catch (const std::exception&) {
+    } catch (const std::exception& ex) {
+        log_tunnel_exception("send port tunnel frame", ex);
         closed_.store(true);
         shutdown_socket(client_);
     }
@@ -385,7 +401,12 @@ bool PortTunnelSender::send_data_frame_or_limit_error(
     }
     try {
         send_frame(frame);
+    } catch (const std::exception& ex) {
+        log_tunnel_exception("send limited port tunnel data frame", ex);
+        release_data_frame_reservation(charge_value);
+        throw;
     } catch (...) {
+        log_unknown_tunnel_exception("send limited port tunnel data frame");
         release_data_frame_reservation(charge_value);
         throw;
     }
@@ -411,7 +432,12 @@ bool PortTunnelSender::send_data_frame_or_drop_on_limit(
     }
     try {
         send_frame(frame);
+    } catch (const std::exception& ex) {
+        log_tunnel_exception("send droppable port tunnel data frame", ex);
+        release_data_frame_reservation(charge_value);
+        throw;
     } catch (...) {
+        log_unknown_tunnel_exception("send droppable port tunnel data frame");
         release_data_frame_reservation(charge_value);
         throw;
     }

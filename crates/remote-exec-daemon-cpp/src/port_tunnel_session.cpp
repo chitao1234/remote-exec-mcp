@@ -203,9 +203,14 @@ bool PortTunnelService::ensure_expiry_scheduler_started_locked() {
     expiry_thread_ = handle;
 #else
     try {
-        expiry_thread_ = new std::thread(&PortTunnelService::expiry_scheduler_loop, this);
+        expiry_thread_.reset(new std::thread(&PortTunnelService::expiry_scheduler_loop, this));
+    } catch (const std::exception& ex) {
+        log_tunnel_exception("spawn session expiry scheduler", ex);
+        expiry_thread_.reset();
+        return false;
     } catch (...) {
-        expiry_thread_ = NULL;
+        log_unknown_tunnel_exception("spawn session expiry scheduler");
+        expiry_thread_.reset();
         return false;
     }
 #endif
@@ -217,14 +222,18 @@ void PortTunnelService::stop_expiry_scheduler() {
 #ifdef _WIN32
     HANDLE thread = NULL;
 #else
-    std::thread* thread = NULL;
+    std::unique_ptr<std::thread> thread;
 #endif
     {
         BasicLockGuard lock(expiry_mutex_);
         expiry_shutdown_ = true;
         expiry_cond_.broadcast();
+#ifdef _WIN32
         thread = expiry_thread_;
         expiry_thread_ = NULL;
+#else
+        thread.swap(expiry_thread_);
+#endif
     }
 #ifdef _WIN32
     if (thread != NULL) {
@@ -232,9 +241,8 @@ void PortTunnelService::stop_expiry_scheduler() {
         CloseHandle(thread);
     }
 #else
-    if (thread != NULL) {
+    if (thread.get() != NULL) {
         thread->join();
-        delete thread;
     }
 #endif
 }

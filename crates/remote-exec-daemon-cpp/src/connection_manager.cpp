@@ -19,7 +19,7 @@ struct ConnectionManager::WorkerRecord {
           thread_handle(NULL)
 #else
           ,
-          thread(NULL)
+          thread()
 #endif
     {
     }
@@ -33,7 +33,7 @@ struct ConnectionManager::WorkerRecord {
 #ifdef _WIN32
     HANDLE thread_handle;
 #else
-    std::thread* thread;
+    std::unique_ptr<std::thread> thread;
 #endif
 };
 
@@ -107,7 +107,7 @@ bool ConnectionManager::try_start(
     record->thread_handle = handle;
     thread_context.release();
 #else
-    record->thread = new std::thread(&ConnectionManager::run_worker, this, record);
+    record->thread.reset(new std::thread(&ConnectionManager::run_worker, this, record));
 #endif
     return true;
 }
@@ -164,10 +164,9 @@ void ConnectionManager::reap_finished() {
             finished[i]->thread_handle = NULL;
         }
 #else
-        if (finished[i]->thread != NULL) {
+        if (finished[i]->thread.get() != NULL) {
             finished[i]->thread->join();
-            delete finished[i]->thread;
-            finished[i]->thread = NULL;
+            finished[i]->thread.reset();
         }
 #endif
     }

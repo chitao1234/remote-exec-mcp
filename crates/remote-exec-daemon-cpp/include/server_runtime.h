@@ -1,5 +1,10 @@
 #pragma once
 
+#ifndef _WIN32
+#include <memory>
+#include <thread>
+#endif
+
 #include "connection_manager.h"
 #include "server.h"
 
@@ -36,7 +41,7 @@ private:
     HANDLE accept_thread_;
     HANDLE maintenance_thread_;
 #else
-    std::thread* accept_thread_;
-    std::thread* maintenance_thread_;
+    std::unique_ptr<std::thread> accept_thread_;
+    std::unique_ptr<std::thread> maintenance_thread_;
 #endif
 };

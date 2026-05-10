@@ -43,7 +43,12 @@ bool PortTunnelService::spawn_tcp_listener_loop(
             PortTunnelWorkerLease lease(service);
             service->tcp_accept_loop(session, listener);
         }).detach();
+    } catch (const std::exception& ex) {
+        log_tunnel_exception("spawn tcp listener thread", ex);
+        service->release_worker();
+        return false;
     } catch (...) {
+        log_unknown_tunnel_exception("spawn tcp listener thread");
         service->release_worker();
         return false;
     }
@@ -153,7 +158,12 @@ void PortTunnelConnection::tcp_listen(const PortTunnelFrame& frame) {
             service_,
             true
         ));
+    } catch (const std::exception& ex) {
+        log_tunnel_exception("create tcp listener", ex);
+        service_->release_retained_listener();
+        throw;
     } catch (...) {
+        log_unknown_tunnel_exception("create tcp listener");
         service_->release_retained_listener();
         throw;
     }

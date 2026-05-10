@@ -1,6 +1,7 @@
 #include "server_runtime.h"
 
 #include <cstring>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 
@@ -72,8 +73,8 @@ ServerRuntime::ServerRuntime(const DaemonConfig& config)
       maintenance_thread_(NULL)
 #else
       ,
-      accept_thread_(NULL),
-      maintenance_thread_(NULL)
+      accept_thread_(),
+      maintenance_thread_()
 #endif
 {
     state_.config = config;
@@ -96,7 +97,11 @@ ServerRuntime::~ServerRuntime() {
 void ServerRuntime::start_accept_loop() {
     {
         BasicLockGuard lock(mutex_);
+#ifdef _WIN32
         if (accept_thread_ != NULL || maintenance_thread_ != NULL) {
+#else
+        if (accept_thread_.get() != NULL || maintenance_thread_.get() != NULL) {
+#endif
             throw std::runtime_error("server runtime accept loop already started");
         }
         if (listener_.valid()) {
@@ -121,8 +126,8 @@ void ServerRuntime::start_accept_loop() {
         throw std::runtime_error("_beginthreadex failed");
     }
 #else
-    accept_thread_ = new std::thread(&ServerRuntime::accept_loop, this);
-    maintenance_thread_ = new std::thread(&ServerRuntime::maintenance_loop, this);
+    accept_thread_.reset(new std::thread(&ServerRuntime::accept_loop, this));
+    maintenance_thread_.reset(new std::thread(&ServerRuntime::maintenance_loop, this));
 #endif
 }
 
@@ -147,15 +152,20 @@ void ServerRuntime::join() {
     HANDLE accept_thread = NULL;
     HANDLE maintenance_thread = NULL;
 #else
-    std::thread* accept_thread = NULL;
-    std::thread* maintenance_thread = NULL;
+    std::unique_ptr<std::thread> accept_thread;
+    std::unique_ptr<std::thread> maintenance_thread;
 #endif
     {
         BasicLockGuard lock(mutex_);
+#ifdef _WIN32
         accept_thread = accept_thread_;
         maintenance_thread = maintenance_thread_;
         accept_thread_ = NULL;
         maintenance_thread_ = NULL;
+#else
+        accept_thread.swap(accept_thread_);
+        maintenance_thread.swap(maintenance_thread_);
+#endif
     }
 
 #ifdef _WIN32
@@ -168,13 +178,11 @@ void ServerRuntime::join() {
         CloseHandle(maintenance_thread);
     }
 #else
-    if (accept_thread != NULL) {
+    if (accept_thread.get() != NULL) {
         accept_thread->join();
-        delete accept_thread;
     }
-    if (maintenance_thread != NULL) {
+    if (maintenance_thread.get() != NULL) {
         maintenance_thread->join();
-        delete maintenance_thread;
     }
 #endif
 

@@ -15,11 +15,13 @@
 #include <winsock2.h>
 #include <windows.h>
 #else
+#include <memory>
 #include <thread>
 #endif
 
 #include "basic_mutex.h"
 #include "json.hpp"
+#include "logging.h"
 #include "platform.h"
 #include "port_forward_endpoint.h"
 #include "port_forward_error.h"
@@ -38,6 +40,9 @@ extern const std::size_t READ_BUF_SIZE;
 extern const std::size_t TCP_WRITE_QUEUE_LIMIT;
 extern const unsigned long RETAINED_SOCKET_POLL_TIMEOUT_MS;
 extern const unsigned long RESUME_TIMEOUT_MS;
+
+void log_tunnel_exception(const char* operation, const std::exception& ex);
+void log_unknown_tunnel_exception(const char* operation);
 
 class PortTunnelConnection;
 class PortTunnelService;
@@ -265,7 +270,7 @@ private:
     HANDLE expiry_thread_;
     static unsigned __stdcall expiry_thread_entry(void* raw_context);
 #else
-    std::thread* expiry_thread_;
+    std::unique_ptr<std::thread> expiry_thread_;
 #endif
 };
 
