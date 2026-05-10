@@ -51,23 +51,16 @@ async fn transfer_files_copies_local_file_and_reports_summary() {
     let destination = fixture._tempdir.path().join("dest.txt");
     std::fs::write(&source, "hello\n").unwrap();
 
-    let result = fixture
-        .call_tool(
-            "transfer_files",
-            serde_json::json!({
-                "source": {
-                    "target": "local",
-                    "path": source.display().to_string()
-                },
-                "destination": {
-                    "target": "local",
-                    "path": destination.display().to_string()
-                },
-                "overwrite": "fail",
-                "create_parent": false
-            }),
-        )
-        .await;
+    let result = transfer_single_source(
+        &fixture,
+        "local",
+        source.display(),
+        "local",
+        destination.display(),
+        Some("fail"),
+        false,
+    )
+    .await;
 
     assert_eq!(std::fs::read_to_string(&destination).unwrap(), "hello\n");
     assert_eq!(result.structured_content["source_type"], "file");
@@ -89,22 +82,16 @@ async fn transfer_files_defaults_to_merge_overwrite() {
     let source = fixture._tempdir.path().join("source.txt");
     std::fs::write(&source, "hello default\n").unwrap();
 
-    fixture
-        .call_tool(
-            "transfer_files",
-            serde_json::json!({
-                "source": {
-                    "target": "local",
-                    "path": source.display().to_string()
-                },
-                "destination": {
-                    "target": "builder-xp",
-                    "path": "/srv/remote.txt"
-                },
-                "create_parent": true
-            }),
-        )
-        .await;
+    transfer_single_source(
+        &fixture,
+        "local",
+        source.display(),
+        "builder-xp",
+        "/srv/remote.txt",
+        None,
+        true,
+    )
+    .await;
 
     let capture = fixture
         .last_transfer_import()
@@ -443,23 +430,16 @@ async fn transfer_files_uses_bearer_auth_for_remote_imports() {
     let source = fixture._tempdir.path().join("source.txt");
     std::fs::write(&source, "hello auth\n").unwrap();
 
-    let result = fixture
-        .call_tool(
-            "transfer_files",
-            serde_json::json!({
-                "source": {
-                    "target": "local",
-                    "path": source.display().to_string()
-                },
-                "destination": {
-                    "target": "builder-a",
-                    "path": "/srv/remote.txt"
-                },
-                "overwrite": "fail",
-                "create_parent": false
-            }),
-        )
-        .await;
+    let result = transfer_single_source(
+        &fixture,
+        "local",
+        source.display(),
+        "builder-a",
+        "/srv/remote.txt",
+        Some("fail"),
+        false,
+    )
+    .await;
 
     assert_eq!(result.structured_content["source_type"], "file");
     assert_eq!(result.structured_content["files_copied"], 1);
@@ -476,23 +456,16 @@ async fn transfer_files_uses_bearer_auth_for_remote_exports() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon_http_auth("shared-secret").await;
     let destination = fixture._tempdir.path().join("download");
 
-    let result = fixture
-        .call_tool(
-            "transfer_files",
-            serde_json::json!({
-                "source": {
-                    "target": "builder-a",
-                    "path": "/srv/export"
-                },
-                "destination": {
-                    "target": "local",
-                    "path": destination.display().to_string()
-                },
-                "overwrite": "fail",
-                "create_parent": false
-            }),
-        )
-        .await;
+    let result = transfer_single_source(
+        &fixture,
+        "builder-a",
+        "/srv/export",
+        "local",
+        destination.display(),
+        Some("fail"),
+        false,
+    )
+    .await;
 
     assert_eq!(
         std::fs::read_to_string(destination.join("nested/hello.txt")).unwrap(),
@@ -716,23 +689,16 @@ async fn transfer_files_copies_local_file_to_plain_http_remote_as_single_file_ta
     let source = fixture._tempdir.path().join("source.txt");
     std::fs::write(&source, "hello xp\n").unwrap();
 
-    let result = fixture
-        .call_tool(
-            "transfer_files",
-            serde_json::json!({
-                "source": {
-                    "target": "local",
-                    "path": source.display().to_string()
-                },
-                "destination": {
-                    "target": "builder-xp",
-                    "path": "C:/dest/file.txt"
-                },
-                "overwrite": "fail",
-                "create_parent": true
-            }),
-        )
-        .await;
+    let result = transfer_single_source(
+        &fixture,
+        "local",
+        source.display(),
+        "builder-xp",
+        "C:/dest/file.txt",
+        Some("fail"),
+        true,
+    )
+    .await;
 
     let capture = fixture
         .last_transfer_import()
@@ -757,23 +723,16 @@ async fn transfer_files_auto_negotiates_zstd_when_supported() {
     let source = fixture._tempdir.path().join("source.txt");
     std::fs::write(&source, "hello zstd\n").unwrap();
 
-    let result = fixture
-        .call_tool(
-            "transfer_files",
-            serde_json::json!({
-                "source": {
-                    "target": "local",
-                    "path": source.display().to_string()
-                },
-                "destination": {
-                    "target": "builder-a",
-                    "path": "/tmp/dest.txt"
-                },
-                "overwrite": "fail",
-                "create_parent": true
-            }),
-        )
-        .await;
+    let result = transfer_single_source(
+        &fixture,
+        "local",
+        source.display(),
+        "builder-a",
+        "/tmp/dest.txt",
+        Some("fail"),
+        true,
+    )
+    .await;
 
     let capture = fixture
         .last_transfer_import()
@@ -793,23 +752,16 @@ async fn transfer_files_falls_back_to_none_when_target_does_not_support_compress
     let source = fixture._tempdir.path().join("source.txt");
     std::fs::write(&source, "hello xp\n").unwrap();
 
-    let result = fixture
-        .call_tool(
-            "transfer_files",
-            serde_json::json!({
-                "source": {
-                    "target": "local",
-                    "path": source.display().to_string()
-                },
-                "destination": {
-                    "target": "builder-xp",
-                    "path": "C:/dest/file.txt"
-                },
-                "overwrite": "fail",
-                "create_parent": true
-            }),
-        )
-        .await;
+    let result = transfer_single_source(
+        &fixture,
+        "local",
+        source.display(),
+        "builder-xp",
+        "C:/dest/file.txt",
+        Some("fail"),
+        true,
+    )
+    .await;
 
     let capture = fixture
         .last_transfer_import()
@@ -859,23 +811,16 @@ async fn transfer_files_copies_plain_http_remote_file_to_local_from_single_file_
         .await;
     let destination = fixture._tempdir.path().join("dest.txt");
 
-    let result = fixture
-        .call_tool(
-            "transfer_files",
-            serde_json::json!({
-                "source": {
-                    "target": "builder-xp",
-                    "path": "C:/remote/file.txt"
-                },
-                "destination": {
-                    "target": "local",
-                    "path": destination.display().to_string()
-                },
-                "overwrite": "replace",
-                "create_parent": true
-            }),
-        )
-        .await;
+    let result = transfer_single_source(
+        &fixture,
+        "builder-xp",
+        "C:/remote/file.txt",
+        "local",
+        destination.display(),
+        Some("replace"),
+        true,
+    )
+    .await;
 
     assert_eq!(std::fs::read_to_string(&destination).unwrap(), "hello xp\n");
     assert_eq!(result.structured_content["source_type"], "file");
@@ -890,23 +835,16 @@ async fn transfer_files_copies_plain_http_remote_directory_to_local() {
     let fixture = support::spawn_broker_with_plain_http_stub_daemon().await;
     let destination = fixture._tempdir.path().join("dest");
 
-    let result = fixture
-        .call_tool(
-            "transfer_files",
-            serde_json::json!({
-                "source": {
-                    "target": "builder-xp",
-                    "path": "C:/remote-exec/tree"
-                },
-                "destination": {
-                    "target": "local",
-                    "path": destination.display().to_string()
-                },
-                "overwrite": "replace",
-                "create_parent": true
-            }),
-        )
-        .await;
+    let result = transfer_single_source(
+        &fixture,
+        "builder-xp",
+        "C:/remote-exec/tree",
+        "local",
+        destination.display(),
+        Some("replace"),
+        true,
+    )
+    .await;
 
     assert_eq!(result.structured_content["source_type"], "directory");
     assert_eq!(result.structured_content["files_copied"], 1);
@@ -956,23 +894,16 @@ async fn transfer_files_rejects_same_local_path_before_mutation() {
     let source = fixture._tempdir.path().join("same.txt");
     std::fs::write(&source, "hello\n").unwrap();
 
-    let error = fixture
-        .call_tool_error(
-            "transfer_files",
-            serde_json::json!({
-                "source": {
-                    "target": "local",
-                    "path": source.display().to_string()
-                },
-                "destination": {
-                    "target": "local",
-                    "path": source.display().to_string()
-                },
-                "overwrite": "replace",
-                "create_parent": false
-            }),
-        )
-        .await;
+    let error = transfer_single_source_error(
+        &fixture,
+        "local",
+        source.display(),
+        "local",
+        source.display(),
+        Some("replace"),
+        false,
+    )
+    .await;
 
     assert!(error.contains("source and destination must differ"));
     assert_eq!(std::fs::read_to_string(&source).unwrap(), "hello\n");
@@ -982,23 +913,16 @@ async fn transfer_files_rejects_same_local_path_before_mutation() {
 async fn transfer_files_accepts_windows_remote_paths_on_non_windows_hosts() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon_platform("windows", false).await;
 
-    let error = fixture
-        .call_tool_error(
-            "transfer_files",
-            serde_json::json!({
-                "source": {
-                    "target": "builder-a",
-                    "path": "C:/Work/Artifact.txt"
-                },
-                "destination": {
-                    "target": "builder-a",
-                    "path": r"c:\work\artifact.txt"
-                },
-                "overwrite": "replace",
-                "create_parent": true
-            }),
-        )
-        .await;
+    let error = transfer_single_source_error(
+        &fixture,
+        "builder-a",
+        "C:/Work/Artifact.txt",
+        "builder-a",
+        r"c:\work\artifact.txt",
+        Some("replace"),
+        true,
+    )
+    .await;
 
     assert!(error.contains("source and destination must differ"));
 }
@@ -1007,23 +931,16 @@ async fn transfer_files_accepts_windows_remote_paths_on_non_windows_hosts() {
 async fn transfer_files_accepts_msys_and_cygwin_windows_remote_paths_on_non_windows_hosts() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon_platform("windows", false).await;
 
-    let error = fixture
-        .call_tool_error(
-            "transfer_files",
-            serde_json::json!({
-                "source": {
-                    "target": "builder-a",
-                    "path": "/c/Work/Artifact.txt"
-                },
-                "destination": {
-                    "target": "builder-a",
-                    "path": "/cygdrive/c/work/artifact.txt"
-                },
-                "overwrite": "replace",
-                "create_parent": true
-            }),
-        )
-        .await;
+    let error = transfer_single_source_error(
+        &fixture,
+        "builder-a",
+        "/c/Work/Artifact.txt",
+        "builder-a",
+        "/cygdrive/c/work/artifact.txt",
+        Some("replace"),
+        true,
+    )
+    .await;
 
     assert!(error.contains("source and destination must differ"));
 }
@@ -1032,23 +949,16 @@ async fn transfer_files_accepts_msys_and_cygwin_windows_remote_paths_on_non_wind
 async fn transfer_files_accepts_single_slash_windows_remote_paths_for_synthetic_posix_roots() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon_platform("windows", false).await;
 
-    let error = fixture
-        .call_tool_error(
-            "transfer_files",
-            serde_json::json!({
-                "source": {
-                    "target": "builder-a",
-                    "path": "/tmp/Artifact.txt"
-                },
-                "destination": {
-                    "target": "builder-a",
-                    "path": "/tmp/artifact.txt"
-                },
-                "overwrite": "replace",
-                "create_parent": true
-            }),
-        )
-        .await;
+    let error = transfer_single_source_error(
+        &fixture,
+        "builder-a",
+        "/tmp/Artifact.txt",
+        "builder-a",
+        "/tmp/artifact.txt",
+        Some("replace"),
+        true,
+    )
+    .await;
 
     assert!(error.contains("source and destination must differ"));
 }
@@ -1058,25 +968,70 @@ async fn transfer_files_accepts_single_slash_windows_remote_paths_for_synthetic_
 async fn transfer_files_still_rejects_windows_paths_for_unix_local_endpoints() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
 
-    let error = fixture
-        .call_tool_error(
-            "transfer_files",
-            serde_json::json!({
-                "source": {
-                    "target": "local",
-                    "path": "C:/Work/Artifact.txt"
-                },
-                "destination": {
-                    "target": "local",
-                    "path": "/tmp/out.txt"
-                },
-                "overwrite": "fail",
-                "create_parent": true
-            }),
-        )
-        .await;
+    let error = transfer_single_source_error(
+        &fixture,
+        "local",
+        "C:/Work/Artifact.txt",
+        "local",
+        "/tmp/out.txt",
+        Some("fail"),
+        true,
+    )
+    .await;
 
     assert!(error.contains("is not absolute"));
+}
+
+async fn transfer_single_source(
+    fixture: &support::fixture::BrokerFixture,
+    source_target: &str,
+    source_path: impl ToString,
+    destination_target: &str,
+    destination_path: impl ToString,
+    overwrite: Option<&str>,
+    create_parent: bool,
+) -> support::fixture::ToolResult {
+    let mut payload = serde_json::json!({
+        "source": {
+            "target": source_target,
+            "path": source_path.to_string()
+        },
+        "destination": {
+            "target": destination_target,
+            "path": destination_path.to_string()
+        },
+        "create_parent": create_parent
+    });
+    if let Some(overwrite) = overwrite {
+        payload["overwrite"] = serde_json::Value::String(overwrite.to_string());
+    }
+    fixture.call_tool("transfer_files", payload).await
+}
+
+async fn transfer_single_source_error(
+    fixture: &support::fixture::BrokerFixture,
+    source_target: &str,
+    source_path: impl ToString,
+    destination_target: &str,
+    destination_path: impl ToString,
+    overwrite: Option<&str>,
+    create_parent: bool,
+) -> String {
+    let mut payload = serde_json::json!({
+        "source": {
+            "target": source_target,
+            "path": source_path.to_string()
+        },
+        "destination": {
+            "target": destination_target,
+            "path": destination_path.to_string()
+        },
+        "create_parent": create_parent
+    });
+    if let Some(overwrite) = overwrite {
+        payload["overwrite"] = serde_json::Value::String(overwrite.to_string());
+    }
+    fixture.call_tool_error("transfer_files", payload).await
 }
 
 #[tokio::test]
