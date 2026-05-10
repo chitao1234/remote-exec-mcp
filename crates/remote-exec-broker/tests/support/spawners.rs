@@ -210,7 +210,7 @@ pub async fn spawn_broker_with_tls_stub_daemon_and_extra_target_config(
     certs: TestCerts,
     extra_target_config: &str,
 ) -> BrokerFixture {
-    remote_exec_daemon::install_crypto_provider();
+    remote_exec_daemon::install_crypto_provider().unwrap();
 
     let tempdir = tempfile::tempdir().unwrap();
     let (addr, stub_state) = spawn_stub_daemon(&certs).await;
@@ -241,7 +241,7 @@ pub async fn spawn_broker_with_tls_stub_daemon_and_daemon_spec(
     daemon_spec: remote_exec_pki::DaemonCertSpec,
     extra_target_config: &str,
 ) -> BrokerFixture {
-    remote_exec_daemon::install_crypto_provider();
+    remote_exec_daemon::install_crypto_provider().unwrap();
 
     let tempdir = tempfile::tempdir().unwrap();
     let certs = write_test_certs_for_daemon_spec(tempdir.path(), daemon_spec);
@@ -651,7 +651,7 @@ async fn spawn_broker_with_local_and_stub_port_forward_version_and_extra_config_
     extra_top_level: Option<&str>,
     env: &[(&str, &str)],
 ) -> BrokerFixture {
-    remote_exec_daemon::install_crypto_provider();
+    remote_exec_daemon::install_crypto_provider().unwrap();
 
     let tempdir = tempfile::tempdir().unwrap();
     let local_workdir = tempdir.path().join("local-work");
@@ -899,7 +899,7 @@ pub async fn spawn_broker_with_late_target() -> DelayedTargetFixture {
 }
 
 pub async fn spawn_broker_with_local_target() -> BrokerFixture {
-    remote_exec_daemon::install_crypto_provider();
+    remote_exec_daemon::install_crypto_provider().unwrap();
 
     let tempdir = tempfile::tempdir().unwrap();
     let local_workdir = tempdir.path().join("local-work");
@@ -940,7 +940,7 @@ pub async fn spawn_broker_with_local_target_and_host_sandbox_for_workdir<F>(
 where
     F: FnOnce(&Path) -> String,
 {
-    remote_exec_daemon::install_crypto_provider();
+    remote_exec_daemon::install_crypto_provider().unwrap();
 
     let tempdir = tempfile::tempdir().unwrap();
     let local_workdir = tempdir.path().join("local-work");
@@ -973,7 +973,7 @@ where
 }
 
 pub async fn spawn_broker_with_local_target_apply_patch_encoding_autodetect() -> BrokerFixture {
-    remote_exec_daemon::install_crypto_provider();
+    remote_exec_daemon::install_crypto_provider().unwrap();
 
     let tempdir = tempfile::tempdir().unwrap();
     let local_workdir = tempdir.path().join("local-work");
@@ -1005,7 +1005,7 @@ pub async fn spawn_broker_with_local_target_apply_patch_encoding_autodetect() ->
 }
 
 pub async fn spawn_broker_with_local_target_and_extra_config(extra_config: &str) -> BrokerFixture {
-    remote_exec_daemon::install_crypto_provider();
+    remote_exec_daemon::install_crypto_provider().unwrap();
 
     let tempdir = tempfile::tempdir().unwrap();
     let local_workdir = tempdir.path().join("local-work");
@@ -1037,7 +1037,7 @@ pub async fn spawn_broker_with_local_target_and_extra_config(extra_config: &str)
 }
 
 async fn wait_until_ready_http(addr: std::net::SocketAddr) {
-    remote_exec_broker::install_crypto_provider();
+    remote_exec_broker::install_crypto_provider().unwrap();
     let client = reqwest::Client::builder().build().unwrap();
 
     for _ in 0..40 {
@@ -1057,7 +1057,7 @@ async fn wait_until_ready_http(addr: std::net::SocketAddr) {
 }
 
 async fn wait_until_ready_mcp_http(url: &str) {
-    remote_exec_broker::install_crypto_provider();
+    remote_exec_broker::install_crypto_provider().unwrap();
     let client = reqwest::Client::builder().build().unwrap();
 
     for _ in 0..40 {

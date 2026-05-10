@@ -135,7 +135,7 @@ impl ClientHandler for RemoteExecClientHandler {
 }
 
 async fn connect_direct(config_path: &Path) -> anyhow::Result<DirectBrokerClient> {
-    crate::install_crypto_provider();
+    crate::install_crypto_provider()?;
     let config = crate::config::BrokerConfig::load(config_path).await?;
     let state = crate::build_state(config).await?;
     Ok(DirectBrokerClient { state })
@@ -145,7 +145,7 @@ async fn connect_streamable_http(
     url: &str,
 ) -> anyhow::Result<RunningService<RoleClient, RemoteExecClientHandler>> {
     crate::broker_tls::ensure_broker_url_supported(url)?;
-    crate::install_crypto_provider();
+    crate::install_crypto_provider()?;
     let client = reqwest::Client::builder()
         .build()
         .context("building streamable HTTP reqwest client")?;

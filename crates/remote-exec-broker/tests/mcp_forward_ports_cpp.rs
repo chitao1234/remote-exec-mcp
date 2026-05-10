@@ -467,7 +467,7 @@ impl CppDaemonBrokerFixture {
 
     async fn spawn_with_daemon_config(extra_daemon_config: &str) -> Self {
         ensure_cpp_daemon_built().await;
-        remote_exec_broker::install_crypto_provider();
+        remote_exec_broker::install_crypto_provider().unwrap();
 
         let tempdir = tempfile::tempdir().unwrap();
         let daemon_binary = stage_cpp_daemon_binary(tempdir.path());
@@ -637,7 +637,7 @@ struct CrashableCppDaemonBrokerFixture {
 impl CrashableCppDaemonBrokerFixture {
     async fn spawn() -> Self {
         ensure_cpp_daemon_built().await;
-        remote_exec_broker::install_crypto_provider();
+        remote_exec_broker::install_crypto_provider().unwrap();
 
         let tempdir = tempfile::tempdir().unwrap();
         let daemon_binary = stage_cpp_daemon_binary(tempdir.path());
@@ -973,7 +973,7 @@ fn allocate_addr() -> std::net::SocketAddr {
 }
 
 async fn wait_until_ready_http(addr: std::net::SocketAddr) {
-    remote_exec_broker::install_crypto_provider();
+    remote_exec_broker::install_crypto_provider().unwrap();
     let client = reqwest::Client::builder().build().unwrap();
 
     for _ in 0..80 {
@@ -993,7 +993,7 @@ async fn wait_until_ready_http(addr: std::net::SocketAddr) {
 }
 
 async fn wait_until_ready_mcp_http(url: &str) {
-    remote_exec_broker::install_crypto_provider();
+    remote_exec_broker::install_crypto_provider().unwrap();
     let client = reqwest::Client::builder().build().unwrap();
 
     for _ in 0..80 {

@@ -5,7 +5,9 @@ use axum::Router;
 
 use crate::config::{DaemonConfig, DaemonTransport};
 
-pub(crate) fn install_crypto_provider() {}
+pub(crate) fn install_crypto_provider() -> anyhow::Result<()> {
+    Ok(())
+}
 
 pub(crate) fn validate_config(config: &DaemonConfig) -> anyhow::Result<()> {
     if matches!(config.transport, DaemonTransport::Tls) {

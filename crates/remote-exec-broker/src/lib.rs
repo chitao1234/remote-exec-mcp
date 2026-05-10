@@ -18,8 +18,8 @@ pub use startup::{build_state, run};
 pub use state::BrokerState;
 pub use target::{CachedDaemonInfo, TargetHandle};
 
-pub fn install_crypto_provider() {
-    broker_tls::install_crypto_provider();
+pub fn install_crypto_provider() -> anyhow::Result<()> {
+    broker_tls::install_crypto_provider()
 }
 
 #[cfg(test)]

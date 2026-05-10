@@ -1,4 +1,4 @@
-use std::sync::{Arc, Once};
+use std::sync::{Arc, OnceLock};
 
 use anyhow::Context;
 use reqwest::Identity;
@@ -12,16 +12,24 @@ use rustls::{DigitallySignedStruct, SignatureScheme};
 
 use crate::config::TargetConfig;
 
-pub(crate) fn install_crypto_provider() {
-    static INIT: Once = Once::new();
+pub(crate) fn install_crypto_provider() -> anyhow::Result<()> {
+    static INIT: OnceLock<Result<(), String>> = OnceLock::new();
 
-    INIT.call_once(|| {
+    INIT.get_or_init(|| {
         if rustls::crypto::CryptoProvider::get_default().is_some() {
-            return;
+            return Ok(());
         }
+
         let provider = rustls::crypto::ring::default_provider();
-        let _ = provider.install_default();
-    });
+        match provider.install_default() {
+            Ok(()) => Ok(()),
+            Err(_) if rustls::crypto::CryptoProvider::get_default().is_some() => Ok(()),
+            Err(_) => Err("failed to install rustls ring crypto provider".to_string()),
+        }
+    })
+    .as_ref()
+    .map(|_| ())
+    .map_err(|message| anyhow::anyhow!(message.clone()))
 }
 
 pub(crate) fn ensure_https_target_supported(_: &str) -> anyhow::Result<()> {

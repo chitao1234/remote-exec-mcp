@@ -24,8 +24,8 @@ pub async fn run(config: DaemonConfig) -> Result<()> {
     run_until(config, pending::<()>()).await
 }
 
-pub fn install_crypto_provider() {
-    tls::install_crypto_provider();
+pub fn install_crypto_provider() -> Result<()> {
+    tls::install_crypto_provider()
 }
 
 pub fn build_app_state(config: DaemonConfig) -> Result<AppState> {
@@ -40,7 +40,7 @@ pub async fn run_until<F>(config: DaemonConfig, shutdown: F) -> Result<()>
 where
     F: Future<Output = ()> + Send,
 {
-    tls::install_crypto_provider();
+    tls::install_crypto_provider()?;
     let daemon_config = Arc::new(config);
     let state = remote_exec_host::build_runtime_state(daemon_config.host_runtime_config())?;
     tracing::info!(

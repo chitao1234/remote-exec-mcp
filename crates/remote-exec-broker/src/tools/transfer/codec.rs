@@ -77,7 +77,7 @@ mod tests {
 
     #[tokio::test]
     async fn transfer_codec_applies_canonical_import_headers() {
-        crate::install_crypto_provider();
+        crate::install_crypto_provider().unwrap();
         let client = reqwest::Client::new();
         let request = apply_import_headers(
             client.post("http://127.0.0.1/v1/transfer/import"),

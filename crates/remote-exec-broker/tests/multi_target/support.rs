@@ -698,7 +698,7 @@ async fn wait_until_ready_http(client: &reqwest::Client, addr: std::net::SocketA
 }
 
 async fn wait_until_ready_mcp_http(url: &str) {
-    remote_exec_broker::install_crypto_provider();
+    remote_exec_broker::install_crypto_provider().unwrap();
     let client = reqwest::Client::builder().build().unwrap();
 
     for _ in 0..80 {
@@ -722,7 +722,7 @@ async fn wait_until_ready_mcp_http(url: &str) {
 }
 
 fn build_http_client() -> reqwest::Client {
-    remote_exec_broker::install_crypto_provider();
+    remote_exec_broker::install_crypto_provider().unwrap();
     reqwest::Client::builder()
         .pool_max_idle_per_host(0)
         .build()

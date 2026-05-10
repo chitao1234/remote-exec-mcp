@@ -16,7 +16,7 @@ use crate::{
 };
 
 pub async fn run(config: config::BrokerConfig) -> anyhow::Result<()> {
-    crate::install_crypto_provider();
+    crate::install_crypto_provider()?;
     let mcp = config.mcp.clone();
     tracing::info!(
         configured_targets = config.targets.len(),

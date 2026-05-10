@@ -136,7 +136,7 @@ impl DaemonClient {
         config: &TargetConfig,
     ) -> anyhow::Result<Self> {
         let target_name = target_name.into();
-        crate::install_crypto_provider();
+        crate::install_crypto_provider()?;
         let client = match config.validated_transport(&target_name)? {
             TargetTransportKind::Http => reqwest::Client::builder()
                 .build()
@@ -607,7 +607,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     fn test_client(authorization: Option<HeaderValue>) -> DaemonClient {
-        crate::install_crypto_provider();
+        crate::install_crypto_provider().unwrap();
         DaemonClient {
             client: reqwest::Client::builder().build().unwrap(),
             target_name: "builder-a".to_string(),
@@ -680,7 +680,7 @@ mod tests {
 
     #[tokio::test]
     async fn port_tunnel_sends_upgrade_headers_and_preface() {
-        crate::install_crypto_provider();
+        crate::install_crypto_provider().unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {

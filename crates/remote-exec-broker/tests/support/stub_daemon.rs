@@ -704,7 +704,7 @@ async fn wait_until_ready(certs: &TestCerts, addr: std::net::SocketAddr) {
 }
 
 async fn wait_until_ready_http(addr: std::net::SocketAddr) {
-    remote_exec_broker::install_crypto_provider();
+    remote_exec_broker::install_crypto_provider().unwrap();
     let client = reqwest::Client::builder().build().unwrap();
 
     for _ in 0..40 {

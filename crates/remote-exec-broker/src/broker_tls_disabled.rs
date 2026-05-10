@@ -18,4 +18,6 @@ pub(crate) fn ensure_broker_url_supported(url: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) fn install_crypto_provider() {}
+pub(crate) fn install_crypto_provider() -> anyhow::Result<()> {
+    Ok(())
+}
