@@ -1,5 +1,8 @@
-CXX = i686-w64-mingw32-g++
+# Toolchains.
 HOST_CXX ?= g++
+WINDOWS_XP_CXX ?= i686-w64-mingw32-g++
+
+# Paths.
 MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 BUILD_DIR ?= $(MAKEFILE_DIR)build
 OBJ_DIR := $(BUILD_DIR)/obj
@@ -9,20 +12,32 @@ WINDOWS_XP_PROD_OBJ_DIR := $(OBJ_DIR)/windows-xp-prod
 WINDOWS_XP_TEST_OBJ_DIR := $(OBJ_DIR)/windows-xp-test
 POSIX_TARGET := $(BUILD_DIR)/remote-exec-daemon-cpp
 WINDOWS_XP_TARGET := $(BUILD_DIR)/remote-exec-daemon-cpp-xp.exe
+
+# Common flags.
 COMMON_CPPFLAGS := -I$(MAKEFILE_DIR)include -I$(MAKEFILE_DIR)third_party
 PROD_CXXFLAGS := -std=c++11 -O0 -Wall -Wextra
 TEST_CXXFLAGS := -std=gnu++17 -O0 -Wall -Wextra
+DEPFLAGS := -MMD -MP
+
+# POSIX builds use pthread APIs. Use the compiler-driver flag, not -lpthread, so
+# both compilation and linking get the platform's thread-aware settings.
+POSIX_PTHREAD_FLAGS := -pthread
 HOST_PROD_CPPFLAGS := $(COMMON_CPPFLAGS)
-HOST_PROD_CXXFLAGS := $(PROD_CXXFLAGS)
+HOST_PROD_CXXFLAGS := $(PROD_CXXFLAGS) $(POSIX_PTHREAD_FLAGS)
+HOST_PROD_LDFLAGS ?=
+HOST_PROD_LDLIBS := $(POSIX_PTHREAD_FLAGS)
 HOST_TEST_CPPFLAGS := $(COMMON_CPPFLAGS) -DREMOTE_EXEC_CPP_TESTING
-HOST_TEST_CXXFLAGS := $(TEST_CXXFLAGS)
+HOST_TEST_CXXFLAGS := $(TEST_CXXFLAGS) $(POSIX_PTHREAD_FLAGS)
+HOST_TEST_LDFLAGS ?=
+HOST_TEST_LDLIBS := $(POSIX_PTHREAD_FLAGS)
+
+# Windows XP-compatible cross-build flags.
 WINDOWS_XP_PROD_CPPFLAGS := $(COMMON_CPPFLAGS) -DWINVER=0x0501 -D_WIN32_WINNT=0x0501
 WINDOWS_XP_PROD_CXXFLAGS := $(PROD_CXXFLAGS)
 WINDOWS_XP_TEST_CPPFLAGS := $(COMMON_CPPFLAGS) -DWINVER=0x0501 -D_WIN32_WINNT=0x0501
 WINDOWS_XP_TEST_CXXFLAGS := $(TEST_CXXFLAGS)
 WINDOWS_XP_LDFLAGS := -static-libgcc -static-libstdc++
-DEPFLAGS := -MMD -MP
-WIN_LIBS := -lws2_32
+WINDOWS_XP_LDLIBS := -lws2_32
 TRANSFER_SRCS := $(addprefix $(MAKEFILE_DIR),src/transfer_ops.cpp src/transfer_ops_fs.cpp src/transfer_ops_tar.cpp src/transfer_ops_export.cpp src/transfer_ops_import.cpp src/transfer_glob.cpp)
 POLICY_SRCS := $(addprefix $(MAKEFILE_DIR),src/path_policy.cpp src/filesystem_sandbox.cpp)
 RPC_FAILURE_SRCS := $(MAKEFILE_DIR)src/rpc_failures.cpp
@@ -49,6 +64,25 @@ XP_SESSION_STORE := $(BUILD_DIR)/test_session_store-xp.exe
 XP_TRANSFER := $(BUILD_DIR)/test_transfer-xp.exe
 WINE ?= wine
 
+HOST_TEST_PHONY_TARGETS := \
+	test-host-basic-mutex \
+	test-host-patch \
+	test-host-transfer \
+	test-host-config \
+	test-host-http-request \
+	test-host-server-transport \
+	test-host-server-streaming \
+	test-host-session-store \
+	test-host-connection-manager \
+	test-host-server-runtime \
+	test-host-server-routes \
+	test-host-sandbox \
+	test-port-tunnel-frame
+
+WINDOWS_XP_TEST_TARGETS := \
+	$(XP_SESSION_STORE) \
+	$(XP_TRANSFER)
+
 HOST_PATCH_SRCS := $(addprefix $(MAKEFILE_DIR),tests/test_patch.cpp src/patch_engine.cpp src/platform.cpp src/path_policy.cpp)
 HOST_TRANSFER_SRCS := $(MAKEFILE_DIR)tests/test_transfer.cpp $(TRANSFER_SRCS) $(RPC_FAILURE_SRCS)
 HOST_CONFIG_SRCS := $(addprefix $(MAKEFILE_DIR),tests/test_config.cpp src/config.cpp src/text_utils.cpp)
@@ -69,6 +103,17 @@ host_prod_objs = $(patsubst $(MAKEFILE_DIR)%.cpp,$(HOST_PROD_OBJ_DIR)/%.o,$(1))
 host_test_objs = $(patsubst $(MAKEFILE_DIR)%.cpp,$(HOST_TEST_OBJ_DIR)/%.o,$(1))
 windows_xp_prod_objs = $(patsubst $(MAKEFILE_DIR)%.cpp,$(WINDOWS_XP_PROD_OBJ_DIR)/%.o,$(1))
 windows_xp_test_objs = $(patsubst $(MAKEFILE_DIR)%.cpp,$(WINDOWS_XP_TEST_OBJ_DIR)/%.o,$(1))
+
+define run_test
+$1: $2
+	$2
+endef
+
+define link_host_test
+$1: $2
+	mkdir -p $$(dir $$@)
+	$$(HOST_CXX) $$(HOST_TEST_CXXFLAGS) $$(HOST_TEST_LDFLAGS) -o $$@ $$^ $$(HOST_TEST_LDLIBS)
+endef
 
 POSIX_OBJS := $(sort $(call host_prod_objs,$(POSIX_SRCS)))
 WINDOWS_XP_OBJS := $(sort $(call windows_xp_prod_objs,$(WINDOWS_XP_SRCS)))
@@ -115,11 +160,11 @@ all-windows-xp: $(WINDOWS_XP_TARGET)
 
 $(POSIX_TARGET): $(POSIX_OBJS)
 	mkdir -p $(dir $@)
-	$(HOST_CXX) $(HOST_PROD_CXXFLAGS) -o $@ $^
+	$(HOST_CXX) $(HOST_PROD_CXXFLAGS) $(HOST_PROD_LDFLAGS) -o $@ $^ $(HOST_PROD_LDLIBS)
 
 $(WINDOWS_XP_TARGET): $(WINDOWS_XP_OBJS)
 	mkdir -p $(dir $@)
-	$(CXX) $(WINDOWS_XP_PROD_CXXFLAGS) $(WINDOWS_XP_LDFLAGS) -o $@ $^ $(WIN_LIBS)
+	$(WINDOWS_XP_CXX) $(WINDOWS_XP_PROD_CXXFLAGS) $(WINDOWS_XP_LDFLAGS) -o $@ $^ $(WINDOWS_XP_LDLIBS)
 
 $(HOST_PROD_OBJ_DIR)/%.o: $(MAKEFILE_DIR)%.cpp
 	mkdir -p $(dir $@)
@@ -131,128 +176,75 @@ $(HOST_TEST_OBJ_DIR)/%.o: $(MAKEFILE_DIR)%.cpp
 
 $(WINDOWS_XP_PROD_OBJ_DIR)/%.o: $(MAKEFILE_DIR)%.cpp
 	mkdir -p $(dir $@)
-	$(CXX) $(WINDOWS_XP_PROD_CPPFLAGS) $(WINDOWS_XP_PROD_CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
+	$(WINDOWS_XP_CXX) $(WINDOWS_XP_PROD_CPPFLAGS) $(WINDOWS_XP_PROD_CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 $(WINDOWS_XP_TEST_OBJ_DIR)/%.o: $(MAKEFILE_DIR)%.cpp
 	mkdir -p $(dir $@)
-	$(CXX) $(WINDOWS_XP_TEST_CPPFLAGS) $(WINDOWS_XP_TEST_CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
+	$(WINDOWS_XP_CXX) $(WINDOWS_XP_TEST_CPPFLAGS) $(WINDOWS_XP_TEST_CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 clean:
 	rm -rf $(BUILD_DIR)
 
-test-host-patch: $(HOST_PATCH)
-	$(HOST_PATCH)
+$(eval $(call run_test,test-host-patch,$(HOST_PATCH)))
+$(eval $(call link_host_test,$(HOST_PATCH),$(HOST_PATCH_OBJS)))
 
-$(HOST_PATCH): $(HOST_PATCH_OBJS)
-	mkdir -p $(dir $@)
-	$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -o $@ $^
+$(eval $(call run_test,test-host-transfer,$(HOST_TRANSFER)))
+$(eval $(call link_host_test,$(HOST_TRANSFER),$(HOST_TRANSFER_OBJS)))
 
-test-host-transfer: $(HOST_TRANSFER)
-	$(HOST_TRANSFER)
+$(eval $(call run_test,test-host-config,$(HOST_CONFIG)))
+$(eval $(call link_host_test,$(HOST_CONFIG),$(HOST_CONFIG_OBJS)))
 
-$(HOST_TRANSFER): $(HOST_TRANSFER_OBJS)
-	mkdir -p $(dir $@)
-	$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -o $@ $^
+$(eval $(call run_test,test-host-basic-mutex,$(HOST_BASIC_MUTEX)))
+$(eval $(call link_host_test,$(HOST_BASIC_MUTEX),$(HOST_BASIC_MUTEX_OBJS)))
 
-test-host-config: $(HOST_CONFIG)
-	$(HOST_CONFIG)
+$(eval $(call run_test,test-host-http-request,$(HOST_HTTP_REQUEST)))
+$(eval $(call link_host_test,$(HOST_HTTP_REQUEST),$(HOST_HTTP_REQUEST_OBJS)))
 
-$(HOST_CONFIG): $(HOST_CONFIG_OBJS)
-	mkdir -p $(dir $@)
-	$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -o $@ $^
+$(eval $(call run_test,test-host-server-transport,$(HOST_SERVER_TRANSPORT)))
+$(eval $(call link_host_test,$(HOST_SERVER_TRANSPORT),$(HOST_SERVER_TRANSPORT_OBJS)))
 
-test-host-basic-mutex: $(HOST_BASIC_MUTEX)
-	$(HOST_BASIC_MUTEX)
-
-$(HOST_BASIC_MUTEX): $(HOST_BASIC_MUTEX_OBJS)
-	mkdir -p $(dir $@)
-	$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -o $@ $^
-
-test-host-http-request: $(HOST_HTTP_REQUEST)
-	$(HOST_HTTP_REQUEST)
-
-$(HOST_HTTP_REQUEST): $(HOST_HTTP_REQUEST_OBJS)
-	mkdir -p $(dir $@)
-	$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -o $@ $^
-
-test-host-server-transport: $(HOST_SERVER_TRANSPORT)
-	$(HOST_SERVER_TRANSPORT)
-
-$(HOST_SERVER_TRANSPORT): $(HOST_SERVER_TRANSPORT_OBJS)
-	mkdir -p $(dir $@)
-	$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -o $@ $^
-
-test-host-server-streaming: $(HOST_SERVER_STREAMING)
-	$(HOST_SERVER_STREAMING)
-
+$(eval $(call run_test,test-host-server-streaming,$(HOST_SERVER_STREAMING)))
 test-server-streaming: test-host-server-streaming
+$(eval $(call link_host_test,$(HOST_SERVER_STREAMING),$(HOST_SERVER_STREAMING_OBJS)))
 
-$(HOST_SERVER_STREAMING): $(HOST_SERVER_STREAMING_OBJS)
-	mkdir -p $(dir $@)
-	$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -o $@ $^
+$(eval $(call run_test,test-host-session-store,$(HOST_SESSION_STORE)))
+$(eval $(call link_host_test,$(HOST_SESSION_STORE),$(HOST_SESSION_STORE_OBJS)))
 
-test-host-session-store: $(HOST_SESSION_STORE)
-	$(HOST_SESSION_STORE)
+$(eval $(call run_test,test-host-connection-manager,$(HOST_CONNECTION_MANAGER)))
+$(eval $(call link_host_test,$(HOST_CONNECTION_MANAGER),$(HOST_CONNECTION_MANAGER_OBJS)))
 
-$(HOST_SESSION_STORE): $(HOST_SESSION_STORE_OBJS)
-	mkdir -p $(dir $@)
-	$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -o $@ $^
+$(eval $(call run_test,test-host-server-runtime,$(HOST_SERVER_RUNTIME)))
+$(eval $(call link_host_test,$(HOST_SERVER_RUNTIME),$(HOST_SERVER_RUNTIME_OBJS)))
 
-test-host-connection-manager: $(HOST_CONNECTION_MANAGER)
-	$(HOST_CONNECTION_MANAGER)
+$(eval $(call run_test,test-host-server-routes,$(HOST_SERVER_ROUTES)))
+$(eval $(call link_host_test,$(HOST_SERVER_ROUTES),$(HOST_SERVER_ROUTES_OBJS)))
 
-$(HOST_CONNECTION_MANAGER): $(HOST_CONNECTION_MANAGER_OBJS)
-	mkdir -p $(dir $@)
-	$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -o $@ $^
+$(eval $(call run_test,test-host-sandbox,$(HOST_SANDBOX)))
+$(eval $(call link_host_test,$(HOST_SANDBOX),$(HOST_SANDBOX_OBJS)))
 
-test-host-server-runtime: $(HOST_SERVER_RUNTIME)
-	$(HOST_SERVER_RUNTIME)
-
-$(HOST_SERVER_RUNTIME): $(HOST_SERVER_RUNTIME_OBJS)
-	mkdir -p $(dir $@)
-	$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -o $@ $^
-
-test-host-server-routes: $(HOST_SERVER_ROUTES)
-	$(HOST_SERVER_ROUTES)
-
-$(HOST_SERVER_ROUTES): $(HOST_SERVER_ROUTES_OBJS)
-	mkdir -p $(dir $@)
-	$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -o $@ $^
-
-test-host-sandbox: $(HOST_SANDBOX)
-	$(HOST_SANDBOX)
-
-$(HOST_SANDBOX): $(HOST_SANDBOX_OBJS)
-	mkdir -p $(dir $@)
-	$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -o $@ $^
-
-test-port-tunnel-frame: $(HOST_PORT_TUNNEL_FRAME)
-	$(HOST_PORT_TUNNEL_FRAME)
-
-$(HOST_PORT_TUNNEL_FRAME): $(HOST_PORT_TUNNEL_FRAME_OBJS)
-	mkdir -p $(dir $@)
-	$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -o $@ $^
+$(eval $(call run_test,test-port-tunnel-frame,$(HOST_PORT_TUNNEL_FRAME)))
+$(eval $(call link_host_test,$(HOST_PORT_TUNNEL_FRAME),$(HOST_PORT_TUNNEL_FRAME_OBJS)))
 
 test-wine-session-store: $(XP_SESSION_STORE)
 	$(WINE) $(XP_SESSION_STORE)
 
 $(XP_SESSION_STORE): $(XP_SESSION_STORE_OBJS)
 	mkdir -p $(dir $@)
-	$(CXX) $(WINDOWS_XP_TEST_CXXFLAGS) $(WINDOWS_XP_LDFLAGS) -o $@ $^ $(WIN_LIBS)
+	$(WINDOWS_XP_CXX) $(WINDOWS_XP_TEST_CXXFLAGS) $(WINDOWS_XP_LDFLAGS) -o $@ $^ $(WINDOWS_XP_LDLIBS)
 
 test-wine-transfer: $(XP_TRANSFER)
 	$(WINE) $(XP_TRANSFER)
 
 $(XP_TRANSFER): $(XP_TRANSFER_OBJS)
 	mkdir -p $(dir $@)
-	$(CXX) $(WINDOWS_XP_TEST_CXXFLAGS) $(WINDOWS_XP_LDFLAGS) -o $@ $^ $(WIN_LIBS)
+	$(WINDOWS_XP_CXX) $(WINDOWS_XP_TEST_CXXFLAGS) $(WINDOWS_XP_LDFLAGS) -o $@ $^ $(WINDOWS_XP_LDLIBS)
 
-check-posix: test-host-basic-mutex test-host-patch test-host-transfer test-host-config test-host-http-request test-host-server-transport test-host-server-streaming test-host-session-store test-host-connection-manager test-host-server-runtime test-host-server-routes test-host-sandbox test-port-tunnel-frame all-posix
+check-posix: $(HOST_TEST_PHONY_TARGETS) all-posix
 
-check-windows-xp: all-windows-xp $(XP_TRANSFER)
+check-windows-xp: all-windows-xp $(WINDOWS_XP_TEST_TARGETS)
 
 check: check-posix
 
 -include $(DEP_FILES)
 
-.PHONY: all all-posix all-windows-xp clean test-host-patch test-host-transfer test-host-config test-host-basic-mutex test-host-http-request test-host-server-transport test-host-server-streaming test-server-streaming test-host-session-store test-host-connection-manager test-host-server-runtime test-host-server-routes test-host-sandbox test-port-tunnel-frame test-wine-session-store test-wine-transfer check-posix check-windows-xp check
+.PHONY: all all-posix all-windows-xp clean $(HOST_TEST_PHONY_TARGETS) test-server-streaming test-wine-session-store test-wine-transfer check-posix check-windows-xp check
