@@ -1,92 +1,13 @@
 mod support;
 
-use std::io::{Cursor, Read};
 #[cfg(unix)]
 use std::process::Command;
 
 use rmcp::model::{CallToolRequestParams, PaginatedRequestParams};
-use support::transfer_archive::{decode_archive, read_archive_paths};
-
-const SINGLE_FILE_ENTRY: &str = ".remote-exec-file";
-
-fn read_single_file_archive(bytes: &[u8]) -> (String, Vec<u8>) {
-    let mut archive = tar::Archive::new(Cursor::new(bytes));
-    let mut entries = archive.entries().expect("archive entries");
-    let mut entry = entries
-        .next()
-        .expect("archive entry")
-        .expect("archive entry ok");
-    let path = entry
-        .path()
-        .expect("entry path")
-        .to_string_lossy()
-        .into_owned();
-    let mut body = Vec::new();
-    entry.read_to_end(&mut body).expect("entry body");
-    assert!(
-        entries
-            .next()
-            .transpose()
-            .expect("no extra entries")
-            .is_none(),
-        "single-file archive contained extra entries"
-    );
-    (path, body)
-}
-
-fn raw_tar_file_with_path(path: &str, body: &[u8]) -> Vec<u8> {
-    fn write_octal(field: &mut [u8], value: u64) {
-        let digits = field.len() - 1;
-        let text = format!("{value:o}");
-        assert!(
-            text.len() <= digits,
-            "value {value} does not fit in tar field"
-        );
-        let start = digits - text.len();
-        field[..start].fill(b'0');
-        field[start..digits].copy_from_slice(text.as_bytes());
-        field[digits] = 0;
-    }
-
-    fn write_checksum(field: &mut [u8], checksum: u32) {
-        let text = format!("{checksum:o}");
-        assert!(
-            text.len() <= 6,
-            "checksum {checksum} does not fit in tar field"
-        );
-        let start = 6 - text.len();
-        field[..start].fill(b'0');
-        field[start..6].copy_from_slice(text.as_bytes());
-        field[6] = 0;
-        field[7] = b' ';
-    }
-
-    assert!(
-        path.len() <= 100,
-        "tar test helper only supports short paths"
-    );
-    let mut header = [0u8; 512];
-    header[..path.len()].copy_from_slice(path.as_bytes());
-    write_octal(&mut header[100..108], 0o644);
-    write_octal(&mut header[108..116], 0);
-    write_octal(&mut header[116..124], 0);
-    write_octal(&mut header[124..136], body.len() as u64);
-    write_octal(&mut header[136..148], 0);
-    header[148..156].fill(b' ');
-    header[156] = b'0';
-    header[257..263].copy_from_slice(b"ustar\0");
-    header[263..265].copy_from_slice(b"00");
-    let checksum = header.iter().map(|byte| *byte as u32).sum();
-    write_checksum(&mut header[148..156], checksum);
-
-    let mut archive = Vec::with_capacity(512 + body.len() + 1024);
-    archive.extend_from_slice(&header);
-    archive.extend_from_slice(body);
-    let padding = (512 - (body.len() % 512)) % 512;
-    archive.resize(archive.len() + padding, 0);
-    archive.extend_from_slice(&[0u8; 1024]);
-    archive
-}
+use support::transfer_archive::{
+    SINGLE_FILE_ENTRY, decode_archive, raw_tar_file_with_path, read_archive_paths,
+    read_single_file_archive,
+};
 
 #[cfg(windows)]
 fn msys_style_path(path: &std::path::Path) -> String {
