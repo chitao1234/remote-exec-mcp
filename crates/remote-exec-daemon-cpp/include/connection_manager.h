@@ -23,6 +23,7 @@ public:
     bool try_start(UniqueSocket client, ConnectionWorkerMain worker_main, void* context);
     void begin_shutdown();
     void reap_finished();
+    void wait_for_all();
     unsigned long active_count() const;
 
     ConnectionManager(const ConnectionManager&) = delete;
@@ -30,13 +31,14 @@ public:
 
 private:
     struct WorkerRecord;
-    static void run_worker(const std::shared_ptr<WorkerRecord>& record);
+    void run_worker(const std::shared_ptr<WorkerRecord>& record);
 #ifdef _WIN32
     static DWORD WINAPI worker_thread_entry(LPVOID raw_context);
 #endif
 
     unsigned long max_active_connections_;
     mutable BasicMutex mutex_;
+    BasicCondVar state_changed_;
     std::map<unsigned long, std::shared_ptr<WorkerRecord> > workers_;
     bool shutting_down_;
     unsigned long next_worker_id_;

@@ -176,10 +176,7 @@ void ServerRuntime::join() {
 #endif
 
     connections_.begin_shutdown();
-    while (connections_.active_count() != 0UL) {
-        maintenance_once();
-        platform::sleep_ms(10UL);
-    }
+    connections_.wait_for_all();
     maintenance_once();
 }
 
@@ -208,10 +205,7 @@ void ServerRuntime::maintenance_once() {
         return;
     }
 
-    while (connections_.active_count() != 0UL) {
-        platform::sleep_ms(10UL);
-        connections_.reap_finished();
-    }
+    connections_.wait_for_all();
 }
 
 void ServerRuntime::maintenance_loop() {

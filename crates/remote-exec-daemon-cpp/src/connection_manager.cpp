@@ -2,8 +2,6 @@
 
 #include <vector>
 
-#include "platform.h"
-
 struct ConnectionManager::WorkerRecord {
     WorkerRecord(
         unsigned long worker_id_value,
@@ -46,25 +44,28 @@ ConnectionManager::ConnectionManager(unsigned long max_active_connections)
 
 ConnectionManager::~ConnectionManager() {
     begin_shutdown();
-    while (active_count() != 0UL) {
-        reap_finished();
-        platform::sleep_ms(10UL);
-    }
+    wait_for_all();
 }
 
 void ConnectionManager::run_worker(const std::shared_ptr<WorkerRecord>& record) {
     record->worker_main(record->socket, record->context);
-    BasicLockGuard lock(record->state_mutex);
-    record->socket = INVALID_SOCKET;
-    record->finished = true;
+    {
+        BasicLockGuard lock(record->state_mutex);
+        record->socket = INVALID_SOCKET;
+        record->finished = true;
+    }
+    BasicLockGuard lock(mutex_);
+    state_changed_.broadcast();
 }
 
 #ifdef _WIN32
 DWORD WINAPI ConnectionManager::worker_thread_entry(LPVOID raw_context) {
-    std::unique_ptr<std::shared_ptr<WorkerRecord> > context(
-        static_cast<std::shared_ptr<WorkerRecord>*>(raw_context)
-    );
-    run_worker(*context);
+    struct WorkerContext {
+        ConnectionManager* manager;
+        std::shared_ptr<WorkerRecord> record;
+    };
+    std::unique_ptr<WorkerContext> context(static_cast<WorkerContext*>(raw_context));
+    context->manager->run_worker(context->record);
     return 0;
 }
 #endif
@@ -83,24 +84,30 @@ bool ConnectionManager::try_start(
         const unsigned long worker_id = next_worker_id_++;
         record.reset(new WorkerRecord(worker_id, client.release(), worker_main, context));
         workers_[worker_id] = record;
+        state_changed_.broadcast();
     }
 
 #ifdef _WIN32
-    std::unique_ptr<std::shared_ptr<WorkerRecord> > thread_context(
-        new std::shared_ptr<WorkerRecord>(record)
-    );
+    struct WorkerContext {
+        ConnectionManager* manager;
+        std::shared_ptr<WorkerRecord> record;
+    };
+    std::unique_ptr<WorkerContext> thread_context(new WorkerContext());
+    thread_context->manager = this;
+    thread_context->record = record;
     HANDLE handle =
         CreateThread(NULL, 0, &ConnectionManager::worker_thread_entry, thread_context.get(), 0, NULL);
     if (handle == NULL) {
         close_socket(record->socket);
         BasicLockGuard lock(mutex_);
         workers_.erase(record->worker_id);
+        state_changed_.broadcast();
         return false;
     }
     record->thread_handle = handle;
     thread_context.release();
 #else
-    record->thread = new std::thread(run_worker, record);
+    record->thread = new std::thread(&ConnectionManager::run_worker, this, record);
 #endif
     return true;
 }
@@ -110,6 +117,7 @@ void ConnectionManager::begin_shutdown() {
     {
         BasicLockGuard lock(mutex_);
         shutting_down_ = true;
+        state_changed_.broadcast();
         for (std::map<unsigned long, std::shared_ptr<WorkerRecord> >::const_iterator it =
                  workers_.begin();
              it != workers_.end();
@@ -144,6 +152,7 @@ void ConnectionManager::reap_finished() {
             }
             finished.push_back(it->second);
             workers_.erase(it++);
+            state_changed_.broadcast();
         }
     }
 
@@ -161,6 +170,17 @@ void ConnectionManager::reap_finished() {
             finished[i]->thread = NULL;
         }
 #endif
+    }
+}
+
+void ConnectionManager::wait_for_all() {
+    for (;;) {
+        reap_finished();
+        BasicLockGuard lock(mutex_);
+        if (workers_.empty()) {
+            return;
+        }
+        state_changed_.wait(mutex_);
     }
 }
 
