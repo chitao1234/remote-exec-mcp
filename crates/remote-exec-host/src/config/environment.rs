@@ -2,26 +2,22 @@ use std::ffi::{OsStr, OsString};
 
 #[derive(Debug, Clone, Default)]
 pub struct ProcessEnvironment {
-    path: Option<OsString>,
-    comspec: Option<String>,
     vars: Vec<(OsString, OsString)>,
 }
 
 impl ProcessEnvironment {
     pub fn capture_current() -> Self {
         Self {
-            path: std::env::var_os("PATH"),
-            comspec: std::env::var("COMSPEC").ok(),
             vars: std::env::vars_os().collect(),
         }
     }
 
     pub fn path(&self) -> Option<&OsStr> {
-        self.path.as_deref()
+        self.var_os("PATH")
     }
 
     pub fn comspec(&self) -> Option<&str> {
-        self.comspec.as_deref()
+        self.var_os("COMSPEC").and_then(|value| value.to_str())
     }
 
     pub fn vars(&self) -> &[(OsString, OsString)] {
@@ -40,20 +36,7 @@ impl ProcessEnvironment {
             .retain(|(existing_key, _)| !env_key_matches(existing_key, key));
 
         if let Some(value) = value {
-            self.vars.push((OsString::from(key), value.clone()));
-            if key.eq_ignore_ascii_case("PATH") {
-                self.path = Some(value.clone());
-            }
-            if key.eq_ignore_ascii_case("COMSPEC") {
-                self.comspec = Some(value.to_string_lossy().into_owned());
-            }
-        } else {
-            if key.eq_ignore_ascii_case("PATH") {
-                self.path = None;
-            }
-            if key.eq_ignore_ascii_case("COMSPEC") {
-                self.comspec = None;
-            }
+            self.vars.push((OsString::from(key), value));
         }
     }
 }
@@ -69,5 +52,27 @@ fn env_key_matches(existing_key: &OsStr, requested_key: &str) -> bool {
     #[cfg(not(windows))]
     {
         existing_key == OsStr::new(requested_key)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ProcessEnvironment;
+    use std::ffi::{OsStr, OsString};
+
+    #[test]
+    fn path_and_comspec_are_derived_from_vars() {
+        let mut environment = ProcessEnvironment::default();
+        environment.set_var("PATH", Some(OsString::from("/custom/bin")));
+        environment.set_var("COMSPEC", Some(OsString::from("cmd.exe")));
+
+        assert_eq!(environment.path(), Some(OsStr::new("/custom/bin")));
+        assert_eq!(environment.comspec(), Some("cmd.exe"));
+
+        environment.set_var("PATH", None);
+        environment.set_var("COMSPEC", None);
+
+        assert_eq!(environment.path(), None);
+        assert_eq!(environment.comspec(), None);
     }
 }
