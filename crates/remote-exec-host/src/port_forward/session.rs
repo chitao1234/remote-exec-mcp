@@ -197,7 +197,13 @@ pub(super) async fn close_attached_session(tunnel: &Arc<TunnelState>, mode: Sess
     }
 }
 
-pub(super) fn close_mode_for_tunnel_result(result: &Result<(), HostRpcError>) -> SessionCloseMode {
+pub(super) fn close_mode_for_tunnel_result(
+    result: &Result<(), HostRpcError>,
+    host_shutdown: bool,
+) -> SessionCloseMode {
+    if host_shutdown {
+        return SessionCloseMode::TerminalFailure;
+    }
     match result {
         Ok(()) => SessionCloseMode::RetryableDetach,
         Err(_) => SessionCloseMode::TerminalFailure,

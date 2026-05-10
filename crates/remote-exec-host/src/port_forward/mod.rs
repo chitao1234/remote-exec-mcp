@@ -546,6 +546,37 @@ mod port_tunnel_tests {
     }
 
     #[tokio::test]
+    async fn host_shutdown_releases_detached_tcp_listener_without_resume_timeout() {
+        let state = test_state();
+        let listen_endpoint = free_loopback_endpoint();
+        let (mut broker_side, ready) =
+            start_open_listen_tunnel_with_ready(state.clone(), TunnelForwardProtocol::Tcp).await;
+        let session_id = session_id_from_ready(&ready);
+        write_frame(
+            &mut broker_side,
+            &json_frame(
+                FrameType::TcpListen,
+                1,
+                serde_json::json!({ "endpoint": listen_endpoint }),
+            ),
+        )
+        .await
+        .unwrap();
+        let ok = read_frame(&mut broker_side).await.unwrap();
+        assert_eq!(ok.frame_type, FrameType::TcpListenOk);
+
+        state.shutdown.cancel();
+        drop(broker_side);
+
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            wait_until_session_removed(&state, &session_id),
+        )
+        .await
+        .expect("shutdown should release retained listener promptly");
+    }
+
+    #[tokio::test]
     async fn tunnel_reports_tcp_listen_errors_on_request_stream() {
         let state = test_state();
         let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
