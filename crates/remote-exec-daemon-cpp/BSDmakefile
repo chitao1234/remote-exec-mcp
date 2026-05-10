@@ -14,6 +14,14 @@ TEST_CXXFLAGS = -std=gnu++17 -O0 -Wall -Wextra -pthread
 PROD_LDFLAGS ?=
 TEST_LDFLAGS ?=
 PTHREAD_LDLIBS = -pthread
+.if defined(REMOTE_EXEC_LOG) && !empty(REMOTE_EXEC_LOG)
+TEST_LOG_LEVEL = ${REMOTE_EXEC_LOG}
+.elif defined(REMOTE_EXEC_TEST_LOG) && !empty(REMOTE_EXEC_TEST_LOG)
+TEST_LOG_LEVEL = ${REMOTE_EXEC_TEST_LOG}
+.else
+TEST_LOG_LEVEL = off
+.endif
+TEST_LOG_ENV = REMOTE_EXEC_LOG=${TEST_LOG_LEVEL}
 
 HOST_PROD_OBJ_DIR = ${OBJ_DIR}/host-prod
 HOST_TEST_OBJ_DIR = ${OBJ_DIR}/host-test
@@ -85,43 +93,43 @@ check-posix: ${HOST_TEST_PHONY_TARGETS} all-posix
 test-server-streaming: test-host-server-streaming
 
 test-host-basic-mutex: ${HOST_BASIC_MUTEX}
-	${HOST_BASIC_MUTEX}
+	${TEST_LOG_ENV} ${HOST_BASIC_MUTEX}
 
 test-host-patch: ${HOST_PATCH}
-	${HOST_PATCH}
+	${TEST_LOG_ENV} ${HOST_PATCH}
 
 test-host-transfer: ${HOST_TRANSFER}
-	${HOST_TRANSFER}
+	${TEST_LOG_ENV} ${HOST_TRANSFER}
 
 test-host-config: ${HOST_CONFIG}
-	${HOST_CONFIG}
+	${TEST_LOG_ENV} ${HOST_CONFIG}
 
 test-host-http-request: ${HOST_HTTP_REQUEST}
-	${HOST_HTTP_REQUEST}
+	${TEST_LOG_ENV} ${HOST_HTTP_REQUEST}
 
 test-host-server-transport: ${HOST_SERVER_TRANSPORT}
-	${HOST_SERVER_TRANSPORT}
+	${TEST_LOG_ENV} ${HOST_SERVER_TRANSPORT}
 
 test-host-server-streaming: ${HOST_SERVER_STREAMING}
-	${HOST_SERVER_STREAMING}
+	${TEST_LOG_ENV} ${HOST_SERVER_STREAMING}
 
 test-host-session-store: ${HOST_SESSION_STORE}
-	${HOST_SESSION_STORE}
+	${TEST_LOG_ENV} ${HOST_SESSION_STORE}
 
 test-host-connection-manager: ${HOST_CONNECTION_MANAGER}
-	${HOST_CONNECTION_MANAGER}
+	${TEST_LOG_ENV} ${HOST_CONNECTION_MANAGER}
 
 test-host-server-runtime: ${HOST_SERVER_RUNTIME}
-	${HOST_SERVER_RUNTIME}
+	${TEST_LOG_ENV} ${HOST_SERVER_RUNTIME}
 
 test-host-server-routes: ${HOST_SERVER_ROUTES}
-	${HOST_SERVER_ROUTES}
+	${TEST_LOG_ENV} ${HOST_SERVER_ROUTES}
 
 test-host-sandbox: ${HOST_SANDBOX}
-	${HOST_SANDBOX}
+	${TEST_LOG_ENV} ${HOST_SANDBOX}
 
 test-port-tunnel-frame: ${HOST_PORT_TUNNEL_FRAME}
-	${HOST_PORT_TUNNEL_FRAME}
+	${TEST_LOG_ENV} ${HOST_PORT_TUNNEL_FRAME}
 
 ${POSIX_TARGET}: ${POSIX_OBJS}
 	mkdir -p ${.TARGET:H}

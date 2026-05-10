@@ -17,6 +17,15 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, oneshot};
 
+fn apply_quiet_test_logging(command: &mut tokio::process::Command) {
+    if std::env::var_os("REMOTE_EXEC_LOG").is_some() || std::env::var_os("RUST_LOG").is_some() {
+        return;
+    }
+
+    let filter = std::env::var("REMOTE_EXEC_TEST_LOG").unwrap_or_else(|_| "error".to_string());
+    command.env("REMOTE_EXEC_LOG", filter);
+}
+
 #[tokio::test]
 async fn broker_forwards_ports_through_real_cpp_daemon_and_handles_port_conflicts() {
     let fixture = CppDaemonBrokerFixture::spawn().await;
@@ -483,6 +492,7 @@ impl CppDaemonBrokerFixture {
 
         let mut daemon = tokio::process::Command::new(&daemon_binary);
         daemon.arg(&daemon_config);
+        apply_quiet_test_logging(&mut daemon);
         let daemon = spawn_cpp_daemon_process(&mut daemon).await;
         wait_until_ready_http(daemon_addr).await;
 
@@ -650,6 +660,7 @@ impl CrashableCppDaemonBrokerFixture {
 
         let mut daemon = tokio::process::Command::new(&daemon_binary);
         daemon.arg(&daemon_config);
+        apply_quiet_test_logging(&mut daemon);
         let daemon = spawn_cpp_daemon_process(&mut daemon).await;
         wait_until_ready_http(daemon_addr).await;
 
@@ -680,6 +691,7 @@ path = "/mcp"
 
         let mut broker = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
         broker.arg(&broker_config);
+        apply_quiet_test_logging(&mut broker);
         broker.kill_on_drop(true);
         let broker = broker.spawn().unwrap();
         let broker_url = format!("http://{broker_addr}/mcp");

@@ -37,6 +37,15 @@ fn toml_string(value: &str) -> String {
     toml::Value::String(value.to_string()).to_string()
 }
 
+fn apply_quiet_test_logging(command: &mut tokio::process::Command) {
+    if std::env::var_os("REMOTE_EXEC_LOG").is_some() || std::env::var_os("RUST_LOG").is_some() {
+        return;
+    }
+
+    let filter = std::env::var("REMOTE_EXEC_TEST_LOG").unwrap_or_else(|_| "error".to_string());
+    command.env("REMOTE_EXEC_LOG", filter);
+}
+
 pub fn long_running_tty_exec_input(target: &str) -> serde_json::Value {
     #[cfg(windows)]
     let cmd = "echo hello & ping -n 30 127.0.0.1 >nul";
@@ -90,6 +99,7 @@ impl BrokerFixture {
 
         let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
         command.arg(&config_path);
+        apply_quiet_test_logging(&mut command);
         let transport = TokioChildProcess::new(command).unwrap();
         let client = DummyClientHandler.serve(transport).await.unwrap();
 
@@ -209,6 +219,7 @@ impl HttpBrokerFixture {
 
         let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
         command.arg(&config_path);
+        apply_quiet_test_logging(&mut command);
         command.kill_on_drop(true);
         let child = command.spawn().unwrap();
         let url = format!("http://{broker_addr}/mcp");

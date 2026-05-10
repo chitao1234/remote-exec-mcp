@@ -6,6 +6,7 @@ PROD_CXXFLAGS := -std=c++11 -O0 -Wall -Wextra
 TEST_CXXFLAGS := -std=gnu++17 -O0 -Wall -Wextra
 DEPFLAGS := -MMD -MP
 DEP_FILES :=
+TEST_LOG_LEVEL := $(if $(REMOTE_EXEC_LOG),$(REMOTE_EXEC_LOG),$(if $(REMOTE_EXEC_TEST_LOG),$(REMOTE_EXEC_TEST_LOG),off))
 
 SOURCE_PREFIX := $(MAKEFILE_DIR)
 include $(MAKEFILE_DIR)mk/sources.mk
@@ -14,5 +15,5 @@ cpp_objs = $(patsubst $(MAKEFILE_DIR)%.cpp,$(1)/%.o,$(2))
 
 define run_test
 $1: $2
-	$2
+	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $2
 endef

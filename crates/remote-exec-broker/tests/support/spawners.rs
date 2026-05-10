@@ -172,6 +172,21 @@ fn write_broker_config(
     std::fs::write(path, parts.join("\n")).unwrap();
 }
 
+fn apply_quiet_test_logging(command: &mut tokio::process::Command, explicit_env: &[(&str, &str)]) {
+    if explicit_env
+        .iter()
+        .any(|(key, _)| *key == "REMOTE_EXEC_LOG" || *key == "RUST_LOG")
+    {
+        return;
+    }
+    if std::env::var_os("REMOTE_EXEC_LOG").is_some() || std::env::var_os("RUST_LOG").is_some() {
+        return;
+    }
+
+    let filter = std::env::var("REMOTE_EXEC_TEST_LOG").unwrap_or_else(|_| "error".to_string());
+    command.env("REMOTE_EXEC_LOG", filter);
+}
+
 async fn spawn_broker_child(
     config_path: &Path,
 ) -> rmcp::service::RunningService<rmcp::RoleClient, DummyClientHandler> {
@@ -184,6 +199,7 @@ async fn spawn_broker_child_with_env(
 ) -> rmcp::service::RunningService<rmcp::RoleClient, DummyClientHandler> {
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
     command.arg(config_path);
+    apply_quiet_test_logging(&mut command, env);
     command.envs(env.iter().copied());
     let transport = TokioChildProcess::new(command).unwrap();
     DummyClientHandler.serve(transport).await.unwrap()
@@ -440,6 +456,7 @@ path = "/mcp"
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
     command.arg(&broker_config);
+    apply_quiet_test_logging(&mut command, &[]);
     command.kill_on_drop(true);
     let child = command.spawn().unwrap();
     let url = format!("http://{broker_addr}/mcp");
@@ -902,6 +919,7 @@ pub async fn spawn_broker_with_local_target() -> BrokerFixture {
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
     command.arg(&broker_config);
+    apply_quiet_test_logging(&mut command, &[]);
     let transport = TokioChildProcess::new(command).unwrap();
     let client = DummyClientHandler.serve(transport).await.unwrap();
 
@@ -943,6 +961,7 @@ where
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
     command.arg(&broker_config);
+    apply_quiet_test_logging(&mut command, &[]);
     let transport = TokioChildProcess::new(command).unwrap();
     let client = DummyClientHandler.serve(transport).await.unwrap();
 
@@ -974,6 +993,7 @@ pub async fn spawn_broker_with_local_target_apply_patch_encoding_autodetect() ->
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
     command.arg(&broker_config);
+    apply_quiet_test_logging(&mut command, &[]);
     let transport = TokioChildProcess::new(command).unwrap();
     let client = DummyClientHandler.serve(transport).await.unwrap();
 
@@ -1005,6 +1025,7 @@ pub async fn spawn_broker_with_local_target_and_extra_config(extra_config: &str)
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
     command.arg(&broker_config);
+    apply_quiet_test_logging(&mut command, &[]);
     let transport = TokioChildProcess::new(command).unwrap();
     let client = DummyClientHandler.serve(transport).await.unwrap();
 
