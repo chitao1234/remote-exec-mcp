@@ -77,318 +77,457 @@ async fn run_tcp_forward_epoch(
         tokio::select! {
             _ = runtime.cancel.cancelled() => return Ok(ForwardLoopControl::Cancelled),
             frame = listen_tunnel.recv() => {
-                let frame = match classify_recoverable_tunnel_event(frame) {
-                    ForwardSideEvent::Frame(frame) => frame,
-                    ForwardSideEvent::RetryableTransportLoss => {
-                        return Ok(ForwardLoopControl::RecoverTunnel(TunnelRole::Listen));
-                    }
-                    ForwardSideEvent::TerminalTransportError(err) => {
-                        return Err(err).context("reading tcp listen tunnel");
-                    }
-                    ForwardSideEvent::TerminalTunnelError(meta) => {
-                        return Err(format_terminal_tunnel_error(&meta))
-                            .context("listen-side tcp tunnel error");
-                    }
-                };
-                match frame.frame_type {
-                    FrameType::TcpAccept => {
-                        let accept: TcpAcceptMeta = decode_tunnel_meta(&frame)?;
-                        if !try_reserve_active_tcp_stream(runtime).await {
-                            let _ = listen_tunnel.close_stream(frame.stream_id).await;
-                            runtime
-                                .store
-                                .update_entry(&runtime.forward_id, |entry| {
-                                    entry.dropped_tcp_streams += 1;
-                                })
-                                .await;
-                            continue;
-                        }
-                        let Some(connect_stream_id) = connect_stream_ids.next() else {
-                            debug_assert!(connect_stream_ids.needs_generation_rotation());
-                            let _ = listen_tunnel.close_stream(frame.stream_id).await;
-                            drop_active_tcp_stream(runtime).await;
-                            close_active_tcp_listen_streams(
-                                runtime,
-                                &listen_tunnel,
-                                &mut state,
-                            )
-                            .await?;
-                            return Ok(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect));
-                        };
-                        if let Err(err) = connect_tunnel.send(Frame {
-                            frame_type: FrameType::TcpConnect,
-                            flags: 0,
-                            stream_id: connect_stream_id,
-                            meta: encode_tunnel_meta(&EndpointMeta {
-                                endpoint: runtime.connect_endpoint.clone(),
-                            })?,
-                            data: Vec::new(),
-                        }).await {
-                            if is_retryable_transport_error(&err) {
-                                return close_unpaired_listen_stream_after_connect_loss(
-                                    runtime,
-                                    &listen_tunnel,
-                                    frame.stream_id,
-                                )
-                                .await;
-                            }
-                            drop_active_tcp_stream(runtime).await;
-                            return Err(err).context("connecting tcp forward destination");
-                        }
-                        state.listen_to_connect.insert(frame.stream_id, connect_stream_id);
-                        state.connect_streams.insert(connect_stream_id, TcpConnectStream {
-                            listen_stream_id: frame.stream_id,
-                            ready: false,
-                            listen_eof: false,
-                            connect_eof: false,
-                            pending_frames: Vec::new(),
-                            pending_bytes: 0,
-                        });
-                        tracing::debug!(
-                            forward_id = %runtime.forward_id,
-                            listener_stream_id = accept.listener_stream_id,
-                            accepted_stream_id = frame.stream_id,
-                            connect_stream_id,
-                            "paired tcp tunnel streams"
-                        );
-                    }
-                    FrameType::TcpData => {
-                        if let Some(connect_stream_id) = state.listen_to_connect.get(&frame.stream_id).copied() {
-                            let remapped = Frame {
-                                stream_id: connect_stream_id,
-                                ..frame
-                            };
-                            if let Some(control) = queue_or_send_tcp_connect_frame(
-                                runtime,
-                                &connect_tunnel,
-                                &listen_tunnel,
-                                &mut state,
-                                connect_stream_id,
-                                remapped,
-                            ).await? {
-                                return Ok(control);
-                            }
-                        }
-                    }
-                    FrameType::TcpEof => {
-                        if let Some(connect_stream_id) = state.listen_to_connect.get(&frame.stream_id).copied() {
-                            if let Some(stream) = state.connect_streams.get_mut(&connect_stream_id) {
-                                stream.listen_eof = true;
-                            }
-                            let eof = Frame {
-                                frame_type: frame.frame_type,
-                                flags: 0,
-                                stream_id: connect_stream_id,
-                                meta: Vec::new(),
-                                data: Vec::new(),
-                            };
-                            if let Some(control) = queue_or_send_tcp_connect_frame(
-                                runtime,
-                                &connect_tunnel,
-                                &listen_tunnel,
-                                &mut state,
-                                connect_stream_id,
-                                eof,
-                            ).await? {
-                                return Ok(control);
-                            }
-                            if let Some(control) = close_tcp_pair_if_fully_eof(
-                                runtime,
-                                &connect_tunnel,
-                                &listen_tunnel,
-                                &mut state,
-                                connect_stream_id,
-                            )
-                            .await?
-                            {
-                                return Ok(control);
-                            }
-                        }
-                    }
-                    FrameType::Close => {
-                        if let Some(connect_stream_id) = state.listen_to_connect.remove(&frame.stream_id) {
-                            if let Some(mut stream) = state.connect_streams.remove(&connect_stream_id) {
-                                if stream.ready {
-                                    let _ = connect_tunnel.close_stream(connect_stream_id).await;
-                                    release_active_tcp_stream(runtime).await;
-                                } else {
-                                    release_pending_budget(&mut state.pending_budget, &mut stream);
-                                    let _ = connect_tunnel.close_stream(connect_stream_id).await;
-                                    release_active_tcp_stream(runtime).await;
-                                }
-                            }
-                        }
-                    }
-                    FrameType::Error => {
-                        if frame.stream_id == runtime.listen_session.listener_stream_id {
-                            let meta = decode_tunnel_error_frame(&frame);
-                            if is_recoverable_pressure_tunnel_error(&meta) {
-                                runtime
-                                    .store
-                                    .update_entry(&runtime.forward_id, |entry| {
-                                        entry.dropped_tcp_streams += 1;
-                                    })
-                                    .await;
-                                continue;
-                            }
-                            return Err(format_terminal_tunnel_error(&meta))
-                                .context("listen-side tcp tunnel error");
-                        }
-                        if let Some(connect_stream_id) = state.listen_to_connect.remove(&frame.stream_id) {
-                            if let Some(mut stream) = state.connect_streams.remove(&connect_stream_id) {
-                                release_pending_budget(&mut state.pending_budget, &mut stream);
-                                release_active_tcp_stream(runtime).await;
-                            }
-                            if let Err(err) = connect_tunnel.close_stream(connect_stream_id).await {
-                                return classify_transport_failure(
-                                    err,
-                                    "closing tcp connect stream after listen error",
-                                    TunnelRole::Connect,
-                                );
-                            }
-                        }
-                    }
-                    FrameType::ForwardDrop => {
-                        apply_forward_drop_report(
-                            &runtime.store,
-                            &runtime.forward_id,
-                            &frame,
-                        )
-                        .await?;
-                    }
-                    _ => {}
+                if let Some(control) = handle_listen_tunnel_event(
+                    runtime,
+                    &listen_tunnel,
+                    &connect_tunnel,
+                    &mut state,
+                    &mut connect_stream_ids,
+                    frame,
+                ).await? {
+                    return Ok(control);
                 }
             }
             frame = connect_tunnel.recv() => {
-                let frame = match classify_recoverable_tunnel_event(frame) {
-                    ForwardSideEvent::Frame(frame) => frame,
-                    ForwardSideEvent::RetryableTransportLoss => {
-                        close_active_tcp_listen_streams(
-                            runtime,
-                            &listen_tunnel,
-                            &mut state,
-                        )
-                        .await?;
-                        return Ok(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect));
-                    }
-                    ForwardSideEvent::TerminalTransportError(err) => {
-                        return Err(err).context("reading tcp connect tunnel");
-                    }
-                    ForwardSideEvent::TerminalTunnelError(meta) => {
-                        return Err(format_terminal_tunnel_error(&meta))
-                            .context("connecting tcp forward destination");
-                    }
-                };
-                match frame.frame_type {
-                    FrameType::TcpConnectOk => {
-                        let Some(stream) = state.connect_streams.get_mut(&frame.stream_id) else {
-                            continue;
-                        };
-                        stream.ready = true;
-                        let mut pending = Vec::new();
-                        std::mem::swap(&mut pending, &mut stream.pending_frames);
-                        let flush_result = flush_pending_tcp_connect_frames(
-                            runtime,
-                            &connect_tunnel,
-                            &listen_tunnel,
-                            &mut state,
-                            frame.stream_id,
-                            pending,
-                        ).await?;
-                        match flush_result {
-                            TcpFlushResult::Sent { should_remove } => {
-                                if should_remove {
-                                    state.connect_streams.remove(&frame.stream_id);
-                                }
-                            }
-                            TcpFlushResult::Recover(control) => return Ok(control),
-                        }
-                    }
-                    FrameType::Error => {
-                        close_tcp_pair_after_connect_error(
-                            runtime,
-                            &listen_tunnel,
-                            &mut state,
-                            frame.stream_id,
-                        )
-                        .await?;
-                    }
-                    FrameType::TcpData => {
-                        if let Some(listen_stream_id) = state.connect_streams
-                            .get(&frame.stream_id)
-                            .map(|stream| stream.listen_stream_id)
-                        {
-                            if let Err(err) = listen_tunnel.send(Frame {
-                                stream_id: listen_stream_id,
-                                ..frame
-                            }).await {
-                                return classify_transport_failure(
-                                    err,
-                                    "relaying tcp data to listen tunnel",
-                                    TunnelRole::Listen,
-                                );
-                            }
-                        }
-                    }
-                    FrameType::TcpEof => {
-                        let Some(listen_stream_id) = state.connect_streams
-                            .get_mut(&frame.stream_id)
-                            .map(|stream| {
-                                stream.connect_eof = true;
-                                stream.listen_stream_id
-                            })
-                        else {
-                            continue;
-                        };
-                            if let Err(err) = listen_tunnel.send(Frame {
-                                frame_type: frame.frame_type,
-                                flags: 0,
-                                stream_id: listen_stream_id,
-                                meta: Vec::new(),
-                                data: Vec::new(),
-                            }).await {
-                                return classify_transport_failure(
-                                    err,
-                                    "relaying tcp eof to listen tunnel",
-                                    TunnelRole::Listen,
-                                );
-                            }
-                        if let Some(control) = close_tcp_pair_if_fully_eof(
-                            runtime,
-                            &connect_tunnel,
-                            &listen_tunnel,
-                            &mut state,
-                            frame.stream_id,
-                        )
-                        .await?
-                        {
-                            return Ok(control);
-                        }
-                    }
-                    FrameType::Close => {
-                        if let Some(listen_stream_id) = state.connect_streams
-                            .remove(&frame.stream_id)
-                            .map(|mut stream| {
-                                release_pending_budget(&mut state.pending_budget, &mut stream);
-                                stream.listen_stream_id
-                            })
-                        {
-                            state.listen_to_connect.remove(&listen_stream_id);
-                            release_active_tcp_stream(runtime).await;
-                            if let Err(err) = listen_tunnel.close_stream(listen_stream_id).await {
-                                return classify_transport_failure(
-                                    err,
-                                    "closing tcp listen stream",
-                                    TunnelRole::Listen,
-                                );
-                            }
-                        }
-                    }
-                    _ => {}
+                if let Some(control) = handle_connect_tunnel_event(
+                    runtime,
+                    &listen_tunnel,
+                    &connect_tunnel,
+                    &mut state,
+                    frame,
+                ).await? {
+                    return Ok(control);
                 }
             }
         }
     }
+}
+
+async fn handle_listen_tunnel_event(
+    runtime: &ForwardRuntime,
+    listen_tunnel: &Arc<PortTunnel>,
+    connect_tunnel: &Arc<PortTunnel>,
+    state: &mut TcpForwardState,
+    connect_stream_ids: &mut StreamIdAllocator,
+    frame_result: anyhow::Result<Frame>,
+) -> anyhow::Result<Option<ForwardLoopControl>> {
+    let frame = match classify_recoverable_tunnel_event(frame_result) {
+        ForwardSideEvent::Frame(frame) => frame,
+        ForwardSideEvent::RetryableTransportLoss => {
+            return Ok(Some(ForwardLoopControl::RecoverTunnel(TunnelRole::Listen)));
+        }
+        ForwardSideEvent::TerminalTransportError(err) => {
+            return Err(err).context("reading tcp listen tunnel");
+        }
+        ForwardSideEvent::TerminalTunnelError(meta) => {
+            return Err(format_terminal_tunnel_error(&meta))
+                .context("listen-side tcp tunnel error");
+        }
+    };
+    match frame.frame_type {
+        FrameType::TcpAccept => {
+            handle_listen_tcp_accept(
+                runtime,
+                listen_tunnel,
+                connect_tunnel,
+                state,
+                connect_stream_ids,
+                frame,
+            )
+            .await
+        }
+        FrameType::TcpData => {
+            handle_listen_tcp_data(runtime, listen_tunnel, connect_tunnel, state, frame).await
+        }
+        FrameType::TcpEof => {
+            handle_listen_tcp_eof(runtime, listen_tunnel, connect_tunnel, state, frame).await
+        }
+        FrameType::Close => {
+            handle_listen_close(runtime, connect_tunnel, state, frame).await;
+            Ok(None)
+        }
+        FrameType::Error => handle_listen_error(runtime, connect_tunnel, state, frame).await,
+        FrameType::ForwardDrop => {
+            apply_forward_drop_report(&runtime.store, &runtime.forward_id, &frame).await?;
+            Ok(None)
+        }
+        _ => Ok(None),
+    }
+}
+
+async fn handle_connect_tunnel_event(
+    runtime: &ForwardRuntime,
+    listen_tunnel: &Arc<PortTunnel>,
+    connect_tunnel: &Arc<PortTunnel>,
+    state: &mut TcpForwardState,
+    frame_result: anyhow::Result<Frame>,
+) -> anyhow::Result<Option<ForwardLoopControl>> {
+    let frame = match classify_recoverable_tunnel_event(frame_result) {
+        ForwardSideEvent::Frame(frame) => frame,
+        ForwardSideEvent::RetryableTransportLoss => {
+            close_active_tcp_listen_streams(runtime, listen_tunnel, state).await?;
+            return Ok(Some(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)));
+        }
+        ForwardSideEvent::TerminalTransportError(err) => {
+            return Err(err).context("reading tcp connect tunnel");
+        }
+        ForwardSideEvent::TerminalTunnelError(meta) => {
+            return Err(format_terminal_tunnel_error(&meta))
+                .context("connecting tcp forward destination");
+        }
+    };
+    match frame.frame_type {
+        FrameType::TcpConnectOk => {
+            handle_connect_tcp_connect_ok(runtime, listen_tunnel, connect_tunnel, state, frame)
+                .await
+        }
+        FrameType::Error => {
+            handle_connect_error(runtime, listen_tunnel, state, frame).await?;
+            Ok(None)
+        }
+        FrameType::TcpData => handle_connect_tcp_data(listen_tunnel, state, frame).await,
+        FrameType::TcpEof => {
+            handle_connect_tcp_eof(runtime, listen_tunnel, connect_tunnel, state, frame).await
+        }
+        FrameType::Close => handle_connect_close(runtime, listen_tunnel, state, frame).await,
+        _ => Ok(None),
+    }
+}
+
+async fn handle_listen_tcp_accept(
+    runtime: &ForwardRuntime,
+    listen_tunnel: &Arc<PortTunnel>,
+    connect_tunnel: &Arc<PortTunnel>,
+    state: &mut TcpForwardState,
+    connect_stream_ids: &mut StreamIdAllocator,
+    frame: Frame,
+) -> anyhow::Result<Option<ForwardLoopControl>> {
+    let accept: TcpAcceptMeta = decode_tunnel_meta(&frame)?;
+    if !try_reserve_active_tcp_stream(runtime).await {
+        let _ = listen_tunnel.close_stream(frame.stream_id).await;
+        runtime
+            .store
+            .update_entry(&runtime.forward_id, |entry| {
+                entry.dropped_tcp_streams += 1;
+            })
+            .await;
+        return Ok(None);
+    }
+    let Some(connect_stream_id) = connect_stream_ids.next() else {
+        debug_assert!(connect_stream_ids.needs_generation_rotation());
+        let _ = listen_tunnel.close_stream(frame.stream_id).await;
+        drop_active_tcp_stream(runtime).await;
+        close_active_tcp_listen_streams(runtime, listen_tunnel, state).await?;
+        return Ok(Some(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)));
+    };
+    if let Err(err) = connect_tunnel
+        .send(Frame {
+            frame_type: FrameType::TcpConnect,
+            flags: 0,
+            stream_id: connect_stream_id,
+            meta: encode_tunnel_meta(&EndpointMeta {
+                endpoint: runtime.connect_endpoint.clone(),
+            })?,
+            data: Vec::new(),
+        })
+        .await
+    {
+        if is_retryable_transport_error(&err) {
+            return close_unpaired_listen_stream_after_connect_loss(
+                runtime,
+                listen_tunnel,
+                frame.stream_id,
+            )
+            .await
+            .map(Some);
+        }
+        drop_active_tcp_stream(runtime).await;
+        return Err(err).context("connecting tcp forward destination");
+    }
+    state
+        .listen_to_connect
+        .insert(frame.stream_id, connect_stream_id);
+    state.connect_streams.insert(
+        connect_stream_id,
+        TcpConnectStream {
+            listen_stream_id: frame.stream_id,
+            ready: false,
+            listen_eof: false,
+            connect_eof: false,
+            pending_frames: Vec::new(),
+            pending_bytes: 0,
+        },
+    );
+    tracing::debug!(
+        forward_id = %runtime.forward_id,
+        listener_stream_id = accept.listener_stream_id,
+        accepted_stream_id = frame.stream_id,
+        connect_stream_id,
+        "paired tcp tunnel streams"
+    );
+    Ok(None)
+}
+
+async fn handle_listen_tcp_data(
+    runtime: &ForwardRuntime,
+    listen_tunnel: &Arc<PortTunnel>,
+    connect_tunnel: &Arc<PortTunnel>,
+    state: &mut TcpForwardState,
+    frame: Frame,
+) -> anyhow::Result<Option<ForwardLoopControl>> {
+    let Some(connect_stream_id) = state.listen_to_connect.get(&frame.stream_id).copied() else {
+        return Ok(None);
+    };
+    queue_or_send_tcp_connect_frame(
+        runtime,
+        connect_tunnel,
+        listen_tunnel,
+        state,
+        connect_stream_id,
+        Frame {
+            stream_id: connect_stream_id,
+            ..frame
+        },
+    )
+    .await
+}
+
+async fn handle_listen_tcp_eof(
+    runtime: &ForwardRuntime,
+    listen_tunnel: &Arc<PortTunnel>,
+    connect_tunnel: &Arc<PortTunnel>,
+    state: &mut TcpForwardState,
+    frame: Frame,
+) -> anyhow::Result<Option<ForwardLoopControl>> {
+    let Some(connect_stream_id) = state.listen_to_connect.get(&frame.stream_id).copied() else {
+        return Ok(None);
+    };
+    if let Some(stream) = state.connect_streams.get_mut(&connect_stream_id) {
+        stream.listen_eof = true;
+    }
+    if let Some(control) = queue_or_send_tcp_connect_frame(
+        runtime,
+        connect_tunnel,
+        listen_tunnel,
+        state,
+        connect_stream_id,
+        Frame {
+            frame_type: frame.frame_type,
+            flags: 0,
+            stream_id: connect_stream_id,
+            meta: Vec::new(),
+            data: Vec::new(),
+        },
+    )
+    .await?
+    {
+        return Ok(Some(control));
+    }
+    close_tcp_pair_if_fully_eof(
+        runtime,
+        connect_tunnel,
+        listen_tunnel,
+        state,
+        connect_stream_id,
+    )
+    .await
+}
+
+async fn handle_listen_close(
+    runtime: &ForwardRuntime,
+    connect_tunnel: &Arc<PortTunnel>,
+    state: &mut TcpForwardState,
+    frame: Frame,
+) {
+    if let Some(connect_stream_id) = state.listen_to_connect.remove(&frame.stream_id) {
+        if let Some(mut stream) = state.connect_streams.remove(&connect_stream_id) {
+            if !stream.ready {
+                release_pending_budget(&mut state.pending_budget, &mut stream);
+            }
+            let _ = connect_tunnel.close_stream(connect_stream_id).await;
+            release_active_tcp_stream(runtime).await;
+        }
+    }
+}
+
+async fn handle_listen_error(
+    runtime: &ForwardRuntime,
+    connect_tunnel: &Arc<PortTunnel>,
+    state: &mut TcpForwardState,
+    frame: Frame,
+) -> anyhow::Result<Option<ForwardLoopControl>> {
+    if frame.stream_id == runtime.listen_session.listener_stream_id {
+        let meta = decode_tunnel_error_frame(&frame);
+        if is_recoverable_pressure_tunnel_error(&meta) {
+            runtime
+                .store
+                .update_entry(&runtime.forward_id, |entry| {
+                    entry.dropped_tcp_streams += 1;
+                })
+                .await;
+            return Ok(None);
+        }
+        return Err(format_terminal_tunnel_error(&meta)).context("listen-side tcp tunnel error");
+    }
+    if let Some(connect_stream_id) = state.listen_to_connect.remove(&frame.stream_id) {
+        if let Some(mut stream) = state.connect_streams.remove(&connect_stream_id) {
+            release_pending_budget(&mut state.pending_budget, &mut stream);
+            release_active_tcp_stream(runtime).await;
+        }
+        if let Err(err) = connect_tunnel.close_stream(connect_stream_id).await {
+            return classify_transport_failure(
+                err,
+                "closing tcp connect stream after listen error",
+                TunnelRole::Connect,
+            )
+            .map(Some);
+        }
+    }
+    Ok(None)
+}
+
+async fn handle_connect_tcp_connect_ok(
+    runtime: &ForwardRuntime,
+    listen_tunnel: &Arc<PortTunnel>,
+    connect_tunnel: &Arc<PortTunnel>,
+    state: &mut TcpForwardState,
+    frame: Frame,
+) -> anyhow::Result<Option<ForwardLoopControl>> {
+    let Some(stream) = state.connect_streams.get_mut(&frame.stream_id) else {
+        return Ok(None);
+    };
+    stream.ready = true;
+    let mut pending = Vec::new();
+    std::mem::swap(&mut pending, &mut stream.pending_frames);
+    match flush_pending_tcp_connect_frames(
+        runtime,
+        connect_tunnel,
+        listen_tunnel,
+        state,
+        frame.stream_id,
+        pending,
+    )
+    .await?
+    {
+        TcpFlushResult::Sent { should_remove } => {
+            if should_remove {
+                state.connect_streams.remove(&frame.stream_id);
+            }
+            Ok(None)
+        }
+        TcpFlushResult::Recover(control) => Ok(Some(control)),
+    }
+}
+
+async fn handle_connect_error(
+    runtime: &ForwardRuntime,
+    listen_tunnel: &Arc<PortTunnel>,
+    state: &mut TcpForwardState,
+    frame: Frame,
+) -> anyhow::Result<()> {
+    close_tcp_pair_after_connect_error(runtime, listen_tunnel, state, frame.stream_id).await
+}
+
+async fn handle_connect_tcp_data(
+    listen_tunnel: &Arc<PortTunnel>,
+    state: &mut TcpForwardState,
+    frame: Frame,
+) -> anyhow::Result<Option<ForwardLoopControl>> {
+    let Some(listen_stream_id) = state
+        .connect_streams
+        .get(&frame.stream_id)
+        .map(|stream| stream.listen_stream_id)
+    else {
+        return Ok(None);
+    };
+    if let Err(err) = listen_tunnel
+        .send(Frame {
+            stream_id: listen_stream_id,
+            ..frame
+        })
+        .await
+    {
+        return classify_transport_failure(
+            err,
+            "relaying tcp data to listen tunnel",
+            TunnelRole::Listen,
+        )
+        .map(Some);
+    }
+    Ok(None)
+}
+
+async fn handle_connect_tcp_eof(
+    runtime: &ForwardRuntime,
+    listen_tunnel: &Arc<PortTunnel>,
+    connect_tunnel: &Arc<PortTunnel>,
+    state: &mut TcpForwardState,
+    frame: Frame,
+) -> anyhow::Result<Option<ForwardLoopControl>> {
+    let Some(listen_stream_id) = state
+        .connect_streams
+        .get_mut(&frame.stream_id)
+        .map(|stream| {
+            stream.connect_eof = true;
+            stream.listen_stream_id
+        })
+    else {
+        return Ok(None);
+    };
+    if let Err(err) = listen_tunnel
+        .send(Frame {
+            frame_type: frame.frame_type,
+            flags: 0,
+            stream_id: listen_stream_id,
+            meta: Vec::new(),
+            data: Vec::new(),
+        })
+        .await
+    {
+        return classify_transport_failure(
+            err,
+            "relaying tcp eof to listen tunnel",
+            TunnelRole::Listen,
+        )
+        .map(Some);
+    }
+    close_tcp_pair_if_fully_eof(
+        runtime,
+        connect_tunnel,
+        listen_tunnel,
+        state,
+        frame.stream_id,
+    )
+    .await
+}
+
+async fn handle_connect_close(
+    runtime: &ForwardRuntime,
+    listen_tunnel: &Arc<PortTunnel>,
+    state: &mut TcpForwardState,
+    frame: Frame,
+) -> anyhow::Result<Option<ForwardLoopControl>> {
+    if let Some(listen_stream_id) =
+        state
+            .connect_streams
+            .remove(&frame.stream_id)
+            .map(|mut stream| {
+                release_pending_budget(&mut state.pending_budget, &mut stream);
+                stream.listen_stream_id
+            })
+    {
+        state.listen_to_connect.remove(&listen_stream_id);
+        release_active_tcp_stream(runtime).await;
+        if let Err(err) = listen_tunnel.close_stream(listen_stream_id).await {
+            return classify_transport_failure(
+                err,
+                "closing tcp listen stream",
+                TunnelRole::Listen,
+            )
+            .map(Some);
+        }
+    }
+    Ok(None)
 }
 
 async fn close_active_tcp_listen_streams(
