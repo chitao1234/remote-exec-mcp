@@ -7,13 +7,38 @@ use rcgen::{
     BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
     PublicKeyData, SanType,
 };
+use zeroize::Zeroizing;
 
 use crate::spec::{DaemonCertSpec, DevInitSpec, SubjectAltName};
 
 #[derive(Debug, Clone)]
 pub struct GeneratedPemPair {
     pub cert_pem: String,
-    pub key_pem: String,
+    pub key_pem: PrivateKeyPem,
+}
+
+pub struct PrivateKeyPem(Zeroizing<String>);
+
+impl PrivateKeyPem {
+    pub fn new(value: String) -> Self {
+        Self(Zeroizing::new(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl Clone for PrivateKeyPem {
+    fn clone(&self) -> Self {
+        Self::new(self.as_str().to_string())
+    }
+}
+
+impl fmt::Debug for PrivateKeyPem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("PrivateKeyPem(<redacted>)")
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -25,7 +50,29 @@ pub struct GeneratedDevInitBundle {
 
 pub struct CertificateAuthority {
     issuer: Issuer<'static, KeyPair>,
-    pub pem_pair: GeneratedPemPair,
+    pem_pair: GeneratedPemPair,
+}
+
+impl CertificateAuthority {
+    pub fn cert_pem(&self) -> &str {
+        &self.pem_pair.cert_pem
+    }
+
+    pub fn key_pem(&self) -> &PrivateKeyPem {
+        &self.pem_pair.key_pem
+    }
+
+    pub fn pem_pair(&self) -> &GeneratedPemPair {
+        &self.pem_pair
+    }
+
+    pub fn issue_broker_cert(&self, common_name: &str) -> anyhow::Result<GeneratedPemPair> {
+        issue_broker_cert(self, common_name)
+    }
+
+    pub fn issue_daemon_cert(&self, daemon: &DaemonCertSpec) -> anyhow::Result<GeneratedPemPair> {
+        issue_daemon_cert(self, daemon)
+    }
 }
 
 impl fmt::Debug for CertificateAuthority {
@@ -47,11 +94,11 @@ pub fn build_dev_init_bundle_from_ca(
 ) -> anyhow::Result<GeneratedDevInitBundle> {
     spec.validate()?;
 
-    let broker = issue_broker_cert(ca, &spec.broker_common_name)?;
+    let broker = ca.issue_broker_cert(&spec.broker_common_name)?;
     let mut daemons = BTreeMap::new();
 
     for daemon in &spec.daemon_specs {
-        daemons.insert(daemon.target.clone(), issue_daemon_cert(ca, daemon)?);
+        daemons.insert(daemon.target.clone(), ca.issue_daemon_cert(daemon)?);
     }
 
     Ok(GeneratedDevInitBundle {
@@ -76,7 +123,7 @@ pub fn generate_ca(common_name: &str) -> anyhow::Result<CertificateAuthority> {
         issuer,
         pem_pair: GeneratedPemPair {
             cert_pem: cert.pem(),
-            key_pem,
+            key_pem: PrivateKeyPem::new(key_pem),
         },
     })
 }
@@ -94,7 +141,7 @@ pub fn load_ca_from_pem(cert_pem: &str, key_pem: &str) -> anyhow::Result<Certifi
         issuer,
         pem_pair: GeneratedPemPair {
             cert_pem: cert_pem.to_string(),
-            key_pem: key_pem.to_string(),
+            key_pem: PrivateKeyPem::new(key_pem.to_string()),
         },
     })
 }
@@ -111,7 +158,7 @@ fn certificate_public_key_der(cert_pem: &str) -> anyhow::Result<Vec<u8>> {
     Ok(parsed.public_key().raw.to_vec())
 }
 
-pub fn issue_broker_cert(
+fn issue_broker_cert(
     ca: &CertificateAuthority,
     common_name: &str,
 ) -> anyhow::Result<GeneratedPemPair> {
@@ -121,11 +168,11 @@ pub fn issue_broker_cert(
 
     Ok(GeneratedPemPair {
         cert_pem: cert.pem(),
-        key_pem: key.serialize_pem(),
+        key_pem: PrivateKeyPem::new(key.serialize_pem()),
     })
 }
 
-pub fn issue_daemon_cert(
+fn issue_daemon_cert(
     ca: &CertificateAuthority,
     daemon: &DaemonCertSpec,
 ) -> anyhow::Result<GeneratedPemPair> {
@@ -135,7 +182,7 @@ pub fn issue_daemon_cert(
 
     Ok(GeneratedPemPair {
         cert_pem: cert.pem(),
-        key_pem: key.serialize_pem(),
+        key_pem: PrivateKeyPem::new(key.serialize_pem()),
     })
 }
 

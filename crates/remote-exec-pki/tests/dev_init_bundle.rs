@@ -83,11 +83,11 @@ fn generates_bundle_for_requested_targets() {
     };
 
     let bundle = build_dev_init_bundle(&spec).expect("bundle should generate");
-    assert_pem_pair(&bundle.ca.cert_pem, &bundle.ca.key_pem);
-    assert_pem_pair(&bundle.broker.cert_pem, &bundle.broker.key_pem);
+    assert_pem_pair(&bundle.ca.cert_pem, bundle.ca.key_pem.as_str());
+    assert_pem_pair(&bundle.broker.cert_pem, bundle.broker.key_pem.as_str());
     assert!(bundle.daemons.contains_key("builder-a"));
     assert_pem_pair(
         &bundle.daemons["builder-a"].cert_pem,
-        &bundle.daemons["builder-a"].key_pem,
+        bundle.daemons["builder-a"].key_pem.as_str(),
     );
 }

@@ -34,7 +34,7 @@ fn run_dev_init(args: DevInitArgs) -> anyhow::Result<()> {
 
 fn run_init_ca(args: InitCaArgs) -> anyhow::Result<()> {
     let ca = remote_exec_pki::generate_ca(&args.ca_common_name)?;
-    let paths = remote_exec_pki::write_ca_pair(&ca.pem_pair, &args.out_dir, args.force)?;
+    let paths = remote_exec_pki::write_ca_pair(ca.pem_pair(), &args.out_dir, args.force)?;
 
     println!("Wrote CA cert: {}", paths.cert_pem.display());
     println!("Wrote CA key: {}", paths.key_pem.display());
@@ -43,7 +43,7 @@ fn run_init_ca(args: InitCaArgs) -> anyhow::Result<()> {
 
 fn run_issue_broker(args: IssueBrokerArgs) -> anyhow::Result<()> {
     let ca = load_ca_from_files(&args.ca_cert_pem, &args.ca_key_pem)?;
-    let broker = remote_exec_pki::issue_broker_cert(&ca, &args.broker_common_name)?;
+    let broker = ca.issue_broker_cert(&args.broker_common_name)?;
     let paths = remote_exec_pki::write_broker_pair(&broker, &args.out_dir, args.force)?;
 
     println!("Wrote broker cert: {}", paths.cert_pem.display());
@@ -54,7 +54,7 @@ fn run_issue_broker(args: IssueBrokerArgs) -> anyhow::Result<()> {
 fn run_issue_daemon(args: IssueDaemonArgs) -> anyhow::Result<()> {
     let ca = load_ca_from_files(&args.ca_cert_pem, &args.ca_key_pem)?;
     let daemon = build_single_daemon_spec(&args)?;
-    let pair = remote_exec_pki::issue_daemon_cert(&ca, &daemon)?;
+    let pair = ca.issue_daemon_cert(&daemon)?;
     let paths = remote_exec_pki::write_daemon_pair(&args.target, &pair, &args.out_dir, args.force)?;
 
     println!("Wrote daemon cert: {}", paths.cert_pem.display());

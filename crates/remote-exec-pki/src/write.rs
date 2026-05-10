@@ -187,7 +187,13 @@ fn write_generated_pair(
     written_paths: &mut Vec<PathBuf>,
 ) -> anyhow::Result<()> {
     write_tracked_text_file(&paths.cert_pem, &pair.cert_pem, force, 0o644, written_paths)?;
-    write_tracked_text_file(&paths.key_pem, &pair.key_pem, force, 0o600, written_paths)?;
+    write_tracked_text_file(
+        &paths.key_pem,
+        pair.key_pem.as_str(),
+        force,
+        0o600,
+        written_paths,
+    )?;
     Ok(())
 }
 
