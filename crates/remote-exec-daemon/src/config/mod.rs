@@ -129,39 +129,11 @@ impl From<EmbeddedHostConfig> for DaemonConfig {
 
 impl DaemonConfig {
     pub fn host_runtime_config(&self) -> HostRuntimeConfig {
-        HostRuntimeConfig {
-            target: self.target.clone(),
-            default_workdir: self.default_workdir.clone(),
-            windows_posix_root: self.windows_posix_root.clone(),
-            sandbox: self.sandbox.clone(),
-            enable_transfer_compression: self.enable_transfer_compression,
-            allow_login_shell: self.allow_login_shell,
-            pty: self.pty,
-            default_shell: self.default_shell.clone(),
-            yield_time: self.yield_time,
-            port_forward_limits: self.port_forward_limits,
-            experimental_apply_patch_target_encoding_autodetect: self
-                .experimental_apply_patch_target_encoding_autodetect,
-            process_environment: self.process_environment.clone(),
-        }
+        self.clone().into()
     }
 
     pub fn into_host_runtime_config(self) -> HostRuntimeConfig {
-        HostRuntimeConfig {
-            target: self.target,
-            default_workdir: self.default_workdir,
-            windows_posix_root: self.windows_posix_root,
-            sandbox: self.sandbox,
-            enable_transfer_compression: self.enable_transfer_compression,
-            allow_login_shell: self.allow_login_shell,
-            pty: self.pty,
-            default_shell: self.default_shell,
-            yield_time: self.yield_time,
-            port_forward_limits: self.port_forward_limits,
-            experimental_apply_patch_target_encoding_autodetect: self
-                .experimental_apply_patch_target_encoding_autodetect,
-            process_environment: self.process_environment,
-        }
+        self.into()
     }
 
     fn normalized_default_workdir(&self) -> PathBuf {
@@ -195,6 +167,26 @@ impl DaemonConfig {
         config.normalize_paths();
         config.validate()?;
         Ok(config)
+    }
+}
+
+impl From<DaemonConfig> for HostRuntimeConfig {
+    fn from(value: DaemonConfig) -> Self {
+        Self {
+            target: value.target,
+            default_workdir: value.default_workdir,
+            windows_posix_root: value.windows_posix_root,
+            sandbox: value.sandbox,
+            enable_transfer_compression: value.enable_transfer_compression,
+            allow_login_shell: value.allow_login_shell,
+            pty: value.pty,
+            default_shell: value.default_shell,
+            yield_time: value.yield_time,
+            port_forward_limits: value.port_forward_limits,
+            experimental_apply_patch_target_encoding_autodetect: value
+                .experimental_apply_patch_target_encoding_autodetect,
+            process_environment: value.process_environment,
+        }
     }
 }
 
