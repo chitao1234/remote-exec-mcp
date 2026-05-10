@@ -127,7 +127,7 @@ bool PortTunnelService::schedule_session_expiry(
     };
 
     struct ExpiryThread {
-        static DWORD WINAPI entry(LPVOID raw_context) {
+        static unsigned __stdcall entry(void* raw_context) {
             std::unique_ptr<ExpiryContext> context(static_cast<ExpiryContext*>(raw_context));
             PortTunnelWorkerLease lease(context->service);
             platform::sleep_ms(RESUME_TIMEOUT_MS);
@@ -139,7 +139,7 @@ bool PortTunnelService::schedule_session_expiry(
     std::unique_ptr<ExpiryContext> context(new ExpiryContext());
     context->service = service;
     context->session = session;
-    HANDLE handle = CreateThread(NULL, 0, &ExpiryThread::entry, context.get(), 0, NULL);
+    HANDLE handle = begin_win32_thread(&ExpiryThread::entry, context.get());
     if (handle != NULL) {
         context.release();
         CloseHandle(handle);

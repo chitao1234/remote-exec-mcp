@@ -28,6 +28,9 @@
 #include "port_tunnel_frame.h"
 #include "server_transport.h"
 #include "text_utils.h"
+#ifdef _WIN32
+#include "win32_thread.h"
+#endif
 
 using Json = nlohmann::json;
 

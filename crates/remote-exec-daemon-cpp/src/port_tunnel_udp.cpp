@@ -19,7 +19,7 @@ bool PortTunnelService::spawn_udp_bind_loop(
     };
 
     struct ThreadEntry {
-        static DWORD WINAPI entry(LPVOID raw_context) {
+        static unsigned __stdcall entry(void* raw_context) {
             std::unique_ptr<Context> context(static_cast<Context*>(raw_context));
             PortTunnelWorkerLease lease(context->service);
             context->service->udp_read_loop(
@@ -36,7 +36,7 @@ bool PortTunnelService::spawn_udp_bind_loop(
     context->session = session;
     context->stream_id = stream_id;
     context->socket_value = socket_value;
-    HANDLE handle = CreateThread(NULL, 0, &ThreadEntry::entry, context.get(), 0, NULL);
+    HANDLE handle = begin_win32_thread(&ThreadEntry::entry, context.get());
     if (handle != NULL) {
         context.release();
         CloseHandle(handle);

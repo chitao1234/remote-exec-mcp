@@ -11,6 +11,9 @@
 #include "platform.h"
 #include "process_session.h"
 #include "session_store.h"
+#ifdef _WIN32
+#include "win32_thread.h"
+#endif
 
 namespace {
 
@@ -299,7 +302,7 @@ struct SessionPumpContext {
     std::shared_ptr<LiveSession> session;
 };
 
-DWORD WINAPI session_output_pump_entry(LPVOID raw_context) {
+unsigned __stdcall session_output_pump_entry(void* raw_context) {
     std::unique_ptr<SessionPumpContext> context(
         static_cast<SessionPumpContext*>(raw_context)
     );
@@ -314,9 +317,9 @@ void start_session_pump(const std::shared_ptr<LiveSession>& session) {
     }
     std::unique_ptr<SessionPumpContext> context(new SessionPumpContext());
     context->session = session;
-    HANDLE handle = CreateThread(NULL, 0, session_output_pump_entry, context.get(), 0, NULL);
+    HANDLE handle = begin_win32_thread(session_output_pump_entry, context.get());
     if (handle == NULL) {
-        throw std::runtime_error("CreateThread failed");
+        throw std::runtime_error("_beginthreadex failed");
     }
     session->pump_thread_ = handle;
     session->pump_started = true;

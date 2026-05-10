@@ -19,6 +19,9 @@
 #include "path_policy.h"
 #include "platform.h"
 #include "port_tunnel.h"
+#ifdef _WIN32
+#include "win32_thread.h"
+#endif
 
 namespace {
 
@@ -104,18 +107,18 @@ void ServerRuntime::start_accept_loop() {
     }
 
 #ifdef _WIN32
-    accept_thread_ = CreateThread(NULL, 0, &ServerRuntime::accept_thread_entry, this, 0, NULL);
+    accept_thread_ = begin_win32_thread(&ServerRuntime::accept_thread_entry, this);
     if (accept_thread_ == NULL) {
         request_shutdown();
         join();
-        throw std::runtime_error("CreateThread failed");
+        throw std::runtime_error("_beginthreadex failed");
     }
     maintenance_thread_ =
-        CreateThread(NULL, 0, &ServerRuntime::maintenance_thread_entry, this, 0, NULL);
+        begin_win32_thread(&ServerRuntime::maintenance_thread_entry, this);
     if (maintenance_thread_ == NULL) {
         request_shutdown();
         join();
-        throw std::runtime_error("CreateThread failed");
+        throw std::runtime_error("_beginthreadex failed");
     }
 #else
     accept_thread_ = new std::thread(&ServerRuntime::accept_loop, this);
@@ -260,13 +263,13 @@ void ServerRuntime::accept_loop() {
 }
 
 #ifdef _WIN32
-DWORD WINAPI ServerRuntime::accept_thread_entry(LPVOID raw_context) {
+unsigned __stdcall ServerRuntime::accept_thread_entry(void* raw_context) {
     ServerRuntime* runtime = static_cast<ServerRuntime*>(raw_context);
     runtime->accept_loop();
     return 0;
 }
 
-DWORD WINAPI ServerRuntime::maintenance_thread_entry(LPVOID raw_context) {
+unsigned __stdcall ServerRuntime::maintenance_thread_entry(void* raw_context) {
     ServerRuntime* runtime = static_cast<ServerRuntime*>(raw_context);
     runtime->maintenance_loop();
     return 0;

@@ -60,7 +60,7 @@ void ConnectionManager::run_worker(const std::shared_ptr<WorkerRecord>& record) 
 }
 
 #ifdef _WIN32
-DWORD WINAPI ConnectionManager::worker_thread_entry(LPVOID raw_context) {
+unsigned __stdcall ConnectionManager::worker_thread_entry(void* raw_context) {
     std::unique_ptr<std::shared_ptr<WorkerRecord> > context(
         static_cast<std::shared_ptr<WorkerRecord>*>(raw_context)
     );
@@ -90,7 +90,7 @@ bool ConnectionManager::try_start(
         new std::shared_ptr<WorkerRecord>(record)
     );
     HANDLE handle =
-        CreateThread(NULL, 0, &ConnectionManager::worker_thread_entry, thread_context.get(), 0, NULL);
+        begin_win32_thread(&ConnectionManager::worker_thread_entry, thread_context.get());
     if (handle == NULL) {
         close_socket(record->socket);
         BasicLockGuard lock(mutex_);

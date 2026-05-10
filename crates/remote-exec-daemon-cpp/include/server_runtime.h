@@ -23,8 +23,8 @@ private:
     void accept_loop();
     void maintenance_loop();
 #ifdef _WIN32
-    static DWORD WINAPI accept_thread_entry(LPVOID raw_context);
-    static DWORD WINAPI maintenance_thread_entry(LPVOID raw_context);
+    static unsigned __stdcall accept_thread_entry(void* raw_context);
+    static unsigned __stdcall maintenance_thread_entry(void* raw_context);
 #endif
 
     AppState state_;
