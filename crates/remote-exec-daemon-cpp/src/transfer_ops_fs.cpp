@@ -122,13 +122,7 @@ void make_directory_if_missing(const std::string& path) {
     if (path.empty() || is_directory(path)) {
         return;
     }
-#ifdef _WIN32
-    if (_mkdir(path.c_str()) != 0 && errno != EEXIST) {
-#else
-    if (mkdir(path.c_str(), 0777) != 0 && errno != EEXIST) {
-#endif
-        throw std::runtime_error("unable to create directory " + path);
-    }
+    path_utils::make_directory_if_missing(path);
 }
 
 void ensure_parent_directory(const std::string& path, bool create_parent) {
@@ -146,24 +140,7 @@ void ensure_parent_directory(const std::string& path, bool create_parent) {
         return;
     }
 
-    std::string current;
-    for (std::size_t i = 0; i < parent.size(); ++i) {
-        const char ch = parent[i];
-        current.push_back(ch);
-        if (ch != '/' && ch != '\\') {
-            continue;
-        }
-        if (current.size() == 1) {
-            continue;
-        }
-        if (current.size() == 3 && current[1] == ':') {
-            continue;
-        }
-        current.erase(current.size() - 1);
-        make_directory_if_missing(current);
-        current.push_back(ch);
-    }
-    make_directory_if_missing(parent);
+    path_utils::create_parent_directories(path);
 }
 
 void ensure_not_existing_symlink(const std::string& path) {

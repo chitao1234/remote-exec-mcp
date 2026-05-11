@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <cerrno>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
@@ -9,12 +8,8 @@
 #include <stdexcept>
 #include <vector>
 
-#ifdef _WIN32
-#include <direct.h>
 #include <sys/stat.h>
-#else
-#include <sys/stat.h>
-#include <sys/types.h>
+#ifndef _WIN32
 #include <unistd.h>
 #endif
 
@@ -191,45 +186,6 @@ std::string resolve_patch_path(const std::string& root, const std::string& path)
     return path_utils::join_path(root, path);
 }
 
-void make_directory_if_missing(const std::string& path) {
-    if (path.empty()) {
-        return;
-    }
-#ifdef _WIN32
-    if (_mkdir(path.c_str()) != 0 && errno != EEXIST) {
-#else
-    if (mkdir(path.c_str(), 0777) != 0 && errno != EEXIST) {
-#endif
-        throw std::runtime_error("unable to create directory " + path);
-    }
-}
-
-void create_parent_directories(const std::string& path) {
-    const std::string parent = path_utils::parent_directory(path);
-    if (parent.empty()) {
-        return;
-    }
-
-    std::string current;
-    for (std::size_t i = 0; i < parent.size(); ++i) {
-        const char ch = parent[i];
-        current.push_back(ch);
-        if (ch != '/' && ch != '\\') {
-            continue;
-        }
-        if (current.size() == 1) {
-            continue;
-        }
-        if (current.size() == 3 && current[1] == ':') {
-            continue;
-        }
-        current.erase(current.size() - 1);
-        make_directory_if_missing(current);
-        current.push_back(ch);
-    }
-    make_directory_if_missing(parent);
-}
-
 bool file_exists(const std::string& path) {
     struct stat st;
     return stat(path.c_str(), &st) == 0;
@@ -244,7 +200,7 @@ std::string read_text_file(const std::string& path) {
 }
 
 void write_text_atomic(const std::string& path, const std::string& content) {
-    create_parent_directories(path);
+    path_utils::create_parent_directories(path);
     const std::string temp_path = path + ".tmp";
 
     std::ofstream output(temp_path.c_str(), std::ios::binary | std::ios::trunc);
