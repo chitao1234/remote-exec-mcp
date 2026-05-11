@@ -327,6 +327,9 @@ PortTunnelSender::PortTunnelSender(
     const std::shared_ptr<PortTunnelService>& service
 ) : client_(client),
     service_(service),
+    writer_started_(false),
+    writer_shutdown_(false),
+    writer_finished_(false),
     closed_(false),
     queued_bytes_(0UL) {}
 
@@ -336,21 +339,132 @@ bool PortTunnelSender::closed() const {
 
 void PortTunnelSender::mark_closed() {
     closed_.store(true);
+    BasicLockGuard lock(writer_mutex_);
+    writer_shutdown_ = true;
+    if (!writer_started_ || writer_finished_) {
+        drain_queued_frame_reservations_locked();
+        writer_cond_.broadcast();
+        return;
+    }
+    writer_cond_.broadcast();
+    while (!writer_finished_) {
+        writer_cond_.wait(writer_mutex_);
+    }
+}
+
+bool PortTunnelSender::ensure_writer_started_locked() {
+    if (writer_started_) {
+        return true;
+    }
+#ifdef _WIN32
+    struct Context {
+        std::shared_ptr<PortTunnelSender> sender;
+    };
+    struct ThreadEntry {
+        static unsigned __stdcall entry(void* raw_context) {
+            std::unique_ptr<Context> context(static_cast<Context*>(raw_context));
+            context->sender->writer_loop();
+            return 0;
+        }
+    };
+    std::unique_ptr<Context> context(new Context());
+    context->sender = shared_from_this();
+    HANDLE handle = begin_win32_thread(&ThreadEntry::entry, context.get());
+    if (handle == NULL) {
+        closed_.store(true);
+        writer_shutdown_ = true;
+        drain_queued_frame_reservations_locked();
+        shutdown_socket(client_);
+        return false;
+    }
+    context.release();
+    CloseHandle(handle);
+    writer_started_ = true;
+    return true;
+#else
+    try {
+        std::shared_ptr<PortTunnelSender> self = shared_from_this();
+        std::thread([self]() { self->writer_loop(); }).detach();
+        writer_started_ = true;
+        return true;
+    } catch (const std::exception& ex) {
+        log_tunnel_exception("spawn tunnel writer thread", ex);
+        closed_.store(true);
+        writer_shutdown_ = true;
+        drain_queued_frame_reservations_locked();
+        shutdown_socket(client_);
+        return false;
+    } catch (...) {
+        log_unknown_tunnel_exception("spawn tunnel writer thread");
+        closed_.store(true);
+        writer_shutdown_ = true;
+        drain_queued_frame_reservations_locked();
+        shutdown_socket(client_);
+        return false;
+    }
+#endif
+}
+
+void PortTunnelSender::writer_loop() {
+    for (;;) {
+        QueuedFrame queued;
+        {
+            BasicLockGuard lock(writer_mutex_);
+            while (writer_queue_.empty() && !writer_shutdown_) {
+                writer_cond_.wait(writer_mutex_);
+            }
+            if (writer_queue_.empty()) {
+                writer_finished_ = true;
+                writer_cond_.broadcast();
+                return;
+            }
+            queued = std::move(writer_queue_.front());
+            writer_queue_.pop_front();
+        }
+
+        try {
+            send_all_bytes(
+                client_,
+                reinterpret_cast<const char*>(queued.bytes.data()),
+                queued.bytes.size()
+            );
+        } catch (const std::exception& ex) {
+            log_tunnel_exception("send port tunnel frame", ex);
+            release_queued_frame_reservation(queued.charge_value);
+            closed_.store(true);
+            shutdown_socket(client_);
+            {
+                BasicLockGuard lock(writer_mutex_);
+                writer_shutdown_ = true;
+                drain_queued_frame_reservations_locked();
+                writer_finished_ = true;
+                writer_cond_.broadcast();
+            }
+            return;
+        }
+        release_queued_frame_reservation(queued.charge_value);
+    }
+}
+
+bool PortTunnelSender::enqueue_encoded_frame(
+    std::vector<unsigned char> bytes,
+    unsigned long charge_value
+) {
+    BasicLockGuard lock(writer_mutex_);
+    if (closed_.load() || writer_shutdown_) {
+        return false;
+    }
+    if (!ensure_writer_started_locked()) {
+        return false;
+    }
+    writer_queue_.push_back(QueuedFrame(std::move(bytes), charge_value));
+    writer_cond_.signal();
+    return true;
 }
 
 void PortTunnelSender::send_frame(const PortTunnelFrame& frame) {
-    const std::vector<unsigned char> bytes = encode_port_tunnel_frame(frame);
-    BasicLockGuard lock(writer_mutex_);
-    if (closed_.load()) {
-        return;
-    }
-    try {
-        send_all_bytes(client_, reinterpret_cast<const char*>(bytes.data()), bytes.size());
-    } catch (const std::exception& ex) {
-        log_tunnel_exception("send port tunnel frame", ex);
-        closed_.store(true);
-        shutdown_socket(client_);
-    }
+    std::vector<unsigned char> bytes = encode_port_tunnel_frame(frame);
+    (void)enqueue_encoded_frame(std::move(bytes), 0UL);
 }
 
 bool PortTunnelSender::try_reserve_data_frame(
@@ -386,6 +500,21 @@ void PortTunnelSender::release_data_frame_reservation(unsigned long charge_value
     queued_bytes_.fetch_sub(charge_value);
 }
 
+void PortTunnelSender::release_queued_frame_reservation(unsigned long charge_value) {
+    if (charge_value != 0UL) {
+        release_data_frame_reservation(charge_value);
+    }
+}
+
+void PortTunnelSender::drain_queued_frame_reservations_locked() {
+    for (std::deque<QueuedFrame>::iterator it = writer_queue_.begin();
+         it != writer_queue_.end();
+         ++it) {
+        release_queued_frame_reservation(it->charge_value);
+    }
+    writer_queue_.clear();
+}
+
 bool PortTunnelSender::send_data_frame_or_limit_error(
     PortTunnelConnection& connection,
     const PortTunnelFrame& frame
@@ -400,18 +529,21 @@ bool PortTunnelSender::send_data_frame_or_limit_error(
         return false;
     }
     try {
-        send_frame(frame);
+        std::vector<unsigned char> bytes = encode_port_tunnel_frame(frame);
+        if (enqueue_encoded_frame(std::move(bytes), charge_value)) {
+            return true;
+        }
     } catch (const std::exception& ex) {
-        log_tunnel_exception("send limited port tunnel data frame", ex);
+        log_tunnel_exception("queue limited port tunnel data frame", ex);
         release_data_frame_reservation(charge_value);
         throw;
     } catch (...) {
-        log_unknown_tunnel_exception("send limited port tunnel data frame");
+        log_unknown_tunnel_exception("queue limited port tunnel data frame");
         release_data_frame_reservation(charge_value);
         throw;
     }
     release_data_frame_reservation(charge_value);
-    return !closed_.load();
+    return false;
 }
 
 bool PortTunnelSender::send_data_frame_or_drop_on_limit(
@@ -431,38 +563,41 @@ bool PortTunnelSender::send_data_frame_or_drop_on_limit(
         return true;
     }
     try {
-        send_frame(frame);
+        std::vector<unsigned char> bytes = encode_port_tunnel_frame(frame);
+        if (enqueue_encoded_frame(std::move(bytes), charge_value)) {
+            return true;
+        }
     } catch (const std::exception& ex) {
-        log_tunnel_exception("send droppable port tunnel data frame", ex);
+        log_tunnel_exception("queue droppable port tunnel data frame", ex);
         release_data_frame_reservation(charge_value);
         throw;
     } catch (...) {
-        log_unknown_tunnel_exception("send droppable port tunnel data frame");
+        log_unknown_tunnel_exception("queue droppable port tunnel data frame");
         release_data_frame_reservation(charge_value);
         throw;
     }
     release_data_frame_reservation(charge_value);
-    return !closed_.load();
+    return false;
 }
 
 void PortTunnelConnection::send_frame(const PortTunnelFrame& frame) {
-    sender_.send_frame(frame);
+    sender_->send_frame(frame);
 }
 
 bool PortTunnelConnection::send_data_frame_or_limit_error(const PortTunnelFrame& frame) {
-    return sender_.send_data_frame_or_limit_error(*this, frame);
+    return sender_->send_data_frame_or_limit_error(*this, frame);
 }
 
 bool PortTunnelConnection::send_data_frame_or_drop_on_limit(const PortTunnelFrame& frame) {
-    return sender_.send_data_frame_or_drop_on_limit(*this, frame);
+    return sender_->send_data_frame_or_drop_on_limit(*this, frame);
 }
 
 bool PortTunnelConnection::closed() const {
-    return sender_.closed();
+    return sender_->closed();
 }
 
 void PortTunnelConnection::mark_closed() {
-    sender_.mark_closed();
+    sender_->mark_closed();
 }
 
 void TransportOwnedStreams::insert_tcp(

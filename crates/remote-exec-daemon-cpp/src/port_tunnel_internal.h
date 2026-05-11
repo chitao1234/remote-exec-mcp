@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <map>
 #include <memory>
 #include <sstream>
@@ -302,7 +303,7 @@ private:
     bool released_;
 };
 
-class PortTunnelSender {
+class PortTunnelSender : public std::enable_shared_from_this<PortTunnelSender> {
 public:
     PortTunnelSender(SOCKET client, const std::shared_ptr<PortTunnelService>& service);
 
@@ -322,12 +323,31 @@ private:
     PortTunnelSender(const PortTunnelSender&);
     PortTunnelSender& operator=(const PortTunnelSender&);
 
+    struct QueuedFrame {
+        QueuedFrame() : charge_value(0UL) {}
+        QueuedFrame(std::vector<unsigned char> bytes_value, unsigned long charge)
+            : bytes(std::move(bytes_value)), charge_value(charge) {}
+
+        std::vector<unsigned char> bytes;
+        unsigned long charge_value;
+    };
+
+    void writer_loop();
+    bool ensure_writer_started_locked();
+    bool enqueue_encoded_frame(std::vector<unsigned char> bytes, unsigned long charge_value);
     bool try_reserve_data_frame(const PortTunnelFrame& frame, unsigned long* charge_value);
     void release_data_frame_reservation(unsigned long charge_value);
+    void release_queued_frame_reservation(unsigned long charge_value);
+    void drain_queued_frame_reservations_locked();
 
     SOCKET client_;
     std::shared_ptr<PortTunnelService> service_;
     BasicMutex writer_mutex_;
+    BasicCondVar writer_cond_;
+    std::deque<QueuedFrame> writer_queue_;
+    bool writer_started_;
+    bool writer_shutdown_;
+    bool writer_finished_;
     std::atomic<bool> closed_;
     std::atomic<unsigned long> queued_bytes_;
 };
@@ -361,7 +381,7 @@ public:
     PortTunnelConnection(SOCKET client, const std::shared_ptr<PortTunnelService>& service)
         : client_(client),
           service_(service),
-          sender_(client, service),
+          sender_(new PortTunnelSender(client, service)),
           generation_(0ULL),
           mode_(PortTunnelMode::Unopened),
           protocol_(PortTunnelProtocol::None) {}
@@ -446,7 +466,7 @@ private:
 
     SOCKET client_;
     std::shared_ptr<PortTunnelService> service_;
-    PortTunnelSender sender_;
+    std::shared_ptr<PortTunnelSender> sender_;
     TransportOwnedStreams transport_streams_;
     BasicMutex state_mutex_;
     std::atomic<std::uint64_t> generation_;
