@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::num::NonZeroU32;
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -24,7 +25,7 @@ use remote_exec_proto::port_tunnel::{
 };
 use remote_exec_proto::rpc::{
     ExecWarning, HealthCheckResponse, ImageReadResponse, PatchApplyRequest, PatchApplyResponse,
-    RpcErrorBody, TargetInfoResponse,
+    PortForwardProtocolVersion, RpcErrorBody, TargetInfoResponse,
 };
 use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
@@ -133,7 +134,7 @@ pub(crate) struct StubDaemonState {
     target_supports_pty: bool,
     pub(super) target_supports_transfer_compression: bool,
     target_supports_port_forward: bool,
-    target_port_forward_protocol_version: u32,
+    target_port_forward_protocol_version: Option<PortForwardProtocolVersion>,
     required_bearer_token: Option<String>,
     pub(super) exec_write_behavior: Arc<Mutex<ExecWriteBehavior>>,
     pub(super) exec_start_behavior: Arc<Mutex<ExecStartBehavior>>,
@@ -165,7 +166,7 @@ pub(super) fn stub_daemon_state(
         target_supports_pty: supports_pty,
         target_supports_transfer_compression: true,
         target_supports_port_forward: false,
-        target_port_forward_protocol_version: 0,
+        target_port_forward_protocol_version: None,
         required_bearer_token: None,
         exec_write_behavior: Arc::new(Mutex::new(exec_write_behavior)),
         exec_start_behavior: Arc::new(Mutex::new(ExecStartBehavior::Success)),
@@ -198,7 +199,11 @@ pub(super) fn set_transfer_compression_support(state: &mut StubDaemonState, enab
 
 pub(super) fn set_port_forward_support(state: &mut StubDaemonState, enabled: bool, version: u32) {
     state.target_supports_port_forward = enabled;
-    state.target_port_forward_protocol_version = version;
+    state.target_port_forward_protocol_version = if enabled {
+        NonZeroU32::new(version).map(PortForwardProtocolVersion::new)
+    } else {
+        None
+    };
 }
 
 pub(super) fn set_required_bearer_token(state: &mut StubDaemonState, token: &str) {

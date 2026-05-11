@@ -438,7 +438,7 @@ mod tests {
     }
 
     #[test]
-    fn target_info_defaults_to_protocol_zero() {
+    fn target_info_defaults_to_missing_protocol_version() {
         let info: crate::rpc::TargetInfoResponse = serde_json::from_value(serde_json::json!({
             "target": "old",
             "daemon_version": "0",
@@ -452,6 +452,29 @@ mod tests {
         }))
         .unwrap();
 
-        assert_eq!(info.port_forward_protocol_version, 0);
+        assert_eq!(info.port_forward_protocol_version, None);
+    }
+
+    #[test]
+    fn target_info_parses_protocol_version() {
+        let info: crate::rpc::TargetInfoResponse = serde_json::from_value(serde_json::json!({
+            "target": "daemon",
+            "daemon_version": "0.1.0",
+            "daemon_instance_id": "inst",
+            "hostname": "host",
+            "platform": "linux",
+            "arch": "x86_64",
+            "supports_pty": true,
+            "supports_image_read": true,
+            "supports_port_forward": true,
+            "port_forward_protocol_version": 4
+        }))
+        .unwrap();
+
+        assert_eq!(
+            info.port_forward_protocol_version
+                .map(crate::rpc::PortForwardProtocolVersion::get),
+            Some(4)
+        );
     }
 }

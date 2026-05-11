@@ -113,8 +113,7 @@ async fn list_targets_returns_cached_daemon_info_and_null_for_unavailable_target
                         "platform": "linux",
                         "arch": "x86_64",
                         "supports_pty": true,
-                        "supports_port_forward": false,
-                        "port_forward_protocol_version": 0
+                        "supports_port_forward": false
                     }
                 },
                 {

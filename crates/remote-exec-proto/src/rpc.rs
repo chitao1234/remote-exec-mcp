@@ -1,3 +1,5 @@
+use std::num::NonZeroU32;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -27,8 +29,28 @@ pub struct TargetInfoResponse {
     pub supports_transfer_compression: bool,
     #[serde(default)]
     pub supports_port_forward: bool,
-    #[serde(default)]
-    pub port_forward_protocol_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port_forward_protocol_version: Option<PortForwardProtocolVersion>,
+}
+
+#[derive(
+    Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord,
+)]
+#[serde(transparent)]
+pub struct PortForwardProtocolVersion(NonZeroU32);
+
+impl PortForwardProtocolVersion {
+    pub fn v4() -> Self {
+        Self(NonZeroU32::new(4).expect("v4 is nonzero"))
+    }
+
+    pub fn new(value: NonZeroU32) -> Self {
+        Self(value)
+    }
+
+    pub fn get(self) -> u32 {
+        self.0.get()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

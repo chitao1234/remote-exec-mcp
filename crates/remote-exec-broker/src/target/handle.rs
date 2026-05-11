@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
-    PatchApplyRequest, PatchApplyResponse, TargetInfoResponse, TransferExportRequest,
-    TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
+    PatchApplyRequest, PatchApplyResponse, PortForwardProtocolVersion, TargetInfoResponse,
+    TransferExportRequest, TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
     TransferPathInfoResponse,
 };
 use tokio::sync::Mutex;
@@ -21,7 +21,7 @@ pub struct CachedDaemonInfo {
     pub supports_pty: bool,
     pub supports_transfer_compression: bool,
     pub supports_port_forward: bool,
-    pub port_forward_protocol_version: u32,
+    pub port_forward_protocol_version: Option<PortForwardProtocolVersion>,
 }
 
 #[derive(Clone)]

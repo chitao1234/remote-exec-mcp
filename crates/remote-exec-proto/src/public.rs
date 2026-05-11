@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::rpc::{ExecWarning, TransferWarning};
+use crate::rpc::{ExecWarning, PortForwardProtocolVersion, TransferWarning};
 pub use crate::transfer::{TransferOverwrite, TransferSourceType, TransferSymlinkMode};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -63,7 +63,8 @@ pub struct ListTargetDaemonInfo {
     pub arch: String,
     pub supports_pty: bool,
     pub supports_port_forward: bool,
-    pub port_forward_protocol_version: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port_forward_protocol_version: Option<PortForwardProtocolVersion>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]

@@ -21,11 +21,10 @@ pub async fn list_targets(
                 arch: info.arch,
                 supports_pty: info.supports_pty,
                 supports_port_forward: info.supports_port_forward,
-                port_forward_protocol_version: if info.supports_port_forward {
-                    info.port_forward_protocol_version
-                } else {
-                    0
-                },
+                port_forward_protocol_version: info
+                    .supports_port_forward
+                    .then_some(info.port_forward_protocol_version)
+                    .flatten(),
             });
         targets.push(ListTargetEntry {
             name: name.clone(),
@@ -72,7 +71,9 @@ fn format_targets_text(targets: &[ListTargetEntry]) -> String {
                     "no"
                 },
                 if info.supports_port_forward {
-                    format!(", forward_protocol=v{}", info.port_forward_protocol_version)
+                    info.port_forward_protocol_version
+                        .map(|version| format!(", forward_protocol=v{}", version.get()))
+                        .unwrap_or_default()
                 } else {
                     String::new()
                 },
