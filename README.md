@@ -226,7 +226,7 @@ Notes:
 - If a target has no `--san` entries, `remote-exec-admin` defaults that daemon cert to `DNS:localhost` and `IP:127.0.0.1`. `certs dev-init` still accepts the old `--daemon-san` spelling as an alias.
 - The command prints broker and daemon config snippets after generation so you can paste the generated file paths directly into `configs/broker.example.toml` and `configs/daemon.example.toml`.
 - Keep `expected_daemon_name` set to the daemon's configured `target`; it is the application-level identity check on top of transport security.
-- On Unix, generated private-key files are written with `0600` permissions. On Windows, this tool does not currently rewrite file ACLs; generate certificate bundles in a private directory and apply the desired Windows ACLs before sharing the directory with other users.
+- Generated private-key files are restricted when written: Unix uses `0600` permissions, and Windows writes a protected file DACL granting access only to the current user, local Administrators, and LocalSystem.
 - `skip_server_name_verification = true` keeps CA, key-usage, and expiry validation but skips matching the broker URL host against the daemon certificate SANs.
 - `pinned_server_cert_pem` adds an exact daemon leaf-certificate pin on top of CA validation. The PEM file may contain multiple acceptable leaf certificates to ease certificate rotation.
 - `tls.pinned_client_cert_pem` adds an exact broker leaf-certificate pin on top of the daemon's normal client-certificate CA validation. The PEM file may contain multiple acceptable broker leaf certificates to ease rotation.
