@@ -56,6 +56,12 @@ expected_daemon_name = "builder-xp"
 # `compression = "zstd"` and keeps all transfer payloads uncompressed.
 #enable_transfer_compression = true
 
+# Optional broker-host transfer import safety limits for endpoints that use
+# `target = "local"`.
+#[transfer_limits]
+#max_archive_bytes = 536870912
+#max_entry_bytes = 536870912
+
 # Optional. When true, the broker omits MCP `structuredContent` from successful
 # tool results and only returns normal content items.
 disable_structured_content = true
@@ -123,6 +129,11 @@ disable_structured_content = true
 # Optional. Per-operation yield-time policy overrides for the embedded local target only.
 # `min_ms` silently raises smaller caller-provided values, `default_ms` applies when
 # the caller omits `yield_time_ms`, and `max_ms` caps larger values.
+
+# Optional transfer import safety limits for the embedded local target.
+#[local.transfer_limits]
+#max_archive_bytes = 536870912
+#max_entry_bytes = 536870912
 #[local.yield_time.exec_command]
 #default_ms = 10000
 #max_ms = 30000

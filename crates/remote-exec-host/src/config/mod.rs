@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use remote_exec_proto::sandbox::FilesystemSandbox;
+use remote_exec_proto::transfer::TransferLimits;
 use serde::Deserialize;
 
 mod environment;
@@ -33,6 +34,7 @@ pub struct HostRuntimeConfig {
     pub windows_posix_root: Option<PathBuf>,
     pub sandbox: Option<FilesystemSandbox>,
     pub enable_transfer_compression: bool,
+    pub transfer_limits: TransferLimits,
     pub allow_login_shell: bool,
     pub pty: PtyMode,
     pub default_shell: Option<String>,
@@ -49,6 +51,7 @@ pub struct EmbeddedHostConfig {
     pub windows_posix_root: Option<PathBuf>,
     pub sandbox: Option<FilesystemSandbox>,
     pub enable_transfer_compression: bool,
+    pub transfer_limits: TransferLimits,
     pub allow_login_shell: bool,
     pub pty: PtyMode,
     pub default_shell: Option<String>,
@@ -126,6 +129,7 @@ impl EmbeddedHostConfig {
             windows_posix_root: self.windows_posix_root,
             sandbox: self.sandbox,
             enable_transfer_compression: self.enable_transfer_compression,
+            transfer_limits: self.transfer_limits,
             allow_login_shell: self.allow_login_shell,
             pty: self.pty,
             default_shell: self.default_shell,
@@ -163,6 +167,7 @@ impl HostRuntimeConfig {
         self.validate_windows_posix_root()?;
         validate_existing_directory(&self.normalized_default_workdir(), "default_workdir")?;
         self.yield_time.validate()?;
+        self.transfer_limits.validate()?;
         self.port_forward_limits.validate()?;
         Ok(())
     }

@@ -33,6 +33,7 @@ fn build_local_port_runtime() -> anyhow::Result<remote_exec_host::HostRuntimeSta
         windows_posix_root: None,
         sandbox: None,
         enable_transfer_compression: false,
+        transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
         allow_login_shell: false,
         pty: remote_exec_host::PtyMode::None,
         default_shell: None,

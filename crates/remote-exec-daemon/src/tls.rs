@@ -112,6 +112,7 @@ mod tests {
                 http_auth: None,
                 sandbox: None,
                 enable_transfer_compression: true,
+                transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
                 allow_login_shell: true,
                 pty: PtyMode::Auto,
                 default_shell: None,

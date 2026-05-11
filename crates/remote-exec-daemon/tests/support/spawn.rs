@@ -69,6 +69,7 @@ fn base_daemon_config(
         http_auth: None,
         sandbox: None,
         enable_transfer_compression: true,
+        transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
         allow_login_shell: true,
         pty,
         default_shell: None,

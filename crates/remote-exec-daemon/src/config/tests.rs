@@ -283,6 +283,38 @@ connect_timeout_ms = 0
 }
 
 #[tokio::test]
+async fn load_rejects_invalid_transfer_limit_bounds() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("daemon.toml");
+    tokio::fs::write(
+        &config_path,
+        format!(
+            r#"
+target = "builder-a"
+listen = "127.0.0.1:8080"
+default_workdir = {}
+transport = "http"
+
+[transfer_limits]
+max_archive_bytes = 8
+max_entry_bytes = 16
+"#,
+            neutral_workdir(&dir)
+        ),
+    )
+    .await
+    .unwrap();
+
+    let err = DaemonConfig::load(&config_path).await.unwrap_err();
+    assert!(
+        err.to_string().contains(
+            "transfer_limits.max_entry_bytes must be less than or equal to transfer_limits.max_archive_bytes"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
 async fn load_rejects_invalid_yield_time_bounds() {
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("daemon.toml");

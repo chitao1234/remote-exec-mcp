@@ -7,6 +7,7 @@ use remote_exec_host::{
     EmbeddedHostConfig, HostPortForwardLimits, ProcessEnvironment, PtyMode, YieldTimeConfig,
 };
 use remote_exec_proto::sandbox::FilesystemSandbox;
+use remote_exec_proto::transfer::TransferLimits;
 use serde::Deserialize;
 
 use crate::port_forward::BrokerPortForwardLimits;
@@ -23,6 +24,8 @@ pub struct BrokerConfig {
     pub host_sandbox: Option<FilesystemSandbox>,
     #[serde(default = "default_enable_transfer_compression")]
     pub enable_transfer_compression: bool,
+    #[serde(default)]
+    pub transfer_limits: TransferLimits,
     #[serde(default)]
     pub disable_structured_content: bool,
     #[serde(default)]
@@ -91,6 +94,8 @@ pub struct LocalTargetConfig {
     pub default_shell: Option<String>,
     #[serde(default)]
     pub yield_time: YieldTimeConfig,
+    #[serde(default)]
+    pub transfer_limits: TransferLimits,
     #[serde(default)]
     pub port_forward_limits: HostPortForwardLimits,
     #[serde(default)]
@@ -180,6 +185,7 @@ impl LocalTargetConfig {
             windows_posix_root: self.windows_posix_root.clone(),
             sandbox,
             enable_transfer_compression,
+            transfer_limits: self.transfer_limits,
             allow_login_shell: self.allow_login_shell,
             pty: self.pty,
             default_shell: self.default_shell.clone(),
@@ -216,12 +222,14 @@ impl BrokerConfig {
 
     pub(crate) fn validate(&self) -> anyhow::Result<()> {
         self.mcp.validate()?;
+        self.transfer_limits.validate()?;
         self.port_forward_limits.validate()?;
         anyhow::ensure!(
             !self.targets.contains_key("local"),
             "configured target name `local` is reserved for broker-host filesystem access"
         );
         if let Some(local) = &self.local {
+            local.transfer_limits.validate()?;
             validate_existing_directory(
                 &local.normalized_default_workdir(),
                 "local.default_workdir",

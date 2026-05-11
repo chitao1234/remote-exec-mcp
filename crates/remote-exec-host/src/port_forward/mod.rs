@@ -1005,6 +1005,7 @@ mod port_tunnel_tests {
                 windows_posix_root: None,
                 sandbox: None,
                 enable_transfer_compression: true,
+                transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
                 allow_login_shell: true,
                 pty: PtyMode::None,
                 default_shell: None,

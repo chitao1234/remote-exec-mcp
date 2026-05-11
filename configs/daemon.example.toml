@@ -20,6 +20,11 @@ allow_login_shell = true
 # `compression = "zstd"` and only accepts uncompressed tar payloads.
 #enable_transfer_compression = true
 
+# Optional transfer import safety limits.
+#[transfer_limits]
+#max_archive_bytes = 536870912
+#max_entry_bytes = 536870912
+
 # Optional. If set, daemon startup fails unless this shell is usable.
 # On Windows, omitted default shell now prefers Git Bash when Git for Windows is installed.
 # Set this to "powershell.exe" or "cmd.exe" to keep the older behavior.

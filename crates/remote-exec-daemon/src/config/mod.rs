@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use remote_exec_host::{EmbeddedHostConfig, HostRuntimeConfig};
 use remote_exec_proto::sandbox::FilesystemSandbox;
+use remote_exec_proto::transfer::TransferLimits;
 use serde::Deserialize;
 
 #[cfg(test)]
@@ -37,6 +38,8 @@ pub struct DaemonConfig {
     pub sandbox: Option<FilesystemSandbox>,
     #[serde(default = "default_enable_transfer_compression")]
     pub enable_transfer_compression: bool,
+    #[serde(default)]
+    pub transfer_limits: TransferLimits,
     #[serde(default = "default_allow_login_shell")]
     pub allow_login_shell: bool,
     #[serde(default)]
@@ -88,6 +91,7 @@ impl EmbeddedDaemonConfig {
             windows_posix_root,
             sandbox,
             enable_transfer_compression,
+            transfer_limits,
             allow_login_shell,
             pty,
             default_shell,
@@ -105,6 +109,7 @@ impl EmbeddedDaemonConfig {
             http_auth: None,
             sandbox,
             enable_transfer_compression,
+            transfer_limits,
             allow_login_shell,
             pty,
             default_shell,
@@ -187,6 +192,7 @@ impl From<DaemonConfig> for HostRuntimeConfig {
             windows_posix_root: value.windows_posix_root,
             sandbox: value.sandbox,
             enable_transfer_compression: value.enable_transfer_compression,
+            transfer_limits: value.transfer_limits,
             allow_login_shell: value.allow_login_shell,
             pty: value.pty,
             default_shell: value.default_shell,

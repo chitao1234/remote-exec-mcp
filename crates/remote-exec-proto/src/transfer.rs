@@ -1,6 +1,43 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+pub const DEFAULT_TRANSFER_MAX_ARCHIVE_BYTES: u64 = 512 * 1024 * 1024;
+pub const DEFAULT_TRANSFER_MAX_ENTRY_BYTES: u64 = 512 * 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(default)]
+pub struct TransferLimits {
+    pub max_archive_bytes: u64,
+    pub max_entry_bytes: u64,
+}
+
+impl Default for TransferLimits {
+    fn default() -> Self {
+        Self {
+            max_archive_bytes: DEFAULT_TRANSFER_MAX_ARCHIVE_BYTES,
+            max_entry_bytes: DEFAULT_TRANSFER_MAX_ENTRY_BYTES,
+        }
+    }
+}
+
+impl TransferLimits {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.max_archive_bytes > 0,
+            "transfer_limits.max_archive_bytes must be greater than zero"
+        );
+        anyhow::ensure!(
+            self.max_entry_bytes > 0,
+            "transfer_limits.max_entry_bytes must be greater than zero"
+        );
+        anyhow::ensure!(
+            self.max_entry_bytes <= self.max_archive_bytes,
+            "transfer_limits.max_entry_bytes must be less than or equal to transfer_limits.max_archive_bytes"
+        );
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TransferSourceType {
