@@ -838,6 +838,56 @@ static void assert_symlink_import_skip_reports_warning() {
     assert(file_imported.warnings[0].code == "transfer_skipped_symlink");
     assert(!fs::exists(root / "skipped-file-link"));
 }
+
+static void assert_symlink_import_rejects_absolute_target() {
+    std::string archive;
+    append_tar_symlink(&archive, "bad-link", "/etc/passwd");
+    finalize_tar(archive);
+
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-symlink-absolute";
+    fs::remove_all(root);
+    fs::create_directories(root);
+
+    bool rejected = false;
+    try {
+        (void)import_path(
+            archive,
+            TransferSourceType::Directory,
+            (root / "dest").string(),
+            "replace",
+            true
+        );
+    } catch (const TransferFailure& failure) {
+        rejected = failure.message.find("symlink target") != std::string::npos;
+    }
+    assert(rejected);
+    assert(!fs::exists(root / "dest" / "bad-link"));
+}
+
+static void assert_symlink_import_rejects_parent_target() {
+    std::string archive;
+    append_tar_symlink(&archive, "bad-link", "../escape.txt");
+    finalize_tar(archive);
+
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-symlink-parent";
+    fs::remove_all(root);
+    fs::create_directories(root);
+
+    bool rejected = false;
+    try {
+        (void)import_path(
+            archive,
+            TransferSourceType::Directory,
+            (root / "dest").string(),
+            "replace",
+            true
+        );
+    } catch (const TransferFailure& failure) {
+        rejected = failure.message.find("symlink target") != std::string::npos;
+    }
+    assert(rejected);
+    assert(!fs::exists(root / "dest" / "bad-link"));
+}
 #endif
 
 #ifdef _WIN32
@@ -983,6 +1033,8 @@ int main() {
     assert_top_level_special_files_are_unsupported();
     assert_symlink_import_preserves_links();
     assert_symlink_import_skip_reports_warning();
+    assert_symlink_import_rejects_absolute_target();
+    assert_symlink_import_rejects_parent_target();
 #endif
 #ifdef _WIN32
     assert_windows_symlink_import_modes_skip_with_warning();

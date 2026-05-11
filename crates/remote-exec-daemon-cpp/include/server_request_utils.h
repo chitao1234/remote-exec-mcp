@@ -21,6 +21,7 @@ struct TransferImportRequestSpec {
     TransferImportMetadata metadata;
     std::string destination_path;
     TransferLimitConfig limits;
+    TransferPathAuthorizer authorizer;
 };
 
 bool reject_before_route(

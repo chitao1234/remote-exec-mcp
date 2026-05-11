@@ -125,6 +125,15 @@ PatchPathAuthorizer make_patch_path_authorizer(const AppState& state) {
     };
 }
 
+TransferPathAuthorizer make_transfer_write_authorizer(const AppState& state) {
+    if (!state.sandbox_enabled) {
+        return TransferPathAuthorizer();
+    }
+    return [&state](const std::string& path) {
+        authorize_sandbox_path(state, SANDBOX_WRITE, path);
+    };
+}
+
 TransferExportRequestSpec prepare_transfer_export_request(
     const AppState& state,
     const Json& body
@@ -162,6 +171,7 @@ TransferImportRequestSpec prepare_transfer_import_request(
         SANDBOX_WRITE
     );
     import_request.limits = state.config.transfer_limits;
+    import_request.authorizer = make_transfer_write_authorizer(state);
     return import_request;
 }
 

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -64,6 +65,8 @@ inline TransferLimitConfig default_transfer_limit_config() {
     return config;
 }
 
+typedef std::function<void(const std::string&)> TransferPathAuthorizer;
+
 struct PathInfo {
     bool exists;
     bool is_directory;
@@ -123,6 +126,16 @@ ImportSummary import_path(
     TransferSymlinkMode symlink_mode,
     const TransferLimitConfig& limits
 );
+ImportSummary import_path(
+    const std::string& bytes,
+    TransferSourceType source_type,
+    const std::string& absolute_path,
+    const std::string& overwrite_mode,
+    bool create_parent,
+    TransferSymlinkMode symlink_mode,
+    const TransferLimitConfig& limits,
+    const TransferPathAuthorizer& authorizer
+);
 ImportSummary import_path_from_reader(
     TransferArchiveReader& reader,
     TransferSourceType source_type,
@@ -139,4 +152,14 @@ ImportSummary import_path_from_reader(
     bool create_parent,
     TransferSymlinkMode symlink_mode,
     const TransferLimitConfig& limits
+);
+ImportSummary import_path_from_reader(
+    TransferArchiveReader& reader,
+    TransferSourceType source_type,
+    const std::string& absolute_path,
+    const std::string& overwrite_mode,
+    bool create_parent,
+    TransferSymlinkMode symlink_mode,
+    const TransferLimitConfig& limits,
+    const TransferPathAuthorizer& authorizer
 );

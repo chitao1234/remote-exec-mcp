@@ -1,5 +1,7 @@
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <cstdio>
 #include <fstream>
 #include <filesystem>
 #include <iterator>
@@ -85,6 +87,85 @@ static std::string normalize_output(const std::string& input) {
 static void write_text_file(const fs::path& path, const std::string& value) {
     std::ofstream output(path.c_str(), std::ios::binary | std::ios::trunc);
     output << value;
+}
+
+static std::string octal_field(std::size_t width, std::uint64_t value) {
+    char buffer[64];
+    std::snprintf(
+        buffer,
+        sizeof(buffer),
+        "%0*llo",
+        static_cast<int>(width - 1),
+        static_cast<unsigned long long>(value)
+    );
+    std::string field(width, '\0');
+    const std::string digits(buffer);
+    const std::size_t start = width - 1 - std::min(width - 1, digits.size());
+    field.replace(
+        start,
+        std::min(width - 1, digits.size()),
+        digits.substr(digits.size() - std::min(width - 1, digits.size()))
+    );
+    field[width - 1] = ' ';
+    return field;
+}
+
+static void set_bytes(
+    std::string* header,
+    std::size_t offset,
+    std::size_t width,
+    const std::string& value
+) {
+    header->replace(offset, std::min(width, value.size()), value.substr(0, width));
+}
+
+static void write_checksum(std::string* header) {
+    std::fill(header->begin() + 148, header->begin() + 156, ' ');
+    unsigned int checksum = 0;
+    for (std::string::const_iterator it = header->begin(); it != header->end(); ++it) {
+        checksum += static_cast<unsigned char>(*it);
+    }
+    const std::string field = octal_field(8, checksum);
+    header->replace(148, 8, field);
+}
+
+static void append_tar_directory(std::string* archive, const std::string& path) {
+    std::string header(512, '\0');
+    set_bytes(&header, 0, 100, path);
+    header.replace(100, 8, octal_field(8, 0755));
+    header.replace(108, 8, octal_field(8, 0));
+    header.replace(116, 8, octal_field(8, 0));
+    header.replace(124, 12, octal_field(12, 0));
+    header.replace(136, 12, octal_field(12, 0));
+    header[156] = '5';
+    set_bytes(&header, 257, 6, "ustar ");
+    set_bytes(&header, 263, 2, " \0");
+    write_checksum(&header);
+    archive->append(header);
+}
+
+static void append_tar_symlink(
+    std::string* archive,
+    const std::string& path,
+    const std::string& target
+) {
+    std::string header(512, '\0');
+    set_bytes(&header, 0, 100, path);
+    header.replace(100, 8, octal_field(8, 0777));
+    header.replace(108, 8, octal_field(8, 0));
+    header.replace(116, 8, octal_field(8, 0));
+    header.replace(124, 12, octal_field(12, 0));
+    header.replace(136, 12, octal_field(12, 0));
+    header[156] = '2';
+    set_bytes(&header, 157, 100, target);
+    set_bytes(&header, 257, 6, "ustar ");
+    set_bytes(&header, 263, 2, " \0");
+    write_checksum(&header);
+    archive->append(header);
+}
+
+static void finalize_tar(std::string* archive) {
+    archive->append(1024, '\0');
 }
 
 static std::string read_text_file(const fs::path& path) {
@@ -518,9 +599,11 @@ static void assert_sandbox_routes(const fs::path& root) {
     const fs::path read_allowed = sandbox_root / "read";
     const fs::path write_allowed = sandbox_root / "write";
     const fs::path outside = sandbox_root / "outside";
+    const fs::path denied_link_target_root = write_allowed / "denied-link-target";
     fs::create_directories(exec_allowed);
     fs::create_directories(read_allowed);
     fs::create_directories(write_allowed);
+    fs::create_directories(denied_link_target_root);
     fs::create_directories(outside);
     write_text_file(read_allowed / "source.txt", "sandbox source");
     write_text_file(outside / "outside.txt", "outside");
@@ -531,6 +614,7 @@ static void assert_sandbox_routes(const fs::path& root) {
     sandbox_state.config.sandbox.exec_cwd.allow.push_back(exec_allowed.string());
     sandbox_state.config.sandbox.read.allow.push_back(read_allowed.string());
     sandbox_state.config.sandbox.write.allow.push_back(write_allowed.string());
+    sandbox_state.config.sandbox.write.deny.push_back(denied_link_target_root.string());
     enable_sandbox(sandbox_state);
 
     const HttpResponse sandbox_export_denied = route_request(
@@ -577,6 +661,37 @@ static void assert_sandbox_routes(const fs::path& root) {
         Json::parse(sandbox_import_denied.body).at("code").get<std::string>() ==
         "sandbox_denied"
     );
+
+#ifndef _WIN32
+    std::string denied_symlink_archive;
+    append_tar_directory(&denied_symlink_archive, ".");
+    append_tar_symlink(
+        &denied_symlink_archive,
+        "allowed-link",
+        "denied-link-target/secret.txt"
+    );
+    finalize_tar(&denied_symlink_archive);
+
+    HttpRequest sandbox_symlink_target_denied_request;
+    sandbox_symlink_target_denied_request.method = "POST";
+    sandbox_symlink_target_denied_request.path = "/v1/transfer/import";
+    sandbox_symlink_target_denied_request.headers["x-remote-exec-source-type"] = "directory";
+    sandbox_symlink_target_denied_request.headers["x-remote-exec-destination-path"] =
+        write_allowed.string();
+    sandbox_symlink_target_denied_request.headers["x-remote-exec-overwrite"] = "merge";
+    sandbox_symlink_target_denied_request.headers["x-remote-exec-create-parent"] = "true";
+    sandbox_symlink_target_denied_request.headers["x-remote-exec-symlink-mode"] = "preserve";
+    sandbox_symlink_target_denied_request.headers["x-remote-exec-compression"] = "none";
+    sandbox_symlink_target_denied_request.body = denied_symlink_archive;
+    const HttpResponse sandbox_symlink_target_denied =
+        route_request(sandbox_state, sandbox_symlink_target_denied_request);
+    assert(sandbox_symlink_target_denied.status == 400);
+    assert(
+        Json::parse(sandbox_symlink_target_denied.body).at("code").get<std::string>() ==
+        "sandbox_denied"
+    );
+    assert(!fs::exists(write_allowed / "allowed-link"));
+#endif
 
     const std::string patch_denied_text =
         "*** Begin Patch\n"
