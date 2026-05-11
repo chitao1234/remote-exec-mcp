@@ -391,7 +391,7 @@ async fn forward_ports_closes_active_tcp_streams_after_connect_tunnel_drop() {
     active.read_exact(&mut echoed).await.unwrap();
     assert_eq!(&echoed, b"before");
 
-    support::stub_daemon::force_close_port_tunnel_transport(&fixture.stub_state).await;
+    support::stub_daemon::force_close_connect_port_tunnel_transport(&fixture.stub_state).await;
     let read_after_drop = tokio::time::timeout(Duration::from_secs(5), async {
         let mut buf = [0u8; 1];
         active.read(&mut buf).await
