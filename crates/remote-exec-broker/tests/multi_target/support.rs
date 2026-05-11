@@ -42,15 +42,6 @@ fn toml_string(value: &str) -> String {
     toml::Value::String(value.to_string()).to_string()
 }
 
-fn allocate_unbound_addr_for_broker_child() -> std::net::SocketAddr {
-    // Temporary child-process fixture handoff. Task 8 replaces this with a
-    // broker-owned bind(0) plus bound-address file.
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = listener.local_addr().unwrap();
-    drop(listener);
-    addr
-}
-
 fn apply_quiet_test_logging(command: &mut tokio::process::Command) {
     if std::env::var_os("REMOTE_EXEC_LOG").is_some() || std::env::var_os("RUST_LOG").is_some() {
         return;
@@ -58,6 +49,26 @@ fn apply_quiet_test_logging(command: &mut tokio::process::Command) {
 
     let filter = std::env::var("REMOTE_EXEC_TEST_LOG").unwrap_or_else(|_| "error".to_string());
     command.env("REMOTE_EXEC_LOG", filter);
+}
+
+async fn wait_for_bound_addr_file(path: &Path, resource: &str) -> std::net::SocketAddr {
+    let started = std::time::Instant::now();
+    loop {
+        let last = match tokio::fs::read_to_string(path).await {
+            Ok(value) => match value.trim().parse() {
+                Ok(addr) => return addr,
+                Err(err) => format!("invalid address `{}`: {err}", value.trim()),
+            },
+            Err(err) => err.to_string(),
+        };
+        if started.elapsed() >= Duration::from_secs(5) {
+            panic!(
+                "{resource} did not write bound address file {}; last={last}",
+                path.display()
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
 }
 
 pub fn long_running_tty_exec_input(target: &str) -> serde_json::Value {
@@ -228,7 +239,7 @@ pub struct HttpBrokerFixture {
 impl HttpBrokerFixture {
     pub async fn spawn(daemon_a: &DaemonFixture, daemon_b: &DaemonFixture) -> Self {
         let tempdir = tempfile::tempdir().unwrap();
-        let broker_addr = allocate_unbound_addr_for_broker_child();
+        let bound_addr_file = tempdir.path().join("broker-bound-addr.txt");
         let config_path = tempdir.path().join("broker-http.toml");
         std::fs::write(
             &config_path,
@@ -236,16 +247,18 @@ impl HttpBrokerFixture {
                 "{}\n{}\n[mcp]\ntransport = \"streamable_http\"\nlisten = {}\npath = \"/mcp\"\n",
                 daemon_a.target_config_fragment(),
                 daemon_b.target_config_fragment(),
-                toml_string(&broker_addr.to_string()),
+                toml_string("127.0.0.1:0"),
             ),
         )
         .unwrap();
 
         let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
         command.arg(&config_path);
+        command.env("REMOTE_EXEC_BROKER_TEST_BOUND_ADDR_FILE", &bound_addr_file);
         apply_quiet_test_logging(&mut command);
         command.kill_on_drop(true);
         let child = command.spawn().unwrap();
+        let broker_addr = wait_for_bound_addr_file(&bound_addr_file, "multi-target broker").await;
         let url = format!("http://{broker_addr}/mcp");
         wait_until_ready_mcp_http(&url).await;
 
