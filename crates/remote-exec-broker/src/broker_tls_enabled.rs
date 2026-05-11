@@ -69,9 +69,9 @@ pub(crate) async fn build_daemon_https_client(
             reqwest::Client::builder(),
             config.timeouts,
         )
-            .use_rustls_tls()
-            .tls_certs_only([ca])
-            .identity(identity);
+        .use_rustls_tls()
+        .tls_certs_only([ca])
+        .identity(identity);
         if config.skip_server_name_verification {
             builder = builder.danger_accept_invalid_hostnames(true);
         }

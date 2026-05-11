@@ -91,12 +91,14 @@ async fn insert_remote_targets(
     target_configs: &BTreeMap<String, config::TargetConfig>,
     targets: &mut BTreeMap<String, TargetHandle>,
 ) -> anyhow::Result<()> {
-    let probes = target_configs.iter().map(|(name, target_config)| async move {
-        (
-            name.clone(),
-            build_remote_target_handle(name, target_config).await,
-        )
-    });
+    let probes = target_configs
+        .iter()
+        .map(|(name, target_config)| async move {
+            (
+                name.clone(),
+                build_remote_target_handle(name, target_config).await,
+            )
+        });
 
     for (name, handle) in futures_util::future::join_all(probes).await {
         let handle = handle?;
