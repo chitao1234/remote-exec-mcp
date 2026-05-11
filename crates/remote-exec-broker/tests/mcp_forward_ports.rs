@@ -23,6 +23,11 @@ async fn forward_ports_is_listed_for_mcp_clients() {
 }
 
 #[tokio::test]
+async fn stub_port_tunnel_relay_preserves_partial_frame_reads() {
+    support::stub_daemon::assert_port_tunnel_relay_preserves_partial_frame_reads().await;
+}
+
+#[tokio::test]
 async fn forward_ports_opens_lists_and_closes_local_tcp_forward() {
     let fixture = support::spawners::spawn_broker_local_only().await;
     let echo_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

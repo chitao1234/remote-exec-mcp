@@ -22,6 +22,10 @@ fn toml_string(value: &str) -> String {
     toml::Value::String(value.to_string()).to_string()
 }
 
+fn cpp_config_path(path: &Path) -> String {
+    path.display().to_string()
+}
+
 fn apply_quiet_test_logging(command: &mut tokio::process::Command) {
     if std::env::var_os("REMOTE_EXEC_LOG").is_some() || std::env::var_os("RUST_LOG").is_some() {
         return;
@@ -557,8 +561,8 @@ impl CppDaemonBrokerFixture {
         let daemon_bound_addr_file = tempdir.path().join("daemon-bound-addr.txt");
         let daemon_config_body = format!(
             "target = builder-cpp\nlisten_host = 127.0.0.1\nlisten_port = 0\ndefault_workdir = {}\ntest_bound_addr_file = {}\n{}",
-            toml_string(&daemon_workdir.display().to_string()),
-            toml_string(&daemon_bound_addr_file.display().to_string()),
+            cpp_config_path(&daemon_workdir),
+            cpp_config_path(&daemon_bound_addr_file),
             extra_daemon_config
         );
         let (daemon, backend_addr) = spawn_cpp_daemon_with_bound_addr(
@@ -747,8 +751,8 @@ impl CrashableCppDaemonBrokerFixture {
         let broker_bound_addr_file = tempdir.path().join("broker-bound-addr.txt");
         let daemon_config_body = format!(
             "target = builder-cpp\nlisten_host = 127.0.0.1\nlisten_port = 0\ndefault_workdir = {}\ntest_bound_addr_file = {}\n",
-            toml_string(&daemon_workdir.display().to_string()),
-            toml_string(&daemon_bound_addr_file.display().to_string())
+            cpp_config_path(&daemon_workdir),
+            cpp_config_path(&daemon_bound_addr_file)
         );
         let (daemon, daemon_addr) = spawn_cpp_daemon_with_bound_addr(
             &daemon_binary,

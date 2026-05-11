@@ -30,7 +30,10 @@ use remote_exec_proto::rpc::{
     ExecWarning, ExecWriteRequest, HealthCheckResponse, ImageReadResponse, PatchApplyRequest,
     PatchApplyResponse, PortForwardProtocolVersion, RpcErrorBody, TargetInfoResponse,
 };
-use tokio::sync::{Mutex, Notify};
+#[cfg(test)]
+use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::{Mutex, Notify, mpsc};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -401,6 +404,71 @@ pub(crate) async fn udp_connector_stats(state: &StubDaemonState) -> UdpConnector
 
 pub(crate) async fn tunnel_open_count(state: &StubDaemonState) -> usize {
     state.port_tunnel_control.lock().await.tunnel_open_count
+}
+
+#[cfg(test)]
+pub(crate) async fn assert_port_tunnel_relay_preserves_partial_frame_reads() {
+    let state = stub_daemon_state(
+        "relay-test",
+        ExecWriteBehavior::Success,
+        std::env::consts::OS,
+        false,
+    );
+    let (mut broker_peer, broker_relay) = tokio::io::duplex(4096);
+    let (mut daemon_peer, daemon_relay) = tokio::io::duplex(4096);
+    let cancel = CancellationToken::new();
+    let relay_cancel = cancel.clone();
+    let relay = tokio::spawn(async move {
+        relay_port_tunnel_frames(state, broker_relay, daemon_relay, relay_cancel).await
+    });
+
+    let broker_frame = Frame {
+        frame_type: FrameType::TcpData,
+        flags: 0,
+        stream_id: 0x0102_0304,
+        meta: Vec::new(),
+        data: b"from-broker".to_vec(),
+    };
+    let mut encoded_broker_frame = Vec::new();
+    write_frame(&mut encoded_broker_frame, &broker_frame)
+        .await
+        .unwrap();
+    broker_peer
+        .write_all(&encoded_broker_frame[..2])
+        .await
+        .unwrap();
+    tokio::task::yield_now().await;
+
+    let daemon_frame = Frame {
+        frame_type: FrameType::TcpData,
+        flags: 0,
+        stream_id: 9,
+        meta: Vec::new(),
+        data: b"from-daemon".to_vec(),
+    };
+    write_frame(&mut daemon_peer, &daemon_frame).await.unwrap();
+    let forwarded_to_broker =
+        tokio::time::timeout(Duration::from_secs(1), read_frame(&mut broker_peer))
+            .await
+            .expect("relay should forward daemon frame while broker frame is partial")
+            .unwrap();
+    assert_eq!(forwarded_to_broker, daemon_frame);
+
+    broker_peer
+        .write_all(&encoded_broker_frame[2..])
+        .await
+        .unwrap();
+    let forwarded_to_daemon =
+        tokio::time::timeout(Duration::from_secs(1), read_frame(&mut daemon_peer))
+            .await
+            .expect("relay should preserve and forward partial broker frame")
+            .unwrap();
+    assert_eq!(forwarded_to_daemon, broker_frame);
+
+    cancel.cancel();
+    drop(broker_peer);
+    drop(daemon_peer);
+    relay.await.unwrap().unwrap();
 }
 
 async fn spawn_stub_task(
@@ -954,41 +1022,124 @@ struct ObservedBrokerFrame {
 
 async fn relay_port_tunnel_frames<S1, S2>(
     state: StubDaemonState,
-    mut external: S1,
-    mut internal: S2,
+    external: S1,
+    internal: S2,
     cancel: CancellationToken,
 ) -> anyhow::Result<()>
 where
-    S1: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
-    S2: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    S1: AsyncRead + AsyncWrite + Unpin,
+    S2: AsyncRead + AsyncWrite + Unpin,
+{
+    let (external_reader, external_writer) = tokio::io::split(external);
+    let (internal_reader, internal_writer) = tokio::io::split(internal);
+    let (external_tx, external_rx) = mpsc::channel(128);
+
+    let broker_to_daemon = relay_broker_to_daemon_frames(
+        state.clone(),
+        external_reader,
+        internal_writer,
+        external_tx.clone(),
+        cancel.clone(),
+    );
+    let daemon_to_broker =
+        relay_daemon_to_broker_frames(state, internal_reader, external_tx.clone(), cancel.clone());
+    drop(external_tx);
+    let external_writer = relay_external_frames(external_writer, external_rx, cancel.clone());
+
+    let result = tokio::select! {
+        result = broker_to_daemon => result,
+        result = daemon_to_broker => result,
+        result = external_writer => result,
+    };
+    cancel.cancel();
+    result
+}
+
+async fn relay_broker_to_daemon_frames<R, W>(
+    state: StubDaemonState,
+    mut external: R,
+    mut internal: W,
+    external_tx: mpsc::Sender<Frame>,
+    cancel: CancellationToken,
+) -> anyhow::Result<()>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    loop {
+        let Some(frame) = read_relay_frame(&mut external, &cancel).await? else {
+            return Ok(());
+        };
+        let observed = observe_broker_to_daemon_frame(&state, &frame).await?;
+        for transport in observed.transports_to_cancel {
+            transport.cancel();
+        }
+        if observed.cancel_current_transport {
+            cancel.cancel();
+        }
+        if let Some(error) = observed.error {
+            if external_tx.send(error).await.is_err() {
+                return Ok(());
+            }
+        }
+        if observed.forward {
+            write_frame(&mut internal, &frame).await?;
+        }
+    }
+}
+
+async fn relay_daemon_to_broker_frames<R>(
+    state: StubDaemonState,
+    mut internal: R,
+    external_tx: mpsc::Sender<Frame>,
+    cancel: CancellationToken,
+) -> anyhow::Result<()>
+where
+    R: AsyncRead + Unpin,
+{
+    loop {
+        let Some(frame) = read_relay_frame(&mut internal, &cancel).await? else {
+            return Ok(());
+        };
+        if let Some(frame) = daemon_to_broker_frame(&state, frame).await? {
+            if external_tx.send(frame).await.is_err() {
+                return Ok(());
+            }
+        }
+    }
+}
+
+async fn relay_external_frames<W>(
+    mut external: W,
+    mut external_rx: mpsc::Receiver<Frame>,
+    cancel: CancellationToken,
+) -> anyhow::Result<()>
+where
+    W: AsyncWrite + Unpin,
 {
     loop {
         tokio::select! {
             _ = cancel.cancelled() => return Ok(()),
-            frame = read_frame(&mut external) => {
-                let Some(frame) = frame_from_result(frame)? else {
+            frame = external_rx.recv() => {
+                let Some(frame) = frame else {
                     return Ok(());
                 };
-                let observed = observe_broker_to_daemon_frame(&state, &frame).await?;
-                for transport in observed.transports_to_cancel {
-                    transport.cancel();
-                }
-                if let Some(error) = observed.error {
-                    write_frame(&mut external, &error).await?;
-                }
-                if observed.forward {
-                    write_frame(&mut internal, &frame).await?;
-                }
-            }
-            frame = read_frame(&mut internal) => {
-                let Some(frame) = frame_from_result(frame)? else {
-                    return Ok(());
-                };
-                if let Some(frame) = daemon_to_broker_frame(&state, frame).await? {
-                    write_frame(&mut external, &frame).await?;
-                }
+                write_frame(&mut external, &frame).await?;
             }
         }
+    }
+}
+
+async fn read_relay_frame<R>(
+    reader: &mut R,
+    cancel: &CancellationToken,
+) -> anyhow::Result<Option<Frame>>
+where
+    R: AsyncRead + Unpin,
+{
+    tokio::select! {
+        _ = cancel.cancelled() => Ok(None),
+        frame = read_frame(reader) => frame_from_result(frame),
     }
 }
 
