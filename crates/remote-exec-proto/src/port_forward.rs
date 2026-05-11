@@ -1,8 +1,28 @@
-use anyhow::{Context, anyhow};
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum PortForwardProtoError {
+    #[error("endpoint must not be empty")]
+    EmptyEndpoint,
+    #[error("invalid endpoint `{endpoint}`; missing `]`")]
+    MissingIpv6Bracket { endpoint: String },
+    #[error("invalid endpoint `{endpoint}`; expected [host]:port")]
+    InvalidIpv6Endpoint { endpoint: String },
+    #[error("invalid endpoint `{endpoint}`; expected <port> or <host>:<port>")]
+    InvalidEndpoint { endpoint: String },
+    #[error("endpoint host must not be empty")]
+    EmptyHost,
+    #[error("invalid port `{value}`: {message}")]
+    InvalidPort { value: String, message: String },
+    #[error("connect_endpoint `{endpoint}` must use a nonzero port")]
+    ZeroConnectPort { endpoint: String },
+}
 
-pub fn normalize_endpoint(endpoint: &str) -> anyhow::Result<String> {
+pub type Result<T> = std::result::Result<T, PortForwardProtoError>;
+
+pub fn normalize_endpoint(endpoint: &str) -> Result<String> {
     let endpoint = endpoint.trim();
-    anyhow::ensure!(!endpoint.is_empty(), "endpoint must not be empty");
+    if endpoint.is_empty() {
+        return Err(PortForwardProtoError::EmptyEndpoint);
+    }
     if endpoint.chars().all(|value| value.is_ascii_digit()) {
         let port = parse_port(endpoint)?;
         return Ok(format!("127.0.0.1:{port}"));
@@ -11,22 +31,21 @@ pub fn normalize_endpoint(endpoint: &str) -> anyhow::Result<String> {
     Ok(endpoint.to_string())
 }
 
-pub fn ensure_nonzero_connect_endpoint(endpoint: &str) -> anyhow::Result<String> {
+pub fn ensure_nonzero_connect_endpoint(endpoint: &str) -> Result<String> {
     let endpoint = normalize_endpoint(endpoint)?;
     let port = endpoint_port(&endpoint)?;
-    anyhow::ensure!(
-        port != 0,
-        "connect_endpoint `{endpoint}` must use a nonzero port"
-    );
+    if port == 0 {
+        return Err(PortForwardProtoError::ZeroConnectPort { endpoint });
+    }
     Ok(endpoint)
 }
 
-pub fn endpoint_port(endpoint: &str) -> anyhow::Result<u16> {
+pub fn endpoint_port(endpoint: &str) -> Result<u16> {
     let (_, port) = split_host_port(endpoint)?;
     parse_port(port)
 }
 
-pub fn udp_connector_endpoint(connect_endpoint: &str) -> anyhow::Result<&'static str> {
+pub fn udp_connector_endpoint(connect_endpoint: &str) -> Result<&'static str> {
     let normalized = normalize_endpoint(connect_endpoint)?;
     if normalized.starts_with('[') {
         return Ok("[::]:0");
@@ -34,38 +53,52 @@ pub fn udp_connector_endpoint(connect_endpoint: &str) -> anyhow::Result<&'static
     Ok("0.0.0.0:0")
 }
 
-fn validate_host_port(endpoint: &str) -> anyhow::Result<()> {
+fn validate_host_port(endpoint: &str) -> Result<()> {
     let (host, port) = split_host_port(endpoint)?;
-    anyhow::ensure!(!host.is_empty(), "endpoint host must not be empty");
+    if host.is_empty() {
+        return Err(PortForwardProtoError::EmptyHost);
+    }
     parse_port(port)?;
     Ok(())
 }
 
-fn split_host_port(endpoint: &str) -> anyhow::Result<(&str, &str)> {
+fn split_host_port(endpoint: &str) -> Result<(&str, &str)> {
     if let Some(rest) = endpoint.strip_prefix('[') {
-        let (host, suffix) = rest
-            .split_once(']')
-            .with_context(|| format!("invalid endpoint `{endpoint}`; missing `]`"))?;
-        let port = suffix
-            .strip_prefix(':')
-            .with_context(|| format!("invalid endpoint `{endpoint}`; expected [host]:port"))?;
+        let (host, suffix) =
+            rest.split_once(']')
+                .ok_or_else(|| PortForwardProtoError::MissingIpv6Bracket {
+                    endpoint: endpoint.to_string(),
+                })?;
+        let port =
+            suffix
+                .strip_prefix(':')
+                .ok_or_else(|| PortForwardProtoError::InvalidIpv6Endpoint {
+                    endpoint: endpoint.to_string(),
+                })?;
         return Ok((host, port));
     }
 
     endpoint
         .rsplit_once(':')
-        .with_context(|| format!("invalid endpoint `{endpoint}`; expected <port> or <host>:<port>"))
+        .ok_or_else(|| PortForwardProtoError::InvalidEndpoint {
+            endpoint: endpoint.to_string(),
+        })
 }
 
-fn parse_port(value: &str) -> anyhow::Result<u16> {
+fn parse_port(value: &str) -> Result<u16> {
     value
         .parse::<u16>()
-        .map_err(|err| anyhow!("invalid port `{value}`: {err}"))
+        .map_err(|err| PortForwardProtoError::InvalidPort {
+            value: value.to_string(),
+            message: err.to_string(),
+        })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_nonzero_connect_endpoint, normalize_endpoint};
+    use super::{
+        PortForwardProtoError, endpoint_port, ensure_nonzero_connect_endpoint, normalize_endpoint,
+    };
 
     #[test]
     fn bare_port_normalizes_to_ipv4_loopback() {
@@ -92,5 +125,17 @@ mod tests {
             normalize_endpoint("localhost:8080").unwrap(),
             "localhost:8080"
         );
+    }
+
+    #[test]
+    fn invalid_endpoint_returns_typed_error() {
+        let err = normalize_endpoint("localhost").unwrap_err();
+        assert!(matches!(err, PortForwardProtoError::InvalidEndpoint { .. }));
+    }
+
+    #[test]
+    fn invalid_port_returns_typed_error() {
+        let err = endpoint_port("127.0.0.1:not-a-port").unwrap_err();
+        assert!(matches!(err, PortForwardProtoError::InvalidPort { .. }));
     }
 }
