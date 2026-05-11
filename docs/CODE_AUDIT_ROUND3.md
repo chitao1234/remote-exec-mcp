@@ -39,6 +39,8 @@ Fix: build an `envp` array in the parent and use `execve`.
 
 ### 3. `pipe()` without `O_CLOEXEC` — grandchild fd leak
 
+*Developer Note: needs portability assessment on uncommon POSIX systems*
+
 `crates/remote-exec-daemon-cpp/src/process_session_posix.cpp:86` uses plain `pipe(fds)`. The child closes its copies manually, but if the child forks again before those closes run (e.g., a shell-script child that forks), the grandchild inherits the pipe ends. The parent's `read` may never see EOF after the original child exits.
 
 Fix: `pipe2(fds, O_CLOEXEC)` on Linux; `fcntl(fd, F_SETFD, FD_CLOEXEC)` immediately after `pipe()` on portable paths.
@@ -80,6 +82,8 @@ Fix: `impl Drop for LiveSession` that aborts background tasks and signals the ch
 Fix: `tokio::time::timeout(cfg.exec_rpc_timeout, lock_fut)` with a typed RPC-timeout error.
 
 ### 9. PTY resize never propagates
+
+*Developer Note: feature addtion, task need interface design, might need to be defered*
 
 `crates/remote-exec-host/src/exec/live.rs` has no `resize` method; `PtySession.master: Box<dyn MasterPty>` has one but nothing calls it. No RPC verb in `proto::rpc::exec` carries a resize event, so interactive PTY sessions are stuck at `default_pty_size()` for their lifetime. Visible as line-wrap and cursor corruption in `vim` / `less`.
 
@@ -135,6 +139,8 @@ Fix: `warn!` for 4xx, `error!` only for 5xx.
 
 ### 18. `info!` on every `write_stdin` poll
 
+*Developer Note: Intentional, defer changes*
+
 - `crates/remote-exec-broker/src/tools/exec.rs:95-101`
 - `crates/remote-exec-host/src/exec/handlers.rs:77-83`
 
@@ -164,6 +170,8 @@ Exec logs a `cmd_preview` (truncated to 120 chars); patch should log the path su
 
 ### 22. Zero structured metrics
 
+*Developer Note: Big Task, cannot be bundled with other problems*
+
 No `metrics`, `prometheus`, `opentelemetry`, or `statsd` crate in the workspace. Tunnel throughput, session counts, error rates, and port-forward lifecycle are all unstructured `info!`/`warn!`. Alerting requires log scraping.
 
 Fix: add a `metrics` crate façade and emit counters from event sites that already have `tracing::event!`.
@@ -178,7 +186,7 @@ Fix: partition into 2 (usage), 3 (config), 4 (connection), 5 (tool error).
 
 - `port_forward_tunnel_io_timeout_ms` exists in C++ (`daemon-cpp/src/config.cpp:332-335`); absent in Rust `HostPortForwardLimits` (`host/src/config/mod.rs:67-86`).
 - `max_request_header_bytes`, `max_request_body_bytes`, `max_open_sessions` exist in C++ (`daemon-cpp/src/config.cpp:479-495`); absent in Rust daemon (hyper defaults, not operator-visible).
-- `port_forward_max_worker_threads` exists in C++; architecturally N/A in Rust, but example files don't call out the deliberate gap.
+- `port_forward_max_worker_threads` exists in C++; architecturally N/A in Rust, but example files don't call out the deliberate gap. *Developer Note: Rust have different worker model*
 
 Fix: add Rust equivalents where architecturally meaningful; annotate deliberate gaps in `configs/daemon.example.toml`.
 
@@ -202,11 +210,15 @@ Fix: stubs return fixture values from `ids::new_instance_id()`; assertion become
 
 ### 27. TOCTOU on ephemeral port allocation across ~15 test sites
 
+*Developer Note: Important, helps stablize CI*
+
 `crates/remote-exec-broker/tests/support/certs.rs:39-44` and `tests/multi_target/support.rs:646-651` bind to `:0`, read the address, drop the listener, then hand the bare address to the server. In the gap another process or parallel test can claim the port. Expected to flake on loaded CI.
 
 Fix: keep the listener bound and hand it through; or retry on `AddrInUse`.
 
 ### 28. Temp-dir leak per stub test
+
+*Developer Note: Important, keeps test clean*
 
 `crates/remote-exec-broker/tests/support/stub_daemon.rs:732-756` creates `std::env::temp_dir().join("remote-exec-broker-stub-port-tunnel-<uuid>")` and never deletes it.
 
