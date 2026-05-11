@@ -97,6 +97,7 @@ mod tests {
     async fn list_targets_returns_empty_text_and_array_for_empty_state() {
         let state = BrokerState {
             enable_transfer_compression: true,
+            transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
             disable_structured_content: false,
             port_forward_limits: crate::port_forward::BrokerPortForwardLimits::default(),
             host_sandbox: None,
