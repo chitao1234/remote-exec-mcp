@@ -189,13 +189,7 @@ async fn tunnel_open_listen(
     tunnel: Arc<TunnelState>,
     meta: TunnelOpenMeta,
 ) -> Result<(), HostRpcError> {
-    if !matches!(*tunnel.open_mode.lock().await, TunnelMode::Unopened) {
-        return Err(rpc_error(
-            RpcErrorCode::PortTunnelAlreadyAttached,
-            "port tunnel is already open",
-        ));
-    }
-    let session = match meta.resume_session_id {
+    let (session, inserted_session) = match meta.resume_session_id {
         Some(session_id) => {
             let session = tunnel
                 .state
@@ -216,7 +210,7 @@ async fn tunnel_open_listen(
                     "port tunnel resume expired",
                 ));
             }
-            session
+            (session, false)
         }
         None => {
             let session = new_session(&tunnel);
@@ -232,15 +226,26 @@ async fn tunnel_open_listen(
                         .max_retained_sessions,
                 )
                 .await?;
-            session
+            (session, true)
         }
     };
     session.generation.store(meta.generation, Ordering::Release);
+    if let Err(err) = claim_tunnel_mode(
+        &tunnel,
+        TunnelMode::Listen {
+            protocol: meta.protocol.clone(),
+            session: session.clone(),
+        },
+    )
+    .await
+    {
+        if inserted_session {
+            tunnel.state.port_forward_sessions.remove(&session.id).await;
+            session.root_cancel.cancel();
+        }
+        return Err(err);
+    }
     attach_session_to_tunnel(&session, &tunnel).await?;
-    *tunnel.open_mode.lock().await = TunnelMode::Listen {
-        protocol: meta.protocol.clone(),
-        session: session.clone(),
-    };
     tunnel
         .send(Frame {
             frame_type: FrameType::TunnelReady,
@@ -265,15 +270,13 @@ async fn tunnel_open_connect(
     tunnel: Arc<TunnelState>,
     meta: TunnelOpenMeta,
 ) -> Result<(), HostRpcError> {
-    if !matches!(*tunnel.open_mode.lock().await, TunnelMode::Unopened) {
-        return Err(rpc_error(
-            RpcErrorCode::PortTunnelAlreadyAttached,
-            "port tunnel is already open",
-        ));
-    }
-    *tunnel.open_mode.lock().await = TunnelMode::Connect {
-        protocol: meta.protocol,
-    };
+    claim_tunnel_mode(
+        &tunnel,
+        TunnelMode::Connect {
+            protocol: meta.protocol,
+        },
+    )
+    .await?;
     tunnel
         .send(Frame {
             frame_type: FrameType::TunnelReady,
@@ -288,6 +291,21 @@ async fn tunnel_open_connect(
             data: Vec::new(),
         })
         .await
+}
+
+async fn claim_tunnel_mode(
+    tunnel: &Arc<TunnelState>,
+    mode: TunnelMode,
+) -> Result<(), HostRpcError> {
+    let mut open_mode = tunnel.open_mode.lock().await;
+    if !matches!(*open_mode, TunnelMode::Unopened) {
+        return Err(rpc_error(
+            RpcErrorCode::PortTunnelAlreadyAttached,
+            "port tunnel is already open",
+        ));
+    }
+    *open_mode = mode;
+    Ok(())
 }
 
 async fn tunnel_close(tunnel: Arc<TunnelState>, frame: Frame) -> Result<(), HostRpcError> {
@@ -315,6 +333,21 @@ fn new_session(tunnel: &Arc<TunnelState>) -> Arc<SessionState> {
     Arc::new(SessionState {
         id: crate::ids::new_tunnel_session_id(),
         root_cancel: tunnel.state.shutdown.child_token(),
+        attachment: Mutex::new(None),
+        attachment_notify: tokio::sync::Notify::new(),
+        resume_deadline: Mutex::new(None),
+        retained_listener: Mutex::new(None),
+        retained_udp_bind: Mutex::new(None),
+        next_daemon_stream_id: std::sync::atomic::AtomicU32::new(2),
+        generation: std::sync::atomic::AtomicU64::new(0),
+    })
+}
+
+#[cfg(test)]
+pub(super) fn new_session_for_test(state: &Arc<AppState>) -> Arc<SessionState> {
+    Arc::new(SessionState {
+        id: crate::ids::new_tunnel_session_id(),
+        root_cancel: state.shutdown.child_token(),
         attachment: Mutex::new(None),
         attachment_notify: tokio::sync::Notify::new(),
         resume_deadline: Mutex::new(None),

@@ -993,6 +993,93 @@ mod port_tunnel_tests {
     }
 
     #[tokio::test]
+    async fn concurrent_tunnel_open_allows_only_one_mode() {
+        let state = test_state();
+        let retained_session = super::tunnel::new_session_for_test(&state);
+        state
+            .port_forward_sessions
+            .try_insert(
+                retained_session.clone(),
+                state.config.port_forward_limits.max_retained_sessions,
+            )
+            .await
+            .unwrap();
+        let attachment_lock = retained_session.attachment.lock().await;
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<QueuedFrame>(8);
+        let tunnel = Arc::new(TunnelState {
+            state: state.clone(),
+            cancel: state.shutdown.child_token(),
+            tx: TunnelSender {
+                tx,
+                limiter: state.port_forward_limiter.clone(),
+            },
+            open_mode: tokio::sync::Mutex::new(TunnelMode::Unopened),
+            tcp_streams: tokio::sync::Mutex::new(HashMap::new()),
+            udp_binds: tokio::sync::Mutex::new(HashMap::new()),
+            generation: AtomicU64::new(0),
+            attached_session: tokio::sync::Mutex::new(None),
+            _connection_permit: state
+                .port_forward_limiter
+                .try_acquire_tunnel_connection()
+                .unwrap(),
+        });
+        let listen_open = Frame {
+            frame_type: FrameType::TunnelOpen,
+            flags: 0,
+            stream_id: 0,
+            meta: serde_json::to_vec(&TunnelOpenMeta {
+                forward_id: "forward-a".to_string(),
+                role: TunnelRole::Listen,
+                side: "test".to_string(),
+                generation: 1,
+                protocol: TunnelForwardProtocol::Tcp,
+                resume_session_id: Some(retained_session.id.clone()),
+            })
+            .unwrap(),
+            data: Vec::new(),
+        };
+
+        let first = tokio::spawn({
+            let tunnel = tunnel.clone();
+            let frame = listen_open.clone();
+            async move { super::tunnel::handle_tunnel_frame(tunnel, frame).await }
+        });
+        let second = tokio::spawn({
+            let tunnel = tunnel.clone();
+            async move { super::tunnel::handle_tunnel_frame(tunnel, listen_open).await }
+        });
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        drop(attachment_lock);
+
+        let first = first.await.unwrap();
+        let second = second.await.unwrap();
+        let success_count = usize::from(first.is_ok()) + usize::from(second.is_ok());
+        let already_open_count = [first, second]
+            .into_iter()
+            .filter(|result| {
+                result.as_ref().is_err_and(|err| {
+                    err.code == RpcErrorCode::PortTunnelAlreadyAttached.wire_value()
+                })
+            })
+            .count();
+        assert_eq!(success_count, 1);
+        assert_eq!(already_open_count, 1);
+
+        let ready_count = {
+            let mut count = 0;
+            while let Ok(queued) = rx.try_recv() {
+                if queued.frame.frame_type == FrameType::TunnelReady {
+                    count += 1;
+                }
+            }
+            count
+        };
+        assert_eq!(ready_count, 1);
+        assert_eq!(state.port_forward_sessions.sessions.lock().await.len(), 1);
+    }
+
+    #[tokio::test]
     async fn retained_udp_queued_byte_pressure_reports_drop() {
         let state = test_state_with_limits(crate::HostPortForwardLimits {
             max_tunnel_queued_bytes: 128,
