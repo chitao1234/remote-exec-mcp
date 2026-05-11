@@ -277,7 +277,9 @@ static ConfigValues read_config_values(const std::string& path) {
 static int read_listen_port(const ConfigValues& values) {
     const unsigned long listen_port =
         parse_unsigned_long(read_required_string(values, "listen_port"), "listen_port");
-    if (listen_port == 0 || listen_port > 65535UL) {
+    const bool test_bound_addr_file_present =
+        values.find("test_bound_addr_file") != values.end();
+    if (listen_port > 65535UL || (listen_port == 0UL && !test_bound_addr_file_present)) {
         throw std::runtime_error("listen_port must be between 1 and 65535");
     }
     return static_cast<int>(listen_port);
@@ -435,6 +437,9 @@ static FilesystemSandbox read_sandbox(const ConfigValues& values) {
 }
 
 static void validate_daemon_config(const DaemonConfig& config) {
+    if (config.listen_port == 0 && config.test_bound_addr_file.empty()) {
+        throw std::runtime_error("listen_port = 0 requires test_bound_addr_file");
+    }
     if (config.max_request_header_bytes == 0) {
         throw std::runtime_error("max_request_header_bytes must be greater than zero");
     }
@@ -472,6 +477,7 @@ DaemonConfig load_config(const std::string& path) {
     config.target = read_required_string(values, "target");
     config.listen_host = read_required_string(values, "listen_host");
     config.listen_port = read_listen_port(values);
+    config.test_bound_addr_file = read_optional_string(values, "test_bound_addr_file", "");
     config.default_workdir = read_required_string(values, "default_workdir");
     config.default_shell = read_optional_string(values, "default_shell", "");
     config.allow_login_shell = read_optional_bool(values, "allow_login_shell", true);

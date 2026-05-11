@@ -33,6 +33,7 @@ struct DaemonConfig {
     std::string target;
     std::string listen_host;
     int listen_port;
+    std::string test_bound_addr_file;
     std::string default_workdir;
     std::string default_shell;
     bool allow_login_shell;

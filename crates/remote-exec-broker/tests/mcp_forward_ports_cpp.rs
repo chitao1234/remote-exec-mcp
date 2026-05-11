@@ -416,7 +416,6 @@ async fn cpp_forward_ports_reconnect_after_connect_tunnel_drop() {
 #[tokio::test]
 async fn real_cpp_daemon_releases_listener_after_broker_crash() {
     let mut fixture = CrashableCppDaemonBrokerFixture::spawn().await;
-    let listen_addr = allocate_addr();
 
     let open = fixture
         .client
@@ -426,7 +425,7 @@ async fn real_cpp_daemon_releases_listener_after_broker_crash() {
                 listen_side: "builder-cpp".to_string(),
                 connect_side: "local".to_string(),
                 forwards: vec![remote_exec_proto::public::ForwardPortSpec {
-                    listen_endpoint: listen_addr.to_string(),
+                    listen_endpoint: "127.0.0.1:0".to_string(),
                     connect_endpoint: "127.0.0.1:9".to_string(),
                     protocol: ForwardPortProtocol::Tcp,
                 }],
@@ -435,12 +434,17 @@ async fn real_cpp_daemon_releases_listener_after_broker_crash() {
         .await
         .unwrap();
     assert!(!open.is_error, "open failed: {}", open.text_output);
+    let listen_endpoint = open.structured_content["forwards"][0]["listen_endpoint"]
+        .as_str()
+        .expect("listen endpoint")
+        .to_string();
+    assert_ne!(listen_endpoint, "127.0.0.1:0");
 
     tokio::time::sleep(Duration::from_millis(200)).await;
     fixture.kill_broker().await;
 
     let (reopened_client, reopened_forward_id) = fixture
-        .wait_for_public_forward_reopen(&listen_addr.to_string(), Duration::from_secs(10))
+        .wait_for_public_forward_reopen(&listen_endpoint, Duration::from_secs(10))
         .await;
 
     let closed = reopened_client
@@ -479,25 +483,22 @@ impl CppDaemonBrokerFixture {
         let daemon_workdir = tempdir.path().join("daemon-workdir");
         std::fs::create_dir_all(&daemon_workdir).unwrap();
 
-        let daemon_addr = allocate_addr();
-        let backend_addr = allocate_addr();
-        let proxy = TunnelDropProxy::spawn(daemon_addr, backend_addr).await;
-        std::fs::write(
+        let daemon_bound_addr_file = tempdir.path().join("daemon-bound-addr.txt");
+        let daemon_config_body = format!(
+            "target = builder-cpp\nlisten_host = 127.0.0.1\nlisten_port = 0\ndefault_workdir = {}\ntest_bound_addr_file = {}\n{}",
+            daemon_workdir.display(),
+            daemon_bound_addr_file.display(),
+            extra_daemon_config
+        );
+        let (daemon, backend_addr) = spawn_cpp_daemon_with_bound_addr(
+            &daemon_binary,
             &daemon_config,
-            format!(
-                "target = builder-cpp\nlisten_host = 127.0.0.1\nlisten_port = {}\ndefault_workdir = {}\n{}",
-                backend_addr.port(),
-                daemon_workdir.display(),
-                extra_daemon_config
-            ),
+            &daemon_bound_addr_file,
+            daemon_config_body,
         )
-        .unwrap();
-
-        let mut daemon = tokio::process::Command::new(&daemon_binary);
-        daemon.arg(&daemon_config);
-        apply_quiet_test_logging(&mut daemon);
-        let daemon = spawn_cpp_daemon_process(&mut daemon).await;
-        wait_until_ready_http(daemon_addr).await;
+        .await;
+        let proxy = TunnelDropProxy::spawn(backend_addr).await;
+        let daemon_addr = proxy.listen_addr;
 
         std::fs::write(
             &broker_config,
@@ -624,6 +625,7 @@ impl Drop for CppDaemonBrokerFixture {
 }
 
 struct TunnelDropProxy {
+    listen_addr: std::net::SocketAddr,
     active_port_tunnels: Arc<Mutex<Vec<oneshot::Sender<()>>>>,
     background_tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
     shutdown: Option<oneshot::Sender<()>>,
@@ -649,24 +651,20 @@ impl CrashableCppDaemonBrokerFixture {
         let daemon_config = tempdir.path().join("daemon-cpp.ini");
         let daemon_workdir = tempdir.path().join("daemon-workdir");
         std::fs::create_dir_all(&daemon_workdir).unwrap();
-        let daemon_addr = allocate_addr();
-        let broker_addr = allocate_addr();
-
-        std::fs::write(
+        let daemon_bound_addr_file = tempdir.path().join("daemon-bound-addr.txt");
+        let broker_bound_addr_file = tempdir.path().join("broker-bound-addr.txt");
+        let daemon_config_body = format!(
+            "target = builder-cpp\nlisten_host = 127.0.0.1\nlisten_port = 0\ndefault_workdir = {}\ntest_bound_addr_file = {}\n",
+            daemon_workdir.display(),
+            daemon_bound_addr_file.display()
+        );
+        let (daemon, daemon_addr) = spawn_cpp_daemon_with_bound_addr(
+            &daemon_binary,
             &daemon_config,
-            format!(
-                "target = builder-cpp\nlisten_host = 127.0.0.1\nlisten_port = {}\ndefault_workdir = {}\n",
-                daemon_addr.port(),
-                daemon_workdir.display()
-            ),
+            &daemon_bound_addr_file,
+            daemon_config_body,
         )
-        .unwrap();
-
-        let mut daemon = tokio::process::Command::new(&daemon_binary);
-        daemon.arg(&daemon_config);
-        apply_quiet_test_logging(&mut daemon);
-        let daemon = spawn_cpp_daemon_process(&mut daemon).await;
-        wait_until_ready_http(daemon_addr).await;
+        .await;
 
         std::fs::write(
             &broker_config,
@@ -682,12 +680,11 @@ pty = "none"
 
 [mcp]
 transport = "streamable_http"
-listen = "{}"
+listen = "127.0.0.1:0"
 path = "/mcp"
 "#,
                 daemon_addr,
-                tempdir.path().join("local-work").display(),
-                broker_addr
+                tempdir.path().join("local-work").display()
             ),
         )
         .unwrap();
@@ -695,9 +692,14 @@ path = "/mcp"
 
         let mut broker = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
         broker.arg(&broker_config);
+        broker.env(
+            "REMOTE_EXEC_BROKER_TEST_BOUND_ADDR_FILE",
+            &broker_bound_addr_file,
+        );
         apply_quiet_test_logging(&mut broker);
         broker.kill_on_drop(true);
         let broker = broker.spawn().unwrap();
+        let broker_addr = wait_for_bound_addr_file(&broker_bound_addr_file, "C++ broker").await;
         let broker_url = format!("http://{broker_addr}/mcp");
         wait_until_ready_mcp_http(&broker_url).await;
         let client = RemoteExecClient::connect(Connection::StreamableHttp { url: broker_url })
@@ -784,8 +786,9 @@ impl Drop for CrashableCppDaemonBrokerFixture {
 }
 
 impl TunnelDropProxy {
-    async fn spawn(listen_addr: std::net::SocketAddr, daemon_addr: std::net::SocketAddr) -> Self {
-        let listener = TcpListener::bind(listen_addr).await.unwrap();
+    async fn spawn(daemon_addr: std::net::SocketAddr) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listen_addr = listener.local_addr().unwrap();
         let active_port_tunnels = Arc::new(Mutex::new(Vec::new()));
         let background_tasks = Arc::new(Mutex::new(Vec::new()));
         let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
@@ -815,6 +818,7 @@ impl TunnelDropProxy {
         });
 
         Self {
+            listen_addr,
             active_port_tunnels,
             background_tasks,
             shutdown: Some(shutdown_tx),
@@ -1004,11 +1008,40 @@ async fn spawn_cpp_daemon_process(command: &mut tokio::process::Command) -> toki
     unreachable!("spawn retry loop returns or panics");
 }
 
-fn allocate_addr() -> std::net::SocketAddr {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = listener.local_addr().unwrap();
-    drop(listener);
-    addr
+async fn wait_for_bound_addr_file(path: &Path, resource: &str) -> std::net::SocketAddr {
+    let started = std::time::Instant::now();
+    loop {
+        let last = match tokio::fs::read_to_string(path).await {
+            Ok(value) => match value.trim().parse() {
+                Ok(addr) => return addr,
+                Err(err) => format!("invalid address `{}`: {err}", value.trim()),
+            },
+            Err(err) => err.to_string(),
+        };
+        if started.elapsed() >= Duration::from_secs(5) {
+            panic!(
+                "{resource} did not write bound address file {}; last={last}",
+                path.display()
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+async fn spawn_cpp_daemon_with_bound_addr(
+    daemon_binary: &Path,
+    daemon_config: &Path,
+    bound_addr_file: &Path,
+    config_body: String,
+) -> (tokio::process::Child, std::net::SocketAddr) {
+    std::fs::write(daemon_config, config_body).unwrap();
+    let mut daemon = tokio::process::Command::new(daemon_binary);
+    daemon.arg(daemon_config);
+    apply_quiet_test_logging(&mut daemon);
+    let child = spawn_cpp_daemon_process(&mut daemon).await;
+    let daemon_addr = wait_for_bound_addr_file(bound_addr_file, "C++ daemon").await;
+    wait_until_ready_http(daemon_addr).await;
+    (child, daemon_addr)
 }
 
 async fn wait_until_ready_http(addr: std::net::SocketAddr) {
