@@ -1,4 +1,6 @@
 #include <cassert>
+#include <climits>
+#include <limits>
 #include <string>
 
 #include <stdexcept>
@@ -15,6 +17,21 @@ int main() {
         rejected_invalid_timeout_socket = true;
     }
     assert(rejected_invalid_timeout_socket);
+
+    assert(bounded_socket_io_size(0U) == 0U);
+    assert(bounded_socket_io_size(1U) == 1U);
+    assert(
+        bounded_socket_io_size(static_cast<std::size_t>(INT_MAX)) ==
+        static_cast<std::size_t>(INT_MAX)
+    );
+    assert(
+        bounded_socket_io_size(static_cast<std::size_t>(INT_MAX) + 1U) ==
+        static_cast<std::size_t>(INT_MAX)
+    );
+    assert(
+        bounded_socket_io_size(std::numeric_limits<std::size_t>::max()) ==
+        static_cast<std::size_t>(INT_MAX)
+    );
 
     int sockets[2];
     assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);

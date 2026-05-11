@@ -271,10 +271,10 @@ bool PortTunnelConnection::read_exact(unsigned char* data, std::size_t size) {
             shutdown_socket(client_);
             return false;
         }
-        const int received = recv(
+        const int received = recv_bounded(
             client_,
             reinterpret_cast<char*>(data + offset),
-            static_cast<int>(size - offset),
+            size - offset,
             0
         );
         if (received == 0) {

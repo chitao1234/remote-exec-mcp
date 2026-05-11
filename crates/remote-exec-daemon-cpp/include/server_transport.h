@@ -98,6 +98,9 @@ private:
 int last_socket_error();
 bool would_block_error(int error);
 bool receive_timeout_error(int error);
+std::size_t bounded_socket_io_size(std::size_t remaining);
+int recv_bounded(SOCKET client, char* data, std::size_t remaining, int flags);
+int send_bounded(SOCKET client, const char* data, std::size_t remaining, int flags);
 std::string socket_error_message(const std::string& operation);
 void close_socket(SOCKET socket);
 void shutdown_socket(SOCKET socket);

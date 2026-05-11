@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cctype>
+#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -129,6 +130,19 @@ bool receive_timeout_error(int error) {
 #else
     return error == EAGAIN || error == EWOULDBLOCK;
 #endif
+}
+
+std::size_t bounded_socket_io_size(std::size_t remaining) {
+    const std::size_t max_chunk = static_cast<std::size_t>(INT_MAX);
+    return remaining > max_chunk ? max_chunk : remaining;
+}
+
+int recv_bounded(SOCKET client, char* data, std::size_t remaining, int flags) {
+    return recv(client, data, static_cast<int>(bounded_socket_io_size(remaining)), flags);
+}
+
+int send_bounded(SOCKET client, const char* data, std::size_t remaining, int flags) {
+    return send(client, data, static_cast<int>(bounded_socket_io_size(remaining)), flags);
 }
 
 namespace {
@@ -408,12 +422,7 @@ void send_all(SOCKET client, const std::string& data) {
 void send_all_bytes(SOCKET client, const char* data, std::size_t size) {
     std::size_t offset = 0;
     while (offset < size) {
-        const int sent = send(
-            client,
-            data + offset,
-            static_cast<int>(size - offset),
-            0
-        );
+        const int sent = send_bounded(client, data + offset, size - offset, 0);
         if (sent <= 0) {
             const int error = last_socket_error();
             throw SocketSendError(
