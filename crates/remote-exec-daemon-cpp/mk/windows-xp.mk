@@ -29,6 +29,7 @@ WINDOWS_XP_TEST_TARGETS := \
 XP_SESSION_STORE_SRCS := \
 	$(MAKEFILE_DIR)tests/test_session_store.cpp \
 	$(MAKEFILE_DIR)src/session_store.cpp \
+	$(MAKEFILE_DIR)src/session_pump.cpp \
 	$(MAKEFILE_DIR)src/process_session_win32.cpp \
 	$(MAKEFILE_DIR)src/platform.cpp \
 	$(MAKEFILE_DIR)src/shell_policy.cpp \

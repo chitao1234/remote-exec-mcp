@@ -57,6 +57,7 @@ BASE_SRCS = \
 	$(SOURCE_PREFIX)src/server_runtime.cpp \
 	$(SOURCE_PREFIX)src/server_transport.cpp \
 	$(SOURCE_PREFIX)src/session_store.cpp \
+	$(SOURCE_PREFIX)src/session_pump.cpp \
 	$(SOURCE_PREFIX)src/patch_engine.cpp \
 	$(SOURCE_PREFIX)src/basic_mutex.cpp \
 	$(SOURCE_PREFIX)src/connection_manager.cpp \
@@ -121,6 +122,7 @@ HOST_SERVER_STREAMING_SRCS = \
 	$(SOURCE_PREFIX)src/http_helpers.cpp \
 	$(SOURCE_PREFIX)src/http_request.cpp \
 	$(SOURCE_PREFIX)src/session_store.cpp \
+	$(SOURCE_PREFIX)src/session_pump.cpp \
 	$(SOURCE_PREFIX)src/process_session_posix.cpp \
 	$(SOURCE_PREFIX)src/platform.cpp \
 	$(PATH_UTILS_SRCS) \
@@ -141,6 +143,7 @@ HOST_SERVER_STREAMING_SRCS = \
 HOST_SESSION_STORE_SRCS = \
 	$(SOURCE_PREFIX)tests/test_session_store.cpp \
 	$(SOURCE_PREFIX)src/session_store.cpp \
+	$(SOURCE_PREFIX)src/session_pump.cpp \
 	$(SOURCE_PREFIX)src/process_session_posix.cpp \
 	$(SOURCE_PREFIX)src/platform.cpp \
 	$(PATH_UTILS_SRCS) \
@@ -173,6 +176,7 @@ HOST_SERVER_RUNTIME_SRCS = \
 	$(SOURCE_PREFIX)src/http_codec.cpp \
 	$(SOURCE_PREFIX)src/http_helpers.cpp \
 	$(SOURCE_PREFIX)src/session_store.cpp \
+	$(SOURCE_PREFIX)src/session_pump.cpp \
 	$(SOURCE_PREFIX)src/process_session_posix.cpp \
 	$(SOURCE_PREFIX)src/platform.cpp \
 	$(PATH_UTILS_SRCS) \
@@ -196,6 +200,7 @@ HOST_SERVER_ROUTES_SRCS = \
 	$(SOURCE_PREFIX)src/http_codec.cpp \
 	$(SOURCE_PREFIX)src/http_helpers.cpp \
 	$(SOURCE_PREFIX)src/session_store.cpp \
+	$(SOURCE_PREFIX)src/session_pump.cpp \
 	$(SOURCE_PREFIX)src/process_session_posix.cpp \
 	$(SOURCE_PREFIX)src/platform.cpp \
 	$(PATH_UTILS_SRCS) \
