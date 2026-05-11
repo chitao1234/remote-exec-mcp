@@ -36,8 +36,6 @@ use tokio_util::sync::CancellationToken;
 
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
 use super::certs::TestCerts;
-#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
-use super::certs::allocate_addr;
 
 #[path = "stub_daemon_exec.rs"]
 mod stub_daemon_exec;
@@ -499,9 +497,12 @@ pub(super) async fn spawn_daemon_with_platform(
     platform: &str,
     supports_pty: bool,
 ) -> (std::net::SocketAddr, StubDaemonState) {
-    let addr = allocate_addr();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind TLS stub daemon listener");
+    let addr = listener.local_addr().expect("read TLS stub daemon addr");
     let state = stub_daemon_state("builder-a", exec_write_behavior, platform, supports_pty);
-    spawn_named_daemon_on_addr(certs, addr, state.clone()).await;
+    spawn_named_daemon_on_listener(certs, listener, state.clone()).await;
     (addr, state)
 }
 
@@ -518,11 +519,12 @@ pub(super) async fn spawn_plain_http_daemon_with_platform(
 }
 
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
-pub(super) async fn spawn_named_daemon_on_addr(
+pub(super) async fn spawn_named_daemon_on_listener(
     certs: &TestCerts,
-    addr: std::net::SocketAddr,
+    listener: tokio::net::TcpListener,
     state: StubDaemonState,
 ) {
+    let addr = listener.local_addr().expect("read TLS stub daemon addr");
     let app = stub_router(state.clone());
 
     let daemon_config = remote_exec_daemon::config::DaemonConfig {
@@ -552,7 +554,13 @@ pub(super) async fn spawn_named_daemon_on_addr(
 
     let task_state = state.clone();
     spawn_stub_task(&state, "tls-server", async move {
-        remote_exec_daemon::tls::serve_tls(app, Arc::new(daemon_config)).await
+        remote_exec_daemon::test_support::serve_tls_on_listener(
+            app,
+            Arc::new(daemon_config),
+            listener,
+            std::future::pending::<()>(),
+        )
+        .await
     })
     .await;
     wait_until_ready(certs, addr).await;

@@ -35,10 +35,3 @@ pub(crate) fn write_test_certs_for_daemon_spec(
         daemon_key: daemon.key_pem.clone(),
     }
 }
-
-pub(crate) fn allocate_addr() -> std::net::SocketAddr {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = listener.local_addr().unwrap();
-    drop(listener);
-    addr
-}

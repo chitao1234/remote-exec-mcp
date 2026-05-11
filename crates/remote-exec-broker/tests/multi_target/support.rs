@@ -42,6 +42,15 @@ fn toml_string(value: &str) -> String {
     toml::Value::String(value.to_string()).to_string()
 }
 
+fn allocate_unbound_addr_for_broker_child() -> std::net::SocketAddr {
+    // Temporary child-process fixture handoff. Task 8 replaces this with a
+    // broker-owned bind(0) plus bound-address file.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    addr
+}
+
 fn apply_quiet_test_logging(command: &mut tokio::process::Command) {
     if std::env::var_os("REMOTE_EXEC_LOG").is_some() || std::env::var_os("RUST_LOG").is_some() {
         return;
@@ -219,7 +228,7 @@ pub struct HttpBrokerFixture {
 impl HttpBrokerFixture {
     pub async fn spawn(daemon_a: &DaemonFixture, daemon_b: &DaemonFixture) -> Self {
         let tempdir = tempfile::tempdir().unwrap();
-        let broker_addr = allocate_addr();
+        let broker_addr = allocate_unbound_addr_for_broker_child();
         let config_path = tempdir.path().join("broker-http.toml");
         std::fs::write(
             &config_path,
@@ -354,7 +363,8 @@ enum PortTunnelAction {
 impl DaemonFixture {
     pub async fn spawn(target: &str) -> Self {
         let tempdir = tempfile::tempdir().unwrap();
-        let backend_addr = allocate_addr();
+        let backend_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let backend_addr = backend_listener.local_addr().unwrap();
         let workdir = tempdir.path().join("workdir");
         std::fs::create_dir_all(&workdir).unwrap();
         let client = build_http_client();
@@ -372,7 +382,7 @@ impl DaemonFixture {
             shutdown: None,
             handle: None,
         };
-        fixture.start().await;
+        fixture.start_on_listener(backend_listener).await;
         fixture
     }
 
@@ -404,8 +414,8 @@ expected_daemon_name = {expected_daemon_name}
         )
     }
 
-    async fn start(&mut self) {
-        let config = remote_exec_daemon::config::DaemonConfig {
+    fn daemon_config(&self) -> remote_exec_daemon::config::DaemonConfig {
+        remote_exec_daemon::config::DaemonConfig {
             target: self.target.clone(),
             listen: self.backend_addr,
             default_workdir: self.workdir.clone(),
@@ -423,16 +433,26 @@ expected_daemon_name = {expected_daemon_name}
             experimental_apply_patch_target_encoding_autodetect: false,
             process_environment: remote_exec_daemon::config::ProcessEnvironment::capture_current(),
             tls: None,
-        };
+        }
+    }
+
+    async fn start_on_listener(&mut self, listener: tokio::net::TcpListener) {
+        let config = self.daemon_config();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         self.shutdown = Some(shutdown_tx);
-        self.handle = Some(tokio::spawn(remote_exec_daemon::run_until(
-            config,
-            async move {
+        self.handle = Some(tokio::spawn(
+            remote_exec_daemon::test_support::run_until_on_listener(config, listener, async move {
                 let _ = shutdown_rx.await;
-            },
-        )));
+            }),
+        ));
         wait_until_ready_http(&self.client, self.addr).await;
+    }
+
+    async fn start(&mut self) {
+        let listener = tokio::net::TcpListener::bind(self.backend_addr)
+            .await
+            .expect("rebind daemon backend listener");
+        self.start_on_listener(listener).await;
     }
 
     async fn stop(&mut self) {
@@ -680,13 +700,6 @@ async fn proxy_port_tunnel_streams(
 pub async fn write_png(path: &Path, width: u32, height: u32) {
     let image = image::DynamicImage::new_rgba8(width, height);
     image.save(path).unwrap();
-}
-
-pub fn allocate_addr() -> std::net::SocketAddr {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = listener.local_addr().unwrap();
-    drop(listener);
-    addr
 }
 
 pub async fn spawn_tcp_echo() -> std::net::SocketAddr {

@@ -4,7 +4,6 @@ use std::time::Duration;
 use rmcp::{ServiceExt, transport::TokioChildProcess};
 use tempfile::TempDir;
 
-use super::certs::allocate_addr;
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
 use super::certs::{TestCerts, write_test_certs_for_daemon_spec};
 use super::fixture::{BrokerFixture, DummyClientHandler};
@@ -12,10 +11,10 @@ use super::fixture::{BrokerFixture, DummyClientHandler};
 use super::stub_daemon::spawn_stub_daemon;
 use super::stub_daemon::{
     ExecWriteBehavior, StubDaemonState, set_port_forward_support, set_required_bearer_token,
-    set_transfer_compression_support, spawn_named_plain_http_daemon_on_addr,
-    spawn_plain_http_daemon_with_platform, spawn_plain_http_retryable_exec_write_daemon,
-    spawn_plain_http_stub_daemon, spawn_plain_http_stub_on_listener,
-    spawn_plain_http_unknown_session_exec_write_daemon, stub_daemon_state,
+    set_transfer_compression_support, spawn_plain_http_daemon_with_platform,
+    spawn_plain_http_retryable_exec_write_daemon, spawn_plain_http_stub_daemon,
+    spawn_plain_http_stub_on_listener, spawn_plain_http_unknown_session_exec_write_daemon,
+    stub_daemon_state,
 };
 
 const TEST_HTTP_READY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -24,14 +23,20 @@ const TEST_HTTP_READY_POLL: Duration = Duration::from_millis(50);
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub struct DelayedTargetFixture {
     pub broker: BrokerFixture,
-    addr: std::net::SocketAddr,
+    delayed_listener: tokio::sync::Mutex<Option<tokio::net::TcpListener>>,
 }
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
 impl DelayedTargetFixture {
     pub async fn spawn_target(&self, target: &str) {
-        spawn_named_plain_http_daemon_on_addr(
-            self.addr,
+        let listener = self
+            .delayed_listener
+            .lock()
+            .await
+            .take()
+            .expect("late target listener should only be consumed once");
+        spawn_plain_http_stub_on_listener(
+            listener,
             stub_daemon_state(target, ExecWriteBehavior::Success, "linux", true),
         )
         .await;
@@ -75,6 +80,23 @@ struct LocalBrokerConfig<'a> {
 
 fn toml_string(value: &str) -> String {
     toml::Value::String(value.to_string()).to_string()
+}
+
+fn allocate_unbound_addr_for_dead_target() -> std::net::SocketAddr {
+    // Intentionally unbound: these tests need broker startup to see a dead target.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    addr
+}
+
+fn allocate_unbound_addr_for_broker_child() -> std::net::SocketAddr {
+    // Temporary child-process fixture handoff. Task 8 replaces this with a
+    // broker-owned bind(0) plus bound-address file.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    addr
 }
 
 fn render_broker_target(target: &BrokerConfigTarget<'_>) -> String {
@@ -431,7 +453,7 @@ pub async fn spawn_broker_local_only_with_port_forward_limits(
 pub async fn spawn_streamable_http_broker_with_stub_daemon() -> HttpBrokerFixture {
     let tempdir = tempfile::tempdir().unwrap();
     let (daemon_addr, stub_state) = spawn_plain_http_stub_daemon().await;
-    let broker_addr = allocate_addr();
+    let broker_addr = allocate_unbound_addr_for_broker_child();
     let broker_config = tempdir.path().join("broker.toml");
     write_broker_config(
         &broker_config,
@@ -639,7 +661,7 @@ pub async fn spawn_broker_with_plain_http_stub_daemon() -> BrokerFixture {
 pub async fn spawn_broker_with_reverse_ordered_targets() -> BrokerFixture {
     let tempdir = tempfile::tempdir().unwrap();
     let (live_addr, stub_state) = spawn_plain_http_stub_daemon().await;
-    let dead_addr = allocate_addr();
+    let dead_addr = allocate_unbound_addr_for_dead_target();
     let broker_config = tempdir.path().join("broker.toml");
     write_broker_config(
         &broker_config,
@@ -675,7 +697,7 @@ pub async fn spawn_broker_with_reverse_ordered_targets() -> BrokerFixture {
 pub async fn spawn_broker_with_live_and_dead_targets() -> BrokerFixture {
     let tempdir = tempfile::tempdir().unwrap();
     let (live_addr, stub_state) = spawn_plain_http_stub_daemon().await;
-    let dead_addr = allocate_addr();
+    let dead_addr = allocate_unbound_addr_for_dead_target();
     let broker_config = tempdir.path().join("broker.toml");
     write_broker_config(
         &broker_config,
@@ -765,8 +787,11 @@ pub async fn spawn_broker_with_unknown_session_exec_write_error() -> BrokerFixtu
 pub async fn spawn_broker_with_late_target() -> DelayedTargetFixture {
     let tempdir = tempfile::tempdir().unwrap();
     let (live_addr, stub_state) = spawn_plain_http_stub_daemon().await;
-    let delayed_addr = allocate_addr();
+    let delayed_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let delayed_addr = delayed_listener.local_addr().unwrap();
     let broker_config = tempdir.path().join("broker.toml");
+    let late_target_extra_config = r#"[targets.builder-b.timeouts]
+startup_probe_ms = 100"#;
     write_broker_config(
         &broker_config,
         &[
@@ -780,7 +805,7 @@ pub async fn spawn_broker_with_late_target() -> DelayedTargetFixture {
                 name: "builder-b",
                 addr: delayed_addr,
                 transport: BrokerTargetTransport::Http,
-                extra_config: None,
+                extra_config: Some(late_target_extra_config),
             },
         ],
         None,
@@ -796,7 +821,7 @@ pub async fn spawn_broker_with_late_target() -> DelayedTargetFixture {
             client,
             stub_state,
         },
-        addr: delayed_addr,
+        delayed_listener: tokio::sync::Mutex::new(Some(delayed_listener)),
     }
 }
 

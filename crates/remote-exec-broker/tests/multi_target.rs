@@ -500,7 +500,6 @@ async fn forward_ports_reconnect_after_connect_side_tunnel_drop_and_relays_futur
 #[tokio::test]
 async fn forward_ports_release_remote_listeners_when_broker_stops() {
     let mut cluster = support::spawn_cluster().await;
-    let listen_addr = support::allocate_addr();
 
     let open = cluster
         .broker
@@ -511,22 +510,22 @@ async fn forward_ports_release_remote_listeners_when_broker_stops() {
                 "listen_side": "builder-a",
                 "connect_side": "local",
                 "forwards": [{
-                    "listen_endpoint": listen_addr.to_string(),
+                    "listen_endpoint": "127.0.0.1:0",
                     "connect_endpoint": "127.0.0.1:9",
                     "protocol": "tcp"
                 }]
             }),
         )
         .await;
-    assert_eq!(
-        open.structured_content["forwards"][0]["listen_endpoint"],
-        listen_addr.to_string()
-    );
+    let listen_endpoint = open.structured_content["forwards"][0]["listen_endpoint"]
+        .as_str()
+        .expect("listen endpoint")
+        .to_string();
+    assert_ne!(listen_endpoint, "127.0.0.1:0");
 
     cluster.broker.stop().await;
 
-    support::wait_for_daemon_listener_rebind(&listen_addr.to_string(), Duration::from_secs(10))
-        .await;
+    support::wait_for_daemon_listener_rebind(&listen_endpoint, Duration::from_secs(10)).await;
 }
 
 #[tokio::test]
@@ -539,7 +538,6 @@ async fn forward_ports_release_remote_listeners_after_broker_crash() {
     })
     .await
     .unwrap();
-    let listen_addr = support::allocate_addr();
 
     let open = client
         .call_tool(
@@ -548,7 +546,7 @@ async fn forward_ports_release_remote_listeners_after_broker_crash() {
                 listen_side: "builder-a".to_string(),
                 connect_side: "local".to_string(),
                 forwards: vec![ForwardPortSpec {
-                    listen_endpoint: listen_addr.to_string(),
+                    listen_endpoint: "127.0.0.1:0".to_string(),
                     connect_endpoint: "127.0.0.1:9".to_string(),
                     protocol: ForwardPortProtocol::Tcp,
                 }],
@@ -557,12 +555,16 @@ async fn forward_ports_release_remote_listeners_after_broker_crash() {
         .await
         .unwrap();
     assert!(!open.is_error, "open failed: {}", open.text_output);
+    let listen_endpoint = open.structured_content["forwards"][0]["listen_endpoint"]
+        .as_str()
+        .expect("listen endpoint")
+        .to_string();
+    assert_ne!(listen_endpoint, "127.0.0.1:0");
 
     tokio::time::sleep(Duration::from_millis(200)).await;
     broker.kill().await;
 
-    support::wait_for_daemon_listener_rebind(&listen_addr.to_string(), Duration::from_secs(15))
-        .await;
+    support::wait_for_daemon_listener_rebind(&listen_endpoint, Duration::from_secs(15)).await;
 
     let reopened_broker = support::BrokerFixture::spawn(&daemon_a, &daemon_b).await;
     let reopened = reopened_broker
@@ -573,7 +575,7 @@ async fn forward_ports_release_remote_listeners_after_broker_crash() {
                 "listen_side": "builder-a",
                 "connect_side": "local",
                 "forwards": [{
-                    "listen_endpoint": listen_addr.to_string(),
+                    "listen_endpoint": listen_endpoint,
                     "connect_endpoint": "127.0.0.1:9",
                     "protocol": "tcp"
                 }]
@@ -586,7 +588,7 @@ async fn forward_ports_release_remote_listeners_after_broker_crash() {
         .to_string();
     assert_eq!(
         reopened.structured_content["forwards"][0]["listen_endpoint"],
-        listen_addr.to_string()
+        listen_endpoint
     );
 
     let closed = reopened_broker
