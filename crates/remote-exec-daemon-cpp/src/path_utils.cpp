@@ -1,5 +1,7 @@
 #include "path_utils.h"
 
+#include <algorithm>
+
 namespace path_utils {
 
 char native_separator() {
@@ -19,14 +21,21 @@ std::string parent_directory(const std::string& path) {
 }
 
 std::string join_path(const std::string& base, const std::string& child) {
+    std::string normalized_child = child;
+#ifdef _WIN32
+    std::replace(normalized_child.begin(), normalized_child.end(), '/', '\\');
+#endif
     if (base.empty()) {
-        return child;
+        return normalized_child;
     }
     std::string joined = base;
+#ifdef _WIN32
+    std::replace(joined.begin(), joined.end(), '/', '\\');
+#endif
     if (joined[joined.size() - 1] != '/' && joined[joined.size() - 1] != '\\') {
         joined.push_back(native_separator());
     }
-    joined += child;
+    joined += normalized_child;
     return joined;
 }
 

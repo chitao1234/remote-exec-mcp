@@ -138,22 +138,4 @@ std::string normalize_path_separators(std::string path) {
     return path;
 }
 
-std::string join_path(const std::string& base, const std::string& relative) {
-    if (base.empty()) {
-        return normalize_path_separators(relative);
-    }
-
-    std::string joined = normalize_path_separators(base);
-#ifdef _WIN32
-    const char separator = '\\';
-#else
-    const char separator = '/';
-#endif
-    if (!joined.empty() && joined[joined.size() - 1] != '/' && joined[joined.size() - 1] != '\\') {
-        joined.push_back(separator);
-    }
-    joined += normalize_path_separators(relative);
-    return joined;
-}
-
 }  // namespace platform

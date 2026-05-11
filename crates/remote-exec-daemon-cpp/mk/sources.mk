@@ -143,6 +143,7 @@ HOST_SESSION_STORE_SRCS = \
 	$(SOURCE_PREFIX)src/session_store.cpp \
 	$(SOURCE_PREFIX)src/process_session_posix.cpp \
 	$(SOURCE_PREFIX)src/platform.cpp \
+	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/shell_policy.cpp \
 	$(SOURCE_PREFIX)src/basic_mutex.cpp \
 	$(SOURCE_PREFIX)src/logging.cpp \

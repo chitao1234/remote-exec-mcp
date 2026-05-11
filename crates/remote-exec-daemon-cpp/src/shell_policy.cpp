@@ -16,6 +16,7 @@
 #include <unistd.h>
 #endif
 
+#include "path_utils.h"
 #include "platform.h"
 
 namespace {
@@ -95,7 +96,7 @@ std::string find_command_on_path(const std::string& command) {
         }
 
         const std::string dir = current.empty() ? "." : current;
-        const std::string candidate = platform::join_path(dir, command);
+        const std::string candidate = path_utils::join_path(dir, command);
         if (is_executable_file(candidate)) {
             return candidate;
         }

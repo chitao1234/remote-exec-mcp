@@ -16,7 +16,6 @@ bool is_windows();
 
 bool is_absolute_path(const std::string& path);
 std::string normalize_path_separators(std::string path);
-std::string join_path(const std::string& base, const std::string& relative);
 
 bool shell_supported(const std::string& shell);
 std::string resolve_default_shell(const std::string& configured_default_shell);
