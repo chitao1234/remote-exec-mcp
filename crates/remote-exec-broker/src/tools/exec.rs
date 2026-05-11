@@ -107,12 +107,19 @@ pub async fn write_stdin(
                 .structured
                 .as_ref()
                 .expect("write_stdin tool output should include structured content");
+            let loggable = command_tool_result_for_logging(structured);
             tracing::info!(
                 tool = "write_stdin",
                 session_id = %session_id,
                 requested_target = requested_target.as_deref().unwrap_or("-"),
-                running = structured["session_id"].is_string(),
-                exit_code = structured["exit_code"].as_i64().unwrap_or(-1),
+                running = loggable
+                    .as_ref()
+                    .and_then(|result| result.session_id.as_ref())
+                    .is_some(),
+                exit_code = loggable
+                    .as_ref()
+                    .and_then(|result| result.exit_code)
+                    .unwrap_or(-1),
                 elapsed_ms = started.elapsed().as_millis() as u64,
                 "broker tool completed"
             );
@@ -363,6 +370,10 @@ fn write_stdin_output(
     ))
 }
 
+fn command_tool_result_for_logging(structured: &serde_json::Value) -> Option<CommandToolResult> {
+    serde_json::from_value(structured.clone()).ok()
+}
+
 fn unknown_process_id_message(session_id: &str) -> String {
     format!("Unknown process id {session_id}")
 }
@@ -382,6 +393,30 @@ fn exec_start_response(response: ExecResponse) -> anyhow::Result<ExecStartRespon
         ExecResponse::Completed(_) => Err(anyhow::anyhow!(
             "daemon returned malformed exec response: running response missing daemon_session_id"
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::command_tool_result_for_logging;
+
+    #[test]
+    fn command_tool_result_for_logging_reads_typed_fields() {
+        let value = serde_json::json!({
+            "target": "local",
+            "chunk_id": null,
+            "wall_time_seconds": 0.25,
+            "exit_code": null,
+            "session_id": "session-1",
+            "session_command": "sleep 10",
+            "original_token_count": null,
+            "output": "",
+            "warnings": []
+        });
+
+        let result = command_tool_result_for_logging(&value).unwrap();
+        assert_eq!(result.session_id.as_deref(), Some("session-1"));
+        assert_eq!(result.exit_code, None);
     }
 }
 

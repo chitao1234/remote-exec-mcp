@@ -41,7 +41,7 @@ pub struct WriteStdinInput {
     pub target: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct CommandToolResult {
     pub target: String,
     pub chunk_id: Option<String>,
