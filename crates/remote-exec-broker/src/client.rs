@@ -235,5 +235,11 @@ fn normalize_content(content: &rmcp::model::Content) -> serde_json::Value {
         });
     }
 
-    serde_json::to_value(content).expect("serializing raw MCP content")
+    serde_json::to_value(content).unwrap_or_else(|err| {
+        tracing::warn!(error = %err, "failed to serialize raw MCP content");
+        serde_json::json!({
+            "type": "unsupported_content",
+            "error": err.to_string(),
+        })
+    })
 }
