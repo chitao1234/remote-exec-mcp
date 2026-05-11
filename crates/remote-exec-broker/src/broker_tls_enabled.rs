@@ -65,7 +65,10 @@ pub(crate) async fn build_daemon_https_client(
         let ca = Certificate::from_pem(&ca_pem)?;
         let identity =
             Identity::from_pem(&[client_cert_pem.as_slice(), client_key_pem.as_slice()].concat())?;
-        let mut builder = reqwest::Client::builder()
+        let mut builder = crate::daemon_client::apply_daemon_client_timeouts(
+            reqwest::Client::builder(),
+            config.timeouts,
+        )
             .use_rustls_tls()
             .tls_certs_only([ca])
             .identity(identity);
@@ -104,7 +107,7 @@ async fn build_pinned_https_client(
         .with_custom_certificate_verifier(verifier)
         .with_client_auth_cert(cert_chain, key)?;
 
-    reqwest::Client::builder()
+    crate::daemon_client::apply_daemon_client_timeouts(reqwest::Client::builder(), config.timeouts)
         .use_preconfigured_tls(tls)
         .build()
         .context("building pinned daemon client")

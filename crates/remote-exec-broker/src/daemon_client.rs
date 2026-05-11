@@ -11,7 +11,7 @@ use remote_exec_proto::rpc::{
 };
 use reqwest::header::{AUTHORIZATION, CONNECTION, CONTENT_LENGTH, HeaderValue, UPGRADE};
 
-use crate::config::{TargetConfig, TargetTransportKind};
+use crate::config::{TargetConfig, TargetTimeoutConfig, TargetTransportKind};
 use crate::tools::transfer::codec;
 
 // Upgrade covers the HTTP 101 handshake and reqwest's transition into raw I/O.
@@ -106,6 +106,7 @@ pub struct DaemonClient {
     target_name: String,
     base_url: String,
     authorization: Option<HeaderValue>,
+    request_timeout: std::time::Duration,
 }
 
 impl DaemonClient {
@@ -115,10 +116,9 @@ impl DaemonClient {
     ) -> anyhow::Result<Self> {
         let target_name = target_name.into();
         crate::install_crypto_provider()?;
+        let timeouts = config.timeouts;
         let client = match config.validated_transport(&target_name)? {
-            TargetTransportKind::Http => reqwest::Client::builder()
-                .build()
-                .map_err(anyhow::Error::from)?,
+            TargetTransportKind::Http => build_http_daemon_client(timeouts)?,
             TargetTransportKind::Https => {
                 crate::broker_tls::build_daemon_https_client(config).await?
             }
@@ -134,6 +134,7 @@ impl DaemonClient {
             target_name,
             base_url: config.base_url.clone(),
             authorization,
+            request_timeout: timeouts.request_timeout(),
         })
     }
 
@@ -456,44 +457,65 @@ impl DaemonClient {
             path,
             "sending daemon rpc"
         );
-        let response = self
-            .request(path)
-            .json(body)
-            .send()
-            .await
-            .map_err(|err| self.rpc_transport_error(path, started, err))?;
-        let response = self.ensure_rpc_success(path, started, response).await?;
+        let result = tokio::time::timeout(self.request_timeout, async {
+            let response = self
+                .request(path)
+                .json(body)
+                .send()
+                .await
+                .map_err(|err| self.rpc_transport_error(path, started, err))?;
+            let response = self.ensure_rpc_success(path, started, response).await?;
 
-        let bytes = response.bytes().await.map_err(|err| {
-            tracing::warn!(
+            let bytes = response.bytes().await.map_err(|err| {
+                tracing::warn!(
+                    target = %self.target_name,
+                    base_url = %self.base_url,
+                    path,
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    error = %err,
+                    "daemon rpc body read failed"
+                );
+                DaemonClientError::Decode(err.into())
+            })?;
+            let decoded = serde_json::from_slice(&bytes).map_err(|err| {
+                tracing::warn!(
+                    target = %self.target_name,
+                    base_url = %self.base_url,
+                    path,
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    error = %err,
+                    "daemon rpc decode failed"
+                );
+                DaemonClientError::Decode(err.into())
+            })?;
+            tracing::debug!(
                 target = %self.target_name,
                 base_url = %self.base_url,
                 path,
                 elapsed_ms = started.elapsed().as_millis() as u64,
-                error = %err,
-                "daemon rpc body read failed"
+                "daemon rpc completed"
             );
-            DaemonClientError::Decode(err.into())
-        })?;
-        let decoded = serde_json::from_slice(&bytes).map_err(|err| {
-            tracing::warn!(
-                target = %self.target_name,
-                base_url = %self.base_url,
-                path,
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                error = %err,
-                "daemon rpc decode failed"
-            );
-            DaemonClientError::Decode(err.into())
-        })?;
-        tracing::debug!(
-            target = %self.target_name,
-            base_url = %self.base_url,
-            path,
-            elapsed_ms = started.elapsed().as_millis() as u64,
-            "daemon rpc completed"
-        );
-        Ok(decoded)
+            Ok(decoded)
+        })
+        .await;
+
+        match result {
+            Ok(result) => result,
+            Err(_) => {
+                let timeout_ms = self.request_timeout.as_millis() as u64;
+                tracing::warn!(
+                    target = %self.target_name,
+                    base_url = %self.base_url,
+                    path,
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    timeout_ms,
+                    "daemon rpc timed out"
+                );
+                Err(DaemonClientError::Transport(anyhow::anyhow!(
+                    "daemon rpc `{path}` timed out after {timeout_ms} ms"
+                )))
+            }
+        }
     }
 
     async fn ensure_rpc_success(
@@ -550,6 +572,21 @@ fn build_bearer_authorization_header(
     HeaderValue::from_str(&http_auth.authorization_header_value()).map_err(anyhow::Error::from)
 }
 
+pub(crate) fn apply_daemon_client_timeouts(
+    builder: reqwest::ClientBuilder,
+    timeouts: TargetTimeoutConfig,
+) -> reqwest::ClientBuilder {
+    builder
+        .connect_timeout(timeouts.connect_timeout())
+        .read_timeout(timeouts.read_timeout())
+}
+
+fn build_http_daemon_client(timeouts: TargetTimeoutConfig) -> anyhow::Result<reqwest::Client> {
+    apply_daemon_client_timeouts(reqwest::Client::builder(), timeouts)
+        .build()
+        .map_err(anyhow::Error::from)
+}
+
 async fn open_transfer_import_body(
     archive_path: &std::path::Path,
 ) -> Result<(u64, reqwest::Body), DaemonClientError> {
@@ -600,6 +637,8 @@ fn decode_rpc_error_body(status: reqwest::StatusCode, body: String) -> DaemonCli
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -610,7 +649,43 @@ mod tests {
             target_name: "builder-a".to_string(),
             base_url: "http://127.0.0.1:9".to_string(),
             authorization,
+            request_timeout: crate::config::TargetTimeoutConfig::default().request_timeout(),
         }
+    }
+
+    #[tokio::test]
+    async fn daemon_rpc_times_out_hung_response() {
+        crate::install_crypto_provider().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf).await.unwrap();
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        });
+
+        let client = DaemonClient {
+            client: reqwest::Client::builder().build().unwrap(),
+            target_name: "builder-a".to_string(),
+            base_url: format!("http://{addr}"),
+            authorization: None,
+            request_timeout: Duration::from_millis(50),
+        };
+
+        let started = std::time::Instant::now();
+        let err = client.target_info().await.unwrap_err();
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "timeout took too long: {:?}",
+            started.elapsed()
+        );
+        assert!(
+            err.to_string()
+                .contains("daemon rpc `/v1/target-info` timed out after 50 ms"),
+            "unexpected error: {err}"
+        );
+        server.abort();
     }
 
     #[test]
@@ -722,6 +797,7 @@ mod tests {
             target_name: "builder-a".to_string(),
             base_url: format!("http://{addr}"),
             authorization: None,
+            request_timeout: crate::config::TargetTimeoutConfig::default().request_timeout(),
         }
         .port_tunnel()
         .await
