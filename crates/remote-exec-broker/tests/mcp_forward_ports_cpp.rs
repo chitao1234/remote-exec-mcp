@@ -625,6 +625,7 @@ impl Drop for CppDaemonBrokerFixture {
 
 struct TunnelDropProxy {
     active_port_tunnels: Arc<Mutex<Vec<oneshot::Sender<()>>>>,
+    background_tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
     shutdown: Option<oneshot::Sender<()>>,
     handle: Option<tokio::task::JoinHandle<()>>,
 }
@@ -786,8 +787,10 @@ impl TunnelDropProxy {
     async fn spawn(listen_addr: std::net::SocketAddr, daemon_addr: std::net::SocketAddr) -> Self {
         let listener = TcpListener::bind(listen_addr).await.unwrap();
         let active_port_tunnels = Arc::new(Mutex::new(Vec::new()));
+        let background_tasks = Arc::new(Mutex::new(Vec::new()));
         let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
         let active_port_tunnels_task = active_port_tunnels.clone();
+        let background_tasks_accept = background_tasks.clone();
         let handle = tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -800,9 +803,12 @@ impl TunnelDropProxy {
                             Err(_) => break,
                         };
                         let active_port_tunnels = active_port_tunnels_task.clone();
-                        tokio::spawn(async move {
-                            let _ = proxy_connection(stream, daemon_addr, active_port_tunnels).await;
+                        let connection_handle = tokio::spawn(async move {
+                            if let Err(err) = proxy_connection(stream, daemon_addr, active_port_tunnels).await {
+                                panic!("C++ tunnel-drop proxy connection failed: {err}");
+                            }
                         });
+                        background_tasks_accept.lock().await.push(connection_handle);
                     }
                 }
             }
@@ -810,6 +816,7 @@ impl TunnelDropProxy {
 
         Self {
             active_port_tunnels,
+            background_tasks,
             shutdown: Some(shutdown_tx),
             handle: Some(handle),
         }
@@ -820,6 +827,29 @@ impl TunnelDropProxy {
         for shutdown in active.drain(..) {
             let _ = shutdown.send(());
         }
+        drop(active);
+        self.assert_no_task_panics().await;
+    }
+
+    async fn assert_no_task_panics(&self) {
+        let finished = {
+            let mut tasks = self.background_tasks.lock().await;
+            let mut finished = Vec::new();
+            let mut pending = Vec::with_capacity(tasks.len());
+            for handle in tasks.drain(..) {
+                if handle.is_finished() {
+                    finished.push(handle);
+                } else {
+                    pending.push(handle);
+                }
+            }
+            *tasks = pending;
+            finished
+        };
+
+        for handle in finished {
+            handle.await.expect("C++ tunnel-drop proxy task panicked");
+        }
     }
 
     fn stop(&mut self) {
@@ -828,6 +858,11 @@ impl TunnelDropProxy {
         }
         if let Some(handle) = self.handle.take() {
             handle.abort();
+        }
+        if let Ok(mut tasks) = self.background_tasks.try_lock() {
+            for handle in tasks.drain(..) {
+                handle.abort();
+            }
         }
     }
 }

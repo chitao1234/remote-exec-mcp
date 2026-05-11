@@ -1,5 +1,7 @@
 use std::collections::HashSet;
+use std::future::Future;
 use std::num::NonZeroU32;
+use std::path::Path;
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -14,6 +16,7 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
+use futures_util::FutureExt;
 use hyper::upgrade;
 use hyper_util::rt::TokioIo;
 use remote_exec_host::{
@@ -28,6 +31,7 @@ use remote_exec_proto::rpc::{
     PatchApplyResponse, PortForwardProtocolVersion, RpcErrorBody, TargetInfoResponse,
 };
 use tokio::sync::{Mutex, Notify};
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
@@ -151,9 +155,11 @@ pub(crate) struct StubDaemonState {
     pub(super) image_read_response: Arc<Mutex<StubImageReadResponse>>,
     transfer_export_response: Arc<Mutex<stub_daemon_transfer::StubTransferExportResponse>>,
     transfer_path_info_response: Arc<Mutex<StubTransferPathInfoResponse>>,
+    _port_tunnel_tempdir: Arc<tempfile::TempDir>,
     port_tunnel_state: Arc<remote_exec_host::HostRuntimeState>,
     port_tunnel_control: Arc<Mutex<StubPortTunnelControl>>,
     port_tunnel_notify: Arc<Notify>,
+    background_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
 }
 
 pub(super) fn stub_daemon_state(
@@ -162,6 +168,7 @@ pub(super) fn stub_daemon_state(
     platform: &str,
     supports_pty: bool,
 ) -> StubDaemonState {
+    let port_tunnel_tempdir = Arc::new(tempfile::tempdir().expect("stub port tunnel tempdir"));
     StubDaemonState {
         target: target.to_string(),
         daemon_instance_id: Arc::new(Mutex::new(
@@ -198,9 +205,11 @@ pub(super) fn stub_daemon_state(
         transfer_path_info_response: Arc::new(Mutex::new(
             stub_daemon_transfer::default_transfer_path_info_response(),
         )),
-        port_tunnel_state: build_stub_port_tunnel_state(target),
+        _port_tunnel_tempdir: port_tunnel_tempdir.clone(),
+        port_tunnel_state: build_stub_port_tunnel_state(target, port_tunnel_tempdir.path()),
         port_tunnel_control: Arc::new(Mutex::new(StubPortTunnelControl::default())),
         port_tunnel_notify: Arc::new(Notify::new()),
+        background_tasks: Arc::new(Mutex::new(Vec::new())),
     }
 }
 
@@ -396,6 +405,42 @@ pub(crate) async fn tunnel_open_count(state: &StubDaemonState) -> usize {
     state.port_tunnel_control.lock().await.tunnel_open_count
 }
 
+async fn spawn_stub_task(
+    state: &StubDaemonState,
+    name: &'static str,
+    task: impl Future<Output = anyhow::Result<()>> + Send + 'static,
+) {
+    let handle = tokio::spawn(async move {
+        match std::panic::AssertUnwindSafe(task).catch_unwind().await {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => panic!("stub daemon background task `{name}` failed: {err:?}"),
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    });
+    state.background_tasks.lock().await.push(handle);
+}
+
+pub(crate) async fn assert_no_stub_task_panics(state: &StubDaemonState) {
+    let finished = {
+        let mut tasks = state.background_tasks.lock().await;
+        let mut finished = Vec::new();
+        let mut pending = Vec::with_capacity(tasks.len());
+        for handle in tasks.drain(..) {
+            if handle.is_finished() {
+                finished.push(handle);
+            } else {
+                pending.push(handle);
+            }
+        }
+        *tasks = pending;
+        finished
+    };
+
+    for handle in finished {
+        handle.await.expect("stub daemon background task panicked");
+    }
+}
+
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
 pub(super) async fn spawn_stub_daemon(
     certs: &TestCerts,
@@ -505,13 +550,13 @@ pub(super) async fn spawn_named_daemon_on_addr(
         }),
     };
 
-    tokio::spawn(async move {
-        remote_exec_daemon::tls::serve_tls(app, Arc::new(daemon_config))
-            .await
-            .unwrap();
-    });
-
+    let task_state = state.clone();
+    spawn_stub_task(&state, "tls-server", async move {
+        remote_exec_daemon::tls::serve_tls(app, Arc::new(daemon_config)).await
+    })
+    .await;
     wait_until_ready(certs, addr).await;
+    assert_no_stub_task_panics(&task_state).await;
 }
 
 pub(super) async fn spawn_named_plain_http_daemon_on_addr(
@@ -527,13 +572,22 @@ pub(super) async fn spawn_named_plain_http_daemon_on_listener(
     state: StubDaemonState,
 ) {
     let addr = listener.local_addr().unwrap();
-    let app = stub_router(state);
+    let app = stub_router(state.clone());
 
-    tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-
+    let task_state = state.clone();
+    spawn_stub_task(&state, "plain-http-server", async move {
+        axum::serve(listener, app).await.map_err(Into::into)
+    })
+    .await;
     wait_until_ready_http(addr).await;
+    assert_no_stub_task_panics(&task_state).await;
+}
+
+pub(crate) async fn spawn_plain_http_stub_on_listener(
+    listener: tokio::net::TcpListener,
+    state: StubDaemonState,
+) {
+    spawn_named_plain_http_daemon_on_listener(listener, state).await;
 }
 
 pub(super) fn stub_router(state: StubDaemonState) -> Router {
@@ -641,20 +695,18 @@ async fn port_tunnel(
     let on_upgrade = upgrade::on(request);
     let handler_state = state.clone();
 
-    tokio::spawn(async move {
+    spawn_stub_task(&state, "port-tunnel-upgrade", async move {
         match on_upgrade.await {
             Ok(upgraded) => {
-                if let Err(err) =
-                    handle_port_tunnel_upgrade(handler_state, TokioIo::new(upgraded)).await
-                {
-                    tracing::warn!(error = %err, "stub port tunnel upgrade failed");
-                }
+                handle_port_tunnel_upgrade(handler_state, TokioIo::new(upgraded)).await?;
             }
             Err(err) => {
-                tracing::warn!(error = %err, "stub port tunnel upgrade failed");
+                return Err(err.into());
             }
         }
-    });
+        Ok(())
+    })
+    .await;
 
     Ok((
         StatusCode::SWITCHING_PROTOCOLS,
@@ -766,11 +818,11 @@ async fn wait_until_ready_http(addr: std::net::SocketAddr) {
     });
 }
 
-fn build_stub_port_tunnel_state(target: &str) -> Arc<remote_exec_host::HostRuntimeState> {
-    let workdir = std::env::temp_dir().join(format!(
-        "remote-exec-broker-stub-port-tunnel-{}",
-        uuid::Uuid::new_v4()
-    ));
+fn build_stub_port_tunnel_state(
+    target: &str,
+    tempdir: &Path,
+) -> Arc<remote_exec_host::HostRuntimeState> {
+    let workdir = tempdir.join("port-tunnel-workdir");
     std::fs::create_dir_all(&workdir).unwrap();
     Arc::new(
         build_runtime_state(HostRuntimeConfig {
@@ -845,9 +897,15 @@ where
 
     let (mut broker_side, daemon_side) = tokio::io::duplex(256 * 1024);
     let tunnel_state = state.port_tunnel_state.clone();
-    tokio::spawn(async move {
-        let _ = remote_exec_host::port_forward::serve_tunnel(tunnel_state, daemon_side).await;
-    });
+    state
+        .port_tunnel_state
+        .background_tasks
+        .spawn("stub-inner-port-tunnel", async move {
+            remote_exec_host::port_forward::serve_tunnel(tunnel_state, daemon_side)
+                .await
+                .map_err(|err| anyhow::anyhow!("{}: {}", err.code, err.message))
+        })
+        .await;
     write_preface(&mut broker_side).await?;
     let cancel = CancellationToken::new();
     let observed = observe_broker_to_daemon_frame(&state, &first_frame).await?;

@@ -341,6 +341,7 @@ pub struct DaemonFixture {
 struct TunnelDropProxy {
     listen_addr: std::net::SocketAddr,
     active_port_tunnels: Arc<Mutex<Vec<oneshot::Sender<PortTunnelAction>>>>,
+    background_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
     shutdown: Option<oneshot::Sender<()>>,
     handle: Option<JoinHandle<()>>,
 }
@@ -382,10 +383,12 @@ impl DaemonFixture {
 
     pub async fn drop_port_tunnels(&self) {
         self.proxy.drop_port_tunnels().await;
+        self.proxy.assert_no_task_panics().await;
     }
 
     pub async fn corrupt_port_tunnels(&self) {
         self.proxy.corrupt_port_tunnels().await;
+        self.proxy.assert_no_task_panics().await;
     }
 
     pub fn target_config_fragment(&self) -> String {
@@ -462,8 +465,10 @@ impl TunnelDropProxy {
             .expect("bind tunnel drop proxy");
         let listen_addr = listener.local_addr().expect("read tunnel drop proxy addr");
         let active_port_tunnels = Arc::new(Mutex::new(Vec::new()));
+        let background_tasks = Arc::new(Mutex::new(Vec::new()));
         let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
         let active_port_tunnels_task = active_port_tunnels.clone();
+        let background_tasks_accept = background_tasks.clone();
         let handle = tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -476,9 +481,12 @@ impl TunnelDropProxy {
                             Err(_) => break,
                         };
                         let active_port_tunnels = active_port_tunnels_task.clone();
-                        tokio::spawn(async move {
-                            let _ = proxy_connection(stream, daemon_addr, active_port_tunnels).await;
+                        let connection_handle = tokio::spawn(async move {
+                            if let Err(err) = proxy_connection(stream, daemon_addr, active_port_tunnels).await {
+                                panic!("multi-target tunnel-drop proxy connection failed: {err}");
+                            }
                         });
+                        background_tasks_accept.lock().await.push(connection_handle);
                     }
                 }
             }
@@ -487,6 +495,7 @@ impl TunnelDropProxy {
         Self {
             listen_addr,
             active_port_tunnels,
+            background_tasks,
             shutdown: Some(shutdown_tx),
             handle: Some(handle),
         }
@@ -506,12 +515,40 @@ impl TunnelDropProxy {
         }
     }
 
+    async fn assert_no_task_panics(&self) {
+        let finished = {
+            let mut tasks = self.background_tasks.lock().await;
+            let mut finished = Vec::new();
+            let mut pending = Vec::with_capacity(tasks.len());
+            for handle in tasks.drain(..) {
+                if handle.is_finished() {
+                    finished.push(handle);
+                } else {
+                    pending.push(handle);
+                }
+            }
+            *tasks = pending;
+            finished
+        };
+
+        for handle in finished {
+            handle
+                .await
+                .expect("multi-target tunnel-drop proxy task panicked");
+        }
+    }
+
     fn stop(&mut self) {
         if let Some(shutdown) = self.shutdown.take() {
             let _ = shutdown.send(());
         }
         if let Some(handle) = self.handle.take() {
             handle.abort();
+        }
+        if let Ok(mut tasks) = self.background_tasks.try_lock() {
+            for handle in tasks.drain(..) {
+                handle.abort();
+            }
         }
     }
 }
@@ -880,6 +917,7 @@ mod tests {
             proxy: TunnelDropProxy {
                 listen_addr: "127.0.0.1:9443".parse().unwrap(),
                 active_port_tunnels: Arc::new(Mutex::new(Vec::new())),
+                background_tasks: Arc::new(Mutex::new(Vec::new())),
                 shutdown: None,
                 handle: None,
             },

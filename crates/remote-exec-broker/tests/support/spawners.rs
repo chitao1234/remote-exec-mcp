@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use axum::serve;
 use rmcp::{ServiceExt, transport::TokioChildProcess};
 use tempfile::TempDir;
 
@@ -15,8 +14,8 @@ use super::stub_daemon::{
     ExecWriteBehavior, StubDaemonState, set_port_forward_support, set_required_bearer_token,
     set_transfer_compression_support, spawn_named_plain_http_daemon_on_addr,
     spawn_plain_http_daemon_with_platform, spawn_plain_http_retryable_exec_write_daemon,
-    spawn_plain_http_stub_daemon, spawn_plain_http_unknown_session_exec_write_daemon,
-    stub_daemon_state, stub_router,
+    spawn_plain_http_stub_daemon, spawn_plain_http_stub_on_listener,
+    spawn_plain_http_unknown_session_exec_write_daemon, stub_daemon_state,
 };
 
 const TEST_HTTP_READY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -305,11 +304,7 @@ pub async fn spawn_broker_with_stub_daemon_http_auth(bearer_token: &str) -> Brok
     let mut stub_state = stub_daemon_state("builder-a", ExecWriteBehavior::Success, "linux", true);
     set_transfer_compression_support(&mut stub_state, false);
     set_required_bearer_token(&mut stub_state, bearer_token);
-    let app = stub_router(stub_state.clone());
-    tokio::spawn(async move {
-        serve(listener, app).await.unwrap();
-    });
-    wait_until_ready_http(addr).await;
+    spawn_plain_http_stub_on_listener(listener, stub_state.clone()).await;
     let broker_config = tempdir.path().join("broker.toml");
     let auth_config = format!(
         r#"[targets.builder-a.http_auth]
@@ -511,13 +506,7 @@ pub async fn spawn_broker_with_stub_port_forward_version(version: u32) -> Broker
     let addr = listener.local_addr().unwrap();
     let mut stub_state = stub_daemon_state("builder-a", ExecWriteBehavior::Success, "linux", true);
     set_port_forward_support(&mut stub_state, true, version);
-    let app = stub_router(stub_state.clone());
-
-    tokio::spawn(async move {
-        serve(listener, app).await.unwrap();
-    });
-
-    wait_until_ready_http(addr).await;
+    spawn_plain_http_stub_on_listener(listener, stub_state.clone()).await;
 
     let broker_config = tempdir.path().join("broker.toml");
     write_broker_config(
@@ -585,13 +574,7 @@ async fn spawn_broker_with_local_and_stub_port_forward_version_and_extra_config(
     let addr = listener.local_addr().unwrap();
     let mut stub_state = stub_daemon_state("builder-a", ExecWriteBehavior::Success, "linux", true);
     set_port_forward_support(&mut stub_state, true, version);
-    let app = stub_router(stub_state.clone());
-
-    tokio::spawn(async move {
-        serve(listener, app).await.unwrap();
-    });
-
-    wait_until_ready_http(addr).await;
+    spawn_plain_http_stub_on_listener(listener, stub_state.clone()).await;
 
     let broker_config = tempdir.path().join("broker.toml");
     write_broker_config(
@@ -627,13 +610,7 @@ pub async fn spawn_broker_with_plain_http_stub_daemon() -> BrokerFixture {
     set_transfer_compression_support(&mut stub_state, false);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let app = stub_router(stub_state.clone());
-
-    tokio::spawn(async move {
-        serve(listener, app).await.unwrap();
-    });
-
-    wait_until_ready_http(addr).await;
+    spawn_plain_http_stub_on_listener(listener, stub_state.clone()).await;
 
     let broker_config = tempdir.path().join("broker.toml");
     write_broker_config(

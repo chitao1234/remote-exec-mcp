@@ -184,6 +184,10 @@ impl BrokerFixture {
         *self.stub_state.daemon_session_id.lock().await = daemon_session_id.to_string();
     }
 
+    pub async fn assert_no_stub_task_panics(&self) {
+        super::stub_daemon::assert_no_stub_task_panics(&self.stub_state).await;
+    }
+
     pub async fn start_running_session(&self) -> String {
         let result = self
             .call_tool(
