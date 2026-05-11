@@ -10,7 +10,7 @@ use std::sync::Arc;
 use remote_exec_proto::rpc::{PatchApplyRequest, PatchApplyResponse, RpcErrorCode};
 use remote_exec_proto::sandbox::SandboxError;
 
-use crate::{AppState, HostRpcError};
+use crate::{AppState, HostRpcError, error::logged_bad_request};
 
 const LF: &str = "\n";
 const CRLF: &str = "\r\n";
@@ -28,7 +28,7 @@ pub async fn apply_patch_local(
     let cwd = crate::exec::resolve_workdir(&state, req.workdir.as_deref())
         .map_err(crate::exec::internal_error)?;
     let actions = parser::parse_patch(&req.patch)
-        .map_err(|err| crate::exec::rpc_error(RpcErrorCode::PatchFailed, err.to_string()))?;
+        .map_err(|err| logged_bad_request(RpcErrorCode::PatchFailed, err.to_string()))?;
     let summary = execute_actions(&state, &cwd, actions)
         .await
         .map_err(map_patch_error)?;
@@ -111,7 +111,7 @@ fn map_patch_error(err: anyhow::Error) -> HostRpcError {
     } else {
         RpcErrorCode::PatchFailed
     };
-    crate::exec::rpc_error(code, err.to_string())
+    logged_bad_request(code, err.to_string())
 }
 
 fn detect_line_ending(text: &str) -> &'static str {

@@ -33,7 +33,9 @@ pub(crate) fn rpc_error(
     code: RpcErrorCode,
     message: impl Into<String>,
 ) -> (StatusCode, Json<RpcErrorBody>) {
-    crate::rpc_error::host_rpc_error_response(remote_exec_host::exec::rpc_error(code, message))
+    crate::rpc_error::host_rpc_error_response(remote_exec_host::HostRpcError::new(
+        400, code, message,
+    ))
 }
 
 pub(crate) fn internal_error(err: anyhow::Error) -> (StatusCode, Json<RpcErrorBody>) {

@@ -48,6 +48,15 @@ pub(crate) fn bad_request(
     rpc_error(400, code, message)
 }
 
+pub(crate) fn logged_bad_request(
+    code: remote_exec_proto::rpc::RpcErrorCode,
+    message: impl Into<String>,
+) -> HostRpcError {
+    let message = message.into();
+    tracing::warn!(code = code.wire_value(), %message, "daemon request rejected");
+    bad_request(code, message)
+}
+
 pub(crate) fn internal(
     code: remote_exec_proto::rpc::RpcErrorCode,
     message: impl Into<String>,

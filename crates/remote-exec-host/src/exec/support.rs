@@ -41,12 +41,6 @@ pub fn ensure_sandbox_access(
     authorize_path(host_path_policy(), state.sandbox.as_ref(), access, path)
 }
 
-pub fn rpc_error(code: RpcErrorCode, message: impl Into<String>) -> HostRpcError {
-    let message = message.into();
-    tracing::warn!(code = code.wire_value(), %message, "daemon request rejected");
-    crate::error::bad_request(code, message)
-}
-
 pub fn internal_error(err: anyhow::Error) -> HostRpcError {
     let message = err.to_string();
     tracing::error!(error = %message, "daemon internal error");

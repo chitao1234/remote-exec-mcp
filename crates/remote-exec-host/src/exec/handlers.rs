@@ -6,13 +6,13 @@ use remote_exec_proto::rpc::{
 };
 use remote_exec_proto::sandbox::SandboxAccess;
 
-use crate::{AppState, HostRpcError, config::YieldTimeOperation};
+use crate::{AppState, HostRpcError, config::YieldTimeOperation, error::logged_bad_request};
 
 use super::{
     session, shell,
     support::{
         ensure_sandbox_access, finish_response, has_exited, internal_error, poll_once, poll_until,
-        resolve_workdir, rpc_error, running_response, write_chars, write_yield_time_operation,
+        resolve_workdir, running_response, write_chars, write_yield_time_operation,
     },
 };
 
@@ -86,11 +86,13 @@ pub async fn exec_write_local(
         .sessions
         .lock(&daemon_session_id)
         .await
-        .ok_or_else(|| rpc_error(RpcErrorCode::UnknownSession, "Unknown daemon session"))?;
+        .ok_or_else(|| {
+            logged_bad_request(RpcErrorCode::UnknownSession, "Unknown daemon session")
+        })?;
     let mut session = session;
 
     if !req.chars.is_empty() && !session.tty {
-        return Err(rpc_error(
+        return Err(logged_bad_request(
             RpcErrorCode::StdinClosed,
             "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open",
         ));
@@ -157,7 +159,7 @@ fn prepare_exec_start(
 ) -> Result<PreparedExecStart, HostRpcError> {
     let cwd = resolve_workdir(state, req.workdir.as_deref()).map_err(internal_error)?;
     ensure_sandbox_access(state, SandboxAccess::ExecCwd, &cwd)
-        .map_err(|err| rpc_error(RpcErrorCode::SandboxDenied, err.to_string()))?;
+        .map_err(|err| logged_bad_request(RpcErrorCode::SandboxDenied, err.to_string()))?;
     ensure_requested_tty_supported(state, req.tty)?;
     let login = resolve_login_request(state, req.login)?;
     let shell = shell::selected_shell(
@@ -292,13 +294,13 @@ fn ensure_requested_tty_supported(state: &Arc<AppState>, tty: bool) -> Result<()
         return Ok(());
     }
     if matches!(state.config.pty, crate::config::PtyMode::None) {
-        return Err(rpc_error(
+        return Err(logged_bad_request(
             RpcErrorCode::TtyDisabled,
             "tty is disabled by daemon config",
         ));
     }
     if !state.supports_pty {
-        return Err(rpc_error(
+        return Err(logged_bad_request(
             RpcErrorCode::TtyUnsupported,
             "tty is not supported on this host",
         ));
@@ -311,11 +313,11 @@ fn resolve_login_request(
     requested_login: Option<bool>,
 ) -> Result<bool, HostRpcError> {
     match requested_login {
-        Some(true) if !shell::platform_supports_login_shells() => Err(rpc_error(
+        Some(true) if !shell::platform_supports_login_shells() => Err(logged_bad_request(
             RpcErrorCode::LoginShellUnsupported,
             "login shells are not supported on this platform",
         )),
-        Some(true) if !state.config.allow_login_shell => Err(rpc_error(
+        Some(true) if !state.config.allow_login_shell => Err(logged_bad_request(
             RpcErrorCode::LoginShellDisabled,
             "login shells are disabled by daemon config",
         )),
