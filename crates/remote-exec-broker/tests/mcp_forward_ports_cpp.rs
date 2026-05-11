@@ -327,6 +327,10 @@ async fn cpp_forward_ports_reconnect_after_tunnel_drop() {
     let mut echoed = [0u8; 5];
     stream.read_exact(&mut echoed).await.unwrap();
     assert_eq!(&echoed, b"after");
+    let forward =
+        wait_for_forward_ready(&fixture.client, &forward_id, Duration::from_secs(5)).await;
+    assert_eq!(forward["status"], "open");
+    assert_eq!(forward["phase"], "ready");
 
     let close = fixture.close_forward(forward_id).await;
     assert!(!close.is_error, "close failed: {}", close.text_output);
@@ -390,7 +394,10 @@ async fn cpp_forward_ports_reconnect_after_connect_tunnel_drop() {
         .unwrap();
     assert_eq!(echoed, b"after");
 
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    let forward =
+        wait_for_forward_ready(&fixture.client, &forward_id, Duration::from_secs(5)).await;
+    assert_eq!(forward["status"], "open");
+    assert_eq!(forward["phase"], "ready");
 
     let mut later = tokio::net::TcpStream::connect(&listen_endpoint)
         .await
@@ -403,10 +410,6 @@ async fn cpp_forward_ports_reconnect_after_connect_tunnel_drop() {
         .expect("forward should stay usable after connect-side reconnect settles")
         .unwrap();
     assert_eq!(echoed_later, b"later");
-
-    let listed = fixture.list_forward(forward_id.clone()).await;
-    assert!(!listed.is_error, "list failed: {}", listed.text_output);
-    assert_eq!(listed.structured_content["forwards"][0]["status"], "open");
 
     let close = fixture.close_forward(forward_id).await;
     assert!(!close.is_error, "close failed: {}", close.text_output);
@@ -440,7 +443,6 @@ async fn real_cpp_daemon_releases_listener_after_broker_crash() {
         .to_string();
     assert_ne!(listen_endpoint, "127.0.0.1:0");
 
-    tokio::time::sleep(Duration::from_millis(200)).await;
     fixture.kill_broker().await;
 
     let (reopened_client, reopened_forward_id) = fixture
@@ -598,20 +600,6 @@ pty = "none"
             .unwrap()
     }
 
-    async fn list_forward(&self, forward_id: String) -> remote_exec_broker::client::ToolResponse {
-        self.client
-            .call_tool(
-                "forward_ports",
-                &ForwardPortsInput::List {
-                    forward_ids: vec![forward_id],
-                    listen_side: None,
-                    connect_side: None,
-                },
-            )
-            .await
-            .unwrap()
-    }
-
     async fn drop_port_tunnels(&self) {
         self.proxy.drop_port_tunnels().await;
     }
@@ -621,6 +609,35 @@ impl Drop for CppDaemonBrokerFixture {
     fn drop(&mut self) {
         self.proxy.stop();
         let _ = self.daemon.start_kill();
+    }
+}
+
+async fn wait_for_forward_ready(
+    client: &RemoteExecClient,
+    forward_id: &str,
+    timeout: Duration,
+) -> serde_json::Value {
+    let started = std::time::Instant::now();
+    loop {
+        let response = client
+            .call_tool(
+                "forward_ports",
+                &ForwardPortsInput::List {
+                    forward_ids: vec![forward_id.to_string()],
+                    listen_side: None,
+                    connect_side: None,
+                },
+            )
+            .await
+            .unwrap();
+        let entry = response.structured_content["forwards"][0].clone();
+        if entry["status"] == "open" && entry["phase"] == "ready" {
+            return entry;
+        }
+        if started.elapsed() >= timeout {
+            panic!("forward `{forward_id}` did not become ready within {timeout:?}; last={entry}");
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
 }
 
@@ -725,6 +742,8 @@ path = "/mcp"
         endpoint: &str,
         timeout: Duration,
     ) -> (RemoteExecClient, String) {
+        const CPP_PUBLIC_REOPEN_POLL: Duration = Duration::from_millis(200);
+
         let started = std::time::Instant::now();
         loop {
             let client = RemoteExecClient::connect(Connection::Config {
@@ -773,7 +792,7 @@ path = "/mcp"
                     response.text_output
                 );
             }
-            tokio::time::sleep(Duration::from_millis(200)).await;
+            tokio::time::sleep(CPP_PUBLIC_REOPEN_POLL).await;
         }
     }
 }

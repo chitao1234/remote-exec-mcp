@@ -339,7 +339,15 @@ async fn forward_ports_reconnect_after_connect_side_tunnel_drop_and_accept_new_t
         .unwrap();
     assert_eq!(echoed, b"after");
 
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    let forward = support::wait_for_forward_ready_after_reconnect(
+        &cluster.broker,
+        &forward_id,
+        Duration::from_secs(5),
+    )
+    .await;
+    assert_eq!(forward["status"], "open");
+    assert_eq!(forward["phase"], "ready");
+    assert!(forward["dropped_tcp_streams"].as_u64().unwrap_or_default() >= 1);
 
     let mut later = tokio::net::TcpStream::connect(&listen_endpoint)
         .await
@@ -352,16 +360,6 @@ async fn forward_ports_reconnect_after_connect_side_tunnel_drop_and_accept_new_t
         .expect("forward should stay usable after connect-side reconnect settles")
         .unwrap();
     assert_eq!(echoed_later, b"later");
-
-    let forward = support::wait_for_forward_ready_after_reconnect(
-        &cluster.broker,
-        &forward_id,
-        Duration::from_secs(5),
-    )
-    .await;
-    assert_eq!(forward["status"], "open");
-    assert_eq!(forward["phase"], "ready");
-    assert!(forward["dropped_tcp_streams"].as_u64().unwrap_or_default() >= 1);
 
     let closed = cluster
         .broker
@@ -460,15 +458,6 @@ async fn forward_ports_reconnect_after_connect_side_tunnel_drop_and_relays_futur
         .unwrap();
     assert_eq!(&buf[..read], b"after");
 
-    tokio::time::sleep(Duration::from_millis(250)).await;
-
-    sender.send_to(b"later", &listen_endpoint).await.unwrap();
-    let (read_later, _) = tokio::time::timeout(Duration::from_secs(5), sender.recv_from(&mut buf))
-        .await
-        .expect("udp forward should stay usable after connect-side reconnect settles")
-        .unwrap();
-    assert_eq!(&buf[..read_later], b"later");
-
     let forward = support::wait_for_forward_ready_after_reconnect(
         &cluster.broker,
         &forward_id,
@@ -483,6 +472,13 @@ async fn forward_ports_reconnect_after_connect_side_tunnel_drop_and_relays_futur
             .unwrap_or_default()
             >= 1
     );
+
+    sender.send_to(b"later", &listen_endpoint).await.unwrap();
+    let (read_later, _) = tokio::time::timeout(Duration::from_secs(5), sender.recv_from(&mut buf))
+        .await
+        .expect("udp forward should stay usable after connect-side reconnect settles")
+        .unwrap();
+    assert_eq!(&buf[..read_later], b"later");
 
     let closed = cluster
         .broker
@@ -561,7 +557,6 @@ async fn forward_ports_release_remote_listeners_after_broker_crash() {
         .to_string();
     assert_ne!(listen_endpoint, "127.0.0.1:0");
 
-    tokio::time::sleep(Duration::from_millis(200)).await;
     broker.kill().await;
 
     support::wait_for_daemon_listener_rebind(&listen_endpoint, Duration::from_secs(15)).await;
@@ -938,10 +933,13 @@ async fn transfer_files_bundles_multiple_local_sources_with_zstd_for_remote_dest
 }
 
 async fn wait_for_stale_forward_to_stop_accepting(endpoint: &str, timeout: Duration) {
+    const STALE_FORWARD_CONNECT_TIMEOUT: Duration = Duration::from_millis(250);
+    const STALE_FORWARD_POLL: Duration = Duration::from_millis(200);
+
     let started = std::time::Instant::now();
     loop {
         let result = tokio::time::timeout(
-            Duration::from_millis(250),
+            STALE_FORWARD_CONNECT_TIMEOUT,
             tokio::net::TcpStream::connect(endpoint),
         )
         .await;
@@ -951,6 +949,6 @@ async fn wait_for_stale_forward_to_stop_accepting(endpoint: &str, timeout: Durat
         if started.elapsed() >= timeout {
             panic!("stale forwarded listener at {endpoint} kept accepting after daemon restart");
         }
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::sleep(STALE_FORWARD_POLL).await;
     }
 }

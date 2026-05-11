@@ -910,6 +910,8 @@ pub async fn wait_for_forward_ready_after_reconnect(
 }
 
 pub async fn wait_for_daemon_listener_rebind(endpoint: &str, timeout: Duration) {
+    const DAEMON_LISTENER_REBIND_POLL: Duration = Duration::from_millis(200);
+
     let started = std::time::Instant::now();
     loop {
         if tokio::net::TcpListener::bind(endpoint).await.is_ok() {
@@ -918,7 +920,7 @@ pub async fn wait_for_daemon_listener_rebind(endpoint: &str, timeout: Duration) 
         if started.elapsed() >= timeout {
             panic!("daemon listener on {endpoint} was not released within {timeout:?}");
         }
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::sleep(DAEMON_LISTENER_REBIND_POLL).await;
     }
 }
 

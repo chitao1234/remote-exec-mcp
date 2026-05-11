@@ -180,8 +180,8 @@ async fn forward_ports_keeps_forward_open_after_stream_connect_error() {
         Err(err) => panic!("unexpected failed connect stream read error: {err}"),
     }
 
-    tokio::time::sleep(Duration::from_millis(250)).await;
-    let listed = list_forward(&fixture, &forward_id).await;
+    let listed =
+        wait_for_forward_status(&fixture, &forward_id, "open", Duration::from_secs(5)).await;
     assert_eq!(listed["status"], "open");
     assert_eq!(
         listed.get("last_error").and_then(|value| value.as_str()),
@@ -1206,7 +1206,7 @@ async fn forward_ports_retries_udp_connector_after_bind_error() {
     let started = std::time::Instant::now();
     let read = loop {
         client.send_to(b"second", &listen_endpoint).await.unwrap();
-        match tokio::time::timeout(Duration::from_millis(100), client.recv_from(&mut buf)).await {
+        match tokio::time::timeout(Duration::from_millis(500), client.recv_from(&mut buf)).await {
             Ok(result) => break result.unwrap().0,
             Err(_) if started.elapsed() < Duration::from_secs(5) => {}
             Err(_) => panic!("udp connector should retry after bind error"),
@@ -1256,6 +1256,39 @@ async fn forward_ports_drops_udp_datagrams_under_pressure() {
     let drops = forward["dropped_udp_datagrams"].as_u64().unwrap();
     assert!(drops > 0, "expected UDP drops under pressure");
     assert_eq!(forward["status"], "open");
+
+    let echo_socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let echo_addr = echo_socket.local_addr().unwrap();
+    tokio::spawn(async move {
+        let mut buf = [0u8; 1024];
+        loop {
+            let (read, peer) = match echo_socket.recv_from(&mut buf).await {
+                Ok(value) => value,
+                Err(_) => return,
+            };
+            if echo_socket.send_to(&buf[..read], peer).await.is_err() {
+                return;
+            }
+        }
+    });
+
+    let positive = open_udp_forward(&fixture, "local", "local", echo_addr).await;
+    let positive_forward_id = forward_id_from(&positive);
+    let positive_listen_endpoint = listen_endpoint_from(&positive);
+    let positive_client = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    send_udp_until_echo(
+        &positive_client,
+        &positive_listen_endpoint,
+        b"post-drop-positive",
+        Duration::from_secs(5),
+        "positive UDP echo should still arrive after drop accounting",
+    )
+    .await;
+    let positive_close = close_forward(&fixture, positive_forward_id).await;
+    assert_eq!(
+        positive_close.structured_content["forwards"][0]["status"],
+        "closed"
+    );
 
     let close = close_forward(&fixture, forward_id).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
@@ -1601,11 +1634,13 @@ async fn send_udp_until_echo(
     timeout: Duration,
     timeout_message: &str,
 ) {
+    const UDP_ECHO_POLL_WINDOW: Duration = Duration::from_millis(100);
+
     let started = std::time::Instant::now();
     let mut buf = vec![0u8; payload.len().max(64)];
     loop {
         socket.send_to(payload, endpoint).await.unwrap();
-        match tokio::time::timeout(Duration::from_millis(100), socket.recv_from(&mut buf)).await {
+        match tokio::time::timeout(UDP_ECHO_POLL_WINDOW, socket.recv_from(&mut buf)).await {
             Ok(result) => {
                 let read = result.unwrap().0;
                 if &buf[..read] == payload {
