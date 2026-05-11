@@ -653,7 +653,9 @@ mod tests {
         }
     }
 
-    async fn hung_response_client(timeout: Duration) -> (DaemonClient, tokio::task::JoinHandle<()>) {
+    async fn hung_response_client(
+        timeout: Duration,
+    ) -> (DaemonClient, tokio::task::JoinHandle<()>) {
         crate::install_crypto_provider().unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
