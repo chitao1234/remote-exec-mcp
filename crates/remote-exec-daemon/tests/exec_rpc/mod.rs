@@ -266,7 +266,7 @@ async fn assert_windows_tty_session_answers_terminal_queries(
         .rpc::<ExecWriteRequest, ExecResponse>(
             "/v1/exec/write",
             &ExecWriteRequest {
-                daemon_session_id: session_id,
+                daemon_session_id: session_id.to_string(),
                 chars: String::new(),
                 yield_time_ms: Some(5_000),
                 max_output_tokens: Some(2_000),
@@ -343,7 +343,7 @@ async fn assert_windows_bare_lf_advances_pty_line_reader(
         )
         .await;
 
-    let mut combined_output = started.output().output;
+    let mut combined_output = started.output().output.clone();
     combined_output.push_str(&response.output().output);
 
     let exit_code = if response.output().running {
@@ -454,7 +454,7 @@ async fn assert_windows_git_bash_tty_read_line(
         )
         .await;
 
-    let mut combined_output = started.output().output;
+    let mut combined_output = started.output().output.clone();
     combined_output.push_str(&response.output().output);
 
     let exit_code = if response.output().running {

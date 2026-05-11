@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 #[cfg(feature = "winpty")]
 use std::ffi::OsString;
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::bail;
 use vte::{Params, Parser, Perform};

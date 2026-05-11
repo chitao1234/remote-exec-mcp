@@ -276,7 +276,7 @@ async fn windows_pty_debug_report_prints_backend_diagnostics() {
             .rpc::<remote_exec_proto::rpc::ExecWriteRequest, remote_exec_proto::rpc::ExecResponse>(
                 "/v1/exec/write",
                 &remote_exec_proto::rpc::ExecWriteRequest {
-                    daemon_session_id: session_id,
+                    daemon_session_id: session_id.to_string(),
                     chars: "".to_string(),
                     yield_time_ms: Some(250),
                     max_output_tokens: Some(2_000),

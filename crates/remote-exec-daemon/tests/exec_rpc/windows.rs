@@ -22,6 +22,7 @@ async fn exec_start_allows_login_requests_on_windows_when_enabled() {
     assert_eq!(response.output().exit_code, Some(0));
     assert!(
         response
+            .output()
             .output
             .to_ascii_lowercase()
             .contains("windows-ready")
@@ -114,6 +115,7 @@ async fn exec_start_uses_configured_default_shell_when_shell_is_omitted() {
     assert_eq!(response.output().exit_code, Some(0));
     assert!(
         response
+            .output()
             .output
             .to_ascii_lowercase()
             .contains("windows-ready")
