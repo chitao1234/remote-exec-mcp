@@ -502,42 +502,6 @@ pub async fn spawn_broker_with_stub_daemon_platform(
 }
 
 pub async fn spawn_broker_with_stub_port_forward_version(version: u32) -> BrokerFixture {
-    spawn_broker_with_stub_port_forward_version_and_env(version, &[]).await
-}
-
-pub async fn spawn_broker_with_stub_port_forward_version_and_fast_heartbeat(
-    version: u32,
-) -> BrokerFixture {
-    spawn_broker_with_stub_port_forward_version_and_heartbeat(version, 25, 250).await
-}
-
-pub async fn spawn_broker_with_stub_port_forward_version_and_heartbeat(
-    version: u32,
-    heartbeat_interval_ms: u64,
-    heartbeat_timeout_ms: u64,
-) -> BrokerFixture {
-    let heartbeat_interval_ms = heartbeat_interval_ms.to_string();
-    let heartbeat_timeout_ms = heartbeat_timeout_ms.to_string();
-    spawn_broker_with_stub_port_forward_version_and_env(
-        version,
-        &[
-            (
-                "REMOTE_EXEC_TEST_PORT_TUNNEL_HEARTBEAT_INTERVAL_MS",
-                heartbeat_interval_ms.as_str(),
-            ),
-            (
-                "REMOTE_EXEC_TEST_PORT_TUNNEL_HEARTBEAT_TIMEOUT_MS",
-                heartbeat_timeout_ms.as_str(),
-            ),
-        ],
-    )
-    .await
-}
-
-async fn spawn_broker_with_stub_port_forward_version_and_env(
-    version: u32,
-    env: &[(&str, &str)],
-) -> BrokerFixture {
     let tempdir = tempfile::tempdir().unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -565,7 +529,7 @@ async fn spawn_broker_with_stub_port_forward_version_and_env(
         None,
     );
 
-    let client = spawn_broker_child_with_env(&broker_config, env).await;
+    let client = spawn_broker_child(&broker_config).await;
 
     BrokerFixture {
         _tempdir: tempdir,
@@ -576,36 +540,6 @@ async fn spawn_broker_with_stub_port_forward_version_and_env(
 
 pub async fn spawn_broker_with_local_and_stub_port_forward_version(version: u32) -> BrokerFixture {
     spawn_broker_with_local_and_stub_port_forward_version_and_extra_config(version, None).await
-}
-
-pub async fn spawn_broker_with_local_and_stub_port_forward_version_and_fast_heartbeat(
-    version: u32,
-) -> BrokerFixture {
-    spawn_broker_with_local_and_stub_port_forward_version_and_heartbeat(version, 25, 250).await
-}
-
-pub async fn spawn_broker_with_local_and_stub_port_forward_version_and_heartbeat(
-    version: u32,
-    heartbeat_interval_ms: u64,
-    heartbeat_timeout_ms: u64,
-) -> BrokerFixture {
-    let heartbeat_interval_ms = heartbeat_interval_ms.to_string();
-    let heartbeat_timeout_ms = heartbeat_timeout_ms.to_string();
-    spawn_broker_with_local_and_stub_port_forward_version_and_extra_config_and_env(
-        version,
-        None,
-        &[
-            (
-                "REMOTE_EXEC_TEST_PORT_TUNNEL_HEARTBEAT_INTERVAL_MS",
-                heartbeat_interval_ms.as_str(),
-            ),
-            (
-                "REMOTE_EXEC_TEST_PORT_TUNNEL_HEARTBEAT_TIMEOUT_MS",
-                heartbeat_timeout_ms.as_str(),
-            ),
-        ],
-    )
-    .await
 }
 
 pub async fn spawn_broker_with_local_and_stub_port_forward_version_and_tunnel_queue_limit(
@@ -637,19 +571,6 @@ pub async fn spawn_broker_with_local_and_stub_port_forward_version_and_port_forw
 async fn spawn_broker_with_local_and_stub_port_forward_version_and_extra_config(
     version: u32,
     extra_top_level: Option<&str>,
-) -> BrokerFixture {
-    spawn_broker_with_local_and_stub_port_forward_version_and_extra_config_and_env(
-        version,
-        extra_top_level,
-        &[],
-    )
-    .await
-}
-
-async fn spawn_broker_with_local_and_stub_port_forward_version_and_extra_config_and_env(
-    version: u32,
-    extra_top_level: Option<&str>,
-    env: &[(&str, &str)],
 ) -> BrokerFixture {
     remote_exec_daemon::install_crypto_provider().unwrap();
 
@@ -686,7 +607,7 @@ async fn spawn_broker_with_local_and_stub_port_forward_version_and_extra_config_
         extra_top_level,
     );
 
-    let client = spawn_broker_child_with_env(&broker_config, env).await;
+    let client = spawn_broker_child(&broker_config).await;
 
     BrokerFixture {
         _tempdir: tempdir,

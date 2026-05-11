@@ -498,8 +498,7 @@ async fn forward_ports_recovers_idle_connect_tunnel_after_heartbeat_timeout() {
 
 #[tokio::test]
 async fn forward_ports_listen_side_recovery_retries_transient_connect_reopen_failures() {
-    let fixture =
-        support::spawners::spawn_broker_with_stub_port_forward_version_and_fast_heartbeat(4).await;
+    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
 
     let echo = spawn_tcp_echo().await;
@@ -530,8 +529,7 @@ async fn forward_ports_listen_side_recovery_retries_transient_connect_reopen_fai
 
 #[tokio::test]
 async fn forward_ports_reports_resumed_listen_ready_while_connect_reopens_after_listen_recovery() {
-    let fixture =
-        support::spawners::spawn_broker_with_stub_port_forward_version_and_fast_heartbeat(4).await;
+    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
 
     let echo = spawn_tcp_echo().await;
@@ -560,11 +558,7 @@ async fn forward_ports_reports_resumed_listen_ready_while_connect_reopens_after_
 
 #[tokio::test]
 async fn forward_ports_reports_reconnecting_until_connect_side_is_ready() {
-    let fixture =
-        support::spawners::spawn_broker_with_local_and_stub_port_forward_version_and_heartbeat(
-            4, 100, 1000,
-        )
-        .await;
+    let fixture = support::spawners::spawn_broker_with_local_and_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
 
     let echo = spawn_tcp_echo().await;
@@ -670,8 +664,7 @@ max_reconnecting_forwards = 1
 
 #[tokio::test]
 async fn forward_ports_fails_when_resume_deadline_expires() {
-    let fixture =
-        support::spawners::spawn_broker_with_stub_port_forward_version_and_fast_heartbeat(4).await;
+    let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
     support::stub_daemon::block_session_resume(&fixture.stub_state).await;
     let blackhole = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

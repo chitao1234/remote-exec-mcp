@@ -15,7 +15,7 @@ use tokio_util::sync::CancellationToken;
 use crate::daemon_client::DaemonClientError;
 
 use super::events::{ForwardSideEvent, TunnelErrorMeta};
-use super::{port_tunnel_heartbeat_interval, port_tunnel_heartbeat_timeout};
+use super::timings::timings;
 
 pub struct PortTunnel {
     tx: mpsc::Sender<QueuedFrame>,
@@ -246,8 +246,9 @@ async fn run_heartbeat_loop(
     mut ack_rx: watch::Receiver<u64>,
     cancel: CancellationToken,
 ) {
-    let heartbeat_interval = port_tunnel_heartbeat_interval();
-    let heartbeat_timeout = port_tunnel_heartbeat_timeout();
+    let timing = timings();
+    let heartbeat_interval = timing.heartbeat_interval;
+    let heartbeat_timeout = timing.heartbeat_timeout;
     let mut next_nonce = 1u64;
     loop {
         tokio::select! {
