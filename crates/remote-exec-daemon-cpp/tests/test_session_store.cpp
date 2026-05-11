@@ -94,7 +94,10 @@ static void assert_unknown_session(
             true,
             1UL,
             DEFAULT_MAX_OUTPUT_TOKENS,
-            yield_time
+            yield_time,
+            false,
+            0U,
+            0U
         );
     } catch (const UnknownSessionError&) {
         rejected = true;
@@ -403,7 +406,10 @@ static void assert_stdin_and_tty_behavior(
             true,
             250UL,
             DEFAULT_MAX_OUTPUT_TOKENS,
-            yield_time
+            yield_time,
+            false,
+            0U,
+            0U
         );
     } catch (const StdinClosedError& ex) {
         stdin_closed_rejected =
@@ -433,7 +439,10 @@ static void assert_stdin_and_tty_behavior(
             true,
             1000UL,
             DEFAULT_MAX_OUTPUT_TOKENS,
-            fast_yield
+            fast_yield,
+            false,
+            0U,
+            0U
         );
         assert(!resumed.at("running").get<bool>());
         assert(resumed.at("exit_code").get<int>() == 0);
@@ -473,7 +482,10 @@ static void assert_stdin_and_tty_behavior(
                 true,
                 5000UL,
                 DEFAULT_MAX_OUTPUT_TOKENS,
-                yield_time
+                yield_time,
+                false,
+                0U,
+                0U
             );
         });
 
@@ -485,7 +497,10 @@ static void assert_stdin_and_tty_behavior(
             true,
             250UL,
             DEFAULT_MAX_OUTPUT_TOKENS,
-            yield_time
+            yield_time,
+            false,
+            0U,
+            0U
         );
         const std::uint64_t fast_elapsed_ms = platform::monotonic_ms() - fast_started_at;
         assert(
@@ -517,7 +532,10 @@ static void assert_stdin_and_tty_behavior(
             true,
             5000UL,
             DEFAULT_MAX_OUTPUT_TOKENS,
-            yield_time
+            yield_time,
+            false,
+            0U,
+            0U
         );
         assert(!tty_completed.at("running").get<bool>());
         assert(tty_completed.at("exit_code").get<int>() == 0);
@@ -525,6 +543,54 @@ static void assert_stdin_and_tty_behavior(
             normalize_output(tty_completed.at("output").get<std::string>());
         assert(normalized_tty_output.find("hello\n") != std::string::npos);
         assert(normalized_tty_output.find("input:hello\n") != std::string::npos);
+
+        const Json resize_running = start_test_command(
+            store,
+            "printf ready; IFS= read line; stty size; sleep 30",
+            root.string(),
+            shell,
+            true,
+            50UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            fast_yield,
+            64UL
+        );
+        assert(resize_running.at("running").get<bool>());
+        const Json resized = store.write_stdin(
+            resize_running.at("daemon_session_id").get<std::string>(),
+            "\n",
+            true,
+            1000UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            fast_yield,
+            true,
+            33U,
+            101U
+        );
+        assert(resized.at("running").get<bool>());
+        assert(
+            normalize_output(resized.at("output").get<std::string>())
+                .find("33 101") != std::string::npos
+        );
+
+        bool non_tty_resize_rejected = false;
+        try {
+            (void)store.write_stdin(
+                non_tty_running.at("daemon_session_id").get<std::string>(),
+                "",
+                true,
+                250UL,
+                DEFAULT_MAX_OUTPUT_TOKENS,
+                yield_time,
+                true,
+                33U,
+                101U
+            );
+        } catch (const ProcessPtyResizeUnsupportedError& ex) {
+            non_tty_resize_rejected =
+                std::string(ex.what()).find("requires a tty session") != std::string::npos;
+        }
+        assert(non_tty_resize_rejected);
     }
 #else
     const Json xp_running = start_test_command(
@@ -548,7 +614,10 @@ static void assert_stdin_and_tty_behavior(
         true,
         5000UL,
         DEFAULT_MAX_OUTPUT_TOKENS,
-        yield_time
+        yield_time,
+        false,
+        0U,
+        0U
     );
     assert(!xp_completed.at("running").get<bool>());
     assert(xp_completed.at("exit_code").get<int>() == 0);
@@ -619,7 +688,10 @@ static void assert_pruning_and_recency_behavior(
                     true,
                     1UL,
                     DEFAULT_MAX_OUTPUT_TOKENS,
-                    fast_yield
+                    fast_yield,
+                    false,
+                    0U,
+                    0U
                 )
                 .at("running")
                 .get<bool>()
@@ -632,7 +704,10 @@ static void assert_pruning_and_recency_behavior(
                     true,
                     1UL,
                     DEFAULT_MAX_OUTPUT_TOKENS,
-                    fast_yield
+                    fast_yield,
+                    false,
+                    0U,
+                    0U
                 )
                 .at("running")
                 .get<bool>()
@@ -670,7 +745,10 @@ static void assert_pruning_and_recency_behavior(
             true,
             1UL,
             DEFAULT_MAX_OUTPUT_TOKENS,
-            fast_yield
+            fast_yield,
+            false,
+            0U,
+            0U
         );
         assert(first_touch.at("running").get<bool>());
 
@@ -699,7 +777,10 @@ static void assert_pruning_and_recency_behavior(
                     true,
                     1UL,
                     DEFAULT_MAX_OUTPUT_TOKENS,
-                    fast_yield
+                    fast_yield,
+                    false,
+                    0U,
+                    0U
                 )
                 .at("running")
                 .get<bool>()
@@ -760,7 +841,10 @@ static void assert_pruning_and_recency_behavior(
                     true,
                     1UL,
                     DEFAULT_MAX_OUTPUT_TOKENS,
-                    fast_yield
+                    fast_yield,
+                    false,
+                    0U,
+                    0U
                 )
                 .at("running")
                 .get<bool>()
@@ -797,7 +881,10 @@ static void assert_pruning_and_recency_behavior(
                     true,
                     1UL,
                     DEFAULT_MAX_OUTPUT_TOKENS,
-                    fast_yield
+                    fast_yield,
+                    false,
+                    0U,
+                    0U
                 )
                 .at("running")
                 .get<bool>()
@@ -824,7 +911,10 @@ static void assert_pruning_and_recency_behavior(
                     true,
                     1UL,
                     DEFAULT_MAX_OUTPUT_TOKENS,
-                    fast_yield
+                    fast_yield,
+                    false,
+                    0U,
+                    0U
                 )
                 .at("running")
                 .get<bool>()
@@ -887,7 +977,10 @@ static void assert_threshold_warnings_and_unknown_sessions(
             true,
             250UL,
             DEFAULT_MAX_OUTPUT_TOKENS,
-            yield_time
+            yield_time,
+            false,
+            0U,
+            0U
         );
     } catch (const UnknownSessionError&) {
         unknown_session_rejected = true;

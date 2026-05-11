@@ -7,8 +7,9 @@ mod transfer;
 
 pub use error::{RpcErrorBody, RpcErrorCode};
 pub use exec::{
-    ExecCompletedResponse, ExecOutputResponse, ExecResponse, ExecRunningResponse, ExecStartRequest,
-    ExecStartResponse, ExecWarning, ExecWriteRequest, ExecWriteResponse, WarningCode,
+    ExecCompletedResponse, ExecOutputResponse, ExecPtySize, ExecResponse, ExecRunningResponse,
+    ExecStartRequest, ExecStartResponse, ExecWarning, ExecWriteRequest, ExecWriteResponse,
+    WarningCode,
 };
 pub use image::{EmptyResponse, ImageReadRequest, ImageReadResponse};
 pub use patch::{PatchApplyRequest, PatchApplyResponse};

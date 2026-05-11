@@ -95,7 +95,10 @@ public:
         bool has_yield_time_ms,
         unsigned long yield_time_ms,
         unsigned long max_output_tokens,
-        const YieldTimeConfig& yield_time
+        const YieldTimeConfig& yield_time,
+        bool has_pty_size,
+        unsigned short pty_rows,
+        unsigned short pty_cols
     );
 
 private:

@@ -17,6 +17,12 @@ pub struct ExecStartRequest {
     pub login: Option<bool>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct ExecPtySize {
+    pub rows: u16,
+    pub cols: u16,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExecWriteRequest {
     pub daemon_session_id: String,
@@ -25,6 +31,8 @@ pub struct ExecWriteRequest {
     pub yield_time_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pty_size: Option<ExecPtySize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -267,6 +275,7 @@ mod tests {
             chars: String::new(),
             yield_time_ms: None,
             max_output_tokens: None,
+            pty_size: None,
         };
 
         let json = serde_json::to_value(&request).unwrap();
@@ -276,6 +285,34 @@ mod tests {
             serde_json::json!({
                 "daemon_session_id": "daemon-session-1",
                 "chars": "",
+            })
+        );
+    }
+
+    #[test]
+    fn exec_write_request_serializes_pty_size() {
+        let request = ExecWriteRequest {
+            daemon_session_id: "daemon-session-1".to_string(),
+            chars: String::new(),
+            yield_time_ms: None,
+            max_output_tokens: None,
+            pty_size: Some(super::ExecPtySize {
+                rows: 33,
+                cols: 101,
+            }),
+        };
+
+        let json = serde_json::to_value(&request).unwrap();
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "daemon_session_id": "daemon-session-1",
+                "chars": "",
+                "pty_size": {
+                    "rows": 33,
+                    "cols": 101,
+                },
             })
         );
     }

@@ -106,6 +106,18 @@ pub async fn exec_write_local(
     };
     let mut session = session;
 
+    if let Some(size) = req.pty_size {
+        if size.rows == 0 || size.cols == 0 {
+            return Err(logged_bad_request(
+                RpcErrorCode::InvalidPtySize,
+                "PTY rows and cols must be greater than zero",
+            ));
+        }
+        super::support::resize_pty(&mut session, size)
+            .await
+            .map_err(|err| logged_bad_request(RpcErrorCode::TtyUnsupported, err.to_string()))?;
+    }
+
     if !req.chars.is_empty() && !session.tty {
         return Err(logged_bad_request(
             RpcErrorCode::StdinClosed,

@@ -50,6 +50,53 @@ async fn write_stdin_routes_by_public_session_id_and_preserves_original_command_
 }
 
 #[tokio::test]
+async fn write_stdin_forwards_pty_size_to_daemon_session() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
+    let start = fixture
+        .call_tool(
+            "exec_command",
+            serde_json::json!({
+                "target": "builder-a",
+                "cmd": "sleep 30",
+                "tty": true,
+                "yield_time_ms": 250,
+            }),
+        )
+        .await;
+    let session_id = start
+        .structured_content
+        .get("session_id")
+        .and_then(|value| value.as_str())
+        .expect("public session id");
+
+    fixture
+        .call_tool(
+            "write_stdin",
+            serde_json::json!({
+                "session_id": session_id,
+                "chars": "",
+                "pty_size": {
+                    "rows": 33,
+                    "cols": 101,
+                },
+            }),
+        )
+        .await;
+
+    let forwarded = fixture
+        .last_exec_write_request()
+        .await
+        .expect("write request");
+    assert_eq!(
+        forwarded.pty_size,
+        Some(remote_exec_proto::rpc::ExecPtySize {
+            rows: 33,
+            cols: 101
+        })
+    );
+}
+
+#[tokio::test]
 async fn write_stdin_wraps_unknown_public_session_as_unknown_process_id() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
 

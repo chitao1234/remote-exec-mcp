@@ -765,6 +765,42 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
         "stdin_closed"
     );
 
+    const HttpResponse invalid_pty_size_response = route_request(
+        state,
+        json_request(
+            "/v1/exec/write",
+            Json{
+                {"daemon_session_id", non_tty_started.at("daemon_session_id").get<std::string>()},
+                {"chars", ""},
+                {"yield_time_ms", 250},
+                {"pty_size", Json{{"rows", 0}, {"cols", 80}}},
+            }
+        )
+    );
+    assert(invalid_pty_size_response.status == 400);
+    assert(
+        Json::parse(invalid_pty_size_response.body).at("code").get<std::string>() ==
+        "invalid_pty_size"
+    );
+
+    const HttpResponse non_tty_resize_response = route_request(
+        state,
+        json_request(
+            "/v1/exec/write",
+            Json{
+                {"daemon_session_id", non_tty_started.at("daemon_session_id").get<std::string>()},
+                {"chars", ""},
+                {"yield_time_ms", 250},
+                {"pty_size", Json{{"rows", 33}, {"cols", 101}}},
+            }
+        )
+    );
+    assert(non_tty_resize_response.status == 400);
+    assert(
+        Json::parse(non_tty_resize_response.body).at("code").get<std::string>() ==
+        "tty_unsupported"
+    );
+
     if (process_session_supports_pty()) {
         const HttpResponse slow_start_response = route_request(
             state,
@@ -881,6 +917,43 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
         const std::string output = normalize_output(completed.at("output").get<std::string>());
         assert(output.find("hello\n") != std::string::npos);
         assert(output.find("input:hello\n") != std::string::npos);
+
+        const HttpResponse resize_start_response = route_request(
+            state,
+            json_request(
+                "/v1/exec/start",
+                Json{
+                    {"cmd", "printf ready; IFS= read line; stty size; sleep 30"},
+                    {"workdir", root.string()},
+                    {"login", false},
+                    {"tty", true},
+                    {"yield_time_ms", 250},
+                }
+            )
+        );
+        assert(resize_start_response.status == 200);
+        const Json resize_started = Json::parse(resize_start_response.body);
+        assert(resize_started.at("running").get<bool>());
+
+        const HttpResponse resize_write_response = route_request(
+            state,
+            json_request(
+                "/v1/exec/write",
+                Json{
+                    {"daemon_session_id", resize_started.at("daemon_session_id").get<std::string>()},
+                    {"chars", "\n"},
+                    {"yield_time_ms", 1000},
+                    {"pty_size", Json{{"rows", 33}, {"cols", 101}}},
+                }
+            )
+        );
+        assert(resize_write_response.status == 200);
+        const Json resized = Json::parse(resize_write_response.body);
+        assert(resized.at("running").get<bool>());
+        assert(
+            normalize_output(resized.at("output").get<std::string>())
+                .find("33 101") != std::string::npos
+        );
     }
 #endif
 }

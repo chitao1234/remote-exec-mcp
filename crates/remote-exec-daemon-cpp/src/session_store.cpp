@@ -643,7 +643,10 @@ Json SessionStore::write_stdin(
     bool has_yield_time_ms,
     unsigned long yield_time_ms,
     unsigned long max_output_tokens,
-    const YieldTimeConfig& yield_time
+    const YieldTimeConfig& yield_time,
+    bool has_pty_size,
+    unsigned short pty_rows,
+    unsigned short pty_cols
 ) {
     std::shared_ptr<LiveSession> session;
     {
@@ -681,6 +684,15 @@ Json SessionStore::write_stdin(
                     "unknown daemon session `" + daemon_session_id + "`"
                 );
                 throw UnknownSessionError("Unknown daemon session");
+            }
+
+            if (has_pty_size) {
+                if (pty_rows == 0U || pty_cols == 0U) {
+                    throw ProcessPtyResizeUnsupportedError(
+                        "PTY rows and cols must be greater than zero"
+                    );
+                }
+                session->process->resize_pty(pty_rows, pty_cols);
             }
 
             if (!chars.empty()) {

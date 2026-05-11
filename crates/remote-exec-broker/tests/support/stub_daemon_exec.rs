@@ -82,6 +82,7 @@ pub(super) async fn exec_write(
     Json(req): Json<ExecWriteRequest>,
 ) -> Result<Response, (StatusCode, Json<RpcErrorBody>)> {
     assert_eq!(req.daemon_session_id, "daemon-session-1");
+    *state.last_exec_write_request.lock().await = Some(req.clone());
     let mut behavior = state.exec_write_behavior.lock().await;
     let response_behavior = *behavior;
     match *behavior {

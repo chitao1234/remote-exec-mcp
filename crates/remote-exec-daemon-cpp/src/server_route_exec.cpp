@@ -15,6 +15,49 @@ unsigned long requested_max_output_tokens(const Json& body) {
     return it == body.end() ? DEFAULT_MAX_OUTPUT_TOKENS : it->get<unsigned long>();
 }
 
+struct RequestedPtySize {
+    bool present;
+    unsigned short rows;
+    unsigned short cols;
+};
+
+RequestedPtySize requested_pty_size(const Json& body, HttpResponse* response) {
+    RequestedPtySize result;
+    result.present = false;
+    result.rows = 0U;
+    result.cols = 0U;
+
+    const Json::const_iterator pty_size_it = body.find("pty_size");
+    if (pty_size_it == body.end() || pty_size_it->is_null()) {
+        return result;
+    }
+
+    try {
+        const Json& pty_size = *pty_size_it;
+        const unsigned long rows = pty_size.at("rows").get<unsigned long>();
+        const unsigned long cols = pty_size.at("cols").get<unsigned long>();
+        if (rows == 0UL || cols == 0UL || rows > 65535UL || cols > 65535UL) {
+            *response = make_rpc_error_response(
+                400,
+                "invalid_pty_size",
+                "PTY rows and cols must be between 1 and 65535"
+            );
+            return result;
+        }
+        result.present = true;
+        result.rows = static_cast<unsigned short>(rows);
+        result.cols = static_cast<unsigned short>(cols);
+        return result;
+    } catch (const Json::exception& ex) {
+        *response = make_rpc_error_response(
+            400,
+            "invalid_pty_size",
+            std::string("invalid PTY size: ") + ex.what()
+        );
+        return result;
+    }
+}
+
 }  // namespace
 
 HttpResponse handle_exec_start(AppState& state, const HttpRequest& request) {
@@ -105,6 +148,10 @@ HttpResponse handle_exec_write(AppState& state, const HttpRequest& request) {
         const bool has_yield_time_ms = yield_time_it != body.end();
         const unsigned long yield_time_ms =
             has_yield_time_ms ? yield_time_it->get<unsigned long>() : 0UL;
+        const RequestedPtySize pty_size = requested_pty_size(body, &response);
+        if (response.status != 200) {
+            return response;
+        }
         {
             std::ostringstream message;
             message << "exec/write daemon_session_id=`"
@@ -118,7 +165,10 @@ HttpResponse handle_exec_write(AppState& state, const HttpRequest& request) {
             has_yield_time_ms,
             yield_time_ms,
             requested_max_output_tokens(body),
-            state.config.yield_time
+            state.config.yield_time,
+            pty_size.present,
+            pty_size.rows,
+            pty_size.cols
         );
         exec_response["daemon_instance_id"] = state.daemon_instance_id;
         write_json(response, exec_response);
@@ -128,6 +178,13 @@ HttpResponse handle_exec_write(AppState& state, const HttpRequest& request) {
     } catch (const StdinClosedError& ex) {
         log_message(LOG_WARN, "server", std::string("exec/write stdin closed: ") + ex.what());
         write_rpc_error(response, 400, "stdin_closed", ex.what());
+    } catch (const ProcessPtyResizeUnsupportedError& ex) {
+        log_message(
+            LOG_WARN,
+            "server",
+            std::string("exec/write pty resize unsupported: ") + ex.what()
+        );
+        write_rpc_error(response, 400, "tty_unsupported", ex.what());
     } catch (const Json::exception& ex) {
         log_message(LOG_WARN, "server", std::string("exec/write bad request: ") + ex.what());
         write_rpc_error(response, 400, "bad_request", ex.what());

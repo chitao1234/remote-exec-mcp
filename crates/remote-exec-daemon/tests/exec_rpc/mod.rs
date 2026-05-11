@@ -270,6 +270,7 @@ async fn assert_windows_tty_session_answers_terminal_queries(
                 chars: String::new(),
                 yield_time_ms: Some(5_000),
                 max_output_tokens: Some(2_000),
+                pty_size: None,
             },
         )
         .await;
@@ -339,6 +340,7 @@ async fn assert_windows_bare_lf_advances_pty_line_reader(
                 chars: "ping\n".to_string(),
                 yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
                 max_output_tokens: None,
+                pty_size: None,
             },
         )
         .await;
@@ -355,6 +357,7 @@ async fn assert_windows_bare_lf_advances_pty_line_reader(
                     chars: String::new(),
                     yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
                     max_output_tokens: None,
+                    pty_size: None,
                 },
             )
             .await;
@@ -450,6 +453,7 @@ async fn assert_windows_git_bash_tty_read_line(
                 chars: "ping\n".to_string(),
                 yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
                 max_output_tokens: None,
+                pty_size: None,
             },
         )
         .await;
@@ -466,6 +470,7 @@ async fn assert_windows_git_bash_tty_read_line(
                     chars: String::new(),
                     yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
                     max_output_tokens: None,
+                    pty_size: None,
                 },
             )
             .await;

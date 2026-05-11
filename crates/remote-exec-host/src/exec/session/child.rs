@@ -88,4 +88,30 @@ impl SessionChild {
 
         Ok(())
     }
+
+    pub(super) fn resize_pty(
+        &mut self,
+        size: remote_exec_proto::rpc::ExecPtySize,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            size.rows > 0 && size.cols > 0,
+            "PTY rows and cols must be greater than zero"
+        );
+        match self {
+            SessionChild::Pty(pty) => pty
+                .master
+                .resize(portable_pty::PtySize {
+                    rows: size.rows,
+                    cols: size.cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })
+                .map_err(Into::into),
+            #[cfg(all(windows, feature = "winpty"))]
+            SessionChild::Winpty(_) => {
+                anyhow::bail!("PTY resize is not supported by the winpty backend")
+            }
+            SessionChild::Pipe(_) => anyhow::bail!("PTY resize requires a tty session"),
+        }
+    }
 }

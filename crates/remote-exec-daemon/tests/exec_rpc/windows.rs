@@ -651,6 +651,7 @@ async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens_on_windows() 
                     chars: String::new(),
                     yield_time_ms: Some(5_000),
                     max_output_tokens: Some(3),
+                    pty_size: None,
                 },
             )
             .await;
@@ -697,6 +698,7 @@ async fn exec_write_rejects_non_tty_sessions_when_chars_are_present_on_windows()
                 chars: "pwd\n".to_string(),
                 yield_time_ms: Some(250),
                 max_output_tokens: Some(2_000),
+                pty_size: None,
             },
         )
         .await;
@@ -744,6 +746,7 @@ async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon_on_windows(
                     chars: String::new(),
                     yield_time_ms: Some(5_000),
                     max_output_tokens: None,
+                    pty_size: None,
                 })
                 .send()
                 .await
@@ -769,6 +772,7 @@ async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon_on_windows(
                     chars: "ping\n".to_string(),
                     yield_time_ms: Some(250),
                     max_output_tokens: None,
+                    pty_size: None,
                 },
             )
             .await;

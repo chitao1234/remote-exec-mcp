@@ -548,6 +548,7 @@ async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens() {
                 chars: "".to_string(),
                 yield_time_ms: Some(5_000),
                 max_output_tokens: Some(3),
+                pty_size: None,
             },
         )
         .await;
@@ -590,6 +591,7 @@ async fn exec_write_rejects_non_tty_sessions_when_chars_are_present() {
                 chars: "pwd\n".to_string(),
                 yield_time_ms: Some(250),
                 max_output_tokens: Some(2_000),
+                pty_size: None,
             },
         )
         .await;
@@ -629,6 +631,7 @@ async fn exec_write_round_trips_pty_input_without_echo_assumptions() {
                 chars: "ping pong\n".to_string(),
                 yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
                 max_output_tokens: None,
+                pty_size: None,
             },
         )
         .await;
@@ -640,6 +643,91 @@ async fn exec_write_round_trips_pty_input_without_echo_assumptions() {
             .output
             .contains("__RESULT__:ping pong:__END__")
     );
+}
+
+#[tokio::test]
+async fn exec_write_resizes_pty_before_polling_output() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let started = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "printf ready; IFS= read -r _; stty size; sleep 30".to_string(),
+                workdir: None,
+                shell: Some(TEST_SHELL.to_string()),
+                tty: true,
+                yield_time_ms: Some(250),
+                max_output_tokens: None,
+                login: Some(false),
+            },
+        )
+        .await;
+    assert!(started.output().running);
+
+    let response = fixture
+        .rpc::<ExecWriteRequest, ExecResponse>(
+            "/v1/exec/write",
+            &ExecWriteRequest {
+                daemon_session_id: started
+                    .daemon_session_id()
+                    .expect("live session")
+                    .to_string(),
+                chars: "\n".to_string(),
+                yield_time_ms: Some(2_000),
+                max_output_tokens: None,
+                pty_size: Some(remote_exec_proto::rpc::ExecPtySize {
+                    rows: 33,
+                    cols: 101,
+                }),
+            },
+        )
+        .await;
+
+    assert!(response.output().running);
+    assert!(
+        response.output().output.contains("33 101"),
+        "PTY size output did not include resized dimensions: {:?}",
+        response.output().output
+    );
+}
+
+#[tokio::test]
+async fn exec_write_rejects_zero_pty_size() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let started = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &ExecStartRequest {
+                cmd: "sleep 30".to_string(),
+                workdir: None,
+                shell: Some(TEST_SHELL.to_string()),
+                tty: true,
+                yield_time_ms: Some(250),
+                max_output_tokens: None,
+                login: Some(false),
+            },
+        )
+        .await;
+    assert!(started.output().running);
+
+    let err = fixture
+        .rpc_error(
+            "/v1/exec/write",
+            &ExecWriteRequest {
+                daemon_session_id: started
+                    .daemon_session_id()
+                    .expect("live session")
+                    .to_string(),
+                chars: String::new(),
+                yield_time_ms: Some(250),
+                max_output_tokens: None,
+                pty_size: Some(remote_exec_proto::rpc::ExecPtySize { rows: 0, cols: 80 }),
+            },
+        )
+        .await;
+
+    assert_eq!(err.code, "invalid_pty_size");
+    assert!(err.message.contains("greater than zero"));
 }
 
 #[tokio::test]
@@ -688,6 +776,7 @@ async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon() {
                 chars: "".to_string(),
                 yield_time_ms: Some(5_000),
                 max_output_tokens: None,
+                pty_size: None,
             })
             .send()
             .await
@@ -713,6 +802,7 @@ async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon() {
                 chars: "ping\n".to_string(),
                 yield_time_ms: Some(250),
                 max_output_tokens: None,
+                pty_size: None,
             },
         )
         .await;

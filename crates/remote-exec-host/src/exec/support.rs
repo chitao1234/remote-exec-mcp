@@ -65,6 +65,13 @@ pub(super) async fn write_chars(
     session.write(chars).await
 }
 
+pub(super) async fn resize_pty(
+    session: &mut session::LiveSession,
+    size: remote_exec_proto::rpc::ExecPtySize,
+) -> anyhow::Result<()> {
+    session.resize_pty(size).await
+}
+
 pub(super) async fn poll_until(
     session: &mut session::LiveSession,
     yield_time_ms: u64,

@@ -108,6 +108,12 @@ impl BrokerFixture {
         self.stub_state.last_patch_request.lock().await.clone()
     }
 
+    pub async fn last_exec_write_request(
+        &self,
+    ) -> Option<remote_exec_proto::rpc::ExecWriteRequest> {
+        self.stub_state.last_exec_write_request.lock().await.clone()
+    }
+
     pub async fn last_transfer_import(&self) -> Option<StubTransferImportCapture> {
         self.stub_state.last_transfer_import.lock().await.clone()
     }

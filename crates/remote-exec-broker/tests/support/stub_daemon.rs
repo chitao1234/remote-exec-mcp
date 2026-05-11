@@ -24,8 +24,8 @@ use remote_exec_proto::port_tunnel::{
     UPGRADE_TOKEN, read_frame, read_preface, write_frame, write_preface,
 };
 use remote_exec_proto::rpc::{
-    ExecWarning, HealthCheckResponse, ImageReadResponse, PatchApplyRequest, PatchApplyResponse,
-    PortForwardProtocolVersion, RpcErrorBody, TargetInfoResponse,
+    ExecWarning, ExecWriteRequest, HealthCheckResponse, ImageReadResponse, PatchApplyRequest,
+    PatchApplyResponse, PortForwardProtocolVersion, RpcErrorBody, TargetInfoResponse,
 };
 use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
@@ -140,6 +140,7 @@ pub(crate) struct StubDaemonState {
     pub(super) exec_start_behavior: Arc<Mutex<ExecStartBehavior>>,
     pub(super) exec_start_warnings: Arc<Mutex<Vec<ExecWarning>>>,
     pub(super) exec_start_calls: Arc<Mutex<usize>>,
+    pub(super) last_exec_write_request: Arc<Mutex<Option<ExecWriteRequest>>>,
     pub(super) last_patch_request: Arc<Mutex<Option<PatchApplyRequest>>>,
     pub(super) last_transfer_import: Arc<Mutex<Option<StubTransferImportCapture>>>,
     pub(super) last_transfer_export: Arc<Mutex<Option<StubTransferExportCapture>>>,
@@ -172,6 +173,7 @@ pub(super) fn stub_daemon_state(
         exec_start_behavior: Arc::new(Mutex::new(ExecStartBehavior::Success)),
         exec_start_warnings: Arc::new(Mutex::new(Vec::new())),
         exec_start_calls: Arc::new(Mutex::new(0)),
+        last_exec_write_request: Arc::new(Mutex::new(None)),
         last_patch_request: Arc::new(Mutex::new(None)),
         last_transfer_import: Arc::new(Mutex::new(None)),
         last_transfer_export: Arc::new(Mutex::new(None)),

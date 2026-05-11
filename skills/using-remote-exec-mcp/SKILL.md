@@ -208,6 +208,10 @@ Input shape:
   "chars": "help\n",
   "yield_time_ms": 250,
   "max_output_tokens": 4000,
+  "pty_size": {
+    "rows": 33,
+    "cols": 101
+  },
   "target": "builder-a"
 }
 ```
@@ -221,12 +225,14 @@ Optional fields:
 - `chars`
 - `yield_time_ms`
 - `max_output_tokens`
+- `pty_size`
 - `target`
 
 How to use it:
 
 - Send `chars` when you need to answer a prompt or continue an interactive program.
 - Send `chars: ""` or omit `chars` when you only need to poll for more output.
+- For live TTY sessions, include `pty_size: { "rows": 33, "cols": 101 }` to resize before polling or writing. Omit `chars` for a resize-only poll. Do not send `pty_size` for non-TTY sessions.
 - You may omit `target`. The broker can route by `session_id` alone.
 - If you provide `target`, it must match the original session target or the call fails.
 - Reuse the returned `session_id` until it becomes `null`.

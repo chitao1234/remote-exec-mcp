@@ -102,6 +102,13 @@ impl LiveSession {
         self.write_chars_internal(chars)
     }
 
+    pub async fn resize_pty(
+        &mut self,
+        size: remote_exec_proto::rpc::ExecPtySize,
+    ) -> anyhow::Result<()> {
+        self.child.resize_pty(size)
+    }
+
     fn write_chars_internal(&mut self, chars: &str) -> anyhow::Result<()> {
         if chars.is_empty() {
             return Ok(());

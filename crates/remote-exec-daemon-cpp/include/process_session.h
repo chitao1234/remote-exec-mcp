@@ -10,6 +10,12 @@ public:
         : std::runtime_error(message) {}
 };
 
+class ProcessPtyResizeUnsupportedError : public std::runtime_error {
+public:
+    explicit ProcessPtyResizeUnsupportedError(const std::string& message)
+        : std::runtime_error(message) {}
+};
+
 class ProcessSession {
 public:
     virtual ~ProcessSession() {}
@@ -26,6 +32,7 @@ public:
     );
 
     virtual void write_stdin(const std::string& chars) = 0;
+    virtual void resize_pty(unsigned short rows, unsigned short cols) = 0;
     virtual std::string read_output(bool block, bool* eof, std::string* carry) = 0;
     virtual std::string flush_carry(std::string* carry) = 0;
     virtual bool has_exited(int* exit_code) = 0;

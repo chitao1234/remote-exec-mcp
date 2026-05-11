@@ -9,6 +9,7 @@ use remote_exec_proto::public::{
     ListTargetsInput, TransferDestinationMode, TransferEndpoint, TransferFilesInput,
     TransferOverwrite, TransferSymlinkMode, ViewImageInput, WriteStdinInput,
 };
+use remote_exec_proto::rpc::ExecPtySize;
 use tokio::io::AsyncReadExt;
 
 const CLI_AFTER_HELP: &str = "\
@@ -157,6 +158,18 @@ struct WriteStdinArgs {
 
     #[arg(long, help = "Maximum number of output tokens to return.")]
     max_output_tokens: Option<u32>,
+
+    #[arg(
+        long,
+        help = "Resize PTY rows for this live session; requires --pty-cols."
+    )]
+    pty_rows: Option<u16>,
+
+    #[arg(
+        long,
+        help = "Resize PTY columns for this live session; requires --pty-rows."
+    )]
+    pty_cols: Option<u16>,
 
     #[arg(long, help = "Optional target check for the session.")]
     target: Option<String>,
@@ -497,8 +510,21 @@ async fn write_stdin_input(args: WriteStdinArgs) -> anyhow::Result<WriteStdinInp
         chars: load_optional_text_input(args.chars, args.chars_file).await?,
         yield_time_ms: args.yield_time_ms,
         max_output_tokens: args.max_output_tokens,
+        pty_size: write_stdin_pty_size(args.pty_rows, args.pty_cols)?,
         target: args.target,
     })
+}
+
+fn write_stdin_pty_size(
+    rows: Option<u16>,
+    cols: Option<u16>,
+) -> anyhow::Result<Option<ExecPtySize>> {
+    match (rows, cols) {
+        (None, None) => Ok(None),
+        (Some(rows), Some(cols)) if rows > 0 && cols > 0 => Ok(Some(ExecPtySize { rows, cols })),
+        (Some(_), Some(_)) => anyhow::bail!("--pty-rows and --pty-cols must be greater than zero"),
+        _ => anyhow::bail!("--pty-rows and --pty-cols must be provided together"),
+    }
 }
 
 async fn apply_patch_input(args: ApplyPatchArgs) -> anyhow::Result<ApplyPatchInput> {

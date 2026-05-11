@@ -414,8 +414,9 @@ void record_exit_status(int status, int* exit_code) {
 
 class PosixProcessSession : public ProcessSession {
 public:
-    PosixProcessSession(pid_t pid, UniqueFd input_write, UniqueFd output_read)
+    PosixProcessSession(pid_t pid, bool tty, UniqueFd input_write, UniqueFd output_read)
         : pid_(pid),
+          tty_(tty),
           input_write_(std::move(input_write)),
           output_read_(std::move(output_read)),
           reaped_(false),
@@ -454,6 +455,26 @@ public:
             }
             data += written;
             remaining -= static_cast<std::size_t>(written);
+        }
+    }
+
+    void resize_pty(unsigned short rows, unsigned short cols) override {
+        if (!tty_ || !input_write_.valid()) {
+            throw ProcessPtyResizeUnsupportedError("PTY resize requires a tty session");
+        }
+        if (rows == 0U || cols == 0U) {
+            throw ProcessPtyResizeUnsupportedError(
+                "PTY rows and cols must be greater than zero"
+            );
+        }
+        struct winsize size;
+        std::memset(&size, 0, sizeof(size));
+        size.ws_row = rows;
+        size.ws_col = cols;
+        if (ioctl(input_write_.get(), TIOCSWINSZ, &size) != 0) {
+            throw std::runtime_error(
+                std::string("ioctl(TIOCSWINSZ) failed: ") + std::strerror(errno)
+            );
         }
     }
 
@@ -546,6 +567,7 @@ public:
 
 private:
     pid_t pid_;
+    bool tty_;
     UniqueFd input_write_;
     UniqueFd output_read_;
     bool reaped_;
@@ -606,7 +628,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
         }
 
         return std::unique_ptr<ProcessSession>(
-            new PosixProcessSession(pid, std::move(pty.master), UniqueFd())
+            new PosixProcessSession(pid, true, std::move(pty.master), UniqueFd())
         );
     }
 
@@ -639,6 +661,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     return std::unique_ptr<ProcessSession>(
         new PosixProcessSession(
             pid,
+            false,
             UniqueFd(),
             std::move(stdout_pipe.read_end)
         )

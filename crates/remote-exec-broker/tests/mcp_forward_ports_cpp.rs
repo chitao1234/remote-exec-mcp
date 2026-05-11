@@ -947,6 +947,7 @@ fn poll_request(session_id: &str) -> WriteStdinInput {
         chars: Some(String::new()),
         yield_time_ms: Some(1),
         max_output_tokens: None,
+        pty_size: None,
         target: None,
     }
 }

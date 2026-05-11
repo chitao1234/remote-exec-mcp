@@ -407,6 +407,7 @@ cargo fmt --all --check
 - Broker `[local]` config enables `target: "local"` for `exec_command`, `write_stdin`, `apply_patch`, and `view_image` on the broker host.
 - `transfer_files` structured results include both the requested `destination` and the broker-computed `resolved_destination`.
 - `write_stdin` normalizes lost sessions into the usual unknown-process error when the broker no longer has the mapping or when the daemon restarted or explicitly reports `unknown_session`.
+- `write_stdin` accepts optional `pty_size: { "rows": N, "cols": N }` for live TTY sessions. The resize is applied before any `chars` are written, so a resize-only poll can omit `chars` or pass an empty string. Both values must be between 1 and 65535. Non-TTY sessions return `tty_unsupported`.
 - `max_output_tokens` is enforced by the daemon for command output as an approximate budget where one token is about four UTF-8 bytes. Both daemons compute `original_token_count` as `ceil(total_utf8_bytes / 4)`.
 - When command output is truncated, both daemons prepend `Total output lines: N\n\n` and render a UTF-8-safe roughly 50/50 head/tail split around the marker `…X tokens truncated…`. Omitted `max_output_tokens` still defaults to `10000`, while explicit `0` still returns an empty `output`.
 - Non-TTY `exec_command` output on both the main daemon and `remote-exec-daemon-cpp` merges `stdout` and `stderr` through one pipe so the single public `output` field preserves their emitted order.

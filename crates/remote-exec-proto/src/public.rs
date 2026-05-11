@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::rpc::{ExecWarning, PortForwardProtocolVersion, TransferWarning};
+use crate::rpc::{ExecPtySize, ExecWarning, PortForwardProtocolVersion, TransferWarning};
 pub use crate::transfer::{TransferOverwrite, TransferSourceType, TransferSymlinkMode};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -37,6 +37,8 @@ pub struct WriteStdinInput {
     pub yield_time_ms: Option<u64>,
     #[serde(default)]
     pub max_output_tokens: Option<u32>,
+    #[serde(default)]
+    pub pty_size: Option<ExecPtySize>,
     #[serde(default)]
     pub target: Option<String>,
 }

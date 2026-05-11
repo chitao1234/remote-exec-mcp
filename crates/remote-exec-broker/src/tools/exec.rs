@@ -312,6 +312,7 @@ async fn forward_exec_write(
                     chars: input.chars.unwrap_or_default(),
                     yield_time_ms: input.yield_time_ms,
                     max_output_tokens: input.max_output_tokens,
+                    pty_size: input.pty_size,
                 })
                 .await,
         )

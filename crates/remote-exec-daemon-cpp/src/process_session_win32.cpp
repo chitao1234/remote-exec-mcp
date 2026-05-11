@@ -138,6 +138,12 @@ public:
         }
     }
 
+    void resize_pty(unsigned short rows, unsigned short cols) override {
+        (void)rows;
+        (void)cols;
+        throw ProcessPtyResizeUnsupportedError("PTY resize is not supported on this host");
+    }
+
     std::string read_output(bool block, bool* eof, std::string* carry) override {
         return read_console_output(stdout_read_.get(), block, eof, carry);
     }

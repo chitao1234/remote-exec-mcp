@@ -114,6 +114,11 @@ reports this through `/v1/target-info` as `supports_pty`, and rejects `tty=true`
 only when PTY allocation is unavailable. Windows XP-compatible builds always
 report `supports_pty=false`.
 
+POSIX builds support `write_stdin.pty_size` for live `tty=true` sessions by
+applying `TIOCSWINSZ` to the PTY master. Windows XP-compatible builds continue
+to reject `tty=true`, so resize requests return the same typed
+unsupported-session error path.
+
 POSIX non-TTY exec intentionally starts child processes with stdin attached to
 `/dev/null`, matching the Rust daemon's closed-stdin behavior. Start POSIX
 interactive commands with `tty=true` when later `write_stdin` input is needed.

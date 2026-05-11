@@ -280,6 +280,7 @@ async fn windows_pty_debug_report_prints_backend_diagnostics() {
                     chars: "".to_string(),
                     yield_time_ms: Some(250),
                     max_output_tokens: Some(2_000),
+                    pty_size: None,
                 },
             )
             .await;
