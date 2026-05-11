@@ -193,6 +193,18 @@ static bool try_read_tunnel_frame_with_timeout(
     return true;
 }
 
+static bool tcp_listener_has_pending_connection(SOCKET socket, unsigned long timeout_ms) {
+    fd_set read_fds;
+    FD_ZERO(&read_fds);
+    FD_SET(socket, &read_fds);
+    timeval timeout;
+    timeout.tv_sec = static_cast<long>(timeout_ms / 1000UL);
+    timeout.tv_usec = static_cast<long>((timeout_ms % 1000UL) * 1000UL);
+    const int ready = select(socket + 1, &read_fds, NULL, NULL, &timeout);
+    assert(ready >= 0);
+    return ready > 0 && FD_ISSET(socket, &read_fds);
+}
+
 static void assert_tunnel_error_code(
     const PortTunnelFrame& frame,
     const std::string& code
@@ -1200,7 +1212,6 @@ static void assert_retained_listener_limit_is_enforced_and_released(const fs::pa
         read_tunnel_frame(client_socket.get()),
         "port_tunnel_limit_exceeded"
     );
-
     send_tunnel_frame(
         client_socket.get(),
         empty_frame(PortTunnelFrameType::Close, 1U)
@@ -1256,18 +1267,6 @@ static void assert_udp_bind_limit_is_enforced_and_released(const fs::path& root)
     close_tunnel(&client_socket, &server_thread);
 }
 
-static std::thread accept_and_hold_tcp_connections(SOCKET listener_socket, int count) {
-    return std::thread([listener_socket, count]() {
-        std::vector<UniqueSocket> accepted;
-        for (int index = 0; index < count; ++index) {
-            const SOCKET socket = accept(listener_socket, NULL, NULL);
-            assert(socket != INVALID_SOCKET);
-            accepted.push_back(UniqueSocket(socket));
-        }
-        platform::sleep_ms(100UL);
-    });
-}
-
 static std::thread accept_and_send_tcp_payload(
     SOCKET listener_socket,
     const std::vector<unsigned char>& payload
@@ -1300,7 +1299,6 @@ static void assert_active_tcp_stream_limit_is_enforced_and_released(const fs::pa
 
     UniqueSocket echo_listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
     const std::string endpoint = socket_local_endpoint(echo_listener.get());
-    std::thread accept_thread = accept_and_hold_tcp_connections(echo_listener.get(), 2);
 
     UniqueSocket client_socket;
     std::thread server_thread;
@@ -1321,6 +1319,9 @@ static void assert_active_tcp_stream_limit_is_enforced_and_released(const fs::pa
         json_frame(PortTunnelFrameType::TcpConnect, 1U, Json{{"endpoint", endpoint}})
     );
     assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpConnectOk);
+    UniqueSocket first_accepted(accept(echo_listener.get(), NULL, NULL));
+    assert(first_accepted.valid());
+
     send_tunnel_frame(
         client_socket.get(),
         json_frame(PortTunnelFrameType::TcpConnect, 3U, Json{{"endpoint", endpoint}})
@@ -1329,21 +1330,24 @@ static void assert_active_tcp_stream_limit_is_enforced_and_released(const fs::pa
         read_tunnel_frame(client_socket.get()),
         "port_tunnel_limit_exceeded"
     );
+    assert(!tcp_listener_has_pending_connection(echo_listener.get(), 100UL));
 
     send_tunnel_frame(
         client_socket.get(),
         empty_frame(PortTunnelFrameType::Close, 1U)
     );
     assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::Close);
+    first_accepted.reset();
+
     send_tunnel_frame(
         client_socket.get(),
         json_frame(PortTunnelFrameType::TcpConnect, 5U, Json{{"endpoint", endpoint}})
     );
     assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpConnectOk);
+    UniqueSocket second_accepted(accept(echo_listener.get(), NULL, NULL));
+    assert(second_accepted.valid());
 
     close_tunnel(&client_socket, &server_thread);
-    echo_listener.reset();
-    accept_thread.join();
 }
 
 static void assert_active_tcp_accept_limit_is_enforced_and_released(const fs::path& root) {

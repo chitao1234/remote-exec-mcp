@@ -201,26 +201,31 @@ void PortTunnelConnection::tcp_connect(const PortTunnelFrame& frame) {
 
     const std::string endpoint = ensure_nonzero_connect_endpoint(frame_meta_string(frame, "endpoint"));
 
-    std::shared_ptr<TunnelTcpStream> stream;
-    stream.reset(new TunnelTcpStream(
-        connect_port_forward_socket(
-            endpoint,
-            "tcp",
-            service_->limits().connect_timeout_ms
-        ),
-        service_,
-        false
-    ));
-
     if (!service_->try_acquire_active_tcp_stream()) {
-        mark_tcp_stream_closed(stream);
         throw PortForwardError(
             400,
             "port_tunnel_limit_exceeded",
             "port tunnel active tcp stream limit reached"
         );
     }
-    stream->active_stream_budget_acquired = true;
+
+    std::shared_ptr<TunnelTcpStream> stream;
+    try {
+        UniqueSocket connected_socket(connect_port_forward_socket(
+            endpoint,
+            "tcp",
+            service_->limits().connect_timeout_ms
+        ));
+        stream.reset(new TunnelTcpStream(
+            connected_socket.release(),
+            service_,
+            true
+        ));
+    } catch (...) {
+        service_->release_active_tcp_stream();
+        throw;
+    }
+
     transport_streams_.insert_tcp(frame.stream_id, stream);
     if (!service_->try_acquire_worker()) {
         drop_tcp_stream(frame.stream_id, stream);
