@@ -34,7 +34,8 @@ struct QueuedFrame {
 }
 
 impl PortTunnel {
-    pub const DEFAULT_MAX_QUEUED_BYTES: usize = 8 * 1024 * 1024;
+    pub const DEFAULT_MAX_QUEUED_BYTES: usize =
+        remote_exec_proto::port_forward::DEFAULT_TUNNEL_QUEUE_BYTES as usize;
 
     pub fn from_stream<S>(stream: S) -> Result<Self, DaemonClientError>
     where

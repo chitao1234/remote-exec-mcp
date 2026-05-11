@@ -16,6 +16,8 @@ pub enum PortForwardProtoError {
     ZeroConnectPort { endpoint: String },
 }
 
+pub const DEFAULT_TUNNEL_QUEUE_BYTES: u64 = 8 * 1024 * 1024;
+
 pub type Result<T> = std::result::Result<T, PortForwardProtoError>;
 
 pub fn normalize_endpoint(endpoint: &str) -> Result<String> {

@@ -562,7 +562,8 @@ mod tests {
                     max_udp_peers: 256,
                     max_pending_tcp_bytes_per_stream: 256 * 1024,
                     max_pending_tcp_bytes_per_forward: 2 * 1024 * 1024,
-                    max_tunnel_queued_bytes: 8 * 1024 * 1024,
+                    max_tunnel_queued_bytes:
+                        remote_exec_proto::port_forward::DEFAULT_TUNNEL_QUEUE_BYTES,
                     max_reconnecting_forwards: 16,
                 },
             ),
@@ -572,7 +573,7 @@ mod tests {
                 format!("session-{forward_id}"),
                 ForwardPortProtocol::Tcp,
                 Duration::from_secs(5),
-                8 * 1024 * 1024,
+                remote_exec_proto::port_forward::DEFAULT_TUNNEL_QUEUE_BYTES as usize,
                 None,
             )),
             CancellationToken::new(),

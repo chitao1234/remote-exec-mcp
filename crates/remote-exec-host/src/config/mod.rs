@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
+use remote_exec_proto::port_forward::DEFAULT_TUNNEL_QUEUE_BYTES;
 use remote_exec_proto::sandbox::FilesystemSandbox;
 use remote_exec_proto::transfer::TransferLimits;
 use serde::Deserialize;
@@ -81,7 +82,7 @@ impl Default for HostPortForwardLimits {
             max_retained_listeners: 64,
             max_udp_binds: 64,
             max_active_tcp_streams: 1024,
-            max_tunnel_queued_bytes: 8 * 1024 * 1024,
+            max_tunnel_queued_bytes: DEFAULT_TUNNEL_QUEUE_BYTES as usize,
             connect_timeout_ms: 10_000,
         }
     }

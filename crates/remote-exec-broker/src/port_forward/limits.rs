@@ -1,3 +1,4 @@
+use remote_exec_proto::port_forward::DEFAULT_TUNNEL_QUEUE_BYTES;
 use remote_exec_proto::port_tunnel::TunnelLimitSummary;
 use remote_exec_proto::public::ForwardPortLimitSummary;
 use serde::Deserialize;
@@ -24,7 +25,7 @@ impl Default for BrokerPortForwardLimits {
             max_pending_tcp_bytes_per_stream: 256 * 1024,
             max_pending_tcp_bytes_per_forward: 2 * 1024 * 1024,
             max_udp_peers_per_forward: 256,
-            max_tunnel_queued_bytes: 8 * 1024 * 1024,
+            max_tunnel_queued_bytes: DEFAULT_TUNNEL_QUEUE_BYTES,
             max_reconnecting_forwards: 16,
         }
     }
