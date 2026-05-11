@@ -766,8 +766,8 @@ async fn resume_listen_session_inner(
 async fn try_resume_listen_tunnel(
     control: &Arc<ListenSessionControl>,
 ) -> anyhow::Result<Arc<PortTunnel>> {
-    let mut state = control.state.lock().await;
     let tunnel = resume_listen_session_inner(control).await?;
+    let mut state = control.state.lock().await;
     state.current_tunnel = Some(tunnel.clone());
     Ok(tunnel)
 }
@@ -920,8 +920,11 @@ where
 }
 
 pub(super) async fn close_listen_session(control: Arc<ListenSessionControl>) -> anyhow::Result<()> {
-    let mut state = control.state.lock().await;
-    if let Some(tunnel) = state.current_tunnel.clone() {
+    let current_tunnel = {
+        let state = control.state.lock().await;
+        state.current_tunnel.clone()
+    };
+    if let Some(tunnel) = current_tunnel {
         match close_listener_on_tunnel(&tunnel, control.listener_stream_id).await {
             Ok(()) => {
                 return close_tunnel_generation(
@@ -937,7 +940,10 @@ pub(super) async fn close_listen_session(control: Arc<ListenSessionControl>) -> 
         }
     }
     let tunnel = resume_listen_session_inner(&control).await?;
-    state.current_tunnel = Some(tunnel.clone());
+    {
+        let mut state = control.state.lock().await;
+        state.current_tunnel = Some(tunnel.clone());
+    }
     close_listener_on_tunnel(&tunnel, control.listener_stream_id).await?;
     close_tunnel_generation(
         &tunnel,
