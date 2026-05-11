@@ -1,4 +1,5 @@
 use futures_util::TryStreamExt;
+
 use remote_exec_proto::port_tunnel::{
     TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, UPGRADE_TOKEN, write_preface,
 };
@@ -77,7 +78,14 @@ impl std::fmt::Display for DaemonClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Transport(err) => write!(f, "daemon transport error: {err:#}"),
-            Self::Decode(err) => write!(f, "daemon decode error: {err}"),
+            Self::Decode(err) => {
+                let message = err.to_string();
+                if message.starts_with("daemon returned malformed exec response: ") {
+                    f.write_str(&message)
+                } else {
+                    write!(f, "daemon decode error: {message}")
+                }
+            }
             Self::Rpc {
                 status,
                 code,
@@ -412,7 +420,18 @@ impl DaemonClient {
         started: std::time::Instant,
         response: reqwest::Response,
     ) -> Result<TransferImportResponse, DaemonClientError> {
-        response.json().await.map_err(|err| {
+        let bytes = response.bytes().await.map_err(|err| {
+            tracing::warn!(
+                target = %self.target_name,
+                base_url = %self.base_url,
+                destination_path = %req.destination_path,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                error = %err,
+                "daemon transfer import body read failed"
+            );
+            DaemonClientError::Decode(err.into())
+        })?;
+        serde_json::from_slice(&bytes).map_err(|err| {
             tracing::warn!(
                 target = %self.target_name,
                 base_url = %self.base_url,
@@ -445,7 +464,18 @@ impl DaemonClient {
             .map_err(|err| self.rpc_transport_error(path, started, err))?;
         let response = self.ensure_rpc_success(path, started, response).await?;
 
-        let decoded = response.json().await.map_err(|err| {
+        let bytes = response.bytes().await.map_err(|err| {
+            tracing::warn!(
+                target = %self.target_name,
+                base_url = %self.base_url,
+                path,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                error = %err,
+                "daemon rpc body read failed"
+            );
+            DaemonClientError::Decode(err.into())
+        })?;
+        let decoded = serde_json::from_slice(&bytes).map_err(|err| {
             tracing::warn!(
                 target = %self.target_name,
                 base_url = %self.base_url,

@@ -62,9 +62,9 @@ pub async fn exec_start_local(
     tracing::info!(
         target = %state.config.target,
         daemon_session_id = %started.daemon_session_id,
-        warnings = started.response.warnings.len(),
-        wall_time_seconds = started.response.wall_time_seconds,
-        output_bytes = started.response.output.len(),
+        warnings = started.response.output().warnings.len(),
+        wall_time_seconds = started.response.output().wall_time_seconds,
+        output_bytes = started.response.output().output.len(),
         "exec_start left process running"
     );
     Ok(started.response)
@@ -121,8 +121,8 @@ pub async fn exec_write_local(
         tracing::info!(
             target = %state.config.target,
             daemon_session_id = %daemon_session_id,
-            exit_code = response.exit_code.unwrap_or_default(),
-            wall_time_seconds = response.wall_time_seconds,
+            exit_code = response.output().exit_code.unwrap_or_default(),
+            wall_time_seconds = response.output().wall_time_seconds,
             "exec_write completed session"
         );
         return Ok(response);
@@ -140,7 +140,7 @@ pub async fn exec_write_local(
     tracing::info!(
         target = %state.config.target,
         daemon_session_id = %daemon_session_id,
-        wall_time_seconds = response.wall_time_seconds,
+        wall_time_seconds = response.output().wall_time_seconds,
         "exec_write left process running"
     );
     Ok(response)
@@ -209,8 +209,6 @@ async fn finish_completed_response(
     );
     Ok(finish_response(
         &state.daemon_instance_id,
-        None,
-        false,
         session,
         output,
         max_output_tokens,

@@ -18,9 +18,9 @@ async fn exec_start_returns_a_live_session_for_long_running_tty_processes() {
         )
         .await;
 
-    assert!(response.running);
-    assert!(response.daemon_session_id.is_some());
-    assert!(response.output.contains("ready"));
+    assert!(response.output().running);
+    assert!(response.daemon_session_id().is_some());
+    assert!(response.output().output.contains("ready"));
 }
 
 #[tokio::test]
@@ -49,9 +49,9 @@ min_ms = 3000
         )
         .await;
 
-    assert!(!response.running, "{response:#?}");
-    assert_eq!(response.exit_code, Some(0));
-    assert!(response.output.contains("ready"));
+    assert!(!response.output().running, "{response:#?}");
+    assert_eq!(response.output().exit_code, Some(0));
+    assert!(response.output().output.contains("ready"));
 }
 
 #[tokio::test]
@@ -84,8 +84,8 @@ async fn exec_start_uses_login_shell_by_default_when_login_is_omitted() {
         )
         .await;
 
-    assert_eq!(response.exit_code, Some(0));
-    assert_eq!(response.output, "from_profile");
+    assert_eq!(response.output().exit_code, Some(0));
+    assert_eq!(response.output().output, "from_profile");
 }
 
 #[tokio::test]
@@ -115,8 +115,8 @@ async fn exec_start_uses_configured_default_shell_when_shell_is_omitted() {
         )
         .await;
 
-    assert_eq!(response.exit_code, Some(0));
-    assert_eq!(response.output, "default-ready");
+    assert_eq!(response.output().exit_code, Some(0));
+    assert_eq!(response.output().output, "default-ready");
 }
 
 #[tokio::test]
@@ -175,8 +175,8 @@ async fn exec_start_uses_non_login_shell_when_policy_disabled_and_login_is_omitt
         )
         .await;
 
-    assert_eq!(response.exit_code, Some(0));
-    assert_eq!(response.output, "");
+    assert_eq!(response.output().exit_code, Some(0));
+    assert_eq!(response.output().output, "");
 }
 
 #[tokio::test]
@@ -265,8 +265,8 @@ async fn env_overlay_is_applied_in_pipe_mode() {
         )
         .await;
 
-    assert_eq!(response.exit_code, Some(0));
-    assert_eq!(response.output, "dumb|1|cat|cat|1|C|en_US.UTF-8|");
+    assert_eq!(response.output().exit_code, Some(0));
+    assert_eq!(response.output().output, "dumb|1|cat|cat|1|C|en_US.UTF-8|");
 }
 
 #[tokio::test]
@@ -303,8 +303,8 @@ async fn env_overlay_is_applied_in_pty_mode() {
         )
         .await;
 
-    assert_eq!(response.exit_code, Some(0));
-    assert_eq!(response.output, "dumb|1|cat|cat|1|C|en_US.UTF-8|");
+    assert_eq!(response.output().exit_code, Some(0));
+    assert_eq!(response.output().output, "dumb|1|cat|cat|1|C|en_US.UTF-8|");
 }
 
 #[tokio::test]
@@ -333,8 +333,8 @@ async fn env_overlay_prefers_lang_c_plus_lc_ctype_when_c_utf8_is_unavailable() {
         )
         .await;
 
-    assert_eq!(response.exit_code, Some(0));
-    assert_eq!(response.output, "C|en_US.UTF-8|");
+    assert_eq!(response.output().exit_code, Some(0));
+    assert_eq!(response.output().output, "C|en_US.UTF-8|");
 }
 
 #[tokio::test]
@@ -363,8 +363,8 @@ async fn env_overlay_falls_back_to_lang_c_only_when_no_utf8_locale_is_available(
         )
         .await;
 
-    assert_eq!(response.exit_code, Some(0));
-    assert_eq!(response.output, "C||");
+    assert_eq!(response.output().exit_code, Some(0));
+    assert_eq!(response.output().output, "C||");
 }
 
 #[tokio::test]
@@ -386,10 +386,15 @@ async fn omitted_max_output_tokens_defaults_to_ten_thousand() {
         )
         .await;
 
-    assert_eq!(response.exit_code, Some(0));
-    assert_eq!(response.original_token_count, Some(12_500));
-    assert!(response.output.starts_with("Total output lines: 1\n\n"));
-    assert!(response.output.contains("tokens truncated"));
+    assert_eq!(response.output().exit_code, Some(0));
+    assert_eq!(response.output().original_token_count, Some(12_500));
+    assert!(
+        response
+            .output()
+            .output
+            .starts_with("Total output lines: 1\n\n")
+    );
+    assert!(response.output().output.contains("tokens truncated"));
 }
 
 #[tokio::test]
@@ -411,9 +416,9 @@ async fn exec_start_truncates_output_to_max_output_tokens() {
         )
         .await;
 
-    assert_eq!(response.original_token_count, Some(25));
+    assert_eq!(response.output().original_token_count, Some(25));
     assert_eq!(
-        response.output,
+        response.output().output,
         "Total output lines: 1\n\naaaaaa\u{2026}22 tokens truncated\u{2026}aaaaaa"
     );
 }
@@ -437,8 +442,8 @@ async fn exec_output_preserves_trailing_newline_when_within_max_output_tokens() 
         )
         .await;
 
-    assert_eq!(response.original_token_count, Some(2));
-    assert_eq!(response.output, "one two\n");
+    assert_eq!(response.output().original_token_count, Some(2));
+    assert_eq!(response.output().output, "one two\n");
 }
 
 #[tokio::test]
@@ -460,9 +465,9 @@ async fn exec_output_drains_late_output_after_exit() {
         )
         .await;
 
-    assert!(!response.running);
-    assert_eq!(response.exit_code, Some(0));
-    assert_eq!(response.output, "late tail");
+    assert!(!response.output().running);
+    assert_eq!(response.output().exit_code, Some(0));
+    assert_eq!(response.output().output, "late tail");
 }
 
 #[tokio::test]
@@ -484,9 +489,9 @@ async fn exec_output_preserves_pipe_mode_output_after_external_pipeline_steps() 
         )
         .await;
 
-    assert!(!response.running);
-    assert_eq!(response.exit_code, Some(0));
-    assert_eq!(response.output, "marker\nexternal\ndone\n");
+    assert!(!response.output().running);
+    assert_eq!(response.output().exit_code, Some(0));
+    assert_eq!(response.output().output, "marker\nexternal\ndone\n");
 }
 
 #[tokio::test]
@@ -508,9 +513,9 @@ async fn exec_output_uses_one_pipe_for_stdout_and_stderr_in_pipe_mode() {
         )
         .await;
 
-    assert!(!response.running);
-    assert_eq!(response.exit_code, Some(0));
-    assert_eq!(response.output, "shared\n");
+    assert!(!response.output().running);
+    assert_eq!(response.output().exit_code, Some(0));
+    assert_eq!(response.output().output, "shared\n");
 }
 
 #[tokio::test]
@@ -530,13 +535,16 @@ async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens() {
             },
         )
         .await;
-    assert!(started.running);
+    assert!(started.output().running);
 
     let response = fixture
         .rpc::<ExecWriteRequest, ExecResponse>(
             "/v1/exec/write",
             &ExecWriteRequest {
-                daemon_session_id: started.daemon_session_id.expect("live session"),
+                daemon_session_id: started
+                    .daemon_session_id()
+                    .expect("live session")
+                    .to_string(),
                 chars: "".to_string(),
                 yield_time_ms: Some(5_000),
                 max_output_tokens: Some(3),
@@ -544,10 +552,10 @@ async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens() {
         )
         .await;
 
-    assert!(response.running);
-    assert_eq!(response.original_token_count, Some(7));
+    assert!(response.output().running);
+    assert_eq!(response.output().original_token_count, Some(7));
     assert_eq!(
-        response.output,
+        response.output().output,
         "Total output lines: 1\n\n\u{2026}7 tokens truncated\u{2026}"
     );
 }
@@ -570,7 +578,10 @@ async fn exec_write_rejects_non_tty_sessions_when_chars_are_present() {
         )
         .await;
 
-    let session_id = started.daemon_session_id.expect("live session");
+    let session_id = started
+        .daemon_session_id()
+        .expect("live session")
+        .to_string();
     let err = fixture
         .rpc_error(
             "/v1/exec/write",
@@ -605,13 +616,16 @@ async fn exec_write_round_trips_pty_input_without_echo_assumptions() {
         )
         .await;
 
-    assert!(started.running);
+    assert!(started.output().running);
 
     let response = fixture
         .rpc::<ExecWriteRequest, ExecResponse>(
             "/v1/exec/write",
             &ExecWriteRequest {
-                daemon_session_id: started.daemon_session_id.expect("live session"),
+                daemon_session_id: started
+                    .daemon_session_id()
+                    .expect("live session")
+                    .to_string(),
                 chars: "ping pong\n".to_string(),
                 yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
                 max_output_tokens: None,
@@ -619,8 +633,13 @@ async fn exec_write_round_trips_pty_input_without_echo_assumptions() {
         )
         .await;
 
-    assert_eq!(response.exit_code, Some(0));
-    assert!(response.output.contains("__RESULT__:ping pong:__END__"));
+    assert_eq!(response.output().exit_code, Some(0));
+    assert!(
+        response
+            .output()
+            .output
+            .contains("__RESULT__:ping pong:__END__")
+    );
 }
 
 #[tokio::test]
@@ -660,7 +679,7 @@ async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon() {
 
     let slow_client = fixture.client.clone();
     let slow_url = fixture.url("/v1/exec/write");
-    let slow_session_id = slow.daemon_session_id.clone().expect("slow session");
+    let slow_session_id = slow.daemon_session_id().expect("slow session").to_string();
     let slow_poll = tokio::spawn(async move {
         slow_client
             .post(slow_url)
@@ -686,7 +705,11 @@ async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon() {
         .rpc::<ExecWriteRequest, ExecResponse>(
             "/v1/exec/write",
             &ExecWriteRequest {
-                daemon_session_id: fast.daemon_session_id.expect("fast session"),
+                daemon_session_id: fast
+                    .daemon_session_id()
+                    .expect("fast session")
+                    .to_string()
+                    .to_string(),
                 chars: "ping\n".to_string(),
                 yield_time_ms: Some(250),
                 max_output_tokens: None,
@@ -699,7 +722,7 @@ async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon() {
         "fast session waited behind unrelated session for {:?}",
         started.elapsed()
     );
-    assert!(fast_response.output.contains("ping"));
+    assert!(fast_response.output().output.contains("ping"));
 
     let _ = slow_poll.await.unwrap();
 }

@@ -19,7 +19,7 @@ async fn exec_start_allows_login_requests_on_windows_when_enabled() {
         )
         .await;
 
-    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.output().exit_code, Some(0));
     assert!(
         response
             .output
@@ -52,9 +52,15 @@ min_ms = 3000
         )
         .await;
 
-    assert!(!response.running, "{response:#?}");
-    assert_eq!(response.exit_code, Some(0));
-    assert!(response.output.to_ascii_lowercase().contains("ready"));
+    assert!(!response.output().running, "{response:#?}");
+    assert_eq!(response.output().exit_code, Some(0));
+    assert!(
+        response
+            .output()
+            .output
+            .to_ascii_lowercase()
+            .contains("ready")
+    );
 }
 
 #[tokio::test]
@@ -105,7 +111,7 @@ async fn exec_start_uses_configured_default_shell_when_shell_is_omitted() {
         )
         .await;
 
-    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.output().exit_code, Some(0));
     assert!(
         response
             .output
@@ -136,8 +142,8 @@ async fn exec_start_prefers_git_bash_when_shell_is_omitted_on_windows() {
         )
         .await;
 
-    assert_eq!(response.exit_code, Some(0));
-    assert_eq!(response.output, "git-bash-ready");
+    assert_eq!(response.output().exit_code, Some(0));
+    assert_eq!(response.output().output, "git-bash-ready");
 }
 
 #[tokio::test]
@@ -162,8 +168,8 @@ async fn exec_start_resolves_bare_bash_shell_requests_to_git_bash_on_windows() {
         )
         .await;
 
-    assert_eq!(response.exit_code, Some(0));
-    assert_eq!(response.output, "explicit-git-bash");
+    assert_eq!(response.output().exit_code, Some(0));
+    assert_eq!(response.output().output, "explicit-git-bash");
 }
 
 #[tokio::test]
@@ -191,9 +197,9 @@ async fn exec_start_preserves_workdir_for_git_bash_login_shells_on_windows() {
         )
         .await;
 
-    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.output().exit_code, Some(0));
     assert_eq!(
-        response.output.replace('\\', "/"),
+        response.output().output.replace('\\', "/"),
         workdir.display().to_string().replace('\\', "/")
     );
 }
@@ -219,8 +225,11 @@ async fn exec_start_accepts_msys_style_workdir_on_windows() {
         )
         .await;
 
-    assert_eq!(response.exit_code, Some(0));
-    assert_eq!(response.output.trim(), workdir.display().to_string(),);
+    assert_eq!(response.output().exit_code, Some(0));
+    assert_eq!(
+        response.output().output.trim(),
+        workdir.display().to_string(),
+    );
 }
 
 #[tokio::test]
@@ -253,8 +262,11 @@ async fn exec_start_accepts_windows_posix_root_workdirs_on_windows() {
         )
         .await;
 
-    assert_eq!(response.exit_code, Some(0));
-    assert_eq!(response.output.trim(), workdir.display().to_string());
+    assert_eq!(response.output().exit_code, Some(0));
+    assert_eq!(
+        response.output().output.trim(),
+        workdir.display().to_string()
+    );
 }
 
 #[tokio::test]
@@ -290,8 +302,8 @@ async fn exec_start_resolves_windows_posix_root_shells_and_sets_chere_invoking()
         )
         .await;
 
-    assert_eq!(response.exit_code, Some(0));
-    assert_eq!(response.output, "1");
+    assert_eq!(response.output().exit_code, Some(0));
+    assert_eq!(response.output().output, "1");
 }
 
 #[tokio::test]
@@ -328,8 +340,8 @@ async fn exec_start_uses_git_bash_login_profiles_when_shell_is_omitted() {
         )
         .await;
 
-    assert_eq!(response.exit_code, Some(0));
-    assert_eq!(response.output, "from_git_bash_profile");
+    assert_eq!(response.output().exit_code, Some(0));
+    assert_eq!(response.output().output, "from_git_bash_profile");
 }
 
 #[tokio::test]
@@ -384,17 +396,17 @@ async fn exec_start_prefers_git_bash_for_windows_pty_when_shell_is_omitted() {
             .await;
 
         assert_eq!(
-            response.exit_code,
+            response.output().exit_code,
             Some(0),
             "{} response: {response:#?}",
             backend.name()
         );
         assert_eq!(
-            strip_terminal_noise(&response.output).replace('\r', ""),
+            strip_terminal_noise(&response.output().output).replace('\r', ""),
             "git-bash-pty-ready",
             "{} output: {:?}",
             backend.name(),
-            response.output
+            response.output().output
         );
     });
 }
@@ -438,19 +450,19 @@ async fn exec_start_preserves_workdir_for_git_bash_login_shells_over_windows_pty
             .await;
 
         assert_eq!(
-            response.exit_code,
+            response.output().exit_code,
             Some(0),
             "{} response: {response:#?}",
             backend.name()
         );
         assert_eq!(
-            strip_terminal_noise(&response.output)
+            strip_terminal_noise(&response.output().output)
                 .replace('\r', "")
                 .replace('\\', "/"),
             workdir.display().to_string().replace('\\', "/"),
             "{} output: {:?}",
             backend.name(),
-            response.output
+            response.output().output
         );
     });
 }
@@ -484,11 +496,14 @@ async fn env_overlay_is_applied_in_pipe_mode_on_windows() {
         )
         .await;
 
-    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.output().exit_code, Some(0));
     assert!(
-        response.output.ends_with(WINDOWS_ENV_OVERLAY_OUTPUT),
+        response
+            .output()
+            .output
+            .ends_with(WINDOWS_ENV_OVERLAY_OUTPUT),
         "unexpected pty output: {:?}",
-        response.output
+        response.output().output
     );
 }
 
@@ -518,17 +533,17 @@ async fn env_overlay_is_applied_in_pty_mode_on_windows() {
             .await;
 
         assert_eq!(
-            response.exit_code,
+            response.output().exit_code,
             Some(0),
             "{} response: {response:#?}",
             backend.name()
         );
-        let normalized_output = strip_terminal_noise(&response.output);
+        let normalized_output = strip_terminal_noise(&response.output().output);
         assert!(
             normalized_output.ends_with(WINDOWS_ENV_OVERLAY_OUTPUT),
             "{} unexpected pty output: {:?}",
             backend.name(),
-            response.output
+            response.output().output
         );
     });
 }
@@ -549,10 +564,15 @@ async fn omitted_max_output_tokens_defaults_to_ten_thousand_on_windows() {
         )
         .await;
 
-    assert_eq!(response.exit_code, Some(0));
-    assert_eq!(response.original_token_count, Some(12_500));
-    assert!(response.output.starts_with("Total output lines: 1\n\n"));
-    assert!(response.output.contains("tokens truncated"));
+    assert_eq!(response.output().exit_code, Some(0));
+    assert_eq!(response.output().original_token_count, Some(12_500));
+    assert!(
+        response
+            .output()
+            .output
+            .starts_with("Total output lines: 1\n\n")
+    );
+    assert!(response.output().output.contains("tokens truncated"));
 }
 
 #[tokio::test]
@@ -571,9 +591,9 @@ async fn exec_start_truncates_output_to_max_output_tokens_on_windows() {
         )
         .await;
 
-    assert_eq!(response.original_token_count, Some(25));
+    assert_eq!(response.output().original_token_count, Some(25));
     assert_eq!(
-        response.output,
+        response.output().output,
         "Total output lines: 1\n\naaaaaa\u{2026}22 tokens truncated\u{2026}aaaaaa"
     );
 }
@@ -594,8 +614,8 @@ async fn exec_output_preserves_trailing_newline_when_within_max_output_tokens_on
         )
         .await;
 
-    assert_eq!(response.original_token_count, Some(2));
-    assert_eq!(response.output, "one two\n");
+    assert_eq!(response.output().original_token_count, Some(2));
+    assert_eq!(response.output().output, "one two\n");
 }
 
 #[tokio::test]
@@ -613,7 +633,7 @@ async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens_on_windows() 
             )
             .await;
         assert!(
-            started.running,
+            started.output().running,
             "{} start response: {started:#?}",
             backend.name()
         );
@@ -622,7 +642,10 @@ async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens_on_windows() 
             .rpc::<ExecWriteRequest, ExecResponse>(
                 "/v1/exec/write",
                 &ExecWriteRequest {
-                    daemon_session_id: started.daemon_session_id.expect("live session"),
+                    daemon_session_id: started
+                        .daemon_session_id()
+                        .expect("live session")
+                        .to_string(),
                     chars: String::new(),
                     yield_time_ms: Some(5_000),
                     max_output_tokens: Some(3),
@@ -631,18 +654,18 @@ async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens_on_windows() 
             .await;
 
         assert!(
-            response.running,
+            response.output().running,
             "{} poll response: {response:#?}",
             backend.name()
         );
         assert_eq!(
-            response.original_token_count,
+            response.output().original_token_count,
             Some(7),
             "{} response: {response:#?}",
             backend.name()
         );
         assert_eq!(
-            strip_terminal_noise(&response.output),
+            strip_terminal_noise(&response.output().output),
             "Total output lines: 1\n\n\u{2026}7 tokens truncated\u{2026}",
             "{} response: {response:#?}",
             backend.name()
@@ -660,7 +683,10 @@ async fn exec_write_rejects_non_tty_sessions_when_chars_are_present_on_windows()
         )
         .await;
 
-    let session_id = started.daemon_session_id.expect("live session");
+    let session_id = started
+        .daemon_session_id()
+        .expect("live session")
+        .to_string();
     let err = fixture
         .rpc_error(
             "/v1/exec/write",
@@ -707,7 +733,7 @@ async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon_on_windows(
 
         let slow_client = fixture.client.clone();
         let slow_url = fixture.url("/v1/exec/write");
-        let slow_session_id = slow.daemon_session_id.clone().expect("slow session");
+        let slow_session_id = slow.daemon_session_id().expect("slow session").to_string();
         let slow_poll = tokio::spawn(async move {
             slow_client
                 .post(slow_url)
@@ -733,7 +759,11 @@ async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon_on_windows(
             .rpc::<ExecWriteRequest, ExecResponse>(
                 "/v1/exec/write",
                 &ExecWriteRequest {
-                    daemon_session_id: fast.daemon_session_id.expect("fast session"),
+                    daemon_session_id: fast
+                        .daemon_session_id()
+                        .expect("fast session")
+                        .to_string()
+                        .to_string(),
                     chars: "ping\n".to_string(),
                     yield_time_ms: Some(250),
                     max_output_tokens: None,
@@ -748,7 +778,7 @@ async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon_on_windows(
             started.elapsed()
         );
         assert!(
-            fast_response.output.contains("ping"),
+            fast_response.output().output.contains("ping"),
             "{} fast response: {fast_response:#?}",
             backend.name()
         );
@@ -806,14 +836,15 @@ async fn exec_start_accepts_git_bash_aliases_on_windows() {
             .await;
 
         assert_eq!(
-            response.exit_code,
+            response.output().exit_code,
             Some(0),
             "alias {alias} response: {response:#?}"
         );
         assert_eq!(
-            response.output, "alias-ok",
+            response.output().output,
+            "alias-ok",
             "alias {alias} output: {:?}",
-            response.output
+            response.output().output
         );
     }
 }

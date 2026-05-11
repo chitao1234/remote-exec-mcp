@@ -254,13 +254,12 @@ async fn assert_windows_tty_session_answers_terminal_queries(
         .await;
 
     assert!(
-        started.running,
+        started.output().running,
         "{} start response: {started:#?}",
         backend.name()
     );
     let session_id = started
-        .daemon_session_id
-        .clone()
+        .daemon_session_id()
         .expect("tty start should create a live session");
 
     let polled = fixture
@@ -276,12 +275,12 @@ async fn assert_windows_tty_session_answers_terminal_queries(
         .await;
 
     assert!(
-        polled.running,
+        polled.output().running,
         "{} poll response: {polled:#?}",
         backend.name()
     );
 
-    let combined_output = format!("{}{}", started.output, polled.output);
+    let combined_output = format!("{}{}", started.output().output, polled.output().output);
     let normalized_output = combined_output.to_ascii_lowercase();
     assert!(
         normalized_output.contains("hello"),
@@ -323,12 +322,15 @@ async fn assert_windows_bare_lf_advances_pty_line_reader(
         .await;
 
     assert!(
-        started.running,
+        started.output().running,
         "{} start response: {started:#?}",
         backend.name()
     );
 
-    let session_id = started.daemon_session_id.expect("live session");
+    let session_id = started
+        .daemon_session_id()
+        .expect("live session")
+        .to_string();
     let response = fixture
         .rpc::<ExecWriteRequest, ExecResponse>(
             "/v1/exec/write",
@@ -341,10 +343,10 @@ async fn assert_windows_bare_lf_advances_pty_line_reader(
         )
         .await;
 
-    let mut combined_output = started.output;
-    combined_output.push_str(&response.output);
+    let mut combined_output = started.output().output;
+    combined_output.push_str(&response.output().output);
 
-    let exit_code = if response.running {
+    let exit_code = if response.output().running {
         let tail = fixture
             .rpc::<ExecWriteRequest, ExecResponse>(
                 "/v1/exec/write",
@@ -356,10 +358,10 @@ async fn assert_windows_bare_lf_advances_pty_line_reader(
                 },
             )
             .await;
-        combined_output.push_str(&tail.output);
-        tail.exit_code
+        combined_output.push_str(&tail.output().output);
+        tail.output().exit_code
     } else {
-        response.exit_code
+        response.output().exit_code
     };
 
     let normalized_output = strip_terminal_noise(&combined_output);
@@ -397,17 +399,17 @@ async fn assert_windows_powershell_command_quoting(
         .await;
 
     assert_eq!(
-        response.exit_code,
+        response.output().exit_code,
         Some(0),
         "{} response: {response:#?}",
         backend.name()
     );
     assert_eq!(
-        strip_terminal_noise(&response.output),
+        strip_terminal_noise(&response.output().output),
         r#"plain|two words|quote "mark"|trail\|C:\Program Files\Test Folder\"#,
         "{} output: {:?}",
         backend.name(),
-        response.output
+        response.output().output
     );
 }
 
@@ -432,11 +434,14 @@ async fn assert_windows_git_bash_tty_read_line(
         .await;
 
     assert!(
-        started.running,
+        started.output().running,
         "{} start response: {started:#?}",
         backend.name()
     );
-    let session_id = started.daemon_session_id.expect("live session");
+    let session_id = started
+        .daemon_session_id()
+        .expect("live session")
+        .to_string();
     let response = fixture
         .rpc::<ExecWriteRequest, ExecResponse>(
             "/v1/exec/write",
@@ -449,10 +454,10 @@ async fn assert_windows_git_bash_tty_read_line(
         )
         .await;
 
-    let mut combined_output = started.output;
-    combined_output.push_str(&response.output);
+    let mut combined_output = started.output().output;
+    combined_output.push_str(&response.output().output);
 
-    let exit_code = if response.running {
+    let exit_code = if response.output().running {
         let tail = fixture
             .rpc::<ExecWriteRequest, ExecResponse>(
                 "/v1/exec/write",
@@ -464,10 +469,10 @@ async fn assert_windows_git_bash_tty_read_line(
                 },
             )
             .await;
-        combined_output.push_str(&tail.output);
-        tail.exit_code
+        combined_output.push_str(&tail.output().output);
+        tail.output().exit_code
     } else {
-        response.exit_code
+        response.output().exit_code
     };
 
     let normalized_output = strip_terminal_noise(&combined_output).replace('\r', "");
@@ -514,17 +519,17 @@ async fn assert_windows_git_bash_command_quoting(
         .await;
 
     assert_eq!(
-        response.exit_code,
+        response.output().exit_code,
         Some(0),
         "{} response: {response:#?}",
         backend.name()
     );
     assert_eq!(
-        strip_terminal_noise(&response.output).replace('\r', ""),
+        strip_terminal_noise(&response.output().output).replace('\r', ""),
         r#"two words|quote "mark"|literal $HOME & | ; * ?|C:\Program Files\Test Folder\"#,
         "{} output: {:?}",
         backend.name(),
-        response.output
+        response.output().output
     );
 }
 

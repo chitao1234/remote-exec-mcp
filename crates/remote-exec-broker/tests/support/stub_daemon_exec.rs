@@ -3,7 +3,10 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::response::Response;
-use remote_exec_proto::rpc::{ExecResponse, ExecStartRequest, ExecWriteRequest, RpcErrorBody};
+use remote_exec_proto::rpc::{
+    ExecCompletedResponse, ExecOutputResponse, ExecResponse, ExecRunningResponse, ExecStartRequest,
+    ExecWriteRequest, RpcErrorBody,
+};
 
 use super::StubDaemonState;
 
@@ -43,18 +46,22 @@ pub(super) async fn exec_start(
     let daemon_instance_id = state.daemon_instance_id.lock().await.clone();
 
     let body = match behavior {
-        ExecStartBehavior::Success => serde_json::to_value(ExecResponse {
-            daemon_session_id: Some("daemon-session-1".to_string()),
-            daemon_instance_id,
-            running: true,
-            chunk_id: Some("chunk-start".to_string()),
-            wall_time_seconds: 0.25,
-            exit_code: None,
-            original_token_count: Some(1),
-            output: "ready".to_string(),
-            warnings,
-        })
-        .unwrap(),
+        ExecStartBehavior::Success => {
+            serde_json::to_value(ExecResponse::Running(ExecRunningResponse {
+                daemon_session_id: "daemon-session-1".to_string(),
+                output: ExecOutputResponse {
+                    daemon_instance_id,
+                    running: true,
+                    chunk_id: Some("chunk-start".to_string()),
+                    wall_time_seconds: 0.25,
+                    exit_code: None,
+                    original_token_count: Some(1),
+                    output: "ready".to_string(),
+                    warnings,
+                },
+            }))
+            .unwrap()
+        }
         ExecStartBehavior::RunningMissingDaemonSessionId => serde_json::json!({
             "daemon_instance_id": daemon_instance_id,
             "running": true,
@@ -115,17 +122,18 @@ pub(super) async fn exec_write(
             "output": "poll output",
             "warnings": [],
         }),
-        _ => serde_json::to_value(ExecResponse {
-            daemon_session_id: None,
-            daemon_instance_id,
-            running: false,
-            chunk_id: Some("chunk-write".to_string()),
-            wall_time_seconds: 0.5,
-            exit_code: Some(0),
-            original_token_count: Some(2),
-            output: "poll output".to_string(),
-            warnings: Vec::new(),
-        })
+        _ => serde_json::to_value(ExecResponse::Completed(ExecCompletedResponse {
+            output: ExecOutputResponse {
+                daemon_instance_id,
+                running: false,
+                chunk_id: Some("chunk-write".to_string()),
+                wall_time_seconds: 0.5,
+                exit_code: Some(0),
+                original_token_count: Some(2),
+                output: "poll output".to_string(),
+                warnings: Vec::new(),
+            },
+        }))
         .unwrap(),
     };
 

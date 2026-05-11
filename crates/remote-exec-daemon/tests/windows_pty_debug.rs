@@ -271,7 +271,7 @@ async fn windows_pty_debug_report_prints_backend_diagnostics() {
         )
         .await;
     println!("daemon exec_start response: {start:#?}");
-    if let Some(session_id) = start.daemon_session_id.clone() {
+    if let Some(session_id) = start.daemon_session_id() {
         let poll = fixture
             .rpc::<remote_exec_proto::rpc::ExecWriteRequest, remote_exec_proto::rpc::ExecResponse>(
                 "/v1/exec/write",

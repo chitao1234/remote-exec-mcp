@@ -3,7 +3,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use remote_exec_proto::path::PathPolicy;
-use remote_exec_proto::rpc::{ExecResponse, ExecWarning, RpcErrorCode};
+use remote_exec_proto::rpc::{
+    ExecCompletedResponse, ExecOutputResponse, ExecResponse, ExecRunningResponse, ExecWarning,
+    RpcErrorCode,
+};
 use remote_exec_proto::sandbox::{SandboxAccess, SandboxError, authorize_path};
 
 use crate::{AppState, HostRpcError, config::YieldTimeOperation, host_path};
@@ -104,23 +107,23 @@ pub(super) fn running_response(
 ) -> ExecResponse {
     let wall_time_seconds = session.started_at.elapsed().as_secs_f64();
     let snapshot = output::snapshot_output(output, max_output_tokens);
-    ExecResponse {
-        daemon_session_id: Some(daemon_session_id),
-        daemon_instance_id: daemon_instance_id.to_string(),
-        running: true,
-        chunk_id: Some(chunk_id()),
-        wall_time_seconds,
-        exit_code: None,
-        original_token_count: Some(snapshot.original_token_count),
-        output: snapshot.output,
-        warnings,
-    }
+    ExecResponse::Running(ExecRunningResponse {
+        daemon_session_id,
+        output: ExecOutputResponse {
+            daemon_instance_id: daemon_instance_id.to_string(),
+            running: true,
+            chunk_id: Some(chunk_id()),
+            wall_time_seconds,
+            exit_code: None,
+            original_token_count: Some(snapshot.original_token_count),
+            output: snapshot.output,
+            warnings,
+        },
+    })
 }
 
 pub(super) fn finish_response(
     daemon_instance_id: &str,
-    daemon_session_id: Option<String>,
-    running: bool,
     session: &session::LiveSession,
     output: String,
     max_output_tokens: Option<u32>,
@@ -128,24 +131,19 @@ pub(super) fn finish_response(
     let snapshot = output::snapshot_output(output, max_output_tokens);
     let wall_time_seconds = session.started_at.elapsed().as_secs_f64();
     let exit_code = session.exit_code();
-    tracing::info!(
-        daemon_session_id = daemon_session_id.as_deref().unwrap_or("-"),
-        running,
-        exit_code,
-        wall_time_seconds,
-        "built exec response"
-    );
-    ExecResponse {
-        daemon_session_id,
-        daemon_instance_id: daemon_instance_id.to_string(),
-        running,
-        chunk_id: Some(chunk_id()),
-        wall_time_seconds,
-        exit_code,
-        original_token_count: Some(snapshot.original_token_count),
-        output: snapshot.output,
-        warnings: Vec::new(),
-    }
+    tracing::info!(exit_code, wall_time_seconds, "built exec response");
+    ExecResponse::Completed(ExecCompletedResponse {
+        output: ExecOutputResponse {
+            daemon_instance_id: daemon_instance_id.to_string(),
+            running: false,
+            chunk_id: Some(chunk_id()),
+            wall_time_seconds,
+            exit_code,
+            original_token_count: Some(snapshot.original_token_count),
+            output: snapshot.output,
+            warnings: Vec::new(),
+        },
+    })
 }
 
 fn host_path_policy() -> PathPolicy {

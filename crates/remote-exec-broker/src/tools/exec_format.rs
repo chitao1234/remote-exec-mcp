@@ -46,6 +46,7 @@ fn format_exec_text(
     response: &ExecResponse,
     session_id: Option<&str>,
 ) -> String {
+    let response = response.output();
     let command = cmd
         .map(|cmd| format!("Command: {cmd}\n"))
         .unwrap_or_default();
@@ -75,7 +76,9 @@ mod tests {
     use super::{
         format_command_text, format_intercepted_patch_text, format_poll_text, prepend_warning_text,
     };
-    use remote_exec_proto::rpc::{ExecResponse, ExecWarning};
+    use remote_exec_proto::rpc::{
+        ExecCompletedResponse, ExecOutputResponse, ExecResponse, ExecWarning,
+    };
 
     #[test]
     fn format_command_text_includes_original_token_count_when_present() {
@@ -127,16 +130,17 @@ mod tests {
     }
 
     fn completed_response() -> ExecResponse {
-        ExecResponse {
-            daemon_session_id: None,
-            daemon_instance_id: "daemon-instance-1".to_string(),
-            running: false,
-            chunk_id: Some("abc123".to_string()),
-            wall_time_seconds: 0.25,
-            exit_code: Some(0),
-            original_token_count: Some(6),
-            output: "one two three".to_string(),
-            warnings: Vec::new(),
-        }
+        ExecResponse::Completed(ExecCompletedResponse {
+            output: ExecOutputResponse {
+                daemon_instance_id: "daemon-instance-1".to_string(),
+                running: false,
+                chunk_id: Some("abc123".to_string()),
+                wall_time_seconds: 0.25,
+                exit_code: Some(0),
+                original_token_count: Some(6),
+                output: "one two three".to_string(),
+                warnings: Vec::new(),
+            },
+        })
     }
 }
