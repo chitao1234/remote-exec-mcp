@@ -8,7 +8,7 @@ use remote_exec_proto::transfer::TransferCompression;
 
 use crate::daemon_client::DaemonClientError;
 
-use super::endpoints::{endpoint_policy, verified_remote_target};
+use super::endpoints::{TransferEndpointTarget, endpoint_policy, verified_remote_target};
 
 struct ExportedSourceArchive {
     endpoint: TransferEndpoint,
@@ -36,8 +36,11 @@ pub(super) async fn transfer_single_source(
     destination: &TransferEndpoint,
     options: TransferExecutionOptions<'_>,
 ) -> anyhow::Result<(TransferSourceType, TransferImportResponse)> {
-    match (source.target.as_str(), destination.target.as_str()) {
-        ("local", "local") => {
+    match (
+        TransferEndpointTarget::from_endpoint(source),
+        TransferEndpointTarget::from_endpoint(destination),
+    ) {
+        (TransferEndpointTarget::Local, TransferEndpointTarget::Local) => {
             let export_request = build_export_request(
                 source,
                 options.compression,
@@ -67,7 +70,7 @@ pub(super) async fn transfer_single_source(
             .await?;
             Ok((exported.source_type, summary))
         }
-        ("local", target_name) => {
+        (TransferEndpointTarget::Local, TransferEndpointTarget::Remote(target_name)) => {
             let export_request = build_export_request(
                 source,
                 options.compression,
@@ -94,7 +97,7 @@ pub(super) async fn transfer_single_source(
                 import_remote_body_to_endpoint(state, target_name, body, &request).await?;
             Ok((exported.source_type, summary))
         }
-        (target_name, "local") => {
+        (TransferEndpointTarget::Remote(target_name), TransferEndpointTarget::Local) => {
             let export_request = build_export_request(
                 source,
                 options.compression,
@@ -125,7 +128,10 @@ pub(super) async fn transfer_single_source(
             .await?;
             Ok((source_type, summary))
         }
-        (source_target_name, destination_target_name) => {
+        (
+            TransferEndpointTarget::Remote(source_target_name),
+            TransferEndpointTarget::Remote(destination_target_name),
+        ) => {
             let export_request = build_export_request(
                 source,
                 options.compression,
@@ -243,8 +249,8 @@ async fn export_endpoint_to_archive(
 ) -> anyhow::Result<ExportArchiveResult> {
     let request = build_export_request(endpoint, compression, exclude, symlink_mode);
 
-    match endpoint.target.as_str() {
-        "local" => {
+    match TransferEndpointTarget::from_endpoint(endpoint) {
+        TransferEndpointTarget::Local => {
             let exported = crate::local_transfer::export_path_to_archive(
                 &endpoint.path,
                 archive_path,
@@ -256,7 +262,7 @@ async fn export_endpoint_to_archive(
                 source_type: exported.source_type,
             })
         }
-        target_name => {
+        TransferEndpointTarget::Remote(target_name) => {
             export_remote_endpoint_to_archive(state, target_name, &request, archive_path).await
         }
     }
@@ -268,8 +274,8 @@ async fn import_archive_to_endpoint(
     endpoint: &TransferEndpoint,
     request: &TransferImportRequest,
 ) -> anyhow::Result<TransferImportResponse> {
-    match endpoint.target.as_str() {
-        "local" => {
+    match TransferEndpointTarget::from_endpoint(endpoint) {
+        TransferEndpointTarget::Local => {
             crate::local_transfer::import_archive_from_file(
                 archive_path,
                 request,
@@ -278,7 +284,7 @@ async fn import_archive_to_endpoint(
             )
             .await
         }
-        target_name => {
+        TransferEndpointTarget::Remote(target_name) => {
             import_remote_archive_to_endpoint(state, target_name, archive_path, request).await
         }
     }

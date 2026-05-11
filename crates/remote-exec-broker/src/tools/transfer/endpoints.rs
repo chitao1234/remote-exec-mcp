@@ -19,6 +19,12 @@ enum EndpointTargetContext {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TransferEndpointTarget<'a> {
+    Local,
+    Remote(&'a str),
+}
+
 pub(super) async fn verified_remote_target<'a>(
     state: &'a crate::BrokerState,
     target_name: &'a str,
@@ -43,13 +49,12 @@ async fn endpoint_target_context(
     state: &crate::BrokerState,
     target_name: &str,
 ) -> anyhow::Result<EndpointTargetContext> {
-    if target_name == "local" {
-        return Ok(EndpointTargetContext::local());
+    match TransferEndpointTarget::from_name(target_name) {
+        TransferEndpointTarget::Local => Ok(EndpointTargetContext::local()),
+        TransferEndpointTarget::Remote(target_name) => Ok(EndpointTargetContext::remote(
+            verified_remote_daemon_info(state, target_name).await?,
+        )),
     }
-
-    Ok(EndpointTargetContext::remote(
-        verified_remote_daemon_info(state, target_name).await?,
-    ))
 }
 
 pub(super) async fn endpoint_policy(
@@ -226,9 +231,11 @@ async fn existing_destination_is_directory(
     state: &crate::BrokerState,
     destination: &TransferEndpoint,
 ) -> anyhow::Result<bool> {
-    let result = match destination.target.as_str() {
-        "local" => crate::local_transfer::path_info(&destination.path, state.host_sandbox.as_ref()),
-        target_name => {
+    let result = match TransferEndpointTarget::from_endpoint(destination) {
+        TransferEndpointTarget::Local => {
+            crate::local_transfer::path_info(&destination.path, state.host_sandbox.as_ref())
+        }
+        TransferEndpointTarget::Remote(target_name) => {
             let target = verified_remote_target(state, target_name).await?;
             target
                 .clear_on_transport_error(
@@ -304,6 +311,20 @@ fn local_policy() -> PathPolicy {
         windows_path_policy()
     } else {
         linux_path_policy()
+    }
+}
+
+impl<'a> TransferEndpointTarget<'a> {
+    pub(super) fn from_name(target_name: &'a str) -> Self {
+        if target_name == "local" {
+            Self::Local
+        } else {
+            Self::Remote(target_name)
+        }
+    }
+
+    pub(super) fn from_endpoint(endpoint: &'a TransferEndpoint) -> Self {
+        Self::from_name(&endpoint.target)
     }
 }
 
