@@ -947,10 +947,11 @@ static void assert_windows_symlink_import_modes_skip_with_warning() {
 }
 #endif
 
-static void assert_directory_traversal_is_rejected() {
-    const std::string archive = tar_with_single_file("../escape.txt", "bad");
+static bool directory_import_rejects_path(const std::string& path) {
+    const std::string archive = tar_with_single_file(path, "bad");
     const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-traversal";
     fs::remove_all(root);
+
     bool rejected = false;
     try {
         (void)import_path(
@@ -960,10 +961,52 @@ static void assert_directory_traversal_is_rejected() {
             "replace",
             true
         );
-    } catch (...) {
-        rejected = true;
+    } catch (const TransferFailure& failure) {
+        rejected =
+            failure.message.find("archive path") != std::string::npos ||
+            failure.message.find("escapes destination") != std::string::npos;
     }
+
+    assert(!fs::exists(root / "escape.txt"));
+    assert(!fs::exists(root / "dest" / "escape.txt"));
+    return rejected;
+}
+
+static void assert_directory_traversal_is_rejected() {
+    assert(directory_import_rejects_path("../escape.txt"));
+    assert(directory_import_rejects_path("foo/../../../etc/shadow"));
+    assert(directory_import_rejects_path("safe/../escape.txt"));
+    assert(directory_import_rejects_path("safe/./escape.txt"));
+    assert(directory_import_rejects_path("safe//escape.txt"));
+    assert(directory_import_rejects_path("safe\\..\\escape.txt"));
+    assert(directory_import_rejects_path("safe\\.\\escape.txt"));
+
+    std::string long_name_archive;
+    append_gnu_long_name(&long_name_archive, "safe/../../escape.txt");
+    append_tar_entry(&long_name_archive, "ignored", '0', "bad");
+    finalize_tar(long_name_archive);
+
+    const fs::path root =
+        fs::temp_directory_path() / "remote-exec-cpp-transfer-long-name-traversal";
+    fs::remove_all(root);
+    bool rejected = false;
+    try {
+        (void)import_path(
+            long_name_archive,
+            TransferSourceType::Directory,
+            (root / "dest").string(),
+            "replace",
+            true
+        );
+    } catch (const TransferFailure& failure) {
+        rejected =
+            failure.message.find("archive path") != std::string::npos ||
+            failure.message.find("escapes destination") != std::string::npos;
+    }
+
     assert(rejected);
+    assert(!fs::exists(root / "escape.txt"));
+    assert(!fs::exists(root / "dest" / "escape.txt"));
 }
 
 static void assert_multiple_sources_import() {
