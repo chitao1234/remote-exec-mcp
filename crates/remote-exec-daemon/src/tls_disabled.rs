@@ -27,3 +27,15 @@ where
 {
     anyhow::bail!(super::FEATURE_REQUIRED_MESSAGE);
 }
+
+pub(crate) async fn serve_tls_with_shutdown_on_listener<F>(
+    _: Router,
+    _: Arc<DaemonConfig>,
+    _: tokio::net::TcpListener,
+    _: F,
+) -> anyhow::Result<()>
+where
+    F: Future<Output = ()> + Send,
+{
+    anyhow::bail!(super::FEATURE_REQUIRED_MESSAGE);
+}

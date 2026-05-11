@@ -8,6 +8,8 @@ pub mod patch;
 pub mod port_forward;
 pub(crate) mod rpc_error;
 pub mod server;
+#[cfg(feature = "test-support")]
+pub mod test_support;
 pub mod tls;
 pub mod transfer;
 
@@ -43,10 +45,24 @@ where
 {
     tls::install_crypto_provider()?;
     let daemon_config = Arc::new(config);
+    let listener = tls::bind_listener(daemon_config.listen)?;
+    run_until_on_bound_listener(daemon_config, listener, shutdown).await
+}
+
+pub(crate) async fn run_until_on_bound_listener<F>(
+    daemon_config: Arc<DaemonConfig>,
+    listener: tokio::net::TcpListener,
+    shutdown: F,
+) -> Result<()>
+where
+    F: Future<Output = ()> + Send,
+{
+    tls::install_crypto_provider()?;
     let state = remote_exec_host::build_runtime_state(daemon_config.host_runtime_config())?;
+    let listen = listener.local_addr().unwrap_or(daemon_config.listen);
     tracing::info!(
         target = %daemon_config.target,
-        listen = %daemon_config.listen,
+        listen = %listen,
         transport = ?daemon_config.transport,
         http_auth_enabled = daemon_config.http_auth.is_some(),
         default_workdir = %daemon_config.default_workdir.display(),
@@ -62,5 +78,5 @@ where
         shutdown.await;
         shutdown_state.shutdown.cancel();
     };
-    server::serve_with_shutdown(state, daemon_config, shutdown).await
+    server::serve_with_shutdown_on_listener(state, daemon_config, listener, shutdown).await
 }

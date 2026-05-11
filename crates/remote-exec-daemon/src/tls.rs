@@ -22,7 +22,7 @@ mod tls_impl;
 #[path = "tls_disabled.rs"]
 mod tls_impl;
 
-pub(crate) use tls_impl::install_crypto_provider;
+pub(crate) use tls_impl::{install_crypto_provider, serve_tls_with_shutdown_on_listener};
 pub use tls_impl::{serve_tls, serve_tls_with_shutdown};
 
 pub(crate) fn validate_config(config: &DaemonConfig) -> anyhow::Result<()> {
@@ -50,9 +50,26 @@ pub async fn serve_with_shutdown<F>(
 where
     F: Future<Output = ()> + Send,
 {
+    let listener = bind_listener(daemon_config.listen)?;
+    serve_with_shutdown_on_listener(app, daemon_config, listener, shutdown).await
+}
+
+pub(crate) async fn serve_with_shutdown_on_listener<F>(
+    app: Router,
+    daemon_config: Arc<DaemonConfig>,
+    listener: TcpListener,
+    shutdown: F,
+) -> anyhow::Result<()>
+where
+    F: Future<Output = ()> + Send,
+{
     match daemon_config.transport {
-        DaemonTransport::Tls => serve_tls_with_shutdown(app, daemon_config, shutdown).await,
-        DaemonTransport::Http => serve_http_with_shutdown(app, daemon_config, shutdown).await,
+        DaemonTransport::Tls => {
+            serve_tls_with_shutdown_on_listener(app, daemon_config, listener, shutdown).await
+        }
+        DaemonTransport::Http => {
+            serve_http_with_shutdown_on_listener(app, daemon_config, listener, shutdown).await
+        }
     }
 }
 
@@ -69,7 +86,20 @@ where
     F: Future<Output = ()> + Send,
 {
     let listener = bind_listener(daemon_config.listen)?;
-    tracing::info!(listen = %daemon_config.listen, "daemon http listener bound");
+    serve_http_with_shutdown_on_listener(app, daemon_config, listener, shutdown).await
+}
+
+pub(crate) async fn serve_http_with_shutdown_on_listener<F>(
+    app: Router,
+    _daemon_config: Arc<DaemonConfig>,
+    listener: TcpListener,
+    shutdown: F,
+) -> anyhow::Result<()>
+where
+    F: Future<Output = ()> + Send,
+{
+    let local_addr = listener.local_addr()?;
+    tracing::info!(listen = %local_addr, "daemon http listener bound");
     let accept_stream: AcceptStream =
         Arc::new(|stream| Box::pin(async move { Ok(Some(Box::new(stream) as AcceptedStream)) }));
     serve_http1_connections(listener, app, shutdown, accept_stream, "http").await

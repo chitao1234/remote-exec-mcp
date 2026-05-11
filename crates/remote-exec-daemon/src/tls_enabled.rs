@@ -60,7 +60,20 @@ where
     F: Future<Output = ()> + Send,
 {
     let listener = super::bind_listener(daemon_config.listen)?;
-    tracing::info!(listen = %daemon_config.listen, "daemon tls listener bound");
+    serve_tls_with_shutdown_on_listener(app, daemon_config, listener, shutdown).await
+}
+
+pub(crate) async fn serve_tls_with_shutdown_on_listener<F>(
+    app: Router,
+    daemon_config: Arc<DaemonConfig>,
+    listener: tokio::net::TcpListener,
+    shutdown: F,
+) -> anyhow::Result<()>
+where
+    F: Future<Output = ()> + Send,
+{
+    let local_addr = listener.local_addr()?;
+    tracing::info!(listen = %local_addr, "daemon tls listener bound");
     let tls = TlsAcceptor::from(Arc::new(server_config(daemon_config.as_ref()).await?));
     let accept_stream: AcceptStream = Arc::new(move |stream| {
         let tls = tls.clone();

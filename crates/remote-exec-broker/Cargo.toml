@@ -44,7 +44,7 @@ uuid = { workspace = true }
 [dev-dependencies]
 gethostname = { workspace = true }
 image = { workspace = true }
-remote-exec-daemon = { path = "../remote-exec-daemon" }
+remote-exec-daemon = { path = "../remote-exec-daemon", features = ["test-support"] }
 remote-exec-pki = { path = "../remote-exec-pki" }
 tar = { workspace = true }
 zstd = { workspace = true }

@@ -21,9 +21,23 @@ pub async fn serve_with_shutdown<F>(
 where
     F: Future<Output = ()> + Send,
 {
+    let listener = crate::tls::bind_listener(daemon_config.listen)?;
+    serve_with_shutdown_on_listener(state, daemon_config, listener, shutdown).await
+}
+
+pub(crate) async fn serve_with_shutdown_on_listener<F>(
+    state: AppState,
+    daemon_config: Arc<DaemonConfig>,
+    listener: tokio::net::TcpListener,
+    shutdown: F,
+) -> Result<()>
+where
+    F: Future<Output = ()> + Send,
+{
     let state = Arc::new(state);
     let app = crate::http::routes::router(state.clone(), daemon_config.clone());
-    let result = crate::tls::serve_with_shutdown(app, daemon_config, shutdown).await;
+    let result =
+        crate::tls::serve_with_shutdown_on_listener(app, daemon_config, listener, shutdown).await;
     state.background_tasks.join_all().await;
     result
 }
