@@ -99,7 +99,7 @@ async fn list_targets_returns_cached_daemon_info_and_null_for_unavailable_target
 
     assert_eq!(
         result.text_output,
-        "Configured targets:\n- builder-a: linux/x86_64, host=builder-a-host, version=0.1.0, pty=yes, forward_ports=no\n- builder-b"
+        "Configured targets:\n- builder-a: linux/x86_64, host=builder-a-host, version=0.1.0, pty=yes, forward_ports=no\n- builder-b: unavailable (no cached daemon info)"
     );
     assert_eq!(
         result.structured_content,

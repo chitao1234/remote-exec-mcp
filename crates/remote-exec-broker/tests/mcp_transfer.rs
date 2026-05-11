@@ -63,6 +63,14 @@ async fn transfer_files_copies_local_file_and_reports_summary() {
     .await;
 
     assert_eq!(std::fs::read_to_string(&destination).unwrap(), "hello\n");
+    assert_eq!(
+        result.text_output,
+        format!(
+            "Transfer complete.\nSource: file `{}` on `local`\nDestination: `{}` on `local`\nFiles copied: 1\nDirectories copied: 0\nBytes copied: 6\nReplaced existing destination: no",
+            source.display(),
+            destination.display()
+        )
+    );
     assert_eq!(result.structured_content["source_type"], "file");
     assert_eq!(result.structured_content["files_copied"], 1);
     assert_eq!(result.structured_content["directories_copied"], 0);
@@ -551,6 +559,13 @@ async fn transfer_files_bundles_multiple_local_sources_into_destination_director
         std::fs::read_to_string(destination.join("tree/nested.txt")).unwrap(),
         "nested\n"
     );
+    assert_eq!(
+        result.text_output,
+        format!(
+            "Transfer complete.\nSource: 2 sources\nDestination: `{}` on `local`\nFiles copied: 2\nDirectories copied: 2\nBytes copied: 13\nReplaced existing destination: no",
+            destination.display()
+        )
+    );
     assert_eq!(result.structured_content["source_type"], "multiple");
     assert_eq!(
         result.structured_content["sources"]
@@ -629,6 +644,13 @@ async fn transfer_files_copies_local_directory_to_plain_http_remote() {
     assert_eq!(capture.overwrite, "replace");
     assert_eq!(capture.create_parent, "true");
     assert!(capture.body_len > 0);
+    assert_eq!(
+        result.text_output,
+        format!(
+            "Transfer complete.\nSource: directory `{}` on `local`\nDestination: `C:/dest/tree` on `builder-xp`\nFiles copied: 1\nDirectories copied: 3\nBytes copied: 13\nReplaced existing destination: yes",
+            source.display()
+        )
+    );
     assert_eq!(result.structured_content["source_type"], "directory");
     assert_eq!(result.structured_content["files_copied"], 1);
     assert_eq!(result.structured_content["directories_copied"], 3);

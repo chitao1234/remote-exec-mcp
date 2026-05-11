@@ -11,14 +11,38 @@ use remote_exec_proto::public::{
 };
 use tokio::io::AsyncReadExt;
 
+const CLI_AFTER_HELP: &str = "\
+Connection modes:
+  --broker-config PATH   Load a broker config and call broker tools in-process.
+  --broker-url URL       Connect to a running broker over streamable HTTP.
+
+Examples:
+  remote-exec --broker-config configs/broker.example.toml list-targets
+  remote-exec --broker-url http://127.0.0.1:8787/mcp exec --target builder-a \"uname -a\"
+";
+
+const TRANSFER_AFTER_HELP: &str = "\
+Endpoint format: <target>:<absolute-path>
+Repeat --source to transfer multiple inputs.
+For multi-source transfers, the destination path is treated as a directory root.
+";
+
 #[derive(Parser, Debug)]
 #[command(name = "remote-exec")]
-#[command(about = "CLI client for a remote-exec-mcp broker")]
+#[command(
+    about = "CLI client for a remote-exec-mcp broker",
+    long_about = "Connect to a remote-exec broker over an in-process config or streamable HTTP and call its public remote execution tools.",
+    after_help = CLI_AFTER_HELP
+)]
 struct Cli {
     #[command(flatten)]
     connection: ConnectionArgs,
 
-    #[arg(long, default_value_t = false)]
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Print the normalized tool response object as JSON."
+    )]
     json: bool,
 
     #[command(subcommand)]
@@ -32,21 +56,36 @@ struct Cli {
         .args(["broker_config", "broker_url"])
 ))]
 struct ConnectionArgs {
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Load this broker config and call broker tools in-process."
+    )]
     broker_config: Option<PathBuf>,
 
-    #[arg(long)]
+    #[arg(long, help = "Connect to a running broker over streamable HTTP.")]
     broker_url: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    #[command(about = "List configured targets using cached broker metadata.")]
     ListTargets,
-    #[command(name = "exec-command")]
+    #[command(
+        name = "exec-command",
+        visible_alias = "exec",
+        about = "Run a command on a configured target machine."
+    )]
     Exec(ExecCommandArgs),
+    #[command(about = "Write to or poll an existing exec session.")]
     WriteStdin(WriteStdinArgs),
+    #[command(about = "Apply a patch on a configured target machine.")]
     ApplyPatch(ApplyPatchArgs),
+    #[command(about = "Read an image from a configured target machine.")]
     ViewImage(ViewImageArgs),
+    #[command(
+        about = "Transfer files or directory trees between broker-local and configured targets.",
+        after_help = TRANSFER_AFTER_HELP
+    )]
     TransferFiles(TransferFilesArgs),
     #[command(
         name = "forward-ports",
@@ -57,52 +96,69 @@ enum Command {
 
 #[derive(Args, Debug)]
 struct ExecCommandArgs {
-    #[arg(long)]
+    #[arg(long, help = "Logical target name to run the command on.")]
     target: String,
 
+    #[arg(help = "Shell command text to execute.")]
     cmd: String,
 
-    #[arg(long)]
+    #[arg(long, help = "Working directory to start the command in.")]
     workdir: Option<String>,
 
-    #[arg(long)]
+    #[arg(long, help = "Override the shell used to launch the command.")]
     shell: Option<String>,
 
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = false, help = "Request a PTY session.")]
     tty: bool,
 
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Milliseconds to wait for initial output before returning."
+    )]
     yield_time_ms: Option<u64>,
 
-    #[arg(long)]
+    #[arg(long, help = "Maximum number of output tokens to return.")]
     max_output_tokens: Option<u32>,
 
-    #[arg(long, default_value_t = false, overrides_with = "no_login")]
+    #[arg(
+        long,
+        default_value_t = false,
+        overrides_with = "no_login",
+        help = "Force login shell semantics."
+    )]
     login: bool,
 
-    #[arg(long, default_value_t = false, overrides_with = "login")]
+    #[arg(
+        long,
+        default_value_t = false,
+        overrides_with = "login",
+        help = "Disable login shell semantics."
+    )]
     no_login: bool,
 }
 
 #[derive(Args, Debug)]
 #[command(group(ArgGroup::new("input").args(["chars", "chars_file"])))]
 struct WriteStdinArgs {
-    #[arg(long)]
+    #[arg(long, help = "Opaque public session id returned by exec-command.")]
     session_id: String,
 
-    #[arg(long)]
+    #[arg(long, help = "Inline text to write to the session. Omit to poll only.")]
     chars: Option<String>,
 
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Read stdin payload from a file, or use `-` to read from stdin."
+    )]
     chars_file: Option<PathBuf>,
 
-    #[arg(long)]
+    #[arg(long, help = "Milliseconds to wait for output before returning.")]
     yield_time_ms: Option<u64>,
 
-    #[arg(long)]
+    #[arg(long, help = "Maximum number of output tokens to return.")]
     max_output_tokens: Option<u32>,
 
-    #[arg(long)]
+    #[arg(long, help = "Optional target check for the session.")]
     target: Option<String>,
 }
 
@@ -113,58 +169,101 @@ struct WriteStdinArgs {
         .args(["input", "input_file"])
 ))]
 struct ApplyPatchArgs {
-    #[arg(long)]
+    #[arg(long, help = "Logical target name to apply the patch on.")]
     target: String,
 
-    #[arg(long)]
+    #[arg(long, help = "Working directory used to resolve patch paths.")]
     workdir: Option<String>,
 
-    #[arg(long)]
+    #[arg(long, help = "Inline patch text to apply.")]
     input: Option<String>,
 
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Read patch text from a file, or use `-` to read from stdin."
+    )]
     input_file: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
 struct ViewImageArgs {
-    #[arg(long)]
+    #[arg(long, help = "Logical target name to read the image from.")]
     target: String,
 
-    #[arg(long)]
+    #[arg(long, help = "Absolute image path on the selected target.")]
     path: String,
 
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Working directory used to resolve relative paths if supported."
+    )]
     workdir: Option<String>,
 
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Image detail level. Use `original` for full fidelity when supported."
+    )]
     detail: Option<String>,
 
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Write the decoded image bytes to this local output path."
+    )]
     out: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
 struct TransferFilesArgs {
-    #[arg(long = "source", required = true)]
+    #[arg(
+        long = "source",
+        value_name = "TARGET:PATH",
+        required = true,
+        help = "Source endpoint in <target>:<absolute-path> format. Repeat --source to transfer multiple inputs."
+    )]
     sources: Vec<String>,
 
-    #[arg(long)]
+    #[arg(
+        long,
+        value_name = "TARGET:PATH",
+        help = "Destination endpoint in <target>:<absolute-path> format."
+    )]
     destination: String,
 
-    #[arg(long = "exclude")]
+    #[arg(
+        long = "exclude",
+        help = "Glob pattern to exclude during export. Repeat for multiple patterns."
+    )]
     exclude: Vec<String>,
 
-    #[arg(long, value_enum, default_value_t = CliTransferOverwrite::Merge)]
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = CliTransferOverwrite::Merge,
+        help = "How to handle an existing destination."
+    )]
     overwrite: CliTransferOverwrite,
 
-    #[arg(long, value_enum, default_value_t = CliTransferDestinationMode::Auto)]
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = CliTransferDestinationMode::Auto,
+        help = "How to resolve the destination path."
+    )]
     destination_mode: CliTransferDestinationMode,
 
-    #[arg(long, value_enum, default_value_t = CliTransferSymlinkMode::Preserve)]
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = CliTransferSymlinkMode::Preserve,
+        help = "How to handle symlinks while exporting."
+    )]
     symlink_mode: CliTransferSymlinkMode,
 
-    #[arg(long, default_value_t = false)]
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Create missing parent directories for the destination path."
+    )]
     create_parent: bool,
 }
 
@@ -186,10 +285,10 @@ enum ForwardPortsActionArgs {
 
 #[derive(Args, Debug)]
 struct ForwardPortsOpenArgs {
-    #[arg(long)]
+    #[arg(long, help = "Side that binds the listen endpoint.")]
     listen_side: String,
 
-    #[arg(long)]
+    #[arg(long, help = "Side that connects to the destination endpoint.")]
     connect_side: String,
 
     #[arg(
@@ -202,19 +301,23 @@ struct ForwardPortsOpenArgs {
 
 #[derive(Args, Debug)]
 struct ForwardPortsListArgs {
-    #[arg(long)]
+    #[arg(long, help = "Filter by listen side.")]
     listen_side: Option<String>,
 
-    #[arg(long)]
+    #[arg(long, help = "Filter by connect side.")]
     connect_side: Option<String>,
 
-    #[arg(long = "forward-id")]
+    #[arg(long = "forward-id", help = "Filter by forward id. Repeatable.")]
     forward_ids: Vec<String>,
 }
 
 #[derive(Args, Debug)]
 struct ForwardPortsCloseArgs {
-    #[arg(long = "forward-id", required = true)]
+    #[arg(
+        long = "forward-id",
+        required = true,
+        help = "Forward id to close. Repeatable."
+    )]
     forward_ids: Vec<String>,
 }
 

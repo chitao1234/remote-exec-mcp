@@ -77,7 +77,7 @@ fn format_targets_text(targets: &[ListTargetEntry]) -> String {
                     String::new()
                 },
             ),
-            None => format!("- {}", target.name),
+            None => format!("- {}: unavailable (no cached daemon info)", target.name),
         })
         .collect::<Vec<_>>();
 

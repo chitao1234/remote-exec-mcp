@@ -501,6 +501,26 @@ cargo run -p remote-exec-broker --bin remote-exec -- \
 
 When `--broker-config` is used, the CLI loads the broker config and invokes the same broker tool handlers in-process. It does not start the broker MCP server, and the config's `[mcp]` transport only matters when running `remote-exec-broker` itself.
 
+Run a command through the broker:
+
+```bash
+cargo run -p remote-exec-broker --bin remote-exec -- \
+  --broker-config configs/broker.example.toml \
+  exec --target builder-a "uname -a"
+```
+
+Transfer endpoints use `<target>:<absolute-path>`. Repeat `--source` to transfer multiple inputs.
+
+```bash
+cargo run -p remote-exec-broker --bin remote-exec -- \
+  --broker-config configs/broker.example.toml \
+  transfer-files \
+  --source local:/tmp/source.txt \
+  --destination builder-a:/tmp/dest.txt
+```
+
+Use `apply-patch --input-file -` and `write-stdin --chars-file -` to read input from stdin.
+
 Open a local-to-remote TCP port forward from the CLI against a running broker:
 
 ```bash

@@ -3,17 +3,24 @@ mod support;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+async fn run_cli(args: &[&str]) -> std::process::Output {
+    tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec"))
+        .args(args)
+        .output()
+        .await
+        .unwrap()
+}
+
 #[tokio::test]
 async fn remote_exec_cli_lists_targets_from_broker_config() {
     let fixture = support::spawners::spawn_broker_config_with_stub_daemon().await;
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec"))
-        .arg("--broker-config")
-        .arg(&fixture.config_path)
-        .arg("--json")
-        .arg("list-targets")
-        .output()
-        .await
-        .unwrap();
+    let output = run_cli(&[
+        "--broker-config",
+        fixture.config_path.to_str().unwrap(),
+        "--json",
+        "list-targets",
+    ])
+    .await;
 
     assert!(
         output.status.success(),
@@ -34,15 +41,14 @@ async fn remote_exec_cli_lists_targets_from_broker_config() {
 #[tokio::test]
 async fn remote_exec_cli_rejects_removed_broker_bin_flag() {
     let fixture = support::spawners::spawn_broker_config_with_stub_daemon().await;
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec"))
-        .arg("--broker-config")
-        .arg(&fixture.config_path)
-        .arg("--broker-bin")
-        .arg("ignored")
-        .arg("list-targets")
-        .output()
-        .await
-        .unwrap();
+    let output = run_cli(&[
+        "--broker-config",
+        fixture.config_path.to_str().unwrap(),
+        "--broker-bin",
+        "ignored",
+        "list-targets",
+    ])
+    .await;
 
     assert!(
         !output.status.success(),
@@ -103,11 +109,7 @@ path = "/mcp"
 
 #[tokio::test]
 async fn remote_exec_cli_help_lists_forward_ports() {
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec"))
-        .arg("--help")
-        .output()
-        .await
-        .unwrap();
+    let output = run_cli(&["--help"]).await;
 
     assert!(
         output.status.success(),
@@ -123,6 +125,79 @@ async fn remote_exec_cli_help_lists_forward_ports() {
         stdout,
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[tokio::test]
+async fn remote_exec_cli_help_describes_connection_modes() {
+    let output = run_cli(&["--help"]).await;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains(
+            "Connect to a remote-exec broker over an in-process config or streamable HTTP"
+        )
+    );
+    assert!(stdout.contains("Load a broker config and call broker tools in-process"));
+    assert!(stdout.contains("Connect to a running broker over streamable HTTP"));
+}
+
+#[tokio::test]
+async fn remote_exec_cli_transfer_help_documents_endpoint_syntax() {
+    let output = run_cli(&["transfer-files", "--help"]).await;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("<target>:<absolute-path>"));
+    assert!(stdout.contains("Repeat --source to transfer multiple inputs"));
+}
+
+#[tokio::test]
+async fn remote_exec_cli_help_documents_stdin_backed_inputs() {
+    let apply_patch = run_cli(&["apply-patch", "--help"]).await;
+    assert!(
+        apply_patch.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&apply_patch.stdout),
+        String::from_utf8_lossy(&apply_patch.stderr)
+    );
+    let apply_patch_stdout = String::from_utf8(apply_patch.stdout).unwrap();
+    assert!(apply_patch_stdout.contains("use `-` to read from stdin"));
+
+    let write_stdin = run_cli(&["write-stdin", "--help"]).await;
+    assert!(
+        write_stdin.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&write_stdin.stdout),
+        String::from_utf8_lossy(&write_stdin.stderr)
+    );
+    let write_stdin_stdout = String::from_utf8(write_stdin.stdout).unwrap();
+    assert!(write_stdin_stdout.contains("use `-` to read from stdin"));
+}
+
+#[tokio::test]
+async fn remote_exec_cli_exec_alias_shows_exec_command_help() {
+    let output = run_cli(&["exec", "--help"]).await;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Run a command on a configured target machine."));
+    assert!(stdout.contains("--target <TARGET>"));
 }
 
 #[tokio::test]

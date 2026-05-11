@@ -65,17 +65,16 @@ pub(super) fn format_transfer_compression(compression: &RpcTransferCompression) 
 fn format_transfer_text(result: &TransferFilesResult) -> String {
     let source_summary = match (&result.source, &result.source_type) {
         (Some(source), TransferSourceType::File) => {
-            format!("file `{}` from `{}`", source.path, source.target)
+            format!("file `{}` on `{}`", source.path, source.target)
         }
         (Some(source), TransferSourceType::Directory) => {
-            format!("directory `{}` from `{}`", source.path, source.target)
+            format!("directory `{}` on `{}`", source.path, source.target)
         }
         _ => format!("{} sources", result.sources.len()),
     };
 
     let summary = format!(
-        "Transferred {} to `{}` on `{}`.\nFiles: {}, directories: {}, bytes: {}, replaced: {}",
-        source_summary,
+        "Transfer complete.\nSource: {source_summary}\nDestination: `{}` on `{}`\nFiles copied: {}\nDirectories copied: {}\nBytes copied: {}\nReplaced existing destination: {}",
         result.resolved_destination.path,
         result.resolved_destination.target,
         result.files_copied,
