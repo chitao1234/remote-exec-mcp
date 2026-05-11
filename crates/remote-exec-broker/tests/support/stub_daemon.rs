@@ -54,6 +54,9 @@ pub(crate) use stub_daemon_transfer::{
     set_transfer_path_info_error_response, set_transfer_path_info_response,
 };
 
+const STUB_READY_TIMEOUT: Duration = Duration::from_secs(5);
+const STUB_READY_POLL: Duration = Duration::from_millis(50);
+
 #[derive(Clone)]
 enum ResumeBehavior {
     PassThrough,
@@ -715,40 +718,52 @@ async fn wait_until_ready(certs: &TestCerts, addr: std::net::SocketAddr) {
         .build()
         .unwrap();
 
-    for _ in 0..40 {
-        if client
-            .post(format!("https://{addr}/v1/health"))
-            .json(&serde_json::json!({}))
-            .send()
-            .await
-            .is_ok()
-        {
-            return;
+    tokio::time::timeout(STUB_READY_TIMEOUT, async {
+        loop {
+            if client
+                .post(format!("https://{addr}/v1/health"))
+                .json(&serde_json::json!({}))
+                .send()
+                .await
+                .is_ok()
+            {
+                return;
+            }
+            tokio::time::sleep(STUB_READY_POLL).await;
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-
-    panic!("stub daemon did not become ready");
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "TLS stub daemon at https://{addr} did not become ready within {STUB_READY_TIMEOUT:?}"
+        )
+    });
 }
 
 async fn wait_until_ready_http(addr: std::net::SocketAddr) {
     remote_exec_broker::install_crypto_provider().unwrap();
     let client = reqwest::Client::builder().build().unwrap();
 
-    for _ in 0..40 {
-        if client
-            .post(format!("http://{addr}/v1/health"))
-            .json(&serde_json::json!({}))
-            .send()
-            .await
-            .is_ok()
-        {
-            return;
+    tokio::time::timeout(STUB_READY_TIMEOUT, async {
+        loop {
+            if client
+                .post(format!("http://{addr}/v1/health"))
+                .json(&serde_json::json!({}))
+                .send()
+                .await
+                .is_ok()
+            {
+                return;
+            }
+            tokio::time::sleep(STUB_READY_POLL).await;
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-
-    panic!("plain http stub daemon did not become ready");
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "plain HTTP stub daemon at http://{addr} did not become ready within {STUB_READY_TIMEOUT:?}"
+        )
+    });
 }
 
 fn build_stub_port_tunnel_state(target: &str) -> Arc<remote_exec_host::HostRuntimeState> {

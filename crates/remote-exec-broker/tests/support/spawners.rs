@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use axum::serve;
 use rmcp::{ServiceExt, transport::TokioChildProcess};
@@ -17,6 +18,9 @@ use super::stub_daemon::{
     spawn_plain_http_stub_daemon, spawn_plain_http_unknown_session_exec_write_daemon,
     stub_daemon_state, stub_router,
 };
+
+const TEST_HTTP_READY_TIMEOUT: Duration = Duration::from_secs(5);
+const TEST_HTTP_READY_POLL: Duration = Duration::from_millis(50);
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub struct DelayedTargetFixture {
@@ -961,44 +965,56 @@ async fn wait_until_ready_http(addr: std::net::SocketAddr) {
     remote_exec_broker::install_crypto_provider().unwrap();
     let client = reqwest::Client::builder().build().unwrap();
 
-    for _ in 0..40 {
-        if client
-            .post(format!("http://{addr}/v1/health"))
-            .json(&serde_json::json!({}))
-            .send()
-            .await
-            .is_ok()
-        {
-            return;
+    tokio::time::timeout(TEST_HTTP_READY_TIMEOUT, async {
+        loop {
+            if client
+                .post(format!("http://{addr}/v1/health"))
+                .json(&serde_json::json!({}))
+                .send()
+                .await
+                .is_ok()
+            {
+                return;
+            }
+            tokio::time::sleep(TEST_HTTP_READY_POLL).await;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
-
-    panic!("plain http stub daemon did not become ready");
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "plain HTTP stub daemon at http://{addr} did not become ready within {TEST_HTTP_READY_TIMEOUT:?}"
+        )
+    });
 }
 
 async fn wait_until_ready_mcp_http(url: &str) {
     remote_exec_broker::install_crypto_provider().unwrap();
     let client = reqwest::Client::builder().build().unwrap();
 
-    for _ in 0..40 {
-        let response = client
-            .post(url)
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .header(reqwest::header::ACCEPT, "application/json, text/event-stream")
-            .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"#)
-            .send()
-            .await;
-        if response
-            .as_ref()
-            .is_ok_and(|response| response.status().is_success())
-        {
-            return;
+    tokio::time::timeout(TEST_HTTP_READY_TIMEOUT, async {
+        loop {
+            let response = client
+                .post(url)
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .header(reqwest::header::ACCEPT, "application/json, text/event-stream")
+                .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"#)
+                .send()
+                .await;
+            if response
+                .as_ref()
+                .is_ok_and(|response| response.status().is_success())
+            {
+                return;
+            }
+            tokio::time::sleep(TEST_HTTP_READY_POLL).await;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
-
-    panic!("streamable HTTP broker did not become ready");
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "streamable HTTP broker at {url} did not become ready within {TEST_HTTP_READY_TIMEOUT:?}"
+        )
+    });
 }
 
 pub async fn spawn_broker_with_stub_daemon_and_structured_content_disabled() -> BrokerFixture {

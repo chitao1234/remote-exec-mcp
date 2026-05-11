@@ -17,6 +17,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, oneshot};
 
+const CPP_READY_TIMEOUT: Duration = Duration::from_secs(20);
+const CPP_READY_POLL: Duration = Duration::from_millis(50);
+
 fn apply_quiet_test_logging(command: &mut tokio::process::Command) {
     if std::env::var_os("REMOTE_EXEC_LOG").is_some() || std::env::var_os("RUST_LOG").is_some() {
         return;
@@ -763,7 +766,7 @@ path = "/mcp"
             }
             if started.elapsed() >= timeout {
                 panic!(
-                    "C++ daemon listener on {endpoint} was not released after broker crash; last error={}",
+                    "C++ daemon listener on {endpoint} was not released within {timeout:?}; last error={}",
                     response.text_output
                 );
             }
@@ -977,42 +980,52 @@ async fn wait_until_ready_http(addr: std::net::SocketAddr) {
     remote_exec_broker::install_crypto_provider().unwrap();
     let client = reqwest::Client::builder().build().unwrap();
 
-    for _ in 0..80 {
-        if client
-            .post(format!("http://{addr}/v1/health"))
-            .json(&serde_json::json!({}))
-            .send()
-            .await
-            .is_ok()
-        {
-            return;
+    tokio::time::timeout(CPP_READY_TIMEOUT, async {
+        loop {
+            if client
+                .post(format!("http://{addr}/v1/health"))
+                .json(&serde_json::json!({}))
+                .send()
+                .await
+                .is_ok()
+            {
+                return;
+            }
+            tokio::time::sleep(CPP_READY_POLL).await;
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-
-    panic!("real C++ daemon did not become ready");
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!("real C++ daemon at http://{addr} did not become ready within {CPP_READY_TIMEOUT:?}")
+    });
 }
 
 async fn wait_until_ready_mcp_http(url: &str) {
     remote_exec_broker::install_crypto_provider().unwrap();
     let client = reqwest::Client::builder().build().unwrap();
 
-    for _ in 0..80 {
-        let response = client
-            .post(url)
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .header(reqwest::header::ACCEPT, "application/json, text/event-stream")
-            .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"#)
-            .send()
-            .await;
-        if response
-            .as_ref()
-            .is_ok_and(|response| response.status().is_success())
-        {
-            return;
+    tokio::time::timeout(CPP_READY_TIMEOUT, async {
+        loop {
+            let response = client
+                .post(url)
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .header(reqwest::header::ACCEPT, "application/json, text/event-stream")
+                .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"#)
+                .send()
+                .await;
+            if response
+                .as_ref()
+                .is_ok_and(|response| response.status().is_success())
+            {
+                return;
+            }
+            tokio::time::sleep(CPP_READY_POLL).await;
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-
-    panic!("broker MCP HTTP endpoint did not become ready");
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "broker MCP HTTP endpoint at {url} did not become ready within {CPP_READY_TIMEOUT:?}"
+        )
+    });
 }

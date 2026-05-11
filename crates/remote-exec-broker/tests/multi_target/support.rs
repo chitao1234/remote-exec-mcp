@@ -17,6 +17,8 @@ use tokio::task::JoinHandle;
 
 const BROKER_TOOL_CALL_TIMEOUT: Duration = Duration::from_secs(30);
 const BROKER_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
+const MULTI_TARGET_READY_TIMEOUT: Duration = Duration::from_secs(20);
+const MULTI_TARGET_READY_POLL: Duration = Duration::from_millis(50);
 
 pub struct ClusterFixture {
     pub broker: BrokerFixture,
@@ -696,43 +698,56 @@ pub async fn spawn_udp_echo() -> std::net::SocketAddr {
 }
 
 async fn wait_until_ready_http(client: &reqwest::Client, addr: std::net::SocketAddr) {
-    for _ in 0..80 {
-        if client
-            .post(format!("http://{addr}/v1/health"))
-            .json(&serde_json::json!({}))
-            .send()
-            .await
-            .is_ok()
-        {
-            return;
+    tokio::time::timeout(MULTI_TARGET_READY_TIMEOUT, async {
+        loop {
+            if client
+                .post(format!("http://{addr}/v1/health"))
+                .json(&serde_json::json!({}))
+                .send()
+                .await
+                .is_ok()
+            {
+                return;
+            }
+            tokio::time::sleep(MULTI_TARGET_READY_POLL).await;
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    panic!("daemon did not become ready");
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "daemon HTTP endpoint at http://{addr} did not become ready within {MULTI_TARGET_READY_TIMEOUT:?}"
+        )
+    });
 }
 
 async fn wait_until_ready_mcp_http(url: &str) {
     remote_exec_broker::install_crypto_provider().unwrap();
     let client = reqwest::Client::builder().build().unwrap();
 
-    for _ in 0..80 {
-        let response = client
-            .post(url)
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .header(reqwest::header::ACCEPT, "application/json, text/event-stream")
-            .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"#)
-            .send()
-            .await;
-        if response
-            .as_ref()
-            .is_ok_and(|response| response.status().is_success())
-        {
-            return;
+    tokio::time::timeout(MULTI_TARGET_READY_TIMEOUT, async {
+        loop {
+            let response = client
+                .post(url)
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .header(reqwest::header::ACCEPT, "application/json, text/event-stream")
+                .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"#)
+                .send()
+                .await;
+            if response
+                .as_ref()
+                .is_ok_and(|response| response.status().is_success())
+            {
+                return;
+            }
+            tokio::time::sleep(MULTI_TARGET_READY_POLL).await;
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-
-    panic!("broker MCP HTTP endpoint did not become ready");
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "streamable HTTP broker at {url} did not become ready within {MULTI_TARGET_READY_TIMEOUT:?}"
+        )
+    });
 }
 
 fn build_http_client() -> reqwest::Client {
@@ -745,23 +760,24 @@ fn build_http_client() -> reqwest::Client {
 
 async fn wait_for_listener_release(addr: std::net::SocketAddr) {
     #[cfg(windows)]
-    let retries = 400;
+    let timeout = Duration::from_secs(20);
     #[cfg(not(windows))]
-    let retries = 80;
+    let timeout = Duration::from_secs(2);
 
     #[cfg(windows)]
-    let delay_ms = 50;
+    let poll = Duration::from_millis(50);
     #[cfg(not(windows))]
-    let delay_ms = 25;
+    let poll = Duration::from_millis(25);
 
-    for _ in 0..retries {
+    let started = std::time::Instant::now();
+    while started.elapsed() < timeout {
         if let Ok(listener) = std::net::TcpListener::bind(addr) {
             drop(listener);
             return;
         }
-        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+        tokio::time::sleep(poll).await;
     }
-    panic!("daemon listener was not released");
+    panic!("listener {addr} was not released within {timeout:?}");
 }
 
 pub async fn wait_for_forward_status_timeout(
@@ -837,7 +853,7 @@ pub async fn wait_for_daemon_listener_rebind(endpoint: &str, timeout: Duration) 
             return;
         }
         if started.elapsed() >= timeout {
-            panic!("daemon listener on {endpoint} was not released after broker crash");
+            panic!("daemon listener on {endpoint} was not released within {timeout:?}");
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
