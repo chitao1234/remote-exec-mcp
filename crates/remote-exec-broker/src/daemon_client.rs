@@ -653,8 +653,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn daemon_rpc_times_out_hung_response() {
+    async fn hung_response_client(timeout: Duration) -> (DaemonClient, tokio::task::JoinHandle<()>) {
         crate::install_crypto_provider().unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -670,8 +669,15 @@ mod tests {
             target_name: "builder-a".to_string(),
             base_url: format!("http://{addr}"),
             authorization: None,
-            request_timeout: Duration::from_millis(50),
+            request_timeout: timeout,
         };
+
+        (client, server)
+    }
+
+    #[tokio::test]
+    async fn daemon_rpc_times_out_hung_response() {
+        let (client, server) = hung_response_client(Duration::from_millis(50)).await;
 
         let started = std::time::Instant::now();
         let err = client.target_info().await.unwrap_err();
@@ -683,6 +689,54 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("daemon rpc `/v1/target-info` timed out after 50 ms"),
+            "unexpected error: {err}"
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn daemon_exec_rpc_times_out_hung_exec_start_response() {
+        let (client, server) = hung_response_client(Duration::from_millis(50)).await;
+
+        let err = client
+            .exec_start(&ExecStartRequest {
+                cmd: "sleep 30".to_string(),
+                workdir: None,
+                shell: None,
+                tty: false,
+                yield_time_ms: None,
+                max_output_tokens: None,
+                login: None,
+            })
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("daemon rpc `/v1/exec/start` timed out after 50 ms"),
+            "unexpected error: {err}"
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn daemon_exec_rpc_times_out_hung_exec_write_response() {
+        let (client, server) = hung_response_client(Duration::from_millis(50)).await;
+
+        let err = client
+            .exec_write(&ExecWriteRequest {
+                daemon_session_id: "daemon-session-1".to_string(),
+                chars: String::new(),
+                yield_time_ms: None,
+                max_output_tokens: None,
+                pty_size: None,
+            })
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("daemon rpc `/v1/exec/write` timed out after 50 ms"),
             "unexpected error: {err}"
         );
         server.abort();
