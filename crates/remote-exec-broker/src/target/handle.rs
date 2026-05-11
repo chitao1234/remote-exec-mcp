@@ -32,6 +32,12 @@ pub struct TargetHandle {
     cached_daemon_info: Arc<Mutex<Option<CachedDaemonInfo>>>,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct RemoteTargetHandle<'a> {
+    handle: &'a TargetHandle,
+    client: &'a crate::daemon_client::DaemonClient,
+}
+
 impl TargetHandle {
     fn new(
         backend: TargetBackend,
@@ -131,26 +137,13 @@ impl TargetHandle {
         }
     }
 
-    pub async fn transfer_export_to_file(
-        &self,
-        req: &TransferExportRequest,
-        archive_path: &std::path::Path,
-    ) -> Result<TransferExportResponse, DaemonClientError> {
+    pub(crate) fn as_remote(&self) -> Option<RemoteTargetHandle<'_>> {
         match &self.backend {
-            TargetBackend::Remote(client) => {
-                client.transfer_export_to_file(req, archive_path).await
-            }
-            TargetBackend::Local(_) => Err(unsupported_local_transfer_error()),
-        }
-    }
-
-    pub async fn transfer_export_stream(
-        &self,
-        req: &TransferExportRequest,
-    ) -> Result<TransferExportStream, DaemonClientError> {
-        match &self.backend {
-            TargetBackend::Remote(client) => client.transfer_export_stream(req).await,
-            TargetBackend::Local(_) => Err(unsupported_local_transfer_error()),
+            TargetBackend::Remote(client) => Some(RemoteTargetHandle {
+                handle: self,
+                client,
+            }),
+            TargetBackend::Local(_) => None,
         }
     }
 
@@ -161,30 +154,6 @@ impl TargetHandle {
         match &self.backend {
             TargetBackend::Remote(client) => client.transfer_path_info(req).await,
             TargetBackend::Local(client) => client.transfer_path_info(req).await,
-        }
-    }
-
-    pub async fn transfer_import_from_file(
-        &self,
-        archive_path: &std::path::Path,
-        req: &TransferImportRequest,
-    ) -> Result<TransferImportResponse, DaemonClientError> {
-        match &self.backend {
-            TargetBackend::Remote(client) => {
-                client.transfer_import_from_file(archive_path, req).await
-            }
-            TargetBackend::Local(_) => Err(unsupported_local_transfer_error()),
-        }
-    }
-
-    pub async fn transfer_import_from_body(
-        &self,
-        req: &TransferImportRequest,
-        body: reqwest::Body,
-    ) -> Result<TransferImportResponse, DaemonClientError> {
-        match &self.backend {
-            TargetBackend::Remote(client) => client.transfer_import_from_body(req, body).await,
-            TargetBackend::Local(_) => Err(unsupported_local_transfer_error()),
         }
     }
 
@@ -246,10 +215,55 @@ impl TargetHandle {
     }
 }
 
-fn unsupported_local_transfer_error() -> DaemonClientError {
-    DaemonClientError::Rpc {
-        status: reqwest::StatusCode::BAD_REQUEST,
-        code: Some("unsupported_operation".to_string()),
-        message: "embedded local target does not use daemon transfer RPC".to_string(),
+impl RemoteTargetHandle<'_> {
+    pub async fn cached_daemon_info(&self) -> Option<CachedDaemonInfo> {
+        self.handle.cached_daemon_info().await
+    }
+
+    pub async fn transfer_export_to_file(
+        &self,
+        req: &TransferExportRequest,
+        archive_path: &std::path::Path,
+    ) -> Result<TransferExportResponse, DaemonClientError> {
+        self.client.transfer_export_to_file(req, archive_path).await
+    }
+
+    pub async fn transfer_export_stream(
+        &self,
+        req: &TransferExportRequest,
+    ) -> Result<TransferExportStream, DaemonClientError> {
+        self.client.transfer_export_stream(req).await
+    }
+
+    pub async fn transfer_path_info(
+        &self,
+        req: &TransferPathInfoRequest,
+    ) -> Result<TransferPathInfoResponse, DaemonClientError> {
+        self.client.transfer_path_info(req).await
+    }
+
+    pub async fn transfer_import_from_file(
+        &self,
+        archive_path: &std::path::Path,
+        req: &TransferImportRequest,
+    ) -> Result<TransferImportResponse, DaemonClientError> {
+        self.client
+            .transfer_import_from_file(archive_path, req)
+            .await
+    }
+
+    pub async fn transfer_import_from_body(
+        &self,
+        req: &TransferImportRequest,
+        body: reqwest::Body,
+    ) -> Result<TransferImportResponse, DaemonClientError> {
+        self.client.transfer_import_from_body(req, body).await
+    }
+
+    pub async fn clear_on_transport_error<T>(
+        &self,
+        result: Result<T, DaemonClientError>,
+    ) -> Result<T, DaemonClientError> {
+        self.handle.clear_on_transport_error(result).await
     }
 }

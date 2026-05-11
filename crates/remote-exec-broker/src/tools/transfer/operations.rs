@@ -363,16 +363,11 @@ fn build_import_request(
 }
 
 async fn handle_remote_transfer_result<T>(
-    target: &crate::TargetHandle,
+    target: crate::target::RemoteTargetHandle<'_>,
     result: Result<T, DaemonClientError>,
 ) -> anyhow::Result<T> {
-    match result {
+    match target.clear_on_transport_error(result).await {
         Ok(value) => Ok(value),
-        Err(err) => {
-            if matches!(err, DaemonClientError::Transport(_)) {
-                target.clear_cached_daemon_info().await;
-            }
-            Err(normalize_transfer_error(err))
-        }
+        Err(err) => Err(normalize_transfer_error(err)),
     }
 }

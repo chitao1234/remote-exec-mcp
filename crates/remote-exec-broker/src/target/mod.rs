@@ -3,6 +3,7 @@ mod capabilities;
 mod handle;
 
 pub(crate) use backend::TargetBackend;
+pub(crate) use handle::RemoteTargetHandle;
 pub use handle::{CachedDaemonInfo, TargetHandle};
 
 pub(crate) fn ensure_expected_daemon_name(

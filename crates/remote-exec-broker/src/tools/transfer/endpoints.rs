@@ -28,10 +28,12 @@ pub(super) enum TransferEndpointTarget<'a> {
 pub(super) async fn verified_remote_target<'a>(
     state: &'a crate::BrokerState,
     target_name: &'a str,
-) -> anyhow::Result<&'a crate::TargetHandle> {
+) -> anyhow::Result<crate::target::RemoteTargetHandle<'a>> {
     let target = state.target(target_name)?;
     target.ensure_identity_verified(target_name).await?;
-    Ok(target)
+    target
+        .as_remote()
+        .with_context(|| format!("target `{target_name}` is not a remote transfer target"))
 }
 
 async fn verified_remote_daemon_info(
