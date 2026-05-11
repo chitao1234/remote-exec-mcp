@@ -15,6 +15,9 @@ use tokio::net::TcpListener;
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
 
+const BROKER_TOOL_CALL_TIMEOUT: Duration = Duration::from_secs(30);
+const BROKER_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
+
 pub struct ClusterFixture {
     pub broker: BrokerFixture,
     pub daemon_a: DaemonFixture,
@@ -178,18 +181,28 @@ impl BrokerFixture {
     }
 
     pub async fn stop(&mut self) {
-        self.client.close().await.unwrap();
+        let closed = self
+            .client
+            .close_with_timeout(BROKER_CLOSE_TIMEOUT)
+            .await
+            .unwrap();
+        assert!(
+            closed.is_some(),
+            "broker MCP child did not close within {BROKER_CLOSE_TIMEOUT:?}"
+        );
     }
 
     async fn raw_call_tool(&self, name: &str, arguments: serde_json::Value) -> ToolResult {
-        let result = self
-            .client
-            .call_tool(
-                CallToolRequestParams::new(name.to_string())
-                    .with_arguments(arguments.as_object().unwrap().clone()),
-            )
+        let params = CallToolRequestParams::new(name.to_string())
+            .with_arguments(arguments.as_object().unwrap().clone());
+        let result = tokio::time::timeout(BROKER_TOOL_CALL_TIMEOUT, self.client.call_tool(params))
             .await
-            .unwrap();
+            .unwrap_or_else(|_| {
+                panic!(
+                    "tool call `{name}` timed out after {BROKER_TOOL_CALL_TIMEOUT:?}; arguments={arguments}"
+                )
+            })
+            .unwrap_or_else(|err| panic!("tool call `{name}` failed: {err}; arguments={arguments}"));
 
         ToolResult::from_call_tool_result(result)
     }

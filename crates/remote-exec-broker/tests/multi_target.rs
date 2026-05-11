@@ -188,20 +188,7 @@ async fn forward_ports_reports_daemon_listen_port_conflicts_cleanly() {
 #[tokio::test]
 async fn forward_ports_relays_remote_udp_datagrams_from_two_peers_full_duplex() {
     let cluster = support::spawn_cluster().await;
-    let echo_socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    let echo_addr = echo_socket.local_addr().unwrap();
-    tokio::spawn(async move {
-        let mut buf = [0u8; 1024];
-        let first = echo_socket.recv_from(&mut buf).await.unwrap();
-        let first_payload = buf[..first.0].to_vec();
-        let second = echo_socket.recv_from(&mut buf).await.unwrap();
-        let second_payload = buf[..second.0].to_vec();
-        echo_socket.send_to(&first_payload, first.1).await.unwrap();
-        echo_socket
-            .send_to(&second_payload, second.1)
-            .await
-            .unwrap();
-    });
+    let echo_addr = support::spawn_udp_echo().await;
 
     let open = cluster
         .broker
