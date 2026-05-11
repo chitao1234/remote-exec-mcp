@@ -26,14 +26,16 @@ Included from round-3 Phase D4:
 - `#33`: No-default-features CI misses `remote-exec-host`.
 - `#34`: Readiness loops lack explicit outer timeout messages naming the resource.
 - `#35`: Stub `patch_apply` validates only the patch header, not the real parser footer.
-- `#36`: C++ daemon Windows runtime coverage gap is undocumented.
+- `#36`: C++ daemon Windows runtime coverage is absent from CI.
 
-Explicitly excluded from this plan: D3 observability and operator-experience items, public tool/operator APIs, request correlation IDs, metrics, logging-level changes, exit-code taxonomy, and C++ daemon Windows runtime implementation. D4 may add hidden test-support APIs and test-only startup hooks whose sole purpose is deterministic fixture binding. For `#36`, D4 documents the gap; it does not build a Windows C++ daemon spawner.
+Explicitly excluded from this plan: D3 observability and operator-experience items, public tool/operator APIs, request correlation IDs, metrics, logging-level changes, exit-code taxonomy, and new C++ daemon product behavior. D4 may add hidden test-support APIs, build-system targets, and test-only startup hooks whose sole purpose is deterministic fixture binding and native Windows test execution. For `#36`, D4 must execute broker-to-C++ daemon runtime forwarding coverage on a native `windows-latest` runner against a host-native Windows C++ daemon process.
 
 Current-state notes:
 
 - Some D4 items already have partial mitigations. Plain-HTTP stub daemons are spawned with pre-bound Tokio listeners, but TLS stub daemon, Rust daemon fixture backend, broker streamable-HTTP child, real C++ daemon, and fixed remote-listener release tests still use dropped `:0` addresses.
 - `multi_target` fixtures already store the main Rust daemon task handle, but their proxy accept tasks still spawn detached per-connection workers.
+- `mcp_forward_ports_cpp.rs` has a file-level Unix cfg and its proxy also detaches per-connection workers; both must be addressed before #36 can run on Windows.
+- The C++ GNU make path has POSIX-native and Windows-XP cross-build targets today, but no host-native Windows daemon target for the Rust broker integration fixture.
 - The C++ POSIX child-reaper test added in D2 currently uses a short sleep to let `SIGCHLD` delivery/reaping occur. D4 should replace that with bounded polling.
 - The XP Wine targets already exist in `crates/remote-exec-daemon-cpp/mk/windows-xp.mk`: `test-wine-session-store` and `test-wine-transfer`. CI should install Wine on Linux and run them conditionally after `check-windows-xp`.
 
@@ -50,21 +52,24 @@ Current-state notes:
 - `crates/remote-exec-broker/tests/support/stub_daemon.rs`: dynamic daemon/session IDs, typed unknown-session responses, stub patch footer parity, tracked stub tasks, owned port-tunnel tempdir, and readiness timeouts.
 - `crates/remote-exec-broker/tests/support/stub_daemon_exec.rs`: use generated daemon session ID and typed validation instead of `assert_eq!`.
 - `crates/remote-exec-broker/tests/support/fixture.rs`: expose stub daemon session ID helper and add targeted regression assertions where fixture-level helpers fit.
+- `crates/remote-exec-broker/src/tools/exec_format.rs`: replace the remaining hard-coded unit-test daemon instance ID fixture with a generated real-format ID.
 - `crates/remote-exec-broker/tests/support/spawners.rs`: track spawned stub task handles, add outer timeouts to readiness loops, wait for broker child bound-address files, and keep dead-target allocation explicit.
 - `crates/remote-exec-broker/tests/mcp_exec/session.rs`: add public-surface regression that a stale daemon session produces typed unknown-session behavior rather than a 500 from the stub.
 - `crates/remote-exec-broker/tests/mcp_assets.rs`: add malformed patch footer regression through broker-to-stub path.
 - `crates/remote-exec-broker/tests/mcp_forward_ports.rs`: replace fixed sleeps with status/counter helpers and widen UDP negative windows with positive counterparts.
 - `crates/remote-exec-broker/tests/multi_target.rs`: replace fixed sleeps and dropped-address listener-open tests with condition polling and returned-endpoint assertions.
 - `crates/remote-exec-broker/tests/multi_target/support.rs`: use listener-taking daemon test APIs, wait for broker child bound-address files, readiness outer timeouts, proxy task tracking, and helper changes needed by `multi_target.rs`.
-- `crates/remote-exec-broker/tests/mcp_forward_ports_cpp.rs`: start C++ daemon and broker child fixtures with port `0`, wait for bound-address files, remove dropped-address helpers, add readiness outer timeouts, and replace fixed sleeps.
+- `crates/remote-exec-broker/tests/mcp_forward_ports_cpp.rs`: remove the Unix-only file cfg, start C++ daemon and broker child fixtures with port `0`, wait for bound-address files, remove dropped-address helpers, track proxy tasks, add readiness outer timeouts, replace fixed sleeps, and run a Windows-safe subset natively on `windows-latest`.
+- `crates/remote-exec-daemon-cpp/GNUmakefile`: include the host-native Windows GNU make target file.
+- `crates/remote-exec-daemon-cpp/mk/windows-native.mk`: add host-native Windows MinGW build rules for `build/remote-exec-daemon-cpp.exe`.
 - `crates/remote-exec-daemon-cpp/include/config.h`: add hidden `test_bound_addr_file` fixture field.
 - `crates/remote-exec-daemon-cpp/src/config.cpp`: allow `listen_port = 0` only when `test_bound_addr_file` is present.
 - `crates/remote-exec-daemon-cpp/src/server.cpp`: write the actual bound address to `test_bound_addr_file` after the listener is live.
 - `crates/remote-exec-daemon-cpp/tests/test_session_store.cpp`: replace sleep-based child-reaper test synchronization with bounded polling.
 - `crates/remote-exec-daemon-cpp/tests/test_server_streaming.cpp`: replace long fixed sleep in socket-buffer pressure test with condition-driven blocking.
-- `.github/workflows/ci.yml`: add host no-default-features test/clippy commands and conditional Wine execution for XP test binaries.
+- `.github/workflows/ci.yml`: add host no-default-features test/clippy commands, conditional Wine execution for XP test binaries, and a native Windows broker-to-C++ daemon runtime test job/step.
 - `README.md`: update focused no-default-features commands and CI coverage notes.
-- `crates/remote-exec-daemon-cpp/README.md`: document what the XP Wine targets execute and the still-deliberate lack of Windows C++ daemon runtime coverage.
+- `crates/remote-exec-daemon-cpp/README.md`: document what the XP Wine targets execute and how native Windows C++ daemon runtime coverage is executed.
 
 ---
 
@@ -102,8 +107,11 @@ git commit -m "docs: plan phase d4 test reliability"
 - Modify: `crates/remote-exec-broker/tests/support/stub_daemon.rs`
 - Modify: `crates/remote-exec-broker/tests/support/stub_daemon_exec.rs`
 - Modify: `crates/remote-exec-broker/tests/support/fixture.rs`
+- Modify: `crates/remote-exec-broker/src/tools/exec_format.rs`
 - Modify: `crates/remote-exec-broker/tests/mcp_exec/session.rs`
-- Test/Verify: `cargo test -p remote-exec-broker --test mcp_exec write_stdin`
+- Test/Verify:
+  - `cargo test -p remote-exec-broker --lib tools::exec_format::tests::format_command_text_includes_original_token_count_when_present`
+  - `cargo test -p remote-exec-broker --test mcp_exec write_stdin`
 
 **Testing approach:** TDD
 Reason: The defect has a clear broker-visible seam: the stub should return generated `inst_...`/`sess_...` IDs and stale daemon-session writes should become typed `unknown_session` responses, not handler panics/500s.
@@ -296,13 +304,59 @@ In `exec_write`, replace `assert_eq!(req.daemon_session_id, "daemon-session-1");
 
 - [ ] **Step 7: Run focused verification.**
 
-Run: `cargo test -p remote-exec-broker --test mcp_exec write_stdin -- --nocapture`
-Expected: all `write_stdin`-filtered tests pass.
-
-- [ ] **Step 8: Commit.**
+Run:
 
 ```bash
-git add crates/remote-exec-broker/tests/support/stub_daemon.rs crates/remote-exec-broker/tests/support/stub_daemon_exec.rs crates/remote-exec-broker/tests/support/fixture.rs crates/remote-exec-broker/tests/mcp_exec/session.rs
+cargo test -p remote-exec-broker --test mcp_exec write_stdin -- --nocapture
+```
+
+Expected: all `write_stdin`-filtered tests pass.
+
+- [ ] **Step 8: Replace the remaining hard-coded exec-format fixture instance ID.**
+
+In `crates/remote-exec-broker/src/tools/exec_format.rs`, update `completed_response` so the unit-test `ExecOutputResponse` uses a generated daemon instance ID:
+
+```rust
+    fn completed_response() -> ExecResponse {
+        ExecResponse::Completed(ExecCompletedResponse {
+            output: ExecOutputResponse {
+                daemon_instance_id: remote_exec_host::ids::new_instance_id().into_string(),
+                running: false,
+                chunk_id: Some("abc123".to_string()),
+                wall_time_seconds: 0.25,
+                exit_code: Some(0),
+                original_token_count: Some(6),
+                output: "one two three".to_string(),
+                warnings: Vec::new(),
+            },
+        })
+    }
+```
+
+- [ ] **Step 9: Run the exec-format unit verification.**
+
+Run:
+
+```bash
+cargo test -p remote-exec-broker --lib tools::exec_format::tests::format_command_text_includes_original_token_count_when_present
+```
+
+Expected: the unit test passes and no `"daemon-instance-1"` literal remains in `exec_format.rs`.
+
+- [ ] **Step 10: Confirm all legacy stub ID literals are gone from the planned surfaces.**
+
+Run:
+
+```bash
+! rg -n '"daemon-instance-1"|"daemon-session-1"' crates/remote-exec-broker/tests/support crates/remote-exec-broker/tests/mcp_exec crates/remote-exec-broker/src/tools/exec_format.rs
+```
+
+Expected: command exits successfully with no matches.
+
+- [ ] **Step 11: Commit.**
+
+```bash
+git add crates/remote-exec-broker/tests/support/stub_daemon.rs crates/remote-exec-broker/tests/support/stub_daemon_exec.rs crates/remote-exec-broker/tests/support/fixture.rs crates/remote-exec-broker/src/tools/exec_format.rs crates/remote-exec-broker/tests/mcp_exec/session.rs
 git commit -m "test: use realistic stub exec ids"
 ```
 
@@ -447,10 +501,25 @@ Update `wait_until_ready` body to wrap the loop:
     .unwrap_or_else(|_| panic!("TLS stub daemon at https://{addr} did not become ready within {STUB_READY_TIMEOUT:?}"));
 ```
 
-Update `wait_until_ready_http` similarly, with message:
+Update `wait_until_ready_http` body to use the same timeout and polling constants:
 
 ```rust
-"plain HTTP stub daemon at http://{addr} did not become ready within {STUB_READY_TIMEOUT:?}"
+    tokio::time::timeout(STUB_READY_TIMEOUT, async {
+        loop {
+            if client
+                .post(format!("http://{addr}/v1/health"))
+                .json(&serde_json::json!({}))
+                .send()
+                .await
+                .is_ok()
+            {
+                return;
+            }
+            tokio::time::sleep(STUB_READY_POLL).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("plain HTTP stub daemon at http://{addr} did not become ready within {STUB_READY_TIMEOUT:?}"));
 ```
 
 - [ ] **Step 2: Add named timeout loops to `spawners.rs`.**
@@ -540,12 +609,16 @@ git commit -m "test: bound readiness waits with named timeouts"
 - Modify: `crates/remote-exec-broker/tests/support/stub_daemon.rs`
 - Modify: `crates/remote-exec-broker/tests/support/spawners.rs`
 - Modify: `crates/remote-exec-broker/tests/support/fixture.rs`
+- Modify: `crates/remote-exec-broker/tests/multi_target/support.rs`
+- Modify: `crates/remote-exec-broker/tests/mcp_forward_ports_cpp.rs`
 - Test/Verify:
   - `cargo test -p remote-exec-broker --test mcp_forward_ports forward_ports_connect_side_reconnect_retries_transient_open_failures`
   - `cargo test -p remote-exec-broker --test mcp_exec write_stdin_routes_by_public_session_id_and_preserves_original_command_metadata`
+  - `cargo test -p remote-exec-broker --test multi_target forward_ports_reconnect_after_connect_side_tunnel_drop_and_accept_new_tcp_connections`
+  - `cargo test -p remote-exec-broker --test mcp_forward_ports_cpp cpp_forward_ports_reconnect_after_connect_tunnel_drop`
 
 **Testing approach:** existing tests + targeted verification
-Reason: This changes test-fixture ownership and panic surfacing. Representative exec and port-tunnel tests exercise the tracked tasks and state lifetime without needing new product tests.
+Reason: This changes test-fixture ownership and panic surfacing. Representative exec, Rust proxy, C++ proxy, and port-tunnel tests exercise the tracked tasks and state lifetime without needing new product tests.
 
 - [ ] **Step 1: Add task tracking helpers and tempdir ownership to `StubDaemonState`.**
 
@@ -706,21 +779,126 @@ pub(crate) async fn spawn_plain_http_stub_on_listener(
 
 Use that helper in `spawn_broker_with_stub_daemon_http_auth`, `spawn_broker_with_stub_port_forward_version`, `spawn_broker_with_local_and_stub_port_forward_version_and_extra_config`, and `spawn_broker_with_plain_http_stub_daemon`.
 
-- [ ] **Step 5: Run targeted verification.**
+- [ ] **Step 5: Track Rust multi-target proxy accept and connection tasks.**
+
+In `crates/remote-exec-broker/tests/multi_target/support.rs`, extend `TunnelDropProxy` with a background task list:
+
+```rust
+    background_tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
+```
+
+Initialize it in `TunnelDropProxy::spawn`:
+
+```rust
+        let background_tasks = Arc::new(Mutex::new(Vec::new()));
+        let background_tasks_accept = background_tasks.clone();
+```
+
+Inside the accept loop, replace the detached per-connection spawn with tracked handles:
+
+```rust
+                        let connection_handle = tokio::spawn(async move {
+                            if let Err(err) = proxy_connection(stream, backend_addr, active_port_tunnels).await {
+                                panic!("multi-target tunnel-drop proxy connection failed: {err}");
+                            }
+                        });
+                        background_tasks_accept.lock().await.push(connection_handle);
+```
+
+Add this method:
+
+```rust
+    async fn assert_no_task_panics(&self) {
+        let finished = {
+            let mut tasks = self.background_tasks.lock().await;
+            let mut finished = Vec::new();
+            let mut pending = Vec::new();
+            for handle in tasks.drain(..) {
+                if handle.is_finished() {
+                    finished.push(handle);
+                } else {
+                    pending.push(handle);
+                }
+            }
+            *tasks = pending;
+            finished
+        };
+        for handle in finished {
+            handle.await.expect("multi-target tunnel-drop proxy task panicked");
+        }
+    }
+```
+
+Call it from `DaemonFixture::drop_port_tunnels` immediately after forwarding the drop to the proxy:
+
+```rust
+        self.proxy.drop_port_tunnels().await;
+        self.proxy.assert_no_task_panics().await;
+```
+
+- [ ] **Step 6: Track C++ tunnel-drop proxy accept and connection tasks.**
+
+In `crates/remote-exec-broker/tests/mcp_forward_ports_cpp.rs`, add the same `background_tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>` field to `TunnelDropProxy`.
+
+In `TunnelDropProxy::spawn`, initialize it and wrap each `proxy_connection` spawn:
+
+```rust
+        let background_tasks = Arc::new(Mutex::new(Vec::new()));
+        let background_tasks_accept = background_tasks.clone();
+```
+
+```rust
+                        let connection_handle = tokio::spawn(async move {
+                            if let Err(err) = proxy_connection(stream, daemon_addr, active_port_tunnels).await {
+                                panic!("C++ tunnel-drop proxy connection failed: {err}");
+                            }
+                        });
+                        background_tasks_accept.lock().await.push(connection_handle);
+```
+
+Add the same `assert_no_task_panics` helper and call it from `TunnelDropProxy::drop_port_tunnels` after sending all drop signals:
+
+```rust
+        self.assert_no_task_panics().await;
+```
+
+Keep `stop` aborting still-pending tasks during fixture teardown:
+
+```rust
+        if let Ok(mut tasks) = self.background_tasks.try_lock() {
+            for handle in tasks.drain(..) {
+                handle.abort();
+            }
+        }
+```
+
+- [ ] **Step 7: Confirm proxy task spawns are no longer detached.**
+
+Run:
+
+```bash
+! rg -n "tokio::spawn\\(async move \\{\\s*let _ = proxy_connection" crates/remote-exec-broker/tests/multi_target/support.rs crates/remote-exec-broker/tests/mcp_forward_ports_cpp.rs
+```
+
+Expected: command exits successfully with no matches.
+
+- [ ] **Step 8: Run targeted verification.**
 
 Run:
 
 ```bash
 cargo test -p remote-exec-broker --test mcp_forward_ports forward_ports_connect_side_reconnect_retries_transient_open_failures
 cargo test -p remote-exec-broker --test mcp_exec write_stdin_routes_by_public_session_id_and_preserves_original_command_metadata
+cargo test -p remote-exec-broker --test multi_target forward_ports_reconnect_after_connect_side_tunnel_drop_and_accept_new_tcp_connections
+cargo test -p remote-exec-broker --test mcp_forward_ports_cpp cpp_forward_ports_reconnect_after_connect_tunnel_drop
 ```
 
-Expected: both commands pass.
+Expected: all commands pass.
 
-- [ ] **Step 6: Commit.**
+- [ ] **Step 9: Commit.**
 
 ```bash
-git add crates/remote-exec-broker/tests/support/stub_daemon.rs crates/remote-exec-broker/tests/support/spawners.rs crates/remote-exec-broker/tests/support/fixture.rs
+git add crates/remote-exec-broker/tests/support/stub_daemon.rs crates/remote-exec-broker/tests/support/spawners.rs crates/remote-exec-broker/tests/support/fixture.rs crates/remote-exec-broker/tests/multi_target/support.rs crates/remote-exec-broker/tests/mcp_forward_ports_cpp.rs
 git commit -m "test: track stub daemon background tasks"
 ```
 
@@ -1804,7 +1982,7 @@ git add crates/remote-exec-daemon-cpp/include/config.h crates/remote-exec-daemon
 git commit -m "test: report cpp daemon bound address"
 ```
 
-### Task 10: Replace Rust Port-Forward Sleeps With Observable Waits
+### Task 10: Replace Rust Port-Forward Sleeps And UDP Timing Windows With Observable Waits
 
 **Findings:** D4 `#30`, D4 `#31`
 
@@ -1821,7 +1999,7 @@ git commit -m "test: report cpp daemon bound address"
   - `cargo test -p remote-exec-broker --test multi_target forward_ports_reconnect_after_connect_side_tunnel_drop_and_relays_future_udp_datagrams`
 
 **Testing approach:** existing tests + targeted verification
-Reason: The tests already assert the desired product behavior. D4 changes their synchronization to wait for counters/health/positive echoes instead of sleeping or relying on tight negative timing.
+Reason: The tests already assert the desired product behavior. D4 changes their synchronization to wait for counters/health/positive echoes instead of sleeping or relying on tight negative timing. This task must remove every fixed 200/250 ms synchronization sleep and every 100 ms UDP negative receive window in the listed Rust files, while preserving short polling sleeps inside named wait helpers.
 
 - [ ] **Step 1: Replace stream-connect-error sleep in `mcp_forward_ports.rs`.**
 
@@ -1849,6 +2027,14 @@ Duration::from_millis(500)
 ```
 
 This loop already sends `"second"` repeatedly and requires a positive echo before passing, so the wider window reduces false-negative timing without weakening the assertion.
+
+In `send_udp_until_echo`, rename the inner receive window constant so it is clearly polling backoff rather than a negative assertion:
+
+```rust
+const UDP_ECHO_POLL_WINDOW: Duration = Duration::from_millis(100);
+```
+
+Then use `UDP_ECHO_POLL_WINDOW` in the `tokio::time::timeout` call. Do not leave an inline `Duration::from_millis(100)` next to `recv_from`.
 
 In `forward_ports_drops_udp_datagrams_under_pressure`, add a positive control after `wait_for_udp_drop_count` by opening a second normal UDP forward to a local echo socket and calling existing `send_udp_until_echo(...)`. Because the pressure forward intentionally targets `127.0.0.1:9`, create a separate normal UDP forward in the same fixture:
 
@@ -1959,7 +2145,39 @@ async fn wait_for_forward_ready(
 
 Use this helper instead of fixed sleeps after tunnel drops.
 
-- [ ] **Step 6: Run targeted verification.**
+- [ ] **Step 6: Classify and remove the remaining Rust fixed sleeps in the D4 port-forward files.**
+
+Scan the affected Rust files and classify every remaining sleep:
+
+```bash
+rg -n "tokio::time::sleep\\(Duration::from_millis\\((200|250)\\)" crates/remote-exec-broker/tests/mcp_forward_ports.rs crates/remote-exec-broker/tests/multi_target.rs crates/remote-exec-broker/tests/multi_target/support.rs crates/remote-exec-broker/tests/mcp_forward_ports_cpp.rs
+rg -n "timeout\\(Duration::from_millis\\(100\\).*recv_from" crates/remote-exec-broker/tests/mcp_forward_ports.rs
+```
+
+Handle the current matches as follows:
+
+- `crates/remote-exec-broker/tests/mcp_forward_ports.rs:183`: replace with `wait_for_forward_status`.
+- `crates/remote-exec-broker/tests/mcp_forward_ports.rs:1209`: widen to `Duration::from_millis(500)` and keep the positive `"second"` echo requirement.
+- `crates/remote-exec-broker/tests/mcp_forward_ports.rs:1608`: replace with `UDP_ECHO_POLL_WINDOW` inside `send_udp_until_echo`, with the positive echo assertion preserved by the helper.
+- `crates/remote-exec-broker/tests/multi_target.rs:342`: replace with `wait_for_forward_ready_after_reconnect`.
+- `crates/remote-exec-broker/tests/multi_target.rs:463`: replace with `wait_for_forward_ready_after_reconnect`.
+- `crates/remote-exec-broker/tests/multi_target.rs:561`: delete after moving the listener-endpoint assertion before `broker.kill()`.
+- `crates/remote-exec-broker/tests/multi_target.rs:952`: keep only if it is inside an explicit listener-close polling helper; otherwise replace with that helper's named polling interval constant.
+- `crates/remote-exec-broker/tests/multi_target/support.rs:842`: keep only if it is in a named listener-close polling helper with an outer timeout and endpoint-specific panic.
+- `crates/remote-exec-broker/tests/mcp_forward_ports_cpp.rs:390`, `:436`, and `:770`: replace with `wait_for_forward_ready`, listener-endpoint assertions, or the C++ fixture's named polling helper.
+
+- [ ] **Step 7: Verify no unclassified fixed synchronization sleeps or inline 100 ms UDP negative windows remain.**
+
+Run:
+
+```bash
+! rg -n "tokio::time::sleep\\(Duration::from_millis\\((200|250)\\)" crates/remote-exec-broker/tests/mcp_forward_ports.rs crates/remote-exec-broker/tests/multi_target.rs crates/remote-exec-broker/tests/multi_target/support.rs crates/remote-exec-broker/tests/mcp_forward_ports_cpp.rs
+! rg -n "timeout\\(Duration::from_millis\\(100\\).*recv_from" crates/remote-exec-broker/tests/mcp_forward_ports.rs
+```
+
+Expected: both commands exit successfully with no matches.
+
+- [ ] **Step 8: Run targeted verification.**
 
 Run:
 
@@ -1973,7 +2191,7 @@ cargo test -p remote-exec-broker --test multi_target forward_ports_reconnect_aft
 
 Expected: all commands pass.
 
-- [ ] **Step 7: Commit.**
+- [ ] **Step 9: Commit.**
 
 ```bash
 git add crates/remote-exec-broker/tests/mcp_forward_ports.rs crates/remote-exec-broker/tests/multi_target.rs crates/remote-exec-broker/tests/multi_target/support.rs crates/remote-exec-broker/tests/mcp_forward_ports_cpp.rs
@@ -1992,7 +2210,7 @@ git commit -m "test: replace port forward sleeps with waits"
   - `make -C crates/remote-exec-daemon-cpp test-host-server-streaming`
 
 **Testing approach:** existing C++ tests + targeted verification
-Reason: The same tests should prove the same behavior, but synchronization should poll for the condition they need instead of assuming a fixed runtime delay.
+Reason: The same tests should prove the same behavior, but synchronization should poll for the condition they need instead of assuming a fixed runtime delay. This task must classify every current `platform::sleep_ms` in the listed C++ tests and leave only named polling backoffs or explicit timeout-margin waits whose purpose is encoded in a helper name or local constant.
 
 - [ ] **Step 1: Add bounded polling helper in `test_session_store.cpp`.**
 
@@ -2004,8 +2222,8 @@ static bool wait_until_zombie_delta_at_most(
     unsigned long allowed_delta,
     unsigned long timeout_ms
 ) {
-    const unsigned long started = platform::monotonic_millis();
-    while (platform::monotonic_millis() - started < timeout_ms) {
+    const std::uint64_t started = platform::monotonic_ms();
+    while (platform::monotonic_ms() - started < timeout_ms) {
         if (zombie_children_of_current_process() <= baseline + allowed_delta) {
             return true;
         }
@@ -2015,10 +2233,102 @@ static bool wait_until_zombie_delta_at_most(
 }
 ```
 
-Replace the fixed `platform::sleep_ms(400UL)` or similar child-reaper waits in `assert_posix_sigchld_reaper_reaps_exited_session_children` with:
+Replace the fixed child-reaper wait in `assert_posix_sigchld_reaper_reaps_exited_session_children`:
+
+```cpp
+    platform::sleep_ms(400UL);
+    for (int attempt = 0; attempt < 40; ++attempt) {
+        if (zombie_children_of_current_process() <= baseline_zombies) {
+            return;
+        }
+        platform::sleep_ms(25UL);
+    }
+    assert(zombie_children_of_current_process() <= baseline_zombies);
+```
+
+with:
 
 ```cpp
     assert(wait_until_zombie_delta_at_most(baseline_zombies, 0UL, 2000UL));
+```
+
+Also replace the current `platform::sleep_ms(200)` used to let the slow `write_stdin` thread start with a bounded condition:
+
+```cpp
+static bool wait_until_true(const std::atomic<bool>& value, unsigned long timeout_ms) {
+    const std::uint64_t started = platform::monotonic_ms();
+    while (platform::monotonic_ms() - started < timeout_ms) {
+        if (value.load()) {
+            return true;
+        }
+        platform::sleep_ms(10UL);
+    }
+    return value.load();
+}
+```
+
+Set an `std::atomic<bool> slow_thread_started(false);` at the start of the thread body, then assert it:
+
+```cpp
+        std::atomic<bool> slow_thread_started(false);
+        std::thread slow_thread([&]() {
+            slow_thread_started.store(true);
+            slow_poll = store.write_stdin(
+                slow_running.at("daemon_session_id").get<std::string>(),
+                "",
+                true,
+                5000UL,
+                DEFAULT_MAX_OUTPUT_TOKENS,
+                yield_time,
+                false,
+                0U,
+                0U
+            );
+        });
+
+        assert(wait_until_true(slow_thread_started, 1000UL));
+```
+
+Replace the current `platform::sleep_ms(150UL)` before starting the replacement session with a bounded poll that waits until the exited session can be pruned:
+
+```cpp
+static bool wait_until_session_exits(
+    SessionStore& store,
+    const std::string& session_id,
+    const YieldTimeConfig& yield_time,
+    unsigned long timeout_ms
+) {
+    const std::uint64_t started = platform::monotonic_ms();
+    while (platform::monotonic_ms() - started < timeout_ms) {
+        const Json poll = store.write_stdin(
+            session_id,
+            "",
+            true,
+            1UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            yield_time,
+            false,
+            0U,
+            0U
+        );
+        if (!poll.at("running").get<bool>()) {
+            return true;
+        }
+        platform::sleep_ms(10UL);
+    }
+    return false;
+}
+```
+
+Use it with the exited session ID before starting the replacement session:
+
+```cpp
+        assert(wait_until_session_exits(
+            exited_store,
+            exited_running.at("daemon_session_id").get<std::string>(),
+            fast_yield,
+            2000UL
+        ));
 ```
 
 - [ ] **Step 2: Replace long socket-buffer sleep in `test_server_streaming.cpp`.**
@@ -2041,8 +2351,8 @@ If there is no existing `wait_until_true`, add:
 
 ```cpp
 static bool wait_until_true(const std::atomic<bool>& value, unsigned long timeout_ms) {
-    const unsigned long started = platform::monotonic_millis();
-    while (platform::monotonic_millis() - started < timeout_ms) {
+    const std::uint64_t started = platform::monotonic_ms();
+    while (platform::monotonic_ms() - started < timeout_ms) {
         if (value.load()) {
             return true;
         }
@@ -2054,7 +2364,37 @@ static bool wait_until_true(const std::atomic<bool>& value, unsigned long timeou
 
 Set `release_sender = true` during cleanup and join the thread.
 
-- [ ] **Step 3: Run focused C++ verification.**
+- [ ] **Step 3: Classify the remaining C++ sleeps and remove fixed synchronization sleeps.**
+
+Run:
+
+```bash
+rg -n "platform::sleep_ms" crates/remote-exec-daemon-cpp/tests/test_session_store.cpp crates/remote-exec-daemon-cpp/tests/test_server_streaming.cpp
+```
+
+Handle the current matches as follows:
+
+- `test_session_store.cpp:435`: replace with `wait_until_zombie_delta_at_most`.
+- `test_session_store.cpp:440`: keep only inside `wait_until_zombie_delta_at_most` as polling backoff.
+- `test_session_store.cpp:562`: replace with `wait_until_true(slow_thread_started, 1000UL)`.
+- `test_session_store.cpp:887`: replace with `wait_until_session_exits(...)`.
+- `test_server_streaming.cpp:598`: keep only inside `wait_until_bindable`, which is a bounded polling helper.
+- `test_server_streaming.cpp:1313`: replace the post-send sleep in `accept_and_send_tcp_payload` with a socket close/flush condition or a named `TCP_PAYLOAD_DRAIN_MARGIN_MS` constant if the test requires a deliberate peer-hold margin.
+- `test_server_streaming.cpp:1580`: replace with the `sender_blocked`/`release_sender` synchronization from Step 2.
+- `test_server_streaming.cpp:1730`: replace the raw `resume_timeout_ms + 200UL` sleep with a helper named `wait_past_resume_timeout(resume_timeout_ms)` that computes the margin internally and documents why this is a protocol timeout boundary rather than generic synchronization.
+
+- [ ] **Step 4: Verify no unclassified C++ sleeps remain.**
+
+Run:
+
+```bash
+! rg -n "platform::sleep_ms\\((150UL|200|400UL|5000UL)\\)" crates/remote-exec-daemon-cpp/tests/test_session_store.cpp crates/remote-exec-daemon-cpp/tests/test_server_streaming.cpp
+rg -n "wait_until_zombie_delta_at_most|wait_until_true|wait_until_session_exits|wait_past_resume_timeout|TCP_PAYLOAD_DRAIN_MARGIN_MS" crates/remote-exec-daemon-cpp/tests/test_session_store.cpp crates/remote-exec-daemon-cpp/tests/test_server_streaming.cpp
+```
+
+Expected: the first command exits successfully with no matches, and the second command shows the named helpers/constants that justify the remaining waits.
+
+- [ ] **Step 5: Run focused C++ verification.**
 
 Run:
 
@@ -2065,7 +2405,7 @@ make -C crates/remote-exec-daemon-cpp test-host-server-streaming
 
 Expected: both commands pass.
 
-- [ ] **Step 4: Commit.**
+- [ ] **Step 6: Commit.**
 
 ```bash
 git add crates/remote-exec-daemon-cpp/tests/test_session_store.cpp crates/remote-exec-daemon-cpp/tests/test_server_streaming.cpp
@@ -2213,50 +2553,308 @@ git add .github/workflows/ci.yml crates/remote-exec-daemon-cpp/README.md
 git commit -m "ci: run xp tests under wine"
 ```
 
-### Task 14: Document C++ Windows Runtime Coverage Gap
+### Task 14: Run C++ Daemon Runtime Forwarding Natively On Windows
 
 **Finding:** D4 `#36`
 
 **Files:**
+- Create: `crates/remote-exec-daemon-cpp/mk/windows-native.mk`
+- Modify: `crates/remote-exec-daemon-cpp/GNUmakefile`
+- Modify: `crates/remote-exec-broker/tests/mcp_forward_ports_cpp.rs`
+- Modify: `.github/workflows/ci.yml`
 - Modify: `README.md`
 - Modify: `crates/remote-exec-daemon-cpp/README.md`
 - Test/Verify:
-  - `rg -n "Windows C\\+\\+ daemon runtime|XP runtime|Wine|mcp_forward_ports_cpp" README.md crates/remote-exec-daemon-cpp/README.md`
+  - Local Windows command: `make -C crates/remote-exec-daemon-cpp all-windows-native`
+  - `cargo test -p remote-exec-broker --test mcp_forward_ports_cpp list_targets_reports_port_forward_protocol_version_for_real_cpp_daemon`
+  - CI command on `windows-latest`: `cargo test -p remote-exec-broker --test mcp_forward_ports_cpp windows_cpp_daemon_smoke -- --nocapture`
 
-**Testing approach:** documentation-only verification
-Reason: The audit asks either to build a Windows C++ daemon spawner or document the gap. This D4 plan chooses documentation because creating a Windows-compatible C++ daemon runtime fixture is a larger product/test harness project and not required to stabilize current CI.
+**Testing approach:** native Windows CI integration smoke + existing Unix integration tests
+Reason: The audit item is missing runtime coverage. Documentation is not enough for D4; CI must start a host-native Windows C++ daemon process and exercise the broker path against it on a native Windows runner.
 
-- [ ] **Step 1: Update root README CI notes.**
+- [ ] **Step 1: Add a host-native Windows GNU make target.**
+
+Create `crates/remote-exec-daemon-cpp/mk/windows-native.mk`:
+
+```make
+WINDOWS_NATIVE_CXX ?= g++
+
+WINDOWS_NATIVE_PROD_OBJ_DIR := $(OBJ_DIR)/windows-native-prod
+WINDOWS_NATIVE_TARGET := $(BUILD_DIR)/remote-exec-daemon-cpp.exe
+
+WINDOWS_NATIVE_PROD_CPPFLAGS := $(COMMON_CPPFLAGS)
+WINDOWS_NATIVE_PROD_CXXFLAGS := $(PROD_CXXFLAGS)
+WINDOWS_NATIVE_LDFLAGS ?=
+WINDOWS_NATIVE_LDLIBS := -lws2_32
+
+WINDOWS_NATIVE_SRCS := \
+	$(BASE_SRCS) \
+	$(MAKEFILE_DIR)src/main.cpp \
+	$(MAKEFILE_DIR)src/process_session_win32.cpp \
+	$(MAKEFILE_DIR)src/console_output.cpp \
+	$(MAKEFILE_DIR)src/win32_error.cpp
+
+WINDOWS_NATIVE_OBJS := $(sort $(call cpp_objs,$(WINDOWS_NATIVE_PROD_OBJ_DIR),$(WINDOWS_NATIVE_SRCS)))
+
+DEP_FILES += \
+	$(WINDOWS_NATIVE_OBJS:.o=.d)
+
+all-windows-native: $(WINDOWS_NATIVE_TARGET)
+
+$(WINDOWS_NATIVE_TARGET): $(WINDOWS_NATIVE_OBJS)
+	mkdir -p $(dir $@)
+	$(WINDOWS_NATIVE_CXX) $(WINDOWS_NATIVE_PROD_CXXFLAGS) $(WINDOWS_NATIVE_LDFLAGS) -o $@ $^ $(WINDOWS_NATIVE_LDLIBS)
+
+$(WINDOWS_NATIVE_PROD_OBJ_DIR)/%.o: $(MAKEFILE_DIR)%.cpp
+	mkdir -p $(dir $@)
+	$(WINDOWS_NATIVE_CXX) $(WINDOWS_NATIVE_PROD_CPPFLAGS) $(WINDOWS_NATIVE_PROD_CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
+
+.PHONY: all-windows-native
+```
+
+Modify `crates/remote-exec-daemon-cpp/GNUmakefile` so Windows-native rules are included only on Windows:
+
+```make
+ifeq ($(OS),Windows_NT)
+include $(MAKEFILE_DIR)mk/windows-native.mk
+endif
+```
+
+Keep the default `all` and `check` targets unchanged so Linux still defaults to POSIX and Windows XP stays explicit.
+
+- [ ] **Step 2: Make the C++ broker integration fixture platform-aware.**
+
+In `crates/remote-exec-broker/tests/mcp_forward_ports_cpp.rs`, remove the file-level gate:
+
+```rust
+#![cfg(unix)]
+```
+
+Update `cpp_daemon_binary`:
+
+```rust
+fn cpp_daemon_binary() -> PathBuf {
+    let binary = if cfg!(windows) {
+        "build/remote-exec-daemon-cpp.exe"
+    } else {
+        "build/remote-exec-daemon-cpp"
+    };
+    cpp_daemon_dir().join(binary)
+}
+```
+
+Update `stage_cpp_daemon_binary`:
+
+```rust
+fn stage_cpp_daemon_binary(tempdir: &Path) -> PathBuf {
+    let staged_name = if cfg!(windows) {
+        "remote-exec-daemon-cpp.exe"
+    } else {
+        "remote-exec-daemon-cpp"
+    };
+    let staged = tempdir.join(staged_name);
+    std::fs::copy(cpp_daemon_binary(), &staged).unwrap();
+    staged
+}
+```
+
+Update `ensure_cpp_daemon_built` so Windows invokes the native target under MSYS2 and Unix invokes the existing POSIX target:
+
+```rust
+    let target = if cfg!(windows) {
+        "all-windows-native"
+    } else {
+        "all-posix"
+    };
+    let status = tokio::process::Command::new("make")
+        .arg(target)
+        .current_dir(&cpp_daemon_dir)
+        .status()
+        .await
+        .unwrap();
+    assert!(status.success(), "failed to build remote-exec-daemon-cpp with {target}");
+```
+
+- [ ] **Step 3: Gate Unix-only C++ integration tests individually and add a Windows smoke test.**
+
+Leave broad Unix coverage on Unix by adding `#[cfg(unix)]` above the tests that use Unix shell commands or crash/rebind assumptions. Apply this exact attribute pattern to at least these current tests:
+
+```rust
+#[cfg(unix)]
+#[tokio::test]
+async fn broker_prunes_cpp_exec_sessions_when_daemon_limit_is_reached() {
+```
+
+```rust
+#[cfg(unix)]
+#[tokio::test]
+async fn real_cpp_daemon_releases_listener_after_broker_crash() {
+```
+
+Also gate any C++ integration test that sends Unix shell commands such as `sleep 30` or `printf ...; sleep ...` through `exec_command`. Keep pure TCP/UDP forwarding tests enabled on Windows when their helper code compiles after Steps 1-2.
+
+Add a compile-time check for the required Windows test name before writing CI:
+
+```bash
+rg -n "#\\[cfg\\(windows\\)\\]|windows_cpp_daemon_smoke" crates/remote-exec-broker/tests/mcp_forward_ports_cpp.rs
+```
+
+Expected: output shows the Windows cfg and the smoke test.
+
+Add this Windows-safe test that starts the native Windows C++ daemon and exercises actual broker-to-daemon runtime forwarding with no Unix shell dependency:
+
+```rust
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_cpp_daemon_smoke() {
+    let fixture = CppDaemonBrokerFixture::spawn().await;
+
+    let target_info = fixture
+        .client
+        .call_tool("list_targets", &serde_json::json!({}))
+        .await
+        .unwrap();
+    assert!(!target_info.is_error, "list_targets failed: {}", target_info.text_output);
+    assert_eq!(
+        target_info.structured_content["targets"][0]["daemon_info"]["port_forward_protocol_version"],
+        4
+    );
+
+    let echo_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let echo_addr = echo_listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let (mut stream, _) = match echo_listener.accept().await {
+                Ok(value) => value,
+                Err(_) => return,
+            };
+            tokio::spawn(async move {
+                let mut buf = [0u8; 1024];
+                loop {
+                    let read = match stream.read(&mut buf).await {
+                        Ok(0) => return,
+                        Ok(read) => read,
+                        Err(_) => return,
+                    };
+                    if stream.write_all(&buf[..read]).await.is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+    });
+
+    let open = fixture.open_tcp_forward(&echo_addr.to_string()).await;
+    assert!(!open.is_error, "open failed: {}", open.text_output);
+    let opened = &open.structured_content["forwards"][0];
+    let forward_id = opened["forward_id"].as_str().unwrap().to_string();
+    let listen_endpoint = opened["listen_endpoint"].as_str().unwrap().to_string();
+
+    let mut stream = tokio::net::TcpStream::connect(&listen_endpoint).await.unwrap();
+    stream.write_all(b"windows-cpp-forward").await.unwrap();
+    let mut echoed = [0u8; 19];
+    stream.read_exact(&mut echoed).await.unwrap();
+    assert_eq!(&echoed, b"windows-cpp-forward");
+
+    let close = fixture.close_forward(forward_id).await;
+    assert!(!close.is_error, "close failed: {}", close.text_output);
+    assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
+}
+```
+
+If any existing tests are already Windows-safe after Tasks 9-10, keep them enabled on Windows, but the `windows_cpp_daemon_smoke` test is the required #36 native runner proof.
+
+- [ ] **Step 4: Add native Windows CI execution.**
+
+Modify `.github/workflows/ci.yml` in the `cpp` job's MSYS2 setup so Rust and Make are available from the same native Windows runner:
+
+```yaml
+      - name: Install Rust toolchain for Windows C++ integration smoke
+        if: runner.os == 'Windows'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies for Windows C++ integration smoke
+        if: runner.os == 'Windows'
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          prefix-key: v1-windows-cpp-smoke
+```
+
+Then extend the Windows C++ checks step:
+
+```yaml
+      - name: Run Windows C++ checks
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)"
+          make -j"${jobs}" -C crates/remote-exec-daemon-cpp check-windows-xp
+          make -j"${jobs}" -C crates/remote-exec-daemon-cpp all-windows-native
+
+      - name: Expose MinGW runtime DLLs
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "C:\\msys64\\mingw32\\bin" >> "$GITHUB_PATH"
+
+      - name: Run native Windows C++ daemon broker smoke
+        if: runner.os == 'Windows'
+        shell: bash
+        run: cargo test -p remote-exec-broker --test mcp_forward_ports_cpp windows_cpp_daemon_smoke -- --nocapture
+```
+
+Use `shell: bash` or the default PowerShell for the Cargo test, not `shell: msys2 {0}`, so the Rust test and spawned daemon execute as normal Windows processes. Keep `C:\msys64\mingw32\bin` on `PATH` for that step so the spawned MinGW-built `remote-exec-daemon-cpp.exe` can load its runtime DLLs.
+
+- [ ] **Step 5: Update root README CI notes.**
 
 In `README.md`, near the CI coverage notes, add:
 
 ```text
-- The Rust broker and Rust daemon are exercised on Linux and Windows. The standalone C++ daemon is built on Linux and Windows, POSIX runtime tests run on Linux, and Windows XP-compatible test binaries run under Wine on Linux when available. Broker-to-C++ daemon runtime forwarding tests are Unix-only today (`mcp_forward_ports_cpp.rs`) because the test harness does not yet include a Windows-native C++ daemon process fixture.
+- The Rust broker and Rust daemon are exercised on Linux and Windows. The standalone C++ daemon is built on Linux and Windows, POSIX runtime tests run on Linux, Windows XP-compatible test binaries run under Wine on Linux when available, and `mcp_forward_ports_cpp.rs` includes a native `windows-latest` broker-to-C++ daemon smoke test against `remote-exec-daemon-cpp.exe`.
 ```
 
-- [ ] **Step 2: Update C++ daemon README.**
+- [ ] **Step 6: Update C++ daemon README.**
 
 In `crates/remote-exec-daemon-cpp/README.md`, after the Windows XP build section, add:
 
 ```text
-Runtime coverage note: host-native POSIX C++ daemon runtime tests run on Unix. Windows XP-compatible binaries are compile-checked on Linux and Windows and are executed under Wine on Linux when Wine is available. Broker-to-C++ daemon runtime forwarding coverage remains Unix-only until the test harness grows a Windows-native C++ daemon fixture.
+Runtime coverage note: host-native POSIX C++ daemon runtime tests run on Unix. Windows XP-compatible binaries are compile-checked on Linux and Windows and are executed under Wine on Linux when Wine is available. CI also builds `build/remote-exec-daemon-cpp.exe` with host-native MinGW on `windows-latest`, exposes `C:\msys64\mingw32\bin` for the MinGW runtime DLLs, and runs the Rust broker `mcp_forward_ports_cpp::windows_cpp_daemon_smoke` integration test against that process.
 ```
 
-- [ ] **Step 3: Verify wording is present.**
+- [ ] **Step 7: Verify #36 no longer has gap-only wording.**
 
 Run:
 
 ```bash
-rg -n "Windows C\\+\\+ daemon runtime|Broker-to-C\\+\\+ daemon runtime|Wine|mcp_forward_ports_cpp" README.md crates/remote-exec-daemon-cpp/README.md
+rg -n "windows_cpp_daemon_smoke|all-windows-native|remote-exec-daemon-cpp\\.exe|mcp_forward_ports_cpp" .github/workflows/ci.yml README.md crates/remote-exec-daemon-cpp/README.md crates/remote-exec-broker/tests/mcp_forward_ports_cpp.rs crates/remote-exec-daemon-cpp/mk/windows-native.mk
+! rg -n "Unix-only|Windows-native fixture is missing|cpp windows runtime test gap" README.md crates/remote-exec-daemon-cpp/README.md
 ```
 
-Expected: output shows the new coverage notes in both files.
+Expected: the first command shows the native Windows test/build hooks, and the second command exits successfully with no stale gap-only wording.
 
-- [ ] **Step 4: Commit.**
+- [ ] **Step 8: Run local verification for the platform you are on.**
+
+On Linux/macOS, run:
 
 ```bash
-git add README.md crates/remote-exec-daemon-cpp/README.md
-git commit -m "docs: document cpp windows runtime test gap"
+make -C crates/remote-exec-daemon-cpp all-posix
+cargo test -p remote-exec-broker --test mcp_forward_ports_cpp list_targets_reports_port_forward_protocol_version_for_real_cpp_daemon
+```
+
+On Windows, run natively:
+
+```bash
+make -C crates/remote-exec-daemon-cpp all-windows-native
+cargo test -p remote-exec-broker --test mcp_forward_ports_cpp windows_cpp_daemon_smoke -- --nocapture
+```
+
+Expected: the local platform commands pass. The Windows command is mandatory in CI even when the implementer is not on Windows locally.
+
+- [ ] **Step 9: Commit.**
+
+```bash
+git add crates/remote-exec-daemon-cpp/mk/windows-native.mk crates/remote-exec-daemon-cpp/GNUmakefile crates/remote-exec-broker/tests/mcp_forward_ports_cpp.rs .github/workflows/ci.yml README.md crates/remote-exec-daemon-cpp/README.md
+git commit -m "ci: run cpp daemon smoke natively on windows"
 ```
 
 ### Task 15: Final D4 Quality Gate
@@ -2266,7 +2864,7 @@ git commit -m "docs: document cpp windows runtime test gap"
 - Modify only files touched in Tasks 2-14 if formatting, lint, or test fixes are required.
 
 **Testing approach:** focused D4 verification + full workspace quality gate
-Reason: D4 touches broker test infrastructure, Rust integration tests, C++ tests, docs, and CI. The final gate must cover representative changed surfaces and the repo-wide quality bar.
+Reason: D4 touches broker test infrastructure, Rust integration tests, C++ tests, docs, and CI. The final gate must cover representative changed surfaces, the repo-wide quality bar, and the native Windows #36 CI proof.
 
 - [ ] **Step 1: Run focused broker verification.**
 
@@ -2296,7 +2894,25 @@ command -v wine >/dev/null && make -C crates/remote-exec-daemon-cpp test-wine-se
 
 Expected: all non-conditional commands pass. If Wine is installed, the Wine targets pass; if Wine is absent, the conditional command exits successfully without running them.
 
-- [ ] **Step 3: Run no-default-feature verification.**
+- [ ] **Step 3: Verify native Windows C++ daemon runtime coverage in CI.**
+
+For a local pre-push check, verify the workflow contains the native Windows command:
+
+```bash
+rg -n "all-windows-native|windows_cpp_daemon_smoke" .github/workflows/ci.yml
+```
+
+Expected: output shows both the host-native C++ daemon build and the Rust broker smoke test.
+
+After pushing the branch, the `cpp (windows-latest)` job must pass this native Windows command:
+
+```bash
+cargo test -p remote-exec-broker --test mcp_forward_ports_cpp windows_cpp_daemon_smoke -- --nocapture
+```
+
+Expected: the GitHub Actions Windows runner starts `remote-exec-daemon-cpp.exe` natively and the smoke test passes.
+
+- [ ] **Step 4: Run no-default-feature verification.**
 
 Run:
 
@@ -2311,7 +2927,7 @@ cargo clippy -p remote-exec-host --no-default-features --all-targets -- -D warni
 
 Expected: all commands pass.
 
-- [ ] **Step 4: Run full Rust quality gate.**
+- [ ] **Step 5: Run full Rust quality gate.**
 
 Run:
 
@@ -2323,7 +2939,7 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 Expected: all commands pass.
 
-- [ ] **Step 5: Commit any verification fixes.**
+- [ ] **Step 6: Commit any verification fixes.**
 
 If formatting, lint, or test fixes were needed, commit only those fixes:
 
@@ -2332,4 +2948,4 @@ git add crates README.md .github/workflows/ci.yml docs/superpowers/plans/2026-05
 git commit -m "chore: satisfy phase d4 quality gate"
 ```
 
-If Steps 1-4 pass without producing changes, do not create an empty commit.
+If Steps 1-5 pass without producing changes, do not create an empty commit.
