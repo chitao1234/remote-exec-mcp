@@ -666,7 +666,8 @@ async fn patch_apply(
     Json(req): Json<PatchApplyRequest>,
 ) -> Result<Json<PatchApplyResponse>, (StatusCode, Json<RpcErrorBody>)> {
     *state.last_patch_request.lock().await = Some(req.clone());
-    if !req.patch.starts_with("*** Begin Patch\n") {
+    let lines = req.patch.lines().collect::<Vec<_>>();
+    if lines.first().copied().map(trim_horizontal) != Some("*** Begin Patch") {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(RpcErrorBody {
@@ -675,10 +676,23 @@ async fn patch_apply(
             }),
         ));
     }
+    if lines.last().copied().map(trim_horizontal) != Some("*** End Patch") {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(RpcErrorBody {
+                code: "patch_failed".to_string(),
+                message: "invalid patch footer".to_string(),
+            }),
+        ));
+    }
 
     Ok(Json(PatchApplyResponse {
         output: "Success. Updated the following files:\nA hello.txt\n".to_string(),
     }))
+}
+
+fn trim_horizontal(value: &str) -> &str {
+    value.trim_matches([' ', '\t'])
 }
 
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]

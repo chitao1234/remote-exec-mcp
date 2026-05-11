@@ -91,6 +91,26 @@ async fn apply_patch_forwards_to_http_target_with_bearer_auth() {
 }
 
 #[tokio::test]
+async fn malformed_patch_footer_is_rejected_by_stub_daemon() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
+
+    let error = fixture
+        .call_tool_error(
+            "apply_patch",
+            serde_json::json!({
+                "target": "builder-a",
+                "input": "*** Begin Patch\n*** Add File: missing-footer.txt\n+hello\n"
+            }),
+        )
+        .await;
+
+    assert!(
+        error.contains("invalid patch footer"),
+        "unexpected malformed patch footer error: {error}"
+    );
+}
+
+#[tokio::test]
 async fn list_targets_returns_cached_daemon_info_and_null_for_unavailable_targets() {
     let fixture = support::spawners::spawn_broker_with_reverse_ordered_targets().await;
     let result = fixture
