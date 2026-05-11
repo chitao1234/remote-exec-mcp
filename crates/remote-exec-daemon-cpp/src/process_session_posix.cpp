@@ -20,6 +20,8 @@
 #include "platform.h"
 #include "process_session.h"
 
+extern char** environ;
+
 namespace {
 
 const unsigned short kDefaultPtyRows = 24;
@@ -83,9 +85,43 @@ struct PosixPtyPair {
 
 PosixPipePair create_posix_pipe(const char* label) {
     int fds[2];
+#ifdef __linux__
+    if (pipe2(fds, O_CLOEXEC) != 0) {
+        throw std::runtime_error(std::string(label) + " failed: " + std::strerror(errno));
+    }
+#else
     if (pipe(fds) != 0) {
         throw std::runtime_error(std::string(label) + " failed: " + std::strerror(errno));
     }
+    try {
+        const int read_flags = fcntl(fds[0], F_GETFD, 0);
+        if (read_flags < 0) {
+            throw std::runtime_error(
+                std::string(label) + " fcntl(F_GETFD) failed: " + std::strerror(errno)
+            );
+        }
+        if (fcntl(fds[0], F_SETFD, read_flags | FD_CLOEXEC) != 0) {
+            throw std::runtime_error(
+                std::string(label) + " fcntl(F_SETFD) failed: " + std::strerror(errno)
+            );
+        }
+        const int write_flags = fcntl(fds[1], F_GETFD, 0);
+        if (write_flags < 0) {
+            throw std::runtime_error(
+                std::string(label) + " fcntl(F_GETFD) failed: " + std::strerror(errno)
+            );
+        }
+        if (fcntl(fds[1], F_SETFD, write_flags | FD_CLOEXEC) != 0) {
+            throw std::runtime_error(
+                std::string(label) + " fcntl(F_SETFD) failed: " + std::strerror(errno)
+            );
+        }
+    } catch (...) {
+        close(fds[0]);
+        close(fds[1]);
+        throw;
+    }
+#endif
     PosixPipePair pair;
     pair.read_end.reset(fds[0]);
     pair.write_end.reset(fds[1]);
@@ -240,27 +276,120 @@ void wait_until_readable(int fd) {
     }
 }
 
+struct ExecEnvironment {
+    std::vector<std::string> values;
+    std::vector<char*> pointers;
+
+    void refresh_pointers() {
+        pointers.clear();
+        pointers.reserve(values.size() + 1U);
+        for (std::size_t i = 0; i < values.size(); ++i) {
+            pointers.push_back(const_cast<char*>(values[i].c_str()));
+        }
+        pointers.push_back(NULL);
+    }
+};
+
+bool env_key_matches(const std::string& entry, const char* key) {
+    const std::size_t key_len = std::strlen(key);
+    return entry.size() > key_len && entry.compare(0, key_len, key) == 0 &&
+           entry[key_len] == '=';
+}
+
+void upsert_env_value(std::vector<std::string>* values, const std::string& assignment) {
+    const std::size_t equals = assignment.find('=');
+    const std::string key = equals == std::string::npos ? assignment : assignment.substr(0, equals);
+    for (std::size_t i = 0; i < values->size(); ++i) {
+        if (env_key_matches((*values)[i], key.c_str())) {
+            (*values)[i] = assignment;
+            return;
+        }
+    }
+    values->push_back(assignment);
+}
+
+ExecEnvironment build_exec_environment_values(bool tty) {
+    ExecEnvironment env;
+    for (char** current = environ; current != NULL && *current != NULL; ++current) {
+        env.values.push_back(*current);
+    }
+    upsert_env_value(&env.values, "LC_ALL=C.UTF-8");
+    upsert_env_value(&env.values, "LANG=C.UTF-8");
+    if (tty) {
+        bool has_term = false;
+        for (std::size_t i = 0; i < env.values.size(); ++i) {
+            if (env_key_matches(env.values[i], "TERM")) {
+                has_term = true;
+                break;
+            }
+        }
+        if (!has_term) {
+            env.values.push_back("TERM=xterm-256color");
+        }
+    }
+    return env;
+}
+
+bool is_path_like_command(const std::string& command) {
+    return command.find('/') != std::string::npos;
+}
+
+std::string path_env_from(const ExecEnvironment& env) {
+    for (std::size_t i = 0; i < env.values.size(); ++i) {
+        if (env_key_matches(env.values[i], "PATH")) {
+            return env.values[i].substr(5);
+        }
+    }
+    return "/bin:/usr/bin";
+}
+
+std::string resolve_exec_path(const std::string& program, const ExecEnvironment& env) {
+    if (program.empty() || is_path_like_command(program)) {
+        return program;
+    }
+
+    const std::string path = path_env_from(env);
+    std::string current;
+    for (std::size_t i = 0; i <= path.size(); ++i) {
+        if (i != path.size() && path[i] != ':') {
+            current.push_back(path[i]);
+            continue;
+        }
+        const std::string dir = current.empty() ? "." : current;
+        const std::string candidate = dir + "/" + program;
+        if (access(candidate.c_str(), X_OK) == 0) {
+            return candidate;
+        }
+        current.clear();
+    }
+    return program;
+}
+
+std::vector<char*> build_exec_argv(const std::vector<std::string>& argv) {
+    std::vector<char*> exec_argv;
+    exec_argv.reserve(argv.size() + 1U);
+    for (std::size_t i = 0; i < argv.size(); ++i) {
+        exec_argv.push_back(const_cast<char*>(argv[i].c_str()));
+    }
+    exec_argv.push_back(NULL);
+    return exec_argv;
+}
+
 void exec_shell_child(
-    const std::vector<std::string>& argv,
-    const std::string& workdir,
-    bool tty
+    const std::vector<char*>& exec_argv,
+    const std::string& executable_path,
+    const ExecEnvironment& environment,
+    const std::string& workdir
 ) {
     if (!workdir.empty() && chdir(workdir.c_str()) != 0) {
         _exit(126);
     }
 
-    setenv("LC_ALL", "C.UTF-8", 1);
-    setenv("LANG", "C.UTF-8", 1);
-    if (tty) {
-        setenv("TERM", "xterm-256color", 0);
-    }
-
-    std::vector<char*> exec_argv;
-    for (std::size_t i = 0; i < argv.size(); ++i) {
-        exec_argv.push_back(const_cast<char*>(argv[i].c_str()));
-    }
-    exec_argv.push_back(NULL);
-    execvp(exec_argv[0], &exec_argv[0]);
+    execve(
+        executable_path.c_str(),
+        const_cast<char* const*>(&exec_argv[0]),
+        const_cast<char* const*>(&environment.pointers[0])
+    );
     _exit(127);
 }
 
@@ -445,6 +574,10 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     bool tty
 ) {
     const std::vector<std::string> argv = platform::shell_argv(shell, login, command);
+    ExecEnvironment exec_environment = build_exec_environment_values(tty);
+    exec_environment.refresh_pointers();
+    const std::vector<char*> exec_argv = build_exec_argv(argv);
+    const std::string executable_path = resolve_exec_path(argv[0], exec_environment);
 
     if (tty) {
         PosixPtyPair pty = create_posix_pty();
@@ -469,7 +602,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
                 close(slave_fd);
             }
             pty.master.reset();
-            exec_shell_child(argv, workdir, true);
+            exec_shell_child(exec_argv, executable_path, exec_environment, workdir);
         }
 
         return std::unique_ptr<ProcessSession>(
@@ -496,7 +629,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
         stdin_null.reset();
         stdout_pipe.read_end.reset();
         stdout_pipe.write_end.reset();
-        exec_shell_child(argv, workdir, false);
+        exec_shell_child(exec_argv, executable_path, exec_environment, workdir);
     }
 
     setpgid(pid, pid);

@@ -1,4 +1,9 @@
 #include <cassert>
+#ifndef _WIN32
+#include <cstdlib>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 #include <fstream>
 #include <string>
 #include <thread>
@@ -288,6 +293,84 @@ static void assert_posix_locale_and_late_output(
     assert(!stdin_closed_response.at("running").get<bool>());
     assert(stdin_closed_response.at("exit_code").get<int>() == 0);
     assert(stdin_closed_response.at("output").get<std::string>() == "stdin:closed\n");
+#endif
+}
+
+static void assert_posix_exec_uses_parent_built_environment_and_path(
+    SessionStore& store,
+    const fs::path& root,
+    const std::string& shell,
+    const YieldTimeConfig& yield_time
+) {
+#ifdef _WIN32
+    (void)store;
+    (void)root;
+    (void)shell;
+    (void)yield_time;
+#else
+    const fs::path bin_dir = root / "path-bin";
+    fs::create_directories(bin_dir);
+    const fs::path helper = bin_dir / "env-helper";
+    write_text_file(
+        helper,
+        "#!/bin/sh\n"
+        "printf '%s|%s|%s\\n' \"$LC_ALL\" \"$LANG\" \"$TERM\"\n"
+    );
+    chmod(helper.c_str(), 0755);
+
+    const char* old_path_raw = std::getenv("PATH");
+    const bool had_old_path = old_path_raw != NULL;
+    const std::string old_path = had_old_path ? old_path_raw : "";
+    const std::string new_path = bin_dir.string() + ":" + old_path;
+    assert(setenv("PATH", new_path.c_str(), 1) == 0);
+    const char* old_term_raw = std::getenv("TERM");
+    const bool had_old_term = old_term_raw != NULL;
+    const std::string old_term = had_old_term ? old_term_raw : "";
+    assert(unsetenv("TERM") == 0);
+
+    const Json pipe_response = start_test_command(
+        store,
+        "env-helper",
+        root.string(),
+        shell,
+        false,
+        5000UL,
+        DEFAULT_MAX_OUTPUT_TOKENS,
+        yield_time,
+        64UL
+    );
+    assert(pipe_response.at("exit_code").get<int>() == 0);
+    assert(pipe_response.at("output").get<std::string>() == "C.UTF-8|C.UTF-8|\n");
+
+    if (process_session_supports_pty()) {
+        const Json pty_response = start_test_command(
+            store,
+            "env-helper",
+            root.string(),
+            shell,
+            true,
+            5000UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            yield_time,
+            64UL
+        );
+        assert(pty_response.at("exit_code").get<int>() == 0);
+        assert(
+            normalize_output(pty_response.at("output").get<std::string>()) ==
+            "C.UTF-8|C.UTF-8|xterm-256color\n"
+        );
+    }
+
+    if (had_old_path) {
+        assert(setenv("PATH", old_path.c_str(), 1) == 0);
+    } else {
+        assert(unsetenv("PATH") == 0);
+    }
+    if (had_old_term) {
+        assert(setenv("TERM", old_term.c_str(), 1) == 0);
+    } else {
+        assert(unsetenv("TERM") == 0);
+    }
 #endif
 }
 
@@ -822,6 +905,7 @@ int main() {
     assert_completed_command_output(store, root, shell, yield_time);
     assert_token_limiting(store, root, shell, yield_time);
     assert_posix_locale_and_late_output(store, root, shell, yield_time);
+    assert_posix_exec_uses_parent_built_environment_and_path(store, root, shell, yield_time);
     assert_stdin_and_tty_behavior(store, root, shell, yield_time);
     assert_pruning_and_recency_behavior(root, shell);
     assert_threshold_warnings_and_unknown_sessions(store, root, shell, yield_time);
