@@ -32,7 +32,8 @@ Windows XP-compatible cross-build:
 
 - `make all-windows-xp`
 - `make check-windows-xp`
-- `make test-wine-session-store` when `wine` is available
+- `make test-wine-session-store` and `make test-wine-transfer` when `wine` is
+  available; CI runs these on Linux after the XP cross-build.
 
 Windows XP-compatible MSVC/NMAKE build:
 
