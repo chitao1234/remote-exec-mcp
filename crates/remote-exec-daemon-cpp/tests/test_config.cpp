@@ -47,6 +47,8 @@ int main() {
         "http_auth_bearer_token = shared-secret\n"
         "max_request_header_bytes = 32768\n"
         "max_request_body_bytes = 1048576\n"
+        "transfer_max_archive_bytes = 4096\n"
+        "transfer_max_entry_bytes = 1024\n"
         "max_open_sessions = 12\n"
         "port_forward_max_worker_threads = 17\n"
         "port_forward_max_retained_sessions = 11\n"
@@ -73,6 +75,8 @@ int main() {
     assert(config.http_auth_bearer_token == "shared-secret");
     assert(config.max_request_header_bytes == 32768UL);
     assert(config.max_request_body_bytes == 1048576UL);
+    assert(config.transfer_limits.max_archive_bytes == 4096ULL);
+    assert(config.transfer_limits.max_entry_bytes == 1024ULL);
     assert(config.max_open_sessions == 12UL);
     assert(config.port_forward_max_worker_threads == 17UL);
     assert(config.port_forward_limits.max_worker_threads == 17UL);
@@ -118,6 +122,8 @@ int main() {
     assert(sandbox_config.port_forward_limits.max_tunnel_queued_bytes == DEFAULT_PORT_FORWARD_MAX_TUNNEL_QUEUED_BYTES);
     assert(sandbox_config.port_forward_limits.tunnel_io_timeout_ms == DEFAULT_PORT_FORWARD_TUNNEL_IO_TIMEOUT_MS);
     assert(sandbox_config.port_forward_limits.connect_timeout_ms == DEFAULT_PORT_FORWARD_CONNECT_TIMEOUT_MS);
+    assert(sandbox_config.transfer_limits.max_archive_bytes == DEFAULT_TRANSFER_MAX_ARCHIVE_BYTES);
+    assert(sandbox_config.transfer_limits.max_entry_bytes == DEFAULT_TRANSFER_MAX_ENTRY_BYTES);
     assert(sandbox_config.sandbox_configured);
     assert(sandbox_config.sandbox.exec_cwd.allow.size() == 2);
     assert(sandbox_config.sandbox.exec_cwd.allow[0] == "/work");
@@ -151,6 +157,24 @@ int main() {
         "port_forward_max_worker_threads = 0\n"
     );
     assert(config_rejected(invalid_worker_limit_path));
+
+    const fs::path invalid_transfer_zero_path = root / "invalid-transfer-zero.ini";
+    write_text(
+        invalid_transfer_zero_path,
+        minimal_config_text() +
+            "transfer_max_archive_bytes = 0\n"
+            "transfer_max_entry_bytes = 1\n"
+    );
+    assert(config_rejected(invalid_transfer_zero_path));
+
+    const fs::path invalid_transfer_bounds_path = root / "invalid-transfer-bounds.ini";
+    write_text(
+        invalid_transfer_bounds_path,
+        minimal_config_text() +
+            "transfer_max_archive_bytes = 8\n"
+            "transfer_max_entry_bytes = 9\n"
+    );
+    assert(config_rejected(invalid_transfer_bounds_path));
 
     const char* invalid_limit_keys[] = {
         "port_forward_max_retained_sessions",

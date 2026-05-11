@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -181,11 +182,22 @@ std::string read_exact_string(
     std::uint64_t size,
     const std::string& error_message
 ) {
+    ensure_u64_fits_size_t(size, "tar entry size");
     std::string body(static_cast<std::size_t>(size), '\0');
     if (!body.empty()) {
         read_exact_or_throw(reader, &body[0], body.size(), error_message);
     }
     return body;
+}
+
+std::string read_limited_metadata_string(
+    TransferArchiveReader& reader,
+    std::uint64_t size,
+    const TransferLimitConfig& limits,
+    const std::string& error_message
+) {
+    ensure_transfer_entry_within_limits(size, 0U, limits);
+    return read_exact_string(reader, size, error_message);
 }
 
 void skip_exact(
@@ -209,6 +221,12 @@ std::uint64_t entry_padding(std::uint64_t size) {
 }
 
 std::uint64_t entry_body_with_padding(std::uint64_t size) {
+    if (size > std::numeric_limits<std::uint64_t>::max() - entry_padding(size)) {
+        throw TransferFailure(
+            TransferRpcCode::TransferFailed,
+            "tar entry size is too large"
+        );
+    }
     return size + entry_padding(size);
 }
 
@@ -220,8 +238,13 @@ void skip_entry_padding(TransferArchiveReader& reader, std::uint64_t size) {
     );
 }
 
-std::string read_gnu_long_name_from_reader(TransferArchiveReader& reader, std::uint64_t size) {
-    std::string value = read_exact_string(reader, size, "truncated tar entry body");
+std::string read_gnu_long_name_from_reader(
+    TransferArchiveReader& reader,
+    std::uint64_t size,
+    const TransferLimitConfig& limits
+) {
+    std::string value =
+        read_limited_metadata_string(reader, size, limits, "truncated tar entry body");
     skip_entry_padding(reader, size);
     while (!value.empty() && value[value.size() - 1] == '\0') {
         value.erase(value.size() - 1);
@@ -233,8 +256,11 @@ void copy_reader_to_file(
     TransferArchiveReader& reader,
     const std::string& path,
     std::uint64_t size,
-    std::uint64_t mode
+    std::uint64_t mode,
+    std::uint64_t copied_so_far,
+    const TransferLimitConfig& limits
 ) {
+    ensure_transfer_entry_within_limits(size, copied_so_far, limits);
     std::ofstream output(path.c_str(), std::ios::binary | std::ios::trunc);
     if (!output) {
         throw std::runtime_error("unable to write destination file");
@@ -310,7 +336,8 @@ SymlinkImportAction symlink_import_action(
 
 void consume_file_archive_tail(
     TransferArchiveReader& reader,
-    std::vector<TransferWarning>* warnings
+    std::vector<TransferWarning>* warnings,
+    const TransferLimitConfig& limits
 ) {
     std::string pending_long_name;
     std::vector<char> block(TAR_BLOCK_SIZE);
@@ -322,7 +349,7 @@ void consume_file_archive_tail(
         const TarHeaderView header = parse_header(block.data());
 
         if (header.typeflag == 'L') {
-            pending_long_name = read_gnu_long_name_from_reader(reader, header.size);
+            pending_long_name = read_gnu_long_name_from_reader(reader, header.size, limits);
             continue;
         }
 
@@ -336,7 +363,9 @@ void consume_file_archive_tail(
         }
         append_warnings(
             warnings,
-            read_transfer_summary(read_exact_string(reader, header.size, "truncated tar entry body"))
+            read_transfer_summary(
+                read_limited_metadata_string(reader, header.size, limits, "truncated tar entry body")
+            )
         );
         skip_entry_padding(reader, header.size);
     }
@@ -354,7 +383,8 @@ ImportSummary import_file_from_tar(
     const std::string& absolute_path,
     const std::string& overwrite_mode,
     bool create_parent,
-    TransferSymlinkMode symlink_mode
+    TransferSymlinkMode symlink_mode,
+    const TransferLimitConfig& limits
 ) {
     const bool replaced = prepare_destination_path(
         absolute_path,
@@ -395,11 +425,11 @@ ImportSummary import_file_from_tar(
         }
         skip_exact(reader, entry_body_with_padding(header.size), "truncated tar entry body");
     } else {
-        copy_reader_to_file(reader, absolute_path, header.size, header.mode);
+        copy_reader_to_file(reader, absolute_path, header.size, header.mode, 0U, limits);
         bytes_copied = header.size;
     }
 
-    consume_file_archive_tail(reader, &warnings);
+    consume_file_archive_tail(reader, &warnings, limits);
 
     return ImportSummary{
         TransferSourceType::File,
@@ -417,7 +447,8 @@ ImportSummary import_directory_from_tar(
     const std::string& absolute_path,
     const std::string& overwrite_mode,
     bool create_parent,
-    TransferSymlinkMode symlink_mode
+    TransferSymlinkMode symlink_mode,
+    const TransferLimitConfig& limits
 ) {
     const bool replaced = prepare_destination_path(absolute_path, source_type, overwrite_mode, create_parent);
     make_directory_if_missing(absolute_path);
@@ -434,7 +465,7 @@ ImportSummary import_directory_from_tar(
         const TarHeaderView header = parse_header(block.data());
 
         if (header.typeflag == 'L') {
-            pending_long_name = read_gnu_long_name_from_reader(reader, header.size);
+            pending_long_name = read_gnu_long_name_from_reader(reader, header.size, limits);
             continue;
         }
 
@@ -451,7 +482,12 @@ ImportSummary import_directory_from_tar(
             append_warnings(
                 &summary.warnings,
                 read_transfer_summary(
-                    read_exact_string(reader, header.size, "truncated tar entry body")
+                    read_limited_metadata_string(
+                        reader,
+                        header.size,
+                        limits,
+                        "truncated tar entry body"
+                    )
                 )
             );
             skip_entry_padding(reader, header.size);
@@ -505,7 +541,14 @@ ImportSummary import_directory_from_tar(
         }
 
         ensure_parent_directory(output_path, true);
-        copy_reader_to_file(reader, output_path, header.size, header.mode);
+        copy_reader_to_file(
+            reader,
+            output_path,
+            header.size,
+            header.mode,
+            summary.bytes_copied,
+            limits
+        );
         summary.bytes_copied += header.size;
         summary.files_copied += 1;
     }
@@ -530,6 +573,26 @@ ImportSummary import_path(
     bool create_parent,
     TransferSymlinkMode symlink_mode
 ) {
+    return import_path(
+        bytes,
+        source_type,
+        absolute_path,
+        overwrite_mode,
+        create_parent,
+        symlink_mode,
+        default_transfer_limit_config()
+    );
+}
+
+ImportSummary import_path(
+    const std::string& bytes,
+    TransferSourceType source_type,
+    const std::string& absolute_path,
+    const std::string& overwrite_mode,
+    bool create_parent,
+    TransferSymlinkMode symlink_mode,
+    const TransferLimitConfig& limits
+) {
     StringTransferArchiveReader reader(&bytes);
     return import_path_from_reader(
         reader,
@@ -537,7 +600,8 @@ ImportSummary import_path(
         absolute_path,
         overwrite_mode,
         create_parent,
-        symlink_mode
+        symlink_mode,
+        limits
     );
 }
 
@@ -548,6 +612,26 @@ ImportSummary import_path_from_reader(
     const std::string& overwrite_mode,
     bool create_parent,
     TransferSymlinkMode symlink_mode
+) {
+    return import_path_from_reader(
+        reader,
+        source_type,
+        absolute_path,
+        overwrite_mode,
+        create_parent,
+        symlink_mode,
+        default_transfer_limit_config()
+    );
+}
+
+ImportSummary import_path_from_reader(
+    TransferArchiveReader& reader,
+    TransferSourceType source_type,
+    const std::string& absolute_path,
+    const std::string& overwrite_mode,
+    bool create_parent,
+    TransferSymlinkMode symlink_mode,
+    const TransferLimitConfig& limits
 ) {
     ExportOptions options;
     options.symlink_mode = symlink_mode;
@@ -565,7 +649,8 @@ ImportSummary import_path_from_reader(
             absolute_path,
             overwrite_mode,
             create_parent,
-            options.symlink_mode
+            options.symlink_mode,
+            limits
         );
     }
     if (source_type == TransferSourceType::Directory) {
@@ -575,7 +660,8 @@ ImportSummary import_path_from_reader(
             absolute_path,
             overwrite_mode,
             create_parent,
-            options.symlink_mode
+            options.symlink_mode,
+            limits
         );
     }
     if (source_type == TransferSourceType::Multiple) {
@@ -585,7 +671,8 @@ ImportSummary import_path_from_reader(
             absolute_path,
             overwrite_mode,
             create_parent,
-            options.symlink_mode
+            options.symlink_mode,
+            limits
         );
     }
     throw TransferFailure(

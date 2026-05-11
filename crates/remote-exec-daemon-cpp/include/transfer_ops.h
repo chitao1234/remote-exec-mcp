@@ -47,6 +47,23 @@ struct ImportSummary {
     std::vector<TransferWarning> warnings;
 };
 
+struct TransferLimitConfig {
+    std::uint64_t max_archive_bytes;
+    std::uint64_t max_entry_bytes;
+};
+
+static const std::uint64_t DEFAULT_TRANSFER_MAX_ARCHIVE_BYTES =
+    512ULL * 1024ULL * 1024ULL;
+static const std::uint64_t DEFAULT_TRANSFER_MAX_ENTRY_BYTES =
+    512ULL * 1024ULL * 1024ULL;
+
+inline TransferLimitConfig default_transfer_limit_config() {
+    TransferLimitConfig config;
+    config.max_archive_bytes = DEFAULT_TRANSFER_MAX_ARCHIVE_BYTES;
+    config.max_entry_bytes = DEFAULT_TRANSFER_MAX_ENTRY_BYTES;
+    return config;
+}
+
 struct PathInfo {
     bool exists;
     bool is_directory;
@@ -97,6 +114,15 @@ ImportSummary import_path(
     bool create_parent,
     TransferSymlinkMode symlink_mode = TransferSymlinkMode::Preserve
 );
+ImportSummary import_path(
+    const std::string& bytes,
+    TransferSourceType source_type,
+    const std::string& absolute_path,
+    const std::string& overwrite_mode,
+    bool create_parent,
+    TransferSymlinkMode symlink_mode,
+    const TransferLimitConfig& limits
+);
 ImportSummary import_path_from_reader(
     TransferArchiveReader& reader,
     TransferSourceType source_type,
@@ -104,4 +130,13 @@ ImportSummary import_path_from_reader(
     const std::string& overwrite_mode,
     bool create_parent,
     TransferSymlinkMode symlink_mode = TransferSymlinkMode::Preserve
+);
+ImportSummary import_path_from_reader(
+    TransferArchiveReader& reader,
+    TransferSourceType source_type,
+    const std::string& absolute_path,
+    const std::string& overwrite_mode,
+    bool create_parent,
+    TransferSymlinkMode symlink_mode,
+    const TransferLimitConfig& limits
 );

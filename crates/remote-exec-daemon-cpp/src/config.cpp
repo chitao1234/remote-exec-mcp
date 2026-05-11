@@ -1,8 +1,9 @@
-#include <cstdlib>
 #include <cerrno>
 #include <climits>
+#include <cstdlib>
 #include <fstream>
 #include <map>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 
@@ -45,6 +46,35 @@ static unsigned long read_optional_unsigned_long(
         return fallback;
     }
     return parse_unsigned_long(it->second, key);
+}
+
+static std::uint64_t parse_uint64(
+    const std::string& raw,
+    const std::string& key
+) {
+    if (raw.empty()) {
+        throw std::runtime_error("missing numeric value for " + key);
+    }
+
+    errno = 0;
+    char* end = NULL;
+    const unsigned long long value = std::strtoull(raw.c_str(), &end, 10);
+    if (errno == ERANGE || end == raw.c_str() || (end != NULL && *end != '\0')) {
+        throw std::runtime_error("invalid numeric value for " + key + ": " + raw);
+    }
+    return static_cast<std::uint64_t>(value);
+}
+
+static std::uint64_t read_optional_uint64(
+    const ConfigValues& values,
+    const std::string& key,
+    std::uint64_t fallback
+) {
+    const ConfigValues::const_iterator it = values.find(key);
+    if (it == values.end()) {
+        return fallback;
+    }
+    return parse_uint64(it->second, key);
 }
 
 static std::string read_required_string(
@@ -364,6 +394,35 @@ static YieldTimeConfig read_yield_time_config(const ConfigValues& values) {
     return config;
 }
 
+static TransferLimitConfig read_transfer_limits(const ConfigValues& values) {
+    TransferLimitConfig limits = default_transfer_limit_config();
+    limits.max_archive_bytes = read_optional_uint64(
+        values,
+        "transfer_max_archive_bytes",
+        limits.max_archive_bytes
+    );
+    limits.max_entry_bytes = read_optional_uint64(
+        values,
+        "transfer_max_entry_bytes",
+        limits.max_entry_bytes
+    );
+    return limits;
+}
+
+static void validate_transfer_limits(const TransferLimitConfig& limits) {
+    if (limits.max_archive_bytes == 0ULL) {
+        throw std::runtime_error("transfer_max_archive_bytes must be greater than zero");
+    }
+    if (limits.max_entry_bytes == 0ULL) {
+        throw std::runtime_error("transfer_max_entry_bytes must be greater than zero");
+    }
+    if (limits.max_entry_bytes > limits.max_archive_bytes) {
+        throw std::runtime_error(
+            "transfer_max_entry_bytes must be less than or equal to transfer_max_archive_bytes"
+        );
+    }
+}
+
 static FilesystemSandbox read_sandbox(const ConfigValues& values) {
     FilesystemSandbox sandbox;
     sandbox.exec_cwd.allow = read_optional_path_list(values, "sandbox_exec_cwd_allow");
@@ -386,6 +445,7 @@ static void validate_daemon_config(const DaemonConfig& config) {
         throw std::runtime_error("max_open_sessions must be greater than zero");
     }
     validate_port_forward_limits(config.port_forward_limits);
+    validate_transfer_limits(config.transfer_limits);
 }
 
 unsigned long resolve_yield_time_ms(
@@ -423,6 +483,7 @@ DaemonConfig load_config(const std::string& path) {
         "max_request_body_bytes",
         512UL * 1024UL * 1024UL
     );
+    config.transfer_limits = read_transfer_limits(values);
     config.max_open_sessions = read_optional_unsigned_long(values, "max_open_sessions", 64UL);
     config.port_forward_limits = read_port_forward_limits(values);
     config.port_forward_max_worker_threads = config.port_forward_limits.max_worker_threads;

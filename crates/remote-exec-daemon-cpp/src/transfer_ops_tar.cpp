@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -137,6 +138,20 @@ std::uint64_t parse_octal_field(const char* data, std::size_t size) {
         ++index;
     }
     return value;
+}
+
+std::uint64_t checked_add_u64(
+    std::uint64_t left,
+    std::uint64_t right,
+    const std::string& label
+) {
+    if (left > std::numeric_limits<std::uint64_t>::max() - right) {
+        throw TransferFailure(
+            TransferRpcCode::TransferFailed,
+            label + " is too large"
+        );
+    }
+    return left + right;
 }
 
 bool checksum_valid(const char* block) {
@@ -343,8 +358,43 @@ TarHeaderView parse_header(const char* block) {
     };
 }
 
+void ensure_u64_fits_size_t(std::uint64_t value, const std::string& label) {
+    if (value > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+        throw TransferFailure(
+            TransferRpcCode::TransferFailed,
+            label + " is too large for this platform"
+        );
+    }
+}
+
+void ensure_transfer_entry_within_limits(
+    std::uint64_t entry_size,
+    std::uint64_t copied_so_far,
+    const TransferLimitConfig& limits
+) {
+    if (entry_size > limits.max_entry_bytes) {
+        std::ostringstream message;
+        message << "archive entry size " << entry_size
+                << " exceeds transfer entry limit " << limits.max_entry_bytes;
+        throw TransferFailure(TransferRpcCode::TransferFailed, message.str());
+    }
+    if (copied_so_far > limits.max_archive_bytes ||
+        entry_size > limits.max_archive_bytes - copied_so_far) {
+        std::ostringstream message;
+        message << "archive byte count exceeds transfer archive limit "
+                << limits.max_archive_bytes;
+        throw TransferFailure(TransferRpcCode::TransferFailed, message.str());
+    }
+}
+
 std::size_t padded_length(std::uint64_t size) {
-    return static_cast<std::size_t>(size) + tar_padding(static_cast<std::size_t>(size));
+    const std::uint64_t padded = checked_add_u64(
+        size,
+        static_cast<std::uint64_t>(tar_padding(size)),
+        "tar entry size"
+    );
+    ensure_u64_fits_size_t(padded, "tar entry size");
+    return static_cast<std::size_t>(padded);
 }
 
 std::string read_gnu_long_name(
@@ -358,6 +408,7 @@ std::string read_gnu_long_name(
             "truncated tar entry body"
         );
     }
+    ensure_u64_fits_size_t(size, "GNU long name entry size");
     std::string value = archive.substr(body_offset, static_cast<std::size_t>(size));
     while (!value.empty() && value[value.size() - 1] == '\0') {
         value.erase(value.size() - 1);

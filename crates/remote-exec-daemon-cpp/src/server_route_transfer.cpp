@@ -91,7 +91,8 @@ HttpResponse handle_transfer_import(AppState& state, const HttpRequest& request)
             import_request.destination_path,
             import_request.metadata.overwrite,
             import_request.metadata.create_parent,
-            import_request.metadata.symlink_mode
+            import_request.metadata.symlink_mode,
+            import_request.limits
         );
         log_transfer_import_summary(import_request.destination_path, summary);
         write_json(response, transfer_summary_json(summary));

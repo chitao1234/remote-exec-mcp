@@ -4,6 +4,7 @@
 #include <string>
 
 #include "filesystem_sandbox.h"
+#include "transfer_ops.h"
 
 struct YieldTimeOperationConfig {
     unsigned long default_ms;
@@ -38,6 +39,7 @@ struct DaemonConfig {
     std::string http_auth_bearer_token;
     std::size_t max_request_header_bytes;
     std::size_t max_request_body_bytes;
+    TransferLimitConfig transfer_limits = default_transfer_limit_config();
     unsigned long max_open_sessions;
     unsigned long port_forward_max_worker_threads;
     PortForwardLimitConfig port_forward_limits;

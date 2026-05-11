@@ -38,6 +38,7 @@ static DaemonConfig make_config(const fs::path& root) {
     config.http_auth_bearer_token.clear();
     config.max_request_header_bytes = 65536;
     config.max_request_body_bytes = 536870912;
+    config.transfer_limits = default_transfer_limit_config();
     config.max_open_sessions = 64;
     config.port_forward_max_worker_threads = DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS;
     config.port_forward_limits = default_port_forward_limit_config();

@@ -187,6 +187,8 @@ default_workdir = /work
 # Request/session safety limits.
 # max_request_header_bytes = 65536
 # max_request_body_bytes = 536870912
+# transfer_max_archive_bytes = 536870912
+# transfer_max_entry_bytes = 536870912
 # max_open_sessions = 64
 # C++ forwarding uses detached worker threads for retained listener, UDP,
 # reconnect-expiry, and TCP stream work. Each active TCP stream uses separate
@@ -260,6 +262,7 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
 - `transfer_files` accepts an optional export-side `exclude` array. Patterns match paths relative to each source root, use `/` as the logical separator on all platforms, and support `*`, `?`, `**`, `[abc]`, `[a-z]`, `[!abc]`, `[!a-c]`, `[^abc]`, and `[^a-c]`
 - excluded matches are silent, excluded directories are pruned recursively, and single-file sources ignore `exclude` in v1
 - daemon HTTP transfer imports and exports stream archive bodies instead of staging the full tar payload in memory
+- `transfer_max_archive_bytes` and `transfer_max_entry_bytes` bound imported archive file entries and in-memory tar metadata bodies
 - transfer imports support `fail`, `merge`, and `replace` overwrite modes; `merge` overlays compatible existing destinations without deleting unrelated directory entries
 - POSIX transfer exports skip unsupported special entries in directory trees and report warnings
 - POSIX transfer symlink modes support preserving, following, or skipping symlinks

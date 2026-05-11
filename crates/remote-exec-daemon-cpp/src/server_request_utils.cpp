@@ -161,6 +161,7 @@ TransferImportRequestSpec prepare_transfer_import_request(
         import_request.metadata.destination_path,
         SANDBOX_WRITE
     );
+    import_request.limits = state.config.transfer_limits;
     return import_request;
 }
 

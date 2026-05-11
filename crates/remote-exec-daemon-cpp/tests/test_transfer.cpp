@@ -159,6 +159,28 @@ static std::string tar_with_single_file(const std::string& path, const std::stri
     return archive;
 }
 
+static std::string tar_with_declared_file_size(
+    const std::string& path,
+    std::uint64_t declared_size
+) {
+    std::string header(512, '\0');
+    set_bytes(&header, 0, 100, path);
+    header.replace(100, 8, octal_field(8, 0644));
+    header.replace(108, 8, octal_field(8, 0));
+    header.replace(116, 8, octal_field(8, 0));
+    header.replace(124, 12, octal_field(12, declared_size));
+    header.replace(136, 12, octal_field(12, 0));
+    header[156] = '0';
+    set_bytes(&header, 257, 6, "ustar ");
+    set_bytes(&header, 263, 2, " \0");
+    write_checksum(&header);
+
+    std::string archive;
+    archive.append(header);
+    archive.append(1024, '\0');
+    return archive;
+}
+
 static std::uint64_t parse_octal_value(const char* data, std::size_t size) {
     std::size_t index = 0;
     while (index < size && (data[index] == ' ' || data[index] == '\0')) {
@@ -353,6 +375,86 @@ static void assert_file_transfer_blocks_raw_bytes() {
     }
 
     assert(rejected);
+}
+
+static void assert_transfer_rejects_entry_size_over_limit() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-size-limit";
+    fs::remove_all(root);
+    fs::create_directories(root);
+
+    TransferLimitConfig limits;
+    limits.max_archive_bytes = 4096ULL;
+    limits.max_entry_bytes = 8ULL;
+
+    bool rejected = false;
+    try {
+        (void)import_path(
+            tar_with_single_file(SINGLE_FILE_ENTRY, "0123456789"),
+            TransferSourceType::File,
+            (root / "dest.txt").string(),
+            "replace",
+            true,
+            TransferSymlinkMode::Preserve,
+            limits
+        );
+    } catch (const TransferFailure& failure) {
+        rejected = failure.message.find("transfer entry limit") != std::string::npos;
+    }
+    assert(rejected);
+    assert(!fs::exists(root / "dest.txt"));
+}
+
+static void assert_transfer_rejects_unrepresentable_tar_size() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-huge-size";
+    fs::remove_all(root);
+    fs::create_directories(root);
+
+    bool rejected = false;
+    try {
+        (void)import_path(
+            tar_with_declared_file_size(SINGLE_FILE_ENTRY, 077777777777ULL),
+            TransferSourceType::File,
+            (root / "dest.txt").string(),
+            "replace",
+            true
+        );
+    } catch (const TransferFailure& failure) {
+        rejected = failure.message.find("too large") != std::string::npos ||
+            failure.message.find("limit") != std::string::npos;
+    }
+    assert(rejected);
+    assert(!fs::exists(root / "dest.txt"));
+}
+
+static void assert_transfer_rejects_summary_size_over_limit() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-summary-limit";
+    fs::remove_all(root);
+
+    std::string archive;
+    append_tar_directory(archive, ".");
+    append_tar_entry(&archive, TRANSFER_SUMMARY_ENTRY, '0', "{\"warnings\":[]}");
+    finalize_tar(archive);
+
+    TransferLimitConfig limits;
+    limits.max_archive_bytes = 4096ULL;
+    limits.max_entry_bytes = 8ULL;
+
+    bool rejected = false;
+    try {
+        (void)import_path(
+            archive,
+            TransferSourceType::Directory,
+            (root / "dest").string(),
+            "replace",
+            true,
+            TransferSymlinkMode::Preserve,
+            limits
+        );
+    } catch (const TransferFailure& failure) {
+        rejected = failure.message.find("transfer entry limit") != std::string::npos;
+    }
+    assert(rejected);
+    assert(!fs::exists(root / "dest" / TRANSFER_SUMMARY_ENTRY));
 }
 
 static void assert_directory_round_trip() {
@@ -862,6 +964,9 @@ int main() {
     assert_file_transfer();
     assert_file_transfer_blocks_unexpected_entry_path();
     assert_file_transfer_blocks_raw_bytes();
+    assert_transfer_rejects_entry_size_over_limit();
+    assert_transfer_rejects_unrepresentable_tar_size();
+    assert_transfer_rejects_summary_size_over_limit();
     assert_directory_round_trip();
     assert_directory_replace_behavior();
     assert_path_info_reports_existing_directory();

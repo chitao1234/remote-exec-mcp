@@ -70,6 +70,12 @@ void append_symlink_entry(
 #endif
 bool is_zero_block(const char* block);
 TarHeaderView parse_header(const char* block);
+void ensure_u64_fits_size_t(std::uint64_t value, const std::string& label);
+void ensure_transfer_entry_within_limits(
+    std::uint64_t entry_size,
+    std::uint64_t copied_so_far,
+    const TransferLimitConfig& limits
+);
 std::size_t padded_length(std::uint64_t size);
 std::string read_gnu_long_name(
     const std::string& archive,
