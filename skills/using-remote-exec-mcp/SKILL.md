@@ -277,6 +277,7 @@ How to use it:
 - C++ daemon targets support both absolute patch paths and paths relative to `workdir`.
 - The patch engine supports the documented `*** End of File` marker.
 - Updating an existing file preserves its current `LF` versus `CRLF` line ending style.
+- `apply_patch` is not transactional across multiple file actions. If one patch contains several file edits and a later edit fails, earlier successful edits remain applied. Prefer smaller patches when partial application would be hard to recover from.
 - This tool is target-local. It does not move bytes between endpoints.
 
 Result behavior:
