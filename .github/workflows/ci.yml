@@ -93,6 +93,9 @@ jobs:
       - name: Test daemon without default features
         run: cargo test -p remote-exec-daemon --no-default-features --tests --locked
 
+      - name: Test host without default features
+        run: cargo test -p remote-exec-host --no-default-features --tests --locked
+
   rust-clippy:
     name: Rust clippy (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -150,6 +153,9 @@ jobs:
 
       - name: Run daemon clippy without default features
         run: cargo clippy -p remote-exec-daemon --no-default-features --all-targets --locked -- -D warnings
+
+      - name: Run host clippy without default features
+        run: cargo clippy -p remote-exec-host --no-default-features --all-targets --locked -- -D warnings
 
   cpp:
     name: C++ daemon (${{ matrix.os }})

@@ -502,9 +502,15 @@ No-default-features checks:
 ```bash
 cargo test -p remote-exec-broker --no-default-features --tests
 cargo test -p remote-exec-daemon --no-default-features --tests
+cargo test -p remote-exec-host --no-default-features --tests
 cargo clippy -p remote-exec-broker --no-default-features --all-targets -- -D warnings
 cargo clippy -p remote-exec-daemon --no-default-features --all-targets -- -D warnings
+cargo clippy -p remote-exec-host --no-default-features --all-targets -- -D warnings
 ```
+
+CI also exercises broker, daemon, and host `--no-default-features` test and
+clippy jobs on Ubuntu so the `tls-disabled` and host feature-gated code paths
+stay intentionally covered.
 
 Windows GNU compile-only checks from Linux:
 
