@@ -528,20 +528,27 @@ async fn close_active_tcp_listen_streams(
     let streams = std::mem::take(&mut state.connect_streams);
     let dropped_count = streams.len() as u64;
     state.listen_to_connect.clear();
+    let mut first_error = None;
     for (_, mut stream) in streams {
         release_pending_budget(&mut state.pending_budget, &mut stream);
         if let Err(err) = listen_tunnel.close_stream(stream.listen_stream_id).await {
-            return classify_transport_failure(
+            let classified = classify_transport_failure(
                 err,
                 "closing tcp listen stream after connect tunnel loss",
                 TunnelRole::Listen,
             )
             .map(|_| ());
+            if first_error.is_none() {
+                first_error = Some(classified);
+            }
         }
     }
     runtime
         .record_dropped_streams_and_release_active(dropped_count)
         .await;
+    if let Some(result) = first_error {
+        result?;
+    }
     Ok(())
 }
 
