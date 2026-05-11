@@ -5,6 +5,7 @@ pub mod session;
 pub(crate) mod shell;
 pub mod store;
 mod support;
+mod timing;
 pub mod transcript;
 #[cfg(all(windows, feature = "winpty"))]
 mod winpty;

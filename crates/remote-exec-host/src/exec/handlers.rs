@@ -14,9 +14,8 @@ use super::{
         ensure_sandbox_access, finish_response, has_exited, internal_error, poll_once, poll_until,
         resolve_workdir, running_response, write_chars, write_yield_time_operation,
     },
+    timing::EXEC_POLL_INTERVAL,
 };
-
-const EXEC_START_POLL_INTERVAL_MS: u64 = 25;
 
 pub async fn exec_start_local(
     state: Arc<AppState>,
@@ -54,7 +53,7 @@ pub async fn exec_start_local(
             return Ok(response);
         }
 
-        tokio::time::sleep(Duration::from_millis(EXEC_START_POLL_INTERVAL_MS)).await;
+        tokio::time::sleep(EXEC_POLL_INTERVAL).await;
     }
 
     let started =

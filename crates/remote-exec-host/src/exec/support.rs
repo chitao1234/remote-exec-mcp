@@ -11,7 +11,7 @@ use remote_exec_proto::sandbox::{SandboxAccess, SandboxError, authorize_path};
 
 use crate::{AppState, HostRpcError, config::YieldTimeOperation, host_path};
 
-use super::{output, session};
+use super::{output, session, timing::EXEC_POLL_INTERVAL};
 
 pub fn resolve_workdir(state: &Arc<AppState>, workdir: Option<&str>) -> anyhow::Result<PathBuf> {
     Ok(match workdir {
@@ -83,7 +83,7 @@ pub(super) async fn poll_until(
             break;
         }
 
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        tokio::time::sleep(EXEC_POLL_INTERVAL).await;
     }
 
     Ok(output)

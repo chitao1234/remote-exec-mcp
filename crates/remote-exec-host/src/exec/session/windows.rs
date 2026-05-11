@@ -353,7 +353,7 @@ async fn summarize_windows_backend_session(
     mut session: LiveSession,
     backend: PtyBackend,
 ) -> String {
-    let deadline = Instant::now() + Duration::from_millis(300);
+    let deadline = Instant::now() + super::super::timing::WINDOWS_BACKEND_SMOKE_TIMEOUT;
     let mut output = String::new();
 
     while Instant::now() < deadline {
@@ -391,12 +391,13 @@ async fn summarize_windows_backend_session(
             }
         }
 
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        tokio::time::sleep(super::super::timing::EXEC_POLL_INTERVAL).await;
     }
 
     let _ = session.terminate().await;
+    let timeout_ms = super::super::timing::WINDOWS_BACKEND_SMOKE_TIMEOUT.as_millis();
     format!(
-        "{} smoke test: still running after 300ms; output={}",
+        "{} smoke test: still running after {timeout_ms}ms; output={}",
         backend.debug_name(),
         summarize_output_excerpt(&output)
     )
