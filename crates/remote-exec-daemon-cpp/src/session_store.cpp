@@ -332,7 +332,12 @@ void pump_session_output(const std::shared_ptr<LiveSession>& session) {
 
         try {
             chunk = session->process->read_output(true, &eof, &carry);
-        } catch (const std::exception&) {
+        } catch (const std::exception& ex) {
+            log_message(
+                LOG_WARN,
+                "session",
+                std::string("session output pump failed: ") + ex.what()
+            );
             BasicLockGuard lock(session->mutex_);
             session->output_.decode_carry = carry;
             finish_session_output_locked(session.get());
