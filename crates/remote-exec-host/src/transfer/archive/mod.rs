@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use crate::host_path;
 use remote_exec_proto::path::PathPolicy;
 use remote_exec_proto::path::normalize_for_system;
-use remote_exec_proto::rpc::{TransferCompression, TransferSourceType, TransferWarning};
+use remote_exec_proto::rpc::{TransferSourceType, TransferWarning};
+use remote_exec_proto::transfer::TransferCompression;
 
 mod codec;
 mod entry;

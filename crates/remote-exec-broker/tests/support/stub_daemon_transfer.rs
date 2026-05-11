@@ -7,10 +7,10 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use remote_exec_proto::rpc::{
     RpcErrorBody, TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
     TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
-    TRANSFER_SYMLINK_MODE_HEADER, TransferCompression, TransferExportRequest,
-    TransferImportResponse, TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType,
-    TransferWarning,
+    TRANSFER_SYMLINK_MODE_HEADER, TransferExportRequest, TransferImportResponse,
+    TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType, TransferWarning,
 };
+use remote_exec_proto::transfer::TransferCompression;
 use tar::{Builder, EntryType, Header};
 
 use super::StubDaemonState;

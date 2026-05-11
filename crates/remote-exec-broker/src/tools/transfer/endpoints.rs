@@ -4,9 +4,8 @@ use remote_exec_proto::path::{
     same_path_for_policy, windows_path_policy,
 };
 use remote_exec_proto::public::{TransferDestinationMode, TransferEndpoint};
-use remote_exec_proto::rpc::{
-    RpcErrorCode, TransferCompression as RpcTransferCompression, TransferPathInfoRequest,
-};
+use remote_exec_proto::rpc::{RpcErrorCode, TransferPathInfoRequest};
+use remote_exec_proto::transfer::TransferCompression;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EndpointTargetContext {
@@ -275,9 +274,9 @@ pub(super) async fn negotiate_transfer_compression(
     state: &crate::BrokerState,
     sources: &[TransferEndpoint],
     destination: &TransferEndpoint,
-) -> anyhow::Result<RpcTransferCompression> {
+) -> anyhow::Result<TransferCompression> {
     if !state.enable_transfer_compression {
-        return Ok(RpcTransferCompression::None);
+        return Ok(TransferCompression::None);
     }
 
     let mut has_remote_endpoint = false;
@@ -289,14 +288,14 @@ pub(super) async fn negotiate_transfer_compression(
 
         has_remote_endpoint = true;
         if !supports_transfer_compression {
-            return Ok(RpcTransferCompression::None);
+            return Ok(TransferCompression::None);
         }
     }
 
     if has_remote_endpoint {
-        Ok(RpcTransferCompression::Zstd)
+        Ok(TransferCompression::Zstd)
     } else {
-        Ok(RpcTransferCompression::None)
+        Ok(TransferCompression::None)
     }
 }
 

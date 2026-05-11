@@ -2,10 +2,9 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use remote_exec_proto::path::basename_for_policy;
-use remote_exec_proto::rpc::{
-    TransferCompression, TransferSourceType, TransferSymlinkMode, TransferWarning,
-};
+use remote_exec_proto::rpc::{TransferSourceType, TransferSymlinkMode, TransferWarning};
 use remote_exec_proto::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
+use remote_exec_proto::transfer::TransferCompression;
 
 use crate::error::TransferError;
 

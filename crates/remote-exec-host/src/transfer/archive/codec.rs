@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::path::Path;
 
-use remote_exec_proto::rpc::TransferCompression;
+use remote_exec_proto::transfer::TransferCompression;
 
 pub(super) fn open_archive_writer(
     archive_path: &Path,

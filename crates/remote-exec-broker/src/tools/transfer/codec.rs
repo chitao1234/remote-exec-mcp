@@ -1,7 +1,8 @@
 use remote_exec_proto::rpc::{
-    TransferCompression, TransferExportMetadata, TransferHeaderError, TransferImportMetadata,
+    TransferExportMetadata, TransferHeaderError, TransferImportMetadata,
     parse_transfer_export_metadata, transfer_import_header_pairs,
 };
+use remote_exec_proto::transfer::TransferCompression;
 
 use crate::daemon_client::DaemonClientError;
 
@@ -47,9 +48,10 @@ mod tests {
     use remote_exec_proto::rpc::{
         TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
         TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
-        TRANSFER_SYMLINK_MODE_HEADER, TransferCompression, TransferImportMetadata,
-        TransferOverwrite, TransferSourceType, TransferSymlinkMode,
+        TRANSFER_SYMLINK_MODE_HEADER, TransferImportMetadata, TransferOverwrite,
+        TransferSourceType, TransferSymlinkMode,
     };
+    use remote_exec_proto::transfer::TransferCompression;
 
     use super::*;
 

@@ -2,8 +2,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub use crate::transfer::{
-    TransferExportMetadata, TransferExportRequest, TransferImportMetadata, TransferImportRequest,
-    TransferOverwrite, TransferSourceType, TransferSymlinkMode,
+    TransferCompression, TransferExportMetadata, TransferExportRequest, TransferImportMetadata,
+    TransferImportRequest, TransferOverwrite, TransferSourceType, TransferSymlinkMode,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -134,35 +134,6 @@ pub const TRANSFER_DESTINATION_PATH_HEADER: &str = "x-remote-exec-destination-pa
 pub const TRANSFER_OVERWRITE_HEADER: &str = "x-remote-exec-overwrite";
 pub const TRANSFER_CREATE_PARENT_HEADER: &str = "x-remote-exec-create-parent";
 pub const TRANSFER_SYMLINK_MODE_HEADER: &str = "x-remote-exec-symlink-mode";
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum TransferCompression {
-    #[default]
-    None,
-    Zstd,
-}
-
-impl TransferCompression {
-    pub fn is_none(&self) -> bool {
-        matches!(self, Self::None)
-    }
-
-    pub fn wire_value(&self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Zstd => "zstd",
-        }
-    }
-
-    pub fn from_wire_value(value: &str) -> Option<Self> {
-        match value {
-            "none" => Some(Self::None),
-            "zstd" => Some(Self::Zstd),
-            _ => None,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct TransferWarning {

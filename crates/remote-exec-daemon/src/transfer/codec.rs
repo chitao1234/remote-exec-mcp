@@ -1,10 +1,10 @@
 use axum::Json;
 use axum::http::{HeaderMap, StatusCode};
 use remote_exec_proto::rpc::{
-    RpcErrorBody, TransferCompression, TransferExportMetadata, TransferHeaderError,
-    TransferImportMetadata, TransferSourceType, parse_transfer_import_metadata,
-    transfer_export_header_pairs,
+    RpcErrorBody, TransferExportMetadata, TransferHeaderError, TransferImportMetadata,
+    TransferSourceType, parse_transfer_import_metadata, transfer_export_header_pairs,
 };
+use remote_exec_proto::transfer::TransferCompression;
 
 use crate::rpc_error::bad_request;
 

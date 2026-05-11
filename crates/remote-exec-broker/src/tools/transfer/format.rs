@@ -4,9 +4,8 @@ use remote_exec_proto::public::{
     TransferDestinationMode, TransferEndpoint, TransferFilesResult, TransferSourceType,
     TransferSymlinkMode as PublicTransferSymlinkMode,
 };
-use remote_exec_proto::rpc::{
-    TransferCompression as RpcTransferCompression, TransferImportResponse,
-};
+use remote_exec_proto::rpc::TransferImportResponse;
+use remote_exec_proto::transfer::TransferCompression;
 
 use crate::mcp_server::ToolCallOutput;
 
@@ -55,10 +54,10 @@ pub(super) fn finish_transfer(
     ))
 }
 
-pub(super) fn format_transfer_compression(compression: &RpcTransferCompression) -> &'static str {
+pub(super) fn format_transfer_compression(compression: &TransferCompression) -> &'static str {
     match compression {
-        RpcTransferCompression::None => "none",
-        RpcTransferCompression::Zstd => "zstd",
+        TransferCompression::None => "none",
+        TransferCompression::Zstd => "zstd",
     }
 }
 

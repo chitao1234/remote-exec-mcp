@@ -3,10 +3,11 @@ pub mod archive;
 use std::sync::Arc;
 
 use remote_exec_proto::rpc::{
-    TransferCompression, TransferExportRequest, TransferImportRequest, TransferImportResponse,
-    TransferPathInfoRequest, TransferPathInfoResponse,
+    TransferExportRequest, TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
+    TransferPathInfoResponse,
 };
 use remote_exec_proto::sandbox::{SandboxAccess, SandboxError, authorize_path};
+use remote_exec_proto::transfer::TransferCompression;
 
 use crate::AppState;
 use crate::error::TransferError;

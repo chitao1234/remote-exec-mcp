@@ -2,9 +2,9 @@ use std::path::Path;
 
 use remote_exec_proto::public::{TransferEndpoint, TransferOverwrite, TransferSymlinkMode};
 use remote_exec_proto::rpc::{
-    TransferCompression as RpcTransferCompression, TransferExportRequest, TransferImportRequest,
-    TransferImportResponse, TransferSourceType,
+    TransferExportRequest, TransferImportRequest, TransferImportResponse, TransferSourceType,
 };
+use remote_exec_proto::transfer::TransferCompression;
 
 use crate::daemon_client::DaemonClientError;
 
@@ -24,7 +24,7 @@ struct ExportArchiveResult {
 #[derive(Clone, Copy)]
 pub(super) struct TransferExecutionOptions<'a> {
     pub(super) overwrite: &'a TransferOverwrite,
-    pub(super) compression: &'a RpcTransferCompression,
+    pub(super) compression: &'a TransferCompression,
     pub(super) exclude: &'a [String],
     pub(super) symlink_mode: &'a TransferSymlinkMode,
     pub(super) create_parent: bool,
@@ -221,7 +221,7 @@ pub(super) async fn transfer_multiple_sources(
 
 fn build_export_request(
     endpoint: &TransferEndpoint,
-    compression: &RpcTransferCompression,
+    compression: &TransferCompression,
     exclude: &[String],
     symlink_mode: &TransferSymlinkMode,
 ) -> TransferExportRequest {
@@ -237,7 +237,7 @@ async fn export_endpoint_to_archive(
     state: &crate::BrokerState,
     endpoint: &TransferEndpoint,
     archive_path: &Path,
-    compression: &RpcTransferCompression,
+    compression: &TransferCompression,
     exclude: &[String],
     symlink_mode: &TransferSymlinkMode,
 ) -> anyhow::Result<ExportArchiveResult> {
@@ -342,7 +342,7 @@ fn build_import_request(
     endpoint: &TransferEndpoint,
     overwrite: &TransferOverwrite,
     source_type: TransferSourceType,
-    compression: &RpcTransferCompression,
+    compression: &TransferCompression,
     symlink_mode: &TransferSymlinkMode,
     create_parent: bool,
 ) -> TransferImportRequest {

@@ -121,14 +121,40 @@ impl TransferSymlinkMode {
     }
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferCompression {
+    #[default]
+    None,
+    Zstd,
+}
+
+impl TransferCompression {
+    pub fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+
+    pub fn wire_value(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Zstd => "zstd",
+        }
+    }
+
+    pub fn from_wire_value(value: &str) -> Option<Self> {
+        match value {
+            "none" => Some(Self::None),
+            "zstd" => Some(Self::Zstd),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransferExportRequest {
     pub path: String,
-    #[serde(
-        default,
-        skip_serializing_if = "crate::rpc::TransferCompression::is_none"
-    )]
-    pub compression: crate::rpc::TransferCompression,
+    #[serde(default, skip_serializing_if = "TransferCompression::is_none")]
+    pub compression: TransferCompression,
     #[serde(default)]
     pub symlink_mode: TransferSymlinkMode,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -138,7 +164,7 @@ pub struct TransferExportRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransferExportMetadata {
     pub source_type: TransferSourceType,
-    pub compression: crate::rpc::TransferCompression,
+    pub compression: TransferCompression,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -147,7 +173,7 @@ pub struct TransferImportRequest {
     pub overwrite: TransferOverwrite,
     pub create_parent: bool,
     pub source_type: TransferSourceType,
-    pub compression: crate::rpc::TransferCompression,
+    pub compression: TransferCompression,
     #[serde(default)]
     pub symlink_mode: TransferSymlinkMode,
 }
@@ -158,7 +184,7 @@ pub struct TransferImportMetadata {
     pub overwrite: TransferOverwrite,
     pub create_parent: bool,
     pub source_type: TransferSourceType,
-    pub compression: crate::rpc::TransferCompression,
+    pub compression: TransferCompression,
     pub symlink_mode: TransferSymlinkMode,
 }
 

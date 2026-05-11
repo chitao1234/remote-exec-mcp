@@ -5,11 +5,11 @@ use remote_exec_proto::path::{
     windows_path_policy,
 };
 use remote_exec_proto::rpc::{
-    TransferCompression, TransferImportRequest, TransferImportResponse, TransferPathInfoResponse,
-    TransferSourceType, TransferWarning,
+    TransferImportRequest, TransferImportResponse, TransferPathInfoResponse, TransferSourceType,
+    TransferWarning,
 };
 use remote_exec_proto::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
-use remote_exec_proto::transfer::TransferLimits;
+use remote_exec_proto::transfer::{TransferCompression, TransferLimits};
 
 use crate::daemon_client::DaemonClientError;
 

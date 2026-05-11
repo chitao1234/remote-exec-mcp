@@ -6,10 +6,10 @@ use std::path::Path;
 
 use remote_exec_proto::rpc::{
     TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER,
-    TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER, TransferCompression,
-    TransferExportRequest, TransferImportResponse, TransferPathInfoRequest,
-    TransferPathInfoResponse, TransferSourceType,
+    TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER, TransferExportRequest,
+    TransferImportResponse, TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType,
 };
+use remote_exec_proto::transfer::TransferCompression;
 #[cfg(unix)]
 use support::transfer_archive::directory_tar_with_symlink;
 use support::transfer_archive::{decode_archive, multi_source_tar, raw_tar_file_with_path};
