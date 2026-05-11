@@ -1,4 +1,5 @@
 #include <cassert>
+#include <fstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -69,6 +70,12 @@ static YieldTimeConfig fast_yield_time_config() {
     return config;
 }
 
+static void write_text_file(const fs::path& path, const std::string& contents) {
+    std::ofstream out(path.string().c_str(), std::ios::binary);
+    assert(out.good());
+    out << contents;
+}
+
 static void assert_unknown_session(
     SessionStore& store,
     const std::string& daemon_session_id,
@@ -133,28 +140,57 @@ static void assert_token_limiting(
     const YieldTimeConfig& yield_time
 ) {
 #ifdef _WIN32
-    const std::string token_command = "echo one two three";
+    const std::string print_long_command = "type long.txt";
+    const std::string print_huge_command = "type huge.txt";
 #else
-    const std::string token_command = "printf 'one two three\\n'";
+    const std::string print_long_command = "cat long.txt";
+    const std::string print_huge_command = "cat huge.txt";
 #endif
 
-    const Json token_limited = start_test_command(
+    write_text_file(root / "long.txt", std::string(100, 'a'));
+    const Json middle_truncated = start_test_command(
         store,
-        token_command,
+        print_long_command,
         root.string(),
         shell,
         false,
         5000UL,
-        2UL,
+        15UL,
         yield_time,
         64UL
     );
-    assert(token_limited.at("original_token_count").get<unsigned long>() == 3UL);
-    assert(normalize_output(token_limited.at("output").get<std::string>()) == "one two");
+    assert(middle_truncated.at("original_token_count").get<unsigned long>() == 25UL);
+    assert(
+        normalize_output(middle_truncated.at("output").get<std::string>()) ==
+        std::string("Total output lines: 1\n\naaaaaa") + "\xE2\x80\xA6" +
+            "22 tokens truncated" + "\xE2\x80\xA6" + "aaaaaa"
+    );
+
+    write_text_file(root / "huge.txt", std::string(50000, 'x'));
+    const Json omitted_limit = start_test_command(
+        store,
+        print_huge_command,
+        root.string(),
+        shell,
+        false,
+        5000UL,
+        DEFAULT_MAX_OUTPUT_TOKENS,
+        yield_time,
+        64UL
+    );
+    assert(omitted_limit.at("original_token_count").get<unsigned long>() == 12500UL);
+    assert(
+        normalize_output(omitted_limit.at("output").get<std::string>())
+            .find("Total output lines: 1\n\n") == 0U
+    );
+    assert(
+        omitted_limit.at("output").get<std::string>().find("tokens truncated") !=
+        std::string::npos
+    );
 
     const Json zero_limited = start_test_command(
         store,
-        token_command,
+        print_huge_command,
         root.string(),
         shell,
         false,
@@ -163,7 +199,7 @@ static void assert_token_limiting(
         yield_time,
         64UL
     );
-    assert(zero_limited.at("original_token_count").get<unsigned long>() == 3UL);
+    assert(zero_limited.at("original_token_count").get<unsigned long>() == 12500UL);
     assert(zero_limited.at("output").get<std::string>().empty());
 }
 

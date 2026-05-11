@@ -375,7 +375,7 @@ async fn omitted_max_output_tokens_defaults_to_ten_thousand() {
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
             &ExecStartRequest {
-                cmd: "awk 'BEGIN { for (i = 0; i < 10005; ++i) printf \"x \" }'".to_string(),
+                cmd: "awk 'BEGIN { for (i = 0; i < 25000; ++i) printf \"x \" }'".to_string(),
                 workdir: None,
                 shell: Some(TEST_SHELL.to_string()),
                 tty: false,
@@ -387,8 +387,9 @@ async fn omitted_max_output_tokens_defaults_to_ten_thousand() {
         .await;
 
     assert_eq!(response.exit_code, Some(0));
-    assert_eq!(response.original_token_count, Some(10_005));
-    assert_eq!(response.output.split_whitespace().count(), 10_000);
+    assert_eq!(response.original_token_count, Some(12_500));
+    assert!(response.output.starts_with("Total output lines: 1\n\n"));
+    assert!(response.output.contains("tokens truncated"));
 }
 
 #[tokio::test]
@@ -399,19 +400,22 @@ async fn exec_start_truncates_output_to_max_output_tokens() {
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
             &ExecStartRequest {
-                cmd: "printf 'one two three four five six'".to_string(),
+                cmd: "awk 'BEGIN { for (i = 0; i < 100; ++i) printf \"a\" }'".to_string(),
                 workdir: None,
                 shell: Some(TEST_SHELL.to_string()),
                 tty: false,
                 yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: Some(3),
+                max_output_tokens: Some(15),
                 login: Some(false),
             },
         )
         .await;
 
-    assert_eq!(response.original_token_count, Some(6));
-    assert_eq!(response.output, "one two three");
+    assert_eq!(response.original_token_count, Some(25));
+    assert_eq!(
+        response.output,
+        "Total output lines: 1\n\naaaaaa\u{2026}22 tokens truncated\u{2026}aaaaaa"
+    );
 }
 
 #[tokio::test]
@@ -541,8 +545,11 @@ async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens() {
         .await;
 
     assert!(response.running);
-    assert_eq!(response.original_token_count, Some(6));
-    assert_eq!(response.output, "one two three");
+    assert_eq!(response.original_token_count, Some(7));
+    assert_eq!(
+        response.output,
+        "Total output lines: 1\n\n\u{2026}7 tokens truncated\u{2026}"
+    );
 }
 
 #[tokio::test]

@@ -150,7 +150,9 @@ How to use it:
 - Use `tty: true` when the program is interactive or when you expect to send more input later.
 - Keep the returned `session_id` when present. That means the command is still running.
 - Read `session_command` if you need the original command string echoed back.
-- Read `original_token_count` to understand whether output was truncated by `max_output_tokens`.
+- `max_output_tokens` is approximate: daemons treat one token as about four UTF-8 bytes, and `original_token_count` is `ceil(total_utf8_bytes / 4)`.
+- If truncation happens, `output` starts with `Total output lines: N\n\n` and uses a UTF-8-safe roughly 50/50 head/tail split around `…X tokens truncated…`.
+- `max_output_tokens: 0` explicitly requests an empty `output`.
 - Read `warnings` when present. Warnings are also surfaced in the normal text output.
 - Do not send patch text through `exec_command`. The broker may intercept obvious `apply_patch` shell wrappers for compatibility, but that path emits a warning and is not the preferred workflow.
 
@@ -228,6 +230,7 @@ How to use it:
 - You may omit `target`. The broker can route by `session_id` alone.
 - If you provide `target`, it must match the original session target or the call fails.
 - Reuse the returned `session_id` until it becomes `null`.
+- `max_output_tokens`, `original_token_count`, and truncated `output` follow the same approximate-byte contract as `exec_command`.
 - Read `warnings` when present. When structured content is enabled, `write_stdin` returns the same structured exec result shape as `exec_command`.
 
 Important failure cases:

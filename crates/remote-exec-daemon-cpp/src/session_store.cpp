@@ -1,8 +1,6 @@
 #include <algorithm>
 #include <atomic>
-#include <cctype>
 #include <cstdint>
-#include <cstdlib>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -62,55 +60,107 @@ struct SessionSnapshot {
     std::uint64_t generation;
 };
 
-bool is_token_space(char ch) {
-    return std::isspace(static_cast<unsigned char>(ch)) != 0;
+const std::size_t BYTES_PER_TOKEN = 4U;
+
+unsigned long approximate_token_count(std::size_t bytes) {
+    if (bytes == 0U) {
+        return 0UL;
+    }
+    return static_cast<unsigned long>((bytes + BYTES_PER_TOKEN - 1U) / BYTES_PER_TOKEN);
 }
 
-unsigned long count_tokens(const std::string& output) {
-    unsigned long count = 0;
-    bool in_token = false;
-    for (std::size_t i = 0; i < output.size(); ++i) {
-        if (is_token_space(output[i])) {
-            in_token = false;
-            continue;
-        }
-        if (!in_token) {
-            ++count;
-            in_token = true;
+unsigned long count_lines(const std::string& output) {
+    if (output.empty()) {
+        return 0UL;
+    }
+
+    unsigned long lines = 1UL;
+    for (std::string::const_iterator it = output.begin(); it != output.end(); ++it) {
+        if (*it == '\n') {
+            ++lines;
         }
     }
-    return count;
+    if (output[output.size() - 1] == '\n') {
+        --lines;
+    }
+    return lines;
 }
 
-std::string trim_trailing_token_space(std::string output) {
-    while (!output.empty() && is_token_space(output[output.size() - 1])) {
-        output.erase(output.size() - 1);
-    }
-    return output;
+bool is_utf8_continuation_byte(unsigned char byte) {
+    return (byte & 0xC0U) == 0x80U;
 }
 
-std::string truncate_output_tokens(const std::string& output, unsigned long max_output_tokens) {
-    if (max_output_tokens == 0) {
-        return "";
+std::size_t floor_char_boundary(const std::string& output, std::size_t max_bytes) {
+    std::size_t index = std::min(max_bytes, output.size());
+    while (index > 0U && index < output.size() &&
+           is_utf8_continuation_byte(static_cast<unsigned char>(output[index]))) {
+        --index;
+    }
+    return index;
+}
+
+std::size_t ceil_char_boundary(const std::string& output, std::size_t min_bytes) {
+    std::size_t index = std::min(min_bytes, output.size());
+    while (index < output.size() &&
+           is_utf8_continuation_byte(static_cast<unsigned char>(output[index]))) {
+        ++index;
+    }
+    return index;
+}
+
+std::size_t suffix_start_for_budget(const std::string& output, std::size_t max_bytes) {
+    if (max_bytes >= output.size()) {
+        return 0U;
+    }
+    return ceil_char_boundary(output, output.size() - max_bytes);
+}
+
+std::string truncation_prefix(unsigned long line_count) {
+    std::ostringstream out;
+    out << "Total output lines: " << line_count << "\n\n";
+    return out.str();
+}
+
+std::string truncation_marker(unsigned long truncated_tokens) {
+    std::ostringstream out;
+    out << "\xE2\x80\xA6" << truncated_tokens << " tokens truncated" << "\xE2\x80\xA6";
+    return out.str();
+}
+
+std::string render_output(const std::string& output, unsigned long max_output_tokens) {
+    if (max_output_tokens == 0UL) {
+        return std::string();
     }
 
-    unsigned long seen = 0;
-    bool in_token = false;
-    for (std::size_t i = 0; i < output.size(); ++i) {
-        if (is_token_space(output[i])) {
-            in_token = false;
-            continue;
-        }
-        if (!in_token) {
-            ++seen;
-            if (seen > max_output_tokens) {
-                return trim_trailing_token_space(output.substr(0, i));
-            }
-            in_token = true;
-        }
+    const std::size_t max_output_bytes =
+        static_cast<std::size_t>(max_output_tokens) * BYTES_PER_TOKEN;
+    if (output.size() <= max_output_bytes) {
+        return output;
     }
 
-    return output;
+    const std::string prefix = truncation_prefix(count_lines(output));
+    unsigned long truncated_tokens = approximate_token_count(output.size());
+    for (;;) {
+        const std::string marker = truncation_marker(truncated_tokens);
+        if (max_output_bytes <= prefix.size() + marker.size()) {
+            return prefix + marker;
+        }
+
+        const std::size_t payload_budget = max_output_bytes - prefix.size() - marker.size();
+        const std::size_t head_budget = payload_budget / 2U;
+        const std::size_t tail_budget = payload_budget - head_budget;
+        const std::size_t head_end = floor_char_boundary(output, head_budget);
+        const std::size_t tail_start =
+            std::max(head_end, suffix_start_for_budget(output, tail_budget));
+        const unsigned long next_truncated_tokens =
+            approximate_token_count(tail_start - head_end);
+
+        if (next_truncated_tokens == truncated_tokens) {
+            return prefix + output.substr(0, head_end) + marker + output.substr(tail_start);
+        }
+
+        truncated_tokens = next_truncated_tokens;
+    }
 }
 
 double wall_time_seconds(std::uint64_t started_at_ms) {
@@ -131,8 +181,8 @@ Json build_response(
     unsigned long max_output_tokens,
     const Json& warnings
 ) {
-    const std::string trimmed = truncate_output_tokens(output, max_output_tokens);
-    const unsigned long original_token_count = count_tokens(output);
+    const std::string trimmed = render_output(output, max_output_tokens);
+    const unsigned long original_token_count = approximate_token_count(output.size());
     return Json{
         {"daemon_session_id", daemon_session_id != NULL ? Json(daemon_session_id) : Json(nullptr)},
         {"running", running},
