@@ -16,6 +16,8 @@ use remote_exec_proto::public::{
     ViewImageInput, WriteStdinInput,
 };
 
+use crate::tools::registry::BrokerTool;
+
 #[derive(Debug, Clone)]
 pub enum Connection {
     Config { config_path: PathBuf },
@@ -184,19 +186,29 @@ async fn call_direct_tool(
         }};
     }
 
-    match name {
-        "list_targets" => invoke_tool!(ListTargetsInput, crate::tools::targets::list_targets),
-        "exec_command" => invoke_tool!(ExecCommandInput, crate::tools::exec::exec_command),
-        "write_stdin" => invoke_tool!(WriteStdinInput, crate::tools::exec::write_stdin),
-        "apply_patch" => invoke_tool!(ApplyPatchInput, crate::tools::patch::apply_patch),
-        "view_image" => invoke_tool!(ViewImageInput, crate::tools::image::view_image),
-        "transfer_files" => {
+    match BrokerTool::from_name(name) {
+        Some(BrokerTool::ListTargets) => {
+            invoke_tool!(ListTargetsInput, crate::tools::targets::list_targets)
+        }
+        Some(BrokerTool::ExecCommand) => {
+            invoke_tool!(ExecCommandInput, crate::tools::exec::exec_command)
+        }
+        Some(BrokerTool::WriteStdin) => {
+            invoke_tool!(WriteStdinInput, crate::tools::exec::write_stdin)
+        }
+        Some(BrokerTool::ApplyPatch) => {
+            invoke_tool!(ApplyPatchInput, crate::tools::patch::apply_patch)
+        }
+        Some(BrokerTool::ViewImage) => {
+            invoke_tool!(ViewImageInput, crate::tools::image::view_image)
+        }
+        Some(BrokerTool::TransferFiles) => {
             invoke_tool!(TransferFilesInput, crate::tools::transfer::transfer_files)
         }
-        "forward_ports" => {
+        Some(BrokerTool::ForwardPorts) => {
             invoke_tool!(ForwardPortsInput, crate::tools::port_forward::forward_ports)
         }
-        _ => crate::mcp_server::tool_error_result(format!("unknown tool `{name}`")),
+        None => crate::mcp_server::tool_error_result(format!("unknown tool `{name}`")),
     }
 }
 
