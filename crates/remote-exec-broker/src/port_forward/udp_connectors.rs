@@ -55,17 +55,28 @@ impl UdpConnectorMap {
         now: Instant,
         idle_timeout: Duration,
     ) -> Vec<(u32, UdpPeerConnector)> {
+        let expired = {
+            let state = self.inner.lock().await;
+            state
+                .connector_by_peer
+                .iter()
+                .filter_map(|(peer, connector)| {
+                    (now.duration_since(connector.last_used) >= idle_timeout)
+                        .then_some((peer.clone(), connector.stream_id))
+                })
+                .collect::<Vec<_>>()
+        };
+
         let mut state = self.inner.lock().await;
-        let expired = state
-            .connector_by_peer
-            .iter()
-            .filter_map(|(peer, connector)| {
-                (now.duration_since(connector.last_used) >= idle_timeout)
-                    .then_some((peer.clone(), connector.stream_id))
-            })
-            .collect::<Vec<_>>();
         let mut removed = Vec::with_capacity(expired.len());
         for (peer, stream_id) in expired {
+            let still_expired = state.connector_by_peer.get(&peer).is_some_and(|connector| {
+                connector.stream_id == stream_id
+                    && now.duration_since(connector.last_used) >= idle_timeout
+            });
+            if !still_expired {
+                continue;
+            }
             if let Some(connector) = state.connector_by_peer.remove(&peer) {
                 state.peer_by_connector.remove(&stream_id);
                 removed.push((stream_id, connector));
@@ -159,6 +170,31 @@ mod tests {
             map.peer_for_stream_id(9).await.as_deref(),
             Some("127.0.0.1:10001")
         );
+        assert_eq!(map.len().await, 1);
+    }
+
+    #[tokio::test]
+    async fn connector_map_sweep_keeps_recently_refreshed_connectors() {
+        let map = UdpConnectorMap::default();
+        let old = Instant::now() - Duration::from_secs(120);
+        let fresh = Instant::now();
+
+        map.insert(
+            "127.0.0.1:10000".to_string(),
+            7,
+            UdpPeerConnector {
+                stream_id: 7,
+                last_used: old,
+            },
+        )
+        .await;
+        map.get_mut_by_peer("127.0.0.1:10000", |connector| {
+            connector.last_used = fresh;
+        })
+        .await;
+
+        let removed = map.sweep_idle(fresh, Duration::from_secs(60)).await;
+        assert!(removed.is_empty());
         assert_eq!(map.len().await, 1);
     }
 }
