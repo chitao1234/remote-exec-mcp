@@ -158,3 +158,11 @@ impl LiveSession {
         self.transcript.push(chunk.as_bytes());
     }
 }
+
+impl Drop for LiveSession {
+    fn drop(&mut self) {
+        if self.exit_code.is_none() {
+            let _ = self.child.terminate();
+        }
+    }
+}

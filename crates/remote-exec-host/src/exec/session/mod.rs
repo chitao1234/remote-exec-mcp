@@ -172,4 +172,59 @@ mod tests {
             "descendant kept running after session termination"
         );
     }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn live_session_drop_kills_pipe_process_group_descendants() {
+        use std::time::{Duration, Instant};
+
+        use crate::config::ProcessEnvironment;
+
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let marker = tempdir.path().join("drop-descendant-marker");
+        let script = format!(
+            "trap 'exit 0' TERM; (trap 'exit 0' TERM; i=0; while [ \"$i\" -lt 100 ]; do touch {}; i=$((i + 1)); sleep 0.05; done) & echo ready; while :; do sleep 1; done",
+            marker.display()
+        );
+        let cmd = vec![TEST_SHELL.to_string(), "-c".to_string(), script];
+
+        let mut session = super::spawn::spawn(
+            &cmd,
+            tempdir.path(),
+            false,
+            &ProcessEnvironment::capture_current(),
+        )
+        .expect("session should spawn");
+
+        let output = session
+            .wait_for_output(Duration::from_secs(2))
+            .await
+            .expect("wait should succeed");
+        match output {
+            super::live::OutputWait::Chunk(chunk) => assert!(chunk.contains("ready")),
+            _ => panic!("expected ready output"),
+        }
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !marker.exists() && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(marker.exists(), "descendant did not create marker");
+
+        drop(session);
+        let modified_after_drop = std::fs::metadata(&marker)
+            .expect("marker metadata")
+            .modified()
+            .expect("marker modified time");
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let modified_later = std::fs::metadata(&marker)
+            .expect("marker metadata after drop")
+            .modified()
+            .expect("marker modified time after drop");
+
+        assert_eq!(
+            modified_after_drop, modified_later,
+            "descendant kept running after LiveSession drop"
+        );
+    }
 }
