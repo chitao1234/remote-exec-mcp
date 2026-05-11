@@ -748,13 +748,13 @@ mod tests {
 
     use super::{
         ExecCompletedResponse, ExecOutputResponse, ExecResponse, ExecStartRequest,
-        ExecWriteRequest, ImageReadRequest, PatchApplyRequest, TRANSFER_COMPRESSION_HEADER,
-        TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER,
-        TRANSFER_SOURCE_TYPE_HEADER, TRANSFER_SYMLINK_MODE_HEADER, TransferCompression,
-        TransferExportMetadata, TransferHeaderError, TransferHeaderErrorKind,
-        TransferImportMetadata, TransferOverwrite, TransferSourceType, TransferSymlinkMode,
-        parse_transfer_export_metadata, parse_transfer_import_metadata,
-        transfer_export_header_pairs, transfer_import_header_pairs,
+        ExecWriteRequest, ImageReadRequest, PatchApplyRequest, RpcErrorCode,
+        TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
+        TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
+        TRANSFER_SYMLINK_MODE_HEADER, TransferCompression, TransferExportMetadata,
+        TransferHeaderError, TransferHeaderErrorKind, TransferImportMetadata, TransferOverwrite,
+        TransferSourceType, TransferSymlinkMode, parse_transfer_export_metadata,
+        parse_transfer_import_metadata, transfer_export_header_pairs, transfer_import_header_pairs,
     };
 
     fn header_map(headers: &[(&'static str, &'static str)]) -> BTreeMap<&'static str, String> {
@@ -862,6 +862,28 @@ mod tests {
         let value = serde_json::to_value(response).unwrap();
 
         assert!(value.get("daemon_session_id").is_none());
+    }
+
+    #[test]
+    fn rpc_error_code_internal_wire_value_round_trips() {
+        assert_eq!(RpcErrorCode::Internal.wire_value(), "internal_error");
+        assert_eq!(
+            RpcErrorCode::from_wire_value("internal_error"),
+            Some(RpcErrorCode::Internal)
+        );
+    }
+
+    #[test]
+    fn rpc_error_code_accepts_legacy_internal_alias() {
+        assert_eq!(
+            RpcErrorCode::from_wire_value("internal"),
+            Some(RpcErrorCode::Internal)
+        );
+    }
+
+    #[test]
+    fn rpc_error_code_unknown_wire_value_returns_none() {
+        assert_eq!(RpcErrorCode::from_wire_value("future_error_code"), None);
     }
 
     #[test]
