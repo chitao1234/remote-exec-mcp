@@ -44,11 +44,12 @@ pub(super) async fn exec_start(
     let behavior = *state.exec_start_behavior.lock().await;
     let warnings = state.exec_start_warnings.lock().await.clone();
     let daemon_instance_id = state.daemon_instance_id.lock().await.clone();
+    let daemon_session_id = state.daemon_session_id.lock().await.clone();
 
     let body = match behavior {
         ExecStartBehavior::Success => {
             serde_json::to_value(ExecResponse::Running(ExecRunningResponse {
-                daemon_session_id: "daemon-session-1".to_string(),
+                daemon_session_id,
                 output: ExecOutputResponse {
                     daemon_instance_id,
                     running: true,
@@ -81,7 +82,17 @@ pub(super) async fn exec_write(
     State(state): State<StubDaemonState>,
     Json(req): Json<ExecWriteRequest>,
 ) -> Result<Response, (StatusCode, Json<RpcErrorBody>)> {
-    assert_eq!(req.daemon_session_id, "daemon-session-1");
+    let expected_daemon_session_id = state.daemon_session_id.lock().await.clone();
+    if req.daemon_session_id != expected_daemon_session_id {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(RpcErrorBody {
+                code: "unknown_session".to_string(),
+                message: "Unknown daemon session".to_string(),
+            }),
+        ));
+    }
+
     *state.last_exec_write_request.lock().await = Some(req.clone());
     let mut behavior = state.exec_write_behavior.lock().await;
     let response_behavior = *behavior;

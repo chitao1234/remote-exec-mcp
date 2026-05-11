@@ -176,6 +176,14 @@ impl BrokerFixture {
         *self.stub_state.daemon_instance_id.lock().await = daemon_instance_id.to_string();
     }
 
+    pub async fn stub_daemon_session_id(&self) -> String {
+        self.stub_state.daemon_session_id.lock().await.clone()
+    }
+
+    pub async fn set_stub_daemon_session_id(&self, daemon_session_id: &str) {
+        *self.stub_state.daemon_session_id.lock().await = daemon_session_id.to_string();
+    }
+
     pub async fn start_running_session(&self) -> String {
         let result = self
             .call_tool(

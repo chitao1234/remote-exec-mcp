@@ -97,6 +97,88 @@ async fn write_stdin_forwards_pty_size_to_daemon_session() {
 }
 
 #[tokio::test]
+async fn write_stdin_uses_generated_daemon_session_id_from_stub() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
+    let daemon_session_id = fixture.stub_daemon_session_id().await;
+    assert!(
+        daemon_session_id.starts_with("sess_"),
+        "stub daemon session id should look like a real daemon session id: {daemon_session_id}"
+    );
+
+    let started = fixture
+        .call_tool(
+            "exec_command",
+            serde_json::json!({
+                "target": "builder-a",
+                "cmd": "printf ready; sleep 2",
+                "tty": true,
+                "yield_time_ms": 10
+            }),
+        )
+        .await;
+    let session_id = started.structured_content["session_id"]
+        .as_str()
+        .expect("running session");
+
+    fixture
+        .call_tool(
+            "write_stdin",
+            serde_json::json!({
+                "session_id": session_id,
+                "target": "builder-a",
+                "chars": ""
+            }),
+        )
+        .await;
+
+    let forwarded = fixture
+        .last_exec_write_request()
+        .await
+        .expect("write request");
+    assert_eq!(forwarded.daemon_session_id, daemon_session_id);
+}
+
+#[tokio::test]
+async fn write_stdin_wraps_stub_stale_daemon_session_as_unknown_process_id() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
+    let started = fixture
+        .call_tool(
+            "exec_command",
+            serde_json::json!({
+                "target": "builder-a",
+                "cmd": "printf ready; sleep 2",
+                "tty": true,
+                "yield_time_ms": 10
+            }),
+        )
+        .await;
+    let public_session_id = started.structured_content["session_id"]
+        .as_str()
+        .expect("running session")
+        .to_string();
+
+    fixture
+        .set_stub_daemon_session_id("sess_replaced_by_test")
+        .await;
+
+    let error = fixture
+        .call_tool_error(
+            "write_stdin",
+            serde_json::json!({
+                "session_id": public_session_id,
+                "target": "builder-a",
+                "chars": ""
+            }),
+        )
+        .await;
+
+    assert_eq!(
+        error,
+        format!("write_stdin failed: Unknown process id {public_session_id}")
+    );
+}
+
+#[tokio::test]
 async fn write_stdin_wraps_unknown_public_session_as_unknown_process_id() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
 

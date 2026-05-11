@@ -128,6 +128,7 @@ impl Default for StubPortTunnelControl {
 pub(crate) struct StubDaemonState {
     pub(super) target: String,
     pub(super) daemon_instance_id: Arc<Mutex<String>>,
+    pub(super) daemon_session_id: Arc<Mutex<String>>,
     target_hostname: String,
     target_platform: String,
     target_arch: String,
@@ -160,7 +161,12 @@ pub(super) fn stub_daemon_state(
 ) -> StubDaemonState {
     StubDaemonState {
         target: target.to_string(),
-        daemon_instance_id: Arc::new(Mutex::new("daemon-instance-1".to_string())),
+        daemon_instance_id: Arc::new(Mutex::new(
+            remote_exec_host::ids::new_instance_id().into_string(),
+        )),
+        daemon_session_id: Arc::new(Mutex::new(
+            remote_exec_host::ids::new_exec_session_id().into_string(),
+        )),
         target_hostname: format!("{target}-host"),
         target_platform: platform.to_string(),
         target_arch: "x86_64".to_string(),
@@ -584,11 +590,11 @@ async fn require_bearer_auth(
         .into_response()
 }
 
-async fn health() -> Json<HealthCheckResponse> {
+async fn health(State(state): State<StubDaemonState>) -> Json<HealthCheckResponse> {
     Json(HealthCheckResponse {
         status: "ok".to_string(),
         daemon_version: "0.1.0".to_string(),
-        daemon_instance_id: "daemon-instance-1".to_string(),
+        daemon_instance_id: state.daemon_instance_id.lock().await.clone(),
     })
 }
 
