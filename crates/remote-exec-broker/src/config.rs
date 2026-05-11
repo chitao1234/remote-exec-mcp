@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::Context;
 use remote_exec_host::{
@@ -80,6 +81,8 @@ pub struct TargetConfig {
     #[serde(default)]
     pub http_auth: Option<HttpAuthConfig>,
     #[serde(default)]
+    pub timeouts: TargetTimeoutConfig,
+    #[serde(default)]
     pub ca_pem: Option<PathBuf>,
     #[serde(default)]
     pub client_cert_pem: Option<PathBuf>,
@@ -98,6 +101,60 @@ pub struct TargetConfig {
 pub(crate) enum TargetTransportKind {
     Http,
     Https,
+}
+
+const DEFAULT_TARGET_CONNECT_TIMEOUT_MS: u64 = 5_000;
+const DEFAULT_TARGET_READ_TIMEOUT_MS: u64 = 310_000;
+const DEFAULT_TARGET_REQUEST_TIMEOUT_MS: u64 = 310_000;
+const DEFAULT_TARGET_STARTUP_PROBE_TIMEOUT_MS: u64 = 5_000;
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+pub struct TargetTimeoutConfig {
+    #[serde(default = "default_target_connect_timeout_ms")]
+    pub connect_ms: u64,
+    #[serde(default = "default_target_read_timeout_ms")]
+    pub read_ms: u64,
+    #[serde(default = "default_target_request_timeout_ms")]
+    pub request_ms: u64,
+    #[serde(default = "default_target_startup_probe_timeout_ms")]
+    pub startup_probe_ms: u64,
+}
+
+impl Default for TargetTimeoutConfig {
+    fn default() -> Self {
+        Self {
+            connect_ms: DEFAULT_TARGET_CONNECT_TIMEOUT_MS,
+            read_ms: DEFAULT_TARGET_READ_TIMEOUT_MS,
+            request_ms: DEFAULT_TARGET_REQUEST_TIMEOUT_MS,
+            startup_probe_ms: DEFAULT_TARGET_STARTUP_PROBE_TIMEOUT_MS,
+        }
+    }
+}
+
+impl TargetTimeoutConfig {
+    pub(crate) fn validate(&self, target_name: &str) -> anyhow::Result<()> {
+        validate_timeout_ms(target_name, "connect_ms", self.connect_ms)?;
+        validate_timeout_ms(target_name, "read_ms", self.read_ms)?;
+        validate_timeout_ms(target_name, "request_ms", self.request_ms)?;
+        validate_timeout_ms(target_name, "startup_probe_ms", self.startup_probe_ms)?;
+        Ok(())
+    }
+
+    pub(crate) fn connect_timeout(self) -> Duration {
+        Duration::from_millis(self.connect_ms)
+    }
+
+    pub(crate) fn read_timeout(self) -> Duration {
+        Duration::from_millis(self.read_ms)
+    }
+
+    pub(crate) fn request_timeout(self) -> Duration {
+        Duration::from_millis(self.request_ms)
+    }
+
+    pub(crate) fn startup_probe_timeout(self) -> Duration {
+        Duration::from_millis(self.startup_probe_ms)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -123,6 +180,8 @@ pub struct LocalTargetConfig {
 
 impl TargetConfig {
     pub(crate) fn validated_transport(&self, name: &str) -> anyhow::Result<TargetTransportKind> {
+        self.timeouts.validate(name)?;
+
         if let Some(http_auth) = &self.http_auth {
             http_auth.validate(&format!("target `{name}`"))?;
         }
@@ -265,6 +324,30 @@ fn default_enable_transfer_compression() -> bool {
     true
 }
 
+fn default_target_connect_timeout_ms() -> u64 {
+    DEFAULT_TARGET_CONNECT_TIMEOUT_MS
+}
+
+fn default_target_read_timeout_ms() -> u64 {
+    DEFAULT_TARGET_READ_TIMEOUT_MS
+}
+
+fn default_target_request_timeout_ms() -> u64 {
+    DEFAULT_TARGET_REQUEST_TIMEOUT_MS
+}
+
+fn default_target_startup_probe_timeout_ms() -> u64 {
+    DEFAULT_TARGET_STARTUP_PROBE_TIMEOUT_MS
+}
+
+fn validate_timeout_ms(target_name: &str, field: &str, value: u64) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        value > 0,
+        "target `{target_name}` timeouts.{field} must be greater than zero"
+    );
+    Ok(())
+}
+
 fn default_streamable_http_path() -> String {
     "/mcp".to_string()
 }
@@ -357,6 +440,63 @@ allow_insecure_http = true
 
         let config = BrokerConfig::load(&config_path).await.unwrap();
         assert!(config.targets.contains_key("builder-a"));
+    }
+
+    #[tokio::test]
+    async fn load_accepts_remote_target_timeout_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("broker.toml");
+        tokio::fs::write(
+            &config_path,
+            r#"[targets.builder-a]
+base_url = "http://127.0.0.1:8181"
+allow_insecure_http = true
+
+[targets.builder-a.timeouts]
+connect_ms = 1234
+read_ms = 2345
+request_ms = 3456
+startup_probe_ms = 4567
+"#,
+        )
+        .await
+        .unwrap();
+
+        let config = BrokerConfig::load(&config_path).await.unwrap();
+        let timeouts = config.targets["builder-a"].timeouts;
+        assert_eq!(timeouts.connect_ms, 1234);
+        assert_eq!(timeouts.read_ms, 2345);
+        assert_eq!(timeouts.request_ms, 3456);
+        assert_eq!(timeouts.startup_probe_ms, 4567);
+        assert_eq!(
+            timeouts.request_timeout(),
+            std::time::Duration::from_millis(3456)
+        );
+    }
+
+    #[tokio::test]
+    async fn load_rejects_zero_remote_target_timeout() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("broker.toml");
+        tokio::fs::write(
+            &config_path,
+            r#"[targets.builder-a]
+base_url = "http://127.0.0.1:8181"
+allow_insecure_http = true
+
+[targets.builder-a.timeouts]
+request_ms = 0
+"#,
+        )
+        .await
+        .unwrap();
+
+        let err = BrokerConfig::load(&config_path).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("target `builder-a` timeouts.request_ms must be greater than zero"),
+            "unexpected error: {err}"
+        );
     }
 
     #[cfg(not(feature = "broker-tls"))]

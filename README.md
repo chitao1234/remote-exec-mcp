@@ -97,6 +97,8 @@ Broker config covers one entry per target:
 - optional `skip_server_name_verification = true` for `https://` targets that should validate chain and expiry but ignore SAN/hostname matching
 - optional exact leaf certificate pin via `pinned_server_cert_pem` for `https://` targets
 - optional HTTP bearer auth shared secret for daemon requests
+- optional per-target daemon timeout policy under `[targets.<name>.timeouts]`
+- separate startup probe timeout so slow or wedged daemons do not serialize broker startup
 - expected daemon target name
 - `allow_insecure_http = true` when a target intentionally uses `http://`
 - optional `[local]` broker-host config with default working directory, login-shell policy, PTY mode, default shell, embedded-local yield-time policy overrides, and embedded-local `apply_patch` encoding autodetect flag
@@ -375,8 +377,8 @@ cargo fmt --all --check
 
 ## Reliability Notes
 
-- The broker now starts even if some configured targets are temporarily unreachable.
-- Targets that are unavailable at broker startup are verified before the first forwarded call.
+- The broker starts even if some configured targets are temporarily unreachable.
+- Remote target startup probes run concurrently and are bounded by each target's `timeouts.startup_probe_ms`; targets that are unavailable at broker startup are verified before the first forwarded call.
 - `transfer_files` uses broker-mediated copy for `local -> remote`, `remote -> local`, `remote -> remote`, and `local -> local`.
 - `forward_ports` uses broker-mediated TCP/UDP forwarding between a `listen_side` and `connect_side`; either side may be a configured target or `"local"`.
 - Public `session_id` and `forward_id` values are broker-owned in-memory runtime state. A broker restart drops those mappings, so live exec sessions and port forwards must be reopened after restart.

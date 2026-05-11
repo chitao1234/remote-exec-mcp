@@ -33,6 +33,13 @@ expected_daemon_name = "builder-a"
 # acceptable daemon leaf certificates to ease rotation.
 # pinned_server_cert_pem = "/etc/remote-exec/pins/builder-a.pem"
 
+# Optional remote-daemon timeout policy. Defaults are shown.
+#[targets.builder-a.timeouts]
+#connect_ms = 5000
+#read_ms = 310000
+#request_ms = 310000
+#startup_probe_ms = 5000
+
 [targets.builder-b]
 # Requires the broker to be built with its default `broker-tls` Cargo feature.
 base_url = "https://builder-b.example.com:9443"
