@@ -396,30 +396,6 @@ fn exec_start_response(response: ExecResponse) -> anyhow::Result<ExecStartRespon
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::command_tool_result_for_logging;
-
-    #[test]
-    fn command_tool_result_for_logging_reads_typed_fields() {
-        let value = serde_json::json!({
-            "target": "local",
-            "chunk_id": null,
-            "wall_time_seconds": 0.25,
-            "exit_code": null,
-            "session_id": "session-1",
-            "session_command": "sleep 10",
-            "original_token_count": null,
-            "output": "",
-            "warnings": []
-        });
-
-        let result = command_tool_result_for_logging(&value).unwrap();
-        assert_eq!(result.session_id.as_deref(), Some("session-1"));
-        assert_eq!(result.exit_code, None);
-    }
-}
-
 fn validate_exec_start_response(response: &ExecResponse) -> anyhow::Result<()> {
     match response {
         ExecResponse::Running(ExecRunningResponse { output, .. }) => {
@@ -475,5 +451,29 @@ fn apply_patch_warning() -> ExecWarning {
     ExecWarning {
         code: APPLY_PATCH_WARNING_CODE.to_string(),
         message: APPLY_PATCH_WARNING_MESSAGE.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::command_tool_result_for_logging;
+
+    #[test]
+    fn command_tool_result_for_logging_reads_typed_fields() {
+        let value = serde_json::json!({
+            "target": "local",
+            "chunk_id": null,
+            "wall_time_seconds": 0.25,
+            "exit_code": null,
+            "session_id": "session-1",
+            "session_command": "sleep 10",
+            "original_token_count": null,
+            "output": "",
+            "warnings": []
+        });
+
+        let result = command_tool_result_for_logging(&value).unwrap();
+        assert_eq!(result.session_id.as_deref(), Some("session-1"));
+        assert_eq!(result.exit_code, None);
     }
 }
