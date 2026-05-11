@@ -197,16 +197,16 @@ pub async fn serve(
             listen,
             path,
             stateful,
-            sse_keep_alive_ms,
-            sse_retry_ms,
+            sse_keep_alive,
+            sse_retry,
         } => {
             serve_streamable_http(
                 state,
                 *listen,
                 path,
                 *stateful,
-                duration_from_millis(*sse_keep_alive_ms),
-                duration_from_millis(*sse_retry_ms),
+                sse_keep_alive.as_duration(),
+                sse_retry.as_duration(),
             )
             .await
         }
@@ -265,14 +265,6 @@ async fn serve_streamable_http(
 
     tracing::info!("broker MCP streamable HTTP service stopped");
     Ok(())
-}
-
-fn duration_from_millis(value: Option<u64>) -> Option<std::time::Duration> {
-    match value {
-        Some(0) => None,
-        Some(value) => Some(std::time::Duration::from_millis(value)),
-        None => None,
-    }
 }
 
 async fn wait_for_shutdown_signal() {

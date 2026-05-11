@@ -43,11 +43,34 @@ pub enum McpServerConfig {
         path: String,
         #[serde(default = "default_streamable_http_stateful")]
         stateful: bool,
-        #[serde(default = "default_streamable_http_sse_keep_alive_ms")]
-        sse_keep_alive_ms: Option<u64>,
-        #[serde(default = "default_streamable_http_sse_retry_ms")]
-        sse_retry_ms: Option<u64>,
+        #[serde(
+            default = "default_streamable_http_sse_keep_alive",
+            rename = "sse_keep_alive_ms",
+            deserialize_with = "deserialize_sse_interval"
+        )]
+        sse_keep_alive: SseInterval,
+        #[serde(
+            default = "default_streamable_http_sse_retry",
+            rename = "sse_retry_ms",
+            deserialize_with = "deserialize_sse_interval"
+        )]
+        sse_retry: SseInterval,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SseInterval {
+    Disabled,
+    Duration(std::time::Duration),
+}
+
+impl SseInterval {
+    pub(crate) fn as_duration(self) -> Option<std::time::Duration> {
+        match self {
+            Self::Disabled => None,
+            Self::Duration(duration) => Some(duration),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -268,12 +291,24 @@ fn default_streamable_http_stateful() -> bool {
     true
 }
 
-fn default_streamable_http_sse_keep_alive_ms() -> Option<u64> {
-    Some(15_000)
+fn deserialize_sse_interval<'de, D>(deserializer: D) -> Result<SseInterval, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let millis = u64::deserialize(deserializer)?;
+    Ok(if millis == 0 {
+        SseInterval::Disabled
+    } else {
+        SseInterval::Duration(std::time::Duration::from_millis(millis))
+    })
 }
 
-fn default_streamable_http_sse_retry_ms() -> Option<u64> {
-    Some(3_000)
+fn default_streamable_http_sse_keep_alive() -> SseInterval {
+    SseInterval::Duration(std::time::Duration::from_millis(15_000))
+}
+
+fn default_streamable_http_sse_retry() -> SseInterval {
+    SseInterval::Duration(std::time::Duration::from_millis(3_000))
 }
 
 fn validate_existing_directory(path: &Path, field_name: &str) -> anyhow::Result<()> {
@@ -292,7 +327,7 @@ mod tests {
     #[cfg(windows)]
     use std::path::PathBuf;
 
-    use super::{BrokerConfig, McpServerConfig};
+    use super::{BrokerConfig, McpServerConfig, SseInterval};
 
     fn valid_target_config(name: &str) -> String {
         if cfg!(feature = "broker-tls") {
@@ -686,14 +721,17 @@ sse_retry_ms = 1000
                 listen,
                 path,
                 stateful,
-                sse_keep_alive_ms,
-                sse_retry_ms,
+                sse_keep_alive,
+                sse_retry,
             } => {
                 assert_eq!(listen, "127.0.0.1:8787".parse().unwrap());
                 assert_eq!(path, "/rpc");
                 assert!(!stateful);
-                assert_eq!(sse_keep_alive_ms, Some(0));
-                assert_eq!(sse_retry_ms, Some(1000));
+                assert_eq!(sse_keep_alive, SseInterval::Disabled);
+                assert_eq!(
+                    sse_retry,
+                    SseInterval::Duration(std::time::Duration::from_millis(1000))
+                );
             }
             other => panic!("unexpected MCP config: {other:?}"),
         }
