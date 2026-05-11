@@ -1080,6 +1080,32 @@ mod port_tunnel_tests {
     }
 
     #[tokio::test]
+    async fn reattached_session_is_not_removed_by_stale_expiry() {
+        let state = test_state();
+        let listen_endpoint = free_loopback_endpoint();
+        let (_bound_endpoint, session_id) =
+            open_resumable_tcp_listener(&state, &listen_endpoint).await;
+        let session = state
+            .port_forward_sessions
+            .get(&session_id)
+            .await
+            .expect("detached session should be retained");
+        wait_until_session_has_expiry_task(&session).await;
+
+        let _resumed = resume_session(&state, &session_id, TunnelForwardProtocol::Tcp).await;
+        assert!(
+            !session.has_expiry_task().await,
+            "reattach should cancel stale expiry task"
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+
+        assert!(
+            state.port_forward_sessions.get(&session_id).await.is_some(),
+            "stale expiry task must not remove a reattached session"
+        );
+    }
+
+    #[tokio::test]
     async fn retained_udp_queued_byte_pressure_reports_drop() {
         let state = test_state_with_limits(crate::HostPortForwardLimits {
             max_tunnel_queued_bytes: 128,
@@ -1386,6 +1412,20 @@ mod port_tunnel_tests {
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
         panic!("session `{session_id}` retained listener did not close");
+    }
+
+    async fn wait_until_session_has_expiry_task(session: &super::session::SessionState) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+        loop {
+            if session.has_expiry_task().await {
+                return;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "detached session should schedule an expiry task"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
 
     async fn spawn_tcp_echo_server() -> String {

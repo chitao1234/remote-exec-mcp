@@ -24,6 +24,7 @@ pub(super) struct SessionState {
     pub(super) attachment: Mutex<Option<Arc<AttachmentState>>>,
     pub(super) attachment_notify: tokio::sync::Notify,
     pub(super) resume_deadline: Mutex<Option<Instant>>,
+    pub(super) expiry_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     pub(super) retained_listener: Mutex<Option<RetainedListener>>,
     pub(super) retained_udp_bind: Mutex<Option<RetainedUdpBind>>,
     pub(super) next_daemon_stream_id: AtomicU32,
@@ -146,6 +147,11 @@ impl SessionState {
     pub(super) async fn has_retained_listener(&self) -> bool {
         self.retained_listener.lock().await.is_some()
     }
+
+    #[cfg(test)]
+    pub(super) async fn has_expiry_task(&self) -> bool {
+        self.expiry_task.lock().await.is_some()
+    }
 }
 
 pub(super) async fn attach_session_to_tunnel(
@@ -165,6 +171,9 @@ pub(super) async fn attach_session_to_tunnel(
             tcp_streams: Mutex::new(HashMap::new()),
             udp_readers: Mutex::new(HashMap::new()),
         }));
+    }
+    if let Some(task) = session.expiry_task.lock().await.take() {
+        task.abort();
     }
     *session.resume_deadline.lock().await = None;
     *tunnel.attached_session.lock().await = Some(session.clone());
@@ -191,7 +200,7 @@ pub(super) async fn close_attached_session(tunnel: &Arc<TunnelState>, mode: Sess
     match mode {
         SessionCloseMode::RetryableDetach => {
             *session.resume_deadline.lock().await = Some(Instant::now() + timings().resume_timeout);
-            schedule_session_expiry(tunnel.state.port_forward_sessions.clone(), session);
+            schedule_session_expiry(tunnel.state.port_forward_sessions.clone(), session).await;
         }
         SessionCloseMode::GracefulClose | SessionCloseMode::TerminalFailure => {
             *session.resume_deadline.lock().await = None;
@@ -247,15 +256,21 @@ pub(super) async fn udp_bind_stream_id(session: &Arc<SessionState>) -> Option<u3
         .map(|RetainedUdpBind::Udp { stream_id, .. }| *stream_id)
 }
 
-pub(super) fn schedule_session_expiry(store: TunnelSessionStore, session: Arc<SessionState>) {
-    tokio::spawn(async move {
+pub(super) async fn schedule_session_expiry(store: TunnelSessionStore, session: Arc<SessionState>) {
+    let task_session = session.clone();
+    let handle = tokio::spawn(async move {
         tokio::time::sleep(timings().resume_timeout).await;
-        if session.is_expired().await && session.current_attachment().await.is_none() {
-            store.remove(&session.id).await;
-            session.close_retained_resources().await;
-            session.root_cancel.cancel();
+        if task_session.is_expired().await && task_session.current_attachment().await.is_none() {
+            store.remove(&task_session.id).await;
+            task_session.close_retained_resources().await;
+            task_session.root_cancel.cancel();
         }
     });
+    let mut expiry_task = session.expiry_task.lock().await;
+    if let Some(existing) = expiry_task.take() {
+        existing.abort();
+    }
+    *expiry_task = Some(handle);
 }
 
 pub(super) async fn reactivate_retained_udp_bind(
