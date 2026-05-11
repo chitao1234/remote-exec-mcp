@@ -19,8 +19,6 @@
 
 namespace {
 
-const unsigned long HTTP_CONNECTION_IDLE_TIMEOUT_MS = 30000UL;
-
 class HttpBodyTransferArchiveReader : public TransferArchiveReader {
 public:
     explicit HttpBodyTransferArchiveReader(HttpRequestBodyStream* body) : body_(body) {}
@@ -341,7 +339,10 @@ int handle_client_request(
 void handle_client(AppState& state, UniqueSocket client) {
     for (;;) {
         try {
-            set_socket_timeout_ms(client.get(), HTTP_CONNECTION_IDLE_TIMEOUT_MS);
+            set_socket_timeout_ms(
+                client.get(),
+                state.config.http_connection_idle_timeout_ms
+            );
             HttpRequestHead request_head;
             if (!try_read_http_request_head(
                     client.get(),

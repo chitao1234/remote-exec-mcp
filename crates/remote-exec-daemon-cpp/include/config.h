@@ -39,6 +39,7 @@ struct DaemonConfig {
     std::string http_auth_bearer_token;
     std::size_t max_request_header_bytes;
     std::size_t max_request_body_bytes;
+    unsigned long http_connection_idle_timeout_ms;
     TransferLimitConfig transfer_limits = default_transfer_limit_config();
     unsigned long max_open_sessions;
     PortForwardLimitConfig port_forward_limits;
@@ -55,6 +56,7 @@ static const unsigned long DEFAULT_PORT_FORWARD_MAX_ACTIVE_TCP_STREAMS = 1024UL;
 static const unsigned long DEFAULT_PORT_FORWARD_MAX_TUNNEL_QUEUED_BYTES = 8UL * 1024UL * 1024UL;
 static const unsigned long DEFAULT_PORT_FORWARD_TUNNEL_IO_TIMEOUT_MS = 30000UL;
 static const unsigned long DEFAULT_PORT_FORWARD_CONNECT_TIMEOUT_MS = 10000UL;
+static const unsigned long DEFAULT_HTTP_CONNECTION_IDLE_TIMEOUT_MS = 30000UL;
 
 YieldTimeConfig default_yield_time_config();
 PortForwardLimitConfig default_port_forward_limit_config();

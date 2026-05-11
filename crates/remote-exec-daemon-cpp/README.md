@@ -103,6 +103,9 @@ Logs go to `stderr`. Set `REMOTE_EXEC_LOG=debug` to raise the level, or use a
 shared filter string such as
 `REMOTE_EXEC_LOG=warn,remote_exec_daemon_cpp=debug`.
 
+Idle keep-alive HTTP connections wait up to `http_connection_idle_timeout_ms`
+for the next request header before the daemon closes the socket.
+
 Non-TTY exec output merges `stdout` and `stderr` through one pipe, so the
 returned `output` field preserves their emitted order.
 
@@ -187,6 +190,7 @@ default_workdir = /work
 # Request/session safety limits.
 # max_request_header_bytes = 65536
 # max_request_body_bytes = 536870912
+# http_connection_idle_timeout_ms = 30000
 # transfer_max_archive_bytes = 536870912
 # transfer_max_entry_bytes = 536870912
 # max_open_sessions = 64

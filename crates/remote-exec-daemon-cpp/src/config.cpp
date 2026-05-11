@@ -441,6 +441,9 @@ static void validate_daemon_config(const DaemonConfig& config) {
     if (config.max_request_body_bytes == 0) {
         throw std::runtime_error("max_request_body_bytes must be greater than zero");
     }
+    if (config.http_connection_idle_timeout_ms == 0) {
+        throw std::runtime_error("http_connection_idle_timeout_ms must be greater than zero");
+    }
     if (config.max_open_sessions == 0) {
         throw std::runtime_error("max_open_sessions must be greater than zero");
     }
@@ -482,6 +485,11 @@ DaemonConfig load_config(const std::string& path) {
         values,
         "max_request_body_bytes",
         512UL * 1024UL * 1024UL
+    );
+    config.http_connection_idle_timeout_ms = read_optional_unsigned_long(
+        values,
+        "http_connection_idle_timeout_ms",
+        DEFAULT_HTTP_CONNECTION_IDLE_TIMEOUT_MS
     );
     config.transfer_limits = read_transfer_limits(values);
     config.max_open_sessions = read_optional_unsigned_long(values, "max_open_sessions", 64UL);

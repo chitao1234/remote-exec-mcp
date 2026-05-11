@@ -47,6 +47,7 @@ int main() {
         "http_auth_bearer_token = shared-secret\n"
         "max_request_header_bytes = 32768\n"
         "max_request_body_bytes = 1048576\n"
+        "http_connection_idle_timeout_ms = 9000\n"
         "transfer_max_archive_bytes = 4096\n"
         "transfer_max_entry_bytes = 1024\n"
         "max_open_sessions = 12\n"
@@ -75,6 +76,7 @@ int main() {
     assert(config.http_auth_bearer_token == "shared-secret");
     assert(config.max_request_header_bytes == 32768UL);
     assert(config.max_request_body_bytes == 1048576UL);
+    assert(config.http_connection_idle_timeout_ms == 9000UL);
     assert(config.transfer_limits.max_archive_bytes == 4096ULL);
     assert(config.transfer_limits.max_entry_bytes == 1024ULL);
     assert(config.max_open_sessions == 12UL);
@@ -120,6 +122,7 @@ int main() {
     assert(sandbox_config.port_forward_limits.max_tunnel_queued_bytes == DEFAULT_PORT_FORWARD_MAX_TUNNEL_QUEUED_BYTES);
     assert(sandbox_config.port_forward_limits.tunnel_io_timeout_ms == DEFAULT_PORT_FORWARD_TUNNEL_IO_TIMEOUT_MS);
     assert(sandbox_config.port_forward_limits.connect_timeout_ms == DEFAULT_PORT_FORWARD_CONNECT_TIMEOUT_MS);
+    assert(sandbox_config.http_connection_idle_timeout_ms == DEFAULT_HTTP_CONNECTION_IDLE_TIMEOUT_MS);
     assert(sandbox_config.transfer_limits.max_archive_bytes == DEFAULT_TRANSFER_MAX_ARCHIVE_BYTES);
     assert(sandbox_config.transfer_limits.max_entry_bytes == DEFAULT_TRANSFER_MAX_ENTRY_BYTES);
     assert(sandbox_config.sandbox_configured);
@@ -175,6 +178,7 @@ int main() {
     assert(config_rejected(invalid_transfer_bounds_path));
 
     const char* invalid_limit_keys[] = {
+        "http_connection_idle_timeout_ms",
         "port_forward_max_retained_sessions",
         "port_forward_max_retained_listeners",
         "port_forward_max_udp_binds",
