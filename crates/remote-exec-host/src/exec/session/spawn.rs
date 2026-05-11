@@ -1,4 +1,6 @@
 use std::io::Read;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 
 use portable_pty::{CommandBuilder, NativePtySystem, PtySystem};
@@ -95,6 +97,17 @@ fn spawn_pipe(
         .stdout(Stdio::from(writer))
         .stderr(Stdio::from(stderr));
     super::environment::apply_overlay_std_command(&mut command, environment);
+    #[cfg(unix)]
+    unsafe {
+        command.pre_exec(|| {
+            let result = nix::libc::setpgid(0, 0);
+            if result == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        });
+    }
     let child = command.spawn()?;
     let (sender, receiver) = unbounded_channel();
     let session = new_live_session(false, SessionChild::Pipe(Box::new(child)), receiver);

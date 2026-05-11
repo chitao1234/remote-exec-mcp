@@ -37,7 +37,7 @@ hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["server", "http1", "tokio"] }
 image = { version = "0.25", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
 gethostname = "1"
-nix = { version = "0.31", default-features = false, features = ["user"] }
+nix = { version = "0.31", default-features = false, features = ["user", "signal", "process"] }
 os_pipe = "1.2"
 portable-pty = { path = "portable-pty" }
 rand = "0.10"

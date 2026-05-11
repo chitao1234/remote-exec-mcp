@@ -1,4 +1,6 @@
 use std::io::Write;
+#[cfg(unix)]
+use std::time::{Duration, Instant};
 
 pub(super) enum ChildStatus {
     Running,
@@ -16,6 +18,30 @@ pub struct PtySession {
     pub child: Box<dyn portable_pty::Child + Send>,
     pub master: Box<dyn portable_pty::MasterPty + Send>,
     pub writer: Box<dyn Write + Send>,
+}
+
+#[cfg(unix)]
+fn terminate_unix_process_group(child: &mut std::process::Child) -> anyhow::Result<()> {
+    use nix::sys::signal::{Signal, killpg};
+    use nix::unistd::Pid;
+
+    if child.try_wait()?.is_some() {
+        return Ok(());
+    }
+
+    let pgid = Pid::from_raw(child.id() as i32);
+    let _ = killpg(pgid, Signal::SIGTERM);
+    let deadline = Instant::now() + Duration::from_millis(250);
+    while Instant::now() < deadline {
+        if child.try_wait()?.is_some() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let _ = killpg(pgid, Signal::SIGKILL);
+    let _ = child.wait()?;
+    Ok(())
 }
 
 impl SessionChild {
@@ -48,8 +74,15 @@ impl SessionChild {
                 let _ = pty.terminate();
             }
             SessionChild::Pipe(child) => {
-                let _ = child.kill();
-                let _ = child.try_wait()?;
+                #[cfg(unix)]
+                {
+                    terminate_unix_process_group(child)?;
+                }
+                #[cfg(not(unix))]
+                {
+                    let _ = child.kill();
+                    let _ = child.try_wait()?;
+                }
             }
         }
 
