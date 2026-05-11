@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include "platform.h"
+#include "posix_child_reaper.h"
 #include "process_session.h"
 
 extern char** environ;
@@ -420,7 +421,9 @@ public:
           input_write_(std::move(input_write)),
           output_read_(std::move(output_read)),
           reaped_(false),
-          exit_code_(0) {}
+          exit_code_(0) {
+        register_posix_child(pid_);
+    }
 
     ~PosixProcessSession() override {
         terminate();
@@ -525,12 +528,20 @@ public:
         }
 
         int status = 0;
+        if (take_reaped_posix_child(pid_, &status)) {
+            reaped_ = true;
+            record_exit_status(status, &exit_code_);
+            *exit_code = exit_code_;
+            return true;
+        }
+
         const pid_t result = waitpid_retry_on_eintr(pid_, &status, WNOHANG);
         if (result == 0) {
             return false;
         }
         if (result < 0) {
             if (errno == ECHILD) {
+                unregister_posix_child(pid_);
                 reaped_ = true;
                 exit_code_ = 1;
                 *exit_code = exit_code_;
@@ -540,6 +551,7 @@ public:
         }
 
         reaped_ = true;
+        unregister_posix_child(pid_);
         record_exit_status(status, &exit_code_);
         *exit_code = exit_code_;
         return true;
@@ -551,8 +563,13 @@ public:
         }
         kill_process_group(pid_);
         int ignored_status = 0;
+        if (take_reaped_posix_child(pid_, &ignored_status)) {
+            reaped_ = true;
+            return;
+        }
         const pid_t result = waitpid_retry_on_eintr(pid_, &ignored_status, 0);
         if (result == pid_ || (result < 0 && errno == ECHILD)) {
+            unregister_posix_child(pid_);
             reaped_ = true;
         }
     }

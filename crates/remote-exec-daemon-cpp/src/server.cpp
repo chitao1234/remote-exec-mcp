@@ -3,12 +3,18 @@
 
 #include "logging.h"
 #include "platform.h"
+#ifndef _WIN32
+#include "posix_child_reaper.h"
+#endif
 #include "server.h"
 #include "server_runtime.h"
 
 int run_server(const DaemonConfig& config) {
     NetworkSession network;
     ServerRuntime runtime(config);
+#ifndef _WIN32
+    install_posix_child_reaper();
+#endif
     runtime.start_accept_loop();
 
     {

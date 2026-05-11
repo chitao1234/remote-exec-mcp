@@ -11,6 +11,9 @@
 
 #include "config.h"
 #include "platform.h"
+#ifndef _WIN32
+#include "posix_child_reaper.h"
+#endif
 #include "process_session.h"
 #include "session_store.h"
 #include "test_filesystem.h"
@@ -376,6 +379,73 @@ static void assert_posix_exec_uses_parent_built_environment_and_path(
     }
 #endif
 }
+
+#ifndef _WIN32
+#ifdef __linux__
+static unsigned long zombie_children_of_current_process() {
+    unsigned long zombies = 0UL;
+    const fs::path proc("/proc");
+    for (fs::directory_iterator it(proc), end; it != end; ++it) {
+        const std::string name = it->path().filename().string();
+        if (name.empty() || name.find_first_not_of("0123456789") != std::string::npos) {
+            continue;
+        }
+        std::ifstream status((it->path() / "status").string().c_str());
+        std::string line;
+        bool zombie = false;
+        long ppid = -1;
+        while (std::getline(status, line)) {
+            if (line.find("State:") == 0 && line.find("Z") != std::string::npos) {
+                zombie = true;
+            } else if (line.find("PPid:") == 0) {
+                ppid = std::strtol(line.substr(5).c_str(), NULL, 10);
+            }
+        }
+        if (zombie && ppid == static_cast<long>(getpid())) {
+            ++zombies;
+        }
+    }
+    return zombies;
+}
+#endif
+
+static void assert_posix_sigchld_reaper_reaps_exited_session_children(
+    const fs::path& root,
+    const std::string& shell
+) {
+#ifdef __linux__
+    const unsigned long baseline_zombies = zombie_children_of_current_process();
+    SessionStore zombie_store;
+    const YieldTimeConfig fast_yield = fast_yield_time_config();
+    for (int index = 0; index < 5; ++index) {
+        const Json running = start_test_command(
+            zombie_store,
+            "printf ready; (sleep 5 >&1) & sleep 0.2; exit 0",
+            root.string(),
+            shell,
+            false,
+            1UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            fast_yield,
+            64UL
+        );
+        assert(running.at("running").get<bool>());
+    }
+
+    platform::sleep_ms(400UL);
+    for (int attempt = 0; attempt < 40; ++attempt) {
+        if (zombie_children_of_current_process() <= baseline_zombies) {
+            return;
+        }
+        platform::sleep_ms(25UL);
+    }
+    assert(zombie_children_of_current_process() <= baseline_zombies);
+#else
+    (void)root;
+    (void)shell;
+#endif
+}
+#endif
 
 static void assert_stdin_and_tty_behavior(
     SessionStore& store,
@@ -990,6 +1060,9 @@ static void assert_threshold_warnings_and_unknown_sessions(
 }
 
 int main() {
+#ifndef _WIN32
+    install_posix_child_reaper();
+#endif
     const fs::path root = make_test_root();
     SessionStore store;
     const YieldTimeConfig yield_time = default_yield_time_config();
@@ -999,6 +1072,9 @@ int main() {
     assert_token_limiting(store, root, shell, yield_time);
     assert_posix_locale_and_late_output(store, root, shell, yield_time);
     assert_posix_exec_uses_parent_built_environment_and_path(store, root, shell, yield_time);
+#ifndef _WIN32
+    assert_posix_sigchld_reaper_reaps_exited_session_children(root, shell);
+#endif
     assert_stdin_and_tty_behavior(store, root, shell, yield_time);
     assert_pruning_and_recency_behavior(root, shell);
     assert_threshold_warnings_and_unknown_sessions(store, root, shell, yield_time);

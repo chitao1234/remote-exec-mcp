@@ -17,6 +17,8 @@ POLICY_SRCS = \
 
 RPC_FAILURE_SRCS = $(SOURCE_PREFIX)src/rpc_failures.cpp
 
+POSIX_CHILD_REAPER_SRCS = $(SOURCE_PREFIX)src/posix_child_reaper.cpp
+
 ROUTE_SRCS = \
 	$(SOURCE_PREFIX)src/server_routes.cpp \
 	$(SOURCE_PREFIX)src/server_route_common.cpp \
@@ -71,7 +73,8 @@ BASE_SRCS = \
 POSIX_SRCS = \
 	$(BASE_SRCS) \
 	$(SOURCE_PREFIX)src/main.cpp \
-	$(SOURCE_PREFIX)src/process_session_posix.cpp
+	$(SOURCE_PREFIX)src/process_session_posix.cpp \
+	$(POSIX_CHILD_REAPER_SRCS)
 
 HOST_PATCH_SRCS = \
 	$(SOURCE_PREFIX)tests/test_patch.cpp \
@@ -124,6 +127,7 @@ HOST_SERVER_STREAMING_SRCS = \
 	$(SOURCE_PREFIX)src/session_store.cpp \
 	$(SOURCE_PREFIX)src/session_pump.cpp \
 	$(SOURCE_PREFIX)src/process_session_posix.cpp \
+	$(POSIX_CHILD_REAPER_SRCS) \
 	$(SOURCE_PREFIX)src/platform.cpp \
 	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/shell_policy.cpp \
@@ -145,6 +149,7 @@ HOST_SESSION_STORE_SRCS = \
 	$(SOURCE_PREFIX)src/session_store.cpp \
 	$(SOURCE_PREFIX)src/session_pump.cpp \
 	$(SOURCE_PREFIX)src/process_session_posix.cpp \
+	$(POSIX_CHILD_REAPER_SRCS) \
 	$(SOURCE_PREFIX)src/platform.cpp \
 	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/shell_policy.cpp \
@@ -178,6 +183,7 @@ HOST_SERVER_RUNTIME_SRCS = \
 	$(SOURCE_PREFIX)src/session_store.cpp \
 	$(SOURCE_PREFIX)src/session_pump.cpp \
 	$(SOURCE_PREFIX)src/process_session_posix.cpp \
+	$(POSIX_CHILD_REAPER_SRCS) \
 	$(SOURCE_PREFIX)src/platform.cpp \
 	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/shell_policy.cpp \
@@ -202,6 +208,7 @@ HOST_SERVER_ROUTES_SRCS = \
 	$(SOURCE_PREFIX)src/session_store.cpp \
 	$(SOURCE_PREFIX)src/session_pump.cpp \
 	$(SOURCE_PREFIX)src/process_session_posix.cpp \
+	$(POSIX_CHILD_REAPER_SRCS) \
 	$(SOURCE_PREFIX)src/platform.cpp \
 	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/shell_policy.cpp \
