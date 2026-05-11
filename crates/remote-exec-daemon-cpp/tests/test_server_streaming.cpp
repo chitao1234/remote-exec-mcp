@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cassert>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -31,11 +32,29 @@
 
 namespace fs = std::filesystem;
 
+static const unsigned long TCP_PAYLOAD_DRAIN_MARGIN_MS = 100UL;
+
 static fs::path make_test_root() {
     const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-server-streaming-test";
     fs::remove_all(root);
     fs::create_directories(root);
     return root;
+}
+
+static bool wait_until_true(const std::atomic<bool>& value, unsigned long timeout_ms) {
+    const std::uint64_t started = platform::monotonic_ms();
+    while (platform::monotonic_ms() - started < timeout_ms) {
+        if (value.load()) {
+            return true;
+        }
+        platform::sleep_ms(10UL);
+    }
+    return value.load();
+}
+
+static void wait_past_resume_timeout(unsigned long resume_timeout_ms) {
+    const unsigned long RESUME_TIMEOUT_EXPIRY_MARGIN_MS = 200UL;
+    platform::sleep_ms(resume_timeout_ms + RESUME_TIMEOUT_EXPIRY_MARGIN_MS);
 }
 
 static DaemonConfig make_config(const fs::path& root) {
@@ -1310,7 +1329,7 @@ static std::thread accept_and_send_tcp_payload(
             reinterpret_cast<const char*>(payload.data()),
             payload.size()
         );
-        platform::sleep_ms(100UL);
+        platform::sleep_ms(TCP_PAYLOAD_DRAIN_MARGIN_MS);
     });
 }
 
@@ -1566,6 +1585,8 @@ static void assert_tunnel_tcp_connect_echoes_binary_data(AppState& state) {
 static void assert_tcp_data_write_pressure_does_not_block_control_frames(AppState& state) {
     UniqueSocket hold_listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
     const std::string hold_endpoint = socket_local_endpoint(hold_listener.get());
+    std::atomic<bool> receiver_ready(false);
+    std::atomic<bool> release_receiver(false);
     std::thread hold_thread([&]() {
         UniqueSocket accepted(accept(hold_listener.get(), NULL, NULL));
         assert(accepted.valid());
@@ -1577,7 +1598,10 @@ static void assert_tcp_data_write_pressure_does_not_block_control_frames(AppStat
             reinterpret_cast<const char*>(&buffer_size),
             sizeof(buffer_size)
         );
-        platform::sleep_ms(5000UL);
+        receiver_ready.store(true);
+        while (!release_receiver.load()) {
+            platform::sleep_ms(10UL);
+        }
     });
 
     UniqueSocket client_socket;
@@ -1588,6 +1612,7 @@ static void assert_tcp_data_write_pressure_does_not_block_control_frames(AppStat
         json_frame(PortTunnelFrameType::TcpConnect, 1U, Json{{"endpoint", hold_endpoint}})
     );
     assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpConnectOk);
+    assert(wait_until_true(receiver_ready, 1000UL));
 
     std::vector<unsigned char> payload(PORT_TUNNEL_MAX_DATA_LEN, 0x51U);
     PortTunnelFrame heartbeat = empty_frame(PortTunnelFrameType::TunnelHeartbeat, 0U);
@@ -1617,10 +1642,11 @@ static void assert_tcp_data_write_pressure_does_not_block_control_frames(AppStat
     }
     assert(saw_ack);
 
+    writer_thread.join();
+    release_receiver.store(true);
+    hold_thread.join();
     close_tunnel(&client_socket, &server_thread);
     hold_listener.reset();
-    hold_thread.join();
-    writer_thread.join();
 }
 
 static void assert_tunnel_udp_bind_emits_two_peer_datagrams(AppState& state) {
@@ -1727,7 +1753,7 @@ static void assert_expired_tunnel_session_is_released(AppState& state) {
     const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
 
     close_tunnel(&client_socket, &server_thread);
-    platform::sleep_ms(resume_timeout_ms + 200UL);
+    wait_past_resume_timeout(resume_timeout_ms);
 
     open_tunnel(state, &client_socket, &server_thread);
     send_tunnel_frame(

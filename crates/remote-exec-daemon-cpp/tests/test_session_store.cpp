@@ -1,4 +1,6 @@
 #include <cassert>
+#include <atomic>
+#include <cstdint>
 #ifndef _WIN32
 #include <cstdlib>
 #include <sys/stat.h>
@@ -82,6 +84,17 @@ static void write_text_file(const fs::path& path, const std::string& contents) {
     std::ofstream out(path.string().c_str(), std::ios::binary);
     assert(out.good());
     out << contents;
+}
+
+static bool wait_until_true(const std::atomic<bool>& value, unsigned long timeout_ms) {
+    const std::uint64_t started = platform::monotonic_ms();
+    while (platform::monotonic_ms() - started < timeout_ms) {
+        if (value.load()) {
+            return true;
+        }
+        platform::sleep_ms(10UL);
+    }
+    return value.load();
 }
 
 static void assert_unknown_session(
@@ -407,7 +420,49 @@ static unsigned long zombie_children_of_current_process() {
     }
     return zombies;
 }
+
+static bool wait_until_zombie_delta_at_most(
+    unsigned long baseline,
+    unsigned long allowed_delta,
+    unsigned long timeout_ms
+) {
+    const std::uint64_t started = platform::monotonic_ms();
+    while (platform::monotonic_ms() - started < timeout_ms) {
+        if (zombie_children_of_current_process() <= baseline + allowed_delta) {
+            return true;
+        }
+        platform::sleep_ms(25UL);
+    }
+    return zombie_children_of_current_process() <= baseline + allowed_delta;
+}
 #endif
+
+static bool wait_until_session_exits(
+    SessionStore& store,
+    const std::string& session_id,
+    const YieldTimeConfig& yield_time,
+    unsigned long timeout_ms
+) {
+    const std::uint64_t started = platform::monotonic_ms();
+    while (platform::monotonic_ms() - started < timeout_ms) {
+        const Json poll = store.write_stdin(
+            session_id,
+            "",
+            true,
+            1UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            yield_time,
+            false,
+            0U,
+            0U
+        );
+        if (!poll.at("running").get<bool>()) {
+            return true;
+        }
+        platform::sleep_ms(10UL);
+    }
+    return false;
+}
 
 static void assert_posix_sigchld_reaper_reaps_exited_session_children(
     const fs::path& root,
@@ -432,14 +487,7 @@ static void assert_posix_sigchld_reaper_reaps_exited_session_children(
         assert(running.at("running").get<bool>());
     }
 
-    platform::sleep_ms(400UL);
-    for (int attempt = 0; attempt < 40; ++attempt) {
-        if (zombie_children_of_current_process() <= baseline_zombies) {
-            return;
-        }
-        platform::sleep_ms(25UL);
-    }
-    assert(zombie_children_of_current_process() <= baseline_zombies);
+    assert(wait_until_zombie_delta_at_most(baseline_zombies, 0UL, 2000UL));
 #else
     (void)root;
     (void)shell;
@@ -545,7 +593,9 @@ static void assert_stdin_and_tty_behavior(
         assert(fast_running.at("running").get<bool>());
 
         Json slow_poll;
+        std::atomic<bool> slow_thread_started(false);
         std::thread slow_thread([&]() {
+            slow_thread_started.store(true);
             slow_poll = store.write_stdin(
                 slow_running.at("daemon_session_id").get<std::string>(),
                 "",
@@ -559,7 +609,7 @@ static void assert_stdin_and_tty_behavior(
             );
         });
 
-        platform::sleep_ms(200);
+        assert(wait_until_true(slow_thread_started, 1000UL));
         const std::uint64_t fast_started_at = platform::monotonic_ms();
         const Json fast_completed = store.write_stdin(
             fast_running.at("daemon_session_id").get<std::string>(),
@@ -884,7 +934,12 @@ static void assert_pruning_and_recency_behavior(
         );
         assert(exited_running.at("running").get<bool>());
         assert(live_running.at("running").get<bool>());
-        platform::sleep_ms(150UL);
+        assert(wait_until_session_exits(
+            exited_store,
+            exited_running.at("daemon_session_id").get<std::string>(),
+            fast_yield,
+            2000UL
+        ));
 
         const Json replacement_running = start_test_command(
             exited_store,
