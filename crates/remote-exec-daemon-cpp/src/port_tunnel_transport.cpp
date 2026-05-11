@@ -563,6 +563,11 @@ void PortTunnelConnection::run() {
     } catch (const std::exception& ex) {
         close_mode = PortTunnelCloseMode::TerminalFailure;
         send_terminal_error(0U, "invalid_port_tunnel", ex.what());
+    } catch (...) {
+        close_mode = PortTunnelCloseMode::TerminalFailure;
+        send_terminal_error(
+            0U, "invalid_port_tunnel", "unknown port tunnel failure"
+        );
     }
     close_current_session(close_mode);
     close_transport_owned_state();
