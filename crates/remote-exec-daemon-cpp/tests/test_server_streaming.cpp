@@ -1084,7 +1084,40 @@ static void assert_tunnel_rejects_data_plane_before_open(AppState& state) {
     close_tunnel(&client_socket, &server_thread);
 }
 
+static void assert_tunnel_open_metadata_error(
+    AppState& state,
+    const std::string& meta
+) {
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_tunnel(state, &client_socket, &server_thread);
+
+    PortTunnelFrame frame = empty_frame(PortTunnelFrameType::TunnelOpen, 0U);
+    frame.meta = meta;
+    send_tunnel_frame(client_socket.get(), frame);
+
+    const PortTunnelFrame error = read_tunnel_frame(client_socket.get());
+    assert(error.stream_id == 0U);
+    assert_tunnel_error_code(error, "invalid_port_tunnel");
+
+    close_tunnel(&client_socket, &server_thread);
+}
+
 static void assert_tunnel_rejects_frames_for_wrong_role_or_protocol(AppState& state) {
+    assert_tunnel_open_metadata_error(state, "{not-json");
+    assert_tunnel_open_metadata_error(
+        state,
+        Json{{"role", "listen"}, {"protocol", "tcp"}}.dump()
+    );
+    assert_tunnel_open_metadata_error(
+        state,
+        Json{{"role", 7}, {"protocol", "tcp"}, {"generation", 1ULL}}.dump()
+    );
+    assert_tunnel_open_metadata_error(
+        state,
+        Json{{"role", "listen"}, {"protocol", "tcp"}, {"generation", "bad"}}.dump()
+    );
+
     UniqueSocket client_socket;
     std::thread server_thread;
     open_v4_tunnel(state, &client_socket, &server_thread, "connect", "tcp", 1ULL);

@@ -225,6 +225,36 @@ bool spawn_udp_read_thread(
 #endif
 }
 
+struct TunnelOpenMetadata {
+    std::string role;
+    std::uint64_t generation;
+    std::string protocol;
+    bool has_resume_session_id;
+    std::string resume_session_id;
+};
+
+TunnelOpenMetadata parse_tunnel_open_metadata(const PortTunnelFrame& frame) {
+    try {
+        const Json meta = Json::parse(frame.meta);
+        TunnelOpenMetadata parsed;
+        parsed.role = meta.at("role").get<std::string>();
+        parsed.generation = meta.at("generation").get<std::uint64_t>();
+        parsed.protocol = meta.at("protocol").get<std::string>();
+        parsed.has_resume_session_id = false;
+        if (meta.contains("resume_session_id") && !meta.at("resume_session_id").is_null()) {
+            parsed.has_resume_session_id = true;
+            parsed.resume_session_id = meta.at("resume_session_id").get<std::string>();
+        }
+        return parsed;
+    } catch (const Json::exception& ex) {
+        throw PortForwardError(
+            400,
+            "invalid_port_tunnel",
+            std::string("invalid tunnel open metadata: ") + ex.what()
+        );
+    }
+}
+
 int handle_port_tunnel_upgrade(AppState& state, SOCKET client, const HttpRequest& request) {
     if (!state.config.http_auth_bearer_token.empty() &&
         !request_has_bearer_auth(request, state.config.http_auth_bearer_token)) {
@@ -767,10 +797,10 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
         }
     }
 
-    const Json meta = Json::parse(frame.meta);
-    const std::string role = meta.at("role").get<std::string>();
-    const std::uint64_t generation = meta.at("generation").get<std::uint64_t>();
-    const std::string protocol = meta.at("protocol").get<std::string>();
+    const TunnelOpenMetadata meta = parse_tunnel_open_metadata(frame);
+    const std::string role = meta.role;
+    const std::uint64_t generation = meta.generation;
+    const std::string protocol = meta.protocol;
     PortTunnelProtocol tunnel_protocol = PortTunnelProtocol::None;
     if (protocol == "tcp") {
         tunnel_protocol = PortTunnelProtocol::Tcp;
@@ -783,8 +813,8 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
 
     if (role == "listen") {
         std::shared_ptr<PortTunnelSession> session;
-        if (meta.contains("resume_session_id") && !meta.at("resume_session_id").is_null()) {
-            const std::string session_id = meta.at("resume_session_id").get<std::string>();
+        if (meta.has_resume_session_id) {
+            const std::string session_id = meta.resume_session_id;
             session = service_->find_session(session_id);
             if (session.get() == NULL) {
                 throw PortForwardError(
