@@ -9,6 +9,7 @@ use remote_exec_proto::rpc::{
     TransferSourceType, TransferWarning,
 };
 use remote_exec_proto::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
+use remote_exec_proto::transfer::TransferLimits;
 
 use crate::daemon_client::DaemonClientError;
 
@@ -76,12 +77,14 @@ pub async fn import_archive_from_file(
     archive_path: &Path,
     request: &TransferImportRequest,
     sandbox: Option<&CompiledFilesystemSandbox>,
+    limits: TransferLimits,
 ) -> anyhow::Result<TransferImportResponse> {
     remote_exec_host::transfer::archive::import_archive_from_file(
         archive_path,
         request,
         sandbox,
         None,
+        limits,
     )
     .await
     .map_err(Into::into)
@@ -91,12 +94,13 @@ pub async fn import_archive_from_async_reader<R>(
     reader: R,
     request: &TransferImportRequest,
     sandbox: Option<&CompiledFilesystemSandbox>,
+    limits: TransferLimits,
 ) -> anyhow::Result<TransferImportResponse>
 where
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
 {
     remote_exec_host::transfer::archive::import_archive_from_async_reader(
-        reader, request, sandbox, None,
+        reader, request, sandbox, None, limits,
     )
     .await
     .map_err(Into::into)

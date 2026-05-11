@@ -65,6 +65,7 @@ pub enum TransferErrorKind {
     CompressionUnsupported,
     SourceUnsupported,
     SourceMissing,
+    Failed,
     Internal,
 }
 
@@ -107,6 +108,10 @@ impl TransferError {
         Self::new(TransferErrorKind::SourceMissing, message)
     }
 
+    pub fn failed(message: impl Into<String>) -> Self {
+        Self::new(TransferErrorKind::Failed, message)
+    }
+
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new(TransferErrorKind::Internal, message)
     }
@@ -125,6 +130,7 @@ impl TransferError {
             }
             TransferErrorKind::SourceUnsupported => RpcErrorCode::TransferSourceUnsupported,
             TransferErrorKind::SourceMissing => RpcErrorCode::TransferSourceMissing,
+            TransferErrorKind::Failed => RpcErrorCode::TransferFailed,
             TransferErrorKind::Internal => RpcErrorCode::Internal,
         }
     }

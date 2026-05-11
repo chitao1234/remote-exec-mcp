@@ -73,6 +73,7 @@ pub async fn import_archive_local(
         &request,
         state.sandbox.as_ref(),
         state.config.windows_posix_root.as_deref(),
+        state.config.transfer_limits,
     )
     .await
 }

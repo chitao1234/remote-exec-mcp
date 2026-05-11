@@ -485,6 +485,7 @@ pub enum RpcErrorCode {
     TransferCompressionUnsupported,
     TransferSourceUnsupported,
     TransferSourceMissing,
+    TransferFailed,
     PatchFailed,
     Internal,
 }
@@ -533,6 +534,7 @@ impl RpcErrorCode {
             Self::TransferCompressionUnsupported => "transfer_compression_unsupported",
             Self::TransferSourceUnsupported => "transfer_source_unsupported",
             Self::TransferSourceMissing => "transfer_source_missing",
+            Self::TransferFailed => "transfer_failed",
             Self::PatchFailed => "patch_failed",
             Self::Internal => "internal_error",
         }
@@ -581,6 +583,7 @@ impl RpcErrorCode {
             "transfer_compression_unsupported" => Some(Self::TransferCompressionUnsupported),
             "transfer_source_unsupported" => Some(Self::TransferSourceUnsupported),
             "transfer_source_missing" => Some(Self::TransferSourceMissing),
+            "transfer_failed" => Some(Self::TransferFailed),
             "patch_failed" => Some(Self::PatchFailed),
             "internal" | "internal_error" => Some(Self::Internal),
             _ => None,

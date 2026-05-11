@@ -62,6 +62,7 @@ pub(super) async fn transfer_single_source(
                 exported.reader,
                 &request,
                 state.host_sandbox.as_ref(),
+                state.transfer_limits,
             )
             .await?;
             Ok((exported.source_type, summary))
@@ -119,6 +120,7 @@ pub(super) async fn transfer_single_source(
                 exported.into_async_read(),
                 &request,
                 state.host_sandbox.as_ref(),
+                state.transfer_limits,
             )
             .await?;
             Ok((source_type, summary))
@@ -272,6 +274,7 @@ async fn import_archive_to_endpoint(
                 archive_path,
                 request,
                 state.host_sandbox.as_ref(),
+                state.transfer_limits,
             )
             .await
         }

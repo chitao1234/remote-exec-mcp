@@ -1119,6 +1119,37 @@ async fn import_accepts_omitted_optional_metadata_defaults() {
 }
 
 #[tokio::test]
+async fn transfer_import_rejects_entry_over_limit() {
+    let fixture = support::spawn::spawn_daemon_with_extra_config(
+        "builder-a",
+        r#"[transfer_limits]
+max_archive_bytes = 4096
+max_entry_bytes = 8
+"#,
+    )
+    .await;
+    let destination = fixture.workdir.join("too-large.txt");
+    let body = raw_tar_file_with_path(".remote-exec-file", b"0123456789");
+
+    let response = fixture
+        .raw_post_bytes(
+            "/v1/transfer/import",
+            &import_headers(destination.display(), "replace", "true", "file"),
+            body,
+        )
+        .await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let err = response
+        .json::<remote_exec_proto::rpc::RpcErrorBody>()
+        .await
+        .unwrap();
+    assert_eq!(err.code, "transfer_failed");
+    assert!(err.message.contains("exceeds transfer entry limit"));
+    assert!(!destination.exists());
+}
+
+#[tokio::test]
 async fn import_replaces_directory_with_file_at_the_exact_destination_path() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let source = fixture.workdir.join("tool.txt");

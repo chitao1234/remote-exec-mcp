@@ -6,6 +6,7 @@ use remote_exec_proto::rpc::{
     TransferSymlinkMode, TransferWarning,
 };
 use remote_exec_proto::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
+use remote_exec_proto::transfer::TransferLimits;
 
 use crate::error::TransferError;
 
@@ -19,6 +20,7 @@ pub async fn import_archive_from_file(
     request: &TransferImportRequest,
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
+    limits: TransferLimits,
 ) -> Result<TransferImportResponse, TransferError> {
     let (destination, replaced) = prepare_import_destination(request, sandbox, windows_posix_root)
         .await
@@ -27,7 +29,7 @@ pub async fn import_archive_from_file(
     let request = request.clone();
 
     tokio::task::spawn_blocking(move || {
-        extract_archive(&archive_path, &destination, &request, replaced)
+        extract_archive(&archive_path, &destination, &request, replaced, limits)
     })
     .await
     .map_err(internal_transfer_error)?
@@ -39,6 +41,7 @@ pub async fn import_archive_from_async_reader<R>(
     request: &TransferImportRequest,
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
+    limits: TransferLimits,
 ) -> Result<TransferImportResponse, TransferError>
 where
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
@@ -52,7 +55,7 @@ where
     tokio::task::spawn_blocking(move || {
         let reader = tokio_util::io::SyncIoBridge::new_with_handle(reader, runtime);
         let reader = wrap_archive_reader(reader, &request.compression)?;
-        extract_archive_from_reader(reader, &destination, &request, replaced)
+        extract_archive_from_reader(reader, &destination, &request, replaced, limits)
     })
     .await
     .map_err(internal_transfer_error)?
@@ -166,9 +169,10 @@ fn extract_archive(
     destination_path: &Path,
     request: &TransferImportRequest,
     replaced: bool,
+    limits: TransferLimits,
 ) -> anyhow::Result<TransferImportResponse> {
     let reader = open_archive_reader(archive_path, &request.compression)?;
-    extract_archive_from_reader(reader, destination_path, request, replaced)
+    extract_archive_from_reader(reader, destination_path, request, replaced, limits)
 }
 
 fn extract_archive_from_reader<R: Read>(
@@ -176,6 +180,7 @@ fn extract_archive_from_reader<R: Read>(
     destination_path: &Path,
     request: &TransferImportRequest,
     replaced: bool,
+    limits: TransferLimits,
 ) -> anyhow::Result<TransferImportResponse> {
     let mut summary = new_import_summary(request, replaced);
 
@@ -187,12 +192,14 @@ fn extract_archive_from_reader<R: Read>(
             destination_path,
             &request.symlink_mode,
             &mut summary,
+            limits,
         )?,
         TransferSourceType::Directory | TransferSourceType::Multiple => extract_tree_archive(
             &mut archive,
             destination_path,
             &request.symlink_mode,
             &mut summary,
+            limits,
         )?,
     }
 
@@ -218,6 +225,7 @@ fn extract_single_file_archive<R: Read>(
     destination_path: &Path,
     symlink_mode: &TransferSymlinkMode,
     summary: &mut TransferImportResponse,
+    limits: TransferLimits,
 ) -> anyhow::Result<()> {
     let mut entries = archive.entries()?;
     let mut entry = entries
@@ -233,7 +241,7 @@ fn extract_single_file_archive<R: Read>(
     if entry_type.is_symlink() {
         write_archive_symlink(&mut entry, destination_path, symlink_mode, summary)?;
     } else {
-        summary.bytes_copied = write_archive_file(&mut entry, destination_path)?;
+        summary.bytes_copied = write_archive_file(&mut entry, destination_path, limits, 0)?;
         summary.files_copied = 1;
     }
 
@@ -256,11 +264,12 @@ fn extract_tree_archive<R: Read>(
     destination_path: &Path,
     symlink_mode: &TransferSymlinkMode,
     summary: &mut TransferImportResponse,
+    limits: TransferLimits,
 ) -> anyhow::Result<()> {
     std::fs::create_dir_all(destination_path)?;
     for entry in archive.entries()? {
         let mut entry = entry?;
-        extract_tree_archive_entry(&mut entry, destination_path, symlink_mode, summary)?;
+        extract_tree_archive_entry(&mut entry, destination_path, symlink_mode, summary, limits)?;
     }
     Ok(())
 }
@@ -270,6 +279,7 @@ fn extract_tree_archive_entry<R: Read>(
     destination_path: &Path,
     symlink_mode: &TransferSymlinkMode,
     summary: &mut TransferImportResponse,
+    limits: TransferLimits,
 ) -> anyhow::Result<()> {
     let raw_rel = entry.path()?.to_path_buf();
     let rel = normalize_archive_entry_path(&raw_rel)?;
@@ -297,7 +307,7 @@ fn extract_tree_archive_entry<R: Read>(
         return Ok(());
     }
 
-    summary.bytes_copied += write_archive_file(entry, &out)?;
+    summary.bytes_copied += write_archive_file(entry, &out, limits, summary.bytes_copied)?;
     summary.files_copied += 1;
     Ok(())
 }
@@ -390,17 +400,50 @@ fn create_symlink(_target: &Path, path: &Path) -> anyhow::Result<()> {
     .into())
 }
 
-fn write_archive_file<R: Read>(entry: &mut tar::Entry<R>, path: &Path) -> anyhow::Result<u64> {
+fn write_archive_file<R: Read>(
+    entry: &mut tar::Entry<R>,
+    path: &Path,
+    limits: TransferLimits,
+    copied_so_far: u64,
+) -> anyhow::Result<u64> {
     ensure_not_existing_symlink(path)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
 
-    let mut bytes = Vec::new();
-    std::io::Read::read_to_end(entry, &mut bytes)?;
-    std::fs::write(path, &bytes)?;
-    restore_executable_bits(path, entry.header().mode()?)?;
-    Ok(bytes.len() as u64)
+    let entry_size = entry.header().size()?;
+    let mode = entry.header().mode()?;
+    ensure_entry_within_limits(entry_size, copied_so_far, limits)?;
+
+    let mut output = std::fs::File::create(path)?;
+    let copied = std::io::copy(&mut entry.take(entry_size), &mut output)?;
+    if copied != entry_size {
+        anyhow::bail!("truncated archive entry");
+    }
+    restore_executable_bits(path, mode)?;
+    Ok(copied)
+}
+
+fn ensure_entry_within_limits(
+    entry_size: u64,
+    copied_so_far: u64,
+    limits: TransferLimits,
+) -> anyhow::Result<()> {
+    if entry_size > limits.max_entry_bytes {
+        return Err(TransferError::failed(format!(
+            "archive entry size {entry_size} exceeds transfer entry limit {}",
+            limits.max_entry_bytes
+        ))
+        .into());
+    }
+    if copied_so_far.saturating_add(entry_size) > limits.max_archive_bytes {
+        return Err(TransferError::failed(format!(
+            "archive byte count exceeds transfer archive limit {}",
+            limits.max_archive_bytes
+        ))
+        .into());
+    }
+    Ok(())
 }
 
 fn ensure_no_existing_symlink_in_path(root: &Path, path: &Path) -> anyhow::Result<()> {
