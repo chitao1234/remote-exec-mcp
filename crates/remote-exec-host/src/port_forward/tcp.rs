@@ -28,6 +28,8 @@ use super::{
     send_forward_drop_report,
 };
 
+const TCP_CONTROL_SEND_TIMEOUT: Duration = Duration::from_secs(1);
+
 fn spawn_tcp_writer_task(writer: OwnedWriteHalf, cancel: CancellationToken) -> TcpWriterHandle {
     let (tx, rx) = mpsc::channel(TCP_WRITE_QUEUE_FRAMES);
     tokio::spawn(tunnel_tcp_write_loop(writer, rx, cancel.clone()));
@@ -568,6 +570,15 @@ async fn clear_session_tcp_cancel(attachment: &AttachmentState, stream_id: u32) 
     }
 }
 
+async fn send_tcp_shutdown(writer: &TcpWriterHandle) -> bool {
+    tokio::time::timeout(
+        TCP_CONTROL_SEND_TIMEOUT,
+        writer.tx.send(TcpWriteCommand::Shutdown),
+    )
+    .await
+    .is_ok_and(|result| result.is_ok())
+}
+
 pub(super) async fn tunnel_tcp_eof(
     tunnel: &Arc<TunnelState>,
     stream_id: u32,
@@ -589,7 +600,7 @@ pub(super) async fn tunnel_tcp_eof(
                     .map(|entry| entry.writer.clone())
             };
             if let Some(writer) = writer
-                && writer.tx.try_send(TcpWriteCommand::Shutdown).is_ok()
+                && send_tcp_shutdown(&writer).await
             {
                 clear_session_tcp_cancel(&attachment, stream_id).await;
             }
@@ -606,7 +617,7 @@ pub(super) async fn tunnel_tcp_eof(
                     .map(|entry| entry.writer.clone())
             };
             if let Some(writer) = writer
-                && writer.tx.try_send(TcpWriteCommand::Shutdown).is_ok()
+                && send_tcp_shutdown(&writer).await
             {
                 clear_transport_tcp_cancel(tunnel, stream_id).await;
             }

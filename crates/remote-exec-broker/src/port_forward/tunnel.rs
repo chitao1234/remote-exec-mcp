@@ -114,7 +114,9 @@ impl PortTunnel {
                                             meta: frame.meta,
                                             data: Vec::new(),
                                         };
-                                        let _ = reader_tx.try_send(QueuedFrame { frame: ack, charge: 0 });
+                                        if reader_tx.send(QueuedFrame { frame: ack, charge: 0 }).await.is_err() {
+                                            return;
+                                        }
                                         continue;
                                     }
                                     _ => {}

@@ -922,6 +922,77 @@ mod port_tunnel_tests {
     }
 
     #[tokio::test]
+    async fn tunnel_tcp_eof_waits_for_full_writer_queue() {
+        let state = test_state();
+        let (tx, _rx) = tokio::sync::mpsc::channel::<QueuedFrame>(8);
+        let stream_cancel = state.shutdown.child_token();
+        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(TCP_WRITE_QUEUE_FRAMES);
+        for _ in 0..TCP_WRITE_QUEUE_FRAMES {
+            writer_tx
+                .send(TcpWriteCommand::Data(Vec::new()))
+                .await
+                .unwrap();
+        }
+        let tunnel = Arc::new(TunnelState {
+            state: state.clone(),
+            cancel: state.shutdown.child_token(),
+            tx: TunnelSender {
+                tx,
+                limiter: state.port_forward_limiter.clone(),
+            },
+            open_mode: tokio::sync::Mutex::new(TunnelMode::Connect {
+                protocol: TunnelForwardProtocol::Tcp,
+            }),
+            tcp_streams: tokio::sync::Mutex::new(HashMap::from([(
+                1,
+                TcpStreamEntry {
+                    writer: TcpWriterHandle {
+                        tx: writer_tx,
+                        cancel: stream_cancel.clone(),
+                    },
+                    _permit: state
+                        .port_forward_limiter
+                        .try_acquire_active_tcp_stream()
+                        .unwrap(),
+                    cancel: Some(stream_cancel.clone()),
+                },
+            )])),
+            udp_binds: tokio::sync::Mutex::new(HashMap::new()),
+            generation: AtomicU64::new(1),
+            attached_session: tokio::sync::Mutex::new(None),
+            _connection_permit: state
+                .port_forward_limiter
+                .try_acquire_tunnel_connection()
+                .unwrap(),
+        });
+
+        let eof = tokio::spawn({
+            let tunnel = tunnel.clone();
+            async move { tunnel_tcp_eof(&tunnel, 1).await.unwrap() }
+        });
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(
+            !eof.is_finished(),
+            "EOF should wait instead of dropping shutdown"
+        );
+
+        let Some(TcpWriteCommand::Data(_)) = writer_rx.recv().await else {
+            panic!("expected queued data before shutdown");
+        };
+        tokio::time::timeout(Duration::from_secs(1), eof)
+            .await
+            .expect("EOF should complete after queue has capacity")
+            .unwrap();
+        while let Some(command) = writer_rx.recv().await {
+            if matches!(command, TcpWriteCommand::Shutdown) {
+                return;
+            }
+        }
+        panic!("expected shutdown command");
+    }
+
+    #[tokio::test]
     async fn retained_udp_queued_byte_pressure_reports_drop() {
         let state = test_state_with_limits(crate::HostPortForwardLimits {
             max_tunnel_queued_bytes: 128,
