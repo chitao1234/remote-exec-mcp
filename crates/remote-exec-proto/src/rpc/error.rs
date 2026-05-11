@@ -11,6 +11,7 @@ pub enum RpcErrorCode {
     BadRequest,
     Unauthorized,
     UnknownSession,
+    ExecSessionLockTimeout,
     NotFound,
     UnknownEndpoint,
     InvalidPortTunnel,
@@ -60,6 +61,7 @@ impl RpcErrorCode {
             Self::BadRequest => "bad_request",
             Self::Unauthorized => "unauthorized",
             Self::UnknownSession => "unknown_session",
+            Self::ExecSessionLockTimeout => "exec_session_lock_timeout",
             Self::NotFound => "not_found",
             Self::UnknownEndpoint => "unknown_endpoint",
             Self::InvalidPortTunnel => "invalid_port_tunnel",
@@ -109,6 +111,7 @@ impl RpcErrorCode {
             "bad_request" => Some(Self::BadRequest),
             "unauthorized" => Some(Self::Unauthorized),
             "unknown_session" => Some(Self::UnknownSession),
+            "exec_session_lock_timeout" => Some(Self::ExecSessionLockTimeout),
             "not_found" => Some(Self::NotFound),
             "unknown_endpoint" => Some(Self::UnknownEndpoint),
             "invalid_port_tunnel" => Some(Self::InvalidPortTunnel),
@@ -178,6 +181,18 @@ mod tests {
         assert_eq!(
             RpcErrorCode::from_wire_value("internal_error"),
             Some(RpcErrorCode::Internal)
+        );
+    }
+
+    #[test]
+    fn rpc_error_code_exec_session_lock_timeout_round_trips() {
+        assert_eq!(
+            RpcErrorCode::ExecSessionLockTimeout.wire_value(),
+            "exec_session_lock_timeout"
+        );
+        assert_eq!(
+            RpcErrorCode::from_wire_value("exec_session_lock_timeout"),
+            Some(RpcErrorCode::ExecSessionLockTimeout)
         );
     }
 

@@ -34,6 +34,12 @@ pub struct InsertOutcome {
     pub crossed_warning_threshold: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionLockError {
+    UnknownSession,
+    TimedOut,
+}
+
 #[derive(Clone)]
 pub struct SessionStore {
     inner: Arc<RwLock<HashMap<String, SessionEntry>>>,
@@ -84,6 +90,22 @@ impl SessionStore {
         self.lock_if_current(session_id, session).await
     }
 
+    pub async fn lock_with_timeout(
+        &self,
+        session_id: &str,
+        timeout: std::time::Duration,
+    ) -> Result<SessionLease, SessionLockError> {
+        let session = self
+            .inner
+            .read()
+            .await
+            .get(session_id)
+            .map(|entry| entry.session.clone())
+            .ok_or(SessionLockError::UnknownSession)?;
+        self.lock_if_current_with_timeout(session_id, session, timeout)
+            .await
+    }
+
     pub async fn remove(&self, session_id: &str) {
         let mut sessions = self.inner.write().await;
         if sessions.remove(session_id).is_some() {
@@ -100,7 +122,30 @@ impl SessionStore {
         session_id: &str,
         session: SharedSession,
     ) -> Option<SessionLease> {
-        let guard = session.clone().lock_owned().await;
+        self.lock_if_current_after_guard(session_id, session.clone(), session.lock_owned().await)
+            .await
+    }
+
+    async fn lock_if_current_with_timeout(
+        &self,
+        session_id: &str,
+        session: SharedSession,
+        timeout: std::time::Duration,
+    ) -> Result<SessionLease, SessionLockError> {
+        let guard = tokio::time::timeout(timeout, session.clone().lock_owned())
+            .await
+            .map_err(|_| SessionLockError::TimedOut)?;
+        self.lock_if_current_after_guard(session_id, session, guard)
+            .await
+            .ok_or(SessionLockError::UnknownSession)
+    }
+
+    async fn lock_if_current_after_guard(
+        &self,
+        session_id: &str,
+        session: SharedSession,
+        guard: OwnedMutexGuard<LiveSession>,
+    ) -> Option<SessionLease> {
         let is_current = self
             .inner
             .read()
@@ -410,6 +455,38 @@ mod tests {
         assert!(
             waiter_result.is_none(),
             "waiting lock must observe retired session as unavailable"
+        );
+    }
+
+    #[tokio::test]
+    async fn session_lock_timeout_returns_timed_out_for_busy_session() {
+        let store = SessionStore::default();
+        let session_id = "session-1";
+
+        store
+            .insert(session_id.to_string(), spawn_pipe_session(&sleep_script(2)))
+            .await;
+        let lease = store.lock(session_id).await.expect("initial lease");
+
+        let started = std::time::Instant::now();
+        let result = store
+            .lock_with_timeout(session_id, Duration::from_millis(50))
+            .await;
+
+        assert_eq!(result.err(), Some(super::SessionLockError::TimedOut));
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "lock timeout took too long: {:?}",
+            started.elapsed()
+        );
+
+        drop(lease);
+        assert!(
+            store
+                .lock_with_timeout(session_id, Duration::from_secs(1))
+                .await
+                .is_ok(),
+            "lock should succeed after the busy lease is dropped"
         );
     }
 

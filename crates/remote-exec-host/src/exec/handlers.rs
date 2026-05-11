@@ -10,12 +10,15 @@ use crate::{AppState, HostRpcError, config::YieldTimeOperation, error::logged_ba
 
 use super::{
     session, shell,
+    store::SessionLockError,
     support::{
         ensure_sandbox_access, finish_response, has_exited, internal_error, poll_once, poll_until,
         resolve_workdir, running_response, write_chars, write_yield_time_operation,
     },
     timing::EXEC_POLL_INTERVAL,
 };
+
+const EXEC_WRITE_SESSION_LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub async fn exec_start_local(
     state: Arc<AppState>,
@@ -81,13 +84,26 @@ pub async fn exec_write_local(
         empty_poll = req.chars.is_empty(),
         "exec_write received"
     );
-    let session = state
+    let session = match state
         .sessions
-        .lock(&daemon_session_id)
+        .lock_with_timeout(&daemon_session_id, EXEC_WRITE_SESSION_LOCK_TIMEOUT)
         .await
-        .ok_or_else(|| {
-            logged_bad_request(RpcErrorCode::UnknownSession, "Unknown daemon session")
-        })?;
+    {
+        Ok(session) => session,
+        Err(SessionLockError::UnknownSession) => {
+            return Err(logged_bad_request(
+                RpcErrorCode::UnknownSession,
+                "Unknown daemon session",
+            ));
+        }
+        Err(SessionLockError::TimedOut) => {
+            return Err(crate::error::rpc_error(
+                409,
+                RpcErrorCode::ExecSessionLockTimeout,
+                format!("Timed out waiting for daemon session `{daemon_session_id}` lock"),
+            ));
+        }
+    };
     let mut session = session;
 
     if !req.chars.is_empty() && !session.tty {
