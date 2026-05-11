@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod path;
 pub mod port_forward;
 pub mod port_tunnel;

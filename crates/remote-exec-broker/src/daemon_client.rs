@@ -547,8 +547,7 @@ impl DaemonClient {
 fn build_bearer_authorization_header(
     http_auth: &crate::config::HttpAuthConfig,
 ) -> anyhow::Result<HeaderValue> {
-    HeaderValue::from_str(&format!("Bearer {}", http_auth.bearer_token))
-        .map_err(anyhow::Error::from)
+    HeaderValue::from_str(&http_auth.authorization_header_value()).map_err(anyhow::Error::from)
 }
 
 async fn open_transfer_import_body(

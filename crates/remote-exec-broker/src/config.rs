@@ -6,6 +6,7 @@ use anyhow::Context;
 use remote_exec_host::{
     EmbeddedHostConfig, HostPortForwardLimits, ProcessEnvironment, PtyMode, YieldTimeConfig,
 };
+pub use remote_exec_proto::auth::HttpAuthConfig;
 use remote_exec_proto::sandbox::FilesystemSandbox;
 use remote_exec_proto::transfer::TransferLimits;
 use serde::Deserialize;
@@ -93,11 +94,6 @@ pub struct TargetConfig {
     pub expected_daemon_name: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct HttpAuthConfig {
-    pub bearer_token: String,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TargetTransportKind {
     Http,
@@ -170,20 +166,6 @@ impl TargetConfig {
         anyhow::ensure!(
             self.client_key_pem.is_some(),
             "target `{name}` is missing client_key_pem"
-        );
-        Ok(())
-    }
-}
-
-impl HttpAuthConfig {
-    fn validate(&self, scope: &str) -> anyhow::Result<()> {
-        anyhow::ensure!(
-            !self.bearer_token.is_empty(),
-            "{scope} http_auth.bearer_token must not be empty"
-        );
-        anyhow::ensure!(
-            !self.bearer_token.chars().any(char::is_whitespace),
-            "{scope} http_auth.bearer_token must not contain whitespace"
         );
         Ok(())
     }

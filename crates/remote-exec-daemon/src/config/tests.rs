@@ -446,8 +446,8 @@ bearer_token = "shared-secret"
         config
             .http_auth
             .as_ref()
-            .map(|auth| auth.expected_authorization.as_str()),
-        Some("Bearer shared-secret")
+            .map(|auth| auth.authorization_header_value()),
+        Some("Bearer shared-secret".to_string())
     );
 }
 

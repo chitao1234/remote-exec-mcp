@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use remote_exec_host::{EmbeddedHostConfig, HostRuntimeConfig};
+pub use remote_exec_proto::auth::HttpAuthConfig;
 use remote_exec_proto::sandbox::FilesystemSandbox;
 use remote_exec_proto::transfer::TransferLimits;
 use serde::Deserialize;
@@ -56,13 +57,6 @@ pub struct DaemonConfig {
     pub process_environment: ProcessEnvironment,
     #[serde(default)]
     pub tls: Option<TlsConfig>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct HttpAuthConfig {
-    pub bearer_token: String,
-    #[serde(skip)]
-    pub expected_authorization: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -149,7 +143,7 @@ impl DaemonConfig {
 
     fn validate_http_auth(&self) -> anyhow::Result<()> {
         if let Some(http_auth) = &self.http_auth {
-            http_auth.validate()?;
+            http_auth.validate("")?;
         }
 
         Ok(())
@@ -159,11 +153,7 @@ impl DaemonConfig {
         self.default_workdir = self.normalized_default_workdir();
     }
 
-    pub fn prepare_runtime_fields(&mut self) {
-        if let Some(http_auth) = &mut self.http_auth {
-            http_auth.prepare_runtime_fields();
-        }
-    }
+    pub fn prepare_runtime_fields(&mut self) {}
 
     pub fn validate(&self) -> anyhow::Result<()> {
         self.host_runtime_config().validate()?;
@@ -207,24 +197,6 @@ impl From<DaemonConfig> for HostRuntimeConfig {
 
 pub fn normalize_configured_workdir(path: &Path, windows_posix_root: Option<&Path>) -> PathBuf {
     remote_exec_host::config::normalize_configured_workdir(path, windows_posix_root)
-}
-
-impl HttpAuthConfig {
-    fn prepare_runtime_fields(&mut self) {
-        self.expected_authorization = format!("Bearer {}", self.bearer_token);
-    }
-
-    fn validate(&self) -> anyhow::Result<()> {
-        anyhow::ensure!(
-            !self.bearer_token.is_empty(),
-            "http_auth.bearer_token must not be empty"
-        );
-        anyhow::ensure!(
-            !self.bearer_token.chars().any(char::is_whitespace),
-            "http_auth.bearer_token must not contain whitespace"
-        );
-        Ok(())
-    }
 }
 
 fn default_allow_login_shell() -> bool {
