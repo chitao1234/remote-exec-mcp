@@ -35,6 +35,10 @@ Windows XP-compatible cross-build:
 - `make test-wine-session-store` and `make test-wine-transfer` when `wine` is
   available; CI runs these on Linux after the XP cross-build.
 
+Host-native Windows MinGW build:
+
+- `make all-windows-native` on Windows under MSYS2/MINGW32
+
 Windows XP-compatible MSVC/NMAKE build:
 
 - Open an x86 Visual Studio developer prompt with the XP-capable VS 2017
@@ -53,6 +57,14 @@ that file automatically.
 builds only the Windows XP-compatible daemon executable with MSVC. It uses the
 static C runtime (`/MT`) and links as an x86 console program with a Windows XP
 minimum subsystem version.
+
+Runtime coverage note: host-native POSIX C++ daemon runtime tests run on Unix.
+Windows XP-compatible binaries are compile-checked on Linux and Windows and are
+executed under Wine on Linux when Wine is available. CI also builds
+`build/remote-exec-daemon-cpp.exe` with host-native MinGW on `windows-latest`,
+exposes `C:\msys64\mingw32\bin` for the MinGW runtime DLLs, and runs the Rust
+broker `mcp_forward_ports_cpp::windows_cpp_daemon_smoke` integration test
+against that process.
 
 BSD make has a separate POSIX-only entry point. It intentionally does not expose
 the Windows XP cross-build targets:

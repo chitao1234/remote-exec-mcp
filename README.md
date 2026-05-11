@@ -512,6 +512,12 @@ CI also exercises broker, daemon, and host `--no-default-features` test and
 clippy jobs on Ubuntu so the `tls-disabled` and host feature-gated code paths
 stay intentionally covered.
 
+CI exercises the Rust broker and Rust daemon on Linux and Windows. The
+standalone C++ daemon is built on Linux and Windows, POSIX runtime tests run on
+Linux, Windows XP-compatible test binaries run under Wine on Linux when
+available, and `mcp_forward_ports_cpp.rs` includes a native `windows-latest`
+broker-to-C++ daemon smoke test against `remote-exec-daemon-cpp.exe`.
+
 Windows GNU compile-only checks from Linux:
 
 ```bash
