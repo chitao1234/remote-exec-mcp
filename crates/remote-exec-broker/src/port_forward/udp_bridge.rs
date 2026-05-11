@@ -289,6 +289,7 @@ mod tests {
     use remote_exec_proto::public::{
         ForwardPortEntry, ForwardPortLimitSummary, ForwardPortProtocol as PublicForwardPortProtocol,
     };
+    use remote_exec_proto::rpc::RpcErrorCode;
     use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
     use tokio_util::sync::CancellationToken;
 
@@ -632,7 +633,7 @@ mod tests {
                 flags: 0,
                 stream_id: 1,
                 meta: serde_json::to_vec(&serde_json::json!({
-                    "code": "port_tunnel_limit_exceeded",
+                    "code": RpcErrorCode::PortTunnelLimitExceeded.wire_value(),
                     "message": "port tunnel queued byte limit reached",
                     "fatal": false
                 }))
@@ -693,7 +694,9 @@ mod tests {
                 meta: serde_json::to_vec(&ForwardDropMeta {
                     kind: ForwardDropKind::UdpDatagram,
                     count: 3,
-                    reason: "port_tunnel_limit_exceeded".to_string(),
+                    reason: RpcErrorCode::PortTunnelLimitExceeded
+                        .wire_value()
+                        .to_string(),
                     message: Some("port tunnel queued byte limit reached".to_string()),
                 })
                 .unwrap(),
