@@ -41,7 +41,6 @@ struct DaemonConfig {
     std::size_t max_request_body_bytes;
     TransferLimitConfig transfer_limits = default_transfer_limit_config();
     unsigned long max_open_sessions;
-    unsigned long port_forward_max_worker_threads;
     PortForwardLimitConfig port_forward_limits;
     YieldTimeConfig yield_time;
     bool sandbox_configured = false;

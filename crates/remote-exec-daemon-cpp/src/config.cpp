@@ -486,7 +486,6 @@ DaemonConfig load_config(const std::string& path) {
     config.transfer_limits = read_transfer_limits(values);
     config.max_open_sessions = read_optional_unsigned_long(values, "max_open_sessions", 64UL);
     config.port_forward_limits = read_port_forward_limits(values);
-    config.port_forward_max_worker_threads = config.port_forward_limits.max_worker_threads;
     config.yield_time = read_yield_time_config(values);
     config.sandbox_configured = has_key_with_prefix(values, "sandbox_");
     config.sandbox = read_sandbox(values);

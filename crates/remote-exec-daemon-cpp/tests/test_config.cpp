@@ -78,7 +78,6 @@ int main() {
     assert(config.transfer_limits.max_archive_bytes == 4096ULL);
     assert(config.transfer_limits.max_entry_bytes == 1024ULL);
     assert(config.max_open_sessions == 12UL);
-    assert(config.port_forward_max_worker_threads == 17UL);
     assert(config.port_forward_limits.max_worker_threads == 17UL);
     assert(config.port_forward_limits.max_retained_sessions == 11UL);
     assert(config.port_forward_limits.max_retained_listeners == 13UL);
@@ -113,7 +112,6 @@ int main() {
         "sandbox_write_deny = /work/.git;/work/readonly\n"
     );
     const DaemonConfig sandbox_config = load_config(sandbox_config_path.string());
-    assert(sandbox_config.port_forward_max_worker_threads == DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS);
     assert(sandbox_config.port_forward_limits.max_worker_threads == DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS);
     assert(sandbox_config.port_forward_limits.max_retained_sessions == DEFAULT_PORT_FORWARD_MAX_RETAINED_SESSIONS);
     assert(sandbox_config.port_forward_limits.max_retained_listeners == DEFAULT_PORT_FORWARD_MAX_RETAINED_LISTENERS);
