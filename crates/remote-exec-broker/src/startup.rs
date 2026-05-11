@@ -91,8 +91,15 @@ async fn insert_remote_targets(
     target_configs: &BTreeMap<String, config::TargetConfig>,
     targets: &mut BTreeMap<String, TargetHandle>,
 ) -> anyhow::Result<()> {
-    for (name, target_config) in target_configs {
-        let handle = build_remote_target_handle(name, target_config).await?;
+    let probes = target_configs.iter().map(|(name, target_config)| async move {
+        (
+            name.clone(),
+            build_remote_target_handle(name, target_config).await,
+        )
+    });
+
+    for (name, handle) in futures_util::future::join_all(probes).await {
+        let handle = handle?;
         targets.insert(name.clone(), handle);
     }
     Ok(())
@@ -103,8 +110,20 @@ async fn build_remote_target_handle(
     target_config: &config::TargetConfig,
 ) -> anyhow::Result<TargetHandle> {
     let client = DaemonClient::new(name.to_string(), target_config).await?;
-    match client.target_info().await {
-        Ok(info) => {
+    match tokio::time::timeout(
+        target_config.timeouts.startup_probe_timeout(),
+        client.target_info(),
+    )
+    .await
+    {
+        Err(_) => {
+            log_remote_target_startup_probe_timeout(name, target_config);
+            Ok(TargetHandle::unavailable(
+                TargetBackend::Remote(client),
+                target_config.expected_daemon_name.clone(),
+            ))
+        }
+        Ok(Ok(info)) => {
             ensure_expected_daemon_name(
                 name,
                 target_config.expected_daemon_name.as_deref(),
@@ -117,14 +136,14 @@ async fn build_remote_target_handle(
                 &info,
             ))
         }
-        Err(DaemonClientError::Transport(err)) => {
+        Ok(Err(DaemonClientError::Transport(err))) => {
             log_remote_target_unavailable(name, target_config, &err);
             Ok(TargetHandle::unavailable(
                 TargetBackend::Remote(client),
                 target_config.expected_daemon_name.clone(),
             ))
         }
-        Err(err) => Err(err.into()),
+        Ok(Err(err)) => Err(err.into()),
     }
 }
 
@@ -174,6 +193,15 @@ fn log_remote_target_unavailable(
     );
 }
 
+fn log_remote_target_startup_probe_timeout(name: &str, target_config: &config::TargetConfig) {
+    tracing::warn!(
+        target = %name,
+        http_auth_enabled = target_config.http_auth.is_some(),
+        timeout_ms = target_config.timeouts.startup_probe_ms,
+        "target unavailable during broker startup: startup probe timed out"
+    );
+}
+
 fn host_path_policy() -> PathPolicy {
     if cfg!(windows) {
         windows_path_policy()
@@ -192,8 +220,11 @@ fn mcp_transport_name(config: &config::McpServerConfig) -> &'static str {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::time::Duration;
 
-    use crate::config::{BrokerConfig, LocalTargetConfig};
+    use tokio::io::AsyncReadExt;
+
+    use crate::config::{BrokerConfig, LocalTargetConfig, TargetConfig, TargetTimeoutConfig};
 
     use super::build_state;
 
@@ -235,5 +266,76 @@ mod tests {
             err.to_string().contains("not found") || err.to_string().contains("usable"),
             "unexpected error: {err}"
         );
+    }
+
+    async fn spawn_hung_target_info_server(delay: Duration) -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let (mut stream, _) = match listener.accept().await {
+                    Ok(value) => value,
+                    Err(_) => return,
+                };
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 1024];
+                    let _ = stream.read(&mut buf).await;
+                    tokio::time::sleep(delay).await;
+                });
+            }
+        });
+        addr
+    }
+
+    fn remote_http_target(addr: std::net::SocketAddr, startup_probe_ms: u64) -> TargetConfig {
+        TargetConfig {
+            base_url: format!("http://{addr}"),
+            http_auth: None,
+            timeouts: TargetTimeoutConfig {
+                startup_probe_ms,
+                request_ms: 5_000,
+                ..TargetTimeoutConfig::default()
+            },
+            ca_pem: None,
+            client_cert_pem: None,
+            client_key_pem: None,
+            allow_insecure_http: true,
+            skip_server_name_verification: false,
+            pinned_server_cert_pem: None,
+            expected_daemon_name: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn remote_startup_probes_are_parallel_and_bounded() {
+        let mut targets = BTreeMap::new();
+        for index in 0..4 {
+            let addr = spawn_hung_target_info_server(Duration::from_secs(5)).await;
+            targets.insert(format!("slow-{index}"), remote_http_target(addr, 400));
+        }
+
+        let started = std::time::Instant::now();
+        let state = build_state(BrokerConfig {
+            mcp: Default::default(),
+            host_sandbox: None,
+            enable_transfer_compression: true,
+            transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
+            disable_structured_content: false,
+            port_forward_limits: Default::default(),
+            targets,
+            local: None,
+        })
+        .await
+        .unwrap();
+
+        assert!(
+            started.elapsed() < Duration::from_millis(1_200),
+            "startup probes did not run concurrently: {:?}",
+            started.elapsed()
+        );
+        assert_eq!(state.targets.len(), 4);
+        for handle in state.targets.values() {
+            assert_eq!(handle.cached_daemon_info().await, None);
+        }
     }
 }
