@@ -59,6 +59,23 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Set up MSYS2 for native Windows C++ smoke
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: true
+          install: >-
+            make
+            mingw-w64-i686-gcc
+
+      - name: Expose MSYS2 tools and MinGW runtime
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          printf '%s\n' 'C:\msys64\usr\bin' >> "$GITHUB_PATH"
+          printf '%s\n' 'C:\msys64\mingw32\bin' >> "$GITHUB_PATH"
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
@@ -200,17 +217,6 @@ jobs:
             make
             mingw-w64-i686-gcc
 
-      - name: Install Rust toolchain for Windows C++ integration smoke
-        if: runner.os == 'Windows'
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust dependencies for Windows C++ integration smoke
-        if: runner.os == 'Windows'
-        uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-          prefix-key: v1-windows-cpp-smoke
-
       - name: Run Linux C++ checks
         if: runner.os == 'Linux'
         run: |
@@ -243,14 +249,3 @@ jobs:
         run: |
           jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)"
           make -j"${jobs}" -C crates/remote-exec-daemon-cpp check-windows-xp
-          make -j"${jobs}" -C crates/remote-exec-daemon-cpp all-windows-native
-
-      - name: Expose MinGW runtime DLLs
-        if: runner.os == 'Windows'
-        shell: bash
-        run: echo "C:\\msys64\\mingw32\\bin" >> "$GITHUB_PATH"
-
-      - name: Run native Windows C++ daemon broker smoke
-        if: runner.os == 'Windows'
-        shell: bash
-        run: cargo test -p remote-exec-broker --test mcp_forward_ports_cpp windows_cpp_daemon_smoke -- --nocapture
