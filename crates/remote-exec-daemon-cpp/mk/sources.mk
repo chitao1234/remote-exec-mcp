@@ -200,15 +200,13 @@ HOST_SERVER_RUNTIME_SRCS = \
 	$(PORT_FORWARD_SRCS) \
 	$(BASE64_SRCS)
 
-HOST_SERVER_ROUTES_SRCS = \
-	$(SOURCE_PREFIX)tests/test_server_routes.cpp \
+SERVER_ROUTES_TEST_SUPPORT_SRCS = \
+	$(SOURCE_PREFIX)tests/test_server_routes_shared.cpp \
 	$(ROUTE_SRCS) \
 	$(SOURCE_PREFIX)src/http_codec.cpp \
 	$(SOURCE_PREFIX)src/http_helpers.cpp \
 	$(SOURCE_PREFIX)src/session_store.cpp \
 	$(SOURCE_PREFIX)src/session_pump.cpp \
-	$(SOURCE_PREFIX)src/process_session_posix.cpp \
-	$(POSIX_CHILD_REAPER_SRCS) \
 	$(SOURCE_PREFIX)src/platform.cpp \
 	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/shell_policy.cpp \
@@ -224,6 +222,16 @@ HOST_SERVER_ROUTES_SRCS = \
 	$(RPC_FAILURE_SRCS) \
 	$(PORT_FORWARD_SRCS) \
 	$(BASE64_SRCS)
+
+HOST_SERVER_ROUTES_SRCS = \
+	$(SOURCE_PREFIX)tests/test_server_routes.cpp \
+	$(SERVER_ROUTES_TEST_SUPPORT_SRCS) \
+	$(SOURCE_PREFIX)src/process_session_posix.cpp \
+	$(POSIX_CHILD_REAPER_SRCS)
+
+HOST_SERVER_ROUTES_COMMON_SRCS = \
+	$(SOURCE_PREFIX)tests/test_server_routes_common.cpp \
+	$(SERVER_ROUTES_TEST_SUPPORT_SRCS)
 
 HOST_SANDBOX_SRCS = \
 	$(SOURCE_PREFIX)tests/test_sandbox.cpp \
@@ -249,6 +257,9 @@ PLATFORM_NEUTRAL_TEST_SRCS = \
 
 WINDOWS_CAPABLE_PROCESS_TEST_SRCS = \
 	$(SOURCE_PREFIX)tests/test_session_store.cpp
+
+WINDOWS_CAPABLE_ROUTE_TEST_SRCS = \
+	$(HOST_SERVER_ROUTES_COMMON_SRCS)
 
 POSIX_ONLY_TEST_SRCS = \
 	$(HOST_SERVER_STREAMING_SRCS) \

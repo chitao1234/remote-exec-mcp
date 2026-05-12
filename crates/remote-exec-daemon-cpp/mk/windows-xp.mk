@@ -32,6 +32,7 @@ XP_CONFIG := $(BUILD_DIR)/test_config-xp.exe
 XP_HTTP_REQUEST := $(BUILD_DIR)/test_http_request-xp.exe
 XP_SERVER_TRANSPORT := $(BUILD_DIR)/test_server_transport-xp.exe
 XP_CONNECTION_MANAGER := $(BUILD_DIR)/test_connection_manager-xp.exe
+XP_SERVER_ROUTES_COMMON := $(BUILD_DIR)/test_server_routes_common-xp.exe
 XP_SANDBOX := $(BUILD_DIR)/test_sandbox-xp.exe
 XP_PORT_TUNNEL_FRAME := $(BUILD_DIR)/test_port_tunnel_frame-xp.exe
 
@@ -43,6 +44,7 @@ WINDOWS_XP_PLATFORM_NEUTRAL_TEST_TARGETS := \
 	$(XP_HTTP_REQUEST) \
 	$(XP_SERVER_TRANSPORT) \
 	$(XP_CONNECTION_MANAGER) \
+	$(XP_SERVER_ROUTES_COMMON) \
 	$(XP_SANDBOX) \
 	$(XP_PORT_TUNNEL_FRAME)
 
@@ -84,6 +86,12 @@ XP_SERVER_TRANSPORT_SRCS := $(HOST_SERVER_TRANSPORT_SRCS)
 
 XP_CONNECTION_MANAGER_SRCS := $(HOST_CONNECTION_MANAGER_SRCS)
 
+XP_SERVER_ROUTES_COMMON_SRCS := \
+	$(HOST_SERVER_ROUTES_COMMON_SRCS) \
+	$(MAKEFILE_DIR)src/process_session_win32.cpp \
+	$(MAKEFILE_DIR)src/console_output.cpp \
+	$(MAKEFILE_DIR)src/win32_error.cpp
+
 XP_SANDBOX_SRCS := $(HOST_SANDBOX_SRCS)
 
 XP_PORT_TUNNEL_FRAME_SRCS := $(HOST_PORT_TUNNEL_FRAME_SRCS)
@@ -97,6 +105,7 @@ XP_CONFIG_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_CONFIG_
 XP_HTTP_REQUEST_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_HTTP_REQUEST_SRCS)))
 XP_SERVER_TRANSPORT_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_SERVER_TRANSPORT_SRCS)))
 XP_CONNECTION_MANAGER_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_CONNECTION_MANAGER_SRCS)))
+XP_SERVER_ROUTES_COMMON_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_SERVER_ROUTES_COMMON_SRCS)))
 XP_SANDBOX_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_SANDBOX_SRCS)))
 XP_PORT_TUNNEL_FRAME_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_PORT_TUNNEL_FRAME_SRCS)))
 
@@ -110,6 +119,7 @@ DEP_FILES += \
 	$(XP_HTTP_REQUEST_OBJS:.o=.d) \
 	$(XP_SERVER_TRANSPORT_OBJS:.o=.d) \
 	$(XP_CONNECTION_MANAGER_OBJS:.o=.d) \
+	$(XP_SERVER_ROUTES_COMMON_OBJS:.o=.d) \
 	$(XP_SANDBOX_OBJS:.o=.d) \
 	$(XP_PORT_TUNNEL_FRAME_OBJS:.o=.d)
 
@@ -162,6 +172,9 @@ $(eval $(call link_windows_xp_test,$(XP_SERVER_TRANSPORT),$(XP_SERVER_TRANSPORT_
 $(eval $(call run_windows_xp_test,test-windows-xp-connection-manager,$(XP_CONNECTION_MANAGER)))
 $(eval $(call link_windows_xp_test,$(XP_CONNECTION_MANAGER),$(XP_CONNECTION_MANAGER_OBJS)))
 
+$(eval $(call run_windows_xp_test,test-windows-xp-server-routes-common,$(XP_SERVER_ROUTES_COMMON)))
+$(eval $(call link_windows_xp_test,$(XP_SERVER_ROUTES_COMMON),$(XP_SERVER_ROUTES_COMMON_OBJS)))
+
 $(eval $(call run_windows_xp_test,test-windows-xp-sandbox,$(XP_SANDBOX)))
 $(eval $(call link_windows_xp_test,$(XP_SANDBOX),$(XP_SANDBOX_OBJS)))
 
@@ -177,9 +190,10 @@ test-windows-xp: $(WINDOWS_XP_TEST_TARGETS)
 	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_HTTP_REQUEST)
 	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_SERVER_TRANSPORT)
 	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_CONNECTION_MANAGER)
+	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_SERVER_ROUTES_COMMON)
 	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_SANDBOX)
 	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_PORT_TUNNEL_FRAME)
 
 check-windows-xp: all-windows-xp test-windows-xp
 
-.PHONY: all-windows-xp test-windows-xp test-windows-xp-basic-mutex test-windows-xp-patch test-windows-xp-session-store test-windows-xp-transfer test-windows-xp-config test-windows-xp-http-request test-windows-xp-server-transport test-windows-xp-connection-manager test-windows-xp-sandbox test-windows-xp-port-tunnel-frame check-windows-xp
+.PHONY: all-windows-xp test-windows-xp test-windows-xp-basic-mutex test-windows-xp-patch test-windows-xp-session-store test-windows-xp-transfer test-windows-xp-config test-windows-xp-http-request test-windows-xp-server-transport test-windows-xp-connection-manager test-windows-xp-server-routes-common test-windows-xp-sandbox test-windows-xp-port-tunnel-frame check-windows-xp
