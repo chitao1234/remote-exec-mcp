@@ -33,7 +33,10 @@ PORT_FORWARD_SRCS = \
 	$(SOURCE_PREFIX)src/port_forward_socket_ops.cpp \
 	$(SOURCE_PREFIX)src/port_tunnel_frame.cpp \
 	$(SOURCE_PREFIX)src/port_tunnel.cpp \
+	$(SOURCE_PREFIX)src/port_tunnel_sender.cpp \
 	$(SOURCE_PREFIX)src/port_tunnel_session.cpp \
+	$(SOURCE_PREFIX)src/port_tunnel_spawn.cpp \
+	$(SOURCE_PREFIX)src/port_tunnel_streams.cpp \
 	$(SOURCE_PREFIX)src/port_tunnel_transport.cpp \
 	$(SOURCE_PREFIX)src/port_tunnel_tcp.cpp \
 	$(SOURCE_PREFIX)src/port_tunnel_udp.cpp \
