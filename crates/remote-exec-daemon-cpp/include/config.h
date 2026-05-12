@@ -26,33 +26,52 @@ static const unsigned long DEFAULT_PORT_FORWARD_CONNECT_TIMEOUT_MS = 10000UL;
 static const unsigned long DEFAULT_HTTP_CONNECTION_IDLE_TIMEOUT_MS = 30000UL;
 
 struct YieldTimeOperationConfig {
-    unsigned long default_ms = 0UL;
-    unsigned long max_ms = 0UL;
-    unsigned long min_ms = 0UL;
+    YieldTimeOperationConfig() : default_ms(0UL), max_ms(0UL), min_ms(0UL) {}
+
+    YieldTimeOperationConfig(unsigned long default_ms_value, unsigned long max_ms_value, unsigned long min_ms_value)
+        : default_ms(default_ms_value), max_ms(max_ms_value), min_ms(min_ms_value) {}
+
+    unsigned long default_ms;
+    unsigned long max_ms;
+    unsigned long min_ms;
 };
 
 struct YieldTimeConfig {
-    YieldTimeOperationConfig exec_command = YieldTimeOperationConfig{DEFAULT_YIELD_TIME_EXEC_COMMAND_DEFAULT_MS,
-                                                                     DEFAULT_YIELD_TIME_EXEC_COMMAND_MAX_MS,
-                                                                     DEFAULT_YIELD_TIME_EXEC_COMMAND_MIN_MS};
-    YieldTimeOperationConfig write_stdin_poll = YieldTimeOperationConfig{DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_DEFAULT_MS,
-                                                                         DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_MAX_MS,
-                                                                         DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_MIN_MS};
-    YieldTimeOperationConfig write_stdin_input =
-        YieldTimeOperationConfig{DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_DEFAULT_MS,
-                                 DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_MAX_MS,
-                                 DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_MIN_MS};
+    YieldTimeConfig()
+        : exec_command(DEFAULT_YIELD_TIME_EXEC_COMMAND_DEFAULT_MS,
+                       DEFAULT_YIELD_TIME_EXEC_COMMAND_MAX_MS,
+                       DEFAULT_YIELD_TIME_EXEC_COMMAND_MIN_MS),
+          write_stdin_poll(DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_DEFAULT_MS,
+                           DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_MAX_MS,
+                           DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_MIN_MS),
+          write_stdin_input(DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_DEFAULT_MS,
+                            DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_MAX_MS,
+                            DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_MIN_MS) {}
+
+    YieldTimeOperationConfig exec_command;
+    YieldTimeOperationConfig write_stdin_poll;
+    YieldTimeOperationConfig write_stdin_input;
 };
 
 struct PortForwardLimitConfig {
-    unsigned long max_worker_threads = DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS;
-    unsigned long max_retained_sessions = DEFAULT_PORT_FORWARD_MAX_RETAINED_SESSIONS;
-    unsigned long max_retained_listeners = DEFAULT_PORT_FORWARD_MAX_RETAINED_LISTENERS;
-    unsigned long max_udp_binds = DEFAULT_PORT_FORWARD_MAX_UDP_BINDS;
-    unsigned long max_active_tcp_streams = DEFAULT_PORT_FORWARD_MAX_ACTIVE_TCP_STREAMS;
-    unsigned long max_tunnel_queued_bytes = DEFAULT_PORT_FORWARD_MAX_TUNNEL_QUEUED_BYTES;
-    unsigned long tunnel_io_timeout_ms = DEFAULT_PORT_FORWARD_TUNNEL_IO_TIMEOUT_MS;
-    unsigned long connect_timeout_ms = DEFAULT_PORT_FORWARD_CONNECT_TIMEOUT_MS;
+    PortForwardLimitConfig()
+        : max_worker_threads(DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS),
+          max_retained_sessions(DEFAULT_PORT_FORWARD_MAX_RETAINED_SESSIONS),
+          max_retained_listeners(DEFAULT_PORT_FORWARD_MAX_RETAINED_LISTENERS),
+          max_udp_binds(DEFAULT_PORT_FORWARD_MAX_UDP_BINDS),
+          max_active_tcp_streams(DEFAULT_PORT_FORWARD_MAX_ACTIVE_TCP_STREAMS),
+          max_tunnel_queued_bytes(DEFAULT_PORT_FORWARD_MAX_TUNNEL_QUEUED_BYTES),
+          tunnel_io_timeout_ms(DEFAULT_PORT_FORWARD_TUNNEL_IO_TIMEOUT_MS),
+          connect_timeout_ms(DEFAULT_PORT_FORWARD_CONNECT_TIMEOUT_MS) {}
+
+    unsigned long max_worker_threads;
+    unsigned long max_retained_sessions;
+    unsigned long max_retained_listeners;
+    unsigned long max_udp_binds;
+    unsigned long max_active_tcp_streams;
+    unsigned long max_tunnel_queued_bytes;
+    unsigned long tunnel_io_timeout_ms;
+    unsigned long connect_timeout_ms;
 };
 
 struct DaemonConfig {

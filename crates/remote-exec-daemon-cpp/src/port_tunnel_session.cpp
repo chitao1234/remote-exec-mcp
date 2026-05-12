@@ -1,3 +1,5 @@
+#include <sstream>
+
 #include "port_tunnel_connection.h"
 #include "port_tunnel_service.h"
 
