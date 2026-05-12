@@ -31,6 +31,8 @@ does not require repository knowledge.
   `list_targets`.
 - If broker structured content is disabled, rely on normal text/image content.
   `apply_patch` is text-only either way.
+- Tool errors include `request_id`, `tool`, and `target` when known. Keep the
+  request ID for broker and daemon log correlation.
 
 ## First Moves
 
@@ -277,6 +279,8 @@ remote-exec --broker-url http://127.0.0.1:8787/mcp list-targets
   It does not start a long-running MCP broker.
 - `--broker-url URL` connects to a running streamable-HTTP broker.
 - Use `--json` to print the normalized tool response object.
+- Exit codes: `0` success, `2` usage/input, `3` broker config load/build, `4`
+  streamable-HTTP connection/transport, `5` MCP tool error.
 - For persistent `forward-ports`, prefer `--broker-url`; in `--broker-config`
   mode each CLI invocation has fresh broker memory.
 

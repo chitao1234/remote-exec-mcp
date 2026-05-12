@@ -288,6 +288,10 @@ cargo run -p remote-exec-broker --bin remote-exec -- \
 Use `--json` for normalized JSON output. Use `apply-patch --input-file -` and
 `write-stdin --chars-file -` to read payloads from stdin.
 
+CLI exit codes are `0` for success, `2` for usage/input errors, `3` for broker
+config load/build errors, `4` for streamable-HTTP connection or transport
+errors, and `5` for MCP tool errors returned by the broker.
+
 `--broker-config` mode builds broker state for one CLI invocation. Persistent
 port forwards require a long-running broker, so prefer `--broker-url` for
 `forward-ports open/list/close` workflows.
@@ -460,6 +464,8 @@ More C++ daemon details live in `crates/remote-exec-daemon-cpp/README.md`.
 Runtime components log to `stderr`.
 
 - The broker keeps `stdout` reserved for MCP stdio.
+- Broker tool errors include `request_id`, `tool`, and `target` when known;
+  use that request ID to correlate broker logs with daemon `x-request-id` logs.
 - Rust components read `REMOTE_EXEC_LOG` first, then `RUST_LOG`.
 - C++ daemon reads `REMOTE_EXEC_LOG` first, then `RUST_LOG`.
 - C++ daemon accepts a bare level such as `debug`, and shared filters such as

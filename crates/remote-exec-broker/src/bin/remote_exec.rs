@@ -18,6 +18,9 @@ Connection modes:
   --broker-config PATH   Load a broker config and call broker tools in-process.
   --broker-url URL       Connect to a running broker over streamable HTTP.
 
+Exit codes:
+  0 success, 2 usage/input, 3 config, 4 connection/transport, 5 tool error.
+
 Examples:
   remote-exec --broker-config configs/broker.example.toml list-targets
   remote-exec --broker-url http://127.0.0.1:8787/mcp exec --target builder-a \"uname -a\"
