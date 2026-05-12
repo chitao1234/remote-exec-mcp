@@ -161,27 +161,6 @@ static YieldTimeOperationConfig read_yield_time_operation(const ConfigValues& va
     return config;
 }
 
-YieldTimeConfig default_yield_time_config() {
-    YieldTimeConfig config;
-    config.exec_command = YieldTimeOperationConfig{10000UL, 30000UL, 250UL};
-    config.write_stdin_poll = YieldTimeOperationConfig{5000UL, 300000UL, 5000UL};
-    config.write_stdin_input = YieldTimeOperationConfig{250UL, 30000UL, 250UL};
-    return config;
-}
-
-PortForwardLimitConfig default_port_forward_limit_config() {
-    PortForwardLimitConfig config;
-    config.max_worker_threads = DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS;
-    config.max_retained_sessions = DEFAULT_PORT_FORWARD_MAX_RETAINED_SESSIONS;
-    config.max_retained_listeners = DEFAULT_PORT_FORWARD_MAX_RETAINED_LISTENERS;
-    config.max_udp_binds = DEFAULT_PORT_FORWARD_MAX_UDP_BINDS;
-    config.max_active_tcp_streams = DEFAULT_PORT_FORWARD_MAX_ACTIVE_TCP_STREAMS;
-    config.max_tunnel_queued_bytes = DEFAULT_PORT_FORWARD_MAX_TUNNEL_QUEUED_BYTES;
-    config.tunnel_io_timeout_ms = DEFAULT_PORT_FORWARD_TUNNEL_IO_TIMEOUT_MS;
-    config.connect_timeout_ms = DEFAULT_PORT_FORWARD_CONNECT_TIMEOUT_MS;
-    return config;
-}
-
 static void validate_port_forward_limit(unsigned long value, const std::string& key) {
     if (value == 0UL) {
         throw std::runtime_error(key + " must be greater than zero");
@@ -238,7 +217,7 @@ static std::string read_http_auth_bearer_token(const ConfigValues& values) {
 }
 
 static PortForwardLimitConfig read_port_forward_limits(const ConfigValues& values) {
-    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    PortForwardLimitConfig limits;
     limits.max_worker_threads =
         read_optional_unsigned_long(values, "port_forward_max_worker_threads", limits.max_worker_threads);
     limits.max_retained_sessions =
@@ -269,7 +248,7 @@ static void validate_port_forward_limits(const PortForwardLimitConfig& limits) {
 }
 
 static YieldTimeConfig read_yield_time_config(const ConfigValues& values) {
-    YieldTimeConfig config = default_yield_time_config();
+    YieldTimeConfig config;
     config.exec_command = read_yield_time_operation(values, "yield_time_exec_command", config.exec_command);
     config.write_stdin_poll = read_yield_time_operation(values, "yield_time_write_stdin_poll", config.write_stdin_poll);
     config.write_stdin_input =

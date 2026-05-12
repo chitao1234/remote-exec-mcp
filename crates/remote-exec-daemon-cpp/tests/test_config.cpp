@@ -32,6 +32,23 @@ static bool config_rejected(const fs::path& path) {
 int main() {
     const DaemonConfig default_config = DaemonConfig();
     assert(default_config.http_connection_idle_timeout_ms == DEFAULT_HTTP_CONNECTION_IDLE_TIMEOUT_MS);
+    assert(default_config.port_forward_limits.max_worker_threads == DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS);
+    assert(default_config.port_forward_limits.max_retained_sessions == DEFAULT_PORT_FORWARD_MAX_RETAINED_SESSIONS);
+    assert(default_config.port_forward_limits.max_retained_listeners == DEFAULT_PORT_FORWARD_MAX_RETAINED_LISTENERS);
+    assert(default_config.port_forward_limits.max_udp_binds == DEFAULT_PORT_FORWARD_MAX_UDP_BINDS);
+    assert(default_config.port_forward_limits.max_active_tcp_streams == DEFAULT_PORT_FORWARD_MAX_ACTIVE_TCP_STREAMS);
+    assert(default_config.port_forward_limits.max_tunnel_queued_bytes == DEFAULT_PORT_FORWARD_MAX_TUNNEL_QUEUED_BYTES);
+    assert(default_config.port_forward_limits.tunnel_io_timeout_ms == DEFAULT_PORT_FORWARD_TUNNEL_IO_TIMEOUT_MS);
+    assert(default_config.port_forward_limits.connect_timeout_ms == DEFAULT_PORT_FORWARD_CONNECT_TIMEOUT_MS);
+    assert(default_config.yield_time.exec_command.default_ms == DEFAULT_YIELD_TIME_EXEC_COMMAND_DEFAULT_MS);
+    assert(default_config.yield_time.exec_command.max_ms == DEFAULT_YIELD_TIME_EXEC_COMMAND_MAX_MS);
+    assert(default_config.yield_time.exec_command.min_ms == DEFAULT_YIELD_TIME_EXEC_COMMAND_MIN_MS);
+    assert(default_config.yield_time.write_stdin_poll.default_ms == DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_DEFAULT_MS);
+    assert(default_config.yield_time.write_stdin_poll.max_ms == DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_MAX_MS);
+    assert(default_config.yield_time.write_stdin_poll.min_ms == DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_MIN_MS);
+    assert(default_config.yield_time.write_stdin_input.default_ms == DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_DEFAULT_MS);
+    assert(default_config.yield_time.write_stdin_input.max_ms == DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_MAX_MS);
+    assert(default_config.yield_time.write_stdin_input.min_ms == DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_MIN_MS);
 
     const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-config-test";
     fs::remove_all(root);
@@ -134,14 +151,14 @@ int main() {
     assert(sandbox_config.sandbox.write.allow[0] == "/work");
     assert(sandbox_config.sandbox.write.deny[1] == "/work/readonly");
 
-    const YieldTimeConfig defaults = default_yield_time_config();
-    assert(resolve_yield_time_ms(defaults.exec_command, false, 0UL) == 10000UL);
+    const YieldTimeConfig defaults = YieldTimeConfig();
+    assert(resolve_yield_time_ms(defaults.exec_command, false, 0UL) == DEFAULT_YIELD_TIME_EXEC_COMMAND_DEFAULT_MS);
     assert(resolve_yield_time_ms(defaults.exec_command, true, 1UL) == 250UL);
-    assert(resolve_yield_time_ms(defaults.write_stdin_poll, false, 0UL) == 5000UL);
-    assert(resolve_yield_time_ms(defaults.write_stdin_poll, true, 1UL) == 5000UL);
-    assert(resolve_yield_time_ms(defaults.write_stdin_poll, true, 400000UL) == 300000UL);
-    assert(resolve_yield_time_ms(defaults.write_stdin_input, false, 0UL) == 250UL);
-    assert(resolve_yield_time_ms(defaults.write_stdin_input, true, 50000UL) == 30000UL);
+    assert(resolve_yield_time_ms(defaults.write_stdin_poll, false, 0UL) == DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_DEFAULT_MS);
+    assert(resolve_yield_time_ms(defaults.write_stdin_poll, true, 1UL) == DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_MIN_MS);
+    assert(resolve_yield_time_ms(defaults.write_stdin_poll, true, 400000UL) == DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_MAX_MS);
+    assert(resolve_yield_time_ms(defaults.write_stdin_input, false, 0UL) == DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_DEFAULT_MS);
+    assert(resolve_yield_time_ms(defaults.write_stdin_input, true, 50000UL) == DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_MAX_MS);
 
     const fs::path invalid_path = root / "invalid.ini";
     write_text(invalid_path, "target builder-cpp\n");

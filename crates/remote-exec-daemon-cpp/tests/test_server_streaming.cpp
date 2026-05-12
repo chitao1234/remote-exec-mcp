@@ -70,8 +70,6 @@ static DaemonConfig make_config(const fs::path& root) {
     config.max_request_body_bytes = 536870912;
     config.transfer_limits = default_transfer_limit_config();
     config.max_open_sessions = 64;
-    config.port_forward_limits = default_port_forward_limit_config();
-    config.yield_time = default_yield_time_config();
     return config;
 }
 
@@ -86,7 +84,7 @@ initialize_state_with_port_forward_limits(AppState& state, const fs::path& root,
 }
 
 static void initialize_state_with_worker_limit(AppState& state, const fs::path& root, unsigned long max_workers) {
-    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    PortForwardLimitConfig limits;
     limits.max_worker_threads = max_workers;
     initialize_state_with_port_forward_limits(state, root, limits);
 }
@@ -856,7 +854,7 @@ static void assert_retained_tcp_accept_worker_pressure_is_local_drop(const fs::p
 }
 
 static void assert_retained_tcp_accept_pressure_is_local_drop(const fs::path& root) {
-    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    PortForwardLimitConfig limits;
     limits.max_worker_threads = 3UL;
     limits.max_active_tcp_streams = 1UL;
 
@@ -896,7 +894,7 @@ static void assert_retained_tcp_accept_pressure_is_local_drop(const fs::path& ro
 }
 
 static void assert_tunnel_ready_reports_configured_limits(const fs::path& root) {
-    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    PortForwardLimitConfig limits;
     limits.max_worker_threads = 7UL;
     limits.max_retained_sessions = 2UL;
     limits.max_retained_listeners = 4UL;
@@ -1018,7 +1016,7 @@ static void assert_legacy_session_frames_are_reserved_but_unsupported(AppState& 
 }
 
 static void assert_retained_session_limit_is_enforced(const fs::path& root) {
-    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    PortForwardLimitConfig limits;
     limits.max_retained_sessions = 1UL;
 
     AppState state;
@@ -1040,7 +1038,7 @@ static void assert_retained_session_limit_is_enforced(const fs::path& root) {
 }
 
 static void assert_retained_listener_limit_is_enforced_and_released(const fs::path& root) {
-    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    PortForwardLimitConfig limits;
     limits.max_retained_sessions = 2UL;
     limits.max_retained_listeners = 1UL;
 
@@ -1070,7 +1068,7 @@ static void assert_retained_listener_limit_is_enforced_and_released(const fs::pa
 }
 
 static void assert_udp_bind_limit_is_enforced_and_released(const fs::path& root) {
-    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    PortForwardLimitConfig limits;
     limits.max_udp_binds = 1UL;
 
     AppState state;
@@ -1112,7 +1110,7 @@ static std::string closed_loopback_tcp_endpoint() {
 }
 
 static void assert_active_tcp_stream_limit_is_enforced_and_released(const fs::path& root) {
-    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    PortForwardLimitConfig limits;
     limits.max_active_tcp_streams = 1UL;
 
     AppState state;
@@ -1155,7 +1153,7 @@ static void assert_active_tcp_stream_limit_is_enforced_and_released(const fs::pa
 }
 
 static void assert_active_tcp_accept_limit_is_enforced_and_released(const fs::path& root) {
-    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    PortForwardLimitConfig limits;
     limits.max_active_tcp_streams = 1UL;
 
     AppState state;
@@ -1191,7 +1189,7 @@ static void assert_active_tcp_accept_limit_is_enforced_and_released(const fs::pa
 }
 
 static void assert_tunnel_queued_byte_limit_is_enforced(const fs::path& root) {
-    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    PortForwardLimitConfig limits;
     limits.max_tunnel_queued_bytes = 128UL;
 
     AppState state;
@@ -1217,7 +1215,7 @@ static void assert_tunnel_queued_byte_limit_is_enforced(const fs::path& root) {
 }
 
 static void assert_udp_queued_byte_pressure_reports_drop(const fs::path& root) {
-    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    PortForwardLimitConfig limits;
     limits.max_tunnel_queued_bytes = 128UL;
 
     AppState state;
@@ -1251,7 +1249,7 @@ static void assert_udp_queued_byte_pressure_reports_drop(const fs::path& root) {
 }
 
 static void assert_partial_tunnel_frame_times_out(const fs::path& root) {
-    PortForwardLimitConfig limits = default_port_forward_limit_config();
+    PortForwardLimitConfig limits;
     limits.tunnel_io_timeout_ms = 50UL;
 
     AppState state;

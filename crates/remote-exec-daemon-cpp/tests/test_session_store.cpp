@@ -874,7 +874,7 @@ int main() {
 #endif
     const fs::path root = make_test_root();
     SessionStore store;
-    const YieldTimeConfig yield_time = default_yield_time_config();
+    const YieldTimeConfig yield_time = YieldTimeConfig();
     const std::string shell = platform::resolve_default_shell("");
 
     assert_completed_command_output(store, root, shell, yield_time);
