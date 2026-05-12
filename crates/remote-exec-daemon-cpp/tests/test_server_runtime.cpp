@@ -1,14 +1,51 @@
 #include <cassert>
-#include <filesystem>
+#include <cstdint>
+#include <cstring>
 #include <sstream>
+#include <string>
 
+#ifdef _WIN32
+#include <ws2tcpip.h>
+#else
 #include <netdb.h>
 #include <sys/socket.h>
+#endif
 
+#include "test_filesystem.h"
 #include "platform.h"
 #include "server_runtime.h"
 
-namespace fs = std::filesystem;
+namespace fs = test_fs;
+
+static const unsigned long TEST_TIMEOUT_MS = 1000UL;
+
+static std::string read_all_from_socket(SOCKET socket) {
+    std::string output;
+    char buffer[4096];
+    for (;;) {
+        const int received = recv(socket, buffer, sizeof(buffer), 0);
+        if (received <= 0) {
+            break;
+        }
+        output.append(buffer, static_cast<std::size_t>(received));
+    }
+    return output;
+}
+
+static bool wait_for_active_connections(
+    ConnectionManager& manager,
+    unsigned long expected,
+    unsigned long timeout_ms
+) {
+    const std::uint64_t deadline = platform::monotonic_ms() + timeout_ms;
+    while (platform::monotonic_ms() < deadline) {
+        if (manager.active_count() == expected) {
+            return true;
+        }
+        platform::sleep_ms(10UL);
+    }
+    return manager.active_count() == expected;
+}
 
 static SOCKET connect_client(unsigned short port) {
     std::ostringstream service;
@@ -41,6 +78,24 @@ static SOCKET connect_client(unsigned short port) {
     return client;
 }
 
+static void assert_health_request(ServerRuntime& runtime, unsigned short port) {
+    UniqueSocket client(connect_client(port));
+    assert(wait_for_active_connections(runtime.connection_manager(), 1UL, TEST_TIMEOUT_MS));
+
+    send_all(
+        client.get(),
+        "POST /v1/health HTTP/1.1\r\n"
+        "Connection: close\r\n"
+        "Content-Length: 0\r\n"
+        "\r\n"
+    );
+
+    const std::string response = read_all_from_socket(client.get());
+    assert(response.find("HTTP/1.1 200 OK\r\n") == 0);
+    assert(response.find("\"status\":\"ok\"") != std::string::npos);
+    assert(wait_for_active_connections(runtime.connection_manager(), 0UL, TEST_TIMEOUT_MS));
+}
+
 int main() {
     NetworkSession network;
     const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-server-runtime-test";
@@ -64,14 +119,7 @@ int main() {
     runtime.start_accept_loop();
     const unsigned short port = runtime.bound_port();
     assert(port != 0);
-
-    UniqueSocket client(connect_client(port));
-    const std::uint64_t deadline = platform::monotonic_ms() + 1000UL;
-    while (runtime.connection_manager().active_count() == 0UL &&
-           platform::monotonic_ms() < deadline) {
-        platform::sleep_ms(10UL);
-    }
-    assert(runtime.connection_manager().active_count() == 1UL);
+    assert_health_request(runtime, port);
 
     runtime.request_shutdown();
     runtime.maintenance_once();
