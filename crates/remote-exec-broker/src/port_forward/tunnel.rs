@@ -3,9 +3,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use remote_exec_proto::port_tunnel::{
-    Frame, FrameType, HEADER_LEN, TunnelHeartbeatMeta,
-    decode_frame_meta as decode_port_tunnel_meta, encode_frame_meta as encode_port_tunnel_meta,
-    read_frame, write_frame, write_preface,
+    Frame, FrameType, TunnelHeartbeatMeta, decode_frame_meta as decode_port_tunnel_meta,
+    encode_frame_meta as encode_port_tunnel_meta, read_frame, write_frame, write_preface,
 };
 use remote_exec_proto::rpc::RpcErrorCode;
 use serde::Serialize;
@@ -334,12 +333,10 @@ pub(super) fn is_recoverable_pressure_tunnel_error(meta: &TunnelErrorMeta) -> bo
 }
 
 fn data_frame_charge(frame: &Frame) -> usize {
-    if frame.stream_id == 0 {
+    if !frame.is_stream_frame() {
         0
     } else {
-        HEADER_LEN
-            .saturating_add(frame.meta.len())
-            .saturating_add(frame.data.len())
+        frame.wire_len()
     }
 }
 

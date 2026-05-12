@@ -2,6 +2,8 @@ use remote_exec_proto::port_tunnel::Frame;
 
 use super::tunnel::is_retryable_transport_error;
 
+pub(super) use remote_exec_proto::port_tunnel::TunnelRole;
+
 pub(super) enum ForwardSideEvent {
     Frame(Frame),
     RetryableTransportLoss,
@@ -15,16 +17,6 @@ pub(super) struct TunnelErrorMeta {
     pub(super) message: String,
     pub(super) fatal: bool,
     pub(super) stream_id: u32,
-}
-
-#[allow(
-    dead_code,
-    reason = "Connect-side recovery is introduced in follow-up tasks"
-)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum TunnelRole {
-    Listen,
-    Connect,
 }
 
 pub(super) enum ForwardLoopControl {

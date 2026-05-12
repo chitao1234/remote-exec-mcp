@@ -200,6 +200,18 @@ pub struct Frame {
     pub data: Vec<u8>,
 }
 
+impl Frame {
+    pub fn is_stream_frame(&self) -> bool {
+        self.stream_id != 0
+    }
+
+    pub fn wire_len(&self) -> usize {
+        HEADER_LEN
+            .saturating_add(self.meta.len())
+            .saturating_add(self.data.len())
+    }
+}
+
 pub fn encode_frame_meta<T: Serialize>(meta: &T) -> Result<Vec<u8>, serde_json::Error> {
     serde_json::to_vec(meta)
 }
@@ -502,5 +514,28 @@ mod tests {
                 .map(crate::rpc::PortForwardProtocolVersion::get),
             Some(4)
         );
+    }
+
+    #[test]
+    fn frame_helpers_report_stream_scope_and_wire_length() {
+        let control = Frame {
+            frame_type: FrameType::TunnelHeartbeat,
+            flags: 0,
+            stream_id: 0,
+            meta: vec![1, 2],
+            data: Vec::new(),
+        };
+        assert!(!control.is_stream_frame());
+        assert_eq!(control.wire_len(), HEADER_LEN + 2);
+
+        let stream = Frame {
+            frame_type: FrameType::TcpData,
+            flags: 0,
+            stream_id: 7,
+            meta: vec![1, 2, 3],
+            data: vec![4, 5],
+        };
+        assert!(stream.is_stream_frame());
+        assert_eq!(stream.wire_len(), HEADER_LEN + 5);
     }
 }

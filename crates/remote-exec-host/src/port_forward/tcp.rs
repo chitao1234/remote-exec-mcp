@@ -30,6 +30,7 @@ use super::{
 };
 
 const TCP_CONTROL_SEND_TIMEOUT: Duration = Duration::from_secs(1);
+type TcpStreamMap = tokio::sync::Mutex<std::collections::HashMap<u32, TcpStreamEntry>>;
 
 fn spawn_tcp_writer_task(writer: OwnedWriteHalf, cancel: CancellationToken) -> TcpWriterHandle {
     let (tx, rx) = mpsc::channel(TCP_WRITE_QUEUE_FRAMES);
@@ -192,7 +193,7 @@ pub(super) async fn tunnel_tcp_accept_loop(session: Arc<SessionState>, listener:
                 }) {
                     Ok(meta) => meta,
                     Err(err) => {
-                        cancel_session_tcp_stream(&attachment, stream_id).await;
+                        cancel_tcp_stream(&attachment.tcp_streams, stream_id).await;
                         let _ = send_tunnel_error_code_with_sender(
                             &attachment.tx,
                             stream_id,
@@ -209,7 +210,7 @@ pub(super) async fn tunnel_tcp_accept_loop(session: Arc<SessionState>, listener:
             .await
             .is_err()
         {
-            cancel_session_tcp_stream(&attachment, stream_id).await;
+            cancel_tcp_stream(&attachment.tcp_streams, stream_id).await;
             return;
         }
         tokio::spawn(tunnel_tcp_read_loop_session_owned(
@@ -294,7 +295,7 @@ pub(super) async fn tunnel_tcp_read_loop_transport_owned(
     loop {
         let read = tokio::select! {
             _ = cancel.cancelled() => {
-                cleanup_transport_tcp_stream(&tunnel, stream_id).await;
+                cleanup_tcp_stream(&tunnel.tcp_streams, stream_id).await;
                 return;
             }
             read = reader.read(&mut buf) => read,
@@ -310,7 +311,7 @@ pub(super) async fn tunnel_tcp_read_loop_transport_owned(
                         data: Vec::new(),
                     })
                     .await;
-                clear_transport_tcp_cancel(&tunnel, stream_id).await;
+                clear_tcp_cancel(&tunnel.tcp_streams, stream_id).await;
                 return;
             }
             Ok(read) => {
@@ -332,7 +333,7 @@ pub(super) async fn tunnel_tcp_read_loop_transport_owned(
                         false,
                     )
                     .await;
-                    cancel_transport_tcp_stream(&tunnel, stream_id).await;
+                    cancel_tcp_stream(&tunnel.tcp_streams, stream_id).await;
                     return;
                 }
             }
@@ -345,7 +346,7 @@ pub(super) async fn tunnel_tcp_read_loop_transport_owned(
                     false,
                 )
                 .await;
-                cancel_transport_tcp_stream(&tunnel, stream_id).await;
+                cancel_tcp_stream(&tunnel.tcp_streams, stream_id).await;
                 return;
             }
         }
@@ -362,7 +363,7 @@ pub(super) async fn tunnel_tcp_read_loop_session_owned(
     loop {
         let read = tokio::select! {
             _ = cancel.cancelled() => {
-                cleanup_session_tcp_stream(&attachment, stream_id).await;
+                cleanup_tcp_stream(&attachment.tcp_streams, stream_id).await;
                 return;
             }
             read = reader.read(&mut buf) => read,
@@ -379,7 +380,7 @@ pub(super) async fn tunnel_tcp_read_loop_session_owned(
                         data: Vec::new(),
                     })
                     .await;
-                clear_session_tcp_cancel(&attachment, stream_id).await;
+                clear_tcp_cancel(&attachment.tcp_streams, stream_id).await;
                 return;
             }
             Ok(read) => {
@@ -402,7 +403,7 @@ pub(super) async fn tunnel_tcp_read_loop_session_owned(
                         false,
                     )
                     .await;
-                    cancel_session_tcp_stream(&attachment, stream_id).await;
+                    cancel_tcp_stream(&attachment.tcp_streams, stream_id).await;
                     return;
                 }
             }
@@ -415,7 +416,7 @@ pub(super) async fn tunnel_tcp_read_loop_session_owned(
                     false,
                 )
                 .await;
-                cancel_session_tcp_stream(&attachment, stream_id).await;
+                cancel_tcp_stream(&attachment.tcp_streams, stream_id).await;
                 return;
             }
         }
@@ -535,38 +536,20 @@ pub(super) async fn tunnel_tcp_data(
         })
 }
 
-async fn cleanup_transport_tcp_stream(tunnel: &TunnelState, stream_id: u32) {
-    let _ = tunnel.tcp_streams.lock().await.remove(&stream_id);
+async fn cleanup_tcp_stream(tcp_streams: &TcpStreamMap, stream_id: u32) {
+    let _ = tcp_streams.lock().await.remove(&stream_id);
 }
 
-async fn cancel_transport_tcp_stream(tunnel: &TunnelState, stream_id: u32) {
-    if let Some(mut stream) = tunnel.tcp_streams.lock().await.remove(&stream_id)
+async fn cancel_tcp_stream(tcp_streams: &TcpStreamMap, stream_id: u32) {
+    if let Some(mut stream) = tcp_streams.lock().await.remove(&stream_id)
         && let Some(cancel) = stream.cancel.take()
     {
         cancel.cancel();
     }
 }
 
-async fn cleanup_session_tcp_stream(attachment: &AttachmentState, stream_id: u32) {
-    let _ = attachment.tcp_streams.lock().await.remove(&stream_id);
-}
-
-async fn cancel_session_tcp_stream(attachment: &AttachmentState, stream_id: u32) {
-    if let Some(mut stream) = attachment.tcp_streams.lock().await.remove(&stream_id)
-        && let Some(cancel) = stream.cancel.take()
-    {
-        cancel.cancel();
-    }
-}
-
-async fn clear_transport_tcp_cancel(tunnel: &TunnelState, stream_id: u32) {
-    if let Some(stream) = tunnel.tcp_streams.lock().await.get_mut(&stream_id) {
-        stream.cancel = None;
-    }
-}
-
-async fn clear_session_tcp_cancel(attachment: &AttachmentState, stream_id: u32) {
-    if let Some(stream) = attachment.tcp_streams.lock().await.get_mut(&stream_id) {
+async fn clear_tcp_cancel(tcp_streams: &TcpStreamMap, stream_id: u32) {
+    if let Some(stream) = tcp_streams.lock().await.get_mut(&stream_id) {
         stream.cancel = None;
     }
 }
@@ -603,7 +586,7 @@ pub(super) async fn tunnel_tcp_eof(
             if let Some(writer) = writer
                 && send_tcp_shutdown(&writer).await
             {
-                clear_session_tcp_cancel(&attachment, stream_id).await;
+                clear_tcp_cancel(&attachment.tcp_streams, stream_id).await;
             }
         }
         TunnelMode::Connect {
@@ -620,7 +603,7 @@ pub(super) async fn tunnel_tcp_eof(
             if let Some(writer) = writer
                 && send_tcp_shutdown(&writer).await
             {
-                clear_transport_tcp_cancel(tunnel, stream_id).await;
+                clear_tcp_cancel(&tunnel.tcp_streams, stream_id).await;
             }
         }
         TunnelMode::Listen { .. } | TunnelMode::Connect { .. } | TunnelMode::Unopened => {}
@@ -642,7 +625,7 @@ pub(super) async fn tunnel_close_stream(
             session,
         } => {
             if let Some(attachment) = session.current_attachment().await {
-                cancel_session_tcp_stream(&attachment, stream_id).await;
+                cancel_tcp_stream(&attachment.tcp_streams, stream_id).await;
                 if let Some(reader) = attachment.udp_readers.lock().await.remove(&stream_id) {
                     reader.cancel.cancel();
                 }
@@ -659,7 +642,7 @@ pub(super) async fn tunnel_close_stream(
             }
         }
         TunnelMode::Connect { .. } => {
-            cancel_transport_tcp_stream(tunnel, stream_id).await;
+            cancel_tcp_stream(&tunnel.tcp_streams, stream_id).await;
             if let Some(bind) = tunnel.udp_binds.lock().await.remove(&stream_id) {
                 bind.cancel.cancel();
             }

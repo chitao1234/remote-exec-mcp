@@ -9,9 +9,7 @@ mod tunnel;
 mod types;
 mod udp;
 
-use remote_exec_proto::port_tunnel::{
-    ForwardDropKind, ForwardDropMeta, Frame, FrameType, HEADER_LEN,
-};
+use remote_exec_proto::port_tunnel::{ForwardDropKind, ForwardDropMeta, Frame, FrameType};
 use remote_exec_proto::rpc::RpcErrorCode;
 
 pub use session_store::TunnelSessionStore;
@@ -50,12 +48,10 @@ impl TunnelSender {
 }
 
 fn queued_frame_charge(frame: &Frame) -> usize {
-    if frame.data.is_empty() {
+    if !frame.is_stream_frame() || frame.data.is_empty() {
         0
     } else {
-        HEADER_LEN
-            .saturating_add(frame.meta.len())
-            .saturating_add(frame.data.len())
+        frame.wire_len()
     }
 }
 
