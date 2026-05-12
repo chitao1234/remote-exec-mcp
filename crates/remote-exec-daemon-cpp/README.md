@@ -31,9 +31,11 @@ Host-native POSIX daemon:
 Windows XP-compatible cross-build:
 
 - `make all-windows-xp`
-- `make check-windows-xp`
-- `make test-wine-session-store` and `make test-wine-transfer` when `wine` is
-  available; CI runs these on Linux after the XP cross-build.
+- `make check-windows-xp`; this runs XP test binaries under `wine` on Linux and
+  directly on Windows.
+- `make test-windows-xp` for the XP runtime tests without rebuilding the daemon.
+- `make test-windows-xp-session-store` and `make test-windows-xp-transfer` for
+  focused XP runtime tests.
 
 Host-native Windows MinGW build:
 
@@ -59,8 +61,8 @@ static C runtime (`/MT`) and links as an x86 console program with a Windows XP
 minimum subsystem version.
 
 Runtime coverage note: host-native POSIX C++ daemon runtime tests run on Unix.
-Windows XP-compatible binaries are compile-checked on Linux and Windows and are
-executed under Wine on Linux when Wine is available. CI also builds
+Windows XP-compatible binaries and tests run under Wine on Linux and run
+natively on Windows. CI also builds
 `build/remote-exec-daemon-cpp.exe` with host-native MinGW on `windows-latest`,
 exposes `C:\msys64\mingw32\bin` for the MinGW runtime DLLs, and runs the Rust
 broker `mcp_forward_ports_cpp::windows_cpp_daemon_smoke` integration test

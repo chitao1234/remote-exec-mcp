@@ -237,12 +237,6 @@ jobs:
             exit 1
           fi
 
-          if command -v wine >/dev/null 2>&1; then
-            make -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-windows-xp test-wine-session-store test-wine-transfer
-          else
-            echo "wine not available; skipping XP runtime tests"
-          fi
-
       - name: Run Windows C++ checks
         if: runner.os == 'Windows'
         shell: msys2 {0}
