@@ -468,6 +468,7 @@ expected_daemon_name = {expected_daemon_name}
             sandbox: None,
             enable_transfer_compression: true,
             transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
+            max_open_sessions: remote_exec_host::config::DEFAULT_MAX_OPEN_SESSIONS,
             allow_login_shell: true,
             pty: remote_exec_daemon::config::PtyMode::Auto,
             default_shell: None,

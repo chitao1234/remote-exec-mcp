@@ -403,8 +403,9 @@ for normal Rust targets. Plain HTTP requires explicit opt-in.
 - Broker startup probes run concurrently and are bounded by
   `timeouts.startup_probe_ms`.
 - Broker-daemon calls are bounded by per-target connect/read/request timeouts.
-- Daemon and broker-host session stores cap live exec sessions and prune old
-  sessions under pressure.
+- Rust daemon live exec sessions are capped by `max_open_sessions` and prune
+  older sessions under pressure, preferring completed sessions. Broker-host
+  local runtime uses the same default cap.
 - `forward_ports` open is all-or-nothing for a single tool call: failed
   initialization closes listeners created during that call.
 - Explicit `forward_ports` close reports an error if daemon-side cleanup cannot
@@ -431,6 +432,12 @@ The C++ daemon intentionally supports a smaller surface than the Rust daemon:
 - v4 `forward_ports` tunnel support
 - static path sandboxing for exec cwd, transfer read/write paths, patch write
   targets, and image reads
+
+The Rust and C++ daemons share the `max_open_sessions` default of 64. C++ also
+has daemon-local safety knobs for its handwritten HTTP parser and blocking
+forwarding worker model: `max_request_header_bytes`, `max_request_body_bytes`,
+`port_forward_max_worker_threads`, and `port_forward_tunnel_io_timeout_ms`.
+Those are deliberately C++-specific rather than hidden Rust equivalents.
 
 Build paths:
 

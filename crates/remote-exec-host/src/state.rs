@@ -73,6 +73,7 @@ pub fn build_runtime_state(mut config: HostRuntimeConfig) -> anyhow::Result<Host
         crate::exec::session::windows_pty_backend_override_for_mode(config.pty)?;
 
     let port_forward_limits = config.port_forward_limits;
+    let max_open_sessions = config.max_open_sessions;
 
     Ok(HostRuntimeState {
         config: Arc::new(config),
@@ -83,7 +84,7 @@ pub fn build_runtime_state(mut config: HostRuntimeConfig) -> anyhow::Result<Host
         windows_pty_backend_override,
         daemon_instance_id: crate::ids::new_instance_id().into_string(),
         shutdown: CancellationToken::new(),
-        sessions: crate::exec::store::SessionStore::new(64),
+        sessions: crate::exec::store::SessionStore::new(max_open_sessions),
         port_forward_sessions: crate::port_forward::TunnelSessionStore::default(),
         port_forward_limiter: Arc::new(crate::port_forward::PortForwardLimiter::new(
             port_forward_limits,

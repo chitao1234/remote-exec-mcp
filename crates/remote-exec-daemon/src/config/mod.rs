@@ -41,6 +41,8 @@ pub struct DaemonConfig {
     pub enable_transfer_compression: bool,
     #[serde(default)]
     pub transfer_limits: TransferLimits,
+    #[serde(default = "default_max_open_sessions")]
+    pub max_open_sessions: usize,
     #[serde(default = "default_allow_login_shell")]
     pub allow_login_shell: bool,
     #[serde(default)]
@@ -104,6 +106,7 @@ impl EmbeddedDaemonConfig {
             sandbox,
             enable_transfer_compression,
             transfer_limits,
+            max_open_sessions: default_max_open_sessions(),
             allow_login_shell,
             pty,
             default_shell,
@@ -183,6 +186,7 @@ impl From<DaemonConfig> for HostRuntimeConfig {
             sandbox: value.sandbox,
             enable_transfer_compression: value.enable_transfer_compression,
             transfer_limits: value.transfer_limits,
+            max_open_sessions: value.max_open_sessions,
             allow_login_shell: value.allow_login_shell,
             pty: value.pty,
             default_shell: value.default_shell,
@@ -205,4 +209,8 @@ fn default_allow_login_shell() -> bool {
 
 fn default_enable_transfer_compression() -> bool {
     true
+}
+
+fn default_max_open_sessions() -> usize {
+    remote_exec_host::config::DEFAULT_MAX_OPEN_SESSIONS
 }

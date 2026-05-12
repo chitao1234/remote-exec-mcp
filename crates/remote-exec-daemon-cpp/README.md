@@ -246,6 +246,12 @@ default_workdir = /work
 # sandbox_write_deny = /work/.git;/work/readonly
 ```
 
+`max_open_sessions` intentionally matches the Rust daemon default of 64. The
+request header/body byte limits are C++-specific because this daemon owns a
+handwritten HTTP parser, and `port_forward_max_worker_threads` plus
+`port_forward_tunnel_io_timeout_ms` are C++-specific because forwarding uses
+blocking socket workers.
+
 Sandbox rules mirror the Rust daemon's static allow/deny model:
 
 - `sandbox_exec_cwd_*` applies to the resolved starting `cwd` for `exec_command`.

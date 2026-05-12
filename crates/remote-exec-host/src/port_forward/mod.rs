@@ -1190,6 +1190,7 @@ mod port_tunnel_tests {
                 sandbox: None,
                 enable_transfer_compression: true,
                 transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
+                max_open_sessions: crate::config::DEFAULT_MAX_OPEN_SESSIONS,
                 allow_login_shell: true,
                 pty: PtyMode::None,
                 default_shell: None,

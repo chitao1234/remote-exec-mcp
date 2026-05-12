@@ -12,6 +12,8 @@ mod yield_time;
 pub use environment::ProcessEnvironment;
 pub use yield_time::{YieldTimeConfig, YieldTimeOperation, YieldTimeOperationConfig};
 
+pub const DEFAULT_MAX_OPEN_SESSIONS: usize = 64;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowsPtyBackendOverride {
     PortablePty,
@@ -36,6 +38,7 @@ pub struct HostRuntimeConfig {
     pub sandbox: Option<FilesystemSandbox>,
     pub enable_transfer_compression: bool,
     pub transfer_limits: TransferLimits,
+    pub max_open_sessions: usize,
     pub allow_login_shell: bool,
     pub pty: PtyMode,
     pub default_shell: Option<String>,
@@ -131,6 +134,7 @@ impl EmbeddedHostConfig {
             sandbox: self.sandbox,
             enable_transfer_compression: self.enable_transfer_compression,
             transfer_limits: self.transfer_limits,
+            max_open_sessions: DEFAULT_MAX_OPEN_SESSIONS,
             allow_login_shell: self.allow_login_shell,
             pty: self.pty,
             default_shell: self.default_shell,
@@ -169,6 +173,10 @@ impl HostRuntimeConfig {
         validate_existing_directory(&self.normalized_default_workdir(), "default_workdir")?;
         self.yield_time.validate()?;
         self.transfer_limits.validate()?;
+        anyhow::ensure!(
+            self.max_open_sessions > 0,
+            "max_open_sessions must be greater than zero"
+        );
         self.port_forward_limits.validate()?;
         Ok(())
     }

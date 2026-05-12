@@ -34,7 +34,64 @@ transport = "http"
     assert!(config.http_auth.is_none());
     assert!(config.tls.is_none());
     assert_eq!(config.yield_time, YieldTimeConfig::default());
+    assert_eq!(
+        config.max_open_sessions,
+        remote_exec_host::config::DEFAULT_MAX_OPEN_SESSIONS
+    );
     assert!(!config.experimental_apply_patch_target_encoding_autodetect);
+}
+
+#[tokio::test]
+async fn load_accepts_max_open_sessions_override() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("daemon.toml");
+    tokio::fs::write(
+        &config_path,
+        format!(
+            r#"
+target = "builder-a"
+listen = "127.0.0.1:8080"
+default_workdir = {}
+transport = "http"
+max_open_sessions = 7
+"#,
+            neutral_workdir(&dir)
+        ),
+    )
+    .await
+    .unwrap();
+
+    let config = DaemonConfig::load(&config_path).await.unwrap();
+    assert_eq!(config.max_open_sessions, 7);
+    assert_eq!(config.host_runtime_config().max_open_sessions, 7);
+}
+
+#[tokio::test]
+async fn load_rejects_zero_max_open_sessions() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("daemon.toml");
+    tokio::fs::write(
+        &config_path,
+        format!(
+            r#"
+target = "builder-a"
+listen = "127.0.0.1:8080"
+default_workdir = {}
+transport = "http"
+max_open_sessions = 0
+"#,
+            neutral_workdir(&dir)
+        ),
+    )
+    .await
+    .unwrap();
+
+    let err = DaemonConfig::load(&config_path).await.unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("max_open_sessions must be greater than zero"),
+        "unexpected error: {err}"
+    );
 }
 
 #[cfg(windows)]
