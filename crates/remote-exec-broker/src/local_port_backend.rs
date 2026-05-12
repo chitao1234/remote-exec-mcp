@@ -2,6 +2,8 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::Context;
 
+use crate::state::LOCAL_TARGET_NAME;
+
 #[derive(Clone)]
 pub struct LocalPortClient {
     state: Arc<remote_exec_host::HostRuntimeState>,
@@ -30,7 +32,7 @@ impl LocalPortClient {
 
 fn build_local_port_runtime() -> anyhow::Result<remote_exec_host::HostRuntimeState> {
     let config = remote_exec_host::EmbeddedHostConfig {
-        target: "local".to_string(),
+        target: LOCAL_TARGET_NAME.to_string(),
         default_workdir: std::env::current_dir()
             .context("resolving current directory for local port runtime")?,
         windows_posix_root: None,

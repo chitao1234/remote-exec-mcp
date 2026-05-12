@@ -7,6 +7,8 @@ use remote_exec_proto::public::{TransferDestinationMode, TransferEndpoint};
 use remote_exec_proto::rpc::{RpcErrorCode, TransferPathInfoRequest};
 use remote_exec_proto::transfer::TransferCompression;
 
+use crate::state::LOCAL_TARGET_NAME;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EndpointTargetContext {
     Local {
@@ -318,7 +320,7 @@ fn local_policy() -> PathPolicy {
 
 impl<'a> TransferEndpointTarget<'a> {
     pub(super) fn from_name(target_name: &'a str) -> Self {
-        if target_name == "local" {
+        if target_name == LOCAL_TARGET_NAME {
             Self::Local
         } else {
             Self::Remote(target_name)

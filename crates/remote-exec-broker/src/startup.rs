@@ -11,6 +11,7 @@ use crate::{
     daemon_client::{DaemonClient, DaemonClientError},
     local_backend::LocalDaemonClient,
     port_forward,
+    state::LOCAL_TARGET_NAME,
     session_store::SessionStore,
     target::{TargetBackend, TargetHandle, ensure_expected_daemon_name},
 };
@@ -77,10 +78,10 @@ async fn insert_local_target(
     let info = client.target_info().await?;
     log_local_target_enabled(&info);
     targets.insert(
-        "local".to_string(),
+        LOCAL_TARGET_NAME.to_string(),
         TargetHandle::verified(
             TargetBackend::Local(client),
-            Some("local".to_string()),
+            Some(LOCAL_TARGET_NAME.to_string()),
             &info,
         ),
     );
@@ -151,7 +152,7 @@ async fn build_remote_target_handle(
 
 fn log_local_target_enabled(info: &TargetInfoResponse) {
     tracing::info!(
-        target = "local",
+        target = LOCAL_TARGET_NAME,
         daemon_instance_id = %info.daemon_instance_id,
         platform = %info.platform,
         arch = %info.arch,

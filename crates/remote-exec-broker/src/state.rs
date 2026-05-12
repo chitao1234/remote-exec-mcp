@@ -6,6 +6,8 @@ use remote_exec_proto::transfer::TransferLimits;
 
 use crate::{port_forward, session_store::SessionStore, target::TargetHandle};
 
+pub(crate) const LOCAL_TARGET_NAME: &str = "local";
+
 #[derive(Clone)]
 pub struct BrokerState {
     pub enable_transfer_compression: bool,
@@ -26,7 +28,7 @@ impl BrokerState {
     }
 
     pub async fn forwarding_side(&self, name: &str) -> anyhow::Result<port_forward::SideHandle> {
-        if name == "local" && !self.targets.contains_key("local") {
+        if name == LOCAL_TARGET_NAME && !self.targets.contains_key(LOCAL_TARGET_NAME) {
             return port_forward::SideHandle::local();
         }
 
