@@ -32,11 +32,16 @@ Host-native POSIX daemon:
 Windows XP-compatible cross-build:
 
 - `make all-windows-xp`
-- `make check-windows-xp`; this runs XP test binaries under `wine` on Linux and
-  directly on Windows.
+- `make check-windows-xp`; this runs XP test binaries through
+  `WINDOWS_XP_TEST_RUNNER` when it is set, and directly when it is empty. The
+  default is `wine` on non-Windows hosts and empty on Windows.
 - `make test-windows-xp` for the XP runtime tests without rebuilding the daemon.
-- `make test-windows-xp-session-store` and `make test-windows-xp-transfer` for
-  focused XP runtime tests.
+- `make test-windows-xp-session-store`
+- `make test-windows-xp-transfer`
+- `make test-windows-xp-server-routes-common`
+- `make test-windows-xp-server-runtime`
+- `make test-windows-xp-server-transport`
+- `make test-windows-xp-connection-manager`
 
 Host-native Windows MinGW build:
 
@@ -49,8 +54,12 @@ Host-native Windows MSVC/NMAKE build:
 - `nmake /f NMakefile`
 - `nmake /f NMakefile all-msvc-native`
 - `nmake /f NMakefile check-msvc-native`
-- `nmake /f NMakefile test-msvc-native-session-store` and
-  `nmake /f NMakefile test-msvc-native-transfer` for focused runtime tests.
+- `nmake /f NMakefile test-msvc-native-session-store`
+- `nmake /f NMakefile test-msvc-native-transfer`
+- `nmake /f NMakefile test-msvc-native-server-routes-common`
+- `nmake /f NMakefile test-msvc-native-server-runtime`
+- `nmake /f NMakefile test-msvc-native-server-transport`
+- `nmake /f NMakefile test-msvc-native-connection-manager`
 
 Windows XP-compatible MSVC/NMAKE build:
 
@@ -58,8 +67,12 @@ Windows XP-compatible MSVC/NMAKE build:
   toolset, such as `vcvarsall.bat x86 -vcvars_ver=14.16`.
 - `nmake /f NMakefile all-msvc-xp`
 - `nmake /f NMakefile check-msvc-xp`
-- `nmake /f NMakefile test-msvc-xp-session-store` and
-  `nmake /f NMakefile test-msvc-xp-transfer` for focused runtime tests.
+- `nmake /f NMakefile test-msvc-xp-session-store`
+- `nmake /f NMakefile test-msvc-xp-transfer`
+- `nmake /f NMakefile test-msvc-xp-server-routes-common`
+- `nmake /f NMakefile test-msvc-xp-server-runtime`
+- `nmake /f NMakefile test-msvc-xp-server-transport`
+- `nmake /f NMakefile test-msvc-xp-connection-manager`
 
 The top-level `GNUmakefile` is the GNU make public entry point. Shared source
 lists live in `mk/sources.mk`, shared GNU make helpers live in `mk/common.mk`,
@@ -104,7 +117,10 @@ Use the same target names with `bmake ...` for the BSD make path.
 - `make test-host-transfer`
 - `make test-host-config`
 - `make test-host-http-request`
+- `make test-host-server-transport`
 - `make test-host-session-store`
+- `make test-host-connection-manager`
+- `make test-host-server-runtime`
 - `make test-host-server-routes`
 - `make test-host-server-streaming`
 - `make test-host-sandbox`

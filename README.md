@@ -452,6 +452,11 @@ make -C crates/remote-exec-daemon-cpp check-windows-xp
 bmake -C crates/remote-exec-daemon-cpp check-posix
 ```
 
+`check-windows-xp` runs the Windows-capable C++ runtime suite through
+`WINDOWS_XP_TEST_RUNNER` when that variable is set and directly when it is
+empty. The GNU make default is `wine` on non-Windows hosts and empty on
+Windows.
+
 From an x86 Visual Studio developer prompt:
 
 ```bat
@@ -516,7 +521,10 @@ cargo test -p remote-exec-broker --test mcp_forward_ports -- --nocapture
 cargo test -p remote-exec-daemon --test transfer_rpc -- --nocapture
 cargo test -p remote-exec-daemon --test port_forward_rpc -- --nocapture
 make -C crates/remote-exec-daemon-cpp test-host-transfer
+make -C crates/remote-exec-daemon-cpp test-host-server-runtime
 make -C crates/remote-exec-daemon-cpp test-host-server-streaming
+make -C crates/remote-exec-daemon-cpp test-windows-xp-server-runtime
+make -C crates/remote-exec-daemon-cpp test-windows-xp-server-routes-common
 ```
 
 No-default-features checks:
