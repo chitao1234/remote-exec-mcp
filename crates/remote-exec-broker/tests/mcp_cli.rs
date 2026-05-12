@@ -11,6 +11,16 @@ async fn run_cli(args: &[&str]) -> std::process::Output {
         .unwrap()
 }
 
+fn assert_exit_code(output: &std::process::Output, expected: i32) {
+    assert_eq!(
+        output.status.code(),
+        Some(expected),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[tokio::test]
 async fn remote_exec_cli_lists_targets_from_broker_config() {
     let fixture = support::spawners::spawn_broker_config_with_stub_daemon().await;
@@ -58,6 +68,86 @@ async fn remote_exec_cli_rejects_removed_broker_bin_flag() {
     );
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("--broker-bin"),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[tokio::test]
+async fn remote_exec_cli_returns_usage_code_for_input_errors() {
+    let fixture = support::spawners::spawn_broker_config_with_stub_daemon().await;
+    let missing_patch = fixture._tempdir.path().join("missing.patch");
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec"))
+        .arg("--broker-config")
+        .arg(&fixture.config_path)
+        .arg("apply-patch")
+        .arg("--target")
+        .arg("builder-a")
+        .arg("--input-file")
+        .arg(&missing_patch)
+        .output()
+        .await
+        .unwrap();
+
+    assert_exit_code(&output, 2);
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("reading"),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[tokio::test]
+async fn remote_exec_cli_returns_config_code_for_config_errors() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let missing_config = tempdir.path().join("missing-broker.toml");
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec"))
+        .arg("--broker-config")
+        .arg(&missing_config)
+        .arg("list-targets")
+        .output()
+        .await
+        .unwrap();
+
+    assert_exit_code(&output, 3);
+}
+
+#[tokio::test]
+async fn remote_exec_cli_returns_connection_code_for_broker_transport_errors() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/mcp", listener.local_addr().unwrap());
+    drop(listener);
+
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec"))
+        .arg("--broker-url")
+        .arg(url)
+        .arg("list-targets")
+        .output()
+        .await
+        .unwrap();
+
+    assert_exit_code(&output, 4);
+}
+
+#[tokio::test]
+async fn remote_exec_cli_returns_tool_code_for_tool_errors() {
+    let fixture = support::spawners::spawn_broker_config_with_stub_daemon().await;
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec"))
+        .arg("--broker-config")
+        .arg(&fixture.config_path)
+        .arg("exec-command")
+        .arg("--target")
+        .arg("missing-target")
+        .arg("printf nope")
+        .output()
+        .await
+        .unwrap();
+
+    assert_exit_code(&output, 5);
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("missing-target"),
         "stdout:\n{}\n\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)

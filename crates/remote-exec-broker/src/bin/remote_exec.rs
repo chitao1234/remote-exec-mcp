@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 
 use anyhow::Context;
 use base64::Engine;
@@ -27,6 +28,43 @@ Endpoint format: <target>:<absolute-path>
 Repeat --source to transfer multiple inputs.
 For multi-source transfers, the destination path is treated as a directory root.
 ";
+
+const EXIT_SUCCESS: u8 = 0;
+const EXIT_USAGE: u8 = 2;
+const EXIT_CONFIG: u8 = 3;
+const EXIT_CONNECTION: u8 = 4;
+const EXIT_TOOL: u8 = 5;
+
+type CliResult<T> = Result<T, CliError>;
+
+#[derive(Debug)]
+struct CliError {
+    exit_code: u8,
+    error: anyhow::Error,
+}
+
+impl CliError {
+    fn usage(error: anyhow::Error) -> Self {
+        Self {
+            exit_code: EXIT_USAGE,
+            error,
+        }
+    }
+
+    fn config(error: anyhow::Error) -> Self {
+        Self {
+            exit_code: EXIT_CONFIG,
+            error,
+        }
+    }
+
+    fn connection(error: anyhow::Error) -> Self {
+        Self {
+            exit_code: EXIT_CONNECTION,
+            error,
+        }
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "remote-exec")]
@@ -386,20 +424,31 @@ impl From<CliTransferSymlinkMode> for TransferSymlinkMode {
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
-    let connection = cli.connection.resolve()?;
-    let client = RemoteExecClient::connect(connection).await?;
-    let exit_code = run_command(&client, cli.command, cli.json).await?;
-
-    std::process::exit(exit_code);
+async fn main() -> ExitCode {
+    let exit_code = match try_main().await {
+        Ok(exit_code) => exit_code,
+        Err(err) => {
+            eprintln!("{:#}", err.error);
+            err.exit_code
+        }
+    };
+    ExitCode::from(exit_code)
 }
 
-async fn run_command(
-    client: &RemoteExecClient,
-    command: Command,
-    json: bool,
-) -> anyhow::Result<i32> {
+async fn try_main() -> CliResult<u8> {
+    let cli = Cli::parse();
+    let connection = cli.connection.resolve().map_err(CliError::usage)?;
+    let client = RemoteExecClient::connect(connection.clone())
+        .await
+        .map_err(|err| match connection {
+            Connection::Config { .. } => CliError::config(err),
+            Connection::StreamableHttp { .. } => CliError::connection(err),
+        })?;
+    let exit_code = run_command(&client, cli.command, cli.json).await?;
+    Ok(exit_code)
+}
+
+async fn run_command(client: &RemoteExecClient, command: Command, json: bool) -> CliResult<u8> {
     match command {
         Command::ListTargets => run_list_targets(client, json).await,
         Command::Exec(args) => run_exec(client, args, json).await,
@@ -411,21 +460,19 @@ async fn run_command(
     }
 }
 
-async fn run_list_targets(client: &RemoteExecClient, json: bool) -> anyhow::Result<i32> {
+async fn run_list_targets(client: &RemoteExecClient, json: bool) -> CliResult<u8> {
     let response = client
         .call_tool("list_targets", &ListTargetsInput::default())
-        .await?;
+        .await
+        .map_err(CliError::connection)?;
     emit_and_status(&response, json)
 }
 
-async fn run_exec(
-    client: &RemoteExecClient,
-    args: ExecCommandArgs,
-    json: bool,
-) -> anyhow::Result<i32> {
+async fn run_exec(client: &RemoteExecClient, args: ExecCommandArgs, json: bool) -> CliResult<u8> {
     let response = client
         .call_tool("exec_command", &exec_command_input(args))
-        .await?;
+        .await
+        .map_err(CliError::connection)?;
     emit_and_status(&response, json)
 }
 
@@ -433,10 +480,12 @@ async fn run_write_stdin(
     client: &RemoteExecClient,
     args: WriteStdinArgs,
     json: bool,
-) -> anyhow::Result<i32> {
+) -> CliResult<u8> {
+    let input = write_stdin_input(args).await.map_err(CliError::usage)?;
     let response = client
-        .call_tool("write_stdin", &write_stdin_input(args).await?)
-        .await?;
+        .call_tool("write_stdin", &input)
+        .await
+        .map_err(CliError::connection)?;
     emit_and_status(&response, json)
 }
 
@@ -444,10 +493,12 @@ async fn run_apply_patch(
     client: &RemoteExecClient,
     args: ApplyPatchArgs,
     json: bool,
-) -> anyhow::Result<i32> {
+) -> CliResult<u8> {
+    let input = apply_patch_input(args).await.map_err(CliError::usage)?;
     let response = client
-        .call_tool("apply_patch", &apply_patch_input(args).await?)
-        .await?;
+        .call_tool("apply_patch", &input)
+        .await
+        .map_err(CliError::connection)?;
     emit_and_status(&response, json)
 }
 
@@ -455,17 +506,20 @@ async fn run_view_image(
     client: &RemoteExecClient,
     args: ViewImageArgs,
     json: bool,
-) -> anyhow::Result<i32> {
+) -> CliResult<u8> {
     let output_path = args.out.clone();
     let response = client
         .call_tool("view_image", &view_image_input(args))
-        .await?;
+        .await
+        .map_err(CliError::connection)?;
     if !response.is_error {
         if let Some(out) = &output_path {
-            write_image_output(&response, out).await?;
+            write_image_output(&response, out)
+                .await
+                .map_err(CliError::usage)?;
         }
     }
-    emit_view_image_response(&response, json, output_path.as_deref())?;
+    emit_view_image_response(&response, json, output_path.as_deref()).map_err(CliError::usage)?;
     Ok(status_code(&response))
 }
 
@@ -473,10 +527,12 @@ async fn run_transfer_files(
     client: &RemoteExecClient,
     args: TransferFilesArgs,
     json: bool,
-) -> anyhow::Result<i32> {
+) -> CliResult<u8> {
+    let input = transfer_files_input(args).map_err(CliError::usage)?;
     let response = client
-        .call_tool("transfer_files", &transfer_files_input(args)?)
-        .await?;
+        .call_tool("transfer_files", &input)
+        .await
+        .map_err(CliError::connection)?;
     emit_and_status(&response, json)
 }
 
@@ -484,10 +540,12 @@ async fn run_forward_ports(
     client: &RemoteExecClient,
     args: ForwardPortsArgs,
     json: bool,
-) -> anyhow::Result<i32> {
+) -> CliResult<u8> {
+    let input = forward_ports_input(args).map_err(CliError::usage)?;
     let response = client
-        .call_tool("forward_ports", &forward_ports_input(args)?)
-        .await?;
+        .call_tool("forward_ports", &input)
+        .await
+        .map_err(CliError::connection)?;
     emit_and_status(&response, json)
 }
 
@@ -711,8 +769,8 @@ fn emit_response(response: &ToolResponse, json: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn emit_and_status(response: &ToolResponse, json: bool) -> anyhow::Result<i32> {
-    emit_response(response, json)?;
+fn emit_and_status(response: &ToolResponse, json: bool) -> CliResult<u8> {
+    emit_response(response, json).map_err(CliError::usage)?;
     Ok(status_code(response))
 }
 
@@ -765,6 +823,10 @@ fn decode_data_url(image_url: &str) -> anyhow::Result<Vec<u8>> {
         .context("decoding image data URL")
 }
 
-fn status_code(response: &ToolResponse) -> i32 {
-    if response.is_error { 1 } else { 0 }
+fn status_code(response: &ToolResponse) -> u8 {
+    if response.is_error {
+        EXIT_TOOL
+    } else {
+        EXIT_SUCCESS
+    }
 }
