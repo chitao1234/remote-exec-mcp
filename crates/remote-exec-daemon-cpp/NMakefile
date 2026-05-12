@@ -94,13 +94,21 @@ MSVC_WIN32_TRANSFER_TEST_SRCS= \
     $(TRANSFER_SRCS) \
     $(RPC_FAILURE_SRCS)
 
+MSVC_NATIVE_TEST_PHONY_TARGETS= \
+    test-msvc-native-session-store \
+    test-msvc-native-transfer
+
+MSVC_XP_TEST_PHONY_TARGETS= \
+    test-msvc-xp-session-store \
+    test-msvc-xp-transfer
+
 all: all-msvc-native
 
 all-msvc-native: $(MSVC_NATIVE_TARGET)
 
 all-msvc-xp: $(MSVC_XP_TARGET)
 
-test-msvc-native: test-msvc-native-session-store test-msvc-native-transfer
+test-msvc-native: $(MSVC_NATIVE_TEST_PHONY_TARGETS)
 
 test-msvc-native-session-store: $(MSVC_NATIVE_SESSION_STORE_TEST)
 	@set "REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL)" && "$(MSVC_NATIVE_SESSION_STORE_TEST)"
@@ -108,7 +116,7 @@ test-msvc-native-session-store: $(MSVC_NATIVE_SESSION_STORE_TEST)
 test-msvc-native-transfer: $(MSVC_NATIVE_TRANSFER_TEST)
 	@set "REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL)" && "$(MSVC_NATIVE_TRANSFER_TEST)"
 
-test-msvc-xp: test-msvc-xp-session-store test-msvc-xp-transfer
+test-msvc-xp: $(MSVC_XP_TEST_PHONY_TARGETS)
 
 test-msvc-xp-session-store: $(MSVC_XP_SESSION_STORE_TEST)
 	@set "REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL)" && "$(MSVC_XP_SESSION_STORE_TEST)"

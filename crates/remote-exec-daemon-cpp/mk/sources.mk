@@ -232,3 +232,25 @@ HOST_SANDBOX_SRCS = \
 HOST_PORT_TUNNEL_FRAME_SRCS = \
 	$(SOURCE_PREFIX)tests/test_port_tunnel_frame.cpp \
 	$(SOURCE_PREFIX)src/port_tunnel_frame.cpp
+
+# Test source groups by portability. POSIX make currently builds every host
+# test; Windows makefiles consume the Windows-capable groups as those tests are
+# made portable.
+PLATFORM_NEUTRAL_TEST_SRCS = \
+	$(HOST_PATCH_SRCS) \
+	$(HOST_TRANSFER_SRCS) \
+	$(HOST_CONFIG_SRCS) \
+	$(HOST_BASIC_MUTEX_SRCS) \
+	$(HOST_HTTP_REQUEST_SRCS) \
+	$(HOST_SANDBOX_SRCS) \
+	$(HOST_PORT_TUNNEL_FRAME_SRCS)
+
+WINDOWS_CAPABLE_PROCESS_TEST_SRCS = \
+	$(SOURCE_PREFIX)tests/test_session_store.cpp
+
+POSIX_ONLY_TEST_SRCS = \
+	$(HOST_SERVER_TRANSPORT_SRCS) \
+	$(HOST_SERVER_STREAMING_SRCS) \
+	$(HOST_CONNECTION_MANAGER_SRCS) \
+	$(HOST_SERVER_RUNTIME_SRCS) \
+	$(HOST_SERVER_ROUTES_SRCS)
