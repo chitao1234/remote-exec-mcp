@@ -1,9 +1,19 @@
+use std::fmt;
+
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 pub struct HttpAuthConfig {
     pub bearer_token: String,
+}
+
+impl fmt::Debug for HttpAuthConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HttpAuthConfig")
+            .field("bearer_token", &"<redacted>")
+            .finish()
+    }
 }
 
 impl HttpAuthConfig {
@@ -39,6 +49,20 @@ mod tests {
             bearer_token: "shared-secret".to_string(),
         };
         assert_eq!(config.authorization_header_value(), "Bearer shared-secret");
+    }
+
+    #[test]
+    fn debug_redacts_bearer_token() {
+        let config = HttpAuthConfig {
+            bearer_token: "shared-secret".to_string(),
+        };
+
+        let debug = format!("{config:?}");
+
+        assert!(debug.contains("HttpAuthConfig"));
+        assert!(debug.contains("bearer_token"));
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("shared-secret"));
     }
 
     #[test]
