@@ -1,4 +1,6 @@
-#include "port_tunnel_internal.h"
+#include "port_tunnel.h"
+#include "port_tunnel_connection.h"
+#include "port_tunnel_service.h"
 
 #include <limits>
 
@@ -300,6 +302,10 @@ int handle_port_tunnel_upgrade(AppState& state, SOCKET client, const HttpRequest
     tunnel->run();
     return 101;
 }
+
+PortTunnelConnection::PortTunnelConnection(SOCKET client, const std::shared_ptr<PortTunnelService>& service)
+    : client_(client), service_(service), sender_(new PortTunnelSender(client, service)), generation_(0ULL),
+      mode_(PortTunnelMode::Unopened), protocol_(PortTunnelProtocol::None) {}
 
 bool PortTunnelConnection::read_exact(unsigned char* data, std::size_t size) {
     std::size_t offset = 0;

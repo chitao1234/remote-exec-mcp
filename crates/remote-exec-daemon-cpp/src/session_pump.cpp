@@ -7,6 +7,7 @@
 #include "logging.h"
 #include "platform.h"
 #include "process_session.h"
+#include "session_pump_internal.h"
 #ifdef _WIN32
 #include "win32_thread.h"
 #endif

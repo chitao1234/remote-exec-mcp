@@ -1,4 +1,5 @@
-#include "port_tunnel_internal.h"
+#include "port_tunnel_connection.h"
+#include "port_tunnel_service.h"
 
 namespace {
 

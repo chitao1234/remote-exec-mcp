@@ -43,6 +43,10 @@ BASE64_SRCS = $(SOURCE_PREFIX)src/base64_codec.cpp
 
 PATH_UTILS_SRCS = $(SOURCE_PREFIX)src/path_utils.cpp
 
+SESSION_STORE_SUPPORT_SRCS = \
+	$(SOURCE_PREFIX)src/output_renderer.cpp \
+	$(SOURCE_PREFIX)src/session_response_builder.cpp
+
 BASE_SRCS = \
 	$(SOURCE_PREFIX)src/config.cpp \
 	$(SOURCE_PREFIX)src/http_codec.cpp \
@@ -58,6 +62,7 @@ BASE_SRCS = \
 	$(SOURCE_PREFIX)src/server_request_utils.cpp \
 	$(SOURCE_PREFIX)src/server_runtime.cpp \
 	$(SOURCE_PREFIX)src/server_transport.cpp \
+	$(SESSION_STORE_SUPPORT_SRCS) \
 	$(SOURCE_PREFIX)src/session_store.cpp \
 	$(SOURCE_PREFIX)src/session_pump.cpp \
 	$(SOURCE_PREFIX)src/patch_engine.cpp \
@@ -124,6 +129,7 @@ HOST_SERVER_STREAMING_SRCS = \
 	$(SOURCE_PREFIX)src/http_connection.cpp \
 	$(SOURCE_PREFIX)src/http_helpers.cpp \
 	$(SOURCE_PREFIX)src/http_request.cpp \
+	$(SESSION_STORE_SUPPORT_SRCS) \
 	$(SOURCE_PREFIX)src/session_store.cpp \
 	$(SOURCE_PREFIX)src/session_pump.cpp \
 	$(SOURCE_PREFIX)src/process_session_posix.cpp \
@@ -146,6 +152,7 @@ HOST_SERVER_STREAMING_SRCS = \
 
 HOST_SESSION_STORE_SRCS = \
 	$(SOURCE_PREFIX)tests/test_session_store.cpp \
+	$(SESSION_STORE_SUPPORT_SRCS) \
 	$(SOURCE_PREFIX)src/session_store.cpp \
 	$(SOURCE_PREFIX)src/session_pump.cpp \
 	$(SOURCE_PREFIX)src/process_session_posix.cpp \
@@ -180,6 +187,7 @@ SERVER_RUNTIME_TEST_SUPPORT_SRCS = \
 	$(SOURCE_PREFIX)src/http_request.cpp \
 	$(SOURCE_PREFIX)src/http_codec.cpp \
 	$(SOURCE_PREFIX)src/http_helpers.cpp \
+	$(SESSION_STORE_SUPPORT_SRCS) \
 	$(SOURCE_PREFIX)src/session_store.cpp \
 	$(SOURCE_PREFIX)src/session_pump.cpp \
 	$(SOURCE_PREFIX)src/platform.cpp \
@@ -203,6 +211,7 @@ SERVER_ROUTES_TEST_SUPPORT_SRCS = \
 	$(ROUTE_SRCS) \
 	$(SOURCE_PREFIX)src/http_codec.cpp \
 	$(SOURCE_PREFIX)src/http_helpers.cpp \
+	$(SESSION_STORE_SUPPORT_SRCS) \
 	$(SOURCE_PREFIX)src/session_store.cpp \
 	$(SOURCE_PREFIX)src/session_pump.cpp \
 	$(SOURCE_PREFIX)src/platform.cpp \

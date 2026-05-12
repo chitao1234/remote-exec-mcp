@@ -1,4 +1,5 @@
-#include "port_tunnel_internal.h"
+#include "port_tunnel_connection.h"
+#include "port_tunnel_service.h"
 
 void PortTunnelConnection::send_error(uint32_t stream_id, const std::string& code, const std::string& message) {
     PortTunnelFrame frame;

@@ -1,4 +1,5 @@
-#include "port_tunnel_internal.h"
+#include "port_tunnel_connection.h"
+#include "port_tunnel_service.h"
 
 bool PortTunnelService::spawn_udp_bind_loop(const std::shared_ptr<PortTunnelSession>& session,
                                             uint32_t stream_id,

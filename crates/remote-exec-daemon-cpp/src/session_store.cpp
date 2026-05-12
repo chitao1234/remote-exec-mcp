@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <sstream>
@@ -6,21 +5,18 @@
 #include <vector>
 
 #include "logging.h"
+#include "output_renderer.h"
 #include "platform.h"
 #include "process_session.h"
 #include "session_pump.h"
+#include "session_pump_internal.h"
+#include "session_response_builder.h"
 #include "session_store.h"
 
 namespace {
 
 std::atomic<unsigned long> next_id(1UL);
 std::atomic<std::uint64_t> next_touch_order(1ULL);
-
-std::string make_chunk_id() {
-    std::ostringstream out;
-    out << platform::monotonic_ms() << '-' << next_id.fetch_add(1UL);
-    return out.str();
-}
 
 std::string make_exec_session_id() {
     std::ostringstream out;
@@ -55,133 +51,6 @@ struct SessionSnapshot {
     int exit_code;
     std::uint64_t generation;
 };
-
-const std::size_t BYTES_PER_TOKEN = 4U;
-
-unsigned long approximate_token_count(std::size_t bytes) {
-    if (bytes == 0U) {
-        return 0UL;
-    }
-    return static_cast<unsigned long>((bytes + BYTES_PER_TOKEN - 1U) / BYTES_PER_TOKEN);
-}
-
-unsigned long count_lines(const std::string& output) {
-    if (output.empty()) {
-        return 0UL;
-    }
-
-    unsigned long lines = 1UL;
-    for (std::string::const_iterator it = output.begin(); it != output.end(); ++it) {
-        if (*it == '\n') {
-            ++lines;
-        }
-    }
-    if (output[output.size() - 1] == '\n') {
-        --lines;
-    }
-    return lines;
-}
-
-bool is_utf8_continuation_byte(unsigned char byte) {
-    return (byte & 0xC0U) == 0x80U;
-}
-
-std::size_t floor_char_boundary(const std::string& output, std::size_t max_bytes) {
-    std::size_t index = std::min(max_bytes, output.size());
-    while (index > 0U && index < output.size() &&
-           is_utf8_continuation_byte(static_cast<unsigned char>(output[index]))) {
-        --index;
-    }
-    return index;
-}
-
-std::size_t ceil_char_boundary(const std::string& output, std::size_t min_bytes) {
-    std::size_t index = std::min(min_bytes, output.size());
-    while (index < output.size() && is_utf8_continuation_byte(static_cast<unsigned char>(output[index]))) {
-        ++index;
-    }
-    return index;
-}
-
-std::size_t suffix_start_for_budget(const std::string& output, std::size_t max_bytes) {
-    if (max_bytes >= output.size()) {
-        return 0U;
-    }
-    return ceil_char_boundary(output, output.size() - max_bytes);
-}
-
-std::string truncation_prefix(unsigned long line_count) {
-    std::ostringstream out;
-    out << "Total output lines: " << line_count << "\n\n";
-    return out.str();
-}
-
-std::string truncation_marker(unsigned long truncated_tokens) {
-    std::ostringstream out;
-    out << "\xE2\x80\xA6" << truncated_tokens << " tokens truncated" << "\xE2\x80\xA6";
-    return out.str();
-}
-
-std::string render_output(const std::string& output, unsigned long max_output_tokens) {
-    if (max_output_tokens == 0UL) {
-        return std::string();
-    }
-
-    const std::size_t max_output_bytes = static_cast<std::size_t>(max_output_tokens) * BYTES_PER_TOKEN;
-    if (output.size() <= max_output_bytes) {
-        return output;
-    }
-
-    const std::string prefix = truncation_prefix(count_lines(output));
-    unsigned long truncated_tokens = approximate_token_count(output.size());
-    for (;;) {
-        const std::string marker = truncation_marker(truncated_tokens);
-        if (max_output_bytes <= prefix.size() + marker.size()) {
-            return prefix + marker;
-        }
-
-        const std::size_t payload_budget = max_output_bytes - prefix.size() - marker.size();
-        const std::size_t head_budget = payload_budget / 2U;
-        const std::size_t tail_budget = payload_budget - head_budget;
-        const std::size_t head_end = floor_char_boundary(output, head_budget);
-        const std::size_t tail_start = std::max(head_end, suffix_start_for_budget(output, tail_budget));
-        const unsigned long next_truncated_tokens = approximate_token_count(tail_start - head_end);
-
-        if (next_truncated_tokens == truncated_tokens) {
-            return prefix + output.substr(0, head_end) + marker + output.substr(tail_start);
-        }
-
-        truncated_tokens = next_truncated_tokens;
-    }
-}
-
-double wall_time_seconds(std::uint64_t started_at_ms) {
-    const std::uint64_t now = platform::monotonic_ms();
-    if (now < started_at_ms) {
-        return 0.0;
-    }
-    return static_cast<double>(now - started_at_ms) / 1000.0;
-}
-
-Json build_response(const char* daemon_session_id,
-                    bool running,
-                    std::uint64_t started_at_ms,
-                    bool has_exit_code,
-                    int exit_code,
-                    const std::string& output,
-                    unsigned long max_output_tokens,
-                    const Json& warnings) {
-    const std::string trimmed = render_output(output, max_output_tokens);
-    const unsigned long original_token_count = approximate_token_count(output.size());
-    return Json{{"daemon_session_id", daemon_session_id != NULL ? Json(daemon_session_id) : Json(nullptr)},
-                {"running", running},
-                {"chunk_id", make_chunk_id()},
-                {"wall_time_seconds", wall_time_seconds(started_at_ms)},
-                {"exit_code", has_exit_code ? Json(exit_code) : Json(nullptr)},
-                {"original_token_count", original_token_count},
-                {"output", trimmed},
-                {"warnings", warnings}};
-}
 
 Json empty_exec_warnings() {
     return Json::array();
@@ -542,14 +411,14 @@ Json SessionStore::start_command(const std::string& target,
             }
         }
         join_session_pump(session.get());
-        Json response = build_response(NULL,
-                                       false,
-                                       session->started_at_ms,
-                                       true,
-                                       poll_result.exit_code,
-                                       poll_result.output,
-                                       max_output_tokens,
-                                       empty_exec_warnings());
+        Json response = build_session_response(NULL,
+                                               false,
+                                               session->started_at_ms,
+                                               true,
+                                               poll_result.exit_code,
+                                               poll_result.output,
+                                               max_output_tokens,
+                                               empty_exec_warnings());
         {
             std::ostringstream message;
             message << "command completed before session handoff exit_code=" << poll_result.exit_code
@@ -559,7 +428,7 @@ Json SessionStore::start_command(const std::string& target,
         return response;
     }
 
-    return build_response(
+    return build_session_response(
         session->id.c_str(), true, session->started_at_ms, false, 0, poll_result.output, max_output_tokens, warnings);
 }
 
@@ -638,14 +507,14 @@ Json SessionStore::write_stdin(const std::string& daemon_session_id,
         }
         erase_session_if_current(mutex_, sessions_, daemon_session_id, session);
         join_session_pump(session.get());
-        Json response = build_response(NULL,
-                                       false,
-                                       session->started_at_ms,
-                                       true,
-                                       poll_result.exit_code,
-                                       poll_result.output,
-                                       max_output_tokens,
-                                       empty_exec_warnings());
+        Json response = build_session_response(NULL,
+                                               false,
+                                               session->started_at_ms,
+                                               true,
+                                               poll_result.exit_code,
+                                               poll_result.output,
+                                               max_output_tokens,
+                                               empty_exec_warnings());
         {
             std::ostringstream message;
             unsigned long open_sessions = 0UL;
@@ -665,12 +534,12 @@ Json SessionStore::write_stdin(const std::string& daemon_session_id,
         message << "session still running daemon_session_id=`" << session->id << '`';
         log_message(LOG_INFO, "session_store", message.str());
     }
-    return build_response(session->id.c_str(),
-                          true,
-                          session->started_at_ms,
-                          false,
-                          0,
-                          poll_result.output,
-                          max_output_tokens,
-                          empty_exec_warnings());
+    return build_session_response(session->id.c_str(),
+                                  true,
+                                  session->started_at_ms,
+                                  false,
+                                  0,
+                                  poll_result.output,
+                                  max_output_tokens,
+                                  empty_exec_warnings());
 }

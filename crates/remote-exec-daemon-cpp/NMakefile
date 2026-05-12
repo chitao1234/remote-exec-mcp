@@ -100,6 +100,7 @@ MSVC_WIN32_PATCH_TEST_SRCS=$(HOST_PATCH_SRCS)
 
 MSVC_WIN32_SESSION_STORE_TEST_SRCS= \
     $(SOURCE_PREFIX)tests/test_session_store.cpp \
+    $(SESSION_STORE_SUPPORT_SRCS) \
     $(SOURCE_PREFIX)src/session_store.cpp \
     $(SOURCE_PREFIX)src/session_pump.cpp \
     $(SOURCE_PREFIX)src/process_session_win32.cpp \
