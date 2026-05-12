@@ -931,10 +931,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tcp_accept_send_backpressure_counts_dropped_stream() {
+    async fn ready_tcp_data_send_backpressure_counts_dropped_stream() {
         let (listen_broker_side, mut listen_daemon_side) = tokio::io::duplex(4096);
         let listen_tunnel = Arc::new(PortTunnel::from_stream(listen_broker_side).unwrap());
-        let (connect_broker_side, _connect_daemon_side) = tokio::io::duplex(4096);
+        let (connect_broker_side, mut connect_daemon_side) = tokio::io::duplex(4096);
         let connect_tunnel = Arc::new(
             PortTunnel::from_stream_with_max_queued_bytes(connect_broker_side, 1).unwrap(),
         );
@@ -943,6 +943,14 @@ mod tests {
             .store
             .insert(test_record(&runtime, "127.0.0.1:10000"))
             .await;
+
+        let cancel = runtime.cancel.clone();
+        let epoch_runtime = runtime.clone();
+        let epoch = tokio::spawn({
+            let listen_tunnel = listen_tunnel.clone();
+            let connect_tunnel = connect_tunnel.clone();
+            async move { run_tcp_forward_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
+        });
 
         write_frame(
             &mut listen_daemon_side,
@@ -960,24 +968,60 @@ mod tests {
         .await
         .unwrap();
 
-        let result = tokio::time::timeout(
-            Duration::from_secs(1),
-            run_tcp_forward_epoch(&runtime, listen_tunnel, connect_tunnel),
+        let connect =
+            tokio::time::timeout(Duration::from_secs(1), read_frame(&mut connect_daemon_side))
+                .await
+                .expect("tcp accept should open a connect stream")
+                .unwrap();
+        assert_eq!(connect.frame_type, FrameType::TcpConnect);
+        assert_eq!(connect.stream_id, 1);
+
+        write_frame(
+            &mut connect_daemon_side,
+            &Frame {
+                frame_type: FrameType::TcpConnectOk,
+                flags: 0,
+                stream_id: 1,
+                meta: Vec::new(),
+                data: Vec::new(),
+            },
         )
         .await
-        .expect("tcp epoch should finish after immediate connect send backpressure");
-        let error = match result {
-            Ok(_) => panic!("connect send backpressure should fail the tcp epoch"),
-            Err(error) => error,
-        };
-        assert!(
-            format!("{error:#}").contains("port_forward_backpressure_exceeded"),
-            "unexpected error: {error:#}"
-        );
+        .unwrap();
 
-        let entries = runtime.store.list(&filter_one(&runtime.forward_id)).await;
-        assert_eq!(entries[0].active_tcp_streams, 0);
-        assert_eq!(entries[0].dropped_tcp_streams, 1);
+        write_frame(
+            &mut listen_daemon_side,
+            &Frame {
+                frame_type: FrameType::TcpData,
+                flags: 0,
+                stream_id: 11,
+                meta: Vec::new(),
+                data: b"blocked".to_vec(),
+            },
+        )
+        .await
+        .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let entries = runtime.store.list(&filter_one(&runtime.forward_id)).await;
+                if entries[0].dropped_tcp_streams == 1 {
+                    assert_eq!(entries[0].active_tcp_streams, 0);
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("connect data backpressure should drop the tcp stream");
+
+        cancel.cancel();
+        let control = tokio::time::timeout(Duration::from_secs(1), epoch)
+            .await
+            .expect("tcp epoch should stop after cancellation")
+            .unwrap()
+            .expect("data backpressure should not fail the forward");
+        assert!(matches!(control, ForwardLoopControl::Cancelled));
     }
 
     #[tokio::test]

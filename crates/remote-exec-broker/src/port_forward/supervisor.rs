@@ -691,6 +691,7 @@ pub(super) async fn open_data_tunnel(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn open_tunnel_with_role(
     side: &SideHandle,
     forward_id: &str,
