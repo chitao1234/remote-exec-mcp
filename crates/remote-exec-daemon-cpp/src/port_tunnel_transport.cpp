@@ -255,6 +255,35 @@ TunnelOpenMetadata parse_tunnel_open_metadata(const PortTunnelFrame& frame) {
     }
 }
 
+Json make_tunnel_ready_limits_json(const PortForwardLimitConfig& limits) {
+    return Json{
+        {"max_active_tcp_streams", limits.max_active_tcp_streams},
+        {"max_udp_peers", limits.max_udp_binds},
+        {"max_queued_bytes", limits.max_tunnel_queued_bytes}
+    };
+}
+
+PortTunnelFrame make_tunnel_ready_frame(
+    const PortForwardLimitConfig& limits,
+    std::uint64_t generation,
+    const std::string* session_id,
+    const unsigned long* resume_timeout_ms
+) {
+    PortTunnelFrame ready = make_empty_frame(PortTunnelFrameType::TunnelReady, 0U);
+    Json meta = {
+        {"generation", generation},
+        {"limits", make_tunnel_ready_limits_json(limits)}
+    };
+    if (session_id != NULL) {
+        meta["session_id"] = *session_id;
+    }
+    if (resume_timeout_ms != NULL) {
+        meta["resume_timeout_ms"] = *resume_timeout_ms;
+    }
+    ready.meta = meta.dump();
+    return ready;
+}
+
 int handle_port_tunnel_upgrade(AppState& state, SOCKET client, const HttpRequest& request) {
     if (!state.config.http_auth_bearer_token.empty() &&
         !request_has_bearer_auth(request, state.config.http_auth_bearer_token)) {
@@ -873,17 +902,13 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
         service_->attach_session(session, shared_from_this());
 
         const PortForwardLimitConfig& limits = service_->limits();
-        PortTunnelFrame ready = make_empty_frame(PortTunnelFrameType::TunnelReady, 0U);
-        ready.meta = Json{
-            {"generation", generation},
-            {"session_id", session->session_id},
-            {"resume_timeout_ms", RESUME_TIMEOUT_MS},
-            {"limits", Json{
-                {"max_active_tcp_streams", limits.max_active_tcp_streams},
-                {"max_udp_peers", limits.max_udp_binds},
-                {"max_queued_bytes", limits.max_tunnel_queued_bytes}
-            }}
-        }.dump();
+        const unsigned long resume_timeout_ms = RESUME_TIMEOUT_MS;
+        PortTunnelFrame ready = make_tunnel_ready_frame(
+            limits,
+            generation,
+            &session->session_id,
+            &resume_timeout_ms
+        );
         send_frame(ready);
         return;
     }
@@ -895,15 +920,7 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
             protocol_ = tunnel_protocol;
         }
         const PortForwardLimitConfig& limits = service_->limits();
-        PortTunnelFrame ready = make_empty_frame(PortTunnelFrameType::TunnelReady, 0U);
-        ready.meta = Json{
-            {"generation", generation},
-            {"limits", Json{
-                {"max_active_tcp_streams", limits.max_active_tcp_streams},
-                {"max_udp_peers", limits.max_udp_binds},
-                {"max_queued_bytes", limits.max_tunnel_queued_bytes}
-            }}
-        }.dump();
+        PortTunnelFrame ready = make_tunnel_ready_frame(limits, generation, NULL, NULL);
         send_frame(ready);
         return;
     }
