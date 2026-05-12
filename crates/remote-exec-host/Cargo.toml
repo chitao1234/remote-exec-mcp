@@ -22,6 +22,7 @@ os_pipe = { workspace = true }
 portable-pty = { workspace = true }
 rand = { workspace = true }
 remote-exec-proto = { path = "../remote-exec-proto" }
+remote-exec-util = { path = "../remote-exec-util" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tar = { workspace = true }

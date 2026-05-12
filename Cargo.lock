@@ -1604,6 +1604,7 @@ dependencies = [
  "remote-exec-host",
  "remote-exec-pki",
  "remote-exec-proto",
+ "remote-exec-util",
  "reqwest",
  "rmcp",
  "rustls",
@@ -1616,7 +1617,6 @@ dependencies = [
  "tokio-util",
  "toml",
  "tracing",
- "tracing-subscriber",
  "uuid",
  "zstd",
 ]
@@ -1644,6 +1644,7 @@ dependencies = [
  "remote-exec-host",
  "remote-exec-pki",
  "remote-exec-proto",
+ "remote-exec-util",
  "reqwest",
  "rustls",
  "rustls-pemfile",
@@ -1657,7 +1658,6 @@ dependencies = [
  "toml",
  "tower",
  "tracing",
- "tracing-subscriber",
  "uuid",
  "vte",
  "winptyrs",
@@ -1681,6 +1681,7 @@ dependencies = [
  "portable-pty",
  "rand",
  "remote-exec-proto",
+ "remote-exec-util",
  "serde",
  "serde_json",
  "tar",
@@ -1722,6 +1723,13 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "remote-exec-util"
+version = "0.1.0"
+dependencies = [
+ "tracing-subscriber",
 ]
 
 [[package]]

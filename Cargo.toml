@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/remote-exec-proto",
+  "crates/remote-exec-util",
   "crates/remote-exec-host",
   "crates/remote-exec-daemon",
   "crates/remote-exec-broker",
