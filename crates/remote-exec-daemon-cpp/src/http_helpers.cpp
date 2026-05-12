@@ -7,15 +7,12 @@
 namespace {
 
 bool constant_time_equals(const std::string& actual, const std::string& expected) {
-    const std::size_t max_size =
-        actual.size() > expected.size() ? actual.size() : expected.size();
+    const std::size_t max_size = actual.size() > expected.size() ? actual.size() : expected.size();
     unsigned int diff = static_cast<unsigned int>(actual.size() ^ expected.size());
 
     for (std::size_t i = 0; i < max_size; ++i) {
-        const unsigned char actual_byte =
-            i < actual.size() ? static_cast<unsigned char>(actual[i]) : 0U;
-        const unsigned char expected_byte =
-            i < expected.size() ? static_cast<unsigned char>(expected[i]) : 0U;
+        const unsigned char actual_byte = i < actual.size() ? static_cast<unsigned char>(actual[i]) : 0U;
+        const unsigned char expected_byte = i < expected.size() ? static_cast<unsigned char>(expected[i]) : 0U;
         diff |= static_cast<unsigned int>(actual_byte ^ expected_byte);
     }
 
@@ -42,7 +39,7 @@ std::string generate_request_id() {
     return out.str();
 }
 
-}  // namespace
+} // namespace
 
 std::string HttpRequest::header(const std::string& name) const {
     std::map<std::string, std::string>::const_iterator it = headers.find(name);
@@ -100,19 +97,15 @@ void write_bearer_auth_challenge(HttpResponse& res) {
     res.headers["WWW-Authenticate"] = "Bearer";
 }
 
-void write_rpc_error(
-    HttpResponse& res,
-    int status,
-    const std::string& code,
-    const std::string& message
-) {
+void write_rpc_error(HttpResponse& res, int status, const std::string& code, const std::string& message) {
     res.status = status;
     res.headers["Content-Type"] = "application/json";
-    res.body = Json {
-        {"code", code},
-        {"message", message},
-    }
-                   .dump();
+    res.body =
+        Json{
+            {"code", code},
+            {"message", message},
+        }
+            .dump();
 }
 
 static std::string reason_phrase(int status) {
@@ -145,9 +138,7 @@ std::string render_http_response(const HttpResponse& res) {
     std::map<std::string, std::string> headers = res.headers;
     headers["Content-Length"] = std::to_string(res.body.size());
 
-    for (std::map<std::string, std::string>::const_iterator it = headers.begin();
-         it != headers.end();
-         ++it) {
+    for (std::map<std::string, std::string>::const_iterator it = headers.begin(); it != headers.end(); ++it) {
         out << it->first << ": " << it->second << "\r\n";
     }
 

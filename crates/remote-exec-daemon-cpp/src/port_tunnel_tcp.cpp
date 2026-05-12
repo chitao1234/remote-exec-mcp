@@ -1,10 +1,8 @@
 #include "port_tunnel_internal.h"
 
-bool PortTunnelService::spawn_tcp_listener_loop(
-    const std::shared_ptr<PortTunnelSession>& session,
-    const std::shared_ptr<RetainedTcpListener>& listener,
-    bool worker_acquired
-) {
+bool PortTunnelService::spawn_tcp_listener_loop(const std::shared_ptr<PortTunnelSession>& session,
+                                                const std::shared_ptr<RetainedTcpListener>& listener,
+                                                bool worker_acquired) {
     std::shared_ptr<PortTunnelService> service = shared_from_this();
     if (!worker_acquired && !service->try_acquire_worker()) {
         return false;
@@ -56,18 +54,15 @@ bool PortTunnelService::spawn_tcp_listener_loop(
 #endif
 }
 
-void PortTunnelService::tcp_accept_loop(
-    const std::shared_ptr<PortTunnelSession>& session,
-    const std::shared_ptr<RetainedTcpListener>& listener
-) {
+void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>& session,
+                                        const std::shared_ptr<RetainedTcpListener>& listener) {
     for (;;) {
         std::shared_ptr<PortTunnelConnection> connection = wait_for_attachment(session);
         if (connection.get() == NULL) {
             return;
         }
 
-        const int ready =
-            wait_socket_readable(listener->listener.get(), RETAINED_SOCKET_POLL_TIMEOUT_MS);
+        const int ready = wait_socket_readable(listener->listener.get(), RETAINED_SOCKET_POLL_TIMEOUT_MS);
         if (ready == 0) {
             continue;
         }
@@ -76,11 +71,7 @@ void PortTunnelService::tcp_accept_loop(
                 return;
             }
             if (connection->owns_session(session)) {
-                connection->send_error(
-                    listener->stream_id,
-                    "port_accept_failed",
-                    socket_error_message("select")
-                );
+                connection->send_error(listener->stream_id, "port_accept_failed", socket_error_message("select"));
             }
             return;
         }
@@ -91,11 +82,7 @@ void PortTunnelService::tcp_accept_loop(
         sockaddr_storage peer_address;
         std::memset(&peer_address, 0, sizeof(peer_address));
         socklen_t peer_len = sizeof(peer_address);
-        const SOCKET accepted = accept(
-            listener->listener.get(),
-            reinterpret_cast<sockaddr*>(&peer_address),
-            &peer_len
-        );
+        const SOCKET accepted = accept(listener->listener.get(), reinterpret_cast<sockaddr*>(&peer_address), &peer_len);
         if (accepted == INVALID_SOCKET) {
             const int error = last_socket_error();
             if (receive_timeout_error(error)) {
@@ -105,11 +92,7 @@ void PortTunnelService::tcp_accept_loop(
                 return;
             }
             if (connection->owns_session(session)) {
-                connection->send_error(
-                    listener->stream_id,
-                    "port_accept_failed",
-                    socket_error_message("accept")
-                );
+                connection->send_error(listener->stream_id, "port_accept_failed", socket_error_message("accept"));
             }
             return;
         }
@@ -121,8 +104,7 @@ void PortTunnelService::tcp_accept_loop(
                 session,
                 listener->stream_id,
                 std::move(accepted_socket),
-                printable_port_forward_endpoint(reinterpret_cast<sockaddr*>(&peer_address), peer_len)
-            )) {
+                printable_port_forward_endpoint(reinterpret_cast<sockaddr*>(&peer_address), peer_len))) {
             if (session_is_unavailable(session)) {
                 return;
             }
@@ -132,32 +114,19 @@ void PortTunnelService::tcp_accept_loop(
 }
 
 void PortTunnelConnection::tcp_listen(const PortTunnelFrame& frame) {
-    require_mode(
-        PortTunnelMode::Listen,
-        PortTunnelProtocol::Tcp,
-        "tcp listen requires an open tcp listen tunnel"
-    );
+    require_mode(PortTunnelMode::Listen, PortTunnelProtocol::Tcp, "tcp listen requires an open tcp listen tunnel");
 
     const std::string endpoint = normalize_port_forward_endpoint(frame_meta_string(frame, "endpoint"));
     std::string bound_endpoint;
 
     if (!service_->try_acquire_retained_listener()) {
-        throw PortForwardError(
-            400,
-            "port_tunnel_limit_exceeded",
-            "port tunnel retained listener limit reached"
-        );
+        throw PortForwardError(400, "port_tunnel_limit_exceeded", "port tunnel retained listener limit reached");
     }
     std::shared_ptr<PortTunnelSession> session = current_session();
     std::shared_ptr<RetainedTcpListener> listener;
     try {
         UniqueSocket listener_socket(bind_port_forward_socket(endpoint, "tcp"));
-        listener.reset(new RetainedTcpListener(
-            frame.stream_id,
-            listener_socket.release(),
-            service_,
-            true
-        ));
+        listener.reset(new RetainedTcpListener(frame.stream_id, listener_socket.release(), service_, true));
     } catch (const std::exception& ex) {
         log_tunnel_exception("create tcp listener", ex);
         service_->release_retained_listener();
@@ -193,34 +162,19 @@ void PortTunnelConnection::tcp_listen(const PortTunnelFrame& frame) {
 }
 
 void PortTunnelConnection::tcp_connect(const PortTunnelFrame& frame) {
-    require_mode(
-        PortTunnelMode::Connect,
-        PortTunnelProtocol::Tcp,
-        "tcp connect requires an open tcp connect tunnel"
-    );
+    require_mode(PortTunnelMode::Connect, PortTunnelProtocol::Tcp, "tcp connect requires an open tcp connect tunnel");
 
     const std::string endpoint = ensure_nonzero_connect_endpoint(frame_meta_string(frame, "endpoint"));
 
     if (!service_->try_acquire_active_tcp_stream()) {
-        throw PortForwardError(
-            400,
-            "port_tunnel_limit_exceeded",
-            "port tunnel active tcp stream limit reached"
-        );
+        throw PortForwardError(400, "port_tunnel_limit_exceeded", "port tunnel active tcp stream limit reached");
     }
 
     std::shared_ptr<TunnelTcpStream> stream;
     try {
-        UniqueSocket connected_socket(connect_port_forward_socket(
-            endpoint,
-            "tcp",
-            service_->limits().connect_timeout_ms
-        ));
-        stream.reset(new TunnelTcpStream(
-            connected_socket.release(),
-            service_,
-            true
-        ));
+        UniqueSocket connected_socket(
+            connect_port_forward_socket(endpoint, "tcp", service_->limits().connect_timeout_ms));
+        stream.reset(new TunnelTcpStream(connected_socket.release(), service_, true));
     } catch (...) {
         service_->release_active_tcp_stream();
         throw;
@@ -233,28 +187,17 @@ void PortTunnelConnection::tcp_connect(const PortTunnelFrame& frame) {
         return;
     }
     if (!send_tcp_success_after_io_threads_started(
-            make_empty_frame(PortTunnelFrameType::TcpConnectOk, frame.stream_id),
-            frame.stream_id,
-            stream,
-            true
-        )) {
+            make_empty_frame(PortTunnelFrameType::TcpConnectOk, frame.stream_id), frame.stream_id, stream, true)) {
         send_worker_limit(frame.stream_id);
         return;
     }
 }
 
-void PortTunnelConnection::tcp_read_loop(
-    uint32_t stream_id,
-    std::shared_ptr<TunnelTcpStream> stream
-) {
+void PortTunnelConnection::tcp_read_loop(uint32_t stream_id, std::shared_ptr<TunnelTcpStream> stream) {
     std::vector<unsigned char> buffer(READ_BUF_SIZE);
     for (;;) {
-        const int received = recv(
-            stream->socket.get(),
-            reinterpret_cast<char*>(buffer.data()),
-            static_cast<int>(buffer.size()),
-            0
-        );
+        const int received =
+            recv(stream->socket.get(), reinterpret_cast<char*>(buffer.data()), static_cast<int>(buffer.size()), 0);
         if (received == 0) {
             if (tcp_stream_closed(stream)) {
                 return;
@@ -280,17 +223,12 @@ void PortTunnelConnection::tcp_read_loop(
     }
 }
 
-void PortTunnelConnection::tcp_write_loop(
-    uint32_t stream_id,
-    std::shared_ptr<TunnelTcpStream> stream
-) {
+void PortTunnelConnection::tcp_write_loop(uint32_t stream_id, std::shared_ptr<TunnelTcpStream> stream) {
     for (;;) {
         std::vector<unsigned char> data;
         {
             BasicLockGuard lock(stream->mutex);
-            while (!stream->closed &&
-                   stream->write_queue.empty() &&
-                   !stream->writer_closed &&
+            while (!stream->closed && stream->write_queue.empty() && !stream->writer_closed &&
                    !stream->writer_shutdown_requested) {
                 stream->writer_cond.wait(stream->mutex);
             }
@@ -306,11 +244,7 @@ void PortTunnelConnection::tcp_write_loop(
             stream->writer_cond.signal();
         }
         try {
-            send_all_bytes(
-                stream->socket.get(),
-                reinterpret_cast<const char*>(data.data()),
-                data.size()
-            );
+            send_all_bytes(stream->socket.get(), reinterpret_cast<const char*>(data.data()), data.size());
         } catch (const std::exception& ex) {
             if (!tcp_stream_closed(stream)) {
                 send_error(stream_id, "port_write_failed", ex.what());
@@ -347,11 +281,7 @@ void PortTunnelConnection::tcp_data(uint32_t stream_id, const std::vector<unsign
         }
     }
     mark_tcp_stream_closed(stream);
-    throw PortForwardError(
-        400,
-        "port_tunnel_limit_exceeded",
-        "tcp write queue limit reached"
-    );
+    throw PortForwardError(400, "port_tunnel_limit_exceeded", "tcp write queue limit reached");
 }
 
 void PortTunnelConnection::tcp_eof(uint32_t stream_id) {

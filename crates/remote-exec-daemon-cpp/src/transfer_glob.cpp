@@ -9,23 +9,13 @@
 
 namespace {
 
-TransferFailure invalid_pattern(
-    const std::string& pattern,
-    const std::string& reason
-) {
-    return TransferFailure(
-        TransferRpcCode::TransferFailed,
-        "invalid exclude pattern `" + pattern + "`: " + reason
-    );
+TransferFailure invalid_pattern(const std::string& pattern, const std::string& reason) {
+    return TransferFailure(TransferRpcCode::TransferFailed, "invalid exclude pattern `" + pattern + "`: " + reason);
 }
 
-std::size_t character_class_end(
-    const std::string& pattern,
-    std::size_t open_index
-) {
+std::size_t character_class_end(const std::string& pattern, std::size_t open_index) {
     std::size_t index = open_index + 1U;
-    if (index < pattern.size() &&
-        (pattern[index] == '!' || pattern[index] == '^')) {
+    if (index < pattern.size() && (pattern[index] == '!' || pattern[index] == '^')) {
         ++index;
     }
     if (index >= pattern.size()) {
@@ -51,12 +41,10 @@ void validate_pattern(const std::string& pattern) {
     }
 }
 
-bool matches_character_class(
-    const std::string& pattern,
-    std::size_t open_index,
-    char candidate,
-    std::size_t* next_index
-) {
+bool matches_character_class(const std::string& pattern,
+                             std::size_t open_index,
+                             char candidate,
+                             std::size_t* next_index) {
     const std::size_t close_index = character_class_end(pattern, open_index);
     std::size_t index = open_index + 1U;
     bool negated = false;
@@ -86,27 +74,23 @@ bool matches_character_class(
     return negated ? !matched : matched;
 }
 
-bool match_pattern(
-    const std::string& pattern,
-    std::size_t pattern_index,
-    const std::string& text,
-    std::size_t text_index
-) {
+bool match_pattern(const std::string& pattern,
+                   std::size_t pattern_index,
+                   const std::string& text,
+                   std::size_t text_index) {
     while (true) {
         if (pattern_index == pattern.size()) {
             return text_index == text.size();
         }
         if (pattern[pattern_index] == '*') {
-            if (pattern_index + 1U < pattern.size() &&
-                pattern[pattern_index + 1U] == '*') {
+            if (pattern_index + 1U < pattern.size() && pattern[pattern_index + 1U] == '*') {
                 const std::size_t next_index = pattern_index + 2U;
                 if (next_index < pattern.size() && pattern[next_index] == '/') {
                     if (match_pattern(pattern, next_index + 1U, text, text_index)) {
                         return true;
                     }
                     for (std::size_t index = text_index; index < text.size(); ++index) {
-                        if (text[index] == '/' &&
-                            match_pattern(pattern, next_index + 1U, text, index + 1U)) {
+                        if (text[index] == '/' && match_pattern(pattern, next_index + 1U, text, index + 1U)) {
                             return true;
                         }
                     }
@@ -126,9 +110,7 @@ bool match_pattern(
             if (match_pattern(pattern, pattern_index + 1U, text, text_index)) {
                 return true;
             }
-            for (std::size_t index = text_index;
-                 index < text.size() && text[index] != '/';
-                 ++index) {
+            for (std::size_t index = text_index; index < text.size() && text[index] != '/'; ++index) {
                 if (match_pattern(pattern, pattern_index + 1U, text, index + 1U)) {
                     return true;
                 }
@@ -148,19 +130,14 @@ bool match_pattern(
                 return false;
             }
             std::size_t next_index = pattern_index;
-            if (!matches_character_class(
-                    pattern,
-                    pattern_index,
-                    text[text_index],
-                    &next_index)) {
+            if (!matches_character_class(pattern, pattern_index, text[text_index], &next_index)) {
                 return false;
             }
             pattern_index = next_index;
             ++text_index;
             continue;
         }
-        if (text_index == text.size() ||
-            pattern[pattern_index] != text[text_index]) {
+        if (text_index == text.size() || pattern[pattern_index] != text[text_index]) {
             return false;
         }
         ++pattern_index;
@@ -168,11 +145,12 @@ bool match_pattern(
     }
 }
 
-}  // namespace
+} // namespace
 
 namespace transfer_glob {
 
-Matcher::Matcher() {}
+Matcher::Matcher() {
+}
 
 Matcher::Matcher(const std::vector<std::string>& patterns) : patterns_(patterns) {
     for (std::size_t index = 0; index < patterns_.size(); ++index) {
@@ -202,4 +180,4 @@ bool Matcher::is_excluded_directory(const std::string& relative_path) const {
     return is_excluded_path(relative_path + "/");
 }
 
-}  // namespace transfer_glob
+} // namespace transfer_glob

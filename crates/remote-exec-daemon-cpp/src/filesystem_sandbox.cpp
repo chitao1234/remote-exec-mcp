@@ -1,6 +1,6 @@
 #include <algorithm>
-#include <cerrno>
 #include <cctype>
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <sstream>
@@ -39,10 +39,7 @@ const SandboxPathList& source_list(const FilesystemSandbox& sandbox, SandboxAcce
     return sandbox.read;
 }
 
-const CompiledSandboxPathList& compiled_list(
-    const CompiledFilesystemSandbox& sandbox,
-    SandboxAccess access
-) {
+const CompiledSandboxPathList& compiled_list(const CompiledFilesystemSandbox& sandbox, SandboxAccess access) {
     switch (access) {
     case SANDBOX_EXEC_CWD:
         return sandbox.exec_cwd;
@@ -65,11 +62,7 @@ char policy_separator(PathPolicy policy) {
     return policy.style == PATH_STYLE_WINDOWS ? '\\' : '/';
 }
 
-std::string join_components(
-    PathPolicy policy,
-    const std::string& prefix,
-    const std::vector<std::string>& parts
-) {
+std::string join_components(PathPolicy policy, const std::string& prefix, const std::vector<std::string>& parts) {
     const char separator = policy_separator(policy);
     if (prefix.empty()) {
         std::string output;
@@ -102,8 +95,7 @@ std::string lexical_normalize_for_policy(PathPolicy policy, const std::string& r
             prefix = "/";
             start = 1;
         }
-    } else if (normalized.size() >= 3 &&
-               std::isalpha(static_cast<unsigned char>(normalized[0])) != 0 &&
+    } else if (normalized.size() >= 3 && std::isalpha(static_cast<unsigned char>(normalized[0])) != 0 &&
                normalized[1] == ':' && is_separator(policy, normalized[2])) {
         prefix = normalized.substr(0, 2);
         prefix.push_back('\\');
@@ -198,8 +190,7 @@ std::string canonicalize_posix_for_sandbox(const std::string& path) {
             std::string rebuilt(resolved);
             std::free(resolved);
             rebuilt = lexical_normalize_for_policy(policy, rebuilt);
-            for (std::vector<std::string>::const_reverse_iterator it =
-                     missing_components.rbegin();
+            for (std::vector<std::string>::const_reverse_iterator it = missing_components.rbegin();
                  it != missing_components.rend();
                  ++it) {
                 rebuilt = join_for_policy(policy, rebuilt, *it);
@@ -208,9 +199,7 @@ std::string canonicalize_posix_for_sandbox(const std::string& path) {
         }
 
         if (errno != ENOENT) {
-            throw SandboxError(
-                "unable to canonicalize `" + normalized + "`: " + std::strerror(errno)
-            );
+            throw SandboxError("unable to canonicalize `" + normalized + "`: " + std::strerror(errno));
         }
 
         const std::string name = basename_for_posix_path(probe);
@@ -270,35 +259,23 @@ bool path_is_within(PathPolicy policy, const std::string& root, const std::strin
     return path_key.rfind(root_key, 0) == 0;
 }
 
-std::string compile_root(
-    PathPolicy policy,
-    SandboxAccess access,
-    const std::string& list_label,
-    const std::string& raw
-) {
+std::string
+compile_root(PathPolicy policy, SandboxAccess access, const std::string& list_label, const std::string& raw) {
     if (!is_absolute_for_policy(policy, raw)) {
-        throw SandboxError(
-            std::string("sandbox ") + access_label(access) + "." + list_label + " path `" +
-            raw + "` is not absolute"
-        );
+        throw SandboxError(std::string("sandbox ") + access_label(access) + "." + list_label + " path `" + raw +
+                           "` is not absolute");
     }
 
     const std::string normalized = normalize_for_system(policy, raw);
     try {
         return canonicalize_for_sandbox(policy, normalized);
     } catch (const SandboxError& ex) {
-        throw SandboxError(
-            std::string("sandbox ") + access_label(access) + "." + list_label + " path `" +
-            normalized + "` is invalid: " + ex.what()
-        );
+        throw SandboxError(std::string("sandbox ") + access_label(access) + "." + list_label + " path `" + normalized +
+                           "` is invalid: " + ex.what());
     }
 }
 
-CompiledSandboxPathList compile_list(
-    PathPolicy policy,
-    SandboxAccess access,
-    const SandboxPathList& list
-) {
+CompiledSandboxPathList compile_list(PathPolicy policy, SandboxAccess access, const SandboxPathList& list) {
     CompiledSandboxPathList compiled;
     for (std::size_t i = 0; i < list.allow.size(); ++i) {
         compiled.allow.push_back(compile_root(policy, access, "allow", list.allow[i]));
@@ -309,14 +286,12 @@ CompiledSandboxPathList compile_list(
     return compiled;
 }
 
-}  // namespace
+} // namespace
 
-SandboxError::SandboxError(const std::string& message) : std::runtime_error(message) {}
+SandboxError::SandboxError(const std::string& message) : std::runtime_error(message) {
+}
 
-CompiledFilesystemSandbox compile_filesystem_sandbox(
-    PathPolicy policy,
-    const FilesystemSandbox& sandbox
-) {
+CompiledFilesystemSandbox compile_filesystem_sandbox(PathPolicy policy, const FilesystemSandbox& sandbox) {
     CompiledFilesystemSandbox compiled;
     compiled.exec_cwd = compile_list(policy, SANDBOX_EXEC_CWD, source_list(sandbox, SANDBOX_EXEC_CWD));
     compiled.read = compile_list(policy, SANDBOX_READ, source_list(sandbox, SANDBOX_READ));
@@ -324,12 +299,10 @@ CompiledFilesystemSandbox compile_filesystem_sandbox(
     return compiled;
 }
 
-void authorize_path(
-    PathPolicy policy,
-    const CompiledFilesystemSandbox* sandbox,
-    SandboxAccess access,
-    const std::string& path
-) {
+void authorize_path(PathPolicy policy,
+                    const CompiledFilesystemSandbox* sandbox,
+                    SandboxAccess access,
+                    const std::string& path) {
     if (sandbox == NULL) {
         return;
     }
@@ -339,10 +312,8 @@ void authorize_path(
 
     for (std::size_t i = 0; i < rules.deny.size(); ++i) {
         if (path_is_within(policy, rules.deny[i], resolved)) {
-            throw SandboxError(
-                std::string(access_label(access)) + " access to `" + resolved +
-                "` is denied by sandbox rule `" + rules.deny[i] + "`"
-            );
+            throw SandboxError(std::string(access_label(access)) + " access to `" + resolved +
+                               "` is denied by sandbox rule `" + rules.deny[i] + "`");
         }
     }
 
@@ -355,8 +326,6 @@ void authorize_path(
         }
     }
 
-    throw SandboxError(
-        std::string(access_label(access)) + " access to `" + resolved +
-        "` is outside the configured sandbox"
-    );
+    throw SandboxError(std::string(access_label(access)) + " access to `" + resolved +
+                       "` is outside the configured sandbox");
 }

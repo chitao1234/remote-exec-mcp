@@ -7,31 +7,24 @@
 #include "base64_codec.h"
 #include "logging.h"
 #include "rpc_failures.h"
-#include "server_route_image.h"
 #include "server_request_utils.h"
+#include "server_route_image.h"
 
 namespace {
 
 ImageFailure invalid_detail_failure(const std::string& detail) {
     return ImageFailure(
         ImageRpcCode::InvalidDetail,
-        "view_image.detail only supports `original`; omit `detail` for default original behavior, got `" +
-            detail + "`"
-    );
+        "view_image.detail only supports `original`; omit `detail` for default original behavior, got `" + detail +
+            "`");
 }
 
 ImageFailure missing_image_failure(const std::string& path) {
-    return ImageFailure(
-        ImageRpcCode::Missing,
-        "unable to locate image at `" + path + "`: No such file or directory"
-    );
+    return ImageFailure(ImageRpcCode::Missing, "unable to locate image at `" + path + "`: No such file or directory");
 }
 
 ImageFailure not_file_image_failure(const std::string& path) {
-    return ImageFailure(
-        ImageRpcCode::NotFile,
-        "image path `" + path + "` is not a file"
-    );
+    return ImageFailure(ImageRpcCode::NotFile, "image path `" + path + "` is not a file");
 }
 
 ImageFailure decode_failed_image(const std::string& message) {
@@ -48,9 +41,7 @@ std::string read_binary_file_bytes(const std::string& path) {
     if (!input) {
         const int error_code = errno;
         if (error_code != 0) {
-            throw internal_image_failure(
-                "unable to read image at `" + path + "`: " + std::strerror(error_code)
-            );
+            throw internal_image_failure("unable to read image at `" + path + "`: " + std::strerror(error_code));
         }
         throw internal_image_failure("unable to read image at `" + path + "`");
     }
@@ -71,32 +62,25 @@ void require_regular_image_file(const std::string& path) {
         throw missing_image_failure(path);
     }
 
-    throw internal_image_failure(
-        "unable to access image at `" + path + "`: " + std::strerror(error_code)
-    );
+    throw internal_image_failure("unable to access image at `" + path + "`: " + std::strerror(error_code));
 }
 
 std::string image_mime_type(const std::string& path, const std::string& bytes) {
     if (bytes.size() >= 8 && std::memcmp(bytes.data(), "\x89PNG\r\n\x1A\n", 8) == 0) {
         return "image/png";
     }
-    if (bytes.size() >= 3 &&
-        static_cast<unsigned char>(bytes[0]) == 0xFF &&
-        static_cast<unsigned char>(bytes[1]) == 0xD8 &&
-        static_cast<unsigned char>(bytes[2]) == 0xFF) {
+    if (bytes.size() >= 3 && static_cast<unsigned char>(bytes[0]) == 0xFF &&
+        static_cast<unsigned char>(bytes[1]) == 0xD8 && static_cast<unsigned char>(bytes[2]) == 0xFF) {
         return "image/jpeg";
     }
-    if (bytes.size() >= 12 &&
-        std::memcmp(bytes.data(), "RIFF", 4) == 0 &&
+    if (bytes.size() >= 12 && std::memcmp(bytes.data(), "RIFF", 4) == 0 &&
         std::memcmp(bytes.data() + 8, "WEBP", 4) == 0) {
         return "image/webp";
     }
-    throw decode_failed_image(
-        "unable to process image at `" + path + "`: unsupported image format"
-    );
+    throw decode_failed_image("unable to process image at `" + path + "`: unsupported image format");
 }
 
-}  // namespace
+} // namespace
 
 HttpResponse handle_image_read(AppState& state, const HttpRequest& request) {
     HttpResponse response;
@@ -109,44 +93,30 @@ HttpResponse handle_image_read(AppState& state, const HttpRequest& request) {
             throw invalid_detail_failure(detail);
         }
 
-        const std::string path =
-            resolve_authorized_input_path(state, body, "path", SANDBOX_READ);
+        const std::string path = resolve_authorized_input_path(state, body, "path", SANDBOX_READ);
         require_regular_image_file(path);
 
         const std::string bytes = read_binary_file_bytes(path);
         const std::string mime = image_mime_type(path, bytes);
-        write_json(
-            response,
-            Json{
-                {"image_url", "data:" + mime + ";base64," + base64_encode_bytes(bytes)},
-                {"detail", "original"},
-            }
-        );
+        write_json(response,
+                   Json{
+                       {"image_url", "data:" + mime + ";base64," + base64_encode_bytes(bytes)},
+                       {"detail", "original"},
+                   });
     } catch (const SandboxError& ex) {
         log_message(LOG_WARN, "server", std::string("image/read failed: ") + ex.what());
-        write_rpc_error(
-            response,
-            400,
-            image_error_code_name(ImageRpcCode::SandboxDenied),
-            ex.what()
-        );
+        write_rpc_error(response, 400, image_error_code_name(ImageRpcCode::SandboxDenied), ex.what());
     } catch (const ImageFailure& failure) {
         log_message(LOG_WARN, "server", "image/read failed: " + failure.message);
         write_rpc_error(
-            response,
-            image_error_status(failure.code),
-            image_error_code_name(failure.code),
-            failure.message
-        );
+            response, image_error_status(failure.code), image_error_code_name(failure.code), failure.message);
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
         log_message(LOG_WARN, "server", "image/read failed: " + message);
-        write_rpc_error(
-            response,
-            image_error_status(ImageRpcCode::Internal),
-            image_error_code_name(ImageRpcCode::Internal),
-            message
-        );
+        write_rpc_error(response,
+                        image_error_status(ImageRpcCode::Internal),
+                        image_error_code_name(ImageRpcCode::Internal),
+                        message);
     }
 
     return response;

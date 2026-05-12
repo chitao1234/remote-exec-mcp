@@ -11,6 +11,6 @@ std::string join_path(const std::string& base, const std::string& child);
 void make_directory_if_missing(const std::string& path);
 void create_parent_directories(const std::string& path);
 
-}  // namespace path_utils
+} // namespace path_utils
 
 #endif

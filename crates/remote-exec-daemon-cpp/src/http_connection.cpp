@@ -3,14 +3,14 @@
 #include <string>
 #include <vector>
 
-#include "http_request.h"
 #include "http_helpers.h"
+#include "http_request.h"
 #include "logging.h"
 #include "platform.h"
 #include "port_tunnel.h"
-#include "server_route_common.h"
-#include "server_request_utils.h"
 #include "server.h"
+#include "server_request_utils.h"
+#include "server_route_common.h"
 #include "server_routes.h"
 #include "server_transport.h"
 #include "text_utils.h"
@@ -87,11 +87,8 @@ bool request_connection_close_requested(const HttpRequest& request) {
     std::size_t offset = 0;
     while (offset <= value.size()) {
         const std::size_t comma = value.find(',', offset);
-        const std::string token = trim_ascii(
-            comma == std::string::npos
-                ? value.substr(offset)
-                : value.substr(offset, comma - offset)
-        );
+        const std::string token =
+            trim_ascii(comma == std::string::npos ? value.substr(offset) : value.substr(offset, comma - offset));
         if (token == "close") {
             return true;
         }
@@ -106,11 +103,7 @@ bool request_connection_close_requested(const HttpRequest& request) {
 
 bool log_send_failure(const SocketSendError& ex) {
     if (ex.peer_disconnected()) {
-        log_message(
-            LOG_WARN,
-            "server",
-            std::string("client disconnected during send: ") + ex.what()
-        );
+        log_message(LOG_WARN, "server", std::string("client disconnected during send: ") + ex.what());
         return true;
     }
 
@@ -128,9 +121,7 @@ bool try_send_response(SOCKET client, const HttpResponse& response) {
     }
 }
 
-HttpRequestBodyFraming parse_request_body_framing_or_throw_bad_request(
-    const HttpRequest& request
-) {
+HttpRequestBodyFraming parse_request_body_framing_or_throw_bad_request(const HttpRequest& request) {
     try {
         return request_body_framing_from_headers(request.headers);
     } catch (const HttpProtocolError& ex) {
@@ -138,11 +129,8 @@ HttpRequestBodyFraming parse_request_body_framing_or_throw_bad_request(
     }
 }
 
-HttpResponse handle_streaming_transfer_import(
-    const AppState& state,
-    const HttpRequest& request,
-    HttpRequestBodyStream* body
-) {
+HttpResponse
+handle_streaming_transfer_import(const AppState& state, const HttpRequest& request, HttpRequestBodyStream* body) {
     HttpResponse response;
     response.status = 200;
 
@@ -151,19 +139,16 @@ HttpResponse handle_streaming_transfer_import(
     }
 
     try {
-        const TransferImportRequestSpec import_request =
-            prepare_transfer_import_request(state, request);
+        const TransferImportRequestSpec import_request = prepare_transfer_import_request(state, request);
         HttpBodyTransferArchiveReader archive_reader(body);
-        const ImportSummary summary = import_path_from_reader(
-            archive_reader,
-            import_request.metadata.source_type,
-            import_request.destination_path,
-            import_request.metadata.overwrite,
-            import_request.metadata.create_parent,
-            import_request.metadata.symlink_mode,
-            import_request.limits,
-            import_request.authorizer
-        );
+        const ImportSummary summary = import_path_from_reader(archive_reader,
+                                                              import_request.metadata.source_type,
+                                                              import_request.destination_path,
+                                                              import_request.metadata.overwrite,
+                                                              import_request.metadata.create_parent,
+                                                              import_request.metadata.symlink_mode,
+                                                              import_request.limits,
+                                                              import_request.authorizer);
         log_transfer_import_summary(import_request.destination_path, summary);
         write_json(response, transfer_summary_json(summary));
     } catch (const SandboxError& ex) {
@@ -181,11 +166,7 @@ HttpResponse handle_streaming_transfer_import(
     return response;
 }
 
-void send_transfer_export_headers(
-    SOCKET client,
-    const ExportedPayload& payload,
-    const HttpRequest& request
-) {
+void send_transfer_export_headers(SOCKET client, const ExportedPayload& payload, const HttpRequest& request) {
     HttpResponse response;
     response.status = 200;
     response.headers["Transfer-Encoding"] = "chunked";
@@ -194,8 +175,7 @@ void send_transfer_export_headers(
 
     std::ostringstream out;
     out << "HTTP/1.1 200 OK\r\n";
-    for (std::map<std::string, std::string>::const_iterator it = response.headers.begin();
-         it != response.headers.end();
+    for (std::map<std::string, std::string>::const_iterator it = response.headers.begin(); it != response.headers.end();
          ++it) {
         out << it->first << ": " << it->second << "\r\n";
     }
@@ -203,12 +183,10 @@ void send_transfer_export_headers(
     send_all(client, out.str());
 }
 
-int handle_streaming_transfer_export(
-    const AppState& state,
-    const HttpRequest& request_head,
-    HttpRequestBodyStream* body,
-    SOCKET client
-) {
+int handle_streaming_transfer_export(const AppState& state,
+                                     const HttpRequest& request_head,
+                                     HttpRequestBodyStream* body,
+                                     SOCKET client) {
     HttpResponse rejection;
     rejection.status = 200;
     if (reject_before_route(state, request_head, &rejection)) {
@@ -222,29 +200,17 @@ int handle_streaming_transfer_export(
         HttpRequest request = request_head;
         request.body = read_request_body_to_string(body);
         const Json body_json = parse_json_body(request);
-        const TransferExportRequestSpec export_request =
-            prepare_transfer_export_request(state, body_json);
-        log_message(
-            LOG_INFO,
-            "server",
-            "transfer/export path=`" + export_request.path + "` source_type=`" +
-                transfer_source_type_wire_value(export_request.source_type) + "`"
-        );
+        const TransferExportRequestSpec export_request = prepare_transfer_export_request(state, body_json);
+        log_message(LOG_INFO,
+                    "server",
+                    "transfer/export path=`" + export_request.path + "` source_type=`" +
+                        transfer_source_type_wire_value(export_request.source_type) + "`");
 
-        send_transfer_export_headers(
-            client,
-            ExportedPayload{export_request.source_type, std::string()},
-            request
-        );
+        send_transfer_export_headers(client, ExportedPayload{export_request.source_type, std::string()}, request);
         headers_sent = true;
         ChunkedTransferArchiveSink sink(client);
         export_path_to_sink_as(
-            sink,
-            export_request.path,
-            export_request.source_type,
-            export_request.symlink_mode,
-            export_request.exclude
-        );
+            sink, export_request.path, export_request.source_type, export_request.symlink_mode, export_request.exclude);
         sink.finish();
         return 200;
     } catch (const SandboxError& ex) {
@@ -288,37 +254,23 @@ int handle_streaming_transfer_export(
     }
 }
 
-void log_request_result(
-    const HttpRequest& request,
-    int status,
-    std::uint64_t started_at_ms
-) {
+void log_request_result(const HttpRequest& request, int status, std::uint64_t started_at_ms) {
     std::ostringstream message;
-    message << request.method << ' ' << request.path
-            << " request_id=" << request_id_for_request(request)
-            << " status=" << status
-            << " elapsed_ms=" << (platform::monotonic_ms() - started_at_ms);
+    message << request.method << ' ' << request.path << " request_id=" << request_id_for_request(request)
+            << " status=" << status << " elapsed_ms=" << (platform::monotonic_ms() - started_at_ms);
     log_message(level_for_status(status), "server", message.str());
 }
 
-int handle_client_request(
-    AppState& state,
-    SOCKET client,
-    const HttpRequestHead& request_head,
-    bool* close_after_response
-) {
+int handle_client_request(AppState& state,
+                          SOCKET client,
+                          const HttpRequestHead& request_head,
+                          bool* close_after_response) {
     const std::uint64_t started_at_ms = platform::monotonic_ms();
     HttpRequest request = parse_http_request_head(request_head.raw_headers);
     assign_request_id(request);
     *close_after_response = request_connection_close_requested(request);
-    const HttpRequestBodyFraming framing =
-        parse_request_body_framing_or_throw_bad_request(request);
-    HttpRequestBodyStream body(
-        client,
-        request_head.initial_body,
-        framing,
-        state.config.max_request_body_bytes
-    );
+    const HttpRequestBodyFraming framing = parse_request_body_framing_or_throw_bad_request(request);
+    HttpRequestBodyStream body(client, request_head.initial_body, framing, state.config.max_request_body_bytes);
 
     if (request.path == "/v1/transfer/export") {
         const int status = handle_streaming_transfer_export(state, request, &body, client);
@@ -347,21 +299,14 @@ int handle_client_request(
     return response.status;
 }
 
-}  // namespace
+} // namespace
 
 void handle_client(AppState& state, UniqueSocket client) {
     for (;;) {
         try {
-            set_socket_timeout_ms(
-                client.get(),
-                state.config.http_connection_idle_timeout_ms
-            );
+            set_socket_timeout_ms(client.get(), state.config.http_connection_idle_timeout_ms);
             HttpRequestHead request_head;
-            if (!try_read_http_request_head(
-                    client.get(),
-                    state.config.max_request_header_bytes,
-                    &request_head
-                )) {
+            if (!try_read_http_request_head(client.get(), state.config.max_request_header_bytes, &request_head)) {
                 return;
             }
             set_socket_timeout_ms(client.get(), 0UL);

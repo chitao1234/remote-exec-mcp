@@ -11,9 +11,9 @@
 #include <sys/socket.h>
 #endif
 
-#include "test_filesystem.h"
 #include "platform.h"
 #include "server_runtime.h"
+#include "test_filesystem.h"
 
 namespace fs = test_fs;
 
@@ -32,11 +32,7 @@ static std::string read_all_from_socket(SOCKET socket) {
     return output;
 }
 
-static bool wait_for_active_connections(
-    ConnectionManager& manager,
-    unsigned long expected,
-    unsigned long timeout_ms
-) {
+static bool wait_for_active_connections(ConnectionManager& manager, unsigned long expected, unsigned long timeout_ms) {
     const std::uint64_t deadline = platform::monotonic_ms() + timeout_ms;
     while (platform::monotonic_ms() < deadline) {
         if (manager.active_count() == expected) {
@@ -82,13 +78,11 @@ static void assert_health_request(ServerRuntime& runtime, unsigned short port) {
     UniqueSocket client(connect_client(port));
     assert(wait_for_active_connections(runtime.connection_manager(), 1UL, TEST_TIMEOUT_MS));
 
-    send_all(
-        client.get(),
-        "POST /v1/health HTTP/1.1\r\n"
-        "Connection: close\r\n"
-        "Content-Length: 0\r\n"
-        "\r\n"
-    );
+    send_all(client.get(),
+             "POST /v1/health HTTP/1.1\r\n"
+             "Connection: close\r\n"
+             "Content-Length: 0\r\n"
+             "\r\n");
 
     const std::string response = read_all_from_socket(client.get());
     assert(response.find("HTTP/1.1 200 OK\r\n") == 0);

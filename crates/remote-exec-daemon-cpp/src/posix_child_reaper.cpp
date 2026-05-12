@@ -128,7 +128,7 @@ void reaper_loop() {
     }
 }
 
-}  // namespace
+} // namespace
 
 void install_posix_child_reaper() {
     BasicLockGuard lock(g_mutex);
@@ -195,11 +195,7 @@ bool poll_posix_child_exit(pid_t pid, int* status) {
             return true;
         }
         g_registered.erase(pid);
-        log_message(
-            LOG_WARN,
-            "posix_child_reaper",
-            "lost child status after ECHILD; assuming zero exit status"
-        );
+        log_message(LOG_WARN, "posix_child_reaper", "lost child status after ECHILD; assuming zero exit status");
         *status = 0;
         return true;
     }
@@ -226,10 +222,7 @@ bool wait_posix_child_exit(pid_t pid, int* status) {
         }
         g_registered.erase(pid);
         log_message(
-            LOG_WARN,
-            "posix_child_reaper",
-            "lost child status during blocking wait; assuming zero exit status"
-        );
+            LOG_WARN, "posix_child_reaper", "lost child status during blocking wait; assuming zero exit status");
         *status = 0;
         return true;
     }

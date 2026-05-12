@@ -2,17 +2,15 @@
 
 #include <stdexcept>
 
-#include <winsock2.h>
 #include <windows.h>
+#include <winsock2.h>
 
 class UniqueHandle {
 public:
     UniqueHandle() : handle_(NULL) {}
     explicit UniqueHandle(HANDLE handle) : handle_(handle) {}
 
-    ~UniqueHandle() {
-        reset();
-    }
+    ~UniqueHandle() { reset(); }
 
     UniqueHandle(UniqueHandle&& other) : handle_(other.release()) {}
 
@@ -26,13 +24,9 @@ public:
     UniqueHandle(const UniqueHandle&) = delete;
     UniqueHandle& operator=(const UniqueHandle&) = delete;
 
-    HANDLE get() const {
-        return handle_;
-    }
+    HANDLE get() const { return handle_; }
 
-    bool valid() const {
-        return handle_ != NULL && handle_ != INVALID_HANDLE_VALUE;
-    }
+    bool valid() const { return handle_ != NULL && handle_ != INVALID_HANDLE_VALUE; }
 
     HANDLE release() {
         const HANDLE released = handle_;
@@ -56,9 +50,7 @@ public:
     UniqueSocket() : socket_(INVALID_SOCKET) {}
     explicit UniqueSocket(SOCKET socket) : socket_(socket) {}
 
-    ~UniqueSocket() {
-        reset();
-    }
+    ~UniqueSocket() { reset(); }
 
     UniqueSocket(UniqueSocket&& other) : socket_(other.release()) {}
 
@@ -72,13 +64,9 @@ public:
     UniqueSocket(const UniqueSocket&) = delete;
     UniqueSocket& operator=(const UniqueSocket&) = delete;
 
-    SOCKET get() const {
-        return socket_;
-    }
+    SOCKET get() const { return socket_; }
 
-    bool valid() const {
-        return socket_ != INVALID_SOCKET;
-    }
+    bool valid() const { return socket_ != INVALID_SOCKET; }
 
     SOCKET release() {
         const SOCKET released = socket_;
@@ -106,9 +94,7 @@ public:
         }
     }
 
-    ~WinsockSession() {
-        WSACleanup();
-    }
+    ~WinsockSession() { WSACleanup(); }
 
     WinsockSession(const WinsockSession&) = delete;
     WinsockSession& operator=(const WinsockSession&) = delete;

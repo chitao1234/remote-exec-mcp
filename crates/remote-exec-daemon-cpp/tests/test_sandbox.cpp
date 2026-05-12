@@ -14,12 +14,8 @@ static fs::path make_test_root() {
     return root;
 }
 
-static bool denied(
-    PathPolicy policy,
-    const CompiledFilesystemSandbox* sandbox,
-    SandboxAccess access,
-    const std::string& path
-) {
+static bool
+denied(PathPolicy policy, const CompiledFilesystemSandbox* sandbox, SandboxAccess access, const std::string& path) {
     try {
         authorize_path(policy, sandbox, access, path);
         return false;
@@ -42,8 +38,7 @@ int main() {
     FilesystemSandbox write_sandbox;
     write_sandbox.write.allow.push_back(allowed.string());
     write_sandbox.write.deny.push_back(denied_root.string());
-    const CompiledFilesystemSandbox compiled =
-        compile_filesystem_sandbox(host_policy, write_sandbox);
+    const CompiledFilesystemSandbox compiled = compile_filesystem_sandbox(host_policy, write_sandbox);
 
     authorize_path(host_policy, &compiled, SANDBOX_WRITE, (allowed / "new.txt").string());
     assert(denied(host_policy, &compiled, SANDBOX_WRITE, (denied_root / "key.txt").string()));
@@ -51,15 +46,9 @@ int main() {
 
     FilesystemSandbox deny_only;
     deny_only.read.deny.push_back(denied_root.string());
-    const CompiledFilesystemSandbox deny_only_compiled =
-        compile_filesystem_sandbox(host_policy, deny_only);
+    const CompiledFilesystemSandbox deny_only_compiled = compile_filesystem_sandbox(host_policy, deny_only);
     authorize_path(host_policy, &deny_only_compiled, SANDBOX_READ, (sibling / "ok.txt").string());
-    assert(denied(
-        host_policy,
-        &deny_only_compiled,
-        SANDBOX_READ,
-        (denied_root / "blocked.txt").string()
-    ));
+    assert(denied(host_policy, &deny_only_compiled, SANDBOX_READ, (denied_root / "blocked.txt").string()));
 
     FilesystemSandbox invalid;
     invalid.exec_cwd.allow.push_back("relative/path");
@@ -83,8 +72,7 @@ int main() {
     FilesystemSandbox windows_sandbox;
     windows_sandbox.read.allow.push_back("C:\\Work");
     windows_sandbox.read.deny.push_back("C:\\Work\\Secret");
-    const CompiledFilesystemSandbox windows_compiled =
-        compile_filesystem_sandbox(windows_policy, windows_sandbox);
+    const CompiledFilesystemSandbox windows_compiled = compile_filesystem_sandbox(windows_policy, windows_sandbox);
     authorize_path(windows_policy, &windows_compiled, SANDBOX_READ, "c:/work/out.txt");
     assert(denied(windows_policy, &windows_compiled, SANDBOX_READ, "C:\\WORK\\SECRET\\key.txt"));
     assert(denied(windows_policy, &windows_compiled, SANDBOX_READ, "C:\\Worker\\out.txt"));

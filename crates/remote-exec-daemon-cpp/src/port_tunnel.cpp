@@ -10,30 +10,16 @@ const unsigned long RESUME_TIMEOUT_MS = 10000UL;
 #endif
 
 void log_tunnel_exception(const char* operation, const std::exception& ex) {
-    log_message(
-        LOG_WARN,
-        "port_tunnel",
-        std::string(operation) + " failed: " + ex.what()
-    );
+    log_message(LOG_WARN, "port_tunnel", std::string(operation) + " failed: " + ex.what());
 }
 
 void log_unknown_tunnel_exception(const char* operation) {
-    log_message(
-        LOG_WARN,
-        "port_tunnel",
-        std::string(operation) + " failed with an unknown exception"
-    );
+    log_message(LOG_WARN, "port_tunnel", std::string(operation) + " failed with an unknown exception");
 }
 
 PortTunnelService::PortTunnelService(const PortForwardLimitConfig& limits)
-    : active_workers_(0UL),
-      retained_sessions_(0UL),
-      retained_listeners_(0UL),
-      udp_binds_(0UL),
-      active_tcp_streams_(0UL),
-      limits_(limits),
-      next_session_sequence_(1ULL),
-      expiry_shutdown_(false),
+    : active_workers_(0UL), retained_sessions_(0UL), retained_listeners_(0UL), udp_binds_(0UL),
+      active_tcp_streams_(0UL), limits_(limits), next_session_sequence_(1ULL), expiry_shutdown_(false),
       expiry_thread_started_(false)
 #ifdef _WIN32
       ,
@@ -42,16 +28,14 @@ PortTunnelService::PortTunnelService(const PortForwardLimitConfig& limits)
       ,
       expiry_thread_()
 #endif
-{}
+{
+}
 
 PortTunnelService::~PortTunnelService() {
     stop_expiry_scheduler();
 }
 
-static bool try_acquire_counter(
-    std::atomic<unsigned long>& counter,
-    unsigned long limit
-) {
+static bool try_acquire_counter(std::atomic<unsigned long>& counter, unsigned long limit) {
     unsigned long current = counter.load();
     while (current < limit) {
         if (counter.compare_exchange_weak(current, current + 1UL)) {
@@ -118,9 +102,8 @@ void PortTunnelService::release_active_tcp_stream() {
     release_counter(active_tcp_streams_);
 }
 
-PortTunnelWorkerLease::PortTunnelWorkerLease(
-    const std::shared_ptr<PortTunnelService>& service
-) : service_(service) {}
+PortTunnelWorkerLease::PortTunnelWorkerLease(const std::shared_ptr<PortTunnelService>& service) : service_(service) {
+}
 
 PortTunnelWorkerLease::~PortTunnelWorkerLease() {
     if (service_.get() != NULL) {
@@ -137,9 +120,8 @@ bool connection_header_has_upgrade(const HttpRequest& request) {
     std::size_t offset = 0;
     while (offset <= value.size()) {
         const std::size_t comma = value.find(',', offset);
-        const std::string token = trim_ascii(
-            comma == std::string::npos ? value.substr(offset) : value.substr(offset, comma - offset)
-        );
+        const std::string token =
+            trim_ascii(comma == std::string::npos ? value.substr(offset) : value.substr(offset, comma - offset));
         if (token == "upgrade") {
             return true;
         }
@@ -258,8 +240,6 @@ bool is_port_tunnel_upgrade_request(const HttpRequest& request) {
     return request.method == "POST" && request.path == "/v1/port/tunnel";
 }
 
-std::shared_ptr<PortTunnelService> create_port_tunnel_service(
-    const PortForwardLimitConfig& limits
-) {
+std::shared_ptr<PortTunnelService> create_port_tunnel_service(const PortForwardLimitConfig& limits) {
     return std::shared_ptr<PortTunnelService>(new PortTunnelService(limits));
 }

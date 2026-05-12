@@ -17,4 +17,4 @@ private:
     std::vector<std::string> patterns_;
 };
 
-}  // namespace transfer_glob
+} // namespace transfer_glob

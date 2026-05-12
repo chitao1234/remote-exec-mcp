@@ -29,12 +29,8 @@ void assert_control_frame_round_trips(PortTunnelFrameType type) {
     assert(decoded.meta == frame.meta);
 }
 
-std::vector<unsigned char> frame_header(
-    unsigned char frame_type,
-    uint32_t stream_id,
-    uint32_t meta_len,
-    uint32_t data_len
-) {
+std::vector<unsigned char>
+frame_header(unsigned char frame_type, uint32_t stream_id, uint32_t meta_len, uint32_t data_len) {
     std::vector<unsigned char> bytes(16U, 0U);
     bytes[0] = frame_type;
     bytes[4] = static_cast<unsigned char>((stream_id >> 24) & 0xffU);
@@ -52,7 +48,7 @@ std::vector<unsigned char> frame_header(
     return bytes;
 }
 
-}  // namespace
+} // namespace
 
 int main() {
     assert(std::string(port_tunnel_preface(), port_tunnel_preface_size()) == "REPFWD1\n");
@@ -76,8 +72,7 @@ int main() {
     empty_control.type = PortTunnelFrameType::TunnelHeartbeat;
     empty_control.flags = 0U;
     empty_control.stream_id = 0U;
-    const PortTunnelFrame decoded_empty_control =
-        decode_port_tunnel_frame(encode_port_tunnel_frame(empty_control));
+    const PortTunnelFrame decoded_empty_control = decode_port_tunnel_frame(encode_port_tunnel_frame(empty_control));
     assert(decoded_empty_control.type == PortTunnelFrameType::TunnelHeartbeat);
     assert(decoded_empty_control.meta.empty());
     assert(decoded_empty_control.data.empty());
@@ -101,18 +96,14 @@ int main() {
     assert_control_frame_round_trips(PortTunnelFrameType::ForwardDrop);
 
     assert_decode_rejects(frame_header(99U, 1U, 0U, 0U));
-    assert_decode_rejects(frame_header(
-        static_cast<unsigned char>(PortTunnelFrameType::Error),
-        1U,
-        static_cast<uint32_t>(PORT_TUNNEL_MAX_META_LEN + 1U),
-        0U
-    ));
-    assert_decode_rejects(frame_header(
-        static_cast<unsigned char>(PortTunnelFrameType::TcpData),
-        1U,
-        0U,
-        static_cast<uint32_t>(PORT_TUNNEL_MAX_DATA_LEN + 1U)
-    ));
+    assert_decode_rejects(frame_header(static_cast<unsigned char>(PortTunnelFrameType::Error),
+                                       1U,
+                                       static_cast<uint32_t>(PORT_TUNNEL_MAX_META_LEN + 1U),
+                                       0U));
+    assert_decode_rejects(frame_header(static_cast<unsigned char>(PortTunnelFrameType::TcpData),
+                                       1U,
+                                       0U,
+                                       static_cast<uint32_t>(PORT_TUNNEL_MAX_DATA_LEN + 1U)));
 
     return 0;
 }

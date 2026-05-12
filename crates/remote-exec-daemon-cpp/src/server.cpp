@@ -37,16 +37,12 @@ int run_server(const DaemonConfig& config) {
 
     {
         std::ostringstream message;
-        message << "listening on " << runtime.state().config.listen_host << ':'
-                << bound_port
-                << " target=`" << runtime.state().config.target << "`"
-                << " http_auth_enabled=`"
-                << (!runtime.state().config.http_auth_bearer_token.empty() ? "true" : "false")
-                << "`"
-                << " platform=`" << platform::platform_name() << "`"
-                << " arch=`" << platform::arch_name() << "`"
-                << " default_shell=`" << runtime.state().default_shell << "`"
-                << " daemon_instance_id=`" << runtime.state().daemon_instance_id << "`";
+        message << "listening on " << runtime.state().config.listen_host << ':' << bound_port << " target=`"
+                << runtime.state().config.target << "`" << " http_auth_enabled=`"
+                << (!runtime.state().config.http_auth_bearer_token.empty() ? "true" : "false") << "`" << " platform=`"
+                << platform::platform_name() << "`" << " arch=`" << platform::arch_name() << "`" << " default_shell=`"
+                << runtime.state().default_shell << "`" << " daemon_instance_id=`" << runtime.state().daemon_instance_id
+                << "`";
         log_message(LOG_INFO, "server", message.str());
     }
 

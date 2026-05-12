@@ -90,15 +90,12 @@ void validate_header_name(const std::string& raw_name) {
     }
 }
 
-}  // namespace
+} // namespace
 
-HttpRequestBodyFraming::HttpRequestBodyFraming()
-    : has_content_length(false), content_length(0), chunked(false) {}
+HttpRequestBodyFraming::HttpRequestBodyFraming() : has_content_length(false), content_length(0), chunked(false) {
+}
 
-void parse_http_header_line(
-    const std::string& header_line,
-    std::map<std::string, std::string>* headers
-) {
+void parse_http_header_line(const std::string& header_line, std::map<std::string, std::string>* headers) {
     const std::size_t colon = header_line.find(':');
     if (colon == std::string::npos) {
         throw HttpProtocolError("invalid header line");
@@ -119,19 +116,15 @@ void parse_http_header_line(
     (*headers)[name] = value;
 }
 
-HttpRequestBodyFraming request_body_framing_from_headers(
-    const std::map<std::string, std::string>& headers
-) {
+HttpRequestBodyFraming request_body_framing_from_headers(const std::map<std::string, std::string>& headers) {
     HttpRequestBodyFraming framing;
-    const std::map<std::string, std::string>::const_iterator content_length =
-        headers.find("content-length");
+    const std::map<std::string, std::string>::const_iterator content_length = headers.find("content-length");
     if (content_length != headers.end()) {
         framing.has_content_length = true;
         framing.content_length = parse_content_length_value(content_length->second);
     }
 
-    const std::map<std::string, std::string>::const_iterator transfer_encoding =
-        headers.find("transfer-encoding");
+    const std::map<std::string, std::string>::const_iterator transfer_encoding = headers.find("transfer-encoding");
     if (transfer_encoding != headers.end()) {
         if (lowercase_ascii(transfer_encoding->second) != "chunked") {
             throw HttpProtocolError("unsupported Transfer-Encoding");
@@ -148,8 +141,7 @@ HttpRequestBodyFraming request_body_framing_from_headers(
 
 std::size_t parse_http_chunk_size_line(const std::string& line) {
     const std::size_t extension = line.find(';');
-    const std::string size_text =
-        trim_ascii(extension == std::string::npos ? line : line.substr(0, extension));
+    const std::string size_text = trim_ascii(extension == std::string::npos ? line : line.substr(0, extension));
     if (size_text.empty()) {
         throw HttpProtocolError("invalid chunk size");
     }
@@ -180,8 +172,7 @@ std::string decode_http_chunked_body(const std::string& body) {
             throw HttpProtocolError("incomplete chunked body");
         }
 
-        const std::size_t chunk_size =
-            parse_http_chunk_size_line(body.substr(offset, line_end - offset));
+        const std::size_t chunk_size = parse_http_chunk_size_line(body.substr(offset, line_end - offset));
         offset = line_end + 2U;
 
         if (chunk_size == 0U) {
@@ -198,10 +189,7 @@ std::string decode_http_chunked_body(const std::string& body) {
                     return decoded;
                 }
 
-                parse_http_header_line(
-                    body.substr(offset, trailer_line_end - offset),
-                    &trailers
-                );
+                parse_http_header_line(body.substr(offset, trailer_line_end - offset), &trailers);
                 offset = trailer_line_end + 2U;
             }
         }

@@ -1,6 +1,6 @@
 #include <algorithm>
-#include <cerrno>
 #include <cctype>
+#include <cerrno>
 #include <climits>
 #include <cstdio>
 #include <cstdlib>
@@ -11,9 +11,9 @@
 #include <string>
 
 #ifdef _WIN32
+#include <windows.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <windows.h>
 #else
 #include <netdb.h>
 #include <signal.h>
@@ -44,7 +44,7 @@ void throw_socket_option_error(const std::string& option, int error) {
     throw std::runtime_error(socket_error_message_from_code("setsockopt(" + option + ")", error));
 }
 
-}  // namespace
+} // namespace
 
 void close_socket(SOCKET socket) {
 #ifdef _WIN32
@@ -65,22 +65,10 @@ void shutdown_socket(SOCKET socket) {
 void set_socket_timeout_ms(SOCKET socket, unsigned long timeout_ms) {
 #ifdef _WIN32
     const DWORD value = static_cast<DWORD>(timeout_ms);
-    if (setsockopt(
-        socket,
-        SOL_SOCKET,
-        SO_RCVTIMEO,
-        reinterpret_cast<const char*>(&value),
-        sizeof(value)
-    ) != 0) {
+    if (setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&value), sizeof(value)) != 0) {
         throw_socket_option_error("SO_RCVTIMEO", WSAGetLastError());
     }
-    if (setsockopt(
-        socket,
-        SOL_SOCKET,
-        SO_SNDTIMEO,
-        reinterpret_cast<const char*>(&value),
-        sizeof(value)
-    ) != 0) {
+    if (setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&value), sizeof(value)) != 0) {
         throw_socket_option_error("SO_SNDTIMEO", WSAGetLastError());
     }
 #else
@@ -155,17 +143,20 @@ std::size_t parse_chunk_size_line(const std::string& line) {
     }
 }
 
-}  // namespace
+} // namespace
 
-UniqueSocket::UniqueSocket() : socket_(INVALID_SOCKET) {}
+UniqueSocket::UniqueSocket() : socket_(INVALID_SOCKET) {
+}
 
-UniqueSocket::UniqueSocket(SOCKET socket) : socket_(socket) {}
+UniqueSocket::UniqueSocket(SOCKET socket) : socket_(socket) {
+}
 
 UniqueSocket::~UniqueSocket() {
     reset();
 }
 
-UniqueSocket::UniqueSocket(UniqueSocket&& other) : socket_(other.release()) {}
+UniqueSocket::UniqueSocket(UniqueSocket&& other) : socket_(other.release()) {
+}
 
 UniqueSocket& UniqueSocket::operator=(UniqueSocket&& other) {
     if (this != &other) {
@@ -212,11 +203,7 @@ NetworkSession::~NetworkSession() {
 #endif
 }
 
-bool try_read_http_request_head(
-    SOCKET client,
-    std::size_t max_header_bytes,
-    HttpRequestHead* head
-) {
+bool try_read_http_request_head(SOCKET client, std::size_t max_header_bytes, HttpRequestHead* head) {
     std::string data;
     char buffer[4096];
 
@@ -269,20 +256,12 @@ HttpRequestHead read_http_request_head(SOCKET client, std::size_t max_header_byt
     throw BadHttpRequest("incomplete http request");
 }
 
-HttpRequestBodyStream::HttpRequestBodyStream(
-    SOCKET client,
-    const std::string& initial_body,
-    const HttpRequestBodyFraming& framing,
-    std::size_t max_body_bytes
-)
-    : client_(client),
-      raw_(initial_body),
-      raw_offset_(0),
-      framing_(framing),
-      decoded_size_(0),
-      max_body_bytes_(max_body_bytes),
-      remaining_content_length_(framing.content_length),
-      remaining_chunk_size_(0),
+HttpRequestBodyStream::HttpRequestBodyStream(SOCKET client,
+                                             const std::string& initial_body,
+                                             const HttpRequestBodyFraming& framing,
+                                             std::size_t max_body_bytes)
+    : client_(client), raw_(initial_body), raw_offset_(0), framing_(framing), decoded_size_(0),
+      max_body_bytes_(max_body_bytes), remaining_content_length_(framing.content_length), remaining_chunk_size_(0),
       chunked_finished_(false) {
     if (!framing_.chunked && remaining_content_length_ > max_body_bytes_) {
         throw BadHttpRequest("http request body too large");
@@ -304,8 +283,7 @@ std::size_t HttpRequestBodyStream::read_content_length_body(char* data, std::siz
         return 0;
     }
 
-    const std::size_t requested =
-        remaining_content_length_ < max_size ? remaining_content_length_ : max_size;
+    const std::size_t requested = remaining_content_length_ < max_size ? remaining_content_length_ : max_size;
     ensure_raw_available(1);
     const std::size_t available = raw_.size() - raw_offset_;
     const std::size_t copied = requested < available ? requested : available;
@@ -324,8 +302,7 @@ std::size_t HttpRequestBodyStream::read_chunked_body(char* data, std::size_t max
     while (remaining_chunk_size_ == 0U) {
         ensure_raw_line();
         const std::size_t line_end = raw_.find("\r\n", raw_offset_);
-        const std::size_t chunk_size =
-            parse_chunk_size_line(raw_.substr(raw_offset_, line_end - raw_offset_));
+        const std::size_t chunk_size = parse_chunk_size_line(raw_.substr(raw_offset_, line_end - raw_offset_));
         consume_raw(line_end + 2U - raw_offset_);
 
         if (chunk_size == 0U) {
@@ -425,10 +402,7 @@ void send_all_bytes(SOCKET client, const char* data, std::size_t size) {
         const int sent = send_bounded(client, data + offset, size - offset, 0);
         if (sent <= 0) {
             const int error = last_socket_error();
-            throw SocketSendError(
-                socket_error_message("send"),
-                peer_disconnected_send_error(error)
-            );
+            throw SocketSendError(socket_error_message("send"), peer_disconnected_send_error(error));
         }
         offset += static_cast<std::size_t>(sent);
     }

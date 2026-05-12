@@ -16,10 +16,7 @@ namespace {
 const unsigned long EXIT_DRAIN_INITIAL_WAIT_MS = 125UL;
 const unsigned long EXIT_DRAIN_QUIET_MS = 25UL;
 
-void append_session_output_locked(
-    LiveSession* session,
-    const std::string& chunk
-) {
+void append_session_output_locked(LiveSession* session, const std::string& chunk) {
     if (!chunk.empty()) {
         session->output_.buffered_output += chunk;
         ++session->output_.generation;
@@ -34,12 +31,10 @@ bool terminate_descendants_after_exit_locked(LiveSession* session) {
     return false;
 }
 
-void wait_for_generation_change_locked(
-    LiveSession* session,
-    std::uint64_t baseline_generation,
-    std::uint64_t deadline_ms,
-    unsigned long max_wait_ms
-) {
+void wait_for_generation_change_locked(LiveSession* session,
+                                       std::uint64_t baseline_generation,
+                                       std::uint64_t deadline_ms,
+                                       unsigned long max_wait_ms) {
     while (!session->closing && session->output_.generation == baseline_generation) {
         const std::uint64_t now = platform::monotonic_ms();
         if (now >= deadline_ms) {
@@ -75,11 +70,7 @@ void pump_session_output(const std::shared_ptr<LiveSession>& session) {
         try {
             chunk = session->process->read_output(true, &eof, &carry);
         } catch (const std::exception& ex) {
-            log_message(
-                LOG_WARN,
-                "session",
-                std::string("session output pump failed: ") + ex.what()
-            );
+            log_message(LOG_WARN, "session", std::string("session output pump failed: ") + ex.what());
             BasicLockGuard lock(session->mutex_);
             session->output_.decode_carry = carry;
             finish_session_output_locked(session.get());
@@ -106,15 +97,13 @@ struct SessionPumpContext {
 };
 
 unsigned __stdcall session_output_pump_entry(void* raw_context) {
-    std::unique_ptr<SessionPumpContext> context(
-        static_cast<SessionPumpContext*>(raw_context)
-    );
+    std::unique_ptr<SessionPumpContext> context(static_cast<SessionPumpContext*>(raw_context));
     pump_session_output(context->session);
     return 0;
 }
 #endif
 
-}  // namespace
+} // namespace
 
 bool mark_session_exit_locked(LiveSession* session) {
     if (session->output_.exited) {
@@ -195,21 +184,14 @@ void join_session_pump(LiveSession* session) {
 }
 #endif
 
-std::string take_session_output_locked(
-    LiveSession* session,
-    unsigned long max_output_tokens
-) {
+std::string take_session_output_locked(LiveSession* session, unsigned long max_output_tokens) {
     (void)max_output_tokens;
     std::string output = session->output_.buffered_output;
     session->output_.buffered_output.clear();
     return output;
 }
 
-bool drain_exited_session_output_locked(
-    LiveSession* session,
-    std::string* output,
-    unsigned long max_output_tokens
-) {
+bool drain_exited_session_output_locked(LiveSession* session, std::string* output, unsigned long max_output_tokens) {
     bool signaled_descendants = false;
     std::uint64_t deadline = platform::monotonic_ms() + EXIT_DRAIN_INITIAL_WAIT_MS;
 

@@ -41,16 +41,15 @@ void maybe_apply_test_exit_poll_delay() {
     }
 }
 #else
-void maybe_apply_test_exit_poll_delay() {}
+void maybe_apply_test_exit_poll_delay() {
+}
 #endif
 
 class UniqueFd {
 public:
     UniqueFd() : fd_(-1) {}
     explicit UniqueFd(int fd) : fd_(fd) {}
-    ~UniqueFd() {
-        reset();
-    }
+    ~UniqueFd() { reset(); }
 
     UniqueFd(UniqueFd&& other) : fd_(other.release()) {}
     UniqueFd& operator=(UniqueFd&& other) {
@@ -63,13 +62,9 @@ public:
     UniqueFd(const UniqueFd&) = delete;
     UniqueFd& operator=(const UniqueFd&) = delete;
 
-    int get() const {
-        return fd_;
-    }
+    int get() const { return fd_; }
 
-    bool valid() const {
-        return fd_ >= 0;
-    }
+    bool valid() const { return fd_ >= 0; }
 
     int release() {
         const int released = fd_;
@@ -111,25 +106,17 @@ PosixPipePair create_posix_pipe(const char* label) {
     try {
         const int read_flags = fcntl(fds[0], F_GETFD, 0);
         if (read_flags < 0) {
-            throw std::runtime_error(
-                std::string(label) + " fcntl(F_GETFD) failed: " + std::strerror(errno)
-            );
+            throw std::runtime_error(std::string(label) + " fcntl(F_GETFD) failed: " + std::strerror(errno));
         }
         if (fcntl(fds[0], F_SETFD, read_flags | FD_CLOEXEC) != 0) {
-            throw std::runtime_error(
-                std::string(label) + " fcntl(F_SETFD) failed: " + std::strerror(errno)
-            );
+            throw std::runtime_error(std::string(label) + " fcntl(F_SETFD) failed: " + std::strerror(errno));
         }
         const int write_flags = fcntl(fds[1], F_GETFD, 0);
         if (write_flags < 0) {
-            throw std::runtime_error(
-                std::string(label) + " fcntl(F_GETFD) failed: " + std::strerror(errno)
-            );
+            throw std::runtime_error(std::string(label) + " fcntl(F_GETFD) failed: " + std::strerror(errno));
         }
         if (fcntl(fds[1], F_SETFD, write_flags | FD_CLOEXEC) != 0) {
-            throw std::runtime_error(
-                std::string(label) + " fcntl(F_SETFD) failed: " + std::strerror(errno)
-            );
+            throw std::runtime_error(std::string(label) + " fcntl(F_SETFD) failed: " + std::strerror(errno));
         }
     } catch (...) {
         close(fds[0]);
@@ -307,8 +294,7 @@ struct ExecEnvironment {
 
 bool env_key_matches(const std::string& entry, const char* key) {
     const std::size_t key_len = std::strlen(key);
-    return entry.size() > key_len && entry.compare(0, key_len, key) == 0 &&
-           entry[key_len] == '=';
+    return entry.size() > key_len && entry.compare(0, key_len, key) == 0 && entry[key_len] == '=';
 }
 
 void upsert_env_value(std::vector<std::string>* values, const std::string& assignment) {
@@ -390,21 +376,17 @@ std::vector<char*> build_exec_argv(const std::vector<std::string>& argv) {
     return exec_argv;
 }
 
-void exec_shell_child(
-    const std::vector<char*>& exec_argv,
-    const std::string& executable_path,
-    const ExecEnvironment& environment,
-    const std::string& workdir
-) {
+void exec_shell_child(const std::vector<char*>& exec_argv,
+                      const std::string& executable_path,
+                      const ExecEnvironment& environment,
+                      const std::string& workdir) {
     if (!workdir.empty() && chdir(workdir.c_str()) != 0) {
         _exit(126);
     }
 
-    execve(
-        executable_path.c_str(),
-        const_cast<char* const*>(&exec_argv[0]),
-        const_cast<char* const*>(&environment.pointers[0])
-    );
+    execve(executable_path.c_str(),
+           const_cast<char* const*>(&exec_argv[0]),
+           const_cast<char* const*>(&environment.pointers[0]));
     _exit(127);
 }
 
@@ -421,24 +403,17 @@ void record_exit_status(int status, int* exit_code) {
 class PosixProcessSession : public ProcessSession {
 public:
     PosixProcessSession(pid_t pid, bool tty, UniqueFd input_write, UniqueFd output_read)
-        : pid_(pid),
-          tty_(tty),
-          input_write_(std::move(input_write)),
-          output_read_(std::move(output_read)),
-          reaped_(false),
-          exit_code_(0) {
+        : pid_(pid), tty_(tty), input_write_(std::move(input_write)), output_read_(std::move(output_read)),
+          reaped_(false), exit_code_(0) {
         register_posix_child(pid_);
     }
 
-    ~PosixProcessSession() override {
-        terminate();
-    }
+    ~PosixProcessSession() override { terminate(); }
 
     void write_stdin(const std::string& chars) override {
         if (!input_write_.valid()) {
             throw std::runtime_error(
-                "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
-            );
+                "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open");
         }
 
         const char* data = chars.data();
@@ -451,12 +426,9 @@ public:
                 }
                 if (errno == EPIPE || errno == EIO) {
                     throw ProcessStdinClosedError(
-                        "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
-                    );
+                        "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open");
                 }
-                throw std::runtime_error(
-                    std::string("write(stdin) failed: ") + std::strerror(errno)
-                );
+                throw std::runtime_error(std::string("write(stdin) failed: ") + std::strerror(errno));
             }
             if (written == 0) {
                 throw std::runtime_error("write(stdin) failed");
@@ -471,18 +443,14 @@ public:
             throw ProcessPtyResizeUnsupportedError("PTY resize requires a tty session");
         }
         if (rows == 0U || cols == 0U) {
-            throw ProcessPtyResizeUnsupportedError(
-                "PTY rows and cols must be greater than zero"
-            );
+            throw ProcessPtyResizeUnsupportedError("PTY rows and cols must be greater than zero");
         }
         struct winsize size;
         std::memset(&size, 0, sizeof(size));
         size.ws_row = rows;
         size.ws_col = cols;
         if (ioctl(input_write_.get(), TIOCSWINSZ, &size) != 0) {
-            throw std::runtime_error(
-                std::string("ioctl(TIOCSWINSZ) failed: ") + std::strerror(errno)
-            );
+            throw std::runtime_error(std::string("ioctl(TIOCSWINSZ) failed: ") + std::strerror(errno));
         }
     }
 
@@ -515,16 +483,12 @@ public:
                 *eof = true;
                 break;
             }
-            throw std::runtime_error(
-                std::string("read(stdout) failed: ") + std::strerror(errno)
-            );
+            throw std::runtime_error(std::string("read(stdout) failed: ") + std::strerror(errno));
         }
         return decode_utf8_output(carry, raw, false);
     }
 
-    std::string flush_carry(std::string* carry) override {
-        return decode_utf8_output(carry, "", true);
-    }
+    std::string flush_carry(std::string* carry) override { return decode_utf8_output(carry, "", true); }
 
     bool has_exited(int* exit_code) override {
         if (reaped_) {
@@ -572,7 +536,7 @@ private:
     int exit_code_;
 };
 
-}  // namespace
+} // namespace
 
 bool process_session_supports_pty() {
     static const bool supported = []() {
@@ -587,12 +551,7 @@ bool process_session_supports_pty() {
 }
 
 std::unique_ptr<ProcessSession> ProcessSession::launch(
-    const std::string& command,
-    const std::string& workdir,
-    const std::string& shell,
-    bool login,
-    bool tty
-) {
+    const std::string& command, const std::string& workdir, const std::string& shell, bool login, bool tty) {
     const std::vector<std::string> argv = platform::shell_argv(shell, login, command);
     ExecEnvironment exec_environment = build_exec_environment_values(tty);
     exec_environment.refresh_pointers();
@@ -625,9 +584,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
             exec_shell_child(exec_argv, executable_path, exec_environment, workdir);
         }
 
-        return std::unique_ptr<ProcessSession>(
-            new PosixProcessSession(pid, true, std::move(pty.master), UniqueFd())
-        );
+        return std::unique_ptr<ProcessSession>(new PosixProcessSession(pid, true, std::move(pty.master), UniqueFd()));
     }
 
     PosixPipePair stdout_pipe = create_posix_pipe("pipe(stdout)");
@@ -640,8 +597,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
 
     if (pid == 0) {
         setpgid(0, 0);
-        if (dup2(stdin_null.get(), STDIN_FILENO) < 0 ||
-            dup2(stdout_pipe.write_end.get(), STDOUT_FILENO) < 0 ||
+        if (dup2(stdin_null.get(), STDIN_FILENO) < 0 || dup2(stdout_pipe.write_end.get(), STDOUT_FILENO) < 0 ||
             dup2(stdout_pipe.write_end.get(), STDERR_FILENO) < 0) {
             _exit(126);
         }
@@ -657,13 +613,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     stdout_pipe.write_end.reset();
 
     return std::unique_ptr<ProcessSession>(
-        new PosixProcessSession(
-            pid,
-            false,
-            UniqueFd(),
-            std::move(stdout_pipe.read_end)
-        )
-    );
+        new PosixProcessSession(pid, false, UniqueFd(), std::move(stdout_pipe.read_end)));
 }
 
 #ifdef REMOTE_EXEC_CPP_TESTING

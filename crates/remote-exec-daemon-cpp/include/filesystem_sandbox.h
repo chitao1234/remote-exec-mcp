@@ -39,14 +39,9 @@ struct CompiledFilesystemSandbox {
     CompiledSandboxPathList write;
 };
 
-CompiledFilesystemSandbox compile_filesystem_sandbox(
-    PathPolicy policy,
-    const FilesystemSandbox& sandbox
-);
+CompiledFilesystemSandbox compile_filesystem_sandbox(PathPolicy policy, const FilesystemSandbox& sandbox);
 
-void authorize_path(
-    PathPolicy policy,
-    const CompiledFilesystemSandbox* sandbox,
-    SandboxAccess access,
-    const std::string& path
-);
+void authorize_path(PathPolicy policy,
+                    const CompiledFilesystemSandbox* sandbox,
+                    SandboxAccess access,
+                    const std::string& path);

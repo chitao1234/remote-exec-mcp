@@ -26,19 +26,12 @@ std::string invalid_header_message(const char* name, const std::string& detail) 
 std::string required_header(const HttpRequest& request, const char* name) {
     const std::map<std::string, std::string>::const_iterator it = request.headers.find(name);
     if (it == request.headers.end()) {
-        throw TransferFailure(
-            TransferRpcCode::BadRequest,
-            missing_header_message(name)
-        );
+        throw TransferFailure(TransferRpcCode::BadRequest, missing_header_message(name));
     }
     return it->second;
 }
 
-std::string optional_header_or(
-    const HttpRequest& request,
-    const char* name,
-    const std::string& fallback
-) {
+std::string optional_header_or(const HttpRequest& request, const char* name, const std::string& fallback) {
     const std::map<std::string, std::string>::const_iterator it = request.headers.find(name);
     if (it == request.headers.end()) {
         return fallback;
@@ -46,22 +39,15 @@ std::string optional_header_or(
     return it->second;
 }
 
-void require_one_of(
-    const char* name,
-    const std::string& value,
-    std::initializer_list<const char*> allowed_values
-) {
-    for (std::initializer_list<const char*>::const_iterator it = allowed_values.begin();
-         it != allowed_values.end();
+void require_one_of(const char* name, const std::string& value, std::initializer_list<const char*> allowed_values) {
+    for (std::initializer_list<const char*>::const_iterator it = allowed_values.begin(); it != allowed_values.end();
          ++it) {
         if (value == *it) {
             return;
         }
     }
-    throw TransferFailure(
-        TransferRpcCode::BadRequest,
-        invalid_header_message(name, "unsupported value `" + value + "`")
-    );
+    throw TransferFailure(TransferRpcCode::BadRequest,
+                          invalid_header_message(name, "unsupported value `" + value + "`"));
 }
 
 bool parse_create_parent(const std::string& value) {
@@ -71,20 +57,16 @@ bool parse_create_parent(const std::string& value) {
     if (value == "false") {
         return false;
     }
-    throw TransferFailure(
-        TransferRpcCode::BadRequest,
-        invalid_header_message(CREATE_PARENT_HEADER, "expected `true` or `false`")
-    );
+    throw TransferFailure(TransferRpcCode::BadRequest,
+                          invalid_header_message(CREATE_PARENT_HEADER, "expected `true` or `false`"));
 }
 
-}  // namespace
+} // namespace
 
 void require_uncompressed_transfer(const std::string& compression) {
     if (!compression.empty() && compression != "none") {
-        throw TransferFailure(
-            TransferRpcCode::CompressionUnsupported,
-            "this daemon does not support transfer compression"
-        );
+        throw TransferFailure(TransferRpcCode::CompressionUnsupported,
+                              "this daemon does not support transfer compression");
     }
 }
 
@@ -96,27 +78,22 @@ TransferImportMetadata parse_transfer_import_metadata(const HttpRequest& request
     metadata.create_parent = parse_create_parent(required_header(request, CREATE_PARENT_HEADER));
     const std::string source_type = required_header(request, SOURCE_TYPE_HEADER);
     if (!parse_transfer_source_type_wire_value(source_type, &metadata.source_type)) {
-        throw TransferFailure(
-            TransferRpcCode::BadRequest,
-            invalid_header_message(SOURCE_TYPE_HEADER, "unsupported value `" + source_type + "`")
-        );
+        throw TransferFailure(TransferRpcCode::BadRequest,
+                              invalid_header_message(SOURCE_TYPE_HEADER, "unsupported value `" + source_type + "`"));
     }
     metadata.compression = optional_header_or(request, COMPRESSION_HEADER, "none");
     require_one_of(COMPRESSION_HEADER, metadata.compression, {"none", "zstd"});
     const std::string symlink_mode = optional_header_or(request, SYMLINK_MODE_HEADER, "preserve");
     if (!parse_transfer_symlink_mode_wire_value(symlink_mode, &metadata.symlink_mode)) {
-        throw TransferFailure(
-            TransferRpcCode::BadRequest,
-            invalid_header_message(SYMLINK_MODE_HEADER, "unsupported value `" + symlink_mode + "`")
-        );
+        throw TransferFailure(TransferRpcCode::BadRequest,
+                              invalid_header_message(SYMLINK_MODE_HEADER, "unsupported value `" + symlink_mode + "`"));
     }
     return metadata;
 }
 
 void write_transfer_export_headers(HttpResponse& response, const ExportedPayload& payload) {
     response.headers["Content-Type"] = "application/octet-stream";
-    response.headers["x-remote-exec-source-type"] =
-        transfer_source_type_wire_value(payload.source_type);
+    response.headers["x-remote-exec-source-type"] = transfer_source_type_wire_value(payload.source_type);
     response.headers["x-remote-exec-compression"] = "none";
 }
 
@@ -144,10 +121,8 @@ Json transfer_summary_json(const ImportSummary& summary) {
 
 void log_transfer_import_summary(const std::string& destination_path, const ImportSummary& summary) {
     std::ostringstream message;
-    message << "transfer/import destination=`" << destination_path
-            << "` bytes_copied=" << summary.bytes_copied
-            << " files_copied=" << summary.files_copied
-            << " directories_copied=" << summary.directories_copied
+    message << "transfer/import destination=`" << destination_path << "` bytes_copied=" << summary.bytes_copied
+            << " files_copied=" << summary.files_copied << " directories_copied=" << summary.directories_copied
             << " replaced=" << (summary.replaced ? "true" : "false");
     log_message(LOG_INFO, "server", message.str());
 }

@@ -25,13 +25,5 @@ std::string path_policy_lowercase_ascii(std::string value);
 std::string path_policy_comparison_key(PathPolicy policy, const std::string& raw);
 bool is_absolute_for_policy(PathPolicy policy, const std::string& raw);
 std::string normalize_for_system(PathPolicy policy, const std::string& raw);
-std::string join_for_policy(
-    PathPolicy policy,
-    const std::string& base,
-    const std::string& child
-);
-bool same_path_for_policy(
-    PathPolicy policy,
-    const std::string& left,
-    const std::string& right
-);
+std::string join_for_policy(PathPolicy policy, const std::string& base, const std::string& child);
+bool same_path_for_policy(PathPolicy policy, const std::string& left, const std::string& right);

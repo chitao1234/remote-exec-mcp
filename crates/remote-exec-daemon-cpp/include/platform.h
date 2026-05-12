@@ -19,14 +19,7 @@ std::string normalize_path_separators(std::string path);
 
 bool shell_supported(const std::string& shell);
 std::string resolve_default_shell(const std::string& configured_default_shell);
-std::string selected_shell(
-    const std::string& shell_override,
-    const std::string& default_shell
-);
-std::vector<std::string> shell_argv(
-    const std::string& shell,
-    bool login,
-    const std::string& command
-);
+std::string selected_shell(const std::string& shell_override, const std::string& default_shell);
+std::vector<std::string> shell_argv(const std::string& shell, bool login, const std::string& command);
 
-}  // namespace platform
+} // namespace platform

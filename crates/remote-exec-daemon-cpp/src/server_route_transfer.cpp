@@ -1,8 +1,8 @@
 #include <string>
 
 #include "logging.h"
-#include "server_route_transfer.h"
 #include "server_request_utils.h"
+#include "server_route_transfer.h"
 #include "transfer_http_codec.h"
 
 HttpResponse handle_transfer_export(AppState& state, const HttpRequest& request) {
@@ -11,23 +11,14 @@ HttpResponse handle_transfer_export(AppState& state, const HttpRequest& request)
 
     try {
         const Json body = parse_json_body(request);
-        const TransferExportRequestSpec export_request =
-            prepare_transfer_export_request(state, body);
-        const ExportedPayload payload = export_path(
-            export_request.path,
-            export_request.symlink_mode,
-            export_request.exclude
-        );
-        log_message(
-            LOG_INFO,
-            "server",
-            "transfer/export path=`" + export_request.path + "` source_type=`" +
-                transfer_source_type_wire_value(export_request.source_type) + "`"
-        );
-        write_transfer_export_headers(
-            response,
-            ExportedPayload{export_request.source_type, payload.bytes}
-        );
+        const TransferExportRequestSpec export_request = prepare_transfer_export_request(state, body);
+        const ExportedPayload payload =
+            export_path(export_request.path, export_request.symlink_mode, export_request.exclude);
+        log_message(LOG_INFO,
+                    "server",
+                    "transfer/export path=`" + export_request.path + "` source_type=`" +
+                        transfer_source_type_wire_value(export_request.source_type) + "`");
+        write_transfer_export_headers(response, ExportedPayload{export_request.source_type, payload.bytes});
         response.body = payload.bytes;
     } catch (const SandboxError& ex) {
         log_message(LOG_WARN, "server", std::string("transfer/export failed: ") + ex.what());
@@ -50,19 +41,14 @@ HttpResponse handle_transfer_path_info(AppState& state, const HttpRequest& reque
 
     try {
         const Json body = parse_json_body(request);
-        const std::string path = resolve_authorized_transfer_path(
-            state,
-            body.at("path").get<std::string>(),
-            SANDBOX_WRITE
-        );
+        const std::string path =
+            resolve_authorized_transfer_path(state, body.at("path").get<std::string>(), SANDBOX_WRITE);
         const PathInfo info = path_info(path);
-        write_json(
-            response,
-            Json{
-                {"exists", info.exists},
-                {"is_directory", info.is_directory},
-            }
-        );
+        write_json(response,
+                   Json{
+                       {"exists", info.exists},
+                       {"is_directory", info.is_directory},
+                   });
     } catch (const SandboxError& ex) {
         log_message(LOG_WARN, "server", std::string("transfer/path-info failed: ") + ex.what());
         write_transfer_error_response(response, ex);
@@ -83,18 +69,15 @@ HttpResponse handle_transfer_import(AppState& state, const HttpRequest& request)
     response.status = 200;
 
     try {
-        const TransferImportRequestSpec import_request =
-            prepare_transfer_import_request(state, request);
-        const ImportSummary summary = import_path(
-            request.body,
-            import_request.metadata.source_type,
-            import_request.destination_path,
-            import_request.metadata.overwrite,
-            import_request.metadata.create_parent,
-            import_request.metadata.symlink_mode,
-            import_request.limits,
-            import_request.authorizer
-        );
+        const TransferImportRequestSpec import_request = prepare_transfer_import_request(state, request);
+        const ImportSummary summary = import_path(request.body,
+                                                  import_request.metadata.source_type,
+                                                  import_request.destination_path,
+                                                  import_request.metadata.overwrite,
+                                                  import_request.metadata.create_parent,
+                                                  import_request.metadata.symlink_mode,
+                                                  import_request.limits,
+                                                  import_request.authorizer);
         log_transfer_import_summary(import_request.destination_path, summary);
         write_json(response, transfer_summary_json(summary));
     } catch (const SandboxError& ex) {

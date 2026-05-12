@@ -1,10 +1,12 @@
 #include "rpc_failures.h"
 
 TransferFailure::TransferFailure(TransferRpcCode code, const std::string& message)
-    : std::runtime_error(message), code(code), message(message) {}
+    : std::runtime_error(message), code(code), message(message) {
+}
 
 ImageFailure::ImageFailure(ImageRpcCode code, const std::string& message)
-    : std::runtime_error(message), code(code), message(message) {}
+    : std::runtime_error(message), code(code), message(message) {
+}
 
 const char* transfer_error_code_name(TransferRpcCode code) {
     switch (code) {

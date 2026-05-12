@@ -5,8 +5,8 @@
 
 #ifdef _WIN32
 #include <cctype>
-#include <winsock2.h>
 #include <windows.h>
+#include <winsock2.h>
 #else
 #include <errno.h>
 #include <pwd.h>
@@ -40,8 +40,7 @@ bool is_windows_cmd_family(const std::string& lower) {
 }
 
 bool is_windows_powershell_family(const std::string& lower) {
-    return lower == "powershell.exe" || lower == "powershell" ||
-           lower == "pwsh.exe" || lower == "pwsh";
+    return lower == "powershell.exe" || lower == "powershell" || lower == "pwsh.exe" || lower == "pwsh";
 }
 #endif
 
@@ -126,7 +125,7 @@ std::string passwd_shell() {
 }
 #endif
 
-}  // namespace
+} // namespace
 
 namespace platform {
 
@@ -156,9 +155,7 @@ std::string resolve_default_shell(const std::string& configured_default_shell) {
     if (!configured_default_shell.empty()) {
         const std::string resolved = validate_unix_shell_candidate(configured_default_shell);
         if (resolved.empty()) {
-            throw std::runtime_error(
-                "configured default shell `" + configured_default_shell + "` is not usable"
-            );
+            throw std::runtime_error("configured default shell `" + configured_default_shell + "` is not usable");
         }
         return resolved;
     }
@@ -183,16 +180,11 @@ std::string resolve_default_shell(const std::string& configured_default_shell) {
         }
     }
 
-    throw std::runtime_error(
-        "no usable default shell found; tried SHELL, passwd shell, bash, and /bin/sh"
-    );
+    throw std::runtime_error("no usable default shell found; tried SHELL, passwd shell, bash, and /bin/sh");
 #endif
 }
 
-std::string selected_shell(
-    const std::string& shell_override,
-    const std::string& default_shell
-) {
+std::string selected_shell(const std::string& shell_override, const std::string& default_shell) {
     const std::string shell = shell_override.empty() ? default_shell : shell_override;
     if (!shell_supported(shell)) {
         throw std::runtime_error("unsupported shell `" + shell + "`");
@@ -200,11 +192,7 @@ std::string selected_shell(
     return shell;
 }
 
-std::vector<std::string> shell_argv(
-    const std::string& shell,
-    bool login,
-    const std::string& command
-) {
+std::vector<std::string> shell_argv(const std::string& shell, bool login, const std::string& command) {
     std::vector<std::string> argv;
     argv.push_back(shell);
 
@@ -239,4 +227,4 @@ std::vector<std::string> shell_argv(
     return argv;
 }
 
-}  // namespace platform
+} // namespace platform

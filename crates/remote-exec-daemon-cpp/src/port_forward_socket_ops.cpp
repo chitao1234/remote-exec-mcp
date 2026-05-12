@@ -27,11 +27,7 @@ int protocol_to_socktype(const std::string& protocol) {
     if (protocol == "udp") {
         return SOCK_DGRAM;
     }
-    throw PortForwardError(
-        400,
-        "bad_request",
-        "unsupported port forward protocol `" + protocol + "`"
-    );
+    throw PortForwardError(400, "bad_request", "unsupported port forward protocol `" + protocol + "`");
 }
 
 int protocol_to_ipproto(const std::string& protocol) {
@@ -41,11 +37,7 @@ int protocol_to_ipproto(const std::string& protocol) {
     if (protocol == "udp") {
         return IPPROTO_UDP;
     }
-    throw PortForwardError(
-        400,
-        "bad_request",
-        "unsupported port forward protocol `" + protocol + "`"
-    );
+    throw PortForwardError(400, "bad_request", "unsupported port forward protocol `" + protocol + "`");
 }
 
 ParsedPortForwardEndpoint endpoint_to_host_port(const std::string& endpoint) {
@@ -57,12 +49,8 @@ ParsedPortForwardEndpoint endpoint_to_host_port(const std::string& endpoint) {
     return parsed;
 }
 
-addrinfo* resolve_endpoint(
-    const std::string& endpoint,
-    const std::string& protocol,
-    int flags,
-    const char* error_code
-) {
+addrinfo*
+resolve_endpoint(const std::string& endpoint, const std::string& protocol, int flags, const char* error_code) {
     const ParsedPortForwardEndpoint parsed = endpoint_to_host_port(endpoint);
 
     addrinfo hints;
@@ -133,12 +121,7 @@ bool wait_for_connect(SOCKET socket, unsigned long timeout_ms) {
     return selected > 0 && FD_ISSET(socket, &writefds);
 }
 
-bool tcp_connect_with_timeout(
-    SOCKET socket,
-    const sockaddr* address,
-    socklen_t address_len,
-    unsigned long timeout_ms
-) {
+bool tcp_connect_with_timeout(SOCKET socket, const sockaddr* address, socklen_t address_len, unsigned long timeout_ms) {
     set_socket_nonblocking(socket, true);
     if (connect(socket, address, static_cast<int>(address_len)) == 0) {
         set_socket_nonblocking(socket, false);
@@ -158,13 +141,7 @@ bool tcp_connect_with_timeout(
 
     int socket_error = 0;
     socklen_t socket_error_len = static_cast<socklen_t>(sizeof(socket_error));
-    if (getsockopt(
-            socket,
-            SOL_SOCKET,
-            SO_ERROR,
-            reinterpret_cast<char*>(&socket_error),
-            &socket_error_len
-        ) != 0) {
+    if (getsockopt(socket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&socket_error), &socket_error_len) != 0) {
         set_socket_nonblocking(socket, false);
         throw PortForwardError(400, "port_connect_failed", socket_error_message("getsockopt"));
     }
@@ -180,23 +157,13 @@ bool tcp_connect_with_timeout(
     return true;
 }
 
-}  // namespace
+} // namespace
 
-std::string printable_port_forward_endpoint(
-    const sockaddr* address,
-    socklen_t address_len
-) {
+std::string printable_port_forward_endpoint(const sockaddr* address, socklen_t address_len) {
     char host[NI_MAXHOST];
     char service[NI_MAXSERV];
     const int result = getnameinfo(
-        address,
-        address_len,
-        host,
-        sizeof(host),
-        service,
-        sizeof(service),
-        NI_NUMERICHOST | NI_NUMERICSERV
-    );
+        address, address_len, host, sizeof(host), service, sizeof(service), NI_NUMERICHOST | NI_NUMERICSERV);
     if (result != 0) {
         return "unknown:0";
     }
@@ -228,13 +195,7 @@ SOCKET bind_port_forward_socket(const std::string& endpoint, const std::string& 
         }
 
         int yes = 1;
-        setsockopt(
-            bound_socket,
-            SOL_SOCKET,
-            SO_REUSEADDR,
-            reinterpret_cast<const char*>(&yes),
-            sizeof(yes)
-        );
+        setsockopt(bound_socket, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
 
         if (bind(bound_socket, current->ai_addr, static_cast<int>(current->ai_addrlen)) == 0) {
             break;
@@ -259,11 +220,7 @@ SOCKET bind_port_forward_socket(const std::string& endpoint, const std::string& 
     return bound_socket;
 }
 
-SOCKET connect_port_forward_socket(
-    const std::string& endpoint,
-    const std::string& protocol,
-    unsigned long timeout_ms
-) {
+SOCKET connect_port_forward_socket(const std::string& endpoint, const std::string& protocol, unsigned long timeout_ms) {
     addrinfo* result = resolve_endpoint(endpoint, protocol, 0, "invalid_endpoint");
     SOCKET connected_socket = INVALID_SOCKET;
 
@@ -277,18 +234,9 @@ SOCKET connect_port_forward_socket(
         try {
             if (protocol == "tcp") {
                 connected = tcp_connect_with_timeout(
-                    connected_socket,
-                    current->ai_addr,
-                    static_cast<socklen_t>(current->ai_addrlen),
-                    timeout_ms
-                );
+                    connected_socket, current->ai_addr, static_cast<socklen_t>(current->ai_addrlen), timeout_ms);
             } else {
-                connected =
-                    connect(
-                        connected_socket,
-                        current->ai_addr,
-                        static_cast<int>(current->ai_addrlen)
-                    ) == 0;
+                connected = connect(connected_socket, current->ai_addr, static_cast<int>(current->ai_addrlen)) == 0;
             }
         } catch (...) {
             close_socket(connected_socket);
@@ -316,12 +264,7 @@ SOCKET connect_port_forward_socket(
 void send_all_socket(SOCKET socket, const std::string& data) {
     std::size_t offset = 0;
     while (offset < data.size()) {
-        const int sent = send(
-            socket,
-            data.data() + offset,
-            static_cast<int>(data.size() - offset),
-            0
-        );
+        const int sent = send(socket, data.data() + offset, static_cast<int>(data.size() - offset), 0);
         if (sent <= 0) {
             throw PortForwardError(400, "port_write_failed", socket_error_message("send"));
         }

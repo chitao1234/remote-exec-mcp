@@ -4,8 +4,8 @@
 #include <memory>
 
 #ifdef _WIN32
-#include <winsock2.h>
 #include <windows.h>
+#include <winsock2.h>
 #else
 #include <thread>
 #endif
@@ -42,7 +42,7 @@ private:
     unsigned long max_active_connections_;
     mutable BasicMutex mutex_;
     BasicCondVar state_changed_;
-    std::map<unsigned long, std::shared_ptr<WorkerRecord> > workers_;
+    std::map<unsigned long, std::shared_ptr<WorkerRecord>> workers_;
     bool shutting_down_;
     unsigned long next_worker_id_;
 };

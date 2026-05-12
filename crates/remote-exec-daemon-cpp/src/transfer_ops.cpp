@@ -16,9 +16,11 @@
 
 using namespace transfer_ops_internal;
 
-TransferArchiveReader::~TransferArchiveReader() {}
+TransferArchiveReader::~TransferArchiveReader() {
+}
 
-TransferArchiveSink::~TransferArchiveSink() {}
+TransferArchiveSink::~TransferArchiveSink() {
+}
 
 void TransferArchiveSink::write_string(const std::string& data) {
     write(data.data(), data.size());
@@ -36,10 +38,7 @@ const char* transfer_source_type_wire_value(TransferSourceType source_type) {
     return "file";
 }
 
-bool parse_transfer_source_type_wire_value(
-    const std::string& value,
-    TransferSourceType* source_type
-) {
+bool parse_transfer_source_type_wire_value(const std::string& value, TransferSourceType* source_type) {
     if (value == "file") {
         *source_type = TransferSourceType::File;
         return true;
@@ -67,10 +66,7 @@ const char* transfer_symlink_mode_wire_value(TransferSymlinkMode symlink_mode) {
     return "preserve";
 }
 
-bool parse_transfer_symlink_mode_wire_value(
-    const std::string& value,
-    TransferSymlinkMode* symlink_mode
-) {
+bool parse_transfer_symlink_mode_wire_value(const std::string& value, TransferSymlinkMode* symlink_mode) {
     if (value == "preserve") {
         *symlink_mode = TransferSymlinkMode::Preserve;
         return true;
@@ -88,10 +84,7 @@ bool parse_transfer_symlink_mode_wire_value(
 
 PathInfo path_info(const std::string& absolute_path) {
     if (!is_absolute_path(absolute_path)) {
-        throw TransferFailure(
-            TransferRpcCode::PathNotAbsolute,
-            "transfer path is not absolute"
-        );
+        throw TransferFailure(TransferRpcCode::PathNotAbsolute, "transfer path is not absolute");
     }
 
     struct stat st;
@@ -111,10 +104,7 @@ PathInfo path_info(const std::string& absolute_path) {
     return PathInfo{true, (st.st_mode & S_IFMT) == S_IFDIR};
 #else
     if ((st.st_mode & S_IFMT) == S_IFLNK) {
-        throw TransferFailure(
-            TransferRpcCode::DestinationUnsupported,
-            "destination path contains unsupported symlink"
-        );
+        throw TransferFailure(TransferRpcCode::DestinationUnsupported, "destination path contains unsupported symlink");
     }
     return PathInfo{true, (st.st_mode & S_IFMT) == S_IFDIR};
 #endif

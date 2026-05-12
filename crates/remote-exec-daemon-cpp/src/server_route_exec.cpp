@@ -4,9 +4,9 @@
 #include "logging.h"
 #include "platform.h"
 #include "process_session.h"
+#include "server_request_utils.h"
 #include "server_route_common.h"
 #include "server_route_exec.h"
-#include "server_request_utils.h"
 
 namespace {
 
@@ -37,11 +37,8 @@ RequestedPtySize requested_pty_size(const Json& body, HttpResponse* response) {
         const unsigned long rows = pty_size.at("rows").get<unsigned long>();
         const unsigned long cols = pty_size.at("cols").get<unsigned long>();
         if (rows == 0UL || cols == 0UL || rows > 65535UL || cols > 65535UL) {
-            *response = make_rpc_error_response(
-                400,
-                "invalid_pty_size",
-                "PTY rows and cols must be between 1 and 65535"
-            );
+            *response =
+                make_rpc_error_response(400, "invalid_pty_size", "PTY rows and cols must be between 1 and 65535");
             return result;
         }
         result.present = true;
@@ -49,16 +46,12 @@ RequestedPtySize requested_pty_size(const Json& body, HttpResponse* response) {
         result.cols = static_cast<unsigned short>(cols);
         return result;
     } catch (const Json::exception& ex) {
-        *response = make_rpc_error_response(
-            400,
-            "invalid_pty_size",
-            std::string("invalid PTY size: ") + ex.what()
-        );
+        *response = make_rpc_error_response(400, "invalid_pty_size", std::string("invalid PTY size: ") + ex.what());
         return result;
     }
 }
 
-}  // namespace
+} // namespace
 
 HttpResponse handle_exec_start(AppState& state, const HttpRequest& request) {
     HttpResponse response;
@@ -68,57 +61,38 @@ HttpResponse handle_exec_start(AppState& state, const HttpRequest& request) {
         const Json body = parse_json_body(request);
         const Json::const_iterator yield_time_it = body.find("yield_time_ms");
         const bool has_yield_time_ms = yield_time_it != body.end();
-        const unsigned long yield_time_ms =
-            has_yield_time_ms ? yield_time_it->get<unsigned long>() : 0UL;
+        const unsigned long yield_time_ms = has_yield_time_ms ? yield_time_it->get<unsigned long>() : 0UL;
         const bool tty_requested = body.value("tty", false);
         if (tty_requested && !process_session_supports_pty()) {
-            return make_rpc_error_response(
-                400,
-                "tty_unsupported",
-                "tty is not supported on this host"
-            );
+            return make_rpc_error_response(400, "tty_unsupported", "tty is not supported on this host");
         }
 
         const bool login_requested = body.value("login", state.config.allow_login_shell);
         if (login_requested && !state.config.allow_login_shell) {
-            return make_rpc_error_response(
-                400,
-                "login_shell_disabled",
-                "login shells are disabled by daemon config"
-            );
+            return make_rpc_error_response(400, "login_shell_disabled", "login shells are disabled by daemon config");
         }
         const std::string shell_override = body.value("shell", std::string());
         if (!shell_override.empty() && !platform::shell_supported(shell_override)) {
-            return make_rpc_error_response(
-                400,
-                "unsupported_shell",
-                "requested shell is not supported on this target"
-            );
+            return make_rpc_error_response(400, "unsupported_shell", "requested shell is not supported on this target");
         }
-        const std::string shell =
-            platform::selected_shell(shell_override, state.default_shell);
-        const std::string workdir =
-            resolve_authorized_workdir(state, body, SANDBOX_EXEC_CWD);
+        const std::string shell = platform::selected_shell(shell_override, state.default_shell);
+        const std::string workdir = resolve_authorized_workdir(state, body, SANDBOX_EXEC_CWD);
 
-        Json exec_response = state.sessions.start_command(
-            state.config.target,
-            body.at("cmd").get<std::string>(),
-            workdir,
-            shell,
-            login_requested,
-            tty_requested,
-            has_yield_time_ms,
-            yield_time_ms,
-            requested_max_output_tokens(body),
-            state.config.yield_time,
-            state.config.max_open_sessions
-        );
-        log_message(
-            LOG_INFO,
-            "server",
-            "exec/start target=`" + state.config.target + "` cmd_preview=`" +
-                preview_text(body.at("cmd").get<std::string>(), 120) + "`"
-        );
+        Json exec_response = state.sessions.start_command(state.config.target,
+                                                          body.at("cmd").get<std::string>(),
+                                                          workdir,
+                                                          shell,
+                                                          login_requested,
+                                                          tty_requested,
+                                                          has_yield_time_ms,
+                                                          yield_time_ms,
+                                                          requested_max_output_tokens(body),
+                                                          state.config.yield_time,
+                                                          state.config.max_open_sessions);
+        log_message(LOG_INFO,
+                    "server",
+                    "exec/start target=`" + state.config.target + "` cmd_preview=`" +
+                        preview_text(body.at("cmd").get<std::string>(), 120) + "`");
         exec_response["daemon_instance_id"] = state.daemon_instance_id;
         write_json(response, exec_response);
     } catch (const SessionLimitError& ex) {
@@ -146,30 +120,26 @@ HttpResponse handle_exec_write(AppState& state, const HttpRequest& request) {
         const Json body = parse_json_body(request);
         const Json::const_iterator yield_time_it = body.find("yield_time_ms");
         const bool has_yield_time_ms = yield_time_it != body.end();
-        const unsigned long yield_time_ms =
-            has_yield_time_ms ? yield_time_it->get<unsigned long>() : 0UL;
+        const unsigned long yield_time_ms = has_yield_time_ms ? yield_time_it->get<unsigned long>() : 0UL;
         const RequestedPtySize pty_size = requested_pty_size(body, &response);
         if (response.status != 200) {
             return response;
         }
         {
             std::ostringstream message;
-            message << "exec/write daemon_session_id=`"
-                    << body.at("daemon_session_id").get<std::string>()
+            message << "exec/write daemon_session_id=`" << body.at("daemon_session_id").get<std::string>()
                     << "` chars_len=" << body.value("chars", std::string()).size();
             log_message(LOG_INFO, "server", message.str());
         }
-        Json exec_response = state.sessions.write_stdin(
-            body.at("daemon_session_id").get<std::string>(),
-            body.value("chars", std::string()),
-            has_yield_time_ms,
-            yield_time_ms,
-            requested_max_output_tokens(body),
-            state.config.yield_time,
-            pty_size.present,
-            pty_size.rows,
-            pty_size.cols
-        );
+        Json exec_response = state.sessions.write_stdin(body.at("daemon_session_id").get<std::string>(),
+                                                        body.value("chars", std::string()),
+                                                        has_yield_time_ms,
+                                                        yield_time_ms,
+                                                        requested_max_output_tokens(body),
+                                                        state.config.yield_time,
+                                                        pty_size.present,
+                                                        pty_size.rows,
+                                                        pty_size.cols);
         exec_response["daemon_instance_id"] = state.daemon_instance_id;
         write_json(response, exec_response);
     } catch (const UnknownSessionError& ex) {
@@ -179,11 +149,7 @@ HttpResponse handle_exec_write(AppState& state, const HttpRequest& request) {
         log_message(LOG_WARN, "server", std::string("exec/write stdin closed: ") + ex.what());
         write_rpc_error(response, 400, "stdin_closed", ex.what());
     } catch (const ProcessPtyResizeUnsupportedError& ex) {
-        log_message(
-            LOG_WARN,
-            "server",
-            std::string("exec/write pty resize unsupported: ") + ex.what()
-        );
+        log_message(LOG_WARN, "server", std::string("exec/write pty resize unsupported: ") + ex.what());
         write_rpc_error(response, 400, "tty_unsupported", ex.what());
     } catch (const Json::exception& ex) {
         log_message(LOG_WARN, "server", std::string("exec/write bad request: ") + ex.what());

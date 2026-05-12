@@ -14,66 +14,64 @@ void write_u32_be(std::vector<unsigned char>& bytes, std::size_t offset, uint32_
 }
 
 uint32_t read_u32_be(const std::vector<unsigned char>& bytes, std::size_t offset) {
-    return (static_cast<uint32_t>(bytes[offset]) << 24) |
-           (static_cast<uint32_t>(bytes[offset + 1U]) << 16) |
-           (static_cast<uint32_t>(bytes[offset + 2U]) << 8) |
-           static_cast<uint32_t>(bytes[offset + 3U]);
+    return (static_cast<uint32_t>(bytes[offset]) << 24) | (static_cast<uint32_t>(bytes[offset + 1U]) << 16) |
+           (static_cast<uint32_t>(bytes[offset + 2U]) << 8) | static_cast<uint32_t>(bytes[offset + 3U]);
 }
 
 PortTunnelFrameType frame_type_from_byte(unsigned char value) {
     switch (value) {
-        case 1:
-            return PortTunnelFrameType::Error;
-        case 2:
-            return PortTunnelFrameType::Close;
-        case 3:
-            return PortTunnelFrameType::SessionOpen;
-        case 4:
-            return PortTunnelFrameType::SessionReady;
-        case 5:
-            return PortTunnelFrameType::SessionResume;
-        case 6:
-            return PortTunnelFrameType::SessionResumed;
-        case 7:
-            return PortTunnelFrameType::TunnelOpen;
-        case 8:
-            return PortTunnelFrameType::TunnelReady;
-        case 9:
-            return PortTunnelFrameType::TunnelClose;
-        case 10:
-            return PortTunnelFrameType::TcpListen;
-        case 11:
-            return PortTunnelFrameType::TcpListenOk;
-        case 12:
-            return PortTunnelFrameType::TcpAccept;
-        case 13:
-            return PortTunnelFrameType::TcpConnect;
-        case 14:
-            return PortTunnelFrameType::TcpConnectOk;
-        case 15:
-            return PortTunnelFrameType::TcpData;
-        case 16:
-            return PortTunnelFrameType::TcpEof;
-        case 17:
-            return PortTunnelFrameType::TunnelClosed;
-        case 18:
-            return PortTunnelFrameType::TunnelHeartbeat;
-        case 19:
-            return PortTunnelFrameType::TunnelHeartbeatAck;
-        case 20:
-            return PortTunnelFrameType::ForwardRecovering;
-        case 21:
-            return PortTunnelFrameType::ForwardRecovered;
-        case 22:
-            return PortTunnelFrameType::ForwardDrop;
-        case 30:
-            return PortTunnelFrameType::UdpBind;
-        case 31:
-            return PortTunnelFrameType::UdpBindOk;
-        case 32:
-            return PortTunnelFrameType::UdpDatagram;
-        default:
-            throw PortTunnelFrameError("unknown port tunnel frame type");
+    case 1:
+        return PortTunnelFrameType::Error;
+    case 2:
+        return PortTunnelFrameType::Close;
+    case 3:
+        return PortTunnelFrameType::SessionOpen;
+    case 4:
+        return PortTunnelFrameType::SessionReady;
+    case 5:
+        return PortTunnelFrameType::SessionResume;
+    case 6:
+        return PortTunnelFrameType::SessionResumed;
+    case 7:
+        return PortTunnelFrameType::TunnelOpen;
+    case 8:
+        return PortTunnelFrameType::TunnelReady;
+    case 9:
+        return PortTunnelFrameType::TunnelClose;
+    case 10:
+        return PortTunnelFrameType::TcpListen;
+    case 11:
+        return PortTunnelFrameType::TcpListenOk;
+    case 12:
+        return PortTunnelFrameType::TcpAccept;
+    case 13:
+        return PortTunnelFrameType::TcpConnect;
+    case 14:
+        return PortTunnelFrameType::TcpConnectOk;
+    case 15:
+        return PortTunnelFrameType::TcpData;
+    case 16:
+        return PortTunnelFrameType::TcpEof;
+    case 17:
+        return PortTunnelFrameType::TunnelClosed;
+    case 18:
+        return PortTunnelFrameType::TunnelHeartbeat;
+    case 19:
+        return PortTunnelFrameType::TunnelHeartbeatAck;
+    case 20:
+        return PortTunnelFrameType::ForwardRecovering;
+    case 21:
+        return PortTunnelFrameType::ForwardRecovered;
+    case 22:
+        return PortTunnelFrameType::ForwardDrop;
+    case 30:
+        return PortTunnelFrameType::UdpBind;
+    case 31:
+        return PortTunnelFrameType::UdpBindOk;
+    case 32:
+        return PortTunnelFrameType::UdpDatagram;
+    default:
+        throw PortTunnelFrameError("unknown port tunnel frame type");
     }
 }
 
@@ -83,10 +81,10 @@ void ensure_u32_len(std::size_t value, const char* name) {
     }
 }
 
-}  // namespace
+} // namespace
 
-PortTunnelFrameError::PortTunnelFrameError(const std::string& message)
-    : std::runtime_error(message) {}
+PortTunnelFrameError::PortTunnelFrameError(const std::string& message) : std::runtime_error(message) {
+}
 
 const char* port_tunnel_preface() {
     return kPortTunnelPreface;
@@ -145,10 +143,8 @@ PortTunnelFrame decode_port_tunnel_frame(const std::vector<unsigned char>& bytes
     frame.stream_id = read_u32_be(bytes, 4U);
     const std::size_t data_offset = PORT_TUNNEL_HEADER_LEN + static_cast<std::size_t>(meta_len);
     if (meta_len > 0U) {
-        frame.meta.assign(
-            reinterpret_cast<const char*>(bytes.data() + PORT_TUNNEL_HEADER_LEN),
-            static_cast<std::size_t>(meta_len)
-        );
+        frame.meta.assign(reinterpret_cast<const char*>(bytes.data() + PORT_TUNNEL_HEADER_LEN),
+                          static_cast<std::size_t>(meta_len));
     } else {
         frame.meta.clear();
     }

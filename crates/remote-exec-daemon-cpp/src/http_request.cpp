@@ -67,12 +67,11 @@ void validate_http_version(const std::string& value) {
     }
 }
 
-}  // namespace
+} // namespace
 
 HttpRequest parse_http_request_head(const std::string& raw_headers) {
     const std::size_t header_end = raw_headers.find("\r\n\r\n");
-    const std::string header_block =
-        header_end == std::string::npos ? raw_headers : raw_headers.substr(0, header_end);
+    const std::string header_block = header_end == std::string::npos ? raw_headers : raw_headers.substr(0, header_end);
     std::istringstream lines(header_block);
     std::string request_line;
     if (!std::getline(lines, request_line)) {
@@ -87,8 +86,7 @@ HttpRequest parse_http_request_head(const std::string& raw_headers) {
     std::string version;
     std::string extra;
     request_line_stream >> request.method >> request.path >> version;
-    if (request.method.empty() || request.path.empty() || version.empty() ||
-        (request_line_stream >> extra)) {
+    if (request.method.empty() || request.path.empty() || version.empty() || (request_line_stream >> extra)) {
         throw HttpParseError("invalid request line");
     }
     validate_token(request.method, "invalid request method");
@@ -124,13 +122,11 @@ HttpRequest parse_http_request(const std::string& raw) {
     const std::string raw_body = raw.substr(header_end + 4U);
 
     try {
-        const HttpRequestBodyFraming framing =
-            request_body_framing_from_headers(request.headers);
+        const HttpRequestBodyFraming framing = request_body_framing_from_headers(request.headers);
         if (framing.chunked) {
             request.body = decode_http_chunked_body(raw_body);
         } else {
-            if (framing.has_content_length &&
-                raw_body.size() != framing.content_length) {
+            if (framing.has_content_length && raw_body.size() != framing.content_length) {
                 throw HttpParseError("Content-Length does not match body size");
             }
             request.body = raw_body;

@@ -21,34 +21,24 @@ int main() {
 
     assert(bounded_socket_io_size(0U) == 0U);
     assert(bounded_socket_io_size(1U) == 1U);
-    assert(
-        bounded_socket_io_size(static_cast<std::size_t>(INT_MAX)) ==
-        static_cast<std::size_t>(INT_MAX)
-    );
-    assert(
-        bounded_socket_io_size(static_cast<std::size_t>(INT_MAX) + 1U) ==
-        static_cast<std::size_t>(INT_MAX)
-    );
-    assert(
-        bounded_socket_io_size(std::numeric_limits<std::size_t>::max()) ==
-        static_cast<std::size_t>(INT_MAX)
-    );
+    assert(bounded_socket_io_size(static_cast<std::size_t>(INT_MAX)) == static_cast<std::size_t>(INT_MAX));
+    assert(bounded_socket_io_size(static_cast<std::size_t>(INT_MAX) + 1U) == static_cast<std::size_t>(INT_MAX));
+    assert(bounded_socket_io_size(std::numeric_limits<std::size_t>::max()) == static_cast<std::size_t>(INT_MAX));
 
     ConnectedSocketPair sockets = make_connected_socket_pair();
     UniqueSocket reader(std::move(sockets.first));
     UniqueSocket writer(std::move(sockets.second));
 
-    const std::string raw =
-        "POST /v1/transfer/import HTTP/1.1\r\n"
-        "Host: cpp-daemon\r\n"
-        "Transfer-Encoding: chunked\r\n"
-        "\r\n"
-        "5\r\n"
-        "hello\r\n"
-        "6\r\n"
-        " world\r\n"
-        "0\r\n"
-        "\r\n";
+    const std::string raw = "POST /v1/transfer/import HTTP/1.1\r\n"
+                            "Host: cpp-daemon\r\n"
+                            "Transfer-Encoding: chunked\r\n"
+                            "\r\n"
+                            "5\r\n"
+                            "hello\r\n"
+                            "6\r\n"
+                            " world\r\n"
+                            "0\r\n"
+                            "\r\n";
 
     send_all(writer.get(), raw);
     writer.reset();
@@ -57,8 +47,7 @@ int main() {
     assert(try_read_http_request_head(reader.get(), 65536, &head));
 
     const HttpRequest request = parse_http_request_head(head.raw_headers);
-    const HttpRequestBodyFraming framing =
-        request_body_framing_from_headers(request.headers);
+    const HttpRequestBodyFraming framing = request_body_framing_from_headers(request.headers);
     HttpRequestBodyStream body(reader.get(), head.initial_body, framing, 1024);
 
     std::string decoded;

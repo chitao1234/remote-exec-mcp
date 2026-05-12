@@ -35,36 +35,34 @@ int main() {
     fs::create_directories(root);
 
     const fs::path config_path = root / "daemon-cpp.ini";
-    write_text(
-        config_path,
-        "# comment\n"
-        "target = builder-cpp\n"
-        "listen_host = 0.0.0.0\n"
-        "listen_port = 8181\n"
-        "default_workdir = \"C:\\work dir\"\n"
-        "default_shell = /bin/sh\n"
-        "allow_login_shell = false\n"
-        "http_auth_bearer_token = shared-secret\n"
-        "max_request_header_bytes = 32768\n"
-        "max_request_body_bytes = 1048576\n"
-        "http_connection_idle_timeout_ms = 9000\n"
-        "transfer_max_archive_bytes = 4096\n"
-        "transfer_max_entry_bytes = 1024\n"
-        "max_open_sessions = 12\n"
-        "port_forward_max_worker_threads = 17\n"
-        "port_forward_max_retained_sessions = 11\n"
-        "port_forward_max_retained_listeners = 13\n"
-        "port_forward_max_udp_binds = 15\n"
-        "port_forward_max_active_tcp_streams = 19\n"
-        "port_forward_max_tunnel_queued_bytes = 2097152\n"
-        "port_forward_tunnel_io_timeout_ms = 7000\n"
-        "port_forward_connect_timeout_ms = 8000\n"
-        "yield_time_exec_command_default_ms = 15000\n"
-        "yield_time_exec_command_max_ms = 60000\n"
-        "yield_time_exec_command_min_ms = 500\n"
-        "yield_time_write_stdin_poll_default_ms = 12000\n"
-        "yield_time_write_stdin_input_max_ms = 45000\n"
-    );
+    write_text(config_path,
+               "# comment\n"
+               "target = builder-cpp\n"
+               "listen_host = 0.0.0.0\n"
+               "listen_port = 8181\n"
+               "default_workdir = \"C:\\work dir\"\n"
+               "default_shell = /bin/sh\n"
+               "allow_login_shell = false\n"
+               "http_auth_bearer_token = shared-secret\n"
+               "max_request_header_bytes = 32768\n"
+               "max_request_body_bytes = 1048576\n"
+               "http_connection_idle_timeout_ms = 9000\n"
+               "transfer_max_archive_bytes = 4096\n"
+               "transfer_max_entry_bytes = 1024\n"
+               "max_open_sessions = 12\n"
+               "port_forward_max_worker_threads = 17\n"
+               "port_forward_max_retained_sessions = 11\n"
+               "port_forward_max_retained_listeners = 13\n"
+               "port_forward_max_udp_binds = 15\n"
+               "port_forward_max_active_tcp_streams = 19\n"
+               "port_forward_max_tunnel_queued_bytes = 2097152\n"
+               "port_forward_tunnel_io_timeout_ms = 7000\n"
+               "port_forward_connect_timeout_ms = 8000\n"
+               "yield_time_exec_command_default_ms = 15000\n"
+               "yield_time_exec_command_max_ms = 60000\n"
+               "yield_time_exec_command_min_ms = 500\n"
+               "yield_time_write_stdin_poll_default_ms = 12000\n"
+               "yield_time_write_stdin_input_max_ms = 45000\n");
 
     const DaemonConfig config = load_config(config_path.string());
     assert(config.target == "builder-cpp");
@@ -100,19 +98,17 @@ int main() {
     assert(!config.sandbox_configured);
 
     const fs::path sandbox_config_path = root / "sandbox.ini";
-    write_text(
-        sandbox_config_path,
-        "target = sandbox-cpp\n"
-        "listen_host = 127.0.0.1\n"
-        "listen_port = 8181\n"
-        "default_workdir = /work\n"
-        "sandbox_exec_cwd_allow = /work;/tmp/work\n"
-        "sandbox_exec_cwd_deny = /work/private\n"
-        "sandbox_read_allow = /work;/assets\n"
-        "sandbox_read_deny = /work/.git;/assets/secrets\n"
-        "sandbox_write_allow = /work\n"
-        "sandbox_write_deny = /work/.git;/work/readonly\n"
-    );
+    write_text(sandbox_config_path,
+               "target = sandbox-cpp\n"
+               "listen_host = 127.0.0.1\n"
+               "listen_port = 8181\n"
+               "default_workdir = /work\n"
+               "sandbox_exec_cwd_allow = /work;/tmp/work\n"
+               "sandbox_exec_cwd_deny = /work/private\n"
+               "sandbox_read_allow = /work;/assets\n"
+               "sandbox_read_deny = /work/.git;/assets/secrets\n"
+               "sandbox_write_allow = /work\n"
+               "sandbox_write_deny = /work/.git;/work/readonly\n");
     const DaemonConfig sandbox_config = load_config(sandbox_config_path.string());
     assert(sandbox_config.port_forward_limits.max_worker_threads == DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS);
     assert(sandbox_config.port_forward_limits.max_retained_sessions == DEFAULT_PORT_FORWARD_MAX_RETAINED_SESSIONS);
@@ -149,32 +145,24 @@ int main() {
     assert(config_rejected(invalid_path));
 
     const fs::path invalid_worker_limit_path = root / "invalid-worker-limit.ini";
-    write_text(
-        invalid_worker_limit_path,
-        "target = builder-cpp\n"
-        "listen_host = 0.0.0.0\n"
-        "listen_port = 8181\n"
-        "default_workdir = C:\\work\n"
-        "port_forward_max_worker_threads = 0\n"
-    );
+    write_text(invalid_worker_limit_path,
+               "target = builder-cpp\n"
+               "listen_host = 0.0.0.0\n"
+               "listen_port = 8181\n"
+               "default_workdir = C:\\work\n"
+               "port_forward_max_worker_threads = 0\n");
     assert(config_rejected(invalid_worker_limit_path));
 
     const fs::path invalid_transfer_zero_path = root / "invalid-transfer-zero.ini";
-    write_text(
-        invalid_transfer_zero_path,
-        minimal_config_text() +
-            "transfer_max_archive_bytes = 0\n"
-            "transfer_max_entry_bytes = 1\n"
-    );
+    write_text(invalid_transfer_zero_path,
+               minimal_config_text() + "transfer_max_archive_bytes = 0\n"
+                                       "transfer_max_entry_bytes = 1\n");
     assert(config_rejected(invalid_transfer_zero_path));
 
     const fs::path invalid_transfer_bounds_path = root / "invalid-transfer-bounds.ini";
-    write_text(
-        invalid_transfer_bounds_path,
-        minimal_config_text() +
-            "transfer_max_archive_bytes = 8\n"
-            "transfer_max_entry_bytes = 9\n"
-    );
+    write_text(invalid_transfer_bounds_path,
+               minimal_config_text() + "transfer_max_archive_bytes = 8\n"
+                                       "transfer_max_entry_bytes = 9\n");
     assert(config_rejected(invalid_transfer_bounds_path));
 
     const char* invalid_limit_keys[] = {
@@ -187,49 +175,37 @@ int main() {
         "port_forward_tunnel_io_timeout_ms",
         "port_forward_connect_timeout_ms",
     };
-    for (std::size_t index = 0;
-         index < sizeof(invalid_limit_keys) / sizeof(invalid_limit_keys[0]);
-         ++index) {
-        const fs::path invalid_limit_path =
-            root / ("invalid-" + std::string(invalid_limit_keys[index]) + ".ini");
-        write_text(
-            invalid_limit_path,
-            minimal_config_text() + invalid_limit_keys[index] + " = 0\n"
-        );
+    for (std::size_t index = 0; index < sizeof(invalid_limit_keys) / sizeof(invalid_limit_keys[0]); ++index) {
+        const fs::path invalid_limit_path = root / ("invalid-" + std::string(invalid_limit_keys[index]) + ".ini");
+        write_text(invalid_limit_path, minimal_config_text() + invalid_limit_keys[index] + " = 0\n");
         assert(config_rejected(invalid_limit_path));
     }
 
     const fs::path invalid_yield_path = root / "invalid-yield.ini";
-    write_text(
-        invalid_yield_path,
-        "target = builder-cpp\n"
-        "listen_host = 0.0.0.0\n"
-        "listen_port = 8181\n"
-        "default_workdir = C:\\work\n"
-        "yield_time_exec_command_default_ms = 10\n"
-        "yield_time_exec_command_min_ms = 20\n"
-    );
+    write_text(invalid_yield_path,
+               "target = builder-cpp\n"
+               "listen_host = 0.0.0.0\n"
+               "listen_port = 8181\n"
+               "default_workdir = C:\\work\n"
+               "yield_time_exec_command_default_ms = 10\n"
+               "yield_time_exec_command_min_ms = 20\n");
     assert(config_rejected(invalid_yield_path));
 
     const fs::path invalid_auth_path = root / "invalid-auth.ini";
-    write_text(
-        invalid_auth_path,
-        "target = builder-cpp\n"
-        "listen_host = 0.0.0.0\n"
-        "listen_port = 8181\n"
-        "default_workdir = C:\\work\n"
-        "http_auth_bearer_token = bad token\n"
-    );
+    write_text(invalid_auth_path,
+               "target = builder-cpp\n"
+               "listen_host = 0.0.0.0\n"
+               "listen_port = 8181\n"
+               "default_workdir = C:\\work\n"
+               "http_auth_bearer_token = bad token\n");
     assert(config_rejected(invalid_auth_path));
 
     const fs::path invalid_port_path = root / "invalid-port.ini";
-    write_text(
-        invalid_port_path,
-        "target = builder-cpp\n"
-        "listen_host = 0.0.0.0\n"
-        "listen_port = 70000\n"
-        "default_workdir = C:\\work\n"
-    );
+    write_text(invalid_port_path,
+               "target = builder-cpp\n"
+               "listen_host = 0.0.0.0\n"
+               "listen_port = 70000\n"
+               "default_workdir = C:\\work\n");
     assert(config_rejected(invalid_port_path));
 
     return 0;

@@ -67,12 +67,10 @@ struct HttpRequestHead {
 
 class HttpRequestBodyStream {
 public:
-    HttpRequestBodyStream(
-        SOCKET client,
-        const std::string& initial_body,
-        const HttpRequestBodyFraming& framing,
-        std::size_t max_body_bytes
-    );
+    HttpRequestBodyStream(SOCKET client,
+                          const std::string& initial_body,
+                          const HttpRequestBodyFraming& framing,
+                          std::size_t max_body_bytes);
 
     std::size_t read(char* data, std::size_t max_size);
 
@@ -105,11 +103,7 @@ std::string socket_error_message(const std::string& operation);
 void close_socket(SOCKET socket);
 void shutdown_socket(SOCKET socket);
 void set_socket_timeout_ms(SOCKET socket, unsigned long timeout_ms);
-bool try_read_http_request_head(
-    SOCKET client,
-    std::size_t max_header_bytes,
-    HttpRequestHead* head
-);
+bool try_read_http_request_head(SOCKET client, std::size_t max_header_bytes, HttpRequestHead* head);
 HttpRequestHead read_http_request_head(SOCKET client, std::size_t max_header_bytes);
 void send_all(SOCKET client, const std::string& data);
 void send_all_bytes(SOCKET client, const char* data, std::size_t size);

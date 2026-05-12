@@ -31,8 +31,7 @@ std::string build_windows_drive_path(char drive, const std::string& rest) {
 }
 
 bool translate_windows_posix_drive_path(const std::string& raw, std::string* output) {
-    if (raw.size() >= 2 && raw[0] == '/' && is_ascii_alpha(raw[1]) &&
-        (raw.size() == 2 || raw[2] == '/')) {
+    if (raw.size() >= 2 && raw[0] == '/' && is_ascii_alpha(raw[1]) && (raw.size() == 2 || raw[2] == '/')) {
         *output = build_windows_drive_path(raw[1], raw.substr(raw.size() == 2 ? 2 : 3));
         return true;
     }
@@ -50,13 +49,11 @@ bool translate_windows_posix_drive_path(const std::string& raw, std::string* out
     }
 
     *output = build_windows_drive_path(
-        raw[prefix.size()],
-        raw.substr(raw.size() == prefix.size() + 1 ? prefix.size() + 1 : prefix.size() + 2)
-    );
+        raw[prefix.size()], raw.substr(raw.size() == prefix.size() + 1 ? prefix.size() + 1 : prefix.size() + 2));
     return true;
 }
 
-}  // namespace
+} // namespace
 
 PathPolicy posix_path_policy() {
     PathPolicy policy;
@@ -100,8 +97,7 @@ bool is_absolute_for_policy(PathPolicy policy, const std::string& raw) {
         return !raw.empty() && raw[0] == '/';
     }
 
-    if (raw.size() >= 3 && is_ascii_alpha(raw[0]) && raw[1] == ':' &&
-        (raw[2] == '\\' || raw[2] == '/')) {
+    if (raw.size() >= 3 && is_ascii_alpha(raw[0]) && raw[1] == ':' && (raw[2] == '\\' || raw[2] == '/')) {
         return true;
     }
     if (raw.rfind("\\\\", 0) == 0 || raw.rfind("//", 0) == 0) {
@@ -124,11 +120,7 @@ std::string normalize_for_system(PathPolicy policy, const std::string& raw) {
     return normalize_windows_path_chars(raw);
 }
 
-std::string join_for_policy(
-    PathPolicy policy,
-    const std::string& base,
-    const std::string& child
-) {
+std::string join_for_policy(PathPolicy policy, const std::string& base, const std::string& child) {
     const std::string normalized_child = normalize_for_system(policy, child);
     if (normalized_child.empty() || is_absolute_for_policy(policy, normalized_child)) {
         return normalized_child;
@@ -146,10 +138,6 @@ std::string join_for_policy(
     return normalized_base + separator + normalized_child;
 }
 
-bool same_path_for_policy(
-    PathPolicy policy,
-    const std::string& left,
-    const std::string& right
-) {
+bool same_path_for_policy(PathPolicy policy, const std::string& left, const std::string& right) {
     return path_policy_comparison_key(policy, left) == path_policy_comparison_key(policy, right);
 }

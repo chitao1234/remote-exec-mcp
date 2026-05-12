@@ -6,14 +6,12 @@
 
 class ProcessStdinClosedError : public std::runtime_error {
 public:
-    explicit ProcessStdinClosedError(const std::string& message)
-        : std::runtime_error(message) {}
+    explicit ProcessStdinClosedError(const std::string& message) : std::runtime_error(message) {}
 };
 
 class ProcessPtyResizeUnsupportedError : public std::runtime_error {
 public:
-    explicit ProcessPtyResizeUnsupportedError(const std::string& message)
-        : std::runtime_error(message) {}
+    explicit ProcessPtyResizeUnsupportedError(const std::string& message) : std::runtime_error(message) {}
 };
 
 class ProcessSession {
@@ -23,13 +21,8 @@ public:
     ProcessSession(const ProcessSession&) = delete;
     ProcessSession& operator=(const ProcessSession&) = delete;
 
-    static std::unique_ptr<ProcessSession> launch(
-        const std::string& command,
-        const std::string& workdir,
-        const std::string& shell,
-        bool login,
-        bool tty
-    );
+    static std::unique_ptr<ProcessSession>
+    launch(const std::string& command, const std::string& workdir, const std::string& shell, bool login, bool tty);
 
     virtual void write_stdin(const std::string& chars) = 0;
     virtual void resize_pty(unsigned short rows, unsigned short cols) = 0;
@@ -37,9 +30,7 @@ public:
     virtual std::string flush_carry(std::string* carry) = 0;
     virtual bool has_exited(int* exit_code) = 0;
     virtual void terminate() = 0;
-    virtual bool terminate_descendants() {
-        return false;
-    }
+    virtual bool terminate_descendants() { return false; }
 
 protected:
     ProcessSession() {}

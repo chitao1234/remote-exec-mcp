@@ -10,8 +10,8 @@
 #include <sys/stat.h>
 #endif
 
-#include "rpc_failures.h"
 #include "path_utils.h"
+#include "rpc_failures.h"
 #include "transfer_ops_internal.h"
 
 namespace {
@@ -57,24 +57,14 @@ std::string validate_relative_archive_path(const std::string& raw_path) {
         return ".";
     }
     if (normalized[0] == '/') {
-        throw TransferFailure(
-            TransferRpcCode::SourceUnsupported,
-            "archive path must be relative"
-        );
+        throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive path must be relative");
     }
-    if (normalized.size() >= 2 &&
-        std::isalpha(static_cast<unsigned char>(normalized[0])) != 0 &&
+    if (normalized.size() >= 2 && std::isalpha(static_cast<unsigned char>(normalized[0])) != 0 &&
         normalized[1] == ':') {
-        throw TransferFailure(
-            TransferRpcCode::SourceUnsupported,
-            "archive path must be relative"
-        );
+        throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive path must be relative");
     }
     if (normalized.rfind("//", 0) == 0) {
-        throw TransferFailure(
-            TransferRpcCode::SourceUnsupported,
-            "archive path must be relative"
-        );
+        throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive path must be relative");
     }
 
     const std::vector<std::string> parts = split_archive_path(normalized);
@@ -82,16 +72,10 @@ std::string validate_relative_archive_path(const std::string& raw_path) {
     for (std::size_t i = 0; i < parts.size(); ++i) {
         const std::string& part = parts[i];
         if (part.empty()) {
-            throw TransferFailure(
-                TransferRpcCode::SourceUnsupported,
-                "archive path contains empty component"
-            );
+            throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive path contains empty component");
         }
         if (part == "." || part == "..") {
-            throw TransferFailure(
-                TransferRpcCode::SourceUnsupported,
-                "archive path escapes destination"
-            );
+            throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive path escapes destination");
         }
         cleaned.push_back(part);
     }
@@ -109,36 +93,23 @@ std::string validate_relative_archive_path(const std::string& raw_path) {
 std::string validate_relative_symlink_target(const std::string& raw_target) {
     const std::string normalized = normalize_archive_separators(raw_target);
     if (normalized.empty() || normalized[0] == '/' || normalized.rfind("//", 0) == 0) {
-        throw TransferFailure(
-            TransferRpcCode::SourceUnsupported,
-            "archive symlink target must be relative"
-        );
+        throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive symlink target must be relative");
     }
-    if (normalized.size() >= 2 &&
-        std::isalpha(static_cast<unsigned char>(normalized[0])) != 0 &&
+    if (normalized.size() >= 2 && std::isalpha(static_cast<unsigned char>(normalized[0])) != 0 &&
         normalized[1] == ':') {
-        throw TransferFailure(
-            TransferRpcCode::SourceUnsupported,
-            "archive symlink target must be relative"
-        );
+        throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive symlink target must be relative");
     }
 
     const std::vector<std::string> parts = split_archive_path(normalized);
     for (std::size_t i = 0; i < parts.size(); ++i) {
         if (parts[i].empty() || parts[i] == "." || parts[i] == "..") {
-            throw TransferFailure(
-                TransferRpcCode::SourceUnsupported,
-                "archive symlink target escapes destination"
-            );
+            throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive symlink target escapes destination");
         }
     }
     return normalized;
 }
 
-std::string materialize_archive_path(
-    const std::string& destination_root,
-    const std::string& relative_archive_path
-) {
+std::string materialize_archive_path(const std::string& destination_root, const std::string& relative_archive_path) {
     if (relative_archive_path == ".") {
         return destination_root;
     }
@@ -151,10 +122,7 @@ std::string materialize_archive_path(
     return path;
 }
 
-void ensure_no_existing_symlink_in_path(
-    const std::string& destination_root,
-    const std::string& relative_archive_path
-) {
+void ensure_no_existing_symlink_in_path(const std::string& destination_root, const std::string& relative_archive_path) {
     ensure_not_existing_symlink(destination_root);
     if (relative_archive_path == ".") {
         return;
@@ -168,10 +136,7 @@ void ensure_no_existing_symlink_in_path(
     }
 }
 
-std::string resolved_symlink_target_path(
-    const std::string& symlink_path,
-    const std::string& relative_target
-) {
+std::string resolved_symlink_target_path(const std::string& symlink_path, const std::string& relative_target) {
     const std::string parent = path_utils::parent_directory(symlink_path);
     if (parent.empty()) {
         return relative_target;
@@ -179,20 +144,15 @@ std::string resolved_symlink_target_path(
     return join_path(parent, relative_target);
 }
 
-void authorize_path_if_present(
-    const TransferPathAuthorizer& authorizer,
-    const std::string& path
-) {
+void authorize_path_if_present(const TransferPathAuthorizer& authorizer, const std::string& path) {
     if (authorizer) {
         authorizer(path);
     }
 }
 
-void write_validated_symlink(
-    const std::string& raw_target,
-    const std::string& output_path,
-    const TransferPathAuthorizer& authorizer
-) {
+void write_validated_symlink(const std::string& raw_target,
+                             const std::string& output_path,
+                             const TransferPathAuthorizer& authorizer) {
     const std::string target = validate_relative_symlink_target(raw_target);
     authorize_path_if_present(authorizer, resolved_symlink_target_path(output_path, target));
     write_symlink(target, output_path);
@@ -200,8 +160,7 @@ void write_validated_symlink(
 
 class StringTransferArchiveReader : public TransferArchiveReader {
 public:
-    explicit StringTransferArchiveReader(const std::string* archive)
-        : archive_(archive), offset_(0) {}
+    explicit StringTransferArchiveReader(const std::string* archive) : archive_(archive), offset_(0) {}
 
     bool read_exact_or_eof(char* data, std::size_t size) {
         if (size == 0U) {
@@ -211,10 +170,7 @@ public:
             return false;
         }
         if (archive_->size() - offset_ < size) {
-            throw TransferFailure(
-                TransferRpcCode::TransferFailed,
-                "truncated transfer body"
-            );
+            throw TransferFailure(TransferRpcCode::TransferFailed, "truncated transfer body");
         }
         std::copy(archive_->data() + offset_, archive_->data() + offset_ + size, data);
         offset_ += size;
@@ -226,22 +182,16 @@ private:
     std::size_t offset_;
 };
 
-void read_exact_or_throw(
-    TransferArchiveReader& reader,
-    char* data,
-    std::size_t size,
-    const std::string& error_message
-) {
+void read_exact_or_throw(TransferArchiveReader& reader,
+                         char* data,
+                         std::size_t size,
+                         const std::string& error_message) {
     if (!reader.read_exact_or_eof(data, size)) {
         throw TransferFailure(TransferRpcCode::TransferFailed, error_message);
     }
 }
 
-std::string read_exact_string(
-    TransferArchiveReader& reader,
-    std::uint64_t size,
-    const std::string& error_message
-) {
+std::string read_exact_string(TransferArchiveReader& reader, std::uint64_t size, const std::string& error_message) {
     ensure_u64_fits_size_t(size, "tar entry size");
     std::string body(static_cast<std::size_t>(size), '\0');
     if (!body.empty()) {
@@ -250,26 +200,19 @@ std::string read_exact_string(
     return body;
 }
 
-std::string read_limited_metadata_string(
-    TransferArchiveReader& reader,
-    std::uint64_t size,
-    const TransferLimitConfig& limits,
-    const std::string& error_message
-) {
+std::string read_limited_metadata_string(TransferArchiveReader& reader,
+                                         std::uint64_t size,
+                                         const TransferLimitConfig& limits,
+                                         const std::string& error_message) {
     ensure_transfer_entry_within_limits(size, 0U, limits);
     return read_exact_string(reader, size, error_message);
 }
 
-void skip_exact(
-    TransferArchiveReader& reader,
-    std::uint64_t size,
-    const std::string& error_message
-) {
+void skip_exact(TransferArchiveReader& reader, std::uint64_t size, const std::string& error_message) {
     char buffer[8192];
     std::uint64_t remaining = size;
     while (remaining > 0U) {
-        const std::size_t requested =
-            remaining < sizeof(buffer) ? static_cast<std::size_t>(remaining) : sizeof(buffer);
+        const std::size_t requested = remaining < sizeof(buffer) ? static_cast<std::size_t>(remaining) : sizeof(buffer);
         read_exact_or_throw(reader, buffer, requested, error_message);
         remaining -= static_cast<std::uint64_t>(requested);
     }
@@ -282,29 +225,18 @@ std::uint64_t entry_padding(std::uint64_t size) {
 
 std::uint64_t entry_body_with_padding(std::uint64_t size) {
     if (size > std::numeric_limits<std::uint64_t>::max() - entry_padding(size)) {
-        throw TransferFailure(
-            TransferRpcCode::TransferFailed,
-            "tar entry size is too large"
-        );
+        throw TransferFailure(TransferRpcCode::TransferFailed, "tar entry size is too large");
     }
     return size + entry_padding(size);
 }
 
 void skip_entry_padding(TransferArchiveReader& reader, std::uint64_t size) {
-    skip_exact(
-        reader,
-        entry_padding(size),
-        "truncated tar entry body"
-    );
+    skip_exact(reader, entry_padding(size), "truncated tar entry body");
 }
 
-std::string read_gnu_long_name_from_reader(
-    TransferArchiveReader& reader,
-    std::uint64_t size,
-    const TransferLimitConfig& limits
-) {
-    std::string value =
-        read_limited_metadata_string(reader, size, limits, "truncated tar entry body");
+std::string
+read_gnu_long_name_from_reader(TransferArchiveReader& reader, std::uint64_t size, const TransferLimitConfig& limits) {
+    std::string value = read_limited_metadata_string(reader, size, limits, "truncated tar entry body");
     skip_entry_padding(reader, size);
     while (!value.empty() && value[value.size() - 1] == '\0') {
         value.erase(value.size() - 1);
@@ -312,14 +244,12 @@ std::string read_gnu_long_name_from_reader(
     return value;
 }
 
-void copy_reader_to_file(
-    TransferArchiveReader& reader,
-    const std::string& path,
-    std::uint64_t size,
-    std::uint64_t mode,
-    std::uint64_t copied_so_far,
-    const TransferLimitConfig& limits
-) {
+void copy_reader_to_file(TransferArchiveReader& reader,
+                         const std::string& path,
+                         std::uint64_t size,
+                         std::uint64_t mode,
+                         std::uint64_t copied_so_far,
+                         const TransferLimitConfig& limits) {
     ensure_transfer_entry_within_limits(size, copied_so_far, limits);
     std::ofstream output(path.c_str(), std::ios::binary | std::ios::trunc);
     if (!output) {
@@ -329,8 +259,7 @@ void copy_reader_to_file(
     char buffer[8192];
     std::uint64_t remaining = size;
     while (remaining > 0U) {
-        const std::size_t requested =
-            remaining < sizeof(buffer) ? static_cast<std::size_t>(remaining) : sizeof(buffer);
+        const std::size_t requested = remaining < sizeof(buffer) ? static_cast<std::size_t>(remaining) : sizeof(buffer);
         read_exact_or_throw(reader, buffer, requested, "truncated tar entry body");
         output.write(buffer, static_cast<std::streamsize>(requested));
         if (!output) {
@@ -359,10 +288,7 @@ void copy_reader_to_file(
 }
 
 TransferWarning skipped_symlink_warning(const std::string& path) {
-    return TransferWarning{
-        "transfer_skipped_symlink",
-        "Skipped symlink transfer source entry `" + path + "`."
-    };
+    return TransferWarning{"transfer_skipped_symlink", "Skipped symlink transfer source entry `" + path + "`."};
 }
 
 enum SymlinkImportAction {
@@ -370,10 +296,7 @@ enum SymlinkImportAction {
     SYMLINK_IMPORT_SKIP,
 };
 
-SymlinkImportAction symlink_import_action(
-    TransferSymlinkMode symlink_mode,
-    const std::string& error_path
-) {
+SymlinkImportAction symlink_import_action(TransferSymlinkMode symlink_mode, const std::string& error_path) {
 #ifdef _WIN32
     (void)symlink_mode;
     (void)error_path;
@@ -394,11 +317,9 @@ SymlinkImportAction symlink_import_action(
 #endif
 }
 
-void consume_file_archive_tail(
-    TransferArchiveReader& reader,
-    std::vector<TransferWarning>* warnings,
-    const TransferLimitConfig& limits
-) {
+void consume_file_archive_tail(TransferArchiveReader& reader,
+                               std::vector<TransferWarning>* warnings,
+                               const TransferLimitConfig& limits) {
     std::string pending_long_name;
     std::vector<char> block(TAR_BLOCK_SIZE);
     while (reader.read_exact_or_eof(block.data(), block.size())) {
@@ -416,59 +337,39 @@ void consume_file_archive_tail(
         const std::string raw_path = pending_long_name.empty() ? header.path : pending_long_name;
         pending_long_name.clear();
         if (!is_transfer_summary_path(raw_path) || header.typeflag != '0') {
-            throw TransferFailure(
-                TransferRpcCode::SourceUnsupported,
-                "file archive contains extra entries"
-            );
+            throw TransferFailure(TransferRpcCode::SourceUnsupported, "file archive contains extra entries");
         }
-        append_warnings(
-            warnings,
-            read_transfer_summary(
-                read_limited_metadata_string(reader, header.size, limits, "truncated tar entry body")
-            )
-        );
+        append_warnings(warnings,
+                        read_transfer_summary(
+                            read_limited_metadata_string(reader, header.size, limits, "truncated tar entry body")));
         skip_entry_padding(reader, header.size);
     }
 
     if (!pending_long_name.empty()) {
-        throw TransferFailure(
-            TransferRpcCode::SourceUnsupported,
-            "dangling GNU long name entry"
-        );
+        throw TransferFailure(TransferRpcCode::SourceUnsupported, "dangling GNU long name entry");
     }
 }
 
-ImportSummary import_file_from_tar(
-    TransferArchiveReader& reader,
-    const std::string& absolute_path,
-    const std::string& overwrite_mode,
-    bool create_parent,
-    TransferSymlinkMode symlink_mode,
-    const TransferLimitConfig& limits,
-    const TransferPathAuthorizer& authorizer
-) {
-    const bool replaced = prepare_destination_path(
-        absolute_path,
-        TransferSourceType::File,
-        overwrite_mode,
-        create_parent
-    );
+ImportSummary import_file_from_tar(TransferArchiveReader& reader,
+                                   const std::string& absolute_path,
+                                   const std::string& overwrite_mode,
+                                   bool create_parent,
+                                   TransferSymlinkMode symlink_mode,
+                                   const TransferLimitConfig& limits,
+                                   const TransferPathAuthorizer& authorizer) {
+    const bool replaced =
+        prepare_destination_path(absolute_path, TransferSourceType::File, overwrite_mode, create_parent);
     ensure_not_existing_symlink(absolute_path);
 
     std::vector<char> block(TAR_BLOCK_SIZE);
     read_exact_or_throw(reader, block.data(), block.size(), "archive is empty");
     const TarHeaderView header = parse_header(block.data());
     if (header.typeflag != '0' && header.typeflag != '2') {
-        throw TransferFailure(
-            TransferRpcCode::SourceUnsupported,
-            "archive entry is not a regular file"
-        );
+        throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive entry is not a regular file");
     }
     if (header.path != SINGLE_FILE_ENTRY) {
-        throw TransferFailure(
-            TransferRpcCode::SourceUnsupported,
-            "file archive entry path must be " + std::string(SINGLE_FILE_ENTRY)
-        );
+        throw TransferFailure(TransferRpcCode::SourceUnsupported,
+                              "file archive entry path must be " + std::string(SINGLE_FILE_ENTRY));
     }
 
     std::uint64_t bytes_copied = 0;
@@ -502,16 +403,14 @@ ImportSummary import_file_from_tar(
     };
 }
 
-ImportSummary import_directory_from_tar(
-    TransferArchiveReader& reader,
-    TransferSourceType source_type,
-    const std::string& absolute_path,
-    const std::string& overwrite_mode,
-    bool create_parent,
-    TransferSymlinkMode symlink_mode,
-    const TransferLimitConfig& limits,
-    const TransferPathAuthorizer& authorizer
-) {
+ImportSummary import_directory_from_tar(TransferArchiveReader& reader,
+                                        TransferSourceType source_type,
+                                        const std::string& absolute_path,
+                                        const std::string& overwrite_mode,
+                                        bool create_parent,
+                                        TransferSymlinkMode symlink_mode,
+                                        const TransferLimitConfig& limits,
+                                        const TransferPathAuthorizer& authorizer) {
     const bool replaced = prepare_destination_path(absolute_path, source_type, overwrite_mode, create_parent);
     make_directory_if_missing(absolute_path);
 
@@ -536,22 +435,12 @@ ImportSummary import_directory_from_tar(
         const std::string relative_path = validate_relative_archive_path(raw_path);
         if (is_transfer_summary_path(relative_path)) {
             if (header.typeflag != '0') {
-                throw TransferFailure(
-                    TransferRpcCode::SourceUnsupported,
-                    "transfer summary archive entry is not a regular file"
-                );
+                throw TransferFailure(TransferRpcCode::SourceUnsupported,
+                                      "transfer summary archive entry is not a regular file");
             }
-            append_warnings(
-                &summary.warnings,
-                read_transfer_summary(
-                    read_limited_metadata_string(
-                        reader,
-                        header.size,
-                        limits,
-                        "truncated tar entry body"
-                    )
-                )
-            );
+            append_warnings(&summary.warnings,
+                            read_transfer_summary(
+                                read_limited_metadata_string(reader, header.size, limits, "truncated tar entry body")));
             skip_entry_padding(reader, header.size);
             continue;
         }
@@ -578,10 +467,7 @@ ImportSummary import_directory_from_tar(
                 break;
             }
             if (relative_path == ".") {
-                throw TransferFailure(
-                    TransferRpcCode::SourceUnsupported,
-                    "archive symlink entry cannot target root"
-                );
+                throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive symlink entry cannot target root");
             }
             write_validated_symlink(header.link_name, output_path, authorizer);
             summary.files_copied += 1;
@@ -590,203 +476,142 @@ ImportSummary import_directory_from_tar(
         }
 
         if (header.typeflag != '0') {
-            throw TransferFailure(
-                TransferRpcCode::SourceUnsupported,
-                "archive contains unsupported entry"
-            );
+            throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive contains unsupported entry");
         }
         if (relative_path == ".") {
-            throw TransferFailure(
-                TransferRpcCode::SourceUnsupported,
-                "archive file entry cannot target root"
-            );
+            throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive file entry cannot target root");
         }
 
         ensure_parent_directory(output_path, true);
-        copy_reader_to_file(
-            reader,
-            output_path,
-            header.size,
-            header.mode,
-            summary.bytes_copied,
-            limits
-        );
+        copy_reader_to_file(reader, output_path, header.size, header.mode, summary.bytes_copied, limits);
         summary.bytes_copied += header.size;
         summary.files_copied += 1;
     }
 
     if (!pending_long_name.empty()) {
-        throw TransferFailure(
-            TransferRpcCode::SourceUnsupported,
-            "dangling GNU long name entry"
-        );
+        throw TransferFailure(TransferRpcCode::SourceUnsupported, "dangling GNU long name entry");
     }
 
     return summary;
 }
 
-}  // namespace
+} // namespace
 
-ImportSummary import_path(
-    const std::string& bytes,
-    TransferSourceType source_type,
-    const std::string& absolute_path,
-    const std::string& overwrite_mode,
-    bool create_parent,
-    TransferSymlinkMode symlink_mode
-) {
-    return import_path(
-        bytes,
-        source_type,
-        absolute_path,
-        overwrite_mode,
-        create_parent,
-        symlink_mode,
-        default_transfer_limit_config()
-    );
+ImportSummary import_path(const std::string& bytes,
+                          TransferSourceType source_type,
+                          const std::string& absolute_path,
+                          const std::string& overwrite_mode,
+                          bool create_parent,
+                          TransferSymlinkMode symlink_mode) {
+    return import_path(bytes,
+                       source_type,
+                       absolute_path,
+                       overwrite_mode,
+                       create_parent,
+                       symlink_mode,
+                       default_transfer_limit_config());
 }
 
-ImportSummary import_path(
-    const std::string& bytes,
-    TransferSourceType source_type,
-    const std::string& absolute_path,
-    const std::string& overwrite_mode,
-    bool create_parent,
-    TransferSymlinkMode symlink_mode,
-    const TransferLimitConfig& limits
-) {
-    return import_path(
-        bytes,
-        source_type,
-        absolute_path,
-        overwrite_mode,
-        create_parent,
-        symlink_mode,
-        limits,
-        TransferPathAuthorizer()
-    );
+ImportSummary import_path(const std::string& bytes,
+                          TransferSourceType source_type,
+                          const std::string& absolute_path,
+                          const std::string& overwrite_mode,
+                          bool create_parent,
+                          TransferSymlinkMode symlink_mode,
+                          const TransferLimitConfig& limits) {
+    return import_path(bytes,
+                       source_type,
+                       absolute_path,
+                       overwrite_mode,
+                       create_parent,
+                       symlink_mode,
+                       limits,
+                       TransferPathAuthorizer());
 }
 
-ImportSummary import_path(
-    const std::string& bytes,
-    TransferSourceType source_type,
-    const std::string& absolute_path,
-    const std::string& overwrite_mode,
-    bool create_parent,
-    TransferSymlinkMode symlink_mode,
-    const TransferLimitConfig& limits,
-    const TransferPathAuthorizer& authorizer
-) {
+ImportSummary import_path(const std::string& bytes,
+                          TransferSourceType source_type,
+                          const std::string& absolute_path,
+                          const std::string& overwrite_mode,
+                          bool create_parent,
+                          TransferSymlinkMode symlink_mode,
+                          const TransferLimitConfig& limits,
+                          const TransferPathAuthorizer& authorizer) {
     StringTransferArchiveReader reader(&bytes);
     return import_path_from_reader(
-        reader,
-        source_type,
-        absolute_path,
-        overwrite_mode,
-        create_parent,
-        symlink_mode,
-        limits,
-        authorizer
-    );
+        reader, source_type, absolute_path, overwrite_mode, create_parent, symlink_mode, limits, authorizer);
 }
 
-ImportSummary import_path_from_reader(
-    TransferArchiveReader& reader,
-    TransferSourceType source_type,
-    const std::string& absolute_path,
-    const std::string& overwrite_mode,
-    bool create_parent,
-    TransferSymlinkMode symlink_mode
-) {
-    return import_path_from_reader(
-        reader,
-        source_type,
-        absolute_path,
-        overwrite_mode,
-        create_parent,
-        symlink_mode,
-        default_transfer_limit_config()
-    );
+ImportSummary import_path_from_reader(TransferArchiveReader& reader,
+                                      TransferSourceType source_type,
+                                      const std::string& absolute_path,
+                                      const std::string& overwrite_mode,
+                                      bool create_parent,
+                                      TransferSymlinkMode symlink_mode) {
+    return import_path_from_reader(reader,
+                                   source_type,
+                                   absolute_path,
+                                   overwrite_mode,
+                                   create_parent,
+                                   symlink_mode,
+                                   default_transfer_limit_config());
 }
 
-ImportSummary import_path_from_reader(
-    TransferArchiveReader& reader,
-    TransferSourceType source_type,
-    const std::string& absolute_path,
-    const std::string& overwrite_mode,
-    bool create_parent,
-    TransferSymlinkMode symlink_mode,
-    const TransferLimitConfig& limits
-) {
-    return import_path_from_reader(
-        reader,
-        source_type,
-        absolute_path,
-        overwrite_mode,
-        create_parent,
-        symlink_mode,
-        limits,
-        TransferPathAuthorizer()
-    );
+ImportSummary import_path_from_reader(TransferArchiveReader& reader,
+                                      TransferSourceType source_type,
+                                      const std::string& absolute_path,
+                                      const std::string& overwrite_mode,
+                                      bool create_parent,
+                                      TransferSymlinkMode symlink_mode,
+                                      const TransferLimitConfig& limits) {
+    return import_path_from_reader(reader,
+                                   source_type,
+                                   absolute_path,
+                                   overwrite_mode,
+                                   create_parent,
+                                   symlink_mode,
+                                   limits,
+                                   TransferPathAuthorizer());
 }
 
-ImportSummary import_path_from_reader(
-    TransferArchiveReader& reader,
-    TransferSourceType source_type,
-    const std::string& absolute_path,
-    const std::string& overwrite_mode,
-    bool create_parent,
-    TransferSymlinkMode symlink_mode,
-    const TransferLimitConfig& limits,
-    const TransferPathAuthorizer& authorizer
-) {
+ImportSummary import_path_from_reader(TransferArchiveReader& reader,
+                                      TransferSourceType source_type,
+                                      const std::string& absolute_path,
+                                      const std::string& overwrite_mode,
+                                      bool create_parent,
+                                      TransferSymlinkMode symlink_mode,
+                                      const TransferLimitConfig& limits,
+                                      const TransferPathAuthorizer& authorizer) {
     ExportOptions options;
     options.symlink_mode = symlink_mode;
     validate_transfer_options(options);
     if (!is_absolute_path(absolute_path)) {
-        throw TransferFailure(
-            TransferRpcCode::PathNotAbsolute,
-            "transfer path is not absolute"
-        );
+        throw TransferFailure(TransferRpcCode::PathNotAbsolute, "transfer path is not absolute");
     }
 
     if (source_type == TransferSourceType::File) {
         return import_file_from_tar(
-            reader,
-            absolute_path,
-            overwrite_mode,
-            create_parent,
-            options.symlink_mode,
-            limits,
-            authorizer
-        );
+            reader, absolute_path, overwrite_mode, create_parent, options.symlink_mode, limits, authorizer);
     }
     if (source_type == TransferSourceType::Directory) {
-        return import_directory_from_tar(
-            reader,
-            source_type,
-            absolute_path,
-            overwrite_mode,
-            create_parent,
-            options.symlink_mode,
-            limits,
-            authorizer
-        );
+        return import_directory_from_tar(reader,
+                                         source_type,
+                                         absolute_path,
+                                         overwrite_mode,
+                                         create_parent,
+                                         options.symlink_mode,
+                                         limits,
+                                         authorizer);
     }
     if (source_type == TransferSourceType::Multiple) {
-        return import_directory_from_tar(
-            reader,
-            source_type,
-            absolute_path,
-            overwrite_mode,
-            create_parent,
-            options.symlink_mode,
-            limits,
-            authorizer
-        );
+        return import_directory_from_tar(reader,
+                                         source_type,
+                                         absolute_path,
+                                         overwrite_mode,
+                                         create_parent,
+                                         options.symlink_mode,
+                                         limits,
+                                         authorizer);
     }
-    throw TransferFailure(
-        TransferRpcCode::SourceUnsupported,
-        "unsupported transfer source type"
-    );
+    throw TransferFailure(TransferRpcCode::SourceUnsupported, "unsupported transfer source type");
 }

@@ -2,9 +2,9 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <sstream>
 #include <string>
-#include <ctime>
 #include <vector>
 
 #ifdef _WIN32
@@ -80,8 +80,8 @@ static LogLevel parse_filter_value(const char* raw) {
 
         const std::string key = lowercase_ascii(trim_ascii(token.substr(0, equals)));
         const std::string value = token.substr(equals + 1);
-        if (key == "remote_exec_daemon_cpp" || key == "daemon_cpp" ||
-            key == "remote_exec_daemon_xp" || key == "daemon_xp") {
+        if (key == "remote_exec_daemon_cpp" || key == "daemon_cpp" || key == "remote_exec_daemon_xp" ||
+            key == "daemon_xp") {
             LogLevel parsed = LOG_INFO;
             if (parse_level_token(value, &parsed)) {
                 component_level = parsed;
@@ -170,20 +170,18 @@ void log_message(LogLevel level, const std::string& component, const std::string
     const int millisecond = static_cast<int>(tv.tv_usec / 1000);
 #endif
 
-    std::fprintf(
-        stderr,
-        "%04d-%02d-%02d %02d:%02d:%02d.%03d %-5s %s %s\n",
-        year,
-        month,
-        day,
-        hour,
-        minute,
-        second,
-        millisecond,
-        level_name(level),
-        component.c_str(),
-        message.c_str()
-    );
+    std::fprintf(stderr,
+                 "%04d-%02d-%02d %02d:%02d:%02d.%03d %-5s %s %s\n",
+                 year,
+                 month,
+                 day,
+                 hour,
+                 minute,
+                 second,
+                 millisecond,
+                 level_name(level),
+                 component.c_str(),
+                 message.c_str());
     std::fflush(stderr);
 }
 

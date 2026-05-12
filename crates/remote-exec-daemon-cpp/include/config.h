@@ -61,10 +61,7 @@ static const unsigned long DEFAULT_HTTP_CONNECTION_IDLE_TIMEOUT_MS = 30000UL;
 
 YieldTimeConfig default_yield_time_config();
 PortForwardLimitConfig default_port_forward_limit_config();
-unsigned long resolve_yield_time_ms(
-    const YieldTimeOperationConfig& config,
-    bool has_requested_ms,
-    unsigned long requested_ms
-);
+unsigned long
+resolve_yield_time_ms(const YieldTimeOperationConfig& config, bool has_requested_ms, unsigned long requested_ms);
 
 DaemonConfig load_config(const std::string& path);

@@ -87,4 +87,4 @@ void create_parent_directories(const std::string& path) {
     make_directory_if_missing(parent);
 }
 
-}  // namespace path_utils
+} // namespace path_utils

@@ -1,9 +1,9 @@
+#include "server_routes.h"
+#include "server_request_utils.h"
 #include "server_route_common.h"
 #include "server_route_exec.h"
 #include "server_route_image.h"
 #include "server_route_transfer.h"
-#include "server_request_utils.h"
-#include "server_routes.h"
 
 HttpResponse route_request(AppState& state, const HttpRequest& request) {
     HttpResponse response;

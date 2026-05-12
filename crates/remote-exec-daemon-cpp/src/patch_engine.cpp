@@ -57,10 +57,7 @@ struct NormalizedPathPrefix {
     std::size_t start;
 };
 
-NormalizedPathPrefix normalized_path_prefix(
-    const std::string& raw,
-    NormalizedPathKind kind
-) {
+NormalizedPathPrefix normalized_path_prefix(const std::string& raw, NormalizedPathKind kind) {
     NormalizedPathPrefix prefix;
     prefix.start = 0;
 
@@ -69,8 +66,8 @@ NormalizedPathPrefix normalized_path_prefix(
     }
 
 #ifdef _WIN32
-    if (raw.size() >= 3 && std::isalpha(static_cast<unsigned char>(raw[0])) != 0 &&
-        raw[1] == ':' && (raw[2] == '\\' || raw[2] == '/')) {
+    if (raw.size() >= 3 && std::isalpha(static_cast<unsigned char>(raw[0])) != 0 && raw[1] == ':' &&
+        (raw[2] == '\\' || raw[2] == '/')) {
         prefix.value = raw.substr(0, 2);
         prefix.value.push_back(path_utils::native_separator());
         prefix.start = 3;
@@ -92,11 +89,7 @@ NormalizedPathPrefix normalized_path_prefix(
     throw std::runtime_error("absolute patch path is not supported");
 }
 
-void push_normalized_segment(
-    std::vector<std::string>* parts,
-    const std::string& segment,
-    NormalizedPathKind kind
-) {
+void push_normalized_segment(std::vector<std::string>* parts, const std::string& segment, NormalizedPathKind kind) {
     if (segment.empty() || segment == ".") {
         return;
     }
@@ -113,15 +106,11 @@ void push_normalized_segment(
     parts->push_back(segment);
 }
 
-std::string build_normalized_path(
-    const std::vector<std::string>& parts,
-    const std::string& prefix
-) {
+std::string build_normalized_path(const std::vector<std::string>& parts, const std::string& prefix) {
     std::ostringstream out;
     out << prefix;
     for (std::size_t i = 0; i < parts.size(); ++i) {
-        if (i != 0 ||
-            (!prefix.empty() && prefix[prefix.size() - 1] != path_utils::native_separator())) {
+        if (i != 0 || (!prefix.empty() && prefix[prefix.size() - 1] != path_utils::native_separator())) {
             out << path_utils::native_separator();
         }
         out << parts[i];
@@ -129,10 +118,7 @@ std::string build_normalized_path(
     return out.str();
 }
 
-std::string normalize_path_segments(
-    const std::string& raw,
-    NormalizedPathKind kind
-) {
+std::string normalize_path_segments(const std::string& raw, NormalizedPathKind kind) {
     if (raw.empty()) {
         throw std::runtime_error("patch path is empty");
     }
@@ -268,11 +254,7 @@ const char* line_ending_text(LineEndingKind line_ending) {
     return line_ending == LINE_ENDING_CRLF ? "\r\n" : "\n";
 }
 
-std::string join_lines(
-    const std::vector<std::string>& lines,
-    bool trailing_newline,
-    LineEndingKind line_ending
-) {
+std::string join_lines(const std::vector<std::string>& lines, bool trailing_newline, LineEndingKind line_ending) {
     std::ostringstream out;
     for (std::size_t i = 0; i < lines.size(); ++i) {
         if (i != 0) {
@@ -427,12 +409,10 @@ std::vector<PatchAction> parse_patch(const std::string& patch_text) {
     return actions;
 }
 
-static std::size_t find_sequence(
-    const std::vector<std::string>& lines,
-    const std::vector<std::string>& needle,
-    std::size_t start,
-    bool require_eof
-) {
+static std::size_t find_sequence(const std::vector<std::string>& lines,
+                                 const std::vector<std::string>& needle,
+                                 std::size_t start,
+                                 bool require_eof) {
     if (needle.empty()) {
         return std::min(start, lines.size());
     }
@@ -459,21 +439,15 @@ static std::size_t find_sequence(
     return std::string::npos;
 }
 
-static std::size_t find_context_anchor(
-    const std::vector<std::string>& lines,
-    const std::string& context,
-    std::size_t start,
-    bool require_eof
-) {
+static std::size_t find_context_anchor(const std::vector<std::string>& lines,
+                                       const std::string& context,
+                                       std::size_t start,
+                                       bool require_eof) {
     const std::vector<std::string> needle(1, context);
     return find_sequence(lines, needle, start, require_eof);
 }
 
-static void apply_update_chunk(
-    std::vector<std::string>* lines,
-    std::size_t* cursor,
-    const UpdateChunk& chunk
-) {
+static void apply_update_chunk(std::vector<std::string>* lines, std::size_t* cursor, const UpdateChunk& chunk) {
     std::size_t search_start = std::min(*cursor, lines->size());
     if (chunk.has_change_context) {
         search_start = find_context_anchor(*lines, chunk.change_context, *cursor, false);
@@ -483,8 +457,7 @@ static void apply_update_chunk(
     }
 
     if (!chunk.old_lines.empty()) {
-        const std::size_t start =
-            find_sequence(*lines, chunk.old_lines, search_start, chunk.is_end_of_file);
+        const std::size_t start = find_sequence(*lines, chunk.old_lines, search_start, chunk.is_end_of_file);
         if (start == std::string::npos) {
             throw std::runtime_error("patch removal not found");
         }
@@ -507,10 +480,7 @@ static void apply_update_chunk(
     *cursor = insert_at + chunk.new_lines.size();
 }
 
-static std::string apply_update_chunks(
-    const std::string& old_text,
-    const std::vector<UpdateChunk>& chunks
-) {
+static std::string apply_update_chunks(const std::string& old_text, const std::vector<UpdateChunk>& chunks) {
     bool had_trailing_newline = false;
     const LineEndingKind line_ending = detect_line_ending(old_text);
     std::vector<std::string> lines = split_lines(old_text, &had_trailing_newline);
@@ -529,11 +499,8 @@ std::string render_added_content(const std::vector<std::string>& lines) {
 
 } // namespace
 
-PatchApplyResult apply_patch(
-    const std::string& root,
-    const std::string& patch_text,
-    const PatchPathAuthorizer& authorizer
-) {
+PatchApplyResult
+apply_patch(const std::string& root, const std::string& patch_text, const PatchPathAuthorizer& authorizer) {
     const std::vector<PatchAction> actions = parse_patch(patch_text);
     std::vector<std::string> summary;
 

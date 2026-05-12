@@ -24,13 +24,9 @@ public:
     path(const char* value) : value_(value == NULL ? "" : value) {}
     path(const std::string& value) : value_(value) {}
 
-    std::string string() const {
-        return value_;
-    }
+    std::string string() const { return value_; }
 
-    const char* c_str() const {
-        return value_.c_str();
-    }
+    const char* c_str() const { return value_.c_str(); }
 
     path parent_path() const {
         const std::string::size_type slash = value_.find_last_of("/\\");
@@ -46,9 +42,7 @@ private:
 
 inline path operator/(const path& base, const std::string& child) {
     std::string joined = base.string();
-    if (!joined.empty() &&
-        joined[joined.size() - 1] != '/' &&
-        joined[joined.size() - 1] != '\\') {
+    if (!joined.empty() && joined[joined.size() - 1] != '/' && joined[joined.size() - 1] != '\\') {
         joined.push_back('\\');
     }
     joined += child;
@@ -76,23 +70,19 @@ inline bool exists(const path& target) {
 
 inline bool is_directory(const path& target) {
     const DWORD attributes = GetFileAttributesA(target.c_str());
-    return attributes != INVALID_FILE_ATTRIBUTES &&
-        (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
 inline void throw_last_error(const std::string& operation, const path& target) {
-    throw std::runtime_error(
-        operation + " failed for `" + target.string() + "`: " +
-        std::to_string(static_cast<unsigned long>(GetLastError()))
-    );
+    throw std::runtime_error(operation + " failed for `" + target.string() +
+                             "`: " + std::to_string(static_cast<unsigned long>(GetLastError())));
 }
 
 inline void create_directory_if_missing(const path& target) {
     if (target.string().empty() || exists(target)) {
         return;
     }
-    if (!CreateDirectoryA(target.c_str(), NULL) &&
-        GetLastError() != ERROR_ALREADY_EXISTS) {
+    if (!CreateDirectoryA(target.c_str(), NULL) && GetLastError() != ERROR_ALREADY_EXISTS) {
         throw_last_error("CreateDirectoryA", target);
     }
 }
@@ -154,7 +144,7 @@ inline void remove_all(const path& target) {
     }
 }
 
-}  // namespace test_fs
+} // namespace test_fs
 
 #endif
 

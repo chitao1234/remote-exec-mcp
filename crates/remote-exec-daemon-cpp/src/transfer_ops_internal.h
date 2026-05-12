@@ -46,53 +46,33 @@ void ensure_parent_directory(const std::string& path, bool create_parent);
 void ensure_not_existing_symlink(const std::string& path);
 void write_symlink(const std::string& target, const std::string& path);
 std::vector<DirectoryEntry> list_directory_entries(const std::string& path);
-bool prepare_destination_path(
-    const std::string& absolute_path,
-    TransferSourceType source_type,
-    const std::string& overwrite_mode,
-    bool create_parent
-);
+bool prepare_destination_path(const std::string& absolute_path,
+                              TransferSourceType source_type,
+                              const std::string& overwrite_mode,
+                              bool create_parent);
 
 void append_archive_terminator(TransferArchiveSink* archive);
 void append_directory_entry(TransferArchiveSink* archive, const std::string& rel_path);
 void append_file_entry(TransferArchiveSink* archive, const std::string& rel_path, const std::string& body);
-void append_file_entry_from_path(
-    TransferArchiveSink* archive,
-    const std::string& rel_path,
-    const std::string& source_path
-);
+void append_file_entry_from_path(TransferArchiveSink* archive,
+                                 const std::string& rel_path,
+                                 const std::string& source_path);
 #ifndef _WIN32
-void append_symlink_entry(
-    TransferArchiveSink* archive,
-    const std::string& rel_path,
-    const std::string& target
-);
+void append_symlink_entry(TransferArchiveSink* archive, const std::string& rel_path, const std::string& target);
 #endif
 bool is_zero_block(const char* block);
 TarHeaderView parse_header(const char* block);
 void ensure_u64_fits_size_t(std::uint64_t value, const std::string& label);
-void ensure_transfer_entry_within_limits(
-    std::uint64_t entry_size,
-    std::uint64_t copied_so_far,
-    const TransferLimitConfig& limits
-);
+void ensure_transfer_entry_within_limits(std::uint64_t entry_size,
+                                         std::uint64_t copied_so_far,
+                                         const TransferLimitConfig& limits);
 std::size_t padded_length(std::uint64_t size);
-std::string read_gnu_long_name(
-    const std::string& archive,
-    std::size_t body_offset,
-    std::uint64_t size
-);
+std::string read_gnu_long_name(const std::string& archive, std::size_t body_offset, std::uint64_t size);
 bool is_transfer_summary_path(const std::string& path);
-void append_transfer_summary_entry(
-    TransferArchiveSink* archive,
-    const std::vector<TransferWarning>& warnings
-);
+void append_transfer_summary_entry(TransferArchiveSink* archive, const std::vector<TransferWarning>& warnings);
 std::vector<TransferWarning> read_transfer_summary(const std::string& body);
-void append_warnings(
-    std::vector<TransferWarning>* destination,
-    const std::vector<TransferWarning>& source
-);
+void append_warnings(std::vector<TransferWarning>* destination, const std::vector<TransferWarning>& source);
 
 void validate_transfer_options(const ExportOptions& options);
 
-}  // namespace transfer_ops_internal
+} // namespace transfer_ops_internal

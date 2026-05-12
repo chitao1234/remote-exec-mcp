@@ -6,8 +6,8 @@
 #include <utility>
 #include <vector>
 
-#include <winsock2.h>
 #include <windows.h>
+#include <winsock2.h>
 
 #include "console_output.h"
 #include "platform.h"
@@ -91,42 +91,27 @@ PipePair create_pipe_pair(const char* label) {
 }
 
 bool is_stdin_closed_error(DWORD error) {
-    return error == ERROR_BROKEN_PIPE ||
-           error == ERROR_NO_DATA ||
-           error == ERROR_PIPE_NOT_CONNECTED;
+    return error == ERROR_BROKEN_PIPE || error == ERROR_NO_DATA || error == ERROR_PIPE_NOT_CONNECTED;
 }
 
 class Win32ProcessSession : public ProcessSession {
 public:
-    Win32ProcessSession(
-        UniqueHandle process_handle,
-        UniqueHandle stdin_write,
-        UniqueHandle stdout_read
-    ) : process_handle_(std::move(process_handle)),
-        stdin_write_(std::move(stdin_write)),
-        stdout_read_(std::move(stdout_read)) {}
+    Win32ProcessSession(UniqueHandle process_handle, UniqueHandle stdin_write, UniqueHandle stdout_read)
+        : process_handle_(std::move(process_handle)), stdin_write_(std::move(stdin_write)),
+          stdout_read_(std::move(stdout_read)) {}
 
-    ~Win32ProcessSession() override {
-        terminate();
-    }
+    ~Win32ProcessSession() override { terminate(); }
 
     void write_stdin(const std::string& chars) override {
         const char* data = chars.data();
         std::size_t remaining = chars.size();
         while (remaining > 0U) {
             DWORD written = 0;
-            if (WriteFile(
-                    stdin_write_.get(),
-                    data,
-                    static_cast<DWORD>(remaining),
-                    &written,
-                    NULL
-                ) == 0) {
+            if (WriteFile(stdin_write_.get(), data, static_cast<DWORD>(remaining), &written, NULL) == 0) {
                 const DWORD error = GetLastError();
                 if (is_stdin_closed_error(error)) {
                     throw ProcessStdinClosedError(
-                        "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
-                    );
+                        "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open");
                 }
                 throw std::runtime_error(last_error_message("WriteFile"));
             }
@@ -148,9 +133,7 @@ public:
         return read_console_output(stdout_read_.get(), block, eof, carry);
     }
 
-    std::string flush_carry(std::string* carry) override {
-        return flush_console_output_carry(carry);
-    }
+    std::string flush_carry(std::string* carry) override { return flush_console_output_carry(carry); }
 
     bool has_exited(int* exit_code) override {
         if (!process_handle_.valid()) {
@@ -179,15 +162,10 @@ private:
     UniqueHandle stdout_read_;
 };
 
-}  // namespace
+} // namespace
 
 std::unique_ptr<ProcessSession> ProcessSession::launch(
-    const std::string& command,
-    const std::string& workdir,
-    const std::string& shell,
-    bool login,
-    bool tty
-) {
+    const std::string& command, const std::string& workdir, const std::string& shell, bool login, bool tty) {
     if (tty) {
         throw std::runtime_error("tty is not supported on this host");
     }
@@ -213,18 +191,16 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     std::vector<char> mutable_command_line(command_line.begin(), command_line.end());
     mutable_command_line.push_back('\0');
 
-    const BOOL created = CreateProcessA(
-        NULL,
-        &mutable_command_line[0],
-        NULL,
-        NULL,
-        TRUE,
-        0,
-        NULL,
-        workdir.empty() ? NULL : workdir.c_str(),
-        &startup_info,
-        &process_info
-    );
+    const BOOL created = CreateProcessA(NULL,
+                                        &mutable_command_line[0],
+                                        NULL,
+                                        NULL,
+                                        TRUE,
+                                        0,
+                                        NULL,
+                                        workdir.empty() ? NULL : workdir.c_str(),
+                                        &startup_info,
+                                        &process_info);
 
     stdin_pipe.read_end.reset();
     stdout_pipe.write_end.reset();
@@ -237,13 +213,8 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     UniqueHandle thread_handle(process_info.hThread);
     thread_handle.reset();
 
-    return std::unique_ptr<ProcessSession>(
-        new Win32ProcessSession(
-            std::move(process_handle),
-            std::move(stdin_pipe.write_end),
-            std::move(stdout_pipe.read_end)
-        )
-    );
+    return std::unique_ptr<ProcessSession>(new Win32ProcessSession(
+        std::move(process_handle), std::move(stdin_pipe.write_end), std::move(stdout_pipe.read_end)));
 }
 
 bool process_session_supports_pty() {

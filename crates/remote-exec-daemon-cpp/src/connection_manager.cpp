@@ -3,16 +3,11 @@
 #include <vector>
 
 struct ConnectionManager::WorkerRecord {
-    WorkerRecord(
-        unsigned long worker_id_value,
-        SOCKET socket_value,
-        ConnectionWorkerMain worker_main_value,
-        void* context_value
-    )
-        : worker_id(worker_id_value),
-          socket(socket_value),
-          worker_main(worker_main_value),
-          context(context_value),
+    WorkerRecord(unsigned long worker_id_value,
+                 SOCKET socket_value,
+                 ConnectionWorkerMain worker_main_value,
+                 void* context_value)
+        : worker_id(worker_id_value), socket(socket_value), worker_main(worker_main_value), context(context_value),
           finished(false)
 #ifdef _WIN32
           ,
@@ -38,9 +33,8 @@ struct ConnectionManager::WorkerRecord {
 };
 
 ConnectionManager::ConnectionManager(unsigned long max_active_connections)
-    : max_active_connections_(max_active_connections),
-      shutting_down_(false),
-      next_worker_id_(1UL) {}
+    : max_active_connections_(max_active_connections), shutting_down_(false), next_worker_id_(1UL) {
+}
 
 ConnectionManager::~ConnectionManager() {
     begin_shutdown();
@@ -70,11 +64,7 @@ unsigned __stdcall ConnectionManager::worker_thread_entry(void* raw_context) {
 }
 #endif
 
-bool ConnectionManager::try_start(
-    UniqueSocket client,
-    ConnectionWorkerMain worker_main,
-    void* context
-) {
+bool ConnectionManager::try_start(UniqueSocket client, ConnectionWorkerMain worker_main, void* context) {
     std::shared_ptr<WorkerRecord> record;
     {
         BasicLockGuard lock(mutex_);
@@ -95,8 +85,7 @@ bool ConnectionManager::try_start(
     std::unique_ptr<WorkerContext> thread_context(new WorkerContext());
     thread_context->manager = this;
     thread_context->record = record;
-    HANDLE handle =
-        begin_win32_thread(&ConnectionManager::worker_thread_entry, thread_context.get());
+    HANDLE handle = begin_win32_thread(&ConnectionManager::worker_thread_entry, thread_context.get());
     if (handle == NULL) {
         close_socket(record->socket);
         BasicLockGuard lock(mutex_);
@@ -113,13 +102,12 @@ bool ConnectionManager::try_start(
 }
 
 void ConnectionManager::begin_shutdown() {
-    std::vector<std::shared_ptr<WorkerRecord> > snapshot;
+    std::vector<std::shared_ptr<WorkerRecord>> snapshot;
     {
         BasicLockGuard lock(mutex_);
         shutting_down_ = true;
         state_changed_.broadcast();
-        for (std::map<unsigned long, std::shared_ptr<WorkerRecord> >::const_iterator it =
-                 workers_.begin();
+        for (std::map<unsigned long, std::shared_ptr<WorkerRecord>>::const_iterator it = workers_.begin();
              it != workers_.end();
              ++it) {
             snapshot.push_back(it->second);
@@ -135,11 +123,10 @@ void ConnectionManager::begin_shutdown() {
 }
 
 void ConnectionManager::reap_finished() {
-    std::vector<std::shared_ptr<WorkerRecord> > finished;
+    std::vector<std::shared_ptr<WorkerRecord>> finished;
     {
         BasicLockGuard lock(mutex_);
-        for (std::map<unsigned long, std::shared_ptr<WorkerRecord> >::iterator it =
-                 workers_.begin();
+        for (std::map<unsigned long, std::shared_ptr<WorkerRecord>>::iterator it = workers_.begin();
              it != workers_.end();) {
             bool done = false;
             {

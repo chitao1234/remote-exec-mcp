@@ -1,11 +1,9 @@
 #include "port_tunnel_internal.h"
 
-bool PortTunnelService::spawn_udp_bind_loop(
-    const std::shared_ptr<PortTunnelSession>& session,
-    uint32_t stream_id,
-    const std::shared_ptr<TunnelUdpSocket>& socket_value,
-    bool worker_acquired
-) {
+bool PortTunnelService::spawn_udp_bind_loop(const std::shared_ptr<PortTunnelSession>& session,
+                                            uint32_t stream_id,
+                                            const std::shared_ptr<TunnelUdpSocket>& socket_value,
+                                            bool worker_acquired) {
     std::shared_ptr<PortTunnelService> service = shared_from_this();
     if (!worker_acquired && !service->try_acquire_worker()) {
         return false;
@@ -22,11 +20,7 @@ bool PortTunnelService::spawn_udp_bind_loop(
         static unsigned __stdcall entry(void* raw_context) {
             std::unique_ptr<Context> context(static_cast<Context*>(raw_context));
             PortTunnelWorkerLease lease(context->service);
-            context->service->udp_read_loop(
-                context->session,
-                context->stream_id,
-                context->socket_value
-            );
+            context->service->udp_read_loop(context->session, context->stream_id, context->socket_value);
             return 0;
         }
     };
@@ -63,11 +57,9 @@ bool PortTunnelService::spawn_udp_bind_loop(
 #endif
 }
 
-void PortTunnelService::udp_read_loop(
-    const std::shared_ptr<PortTunnelSession>& session,
-    uint32_t stream_id,
-    const std::shared_ptr<TunnelUdpSocket>& socket_value
-) {
+void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& session,
+                                      uint32_t stream_id,
+                                      const std::shared_ptr<TunnelUdpSocket>& socket_value) {
     std::vector<unsigned char> buffer(READ_BUF_SIZE);
     for (;;) {
         std::shared_ptr<PortTunnelConnection> connection = wait_for_attachment(session);
@@ -75,8 +67,7 @@ void PortTunnelService::udp_read_loop(
             return;
         }
 
-        const int ready =
-            wait_socket_readable(socket_value->socket.get(), RETAINED_SOCKET_POLL_TIMEOUT_MS);
+        const int ready = wait_socket_readable(socket_value->socket.get(), RETAINED_SOCKET_POLL_TIMEOUT_MS);
         if (ready == 0) {
             continue;
         }
@@ -85,11 +76,7 @@ void PortTunnelService::udp_read_loop(
                 return;
             }
             if (connection->owns_session(session)) {
-                connection->send_error(
-                    stream_id,
-                    "port_read_failed",
-                    socket_error_message("select")
-                );
+                connection->send_error(stream_id, "port_read_failed", socket_error_message("select"));
             }
             return;
         }
@@ -100,14 +87,12 @@ void PortTunnelService::udp_read_loop(
         sockaddr_storage peer_address;
         std::memset(&peer_address, 0, sizeof(peer_address));
         socklen_t peer_len = sizeof(peer_address);
-        const int received = recvfrom(
-            socket_value->socket.get(),
-            reinterpret_cast<char*>(buffer.data()),
-            static_cast<int>(buffer.size()),
-            0,
-            reinterpret_cast<sockaddr*>(&peer_address),
-            &peer_len
-        );
+        const int received = recvfrom(socket_value->socket.get(),
+                                      reinterpret_cast<char*>(buffer.data()),
+                                      static_cast<int>(buffer.size()),
+                                      0,
+                                      reinterpret_cast<sockaddr*>(&peer_address),
+                                      &peer_len);
         if (received < 0) {
             const int error = last_socket_error();
             if (receive_timeout_error(error)) {
@@ -117,11 +102,7 @@ void PortTunnelService::udp_read_loop(
                 return;
             }
             if (connection->owns_session(session)) {
-                connection->send_error(
-                    stream_id,
-                    "port_read_failed",
-                    socket_error_message("recvfrom")
-                );
+                connection->send_error(stream_id, "port_read_failed", socket_error_message("recvfrom"));
             }
             return;
         }
@@ -136,8 +117,7 @@ void PortTunnelService::udp_read_loop(
                 session,
                 stream_id,
                 printable_port_forward_endpoint(reinterpret_cast<sockaddr*>(&peer_address), peer_len),
-                payload
-            )) {
+                payload)) {
             if (session_is_unavailable(session)) {
                 return;
             }
@@ -148,35 +128,19 @@ void PortTunnelService::udp_read_loop(
 void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
     const PortTunnelMode mode = current_mode();
     if (mode == PortTunnelMode::Listen) {
-        require_mode(
-            PortTunnelMode::Listen,
-            PortTunnelProtocol::Udp,
-            "udp bind requires an open udp listen tunnel"
-        );
+        require_mode(PortTunnelMode::Listen, PortTunnelProtocol::Udp, "udp bind requires an open udp listen tunnel");
     } else {
-        require_mode(
-            PortTunnelMode::Connect,
-            PortTunnelProtocol::Udp,
-            "udp bind requires an open udp connect tunnel"
-        );
+        require_mode(PortTunnelMode::Connect, PortTunnelProtocol::Udp, "udp bind requires an open udp connect tunnel");
     }
 
     const std::string endpoint = normalize_port_forward_endpoint(frame_meta_string(frame, "endpoint"));
     if (!service_->try_acquire_udp_bind()) {
-        throw PortForwardError(
-            400,
-            "port_tunnel_limit_exceeded",
-            "port tunnel udp bind limit reached"
-        );
+        throw PortForwardError(400, "port_tunnel_limit_exceeded", "port tunnel udp bind limit reached");
     }
 
     std::shared_ptr<TunnelUdpSocket> socket_value;
     try {
-        socket_value.reset(new TunnelUdpSocket(
-            bind_port_forward_socket(endpoint, "udp"),
-            service_,
-            true
-        ));
+        socket_value.reset(new TunnelUdpSocket(bind_port_forward_socket(endpoint, "udp"), service_, true));
     } catch (const std::exception& ex) {
         log_tunnel_exception("create udp bind socket", ex);
         service_->release_udp_bind();
@@ -216,8 +180,7 @@ void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
         }
         transport_streams_.insert_udp(frame.stream_id, socket_value);
         if (!spawn_udp_read_thread(service_, shared_from_this(), frame.stream_id, socket_value, true)) {
-            std::shared_ptr<TunnelUdpSocket> removed_socket =
-                transport_streams_.remove_udp(frame.stream_id);
+            std::shared_ptr<TunnelUdpSocket> removed_socket = transport_streams_.remove_udp(frame.stream_id);
             if (removed_socket.get() != NULL) {
                 mark_udp_socket_closed(removed_socket);
             } else {
@@ -233,23 +196,19 @@ void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
     send_frame(ok);
 }
 
-void PortTunnelConnection::udp_read_loop_transport_owned(
-    uint32_t stream_id,
-    std::shared_ptr<TunnelUdpSocket> socket_value
-) {
+void PortTunnelConnection::udp_read_loop_transport_owned(uint32_t stream_id,
+                                                         std::shared_ptr<TunnelUdpSocket> socket_value) {
     std::vector<unsigned char> buffer(READ_BUF_SIZE);
     for (;;) {
         sockaddr_storage peer_address;
         std::memset(&peer_address, 0, sizeof(peer_address));
         socklen_t peer_len = sizeof(peer_address);
-        const int received = recvfrom(
-            socket_value->socket.get(),
-            reinterpret_cast<char*>(buffer.data()),
-            static_cast<int>(buffer.size()),
-            0,
-            reinterpret_cast<sockaddr*>(&peer_address),
-            &peer_len
-        );
+        const int received = recvfrom(socket_value->socket.get(),
+                                      reinterpret_cast<char*>(buffer.data()),
+                                      static_cast<int>(buffer.size()),
+                                      0,
+                                      reinterpret_cast<sockaddr*>(&peer_address),
+                                      &peer_len);
         if (received < 0) {
             if (!udp_socket_closed(socket_value)) {
                 send_error(stream_id, "port_read_failed", socket_error_message("recvfrom"));
@@ -260,9 +219,9 @@ void PortTunnelConnection::udp_read_loop_transport_owned(
             return;
         }
         PortTunnelFrame frame = make_empty_frame(PortTunnelFrameType::UdpDatagram, stream_id);
-        frame.meta = Json{
-            {"peer", printable_port_forward_endpoint(reinterpret_cast<sockaddr*>(&peer_address), peer_len)}
-        }.dump();
+        frame.meta =
+            Json{{"peer", printable_port_forward_endpoint(reinterpret_cast<sockaddr*>(&peer_address), peer_len)}}
+                .dump();
         frame.data.assign(buffer.begin(), buffer.begin() + received);
         if (!send_data_frame_or_drop_on_limit(frame)) {
             continue;
@@ -273,25 +232,16 @@ void PortTunnelConnection::udp_read_loop_transport_owned(
 void PortTunnelConnection::udp_datagram(const PortTunnelFrame& frame) {
     const PortTunnelMode mode = current_mode();
     if (mode == PortTunnelMode::Listen) {
-        require_mode(
-            PortTunnelMode::Listen,
-            PortTunnelProtocol::Udp,
-            "udp datagram requires an open udp tunnel"
-        );
+        require_mode(PortTunnelMode::Listen, PortTunnelProtocol::Udp, "udp datagram requires an open udp tunnel");
     } else {
-        require_mode(
-            PortTunnelMode::Connect,
-            PortTunnelProtocol::Udp,
-            "udp datagram requires an open udp tunnel"
-        );
+        require_mode(PortTunnelMode::Connect, PortTunnelProtocol::Udp, "udp datagram requires an open udp tunnel");
     }
 
     std::shared_ptr<TunnelUdpSocket> socket_value;
     if (session_mode_active()) {
         std::shared_ptr<PortTunnelSession> session = current_session();
         BasicLockGuard lock(session->mutex);
-        std::map<uint32_t, std::shared_ptr<TunnelUdpSocket> >::iterator it =
-            session->udp_binds.find(frame.stream_id);
+        std::map<uint32_t, std::shared_ptr<TunnelUdpSocket>>::iterator it = session->udp_binds.find(frame.stream_id);
         if (it == session->udp_binds.end()) {
             throw PortForwardError(400, "unknown_port_bind", "unknown tunnel udp stream");
         }
@@ -305,14 +255,12 @@ void PortTunnelConnection::udp_datagram(const PortTunnelFrame& frame) {
     const std::string peer = frame_meta_string(frame, "peer");
     socklen_t peer_len = 0;
     const sockaddr_storage peer_address = parse_port_forward_peer(peer, &peer_len);
-    const int sent = sendto(
-        socket_value->socket.get(),
-        reinterpret_cast<const char*>(frame.data.data()),
-        static_cast<int>(frame.data.size()),
-        0,
-        reinterpret_cast<const sockaddr*>(&peer_address),
-        peer_len
-    );
+    const int sent = sendto(socket_value->socket.get(),
+                            reinterpret_cast<const char*>(frame.data.data()),
+                            static_cast<int>(frame.data.size()),
+                            0,
+                            reinterpret_cast<const sockaddr*>(&peer_address),
+                            peer_len);
     if (sent < 0 || static_cast<std::size_t>(sent) != frame.data.size()) {
         throw PortForwardError(400, "port_write_failed", socket_error_message("sendto"));
     }

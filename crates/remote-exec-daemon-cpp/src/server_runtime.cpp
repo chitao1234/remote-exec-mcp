@@ -6,9 +6,9 @@
 #include <stdexcept>
 
 #ifdef _WIN32
+#include <windows.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <windows.h>
 #else
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -62,19 +62,16 @@ void connection_worker_main(SOCKET socket, void* context) {
     handle_client(runtime->state(), std::move(client));
 }
 
-}  // namespace
+} // namespace
 
 ServerRuntime::ServerRuntime(const DaemonConfig& config)
-    : connections_(config.max_open_sessions),
-      shutting_down_(false)
+    : connections_(config.max_open_sessions), shutting_down_(false)
 #ifdef _WIN32
       ,
-      accept_thread_(NULL),
-      maintenance_thread_(NULL)
+      accept_thread_(NULL), maintenance_thread_(NULL)
 #else
       ,
-      accept_thread_(),
-      maintenance_thread_()
+      accept_thread_(), maintenance_thread_()
 #endif
 {
     state_.config = config;
@@ -85,8 +82,7 @@ ServerRuntime::ServerRuntime(const DaemonConfig& config)
     if (state_.sandbox_enabled) {
         state_.sandbox = compile_filesystem_sandbox(host_path_policy(), config.sandbox);
     }
-    state_.port_tunnel_service =
-        create_port_tunnel_service(config.port_forward_limits);
+    state_.port_tunnel_service = create_port_tunnel_service(config.port_forward_limits);
 }
 
 ServerRuntime::~ServerRuntime() {
@@ -118,8 +114,7 @@ void ServerRuntime::start_accept_loop() {
         join();
         throw std::runtime_error("_beginthreadex failed");
     }
-    maintenance_thread_ =
-        begin_win32_thread(&ServerRuntime::maintenance_thread_entry, this);
+    maintenance_thread_ = begin_win32_thread(&ServerRuntime::maintenance_thread_entry, this);
     if (maintenance_thread_ == NULL) {
         request_shutdown();
         join();
