@@ -34,7 +34,6 @@ impl BrokerTool {
         }
     }
 
-    #[cfg(test)]
     pub(crate) const fn name(self) -> &'static str {
         match self {
             Self::ListTargets => "list_targets",

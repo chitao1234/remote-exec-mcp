@@ -3,6 +3,7 @@ use futures_util::TryStreamExt;
 use remote_exec_proto::port_tunnel::{
     TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, UPGRADE_TOKEN, write_preface,
 };
+use remote_exec_proto::request_id::REQUEST_ID_HEADER;
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
     PatchApplyRequest, PatchApplyResponse, RpcErrorBody, RpcErrorCode, TargetInfoResponse,
@@ -558,7 +559,11 @@ impl DaemonClient {
     }
 
     fn request(&self, path: &str) -> reqwest::RequestBuilder {
-        let mut request = self.client.post(format!("{}{}", self.base_url, path));
+        let request_id = crate::request_context::current_request_id().unwrap_or_default();
+        let mut request = self
+            .client
+            .post(format!("{}{}", self.base_url, path))
+            .header(REQUEST_ID_HEADER, request_id.as_str());
         if let Some(authorization) = &self.authorization {
             request = request.header(AUTHORIZATION, authorization.clone());
         }
@@ -638,6 +643,8 @@ fn decode_rpc_error_body(status: reqwest::StatusCode, body: String) -> DaemonCli
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
+
+    use remote_exec_proto::request_id::{REQUEST_ID_HEADER, RequestId};
 
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -758,6 +765,42 @@ mod tests {
     }
 
     #[test]
+    fn daemon_request_includes_generated_request_id_header() {
+        let request = test_client(None)
+            .request("/v1/target-info")
+            .build()
+            .unwrap();
+
+        let request_id = request
+            .headers()
+            .get(REQUEST_ID_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .expect("request id header should be present");
+        assert!(RequestId::from_header_value(request_id).is_some());
+    }
+
+    #[tokio::test]
+    async fn daemon_request_reuses_current_request_context_id() {
+        let context = crate::request_context::RequestContext::new("test_tool");
+        let expected_request_id = context.request_id().to_string();
+        let request = crate::request_context::scope(context, async {
+            test_client(None)
+                .request("/v1/target-info")
+                .build()
+                .unwrap()
+        })
+        .await;
+
+        assert_eq!(
+            request
+                .headers()
+                .get(REQUEST_ID_HEADER)
+                .and_then(|value| value.to_str().ok()),
+            Some(expected_request_id.as_str())
+        );
+    }
+
+    #[test]
     fn daemon_request_still_applies_authorization_header() {
         let request = test_client(Some(HeaderValue::from_static("Bearer shared-secret")))
             .request("/v1/target-info")
@@ -832,6 +875,7 @@ mod tests {
                     .to_ascii_lowercase()
                     .contains("x-remote-exec-port-tunnel-version: 4")
             );
+            assert!(request.to_ascii_lowercase().contains("x-request-id: req_"));
 
             stream
                 .write_all(

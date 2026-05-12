@@ -8,6 +8,7 @@ pub mod local_transfer;
 pub mod logging;
 pub mod mcp_server;
 pub mod port_forward;
+pub(crate) mod request_context;
 pub mod session_store;
 mod startup;
 mod state;

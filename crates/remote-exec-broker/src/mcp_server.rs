@@ -7,7 +7,11 @@ use rmcp::{
     tool, tool_handler, tool_router,
     transport::{StreamableHttpServerConfig, StreamableHttpService},
 };
+use std::future::Future;
 use tokio_util::sync::CancellationToken;
+
+use crate::request_context::RequestContext;
+use crate::tools::registry::BrokerTool;
 
 pub struct ToolCallOutput {
     pub content: Vec<Content>,
@@ -78,6 +82,22 @@ impl BrokerServer {
             Err(err) => format_tool_error(err),
         }
     }
+
+    async fn finish_scoped_tool_call<F>(&self, tool: BrokerTool, future: F) -> CallToolResult
+    where
+        F: Future<Output = anyhow::Result<ToolCallOutput>>,
+    {
+        let context = RequestContext::new(tool.name());
+        crate::request_context::scope(context.clone(), async {
+            tracing::debug!(
+                request_id = %context.request_id(),
+                tool = context.tool(),
+                "broker tool request context created"
+            );
+            self.finish_tool_call(future.await)
+        })
+        .await
+    }
 }
 
 #[tool_router]
@@ -91,7 +111,12 @@ impl BrokerServer {
         &self,
         Parameters(input): Parameters<remote_exec_proto::public::ListTargetsInput>,
     ) -> Result<CallToolResult, McpError> {
-        Ok(self.finish_tool_call(crate::tools::targets::list_targets(&self.state, input).await))
+        Ok(self
+            .finish_scoped_tool_call(
+                BrokerTool::ListTargets,
+                crate::tools::targets::list_targets(&self.state, input),
+            )
+            .await)
     }
 
     #[tool(
@@ -102,7 +127,12 @@ impl BrokerServer {
         &self,
         Parameters(input): Parameters<remote_exec_proto::public::ExecCommandInput>,
     ) -> Result<CallToolResult, McpError> {
-        Ok(self.finish_tool_call(crate::tools::exec::exec_command(&self.state, input).await))
+        Ok(self
+            .finish_scoped_tool_call(
+                BrokerTool::ExecCommand,
+                crate::tools::exec::exec_command(&self.state, input),
+            )
+            .await)
     }
 
     #[tool(
@@ -113,7 +143,12 @@ impl BrokerServer {
         &self,
         Parameters(input): Parameters<remote_exec_proto::public::WriteStdinInput>,
     ) -> Result<CallToolResult, McpError> {
-        Ok(self.finish_tool_call(crate::tools::exec::write_stdin(&self.state, input).await))
+        Ok(self
+            .finish_scoped_tool_call(
+                BrokerTool::WriteStdin,
+                crate::tools::exec::write_stdin(&self.state, input),
+            )
+            .await)
     }
 
     #[tool(
@@ -124,7 +159,12 @@ impl BrokerServer {
         &self,
         Parameters(input): Parameters<remote_exec_proto::public::ApplyPatchInput>,
     ) -> Result<CallToolResult, McpError> {
-        Ok(self.finish_tool_call(crate::tools::patch::apply_patch(&self.state, input).await))
+        Ok(self
+            .finish_scoped_tool_call(
+                BrokerTool::ApplyPatch,
+                crate::tools::patch::apply_patch(&self.state, input),
+            )
+            .await)
     }
 
     #[tool(
@@ -136,7 +176,12 @@ impl BrokerServer {
         &self,
         Parameters(input): Parameters<remote_exec_proto::public::ViewImageInput>,
     ) -> Result<CallToolResult, McpError> {
-        Ok(self.finish_tool_call(crate::tools::image::view_image(&self.state, input).await))
+        Ok(self
+            .finish_scoped_tool_call(
+                BrokerTool::ViewImage,
+                crate::tools::image::view_image(&self.state, input),
+            )
+            .await)
     }
 
     #[tool(
@@ -147,7 +192,12 @@ impl BrokerServer {
         &self,
         Parameters(input): Parameters<remote_exec_proto::public::TransferFilesInput>,
     ) -> Result<CallToolResult, McpError> {
-        Ok(self.finish_tool_call(crate::tools::transfer::transfer_files(&self.state, input).await))
+        Ok(self
+            .finish_scoped_tool_call(
+                BrokerTool::TransferFiles,
+                crate::tools::transfer::transfer_files(&self.state, input),
+            )
+            .await)
     }
 
     #[tool(
@@ -159,7 +209,11 @@ impl BrokerServer {
         Parameters(input): Parameters<remote_exec_proto::public::ForwardPortsInput>,
     ) -> Result<CallToolResult, McpError> {
         Ok(self
-            .finish_tool_call(crate::tools::port_forward::forward_ports(&self.state, input).await))
+            .finish_scoped_tool_call(
+                BrokerTool::ForwardPorts,
+                crate::tools::port_forward::forward_ports(&self.state, input),
+            )
+            .await)
     }
 }
 

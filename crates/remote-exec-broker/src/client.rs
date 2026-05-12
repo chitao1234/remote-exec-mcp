@@ -172,6 +172,11 @@ async fn call_direct_tool(
     name: &str,
     arguments: Map<String, Value>,
 ) -> CallToolResult {
+    let Some(tool) = BrokerTool::from_name(name) else {
+        return crate::mcp_server::tool_error_result(format!("unknown tool `{name}`"));
+    };
+    let context = crate::request_context::RequestContext::new(tool.name());
+
     macro_rules! invoke_tool {
         ($input:ty, $handler:path) => {{
             let input = match deserialize_tool_arguments::<$input>(name, arguments) {
@@ -179,36 +184,30 @@ async fn call_direct_tool(
                 Err(err) => return crate::mcp_server::tool_error_result(err.to_string()),
             };
 
-            match $handler(state, input).await {
-                Ok(output) => output.into_call_tool_result(!state.disable_structured_content),
-                Err(err) => crate::mcp_server::format_tool_error(err),
-            }
+            crate::request_context::scope(context, async {
+                match $handler(state, input).await {
+                    Ok(output) => output.into_call_tool_result(!state.disable_structured_content),
+                    Err(err) => crate::mcp_server::format_tool_error(err),
+                }
+            })
+            .await
         }};
     }
 
-    match BrokerTool::from_name(name) {
-        Some(BrokerTool::ListTargets) => {
+    match tool {
+        BrokerTool::ListTargets => {
             invoke_tool!(ListTargetsInput, crate::tools::targets::list_targets)
         }
-        Some(BrokerTool::ExecCommand) => {
-            invoke_tool!(ExecCommandInput, crate::tools::exec::exec_command)
-        }
-        Some(BrokerTool::WriteStdin) => {
-            invoke_tool!(WriteStdinInput, crate::tools::exec::write_stdin)
-        }
-        Some(BrokerTool::ApplyPatch) => {
-            invoke_tool!(ApplyPatchInput, crate::tools::patch::apply_patch)
-        }
-        Some(BrokerTool::ViewImage) => {
-            invoke_tool!(ViewImageInput, crate::tools::image::view_image)
-        }
-        Some(BrokerTool::TransferFiles) => {
+        BrokerTool::ExecCommand => invoke_tool!(ExecCommandInput, crate::tools::exec::exec_command),
+        BrokerTool::WriteStdin => invoke_tool!(WriteStdinInput, crate::tools::exec::write_stdin),
+        BrokerTool::ApplyPatch => invoke_tool!(ApplyPatchInput, crate::tools::patch::apply_patch),
+        BrokerTool::ViewImage => invoke_tool!(ViewImageInput, crate::tools::image::view_image),
+        BrokerTool::TransferFiles => {
             invoke_tool!(TransferFilesInput, crate::tools::transfer::transfer_files)
         }
-        Some(BrokerTool::ForwardPorts) => {
+        BrokerTool::ForwardPorts => {
             invoke_tool!(ForwardPortsInput, crate::tools::port_forward::forward_ports)
         }
-        None => crate::mcp_server::tool_error_result(format!("unknown tool `{name}`")),
     }
 }
 
