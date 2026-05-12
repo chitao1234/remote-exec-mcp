@@ -58,7 +58,8 @@ drops daemon-local command sessions and forwarded sockets.
 - `remote-exec-host`: shared Rust host runtime reused by the Rust daemon and the
   broker-host `local` target.
 - `remote-exec-daemon-cpp`: standalone plain-HTTP C++ daemon with native POSIX,
-  MinGW Windows XP-compatible, and MSVC v141_xp-compatible build paths.
+  MinGW Windows XP-compatible, host-native MSVC, and MSVC v141_xp-compatible
+  build paths.
 - `remote-exec-proto`: public MCP schemas, broker-daemon RPC schemas, path and
   sandbox helpers, and port-forward protocol types.
 - `remote-exec-admin`: administrative CLI for certificate/bootstrap workflows.
@@ -440,6 +441,12 @@ make -C crates/remote-exec-daemon-cpp check-windows-xp
 bmake -C crates/remote-exec-daemon-cpp check-posix
 ```
 
+From an x86 Visual Studio developer prompt:
+
+```bat
+nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-native
+```
+
 From an x86 Visual Studio developer prompt with the v141_xp-capable toolset:
 
 ```bat
@@ -480,6 +487,8 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 make -C crates/remote-exec-daemon-cpp check-posix
 make -C crates/remote-exec-daemon-cpp check-windows-xp
+# From an x86 Visual Studio developer prompt:
+nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-native
 # From an x86 Visual Studio developer prompt with the v141_xp-capable toolset:
 nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-xp
 ```
