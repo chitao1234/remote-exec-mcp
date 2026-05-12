@@ -5,6 +5,8 @@ mod side;
 mod store;
 mod supervisor;
 mod tcp_bridge;
+#[cfg(test)]
+mod test_support;
 mod timings;
 mod tunnel;
 mod udp_bridge;

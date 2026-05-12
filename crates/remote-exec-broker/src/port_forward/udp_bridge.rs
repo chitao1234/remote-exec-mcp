@@ -276,140 +276,21 @@ async fn sweep_idle_udp_connectors(connect_tunnel: &Arc<PortTunnel>, connectors:
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
-    use std::pin::Pin;
     use std::sync::Arc;
-    use std::sync::Mutex as StdMutex;
-    use std::task::{Context as TaskContext, Poll, Waker};
     use std::time::{Duration, Instant};
 
-    use remote_exec_proto::port_tunnel::{
-        ForwardDropKind, ForwardDropMeta, HEADER_LEN, write_frame,
-    };
-    use remote_exec_proto::public::{
-        ForwardPortEntry, ForwardPortLimitSummary, ForwardPortProtocol as PublicForwardPortProtocol,
-    };
+    use remote_exec_proto::port_tunnel::{ForwardDropKind, ForwardDropMeta, write_frame};
+    use remote_exec_proto::public::ForwardPortProtocol as PublicForwardPortProtocol;
     use remote_exec_proto::rpc::RpcErrorCode;
-    use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
     use tokio_util::sync::CancellationToken;
 
     use super::super::side::SideHandle;
     use super::super::supervisor::{ForwardRuntime, ListenSessionControl};
+    use super::super::test_support::{
+        ScriptedTunnelIo, filter_one, test_record, wait_until_send_fails,
+    };
     use super::super::tunnel::PortTunnel;
     use super::*;
-
-    #[derive(Clone, Default)]
-    struct ScriptedTunnelIo {
-        state: Arc<StdMutex<ScriptedTunnelState>>,
-    }
-
-    #[derive(Default)]
-    struct ScriptedTunnelState {
-        read_bytes: VecDeque<u8>,
-        written_bytes: Vec<u8>,
-        fail_writes: bool,
-        read_waker: Option<Waker>,
-    }
-
-    impl ScriptedTunnelIo {
-        fn fail_writes(&self) {
-            self.state.lock().unwrap().fail_writes = true;
-        }
-
-        async fn wait_for_written_frame(&self, frame_type: FrameType, stream_id: u32) {
-            tokio::time::timeout(Duration::from_secs(1), async {
-                loop {
-                    if self.pop_matching_written_frame(frame_type, stream_id) {
-                        return;
-                    }
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .expect("expected tunnel frame should be written");
-        }
-
-        fn pop_matching_written_frame(&self, frame_type: FrameType, stream_id: u32) -> bool {
-            let mut state = self.state.lock().unwrap();
-            if state.written_bytes.len() < HEADER_LEN {
-                return false;
-            }
-            let meta_len = u32::from_be_bytes(
-                state.written_bytes[8..12]
-                    .try_into()
-                    .expect("header slice length"),
-            ) as usize;
-            let data_len = u32::from_be_bytes(
-                state.written_bytes[12..16]
-                    .try_into()
-                    .expect("header slice length"),
-            ) as usize;
-            let frame_len = HEADER_LEN + meta_len + data_len;
-            if state.written_bytes.len() < frame_len {
-                return false;
-            }
-            let written_frame_type = state.written_bytes[0];
-            let written_stream_id = u32::from_be_bytes(
-                state.written_bytes[4..8]
-                    .try_into()
-                    .expect("header slice length"),
-            );
-            assert_eq!(written_frame_type, frame_type as u8);
-            assert_eq!(written_stream_id, stream_id);
-            state.written_bytes.drain(..frame_len);
-            true
-        }
-    }
-
-    impl AsyncRead for ScriptedTunnelIo {
-        fn poll_read(
-            self: Pin<&mut Self>,
-            cx: &mut TaskContext<'_>,
-            buf: &mut ReadBuf<'_>,
-        ) -> Poll<std::io::Result<()>> {
-            let mut state = self.state.lock().unwrap();
-            if state.read_bytes.is_empty() {
-                state.read_waker = Some(cx.waker().clone());
-                return Poll::Pending;
-            }
-            let read = buf.remaining().min(state.read_bytes.len());
-            let bytes: Vec<u8> = state.read_bytes.drain(..read).collect();
-            buf.put_slice(&bytes);
-            Poll::Ready(Ok(()))
-        }
-    }
-
-    impl AsyncWrite for ScriptedTunnelIo {
-        fn poll_write(
-            self: Pin<&mut Self>,
-            _cx: &mut TaskContext<'_>,
-            buf: &[u8],
-        ) -> Poll<std::io::Result<usize>> {
-            let mut state = self.state.lock().unwrap();
-            if state.fail_writes {
-                return Poll::Ready(Err(std::io::Error::new(
-                    std::io::ErrorKind::BrokenPipe,
-                    "forced closed writer",
-                )));
-            }
-            state.written_bytes.extend_from_slice(buf);
-            Poll::Ready(Ok(buf.len()))
-        }
-
-        fn poll_flush(
-            self: Pin<&mut Self>,
-            _cx: &mut TaskContext<'_>,
-        ) -> Poll<std::io::Result<()>> {
-            Poll::Ready(Ok(()))
-        }
-
-        fn poll_shutdown(
-            self: Pin<&mut Self>,
-            _cx: &mut TaskContext<'_>,
-        ) -> Poll<std::io::Result<()>> {
-            Poll::Ready(Ok(()))
-        }
-    }
 
     #[tokio::test]
     async fn udp_connector_limit_refuses_new_peer_without_evicting_existing_peer() {
@@ -757,63 +638,5 @@ mod tests {
             initial_connect_tunnel: connect_tunnel,
             cancel: CancellationToken::new(),
         }
-    }
-
-    fn filter_one(forward_id: &str) -> super::super::store::PortForwardFilter {
-        super::super::store::PortForwardFilter {
-            listen_side: None,
-            connect_side: None,
-            forward_ids: vec![forward_id.to_string()],
-        }
-    }
-
-    fn test_record(
-        runtime: &ForwardRuntime,
-        listen_endpoint: &str,
-    ) -> super::super::store::PortForwardRecord {
-        super::super::store::PortForwardRecord::new(
-            ForwardPortEntry::new_open(
-                runtime.forward_id.clone(),
-                runtime.listen_side.name().to_string(),
-                listen_endpoint.to_string(),
-                runtime.connect_side.name().to_string(),
-                runtime.connect_endpoint.clone(),
-                runtime.protocol,
-                ForwardPortLimitSummary {
-                    max_active_tcp_streams: runtime.max_active_tcp_streams_per_forward,
-                    max_udp_peers: runtime.max_udp_peers_per_forward as u64,
-                    max_pending_tcp_bytes_per_stream: runtime.max_pending_tcp_bytes_per_stream
-                        as u64,
-                    max_pending_tcp_bytes_per_forward: runtime.max_pending_tcp_bytes_per_forward
-                        as u64,
-                    max_tunnel_queued_bytes: runtime.max_tunnel_queued_bytes as u64,
-                    max_reconnecting_forwards: runtime.max_reconnecting_forwards,
-                },
-            ),
-            runtime.listen_session.clone(),
-            runtime.cancel.clone(),
-        )
-    }
-
-    async fn wait_until_send_fails(tunnel: &PortTunnel) {
-        tokio::time::timeout(Duration::from_secs(1), async {
-            loop {
-                let result = tunnel
-                    .send(Frame {
-                        frame_type: FrameType::Close,
-                        flags: 0,
-                        stream_id: 99,
-                        meta: Vec::new(),
-                        data: Vec::new(),
-                    })
-                    .await;
-                if result.is_err() {
-                    return;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("connect tunnel writer should close after forced write failure");
     }
 }

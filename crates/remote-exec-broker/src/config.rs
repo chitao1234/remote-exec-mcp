@@ -393,6 +393,8 @@ mod tests {
     #[cfg(windows)]
     use std::path::PathBuf;
 
+    use crate::state::LOCAL_TARGET_NAME;
+
     use super::{BrokerConfig, McpServerConfig, SseInterval};
 
     fn valid_target_config(name: &str) -> String {
