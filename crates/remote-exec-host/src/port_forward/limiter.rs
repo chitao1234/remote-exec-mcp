@@ -7,8 +7,6 @@ use remote_exec_proto::rpc::RpcErrorCode;
 use crate::{HostPortForwardLimits, HostRpcError};
 
 use super::error::rpc_error;
-use super::queued_frame_charge;
-
 #[derive(Debug)]
 pub struct PortForwardLimiter {
     limits: HostPortForwardLimits,
@@ -98,7 +96,7 @@ impl PortForwardLimiter {
         self: &Arc<Self>,
         frame: &Frame,
     ) -> Result<Option<PortForwardPermit>, HostRpcError> {
-        let charge = queued_frame_charge(frame);
+        let charge = frame.data_plane_charge();
         if charge == 0 {
             return Ok(None);
         }

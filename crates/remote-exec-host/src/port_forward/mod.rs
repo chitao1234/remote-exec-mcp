@@ -47,14 +47,6 @@ impl TunnelSender {
     }
 }
 
-fn queued_frame_charge(frame: &Frame) -> usize {
-    if !frame.is_stream_frame() || frame.data.is_empty() {
-        0
-    } else {
-        frame.wire_len()
-    }
-}
-
 async fn send_forward_drop_report(
     tx: &TunnelSender,
     stream_id: u32,

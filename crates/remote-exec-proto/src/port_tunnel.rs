@@ -205,6 +205,18 @@ impl Frame {
         self.stream_id != 0
     }
 
+    pub fn is_data_plane_frame(&self) -> bool {
+        self.is_stream_frame() && !self.data.is_empty()
+    }
+
+    pub fn data_plane_charge(&self) -> usize {
+        if self.is_data_plane_frame() {
+            self.wire_len()
+        } else {
+            0
+        }
+    }
+
     pub fn wire_len(&self) -> usize {
         HEADER_LEN
             .saturating_add(self.meta.len())
@@ -536,6 +548,19 @@ mod tests {
             data: vec![4, 5],
         };
         assert!(stream.is_stream_frame());
+        assert!(stream.is_data_plane_frame());
+        assert_eq!(stream.data_plane_charge(), HEADER_LEN + 5);
         assert_eq!(stream.wire_len(), HEADER_LEN + 5);
+
+        let stream_control = Frame {
+            frame_type: FrameType::TcpEof,
+            flags: 0,
+            stream_id: 3,
+            meta: vec![9],
+            data: Vec::new(),
+        };
+        assert!(stream_control.is_stream_frame());
+        assert!(!stream_control.is_data_plane_frame());
+        assert_eq!(stream_control.data_plane_charge(), 0);
     }
 }

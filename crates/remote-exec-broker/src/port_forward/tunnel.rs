@@ -177,7 +177,7 @@ impl PortTunnel {
     }
 
     pub async fn send(&self, frame: Frame) -> anyhow::Result<()> {
-        let charge = data_frame_charge(&frame);
+        let charge = frame.data_plane_charge();
         if charge > self.max_queued_bytes {
             return Err(backpressure_error());
         }
@@ -330,14 +330,6 @@ pub(super) fn is_backpressure_error(err: &anyhow::Error) -> bool {
 pub(super) fn is_recoverable_pressure_tunnel_error(meta: &TunnelErrorMeta) -> bool {
     meta.code.as_deref().and_then(RpcErrorCode::from_wire_value)
         == Some(RpcErrorCode::PortTunnelLimitExceeded)
-}
-
-fn data_frame_charge(frame: &Frame) -> usize {
-    if !frame.is_stream_frame() {
-        0
-    } else {
-        frame.wire_len()
-    }
 }
 
 fn reserve_queued_bytes(
