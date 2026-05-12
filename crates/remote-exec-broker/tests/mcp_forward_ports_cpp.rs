@@ -2,13 +2,14 @@
 mod support;
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Once};
 use std::time::Duration;
 
 use remote_exec_broker::client::{Connection, RemoteExecClient};
 #[cfg(unix)]
 use remote_exec_proto::public::{ExecCommandInput, WriteStdinInput};
 use remote_exec_proto::public::{ForwardPortProtocol, ForwardPortsInput};
+use std::io::Write;
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -16,6 +17,7 @@ use tokio::sync::{Mutex, oneshot};
 
 const CPP_READY_TIMEOUT: Duration = Duration::from_secs(20);
 const CPP_READY_POLL: Duration = Duration::from_millis(50);
+static MISSING_CPP_DAEMON_WARNING: Once = Once::new();
 
 fn toml_string(value: &str) -> String {
     toml::Value::String(value.to_string()).to_string()
@@ -567,10 +569,7 @@ impl CppDaemonBrokerFixture {
         let daemon_binary = match cpp_daemon_binary() {
             Some(path) => path,
             None => {
-                eprintln!(
-                    "skipping C++ daemon integration test; {}",
-                    cpp_daemon_skip_message()
-                );
+                warn_missing_cpp_daemon_executable();
                 return None;
             }
         };
@@ -713,6 +712,36 @@ fn cpp_daemon_skip_message() -> String {
     )
 }
 
+fn warn_missing_cpp_daemon_executable() {
+    MISSING_CPP_DAEMON_WARNING.call_once(|| {
+        let env_path = std::env::var_os("REMOTE_EXEC_CPP_DAEMON")
+            .map(PathBuf::from)
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<not set>".to_string());
+        let default = cpp_daemon_default_binary();
+        let message = format!(
+            "\n\
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\
+!!! WARNING: SKIPPING REAL C++ DAEMON INTEGRATION TESTS                 !!!\n\
+!!!                                                                        !!!\n\
+!!! The remote-exec-daemon-cpp executable is not available. These Rust     !!!\n\
+!!! integration tests are being skipped instead of exercising the real     !!!\n\
+!!! C++ daemon.                                                           !!!\n\
+!!!                                                                        !!!\n\
+!!! REMOTE_EXEC_CPP_DAEMON = {env_path}\n\
+!!! default checked path     = {default_path}\n\
+!!!                                                                        !!!\n\
+!!! {skip_message}\n\
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n",
+            default_path = default.display(),
+            skip_message = cpp_daemon_skip_message()
+        );
+        let mut stderr = std::io::stderr().lock();
+        let _ = stderr.write_all(message.as_bytes());
+        let _ = stderr.flush();
+    });
+}
+
 impl Drop for CppDaemonBrokerFixture {
     fn drop(&mut self) {
         self.proxy.stop();
@@ -774,10 +803,7 @@ impl CrashableCppDaemonBrokerFixture {
         let daemon_binary = match cpp_daemon_binary() {
             Some(path) => path,
             None => {
-                eprintln!(
-                    "skipping C++ daemon integration test; {}",
-                    cpp_daemon_skip_message()
-                );
+                warn_missing_cpp_daemon_executable();
                 return None;
             }
         };
