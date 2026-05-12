@@ -69,7 +69,14 @@ HttpResponse handle_patch_apply(AppState& state, const HttpRequest& request) {
         std::ostringstream summary;
         summary << "patch/apply patch_len=" << patch_text.size();
         log_message(LOG_INFO, "server", summary.str());
-        write_json(response, Json{{"output", result.output}});
+        write_json(
+            response,
+            Json{
+                {"output", result.output},
+                {"daemon_instance_id", state.daemon_instance_id},
+                {"updated_paths", result.updated_paths},
+            }
+        );
     } catch (const SandboxError& ex) {
         log_message(LOG_WARN, "server", std::string("patch/apply denied: ") + ex.what());
         write_rpc_error(response, 400, "sandbox_denied", ex.what());

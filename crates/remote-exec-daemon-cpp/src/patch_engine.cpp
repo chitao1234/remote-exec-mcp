@@ -575,5 +575,5 @@ PatchApplyResult apply_patch(
     for (std::size_t i = 0; i < summary.size(); ++i) {
         out << summary[i] << '\n';
     }
-    return PatchApplyResult{out.str()};
+    return PatchApplyResult{out.str(), summary};
 }

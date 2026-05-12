@@ -44,6 +44,8 @@ int main() {
 
     PatchApplyResult update_result = apply_patch(root.string(), update_patch);
     assert(update_result.output.find("M hello.txt") != std::string::npos);
+    assert(update_result.updated_paths.size() == 1);
+    assert(update_result.updated_paths[0] == "M hello.txt");
     assert(read_text(root / "hello.txt") == "hello xp\n");
 
     write_text(root / "crlf.txt", "hello\r\nworld\r\n");

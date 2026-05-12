@@ -36,6 +36,13 @@ async fn add_file_overwrites_existing_content() {
         .await;
 
     assert!(response.output.contains("Success."));
+    assert!(
+        response
+            .daemon_instance_id
+            .as_deref()
+            .is_some_and(|id| !id.is_empty())
+    );
+    assert_eq!(response.updated_paths, vec!["A demo.txt"]);
     assert_eq!(tokio::fs::read_to_string(path).await.unwrap(), "new\n");
 }
 

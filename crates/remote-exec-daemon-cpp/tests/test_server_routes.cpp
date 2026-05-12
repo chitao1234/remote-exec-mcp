@@ -360,6 +360,30 @@ static void assert_image_routes(AppState& state, const fs::path& root) {
 #endif
 }
 
+static void assert_patch_route_audit_fields(AppState& state, const fs::path& root) {
+    const fs::path patch_file = root / "patch-audit.txt";
+    const std::string patch_text =
+        "*** Begin Patch\n"
+        "*** Add File: patch-audit.txt\n"
+        "+audit\n"
+        "*** End Patch\n";
+
+    const HttpResponse response = route_request(
+        state,
+        json_request(
+            "/v1/patch/apply",
+            Json{{"workdir", root.string()}, {"patch", patch_text}}
+        )
+    );
+    assert(response.status == 200);
+    const Json body = Json::parse(response.body);
+    assert(body.at("output").get<std::string>().find("A patch-audit.txt") != std::string::npos);
+    assert(body.at("daemon_instance_id").get<std::string>() == state.daemon_instance_id);
+    assert(body.at("updated_paths").size() == 1);
+    assert(body.at("updated_paths")[0].get<std::string>() == "A patch-audit.txt");
+    assert(read_text_file(patch_file) == "audit\n");
+}
+
 static void assert_transfer_path_info_routes(AppState& state, const fs::path& root) {
     const fs::path source_file = root / "transfer-source.txt";
     write_text_file(source_file, "route transfer payload");
@@ -975,6 +999,7 @@ int main() {
     assert_target_info_and_basic_helpers(state);
     assert_transfer_export_errors(state, root);
     assert_image_routes(state, root);
+    assert_patch_route_audit_fields(state, root);
     assert_transfer_path_info_routes(state, root);
     const std::string export_body = assert_transfer_export_and_exclude_routes(state, root);
     assert_transfer_import_routes(state, root, export_body);

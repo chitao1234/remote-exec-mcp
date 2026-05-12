@@ -43,6 +43,8 @@ pub async fn apply_patch_local(
             "Success. Updated the following files:\n{}\n",
             summary.join("\n")
         ),
+        daemon_instance_id: Some(state.daemon_instance_id.clone()),
+        updated_paths: summary,
     })
 }
 

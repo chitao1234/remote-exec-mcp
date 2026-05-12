@@ -817,8 +817,11 @@ async fn patch_apply(
         ));
     }
 
+    let daemon_instance_id = state.daemon_instance_id.lock().await.clone();
     Ok(Json(PatchApplyResponse {
         output: "Success. Updated the following files:\nA hello.txt\n".to_string(),
+        daemon_instance_id: Some(daemon_instance_id),
+        updated_paths: vec!["A hello.txt".to_string()],
     }))
 }
 

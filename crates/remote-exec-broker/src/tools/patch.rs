@@ -1,5 +1,5 @@
 use remote_exec_proto::public::ApplyPatchInput;
-use remote_exec_proto::rpc::PatchApplyRequest;
+use remote_exec_proto::rpc::{PatchApplyRequest, PatchApplyResponse};
 
 use crate::mcp_server::ToolCallOutput;
 
@@ -13,7 +13,28 @@ pub async fn forward_patch(
     let response = target
         .patch_apply_checked(target_name, &PatchApplyRequest { patch, workdir })
         .await?;
+    log_patch_audit(target_name, &response);
     Ok(response.output)
+}
+
+fn log_patch_audit(target_name: &str, response: &PatchApplyResponse) {
+    let preview = if response.updated_paths.is_empty() {
+        String::new()
+    } else {
+        crate::logging::preview_text(&response.updated_paths.join(", "), 240)
+    };
+    let tool = crate::request_context::current()
+        .map(|context| context.tool())
+        .unwrap_or("apply_patch");
+
+    tracing::info!(
+        tool,
+        target = %target_name,
+        daemon_instance_id = response.daemon_instance_id.as_deref().unwrap_or("-"),
+        updated_path_count = response.updated_paths.len(),
+        updated_path_preview = %preview,
+        "patch apply audit"
+    );
 }
 
 pub async fn apply_patch(
