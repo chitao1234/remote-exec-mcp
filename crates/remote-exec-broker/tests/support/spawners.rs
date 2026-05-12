@@ -85,10 +85,14 @@ fn toml_string(value: &str) -> String {
     toml::Value::String(value.to_string()).to_string()
 }
 
-fn allocate_unused_loopback_addr() -> std::net::SocketAddr {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+async fn spawn_unavailable_plain_http_target() -> std::net::SocketAddr {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    drop(listener);
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            drop(stream);
+        }
+    });
     addr
 }
 
@@ -656,14 +660,15 @@ pub async fn spawn_broker_with_plain_http_stub_daemon() -> BrokerFixture {
 pub async fn spawn_broker_with_reverse_ordered_targets() -> BrokerFixture {
     let tempdir = tempfile::tempdir().unwrap();
     let (live_addr, stub_state) = spawn_plain_http_stub_daemon().await;
-    let dead_addr = allocate_unused_loopback_addr();
+    // Keep builder-b structurally unavailable without guessing a future free port.
+    let unavailable_addr = spawn_unavailable_plain_http_target().await;
     let broker_config = tempdir.path().join("broker.toml");
     write_broker_config(
         &broker_config,
         &[
             BrokerConfigTarget {
                 name: "builder-b",
-                addr: dead_addr,
+                addr: unavailable_addr,
                 transport: BrokerTargetTransport::Http,
                 extra_config: None,
             },
@@ -692,7 +697,8 @@ pub async fn spawn_broker_with_reverse_ordered_targets() -> BrokerFixture {
 pub async fn spawn_broker_with_live_and_dead_targets() -> BrokerFixture {
     let tempdir = tempfile::tempdir().unwrap();
     let (live_addr, stub_state) = spawn_plain_http_stub_daemon().await;
-    let dead_addr = allocate_unused_loopback_addr();
+    // Keep builder-b structurally unavailable without guessing a future free port.
+    let unavailable_addr = spawn_unavailable_plain_http_target().await;
     let broker_config = tempdir.path().join("broker.toml");
     write_broker_config(
         &broker_config,
@@ -705,7 +711,7 @@ pub async fn spawn_broker_with_live_and_dead_targets() -> BrokerFixture {
             },
             BrokerConfigTarget {
                 name: "builder-b",
-                addr: dead_addr,
+                addr: unavailable_addr,
                 transport: BrokerTargetTransport::Http,
                 extra_config: None,
             },
