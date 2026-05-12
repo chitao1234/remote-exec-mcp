@@ -59,7 +59,7 @@ pub async fn exec_command(
             return Err(err);
         }
     };
-    validate_exec_start_response(&response)?;
+    validate_exec_response(&response)?;
 
     let session_command = input.cmd.clone();
     let session_id = if response.running() {
@@ -161,7 +161,7 @@ async fn write_stdin_inner(
 
     let target = state.target(&record.target)?;
     let response = forward_exec_write(state, target, &record, input).await?;
-    validate_exec_write_response(&response)?;
+    validate_exec_response(&response)?;
     let write_response = ExecWriteResponse { response };
 
     let session_id = if write_response.response.running() {
@@ -402,18 +402,7 @@ fn exec_start_response(response: ExecResponse) -> anyhow::Result<ExecStartRespon
     }
 }
 
-fn validate_exec_start_response(response: &ExecResponse) -> anyhow::Result<()> {
-    match response {
-        ExecResponse::Running(ExecRunningResponse { output, .. }) => {
-            validate_running_output(output)
-        }
-        ExecResponse::Completed(ExecCompletedResponse { output }) => {
-            validate_completed_output(output)
-        }
-    }
-}
-
-fn validate_exec_write_response(response: &ExecResponse) -> anyhow::Result<()> {
+fn validate_exec_response(response: &ExecResponse) -> anyhow::Result<()> {
     match response {
         ExecResponse::Running(ExecRunningResponse { output, .. }) => {
             validate_running_output(output)

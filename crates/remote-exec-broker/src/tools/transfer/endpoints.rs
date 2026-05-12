@@ -1,7 +1,7 @@
 use anyhow::Context;
 use remote_exec_proto::path::{
-    PathPolicy, basename_for_policy, is_absolute_for_policy, join_for_policy, linux_path_policy,
-    same_path_for_policy, windows_path_policy,
+    PathPolicy, basename_for_policy, host_policy, is_absolute_for_policy, join_for_policy,
+    linux_path_policy, same_path_for_policy, windows_path_policy,
 };
 use remote_exec_proto::public::{TransferDestinationMode, TransferEndpoint};
 use remote_exec_proto::rpc::{RpcErrorCode, TransferPathInfoRequest};
@@ -307,14 +307,6 @@ pub(super) async fn negotiate_transfer_compression(
     }
 }
 
-fn local_policy() -> PathPolicy {
-    if cfg!(windows) {
-        windows_path_policy()
-    } else {
-        linux_path_policy()
-    }
-}
-
 impl<'a> TransferEndpointTarget<'a> {
     pub(super) fn from_name(target_name: &'a str) -> Self {
         if target_name == LOCAL_TARGET_NAME {
@@ -332,7 +324,7 @@ impl<'a> TransferEndpointTarget<'a> {
 impl EndpointTargetContext {
     fn local() -> Self {
         Self::Local {
-            policy: local_policy(),
+            policy: host_policy(),
         }
     }
 

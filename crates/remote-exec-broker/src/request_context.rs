@@ -93,6 +93,15 @@ pub(crate) fn set_current_target(target: impl Into<String>) {
     let _ = CURRENT_REQUEST_CONTEXT.try_with(|context| context.set_target(target));
 }
 
+pub(crate) fn set_current_targets<'a>(targets: impl IntoIterator<Item = &'a str>) {
+    let mut targets: Vec<&str> = targets.into_iter().filter(|target| !target.is_empty()).collect();
+    targets.sort_unstable();
+    targets.dedup();
+    if !targets.is_empty() {
+        set_current_target(targets.join(","));
+    }
+}
+
 fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
         .lock()

@@ -1,8 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use remote_exec_proto::path::{
-    PathPolicy, is_absolute_for_policy, linux_path_policy, normalize_for_system,
-    windows_path_policy,
+    PathPolicy, host_policy, is_absolute_for_policy, normalize_for_system,
 };
 use remote_exec_proto::rpc::{
     TransferImportRequest, TransferImportResponse, TransferPathInfoResponse, TransferSourceType,
@@ -147,14 +146,6 @@ pub fn path_info(
         Err(err) => Err(crate::local_backend::map_local_transfer_error(
             remote_exec_host::TransferError::internal(err.to_string()),
         )),
-    }
-}
-
-fn host_policy() -> PathPolicy {
-    if cfg!(windows) {
-        windows_path_policy()
-    } else {
-        linux_path_policy()
     }
 }
 

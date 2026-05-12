@@ -32,6 +32,14 @@ pub fn windows_path_policy() -> PathPolicy {
     }
 }
 
+pub fn host_policy() -> PathPolicy {
+    if cfg!(windows) {
+        windows_path_policy()
+    } else {
+        linux_path_policy()
+    }
+}
+
 fn split_windows_prefix(raw: &str) -> (&str, &str) {
     let bytes = raw.as_bytes();
     if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {

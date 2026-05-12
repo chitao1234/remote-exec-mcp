@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use remote_exec_proto::{
-    path::{PathPolicy, linux_path_policy, windows_path_policy},
+    path::host_policy,
     rpc::TargetInfoResponse,
     sandbox::{CompiledFilesystemSandbox, compile_filesystem_sandbox},
 };
@@ -58,7 +58,7 @@ fn compile_host_sandbox(
     Ok(config
         .host_sandbox
         .as_ref()
-        .map(|sandbox| compile_filesystem_sandbox(host_path_policy(), sandbox))
+        .map(|sandbox| compile_filesystem_sandbox(host_policy(), sandbox))
         .transpose()?)
 }
 
@@ -205,14 +205,6 @@ fn log_remote_target_startup_probe_timeout(name: &str, target_config: &config::T
         timeout_ms = target_config.timeouts.startup_probe_ms,
         "target unavailable during broker startup: startup probe timed out"
     );
-}
-
-fn host_path_policy() -> PathPolicy {
-    if cfg!(windows) {
-        windows_path_policy()
-    } else {
-        linux_path_policy()
-    }
 }
 
 fn mcp_transport_name(config: &config::McpServerConfig) -> &'static str {

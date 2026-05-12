@@ -11,7 +11,7 @@ pub async fn forward_ports(
     input: ForwardPortsInput,
 ) -> anyhow::Result<ToolCallOutput> {
     let started = std::time::Instant::now();
-    set_forward_ports_target_context(&input);
+    crate::request_context::set_current_targets(input_targets(&input));
     match input {
         ForwardPortsInput::Open {
             listen_side,
@@ -29,7 +29,7 @@ pub async fn forward_ports(
     }
 }
 
-fn set_forward_ports_target_context(input: &ForwardPortsInput) {
+fn input_targets(input: &ForwardPortsInput) -> Vec<&str> {
     let mut targets = Vec::new();
     match input {
         ForwardPortsInput::Open {
@@ -54,12 +54,7 @@ fn set_forward_ports_target_context(input: &ForwardPortsInput) {
         }
         ForwardPortsInput::Close { .. } => {}
     }
-    targets.retain(|target| !target.is_empty());
-    targets.sort_unstable();
-    targets.dedup();
-    if !targets.is_empty() {
-        crate::request_context::set_current_target(targets.join(","));
-    }
+    targets
 }
 
 async fn open_forwards(
