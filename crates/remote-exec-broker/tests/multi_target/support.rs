@@ -362,6 +362,7 @@ pub struct DaemonFixture {
 
 struct TunnelDropProxy {
     listen_addr: std::net::SocketAddr,
+    daemon_addr: Arc<Mutex<std::net::SocketAddr>>,
     active_port_tunnels: Arc<Mutex<Vec<oneshot::Sender<PortTunnelAction>>>>,
     background_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
     shutdown: Option<oneshot::Sender<()>>,
@@ -376,7 +377,8 @@ enum PortTunnelAction {
 impl DaemonFixture {
     pub async fn spawn(target: &str) -> Self {
         let tempdir = tempfile::tempdir().unwrap();
-        let backend_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let backend_listener =
+            bind_reusable_daemon_test_listener("127.0.0.1:0".parse().unwrap()).unwrap();
         let backend_addr = backend_listener.local_addr().unwrap();
         let workdir = tempdir.path().join("workdir");
         std::fs::create_dir_all(&workdir).unwrap();
@@ -462,9 +464,12 @@ expected_daemon_name = {expected_daemon_name}
     }
 
     async fn start(&mut self) {
-        let listener = tokio::net::TcpListener::bind(self.backend_addr)
-            .await
-            .expect("rebind daemon backend listener");
+        let listener = bind_reusable_daemon_test_listener("127.0.0.1:0".parse().unwrap())
+            .expect("bind daemon backend listener");
+        self.backend_addr = listener
+            .local_addr()
+            .expect("read daemon backend listener addr");
+        self.proxy.set_daemon_addr(self.backend_addr).await;
         self.start_on_listener(listener).await;
     }
 
@@ -474,7 +479,6 @@ expected_daemon_name = {expected_daemon_name}
         }
         if let Some(handle) = self.handle.take() {
             let _ = handle.await;
-            wait_for_listener_release(self.backend_addr).await;
         }
     }
 }
@@ -497,9 +501,11 @@ impl TunnelDropProxy {
             .await
             .expect("bind tunnel drop proxy");
         let listen_addr = listener.local_addr().expect("read tunnel drop proxy addr");
+        let daemon_addr = Arc::new(Mutex::new(daemon_addr));
         let active_port_tunnels = Arc::new(Mutex::new(Vec::new()));
         let background_tasks = Arc::new(Mutex::new(Vec::new()));
         let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+        let daemon_addr_task = daemon_addr.clone();
         let active_port_tunnels_task = active_port_tunnels.clone();
         let background_tasks_accept = background_tasks.clone();
         let handle = tokio::spawn(async move {
@@ -513,9 +519,14 @@ impl TunnelDropProxy {
                             Ok(value) => value,
                             Err(_) => break,
                         };
+                        let daemon_addr = daemon_addr_task.clone();
                         let active_port_tunnels = active_port_tunnels_task.clone();
                         let connection_handle = tokio::spawn(async move {
+                            let daemon_addr = *daemon_addr.lock().await;
                             if let Err(err) = proxy_connection(stream, daemon_addr, active_port_tunnels).await {
+                                if is_expected_proxy_teardown_error(&err) {
+                                    return;
+                                }
                                 panic!("multi-target tunnel-drop proxy connection failed: {err}");
                             }
                         });
@@ -527,11 +538,16 @@ impl TunnelDropProxy {
 
         Self {
             listen_addr,
+            daemon_addr,
             active_port_tunnels,
             background_tasks,
             shutdown: Some(shutdown_tx),
             handle: Some(handle),
         }
+    }
+
+    async fn set_daemon_addr(&self, addr: std::net::SocketAddr) {
+        *self.daemon_addr.lock().await = addr;
     }
 
     async fn drop_port_tunnels(&self) {
@@ -821,26 +837,29 @@ fn build_http_client() -> reqwest::Client {
         .unwrap()
 }
 
-async fn wait_for_listener_release(addr: std::net::SocketAddr) {
-    #[cfg(windows)]
-    let timeout = Duration::from_secs(20);
-    #[cfg(not(windows))]
-    let timeout = Duration::from_secs(2);
+fn bind_reusable_daemon_test_listener(
+    addr: std::net::SocketAddr,
+) -> std::io::Result<tokio::net::TcpListener> {
+    let socket = if addr.is_ipv4() {
+        tokio::net::TcpSocket::new_v4()?
+    } else {
+        tokio::net::TcpSocket::new_v6()?
+    };
+    socket.set_reuseaddr(true)?;
+    socket.bind(addr)?;
+    socket.listen(1024)
+}
 
-    #[cfg(windows)]
-    let poll = Duration::from_millis(50);
-    #[cfg(not(windows))]
-    let poll = Duration::from_millis(25);
-
-    let started = std::time::Instant::now();
-    while started.elapsed() < timeout {
-        if let Ok(listener) = std::net::TcpListener::bind(addr) {
-            drop(listener);
-            return;
-        }
-        tokio::time::sleep(poll).await;
-    }
-    panic!("listener {addr} was not released within {timeout:?}");
+fn is_expected_proxy_teardown_error(err: &std::io::Error) -> bool {
+    matches!(
+        err.kind(),
+        std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::ConnectionRefused
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::NotConnected
+            | std::io::ErrorKind::UnexpectedEof
+    ) || matches!(err.raw_os_error(), Some(10053 | 10054 | 10061))
 }
 
 pub async fn wait_for_forward_status_timeout(
@@ -944,6 +963,7 @@ mod tests {
             client: build_http_client(),
             proxy: TunnelDropProxy {
                 listen_addr: "127.0.0.1:9443".parse().unwrap(),
+                daemon_addr: Arc::new(Mutex::new("127.0.0.1:9444".parse().unwrap())),
                 active_port_tunnels: Arc::new(Mutex::new(Vec::new())),
                 background_tasks: Arc::new(Mutex::new(Vec::new())),
                 shutdown: None,

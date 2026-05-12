@@ -72,6 +72,28 @@ int main() {
     assert(decoded.meta == "{\"note\":\"binary\"}");
     assert(decoded.data == frame.data);
 
+    PortTunnelFrame empty_control;
+    empty_control.type = PortTunnelFrameType::TunnelHeartbeat;
+    empty_control.flags = 0U;
+    empty_control.stream_id = 0U;
+    const PortTunnelFrame decoded_empty_control =
+        decode_port_tunnel_frame(encode_port_tunnel_frame(empty_control));
+    assert(decoded_empty_control.type == PortTunnelFrameType::TunnelHeartbeat);
+    assert(decoded_empty_control.meta.empty());
+    assert(decoded_empty_control.data.empty());
+
+    PortTunnelFrame data_without_meta;
+    data_without_meta.type = PortTunnelFrameType::TcpData;
+    data_without_meta.flags = 0U;
+    data_without_meta.stream_id = 42U;
+    data_without_meta.data = {static_cast<unsigned char>('o'), static_cast<unsigned char>('k')};
+    const PortTunnelFrame decoded_data_without_meta =
+        decode_port_tunnel_frame(encode_port_tunnel_frame(data_without_meta));
+    assert(decoded_data_without_meta.type == PortTunnelFrameType::TcpData);
+    assert(decoded_data_without_meta.stream_id == 42U);
+    assert(decoded_data_without_meta.meta.empty());
+    assert(decoded_data_without_meta.data == data_without_meta.data);
+
     assert_control_frame_round_trips(PortTunnelFrameType::TunnelOpen);
     assert_control_frame_round_trips(PortTunnelFrameType::TunnelReady);
     assert_control_frame_round_trips(PortTunnelFrameType::TunnelClose);

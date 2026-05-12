@@ -33,7 +33,7 @@ use remote_exec_proto::rpc::{
 #[cfg(test)]
 use tokio::io::AsyncWriteExt;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::{Mutex, Notify, mpsc};
+use tokio::sync::{Mutex, Notify, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -83,27 +83,44 @@ pub(crate) struct UdpConnectorStats {
     pub opened: usize,
 }
 
-#[derive(Clone)]
 struct StubPortTunnelControl {
     enabled: bool,
     resume_behavior: ResumeBehavior,
     tcp_connect_ok_behavior: TcpConnectOkBehavior,
     close_transports_on_second_session_open: bool,
     tunnel_open_count: usize,
+    connect_tunnel_open_count: usize,
+    current_transport_id: Option<u64>,
+    resume_attempt_count: usize,
     port_tunnel_upgrades_to_fail: usize,
     connect_tunnel_opens_to_drop: usize,
     delay_session_ready_after_first: Option<Duration>,
+    blocked_session_ready_after_first: Option<BlockedPortTunnelEventState>,
+    blocked_connect_tunnel_open_after_first: Option<BlockedPortTunnelEventState>,
     override_session_ready_resume_timeout_ms: Option<u64>,
     override_tunnel_ready_limits: Option<TunnelLimitSummary>,
     session_ready_count: usize,
-    active_transports: Vec<CancellationToken>,
-    active_listen_transports: Vec<CancellationToken>,
-    active_connect_transports: Vec<CancellationToken>,
+    next_transport_id: u64,
+    active_transports: Vec<ActivePortTunnelTransport>,
+    active_listen_transports: Vec<ActivePortTunnelTransport>,
+    active_connect_transports: Vec<ActivePortTunnelTransport>,
+    closed_transport_count: usize,
     active_udp_connector_streams: HashSet<u32>,
     max_observed_udp_connector_streams: usize,
     opened_udp_connector_streams: usize,
     udp_connector_bind_errors_remaining: usize,
     heartbeat_acks_to_drop: usize,
+}
+
+#[derive(Clone)]
+struct ActivePortTunnelTransport {
+    id: u64,
+    cancel: CancellationToken,
+}
+
+struct BlockedPortTunnelEventState {
+    release_rx: Option<oneshot::Receiver<()>>,
+    blocked_tx: Option<oneshot::Sender<()>>,
 }
 
 impl Default for StubPortTunnelControl {
@@ -114,15 +131,22 @@ impl Default for StubPortTunnelControl {
             tcp_connect_ok_behavior: TcpConnectOkBehavior::PassThrough,
             close_transports_on_second_session_open: false,
             tunnel_open_count: 0,
+            connect_tunnel_open_count: 0,
+            current_transport_id: None,
+            resume_attempt_count: 0,
             port_tunnel_upgrades_to_fail: 0,
             connect_tunnel_opens_to_drop: 0,
             delay_session_ready_after_first: None,
+            blocked_session_ready_after_first: None,
+            blocked_connect_tunnel_open_after_first: None,
             override_session_ready_resume_timeout_ms: None,
             override_tunnel_ready_limits: None,
             session_ready_count: 0,
+            next_transport_id: 1,
             active_transports: Vec::new(),
             active_listen_transports: Vec::new(),
             active_connect_transports: Vec::new(),
+            closed_transport_count: 0,
             active_udp_connector_streams: HashSet::new(),
             max_observed_udp_connector_streams: 0,
             opened_udp_connector_streams: 0,
@@ -243,28 +267,39 @@ pub(crate) async fn force_close_port_tunnel_transport(state: &StubDaemonState) {
         std::mem::take(&mut control.active_transports)
     };
     for transport in active_transports {
-        transport.cancel();
+        transport.cancel.cancel();
     }
 }
 
 pub(crate) async fn force_close_listen_port_tunnel_transport(state: &StubDaemonState) {
     let active_transports = {
         let mut control = state.port_tunnel_control.lock().await;
-        std::mem::take(&mut control.active_listen_transports)
+        let active_transports = std::mem::take(&mut control.active_listen_transports);
+        remove_active_transport_ids(&mut control.active_transports, &active_transports);
+        active_transports
     };
     for transport in active_transports {
-        transport.cancel();
+        transport.cancel.cancel();
     }
 }
 
 pub(crate) async fn force_close_connect_port_tunnel_transport(state: &StubDaemonState) {
     let active_transports = {
         let mut control = state.port_tunnel_control.lock().await;
-        std::mem::take(&mut control.active_connect_transports)
+        let active_transports = std::mem::take(&mut control.active_connect_transports);
+        remove_active_transport_ids(&mut control.active_transports, &active_transports);
+        active_transports
     };
     for transport in active_transports {
-        transport.cancel();
+        transport.cancel.cancel();
     }
+}
+
+fn remove_active_transport_ids(
+    active_transports: &mut Vec<ActivePortTunnelTransport>,
+    removed: &[ActivePortTunnelTransport],
+) {
+    active_transports.retain(|transport| !removed.iter().any(|removed| removed.id == transport.id));
 }
 
 pub(crate) async fn wait_for_port_tunnel_transports(state: &StubDaemonState, count: usize) {
@@ -276,6 +311,33 @@ pub(crate) async fn wait_for_connect_port_tunnel_transports(state: &StubDaemonSt
         control.active_connect_transports.len() >= count
     })
     .await;
+}
+
+pub(crate) async fn wait_for_listen_port_tunnel_transports(state: &StubDaemonState, count: usize) {
+    wait_for_port_tunnel_condition(state, |control| {
+        control.active_listen_transports.len() >= count
+    })
+    .await;
+}
+
+pub(crate) async fn closed_port_tunnel_transport_count(state: &StubDaemonState) -> usize {
+    state
+        .port_tunnel_control
+        .lock()
+        .await
+        .closed_transport_count
+}
+
+pub(crate) async fn wait_for_closed_port_tunnel_transports(state: &StubDaemonState, count: usize) {
+    wait_for_port_tunnel_condition(state, |control| control.closed_transport_count >= count).await;
+}
+
+pub(crate) async fn resume_attempt_count(state: &StubDaemonState) -> usize {
+    state.port_tunnel_control.lock().await.resume_attempt_count
+}
+
+pub(crate) async fn wait_for_resume_attempts(state: &StubDaemonState, count: usize) {
+    wait_for_port_tunnel_condition(state, |control| control.resume_attempt_count >= count).await;
 }
 
 async fn wait_for_port_tunnel_condition(
@@ -290,7 +352,7 @@ async fn wait_for_port_tunnel_condition(
                     return;
                 }
             }
-            state.port_tunnel_notify.notified().await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
     .await
@@ -335,6 +397,82 @@ pub(crate) async fn delay_session_ready_after_first(state: &StubDaemonState, del
         .lock()
         .await
         .delay_session_ready_after_first = Some(delay);
+}
+
+pub(crate) async fn block_session_ready_after_first(
+    state: &StubDaemonState,
+) -> BlockedSessionReady {
+    let (release_tx, release_rx) = oneshot::channel();
+    let (blocked_tx, blocked_rx) = oneshot::channel();
+    state
+        .port_tunnel_control
+        .lock()
+        .await
+        .blocked_session_ready_after_first = Some(BlockedPortTunnelEventState {
+        release_rx: Some(release_rx),
+        blocked_tx: Some(blocked_tx),
+    });
+    BlockedSessionReady {
+        release_tx: Some(release_tx),
+        blocked_rx,
+    }
+}
+
+pub(crate) struct BlockedSessionReady {
+    release_tx: Option<oneshot::Sender<()>>,
+    blocked_rx: oneshot::Receiver<()>,
+}
+
+impl BlockedSessionReady {
+    pub(crate) async fn wait_blocked(&mut self) {
+        let _ = tokio::time::timeout(Duration::from_secs(5), &mut self.blocked_rx)
+            .await
+            .expect("session ready frame should become blocked");
+    }
+
+    pub(crate) fn release(mut self) {
+        if let Some(release_tx) = self.release_tx.take() {
+            let _ = release_tx.send(());
+        }
+    }
+}
+
+pub(crate) async fn block_connect_tunnel_open_after_first(
+    state: &StubDaemonState,
+) -> BlockedConnectTunnelOpen {
+    let (release_tx, release_rx) = oneshot::channel();
+    let (blocked_tx, blocked_rx) = oneshot::channel();
+    state
+        .port_tunnel_control
+        .lock()
+        .await
+        .blocked_connect_tunnel_open_after_first = Some(BlockedPortTunnelEventState {
+        release_rx: Some(release_rx),
+        blocked_tx: Some(blocked_tx),
+    });
+    BlockedConnectTunnelOpen {
+        release_tx: Some(release_tx),
+        blocked_rx,
+    }
+}
+
+pub(crate) struct BlockedConnectTunnelOpen {
+    release_tx: Option<oneshot::Sender<()>>,
+    blocked_rx: oneshot::Receiver<()>,
+}
+
+impl BlockedConnectTunnelOpen {
+    pub(crate) async fn wait_blocked(&mut self) {
+        let _ = tokio::time::timeout(Duration::from_secs(5), &mut self.blocked_rx)
+            .await
+            .expect("connect tunnel open frame should become blocked");
+    }
+
+    pub(crate) fn release(mut self) {
+        if let Some(release_tx) = self.release_tx.take() {
+            let _ = release_tx.send(());
+        }
+    }
 }
 
 pub(crate) async fn override_tunnel_ready_limits(
@@ -419,7 +557,7 @@ pub(crate) async fn assert_port_tunnel_relay_preserves_partial_frame_reads() {
     let cancel = CancellationToken::new();
     let relay_cancel = cancel.clone();
     let relay = tokio::spawn(async move {
-        relay_port_tunnel_frames(state, broker_relay, daemon_relay, relay_cancel).await
+        relay_port_tunnel_frames(state, broker_relay, daemon_relay, relay_cancel, None).await
     });
 
     let broker_frame = Frame {
@@ -937,13 +1075,13 @@ where
         .and_then(|meta| meta.get("resume_session_id"))
         .is_some_and(|value| !value.is_null());
     if is_resume_open {
-        match state
-            .port_tunnel_control
-            .lock()
-            .await
-            .resume_behavior
-            .clone()
-        {
+        let resume_behavior = {
+            let mut control = state.port_tunnel_control.lock().await;
+            control.resume_attempt_count += 1;
+            control.resume_behavior.clone()
+        };
+        state.port_tunnel_notify.notify_waiters();
+        match resume_behavior {
             ResumeBehavior::PassThrough => {}
             ResumeBehavior::DropTransport => return Ok(()),
             ResumeBehavior::HangTransport => {
@@ -986,7 +1124,7 @@ where
     let cancel = CancellationToken::new();
     let observed = observe_broker_to_daemon_frame(&state, &first_frame).await?;
     for transport in observed.transports_to_cancel {
-        transport.cancel();
+        transport.cancel.cancel();
     }
     if observed.cancel_current_transport {
         cancel.cancel();
@@ -998,26 +1136,35 @@ where
         write_frame(&mut broker_side, &first_frame).await?;
     }
 
-    {
+    let transport_id = {
         let mut control = state.port_tunnel_control.lock().await;
-        control.active_transports.push(cancel.clone());
+        let transport_id = control.next_transport_id;
+        let transport = ActivePortTunnelTransport {
+            id: transport_id,
+            cancel: cancel.clone(),
+        };
+        control.next_transport_id += 1;
+        control.current_transport_id = Some(transport_id);
+        control.active_transports.push(transport.clone());
         if observed.listen_role_transport {
-            control.active_listen_transports.push(cancel.clone());
+            control.active_listen_transports.push(transport);
         } else {
-            control.active_connect_transports.push(cancel.clone());
+            control.active_connect_transports.push(transport);
         }
-    }
+        transport_id
+    };
     state.port_tunnel_notify.notify_waiters();
 
-    relay_port_tunnel_frames(state, stream, broker_side, cancel).await
+    relay_port_tunnel_frames(state, stream, broker_side, cancel, Some(transport_id)).await
 }
 
 struct ObservedBrokerFrame {
     forward: bool,
     error: Option<Frame>,
-    transports_to_cancel: Vec<CancellationToken>,
+    transports_to_cancel: Vec<ActivePortTunnelTransport>,
     cancel_current_transport: bool,
     listen_role_transport: bool,
+    block_open: Option<(oneshot::Sender<()>, Option<oneshot::Receiver<()>>)>,
 }
 
 async fn relay_port_tunnel_frames<S1, S2>(
@@ -1025,6 +1172,7 @@ async fn relay_port_tunnel_frames<S1, S2>(
     external: S1,
     internal: S2,
     cancel: CancellationToken,
+    transport_id: Option<u64>,
 ) -> anyhow::Result<()>
 where
     S1: AsyncRead + AsyncWrite + Unpin,
@@ -1041,8 +1189,12 @@ where
         external_tx.clone(),
         cancel.clone(),
     );
-    let daemon_to_broker =
-        relay_daemon_to_broker_frames(state, internal_reader, external_tx.clone(), cancel.clone());
+    let daemon_to_broker = relay_daemon_to_broker_frames(
+        state.clone(),
+        internal_reader,
+        external_tx.clone(),
+        cancel.clone(),
+    );
     drop(external_tx);
     let external_writer = relay_external_frames(external_writer, external_rx, cancel.clone());
 
@@ -1052,6 +1204,25 @@ where
         result = external_writer => result,
     };
     cancel.cancel();
+    {
+        let mut control = state.port_tunnel_control.lock().await;
+        if let Some(transport_id) = transport_id {
+            control
+                .active_transports
+                .retain(|transport| transport.id != transport_id);
+            control
+                .active_listen_transports
+                .retain(|transport| transport.id != transport_id);
+            control
+                .active_connect_transports
+                .retain(|transport| transport.id != transport_id);
+            if control.current_transport_id == Some(transport_id) {
+                control.current_transport_id = None;
+            }
+        }
+        control.closed_transport_count += 1;
+    }
+    state.port_tunnel_notify.notify_waiters();
     result
 }
 
@@ -1072,7 +1243,7 @@ where
         };
         let observed = observe_broker_to_daemon_frame(&state, &frame).await?;
         for transport in observed.transports_to_cancel {
-            transport.cancel();
+            transport.cancel.cancel();
         }
         if observed.cancel_current_transport {
             cancel.cancel();
@@ -1161,6 +1332,7 @@ async fn observe_broker_to_daemon_frame(
         transports_to_cancel: Vec::new(),
         cancel_current_transport: false,
         listen_role_transport: false,
+        block_open: None,
     };
     {
         let mut control = state.port_tunnel_control.lock().await;
@@ -1170,17 +1342,30 @@ async fn observe_broker_to_daemon_frame(
                 let meta: serde_json::Value = serde_json::from_slice(&frame.meta)?;
                 observed.listen_role_transport =
                     meta.get("role").and_then(|role| role.as_str()) == Some("listen");
-                if meta.get("role").and_then(|role| role.as_str()) == Some("connect")
-                    && control.connect_tunnel_opens_to_drop > 0
-                {
-                    control.connect_tunnel_opens_to_drop -= 1;
-                    observed.forward = false;
-                    observed.cancel_current_transport = true;
+                if meta.get("role").and_then(|role| role.as_str()) == Some("connect") {
+                    if control.connect_tunnel_open_count > 0 {
+                        observed.block_open = control
+                            .blocked_connect_tunnel_open_after_first
+                            .as_mut()
+                            .and_then(|state| {
+                                let blocked_tx = state.blocked_tx.take();
+                                let release_rx = state.release_rx.take();
+                                blocked_tx.map(|blocked_tx| (blocked_tx, release_rx))
+                            });
+                    }
+                    control.connect_tunnel_open_count += 1;
+                    if control.connect_tunnel_opens_to_drop > 0 {
+                        control.connect_tunnel_opens_to_drop -= 1;
+                        observed.forward = false;
+                        observed.cancel_current_transport = true;
+                    }
                 }
                 if control.close_transports_on_second_session_open && control.tunnel_open_count == 2
                 {
                     control.close_transports_on_second_session_open = false;
                     observed.transports_to_cancel = std::mem::take(&mut control.active_transports);
+                    control.active_listen_transports.clear();
+                    control.active_connect_transports.clear();
                 }
             }
             FrameType::TunnelHeartbeat if control.heartbeat_acks_to_drop > 0 => {
@@ -1218,6 +1403,12 @@ async fn observe_broker_to_daemon_frame(
             _ => {}
         }
     }
+    if let Some((blocked_tx, release_rx)) = observed.block_open.take() {
+        let _ = blocked_tx.send(());
+        if let Some(release_rx) = release_rx {
+            let _ = release_rx.await;
+        }
+    }
     Ok(observed)
 }
 
@@ -1225,23 +1416,35 @@ async fn daemon_to_broker_frame(
     state: &StubDaemonState,
     mut frame: Frame,
 ) -> anyhow::Result<Option<Frame>> {
-    let (delay, should_forward, resume_timeout_ms, override_tunnel_ready_limits) = {
+    let (delay, block_ready, should_forward, resume_timeout_ms, override_tunnel_ready_limits) = {
         let mut control = state.port_tunnel_control.lock().await;
         if frame.frame_type == FrameType::Close {
             control
                 .active_udp_connector_streams
                 .remove(&frame.stream_id);
         }
-        let delay = if frame.frame_type == FrameType::TunnelReady {
+        let (delay, block_ready) = if frame.frame_type == FrameType::TunnelReady {
+            let block_ready = if control.session_ready_count > 0 {
+                control
+                    .blocked_session_ready_after_first
+                    .as_mut()
+                    .and_then(|state| {
+                        let blocked_tx = state.blocked_tx.take();
+                        let release_rx = state.release_rx.take();
+                        blocked_tx.map(|blocked_tx| (blocked_tx, release_rx))
+                    })
+            } else {
+                None
+            };
             let delay = if control.session_ready_count > 0 {
                 control.delay_session_ready_after_first
             } else {
                 None
             };
             control.session_ready_count += 1;
-            delay
+            (delay, block_ready)
         } else {
-            None
+            (None, None)
         };
         let resume_timeout_ms = if frame.frame_type == FrameType::TunnelReady {
             control.override_session_ready_resume_timeout_ms
@@ -1260,11 +1463,18 @@ async fn daemon_to_broker_frame(
             ));
         (
             delay,
+            block_ready,
             should_forward,
             resume_timeout_ms,
             override_tunnel_ready_limits,
         )
     };
+    if let Some((blocked_tx, release_rx)) = block_ready {
+        let _ = blocked_tx.send(());
+        if let Some(release_rx) = release_rx {
+            let _ = release_rx.await;
+        }
+    }
     if let Some(delay) = delay {
         tokio::time::sleep(delay).await;
     }

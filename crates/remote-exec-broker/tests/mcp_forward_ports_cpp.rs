@@ -949,6 +949,9 @@ impl TunnelDropProxy {
                         let active_port_tunnels = active_port_tunnels_task.clone();
                         let connection_handle = tokio::spawn(async move {
                             if let Err(err) = proxy_connection(stream, daemon_addr, active_port_tunnels).await {
+                                if is_expected_proxy_teardown_error(&err) {
+                                    return;
+                                }
                                 panic!("C++ tunnel-drop proxy connection failed: {err}");
                             }
                         });
@@ -1080,6 +1083,18 @@ async fn proxy_port_tunnel_streams(
     }
 
     Ok(())
+}
+
+fn is_expected_proxy_teardown_error(err: &std::io::Error) -> bool {
+    matches!(
+        err.kind(),
+        std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::ConnectionRefused
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::NotConnected
+            | std::io::ErrorKind::UnexpectedEof
+    ) || matches!(err.raw_os_error(), Some(10053 | 10054 | 10061))
 }
 
 fn cpp_daemon_binary() -> Option<PathBuf> {
