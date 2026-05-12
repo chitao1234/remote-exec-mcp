@@ -7,6 +7,9 @@ use tempfile::TempDir;
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
 use super::certs::{TestCerts, write_test_certs_for_daemon_spec};
 use super::fixture::{BrokerFixture, DummyClientHandler};
+use super::streamable_http_child::{
+    configure_streamable_http_broker_child, wait_for_streamable_http_bound_addr,
+};
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
 use super::stub_daemon::spawn_stub_daemon;
 use super::stub_daemon::{
@@ -443,7 +446,6 @@ pub async fn spawn_broker_local_only_with_port_forward_limits(
 pub async fn spawn_streamable_http_broker_with_stub_daemon() -> HttpBrokerFixture {
     let tempdir = tempfile::tempdir().unwrap();
     let (daemon_addr, stub_state) = spawn_plain_http_stub_daemon().await;
-    let broker_listen = allocate_unused_loopback_addr();
     let broker_config = tempdir.path().join("broker.toml");
     write_broker_config(
         &broker_config,
@@ -461,16 +463,19 @@ transport = "streamable_http"
 listen = {listen}
 path = "/mcp"
 "#,
-            listen = toml_string(&broker_listen.to_string()),
+            listen = toml_string("127.0.0.1:0"),
         )),
     );
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
     command.arg(&broker_config);
     apply_quiet_test_logging(&mut command, &[]);
+    configure_streamable_http_broker_child(&mut command);
     command.kill_on_drop(true);
-    let child = command.spawn().unwrap();
-    let url = format!("http://{broker_listen}/mcp");
+    let mut child = command.spawn().unwrap();
+    let broker_addr =
+        wait_for_streamable_http_bound_addr(&mut child, "broker streamable HTTP").await;
+    let url = format!("http://{broker_addr}/mcp");
     wait_until_ready_mcp_http(&url).await;
 
     HttpBrokerFixture {

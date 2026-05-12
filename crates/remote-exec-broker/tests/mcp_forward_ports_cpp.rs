@@ -36,13 +36,6 @@ fn apply_quiet_test_logging(command: &mut tokio::process::Command) {
     command.env("REMOTE_EXEC_LOG", filter);
 }
 
-fn allocate_unused_loopback_addr() -> std::net::SocketAddr {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = listener.local_addr().unwrap();
-    drop(listener);
-    addr
-}
-
 #[tokio::test]
 async fn broker_forwards_ports_through_real_cpp_daemon_and_handles_port_conflicts() {
     let Some(fixture) = CppDaemonBrokerFixture::spawn().await else {
@@ -819,7 +812,6 @@ impl CrashableCppDaemonBrokerFixture {
         let daemon_workdir = tempdir.path().join("daemon-workdir");
         std::fs::create_dir_all(&daemon_workdir).unwrap();
         let daemon_bound_addr_file = tempdir.path().join("daemon-bound-addr.txt");
-        let broker_listen = allocate_unused_loopback_addr();
         let daemon_config_body = format!(
             "target = builder-cpp\nlisten_host = 127.0.0.1\nlisten_port = 0\ndefault_workdir = {}\ntest_bound_addr_file = {}\n",
             cpp_config_path(&daemon_workdir),
@@ -852,7 +844,7 @@ path = "/mcp"
 "#,
                 daemon_addr,
                 toml_string(&tempdir.path().join("local-work").display().to_string()),
-                broker_listen = toml_string(&broker_listen.to_string()),
+                broker_listen = toml_string("127.0.0.1:0"),
             ),
         )
         .unwrap();
@@ -861,9 +853,15 @@ path = "/mcp"
         let mut broker = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
         broker.arg(&broker_config);
         apply_quiet_test_logging(&mut broker);
+        support::streamable_http_child::configure_streamable_http_broker_child(&mut broker);
         broker.kill_on_drop(true);
-        let broker = broker.spawn().unwrap();
-        let broker_url = format!("http://{broker_listen}/mcp");
+        let mut broker = broker.spawn().unwrap();
+        let broker_addr = support::streamable_http_child::wait_for_streamable_http_bound_addr(
+            &mut broker,
+            "C++ broker",
+        )
+        .await;
+        let broker_url = format!("http://{broker_addr}/mcp");
         wait_until_ready_mcp_http(&broker_url).await;
         let client = RemoteExecClient::connect(Connection::StreamableHttp { url: broker_url })
             .await

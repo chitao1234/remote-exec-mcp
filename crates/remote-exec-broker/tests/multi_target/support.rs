@@ -15,6 +15,9 @@ use tokio::net::TcpListener;
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
 
+#[path = "../support/streamable_http_child.rs"]
+mod streamable_http_child;
+
 const BROKER_TOOL_CALL_TIMEOUT: Duration = Duration::from_secs(30);
 const BROKER_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 const MULTI_TARGET_READY_TIMEOUT: Duration = Duration::from_secs(20);
@@ -49,13 +52,6 @@ fn apply_quiet_test_logging(command: &mut tokio::process::Command) {
 
     let filter = std::env::var("REMOTE_EXEC_TEST_LOG").unwrap_or_else(|_| "error".to_string());
     command.env("REMOTE_EXEC_LOG", filter);
-}
-
-fn allocate_unused_loopback_addr() -> std::net::SocketAddr {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = listener.local_addr().unwrap();
-    drop(listener);
-    addr
 }
 
 pub fn long_running_tty_exec_input(target: &str) -> serde_json::Value {
@@ -256,7 +252,6 @@ pub struct HttpBrokerFixture {
 impl HttpBrokerFixture {
     pub async fn spawn(daemon_a: &DaemonFixture, daemon_b: &DaemonFixture) -> Self {
         let tempdir = tempfile::tempdir().unwrap();
-        let broker_listen = allocate_unused_loopback_addr();
         let config_path = tempdir.path().join("broker-http.toml");
         std::fs::write(
             &config_path,
@@ -264,7 +259,7 @@ impl HttpBrokerFixture {
                 "{}\n{}\n[mcp]\ntransport = \"streamable_http\"\nlisten = {}\npath = \"/mcp\"\n",
                 daemon_a.target_config_fragment(),
                 daemon_b.target_config_fragment(),
-                toml_string(&broker_listen.to_string()),
+                toml_string("127.0.0.1:0"),
             ),
         )
         .unwrap();
@@ -272,9 +267,15 @@ impl HttpBrokerFixture {
         let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
         command.arg(&config_path);
         apply_quiet_test_logging(&mut command);
+        streamable_http_child::configure_streamable_http_broker_child(&mut command);
         command.kill_on_drop(true);
-        let child = command.spawn().unwrap();
-        let url = format!("http://{broker_listen}/mcp");
+        let mut child = command.spawn().unwrap();
+        let broker_addr = streamable_http_child::wait_for_streamable_http_bound_addr(
+            &mut child,
+            "multi-target broker",
+        )
+        .await;
+        let url = format!("http://{broker_addr}/mcp");
         wait_until_ready_mcp_http(&url).await;
 
         Self {
