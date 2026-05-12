@@ -386,7 +386,7 @@ async fn open_protocol_forward(
     limits: ForwardPortLimitSummary,
     kind: ForwardOpenKind,
 ) -> anyhow::Result<OpenedForward> {
-    let forward_id = remote_exec_host::ids::new_forward_id().into_string();
+    let forward_id = remote_exec_host::ids::new_forward_id();
     let opened_listen = open_listen_session_for_forward(
         &listen_side,
         &forward_id,

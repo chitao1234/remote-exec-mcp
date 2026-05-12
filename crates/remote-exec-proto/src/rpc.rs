@@ -4,12 +4,12 @@ mod image;
 mod patch;
 mod target;
 mod transfer;
+mod warning;
 
 pub use error::{RpcErrorBody, RpcErrorCode};
 pub use exec::{
     ExecCompletedResponse, ExecOutputResponse, ExecPtySize, ExecResponse, ExecRunningResponse,
     ExecStartRequest, ExecStartResponse, ExecWarning, ExecWriteRequest, ExecWriteResponse,
-    WarningCode,
 };
 pub use image::{EmptyResponse, ImageReadRequest, ImageReadResponse};
 pub use patch::{PatchApplyRequest, PatchApplyResponse};
@@ -22,6 +22,7 @@ pub use transfer::{
     parse_transfer_export_metadata, parse_transfer_import_metadata, transfer_export_header_pairs,
     transfer_import_header_pairs,
 };
+pub use warning::WarningCode;
 
 pub use crate::transfer::{
     TransferCompression, TransferExportMetadata, TransferExportRequest, TransferImportMetadata,

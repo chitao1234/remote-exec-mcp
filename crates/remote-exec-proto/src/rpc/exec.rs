@@ -211,27 +211,10 @@ pub struct ExecWarning {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WarningCode {
-    ExecSessionLimitApproaching,
-    TransferSkippedUnsupportedEntry,
-    TransferSkippedSymlink,
-}
-
-impl WarningCode {
-    pub const fn wire_value(self) -> &'static str {
-        match self {
-            Self::ExecSessionLimitApproaching => "exec_session_limit_approaching",
-            Self::TransferSkippedUnsupportedEntry => "transfer_skipped_unsupported_entry",
-            Self::TransferSkippedSymlink => "transfer_skipped_symlink",
-        }
-    }
-}
-
 impl ExecWarning {
     pub fn session_limit_approaching(target: &str) -> Self {
         Self {
-            code: WarningCode::ExecSessionLimitApproaching
+            code: super::WarningCode::ExecSessionLimitApproaching
                 .wire_value()
                 .to_string(),
             message: format!("Target `{target}` now has 60 open exec sessions."),

@@ -263,7 +263,7 @@ async fn store_running_session(
     output: String,
     max_output_tokens: Option<u32>,
 ) -> Result<ExecStartResponse, HostRpcError> {
-    let daemon_session_id = crate::ids::new_exec_session_id().into_string();
+    let daemon_session_id = crate::ids::new_exec_session_id();
     let insert_outcome = state
         .sessions
         .insert(daemon_session_id.clone(), session)

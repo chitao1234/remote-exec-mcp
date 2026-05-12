@@ -196,12 +196,8 @@ pub(super) fn stub_daemon_state(
     let port_tunnel_tempdir = Arc::new(tempfile::tempdir().expect("stub port tunnel tempdir"));
     StubDaemonState {
         target: target.to_string(),
-        daemon_instance_id: Arc::new(Mutex::new(
-            remote_exec_host::ids::new_instance_id().into_string(),
-        )),
-        daemon_session_id: Arc::new(Mutex::new(
-            remote_exec_host::ids::new_exec_session_id().into_string(),
-        )),
+        daemon_instance_id: Arc::new(Mutex::new(remote_exec_host::ids::new_instance_id())),
+        daemon_session_id: Arc::new(Mutex::new(remote_exec_host::ids::new_exec_session_id())),
         target_hostname: format!("{target}-host"),
         target_platform: platform.to_string(),
         target_arch: "x86_64".to_string(),
