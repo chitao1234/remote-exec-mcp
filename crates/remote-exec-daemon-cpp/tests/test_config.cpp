@@ -1,12 +1,12 @@
 #include <cassert>
 #include <cstdio>
-#include <filesystem>
 #include <fstream>
 #include <string>
 
 #include "config.h"
+#include "test_filesystem.h"
 
-namespace fs = std::filesystem;
+namespace fs = test_fs;
 
 static void write_text(const fs::path& path, const std::string& value) {
     std::ofstream output(path.c_str(), std::ios::binary | std::ios::trunc);

@@ -1,11 +1,11 @@
 #include <cassert>
-#include <filesystem>
 #include <string>
 
 #include "filesystem_sandbox.h"
 #include "path_policy.h"
+#include "test_filesystem.h"
 
-namespace fs = std::filesystem;
+namespace fs = test_fs;
 
 static fs::path make_test_root() {
     const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-sandbox-test";

@@ -1,12 +1,12 @@
 #include <cassert>
-#include <filesystem>
 #include <fstream>
 #include <stdexcept>
 #include <string>
 
 #include "patch_engine.h"
+#include "test_filesystem.h"
 
-namespace fs = std::filesystem;
+namespace fs = test_fs;
 
 static std::string read_text(const fs::path& path) {
     std::ifstream input(path.c_str(), std::ios::binary);
