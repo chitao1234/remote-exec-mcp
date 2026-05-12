@@ -1,5 +1,5 @@
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Context;
 use remote_exec_host::{EmbeddedHostConfig, HostRuntimeConfig};
@@ -70,17 +70,8 @@ pub struct TlsConfig {
     pub pinned_client_cert_pem: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone)]
-pub struct EmbeddedDaemonConfig {
-    pub host: EmbeddedHostConfig,
-}
-
-impl EmbeddedDaemonConfig {
-    pub fn into_host_config(self) -> EmbeddedHostConfig {
-        self.host
-    }
-
-    pub fn into_daemon_config(self) -> DaemonConfig {
+impl From<EmbeddedHostConfig> for DaemonConfig {
+    fn from(value: EmbeddedHostConfig) -> Self {
         let EmbeddedHostConfig {
             target,
             default_workdir,
@@ -95,8 +86,8 @@ impl EmbeddedDaemonConfig {
             port_forward_limits,
             experimental_apply_patch_target_encoding_autodetect,
             process_environment,
-        } = self.host;
-        DaemonConfig {
+        } = value;
+        Self {
             target,
             listen: SocketAddr::from(([127, 0, 0, 1], 0)),
             default_workdir,
@@ -119,29 +110,12 @@ impl EmbeddedDaemonConfig {
     }
 }
 
-impl From<EmbeddedHostConfig> for EmbeddedDaemonConfig {
-    fn from(value: EmbeddedHostConfig) -> Self {
-        Self { host: value }
-    }
-}
-
-impl From<EmbeddedHostConfig> for DaemonConfig {
-    fn from(value: EmbeddedHostConfig) -> Self {
-        EmbeddedDaemonConfig::from(value).into_daemon_config()
-    }
-}
-
 impl DaemonConfig {
-    pub fn host_runtime_config(&self) -> HostRuntimeConfig {
-        self.clone().into()
-    }
-
-    pub fn into_host_runtime_config(self) -> HostRuntimeConfig {
-        self.into()
-    }
-
     fn normalized_default_workdir(&self) -> PathBuf {
-        normalize_configured_workdir(&self.default_workdir, self.windows_posix_root.as_deref())
+        remote_exec_host::config::normalize_configured_workdir(
+            &self.default_workdir,
+            self.windows_posix_root.as_deref(),
+        )
     }
 
     fn validate_http_auth(&self) -> anyhow::Result<()> {
@@ -156,10 +130,8 @@ impl DaemonConfig {
         self.default_workdir = self.normalized_default_workdir();
     }
 
-    pub fn prepare_runtime_fields(&mut self) {}
-
     pub fn validate(&self) -> anyhow::Result<()> {
-        self.host_runtime_config().validate()?;
+        HostRuntimeConfig::from(self.clone()).validate()?;
         self.validate_http_auth()?;
         crate::tls::validate_config(self)?;
         Ok(())
@@ -171,7 +143,6 @@ impl DaemonConfig {
             .with_context(|| format!("reading {}", path.as_ref().display()))?;
         let mut config: Self = toml::from_str(&text)?;
         config.normalize_paths();
-        config.prepare_runtime_fields();
         config.validate()?;
         Ok(config)
     }
@@ -197,10 +168,6 @@ impl From<DaemonConfig> for HostRuntimeConfig {
             process_environment: value.process_environment,
         }
     }
-}
-
-pub fn normalize_configured_workdir(path: &Path, windows_posix_root: Option<&Path>) -> PathBuf {
-    remote_exec_host::config::normalize_configured_workdir(path, windows_posix_root)
 }
 
 fn default_allow_login_shell() -> bool {

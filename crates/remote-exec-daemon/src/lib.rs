@@ -32,7 +32,7 @@ pub fn install_crypto_provider() -> Result<()> {
 }
 
 pub fn build_app_state(config: DaemonConfig) -> Result<AppState> {
-    remote_exec_host::build_runtime_state(config.into_host_runtime_config())
+    remote_exec_host::build_runtime_state(config.into())
 }
 
 pub fn target_info_response(state: &AppState) -> TargetInfoResponse {
@@ -58,7 +58,7 @@ where
     F: Future<Output = ()> + Send,
 {
     tls::install_crypto_provider()?;
-    let state = remote_exec_host::build_runtime_state(daemon_config.host_runtime_config())?;
+    let state = remote_exec_host::build_runtime_state(daemon_config.as_ref().clone().into())?;
     let listen = listener.local_addr().unwrap_or(daemon_config.listen);
     tracing::info!(
         target = %daemon_config.target,

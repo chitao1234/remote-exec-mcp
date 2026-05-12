@@ -63,7 +63,10 @@ max_open_sessions = 7
 
     let config = DaemonConfig::load(&config_path).await.unwrap();
     assert_eq!(config.max_open_sessions, 7);
-    assert_eq!(config.host_runtime_config().max_open_sessions, 7);
+    assert_eq!(
+        remote_exec_host::HostRuntimeConfig::from(config.clone()).max_open_sessions,
+        7
+    );
 }
 
 #[tokio::test]
