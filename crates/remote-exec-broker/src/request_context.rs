@@ -94,7 +94,10 @@ pub(crate) fn set_current_target(target: impl Into<String>) {
 }
 
 pub(crate) fn set_current_targets<'a>(targets: impl IntoIterator<Item = &'a str>) {
-    let mut targets: Vec<&str> = targets.into_iter().filter(|target| !target.is_empty()).collect();
+    let mut targets: Vec<&str> = targets
+        .into_iter()
+        .filter(|target| !target.is_empty())
+        .collect();
     targets.sort_unstable();
     targets.dedup();
     if !targets.is_empty() {

@@ -66,8 +66,6 @@ pub(crate) fn archive_error_to_transfer_error(err: anyhow::Error) -> crate::erro
     }
 }
 
-pub(crate) fn internal_transfer_error(
-    err: impl std::fmt::Display,
-) -> crate::error::TransferError {
+pub(crate) fn internal_transfer_error(err: impl std::fmt::Display) -> crate::error::TransferError {
     crate::error::TransferError::internal(err.to_string())
 }

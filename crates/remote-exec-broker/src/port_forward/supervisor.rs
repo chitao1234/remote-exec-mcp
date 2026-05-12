@@ -20,8 +20,7 @@ use super::side::SideHandle;
 use super::store::{PortForwardRecord, PortForwardStore};
 use super::tcp_bridge::run_tcp_forward;
 use super::tunnel::{
-    PortTunnel, decode_tunnel_meta, encode_tunnel_meta, is_retryable_transport_error,
-    tunnel_error,
+    PortTunnel, decode_tunnel_meta, encode_tunnel_meta, is_retryable_transport_error, tunnel_error,
 };
 use super::udp_bridge::run_udp_forward;
 use super::{
