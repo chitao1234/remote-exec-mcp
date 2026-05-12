@@ -12,6 +12,7 @@ pub async fn view_image(
 ) -> anyhow::Result<ToolCallOutput> {
     let started = std::time::Instant::now();
     let target_name = input.target.clone();
+    crate::request_context::set_current_target(target_name.clone());
     let detail = input.detail.clone();
     let path = input.path.clone();
     tracing::info!(

@@ -17,9 +17,11 @@ async fn exec_command_reports_malformed_running_response_without_daemon_session_
         )
         .await;
 
-    assert_eq!(
-        error,
-        "daemon returned malformed exec response: running response missing daemon_session_id"
+    support::assert_correlated_tool_error(
+        &error,
+        "exec_command",
+        Some("builder-a"),
+        "daemon returned malformed exec response: running response missing daemon_session_id",
     );
 }
 
@@ -40,8 +42,10 @@ async fn write_stdin_reports_malformed_completed_response_without_exit_code() {
         )
         .await;
 
-    assert_eq!(
-        error,
-        "write_stdin failed: daemon returned malformed exec response: completed response missing exit_code"
+    support::assert_correlated_tool_error(
+        &error,
+        "write_stdin",
+        Some("builder-a"),
+        "write_stdin failed: daemon returned malformed exec response: completed response missing exit_code",
     );
 }

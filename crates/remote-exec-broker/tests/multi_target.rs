@@ -131,10 +131,11 @@ async fn sessions_are_invalidated_after_daemon_restart() {
             }),
         )
         .await;
-    assert_eq!(
-        invalidated,
-        format!("write_stdin failed: Unknown process id {session_id}"),
-        "restart invalidation error: {invalidated}"
+    support::assert_correlated_tool_error(
+        &invalidated,
+        "write_stdin",
+        Some("builder-a"),
+        &format!("write_stdin failed: Unknown process id {session_id}"),
     );
 
     let unknown = cluster
@@ -148,10 +149,11 @@ async fn sessions_are_invalidated_after_daemon_restart() {
             }),
         )
         .await;
-    assert_eq!(
-        unknown,
-        format!("write_stdin failed: Unknown process id {session_id}"),
-        "unknown session error: {unknown}"
+    support::assert_correlated_tool_error(
+        &unknown,
+        "write_stdin",
+        Some("builder-a"),
+        &format!("write_stdin failed: Unknown process id {session_id}"),
     );
 }
 

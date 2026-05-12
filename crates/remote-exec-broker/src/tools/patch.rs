@@ -22,6 +22,7 @@ pub async fn apply_patch(
 ) -> anyhow::Result<ToolCallOutput> {
     let started = std::time::Instant::now();
     let target_name = input.target.clone();
+    crate::request_context::set_current_target(target_name.clone());
     let patch_len = input.input.len();
     tracing::info!(
         tool = "apply_patch",

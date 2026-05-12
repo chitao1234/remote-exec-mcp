@@ -172,9 +172,11 @@ async fn write_stdin_wraps_stub_stale_daemon_session_as_unknown_process_id() {
         )
         .await;
 
-    assert_eq!(
-        error,
-        format!("write_stdin failed: Unknown process id {public_session_id}")
+    support::assert_correlated_tool_error(
+        &error,
+        "write_stdin",
+        Some("builder-a"),
+        &format!("write_stdin failed: Unknown process id {public_session_id}"),
     );
 }
 
@@ -193,7 +195,12 @@ async fn write_stdin_wraps_unknown_public_session_as_unknown_process_id() {
         )
         .await;
 
-    assert_eq!(error, "write_stdin failed: Unknown process id sess_missing");
+    support::assert_correlated_tool_error(
+        &error,
+        "write_stdin",
+        None,
+        "write_stdin failed: Unknown process id sess_missing",
+    );
 }
 
 #[tokio::test]
@@ -227,12 +234,14 @@ async fn write_stdin_wraps_daemon_unknown_session_as_unknown_process_id() {
         )
         .await;
 
-    assert_eq!(
-        error,
-        format!(
+    support::assert_correlated_tool_error(
+        &error,
+        "write_stdin",
+        Some("builder-a"),
+        &format!(
             "write_stdin failed: Unknown process id {}",
             started.structured_content["session_id"].as_str().unwrap()
-        )
+        ),
     );
 }
 
@@ -266,7 +275,12 @@ async fn write_stdin_keeps_session_after_retryable_daemon_error() {
             }),
         )
         .await;
-    assert!(first.starts_with("write_stdin failed: "));
+    support::assert_correlated_tool_error(
+        &first,
+        "write_stdin",
+        Some("builder-a"),
+        "write_stdin failed: temporary_failure: temporary failure (500 Internal Server Error)",
+    );
     assert!(first.contains("temporary_failure"));
 
     let second = fixture

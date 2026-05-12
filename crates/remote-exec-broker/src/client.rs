@@ -179,12 +179,12 @@ async fn call_direct_tool(
 
     macro_rules! invoke_tool {
         ($input:ty, $handler:path) => {{
-            let input = match deserialize_tool_arguments::<$input>(name, arguments) {
-                Ok(input) => input,
-                Err(err) => return crate::mcp_server::tool_error_result(err.to_string()),
-            };
+            crate::request_context::scope(context, async move {
+                let input = match deserialize_tool_arguments::<$input>(name, arguments) {
+                    Ok(input) => input,
+                    Err(err) => return crate::mcp_server::format_tool_error(err),
+                };
 
-            crate::request_context::scope(context, async {
                 match $handler(state, input).await {
                     Ok(output) => output.into_call_tool_result(!state.disable_structured_content),
                     Err(err) => crate::mcp_server::format_tool_error(err),

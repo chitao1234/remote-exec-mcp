@@ -54,8 +54,41 @@ pub fn tool_error_result(text: String) -> CallToolResult {
 }
 
 pub fn format_tool_error(err: anyhow::Error) -> CallToolResult {
-    tracing::warn!(error = %err, "broker tool returned error");
-    tool_error_result(err.to_string())
+    let message = err.to_string();
+    if let Some(context) = crate::request_context::current() {
+        tracing::warn!(
+            request_id = %context.request_id(),
+            tool = context.tool(),
+            target = context.target().unwrap_or("-"),
+            error = %message,
+            "broker tool returned error"
+        );
+        return tool_error_result(format_correlated_error(&message, &context));
+    }
+
+    tracing::warn!(error = %message, "broker tool returned error");
+    tool_error_result(message)
+}
+
+fn format_correlated_error(
+    message: &str,
+    context: &crate::request_context::RequestContextSnapshot,
+) -> String {
+    match context.target() {
+        Some(target) => format!(
+            "request_id={} tool={} target={}: {}",
+            context.request_id(),
+            context.tool(),
+            target,
+            message
+        ),
+        None => format!(
+            "request_id={} tool={}: {}",
+            context.request_id(),
+            context.tool(),
+            message
+        ),
+    }
 }
 
 #[derive(Clone)]
@@ -361,5 +394,53 @@ async fn wait_for_shutdown_signal() {
     #[cfg(not(unix))]
     {
         let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_tool_error;
+    use crate::request_context::RequestContext;
+
+    fn error_text(result: rmcp::model::CallToolResult) -> String {
+        result.content[0]
+            .raw
+            .as_text()
+            .expect("text content")
+            .text
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn tool_errors_include_request_context_and_preserve_suffix() {
+        let context = RequestContext::new("exec_command");
+        context.set_target("builder-a");
+
+        let text = crate::request_context::scope(context, async {
+            error_text(format_tool_error(anyhow::anyhow!("daemon unavailable")))
+        })
+        .await;
+
+        assert!(text.starts_with("request_id=req_"), "{text}");
+        assert!(
+            text.contains(" tool=exec_command target=builder-a: "),
+            "{text}"
+        );
+        assert!(text.ends_with("daemon unavailable"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn tool_errors_omit_unknown_target_context() {
+        let context = RequestContext::new("list_targets");
+
+        let text = crate::request_context::scope(context, async {
+            error_text(format_tool_error(anyhow::anyhow!("bad list")))
+        })
+        .await;
+
+        assert!(text.starts_with("request_id=req_"), "{text}");
+        assert!(text.contains(" tool=list_targets: "), "{text}");
+        assert!(!text.contains(" target="), "{text}");
+        assert!(text.ends_with("bad list"), "{text}");
     }
 }

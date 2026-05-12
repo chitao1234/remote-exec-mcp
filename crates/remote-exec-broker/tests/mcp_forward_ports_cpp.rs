@@ -193,9 +193,11 @@ yield_time_write_stdin_input_min_ms = 1\n",
         .await
         .unwrap();
     assert!(first_poll.is_error, "expected pruned session failure");
-    assert_eq!(
-        first_poll.text_output,
-        format!("write_stdin failed: Unknown process id {first_session_id}")
+    support::assert_correlated_tool_error(
+        &first_poll.text_output,
+        "write_stdin",
+        Some("builder-a"),
+        &format!("write_stdin failed: Unknown process id {first_session_id}"),
     );
 
     let second_poll = fixture

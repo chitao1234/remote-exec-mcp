@@ -18,6 +18,7 @@ pub async fn transfer_files(
     input: TransferFilesInput,
 ) -> anyhow::Result<ToolCallOutput> {
     let started = std::time::Instant::now();
+    set_transfer_target_context(&input);
     let sources = resolve_sources(&input)?;
     let requested_destination = input.destination.clone();
     let compression =
@@ -106,5 +107,20 @@ fn resolve_sources(input: &TransferFilesInput) -> anyhow::Result<Vec<TransferEnd
         (Some(source), true) => Ok(vec![source.clone()]),
         (None, false) => Ok(input.sources.clone()),
         (None, true) => anyhow::bail!("`sources` must contain at least one entry"),
+    }
+}
+
+fn set_transfer_target_context(input: &TransferFilesInput) {
+    let mut targets = Vec::new();
+    if let Some(source) = &input.source {
+        targets.push(source.target.as_str());
+    }
+    targets.extend(input.sources.iter().map(|source| source.target.as_str()));
+    targets.push(input.destination.target.as_str());
+    targets.retain(|target| !target.is_empty());
+    targets.sort_unstable();
+    targets.dedup();
+    if !targets.is_empty() {
+        crate::request_context::set_current_target(targets.join(","));
     }
 }

@@ -367,15 +367,17 @@ async fn view_image_returns_text_only_errors_without_input_image_content() {
         .await;
 
     assert!(result.is_error);
-    assert_eq!(
-        result.text_output,
-        "unable to locate image at `/tmp/chart.png`: No such file or directory (os error 2)"
+    support::assert_correlated_tool_error(
+        &result.text_output,
+        "view_image",
+        Some("builder-a"),
+        "unable to locate image at `/tmp/chart.png`: No such file or directory (os error 2)",
     );
     assert_eq!(
         result.raw_content,
         vec![serde_json::json!({
             "type": "text",
-            "text": "unable to locate image at `/tmp/chart.png`: No such file or directory (os error 2)"
+            "text": result.text_output
         })]
     );
 }
@@ -407,9 +409,11 @@ async fn view_image_invalid_detail_matches_daemon_message() {
         .await;
 
     assert!(result.is_error);
-    assert_eq!(
-        result.text_output,
-        "view_image.detail only supports `original`; omit `detail` for default resized behavior, got `low`"
+    support::assert_correlated_tool_error(
+        &result.text_output,
+        "view_image",
+        Some("builder-a"),
+        "view_image.detail only supports `original`; omit `detail` for default resized behavior, got `low`",
     );
 }
 

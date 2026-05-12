@@ -24,6 +24,7 @@ pub async fn exec_command(
 ) -> anyhow::Result<ToolCallOutput> {
     let started = Instant::now();
     let target_name = input.target.clone();
+    crate::request_context::set_current_target(target_name.clone());
     let cmd_preview = crate::logging::preview_text(&input.cmd, 120);
     tracing::info!(
         tool = "exec_command",
@@ -91,6 +92,9 @@ pub async fn write_stdin(
     let started = Instant::now();
     let session_id = input.session_id.clone();
     let requested_target = input.target.clone();
+    if let Some(target) = &requested_target {
+        crate::request_context::set_current_target(target.clone());
+    }
     let chars_len = input.chars.as_ref().map(|chars| chars.len()).unwrap_or(0);
     tracing::info!(
         tool = "write_stdin",
@@ -146,6 +150,7 @@ async fn write_stdin_inner(
         .get(&input.session_id)
         .await
         .with_context(|| unknown_process_id_message(&input.session_id))?;
+    crate::request_context::set_current_target(record.target.clone());
 
     if let Some(target) = &input.target {
         anyhow::ensure!(
