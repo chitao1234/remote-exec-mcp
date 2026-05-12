@@ -14,18 +14,15 @@ use crate::{
 
 pub const CA_CERT_FILENAME: &str = "ca.pem";
 pub const CA_KEY_FILENAME: &str = "ca.key";
+const CA_PAIR_NAME: &str = "ca";
+const BROKER_PAIR_NAME: &str = "broker";
 
 pub fn write_ca_pair(
     pair: &crate::GeneratedPemPair,
     out_dir: &Path,
     force: bool,
 ) -> anyhow::Result<KeyPairPaths> {
-    let paths = KeyPairPaths {
-        cert_pem: out_dir.join(CA_CERT_FILENAME),
-        key_pem: out_dir.join(CA_KEY_FILENAME),
-    };
-    write_pair(&paths, pair, force)?;
-    Ok(paths)
+    write_named_pair(CA_PAIR_NAME, pair, out_dir, force)
 }
 
 pub fn write_broker_pair(
@@ -33,12 +30,7 @@ pub fn write_broker_pair(
     out_dir: &Path,
     force: bool,
 ) -> anyhow::Result<KeyPairPaths> {
-    let paths = KeyPairPaths {
-        cert_pem: out_dir.join("broker.pem"),
-        key_pem: out_dir.join("broker.key"),
-    };
-    write_pair(&paths, pair, force)?;
-    Ok(paths)
+    write_named_pair(BROKER_PAIR_NAME, pair, out_dir, force)
 }
 
 pub fn write_daemon_pair(
@@ -47,12 +39,7 @@ pub fn write_daemon_pair(
     out_dir: &Path,
     force: bool,
 ) -> anyhow::Result<KeyPairPaths> {
-    let paths = KeyPairPaths {
-        cert_pem: out_dir.join(format!("{target}.pem")),
-        key_pem: out_dir.join(format!("{target}.key")),
-    };
-    write_pair(&paths, pair, force)?;
-    Ok(paths)
+    write_named_pair(target, pair, out_dir, force)
 }
 
 pub fn write_dev_init_bundle(
@@ -66,14 +53,8 @@ pub fn write_dev_init_bundle(
     fs::create_dir_all(&daemon_out_dir)
         .with_context(|| format!("creating {}", daemon_out_dir.display()))?;
 
-    let ca = KeyPairPaths {
-        cert_pem: out_dir.join(CA_CERT_FILENAME),
-        key_pem: out_dir.join(CA_KEY_FILENAME),
-    };
-    let broker = KeyPairPaths {
-        cert_pem: out_dir.join("broker.pem"),
-        key_pem: out_dir.join("broker.key"),
-    };
+    let ca = named_pair_paths(CA_PAIR_NAME, out_dir);
+    let broker = named_pair_paths(BROKER_PAIR_NAME, out_dir);
     let manifest_path = out_dir.join("certs-manifest.json");
     let daemon_paths = build_daemon_paths(spec, &daemon_out_dir);
     validate_dev_init_output_paths(&ca, &broker, &daemon_paths, &manifest_path, force)?;
@@ -100,15 +81,27 @@ fn build_daemon_paths(spec: &DevInitSpec, daemon_out_dir: &Path) -> BTreeMap<Str
         .iter()
         .map(|daemon| {
             let target = daemon.target.clone();
-            (
-                target.clone(),
-                KeyPairPaths {
-                    cert_pem: daemon_out_dir.join(format!("{target}.pem")),
-                    key_pem: daemon_out_dir.join(format!("{target}.key")),
-                },
-            )
+            (target.clone(), named_pair_paths(&target, daemon_out_dir))
         })
         .collect()
+}
+
+fn write_named_pair(
+    name: &str,
+    pair: &crate::GeneratedPemPair,
+    out_dir: &Path,
+    force: bool,
+) -> anyhow::Result<KeyPairPaths> {
+    let paths = named_pair_paths(name, out_dir);
+    write_pair(&paths, pair, force)?;
+    Ok(paths)
+}
+
+fn named_pair_paths(name: &str, out_dir: &Path) -> KeyPairPaths {
+    KeyPairPaths {
+        cert_pem: out_dir.join(format!("{name}.pem")),
+        key_pem: out_dir.join(format!("{name}.key")),
+    }
 }
 
 fn validate_dev_init_output_paths(

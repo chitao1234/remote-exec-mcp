@@ -1,6 +1,9 @@
 use std::net::{IpAddr, Ipv4Addr};
 
-use remote_exec_pki::{DaemonCertSpec, DevInitSpec, SubjectAltName, build_dev_init_bundle};
+use remote_exec_pki::{
+    CA_CERT_FILENAME, CA_KEY_FILENAME, DaemonCertSpec, DevInitSpec, SubjectAltName,
+    build_dev_init_bundle, write_dev_init_bundle,
+};
 
 fn assert_pem_pair(cert_pem: &str, key_pem: &str) {
     assert!(cert_pem.contains("BEGIN CERTIFICATE"));
@@ -90,4 +93,33 @@ fn generates_bundle_for_requested_targets() {
         &bundle.daemons["builder-a"].cert_pem,
         bundle.daemons["builder-a"].key_pem.as_str(),
     );
+}
+
+#[test]
+fn writes_dev_init_bundle_with_expected_paths() {
+    let spec = DevInitSpec {
+        ca_common_name: "remote-exec-ca".to_string(),
+        broker_common_name: "remote-exec-broker".to_string(),
+        daemon_specs: vec![DaemonCertSpec::localhost("builder-a")],
+    };
+    let bundle = build_dev_init_bundle(&spec).expect("bundle should generate");
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let out_dir = tempdir.path().join("certs");
+
+    let manifest =
+        write_dev_init_bundle(&spec, &bundle, &out_dir, true).expect("bundle should write");
+
+    assert_eq!(manifest.ca.cert_pem, out_dir.join(CA_CERT_FILENAME));
+    assert_eq!(manifest.ca.key_pem, out_dir.join(CA_KEY_FILENAME));
+    assert_eq!(manifest.broker.cert_pem, out_dir.join("broker.pem"));
+    assert_eq!(manifest.broker.key_pem, out_dir.join("broker.key"));
+    assert_eq!(
+        manifest.daemons["builder-a"].cert_pem,
+        out_dir.join("daemons").join("builder-a.pem")
+    );
+    assert_eq!(
+        manifest.daemons["builder-a"].key_pem,
+        out_dir.join("daemons").join("builder-a.key")
+    );
+    assert!(out_dir.join("certs-manifest.json").exists());
 }
