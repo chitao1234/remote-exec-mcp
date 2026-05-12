@@ -7,6 +7,7 @@ build paths:
 
 - native POSIX hosts through `g++`
 - Windows XP-compatible hosts through `i686-w64-mingw32-g++`
+- host-native Windows builds through MSVC/NMAKE
 - Windows XP-compatible hosts through MSVC/NMAKE with the `v141_xp` toolset
 
 The former `remote-exec-daemon-xp` name referred to the original Windows XP-only
@@ -31,21 +32,34 @@ Host-native POSIX daemon:
 Windows XP-compatible cross-build:
 
 - `make all-windows-xp`
-- `make check-windows-xp`
-- `make test-wine-session-store` and `make test-wine-transfer` when `wine` is
-  available; CI runs these on Linux after the XP cross-build.
+- `make check-windows-xp`; this runs XP test binaries under `wine` on Linux and
+  directly on Windows.
+- `make test-windows-xp` for the XP runtime tests without rebuilding the daemon.
+- `make test-windows-xp-session-store` and `make test-windows-xp-transfer` for
+  focused XP runtime tests.
 
 Host-native Windows MinGW build:
 
 - `make all-windows-native` on Windows under MSYS2/MINGW32
 
+Host-native Windows MSVC/NMAKE build:
+
+- Open a Visual Studio developer prompt. Use an x86 prompt for the same 32-bit
+  native path that CI runs.
+- `nmake /f NMakefile`
+- `nmake /f NMakefile all-msvc-native`
+- `nmake /f NMakefile check-msvc-native`
+- `nmake /f NMakefile test-msvc-native-session-store` and
+  `nmake /f NMakefile test-msvc-native-transfer` for focused runtime tests.
+
 Windows XP-compatible MSVC/NMAKE build:
 
 - Open an x86 Visual Studio developer prompt with the XP-capable VS 2017
   toolset, such as `vcvarsall.bat x86 -vcvars_ver=14.16`.
-- `nmake /f NMakefile`
 - `nmake /f NMakefile all-msvc-xp`
 - `nmake /f NMakefile check-msvc-xp`
+- `nmake /f NMakefile test-msvc-xp-session-store` and
+  `nmake /f NMakefile test-msvc-xp-transfer` for focused runtime tests.
 
 The top-level `GNUmakefile` is the GNU make public entry point. Shared source
 lists live in `mk/sources.mk`, shared GNU make helpers live in `mk/common.mk`,
@@ -53,14 +67,17 @@ host-native rules live in `mk/posix.mk`, and Windows XP cross-build rules live
 in `mk/windows-xp.mk`. GNU make prefers `GNUmakefile`, so plain `make` selects
 that file automatically.
 
-`NMakefile` is intentionally separate from the GNU/BSD make entry points and
-builds only the Windows XP-compatible daemon executable with MSVC. It uses the
-static C runtime (`/MT`) and links as an x86 console program with a Windows XP
-minimum subsystem version.
+`NMakefile` is intentionally separate from the GNU/BSD make entry points. It
+builds a host-native MSVC daemon and a Windows XP-compatible MSVC daemon, uses
+the static C runtime (`/MT`), and exposes Win32 session/transfer runtime test
+targets for both toolchains. The XP targets link as an x86 console program with
+a Windows XP minimum subsystem version.
 
 Runtime coverage note: host-native POSIX C++ daemon runtime tests run on Unix.
-Windows XP-compatible binaries are compile-checked on Linux and Windows and are
-executed under Wine on Linux when Wine is available. CI also builds
+Windows XP-compatible binaries and tests run under Wine on Linux and run
+natively on Windows when the XP-capable MSVC toolset is available. CI builds and
+runs the 32-bit host-native MSVC NMAKE test path on `windows-latest`. CI also
+builds
 `build/remote-exec-daemon-cpp.exe` with host-native MinGW on `windows-latest`,
 exposes `C:\msys64\mingw32\bin` for the MinGW runtime DLLs, and runs the Rust
 broker `mcp_forward_ports_cpp::windows_cpp_daemon_smoke` integration test

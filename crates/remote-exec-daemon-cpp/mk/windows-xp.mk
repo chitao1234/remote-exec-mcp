@@ -1,5 +1,10 @@
 WINDOWS_XP_CXX ?= i686-w64-mingw32-g++
 WINE ?= wine
+ifeq ($(OS),Windows_NT)
+WINDOWS_XP_TEST_RUNNER :=
+else
+WINDOWS_XP_TEST_RUNNER ?= $(WINE)
+endif
 
 WINDOWS_XP_PROD_OBJ_DIR := $(OBJ_DIR)/windows-xp-prod
 WINDOWS_XP_TEST_OBJ_DIR := $(OBJ_DIR)/windows-xp-test
@@ -69,20 +74,24 @@ $(WINDOWS_XP_TEST_OBJ_DIR)/%.o: $(MAKEFILE_DIR)%.cpp
 	mkdir -p $(dir $@)
 	$(WINDOWS_XP_CXX) $(WINDOWS_XP_TEST_CPPFLAGS) $(WINDOWS_XP_TEST_CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
 
-test-wine-session-store: $(XP_SESSION_STORE)
-	$(WINE) $(XP_SESSION_STORE)
+test-windows-xp-session-store: $(XP_SESSION_STORE)
+	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_SESSION_STORE)
 
 $(XP_SESSION_STORE): $(XP_SESSION_STORE_OBJS)
 	mkdir -p $(dir $@)
 	$(WINDOWS_XP_CXX) $(WINDOWS_XP_TEST_CXXFLAGS) $(WINDOWS_XP_LDFLAGS) -o $@ $^ $(WINDOWS_XP_LDLIBS)
 
-test-wine-transfer: $(XP_TRANSFER)
-	$(WINE) $(XP_TRANSFER)
+test-windows-xp-transfer: $(XP_TRANSFER)
+	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_TRANSFER)
 
 $(XP_TRANSFER): $(XP_TRANSFER_OBJS)
 	mkdir -p $(dir $@)
 	$(WINDOWS_XP_CXX) $(WINDOWS_XP_TEST_CXXFLAGS) $(WINDOWS_XP_LDFLAGS) -o $@ $^ $(WINDOWS_XP_LDLIBS)
 
-check-windows-xp: all-windows-xp $(WINDOWS_XP_TEST_TARGETS)
+test-windows-xp: $(WINDOWS_XP_TEST_TARGETS)
+	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_SESSION_STORE)
+	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_TRANSFER)
 
-.PHONY: all-windows-xp test-wine-session-store test-wine-transfer check-windows-xp
+check-windows-xp: all-windows-xp test-windows-xp
+
+.PHONY: all-windows-xp test-windows-xp test-windows-xp-session-store test-windows-xp-transfer check-windows-xp

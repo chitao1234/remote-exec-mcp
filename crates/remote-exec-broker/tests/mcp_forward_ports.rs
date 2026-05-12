@@ -341,6 +341,7 @@ async fn forward_ports_keeps_forward_open_after_listen_tunnel_drop() {
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
 
+    support::stub_daemon::wait_for_listen_port_tunnel_transports(&fixture.stub_state, 1).await;
     support::stub_daemon::force_close_listen_port_tunnel_transport(&fixture.stub_state).await;
 
     let forward =
@@ -441,6 +442,11 @@ async fn forward_ports_closes_active_tcp_streams_after_connect_tunnel_drop() {
 async fn forward_ports_connect_side_reconnect_retries_transient_open_failures() {
     let fixture = support::spawners::spawn_broker_with_local_and_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
+    support::stub_daemon::delay_session_ready_after_first(
+        &fixture.stub_state,
+        Duration::from_millis(250),
+    )
+    .await;
 
     let echo = spawn_tcp_echo().await;
     let open = open_tcp_forward(&fixture, "local", "builder-a", echo).await;
@@ -448,6 +454,7 @@ async fn forward_ports_connect_side_reconnect_retries_transient_open_failures() 
     let listen_endpoint = listen_endpoint_from(&open);
     support::stub_daemon::fail_next_port_tunnel_upgrades(&fixture.stub_state, 2).await;
 
+    support::stub_daemon::wait_for_port_tunnel_transports(&fixture.stub_state, 1).await;
     support::stub_daemon::force_close_port_tunnel_transport(&fixture.stub_state).await;
     let mut stream = tokio::net::TcpStream::connect(&listen_endpoint)
         .await
@@ -512,6 +519,7 @@ async fn forward_ports_listen_side_recovery_retries_transient_connect_reopen_fai
     let listen_endpoint = listen_endpoint_from(&open);
     support::stub_daemon::drop_next_connect_tunnel_opens(&fixture.stub_state, 2).await;
 
+    support::stub_daemon::wait_for_listen_port_tunnel_transports(&fixture.stub_state, 1).await;
     support::stub_daemon::force_close_listen_port_tunnel_transport(&fixture.stub_state).await;
 
     let forward =
@@ -536,14 +544,17 @@ async fn forward_ports_listen_side_recovery_retries_transient_connect_reopen_fai
 async fn forward_ports_reports_resumed_listen_ready_while_connect_reopens_after_listen_recovery() {
     let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
+    let mut blocked_connect_open =
+        support::stub_daemon::block_connect_tunnel_open_after_first(&fixture.stub_state).await;
 
     let echo = spawn_tcp_echo().await;
     let open = open_tcp_forward(&fixture, "builder-a", "builder-a", echo).await;
     let forward_id = forward_id_from(&open);
-    support::stub_daemon::drop_next_connect_tunnel_opens(&fixture.stub_state, 100).await;
 
+    support::stub_daemon::wait_for_listen_port_tunnel_transports(&fixture.stub_state, 1).await;
     support::stub_daemon::force_close_listen_port_tunnel_transport(&fixture.stub_state).await;
 
+    blocked_connect_open.wait_blocked().await;
     let reconnecting = wait_for_forward_side_health(
         &fixture,
         &forward_id,
@@ -557,6 +568,12 @@ async fn forward_ports_reports_resumed_listen_ready_while_connect_reopens_after_
     assert_eq!(reconnecting["listen_state"]["health"], "ready");
     assert_eq!(reconnecting["connect_state"]["health"], "reconnecting");
 
+    blocked_connect_open.release();
+    let ready =
+        wait_for_forward_ready_after_reconnect(&fixture, &forward_id, Duration::from_secs(5)).await;
+    assert_eq!(ready["status"], "open");
+    assert_eq!(ready["phase"], "ready");
+
     let close = close_forward(&fixture, forward_id).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
@@ -565,13 +582,15 @@ async fn forward_ports_reports_resumed_listen_ready_while_connect_reopens_after_
 async fn forward_ports_reports_reconnecting_until_connect_side_is_ready() {
     let fixture = support::spawners::spawn_broker_with_local_and_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
+    let mut blocked_session_ready =
+        support::stub_daemon::block_session_ready_after_first(&fixture.stub_state).await;
 
     let echo = spawn_tcp_echo().await;
     let open = open_tcp_forward(&fixture, "local", "builder-a", echo).await;
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
 
-    support::stub_daemon::fail_next_port_tunnel_upgrades(&fixture.stub_state, 2).await;
+    support::stub_daemon::wait_for_port_tunnel_transports(&fixture.stub_state, 1).await;
     support::stub_daemon::force_close_port_tunnel_transport(&fixture.stub_state).await;
     let mut stream = tokio::net::TcpStream::connect(&listen_endpoint)
         .await
@@ -579,6 +598,7 @@ async fn forward_ports_reports_reconnecting_until_connect_side_is_ready() {
     let _ = stream.write_all(b"trigger").await;
     drop(stream);
 
+    blocked_session_ready.wait_blocked().await;
     let reconnecting = wait_for_forward_phase(
         &fixture,
         &forward_id,
@@ -590,6 +610,7 @@ async fn forward_ports_reports_reconnecting_until_connect_side_is_ready() {
     assert_eq!(reconnecting["listen_state"]["health"], "ready");
     assert_eq!(reconnecting["connect_state"]["health"], "reconnecting");
 
+    blocked_session_ready.release();
     let ready =
         wait_for_forward_ready_after_reconnect(&fixture, &forward_id, Duration::from_secs(5)).await;
     assert_eq!(ready["status"], "open");
@@ -645,6 +666,7 @@ max_reconnecting_forwards = 1
     let forward_ids = vec![forward_id_at(&open, 0), forward_id_at(&open, 1)];
 
     support::stub_daemon::fail_next_port_tunnel_upgrades(&fixture.stub_state, 100).await;
+    support::stub_daemon::wait_for_port_tunnel_transports(&fixture.stub_state, 2).await;
     support::stub_daemon::force_close_port_tunnel_transport(&fixture.stub_state).await;
 
     let entries =
@@ -671,6 +693,11 @@ max_reconnecting_forwards = 1
 async fn forward_ports_fails_when_resume_deadline_expires() {
     let fixture = support::spawners::spawn_broker_with_stub_port_forward_version(4).await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
+    support::stub_daemon::set_session_resume_timeout(
+        &fixture.stub_state,
+        Duration::from_millis(350),
+    )
+    .await;
     support::stub_daemon::block_session_resume(&fixture.stub_state).await;
     let blackhole = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let blackhole_addr = blackhole.local_addr().unwrap();
@@ -682,10 +709,14 @@ async fn forward_ports_fails_when_resume_deadline_expires() {
     let forward_id = forward_id_from(&open);
 
     support::stub_daemon::wait_for_port_tunnel_transports(&fixture.stub_state, 1).await;
+    let resume_attempts_before =
+        support::stub_daemon::resume_attempt_count(&fixture.stub_state).await;
     support::stub_daemon::force_close_port_tunnel_transport(&fixture.stub_state).await;
+    support::stub_daemon::wait_for_resume_attempts(&fixture.stub_state, resume_attempts_before + 1)
+        .await;
 
     let failed =
-        wait_for_forward_status(&fixture, &forward_id, "failed", Duration::from_secs(15)).await;
+        wait_for_forward_status(&fixture, &forward_id, "failed", Duration::from_secs(5)).await;
     let error = failed["last_error"].as_str().unwrap_or_default();
     assert!(
         error.contains("reconnect timed out")
@@ -714,7 +745,15 @@ async fn forward_ports_times_out_stalled_resume_attempts() {
         .await;
     let forward_id = forward_id_from(&open);
 
+    support::stub_daemon::wait_for_port_tunnel_transports(&fixture.stub_state, 1).await;
+    let closed_before =
+        support::stub_daemon::closed_port_tunnel_transport_count(&fixture.stub_state).await;
     support::stub_daemon::force_close_port_tunnel_transport(&fixture.stub_state).await;
+    support::stub_daemon::wait_for_closed_port_tunnel_transports(
+        &fixture.stub_state,
+        closed_before + 1,
+    )
+    .await;
 
     let failed =
         wait_for_forward_status(&fixture, &forward_id, "failed", Duration::from_secs(3)).await;
@@ -743,7 +782,16 @@ async fn forward_ports_does_not_retry_stream_error_frames() {
         .open_remote_tcp_forward(&blackhole_addr.to_string())
         .await;
     let forward_id = forward_id_from(&open);
+
+    support::stub_daemon::wait_for_port_tunnel_transports(&fixture.stub_state, 1).await;
+    let closed_before =
+        support::stub_daemon::closed_port_tunnel_transport_count(&fixture.stub_state).await;
     support::stub_daemon::force_close_port_tunnel_transport(&fixture.stub_state).await;
+    support::stub_daemon::wait_for_closed_port_tunnel_transports(
+        &fixture.stub_state,
+        closed_before + 1,
+    )
+    .await;
 
     let failed =
         wait_for_forward_status(&fixture, &forward_id, "failed", Duration::from_secs(10)).await;
@@ -768,6 +816,7 @@ async fn forward_ports_close_cleanup_failure_returns_error_and_marks_forward_fai
         .await;
     let forward_id = forward_id_from(&open);
 
+    support::stub_daemon::wait_for_listen_port_tunnel_transports(&fixture.stub_state, 1).await;
     support::stub_daemon::force_close_listen_port_tunnel_transport(&fixture.stub_state).await;
 
     let close_error = fixture

@@ -58,7 +58,8 @@ drops daemon-local command sessions and forwarded sockets.
 - `remote-exec-host`: shared Rust host runtime reused by the Rust daemon and the
   broker-host `local` target.
 - `remote-exec-daemon-cpp`: standalone plain-HTTP C++ daemon with native POSIX,
-  MinGW Windows XP-compatible, and MSVC v141_xp-compatible build paths.
+  MinGW Windows XP-compatible, host-native MSVC, and MSVC v141_xp-compatible
+  build paths.
 - `remote-exec-proto`: public MCP schemas, broker-daemon RPC schemas, path and
   sandbox helpers, and port-forward protocol types.
 - `remote-exec-admin`: administrative CLI for certificate/bootstrap workflows.
@@ -451,6 +452,12 @@ make -C crates/remote-exec-daemon-cpp check-windows-xp
 bmake -C crates/remote-exec-daemon-cpp check-posix
 ```
 
+From an x86 Visual Studio developer prompt:
+
+```bat
+nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-native
+```
+
 From an x86 Visual Studio developer prompt with the v141_xp-capable toolset:
 
 ```bat
@@ -493,6 +500,8 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 make -C crates/remote-exec-daemon-cpp check-posix
 make -C crates/remote-exec-daemon-cpp check-windows-xp
+# From an x86 Visual Studio developer prompt:
+nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-native
 # From an x86 Visual Studio developer prompt with the v141_xp-capable toolset:
 nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-xp
 ```
@@ -525,11 +534,14 @@ CI also exercises broker, daemon, and host `--no-default-features` test and
 clippy jobs on Ubuntu so the `tls-disabled` and host feature-gated code paths
 stay intentionally covered.
 
-CI exercises the Rust broker and Rust daemon on Linux and Windows. The
-standalone C++ daemon is built on Linux and Windows, POSIX runtime tests run on
-Linux, Windows XP-compatible test binaries run under Wine on Linux when
-available, and `mcp_forward_ports_cpp.rs` includes a native `windows-latest`
-broker-to-C++ daemon smoke test against `remote-exec-daemon-cpp.exe`.
+CI exercises the Rust broker and Rust daemon on Linux and Windows. The Rust
+broker integration tests consume a prebuilt C++ daemon binary when one is
+present, and skip the C++ daemon scenarios when it is absent; they do not build
+the C++ daemon themselves. CI builds that C++ daemon binary in an explicit step
+before the Rust test job. The standalone C++ daemon also has its own Linux and
+Windows CI job: POSIX runtime tests run on Linux, Windows XP-compatible test
+binaries run under Wine on Linux when available, and the 32-bit host-native MSVC
+NMAKE path runs on `windows-latest`.
 
 Windows GNU compile-only checks from Linux:
 

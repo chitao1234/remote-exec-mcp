@@ -59,22 +59,20 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Set up MSYS2 for native Windows C++ smoke
+      - name: Set up MSVC for Rust C++ integration tests
         if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@v2
+        uses: ilammy/msvc-dev-cmd@v1
         with:
-          msystem: MINGW32
-          update: true
-          install: >-
-            make
-            mingw-w64-i686-gcc
+          arch: x64
 
-      - name: Expose MSYS2 tools and MinGW runtime
+      - name: Build C++ daemon for Rust integration tests
+        if: runner.os == 'Linux'
+        run: make -C crates/remote-exec-daemon-cpp all-posix
+
+      - name: Build C++ daemon for Rust integration tests
         if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          printf '%s\n' 'C:\msys64\usr\bin' >> "$GITHUB_PATH"
-          printf '%s\n' 'C:\msys64\mingw32\bin' >> "$GITHUB_PATH"
+        shell: cmd
+        run: nmake /f crates\remote-exec-daemon-cpp\NMakefile all-msvc-native
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -83,6 +81,15 @@ jobs:
           prefix-key: v1-rust-test-nodebug
 
       - name: Run tests
+        if: runner.os == 'Linux'
+        env:
+          REMOTE_EXEC_CPP_DAEMON: ${{ github.workspace }}/crates/remote-exec-daemon-cpp/build/remote-exec-daemon-cpp
+        run: cargo test --workspace --locked
+
+      - name: Run tests
+        if: runner.os == 'Windows'
+        env:
+          REMOTE_EXEC_CPP_DAEMON: ${{ github.workspace }}\crates\remote-exec-daemon-cpp\build\remote-exec-daemon-cpp-msvc.exe
         run: cargo test --workspace --locked
 
   rust-test-no-default-features:
@@ -207,15 +214,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y g++ make g++-mingw-w64-i686 wine wine32:i386
 
-      - name: Set up MSYS2
+      - name: Set up MSVC
         if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@v2
+        uses: ilammy/msvc-dev-cmd@v1
         with:
-          msystem: MINGW32
-          update: true
-          install: >-
-            make
-            mingw-w64-i686-gcc
+          arch: x86
 
       - name: Run Linux C++ checks
         if: runner.os == 'Linux'
@@ -237,15 +240,8 @@ jobs:
             exit 1
           fi
 
-          if command -v wine >/dev/null 2>&1; then
-            make -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-windows-xp test-wine-session-store test-wine-transfer
-          else
-            echo "wine not available; skipping XP runtime tests"
-          fi
-
       - name: Run Windows C++ checks
         if: runner.os == 'Windows'
-        shell: msys2 {0}
+        shell: cmd
         run: |
-          jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)"
-          make -j"${jobs}" -C crates/remote-exec-daemon-cpp check-windows-xp
+          nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-native
