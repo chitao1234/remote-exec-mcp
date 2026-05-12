@@ -223,14 +223,23 @@ static void assert_target_info_and_basic_helpers(AppState& state) {
     HttpRequest info_request;
     info_request.method = "POST";
     info_request.path = "/v1/target-info";
+    info_request.headers[request_id_header_name()] = "client-req-123";
     const HttpResponse info_response = route_request(state, info_request);
     assert(info_response.status == 200);
+    assert(info_response.headers.at(request_id_header_name()) == "client-req-123");
     const Json info = Json::parse(info_response.body);
     assert(info.at("target").get<std::string>() == "cpp-test");
     assert(info.at("supports_pty").get<bool>() == process_session_supports_pty());
     assert(info.at("supports_image_read").get<bool>());
     assert(info.at("supports_port_forward").get<bool>());
     assert(info.at("port_forward_protocol_version").get<int>() == 4);
+
+    HttpRequest generated_request;
+    generated_request.method = "POST";
+    generated_request.path = "/v1/health";
+    const HttpResponse generated_response = route_request(state, generated_request);
+    assert(generated_response.status == 200);
+    assert(generated_response.headers.at(request_id_header_name()).find("req_cpp_") == 0);
 
     assert(normalize_port_forward_endpoint("8080") == "127.0.0.1:8080");
     assert(base64_decode_bytes(base64_encode_bytes(std::string("hello\0world", 11))).size() == 11);

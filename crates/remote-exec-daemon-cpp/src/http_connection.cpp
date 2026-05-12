@@ -181,11 +181,16 @@ HttpResponse handle_streaming_transfer_import(
     return response;
 }
 
-void send_transfer_export_headers(SOCKET client, const ExportedPayload& payload) {
+void send_transfer_export_headers(
+    SOCKET client,
+    const ExportedPayload& payload,
+    const HttpRequest& request
+) {
     HttpResponse response;
     response.status = 200;
     response.headers["Transfer-Encoding"] = "chunked";
     write_transfer_export_headers(response, payload);
+    write_request_id_header(response, request);
 
     std::ostringstream out;
     out << "HTTP/1.1 200 OK\r\n";
@@ -207,6 +212,7 @@ int handle_streaming_transfer_export(
     HttpResponse rejection;
     rejection.status = 200;
     if (reject_before_route(state, request_head, &rejection)) {
+        write_request_id_header(rejection, request_head);
         send_all(client, render_http_response(rejection));
         return rejection.status;
     }
@@ -227,7 +233,8 @@ int handle_streaming_transfer_export(
 
         send_transfer_export_headers(
             client,
-            ExportedPayload{export_request.source_type, std::string()}
+            ExportedPayload{export_request.source_type, std::string()},
+            request
         );
         headers_sent = true;
         ChunkedTransferArchiveSink sink(client);
@@ -250,6 +257,7 @@ int handle_streaming_transfer_export(
         HttpResponse response;
         response.status = 400;
         write_transfer_error_response(response, ex);
+        write_request_id_header(response, request_head);
         try_send_response(client, response);
         return response.status;
     } catch (const TransferFailure& failure) {
@@ -261,6 +269,7 @@ int handle_streaming_transfer_export(
         HttpResponse response;
         response.status = transfer_error_status(failure.code);
         write_transfer_error_response(response, failure);
+        write_request_id_header(response, request_head);
         try_send_response(client, response);
         return response.status;
     } catch (const std::exception& ex) {
@@ -273,6 +282,7 @@ int handle_streaming_transfer_export(
         HttpResponse response;
         response.status = transfer_error_status(TransferRpcCode::Internal);
         write_transfer_internal_error_response(response, message);
+        write_request_id_header(response, request_head);
         try_send_response(client, response);
         return response.status;
     }
@@ -285,6 +295,7 @@ void log_request_result(
 ) {
     std::ostringstream message;
     message << request.method << ' ' << request.path
+            << " request_id=" << request_id_for_request(request)
             << " status=" << status
             << " elapsed_ms=" << (platform::monotonic_ms() - started_at_ms);
     log_message(level_for_status(status), "server", message.str());
@@ -298,6 +309,7 @@ int handle_client_request(
 ) {
     const std::uint64_t started_at_ms = platform::monotonic_ms();
     HttpRequest request = parse_http_request_head(request_head.raw_headers);
+    assign_request_id(request);
     *close_after_response = request_connection_close_requested(request);
     const HttpRequestBodyFraming framing =
         parse_request_body_framing_or_throw_bad_request(request);
@@ -327,6 +339,7 @@ int handle_client_request(
         request.body = read_request_body_to_string(&body);
         response = route_request(state, request);
     }
+    write_request_id_header(response, request);
     log_request_result(request, response.status, started_at_ms);
     if (!try_send_response(client, response)) {
         *close_after_response = true;

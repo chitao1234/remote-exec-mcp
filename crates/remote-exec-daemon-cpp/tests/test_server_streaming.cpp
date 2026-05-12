@@ -515,12 +515,14 @@ static void open_tunnel(AppState& state, UniqueSocket* client_socket, std::threa
         "Connection: Upgrade\r\n"
         "Upgrade: remote-exec-port-tunnel\r\n"
         "X-Remote-Exec-Port-Tunnel-Version: 4\r\n"
+        "X-Request-Id: cpp-tunnel-req\r\n"
         "\r\n"
     );
     const std::string response = read_http_head_from_socket(client_socket->get());
     assert(response.find("HTTP/1.1 101 Switching Protocols\r\n") == 0);
     assert(response.find("Connection: Upgrade\r\n") != std::string::npos);
     assert(response.find("Upgrade: remote-exec-port-tunnel\r\n") != std::string::npos);
+    assert(response.find("x-request-id: cpp-tunnel-req\r\n") != std::string::npos);
     send_preface(client_socket->get());
 }
 

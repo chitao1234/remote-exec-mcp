@@ -260,6 +260,7 @@ int handle_port_tunnel_upgrade(AppState& state, SOCKET client, const HttpRequest
         !request_has_bearer_auth(request, state.config.http_auth_bearer_token)) {
         HttpResponse response;
         write_bearer_auth_challenge(response);
+        write_request_id_header(response, request);
         send_all(client, render_http_response(response));
         return response.status;
     }
@@ -269,16 +270,17 @@ int handle_port_tunnel_upgrade(AppState& state, SOCKET client, const HttpRequest
         request.header("x-remote-exec-port-tunnel-version") != "4") {
         HttpResponse response;
         write_rpc_error(response, 400, "bad_request", "invalid port tunnel upgrade request");
+        write_request_id_header(response, request);
         send_all(client, render_http_response(response));
         return response.status;
     }
 
+    const std::string request_id = request_id_for_request(request);
     send_all(
         client,
-        "HTTP/1.1 101 Switching Protocols\r\n"
-        "Connection: Upgrade\r\n"
-        "Upgrade: remote-exec-port-tunnel\r\n"
-        "\r\n"
+        "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: "
+        "remote-exec-port-tunnel\r\n" +
+            std::string(request_id_header_name()) + ": " + request_id + "\r\n\r\n"
     );
     if (!state.port_tunnel_service) {
         state.port_tunnel_service =

@@ -1,3 +1,4 @@
+#include <atomic>
 #include <sstream>
 #include <stdexcept>
 
@@ -21,6 +22,26 @@ bool constant_time_equals(const std::string& actual, const std::string& expected
     return diff == 0U;
 }
 
+bool is_log_safe_request_id(const std::string& value) {
+    if (value.empty() || value.size() > 128U) {
+        return false;
+    }
+    for (std::string::const_iterator it = value.begin(); it != value.end(); ++it) {
+        const unsigned char byte = static_cast<unsigned char>(*it);
+        if (byte < 0x21U || byte > 0x7eU) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::string generate_request_id() {
+    static std::atomic<unsigned long long> next_id(1ULL);
+    std::ostringstream out;
+    out << "req_cpp_" << std::hex << next_id.fetch_add(1ULL);
+    return out.str();
+}
+
 }  // namespace
 
 std::string HttpRequest::header(const std::string& name) const {
@@ -41,6 +62,31 @@ Json parse_json_body(const HttpRequest& req) {
 bool request_has_bearer_auth(const HttpRequest& req, const std::string& bearer_token) {
     const std::string expected = "Bearer " + bearer_token;
     return constant_time_equals(req.header("authorization"), expected);
+}
+
+const char* request_id_header_name() {
+    return "x-request-id";
+}
+
+std::string request_id_for_request(const HttpRequest& req) {
+    if (is_log_safe_request_id(req.request_id)) {
+        return req.request_id;
+    }
+
+    const std::string header_value = req.header(request_id_header_name());
+    if (is_log_safe_request_id(header_value)) {
+        return header_value;
+    }
+
+    return generate_request_id();
+}
+
+void assign_request_id(HttpRequest& req) {
+    req.request_id = request_id_for_request(req);
+}
+
+void write_request_id_header(HttpResponse& res, const HttpRequest& req) {
+    res.headers[request_id_header_name()] = request_id_for_request(req);
 }
 
 void write_json(HttpResponse& res, const Json& body) {

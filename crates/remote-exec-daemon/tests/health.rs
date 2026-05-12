@@ -6,6 +6,7 @@ use remote_exec_daemon::config::{
     DaemonConfig, DaemonTransport, HostPortForwardLimits, ProcessEnvironment, PtyMode,
     YieldTimeConfig,
 };
+use remote_exec_proto::request_id::{REQUEST_ID_HEADER, RequestId};
 use remote_exec_proto::rpc::TargetInfoResponse;
 use reqwest::StatusCode;
 use reqwest::header::{AUTHORIZATION, WWW_AUTHENTICATE};
@@ -41,6 +42,41 @@ async fn raw_http_request(addr: SocketAddr, request: &str) -> String {
     let mut response = Vec::new();
     stream.read_to_end(&mut response).await.unwrap();
     String::from_utf8(response).unwrap()
+}
+
+#[tokio::test]
+async fn daemon_echoes_or_generates_request_id_header() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+
+    let echoed = fixture
+        .client
+        .post(fixture.url("/v1/health"))
+        .header(REQUEST_ID_HEADER, "client-req-123")
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        echoed
+            .headers()
+            .get(REQUEST_ID_HEADER)
+            .and_then(|value| value.to_str().ok()),
+        Some("client-req-123")
+    );
+
+    let generated = fixture
+        .client
+        .post(fixture.url("/v1/health"))
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    let request_id = generated
+        .headers()
+        .get(REQUEST_ID_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .expect("request id should be present");
+    assert!(RequestId::from_header_value(request_id).is_some());
 }
 
 #[tokio::test]

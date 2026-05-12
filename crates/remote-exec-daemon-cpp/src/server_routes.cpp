@@ -9,36 +9,32 @@ HttpResponse route_request(AppState& state, const HttpRequest& request) {
     HttpResponse response;
     response.status = 200;
     if (reject_before_route(state, request, &response)) {
+        write_request_id_header(response, request);
         return response;
     }
 
     if (request.path == "/v1/health") {
-        return handle_health(state);
-    }
-    if (request.path == "/v1/target-info") {
-        return handle_target_info(state);
-    }
-    if (request.path == "/v1/image/read") {
-        return handle_image_read(state, request);
-    }
-    if (request.path == "/v1/exec/start") {
-        return handle_exec_start(state, request);
-    }
-    if (request.path == "/v1/exec/write") {
-        return handle_exec_write(state, request);
-    }
-    if (request.path == "/v1/patch/apply") {
-        return handle_patch_apply(state, request);
-    }
-    if (request.path == "/v1/transfer/export") {
-        return handle_transfer_export(state, request);
-    }
-    if (request.path == "/v1/transfer/path-info") {
-        return handle_transfer_path_info(state, request);
-    }
-    if (request.path == "/v1/transfer/import") {
-        return handle_transfer_import(state, request);
+        response = handle_health(state);
+    } else if (request.path == "/v1/target-info") {
+        response = handle_target_info(state);
+    } else if (request.path == "/v1/image/read") {
+        response = handle_image_read(state, request);
+    } else if (request.path == "/v1/exec/start") {
+        response = handle_exec_start(state, request);
+    } else if (request.path == "/v1/exec/write") {
+        response = handle_exec_write(state, request);
+    } else if (request.path == "/v1/patch/apply") {
+        response = handle_patch_apply(state, request);
+    } else if (request.path == "/v1/transfer/export") {
+        response = handle_transfer_export(state, request);
+    } else if (request.path == "/v1/transfer/path-info") {
+        response = handle_transfer_path_info(state, request);
+    } else if (request.path == "/v1/transfer/import") {
+        response = handle_transfer_import(state, request);
+    } else {
+        response = make_rpc_error_response(404, "not_found", "unknown endpoint");
     }
 
-    return make_rpc_error_response(404, "not_found", "unknown endpoint");
+    write_request_id_header(response, request);
+    return response;
 }
