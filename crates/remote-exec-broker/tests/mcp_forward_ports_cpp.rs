@@ -3,7 +3,6 @@ mod support;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::OnceLock;
 use std::time::Duration;
 
 use remote_exec_broker::client::{Connection, RemoteExecClient};
@@ -37,7 +36,9 @@ fn apply_quiet_test_logging(command: &mut tokio::process::Command) {
 
 #[tokio::test]
 async fn broker_forwards_ports_through_real_cpp_daemon_and_handles_port_conflicts() {
-    let fixture = CppDaemonBrokerFixture::spawn().await;
+    let Some(fixture) = CppDaemonBrokerFixture::spawn().await else {
+        return;
+    };
     let echo_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let echo_addr = echo_listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -116,7 +117,9 @@ async fn broker_forwards_ports_through_real_cpp_daemon_and_handles_port_conflict
 
 #[tokio::test]
 async fn list_targets_reports_port_forward_protocol_version_for_real_cpp_daemon() {
-    let fixture = CppDaemonBrokerFixture::spawn().await;
+    let Some(fixture) = CppDaemonBrokerFixture::spawn().await else {
+        return;
+    };
     let result = fixture
         .client
         .call_tool("list_targets", &serde_json::json!({}))
@@ -136,7 +139,7 @@ async fn list_targets_reports_port_forward_protocol_version_for_real_cpp_daemon(
 #[cfg(unix)]
 #[tokio::test]
 async fn broker_prunes_cpp_exec_sessions_when_daemon_limit_is_reached() {
-    let fixture = CppDaemonBrokerFixture::spawn_with_daemon_config(
+    let Some(fixture) = CppDaemonBrokerFixture::spawn_with_daemon_config(
         "max_open_sessions = 2\n\
 yield_time_exec_command_default_ms = 1\n\
 yield_time_exec_command_max_ms = 1000\n\
@@ -148,7 +151,10 @@ yield_time_write_stdin_input_default_ms = 1\n\
 yield_time_write_stdin_input_max_ms = 1000\n\
 yield_time_write_stdin_input_min_ms = 1\n",
     )
-    .await;
+    .await
+    else {
+        return;
+    };
 
     let first = fixture
         .client
@@ -225,7 +231,9 @@ yield_time_write_stdin_input_min_ms = 1\n",
 
 #[tokio::test]
 async fn broker_forwards_udp_datagrams_through_real_cpp_daemon_full_duplex() {
-    let fixture = CppDaemonBrokerFixture::spawn().await;
+    let Some(fixture) = CppDaemonBrokerFixture::spawn().await else {
+        return;
+    };
     let echo_socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let echo_addr = echo_socket.local_addr().unwrap();
     tokio::spawn(async move {
@@ -291,7 +299,9 @@ async fn broker_forwards_udp_datagrams_through_real_cpp_daemon_full_duplex() {
 #[cfg(unix)]
 #[tokio::test]
 async fn cpp_forward_ports_reconnect_after_tunnel_drop() {
-    let fixture = CppDaemonBrokerFixture::spawn().await;
+    let Some(fixture) = CppDaemonBrokerFixture::spawn().await else {
+        return;
+    };
     let echo_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let echo_addr = echo_listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -348,7 +358,9 @@ async fn cpp_forward_ports_reconnect_after_tunnel_drop() {
 #[cfg(unix)]
 #[tokio::test]
 async fn cpp_forward_ports_reconnect_after_connect_tunnel_drop() {
-    let fixture = CppDaemonBrokerFixture::spawn().await;
+    let Some(fixture) = CppDaemonBrokerFixture::spawn().await else {
+        return;
+    };
     let echo_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let echo_addr = echo_listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -428,7 +440,9 @@ async fn cpp_forward_ports_reconnect_after_connect_tunnel_drop() {
 #[cfg(unix)]
 #[tokio::test]
 async fn real_cpp_daemon_releases_listener_after_broker_crash() {
-    let mut fixture = CrashableCppDaemonBrokerFixture::spawn().await;
+    let Some(mut fixture) = CrashableCppDaemonBrokerFixture::spawn().await else {
+        return;
+    };
 
     let open = fixture
         .client
@@ -475,7 +489,9 @@ async fn real_cpp_daemon_releases_listener_after_broker_crash() {
 #[cfg(windows)]
 #[tokio::test]
 async fn windows_cpp_daemon_smoke() {
-    let fixture = CppDaemonBrokerFixture::spawn().await;
+    let Some(fixture) = CppDaemonBrokerFixture::spawn().await else {
+        return;
+    };
 
     let target_info = fixture
         .client
@@ -543,16 +559,25 @@ struct CppDaemonBrokerFixture {
 }
 
 impl CppDaemonBrokerFixture {
-    async fn spawn() -> Self {
+    async fn spawn() -> Option<Self> {
         Self::spawn_with_daemon_config("").await
     }
 
-    async fn spawn_with_daemon_config(extra_daemon_config: &str) -> Self {
-        ensure_cpp_daemon_built().await;
+    async fn spawn_with_daemon_config(extra_daemon_config: &str) -> Option<Self> {
+        let daemon_binary = match cpp_daemon_binary() {
+            Some(path) => path,
+            None => {
+                eprintln!(
+                    "skipping C++ daemon integration test; {}",
+                    cpp_daemon_skip_message()
+                );
+                return None;
+            }
+        };
         remote_exec_broker::install_crypto_provider().unwrap();
 
         let tempdir = tempfile::tempdir().unwrap();
-        let daemon_binary = stage_cpp_daemon_binary(tempdir.path());
+        let daemon_binary = stage_cpp_daemon_binary(&daemon_binary, tempdir.path());
         let broker_config = tempdir.path().join("broker.toml");
         let daemon_config = tempdir.path().join("daemon-cpp.ini");
         let daemon_workdir = tempdir.path().join("daemon-workdir");
@@ -600,12 +625,12 @@ pty = "none"
         .await
         .unwrap();
 
-        Self {
+        Some(Self {
             _tempdir: tempdir,
             client,
             proxy,
             daemon,
-        }
+        })
     }
 
     async fn open_forward(
@@ -680,6 +705,14 @@ pty = "none"
     }
 }
 
+fn cpp_daemon_skip_message() -> String {
+    let default = cpp_daemon_default_binary();
+    format!(
+        "set REMOTE_EXEC_CPP_DAEMON or build {} before running this test",
+        default.display()
+    )
+}
+
 impl Drop for CppDaemonBrokerFixture {
     fn drop(&mut self) {
         self.proxy.stop();
@@ -737,12 +770,21 @@ struct CrashableCppDaemonBrokerFixture {
 
 #[cfg(unix)]
 impl CrashableCppDaemonBrokerFixture {
-    async fn spawn() -> Self {
-        ensure_cpp_daemon_built().await;
+    async fn spawn() -> Option<Self> {
+        let daemon_binary = match cpp_daemon_binary() {
+            Some(path) => path,
+            None => {
+                eprintln!(
+                    "skipping C++ daemon integration test; {}",
+                    cpp_daemon_skip_message()
+                );
+                return None;
+            }
+        };
         remote_exec_broker::install_crypto_provider().unwrap();
 
         let tempdir = tempfile::tempdir().unwrap();
-        let daemon_binary = stage_cpp_daemon_binary(tempdir.path());
+        let daemon_binary = stage_cpp_daemon_binary(&daemon_binary, tempdir.path());
         let broker_config = tempdir.path().join("broker-http.toml");
         let daemon_config = tempdir.path().join("daemon-cpp.ini");
         let daemon_workdir = tempdir.path().join("daemon-workdir");
@@ -802,13 +844,13 @@ path = "/mcp"
             .await
             .unwrap();
 
-        Self {
+        Some(Self {
             _tempdir: tempdir,
             broker_config,
             client,
             broker,
             daemon,
-        }
+        })
     }
 
     async fn kill_broker(&mut self) {
@@ -1040,53 +1082,36 @@ async fn proxy_port_tunnel_streams(
     Ok(())
 }
 
-fn cpp_daemon_binary() -> PathBuf {
-    let binary = if cfg!(windows) {
+fn cpp_daemon_binary() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("REMOTE_EXEC_CPP_DAEMON").map(PathBuf::from) {
+        return path.exists().then_some(path);
+    }
+
+    let path = cpp_daemon_default_binary();
+    path.exists().then_some(path)
+}
+
+fn cpp_daemon_default_binary() -> PathBuf {
+    cpp_daemon_dir().join(if cfg!(windows) {
         "build/remote-exec-daemon-cpp.exe"
     } else {
         "build/remote-exec-daemon-cpp"
-    };
-    cpp_daemon_dir().join(binary)
+    })
 }
 
 fn cpp_daemon_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../remote-exec-daemon-cpp")
 }
 
-fn stage_cpp_daemon_binary(tempdir: &Path) -> PathBuf {
+fn stage_cpp_daemon_binary(source: &Path, tempdir: &Path) -> PathBuf {
     let staged_name = if cfg!(windows) {
         "remote-exec-daemon-cpp.exe"
     } else {
         "remote-exec-daemon-cpp"
     };
     let staged = tempdir.join(staged_name);
-    std::fs::copy(cpp_daemon_binary(), &staged).unwrap();
+    std::fs::copy(source, &staged).unwrap();
     staged
-}
-
-async fn ensure_cpp_daemon_built() {
-    static CPP_DAEMON_BUILD_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-    let _build_guard = CPP_DAEMON_BUILD_LOCK
-        .get_or_init(|| tokio::sync::Mutex::new(()))
-        .lock()
-        .await;
-
-    let cpp_daemon_dir = cpp_daemon_dir();
-    let target = if cfg!(windows) {
-        "all-windows-native"
-    } else {
-        "all-posix"
-    };
-    let status = tokio::process::Command::new("make")
-        .arg(target)
-        .current_dir(&cpp_daemon_dir)
-        .status()
-        .await
-        .unwrap();
-    assert!(
-        status.success(),
-        "failed to build remote-exec-daemon-cpp with {target}"
-    );
 }
 
 #[cfg(unix)]
