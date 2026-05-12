@@ -261,10 +261,7 @@ async fn existing_destination_is_directory(
 }
 
 fn normalize_path_info_error(err: crate::daemon_client::DaemonClientError) -> anyhow::Error {
-    match err {
-        crate::daemon_client::DaemonClientError::Rpc { message, .. } => anyhow::Error::msg(message),
-        other => other.into(),
-    }
+    err.into_anyhow_rpc_message()
 }
 
 fn path_info_missing_or_unsupported(err: &crate::daemon_client::DaemonClientError) -> bool {

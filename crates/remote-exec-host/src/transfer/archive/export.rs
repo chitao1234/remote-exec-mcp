@@ -14,7 +14,8 @@ use super::exclude_matcher::{ExcludeMatcher, normalize_relative_path};
 use super::summary::{append_transfer_summary, is_transfer_summary_path, read_transfer_summary};
 use super::{
     BundledArchiveSource, ExportPathResult, ExportedArchive, ExportedArchiveStream,
-    SINGLE_FILE_ENTRY, host_path, host_policy,
+    SINGLE_FILE_ENTRY, archive_error_to_transfer_error, host_path, host_policy,
+    internal_transfer_error,
 };
 
 const STREAM_BUFFER_SIZE: usize = 64 * 1024;
@@ -528,15 +529,4 @@ fn append_directory_archive_to_bundle<W: Write, R: Read>(
     }
 
     Ok(warnings)
-}
-
-fn archive_error_to_transfer_error(err: anyhow::Error) -> TransferError {
-    match err.downcast::<TransferError>() {
-        Ok(err) => err,
-        Err(err) => internal_transfer_error(err),
-    }
-}
-
-fn internal_transfer_error(err: impl std::fmt::Display) -> TransferError {
-    TransferError::internal(err.to_string())
 }

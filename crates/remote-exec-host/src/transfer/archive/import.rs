@@ -13,7 +13,7 @@ use crate::error::TransferError;
 use super::codec::{open_archive_reader, wrap_archive_reader};
 use super::entry::{ensure_supported_archive_entry_type, normalize_archive_entry_path};
 use super::summary::{is_transfer_summary_path, read_transfer_summary};
-use super::{host_path, host_policy};
+use super::{archive_error_to_transfer_error, host_path, host_policy, internal_transfer_error};
 
 pub async fn import_archive_from_file(
     archive_path: &Path,
@@ -495,15 +495,4 @@ fn restore_executable_bits(path: &Path, mode: u32) -> anyhow::Result<()> {
 #[cfg(not(unix))]
 fn restore_executable_bits(_path: &Path, _mode: u32) -> anyhow::Result<()> {
     Ok(())
-}
-
-fn archive_error_to_transfer_error(err: anyhow::Error) -> TransferError {
-    match err.downcast::<TransferError>() {
-        Ok(err) => err,
-        Err(err) => internal_transfer_error(err),
-    }
-}
-
-fn internal_transfer_error(err: impl std::fmt::Display) -> TransferError {
-    TransferError::internal(err.to_string())
 }

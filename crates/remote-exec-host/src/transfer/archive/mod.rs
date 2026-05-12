@@ -58,3 +58,16 @@ pub(crate) fn host_path(raw: &str, windows_posix_root: Option<&Path>) -> anyhow:
             .unwrap_or_else(|| PathBuf::from(normalize_for_system(policy, raw))),
     )
 }
+
+pub(crate) fn archive_error_to_transfer_error(err: anyhow::Error) -> crate::error::TransferError {
+    match err.downcast::<crate::error::TransferError>() {
+        Ok(err) => err,
+        Err(err) => internal_transfer_error(err),
+    }
+}
+
+pub(crate) fn internal_transfer_error(
+    err: impl std::fmt::Display,
+) -> crate::error::TransferError {
+    crate::error::TransferError::internal(err.to_string())
+}

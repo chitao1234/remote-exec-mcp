@@ -72,8 +72,7 @@ pub async fn view_image(
 
 fn normalize_view_image_error(err: anyhow::Error) -> anyhow::Error {
     match err.downcast::<DaemonClientError>() {
-        Ok(DaemonClientError::Rpc { message, .. }) => anyhow::Error::msg(message),
-        Ok(other) => other.into(),
+        Ok(other) => other.into_anyhow_rpc_message(),
         Err(other) => other,
     }
 }

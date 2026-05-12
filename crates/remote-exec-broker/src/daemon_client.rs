@@ -73,6 +73,13 @@ impl DaemonClientError {
     pub fn is_transport(&self) -> bool {
         matches!(self, Self::Transport(_))
     }
+
+    pub fn into_anyhow_rpc_message(self) -> anyhow::Error {
+        match self {
+            Self::Rpc { message, .. } => anyhow::Error::msg(message),
+            other => other.into(),
+        }
+    }
 }
 
 impl std::fmt::Display for DaemonClientError {

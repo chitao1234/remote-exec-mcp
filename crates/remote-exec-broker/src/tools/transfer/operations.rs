@@ -291,10 +291,7 @@ async fn import_archive_to_endpoint(
 }
 
 fn normalize_transfer_error(err: DaemonClientError) -> anyhow::Error {
-    match err {
-        DaemonClientError::Rpc { message, .. } => anyhow::Error::msg(message),
-        other => other.into(),
-    }
+    err.into_anyhow_rpc_message()
 }
 
 async fn export_remote_endpoint_to_archive(
