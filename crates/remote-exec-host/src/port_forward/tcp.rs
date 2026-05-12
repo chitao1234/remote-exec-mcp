@@ -3,7 +3,9 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use remote_exec_proto::port_forward::{ensure_nonzero_connect_endpoint, normalize_endpoint};
-use remote_exec_proto::port_tunnel::{ForwardDropKind, Frame, FrameType, TunnelForwardProtocol};
+use remote_exec_proto::port_tunnel::{
+    EndpointMeta, ForwardDropKind, Frame, FrameType, TcpAcceptMeta, TunnelForwardProtocol,
+};
 use remote_exec_proto::rpc::RpcErrorCode;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
@@ -23,9 +25,8 @@ use super::session::{
 use super::tunnel::tunnel_mode;
 use super::tunnel::{send_tunnel_error, send_tunnel_error_code};
 use super::{
-    EndpointMeta, EndpointOkMeta, READ_BUF_SIZE, TCP_WRITE_QUEUE_FRAMES, TcpAcceptMeta,
-    TcpStreamEntry, TcpWriteCommand, TcpWriterHandle, TunnelMode, TunnelState,
-    send_forward_drop_report,
+    EndpointOkMeta, READ_BUF_SIZE, TCP_WRITE_QUEUE_FRAMES, TcpStreamEntry, TcpWriteCommand,
+    TcpWriterHandle, TunnelMode, TunnelState, send_forward_drop_report,
 };
 
 const TCP_CONTROL_SEND_TIMEOUT: Duration = Duration::from_secs(1);

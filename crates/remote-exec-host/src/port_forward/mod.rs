@@ -20,9 +20,8 @@ pub use tunnel::{reserve_tunnel_connection, serve_tunnel, serve_tunnel_with_perm
 pub use limiter::{PortForwardLimiter, PortForwardPermit};
 use timings::timings;
 use types::{
-    EndpointMeta, EndpointOkMeta, ErrorMeta, QueuedFrame, TcpAcceptMeta, TcpStreamEntry,
-    TcpWriteCommand, TcpWriterHandle, TransportUdpBind, TunnelMode, TunnelSender, TunnelState,
-    UdpDatagramMeta, UdpReaderEntry,
+    EndpointOkMeta, ErrorMeta, QueuedFrame, TcpStreamEntry, TcpWriteCommand, TcpWriterHandle,
+    TransportUdpBind, TunnelMode, TunnelSender, TunnelState, UdpReaderEntry,
 };
 
 const READ_BUF_SIZE: usize = 64 * 1024;

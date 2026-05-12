@@ -2,15 +2,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Context;
-use remote_exec_proto::port_tunnel::{Frame, FrameType};
+use remote_exec_proto::port_tunnel::{EndpointMeta, Frame, FrameType, TcpAcceptMeta};
 
 use super::apply_forward_drop_report;
 use super::events::{ForwardLoopControl, ForwardSideEvent, TunnelRole, classify_transport_failure};
 use super::generation::StreamIdAllocator;
 use super::supervisor::{ForwardRuntime, reconnect_connect_tunnel, recover_listen_side_tunnels};
 use super::tunnel::{
-    EndpointMeta, PortTunnel, TcpAcceptMeta, classify_recoverable_tunnel_event,
-    decode_tunnel_error_frame, decode_tunnel_meta, encode_tunnel_meta,
+    PortTunnel, classify_recoverable_tunnel_event, decode_tunnel_error_frame, decode_tunnel_meta,
+    encode_tunnel_meta,
     format_terminal_tunnel_error, is_backpressure_error, is_recoverable_pressure_tunnel_error,
     is_retryable_transport_error,
 };

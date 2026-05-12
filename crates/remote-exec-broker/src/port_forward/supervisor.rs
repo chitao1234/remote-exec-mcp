@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use remote_exec_proto::port_forward::{ensure_nonzero_connect_endpoint, normalize_endpoint};
 use remote_exec_proto::port_tunnel::{
-    Frame, FrameType, TunnelCloseMeta, TunnelForwardProtocol, TunnelLimitSummary, TunnelOpenMeta,
-    TunnelReadyMeta, TunnelRole,
+    EndpointMeta, Frame, FrameType, TunnelCloseMeta, TunnelForwardProtocol, TunnelLimitSummary,
+    TunnelOpenMeta, TunnelReadyMeta, TunnelRole,
 };
 use remote_exec_proto::public::{
     ForwardPortEntry, ForwardPortLimitSummary, ForwardPortProtocol as PublicForwardPortProtocol,
@@ -20,7 +20,7 @@ use super::side::SideHandle;
 use super::store::{PortForwardRecord, PortForwardStore};
 use super::tcp_bridge::run_tcp_forward;
 use super::tunnel::{
-    EndpointMeta, PortTunnel, decode_tunnel_meta, encode_tunnel_meta, is_retryable_transport_error,
+    PortTunnel, decode_tunnel_meta, encode_tunnel_meta, is_retryable_transport_error,
     tunnel_error,
 };
 use super::udp_bridge::run_udp_forward;

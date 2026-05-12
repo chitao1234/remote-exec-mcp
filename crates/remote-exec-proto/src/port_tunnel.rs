@@ -1,5 +1,6 @@
 use std::io::{self, ErrorKind};
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -173,6 +174,23 @@ pub struct TunnelErrorMeta {
     pub generation: Option<u64>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct EndpointMeta {
+    pub endpoint: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TcpAcceptMeta {
+    pub listener_stream_id: u32,
+    #[serde(default)]
+    pub peer: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct UdpDatagramMeta {
+    pub peer: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
     pub frame_type: FrameType,
@@ -180,6 +198,14 @@ pub struct Frame {
     pub stream_id: u32,
     pub meta: Vec<u8>,
     pub data: Vec<u8>,
+}
+
+pub fn encode_frame_meta<T: Serialize>(meta: &T) -> Result<Vec<u8>, serde_json::Error> {
+    serde_json::to_vec(meta)
+}
+
+pub fn decode_frame_meta<T: DeserializeOwned>(frame: &Frame) -> Result<T, serde_json::Error> {
+    serde_json::from_slice(&frame.meta)
 }
 
 pub async fn write_preface<W>(writer: &mut W) -> io::Result<()>

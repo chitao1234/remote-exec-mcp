@@ -3,10 +3,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use remote_exec_proto::port_tunnel::{
-    Frame, FrameType, HEADER_LEN, TunnelHeartbeatMeta, read_frame, write_frame, write_preface,
+    Frame, FrameType, HEADER_LEN, TunnelHeartbeatMeta,
+    decode_frame_meta as decode_port_tunnel_meta, encode_frame_meta as encode_port_tunnel_meta,
+    read_frame, write_frame, write_preface,
 };
 use remote_exec_proto::rpc::RpcErrorCode;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, mpsc, watch};
 use tokio::task::JoinHandle;
@@ -371,27 +374,12 @@ fn backpressure_error() -> anyhow::Error {
     anyhow::anyhow!("port_forward_backpressure_exceeded: tunnel queue byte budget exceeded")
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub(super) struct EndpointMeta {
-    pub(super) endpoint: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub(super) struct TcpAcceptMeta {
-    pub(super) listener_stream_id: u32,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub(super) struct UdpDatagramMeta {
-    pub(super) peer: String,
-}
-
 pub(super) fn encode_tunnel_meta<T: Serialize>(meta: &T) -> anyhow::Result<Vec<u8>> {
-    serde_json::to_vec(meta).map_err(anyhow::Error::from)
+    encode_port_tunnel_meta(meta).map_err(anyhow::Error::from)
 }
 
-pub(super) fn decode_tunnel_meta<T: for<'de> Deserialize<'de>>(frame: &Frame) -> anyhow::Result<T> {
-    serde_json::from_slice(&frame.meta).map_err(anyhow::Error::from)
+pub(super) fn decode_tunnel_meta<T: DeserializeOwned>(frame: &Frame) -> anyhow::Result<T> {
+    decode_port_tunnel_meta(frame).map_err(anyhow::Error::from)
 }
 
 pub(super) fn tunnel_error(frame: &Frame) -> anyhow::Error {

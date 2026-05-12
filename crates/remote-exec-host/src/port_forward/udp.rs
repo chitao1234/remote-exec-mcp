@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use remote_exec_proto::port_forward::normalize_endpoint;
-use remote_exec_proto::port_tunnel::{ForwardDropKind, Frame, FrameType, TunnelForwardProtocol};
+use remote_exec_proto::port_tunnel::{
+    EndpointMeta, ForwardDropKind, Frame, FrameType, TunnelForwardProtocol, UdpDatagramMeta,
+};
 use remote_exec_proto::rpc::RpcErrorCode;
 use tokio::net::UdpSocket;
 use tokio_util::sync::CancellationToken;
@@ -15,8 +17,8 @@ use super::session::{send_tunnel_error_code_with_sender, send_tunnel_error_with_
 use super::tunnel::tunnel_mode;
 use super::tunnel::{send_tunnel_error, send_tunnel_error_code};
 use super::{
-    EndpointMeta, EndpointOkMeta, READ_BUF_SIZE, TransportUdpBind, TunnelMode, TunnelState,
-    UdpDatagramMeta, send_forward_drop_report,
+    EndpointOkMeta, READ_BUF_SIZE, TransportUdpBind, TunnelMode, TunnelState,
+    send_forward_drop_report,
 };
 
 pub(super) async fn tunnel_udp_bind(

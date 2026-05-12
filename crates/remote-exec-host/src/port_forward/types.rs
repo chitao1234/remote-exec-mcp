@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
 use remote_exec_proto::port_tunnel::{Frame, TunnelForwardProtocol};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tokio::net::UdpSocket;
 use tokio::sync::{Mutex, mpsc};
 use tokio_util::sync::CancellationToken;
@@ -63,25 +63,9 @@ pub(super) struct UdpReaderEntry {
     pub(super) cancel: CancellationToken,
 }
 
-#[derive(Debug, Deserialize)]
-pub(super) struct EndpointMeta {
-    pub(super) endpoint: String,
-}
-
 #[derive(Debug, Serialize)]
 pub(super) struct EndpointOkMeta {
     pub(super) endpoint: String,
-}
-
-#[derive(Debug, Serialize)]
-pub(super) struct TcpAcceptMeta {
-    pub(super) listener_stream_id: u32,
-    pub(super) peer: String,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub(super) struct UdpDatagramMeta {
-    pub(super) peer: String,
 }
 
 #[derive(Debug, Serialize)]
