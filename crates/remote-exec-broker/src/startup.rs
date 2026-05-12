@@ -189,6 +189,7 @@ fn log_remote_target_unavailable(
 ) {
     tracing::warn!(
         target = %name,
+        base_url = %target_config.base_url,
         http_auth_enabled = target_config.http_auth.is_some(),
         ?err,
         "target unavailable during broker startup"
@@ -198,6 +199,7 @@ fn log_remote_target_unavailable(
 fn log_remote_target_startup_probe_timeout(name: &str, target_config: &config::TargetConfig) {
     tracing::warn!(
         target = %name,
+        base_url = %target_config.base_url,
         http_auth_enabled = target_config.http_auth.is_some(),
         timeout_ms = target_config.timeouts.startup_probe_ms,
         "target unavailable during broker startup: startup probe timed out"

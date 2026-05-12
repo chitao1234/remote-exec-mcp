@@ -196,7 +196,7 @@ yield_time_write_stdin_input_min_ms = 1\n",
     support::assert_correlated_tool_error(
         &first_poll.text_output,
         "write_stdin",
-        Some("builder-a"),
+        Some("builder-cpp"),
         &format!("write_stdin failed: Unknown process id {first_session_id}"),
     );
 
