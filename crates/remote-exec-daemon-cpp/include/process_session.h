@@ -46,3 +46,7 @@ protected:
 };
 
 bool process_session_supports_pty();
+
+#if !defined(_WIN32) && defined(REMOTE_EXEC_CPP_TESTING)
+void set_process_session_test_exit_poll_delay_ms(unsigned long delay_ms);
+#endif

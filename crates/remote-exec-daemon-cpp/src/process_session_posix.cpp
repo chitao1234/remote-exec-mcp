@@ -1,5 +1,6 @@
 #ifndef _WIN32
 
+#include <atomic>
 #include <cerrno>
 #include <cstring>
 #include <stdexcept>
@@ -29,6 +30,19 @@ const unsigned short kDefaultPtyRows = 24;
 const unsigned short kDefaultPtyCols = 120;
 // Grace period for cooperative shutdown before escalating from SIGTERM to SIGKILL.
 const int kTerminateGraceMs = 50;
+
+#ifdef REMOTE_EXEC_CPP_TESTING
+std::atomic<unsigned long> g_test_exit_poll_delay_ms(0UL);
+
+void maybe_apply_test_exit_poll_delay() {
+    const unsigned long delay_ms = g_test_exit_poll_delay_ms.load();
+    if (delay_ms > 0UL) {
+        platform::sleep_ms(delay_ms);
+    }
+}
+#else
+void maybe_apply_test_exit_poll_delay() {}
+#endif
 
 class UniqueFd {
 public:
@@ -394,15 +408,6 @@ void exec_shell_child(
     _exit(127);
 }
 
-pid_t waitpid_retry_on_eintr(pid_t pid, int* status, int options) {
-    for (;;) {
-        const pid_t result = waitpid(pid, status, options);
-        if (result >= 0 || errno != EINTR) {
-            return result;
-        }
-    }
-}
-
 void record_exit_status(int status, int* exit_code) {
     if (WIFEXITED(status)) {
         *exit_code = WEXITSTATUS(status);
@@ -527,34 +532,15 @@ public:
             return true;
         }
 
+        maybe_apply_test_exit_poll_delay();
         int status = 0;
-        if (take_reaped_posix_child(pid_, &status)) {
+        if (poll_posix_child_exit(pid_, &status)) {
             reaped_ = true;
             record_exit_status(status, &exit_code_);
             *exit_code = exit_code_;
             return true;
         }
-
-        const pid_t result = waitpid_retry_on_eintr(pid_, &status, WNOHANG);
-        if (result == 0) {
-            return false;
-        }
-        if (result < 0) {
-            if (errno == ECHILD) {
-                unregister_posix_child(pid_);
-                reaped_ = true;
-                exit_code_ = 1;
-                *exit_code = exit_code_;
-                return true;
-            }
-            throw std::runtime_error(std::string("waitpid failed: ") + std::strerror(errno));
-        }
-
-        reaped_ = true;
-        unregister_posix_child(pid_);
-        record_exit_status(status, &exit_code_);
-        *exit_code = exit_code_;
-        return true;
+        return false;
     }
 
     void terminate() override {
@@ -563,15 +549,10 @@ public:
         }
         kill_process_group(pid_);
         int ignored_status = 0;
-        if (take_reaped_posix_child(pid_, &ignored_status)) {
-            reaped_ = true;
-            return;
-        }
-        const pid_t result = waitpid_retry_on_eintr(pid_, &ignored_status, 0);
-        if (result == pid_ || (result < 0 && errno == ECHILD)) {
-            unregister_posix_child(pid_);
+        if (wait_posix_child_exit(pid_, &ignored_status)) {
             reaped_ = true;
         }
+        return;
     }
 
     bool terminate_descendants() override {
@@ -684,5 +665,11 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
         )
     );
 }
+
+#ifdef REMOTE_EXEC_CPP_TESTING
+void set_process_session_test_exit_poll_delay_ms(unsigned long delay_ms) {
+    g_test_exit_poll_delay_ms.store(delay_ms);
+}
+#endif
 
 #endif

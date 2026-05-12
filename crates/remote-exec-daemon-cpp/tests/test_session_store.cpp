@@ -493,6 +493,81 @@ static void assert_posix_sigchld_reaper_reaps_exited_session_children(
     (void)shell;
 #endif
 }
+
+static void assert_posix_sigchld_reaper_preserves_exit_status_during_pty_resume_race(
+    const fs::path& root,
+    const std::string& shell
+) {
+#ifdef __linux__
+    if (!process_session_supports_pty()) {
+        return;
+    }
+
+    const fs::path bash_path("/bin/bash");
+    const std::string race_shell = fs::exists(bash_path) ? bash_path.string() : shell;
+    const YieldTimeConfig fast_yield = fast_yield_time_config();
+    set_posix_child_reaper_test_reap_delay_ms(200UL);
+    set_process_session_test_exit_poll_delay_ms(50UL);
+
+    for (int attempt = 0; attempt < 10; ++attempt) {
+        SessionStore race_store;
+        Json waiting = start_test_command(
+            race_store,
+            "printf 'ready\\n'; IFS= read line; printf 'echo:%s\\n' \"$line\"",
+            root.string(),
+            race_shell,
+            true,
+            50UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            fast_yield,
+            64UL
+        );
+        assert(waiting.at("running").get<bool>());
+        std::string waiting_id = waiting.at("daemon_session_id").get<std::string>();
+        std::string waiting_output = waiting.at("output").get<std::string>();
+        for (int poll = 0;
+             waiting_output.find("ready") == std::string::npos && poll < 20;
+             ++poll) {
+            waiting = race_store.write_stdin(
+                waiting_id,
+                "",
+                true,
+                50UL,
+                DEFAULT_MAX_OUTPUT_TOKENS,
+                fast_yield,
+                false,
+                0U,
+                0U
+            );
+            assert(waiting.at("running").get<bool>());
+            waiting_id = waiting.at("daemon_session_id").get<std::string>();
+            waiting_output += waiting.at("output").get<std::string>();
+        }
+        assert(waiting_output.find("ready") != std::string::npos);
+
+        const Json resumed = race_store.write_stdin(
+            waiting_id,
+            "ping\n",
+            true,
+            1000UL,
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            fast_yield,
+            false,
+            0U,
+            0U
+        );
+        assert(!resumed.at("running").get<bool>());
+        assert(resumed.at("exit_code").get<int>() == 0);
+        assert(resumed.at("output").get<std::string>().find("echo:ping") != std::string::npos);
+    }
+
+    set_process_session_test_exit_poll_delay_ms(0UL);
+    set_posix_child_reaper_test_reap_delay_ms(0UL);
+#else
+    (void)root;
+    (void)shell;
+#endif
+}
 #endif
 
 static void assert_stdin_and_tty_behavior(
@@ -1129,6 +1204,7 @@ int main() {
     assert_posix_exec_uses_parent_built_environment_and_path(store, root, shell, yield_time);
 #ifndef _WIN32
     assert_posix_sigchld_reaper_reaps_exited_session_children(root, shell);
+    assert_posix_sigchld_reaper_preserves_exit_status_during_pty_resume_race(root, shell);
 #endif
     assert_stdin_and_tty_behavior(store, root, shell, yield_time);
     assert_pruning_and_recency_behavior(root, shell);
