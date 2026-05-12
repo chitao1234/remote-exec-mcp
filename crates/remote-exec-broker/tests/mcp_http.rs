@@ -1,7 +1,7 @@
 #[path = "support/mod.rs"]
 mod support;
 
-use remote_exec_broker::client::{Connection, RemoteExecClient};
+use remote_exec_broker::{Connection, RemoteExecClient};
 use remote_exec_proto::public::{ExecCommandInput, ListTargetsInput};
 
 #[tokio::test]

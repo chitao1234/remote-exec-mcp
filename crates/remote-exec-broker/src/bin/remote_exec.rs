@@ -4,7 +4,7 @@ use std::process::ExitCode;
 use anyhow::Context;
 use base64::Engine;
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
-use remote_exec_broker::client::{Connection, RemoteExecClient, ToolResponse};
+use remote_exec_broker::{Connection, RemoteExecClient, ToolResponse};
 use remote_exec_proto::public::{
     ApplyPatchInput, ExecCommandInput, ForwardPortProtocol, ForwardPortSpec, ForwardPortsInput,
     ListTargetsInput, TransferDestinationMode, TransferEndpoint, TransferFilesInput,

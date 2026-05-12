@@ -18,8 +18,8 @@ use remote_exec_proto::port_tunnel::{ForwardDropKind, ForwardDropMeta, Frame};
 
 pub use limits::BrokerPortForwardLimits;
 pub use side::SideHandle;
-pub use store::{PortForwardFilter, PortForwardRecord, PortForwardStore, close_all, close_record};
-pub use supervisor::{OpenedForward, open_forward};
+pub use store::{PortForwardFilter, PortForwardStore, close_all, close_record};
+pub use supervisor::open_forward;
 pub(crate) use tunnel::PortTunnel;
 
 const UDP_CONNECTOR_IDLE_TIMEOUT: Duration = Duration::from_secs(60);

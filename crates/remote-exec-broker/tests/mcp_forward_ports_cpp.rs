@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Once};
 use std::time::Duration;
 
-use remote_exec_broker::client::{Connection, RemoteExecClient};
+use remote_exec_broker::{Connection, RemoteExecClient, ToolResponse};
 #[cfg(unix)]
 use remote_exec_proto::public::{ExecCommandInput, WriteStdinInput};
 use remote_exec_proto::public::{ForwardPortProtocol, ForwardPortsInput};
@@ -34,6 +34,13 @@ fn apply_quiet_test_logging(command: &mut tokio::process::Command) {
 
     let filter = std::env::var("REMOTE_EXEC_TEST_LOG").unwrap_or_else(|_| "error".to_string());
     command.env("REMOTE_EXEC_LOG", filter);
+}
+
+fn allocate_unused_loopback_addr() -> std::net::SocketAddr {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    addr
 }
 
 #[tokio::test]
@@ -641,7 +648,7 @@ pty = "none"
         listen_endpoint: String,
         connect_endpoint: String,
         protocol: ForwardPortProtocol,
-    ) -> remote_exec_broker::client::ToolResponse {
+    ) -> ToolResponse {
         self.client
             .call_tool(
                 "forward_ports",
@@ -659,10 +666,7 @@ pty = "none"
             .unwrap()
     }
 
-    async fn open_tcp_forward(
-        &self,
-        connect_endpoint: &str,
-    ) -> remote_exec_broker::client::ToolResponse {
+    async fn open_tcp_forward(&self, connect_endpoint: &str) -> ToolResponse {
         self.open_forward(
             "builder-cpp",
             "local",
@@ -674,10 +678,7 @@ pty = "none"
     }
 
     #[cfg(unix)]
-    async fn open_tcp_forward_local_to_cpp(
-        &self,
-        connect_endpoint: &str,
-    ) -> remote_exec_broker::client::ToolResponse {
+    async fn open_tcp_forward_local_to_cpp(&self, connect_endpoint: &str) -> ToolResponse {
         self.open_forward(
             "local",
             "builder-cpp",
@@ -688,7 +689,7 @@ pty = "none"
         .await
     }
 
-    async fn close_forward(&self, forward_id: String) -> remote_exec_broker::client::ToolResponse {
+    async fn close_forward(&self, forward_id: String) -> ToolResponse {
         self.client
             .call_tool(
                 "forward_ports",
@@ -818,7 +819,7 @@ impl CrashableCppDaemonBrokerFixture {
         let daemon_workdir = tempdir.path().join("daemon-workdir");
         std::fs::create_dir_all(&daemon_workdir).unwrap();
         let daemon_bound_addr_file = tempdir.path().join("daemon-bound-addr.txt");
-        let broker_bound_addr_file = tempdir.path().join("broker-bound-addr.txt");
+        let broker_listen = allocate_unused_loopback_addr();
         let daemon_config_body = format!(
             "target = builder-cpp\nlisten_host = 127.0.0.1\nlisten_port = 0\ndefault_workdir = {}\ntest_bound_addr_file = {}\n",
             cpp_config_path(&daemon_workdir),
@@ -846,11 +847,12 @@ pty = "none"
 
 [mcp]
 transport = "streamable_http"
-listen = "127.0.0.1:0"
+listen = {broker_listen}
 path = "/mcp"
 "#,
                 daemon_addr,
-                toml_string(&tempdir.path().join("local-work").display().to_string())
+                toml_string(&tempdir.path().join("local-work").display().to_string()),
+                broker_listen = toml_string(&broker_listen.to_string()),
             ),
         )
         .unwrap();
@@ -858,15 +860,10 @@ path = "/mcp"
 
         let mut broker = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
         broker.arg(&broker_config);
-        broker.env(
-            "REMOTE_EXEC_BROKER_TEST_BOUND_ADDR_FILE",
-            &broker_bound_addr_file,
-        );
         apply_quiet_test_logging(&mut broker);
         broker.kill_on_drop(true);
         let broker = broker.spawn().unwrap();
-        let broker_addr = wait_for_bound_addr_file(&broker_bound_addr_file, "C++ broker").await;
-        let broker_url = format!("http://{broker_addr}/mcp");
+        let broker_url = format!("http://{broker_listen}/mcp");
         wait_until_ready_mcp_http(&broker_url).await;
         let client = RemoteExecClient::connect(Connection::StreamableHttp { url: broker_url })
             .await

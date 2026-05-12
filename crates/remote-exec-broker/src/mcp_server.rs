@@ -329,7 +329,6 @@ async fn serve_streamable_http(
     let local_addr = listener
         .local_addr()
         .context("reading broker listener address")?;
-    write_test_bound_addr_file(local_addr).await?;
 
     tracing::info!(
         listen = %local_addr,
@@ -353,20 +352,6 @@ async fn serve_streamable_http(
 
     tracing::info!("broker MCP streamable HTTP service stopped");
     Ok(())
-}
-
-async fn write_test_bound_addr_file(local_addr: std::net::SocketAddr) -> anyhow::Result<()> {
-    let Some(path) = std::env::var_os("REMOTE_EXEC_BROKER_TEST_BOUND_ADDR_FILE") else {
-        return Ok(());
-    };
-    tokio::fs::write(&path, format!("{local_addr}\n"))
-        .await
-        .with_context(|| {
-            format!(
-                "writing broker test bound address file {}",
-                std::path::Path::new(&path).display()
-            )
-        })
 }
 
 async fn wait_for_shutdown_signal() {

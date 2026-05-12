@@ -3,7 +3,7 @@ mod support;
 
 use std::time::Duration;
 
-use remote_exec_broker::client::{Connection, RemoteExecClient};
+use remote_exec_broker::{Connection, RemoteExecClient};
 use remote_exec_proto::public::{ForwardPortProtocol, ForwardPortSpec, ForwardPortsInput};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
