@@ -35,6 +35,8 @@ MSVC_NATIVE_SESSION_STORE_TEST=$(BUILD_DIR)\test_session_store-msvc.exe
 MSVC_NATIVE_TRANSFER_TEST=$(BUILD_DIR)\test_transfer-msvc.exe
 MSVC_NATIVE_CONFIG_TEST=$(BUILD_DIR)\test_config-msvc.exe
 MSVC_NATIVE_HTTP_REQUEST_TEST=$(BUILD_DIR)\test_http_request-msvc.exe
+MSVC_NATIVE_SERVER_TRANSPORT_TEST=$(BUILD_DIR)\test_server_transport-msvc.exe
+MSVC_NATIVE_CONNECTION_MANAGER_TEST=$(BUILD_DIR)\test_connection_manager-msvc.exe
 MSVC_NATIVE_SANDBOX_TEST=$(BUILD_DIR)\test_sandbox-msvc.exe
 MSVC_NATIVE_PORT_TUNNEL_FRAME_TEST=$(BUILD_DIR)\test_port_tunnel_frame-msvc.exe
 
@@ -47,6 +49,8 @@ MSVC_XP_SESSION_STORE_TEST=$(BUILD_DIR)\test_session_store-xp-msvc.exe
 MSVC_XP_TRANSFER_TEST=$(BUILD_DIR)\test_transfer-xp-msvc.exe
 MSVC_XP_CONFIG_TEST=$(BUILD_DIR)\test_config-xp-msvc.exe
 MSVC_XP_HTTP_REQUEST_TEST=$(BUILD_DIR)\test_http_request-xp-msvc.exe
+MSVC_XP_SERVER_TRANSPORT_TEST=$(BUILD_DIR)\test_server_transport-xp-msvc.exe
+MSVC_XP_CONNECTION_MANAGER_TEST=$(BUILD_DIR)\test_connection_manager-xp-msvc.exe
 MSVC_XP_SANDBOX_TEST=$(BUILD_DIR)\test_sandbox-xp-msvc.exe
 MSVC_XP_PORT_TUNNEL_FRAME_TEST=$(BUILD_DIR)\test_port_tunnel_frame-xp-msvc.exe
 
@@ -114,6 +118,10 @@ MSVC_WIN32_CONFIG_TEST_SRCS=$(HOST_CONFIG_SRCS)
 
 MSVC_WIN32_HTTP_REQUEST_TEST_SRCS=$(HOST_HTTP_REQUEST_SRCS)
 
+MSVC_WIN32_SERVER_TRANSPORT_TEST_SRCS=$(HOST_SERVER_TRANSPORT_SRCS)
+
+MSVC_WIN32_CONNECTION_MANAGER_TEST_SRCS=$(HOST_CONNECTION_MANAGER_SRCS)
+
 MSVC_WIN32_SANDBOX_TEST_SRCS=$(HOST_SANDBOX_SRCS)
 
 MSVC_WIN32_PORT_TUNNEL_FRAME_TEST_SRCS=$(HOST_PORT_TUNNEL_FRAME_SRCS)
@@ -125,6 +133,8 @@ MSVC_NATIVE_TEST_PHONY_TARGETS= \
     test-msvc-native-transfer \
     test-msvc-native-config \
     test-msvc-native-http-request \
+    test-msvc-native-server-transport \
+    test-msvc-native-connection-manager \
     test-msvc-native-sandbox \
     test-msvc-native-port-tunnel-frame
 
@@ -135,6 +145,8 @@ MSVC_XP_TEST_PHONY_TARGETS= \
     test-msvc-xp-transfer \
     test-msvc-xp-config \
     test-msvc-xp-http-request \
+    test-msvc-xp-server-transport \
+    test-msvc-xp-connection-manager \
     test-msvc-xp-sandbox \
     test-msvc-xp-port-tunnel-frame
 
@@ -164,6 +176,12 @@ test-msvc-native-config: $(MSVC_NATIVE_CONFIG_TEST)
 test-msvc-native-http-request: $(MSVC_NATIVE_HTTP_REQUEST_TEST)
 	@set "REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL)" && "$(MSVC_NATIVE_HTTP_REQUEST_TEST)"
 
+test-msvc-native-server-transport: $(MSVC_NATIVE_SERVER_TRANSPORT_TEST)
+	@set "REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL)" && "$(MSVC_NATIVE_SERVER_TRANSPORT_TEST)"
+
+test-msvc-native-connection-manager: $(MSVC_NATIVE_CONNECTION_MANAGER_TEST)
+	@set "REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL)" && "$(MSVC_NATIVE_CONNECTION_MANAGER_TEST)"
+
 test-msvc-native-sandbox: $(MSVC_NATIVE_SANDBOX_TEST)
 	@set "REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL)" && "$(MSVC_NATIVE_SANDBOX_TEST)"
 
@@ -189,6 +207,12 @@ test-msvc-xp-config: $(MSVC_XP_CONFIG_TEST)
 
 test-msvc-xp-http-request: $(MSVC_XP_HTTP_REQUEST_TEST)
 	@set "REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL)" && "$(MSVC_XP_HTTP_REQUEST_TEST)"
+
+test-msvc-xp-server-transport: $(MSVC_XP_SERVER_TRANSPORT_TEST)
+	@set "REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL)" && "$(MSVC_XP_SERVER_TRANSPORT_TEST)"
+
+test-msvc-xp-connection-manager: $(MSVC_XP_CONNECTION_MANAGER_TEST)
+	@set "REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL)" && "$(MSVC_XP_CONNECTION_MANAGER_TEST)"
 
 test-msvc-xp-sandbox: $(MSVC_XP_SANDBOX_TEST)
 	@set "REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL)" && "$(MSVC_XP_SANDBOX_TEST)"
@@ -241,6 +265,18 @@ $(MSVC_NATIVE_HTTP_REQUEST_TEST): $(MSVC_WIN32_HTTP_REQUEST_TEST_SRCS)
 	@if not exist "$(BUILD_DIR)\obj" mkdir "$(BUILD_DIR)\obj"
 	@if not exist "$(MSVC_NATIVE_TEST_OBJ_DIR)" mkdir "$(MSVC_NATIVE_TEST_OBJ_DIR)"
 	$(CXX) $(MSVC_CXXFLAGS) $(MSVC_NATIVE_CPPFLAGS) /Fo"$(MSVC_NATIVE_TEST_OBJ_DIR)\\" /Fe"$@" $(MSVC_WIN32_HTTP_REQUEST_TEST_SRCS) $(MSVC_LDLIBS) $(MSVC_NATIVE_LDFLAGS)
+
+$(MSVC_NATIVE_SERVER_TRANSPORT_TEST): $(MSVC_WIN32_SERVER_TRANSPORT_TEST_SRCS)
+	@if not exist "$(BUILD_DIR)" mkdir "$(BUILD_DIR)"
+	@if not exist "$(BUILD_DIR)\obj" mkdir "$(BUILD_DIR)\obj"
+	@if not exist "$(MSVC_NATIVE_TEST_OBJ_DIR)" mkdir "$(MSVC_NATIVE_TEST_OBJ_DIR)"
+	$(CXX) $(MSVC_CXXFLAGS) $(MSVC_NATIVE_CPPFLAGS) /Fo"$(MSVC_NATIVE_TEST_OBJ_DIR)\\" /Fe"$@" $(MSVC_WIN32_SERVER_TRANSPORT_TEST_SRCS) $(MSVC_LDLIBS) $(MSVC_NATIVE_LDFLAGS)
+
+$(MSVC_NATIVE_CONNECTION_MANAGER_TEST): $(MSVC_WIN32_CONNECTION_MANAGER_TEST_SRCS)
+	@if not exist "$(BUILD_DIR)" mkdir "$(BUILD_DIR)"
+	@if not exist "$(BUILD_DIR)\obj" mkdir "$(BUILD_DIR)\obj"
+	@if not exist "$(MSVC_NATIVE_TEST_OBJ_DIR)" mkdir "$(MSVC_NATIVE_TEST_OBJ_DIR)"
+	$(CXX) $(MSVC_CXXFLAGS) $(MSVC_NATIVE_CPPFLAGS) /Fo"$(MSVC_NATIVE_TEST_OBJ_DIR)\\" /Fe"$@" $(MSVC_WIN32_CONNECTION_MANAGER_TEST_SRCS) $(MSVC_LDLIBS) $(MSVC_NATIVE_LDFLAGS)
 
 $(MSVC_NATIVE_SANDBOX_TEST): $(MSVC_WIN32_SANDBOX_TEST_SRCS)
 	@if not exist "$(BUILD_DIR)" mkdir "$(BUILD_DIR)"
@@ -296,6 +332,18 @@ $(MSVC_XP_HTTP_REQUEST_TEST): $(MSVC_WIN32_HTTP_REQUEST_TEST_SRCS)
 	@if not exist "$(MSVC_XP_TEST_OBJ_DIR)" mkdir "$(MSVC_XP_TEST_OBJ_DIR)"
 	$(CXX) $(MSVC_CXXFLAGS) $(MSVC_XP_CPPFLAGS) /Fo"$(MSVC_XP_TEST_OBJ_DIR)\\" /Fe"$@" $(MSVC_WIN32_HTTP_REQUEST_TEST_SRCS) $(MSVC_LDLIBS) $(MSVC_XP_LDFLAGS)
 
+$(MSVC_XP_SERVER_TRANSPORT_TEST): $(MSVC_WIN32_SERVER_TRANSPORT_TEST_SRCS)
+	@if not exist "$(BUILD_DIR)" mkdir "$(BUILD_DIR)"
+	@if not exist "$(BUILD_DIR)\obj" mkdir "$(BUILD_DIR)\obj"
+	@if not exist "$(MSVC_XP_TEST_OBJ_DIR)" mkdir "$(MSVC_XP_TEST_OBJ_DIR)"
+	$(CXX) $(MSVC_CXXFLAGS) $(MSVC_XP_CPPFLAGS) /Fo"$(MSVC_XP_TEST_OBJ_DIR)\\" /Fe"$@" $(MSVC_WIN32_SERVER_TRANSPORT_TEST_SRCS) $(MSVC_LDLIBS) $(MSVC_XP_LDFLAGS)
+
+$(MSVC_XP_CONNECTION_MANAGER_TEST): $(MSVC_WIN32_CONNECTION_MANAGER_TEST_SRCS)
+	@if not exist "$(BUILD_DIR)" mkdir "$(BUILD_DIR)"
+	@if not exist "$(BUILD_DIR)\obj" mkdir "$(BUILD_DIR)\obj"
+	@if not exist "$(MSVC_XP_TEST_OBJ_DIR)" mkdir "$(MSVC_XP_TEST_OBJ_DIR)"
+	$(CXX) $(MSVC_CXXFLAGS) $(MSVC_XP_CPPFLAGS) /Fo"$(MSVC_XP_TEST_OBJ_DIR)\\" /Fe"$@" $(MSVC_WIN32_CONNECTION_MANAGER_TEST_SRCS) $(MSVC_LDLIBS) $(MSVC_XP_LDFLAGS)
+
 $(MSVC_XP_SANDBOX_TEST): $(MSVC_WIN32_SANDBOX_TEST_SRCS)
 	@if not exist "$(BUILD_DIR)" mkdir "$(BUILD_DIR)"
 	@if not exist "$(BUILD_DIR)\obj" mkdir "$(BUILD_DIR)\obj"
@@ -316,6 +364,8 @@ clean:
 	@if exist "$(MSVC_NATIVE_TRANSFER_TEST)" del /Q "$(MSVC_NATIVE_TRANSFER_TEST)"
 	@if exist "$(MSVC_NATIVE_CONFIG_TEST)" del /Q "$(MSVC_NATIVE_CONFIG_TEST)"
 	@if exist "$(MSVC_NATIVE_HTTP_REQUEST_TEST)" del /Q "$(MSVC_NATIVE_HTTP_REQUEST_TEST)"
+	@if exist "$(MSVC_NATIVE_SERVER_TRANSPORT_TEST)" del /Q "$(MSVC_NATIVE_SERVER_TRANSPORT_TEST)"
+	@if exist "$(MSVC_NATIVE_CONNECTION_MANAGER_TEST)" del /Q "$(MSVC_NATIVE_CONNECTION_MANAGER_TEST)"
 	@if exist "$(MSVC_NATIVE_SANDBOX_TEST)" del /Q "$(MSVC_NATIVE_SANDBOX_TEST)"
 	@if exist "$(MSVC_NATIVE_PORT_TUNNEL_FRAME_TEST)" del /Q "$(MSVC_NATIVE_PORT_TUNNEL_FRAME_TEST)"
 	@if exist "$(MSVC_XP_TARGET)" del /Q "$(MSVC_XP_TARGET)"
@@ -325,6 +375,8 @@ clean:
 	@if exist "$(MSVC_XP_TRANSFER_TEST)" del /Q "$(MSVC_XP_TRANSFER_TEST)"
 	@if exist "$(MSVC_XP_CONFIG_TEST)" del /Q "$(MSVC_XP_CONFIG_TEST)"
 	@if exist "$(MSVC_XP_HTTP_REQUEST_TEST)" del /Q "$(MSVC_XP_HTTP_REQUEST_TEST)"
+	@if exist "$(MSVC_XP_SERVER_TRANSPORT_TEST)" del /Q "$(MSVC_XP_SERVER_TRANSPORT_TEST)"
+	@if exist "$(MSVC_XP_CONNECTION_MANAGER_TEST)" del /Q "$(MSVC_XP_CONNECTION_MANAGER_TEST)"
 	@if exist "$(MSVC_XP_SANDBOX_TEST)" del /Q "$(MSVC_XP_SANDBOX_TEST)"
 	@if exist "$(MSVC_XP_PORT_TUNNEL_FRAME_TEST)" del /Q "$(MSVC_XP_PORT_TUNNEL_FRAME_TEST)"
 	@if exist "$(MSVC_NATIVE_OBJ_DIR)" rmdir /S /Q "$(MSVC_NATIVE_OBJ_DIR)"
@@ -332,4 +384,4 @@ clean:
 	@if exist "$(MSVC_XP_OBJ_DIR)" rmdir /S /Q "$(MSVC_XP_OBJ_DIR)"
 	@if exist "$(MSVC_XP_TEST_OBJ_DIR)" rmdir /S /Q "$(MSVC_XP_TEST_OBJ_DIR)"
 
-.PHONY: all all-msvc-native all-msvc-xp test-msvc-native test-msvc-native-basic-mutex test-msvc-native-patch test-msvc-native-session-store test-msvc-native-transfer test-msvc-native-config test-msvc-native-http-request test-msvc-native-sandbox test-msvc-native-port-tunnel-frame test-msvc-xp test-msvc-xp-basic-mutex test-msvc-xp-patch test-msvc-xp-session-store test-msvc-xp-transfer test-msvc-xp-config test-msvc-xp-http-request test-msvc-xp-sandbox test-msvc-xp-port-tunnel-frame check-msvc-native check-msvc-xp clean
+.PHONY: all all-msvc-native all-msvc-xp test-msvc-native test-msvc-native-basic-mutex test-msvc-native-patch test-msvc-native-session-store test-msvc-native-transfer test-msvc-native-config test-msvc-native-http-request test-msvc-native-server-transport test-msvc-native-connection-manager test-msvc-native-sandbox test-msvc-native-port-tunnel-frame test-msvc-xp test-msvc-xp-basic-mutex test-msvc-xp-patch test-msvc-xp-session-store test-msvc-xp-transfer test-msvc-xp-config test-msvc-xp-http-request test-msvc-xp-server-transport test-msvc-xp-connection-manager test-msvc-xp-sandbox test-msvc-xp-port-tunnel-frame check-msvc-native check-msvc-xp clean

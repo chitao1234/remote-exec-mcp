@@ -30,6 +30,8 @@ XP_SESSION_STORE := $(BUILD_DIR)/test_session_store-xp.exe
 XP_TRANSFER := $(BUILD_DIR)/test_transfer-xp.exe
 XP_CONFIG := $(BUILD_DIR)/test_config-xp.exe
 XP_HTTP_REQUEST := $(BUILD_DIR)/test_http_request-xp.exe
+XP_SERVER_TRANSPORT := $(BUILD_DIR)/test_server_transport-xp.exe
+XP_CONNECTION_MANAGER := $(BUILD_DIR)/test_connection_manager-xp.exe
 XP_SANDBOX := $(BUILD_DIR)/test_sandbox-xp.exe
 XP_PORT_TUNNEL_FRAME := $(BUILD_DIR)/test_port_tunnel_frame-xp.exe
 
@@ -39,6 +41,8 @@ WINDOWS_XP_PLATFORM_NEUTRAL_TEST_TARGETS := \
 	$(XP_TRANSFER) \
 	$(XP_CONFIG) \
 	$(XP_HTTP_REQUEST) \
+	$(XP_SERVER_TRANSPORT) \
+	$(XP_CONNECTION_MANAGER) \
 	$(XP_SANDBOX) \
 	$(XP_PORT_TUNNEL_FRAME)
 
@@ -76,6 +80,10 @@ XP_CONFIG_SRCS := $(HOST_CONFIG_SRCS)
 
 XP_HTTP_REQUEST_SRCS := $(HOST_HTTP_REQUEST_SRCS)
 
+XP_SERVER_TRANSPORT_SRCS := $(HOST_SERVER_TRANSPORT_SRCS)
+
+XP_CONNECTION_MANAGER_SRCS := $(HOST_CONNECTION_MANAGER_SRCS)
+
 XP_SANDBOX_SRCS := $(HOST_SANDBOX_SRCS)
 
 XP_PORT_TUNNEL_FRAME_SRCS := $(HOST_PORT_TUNNEL_FRAME_SRCS)
@@ -87,6 +95,8 @@ XP_SESSION_STORE_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_
 XP_TRANSFER_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_TRANSFER_SRCS)))
 XP_CONFIG_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_CONFIG_SRCS)))
 XP_HTTP_REQUEST_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_HTTP_REQUEST_SRCS)))
+XP_SERVER_TRANSPORT_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_SERVER_TRANSPORT_SRCS)))
+XP_CONNECTION_MANAGER_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_CONNECTION_MANAGER_SRCS)))
 XP_SANDBOX_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_SANDBOX_SRCS)))
 XP_PORT_TUNNEL_FRAME_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_PORT_TUNNEL_FRAME_SRCS)))
 
@@ -98,6 +108,8 @@ DEP_FILES += \
 	$(XP_TRANSFER_OBJS:.o=.d) \
 	$(XP_CONFIG_OBJS:.o=.d) \
 	$(XP_HTTP_REQUEST_OBJS:.o=.d) \
+	$(XP_SERVER_TRANSPORT_OBJS:.o=.d) \
+	$(XP_CONNECTION_MANAGER_OBJS:.o=.d) \
 	$(XP_SANDBOX_OBJS:.o=.d) \
 	$(XP_PORT_TUNNEL_FRAME_OBJS:.o=.d)
 
@@ -144,6 +156,12 @@ $(eval $(call link_windows_xp_test,$(XP_CONFIG),$(XP_CONFIG_OBJS)))
 $(eval $(call run_windows_xp_test,test-windows-xp-http-request,$(XP_HTTP_REQUEST)))
 $(eval $(call link_windows_xp_test,$(XP_HTTP_REQUEST),$(XP_HTTP_REQUEST_OBJS)))
 
+$(eval $(call run_windows_xp_test,test-windows-xp-server-transport,$(XP_SERVER_TRANSPORT)))
+$(eval $(call link_windows_xp_test,$(XP_SERVER_TRANSPORT),$(XP_SERVER_TRANSPORT_OBJS)))
+
+$(eval $(call run_windows_xp_test,test-windows-xp-connection-manager,$(XP_CONNECTION_MANAGER)))
+$(eval $(call link_windows_xp_test,$(XP_CONNECTION_MANAGER),$(XP_CONNECTION_MANAGER_OBJS)))
+
 $(eval $(call run_windows_xp_test,test-windows-xp-sandbox,$(XP_SANDBOX)))
 $(eval $(call link_windows_xp_test,$(XP_SANDBOX),$(XP_SANDBOX_OBJS)))
 
@@ -157,9 +175,11 @@ test-windows-xp: $(WINDOWS_XP_TEST_TARGETS)
 	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_TRANSFER)
 	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_CONFIG)
 	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_HTTP_REQUEST)
+	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_SERVER_TRANSPORT)
+	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_CONNECTION_MANAGER)
 	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_SANDBOX)
 	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_PORT_TUNNEL_FRAME)
 
 check-windows-xp: all-windows-xp test-windows-xp
 
-.PHONY: all-windows-xp test-windows-xp test-windows-xp-basic-mutex test-windows-xp-patch test-windows-xp-session-store test-windows-xp-transfer test-windows-xp-config test-windows-xp-http-request test-windows-xp-sandbox test-windows-xp-port-tunnel-frame check-windows-xp
+.PHONY: all-windows-xp test-windows-xp test-windows-xp-basic-mutex test-windows-xp-patch test-windows-xp-session-store test-windows-xp-transfer test-windows-xp-config test-windows-xp-http-request test-windows-xp-server-transport test-windows-xp-connection-manager test-windows-xp-sandbox test-windows-xp-port-tunnel-frame check-windows-xp

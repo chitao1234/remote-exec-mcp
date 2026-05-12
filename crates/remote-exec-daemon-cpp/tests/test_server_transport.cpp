@@ -4,10 +4,11 @@
 #include <string>
 
 #include <stdexcept>
-#include <sys/socket.h>
+#include <utility>
 
 #include "http_request.h"
 #include "server_transport.h"
+#include "test_socket_pair.h"
 
 int main() {
     bool rejected_invalid_timeout_socket = false;
@@ -33,11 +34,9 @@ int main() {
         static_cast<std::size_t>(INT_MAX)
     );
 
-    int sockets[2];
-    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
-
-    UniqueSocket reader(sockets[0]);
-    UniqueSocket writer(sockets[1]);
+    ConnectedSocketPair sockets = make_connected_socket_pair();
+    UniqueSocket reader(std::move(sockets.first));
+    UniqueSocket writer(std::move(sockets.second));
 
     const std::string raw =
         "POST /v1/transfer/import HTTP/1.1\r\n"

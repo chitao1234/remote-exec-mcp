@@ -1,37 +1,32 @@
+#include <atomic>
 #include <cassert>
-#include <thread>
-
-#include <unistd.h>
-
-#include <sys/socket.h>
+#include <utility>
 
 #include "connection_manager.h"
 #include "platform.h"
+#include "test_socket_pair.h"
 
 static void hold_worker(SOCKET socket, void* raw_flag) {
-    bool* release = static_cast<bool*>(raw_flag);
-    while (!*release) {
+    std::atomic<bool>* release = static_cast<std::atomic<bool>*>(raw_flag);
+    while (!release->load()) {
         platform::sleep_ms(10);
     }
-    close(socket);
+    close_socket(socket);
 }
 
 int main() {
     ConnectionManager manager(1UL);
-    int pair_one[2];
-    int pair_two[2];
-    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, pair_one) == 0);
-    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, pair_two) == 0);
+    ConnectedSocketPair pair_one = make_connected_socket_pair();
+    ConnectedSocketPair pair_two = make_connected_socket_pair();
 
-    bool release_first = false;
-    UniqueSocket first(pair_one[0]);
-    UniqueSocket second(pair_two[0]);
+    std::atomic<bool> release_first(false);
 
-    assert(manager.try_start(std::move(first), &hold_worker, &release_first));
+    assert(manager.try_start(std::move(pair_one.first), &hold_worker, &release_first));
     assert(manager.active_count() == 1UL);
-    assert(!manager.try_start(std::move(second), &hold_worker, &release_first));
+    assert(!manager.try_start(std::move(pair_two.first), &hold_worker, &release_first));
 
     manager.begin_shutdown();
-    release_first = true;
-    manager.reap_finished();
+    release_first.store(true);
+    manager.wait_for_all();
+    assert(manager.active_count() == 0UL);
 }
