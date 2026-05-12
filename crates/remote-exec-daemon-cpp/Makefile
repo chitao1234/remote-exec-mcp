@@ -10,7 +10,7 @@ HOST_CXX ?= g++
 
 COMMON_CPPFLAGS = -Iinclude -Ithird_party
 PROD_CXXFLAGS = -std=c++11 -O0 -Wall -Wextra -pthread
-TEST_CXXFLAGS = -std=gnu++17 -O0 -Wall -Wextra -pthread
+TEST_CXXFLAGS = -std=c++11 -O0 -Wall -Wextra -pthread
 PROD_LDFLAGS ?=
 TEST_LDFLAGS ?=
 PTHREAD_LDLIBS = -pthread

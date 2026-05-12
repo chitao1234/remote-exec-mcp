@@ -6,7 +6,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -29,8 +28,9 @@
 #include "process_session.h"
 #include "server.h"
 #include "server_transport.h"
+#include "test_filesystem.h"
 
-namespace fs = std::filesystem;
+namespace fs = test_fs;
 
 static const unsigned long TCP_PAYLOAD_DRAIN_MARGIN_MS = 100UL;
 

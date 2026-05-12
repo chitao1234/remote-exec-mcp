@@ -3,7 +3,7 @@ OBJ_DIR := $(BUILD_DIR)/obj
 
 COMMON_CPPFLAGS := -I$(MAKEFILE_DIR)include -I$(MAKEFILE_DIR)third_party
 PROD_CXXFLAGS := -std=c++11 -O0 -Wall -Wextra
-TEST_CXXFLAGS := -std=gnu++17 -O0 -Wall -Wextra
+TEST_CXXFLAGS := -std=c++11 -O0 -Wall -Wextra
 HOST_TEST_CXXFLAGS := $(TEST_CXXFLAGS)
 XP_TEST_CXXFLAGS := -std=c++11 -O0 -Wall -Wextra
 DEPFLAGS := -MMD -MP
