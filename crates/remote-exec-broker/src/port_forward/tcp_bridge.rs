@@ -577,12 +577,9 @@ async fn queue_or_send_tcp_connect_frame(
         return Ok(None);
     };
     if stream_ready {
-        if let Err(err) = connect_tunnel
-            .send(frame)
-            .await
-            .context("relaying tcp data to connect tunnel")
-        {
-            if is_backpressure_error(&err) {
+        match send_or_classify_connect_tunnel_frame(connect_tunnel, frame).await? {
+            ConnectTunnelFrameSend::Sent => {}
+            ConnectTunnelFrameSend::Backpressure => {
                 close_tcp_pair(
                     runtime,
                     connect_tunnel,
@@ -594,11 +591,10 @@ async fn queue_or_send_tcp_connect_frame(
                 .await?;
                 return Ok(None);
             }
-            if is_retryable_transport_error(&err) {
+            ConnectTunnelFrameSend::Retryable => {
                 close_active_tcp_listen_streams(runtime, listen_tunnel, state).await?;
                 return Ok(Some(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)));
             }
-            return Err(err);
         }
     } else {
         let Some(stream) = state.connect_streams.get_mut(&connect_stream_id) else {
@@ -640,12 +636,9 @@ async fn flush_pending_tcp_connect_frames(
     let mut should_remove = false;
     for frame in pending_frames {
         let is_close = frame.frame_type == FrameType::Close;
-        if let Err(err) = connect_tunnel
-            .send(frame)
-            .await
-            .context("relaying tcp data to connect tunnel")
-        {
-            if is_backpressure_error(&err) {
+        match send_or_classify_connect_tunnel_frame(connect_tunnel, frame).await? {
+            ConnectTunnelFrameSend::Sent => {}
+            ConnectTunnelFrameSend::Backpressure => {
                 close_tcp_pair(
                     runtime,
                     connect_tunnel,
@@ -659,13 +652,12 @@ async fn flush_pending_tcp_connect_frames(
                     should_remove: true,
                 });
             }
-            if is_retryable_transport_error(&err) {
+            ConnectTunnelFrameSend::Retryable => {
                 close_active_tcp_listen_streams(runtime, listen_tunnel, state).await?;
                 return Ok(TcpFlushResult::Recover(ForwardLoopControl::RecoverTunnel(
                     TunnelRole::Connect,
                 )));
             }
-            return Err(err);
         }
         if is_close {
             if let Some(listen_stream_id) = state
@@ -687,9 +679,31 @@ enum TcpFlushResult {
     Recover(ForwardLoopControl),
 }
 
+enum ConnectTunnelFrameSend {
+    Sent,
+    Backpressure,
+    Retryable,
+}
+
 enum TcpPairCloseReason {
     ConnectError,
     ConnectPressure,
+}
+
+async fn send_or_classify_connect_tunnel_frame(
+    connect_tunnel: &Arc<PortTunnel>,
+    frame: Frame,
+) -> anyhow::Result<ConnectTunnelFrameSend> {
+    match connect_tunnel
+        .send(frame)
+        .await
+        .context("relaying tcp data to connect tunnel")
+    {
+        Ok(()) => Ok(ConnectTunnelFrameSend::Sent),
+        Err(err) if is_backpressure_error(&err) => Ok(ConnectTunnelFrameSend::Backpressure),
+        Err(err) if is_retryable_transport_error(&err) => Ok(ConnectTunnelFrameSend::Retryable),
+        Err(err) => Err(err),
+    }
 }
 
 async fn close_tcp_pair(
