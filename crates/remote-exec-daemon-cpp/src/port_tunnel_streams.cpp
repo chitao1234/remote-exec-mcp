@@ -1,11 +1,11 @@
 #include "port_tunnel_streams.h"
 
-void TransportOwnedStreams::insert_tcp(uint32_t stream_id, const std::shared_ptr<TunnelTcpStream>& stream) {
+void ConnectionLocalStreams::insert_tcp(uint32_t stream_id, const std::shared_ptr<TunnelTcpStream>& stream) {
     BasicLockGuard lock(mutex_);
     tcp_streams_[stream_id] = stream;
 }
 
-std::shared_ptr<TunnelTcpStream> TransportOwnedStreams::get_tcp(uint32_t stream_id) {
+std::shared_ptr<TunnelTcpStream> ConnectionLocalStreams::get_tcp(uint32_t stream_id) {
     BasicLockGuard lock(mutex_);
     std::map<uint32_t, std::shared_ptr<TunnelTcpStream>>::iterator it = tcp_streams_.find(stream_id);
     if (it == tcp_streams_.end()) {
@@ -14,7 +14,7 @@ std::shared_ptr<TunnelTcpStream> TransportOwnedStreams::get_tcp(uint32_t stream_
     return it->second;
 }
 
-std::shared_ptr<TunnelTcpStream> TransportOwnedStreams::remove_tcp(uint32_t stream_id) {
+std::shared_ptr<TunnelTcpStream> ConnectionLocalStreams::remove_tcp(uint32_t stream_id) {
     BasicLockGuard lock(mutex_);
     std::map<uint32_t, std::shared_ptr<TunnelTcpStream>>::iterator it = tcp_streams_.find(stream_id);
     if (it == tcp_streams_.end()) {
@@ -25,12 +25,12 @@ std::shared_ptr<TunnelTcpStream> TransportOwnedStreams::remove_tcp(uint32_t stre
     return stream;
 }
 
-void TransportOwnedStreams::insert_udp(uint32_t stream_id, const std::shared_ptr<TunnelUdpSocket>& socket_value) {
+void ConnectionLocalStreams::insert_udp(uint32_t stream_id, const std::shared_ptr<TunnelUdpSocket>& socket_value) {
     BasicLockGuard lock(mutex_);
     udp_sockets_[stream_id] = socket_value;
 }
 
-std::shared_ptr<TunnelUdpSocket> TransportOwnedStreams::get_udp(uint32_t stream_id) {
+std::shared_ptr<TunnelUdpSocket> ConnectionLocalStreams::get_udp(uint32_t stream_id) {
     BasicLockGuard lock(mutex_);
     std::map<uint32_t, std::shared_ptr<TunnelUdpSocket>>::iterator it = udp_sockets_.find(stream_id);
     if (it == udp_sockets_.end()) {
@@ -39,7 +39,7 @@ std::shared_ptr<TunnelUdpSocket> TransportOwnedStreams::get_udp(uint32_t stream_
     return it->second;
 }
 
-std::shared_ptr<TunnelUdpSocket> TransportOwnedStreams::remove_udp(uint32_t stream_id) {
+std::shared_ptr<TunnelUdpSocket> ConnectionLocalStreams::remove_udp(uint32_t stream_id) {
     BasicLockGuard lock(mutex_);
     std::map<uint32_t, std::shared_ptr<TunnelUdpSocket>>::iterator it = udp_sockets_.find(stream_id);
     if (it == udp_sockets_.end()) {
@@ -50,8 +50,8 @@ std::shared_ptr<TunnelUdpSocket> TransportOwnedStreams::remove_udp(uint32_t stre
     return socket_value;
 }
 
-void TransportOwnedStreams::drain(std::vector<std::shared_ptr<TunnelTcpStream>>* tcp_streams,
-                                  std::vector<std::shared_ptr<TunnelUdpSocket>>* udp_sockets) {
+void ConnectionLocalStreams::drain(std::vector<std::shared_ptr<TunnelTcpStream>>* tcp_streams,
+                                   std::vector<std::shared_ptr<TunnelUdpSocket>>* udp_sockets) {
     BasicLockGuard lock(mutex_);
     for (std::map<uint32_t, std::shared_ptr<TunnelTcpStream>>::iterator it = tcp_streams_.begin();
          it != tcp_streams_.end();

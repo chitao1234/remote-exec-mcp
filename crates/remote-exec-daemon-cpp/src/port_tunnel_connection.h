@@ -16,7 +16,7 @@ public:
     void run();
     void tcp_read_loop(uint32_t stream_id, std::shared_ptr<TunnelTcpStream> stream);
     void tcp_write_loop(uint32_t stream_id, std::shared_ptr<TunnelTcpStream> stream);
-    void udp_read_loop_transport_owned(uint32_t stream_id, std::shared_ptr<TunnelUdpSocket> socket_value);
+    void udp_read_loop_connection_local(uint32_t stream_id, std::shared_ptr<TunnelUdpSocket> socket_value);
     void send_error(uint32_t stream_id, const std::string& code, const std::string& message);
     void send_terminal_error(uint32_t stream_id, const std::string& code, const std::string& message);
     void send_forward_drop(uint32_t stream_id,
@@ -66,7 +66,7 @@ private:
     void set_generation(std::uint64_t generation);
     void ensure_generation(std::uint64_t frame_generation) const;
     void close_current_session(PortTunnelCloseMode mode);
-    void close_transport_owned_state();
+    void close_connection_local_state();
     std::shared_ptr<PortTunnelSession> current_session();
     PortTunnelMode current_mode();
     void require_mode(PortTunnelMode mode, PortTunnelProtocol protocol, const std::string& message);
@@ -75,7 +75,7 @@ private:
     SOCKET client_;
     std::shared_ptr<PortTunnelService> service_;
     std::shared_ptr<PortTunnelSender> sender_;
-    TransportOwnedStreams transport_streams_;
+    ConnectionLocalStreams connection_local_streams_;
     BasicMutex state_mutex_;
     std::atomic<std::uint64_t> generation_;
     std::shared_ptr<PortTunnelSession> session_;

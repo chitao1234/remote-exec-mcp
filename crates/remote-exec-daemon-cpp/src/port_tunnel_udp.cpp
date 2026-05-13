@@ -180,9 +180,9 @@ void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
             send_worker_limit(frame.stream_id);
             return;
         }
-        transport_streams_.insert_udp(frame.stream_id, socket_value);
+        connection_local_streams_.insert_udp(frame.stream_id, socket_value);
         if (!spawn_udp_read_thread(service_, shared_from_this(), frame.stream_id, socket_value, true)) {
-            std::shared_ptr<TunnelUdpSocket> removed_socket = transport_streams_.remove_udp(frame.stream_id);
+            std::shared_ptr<TunnelUdpSocket> removed_socket = connection_local_streams_.remove_udp(frame.stream_id);
             if (removed_socket.get() != NULL) {
                 mark_udp_socket_closed(removed_socket);
             } else {
@@ -198,8 +198,8 @@ void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
     send_frame(ok);
 }
 
-void PortTunnelConnection::udp_read_loop_transport_owned(uint32_t stream_id,
-                                                         std::shared_ptr<TunnelUdpSocket> socket_value) {
+void PortTunnelConnection::udp_read_loop_connection_local(uint32_t stream_id,
+                                                          std::shared_ptr<TunnelUdpSocket> socket_value) {
     std::vector<unsigned char> buffer(READ_BUF_SIZE);
     for (;;) {
         sockaddr_storage peer_address;
@@ -249,7 +249,7 @@ void PortTunnelConnection::udp_datagram(const PortTunnelFrame& frame) {
         }
         socket_value = it->second;
     } else {
-        socket_value = transport_streams_.get_udp(frame.stream_id);
+        socket_value = connection_local_streams_.get_udp(frame.stream_id);
         if (socket_value.get() == NULL) {
             throw PortForwardError(400, "unknown_port_bind", "unknown tunnel udp stream");
         }

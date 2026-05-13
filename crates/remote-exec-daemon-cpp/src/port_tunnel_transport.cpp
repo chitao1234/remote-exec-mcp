@@ -195,7 +195,7 @@ void PortTunnelConnection::run() {
         send_terminal_error(0U, "invalid_port_tunnel", "unknown port tunnel failure");
     }
     close_current_session(close_mode);
-    close_transport_owned_state();
+    close_connection_local_state();
 }
 
 void PortTunnelConnection::handle_frame(const PortTunnelFrame& frame) {
@@ -342,7 +342,7 @@ void PortTunnelConnection::tunnel_close(const PortTunnelFrame& frame) {
     closed.meta = frame.meta;
     send_frame(closed);
     close_current_session(PortTunnelCloseMode::GracefulClose);
-    close_transport_owned_state();
+    close_connection_local_state();
 }
 
 void PortTunnelConnection::tunnel_heartbeat(const PortTunnelFrame& frame) {

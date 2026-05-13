@@ -181,7 +181,7 @@ void PortTunnelConnection::tcp_connect(const PortTunnelFrame& frame) {
         throw;
     }
 
-    transport_streams_.insert_tcp(frame.stream_id, stream);
+    connection_local_streams_.insert_tcp(frame.stream_id, stream);
     if (!service_->try_acquire_worker()) {
         drop_tcp_stream(frame.stream_id, stream);
         send_worker_limit(frame.stream_id);
@@ -263,7 +263,7 @@ void PortTunnelConnection::tcp_write_loop(uint32_t stream_id, std::shared_ptr<Tu
 
 void PortTunnelConnection::tcp_data(uint32_t stream_id, const std::vector<unsigned char>& data) {
     std::shared_ptr<TunnelTcpStream> stream;
-    stream = transport_streams_.get_tcp(stream_id);
+    stream = connection_local_streams_.get_tcp(stream_id);
     if (stream.get() == NULL) {
         throw PortForwardError(400, "unknown_port_connection", "unknown tunnel tcp stream");
     }
@@ -287,7 +287,7 @@ void PortTunnelConnection::tcp_data(uint32_t stream_id, const std::vector<unsign
 
 void PortTunnelConnection::tcp_eof(uint32_t stream_id) {
     std::shared_ptr<TunnelTcpStream> stream;
-    stream = transport_streams_.get_tcp(stream_id);
+    stream = connection_local_streams_.get_tcp(stream_id);
     if (stream.get() == NULL) {
         return;
     }

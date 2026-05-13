@@ -89,9 +89,9 @@ bool retained_listener_closed(const std::shared_ptr<RetainedTcpListener>& listen
 bool session_is_unavailable(const std::shared_ptr<PortTunnelSession>& session);
 void mark_retained_listener_closed(const std::shared_ptr<RetainedTcpListener>& listener);
 
-class TransportOwnedStreams {
+class ConnectionLocalStreams {
 public:
-    TransportOwnedStreams() {}
+    ConnectionLocalStreams() {}
 
     void insert_tcp(uint32_t stream_id, const std::shared_ptr<TunnelTcpStream>& stream);
     std::shared_ptr<TunnelTcpStream> get_tcp(uint32_t stream_id);
@@ -103,8 +103,8 @@ public:
                std::vector<std::shared_ptr<TunnelUdpSocket>>* udp_sockets);
 
 private:
-    TransportOwnedStreams(const TransportOwnedStreams&);
-    TransportOwnedStreams& operator=(const TransportOwnedStreams&);
+    ConnectionLocalStreams(const ConnectionLocalStreams&);
+    ConnectionLocalStreams& operator=(const ConnectionLocalStreams&);
 
     BasicMutex mutex_;
     std::map<uint32_t, std::shared_ptr<TunnelTcpStream>> tcp_streams_;

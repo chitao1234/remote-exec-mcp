@@ -135,6 +135,6 @@ bool spawn_udp_read_thread(const std::shared_ptr<PortTunnelService>& service,
                            const std::shared_ptr<TunnelUdpSocket>& socket_value,
                            bool worker_acquired) {
     return spawn_worker_thread("spawn udp read thread", service, worker_acquired, [tunnel, stream_id, socket_value]() {
-        tunnel->udp_read_loop_transport_owned(stream_id, socket_value);
+        tunnel->udp_read_loop_connection_local(stream_id, socket_value);
     });
 }

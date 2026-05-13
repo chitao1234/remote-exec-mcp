@@ -48,7 +48,7 @@ void PortTunnelConnection::send_forward_drop(uint32_t stream_id,
 }
 
 void PortTunnelConnection::close_stream(uint32_t stream_id) {
-    std::shared_ptr<TunnelTcpStream> tcp_stream = transport_streams_.remove_tcp(stream_id);
+    std::shared_ptr<TunnelTcpStream> tcp_stream = connection_local_streams_.remove_tcp(stream_id);
     if (tcp_stream.get() != NULL) {
         mark_tcp_stream_closed(tcp_stream);
     }
@@ -79,7 +79,7 @@ void PortTunnelConnection::close_stream(uint32_t stream_id) {
         return;
     }
 
-    std::shared_ptr<TunnelUdpSocket> udp_socket = transport_streams_.remove_udp(stream_id);
+    std::shared_ptr<TunnelUdpSocket> udp_socket = connection_local_streams_.remove_udp(stream_id);
     if (udp_socket.get() != NULL) {
         mark_udp_socket_closed(udp_socket);
     }
@@ -91,7 +91,7 @@ void PortTunnelConnection::send_worker_limit(uint32_t stream_id) {
 }
 
 void PortTunnelConnection::drop_tcp_stream(uint32_t stream_id, const std::shared_ptr<TunnelTcpStream>& fallback) {
-    std::shared_ptr<TunnelTcpStream> removed_stream = transport_streams_.remove_tcp(stream_id);
+    std::shared_ptr<TunnelTcpStream> removed_stream = connection_local_streams_.remove_tcp(stream_id);
     if (removed_stream.get() != NULL) {
         mark_tcp_stream_closed(removed_stream);
     } else if (fallback.get() != NULL) {
@@ -131,11 +131,11 @@ void PortTunnelConnection::close_current_session(PortTunnelCloseMode mode) {
     }
 }
 
-void PortTunnelConnection::close_transport_owned_state() {
+void PortTunnelConnection::close_connection_local_state() {
     std::vector<std::shared_ptr<TunnelTcpStream>> tcp_streams;
     std::vector<std::shared_ptr<TunnelUdpSocket>> udp_sockets;
     mark_closed();
-    transport_streams_.drain(&tcp_streams, &udp_sockets);
+    connection_local_streams_.drain(&tcp_streams, &udp_sockets);
     for (std::size_t i = 0; i < tcp_streams.size(); ++i) {
         mark_tcp_stream_closed(tcp_streams[i]);
     }
@@ -228,7 +228,7 @@ bool PortTunnelConnection::accept_session_tcp_stream(const std::shared_ptr<PortT
             service_->release_worker();
             return false;
         }
-        transport_streams_.insert_tcp(stream_id, stream);
+        connection_local_streams_.insert_tcp(stream_id, stream);
     }
 
     PortTunnelFrame frame = make_empty_frame(PortTunnelFrameType::TcpAccept, stream_id);
