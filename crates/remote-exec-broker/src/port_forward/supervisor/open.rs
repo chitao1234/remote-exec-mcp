@@ -14,8 +14,8 @@ use remote_exec_proto::public::{
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    ForwardRuntime, LISTEN_SESSION_GENERATION, LISTEN_SESSION_STREAM_ID, ListenSessionControl,
-    ListenSessionParams, OpenedForward,
+    ForwardIdentity, ForwardRuntime, LISTEN_SESSION_GENERATION, LISTEN_SESSION_STREAM_ID,
+    ListenSessionControl, ListenSessionParams, OpenedForward,
 };
 use crate::port_forward::limits::effective_forward_limits;
 use crate::port_forward::side::SideHandle;
@@ -264,18 +264,21 @@ async fn build_opened_forward(
     }));
 
     let cancel = CancellationToken::new();
-    let runtime = ForwardRuntime {
-        forward_id: forward_id.clone(),
-        listen_side: listen_side.clone(),
-        connect_side: connect_side.clone(),
-        protocol: kind.protocol,
-        connect_endpoint: connect_endpoint.clone(),
-        limits: limits.into(),
+    let identity = ForwardIdentity::new(
+        forward_id.clone(),
+        listen_side.clone(),
+        connect_side.clone(),
+        kind.protocol,
+        connect_endpoint.clone(),
+    );
+    let runtime = ForwardRuntime::new(
+        identity,
+        limits.into(),
         store,
-        listen_session: listen_session.clone(),
-        initial_connect_tunnel: connect_tunnel,
-        cancel: cancel.clone(),
-    };
+        listen_session.clone(),
+        connect_tunnel,
+        cancel.clone(),
+    );
     Ok(OpenedForward {
         record: PortForwardRecord::new(
             ForwardPortEntry::new_open(

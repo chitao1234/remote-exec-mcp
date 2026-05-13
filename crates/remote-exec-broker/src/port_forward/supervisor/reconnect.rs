@@ -172,7 +172,7 @@ async fn recover_connect_side_tunnel_after_listen_recovery(
     runtime
         .store
         .mark_connect_reopening_after_listen_recovery(
-            &runtime.forward_id,
+            runtime.forward_id(),
             reason.to_string(),
             runtime.limits.max_reconnecting_forwards,
         )
@@ -210,9 +210,9 @@ async fn retry_open_connect_tunnel(
         PortForwardReconnectPolicy::connect(),
         || async {
             open_data_tunnel(
-                &runtime.connect_side,
-                &runtime.forward_id,
-                runtime.protocol,
+                runtime.connect_side(),
+                runtime.forward_id(),
+                runtime.protocol(),
                 LISTEN_SESSION_GENERATION,
                 runtime.limits.max_tunnel_queued_bytes,
             )

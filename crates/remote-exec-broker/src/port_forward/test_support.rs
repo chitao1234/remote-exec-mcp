@@ -138,12 +138,12 @@ pub(super) fn filter_one(forward_id: &str) -> PortForwardFilter {
 pub(super) fn test_record(runtime: &ForwardRuntime, listen_endpoint: &str) -> PortForwardRecord {
     PortForwardRecord::new(
         ForwardPortEntry::new_open(
-            runtime.forward_id.clone(),
-            runtime.listen_side.name().to_string(),
+            runtime.forward_id().to_string(),
+            runtime.listen_side().name().to_string(),
             listen_endpoint.to_string(),
-            runtime.connect_side.name().to_string(),
-            runtime.connect_endpoint.clone(),
-            runtime.protocol,
+            runtime.connect_side().name().to_string(),
+            runtime.connect_endpoint().to_string(),
+            runtime.protocol(),
             runtime.limits.public_summary(),
         ),
         runtime.listen_session.clone(),

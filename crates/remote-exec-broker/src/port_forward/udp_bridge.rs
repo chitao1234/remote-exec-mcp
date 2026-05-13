@@ -49,7 +49,7 @@ async fn run_udp_forward_epoch(
     listen_tunnel: Arc<PortTunnel>,
     connect_tunnel: Arc<PortTunnel>,
 ) -> anyhow::Result<ForwardLoopControl> {
-    let connector_bind_endpoint = udp_connector_endpoint(&runtime.connect_endpoint)?.to_string();
+    let connector_bind_endpoint = udp_connector_endpoint(runtime.connect_endpoint())?.to_string();
     let connectors = UdpConnectorMap::default();
     let mut connector_stream_ids = StreamIdAllocator::new_odd_from(3);
     let mut sweep = tokio::time::interval(UDP_CONNECTOR_IDLE_SWEEP_INTERVAL);
@@ -106,7 +106,7 @@ async fn run_udp_forward_epoch(
                             flags: 0,
                             stream_id: connector_stream_id,
                             meta: encode_tunnel_meta(&UdpDatagramMeta {
-                                peer: runtime.connect_endpoint.clone(),
+                                peer: runtime.connect_endpoint().to_string(),
                             })?,
                             data: frame.data,
                         }).await {
@@ -134,7 +134,7 @@ async fn run_udp_forward_epoch(
                     FrameType::ForwardDrop => {
                         apply_forward_drop_report(
                             &runtime.store,
-                            &runtime.forward_id,
+                            runtime.forward_id(),
                             &frame,
                         )
                         .await?;
@@ -278,7 +278,9 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::super::side::SideHandle;
-    use super::super::supervisor::{ForwardLimits, ForwardRuntime, ListenSessionControl};
+    use super::super::supervisor::{
+        ForwardIdentity, ForwardLimits, ForwardRuntime, ListenSessionControl,
+    };
     use super::super::test_support::{
         ScriptedTunnelIo, filter_one, test_record, wait_until_send_fails,
     };
@@ -520,7 +522,7 @@ mod tests {
 
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
-                let entries = runtime.store.list(&filter_one(&runtime.forward_id)).await;
+                let entries = runtime.store.list(&filter_one(runtime.forward_id())).await;
                 if entries[0].dropped_udp_datagrams == 1 {
                     return;
                 }
@@ -582,7 +584,7 @@ mod tests {
 
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
-                let entries = runtime.store.list(&filter_one(&runtime.forward_id)).await;
+                let entries = runtime.store.list(&filter_one(runtime.forward_id())).await;
                 if entries[0].dropped_udp_datagrams == 3 {
                     return;
                 }
@@ -614,17 +616,19 @@ mod tests {
             PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
             Some(listen_tunnel),
         ));
-        ForwardRuntime {
-            forward_id: "fwd_test".to_string(),
-            listen_side: SideHandle::local().unwrap(),
-            connect_side: SideHandle::local().unwrap(),
-            protocol: PublicForwardPortProtocol::Udp,
-            connect_endpoint: "127.0.0.1:1".to_string(),
-            limits: ForwardLimits::default(),
-            store: Default::default(),
+        ForwardRuntime::new(
+            ForwardIdentity::new(
+                "fwd_test".to_string(),
+                SideHandle::local().unwrap(),
+                SideHandle::local().unwrap(),
+                PublicForwardPortProtocol::Udp,
+                "127.0.0.1:1".to_string(),
+            ),
+            ForwardLimits::default(),
+            Default::default(),
             listen_session,
-            initial_connect_tunnel: connect_tunnel,
-            cancel: CancellationToken::new(),
-        }
+            connect_tunnel,
+            CancellationToken::new(),
+        )
     }
 }

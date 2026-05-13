@@ -144,7 +144,7 @@ async fn handle_listen_tunnel_event(
         }
         FrameType::Error => handle_listen_error(runtime, connect_tunnel, state, frame).await,
         FrameType::ForwardDrop => {
-            apply_forward_drop_report(&runtime.store, &runtime.forward_id, &frame).await?;
+            apply_forward_drop_report(&runtime.store, runtime.forward_id(), &frame).await?;
             Ok(None)
         }
         _ => Ok(None),
@@ -217,7 +217,7 @@ async fn handle_listen_tcp_accept(
             flags: 0,
             stream_id: connect_stream_id,
             meta: encode_tunnel_meta(&EndpointMeta {
-                endpoint: runtime.connect_endpoint.clone(),
+                endpoint: runtime.connect_endpoint().to_string(),
             })?,
             data: Vec::new(),
         })
@@ -250,7 +250,7 @@ async fn handle_listen_tcp_accept(
         },
     );
     tracing::debug!(
-        forward_id = %runtime.forward_id,
+        forward_id = %runtime.forward_id(),
         listener_stream_id = accept.listener_stream_id,
         accepted_stream_id = frame.stream_id,
         connect_stream_id,
@@ -816,7 +816,7 @@ async fn try_reserve_active_tcp_stream(runtime: &ForwardRuntime) -> bool {
     let mut saw_entry = false;
     runtime
         .store
-        .update_entry(&runtime.forward_id, |entry| {
+        .update_entry(runtime.forward_id(), |entry| {
             saw_entry = true;
             if entry.active_tcp_streams < runtime.limits.max_active_tcp_streams {
                 entry.active_tcp_streams += 1;
@@ -851,7 +851,9 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::super::side::SideHandle;
-    use super::super::supervisor::{ForwardLimits, ForwardRuntime, ListenSessionControl};
+    use super::super::supervisor::{
+        ForwardIdentity, ForwardLimits, ForwardRuntime, ListenSessionControl,
+    };
     use super::super::test_support::{
         ScriptedTunnelIo, filter_one, test_record, wait_until_send_fails,
     };
@@ -939,7 +941,7 @@ mod tests {
 
         // The failed connect tunnel and queued listen accept may be observed in
         // either order; neither path may leak active stream accounting.
-        let entries = runtime.store.list(&filter_one(&runtime.forward_id)).await;
+        let entries = runtime.store.list(&filter_one(runtime.forward_id())).await;
         assert_eq!(entries[0].active_tcp_streams, 0);
     }
 
@@ -1017,7 +1019,7 @@ mod tests {
 
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
-                let entries = runtime.store.list(&filter_one(&runtime.forward_id)).await;
+                let entries = runtime.store.list(&filter_one(runtime.forward_id())).await;
                 if entries[0].dropped_tcp_streams == 1 {
                     assert_eq!(entries[0].active_tcp_streams, 0);
                     return;
@@ -1054,18 +1056,20 @@ mod tests {
             Some(listen_tunnel.clone()),
         ));
         let cancel = CancellationToken::new();
-        let runtime = ForwardRuntime {
-            forward_id: "fwd_test".to_string(),
-            listen_side: SideHandle::local().unwrap(),
-            connect_side: SideHandle::local().unwrap(),
-            protocol: PublicForwardPortProtocol::Tcp,
-            connect_endpoint: "127.0.0.1:1".to_string(),
-            limits: ForwardLimits::default(),
-            store: Default::default(),
+        let runtime = ForwardRuntime::new(
+            ForwardIdentity::new(
+                "fwd_test".to_string(),
+                SideHandle::local().unwrap(),
+                SideHandle::local().unwrap(),
+                PublicForwardPortProtocol::Tcp,
+                "127.0.0.1:1".to_string(),
+            ),
+            ForwardLimits::default(),
+            Default::default(),
             listen_session,
-            initial_connect_tunnel: connect_tunnel.clone(),
+            connect_tunnel.clone(),
             cancel,
-        };
+        );
 
         let epoch_runtime = runtime.clone();
         let epoch = tokio::spawn({
@@ -1159,18 +1163,20 @@ mod tests {
             Some(listen_tunnel.clone()),
         ));
         let cancel = CancellationToken::new();
-        let runtime = ForwardRuntime {
-            forward_id: "fwd_test".to_string(),
-            listen_side: SideHandle::local().unwrap(),
-            connect_side: SideHandle::local().unwrap(),
-            protocol: PublicForwardPortProtocol::Tcp,
-            connect_endpoint: "127.0.0.1:1".to_string(),
-            limits: ForwardLimits::default(),
-            store: Default::default(),
+        let runtime = ForwardRuntime::new(
+            ForwardIdentity::new(
+                "fwd_test".to_string(),
+                SideHandle::local().unwrap(),
+                SideHandle::local().unwrap(),
+                PublicForwardPortProtocol::Tcp,
+                "127.0.0.1:1".to_string(),
+            ),
+            ForwardLimits::default(),
+            Default::default(),
             listen_session,
-            initial_connect_tunnel: connect_tunnel.clone(),
+            connect_tunnel.clone(),
             cancel,
-        };
+        );
 
         let epoch_runtime = runtime.clone();
         let epoch = tokio::spawn({
@@ -1288,7 +1294,7 @@ mod tests {
 
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
-                let entries = runtime.store.list(&filter_one(&runtime.forward_id)).await;
+                let entries = runtime.store.list(&filter_one(runtime.forward_id())).await;
                 if entries[0].active_tcp_streams == 0 {
                     return;
                 }
@@ -1406,7 +1412,7 @@ mod tests {
 
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
-                let entries = runtime.store.list(&filter_one(&runtime.forward_id)).await;
+                let entries = runtime.store.list(&filter_one(runtime.forward_id())).await;
                 if entries[0].active_tcp_streams == 0 {
                     return;
                 }
@@ -1507,7 +1513,7 @@ mod tests {
 
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
-                let entries = runtime.store.list(&filter_one(&runtime.forward_id)).await;
+                let entries = runtime.store.list(&filter_one(runtime.forward_id())).await;
                 if entries[0].dropped_tcp_streams == 1 {
                     return;
                 }
@@ -1569,7 +1575,7 @@ mod tests {
 
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
-                let entries = runtime.store.list(&filter_one(&runtime.forward_id)).await;
+                let entries = runtime.store.list(&filter_one(runtime.forward_id())).await;
                 if entries[0].dropped_tcp_streams == 2 {
                     return;
                 }
@@ -1664,17 +1670,19 @@ mod tests {
             PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
             Some(listen_tunnel),
         ));
-        ForwardRuntime {
-            forward_id: "fwd_test".to_string(),
-            listen_side: SideHandle::local().unwrap(),
-            connect_side: SideHandle::local().unwrap(),
-            protocol: PublicForwardPortProtocol::Tcp,
-            connect_endpoint: "127.0.0.1:1".to_string(),
-            limits: ForwardLimits::default(),
-            store: Default::default(),
+        ForwardRuntime::new(
+            ForwardIdentity::new(
+                "fwd_test".to_string(),
+                SideHandle::local().unwrap(),
+                SideHandle::local().unwrap(),
+                PublicForwardPortProtocol::Tcp,
+                "127.0.0.1:1".to_string(),
+            ),
+            ForwardLimits::default(),
+            Default::default(),
             listen_session,
-            initial_connect_tunnel: connect_tunnel,
-            cancel: CancellationToken::new(),
-        }
+            connect_tunnel,
+            CancellationToken::new(),
+        )
     }
 }

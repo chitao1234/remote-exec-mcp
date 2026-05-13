@@ -25,12 +25,55 @@ pub(super) use reconnect::{
 };
 
 #[derive(Clone)]
+pub(super) struct ForwardIdentity {
+    forward_id: String,
+    listen_side: SideHandle,
+    connect_side: SideHandle,
+    protocol: PublicForwardPortProtocol,
+    connect_endpoint: String,
+}
+
+impl ForwardIdentity {
+    pub(super) fn new(
+        forward_id: String,
+        listen_side: SideHandle,
+        connect_side: SideHandle,
+        protocol: PublicForwardPortProtocol,
+        connect_endpoint: String,
+    ) -> Self {
+        Self {
+            forward_id,
+            listen_side,
+            connect_side,
+            protocol,
+            connect_endpoint,
+        }
+    }
+
+    pub(super) fn forward_id(&self) -> &str {
+        &self.forward_id
+    }
+
+    pub(super) fn listen_side(&self) -> &SideHandle {
+        &self.listen_side
+    }
+
+    pub(super) fn connect_side(&self) -> &SideHandle {
+        &self.connect_side
+    }
+
+    pub(super) fn protocol(&self) -> PublicForwardPortProtocol {
+        self.protocol
+    }
+
+    pub(super) fn connect_endpoint(&self) -> &str {
+        &self.connect_endpoint
+    }
+}
+
+#[derive(Clone)]
 pub(super) struct ForwardRuntime {
-    pub(super) forward_id: String,
-    pub(super) listen_side: SideHandle,
-    pub(super) connect_side: SideHandle,
-    pub(super) protocol: PublicForwardPortProtocol,
-    pub(super) connect_endpoint: String,
+    pub(super) identity: ForwardIdentity,
     pub(super) limits: ForwardLimits,
     pub(super) store: PortForwardStore,
     pub(super) listen_session: Arc<ListenSessionControl>,
@@ -82,9 +125,47 @@ impl Default for ForwardLimits {
 }
 
 impl ForwardRuntime {
+    pub(super) fn new(
+        identity: ForwardIdentity,
+        limits: ForwardLimits,
+        store: PortForwardStore,
+        listen_session: Arc<ListenSessionControl>,
+        initial_connect_tunnel: Arc<PortTunnel>,
+        cancel: CancellationToken,
+    ) -> Self {
+        Self {
+            identity,
+            limits,
+            store,
+            listen_session,
+            initial_connect_tunnel,
+            cancel,
+        }
+    }
+
+    pub(super) fn forward_id(&self) -> &str {
+        self.identity.forward_id()
+    }
+
+    pub(super) fn listen_side(&self) -> &SideHandle {
+        self.identity.listen_side()
+    }
+
+    pub(super) fn connect_side(&self) -> &SideHandle {
+        self.identity.connect_side()
+    }
+
+    pub(super) fn protocol(&self) -> PublicForwardPortProtocol {
+        self.identity.protocol()
+    }
+
+    pub(super) fn connect_endpoint(&self) -> &str {
+        self.identity.connect_endpoint()
+    }
+
     pub(super) async fn record_dropped_datagram(&self) {
         self.store
-            .update_entry(&self.forward_id, |entry| {
+            .update_entry(self.forward_id(), |entry| {
                 entry.dropped_udp_datagrams += 1;
             })
             .await;
@@ -92,7 +173,7 @@ impl ForwardRuntime {
 
     pub(super) async fn record_dropped_stream(&self) {
         self.store
-            .update_entry(&self.forward_id, |entry| {
+            .update_entry(self.forward_id(), |entry| {
                 entry.dropped_tcp_streams += 1;
             })
             .await;
@@ -103,7 +184,7 @@ impl ForwardRuntime {
             return;
         }
         self.store
-            .update_entry(&self.forward_id, |entry| {
+            .update_entry(self.forward_id(), |entry| {
                 entry.dropped_tcp_streams += count;
                 entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(count);
             })
@@ -112,7 +193,7 @@ impl ForwardRuntime {
 
     pub(super) async fn release_active_stream(&self) {
         self.store
-            .update_entry(&self.forward_id, |entry| {
+            .update_entry(self.forward_id(), |entry| {
                 entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(1);
             })
             .await;
@@ -120,7 +201,7 @@ impl ForwardRuntime {
 
     pub(super) async fn record_dropped_active_stream(&self) {
         self.store
-            .update_entry(&self.forward_id, |entry| {
+            .update_entry(self.forward_id(), |entry| {
                 entry.dropped_tcp_streams += 1;
                 entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(1);
             })
@@ -134,7 +215,7 @@ impl ForwardRuntime {
     ) -> anyhow::Result<()> {
         self.store
             .mark_reconnecting(
-                &self.forward_id,
+                self.forward_id(),
                 side,
                 reason.to_string(),
                 self.limits.max_reconnecting_forwards,
@@ -143,7 +224,7 @@ impl ForwardRuntime {
     }
 
     pub(super) async fn mark_active(&self, side: ForwardPortSideRole) {
-        self.store.mark_ready(&self.forward_id, side).await;
+        self.store.mark_ready(self.forward_id(), side).await;
     }
 }
 
@@ -197,7 +278,7 @@ impl OpenedForward {
 
 fn spawn_forward(runtime: ForwardRuntime, store: super::store::PortForwardStore) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let result = match runtime.protocol {
+        let result = match runtime.protocol() {
             PublicForwardPortProtocol::Tcp => run_tcp_forward(runtime.clone()).await,
             PublicForwardPortProtocol::Udp => run_udp_forward(runtime.clone()).await,
         };
@@ -205,12 +286,12 @@ fn spawn_forward(runtime: ForwardRuntime, store: super::store::PortForwardStore)
             let error_text = format!("{err:#}");
             runtime.cancel.cancel();
             store
-                .mark_failed(&runtime.forward_id, error_text.clone())
+                .mark_failed(runtime.forward_id(), error_text.clone())
                 .await;
             tracing::warn!(
-                forward_id = %runtime.forward_id,
-                listen_side = %runtime.listen_side.name(),
-                connect_side = %runtime.connect_side.name(),
+                forward_id = %runtime.forward_id(),
+                listen_side = %runtime.listen_side().name(),
+                connect_side = %runtime.connect_side().name(),
                 error = %error_text,
                 "port forward task stopped"
             );
