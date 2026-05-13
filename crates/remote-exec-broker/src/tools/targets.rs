@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use remote_exec_proto::public::{
     ListTargetDaemonInfo, ListTargetEntry, ListTargetsInput, ListTargetsResult,
 };
@@ -8,7 +10,10 @@ pub async fn list_targets(
     state: &crate::BrokerState,
     _input: ListTargetsInput,
 ) -> anyhow::Result<ToolCallOutput> {
+    let started = Instant::now();
     tracing::info!(tool = "list_targets", "broker tool started");
+    // list_targets can report multiple configured targets, including unavailable ones,
+    // so a synthetic single-target request context would be misleading.
     let mut targets = Vec::with_capacity(state.targets.len());
     for (name, handle) in &state.targets {
         let daemon_info = handle
@@ -40,6 +45,7 @@ pub async fn list_targets(
         tool = "list_targets",
         configured_targets = targets.len(),
         reachable_targets = reachable,
+        elapsed_ms = started.elapsed().as_millis() as u64,
         "broker tool completed"
     );
 

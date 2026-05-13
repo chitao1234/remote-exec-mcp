@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -34,6 +35,9 @@ pub struct BrokerConfig {
     #[serde(default)]
     pub port_forward_limits: BrokerPortForwardLimits,
 }
+
+#[derive(Debug, Clone)]
+pub struct ValidatedBrokerConfig(BrokerConfig);
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(tag = "transport", rename_all = "snake_case")]
@@ -261,6 +265,23 @@ impl LocalTargetConfig {
             process_environment: ProcessEnvironment::capture_current(),
         }
     }
+
+    pub(crate) fn embedded_port_forward_host_config(
+        default_workdir: PathBuf,
+    ) -> EmbeddedHostConfig {
+        Self {
+            default_workdir,
+            windows_posix_root: None,
+            allow_login_shell: false,
+            pty: PtyMode::None,
+            default_shell: None,
+            yield_time: YieldTimeConfig::default(),
+            transfer_limits: TransferLimits::default(),
+            port_forward_limits: HostPortForwardLimits::default(),
+            experimental_apply_patch_target_encoding_autodetect: false,
+        }
+        .embedded_host_config(None, false)
+    }
 }
 
 impl McpServerConfig {
@@ -306,14 +327,38 @@ impl BrokerConfig {
         Ok(())
     }
 
-    pub async fn load(path: impl AsRef<std::path::Path>) -> anyhow::Result<Self> {
+    pub fn into_validated(mut self) -> anyhow::Result<ValidatedBrokerConfig> {
+        self.normalize_paths();
+        self.validate()?;
+        Ok(ValidatedBrokerConfig(self))
+    }
+
+    pub async fn load(path: impl AsRef<std::path::Path>) -> anyhow::Result<ValidatedBrokerConfig> {
         let text = tokio::fs::read_to_string(path.as_ref())
             .await
             .with_context(|| format!("reading {}", path.as_ref().display()))?;
-        let mut config: Self = toml::from_str(&text)?;
-        config.normalize_paths();
-        config.validate()?;
-        Ok(config)
+        let config: Self = toml::from_str(&text)?;
+        config.into_validated()
+    }
+}
+
+impl ValidatedBrokerConfig {
+    pub fn into_inner(self) -> BrokerConfig {
+        self.0
+    }
+}
+
+impl AsRef<BrokerConfig> for ValidatedBrokerConfig {
+    fn as_ref(&self) -> &BrokerConfig {
+        &self.0
+    }
+}
+
+impl Deref for ValidatedBrokerConfig {
+    type Target = BrokerConfig;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 

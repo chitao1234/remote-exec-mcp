@@ -617,18 +617,25 @@ async fn open_transfer_import_body(
 async fn decode_rpc_error_strict(
     response: reqwest::Response,
 ) -> Result<DaemonClientError, DaemonClientError> {
-    let status = response.status();
-    let body = response
-        .text()
-        .await
-        .map_err(|err| DaemonClientError::Transport(err.into()))?;
-    Ok(decode_rpc_error_body(status, body))
+    decode_rpc_error_with_body_policy(response, true).await
 }
 
 async fn decode_rpc_error(response: reqwest::Response) -> DaemonClientError {
+    decode_rpc_error_with_body_policy(response, false)
+        .await
+        .expect("non-strict RPC error decoding should not propagate body read failures")
+}
+
+async fn decode_rpc_error_with_body_policy(
+    response: reqwest::Response,
+    propagate_body_error: bool,
+) -> Result<DaemonClientError, DaemonClientError> {
     let status = response.status();
-    let body = response.text().await.unwrap_or_else(|err| err.to_string());
-    decode_rpc_error_body(status, body)
+    match response.text().await {
+        Ok(body) => Ok(decode_rpc_error_body(status, body)),
+        Err(err) if propagate_body_error => Err(DaemonClientError::Transport(err.into())),
+        Err(err) => Ok(decode_rpc_error_body(status, err.to_string())),
+    }
 }
 
 fn decode_rpc_error_body(status: reqwest::StatusCode, body: String) -> DaemonClientError {

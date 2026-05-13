@@ -16,7 +16,7 @@ mod target;
 mod tools;
 
 pub use client::{Connection, RemoteExecClient, ToolResponse};
-pub use config::BrokerConfig;
+pub use config::{BrokerConfig, ValidatedBrokerConfig};
 pub use logging::init_logging;
 pub use startup::{build_state, run};
 pub use state::BrokerState;

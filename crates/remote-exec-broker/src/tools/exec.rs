@@ -18,6 +18,16 @@ const APPLY_PATCH_WARNING_CODE: &str = "apply_patch_via_exec_command";
 const APPLY_PATCH_WARNING_MESSAGE: &str =
     "Use apply_patch directly rather than through exec_command.";
 
+#[derive(Debug, thiserror::Error)]
+#[error("write_stdin failed: {0}")]
+struct WriteStdinToolError(#[source] anyhow::Error);
+
+struct WriteStdinCompletion {
+    output: ToolCallOutput,
+    running: bool,
+    exit_code: Option<i32>,
+}
+
 pub async fn exec_command(
     state: &crate::BrokerState,
     input: ExecCommandInput,
@@ -104,31 +114,20 @@ pub async fn write_stdin(
         empty_poll = chars_len == 0,
         "broker tool started"
     );
-    write_stdin_inner(state, input)
-        .await
-        .inspect(|output| {
-            let structured = output
-                .structured
-                .as_ref()
-                .expect("write_stdin tool output should include structured content");
-            let loggable = command_tool_result_for_logging(structured);
+    match write_stdin_inner(state, input).await {
+        Ok(result) => {
             tracing::info!(
                 tool = "write_stdin",
                 session_id = %session_id,
                 requested_target = requested_target.as_deref().unwrap_or("-"),
-                running = loggable
-                    .as_ref()
-                    .and_then(|result| result.session_id.as_ref())
-                    .is_some(),
-                exit_code = loggable
-                    .as_ref()
-                    .and_then(|result| result.exit_code)
-                    .unwrap_or(-1),
+                running = result.running,
+                exit_code = result.exit_code.unwrap_or(-1),
                 elapsed_ms = started.elapsed().as_millis() as u64,
                 "broker tool completed"
             );
-        })
-        .map_err(|err| {
+            Ok(result.output)
+        }
+        Err(err) => {
             tracing::warn!(
                 tool = "write_stdin",
                 session_id = %session_id,
@@ -137,14 +136,15 @@ pub async fn write_stdin(
                 error = %err,
                 "broker tool failed"
             );
-            anyhow::anyhow!("write_stdin failed: {err}")
-        })
+            Err(WriteStdinToolError(err).into())
+        }
+    }
 }
 
 async fn write_stdin_inner(
     state: &crate::BrokerState,
     input: WriteStdinInput,
-) -> anyhow::Result<ToolCallOutput> {
+) -> anyhow::Result<WriteStdinCompletion> {
     let record = state
         .sessions
         .get(&input.session_id)
@@ -350,7 +350,7 @@ fn write_stdin_output(
     record: crate::session_store::SessionRecord,
     response: ExecResponse,
     session_id: Option<String>,
-) -> anyhow::Result<ToolCallOutput> {
+) -> anyhow::Result<WriteStdinCompletion> {
     let output = response.output().clone();
     let text = prepend_warning_text(
         format_poll_text(
@@ -360,24 +360,22 @@ fn write_stdin_output(
         ),
         &output.warnings,
     );
-    Ok(ToolCallOutput::text_and_structured(
-        text,
-        serde_json::to_value(CommandToolResult {
-            target: record.target,
-            chunk_id: output.chunk_id,
-            wall_time_seconds: output.wall_time_seconds,
-            exit_code: output.exit_code,
-            session_id,
-            session_command: Some(record.session_command),
-            original_token_count: output.original_token_count,
-            output: output.output,
-            warnings: output.warnings,
-        })?,
-    ))
-}
-
-fn command_tool_result_for_logging(structured: &serde_json::Value) -> Option<CommandToolResult> {
-    serde_json::from_value(structured.clone()).ok()
+    let result = CommandToolResult {
+        target: record.target,
+        chunk_id: output.chunk_id,
+        wall_time_seconds: output.wall_time_seconds,
+        exit_code: output.exit_code,
+        session_id,
+        session_command: Some(record.session_command),
+        original_token_count: output.original_token_count,
+        output: output.output,
+        warnings: output.warnings,
+    };
+    Ok(WriteStdinCompletion {
+        running: result.session_id.is_some(),
+        exit_code: result.exit_code,
+        output: ToolCallOutput::text_and_structured(text, serde_json::to_value(result)?),
+    })
 }
 
 fn unknown_process_id_message(session_id: &str) -> String {
@@ -446,29 +444,5 @@ fn apply_patch_warning() -> ExecWarning {
     ExecWarning {
         code: APPLY_PATCH_WARNING_CODE.to_string(),
         message: APPLY_PATCH_WARNING_MESSAGE.to_string(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::command_tool_result_for_logging;
-
-    #[test]
-    fn command_tool_result_for_logging_reads_typed_fields() {
-        let value = serde_json::json!({
-            "target": "local",
-            "chunk_id": null,
-            "wall_time_seconds": 0.25,
-            "exit_code": null,
-            "session_id": "session-1",
-            "session_command": "sleep 10",
-            "original_token_count": null,
-            "output": "",
-            "warnings": []
-        });
-
-        let result = command_tool_result_for_logging(&value).unwrap();
-        assert_eq!(result.session_id.as_deref(), Some("session-1"));
-        assert_eq!(result.exit_code, None);
     }
 }

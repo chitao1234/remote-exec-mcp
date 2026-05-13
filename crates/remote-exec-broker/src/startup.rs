@@ -16,7 +16,7 @@ use crate::{
     target::{TargetBackend, TargetHandle, ensure_expected_daemon_name},
 };
 
-pub async fn run(config: config::BrokerConfig) -> anyhow::Result<()> {
+pub async fn run(config: config::ValidatedBrokerConfig) -> anyhow::Result<()> {
     crate::install_crypto_provider()?;
     let mcp = config.mcp.clone();
     tracing::info!(
@@ -31,9 +31,8 @@ pub async fn run(config: config::BrokerConfig) -> anyhow::Result<()> {
     crate::mcp_server::serve(state, &mcp).await
 }
 
-pub async fn build_state(mut config: config::BrokerConfig) -> anyhow::Result<BrokerState> {
-    config.normalize_paths();
-    config.validate()?;
+pub async fn build_state(config: config::ValidatedBrokerConfig) -> anyhow::Result<BrokerState> {
+    let config = config.into_inner();
     let host_sandbox = compile_host_sandbox(&config)?;
     let mut targets = BTreeMap::new();
 
@@ -233,26 +232,30 @@ mod tests {
         #[cfg(windows)]
         let missing_shell = r"C:\definitely\missing\remote-exec-shell.exe";
 
-        let err = match build_state(BrokerConfig {
-            mcp: Default::default(),
-            host_sandbox: None,
-            enable_transfer_compression: true,
-            transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
-            disable_structured_content: false,
-            port_forward_limits: Default::default(),
-            targets: BTreeMap::new(),
-            local: Some(LocalTargetConfig {
-                default_workdir: tempdir.path().to_path_buf(),
-                windows_posix_root: None,
-                allow_login_shell: true,
-                pty: remote_exec_host::PtyMode::Auto,
-                default_shell: Some(missing_shell.to_string()),
-                yield_time: remote_exec_host::YieldTimeConfig::default(),
+        let err = match build_state(
+            BrokerConfig {
+                mcp: Default::default(),
+                host_sandbox: None,
+                enable_transfer_compression: true,
                 transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
-                port_forward_limits: remote_exec_host::HostPortForwardLimits::default(),
-                experimental_apply_patch_target_encoding_autodetect: false,
-            }),
-        })
+                disable_structured_content: false,
+                port_forward_limits: Default::default(),
+                targets: BTreeMap::new(),
+                local: Some(LocalTargetConfig {
+                    default_workdir: tempdir.path().to_path_buf(),
+                    windows_posix_root: None,
+                    allow_login_shell: true,
+                    pty: remote_exec_host::PtyMode::Auto,
+                    default_shell: Some(missing_shell.to_string()),
+                    yield_time: remote_exec_host::YieldTimeConfig::default(),
+                    transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
+                    port_forward_limits: remote_exec_host::HostPortForwardLimits::default(),
+                    experimental_apply_patch_target_encoding_autodetect: false,
+                }),
+            }
+            .into_validated()
+            .unwrap(),
+        )
         .await
         {
             Ok(_) => panic!("expected local default shell validation to fail"),
@@ -312,16 +315,20 @@ mod tests {
         }
 
         let started = std::time::Instant::now();
-        let state = build_state(BrokerConfig {
-            mcp: Default::default(),
-            host_sandbox: None,
-            enable_transfer_compression: true,
-            transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
-            disable_structured_content: false,
-            port_forward_limits: Default::default(),
-            targets,
-            local: None,
-        })
+        let state = build_state(
+            BrokerConfig {
+                mcp: Default::default(),
+                host_sandbox: None,
+                enable_transfer_compression: true,
+                transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
+                disable_structured_content: false,
+                port_forward_limits: Default::default(),
+                targets,
+                local: None,
+            }
+            .into_validated()
+            .unwrap(),
+        )
         .await
         .unwrap();
 

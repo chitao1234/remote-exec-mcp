@@ -63,28 +63,17 @@ pub async fn transfer_files(
     for source in &sources {
         ensure_distinct_endpoints(state, source, &destination).await?;
     }
+    let options = TransferExecutionOptions {
+        overwrite: &input.overwrite,
+        compression: &compression,
+        exclude: &input.exclude,
+        symlink_mode: &input.symlink_mode,
+        create_parent: input.create_parent,
+    };
 
     let (source_type, summary) = match sources.as_slice() {
-        [source] => {
-            let options = TransferExecutionOptions {
-                overwrite: &input.overwrite,
-                compression: &compression,
-                exclude: &input.exclude,
-                symlink_mode: &input.symlink_mode,
-                create_parent: input.create_parent,
-            };
-            transfer_single_source(state, source, &destination, options).await?
-        }
-        _ => {
-            let options = TransferExecutionOptions {
-                overwrite: &input.overwrite,
-                compression: &compression,
-                exclude: &input.exclude,
-                symlink_mode: &input.symlink_mode,
-                create_parent: input.create_parent,
-            };
-            transfer_multiple_sources(state, &sources, &destination, options).await?
-        }
+        [source] => transfer_single_source(state, source, &destination, options).await?,
+        _ => transfer_multiple_sources(state, &sources, &destination, options).await?,
     };
 
     finish_transfer(
