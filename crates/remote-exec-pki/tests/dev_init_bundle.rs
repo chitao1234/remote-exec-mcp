@@ -2,8 +2,12 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use remote_exec_pki::{
     CA_CERT_FILENAME, CA_KEY_FILENAME, DaemonCertSpec, DevInitSpec, SubjectAltName,
-    build_dev_init_bundle, write_dev_init_bundle,
+    build_dev_init_bundle, write_ca_pair, write_dev_init_bundle,
 };
+
+#[cfg(target_os = "linux")]
+#[path = "support/inotify.rs"]
+mod linux_inotify;
 
 fn assert_pem_pair(cert_pem: &str, key_pem: &str) {
     assert!(cert_pem.contains("BEGIN CERTIFICATE"));
@@ -122,4 +126,31 @@ fn writes_dev_init_bundle_with_expected_paths() {
         out_dir.join("daemons").join("builder-a.key")
     );
     assert!(out_dir.join("certs-manifest.json").exists());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn force_rewrite_of_ca_pair_does_not_delete_destination_before_replace() {
+    let spec = DevInitSpec {
+        ca_common_name: "remote-exec-ca".to_string(),
+        broker_common_name: "remote-exec-broker".to_string(),
+        daemon_specs: vec![DaemonCertSpec::localhost("builder-a")],
+    };
+    let initial = build_dev_init_bundle(&spec).expect("initial bundle").ca;
+    let replacement = build_dev_init_bundle(&spec).expect("replacement bundle").ca;
+    let tempdir = tempfile::tempdir().expect("tempdir");
+
+    write_ca_pair(&initial, tempdir.path(), false).expect("initial write");
+
+    let watch = linux_inotify::DirectoryWatch::new(tempdir.path());
+    write_ca_pair(&replacement, tempdir.path(), true).expect("replacement write");
+
+    assert_eq!(
+        std::fs::read_to_string(tempdir.path().join(CA_KEY_FILENAME)).expect("read key"),
+        replacement.key_pem.as_str()
+    );
+    assert!(
+        !watch.saw_delete_for(CA_KEY_FILENAME),
+        "destination was deleted before replacement"
+    );
 }
