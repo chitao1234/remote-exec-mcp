@@ -48,6 +48,14 @@ pub(super) enum ActiveTunnelAccess {
     },
 }
 
+#[derive(Clone, Copy)]
+enum RequiredTunnelAccess {
+    AnyProtocol,
+    ListenOnly,
+    ConnectOnly,
+    BindTarget,
+}
+
 impl ConnectContext {
     pub(super) fn tx(&self) -> &TunnelSender {
         &self.runtime.tx
@@ -107,33 +115,24 @@ impl ListenContext {
     }
 }
 
+impl ActiveProtocolAccess {
+    pub(super) fn tcp_streams(
+        &self,
+    ) -> &tokio::sync::Mutex<std::collections::HashMap<u32, super::TcpStreamEntry>> {
+        match self {
+            Self::Listen(listen) => listen.tcp_streams(),
+            Self::Connect(connect) => connect.tcp_streams(),
+        }
+    }
+}
+
 impl ActiveTunnelAccess {
     pub(super) fn require_protocol(
         self,
         protocol: TunnelForwardProtocol,
         operation: &str,
     ) -> Result<ActiveProtocolAccess, HostRpcError> {
-        match self {
-            Self::Listen {
-                protocol: open_protocol,
-                context,
-            } if open_protocol == protocol => Ok(ActiveProtocolAccess::Listen(context)),
-            Self::Connect {
-                protocol: open_protocol,
-                context,
-            } if open_protocol == protocol => Ok(ActiveProtocolAccess::Connect(context)),
-            Self::Unopened => Err(rpc_error(
-                RpcErrorCode::InvalidPortTunnel,
-                format!("{operation} requires tunnel open"),
-            )),
-            Self::Connect { .. } | Self::Listen { .. } => Err(rpc_error(
-                RpcErrorCode::InvalidPortTunnel,
-                format!(
-                    "{operation} requires an open {} tunnel",
-                    protocol_label(protocol)
-                ),
-            )),
-        }
+        self.require_access(protocol, operation, RequiredTunnelAccess::AnyProtocol)
     }
 
     pub(super) fn require_listen_session(
@@ -141,26 +140,9 @@ impl ActiveTunnelAccess {
         protocol: TunnelForwardProtocol,
         operation: &str,
     ) -> Result<ListenContext, HostRpcError> {
-        match self {
-            Self::Listen {
-                protocol: open_protocol,
-                context,
-            } if open_protocol == protocol => Ok(context),
-            Self::Listen { .. } => Err(rpc_error(
-                RpcErrorCode::InvalidPortTunnel,
-                format!(
-                    "{operation} requires an open {} listen tunnel",
-                    protocol_label(protocol)
-                ),
-            )),
-            Self::Connect { .. } => Err(rpc_error(
-                RpcErrorCode::InvalidPortTunnel,
-                format!("{operation} requires an open listen tunnel"),
-            )),
-            Self::Unopened => Err(rpc_error(
-                RpcErrorCode::InvalidPortTunnel,
-                format!("{operation} requires tunnel open"),
-            )),
+        match self.require_access(protocol, operation, RequiredTunnelAccess::ListenOnly)? {
+            ActiveProtocolAccess::Listen(context) => Ok(context),
+            ActiveProtocolAccess::Connect(_) => unreachable!("listen-only access accepted connect"),
         }
     }
 
@@ -169,26 +151,11 @@ impl ActiveTunnelAccess {
         protocol: TunnelForwardProtocol,
         operation: &str,
     ) -> Result<ConnectContext, HostRpcError> {
-        match self {
-            Self::Connect {
-                protocol: open_protocol,
-                context,
-            } if open_protocol == protocol => Ok(context),
-            Self::Connect { .. } => Err(rpc_error(
-                RpcErrorCode::InvalidPortTunnel,
-                format!(
-                    "{operation} requires an open {} connect tunnel",
-                    protocol_label(protocol)
-                ),
-            )),
-            Self::Listen { .. } => Err(rpc_error(
-                RpcErrorCode::InvalidPortTunnel,
-                format!("{operation} requires an open connect tunnel"),
-            )),
-            Self::Unopened => Err(rpc_error(
-                RpcErrorCode::InvalidPortTunnel,
-                format!("{operation} requires tunnel open"),
-            )),
+        match self.require_access(protocol, operation, RequiredTunnelAccess::ConnectOnly)? {
+            ActiveProtocolAccess::Connect(context) => Ok(context),
+            ActiveProtocolAccess::Listen(_) => {
+                unreachable!("connect-only access accepted listen")
+            }
         }
     }
 
@@ -197,33 +164,23 @@ impl ActiveTunnelAccess {
         protocol: TunnelForwardProtocol,
         operation: &str,
     ) -> Result<ActiveProtocolAccess, HostRpcError> {
+        self.require_access(protocol, operation, RequiredTunnelAccess::BindTarget)
+    }
+
+    pub(super) fn protocol_access_if(
+        self,
+        protocol: TunnelForwardProtocol,
+    ) -> Option<ActiveProtocolAccess> {
         match self {
             Self::Listen {
                 protocol: open_protocol,
                 context,
-            } if open_protocol == protocol => Ok(ActiveProtocolAccess::Listen(context)),
-            Self::Listen { .. } => Err(rpc_error(
-                RpcErrorCode::InvalidPortTunnel,
-                format!(
-                    "{operation} requires an open {} listen tunnel",
-                    protocol_label(protocol)
-                ),
-            )),
+            } if open_protocol == protocol => Some(ActiveProtocolAccess::Listen(context)),
             Self::Connect {
                 protocol: open_protocol,
                 context,
-            } if open_protocol == protocol => Ok(ActiveProtocolAccess::Connect(context)),
-            Self::Connect { .. } => Err(rpc_error(
-                RpcErrorCode::InvalidPortTunnel,
-                format!(
-                    "{operation} requires an open {} connect tunnel",
-                    protocol_label(protocol)
-                ),
-            )),
-            Self::Unopened => Err(rpc_error(
-                RpcErrorCode::InvalidPortTunnel,
-                format!("{operation} requires tunnel open"),
-            )),
+            } if open_protocol == protocol => Some(ActiveProtocolAccess::Connect(context)),
+            _ => None,
         }
     }
 
@@ -234,6 +191,102 @@ impl ActiveTunnelAccess {
             Self::Unopened => ActiveTunnelRole::Unopened,
         }
     }
+
+    fn require_access(
+        self,
+        protocol: TunnelForwardProtocol,
+        operation: &str,
+        required: RequiredTunnelAccess,
+    ) -> Result<ActiveProtocolAccess, HostRpcError> {
+        match self {
+            Self::Unopened => Err(tunnel_open_required_error(operation)),
+            Self::Listen {
+                protocol: open_protocol,
+                context,
+            } => {
+                if let Some(err) = required.role_mismatch_error(operation, "listen") {
+                    return Err(err);
+                }
+                if open_protocol == protocol {
+                    Ok(ActiveProtocolAccess::Listen(context))
+                } else {
+                    Err(required.protocol_mismatch_error(operation, protocol, "listen"))
+                }
+            }
+            Self::Connect {
+                protocol: open_protocol,
+                context,
+            } => {
+                if let Some(err) = required.role_mismatch_error(operation, "connect") {
+                    return Err(err);
+                }
+                if open_protocol == protocol {
+                    Ok(ActiveProtocolAccess::Connect(context))
+                } else {
+                    Err(required.protocol_mismatch_error(operation, protocol, "connect"))
+                }
+            }
+        }
+    }
+}
+
+impl RequiredTunnelAccess {
+    fn role_mismatch_error(
+        self,
+        operation: &str,
+        actual_role: &'static str,
+    ) -> Option<HostRpcError> {
+        match (self, actual_role) {
+            (Self::ListenOnly, "connect") => Some(role_required_error(operation, "listen")),
+            (Self::ConnectOnly, "listen") => Some(role_required_error(operation, "connect")),
+            _ => None,
+        }
+    }
+
+    fn protocol_mismatch_error(
+        self,
+        operation: &str,
+        protocol: TunnelForwardProtocol,
+        actual_role: &'static str,
+    ) -> HostRpcError {
+        match self {
+            Self::AnyProtocol => protocol_required_error(operation, protocol, None),
+            Self::ListenOnly | Self::BindTarget if actual_role == "listen" => {
+                protocol_required_error(operation, protocol, Some("listen"))
+            }
+            Self::ConnectOnly | Self::BindTarget if actual_role == "connect" => {
+                protocol_required_error(operation, protocol, Some("connect"))
+            }
+            _ => unreachable!("role mismatch should be handled before protocol mismatch"),
+        }
+    }
+}
+
+fn tunnel_open_required_error(operation: &str) -> HostRpcError {
+    rpc_error(
+        RpcErrorCode::InvalidPortTunnel,
+        format!("{operation} requires tunnel open"),
+    )
+}
+
+fn role_required_error(operation: &str, role: &str) -> HostRpcError {
+    rpc_error(
+        RpcErrorCode::InvalidPortTunnel,
+        format!("{operation} requires an open {role} tunnel"),
+    )
+}
+
+fn protocol_required_error(
+    operation: &str,
+    protocol: TunnelForwardProtocol,
+    role: Option<&str>,
+) -> HostRpcError {
+    let protocol = protocol_label(protocol);
+    let role = role.map(|value| format!(" {value}")).unwrap_or_default();
+    rpc_error(
+        RpcErrorCode::InvalidPortTunnel,
+        format!("{operation} requires an open {protocol}{role} tunnel"),
+    )
 }
 
 pub(super) async fn active_access(

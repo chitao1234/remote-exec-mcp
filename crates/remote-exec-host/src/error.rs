@@ -64,211 +64,106 @@ pub(crate) fn internal(
     rpc_error(500, code, message)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TransferErrorKind {
-    SandboxDenied,
-    PathNotAbsolute,
-    DestinationExists,
-    ParentMissing,
-    DestinationUnsupported,
-    CompressionUnsupported,
-    SourceUnsupported,
-    SourceMissing,
-    Failed,
-    Internal,
-}
+macro_rules! define_domain_error {
+    (
+        $error:ident,
+        $kind:ident,
+        $internal_log:literal,
+        {
+            $($ctor:ident => $variant:ident => $code:expr),+ $(,)?
+        }
+    ) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum $kind {
+            $($variant,)+
+        }
 
-#[derive(Debug)]
-pub struct TransferError {
-    kind: TransferErrorKind,
-    message: String,
-}
+        #[derive(Debug)]
+        pub struct $error {
+            kind: $kind,
+            message: String,
+        }
 
-impl TransferError {
-    pub fn sandbox_denied(message: impl Into<String>) -> Self {
-        Self::new(TransferErrorKind::SandboxDenied, message)
-    }
+        impl $error {
+            $(
+                pub fn $ctor(message: impl Into<String>) -> Self {
+                    Self::new($kind::$variant, message)
+                }
+            )+
 
-    pub fn path_not_absolute(message: impl Into<String>) -> Self {
-        Self::new(TransferErrorKind::PathNotAbsolute, message)
-    }
-
-    pub fn destination_exists(message: impl Into<String>) -> Self {
-        Self::new(TransferErrorKind::DestinationExists, message)
-    }
-
-    pub fn parent_missing(message: impl Into<String>) -> Self {
-        Self::new(TransferErrorKind::ParentMissing, message)
-    }
-
-    pub fn destination_unsupported(message: impl Into<String>) -> Self {
-        Self::new(TransferErrorKind::DestinationUnsupported, message)
-    }
-
-    pub fn compression_unsupported(message: impl Into<String>) -> Self {
-        Self::new(TransferErrorKind::CompressionUnsupported, message)
-    }
-
-    pub fn source_unsupported(message: impl Into<String>) -> Self {
-        Self::new(TransferErrorKind::SourceUnsupported, message)
-    }
-
-    pub fn source_missing(message: impl Into<String>) -> Self {
-        Self::new(TransferErrorKind::SourceMissing, message)
-    }
-
-    pub fn failed(message: impl Into<String>) -> Self {
-        Self::new(TransferErrorKind::Failed, message)
-    }
-
-    pub fn internal(message: impl Into<String>) -> Self {
-        Self::new(TransferErrorKind::Internal, message)
-    }
-
-    pub fn code(&self) -> RpcErrorCode {
-        match self.kind {
-            TransferErrorKind::SandboxDenied => RpcErrorCode::SandboxDenied,
-            TransferErrorKind::PathNotAbsolute => RpcErrorCode::TransferPathNotAbsolute,
-            TransferErrorKind::DestinationExists => RpcErrorCode::TransferDestinationExists,
-            TransferErrorKind::ParentMissing => RpcErrorCode::TransferParentMissing,
-            TransferErrorKind::DestinationUnsupported => {
-                RpcErrorCode::TransferDestinationUnsupported
+            pub fn code(&self) -> RpcErrorCode {
+                match self.kind {
+                    $($kind::$variant => $code,)+
+                }
             }
-            TransferErrorKind::CompressionUnsupported => {
-                RpcErrorCode::TransferCompressionUnsupported
+
+            fn into_host_rpc_error(self) -> HostRpcError {
+                let code = self.code();
+                let message = self.message;
+                if self.kind == $kind::Internal {
+                    tracing::error!(code = code.wire_value(), %message, $internal_log);
+                    internal(code, message)
+                } else {
+                    tracing::warn!(code = code.wire_value(), %message, "daemon request rejected");
+                    bad_request(code, message)
+                }
             }
-            TransferErrorKind::SourceUnsupported => RpcErrorCode::TransferSourceUnsupported,
-            TransferErrorKind::SourceMissing => RpcErrorCode::TransferSourceMissing,
-            TransferErrorKind::Failed => RpcErrorCode::TransferFailed,
-            TransferErrorKind::Internal => RpcErrorCode::Internal,
-        }
-    }
 
-    fn into_host_rpc_error(self) -> HostRpcError {
-        let code = self.code();
-        let message = self.message;
-        if self.kind == TransferErrorKind::Internal {
-            tracing::error!(code = code.wire_value(), %message, "daemon internal transfer error");
-        } else {
-            tracing::warn!(code = code.wire_value(), %message, "daemon request rejected");
+            fn new(kind: $kind, message: impl Into<String>) -> Self {
+                Self {
+                    kind,
+                    message: message.into(),
+                }
+            }
         }
-        if self.kind == TransferErrorKind::Internal {
-            internal(code, message)
-        } else {
-            bad_request(code, message)
-        }
-    }
 
-    fn new(kind: TransferErrorKind, message: impl Into<String>) -> Self {
-        Self {
-            kind,
-            message: message.into(),
+        impl fmt::Display for $error {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(&self.message)
+            }
         }
-    }
+
+        impl std::error::Error for $error {}
+
+        impl From<$error> for HostRpcError {
+            fn from(value: $error) -> Self {
+                value.into_host_rpc_error()
+            }
+        }
+    };
 }
 
-impl fmt::Display for TransferError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
+define_domain_error!(
+    TransferError,
+    TransferErrorKind,
+    "daemon internal transfer error",
+    {
+        sandbox_denied => SandboxDenied => RpcErrorCode::SandboxDenied,
+        path_not_absolute => PathNotAbsolute => RpcErrorCode::TransferPathNotAbsolute,
+        destination_exists => DestinationExists => RpcErrorCode::TransferDestinationExists,
+        parent_missing => ParentMissing => RpcErrorCode::TransferParentMissing,
+        destination_unsupported => DestinationUnsupported => RpcErrorCode::TransferDestinationUnsupported,
+        compression_unsupported => CompressionUnsupported => RpcErrorCode::TransferCompressionUnsupported,
+        source_unsupported => SourceUnsupported => RpcErrorCode::TransferSourceUnsupported,
+        source_missing => SourceMissing => RpcErrorCode::TransferSourceMissing,
+        failed => Failed => RpcErrorCode::TransferFailed,
+        internal => Internal => RpcErrorCode::Internal,
     }
-}
+);
 
-impl std::error::Error for TransferError {}
-
-impl From<TransferError> for HostRpcError {
-    fn from(value: TransferError) -> Self {
-        value.into_host_rpc_error()
+define_domain_error!(
+    ImageError,
+    ImageErrorKind,
+    "daemon internal image error",
+    {
+        sandbox_denied => SandboxDenied => RpcErrorCode::SandboxDenied,
+        invalid_detail => InvalidDetail => RpcErrorCode::InvalidDetail,
+        missing => Missing => RpcErrorCode::ImageMissing,
+        not_file => NotFile => RpcErrorCode::ImageNotFile,
+        decode_failed => DecodeFailed => RpcErrorCode::ImageDecodeFailed,
+        internal => Internal => RpcErrorCode::Internal,
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ImageErrorKind {
-    SandboxDenied,
-    InvalidDetail,
-    Missing,
-    NotFile,
-    DecodeFailed,
-    Internal,
-}
-
-#[derive(Debug)]
-pub struct ImageError {
-    kind: ImageErrorKind,
-    message: String,
-}
-
-impl ImageError {
-    pub fn sandbox_denied(message: impl Into<String>) -> Self {
-        Self::new(ImageErrorKind::SandboxDenied, message)
-    }
-
-    pub fn invalid_detail(message: impl Into<String>) -> Self {
-        Self::new(ImageErrorKind::InvalidDetail, message)
-    }
-
-    pub fn missing(message: impl Into<String>) -> Self {
-        Self::new(ImageErrorKind::Missing, message)
-    }
-
-    pub fn not_file(message: impl Into<String>) -> Self {
-        Self::new(ImageErrorKind::NotFile, message)
-    }
-
-    pub fn decode_failed(message: impl Into<String>) -> Self {
-        Self::new(ImageErrorKind::DecodeFailed, message)
-    }
-
-    pub fn internal(message: impl Into<String>) -> Self {
-        Self::new(ImageErrorKind::Internal, message)
-    }
-
-    pub fn code(&self) -> RpcErrorCode {
-        match self.kind {
-            ImageErrorKind::SandboxDenied => RpcErrorCode::SandboxDenied,
-            ImageErrorKind::InvalidDetail => RpcErrorCode::InvalidDetail,
-            ImageErrorKind::Missing => RpcErrorCode::ImageMissing,
-            ImageErrorKind::NotFile => RpcErrorCode::ImageNotFile,
-            ImageErrorKind::DecodeFailed => RpcErrorCode::ImageDecodeFailed,
-            ImageErrorKind::Internal => RpcErrorCode::Internal,
-        }
-    }
-
-    fn into_host_rpc_error(self) -> HostRpcError {
-        let code = self.code();
-        let message = self.message;
-        if self.kind == ImageErrorKind::Internal {
-            tracing::error!(code = code.wire_value(), %message, "daemon internal image error");
-        } else {
-            tracing::warn!(code = code.wire_value(), %message, "daemon request rejected");
-        }
-        if self.kind == ImageErrorKind::Internal {
-            internal(code, message)
-        } else {
-            bad_request(code, message)
-        }
-    }
-
-    fn new(kind: ImageErrorKind, message: impl Into<String>) -> Self {
-        Self {
-            kind,
-            message: message.into(),
-        }
-    }
-}
-
-impl fmt::Display for ImageError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for ImageError {}
-
-impl From<ImageError> for HostRpcError {
-    fn from(value: ImageError) -> Self {
-        value.into_host_rpc_error()
-    }
-}
+);
 
 #[cfg(test)]
 mod tests {

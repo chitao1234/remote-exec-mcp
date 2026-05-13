@@ -55,6 +55,21 @@ pub(super) enum RetainedUdpBind {
 }
 
 impl SessionState {
+    pub(super) fn new(root_cancel: CancellationToken) -> Self {
+        Self {
+            id: crate::ids::new_tunnel_session_id(),
+            root_cancel,
+            attachment: Mutex::new(None),
+            attachment_notify: tokio::sync::Notify::new(),
+            resume_deadline: Mutex::new(None),
+            expiry_task: Mutex::new(None),
+            retained_listener: Mutex::new(None),
+            retained_udp_bind: Mutex::new(None),
+            next_daemon_stream_id: AtomicU32::new(2),
+            generation: AtomicU64::new(0),
+        }
+    }
+
     pub(super) async fn current_attachment(&self) -> Option<Arc<AttachmentState>> {
         self.attachment.lock().await.clone()
     }

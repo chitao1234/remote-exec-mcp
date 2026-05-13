@@ -291,34 +291,12 @@ async fn tunnel_close(tunnel: Arc<TunnelState>, frame: Frame) -> Result<(), Host
 }
 
 fn new_session(tunnel: &Arc<TunnelState>) -> Arc<SessionState> {
-    Arc::new(SessionState {
-        id: crate::ids::new_tunnel_session_id(),
-        root_cancel: tunnel.state.shutdown.child_token(),
-        attachment: Mutex::new(None),
-        attachment_notify: tokio::sync::Notify::new(),
-        resume_deadline: Mutex::new(None),
-        expiry_task: Mutex::new(None),
-        retained_listener: Mutex::new(None),
-        retained_udp_bind: Mutex::new(None),
-        next_daemon_stream_id: std::sync::atomic::AtomicU32::new(2),
-        generation: std::sync::atomic::AtomicU64::new(0),
-    })
+    Arc::new(SessionState::new(tunnel.state.shutdown.child_token()))
 }
 
 #[cfg(test)]
 pub(super) fn new_session_for_test(state: &Arc<AppState>) -> Arc<SessionState> {
-    Arc::new(SessionState {
-        id: crate::ids::new_tunnel_session_id(),
-        root_cancel: state.shutdown.child_token(),
-        attachment: Mutex::new(None),
-        attachment_notify: tokio::sync::Notify::new(),
-        resume_deadline: Mutex::new(None),
-        expiry_task: Mutex::new(None),
-        retained_listener: Mutex::new(None),
-        retained_udp_bind: Mutex::new(None),
-        next_daemon_stream_id: std::sync::atomic::AtomicU32::new(2),
-        generation: std::sync::atomic::AtomicU64::new(0),
-    })
+    Arc::new(SessionState::new(state.shutdown.child_token()))
 }
 
 fn tunnel_limit_summary(tunnel: &TunnelState) -> TunnelLimitSummary {

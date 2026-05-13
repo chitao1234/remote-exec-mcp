@@ -16,8 +16,8 @@ use tokio_util::sync::CancellationToken;
 use crate::HostRpcError;
 
 use super::active::{
-    ActiveProtocolAccess, ActiveTunnelAccess, ActiveTunnelRole, ConnectContext, ListenContext,
-    active_access, send_tunnel_error, send_tunnel_error_code,
+    ActiveTunnelRole, ConnectContext, ListenContext, active_access, send_tunnel_error,
+    send_tunnel_error_code,
 };
 use super::codec::decode_frame_meta;
 use super::error::{SessionCloseMode, rpc_error};
@@ -40,86 +40,65 @@ enum TcpReadLoopTarget {
 }
 
 impl TcpReadLoopTarget {
-    async fn send_frame(&self, frame: Frame) -> Result<(), HostRpcError> {
+    fn tx(&self) -> &super::TunnelSender {
         match self {
-            Self::Connect(context) => context.tx().send(frame).await,
-            Self::Listen(context) => context.tx().send(frame).await,
+            Self::Connect(context) => context.tx(),
+            Self::Listen(context) => context.tx(),
         }
+    }
+
+    fn generation(&self) -> u64 {
+        match self {
+            Self::Connect(context) => context.generation(),
+            Self::Listen(context) => context.generation(),
+        }
+    }
+
+    fn tcp_streams(&self) -> &TcpStreamMap {
+        match self {
+            Self::Connect(context) => context.tcp_streams(),
+            Self::Listen(context) => context.tcp_streams(),
+        }
+    }
+
+    async fn send_frame(&self, frame: Frame) -> Result<(), HostRpcError> {
+        self.tx().send(frame).await
     }
 
     async fn send_error_code(&self, stream_id: u32, code: String, message: String) {
-        match self {
-            Self::Connect(context) => {
-                let _ = send_tunnel_error_code(
-                    context.tx(),
-                    Some(context.generation()),
-                    stream_id,
-                    code,
-                    message,
-                    false,
-                )
-                .await;
-            }
-            Self::Listen(context) => {
-                let _ = send_tunnel_error_code(
-                    context.tx(),
-                    Some(context.generation()),
-                    stream_id,
-                    code,
-                    message,
-                    false,
-                )
-                .await;
-            }
-        }
+        let _ = send_tunnel_error_code(
+            self.tx(),
+            Some(self.generation()),
+            stream_id,
+            code,
+            message,
+            false,
+        )
+        .await;
     }
 
     async fn send_read_failed(&self, stream_id: u32, message: String) {
-        match self {
-            Self::Connect(context) => {
-                let _ = send_tunnel_error(
-                    context.tx(),
-                    Some(context.generation()),
-                    stream_id,
-                    RpcErrorCode::PortReadFailed,
-                    message,
-                    false,
-                )
-                .await;
-            }
-            Self::Listen(context) => {
-                let _ = send_tunnel_error(
-                    context.tx(),
-                    Some(context.generation()),
-                    stream_id,
-                    RpcErrorCode::PortReadFailed,
-                    message,
-                    false,
-                )
-                .await;
-            }
-        }
+        let _ = send_tunnel_error(
+            self.tx(),
+            Some(self.generation()),
+            stream_id,
+            RpcErrorCode::PortReadFailed,
+            message,
+            false,
+        )
+        .await;
     }
 
     async fn cleanup_stream(&self, stream_id: u32) {
-        match self {
-            Self::Connect(context) => cleanup_tcp_stream(context.tcp_streams(), stream_id).await,
-            Self::Listen(context) => cleanup_tcp_stream(context.tcp_streams(), stream_id).await,
-        }
+        cleanup_tcp_stream(self.tcp_streams(), stream_id).await;
     }
 
     async fn cancel_stream(&self, stream_id: u32) {
-        match self {
-            Self::Connect(context) => cancel_tcp_stream(context.tcp_streams(), stream_id).await,
-            Self::Listen(context) => cancel_tcp_stream(context.tcp_streams(), stream_id).await,
-        }
+        cancel_tcp_stream(self.tcp_streams(), stream_id).await;
     }
 
     async fn clear_cancel(&self, stream_id: u32) {
-        match self {
-            Self::Connect(context) => clear_tcp_cancel(context.tcp_streams(), stream_id).await,
-            Self::Listen(context) => clear_tcp_cancel(context.tcp_streams(), stream_id).await,
-        }
+        clear_tcp_cancel(self.tcp_streams(), stream_id).await;
     }
 }
 
@@ -456,35 +435,10 @@ pub(super) async fn tunnel_tcp_data(
     stream_id: u32,
     data: &[u8],
 ) -> Result<(), HostRpcError> {
-    let writer = match active_access(tunnel)
+    let access = active_access(tunnel)
         .await?
-        .require_protocol(TunnelForwardProtocol::Tcp, "tcp data")?
-    {
-        ActiveProtocolAccess::Listen(listen) => listen
-            .tcp_streams()
-            .lock()
-            .await
-            .get(&stream_id)
-            .map(|entry| entry.writer.clone())
-            .ok_or_else(|| {
-                rpc_error(
-                    RpcErrorCode::UnknownPortConnection,
-                    format!("unknown tunnel tcp stream `{stream_id}`"),
-                )
-            })?,
-        ActiveProtocolAccess::Connect(connect) => connect
-            .tcp_streams()
-            .lock()
-            .await
-            .get(&stream_id)
-            .map(|entry| entry.writer.clone())
-            .ok_or_else(|| {
-                rpc_error(
-                    RpcErrorCode::UnknownPortConnection,
-                    format!("unknown tunnel tcp stream `{stream_id}`"),
-                )
-            })?,
-    };
+        .require_protocol(TunnelForwardProtocol::Tcp, "tcp data")?;
+    let writer = lookup_tcp_writer(access.tcp_streams(), stream_id).await?;
     writer
         .tx
         .try_send(TcpWriteCommand::Data(data.to_vec()))
@@ -533,46 +487,43 @@ pub(super) async fn tunnel_tcp_eof(
     tunnel: &Arc<TunnelState>,
     stream_id: u32,
 ) -> Result<(), HostRpcError> {
-    match active_access(tunnel).await? {
-        ActiveTunnelAccess::Listen {
-            protocol: TunnelForwardProtocol::Tcp,
-            context,
-        } => {
-            let writer = {
-                context
-                    .tcp_streams()
-                    .lock()
-                    .await
-                    .get(&stream_id)
-                    .map(|entry| entry.writer.clone())
-            };
-            if let Some(writer) = writer
-                && send_tcp_shutdown(&writer).await
-            {
-                clear_tcp_cancel(context.tcp_streams(), stream_id).await;
-            }
+    if let Some(access) = active_access(tunnel)
+        .await?
+        .protocol_access_if(TunnelForwardProtocol::Tcp)
+    {
+        let tcp_streams = access.tcp_streams();
+        if let Some(writer) = optional_tcp_writer(tcp_streams, stream_id).await
+            && send_tcp_shutdown(&writer).await
+        {
+            clear_tcp_cancel(tcp_streams, stream_id).await;
         }
-        ActiveTunnelAccess::Connect {
-            protocol: TunnelForwardProtocol::Tcp,
-            context,
-        } => {
-            let writer = {
-                context
-                    .tcp_streams()
-                    .lock()
-                    .await
-                    .get(&stream_id)
-                    .map(|entry| entry.writer.clone())
-            };
-            if let Some(writer) = writer
-                && send_tcp_shutdown(&writer).await
-            {
-                clear_tcp_cancel(context.tcp_streams(), stream_id).await;
-            }
-        }
-        _ => {}
     }
     Ok(())
+}
+
+async fn lookup_tcp_writer(
+    tcp_streams: &TcpStreamMap,
+    stream_id: u32,
+) -> Result<TcpWriterHandle, HostRpcError> {
+    optional_tcp_writer(tcp_streams, stream_id)
+        .await
+        .ok_or_else(|| {
+            rpc_error(
+                RpcErrorCode::UnknownPortConnection,
+                format!("unknown tunnel tcp stream `{stream_id}`"),
+            )
+        })
+}
+
+async fn optional_tcp_writer(
+    tcp_streams: &TcpStreamMap,
+    stream_id: u32,
+) -> Option<TcpWriterHandle> {
+    tcp_streams
+        .lock()
+        .await
+        .get(&stream_id)
+        .map(|entry| entry.writer.clone())
 }
 
 pub(super) async fn tunnel_close_stream(
