@@ -238,7 +238,7 @@ pub fn normalize_configured_workdir(path: &Path, windows_posix_root: Option<&Pat
         .unwrap_or_else(|| path.to_path_buf())
 }
 
-fn validate_existing_directory(path: &Path, field_name: &str) -> anyhow::Result<()> {
+pub fn validate_existing_directory(path: &Path, field_name: &str) -> anyhow::Result<()> {
     let metadata = std::fs::metadata(path)
         .with_context(|| format!("{field_name} `{}` does not exist", path.display()))?;
     anyhow::ensure!(

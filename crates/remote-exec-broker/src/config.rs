@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::ops::Deref;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -316,7 +316,7 @@ impl BrokerConfig {
         );
         if let Some(local) = &self.local {
             local.transfer_limits.validate()?;
-            validate_existing_directory(
+            remote_exec_host::config::validate_existing_directory(
                 &local.normalized_default_workdir(),
                 "local.default_workdir",
             )?;
@@ -420,17 +420,6 @@ fn default_streamable_http_sse_keep_alive() -> SseInterval {
 
 fn default_streamable_http_sse_retry() -> SseInterval {
     SseInterval::Duration(std::time::Duration::from_millis(3_000))
-}
-
-fn validate_existing_directory(path: &Path, field_name: &str) -> anyhow::Result<()> {
-    let metadata = std::fs::metadata(path)
-        .with_context(|| format!("{field_name} `{}` does not exist", path.display()))?;
-    anyhow::ensure!(
-        metadata.is_dir(),
-        "{field_name} `{}` must be a directory",
-        path.display()
-    );
-    Ok(())
 }
 
 #[cfg(test)]

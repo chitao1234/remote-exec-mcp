@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use remote_exec_proto::public::{
     ForwardPortEntry, ForwardPortPhase, ForwardPortSideHealth, ForwardPortSideRole,
-    ForwardPortStatus, Timestamp,
+    ForwardPortSideState, ForwardPortStatus, Timestamp,
 };
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
@@ -143,14 +143,8 @@ impl PortForwardStore {
         ensure_reconnect_capacity(&mut entries, forward_id, max_reconnecting_forwards)?;
         if let Some(record) = open_record_mut(&mut entries, forward_id) {
             let entry = &mut record.entry;
-            entry.reconnect_attempts += 1;
-            entry.last_reconnect_at = Some(Timestamp(unix_timestamp_string()));
-            let side = match role {
-                ForwardPortSideRole::Listen => &mut entry.listen_state,
-                ForwardPortSideRole::Connect => &mut entry.connect_state,
-            };
-            side.health = ForwardPortSideHealth::Reconnecting;
-            side.last_error = Some(error);
+            prepare_reconnect_entry(entry);
+            mark_side_reconnecting(side_state_mut(entry, role), error);
             entry.phase = derive_phase(entry);
         }
         Ok(())
@@ -166,12 +160,9 @@ impl PortForwardStore {
         ensure_reconnect_capacity(&mut entries, forward_id, max_reconnecting_forwards)?;
         if let Some(record) = open_record_mut(&mut entries, forward_id) {
             let entry = &mut record.entry;
-            entry.reconnect_attempts += 1;
-            entry.last_reconnect_at = Some(Timestamp(unix_timestamp_string()));
-            entry.listen_state.health = ForwardPortSideHealth::Ready;
-            entry.listen_state.last_error = None;
-            entry.connect_state.health = ForwardPortSideHealth::Reconnecting;
-            entry.connect_state.last_error = Some(error);
+            prepare_reconnect_entry(entry);
+            mark_side_ready(&mut entry.listen_state);
+            mark_side_reconnecting(&mut entry.connect_state, error);
             entry.phase = derive_phase(entry);
         }
         Ok(())
@@ -259,6 +250,31 @@ fn open_record_mut<'a>(
 ) -> Option<&'a mut PortForwardRecord> {
     let record = entries.get_mut(forward_id)?;
     (record.entry.status == ForwardPortStatus::Open).then_some(record)
+}
+
+fn prepare_reconnect_entry(entry: &mut ForwardPortEntry) {
+    entry.reconnect_attempts += 1;
+    entry.last_reconnect_at = Some(Timestamp(unix_timestamp_string()));
+}
+
+fn side_state_mut(
+    entry: &mut ForwardPortEntry,
+    role: ForwardPortSideRole,
+) -> &mut ForwardPortSideState {
+    match role {
+        ForwardPortSideRole::Listen => &mut entry.listen_state,
+        ForwardPortSideRole::Connect => &mut entry.connect_state,
+    }
+}
+
+fn mark_side_reconnecting(side: &mut ForwardPortSideState, error: String) {
+    side.health = ForwardPortSideHealth::Reconnecting;
+    side.last_error = Some(error);
+}
+
+fn mark_side_ready(side: &mut ForwardPortSideState) {
+    side.health = ForwardPortSideHealth::Ready;
+    side.last_error = None;
 }
 
 pub struct PortForwardFilter {
