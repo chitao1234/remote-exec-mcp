@@ -380,6 +380,7 @@ pub(super) fn decode_tunnel_error_frame(frame: &Frame) -> TunnelErrorMeta {
         code: None,
         message: format!("port tunnel returned error on stream {}", frame.stream_id),
         fatal: true,
+        generation: None,
         stream_id: frame.stream_id,
     };
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(&frame.meta) else {
@@ -399,12 +400,22 @@ pub(super) fn decode_tunnel_error_frame(frame: &Frame) -> TunnelErrorMeta {
             .get("fatal")
             .and_then(|fatal| fatal.as_bool())
             .unwrap_or(false),
+        generation: value
+            .get("generation")
+            .and_then(|generation| generation.as_u64()),
         stream_id: frame.stream_id,
     }
 }
 
 pub(super) fn format_terminal_tunnel_error(meta: &TunnelErrorMeta) -> anyhow::Error {
-    let _ = meta.fatal;
+    tracing::debug!(
+        code = ?meta.code,
+        generation = ?meta.generation,
+        stream_id = meta.stream_id,
+        fatal = meta.fatal,
+        message = %meta.message,
+        "port tunnel reported terminal error"
+    );
     match meta.code.as_deref() {
         Some(code) => anyhow::anyhow!("{code}: {}", meta.message),
         None if meta.message

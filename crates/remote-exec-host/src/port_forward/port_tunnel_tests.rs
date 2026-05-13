@@ -283,6 +283,7 @@ async fn resumed_tcp_listener_session_closes_with_retained_generation() {
 
     let frame = read_frame(&mut resumed).await.unwrap();
     assert_eq!(frame.frame_type, FrameType::TunnelClosed);
+    wait_until_session_removed(&state, &session_id).await;
 }
 
 #[tokio::test]

@@ -52,12 +52,6 @@ impl PortForwardReconnectPolicy {
     }
 }
 
-struct RecoveredForwardTunnels {
-    generation: u64,
-    listen_tunnel: Arc<PortTunnel>,
-    connect_tunnel: Arc<PortTunnel>,
-}
-
 pub(in crate::port_forward) async fn wait_for_forward_task_stop(
     task: JoinHandle<()>,
 ) -> anyhow::Result<()> {
@@ -108,9 +102,7 @@ async fn reconnect_listen_tunnel(
     .await
 }
 
-async fn reconnect_connect_epoch(
-    runtime: &ForwardRuntime,
-) -> anyhow::Result<Option<RecoveredForwardTunnels>> {
+async fn reconnect_connect_epoch(runtime: &ForwardRuntime) -> anyhow::Result<Option<ForwardEpoch>> {
     mark_connect_reconnecting(runtime, "connect-side transport loss").await?;
     let generation = runtime.listen_session.advance_generation();
     runtime
@@ -130,18 +122,17 @@ async fn reconnect_connect_epoch(
         return Ok(None);
     };
     runtime.mark_active(ForwardPortSideRole::Connect).await;
-    Ok(Some(RecoveredForwardTunnels {
+    Ok(Some(ForwardEpoch::new(
         generation,
         listen_tunnel,
         connect_tunnel,
-    }))
+    )))
 }
 
 pub(in crate::port_forward) async fn handle_forward_loop_control<H, Fut>(
     runtime: &ForwardRuntime,
     control: ForwardLoopControl,
-    listen_tunnel: &mut Arc<PortTunnel>,
-    connect_tunnel: &mut Arc<PortTunnel>,
+    epoch: &mut ForwardEpoch,
     before_connect_recover: H,
 ) -> anyhow::Result<bool>
 where
@@ -151,30 +142,36 @@ where
     match control {
         ForwardLoopControl::Cancelled => Ok(false),
         ForwardLoopControl::RecoverTunnel(TunnelRole::Listen) => {
-            let Some(recovered) = recover_listen_side_tunnels(runtime).await? else {
+            let previous_generation = epoch.generation();
+            let Some(recovered_epoch) = recover_listen_side_tunnels(runtime).await? else {
                 return Ok(false);
             };
-            let _epoch = ForwardEpoch::new(
-                recovered.generation,
-                recovered.listen_tunnel.clone(),
-                recovered.connect_tunnel.clone(),
+            debug_assert!(recovered_epoch.generation() > previous_generation);
+            tracing::debug!(
+                forward_id = %runtime.forward_id(),
+                failed_role = "listen",
+                previous_generation,
+                recovered_generation = recovered_epoch.generation(),
+                "advanced broker port-forward epoch after listen-side recovery"
             );
-            *listen_tunnel = recovered.listen_tunnel;
-            *connect_tunnel = recovered.connect_tunnel;
+            *epoch = recovered_epoch;
             Ok(true)
         }
         ForwardLoopControl::RecoverTunnel(TunnelRole::Connect) => {
             before_connect_recover().await;
-            let Some(recovered) = reconnect_connect_epoch(runtime).await? else {
+            let previous_generation = epoch.generation();
+            let Some(recovered_epoch) = reconnect_connect_epoch(runtime).await? else {
                 return Ok(false);
             };
-            let _epoch = ForwardEpoch::new(
-                recovered.generation,
-                recovered.listen_tunnel.clone(),
-                recovered.connect_tunnel.clone(),
+            debug_assert!(recovered_epoch.generation() > previous_generation);
+            tracing::debug!(
+                forward_id = %runtime.forward_id(),
+                failed_role = "connect",
+                previous_generation,
+                recovered_generation = recovered_epoch.generation(),
+                "advanced broker port-forward epoch after connect-side recovery"
             );
-            *listen_tunnel = recovered.listen_tunnel;
-            *connect_tunnel = recovered.connect_tunnel;
+            *epoch = recovered_epoch;
             Ok(true)
         }
     }
@@ -182,7 +179,7 @@ where
 
 async fn recover_listen_side_tunnels(
     runtime: &ForwardRuntime,
-) -> anyhow::Result<Option<RecoveredForwardTunnels>> {
+) -> anyhow::Result<Option<ForwardEpoch>> {
     runtime
         .mark_reconnecting(ForwardPortSideRole::Listen, "listen-side tunnel lost")
         .await?;
@@ -209,11 +206,11 @@ async fn recover_listen_side_tunnels(
     else {
         return Ok(None);
     };
-    Ok(Some(RecoveredForwardTunnels {
+    Ok(Some(ForwardEpoch::new(
         generation,
         listen_tunnel,
         connect_tunnel,
-    }))
+    )))
 }
 
 async fn recover_connect_side_tunnel_after_listen_recovery(

@@ -15,7 +15,6 @@ use super::limits::BrokerPortForwardLimits;
 use super::side::SideHandle;
 use super::store::{PortForwardRecord, PortForwardStore};
 use super::tcp_bridge::run_tcp_forward;
-use super::tunnel::PortTunnel;
 use super::udp_bridge::run_udp_forward;
 
 pub(super) use super::session::ListenSessionControl;
@@ -79,7 +78,6 @@ pub(super) struct ForwardRuntime {
     pub(super) store: PortForwardStore,
     pub(super) listen_session: Arc<ListenSessionControl>,
     pub(super) initial_epoch: ForwardEpoch,
-    pub(super) initial_connect_tunnel: Arc<PortTunnel>,
     pub(super) cancel: CancellationToken,
 }
 
@@ -135,14 +133,12 @@ impl ForwardRuntime {
         initial_epoch: ForwardEpoch,
         cancel: CancellationToken,
     ) -> Self {
-        let initial_connect_tunnel = initial_epoch.connect_tunnel().clone();
         Self {
             identity,
             limits,
             store,
             listen_session,
             initial_epoch,
-            initial_connect_tunnel,
             cancel,
         }
     }

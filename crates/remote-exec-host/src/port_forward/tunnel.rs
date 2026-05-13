@@ -103,23 +103,25 @@ where
     tunnel.cancel.cancel();
     drop(tx);
     let _ = tokio::time::timeout(std::time::Duration::from_millis(100), writer_task).await;
-    result
+    result.map(|_| ())
 }
 
 pub(super) async fn tunnel_read_loop<R>(
     tunnel: Arc<TunnelState>,
     reader: &mut R,
-) -> Result<(), HostRpcError>
+) -> Result<super::error::SessionCloseMode, HostRpcError>
 where
     R: AsyncRead + Unpin,
 {
     loop {
         let frame = tokio::select! {
-            _ = tunnel.cancel.cancelled() => return Ok(()),
+            _ = tunnel.cancel.cancelled() => return Ok(super::error::SessionCloseMode::RetryableDetach),
             frame = read_frame(reader) => {
                 match frame {
                     Ok(frame) => frame,
-                    Err(err) if err.kind() == ErrorKind::UnexpectedEof => return Ok(()),
+                    Err(err) if err.kind() == ErrorKind::UnexpectedEof => {
+                        return Ok(super::error::SessionCloseMode::RetryableDetach);
+                    }
                     Err(err) => {
                         let generation = connection_generation(&tunnel).await;
                         let _ = send_tunnel_error(
@@ -138,6 +140,7 @@ where
         };
 
         let stream_id = frame.stream_id;
+        let graceful_close = frame.frame_type == FrameType::TunnelClose && stream_id == 0;
         if let Err(err) = handle_tunnel_frame(tunnel.clone(), frame).await {
             let generation = connection_generation(&tunnel).await;
             let _ = send_tunnel_error_code(
@@ -149,6 +152,10 @@ where
                 false,
             )
             .await;
+            continue;
+        }
+        if graceful_close {
+            return Ok(super::error::SessionCloseMode::GracefulClose);
         }
     }
 }

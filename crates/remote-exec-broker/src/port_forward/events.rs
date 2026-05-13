@@ -21,6 +21,7 @@ pub(super) struct TunnelErrorMeta {
     pub(super) code: Option<String>,
     pub(super) message: String,
     pub(super) fatal: bool,
+    pub(super) generation: Option<u64>,
     pub(super) stream_id: u32,
 }
 

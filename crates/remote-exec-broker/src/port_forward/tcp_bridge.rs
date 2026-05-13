@@ -39,25 +39,11 @@ struct TcpForwardState {
 }
 
 pub(super) async fn run_tcp_forward(runtime: ForwardRuntime) -> anyhow::Result<()> {
-    let mut listen_tunnel = runtime
-        .listen_session
-        .current_tunnel()
-        .await
-        .context("missing listen-side port tunnel")?;
-    let mut connect_tunnel = runtime.initial_connect_tunnel.clone();
+    let mut epoch = runtime.initial_epoch().clone();
 
     loop {
-        let control =
-            run_tcp_forward_epoch(&runtime, listen_tunnel.clone(), connect_tunnel.clone()).await?;
-        if !handle_forward_loop_control(
-            &runtime,
-            control,
-            &mut listen_tunnel,
-            &mut connect_tunnel,
-            || async {},
-        )
-        .await?
-        {
+        let control = run_tcp_forward_epoch(&runtime, &epoch).await?;
+        if !handle_forward_loop_control(&runtime, control, &mut epoch, || async {}).await? {
             return Ok(());
         }
     }
@@ -65,9 +51,10 @@ pub(super) async fn run_tcp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
 
 async fn run_tcp_forward_epoch(
     runtime: &ForwardRuntime,
-    listen_tunnel: Arc<PortTunnel>,
-    connect_tunnel: Arc<PortTunnel>,
+    epoch: &super::epoch::ForwardEpoch,
 ) -> anyhow::Result<ForwardLoopControl> {
+    let listen_tunnel = epoch.listen_tunnel().clone();
+    let connect_tunnel = epoch.connect_tunnel().clone();
     let mut state = TcpForwardState::default();
     let mut connect_stream_ids = StreamIdAllocator::new_odd();
 
@@ -850,6 +837,7 @@ mod tests {
     use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
     use tokio_util::sync::CancellationToken;
 
+    use super::super::epoch::{ForwardEpoch, INITIAL_FORWARD_GENERATION};
     use super::super::side::SideHandle;
     use super::super::supervisor::{
         ForwardIdentity, ForwardLimits, ForwardRuntime, ListenSessionControl,
@@ -929,7 +917,7 @@ mod tests {
 
         let control = tokio::time::timeout(
             Duration::from_secs(1),
-            run_tcp_forward_epoch(&runtime, listen_tunnel, connect_tunnel),
+            run_tcp_test_epoch(&runtime, listen_tunnel, connect_tunnel),
         )
         .await
         .expect("tcp epoch should finish after retryable send failure")
@@ -964,7 +952,7 @@ mod tests {
         let epoch = tokio::spawn({
             let listen_tunnel = listen_tunnel.clone();
             let connect_tunnel = connect_tunnel.clone();
-            async move { run_tcp_forward_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
+            async move { run_tcp_test_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
         });
 
         write_frame(
@@ -1067,7 +1055,7 @@ mod tests {
             ForwardLimits::default(),
             Default::default(),
             listen_session,
-            connect_tunnel.clone(),
+            tcp_test_epoch(listen_tunnel.clone(), connect_tunnel.clone()),
             cancel,
         );
 
@@ -1075,7 +1063,7 @@ mod tests {
         let epoch = tokio::spawn({
             let listen_tunnel = listen_tunnel.clone();
             let connect_tunnel = connect_tunnel.clone();
-            async move { run_tcp_forward_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
+            async move { run_tcp_test_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
         });
 
         write_frame(
@@ -1174,7 +1162,7 @@ mod tests {
             ForwardLimits::default(),
             Default::default(),
             listen_session,
-            connect_tunnel.clone(),
+            tcp_test_epoch(listen_tunnel.clone(), connect_tunnel.clone()),
             cancel,
         );
 
@@ -1182,7 +1170,7 @@ mod tests {
         let epoch = tokio::spawn({
             let listen_tunnel = listen_tunnel.clone();
             let connect_tunnel = connect_tunnel.clone();
-            async move { run_tcp_forward_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
+            async move { run_tcp_test_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
         });
 
         write_frame(
@@ -1256,7 +1244,7 @@ mod tests {
         let epoch = tokio::spawn({
             let listen_tunnel = listen_tunnel.clone();
             let connect_tunnel = connect_tunnel.clone();
-            async move { run_tcp_forward_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
+            async move { run_tcp_test_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
         });
 
         write_frame(
@@ -1342,7 +1330,7 @@ mod tests {
         let epoch = tokio::spawn({
             let listen_tunnel = listen_tunnel.clone();
             let connect_tunnel = connect_tunnel.clone();
-            async move { run_tcp_forward_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
+            async move { run_tcp_test_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
         });
 
         write_frame(
@@ -1459,7 +1447,7 @@ mod tests {
 
         let result = tokio::time::timeout(
             Duration::from_secs(1),
-            run_tcp_forward_epoch(&runtime, listen_tunnel, connect_tunnel),
+            run_tcp_test_epoch(&runtime, listen_tunnel, connect_tunnel),
         )
         .await
         .expect("tcp epoch should finish after listener error");
@@ -1490,7 +1478,7 @@ mod tests {
         let epoch = tokio::spawn({
             let listen_tunnel = listen_tunnel.clone();
             let connect_tunnel = connect_tunnel.clone();
-            async move { run_tcp_forward_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
+            async move { run_tcp_test_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
         });
 
         write_frame(
@@ -1549,7 +1537,7 @@ mod tests {
         let epoch = tokio::spawn({
             let listen_tunnel = listen_tunnel.clone();
             let connect_tunnel = connect_tunnel.clone();
-            async move { run_tcp_forward_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
+            async move { run_tcp_test_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
         });
 
         write_frame(
@@ -1606,7 +1594,7 @@ mod tests {
         let epoch = tokio::spawn({
             let listen_tunnel = listen_tunnel.clone();
             let connect_tunnel = connect_tunnel.clone();
-            async move { run_tcp_forward_epoch(&runtime, listen_tunnel, connect_tunnel).await }
+            async move { run_tcp_test_epoch(&runtime, listen_tunnel, connect_tunnel).await }
         });
 
         write_frame(
@@ -1661,6 +1649,7 @@ mod tests {
         listen_tunnel: Arc<PortTunnel>,
         connect_tunnel: Arc<PortTunnel>,
     ) -> ForwardRuntime {
+        let initial_epoch = tcp_test_epoch(listen_tunnel.clone(), connect_tunnel.clone());
         let listen_session = Arc::new(ListenSessionControl::new_for_test(
             SideHandle::local().unwrap(),
             "fwd_test".to_string(),
@@ -1681,8 +1670,24 @@ mod tests {
             ForwardLimits::default(),
             Default::default(),
             listen_session,
-            connect_tunnel,
+            initial_epoch,
             CancellationToken::new(),
         )
+    }
+
+    fn tcp_test_epoch(
+        listen_tunnel: Arc<PortTunnel>,
+        connect_tunnel: Arc<PortTunnel>,
+    ) -> ForwardEpoch {
+        ForwardEpoch::new(INITIAL_FORWARD_GENERATION, listen_tunnel, connect_tunnel)
+    }
+
+    async fn run_tcp_test_epoch(
+        runtime: &ForwardRuntime,
+        listen_tunnel: Arc<PortTunnel>,
+        connect_tunnel: Arc<PortTunnel>,
+    ) -> anyhow::Result<ForwardLoopControl> {
+        let epoch = tcp_test_epoch(listen_tunnel, connect_tunnel);
+        run_tcp_forward_epoch(runtime, &epoch).await
     }
 }
