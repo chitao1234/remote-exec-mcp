@@ -21,7 +21,9 @@ use super::tcp::{
     tunnel_close_stream, tunnel_tcp_connect, tunnel_tcp_data, tunnel_tcp_eof, tunnel_tcp_listen,
 };
 use super::udp::{tunnel_udp_bind, tunnel_udp_datagram};
-use super::{PortForwardPermit, QueuedFrame, TunnelMode, TunnelSender, TunnelState};
+use super::{
+    PortForwardPermit, QueuedFrame, TunnelMode, TunnelSender, TunnelState, tunnel_error_frame,
+};
 
 pub async fn serve_tunnel<S>(state: Arc<AppState>, stream: S) -> Result<(), HostRpcError>
 where
@@ -406,19 +408,13 @@ pub(super) async fn send_tunnel_error_code(
     message: impl Into<String>,
     fatal: bool,
 ) -> Result<(), HostRpcError> {
-    let meta = encode_frame_meta(&super::ErrorMeta {
-        code: code.into(),
-        message: message.into(),
-        fatal,
-        generation: Some(tunnel.generation.load(Ordering::Acquire)),
-    })?;
     tunnel
-        .send(Frame {
-            frame_type: FrameType::Error,
-            flags: 0,
+        .send(tunnel_error_frame(
             stream_id,
-            meta,
-            data: Vec::new(),
-        })
+            code,
+            message,
+            fatal,
+            Some(tunnel.generation.load(Ordering::Acquire)),
+        )?)
         .await
 }

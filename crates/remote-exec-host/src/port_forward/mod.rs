@@ -71,6 +71,28 @@ async fn send_forward_drop_report(
     .await
 }
 
+pub(super) fn tunnel_error_frame(
+    stream_id: u32,
+    code: impl Into<String>,
+    message: impl Into<String>,
+    fatal: bool,
+    generation: Option<u64>,
+) -> Result<Frame, crate::HostRpcError> {
+    let meta = codec::encode_frame_meta(&ErrorMeta {
+        code: code.into(),
+        message: message.into(),
+        fatal,
+        generation,
+    })?;
+    Ok(Frame {
+        frame_type: FrameType::Error,
+        flags: 0,
+        stream_id,
+        meta,
+        data: Vec::new(),
+    })
+}
+
 #[cfg(test)]
 mod port_tunnel_tests {
     use std::collections::HashMap;

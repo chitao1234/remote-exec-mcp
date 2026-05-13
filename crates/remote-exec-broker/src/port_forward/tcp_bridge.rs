@@ -5,13 +5,16 @@ use anyhow::Context;
 use remote_exec_proto::port_tunnel::{EndpointMeta, Frame, FrameType, TcpAcceptMeta};
 
 use super::apply_forward_drop_report;
-use super::events::{ForwardLoopControl, ForwardSideEvent, TunnelRole, classify_transport_failure};
+use super::events::{
+    ForwardLoopControl, TunnelFrameOutcome, TunnelRole, classify_transport_failure,
+    recoverable_tunnel_frame,
+};
 use super::generation::StreamIdAllocator;
-use super::supervisor::{ForwardRuntime, reconnect_connect_tunnel, recover_listen_side_tunnels};
+use super::supervisor::{ForwardRuntime, handle_forward_loop_control};
 use super::tunnel::{
-    PortTunnel, classify_recoverable_tunnel_event, decode_tunnel_error_frame, decode_tunnel_meta,
-    encode_tunnel_meta, format_terminal_tunnel_error, is_backpressure_error,
-    is_recoverable_pressure_tunnel_error, is_retryable_transport_error,
+    PortTunnel, decode_tunnel_error_frame, decode_tunnel_meta, encode_tunnel_meta,
+    format_terminal_tunnel_error, is_backpressure_error, is_recoverable_pressure_tunnel_error,
+    is_retryable_transport_error,
 };
 
 struct TcpConnectStream {
@@ -44,22 +47,18 @@ pub(super) async fn run_tcp_forward(runtime: ForwardRuntime) -> anyhow::Result<(
     let mut connect_tunnel = runtime.initial_connect_tunnel.clone();
 
     loop {
-        match run_tcp_forward_epoch(&runtime, listen_tunnel.clone(), connect_tunnel.clone()).await?
+        let control =
+            run_tcp_forward_epoch(&runtime, listen_tunnel.clone(), connect_tunnel.clone()).await?;
+        if !handle_forward_loop_control(
+            &runtime,
+            control,
+            &mut listen_tunnel,
+            &mut connect_tunnel,
+            || async {},
+        )
+        .await?
         {
-            ForwardLoopControl::Cancelled => return Ok(()),
-            ForwardLoopControl::RecoverTunnel(TunnelRole::Listen) => {
-                let Some(recovered) = recover_listen_side_tunnels(&runtime).await? else {
-                    return Ok(());
-                };
-                listen_tunnel = recovered.listen_tunnel;
-                connect_tunnel = recovered.connect_tunnel;
-            }
-            ForwardLoopControl::RecoverTunnel(TunnelRole::Connect) => {
-                let Some(reconnected_tunnel) = reconnect_connect_tunnel(&runtime).await? else {
-                    return Ok(());
-                };
-                connect_tunnel = reconnected_tunnel;
-            }
+            return Ok(());
         }
     }
 }
@@ -110,18 +109,16 @@ async fn handle_listen_tunnel_event(
     connect_stream_ids: &mut StreamIdAllocator,
     frame_result: anyhow::Result<Frame>,
 ) -> anyhow::Result<Option<ForwardLoopControl>> {
-    let frame = match classify_recoverable_tunnel_event(frame_result) {
-        ForwardSideEvent::Frame(frame) => frame,
-        ForwardSideEvent::RetryableTransportLoss => {
-            return Ok(Some(ForwardLoopControl::RecoverTunnel(TunnelRole::Listen)));
-        }
-        ForwardSideEvent::TerminalTransportError(err) => {
-            return Err(err).context("reading tcp listen tunnel");
-        }
-        ForwardSideEvent::TerminalTunnelError(meta) => {
-            return Err(format_terminal_tunnel_error(&meta))
-                .context("listen-side tcp tunnel error");
-        }
+    let frame = match recoverable_tunnel_frame(
+        frame_result,
+        "reading tcp listen tunnel",
+        "listen-side tcp tunnel error",
+        || async { Ok(ForwardLoopControl::RecoverTunnel(TunnelRole::Listen)) },
+    )
+    .await?
+    {
+        TunnelFrameOutcome::Frame(frame) => frame,
+        TunnelFrameOutcome::Control(control) => return Ok(Some(control)),
     };
     match frame.frame_type {
         FrameType::TcpAccept => {
@@ -161,19 +158,19 @@ async fn handle_connect_tunnel_event(
     state: &mut TcpForwardState,
     frame_result: anyhow::Result<Frame>,
 ) -> anyhow::Result<Option<ForwardLoopControl>> {
-    let frame = match classify_recoverable_tunnel_event(frame_result) {
-        ForwardSideEvent::Frame(frame) => frame,
-        ForwardSideEvent::RetryableTransportLoss => {
+    let frame = match recoverable_tunnel_frame(
+        frame_result,
+        "reading tcp connect tunnel",
+        "connecting tcp forward destination",
+        || async {
             close_active_tcp_listen_streams(runtime, listen_tunnel, state).await?;
-            return Ok(Some(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)));
-        }
-        ForwardSideEvent::TerminalTransportError(err) => {
-            return Err(err).context("reading tcp connect tunnel");
-        }
-        ForwardSideEvent::TerminalTunnelError(meta) => {
-            return Err(format_terminal_tunnel_error(&meta))
-                .context("connecting tcp forward destination");
-        }
+            Ok(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect))
+        },
+    )
+    .await?
+    {
+        TunnelFrameOutcome::Frame(frame) => frame,
+        TunnelFrameOutcome::Control(control) => return Ok(Some(control)),
     };
     match frame.frame_type {
         FrameType::TcpConnectOk => {

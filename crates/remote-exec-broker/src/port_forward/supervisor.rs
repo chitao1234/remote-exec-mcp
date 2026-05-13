@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -15,6 +16,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use super::events::ForwardLoopControl;
 use super::limits::{BrokerPortForwardLimits, effective_forward_limits};
 use super::side::SideHandle;
 use super::store::{PortForwardRecord, PortForwardStore};
@@ -815,6 +817,38 @@ pub(super) async fn reconnect_connect_tunnel(
     runtime: &ForwardRuntime,
 ) -> anyhow::Result<Option<Arc<PortTunnel>>> {
     recover_connect_side_tunnel(runtime, "connect-side transport loss").await
+}
+
+pub(super) async fn handle_forward_loop_control<H, Fut>(
+    runtime: &ForwardRuntime,
+    control: ForwardLoopControl,
+    listen_tunnel: &mut Arc<PortTunnel>,
+    connect_tunnel: &mut Arc<PortTunnel>,
+    before_connect_recover: H,
+) -> anyhow::Result<bool>
+where
+    H: FnOnce() -> Fut,
+    Fut: Future<Output = ()>,
+{
+    match control {
+        ForwardLoopControl::Cancelled => Ok(false),
+        ForwardLoopControl::RecoverTunnel(TunnelRole::Listen) => {
+            let Some(recovered) = recover_listen_side_tunnels(runtime).await? else {
+                return Ok(false);
+            };
+            *listen_tunnel = recovered.listen_tunnel;
+            *connect_tunnel = recovered.connect_tunnel;
+            Ok(true)
+        }
+        ForwardLoopControl::RecoverTunnel(TunnelRole::Connect) => {
+            before_connect_recover().await;
+            let Some(reconnected_tunnel) = reconnect_connect_tunnel(runtime).await? else {
+                return Ok(false);
+            };
+            *connect_tunnel = reconnected_tunnel;
+            Ok(true)
+        }
+    }
 }
 
 pub(super) async fn recover_listen_side_tunnels(

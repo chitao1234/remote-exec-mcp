@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64};
 use std::time::Instant;
 
-use remote_exec_proto::port_tunnel::{Frame, FrameType};
 use remote_exec_proto::rpc::RpcErrorCode;
 use tokio::net::{TcpListener, UdpSocket};
 use tokio::sync::Mutex;
@@ -11,12 +10,13 @@ use tokio_util::sync::CancellationToken;
 
 use crate::HostRpcError;
 
-use super::codec::encode_frame_meta;
 use super::error::{SessionCloseMode, rpc_error};
 use super::limiter::{PortForwardLimiter, PortForwardPermit};
 use super::session_store::TunnelSessionStore;
 use super::udp::tunnel_udp_read_loop_attached_session;
-use super::{ErrorMeta, TcpStreamEntry, TunnelSender, TunnelState, UdpReaderEntry, timings};
+use super::{
+    TcpStreamEntry, TunnelSender, TunnelState, UdpReaderEntry, timings, tunnel_error_frame,
+};
 
 pub(super) struct SessionState {
     pub(super) id: String,
@@ -320,24 +320,6 @@ pub(super) async fn send_tunnel_error_code_with_sender(
     message: impl Into<String>,
     fatal: bool,
 ) -> Result<(), HostRpcError> {
-    let meta = encode_frame_meta(&ErrorMeta {
-        code: code.into(),
-        message: message.into(),
-        fatal,
-        generation: None,
-    })?;
-    tx.send(Frame {
-        frame_type: FrameType::Error,
-        flags: 0,
-        stream_id,
-        meta,
-        data: Vec::new(),
-    })
-    .await
-    .map_err(|_| {
-        rpc_error(
-            RpcErrorCode::PortTunnelClosed,
-            "port tunnel writer is closed",
-        )
-    })
+    tx.send(tunnel_error_frame(stream_id, code, message, fatal, None)?)
+        .await
 }
