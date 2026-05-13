@@ -314,7 +314,7 @@ pub(in crate::port_forward) async fn close_listen_session(
     if let Some(tunnel) = current_tunnel {
         match close_listener_on_tunnel(&tunnel, control.listener_stream_id).await {
             Ok(()) => {
-                return close_tunnel_generation(
+                return close_tunnel_after_listener_ack(
                     &tunnel,
                     &control.forward_id,
                     control.current_generation(),
@@ -332,12 +332,34 @@ pub(in crate::port_forward) async fn close_listen_session(
         .replace_current_tunnel(generation, tunnel.clone())
         .await;
     close_listener_on_tunnel(&tunnel, control.listener_stream_id).await?;
-    close_tunnel_generation(&tunnel, &control.forward_id, generation, "operator_close").await
+    close_tunnel_after_listener_ack(&tunnel, &control.forward_id, generation, "operator_close")
+        .await
 }
 
 async fn close_listener_on_tunnel(tunnel: &Arc<PortTunnel>, stream_id: u32) -> anyhow::Result<()> {
     tunnel.close_stream(stream_id).await?;
     wait_for_close_ack(tunnel, stream_id).await
+}
+
+async fn close_tunnel_after_listener_ack(
+    tunnel: &Arc<PortTunnel>,
+    forward_id: &str,
+    generation: u64,
+    reason: &str,
+) -> anyhow::Result<()> {
+    match close_tunnel_generation(tunnel, forward_id, generation, reason).await {
+        Ok(()) => Ok(()),
+        Err(err) if is_retryable_transport_error(&err) => {
+            tracing::debug!(
+                forward_id,
+                generation,
+                error = %err,
+                "port tunnel closed after listener close acknowledgement"
+            );
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
 }
 
 async fn close_tunnel_generation(
@@ -405,5 +427,58 @@ fn effective_resume_timeout(resume_timeout: Duration) -> Duration {
         resume_timeout
     } else {
         adjusted
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use remote_exec_proto::port_tunnel::{Frame, FrameType, read_frame, write_frame};
+    use remote_exec_proto::public::ForwardPortProtocol;
+
+    use super::super::super::session::LISTEN_SESSION_STREAM_ID;
+    use super::super::super::side::SideHandle;
+    use super::*;
+
+    #[tokio::test]
+    async fn close_listen_session_accepts_transport_loss_after_listener_close_ack() {
+        let (broker_side, mut daemon_side) = tokio::io::duplex(4096);
+        let tunnel = Arc::new(PortTunnel::from_stream(broker_side).unwrap());
+        let control = Arc::new(ListenSessionControl::new_for_test(
+            SideHandle::local().unwrap(),
+            "fwd_test".to_string(),
+            "tunnel_session_test".to_string(),
+            ForwardPortProtocol::Tcp,
+            Duration::from_secs(10),
+            PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
+            Some(tunnel),
+        ));
+
+        let daemon = tokio::spawn(async move {
+            let close = read_frame(&mut daemon_side).await.unwrap();
+            assert_eq!(close.frame_type, FrameType::Close);
+            assert_eq!(close.stream_id, LISTEN_SESSION_STREAM_ID);
+            write_frame(
+                &mut daemon_side,
+                &Frame {
+                    frame_type: FrameType::Close,
+                    flags: 0,
+                    stream_id: close.stream_id,
+                    meta: Vec::new(),
+                    data: Vec::new(),
+                },
+            )
+            .await
+            .unwrap();
+        });
+
+        let result = close_listen_session(control).await;
+        assert!(
+            result.is_ok(),
+            "listener close was already acknowledged before transport loss: {result:?}"
+        );
+        daemon.await.unwrap();
     }
 }

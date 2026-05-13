@@ -329,6 +329,16 @@ async fn forward_ports_reconnect_after_connect_side_tunnel_drop_and_accept_new_t
         Err(err) => panic!("unexpected active tcp stream read error: {err}"),
     }
 
+    let forward = support::wait_for_forward_ready_after_reconnect(
+        &cluster.broker,
+        &forward_id,
+        Duration::from_secs(5),
+    )
+    .await;
+    assert_eq!(forward["status"], "open");
+    assert_eq!(forward["phase"], "ready");
+    assert!(forward["dropped_tcp_streams"].as_u64().unwrap_or_default() >= 1);
+
     let mut stream = tokio::net::TcpStream::connect(&listen_endpoint)
         .await
         .unwrap();
@@ -340,16 +350,6 @@ async fn forward_ports_reconnect_after_connect_side_tunnel_drop_and_accept_new_t
         .expect("future tcp connection should succeed after connect-side reconnect")
         .unwrap();
     assert_eq!(echoed, b"after");
-
-    let forward = support::wait_for_forward_ready_after_reconnect(
-        &cluster.broker,
-        &forward_id,
-        Duration::from_secs(5),
-    )
-    .await;
-    assert_eq!(forward["status"], "open");
-    assert_eq!(forward["phase"], "ready");
-    assert!(forward["dropped_tcp_streams"].as_u64().unwrap_or_default() >= 1);
 
     let mut later = tokio::net::TcpStream::connect(&listen_endpoint)
         .await
@@ -453,13 +453,6 @@ async fn forward_ports_reconnect_after_connect_side_tunnel_drop_and_relays_futur
     sender.send_to(b"trigger", &listen_endpoint).await.unwrap();
     let _ = tokio::time::timeout(Duration::from_millis(250), sender.recv_from(&mut buf)).await;
 
-    sender.send_to(b"after", &listen_endpoint).await.unwrap();
-    let (read, _) = tokio::time::timeout(Duration::from_secs(5), sender.recv_from(&mut buf))
-        .await
-        .expect("future udp datagram should relay after connect-side reconnect")
-        .unwrap();
-    assert_eq!(&buf[..read], b"after");
-
     let forward = support::wait_for_forward_ready_after_reconnect(
         &cluster.broker,
         &forward_id,
@@ -474,6 +467,13 @@ async fn forward_ports_reconnect_after_connect_side_tunnel_drop_and_relays_futur
             .unwrap_or_default()
             >= 1
     );
+
+    sender.send_to(b"after", &listen_endpoint).await.unwrap();
+    let (read, _) = tokio::time::timeout(Duration::from_secs(5), sender.recv_from(&mut buf))
+        .await
+        .expect("future udp datagram should relay after connect-side reconnect")
+        .unwrap();
+    assert_eq!(&buf[..read], b"after");
 
     sender.send_to(b"later", &listen_endpoint).await.unwrap();
     let (read_later, _) = tokio::time::timeout(Duration::from_secs(5), sender.recv_from(&mut buf))

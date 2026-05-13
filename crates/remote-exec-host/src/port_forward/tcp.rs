@@ -534,9 +534,10 @@ pub(super) async fn tunnel_tcp_eof(
     stream_id: u32,
 ) -> Result<(), HostRpcError> {
     match active_access(tunnel).await? {
-        ActiveTunnelAccess::Listen { protocol, context }
-            if protocol == TunnelForwardProtocol::Tcp =>
-        {
+        ActiveTunnelAccess::Listen {
+            protocol: TunnelForwardProtocol::Tcp,
+            context,
+        } => {
             let writer = {
                 context
                     .tcp_streams()
@@ -551,9 +552,10 @@ pub(super) async fn tunnel_tcp_eof(
                 clear_tcp_cancel(context.tcp_streams(), stream_id).await;
             }
         }
-        ActiveTunnelAccess::Connect { protocol, context }
-            if protocol == TunnelForwardProtocol::Tcp =>
-        {
+        ActiveTunnelAccess::Connect {
+            protocol: TunnelForwardProtocol::Tcp,
+            context,
+        } => {
             let writer = {
                 context
                     .tcp_streams()
