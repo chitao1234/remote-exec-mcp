@@ -1,4 +1,3 @@
-#include <sstream>
 #include <string>
 
 #include "logging.h"
@@ -54,9 +53,9 @@ HttpResponse handle_exec_write(AppState& state, const HttpRequest& request) {
     try {
         const ExecWriteRequestSpec parsed = prepare_exec_write_request(request);
         {
-            std::ostringstream message;
-            message << "exec/write daemon_session_id=`" << parsed.daemon_session_id
-                    << "` chars_len=" << parsed.chars.size();
+            LogMessageBuilder message("exec/write");
+            message.quoted_field("daemon_session_id", parsed.daemon_session_id)
+                .field("chars_len", parsed.chars.size());
             log_message(LOG_INFO, "server", message.str());
         }
         Json exec_response = state.sessions.write_stdin(parsed.daemon_session_id,

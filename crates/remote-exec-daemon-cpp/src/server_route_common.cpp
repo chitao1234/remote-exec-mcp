@@ -1,4 +1,3 @@
-#include <sstream>
 #include <string>
 
 #include "common.h"
@@ -54,8 +53,8 @@ HttpResponse handle_patch_apply(AppState& state, const HttpRequest& request) {
         const std::string workdir = resolve_workdir(state, body);
         const std::string patch_text = body.at("patch").get<std::string>();
         const PatchApplyResult result = apply_patch(workdir, patch_text, make_patch_path_authorizer(state));
-        std::ostringstream summary;
-        summary << "patch/apply patch_len=" << patch_text.size();
+        LogMessageBuilder summary("patch/apply");
+        summary.field("patch_len", patch_text.size());
         log_message(LOG_INFO, "server", summary.str());
         write_json(response,
                    Json{

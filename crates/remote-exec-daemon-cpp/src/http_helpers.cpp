@@ -146,3 +146,18 @@ std::string render_http_response(const HttpResponse& res) {
     out << res.body;
     return out.str();
 }
+
+std::string render_http_upgrade_response(const std::string& upgrade_token,
+                                         const std::map<std::string, std::string>& headers) {
+    std::ostringstream out;
+    out << "HTTP/1.1 101 Switching Protocols\r\n";
+    out << "Connection: Upgrade\r\n";
+    out << "Upgrade: " << upgrade_token << "\r\n";
+
+    for (std::map<std::string, std::string>::const_iterator it = headers.begin(); it != headers.end(); ++it) {
+        out << it->first << ": " << it->second << "\r\n";
+    }
+
+    out << "\r\n";
+    return out.str();
+}

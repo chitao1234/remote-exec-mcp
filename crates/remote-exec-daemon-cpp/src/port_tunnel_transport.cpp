@@ -86,10 +86,9 @@ int handle_port_tunnel_upgrade(AppState& state, SOCKET client, const HttpRequest
     }
 
     const std::string request_id = request_id_for_request(request);
-    send_all(client,
-             "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: "
-             "remote-exec-port-tunnel\r\n" +
-                 std::string(request_id_header_name()) + ": " + request_id + "\r\n\r\n");
+    std::map<std::string, std::string> response_headers;
+    response_headers[request_id_header_name()] = request_id;
+    send_all(client, render_http_upgrade_response("remote-exec-port-tunnel", response_headers));
     if (!state.port_tunnel_service) {
         state.port_tunnel_service = create_port_tunnel_service(state.config.port_forward_limits);
     }

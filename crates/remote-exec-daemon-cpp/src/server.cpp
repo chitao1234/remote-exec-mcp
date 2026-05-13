@@ -1,5 +1,4 @@
 #include <fstream>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -35,16 +34,17 @@ int run_server(const DaemonConfig& config) {
     const unsigned short bound_port = runtime.bound_port();
     write_test_bound_addr_file(runtime.state().config, bound_port);
 
-    {
-        std::ostringstream message;
-        message << "listening on " << runtime.state().config.listen_host << ':' << bound_port << " target=`"
-                << runtime.state().config.target << "`" << " http_auth_enabled=`"
-                << (!runtime.state().config.http_auth_bearer_token.empty() ? "true" : "false") << "`" << " platform=`"
-                << platform::platform_name() << "`" << " arch=`" << platform::arch_name() << "`" << " default_shell=`"
-                << runtime.state().default_shell << "`" << " daemon_instance_id=`" << runtime.state().daemon_instance_id
-                << "`";
-        log_message(LOG_INFO, "server", message.str());
-    }
+    LogMessageBuilder message("listening");
+    message.raw("on")
+        .raw(runtime.state().config.listen_host)
+        .field("port", bound_port)
+        .quoted_field("target", runtime.state().config.target)
+        .bool_field("http_auth_enabled", !runtime.state().config.http_auth_bearer_token.empty())
+        .quoted_field("platform", platform::platform_name())
+        .quoted_field("arch", platform::arch_name())
+        .quoted_field("default_shell", runtime.state().default_shell)
+        .quoted_field("daemon_instance_id", runtime.state().daemon_instance_id);
+    log_message(LOG_INFO, "server", message.str());
 
     runtime.join();
     return 0;

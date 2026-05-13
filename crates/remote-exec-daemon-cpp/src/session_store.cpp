@@ -338,9 +338,9 @@ bool SessionStore::prune_one_session_for_start(unsigned long max_open_sessions) 
             BasicLockGuard lock(mutex_);
             open_sessions_after_prune = static_cast<unsigned long>(sessions_.size());
         }
-        std::ostringstream message;
-        message << "pruned exec session daemon_session_id=`" << victim.daemon_session_id
-                << "` open_sessions=" << open_sessions_after_prune;
+        LogMessageBuilder message("pruned exec session");
+        message.quoted_field("daemon_session_id", victim.daemon_session_id)
+            .field("open_sessions", open_sessions_after_prune);
         log_message(LOG_WARN, "session_store", message.str());
         return true;
     }
@@ -363,10 +363,12 @@ Json SessionStore::start_command(const std::string& target,
     PendingStartReservation pending_start(mutex_, &pending_starts_);
 
     {
-        std::ostringstream message;
-        message << "start_command cmd_preview=`" << preview_text(command, 120) << "` workdir=`" << workdir
-                << "` shell=`" << shell << "` login=" << (login ? "true" : "false")
-                << " tty=" << (tty ? "true" : "false");
+        LogMessageBuilder message("start_command");
+        message.quoted_field("cmd_preview", preview_text(command, 120))
+            .quoted_field("workdir", workdir)
+            .quoted_field("shell", shell)
+            .bool_field("login", login)
+            .bool_field("tty", tty);
         log_message(LOG_INFO, "session_store", message.str());
     }
     std::shared_ptr<LiveSession> session = launch_live_session(command, workdir, shell, login, tty);
@@ -384,9 +386,8 @@ Json SessionStore::start_command(const std::string& target,
             const bool crossed_warning_threshold = crosses_warning_threshold(sessions_.size());
             session->last_touched_order.store(make_touch_order());
             sessions_[session->id] = session;
-            std::ostringstream message;
-            message << "stored live session daemon_session_id=`" << session->id
-                    << "` open_sessions=" << sessions_.size();
+            LogMessageBuilder message("stored live session");
+            message.quoted_field("daemon_session_id", session->id).field("open_sessions", sessions_.size());
             log_message(LOG_INFO, "session_store", message.str());
             if (crossed_warning_threshold) {
                 warnings = session_limit_warning(target);
@@ -406,9 +407,8 @@ Json SessionStore::start_command(const std::string& target,
                                                max_output_tokens,
                                                empty_exec_warnings());
         {
-            std::ostringstream message;
-            message << "command completed before session handoff exit_code=" << poll_result.exit_code
-                    << " output_chars=" << poll_result.output.size();
+            LogMessageBuilder message("command completed before session handoff");
+            message.field("exit_code", poll_result.exit_code).field("output_chars", poll_result.output.size());
             log_message(LOG_INFO, "session_store", message.str());
         }
         return response;
@@ -440,8 +440,8 @@ Json SessionStore::write_stdin(const std::string& daemon_session_id,
     }
 
     {
-        std::ostringstream message;
-        message << "write_stdin daemon_session_id=`" << daemon_session_id << "` chars_len=" << chars.size();
+        LogMessageBuilder message("write_stdin");
+        message.quoted_field("daemon_session_id", daemon_session_id).field("chars_len", chars.size());
         log_message(LOG_INFO, "session_store", message.str());
     }
 
@@ -494,22 +494,23 @@ Json SessionStore::write_stdin(const std::string& daemon_session_id,
                                                max_output_tokens,
                                                empty_exec_warnings());
         {
-            std::ostringstream message;
             unsigned long open_sessions = 0UL;
             {
                 BasicLockGuard lock(mutex_);
                 open_sessions = static_cast<unsigned long>(sessions_.size() + pending_starts_);
             }
-            message << "session completed daemon_session_id=`" << daemon_session_id
-                    << "` exit_code=" << poll_result.exit_code << " open_sessions=" << open_sessions;
+            LogMessageBuilder message("session completed");
+            message.quoted_field("daemon_session_id", daemon_session_id)
+                .field("exit_code", poll_result.exit_code)
+                .field("open_sessions", open_sessions);
             log_message(LOG_INFO, "session_store", message.str());
         }
         return response;
     }
 
     {
-        std::ostringstream message;
-        message << "session still running daemon_session_id=`" << session->id << '`';
+        LogMessageBuilder message("session still running");
+        message.quoted_field("daemon_session_id", session->id);
         log_message(LOG_INFO, "session_store", message.str());
     }
     return build_session_response(session->id.c_str(),

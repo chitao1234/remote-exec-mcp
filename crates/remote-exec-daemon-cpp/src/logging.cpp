@@ -191,3 +191,40 @@ std::string preview_text(const std::string& text, std::size_t limit) {
     }
     return text.substr(0, limit) + "...";
 }
+
+LogMessageBuilder::LogMessageBuilder(const std::string& prefix) : needs_separator_(false) {
+    if (!prefix.empty()) {
+        out_ << prefix;
+        needs_separator_ = true;
+    }
+}
+
+LogMessageBuilder& LogMessageBuilder::raw(const std::string& token) {
+    append_separator();
+    out_ << token;
+    return *this;
+}
+
+LogMessageBuilder& LogMessageBuilder::quoted_field(const std::string& name, const std::string& value) {
+    append_separator();
+    out_ << name << "=`" << value << "`";
+    return *this;
+}
+
+LogMessageBuilder& LogMessageBuilder::bool_field(const std::string& name, bool value) {
+    append_separator();
+    out_ << name << "=" << (value ? "true" : "false");
+    return *this;
+}
+
+std::string LogMessageBuilder::str() const {
+    return out_.str();
+}
+
+void LogMessageBuilder::append_separator() {
+    if (needs_separator_) {
+        out_ << ' ';
+    } else {
+        needs_separator_ = true;
+    }
+}

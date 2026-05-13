@@ -1,5 +1,4 @@
 #include <initializer_list>
-#include <sstream>
 #include <string>
 
 #include "logging.h"
@@ -120,9 +119,11 @@ Json transfer_summary_json(const ImportSummary& summary) {
 }
 
 void log_transfer_import_summary(const std::string& destination_path, const ImportSummary& summary) {
-    std::ostringstream message;
-    message << "transfer/import destination=`" << destination_path << "` bytes_copied=" << summary.bytes_copied
-            << " files_copied=" << summary.files_copied << " directories_copied=" << summary.directories_copied
-            << " replaced=" << (summary.replaced ? "true" : "false");
+    LogMessageBuilder message("transfer/import");
+    message.quoted_field("destination", destination_path)
+        .field("bytes_copied", summary.bytes_copied)
+        .field("files_copied", summary.files_copied)
+        .field("directories_copied", summary.directories_copied)
+        .bool_field("replaced", summary.replaced);
     log_message(LOG_INFO, "server", message.str());
 }

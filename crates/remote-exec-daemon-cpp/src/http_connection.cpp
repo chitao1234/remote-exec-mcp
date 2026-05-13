@@ -255,9 +255,10 @@ int handle_streaming_transfer_export(const AppState& state,
 }
 
 void log_request_result(const HttpRequest& request, int status, std::uint64_t started_at_ms) {
-    std::ostringstream message;
-    message << request.method << ' ' << request.path << " request_id=" << request_id_for_request(request)
-            << " status=" << status << " elapsed_ms=" << (platform::monotonic_ms() - started_at_ms);
+    LogMessageBuilder message(request.method + " " + request.path);
+    message.field("request_id", request_id_for_request(request))
+        .field("status", status)
+        .field("elapsed_ms", (platform::monotonic_ms() - started_at_ms));
     log_message(level_for_status(status), "server", message.str());
 }
 
