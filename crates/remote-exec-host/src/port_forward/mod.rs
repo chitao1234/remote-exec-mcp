@@ -1,6 +1,7 @@
 mod access;
 mod codec;
 mod error;
+mod frames;
 mod limiter;
 mod session;
 mod session_store;
@@ -55,20 +56,16 @@ async fn send_forward_drop_report(
     reason: impl Into<String>,
     message: impl Into<String>,
 ) -> Result<(), crate::HostRpcError> {
-    let meta = serde_json::to_vec(&ForwardDropMeta {
-        kind,
-        count: 1,
-        reason: reason.into(),
-        message: Some(message.into()),
-    })
-    .map_err(|err| error::rpc_error(RpcErrorCode::InvalidPortTunnel, err.to_string()))?;
-    tx.send(Frame {
-        frame_type: FrameType::ForwardDrop,
-        flags: 0,
+    tx.send(frames::meta_frame(
+        FrameType::ForwardDrop,
         stream_id,
-        meta,
-        data: Vec::new(),
-    })
+        &ForwardDropMeta {
+            kind,
+            count: 1,
+            reason: reason.into(),
+            message: Some(message.into()),
+        },
+    )?)
     .await
 }
 
@@ -79,19 +76,16 @@ pub(super) fn tunnel_error_frame(
     fatal: bool,
     generation: Option<u64>,
 ) -> Result<Frame, crate::HostRpcError> {
-    let meta = codec::encode_frame_meta(&ErrorMeta {
-        code: code.into(),
-        message: message.into(),
-        fatal,
-        generation,
-    })?;
-    Ok(Frame {
-        frame_type: FrameType::Error,
-        flags: 0,
+    frames::meta_frame(
+        FrameType::Error,
         stream_id,
-        meta,
-        data: Vec::new(),
-    })
+        &ErrorMeta {
+            code: code.into(),
+            message: message.into(),
+            fatal,
+            generation,
+        },
+    )
 }
 
 #[cfg(test)]

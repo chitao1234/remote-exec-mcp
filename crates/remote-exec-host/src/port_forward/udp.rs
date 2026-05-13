@@ -11,14 +11,13 @@ use tokio_util::sync::CancellationToken;
 use crate::HostRpcError;
 
 use super::access::{OpenProtocolAccess, tunnel_access};
-use super::codec::{decode_frame_meta, encode_frame_meta};
+use super::codec::decode_frame_meta;
 use super::error::{is_recoverable_pressure_error, rpc_error};
+use super::frames::{endpoint_ok_frame, frame as raw_frame, meta_frame};
 use super::session::{AttachmentState, reactivate_retained_udp_bind};
 use super::session::{send_tunnel_error_code_with_sender, send_tunnel_error_with_sender};
 use super::tunnel::{send_tunnel_error, send_tunnel_error_code};
-use super::{
-    ConnectionLocalUdpBind, EndpointOkMeta, READ_BUF_SIZE, TunnelState, send_forward_drop_report,
-};
+use super::{ConnectionLocalUdpBind, READ_BUF_SIZE, TunnelState, send_forward_drop_report};
 
 enum UdpReadLoopTarget {
     Connection(Arc<TunnelState>),
@@ -32,13 +31,7 @@ impl UdpReadLoopTarget {
         meta: Vec<u8>,
         data: Vec<u8>,
     ) -> Result<(), HostRpcError> {
-        let frame = Frame {
-            frame_type: FrameType::UdpDatagram,
-            flags: 0,
-            stream_id,
-            meta,
-            data,
-        };
+        let frame = raw_frame(FrameType::UdpDatagram, stream_id, meta, data);
         match self {
             Self::Connection(tunnel) => tunnel.send(frame).await,
             Self::AttachedSession(attachment) => attachment.tx.send(frame).await,
@@ -152,15 +145,11 @@ pub(super) async fn tunnel_udp_bind(
                 )
                 .await?;
             tunnel
-                .send(Frame {
-                    frame_type: FrameType::UdpBindOk,
-                    flags: 0,
-                    stream_id: frame.stream_id,
-                    meta: encode_frame_meta(&EndpointOkMeta {
-                        endpoint: bound_endpoint,
-                    })?,
-                    data: Vec::new(),
-                })
+                .send(endpoint_ok_frame(
+                    FrameType::UdpBindOk,
+                    frame.stream_id,
+                    bound_endpoint,
+                )?)
                 .await?;
             reactivate_retained_udp_bind(&session).await
         }
@@ -195,15 +184,11 @@ pub(super) async fn tunnel_udp_bind_connection_local(
         },
     );
     tunnel
-        .send(Frame {
-            frame_type: FrameType::UdpBindOk,
-            flags: 0,
-            stream_id: frame.stream_id,
-            meta: encode_frame_meta(&EndpointOkMeta {
-                endpoint: bound_endpoint,
-            })?,
-            data: Vec::new(),
-        })
+        .send(endpoint_ok_frame(
+            FrameType::UdpBindOk,
+            frame.stream_id,
+            bound_endpoint,
+        )?)
         .await?;
     tokio::spawn(tunnel_udp_read_loop_connection_local(
         tunnel,
@@ -263,10 +248,14 @@ async fn tunnel_udp_read_loop(
                 return;
             }
         };
-        let meta = match encode_frame_meta(&UdpDatagramMeta {
-            peer: peer.to_string(),
-        }) {
-            Ok(meta) => meta,
+        let frame = match meta_frame(
+            FrameType::UdpDatagram,
+            stream_id,
+            &UdpDatagramMeta {
+                peer: peer.to_string(),
+            },
+        ) {
+            Ok(frame) => frame,
             Err(err) => {
                 target
                     .send_error_code(stream_id, err.code.to_string(), err.message)
@@ -275,7 +264,7 @@ async fn tunnel_udp_read_loop(
             }
         };
         if let Err(err) = target
-            .send_datagram(stream_id, meta, buf[..read].to_vec())
+            .send_datagram(stream_id, frame.meta, buf[..read].to_vec())
             .await
         {
             if is_recoverable_pressure_error(&err) {

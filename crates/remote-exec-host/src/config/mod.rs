@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::Context;
 use remote_exec_proto::port_forward::DEFAULT_TUNNEL_QUEUE_BYTES;
@@ -77,6 +78,21 @@ pub struct HostPortForwardLimits {
     pub connect_timeout_ms: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HostPortForwardCapacityLimits {
+    pub max_tunnel_connections: usize,
+    pub max_retained_sessions: usize,
+    pub max_retained_listeners: usize,
+    pub max_udp_binds: usize,
+    pub max_active_tcp_streams: usize,
+    pub max_tunnel_queued_bytes: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HostPortForwardTimeouts {
+    pub connect_timeout_ms: u64,
+}
+
 impl Default for HostPortForwardLimits {
     fn default() -> Self {
         Self {
@@ -92,6 +108,31 @@ impl Default for HostPortForwardLimits {
 }
 
 impl HostPortForwardLimits {
+    pub fn capacity(self) -> HostPortForwardCapacityLimits {
+        HostPortForwardCapacityLimits {
+            max_tunnel_connections: self.max_tunnel_connections,
+            max_retained_sessions: self.max_retained_sessions,
+            max_retained_listeners: self.max_retained_listeners,
+            max_udp_binds: self.max_udp_binds,
+            max_active_tcp_streams: self.max_active_tcp_streams,
+            max_tunnel_queued_bytes: self.max_tunnel_queued_bytes,
+        }
+    }
+
+    pub fn timeouts(self) -> HostPortForwardTimeouts {
+        HostPortForwardTimeouts {
+            connect_timeout_ms: self.connect_timeout_ms,
+        }
+    }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        self.capacity().validate()?;
+        self.timeouts().validate()?;
+        Ok(())
+    }
+}
+
+impl HostPortForwardCapacityLimits {
     pub fn validate(&self) -> anyhow::Result<()> {
         anyhow::ensure!(
             self.max_tunnel_connections > 0,
@@ -117,6 +158,16 @@ impl HostPortForwardLimits {
             self.max_tunnel_queued_bytes > 0,
             "port_forward_limits.max_tunnel_queued_bytes must be greater than zero"
         );
+        Ok(())
+    }
+}
+
+impl HostPortForwardTimeouts {
+    pub fn connect_timeout(self) -> Duration {
+        Duration::from_millis(self.connect_timeout_ms)
+    }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
         anyhow::ensure!(
             self.connect_timeout_ms > 0,
             "port_forward_limits.connect_timeout_ms must be greater than zero"

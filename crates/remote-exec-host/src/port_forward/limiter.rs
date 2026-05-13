@@ -4,12 +4,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use remote_exec_proto::port_tunnel::Frame;
 use remote_exec_proto::rpc::RpcErrorCode;
 
+use crate::config::HostPortForwardCapacityLimits;
 use crate::{HostPortForwardLimits, HostRpcError};
 
 use super::error::rpc_error;
 #[derive(Debug)]
 pub struct PortForwardLimiter {
-    limits: HostPortForwardLimits,
+    limits: HostPortForwardCapacityLimits,
     tunnel_connections: AtomicUsize,
     retained_listeners: AtomicUsize,
     udp_binds: AtomicUsize,
@@ -34,6 +35,7 @@ enum PermitKind {
 
 impl PortForwardLimiter {
     pub fn new(limits: HostPortForwardLimits) -> Self {
+        let limits = limits.capacity();
         Self {
             limits,
             tunnel_connections: AtomicUsize::new(0),

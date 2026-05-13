@@ -16,8 +16,9 @@ use tokio_util::sync::CancellationToken;
 use crate::HostRpcError;
 
 use super::access::{OpenProtocolAccess, OpenTunnelRole, tunnel_access};
-use super::codec::{decode_frame_meta, encode_frame_meta};
+use super::codec::decode_frame_meta;
 use super::error::{SessionCloseMode, rpc_error};
+use super::frames::{data_frame, empty_frame, endpoint_ok_frame, meta_frame};
 use super::session::{
     AttachmentState, SessionState, close_attached_session, listener_stream_id,
     send_tunnel_error_code_with_sender, send_tunnel_error_with_sender, udp_bind_stream_id,
@@ -25,8 +26,8 @@ use super::session::{
 };
 use super::tunnel::{send_tunnel_error, send_tunnel_error_code};
 use super::{
-    EndpointOkMeta, READ_BUF_SIZE, TCP_WRITE_QUEUE_FRAMES, TcpStreamEntry, TcpWriteCommand,
-    TcpWriterHandle, TunnelState, send_forward_drop_report,
+    READ_BUF_SIZE, TCP_WRITE_QUEUE_FRAMES, TcpStreamEntry, TcpWriteCommand, TcpWriterHandle,
+    TunnelState, send_forward_drop_report,
 };
 
 const TCP_CONTROL_SEND_TIMEOUT: Duration = Duration::from_secs(1);
@@ -126,8 +127,12 @@ async fn tcp_connect_with_timeout(
     tunnel: &TunnelState,
     endpoint: &str,
 ) -> Result<TcpStream, HostRpcError> {
-    let connect_timeout =
-        Duration::from_millis(tunnel.state.config.port_forward_limits.connect_timeout_ms);
+    let connect_timeout = tunnel
+        .state
+        .config
+        .port_forward_limits
+        .timeouts()
+        .connect_timeout();
     tokio::time::timeout(connect_timeout, TcpStream::connect(endpoint))
         .await
         .map_err(|_| rpc_error(RpcErrorCode::PortConnectFailed, "tcp connect timed out"))?
@@ -161,15 +166,11 @@ pub(super) async fn tunnel_tcp_listen(
         )
         .await?;
     tunnel
-        .send(Frame {
-            frame_type: FrameType::TcpListenOk,
-            flags: 0,
-            stream_id: frame.stream_id,
-            meta: encode_frame_meta(&EndpointOkMeta {
-                endpoint: bound_endpoint.clone(),
-            })?,
-            data: Vec::new(),
-        })
+        .send(endpoint_ok_frame(
+            FrameType::TcpListenOk,
+            frame.stream_id,
+            bound_endpoint.clone(),
+        )?)
         .await?;
 
     tracing::info!(
@@ -246,15 +247,16 @@ pub(super) async fn tunnel_tcp_accept_loop(session: Arc<SessionState>, listener:
         );
         if attachment
             .tx
-            .send(Frame {
-                frame_type: FrameType::TcpAccept,
-                flags: 0,
-                stream_id,
-                meta: match encode_frame_meta(&TcpAcceptMeta {
-                    listener_stream_id: listener_stream,
-                    peer: peer.to_string(),
-                }) {
-                    Ok(meta) => meta,
+            .send(
+                match meta_frame(
+                    FrameType::TcpAccept,
+                    stream_id,
+                    &TcpAcceptMeta {
+                        listener_stream_id: listener_stream,
+                        peer: peer.to_string(),
+                    },
+                ) {
+                    Ok(frame) => frame,
                     Err(err) => {
                         cancel_tcp_stream(&attachment.tcp_streams, stream_id).await;
                         let _ = send_tunnel_error_code_with_sender(
@@ -268,8 +270,7 @@ pub(super) async fn tunnel_tcp_accept_loop(session: Arc<SessionState>, listener:
                         continue;
                     }
                 },
-                data: Vec::new(),
-            })
+            )
             .await
             .is_err()
         {
@@ -318,13 +319,7 @@ pub(super) async fn tunnel_tcp_connect_connection_local(
         },
     );
     tunnel
-        .send(Frame {
-            frame_type: FrameType::TcpConnectOk,
-            flags: 0,
-            stream_id: frame.stream_id,
-            meta: Vec::new(),
-            data: Vec::new(),
-        })
+        .send(empty_frame(FrameType::TcpConnectOk, frame.stream_id))
         .await?;
     tokio::spawn(tunnel_tcp_read_loop_connection_local(
         tunnel,
@@ -383,26 +378,18 @@ async fn tunnel_tcp_read_loop(
         match read {
             Ok(0) => {
                 let _ = target
-                    .send_frame(Frame {
-                        frame_type: FrameType::TcpEof,
-                        flags: 0,
-                        stream_id,
-                        meta: Vec::new(),
-                        data: Vec::new(),
-                    })
+                    .send_frame(empty_frame(FrameType::TcpEof, stream_id))
                     .await;
                 target.clear_cancel(stream_id).await;
                 return;
             }
             Ok(read) => {
                 if let Err(err) = target
-                    .send_frame(Frame {
-                        frame_type: FrameType::TcpData,
-                        flags: 0,
+                    .send_frame(data_frame(
+                        FrameType::TcpData,
                         stream_id,
-                        meta: Vec::new(),
-                        data: buf[..read].to_vec(),
-                    })
+                        buf[..read].to_vec(),
+                    ))
                     .await
                 {
                     target
@@ -622,13 +609,7 @@ pub(super) async fn tunnel_close_stream(
         OpenTunnelRole::Unopened => {}
     }
     tunnel
-        .send(Frame {
-            frame_type: FrameType::Close,
-            flags: 0,
-            stream_id,
-            meta: Vec::new(),
-            data: Vec::new(),
-        })
+        .send(empty_frame(FrameType::Close, stream_id))
         .await?;
     Ok(())
 }
