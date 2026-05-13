@@ -103,9 +103,9 @@ int main() {
     config.default_workdir = root.string();
     config.default_shell.clear();
     config.allow_login_shell = true;
-    config.max_request_header_bytes = 65536;
-    config.max_request_body_bytes = 65536;
-    config.max_open_sessions = 64;
+    config.max_request_header_bytes = DEFAULT_MAX_REQUEST_HEADER_BYTES;
+    config.max_request_body_bytes = DEFAULT_MAX_REQUEST_BODY_BYTES;
+    config.max_open_sessions = DEFAULT_MAX_OPEN_SESSIONS;
 
     ServerRuntime runtime(config);
     runtime.start_accept_loop();

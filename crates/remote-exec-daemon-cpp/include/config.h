@@ -24,6 +24,9 @@ static const unsigned long DEFAULT_PORT_FORWARD_MAX_TUNNEL_QUEUED_BYTES = 8UL * 
 static const unsigned long DEFAULT_PORT_FORWARD_TUNNEL_IO_TIMEOUT_MS = 30000UL;
 static const unsigned long DEFAULT_PORT_FORWARD_CONNECT_TIMEOUT_MS = 10000UL;
 static const unsigned long DEFAULT_HTTP_CONNECTION_IDLE_TIMEOUT_MS = 30000UL;
+static const std::size_t DEFAULT_MAX_REQUEST_HEADER_BYTES = 64UL * 1024UL;
+static const std::size_t DEFAULT_MAX_REQUEST_BODY_BYTES = 512UL * 1024UL * 1024UL;
+static const unsigned long DEFAULT_MAX_OPEN_SESSIONS = 64UL;
 
 struct YieldTimeOperationConfig {
     YieldTimeOperationConfig() : default_ms(0UL), max_ms(0UL), min_ms(0UL) {}
@@ -83,11 +86,11 @@ struct DaemonConfig {
     std::string default_shell;
     bool allow_login_shell;
     std::string http_auth_bearer_token;
-    std::size_t max_request_header_bytes;
-    std::size_t max_request_body_bytes;
+    std::size_t max_request_header_bytes = DEFAULT_MAX_REQUEST_HEADER_BYTES;
+    std::size_t max_request_body_bytes = DEFAULT_MAX_REQUEST_BODY_BYTES;
     unsigned long http_connection_idle_timeout_ms = DEFAULT_HTTP_CONNECTION_IDLE_TIMEOUT_MS;
     TransferLimitConfig transfer_limits = default_transfer_limit_config();
-    unsigned long max_open_sessions;
+    unsigned long max_open_sessions = DEFAULT_MAX_OPEN_SESSIONS;
     PortForwardLimitConfig port_forward_limits;
     YieldTimeConfig yield_time;
     bool sandbox_configured = false;

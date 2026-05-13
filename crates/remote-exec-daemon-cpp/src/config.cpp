@@ -329,12 +329,14 @@ DaemonConfig load_config(const std::string& path) {
     config.default_shell = read_optional_string(values, "default_shell", "");
     config.allow_login_shell = read_optional_bool(values, "allow_login_shell", true);
     config.http_auth_bearer_token = read_http_auth_bearer_token(values);
-    config.max_request_header_bytes = read_optional_size_t(values, "max_request_header_bytes", 64UL * 1024UL);
-    config.max_request_body_bytes = read_optional_size_t(values, "max_request_body_bytes", 512UL * 1024UL * 1024UL);
+    config.max_request_header_bytes =
+        read_optional_size_t(values, "max_request_header_bytes", DEFAULT_MAX_REQUEST_HEADER_BYTES);
+    config.max_request_body_bytes =
+        read_optional_size_t(values, "max_request_body_bytes", DEFAULT_MAX_REQUEST_BODY_BYTES);
     config.http_connection_idle_timeout_ms =
         read_optional_unsigned_long(values, "http_connection_idle_timeout_ms", DEFAULT_HTTP_CONNECTION_IDLE_TIMEOUT_MS);
     config.transfer_limits = read_transfer_limits(values);
-    config.max_open_sessions = read_optional_unsigned_long(values, "max_open_sessions", 64UL);
+    config.max_open_sessions = read_optional_unsigned_long(values, "max_open_sessions", DEFAULT_MAX_OPEN_SESSIONS);
     config.port_forward_limits = read_port_forward_limits(values);
     config.yield_time = read_yield_time_config(values);
     config.sandbox_configured = has_key_with_prefix(values, "sandbox_");

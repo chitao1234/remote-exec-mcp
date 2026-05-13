@@ -11,6 +11,10 @@ struct TunnelOpenMetadata {
     std::string resume_session_id;
 };
 
+struct TunnelCloseMetadata {
+    std::uint64_t generation;
+};
+
 TunnelOpenMetadata parse_tunnel_open_metadata(const PortTunnelFrame& frame) {
     try {
         const Json meta = Json::parse(frame.meta);
@@ -26,6 +30,17 @@ TunnelOpenMetadata parse_tunnel_open_metadata(const PortTunnelFrame& frame) {
         return parsed;
     } catch (const Json::exception& ex) {
         throw PortForwardError(400, "invalid_port_tunnel", std::string("invalid tunnel open metadata: ") + ex.what());
+    }
+}
+
+TunnelCloseMetadata parse_tunnel_close_metadata(const PortTunnelFrame& frame) {
+    try {
+        const Json meta = Json::parse(frame.meta);
+        TunnelCloseMetadata parsed;
+        parsed.generation = meta.at("generation").get<std::uint64_t>();
+        return parsed;
+    } catch (const Json::exception& ex) {
+        throw PortForwardError(400, "invalid_port_tunnel", std::string("invalid tunnel close metadata: ") + ex.what());
     }
 }
 
@@ -321,8 +336,8 @@ void PortTunnelConnection::tunnel_close(const PortTunnelFrame& frame) {
     if (frame.stream_id != 0U) {
         throw PortForwardError(400, "invalid_port_tunnel", "tunnel close must use stream_id 0");
     }
-    const Json meta = Json::parse(frame.meta);
-    ensure_generation(meta.at("generation").get<std::uint64_t>());
+    const TunnelCloseMetadata meta = parse_tunnel_close_metadata(frame);
+    ensure_generation(meta.generation);
     PortTunnelFrame closed = make_empty_frame(PortTunnelFrameType::TunnelClosed, 0U);
     closed.meta = frame.meta;
     send_frame(closed);

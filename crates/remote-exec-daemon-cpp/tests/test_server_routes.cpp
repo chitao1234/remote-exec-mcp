@@ -32,6 +32,11 @@ static std::string normalize_output(const std::string& input) {
 }
 
 static void assert_exec_routes(AppState& state, const fs::path& root) {
+    const HttpResponse missing_cmd_response =
+        route_request(state, json_request("/v1/exec/start", Json{{"workdir", root.string()}}));
+    assert(missing_cmd_response.status == 400);
+    assert(Json::parse(missing_cmd_response.body).at("code").get<std::string>() == "bad_request");
+
     const HttpResponse non_tty_start_response = route_request(state,
                                                               json_request("/v1/exec/start",
                                                                            Json{
@@ -80,6 +85,17 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
                      }));
     assert(non_tty_resize_response.status == 400);
     assert(Json::parse(non_tty_resize_response.body).at("code").get<std::string>() == "tty_unsupported");
+
+    const HttpResponse invalid_session_id_type_response = route_request(
+        state,
+        json_request("/v1/exec/write",
+                     Json{
+                         {"daemon_session_id", Json{{"unexpected", true}}},
+                         {"chars", ""},
+                         {"yield_time_ms", 250},
+                     }));
+    assert(invalid_session_id_type_response.status == 400);
+    assert(Json::parse(invalid_session_id_type_response.body).at("code").get<std::string>() == "bad_request");
 
     if (process_session_supports_pty()) {
         const HttpResponse slow_start_response = route_request(state,

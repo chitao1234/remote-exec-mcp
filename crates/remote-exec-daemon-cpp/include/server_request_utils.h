@@ -24,7 +24,44 @@ struct TransferImportRequestSpec {
     TransferPathAuthorizer authorizer;
 };
 
+class ExecRequestFailure : public std::runtime_error {
+public:
+    ExecRequestFailure(int status, const std::string& code, const std::string& message);
+
+    int status;
+    std::string code;
+    std::string message;
+};
+
+struct ExecPtySizeSpec {
+    bool present;
+    unsigned short rows;
+    unsigned short cols;
+};
+
+struct ExecStartRequestSpec {
+    std::string cmd;
+    std::string workdir;
+    std::string shell;
+    bool login_requested;
+    bool tty_requested;
+    bool has_yield_time_ms;
+    unsigned long yield_time_ms;
+    unsigned long max_output_tokens;
+};
+
+struct ExecWriteRequestSpec {
+    std::string daemon_session_id;
+    std::string chars;
+    bool has_yield_time_ms;
+    unsigned long yield_time_ms;
+    unsigned long max_output_tokens;
+    ExecPtySizeSpec pty_size;
+};
+
 bool reject_before_route(const AppState& state, const HttpRequest& request, HttpResponse* response);
+ExecStartRequestSpec prepare_exec_start_request(const AppState& state, const HttpRequest& request);
+ExecWriteRequestSpec prepare_exec_write_request(const HttpRequest& request);
 std::string resolve_workdir(const AppState& state, const Json& body);
 std::string resolve_authorized_workdir(const AppState& state, const Json& body, SandboxAccess access);
 std::string resolve_input_path(const AppState& state, const Json& body, const std::string& key);

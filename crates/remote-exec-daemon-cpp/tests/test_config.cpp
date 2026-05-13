@@ -31,6 +31,9 @@ static bool config_rejected(const fs::path& path) {
 
 int main() {
     const DaemonConfig default_config = DaemonConfig();
+    assert(default_config.max_request_header_bytes == DEFAULT_MAX_REQUEST_HEADER_BYTES);
+    assert(default_config.max_request_body_bytes == DEFAULT_MAX_REQUEST_BODY_BYTES);
+    assert(default_config.max_open_sessions == DEFAULT_MAX_OPEN_SESSIONS);
     assert(default_config.http_connection_idle_timeout_ms == DEFAULT_HTTP_CONNECTION_IDLE_TIMEOUT_MS);
     assert(default_config.port_forward_limits.max_worker_threads == DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS);
     assert(default_config.port_forward_limits.max_retained_sessions == DEFAULT_PORT_FORWARD_MAX_RETAINED_SESSIONS);
