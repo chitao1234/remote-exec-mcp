@@ -142,7 +142,7 @@
 - Existing references: `crates/remote-exec-broker/tests/mcp_forward_ports_cpp.rs`
 
 **Notes / constraints:**
-- Keep the helper design compatible with the daemon’s POSIX and Windows XP-oriented build constraints; do not assume modern variadic-template or formatting-library availability.
+- Keep the helper design compatible with the daemon’s POSIX and Windows XP-oriented C++11 build constraints; do not assume modern variadic-template or formatting-library availability.
 - Keep this task scoped to logging-message construction and the HTTP 101 upgrade response helper. Do not rewrite unrelated `ostringstream` uses that serialize HTTP bodies, patch text, or other non-logging payloads unless the migration is purely mechanical and obviously beneficial.
 - Preserve the exact upgrade headers that broker tests and runtime interoperability depend on, especially `Connection`, `Upgrade`, and request-id propagation.
 
@@ -155,7 +155,7 @@
 - Expect: broker forwarding still interoperates with the real C++ daemon after the upgrade-response change.
 
 - [ ] Distinguish verified logging-message `ostringstream` sites from unrelated string-rendering helpers and confirm the exact migration set
-- [ ] Add a C++03-compatible helper for the raw HTTP upgrade response and a small helper for repetitive logging-message assembly
+- [ ] Add a C++11-compatible helper for the raw HTTP upgrade response and a small helper for repetitive logging-message assembly
 - [ ] Migrate the verified logging-message seams and the port-tunnel upgrade path to those helpers without changing behavior
 - [ ] Run focused C++ and broker verification
 - [ ] Commit with real changes only

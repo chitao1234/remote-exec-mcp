@@ -353,6 +353,9 @@ Port forward:
 - PTY support is target-specific. Trust `supports_pty`.
 - Rust daemons support TLS by default; C++ daemon targets are plain HTTP.
 - C++ daemon targets are narrower than Rust daemon targets.
+- The C++ daemon uses C++11 on every supported build path. "Windows
+  XP-compatible" means the binary was built with a toolchain that supports both
+  XP targeting and C++11.
 - POSIX C++ daemon targets support `tty: true` when PTY allocation is available.
 - Windows XP-compatible C++ targets reject `tty: true` and use `cmd.exe`.
 - POSIX C++ non-TTY exec starts with stdin closed. Use `tty: true` when later

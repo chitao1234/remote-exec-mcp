@@ -1,6 +1,6 @@
 # remote-exec-daemon-cpp
 
-Standalone C++ daemon for `remote-exec-mcp`.
+Standalone C++11 daemon for `remote-exec-mcp`.
 
 This daemon is intentionally narrower than the Rust daemon, but it now has two
 build paths:
@@ -9,6 +9,10 @@ build paths:
 - Windows XP-compatible hosts through `i686-w64-mingw32-g++`
 - host-native Windows builds through MSVC/NMAKE
 - Windows XP-compatible hosts through MSVC/NMAKE with the `v141_xp` toolset
+
+The daemon builds as C++11 across all supported toolchains. In this repository,
+"Windows XP-compatible" means a toolchain that can target Windows XP while
+compiling the daemon as C++11; it does not imply a pre-C++11 language level.
 
 The former `remote-exec-daemon-xp` name referred to the original Windows XP-only
 shape. Current live behavior is documented here and in the repository root
@@ -63,7 +67,7 @@ Host-native Windows MSVC/NMAKE build:
 
 Windows XP-compatible MSVC/NMAKE build:
 
-- Open an x86 Visual Studio developer prompt with the XP-capable VS 2017
+- Open an x86 Visual Studio developer prompt with an XP-capable C++11 VS 2017
   toolset, such as `vcvarsall.bat x86 -vcvars_ver=14.16`.
 - `nmake /f NMakefile all-msvc-xp`
 - `nmake /f NMakefile check-msvc-xp`

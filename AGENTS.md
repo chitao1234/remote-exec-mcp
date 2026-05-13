@@ -17,8 +17,10 @@ explicitly asks for docs maintenance there. The live contract is maintained in:
 
 This repository is a Rust 2024 workspace for a remote-first MCP server that
 exposes Codex-style local-system tools across configured Linux and Windows
-targets. It also contains a narrower standalone C++ daemon with native POSIX and
-Windows XP-compatible build paths.
+targets. It also contains a narrower standalone C++11 daemon with native POSIX
+and Windows XP-compatible build paths. In this repository, "Windows
+XP-compatible" means a toolchain and binary target that can both compile the C++
+daemon as C++11 and target Windows XP.
 
 The public tool surface is:
 
@@ -41,7 +43,7 @@ The architecture is intentionally split:
 - `remote-exec-daemon`: per-machine Rust HTTP/1.1 JSON daemon. It supports mTLS
   by default, optional plain HTTP, command sessions, patching, image reads,
   transfer import/export, sandbox checks, and v4 port-forward upgrade tunnels.
-- `remote-exec-daemon-cpp`: standalone plain-HTTP C++ daemon. It shares the
+- `remote-exec-daemon-cpp`: standalone plain-HTTP C++11 daemon. It shares the
   broker-daemon contract where implemented, supports native POSIX and Windows
   XP-compatible builds, and intentionally omits TLS and transfer compression.
 - `remote-exec-proto`: shared public tool schemas, internal RPC payloads, path
@@ -51,7 +53,7 @@ The architecture is intentionally split:
   private-key write helpers.
 
 Avoid broad new abstraction layers unless the existing Linux, Windows, POSIX
-C++, and XP-compatible C++ split actually needs them.
+C++11, and XP-targeting C++11 split actually needs them.
 
 ## Workspace Map
 
@@ -231,7 +233,7 @@ Focused C++ commands:
 - `bmake -C crates/remote-exec-daemon-cpp check-posix` when validating the BSD
   make path
 - `nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-xp` from an x86
-  Visual Studio developer prompt with the XP-capable toolset
+  Visual Studio developer prompt with an XP-capable C++11 toolset
 
 Useful Windows cross-target compile gates from Linux:
 

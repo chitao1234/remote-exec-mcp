@@ -38,7 +38,7 @@ Implemented transports and runtimes:
 - broker-host `local` filesystem endpoint for transfers
 - broker-host `local` network side for port forwards
 - `remote-exec` CLI client for broker config or streamable HTTP use
-- standalone C++ daemon for POSIX and Windows XP-compatible hosts
+- standalone C++11 daemon for POSIX and Windows XP-compatible hosts
 
 Live exec sessions and live port forwards are in-memory runtime state. Broker
 restart drops public `session_id` and `forward_id` mappings. Daemon restart
@@ -57,9 +57,9 @@ drops daemon-local command sessions and forwarded sockets.
   checks static path sandbox rules, and serves v4 port-forward upgrade tunnels.
 - `remote-exec-host`: shared Rust host runtime reused by the Rust daemon and the
   broker-host `local` target.
-- `remote-exec-daemon-cpp`: standalone plain-HTTP C++ daemon with native POSIX,
-  MinGW Windows XP-compatible, host-native MSVC, and MSVC v141_xp-compatible
-  build paths.
+- `remote-exec-daemon-cpp`: standalone plain-HTTP C++11 daemon with native
+  POSIX, MinGW Windows XP-compatible, host-native MSVC, and MSVC
+  v141_xp-compatible build paths.
 - `remote-exec-proto`: public MCP schemas, broker-daemon RPC schemas, path and
   sandbox helpers, and port-forward protocol types.
 - `remote-exec-admin`: administrative CLI for certificate/bootstrap workflows.
@@ -438,6 +438,11 @@ The C++ daemon intentionally supports a smaller surface than the Rust daemon:
 - static path sandboxing for exec cwd, transfer read/write paths, patch write
   targets, and image reads
 
+The C++ daemon standard level is C++11 on every supported build path. In this
+repository, "Windows XP-compatible" means using a toolchain that can target XP
+while compiling the daemon as C++11, such as the MinGW XP cross-build or an
+MSVC `v141_xp` setup.
+
 The Rust and C++ daemons share the `max_open_sessions` default of 64. C++ also
 has daemon-local safety knobs for its handwritten HTTP parser and blocking
 forwarding worker model: `max_request_header_bytes`, `max_request_body_bytes`,
@@ -463,7 +468,8 @@ From an x86 Visual Studio developer prompt:
 nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-native
 ```
 
-From an x86 Visual Studio developer prompt with the v141_xp-capable toolset:
+From an x86 Visual Studio developer prompt with a `v141_xp`-capable C++11
+toolset:
 
 ```bat
 nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-xp
@@ -507,7 +513,7 @@ make -C crates/remote-exec-daemon-cpp check-posix
 make -C crates/remote-exec-daemon-cpp check-windows-xp
 # From an x86 Visual Studio developer prompt:
 nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-native
-# From an x86 Visual Studio developer prompt with the v141_xp-capable toolset:
+# From an x86 Visual Studio developer prompt with a v141_xp-capable C++11 toolset:
 nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-xp
 ```
 
