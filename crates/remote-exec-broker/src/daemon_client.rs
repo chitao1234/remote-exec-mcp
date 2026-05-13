@@ -315,29 +315,17 @@ impl DaemonClient {
                 );
                 DaemonClientError::Transport(err.into())
             })?;
-        self.ensure_transfer_export_success(req, started, response)
-            .await
-    }
-
-    async fn ensure_transfer_export_success(
-        &self,
-        req: &TransferExportRequest,
-        started: std::time::Instant,
-        response: reqwest::Response,
-    ) -> Result<reqwest::Response, DaemonClientError> {
-        if response.status().is_success() {
-            return Ok(response);
-        }
-
-        tracing::warn!(
-            target = %self.target_name,
-            base_url = %self.base_url,
-            path = %req.path,
-            status = response.status().as_u16(),
-            elapsed_ms = started.elapsed().as_millis() as u64,
-            "daemon transfer export returned error status"
-        );
-        Err(decode_rpc_error(response).await)
+        self.ensure_success(response, RpcErrorDecodePolicy::Lenient, |status| {
+            tracing::warn!(
+                target = %self.target_name,
+                base_url = %self.base_url,
+                path = %req.path,
+                status = status.as_u16(),
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "daemon transfer export returned error status"
+            );
+        })
+        .await
     }
 
     fn transfer_export_metadata(
@@ -398,29 +386,17 @@ impl DaemonClient {
             );
             DaemonClientError::Transport(err.into())
         })?;
-        self.ensure_transfer_import_success(req, started, response)
-            .await
-    }
-
-    async fn ensure_transfer_import_success(
-        &self,
-        req: &TransferImportRequest,
-        started: std::time::Instant,
-        response: reqwest::Response,
-    ) -> Result<reqwest::Response, DaemonClientError> {
-        if response.status().is_success() {
-            return Ok(response);
-        }
-
-        tracing::warn!(
-            target = %self.target_name,
-            base_url = %self.base_url,
-            destination_path = %req.destination_path,
-            status = response.status().as_u16(),
-            elapsed_ms = started.elapsed().as_millis() as u64,
-            "daemon transfer import returned error status"
-        );
-        Err(decode_rpc_error(response).await)
+        self.ensure_success(response, RpcErrorDecodePolicy::Lenient, |status| {
+            tracing::warn!(
+                target = %self.target_name,
+                base_url = %self.base_url,
+                destination_path = %req.destination_path,
+                status = status.as_u16(),
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "daemon transfer import returned error status"
+            );
+        })
+        .await
     }
 
     async fn decode_transfer_import_response(
@@ -472,7 +448,18 @@ impl DaemonClient {
                 .send()
                 .await
                 .map_err(|err| self.rpc_transport_error(path, started, err))?;
-            let response = self.ensure_rpc_success(path, started, response).await?;
+            let response = self
+                .ensure_success(response, RpcErrorDecodePolicy::Strict, |status| {
+                    tracing::warn!(
+                        target = %self.target_name,
+                        base_url = %self.base_url,
+                        path,
+                        status = status.as_u16(),
+                        elapsed_ms = started.elapsed().as_millis() as u64,
+                        "daemon rpc returned error status"
+                    );
+                })
+                .await?;
 
             let bytes = response.bytes().await.map_err(|err| {
                 tracing::warn!(
@@ -526,26 +513,24 @@ impl DaemonClient {
         }
     }
 
-    async fn ensure_rpc_success(
+    async fn ensure_success<Log>(
         &self,
-        path: &str,
-        started: std::time::Instant,
         response: reqwest::Response,
-    ) -> Result<reqwest::Response, DaemonClientError> {
+        decode_policy: RpcErrorDecodePolicy,
+        log_error: Log,
+    ) -> Result<reqwest::Response, DaemonClientError>
+    where
+        Log: FnOnce(reqwest::StatusCode),
+    {
         if response.status().is_success() {
             return Ok(response);
         }
 
-        tracing::warn!(
-            target = %self.target_name,
-            base_url = %self.base_url,
-            path,
-            status = response.status().as_u16(),
-            elapsed_ms = started.elapsed().as_millis() as u64,
-            "daemon rpc returned error status"
-        );
-        let error = decode_rpc_error_strict(response).await?;
-        Err(error)
+        log_error(response.status());
+        match decode_policy {
+            RpcErrorDecodePolicy::Strict => Err(decode_rpc_error_strict(response).await?),
+            RpcErrorDecodePolicy::Lenient => Err(decode_rpc_error(response).await),
+        }
     }
 
     fn rpc_transport_error(
@@ -576,6 +561,12 @@ impl DaemonClient {
         }
         request
     }
+}
+
+#[derive(Clone, Copy)]
+enum RpcErrorDecodePolicy {
+    Strict,
+    Lenient,
 }
 
 fn build_bearer_authorization_header(
