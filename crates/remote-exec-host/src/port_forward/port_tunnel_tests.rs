@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 use remote_exec_proto::port_tunnel::{
@@ -711,6 +712,7 @@ async fn tcp_close_after_peer_eof_does_not_cancel_queued_writer_shutdown() {
         open_mode: tokio::sync::Mutex::new(TunnelMode::Connect {
             protocol: TunnelForwardProtocol::Tcp,
         }),
+        last_generation: AtomicU64::new(1),
         active: tokio::sync::Mutex::new(Some(ActiveTunnelState::Connect(Arc::new(
             ConnectRuntimeState {
                 tx: sender,
@@ -777,6 +779,7 @@ async fn tunnel_tcp_eof_waits_for_full_writer_queue() {
         open_mode: tokio::sync::Mutex::new(TunnelMode::Connect {
             protocol: TunnelForwardProtocol::Tcp,
         }),
+        last_generation: AtomicU64::new(1),
         active: tokio::sync::Mutex::new(Some(ActiveTunnelState::Connect(Arc::new(
             ConnectRuntimeState {
                 tx: sender,
@@ -854,6 +857,7 @@ async fn concurrent_tunnel_open_allows_only_one_mode() {
         cancel: state.shutdown.child_token(),
         tx: sender,
         open_mode: tokio::sync::Mutex::new(TunnelMode::Unopened),
+        last_generation: AtomicU64::new(0),
         active: tokio::sync::Mutex::new(None),
         _connection_permit: state
             .port_forward_limiter

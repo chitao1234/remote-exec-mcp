@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 
 use remote_exec_proto::port_tunnel::{Frame, TunnelForwardProtocol};
 use serde::Serialize;
@@ -17,6 +18,7 @@ pub(super) struct TunnelState {
     pub(super) cancel: CancellationToken,
     pub(super) tx: TunnelSender,
     pub(super) open_mode: Mutex<TunnelMode>,
+    pub(super) last_generation: AtomicU64,
     pub(super) active: Mutex<Option<ActiveTunnelState>>,
     pub(super) _connection_permit: PortForwardPermit,
 }

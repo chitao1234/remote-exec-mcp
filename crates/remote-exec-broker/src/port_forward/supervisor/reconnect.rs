@@ -8,8 +8,9 @@ use remote_exec_proto::public::ForwardPortSideRole;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use super::super::epoch::ForwardEpoch;
 use super::open::{open_data_tunnel, open_listen_session};
-use super::{ForwardRuntime, LISTEN_SESSION_GENERATION, ListenSessionControl};
+use super::{ForwardRuntime, ListenSessionControl};
 use crate::port_forward::events::ForwardLoopControl;
 use crate::port_forward::tunnel::{
     PortTunnel, decode_tunnel_meta, encode_tunnel_meta, is_retryable_transport_error, tunnel_error,
@@ -52,6 +53,7 @@ impl PortForwardReconnectPolicy {
 }
 
 struct RecoveredForwardTunnels {
+    generation: u64,
     listen_tunnel: Arc<PortTunnel>,
     connect_tunnel: Arc<PortTunnel>,
 }
@@ -67,12 +69,13 @@ pub(in crate::port_forward) async fn wait_for_forward_task_stop(
 
 async fn resume_listen_session_inner(
     control: &ListenSessionControl,
+    generation: u64,
 ) -> anyhow::Result<Arc<PortTunnel>> {
     let opened = open_listen_session(
         &control.side,
         &control.forward_id,
         control.protocol,
-        LISTEN_SESSION_GENERATION,
+        generation,
         Some(control.session_id.clone()),
         control.max_tunnel_queued_bytes,
     )
@@ -83,29 +86,55 @@ async fn resume_listen_session_inner(
 
 async fn try_resume_listen_tunnel(
     control: &Arc<ListenSessionControl>,
+    generation: u64,
 ) -> anyhow::Result<Arc<PortTunnel>> {
-    let tunnel = resume_listen_session_inner(control).await?;
-    let mut state = control.state.lock().await;
-    state.current_tunnel = Some(tunnel.clone());
+    let tunnel = resume_listen_session_inner(control, generation).await?;
+    control
+        .replace_current_tunnel(generation, tunnel.clone())
+        .await;
     Ok(tunnel)
 }
 
 async fn reconnect_listen_tunnel(
     control: Arc<ListenSessionControl>,
     cancel: CancellationToken,
+    generation: u64,
 ) -> anyhow::Result<Option<Arc<PortTunnel>>> {
     retry_reconnect(
         cancel,
         PortForwardReconnectPolicy::listen(control.resume_timeout),
-        || try_resume_listen_tunnel(&control),
+        || try_resume_listen_tunnel(&control, generation),
     )
     .await
 }
 
-async fn reconnect_connect_tunnel(
+async fn reconnect_connect_epoch(
     runtime: &ForwardRuntime,
-) -> anyhow::Result<Option<Arc<PortTunnel>>> {
-    recover_connect_side_tunnel(runtime, "connect-side transport loss").await
+) -> anyhow::Result<Option<RecoveredForwardTunnels>> {
+    mark_connect_reconnecting(runtime, "connect-side transport loss").await?;
+    let generation = runtime.listen_session.advance_generation();
+    runtime
+        .store
+        .set_forward_generation(runtime.forward_id(), generation)
+        .await;
+    let Some(listen_tunnel) = reconnect_listen_tunnel(
+        runtime.listen_session.clone(),
+        runtime.cancel.clone(),
+        generation,
+    )
+    .await?
+    else {
+        return Ok(None);
+    };
+    let Some(connect_tunnel) = retry_open_connect_tunnel(runtime, generation).await? else {
+        return Ok(None);
+    };
+    runtime.mark_active(ForwardPortSideRole::Connect).await;
+    Ok(Some(RecoveredForwardTunnels {
+        generation,
+        listen_tunnel,
+        connect_tunnel,
+    }))
 }
 
 pub(in crate::port_forward) async fn handle_forward_loop_control<H, Fut>(
@@ -125,16 +154,27 @@ where
             let Some(recovered) = recover_listen_side_tunnels(runtime).await? else {
                 return Ok(false);
             };
+            let _epoch = ForwardEpoch::new(
+                recovered.generation,
+                recovered.listen_tunnel.clone(),
+                recovered.connect_tunnel.clone(),
+            );
             *listen_tunnel = recovered.listen_tunnel;
             *connect_tunnel = recovered.connect_tunnel;
             Ok(true)
         }
         ForwardLoopControl::RecoverTunnel(TunnelRole::Connect) => {
             before_connect_recover().await;
-            let Some(reconnected_tunnel) = reconnect_connect_tunnel(runtime).await? else {
+            let Some(recovered) = reconnect_connect_epoch(runtime).await? else {
                 return Ok(false);
             };
-            *connect_tunnel = reconnected_tunnel;
+            let _epoch = ForwardEpoch::new(
+                recovered.generation,
+                recovered.listen_tunnel.clone(),
+                recovered.connect_tunnel.clone(),
+            );
+            *listen_tunnel = recovered.listen_tunnel;
+            *connect_tunnel = recovered.connect_tunnel;
             Ok(true)
         }
     }
@@ -146,20 +186,31 @@ async fn recover_listen_side_tunnels(
     runtime
         .mark_reconnecting(ForwardPortSideRole::Listen, "listen-side tunnel lost")
         .await?;
-    let Some(listen_tunnel) =
-        reconnect_listen_tunnel(runtime.listen_session.clone(), runtime.cancel.clone()).await?
+    let generation = runtime.listen_session.advance_generation();
+    runtime
+        .store
+        .set_forward_generation(runtime.forward_id(), generation)
+        .await;
+    let Some(listen_tunnel) = reconnect_listen_tunnel(
+        runtime.listen_session.clone(),
+        runtime.cancel.clone(),
+        generation,
+    )
+    .await?
     else {
         return Ok(None);
     };
     let Some(connect_tunnel) = recover_connect_side_tunnel_after_listen_recovery(
         runtime,
         "connect-side tunnel reopening after listen-side recovery",
+        generation,
     )
     .await?
     else {
         return Ok(None);
     };
     Ok(Some(RecoveredForwardTunnels {
+        generation,
         listen_tunnel,
         connect_tunnel,
     }))
@@ -168,6 +219,7 @@ async fn recover_listen_side_tunnels(
 async fn recover_connect_side_tunnel_after_listen_recovery(
     runtime: &ForwardRuntime,
     reason: &str,
+    generation: u64,
 ) -> anyhow::Result<Option<Arc<PortTunnel>>> {
     runtime
         .store
@@ -177,19 +229,7 @@ async fn recover_connect_side_tunnel_after_listen_recovery(
             runtime.limits.max_reconnecting_forwards,
         )
         .await?;
-    let Some(connect_tunnel) = retry_open_connect_tunnel(runtime).await? else {
-        return Ok(None);
-    };
-    runtime.mark_active(ForwardPortSideRole::Connect).await;
-    Ok(Some(connect_tunnel))
-}
-
-async fn recover_connect_side_tunnel(
-    runtime: &ForwardRuntime,
-    reason: &str,
-) -> anyhow::Result<Option<Arc<PortTunnel>>> {
-    mark_connect_reconnecting(runtime, reason).await?;
-    let Some(connect_tunnel) = retry_open_connect_tunnel(runtime).await? else {
+    let Some(connect_tunnel) = retry_open_connect_tunnel(runtime, generation).await? else {
         return Ok(None);
     };
     runtime.mark_active(ForwardPortSideRole::Connect).await;
@@ -204,6 +244,7 @@ async fn mark_connect_reconnecting(runtime: &ForwardRuntime, reason: &str) -> an
 
 async fn retry_open_connect_tunnel(
     runtime: &ForwardRuntime,
+    generation: u64,
 ) -> anyhow::Result<Option<Arc<PortTunnel>>> {
     retry_reconnect(
         runtime.cancel.clone(),
@@ -213,7 +254,7 @@ async fn retry_open_connect_tunnel(
                 runtime.connect_side(),
                 runtime.forward_id(),
                 runtime.protocol(),
-                LISTEN_SESSION_GENERATION,
+                generation,
                 runtime.limits.max_tunnel_queued_bytes,
             )
             .await
@@ -272,17 +313,14 @@ where
 pub(in crate::port_forward) async fn close_listen_session(
     control: Arc<ListenSessionControl>,
 ) -> anyhow::Result<()> {
-    let current_tunnel = {
-        let state = control.state.lock().await;
-        state.current_tunnel.clone()
-    };
+    let current_tunnel = control.current_tunnel().await;
     if let Some(tunnel) = current_tunnel {
         match close_listener_on_tunnel(&tunnel, control.listener_stream_id).await {
             Ok(()) => {
                 return close_tunnel_generation(
                     &tunnel,
                     &control.forward_id,
-                    LISTEN_SESSION_GENERATION,
+                    control.current_generation(),
                     "operator_close",
                 )
                 .await;
@@ -291,19 +329,13 @@ pub(in crate::port_forward) async fn close_listen_session(
             Err(err) => return Err(err),
         }
     }
-    let tunnel = resume_listen_session_inner(&control).await?;
-    {
-        let mut state = control.state.lock().await;
-        state.current_tunnel = Some(tunnel.clone());
-    }
+    let generation = control.current_generation();
+    let tunnel = resume_listen_session_inner(&control, generation).await?;
+    control
+        .replace_current_tunnel(generation, tunnel.clone())
+        .await;
     close_listener_on_tunnel(&tunnel, control.listener_stream_id).await?;
-    close_tunnel_generation(
-        &tunnel,
-        &control.forward_id,
-        LISTEN_SESSION_GENERATION,
-        "operator_close",
-    )
-    .await
+    close_tunnel_generation(&tunnel, &control.forward_id, generation, "operator_close").await
 }
 
 async fn close_listener_on_tunnel(tunnel: &Arc<PortTunnel>, stream_id: u32) -> anyhow::Result<()> {

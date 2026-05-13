@@ -193,6 +193,17 @@ impl PortForwardStore {
         .await;
     }
 
+    pub async fn set_forward_generation(&self, forward_id: &str, generation: u64) {
+        self.update_entry(forward_id, |entry| {
+            if entry.status != ForwardPortStatus::Open {
+                return;
+            }
+            entry.listen_state.generation = generation;
+            entry.connect_state.generation = generation;
+        })
+        .await;
+    }
+
     pub async fn drain(&self) -> Vec<PortForwardRecord> {
         self.entries
             .write()

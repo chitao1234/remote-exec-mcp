@@ -1,5 +1,6 @@
 use std::io::ErrorKind;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use crate::{AppState, HostRpcError};
 use remote_exec_proto::port_tunnel::{
@@ -62,6 +63,7 @@ where
         cancel: state.shutdown.child_token(),
         tx: sender,
         open_mode: tokio::sync::Mutex::new(TunnelMode::Unopened),
+        last_generation: std::sync::atomic::AtomicU64::new(0),
         active: Mutex::new(None),
         _connection_permit: connection_permit,
     });
@@ -203,6 +205,9 @@ async fn tunnel_open_listen(
     tunnel: Arc<TunnelState>,
     meta: TunnelOpenMeta,
 ) -> Result<(), HostRpcError> {
+    tunnel
+        .last_generation
+        .store(meta.generation, Ordering::Release);
     let listen_session =
         acquire_listen_open_session(&tunnel, meta.resume_session_id.as_deref()).await?;
     open_listen_session(
@@ -236,6 +241,9 @@ async fn tunnel_open_connect(
         },
     )
     .await?;
+    tunnel
+        .last_generation
+        .store(meta.generation, Ordering::Release);
     *tunnel.active.lock().await = Some(ActiveTunnelState::Connect(Arc::new(ConnectRuntimeState {
         tx: tunnel.tx.clone(),
         cancel: tunnel.cancel.child_token(),

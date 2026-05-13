@@ -13,9 +13,10 @@ use remote_exec_proto::public::{
 };
 use tokio_util::sync::CancellationToken;
 
+use super::super::epoch::{ForwardEpoch, INITIAL_FORWARD_GENERATION};
 use super::{
-    ForwardIdentity, ForwardRuntime, LISTEN_SESSION_GENERATION, LISTEN_SESSION_STREAM_ID,
-    ListenSessionControl, ListenSessionParams, OpenedForward,
+    ForwardIdentity, ForwardRuntime, LISTEN_SESSION_STREAM_ID, ListenSessionControl,
+    ListenSessionParams, OpenedForward,
 };
 use crate::port_forward::limits::effective_forward_limits;
 use crate::port_forward::side::SideHandle;
@@ -124,10 +125,12 @@ async fn open_protocol_forward(
     kind: ForwardOpenKind,
 ) -> anyhow::Result<OpenedForward> {
     let forward_id = remote_exec_host::ids::new_forward_id();
+    let initial_generation = INITIAL_FORWARD_GENERATION;
     let opened_listen = open_listen_session_for_forward(
         &listen_side,
         &forward_id,
         kind,
+        initial_generation,
         limits.max_tunnel_queued_bytes as usize,
     )
     .await?;
@@ -135,6 +138,7 @@ async fn open_protocol_forward(
         &connect_side,
         &forward_id,
         kind,
+        initial_generation,
         limits.max_tunnel_queued_bytes as usize,
     )
     .await?;
@@ -161,13 +165,14 @@ async fn open_listen_session_for_forward(
     listen_side: &SideHandle,
     forward_id: &str,
     kind: ForwardOpenKind,
+    generation: u64,
     max_queued_bytes: usize,
 ) -> anyhow::Result<OpenListenSession> {
     open_listen_session(
         listen_side,
         forward_id,
         kind.protocol,
-        LISTEN_SESSION_GENERATION,
+        generation,
         None,
         max_queued_bytes,
     )
@@ -178,13 +183,14 @@ async fn open_connect_tunnel_for_forward(
     connect_side: &SideHandle,
     forward_id: &str,
     kind: ForwardOpenKind,
+    generation: u64,
     max_queued_bytes: usize,
 ) -> anyhow::Result<OpenDataTunnel> {
     open_data_tunnel(
         connect_side,
         forward_id,
         kind.protocol,
-        LISTEN_SESSION_GENERATION,
+        generation,
         max_queued_bytes,
     )
     .await
@@ -220,6 +226,7 @@ async fn build_opened_forward(
     } = opened.listen;
     let limits = effective_forward_limits(requested_limits, &listen_limits, &opened.connect.limits);
     let connect_tunnel = opened.connect.tunnel;
+    let initial_generation = INITIAL_FORWARD_GENERATION;
     let listener_stream_id = LISTEN_SESSION_STREAM_ID;
     let listener_open_context = open_context(
         kind,
@@ -260,8 +267,17 @@ async fn build_opened_forward(
         listener_stream_id,
         resume_timeout,
         max_tunnel_queued_bytes: limits.max_tunnel_queued_bytes as usize,
+        generation: initial_generation,
         tunnel: listen_tunnel,
     }));
+    let initial_epoch = ForwardEpoch::new(
+        initial_generation,
+        listen_session
+            .current_tunnel()
+            .await
+            .expect("listen tunnel"),
+        connect_tunnel,
+    );
 
     let cancel = CancellationToken::new();
     let identity = ForwardIdentity::new(
@@ -276,7 +292,7 @@ async fn build_opened_forward(
         limits.into(),
         store,
         listen_session.clone(),
-        connect_tunnel,
+        initial_epoch,
         cancel.clone(),
     );
     Ok(OpenedForward {

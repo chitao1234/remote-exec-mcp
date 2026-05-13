@@ -2,16 +2,15 @@ mod open;
 mod reconnect;
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use remote_exec_proto::public::{
     ForwardPortEntry, ForwardPortLimitSummary, ForwardPortProtocol as PublicForwardPortProtocol,
     ForwardPortSideRole,
 };
-use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use super::epoch::ForwardEpoch;
 use super::limits::BrokerPortForwardLimits;
 use super::side::SideHandle;
 use super::store::{PortForwardRecord, PortForwardStore};
@@ -19,6 +18,8 @@ use super::tcp_bridge::run_tcp_forward;
 use super::tunnel::PortTunnel;
 use super::udp_bridge::run_udp_forward;
 
+pub(super) use super::session::ListenSessionControl;
+pub(super) use super::session::{LISTEN_SESSION_STREAM_ID, ListenSessionParams};
 pub use open::open_forward;
 pub(super) use reconnect::{
     close_listen_session, handle_forward_loop_control, wait_for_forward_task_stop,
@@ -77,6 +78,7 @@ pub(super) struct ForwardRuntime {
     pub(super) limits: ForwardLimits,
     pub(super) store: PortForwardStore,
     pub(super) listen_session: Arc<ListenSessionControl>,
+    pub(super) initial_epoch: ForwardEpoch,
     pub(super) initial_connect_tunnel: Arc<PortTunnel>,
     pub(super) cancel: CancellationToken,
 }
@@ -130,14 +132,16 @@ impl ForwardRuntime {
         limits: ForwardLimits,
         store: PortForwardStore,
         listen_session: Arc<ListenSessionControl>,
-        initial_connect_tunnel: Arc<PortTunnel>,
+        initial_epoch: ForwardEpoch,
         cancel: CancellationToken,
     ) -> Self {
+        let initial_connect_tunnel = initial_epoch.connect_tunnel().clone();
         Self {
             identity,
             limits,
             store,
             listen_session,
+            initial_epoch,
             initial_connect_tunnel,
             cancel,
         }
@@ -161,6 +165,10 @@ impl ForwardRuntime {
 
     pub(super) fn connect_endpoint(&self) -> &str {
         self.identity.connect_endpoint()
+    }
+
+    pub(super) fn initial_epoch(&self) -> &ForwardEpoch {
+        &self.initial_epoch
     }
 
     pub(super) async fn record_dropped_datagram(&self) {
@@ -228,36 +236,6 @@ impl ForwardRuntime {
     }
 }
 
-const LISTEN_SESSION_STREAM_ID: u32 = 1;
-// TODO: implement listen-side generation rotation on reconnect instead of reusing generation 1.
-const LISTEN_SESSION_GENERATION: u64 = 1;
-
-pub(super) struct ListenSessionControl {
-    pub(super) side: SideHandle,
-    pub(super) forward_id: String,
-    pub(super) session_id: String,
-    pub(super) protocol: PublicForwardPortProtocol,
-    pub(super) listener_stream_id: u32,
-    pub(super) resume_timeout: Duration,
-    pub(super) max_tunnel_queued_bytes: usize,
-    state: Mutex<ListenSessionState>,
-}
-
-struct ListenSessionState {
-    current_tunnel: Option<Arc<PortTunnel>>,
-}
-
-struct ListenSessionParams {
-    side: SideHandle,
-    forward_id: String,
-    session_id: String,
-    protocol: PublicForwardPortProtocol,
-    listener_stream_id: u32,
-    resume_timeout: Duration,
-    max_tunnel_queued_bytes: usize,
-    tunnel: Arc<PortTunnel>,
-}
-
 pub struct OpenedForward {
     pub record: PortForwardRecord,
     runtime: ForwardRuntime,
@@ -297,58 +275,4 @@ fn spawn_forward(runtime: ForwardRuntime, store: super::store::PortForwardStore)
             );
         }
     })
-}
-
-impl ListenSessionControl {
-    fn new(params: ListenSessionParams) -> Self {
-        Self {
-            side: params.side,
-            forward_id: params.forward_id,
-            session_id: params.session_id,
-            protocol: params.protocol,
-            listener_stream_id: params.listener_stream_id,
-            resume_timeout: params.resume_timeout,
-            max_tunnel_queued_bytes: params.max_tunnel_queued_bytes,
-            state: Mutex::new(ListenSessionState {
-                current_tunnel: Some(params.tunnel),
-            }),
-        }
-    }
-
-    pub(super) async fn current_tunnel(&self) -> Option<Arc<PortTunnel>> {
-        self.with_session_state(|state| state.current_tunnel.clone())
-            .await
-    }
-
-    async fn with_session_state<T>(
-        &self,
-        operation: impl FnOnce(&mut ListenSessionState) -> T,
-    ) -> T {
-        let mut state = self.state.lock().await;
-        operation(&mut state)
-    }
-
-    #[cfg(test)]
-    pub(super) fn new_for_test(
-        side: SideHandle,
-        forward_id: String,
-        session_id: String,
-        protocol: PublicForwardPortProtocol,
-        resume_timeout: Duration,
-        max_tunnel_queued_bytes: usize,
-        tunnel: Option<Arc<PortTunnel>>,
-    ) -> Self {
-        Self {
-            side,
-            forward_id,
-            session_id,
-            protocol,
-            listener_stream_id: LISTEN_SESSION_STREAM_ID,
-            resume_timeout,
-            max_tunnel_queued_bytes,
-            state: Mutex::new(ListenSessionState {
-                current_tunnel: tunnel,
-            }),
-        }
-    }
 }

@@ -258,7 +258,10 @@ pub(super) async fn connection_generation(tunnel: &Arc<TunnelState>) -> Option<u
         Some(ActiveTunnelState::Listen(session)) => {
             Some(session.generation.load(Ordering::Acquire))
         }
-        None => None,
+        None => {
+            let generation = tunnel.last_generation.load(Ordering::Acquire);
+            (generation != 0).then_some(generation)
+        }
     }
 }
 

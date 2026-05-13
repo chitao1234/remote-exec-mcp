@@ -466,6 +466,8 @@ async fn forward_ports_connect_side_reconnect_retries_transient_open_failures() 
         wait_for_forward_ready_after_reconnect(&fixture, &forward_id, Duration::from_secs(5)).await;
     assert_eq!(forward["status"], "open");
     assert!(forward["reconnect_attempts"].as_u64().unwrap() >= 1);
+    assert_eq!(forward["listen_state"]["generation"], 2);
+    assert_eq!(forward["connect_state"]["generation"], 2);
 
     let close = close_forward(&fixture, forward_id).await;
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
@@ -502,6 +504,8 @@ async fn forward_ports_recovers_idle_connect_tunnel_after_heartbeat_timeout() {
         wait_for_forward_ready_after_reconnect(&fixture, &forward_id, Duration::from_secs(5)).await;
     assert_eq!(ready["status"], "open");
     assert_eq!(ready["phase"], "ready");
+    assert_eq!(ready["listen_state"]["generation"], 2);
+    assert_eq!(ready["connect_state"]["generation"], 2);
     assert_eq!(ready["connect_state"]["health"], "ready");
 
     let close = close_forward(&fixture, forward_id).await;
