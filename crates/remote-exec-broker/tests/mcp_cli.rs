@@ -118,7 +118,11 @@ async fn remote_exec_cli_returns_config_code_for_config_errors() {
 async fn remote_exec_cli_returns_connection_code_for_broker_transport_errors() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/mcp", listener.local_addr().unwrap());
-    drop(listener);
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            drop(stream);
+        }
+    });
 
     let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec"))
         .arg("--broker-url")
