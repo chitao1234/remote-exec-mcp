@@ -17,12 +17,7 @@ WINDOWS_XP_TEST_CXXFLAGS := $(XP_TEST_CXXFLAGS)
 WINDOWS_XP_LDFLAGS := -static-libgcc -static-libstdc++
 WINDOWS_XP_LDLIBS := -lws2_32
 
-WINDOWS_XP_SRCS := \
-	$(BASE_SRCS) \
-	$(MAKEFILE_DIR)src/main.cpp \
-	$(MAKEFILE_DIR)src/process_session_win32.cpp \
-	$(MAKEFILE_DIR)src/console_output.cpp \
-	$(MAKEFILE_DIR)src/win32_error.cpp
+WINDOWS_XP_SRCS := $(WINDOWS_DAEMON_SRCS)
 
 XP_BASIC_MUTEX := $(BUILD_DIR)/test_basic_mutex-xp.exe
 XP_PATCH := $(BUILD_DIR)/test_patch-xp.exe
@@ -62,20 +57,7 @@ XP_BASIC_MUTEX_SRCS := $(HOST_BASIC_MUTEX_SRCS)
 
 XP_PATCH_SRCS := $(HOST_PATCH_SRCS)
 
-XP_SESSION_STORE_SRCS := \
-    $(MAKEFILE_DIR)tests/test_session_store.cpp \
-    $(SESSION_STORE_SUPPORT_SRCS) \
-    $(MAKEFILE_DIR)src/session_store.cpp \
-    $(MAKEFILE_DIR)src/session_pump.cpp \
-	$(MAKEFILE_DIR)src/process_session_win32.cpp \
-	$(MAKEFILE_DIR)src/platform.cpp \
-	$(MAKEFILE_DIR)src/shell_policy.cpp \
-	$(MAKEFILE_DIR)src/console_output.cpp \
-	$(MAKEFILE_DIR)src/basic_mutex.cpp \
-	$(MAKEFILE_DIR)src/logging.cpp \
-	$(MAKEFILE_DIR)src/win32_error.cpp \
-	$(MAKEFILE_DIR)src/config.cpp \
-	$(MAKEFILE_DIR)src/text_utils.cpp
+XP_SESSION_STORE_SRCS := $(WINDOWS_SESSION_STORE_TEST_SRCS)
 
 XP_TRANSFER_SRCS := \
 	$(MAKEFILE_DIR)tests/test_transfer.cpp \
@@ -91,17 +73,9 @@ XP_SERVER_TRANSPORT_SRCS := $(HOST_SERVER_TRANSPORT_SRCS)
 
 XP_CONNECTION_MANAGER_SRCS := $(HOST_CONNECTION_MANAGER_SRCS)
 
-XP_SERVER_ROUTES_COMMON_SRCS := \
-	$(HOST_SERVER_ROUTES_COMMON_SRCS) \
-	$(MAKEFILE_DIR)src/process_session_win32.cpp \
-	$(MAKEFILE_DIR)src/console_output.cpp \
-	$(MAKEFILE_DIR)src/win32_error.cpp
+XP_SERVER_ROUTES_COMMON_SRCS := $(WINDOWS_SERVER_ROUTES_COMMON_TEST_SRCS)
 
-XP_SERVER_RUNTIME_SRCS := \
-	$(SERVER_RUNTIME_TEST_SUPPORT_SRCS) \
-	$(MAKEFILE_DIR)src/process_session_win32.cpp \
-	$(MAKEFILE_DIR)src/console_output.cpp \
-	$(MAKEFILE_DIR)src/win32_error.cpp
+XP_SERVER_RUNTIME_SRCS := $(WINDOWS_SERVER_RUNTIME_TEST_SRCS)
 
 XP_SANDBOX_SRCS := $(HOST_SANDBOX_SRCS)
 

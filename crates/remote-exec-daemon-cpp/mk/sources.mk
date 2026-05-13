@@ -50,7 +50,7 @@ SESSION_STORE_SUPPORT_SRCS = \
 	$(SOURCE_PREFIX)src/output_renderer.cpp \
 	$(SOURCE_PREFIX)src/session_response_builder.cpp
 
-BASE_SRCS = \
+BASE_SRCS_NO_MAIN = \
 	$(SOURCE_PREFIX)src/config.cpp \
 	$(SOURCE_PREFIX)src/http_codec.cpp \
 	$(SOURCE_PREFIX)src/http_connection.cpp \
@@ -77,6 +77,8 @@ BASE_SRCS = \
 	$(TRANSFER_SRCS) \
 	$(POLICY_SRCS) \
 	$(RPC_FAILURE_SRCS)
+
+BASE_SRCS = $(BASE_SRCS_NO_MAIN)
 
 POSIX_SRCS = \
 	$(BASE_SRCS) \
@@ -124,34 +126,9 @@ HOST_SERVER_TRANSPORT_SRCS = \
 
 HOST_SERVER_STREAMING_SRCS = \
 	$(SOURCE_PREFIX)tests/test_server_streaming.cpp \
-	$(ROUTE_SRCS) \
-	$(SOURCE_PREFIX)src/server.cpp \
-	$(SOURCE_PREFIX)src/server_runtime.cpp \
-	$(SOURCE_PREFIX)src/connection_manager.cpp \
-	$(SOURCE_PREFIX)src/http_codec.cpp \
-	$(SOURCE_PREFIX)src/http_connection.cpp \
-	$(SOURCE_PREFIX)src/http_helpers.cpp \
-	$(SOURCE_PREFIX)src/http_request.cpp \
-	$(SESSION_STORE_SUPPORT_SRCS) \
-	$(SOURCE_PREFIX)src/session_store.cpp \
-	$(SOURCE_PREFIX)src/session_pump.cpp \
+	$(BASE_SRCS_NO_MAIN) \
 	$(SOURCE_PREFIX)src/process_session_posix.cpp \
-	$(POSIX_CHILD_REAPER_SRCS) \
-	$(SOURCE_PREFIX)src/platform.cpp \
-	$(PATH_UTILS_SRCS) \
-	$(SOURCE_PREFIX)src/shell_policy.cpp \
-	$(SOURCE_PREFIX)src/patch_engine.cpp \
-	$(SOURCE_PREFIX)src/server_request_utils.cpp \
-	$(SOURCE_PREFIX)src/server_transport.cpp \
-	$(SOURCE_PREFIX)src/basic_mutex.cpp \
-	$(SOURCE_PREFIX)src/logging.cpp \
-	$(SOURCE_PREFIX)src/config.cpp \
-	$(SOURCE_PREFIX)src/text_utils.cpp \
-	$(TRANSFER_SRCS) \
-	$(POLICY_SRCS) \
-	$(RPC_FAILURE_SRCS) \
-	$(PORT_FORWARD_SRCS) \
-	$(BASE64_SRCS)
+	$(POSIX_CHILD_REAPER_SRCS)
 
 HOST_SESSION_STORE_SRCS = \
 	$(SOURCE_PREFIX)tests/test_session_store.cpp \
@@ -182,32 +159,7 @@ HOST_CONNECTION_MANAGER_SRCS = \
 
 SERVER_RUNTIME_TEST_SUPPORT_SRCS = \
 	$(SOURCE_PREFIX)tests/test_server_runtime.cpp \
-	$(SOURCE_PREFIX)src/server_runtime.cpp \
-	$(SOURCE_PREFIX)src/connection_manager.cpp \
-	$(SOURCE_PREFIX)src/server.cpp \
-	$(SOURCE_PREFIX)src/http_connection.cpp \
-	$(SOURCE_PREFIX)src/server_transport.cpp \
-	$(SOURCE_PREFIX)src/http_request.cpp \
-	$(SOURCE_PREFIX)src/http_codec.cpp \
-	$(SOURCE_PREFIX)src/http_helpers.cpp \
-	$(SESSION_STORE_SUPPORT_SRCS) \
-	$(SOURCE_PREFIX)src/session_store.cpp \
-	$(SOURCE_PREFIX)src/session_pump.cpp \
-	$(SOURCE_PREFIX)src/platform.cpp \
-	$(PATH_UTILS_SRCS) \
-	$(SOURCE_PREFIX)src/shell_policy.cpp \
-	$(SOURCE_PREFIX)src/patch_engine.cpp \
-	$(SOURCE_PREFIX)src/basic_mutex.cpp \
-	$(SOURCE_PREFIX)src/logging.cpp \
-	$(SOURCE_PREFIX)src/config.cpp \
-	$(SOURCE_PREFIX)src/text_utils.cpp \
-	$(SOURCE_PREFIX)src/server_request_utils.cpp \
-	$(ROUTE_SRCS) \
-	$(TRANSFER_SRCS) \
-	$(POLICY_SRCS) \
-	$(RPC_FAILURE_SRCS) \
-	$(PORT_FORWARD_SRCS) \
-	$(BASE64_SRCS)
+	$(BASE_SRCS_NO_MAIN)
 
 SERVER_ROUTES_TEST_SUPPORT_SRCS = \
 	$(SOURCE_PREFIX)tests/test_server_routes_shared.cpp \
@@ -255,6 +207,37 @@ HOST_SANDBOX_SRCS = \
 HOST_PORT_TUNNEL_FRAME_SRCS = \
 	$(SOURCE_PREFIX)tests/test_port_tunnel_frame.cpp \
 	$(SOURCE_PREFIX)src/port_tunnel_frame.cpp
+
+WINDOWS_DAEMON_SUPPORT_SRCS = \
+	$(SOURCE_PREFIX)src/process_session_win32.cpp \
+	$(SOURCE_PREFIX)src/console_output.cpp \
+	$(SOURCE_PREFIX)src/win32_error.cpp
+
+WINDOWS_DAEMON_SRCS = \
+	$(BASE_SRCS_NO_MAIN) \
+	$(SOURCE_PREFIX)src/main.cpp \
+	$(WINDOWS_DAEMON_SUPPORT_SRCS)
+
+WINDOWS_SESSION_STORE_TEST_SRCS = \
+	$(SOURCE_PREFIX)tests/test_session_store.cpp \
+	$(SESSION_STORE_SUPPORT_SRCS) \
+	$(SOURCE_PREFIX)src/session_store.cpp \
+	$(SOURCE_PREFIX)src/session_pump.cpp \
+	$(WINDOWS_DAEMON_SUPPORT_SRCS) \
+	$(SOURCE_PREFIX)src/platform.cpp \
+	$(SOURCE_PREFIX)src/shell_policy.cpp \
+	$(SOURCE_PREFIX)src/basic_mutex.cpp \
+	$(SOURCE_PREFIX)src/logging.cpp \
+	$(SOURCE_PREFIX)src/config.cpp \
+	$(SOURCE_PREFIX)src/text_utils.cpp
+
+WINDOWS_SERVER_ROUTES_COMMON_TEST_SRCS = \
+	$(HOST_SERVER_ROUTES_COMMON_SRCS) \
+	$(WINDOWS_DAEMON_SUPPORT_SRCS)
+
+WINDOWS_SERVER_RUNTIME_TEST_SRCS = \
+	$(SERVER_RUNTIME_TEST_SUPPORT_SRCS) \
+	$(WINDOWS_DAEMON_SUPPORT_SRCS)
 
 # Test source groups by portability. POSIX make currently builds every host
 # test; Windows makefiles consume the Windows-capable groups as those tests are
