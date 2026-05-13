@@ -15,7 +15,7 @@ pub struct LiveSession {
     pub(super) receiver: UnboundedReceiver<String>,
     pub(super) exit_code: Option<i32>,
     #[cfg(windows)]
-    terminal_output_state: Option<super::windows::TerminalOutputState>,
+    terminal_output_state: Option<super::pty_filter::TerminalOutputState>,
 }
 
 pub(crate) enum OutputWait {
@@ -37,7 +37,7 @@ pub(super) fn new_live_session(
         receiver,
         exit_code: None,
         #[cfg(windows)]
-        terminal_output_state: tty.then(super::windows::TerminalOutputState::default),
+        terminal_output_state: tty.then(super::pty_filter::TerminalOutputState::default),
     }
 }
 
@@ -115,7 +115,7 @@ impl LiveSession {
         }
 
         #[cfg(windows)]
-        let normalized_chars = super::windows::normalize_input(chars, self.tty);
+        let normalized_chars = super::pty_filter::normalize_input(chars, self.tty);
         #[cfg(not(windows))]
         let normalized_chars = chars;
 
@@ -153,7 +153,7 @@ impl LiveSession {
     fn drain_terminal_output_buffer(&mut self) -> String {
         self.terminal_output_state
             .as_mut()
-            .map(super::windows::TerminalOutputState::drain_pending)
+            .map(super::pty_filter::TerminalOutputState::drain_pending)
             .unwrap_or_default()
     }
 

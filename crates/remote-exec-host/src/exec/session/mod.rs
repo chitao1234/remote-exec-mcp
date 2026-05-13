@@ -2,6 +2,8 @@ mod capability;
 mod child;
 mod environment;
 mod live;
+#[cfg(any(test, windows))]
+mod pty_filter;
 mod spawn;
 #[cfg(windows)]
 mod windows;

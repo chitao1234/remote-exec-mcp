@@ -10,7 +10,6 @@ use super::common::{is_path_like, probe_shell_for_platform};
 pub(super) fn resolve_default_shell(
     configured_default_shell: Option<&str>,
     environment: &ProcessEnvironment,
-    _windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<String> {
     let env_shell = environment
         .var_os("SHELL")
@@ -34,7 +33,6 @@ pub(super) fn selected_shell(
     shell_override: Option<&str>,
     default_shell: &str,
     _environment: &ProcessEnvironment,
-    _windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<String> {
     Ok(shell_override
         .filter(|value| !value.is_empty())

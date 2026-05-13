@@ -79,10 +79,10 @@ mod port_tunnel_tests {
     use std::time::Duration;
 
     use remote_exec_proto::port_tunnel::{
-        Frame, FrameType, MAX_DATA_LEN, TunnelForwardProtocol, TunnelOpenMeta, TunnelReadyMeta,
-        TunnelRole, read_frame, write_frame, write_preface,
+        EndpointMeta, Frame, FrameType, MAX_DATA_LEN, TunnelCloseMeta, TunnelErrorMeta,
+        TunnelForwardProtocol, TunnelHeartbeatMeta, TunnelOpenMeta, TunnelReadyMeta, TunnelRole,
+        decode_frame_meta, encode_frame_meta, read_frame, write_frame, write_preface,
     };
-    use serde_json::Value;
     use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 
     use super::tcp::{tunnel_close_stream, tunnel_tcp_eof};
@@ -103,11 +103,7 @@ mod port_tunnel_tests {
             start_open_listen_tunnel_with_ready(state.clone(), TunnelForwardProtocol::Tcp).await;
         write_frame(
             &mut broker_side,
-            &json_frame(
-                FrameType::TcpListen,
-                1,
-                serde_json::json!({ "endpoint": listen_endpoint }),
-            ),
+            &endpoint_frame(FrameType::TcpListen, 1, &listen_endpoint),
         )
         .await
         .unwrap();
@@ -126,11 +122,7 @@ mod port_tunnel_tests {
         let mut broker_side = start_open_connect_tunnel(state, TunnelForwardProtocol::Tcp).await;
         write_frame(
             &mut broker_side,
-            &json_frame(
-                FrameType::TcpConnect,
-                1,
-                serde_json::json!({ "endpoint": echo_endpoint }),
-            ),
+            &endpoint_frame(FrameType::TcpConnect, 1, &echo_endpoint),
         )
         .await
         .unwrap();
@@ -172,11 +164,7 @@ mod port_tunnel_tests {
         );
         write_frame(
             &mut broker_write,
-            &json_frame(
-                FrameType::TcpConnect,
-                1,
-                serde_json::json!({ "endpoint": endpoint }),
-            ),
+            &endpoint_frame(FrameType::TcpConnect, 1, &endpoint),
         )
         .await
         .unwrap();
@@ -185,7 +173,7 @@ mod port_tunnel_tests {
             FrameType::TcpConnectOk
         );
 
-        let heartbeat_meta = br#"{"nonce":1}"#.to_vec();
+        let heartbeat_meta = encode_frame_meta(&TunnelHeartbeatMeta { nonce: 1 }).unwrap();
         let writer = tokio::spawn({
             let heartbeat_meta = heartbeat_meta.clone();
             async move {
@@ -253,11 +241,7 @@ mod port_tunnel_tests {
         );
         write_frame(
             &mut broker_write,
-            &json_frame(
-                FrameType::TcpConnect,
-                1,
-                serde_json::json!({ "endpoint": pressured_endpoint }),
-            ),
+            &endpoint_frame(FrameType::TcpConnect, 1, &pressured_endpoint),
         )
         .await
         .unwrap();
@@ -278,11 +262,7 @@ mod port_tunnel_tests {
             }
             write_frame(
                 &mut broker_write,
-                &json_frame(
-                    FrameType::TcpConnect,
-                    3,
-                    serde_json::json!({ "endpoint": replacement_endpoint }),
-                ),
+                &endpoint_frame(FrameType::TcpConnect, 3, &replacement_endpoint),
             )
             .await
             .unwrap();
@@ -295,8 +275,8 @@ mod port_tunnel_tests {
                 let frame = read_frame(&mut broker_read).await.unwrap();
                 match frame.frame_type {
                     FrameType::Error if frame.stream_id == 1 => {
-                        let meta = serde_json::from_slice::<Value>(&frame.meta).unwrap();
-                        if meta["code"]
+                        let meta = decode_frame_meta::<TunnelErrorMeta>(&frame).unwrap();
+                        if meta.code
                             == remote_exec_proto::rpc::RpcErrorCode::PortTunnelLimitExceeded
                                 .wire_value()
                         {
@@ -325,11 +305,7 @@ mod port_tunnel_tests {
         let mut broker_side = start_open_connect_tunnel(state, TunnelForwardProtocol::Udp).await;
         write_frame(
             &mut broker_side,
-            &json_frame(
-                FrameType::UdpBind,
-                1,
-                serde_json::json!({ "endpoint": endpoint }),
-            ),
+            &endpoint_frame(FrameType::UdpBind, 1, &endpoint),
         )
         .await
         .unwrap();
@@ -377,20 +353,9 @@ mod port_tunnel_tests {
             open_v4_resumable_tcp_listener(&state, &listen_endpoint).await;
 
         let mut resumed = resume_session(&state, &session_id, TunnelForwardProtocol::Tcp).await;
-        write_frame(
-            &mut resumed,
-            &json_frame(
-                FrameType::TunnelClose,
-                0,
-                serde_json::json!({
-                    "forward_id": "fwd_test",
-                    "generation": 1,
-                    "reason": "operator_close"
-                }),
-            ),
-        )
-        .await
-        .unwrap();
+        write_frame(&mut resumed, &tunnel_close_frame(0, 1, "operator_close"))
+            .await
+            .unwrap();
 
         let frame = read_frame(&mut resumed).await.unwrap();
         assert_eq!(frame.frame_type, FrameType::TunnelClosed);
@@ -458,11 +423,7 @@ mod port_tunnel_tests {
         let session_id = session_id_from_ready(&ready);
         write_frame(
             &mut broker_side,
-            &json_frame(
-                FrameType::TcpListen,
-                1,
-                serde_json::json!({ "endpoint": listen_endpoint }),
-            ),
+            &endpoint_frame(FrameType::TcpListen, 1, &listen_endpoint),
         )
         .await
         .unwrap();
@@ -488,11 +449,7 @@ mod port_tunnel_tests {
         let mut broker_side = start_open_listen_tunnel(state, TunnelForwardProtocol::Tcp).await;
         write_frame(
             &mut broker_side,
-            &json_frame(
-                FrameType::TcpListen,
-                7,
-                serde_json::json!({ "endpoint": occupied_endpoint }),
-            ),
+            &endpoint_frame(FrameType::TcpListen, 7, &occupied_endpoint),
         )
         .await
         .unwrap();
@@ -592,10 +549,12 @@ mod port_tunnel_tests {
             let mut broker_side = start_tunnel(state).await;
             write_frame(
                 &mut broker_side,
-                &json_frame(
+                &meta_frame(
                     frame_type,
                     0,
-                    serde_json::json!({ "session_id": "legacy_session" }),
+                    &LegacySessionMeta {
+                        session_id: "legacy_session".to_string(),
+                    },
                 ),
             )
             .await
@@ -604,8 +563,8 @@ mod port_tunnel_tests {
             let error = read_frame(&mut broker_side).await.unwrap();
             assert_eq!(error.frame_type, FrameType::Error);
             assert_eq!(error.stream_id, 0);
-            let meta: serde_json::Value = serde_json::from_slice(&error.meta).unwrap();
-            assert_eq!(meta["code"], "invalid_port_tunnel");
+            let meta = decode_frame_meta::<TunnelErrorMeta>(&error).unwrap();
+            assert_eq!(meta.code, "invalid_port_tunnel");
         }
     }
 
@@ -616,11 +575,7 @@ mod port_tunnel_tests {
             start_open_connect_tunnel(state.clone(), TunnelForwardProtocol::Tcp).await;
         write_frame(
             &mut tcp_connect,
-            &json_frame(
-                FrameType::UdpBind,
-                1,
-                serde_json::json!({ "endpoint": "127.0.0.1:0" }),
-            ),
+            &endpoint_frame(FrameType::UdpBind, 1, "127.0.0.1:0"),
         )
         .await
         .unwrap();
@@ -630,11 +585,7 @@ mod port_tunnel_tests {
         let mut udp_listen = start_open_listen_tunnel(state, TunnelForwardProtocol::Udp).await;
         write_frame(
             &mut udp_listen,
-            &json_frame(
-                FrameType::TcpListen,
-                1,
-                serde_json::json!({ "endpoint": "127.0.0.1:0" }),
-            ),
+            &endpoint_frame(FrameType::TcpListen, 1, "127.0.0.1:0"),
         )
         .await
         .unwrap();
@@ -657,11 +608,7 @@ mod port_tunnel_tests {
         let mut second = start_open_listen_tunnel(state, TunnelForwardProtocol::Tcp).await;
         write_frame(
             &mut second,
-            &json_frame(
-                FrameType::TcpListen,
-                1,
-                serde_json::json!({ "endpoint": second_endpoint }),
-            ),
+            &endpoint_frame(FrameType::TcpListen, 1, &second_endpoint),
         )
         .await
         .unwrap();
@@ -680,11 +627,7 @@ mod port_tunnel_tests {
 
         write_frame(
             &mut broker_side,
-            &json_frame(
-                FrameType::UdpBind,
-                1,
-                serde_json::json!({ "endpoint": "127.0.0.1:0" }),
-            ),
+            &endpoint_frame(FrameType::UdpBind, 1, "127.0.0.1:0"),
         )
         .await
         .unwrap();
@@ -695,11 +638,7 @@ mod port_tunnel_tests {
 
         write_frame(
             &mut broker_side,
-            &json_frame(
-                FrameType::UdpBind,
-                3,
-                serde_json::json!({ "endpoint": "127.0.0.1:0" }),
-            ),
+            &endpoint_frame(FrameType::UdpBind, 3, "127.0.0.1:0"),
         )
         .await
         .unwrap();
@@ -719,11 +658,7 @@ mod port_tunnel_tests {
 
         write_frame(
             &mut broker_side,
-            &json_frame(
-                FrameType::TcpConnect,
-                1,
-                serde_json::json!({ "endpoint": destination }),
-            ),
+            &endpoint_frame(FrameType::TcpConnect, 1, &destination),
         )
         .await
         .unwrap();
@@ -734,11 +669,7 @@ mod port_tunnel_tests {
 
         write_frame(
             &mut broker_side,
-            &json_frame(
-                FrameType::TcpConnect,
-                3,
-                serde_json::json!({ "endpoint": destination }),
-            ),
+            &endpoint_frame(FrameType::TcpConnect, 3, &destination),
         )
         .await
         .unwrap();
@@ -759,11 +690,7 @@ mod port_tunnel_tests {
 
         write_frame(
             &mut connect_side,
-            &json_frame(
-                FrameType::TcpConnect,
-                3,
-                serde_json::json!({ "endpoint": destination }),
-            ),
+            &endpoint_frame(FrameType::TcpConnect, 3, &destination),
         )
         .await
         .unwrap();
@@ -775,11 +702,7 @@ mod port_tunnel_tests {
         let mut broker_side = start_open_listen_tunnel(state, TunnelForwardProtocol::Tcp).await;
         write_frame(
             &mut broker_side,
-            &json_frame(
-                FrameType::TcpListen,
-                1,
-                serde_json::json!({ "endpoint": "127.0.0.1:0" }),
-            ),
+            &endpoint_frame(FrameType::TcpListen, 1, "127.0.0.1:0"),
         )
         .await
         .unwrap();
@@ -837,11 +760,7 @@ mod port_tunnel_tests {
 
         write_frame(
             &mut broker_side,
-            &json_frame(
-                FrameType::TcpConnect,
-                1,
-                serde_json::json!({ "endpoint": destination }),
-            ),
+            &endpoint_frame(FrameType::TcpConnect, 1, &destination),
         )
         .await
         .unwrap();
@@ -1125,11 +1044,7 @@ mod port_tunnel_tests {
         );
         write_frame(
             &mut broker_side,
-            &json_frame(
-                FrameType::UdpBind,
-                1,
-                serde_json::json!({ "endpoint": "127.0.0.1:0" }),
-            ),
+            &endpoint_frame(FrameType::UdpBind, 1, "127.0.0.1:0"),
         )
         .await
         .unwrap();
@@ -1276,11 +1191,7 @@ mod port_tunnel_tests {
         let session_id = session_id_from_ready(&ready);
         write_frame(
             &mut broker_side,
-            &json_frame(
-                FrameType::TcpListen,
-                1,
-                serde_json::json!({ "endpoint": endpoint }),
-            ),
+            &endpoint_frame(FrameType::TcpListen, 1, endpoint),
         )
         .await
         .unwrap();
@@ -1303,11 +1214,7 @@ mod port_tunnel_tests {
         let session_id = session_id_from_ready(&ready);
         write_frame(
             &mut broker_side,
-            &json_frame(
-                FrameType::UdpBind,
-                1,
-                serde_json::json!({ "endpoint": endpoint }),
-            ),
+            &endpoint_frame(FrameType::UdpBind, 1, endpoint),
         )
         .await
         .unwrap();
@@ -1336,10 +1243,10 @@ mod port_tunnel_tests {
     }
 
     fn session_id_from_ready(frame: &Frame) -> String {
-        serde_json::from_slice::<Value>(&frame.meta).unwrap()["session_id"]
-            .as_str()
+        decode_frame_meta::<TunnelReadyMeta>(frame)
             .unwrap()
-            .to_string()
+            .session_id
+            .unwrap()
     }
 
     fn free_loopback_endpoint() -> String {
@@ -1490,14 +1397,36 @@ mod port_tunnel_tests {
         endpoint
     }
 
-    fn json_frame(frame_type: FrameType, stream_id: u32, meta: Value) -> Frame {
+    fn meta_frame<T: serde::Serialize>(frame_type: FrameType, stream_id: u32, meta: &T) -> Frame {
         Frame {
             frame_type,
             flags: 0,
             stream_id,
-            meta: serde_json::to_vec(&meta).unwrap(),
+            meta: encode_frame_meta(meta).unwrap(),
             data: Vec::new(),
         }
+    }
+
+    fn endpoint_frame(frame_type: FrameType, stream_id: u32, endpoint: &str) -> Frame {
+        meta_frame(
+            frame_type,
+            stream_id,
+            &EndpointMeta {
+                endpoint: endpoint.to_string(),
+            },
+        )
+    }
+
+    fn tunnel_close_frame(stream_id: u32, generation: u64, reason: impl Into<String>) -> Frame {
+        meta_frame(
+            FrameType::TunnelClose,
+            stream_id,
+            &TunnelCloseMeta {
+                forward_id: "fwd_test".to_string(),
+                generation,
+                reason: reason.into(),
+            },
+        )
     }
 
     fn data_frame(frame_type: FrameType, stream_id: u32, data: Vec<u8>) -> Frame {
@@ -1511,10 +1440,7 @@ mod port_tunnel_tests {
     }
 
     fn endpoint_from_frame(frame: &Frame) -> String {
-        serde_json::from_slice::<Value>(&frame.meta).unwrap()["endpoint"]
-            .as_str()
-            .unwrap()
-            .to_string()
+        decode_frame_meta::<EndpointMeta>(frame).unwrap().endpoint
     }
 
     fn assert_limit_error(frame: Frame, stream_id: u32) {
@@ -1524,9 +1450,14 @@ mod port_tunnel_tests {
     fn assert_error_code(frame: Frame, stream_id: u32, code: &str) {
         assert_eq!(frame.frame_type, FrameType::Error);
         assert_eq!(frame.stream_id, stream_id);
-        let meta = serde_json::from_slice::<Value>(&frame.meta).unwrap();
-        assert_eq!(meta["code"], code);
-        assert_eq!(meta["fatal"], false);
+        let meta = decode_frame_meta::<TunnelErrorMeta>(&frame).unwrap();
+        assert_eq!(meta.code, code);
+        assert!(!meta.fatal);
+    }
+
+    #[derive(serde::Serialize)]
+    struct LegacySessionMeta {
+        session_id: String,
     }
 
     fn sorted_payloads<const N: usize>(payloads: [Vec<u8>; N]) -> Vec<Vec<u8>> {
