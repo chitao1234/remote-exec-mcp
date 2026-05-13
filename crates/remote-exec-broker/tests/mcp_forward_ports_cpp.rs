@@ -19,10 +19,6 @@ const CPP_READY_TIMEOUT: Duration = Duration::from_secs(20);
 const CPP_READY_POLL: Duration = Duration::from_millis(50);
 static MISSING_CPP_DAEMON_WARNING: Once = Once::new();
 
-fn toml_string(value: &str) -> String {
-    toml::Value::String(value.to_string()).to_string()
-}
-
 fn cpp_config_path(path: &Path) -> String {
     path.display().to_string()
 }
@@ -614,7 +610,9 @@ default_workdir = {}
 pty = "none"
 "#,
                 daemon_addr,
-                toml_string(&tempdir.path().join("local-work").display().to_string())
+                support::test_helpers::toml_string(
+                    &tempdir.path().join("local-work").display().to_string(),
+                )
             ),
         )
         .unwrap();
@@ -843,8 +841,10 @@ listen = {broker_listen}
 path = "/mcp"
 "#,
                 daemon_addr,
-                toml_string(&tempdir.path().join("local-work").display().to_string()),
-                broker_listen = toml_string("127.0.0.1:0"),
+                support::test_helpers::toml_string(
+                    &tempdir.path().join("local-work").display().to_string(),
+                ),
+                broker_listen = support::test_helpers::toml_string("127.0.0.1:0"),
             ),
         )
         .unwrap();

@@ -17,6 +17,8 @@ use tokio::task::JoinHandle;
 
 #[path = "../support/streamable_http_child.rs"]
 mod streamable_http_child;
+#[path = "../../../../tests/support/test_helpers.rs"]
+mod test_helpers;
 
 const BROKER_TOOL_CALL_TIMEOUT: Duration = Duration::from_secs(30);
 const BROKER_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -39,10 +41,6 @@ pub async fn spawn_cluster() -> ClusterFixture {
         daemon_a,
         daemon_b,
     }
-}
-
-fn toml_string(value: &str) -> String {
-    toml::Value::String(value.to_string()).to_string()
 }
 
 fn apply_quiet_test_logging(command: &mut tokio::process::Command) {
@@ -259,7 +257,7 @@ impl HttpBrokerFixture {
                 "{}\n{}\n[mcp]\ntransport = \"streamable_http\"\nlisten = {}\npath = \"/mcp\"\n",
                 daemon_a.target_config_fragment(),
                 daemon_b.target_config_fragment(),
-                toml_string("127.0.0.1:0"),
+                test_helpers::toml_string("127.0.0.1:0"),
             ),
         )
         .unwrap();
@@ -440,8 +438,8 @@ allow_insecure_http = true
 expected_daemon_name = {expected_daemon_name}
 "#,
             target = self.target,
-            base_url = toml_string(&format!("http://{}", self.addr)),
-            expected_daemon_name = toml_string(&self.target),
+            base_url = test_helpers::toml_string(&format!("http://{}", self.addr)),
+            expected_daemon_name = test_helpers::toml_string(&self.target),
         )
     }
 

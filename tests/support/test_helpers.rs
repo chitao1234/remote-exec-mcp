@@ -6,12 +6,14 @@ pub fn toml_string(value: &str) -> String {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum ReadinessWaitOutcome {
     Ready,
     Finished,
     TimedOut,
 }
 
+#[allow(dead_code)]
 pub async fn poll_until_ready<Probe, ProbeFuture, Finished>(
     attempts: usize,
     interval: Duration,
