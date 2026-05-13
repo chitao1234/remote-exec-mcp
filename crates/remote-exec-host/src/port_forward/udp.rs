@@ -10,15 +10,14 @@ use tokio_util::sync::CancellationToken;
 
 use crate::HostRpcError;
 
+use super::access::{OpenProtocolAccess, tunnel_access};
 use super::codec::{decode_frame_meta, encode_frame_meta};
 use super::error::{is_recoverable_pressure_error, rpc_error};
 use super::session::{AttachmentState, reactivate_retained_udp_bind};
 use super::session::{send_tunnel_error_code_with_sender, send_tunnel_error_with_sender};
-use super::tunnel::tunnel_mode;
 use super::tunnel::{send_tunnel_error, send_tunnel_error_code};
 use super::{
-    ConnectionLocalUdpBind, EndpointOkMeta, READ_BUF_SIZE, TunnelMode, TunnelState,
-    send_forward_drop_report,
+    ConnectionLocalUdpBind, EndpointOkMeta, READ_BUF_SIZE, TunnelState, send_forward_drop_report,
 };
 
 enum UdpReadLoopTarget {
@@ -128,11 +127,11 @@ pub(super) async fn tunnel_udp_bind(
     tunnel: Arc<TunnelState>,
     frame: Frame,
 ) -> Result<(), HostRpcError> {
-    match tunnel_mode(&tunnel).await {
-        TunnelMode::Listen {
-            protocol: TunnelForwardProtocol::Udp,
-            session,
-        } => {
+    match tunnel_access(&tunnel)
+        .await
+        .require_bind_target(TunnelForwardProtocol::Udp, "udp bind")?
+    {
+        OpenProtocolAccess::Listen(session) => {
             let meta: EndpointMeta = decode_frame_meta(&frame)?;
             let endpoint = normalize_endpoint(&meta.endpoint)
                 .map_err(|err| rpc_error(RpcErrorCode::InvalidEndpoint, err.to_string()))?;
@@ -165,21 +164,7 @@ pub(super) async fn tunnel_udp_bind(
                 .await?;
             reactivate_retained_udp_bind(&session).await
         }
-        TunnelMode::Listen { .. } => Err(rpc_error(
-            RpcErrorCode::InvalidPortTunnel,
-            "udp bind requires an open udp listen tunnel",
-        )),
-        TunnelMode::Connect {
-            protocol: TunnelForwardProtocol::Udp,
-        } => tunnel_udp_bind_connection_local(tunnel, frame).await,
-        TunnelMode::Connect { .. } => Err(rpc_error(
-            RpcErrorCode::InvalidPortTunnel,
-            "udp bind requires an open udp connect tunnel",
-        )),
-        TunnelMode::Unopened => Err(rpc_error(
-            RpcErrorCode::InvalidPortTunnel,
-            "udp bind requires tunnel open",
-        )),
+        OpenProtocolAccess::Connect => tunnel_udp_bind_connection_local(tunnel, frame).await,
     }
 }
 
@@ -323,25 +308,19 @@ pub(super) async fn tunnel_udp_datagram(
     frame: Frame,
 ) -> Result<(), HostRpcError> {
     let meta: UdpDatagramMeta = decode_frame_meta(&frame)?;
-    let socket = match tunnel_mode(tunnel).await {
-        TunnelMode::Listen {
-            protocol: TunnelForwardProtocol::Udp,
-            session,
-        } => session.udp_socket(frame.stream_id).await.ok_or_else(|| {
-            rpc_error(
-                RpcErrorCode::UnknownPortBind,
-                format!("unknown tunnel udp stream `{}`", frame.stream_id),
-            )
-        })?,
-        TunnelMode::Listen { .. } => {
-            return Err(rpc_error(
-                RpcErrorCode::InvalidPortTunnel,
-                "udp datagram requires an open udp tunnel",
-            ));
+    let socket = match tunnel_access(tunnel)
+        .await
+        .require_protocol(TunnelForwardProtocol::Udp, "udp datagram")?
+    {
+        OpenProtocolAccess::Listen(session) => {
+            session.udp_socket(frame.stream_id).await.ok_or_else(|| {
+                rpc_error(
+                    RpcErrorCode::UnknownPortBind,
+                    format!("unknown tunnel udp stream `{}`", frame.stream_id),
+                )
+            })?
         }
-        TunnelMode::Connect {
-            protocol: TunnelForwardProtocol::Udp,
-        } => tunnel
+        OpenProtocolAccess::Connect => tunnel
             .udp_binds
             .lock()
             .await
@@ -353,18 +332,6 @@ pub(super) async fn tunnel_udp_datagram(
                     format!("unknown tunnel udp stream `{}`", frame.stream_id),
                 )
             })?,
-        TunnelMode::Connect { .. } => {
-            return Err(rpc_error(
-                RpcErrorCode::InvalidPortTunnel,
-                "udp datagram requires an open udp tunnel",
-            ));
-        }
-        TunnelMode::Unopened => {
-            return Err(rpc_error(
-                RpcErrorCode::InvalidPortTunnel,
-                "udp datagram requires tunnel open",
-            ));
-        }
     };
     socket
         .send_to(&frame.data, &meta.peer)

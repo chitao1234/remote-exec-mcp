@@ -15,6 +15,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::HostRpcError;
 
+use super::access::{OpenProtocolAccess, OpenTunnelRole, tunnel_access};
 use super::codec::{decode_frame_meta, encode_frame_meta};
 use super::error::{SessionCloseMode, rpc_error};
 use super::session::{
@@ -22,11 +23,10 @@ use super::session::{
     send_tunnel_error_code_with_sender, send_tunnel_error_with_sender, udp_bind_stream_id,
     wait_for_session_attachment,
 };
-use super::tunnel::tunnel_mode;
 use super::tunnel::{send_tunnel_error, send_tunnel_error_code};
 use super::{
     EndpointOkMeta, READ_BUF_SIZE, TCP_WRITE_QUEUE_FRAMES, TcpStreamEntry, TcpWriteCommand,
-    TcpWriterHandle, TunnelMode, TunnelState, send_forward_drop_report,
+    TcpWriterHandle, TunnelState, send_forward_drop_report,
 };
 
 const TCP_CONTROL_SEND_TIMEOUT: Duration = Duration::from_secs(1);
@@ -138,30 +138,9 @@ pub(super) async fn tunnel_tcp_listen(
     tunnel: Arc<TunnelState>,
     frame: Frame,
 ) -> Result<(), HostRpcError> {
-    let session = match tunnel_mode(&tunnel).await {
-        TunnelMode::Listen {
-            protocol: TunnelForwardProtocol::Tcp,
-            session,
-        } => session,
-        TunnelMode::Listen { .. } => {
-            return Err(rpc_error(
-                RpcErrorCode::InvalidPortTunnel,
-                "tcp listen requires an open tcp listen tunnel",
-            ));
-        }
-        TunnelMode::Connect { .. } => {
-            return Err(rpc_error(
-                RpcErrorCode::InvalidPortTunnel,
-                "tcp listen requires an open listen tunnel",
-            ));
-        }
-        TunnelMode::Unopened => {
-            return Err(rpc_error(
-                RpcErrorCode::InvalidPortTunnel,
-                "tcp listen requires tunnel open",
-            ));
-        }
-    };
+    let session = tunnel_access(&tunnel)
+        .await
+        .require_listen_session(TunnelForwardProtocol::Tcp, "tcp listen")?;
     let meta: EndpointMeta = decode_frame_meta(&frame)?;
     let endpoint = normalize_endpoint(&meta.endpoint)
         .map_err(|err| rpc_error(RpcErrorCode::InvalidEndpoint, err.to_string()))?;
@@ -310,23 +289,10 @@ pub(super) async fn tunnel_tcp_connect(
     tunnel: Arc<TunnelState>,
     frame: Frame,
 ) -> Result<(), HostRpcError> {
-    match tunnel_mode(&tunnel).await {
-        TunnelMode::Connect {
-            protocol: TunnelForwardProtocol::Tcp,
-        } => tunnel_tcp_connect_connection_local(tunnel, frame).await,
-        TunnelMode::Connect { .. } => Err(rpc_error(
-            RpcErrorCode::InvalidPortTunnel,
-            "tcp connect requires an open tcp connect tunnel",
-        )),
-        TunnelMode::Listen { .. } => Err(rpc_error(
-            RpcErrorCode::InvalidPortTunnel,
-            "tcp connect requires an open connect tunnel",
-        )),
-        TunnelMode::Unopened => Err(rpc_error(
-            RpcErrorCode::InvalidPortTunnel,
-            "tcp connect requires tunnel open",
-        )),
-    }
+    tunnel_access(&tunnel)
+        .await
+        .require_connect_tunnel(TunnelForwardProtocol::Tcp, "tcp connect")?;
+    tunnel_tcp_connect_connection_local(tunnel, frame).await
 }
 
 pub(super) async fn tunnel_tcp_connect_connection_local(
@@ -497,11 +463,11 @@ pub(super) async fn tunnel_tcp_data(
     stream_id: u32,
     data: &[u8],
 ) -> Result<(), HostRpcError> {
-    let writer = match tunnel_mode(tunnel).await {
-        TunnelMode::Listen {
-            protocol: TunnelForwardProtocol::Tcp,
-            session,
-        } => {
+    let writer = match tunnel_access(tunnel)
+        .await
+        .require_protocol(TunnelForwardProtocol::Tcp, "tcp data")?
+    {
+        OpenProtocolAccess::Listen(session) => {
             let attachment = session.current_attachment().await.ok_or_else(|| {
                 rpc_error(
                     RpcErrorCode::PortTunnelClosed,
@@ -521,18 +487,7 @@ pub(super) async fn tunnel_tcp_data(
                     )
                 })?
         }
-        TunnelMode::Listen { .. }
-        | TunnelMode::Connect {
-            protocol: TunnelForwardProtocol::Udp,
-        } => {
-            return Err(rpc_error(
-                RpcErrorCode::InvalidPortTunnel,
-                "tcp data requires an open tcp tunnel",
-            ));
-        }
-        TunnelMode::Connect {
-            protocol: TunnelForwardProtocol::Tcp,
-        } => tunnel
+        OpenProtocolAccess::Connect => tunnel
             .tcp_streams
             .lock()
             .await
@@ -544,12 +499,6 @@ pub(super) async fn tunnel_tcp_data(
                     format!("unknown tunnel tcp stream `{stream_id}`"),
                 )
             })?,
-        TunnelMode::Unopened => {
-            return Err(rpc_error(
-                RpcErrorCode::InvalidPortTunnel,
-                "tcp data requires tunnel open",
-            ));
-        }
     };
     writer
         .tx
@@ -599,11 +548,11 @@ pub(super) async fn tunnel_tcp_eof(
     tunnel: &Arc<TunnelState>,
     stream_id: u32,
 ) -> Result<(), HostRpcError> {
-    match tunnel_mode(tunnel).await {
-        TunnelMode::Listen {
-            protocol: TunnelForwardProtocol::Tcp,
-            session,
-        } => {
+    match tunnel_access(tunnel)
+        .await
+        .protocol_access(TunnelForwardProtocol::Tcp)
+    {
+        Some(OpenProtocolAccess::Listen(session)) => {
             let Some(attachment) = session.current_attachment().await else {
                 return Ok(());
             };
@@ -621,9 +570,7 @@ pub(super) async fn tunnel_tcp_eof(
                 clear_tcp_cancel(&attachment.tcp_streams, stream_id).await;
             }
         }
-        TunnelMode::Connect {
-            protocol: TunnelForwardProtocol::Tcp,
-        } => {
+        Some(OpenProtocolAccess::Connect) => {
             let writer = {
                 tunnel
                     .tcp_streams
@@ -638,7 +585,7 @@ pub(super) async fn tunnel_tcp_eof(
                 clear_tcp_cancel(&tunnel.tcp_streams, stream_id).await;
             }
         }
-        TunnelMode::Listen { .. } | TunnelMode::Connect { .. } | TunnelMode::Unopened => {}
+        None => {}
     }
     Ok(())
 }
@@ -647,15 +594,8 @@ pub(super) async fn tunnel_close_stream(
     tunnel: &Arc<TunnelState>,
     stream_id: u32,
 ) -> Result<(), HostRpcError> {
-    match tunnel_mode(tunnel).await {
-        TunnelMode::Listen {
-            protocol: TunnelForwardProtocol::Tcp,
-            session,
-        }
-        | TunnelMode::Listen {
-            protocol: TunnelForwardProtocol::Udp,
-            session,
-        } => {
+    match tunnel_access(tunnel).await.role_access() {
+        OpenTunnelRole::Listen(session) => {
             if let Some(attachment) = session.current_attachment().await {
                 cancel_tcp_stream(&attachment.tcp_streams, stream_id).await;
                 if let Some(reader) = attachment.udp_readers.lock().await.remove(&stream_id) {
@@ -673,13 +613,13 @@ pub(super) async fn tunnel_close_stream(
                 }
             }
         }
-        TunnelMode::Connect { .. } => {
+        OpenTunnelRole::Connect => {
             cancel_tcp_stream(&tunnel.tcp_streams, stream_id).await;
             if let Some(bind) = tunnel.udp_binds.lock().await.remove(&stream_id) {
                 bind.cancel.cancel();
             }
         }
-        TunnelMode::Unopened => {}
+        OpenTunnelRole::Unopened => {}
     }
     tunnel
         .send(Frame {
