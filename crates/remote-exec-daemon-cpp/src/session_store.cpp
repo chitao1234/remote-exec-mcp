@@ -149,6 +149,16 @@ PollResult wait_for_session_activity(const std::shared_ptr<LiveSession>& session
     }
 }
 
+void retire_session(const std::shared_ptr<LiveSession>& session) {
+    BasicLockGuard session_lock(session->mutex_);
+    session->retired = true;
+    session->closing = true;
+    session->cond_.broadcast();
+    if (session->process.get() != NULL) {
+        session->process->terminate();
+    }
+}
+
 } // namespace
 
 SessionOutputState::SessionOutputState() : eof(false), exited(false), exit_code(0), generation(0) {
@@ -183,15 +193,7 @@ SessionStore::~SessionStore() {
     }
 
     for (std::size_t i = 0; i < sessions.size(); ++i) {
-        {
-            BasicLockGuard session_lock(sessions[i]->mutex_);
-            sessions[i]->retired = true;
-            sessions[i]->closing = true;
-            sessions[i]->cond_.broadcast();
-            if (sessions[i]->process.get() != NULL) {
-                sessions[i]->process->terminate();
-            }
-        }
+        retire_session(sessions[i]);
         join_session_pump(sessions[i].get());
     }
 }
@@ -328,15 +330,7 @@ bool SessionStore::prune_one_session_for_start(unsigned long max_open_sessions) 
             continue;
         }
 
-        {
-            BasicLockGuard session_lock(removed->mutex_);
-            removed->retired = true;
-            removed->closing = true;
-            removed->cond_.broadcast();
-            if (removed->process.get() != NULL) {
-                removed->process->terminate();
-            }
-        }
+        retire_session(removed);
         join_session_pump(removed.get());
 
         unsigned long open_sessions_after_prune = 0UL;
@@ -401,15 +395,7 @@ Json SessionStore::start_command(const std::string& target,
     }
 
     if (poll_result.completed) {
-        {
-            BasicLockGuard session_lock(session->mutex_);
-            session->retired = true;
-            session->closing = true;
-            session->cond_.broadcast();
-            if (session->process.get() != NULL) {
-                session->process->terminate();
-            }
-        }
+        retire_session(session);
         join_session_pump(session.get());
         Json response = build_session_response(NULL,
                                                false,
@@ -496,15 +482,7 @@ Json SessionStore::write_stdin(const std::string& daemon_session_id,
     }
 
     if (poll_result.completed) {
-        {
-            BasicLockGuard session_lock(session->mutex_);
-            session->retired = true;
-            session->closing = true;
-            session->cond_.broadcast();
-            if (session->process.get() != NULL) {
-                session->process->terminate();
-            }
-        }
+        retire_session(session);
         erase_session_if_current(mutex_, sessions_, daemon_session_id, session);
         join_session_pump(session.get());
         Json response = build_session_response(NULL,
