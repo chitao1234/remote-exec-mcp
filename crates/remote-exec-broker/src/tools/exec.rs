@@ -12,11 +12,22 @@ use super::exec_format::{
     format_command_text, format_intercepted_patch_text, format_poll_text, prepend_warning_text,
 };
 use super::exec_intercept::maybe_intercept_apply_patch;
+use crate::daemon_client::RpcToolErrorMode;
 use crate::mcp_server::ToolCallOutput;
 
 #[derive(Debug, thiserror::Error)]
-#[error("write_stdin failed: {0}")]
-struct WriteStdinToolError(#[source] anyhow::Error);
+#[error("{tool} failed: {source}")]
+struct ToolOperationError {
+    tool: &'static str,
+    #[source]
+    source: anyhow::Error,
+}
+
+impl ToolOperationError {
+    fn new(tool: &'static str, source: anyhow::Error) -> Self {
+        Self { tool, source }
+    }
+}
 
 struct WriteStdinCompletion {
     output: ToolCallOutput,
@@ -132,7 +143,7 @@ pub async fn write_stdin(
                 error = %err,
                 "broker tool failed"
             );
-            Err(WriteStdinToolError(err).into())
+            Err(ToolOperationError::new("write_stdin", err).into())
         }
     }
 }
@@ -337,7 +348,7 @@ async fn forward_exec_write(
                     )));
                 }
             }
-            Err(err.into())
+            Err(err.into_tool_error(RpcToolErrorMode::Full))
         }
     }
 }

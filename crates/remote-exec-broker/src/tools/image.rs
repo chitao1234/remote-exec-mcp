@@ -3,7 +3,6 @@ use remote_exec_proto::public::{ViewImageInput, ViewImageResult};
 use remote_exec_proto::rpc::ImageReadRequest;
 use rmcp::model::Content;
 
-use crate::daemon_client::DaemonClientError;
 use crate::mcp_server::ToolCallOutput;
 
 pub async fn view_image(
@@ -46,7 +45,7 @@ pub async fn view_image(
                 error = %err,
                 "broker tool failed"
             );
-            return Err(normalize_view_image_error(err));
+            return Err(err);
         }
     };
     let image_content = content_from_data_url(&response.image_url)?;
@@ -68,13 +67,6 @@ pub async fn view_image(
             detail: response.detail,
         })?,
     ))
-}
-
-fn normalize_view_image_error(err: anyhow::Error) -> anyhow::Error {
-    match err.downcast::<DaemonClientError>() {
-        Ok(other) => other.into_anyhow_rpc_message(),
-        Err(other) => other,
-    }
 }
 
 fn content_from_data_url(image_url: &str) -> anyhow::Result<Content> {

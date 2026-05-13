@@ -7,6 +7,7 @@ use remote_exec_proto::public::{TransferDestinationMode, TransferEndpoint};
 use remote_exec_proto::rpc::{RpcErrorCode, TransferPathInfoRequest};
 use remote_exec_proto::transfer::TransferCompression;
 
+use crate::daemon_client::{RpcToolErrorMode, normalize_tool_error};
 use crate::state::LOCAL_TARGET_NAME;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -261,7 +262,7 @@ async fn existing_destination_is_directory(
 }
 
 fn normalize_path_info_error(err: crate::daemon_client::DaemonClientError) -> anyhow::Error {
-    err.into_anyhow_rpc_message()
+    normalize_tool_error(err.into(), RpcToolErrorMode::MessageOnly)
 }
 
 fn path_info_missing_or_unsupported(err: &crate::daemon_client::DaemonClientError) -> bool {

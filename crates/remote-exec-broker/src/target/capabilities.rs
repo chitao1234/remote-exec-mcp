@@ -3,11 +3,21 @@ use remote_exec_proto::rpc::{
     PatchApplyResponse,
 };
 
-use crate::daemon_client::DaemonClientError;
+use crate::daemon_client::{DaemonClientError, RpcToolErrorMode, normalize_tool_result};
 
 use super::TargetHandle;
 
 impl TargetHandle {
+    async fn checked_call<T>(
+        &self,
+        target_name: &str,
+        rpc_mode: RpcToolErrorMode,
+        result: Result<T, DaemonClientError>,
+    ) -> anyhow::Result<T> {
+        self.ensure_identity_verified(target_name).await?;
+        normalize_tool_result(self.clear_on_transport_error(result).await, rpc_mode)
+    }
+
     pub async fn clear_on_transport_error<T>(
         &self,
         result: Result<T, DaemonClientError>,
@@ -23,10 +33,12 @@ impl TargetHandle {
         target_name: &str,
         req: &ExecStartRequest,
     ) -> anyhow::Result<ExecResponse> {
-        self.ensure_identity_verified(target_name).await?;
-        Ok(self
-            .clear_on_transport_error(self.exec_start(req).await)
-            .await?)
+        self.checked_call(
+            target_name,
+            RpcToolErrorMode::Full,
+            self.exec_start(req).await,
+        )
+        .await
     }
 
     pub async fn patch_apply_checked(
@@ -34,10 +46,12 @@ impl TargetHandle {
         target_name: &str,
         req: &PatchApplyRequest,
     ) -> anyhow::Result<PatchApplyResponse> {
-        self.ensure_identity_verified(target_name).await?;
-        Ok(self
-            .clear_on_transport_error(self.patch_apply(req).await)
-            .await?)
+        self.checked_call(
+            target_name,
+            RpcToolErrorMode::Full,
+            self.patch_apply(req).await,
+        )
+        .await
     }
 
     pub async fn image_read_checked(
@@ -45,9 +59,11 @@ impl TargetHandle {
         target_name: &str,
         req: &ImageReadRequest,
     ) -> anyhow::Result<ImageReadResponse> {
-        self.ensure_identity_verified(target_name).await?;
-        Ok(self
-            .clear_on_transport_error(self.image_read(req).await)
-            .await?)
+        self.checked_call(
+            target_name,
+            RpcToolErrorMode::MessageOnly,
+            self.image_read(req).await,
+        )
+        .await
     }
 }

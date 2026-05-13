@@ -48,22 +48,61 @@ pub enum DaemonClientError {
     Transport(anyhow::Error),
     Rpc {
         status: reqwest::StatusCode,
-        code: Option<String>,
+        code: Option<DaemonRpcCode>,
         message: String,
     },
     Decode(anyhow::Error),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DaemonRpcCode {
+    Known(RpcErrorCode),
+    Unknown(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RpcToolErrorMode {
+    Full,
+    MessageOnly,
+}
+
+impl DaemonRpcCode {
+    pub fn from_wire_value(value: impl Into<String>) -> Self {
+        let value = value.into();
+        match RpcErrorCode::from_wire_value(&value) {
+            Some(code) => Self::Known(code),
+            None => Self::Unknown(value),
+        }
+    }
+
+    pub fn as_wire_value(&self) -> &str {
+        match self {
+            Self::Known(code) => code.wire_value(),
+            Self::Unknown(value) => value.as_str(),
+        }
+    }
+
+    pub fn known(&self) -> Option<RpcErrorCode> {
+        match self {
+            Self::Known(code) => Some(*code),
+            Self::Unknown(_) => None,
+        }
+    }
+}
+
 impl DaemonClientError {
     pub fn rpc_code(&self) -> Option<&str> {
         match self {
-            Self::Rpc { code, .. } => code.as_deref(),
+            Self::Rpc { code, .. } => code.as_ref().map(DaemonRpcCode::as_wire_value),
             _ => None,
         }
     }
 
     pub fn rpc_error_code(&self) -> Option<RpcErrorCode> {
-        self.rpc_code().and_then(RpcErrorCode::from_wire_value)
+        match self {
+            Self::Rpc { code, .. } => code.as_ref().and_then(DaemonRpcCode::known),
+            _ => None,
+        }
     }
 
     pub fn is_rpc_error_code(&self, expected: RpcErrorCode) -> bool {
@@ -74,10 +113,12 @@ impl DaemonClientError {
         matches!(self, Self::Transport(_))
     }
 
-    pub fn into_anyhow_rpc_message(self) -> anyhow::Error {
-        match self {
-            Self::Rpc { message, .. } => anyhow::Error::msg(message),
-            other => other.into(),
+    pub fn into_tool_error(self, rpc_mode: RpcToolErrorMode) -> anyhow::Error {
+        match (self, rpc_mode) {
+            (Self::Rpc { message, .. }, RpcToolErrorMode::MessageOnly) => {
+                anyhow::Error::msg(message)
+            }
+            (other, _) => other.into(),
         }
     }
 }
@@ -99,7 +140,7 @@ impl std::fmt::Display for DaemonClientError {
                 code,
                 message,
             } => match code {
-                Some(code) => write!(f, "{code}: {message} ({status})"),
+                Some(code) => write!(f, "{}: {message} ({status})", code.as_wire_value()),
                 None => write!(f, "daemon returned {status}: {message}"),
             },
         }
@@ -200,7 +241,7 @@ impl DaemonClient {
             })?
             .map_err(|err| self.rpc_transport_error("/v1/port/tunnel", started, err))?;
         if response.status() != reqwest::StatusCode::SWITCHING_PROTOCOLS {
-            return Err(decode_rpc_error(response).await);
+            return Err(decode_rpc_error_lenient(response).await);
         }
         let mut upgraded = tokio::time::timeout(PORT_TUNNEL_UPGRADE_TIMEOUT, response.upgrade())
             .await
@@ -583,8 +624,8 @@ impl DaemonClient {
 
         log_error(response.status());
         match decode_policy {
-            RpcErrorDecodePolicy::Strict => Err(decode_rpc_error_strict(response).await?),
-            RpcErrorDecodePolicy::Lenient => Err(decode_rpc_error(response).await),
+            RpcErrorDecodePolicy::Strict => Err(decode_rpc_error_strict(response).await),
+            RpcErrorDecodePolicy::Lenient => Err(decode_rpc_error_lenient(response).await),
         }
     }
 
@@ -660,27 +701,36 @@ async fn open_transfer_import_body(
     Ok((file_len, body))
 }
 
-async fn decode_rpc_error_strict(
-    response: reqwest::Response,
-) -> Result<DaemonClientError, DaemonClientError> {
-    decode_rpc_error_with_body_policy(response, true).await
+pub(crate) fn normalize_tool_error(
+    err: anyhow::Error,
+    rpc_mode: RpcToolErrorMode,
+) -> anyhow::Error {
+    match err.downcast::<DaemonClientError>() {
+        Ok(other) => other.into_tool_error(rpc_mode),
+        Err(other) => other,
+    }
 }
 
-async fn decode_rpc_error(response: reqwest::Response) -> DaemonClientError {
-    decode_rpc_error_with_body_policy(response, false)
-        .await
-        .expect("non-strict RPC error decoding should not propagate body read failures")
+pub(crate) fn normalize_tool_result<T>(
+    result: Result<T, DaemonClientError>,
+    rpc_mode: RpcToolErrorMode,
+) -> anyhow::Result<T> {
+    result.map_err(|err| err.into_tool_error(rpc_mode))
 }
 
-async fn decode_rpc_error_with_body_policy(
-    response: reqwest::Response,
-    propagate_body_error: bool,
-) -> Result<DaemonClientError, DaemonClientError> {
+async fn decode_rpc_error_strict(response: reqwest::Response) -> DaemonClientError {
     let status = response.status();
     match response.text().await {
-        Ok(body) => Ok(decode_rpc_error_body(status, body)),
-        Err(err) if propagate_body_error => Err(DaemonClientError::Transport(err.into())),
-        Err(err) => Ok(decode_rpc_error_body(status, err.to_string())),
+        Ok(body) => decode_rpc_error_body(status, body),
+        Err(err) => DaemonClientError::Transport(err.into()),
+    }
+}
+
+async fn decode_rpc_error_lenient(response: reqwest::Response) -> DaemonClientError {
+    let status = response.status();
+    match response.text().await {
+        Ok(body) => decode_rpc_error_body(status, body),
+        Err(err) => decode_rpc_error_body(status, err.to_string()),
     }
 }
 
@@ -688,7 +738,7 @@ fn decode_rpc_error_body(status: reqwest::StatusCode, body: String) -> DaemonCli
     if let Ok(error) = serde_json::from_str::<RpcErrorBody>(&body) {
         DaemonClientError::Rpc {
             status,
-            code: Some(error.code),
+            code: Some(DaemonRpcCode::from_wire_value(error.code)),
             message: error.message,
         }
     } else {

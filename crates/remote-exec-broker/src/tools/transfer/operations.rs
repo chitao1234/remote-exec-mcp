@@ -6,7 +6,7 @@ use remote_exec_proto::rpc::{
 };
 use remote_exec_proto::transfer::TransferCompression;
 
-use crate::daemon_client::DaemonClientError;
+use crate::daemon_client::{DaemonClientError, RpcToolErrorMode, normalize_tool_result};
 
 use super::endpoints::{TransferEndpointTarget, endpoint_policy, verified_remote_target};
 
@@ -257,10 +257,6 @@ async fn import_single_source(
     }
 }
 
-fn normalize_transfer_error(err: DaemonClientError) -> anyhow::Error {
-    err.into_anyhow_rpc_message()
-}
-
 async fn export_remote_endpoint_to_archive(
     state: &crate::BrokerState,
     target_name: &str,
@@ -330,8 +326,8 @@ async fn handle_remote_transfer_result<T>(
     target: crate::target::RemoteTargetHandle<'_>,
     result: Result<T, DaemonClientError>,
 ) -> anyhow::Result<T> {
-    match target.clear_on_transport_error(result).await {
-        Ok(value) => Ok(value),
-        Err(err) => Err(normalize_transfer_error(err)),
-    }
+    normalize_tool_result(
+        target.clear_on_transport_error(result).await,
+        RpcToolErrorMode::MessageOnly,
+    )
 }

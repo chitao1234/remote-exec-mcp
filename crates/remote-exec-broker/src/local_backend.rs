@@ -6,7 +6,7 @@ use remote_exec_proto::rpc::{
     TransferPathInfoResponse,
 };
 
-use crate::daemon_client::DaemonClientError;
+use crate::daemon_client::{DaemonClientError, DaemonRpcCode};
 
 #[derive(Clone)]
 pub struct LocalDaemonClient {
@@ -95,7 +95,7 @@ pub(crate) fn map_host_rpc_error(err: remote_exec_host::HostRpcError) -> DaemonC
     DaemonClientError::Rpc {
         status: reqwest::StatusCode::from_u16(status)
             .unwrap_or(reqwest::StatusCode::INTERNAL_SERVER_ERROR),
-        code: Some(body.code),
+        code: Some(DaemonRpcCode::from_wire_value(body.code)),
         message: body.message,
     }
 }
@@ -114,18 +114,16 @@ mod tests {
             message: "boom".to_string(),
         });
 
-        match err {
+        assert!(matches!(
+            &err,
             DaemonClientError::Rpc {
                 status,
-                code,
                 message,
-            } => {
-                assert_eq!(status, reqwest::StatusCode::INTERNAL_SERVER_ERROR);
-                assert_eq!(code.as_deref(), Some("internal_error"));
-                assert_eq!(message, "boom");
-            }
-            other => panic!("expected rpc error, got {other:?}"),
-        }
+                ..
+            } if *status == reqwest::StatusCode::INTERNAL_SERVER_ERROR && message == "boom"
+        ));
+        assert_eq!(err.rpc_code(), Some("internal_error"));
+        assert_eq!(err.rpc_error_code(), Some(RpcErrorCode::Internal));
     }
 
     #[test]
@@ -136,17 +134,15 @@ mod tests {
             message: "invalid status".to_string(),
         });
 
-        match err {
+        assert!(matches!(
+            &err,
             DaemonClientError::Rpc {
                 status,
-                code,
                 message,
-            } => {
-                assert_eq!(status, reqwest::StatusCode::INTERNAL_SERVER_ERROR);
-                assert_eq!(code.as_deref(), Some("internal_error"));
-                assert_eq!(message, "invalid status");
-            }
-            other => panic!("expected rpc error, got {other:?}"),
-        }
+                ..
+            } if *status == reqwest::StatusCode::INTERNAL_SERVER_ERROR && message == "invalid status"
+        ));
+        assert_eq!(err.rpc_code(), Some("internal_error"));
+        assert_eq!(err.rpc_error_code(), Some(RpcErrorCode::Internal));
     }
 }
