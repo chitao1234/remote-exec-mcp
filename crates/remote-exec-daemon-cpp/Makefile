@@ -1,7 +1,7 @@
 # POSIX-only bmake entry point for remote-exec-daemon-cpp.
 #
 # GNUmakefile remains the cross-platform public entry point. Keep this file
-# bmake-compatible and share only dialect-neutral source inventory.
+# bmake-compatible and share only dialect-neutral inventory files.
 
 BUILD_DIR ?= build
 OBJ_DIR = ${BUILD_DIR}/obj
@@ -30,58 +30,18 @@ POSIX_TARGET = ${BUILD_DIR}/remote-exec-daemon-cpp
 
 SOURCE_PREFIX =
 .include "mk/sources.mk"
+.include "mk/host-tests.mk"
 
 POSIX_OBJS = ${POSIX_SRCS:C|^|${HOST_PROD_OBJ_DIR}/|:S|.cpp|.o|:O:u}
-HOST_PATCH_OBJS = ${HOST_PATCH_SRCS:C|^|${HOST_TEST_OBJ_DIR}/|:S|.cpp|.o|:O:u}
-HOST_TRANSFER_OBJS = ${HOST_TRANSFER_SRCS:C|^|${HOST_TEST_OBJ_DIR}/|:S|.cpp|.o|:O:u}
-HOST_CONFIG_OBJS = ${HOST_CONFIG_SRCS:C|^|${HOST_TEST_OBJ_DIR}/|:S|.cpp|.o|:O:u}
-HOST_BASIC_MUTEX_OBJS = ${HOST_BASIC_MUTEX_SRCS:C|^|${HOST_TEST_OBJ_DIR}/|:S|.cpp|.o|:O:u}
-HOST_HTTP_REQUEST_OBJS = ${HOST_HTTP_REQUEST_SRCS:C|^|${HOST_TEST_OBJ_DIR}/|:S|.cpp|.o|:O:u}
-HOST_SERVER_TRANSPORT_OBJS = ${HOST_SERVER_TRANSPORT_SRCS:C|^|${HOST_TEST_OBJ_DIR}/|:S|.cpp|.o|:O:u}
-HOST_SERVER_STREAMING_OBJS = ${HOST_SERVER_STREAMING_SRCS:C|^|${HOST_TEST_OBJ_DIR}/|:S|.cpp|.o|:O:u}
-HOST_SESSION_STORE_OBJS = ${HOST_SESSION_STORE_SRCS:C|^|${HOST_TEST_OBJ_DIR}/|:S|.cpp|.o|:O:u}
-HOST_CONNECTION_MANAGER_OBJS = ${HOST_CONNECTION_MANAGER_SRCS:C|^|${HOST_TEST_OBJ_DIR}/|:S|.cpp|.o|:O:u}
-HOST_SERVER_RUNTIME_OBJS = ${HOST_SERVER_RUNTIME_SRCS:C|^|${HOST_TEST_OBJ_DIR}/|:S|.cpp|.o|:O:u}
-HOST_SERVER_ROUTES_OBJS = ${HOST_SERVER_ROUTES_SRCS:C|^|${HOST_TEST_OBJ_DIR}/|:S|.cpp|.o|:O:u}
-HOST_SANDBOX_OBJS = ${HOST_SANDBOX_SRCS:C|^|${HOST_TEST_OBJ_DIR}/|:S|.cpp|.o|:O:u}
-HOST_PORT_TUNNEL_FRAME_OBJS = ${HOST_PORT_TUNNEL_FRAME_SRCS:C|^|${HOST_TEST_OBJ_DIR}/|:S|.cpp|.o|:O:u}
 
-HOST_TEST_SRCS = ${HOST_PATCH_SRCS} ${HOST_TRANSFER_SRCS} ${HOST_CONFIG_SRCS} \
-	${HOST_BASIC_MUTEX_SRCS} ${HOST_HTTP_REQUEST_SRCS} \
-	${HOST_SERVER_TRANSPORT_SRCS} ${HOST_SERVER_STREAMING_SRCS} \
-	${HOST_SESSION_STORE_SRCS} ${HOST_CONNECTION_MANAGER_SRCS} \
-	${HOST_SERVER_RUNTIME_SRCS} ${HOST_SERVER_ROUTES_SRCS} \
-	${HOST_SANDBOX_SRCS} ${HOST_PORT_TUNNEL_FRAME_SRCS}
+.for test in ${HOST_POSIX_TESTS}
+HOST_${test} = ${BUILD_DIR}/${HOST_${test}_BIN}
+HOST_${test}_OBJS = ${HOST_${test}_SRCS:C|^|${HOST_TEST_OBJ_DIR}/|:S|.cpp|.o|:O:u}
+HOST_TEST_SRCS += ${HOST_${test}_SRCS}
+HOST_TEST_PHONY_TARGETS += ${HOST_${test}_TEST_TARGET}
+.endfor
+
 HOST_TEST_COMPILE_SRCS = ${HOST_TEST_SRCS:O:u}
-
-HOST_PATCH = ${BUILD_DIR}/test_patch
-HOST_TRANSFER = ${BUILD_DIR}/test_transfer
-HOST_CONFIG = ${BUILD_DIR}/test_config
-HOST_BASIC_MUTEX = ${BUILD_DIR}/test_basic_mutex
-HOST_HTTP_REQUEST = ${BUILD_DIR}/test_http_request
-HOST_SERVER_TRANSPORT = ${BUILD_DIR}/test_server_transport
-HOST_SERVER_STREAMING = ${BUILD_DIR}/test_server_streaming
-HOST_SESSION_STORE = ${BUILD_DIR}/test_session_store
-HOST_CONNECTION_MANAGER = ${BUILD_DIR}/test_connection_manager
-HOST_SERVER_RUNTIME = ${BUILD_DIR}/test_server_runtime
-HOST_SERVER_ROUTES = ${BUILD_DIR}/test_server_routes
-HOST_SANDBOX = ${BUILD_DIR}/test_sandbox
-HOST_PORT_TUNNEL_FRAME = ${BUILD_DIR}/test_port_tunnel_frame
-
-HOST_TEST_PHONY_TARGETS = \
-	test-host-basic-mutex \
-	test-host-patch \
-	test-host-transfer \
-	test-host-config \
-	test-host-http-request \
-	test-host-server-transport \
-	test-host-server-streaming \
-	test-host-session-store \
-	test-host-connection-manager \
-	test-host-server-runtime \
-	test-host-server-routes \
-	test-host-sandbox \
-	test-port-tunnel-frame
 
 all: all-posix
 
@@ -91,66 +51,19 @@ check: check-posix
 
 check-posix: ${HOST_TEST_PHONY_TARGETS} all-posix
 
-test-server-streaming: test-host-server-streaming
+test-server-streaming: ${HOST_SERVER_STREAMING_TEST_TARGET}
 
-test-host-basic-mutex: ${HOST_BASIC_MUTEX}
-	${TEST_LOG_ENV} ${HOST_BASIC_MUTEX}
-
-test-host-patch: ${HOST_PATCH}
-	${TEST_LOG_ENV} ${HOST_PATCH}
-
-test-host-transfer: ${HOST_TRANSFER}
-	${TEST_LOG_ENV} ${HOST_TRANSFER}
-
-test-host-config: ${HOST_CONFIG}
-	${TEST_LOG_ENV} ${HOST_CONFIG}
-
-test-host-http-request: ${HOST_HTTP_REQUEST}
-	${TEST_LOG_ENV} ${HOST_HTTP_REQUEST}
-
-test-host-server-transport: ${HOST_SERVER_TRANSPORT}
-	${TEST_LOG_ENV} ${HOST_SERVER_TRANSPORT}
-
-test-host-server-streaming: ${HOST_SERVER_STREAMING}
-	${TEST_LOG_ENV} ${HOST_SERVER_STREAMING}
-
-test-host-session-store: ${HOST_SESSION_STORE}
-	${TEST_LOG_ENV} ${HOST_SESSION_STORE}
-
-test-host-connection-manager: ${HOST_CONNECTION_MANAGER}
-	${TEST_LOG_ENV} ${HOST_CONNECTION_MANAGER}
-
-test-host-server-runtime: ${HOST_SERVER_RUNTIME}
-	${TEST_LOG_ENV} ${HOST_SERVER_RUNTIME}
-
-test-host-server-routes: ${HOST_SERVER_ROUTES}
-	${TEST_LOG_ENV} ${HOST_SERVER_ROUTES}
-
-test-host-sandbox: ${HOST_SANDBOX}
-	${TEST_LOG_ENV} ${HOST_SANDBOX}
-
-test-port-tunnel-frame: ${HOST_PORT_TUNNEL_FRAME}
-	${TEST_LOG_ENV} ${HOST_PORT_TUNNEL_FRAME}
+.for test in ${HOST_POSIX_TESTS}
+${HOST_${test}_TEST_TARGET}: ${HOST_${test}}
+	${TEST_LOG_ENV} ${HOST_${test}}
+.endfor
 
 ${POSIX_TARGET}: ${POSIX_OBJS}
 	mkdir -p ${.TARGET:H}
 	${HOST_CXX} ${PROD_CXXFLAGS} ${PROD_LDFLAGS} -o ${.TARGET} ${.ALLSRC} ${PTHREAD_LDLIBS}
 
-.for test in \
-	HOST_PATCH \
-	HOST_TRANSFER \
-	HOST_CONFIG \
-	HOST_BASIC_MUTEX \
-	HOST_HTTP_REQUEST \
-	HOST_SERVER_TRANSPORT \
-	HOST_SERVER_STREAMING \
-	HOST_SESSION_STORE \
-	HOST_CONNECTION_MANAGER \
-	HOST_SERVER_RUNTIME \
-	HOST_SERVER_ROUTES \
-	HOST_SANDBOX \
-	HOST_PORT_TUNNEL_FRAME
-${${test}}: ${${test}_OBJS}
+.for test in ${HOST_POSIX_TESTS}
+${HOST_${test}}: ${HOST_${test}_OBJS}
 	mkdir -p ${.TARGET:H}
 	${HOST_TEST_LINK}
 .endfor
