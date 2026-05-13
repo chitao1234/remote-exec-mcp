@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, path::PathBuf, time::UNIX_EPOCH};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    time::UNIX_EPOCH,
+};
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -17,9 +21,19 @@ pub struct KeyPairPaths {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonManifestEntry {
-    pub cert_pem: PathBuf,
-    pub key_pem: PathBuf,
+    #[serde(flatten)]
+    pub paths: KeyPairPaths,
     pub sans: Vec<SubjectAltName>,
+}
+
+impl DaemonManifestEntry {
+    pub fn cert_pem(&self) -> &Path {
+        self.paths.cert_pem.as_path()
+    }
+
+    pub fn key_pem(&self) -> &Path {
+        self.paths.key_pem.as_path()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,8 +63,7 @@ pub fn build_manifest(
             Ok((
                 daemon.target.clone(),
                 DaemonManifestEntry {
-                    cert_pem: paths.cert_pem.clone(),
-                    key_pem: paths.key_pem.clone(),
+                    paths: paths.clone(),
                     sans: daemon.sans.clone(),
                 },
             ))
@@ -90,11 +103,11 @@ pub fn render_config_snippets(manifest: &DevInitManifest) -> String {
     for (target, daemon) in &manifest.daemons {
         output.push_str(&format!(
             "- Daemon `{target}` cert: {}\n",
-            daemon.cert_pem.display()
+            daemon.cert_pem().display()
         ));
         output.push_str(&format!(
             "- Daemon `{target}` key: {}\n",
-            daemon.key_pem.display()
+            daemon.key_pem().display()
         ));
         output.push_str(&format!(
             "- Daemon `{target}` SANs: {}\n",
@@ -142,8 +155,8 @@ ca_pem = {ca_pem}
             target = toml_string(target),
             listen = toml_string("0.0.0.0:9443"),
             default_workdir = toml_string("/srv/work"),
-            daemon_cert = toml_string(&daemon.cert_pem.display().to_string()),
-            daemon_key = toml_string(&daemon.key_pem.display().to_string()),
+            daemon_cert = toml_string(&daemon.cert_pem().display().to_string()),
+            daemon_key = toml_string(&daemon.key_pem().display().to_string()),
             ca_pem = toml_string(&manifest.ca.cert_pem.display().to_string()),
             broker_cert = toml_string(&manifest.broker.cert_pem.display().to_string()),
         ));
@@ -174,8 +187,10 @@ mod tests {
         daemons.insert(
             "builder-a".to_string(),
             DaemonManifestEntry {
-                cert_pem: PathBuf::from(r"C:\remote-exec\fixtures\builder-a.pem"),
-                key_pem: PathBuf::from(r"C:\remote-exec\fixtures\builder-a-key.pem"),
+                paths: KeyPairPaths {
+                    cert_pem: PathBuf::from(r"C:\remote-exec\fixtures\builder-a.pem"),
+                    key_pem: PathBuf::from(r"C:\remote-exec\fixtures\builder-a-key.pem"),
+                },
                 sans: vec![SubjectAltName::Dns("builder-a".to_string())],
             },
         );
@@ -263,6 +278,22 @@ mod tests {
         assert!(snippets.contains("# listen = \"0.0.0.0:9443\""));
         assert!(!snippets.contains("\nbase_url = \"https://builder-a.example.com:9443\""));
         assert!(!snippets.contains("\nlisten = \"0.0.0.0:9443\""));
+    }
+
+    #[test]
+    fn daemon_manifest_entry_serializes_flat_cert_and_key_fields() {
+        let entry = &sample_manifest().daemons["builder-a"];
+        let value = serde_json::to_value(entry).expect("daemon manifest entry should serialize");
+
+        assert_eq!(
+            value.get("cert_pem").and_then(|field| field.as_str()),
+            Some(r"C:\remote-exec\fixtures\builder-a.pem")
+        );
+        assert_eq!(
+            value.get("key_pem").and_then(|field| field.as_str()),
+            Some(r"C:\remote-exec\fixtures\builder-a-key.pem")
+        );
+        assert!(value.get("paths").is_none());
     }
 
     fn uncomment_placeholder_lines(input: &str) -> String {
