@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 use remote_exec_proto::port_tunnel::{
@@ -701,33 +700,39 @@ async fn tcp_close_after_peer_eof_does_not_cancel_queued_writer_shutdown() {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<QueuedFrame>(8);
     let stream_cancel = state.shutdown.child_token();
     let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(TCP_WRITE_QUEUE_FRAMES);
+    let sender = TunnelSender {
+        tx,
+        limiter: state.port_forward_limiter.clone(),
+    };
     let tunnel = Arc::new(TunnelState {
         state: state.clone(),
         cancel: state.shutdown.child_token(),
-        tx: TunnelSender {
-            tx,
-            limiter: state.port_forward_limiter.clone(),
-        },
+        tx: sender.clone(),
         open_mode: tokio::sync::Mutex::new(TunnelMode::Connect {
             protocol: TunnelForwardProtocol::Tcp,
         }),
-        tcp_streams: tokio::sync::Mutex::new(HashMap::from([(
-            1,
-            TcpStreamEntry {
-                writer: TcpWriterHandle {
-                    tx: writer_tx,
-                    cancel: stream_cancel.clone(),
-                },
-                _permit: state
-                    .port_forward_limiter
-                    .try_acquire_active_tcp_stream()
-                    .unwrap(),
-                cancel: Some(stream_cancel.clone()),
+        active: tokio::sync::Mutex::new(Some(ActiveTunnelState::Connect(Arc::new(
+            ConnectRuntimeState {
+                tx: sender,
+                cancel: state.shutdown.child_token(),
+                generation: 1,
+                tcp_streams: tokio::sync::Mutex::new(HashMap::from([(
+                    1,
+                    TcpStreamEntry {
+                        writer: TcpWriterHandle {
+                            tx: writer_tx,
+                            cancel: stream_cancel.clone(),
+                        },
+                        _permit: state
+                            .port_forward_limiter
+                            .try_acquire_active_tcp_stream()
+                            .unwrap(),
+                        cancel: Some(stream_cancel.clone()),
+                    },
+                )])),
+                udp_binds: tokio::sync::Mutex::new(HashMap::new()),
             },
-        )])),
-        udp_binds: tokio::sync::Mutex::new(HashMap::new()),
-        generation: AtomicU64::new(1),
-        listen_session: tokio::sync::Mutex::new(None),
+        )))),
         _connection_permit: state
             .port_forward_limiter
             .try_acquire_tunnel_connection()
@@ -761,33 +766,39 @@ async fn tunnel_tcp_eof_waits_for_full_writer_queue() {
             .await
             .unwrap();
     }
+    let sender = TunnelSender {
+        tx,
+        limiter: state.port_forward_limiter.clone(),
+    };
     let tunnel = Arc::new(TunnelState {
         state: state.clone(),
         cancel: state.shutdown.child_token(),
-        tx: TunnelSender {
-            tx,
-            limiter: state.port_forward_limiter.clone(),
-        },
+        tx: sender.clone(),
         open_mode: tokio::sync::Mutex::new(TunnelMode::Connect {
             protocol: TunnelForwardProtocol::Tcp,
         }),
-        tcp_streams: tokio::sync::Mutex::new(HashMap::from([(
-            1,
-            TcpStreamEntry {
-                writer: TcpWriterHandle {
-                    tx: writer_tx,
-                    cancel: stream_cancel.clone(),
-                },
-                _permit: state
-                    .port_forward_limiter
-                    .try_acquire_active_tcp_stream()
-                    .unwrap(),
-                cancel: Some(stream_cancel.clone()),
+        active: tokio::sync::Mutex::new(Some(ActiveTunnelState::Connect(Arc::new(
+            ConnectRuntimeState {
+                tx: sender,
+                cancel: state.shutdown.child_token(),
+                generation: 1,
+                tcp_streams: tokio::sync::Mutex::new(HashMap::from([(
+                    1,
+                    TcpStreamEntry {
+                        writer: TcpWriterHandle {
+                            tx: writer_tx,
+                            cancel: stream_cancel.clone(),
+                        },
+                        _permit: state
+                            .port_forward_limiter
+                            .try_acquire_active_tcp_stream()
+                            .unwrap(),
+                        cancel: Some(stream_cancel.clone()),
+                    },
+                )])),
+                udp_binds: tokio::sync::Mutex::new(HashMap::new()),
             },
-        )])),
-        udp_binds: tokio::sync::Mutex::new(HashMap::new()),
-        generation: AtomicU64::new(1),
-        listen_session: tokio::sync::Mutex::new(None),
+        )))),
         _connection_permit: state
             .port_forward_limiter
             .try_acquire_tunnel_connection()
@@ -834,18 +845,16 @@ async fn concurrent_tunnel_open_allows_only_one_mode() {
         .unwrap();
     let attachment_lock = retained_session.attachment.lock().await;
     let (tx, mut rx) = tokio::sync::mpsc::channel::<QueuedFrame>(8);
+    let sender = TunnelSender {
+        tx,
+        limiter: state.port_forward_limiter.clone(),
+    };
     let tunnel = Arc::new(TunnelState {
         state: state.clone(),
         cancel: state.shutdown.child_token(),
-        tx: TunnelSender {
-            tx,
-            limiter: state.port_forward_limiter.clone(),
-        },
+        tx: sender,
         open_mode: tokio::sync::Mutex::new(TunnelMode::Unopened),
-        tcp_streams: tokio::sync::Mutex::new(HashMap::new()),
-        udp_binds: tokio::sync::Mutex::new(HashMap::new()),
-        generation: AtomicU64::new(0),
-        listen_session: tokio::sync::Mutex::new(None),
+        active: tokio::sync::Mutex::new(None),
         _connection_permit: state
             .port_forward_limiter
             .try_acquire_tunnel_connection()

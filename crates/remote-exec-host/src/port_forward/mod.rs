@@ -1,4 +1,4 @@
-mod access;
+mod active;
 mod codec;
 mod error;
 mod frames;
@@ -20,8 +20,9 @@ pub use tunnel::{reserve_tunnel_connection, serve_tunnel, serve_tunnel_with_perm
 pub use limiter::{PortForwardLimiter, PortForwardPermit};
 use timings::timings;
 use types::{
-    ConnectionLocalUdpBind, EndpointOkMeta, ErrorMeta, QueuedFrame, TcpStreamEntry,
-    TcpWriteCommand, TcpWriterHandle, TunnelMode, TunnelSender, TunnelState, UdpReaderEntry,
+    ActiveTunnelState, ConnectRuntimeState, ConnectionLocalUdpBind, EndpointOkMeta, ErrorMeta,
+    QueuedFrame, TcpStreamEntry, TcpWriteCommand, TcpWriterHandle, TunnelMode, TunnelSender,
+    TunnelState, UdpReaderEntry,
 };
 
 const READ_BUF_SIZE: usize = 64 * 1024;

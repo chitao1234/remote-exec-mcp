@@ -1,6 +1,5 @@
 use std::io::ErrorKind;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 
 use crate::{AppState, HostRpcError};
 use remote_exec_proto::port_tunnel::{
@@ -11,6 +10,7 @@ use remote_exec_proto::rpc::RpcErrorCode;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, mpsc};
 
+use super::active::{connection_generation, send_tunnel_error, send_tunnel_error_code};
 use super::codec::decode_frame_meta;
 use super::error::rpc_error;
 use super::frames::{frame as raw_frame, meta_frame};
@@ -23,7 +23,8 @@ use super::tcp::{
 };
 use super::udp::{tunnel_udp_bind, tunnel_udp_datagram};
 use super::{
-    PortForwardPermit, QueuedFrame, TunnelMode, TunnelSender, TunnelState, tunnel_error_frame,
+    ActiveTunnelState, ConnectRuntimeState, PortForwardPermit, QueuedFrame, TunnelMode,
+    TunnelSender, TunnelState,
 };
 
 pub async fn serve_tunnel<S>(state: Arc<AppState>, stream: S) -> Result<(), HostRpcError>
@@ -61,10 +62,7 @@ where
         cancel: state.shutdown.child_token(),
         tx: sender,
         open_mode: tokio::sync::Mutex::new(TunnelMode::Unopened),
-        tcp_streams: Mutex::new(std::collections::HashMap::new()),
-        udp_binds: Mutex::new(std::collections::HashMap::new()),
-        generation: std::sync::atomic::AtomicU64::new(0),
-        listen_session: Mutex::new(None),
+        active: Mutex::new(None),
         _connection_permit: connection_permit,
     });
     let writer_cancel = tunnel.cancel.clone();
@@ -95,7 +93,7 @@ where
     });
 
     let result = tunnel_read_loop(tunnel.clone(), &mut reader).await;
-    close_attached_session(
+    close_tunnel_runtime(
         &tunnel,
         close_mode_for_tunnel_result(&result, state.shutdown.is_cancelled()),
     )
@@ -121,8 +119,16 @@ where
                     Ok(frame) => frame,
                     Err(err) if err.kind() == ErrorKind::UnexpectedEof => return Ok(()),
                     Err(err) => {
-                        let _ = send_tunnel_error(&tunnel, 0, RpcErrorCode::InvalidPortTunnel, err.to_string(), true)
-                            .await;
+                        let generation = connection_generation(&tunnel).await;
+                        let _ = send_tunnel_error(
+                            &tunnel.tx,
+                            generation,
+                            0,
+                            RpcErrorCode::InvalidPortTunnel,
+                            err.to_string(),
+                            true,
+                        )
+                        .await;
                         return Err(rpc_error(RpcErrorCode::InvalidPortTunnel, err.to_string()));
                     }
                 }
@@ -131,9 +137,16 @@ where
 
         let stream_id = frame.stream_id;
         if let Err(err) = handle_tunnel_frame(tunnel.clone(), frame).await {
-            let _ =
-                send_tunnel_error_code(&tunnel, stream_id, err.code, err.message.clone(), false)
-                    .await;
+            let generation = connection_generation(&tunnel).await;
+            let _ = send_tunnel_error_code(
+                &tunnel.tx,
+                generation,
+                stream_id,
+                err.code,
+                err.message.clone(),
+                false,
+            )
+            .await;
         }
     }
 }
@@ -180,7 +193,6 @@ pub(super) async fn tunnel_open(
         ));
     }
     let meta: TunnelOpenMeta = decode_frame_meta(&frame)?;
-    tunnel.generation.store(meta.generation, Ordering::Release);
     match meta.role {
         TunnelRole::Listen => tunnel_open_listen(tunnel, meta).await,
         TunnelRole::Connect => tunnel_open_connect(tunnel, meta).await,
@@ -224,6 +236,13 @@ async fn tunnel_open_connect(
         },
     )
     .await?;
+    *tunnel.active.lock().await = Some(ActiveTunnelState::Connect(Arc::new(ConnectRuntimeState {
+        tx: tunnel.tx.clone(),
+        cancel: tunnel.cancel.child_token(),
+        generation: meta.generation,
+        tcp_streams: Mutex::new(std::collections::HashMap::new()),
+        udp_binds: Mutex::new(std::collections::HashMap::new()),
+    })));
     send_tunnel_ready(&tunnel, meta.generation, None, None).await
 }
 
@@ -250,8 +269,7 @@ async fn tunnel_close(tunnel: Arc<TunnelState>, frame: Frame) -> Result<(), Host
         ));
     }
     let meta: TunnelCloseMeta = decode_frame_meta(&frame)?;
-    ensure_tunnel_generation(&tunnel, meta.generation)?;
-    close_attached_session(&tunnel, super::error::SessionCloseMode::GracefulClose).await;
+    ensure_tunnel_generation(&tunnel, meta.generation).await?;
     tunnel
         .send(meta_frame(FrameType::TunnelClosed, 0, &meta)?)
         .await
@@ -361,10 +379,7 @@ async fn open_listen_session(
     generation: u64,
     protocol: TunnelForwardProtocol,
 ) -> Result<(), HostRpcError> {
-    listen_session
-        .session
-        .generation
-        .store(generation, Ordering::Release);
+    listen_session.session.set_generation(generation);
     if let Err(err) = claim_tunnel_mode(tunnel, TunnelMode::Listen { protocol }).await {
         cleanup_inserted_listen_session(tunnel, listen_session).await;
         return Err(err);
@@ -406,11 +421,16 @@ async fn send_tunnel_ready(
         .await
 }
 
-fn ensure_tunnel_generation(
-    tunnel: &TunnelState,
+async fn ensure_tunnel_generation(
+    tunnel: &Arc<TunnelState>,
     frame_generation: u64,
 ) -> Result<(), HostRpcError> {
-    let current_generation = tunnel.generation.load(Ordering::Acquire);
+    let current_generation = connection_generation(tunnel).await.ok_or_else(|| {
+        rpc_error(
+            RpcErrorCode::InvalidPortTunnel,
+            "frame generation requires an active tunnel",
+        )
+    })?;
     if frame_generation != current_generation {
         return Err(rpc_error(
             RpcErrorCode::PortTunnelGenerationMismatch,
@@ -426,30 +446,24 @@ pub(super) async fn tunnel_mode(tunnel: &Arc<TunnelState>) -> TunnelMode {
     tunnel.open_mode.lock().await.clone()
 }
 
-pub(super) async fn send_tunnel_error(
-    tunnel: &TunnelState,
-    stream_id: u32,
-    code: RpcErrorCode,
-    message: impl Into<String>,
-    fatal: bool,
-) -> Result<(), HostRpcError> {
-    send_tunnel_error_code(tunnel, stream_id, code.wire_value(), message, fatal).await
-}
-
-pub(super) async fn send_tunnel_error_code(
-    tunnel: &TunnelState,
-    stream_id: u32,
-    code: impl Into<String>,
-    message: impl Into<String>,
-    fatal: bool,
-) -> Result<(), HostRpcError> {
-    tunnel
-        .send(tunnel_error_frame(
-            stream_id,
-            code,
-            message,
-            fatal,
-            Some(tunnel.generation.load(Ordering::Acquire)),
-        )?)
-        .await
+async fn close_tunnel_runtime(tunnel: &Arc<TunnelState>, mode: super::error::SessionCloseMode) {
+    if matches!(
+        tunnel.active.lock().await.as_ref(),
+        Some(ActiveTunnelState::Listen(_))
+    ) {
+        close_attached_session(tunnel, mode).await;
+        return;
+    }
+    let Some(ActiveTunnelState::Connect(runtime)) = tunnel.active.lock().await.take() else {
+        return;
+    };
+    runtime.cancel.cancel();
+    for (_, mut stream) in runtime.tcp_streams.lock().await.drain() {
+        if let Some(cancel) = stream.cancel.take() {
+            cancel.cancel();
+        }
+    }
+    for (_, bind) in runtime.udp_binds.lock().await.drain() {
+        bind.cancel.cancel();
+    }
 }

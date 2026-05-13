@@ -10,18 +10,19 @@ use tokio_util::sync::CancellationToken;
 
 use crate::HostRpcError;
 
-use super::access::{OpenProtocolAccess, tunnel_access};
+use super::active::{
+    ActiveProtocolAccess, ConnectContext, ListenContext, active_access, send_tunnel_error,
+    send_tunnel_error_code,
+};
 use super::codec::decode_frame_meta;
 use super::error::{is_recoverable_pressure_error, rpc_error};
 use super::frames::{endpoint_ok_frame, frame as raw_frame, meta_frame};
-use super::session::{AttachmentState, reactivate_retained_udp_bind};
-use super::session::{send_tunnel_error_code_with_sender, send_tunnel_error_with_sender};
-use super::tunnel::{send_tunnel_error, send_tunnel_error_code};
+use super::session::{AttachmentState, SessionState, reactivate_retained_udp_bind};
 use super::{ConnectionLocalUdpBind, READ_BUF_SIZE, TunnelState, send_forward_drop_report};
 
 enum UdpReadLoopTarget {
-    Connection(Arc<TunnelState>),
-    AttachedSession(Arc<AttachmentState>),
+    Connect(ConnectContext),
+    Listen(ListenContext),
 }
 
 impl UdpReadLoopTarget {
@@ -33,19 +34,28 @@ impl UdpReadLoopTarget {
     ) -> Result<(), HostRpcError> {
         let frame = raw_frame(FrameType::UdpDatagram, stream_id, meta, data);
         match self {
-            Self::Connection(tunnel) => tunnel.send(frame).await,
-            Self::AttachedSession(attachment) => attachment.tx.send(frame).await,
+            Self::Connect(context) => context.tx().send(frame).await,
+            Self::Listen(context) => context.tx().send(frame).await,
         }
     }
 
     async fn send_error_code(&self, stream_id: u32, code: String, message: String) {
         match self {
-            Self::Connection(tunnel) => {
-                let _ = send_tunnel_error_code(tunnel, stream_id, code, message, false).await;
+            Self::Connect(context) => {
+                let _ = send_tunnel_error_code(
+                    context.tx(),
+                    Some(context.generation()),
+                    stream_id,
+                    code,
+                    message,
+                    false,
+                )
+                .await;
             }
-            Self::AttachedSession(attachment) => {
-                let _ = send_tunnel_error_code_with_sender(
-                    &attachment.tx,
+            Self::Listen(context) => {
+                let _ = send_tunnel_error_code(
+                    context.tx(),
+                    Some(context.generation()),
                     stream_id,
                     code,
                     message,
@@ -58,9 +68,10 @@ impl UdpReadLoopTarget {
 
     async fn send_read_failed(&self, stream_id: u32, message: String) {
         match self {
-            Self::Connection(tunnel) => {
+            Self::Connect(context) => {
                 let _ = send_tunnel_error(
-                    tunnel,
+                    context.tx(),
+                    Some(context.generation()),
                     stream_id,
                     RpcErrorCode::PortReadFailed,
                     message,
@@ -68,9 +79,10 @@ impl UdpReadLoopTarget {
                 )
                 .await;
             }
-            Self::AttachedSession(attachment) => {
-                let _ = send_tunnel_error_with_sender(
-                    &attachment.tx,
+            Self::Listen(context) => {
+                let _ = send_tunnel_error(
+                    context.tx(),
+                    Some(context.generation()),
                     stream_id,
                     RpcErrorCode::PortReadFailed,
                     message,
@@ -89,26 +101,26 @@ impl UdpReadLoopTarget {
         message: String,
     ) {
         match self {
-            Self::Connection(tunnel) => {
+            Self::Connect(context) => {
                 let _ =
-                    send_forward_drop_report(&tunnel.tx, stream_id, kind, reason, message).await;
+                    send_forward_drop_report(context.tx(), stream_id, kind, reason, message).await;
             }
-            Self::AttachedSession(attachment) => {
-                let _ = send_forward_drop_report(&attachment.tx, stream_id, kind, reason, message)
-                    .await;
+            Self::Listen(context) => {
+                let _ =
+                    send_forward_drop_report(context.tx(), stream_id, kind, reason, message).await;
             }
         }
     }
 
     async fn close_on_terminal_send_failure(&self, stream_id: u32) {
         match self {
-            Self::Connection(tunnel) => {
-                if let Some(bind) = tunnel.udp_binds.lock().await.remove(&stream_id) {
+            Self::Connect(context) => {
+                if let Some(bind) = context.udp_binds().lock().await.remove(&stream_id) {
                     bind.cancel.cancel();
                 }
             }
-            Self::AttachedSession(attachment) => {
-                if let Some(reader) = attachment.udp_readers.lock().await.remove(&stream_id) {
+            Self::Listen(context) => {
+                if let Some(reader) = context.udp_readers().lock().await.remove(&stream_id) {
                     reader.cancel.cancel();
                 }
             }
@@ -120,11 +132,11 @@ pub(super) async fn tunnel_udp_bind(
     tunnel: Arc<TunnelState>,
     frame: Frame,
 ) -> Result<(), HostRpcError> {
-    match tunnel_access(&tunnel)
+    match active_access(&tunnel)
         .await?
         .require_bind_target(TunnelForwardProtocol::Udp, "udp bind")?
     {
-        OpenProtocolAccess::Listen(session) => {
+        ActiveProtocolAccess::Listen(listen) => {
             let meta: EndpointMeta = decode_frame_meta(&frame)?;
             let endpoint = normalize_endpoint(&meta.endpoint)
                 .map_err(|err| rpc_error(RpcErrorCode::InvalidEndpoint, err.to_string()))?;
@@ -137,7 +149,8 @@ pub(super) async fn tunnel_udp_bind(
                 .local_addr()
                 .map_err(|err| rpc_error(RpcErrorCode::PortBindFailed, err.to_string()))?
                 .to_string();
-            session
+            listen
+                .session()
                 .replace_udp_bind(
                     frame.stream_id,
                     socket.clone(),
@@ -151,14 +164,17 @@ pub(super) async fn tunnel_udp_bind(
                     bound_endpoint,
                 )?)
                 .await?;
-            reactivate_retained_udp_bind(&session).await
+            reactivate_retained_udp_bind(listen.session()).await
         }
-        OpenProtocolAccess::Connect => tunnel_udp_bind_connection_local(tunnel, frame).await,
+        ActiveProtocolAccess::Connect(connect) => {
+            tunnel_udp_bind_connection_local(tunnel, connect, frame).await
+        }
     }
 }
 
 pub(super) async fn tunnel_udp_bind_connection_local(
     tunnel: Arc<TunnelState>,
+    connect: ConnectContext,
     frame: Frame,
 ) -> Result<(), HostRpcError> {
     let meta: EndpointMeta = decode_frame_meta(&frame)?;
@@ -174,8 +190,8 @@ pub(super) async fn tunnel_udp_bind_connection_local(
         .map_err(|err| rpc_error(RpcErrorCode::PortBindFailed, err.to_string()))?
         .to_string();
     let permit = tunnel.state.port_forward_limiter.try_acquire_udp_bind()?;
-    let stream_cancel = tunnel.cancel.child_token();
-    tunnel.udp_binds.lock().await.insert(
+    let stream_cancel = connect.cancel().child_token();
+    connect.udp_binds().lock().await.insert(
         frame.stream_id,
         ConnectionLocalUdpBind {
             socket: socket.clone(),
@@ -191,7 +207,7 @@ pub(super) async fn tunnel_udp_bind_connection_local(
         )?)
         .await?;
     tokio::spawn(tunnel_udp_read_loop_connection_local(
-        tunnel,
+        connect,
         frame.stream_id,
         socket,
         stream_cancel,
@@ -200,13 +216,13 @@ pub(super) async fn tunnel_udp_bind_connection_local(
 }
 
 pub(super) async fn tunnel_udp_read_loop_connection_local(
-    tunnel: Arc<TunnelState>,
+    connect: ConnectContext,
     stream_id: u32,
     socket: Arc<UdpSocket>,
     cancel: CancellationToken,
 ) {
     tunnel_udp_read_loop(
-        UdpReadLoopTarget::Connection(tunnel),
+        UdpReadLoopTarget::Connect(connect),
         stream_id,
         socket,
         cancel,
@@ -215,13 +231,14 @@ pub(super) async fn tunnel_udp_read_loop_connection_local(
 }
 
 pub(super) async fn tunnel_udp_read_loop_attached_session(
+    session: Arc<SessionState>,
     attachment: Arc<AttachmentState>,
     stream_id: u32,
     socket: Arc<UdpSocket>,
     cancel: CancellationToken,
 ) {
     tunnel_udp_read_loop(
-        UdpReadLoopTarget::AttachedSession(attachment),
+        UdpReadLoopTarget::Listen(ListenContext::new(session, attachment)),
         stream_id,
         socket,
         cancel,
@@ -297,20 +314,22 @@ pub(super) async fn tunnel_udp_datagram(
     frame: Frame,
 ) -> Result<(), HostRpcError> {
     let meta: UdpDatagramMeta = decode_frame_meta(&frame)?;
-    let socket = match tunnel_access(tunnel)
+    let socket = match active_access(tunnel)
         .await?
         .require_protocol(TunnelForwardProtocol::Udp, "udp datagram")?
     {
-        OpenProtocolAccess::Listen(session) => {
-            session.udp_socket(frame.stream_id).await.ok_or_else(|| {
+        ActiveProtocolAccess::Listen(listen) => listen
+            .session()
+            .udp_socket(frame.stream_id)
+            .await
+            .ok_or_else(|| {
                 rpc_error(
                     RpcErrorCode::UnknownPortBind,
                     format!("unknown tunnel udp stream `{}`", frame.stream_id),
                 )
-            })?
-        }
-        OpenProtocolAccess::Connect => tunnel
-            .udp_binds
+            })?,
+        ActiveProtocolAccess::Connect(connect) => connect
+            .udp_binds()
             .lock()
             .await
             .get(&frame.stream_id)

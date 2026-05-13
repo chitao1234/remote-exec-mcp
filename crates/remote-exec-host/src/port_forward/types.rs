@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 
 use remote_exec_proto::port_tunnel::{Frame, TunnelForwardProtocol};
 use serde::Serialize;
@@ -18,11 +17,14 @@ pub(super) struct TunnelState {
     pub(super) cancel: CancellationToken,
     pub(super) tx: TunnelSender,
     pub(super) open_mode: Mutex<TunnelMode>,
-    pub(super) tcp_streams: Mutex<HashMap<u32, TcpStreamEntry>>,
-    pub(super) udp_binds: Mutex<HashMap<u32, ConnectionLocalUdpBind>>,
-    pub(super) generation: AtomicU64,
-    pub(super) listen_session: Mutex<Option<Arc<session::SessionState>>>,
+    pub(super) active: Mutex<Option<ActiveTunnelState>>,
     pub(super) _connection_permit: PortForwardPermit,
+}
+
+#[derive(Clone)]
+pub(super) enum ActiveTunnelState {
+    Connect(Arc<ConnectRuntimeState>),
+    Listen(Arc<session::SessionState>),
 }
 
 #[derive(Clone)]
@@ -57,6 +59,14 @@ pub(super) struct ConnectionLocalUdpBind {
     pub(super) socket: Arc<UdpSocket>,
     pub(super) _permit: PortForwardPermit,
     pub(super) cancel: CancellationToken,
+}
+
+pub(super) struct ConnectRuntimeState {
+    pub(super) tx: TunnelSender,
+    pub(super) cancel: CancellationToken,
+    pub(super) generation: u64,
+    pub(super) tcp_streams: Mutex<HashMap<u32, TcpStreamEntry>>,
+    pub(super) udp_binds: Mutex<HashMap<u32, ConnectionLocalUdpBind>>,
 }
 
 pub(super) struct UdpReaderEntry {

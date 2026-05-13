@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU64};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::Instant;
 
 use remote_exec_proto::rpc::RpcErrorCode;
@@ -15,7 +15,7 @@ use super::limiter::{PortForwardLimiter, PortForwardPermit};
 use super::session_store::TunnelSessionStore;
 use super::udp::tunnel_udp_read_loop_attached_session;
 use super::{
-    TcpStreamEntry, TunnelSender, TunnelState, UdpReaderEntry, timings, tunnel_error_frame,
+    ActiveTunnelState, TcpStreamEntry, TunnelSender, TunnelState, UdpReaderEntry, timings,
 };
 
 pub(super) struct SessionState {
@@ -57,6 +57,14 @@ pub(super) enum RetainedUdpBind {
 impl SessionState {
     pub(super) async fn current_attachment(&self) -> Option<Arc<AttachmentState>> {
         self.attachment.lock().await.clone()
+    }
+
+    pub(super) fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
+    }
+
+    pub(super) fn set_generation(&self, generation: u64) {
+        self.generation.store(generation, Ordering::Release);
     }
 
     pub(super) async fn is_expired(&self) -> bool {
@@ -176,14 +184,22 @@ pub(super) async fn attach_session_to_tunnel(
         task.abort();
     }
     *session.resume_deadline.lock().await = None;
-    *tunnel.listen_session.lock().await = Some(session.clone());
+    *tunnel.active.lock().await = Some(ActiveTunnelState::Listen(session.clone()));
     session.attachment_notify.notify_waiters();
     Ok(())
 }
 
 pub(super) async fn close_attached_session(tunnel: &Arc<TunnelState>, mode: SessionCloseMode) {
-    let Some(session) = tunnel.listen_session.lock().await.take() else {
-        return;
+    let session = {
+        let mut active = tunnel.active.lock().await;
+        match active.take() {
+            Some(ActiveTunnelState::Listen(session)) => session,
+            Some(other) => {
+                *active = Some(other);
+                return;
+            }
+            None => return,
+        }
     };
     if let Some(attachment) = session.attachment.lock().await.take() {
         attachment.cancel.cancel();
@@ -295,31 +311,11 @@ pub(super) async fn reactivate_retained_udp_bind(
         existing.cancel.cancel();
     }
     tokio::spawn(tunnel_udp_read_loop_attached_session(
+        session.clone(),
         attachment,
         stream_id,
         socket,
         stream_cancel,
     ));
     Ok(())
-}
-
-pub(super) async fn send_tunnel_error_with_sender(
-    tx: &TunnelSender,
-    stream_id: u32,
-    code: RpcErrorCode,
-    message: impl Into<String>,
-    fatal: bool,
-) -> Result<(), HostRpcError> {
-    send_tunnel_error_code_with_sender(tx, stream_id, code.wire_value(), message, fatal).await
-}
-
-pub(super) async fn send_tunnel_error_code_with_sender(
-    tx: &TunnelSender,
-    stream_id: u32,
-    code: impl Into<String>,
-    message: impl Into<String>,
-    fatal: bool,
-) -> Result<(), HostRpcError> {
-    tx.send(tunnel_error_frame(stream_id, code, message, fatal, None)?)
-        .await
 }
