@@ -5,6 +5,8 @@ pub mod fixture;
 pub mod spawners;
 pub mod streamable_http_child;
 pub mod stub_daemon;
+#[path = "../../../../tests/support/test_helpers.rs"]
+pub mod test_helpers;
 #[path = "../../../../tests/support/transfer_archive.rs"]
 pub mod transfer_archive;
 

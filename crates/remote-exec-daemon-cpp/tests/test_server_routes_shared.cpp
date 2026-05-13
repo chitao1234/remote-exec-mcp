@@ -18,6 +18,7 @@
 #include "server_routes.h"
 #include "test_filesystem.h"
 #include "test_server_routes_shared.h"
+#include "test_text_file.h"
 #include "transfer_ops.h"
 
 namespace fs = test_fs;
@@ -67,11 +68,6 @@ static HttpRequest json_request(const std::string& path, const Json& body) {
     request.headers["content-type"] = "application/json";
     request.body = body.dump();
     return request;
-}
-
-static void write_text_file(const fs::path& path, const std::string& value) {
-    std::ofstream output(path.c_str(), std::ios::binary | std::ios::trunc);
-    output << value;
 }
 
 #ifndef _WIN32

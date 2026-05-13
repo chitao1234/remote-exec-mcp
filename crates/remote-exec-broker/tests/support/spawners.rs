@@ -19,9 +19,11 @@ use super::stub_daemon::{
     spawn_plain_http_stub_on_listener, spawn_plain_http_unknown_session_exec_write_daemon,
     stub_daemon_state,
 };
+use super::test_helpers::{ReadinessWaitOutcome, poll_until_ready, toml_string};
 
 const TEST_HTTP_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const TEST_HTTP_READY_POLL: Duration = Duration::from_millis(50);
+const TEST_HTTP_READY_ATTEMPTS: usize = 100;
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub struct DelayedTargetFixture {
@@ -79,10 +81,6 @@ struct LocalBrokerConfig<'a> {
     default_workdir: &'a Path,
     experimental_apply_patch_target_encoding_autodetect: bool,
     extra_config: Option<&'a str>,
-}
-
-fn toml_string(value: &str) -> String {
-    toml::Value::String(value.to_string()).to_string()
 }
 
 async fn spawn_unavailable_plain_http_target() -> std::net::SocketAddr {
@@ -194,6 +192,69 @@ fn write_broker_config(
     std::fs::write(path, parts.join("\n")).unwrap();
 }
 
+fn write_broker_fixture_config(
+    tempdir: &TempDir,
+    targets: &[BrokerConfigTarget<'_>],
+    local: Option<&LocalBrokerConfig<'_>>,
+    host_sandbox: Option<&str>,
+    extra_top_level: Option<&str>,
+) -> PathBuf {
+    let broker_config = tempdir.path().join("broker.toml");
+    write_broker_config(
+        &broker_config,
+        targets,
+        local,
+        host_sandbox,
+        extra_top_level,
+    );
+    broker_config
+}
+
+async fn spawn_broker_fixture_from_config(
+    tempdir: TempDir,
+    targets: &[BrokerConfigTarget<'_>],
+    local: Option<&LocalBrokerConfig<'_>>,
+    host_sandbox: Option<&str>,
+    extra_top_level: Option<&str>,
+    stub_state: StubDaemonState,
+) -> BrokerFixture {
+    let broker_config =
+        write_broker_fixture_config(&tempdir, targets, local, host_sandbox, extra_top_level);
+    let client = spawn_broker_child(&broker_config).await;
+    BrokerFixture {
+        _tempdir: tempdir,
+        client,
+        stub_state,
+    }
+}
+
+fn broker_config_fixture_from_config(
+    tempdir: TempDir,
+    targets: &[BrokerConfigTarget<'_>],
+    local: Option<&LocalBrokerConfig<'_>>,
+    host_sandbox: Option<&str>,
+    extra_top_level: Option<&str>,
+    stub_state: StubDaemonState,
+) -> BrokerConfigFixture {
+    let broker_config =
+        write_broker_fixture_config(&tempdir, targets, local, host_sandbox, extra_top_level);
+    BrokerConfigFixture {
+        _tempdir: tempdir,
+        config_path: broker_config,
+        _stub_state: stub_state,
+    }
+}
+
+fn create_local_workdir(tempdir: &TempDir) -> PathBuf {
+    let local_workdir = tempdir.path().join("local-work");
+    std::fs::create_dir_all(&local_workdir).unwrap();
+    local_workdir
+}
+
+fn local_stub_state() -> StubDaemonState {
+    stub_daemon_state("local", ExecWriteBehavior::Success, "local", true)
+}
+
 fn apply_quiet_test_logging(command: &mut tokio::process::Command, explicit_env: &[(&str, &str)]) {
     if explicit_env
         .iter()
@@ -236,9 +297,8 @@ pub async fn spawn_broker_with_tls_stub_daemon_and_extra_target_config(
 
     let tempdir = tempfile::tempdir().unwrap();
     let (addr, stub_state) = spawn_stub_daemon(&certs).await;
-    let broker_config = tempdir.path().join("broker.toml");
-    write_broker_config(
-        &broker_config,
+    spawn_broker_fixture_from_config(
+        tempdir,
         &[BrokerConfigTarget {
             name: "builder-a",
             addr,
@@ -248,14 +308,9 @@ pub async fn spawn_broker_with_tls_stub_daemon_and_extra_target_config(
         None,
         None,
         None,
-    );
-
-    let client = spawn_broker_child(&broker_config).await;
-    BrokerFixture {
-        _tempdir: tempdir,
-        client,
         stub_state,
-    }
+    )
+    .await
 }
 
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
@@ -268,9 +323,8 @@ pub async fn spawn_broker_with_tls_stub_daemon_and_daemon_spec(
     let tempdir = tempfile::tempdir().unwrap();
     let certs = write_test_certs_for_daemon_spec(tempdir.path(), daemon_spec);
     let (addr, stub_state) = spawn_stub_daemon(&certs).await;
-    let broker_config = tempdir.path().join("broker.toml");
-    write_broker_config(
-        &broker_config,
+    spawn_broker_fixture_from_config(
+        tempdir,
         &[BrokerConfigTarget {
             name: "builder-a",
             addr,
@@ -280,22 +334,16 @@ pub async fn spawn_broker_with_tls_stub_daemon_and_daemon_spec(
         None,
         None,
         None,
-    );
-
-    let client = spawn_broker_child(&broker_config).await;
-    BrokerFixture {
-        _tempdir: tempdir,
-        client,
         stub_state,
-    }
+    )
+    .await
 }
 
 pub async fn spawn_broker_with_stub_daemon() -> BrokerFixture {
     let tempdir = tempfile::tempdir().unwrap();
     let (addr, stub_state) = spawn_plain_http_stub_daemon().await;
-    let broker_config = tempdir.path().join("broker.toml");
-    write_broker_config(
-        &broker_config,
+    spawn_broker_fixture_from_config(
+        tempdir,
         &[BrokerConfigTarget {
             name: "builder-a",
             addr,
@@ -305,15 +353,9 @@ pub async fn spawn_broker_with_stub_daemon() -> BrokerFixture {
         None,
         None,
         None,
-    );
-
-    let client = spawn_broker_child(&broker_config).await;
-
-    BrokerFixture {
-        _tempdir: tempdir,
-        client,
         stub_state,
-    }
+    )
+    .await
 }
 
 pub async fn spawn_broker_with_stub_daemon_http_auth(bearer_token: &str) -> BrokerFixture {
@@ -324,14 +366,13 @@ pub async fn spawn_broker_with_stub_daemon_http_auth(bearer_token: &str) -> Brok
     set_transfer_compression_support(&mut stub_state, false);
     set_required_bearer_token(&mut stub_state, bearer_token);
     spawn_plain_http_stub_on_listener(listener, stub_state.clone()).await;
-    let broker_config = tempdir.path().join("broker.toml");
     let auth_config = format!(
         r#"[targets.builder-a.http_auth]
 bearer_token = {}"#,
         toml_string(bearer_token)
     );
-    write_broker_config(
-        &broker_config,
+    spawn_broker_fixture_from_config(
+        tempdir,
         &[BrokerConfigTarget {
             name: "builder-a",
             addr,
@@ -341,23 +382,16 @@ bearer_token = {}"#,
         None,
         None,
         None,
-    );
-
-    let client = spawn_broker_child(&broker_config).await;
-
-    BrokerFixture {
-        _tempdir: tempdir,
-        client,
         stub_state,
-    }
+    )
+    .await
 }
 
 pub async fn spawn_broker_config_with_stub_daemon() -> BrokerConfigFixture {
     let tempdir = tempfile::tempdir().unwrap();
     let (addr, stub_state) = spawn_plain_http_stub_daemon().await;
-    let broker_config = tempdir.path().join("broker.toml");
-    write_broker_config(
-        &broker_config,
+    broker_config_fixture_from_config(
+        tempdir,
         &[BrokerConfigTarget {
             name: "builder-a",
             addr,
@@ -367,22 +401,15 @@ pub async fn spawn_broker_config_with_stub_daemon() -> BrokerConfigFixture {
         None,
         None,
         None,
-    );
-
-    BrokerConfigFixture {
-        _tempdir: tempdir,
-        config_path: broker_config,
-        _stub_state: stub_state,
-    }
+        stub_state,
+    )
 }
 
 pub async fn spawn_broker_config_local_only() -> BrokerConfigFixture {
     let tempdir = tempfile::tempdir().unwrap();
-    let broker_config = tempdir.path().join("broker.toml");
-    let local_workdir = tempdir.path().join("local-work");
-    tokio::fs::create_dir(&local_workdir).await.unwrap();
-    write_broker_config(
-        &broker_config,
+    let local_workdir = create_local_workdir(&tempdir);
+    broker_config_fixture_from_config(
+        tempdir,
         &[],
         Some(&LocalBrokerConfig {
             default_workdir: &local_workdir,
@@ -391,13 +418,8 @@ pub async fn spawn_broker_config_local_only() -> BrokerConfigFixture {
         }),
         None,
         None,
-    );
-
-    BrokerConfigFixture {
-        _tempdir: tempdir,
-        config_path: broker_config,
-        _stub_state: stub_daemon_state("unused", ExecWriteBehavior::Success, "linux", true),
-    }
+        stub_daemon_state("unused", ExecWriteBehavior::Success, "linux", true),
+    )
 }
 
 pub async fn spawn_broker_local_only() -> BrokerFixture {
@@ -423,11 +445,9 @@ pub async fn spawn_broker_local_only_with_port_forward_limits(
     extra_top_level: &str,
 ) -> BrokerFixture {
     let tempdir = tempfile::tempdir().unwrap();
-    let local_workdir = tempdir.path().join("local-work");
-    std::fs::create_dir_all(&local_workdir).unwrap();
-    let broker_config = tempdir.path().join("broker.toml");
-    write_broker_config(
-        &broker_config,
+    let local_workdir = create_local_workdir(&tempdir);
+    spawn_broker_fixture_from_config(
+        tempdir,
         &[],
         Some(&LocalBrokerConfig {
             default_workdir: &local_workdir,
@@ -436,23 +456,16 @@ pub async fn spawn_broker_local_only_with_port_forward_limits(
         }),
         None,
         Some(extra_top_level),
-    );
-
-    let client = spawn_broker_child(&broker_config).await;
-
-    BrokerFixture {
-        _tempdir: tempdir,
-        client,
-        stub_state: stub_daemon_state("local", ExecWriteBehavior::Success, "local", true),
-    }
+        local_stub_state(),
+    )
+    .await
 }
 
 pub async fn spawn_streamable_http_broker_with_stub_daemon() -> HttpBrokerFixture {
     let tempdir = tempfile::tempdir().unwrap();
     let (daemon_addr, stub_state) = spawn_plain_http_stub_daemon().await;
-    let broker_config = tempdir.path().join("broker.toml");
-    write_broker_config(
-        &broker_config,
+    let broker_config = write_broker_fixture_config(
+        &tempdir,
         &[BrokerConfigTarget {
             name: "builder-a",
             addr: daemon_addr,
@@ -498,9 +511,8 @@ pub async fn spawn_broker_with_stub_daemon_platform(
     let (addr, stub_state) =
         spawn_plain_http_daemon_with_platform(ExecWriteBehavior::Success, platform, supports_pty)
             .await;
-    let broker_config = tempdir.path().join("broker.toml");
-    write_broker_config(
-        &broker_config,
+    spawn_broker_fixture_from_config(
+        tempdir,
         &[BrokerConfigTarget {
             name: "builder-a",
             addr,
@@ -510,15 +522,9 @@ pub async fn spawn_broker_with_stub_daemon_platform(
         None,
         None,
         None,
-    );
-
-    let client = spawn_broker_child(&broker_config).await;
-
-    BrokerFixture {
-        _tempdir: tempdir,
-        client,
         stub_state,
-    }
+    )
+    .await
 }
 
 pub async fn spawn_broker_with_stub_port_forward_version(version: u32) -> BrokerFixture {
@@ -529,9 +535,8 @@ pub async fn spawn_broker_with_stub_port_forward_version(version: u32) -> Broker
     set_port_forward_support(&mut stub_state, true, version);
     spawn_plain_http_stub_on_listener(listener, stub_state.clone()).await;
 
-    let broker_config = tempdir.path().join("broker.toml");
-    write_broker_config(
-        &broker_config,
+    spawn_broker_fixture_from_config(
+        tempdir,
         &[BrokerConfigTarget {
             name: "builder-a",
             addr,
@@ -541,15 +546,9 @@ pub async fn spawn_broker_with_stub_port_forward_version(version: u32) -> Broker
         None,
         None,
         None,
-    );
-
-    let client = spawn_broker_child(&broker_config).await;
-
-    BrokerFixture {
-        _tempdir: tempdir,
-        client,
         stub_state,
-    }
+    )
+    .await
 }
 
 pub async fn spawn_broker_with_local_and_stub_port_forward_version(version: u32) -> BrokerFixture {
@@ -589,17 +588,15 @@ async fn spawn_broker_with_local_and_stub_port_forward_version_and_extra_config(
     remote_exec_daemon::install_crypto_provider().unwrap();
 
     let tempdir = tempfile::tempdir().unwrap();
-    let local_workdir = tempdir.path().join("local-work");
-    std::fs::create_dir_all(&local_workdir).unwrap();
+    let local_workdir = create_local_workdir(&tempdir);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let mut stub_state = stub_daemon_state("builder-a", ExecWriteBehavior::Success, "linux", true);
     set_port_forward_support(&mut stub_state, true, version);
     spawn_plain_http_stub_on_listener(listener, stub_state.clone()).await;
 
-    let broker_config = tempdir.path().join("broker.toml");
-    write_broker_config(
-        &broker_config,
+    spawn_broker_fixture_from_config(
+        tempdir,
         &[BrokerConfigTarget {
             name: "builder-a",
             addr,
@@ -613,15 +610,9 @@ async fn spawn_broker_with_local_and_stub_port_forward_version_and_extra_config(
         }),
         None,
         extra_top_level,
-    );
-
-    let client = spawn_broker_child(&broker_config).await;
-
-    BrokerFixture {
-        _tempdir: tempdir,
-        client,
         stub_state,
-    }
+    )
+    .await
 }
 
 pub async fn spawn_broker_with_plain_http_stub_daemon() -> BrokerFixture {
@@ -633,9 +624,8 @@ pub async fn spawn_broker_with_plain_http_stub_daemon() -> BrokerFixture {
     let addr = listener.local_addr().unwrap();
     spawn_plain_http_stub_on_listener(listener, stub_state.clone()).await;
 
-    let broker_config = tempdir.path().join("broker.toml");
-    write_broker_config(
-        &broker_config,
+    spawn_broker_fixture_from_config(
+        tempdir,
         &[BrokerConfigTarget {
             name: "builder-xp",
             addr,
@@ -645,15 +635,9 @@ pub async fn spawn_broker_with_plain_http_stub_daemon() -> BrokerFixture {
         None,
         None,
         None,
-    );
-
-    let client = spawn_broker_child(&broker_config).await;
-
-    BrokerFixture {
-        _tempdir: tempdir,
-        client,
         stub_state,
-    }
+    )
+    .await
 }
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
@@ -662,9 +646,8 @@ pub async fn spawn_broker_with_reverse_ordered_targets() -> BrokerFixture {
     let (live_addr, stub_state) = spawn_plain_http_stub_daemon().await;
     // Keep builder-b structurally unavailable without guessing a future free port.
     let unavailable_addr = spawn_unavailable_plain_http_target().await;
-    let broker_config = tempdir.path().join("broker.toml");
-    write_broker_config(
-        &broker_config,
+    spawn_broker_fixture_from_config(
+        tempdir,
         &[
             BrokerConfigTarget {
                 name: "builder-b",
@@ -682,15 +665,9 @@ pub async fn spawn_broker_with_reverse_ordered_targets() -> BrokerFixture {
         None,
         None,
         None,
-    );
-
-    let client = spawn_broker_child(&broker_config).await;
-
-    BrokerFixture {
-        _tempdir: tempdir,
-        client,
         stub_state,
-    }
+    )
+    .await
 }
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
@@ -699,9 +676,8 @@ pub async fn spawn_broker_with_live_and_dead_targets() -> BrokerFixture {
     let (live_addr, stub_state) = spawn_plain_http_stub_daemon().await;
     // Keep builder-b structurally unavailable without guessing a future free port.
     let unavailable_addr = spawn_unavailable_plain_http_target().await;
-    let broker_config = tempdir.path().join("broker.toml");
-    write_broker_config(
-        &broker_config,
+    spawn_broker_fixture_from_config(
+        tempdir,
         &[
             BrokerConfigTarget {
                 name: "builder-a",
@@ -719,24 +695,17 @@ pub async fn spawn_broker_with_live_and_dead_targets() -> BrokerFixture {
         None,
         None,
         None,
-    );
-
-    let client = spawn_broker_child(&broker_config).await;
-
-    BrokerFixture {
-        _tempdir: tempdir,
-        client,
         stub_state,
-    }
+    )
+    .await
 }
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub async fn spawn_broker_with_retryable_exec_write_error() -> BrokerFixture {
     let tempdir = tempfile::tempdir().unwrap();
     let (addr, stub_state) = spawn_plain_http_retryable_exec_write_daemon().await;
-    let broker_config = tempdir.path().join("broker.toml");
-    write_broker_config(
-        &broker_config,
+    spawn_broker_fixture_from_config(
+        tempdir,
         &[BrokerConfigTarget {
             name: "builder-a",
             addr,
@@ -746,24 +715,17 @@ pub async fn spawn_broker_with_retryable_exec_write_error() -> BrokerFixture {
         None,
         None,
         None,
-    );
-
-    let client = spawn_broker_child(&broker_config).await;
-
-    BrokerFixture {
-        _tempdir: tempdir,
-        client,
         stub_state,
-    }
+    )
+    .await
 }
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
 pub async fn spawn_broker_with_unknown_session_exec_write_error() -> BrokerFixture {
     let tempdir = tempfile::tempdir().unwrap();
     let (addr, stub_state) = spawn_plain_http_unknown_session_exec_write_daemon().await;
-    let broker_config = tempdir.path().join("broker.toml");
-    write_broker_config(
-        &broker_config,
+    spawn_broker_fixture_from_config(
+        tempdir,
         &[BrokerConfigTarget {
             name: "builder-a",
             addr,
@@ -773,15 +735,9 @@ pub async fn spawn_broker_with_unknown_session_exec_write_error() -> BrokerFixtu
         None,
         None,
         None,
-    );
-
-    let client = spawn_broker_child(&broker_config).await;
-
-    BrokerFixture {
-        _tempdir: tempdir,
-        client,
         stub_state,
-    }
+    )
+    .await
 }
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
@@ -790,11 +746,10 @@ pub async fn spawn_broker_with_late_target() -> DelayedTargetFixture {
     let (live_addr, stub_state) = spawn_plain_http_stub_daemon().await;
     let delayed_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let delayed_addr = delayed_listener.local_addr().unwrap();
-    let broker_config = tempdir.path().join("broker.toml");
     let late_target_extra_config = r#"[targets.builder-b.timeouts]
 startup_probe_ms = 100"#;
-    write_broker_config(
-        &broker_config,
+    let broker_config = write_broker_fixture_config(
+        &tempdir,
         &[
             BrokerConfigTarget {
                 name: "builder-a",
@@ -830,11 +785,9 @@ pub async fn spawn_broker_with_local_target() -> BrokerFixture {
     remote_exec_daemon::install_crypto_provider().unwrap();
 
     let tempdir = tempfile::tempdir().unwrap();
-    let local_workdir = tempdir.path().join("local-work");
-    std::fs::create_dir_all(&local_workdir).unwrap();
-    let broker_config = tempdir.path().join("broker.toml");
-    write_broker_config(
-        &broker_config,
+    let local_workdir = create_local_workdir(&tempdir);
+    spawn_broker_fixture_from_config(
+        tempdir,
         &[],
         Some(&LocalBrokerConfig {
             default_workdir: &local_workdir,
@@ -843,19 +796,9 @@ pub async fn spawn_broker_with_local_target() -> BrokerFixture {
         }),
         None,
         None,
-    );
-
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
-    command.arg(&broker_config);
-    apply_quiet_test_logging(&mut command, &[]);
-    let transport = TokioChildProcess::new(command).unwrap();
-    let client = DummyClientHandler.serve(transport).await.unwrap();
-
-    BrokerFixture {
-        _tempdir: tempdir,
-        client,
-        stub_state: stub_daemon_state("local", ExecWriteBehavior::Success, "local", true),
-    }
+        local_stub_state(),
+    )
+    .await
 }
 
 pub async fn spawn_broker_with_local_target_and_host_sandbox(host_sandbox: &str) -> BrokerFixture {
@@ -871,12 +814,10 @@ where
     remote_exec_daemon::install_crypto_provider().unwrap();
 
     let tempdir = tempfile::tempdir().unwrap();
-    let local_workdir = tempdir.path().join("local-work");
-    std::fs::create_dir_all(&local_workdir).unwrap();
-    let broker_config = tempdir.path().join("broker.toml");
+    let local_workdir = create_local_workdir(&tempdir);
     let host_sandbox = render_host_sandbox(&local_workdir);
-    write_broker_config(
-        &broker_config,
+    spawn_broker_fixture_from_config(
+        tempdir,
         &[],
         Some(&LocalBrokerConfig {
             default_workdir: &local_workdir,
@@ -885,30 +826,18 @@ where
         }),
         Some(&host_sandbox),
         None,
-    );
-
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
-    command.arg(&broker_config);
-    apply_quiet_test_logging(&mut command, &[]);
-    let transport = TokioChildProcess::new(command).unwrap();
-    let client = DummyClientHandler.serve(transport).await.unwrap();
-
-    BrokerFixture {
-        _tempdir: tempdir,
-        client,
-        stub_state: stub_daemon_state("local", ExecWriteBehavior::Success, "local", true),
-    }
+        local_stub_state(),
+    )
+    .await
 }
 
 pub async fn spawn_broker_with_local_target_apply_patch_encoding_autodetect() -> BrokerFixture {
     remote_exec_daemon::install_crypto_provider().unwrap();
 
     let tempdir = tempfile::tempdir().unwrap();
-    let local_workdir = tempdir.path().join("local-work");
-    std::fs::create_dir_all(&local_workdir).unwrap();
-    let broker_config = tempdir.path().join("broker.toml");
-    write_broker_config(
-        &broker_config,
+    let local_workdir = create_local_workdir(&tempdir);
+    spawn_broker_fixture_from_config(
+        tempdir,
         &[],
         Some(&LocalBrokerConfig {
             default_workdir: &local_workdir,
@@ -917,30 +846,18 @@ pub async fn spawn_broker_with_local_target_apply_patch_encoding_autodetect() ->
         }),
         None,
         None,
-    );
-
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
-    command.arg(&broker_config);
-    apply_quiet_test_logging(&mut command, &[]);
-    let transport = TokioChildProcess::new(command).unwrap();
-    let client = DummyClientHandler.serve(transport).await.unwrap();
-
-    BrokerFixture {
-        _tempdir: tempdir,
-        client,
-        stub_state: stub_daemon_state("local", ExecWriteBehavior::Success, "local", true),
-    }
+        local_stub_state(),
+    )
+    .await
 }
 
 pub async fn spawn_broker_with_local_target_and_extra_config(extra_config: &str) -> BrokerFixture {
     remote_exec_daemon::install_crypto_provider().unwrap();
 
     let tempdir = tempfile::tempdir().unwrap();
-    let local_workdir = tempdir.path().join("local-work");
-    std::fs::create_dir_all(&local_workdir).unwrap();
-    let broker_config = tempdir.path().join("broker.toml");
-    write_broker_config(
-        &broker_config,
+    let local_workdir = create_local_workdir(&tempdir);
+    spawn_broker_fixture_from_config(
+        tempdir,
         &[],
         Some(&LocalBrokerConfig {
             default_workdir: &local_workdir,
@@ -949,53 +866,44 @@ pub async fn spawn_broker_with_local_target_and_extra_config(extra_config: &str)
         }),
         None,
         None,
-    );
-
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
-    command.arg(&broker_config);
-    apply_quiet_test_logging(&mut command, &[]);
-    let transport = TokioChildProcess::new(command).unwrap();
-    let client = DummyClientHandler.serve(transport).await.unwrap();
-
-    BrokerFixture {
-        _tempdir: tempdir,
-        client,
-        stub_state: stub_daemon_state("local", ExecWriteBehavior::Success, "local", true),
-    }
+        local_stub_state(),
+    )
+    .await
 }
 
 async fn wait_until_ready_http(addr: std::net::SocketAddr) {
     remote_exec_broker::install_crypto_provider().unwrap();
     let client = reqwest::Client::builder().build().unwrap();
 
-    tokio::time::timeout(TEST_HTTP_READY_TIMEOUT, async {
-        loop {
-            if client
+    let outcome = poll_until_ready(
+        TEST_HTTP_READY_ATTEMPTS,
+        TEST_HTTP_READY_POLL,
+        || async {
+            client
                 .post(format!("http://{addr}/v1/health"))
                 .json(&serde_json::json!({}))
                 .send()
                 .await
                 .is_ok()
-            {
-                return;
-            }
-            tokio::time::sleep(TEST_HTTP_READY_POLL).await;
-        }
-    })
-    .await
-    .unwrap_or_else(|_| {
-        panic!(
-            "plain HTTP stub daemon at http://{addr} did not become ready within {TEST_HTTP_READY_TIMEOUT:?}"
-        )
-    });
+        },
+        || false,
+    )
+    .await;
+    assert_eq!(
+        outcome,
+        ReadinessWaitOutcome::Ready,
+        "plain HTTP stub daemon at http://{addr} did not become ready within {TEST_HTTP_READY_TIMEOUT:?}"
+    );
 }
 
 async fn wait_until_ready_mcp_http(url: &str) {
     remote_exec_broker::install_crypto_provider().unwrap();
     let client = reqwest::Client::builder().build().unwrap();
 
-    tokio::time::timeout(TEST_HTTP_READY_TIMEOUT, async {
-        loop {
+    let outcome = poll_until_ready(
+        TEST_HTTP_READY_ATTEMPTS,
+        TEST_HTTP_READY_POLL,
+        || async {
             let response = client
                 .post(url)
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
@@ -1003,29 +911,25 @@ async fn wait_until_ready_mcp_http(url: &str) {
                 .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"#)
                 .send()
                 .await;
-            if response
+            response
                 .as_ref()
                 .is_ok_and(|response| response.status().is_success())
-            {
-                return;
-            }
-            tokio::time::sleep(TEST_HTTP_READY_POLL).await;
-        }
-    })
-    .await
-    .unwrap_or_else(|_| {
-        panic!(
-            "streamable HTTP broker at {url} did not become ready within {TEST_HTTP_READY_TIMEOUT:?}"
-        )
-    });
+        },
+        || false,
+    )
+    .await;
+    assert_eq!(
+        outcome,
+        ReadinessWaitOutcome::Ready,
+        "streamable HTTP broker at {url} did not become ready within {TEST_HTTP_READY_TIMEOUT:?}"
+    );
 }
 
 pub async fn spawn_broker_with_stub_daemon_and_structured_content_disabled() -> BrokerFixture {
     let tempdir = tempfile::tempdir().unwrap();
     let (addr, stub_state) = spawn_plain_http_stub_daemon().await;
-    let broker_config = tempdir.path().join("broker.toml");
-    write_broker_config(
-        &broker_config,
+    spawn_broker_fixture_from_config(
+        tempdir,
         &[BrokerConfigTarget {
             name: "builder-a",
             addr,
@@ -1035,13 +939,7 @@ pub async fn spawn_broker_with_stub_daemon_and_structured_content_disabled() -> 
         None,
         None,
         Some("disable_structured_content = true"),
-    );
-
-    let client = spawn_broker_child(&broker_config).await;
-
-    BrokerFixture {
-        _tempdir: tempdir,
-        client,
         stub_state,
-    }
+    )
+    .await
 }

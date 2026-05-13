@@ -8,6 +8,7 @@ use anyhow::Context;
 use remote_exec_daemon::config::{DaemonConfig, DaemonTransport, ProcessEnvironment, PtyMode};
 
 use super::fixture::DaemonFixture;
+use super::test_helpers::{ReadinessWaitOutcome, poll_until_ready, toml_string};
 
 #[cfg(feature = "tls")]
 #[path = "spawn_tls.rs"]
@@ -21,11 +22,6 @@ mod spawn_tls;
 pub use spawn_tls::{
     PinnedClientCert, spawn_daemon_over_tls, spawn_daemon_with_pinned_client_cert,
 };
-
-#[allow(dead_code, reason = "Shared across daemon integration test crates")]
-fn toml_string(value: &str) -> String {
-    toml::Value::String(value.to_string()).to_string()
-}
 
 #[cfg(windows)]
 #[allow(dead_code, reason = "Shared across daemon integration test crates")]
@@ -132,27 +128,25 @@ pub(super) async fn wait_until_ready(
     url: &str,
     server_thread: &JoinHandle<anyhow::Result<()>>,
 ) -> StartupWaitOutcome {
-    for _ in 0..STARTUP_POLL_ATTEMPTS {
-        if client
-            .post(url)
-            .header(reqwest::header::CONNECTION, "close")
-            .json(&serde_json::json!({}))
-            .send()
-            .await
-            .is_ok()
-        {
-            return StartupWaitOutcome::Ready;
-        }
-        if server_thread.is_finished() {
-            return StartupWaitOutcome::ThreadFinished;
-        }
-        tokio::time::sleep(STARTUP_POLL_INTERVAL).await;
-    }
-
-    if server_thread.is_finished() {
-        StartupWaitOutcome::ThreadFinished
-    } else {
-        StartupWaitOutcome::TimedOut
+    match poll_until_ready(
+        STARTUP_POLL_ATTEMPTS,
+        STARTUP_POLL_INTERVAL,
+        || async {
+            client
+                .post(url)
+                .header(reqwest::header::CONNECTION, "close")
+                .json(&serde_json::json!({}))
+                .send()
+                .await
+                .is_ok()
+        },
+        || server_thread.is_finished(),
+    )
+    .await
+    {
+        ReadinessWaitOutcome::Ready => StartupWaitOutcome::Ready,
+        ReadinessWaitOutcome::Finished => StartupWaitOutcome::ThreadFinished,
+        ReadinessWaitOutcome::TimedOut => StartupWaitOutcome::TimedOut,
     }
 }
 
@@ -161,20 +155,17 @@ pub(super) async fn wait_until_listener_ready(
     addr: SocketAddr,
     server_thread: &JoinHandle<anyhow::Result<()>>,
 ) -> StartupWaitOutcome {
-    for _ in 0..STARTUP_POLL_ATTEMPTS {
-        if tokio::net::TcpStream::connect(addr).await.is_ok() {
-            return StartupWaitOutcome::Ready;
-        }
-        if server_thread.is_finished() {
-            return StartupWaitOutcome::ThreadFinished;
-        }
-        tokio::time::sleep(STARTUP_POLL_INTERVAL).await;
-    }
-
-    if server_thread.is_finished() {
-        StartupWaitOutcome::ThreadFinished
-    } else {
-        StartupWaitOutcome::TimedOut
+    match poll_until_ready(
+        STARTUP_POLL_ATTEMPTS,
+        STARTUP_POLL_INTERVAL,
+        || async { tokio::net::TcpStream::connect(addr).await.is_ok() },
+        || server_thread.is_finished(),
+    )
+    .await
+    {
+        ReadinessWaitOutcome::Ready => StartupWaitOutcome::Ready,
+        ReadinessWaitOutcome::Finished => StartupWaitOutcome::ThreadFinished,
+        ReadinessWaitOutcome::TimedOut => StartupWaitOutcome::TimedOut,
     }
 }
 

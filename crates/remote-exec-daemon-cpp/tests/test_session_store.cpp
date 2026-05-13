@@ -19,6 +19,7 @@
 #include "process_session.h"
 #include "session_store.h"
 #include "test_filesystem.h"
+#include "test_text_file.h"
 
 namespace fs = test_fs;
 
@@ -74,12 +75,6 @@ static YieldTimeConfig fast_yield_time_config() {
     config.write_stdin_poll = YieldTimeOperationConfig{1UL, 1000UL, 1UL};
     config.write_stdin_input = YieldTimeOperationConfig{1UL, 1000UL, 1UL};
     return config;
-}
-
-static void write_text_file(const fs::path& path, const std::string& contents) {
-    std::ofstream out(path.string().c_str(), std::ios::binary);
-    assert(out.good());
-    out << contents;
 }
 
 static bool wait_until_true(const std::atomic<bool>& value, unsigned long timeout_ms) {
