@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::limits::effective_forward_limits;
+use super::limits::{BrokerPortForwardLimits, effective_forward_limits};
 use super::side::SideHandle;
 use super::store::{PortForwardRecord, PortForwardStore};
 use super::tcp_bridge::run_tcp_forward;
@@ -68,54 +68,57 @@ pub(super) struct ForwardRuntime {
     pub(super) connect_side: SideHandle,
     pub(super) protocol: PublicForwardPortProtocol,
     pub(super) connect_endpoint: String,
-    pub(super) max_active_tcp_streams_per_forward: u64,
-    pub(super) max_pending_tcp_bytes_per_stream: usize,
-    pub(super) max_pending_tcp_bytes_per_forward: usize,
-    pub(super) max_udp_peers_per_forward: usize,
-    pub(super) max_tunnel_queued_bytes: usize,
-    pub(super) max_reconnecting_forwards: usize,
+    pub(super) limits: ForwardLimits,
     pub(super) store: PortForwardStore,
     pub(super) listen_session: Arc<ListenSessionControl>,
     pub(super) initial_connect_tunnel: Arc<PortTunnel>,
     pub(super) cancel: CancellationToken,
 }
 
-struct ForwardRuntimeParts {
-    forward_id: String,
-    listen_side: SideHandle,
-    connect_side: SideHandle,
-    protocol: PublicForwardPortProtocol,
-    connect_endpoint: String,
-    limits: ForwardPortLimitSummary,
-    store: PortForwardStore,
-    listen_session: Arc<ListenSessionControl>,
-    initial_connect_tunnel: Arc<PortTunnel>,
-    cancel: CancellationToken,
+#[derive(Clone, Copy)]
+pub(super) struct ForwardLimits {
+    pub(super) max_active_tcp_streams: u64,
+    pub(super) max_pending_tcp_bytes_per_stream: usize,
+    pub(super) max_pending_tcp_bytes_per_forward: usize,
+    pub(super) max_udp_peers: usize,
+    pub(super) max_tunnel_queued_bytes: usize,
+    pub(super) max_reconnecting_forwards: usize,
+}
+
+impl ForwardLimits {
+    #[cfg(test)]
+    pub(super) fn public_summary(self) -> ForwardPortLimitSummary {
+        ForwardPortLimitSummary {
+            max_active_tcp_streams: self.max_active_tcp_streams,
+            max_udp_peers: self.max_udp_peers as u64,
+            max_pending_tcp_bytes_per_stream: self.max_pending_tcp_bytes_per_stream as u64,
+            max_pending_tcp_bytes_per_forward: self.max_pending_tcp_bytes_per_forward as u64,
+            max_tunnel_queued_bytes: self.max_tunnel_queued_bytes as u64,
+            max_reconnecting_forwards: self.max_reconnecting_forwards,
+        }
+    }
+}
+
+impl From<ForwardPortLimitSummary> for ForwardLimits {
+    fn from(summary: ForwardPortLimitSummary) -> Self {
+        Self {
+            max_active_tcp_streams: summary.max_active_tcp_streams,
+            max_pending_tcp_bytes_per_stream: summary.max_pending_tcp_bytes_per_stream as usize,
+            max_pending_tcp_bytes_per_forward: summary.max_pending_tcp_bytes_per_forward as usize,
+            max_udp_peers: summary.max_udp_peers as usize,
+            max_tunnel_queued_bytes: summary.max_tunnel_queued_bytes as usize,
+            max_reconnecting_forwards: summary.max_reconnecting_forwards,
+        }
+    }
+}
+
+impl Default for ForwardLimits {
+    fn default() -> Self {
+        BrokerPortForwardLimits::default().public_summary().into()
+    }
 }
 
 impl ForwardRuntime {
-    fn new(parts: ForwardRuntimeParts) -> Self {
-        Self {
-            forward_id: parts.forward_id,
-            listen_side: parts.listen_side,
-            connect_side: parts.connect_side,
-            protocol: parts.protocol,
-            connect_endpoint: parts.connect_endpoint,
-            max_active_tcp_streams_per_forward: parts.limits.max_active_tcp_streams,
-            max_pending_tcp_bytes_per_stream: parts.limits.max_pending_tcp_bytes_per_stream
-                as usize,
-            max_pending_tcp_bytes_per_forward: parts.limits.max_pending_tcp_bytes_per_forward
-                as usize,
-            max_udp_peers_per_forward: parts.limits.max_udp_peers as usize,
-            max_tunnel_queued_bytes: parts.limits.max_tunnel_queued_bytes as usize,
-            max_reconnecting_forwards: parts.limits.max_reconnecting_forwards,
-            store: parts.store,
-            listen_session: parts.listen_session,
-            initial_connect_tunnel: parts.initial_connect_tunnel,
-            cancel: parts.cancel,
-        }
-    }
-
     pub(super) async fn record_dropped_datagram(&self) {
         self.store
             .update_entry(&self.forward_id, |entry| {
@@ -171,7 +174,7 @@ impl ForwardRuntime {
                 &self.forward_id,
                 side,
                 reason.to_string(),
-                self.max_reconnecting_forwards,
+                self.limits.max_reconnecting_forwards,
             )
             .await
     }
@@ -180,6 +183,10 @@ impl ForwardRuntime {
         self.store.mark_ready(&self.forward_id, side).await;
     }
 }
+
+const LISTEN_SESSION_STREAM_ID: u32 = 1;
+// TODO: implement listen-side generation rotation on reconnect instead of reusing generation 1.
+const LISTEN_SESSION_GENERATION: u64 = 1;
 
 #[derive(Clone, Copy)]
 struct ForwardOpenKind {
@@ -219,7 +226,6 @@ pub(super) struct ListenSessionControl {
     pub(super) forward_id: String,
     pub(super) session_id: String,
     pub(super) protocol: PublicForwardPortProtocol,
-    pub(super) generation: u64,
     pub(super) listener_stream_id: u32,
     pub(super) resume_timeout: Duration,
     pub(super) max_tunnel_queued_bytes: usize,
@@ -235,7 +241,6 @@ struct ListenSessionParams {
     forward_id: String,
     session_id: String,
     protocol: PublicForwardPortProtocol,
-    generation: u64,
     listener_stream_id: u32,
     resume_timeout: Duration,
     max_tunnel_queued_bytes: usize,
@@ -267,7 +272,6 @@ impl ListenSessionControl {
             forward_id: params.forward_id,
             session_id: params.session_id,
             protocol: params.protocol,
-            generation: params.generation,
             listener_stream_id: params.listener_stream_id,
             resume_timeout: params.resume_timeout,
             max_tunnel_queued_bytes: params.max_tunnel_queued_bytes,
@@ -305,8 +309,7 @@ impl ListenSessionControl {
             forward_id,
             session_id,
             protocol,
-            generation: 1,
-            listener_stream_id: 1,
+            listener_stream_id: LISTEN_SESSION_STREAM_ID,
             resume_timeout,
             max_tunnel_queued_bytes,
             state: Mutex::new(ListenSessionState {
@@ -430,7 +433,7 @@ async fn open_listen_session_for_forward(
         listen_side,
         forward_id,
         kind.protocol,
-        1,
+        LISTEN_SESSION_GENERATION,
         None,
         max_queued_bytes,
     )
@@ -443,16 +446,22 @@ async fn open_connect_tunnel_for_forward(
     kind: ForwardOpenKind,
     max_queued_bytes: usize,
 ) -> anyhow::Result<OpenDataTunnel> {
-    open_data_tunnel(connect_side, forward_id, kind.protocol, 1, max_queued_bytes)
-        .await
-        .with_context(|| {
-            open_context(
-                kind,
-                ForwardSide::Connect,
-                connect_side.name(),
-                "data tunnel",
-            )
-        })
+    open_data_tunnel(
+        connect_side,
+        forward_id,
+        kind.protocol,
+        LISTEN_SESSION_GENERATION,
+        max_queued_bytes,
+    )
+    .await
+    .with_context(|| {
+        open_context(
+            kind,
+            ForwardSide::Connect,
+            connect_side.name(),
+            "data tunnel",
+        )
+    })
 }
 
 async fn build_opened_forward(
@@ -477,7 +486,7 @@ async fn build_opened_forward(
     } = opened.listen;
     let limits = effective_forward_limits(requested_limits, &listen_limits, &opened.connect.limits);
     let connect_tunnel = opened.connect.tunnel;
-    let listener_stream_id = 1;
+    let listener_stream_id = LISTEN_SESSION_STREAM_ID;
     let listener_open_context = open_context(
         kind,
         ForwardSide::Listen,
@@ -514,7 +523,6 @@ async fn build_opened_forward(
         forward_id: forward_id.clone(),
         session_id,
         protocol: kind.protocol,
-        generation: 1,
         listener_stream_id,
         resume_timeout,
         max_tunnel_queued_bytes: limits.max_tunnel_queued_bytes as usize,
@@ -522,18 +530,18 @@ async fn build_opened_forward(
     }));
 
     let cancel = CancellationToken::new();
-    let runtime = ForwardRuntime::new(ForwardRuntimeParts {
+    let runtime = ForwardRuntime {
         forward_id: forward_id.clone(),
         listen_side: listen_side.clone(),
         connect_side: connect_side.clone(),
         protocol: kind.protocol,
         connect_endpoint: connect_endpoint.clone(),
-        limits,
+        limits: limits.into(),
         store,
         listen_session: listen_session.clone(),
         initial_connect_tunnel: connect_tunnel,
         cancel: cancel.clone(),
-    });
+    };
     Ok(OpenedForward {
         record: PortForwardRecord::new(
             ForwardPortEntry::new_open(
@@ -773,7 +781,7 @@ async fn resume_listen_session_inner(
         &control.side,
         &control.forward_id,
         control.protocol,
-        control.generation,
+        LISTEN_SESSION_GENERATION,
         Some(control.session_id.clone()),
         control.max_tunnel_queued_bytes,
     )
@@ -843,7 +851,7 @@ async fn recover_connect_side_tunnel_after_listen_recovery(
         .mark_connect_reopening_after_listen_recovery(
             &runtime.forward_id,
             reason.to_string(),
-            runtime.max_reconnecting_forwards,
+            runtime.limits.max_reconnecting_forwards,
         )
         .await?;
     let Some(connect_tunnel) = retry_open_connect_tunnel(runtime).await? else {
@@ -882,8 +890,8 @@ async fn retry_open_connect_tunnel(
                 &runtime.connect_side,
                 &runtime.forward_id,
                 runtime.protocol,
-                1,
-                runtime.max_tunnel_queued_bytes,
+                LISTEN_SESSION_GENERATION,
+                runtime.limits.max_tunnel_queued_bytes,
             )
             .await
             .map(|opened| opened.tunnel)
@@ -949,7 +957,7 @@ pub(super) async fn close_listen_session(control: Arc<ListenSessionControl>) -> 
                 return close_tunnel_generation(
                     &tunnel,
                     &control.forward_id,
-                    control.generation,
+                    LISTEN_SESSION_GENERATION,
                     "operator_close",
                 )
                 .await;
@@ -967,7 +975,7 @@ pub(super) async fn close_listen_session(control: Arc<ListenSessionControl>) -> 
     close_tunnel_generation(
         &tunnel,
         &control.forward_id,
-        control.generation,
+        LISTEN_SESSION_GENERATION,
         "operator_close",
     )
     .await

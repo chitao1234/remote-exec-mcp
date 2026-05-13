@@ -5,7 +5,7 @@ use std::task::{Context as TaskContext, Poll, Waker};
 use std::time::Duration;
 
 use remote_exec_proto::port_tunnel::{Frame, FrameType, HEADER_LEN};
-use remote_exec_proto::public::{ForwardPortEntry, ForwardPortLimitSummary};
+use remote_exec_proto::public::ForwardPortEntry;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use super::store::{PortForwardFilter, PortForwardRecord};
@@ -144,14 +144,7 @@ pub(super) fn test_record(runtime: &ForwardRuntime, listen_endpoint: &str) -> Po
             runtime.connect_side.name().to_string(),
             runtime.connect_endpoint.clone(),
             runtime.protocol,
-            ForwardPortLimitSummary {
-                max_active_tcp_streams: runtime.max_active_tcp_streams_per_forward,
-                max_udp_peers: runtime.max_udp_peers_per_forward as u64,
-                max_pending_tcp_bytes_per_stream: runtime.max_pending_tcp_bytes_per_stream as u64,
-                max_pending_tcp_bytes_per_forward: runtime.max_pending_tcp_bytes_per_forward as u64,
-                max_tunnel_queued_bytes: runtime.max_tunnel_queued_bytes as u64,
-                max_reconnecting_forwards: runtime.max_reconnecting_forwards,
-            },
+            runtime.limits.public_summary(),
         ),
         runtime.listen_session.clone(),
         runtime.cancel.clone(),

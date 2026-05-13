@@ -90,7 +90,7 @@ async fn run_udp_forward_epoch(
                             &mut connector_stream_ids,
                             &connector_bind_endpoint,
                             datagram.peer.clone(),
-                            runtime.max_udp_peers_per_forward,
+                            runtime.limits.max_udp_peers,
                         ).await {
                             Ok(stream_id) => stream_id,
                             Err(UdpConnectorError::LimitExceeded) => {
@@ -285,7 +285,7 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::super::side::SideHandle;
-    use super::super::supervisor::{ForwardRuntime, ListenSessionControl};
+    use super::super::supervisor::{ForwardLimits, ForwardRuntime, ListenSessionControl};
     use super::super::test_support::{
         ScriptedTunnelIo, filter_one, test_record, wait_until_send_fails,
     };
@@ -627,12 +627,7 @@ mod tests {
             connect_side: SideHandle::local().unwrap(),
             protocol: PublicForwardPortProtocol::Udp,
             connect_endpoint: "127.0.0.1:1".to_string(),
-            max_active_tcp_streams_per_forward: 256,
-            max_pending_tcp_bytes_per_stream: 256 * 1024,
-            max_pending_tcp_bytes_per_forward: 2 * 1024 * 1024,
-            max_udp_peers_per_forward: 256,
-            max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
-            max_reconnecting_forwards: 16,
+            limits: ForwardLimits::default(),
             store: Default::default(),
             listen_session,
             initial_connect_tunnel: connect_tunnel,

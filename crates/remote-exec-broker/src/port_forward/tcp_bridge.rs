@@ -181,7 +181,7 @@ async fn handle_connect_tunnel_event(
                 .await
         }
         FrameType::Error => {
-            handle_connect_error(runtime, listen_tunnel, state, frame).await?;
+            handle_connect_error(runtime, connect_tunnel, listen_tunnel, state, frame).await?;
             Ok(None)
         }
         FrameType::TcpData => handle_connect_tcp_data(listen_tunnel, state, frame).await,
@@ -334,10 +334,7 @@ async fn handle_listen_close(
     frame: Frame,
 ) {
     if let Some(connect_stream_id) = state.listen_to_connect.remove(&frame.stream_id) {
-        if let Some(mut stream) = state.connect_streams.remove(&connect_stream_id) {
-            if !stream.ready {
-                release_pending_budget(&mut state.pending_budget, &mut stream);
-            }
+        if remove_stream_entry(state, connect_stream_id).is_some() {
             let _ = connect_tunnel.close_stream(connect_stream_id).await;
             release_active_tcp_stream(runtime).await;
         }
@@ -359,8 +356,7 @@ async fn handle_listen_error(
         return Err(format_terminal_tunnel_error(&meta)).context("listen-side tcp tunnel error");
     }
     if let Some(connect_stream_id) = state.listen_to_connect.remove(&frame.stream_id) {
-        if let Some(mut stream) = state.connect_streams.remove(&connect_stream_id) {
-            release_pending_budget(&mut state.pending_budget, &mut stream);
+        if remove_stream_entry(state, connect_stream_id).is_some() {
             release_active_tcp_stream(runtime).await;
         }
         if let Err(err) = connect_tunnel.close_stream(connect_stream_id).await {
@@ -410,11 +406,20 @@ async fn handle_connect_tcp_connect_ok(
 
 async fn handle_connect_error(
     runtime: &ForwardRuntime,
+    connect_tunnel: &Arc<PortTunnel>,
     listen_tunnel: &Arc<PortTunnel>,
     state: &mut TcpForwardState,
     frame: Frame,
 ) -> anyhow::Result<()> {
-    close_tcp_pair_after_connect_error(runtime, listen_tunnel, state, frame.stream_id).await
+    close_tcp_pair(
+        runtime,
+        connect_tunnel,
+        listen_tunnel,
+        state,
+        frame.stream_id,
+        TcpPairCloseReason::ConnectError,
+    )
+    .await
 }
 
 async fn handle_connect_tcp_data(
@@ -496,18 +501,9 @@ async fn handle_connect_close(
     state: &mut TcpForwardState,
     frame: Frame,
 ) -> anyhow::Result<Option<ForwardLoopControl>> {
-    if let Some(listen_stream_id) =
-        state
-            .connect_streams
-            .remove(&frame.stream_id)
-            .map(|mut stream| {
-                release_pending_budget(&mut state.pending_budget, &mut stream);
-                stream.listen_stream_id
-            })
-    {
-        state.listen_to_connect.remove(&listen_stream_id);
+    if let Some(stream) = remove_stream_entry(state, frame.stream_id) {
         release_active_tcp_stream(runtime).await;
-        if let Err(err) = listen_tunnel.close_stream(listen_stream_id).await {
+        if let Err(err) = listen_tunnel.close_stream(stream.listen_stream_id).await {
             return classify_transport_failure(
                 err,
                 "closing tcp listen stream",
@@ -590,12 +586,13 @@ async fn queue_or_send_tcp_connect_frame(
             .context("relaying tcp data to connect tunnel")
         {
             if is_backpressure_error(&err) {
-                close_tcp_pair_after_connect_pressure(
+                close_tcp_pair(
                     runtime,
                     connect_tunnel,
                     listen_tunnel,
                     state,
                     connect_stream_id,
+                    TcpPairCloseReason::ConnectPressure,
                 )
                 .await?;
                 return Ok(None);
@@ -613,13 +610,12 @@ async fn queue_or_send_tcp_connect_frame(
         let added = frame_data_bytes(&frame);
         let next_stream_total = stream.pending_bytes.saturating_add(added);
         let next_forward_total = state.pending_budget.total_bytes.saturating_add(added);
-        if next_stream_total > runtime.max_pending_tcp_bytes_per_stream
-            || next_forward_total > runtime.max_pending_tcp_bytes_per_forward
+        if next_stream_total > runtime.limits.max_pending_tcp_bytes_per_stream
+            || next_forward_total > runtime.limits.max_pending_tcp_bytes_per_forward
         {
             let listen_stream_id = stream.listen_stream_id;
-            release_pending_budget(&mut state.pending_budget, stream);
-            state.connect_streams.remove(&connect_stream_id);
-            state.listen_to_connect.remove(&listen_stream_id);
+            let _removed =
+                remove_stream_entry(state, connect_stream_id).expect("pending tcp stream exists");
             let _ = connect_tunnel.close_stream(connect_stream_id).await;
             let _ = listen_tunnel.close_stream(listen_stream_id).await;
             runtime.record_dropped_stream().await;
@@ -653,12 +649,13 @@ async fn flush_pending_tcp_connect_frames(
             .context("relaying tcp data to connect tunnel")
         {
             if is_backpressure_error(&err) {
-                close_tcp_pair_after_connect_pressure(
+                close_tcp_pair(
                     runtime,
                     connect_tunnel,
                     listen_tunnel,
                     state,
                     connect_stream_id,
+                    TcpPairCloseReason::ConnectPressure,
                 )
                 .await?;
                 return Ok(TcpFlushResult::Sent {
@@ -693,46 +690,43 @@ enum TcpFlushResult {
     Recover(ForwardLoopControl),
 }
 
-async fn close_tcp_pair_after_connect_error(
-    runtime: &ForwardRuntime,
-    listen_tunnel: &Arc<PortTunnel>,
-    state: &mut TcpForwardState,
-    connect_stream_id: u32,
-) -> anyhow::Result<()> {
-    let Some(mut stream) = state.connect_streams.remove(&connect_stream_id) else {
-        return Ok(());
-    };
-    release_pending_budget(&mut state.pending_budget, &mut stream);
-    state.listen_to_connect.remove(&stream.listen_stream_id);
-    release_active_tcp_stream(runtime).await;
-    if let Err(err) = listen_tunnel.close_stream(stream.listen_stream_id).await {
-        return classify_transport_failure(
-            err,
-            "closing tcp listen stream after connect error",
-            TunnelRole::Listen,
-        )
-        .map(|_| ());
-    }
-    Ok(())
+enum TcpPairCloseReason {
+    ConnectError,
+    ConnectPressure,
 }
 
-async fn close_tcp_pair_after_connect_pressure(
+async fn close_tcp_pair(
     runtime: &ForwardRuntime,
     connect_tunnel: &Arc<PortTunnel>,
     listen_tunnel: &Arc<PortTunnel>,
     state: &mut TcpForwardState,
     connect_stream_id: u32,
+    reason: TcpPairCloseReason,
 ) -> anyhow::Result<()> {
-    let Some(mut stream) = state.connect_streams.remove(&connect_stream_id) else {
+    let Some(stream) = remove_stream_entry(state, connect_stream_id) else {
         return Ok(());
     };
-    release_pending_budget(&mut state.pending_budget, &mut stream);
-    state.listen_to_connect.remove(&stream.listen_stream_id);
-    let _ = connect_tunnel.close_stream(connect_stream_id).await;
-    let _ = listen_tunnel.close_stream(stream.listen_stream_id).await;
-    runtime.record_dropped_stream().await;
-    release_active_tcp_stream(runtime).await;
-    Ok(())
+    match reason {
+        TcpPairCloseReason::ConnectError => {
+            release_active_tcp_stream(runtime).await;
+            if let Err(err) = listen_tunnel.close_stream(stream.listen_stream_id).await {
+                return classify_transport_failure(
+                    err,
+                    "closing tcp listen stream after connect error",
+                    TunnelRole::Listen,
+                )
+                .map(|_| ());
+            }
+            Ok(())
+        }
+        TcpPairCloseReason::ConnectPressure => {
+            let _ = connect_tunnel.close_stream(connect_stream_id).await;
+            let _ = listen_tunnel.close_stream(stream.listen_stream_id).await;
+            runtime.record_dropped_stream().await;
+            release_active_tcp_stream(runtime).await;
+            Ok(())
+        }
+    }
 }
 
 async fn close_tcp_pair_if_fully_eof(
@@ -755,10 +749,8 @@ async fn close_tcp_pair_if_fully_eof(
     if !fully_eof {
         return Ok(None);
     }
-    if let Some(mut stream) = state.connect_streams.remove(&connect_stream_id) {
-        release_pending_budget(&mut state.pending_budget, &mut stream);
-    }
-    state.listen_to_connect.remove(&listen_stream_id);
+    let _removed =
+        remove_stream_entry(state, connect_stream_id).expect("fully drained tcp stream exists");
     if let Err(err) = connect_tunnel.close_stream(connect_stream_id).await {
         release_active_tcp_stream(runtime).await;
         if is_retryable_transport_error(&err) {
@@ -791,6 +783,16 @@ fn frame_data_bytes(frame: &Frame) -> usize {
     frame.meta.len().saturating_add(frame.data.len())
 }
 
+fn remove_stream_entry(
+    state: &mut TcpForwardState,
+    connect_stream_id: u32,
+) -> Option<TcpConnectStream> {
+    let mut stream = state.connect_streams.remove(&connect_stream_id)?;
+    release_pending_budget(&mut state.pending_budget, &mut stream);
+    state.listen_to_connect.remove(&stream.listen_stream_id);
+    Some(stream)
+}
+
 fn release_pending_budget(pending_budget: &mut PendingTcpBudget, stream: &mut TcpConnectStream) {
     pending_budget.total_bytes = pending_budget
         .total_bytes
@@ -805,7 +807,7 @@ async fn try_reserve_active_tcp_stream(runtime: &ForwardRuntime) -> bool {
         .store
         .update_entry(&runtime.forward_id, |entry| {
             saw_entry = true;
-            if entry.active_tcp_streams < runtime.max_active_tcp_streams_per_forward {
+            if entry.active_tcp_streams < runtime.limits.max_active_tcp_streams {
                 entry.active_tcp_streams += 1;
                 reserved = true;
             }
@@ -838,7 +840,7 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::super::side::SideHandle;
-    use super::super::supervisor::{ForwardRuntime, ListenSessionControl};
+    use super::super::supervisor::{ForwardLimits, ForwardRuntime, ListenSessionControl};
     use super::super::test_support::{
         ScriptedTunnelIo, filter_one, test_record, wait_until_send_fails,
     };
@@ -1047,12 +1049,7 @@ mod tests {
             connect_side: SideHandle::local().unwrap(),
             protocol: PublicForwardPortProtocol::Tcp,
             connect_endpoint: "127.0.0.1:1".to_string(),
-            max_active_tcp_streams_per_forward: 256,
-            max_pending_tcp_bytes_per_stream: 256 * 1024,
-            max_pending_tcp_bytes_per_forward: 2 * 1024 * 1024,
-            max_udp_peers_per_forward: 256,
-            max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
-            max_reconnecting_forwards: 16,
+            limits: ForwardLimits::default(),
             store: Default::default(),
             listen_session,
             initial_connect_tunnel: connect_tunnel.clone(),
@@ -1157,12 +1154,7 @@ mod tests {
             connect_side: SideHandle::local().unwrap(),
             protocol: PublicForwardPortProtocol::Tcp,
             connect_endpoint: "127.0.0.1:1".to_string(),
-            max_active_tcp_streams_per_forward: 256,
-            max_pending_tcp_bytes_per_stream: 256 * 1024,
-            max_pending_tcp_bytes_per_forward: 2 * 1024 * 1024,
-            max_udp_peers_per_forward: 256,
-            max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
-            max_reconnecting_forwards: 16,
+            limits: ForwardLimits::default(),
             store: Default::default(),
             listen_session,
             initial_connect_tunnel: connect_tunnel.clone(),
@@ -1667,12 +1659,7 @@ mod tests {
             connect_side: SideHandle::local().unwrap(),
             protocol: PublicForwardPortProtocol::Tcp,
             connect_endpoint: "127.0.0.1:1".to_string(),
-            max_active_tcp_streams_per_forward: 256,
-            max_pending_tcp_bytes_per_stream: 256 * 1024,
-            max_pending_tcp_bytes_per_forward: 2 * 1024 * 1024,
-            max_udp_peers_per_forward: 256,
-            max_tunnel_queued_bytes: PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
-            max_reconnecting_forwards: 16,
+            limits: ForwardLimits::default(),
             store: Default::default(),
             listen_session,
             initial_connect_tunnel: connect_tunnel,
