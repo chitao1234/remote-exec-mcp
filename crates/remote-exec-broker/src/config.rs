@@ -886,7 +886,7 @@ sse_retry_ms = 1000
         .unwrap();
 
         let config = BrokerConfig::load(&config_path).await.unwrap();
-        match config.mcp {
+        match &config.mcp {
             McpServerConfig::StreamableHttp {
                 listen,
                 path,
@@ -894,12 +894,12 @@ sse_retry_ms = 1000
                 sse_keep_alive,
                 sse_retry,
             } => {
-                assert_eq!(listen, "127.0.0.1:8787".parse().unwrap());
+                assert_eq!(*listen, "127.0.0.1:8787".parse().unwrap());
                 assert_eq!(path, "/rpc");
                 assert!(!stateful);
-                assert_eq!(sse_keep_alive, SseInterval::Disabled);
+                assert_eq!(*sse_keep_alive, SseInterval::Disabled);
                 assert_eq!(
-                    sse_retry,
+                    *sse_retry,
                     SseInterval::Duration(std::time::Duration::from_millis(1000))
                 );
             }

@@ -2,12 +2,15 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use remote_exec_pki::{
     CA_CERT_FILENAME, CA_KEY_FILENAME, DaemonCertSpec, DevInitSpec, SubjectAltName,
-    build_dev_init_bundle, write_ca_pair, write_dev_init_bundle,
+    build_dev_init_bundle, write_dev_init_bundle,
 };
 
 #[cfg(target_os = "linux")]
 #[path = "support/inotify.rs"]
 mod linux_inotify;
+
+#[cfg(target_os = "linux")]
+use remote_exec_pki::write_ca_pair;
 
 fn assert_pem_pair(cert_pem: &str, key_pem: &str) {
     assert!(cert_pem.contains("BEGIN CERTIFICATE"));
