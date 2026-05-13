@@ -15,7 +15,7 @@ use super::codec::encode_frame_meta;
 use super::error::{SessionCloseMode, rpc_error};
 use super::limiter::{PortForwardLimiter, PortForwardPermit};
 use super::session_store::TunnelSessionStore;
-use super::udp::tunnel_udp_read_loop_session_owned;
+use super::udp::tunnel_udp_read_loop_attached_session;
 use super::{ErrorMeta, TcpStreamEntry, TunnelSender, TunnelState, UdpReaderEntry, timings};
 
 pub(super) struct SessionState {
@@ -294,7 +294,7 @@ pub(super) async fn reactivate_retained_udp_bind(
     ) {
         existing.cancel.cancel();
     }
-    tokio::spawn(tunnel_udp_read_loop_session_owned(
+    tokio::spawn(tunnel_udp_read_loop_attached_session(
         attachment,
         stream_id,
         socket,

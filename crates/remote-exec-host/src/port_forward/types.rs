@@ -19,7 +19,7 @@ pub(super) struct TunnelState {
     pub(super) tx: TunnelSender,
     pub(super) open_mode: Mutex<TunnelMode>,
     pub(super) tcp_streams: Mutex<HashMap<u32, TcpStreamEntry>>,
-    pub(super) udp_binds: Mutex<HashMap<u32, TransportUdpBind>>,
+    pub(super) udp_binds: Mutex<HashMap<u32, ConnectionLocalUdpBind>>,
     pub(super) generation: AtomicU64,
     pub(super) attached_session: Mutex<Option<Arc<session::SessionState>>>,
     pub(super) _connection_permit: PortForwardPermit,
@@ -53,7 +53,7 @@ pub(super) enum TcpWriteCommand {
     Shutdown,
 }
 
-pub(super) struct TransportUdpBind {
+pub(super) struct ConnectionLocalUdpBind {
     pub(super) socket: Arc<UdpSocket>,
     pub(super) _permit: PortForwardPermit,
     pub(super) cancel: CancellationToken,
