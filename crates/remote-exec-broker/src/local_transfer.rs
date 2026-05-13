@@ -5,7 +5,6 @@ use remote_exec_proto::path::{
 };
 use remote_exec_proto::rpc::{
     TransferImportRequest, TransferImportResponse, TransferPathInfoResponse, TransferSourceType,
-    TransferWarning,
 };
 use remote_exec_proto::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
 use remote_exec_proto::transfer::{TransferCompression, TransferLimits};
@@ -22,7 +21,6 @@ pub struct BundledArchiveSource {
 
 pub struct ExportedArchive {
     pub source_type: TransferSourceType,
-    pub warnings: Vec<TransferWarning>,
 }
 
 pub struct ExportedArchiveStream {
@@ -48,7 +46,6 @@ pub async fn export_path_to_archive(
     .await?;
     Ok(ExportedArchive {
         source_type: exported.source_type,
-        warnings: exported.warnings,
     })
 }
 
