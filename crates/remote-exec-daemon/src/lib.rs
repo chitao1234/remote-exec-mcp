@@ -18,12 +18,12 @@ use std::future::pending;
 use std::sync::Arc;
 
 use anyhow::Result;
-use config::DaemonConfig;
+use config::{DaemonConfig, ValidatedDaemonConfig};
 use remote_exec_proto::rpc::TargetInfoResponse;
 
 pub type AppState = remote_exec_host::HostRuntimeState;
 
-pub async fn run(config: DaemonConfig) -> Result<()> {
+pub async fn run(config: ValidatedDaemonConfig) -> Result<()> {
     run_until(config, pending::<()>()).await
 }
 
@@ -31,33 +31,33 @@ pub fn install_crypto_provider() -> Result<()> {
     tls::install_crypto_provider()
 }
 
-pub fn build_app_state(config: DaemonConfig) -> Result<AppState> {
-    remote_exec_host::build_runtime_state(config.into())
+pub fn build_app_state(config: ValidatedDaemonConfig) -> Result<AppState> {
+    remote_exec_host::build_runtime_state(config.into_inner().into())
 }
 
 pub fn target_info_response(state: &AppState) -> TargetInfoResponse {
     remote_exec_host::target_info_response(state, env!("CARGO_PKG_VERSION"))
 }
 
-pub async fn run_until<F>(config: DaemonConfig, shutdown: F) -> Result<()>
+pub async fn run_until<F>(config: ValidatedDaemonConfig, shutdown: F) -> Result<()>
 where
     F: Future<Output = ()> + Send,
 {
     tls::install_crypto_provider()?;
-    let daemon_config = Arc::new(config);
+    let daemon_config = Arc::new(config.into_inner());
     let listener = tls::bind_listener(daemon_config.listen)?;
     run_until_on_bound_listener(daemon_config, listener, shutdown).await
 }
 
 pub async fn run_until_on_listener<F>(
-    config: DaemonConfig,
+    config: ValidatedDaemonConfig,
     listener: tokio::net::TcpListener,
     shutdown: F,
 ) -> Result<()>
 where
     F: Future<Output = ()> + Send,
 {
-    run_until_on_bound_listener(Arc::new(config), listener, shutdown).await
+    run_until_on_bound_listener(Arc::new(config.into_inner()), listener, shutdown).await
 }
 
 pub(crate) async fn run_until_on_bound_listener<F>(

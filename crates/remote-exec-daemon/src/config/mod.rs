@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::ops::Deref;
 use std::path::PathBuf;
 
 use anyhow::Context;
@@ -60,6 +61,9 @@ pub struct DaemonConfig {
     #[serde(default)]
     pub tls: Option<TlsConfig>,
 }
+
+#[derive(Debug, Clone)]
+pub struct ValidatedDaemonConfig(DaemonConfig);
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TlsConfig {
@@ -137,14 +141,38 @@ impl DaemonConfig {
         Ok(())
     }
 
-    pub async fn load(path: impl AsRef<std::path::Path>) -> anyhow::Result<Self> {
+    pub fn into_validated(mut self) -> anyhow::Result<ValidatedDaemonConfig> {
+        self.normalize_paths();
+        self.validate()?;
+        Ok(ValidatedDaemonConfig(self))
+    }
+
+    pub async fn load(path: impl AsRef<std::path::Path>) -> anyhow::Result<ValidatedDaemonConfig> {
         let text = tokio::fs::read_to_string(path.as_ref())
             .await
             .with_context(|| format!("reading {}", path.as_ref().display()))?;
-        let mut config: Self = toml::from_str(&text)?;
-        config.normalize_paths();
-        config.validate()?;
-        Ok(config)
+        let config: Self = toml::from_str(&text)?;
+        config.into_validated()
+    }
+}
+
+impl ValidatedDaemonConfig {
+    pub fn into_inner(self) -> DaemonConfig {
+        self.0
+    }
+}
+
+impl AsRef<DaemonConfig> for ValidatedDaemonConfig {
+    fn as_ref(&self) -> &DaemonConfig {
+        &self.0
+    }
+}
+
+impl Deref for ValidatedDaemonConfig {
+    type Target = DaemonConfig;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
@@ -167,6 +195,12 @@ impl From<DaemonConfig> for HostRuntimeConfig {
                 .experimental_apply_patch_target_encoding_autodetect,
             process_environment: value.process_environment,
         }
+    }
+}
+
+impl From<ValidatedDaemonConfig> for HostRuntimeConfig {
+    fn from(value: ValidatedDaemonConfig) -> Self {
+        value.into_inner().into()
     }
 }
 

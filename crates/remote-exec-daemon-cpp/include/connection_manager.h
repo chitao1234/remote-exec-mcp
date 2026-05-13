@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <map>
 #include <memory>
 
@@ -16,14 +17,12 @@
 #include "win32_thread.h"
 #endif
 
-typedef void (*ConnectionWorkerMain)(SOCKET socket, void* context);
-
 class ConnectionManager {
 public:
     explicit ConnectionManager(unsigned long max_active_connections);
     ~ConnectionManager();
 
-    bool try_start(UniqueSocket client, ConnectionWorkerMain worker_main, void* context);
+    bool try_start(UniqueSocket client, std::function<void(SOCKET)> worker_main);
     void begin_shutdown();
     void reap_finished();
     void wait_for_all();

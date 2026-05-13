@@ -188,6 +188,9 @@ pub(super) fn spawn_background_daemon(
             runtime.block_on(async move {
                 let listener = tokio::net::TcpListener::from_std(listener)
                     .context("failed to adopt daemon test listener")?;
+                let config = config
+                    .into_validated()
+                    .context("invalid daemon test config")?;
                 remote_exec_daemon::run_until_on_listener(config, listener, async move {
                     let _ = shutdown_rx.await;
                 })
@@ -432,7 +435,8 @@ transport = "http"
     .unwrap();
     let mut config = remote_exec_daemon::config::DaemonConfig::load(&config_path)
         .await
-        .unwrap();
+        .unwrap()
+        .into_inner();
     config.process_environment = process_environment;
 
     let (shutdown, server_thread) = spawn_background_daemon(config, listener);

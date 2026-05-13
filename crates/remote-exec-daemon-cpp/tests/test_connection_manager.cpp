@@ -6,9 +6,8 @@
 #include "platform.h"
 #include "test_socket_pair.h"
 
-static void hold_worker(SOCKET socket, void* raw_flag) {
-    std::atomic<bool>* release = static_cast<std::atomic<bool>*>(raw_flag);
-    while (!release->load()) {
+static void hold_worker(SOCKET socket, std::atomic<bool>& release) {
+    while (!release.load()) {
         platform::sleep_ms(10);
     }
     close_socket(socket);
@@ -21,9 +20,13 @@ int main() {
 
     std::atomic<bool> release_first(false);
 
-    assert(manager.try_start(std::move(pair_one.first), &hold_worker, &release_first));
+    assert(manager.try_start(std::move(pair_one.first), [&release_first](SOCKET socket) {
+        hold_worker(socket, release_first);
+    }));
     assert(manager.active_count() == 1UL);
-    assert(!manager.try_start(std::move(pair_two.first), &hold_worker, &release_first));
+    assert(!manager.try_start(std::move(pair_two.first), [&release_first](SOCKET socket) {
+        hold_worker(socket, release_first);
+    }));
 
     manager.begin_shutdown();
     release_first.store(true);

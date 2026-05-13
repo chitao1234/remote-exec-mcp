@@ -4,7 +4,7 @@ use std::sync::Arc;
 use axum::Router;
 use tokio::net::TcpListener;
 
-use crate::config::DaemonConfig;
+use crate::config::{DaemonConfig, ValidatedDaemonConfig};
 
 pub async fn run_until_on_listener<F>(
     config: DaemonConfig,
@@ -14,7 +14,11 @@ pub async fn run_until_on_listener<F>(
 where
     F: Future<Output = ()> + Send,
 {
-    crate::run_until_on_listener(config, listener, shutdown).await
+    crate::run_until_on_listener(config.into_validated()?, listener, shutdown).await
+}
+
+pub fn validated_config(config: DaemonConfig) -> anyhow::Result<ValidatedDaemonConfig> {
+    config.into_validated()
 }
 
 pub async fn serve_tls_on_listener<F>(

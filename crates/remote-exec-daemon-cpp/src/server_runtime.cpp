@@ -56,12 +56,6 @@ unsigned short socket_bound_port_or_zero(SOCKET socket) {
     return 0;
 }
 
-void connection_worker_main(SOCKET socket, void* context) {
-    ServerRuntime* runtime = static_cast<ServerRuntime*>(context);
-    UniqueSocket client(socket);
-    handle_client(runtime->state(), std::move(client));
-}
-
 } // namespace
 
 ServerRuntime::ServerRuntime(const DaemonConfig& config)
@@ -253,7 +247,10 @@ void ServerRuntime::accept_loop() {
             continue;
         }
 
-        if (!connections_.try_start(std::move(client), &connection_worker_main, this)) {
+        if (!connections_.try_start(std::move(client), [this](SOCKET socket) {
+                UniqueSocket client(socket);
+                handle_client(this->state(), std::move(client));
+            })) {
             log_message(LOG_WARN, "server", "dropping client connection during shutdown");
         }
     }

@@ -35,6 +35,10 @@ struct QueuedFrame {
     charge: usize,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("port_forward_backpressure_exceeded: tunnel queue byte budget exceeded")]
+struct PortTunnelBackpressureError;
+
 impl PortTunnel {
     pub const DEFAULT_MAX_QUEUED_BYTES: usize =
         remote_exec_proto::port_forward::DEFAULT_TUNNEL_QUEUE_BYTES as usize;
@@ -322,8 +326,8 @@ async fn run_heartbeat_loop(
 pub(super) fn is_backpressure_error(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         cause
-            .to_string()
-            .contains("port_forward_backpressure_exceeded")
+            .downcast_ref::<PortTunnelBackpressureError>()
+            .is_some()
     })
 }
 
@@ -360,7 +364,7 @@ fn release_queued_bytes(queued_bytes: &AtomicUsize, charge: usize) {
 }
 
 fn backpressure_error() -> anyhow::Error {
-    anyhow::anyhow!("port_forward_backpressure_exceeded: tunnel queue byte budget exceeded")
+    anyhow::Error::new(PortTunnelBackpressureError)
 }
 
 pub(super) fn encode_tunnel_meta<T: Serialize>(meta: &T) -> anyhow::Result<Vec<u8>> {

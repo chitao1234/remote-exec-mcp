@@ -5,10 +5,8 @@
 struct ConnectionManager::WorkerRecord {
     WorkerRecord(unsigned long worker_id_value,
                  SOCKET socket_value,
-                 ConnectionWorkerMain worker_main_value,
-                 void* context_value)
-        : worker_id(worker_id_value), socket(socket_value), worker_main(worker_main_value), context(context_value),
-          finished(false)
+                 std::function<void(SOCKET)> worker_main_value)
+        : worker_id(worker_id_value), socket(socket_value), worker_main(std::move(worker_main_value)), finished(false)
 #ifdef _WIN32
           ,
           thread_handle(NULL)
@@ -21,8 +19,7 @@ struct ConnectionManager::WorkerRecord {
 
     unsigned long worker_id;
     SOCKET socket;
-    ConnectionWorkerMain worker_main;
-    void* context;
+    std::function<void(SOCKET)> worker_main;
     BasicMutex state_mutex;
     bool finished;
 #ifdef _WIN32
@@ -42,7 +39,7 @@ ConnectionManager::~ConnectionManager() {
 }
 
 void ConnectionManager::run_worker(const std::shared_ptr<WorkerRecord>& record) {
-    record->worker_main(record->socket, record->context);
+    record->worker_main(record->socket);
     {
         BasicLockGuard lock(record->state_mutex);
         record->socket = INVALID_SOCKET;
@@ -64,7 +61,7 @@ unsigned __stdcall ConnectionManager::worker_thread_entry(void* raw_context) {
 }
 #endif
 
-bool ConnectionManager::try_start(UniqueSocket client, ConnectionWorkerMain worker_main, void* context) {
+bool ConnectionManager::try_start(UniqueSocket client, std::function<void(SOCKET)> worker_main) {
     std::shared_ptr<WorkerRecord> record;
     {
         BasicLockGuard lock(mutex_);
@@ -72,7 +69,7 @@ bool ConnectionManager::try_start(UniqueSocket client, ConnectionWorkerMain work
             return false;
         }
         const unsigned long worker_id = next_worker_id_++;
-        record.reset(new WorkerRecord(worker_id, client.release(), worker_main, context));
+        record.reset(new WorkerRecord(worker_id, client.release(), std::move(worker_main)));
         workers_[worker_id] = record;
         state_changed_.broadcast();
     }

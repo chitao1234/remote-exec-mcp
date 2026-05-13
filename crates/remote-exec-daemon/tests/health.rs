@@ -208,9 +208,10 @@ async fn daemon_startup_rejects_unusable_default_shell() {
     let mut config = startup_validation_config();
     config.default_shell = Some("definitely-not-a-real-shell".to_string());
 
-    let err = remote_exec_daemon::run_until(config, std::future::ready(()))
-        .await
-        .unwrap_err();
+    let err =
+        remote_exec_daemon::run_until(config.into_validated().unwrap(), std::future::ready(()))
+            .await
+            .unwrap_err();
 
     assert!(err.to_string().contains("configured default shell"));
 }
@@ -222,9 +223,10 @@ async fn daemon_startup_rejects_non_windows_conpty_configuration() {
     config.pty = PtyMode::Conpty;
     config.default_shell = Some("/bin/sh".to_string());
 
-    let err = remote_exec_daemon::run_until(config, std::future::ready(()))
-        .await
-        .unwrap_err();
+    let err =
+        remote_exec_daemon::run_until(config.into_validated().unwrap(), std::future::ready(()))
+            .await
+            .unwrap_err();
 
     assert!(err.to_string().contains("conpty"));
 }
