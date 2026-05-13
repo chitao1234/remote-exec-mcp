@@ -7,3 +7,4 @@ pub mod request_id;
 pub mod rpc;
 pub mod sandbox;
 pub mod transfer;
+mod wire;

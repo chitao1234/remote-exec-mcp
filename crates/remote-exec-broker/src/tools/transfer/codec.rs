@@ -1,5 +1,5 @@
 use remote_exec_proto::rpc::{
-    TransferExportMetadata, TransferHeaderError, TransferImportMetadata,
+    TransferExportMetadata, TransferHeaderError, TransferHeaders, TransferImportMetadata,
     parse_transfer_export_metadata, transfer_import_header_pairs,
 };
 use remote_exec_proto::transfer::TransferCompression;
@@ -9,8 +9,18 @@ use crate::daemon_client::DaemonClientError;
 pub(crate) fn parse_export_metadata(
     headers: &reqwest::header::HeaderMap,
 ) -> Result<TransferExportMetadata, DaemonClientError> {
-    parse_transfer_export_metadata(|name| reqwest_header_string(headers, name))
-        .map_err(|err| DaemonClientError::Decode(err.into()))
+    parse_transfer_export_metadata(&TransferHeaders {
+        source_type: parsed_reqwest_header_string(
+            headers,
+            remote_exec_proto::rpc::TRANSFER_SOURCE_TYPE_HEADER,
+        )?,
+        compression: parsed_reqwest_header_string(
+            headers,
+            remote_exec_proto::rpc::TRANSFER_COMPRESSION_HEADER,
+        )?,
+        ..TransferHeaders::default()
+    })
+    .map_err(|err| DaemonClientError::Decode(err.into()))
 }
 
 pub(crate) fn apply_import_headers(
@@ -41,6 +51,13 @@ fn reqwest_header_string(
                 .map_err(|err| TransferHeaderError::invalid(name, err.to_string()))
         })
         .transpose()
+}
+
+fn parsed_reqwest_header_string(
+    headers: &reqwest::header::HeaderMap,
+    name: &'static str,
+) -> Result<Option<String>, DaemonClientError> {
+    reqwest_header_string(headers, name).map_err(|err| DaemonClientError::Decode(err.into()))
 }
 
 #[cfg(test)]

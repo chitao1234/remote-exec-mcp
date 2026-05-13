@@ -1,3 +1,5 @@
+use crate::wire;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WarningCode {
     ExecSessionLimitApproaching,
@@ -5,12 +7,23 @@ pub enum WarningCode {
     TransferSkippedSymlink,
 }
 
+const WARNING_CODE_WIRE_VALUES: &[(WarningCode, &str)] = &[
+    (
+        WarningCode::ExecSessionLimitApproaching,
+        "exec_session_limit_approaching",
+    ),
+    (
+        WarningCode::TransferSkippedUnsupportedEntry,
+        "transfer_skipped_unsupported_entry",
+    ),
+    (
+        WarningCode::TransferSkippedSymlink,
+        "transfer_skipped_symlink",
+    ),
+];
+
 impl WarningCode {
-    pub const fn wire_value(self) -> &'static str {
-        match self {
-            Self::ExecSessionLimitApproaching => "exec_session_limit_approaching",
-            Self::TransferSkippedUnsupportedEntry => "transfer_skipped_unsupported_entry",
-            Self::TransferSkippedSymlink => "transfer_skipped_symlink",
-        }
+    pub fn wire_value(self) -> &'static str {
+        wire::wire_value(&self, WARNING_CODE_WIRE_VALUES)
     }
 }

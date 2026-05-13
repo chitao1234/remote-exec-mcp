@@ -1,8 +1,9 @@
 use axum::Json;
 use axum::http::{HeaderMap, StatusCode};
 use remote_exec_proto::rpc::{
-    RpcErrorBody, TransferExportMetadata, TransferHeaderError, TransferImportMetadata,
-    TransferSourceType, parse_transfer_import_metadata, transfer_export_header_pairs,
+    RpcErrorBody, TransferExportMetadata, TransferHeaderError, TransferHeaders,
+    TransferImportMetadata, TransferSourceType, parse_transfer_import_metadata,
+    transfer_export_header_pairs,
 };
 use remote_exec_proto::transfer::TransferCompression;
 
@@ -32,8 +33,33 @@ pub(crate) fn apply_export_headers(
 pub(crate) fn parse_import_metadata(
     headers: &HeaderMap,
 ) -> Result<TransferImportMetadata, (StatusCode, Json<RpcErrorBody>)> {
-    parse_transfer_import_metadata(|name| axum_header_string(headers, name))
-        .map_err(|err| bad_request(err.to_string()))
+    parse_transfer_import_metadata(&TransferHeaders {
+        destination_path: parsed_axum_header_string(
+            headers,
+            remote_exec_proto::rpc::TRANSFER_DESTINATION_PATH_HEADER,
+        )?,
+        overwrite: parsed_axum_header_string(
+            headers,
+            remote_exec_proto::rpc::TRANSFER_OVERWRITE_HEADER,
+        )?,
+        create_parent: parsed_axum_header_string(
+            headers,
+            remote_exec_proto::rpc::TRANSFER_CREATE_PARENT_HEADER,
+        )?,
+        source_type: parsed_axum_header_string(
+            headers,
+            remote_exec_proto::rpc::TRANSFER_SOURCE_TYPE_HEADER,
+        )?,
+        compression: parsed_axum_header_string(
+            headers,
+            remote_exec_proto::rpc::TRANSFER_COMPRESSION_HEADER,
+        )?,
+        symlink_mode: parsed_axum_header_string(
+            headers,
+            remote_exec_proto::rpc::TRANSFER_SYMLINK_MODE_HEADER,
+        )?,
+    })
+    .map_err(|err| bad_request(err.to_string()))
 }
 
 pub(crate) fn source_type_header_value(source_type: &TransferSourceType) -> &'static str {
@@ -57,4 +83,11 @@ fn axum_header_string(
                 .map_err(|err| TransferHeaderError::invalid(name, err.to_string()))
         })
         .transpose()
+}
+
+fn parsed_axum_header_string(
+    headers: &HeaderMap,
+    name: &'static str,
+) -> Result<Option<String>, (StatusCode, Json<RpcErrorBody>)> {
+    axum_header_string(headers, name).map_err(|err| bad_request(err.to_string()))
 }

@@ -66,66 +66,24 @@ pub enum ExecResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct ExecResponseWire {
+struct ExecResponseEnvelope {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     daemon_session_id: Option<String>,
-    daemon_instance_id: String,
-    running: bool,
-    chunk_id: Option<String>,
-    wall_time_seconds: f64,
-    exit_code: Option<i32>,
-    original_token_count: Option<u32>,
-    output: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    warnings: Vec<ExecWarning>,
+    #[serde(flatten)]
+    output: ExecOutputResponse,
 }
 
-impl ExecResponseWire {
-    fn output(self) -> ExecOutputResponse {
-        ExecOutputResponse {
-            daemon_instance_id: self.daemon_instance_id,
-            running: self.running,
-            chunk_id: self.chunk_id,
-            wall_time_seconds: self.wall_time_seconds,
-            exit_code: self.exit_code,
-            original_token_count: self.original_token_count,
-            output: self.output,
-            warnings: self.warnings,
-        }
-    }
-}
-
-impl From<ExecResponse> for ExecResponseWire {
+impl From<ExecResponse> for ExecResponseEnvelope {
     fn from(response: ExecResponse) -> Self {
         match response {
-            ExecResponse::Running(response) => {
-                let output = response.output;
-                Self {
-                    daemon_session_id: Some(response.daemon_session_id),
-                    daemon_instance_id: output.daemon_instance_id,
-                    running: true,
-                    chunk_id: output.chunk_id,
-                    wall_time_seconds: output.wall_time_seconds,
-                    exit_code: output.exit_code,
-                    original_token_count: output.original_token_count,
-                    output: output.output,
-                    warnings: output.warnings,
-                }
-            }
-            ExecResponse::Completed(response) => {
-                let output = response.output;
-                Self {
-                    daemon_session_id: None,
-                    daemon_instance_id: output.daemon_instance_id,
-                    running: false,
-                    chunk_id: output.chunk_id,
-                    wall_time_seconds: output.wall_time_seconds,
-                    exit_code: output.exit_code,
-                    original_token_count: output.original_token_count,
-                    output: output.output,
-                    warnings: output.warnings,
-                }
-            }
+            ExecResponse::Running(response) => Self {
+                daemon_session_id: Some(response.daemon_session_id),
+                output: response.output,
+            },
+            ExecResponse::Completed(response) => Self {
+                daemon_session_id: None,
+                output: response.output,
+            },
         }
     }
 }
@@ -135,7 +93,7 @@ impl Serialize for ExecResponse {
     where
         S: serde::Serializer,
     {
-        ExecResponseWire::from(self.clone()).serialize(serializer)
+        ExecResponseEnvelope::from(self.clone()).serialize(serializer)
     }
 }
 
@@ -144,21 +102,20 @@ impl<'de> Deserialize<'de> for ExecResponse {
     where
         D: serde::Deserializer<'de>,
     {
-        let wire = ExecResponseWire::deserialize(deserializer)?;
-        let running = wire.running;
-        let daemon_session_id = wire.daemon_session_id.clone();
-        match (running, daemon_session_id) {
+        let envelope = ExecResponseEnvelope::deserialize(deserializer)?;
+        let running = envelope.output.running;
+        match (running, envelope.daemon_session_id) {
             (true, Some(daemon_session_id)) if !daemon_session_id.is_empty() => {
                 Ok(Self::Running(ExecRunningResponse {
                     daemon_session_id,
-                    output: wire.output(),
+                    output: envelope.output,
                 }))
             }
             (true, _) => Err(serde::de::Error::custom(
                 "daemon returned malformed exec response: running response missing daemon_session_id",
             )),
             (false, None) => Ok(Self::Completed(ExecCompletedResponse {
-                output: wire.output(),
+                output: envelope.output,
             })),
             (false, Some(_)) => Err(serde::de::Error::custom(
                 "daemon returned malformed exec response: completed response unexpectedly included daemon_session_id",

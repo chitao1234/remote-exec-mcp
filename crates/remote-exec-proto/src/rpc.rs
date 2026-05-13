@@ -17,8 +17,8 @@ pub use target::{HealthCheckResponse, PortForwardProtocolVersion, TargetInfoResp
 pub use transfer::{
     TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER,
     TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER, TRANSFER_SYMLINK_MODE_HEADER,
-    TransferHeaderError, TransferHeaderErrorKind, TransferHeaderPairs, TransferImportResponse,
-    TransferPathInfoRequest, TransferPathInfoResponse, TransferWarning,
+    TransferHeaderError, TransferHeaderErrorKind, TransferHeaderPairs, TransferHeaders,
+    TransferImportResponse, TransferPathInfoRequest, TransferPathInfoResponse, TransferWarning,
     parse_transfer_export_metadata, parse_transfer_import_metadata, transfer_export_header_pairs,
     transfer_import_header_pairs,
 };
