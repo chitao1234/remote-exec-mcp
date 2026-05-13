@@ -21,7 +21,7 @@ pub(super) struct TunnelState {
     pub(super) tcp_streams: Mutex<HashMap<u32, TcpStreamEntry>>,
     pub(super) udp_binds: Mutex<HashMap<u32, ConnectionLocalUdpBind>>,
     pub(super) generation: AtomicU64,
-    pub(super) attached_session: Mutex<Option<Arc<session::SessionState>>>,
+    pub(super) listen_session: Mutex<Option<Arc<session::SessionState>>>,
     pub(super) _connection_permit: PortForwardPermit,
 }
 
@@ -80,11 +80,6 @@ pub(super) struct ErrorMeta {
 #[derive(Clone)]
 pub(super) enum TunnelMode {
     Unopened,
-    Connect {
-        protocol: TunnelForwardProtocol,
-    },
-    Listen {
-        protocol: TunnelForwardProtocol,
-        session: Arc<session::SessionState>,
-    },
+    Connect { protocol: TunnelForwardProtocol },
+    Listen { protocol: TunnelForwardProtocol },
 }

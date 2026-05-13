@@ -174,11 +174,14 @@ impl TunnelAccess {
     }
 }
 
-pub(super) async fn tunnel_access(tunnel: &Arc<TunnelState>) -> TunnelAccess {
+pub(super) async fn tunnel_access(tunnel: &Arc<TunnelState>) -> Result<TunnelAccess, HostRpcError> {
     match tunnel_mode(tunnel).await {
-        TunnelMode::Unopened => TunnelAccess::Unopened,
-        TunnelMode::Connect { protocol } => TunnelAccess::Connect { protocol },
-        TunnelMode::Listen { protocol, session } => TunnelAccess::Listen { protocol, session },
+        TunnelMode::Unopened => Ok(TunnelAccess::Unopened),
+        TunnelMode::Connect { protocol } => Ok(TunnelAccess::Connect { protocol }),
+        TunnelMode::Listen { protocol } => Ok(TunnelAccess::Listen {
+            protocol,
+            session: current_listen_session(tunnel).await?,
+        }),
     }
 }
 
@@ -187,4 +190,15 @@ fn protocol_label(protocol: TunnelForwardProtocol) -> &'static str {
         TunnelForwardProtocol::Tcp => "tcp",
         TunnelForwardProtocol::Udp => "udp",
     }
+}
+
+async fn current_listen_session(
+    tunnel: &Arc<TunnelState>,
+) -> Result<Arc<SessionState>, HostRpcError> {
+    tunnel.listen_session.lock().await.clone().ok_or_else(|| {
+        rpc_error(
+            RpcErrorCode::InvalidPortTunnel,
+            "listen tunnel session is unavailable",
+        )
+    })
 }

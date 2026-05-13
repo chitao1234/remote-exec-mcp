@@ -176,13 +176,13 @@ pub(super) async fn attach_session_to_tunnel(
         task.abort();
     }
     *session.resume_deadline.lock().await = None;
-    *tunnel.attached_session.lock().await = Some(session.clone());
+    *tunnel.listen_session.lock().await = Some(session.clone());
     session.attachment_notify.notify_waiters();
     Ok(())
 }
 
 pub(super) async fn close_attached_session(tunnel: &Arc<TunnelState>, mode: SessionCloseMode) {
-    let Some(session) = tunnel.attached_session.lock().await.take() else {
+    let Some(session) = tunnel.listen_session.lock().await.take() else {
         return;
     };
     if let Some(attachment) = session.attachment.lock().await.take() {

@@ -128,7 +128,7 @@ pub(super) async fn tunnel_udp_bind(
     frame: Frame,
 ) -> Result<(), HostRpcError> {
     match tunnel_access(&tunnel)
-        .await
+        .await?
         .require_bind_target(TunnelForwardProtocol::Udp, "udp bind")?
     {
         OpenProtocolAccess::Listen(session) => {
@@ -309,7 +309,7 @@ pub(super) async fn tunnel_udp_datagram(
 ) -> Result<(), HostRpcError> {
     let meta: UdpDatagramMeta = decode_frame_meta(&frame)?;
     let socket = match tunnel_access(tunnel)
-        .await
+        .await?
         .require_protocol(TunnelForwardProtocol::Udp, "udp datagram")?
     {
         OpenProtocolAccess::Listen(session) => {

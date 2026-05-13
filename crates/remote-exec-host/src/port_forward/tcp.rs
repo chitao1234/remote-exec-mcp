@@ -139,7 +139,7 @@ pub(super) async fn tunnel_tcp_listen(
     frame: Frame,
 ) -> Result<(), HostRpcError> {
     let session = tunnel_access(&tunnel)
-        .await
+        .await?
         .require_listen_session(TunnelForwardProtocol::Tcp, "tcp listen")?;
     let meta: EndpointMeta = decode_frame_meta(&frame)?;
     let endpoint = normalize_endpoint(&meta.endpoint)
@@ -290,7 +290,7 @@ pub(super) async fn tunnel_tcp_connect(
     frame: Frame,
 ) -> Result<(), HostRpcError> {
     tunnel_access(&tunnel)
-        .await
+        .await?
         .require_connect_tunnel(TunnelForwardProtocol::Tcp, "tcp connect")?;
     tunnel_tcp_connect_connection_local(tunnel, frame).await
 }
@@ -464,7 +464,7 @@ pub(super) async fn tunnel_tcp_data(
     data: &[u8],
 ) -> Result<(), HostRpcError> {
     let writer = match tunnel_access(tunnel)
-        .await
+        .await?
         .require_protocol(TunnelForwardProtocol::Tcp, "tcp data")?
     {
         OpenProtocolAccess::Listen(session) => {
@@ -549,7 +549,7 @@ pub(super) async fn tunnel_tcp_eof(
     stream_id: u32,
 ) -> Result<(), HostRpcError> {
     match tunnel_access(tunnel)
-        .await
+        .await?
         .protocol_access(TunnelForwardProtocol::Tcp)
     {
         Some(OpenProtocolAccess::Listen(session)) => {
@@ -594,7 +594,7 @@ pub(super) async fn tunnel_close_stream(
     tunnel: &Arc<TunnelState>,
     stream_id: u32,
 ) -> Result<(), HostRpcError> {
-    match tunnel_access(tunnel).await.role_access() {
+    match tunnel_access(tunnel).await?.role_access() {
         OpenTunnelRole::Listen(session) => {
             if let Some(attachment) = session.current_attachment().await {
                 cancel_tcp_stream(&attachment.tcp_streams, stream_id).await;

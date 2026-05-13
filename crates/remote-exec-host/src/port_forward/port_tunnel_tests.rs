@@ -727,7 +727,7 @@ async fn tcp_close_after_peer_eof_does_not_cancel_queued_writer_shutdown() {
         )])),
         udp_binds: tokio::sync::Mutex::new(HashMap::new()),
         generation: AtomicU64::new(1),
-        attached_session: tokio::sync::Mutex::new(None),
+        listen_session: tokio::sync::Mutex::new(None),
         _connection_permit: state
             .port_forward_limiter
             .try_acquire_tunnel_connection()
@@ -787,7 +787,7 @@ async fn tunnel_tcp_eof_waits_for_full_writer_queue() {
         )])),
         udp_binds: tokio::sync::Mutex::new(HashMap::new()),
         generation: AtomicU64::new(1),
-        attached_session: tokio::sync::Mutex::new(None),
+        listen_session: tokio::sync::Mutex::new(None),
         _connection_permit: state
             .port_forward_limiter
             .try_acquire_tunnel_connection()
@@ -845,7 +845,7 @@ async fn concurrent_tunnel_open_allows_only_one_mode() {
         tcp_streams: tokio::sync::Mutex::new(HashMap::new()),
         udp_binds: tokio::sync::Mutex::new(HashMap::new()),
         generation: AtomicU64::new(0),
-        attached_session: tokio::sync::Mutex::new(None),
+        listen_session: tokio::sync::Mutex::new(None),
         _connection_permit: state
             .port_forward_limiter
             .try_acquire_tunnel_connection()

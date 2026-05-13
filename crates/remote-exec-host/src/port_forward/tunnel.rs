@@ -63,7 +63,7 @@ where
         tcp_streams: Mutex::new(std::collections::HashMap::new()),
         udp_binds: Mutex::new(std::collections::HashMap::new()),
         generation: std::sync::atomic::AtomicU64::new(0),
-        attached_session: Mutex::new(None),
+        listen_session: Mutex::new(None),
         _connection_permit: connection_permit,
     });
     let writer_cancel = tunnel.cancel.clone();
@@ -236,7 +236,6 @@ async fn tunnel_open_listen(
         &tunnel,
         TunnelMode::Listen {
             protocol: meta.protocol.clone(),
-            session: session.clone(),
         },
     )
     .await
