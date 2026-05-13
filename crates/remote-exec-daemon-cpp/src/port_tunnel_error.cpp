@@ -198,18 +198,28 @@ void PortTunnelConnection::ensure_generation(std::uint64_t frame_generation) con
     }
 }
 
-bool PortTunnelConnection::owns_session(const std::shared_ptr<PortTunnelSession>& session) {
-    BasicLockGuard lock(state_mutex_);
-    return !closed() && session_.get() == session.get();
+bool PortTunnelConnection::owns_attachment(const std::shared_ptr<PortTunnelSessionAttachment>& attachment) {
+    if (attachment.get() == NULL) {
+        return false;
+    }
+    std::shared_ptr<PortTunnelSession> session;
+    {
+        BasicLockGuard lock(state_mutex_);
+        if (closed() || session_.get() == NULL) {
+            return false;
+        }
+        session = session_;
+    }
+    return session_attachment_for(session).get() == attachment.get();
 }
 
 bool PortTunnelConnection::accept_session_tcp_stream(const std::shared_ptr<PortTunnelSession>& session,
+                                                     const std::shared_ptr<PortTunnelSessionAttachment>& attachment,
                                                      uint32_t listener_stream_id,
                                                      UniqueSocket accepted_socket,
                                                      const std::string& peer) {
     uint32_t stream_id = 0U;
     bool worker_acquired = false;
-    std::shared_ptr<PortTunnelSessionAttachment> attachment;
     if (!service_->try_acquire_active_tcp_stream()) {
         send_forward_drop(listener_stream_id,
                           "tcp_stream",
@@ -226,11 +236,10 @@ bool PortTunnelConnection::accept_session_tcp_stream(const std::shared_ptr<PortT
             return false;
         }
         BasicLockGuard session_lock(session->mutex);
-        if (session->closed || session->expired || session->attachment.get() == NULL) {
+        if (session->closed || session->expired || session->attachment.get() != attachment.get()) {
             mark_tcp_stream_closed(stream);
             return false;
         }
-        attachment = session->attachment;
         stream_id = session->next_daemon_stream_id;
         session->next_daemon_stream_id += 2U;
         attachment->local_streams.insert_tcp(stream_id, stream);
@@ -247,7 +256,7 @@ bool PortTunnelConnection::accept_session_tcp_stream(const std::shared_ptr<PortT
 
     PortTunnelFrame frame = make_empty_frame(PortTunnelFrameType::TcpAccept, stream_id);
     frame.meta = Json{{"listener_stream_id", listener_stream_id}, {"peer", peer}}.dump();
-    if (!owns_session(session) || closed()) {
+    if (!owns_attachment(attachment) || closed()) {
         drop_tcp_stream(&attachment->local_streams, stream_id, stream);
         service_->release_worker();
         return false;
@@ -259,11 +268,11 @@ bool PortTunnelConnection::accept_session_tcp_stream(const std::shared_ptr<PortT
     return true;
 }
 
-bool PortTunnelConnection::emit_session_udp_datagram(const std::shared_ptr<PortTunnelSession>& session,
+bool PortTunnelConnection::emit_session_udp_datagram(const std::shared_ptr<PortTunnelSessionAttachment>& attachment,
                                                      uint32_t stream_id,
                                                      const std::string& peer,
                                                      const std::vector<unsigned char>& data) {
-    if (!owns_session(session)) {
+    if (!owns_attachment(attachment)) {
         return false;
     }
     PortTunnelFrame frame = make_empty_frame(PortTunnelFrameType::UdpDatagram, stream_id);
@@ -272,5 +281,5 @@ bool PortTunnelConnection::emit_session_udp_datagram(const std::shared_ptr<PortT
     if (!send_data_frame_or_drop_on_limit(frame)) {
         return false;
     }
-    return owns_session(session) && !closed();
+    return owns_attachment(attachment) && !closed();
 }

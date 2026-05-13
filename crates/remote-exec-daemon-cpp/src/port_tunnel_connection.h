@@ -23,12 +23,13 @@ public:
                            const std::string& kind,
                            const std::string& reason,
                            const std::string& message);
-    bool owns_session(const std::shared_ptr<PortTunnelSession>& session);
+    bool owns_attachment(const std::shared_ptr<PortTunnelSessionAttachment>& attachment);
     bool accept_session_tcp_stream(const std::shared_ptr<PortTunnelSession>& session,
+                                   const std::shared_ptr<PortTunnelSessionAttachment>& attachment,
                                    uint32_t listener_stream_id,
                                    UniqueSocket accepted_socket,
                                    const std::string& peer);
-    bool emit_session_udp_datagram(const std::shared_ptr<PortTunnelSession>& session,
+    bool emit_session_udp_datagram(const std::shared_ptr<PortTunnelSessionAttachment>& attachment,
                                    uint32_t stream_id,
                                    const std::string& peer,
                                    const std::vector<unsigned char>& data);

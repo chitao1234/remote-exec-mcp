@@ -75,12 +75,12 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
             if (retained_listener_closed(listener) || session_is_unavailable(session)) {
                 return;
             }
-            if (connection->owns_session(session)) {
+            if (connection->owns_attachment(attachment)) {
                 connection->send_error(listener->stream_id, "port_accept_failed", socket_error_message("select"));
             }
             return;
         }
-        if (!connection->owns_session(session)) {
+        if (!connection->owns_attachment(attachment)) {
             continue;
         }
 
@@ -96,17 +96,18 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
             if (retained_listener_closed(listener) || session_is_unavailable(session)) {
                 return;
             }
-            if (connection->owns_session(session)) {
+            if (connection->owns_attachment(attachment)) {
                 connection->send_error(listener->stream_id, "port_accept_failed", socket_error_message("accept"));
             }
             return;
         }
         UniqueSocket accepted_socket(accepted);
-        if (!connection->owns_session(session)) {
+        if (!connection->owns_attachment(attachment)) {
             continue;
         }
         if (!connection->accept_session_tcp_stream(
                 session,
+                attachment,
                 listener->stream_id,
                 std::move(accepted_socket),
                 printable_port_forward_endpoint(reinterpret_cast<sockaddr*>(&peer_address), peer_len))) {

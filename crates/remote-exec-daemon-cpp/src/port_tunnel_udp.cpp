@@ -81,12 +81,12 @@ void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& 
             if (udp_socket_closed(socket_value) || session_is_unavailable(session)) {
                 return;
             }
-            if (connection->owns_session(session)) {
+            if (connection->owns_attachment(attachment)) {
                 connection->send_error(stream_id, "port_read_failed", socket_error_message("select"));
             }
             return;
         }
-        if (!connection->owns_session(session)) {
+        if (!connection->owns_attachment(attachment)) {
             continue;
         }
 
@@ -107,7 +107,7 @@ void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& 
             if (udp_socket_closed(socket_value) || session_is_unavailable(session)) {
                 return;
             }
-            if (connection->owns_session(session)) {
+            if (connection->owns_attachment(attachment)) {
                 connection->send_error(stream_id, "port_read_failed", socket_error_message("recvfrom"));
             }
             return;
@@ -115,12 +115,12 @@ void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& 
         if (udp_socket_closed(socket_value) || session_is_unavailable(session)) {
             return;
         }
-        if (!connection->owns_session(session)) {
+        if (!connection->owns_attachment(attachment)) {
             continue;
         }
         std::vector<unsigned char> payload(buffer.begin(), buffer.begin() + received);
         if (!connection->emit_session_udp_datagram(
-                session,
+                attachment,
                 stream_id,
                 printable_port_forward_endpoint(reinterpret_cast<sockaddr*>(&peer_address), peer_len),
                 payload)) {
