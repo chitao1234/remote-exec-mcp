@@ -4,7 +4,7 @@
 #include <memory>
 #include <vector>
 
-#include "port_tunnel_streams.h"
+#include "port_tunnel_session_state.h"
 
 class PortTunnelService;
 class PortTunnelSender;
@@ -46,10 +46,13 @@ private:
     bool closed() const;
     void mark_closed();
     bool send_tcp_success_after_io_threads_started(const PortTunnelFrame& success,
+                                                   ConnectionLocalStreams* local_streams,
                                                    uint32_t stream_id,
                                                    const std::shared_ptr<TunnelTcpStream>& stream,
                                                    bool worker_acquired);
-    void drop_tcp_stream(uint32_t stream_id, const std::shared_ptr<TunnelTcpStream>& fallback);
+    void drop_tcp_stream(ConnectionLocalStreams* local_streams,
+                         uint32_t stream_id,
+                         const std::shared_ptr<TunnelTcpStream>& fallback);
     void handle_frame(const PortTunnelFrame& frame);
     void tunnel_open(const PortTunnelFrame& frame);
     void tunnel_close(const PortTunnelFrame& frame);
@@ -68,6 +71,11 @@ private:
     void close_current_session(PortTunnelCloseMode mode);
     void close_connection_local_state();
     std::shared_ptr<PortTunnelSession> current_session();
+    std::shared_ptr<PortTunnelSessionAttachment> current_session_attachment();
+    std::shared_ptr<PortTunnelSessionAttachment>
+    session_attachment_for(const std::shared_ptr<PortTunnelSession>& session);
+    std::shared_ptr<TunnelTcpStream> get_active_tcp_stream(uint32_t stream_id);
+    std::shared_ptr<TunnelTcpStream> remove_active_tcp_stream(uint32_t stream_id);
     PortTunnelMode current_mode();
     void require_mode(PortTunnelMode mode, PortTunnelProtocol protocol, const std::string& message);
     bool session_mode_active();

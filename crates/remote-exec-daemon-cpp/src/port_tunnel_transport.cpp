@@ -281,7 +281,7 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
                 if (session->closed) {
                     throw PortForwardError(400, "unknown_port_tunnel_session", "unknown port tunnel session");
                 }
-                if (session->attached) {
+                if (session->attachment.get() != NULL) {
                     throw PortForwardError(
                         400, "port_tunnel_already_attached", "port tunnel session is already attached");
                 }

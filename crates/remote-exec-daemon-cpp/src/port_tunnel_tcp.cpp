@@ -58,9 +58,13 @@ bool PortTunnelService::spawn_tcp_listener_loop(const std::shared_ptr<PortTunnel
 void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>& session,
                                         const std::shared_ptr<RetainedTcpListener>& listener) {
     for (;;) {
-        std::shared_ptr<PortTunnelConnection> connection = wait_for_attachment(session);
-        if (connection.get() == NULL) {
+        std::shared_ptr<PortTunnelSessionAttachment> attachment = wait_for_attachment(session);
+        if (attachment.get() == NULL) {
             return;
+        }
+        std::shared_ptr<PortTunnelConnection> connection = attachment->connection.lock();
+        if (connection.get() == NULL) {
+            continue;
         }
 
         const int ready = wait_socket_readable(listener->listener.get(), RETAINED_SOCKET_POLL_TIMEOUT_MS);
@@ -183,12 +187,16 @@ void PortTunnelConnection::tcp_connect(const PortTunnelFrame& frame) {
 
     connection_local_streams_.insert_tcp(frame.stream_id, stream);
     if (!service_->try_acquire_worker()) {
-        drop_tcp_stream(frame.stream_id, stream);
+        drop_tcp_stream(&connection_local_streams_, frame.stream_id, stream);
         send_worker_limit(frame.stream_id);
         return;
     }
     if (!send_tcp_success_after_io_threads_started(
-            make_empty_frame(PortTunnelFrameType::TcpConnectOk, frame.stream_id), frame.stream_id, stream, true)) {
+            make_empty_frame(PortTunnelFrameType::TcpConnectOk, frame.stream_id),
+            &connection_local_streams_,
+            frame.stream_id,
+            stream,
+            true)) {
         send_worker_limit(frame.stream_id);
         return;
     }
@@ -263,7 +271,7 @@ void PortTunnelConnection::tcp_write_loop(uint32_t stream_id, std::shared_ptr<Tu
 
 void PortTunnelConnection::tcp_data(uint32_t stream_id, const std::vector<unsigned char>& data) {
     std::shared_ptr<TunnelTcpStream> stream;
-    stream = connection_local_streams_.get_tcp(stream_id);
+    stream = get_active_tcp_stream(stream_id);
     if (stream.get() == NULL) {
         throw PortForwardError(400, "unknown_port_connection", "unknown tunnel tcp stream");
     }
@@ -287,7 +295,7 @@ void PortTunnelConnection::tcp_data(uint32_t stream_id, const std::vector<unsign
 
 void PortTunnelConnection::tcp_eof(uint32_t stream_id) {
     std::shared_ptr<TunnelTcpStream> stream;
-    stream = connection_local_streams_.get_tcp(stream_id);
+    stream = get_active_tcp_stream(stream_id);
     if (stream.get() == NULL) {
         return;
     }

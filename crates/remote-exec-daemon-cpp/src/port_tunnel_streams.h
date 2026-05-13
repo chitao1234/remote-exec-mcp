@@ -1,15 +1,12 @@
 #pragma once
 
-#include <map>
 #include <memory>
-#include <string>
 #include <utility>
 #include <vector>
 
 #include "basic_mutex.h"
 #include "port_tunnel_common.h"
 
-class PortTunnelConnection;
 class PortTunnelService;
 
 struct TunnelTcpStream {
@@ -57,36 +54,11 @@ struct RetainedTcpListener {
     bool retained_listener_budget_acquired;
 };
 
-struct PortTunnelSession {
-    PortTunnelSession(const std::string& session_id_value,
-                      const std::shared_ptr<PortTunnelService>& service_value,
-                      bool retained_budget)
-        : session_id(session_id_value), service(service_value), attached(false), closed(false), expired(false),
-          resume_deadline_ms(0ULL), generation(0ULL), retained_session_budget_acquired(retained_budget),
-          next_daemon_stream_id(2U) {}
-
-    std::string session_id;
-    std::weak_ptr<PortTunnelService> service;
-    BasicMutex mutex;
-    BasicCondVar state_changed;
-    bool attached;
-    bool closed;
-    bool expired;
-    std::uint64_t resume_deadline_ms;
-    std::uint64_t generation;
-    bool retained_session_budget_acquired;
-    std::weak_ptr<PortTunnelConnection> connection;
-    std::map<uint32_t, std::shared_ptr<RetainedTcpListener>> tcp_listeners;
-    std::map<uint32_t, std::shared_ptr<TunnelUdpSocket>> udp_binds;
-    std::uint32_t next_daemon_stream_id;
-};
-
 void mark_tcp_stream_closed(const std::shared_ptr<TunnelTcpStream>& stream);
 void mark_udp_socket_closed(const std::shared_ptr<TunnelUdpSocket>& socket_value);
 bool tcp_stream_closed(const std::shared_ptr<TunnelTcpStream>& stream);
 bool udp_socket_closed(const std::shared_ptr<TunnelUdpSocket>& socket_value);
 bool retained_listener_closed(const std::shared_ptr<RetainedTcpListener>& listener);
-bool session_is_unavailable(const std::shared_ptr<PortTunnelSession>& session);
 void mark_retained_listener_closed(const std::shared_ptr<RetainedTcpListener>& listener);
 
 class ConnectionLocalStreams {

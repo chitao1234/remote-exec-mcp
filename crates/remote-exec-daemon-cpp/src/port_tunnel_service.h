@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "config.h"
-#include "port_tunnel_streams.h"
+#include "port_tunnel_session_state.h"
 
 class PortTunnelConnection;
 
@@ -51,7 +51,7 @@ private:
     void stop_expiry_scheduler();
     void expiry_scheduler_loop();
     void expire_session_if_needed(const std::shared_ptr<PortTunnelSession>& session);
-    std::shared_ptr<PortTunnelConnection> wait_for_attachment(const std::shared_ptr<PortTunnelSession>& session);
+    std::shared_ptr<PortTunnelSessionAttachment> wait_for_attachment(const std::shared_ptr<PortTunnelSession>& session);
     void tcp_accept_loop(const std::shared_ptr<PortTunnelSession>& session,
                          const std::shared_ptr<RetainedTcpListener>& listener);
     void udp_read_loop(const std::shared_ptr<PortTunnelSession>& session,

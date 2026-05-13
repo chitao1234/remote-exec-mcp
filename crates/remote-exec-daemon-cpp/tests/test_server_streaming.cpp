@@ -1433,6 +1433,41 @@ static void assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(A
     close_tunnel(&client_socket, &server_thread);
 }
 
+static void assert_detached_session_releases_active_tcp_accept_budget(const fs::path& root) {
+    PortForwardLimitConfig limits;
+    limits.max_active_tcp_streams = 1UL;
+
+    AppState state;
+    initialize_state_with_port_forward_limits(state, root, limits);
+
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    const PortTunnelFrame ready = open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
+    const Json ready_meta = Json::parse(ready.meta);
+    const std::string session_id = ready_meta.at("session_id").get<std::string>();
+
+    send_tunnel_frame(client_socket.get(),
+                      json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
+    const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
+    assert(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
+
+    UniqueSocket first_peer(connect_port_forward_socket(endpoint, "tcp"));
+    const PortTunnelFrame first_accept = read_tunnel_frame(client_socket.get());
+    assert(first_accept.type == PortTunnelFrameType::TcpAccept);
+
+    close_tunnel(&client_socket, &server_thread);
+    first_peer.reset();
+
+    open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 2ULL, session_id);
+
+    UniqueSocket second_peer(connect_port_forward_socket(endpoint, "tcp"));
+    const PortTunnelFrame second_accept = read_tunnel_frame(client_socket.get());
+    assert(second_accept.type == PortTunnelFrameType::TcpAccept);
+
+    close_tunnel(&client_socket, &server_thread);
+}
+
 static void assert_expired_tunnel_session_is_released(AppState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
@@ -1612,6 +1647,7 @@ int main() {
     assert_tunnel_udp_paths(state);
     assert_tunnel_limit_and_pressure_paths(state);
     assert_tunnel_resume_and_expiry_paths(state);
+    assert_detached_session_releases_active_tcp_accept_budget(root);
 
     return 0;
 }

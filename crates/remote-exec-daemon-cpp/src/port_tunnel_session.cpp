@@ -50,6 +50,75 @@ void close_udp_socket_for_service(const std::shared_ptr<TunnelUdpSocket>& socket
     }
 }
 
+void close_connection_local_streams(ConnectionLocalStreams* local_streams) {
+    std::vector<std::shared_ptr<TunnelTcpStream>> tcp_streams;
+    std::vector<std::shared_ptr<TunnelUdpSocket>> udp_sockets;
+    local_streams->drain(&tcp_streams, &udp_sockets);
+    for (std::size_t i = 0; i < tcp_streams.size(); ++i) {
+        mark_tcp_stream_closed(tcp_streams[i]);
+    }
+    for (std::size_t i = 0; i < udp_sockets.size(); ++i) {
+        mark_udp_socket_closed(udp_sockets[i]);
+    }
+}
+
+void close_session_attachment(const std::shared_ptr<PortTunnelSessionAttachment>& attachment) {
+    if (attachment.get() == NULL) {
+        return;
+    }
+    close_connection_local_streams(&attachment->local_streams);
+}
+
+struct SessionTeardownState {
+    SessionTeardownState() : release_retained_session_budget(false) {}
+
+    std::shared_ptr<PortTunnelSessionAttachment> attachment;
+    std::vector<std::shared_ptr<RetainedTcpListener>> listeners;
+    std::vector<std::shared_ptr<TunnelUdpSocket>> udp_binds;
+    bool release_retained_session_budget;
+};
+
+SessionTeardownState collect_terminal_session_teardown_locked(const std::shared_ptr<PortTunnelSession>& session,
+                                                              bool mark_expired) {
+    SessionTeardownState state;
+    session->closed = !mark_expired;
+    session->expired = mark_expired;
+    session->resume_deadline_ms = 0ULL;
+    state.attachment = session->attachment;
+    session->attachment.reset();
+    if (session->retained_session_budget_acquired) {
+        session->retained_session_budget_acquired = false;
+        state.release_retained_session_budget = true;
+    }
+    for (std::map<uint32_t, std::shared_ptr<RetainedTcpListener>>::iterator it = session->tcp_listeners.begin();
+         it != session->tcp_listeners.end();
+         ++it) {
+        state.listeners.push_back(it->second);
+    }
+    session->tcp_listeners.clear();
+    for (std::map<uint32_t, std::shared_ptr<TunnelUdpSocket>>::iterator it = session->udp_binds.begin();
+         it != session->udp_binds.end();
+         ++it) {
+        state.udp_binds.push_back(it->second);
+    }
+    session->udp_binds.clear();
+    session->state_changed.broadcast();
+    return state;
+}
+
+void finish_terminal_session_teardown(const SessionTeardownState& state, PortTunnelService& service) {
+    close_session_attachment(state.attachment);
+    if (state.release_retained_session_budget) {
+        service.release_retained_session();
+    }
+    for (std::size_t i = 0; i < state.listeners.size(); ++i) {
+        close_retained_listener_for_service(state.listeners[i], service);
+    }
+    for (std::size_t i = 0; i < state.udp_binds.size(); ++i) {
+        close_udp_socket_for_service(state.udp_binds[i], service);
+    }
+}
+
 } // namespace
 
 std::shared_ptr<PortTunnelSession> PortTunnelService::create_session() {
@@ -80,25 +149,26 @@ std::shared_ptr<PortTunnelSession> PortTunnelService::find_session(const std::st
 void PortTunnelService::attach_session(const std::shared_ptr<PortTunnelSession>& session,
                                        const std::shared_ptr<PortTunnelConnection>& connection) {
     BasicLockGuard lock(session->mutex);
-    session->attached = true;
     session->closed = false;
     session->expired = false;
     session->resume_deadline_ms = 0ULL;
-    session->connection = connection;
+    session->attachment.reset(new PortTunnelSessionAttachment(connection));
     session->state_changed.broadcast();
 }
 
 void PortTunnelService::detach_session(const std::shared_ptr<PortTunnelSession>& session) {
+    std::shared_ptr<PortTunnelSessionAttachment> attachment;
     {
         BasicLockGuard lock(session->mutex);
         if (session->closed || session->expired) {
             return;
         }
-        session->attached = false;
         session->resume_deadline_ms = platform::monotonic_ms() + RESUME_TIMEOUT_MS;
-        session->connection.reset();
+        attachment = session->attachment;
+        session->attachment.reset();
         session->state_changed.broadcast();
     }
+    close_session_attachment(attachment);
     if (!schedule_session_expiry(session)) {
         close_session(session);
     }
@@ -110,47 +180,15 @@ void PortTunnelService::close_session(const std::shared_ptr<PortTunnelSession>& 
         sessions_.erase(session->session_id);
     }
 
-    std::vector<std::shared_ptr<RetainedTcpListener>> listeners;
-    std::vector<std::shared_ptr<TunnelUdpSocket>> udp_binds;
-    bool release_retained_session_budget = false;
+    SessionTeardownState teardown;
     {
         BasicLockGuard lock(session->mutex);
         if (session->closed) {
             return;
         }
-        session->closed = true;
-        session->expired = false;
-        session->attached = false;
-        session->resume_deadline_ms = 0ULL;
-        session->connection.reset();
-        if (session->retained_session_budget_acquired) {
-            session->retained_session_budget_acquired = false;
-            release_retained_session_budget = true;
-        }
-        for (std::map<uint32_t, std::shared_ptr<RetainedTcpListener>>::iterator it = session->tcp_listeners.begin();
-             it != session->tcp_listeners.end();
-             ++it) {
-            listeners.push_back(it->second);
-        }
-        session->tcp_listeners.clear();
-        for (std::map<uint32_t, std::shared_ptr<TunnelUdpSocket>>::iterator it = session->udp_binds.begin();
-             it != session->udp_binds.end();
-             ++it) {
-            udp_binds.push_back(it->second);
-        }
-        session->udp_binds.clear();
-        session->state_changed.broadcast();
+        teardown = collect_terminal_session_teardown_locked(session, false);
     }
-
-    if (release_retained_session_budget) {
-        release_retained_session();
-    }
-    for (std::size_t i = 0; i < listeners.size(); ++i) {
-        close_retained_listener_for_service(listeners[i], *this);
-    }
-    for (std::size_t i = 0; i < udp_binds.size(); ++i) {
-        close_udp_socket_for_service(udp_binds[i], *this);
-    }
+    finish_terminal_session_teardown(teardown, *this);
 }
 
 bool PortTunnelService::schedule_session_expiry(const std::shared_ptr<PortTunnelSession>& session) {
@@ -255,7 +293,7 @@ void PortTunnelService::expiry_scheduler_loop() {
                     bool detached = false;
                     {
                         BasicLockGuard session_lock(session->mutex);
-                        detached = !session->closed && !session->expired && !session->attached &&
+                        detached = !session->closed && !session->expired && session->attachment.get() == NULL &&
                                    session->resume_deadline_ms != 0ULL;
                         deadline = session->resume_deadline_ms;
                     }
@@ -290,62 +328,29 @@ void PortTunnelService::expiry_scheduler_loop() {
 }
 
 void PortTunnelService::expire_session_if_needed(const std::shared_ptr<PortTunnelSession>& session) {
-    std::vector<std::shared_ptr<RetainedTcpListener>> listeners;
-    std::vector<std::shared_ptr<TunnelUdpSocket>> udp_binds;
-    bool release_retained_session_budget = false;
+    SessionTeardownState teardown;
     {
         BasicLockGuard lock(session->mutex);
-        if (session->closed || session->expired || session->attached) {
+        if (session->closed || session->expired || session->attachment.get() != NULL) {
             return;
         }
         if (session->resume_deadline_ms == 0ULL || platform::monotonic_ms() < session->resume_deadline_ms) {
             return;
         }
-        session->expired = true;
-        session->resume_deadline_ms = 0ULL;
-        session->connection.reset();
-        if (session->retained_session_budget_acquired) {
-            session->retained_session_budget_acquired = false;
-            release_retained_session_budget = true;
-        }
-        for (std::map<uint32_t, std::shared_ptr<RetainedTcpListener>>::iterator it = session->tcp_listeners.begin();
-             it != session->tcp_listeners.end();
-             ++it) {
-            listeners.push_back(it->second);
-        }
-        session->tcp_listeners.clear();
-        for (std::map<uint32_t, std::shared_ptr<TunnelUdpSocket>>::iterator it = session->udp_binds.begin();
-             it != session->udp_binds.end();
-             ++it) {
-            udp_binds.push_back(it->second);
-        }
-        session->udp_binds.clear();
-        session->state_changed.broadcast();
+        teardown = collect_terminal_session_teardown_locked(session, true);
     }
-
-    if (release_retained_session_budget) {
-        release_retained_session();
-    }
-    for (std::size_t i = 0; i < listeners.size(); ++i) {
-        close_retained_listener_for_service(listeners[i], *this);
-    }
-    for (std::size_t i = 0; i < udp_binds.size(); ++i) {
-        close_udp_socket_for_service(udp_binds[i], *this);
-    }
+    finish_terminal_session_teardown(teardown, *this);
 }
 
-std::shared_ptr<PortTunnelConnection>
+std::shared_ptr<PortTunnelSessionAttachment>
 PortTunnelService::wait_for_attachment(const std::shared_ptr<PortTunnelSession>& session) {
     BasicLockGuard lock(session->mutex);
     for (;;) {
         if (session->closed || session->expired) {
-            return std::shared_ptr<PortTunnelConnection>();
+            return std::shared_ptr<PortTunnelSessionAttachment>();
         }
-        if (session->attached) {
-            std::shared_ptr<PortTunnelConnection> connection = session->connection.lock();
-            if (connection.get() != NULL) {
-                return connection;
-            }
+        if (session->attachment.get() != NULL) {
+            return session->attachment;
         }
         session->state_changed.timed_wait_ms(session->mutex, RETAINED_SOCKET_POLL_TIMEOUT_MS);
     }
