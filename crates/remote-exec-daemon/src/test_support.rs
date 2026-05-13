@@ -1,5 +1,4 @@
 use std::future::Future;
-use std::sync::Arc;
 
 use axum::Router;
 use tokio::net::TcpListener;
@@ -14,7 +13,7 @@ pub async fn run_until_on_listener<F>(
 where
     F: Future<Output = ()> + Send,
 {
-    crate::run_until_on_bound_listener(Arc::new(config), listener, shutdown).await
+    crate::run_until_on_listener(config, listener, shutdown).await
 }
 
 pub async fn serve_tls_on_listener<F>(

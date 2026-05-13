@@ -49,6 +49,17 @@ where
     run_until_on_bound_listener(daemon_config, listener, shutdown).await
 }
 
+pub async fn run_until_on_listener<F>(
+    config: DaemonConfig,
+    listener: tokio::net::TcpListener,
+    shutdown: F,
+) -> Result<()>
+where
+    F: Future<Output = ()> + Send,
+{
+    run_until_on_bound_listener(Arc::new(config), listener, shutdown).await
+}
+
 pub(crate) async fn run_until_on_bound_listener<F>(
     daemon_config: Arc<DaemonConfig>,
     listener: tokio::net::TcpListener,

@@ -90,16 +90,15 @@ pub(super) fn install_test_crypto_provider() {
     });
 }
 
-pub(super) fn reserve_listen_addr() -> SocketAddr {
+pub(super) fn bind_test_listener() -> (std::net::TcpListener, SocketAddr) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
-    drop(listener);
-    addr
+    listener.set_nonblocking(true).unwrap();
+    (listener, addr)
 }
 
 const STARTUP_POLL_ATTEMPTS: usize = 100;
 const STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(50);
-const STARTUP_BIND_RETRY_ATTEMPTS: usize = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum StartupWaitOutcome {
@@ -181,6 +180,7 @@ pub(super) async fn wait_until_listener_ready(
 
 pub(super) fn spawn_background_daemon(
     config: DaemonConfig,
+    listener: std::net::TcpListener,
 ) -> (
     tokio::sync::oneshot::Sender<()>,
     JoinHandle<anyhow::Result<()>>,
@@ -194,9 +194,14 @@ pub(super) fn spawn_background_daemon(
                 .enable_all()
                 .build()
                 .context("failed to build daemon test runtime")?;
-            runtime.block_on(remote_exec_daemon::run_until(config, async move {
-                let _ = shutdown_rx.await;
-            }))
+            runtime.block_on(async move {
+                let listener = tokio::net::TcpListener::from_std(listener)
+                    .context("failed to adopt daemon test listener")?;
+                remote_exec_daemon::run_until_on_listener(config, listener, async move {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+            })
         })
         .unwrap();
 
@@ -250,16 +255,6 @@ pub(super) fn startup_failure_error(
     }
 }
 
-pub(super) fn is_retryable_startup_error(err: &anyhow::Error) -> bool {
-    err.chain().any(|cause| {
-        let text = cause.to_string().to_ascii_lowercase();
-        text.contains("address already in use")
-            || text.contains("one usage of each socket address")
-            || text.contains("os error 98")
-            || text.contains("os error 10048")
-    })
-}
-
 fn panic_payload_message(payload: Box<dyn Any + Send>) -> String {
     match payload.downcast::<String>() {
         Ok(message) => *message,
@@ -277,53 +272,38 @@ async fn spawn_daemon_with_pty_mode(
 ) -> DaemonFixture {
     install_test_crypto_provider();
 
-    for attempt in 1..=STARTUP_BIND_RETRY_ATTEMPTS {
-        let tempdir = tempfile::tempdir().unwrap();
-        let addr = reserve_listen_addr();
-        let workdir = tempdir.path().join("workdir");
-        std::fs::create_dir_all(&workdir).unwrap();
-        let config = base_daemon_config(target, addr, &workdir, pty, process_environment.clone());
+    let tempdir = tempfile::tempdir().unwrap();
+    let (listener, addr) = bind_test_listener();
+    let workdir = tempdir.path().join("workdir");
+    std::fs::create_dir_all(&workdir).unwrap();
+    let config = base_daemon_config(target, addr, &workdir, pty, process_environment);
 
-        let (shutdown, server_thread) = spawn_background_daemon(config);
-        let client = reqwest::Client::builder().build().unwrap();
-        let startup =
-            wait_until_ready(&client, &format!("http://{addr}/v1/health"), &server_thread).await;
+    let (shutdown, server_thread) = spawn_background_daemon(config, listener);
+    let client = reqwest::Client::builder().build().unwrap();
+    let startup =
+        wait_until_ready(&client, &format!("http://{addr}/v1/health"), &server_thread).await;
 
-        if startup == StartupWaitOutcome::Ready {
-            return daemon_fixture(
-                tempdir,
-                client,
-                addr,
-                "http",
-                workdir,
-                shutdown,
-                server_thread,
-            );
-        }
-
-        let err = startup_failure_error(
-            target,
+    if startup == StartupWaitOutcome::Ready {
+        return daemon_fixture(
+            tempdir,
+            client,
             addr,
-            "health endpoint",
-            startup,
+            "http",
+            workdir,
             shutdown,
             server_thread,
         );
-        if attempt < STARTUP_BIND_RETRY_ATTEMPTS && is_retryable_startup_error(&err) {
-            tracing::warn!(
-                target,
-                listen = %addr,
-                attempt,
-                error = %err,
-                "retrying daemon test startup after bind race"
-            );
-            continue;
-        }
-
-        panic!("daemon test startup failed: {err:#}");
     }
 
-    unreachable!("startup retry loop should return or panic")
+    let err = startup_failure_error(
+        target,
+        addr,
+        "health endpoint",
+        startup,
+        shutdown,
+        server_thread,
+    );
+    panic!("daemon test startup failed: {err:#}");
 }
 
 #[allow(dead_code, reason = "Shared across daemon integration test crates")]
@@ -438,71 +418,56 @@ where
 {
     install_test_crypto_provider();
 
-    for attempt in 1..=STARTUP_BIND_RETRY_ATTEMPTS {
-        let tempdir = tempfile::tempdir().unwrap();
-        let addr = reserve_listen_addr();
-        let workdir = tempdir.path().join("workdir");
-        std::fs::create_dir_all(&workdir).unwrap();
-        let extra_config = render_extra_config(&workdir);
-        let config_path = tempdir.path().join("daemon.toml");
-        std::fs::write(
-            &config_path,
-            format!(
-                r#"target = {target}
+    let tempdir = tempfile::tempdir().unwrap();
+    let (listener, addr) = bind_test_listener();
+    let workdir = tempdir.path().join("workdir");
+    std::fs::create_dir_all(&workdir).unwrap();
+    let extra_config = render_extra_config(&workdir);
+    let config_path = tempdir.path().join("daemon.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"target = {target}
 listen = {listen}
 default_workdir = {default_workdir}
 transport = "http"
 {extra_config}
 "#,
-                target = toml_string(target),
-                listen = toml_string(&addr.to_string()),
-                default_workdir = toml_string(&workdir.display().to_string()),
-            ),
-        )
+            target = toml_string(target),
+            listen = toml_string(&addr.to_string()),
+            default_workdir = toml_string(&workdir.display().to_string()),
+        ),
+    )
+    .unwrap();
+    let mut config = remote_exec_daemon::config::DaemonConfig::load(&config_path)
+        .await
         .unwrap();
-        let mut config = remote_exec_daemon::config::DaemonConfig::load(&config_path)
-            .await
-            .unwrap();
-        config.process_environment = process_environment.clone();
+    config.process_environment = process_environment;
 
-        let (shutdown, server_thread) = spawn_background_daemon(config);
-        let client = reqwest::Client::builder().build().unwrap();
-        let startup =
-            wait_until_ready(&client, &format!("http://{addr}/v1/health"), &server_thread).await;
+    let (shutdown, server_thread) = spawn_background_daemon(config, listener);
+    let client = reqwest::Client::builder().build().unwrap();
+    let startup =
+        wait_until_ready(&client, &format!("http://{addr}/v1/health"), &server_thread).await;
 
-        if startup == StartupWaitOutcome::Ready {
-            return daemon_fixture(
-                tempdir,
-                client,
-                addr,
-                "http",
-                workdir,
-                shutdown,
-                server_thread,
-            );
-        }
-
-        let err = startup_failure_error(
-            target,
+    if startup == StartupWaitOutcome::Ready {
+        return daemon_fixture(
+            tempdir,
+            client,
             addr,
-            "health endpoint",
-            startup,
+            "http",
+            workdir,
             shutdown,
             server_thread,
         );
-        if attempt < STARTUP_BIND_RETRY_ATTEMPTS && is_retryable_startup_error(&err) {
-            tracing::warn!(
-                target,
-                listen = %addr,
-                attempt,
-                error = %err,
-                "retrying daemon test startup after bind race"
-            );
-            continue;
-        }
-
-        panic!("daemon test startup failed: {err:#}");
     }
 
-    unreachable!("startup retry loop should return or panic")
+    let err = startup_failure_error(
+        target,
+        addr,
+        "health endpoint",
+        startup,
+        shutdown,
+        server_thread,
+    );
+    panic!("daemon test startup failed: {err:#}");
 }
