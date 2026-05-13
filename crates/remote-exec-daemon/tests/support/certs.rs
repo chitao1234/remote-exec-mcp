@@ -23,7 +23,7 @@ pub(super) fn write_test_certs(dir: &Path, target: &str) -> TestCerts {
         ca_cert: manifest.ca.cert_pem.clone(),
         client_cert: manifest.broker.cert_pem.clone(),
         client_key: manifest.broker.key_pem.clone(),
-        daemon_cert: daemon.cert_pem.clone(),
-        daemon_key: daemon.key_pem.clone(),
+        daemon_cert: daemon.cert_pem().to_path_buf(),
+        daemon_key: daemon.key_pem().to_path_buf(),
     }
 }
