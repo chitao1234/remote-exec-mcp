@@ -9,6 +9,8 @@
 class PortTunnelConnection;
 class PortTunnelService;
 
+enum class PortTunnelRetainedResourceKind { None, TcpListener, UdpBind };
+
 struct PortTunnelSessionAttachment {
     explicit PortTunnelSessionAttachment(const std::shared_ptr<PortTunnelConnection>& connection_value)
         : connection(connection_value) {}
@@ -16,6 +18,17 @@ struct PortTunnelSessionAttachment {
     std::weak_ptr<PortTunnelConnection> connection;
     ConnectionLocalStreams local_streams;
 };
+
+struct PortTunnelRetainedResource {
+    PortTunnelRetainedResource() : kind(PortTunnelRetainedResourceKind::None), stream_id(0U) {}
+
+    PortTunnelRetainedResourceKind kind;
+    uint32_t stream_id;
+    std::shared_ptr<RetainedTcpListener> tcp_listener;
+    std::shared_ptr<TunnelUdpSocket> udp_bind;
+};
+
+enum class SessionRetainedInstallResult { Installed, Conflict, Unavailable };
 
 struct PortTunnelSession {
     PortTunnelSession(const std::string& session_id_value,
@@ -34,8 +47,7 @@ struct PortTunnelSession {
     std::uint64_t generation;
     bool retained_session_budget_acquired;
     std::shared_ptr<PortTunnelSessionAttachment> attachment;
-    std::map<uint32_t, std::shared_ptr<RetainedTcpListener>> tcp_listeners;
-    std::map<uint32_t, std::shared_ptr<TunnelUdpSocket>> udp_binds;
+    PortTunnelRetainedResource retained_resource;
     std::uint32_t next_daemon_stream_id;
 };
 

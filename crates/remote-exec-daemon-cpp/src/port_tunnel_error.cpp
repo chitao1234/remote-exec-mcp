@@ -55,24 +55,7 @@ void PortTunnelConnection::close_stream(uint32_t stream_id) {
 
     if (session_mode_active()) {
         std::shared_ptr<PortTunnelSession> session = current_session();
-        bool close_session_now = false;
-        {
-            BasicLockGuard lock(session->mutex);
-            std::map<uint32_t, std::shared_ptr<RetainedTcpListener>>::iterator listener =
-                session->tcp_listeners.find(stream_id);
-            if (listener != session->tcp_listeners.end()) {
-                mark_retained_listener_closed(listener->second);
-                session->tcp_listeners.erase(listener);
-                close_session_now = true;
-            }
-            std::map<uint32_t, std::shared_ptr<TunnelUdpSocket>>::iterator udp = session->udp_binds.find(stream_id);
-            if (udp != session->udp_binds.end()) {
-                mark_udp_socket_closed(udp->second);
-                session->udp_binds.erase(udp);
-                close_session_now = true;
-            }
-        }
-        if (close_session_now) {
+        if (service_->close_session_retained_resource(session, stream_id)) {
             service_->close_session(session);
         }
         send_frame(make_empty_frame(PortTunnelFrameType::Close, stream_id));

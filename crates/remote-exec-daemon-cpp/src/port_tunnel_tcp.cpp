@@ -147,16 +147,18 @@ void PortTunnelConnection::tcp_listen(const PortTunnelFrame& frame) {
         send_worker_limit(frame.stream_id);
         return;
     }
-    {
-        BasicLockGuard lock(session->mutex);
-        session->tcp_listeners[frame.stream_id] = listener;
+    const SessionRetainedInstallResult install_result =
+        service_->install_session_tcp_listener(session, frame.stream_id, listener);
+    if (install_result != SessionRetainedInstallResult::Installed) {
+        mark_retained_listener_closed(listener);
+        service_->release_worker();
+        if (install_result == SessionRetainedInstallResult::Conflict) {
+            throw PortForwardError(400, "invalid_port_tunnel", "listen session already has a retained resource");
+        }
+        throw PortForwardError(400, "invalid_port_tunnel", "listen session is unavailable");
     }
     if (!service_->spawn_tcp_listener_loop(session, listener, true)) {
-        {
-            BasicLockGuard lock(session->mutex);
-            session->tcp_listeners.erase(frame.stream_id);
-        }
-        mark_retained_listener_closed(listener);
+        service_->close_session_retained_resource(session, frame.stream_id);
         send_worker_limit(frame.stream_id);
         return;
     }

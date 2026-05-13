@@ -165,16 +165,18 @@ void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
             send_worker_limit(frame.stream_id);
             return;
         }
-        {
-            BasicLockGuard lock(session->mutex);
-            session->udp_binds[frame.stream_id] = socket_value;
+        const SessionRetainedInstallResult install_result =
+            service_->install_session_udp_bind(session, frame.stream_id, socket_value);
+        if (install_result != SessionRetainedInstallResult::Installed) {
+            mark_udp_socket_closed(socket_value);
+            service_->release_worker();
+            if (install_result == SessionRetainedInstallResult::Conflict) {
+                throw PortForwardError(400, "invalid_port_tunnel", "listen session already has a retained resource");
+            }
+            throw PortForwardError(400, "invalid_port_tunnel", "listen session is unavailable");
         }
         if (!service_->spawn_udp_bind_loop(session, frame.stream_id, socket_value, true)) {
-            {
-                BasicLockGuard lock(session->mutex);
-                session->udp_binds.erase(frame.stream_id);
-            }
-            mark_udp_socket_closed(socket_value);
+            service_->close_session_retained_resource(session, frame.stream_id);
             send_worker_limit(frame.stream_id);
             return;
         }
@@ -246,12 +248,10 @@ void PortTunnelConnection::udp_datagram(const PortTunnelFrame& frame) {
     std::shared_ptr<TunnelUdpSocket> socket_value;
     if (session_mode_active()) {
         std::shared_ptr<PortTunnelSession> session = current_session();
-        BasicLockGuard lock(session->mutex);
-        std::map<uint32_t, std::shared_ptr<TunnelUdpSocket>>::iterator it = session->udp_binds.find(frame.stream_id);
-        if (it == session->udp_binds.end()) {
+        socket_value = service_->session_udp_bind(session, frame.stream_id);
+        if (socket_value.get() == NULL) {
             throw PortForwardError(400, "unknown_port_bind", "unknown tunnel udp stream");
         }
-        socket_value = it->second;
     } else {
         socket_value = connection_local_streams_.get_udp(frame.stream_id);
         if (socket_value.get() == NULL) {

@@ -667,29 +667,37 @@ static void assert_port_tunnel_worker_limit_is_reported(const fs::path& root) {
     AppState state;
     initialize_state_with_worker_limit(state, root, 1UL);
 
-    UniqueSocket client_socket;
-    std::thread server_thread;
-    open_tunnel(state, &client_socket, &server_thread);
+    UniqueSocket worker_holder;
+    std::thread worker_holder_thread;
+    open_tunnel(state, &worker_holder, &worker_holder_thread);
 
-    send_tunnel_frame(client_socket.get(),
+    send_tunnel_frame(worker_holder.get(),
                       json_frame(PortTunnelFrameType::TunnelOpen, 0U, tunnel_open_meta("listen", "tcp", 1ULL)));
-    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TunnelReady);
+    assert(read_tunnel_frame(worker_holder.get()).type == PortTunnelFrameType::TunnelReady);
 
-    send_tunnel_frame(client_socket.get(),
+    send_tunnel_frame(worker_holder.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
-    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpListenOk);
+    assert(read_tunnel_frame(worker_holder.get()).type == PortTunnelFrameType::TcpListenOk);
 
-    send_tunnel_frame(client_socket.get(),
-                      json_frame(PortTunnelFrameType::TcpListen, 3U, Json{{"endpoint", "127.0.0.1:0"}}));
-    const PortTunnelFrame error = read_tunnel_frame(client_socket.get());
+    UniqueSocket limited_client;
+    std::thread limited_thread;
+    open_tunnel(state, &limited_client, &limited_thread);
+    send_tunnel_frame(limited_client.get(),
+                      json_frame(PortTunnelFrameType::TunnelOpen, 0U, tunnel_open_meta("listen", "tcp", 1ULL)));
+    assert(read_tunnel_frame(limited_client.get()).type == PortTunnelFrameType::TunnelReady);
+
+    send_tunnel_frame(limited_client.get(),
+                      json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
+    const PortTunnelFrame error = read_tunnel_frame(limited_client.get());
     assert(error.type == PortTunnelFrameType::Error);
-    assert(error.stream_id == 3U);
+    assert(error.stream_id == 1U);
     const Json error_meta = Json::parse(error.meta);
     assert(error_meta.at("code").get<std::string>() == "port_tunnel_limit_exceeded");
     assert(error_meta.at("message").get<std::string>() == "port tunnel worker limit reached");
     assert(!error_meta.at("fatal").get<bool>());
 
-    close_tunnel(&client_socket, &server_thread);
+    close_tunnel(&limited_client, &limited_thread);
+    close_tunnel(&worker_holder, &worker_holder_thread);
 }
 
 static void assert_tcp_connect_worker_limit_errors_before_success(const fs::path& root) {
@@ -1045,25 +1053,53 @@ static void assert_retained_listener_limit_is_enforced_and_released(const fs::pa
     AppState state;
     initialize_state_with_port_forward_limits(state, root, limits);
 
+    UniqueSocket first_client;
+    std::thread first_thread;
+    open_v4_tunnel(state, &first_client, &first_thread, "listen", "tcp", 1ULL);
+
+    send_tunnel_frame(first_client.get(),
+                      json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
+    assert(read_tunnel_frame(first_client.get()).type == PortTunnelFrameType::TcpListenOk);
+
+    UniqueSocket second_client;
+    std::thread second_thread;
+    open_v4_tunnel(state, &second_client, &second_thread, "listen", "tcp", 1ULL);
+    send_tunnel_frame(second_client.get(),
+                      json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
+    assert_tunnel_error_code(read_tunnel_frame(second_client.get()), "port_tunnel_limit_exceeded");
+
+    send_tunnel_frame(first_client.get(), empty_frame(PortTunnelFrameType::Close, 1U));
+    assert(read_tunnel_frame(first_client.get()).type == PortTunnelFrameType::Close);
+    close_tunnel(&first_client, &first_thread);
+
+    open_v4_tunnel(state, &first_client, &first_thread, "listen", "tcp", 1ULL);
+    send_tunnel_frame(first_client.get(),
+                      json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
+    assert(read_tunnel_frame(first_client.get()).type == PortTunnelFrameType::TcpListenOk);
+
+    close_tunnel(&second_client, &second_thread);
+    close_tunnel(&first_client, &first_thread);
+}
+
+static void assert_listen_session_rejects_second_retained_open(AppState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
     open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
-
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
     assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpListenOk);
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 3U, Json{{"endpoint", "127.0.0.1:0"}}));
-    assert_tunnel_error_code(read_tunnel_frame(client_socket.get()), "port_tunnel_limit_exceeded");
-    send_tunnel_frame(client_socket.get(), empty_frame(PortTunnelFrameType::Close, 1U));
-    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::Close);
+    assert_tunnel_error_code(read_tunnel_frame(client_socket.get()), "invalid_port_tunnel");
     close_tunnel(&client_socket, &server_thread);
 
-    open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
+    open_v4_tunnel(state, &client_socket, &server_thread, "listen", "udp", 1ULL);
     send_tunnel_frame(client_socket.get(),
-                      json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
-    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpListenOk);
-
+                      json_frame(PortTunnelFrameType::UdpBind, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
+    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::UdpBindOk);
+    send_tunnel_frame(client_socket.get(),
+                      json_frame(PortTunnelFrameType::UdpBind, 3U, Json{{"endpoint", "127.0.0.1:0"}}));
+    assert_tunnel_error_code(read_tunnel_frame(client_socket.get()), "invalid_port_tunnel");
     close_tunnel(&client_socket, &server_thread);
 }
 
@@ -1645,6 +1681,7 @@ int main() {
     assert_tunnel_open_ready_and_limits(state);
     assert_tunnel_tcp_listener_and_connect_paths(state);
     assert_tunnel_udp_paths(state);
+    assert_listen_session_rejects_second_retained_open(state);
     assert_tunnel_limit_and_pressure_paths(state);
     assert_tunnel_resume_and_expiry_paths(state);
     assert_detached_session_releases_active_tcp_accept_budget(root);

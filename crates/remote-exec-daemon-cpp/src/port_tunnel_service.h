@@ -22,6 +22,15 @@ public:
                         const std::shared_ptr<PortTunnelConnection>& connection);
     void detach_session(const std::shared_ptr<PortTunnelSession>& session);
     void close_session(const std::shared_ptr<PortTunnelSession>& session);
+    SessionRetainedInstallResult install_session_tcp_listener(const std::shared_ptr<PortTunnelSession>& session,
+                                                              uint32_t stream_id,
+                                                              const std::shared_ptr<RetainedTcpListener>& listener);
+    SessionRetainedInstallResult install_session_udp_bind(const std::shared_ptr<PortTunnelSession>& session,
+                                                          uint32_t stream_id,
+                                                          const std::shared_ptr<TunnelUdpSocket>& socket_value);
+    std::shared_ptr<TunnelUdpSocket> session_udp_bind(const std::shared_ptr<PortTunnelSession>& session,
+                                                      uint32_t stream_id);
+    bool close_session_retained_resource(const std::shared_ptr<PortTunnelSession>& session, uint32_t stream_id);
     bool spawn_tcp_listener_loop(const std::shared_ptr<PortTunnelSession>& session,
                                  const std::shared_ptr<RetainedTcpListener>& listener,
                                  bool worker_acquired = false);
