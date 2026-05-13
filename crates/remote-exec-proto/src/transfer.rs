@@ -56,7 +56,11 @@ const TRANSFER_SOURCE_TYPE_WIRE_VALUES: &[(TransferSourceType, &str)] = &[
 
 impl TransferSourceType {
     pub fn wire_value(&self) -> &'static str {
-        wire::wire_value(self, TRANSFER_SOURCE_TYPE_WIRE_VALUES)
+        match self {
+            Self::File => "file",
+            Self::Directory => "directory",
+            Self::Multiple => "multiple",
+        }
     }
 
     pub fn from_wire_value(value: &str) -> Option<Self> {
@@ -81,7 +85,11 @@ const TRANSFER_OVERWRITE_WIRE_VALUES: &[(TransferOverwrite, &str)] = &[
 
 impl TransferOverwrite {
     pub fn wire_value(&self) -> &'static str {
-        wire::wire_value(self, TRANSFER_OVERWRITE_WIRE_VALUES)
+        match self {
+            Self::Fail => "fail",
+            Self::Merge => "merge",
+            Self::Replace => "replace",
+        }
     }
 
     pub fn from_wire_value(value: &str) -> Option<Self> {
@@ -106,7 +114,11 @@ const TRANSFER_SYMLINK_MODE_WIRE_VALUES: &[(TransferSymlinkMode, &str)] = &[
 
 impl TransferSymlinkMode {
     pub fn wire_value(&self) -> &'static str {
-        wire::wire_value(self, TRANSFER_SYMLINK_MODE_WIRE_VALUES)
+        match self {
+            Self::Preserve => "preserve",
+            Self::Follow => "follow",
+            Self::Skip => "skip",
+        }
     }
 
     pub fn from_wire_value(value: &str) -> Option<Self> {
@@ -133,7 +145,10 @@ impl TransferCompression {
     }
 
     pub fn wire_value(&self) -> &'static str {
-        wire::wire_value(self, TRANSFER_COMPRESSION_WIRE_VALUES)
+        match self {
+            Self::None => "none",
+            Self::Zstd => "zstd",
+        }
     }
 
     pub fn from_wire_value(value: &str) -> Option<Self> {

@@ -1,14 +1,3 @@
-pub(crate) fn wire_value<T>(value: &T, mappings: &[(T, &'static str)]) -> &'static str
-where
-    T: PartialEq,
-{
-    mappings
-        .iter()
-        .find(|(variant, _)| variant == value)
-        .map(|(_, wire)| *wire)
-        .expect("wire mapping missing variant")
-}
-
 pub(crate) fn from_wire_value<T>(value: &str, mappings: &[(T, &'static str)]) -> Option<T>
 where
     T: Clone,

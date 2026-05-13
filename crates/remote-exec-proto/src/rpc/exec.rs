@@ -169,13 +169,25 @@ pub struct ExecWarning {
 }
 
 impl ExecWarning {
-    pub fn session_limit_approaching(target: &str) -> Self {
+    pub fn new(code: super::WarningCode, message: impl Into<String>) -> Self {
         Self {
-            code: super::WarningCode::ExecSessionLimitApproaching
-                .wire_value()
-                .to_string(),
-            message: format!("Target `{target}` now has 60 open exec sessions."),
+            code: code.wire_value().to_string(),
+            message: message.into(),
         }
+    }
+
+    pub fn apply_patch_via_exec_command() -> Self {
+        Self::new(
+            super::WarningCode::ApplyPatchViaExecCommand,
+            "Use apply_patch directly rather than through exec_command.",
+        )
+    }
+
+    pub fn session_limit_approaching(target: &str) -> Self {
+        Self::new(
+            super::WarningCode::ExecSessionLimitApproaching,
+            format!("Target `{target}` now has 60 open exec sessions."),
+        )
     }
 }
 

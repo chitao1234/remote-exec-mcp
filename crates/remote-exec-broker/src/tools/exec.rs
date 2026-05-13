@@ -14,10 +14,6 @@ use super::exec_format::{
 use super::exec_intercept::maybe_intercept_apply_patch;
 use crate::mcp_server::ToolCallOutput;
 
-const APPLY_PATCH_WARNING_CODE: &str = "apply_patch_via_exec_command";
-const APPLY_PATCH_WARNING_MESSAGE: &str =
-    "Use apply_patch directly rather than through exec_command.";
-
 #[derive(Debug, thiserror::Error)]
 #[error("write_stdin failed: {0}")]
 struct WriteStdinToolError(#[source] anyhow::Error);
@@ -441,8 +437,5 @@ async fn target_path_policy(target: &crate::TargetHandle) -> anyhow::Result<Path
 }
 
 fn apply_patch_warning() -> ExecWarning {
-    ExecWarning {
-        code: APPLY_PATCH_WARNING_CODE.to_string(),
-        message: APPLY_PATCH_WARNING_MESSAGE.to_string(),
-    }
+    ExecWarning::apply_patch_via_exec_command()
 }

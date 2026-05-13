@@ -12,10 +12,20 @@ pub async fn log_http_request(request: Request, next: Next) -> Response {
     let path = request.uri().path().to_string();
     let started = Instant::now();
     let mut response = next.run(request).await;
-    response.headers_mut().insert(
-        REQUEST_ID_HEADER,
-        HeaderValue::from_str(request_id.as_str()).expect("request id should be a valid header"),
-    );
+    match HeaderValue::from_str(request_id.as_str()) {
+        Ok(request_id_header) => {
+            response
+                .headers_mut()
+                .insert(REQUEST_ID_HEADER, request_id_header);
+        }
+        Err(err) => {
+            tracing::error!(
+                request_id = %request_id,
+                error = %err,
+                "request id could not be encoded as a response header"
+            );
+        }
+    }
     let status = response.status();
     let elapsed_ms = started.elapsed().as_millis() as u64;
 
