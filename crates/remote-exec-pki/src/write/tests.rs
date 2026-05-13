@@ -1,4 +1,3 @@
-
 use super::write_text_file;
 
 #[test]

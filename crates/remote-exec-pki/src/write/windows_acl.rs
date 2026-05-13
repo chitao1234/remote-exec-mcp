@@ -1,4 +1,3 @@
-
 use std::{
     fs::File, io::Write, iter, mem, os::windows::ffi::OsStrExt, os::windows::io::FromRawHandle,
     path::Path, ptr,
