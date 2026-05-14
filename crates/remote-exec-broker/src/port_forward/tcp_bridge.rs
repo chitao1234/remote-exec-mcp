@@ -784,7 +784,7 @@ async fn close_tcp_pair_if_fully_eof(
     .await
     .expect("fully drained tcp stream exists");
     let listen_stream_id = stream.listen_stream_id;
-    let result = if let Err(err) = connect_tunnel.close_stream(connect_stream_id).await {
+    if let Err(err) = connect_tunnel.close_stream(connect_stream_id).await {
         if is_retryable_transport_error(&err) {
             if let Err(listen_err) = listen_tunnel.close_stream(listen_stream_id).await {
                 classify_transport_failure(
@@ -808,8 +808,7 @@ async fn close_tcp_pair_if_fully_eof(
         .map(Some)
     } else {
         Ok(None)
-    };
-    result
+    }
 }
 
 fn frame_data_bytes(frame: &Frame) -> usize {
