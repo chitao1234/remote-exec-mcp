@@ -128,6 +128,13 @@ HOST_SERVER_TRANSPORT_SRCS = \
 
 HOST_SERVER_STREAMING_SRCS = \
 	$(SOURCE_PREFIX)tests/test_server_streaming.cpp \
+	$(SOURCE_PREFIX)tests/test_server_streaming_shared.cpp \
+	$(SOURCE_PREFIX)tests/test_server_streaming_routes.cpp \
+	$(SOURCE_PREFIX)tests/test_server_streaming_protocol.cpp \
+	$(SOURCE_PREFIX)tests/test_server_streaming_tcp.cpp \
+	$(SOURCE_PREFIX)tests/test_server_streaming_udp.cpp \
+	$(SOURCE_PREFIX)tests/test_server_streaming_limits.cpp \
+	$(SOURCE_PREFIX)tests/test_server_streaming_lifecycle.cpp \
 	$(BASE_SRCS_NO_MAIN) \
 	$(SOURCE_PREFIX)src/process_session_posix.cpp \
 	$(POSIX_CHILD_REAPER_SRCS)
