@@ -74,7 +74,7 @@ ServerRuntime::ServerRuntime(const DaemonConfig& config)
     state_.default_shell = platform::resolve_default_shell(config.default_shell);
     state_.sandbox_enabled = config.sandbox_configured;
     if (state_.sandbox_enabled) {
-        state_.sandbox = compile_filesystem_sandbox(host_path_policy(), config.sandbox);
+        state_.sandbox = compile_filesystem_sandbox(config.sandbox);
     }
     state_.port_tunnel_service = create_port_tunnel_service(config.port_forward_limits);
 }

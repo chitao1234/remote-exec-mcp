@@ -169,7 +169,7 @@ resolve_authorized_input_path(const AppState& state, const Json& body, const std
 }
 
 void authorize_sandbox_path(const AppState& state, SandboxAccess access, const std::string& path) {
-    authorize_path(host_path_policy(), active_sandbox(state), access, path);
+    authorize_path(active_sandbox(state), access, path);
 }
 
 std::string resolve_absolute_transfer_path(const std::string& path) {

@@ -96,7 +96,7 @@ static void initialize_state(AppState& state, const fs::path& root) {
 static void enable_sandbox(AppState& state) {
     state.sandbox_enabled = state.config.sandbox_configured;
     if (state.sandbox_enabled) {
-        state.sandbox = compile_filesystem_sandbox(host_path_policy(), state.config.sandbox);
+        state.sandbox = compile_filesystem_sandbox(state.config.sandbox);
     }
 }
 

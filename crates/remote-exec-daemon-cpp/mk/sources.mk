@@ -13,6 +13,7 @@ TRANSFER_SRCS = \
 
 POLICY_SRCS = \
 	$(SOURCE_PREFIX)src/path_policy.cpp \
+	$(SOURCE_PREFIX)src/path_compare.cpp \
 	$(SOURCE_PREFIX)src/filesystem_sandbox.cpp
 
 RPC_FAILURE_SRCS = $(SOURCE_PREFIX)src/rpc_failures.cpp
