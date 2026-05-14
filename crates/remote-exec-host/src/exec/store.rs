@@ -151,6 +151,9 @@ impl SessionStore {
         session: SharedSession,
         guard: OwnedMutexGuard<LiveSession>,
     ) -> Option<SessionLease> {
+        // Recheck the store entry after acquiring the session lock: the session may have been
+        // removed or replaced while we were waiting on the mutex, so the lease is valid only if
+        // the store still points at this exact session instance.
         let is_current = self
             .inner
             .read()

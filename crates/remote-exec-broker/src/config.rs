@@ -317,7 +317,7 @@ impl BrokerConfig {
         if let Some(local) = &self.local {
             local.transfer_limits.validate()?;
             remote_exec_host::config::validate_existing_directory(
-                &local.normalized_default_workdir(),
+                &local.default_workdir,
                 "local.default_workdir",
             )?;
         }
