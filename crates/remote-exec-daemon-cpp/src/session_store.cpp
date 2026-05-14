@@ -36,7 +36,8 @@ struct PollResult {
 
 const unsigned long EXIT_POLL_INTERVAL_MS = 25UL;
 const unsigned long RECENT_PROTECTION_COUNT = 8UL;
-const unsigned long WARNING_THRESHOLD = 60UL;
+const unsigned long WARNING_THRESHOLD_HEADROOM = 4UL;
+const unsigned long WARNING_THRESHOLD = DEFAULT_MAX_OPEN_SESSIONS - WARNING_THRESHOLD_HEADROOM;
 
 struct PruneCandidate {
     std::string daemon_session_id;
@@ -56,10 +57,10 @@ Json empty_exec_warnings() {
     return Json::array();
 }
 
-Json session_limit_warning(const std::string& target) {
+Json session_limit_warning(const std::string& target, unsigned long open_sessions) {
     return Json::array({Json{
         {"code", "exec_session_limit_approaching"},
-        {"message", "Target `" + target + "` now has 60 open exec sessions."},
+        {"message", "Target `" + target + "` now has " + std::to_string(open_sessions) + " open exec sessions."},
     }});
 }
 
@@ -390,7 +391,7 @@ Json SessionStore::start_command(const std::string& target,
             message.quoted_field("daemon_session_id", session->id).field("open_sessions", sessions_.size());
             log_message(LOG_INFO, "session_store", message.str());
             if (crossed_warning_threshold) {
-                warnings = session_limit_warning(target);
+                warnings = session_limit_warning(target, WARNING_THRESHOLD);
             }
         }
     }

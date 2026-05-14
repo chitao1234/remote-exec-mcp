@@ -77,6 +77,10 @@ static YieldTimeConfig fast_yield_time_config() {
     return config;
 }
 
+static unsigned long warning_threshold() {
+    return DEFAULT_MAX_OPEN_SESSIONS - 4UL;
+}
+
 static bool wait_until_true(const std::atomic<bool>& value, unsigned long timeout_ms) {
     const std::uint64_t started = platform::monotonic_ms();
     while (platform::monotonic_ms() - started < timeout_ms) {
@@ -828,8 +832,9 @@ static void assert_threshold_warnings_and_unknown_sessions(SessionStore& store,
     {
         SessionStore warning_store;
         const YieldTimeConfig fast_yield = fast_yield_time_config();
+        const unsigned long threshold = warning_threshold();
         Json threshold_response;
-        for (int index = 0; index < 60; ++index) {
+        for (unsigned long index = 0; index < threshold; ++index) {
             const Json running = start_test_command(warning_store,
                                                     "printf ready; sleep 30",
                                                     root.string(),
@@ -838,9 +843,9 @@ static void assert_threshold_warnings_and_unknown_sessions(SessionStore& store,
                                                     1UL,
                                                     DEFAULT_MAX_OUTPUT_TOKENS,
                                                     fast_yield,
-                                                    64UL);
+                                                    DEFAULT_MAX_OPEN_SESSIONS);
             assert(running.at("running").get<bool>());
-            if (index < 59) {
+            if (index + 1UL < threshold) {
                 assert(running.at("warnings").empty());
             } else {
                 threshold_response = running;
@@ -849,7 +854,7 @@ static void assert_threshold_warnings_and_unknown_sessions(SessionStore& store,
         assert(threshold_response.at("warnings").size() == 1U);
         assert(threshold_response.at("warnings")[0].at("code").get<std::string>() == "exec_session_limit_approaching");
         assert(threshold_response.at("warnings")[0].at("message").get<std::string>() ==
-               "Target `cpp-test` now has 60 open exec sessions.");
+               "Target `cpp-test` now has " + std::to_string(threshold) + " open exec sessions.");
     }
 
     bool unknown_session_rejected = false;

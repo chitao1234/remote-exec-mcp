@@ -1,6 +1,7 @@
 use std::io::ErrorKind;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use crate::{AppState, HostRpcError};
 use remote_exec_proto::port_tunnel::{
@@ -28,6 +29,14 @@ use super::{
     TunnelSender, TunnelState,
 };
 
+// Keep enough buffered slack for queued data plus follow-up control frames
+// without letting tunnel-local memory growth become unbounded.
+const TUNNEL_FRAME_QUEUE_CAPACITY: usize = 128;
+
+// On shutdown, give already queued frames a brief chance to flush without
+// blocking tunnel detach indefinitely.
+const WRITER_TASK_DRAIN_TIMEOUT: Duration = Duration::from_millis(100);
+
 pub async fn serve_tunnel<S>(state: Arc<AppState>, stream: S) -> Result<(), HostRpcError>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -53,7 +62,7 @@ where
         .await
         .map_err(|err| rpc_error(RpcErrorCode::InvalidPortTunnel, err.to_string()))?;
 
-    let (tx, mut rx) = mpsc::channel::<QueuedFrame>(128);
+    let (tx, mut rx) = mpsc::channel::<QueuedFrame>(TUNNEL_FRAME_QUEUE_CAPACITY);
     let sender = TunnelSender {
         tx: tx.clone(),
         limiter: state.port_forward_limiter.clone(),
@@ -102,7 +111,7 @@ where
     .await;
     tunnel.cancel.cancel();
     drop(tx);
-    let _ = tokio::time::timeout(std::time::Duration::from_millis(100), writer_task).await;
+    let _ = tokio::time::timeout(WRITER_TASK_DRAIN_TIMEOUT, writer_task).await;
     result.map(|_| ())
 }
 

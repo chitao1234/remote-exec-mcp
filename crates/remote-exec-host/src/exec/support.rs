@@ -157,8 +157,13 @@ fn host_path_policy() -> PathPolicy {
     host_path::host_path_policy()
 }
 
+// Chunk ids are short-lived response correlation hints, not globally unique
+// identifiers. Three random bytes keep them compact while still yielding
+// roughly 16 million possibilities.
+const CHUNK_ID_RANDOM_BYTES: usize = 3;
+
 fn chunk_id() -> String {
-    let bytes = rand::random::<[u8; 3]>();
+    let bytes = rand::random::<[u8; CHUNK_ID_RANDOM_BYTES]>();
     format!("{:02x}{:02x}{:02x}", bytes[0], bytes[1], bytes[2])
 }
 

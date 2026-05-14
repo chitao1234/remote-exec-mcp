@@ -183,10 +183,10 @@ impl ExecWarning {
         )
     }
 
-    pub fn session_limit_approaching(target: &str) -> Self {
+    pub fn session_limit_approaching(target: &str, open_sessions: usize) -> Self {
         Self::new(
             super::WarningCode::ExecSessionLimitApproaching,
-            format!("Target `{target}` now has 60 open exec sessions."),
+            format!("Target `{target}` now has {open_sessions} open exec sessions."),
         )
     }
 }
@@ -266,6 +266,16 @@ mod tests {
                     "cols": 101,
                 },
             })
+        );
+    }
+
+    #[test]
+    fn session_limit_warning_message_uses_supplied_open_session_count() {
+        let warning = super::ExecWarning::session_limit_approaching("builder-a", 9);
+        assert_eq!(warning.code, "exec_session_limit_approaching");
+        assert_eq!(
+            warning.message,
+            "Target `builder-a` now has 9 open exec sessions."
         );
     }
 

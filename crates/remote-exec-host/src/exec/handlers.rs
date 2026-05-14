@@ -308,7 +308,10 @@ fn running_session_response(
 
 fn session_limit_warnings(state: &AppState, crossed_warning_threshold: bool) -> Vec<ExecWarning> {
     if crossed_warning_threshold {
-        vec![ExecWarning::session_limit_approaching(&state.config.target)]
+        vec![ExecWarning::session_limit_approaching(
+            &state.config.target,
+            super::store::exec_session_warning_threshold(),
+        )]
     } else {
         Vec::new()
     }

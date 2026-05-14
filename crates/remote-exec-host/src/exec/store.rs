@@ -10,7 +10,12 @@ use super::session::LiveSession;
 type SharedSession = Arc<Mutex<LiveSession>>;
 const DEFAULT_SESSION_LIMIT: usize = 64;
 const RECENT_PROTECTION_COUNT: usize = 8;
-const WARNING_THRESHOLD: usize = 60;
+const WARNING_THRESHOLD_HEADROOM: usize = 4;
+const WARNING_THRESHOLD: usize = DEFAULT_SESSION_LIMIT - WARNING_THRESHOLD_HEADROOM;
+
+pub(crate) const fn exec_session_warning_threshold() -> usize {
+    WARNING_THRESHOLD
+}
 
 fn session_matches(entry: &SessionEntry, session: &SharedSession) -> bool {
     Arc::ptr_eq(&entry.session, session)
