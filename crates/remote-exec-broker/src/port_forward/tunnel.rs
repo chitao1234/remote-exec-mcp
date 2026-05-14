@@ -121,8 +121,17 @@ impl PortTunnel {
                                             meta: frame.meta,
                                             data: Vec::new(),
                                         };
-                                        if reader_tx.send(QueuedFrame { frame: ack, charge: 0 }).await.is_err() {
-                                            return;
+                                        match reader_tx.try_send(QueuedFrame {
+                                            frame: ack,
+                                            charge: 0,
+                                        }) {
+                                            Ok(()) => {}
+                                            Err(mpsc::error::TrySendError::Full(_)) => {
+                                                tracing::debug!(
+                                                    "port tunnel writer queue is full; dropping heartbeat ack"
+                                                );
+                                            }
+                                            Err(mpsc::error::TrySendError::Closed(_)) => return,
                                         }
                                         continue;
                                     }
@@ -225,26 +234,35 @@ impl PortTunnel {
     }
 
     pub async fn wait_closed(&self, timeout: Duration) -> anyhow::Result<()> {
-        if let Some(task) = self.reader_task.lock().await.take() {
-            tokio::time::timeout(timeout, task)
-                .await
-                .map_err(|_| anyhow::anyhow!("timed out waiting for port tunnel reader task"))?
-                .map_err(|err| anyhow::anyhow!("port tunnel reader task join failed: {err}"))?;
-        }
-        if let Some(task) = self.writer_task.lock().await.take() {
-            tokio::time::timeout(timeout, task)
-                .await
-                .map_err(|_| anyhow::anyhow!("timed out waiting for port tunnel writer task"))?
-                .map_err(|err| anyhow::anyhow!("port tunnel writer task join failed: {err}"))?;
-        }
-        if let Some(task) = self.heartbeat_task.lock().await.take() {
-            tokio::time::timeout(timeout, task)
-                .await
-                .map_err(|_| anyhow::anyhow!("timed out waiting for port tunnel heartbeat task"))?
-                .map_err(|err| anyhow::anyhow!("port tunnel heartbeat task join failed: {err}"))?;
-        }
+        let reader_task = self.reader_task.lock().await.take();
+        let writer_task = self.writer_task.lock().await.take();
+        let heartbeat_task = self.heartbeat_task.lock().await.take();
+        tokio::time::timeout(timeout, async move {
+            let (reader_result, writer_result, heartbeat_result) = tokio::join!(
+                wait_for_tunnel_task("reader", reader_task),
+                wait_for_tunnel_task("writer", writer_task),
+                wait_for_tunnel_task("heartbeat", heartbeat_task),
+            );
+            reader_result?;
+            writer_result?;
+            heartbeat_result?;
+            Ok::<(), anyhow::Error>(())
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("timed out waiting for port tunnel tasks to stop"))??;
         Ok(())
     }
+}
+
+async fn wait_for_tunnel_task(
+    name: &'static str,
+    task: Option<JoinHandle<()>>,
+) -> anyhow::Result<()> {
+    let Some(task) = task else {
+        return Ok(());
+    };
+    task.await
+        .map_err(|err| anyhow::anyhow!("port tunnel {name} task join failed: {err}"))
 }
 
 async fn run_heartbeat_loop(
@@ -633,5 +651,113 @@ mod tests {
             .expect("heartbeat timeout should wake tunnel receiver")
             .unwrap_err();
         assert!(is_retryable_transport_error(&err), "{err:#}");
+    }
+
+    #[tokio::test]
+    async fn heartbeat_frames_do_not_block_reader_when_writer_queue_is_full() {
+        let (broker_side, mut daemon_side) = tokio::io::duplex(1);
+        let tunnel = PortTunnel::from_stream(broker_side).unwrap();
+
+        for index in 0..128 {
+            tunnel
+                .send(Frame {
+                    frame_type: FrameType::TcpData,
+                    flags: 0,
+                    stream_id: 1,
+                    meta: Vec::new(),
+                    data: vec![index as u8; 1024],
+                })
+                .await
+                .unwrap();
+        }
+        tokio::task::yield_now().await;
+
+        remote_exec_proto::port_tunnel::write_frame(
+            &mut daemon_side,
+            &Frame {
+                frame_type: FrameType::TunnelHeartbeat,
+                flags: 0,
+                stream_id: 0,
+                meta: serde_json::to_vec(&TunnelHeartbeatMeta { nonce: 1 }).unwrap(),
+                data: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+        remote_exec_proto::port_tunnel::write_frame(
+            &mut daemon_side,
+            &Frame {
+                frame_type: FrameType::TcpData,
+                flags: 0,
+                stream_id: 99,
+                meta: Vec::new(),
+                data: b"payload".to_vec(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(1), tunnel.recv())
+            .await
+            .expect("heartbeat echo should not block subsequent data frames")
+            .unwrap();
+        assert_eq!(frame.frame_type, FrameType::TcpData);
+        assert_eq!(frame.stream_id, 99);
+        assert_eq!(frame.data, b"payload");
+    }
+
+    #[tokio::test]
+    async fn wait_closed_uses_a_single_total_timeout_budget() {
+        let (broker_side, mut daemon_side) = tokio::io::duplex(1);
+        let tunnel = PortTunnel::from_stream(broker_side).unwrap();
+
+        for index in 0..128 {
+            tunnel
+                .send(Frame {
+                    frame_type: FrameType::TcpData,
+                    flags: 0,
+                    stream_id: 1,
+                    meta: Vec::new(),
+                    data: vec![index as u8; 1024],
+                })
+                .await
+                .unwrap();
+        }
+
+        for index in 0..128 {
+            remote_exec_proto::port_tunnel::write_frame(
+                &mut daemon_side,
+                &Frame {
+                    frame_type: FrameType::TcpData,
+                    flags: 0,
+                    stream_id: 10 + index,
+                    meta: Vec::new(),
+                    data: vec![index as u8; 16],
+                },
+            )
+            .await
+            .unwrap();
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        tunnel.abort().await;
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(110),
+            tunnel.wait_closed(std::time::Duration::from_millis(40)),
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "wait_closed should finish within one total timeout budget"
+        );
+        let err = result
+            .unwrap()
+            .expect_err("blocked tunnel tasks should time out once, not hang for three budgets");
+        assert!(
+            err.to_string()
+                .contains("timed out waiting for port tunnel"),
+            "{err:#}"
+        );
     }
 }
