@@ -11,11 +11,6 @@ type SharedSession = Arc<Mutex<LiveSession>>;
 const DEFAULT_SESSION_LIMIT: usize = 64;
 const RECENT_PROTECTION_COUNT: usize = 8;
 const WARNING_THRESHOLD_HEADROOM: usize = 4;
-const WARNING_THRESHOLD: usize = DEFAULT_SESSION_LIMIT - WARNING_THRESHOLD_HEADROOM;
-
-pub(crate) const fn exec_session_warning_threshold() -> usize {
-    WARNING_THRESHOLD
-}
 
 fn session_matches(entry: &SessionEntry, session: &SharedSession) -> bool {
     Arc::ptr_eq(&entry.session, session)
@@ -34,9 +29,10 @@ struct Candidate {
     last_touched_at: Instant,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct InsertOutcome {
     pub crossed_warning_threshold: bool,
+    pub warning_threshold: usize,
+    pub lease: SessionLease,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,14 +64,17 @@ impl SessionStore {
     }
 
     pub async fn insert(&self, session_id: String, session: LiveSession) -> InsertOutcome {
-        let crossed_warning_threshold = self.crosses_warning_threshold().await;
+        let warning_threshold = self.warning_threshold();
+        let crossed_warning_threshold = self.crosses_warning_threshold(warning_threshold).await;
         self.prune_for_insert().await;
         let session_id_for_log = session_id.clone();
+        let shared_session = Arc::new(Mutex::new(session));
+        let guard = shared_session.clone().lock_owned().await;
         let mut sessions = self.inner.write().await;
         sessions.insert(
-            session_id,
+            session_id.clone(),
             SessionEntry {
-                session: Arc::new(Mutex::new(session)),
+                session: shared_session.clone(),
                 last_touched_at: Instant::now(),
             },
         );
@@ -87,6 +86,13 @@ impl SessionStore {
         );
         InsertOutcome {
             crossed_warning_threshold,
+            warning_threshold,
+            lease: SessionLease {
+                inner: self.inner.clone(),
+                session_id,
+                session: shared_session,
+                guard,
+            },
         }
     }
 
@@ -182,9 +188,13 @@ impl SessionStore {
         }
     }
 
-    async fn crosses_warning_threshold(&self) -> bool {
+    fn warning_threshold(&self) -> usize {
+        self.limit.saturating_sub(WARNING_THRESHOLD_HEADROOM)
+    }
+
+    async fn crosses_warning_threshold(&self, warning_threshold: usize) -> bool {
         let current_len = self.inner.read().await.len();
-        current_len < WARNING_THRESHOLD && current_len + 1 >= WARNING_THRESHOLD
+        current_len < warning_threshold && current_len + 1 >= warning_threshold
     }
 
     fn protected_recent_count(&self) -> usize {

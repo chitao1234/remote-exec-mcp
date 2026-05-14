@@ -371,3 +371,26 @@ async fn insert_reports_warning_only_when_crossing_threshold() {
         .await;
     assert!(recrossing.crossed_warning_threshold);
 }
+
+#[tokio::test]
+async fn insert_crosses_warning_threshold_for_configured_limit() {
+    let store = SessionStore::new(6);
+
+    let first = store
+        .insert(
+            "session-1".to_string(),
+            spawn_pipe_session(&sleep_script(2)),
+        )
+        .await;
+    assert_eq!(first.warning_threshold, 2);
+    assert!(!first.crossed_warning_threshold);
+
+    let second = store
+        .insert(
+            "session-2".to_string(),
+            spawn_pipe_session(&sleep_script(2)),
+        )
+        .await;
+    assert_eq!(second.warning_threshold, 2);
+    assert!(second.crossed_warning_threshold);
+}

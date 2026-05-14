@@ -37,7 +37,6 @@ struct PollResult {
 const unsigned long EXIT_POLL_INTERVAL_MS = 25UL;
 const unsigned long RECENT_PROTECTION_COUNT = 8UL;
 const unsigned long WARNING_THRESHOLD_HEADROOM = 4UL;
-const unsigned long WARNING_THRESHOLD = DEFAULT_MAX_OPEN_SESSIONS - WARNING_THRESHOLD_HEADROOM;
 
 struct PruneCandidate {
     std::string daemon_session_id;
@@ -64,8 +63,13 @@ Json session_limit_warning(const std::string& target, unsigned long open_session
     }});
 }
 
-bool crosses_warning_threshold(std::size_t open_sessions) {
-    return open_sessions < WARNING_THRESHOLD && open_sessions + 1U >= WARNING_THRESHOLD;
+unsigned long warning_threshold(unsigned long max_open_sessions) {
+    return max_open_sessions > WARNING_THRESHOLD_HEADROOM ? max_open_sessions - WARNING_THRESHOLD_HEADROOM : 0UL;
+}
+
+bool crosses_warning_threshold(std::size_t open_sessions, unsigned long max_open_sessions) {
+    const unsigned long threshold = warning_threshold(max_open_sessions);
+    return open_sessions < threshold && open_sessions + 1U >= threshold;
 }
 
 std::size_t protected_recent_count(std::size_t open_sessions) {
@@ -384,14 +388,15 @@ Json SessionStore::start_command(const std::string& target,
         BasicLockGuard lock(mutex_);
         pending_start.release_locked();
         if (!poll_result.completed) {
-            const bool crossed_warning_threshold = crosses_warning_threshold(sessions_.size());
+            const unsigned long threshold = warning_threshold(max_open_sessions);
+            const bool crossed_warning_threshold = crosses_warning_threshold(sessions_.size(), max_open_sessions);
             session->last_touched_order.store(make_touch_order());
             sessions_[session->id] = session;
             LogMessageBuilder message("stored live session");
             message.quoted_field("daemon_session_id", session->id).field("open_sessions", sessions_.size());
             log_message(LOG_INFO, "session_store", message.str());
             if (crossed_warning_threshold) {
-                warnings = session_limit_warning(target, WARNING_THRESHOLD);
+                warnings = session_limit_warning(target, threshold);
             }
         }
     }

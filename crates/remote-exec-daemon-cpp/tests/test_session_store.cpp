@@ -961,6 +961,41 @@ static void assert_threshold_warnings_and_unknown_sessions(SessionStore& store,
 #endif
 }
 
+static void assert_threshold_warnings_follow_configured_limit(const fs::path& root,
+                                                              const std::string& shell) {
+#ifdef _WIN32
+    (void)root;
+    (void)shell;
+#else
+    SessionStore warning_store;
+    const YieldTimeConfig fast_yield = fast_yield_time_config();
+    const unsigned long max_open_sessions = 6UL;
+    const unsigned long threshold = max_open_sessions - 4UL;
+    Json threshold_response;
+    for (unsigned long index = 0; index < threshold; ++index) {
+        const Json running = start_test_command(warning_store,
+                                                "printf ready; sleep 30",
+                                                root.string(),
+                                                shell,
+                                                false,
+                                                1UL,
+                                                DEFAULT_MAX_OUTPUT_TOKENS,
+                                                fast_yield,
+                                                max_open_sessions);
+        assert(running.at("running").get<bool>());
+        if (index + 1UL < threshold) {
+            assert(running.at("warnings").empty());
+        } else {
+            threshold_response = running;
+        }
+    }
+    assert(threshold_response.at("warnings").size() == 1U);
+    assert(threshold_response.at("warnings")[0].at("code").get<std::string>() == "exec_session_limit_approaching");
+    assert(threshold_response.at("warnings")[0].at("message").get<std::string>() ==
+           "Target `cpp-test` now has " + std::to_string(threshold) + " open exec sessions.");
+#endif
+}
+
 int main() {
 #ifndef _WIN32
     install_posix_child_reaper();
@@ -981,6 +1016,7 @@ int main() {
     assert_stdin_and_tty_behavior(store, root, shell, yield_time);
     assert_pruning_and_recency_behavior(root, shell);
     assert_threshold_warnings_and_unknown_sessions(store, root, shell, yield_time);
+    assert_threshold_warnings_follow_configured_limit(root, shell);
 
     return 0;
 }

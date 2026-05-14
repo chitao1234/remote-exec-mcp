@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use crate::wire;
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RpcErrorBody {
     pub code: String,
@@ -58,172 +56,80 @@ pub enum RpcErrorCode {
     Internal,
 }
 
-const RPC_ERROR_CODE_WIRE_VALUES: &[(RpcErrorCode, &str)] = &[
-    (RpcErrorCode::BadRequest, "bad_request"),
-    (RpcErrorCode::Unauthorized, "unauthorized"),
-    (RpcErrorCode::UnknownSession, "unknown_session"),
-    (
-        RpcErrorCode::ExecSessionLockTimeout,
-        "exec_session_lock_timeout",
-    ),
-    (RpcErrorCode::NotFound, "not_found"),
-    (RpcErrorCode::UnknownEndpoint, "unknown_endpoint"),
-    (RpcErrorCode::InvalidPortTunnel, "invalid_port_tunnel"),
-    (
-        RpcErrorCode::PortTunnelUnavailable,
-        "port_tunnel_unavailable",
-    ),
-    (
-        RpcErrorCode::PortTunnelLimitExceeded,
-        "port_tunnel_limit_exceeded",
-    ),
-    (
-        RpcErrorCode::PortTunnelAlreadyAttached,
-        "port_tunnel_already_attached",
-    ),
-    (
-        RpcErrorCode::PortTunnelResumeExpired,
-        "port_tunnel_resume_expired",
-    ),
-    (
-        RpcErrorCode::PortTunnelGenerationMismatch,
-        "port_tunnel_generation_mismatch",
-    ),
-    (
-        RpcErrorCode::UnknownPortTunnelSession,
-        "unknown_port_tunnel_session",
-    ),
-    (RpcErrorCode::PortTunnelClosed, "port_tunnel_closed"),
-    (
-        RpcErrorCode::PortForwardBackpressureExceeded,
-        "port_forward_backpressure_exceeded",
-    ),
-    (
-        RpcErrorCode::InvalidPortTunnelMetadata,
-        "invalid_port_tunnel_metadata",
-    ),
-    (RpcErrorCode::InvalidEndpoint, "invalid_endpoint"),
-    (RpcErrorCode::PortBindFailed, "port_bind_failed"),
-    (RpcErrorCode::PortAcceptFailed, "port_accept_failed"),
-    (RpcErrorCode::PortConnectFailed, "port_connect_failed"),
-    (RpcErrorCode::PortReadFailed, "port_read_failed"),
-    (RpcErrorCode::PortWriteFailed, "port_write_failed"),
-    (RpcErrorCode::PortConnectionClosed, "port_connection_closed"),
-    (
-        RpcErrorCode::UnknownPortConnection,
-        "unknown_port_connection",
-    ),
-    (RpcErrorCode::UnknownPortBind, "unknown_port_bind"),
-    (RpcErrorCode::SandboxDenied, "sandbox_denied"),
-    (RpcErrorCode::StdinClosed, "stdin_closed"),
-    (RpcErrorCode::TtyDisabled, "tty_disabled"),
-    (RpcErrorCode::TtyUnsupported, "tty_unsupported"),
-    (RpcErrorCode::InvalidPtySize, "invalid_pty_size"),
-    (
-        RpcErrorCode::LoginShellUnsupported,
-        "login_shell_unsupported",
-    ),
-    (RpcErrorCode::LoginShellDisabled, "login_shell_disabled"),
-    (RpcErrorCode::InvalidDetail, "invalid_detail"),
-    (RpcErrorCode::ImageMissing, "image_missing"),
-    (RpcErrorCode::ImageNotFile, "image_not_file"),
-    (RpcErrorCode::ImageDecodeFailed, "image_decode_failed"),
-    (
-        RpcErrorCode::TransferPathNotAbsolute,
-        "transfer_path_not_absolute",
-    ),
-    (
-        RpcErrorCode::TransferDestinationExists,
-        "transfer_destination_exists",
-    ),
-    (
-        RpcErrorCode::TransferParentMissing,
-        "transfer_parent_missing",
-    ),
-    (
-        RpcErrorCode::TransferDestinationUnsupported,
-        "transfer_destination_unsupported",
-    ),
-    (
-        RpcErrorCode::TransferCompressionUnsupported,
-        "transfer_compression_unsupported",
-    ),
-    (
-        RpcErrorCode::TransferSourceUnsupported,
-        "transfer_source_unsupported",
-    ),
-    (
-        RpcErrorCode::TransferSourceMissing,
-        "transfer_source_missing",
-    ),
-    (RpcErrorCode::TransferFailed, "transfer_failed"),
-    (RpcErrorCode::PatchFailed, "patch_failed"),
-    (RpcErrorCode::Internal, "internal_error"),
-];
-
-const RPC_ERROR_CODE_WIRE_ALIASES: &[(&str, RpcErrorCode)] =
-    &[("internal", RpcErrorCode::Internal)];
-
-impl RpcErrorCode {
-    pub fn wire_value(self) -> &'static str {
-        match self {
-            Self::BadRequest => "bad_request",
-            Self::Unauthorized => "unauthorized",
-            Self::UnknownSession => "unknown_session",
-            Self::ExecSessionLockTimeout => "exec_session_lock_timeout",
-            Self::NotFound => "not_found",
-            Self::UnknownEndpoint => "unknown_endpoint",
-            Self::InvalidPortTunnel => "invalid_port_tunnel",
-            Self::PortTunnelUnavailable => "port_tunnel_unavailable",
-            Self::PortTunnelLimitExceeded => "port_tunnel_limit_exceeded",
-            Self::PortTunnelAlreadyAttached => "port_tunnel_already_attached",
-            Self::PortTunnelResumeExpired => "port_tunnel_resume_expired",
-            Self::PortTunnelGenerationMismatch => "port_tunnel_generation_mismatch",
-            Self::UnknownPortTunnelSession => "unknown_port_tunnel_session",
-            Self::PortTunnelClosed => "port_tunnel_closed",
-            Self::PortForwardBackpressureExceeded => "port_forward_backpressure_exceeded",
-            Self::InvalidPortTunnelMetadata => "invalid_port_tunnel_metadata",
-            Self::InvalidEndpoint => "invalid_endpoint",
-            Self::PortBindFailed => "port_bind_failed",
-            Self::PortAcceptFailed => "port_accept_failed",
-            Self::PortConnectFailed => "port_connect_failed",
-            Self::PortReadFailed => "port_read_failed",
-            Self::PortWriteFailed => "port_write_failed",
-            Self::PortConnectionClosed => "port_connection_closed",
-            Self::UnknownPortConnection => "unknown_port_connection",
-            Self::UnknownPortBind => "unknown_port_bind",
-            Self::SandboxDenied => "sandbox_denied",
-            Self::StdinClosed => "stdin_closed",
-            Self::TtyDisabled => "tty_disabled",
-            Self::TtyUnsupported => "tty_unsupported",
-            Self::InvalidPtySize => "invalid_pty_size",
-            Self::LoginShellUnsupported => "login_shell_unsupported",
-            Self::LoginShellDisabled => "login_shell_disabled",
-            Self::InvalidDetail => "invalid_detail",
-            Self::ImageMissing => "image_missing",
-            Self::ImageNotFile => "image_not_file",
-            Self::ImageDecodeFailed => "image_decode_failed",
-            Self::TransferPathNotAbsolute => "transfer_path_not_absolute",
-            Self::TransferDestinationExists => "transfer_destination_exists",
-            Self::TransferParentMissing => "transfer_parent_missing",
-            Self::TransferDestinationUnsupported => "transfer_destination_unsupported",
-            Self::TransferCompressionUnsupported => "transfer_compression_unsupported",
-            Self::TransferSourceUnsupported => "transfer_source_unsupported",
-            Self::TransferSourceMissing => "transfer_source_missing",
-            Self::TransferFailed => "transfer_failed",
-            Self::PatchFailed => "patch_failed",
-            Self::Internal => "internal_error",
+macro_rules! rpc_error_code_mappings {
+    ($macro:ident) => {
+        $macro! {
+            BadRequest => "bad_request",
+            Unauthorized => "unauthorized",
+            UnknownSession => "unknown_session",
+            ExecSessionLockTimeout => "exec_session_lock_timeout",
+            NotFound => "not_found",
+            UnknownEndpoint => "unknown_endpoint",
+            InvalidPortTunnel => "invalid_port_tunnel",
+            PortTunnelUnavailable => "port_tunnel_unavailable",
+            PortTunnelLimitExceeded => "port_tunnel_limit_exceeded",
+            PortTunnelAlreadyAttached => "port_tunnel_already_attached",
+            PortTunnelResumeExpired => "port_tunnel_resume_expired",
+            PortTunnelGenerationMismatch => "port_tunnel_generation_mismatch",
+            UnknownPortTunnelSession => "unknown_port_tunnel_session",
+            PortTunnelClosed => "port_tunnel_closed",
+            PortForwardBackpressureExceeded => "port_forward_backpressure_exceeded",
+            InvalidPortTunnelMetadata => "invalid_port_tunnel_metadata",
+            InvalidEndpoint => "invalid_endpoint",
+            PortBindFailed => "port_bind_failed",
+            PortAcceptFailed => "port_accept_failed",
+            PortConnectFailed => "port_connect_failed",
+            PortReadFailed => "port_read_failed",
+            PortWriteFailed => "port_write_failed",
+            PortConnectionClosed => "port_connection_closed",
+            UnknownPortConnection => "unknown_port_connection",
+            UnknownPortBind => "unknown_port_bind",
+            SandboxDenied => "sandbox_denied",
+            StdinClosed => "stdin_closed",
+            TtyDisabled => "tty_disabled",
+            TtyUnsupported => "tty_unsupported",
+            InvalidPtySize => "invalid_pty_size",
+            LoginShellUnsupported => "login_shell_unsupported",
+            LoginShellDisabled => "login_shell_disabled",
+            InvalidDetail => "invalid_detail",
+            ImageMissing => "image_missing",
+            ImageNotFile => "image_not_file",
+            ImageDecodeFailed => "image_decode_failed",
+            TransferPathNotAbsolute => "transfer_path_not_absolute",
+            TransferDestinationExists => "transfer_destination_exists",
+            TransferParentMissing => "transfer_parent_missing",
+            TransferDestinationUnsupported => "transfer_destination_unsupported",
+            TransferCompressionUnsupported => "transfer_compression_unsupported",
+            TransferSourceUnsupported => "transfer_source_unsupported",
+            TransferSourceMissing => "transfer_source_missing",
+            TransferFailed => "transfer_failed",
+            PatchFailed => "patch_failed",
+            Internal => "internal_error",
         }
-    }
-
-    pub fn from_wire_value(value: &str) -> Option<Self> {
-        wire::from_wire_value_with_aliases(
-            value,
-            RPC_ERROR_CODE_WIRE_VALUES,
-            RPC_ERROR_CODE_WIRE_ALIASES,
-        )
-    }
+    };
 }
+
+macro_rules! impl_rpc_error_code_wire_values {
+    ($($variant:ident => $wire:literal,)+) => {
+        impl RpcErrorCode {
+            pub fn wire_value(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $wire,)+
+                }
+            }
+
+            pub fn from_wire_value(value: &str) -> Option<Self> {
+                match value {
+                    $($wire => Some(Self::$variant),)+
+                    "internal" => Some(Self::Internal),
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+rpc_error_code_mappings!(impl_rpc_error_code_wire_values);
 
 impl RpcErrorBody {
     pub fn new(code: RpcErrorCode, message: impl Into<String>) -> Self {

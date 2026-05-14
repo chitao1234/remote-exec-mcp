@@ -282,16 +282,15 @@ async fn store_running_session(
         .sessions
         .insert(daemon_session_id.clone(), session)
         .await;
-    let warnings = session_limit_warnings(state, insert_outcome.crossed_warning_threshold);
-    let session = state
-        .sessions
-        .lock(&daemon_session_id)
-        .await
-        .ok_or_else(|| internal_error(anyhow::anyhow!("stored daemon session disappeared")))?;
+    let warnings = session_limit_warnings(
+        &state.config.target,
+        insert_outcome.crossed_warning_threshold,
+        insert_outcome.warning_threshold,
+    );
     let response = running_session_response(
         state,
         daemon_session_id.clone(),
-        &session,
+        &insert_outcome.lease,
         output,
         max_output_tokens,
         warnings.clone(),
@@ -320,11 +319,15 @@ fn running_session_response(
     )
 }
 
-fn session_limit_warnings(state: &AppState, crossed_warning_threshold: bool) -> Vec<ExecWarning> {
+fn session_limit_warnings(
+    target: &str,
+    crossed_warning_threshold: bool,
+    warning_threshold: usize,
+) -> Vec<ExecWarning> {
     if crossed_warning_threshold {
         vec![ExecWarning::session_limit_approaching(
-            &state.config.target,
-            super::store::exec_session_warning_threshold(),
+            target,
+            warning_threshold,
         )]
     } else {
         Vec::new()
