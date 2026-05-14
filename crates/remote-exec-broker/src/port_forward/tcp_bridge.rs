@@ -749,32 +749,33 @@ async fn close_tcp_pair_if_fully_eof(
     }
     let _removed =
         remove_stream_entry(state, connect_stream_id).expect("fully drained tcp stream exists");
-    if let Err(err) = connect_tunnel.close_stream(connect_stream_id).await {
-        release_active_tcp_stream(runtime).await;
+    let result = if let Err(err) = connect_tunnel.close_stream(connect_stream_id).await {
         if is_retryable_transport_error(&err) {
             if let Err(listen_err) = listen_tunnel.close_stream(listen_stream_id).await {
-                return classify_transport_failure(
+                classify_transport_failure(
                     listen_err,
                     "closing fully drained tcp listen stream after connect tunnel loss",
                     TunnelRole::Listen,
                 )
-                .map(Some);
+                .map(Some)
+            } else {
+                Ok(Some(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)))
             }
-            return Ok(Some(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)));
+        } else {
+            Err(err).context("closing fully drained tcp connect stream")
         }
-        return Err(err).context("closing fully drained tcp connect stream");
-    }
-    if let Err(err) = listen_tunnel.close_stream(listen_stream_id).await {
-        release_active_tcp_stream(runtime).await;
-        return classify_transport_failure(
+    } else if let Err(err) = listen_tunnel.close_stream(listen_stream_id).await {
+        classify_transport_failure(
             err,
             "closing fully drained tcp listen stream",
             TunnelRole::Listen,
         )
-        .map(Some);
-    }
+        .map(Some)
+    } else {
+        Ok(None)
+    };
     release_active_tcp_stream(runtime).await;
-    Ok(None)
+    result
 }
 
 fn frame_data_bytes(frame: &Frame) -> usize {

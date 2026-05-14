@@ -25,10 +25,18 @@ impl BackgroundTasks {
     }
 
     pub async fn join_all(&self) {
-        let mut tasks = self.tasks.lock().await;
-        while let Some(result) = tasks.join_next().await {
-            if let Err(err) = result {
-                tracing::warn!(?err, "background task join failed");
+        loop {
+            let mut tasks = {
+                let mut tasks = self.tasks.lock().await;
+                if tasks.is_empty() {
+                    return;
+                }
+                std::mem::take(&mut *tasks)
+            };
+            while let Some(result) = tasks.join_next().await {
+                if let Err(err) = result {
+                    tracing::warn!(?err, "background task join failed");
+                }
             }
         }
     }
@@ -103,5 +111,47 @@ pub fn target_info_response(state: &HostRuntimeState, daemon_version: &str) -> T
         supports_transfer_compression: state.supports_transfer_compression,
         supports_port_forward: true,
         port_forward_protocol_version: Some(PortForwardProtocolVersion::v4()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use tokio::sync::oneshot;
+
+    use super::BackgroundTasks;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn join_all_does_not_block_spawn_while_waiting_for_tracked_tasks() {
+        let tasks = BackgroundTasks::default();
+        let (allow_parent_tx, allow_parent_rx) = oneshot::channel();
+
+        tasks
+            .spawn("parent", async move {
+                let _ = allow_parent_rx.await;
+                Ok(())
+            })
+            .await;
+
+        let join_handle = tokio::spawn({
+            let tasks = tasks.clone();
+            async move { tasks.join_all().await }
+        });
+        tokio::task::yield_now().await;
+
+        tokio::time::timeout(Duration::from_millis(200), async {
+            tasks
+                .spawn("child", async move { Ok(()) })
+                .await;
+        })
+        .await
+        .expect("join_all should not hold the task set mutex while awaiting joins");
+
+        allow_parent_tx.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), join_handle)
+            .await
+            .expect("join_all should finish after tracked tasks complete")
+            .unwrap();
     }
 }

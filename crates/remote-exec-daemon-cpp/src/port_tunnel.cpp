@@ -1,4 +1,4 @@
-#include <cassert>
+#include <cstdlib>
 
 #include "port_tunnel_service.h"
 
@@ -55,7 +55,7 @@ static void release_counter(std::atomic<unsigned long>& counter, const char* cou
         }
     }
     log_message(LOG_ERROR, "port_tunnel", std::string("attempted to release exhausted counter `") + counter_name + "`");
-    assert(false && "port-tunnel counter released below zero");
+    std::abort();
 }
 
 bool PortTunnelService::try_acquire_worker() {

@@ -246,7 +246,7 @@ async fn build_opened_forward(
         })
         .await
         .with_context(|| listener_open_context.clone())?;
-    let listen_response = wait_for_listener_ready(
+    let listen_response = match wait_for_listener_ready(
         &listen_tunnel,
         listener_stream_id,
         kind.listen_ok_frame_type,
@@ -258,7 +258,14 @@ async fn build_opened_forward(
             &listen_endpoint,
         ),
     )
-    .await?;
+    .await
+    {
+        Ok(endpoint) => endpoint,
+        Err(err) => {
+            connect_tunnel.abort().await;
+            return Err(err);
+        }
+    };
     let listen_session = Arc::new(ListenSessionControl::new(ListenSessionParams {
         side: listen_side.clone(),
         forward_id: forward_id.clone(),
@@ -494,5 +501,97 @@ async fn wait_for_listener_ready(
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use remote_exec_proto::port_tunnel::{TunnelErrorMeta, TunnelLimitSummary};
+
+    use super::*;
+    use crate::port_forward::BrokerPortForwardLimits;
+    use crate::port_forward::test_support::ScriptedTunnelIo;
+
+    #[tokio::test]
+    async fn listen_open_failure_aborts_already_opened_connect_tunnel() {
+        let listen_io = ScriptedTunnelIo::default();
+        let listen_tunnel = Arc::new(PortTunnel::from_stream(listen_io.clone()).unwrap());
+        let connect_io = ScriptedTunnelIo::default();
+        let connect_tunnel = Arc::new(PortTunnel::from_stream(connect_io.clone()).unwrap());
+        let limits = TunnelLimitSummary {
+            max_active_tcp_streams: 32,
+            max_udp_peers: 32,
+            max_queued_bytes: remote_exec_proto::port_forward::DEFAULT_TUNNEL_QUEUE_BYTES,
+        };
+        listen_io.push_read_frame(&Frame {
+            frame_type: FrameType::Error,
+            flags: 0,
+            stream_id: LISTEN_SESSION_STREAM_ID,
+            meta: encode_tunnel_meta(&TunnelErrorMeta {
+                code: "listener_open_failed".to_string(),
+                message: "listen refused".to_string(),
+                fatal: false,
+                generation: None,
+            })
+            .unwrap(),
+            data: Vec::new(),
+        });
+
+        let result = build_opened_forward(
+            ForwardOpenContext {
+                store: PortForwardStore::default(),
+                listen_side: SideHandle::local().unwrap(),
+                connect_side: SideHandle::local().unwrap(),
+                forward_id: "fwd_test".to_string(),
+                listen_endpoint: "127.0.0.1:10000".to_string(),
+                connect_endpoint: "127.0.0.1:10001".to_string(),
+                requested_limits: BrokerPortForwardLimits::default().public_summary(),
+                kind: ForwardOpenKind::for_protocol(PublicForwardPortProtocol::Tcp),
+            },
+            OpenedTunnels {
+                listen: OpenListenSession {
+                    tunnel: listen_tunnel,
+                    session_id: "session_test".to_string(),
+                    resume_timeout: Duration::from_secs(5),
+                    limits: limits.clone(),
+                },
+                connect: OpenDataTunnel {
+                    tunnel: connect_tunnel.clone(),
+                    limits,
+                },
+            },
+        )
+        .await;
+
+        let err = match result {
+            Ok(_) => panic!("listen open failure should abort forward construction"),
+            Err(err) => err,
+        };
+        assert!(
+            format!("{err:#}").contains("listener_open_failed: listen refused"),
+            "unexpected error: {err:#}"
+        );
+        tokio::time::timeout(Duration::from_millis(50), async {
+            loop {
+                let result = connect_tunnel
+                    .send(Frame {
+                        frame_type: FrameType::Close,
+                        flags: 0,
+                        stream_id: 99,
+                        meta: Vec::new(),
+                        data: Vec::new(),
+                    })
+                    .await;
+                if result.is_err() {
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("listen-open failure should abort the connect tunnel immediately");
     }
 }
