@@ -29,6 +29,53 @@ const WINDOWS_ENV_OVERLAY_OUTPUT: &str = "dumb|1|cat|cat|1|C.UTF-8|C.UTF-8|C.UTF
 // Use a generous window so large-output assertions do not become timing-sensitive.
 const COMPLETED_COMMAND_YIELD_MS: u64 = 10_000;
 
+fn test_exec_start_request(
+    shell: Option<&str>,
+    cmd: &str,
+    tty: bool,
+    yield_time_ms: Option<u64>,
+    max_output_tokens: Option<u32>,
+    login: Option<bool>,
+) -> ExecStartRequest {
+    ExecStartRequest {
+        cmd: cmd.to_string(),
+        workdir: None,
+        shell: shell.map(str::to_owned),
+        tty,
+        yield_time_ms,
+        max_output_tokens,
+        login,
+    }
+}
+
+#[cfg(unix)]
+fn unix_start_request(
+    cmd: &str,
+    tty: bool,
+    yield_time_ms: Option<u64>,
+    max_output_tokens: Option<u32>,
+) -> ExecStartRequest {
+    unix_start_request_with_login(cmd, tty, yield_time_ms, max_output_tokens, Some(false))
+}
+
+#[cfg(unix)]
+fn unix_start_request_with_login(
+    cmd: &str,
+    tty: bool,
+    yield_time_ms: Option<u64>,
+    max_output_tokens: Option<u32>,
+    login: Option<bool>,
+) -> ExecStartRequest {
+    test_exec_start_request(
+        Some(TEST_SHELL),
+        cmd,
+        tty,
+        yield_time_ms,
+        max_output_tokens,
+        login,
+    )
+}
+
 #[cfg(windows)]
 macro_rules! for_each_windows_pty_backend {
     ($backend:ident, $fixture:ident, $body:block) => {{
@@ -82,15 +129,14 @@ fn windows_start_request_with_shell(
     max_output_tokens: Option<u32>,
     login: bool,
 ) -> ExecStartRequest {
-    ExecStartRequest {
-        cmd: cmd.to_string(),
-        workdir: None,
-        shell: shell.map(str::to_owned),
+    test_exec_start_request(
+        shell,
+        cmd,
         tty,
         yield_time_ms,
         max_output_tokens,
-        login: Some(login),
-    }
+        Some(login),
+    )
 }
 
 #[cfg(windows)]

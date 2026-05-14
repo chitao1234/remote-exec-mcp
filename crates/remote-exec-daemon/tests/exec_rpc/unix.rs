@@ -6,15 +6,7 @@ async fn exec_start_returns_a_live_session_for_long_running_tty_processes() {
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "printf ready; sleep 2".to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: true,
-                yield_time_ms: Some(250),
-                max_output_tokens: Some(2_000),
-                login: Some(false),
-            },
+            &unix_start_request("printf ready; sleep 2", true, Some(250), Some(2_000)),
         )
         .await;
 
@@ -37,15 +29,7 @@ min_ms = 3000
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "printf ready; sleep 2".to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: false,
-                yield_time_ms: Some(1),
-                max_output_tokens: Some(2_000),
-                login: Some(false),
-            },
+            &unix_start_request("printf ready; sleep 2", false, Some(1), Some(2_000)),
         )
         .await;
 
@@ -72,15 +56,13 @@ async fn exec_start_uses_login_shell_by_default_when_login_is_omitted() {
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "printf '%s' \"$LOGIN_SENTINEL\"".to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: false,
-                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: None,
-                login: None,
-            },
+            &unix_start_request_with_login(
+                "printf '%s' \"$LOGIN_SENTINEL\"",
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+                None,
+            ),
         )
         .await;
 
@@ -103,15 +85,14 @@ async fn exec_start_uses_configured_default_shell_when_shell_is_omitted() {
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "printf default-ready".to_string(),
-                workdir: None,
-                shell: None,
-                tty: false,
-                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: None,
-                login: Some(false),
-            },
+            &test_exec_start_request(
+                None,
+                "printf default-ready",
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+                Some(false),
+            ),
         )
         .await;
 
@@ -128,15 +109,13 @@ async fn exec_start_rejects_explicit_login_when_disabled_by_config() {
     let err = fixture
         .rpc_error(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "printf should-not-run".to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: false,
-                yield_time_ms: Some(250),
-                max_output_tokens: None,
-                login: Some(true),
-            },
+            &unix_start_request_with_login(
+                "printf should-not-run",
+                false,
+                Some(250),
+                None,
+                Some(true),
+            ),
         )
         .await;
 
@@ -163,15 +142,13 @@ async fn exec_start_uses_non_login_shell_when_policy_disabled_and_login_is_omitt
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "printf '%s' \"$LOGIN_SENTINEL\"".to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: false,
-                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: None,
-                login: None,
-            },
+            &unix_start_request_with_login(
+                "printf '%s' \"$LOGIN_SENTINEL\"",
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+                None,
+            ),
         )
         .await;
 
@@ -187,15 +164,7 @@ async fn exec_start_rejects_tty_when_disabled_by_config() {
     let err = fixture
         .rpc_error(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "printf should-not-run".to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: true,
-                yield_time_ms: Some(250),
-                max_output_tokens: None,
-                login: Some(false),
-            },
+            &unix_start_request("printf should-not-run", true, Some(250), None),
         )
         .await;
 
@@ -215,15 +184,7 @@ deny = ["/"]
     let err = fixture
         .rpc_error(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "printf should-not-run".to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: false,
-                yield_time_ms: Some(250),
-                max_output_tokens: None,
-                login: Some(false),
-            },
+            &unix_start_request("printf should-not-run", false, Some(250), None),
         )
         .await;
 
@@ -252,16 +213,12 @@ async fn env_overlay_is_applied_in_pipe_mode() {
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "printf '%s|%s|%s|%s|%s|%s|%s|%s' \"$TERM\" \"$NO_COLOR\" \"$PAGER\" \"$GIT_PAGER\" \"$CODEX_CI\" \"$LANG\" \"$LC_CTYPE\" \"$LC_ALL\""
-                    .to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: false,
-                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: None,
-                login: Some(false),
-            },
+            &unix_start_request(
+                "printf '%s|%s|%s|%s|%s|%s|%s|%s' \"$TERM\" \"$NO_COLOR\" \"$PAGER\" \"$GIT_PAGER\" \"$CODEX_CI\" \"$LANG\" \"$LC_CTYPE\" \"$LC_ALL\"",
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+            ),
         )
         .await;
 
@@ -290,16 +247,12 @@ async fn env_overlay_is_applied_in_pty_mode() {
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "printf '%s|%s|%s|%s|%s|%s|%s|%s' \"$TERM\" \"$NO_COLOR\" \"$PAGER\" \"$GIT_PAGER\" \"$CODEX_CI\" \"$LANG\" \"$LC_CTYPE\" \"$LC_ALL\""
-                    .to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: true,
-                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: None,
-                login: Some(false),
-            },
+            &unix_start_request(
+                "printf '%s|%s|%s|%s|%s|%s|%s|%s' \"$TERM\" \"$NO_COLOR\" \"$PAGER\" \"$GIT_PAGER\" \"$CODEX_CI\" \"$LANG\" \"$LC_CTYPE\" \"$LC_ALL\"",
+                true,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+            ),
         )
         .await;
 
@@ -321,15 +274,12 @@ async fn env_overlay_prefers_lang_c_plus_lc_ctype_when_c_utf8_is_unavailable() {
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "printf '%s|%s|%s' \"$LANG\" \"$LC_CTYPE\" \"$LC_ALL\"".to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: false,
-                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: None,
-                login: Some(false),
-            },
+            &unix_start_request(
+                "printf '%s|%s|%s' \"$LANG\" \"$LC_CTYPE\" \"$LC_ALL\"",
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+            ),
         )
         .await;
 
@@ -351,15 +301,12 @@ async fn env_overlay_falls_back_to_lang_c_only_when_no_utf8_locale_is_available(
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "printf '%s|%s|%s' \"$LANG\" \"$LC_CTYPE\" \"$LC_ALL\"".to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: false,
-                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: None,
-                login: Some(false),
-            },
+            &unix_start_request(
+                "printf '%s|%s|%s' \"$LANG\" \"$LC_CTYPE\" \"$LC_ALL\"",
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+            ),
         )
         .await;
 
@@ -374,15 +321,12 @@ async fn omitted_max_output_tokens_defaults_to_ten_thousand() {
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "awk 'BEGIN { for (i = 0; i < 25000; ++i) printf \"x \" }'".to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: false,
-                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: None,
-                login: Some(false),
-            },
+            &unix_start_request(
+                "awk 'BEGIN { for (i = 0; i < 25000; ++i) printf \"x \" }'",
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+            ),
         )
         .await;
 
@@ -404,15 +348,12 @@ async fn exec_start_truncates_output_to_max_output_tokens() {
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "awk 'BEGIN { for (i = 0; i < 100; ++i) printf \"a\" }'".to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: false,
-                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: Some(15),
-                login: Some(false),
-            },
+            &unix_start_request(
+                "awk 'BEGIN { for (i = 0; i < 100; ++i) printf \"a\" }'",
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                Some(15),
+            ),
         )
         .await;
 
@@ -430,15 +371,12 @@ async fn exec_output_preserves_trailing_newline_when_within_max_output_tokens() 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "printf 'one two\\n'".to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: false,
-                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: Some(3),
-                login: Some(false),
-            },
+            &unix_start_request(
+                "printf 'one two\\n'",
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                Some(3),
+            ),
         )
         .await;
 
@@ -453,15 +391,12 @@ async fn exec_output_drains_late_output_after_exit() {
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "(sleep 0.08; printf 'late tail') &".to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: false,
-                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: Some(10),
-                login: Some(false),
-            },
+            &unix_start_request(
+                "(sleep 0.08; printf 'late tail') &",
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                Some(10),
+            ),
         )
         .await;
 
@@ -477,15 +412,12 @@ async fn exec_output_preserves_pipe_mode_output_after_external_pipeline_steps() 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "printf 'marker\\n'; printf 'external\\n' | cat; printf 'done\\n'".to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: false,
-                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: None,
-                login: Some(false),
-            },
+            &unix_start_request(
+                "printf 'marker\\n'; printf 'external\\n' | cat; printf 'done\\n'",
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+            ),
         )
         .await;
 
@@ -501,15 +433,12 @@ async fn exec_output_uses_one_pipe_for_stdout_and_stderr_in_pipe_mode() {
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: r#"if [ "$(readlink /proc/$$/fd/1)" = "$(readlink /proc/$$/fd/2)" ]; then printf 'shared\n'; else printf 'separate\n'; fi"#.to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: false,
-                yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
-                max_output_tokens: None,
-                login: Some(false),
-            },
+            &unix_start_request(
+                r#"if [ "$(readlink /proc/$$/fd/1)" = "$(readlink /proc/$$/fd/2)" ]; then printf 'shared\n'; else printf 'separate\n'; fi"#,
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+            ),
         )
         .await;
 
@@ -524,15 +453,12 @@ async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens() {
     let started = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "sleep 0.4; printf 'one two three four five six'; sleep 30".to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: true,
-                yield_time_ms: Some(250),
-                max_output_tokens: Some(3),
-                login: Some(false),
-            },
+            &unix_start_request(
+                "sleep 0.4; printf 'one two three four five six'; sleep 30",
+                true,
+                Some(250),
+                Some(3),
+            ),
         )
         .await;
     assert!(started.output().running);
@@ -567,15 +493,7 @@ async fn exec_write_rejects_non_tty_sessions_when_chars_are_present() {
     let started = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "sleep 1".to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: false,
-                yield_time_ms: Some(250),
-                max_output_tokens: Some(2_000),
-                login: Some(false),
-            },
+            &unix_start_request("sleep 1", false, Some(250), Some(2_000)),
         )
         .await;
 
@@ -606,15 +524,12 @@ async fn exec_write_round_trips_pty_input_without_echo_assumptions() {
     let started = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "IFS= read -r line; printf '__RESULT__:%s:__END__' \"$line\"".to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: true,
-                yield_time_ms: Some(250),
-                max_output_tokens: None,
-                login: Some(false),
-            },
+            &unix_start_request(
+                "IFS= read -r line; printf '__RESULT__:%s:__END__' \"$line\"",
+                true,
+                Some(250),
+                None,
+            ),
         )
         .await;
 
@@ -651,15 +566,12 @@ async fn exec_write_resizes_pty_before_polling_output() {
     let started = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "printf ready; IFS= read -r _; stty size; sleep 30".to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: true,
-                yield_time_ms: Some(250),
-                max_output_tokens: None,
-                login: Some(false),
-            },
+            &unix_start_request(
+                "printf ready; IFS= read -r _; stty size; sleep 30",
+                true,
+                Some(250),
+                None,
+            ),
         )
         .await;
     assert!(started.output().running);
@@ -697,15 +609,7 @@ async fn exec_write_rejects_zero_pty_size() {
     let started = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "sleep 30".to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: true,
-                yield_time_ms: Some(250),
-                max_output_tokens: None,
-                login: Some(false),
-            },
+            &unix_start_request("sleep 30", true, Some(250), None),
         )
         .await;
     assert!(started.output().running);
@@ -739,29 +643,18 @@ async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon() {
     let slow = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "printf slow; sleep 30".to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: true,
-                yield_time_ms: Some(250),
-                max_output_tokens: None,
-                login: Some(false),
-            },
+            &unix_start_request("printf slow; sleep 30", true, Some(250), None),
         )
         .await;
     let fast = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &ExecStartRequest {
-                cmd: "read line; printf '%s' \"$line\"; sleep 30".to_string(),
-                workdir: None,
-                shell: Some(TEST_SHELL.to_string()),
-                tty: true,
-                yield_time_ms: Some(250),
-                max_output_tokens: None,
-                login: Some(false),
-            },
+            &unix_start_request(
+                "read line; printf '%s' \"$line\"; sleep 30",
+                true,
+                Some(250),
+                None,
+            ),
         )
         .await;
 
