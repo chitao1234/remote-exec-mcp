@@ -1,7 +1,7 @@
-use std::io::Cursor;
 use remote_exec_pki::{
     DaemonCertSpec, DevInitSpec, build_dev_init_bundle_from_ca, generate_ca, load_ca_from_pem,
 };
+use std::io::Cursor;
 
 fn assert_pem_pair(cert_pem: &str, key_pem: &str) {
     assert!(cert_pem.contains("BEGIN CERTIFICATE"));
