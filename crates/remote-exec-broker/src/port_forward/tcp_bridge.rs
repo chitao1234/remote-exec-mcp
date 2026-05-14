@@ -194,7 +194,7 @@ async fn handle_listen_tcp_accept(
     let Some(connect_stream_id) = connect_stream_ids.next() else {
         debug_assert!(connect_stream_ids.needs_generation_rotation());
         let _ = listen_tunnel.close_stream(frame.stream_id).await;
-        drop_active_tcp_stream(runtime).await;
+        settle_active_tcp_stream(runtime, TcpActiveStreamSettlement::Dropped).await;
         close_active_tcp_listen_streams(runtime, listen_tunnel, state).await?;
         return Ok(Some(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)));
     };
@@ -219,7 +219,7 @@ async fn handle_listen_tcp_accept(
             .await
             .map(Some);
         }
-        drop_active_tcp_stream(runtime).await;
+        settle_active_tcp_stream(runtime, TcpActiveStreamSettlement::Dropped).await;
         return Err(err).context("connecting tcp forward destination");
     }
     state
@@ -318,9 +318,16 @@ async fn handle_listen_close(
     frame: Frame,
 ) {
     if let Some(connect_stream_id) = state.listen_to_connect.remove(&frame.stream_id) {
-        if remove_stream_entry(state, connect_stream_id).is_some() {
+        if remove_tcp_stream_entry_and_settle_active(
+            runtime,
+            state,
+            connect_stream_id,
+            TcpActiveStreamSettlement::Release,
+        )
+        .await
+        .is_some()
+        {
             let _ = connect_tunnel.close_stream(connect_stream_id).await;
-            release_active_tcp_stream(runtime).await;
         }
     }
 }
@@ -340,9 +347,13 @@ async fn handle_listen_error(
         return Err(format_terminal_tunnel_error(&meta)).context("listen-side tcp tunnel error");
     }
     if let Some(connect_stream_id) = state.listen_to_connect.remove(&frame.stream_id) {
-        if remove_stream_entry(state, connect_stream_id).is_some() {
-            release_active_tcp_stream(runtime).await;
-        }
+        let _ = remove_tcp_stream_entry_and_settle_active(
+            runtime,
+            state,
+            connect_stream_id,
+            TcpActiveStreamSettlement::Release,
+        )
+        .await;
         if let Err(err) = connect_tunnel.close_stream(connect_stream_id).await {
             return classify_transport_failure(
                 err,
@@ -485,8 +496,14 @@ async fn handle_connect_close(
     state: &mut TcpForwardState,
     frame: Frame,
 ) -> anyhow::Result<Option<ForwardLoopControl>> {
-    if let Some(stream) = remove_stream_entry(state, frame.stream_id) {
-        release_active_tcp_stream(runtime).await;
+    if let Some(stream) = remove_tcp_stream_entry_and_settle_active(
+        runtime,
+        state,
+        frame.stream_id,
+        TcpActiveStreamSettlement::Release,
+    )
+    .await
+    {
         if let Err(err) = listen_tunnel.close_stream(stream.listen_stream_id).await {
             return classify_transport_failure(
                 err,
@@ -537,7 +554,7 @@ async fn close_unpaired_listen_stream_after_connect_loss(
     listen_stream_id: u32,
 ) -> anyhow::Result<ForwardLoopControl> {
     let close_result = listen_tunnel.close_stream(listen_stream_id).await;
-    drop_active_tcp_stream(runtime).await;
+    settle_active_tcp_stream(runtime, TcpActiveStreamSettlement::Dropped).await;
     if let Err(err) = close_result {
         return classify_transport_failure(
             err,
@@ -594,12 +611,16 @@ async fn queue_or_send_tcp_connect_frame(
             || next_forward_total > runtime.limits.max_pending_tcp_bytes_per_forward
         {
             let listen_stream_id = stream.listen_stream_id;
-            let _removed =
-                remove_stream_entry(state, connect_stream_id).expect("pending tcp stream exists");
+            let _removed = remove_tcp_stream_entry_and_settle_active(
+                runtime,
+                state,
+                connect_stream_id,
+                TcpActiveStreamSettlement::Dropped,
+            )
+            .await
+            .expect("pending tcp stream exists");
             let _ = connect_tunnel.close_stream(connect_stream_id).await;
             let _ = listen_tunnel.close_stream(listen_stream_id).await;
-            runtime.record_dropped_stream().await;
-            release_active_tcp_stream(runtime).await;
             return Ok(None);
         }
         stream.pending_bytes = next_stream_total;
@@ -654,7 +675,7 @@ async fn flush_pending_tcp_connect_frames(
             {
                 state.listen_to_connect.remove(&listen_stream_id);
             }
-            release_active_tcp_stream(runtime).await;
+            settle_active_tcp_stream(runtime, TcpActiveStreamSettlement::Release).await;
             should_remove = true;
         }
     }
@@ -675,6 +696,12 @@ enum ConnectTunnelFrameSend {
 enum TcpPairCloseReason {
     ConnectError,
     ConnectPressure,
+}
+
+#[derive(Clone, Copy)]
+enum TcpActiveStreamSettlement {
+    Release,
+    Dropped,
 }
 
 async fn send_or_classify_connect_tunnel_frame(
@@ -701,12 +728,18 @@ async fn close_tcp_pair(
     connect_stream_id: u32,
     reason: TcpPairCloseReason,
 ) -> anyhow::Result<()> {
-    let Some(stream) = remove_stream_entry(state, connect_stream_id) else {
+    let settlement = match reason {
+        TcpPairCloseReason::ConnectError => TcpActiveStreamSettlement::Release,
+        TcpPairCloseReason::ConnectPressure => TcpActiveStreamSettlement::Dropped,
+    };
+    let Some(stream) =
+        remove_tcp_stream_entry_and_settle_active(runtime, state, connect_stream_id, settlement)
+            .await
+    else {
         return Ok(());
     };
     match reason {
         TcpPairCloseReason::ConnectError => {
-            release_active_tcp_stream(runtime).await;
             if let Err(err) = listen_tunnel.close_stream(stream.listen_stream_id).await {
                 return classify_transport_failure(
                     err,
@@ -720,8 +753,6 @@ async fn close_tcp_pair(
         TcpPairCloseReason::ConnectPressure => {
             let _ = connect_tunnel.close_stream(connect_stream_id).await;
             let _ = listen_tunnel.close_stream(stream.listen_stream_id).await;
-            runtime.record_dropped_stream().await;
-            release_active_tcp_stream(runtime).await;
             Ok(())
         }
     }
@@ -734,21 +765,25 @@ async fn close_tcp_pair_if_fully_eof(
     state: &mut TcpForwardState,
     connect_stream_id: u32,
 ) -> anyhow::Result<Option<ForwardLoopControl>> {
-    let Some((listen_stream_id, fully_eof)) =
-        state.connect_streams.get(&connect_stream_id).map(|stream| {
-            (
-                stream.listen_stream_id,
-                stream.listen_eof && stream.connect_eof,
-            )
-        })
+    let Some(fully_eof) = state
+        .connect_streams
+        .get(&connect_stream_id)
+        .map(|stream| stream.listen_eof && stream.connect_eof)
     else {
         return Ok(None);
     };
     if !fully_eof {
         return Ok(None);
     }
-    let _removed =
-        remove_stream_entry(state, connect_stream_id).expect("fully drained tcp stream exists");
+    let stream = remove_tcp_stream_entry_and_settle_active(
+        runtime,
+        state,
+        connect_stream_id,
+        TcpActiveStreamSettlement::Release,
+    )
+    .await
+    .expect("fully drained tcp stream exists");
+    let listen_stream_id = stream.listen_stream_id;
     let result = if let Err(err) = connect_tunnel.close_stream(connect_stream_id).await {
         if is_retryable_transport_error(&err) {
             if let Err(listen_err) = listen_tunnel.close_stream(listen_stream_id).await {
@@ -774,7 +809,6 @@ async fn close_tcp_pair_if_fully_eof(
     } else {
         Ok(None)
     };
-    release_active_tcp_stream(runtime).await;
     result
 }
 
@@ -789,6 +823,17 @@ fn remove_stream_entry(
     let mut stream = state.connect_streams.remove(&connect_stream_id)?;
     release_pending_budget(&mut state.pending_budget, &mut stream);
     state.listen_to_connect.remove(&stream.listen_stream_id);
+    Some(stream)
+}
+
+async fn remove_tcp_stream_entry_and_settle_active(
+    runtime: &ForwardRuntime,
+    state: &mut TcpForwardState,
+    connect_stream_id: u32,
+    settlement: TcpActiveStreamSettlement,
+) -> Option<TcpConnectStream> {
+    let stream = remove_stream_entry(state, connect_stream_id)?;
+    settle_active_tcp_stream(runtime, settlement).await;
     Some(stream)
 }
 
@@ -815,12 +860,11 @@ async fn try_reserve_active_tcp_stream(runtime: &ForwardRuntime) -> bool {
     !saw_entry || reserved
 }
 
-async fn release_active_tcp_stream(runtime: &ForwardRuntime) {
-    runtime.release_active_stream().await;
-}
-
-async fn drop_active_tcp_stream(runtime: &ForwardRuntime) {
-    runtime.record_dropped_active_stream().await;
+async fn settle_active_tcp_stream(runtime: &ForwardRuntime, settlement: TcpActiveStreamSettlement) {
+    match settlement {
+        TcpActiveStreamSettlement::Release => runtime.release_active_stream().await,
+        TcpActiveStreamSettlement::Dropped => runtime.record_dropped_active_stream().await,
+    }
 }
 
 #[cfg(test)]
