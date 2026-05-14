@@ -121,8 +121,11 @@ std::string header_token_lower(const HttpRequest& request, const std::string& na
 
 bool connection_header_has_upgrade(const HttpRequest& request) {
     const std::string value = header_token_lower(request, "connection");
+    if (value.empty()) {
+        return false;
+    }
     std::size_t offset = 0;
-    while (offset <= value.size()) {
+    while (offset < value.size()) {
         const std::size_t comma = value.find(',', offset);
         const std::string token =
             trim_ascii(comma == std::string::npos ? value.substr(offset) : value.substr(offset, comma - offset));

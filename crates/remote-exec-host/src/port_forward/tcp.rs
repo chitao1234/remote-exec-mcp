@@ -208,6 +208,8 @@ pub(super) async fn tunnel_tcp_accept_loop(session: Arc<SessionState>, listener:
                 return;
             }
         };
+        // `accept()` can win the race against attachment cancellation. Drop the accepted
+        // socket here so it is not attributed to the next attachment generation.
         if attachment.cancel.is_cancelled() {
             drop(stream);
             continue;

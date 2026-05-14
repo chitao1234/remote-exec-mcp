@@ -149,6 +149,175 @@ impl std::fmt::Display for DaemonClientError {
 
 impl std::error::Error for DaemonClientError {}
 
+#[derive(Clone, Copy)]
+enum RpcLogSubject<'a> {
+    Path(&'a str),
+    DestinationPath(&'a str),
+}
+
+#[derive(Clone, Copy)]
+enum RpcCallKind {
+    Rpc,
+    TransferExport,
+    TransferImport,
+}
+
+#[derive(Clone, Copy)]
+struct RpcCallContext<'a> {
+    target_name: &'a str,
+    base_url: &'a str,
+    started: std::time::Instant,
+    kind: RpcCallKind,
+    subject: RpcLogSubject<'a>,
+}
+
+impl<'a> RpcCallContext<'a> {
+    fn path(
+        target_name: &'a str,
+        base_url: &'a str,
+        started: std::time::Instant,
+        kind: RpcCallKind,
+        path: &'a str,
+    ) -> Self {
+        Self {
+            target_name,
+            base_url,
+            started,
+            kind,
+            subject: RpcLogSubject::Path(path),
+        }
+    }
+
+    fn destination_path(
+        target_name: &'a str,
+        base_url: &'a str,
+        started: std::time::Instant,
+        kind: RpcCallKind,
+        destination_path: &'a str,
+    ) -> Self {
+        Self {
+            target_name,
+            base_url,
+            started,
+            kind,
+            subject: RpcLogSubject::DestinationPath(destination_path),
+        }
+    }
+
+    fn log_completed(self) {
+        match self.subject {
+            RpcLogSubject::Path(path) => tracing::debug!(
+                target = %self.target_name,
+                base_url = %self.base_url,
+                path,
+                elapsed_ms = self.started.elapsed().as_millis() as u64,
+                "daemon rpc completed"
+            ),
+            RpcLogSubject::DestinationPath(destination_path) => tracing::debug!(
+                target = %self.target_name,
+                base_url = %self.base_url,
+                destination_path,
+                elapsed_ms = self.started.elapsed().as_millis() as u64,
+                "daemon transfer import completed"
+            ),
+        }
+    }
+
+    fn log_transport_error(self, err: &reqwest::Error) {
+        match self.subject {
+            RpcLogSubject::Path(path) => tracing::warn!(
+                target = %self.target_name,
+                base_url = %self.base_url,
+                path,
+                elapsed_ms = self.started.elapsed().as_millis() as u64,
+                error = %err,
+                "{}",
+                match self.kind {
+                    RpcCallKind::Rpc => "daemon rpc transport failed",
+                    RpcCallKind::TransferExport => "daemon transfer export transport failed",
+                    RpcCallKind::TransferImport => "daemon transfer import transport failed",
+                }
+            ),
+            RpcLogSubject::DestinationPath(destination_path) => tracing::warn!(
+                target = %self.target_name,
+                base_url = %self.base_url,
+                destination_path,
+                elapsed_ms = self.started.elapsed().as_millis() as u64,
+                error = %err,
+                "daemon transfer import transport failed"
+            ),
+        }
+    }
+
+    fn log_status_error(self, status: reqwest::StatusCode) {
+        match self.subject {
+            RpcLogSubject::Path(path) => tracing::warn!(
+                target = %self.target_name,
+                base_url = %self.base_url,
+                path,
+                status = status.as_u16(),
+                elapsed_ms = self.started.elapsed().as_millis() as u64,
+                "{}",
+                match self.kind {
+                    RpcCallKind::Rpc => "daemon rpc returned error status",
+                    RpcCallKind::TransferExport => "daemon transfer export returned error status",
+                    RpcCallKind::TransferImport => "daemon transfer import returned error status",
+                }
+            ),
+            RpcLogSubject::DestinationPath(destination_path) => tracing::warn!(
+                target = %self.target_name,
+                base_url = %self.base_url,
+                destination_path,
+                status = status.as_u16(),
+                elapsed_ms = self.started.elapsed().as_millis() as u64,
+                "daemon transfer import returned error status"
+            ),
+        }
+    }
+
+    fn log_read_error(self, err: &reqwest::Error) {
+        match self.subject {
+            RpcLogSubject::Path(path) => tracing::warn!(
+                target = %self.target_name,
+                base_url = %self.base_url,
+                path,
+                elapsed_ms = self.started.elapsed().as_millis() as u64,
+                error = %err,
+                "daemon rpc body read failed"
+            ),
+            RpcLogSubject::DestinationPath(destination_path) => tracing::warn!(
+                target = %self.target_name,
+                base_url = %self.base_url,
+                destination_path,
+                elapsed_ms = self.started.elapsed().as_millis() as u64,
+                error = %err,
+                "daemon transfer import body read failed"
+            ),
+        }
+    }
+
+    fn log_decode_error(self, err: &serde_json::Error) {
+        match self.subject {
+            RpcLogSubject::Path(path) => tracing::warn!(
+                target = %self.target_name,
+                base_url = %self.base_url,
+                path,
+                elapsed_ms = self.started.elapsed().as_millis() as u64,
+                error = %err,
+                "daemon rpc decode failed"
+            ),
+            RpcLogSubject::DestinationPath(destination_path) => tracing::warn!(
+                target = %self.target_name,
+                base_url = %self.base_url,
+                destination_path,
+                elapsed_ms = self.started.elapsed().as_millis() as u64,
+                error = %err,
+                "daemon transfer import decode failed"
+            ),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct DaemonClient {
     client: reqwest::Client,
@@ -340,29 +509,18 @@ impl DaemonClient {
         req: &TransferExportRequest,
         started: std::time::Instant,
     ) -> Result<reqwest::Response, DaemonClientError> {
+        let context = RpcCallContext::path(
+            &self.target_name,
+            &self.base_url,
+            started,
+            RpcCallKind::TransferExport,
+            req.path.as_str(),
+        );
         self.send_request_with_policy(
             self.request("/v1/transfer/export").json(req).send(),
             RpcErrorDecodePolicy::Lenient,
-            |err| {
-                tracing::warn!(
-                    target = %self.target_name,
-                    base_url = %self.base_url,
-                    path = %req.path,
-                    elapsed_ms = started.elapsed().as_millis() as u64,
-                    error = %err,
-                    "daemon transfer export transport failed"
-                );
-            },
-            |status| {
-                tracing::warn!(
-                    target = %self.target_name,
-                    base_url = %self.base_url,
-                    path = %req.path,
-                    status = status.as_u16(),
-                    elapsed_ms = started.elapsed().as_millis() as u64,
-                    "daemon transfer export returned error status"
-                );
-            },
+            |err| context.log_transport_error(err),
+            |status| context.log_status_error(status),
         )
         .await
     }
@@ -409,6 +567,13 @@ impl DaemonClient {
         body: reqwest::Body,
         started: std::time::Instant,
     ) -> Result<reqwest::Response, DaemonClientError> {
+        let context = RpcCallContext::destination_path(
+            &self.target_name,
+            &self.base_url,
+            started,
+            RpcCallKind::TransferImport,
+            req.destination_path.as_str(),
+        );
         let mut request =
             codec::apply_import_headers(self.request("/v1/transfer/import"), &req.metadata());
         if let Some(file_len) = file_len {
@@ -417,26 +582,8 @@ impl DaemonClient {
         self.send_request_with_policy(
             request.body(body).send(),
             RpcErrorDecodePolicy::Lenient,
-            |err| {
-                tracing::warn!(
-                    target = %self.target_name,
-                    base_url = %self.base_url,
-                    destination_path = %req.destination_path,
-                    elapsed_ms = started.elapsed().as_millis() as u64,
-                    error = %err,
-                    "daemon transfer import transport failed"
-                );
-            },
-            |status| {
-                tracing::warn!(
-                    target = %self.target_name,
-                    base_url = %self.base_url,
-                    destination_path = %req.destination_path,
-                    status = status.as_u16(),
-                    elapsed_ms = started.elapsed().as_millis() as u64,
-                    "daemon transfer import returned error status"
-                );
-            },
+            |err| context.log_transport_error(err),
+            |status| context.log_status_error(status),
         )
         .await
     }
@@ -447,28 +594,17 @@ impl DaemonClient {
         started: std::time::Instant,
         response: reqwest::Response,
     ) -> Result<TransferImportResponse, DaemonClientError> {
+        let context = RpcCallContext::destination_path(
+            &self.target_name,
+            &self.base_url,
+            started,
+            RpcCallKind::TransferImport,
+            req.destination_path.as_str(),
+        );
         self.decode_json_response(
             response,
-            |err| {
-                tracing::warn!(
-                    target = %self.target_name,
-                    base_url = %self.base_url,
-                    destination_path = %req.destination_path,
-                    elapsed_ms = started.elapsed().as_millis() as u64,
-                    error = %err,
-                    "daemon transfer import body read failed"
-                );
-            },
-            |err| {
-                tracing::warn!(
-                    target = %self.target_name,
-                    base_url = %self.base_url,
-                    destination_path = %req.destination_path,
-                    elapsed_ms = started.elapsed().as_millis() as u64,
-                    error = %err,
-                    "daemon transfer import decode failed"
-                );
-            },
+            |err| context.log_read_error(err),
+            |err| context.log_decode_error(err),
         )
         .await
     }
@@ -479,6 +615,13 @@ impl DaemonClient {
         Resp: serde::de::DeserializeOwned,
     {
         let started = std::time::Instant::now();
+        let context = RpcCallContext::path(
+            &self.target_name,
+            &self.base_url,
+            started,
+            RpcCallKind::Rpc,
+            path,
+        );
         tracing::debug!(
             target = %self.target_name,
             base_url = %self.base_url,
@@ -490,61 +633,19 @@ impl DaemonClient {
                 .send_request_with_policy(
                     self.request(path).json(body).send(),
                     RpcErrorDecodePolicy::Strict,
-                    |err| {
-                        tracing::warn!(
-                            target = %self.target_name,
-                            base_url = %self.base_url,
-                            path,
-                            elapsed_ms = started.elapsed().as_millis() as u64,
-                            error = %err,
-                            "daemon rpc transport failed"
-                        );
-                    },
-                    |status| {
-                        tracing::warn!(
-                            target = %self.target_name,
-                            base_url = %self.base_url,
-                            path,
-                            status = status.as_u16(),
-                            elapsed_ms = started.elapsed().as_millis() as u64,
-                            "daemon rpc returned error status"
-                        );
-                    },
+                    |err| context.log_transport_error(err),
+                    |status| context.log_status_error(status),
                 )
                 .await?;
 
             let decoded = self
                 .decode_json_response(
                     response,
-                    |err| {
-                        tracing::warn!(
-                            target = %self.target_name,
-                            base_url = %self.base_url,
-                            path,
-                            elapsed_ms = started.elapsed().as_millis() as u64,
-                            error = %err,
-                            "daemon rpc body read failed"
-                        );
-                    },
-                    |err| {
-                        tracing::warn!(
-                            target = %self.target_name,
-                            base_url = %self.base_url,
-                            path,
-                            elapsed_ms = started.elapsed().as_millis() as u64,
-                            error = %err,
-                            "daemon rpc decode failed"
-                        );
-                    },
+                    |err| context.log_read_error(err),
+                    |err| context.log_decode_error(err),
                 )
                 .await?;
-            tracing::debug!(
-                target = %self.target_name,
-                base_url = %self.base_url,
-                path,
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                "daemon rpc completed"
-            );
+            context.log_completed();
             Ok(decoded)
         })
         .await;

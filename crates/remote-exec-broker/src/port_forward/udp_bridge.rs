@@ -179,6 +179,10 @@ async fn run_udp_forward_epoch(
                     FrameType::Close => {
                         let _ = connectors.remove_by_stream_id(frame.stream_id).await;
                     }
+                    FrameType::ForwardDrop => {
+                        // Public forward drop accounting is driven by the listen-side tunnel.
+                        // Connect-side UDP connector churn is peer-local cleanup only.
+                    }
                     _ => {}
                 }
             }
