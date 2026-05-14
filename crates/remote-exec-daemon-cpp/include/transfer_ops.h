@@ -18,10 +18,18 @@ enum class TransferSymlinkMode {
     Skip,
 };
 
+enum class TransferOverwrite {
+    Fail,
+    Merge,
+    Replace,
+};
+
 const char* transfer_source_type_wire_value(TransferSourceType source_type);
 bool parse_transfer_source_type_wire_value(const std::string& value, TransferSourceType* source_type);
 const char* transfer_symlink_mode_wire_value(TransferSymlinkMode symlink_mode);
 bool parse_transfer_symlink_mode_wire_value(const std::string& value, TransferSymlinkMode* symlink_mode);
+const char* transfer_overwrite_wire_value(TransferOverwrite overwrite);
+bool parse_transfer_overwrite_wire_value(const std::string& value, TransferOverwrite* overwrite);
 
 struct TransferWarning {
     std::string code;
@@ -96,42 +104,16 @@ PathInfo path_info(const std::string& absolute_path);
 ImportSummary import_path(const std::string& bytes,
                           TransferSourceType source_type,
                           const std::string& absolute_path,
-                          const std::string& overwrite_mode,
+                          TransferOverwrite overwrite,
                           bool create_parent,
-                          TransferSymlinkMode symlink_mode = TransferSymlinkMode::Preserve);
-ImportSummary import_path(const std::string& bytes,
-                          TransferSourceType source_type,
-                          const std::string& absolute_path,
-                          const std::string& overwrite_mode,
-                          bool create_parent,
-                          TransferSymlinkMode symlink_mode,
-                          const TransferLimitConfig& limits);
-ImportSummary import_path(const std::string& bytes,
-                          TransferSourceType source_type,
-                          const std::string& absolute_path,
-                          const std::string& overwrite_mode,
-                          bool create_parent,
-                          TransferSymlinkMode symlink_mode,
-                          const TransferLimitConfig& limits,
-                          const TransferPathAuthorizer& authorizer);
+                          TransferSymlinkMode symlink_mode = TransferSymlinkMode::Preserve,
+                          const TransferLimitConfig& limits = default_transfer_limit_config(),
+                          const TransferPathAuthorizer& authorizer = TransferPathAuthorizer());
 ImportSummary import_path_from_reader(TransferArchiveReader& reader,
                                       TransferSourceType source_type,
                                       const std::string& absolute_path,
-                                      const std::string& overwrite_mode,
+                                      TransferOverwrite overwrite,
                                       bool create_parent,
-                                      TransferSymlinkMode symlink_mode = TransferSymlinkMode::Preserve);
-ImportSummary import_path_from_reader(TransferArchiveReader& reader,
-                                      TransferSourceType source_type,
-                                      const std::string& absolute_path,
-                                      const std::string& overwrite_mode,
-                                      bool create_parent,
-                                      TransferSymlinkMode symlink_mode,
-                                      const TransferLimitConfig& limits);
-ImportSummary import_path_from_reader(TransferArchiveReader& reader,
-                                      TransferSourceType source_type,
-                                      const std::string& absolute_path,
-                                      const std::string& overwrite_mode,
-                                      bool create_parent,
-                                      TransferSymlinkMode symlink_mode,
-                                      const TransferLimitConfig& limits,
-                                      const TransferPathAuthorizer& authorizer);
+                                      TransferSymlinkMode symlink_mode = TransferSymlinkMode::Preserve,
+                                      const TransferLimitConfig& limits = default_transfer_limit_config(),
+                                      const TransferPathAuthorizer& authorizer = TransferPathAuthorizer());

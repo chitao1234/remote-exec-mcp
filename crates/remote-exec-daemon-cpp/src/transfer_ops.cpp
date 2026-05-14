@@ -83,6 +83,34 @@ bool parse_transfer_symlink_mode_wire_value(const std::string& value, TransferSy
     return false;
 }
 
+const char* transfer_overwrite_wire_value(TransferOverwrite overwrite) {
+    switch (overwrite) {
+    case TransferOverwrite::Fail:
+        return "fail";
+    case TransferOverwrite::Merge:
+        return "merge";
+    case TransferOverwrite::Replace:
+        return "replace";
+    }
+    return "fail";
+}
+
+bool parse_transfer_overwrite_wire_value(const std::string& value, TransferOverwrite* overwrite) {
+    if (value == "fail") {
+        *overwrite = TransferOverwrite::Fail;
+        return true;
+    }
+    if (value == "merge") {
+        *overwrite = TransferOverwrite::Merge;
+        return true;
+    }
+    if (value == "replace") {
+        *overwrite = TransferOverwrite::Replace;
+        return true;
+    }
+    return false;
+}
+
 PathInfo path_info(const std::string& absolute_path) {
     if (!is_absolute_path(absolute_path)) {
         throw TransferFailure(TransferRpcCode::PathNotAbsolute, "transfer path is not absolute");

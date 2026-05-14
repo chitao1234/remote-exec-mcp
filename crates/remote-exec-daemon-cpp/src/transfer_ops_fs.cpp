@@ -265,19 +265,16 @@ std::vector<DirectoryEntry> list_directory_entries(const std::string& path) {
 
 bool prepare_destination_path(const std::string& absolute_path,
                               TransferSourceType source_type,
-                              const std::string& overwrite_mode,
+                              TransferOverwrite overwrite,
                               bool create_parent) {
     const bool existed = path_exists(absolute_path);
-    if (overwrite_mode != "fail" && overwrite_mode != "merge" && overwrite_mode != "replace") {
-        throw TransferFailure(TransferRpcCode::TransferFailed, "unsupported transfer overwrite mode");
-    }
-    if (existed && overwrite_mode == "fail") {
+    if (existed && overwrite == TransferOverwrite::Fail) {
         throw TransferFailure(TransferRpcCode::DestinationExists, "destination path already exists");
     }
 
     ensure_parent_directory(absolute_path, create_parent);
 
-    if (existed && overwrite_mode == "merge") {
+    if (existed && overwrite == TransferOverwrite::Merge) {
         ensure_not_existing_symlink(absolute_path);
         if (source_type == TransferSourceType::File) {
             if (is_directory(absolute_path)) {
@@ -296,11 +293,11 @@ bool prepare_destination_path(const std::string& absolute_path,
         }
     }
 
-    if (existed && overwrite_mode == "replace") {
+    if (existed && overwrite == TransferOverwrite::Replace) {
         remove_existing_path(absolute_path);
     }
 
-    return existed && overwrite_mode == "replace";
+    return existed && overwrite == TransferOverwrite::Replace;
 }
 
 } // namespace transfer_ops_internal

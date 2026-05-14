@@ -48,7 +48,7 @@ void write_symlink(const std::string& target, const std::string& path);
 std::vector<DirectoryEntry> list_directory_entries(const std::string& path);
 bool prepare_destination_path(const std::string& absolute_path,
                               TransferSourceType source_type,
-                              const std::string& overwrite_mode,
+                              TransferOverwrite overwrite,
                               bool create_parent);
 
 void append_archive_terminator(TransferArchiveSink* archive);

@@ -8,7 +8,7 @@
 
 struct TransferImportMetadata {
     std::string destination_path;
-    std::string overwrite;
+    TransferOverwrite overwrite;
     bool create_parent;
     TransferSourceType source_type;
     std::string compression;

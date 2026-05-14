@@ -83,8 +83,11 @@ void require_uncompressed_transfer(const std::string& compression) {
 TransferImportMetadata parse_transfer_import_metadata(const HttpRequest& request) {
     TransferImportMetadata metadata;
     metadata.destination_path = decode_destination_path_header(required_header(request, DESTINATION_PATH_HEADER));
-    metadata.overwrite = required_header(request, OVERWRITE_HEADER);
-    require_one_of(OVERWRITE_HEADER, metadata.overwrite, {"fail", "merge", "replace"});
+    const std::string overwrite = required_header(request, OVERWRITE_HEADER);
+    if (!parse_transfer_overwrite_wire_value(overwrite, &metadata.overwrite)) {
+        throw TransferFailure(TransferRpcCode::BadRequest,
+                              invalid_header_message(OVERWRITE_HEADER, "unsupported value `" + overwrite + "`"));
+    }
     metadata.create_parent = parse_create_parent(required_header(request, CREATE_PARENT_HEADER));
     const std::string source_type = required_header(request, SOURCE_TYPE_HEADER);
     if (!parse_transfer_source_type_wire_value(source_type, &metadata.source_type)) {

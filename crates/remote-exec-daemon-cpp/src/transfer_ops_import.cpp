@@ -352,13 +352,13 @@ void consume_file_archive_tail(TransferArchiveReader& reader,
 
 ImportSummary import_file_from_tar(TransferArchiveReader& reader,
                                    const std::string& absolute_path,
-                                   const std::string& overwrite_mode,
+                                   TransferOverwrite overwrite,
                                    bool create_parent,
                                    TransferSymlinkMode symlink_mode,
                                    const TransferLimitConfig& limits,
                                    const TransferPathAuthorizer& authorizer) {
     const bool replaced =
-        prepare_destination_path(absolute_path, TransferSourceType::File, overwrite_mode, create_parent);
+        prepare_destination_path(absolute_path, TransferSourceType::File, overwrite, create_parent);
     ensure_not_existing_symlink(absolute_path);
 
     std::vector<char> block(TAR_BLOCK_SIZE);
@@ -406,12 +406,12 @@ ImportSummary import_file_from_tar(TransferArchiveReader& reader,
 ImportSummary import_directory_from_tar(TransferArchiveReader& reader,
                                         TransferSourceType source_type,
                                         const std::string& absolute_path,
-                                        const std::string& overwrite_mode,
+                                        TransferOverwrite overwrite,
                                         bool create_parent,
                                         TransferSymlinkMode symlink_mode,
                                         const TransferLimitConfig& limits,
                                         const TransferPathAuthorizer& authorizer) {
-    const bool replaced = prepare_destination_path(absolute_path, source_type, overwrite_mode, create_parent);
+    const bool replaced = prepare_destination_path(absolute_path, source_type, overwrite, create_parent);
     make_directory_if_missing(absolute_path);
 
     ImportSummary summary = {source_type, 0, 0, 1, replaced, std::vector<TransferWarning>()};
@@ -500,84 +500,20 @@ ImportSummary import_directory_from_tar(TransferArchiveReader& reader,
 ImportSummary import_path(const std::string& bytes,
                           TransferSourceType source_type,
                           const std::string& absolute_path,
-                          const std::string& overwrite_mode,
-                          bool create_parent,
-                          TransferSymlinkMode symlink_mode) {
-    return import_path(bytes,
-                       source_type,
-                       absolute_path,
-                       overwrite_mode,
-                       create_parent,
-                       symlink_mode,
-                       default_transfer_limit_config());
-}
-
-ImportSummary import_path(const std::string& bytes,
-                          TransferSourceType source_type,
-                          const std::string& absolute_path,
-                          const std::string& overwrite_mode,
-                          bool create_parent,
-                          TransferSymlinkMode symlink_mode,
-                          const TransferLimitConfig& limits) {
-    return import_path(bytes,
-                       source_type,
-                       absolute_path,
-                       overwrite_mode,
-                       create_parent,
-                       symlink_mode,
-                       limits,
-                       TransferPathAuthorizer());
-}
-
-ImportSummary import_path(const std::string& bytes,
-                          TransferSourceType source_type,
-                          const std::string& absolute_path,
-                          const std::string& overwrite_mode,
+                          TransferOverwrite overwrite,
                           bool create_parent,
                           TransferSymlinkMode symlink_mode,
                           const TransferLimitConfig& limits,
                           const TransferPathAuthorizer& authorizer) {
     StringTransferArchiveReader reader(&bytes);
     return import_path_from_reader(
-        reader, source_type, absolute_path, overwrite_mode, create_parent, symlink_mode, limits, authorizer);
+        reader, source_type, absolute_path, overwrite, create_parent, symlink_mode, limits, authorizer);
 }
 
 ImportSummary import_path_from_reader(TransferArchiveReader& reader,
                                       TransferSourceType source_type,
                                       const std::string& absolute_path,
-                                      const std::string& overwrite_mode,
-                                      bool create_parent,
-                                      TransferSymlinkMode symlink_mode) {
-    return import_path_from_reader(reader,
-                                   source_type,
-                                   absolute_path,
-                                   overwrite_mode,
-                                   create_parent,
-                                   symlink_mode,
-                                   default_transfer_limit_config());
-}
-
-ImportSummary import_path_from_reader(TransferArchiveReader& reader,
-                                      TransferSourceType source_type,
-                                      const std::string& absolute_path,
-                                      const std::string& overwrite_mode,
-                                      bool create_parent,
-                                      TransferSymlinkMode symlink_mode,
-                                      const TransferLimitConfig& limits) {
-    return import_path_from_reader(reader,
-                                   source_type,
-                                   absolute_path,
-                                   overwrite_mode,
-                                   create_parent,
-                                   symlink_mode,
-                                   limits,
-                                   TransferPathAuthorizer());
-}
-
-ImportSummary import_path_from_reader(TransferArchiveReader& reader,
-                                      TransferSourceType source_type,
-                                      const std::string& absolute_path,
-                                      const std::string& overwrite_mode,
+                                      TransferOverwrite overwrite,
                                       bool create_parent,
                                       TransferSymlinkMode symlink_mode,
                                       const TransferLimitConfig& limits,
@@ -591,13 +527,13 @@ ImportSummary import_path_from_reader(TransferArchiveReader& reader,
 
     if (source_type == TransferSourceType::File) {
         return import_file_from_tar(
-            reader, absolute_path, overwrite_mode, create_parent, options.symlink_mode, limits, authorizer);
+            reader, absolute_path, overwrite, create_parent, options.symlink_mode, limits, authorizer);
     }
     if (source_type == TransferSourceType::Directory) {
         return import_directory_from_tar(reader,
                                          source_type,
                                          absolute_path,
-                                         overwrite_mode,
+                                         overwrite,
                                          create_parent,
                                          options.symlink_mode,
                                          limits,
@@ -607,7 +543,7 @@ ImportSummary import_path_from_reader(TransferArchiveReader& reader,
         return import_directory_from_tar(reader,
                                          source_type,
                                          absolute_path,
-                                         overwrite_mode,
+                                         overwrite,
                                          create_parent,
                                          options.symlink_mode,
                                          limits,

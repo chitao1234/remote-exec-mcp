@@ -268,6 +268,13 @@ static void assert_transfer_type_wire_helpers() {
     assert(parse_transfer_symlink_mode_wire_value("skip", &parsed_symlink_mode));
     assert(parsed_symlink_mode == TransferSymlinkMode::Skip);
     assert(!parse_transfer_symlink_mode_wire_value("copy", &parsed_symlink_mode));
+
+    assert(std::string(transfer_overwrite_wire_value(TransferOverwrite::Replace)) == "replace");
+
+    TransferOverwrite parsed_overwrite = TransferOverwrite::Fail;
+    assert(parse_transfer_overwrite_wire_value("merge", &parsed_overwrite));
+    assert(parsed_overwrite == TransferOverwrite::Merge);
+    assert(!parse_transfer_overwrite_wire_value("copy", &parsed_overwrite));
 }
 
 static void assert_file_transfer() {
@@ -283,7 +290,7 @@ static void assert_file_transfer() {
     assert(file_entry.second == "hello transfer");
 
     const ImportSummary imported =
-        import_path(exported.bytes, exported.source_type, (root / "copied.txt").string(), "replace", true);
+        import_path(exported.bytes, exported.source_type, (root / "copied.txt").string(), TransferOverwrite::Replace, true);
     assert(imported.files_copied == 1);
     assert(imported.directories_copied == 0);
     assert(read_text(root / "copied.txt") == "hello transfer");
@@ -299,7 +306,7 @@ static void assert_file_transfer_blocks_unexpected_entry_path() {
         (void)import_path(tar_with_single_file("payload.txt", "bad"),
                           TransferSourceType::File,
                           (root / "copied.txt").string(),
-                          "replace",
+                          TransferOverwrite::Replace,
                           true);
     } catch (...) {
         rejected = true;
@@ -315,7 +322,7 @@ static void assert_file_transfer_blocks_raw_bytes() {
 
     bool rejected = false;
     try {
-        (void)import_path("raw-bytes", TransferSourceType::File, (root / "copied.txt").string(), "replace", true);
+        (void)import_path("raw-bytes", TransferSourceType::File, (root / "copied.txt").string(), TransferOverwrite::Replace, true);
     } catch (...) {
         rejected = true;
     }
@@ -337,7 +344,7 @@ static void assert_transfer_rejects_entry_size_over_limit() {
         (void)import_path(tar_with_single_file(SINGLE_FILE_ENTRY, "0123456789"),
                           TransferSourceType::File,
                           (root / "dest.txt").string(),
-                          "replace",
+                          TransferOverwrite::Replace,
                           true,
                           TransferSymlinkMode::Preserve,
                           limits);
@@ -358,7 +365,7 @@ static void assert_transfer_rejects_unrepresentable_tar_size() {
         (void)import_path(tar_with_declared_file_size(SINGLE_FILE_ENTRY, 077777777777ULL),
                           TransferSourceType::File,
                           (root / "dest.txt").string(),
-                          "replace",
+                          TransferOverwrite::Replace,
                           true);
     } catch (const TransferFailure& failure) {
         rejected = failure.message.find("too large") != std::string::npos ||
@@ -386,7 +393,7 @@ static void assert_transfer_rejects_summary_size_over_limit() {
         (void)import_path(archive,
                           TransferSourceType::Directory,
                           (root / "dest").string(),
-                          "replace",
+                          TransferOverwrite::Replace,
                           true,
                           TransferSymlinkMode::Preserve,
                           limits);
@@ -408,7 +415,7 @@ static void assert_directory_round_trip() {
     assert(exported.source_type == TransferSourceType::Directory);
 
     const ImportSummary imported =
-        import_path(exported.bytes, exported.source_type, (root / "dest").string(), "replace", true);
+        import_path(exported.bytes, exported.source_type, (root / "dest").string(), TransferOverwrite::Replace, true);
 
     assert(imported.source_type == TransferSourceType::Directory);
     assert(imported.files_copied == 2);
@@ -428,7 +435,7 @@ static void assert_directory_replace_behavior() {
 
     const ExportedPayload exported = export_path((root / "source").string());
     const ImportSummary imported =
-        import_path(exported.bytes, exported.source_type, (root / "dest").string(), "replace", true);
+        import_path(exported.bytes, exported.source_type, (root / "dest").string(), TransferOverwrite::Replace, true);
 
     assert(imported.replaced);
     assert(!fs::exists(root / "dest" / "stale" / "old.txt"));
@@ -460,7 +467,7 @@ static void assert_directory_merge_behavior() {
 
     const ExportedPayload exported = export_path((root / "source").string());
     const ImportSummary imported =
-        import_path(exported.bytes, exported.source_type, (root / "dest").string(), "merge", true);
+        import_path(exported.bytes, exported.source_type, (root / "dest").string(), TransferOverwrite::Merge, true);
 
     assert(!imported.replaced);
     assert(read_text(root / "dest" / "nested" / "fresh.txt") == "fresh");
@@ -480,7 +487,7 @@ static void assert_directory_long_path_round_trip() {
 
     const ExportedPayload exported = export_path((root / "source").string());
     const ImportSummary imported =
-        import_path(exported.bytes, exported.source_type, (root / "dest").string(), "replace", true);
+        import_path(exported.bytes, exported.source_type, (root / "dest").string(), TransferOverwrite::Replace, true);
 
     assert(imported.source_type == TransferSourceType::Directory);
     assert(read_text(root / "dest" / long_name / "nested" / "payload.txt") == "long path");
@@ -518,7 +525,7 @@ static void assert_directory_export_excludes_matching_entries() {
     assert(std::find(archive_paths.begin(), archive_paths.end(), "src/a.cpp") == archive_paths.end());
 
     const ImportSummary imported =
-        import_path(exported.bytes, exported.source_type, (root / "dest").string(), "replace", true);
+        import_path(exported.bytes, exported.source_type, (root / "dest").string(), TransferOverwrite::Replace, true);
     assert(imported.files_copied == 3);
     assert(imported.warnings.empty());
     assert(read_text(root / "dest" / "keep.txt") == "keep");
@@ -570,7 +577,7 @@ static void assert_top_level_file_symlink_can_be_followed() {
     assert(exported.source_type == TransferSourceType::File);
 
     const ImportSummary imported =
-        import_path(exported.bytes, exported.source_type, (root / "dest.txt").string(), "replace", true);
+        import_path(exported.bytes, exported.source_type, (root / "dest.txt").string(), TransferOverwrite::Replace, true);
     assert(imported.files_copied == 1);
     assert(read_text(root / "dest.txt") == "target");
 }
@@ -585,7 +592,7 @@ static void assert_top_level_symlink_is_preserved_without_following_target() {
     assert(exported.source_type == TransferSourceType::File);
 
     const ImportSummary imported =
-        import_path(exported.bytes, exported.source_type, (root / "restored-link.txt").string(), "replace", true);
+        import_path(exported.bytes, exported.source_type, (root / "restored-link.txt").string(), TransferOverwrite::Replace, true);
     assert(imported.files_copied == 1);
     assert(fs::read_symlink(root / "restored-link.txt") == fs::path("missing-target.txt"));
 }
@@ -604,7 +611,7 @@ static void assert_executable_bits_round_trip() {
 
     const fs::path imported_path = root / "imported.sh";
     const ImportSummary imported =
-        import_path(exported.bytes, exported.source_type, imported_path.string(), "replace", true);
+        import_path(exported.bytes, exported.source_type, imported_path.string(), TransferOverwrite::Replace, true);
     assert(imported.files_copied == 1);
     assert((static_cast<unsigned>(fs::status(imported_path).permissions()) &
             static_cast<unsigned>(fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec)) != 0U);
@@ -615,7 +622,7 @@ static void assert_executable_bits_round_trip() {
     finalize_tar(archive);
     const fs::path directory_dest = root / "directory-dest";
     const ImportSummary directory_imported =
-        import_path(archive, TransferSourceType::Directory, directory_dest.string(), "replace", true);
+        import_path(archive, TransferSourceType::Directory, directory_dest.string(), TransferOverwrite::Replace, true);
     assert(directory_imported.files_copied == 1);
     assert((static_cast<unsigned>(fs::status(directory_dest / "bin" / "tool.sh").permissions()) &
             static_cast<unsigned>(fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec)) != 0U);
@@ -635,7 +642,7 @@ static void assert_transfer_skips_special_files_with_warning() {
     assert(exported.bytes.find(TRANSFER_SUMMARY_ENTRY) != std::string::npos);
 
     const ImportSummary imported =
-        import_path(exported.bytes, TransferSourceType::Directory, (root / "dest").string(), "replace", true);
+        import_path(exported.bytes, TransferSourceType::Directory, (root / "dest").string(), TransferOverwrite::Replace, true);
     assert(imported.warnings.size() == 1);
     assert(imported.warnings[0].code == "transfer_skipped_unsupported_entry");
     assert(read_text(root / "dest" / "regular.txt") == "regular");
@@ -679,7 +686,7 @@ static void assert_symlink_import_preserves_links() {
     fs::remove_all(root);
 
     const ImportSummary imported =
-        import_path(archive, TransferSourceType::Directory, (root / "dest").string(), "replace", true);
+        import_path(archive, TransferSourceType::Directory, (root / "dest").string(), TransferOverwrite::Replace, true);
 
     assert(imported.files_copied == 2);
     assert(read_text(root / "dest" / "alpha.txt") == "alpha");
@@ -696,7 +703,7 @@ static void assert_symlink_import_skip_reports_warning() {
     fs::remove_all(root);
 
     const ImportSummary imported = import_path(
-        archive, TransferSourceType::Directory, (root / "dest").string(), "replace", true, TransferSymlinkMode::Skip);
+        archive, TransferSourceType::Directory, (root / "dest").string(), TransferOverwrite::Replace, true, TransferSymlinkMode::Skip);
 
     assert(imported.files_copied == 1);
     assert(imported.warnings.size() == 1);
@@ -710,7 +717,7 @@ static void assert_symlink_import_skip_reports_warning() {
     const ImportSummary file_imported = import_path(file_archive,
                                                     TransferSourceType::File,
                                                     (root / "skipped-file-link").string(),
-                                                    "replace",
+                                                    TransferOverwrite::Replace,
                                                     true,
                                                     TransferSymlinkMode::Skip);
     assert(file_imported.files_copied == 0);
@@ -730,7 +737,7 @@ static void assert_symlink_import_rejects_absolute_target() {
 
     bool rejected = false;
     try {
-        (void)import_path(archive, TransferSourceType::Directory, (root / "dest").string(), "replace", true);
+        (void)import_path(archive, TransferSourceType::Directory, (root / "dest").string(), TransferOverwrite::Replace, true);
     } catch (const TransferFailure& failure) {
         rejected = failure.message.find("symlink target") != std::string::npos;
     }
@@ -749,7 +756,7 @@ static void assert_symlink_import_rejects_parent_target() {
 
     bool rejected = false;
     try {
-        (void)import_path(archive, TransferSourceType::Directory, (root / "dest").string(), "replace", true);
+        (void)import_path(archive, TransferSourceType::Directory, (root / "dest").string(), TransferOverwrite::Replace, true);
     } catch (const TransferFailure& failure) {
         rejected = failure.message.find("symlink target") != std::string::npos;
     }
@@ -776,7 +783,7 @@ static void assert_windows_symlink_import_modes_skip_with_warning() {
         fs::remove_all(root);
 
         const ImportSummary imported =
-            import_path(archive, TransferSourceType::Directory, (root / "dest").string(), "replace", true, modes[i]);
+            import_path(archive, TransferSourceType::Directory, (root / "dest").string(), TransferOverwrite::Replace, true, modes[i]);
 
         assert(imported.files_copied == 1);
         assert(imported.warnings.size() == 1);
@@ -789,7 +796,7 @@ static void assert_windows_symlink_import_modes_skip_with_warning() {
         finalize_tar(file_archive);
 
         const ImportSummary file_imported = import_path(
-            file_archive, TransferSourceType::File, (root / "skipped-file-link").string(), "replace", true, modes[i]);
+            file_archive, TransferSourceType::File, (root / "skipped-file-link").string(), TransferOverwrite::Replace, true, modes[i]);
 
         assert(file_imported.files_copied == 0);
         assert(file_imported.warnings.size() == 1);
@@ -806,7 +813,7 @@ static bool directory_import_rejects_path(const std::string& path) {
 
     bool rejected = false;
     try {
-        (void)import_path(archive, TransferSourceType::Directory, (root / "dest").string(), "replace", true);
+        (void)import_path(archive, TransferSourceType::Directory, (root / "dest").string(), TransferOverwrite::Replace, true);
     } catch (const TransferFailure& failure) {
         rejected = failure.message.find("archive path") != std::string::npos ||
                    failure.message.find("escapes destination") != std::string::npos;
@@ -835,7 +842,7 @@ static void assert_directory_traversal_is_rejected() {
     fs::remove_all(root);
     bool rejected = false;
     try {
-        (void)import_path(long_name_archive, TransferSourceType::Directory, (root / "dest").string(), "replace", true);
+        (void)import_path(long_name_archive, TransferSourceType::Directory, (root / "dest").string(), TransferOverwrite::Replace, true);
     } catch (const TransferFailure& failure) {
         rejected = failure.message.find("archive path") != std::string::npos ||
                    failure.message.find("escapes destination") != std::string::npos;
@@ -857,7 +864,7 @@ static void assert_multiple_sources_import() {
     fs::remove_all(root);
 
     const ImportSummary imported =
-        import_path(archive, TransferSourceType::Multiple, (root / "dest").string(), "replace", true);
+        import_path(archive, TransferSourceType::Multiple, (root / "dest").string(), TransferOverwrite::Replace, true);
 
     assert(imported.source_type == TransferSourceType::Multiple);
     assert(imported.files_copied == 2);
