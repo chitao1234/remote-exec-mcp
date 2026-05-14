@@ -1,3 +1,4 @@
+#include <atomic>
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -8,6 +9,9 @@
 #include <stdexcept>
 #include <vector>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include <sys/stat.h>
 #ifndef _WIN32
 #include <unistd.h>
@@ -56,6 +60,20 @@ struct NormalizedPathPrefix {
     std::string value;
     std::size_t start;
 };
+
+std::string unique_atomic_write_temp_path(const std::string& path) {
+    static std::atomic<unsigned long> next_suffix(1UL);
+
+    std::ostringstream out;
+    out << path << ".tmp."
+#ifdef _WIN32
+        << static_cast<unsigned long>(GetCurrentProcessId())
+#else
+        << static_cast<long>(getpid())
+#endif
+        << "." << platform::monotonic_ms() << "." << next_suffix.fetch_add(1UL);
+    return out.str();
+}
 
 NormalizedPathPrefix normalized_path_prefix(const std::string& raw, NormalizedPathKind kind) {
     NormalizedPathPrefix prefix;
@@ -187,7 +205,7 @@ std::string read_text_file(const std::string& path) {
 
 void write_text_atomic(const std::string& path, const std::string& content) {
     path_utils::create_parent_directories(path);
-    const std::string temp_path = path + ".tmp";
+    const std::string temp_path = unique_atomic_write_temp_path(path);
 
     std::ofstream output(temp_path.c_str(), std::ios::binary | std::ios::trunc);
     if (!output) {

@@ -1,7 +1,11 @@
+#include <atomic>
 #include <cassert>
 #include <fstream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include "patch_engine.h"
 #include "test_filesystem.h"
@@ -26,6 +30,77 @@ static void expect_patch_failure(const fs::path& root, const std::string& patch)
         threw = true;
     }
     assert(threw);
+}
+
+static std::string repeated_line_block(const std::string& prefix, int count) {
+    std::ostringstream out;
+    for (int i = 0; i < count; ++i) {
+        out << prefix << "-" << i << "\n";
+    }
+    return out.str();
+}
+
+static std::string add_file_patch(const std::string& relative_path, const std::string& content) {
+    std::ostringstream out;
+    out << "*** Begin Patch\n"
+        << "*** Add File: " << relative_path << "\n";
+    std::istringstream input(content);
+    std::string line;
+    while (std::getline(input, line)) {
+        out << "+" << line << "\n";
+    }
+    out << "*** End Patch\n";
+    return out.str();
+}
+
+static void assert_concurrent_patch_writes_share_no_fixed_temp_path(const fs::path& root) {
+    const std::string relative_path = "concurrent.txt";
+    const std::string alpha_content = repeated_line_block("alpha", 4096);
+    const std::string beta_content = repeated_line_block("beta", 4096);
+    const std::string alpha_patch = add_file_patch(relative_path, alpha_content);
+    const std::string beta_patch = add_file_patch(relative_path, beta_content);
+
+    for (int round = 0; round < 16; ++round) {
+        const fs::path target = root / "concurrent.txt";
+        const fs::path temp = root / "concurrent.txt.tmp";
+        fs::remove_all(target);
+        fs::remove_all(temp);
+
+        std::atomic<int> ready_count(0);
+        std::atomic<bool> release(false);
+        std::atomic<int> failure_count(0);
+        std::vector<std::thread> workers;
+
+        for (int i = 0; i < 4; ++i) {
+            const std::string& patch = (i % 2 == 0) ? alpha_patch : beta_patch;
+            workers.push_back(std::thread([&, patch]() {
+                ready_count.fetch_add(1);
+                while (!release.load()) {
+                    std::this_thread::yield();
+                }
+                try {
+                    (void)apply_patch(root.string(), patch);
+                } catch (const std::runtime_error&) {
+                    failure_count.fetch_add(1);
+                }
+            }));
+        }
+
+        while (ready_count.load() != 4) {
+            std::this_thread::yield();
+        }
+        release.store(true);
+
+        for (std::size_t i = 0; i < workers.size(); ++i) {
+            workers[i].join();
+        }
+
+        assert(failure_count.load() == 0);
+        assert(fs::exists(target));
+        const std::string final_text = read_text(target);
+        assert(final_text == alpha_content || final_text == beta_content);
+        assert(!fs::exists(temp));
+    }
 }
 
 int main() {
@@ -234,6 +309,8 @@ int main() {
 
     expect_patch_failure(root, blocked_add_patch);
     assert(!fs::exists(root / "blocked.txt.tmp"));
+
+    assert_concurrent_patch_writes_share_no_fixed_temp_path(root);
 
     return 0;
 }
