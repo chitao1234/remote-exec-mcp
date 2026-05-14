@@ -234,6 +234,7 @@ WINDOWS_SESSION_STORE_TEST_SRCS = \
 	$(SOURCE_PREFIX)src/session_pump.cpp \
 	$(WINDOWS_DAEMON_SUPPORT_SRCS) \
 	$(SOURCE_PREFIX)src/platform.cpp \
+	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/shell_policy.cpp \
 	$(SOURCE_PREFIX)src/basic_mutex.cpp \
 	$(SOURCE_PREFIX)src/logging.cpp \
