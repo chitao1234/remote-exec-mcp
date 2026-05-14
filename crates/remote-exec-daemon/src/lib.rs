@@ -69,7 +69,7 @@ where
     F: Future<Output = ()> + Send,
 {
     tls::install_crypto_provider()?;
-    let state = remote_exec_host::build_runtime_state(daemon_config.as_ref().clone().into())?;
+    let state = remote_exec_host::build_runtime_state(daemon_config.as_ref().into())?;
     let listen = listener.local_addr().unwrap_or(daemon_config.listen);
     tracing::info!(
         target = %daemon_config.target,

@@ -135,7 +135,7 @@ impl DaemonConfig {
     }
 
     pub fn validate(&self) -> anyhow::Result<()> {
-        HostRuntimeConfig::from(self.clone()).validate()?;
+        HostRuntimeConfig::from(self).validate()?;
         self.validate_http_auth()?;
         crate::tls::validate_config(self)?;
         Ok(())
@@ -198,9 +198,37 @@ impl From<DaemonConfig> for HostRuntimeConfig {
     }
 }
 
+impl From<&DaemonConfig> for HostRuntimeConfig {
+    fn from(value: &DaemonConfig) -> Self {
+        Self {
+            target: value.target.clone(),
+            default_workdir: value.default_workdir.clone(),
+            windows_posix_root: value.windows_posix_root.clone(),
+            sandbox: value.sandbox.clone(),
+            enable_transfer_compression: value.enable_transfer_compression,
+            transfer_limits: value.transfer_limits,
+            max_open_sessions: value.max_open_sessions,
+            allow_login_shell: value.allow_login_shell,
+            pty: value.pty,
+            default_shell: value.default_shell.clone(),
+            yield_time: value.yield_time,
+            port_forward_limits: value.port_forward_limits,
+            experimental_apply_patch_target_encoding_autodetect: value
+                .experimental_apply_patch_target_encoding_autodetect,
+            process_environment: value.process_environment.clone(),
+        }
+    }
+}
+
 impl From<ValidatedDaemonConfig> for HostRuntimeConfig {
     fn from(value: ValidatedDaemonConfig) -> Self {
         value.into_inner().into()
+    }
+}
+
+impl From<&ValidatedDaemonConfig> for HostRuntimeConfig {
+    fn from(value: &ValidatedDaemonConfig) -> Self {
+        value.as_ref().into()
     }
 }
 
