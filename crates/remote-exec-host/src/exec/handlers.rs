@@ -10,7 +10,7 @@ use crate::{AppState, HostRpcError, config::YieldTimeOperation, error::logged_ba
 
 use super::{
     session, shell,
-    store::SessionLockError,
+    store::{SessionLease, SessionLockError},
     support::{
         ensure_sandbox_access, finish_response, has_exited, internal_error, poll_once, poll_until,
         resolve_workdir, running_response, write_chars, write_yield_time_operation,
@@ -76,7 +76,7 @@ pub async fn exec_write_local(
     state: Arc<AppState>,
     req: ExecWriteRequest,
 ) -> Result<ExecResponse, HostRpcError> {
-    let daemon_session_id = req.daemon_session_id;
+    let daemon_session_id = req.daemon_session_id.clone();
     tracing::info!(
         target = %state.config.target,
         daemon_session_id = %daemon_session_id,
@@ -84,46 +84,7 @@ pub async fn exec_write_local(
         empty_poll = req.chars.is_empty(),
         "exec_write received"
     );
-    let session = match state
-        .sessions
-        .lock_with_timeout(&daemon_session_id, EXEC_WRITE_SESSION_LOCK_TIMEOUT)
-        .await
-    {
-        Ok(session) => session,
-        Err(SessionLockError::UnknownSession) => {
-            return Err(logged_bad_request(
-                RpcErrorCode::UnknownSession,
-                "Unknown daemon session",
-            ));
-        }
-        Err(SessionLockError::TimedOut) => {
-            return Err(crate::error::rpc_error(
-                409,
-                RpcErrorCode::ExecSessionLockTimeout,
-                format!("Timed out waiting for daemon session `{daemon_session_id}` lock"),
-            ));
-        }
-    };
-    let mut session = session;
-
-    if let Some(size) = req.pty_size {
-        if size.rows == 0 || size.cols == 0 {
-            return Err(logged_bad_request(
-                RpcErrorCode::InvalidPtySize,
-                "PTY rows and cols must be greater than zero",
-            ));
-        }
-        super::support::resize_pty(&mut session, size)
-            .await
-            .map_err(|err| logged_bad_request(RpcErrorCode::TtyUnsupported, err.to_string()))?;
-    }
-
-    if !req.chars.is_empty() && !session.tty {
-        return Err(logged_bad_request(
-            RpcErrorCode::StdinClosed,
-            "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open",
-        ));
-    }
+    let mut session = prepare_exec_write_session(&state, &req).await?;
 
     write_chars(&mut session, &req.chars)
         .await
@@ -171,6 +132,57 @@ pub async fn exec_write_local(
         "exec_write left process running"
     );
     Ok(response)
+}
+
+async fn prepare_exec_write_session(
+    state: &Arc<AppState>,
+    req: &ExecWriteRequest,
+) -> Result<SessionLease, HostRpcError> {
+    let session = match state
+        .sessions
+        .lock_with_timeout(&req.daemon_session_id, EXEC_WRITE_SESSION_LOCK_TIMEOUT)
+        .await
+    {
+        Ok(session) => session,
+        Err(SessionLockError::UnknownSession) => {
+            return Err(logged_bad_request(
+                RpcErrorCode::UnknownSession,
+                "Unknown daemon session",
+            ));
+        }
+        Err(SessionLockError::TimedOut) => {
+            return Err(crate::error::rpc_error(
+                409,
+                RpcErrorCode::ExecSessionLockTimeout,
+                format!(
+                    "Timed out waiting for daemon session `{}` lock",
+                    req.daemon_session_id
+                ),
+            ));
+        }
+    };
+    let mut session = session;
+
+    if let Some(size) = req.pty_size {
+        if size.rows == 0 || size.cols == 0 {
+            return Err(logged_bad_request(
+                RpcErrorCode::InvalidPtySize,
+                "PTY rows and cols must be greater than zero",
+            ));
+        }
+        super::support::resize_pty(&mut session, size)
+            .await
+            .map_err(|err| logged_bad_request(RpcErrorCode::TtyUnsupported, err.to_string()))?;
+    }
+
+    if !req.chars.is_empty() && !session.tty {
+        return Err(logged_bad_request(
+            RpcErrorCode::StdinClosed,
+            "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open",
+        ));
+    }
+
+    Ok(session)
 }
 
 struct PreparedExecStart {
