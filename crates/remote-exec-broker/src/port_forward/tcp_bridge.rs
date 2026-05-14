@@ -186,7 +186,7 @@ async fn handle_listen_tcp_accept(
     frame: Frame,
 ) -> anyhow::Result<Option<ForwardLoopControl>> {
     let accept: TcpAcceptMeta = decode_tunnel_meta(&frame)?;
-    if !try_reserve_active_tcp_stream(runtime).await {
+    if !runtime.try_reserve_active_stream().await {
         let _ = listen_tunnel.close_stream(frame.stream_id).await;
         runtime.record_dropped_stream().await;
         return Ok(None);
@@ -841,22 +841,6 @@ fn release_pending_budget(pending_budget: &mut PendingTcpBudget, stream: &mut Tc
         .total_bytes
         .saturating_sub(stream.pending_bytes);
     stream.pending_bytes = 0;
-}
-
-async fn try_reserve_active_tcp_stream(runtime: &ForwardRuntime) -> bool {
-    let mut reserved = false;
-    let mut saw_entry = false;
-    runtime
-        .store
-        .update_entry(runtime.forward_id(), |entry| {
-            saw_entry = true;
-            if entry.active_tcp_streams < runtime.limits.max_active_tcp_streams {
-                entry.active_tcp_streams += 1;
-                reserved = true;
-            }
-        })
-        .await;
-    !saw_entry || reserved
 }
 
 async fn settle_active_tcp_stream(runtime: &ForwardRuntime, settlement: TcpActiveStreamSettlement) {

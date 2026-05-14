@@ -10,14 +10,14 @@ pub(crate) const LOCAL_TARGET_NAME: &str = "local";
 
 #[derive(Clone)]
 pub struct BrokerState {
-    pub enable_transfer_compression: bool,
-    pub transfer_limits: TransferLimits,
-    pub disable_structured_content: bool,
-    pub port_forward_limits: port_forward::BrokerPortForwardLimits,
-    pub host_sandbox: Option<CompiledFilesystemSandbox>,
-    pub sessions: SessionStore,
-    pub port_forwards: port_forward::PortForwardStore,
-    pub targets: BTreeMap<String, TargetHandle>,
+    pub(crate) enable_transfer_compression: bool,
+    pub(crate) transfer_limits: TransferLimits,
+    pub(crate) disable_structured_content: bool,
+    pub(crate) port_forward_limits: port_forward::BrokerPortForwardLimits,
+    pub(crate) host_sandbox: Option<CompiledFilesystemSandbox>,
+    pub(crate) sessions: SessionStore,
+    pub(crate) port_forwards: port_forward::PortForwardStore,
+    pub(crate) targets: BTreeMap<String, TargetHandle>,
 }
 
 impl BrokerState {

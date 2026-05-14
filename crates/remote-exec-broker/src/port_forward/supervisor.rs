@@ -212,6 +212,21 @@ impl ForwardRuntime {
             .await;
     }
 
+    pub(super) async fn try_reserve_active_stream(&self) -> bool {
+        let mut reserved = false;
+        let mut saw_entry = false;
+        self.store
+            .update_entry(self.forward_id(), |entry| {
+                saw_entry = true;
+                if entry.active_tcp_streams < self.limits.max_active_tcp_streams {
+                    entry.active_tcp_streams += 1;
+                    reserved = true;
+                }
+            })
+            .await;
+        !saw_entry || reserved
+    }
+
     pub(super) async fn mark_reconnecting(
         &self,
         side: ForwardPortSideRole,
