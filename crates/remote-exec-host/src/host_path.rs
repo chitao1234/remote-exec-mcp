@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use remote_exec_proto::path::{
-    PathPolicy, is_absolute_for_policy, linux_path_policy, normalize_for_system,
-    windows_path_policy,
+    PathPolicy, comparison_key_for_policy, is_absolute_for_policy, linux_path_policy,
+    normalize_for_system, windows_path_policy,
 };
 
 pub fn host_path_policy() -> PathPolicy {
@@ -80,7 +80,7 @@ fn synthetic_windows_posix_absolute_path(
     None
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, test))]
 fn path_has_windows_prefix(path: &Path, prefix: &Path) -> bool {
     let path_lower = normalized_windows_path_key(path);
     let mut prefix_lower = normalized_windows_path_key(prefix);
@@ -95,9 +95,9 @@ fn path_has_windows_prefix(path: &Path, prefix: &Path) -> bool {
     path_lower.starts_with(&prefix_lower)
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, test))]
 fn normalized_windows_path_key(path: &Path) -> String {
-    normalize_for_system(windows_path_policy(), &path.to_string_lossy()).to_ascii_lowercase()
+    comparison_key_for_policy(windows_path_policy(), &path.to_string_lossy())
 }
 
 #[cfg(all(test, windows))]
@@ -147,6 +147,25 @@ mod tests {
         assert!(!shell_uses_windows_posix_root(
             r"C:\msys64-tools\usr\bin\zsh.exe",
             Some(root)
+        ));
+    }
+}
+
+#[cfg(all(test, not(windows)))]
+mod non_windows_tests {
+    use std::path::Path;
+
+    use super::path_has_windows_prefix;
+
+    #[test]
+    fn path_has_windows_prefix_handles_unicode_casefold() {
+        assert!(path_has_windows_prefix(
+            Path::new("C:/RÉSUMÉ/bin/zsh.exe"),
+            Path::new("c:/résumé"),
+        ));
+        assert!(!path_has_windows_prefix(
+            Path::new("C:/RÉSUMÉ-tools/bin/zsh.exe"),
+            Path::new("c:/résumé"),
         ));
     }
 }

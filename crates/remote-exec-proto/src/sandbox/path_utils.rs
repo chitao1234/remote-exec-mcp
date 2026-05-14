@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 
-use crate::path::{PathComparison, PathPolicy};
+use crate::path::{PathPolicy, path_text_eq};
 
 use super::SandboxError;
 
@@ -78,9 +78,23 @@ pub(crate) fn path_is_within(policy: PathPolicy, root: &Path, path: &Path) -> bo
 fn component_eq(policy: PathPolicy, left: Component<'_>, right: Component<'_>) -> bool {
     let left = left.as_os_str().to_string_lossy();
     let right = right.as_os_str().to_string_lossy();
+    path_text_eq(policy, &left, &right)
+}
 
-    match policy.comparison {
-        PathComparison::CaseSensitive => left == right,
-        PathComparison::CaseInsensitive => left.eq_ignore_ascii_case(&right),
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use crate::path::windows_path_policy;
+
+    use super::path_is_within;
+
+    #[test]
+    fn windows_path_is_within_handles_unicode_casefold() {
+        assert!(path_is_within(
+            windows_path_policy(),
+            Path::new("C:/RÉSUMÉ"),
+            Path::new("c:/résumé/ärger.txt"),
+        ));
     }
 }

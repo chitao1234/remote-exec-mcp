@@ -1,5 +1,7 @@
 use std::path::{Component, Path, PathBuf};
 
+use caseless::default_case_fold_str;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathStyle {
     Posix,
@@ -109,16 +111,24 @@ fn normalize_windows_separators(raw: &str) -> String {
     format!("{normalized_prefix}{normalized_rest}")
 }
 
-fn comparison_key(policy: PathPolicy, raw: &str) -> String {
+fn comparison_text_key(comparison: PathComparison, raw: &str) -> String {
+    match comparison {
+        PathComparison::CaseSensitive => raw.to_string(),
+        PathComparison::CaseInsensitive => default_case_fold_str(raw),
+    }
+}
+
+pub fn comparison_key_for_policy(policy: PathPolicy, raw: &str) -> String {
     let normalized = match policy.style {
         PathStyle::Posix => raw.to_string(),
         PathStyle::Windows => normalize_for_system(policy, raw),
     };
 
-    match policy.comparison {
-        PathComparison::CaseSensitive => normalized,
-        PathComparison::CaseInsensitive => normalized.to_ascii_lowercase(),
-    }
+    comparison_text_key(policy.comparison, &normalized)
+}
+
+pub fn path_text_eq(policy: PathPolicy, left: &str, right: &str) -> bool {
+    comparison_text_key(policy.comparison, left) == comparison_text_key(policy.comparison, right)
 }
 
 pub fn is_absolute_for_policy(policy: PathPolicy, raw: &str) -> bool {
@@ -201,7 +211,7 @@ pub fn join_for_policy(policy: PathPolicy, base: &str, child: &str) -> String {
 }
 
 pub fn same_path_for_policy(policy: PathPolicy, left: &str, right: &str) -> bool {
-    comparison_key(policy, left) == comparison_key(policy, right)
+    comparison_key_for_policy(policy, left) == comparison_key_for_policy(policy, right)
 }
 
 pub fn normalize_relative_path(path: &Path) -> Option<PathBuf> {
@@ -255,6 +265,16 @@ mod tests {
             policy,
             "/cygdrive/c/Work/Artifact.txt",
             r"c:\work\artifact.txt"
+        ));
+    }
+
+    #[test]
+    fn windows_same_path_handles_unicode_casefold() {
+        let policy = windows_path_policy();
+        assert!(same_path_for_policy(
+            policy,
+            r"C:\RÉSUMÉ\Ärger.txt",
+            "c:/résumé/ärger.TXT"
         ));
     }
 
