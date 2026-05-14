@@ -29,6 +29,7 @@
 #include "server.h"
 #include "server_transport.h"
 #include "test_filesystem.h"
+#include "test_server_routes_shared.h"
 
 namespace fs = test_fs;
 
@@ -57,25 +58,9 @@ static void wait_past_resume_timeout(unsigned long resume_timeout_ms) {
     platform::sleep_ms(resume_timeout_ms + RESUME_TIMEOUT_EXPIRY_MARGIN_MS);
 }
 
-static DaemonConfig make_config(const fs::path& root) {
-    DaemonConfig config;
-    config.target = "cpp-test";
-    config.listen_host = "127.0.0.1";
-    config.listen_port = 0;
-    config.default_workdir = root.string();
-    config.default_shell.clear();
-    config.allow_login_shell = true;
-    config.http_auth_bearer_token.clear();
-    config.max_request_header_bytes = 65536;
-    config.max_request_body_bytes = 536870912;
-    config.transfer_limits = default_transfer_limit_config();
-    config.max_open_sessions = 64;
-    return config;
-}
-
 static void
 initialize_state_with_port_forward_limits(AppState& state, const fs::path& root, const PortForwardLimitConfig& limits) {
-    state.config = make_config(root);
+    state.config = make_server_routes_test_config(root);
     state.config.port_forward_limits = limits;
     state.daemon_instance_id = "test-instance";
     state.hostname = "test-host";

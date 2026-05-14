@@ -258,6 +258,26 @@ impl ServerHandler for BrokerServer {
     }
 }
 
+#[cfg(test)]
+mod tool_router_contract_tests {
+    use super::BrokerServer;
+    use crate::tools::registry::BrokerTool;
+
+    #[test]
+    fn tool_router_matches_registry_names() {
+        let router = BrokerServer::tool_router();
+        let mut actual: Vec<_> = router
+            .list_all()
+            .into_iter()
+            .map(|tool| tool.name.into_owned())
+            .collect();
+        let mut expected: Vec<_> = BrokerTool::ALL.iter().map(|tool| tool.name()).collect();
+        actual.sort_unstable();
+        expected.sort_unstable();
+        assert_eq!(actual, expected);
+    }
+}
+
 pub async fn serve_stdio(state: crate::BrokerState) -> anyhow::Result<()> {
     tracing::info!("starting broker MCP stdio service");
     let server = BrokerServer::new(state.clone());

@@ -11,14 +11,14 @@ pub(crate) enum BrokerTool {
 
 impl BrokerTool {
     #[cfg(test)]
-    pub(crate) const NAMES: &'static [&'static str] = &[
-        "list_targets",
-        "exec_command",
-        "write_stdin",
-        "apply_patch",
-        "view_image",
-        "transfer_files",
-        "forward_ports",
+    pub(crate) const ALL: &'static [Self] = &[
+        Self::ListTargets,
+        Self::ExecCommand,
+        Self::WriteStdin,
+        Self::ApplyPatch,
+        Self::ViewImage,
+        Self::TransferFiles,
+        Self::ForwardPorts,
     ];
 
     pub(crate) fn from_name(name: &str) -> Option<Self> {
@@ -53,29 +53,12 @@ mod tests {
 
     #[test]
     fn all_tool_names_round_trip_through_registry() {
-        for name in BrokerTool::NAMES {
-            let tool = BrokerTool::from_name(name).expect("registered tool should parse");
-            assert_eq!(tool.name(), *name);
+        for tool in BrokerTool::ALL {
+            let name = tool.name();
+            assert_eq!(
+                BrokerTool::from_name(name).expect("registered tool should parse"),
+                *tool
+            );
         }
-    }
-}
-
-#[cfg(test)]
-mod mcp_registration_contract_tests {
-    use super::BrokerTool;
-
-    const MCP_TOOL_NAMES: &[&str] = &[
-        "list_targets",
-        "exec_command",
-        "write_stdin",
-        "apply_patch",
-        "view_image",
-        "transfer_files",
-        "forward_ports",
-    ];
-
-    #[test]
-    fn registry_matches_mcp_tool_names() {
-        assert_eq!(BrokerTool::NAMES, MCP_TOOL_NAMES);
     }
 }

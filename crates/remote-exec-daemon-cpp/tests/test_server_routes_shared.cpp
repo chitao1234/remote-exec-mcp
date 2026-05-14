@@ -29,24 +29,8 @@ fs::path make_server_routes_test_root(const std::string& directory_name) {
     return root;
 }
 
-static DaemonConfig make_config(const fs::path& root) {
-    DaemonConfig config;
-    config.target = "cpp-test";
-    config.listen_host = "127.0.0.1";
-    config.listen_port = 0;
-    config.default_workdir = root.string();
-    config.default_shell.clear();
-    config.allow_login_shell = true;
-    config.http_auth_bearer_token.clear();
-    config.max_request_header_bytes = 65536;
-    config.max_request_body_bytes = 536870912;
-    config.transfer_limits = default_transfer_limit_config();
-    config.max_open_sessions = 64;
-    return config;
-}
-
 void initialize_server_routes_state(AppState& state, const fs::path& root) {
-    state.config = make_config(root);
+    state.config = make_server_routes_test_config(root);
     state.daemon_instance_id = "test-instance";
     state.hostname = "test-host";
     state.default_shell = platform::resolve_default_shell("");
