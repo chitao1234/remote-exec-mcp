@@ -17,7 +17,7 @@ use super::codec::decode_frame_meta;
 use super::error::rpc_error;
 use super::frames::{frame as raw_frame, meta_frame};
 use super::session::{
-    SessionState, attach_session_to_tunnel, close_attached_session, close_mode_for_tunnel_result,
+    SessionState, attach_session_to_tunnel, close_listen_session, close_mode_for_tunnel_result,
     reactivate_retained_udp_bind,
 };
 use super::tcp::{
@@ -449,23 +449,23 @@ pub(super) async fn tunnel_mode(tunnel: &Arc<TunnelState>) -> TunnelMode {
 }
 
 async fn close_tunnel_runtime(tunnel: &Arc<TunnelState>, mode: super::error::SessionCloseMode) {
-    if matches!(
-        tunnel.active.lock().await.as_ref(),
-        Some(ActiveTunnelState::Listen(_))
-    ) {
-        close_attached_session(tunnel, mode).await;
-        return;
-    }
-    let Some(ActiveTunnelState::Connect(runtime)) = tunnel.active.lock().await.take() else {
+    let Some(active) = tunnel.active.lock().await.take() else {
         return;
     };
-    runtime.cancel.cancel();
-    for (_, mut stream) in runtime.tcp_streams.lock().await.drain() {
-        if let Some(cancel) = stream.cancel.take() {
-            cancel.cancel();
+    match active {
+        ActiveTunnelState::Listen(session) => {
+            close_listen_session(tunnel, session, mode).await;
         }
-    }
-    for (_, bind) in runtime.udp_binds.lock().await.drain() {
-        bind.cancel.cancel();
+        ActiveTunnelState::Connect(runtime) => {
+            runtime.cancel.cancel();
+            for (_, mut stream) in runtime.tcp_streams.lock().await.drain() {
+                if let Some(cancel) = stream.cancel.take() {
+                    cancel.cancel();
+                }
+            }
+            for (_, bind) in runtime.udp_binds.lock().await.drain() {
+                bind.cancel.cancel();
+            }
+        }
     }
 }

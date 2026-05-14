@@ -208,14 +208,25 @@ pub(super) async fn close_attached_session(tunnel: &Arc<TunnelState>, mode: Sess
     let session = {
         let mut active = tunnel.active.lock().await;
         match active.take() {
-            Some(ActiveTunnelState::Listen(session)) => session,
+            Some(ActiveTunnelState::Listen(session)) => Some(session),
             Some(other) => {
                 *active = Some(other);
-                return;
+                None
             }
-            None => return,
+            None => None,
         }
     };
+    let Some(session) = session else {
+        return;
+    };
+    close_listen_session(tunnel, session, mode).await;
+}
+
+pub(super) async fn close_listen_session(
+    tunnel: &Arc<TunnelState>,
+    session: Arc<SessionState>,
+    mode: SessionCloseMode,
+) {
     if let Some(attachment) = session.attachment.lock().await.take() {
         attachment.cancel.cancel();
         for (_, mut stream) in attachment.tcp_streams.lock().await.drain() {
