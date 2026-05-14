@@ -381,7 +381,7 @@ static std::string assert_transfer_export_and_exclude_routes(AppState& state, co
     return export_response.body;
 }
 
-static void assert_transfer_import_routes(AppState& state, const fs::path& root, const std::string& export_body) {
+static void assert_transfer_import_success(AppState& state, const fs::path& root, const std::string& export_body) {
     HttpRequest import_request;
     import_request.method = "POST";
     import_request.path = "/v1/transfer/import";
@@ -402,14 +402,22 @@ static void assert_transfer_import_routes(AppState& state, const fs::path& root,
     assert(imported.at("replaced").get<bool>() == false);
     assert(imported.at("warnings").empty());
     assert(read_text_file(root / "transfer-dest.txt") == "route transfer payload");
+}
 
+static void assert_transfer_import_optional_defaults(AppState& state,
+                                                     const fs::path& root,
+                                                     const std::string& export_body) {
     HttpRequest optional_defaults_import = transfer_import_request(root / "transfer-defaults.txt", export_body);
     optional_defaults_import.headers.erase("x-remote-exec-symlink-mode");
     optional_defaults_import.headers.erase("x-remote-exec-compression");
     const HttpResponse optional_defaults_response = route_request(state, optional_defaults_import);
     assert(optional_defaults_response.status == 200);
     assert(read_text_file(root / "transfer-defaults.txt") == "route transfer payload");
+}
 
+static void assert_transfer_import_header_validation(AppState& state,
+                                                     const fs::path& root,
+                                                     const std::string& export_body) {
     HttpRequest missing_create_parent = transfer_import_request(root / "missing-create-parent.txt", export_body);
     missing_create_parent.headers.erase("x-remote-exec-create-parent");
     assert_bad_request_for_transfer_import(
@@ -439,7 +447,11 @@ static void assert_transfer_import_routes(AppState& state, const fs::path& root,
     invalid_symlink_mode.headers["x-remote-exec-symlink-mode"] = "copy";
     assert_bad_request_for_transfer_import(
         state, invalid_symlink_mode, root / "invalid-symlink-mode.txt", "x-remote-exec-symlink-mode");
+}
 
+static void assert_transfer_import_rejects_file_merge_into_directory(AppState& state,
+                                                                     const fs::path& root,
+                                                                     const std::string& export_body) {
     fs::create_directories(root / "merge-dir");
     HttpRequest merge_file_into_directory_request;
     merge_file_into_directory_request.method = "POST";
@@ -455,6 +467,103 @@ static void assert_transfer_import_routes(AppState& state, const fs::path& root,
     assert(merge_file_into_directory_response.status == 400);
     const Json merge_file_into_directory_error = Json::parse(merge_file_into_directory_response.body);
     assert(merge_file_into_directory_error.at("code").get<std::string>() == "transfer_destination_unsupported");
+}
+
+static void assert_transfer_import_routes(AppState& state, const fs::path& root, const std::string& export_body) {
+    assert_transfer_import_success(state, root, export_body);
+    assert_transfer_import_optional_defaults(state, root, export_body);
+    assert_transfer_import_header_validation(state, root, export_body);
+    assert_transfer_import_rejects_file_merge_into_directory(state, root, export_body);
+}
+
+static void assert_sandbox_denied(const HttpResponse& response) {
+    assert(response.status == 400);
+    assert(Json::parse(response.body).at("code").get<std::string>() == "sandbox_denied");
+}
+
+static void assert_sandbox_export_and_path_info_denied(AppState& sandbox_state, const fs::path& outside) {
+    const HttpResponse sandbox_export_denied = route_request(
+        sandbox_state, json_request("/v1/transfer/export", Json{{"path", (outside / "outside.txt").string()}}));
+    assert_sandbox_denied(sandbox_export_denied);
+
+    const HttpResponse sandbox_path_info_denied = route_request(
+        sandbox_state, json_request("/v1/transfer/path-info", Json{{"path", (outside / "dest.txt").string()}}));
+    assert_sandbox_denied(sandbox_path_info_denied);
+}
+
+static std::string assert_sandbox_export_allowed(AppState& sandbox_state, const fs::path& read_allowed) {
+    const HttpResponse sandbox_export_allowed = route_request(
+        sandbox_state, json_request("/v1/transfer/export", Json{{"path", (read_allowed / "source.txt").string()}}));
+    assert(sandbox_export_allowed.status == 200);
+    return sandbox_export_allowed.body;
+}
+
+static void assert_sandbox_import_denied(AppState& sandbox_state,
+                                         const fs::path& outside,
+                                         const std::string& export_body) {
+    HttpRequest sandbox_import_denied_request;
+    sandbox_import_denied_request.method = "POST";
+    sandbox_import_denied_request.path = "/v1/transfer/import";
+    sandbox_import_denied_request.headers["x-remote-exec-source-type"] = "file";
+    sandbox_import_denied_request.headers["x-remote-exec-destination-path"] = (outside / "dest.txt").string();
+    sandbox_import_denied_request.headers["x-remote-exec-overwrite"] = "replace";
+    sandbox_import_denied_request.headers["x-remote-exec-create-parent"] = "true";
+    sandbox_import_denied_request.headers["x-remote-exec-symlink-mode"] = "preserve";
+    sandbox_import_denied_request.headers["x-remote-exec-compression"] = "none";
+    sandbox_import_denied_request.body = export_body;
+    const HttpResponse sandbox_import_denied = route_request(sandbox_state, sandbox_import_denied_request);
+    assert_sandbox_denied(sandbox_import_denied);
+}
+
+#ifndef _WIN32
+static void assert_sandbox_symlink_target_denied(AppState& sandbox_state, const fs::path& write_allowed) {
+    std::string denied_symlink_archive;
+    append_tar_directory(&denied_symlink_archive, ".");
+    append_tar_symlink(&denied_symlink_archive, "allowed-link", "denied-link-target/secret.txt");
+    finalize_tar(&denied_symlink_archive);
+
+    HttpRequest sandbox_symlink_target_denied_request;
+    sandbox_symlink_target_denied_request.method = "POST";
+    sandbox_symlink_target_denied_request.path = "/v1/transfer/import";
+    sandbox_symlink_target_denied_request.headers["x-remote-exec-source-type"] = "directory";
+    sandbox_symlink_target_denied_request.headers["x-remote-exec-destination-path"] = write_allowed.string();
+    sandbox_symlink_target_denied_request.headers["x-remote-exec-overwrite"] = "merge";
+    sandbox_symlink_target_denied_request.headers["x-remote-exec-create-parent"] = "true";
+    sandbox_symlink_target_denied_request.headers["x-remote-exec-symlink-mode"] = "preserve";
+    sandbox_symlink_target_denied_request.headers["x-remote-exec-compression"] = "none";
+    sandbox_symlink_target_denied_request.body = denied_symlink_archive;
+    const HttpResponse sandbox_symlink_target_denied =
+        route_request(sandbox_state, sandbox_symlink_target_denied_request);
+    assert_sandbox_denied(sandbox_symlink_target_denied);
+    assert(!fs::exists(write_allowed / "allowed-link"));
+}
+#endif
+
+static void assert_sandbox_patch_denied(AppState& sandbox_state, const fs::path& outside, const fs::path& write_allowed) {
+    const std::string patch_denied_text = "*** Begin Patch\n"
+                                          "*** Add File: " +
+                                          (outside / "patched.txt").string() +
+                                          "\n"
+                                          "+denied\n"
+                                          "*** End Patch\n";
+    const HttpResponse sandbox_patch_denied = route_request(
+        sandbox_state,
+        json_request("/v1/patch/apply", Json{{"workdir", write_allowed.string()}, {"patch", patch_denied_text}}));
+    assert_sandbox_denied(sandbox_patch_denied);
+    assert(!fs::exists(outside / "patched.txt"));
+}
+
+static void assert_sandbox_exec_denied(AppState& sandbox_state, const fs::path& outside) {
+    const HttpResponse sandbox_exec_denied = route_request(sandbox_state,
+                                                           json_request("/v1/exec/start",
+                                                                        Json{
+                                                                            {"cmd", "printf denied"},
+                                                                            {"workdir", outside.string()},
+                                                                            {"login", false},
+                                                                            {"tty", false},
+                                                                            {"yield_time_ms", 250},
+                                                                        }));
+    assert_sandbox_denied(sandbox_exec_denied);
 }
 
 static void assert_sandbox_routes(const fs::path& root) {
@@ -481,81 +590,16 @@ static void assert_sandbox_routes(const fs::path& root) {
     sandbox_state.config.sandbox.write.deny.push_back(denied_link_target_root.string());
     enable_sandbox(sandbox_state);
 
-    const HttpResponse sandbox_export_denied = route_request(
-        sandbox_state, json_request("/v1/transfer/export", Json{{"path", (outside / "outside.txt").string()}}));
-    assert(sandbox_export_denied.status == 400);
-    assert(Json::parse(sandbox_export_denied.body).at("code").get<std::string>() == "sandbox_denied");
-
-    const HttpResponse sandbox_path_info_denied = route_request(
-        sandbox_state, json_request("/v1/transfer/path-info", Json{{"path", (outside / "dest.txt").string()}}));
-    assert(sandbox_path_info_denied.status == 400);
-    assert(Json::parse(sandbox_path_info_denied.body).at("code").get<std::string>() == "sandbox_denied");
-
-    const HttpResponse sandbox_export_allowed = route_request(
-        sandbox_state, json_request("/v1/transfer/export", Json{{"path", (read_allowed / "source.txt").string()}}));
-    assert(sandbox_export_allowed.status == 200);
-
-    HttpRequest sandbox_import_denied_request;
-    sandbox_import_denied_request.method = "POST";
-    sandbox_import_denied_request.path = "/v1/transfer/import";
-    sandbox_import_denied_request.headers["x-remote-exec-source-type"] = "file";
-    sandbox_import_denied_request.headers["x-remote-exec-destination-path"] = (outside / "dest.txt").string();
-    sandbox_import_denied_request.headers["x-remote-exec-overwrite"] = "replace";
-    sandbox_import_denied_request.headers["x-remote-exec-create-parent"] = "true";
-    sandbox_import_denied_request.headers["x-remote-exec-symlink-mode"] = "preserve";
-    sandbox_import_denied_request.headers["x-remote-exec-compression"] = "none";
-    sandbox_import_denied_request.body = sandbox_export_allowed.body;
-    const HttpResponse sandbox_import_denied = route_request(sandbox_state, sandbox_import_denied_request);
-    assert(sandbox_import_denied.status == 400);
-    assert(Json::parse(sandbox_import_denied.body).at("code").get<std::string>() == "sandbox_denied");
+    assert_sandbox_export_and_path_info_denied(sandbox_state, outside);
+    const std::string sandbox_export_body = assert_sandbox_export_allowed(sandbox_state, read_allowed);
+    assert_sandbox_import_denied(sandbox_state, outside, sandbox_export_body);
 
 #ifndef _WIN32
-    std::string denied_symlink_archive;
-    append_tar_directory(&denied_symlink_archive, ".");
-    append_tar_symlink(&denied_symlink_archive, "allowed-link", "denied-link-target/secret.txt");
-    finalize_tar(&denied_symlink_archive);
-
-    HttpRequest sandbox_symlink_target_denied_request;
-    sandbox_symlink_target_denied_request.method = "POST";
-    sandbox_symlink_target_denied_request.path = "/v1/transfer/import";
-    sandbox_symlink_target_denied_request.headers["x-remote-exec-source-type"] = "directory";
-    sandbox_symlink_target_denied_request.headers["x-remote-exec-destination-path"] = write_allowed.string();
-    sandbox_symlink_target_denied_request.headers["x-remote-exec-overwrite"] = "merge";
-    sandbox_symlink_target_denied_request.headers["x-remote-exec-create-parent"] = "true";
-    sandbox_symlink_target_denied_request.headers["x-remote-exec-symlink-mode"] = "preserve";
-    sandbox_symlink_target_denied_request.headers["x-remote-exec-compression"] = "none";
-    sandbox_symlink_target_denied_request.body = denied_symlink_archive;
-    const HttpResponse sandbox_symlink_target_denied =
-        route_request(sandbox_state, sandbox_symlink_target_denied_request);
-    assert(sandbox_symlink_target_denied.status == 400);
-    assert(Json::parse(sandbox_symlink_target_denied.body).at("code").get<std::string>() == "sandbox_denied");
-    assert(!fs::exists(write_allowed / "allowed-link"));
+    assert_sandbox_symlink_target_denied(sandbox_state, write_allowed);
 #endif
 
-    const std::string patch_denied_text = "*** Begin Patch\n"
-                                          "*** Add File: " +
-                                          (outside / "patched.txt").string() +
-                                          "\n"
-                                          "+denied\n"
-                                          "*** End Patch\n";
-    const HttpResponse sandbox_patch_denied = route_request(
-        sandbox_state,
-        json_request("/v1/patch/apply", Json{{"workdir", write_allowed.string()}, {"patch", patch_denied_text}}));
-    assert(sandbox_patch_denied.status == 400);
-    assert(Json::parse(sandbox_patch_denied.body).at("code").get<std::string>() == "sandbox_denied");
-    assert(!fs::exists(outside / "patched.txt"));
-
-    const HttpResponse sandbox_exec_denied = route_request(sandbox_state,
-                                                           json_request("/v1/exec/start",
-                                                                        Json{
-                                                                            {"cmd", "printf denied"},
-                                                                            {"workdir", outside.string()},
-                                                                            {"login", false},
-                                                                            {"tty", false},
-                                                                            {"yield_time_ms", 250},
-                                                                        }));
-    assert(sandbox_exec_denied.status == 400);
-    assert(Json::parse(sandbox_exec_denied.body).at("code").get<std::string>() == "sandbox_denied");
+    assert_sandbox_patch_denied(sandbox_state, outside, write_allowed);
+    assert_sandbox_exec_denied(sandbox_state, outside);
 }
 
 void run_platform_neutral_server_route_tests(AppState& state, const fs::path& root) {
