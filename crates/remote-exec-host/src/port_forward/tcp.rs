@@ -34,72 +34,86 @@ use super::{
 const TCP_CONTROL_SEND_TIMEOUT: Duration = Duration::from_secs(1);
 type TcpStreamMap = tokio::sync::Mutex<std::collections::HashMap<u32, TcpStreamEntry>>;
 
-enum TcpReadLoopTarget {
-    Connect(ConnectContext),
-    Listen(ListenContext),
+trait TcpReadLoopContext {
+    fn tx(&self) -> &super::TunnelSender;
+    fn generation(&self) -> u64;
+    fn tcp_streams(&self) -> &TcpStreamMap;
 }
 
-impl TcpReadLoopTarget {
+impl TcpReadLoopContext for ConnectContext {
     fn tx(&self) -> &super::TunnelSender {
-        match self {
-            Self::Connect(context) => context.tx(),
-            Self::Listen(context) => context.tx(),
-        }
+        ConnectContext::tx(self)
     }
 
     fn generation(&self) -> u64 {
-        match self {
-            Self::Connect(context) => context.generation(),
-            Self::Listen(context) => context.generation(),
-        }
+        ConnectContext::generation(self)
     }
 
     fn tcp_streams(&self) -> &TcpStreamMap {
-        match self {
-            Self::Connect(context) => context.tcp_streams(),
-            Self::Listen(context) => context.tcp_streams(),
-        }
+        ConnectContext::tcp_streams(self)
+    }
+}
+
+impl TcpReadLoopContext for ListenContext {
+    fn tx(&self) -> &super::TunnelSender {
+        ListenContext::tx(self)
     }
 
-    async fn send_frame(&self, frame: Frame) -> Result<(), HostRpcError> {
-        self.tx().send(frame).await
+    fn generation(&self) -> u64 {
+        ListenContext::generation(self)
     }
 
-    async fn send_error_code(&self, stream_id: u32, code: String, message: String) {
-        let _ = send_tunnel_error_code(
-            self.tx(),
-            Some(self.generation()),
-            stream_id,
-            code,
-            message,
-            false,
-        )
-        .await;
+    fn tcp_streams(&self) -> &TcpStreamMap {
+        ListenContext::tcp_streams(self)
     }
+}
 
-    async fn send_read_failed(&self, stream_id: u32, message: String) {
-        let _ = send_tunnel_error(
-            self.tx(),
-            Some(self.generation()),
-            stream_id,
-            RpcErrorCode::PortReadFailed,
-            message,
-            false,
-        )
-        .await;
-    }
+async fn send_tcp_read_frame<T: TcpReadLoopContext>(
+    target: &T,
+    frame: Frame,
+) -> Result<(), HostRpcError> {
+    target.tx().send(frame).await
+}
 
-    async fn cleanup_stream(&self, stream_id: u32) {
-        cleanup_tcp_stream(self.tcp_streams(), stream_id).await;
-    }
+async fn send_tcp_read_error_code<T: TcpReadLoopContext>(
+    target: &T,
+    stream_id: u32,
+    code: String,
+    message: String,
+) {
+    let _ = send_tunnel_error_code(
+        target.tx(),
+        Some(target.generation()),
+        stream_id,
+        code,
+        message,
+        false,
+    )
+    .await;
+}
 
-    async fn cancel_stream(&self, stream_id: u32) {
-        cancel_tcp_stream(self.tcp_streams(), stream_id).await;
-    }
+async fn send_tcp_read_failed<T: TcpReadLoopContext>(target: &T, stream_id: u32, message: String) {
+    let _ = send_tunnel_error(
+        target.tx(),
+        Some(target.generation()),
+        stream_id,
+        RpcErrorCode::PortReadFailed,
+        message,
+        false,
+    )
+    .await;
+}
 
-    async fn clear_cancel(&self, stream_id: u32) {
-        clear_tcp_cancel(self.tcp_streams(), stream_id).await;
-    }
+async fn cleanup_tcp_read_stream<T: TcpReadLoopContext>(target: &T, stream_id: u32) {
+    cleanup_tcp_stream(target.tcp_streams(), stream_id).await;
+}
+
+async fn cancel_tcp_read_stream<T: TcpReadLoopContext>(target: &T, stream_id: u32) {
+    cancel_tcp_stream(target.tcp_streams(), stream_id).await;
+}
+
+async fn clear_tcp_read_cancel<T: TcpReadLoopContext>(target: &T, stream_id: u32) {
+    clear_tcp_cancel(target.tcp_streams(), stream_id).await;
 }
 
 fn spawn_tcp_writer_task(writer: OwnedWriteHalf, cancel: CancellationToken) -> TcpWriterHandle {
@@ -320,13 +334,7 @@ pub(super) async fn tunnel_tcp_read_loop_connection_local(
     mut reader: OwnedReadHalf,
     cancel: CancellationToken,
 ) {
-    tunnel_tcp_read_loop(
-        TcpReadLoopTarget::Connect(connect),
-        stream_id,
-        &mut reader,
-        cancel,
-    )
-    .await;
+    tunnel_tcp_read_loop(connect, stream_id, &mut reader, cancel).await;
 }
 
 pub(super) async fn tunnel_tcp_read_loop_attached_session(
@@ -337,7 +345,7 @@ pub(super) async fn tunnel_tcp_read_loop_attached_session(
     cancel: CancellationToken,
 ) {
     tunnel_tcp_read_loop(
-        TcpReadLoopTarget::Listen(ListenContext::new(session, attachment)),
+        ListenContext::new(session, attachment),
         stream_id,
         &mut reader,
         cancel,
@@ -345,8 +353,8 @@ pub(super) async fn tunnel_tcp_read_loop_attached_session(
     .await;
 }
 
-async fn tunnel_tcp_read_loop(
-    target: TcpReadLoopTarget,
+async fn tunnel_tcp_read_loop<T: TcpReadLoopContext>(
+    target: T,
     stream_id: u32,
     reader: &mut OwnedReadHalf,
     cancel: CancellationToken,
@@ -355,38 +363,33 @@ async fn tunnel_tcp_read_loop(
     loop {
         let read = tokio::select! {
             _ = cancel.cancelled() => {
-                target.cleanup_stream(stream_id).await;
+                cleanup_tcp_read_stream(&target, stream_id).await;
                 return;
             }
             read = reader.read(&mut buf) => read,
         };
         match read {
             Ok(0) => {
-                let _ = target
-                    .send_frame(empty_frame(FrameType::TcpEof, stream_id))
-                    .await;
-                target.clear_cancel(stream_id).await;
+                let _ = send_tcp_read_frame(&target, empty_frame(FrameType::TcpEof, stream_id)).await;
+                clear_tcp_read_cancel(&target, stream_id).await;
                 return;
             }
             Ok(read) => {
-                if let Err(err) = target
-                    .send_frame(data_frame(
-                        FrameType::TcpData,
-                        stream_id,
-                        buf[..read].to_vec(),
-                    ))
-                    .await
+                if let Err(err) = send_tcp_read_frame(
+                    &target,
+                    data_frame(FrameType::TcpData, stream_id, buf[..read].to_vec()),
+                )
+                .await
                 {
-                    target
-                        .send_error_code(stream_id, err.code.to_string(), err.message)
+                    send_tcp_read_error_code(&target, stream_id, err.code.to_string(), err.message)
                         .await;
-                    target.cancel_stream(stream_id).await;
+                    cancel_tcp_read_stream(&target, stream_id).await;
                     return;
                 }
             }
             Err(err) => {
-                target.send_read_failed(stream_id, err.to_string()).await;
-                target.cancel_stream(stream_id).await;
+                send_tcp_read_failed(&target, stream_id, err.to_string()).await;
+                cancel_tcp_read_stream(&target, stream_id).await;
                 return;
             }
         }

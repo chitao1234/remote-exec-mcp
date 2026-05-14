@@ -15,20 +15,6 @@ use super::exec_intercept::maybe_intercept_apply_patch;
 use crate::daemon_client::RpcToolErrorMode;
 use crate::mcp_server::ToolCallOutput;
 
-#[derive(Debug, thiserror::Error)]
-#[error("{tool} failed: {source}")]
-struct ToolOperationError {
-    tool: &'static str,
-    #[source]
-    source: anyhow::Error,
-}
-
-impl ToolOperationError {
-    fn new(tool: &'static str, source: anyhow::Error) -> Self {
-        Self { tool, source }
-    }
-}
-
 struct WriteStdinCompletion {
     output: ToolCallOutput,
     running: bool,
@@ -62,7 +48,16 @@ pub async fn exec_command(
         return Ok(output);
     }
 
-    let response = match forward_exec_start(target, &input.target, &input).await {
+    let request = ExecStartRequest {
+        cmd: input.cmd.clone(),
+        workdir: input.workdir.clone(),
+        shell: input.shell.clone(),
+        tty: input.tty,
+        yield_time_ms: input.yield_time_ms,
+        max_output_tokens: input.max_output_tokens,
+        login: input.login,
+    };
+    let response = match target.exec_start_checked(&input.target, &request).await {
         Ok(response) => response,
         Err(err) => {
             tracing::warn!(
@@ -143,7 +138,7 @@ pub async fn write_stdin(
                 error = %err,
                 "broker tool failed"
             );
-            Err(ToolOperationError::new("write_stdin", err).into())
+            Err(anyhow::anyhow!("write_stdin failed: {err}"))
         }
     }
 }
@@ -194,7 +189,7 @@ async fn maybe_intercepted_exec_output(
         return Ok(None);
     };
 
-    let warnings = vec![apply_patch_warning()];
+    let warnings = vec![ExecWarning::apply_patch_via_exec_command()];
     let output = crate::tools::patch::forward_patch(
         state,
         &input.target,
@@ -235,28 +230,6 @@ async fn maybe_intercepted_exec_output(
             warnings,
         })?,
     )))
-}
-
-fn exec_start_request(input: &ExecCommandInput) -> ExecStartRequest {
-    ExecStartRequest {
-        cmd: input.cmd.clone(),
-        workdir: input.workdir.clone(),
-        shell: input.shell.clone(),
-        tty: input.tty,
-        yield_time_ms: input.yield_time_ms,
-        max_output_tokens: input.max_output_tokens,
-        login: input.login,
-    }
-}
-
-async fn forward_exec_start(
-    target: &crate::TargetHandle,
-    target_name: &str,
-    input: &ExecCommandInput,
-) -> anyhow::Result<ExecResponse> {
-    target
-        .exec_start_checked(target_name, &exec_start_request(input))
-        .await
 }
 
 async fn register_public_session(
@@ -445,8 +418,4 @@ async fn target_path_policy(target: &crate::TargetHandle) -> anyhow::Result<Path
     } else {
         linux_path_policy()
     })
-}
-
-fn apply_patch_warning() -> ExecWarning {
-    ExecWarning::apply_patch_via_exec_command()
 }
