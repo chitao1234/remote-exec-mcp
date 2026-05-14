@@ -1,3 +1,4 @@
+use std::io::Cursor;
 use remote_exec_pki::{
     DaemonCertSpec, DevInitSpec, build_dev_init_bundle_from_ca, generate_ca, load_ca_from_pem,
 };
@@ -5,6 +6,29 @@ use remote_exec_pki::{
 fn assert_pem_pair(cert_pem: &str, key_pem: &str) {
     assert!(cert_pem.contains("BEGIN CERTIFICATE"));
     assert!(key_pem.contains("BEGIN PRIVATE KEY"));
+}
+
+fn basic_constraints(cert_pem: &str) -> Option<(bool, Option<u32>)> {
+    let mut reader = Cursor::new(cert_pem.as_bytes());
+    let cert = rustls_pemfile::certs(&mut reader)
+        .next()
+        .transpose()
+        .expect("read certificate PEM")
+        .expect("missing certificate PEM block");
+    let (_, parsed) =
+        x509_parser::parse_x509_certificate(cert.as_ref()).expect("parse certificate DER");
+    parsed
+        .basic_constraints()
+        .expect("read basic constraints")
+        .map(|extension| (extension.value.ca, extension.value.path_len_constraint))
+}
+
+fn assert_leaf_certificate(cert_pem: &str) {
+    let constraints = basic_constraints(cert_pem);
+    assert!(
+        !matches!(constraints, Some((true, _))),
+        "leaf certificate unexpectedly marked as CA: {constraints:?}"
+    );
 }
 
 #[test]
@@ -54,6 +78,9 @@ fn loaded_ca_can_issue_broker_and_daemon_leaf_certificates() {
         .issue_daemon_cert(&DaemonCertSpec::localhost("builder-a"))
         .expect("daemon cert");
 
+    assert_eq!(basic_constraints(ca.cert_pem()), Some((true, Some(0))));
     assert_pem_pair(&broker.cert_pem, broker.key_pem.as_str());
     assert_pem_pair(&daemon.cert_pem, daemon.key_pem.as_str());
+    assert_leaf_certificate(&broker.cert_pem);
+    assert_leaf_certificate(&daemon.cert_pem);
 }

@@ -113,7 +113,7 @@ pub fn generate_ca(common_name: &str) -> anyhow::Result<CertificateAuthority> {
     params
         .distinguished_name
         .push(DnType::CommonName, common_name);
-    params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
 
     let key = KeyPair::generate()?;
     let cert = params.self_signed(&key)?;
