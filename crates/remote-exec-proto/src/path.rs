@@ -1,7 +1,5 @@
 use std::path::{Component, Path, PathBuf};
 
-use caseless::default_case_fold_str;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathStyle {
     Posix,
@@ -9,28 +7,19 @@ pub enum PathStyle {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PathComparison {
-    CaseSensitive,
-    CaseInsensitive,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PathPolicy {
     pub style: PathStyle,
-    pub comparison: PathComparison,
 }
 
 pub fn linux_path_policy() -> PathPolicy {
     PathPolicy {
         style: PathStyle::Posix,
-        comparison: PathComparison::CaseSensitive,
     }
 }
 
 pub fn windows_path_policy() -> PathPolicy {
     PathPolicy {
         style: PathStyle::Windows,
-        comparison: PathComparison::CaseInsensitive,
     }
 }
 
@@ -109,26 +98,6 @@ fn normalize_windows_separators(raw: &str) -> String {
     let normalized_prefix = normalize_windows_path_chars(prefix);
     let normalized_rest = normalize_windows_path_chars(rest);
     format!("{normalized_prefix}{normalized_rest}")
-}
-
-fn comparison_text_key(comparison: PathComparison, raw: &str) -> String {
-    match comparison {
-        PathComparison::CaseSensitive => raw.to_string(),
-        PathComparison::CaseInsensitive => default_case_fold_str(raw),
-    }
-}
-
-pub fn comparison_key_for_policy(policy: PathPolicy, raw: &str) -> String {
-    let normalized = match policy.style {
-        PathStyle::Posix => raw.to_string(),
-        PathStyle::Windows => normalize_for_system(policy, raw),
-    };
-
-    comparison_text_key(policy.comparison, &normalized)
-}
-
-pub fn path_text_eq(policy: PathPolicy, left: &str, right: &str) -> bool {
-    comparison_text_key(policy.comparison, left) == comparison_text_key(policy.comparison, right)
 }
 
 pub fn is_absolute_for_policy(policy: PathPolicy, raw: &str) -> bool {
@@ -212,10 +181,6 @@ pub fn join_for_policy(policy: PathPolicy, base: &str, child: &str) -> String {
     } else {
         format!("{normalized_base}{separator}{normalized_child}")
     }
-}
-
-pub fn same_path_for_policy(policy: PathPolicy, left: &str, right: &str) -> bool {
-    comparison_key_for_policy(policy, left) == comparison_key_for_policy(policy, right)
 }
 
 pub fn normalize_relative_path(path: &Path) -> Option<PathBuf> {
