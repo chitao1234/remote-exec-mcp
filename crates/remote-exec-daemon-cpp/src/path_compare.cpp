@@ -78,7 +78,7 @@ std::wstring wide_from_utf8(const std::string& value) {
     }
 
     const int wide_length =
-        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), NULL, 0);
+        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0);
     if (wide_length <= 0) {
         throw std::runtime_error("unable to decode UTF-8 path");
     }
@@ -93,11 +93,11 @@ std::wstring wide_from_utf8(const std::string& value) {
 }
 
 CompareStringOrdinalFn compare_string_ordinal_fn() {
-    static CompareStringOrdinalFn fn = NULL;
+    static CompareStringOrdinalFn fn = nullptr;
     static bool initialized = false;
     if (!initialized) {
         HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
-        if (kernel32 != NULL) {
+        if (kernel32 != nullptr) {
             fn = reinterpret_cast<CompareStringOrdinalFn>(GetProcAddress(kernel32, "CompareStringOrdinal"));
         }
         initialized = true;
@@ -126,20 +126,20 @@ bool component_equal(const std::string& left, const std::string& right) {
         const std::wstring left_wide = wide_from_utf8(left);
         const std::wstring right_wide = wide_from_utf8(right);
         const CompareStringOrdinalFn ordinal = compare_string_ordinal_fn();
-        if (ordinal != NULL) {
+        if (ordinal != nullptr) {
             return ordinal(
-                       left_wide.empty() ? NULL : left_wide.data(),
+                       left_wide.empty() ? nullptr : left_wide.data(),
                        static_cast<int>(left_wide.size()),
-                       right_wide.empty() ? NULL : right_wide.data(),
+                       right_wide.empty() ? nullptr : right_wide.data(),
                        static_cast<int>(right_wide.size()),
                        TRUE) == CSTR_EQUAL;
         }
         return CompareStringW(
                    LOCALE_INVARIANT,
                    NORM_IGNORECASE,
-                   left_wide.empty() ? NULL : left_wide.data(),
+                   left_wide.empty() ? nullptr : left_wide.data(),
                    static_cast<int>(left_wide.size()),
-                   right_wide.empty() ? NULL : right_wide.data(),
+                   right_wide.empty() ? nullptr : right_wide.data(),
                    static_cast<int>(right_wide.size())) == CSTR_EQUAL;
     } catch (const std::exception&) {
         return ascii_case_equal(left, right);

@@ -19,7 +19,7 @@ std::string utf8_from_wide(const std::wstring& wide) {
     }
 
     const int utf8_length =
-        WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), NULL, 0, NULL, NULL);
+        WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), nullptr, 0, nullptr, nullptr);
     if (utf8_length <= 0) {
         throw std::runtime_error(last_error_message("WideCharToMultiByte(CP_UTF8)"));
     }
@@ -27,7 +27,7 @@ std::string utf8_from_wide(const std::wstring& wide) {
     std::string utf8;
     utf8.resize(static_cast<std::size_t>(utf8_length));
     if (WideCharToMultiByte(
-            CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), &utf8[0], utf8_length, NULL, NULL) <= 0) {
+            CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), &utf8[0], utf8_length, nullptr, nullptr) <= 0) {
         throw std::runtime_error(last_error_message("WideCharToMultiByte(CP_UTF8)"));
     }
     return utf8;
@@ -38,7 +38,7 @@ std::string utf8_from_code_page(UINT code_page, const std::string& raw) {
         return "";
     }
 
-    const int wide_length = MultiByteToWideChar(code_page, 0, raw.data(), static_cast<int>(raw.size()), NULL, 0);
+    const int wide_length = MultiByteToWideChar(code_page, 0, raw.data(), static_cast<int>(raw.size()), nullptr, 0);
     if (wide_length <= 0) {
         throw std::runtime_error(last_error_message("MultiByteToWideChar"));
     }
@@ -90,14 +90,14 @@ std::string decode_console_output(std::string* carry, const std::string& raw_chu
 
 std::string read_available_raw(HANDLE pipe) {
     DWORD available = 0;
-    if (PeekNamedPipe(pipe, NULL, 0, NULL, &available, NULL) == 0 || available == 0) {
+    if (PeekNamedPipe(pipe, nullptr, 0, nullptr, &available, nullptr) == 0 || available == 0) {
         return "";
     }
 
     std::string buffer;
     buffer.resize(available);
     DWORD read = 0;
-    if (ReadFile(pipe, &buffer[0], available, &read, NULL) == 0) {
+    if (ReadFile(pipe, &buffer[0], available, &read, nullptr) == 0) {
         return "";
     }
     buffer.resize(read);
@@ -107,7 +107,7 @@ std::string read_available_raw(HANDLE pipe) {
 std::string read_blocking_raw(HANDLE pipe, bool* eof) {
     char buffer[4096];
     DWORD read = 0;
-    if (ReadFile(pipe, buffer, sizeof(buffer), &read, NULL) == 0) {
+    if (ReadFile(pipe, buffer, sizeof(buffer), &read, nullptr) == 0) {
         const DWORD error = GetLastError();
         if (error == ERROR_BROKEN_PIPE || error == ERROR_NO_DATA || error == ERROR_PIPE_NOT_CONNECTED) {
             *eof = true;

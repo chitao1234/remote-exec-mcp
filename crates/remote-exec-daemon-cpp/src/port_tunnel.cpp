@@ -25,7 +25,7 @@ PortTunnelService::PortTunnelService(const PortForwardLimitConfig& limits)
       expiry_thread_started_(false)
 #ifdef _WIN32
       ,
-      expiry_thread_(NULL)
+      expiry_thread_(nullptr)
 #else
       ,
       expiry_thread_()
@@ -110,7 +110,7 @@ PortTunnelWorkerLease::PortTunnelWorkerLease(const std::shared_ptr<PortTunnelSer
 }
 
 PortTunnelWorkerLease::~PortTunnelWorkerLease() {
-    if (service_.get() != NULL) {
+    if (service_.get() != nullptr) {
         service_->release_worker();
     }
 }
@@ -165,7 +165,7 @@ void mark_tcp_stream_closed(const std::shared_ptr<TunnelTcpStream>& stream) {
             service_to_release = stream->service.lock();
         }
     }
-    if (service_to_release.get() != NULL) {
+    if (service_to_release.get() != nullptr) {
         service_to_release->release_active_tcp_stream();
     }
 }
@@ -182,7 +182,7 @@ void mark_udp_socket_closed(const std::shared_ptr<TunnelUdpSocket>& socket_value
             service_to_release = socket_value->service.lock();
         }
     }
-    if (service_to_release.get() != NULL) {
+    if (service_to_release.get() != nullptr) {
         service_to_release->release_udp_bind();
     }
 }
@@ -217,9 +217,9 @@ int wait_socket_readable(SOCKET socket, unsigned long timeout_ms) {
     timeout.tv_usec = static_cast<long>((timeout_ms % 1000UL) * 1000UL);
 
 #ifdef _WIN32
-    return select(0, &readfds, NULL, NULL, &timeout);
+    return select(0, &readfds, nullptr, nullptr, &timeout);
 #else
-    return select(socket + 1, &readfds, NULL, NULL, &timeout);
+    return select(socket + 1, &readfds, nullptr, nullptr, &timeout);
 #endif
 }
 
@@ -235,7 +235,7 @@ void mark_retained_listener_closed(const std::shared_ptr<RetainedTcpListener>& l
             service_to_release = listener->service.lock();
         }
     }
-    if (service_to_release.get() != NULL) {
+    if (service_to_release.get() != nullptr) {
         service_to_release->release_retained_listener();
     }
 }

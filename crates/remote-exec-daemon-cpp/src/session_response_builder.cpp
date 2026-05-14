@@ -36,7 +36,7 @@ Json build_session_response(const char* daemon_session_id,
                             const Json& warnings) {
     const std::string trimmed = render_output(output, max_output_tokens);
     const unsigned long original_token_count = approximate_output_token_count(output.size());
-    return Json{{"daemon_session_id", daemon_session_id != NULL ? Json(daemon_session_id) : Json(nullptr)},
+    return Json{{"daemon_session_id", daemon_session_id != nullptr ? Json(daemon_session_id) : Json(nullptr)},
                 {"running", running},
                 {"chunk_id", make_chunk_id()},
                 {"wall_time_seconds", wall_time_seconds(started_at_ms)},

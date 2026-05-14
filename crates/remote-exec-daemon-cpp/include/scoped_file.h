@@ -4,7 +4,7 @@
 
 class ScopedFile {
 public:
-    ScopedFile() : file_(NULL) {}
+    ScopedFile() : file_(nullptr) {}
     explicit ScopedFile(FILE* file) : file_(file) {}
 
     ~ScopedFile() {
@@ -28,26 +28,26 @@ public:
     }
 
     bool valid() const {
-        return file_ != NULL;
+        return file_ != nullptr;
     }
 
     FILE* release() {
         FILE* file = file_;
-        file_ = NULL;
+        file_ = nullptr;
         return file;
     }
 
     int close() {
-        if (file_ == NULL) {
+        if (file_ == nullptr) {
             return 0;
         }
         FILE* file = file_;
-        file_ = NULL;
+        file_ = nullptr;
         return std::fclose(file);
     }
 
-    void reset(FILE* file = NULL) {
-        if (file_ != NULL) {
+    void reset(FILE* file = nullptr) {
+        if (file_ != nullptr) {
             std::fclose(file_);
         }
         file_ = file;

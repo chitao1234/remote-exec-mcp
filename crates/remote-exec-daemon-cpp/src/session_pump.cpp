@@ -26,7 +26,7 @@ void append_session_output_locked(LiveSession* session, const std::string& chunk
 }
 
 bool terminate_descendants_after_exit_locked(LiveSession* session) {
-    if (session->process.get() != NULL) {
+    if (session->process.get() != nullptr) {
         return session->process->terminate_descendants();
     }
     return false;
@@ -55,7 +55,7 @@ void pump_session_output(const std::shared_ptr<LiveSession>& session) {
     for (;;) {
         {
             BasicLockGuard lock(session->mutex_);
-            if (session->closing || session->retired || session->process.get() == NULL) {
+            if (session->closing || session->retired || session->process.get() == nullptr) {
                 return;
             }
         }
@@ -141,7 +141,7 @@ void start_session_pump(const std::shared_ptr<LiveSession>& session) {
     std::unique_ptr<SessionPumpContext> context(new SessionPumpContext());
     context->session = session;
     HANDLE handle = begin_win32_thread(session_output_pump_entry, context.get());
-    if (handle == NULL) {
+    if (handle == nullptr) {
         throw std::runtime_error("_beginthreadex failed");
     }
     session->pump_thread_ = handle;
@@ -150,14 +150,14 @@ void start_session_pump(const std::shared_ptr<LiveSession>& session) {
 }
 
 void join_session_pump(LiveSession* session) {
-    HANDLE handle = NULL;
+    HANDLE handle = nullptr;
     {
         BasicLockGuard lock(session->mutex_);
         handle = session->pump_thread_;
-        session->pump_thread_ = NULL;
+        session->pump_thread_ = nullptr;
         session->pump_started = false;
     }
-    if (handle != NULL) {
+    if (handle != nullptr) {
         WaitForSingleObject(handle, INFINITE);
         CloseHandle(handle);
     }
@@ -179,7 +179,7 @@ void join_session_pump(LiveSession* session) {
         thread.swap(session->pump_thread_);
         session->pump_started = false;
     }
-    if (thread.get() != NULL) {
+    if (thread.get() != nullptr) {
         thread->join();
     }
 }

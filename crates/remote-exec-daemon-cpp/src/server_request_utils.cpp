@@ -10,7 +10,7 @@
 namespace {
 
 const CompiledFilesystemSandbox* active_sandbox(const AppState& state) {
-    return state.sandbox_enabled ? &state.sandbox : NULL;
+    return state.sandbox_enabled ? &state.sandbox : nullptr;
 }
 
 std::string resolve_path_from_base(const std::string& base, const std::string& raw) {

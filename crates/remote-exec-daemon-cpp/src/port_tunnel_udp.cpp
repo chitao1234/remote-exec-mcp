@@ -33,7 +33,7 @@ bool PortTunnelService::spawn_udp_bind_loop(const std::shared_ptr<PortTunnelSess
     context->stream_id = stream_id;
     context->socket_value = socket_value;
     HANDLE handle = begin_win32_thread(&ThreadEntry::entry, context.get());
-    if (handle != NULL) {
+    if (handle != nullptr) {
         context.release();
         CloseHandle(handle);
         return true;
@@ -65,11 +65,11 @@ void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& 
     std::vector<unsigned char> buffer(READ_BUF_SIZE);
     for (;;) {
         std::shared_ptr<PortTunnelSessionAttachment> attachment = wait_for_attachment(session);
-        if (attachment.get() == NULL) {
+        if (attachment.get() == nullptr) {
             return;
         }
         std::shared_ptr<PortTunnelConnection> connection = attachment->connection.lock();
-        if (connection.get() == NULL) {
+        if (connection.get() == nullptr) {
             continue;
         }
 
@@ -189,7 +189,7 @@ void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
         connection_local_streams_.insert_udp(frame.stream_id, socket_value);
         if (!spawn_udp_read_thread(service_, shared_from_this(), frame.stream_id, socket_value, true)) {
             std::shared_ptr<TunnelUdpSocket> removed_socket = connection_local_streams_.remove_udp(frame.stream_id);
-            if (removed_socket.get() != NULL) {
+            if (removed_socket.get() != nullptr) {
                 mark_udp_socket_closed(removed_socket);
             } else {
                 mark_udp_socket_closed(socket_value);
@@ -249,12 +249,12 @@ void PortTunnelConnection::udp_datagram(const PortTunnelFrame& frame) {
     if (session_mode_active()) {
         std::shared_ptr<PortTunnelSession> session = current_session();
         socket_value = service_->session_udp_bind(session, frame.stream_id);
-        if (socket_value.get() == NULL) {
+        if (socket_value.get() == nullptr) {
             throw PortForwardError(400, "unknown_port_bind", "unknown tunnel udp stream");
         }
     } else {
         socket_value = connection_local_streams_.get_udp(frame.stream_id);
-        if (socket_value.get() == NULL) {
+        if (socket_value.get() == nullptr) {
             throw PortForwardError(400, "unknown_port_bind", "unknown tunnel udp stream");
         }
     }

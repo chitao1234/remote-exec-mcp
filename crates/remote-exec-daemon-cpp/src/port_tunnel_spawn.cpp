@@ -52,7 +52,7 @@ bool spawn_worker_thread(const char* operation,
     context->service = service;
     context->work = work;
     HANDLE handle = begin_win32_thread(worker_thread_entry, context.get());
-    if (handle != NULL) {
+    if (handle != nullptr) {
         context.release();
         CloseHandle(handle);
         return true;
@@ -112,7 +112,7 @@ bool spawn_tcp_read_thread(const std::shared_ptr<PortTunnelService>& service,
     }
 #endif
     return spawn_worker_thread("spawn tcp read thread", service, worker_acquired, [tunnel, stream_id, stream, start_gate]() {
-        if (start_gate.get() != NULL) {
+        if (start_gate.get() != nullptr) {
             start_gate->wait();
         }
         tunnel->tcp_read_loop(stream_id, stream);

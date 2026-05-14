@@ -67,7 +67,7 @@ bool probe_unix_shell(const std::string& shell) {
         return false;
     }
     if (pid == 0) {
-        execl(shell.c_str(), shell.c_str(), "-c", "exit 0", static_cast<char*>(NULL));
+        execl(shell.c_str(), shell.c_str(), "-c", "exit 0", static_cast<char*>(nullptr));
         _exit(127);
     }
 
@@ -82,7 +82,7 @@ bool probe_unix_shell(const std::string& shell) {
 
 std::string find_command_on_path(const std::string& command) {
     const char* path_env = std::getenv("PATH");
-    if (path_env == NULL || command.empty()) {
+    if (path_env == nullptr || command.empty()) {
         return "";
     }
 
@@ -118,7 +118,7 @@ std::string validate_unix_shell_candidate(const std::string& shell) {
 
 std::string passwd_shell() {
     struct passwd* entry = getpwuid(geteuid());
-    if (entry == NULL || entry->pw_shell == NULL || entry->pw_shell[0] == '\0') {
+    if (entry == nullptr || entry->pw_shell == nullptr || entry->pw_shell[0] == '\0') {
         return "";
     }
     return entry->pw_shell;
@@ -147,7 +147,7 @@ std::string resolve_default_shell(const std::string& configured_default_shell) {
         return configured_default_shell;
     }
     const char* comspec = std::getenv("COMSPEC");
-    if (comspec != NULL && comspec[0] != '\0' && shell_supported(comspec)) {
+    if (comspec != nullptr && comspec[0] != '\0' && shell_supported(comspec)) {
         return comspec;
     }
     return "cmd.exe";
@@ -163,15 +163,15 @@ std::string resolve_default_shell(const std::string& configured_default_shell) {
     const char* env_shell = std::getenv("SHELL");
     const char* candidates[] = {
         env_shell,
-        NULL,
+        nullptr,
         "bash",
         "/bin/sh",
     };
     const std::string passwd = passwd_shell();
-    candidates[1] = passwd.empty() ? NULL : passwd.c_str();
+    candidates[1] = passwd.empty() ? nullptr : passwd.c_str();
 
     for (std::size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
-        if (candidates[i] == NULL || candidates[i][0] == '\0') {
+        if (candidates[i] == nullptr || candidates[i][0] == '\0') {
             continue;
         }
         const std::string resolved = validate_unix_shell_candidate(candidates[i]);

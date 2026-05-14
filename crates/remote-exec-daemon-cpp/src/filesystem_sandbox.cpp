@@ -186,8 +186,8 @@ std::string canonicalize_posix_for_sandbox(const std::string& path) {
 
     for (;;) {
         errno = 0;
-        char* resolved = realpath(probe.c_str(), NULL);
-        if (resolved != NULL) {
+        char* resolved = realpath(probe.c_str(), nullptr);
+        if (resolved != nullptr) {
             std::string rebuilt(resolved);
             std::free(resolved);
             rebuilt = lexical_normalize_for_policy(policy, rebuilt);
@@ -277,7 +277,7 @@ void authorize_path(const CompiledFilesystemSandbox* sandbox, SandboxAccess acce
         throw SandboxError(std::string("path `") + path + "` is not absolute");
     }
 
-    if (sandbox == NULL) {
+    if (sandbox == nullptr) {
         return;
     }
 

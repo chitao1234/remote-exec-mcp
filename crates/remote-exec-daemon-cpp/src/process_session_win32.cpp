@@ -23,7 +23,7 @@ std::wstring wide_from_utf8(const std::string& value) {
     }
 
     const int wide_length =
-        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), NULL, 0);
+        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0);
     if (wide_length <= 0) {
         throw std::runtime_error(last_error_message("MultiByteToWideChar(CP_UTF8)"));
     }
@@ -95,11 +95,11 @@ struct PipePair {
 PipePair create_pipe_pair(const char* label) {
     SECURITY_ATTRIBUTES sa;
     sa.nLength = sizeof(sa);
-    sa.lpSecurityDescriptor = NULL;
+    sa.lpSecurityDescriptor = nullptr;
     sa.bInheritHandle = TRUE;
 
-    HANDLE read_end = NULL;
-    HANDLE write_end = NULL;
+    HANDLE read_end = nullptr;
+    HANDLE write_end = nullptr;
     if (CreatePipe(&read_end, &write_end, &sa, 0) == 0) {
         throw std::runtime_error(last_error_message(label));
     }
@@ -127,7 +127,7 @@ public:
         std::size_t remaining = chars.size();
         while (remaining > 0U) {
             DWORD written = 0;
-            if (WriteFile(stdin_write_.get(), data, static_cast<DWORD>(remaining), &written, NULL) == 0) {
+            if (WriteFile(stdin_write_.get(), data, static_cast<DWORD>(remaining), &written, nullptr) == 0) {
                 const DWORD error = GetLastError();
                 if (is_stdin_closed_error(error)) {
                     throw ProcessStdinClosedError(
@@ -213,14 +213,14 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     mutable_command_line.push_back(L'\0');
     const std::wstring wide_workdir = workdir.empty() ? std::wstring() : wide_from_utf8(workdir);
 
-    const BOOL created = CreateProcessW(NULL,
+    const BOOL created = CreateProcessW(nullptr,
                                         &mutable_command_line[0],
-                                        NULL,
-                                        NULL,
+                                        nullptr,
+                                        nullptr,
                                         TRUE,
                                         0,
-                                        NULL,
-                                        workdir.empty() ? NULL : wide_workdir.c_str(),
+                                        nullptr,
+                                        workdir.empty() ? nullptr : wide_workdir.c_str(),
                                         &startup_info,
                                         &process_info);
 

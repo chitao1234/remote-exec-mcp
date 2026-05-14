@@ -159,7 +159,7 @@ void retire_session(const std::shared_ptr<LiveSession>& session) {
     session->retired = true;
     session->closing = true;
     session->cond_.broadcast();
-    if (session->process.get() != NULL) {
+    if (session->process.get() != nullptr) {
         session->process->terminate();
     }
 }
@@ -173,7 +173,7 @@ LiveSession::LiveSession()
     : started_at_ms(0), last_touched_order(0), stdin_open(false), retired(false), closing(false), pump_started(false)
 #ifdef _WIN32
       ,
-      pump_thread_(NULL)
+      pump_thread_(nullptr)
 #endif
 {
 }
@@ -404,7 +404,7 @@ Json SessionStore::start_command(const std::string& target,
     if (poll_result.completed) {
         retire_session(session);
         join_session_pump(session.get());
-        Json response = build_session_response(NULL,
+        Json response = build_session_response(nullptr,
                                                false,
                                                session->started_at_ms,
                                                true,
@@ -491,7 +491,7 @@ Json SessionStore::write_stdin(const std::string& daemon_session_id,
         retire_session(session);
         erase_session_if_current(mutex_, sessions_, daemon_session_id, session);
         join_session_pump(session.get());
-        Json response = build_session_response(NULL,
+        Json response = build_session_response(nullptr,
                                                false,
                                                session->started_at_ms,
                                                true,

@@ -60,9 +60,9 @@ resolve_endpoint(const std::string& endpoint, const std::string& protocol, int f
     hints.ai_protocol = protocol_to_ipproto(protocol);
     hints.ai_flags = flags;
 
-    addrinfo* result = NULL;
+    addrinfo* result = nullptr;
     const int status = getaddrinfo(parsed.host.c_str(), parsed.port.c_str(), &hints, &result);
-    if (status != 0 || result == NULL) {
+    if (status != 0 || result == nullptr) {
         std::ostringstream message;
         message << "resolving endpoint `" << endpoint << "` failed";
 #ifdef _WIN32
@@ -111,9 +111,9 @@ bool wait_for_connect(SOCKET socket, unsigned long timeout_ms) {
     timeout.tv_usec = static_cast<long>((timeout_ms % 1000UL) * 1000UL);
 
 #ifdef _WIN32
-    const int selected = select(0, NULL, &writefds, NULL, &timeout);
+    const int selected = select(0, nullptr, &writefds, nullptr, &timeout);
 #else
-    const int selected = select(socket + 1, NULL, &writefds, NULL, &timeout);
+    const int selected = select(socket + 1, nullptr, &writefds, nullptr, &timeout);
 #endif
     if (selected < 0) {
         throw PortForwardError(400, "port_connect_failed", socket_error_message("select"));
@@ -188,7 +188,7 @@ SOCKET bind_port_forward_socket(const std::string& endpoint, const std::string& 
     addrinfo* result = resolve_endpoint(endpoint, protocol, AI_PASSIVE, "invalid_endpoint");
     SOCKET bound_socket = INVALID_SOCKET;
 
-    for (addrinfo* current = result; current != NULL; current = current->ai_next) {
+    for (addrinfo* current = result; current != nullptr; current = current->ai_next) {
         bound_socket = socket(current->ai_family, current->ai_socktype, current->ai_protocol);
         if (bound_socket == INVALID_SOCKET) {
             continue;
@@ -224,7 +224,7 @@ SOCKET connect_port_forward_socket(const std::string& endpoint, const std::strin
     addrinfo* result = resolve_endpoint(endpoint, protocol, 0, "invalid_endpoint");
     SOCKET connected_socket = INVALID_SOCKET;
 
-    for (addrinfo* current = result; current != NULL; current = current->ai_next) {
+    for (addrinfo* current = result; current != nullptr; current = current->ai_next) {
         connected_socket = socket(current->ai_family, current->ai_socktype, current->ai_protocol);
         if (connected_socket == INVALID_SOCKET) {
             continue;
@@ -277,7 +277,7 @@ sockaddr_storage parse_port_forward_peer(const std::string& peer, socklen_t* pee
     sockaddr_storage address;
     std::memset(&address, 0, sizeof(address));
     *peer_len = 0;
-    if (result != NULL) {
+    if (result != nullptr) {
         std::memcpy(&address, result->ai_addr, result->ai_addrlen);
         *peer_len = static_cast<socklen_t>(result->ai_addrlen);
     }

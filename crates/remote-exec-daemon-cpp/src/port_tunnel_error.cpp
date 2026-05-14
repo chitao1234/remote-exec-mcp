@@ -49,7 +49,7 @@ void PortTunnelConnection::send_forward_drop(uint32_t stream_id,
 
 void PortTunnelConnection::close_stream(uint32_t stream_id) {
     std::shared_ptr<TunnelTcpStream> tcp_stream = remove_active_tcp_stream(stream_id);
-    if (tcp_stream.get() != NULL) {
+    if (tcp_stream.get() != nullptr) {
         mark_tcp_stream_closed(tcp_stream);
     }
 
@@ -63,7 +63,7 @@ void PortTunnelConnection::close_stream(uint32_t stream_id) {
     }
 
     std::shared_ptr<TunnelUdpSocket> udp_socket = connection_local_streams_.remove_udp(stream_id);
-    if (udp_socket.get() != NULL) {
+    if (udp_socket.get() != nullptr) {
         mark_udp_socket_closed(udp_socket);
     }
     send_frame(make_empty_frame(PortTunnelFrameType::Close, stream_id));
@@ -77,9 +77,9 @@ void PortTunnelConnection::drop_tcp_stream(ConnectionLocalStreams* local_streams
                                            uint32_t stream_id,
                                            const std::shared_ptr<TunnelTcpStream>& fallback) {
     std::shared_ptr<TunnelTcpStream> removed_stream = local_streams->remove_tcp(stream_id);
-    if (removed_stream.get() != NULL) {
+    if (removed_stream.get() != nullptr) {
         mark_tcp_stream_closed(removed_stream);
-    } else if (fallback.get() != NULL) {
+    } else if (fallback.get() != nullptr) {
         mark_tcp_stream_closed(fallback);
     }
 }
@@ -108,7 +108,7 @@ bool PortTunnelConnection::send_tcp_success_after_io_threads_started(const PortT
 
 void PortTunnelConnection::close_current_session(PortTunnelCloseMode mode) {
     std::shared_ptr<PortTunnelSession> session = current_session();
-    if (session.get() != NULL) {
+    if (session.get() != nullptr) {
         if (mode == PortTunnelCloseMode::RetryableDetach) {
             service_->detach_session(session);
         } else if (mode == PortTunnelCloseMode::GracefulClose || mode == PortTunnelCloseMode::TerminalFailure) {
@@ -137,7 +137,7 @@ std::shared_ptr<PortTunnelSession> PortTunnelConnection::current_session() {
 
 std::shared_ptr<PortTunnelSessionAttachment> PortTunnelConnection::session_attachment_for(
     const std::shared_ptr<PortTunnelSession>& session) {
-    if (session.get() == NULL) {
+    if (session.get() == nullptr) {
         return std::shared_ptr<PortTunnelSessionAttachment>();
     }
     BasicLockGuard lock(session->mutex);
@@ -150,7 +150,7 @@ std::shared_ptr<PortTunnelSessionAttachment> PortTunnelConnection::current_sessi
 
 std::shared_ptr<TunnelTcpStream> PortTunnelConnection::get_active_tcp_stream(uint32_t stream_id) {
     std::shared_ptr<PortTunnelSessionAttachment> attachment = current_session_attachment();
-    if (attachment.get() != NULL) {
+    if (attachment.get() != nullptr) {
         return attachment->local_streams.get_tcp(stream_id);
     }
     return connection_local_streams_.get_tcp(stream_id);
@@ -158,7 +158,7 @@ std::shared_ptr<TunnelTcpStream> PortTunnelConnection::get_active_tcp_stream(uin
 
 std::shared_ptr<TunnelTcpStream> PortTunnelConnection::remove_active_tcp_stream(uint32_t stream_id) {
     std::shared_ptr<PortTunnelSessionAttachment> attachment = current_session_attachment();
-    if (attachment.get() != NULL) {
+    if (attachment.get() != nullptr) {
         return attachment->local_streams.remove_tcp(stream_id);
     }
     return connection_local_streams_.remove_tcp(stream_id);
@@ -177,7 +177,7 @@ void PortTunnelConnection::require_mode(PortTunnelMode mode, PortTunnelProtocol 
 }
 
 bool PortTunnelConnection::session_mode_active() {
-    return current_session().get() != NULL;
+    return current_session().get() != nullptr;
 }
 
 std::uint64_t PortTunnelConnection::current_generation() const {
@@ -199,13 +199,13 @@ void PortTunnelConnection::ensure_generation(std::uint64_t frame_generation) con
 }
 
 bool PortTunnelConnection::owns_attachment(const std::shared_ptr<PortTunnelSessionAttachment>& attachment) {
-    if (attachment.get() == NULL) {
+    if (attachment.get() == nullptr) {
         return false;
     }
     std::shared_ptr<PortTunnelSession> session;
     {
         BasicLockGuard lock(state_mutex_);
-        if (closed() || session_.get() == NULL) {
+        if (closed() || session_.get() == nullptr) {
             return false;
         }
         session = session_;

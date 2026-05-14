@@ -99,10 +99,10 @@ static LogLevel configured_level() {
 
     if (!initialized) {
         const char* raw = std::getenv("REMOTE_EXEC_LOG");
-        if (raw == NULL || raw[0] == '\0') {
+        if (raw == nullptr || raw[0] == '\0') {
             raw = std::getenv("RUST_LOG");
         }
-        if (raw != NULL && raw[0] != '\0') {
+        if (raw != nullptr && raw[0] != '\0') {
             level = parse_filter_value(raw);
         }
         initialized = true;
@@ -158,7 +158,7 @@ void log_message(LogLevel level, const std::string& component, const std::string
     const int millisecond = static_cast<int>(now.wMilliseconds);
 #else
     struct timeval tv;
-    gettimeofday(&tv, NULL);
+    gettimeofday(&tv, nullptr);
     struct tm local_time;
     localtime_r(&tv.tv_sec, &local_time);
     const int year = local_time.tm_year + 1900;

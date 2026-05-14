@@ -56,10 +56,10 @@ PortTunnelFrame make_tunnel_ready_frame(const PortForwardLimitConfig& limits,
                                         const unsigned long* resume_timeout_ms) {
     PortTunnelFrame ready = make_empty_frame(PortTunnelFrameType::TunnelReady, 0U);
     Json meta = {{"generation", generation}, {"limits", make_tunnel_ready_limits_json(limits)}};
-    if (session_id != NULL) {
+    if (session_id != nullptr) {
         meta["session_id"] = *session_id;
     }
-    if (resume_timeout_ms != NULL) {
+    if (resume_timeout_ms != nullptr) {
         meta["resume_timeout_ms"] = *resume_timeout_ms;
     }
     ready.meta = meta.dump();
@@ -247,7 +247,7 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
     }
     {
         BasicLockGuard lock(state_mutex_);
-        if (mode_ != PortTunnelMode::Unopened || session_.get() != NULL) {
+        if (mode_ != PortTunnelMode::Unopened || session_.get() != nullptr) {
             throw PortForwardError(400, "port_tunnel_already_attached", "port tunnel is already open");
         }
     }
@@ -271,7 +271,7 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
         if (meta.has_resume_session_id) {
             const std::string session_id = meta.resume_session_id;
             session = service_->find_session(session_id);
-            if (session.get() == NULL) {
+            if (session.get() == nullptr) {
                 throw PortForwardError(400, "unknown_port_tunnel_session", "unknown port tunnel session");
             }
 
@@ -281,7 +281,7 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
                 if (session->closed) {
                     throw PortForwardError(400, "unknown_port_tunnel_session", "unknown port tunnel session");
                 }
-                if (session->attachment.get() != NULL) {
+                if (session->attachment.get() != nullptr) {
                     throw PortForwardError(
                         400, "port_tunnel_already_attached", "port tunnel session is already attached");
                 }
@@ -323,7 +323,7 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
             protocol_ = tunnel_protocol;
         }
         const PortForwardLimitConfig& limits = service_->limits();
-        PortTunnelFrame ready = make_tunnel_ready_frame(limits, generation, NULL, NULL);
+        PortTunnelFrame ready = make_tunnel_ready_frame(limits, generation, nullptr, nullptr);
         send_frame(ready);
         return;
     }

@@ -47,7 +47,7 @@ bool PortTunnelSender::ensure_writer_started_locked() {
     std::unique_ptr<Context> context(new Context());
     context->sender = shared_from_this();
     HANDLE handle = begin_win32_thread(&ThreadEntry::entry, context.get());
-    if (handle == NULL) {
+    if (handle == nullptr) {
         closed_.store(true);
         writer_shutdown_ = true;
         drain_queued_frame_reservations_locked();

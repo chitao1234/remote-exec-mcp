@@ -120,7 +120,7 @@ void reaper_loop() {
         timeval timeout;
         timeout.tv_sec = 1;
         timeout.tv_usec = 0;
-        const int ready = select(g_signal_pipe_read + 1, &read_fds, NULL, NULL, &timeout);
+        const int ready = select(g_signal_pipe_read + 1, &read_fds, nullptr, nullptr, &timeout);
         if (ready > 0) {
             drain_signal_pipe();
         }
@@ -149,7 +149,7 @@ void install_posix_child_reaper() {
     action.sa_handler = sigchld_handler;
     sigemptyset(&action.sa_mask);
     action.sa_flags = SA_RESTART | SA_NOCLDSTOP;
-    if (sigaction(SIGCHLD, &action, NULL) != 0) {
+    if (sigaction(SIGCHLD, &action, nullptr) != 0) {
         throw std::runtime_error(std::string("sigaction(SIGCHLD) failed: ") + std::strerror(errno));
     }
 

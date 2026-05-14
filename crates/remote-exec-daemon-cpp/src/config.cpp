@@ -27,9 +27,9 @@ static unsigned long parse_unsigned_long(const std::string& raw, const std::stri
     }
 
     errno = 0;
-    char* end = NULL;
+    char* end = nullptr;
     const unsigned long value = std::strtoul(raw.c_str(), &end, 10);
-    if (errno == ERANGE || end == raw.c_str() || (end != NULL && *end != '\0')) {
+    if (errno == ERANGE || end == raw.c_str() || (end != nullptr && *end != '\0')) {
         throw std::runtime_error("invalid numeric value for " + key + ": " + raw);
     }
     return value;
@@ -50,9 +50,9 @@ static std::uint64_t parse_uint64(const std::string& raw, const std::string& key
     }
 
     errno = 0;
-    char* end = NULL;
+    char* end = nullptr;
     const unsigned long long value = std::strtoull(raw.c_str(), &end, 10);
-    if (errno == ERANGE || end == raw.c_str() || (end != NULL && *end != '\0')) {
+    if (errno == ERANGE || end == raw.c_str() || (end != nullptr && *end != '\0')) {
         throw std::runtime_error("invalid numeric value for " + key + ": " + raw);
     }
     return static_cast<std::uint64_t>(value);

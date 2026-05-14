@@ -419,13 +419,13 @@ SOCKET create_listener(const DaemonConfig& config) {
     hints.ai_protocol = IPPROTO_TCP;
     hints.ai_flags = AI_PASSIVE;
 
-    addrinfo* result = NULL;
+    addrinfo* result = nullptr;
     if (getaddrinfo(config.listen_host.c_str(), port_buffer, &hints, &result) != 0) {
         throw std::runtime_error("getaddrinfo failed");
     }
 
     SOCKET listener = INVALID_SOCKET;
-    for (addrinfo* current = result; current != NULL; current = current->ai_next) {
+    for (addrinfo* current = result; current != nullptr; current = current->ai_next) {
         listener = socket(current->ai_family, current->ai_socktype, current->ai_protocol);
         if (listener == INVALID_SOCKET) {
             continue;
@@ -456,5 +456,5 @@ SOCKET create_listener(const DaemonConfig& config) {
 }
 
 SOCKET accept_client(SOCKET listener) {
-    return accept(listener, NULL, NULL);
+    return accept(listener, nullptr, nullptr);
 }

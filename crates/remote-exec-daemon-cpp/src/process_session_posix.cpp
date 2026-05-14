@@ -157,7 +157,7 @@ PosixPtyPair create_posix_pty() {
     }
 
     char* slave_name = ptsname(master.get());
-    if (slave_name == NULL) {
+    if (slave_name == nullptr) {
         throw std::runtime_error(std::string("ptsname failed: ") + std::strerror(errno));
     }
 
@@ -288,7 +288,7 @@ struct ExecEnvironment {
         for (std::size_t i = 0; i < values.size(); ++i) {
             pointers.push_back(const_cast<char*>(values[i].c_str()));
         }
-        pointers.push_back(NULL);
+        pointers.push_back(nullptr);
     }
 };
 
@@ -311,7 +311,7 @@ void upsert_env_value(std::vector<std::string>* values, const std::string& assig
 
 ExecEnvironment build_exec_environment_values(bool tty) {
     ExecEnvironment env;
-    for (char** current = environ; current != NULL && *current != NULL; ++current) {
+    for (char** current = environ; current != nullptr && *current != nullptr; ++current) {
         env.values.push_back(*current);
     }
     upsert_env_value(&env.values, "LC_ALL=C.UTF-8");
@@ -372,7 +372,7 @@ std::vector<char*> build_exec_argv(const std::vector<std::string>& argv) {
     for (std::size_t i = 0; i < argv.size(); ++i) {
         exec_argv.push_back(const_cast<char*>(argv[i].c_str()));
     }
-    exec_argv.push_back(NULL);
+    exec_argv.push_back(nullptr);
     return exec_argv;
 }
 

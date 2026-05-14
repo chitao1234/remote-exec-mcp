@@ -7,7 +7,7 @@
 
 class UniqueHandle {
 public:
-    UniqueHandle() : handle_(NULL) {}
+    UniqueHandle() : handle_(nullptr) {}
     explicit UniqueHandle(HANDLE handle) : handle_(handle) {}
 
     ~UniqueHandle() { reset(); }
@@ -26,15 +26,15 @@ public:
 
     HANDLE get() const { return handle_; }
 
-    bool valid() const { return handle_ != NULL && handle_ != INVALID_HANDLE_VALUE; }
+    bool valid() const { return handle_ != nullptr && handle_ != INVALID_HANDLE_VALUE; }
 
     HANDLE release() {
         const HANDLE released = handle_;
-        handle_ = NULL;
+        handle_ = nullptr;
         return released;
     }
 
-    void reset(HANDLE handle = NULL) {
+    void reset(HANDLE handle = nullptr) {
         if (valid()) {
             CloseHandle(handle_);
         }

@@ -43,7 +43,7 @@ std::uint64_t monotonic_ms() {
     }
 #endif
     struct timeval tv;
-    gettimeofday(&tv, NULL);
+    gettimeofday(&tv, nullptr);
     return static_cast<std::uint64_t>(tv.tv_sec) * 1000ULL + static_cast<std::uint64_t>(tv.tv_usec / 1000L);
 #endif
 }

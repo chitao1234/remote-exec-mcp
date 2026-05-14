@@ -62,7 +62,7 @@ ServerRuntime::ServerRuntime(const DaemonConfig& config)
     : connections_(config.max_open_sessions), shutting_down_(false)
 #ifdef _WIN32
       ,
-      accept_thread_(NULL), maintenance_thread_(NULL)
+      accept_thread_(nullptr), maintenance_thread_(nullptr)
 #else
       ,
       accept_thread_(), maintenance_thread_()
@@ -88,9 +88,9 @@ void ServerRuntime::start_accept_loop() {
     {
         BasicLockGuard lock(mutex_);
 #ifdef _WIN32
-        if (accept_thread_ != NULL || maintenance_thread_ != NULL) {
+        if (accept_thread_ != nullptr || maintenance_thread_ != nullptr) {
 #else
-        if (accept_thread_.get() != NULL || maintenance_thread_.get() != NULL) {
+        if (accept_thread_.get() != nullptr || maintenance_thread_.get() != nullptr) {
 #endif
             throw std::runtime_error("server runtime accept loop already started");
         }
@@ -103,13 +103,13 @@ void ServerRuntime::start_accept_loop() {
 
 #ifdef _WIN32
     accept_thread_ = begin_win32_thread(&ServerRuntime::accept_thread_entry, this);
-    if (accept_thread_ == NULL) {
+    if (accept_thread_ == nullptr) {
         request_shutdown();
         join();
         throw std::runtime_error("_beginthreadex failed");
     }
     maintenance_thread_ = begin_win32_thread(&ServerRuntime::maintenance_thread_entry, this);
-    if (maintenance_thread_ == NULL) {
+    if (maintenance_thread_ == nullptr) {
         request_shutdown();
         join();
         throw std::runtime_error("_beginthreadex failed");
@@ -138,8 +138,8 @@ void ServerRuntime::request_shutdown() {
 
 void ServerRuntime::join() {
 #ifdef _WIN32
-    HANDLE accept_thread = NULL;
-    HANDLE maintenance_thread = NULL;
+    HANDLE accept_thread = nullptr;
+    HANDLE maintenance_thread = nullptr;
 #else
     std::unique_ptr<std::thread> accept_thread;
     std::unique_ptr<std::thread> maintenance_thread;
@@ -149,8 +149,8 @@ void ServerRuntime::join() {
 #ifdef _WIN32
         accept_thread = accept_thread_;
         maintenance_thread = maintenance_thread_;
-        accept_thread_ = NULL;
-        maintenance_thread_ = NULL;
+        accept_thread_ = nullptr;
+        maintenance_thread_ = nullptr;
 #else
         accept_thread.swap(accept_thread_);
         maintenance_thread.swap(maintenance_thread_);
@@ -158,19 +158,19 @@ void ServerRuntime::join() {
     }
 
 #ifdef _WIN32
-    if (accept_thread != NULL) {
+    if (accept_thread != nullptr) {
         WaitForSingleObject(accept_thread, INFINITE);
         CloseHandle(accept_thread);
     }
-    if (maintenance_thread != NULL) {
+    if (maintenance_thread != nullptr) {
         WaitForSingleObject(maintenance_thread, INFINITE);
         CloseHandle(maintenance_thread);
     }
 #else
-    if (accept_thread.get() != NULL) {
+    if (accept_thread.get() != nullptr) {
         accept_thread->join();
     }
-    if (maintenance_thread.get() != NULL) {
+    if (maintenance_thread.get() != nullptr) {
         maintenance_thread->join();
     }
 #endif

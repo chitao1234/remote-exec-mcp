@@ -23,7 +23,7 @@ namespace {
 
 std::wstring wide_mode_from_ascii(const char* mode) {
     std::wstring wide;
-    while (mode != NULL && *mode != '\0') {
+    while (mode != nullptr && *mode != '\0') {
         wide.push_back(static_cast<unsigned char>(*mode));
         ++mode;
     }
@@ -54,7 +54,7 @@ std::wstring wide_from_utf8(const std::string& value) {
     }
 
     const int wide_length =
-        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), NULL, 0);
+        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0);
     if (wide_length <= 0) {
         throw std::runtime_error("unable to decode UTF-8 path");
     }
@@ -74,14 +74,14 @@ std::string utf8_from_wide(const std::wstring& value) {
     }
 
     const int utf8_length =
-        WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), NULL, 0, NULL, NULL);
+        WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
     if (utf8_length <= 0) {
         throw std::runtime_error("unable to encode UTF-8 path");
     }
 
     std::string utf8(static_cast<std::size_t>(utf8_length), '\0');
     if (WideCharToMultiByte(
-            CP_UTF8, 0, value.data(), static_cast<int>(value.size()), &utf8[0], utf8_length, NULL, NULL) <= 0) {
+            CP_UTF8, 0, value.data(), static_cast<int>(value.size()), &utf8[0], utf8_length, nullptr, nullptr) <= 0) {
         throw std::runtime_error("unable to encode UTF-8 path");
     }
     return utf8;

@@ -8,7 +8,7 @@ BasicMutex::BasicMutex() {
 #ifdef _WIN32
     InitializeCriticalSection(&mutex_);
 #else
-    pthread_mutex_init(&mutex_, NULL);
+    pthread_mutex_init(&mutex_, nullptr);
 #endif
 }
 
@@ -38,20 +38,20 @@ void BasicMutex::unlock() {
 
 BasicCondVar::BasicCondVar() {
 #ifdef _WIN32
-    signal_event_ = CreateEvent(NULL, FALSE, FALSE, NULL);
-    broadcast_event_ = CreateEvent(NULL, TRUE, FALSE, NULL);
+    signal_event_ = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+    broadcast_event_ = CreateEvent(nullptr, TRUE, FALSE, nullptr);
     waiters_ = 0;
 #else
-    pthread_cond_init(&cond_, NULL);
+    pthread_cond_init(&cond_, nullptr);
 #endif
 }
 
 BasicCondVar::~BasicCondVar() {
 #ifdef _WIN32
-    if (signal_event_ != NULL) {
+    if (signal_event_ != nullptr) {
         CloseHandle(signal_event_);
     }
-    if (broadcast_event_ != NULL) {
+    if (broadcast_event_ != nullptr) {
         CloseHandle(broadcast_event_);
     }
 #else

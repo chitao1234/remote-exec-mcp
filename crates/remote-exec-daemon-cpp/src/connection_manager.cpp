@@ -9,7 +9,7 @@ struct ConnectionManager::WorkerRecord {
         : worker_id(worker_id_value), socket(socket_value), worker_main(std::move(worker_main_value)), finished(false)
 #ifdef _WIN32
           ,
-          thread_handle(NULL)
+          thread_handle(nullptr)
 #else
           ,
           thread()
@@ -83,7 +83,7 @@ bool ConnectionManager::try_start(UniqueSocket client, std::function<void(SOCKET
     thread_context->manager = this;
     thread_context->record = record;
     HANDLE handle = begin_win32_thread(&ConnectionManager::worker_thread_entry, thread_context.get());
-    if (handle == NULL) {
+    if (handle == nullptr) {
         close_socket(record->socket);
         BasicLockGuard lock(mutex_);
         workers_.erase(record->worker_id);
@@ -142,13 +142,13 @@ void ConnectionManager::reap_finished() {
 
     for (std::size_t i = 0; i < finished.size(); ++i) {
 #ifdef _WIN32
-        if (finished[i]->thread_handle != NULL) {
+        if (finished[i]->thread_handle != nullptr) {
             WaitForSingleObject(finished[i]->thread_handle, INFINITE);
             CloseHandle(finished[i]->thread_handle);
-            finished[i]->thread_handle = NULL;
+            finished[i]->thread_handle = nullptr;
         }
 #else
-        if (finished[i]->thread.get() != NULL) {
+        if (finished[i]->thread.get() != nullptr) {
             finished[i]->thread->join();
             finished[i]->thread.reset();
         }

@@ -77,7 +77,7 @@ class ScopedDirHandle {
     }
 
     ~ScopedDirHandle() {
-        if (dir_ != NULL) {
+        if (dir_ != nullptr) {
             closedir(dir_);
         }
     }
@@ -238,12 +238,12 @@ std::vector<DirectoryEntry> list_directory_entries(const std::string& path) {
     }
 #else
     ScopedDirHandle dir(opendir(path.c_str()));
-    if (dir.get() == NULL) {
+    if (dir.get() == nullptr) {
         throw std::runtime_error("unable to read directory " + path);
     }
 
-    dirent* entry = NULL;
-    while ((entry = readdir(dir.get())) != NULL) {
+    dirent* entry = nullptr;
+    while ((entry = readdir(dir.get())) != nullptr) {
         const std::string name(entry->d_name);
         if (name == "." || name == "..") {
             continue;
