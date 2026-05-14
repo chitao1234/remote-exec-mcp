@@ -5,11 +5,11 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use remote_exec_proto::rpc::{
-    TransferHeaders, parse_transfer_import_metadata,
     RpcErrorBody, TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
     TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
-    TRANSFER_SYMLINK_MODE_HEADER, TransferExportRequest, TransferImportResponse,
+    TRANSFER_SYMLINK_MODE_HEADER, TransferExportRequest, TransferHeaders, TransferImportResponse,
     TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType, TransferWarning,
+    parse_transfer_import_metadata,
 };
 use remote_exec_proto::transfer::TransferCompression;
 use tar::{Builder, EntryType, Header};

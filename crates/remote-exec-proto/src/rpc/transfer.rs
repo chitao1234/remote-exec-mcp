@@ -211,9 +211,7 @@ fn validate_transfer_header_value(
     }
 }
 
-fn decode_transfer_destination_path_header(
-    encoded: String,
-) -> Result<String, TransferHeaderError> {
+fn decode_transfer_destination_path_header(encoded: String) -> Result<String, TransferHeaderError> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(&encoded)
         .map_err(|err| {
@@ -326,8 +324,8 @@ mod tests {
         TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
         TRANSFER_SYMLINK_MODE_HEADER, TransferHeaderErrorKind, TransferHeaders,
         parse_transfer_export_metadata, parse_transfer_import_metadata,
-        transfer_destination_path_header_value,
-        transfer_export_header_pairs, transfer_import_header_pairs,
+        transfer_destination_path_header_value, transfer_export_header_pairs,
+        transfer_import_header_pairs,
     };
     use crate::transfer::{
         TransferCompression, TransferExportMetadata, TransferImportMetadata, TransferOverwrite,
@@ -398,10 +396,7 @@ mod tests {
     #[test]
     fn transfer_header_parser_reads_import_metadata_and_optional_defaults() {
         let headers = transfer_headers(&[
-            (
-                TRANSFER_DESTINATION_PATH_HEADER,
-                "L3RtcC9vdXRwdXQ=",
-            ),
+            (TRANSFER_DESTINATION_PATH_HEADER, "L3RtcC9vdXRwdXQ="),
             (TRANSFER_OVERWRITE_HEADER, "merge"),
             (TRANSFER_CREATE_PARENT_HEADER, "false"),
             (TRANSFER_SOURCE_TYPE_HEADER, "file"),
@@ -431,10 +426,7 @@ mod tests {
             TRANSFER_SOURCE_TYPE_HEADER,
         ] {
             let mut headers = transfer_headers(&[
-                (
-                    TRANSFER_DESTINATION_PATH_HEADER,
-                    "L3RtcC9vdXRwdXQ=",
-                ),
+                (TRANSFER_DESTINATION_PATH_HEADER, "L3RtcC9vdXRwdXQ="),
                 (TRANSFER_OVERWRITE_HEADER, "merge"),
                 (TRANSFER_CREATE_PARENT_HEADER, "true"),
                 (TRANSFER_SOURCE_TYPE_HEADER, "file"),
@@ -464,10 +456,7 @@ mod tests {
             (TRANSFER_SYMLINK_MODE_HEADER, "copy"),
         ] {
             let mut headers = transfer_headers(&[
-                (
-                    TRANSFER_DESTINATION_PATH_HEADER,
-                    "L3RtcC9vdXRwdXQ=",
-                ),
+                (TRANSFER_DESTINATION_PATH_HEADER, "L3RtcC9vdXRwdXQ="),
                 (TRANSFER_OVERWRITE_HEADER, "merge"),
                 (TRANSFER_CREATE_PARENT_HEADER, "true"),
                 (TRANSFER_SOURCE_TYPE_HEADER, "file"),
@@ -493,7 +482,10 @@ mod tests {
     #[test]
     fn transfer_header_parser_rejects_destination_path_with_newlines() {
         let headers = transfer_headers(&[
-            (TRANSFER_DESTINATION_PATH_HEADER, "/tmp/output\r\nx-injected: nope"),
+            (
+                TRANSFER_DESTINATION_PATH_HEADER,
+                "/tmp/output\r\nx-injected: nope",
+            ),
             (TRANSFER_OVERWRITE_HEADER, "merge"),
             (TRANSFER_CREATE_PARENT_HEADER, "false"),
             (TRANSFER_SOURCE_TYPE_HEADER, "file"),
