@@ -1,9 +1,10 @@
 use std::path::{Path, PathBuf};
 
 use remote_exec_proto::path::{
-    PathPolicy, comparison_key_for_policy, is_absolute_for_policy, linux_path_policy,
-    normalize_for_system, windows_path_policy,
+    PathPolicy, is_absolute_for_policy, linux_path_policy, normalize_for_system, windows_path_policy,
 };
+#[cfg(any(windows, test))]
+use remote_exec_proto::path::comparison_key_for_policy;
 
 pub fn host_path_policy() -> PathPolicy {
     host_path_policy_for_platform(cfg!(windows))
