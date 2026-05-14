@@ -1,7 +1,5 @@
 use std::path::{Path, PathBuf};
 
-#[cfg(any(windows, test))]
-use remote_exec_proto::path::comparison_key_for_policy;
 use remote_exec_proto::path::{
     PathPolicy, is_absolute_for_policy, linux_path_policy, normalize_for_system,
     windows_path_policy,
@@ -48,7 +46,7 @@ pub fn shell_uses_windows_posix_root(shell: &str, windows_posix_root: Option<&Pa
     };
 
     let resolved = resolve_absolute_input_path(shell, Some(root)).unwrap_or_else(|| shell.into());
-    path_has_windows_prefix(&resolved, root)
+    crate::path_compare::path_has_prefix(&resolved, root)
 }
 
 #[cfg(not(windows))]
@@ -80,26 +78,6 @@ fn synthetic_windows_posix_absolute_path(
     _windows_posix_root: Option<&Path>,
 ) -> Option<PathBuf> {
     None
-}
-
-#[cfg(any(windows, test))]
-fn path_has_windows_prefix(path: &Path, prefix: &Path) -> bool {
-    let path_lower = normalized_windows_path_key(path);
-    let mut prefix_lower = normalized_windows_path_key(prefix);
-
-    if path_lower == prefix_lower {
-        return true;
-    }
-    if !prefix_lower.ends_with('\\') {
-        prefix_lower.push('\\');
-    }
-
-    path_lower.starts_with(&prefix_lower)
-}
-
-#[cfg(any(windows, test))]
-fn normalized_windows_path_key(path: &Path) -> String {
-    comparison_key_for_policy(windows_path_policy(), &path.to_string_lossy())
 }
 
 #[cfg(all(test, windows))]
@@ -149,25 +127,6 @@ mod tests {
         assert!(!shell_uses_windows_posix_root(
             r"C:\msys64-tools\usr\bin\zsh.exe",
             Some(root)
-        ));
-    }
-}
-
-#[cfg(all(test, not(windows)))]
-mod non_windows_tests {
-    use std::path::Path;
-
-    use super::path_has_windows_prefix;
-
-    #[test]
-    fn path_has_windows_prefix_handles_unicode_casefold() {
-        assert!(path_has_windows_prefix(
-            Path::new("C:/RÉSUMÉ/bin/zsh.exe"),
-            Path::new("c:/résumé"),
-        ));
-        assert!(!path_has_windows_prefix(
-            Path::new("C:/RÉSUMÉ-tools/bin/zsh.exe"),
-            Path::new("c:/résumé"),
         ));
     }
 }

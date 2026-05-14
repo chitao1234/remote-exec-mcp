@@ -1701,6 +1701,7 @@ dependencies = [
  "tracing",
  "uuid",
  "vte",
+ "windows-sys 0.61.2",
  "winptyrs",
  "zstd",
 ]

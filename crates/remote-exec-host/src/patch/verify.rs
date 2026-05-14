@@ -1,9 +1,6 @@
 use std::path::{Component, Path, PathBuf};
 
-use remote_exec_proto::{
-    path::{host_policy, path_text_eq},
-    sandbox::SandboxAccess,
-};
+use remote_exec_proto::sandbox::SandboxAccess;
 use tokio::fs;
 
 use super::ensure_trailing_newline;
@@ -199,9 +196,7 @@ fn lexical_normalize(path: &Path) -> PathBuf {
 }
 
 fn path_component_eq(left: Component<'_>, right: Component<'_>) -> bool {
-    let left = left.as_os_str().to_string_lossy();
-    let right = right.as_os_str().to_string_lossy();
-    path_text_eq(host_policy(), &left, &right)
+    crate::path_compare::component_eq(left.as_os_str(), right.as_os_str())
 }
 
 #[cfg(test)]

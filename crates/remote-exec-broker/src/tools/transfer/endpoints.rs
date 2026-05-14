@@ -1,7 +1,10 @@
+use std::path::Path;
+
 use anyhow::Context;
+use remote_exec_host::path_compare;
 use remote_exec_proto::path::{
     PathPolicy, basename_for_policy, host_policy, is_absolute_for_policy, join_for_policy,
-    linux_path_policy, same_path_for_policy, syntax_eq_for_policy, windows_path_policy,
+    linux_path_policy, syntax_eq_for_policy, windows_path_policy,
 };
 use remote_exec_proto::public::{TransferDestinationMode, TransferEndpoint};
 use remote_exec_proto::rpc::{RpcErrorCode, TransferPathInfoRequest};
@@ -210,7 +213,9 @@ fn paths_match_for_preflight(
     right: &str,
 ) -> bool {
     match context {
-        EndpointTargetContext::Local { .. } => same_path_for_policy(policy, left, right),
+        EndpointTargetContext::Local { .. } => {
+            path_compare::path_eq(Path::new(left), Path::new(right))
+        }
         EndpointTargetContext::Remote { .. } => syntax_eq_for_policy(policy, left, right),
     }
 }

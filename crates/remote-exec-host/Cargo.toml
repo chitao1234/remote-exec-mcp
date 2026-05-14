@@ -39,3 +39,4 @@ nix = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 winptyrs = { path = "../../winptyrs/crates/winptyrs", optional = true }
+windows-sys = { workspace = true, features = ["Win32_Globalization"] }

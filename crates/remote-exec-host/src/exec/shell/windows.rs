@@ -200,13 +200,7 @@ fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
 }
 
 fn same_windows_candidate_path(left: &Path, right: &Path) -> bool {
-    let left = left.to_string_lossy();
-    let right = right.to_string_lossy();
-    remote_exec_proto::path::same_path_for_policy(
-        remote_exec_proto::path::windows_path_policy(),
-        left.as_ref(),
-        right.as_ref(),
-    )
+    crate::path_compare::path_eq(left, right)
 }
 
 fn resolve_windows_shell_path(shell: &str, windows_posix_root: Option<&Path>) -> String {
@@ -293,8 +287,8 @@ mod tests {
     use crate::config::ProcessEnvironment;
 
     use super::{
-        push_unique_path, resolve_default_windows_shell_with_validator,
-        resolve_requested_windows_shell, windows_path_exts,
+        resolve_default_windows_shell_with_validator, resolve_requested_windows_shell,
+        windows_path_exts,
     };
 
     fn make_environment(
@@ -488,10 +482,11 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
     #[test]
     fn windows_path_candidate_deduping_ignores_case_and_separator_style() {
         let mut paths = vec![std::path::PathBuf::from(r"C:\Git\bin\bash.exe")];
-        push_unique_path(&mut paths, std::path::PathBuf::from("c:/git/bin/bash.exe"));
+        super::push_unique_path(&mut paths, std::path::PathBuf::from("c:/git/bin/bash.exe"));
         assert_eq!(paths.len(), 1);
     }
 }
