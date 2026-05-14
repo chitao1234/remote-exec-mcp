@@ -3,7 +3,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <fstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -24,13 +23,11 @@ static const char* const SINGLE_FILE_ENTRY = ".remote-exec-file";
 static const char* const TRANSFER_SUMMARY_ENTRY = ".remote-exec-transfer-summary.json";
 
 static std::string read_text(const fs::path& path) {
-    std::ifstream input(path.string().c_str(), std::ios::binary);
-    return std::string((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    return fs::read_file_bytes(path);
 }
 
 static void write_text(const fs::path& path, const std::string& value) {
-    std::ofstream output(path.string().c_str(), std::ios::binary | std::ios::trunc);
-    output << value;
+    fs::write_file_bytes(path, value);
 }
 
 static std::string octal_field(std::size_t width, std::uint64_t value) {

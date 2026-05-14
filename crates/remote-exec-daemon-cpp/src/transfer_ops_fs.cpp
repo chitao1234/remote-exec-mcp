@@ -36,11 +36,7 @@ bool is_absolute_path(const std::string& path) {
 namespace {
 
 bool stat_path_no_follow(const std::string& path, struct stat* st) {
-#ifdef _WIN32
-    return stat(path.c_str(), st) == 0;
-#else
-    return lstat(path.c_str(), st) == 0;
-#endif
+    return path_utils::lstat_path(path, st);
 }
 
 bool stat_is_regular_file(const struct stat& st) {
@@ -106,16 +102,16 @@ void remove_existing_path(const std::string& path) {
             remove_existing_path(join_path(path, entries[i].name));
         }
 #ifdef _WIN32
-        if (_rmdir(path.c_str()) != 0) {
+        if (!path_utils::remove_directory(path)) {
 #else
-        if (rmdir(path.c_str()) != 0) {
+        if (!path_utils::remove_directory(path)) {
 #endif
             throw std::runtime_error("unable to remove existing directory " + path);
         }
         return;
     }
 
-    if (std::remove(path.c_str()) != 0) {
+    if (!path_utils::remove_path(path)) {
         throw std::runtime_error("unable to remove existing file " + path);
     }
 }
@@ -124,11 +120,11 @@ void remove_existing_path(const std::string& path) {
 
 bool is_symlink_path(const std::string& path) {
 #ifdef _WIN32
-    const DWORD attributes = GetFileAttributesA(path.c_str());
+    const DWORD attributes = GetFileAttributesW(path_utils::wide_from_utf8(path).c_str());
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
 #else
     struct stat st;
-    return lstat(path.c_str(), &st) == 0 && S_ISLNK(st.st_mode);
+    return path_utils::lstat_path(path, &st) && S_ISLNK(st.st_mode);
 #endif
 }
 
@@ -144,7 +140,7 @@ bool is_regular_file(const std::string& path) {
 
 bool is_regular_file_follow(const std::string& path) {
     struct stat st;
-    return stat(path.c_str(), &st) == 0 && stat_is_regular_file(st);
+    return path_utils::stat_path(path, &st) && stat_is_regular_file(st);
 }
 
 bool is_directory(const std::string& path) {
@@ -154,7 +150,7 @@ bool is_directory(const std::string& path) {
 
 bool is_directory_follow(const std::string& path) {
     struct stat st;
-    return stat(path.c_str(), &st) == 0 && stat_is_directory(st);
+    return path_utils::stat_path(path, &st) && stat_is_directory(st);
 }
 
 std::string join_path(const std::string& base, const std::string& child) {
@@ -212,20 +208,20 @@ void write_symlink(const std::string& target, const std::string& path) {
 std::vector<DirectoryEntry> list_directory_entries(const std::string& path) {
     std::vector<DirectoryEntry> entries;
 #ifdef _WIN32
-    std::string pattern = path;
+    std::wstring pattern = path_utils::wide_from_utf8(path);
     if (!pattern.empty() && pattern[pattern.size() - 1] != '\\' && pattern[pattern.size() - 1] != '/') {
-        pattern.push_back('\\');
+        pattern.push_back(L'\\');
     }
-    pattern.push_back('*');
+    pattern.push_back(L'*');
 
-    WIN32_FIND_DATAA find_data;
-    ScopedFindHandle handle(FindFirstFileA(pattern.c_str(), &find_data));
+    WIN32_FIND_DATAW find_data;
+    ScopedFindHandle handle(FindFirstFileW(pattern.c_str(), &find_data));
     if (!handle.valid()) {
         throw std::runtime_error("unable to read directory " + path);
     }
 
     do {
-        const std::string name(find_data.cFileName);
+        const std::string name = path_utils::utf8_from_wide(find_data.cFileName);
         if (name == "." || name == "..") {
             continue;
         }
@@ -234,7 +230,7 @@ std::vector<DirectoryEntry> list_directory_entries(const std::string& path) {
             !entry_is_symlink && (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
         entries.push_back(
             DirectoryEntry{name, entry_is_directory, !entry_is_directory && !entry_is_symlink, entry_is_symlink});
-    } while (FindNextFileA(handle.get(), &find_data) != 0);
+    } while (FindNextFileW(handle.get(), &find_data) != 0);
 
     const DWORD last_error = GetLastError();
     if (last_error != ERROR_NO_MORE_FILES) {

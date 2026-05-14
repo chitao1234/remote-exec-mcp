@@ -230,11 +230,7 @@ std::string canonicalize_for_sandbox(PathPolicy policy, const std::string& path)
 }
 
 std::string sandbox_comparison_key(PathPolicy policy, const std::string& path) {
-    std::string key = lexical_normalize_for_policy(policy, path);
-    if (policy.comparison == PATH_COMPARISON_CASE_INSENSITIVE) {
-        key = path_policy_lowercase_ascii(key);
-    }
-    return key;
+    return path_policy_comparison_key(policy, lexical_normalize_for_policy(policy, path));
 }
 
 bool path_is_within(PathPolicy policy, const std::string& root, const std::string& path) {

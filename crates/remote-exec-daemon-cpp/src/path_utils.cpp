@@ -1,17 +1,92 @@
 #include "path_utils.h"
 
 #include <algorithm>
+#include <cstring>
 #include <cerrno>
 #include <stdexcept>
 
 #ifdef _WIN32
 #include <direct.h>
+#include <io.h>
+#include <wchar.h>
+#include <windows.h>
 #else
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 #endif
 
 namespace path_utils {
+
+#ifdef _WIN32
+namespace {
+
+std::wstring wide_mode_from_ascii(const char* mode) {
+    std::wstring wide;
+    while (mode != NULL && *mode != '\0') {
+        wide.push_back(static_cast<unsigned char>(*mode));
+        ++mode;
+    }
+    return wide;
+}
+
+int last_error_to_errno(DWORD error) {
+    switch (error) {
+    case ERROR_FILE_NOT_FOUND:
+    case ERROR_PATH_NOT_FOUND:
+    case ERROR_INVALID_NAME:
+    case ERROR_BAD_PATHNAME:
+    case ERROR_DIRECTORY:
+        return ENOENT;
+    case ERROR_ACCESS_DENIED:
+    case ERROR_SHARING_VIOLATION:
+        return EACCES;
+    default:
+        return EIO;
+    }
+}
+
+} // namespace
+
+std::wstring wide_from_utf8(const std::string& value) {
+    if (value.empty()) {
+        return std::wstring();
+    }
+
+    const int wide_length =
+        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), NULL, 0);
+    if (wide_length <= 0) {
+        throw std::runtime_error("unable to decode UTF-8 path");
+    }
+
+    std::wstring wide(static_cast<std::size_t>(wide_length), L'\0');
+    if (MultiByteToWideChar(
+            CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), &wide[0], wide_length) <=
+        0) {
+        throw std::runtime_error("unable to decode UTF-8 path");
+    }
+    return wide;
+}
+
+std::string utf8_from_wide(const std::wstring& value) {
+    if (value.empty()) {
+        return std::string();
+    }
+
+    const int utf8_length =
+        WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), NULL, 0, NULL, NULL);
+    if (utf8_length <= 0) {
+        throw std::runtime_error("unable to encode UTF-8 path");
+    }
+
+    std::string utf8(static_cast<std::size_t>(utf8_length), '\0');
+    if (WideCharToMultiByte(
+            CP_UTF8, 0, value.data(), static_cast<int>(value.size()), &utf8[0], utf8_length, NULL, NULL) <= 0) {
+        throw std::runtime_error("unable to encode UTF-8 path");
+    }
+    return utf8;
+}
+#endif
 
 char native_separator() {
 #ifdef _WIN32
@@ -53,7 +128,7 @@ void make_directory_if_missing(const std::string& path) {
         return;
     }
 #ifdef _WIN32
-    if (_mkdir(path.c_str()) != 0 && errno != EEXIST) {
+    if (_wmkdir(wide_from_utf8(path).c_str()) != 0 && errno != EEXIST) {
 #else
     if (mkdir(path.c_str(), 0777) != 0 && errno != EEXIST) {
 #endif
@@ -85,6 +160,69 @@ void create_parent_directories(const std::string& path) {
         current.push_back(ch);
     }
     make_directory_if_missing(parent);
+}
+
+FILE* open_file(const std::string& path, const char* mode) {
+#ifdef _WIN32
+    return _wfopen(wide_from_utf8(path).c_str(), wide_mode_from_ascii(mode).c_str());
+#else
+    return std::fopen(path.c_str(), mode);
+#endif
+}
+
+bool stat_path(const std::string& path, struct stat* st) {
+#ifdef _WIN32
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    if (!GetFileAttributesExW(wide_from_utf8(path).c_str(), GetFileExInfoStandard, &data)) {
+        errno = last_error_to_errno(GetLastError());
+        return false;
+    }
+
+    std::memset(st, 0, sizeof(*st));
+    st->st_mode = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ? S_IFDIR : S_IFREG;
+    if ((data.dwFileAttributes & FILE_ATTRIBUTE_READONLY) != 0) {
+        st->st_mode |= 0444;
+    } else {
+        st->st_mode |= 0666;
+    }
+    st->st_size = static_cast<_off_t>(
+        (static_cast<unsigned long long>(data.nFileSizeHigh) << 32) | data.nFileSizeLow);
+    return true;
+#else
+    return stat(path.c_str(), st) == 0;
+#endif
+}
+
+bool lstat_path(const std::string& path, struct stat* st) {
+#ifdef _WIN32
+    return stat_path(path, st);
+#else
+    return lstat(path.c_str(), st) == 0;
+#endif
+}
+
+bool remove_path(const std::string& path) {
+#ifdef _WIN32
+    return _wremove(wide_from_utf8(path).c_str()) == 0;
+#else
+    return std::remove(path.c_str()) == 0;
+#endif
+}
+
+bool remove_directory(const std::string& path) {
+#ifdef _WIN32
+    return _wrmdir(wide_from_utf8(path).c_str()) == 0;
+#else
+    return rmdir(path.c_str()) == 0;
+#endif
+}
+
+bool rename_path(const std::string& source, const std::string& destination) {
+#ifdef _WIN32
+    return _wrename(wide_from_utf8(source).c_str(), wide_from_utf8(destination).c_str()) == 0;
+#else
+    return std::rename(source.c_str(), destination.c_str()) == 0;
+#endif
 }
 
 } // namespace path_utils

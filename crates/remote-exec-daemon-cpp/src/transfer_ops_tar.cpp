@@ -15,6 +15,8 @@
 
 #include "json.hpp"
 #include "rpc_failures.h"
+#include "path_utils.h"
+#include "scoped_file.h"
 #include "transfer_ops_internal.h"
 
 using Json = nlohmann::json;
@@ -209,28 +211,16 @@ void append_file_entry(TransferArchiveSink* archive, const std::string& rel_path
 void append_file_entry_from_path(TransferArchiveSink* archive,
                                  const std::string& rel_path,
                                  const std::string& source_path) {
-#ifndef _WIN32
     struct stat st;
-    if (stat(source_path.c_str(), &st) != 0) {
+    if (!path_utils::stat_path(source_path, &st)) {
         throw TransferFailure(TransferRpcCode::SourceMissing, "transfer source missing");
     }
     const std::uint64_t mode = static_cast<std::uint64_t>(st.st_mode & 0777);
-#else
-    const std::uint64_t mode = 0644;
-#endif
-    std::ifstream input(source_path.c_str(), std::ios::binary | std::ios::ate);
-    if (!input) {
+    ScopedFile input(path_utils::open_file(source_path, "rb"));
+    if (!input.valid()) {
         throw TransferFailure(TransferRpcCode::SourceMissing, "transfer source missing");
     }
-    const std::ifstream::pos_type end_position = input.tellg();
-    if (end_position < 0) {
-        throw std::runtime_error("unable to read transfer source size");
-    }
-    const std::uint64_t file_size = static_cast<std::uint64_t>(end_position);
-    input.seekg(0, std::ios::beg);
-    if (!input) {
-        throw std::runtime_error("unable to read transfer source");
-    }
+    const std::uint64_t file_size = static_cast<std::uint64_t>(st.st_size);
 
     const bool long_name_emitted = rel_path.size() > 100;
     if (long_name_emitted) {
@@ -242,12 +232,11 @@ void append_file_entry_from_path(TransferArchiveSink* archive,
     std::uint64_t remaining = file_size;
     while (remaining > 0U) {
         const std::size_t requested = remaining < sizeof(buffer) ? static_cast<std::size_t>(remaining) : sizeof(buffer);
-        input.read(buffer, static_cast<std::streamsize>(requested));
-        const std::streamsize received = input.gcount();
-        if (received <= 0 || static_cast<std::size_t>(received) != requested) {
+        const std::size_t received = std::fread(buffer, 1, requested, input.get());
+        if (received != requested) {
             throw std::runtime_error("unable to read transfer source");
         }
-        archive->write(buffer, static_cast<std::size_t>(received));
+        archive->write(buffer, received);
         remaining -= static_cast<std::uint64_t>(received);
     }
     append_padding(archive, file_size);

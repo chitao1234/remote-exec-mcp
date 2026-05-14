@@ -1,13 +1,15 @@
 #include <cerrno>
 #include <climits>
+#include <cstdio>
 #include <cstdlib>
-#include <fstream>
 #include <limits>
 #include <map>
 #include <sstream>
 #include <stdexcept>
 
 #include "config.h"
+#include "path_utils.h"
+#include "scoped_file.h"
 #include "text_utils.h"
 
 typedef std::map<std::string, std::string> ConfigValues;
@@ -168,14 +170,30 @@ static void validate_port_forward_limit(unsigned long value, const std::string& 
 }
 
 static ConfigValues read_config_values(const std::string& path) {
-    std::ifstream input(path.c_str());
-    if (!input) {
+    ScopedFile input(path_utils::open_file(path, "rb"));
+    if (!input.valid()) {
         throw std::runtime_error("unable to open config file: " + path);
     }
 
+    std::string contents;
+    char buffer[4096];
+    while (true) {
+        const std::size_t received = std::fread(buffer, 1, sizeof(buffer), input.get());
+        if (received > 0U) {
+            contents.append(buffer, received);
+        }
+        if (received < sizeof(buffer)) {
+            if (std::ferror(input.get()) != 0) {
+                throw std::runtime_error("unable to open config file: " + path);
+            }
+            break;
+        }
+    }
+
+    std::istringstream input_text(contents);
     ConfigValues values;
     std::string line;
-    while (std::getline(input, line)) {
+    while (std::getline(input_text, line)) {
         line = trim_ascii(line);
         if (line.empty() || line[0] == '#' || line[0] == ';') {
             continue;

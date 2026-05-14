@@ -2,11 +2,14 @@
 #define REMOTE_EXEC_TEST_FILESYSTEM_H
 
 #include <cstdlib>
+#include <cstdio>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 #ifdef _WIN32
+#include <direct.h>
+#include <wchar.h>
 #include <windows.h>
 #else
 #include <cerrno>
@@ -16,6 +19,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #endif
+#include "scoped_file.h"
 
 namespace test_fs {
 
@@ -81,6 +85,100 @@ inline path operator/(const path& base, const path& child) {
     return base / child.string();
 }
 
+#ifdef _WIN32
+inline std::wstring wide_from_utf8(const std::string& value) {
+    if (value.empty()) {
+        return std::wstring();
+    }
+
+    const int wide_length =
+        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), NULL, 0);
+    if (wide_length <= 0) {
+        throw std::runtime_error("unable to decode UTF-8 path");
+    }
+
+    std::wstring wide(static_cast<std::size_t>(wide_length), L'\0');
+    if (MultiByteToWideChar(
+            CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), &wide[0], wide_length) <=
+        0) {
+        throw std::runtime_error("unable to decode UTF-8 path");
+    }
+    return wide;
+}
+
+inline std::string utf8_from_wide(const std::wstring& value) {
+    if (value.empty()) {
+        return std::string();
+    }
+
+    const int utf8_length =
+        WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), NULL, 0, NULL, NULL);
+    if (utf8_length <= 0) {
+        throw std::runtime_error("unable to encode UTF-8 path");
+    }
+
+    std::string utf8(static_cast<std::size_t>(utf8_length), '\0');
+    if (WideCharToMultiByte(
+            CP_UTF8, 0, value.data(), static_cast<int>(value.size()), &utf8[0], utf8_length, NULL, NULL) <= 0) {
+        throw std::runtime_error("unable to encode UTF-8 path");
+    }
+    return utf8;
+}
+
+inline std::wstring wide_mode_from_ascii(const char* mode) {
+    std::wstring wide;
+    while (mode != NULL && *mode != '\0') {
+        wide.push_back(static_cast<unsigned char>(*mode));
+        ++mode;
+    }
+    return wide;
+}
+#endif
+
+inline FILE* open_file(const path& target, const char* mode) {
+#ifdef _WIN32
+    return _wfopen(wide_from_utf8(target.string()).c_str(), wide_mode_from_ascii(mode).c_str());
+#else
+    return std::fopen(target.c_str(), mode);
+#endif
+}
+
+inline std::string read_file_bytes(const path& target) {
+    ScopedFile file(open_file(target, "rb"));
+    if (!file.valid()) {
+        throw std::runtime_error("unable to open file " + target.string());
+    }
+
+    std::string contents;
+    char buffer[4096];
+    while (true) {
+        const std::size_t received = std::fread(buffer, 1, sizeof(buffer), file.get());
+        if (received > 0U) {
+            contents.append(buffer, received);
+        }
+        if (received < sizeof(buffer)) {
+            if (std::ferror(file.get()) != 0) {
+                throw std::runtime_error("unable to read file " + target.string());
+            }
+            break;
+        }
+    }
+    return contents;
+}
+
+inline void write_file_bytes(const path& target, const std::string& contents) {
+    ScopedFile file(open_file(target, "wb"));
+    if (!file.valid()) {
+        throw std::runtime_error("unable to open file " + target.string());
+    }
+    if (!contents.empty() && std::fwrite(contents.data(), 1, contents.size(), file.get()) != contents.size()) {
+        throw std::runtime_error("unable to write file " + target.string());
+    }
+    if (file.close() != 0) {
+        throw std::runtime_error("unable to write file " + target.string());
+    }
+}
+
 enum class perms : unsigned {
     none = 0U,
     owner_exec = 0100U,
@@ -122,11 +220,11 @@ inline path temp_directory_path() {
 }
 
 inline bool exists(const path& target) {
-    return GetFileAttributesA(target.c_str()) != INVALID_FILE_ATTRIBUTES;
+    return GetFileAttributesW(wide_from_utf8(target.string()).c_str()) != INVALID_FILE_ATTRIBUTES;
 }
 
 inline bool is_directory(const path& target) {
-    const DWORD attributes = GetFileAttributesA(target.c_str());
+    const DWORD attributes = GetFileAttributesW(wide_from_utf8(target.string()).c_str());
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
@@ -139,8 +237,8 @@ inline void create_directory_if_missing(const path& target) {
     if (target.string().empty() || exists(target)) {
         return;
     }
-    if (!CreateDirectoryA(target.c_str(), NULL) && GetLastError() != ERROR_ALREADY_EXISTS) {
-        throw_last_error("CreateDirectoryA", target);
+    if (!CreateDirectoryW(wide_from_utf8(target.string()).c_str(), NULL) && GetLastError() != ERROR_ALREADY_EXISTS) {
+        throw_last_error("CreateDirectoryW", target);
     }
 }
 
@@ -170,34 +268,34 @@ inline void create_directories(const path& target) {
 }
 
 inline void remove_all(const path& target) {
-    const DWORD attributes = GetFileAttributesA(target.c_str());
+    const DWORD attributes = GetFileAttributesW(wide_from_utf8(target.string()).c_str());
     if (attributes == INVALID_FILE_ATTRIBUTES) {
         return;
     }
 
     if ((attributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
-        if (!DeleteFileA(target.c_str())) {
-            throw_last_error("DeleteFileA", target);
+        if (!DeleteFileW(wide_from_utf8(target.string()).c_str())) {
+            throw_last_error("DeleteFileW", target);
         }
         return;
     }
 
     const path search = target / "*";
-    WIN32_FIND_DATAA data;
-    HANDLE handle = FindFirstFileA(search.c_str(), &data);
+    WIN32_FIND_DATAW data;
+    HANDLE handle = FindFirstFileW(wide_from_utf8(search.string()).c_str(), &data);
     if (handle != INVALID_HANDLE_VALUE) {
         do {
-            const std::string name(data.cFileName);
+            const std::string name = utf8_from_wide(data.cFileName);
             if (name == "." || name == "..") {
                 continue;
             }
             remove_all(target / name);
-        } while (FindNextFileA(handle, &data));
+        } while (FindNextFileW(handle, &data));
         FindClose(handle);
     }
 
-    if (!RemoveDirectoryA(target.c_str())) {
-        throw_last_error("RemoveDirectoryA", target);
+    if (!RemoveDirectoryW(wide_from_utf8(target.string()).c_str())) {
+        throw_last_error("RemoveDirectoryW", target);
     }
 }
 

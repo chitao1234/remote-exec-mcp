@@ -1,6 +1,5 @@
 #include <atomic>
 #include <cassert>
-#include <fstream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -13,13 +12,11 @@
 namespace fs = test_fs;
 
 static std::string read_text(const fs::path& path) {
-    std::ifstream input(path.c_str(), std::ios::binary);
-    return std::string((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    return fs::read_file_bytes(path);
 }
 
 static void write_text(const fs::path& path, const std::string& value) {
-    std::ofstream output(path.c_str(), std::ios::binary | std::ios::trunc);
-    output << value;
+    fs::write_file_bytes(path, value);
 }
 
 static void expect_patch_failure(const fs::path& root, const std::string& patch) {

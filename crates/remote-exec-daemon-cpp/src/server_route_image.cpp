@@ -1,12 +1,14 @@
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
-#include <fstream>
 #include <string>
 #include <sys/stat.h>
 
 #include "base64_codec.h"
 #include "logging.h"
+#include "path_utils.h"
 #include "rpc_failures.h"
+#include "scoped_file.h"
 #include "server_request_utils.h"
 #include "server_route_image.h"
 
@@ -37,20 +39,34 @@ ImageFailure internal_image_failure(const std::string& message) {
 
 std::string read_binary_file_bytes(const std::string& path) {
     errno = 0;
-    std::ifstream input(path.c_str(), std::ios::binary);
-    if (!input) {
+    ScopedFile input(path_utils::open_file(path, "rb"));
+    if (!input.valid()) {
         const int error_code = errno;
         if (error_code != 0) {
             throw internal_image_failure("unable to read image at `" + path + "`: " + std::strerror(error_code));
         }
         throw internal_image_failure("unable to read image at `" + path + "`");
     }
-    return std::string((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    std::string bytes;
+    char buffer[8192];
+    while (true) {
+        const std::size_t received = std::fread(buffer, 1, sizeof(buffer), input.get());
+        if (received > 0U) {
+            bytes.append(buffer, received);
+        }
+        if (received < sizeof(buffer)) {
+            if (std::ferror(input.get()) != 0) {
+                throw internal_image_failure("unable to read image at `" + path + "`");
+            }
+            break;
+        }
+    }
+    return bytes;
 }
 
 void require_regular_image_file(const std::string& path) {
     struct stat st;
-    if (stat(path.c_str(), &st) == 0) {
+    if (path_utils::stat_path(path, &st)) {
         if ((st.st_mode & S_IFMT) != S_IFREG) {
             throw not_file_image_failure(path);
         }

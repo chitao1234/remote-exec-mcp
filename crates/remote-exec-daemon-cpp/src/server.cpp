@@ -1,12 +1,14 @@
-#include <fstream>
+#include <cstdio>
 #include <stdexcept>
 #include <string>
 
 #include "logging.h"
+#include "path_utils.h"
 #include "platform.h"
 #ifndef _WIN32
 #include "posix_child_reaper.h"
 #endif
+#include "scoped_file.h"
 #include "server.h"
 #include "server_runtime.h"
 
@@ -14,12 +16,12 @@ static void write_test_bound_addr_file(const DaemonConfig& config, unsigned shor
     if (config.test_bound_addr_file.empty()) {
         return;
     }
-    std::ofstream out(config.test_bound_addr_file.c_str(), std::ios::out | std::ios::trunc);
-    if (!out) {
+    ScopedFile out(path_utils::open_file(config.test_bound_addr_file, "wb"));
+    if (!out.valid()) {
         throw std::runtime_error("failed to open test_bound_addr_file");
     }
-    out << config.listen_host << ':' << bound_port << '\n';
-    if (!out) {
+    const std::string line = config.listen_host + ":" + std::to_string(bound_port) + "\n";
+    if (std::fwrite(line.data(), 1, line.size(), out.get()) != line.size() || out.close() != 0) {
         throw std::runtime_error("failed to write test_bound_addr_file");
     }
 }

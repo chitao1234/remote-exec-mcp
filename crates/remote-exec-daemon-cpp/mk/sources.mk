@@ -102,6 +102,7 @@ HOST_TRANSFER_SRCS = \
 HOST_CONFIG_SRCS = \
 	$(SOURCE_PREFIX)tests/test_config.cpp \
 	$(SOURCE_PREFIX)src/config.cpp \
+	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/text_utils.cpp
 
 HOST_BASIC_MUTEX_SRCS = \

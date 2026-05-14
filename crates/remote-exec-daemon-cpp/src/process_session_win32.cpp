@@ -17,6 +17,26 @@
 
 namespace {
 
+std::wstring wide_from_utf8(const std::string& value) {
+    if (value.empty()) {
+        return std::wstring();
+    }
+
+    const int wide_length =
+        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), NULL, 0);
+    if (wide_length <= 0) {
+        throw std::runtime_error(last_error_message("MultiByteToWideChar(CP_UTF8)"));
+    }
+
+    std::wstring wide(static_cast<std::size_t>(wide_length), L'\0');
+    if (MultiByteToWideChar(
+            CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), &wide[0], wide_length) <=
+        0) {
+        throw std::runtime_error(last_error_message("MultiByteToWideChar(CP_UTF8)"));
+    }
+    return wide;
+}
+
 std::string windows_quote_arg(const std::string& arg) {
     if (arg.empty()) {
         return "\"\"";
@@ -175,7 +195,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     SetHandleInformation(stdout_pipe.read_end.get(), HANDLE_FLAG_INHERIT, 0);
     SetHandleInformation(stdin_pipe.write_end.get(), HANDLE_FLAG_INHERIT, 0);
 
-    STARTUPINFOA startup_info;
+    STARTUPINFOW startup_info;
     ZeroMemory(&startup_info, sizeof(startup_info));
     startup_info.cb = sizeof(startup_info);
     startup_info.dwFlags = STARTF_USESTDHANDLES;
@@ -188,17 +208,19 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
 
     const std::vector<std::string> argv = platform::shell_argv(shell, login, command);
     const std::string command_line = command_line_from_argv(argv);
-    std::vector<char> mutable_command_line(command_line.begin(), command_line.end());
-    mutable_command_line.push_back('\0');
+    std::wstring wide_command_line = wide_from_utf8(command_line);
+    std::vector<wchar_t> mutable_command_line(wide_command_line.begin(), wide_command_line.end());
+    mutable_command_line.push_back(L'\0');
+    const std::wstring wide_workdir = workdir.empty() ? std::wstring() : wide_from_utf8(workdir);
 
-    const BOOL created = CreateProcessA(NULL,
+    const BOOL created = CreateProcessW(NULL,
                                         &mutable_command_line[0],
                                         NULL,
                                         NULL,
                                         TRUE,
                                         0,
                                         NULL,
-                                        workdir.empty() ? NULL : workdir.c_str(),
+                                        workdir.empty() ? NULL : wide_workdir.c_str(),
                                         &startup_info,
                                         &process_info);
 
@@ -206,7 +228,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     stdout_pipe.write_end.reset();
 
     if (created == 0) {
-        throw std::runtime_error(last_error_message("CreateProcessA"));
+        throw std::runtime_error(last_error_message("CreateProcessW"));
     }
 
     UniqueHandle process_handle(process_info.hProcess);

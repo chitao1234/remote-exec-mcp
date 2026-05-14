@@ -3,7 +3,6 @@
 #include <cctype>
 #include <cstdio>
 #include <cstring>
-#include <fstream>
 #include <functional>
 #include <sstream>
 #include <stdexcept>
@@ -21,6 +20,7 @@
 #include "path_policy.h"
 #include "path_utils.h"
 #include "platform.h"
+#include "scoped_file.h"
 
 namespace {
 
@@ -192,37 +192,55 @@ std::string resolve_patch_path(const std::string& root, const std::string& path)
 
 bool file_exists(const std::string& path) {
     struct stat st;
-    return stat(path.c_str(), &st) == 0;
+    return path_utils::stat_path(path, &st);
 }
 
 std::string read_text_file(const std::string& path) {
-    std::ifstream input(path.c_str(), std::ios::binary);
-    if (!input) {
+    ScopedFile input(path_utils::open_file(path, "rb"));
+    if (!input.valid()) {
         throw std::runtime_error("unable to read " + path);
     }
-    return std::string((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    std::string text;
+    char buffer[8192];
+    while (true) {
+        const std::size_t received = std::fread(buffer, 1, sizeof(buffer), input.get());
+        if (received > 0U) {
+            text.append(buffer, received);
+        }
+        if (received < sizeof(buffer)) {
+            if (std::ferror(input.get()) != 0) {
+                throw std::runtime_error("unable to read " + path);
+            }
+            break;
+        }
+    }
+    return text;
 }
 
 void write_text_atomic(const std::string& path, const std::string& content) {
     path_utils::create_parent_directories(path);
     const std::string temp_path = unique_atomic_write_temp_path(path);
 
-    std::ofstream output(temp_path.c_str(), std::ios::binary | std::ios::trunc);
-    if (!output) {
+    ScopedFile output(path_utils::open_file(temp_path, "wb"));
+    if (!output.valid()) {
         throw std::runtime_error("unable to write " + temp_path);
     }
-    output << content;
-    output.close();
+    if (!content.empty() && std::fwrite(content.data(), 1, content.size(), output.get()) != content.size()) {
+        throw std::runtime_error("unable to write " + temp_path);
+    }
+    if (output.close() != 0) {
+        throw std::runtime_error("unable to write " + temp_path);
+    }
 
-    std::remove(path.c_str());
-    if (std::rename(temp_path.c_str(), path.c_str()) != 0) {
-        std::remove(temp_path.c_str());
+    (void)path_utils::remove_path(path);
+    if (!path_utils::rename_path(temp_path, path)) {
+        (void)path_utils::remove_path(temp_path);
         throw std::runtime_error("unable to rename " + temp_path + " to " + path);
     }
 }
 
 void remove_file_required(const std::string& path) {
-    if (std::remove(path.c_str()) != 0) {
+    if (!path_utils::remove_path(path)) {
         throw std::runtime_error("unable to remove " + path);
     }
 }

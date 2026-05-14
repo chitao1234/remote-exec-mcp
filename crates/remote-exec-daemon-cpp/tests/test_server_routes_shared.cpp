@@ -2,7 +2,6 @@
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
-#include <fstream>
 #include <iterator>
 #include <string>
 
@@ -135,8 +134,7 @@ static void finalize_tar(std::string* archive) {
 #endif
 
 static std::string read_text_file(const fs::path& path) {
-    std::ifstream input(path.c_str(), std::ios::binary);
-    return std::string((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    return fs::read_file_bytes(path);
 }
 
 static std::string read_binary_file(const fs::path& path) {
@@ -144,7 +142,7 @@ static std::string read_binary_file(const fs::path& path) {
 }
 
 static void write_binary_file(const fs::path& path, const std::string& value) {
-    write_text_file(path, value);
+    fs::write_file_bytes(path, value);
 }
 
 static std::string decode_data_url_bytes(const std::string& image_url) {

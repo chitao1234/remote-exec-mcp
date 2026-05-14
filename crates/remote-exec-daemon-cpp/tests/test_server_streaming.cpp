@@ -6,7 +6,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <fstream>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -237,13 +236,11 @@ static std::string read_content_length_response_from_socket(SOCKET socket) {
 }
 
 static std::string read_text_file(const fs::path& path) {
-    std::ifstream input(path.c_str(), std::ios::binary);
-    return std::string((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    return fs::read_file_bytes(path);
 }
 
 static void write_text_file(const fs::path& path, const std::string& value) {
-    std::ofstream output(path.c_str(), std::ios::binary | std::ios::trunc);
-    output << value;
+    fs::write_file_bytes(path, value);
 }
 
 static void send_request_and_close_writer(SOCKET socket, const std::string& request) {

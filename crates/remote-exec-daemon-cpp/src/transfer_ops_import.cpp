@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <fstream>
 #include <limits>
 #include <stdexcept>
@@ -11,6 +12,7 @@
 #endif
 
 #include "path_utils.h"
+#include "scoped_file.h"
 #include "rpc_failures.h"
 #include "transfer_ops_internal.h"
 
@@ -251,8 +253,8 @@ void copy_reader_to_file(TransferArchiveReader& reader,
                          std::uint64_t copied_so_far,
                          const TransferLimitConfig& limits) {
     ensure_transfer_entry_within_limits(size, copied_so_far, limits);
-    std::ofstream output(path.c_str(), std::ios::binary | std::ios::trunc);
-    if (!output) {
+    ScopedFile output(path_utils::open_file(path, "wb"));
+    if (!output.valid()) {
         throw std::runtime_error("unable to write destination file");
     }
 
@@ -261,21 +263,19 @@ void copy_reader_to_file(TransferArchiveReader& reader,
     while (remaining > 0U) {
         const std::size_t requested = remaining < sizeof(buffer) ? static_cast<std::size_t>(remaining) : sizeof(buffer);
         read_exact_or_throw(reader, buffer, requested, "truncated tar entry body");
-        output.write(buffer, static_cast<std::streamsize>(requested));
-        if (!output) {
+        if (std::fwrite(buffer, 1, requested, output.get()) != requested) {
             throw std::runtime_error("unable to write destination file");
         }
         remaining -= static_cast<std::uint64_t>(requested);
     }
     skip_entry_padding(reader, size);
-    output.close();
-    if (!output) {
+    if (output.close() != 0) {
         throw std::runtime_error("unable to write destination file");
     }
 #ifndef _WIN32
     if ((mode & 0111U) != 0U) {
         struct stat st;
-        if (stat(path.c_str(), &st) != 0) {
+        if (!path_utils::stat_path(path, &st)) {
             throw std::runtime_error("unable to read destination file mode");
         }
         if (chmod(path.c_str(), st.st_mode | 0111) != 0) {

@@ -11,6 +11,7 @@
 #endif
 
 #include "rpc_failures.h"
+#include "path_utils.h"
 #include "transfer_ops.h"
 #include "transfer_ops_internal.h"
 
@@ -89,9 +90,9 @@ PathInfo path_info(const std::string& absolute_path) {
 
     struct stat st;
 #ifdef _WIN32
-    if (stat(absolute_path.c_str(), &st) != 0) {
+    if (!path_utils::stat_path(absolute_path, &st)) {
 #else
-    if (lstat(absolute_path.c_str(), &st) != 0) {
+    if (!path_utils::lstat_path(absolute_path, &st)) {
 #endif
         const int error_code = errno;
         if (error_code == ENOENT || error_code == ENOTDIR) {

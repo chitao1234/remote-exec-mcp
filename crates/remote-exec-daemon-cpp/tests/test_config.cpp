@@ -1,6 +1,5 @@
 #include <cassert>
 #include <cstdio>
-#include <fstream>
 #include <string>
 
 #include "config.h"
@@ -9,8 +8,7 @@
 namespace fs = test_fs;
 
 static void write_text(const fs::path& path, const std::string& value) {
-    std::ofstream output(path.c_str(), std::ios::binary | std::ios::trunc);
-    output << value;
+    fs::write_file_bytes(path, value);
 }
 
 static std::string minimal_config_text() {

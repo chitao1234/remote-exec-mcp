@@ -68,6 +68,7 @@ int main() {
     assert(normalize_for_system(windows_policy, "/cygdrive/c/Work/file.txt") == "C:\\Work\\file.txt");
     assert(join_for_policy(windows_policy, "C:/Work", "nested/file.txt") == "C:\\Work\\nested\\file.txt");
     assert(same_path_for_policy(windows_policy, "/c/WORK/File.txt", "c:\\work\\file.txt"));
+    assert(same_path_for_policy(windows_policy, "C:\\RÉSUMÉ\\Ärger.txt", "c:/résumé/ärger.TXT"));
 
     FilesystemSandbox windows_sandbox;
     windows_sandbox.read.allow.push_back("C:\\Work");
@@ -76,6 +77,15 @@ int main() {
     authorize_path(windows_policy, &windows_compiled, SANDBOX_READ, "c:/work/out.txt");
     assert(denied(windows_policy, &windows_compiled, SANDBOX_READ, "C:\\WORK\\SECRET\\key.txt"));
     assert(denied(windows_policy, &windows_compiled, SANDBOX_READ, "C:\\Worker\\out.txt"));
+
+    FilesystemSandbox unicode_windows_sandbox;
+    unicode_windows_sandbox.read.allow.push_back("C:\\RÉSUMÉ");
+    unicode_windows_sandbox.read.deny.push_back("C:\\RÉSUMÉ\\Ärger");
+    const CompiledFilesystemSandbox unicode_windows_compiled =
+        compile_filesystem_sandbox(windows_policy, unicode_windows_sandbox);
+    authorize_path(windows_policy, &unicode_windows_compiled, SANDBOX_READ, "c:/résumé/out.txt");
+    assert(denied(
+        windows_policy, &unicode_windows_compiled, SANDBOX_READ, "C:\\résumé\\ärger\\key.txt"));
 
     return 0;
 }
