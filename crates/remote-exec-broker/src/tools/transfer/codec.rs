@@ -123,4 +123,29 @@ mod tests {
         assert_eq!(request.headers()[TRANSFER_COMPRESSION_HEADER], "zstd");
         assert_eq!(request.headers()[TRANSFER_SYMLINK_MODE_HEADER], "skip");
     }
+
+    #[tokio::test]
+    async fn transfer_codec_builds_unicode_import_destination_header() {
+        crate::install_crypto_provider().unwrap();
+        let client = reqwest::Client::new();
+        let request = apply_import_headers(
+            client.post("http://127.0.0.1/v1/transfer/import"),
+            &TransferImportMetadata {
+                destination_path: "/tmp/测试/привет/résumé.txt".to_string(),
+                overwrite: TransferOverwrite::Replace,
+                create_parent: false,
+                source_type: TransferSourceType::Multiple,
+                compression: TransferCompression::None,
+                symlink_mode: TransferSymlinkMode::Preserve,
+            },
+        )
+        .body(reqwest::Body::from(Vec::new()))
+        .build()
+        .unwrap();
+
+        assert_ne!(
+            request.headers()[TRANSFER_DESTINATION_PATH_HEADER],
+            "/tmp/测试/привет/résumé.txt"
+        );
+    }
 }

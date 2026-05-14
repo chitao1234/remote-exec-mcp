@@ -1,6 +1,7 @@
 #include <initializer_list>
 #include <string>
 
+#include "base64_codec.h"
 #include "logging.h"
 #include "rpc_failures.h"
 #include "transfer_http_codec.h"
@@ -60,6 +61,16 @@ bool parse_create_parent(const std::string& value) {
                           invalid_header_message(CREATE_PARENT_HEADER, "expected `true` or `false`"));
 }
 
+std::string decode_destination_path_header(const std::string& encoded) {
+    try {
+        return base64_decode_bytes(encoded);
+    } catch (const std::runtime_error& ex) {
+        throw TransferFailure(
+            TransferRpcCode::BadRequest,
+            invalid_header_message(DESTINATION_PATH_HEADER, "expected base64-encoded UTF-8 path: " + std::string(ex.what())));
+    }
+}
+
 } // namespace
 
 void require_uncompressed_transfer(const std::string& compression) {
@@ -71,7 +82,7 @@ void require_uncompressed_transfer(const std::string& compression) {
 
 TransferImportMetadata parse_transfer_import_metadata(const HttpRequest& request) {
     TransferImportMetadata metadata;
-    metadata.destination_path = required_header(request, DESTINATION_PATH_HEADER);
+    metadata.destination_path = decode_destination_path_header(required_header(request, DESTINATION_PATH_HEADER));
     metadata.overwrite = required_header(request, OVERWRITE_HEADER);
     require_one_of(OVERWRITE_HEADER, metadata.overwrite, {"fail", "merge", "replace"});
     metadata.create_parent = parse_create_parent(required_header(request, CREATE_PARENT_HEADER));

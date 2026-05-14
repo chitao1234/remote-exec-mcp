@@ -153,12 +153,16 @@ static std::string decode_data_url_bytes(const std::string& image_url) {
     return base64_decode_bytes(image_url.substr(comma + 1));
 }
 
+static std::string encoded_destination_path_header(const fs::path& destination) {
+    return base64_encode_bytes(destination.string());
+}
+
 static HttpRequest transfer_import_request(const fs::path& destination, const std::string& archive) {
     HttpRequest request;
     request.method = "POST";
     request.path = "/v1/transfer/import";
     request.headers["x-remote-exec-source-type"] = "file";
-    request.headers["x-remote-exec-destination-path"] = destination.string();
+    request.headers["x-remote-exec-destination-path"] = encoded_destination_path_header(destination);
     request.headers["x-remote-exec-overwrite"] = "replace";
     request.headers["x-remote-exec-create-parent"] = "true";
     request.headers["x-remote-exec-symlink-mode"] = "preserve";
@@ -386,7 +390,7 @@ static void assert_transfer_import_success(AppState& state, const fs::path& root
     import_request.method = "POST";
     import_request.path = "/v1/transfer/import";
     import_request.headers["x-remote-exec-source-type"] = "file";
-    import_request.headers["x-remote-exec-destination-path"] = (root / "transfer-dest.txt").string();
+    import_request.headers["x-remote-exec-destination-path"] = encoded_destination_path_header(root / "transfer-dest.txt");
     import_request.headers["x-remote-exec-overwrite"] = "replace";
     import_request.headers["x-remote-exec-create-parent"] = "true";
     import_request.headers["x-remote-exec-symlink-mode"] = "preserve";
@@ -457,7 +461,8 @@ static void assert_transfer_import_rejects_file_merge_into_directory(AppState& s
     merge_file_into_directory_request.method = "POST";
     merge_file_into_directory_request.path = "/v1/transfer/import";
     merge_file_into_directory_request.headers["x-remote-exec-source-type"] = "file";
-    merge_file_into_directory_request.headers["x-remote-exec-destination-path"] = (root / "merge-dir").string();
+    merge_file_into_directory_request.headers["x-remote-exec-destination-path"] =
+        encoded_destination_path_header(root / "merge-dir");
     merge_file_into_directory_request.headers["x-remote-exec-overwrite"] = "merge";
     merge_file_into_directory_request.headers["x-remote-exec-create-parent"] = "true";
     merge_file_into_directory_request.headers["x-remote-exec-symlink-mode"] = "preserve";
@@ -505,7 +510,8 @@ static void assert_sandbox_import_denied(AppState& sandbox_state,
     sandbox_import_denied_request.method = "POST";
     sandbox_import_denied_request.path = "/v1/transfer/import";
     sandbox_import_denied_request.headers["x-remote-exec-source-type"] = "file";
-    sandbox_import_denied_request.headers["x-remote-exec-destination-path"] = (outside / "dest.txt").string();
+    sandbox_import_denied_request.headers["x-remote-exec-destination-path"] =
+        encoded_destination_path_header(outside / "dest.txt");
     sandbox_import_denied_request.headers["x-remote-exec-overwrite"] = "replace";
     sandbox_import_denied_request.headers["x-remote-exec-create-parent"] = "true";
     sandbox_import_denied_request.headers["x-remote-exec-symlink-mode"] = "preserve";
@@ -526,7 +532,8 @@ static void assert_sandbox_symlink_target_denied(AppState& sandbox_state, const 
     sandbox_symlink_target_denied_request.method = "POST";
     sandbox_symlink_target_denied_request.path = "/v1/transfer/import";
     sandbox_symlink_target_denied_request.headers["x-remote-exec-source-type"] = "directory";
-    sandbox_symlink_target_denied_request.headers["x-remote-exec-destination-path"] = write_allowed.string();
+    sandbox_symlink_target_denied_request.headers["x-remote-exec-destination-path"] =
+        encoded_destination_path_header(write_allowed);
     sandbox_symlink_target_denied_request.headers["x-remote-exec-overwrite"] = "merge";
     sandbox_symlink_target_denied_request.headers["x-remote-exec-create-parent"] = "true";
     sandbox_symlink_target_denied_request.headers["x-remote-exec-symlink-mode"] = "preserve";

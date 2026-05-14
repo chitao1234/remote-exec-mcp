@@ -1,3 +1,4 @@
+use base64::Engine;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -101,6 +102,10 @@ impl std::error::Error for TransferHeaderError {}
 
 pub type TransferHeaderPairs = Vec<(&'static str, String)>;
 
+pub fn transfer_destination_path_header_value(destination_path: &str) -> String {
+    base64::engine::general_purpose::STANDARD.encode(destination_path.as_bytes())
+}
+
 pub fn transfer_export_header_pairs(metadata: &TransferExportMetadata) -> TransferHeaderPairs {
     vec![
         (
@@ -118,7 +123,7 @@ pub fn transfer_import_header_pairs(metadata: &TransferImportMetadata) -> Transf
     vec![
         (
             TRANSFER_DESTINATION_PATH_HEADER,
-            metadata.destination_path.clone(),
+            transfer_destination_path_header_value(&metadata.destination_path),
         ),
         (
             TRANSFER_OVERWRITE_HEADER,
@@ -156,10 +161,10 @@ pub fn parse_transfer_import_metadata(
     headers: &TransferHeaders,
 ) -> Result<TransferImportMetadata, TransferHeaderError> {
     Ok(TransferImportMetadata {
-        destination_path: required_transfer_header(
+        destination_path: decode_transfer_destination_path_header(required_transfer_header(
             headers.destination_path.as_ref(),
             TRANSFER_DESTINATION_PATH_HEADER,
-        )?,
+        )?)?,
         overwrite: parse_required_overwrite(headers)?,
         create_parent: parse_required_create_parent(headers)?,
         source_type: parse_required_source_type(headers)?,
@@ -204,6 +209,25 @@ fn validate_transfer_header_value(
     } else {
         Ok(())
     }
+}
+
+fn decode_transfer_destination_path_header(
+    encoded: String,
+) -> Result<String, TransferHeaderError> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&encoded)
+        .map_err(|err| {
+            TransferHeaderError::invalid(
+                TRANSFER_DESTINATION_PATH_HEADER,
+                format!("expected base64-encoded UTF-8 path: {err}"),
+            )
+        })?;
+    String::from_utf8(bytes).map_err(|err| {
+        TransferHeaderError::invalid(
+            TRANSFER_DESTINATION_PATH_HEADER,
+            format!("expected base64-encoded UTF-8 path: {err}"),
+        )
+    })
 }
 
 fn parse_required_source_type(
@@ -302,6 +326,7 @@ mod tests {
         TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
         TRANSFER_SYMLINK_MODE_HEADER, TransferHeaderErrorKind, TransferHeaders,
         parse_transfer_export_metadata, parse_transfer_import_metadata,
+        transfer_destination_path_header_value,
         transfer_export_header_pairs, transfer_import_header_pairs,
     };
     use crate::transfer::{
@@ -341,7 +366,10 @@ mod tests {
         assert_eq!(
             transfer_import_header_pairs(&metadata),
             vec![
-                (TRANSFER_DESTINATION_PATH_HEADER, "/tmp/output".to_string()),
+                (
+                    TRANSFER_DESTINATION_PATH_HEADER,
+                    transfer_destination_path_header_value("/tmp/output"),
+                ),
                 (TRANSFER_OVERWRITE_HEADER, "replace".to_string()),
                 (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
                 (TRANSFER_SOURCE_TYPE_HEADER, "directory".to_string()),
@@ -370,7 +398,10 @@ mod tests {
     #[test]
     fn transfer_header_parser_reads_import_metadata_and_optional_defaults() {
         let headers = transfer_headers(&[
-            (TRANSFER_DESTINATION_PATH_HEADER, "/tmp/output"),
+            (
+                TRANSFER_DESTINATION_PATH_HEADER,
+                "L3RtcC9vdXRwdXQ=",
+            ),
             (TRANSFER_OVERWRITE_HEADER, "merge"),
             (TRANSFER_CREATE_PARENT_HEADER, "false"),
             (TRANSFER_SOURCE_TYPE_HEADER, "file"),
@@ -400,7 +431,10 @@ mod tests {
             TRANSFER_SOURCE_TYPE_HEADER,
         ] {
             let mut headers = transfer_headers(&[
-                (TRANSFER_DESTINATION_PATH_HEADER, "/tmp/output"),
+                (
+                    TRANSFER_DESTINATION_PATH_HEADER,
+                    "L3RtcC9vdXRwdXQ=",
+                ),
                 (TRANSFER_OVERWRITE_HEADER, "merge"),
                 (TRANSFER_CREATE_PARENT_HEADER, "true"),
                 (TRANSFER_SOURCE_TYPE_HEADER, "file"),
@@ -430,7 +464,10 @@ mod tests {
             (TRANSFER_SYMLINK_MODE_HEADER, "copy"),
         ] {
             let mut headers = transfer_headers(&[
-                (TRANSFER_DESTINATION_PATH_HEADER, "/tmp/output"),
+                (
+                    TRANSFER_DESTINATION_PATH_HEADER,
+                    "L3RtcC9vdXRwdXQ=",
+                ),
                 (TRANSFER_OVERWRITE_HEADER, "merge"),
                 (TRANSFER_CREATE_PARENT_HEADER, "true"),
                 (TRANSFER_SOURCE_TYPE_HEADER, "file"),
@@ -457,6 +494,38 @@ mod tests {
     fn transfer_header_parser_rejects_destination_path_with_newlines() {
         let headers = transfer_headers(&[
             (TRANSFER_DESTINATION_PATH_HEADER, "/tmp/output\r\nx-injected: nope"),
+            (TRANSFER_OVERWRITE_HEADER, "merge"),
+            (TRANSFER_CREATE_PARENT_HEADER, "false"),
+            (TRANSFER_SOURCE_TYPE_HEADER, "file"),
+        ]);
+
+        let err = parse_transfer_import_metadata(&headers).unwrap_err();
+
+        assert_eq!(err.kind, TransferHeaderErrorKind::Invalid);
+        assert_eq!(err.header, TRANSFER_DESTINATION_PATH_HEADER);
+    }
+
+    #[test]
+    fn transfer_header_parser_round_trips_unicode_destination_path() {
+        let headers = transfer_headers(&[
+            (
+                TRANSFER_DESTINATION_PATH_HEADER,
+                "L3RtcC/mtYvor5Uv0L/RgNC40LLQtdGCL3LDqXN1bcOpLnR4dA==",
+            ),
+            (TRANSFER_OVERWRITE_HEADER, "merge"),
+            (TRANSFER_CREATE_PARENT_HEADER, "false"),
+            (TRANSFER_SOURCE_TYPE_HEADER, "file"),
+        ]);
+
+        let parsed = parse_transfer_import_metadata(&headers).unwrap();
+
+        assert_eq!(parsed.destination_path, "/tmp/测试/привет/résumé.txt");
+    }
+
+    #[test]
+    fn transfer_header_parser_rejects_non_base64_destination_path() {
+        let headers = transfer_headers(&[
+            (TRANSFER_DESTINATION_PATH_HEADER, "/tmp/output"),
             (TRANSFER_OVERWRITE_HEADER, "merge"),
             (TRANSFER_CREATE_PARENT_HEADER, "false"),
             (TRANSFER_SOURCE_TYPE_HEADER, "file"),

@@ -16,6 +16,7 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 
+#include "base64_codec.h"
 #include "config.h"
 #include "filesystem_sandbox.h"
 #include "http_helpers.h"
@@ -366,6 +367,10 @@ static std::string chunked_body(const std::string& body) {
     }
     out << "0\r\n\r\n";
     return out.str();
+}
+
+static std::string encoded_destination_path_header(const fs::path& destination) {
+    return base64_encode_bytes(destination.string());
 }
 
 static std::string run_single_request(AppState& state, const std::string& request) {
@@ -1545,7 +1550,7 @@ static void assert_http_streaming_routes(AppState& state, const fs::path& root) 
     import_request << "POST /v1/transfer/import HTTP/1.1\r\n"
                    << "Transfer-Encoding: chunked\r\n"
                    << "x-remote-exec-source-type: file\r\n"
-                   << "x-remote-exec-destination-path: " << imported_path.string() << "\r\n"
+                   << "x-remote-exec-destination-path: " << encoded_destination_path_header(imported_path) << "\r\n"
                    << "x-remote-exec-overwrite: replace\r\n"
                    << "x-remote-exec-create-parent: true\r\n"
                    << "x-remote-exec-symlink-mode: preserve\r\n"
@@ -1604,7 +1609,8 @@ static void assert_http_streaming_routes(AppState& state, const fs::path& root) 
     denied_import_request << "POST /v1/transfer/import HTTP/1.1\r\n"
                           << "Transfer-Encoding: chunked\r\n"
                           << "x-remote-exec-source-type: file\r\n"
-                          << "x-remote-exec-destination-path: " << (outside / "imported.txt").string() << "\r\n"
+                          << "x-remote-exec-destination-path: "
+                          << encoded_destination_path_header(outside / "imported.txt") << "\r\n"
                           << "x-remote-exec-overwrite: replace\r\n"
                           << "x-remote-exec-create-parent: true\r\n"
                           << "x-remote-exec-symlink-mode: preserve\r\n"

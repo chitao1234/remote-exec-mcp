@@ -5,6 +5,7 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use remote_exec_proto::rpc::{
+    TransferHeaders, parse_transfer_import_metadata,
     RpcErrorBody, TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
     TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
     TRANSFER_SYMLINK_MODE_HEADER, TransferExportRequest, TransferImportResponse,
@@ -160,11 +161,42 @@ pub(super) async fn transfer_import(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<TransferImportResponse>, (StatusCode, Json<RpcErrorBody>)> {
-    let destination_path = headers
-        .get(TRANSFER_DESTINATION_PATH_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or_default()
-        .to_string();
+    let destination_path = parse_transfer_import_metadata(&TransferHeaders {
+        destination_path: headers
+            .get(TRANSFER_DESTINATION_PATH_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string),
+        overwrite: headers
+            .get(TRANSFER_OVERWRITE_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string),
+        create_parent: headers
+            .get(TRANSFER_CREATE_PARENT_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string),
+        source_type: headers
+            .get(TRANSFER_SOURCE_TYPE_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string),
+        compression: headers
+            .get(TRANSFER_COMPRESSION_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string),
+        symlink_mode: headers
+            .get(TRANSFER_SYMLINK_MODE_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string),
+    })
+    .map_err(|err| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(RpcErrorBody {
+                code: "bad_request".to_string(),
+                message: err.to_string(),
+            }),
+        )
+    })?
+    .destination_path;
     let source_type = headers
         .get(TRANSFER_SOURCE_TYPE_HEADER)
         .and_then(|value| value.to_str().ok())

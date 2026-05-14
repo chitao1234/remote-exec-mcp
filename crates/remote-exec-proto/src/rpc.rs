@@ -20,7 +20,7 @@ pub use transfer::{
     TransferHeaderError, TransferHeaderErrorKind, TransferHeaderPairs, TransferHeaders,
     TransferImportResponse, TransferPathInfoRequest, TransferPathInfoResponse, TransferWarning,
     parse_transfer_export_metadata, parse_transfer_import_metadata, transfer_export_header_pairs,
-    transfer_import_header_pairs,
+    transfer_destination_path_header_value, transfer_import_header_pairs,
 };
 pub use warning::WarningCode;
 

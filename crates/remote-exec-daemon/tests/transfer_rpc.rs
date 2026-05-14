@@ -8,6 +8,7 @@ use remote_exec_proto::rpc::{
     TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER,
     TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER, TransferExportRequest,
     TransferImportResponse, TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType,
+    transfer_destination_path_header_value,
 };
 use remote_exec_proto::transfer::TransferCompression;
 #[cfg(unix)]
@@ -53,11 +54,18 @@ fn import_headers(
     source_type: &str,
 ) -> Vec<(&'static str, String)> {
     vec![
-        (TRANSFER_DESTINATION_PATH_HEADER, destination.to_string()),
+        encoded_destination_header(destination),
         (TRANSFER_OVERWRITE_HEADER, overwrite.to_string()),
         (TRANSFER_CREATE_PARENT_HEADER, create_parent.to_string()),
         (TRANSFER_SOURCE_TYPE_HEADER, source_type.to_string()),
     ]
+}
+
+fn encoded_destination_header(destination: impl ToString) -> (&'static str, String) {
+    (
+        TRANSFER_DESTINATION_PATH_HEADER,
+        transfer_destination_path_header_value(&destination.to_string()),
+    )
 }
 
 #[tokio::test]
@@ -310,6 +318,29 @@ async fn export_directory_skips_special_files_with_warning() {
 }
 
 #[tokio::test]
+async fn import_accepts_unicode_destination_paths() {
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let destination = fixture.workdir.join("导入").join("résumé.txt");
+    let body = raw_tar_file_with_path(".remote-exec-file", b"hello unicode\n");
+
+    let response = fixture
+        .raw_post_bytes(
+            "/v1/transfer/import",
+            &import_headers(destination.display(), "replace", "true", "file"),
+            body,
+        )
+        .await;
+
+    assert!(response.status().is_success());
+    let summary = response.json::<TransferImportResponse>().await.unwrap();
+    assert_eq!(summary.bytes_copied, 14);
+    assert_eq!(
+        tokio::fs::read_to_string(&destination).await.unwrap(),
+        "hello unicode\n"
+    );
+}
+
+#[tokio::test]
 async fn export_directory_excludes_matching_entries_relative_to_source_root() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
     let root = fixture.workdir.join("dist");
@@ -464,7 +495,7 @@ async fn import_accepts_forward_slash_windows_destination_paths() {
         .raw_post_bytes(
             "/v1/transfer/import",
             &[
-                (TRANSFER_DESTINATION_PATH_HEADER, destination_text),
+                encoded_destination_header(destination_text),
                 (TRANSFER_OVERWRITE_HEADER, "fail".to_string()),
                 (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
                 (TRANSFER_SOURCE_TYPE_HEADER, "file".to_string()),
@@ -540,10 +571,7 @@ async fn import_accepts_cygwin_style_windows_destination_paths() {
         .raw_post_bytes(
             "/v1/transfer/import",
             &[
-                (
-                    TRANSFER_DESTINATION_PATH_HEADER,
-                    support::cygwin_style_path(&destination),
-                ),
+                encoded_destination_header(support::cygwin_style_path(&destination)),
                 (TRANSFER_OVERWRITE_HEADER, "fail".to_string()),
                 (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
                 (TRANSFER_SOURCE_TYPE_HEADER, "file".to_string()),
@@ -628,10 +656,7 @@ async fn import_accepts_windows_posix_root_destination_paths() {
         .raw_post_bytes(
             "/v1/transfer/import",
             &[
-                (
-                    TRANSFER_DESTINATION_PATH_HEADER,
-                    "/release/artifact.txt".to_string(),
-                ),
+                encoded_destination_header("/release/artifact.txt"),
                 (TRANSFER_OVERWRITE_HEADER, "fail".to_string()),
                 (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
                 (TRANSFER_SOURCE_TYPE_HEADER, "file".to_string()),
@@ -711,10 +736,7 @@ async fn import_multiple_source_archive_creates_destination_directory_bundle() {
         .raw_post_bytes(
             "/v1/transfer/import",
             &[
-                (
-                    TRANSFER_DESTINATION_PATH_HEADER,
-                    destination.display().to_string(),
-                ),
+                encoded_destination_header(destination.display()),
                 (TRANSFER_OVERWRITE_HEADER, "replace".to_string()),
                 (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
                 (TRANSFER_SOURCE_TYPE_HEADER, "multiple".to_string()),
@@ -753,10 +775,7 @@ async fn import_directory_preserves_symlinks_by_default() {
         .raw_post_bytes(
             "/v1/transfer/import",
             &[
-                (
-                    TRANSFER_DESTINATION_PATH_HEADER,
-                    destination.display().to_string(),
-                ),
+                encoded_destination_header(destination.display()),
                 (TRANSFER_OVERWRITE_HEADER, "replace".to_string()),
                 (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
                 (TRANSFER_SOURCE_TYPE_HEADER, "directory".to_string()),
@@ -811,10 +830,7 @@ async fn import_directory_merge_preserves_unrelated_destination_entries() {
         .raw_post_bytes(
             "/v1/transfer/import",
             &[
-                (
-                    TRANSFER_DESTINATION_PATH_HEADER,
-                    destination.display().to_string(),
-                ),
+                encoded_destination_header(destination.display()),
                 (TRANSFER_OVERWRITE_HEADER, "merge".to_string()),
                 (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
                 (TRANSFER_SOURCE_TYPE_HEADER, "directory".to_string()),
@@ -860,10 +876,7 @@ async fn import_directory_merge_rejects_existing_file_destination() {
         .raw_post_bytes(
             "/v1/transfer/import",
             &[
-                (
-                    TRANSFER_DESTINATION_PATH_HEADER,
-                    destination.display().to_string(),
-                ),
+                encoded_destination_header(destination.display()),
                 (TRANSFER_OVERWRITE_HEADER, "merge".to_string()),
                 (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
                 (TRANSFER_SOURCE_TYPE_HEADER, "directory".to_string()),
@@ -980,10 +993,7 @@ async fn import_rejects_missing_create_parent_header_as_bad_request() {
         .raw_post_bytes(
             "/v1/transfer/import",
             &[
-                (
-                    TRANSFER_DESTINATION_PATH_HEADER,
-                    destination.display().to_string(),
-                ),
+                encoded_destination_header(destination.display()),
                 (TRANSFER_OVERWRITE_HEADER, "replace".to_string()),
                 (TRANSFER_SOURCE_TYPE_HEADER, "file".to_string()),
             ],
@@ -1025,10 +1035,7 @@ async fn import_rejects_invalid_create_parent_header_as_bad_request() {
         .raw_post_bytes(
             "/v1/transfer/import",
             &[
-                (
-                    TRANSFER_DESTINATION_PATH_HEADER,
-                    destination.display().to_string(),
-                ),
+                encoded_destination_header(destination.display()),
                 (TRANSFER_OVERWRITE_HEADER, "replace".to_string()),
                 (TRANSFER_CREATE_PARENT_HEADER, "yes".to_string()),
                 (TRANSFER_SOURCE_TYPE_HEADER, "file".to_string()),
@@ -1071,10 +1078,7 @@ async fn import_rejects_invalid_metadata_enum_header_as_bad_request() {
         .raw_post_bytes(
             "/v1/transfer/import",
             &[
-                (
-                    TRANSFER_DESTINATION_PATH_HEADER,
-                    destination.display().to_string(),
-                ),
+                encoded_destination_header(destination.display()),
                 (TRANSFER_OVERWRITE_HEADER, "clobber".to_string()),
                 (TRANSFER_CREATE_PARENT_HEADER, "true".to_string()),
                 (TRANSFER_SOURCE_TYPE_HEADER, "file".to_string()),
