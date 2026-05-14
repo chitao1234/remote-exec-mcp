@@ -172,9 +172,11 @@ fn required_transfer_header(
     value: Option<&String>,
     name: &'static str,
 ) -> Result<String, TransferHeaderError> {
-    value
+    let value = value
         .cloned()
-        .ok_or_else(|| TransferHeaderError::missing(name))
+        .ok_or_else(|| TransferHeaderError::missing(name))?;
+    validate_transfer_header_value(&value, name)?;
+    Ok(value)
 }
 
 fn optional_transfer_header(
@@ -183,16 +185,24 @@ fn optional_transfer_header(
 ) -> Result<Option<String>, TransferHeaderError> {
     match value {
         Some(value) => {
-            if value.contains('\n') || value.contains('\r') {
-                Err(TransferHeaderError::invalid(
-                    name,
-                    "header value contains invalid newline characters",
-                ))
-            } else {
-                Ok(Some(value.clone()))
-            }
+            validate_transfer_header_value(value, name)?;
+            Ok(Some(value.clone()))
         }
         None => Ok(None),
+    }
+}
+
+fn validate_transfer_header_value(
+    value: &str,
+    name: &'static str,
+) -> Result<(), TransferHeaderError> {
+    if value.contains('\n') || value.contains('\r') {
+        Err(TransferHeaderError::invalid(
+            name,
+            "header value contains invalid newline characters",
+        ))
+    } else {
+        Ok(())
     }
 }
 
@@ -441,6 +451,21 @@ mod tests {
             assert_eq!(err.kind, TransferHeaderErrorKind::Invalid);
             assert_eq!(err.header, header);
         }
+    }
+
+    #[test]
+    fn transfer_header_parser_rejects_destination_path_with_newlines() {
+        let headers = transfer_headers(&[
+            (TRANSFER_DESTINATION_PATH_HEADER, "/tmp/output\r\nx-injected: nope"),
+            (TRANSFER_OVERWRITE_HEADER, "merge"),
+            (TRANSFER_CREATE_PARENT_HEADER, "false"),
+            (TRANSFER_SOURCE_TYPE_HEADER, "file"),
+        ]);
+
+        let err = parse_transfer_import_metadata(&headers).unwrap_err();
+
+        assert_eq!(err.kind, TransferHeaderErrorKind::Invalid);
+        assert_eq!(err.header, TRANSFER_DESTINATION_PATH_HEADER);
     }
 
     #[test]
