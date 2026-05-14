@@ -1,6 +1,6 @@
 #include "port_tunnel_frame.h"
 
-#include <cassert>
+#include "test_assert.h"
 #include <string>
 #include <vector>
 
@@ -13,7 +13,7 @@ void assert_decode_rejects(const std::vector<unsigned char>& bytes) {
     } catch (const PortTunnelFrameError&) {
         rejected = true;
     }
-    assert(rejected);
+    TEST_ASSERT(rejected);
 }
 
 void assert_control_frame_round_trips(PortTunnelFrameType type) {
@@ -24,9 +24,9 @@ void assert_control_frame_round_trips(PortTunnelFrameType type) {
     frame.meta = "{\"forward_id\":\"fwd_test\",\"generation\":1}";
     const std::vector<unsigned char> bytes = encode_port_tunnel_frame(frame);
     const PortTunnelFrame decoded = decode_port_tunnel_frame(bytes);
-    assert(decoded.type == type);
-    assert(decoded.stream_id == 0U);
-    assert(decoded.meta == frame.meta);
+    TEST_ASSERT(decoded.type == type);
+    TEST_ASSERT(decoded.stream_id == 0U);
+    TEST_ASSERT(decoded.meta == frame.meta);
 }
 
 std::vector<unsigned char>
@@ -51,7 +51,7 @@ frame_header(unsigned char frame_type, uint32_t stream_id, uint32_t meta_len, ui
 } // namespace
 
 int main() {
-    assert(std::string(port_tunnel_preface(), port_tunnel_preface_size()) == "REPFWD1\n");
+    TEST_ASSERT(std::string(port_tunnel_preface(), port_tunnel_preface_size()) == "REPFWD1\n");
 
     PortTunnelFrame frame;
     frame.type = PortTunnelFrameType::TcpData;
@@ -62,20 +62,20 @@ int main() {
 
     const std::vector<unsigned char> encoded = encode_port_tunnel_frame(frame);
     const PortTunnelFrame decoded = decode_port_tunnel_frame(encoded);
-    assert(decoded.type == PortTunnelFrameType::TcpData);
-    assert(decoded.flags == 7U);
-    assert(decoded.stream_id == 3U);
-    assert(decoded.meta == "{\"note\":\"binary\"}");
-    assert(decoded.data == frame.data);
+    TEST_ASSERT(decoded.type == PortTunnelFrameType::TcpData);
+    TEST_ASSERT(decoded.flags == 7U);
+    TEST_ASSERT(decoded.stream_id == 3U);
+    TEST_ASSERT(decoded.meta == "{\"note\":\"binary\"}");
+    TEST_ASSERT(decoded.data == frame.data);
 
     PortTunnelFrame empty_control;
     empty_control.type = PortTunnelFrameType::TunnelHeartbeat;
     empty_control.flags = 0U;
     empty_control.stream_id = 0U;
     const PortTunnelFrame decoded_empty_control = decode_port_tunnel_frame(encode_port_tunnel_frame(empty_control));
-    assert(decoded_empty_control.type == PortTunnelFrameType::TunnelHeartbeat);
-    assert(decoded_empty_control.meta.empty());
-    assert(decoded_empty_control.data.empty());
+    TEST_ASSERT(decoded_empty_control.type == PortTunnelFrameType::TunnelHeartbeat);
+    TEST_ASSERT(decoded_empty_control.meta.empty());
+    TEST_ASSERT(decoded_empty_control.data.empty());
 
     PortTunnelFrame data_without_meta;
     data_without_meta.type = PortTunnelFrameType::TcpData;
@@ -84,10 +84,10 @@ int main() {
     data_without_meta.data = {static_cast<unsigned char>('o'), static_cast<unsigned char>('k')};
     const PortTunnelFrame decoded_data_without_meta =
         decode_port_tunnel_frame(encode_port_tunnel_frame(data_without_meta));
-    assert(decoded_data_without_meta.type == PortTunnelFrameType::TcpData);
-    assert(decoded_data_without_meta.stream_id == 42U);
-    assert(decoded_data_without_meta.meta.empty());
-    assert(decoded_data_without_meta.data == data_without_meta.data);
+    TEST_ASSERT(decoded_data_without_meta.type == PortTunnelFrameType::TcpData);
+    TEST_ASSERT(decoded_data_without_meta.stream_id == 42U);
+    TEST_ASSERT(decoded_data_without_meta.meta.empty());
+    TEST_ASSERT(decoded_data_without_meta.data == data_without_meta.data);
 
     assert_control_frame_round_trips(PortTunnelFrameType::TunnelOpen);
     assert_control_frame_round_trips(PortTunnelFrameType::TunnelReady);

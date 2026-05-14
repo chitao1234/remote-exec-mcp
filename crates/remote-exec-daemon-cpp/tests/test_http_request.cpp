@@ -1,4 +1,4 @@
-#include <cassert>
+#include "test_assert.h"
 #include <string>
 
 #include "http_helpers.h"
@@ -11,7 +11,7 @@ static void assert_rejects(const std::string& raw) {
     } catch (const HttpParseError&) {
         rejected = true;
     }
-    assert(rejected);
+    TEST_ASSERT(rejected);
 }
 
 int main() {
@@ -23,28 +23,28 @@ int main() {
                             "{\"cmd\":\"dir\"}";
 
     const HttpRequest request = parse_http_request(raw);
-    assert(request.method == "POST");
-    assert(request.path == "/v1/exec/start");
-    assert(request.header("content-length") == "13");
-    assert(request.header("x-test") == "Value");
-    assert(request.header("authorization") == "Bearer shared-secret");
-    assert(request.body == "{\"cmd\":\"dir\"}");
-    assert(request_has_bearer_auth(request, "shared-secret"));
-    assert(!request_has_bearer_auth(request, "wrong-secret"));
-    assert(!request_has_bearer_auth(request, "shared"));
-    assert(!request_has_bearer_auth(request, "shared-secret-extra"));
+    TEST_ASSERT(request.method == "POST");
+    TEST_ASSERT(request.path == "/v1/exec/start");
+    TEST_ASSERT(request.header("content-length") == "13");
+    TEST_ASSERT(request.header("x-test") == "Value");
+    TEST_ASSERT(request.header("authorization") == "Bearer shared-secret");
+    TEST_ASSERT(request.body == "{\"cmd\":\"dir\"}");
+    TEST_ASSERT(request_has_bearer_auth(request, "shared-secret"));
+    TEST_ASSERT(!request_has_bearer_auth(request, "wrong-secret"));
+    TEST_ASSERT(!request_has_bearer_auth(request, "shared"));
+    TEST_ASSERT(!request_has_bearer_auth(request, "shared-secret-extra"));
 
     HttpRequest wrong_prefix = request;
     wrong_prefix.headers["authorization"] = "Basic shared-secret";
-    assert(!request_has_bearer_auth(wrong_prefix, "shared-secret"));
+    TEST_ASSERT(!request_has_bearer_auth(wrong_prefix, "shared-secret"));
 
     HttpRequest shorter_value = request;
     shorter_value.headers["authorization"] = "Bearer shared";
-    assert(!request_has_bearer_auth(shorter_value, "shared-secret"));
+    TEST_ASSERT(!request_has_bearer_auth(shorter_value, "shared-secret"));
 
     HttpRequest longer_value = request;
     longer_value.headers["authorization"] = "Bearer shared-secret-extra";
-    assert(!request_has_bearer_auth(longer_value, "shared-secret"));
+    TEST_ASSERT(!request_has_bearer_auth(longer_value, "shared-secret"));
 
     const std::string chunked_raw = "POST /v1/exec/start HTTP/1.1\r\n"
                                     "Transfer-Encoding: chunked\r\n"
@@ -58,8 +58,8 @@ int main() {
                                     "\r\n";
 
     const HttpRequest chunked_request = parse_http_request(chunked_raw);
-    assert(chunked_request.header("transfer-encoding") == "chunked");
-    assert(chunked_request.body == "{\"cmd\":\"dir\"}");
+    TEST_ASSERT(chunked_request.header("transfer-encoding") == "chunked");
+    TEST_ASSERT(chunked_request.body == "{\"cmd\":\"dir\"}");
 
     assert_rejects("POST /v1/exec/start HTTP/1.1\r\n"
                    "Transfer-Encoding: chunked\r\n"
@@ -71,17 +71,17 @@ int main() {
 
     HttpResponse unauthorized;
     write_bearer_auth_challenge(unauthorized);
-    assert(unauthorized.status == 401);
-    assert(unauthorized.headers["WWW-Authenticate"] == "Bearer");
-    assert(unauthorized.body.find("\"code\":\"unauthorized\"") != std::string::npos);
+    TEST_ASSERT(unauthorized.status == 401);
+    TEST_ASSERT(unauthorized.headers["WWW-Authenticate"] == "Bearer");
+    TEST_ASSERT(unauthorized.body.find("\"code\":\"unauthorized\"") != std::string::npos);
 
     HttpResponse ok;
     write_json(ok, Json{{"status", "ok"}});
     const std::string rendered = render_http_response(ok);
-    assert(rendered.find("HTTP/1.1 200 OK\r\n") == 0);
-    assert(rendered.find("Content-Type: application/json\r\n") != std::string::npos);
-    assert(rendered.find("Content-Length: ") != std::string::npos);
-    assert(rendered.find("Connection: close\r\n") == std::string::npos);
+    TEST_ASSERT(rendered.find("HTTP/1.1 200 OK\r\n") == 0);
+    TEST_ASSERT(rendered.find("Content-Type: application/json\r\n") != std::string::npos);
+    TEST_ASSERT(rendered.find("Content-Length: ") != std::string::npos);
+    TEST_ASSERT(rendered.find("Connection: close\r\n") == std::string::npos);
 
     assert_rejects("invalid");
     assert_rejects("POST /v1/exec/start\r\n"

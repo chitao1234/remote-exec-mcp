@@ -1,6 +1,6 @@
 #pragma once
 
-#include <cassert>
+#include "test_assert.h"
 #include <cstring>
 #include <utility>
 
@@ -30,7 +30,7 @@ inline ConnectedSocketPair make_connected_socket_pair() {
 
 #ifdef _WIN32
     UniqueSocket listener(socket(AF_INET, SOCK_STREAM, IPPROTO_TCP));
-    assert(listener.valid());
+    TEST_ASSERT(listener.valid());
 
     sockaddr_in address;
     std::memset(&address, 0, sizeof(address));
@@ -38,22 +38,22 @@ inline ConnectedSocketPair make_connected_socket_pair() {
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     address.sin_port = 0;
 
-    assert(bind(listener.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
-    assert(listen(listener.get(), 1) == 0);
+    TEST_ASSERT(bind(listener.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
+    TEST_ASSERT(listen(listener.get(), 1) == 0);
 
     int address_len = sizeof(address);
-    assert(getsockname(listener.get(), reinterpret_cast<sockaddr*>(&address), &address_len) == 0);
+    TEST_ASSERT(getsockname(listener.get(), reinterpret_cast<sockaddr*>(&address), &address_len) == 0);
 
     UniqueSocket client(socket(AF_INET, SOCK_STREAM, IPPROTO_TCP));
-    assert(client.valid());
-    assert(connect(client.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
+    TEST_ASSERT(client.valid());
+    TEST_ASSERT(connect(client.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
 
     const SOCKET accepted_socket = accept(listener.get(), NULL, NULL);
-    assert(accepted_socket != INVALID_SOCKET);
+    TEST_ASSERT(accepted_socket != INVALID_SOCKET);
     return ConnectedSocketPair(UniqueSocket(accepted_socket), std::move(client));
 #else
     int sockets[2];
-    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
+    TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
     return ConnectedSocketPair(UniqueSocket(sockets[0]), UniqueSocket(sockets[1]));
 #endif
 }

@@ -1,4 +1,4 @@
-#include <cassert>
+#include "test_assert.h"
 #include <cstdint>
 #include <cstring>
 #include <sstream>
@@ -54,7 +54,7 @@ static SOCKET connect_client(unsigned short port) {
     hints.ai_protocol = IPPROTO_TCP;
 
     addrinfo* result = NULL;
-    assert(getaddrinfo("127.0.0.1", service.str().c_str(), &hints, &result) == 0);
+    TEST_ASSERT(getaddrinfo("127.0.0.1", service.str().c_str(), &hints, &result) == 0);
 
     SOCKET client = INVALID_SOCKET;
     for (addrinfo* current = result; current != NULL; current = current->ai_next) {
@@ -70,13 +70,13 @@ static SOCKET connect_client(unsigned short port) {
     }
 
     freeaddrinfo(result);
-    assert(client != INVALID_SOCKET);
+    TEST_ASSERT(client != INVALID_SOCKET);
     return client;
 }
 
 static void assert_health_request(ServerRuntime& runtime, unsigned short port) {
     UniqueSocket client(connect_client(port));
-    assert(wait_for_active_connections(runtime.connection_manager(), 1UL, TEST_TIMEOUT_MS));
+    TEST_ASSERT(wait_for_active_connections(runtime.connection_manager(), 1UL, TEST_TIMEOUT_MS));
 
     send_all(client.get(),
              "POST /v1/health HTTP/1.1\r\n"
@@ -85,9 +85,9 @@ static void assert_health_request(ServerRuntime& runtime, unsigned short port) {
              "\r\n");
 
     const std::string response = read_all_from_socket(client.get());
-    assert(response.find("HTTP/1.1 200 OK\r\n") == 0);
-    assert(response.find("\"status\":\"ok\"") != std::string::npos);
-    assert(wait_for_active_connections(runtime.connection_manager(), 0UL, TEST_TIMEOUT_MS));
+    TEST_ASSERT(response.find("HTTP/1.1 200 OK\r\n") == 0);
+    TEST_ASSERT(response.find("\"status\":\"ok\"") != std::string::npos);
+    TEST_ASSERT(wait_for_active_connections(runtime.connection_manager(), 0UL, TEST_TIMEOUT_MS));
 }
 
 int main() {
@@ -110,12 +110,12 @@ int main() {
     ServerRuntime runtime(config);
     runtime.start_accept_loop();
     const unsigned short port = runtime.bound_port();
-    assert(port != 0);
+    TEST_ASSERT(port != 0);
     assert_health_request(runtime, port);
 
     runtime.request_shutdown();
     runtime.maintenance_once();
-    assert(runtime.connection_manager().active_count() == 0UL);
+    TEST_ASSERT(runtime.connection_manager().active_count() == 0UL);
     runtime.join();
-    assert(runtime.connection_manager().active_count() == 0UL);
+    TEST_ASSERT(runtime.connection_manager().active_count() == 0UL);
 }

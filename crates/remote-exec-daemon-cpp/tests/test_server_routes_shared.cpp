@@ -1,5 +1,5 @@
 #include <algorithm>
-#include <cassert>
+#include "test_assert.h"
 #include <cstdint>
 #include <cstdio>
 #include <iterator>
@@ -131,7 +131,7 @@ static void write_binary_file(const fs::path& path, const std::string& value) {
 
 static std::string decode_data_url_bytes(const std::string& image_url) {
     const std::size_t comma = image_url.find(',');
-    assert(comma != std::string::npos);
+    TEST_ASSERT(comma != std::string::npos);
     return base64_decode_bytes(image_url.substr(comma + 1));
 }
 
@@ -158,11 +158,11 @@ static void assert_bad_request_for_transfer_import(AppState& state,
                                                    const fs::path& destination,
                                                    const std::string& message_fragment) {
     const HttpResponse response = route_request(state, request);
-    assert(response.status == 400);
+    TEST_ASSERT(response.status == 400);
     const Json body = Json::parse(response.body);
-    assert(body.at("code").get<std::string>() == "bad_request");
-    assert(body.at("message").get<std::string>().find(message_fragment) != std::string::npos);
-    assert(!fs::exists(destination));
+    TEST_ASSERT(body.at("code").get<std::string>() == "bad_request");
+    TEST_ASSERT(body.at("message").get<std::string>().find(message_fragment) != std::string::npos);
+    TEST_ASSERT(!fs::exists(destination));
 }
 
 static void assert_target_info_and_basic_helpers(AppState& state) {
@@ -171,37 +171,37 @@ static void assert_target_info_and_basic_helpers(AppState& state) {
     info_request.path = "/v1/target-info";
     info_request.headers[request_id_header_name()] = "client-req-123";
     const HttpResponse info_response = route_request(state, info_request);
-    assert(info_response.status == 200);
-    assert(info_response.headers.at(request_id_header_name()) == "client-req-123");
+    TEST_ASSERT(info_response.status == 200);
+    TEST_ASSERT(info_response.headers.at(request_id_header_name()) == "client-req-123");
     const Json info = Json::parse(info_response.body);
-    assert(info.at("target").get<std::string>() == "cpp-test");
-    assert(info.at("supports_pty").get<bool>() == process_session_supports_pty());
-    assert(info.at("supports_image_read").get<bool>());
-    assert(info.at("supports_port_forward").get<bool>());
-    assert(info.at("port_forward_protocol_version").get<int>() == 4);
+    TEST_ASSERT(info.at("target").get<std::string>() == "cpp-test");
+    TEST_ASSERT(info.at("supports_pty").get<bool>() == process_session_supports_pty());
+    TEST_ASSERT(info.at("supports_image_read").get<bool>());
+    TEST_ASSERT(info.at("supports_port_forward").get<bool>());
+    TEST_ASSERT(info.at("port_forward_protocol_version").get<int>() == 4);
 
     HttpRequest generated_request;
     generated_request.method = "POST";
     generated_request.path = "/v1/health";
     const HttpResponse generated_response = route_request(state, generated_request);
-    assert(generated_response.status == 200);
-    assert(generated_response.headers.at(request_id_header_name()).find("req_cpp_") == 0);
+    TEST_ASSERT(generated_response.status == 200);
+    TEST_ASSERT(generated_response.headers.at(request_id_header_name()).find("req_cpp_") == 0);
 
-    assert(normalize_port_forward_endpoint("8080") == "127.0.0.1:8080");
-    assert(base64_decode_bytes(base64_encode_bytes(std::string("hello\0world", 11))).size() == 11);
+    TEST_ASSERT(normalize_port_forward_endpoint("8080") == "127.0.0.1:8080");
+    TEST_ASSERT(base64_decode_bytes(base64_encode_bytes(std::string("hello\0world", 11))).size() == 11);
 }
 
 static void assert_transfer_export_errors(AppState& state, const fs::path& root) {
     const HttpResponse compression_response = route_request(
         state,
         json_request("/v1/transfer/export", Json{{"path", (root / "missing.txt").string()}, {"compression", "zstd"}}));
-    assert(compression_response.status == 400);
-    assert(Json::parse(compression_response.body).at("code").get<std::string>() == "transfer_compression_unsupported");
+    TEST_ASSERT(compression_response.status == 400);
+    TEST_ASSERT(Json::parse(compression_response.body).at("code").get<std::string>() == "transfer_compression_unsupported");
 
     const HttpResponse missing_source_response =
         route_request(state, json_request("/v1/transfer/export", Json{{"path", (root / "missing.txt").string()}}));
-    assert(missing_source_response.status == 400);
-    assert(Json::parse(missing_source_response.body).at("code").get<std::string>() == "transfer_source_missing");
+    TEST_ASSERT(missing_source_response.status == 400);
+    TEST_ASSERT(Json::parse(missing_source_response.body).at("code").get<std::string>() == "transfer_source_missing");
 }
 
 static void assert_image_routes(AppState& state, const fs::path& root) {
@@ -214,33 +214,33 @@ static void assert_image_routes(AppState& state, const fs::path& root) {
 
     const HttpResponse image_response =
         route_request(state, json_request("/v1/image/read", Json{{"path", "tiny.png"}, {"workdir", root.string()}}));
-    assert(image_response.status == 200);
+    TEST_ASSERT(image_response.status == 200);
     const Json image = Json::parse(image_response.body);
-    assert(image.at("detail").get<std::string>() == "original");
-    assert(image.at("image_url").get<std::string>().find("data:image/png;base64,") == 0);
-    assert(decode_data_url_bytes(image.at("image_url").get<std::string>()) == original_image);
+    TEST_ASSERT(image.at("detail").get<std::string>() == "original");
+    TEST_ASSERT(image.at("image_url").get<std::string>().find("data:image/png;base64,") == 0);
+    TEST_ASSERT(decode_data_url_bytes(image.at("image_url").get<std::string>()) == original_image);
 
     const HttpResponse invalid_detail_response = route_request(
         state,
         json_request("/v1/image/read", Json{{"path", "tiny.png"}, {"workdir", root.string()}, {"detail", "low"}}));
-    assert(invalid_detail_response.status == 400);
+    TEST_ASSERT(invalid_detail_response.status == 400);
     const Json invalid_detail = Json::parse(invalid_detail_response.body);
-    assert(invalid_detail.at("code").get<std::string>() == "invalid_detail");
+    TEST_ASSERT(invalid_detail.at("code").get<std::string>() == "invalid_detail");
 
     const HttpResponse missing_image_response =
         route_request(state, json_request("/v1/image/read", Json{{"path", "missing.png"}, {"workdir", root.string()}}));
-    assert(missing_image_response.status == 400);
+    TEST_ASSERT(missing_image_response.status == 400);
     const Json missing_image = Json::parse(missing_image_response.body);
-    assert(missing_image.at("code").get<std::string>() == "image_missing");
+    TEST_ASSERT(missing_image.at("code").get<std::string>() == "image_missing");
 
     const fs::path gif_file = root / "tiny.gif";
     write_binary_file(gif_file, base64_decode_bytes("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="));
 
     const HttpResponse gif_response =
         route_request(state, json_request("/v1/image/read", Json{{"path", "tiny.gif"}, {"workdir", root.string()}}));
-    assert(gif_response.status == 400);
+    TEST_ASSERT(gif_response.status == 400);
     const Json gif_error = Json::parse(gif_response.body);
-    assert(gif_error.at("code").get<std::string>() == "image_decode_failed");
+    TEST_ASSERT(gif_error.at("code").get<std::string>() == "image_decode_failed");
 
 #ifndef _WIN32
     const fs::path blocked_image_dir = root / "blocked-image";
@@ -253,9 +253,9 @@ static void assert_image_routes(AppState& state, const fs::path& root) {
     const HttpResponse blocked_image_response = route_request(
         state, json_request("/v1/image/read", Json{{"path", "blocked-image/blocked.png"}, {"workdir", root.string()}}));
     fs::permissions(blocked_image_dir, fs::perms::owner_all, fs::perm_options::replace);
-    assert(blocked_image_response.status == 500);
+    TEST_ASSERT(blocked_image_response.status == 500);
     const Json blocked_image_error = Json::parse(blocked_image_response.body);
-    assert(blocked_image_error.at("code").get<std::string>() == "internal_error");
+    TEST_ASSERT(blocked_image_error.at("code").get<std::string>() == "internal_error");
 #endif
 }
 
@@ -268,13 +268,13 @@ static void assert_patch_route_audit_fields(AppState& state, const fs::path& roo
 
     const HttpResponse response =
         route_request(state, json_request("/v1/patch/apply", Json{{"workdir", root.string()}, {"patch", patch_text}}));
-    assert(response.status == 200);
+    TEST_ASSERT(response.status == 200);
     const Json body = Json::parse(response.body);
-    assert(body.at("output").get<std::string>().find("A patch-audit.txt") != std::string::npos);
-    assert(body.at("daemon_instance_id").get<std::string>() == state.daemon_instance_id);
-    assert(body.at("updated_paths").size() == 1);
-    assert(body.at("updated_paths")[0].get<std::string>() == "A patch-audit.txt");
-    assert(read_text_file(patch_file) == "audit\n");
+    TEST_ASSERT(body.at("output").get<std::string>().find("A patch-audit.txt") != std::string::npos);
+    TEST_ASSERT(body.at("daemon_instance_id").get<std::string>() == state.daemon_instance_id);
+    TEST_ASSERT(body.at("updated_paths").size() == 1);
+    TEST_ASSERT(body.at("updated_paths")[0].get<std::string>() == "A patch-audit.txt");
+    TEST_ASSERT(read_text_file(patch_file) == "audit\n");
 }
 
 static void assert_transfer_path_info_routes(AppState& state, const fs::path& root) {
@@ -283,23 +283,23 @@ static void assert_transfer_path_info_routes(AppState& state, const fs::path& ro
 
     const HttpResponse source_info_response =
         route_request(state, json_request("/v1/transfer/path-info", Json{{"path", source_file.string()}}));
-    assert(source_info_response.status == 200);
+    TEST_ASSERT(source_info_response.status == 200);
     const Json source_info = Json::parse(source_info_response.body);
-    assert(source_info.at("exists").get<bool>());
-    assert(!source_info.at("is_directory").get<bool>());
+    TEST_ASSERT(source_info.at("exists").get<bool>());
+    TEST_ASSERT(!source_info.at("is_directory").get<bool>());
 
     const HttpResponse root_info_response =
         route_request(state, json_request("/v1/transfer/path-info", Json{{"path", root.string()}}));
-    assert(root_info_response.status == 200);
+    TEST_ASSERT(root_info_response.status == 200);
     const Json root_info = Json::parse(root_info_response.body);
-    assert(root_info.at("exists").get<bool>());
-    assert(root_info.at("is_directory").get<bool>());
+    TEST_ASSERT(root_info.at("exists").get<bool>());
+    TEST_ASSERT(root_info.at("is_directory").get<bool>());
 
     const HttpResponse relative_info_response =
         route_request(state, json_request("/v1/transfer/path-info", Json{{"path", "relative/path.txt"}}));
-    assert(relative_info_response.status == 400);
+    TEST_ASSERT(relative_info_response.status == 400);
     const Json relative_info_error = Json::parse(relative_info_response.body);
-    assert(relative_info_error.at("code").get<std::string>() == "transfer_path_not_absolute");
+    TEST_ASSERT(relative_info_error.at("code").get<std::string>() == "transfer_path_not_absolute");
 
 #ifndef _WIN32
     const fs::path blocked_transfer_dir = root / "blocked-transfer";
@@ -309,9 +309,9 @@ static void assert_transfer_path_info_routes(AppState& state, const fs::path& ro
     const HttpResponse blocked_transfer_info_response = route_request(
         state, json_request("/v1/transfer/path-info", Json{{"path", (blocked_transfer_dir / "inside.txt").string()}}));
     fs::permissions(blocked_transfer_dir, fs::perms::owner_all, fs::perm_options::replace);
-    assert(blocked_transfer_info_response.status == 500);
+    TEST_ASSERT(blocked_transfer_info_response.status == 500);
     const Json blocked_transfer_info_error = Json::parse(blocked_transfer_info_response.body);
-    assert(blocked_transfer_info_error.at("code").get<std::string>() == "internal_error");
+    TEST_ASSERT(blocked_transfer_info_error.at("code").get<std::string>() == "internal_error");
 #endif
 }
 
@@ -321,11 +321,11 @@ static std::string assert_transfer_export_and_exclude_routes(AppState& state, co
 
     const HttpResponse export_response =
         route_request(state, json_request("/v1/transfer/export", Json{{"path", source_file.string()}}));
-    assert(export_response.status == 200);
-    assert(export_response.headers.at("Content-Type") == "application/octet-stream");
-    assert(export_response.headers.at("x-remote-exec-source-type") == "file");
-    assert(export_response.headers.at("x-remote-exec-compression") == "none");
-    assert(!export_response.body.empty());
+    TEST_ASSERT(export_response.status == 200);
+    TEST_ASSERT(export_response.headers.at("Content-Type") == "application/octet-stream");
+    TEST_ASSERT(export_response.headers.at("x-remote-exec-source-type") == "file");
+    TEST_ASSERT(export_response.headers.at("x-remote-exec-compression") == "none");
+    TEST_ASSERT(!export_response.body.empty());
 
     const fs::path exclude_source = root / "transfer-exclude-source";
     fs::create_directories(exclude_source / ".git");
@@ -341,28 +341,28 @@ static std::string assert_transfer_export_and_exclude_routes(AppState& state, co
     const HttpResponse export_excluded_response = route_request(
         state,
         json_request("/v1/transfer/export", Json{{"path", exclude_source.string()}, {"exclude", exclude_patterns}}));
-    assert(export_excluded_response.status == 200);
+    TEST_ASSERT(export_excluded_response.status == 200);
     const ImportSummary excluded_import = import_path(export_excluded_response.body,
                                                       TransferSourceType::Directory,
                                                       (root / "transfer-exclude-dest").string(),
                                                       TransferOverwrite::Replace,
                                                       true);
-    assert(excluded_import.warnings.empty());
-    assert(read_text_file(root / "transfer-exclude-dest" / "keep.txt") == "keep");
-    assert(read_text_file(root / "transfer-exclude-dest" / "logs" / "readme.txt") == "keep");
-    assert(!fs::exists(root / "transfer-exclude-dest" / "top.log"));
-    assert(!fs::exists(root / "transfer-exclude-dest" / ".git"));
-    assert(!fs::exists(root / "transfer-exclude-dest" / "logs" / "app.log"));
+    TEST_ASSERT(excluded_import.warnings.empty());
+    TEST_ASSERT(read_text_file(root / "transfer-exclude-dest" / "keep.txt") == "keep");
+    TEST_ASSERT(read_text_file(root / "transfer-exclude-dest" / "logs" / "readme.txt") == "keep");
+    TEST_ASSERT(!fs::exists(root / "transfer-exclude-dest" / "top.log"));
+    TEST_ASSERT(!fs::exists(root / "transfer-exclude-dest" / ".git"));
+    TEST_ASSERT(!fs::exists(root / "transfer-exclude-dest" / "logs" / "app.log"));
 
     Json malformed_exclude = Json::array();
     malformed_exclude.push_back("tmp/[abc");
     const HttpResponse invalid_exclude_response = route_request(
         state,
         json_request("/v1/transfer/export", Json{{"path", exclude_source.string()}, {"exclude", malformed_exclude}}));
-    assert(invalid_exclude_response.status == 400);
+    TEST_ASSERT(invalid_exclude_response.status == 400);
     const Json invalid_exclude = Json::parse(invalid_exclude_response.body);
-    assert(invalid_exclude.at("code").get<std::string>() == "transfer_failed");
-    assert(invalid_exclude.at("message").get<std::string>().find("invalid exclude pattern") != std::string::npos);
+    TEST_ASSERT(invalid_exclude.at("code").get<std::string>() == "transfer_failed");
+    TEST_ASSERT(invalid_exclude.at("message").get<std::string>().find("invalid exclude pattern") != std::string::npos);
 
     return export_response.body;
 }
@@ -380,14 +380,14 @@ static void assert_transfer_import_success(AppState& state, const fs::path& root
     import_request.body = export_body;
 
     const HttpResponse import_response = route_request(state, import_request);
-    assert(import_response.status == 200);
+    TEST_ASSERT(import_response.status == 200);
     const Json imported = Json::parse(import_response.body);
-    assert(imported.at("source_type").get<std::string>() == "file");
-    assert(imported.at("files_copied").get<std::uint64_t>() == 1);
-    assert(imported.at("bytes_copied").get<std::uint64_t>() == 22);
-    assert(imported.at("replaced").get<bool>() == false);
-    assert(imported.at("warnings").empty());
-    assert(read_text_file(root / "transfer-dest.txt") == "route transfer payload");
+    TEST_ASSERT(imported.at("source_type").get<std::string>() == "file");
+    TEST_ASSERT(imported.at("files_copied").get<std::uint64_t>() == 1);
+    TEST_ASSERT(imported.at("bytes_copied").get<std::uint64_t>() == 22);
+    TEST_ASSERT(imported.at("replaced").get<bool>() == false);
+    TEST_ASSERT(imported.at("warnings").empty());
+    TEST_ASSERT(read_text_file(root / "transfer-dest.txt") == "route transfer payload");
 }
 
 static void assert_transfer_import_optional_defaults(AppState& state,
@@ -397,8 +397,8 @@ static void assert_transfer_import_optional_defaults(AppState& state,
     optional_defaults_import.headers.erase("x-remote-exec-symlink-mode");
     optional_defaults_import.headers.erase("x-remote-exec-compression");
     const HttpResponse optional_defaults_response = route_request(state, optional_defaults_import);
-    assert(optional_defaults_response.status == 200);
-    assert(read_text_file(root / "transfer-defaults.txt") == "route transfer payload");
+    TEST_ASSERT(optional_defaults_response.status == 200);
+    TEST_ASSERT(read_text_file(root / "transfer-defaults.txt") == "route transfer payload");
 }
 
 static void assert_transfer_import_header_validation(AppState& state,
@@ -451,9 +451,9 @@ static void assert_transfer_import_rejects_file_merge_into_directory(AppState& s
     merge_file_into_directory_request.headers["x-remote-exec-compression"] = "none";
     merge_file_into_directory_request.body = export_body;
     const HttpResponse merge_file_into_directory_response = route_request(state, merge_file_into_directory_request);
-    assert(merge_file_into_directory_response.status == 400);
+    TEST_ASSERT(merge_file_into_directory_response.status == 400);
     const Json merge_file_into_directory_error = Json::parse(merge_file_into_directory_response.body);
-    assert(merge_file_into_directory_error.at("code").get<std::string>() == "transfer_destination_unsupported");
+    TEST_ASSERT(merge_file_into_directory_error.at("code").get<std::string>() == "transfer_destination_unsupported");
 }
 
 static void assert_transfer_import_routes(AppState& state, const fs::path& root, const std::string& export_body) {
@@ -464,8 +464,8 @@ static void assert_transfer_import_routes(AppState& state, const fs::path& root,
 }
 
 static void assert_sandbox_denied(const HttpResponse& response) {
-    assert(response.status == 400);
-    assert(Json::parse(response.body).at("code").get<std::string>() == "sandbox_denied");
+    TEST_ASSERT(response.status == 400);
+    TEST_ASSERT(Json::parse(response.body).at("code").get<std::string>() == "sandbox_denied");
 }
 
 static void assert_sandbox_export_and_path_info_denied(AppState& sandbox_state, const fs::path& outside) {
@@ -481,7 +481,7 @@ static void assert_sandbox_export_and_path_info_denied(AppState& sandbox_state, 
 static std::string assert_sandbox_export_allowed(AppState& sandbox_state, const fs::path& read_allowed) {
     const HttpResponse sandbox_export_allowed = route_request(
         sandbox_state, json_request("/v1/transfer/export", Json{{"path", (read_allowed / "source.txt").string()}}));
-    assert(sandbox_export_allowed.status == 200);
+    TEST_ASSERT(sandbox_export_allowed.status == 200);
     return sandbox_export_allowed.body;
 }
 
@@ -524,7 +524,7 @@ static void assert_sandbox_symlink_target_denied(AppState& sandbox_state, const 
     const HttpResponse sandbox_symlink_target_denied =
         route_request(sandbox_state, sandbox_symlink_target_denied_request);
     assert_sandbox_denied(sandbox_symlink_target_denied);
-    assert(!fs::exists(write_allowed / "allowed-link"));
+    TEST_ASSERT(!fs::exists(write_allowed / "allowed-link"));
 }
 #endif
 
@@ -539,7 +539,7 @@ static void assert_sandbox_patch_denied(AppState& sandbox_state, const fs::path&
         sandbox_state,
         json_request("/v1/patch/apply", Json{{"workdir", write_allowed.string()}, {"patch", patch_denied_text}}));
     assert_sandbox_denied(sandbox_patch_denied);
-    assert(!fs::exists(outside / "patched.txt"));
+    TEST_ASSERT(!fs::exists(outside / "patched.txt"));
 }
 
 static void assert_sandbox_exec_denied(AppState& sandbox_state, const fs::path& outside) {

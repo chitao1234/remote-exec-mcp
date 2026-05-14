@@ -1,5 +1,5 @@
 #include <atomic>
-#include <cassert>
+#include "test_assert.h"
 #include <cstdint>
 #ifndef _WIN32
 #include <cstdlib>
@@ -36,18 +36,18 @@ class ScopedEnvVar {
 
     ~ScopedEnvVar() {
         if (had_original_) {
-            assert(setenv(name_.c_str(), original_.c_str(), 1) == 0);
+            TEST_ASSERT(setenv(name_.c_str(), original_.c_str(), 1) == 0);
         } else {
-            assert(unsetenv(name_.c_str()) == 0);
+            TEST_ASSERT(unsetenv(name_.c_str()) == 0);
         }
     }
 
     void set(const std::string& value) const {
-        assert(setenv(name_.c_str(), value.c_str(), 1) == 0);
+        TEST_ASSERT(setenv(name_.c_str(), value.c_str(), 1) == 0);
     }
 
     void unset() const {
-        assert(unsetenv(name_.c_str()) == 0);
+        TEST_ASSERT(unsetenv(name_.c_str()) == 0);
     }
 
   private:
@@ -134,7 +134,7 @@ assert_unknown_session(SessionStore& store, const std::string& daemon_session_id
     } catch (const UnknownSessionError&) {
         rejected = true;
     }
-    assert(rejected);
+    TEST_ASSERT(rejected);
 }
 
 static void assert_completed_command_output(SessionStore& store,
@@ -151,10 +151,10 @@ static void assert_completed_command_output(SessionStore& store,
     const Json response = start_test_command(
         store, merge_command, root.string(), shell, false, 5000UL, DEFAULT_MAX_OUTPUT_TOKENS, yield_time, 64UL);
 
-    assert(response.at("daemon_session_id").is_null());
-    assert(!response.at("running").get<bool>());
-    assert(response.at("exit_code").get<int>() == 0);
-    assert(normalize_output(response.at("output").get<std::string>()) == "stdout-1\nstderr-1\nstdout-2\nstderr-2\n");
+    TEST_ASSERT(response.at("daemon_session_id").is_null());
+    TEST_ASSERT(!response.at("running").get<bool>());
+    TEST_ASSERT(response.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(normalize_output(response.at("output").get<std::string>()) == "stdout-1\nstderr-1\nstdout-2\nstderr-2\n");
 }
 
 static void assert_token_limiting(SessionStore& store,
@@ -172,22 +172,22 @@ static void assert_token_limiting(SessionStore& store,
     write_text_file(root / "long.txt", std::string(100, 'a'));
     const Json middle_truncated =
         start_test_command(store, print_long_command, root.string(), shell, false, 5000UL, 15UL, yield_time, 64UL);
-    assert(middle_truncated.at("original_token_count").get<unsigned long>() == 25UL);
-    assert(normalize_output(middle_truncated.at("output").get<std::string>()) ==
+    TEST_ASSERT(middle_truncated.at("original_token_count").get<unsigned long>() == 25UL);
+    TEST_ASSERT(normalize_output(middle_truncated.at("output").get<std::string>()) ==
            std::string("Total output lines: 1\n\naaaaaa") + "\xE2\x80\xA6" + "22 tokens truncated" + "\xE2\x80\xA6" +
                "aaaaaa");
 
     write_text_file(root / "huge.txt", std::string(50000, 'x'));
     const Json omitted_limit = start_test_command(
         store, print_huge_command, root.string(), shell, false, 5000UL, DEFAULT_MAX_OUTPUT_TOKENS, yield_time, 64UL);
-    assert(omitted_limit.at("original_token_count").get<unsigned long>() == 12500UL);
-    assert(normalize_output(omitted_limit.at("output").get<std::string>()).find("Total output lines: 1\n\n") == 0U);
-    assert(omitted_limit.at("output").get<std::string>().find("tokens truncated") != std::string::npos);
+    TEST_ASSERT(omitted_limit.at("original_token_count").get<unsigned long>() == 12500UL);
+    TEST_ASSERT(normalize_output(omitted_limit.at("output").get<std::string>()).find("Total output lines: 1\n\n") == 0U);
+    TEST_ASSERT(omitted_limit.at("output").get<std::string>().find("tokens truncated") != std::string::npos);
 
     const Json zero_limited =
         start_test_command(store, print_huge_command, root.string(), shell, false, 5000UL, 0UL, yield_time, 64UL);
-    assert(zero_limited.at("original_token_count").get<unsigned long>() == 12500UL);
-    assert(zero_limited.at("output").get<std::string>().empty());
+    TEST_ASSERT(zero_limited.at("original_token_count").get<unsigned long>() == 12500UL);
+    TEST_ASSERT(zero_limited.at("output").get<std::string>().empty());
 }
 
 static void assert_posix_locale_and_late_output(SessionStore& store,
@@ -209,14 +209,14 @@ static void assert_posix_locale_and_late_output(SessionStore& store,
                                                     DEFAULT_MAX_OUTPUT_TOKENS,
                                                     yield_time,
                                                     64UL);
-    assert(locale_response.at("exit_code").get<int>() == 0);
-    assert(locale_response.at("output").get<std::string>() == "C.UTF-8 C.UTF-8\n");
+    TEST_ASSERT(locale_response.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(locale_response.at("output").get<std::string>() == "C.UTF-8 C.UTF-8\n");
 
     const Json late_output = start_test_command(
         store, "(sleep 0.08; printf 'late tail') &", root.string(), shell, false, 5000UL, 10UL, yield_time, 64UL);
-    assert(!late_output.at("running").get<bool>());
-    assert(late_output.at("exit_code").get<int>() == 0);
-    assert(late_output.at("output").get<std::string>() == "late tail");
+    TEST_ASSERT(!late_output.at("running").get<bool>());
+    TEST_ASSERT(late_output.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(late_output.at("output").get<std::string>() == "late tail");
 
     const Json stdout_held_open = start_test_command(store,
                                                      "exec 3>&1; (sleep 30 >&3) & printf 'done\\n'; sleep 0.05",
@@ -227,14 +227,14 @@ static void assert_posix_locale_and_late_output(SessionStore& store,
                                                      DEFAULT_MAX_OUTPUT_TOKENS,
                                                      yield_time,
                                                      64UL);
-    assert(!stdout_held_open.at("running").get<bool>());
-    assert(stdout_held_open.at("exit_code").get<int>() == 0);
-    assert(stdout_held_open.at("output").get<std::string>() == "done\n");
+    TEST_ASSERT(!stdout_held_open.at("running").get<bool>());
+    TEST_ASSERT(stdout_held_open.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(stdout_held_open.at("output").get<std::string>() == "done\n");
 
     const Json newline_preserved =
         start_test_command(store, "printf 'one two\\n'", root.string(), shell, false, 5000UL, 3UL, yield_time, 64UL);
-    assert(newline_preserved.at("original_token_count").get<unsigned long>() == 2UL);
-    assert(newline_preserved.at("output").get<std::string>() == "one two\n");
+    TEST_ASSERT(newline_preserved.at("original_token_count").get<unsigned long>() == 2UL);
+    TEST_ASSERT(newline_preserved.at("output").get<std::string>() == "one two\n");
 
     const Json stdin_closed_response = start_test_command(store,
                                                           "if IFS= read line; then printf 'got:%s\\n' \"$line\"; "
@@ -246,9 +246,9 @@ static void assert_posix_locale_and_late_output(SessionStore& store,
                                                           DEFAULT_MAX_OUTPUT_TOKENS,
                                                           yield_time,
                                                           64UL);
-    assert(!stdin_closed_response.at("running").get<bool>());
-    assert(stdin_closed_response.at("exit_code").get<int>() == 0);
-    assert(stdin_closed_response.at("output").get<std::string>() == "stdin:closed\n");
+    TEST_ASSERT(!stdin_closed_response.at("running").get<bool>());
+    TEST_ASSERT(stdin_closed_response.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(stdin_closed_response.at("output").get<std::string>() == "stdin:closed\n");
 #endif
 }
 
@@ -280,14 +280,14 @@ static void assert_posix_exec_uses_parent_built_environment_and_path(SessionStor
 
     const Json pipe_response = start_test_command(
         store, "env-helper", root.string(), shell, false, 5000UL, DEFAULT_MAX_OUTPUT_TOKENS, yield_time, 64UL);
-    assert(pipe_response.at("exit_code").get<int>() == 0);
-    assert(pipe_response.at("output").get<std::string>() == "C.UTF-8|C.UTF-8|\n");
+    TEST_ASSERT(pipe_response.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(pipe_response.at("output").get<std::string>() == "C.UTF-8|C.UTF-8|\n");
 
     if (process_session_supports_pty()) {
         const Json pty_response = start_test_command(
             store, "env-helper", root.string(), shell, true, 5000UL, DEFAULT_MAX_OUTPUT_TOKENS, yield_time, 64UL);
-        assert(pty_response.at("exit_code").get<int>() == 0);
-        assert(normalize_output(pty_response.at("output").get<std::string>()) == "C.UTF-8|C.UTF-8|xterm-256color\n");
+        TEST_ASSERT(pty_response.at("exit_code").get<int>() == 0);
+        TEST_ASSERT(normalize_output(pty_response.at("output").get<std::string>()) == "C.UTF-8|C.UTF-8|xterm-256color\n");
     }
 
 #endif
@@ -365,10 +365,10 @@ static void assert_posix_sigchld_reaper_reaps_exited_session_children(const fs::
                                                 DEFAULT_MAX_OUTPUT_TOKENS,
                                                 fast_yield,
                                                 64UL);
-        assert(running.at("running").get<bool>());
+        TEST_ASSERT(running.at("running").get<bool>());
     }
 
-    assert(wait_until_zombie_delta_at_most(baseline_zombies, 0UL, 2000UL));
+    TEST_ASSERT(wait_until_zombie_delta_at_most(baseline_zombies, 0UL, 2000UL));
 #else
     (void)root;
     (void)shell;
@@ -399,23 +399,23 @@ static void assert_posix_sigchld_reaper_preserves_exit_status_during_pty_resume_
                                           DEFAULT_MAX_OUTPUT_TOKENS,
                                           fast_yield,
                                           64UL);
-        assert(waiting.at("running").get<bool>());
+        TEST_ASSERT(waiting.at("running").get<bool>());
         std::string waiting_id = waiting.at("daemon_session_id").get<std::string>();
         std::string waiting_output = waiting.at("output").get<std::string>();
         for (int poll = 0; waiting_output.find("ready") == std::string::npos && poll < 20; ++poll) {
             waiting = race_store.write_stdin(
                 waiting_id, "", true, 50UL, DEFAULT_MAX_OUTPUT_TOKENS, fast_yield, false, 0U, 0U);
-            assert(waiting.at("running").get<bool>());
+            TEST_ASSERT(waiting.at("running").get<bool>());
             waiting_id = waiting.at("daemon_session_id").get<std::string>();
             waiting_output += waiting.at("output").get<std::string>();
         }
-        assert(waiting_output.find("ready") != std::string::npos);
+        TEST_ASSERT(waiting_output.find("ready") != std::string::npos);
 
         const Json resumed = race_store.write_stdin(
             waiting_id, "ping\n", true, 1000UL, DEFAULT_MAX_OUTPUT_TOKENS, fast_yield, false, 0U, 0U);
-        assert(!resumed.at("running").get<bool>());
-        assert(resumed.at("exit_code").get<int>() == 0);
-        assert(resumed.at("output").get<std::string>().find("echo:ping") != std::string::npos);
+        TEST_ASSERT(!resumed.at("running").get<bool>());
+        TEST_ASSERT(resumed.at("exit_code").get<int>() == 0);
+        TEST_ASSERT(resumed.at("output").get<std::string>().find("echo:ping") != std::string::npos);
     }
 
     set_process_session_test_exit_poll_delay_ms(0UL);
@@ -441,8 +441,8 @@ static void assert_non_tty_stdin_closed_rejected(SessionStore& store,
                                                     DEFAULT_MAX_OUTPUT_TOKENS,
                                                     yield_time,
                                                     64UL);
-    assert(non_tty_running.at("running").get<bool>());
-    assert(non_tty_running.at("output").get<std::string>() == "ready");
+    TEST_ASSERT(non_tty_running.at("running").get<bool>());
+    TEST_ASSERT(non_tty_running.at("output").get<std::string>() == "ready");
 
     bool stdin_closed_rejected = false;
     try {
@@ -458,7 +458,7 @@ static void assert_non_tty_stdin_closed_rejected(SessionStore& store,
     } catch (const StdinClosedError& ex) {
         stdin_closed_rejected = std::string(ex.what()).find("stdin is closed") != std::string::npos;
     }
-    assert(stdin_closed_rejected);
+    TEST_ASSERT(stdin_closed_rejected);
 }
 
 static void assert_tty_resume_round_trip(SessionStore& store,
@@ -478,15 +478,15 @@ static void assert_tty_resume_round_trip(SessionStore& store,
                                             DEFAULT_MAX_OUTPUT_TOKENS,
                                             fast_yield,
                                             64UL);
-    assert(waiting.at("running").get<bool>());
-    assert(waiting.at("output").get<std::string>().find("ready") != std::string::npos);
+    TEST_ASSERT(waiting.at("running").get<bool>());
+    TEST_ASSERT(waiting.at("output").get<std::string>().find("ready") != std::string::npos);
 
     const std::string waiting_id = waiting.at("daemon_session_id").get<std::string>();
     const Json resumed =
         store.write_stdin(waiting_id, "ping\n", true, 1000UL, DEFAULT_MAX_OUTPUT_TOKENS, fast_yield, false, 0U, 0U);
-    assert(!resumed.at("running").get<bool>());
-    assert(resumed.at("exit_code").get<int>() == 0);
-    assert(resumed.at("output").get<std::string>().find("echo:ping") != std::string::npos);
+    TEST_ASSERT(!resumed.at("running").get<bool>());
+    TEST_ASSERT(resumed.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(resumed.at("output").get<std::string>().find("echo:ping") != std::string::npos);
 }
 
 static void assert_unrelated_sessions_do_not_block_each_other(SessionStore& store,
@@ -506,7 +506,7 @@ static void assert_unrelated_sessions_do_not_block_each_other(SessionStore& stor
                                                  DEFAULT_MAX_OUTPUT_TOKENS,
                                                  yield_time,
                                                  64UL);
-    assert(slow_running.at("running").get<bool>());
+    TEST_ASSERT(slow_running.at("running").get<bool>());
 
     const Json fast_running = start_test_command(store,
                                                  "IFS= read line; printf '%s' \"$line\"; sleep 30",
@@ -517,7 +517,7 @@ static void assert_unrelated_sessions_do_not_block_each_other(SessionStore& stor
                                                  DEFAULT_MAX_OUTPUT_TOKENS,
                                                  yield_time,
                                                  64UL);
-    assert(fast_running.at("running").get<bool>());
+    TEST_ASSERT(fast_running.at("running").get<bool>());
 
     Json slow_poll;
     std::atomic<bool> slow_thread_started(false);
@@ -534,7 +534,7 @@ static void assert_unrelated_sessions_do_not_block_each_other(SessionStore& stor
                                       0U);
     });
 
-    assert(wait_until_true(slow_thread_started, 1000UL));
+    TEST_ASSERT(wait_until_true(slow_thread_started, 1000UL));
     const std::uint64_t fast_started_at = platform::monotonic_ms();
     const Json fast_completed = store.write_stdin(fast_running.at("daemon_session_id").get<std::string>(),
                                                   "ping\n",
@@ -546,10 +546,10 @@ static void assert_unrelated_sessions_do_not_block_each_other(SessionStore& stor
                                                   0U,
                                                   0U);
     const std::uint64_t fast_elapsed_ms = platform::monotonic_ms() - fast_started_at;
-    assert(fast_elapsed_ms < 2000UL && "fast session waited behind unrelated session");
-    assert(fast_completed.at("output").get<std::string>().find("ping") != std::string::npos);
+    TEST_ASSERT(fast_elapsed_ms < 2000UL && "fast session waited behind unrelated session");
+    TEST_ASSERT(fast_completed.at("output").get<std::string>().find("ping") != std::string::npos);
     slow_thread.join();
-    assert(slow_poll.at("running").get<bool>());
+    TEST_ASSERT(slow_poll.at("running").get<bool>());
 }
 
 static void assert_tty_detection_and_input_round_trip(SessionStore& store,
@@ -571,8 +571,8 @@ static void assert_tty_detection_and_input_round_trip(SessionStore& store,
                            DEFAULT_MAX_OUTPUT_TOKENS,
                            yield_time,
                            64UL);
-    assert(tty_running.at("running").get<bool>());
-    assert(normalize_output(tty_running.at("output").get<std::string>()) == "tty:yes\n");
+    TEST_ASSERT(tty_running.at("running").get<bool>());
+    TEST_ASSERT(normalize_output(tty_running.at("output").get<std::string>()) == "tty:yes\n");
 
     const Json tty_completed = store.write_stdin(tty_running.at("daemon_session_id").get<std::string>(),
                                                  "hello\n",
@@ -583,11 +583,11 @@ static void assert_tty_detection_and_input_round_trip(SessionStore& store,
                                                  false,
                                                  0U,
                                                  0U);
-    assert(!tty_completed.at("running").get<bool>());
-    assert(tty_completed.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(!tty_completed.at("running").get<bool>());
+    TEST_ASSERT(tty_completed.at("exit_code").get<int>() == 0);
     const std::string normalized_tty_output = normalize_output(tty_completed.at("output").get<std::string>());
-    assert(normalized_tty_output.find("hello\n") != std::string::npos);
-    assert(normalized_tty_output.find("input:hello\n") != std::string::npos);
+    TEST_ASSERT(normalized_tty_output.find("hello\n") != std::string::npos);
+    TEST_ASSERT(normalized_tty_output.find("input:hello\n") != std::string::npos);
 }
 
 static void assert_tty_resize_round_trip(SessionStore& store,
@@ -607,7 +607,7 @@ static void assert_tty_resize_round_trip(SessionStore& store,
                                                    DEFAULT_MAX_OUTPUT_TOKENS,
                                                    fast_yield,
                                                    64UL);
-    assert(resize_running.at("running").get<bool>());
+    TEST_ASSERT(resize_running.at("running").get<bool>());
     const Json resized = store.write_stdin(resize_running.at("daemon_session_id").get<std::string>(),
                                            "\n",
                                            true,
@@ -617,8 +617,8 @@ static void assert_tty_resize_round_trip(SessionStore& store,
                                            true,
                                            33U,
                                            101U);
-    assert(resized.at("running").get<bool>());
-    assert(normalize_output(resized.at("output").get<std::string>()).find("33 101") != std::string::npos);
+    TEST_ASSERT(resized.at("running").get<bool>());
+    TEST_ASSERT(normalize_output(resized.at("output").get<std::string>()).find("33 101") != std::string::npos);
 }
 
 static void assert_non_tty_resize_rejected(SessionStore& store,
@@ -638,7 +638,7 @@ static void assert_non_tty_resize_rejected(SessionStore& store,
                                                     DEFAULT_MAX_OUTPUT_TOKENS,
                                                     yield_time,
                                                     64UL);
-    assert(non_tty_running.at("running").get<bool>());
+    TEST_ASSERT(non_tty_running.at("running").get<bool>());
 
     bool non_tty_resize_rejected = false;
     try {
@@ -654,7 +654,7 @@ static void assert_non_tty_resize_rejected(SessionStore& store,
     } catch (const ProcessPtyResizeUnsupportedError& ex) {
         non_tty_resize_rejected = std::string(ex.what()).find("requires a tty session") != std::string::npos;
     }
-    assert(non_tty_resize_rejected);
+    TEST_ASSERT(non_tty_resize_rejected);
 }
 
 static void assert_session_limit_prunes_oldest_running(const fs::path& root, const std::string& shell) {
@@ -687,11 +687,11 @@ static void assert_session_limit_prunes_oldest_running(const fs::path& root, con
                                                   DEFAULT_MAX_OUTPUT_TOKENS,
                                                   fast_yield,
                                                   2UL);
-    assert(first_running.at("running").get<bool>());
-    assert(second_running.at("running").get<bool>());
-    assert(third_running.at("running").get<bool>());
+    TEST_ASSERT(first_running.at("running").get<bool>());
+    TEST_ASSERT(second_running.at("running").get<bool>());
+    TEST_ASSERT(third_running.at("running").get<bool>());
     assert_unknown_session(limit_store, first_running.at("daemon_session_id").get<std::string>(), fast_yield);
-    assert(limit_store
+    TEST_ASSERT(limit_store
                .write_stdin(second_running.at("daemon_session_id").get<std::string>(),
                             "",
                             true,
@@ -703,7 +703,7 @@ static void assert_session_limit_prunes_oldest_running(const fs::path& root, con
                             0U)
                .at("running")
                .get<bool>());
-    assert(limit_store
+    TEST_ASSERT(limit_store
                .write_stdin(third_running.at("daemon_session_id").get<std::string>(),
                             "",
                             true,
@@ -747,7 +747,7 @@ static void assert_recent_session_survives_limit_prune(const fs::path& root, con
                                                        false,
                                                        0U,
                                                        0U);
-    assert(first_touch.at("running").get<bool>());
+    TEST_ASSERT(first_touch.at("running").get<bool>());
 
     const Json third_running = start_test_command(recency_store,
                                                   "printf 'third'; sleep 30",
@@ -758,9 +758,9 @@ static void assert_recent_session_survives_limit_prune(const fs::path& root, con
                                                   DEFAULT_MAX_OUTPUT_TOKENS,
                                                   fast_yield,
                                                   2UL);
-    assert(third_running.at("running").get<bool>());
+    TEST_ASSERT(third_running.at("running").get<bool>());
     assert_unknown_session(recency_store, second_running.at("daemon_session_id").get<std::string>(), fast_yield);
-    assert(recency_store
+    TEST_ASSERT(recency_store
                .write_stdin(first_running.at("daemon_session_id").get<std::string>(),
                             "",
                             true,
@@ -788,9 +788,9 @@ static void assert_exited_session_is_pruned_before_live_session(const fs::path& 
                                                  DEFAULT_MAX_OUTPUT_TOKENS,
                                                  fast_yield,
                                                  2UL);
-    assert(exited_running.at("running").get<bool>());
-    assert(live_running.at("running").get<bool>());
-    assert(wait_until_session_exits(
+    TEST_ASSERT(exited_running.at("running").get<bool>());
+    TEST_ASSERT(live_running.at("running").get<bool>());
+    TEST_ASSERT(wait_until_session_exits(
         exited_store, exited_running.at("daemon_session_id").get<std::string>(), fast_yield, 2000UL));
 
     const Json replacement_running = start_test_command(exited_store,
@@ -802,9 +802,9 @@ static void assert_exited_session_is_pruned_before_live_session(const fs::path& 
                                                         DEFAULT_MAX_OUTPUT_TOKENS,
                                                         fast_yield,
                                                         2UL);
-    assert(replacement_running.at("running").get<bool>());
+    TEST_ASSERT(replacement_running.at("running").get<bool>());
     assert_unknown_session(exited_store, exited_running.at("daemon_session_id").get<std::string>(), fast_yield);
-    assert(exited_store
+    TEST_ASSERT(exited_store
                .write_stdin(live_running.at("daemon_session_id").get<std::string>(),
                             "",
                             true,
@@ -832,11 +832,11 @@ static void assert_recent_session_is_protected_from_prune(const fs::path& root, 
                                                 DEFAULT_MAX_OUTPUT_TOKENS,
                                                 fast_yield,
                                                 10UL);
-        assert(running.at("running").get<bool>());
+        TEST_ASSERT(running.at("running").get<bool>());
         daemon_session_ids.push_back(running.at("daemon_session_id").get<std::string>());
     }
 
-    assert(protected_store
+    TEST_ASSERT(protected_store
                .write_stdin(daemon_session_ids[0], "", true, 1UL, DEFAULT_MAX_OUTPUT_TOKENS, fast_yield, false, 0U, 0U)
                .at("running")
                .get<bool>());
@@ -850,9 +850,9 @@ static void assert_recent_session_is_protected_from_prune(const fs::path& root, 
                                                           DEFAULT_MAX_OUTPUT_TOKENS,
                                                           fast_yield,
                                                           10UL);
-    assert(protected_replacement.at("running").get<bool>());
+    TEST_ASSERT(protected_replacement.at("running").get<bool>());
     assert_unknown_session(protected_store, daemon_session_ids[1], fast_yield);
-    assert(protected_store
+    TEST_ASSERT(protected_store
                .write_stdin(daemon_session_ids[0], "", true, 1UL, DEFAULT_MAX_OUTPUT_TOKENS, fast_yield, false, 0U, 0U)
                .at("running")
                .get<bool>());
@@ -880,7 +880,7 @@ static void assert_stdin_and_tty_behavior(SessionStore& store,
                                                DEFAULT_MAX_OUTPUT_TOKENS,
                                                yield_time,
                                                64UL);
-    assert(xp_running.at("running").get<bool>());
+    TEST_ASSERT(xp_running.at("running").get<bool>());
     const std::string xp_initial = normalize_output(xp_running.at("output").get<std::string>());
 
     const Json xp_completed = store.write_stdin(xp_running.at("daemon_session_id").get<std::string>(),
@@ -892,11 +892,11 @@ static void assert_stdin_and_tty_behavior(SessionStore& store,
                                                 false,
                                                 0U,
                                                 0U);
-    assert(!xp_completed.at("running").get<bool>());
-    assert(xp_completed.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(!xp_completed.at("running").get<bool>());
+    TEST_ASSERT(xp_completed.at("exit_code").get<int>() == 0);
     const std::string xp_output = xp_initial + normalize_output(xp_completed.at("output").get<std::string>());
-    assert(xp_output.find("ready\n") != std::string::npos);
-    assert(xp_output.find("got:hello\n") != std::string::npos);
+    TEST_ASSERT(xp_output.find("ready\n") != std::string::npos);
+    TEST_ASSERT(xp_output.find("got:hello\n") != std::string::npos);
 #endif
 }
 
@@ -937,16 +937,16 @@ static void assert_threshold_warnings_and_unknown_sessions(SessionStore& store,
                                                     DEFAULT_MAX_OUTPUT_TOKENS,
                                                     fast_yield,
                                                     DEFAULT_MAX_OPEN_SESSIONS);
-            assert(running.at("running").get<bool>());
+            TEST_ASSERT(running.at("running").get<bool>());
             if (index + 1UL < threshold) {
-                assert(running.at("warnings").empty());
+                TEST_ASSERT(running.at("warnings").empty());
             } else {
                 threshold_response = running;
             }
         }
-        assert(threshold_response.at("warnings").size() == 1U);
-        assert(threshold_response.at("warnings")[0].at("code").get<std::string>() == "exec_session_limit_approaching");
-        assert(threshold_response.at("warnings")[0].at("message").get<std::string>() ==
+        TEST_ASSERT(threshold_response.at("warnings").size() == 1U);
+        TEST_ASSERT(threshold_response.at("warnings")[0].at("code").get<std::string>() == "exec_session_limit_approaching");
+        TEST_ASSERT(threshold_response.at("warnings")[0].at("message").get<std::string>() ==
                "Target `cpp-test` now has " + std::to_string(threshold) + " open exec sessions.");
     }
 
@@ -957,7 +957,7 @@ static void assert_threshold_warnings_and_unknown_sessions(SessionStore& store,
     } catch (const UnknownSessionError&) {
         unknown_session_rejected = true;
     }
-    assert(unknown_session_rejected);
+    TEST_ASSERT(unknown_session_rejected);
 #endif
 }
 
@@ -982,16 +982,16 @@ static void assert_threshold_warnings_follow_configured_limit(const fs::path& ro
                                                 DEFAULT_MAX_OUTPUT_TOKENS,
                                                 fast_yield,
                                                 max_open_sessions);
-        assert(running.at("running").get<bool>());
+        TEST_ASSERT(running.at("running").get<bool>());
         if (index + 1UL < threshold) {
-            assert(running.at("warnings").empty());
+            TEST_ASSERT(running.at("warnings").empty());
         } else {
             threshold_response = running;
         }
     }
-    assert(threshold_response.at("warnings").size() == 1U);
-    assert(threshold_response.at("warnings")[0].at("code").get<std::string>() == "exec_session_limit_approaching");
-    assert(threshold_response.at("warnings")[0].at("message").get<std::string>() ==
+    TEST_ASSERT(threshold_response.at("warnings").size() == 1U);
+    TEST_ASSERT(threshold_response.at("warnings")[0].at("code").get<std::string>() == "exec_session_limit_approaching");
+    TEST_ASSERT(threshold_response.at("warnings")[0].at("message").get<std::string>() ==
            "Target `cpp-test` now has " + std::to_string(threshold) + " open exec sessions.");
 #endif
 }

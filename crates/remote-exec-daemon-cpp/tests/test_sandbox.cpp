@@ -1,4 +1,4 @@
-#include <cassert>
+#include "test_assert.h"
 #include <string>
 
 #include "filesystem_sandbox.h"
@@ -39,14 +39,14 @@ int main() {
     const CompiledFilesystemSandbox compiled = compile_filesystem_sandbox(write_sandbox);
 
     authorize_path(&compiled, SANDBOX_WRITE, (allowed / "new.txt").string());
-    assert(denied(&compiled, SANDBOX_WRITE, (denied_root / "key.txt").string()));
-    assert(denied(&compiled, SANDBOX_WRITE, (sibling / "nope.txt").string()));
+    TEST_ASSERT(denied(&compiled, SANDBOX_WRITE, (denied_root / "key.txt").string()));
+    TEST_ASSERT(denied(&compiled, SANDBOX_WRITE, (sibling / "nope.txt").string()));
 
     FilesystemSandbox deny_only;
     deny_only.read.deny.push_back(denied_root.string());
     const CompiledFilesystemSandbox deny_only_compiled = compile_filesystem_sandbox(deny_only);
     authorize_path(&deny_only_compiled, SANDBOX_READ, (sibling / "ok.txt").string());
-    assert(denied(&deny_only_compiled, SANDBOX_READ, (denied_root / "blocked.txt").string()));
+    TEST_ASSERT(denied(&deny_only_compiled, SANDBOX_READ, (denied_root / "blocked.txt").string()));
 
     FilesystemSandbox invalid;
     invalid.exec_cwd.allow.push_back("relative/path");
@@ -56,36 +56,36 @@ int main() {
     } catch (const SandboxError&) {
         rejected = true;
     }
-    assert(rejected);
+    TEST_ASSERT(rejected);
 
     const PathPolicy windows_policy = windows_path_policy();
-    assert(is_absolute_for_policy(windows_policy, "C:/Work/file.txt"));
-    assert(is_absolute_for_policy(windows_policy, "/c/Work/file.txt"));
-    assert(is_absolute_for_policy(windows_policy, "/cygdrive/c/Work/file.txt"));
-    assert(normalize_for_system(windows_policy, "/c/Work/file.txt") == "C:\\Work\\file.txt");
-    assert(normalize_for_system(windows_policy, "/cygdrive/c/Work/file.txt") == "C:\\Work\\file.txt");
-    assert(join_for_policy(windows_policy, "C:/Work", "nested/file.txt") == "C:\\Work\\nested\\file.txt");
+    TEST_ASSERT(is_absolute_for_policy(windows_policy, "C:/Work/file.txt"));
+    TEST_ASSERT(is_absolute_for_policy(windows_policy, "/c/Work/file.txt"));
+    TEST_ASSERT(is_absolute_for_policy(windows_policy, "/cygdrive/c/Work/file.txt"));
+    TEST_ASSERT(normalize_for_system(windows_policy, "/c/Work/file.txt") == "C:\\Work\\file.txt");
+    TEST_ASSERT(normalize_for_system(windows_policy, "/cygdrive/c/Work/file.txt") == "C:\\Work\\file.txt");
+    TEST_ASSERT(join_for_policy(windows_policy, "C:/Work", "nested/file.txt") == "C:\\Work\\nested\\file.txt");
 
 #ifdef _WIN32
-    assert(host_path_equal("/c/WORK/File.txt", "c:\\work\\file.txt"));
-    assert(host_path_equal("C:\\RÉSUMÉ\\Ärger.txt", "c:/résumé/ärger.TXT"));
-    assert(host_path_is_within("C:\\WORK\\SECRET\\key.txt", "c:/work/secret"));
-    assert(!host_path_is_within("C:\\Worker\\out.txt", "c:/work"));
+    TEST_ASSERT(host_path_equal("/c/WORK/File.txt", "c:\\work\\file.txt"));
+    TEST_ASSERT(host_path_equal("C:\\RÉSUMÉ\\Ärger.txt", "c:/résumé/ärger.TXT"));
+    TEST_ASSERT(host_path_is_within("C:\\WORK\\SECRET\\key.txt", "c:/work/secret"));
+    TEST_ASSERT(!host_path_is_within("C:\\Worker\\out.txt", "c:/work"));
 
     FilesystemSandbox windows_sandbox;
     windows_sandbox.read.allow.push_back("C:\\Work");
     windows_sandbox.read.deny.push_back("C:\\Work\\Secret");
     const CompiledFilesystemSandbox windows_compiled = compile_filesystem_sandbox(windows_sandbox);
     authorize_path(&windows_compiled, SANDBOX_READ, "c:/work/out.txt");
-    assert(denied(&windows_compiled, SANDBOX_READ, "C:\\WORK\\SECRET\\key.txt"));
-    assert(denied(&windows_compiled, SANDBOX_READ, "C:\\Worker\\out.txt"));
+    TEST_ASSERT(denied(&windows_compiled, SANDBOX_READ, "C:\\WORK\\SECRET\\key.txt"));
+    TEST_ASSERT(denied(&windows_compiled, SANDBOX_READ, "C:\\Worker\\out.txt"));
 
     FilesystemSandbox unicode_windows_sandbox;
     unicode_windows_sandbox.read.allow.push_back("C:\\RÉSUMÉ");
     unicode_windows_sandbox.read.deny.push_back("C:\\RÉSUMÉ\\Ärger");
     const CompiledFilesystemSandbox unicode_windows_compiled = compile_filesystem_sandbox(unicode_windows_sandbox);
     authorize_path(&unicode_windows_compiled, SANDBOX_READ, "c:/résumé/out.txt");
-    assert(denied(&unicode_windows_compiled, SANDBOX_READ, "C:\\résumé\\ärger\\key.txt"));
+    TEST_ASSERT(denied(&unicode_windows_compiled, SANDBOX_READ, "C:\\résumé\\ärger\\key.txt"));
 #endif
 
     return 0;

@@ -1,4 +1,4 @@
-#include <cassert>
+#include "test_assert.h"
 #include <climits>
 #include <limits>
 #include <string>
@@ -17,13 +17,13 @@ int main() {
     } catch (const std::runtime_error&) {
         rejected_invalid_timeout_socket = true;
     }
-    assert(rejected_invalid_timeout_socket);
+    TEST_ASSERT(rejected_invalid_timeout_socket);
 
-    assert(bounded_socket_io_size(0U) == 0U);
-    assert(bounded_socket_io_size(1U) == 1U);
-    assert(bounded_socket_io_size(static_cast<std::size_t>(INT_MAX)) == static_cast<std::size_t>(INT_MAX));
-    assert(bounded_socket_io_size(static_cast<std::size_t>(INT_MAX) + 1U) == static_cast<std::size_t>(INT_MAX));
-    assert(bounded_socket_io_size(std::numeric_limits<std::size_t>::max()) == static_cast<std::size_t>(INT_MAX));
+    TEST_ASSERT(bounded_socket_io_size(0U) == 0U);
+    TEST_ASSERT(bounded_socket_io_size(1U) == 1U);
+    TEST_ASSERT(bounded_socket_io_size(static_cast<std::size_t>(INT_MAX)) == static_cast<std::size_t>(INT_MAX));
+    TEST_ASSERT(bounded_socket_io_size(static_cast<std::size_t>(INT_MAX) + 1U) == static_cast<std::size_t>(INT_MAX));
+    TEST_ASSERT(bounded_socket_io_size(std::numeric_limits<std::size_t>::max()) == static_cast<std::size_t>(INT_MAX));
 
     ConnectedSocketPair sockets = make_connected_socket_pair();
     UniqueSocket reader(std::move(sockets.first));
@@ -44,7 +44,7 @@ int main() {
     writer.reset();
 
     HttpRequestHead head;
-    assert(try_read_http_request_head(reader.get(), 65536, &head));
+    TEST_ASSERT(try_read_http_request_head(reader.get(), 65536, &head));
 
     const HttpRequest request = parse_http_request_head(head.raw_headers);
     const HttpRequestBodyFraming framing = request_body_framing_from_headers(request.headers);
@@ -60,9 +60,9 @@ int main() {
         decoded.append(buffer, received);
     }
 
-    assert(request.path == "/v1/transfer/import");
-    assert(request.header("transfer-encoding") == "chunked");
-    assert(decoded == "hello world");
+    TEST_ASSERT(request.path == "/v1/transfer/import");
+    TEST_ASSERT(request.header("transfer-encoding") == "chunked");
+    TEST_ASSERT(decoded == "hello world");
 
     return 0;
 }

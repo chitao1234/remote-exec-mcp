@@ -1,4 +1,4 @@
-#include <cassert>
+#include "test_assert.h"
 #include <cstdint>
 #include <thread>
 #include <vector>
@@ -16,7 +16,7 @@ int main() {
             BasicLockGuard lock(mutex);
             while (!ready) {
                 const bool woke = cond.timed_wait_ms(mutex, 500UL);
-                assert(woke);
+                TEST_ASSERT(woke);
             }
         });
 
@@ -35,8 +35,8 @@ int main() {
         const std::uint64_t start = platform::monotonic_ms();
         const bool woke = cond.timed_wait_ms(mutex, 75UL);
         const std::uint64_t elapsed = platform::monotonic_ms() - start;
-        assert(!woke);
-        assert(elapsed >= 50UL);
+        TEST_ASSERT(!woke);
+        TEST_ASSERT(elapsed >= 50UL);
     }
 
     ready = false;
@@ -49,7 +49,7 @@ int main() {
                 BasicLockGuard lock(mutex);
                 while (!ready) {
                     const bool woke = cond.timed_wait_ms(mutex, 500UL);
-                    assert(woke);
+                    TEST_ASSERT(woke);
                 }
                 ++released;
             }));
@@ -64,5 +64,5 @@ int main() {
             waiters[i].join();
         }
     }
-    assert(released == 2);
+    TEST_ASSERT(released == 2);
 }

@@ -1,5 +1,5 @@
 #include <atomic>
-#include <cassert>
+#include "test_assert.h"
 #include <utility>
 
 #include "connection_manager.h"
@@ -20,16 +20,16 @@ int main() {
 
     std::atomic<bool> release_first(false);
 
-    assert(manager.try_start(std::move(pair_one.first), [&release_first](SOCKET socket) {
+    TEST_ASSERT(manager.try_start(std::move(pair_one.first), [&release_first](SOCKET socket) {
         hold_worker(socket, release_first);
     }));
-    assert(manager.active_count() == 1UL);
-    assert(!manager.try_start(std::move(pair_two.first), [&release_first](SOCKET socket) {
+    TEST_ASSERT(manager.active_count() == 1UL);
+    TEST_ASSERT(!manager.try_start(std::move(pair_two.first), [&release_first](SOCKET socket) {
         hold_worker(socket, release_first);
     }));
 
     manager.begin_shutdown();
     release_first.store(true);
     manager.wait_for_all();
-    assert(manager.active_count() == 0UL);
+    TEST_ASSERT(manager.active_count() == 0UL);
 }

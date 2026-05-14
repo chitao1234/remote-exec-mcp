@@ -1,4 +1,4 @@
-#include <cassert>
+#include "test_assert.h"
 #include <cstdint>
 #include <string>
 #include <thread>
@@ -34,8 +34,8 @@ static std::string normalize_output(const std::string& input) {
 static void assert_exec_routes(AppState& state, const fs::path& root) {
     const HttpResponse missing_cmd_response =
         route_request(state, json_request("/v1/exec/start", Json{{"workdir", root.string()}}));
-    assert(missing_cmd_response.status == 400);
-    assert(Json::parse(missing_cmd_response.body).at("code").get<std::string>() == "bad_request");
+    TEST_ASSERT(missing_cmd_response.status == 400);
+    TEST_ASSERT(Json::parse(missing_cmd_response.body).at("code").get<std::string>() == "bad_request");
 
     const HttpResponse non_tty_start_response = route_request(state,
                                                               json_request("/v1/exec/start",
@@ -46,10 +46,10 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
                                                                                {"tty", false},
                                                                                {"yield_time_ms", 250},
                                                                            }));
-    assert(non_tty_start_response.status == 200);
+    TEST_ASSERT(non_tty_start_response.status == 200);
     const Json non_tty_started = Json::parse(non_tty_start_response.body);
-    assert(non_tty_started.at("running").get<bool>());
-    assert(non_tty_started.at("output").get<std::string>() == "ready");
+    TEST_ASSERT(non_tty_started.at("running").get<bool>());
+    TEST_ASSERT(non_tty_started.at("output").get<std::string>() == "ready");
 
     const HttpResponse stdin_closed_response = route_request(
         state,
@@ -59,8 +59,8 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
                          {"chars", "hello\n"},
                          {"yield_time_ms", 250},
                      }));
-    assert(stdin_closed_response.status == 400);
-    assert(Json::parse(stdin_closed_response.body).at("code").get<std::string>() == "stdin_closed");
+    TEST_ASSERT(stdin_closed_response.status == 400);
+    TEST_ASSERT(Json::parse(stdin_closed_response.body).at("code").get<std::string>() == "stdin_closed");
 
     const HttpResponse invalid_pty_size_response = route_request(
         state,
@@ -71,8 +71,8 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
                          {"yield_time_ms", 250},
                          {"pty_size", Json{{"rows", 0}, {"cols", 80}}},
                      }));
-    assert(invalid_pty_size_response.status == 400);
-    assert(Json::parse(invalid_pty_size_response.body).at("code").get<std::string>() == "invalid_pty_size");
+    TEST_ASSERT(invalid_pty_size_response.status == 400);
+    TEST_ASSERT(Json::parse(invalid_pty_size_response.body).at("code").get<std::string>() == "invalid_pty_size");
 
     const HttpResponse non_tty_resize_response = route_request(
         state,
@@ -83,8 +83,8 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
                          {"yield_time_ms", 250},
                          {"pty_size", Json{{"rows", 33}, {"cols", 101}}},
                      }));
-    assert(non_tty_resize_response.status == 400);
-    assert(Json::parse(non_tty_resize_response.body).at("code").get<std::string>() == "tty_unsupported");
+    TEST_ASSERT(non_tty_resize_response.status == 400);
+    TEST_ASSERT(Json::parse(non_tty_resize_response.body).at("code").get<std::string>() == "tty_unsupported");
 
     const HttpResponse invalid_session_id_type_response = route_request(
         state,
@@ -94,8 +94,8 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
                          {"chars", ""},
                          {"yield_time_ms", 250},
                      }));
-    assert(invalid_session_id_type_response.status == 400);
-    assert(Json::parse(invalid_session_id_type_response.body).at("code").get<std::string>() == "bad_request");
+    TEST_ASSERT(invalid_session_id_type_response.status == 400);
+    TEST_ASSERT(Json::parse(invalid_session_id_type_response.body).at("code").get<std::string>() == "bad_request");
 
     if (process_session_supports_pty()) {
         const HttpResponse slow_start_response = route_request(state,
@@ -107,9 +107,9 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
                                                                                 {"tty", true},
                                                                                 {"yield_time_ms", 250},
                                                                             }));
-        assert(slow_start_response.status == 200);
+        TEST_ASSERT(slow_start_response.status == 200);
         const Json slow_started = Json::parse(slow_start_response.body);
-        assert(slow_started.at("running").get<bool>());
+        TEST_ASSERT(slow_started.at("running").get<bool>());
 
         const HttpResponse fast_start_response =
             route_request(state,
@@ -121,9 +121,9 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
                                            {"tty", true},
                                            {"yield_time_ms", 250},
                                        }));
-        assert(fast_start_response.status == 200);
+        TEST_ASSERT(fast_start_response.status == 200);
         const Json fast_started = Json::parse(fast_start_response.body);
-        assert(fast_started.at("running").get<bool>());
+        TEST_ASSERT(fast_started.at("running").get<bool>());
 
         HttpResponse slow_poll_response;
         std::thread slow_thread([&]() {
@@ -148,11 +148,11 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
                              {"yield_time_ms", 250},
                          }));
         const std::uint64_t fast_elapsed_ms = platform::monotonic_ms() - fast_started_at;
-        assert(fast_write_response.status == 200);
-        assert(fast_elapsed_ms < 2000UL && "fast route request waited behind unrelated session");
-        assert(Json::parse(fast_write_response.body).at("output").get<std::string>().find("ping") != std::string::npos);
+        TEST_ASSERT(fast_write_response.status == 200);
+        TEST_ASSERT(fast_elapsed_ms < 2000UL && "fast route request waited behind unrelated session");
+        TEST_ASSERT(Json::parse(fast_write_response.body).at("output").get<std::string>().find("ping") != std::string::npos);
         slow_thread.join();
-        assert(slow_poll_response.status == 200);
+        TEST_ASSERT(slow_poll_response.status == 200);
 
         const HttpResponse start_response =
             route_request(state,
@@ -166,10 +166,10 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
                                            {"tty", true},
                                            {"yield_time_ms", 250},
                                        }));
-        assert(start_response.status == 200);
+        TEST_ASSERT(start_response.status == 200);
         const Json started = Json::parse(start_response.body);
-        assert(started.at("running").get<bool>());
-        assert(normalize_output(started.at("output").get<std::string>()) == "tty:yes\n");
+        TEST_ASSERT(started.at("running").get<bool>());
+        TEST_ASSERT(normalize_output(started.at("output").get<std::string>()) == "tty:yes\n");
 
         const HttpResponse write_response =
             route_request(state,
@@ -179,13 +179,13 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
                                            {"chars", "hello\n"},
                                            {"yield_time_ms", 5000},
                                        }));
-        assert(write_response.status == 200);
+        TEST_ASSERT(write_response.status == 200);
         const Json completed = Json::parse(write_response.body);
-        assert(!completed.at("running").get<bool>());
-        assert(completed.at("exit_code").get<int>() == 0);
+        TEST_ASSERT(!completed.at("running").get<bool>());
+        TEST_ASSERT(completed.at("exit_code").get<int>() == 0);
         const std::string output = normalize_output(completed.at("output").get<std::string>());
-        assert(output.find("hello\n") != std::string::npos);
-        assert(output.find("input:hello\n") != std::string::npos);
+        TEST_ASSERT(output.find("hello\n") != std::string::npos);
+        TEST_ASSERT(output.find("input:hello\n") != std::string::npos);
 
         const HttpResponse resize_start_response =
             route_request(state,
@@ -197,9 +197,9 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
                                            {"tty", true},
                                            {"yield_time_ms", 250},
                                        }));
-        assert(resize_start_response.status == 200);
+        TEST_ASSERT(resize_start_response.status == 200);
         const Json resize_started = Json::parse(resize_start_response.body);
-        assert(resize_started.at("running").get<bool>());
+        TEST_ASSERT(resize_started.at("running").get<bool>());
 
         const HttpResponse resize_write_response = route_request(
             state,
@@ -210,10 +210,10 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
                              {"yield_time_ms", 1000},
                              {"pty_size", Json{{"rows", 33}, {"cols", 101}}},
                          }));
-        assert(resize_write_response.status == 200);
+        TEST_ASSERT(resize_write_response.status == 200);
         const Json resized = Json::parse(resize_write_response.body);
-        assert(resized.at("running").get<bool>());
-        assert(normalize_output(resized.at("output").get<std::string>()).find("33 101") != std::string::npos);
+        TEST_ASSERT(resized.at("running").get<bool>());
+        TEST_ASSERT(normalize_output(resized.at("output").get<std::string>()).find("33 101") != std::string::npos);
     }
 }
 

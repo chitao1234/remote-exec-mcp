@@ -1,6 +1,6 @@
 #include <algorithm>
 #include <atomic>
-#include <cassert>
+#include "test_assert.h"
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -102,7 +102,7 @@ static void recv_exact_or_assert(SOCKET socket, char* data, std::size_t size) {
     std::size_t offset = 0;
     while (offset < size) {
         const int received = recv(socket, data + offset, static_cast<int>(size - offset), 0);
-        assert(received > 0);
+        TEST_ASSERT(received > 0);
         offset += static_cast<std::size_t>(received);
     }
 }
@@ -153,7 +153,7 @@ static bool try_read_tunnel_frame_with_timeout(SOCKET socket, unsigned long time
     timeout.tv_sec = static_cast<long>(timeout_ms / 1000UL);
     timeout.tv_usec = static_cast<long>((timeout_ms % 1000UL) * 1000UL);
     const int ready = select(socket + 1, &read_fds, NULL, NULL, &timeout);
-    assert(ready >= 0);
+    TEST_ASSERT(ready >= 0);
     if (ready == 0) {
         return false;
     }
@@ -169,31 +169,31 @@ static bool tcp_listener_has_pending_connection(SOCKET socket, unsigned long tim
     timeout.tv_sec = static_cast<long>(timeout_ms / 1000UL);
     timeout.tv_usec = static_cast<long>((timeout_ms % 1000UL) * 1000UL);
     const int ready = select(socket + 1, &read_fds, NULL, NULL, &timeout);
-    assert(ready >= 0);
+    TEST_ASSERT(ready >= 0);
     return ready > 0 && FD_ISSET(socket, &read_fds);
 }
 
 static void assert_tunnel_error_code(const PortTunnelFrame& frame, const std::string& code) {
-    assert(frame.type == PortTunnelFrameType::Error);
+    TEST_ASSERT(frame.type == PortTunnelFrameType::Error);
     const Json meta = Json::parse(frame.meta);
-    assert(meta.at("code").get<std::string>() == code);
+    TEST_ASSERT(meta.at("code").get<std::string>() == code);
 }
 
 static void assert_forward_drop(const PortTunnelFrame& frame, const std::string& kind, const std::string& reason) {
-    assert(frame.type == PortTunnelFrameType::ForwardDrop);
+    TEST_ASSERT(frame.type == PortTunnelFrameType::ForwardDrop);
     const Json meta = Json::parse(frame.meta);
-    assert(meta.at("kind").get<std::string>() == kind);
-    assert(meta.at("count").get<unsigned long>() == 1UL);
-    assert(meta.at("reason").get<std::string>() == reason);
+    TEST_ASSERT(meta.at("kind").get<std::string>() == kind);
+    TEST_ASSERT(meta.at("count").get<unsigned long>() == 1UL);
+    TEST_ASSERT(meta.at("reason").get<std::string>() == reason);
 }
 
 static std::size_t response_content_length(const std::string& header_block) {
     const std::string marker = "\r\nContent-Length: ";
     const std::size_t start = header_block.find(marker);
-    assert(start != std::string::npos);
+    TEST_ASSERT(start != std::string::npos);
     const std::size_t value_start = start + marker.size();
     const std::size_t value_end = header_block.find("\r\n", value_start);
-    assert(value_end != std::string::npos);
+    TEST_ASSERT(value_end != std::string::npos);
     return static_cast<std::size_t>(
         std::strtoull(header_block.substr(value_start, value_end - value_start).c_str(), NULL, 10));
 }
@@ -235,7 +235,7 @@ static void send_request_and_close_writer(SOCKET socket, const std::string& requ
 
 static std::string response_body(const std::string& response) {
     const std::size_t header_end = response.find("\r\n\r\n");
-    assert(header_end != std::string::npos);
+    TEST_ASSERT(header_end != std::string::npos);
     return response.substr(header_end + 4);
 }
 
@@ -245,19 +245,19 @@ static std::string decode_chunked_response_body(const std::string& response) {
     std::size_t offset = 0;
     for (;;) {
         const std::size_t line_end = body.find("\r\n", offset);
-        assert(line_end != std::string::npos);
+        TEST_ASSERT(line_end != std::string::npos);
         std::size_t chunk_size = 0;
         std::istringstream size_stream(body.substr(offset, line_end - offset));
         size_stream >> std::hex >> chunk_size;
         offset = line_end + 2;
         if (chunk_size == 0U) {
-            assert(body.compare(offset, 2, "\r\n") == 0);
+            TEST_ASSERT(body.compare(offset, 2, "\r\n") == 0);
             return decoded;
         }
-        assert(offset + chunk_size + 2 <= body.size());
+        TEST_ASSERT(offset + chunk_size + 2 <= body.size());
         decoded.append(body, offset, chunk_size);
         offset += chunk_size;
-        assert(body.compare(offset, 2, "\r\n") == 0);
+        TEST_ASSERT(body.compare(offset, 2, "\r\n") == 0);
         offset += 2;
     }
 }
@@ -288,16 +288,16 @@ static std::uint64_t parse_octal_value(const char* data, std::size_t size) {
 }
 
 static std::string single_file_tar_body(const std::string& archive) {
-    assert(archive.size() >= 512);
+    TEST_ASSERT(archive.size() >= 512);
     const char* header = archive.data();
     std::size_t path_length = 0;
     while (path_length < 100 && header[path_length] != '\0') {
         ++path_length;
     }
-    assert(std::string(header, path_length) == ".remote-exec-file");
-    assert(header[156] == '0');
+    TEST_ASSERT(std::string(header, path_length) == ".remote-exec-file");
+    TEST_ASSERT(header[156] == '0');
     const std::uint64_t size = parse_octal_value(header + 124, 12);
-    assert(512 + static_cast<std::size_t>(size) <= archive.size());
+    TEST_ASSERT(512 + static_cast<std::size_t>(size) <= archive.size());
     return archive.substr(512, static_cast<std::size_t>(size));
 }
 
@@ -357,7 +357,7 @@ static std::string encoded_destination_path_header(const fs::path& destination) 
 
 static std::string run_single_request(AppState& state, const std::string& request) {
     int sockets[2];
-    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
+    TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
 
     UniqueSocket server_socket(sockets[0]);
     UniqueSocket client_socket(sockets[1]);
@@ -389,7 +389,7 @@ json_post_request_with_extra_headers(const std::string& path, const Json& body, 
 
 static void assert_persistent_json_requests_reuse_socket(AppState& state) {
     int sockets[2];
-    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
+    TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
 
     UniqueSocket server_socket(sockets[0]);
     UniqueSocket client_socket(sockets[1]);
@@ -402,19 +402,19 @@ static void assert_persistent_json_requests_reuse_socket(AppState& state) {
 
     send_all(client_socket.get(), json_post_request("/v1/health", Json::object()));
     const std::string first_response = read_content_length_response_from_socket(client_socket.get());
-    assert(first_response.find("HTTP/1.1 200 OK\r\n") == 0);
-    assert(first_response.find("Connection: close\r\n") == std::string::npos);
-    assert(Json::parse(response_body(first_response)).at("status").get<std::string>() == "ok");
+    TEST_ASSERT(first_response.find("HTTP/1.1 200 OK\r\n") == 0);
+    TEST_ASSERT(first_response.find("Connection: close\r\n") == std::string::npos);
+    TEST_ASSERT(Json::parse(response_body(first_response)).at("status").get<std::string>() == "ok");
 
     send_all(client_socket.get(),
              json_post_request_with_extra_headers("/v1/target-info", Json::object(), "Connection: close\r\n"));
     const std::string second_response = read_content_length_response_from_socket(client_socket.get());
-    assert(second_response.find("HTTP/1.1 200 OK\r\n") == 0);
-    assert(second_response.find("Connection: close\r\n") == std::string::npos);
-    assert(Json::parse(response_body(second_response)).at("target").get<std::string>() == "cpp-test");
+    TEST_ASSERT(second_response.find("HTTP/1.1 200 OK\r\n") == 0);
+    TEST_ASSERT(second_response.find("Connection: close\r\n") == std::string::npos);
+    TEST_ASSERT(Json::parse(response_body(second_response)).at("target").get<std::string>() == "cpp-test");
 
     char extra = '\0';
-    assert(recv(client_socket.get(), &extra, 1, 0) == 0);
+    TEST_ASSERT(recv(client_socket.get(), &extra, 1, 0) == 0);
     server_thread.join();
 }
 
@@ -429,7 +429,7 @@ static std::thread start_server_thread(AppState& state, UniqueSocket* server_soc
 
 static void open_tunnel(AppState& state, UniqueSocket* client_socket, std::thread* server_thread) {
     int sockets[2];
-    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
+    TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
 
     UniqueSocket server_socket(sockets[0]);
     client_socket->reset(sockets[1]);
@@ -443,10 +443,10 @@ static void open_tunnel(AppState& state, UniqueSocket* client_socket, std::threa
              "X-Request-Id: cpp-tunnel-req\r\n"
              "\r\n");
     const std::string response = read_http_head_from_socket(client_socket->get());
-    assert(response.find("HTTP/1.1 101 Switching Protocols\r\n") == 0);
-    assert(response.find("Connection: Upgrade\r\n") != std::string::npos);
-    assert(response.find("Upgrade: remote-exec-port-tunnel\r\n") != std::string::npos);
-    assert(response.find("x-request-id: cpp-tunnel-req\r\n") != std::string::npos);
+    TEST_ASSERT(response.find("HTTP/1.1 101 Switching Protocols\r\n") == 0);
+    TEST_ASSERT(response.find("Connection: Upgrade\r\n") != std::string::npos);
+    TEST_ASSERT(response.find("Upgrade: remote-exec-port-tunnel\r\n") != std::string::npos);
+    TEST_ASSERT(response.find("x-request-id: cpp-tunnel-req\r\n") != std::string::npos);
     send_preface(client_socket->get());
 }
 
@@ -505,7 +505,7 @@ static PortTunnelFrame open_v4_tunnel(AppState& state,
                                  0U,
                                  tunnel_open_meta(role, protocol, generation, resume_session_id)));
     const PortTunnelFrame ready = read_tunnel_frame(client_socket->get());
-    assert(ready.type == PortTunnelFrameType::TunnelReady);
+    TEST_ASSERT(ready.type == PortTunnelFrameType::TunnelReady);
     return ready;
 }
 
@@ -537,7 +537,7 @@ static void assert_tunnel_close_releases_tcp_listener(AppState& state) {
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
     const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
-    assert(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
     const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
 
     send_tunnel_frame(
@@ -545,11 +545,11 @@ static void assert_tunnel_close_releases_tcp_listener(AppState& state) {
         json_frame(PortTunnelFrameType::TunnelClose,
                    0U,
                    Json{{"forward_id", "fwd_cpp_test"}, {"generation", 1ULL}, {"reason", "operator_close"}}));
-    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TunnelClosed);
+    TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TunnelClosed);
     close_tunnel(&client_socket, &server_thread);
 
     UniqueSocket rebound(bind_port_forward_socket(endpoint, "tcp"));
-    assert(rebound.valid());
+    TEST_ASSERT(rebound.valid());
 }
 
 static void assert_terminal_tunnel_error_releases_tcp_listener_immediately(AppState& state) {
@@ -560,7 +560,7 @@ static void assert_terminal_tunnel_error_releases_tcp_listener_immediately(AppSt
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
     const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
-    assert(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
     const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
 
     const unsigned char invalid_frame[PORT_TUNNEL_HEADER_LEN] = {
@@ -584,11 +584,11 @@ static void assert_terminal_tunnel_error_releases_tcp_listener_immediately(AppSt
     send_all_bytes(client_socket.get(), reinterpret_cast<const char*>(invalid_frame), sizeof(invalid_frame));
 
     const PortTunnelFrame error = read_tunnel_frame(client_socket.get());
-    assert(error.type == PortTunnelFrameType::Error);
-    assert(error.stream_id == 0U);
+    TEST_ASSERT(error.type == PortTunnelFrameType::Error);
+    TEST_ASSERT(error.stream_id == 0U);
     const Json error_meta = Json::parse(error.meta);
-    assert(error_meta.at("code").get<std::string>() == "invalid_port_tunnel");
-    assert(error_meta.at("fatal").get<bool>());
+    TEST_ASSERT(error_meta.at("code").get<std::string>() == "invalid_port_tunnel");
+    TEST_ASSERT(error_meta.at("fatal").get<bool>());
 
     close_tunnel(&client_socket, &server_thread);
     wait_until_bindable(endpoint);
@@ -602,11 +602,11 @@ static void assert_tunnel_open_ready_and_close_round_trip(AppState& state) {
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TunnelOpen, 0U, tunnel_open_meta("listen", "tcp", 1ULL)));
     const PortTunnelFrame ready = read_tunnel_frame(client_socket.get());
-    assert(ready.type == PortTunnelFrameType::TunnelReady);
+    TEST_ASSERT(ready.type == PortTunnelFrameType::TunnelReady);
     const Json ready_meta = Json::parse(ready.meta);
-    assert(ready_meta.at("generation").get<uint64_t>() == 1ULL);
-    assert(ready_meta.at("session_id").get<std::string>().find("ptun_") == 0);
-    assert(ready_meta.at("resume_timeout_ms").get<unsigned long>() > 0UL);
+    TEST_ASSERT(ready_meta.at("generation").get<uint64_t>() == 1ULL);
+    TEST_ASSERT(ready_meta.at("session_id").get<std::string>().find("ptun_") == 0);
+    TEST_ASSERT(ready_meta.at("resume_timeout_ms").get<unsigned long>() > 0UL);
 
     send_tunnel_frame(
         client_socket.get(),
@@ -614,9 +614,9 @@ static void assert_tunnel_open_ready_and_close_round_trip(AppState& state) {
                    0U,
                    Json{{"forward_id", "fwd_cpp_test"}, {"generation", 1ULL}, {"reason", "operator_close"}}));
     const PortTunnelFrame closed = read_tunnel_frame(client_socket.get());
-    assert(closed.type == PortTunnelFrameType::TunnelClosed);
-    assert(closed.stream_id == 0U);
-    assert(Json::parse(closed.meta).at("generation").get<uint64_t>() == 1ULL);
+    TEST_ASSERT(closed.type == PortTunnelFrameType::TunnelClosed);
+    TEST_ASSERT(closed.stream_id == 0U);
+    TEST_ASSERT(Json::parse(closed.meta).at("generation").get<uint64_t>() == 1ULL);
 
     close_tunnel(&client_socket, &server_thread);
 }
@@ -628,12 +628,12 @@ static void assert_tunnel_close_releases_retained_listener_immediately(AppState&
 
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TunnelOpen, 0U, tunnel_open_meta("listen", "tcp", 1ULL)));
-    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TunnelReady);
+    TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TunnelReady);
 
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
     const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
-    assert(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
     const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
 
     send_tunnel_frame(
@@ -642,12 +642,12 @@ static void assert_tunnel_close_releases_retained_listener_immediately(AppState&
                    0U,
                    Json{{"forward_id", "fwd_cpp_test"}, {"generation", 1ULL}, {"reason", "operator_close"}}));
     const PortTunnelFrame closed = read_tunnel_frame(client_socket.get());
-    assert(closed.type == PortTunnelFrameType::TunnelClosed);
-    assert(closed.stream_id == 0U);
+    TEST_ASSERT(closed.type == PortTunnelFrameType::TunnelClosed);
+    TEST_ASSERT(closed.stream_id == 0U);
 
     close_tunnel(&client_socket, &server_thread);
     UniqueSocket rebound(bind_port_forward_socket(endpoint, "tcp"));
-    assert(rebound.valid());
+    TEST_ASSERT(rebound.valid());
 }
 
 static void assert_port_tunnel_worker_limit_is_reported(const fs::path& root) {
@@ -660,28 +660,28 @@ static void assert_port_tunnel_worker_limit_is_reported(const fs::path& root) {
 
     send_tunnel_frame(worker_holder.get(),
                       json_frame(PortTunnelFrameType::TunnelOpen, 0U, tunnel_open_meta("listen", "tcp", 1ULL)));
-    assert(read_tunnel_frame(worker_holder.get()).type == PortTunnelFrameType::TunnelReady);
+    TEST_ASSERT(read_tunnel_frame(worker_holder.get()).type == PortTunnelFrameType::TunnelReady);
 
     send_tunnel_frame(worker_holder.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
-    assert(read_tunnel_frame(worker_holder.get()).type == PortTunnelFrameType::TcpListenOk);
+    TEST_ASSERT(read_tunnel_frame(worker_holder.get()).type == PortTunnelFrameType::TcpListenOk);
 
     UniqueSocket limited_client;
     std::thread limited_thread;
     open_tunnel(state, &limited_client, &limited_thread);
     send_tunnel_frame(limited_client.get(),
                       json_frame(PortTunnelFrameType::TunnelOpen, 0U, tunnel_open_meta("listen", "tcp", 1ULL)));
-    assert(read_tunnel_frame(limited_client.get()).type == PortTunnelFrameType::TunnelReady);
+    TEST_ASSERT(read_tunnel_frame(limited_client.get()).type == PortTunnelFrameType::TunnelReady);
 
     send_tunnel_frame(limited_client.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
     const PortTunnelFrame error = read_tunnel_frame(limited_client.get());
-    assert(error.type == PortTunnelFrameType::Error);
-    assert(error.stream_id == 1U);
+    TEST_ASSERT(error.type == PortTunnelFrameType::Error);
+    TEST_ASSERT(error.stream_id == 1U);
     const Json error_meta = Json::parse(error.meta);
-    assert(error_meta.at("code").get<std::string>() == "port_tunnel_limit_exceeded");
-    assert(error_meta.at("message").get<std::string>() == "port tunnel worker limit reached");
-    assert(!error_meta.at("fatal").get<bool>());
+    TEST_ASSERT(error_meta.at("code").get<std::string>() == "port_tunnel_limit_exceeded");
+    TEST_ASSERT(error_meta.at("message").get<std::string>() == "port tunnel worker limit reached");
+    TEST_ASSERT(!error_meta.at("fatal").get<bool>());
 
     close_tunnel(&limited_client, &limited_thread);
     close_tunnel(&worker_holder, &worker_holder_thread);
@@ -703,17 +703,17 @@ static void assert_tcp_connect_worker_limit_errors_before_success(const fs::path
     open_v4_tunnel(state, &worker_holder, &worker_holder_thread, "listen", "tcp", 1ULL);
     send_tunnel_frame(worker_holder.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 99U, Json{{"endpoint", "127.0.0.1:0"}}));
-    assert(read_tunnel_frame(worker_holder.get()).type == PortTunnelFrameType::TcpListenOk);
+    TEST_ASSERT(read_tunnel_frame(worker_holder.get()).type == PortTunnelFrameType::TcpListenOk);
 
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpConnect, 1U, Json{{"endpoint", endpoint}}));
     const PortTunnelFrame response = read_tunnel_frame(client_socket.get());
-    assert(response.type == PortTunnelFrameType::Error);
-    assert(response.stream_id == 1U);
+    TEST_ASSERT(response.type == PortTunnelFrameType::Error);
+    TEST_ASSERT(response.stream_id == 1U);
     const Json meta = Json::parse(response.meta);
-    assert(meta.at("code").get<std::string>() == "port_tunnel_limit_exceeded");
-    assert(meta.at("message").get<std::string>() == "port tunnel worker limit reached");
-    assert(!meta.at("fatal").get<bool>());
+    TEST_ASSERT(meta.at("code").get<std::string>() == "port_tunnel_limit_exceeded");
+    TEST_ASSERT(meta.at("message").get<std::string>() == "port tunnel worker limit reached");
+    TEST_ASSERT(!meta.at("fatal").get<bool>());
 
     close_tunnel(&worker_holder, &worker_holder_thread);
     close_tunnel(&client_socket, &server_thread);
@@ -741,7 +741,7 @@ static void assert_detached_session_expiry_does_not_consume_worker_budget(const 
     send_tunnel_frame(connect_client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpConnect, 1U, Json{{"endpoint", endpoint}}));
     const PortTunnelFrame response = read_tunnel_frame(connect_client_socket.get());
-    assert(response.type == PortTunnelFrameType::TcpConnectOk);
+    TEST_ASSERT(response.type == PortTunnelFrameType::TcpConnectOk);
 
     close_tunnel(&connect_client_socket, &connect_thread);
 
@@ -766,11 +766,11 @@ static void assert_tcp_connect_read_thread_failure_errors_before_success(const f
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpConnect, 1U, Json{{"endpoint", endpoint}}));
     const PortTunnelFrame response = read_tunnel_frame(client_socket.get());
-    assert(response.type == PortTunnelFrameType::Error);
-    assert(response.stream_id == 1U);
+    TEST_ASSERT(response.type == PortTunnelFrameType::Error);
+    TEST_ASSERT(response.stream_id == 1U);
     const Json meta = Json::parse(response.meta);
-    assert(meta.at("code").get<std::string>() == "port_tunnel_limit_exceeded");
-    assert(meta.at("message").get<std::string>() == "port tunnel worker limit reached");
+    TEST_ASSERT(meta.at("code").get<std::string>() == "port_tunnel_limit_exceeded");
+    TEST_ASSERT(meta.at("message").get<std::string>() == "port tunnel worker limit reached");
 
     close_tunnel(&client_socket, &server_thread);
 }
@@ -785,17 +785,17 @@ static void assert_tcp_accept_read_thread_failure_drops_before_accept(const fs::
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
     const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
-    assert(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
     const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
 
     set_forced_tcp_read_thread_failures(1UL);
     UniqueSocket dropped_peer(connect_port_forward_socket(endpoint, "tcp"));
     PortTunnelFrame unexpected;
-    assert(!try_read_tunnel_frame_with_timeout(client_socket.get(), 100UL, &unexpected));
+    TEST_ASSERT(!try_read_tunnel_frame_with_timeout(client_socket.get(), 100UL, &unexpected));
 
     UniqueSocket accepted_peer(connect_port_forward_socket(endpoint, "tcp"));
     const PortTunnelFrame accepted = read_tunnel_frame(client_socket.get());
-    assert(accepted.type == PortTunnelFrameType::TcpAccept);
+    TEST_ASSERT(accepted.type == PortTunnelFrameType::TcpAccept);
 
     close_tunnel(&client_socket, &server_thread);
 }
@@ -811,17 +811,17 @@ static void assert_retained_tcp_accept_read_thread_failure_drops_before_accept(c
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
     const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
-    assert(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
     const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
 
     set_forced_tcp_read_thread_failures(1UL);
     UniqueSocket dropped_peer(connect_port_forward_socket(endpoint, "tcp"));
     PortTunnelFrame unexpected;
-    assert(!try_read_tunnel_frame_with_timeout(client_socket.get(), 100UL, &unexpected));
+    TEST_ASSERT(!try_read_tunnel_frame_with_timeout(client_socket.get(), 100UL, &unexpected));
 
     UniqueSocket accepted_peer(connect_port_forward_socket(endpoint, "tcp"));
     const PortTunnelFrame accepted = read_tunnel_frame(client_socket.get());
-    assert(accepted.type == PortTunnelFrameType::TcpAccept);
+    TEST_ASSERT(accepted.type == PortTunnelFrameType::TcpAccept);
 
     close_tunnel(&client_socket, &server_thread);
 }
@@ -837,12 +837,12 @@ static void assert_retained_tcp_accept_worker_pressure_is_local_drop(const fs::p
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
     const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
-    assert(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
     const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
 
     UniqueSocket peer(connect_port_forward_socket(endpoint, "tcp"));
     PortTunnelFrame drop_report;
-    assert(try_read_tunnel_frame_with_timeout(client_socket.get(), 1000UL, &drop_report));
+    TEST_ASSERT(try_read_tunnel_frame_with_timeout(client_socket.get(), 1000UL, &drop_report));
     assert_forward_drop(drop_report, "tcp_stream", "port_tunnel_limit_exceeded");
 
     close_tunnel(&client_socket, &server_thread);
@@ -863,7 +863,7 @@ static void assert_retained_tcp_accept_pressure_is_local_drop(const fs::path& ro
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
     const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
-    assert(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
     const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
 
     UniqueSocket listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
@@ -874,14 +874,14 @@ static void assert_retained_tcp_accept_pressure_is_local_drop(const fs::path& ro
     open_v4_tunnel(state, &connect_client, &connect_thread, "connect", "tcp", 1ULL);
     send_tunnel_frame(connect_client.get(),
                       json_frame(PortTunnelFrameType::TcpConnect, 3U, Json{{"endpoint", hold_endpoint}}));
-    assert(read_tunnel_frame(connect_client.get()).type == PortTunnelFrameType::TcpConnectOk);
+    TEST_ASSERT(read_tunnel_frame(connect_client.get()).type == PortTunnelFrameType::TcpConnectOk);
     UniqueSocket held_peer(accept(listener.get(), NULL, NULL));
-    assert(held_peer.valid());
+    TEST_ASSERT(held_peer.valid());
 
     UniqueSocket refused_peer(connect_port_forward_socket(endpoint, "tcp"));
-    assert(refused_peer.valid());
+    TEST_ASSERT(refused_peer.valid());
     PortTunnelFrame drop_report;
-    assert(try_read_tunnel_frame_with_timeout(client_socket.get(), 1000UL, &drop_report));
+    TEST_ASSERT(try_read_tunnel_frame_with_timeout(client_socket.get(), 1000UL, &drop_report));
     assert_forward_drop(drop_report, "tcp_stream", "port_tunnel_limit_exceeded");
 
     close_tunnel(&client_socket, &server_thread);
@@ -908,12 +908,12 @@ static void assert_tunnel_ready_reports_configured_limits(const fs::path& root) 
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TunnelOpen, 0U, tunnel_open_meta("listen", "tcp", 1ULL)));
     const PortTunnelFrame ready = read_tunnel_frame(client_socket.get());
-    assert(ready.type == PortTunnelFrameType::TunnelReady);
+    TEST_ASSERT(ready.type == PortTunnelFrameType::TunnelReady);
     const Json ready_meta = Json::parse(ready.meta);
     const Json ready_limits = ready_meta.at("limits");
-    assert(ready_limits.at("max_active_tcp_streams").get<unsigned long>() == 3UL);
-    assert(ready_limits.at("max_udp_peers").get<unsigned long>() == 5UL);
-    assert(ready_limits.at("max_queued_bytes").get<unsigned long>() == 4096UL);
+    TEST_ASSERT(ready_limits.at("max_active_tcp_streams").get<unsigned long>() == 3UL);
+    TEST_ASSERT(ready_limits.at("max_udp_peers").get<unsigned long>() == 5UL);
+    TEST_ASSERT(ready_limits.at("max_queued_bytes").get<unsigned long>() == 4096UL);
 
     close_tunnel(&client_socket, &server_thread);
 }
@@ -926,13 +926,13 @@ static void assert_tunnel_rejects_data_plane_before_open(AppState& state) {
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpConnect, 1U, Json{{"endpoint", "127.0.0.1:1"}}));
     PortTunnelFrame error = read_tunnel_frame(client_socket.get());
-    assert(error.stream_id == 1U);
+    TEST_ASSERT(error.stream_id == 1U);
     assert_tunnel_error_code(error, "invalid_port_tunnel");
 
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::UdpBind, 3U, Json{{"endpoint", "127.0.0.1:0"}}));
     error = read_tunnel_frame(client_socket.get());
-    assert(error.stream_id == 3U);
+    TEST_ASSERT(error.stream_id == 3U);
     assert_tunnel_error_code(error, "invalid_port_tunnel");
 
     close_tunnel(&client_socket, &server_thread);
@@ -948,7 +948,7 @@ static void assert_tunnel_open_metadata_error(AppState& state, const std::string
     send_tunnel_frame(client_socket.get(), frame);
 
     const PortTunnelFrame error = read_tunnel_frame(client_socket.get());
-    assert(error.stream_id == 0U);
+    TEST_ASSERT(error.stream_id == 0U);
     assert_tunnel_error_code(error, "invalid_port_tunnel");
 
     close_tunnel(&client_socket, &server_thread);
@@ -968,19 +968,19 @@ static void assert_tunnel_rejects_frames_for_wrong_role_or_protocol(AppState& st
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::UdpBind, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
     PortTunnelFrame error = read_tunnel_frame(client_socket.get());
-    assert(error.stream_id == 1U);
+    TEST_ASSERT(error.stream_id == 1U);
     assert_tunnel_error_code(error, "invalid_port_tunnel");
 
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 3U, Json{{"endpoint", "127.0.0.1:0"}}));
     error = read_tunnel_frame(client_socket.get());
-    assert(error.stream_id == 3U);
+    TEST_ASSERT(error.stream_id == 3U);
     assert_tunnel_error_code(error, "invalid_port_tunnel");
 
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TunnelOpen, 0U, tunnel_open_meta("connect", "tcp", 2ULL)));
     error = read_tunnel_frame(client_socket.get());
-    assert(error.stream_id == 0U);
+    TEST_ASSERT(error.stream_id == 0U);
     assert_tunnel_error_code(error, "port_tunnel_already_attached");
 
     close_tunnel(&client_socket, &server_thread);
@@ -989,7 +989,7 @@ static void assert_tunnel_rejects_frames_for_wrong_role_or_protocol(AppState& st
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 5U, Json{{"endpoint", "127.0.0.1:0"}}));
     error = read_tunnel_frame(client_socket.get());
-    assert(error.stream_id == 5U);
+    TEST_ASSERT(error.stream_id == 5U);
     assert_tunnel_error_code(error, "invalid_port_tunnel");
 
     close_tunnel(&client_socket, &server_thread);
@@ -1046,7 +1046,7 @@ static void assert_retained_listener_limit_is_enforced_and_released(const fs::pa
 
     send_tunnel_frame(first_client.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
-    assert(read_tunnel_frame(first_client.get()).type == PortTunnelFrameType::TcpListenOk);
+    TEST_ASSERT(read_tunnel_frame(first_client.get()).type == PortTunnelFrameType::TcpListenOk);
 
     UniqueSocket second_client;
     std::thread second_thread;
@@ -1056,13 +1056,13 @@ static void assert_retained_listener_limit_is_enforced_and_released(const fs::pa
     assert_tunnel_error_code(read_tunnel_frame(second_client.get()), "port_tunnel_limit_exceeded");
 
     send_tunnel_frame(first_client.get(), empty_frame(PortTunnelFrameType::Close, 1U));
-    assert(read_tunnel_frame(first_client.get()).type == PortTunnelFrameType::Close);
+    TEST_ASSERT(read_tunnel_frame(first_client.get()).type == PortTunnelFrameType::Close);
     close_tunnel(&first_client, &first_thread);
 
     open_v4_tunnel(state, &first_client, &first_thread, "listen", "tcp", 1ULL);
     send_tunnel_frame(first_client.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
-    assert(read_tunnel_frame(first_client.get()).type == PortTunnelFrameType::TcpListenOk);
+    TEST_ASSERT(read_tunnel_frame(first_client.get()).type == PortTunnelFrameType::TcpListenOk);
 
     close_tunnel(&second_client, &second_thread);
     close_tunnel(&first_client, &first_thread);
@@ -1074,7 +1074,7 @@ static void assert_listen_session_rejects_second_retained_open(AppState& state) 
     open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
-    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpListenOk);
+    TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpListenOk);
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 3U, Json{{"endpoint", "127.0.0.1:0"}}));
     assert_tunnel_error_code(read_tunnel_frame(client_socket.get()), "invalid_port_tunnel");
@@ -1083,7 +1083,7 @@ static void assert_listen_session_rejects_second_retained_open(AppState& state) 
     open_v4_tunnel(state, &client_socket, &server_thread, "listen", "udp", 1ULL);
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::UdpBind, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
-    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::UdpBindOk);
+    TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::UdpBindOk);
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::UdpBind, 3U, Json{{"endpoint", "127.0.0.1:0"}}));
     assert_tunnel_error_code(read_tunnel_frame(client_socket.get()), "invalid_port_tunnel");
@@ -1102,16 +1102,16 @@ static void assert_udp_bind_limit_is_enforced_and_released(const fs::path& root)
     open_v4_tunnel(state, &client_socket, &server_thread, "connect", "udp", 1ULL);
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::UdpBind, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
-    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::UdpBindOk);
+    TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::UdpBindOk);
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::UdpBind, 3U, Json{{"endpoint", "127.0.0.1:0"}}));
     assert_tunnel_error_code(read_tunnel_frame(client_socket.get()), "port_tunnel_limit_exceeded");
 
     send_tunnel_frame(client_socket.get(), empty_frame(PortTunnelFrameType::Close, 1U));
-    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::Close);
+    TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::Close);
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::UdpBind, 5U, Json{{"endpoint", "127.0.0.1:0"}}));
-    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::UdpBindOk);
+    TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::UdpBindOk);
 
     close_tunnel(&client_socket, &server_thread);
 }
@@ -1119,7 +1119,7 @@ static void assert_udp_bind_limit_is_enforced_and_released(const fs::path& root)
 static std::thread accept_and_send_tcp_payload(SOCKET listener_socket, const std::vector<unsigned char>& payload) {
     return std::thread([listener_socket, payload]() {
         UniqueSocket accepted(accept(listener_socket, NULL, NULL));
-        assert(accepted.valid());
+        TEST_ASSERT(accepted.valid());
         send_all_bytes(accepted.get(), reinterpret_cast<const char*>(payload.data()), payload.size());
         platform::sleep_ms(TCP_PAYLOAD_DRAIN_MARGIN_MS);
     });
@@ -1153,24 +1153,24 @@ static void assert_active_tcp_stream_limit_is_enforced_and_released(const fs::pa
 
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpConnect, 1U, Json{{"endpoint", endpoint}}));
-    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpConnectOk);
+    TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpConnectOk);
     UniqueSocket first_accepted(accept(echo_listener.get(), NULL, NULL));
-    assert(first_accepted.valid());
+    TEST_ASSERT(first_accepted.valid());
 
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpConnect, 3U, Json{{"endpoint", endpoint}}));
     assert_tunnel_error_code(read_tunnel_frame(client_socket.get()), "port_tunnel_limit_exceeded");
-    assert(!tcp_listener_has_pending_connection(echo_listener.get(), 100UL));
+    TEST_ASSERT(!tcp_listener_has_pending_connection(echo_listener.get(), 100UL));
 
     send_tunnel_frame(client_socket.get(), empty_frame(PortTunnelFrameType::Close, 1U));
-    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::Close);
+    TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::Close);
     first_accepted.reset();
 
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpConnect, 5U, Json{{"endpoint", endpoint}}));
-    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpConnectOk);
+    TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpConnectOk);
     UniqueSocket second_accepted(accept(echo_listener.get(), NULL, NULL));
-    assert(second_accepted.valid());
+    TEST_ASSERT(second_accepted.valid());
 
     close_tunnel(&client_socket, &server_thread);
 }
@@ -1188,25 +1188,25 @@ static void assert_active_tcp_accept_limit_is_enforced_and_released(const fs::pa
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
     const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
-    assert(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
     const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
 
     UniqueSocket first_peer(connect_port_forward_socket(endpoint, "tcp"));
     const PortTunnelFrame first_accept = read_tunnel_frame(client_socket.get());
-    assert(first_accept.type == PortTunnelFrameType::TcpAccept);
+    TEST_ASSERT(first_accept.type == PortTunnelFrameType::TcpAccept);
 
     UniqueSocket refused_peer(connect_port_forward_socket(endpoint, "tcp"));
     PortTunnelFrame drop_report;
-    assert(try_read_tunnel_frame_with_timeout(client_socket.get(), 1000UL, &drop_report));
+    TEST_ASSERT(try_read_tunnel_frame_with_timeout(client_socket.get(), 1000UL, &drop_report));
     assert_forward_drop(drop_report, "tcp_stream", "port_tunnel_limit_exceeded");
     refused_peer.reset();
 
     send_tunnel_frame(client_socket.get(), empty_frame(PortTunnelFrameType::Close, first_accept.stream_id));
-    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::Close);
+    TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::Close);
     first_peer.reset();
 
     UniqueSocket second_peer(connect_port_forward_socket(endpoint, "tcp"));
-    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpAccept);
+    TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpAccept);
 
     close_tunnel(&client_socket, &server_thread);
 }
@@ -1228,7 +1228,7 @@ static void assert_tunnel_queued_byte_limit_is_enforced(const fs::path& root) {
     open_v4_tunnel(state, &client_socket, &server_thread, "connect", "tcp", 1ULL);
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpConnect, 1U, Json{{"endpoint", endpoint}}));
-    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpConnectOk);
+    TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpConnectOk);
 
     assert_tunnel_error_code(read_tunnel_frame(client_socket.get()), "port_tunnel_limit_exceeded");
 
@@ -1250,14 +1250,14 @@ static void assert_udp_queued_byte_pressure_reports_drop(const fs::path& root) {
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::UdpBind, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
     const PortTunnelFrame bind_ok = read_tunnel_frame(client_socket.get());
-    assert(bind_ok.type == PortTunnelFrameType::UdpBindOk);
+    TEST_ASSERT(bind_ok.type == PortTunnelFrameType::UdpBindOk);
     const std::string endpoint = Json::parse(bind_ok.meta).at("endpoint").get<std::string>();
 
     UniqueSocket peer(bind_port_forward_socket("127.0.0.1:0", "udp"));
     socklen_t peer_len = 0;
     const sockaddr_storage destination = parse_port_forward_peer(endpoint, &peer_len);
     std::vector<unsigned char> payload(512U, 7U);
-    assert(sendto(peer.get(),
+    TEST_ASSERT(sendto(peer.get(),
                   reinterpret_cast<const char*>(payload.data()),
                   static_cast<int>(payload.size()),
                   0,
@@ -1265,7 +1265,7 @@ static void assert_udp_queued_byte_pressure_reports_drop(const fs::path& root) {
                   peer_len) == static_cast<int>(payload.size()));
 
     PortTunnelFrame drop_report;
-    assert(try_read_tunnel_frame_with_timeout(client_socket.get(), 1000UL, &drop_report));
+    TEST_ASSERT(try_read_tunnel_frame_with_timeout(client_socket.get(), 1000UL, &drop_report));
     assert_forward_drop(drop_report, "udp_datagram", "port_tunnel_limit_exceeded");
 
     close_tunnel(&client_socket, &server_thread);
@@ -1279,7 +1279,7 @@ static void assert_partial_tunnel_frame_times_out(const fs::path& root) {
     initialize_state_with_port_forward_limits(state, root, limits);
 
     int sockets[2];
-    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
+    TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
 
     UniqueSocket server_socket(sockets[0]);
     UniqueSocket client_socket(sockets[1]);
@@ -1292,7 +1292,7 @@ static void assert_partial_tunnel_frame_times_out(const fs::path& root) {
              "X-Remote-Exec-Port-Tunnel-Version: 4\r\n"
              "\r\n");
     const std::string response = read_http_head_from_socket(client_socket.get());
-    assert(response.find("HTTP/1.1 101 Switching Protocols\r\n") == 0);
+    TEST_ASSERT(response.find("HTTP/1.1 101 Switching Protocols\r\n") == 0);
     send_preface(client_socket.get());
 
     const unsigned char partial_header[2] = {
@@ -1309,10 +1309,10 @@ static void assert_tunnel_tcp_connect_echoes_binary_data(AppState& state) {
     const std::string echo_endpoint = socket_local_endpoint(echo_listener.get());
     std::thread echo_thread([&]() {
         UniqueSocket accepted(accept(echo_listener.get(), NULL, NULL));
-        assert(accepted.valid());
+        TEST_ASSERT(accepted.valid());
         char buffer[64];
         const int received = recv(accepted.get(), buffer, sizeof(buffer), 0);
-        assert(received > 0);
+        TEST_ASSERT(received > 0);
         send_all_bytes(accepted.get(), buffer, static_cast<std::size_t>(received));
     });
 
@@ -1321,13 +1321,13 @@ static void assert_tunnel_tcp_connect_echoes_binary_data(AppState& state) {
     open_v4_tunnel(state, &client_socket, &server_thread, "connect", "tcp", 1ULL);
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpConnect, 1U, Json{{"endpoint", echo_endpoint}}));
-    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpConnectOk);
+    TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpConnectOk);
     const std::vector<unsigned char> payload = {
         0U, 1U, 2U, 255U, static_cast<unsigned char>('x'), static_cast<unsigned char>('\n')};
     send_tunnel_frame(client_socket.get(), data_frame(PortTunnelFrameType::TcpData, 1U, payload));
     const PortTunnelFrame echoed = read_tunnel_frame(client_socket.get());
-    assert(echoed.type == PortTunnelFrameType::TcpData);
-    assert(echoed.data == payload);
+    TEST_ASSERT(echoed.type == PortTunnelFrameType::TcpData);
+    TEST_ASSERT(echoed.data == payload);
 
     close_tunnel(&client_socket, &server_thread);
     echo_listener.reset();
@@ -1341,7 +1341,7 @@ static void assert_tcp_data_write_pressure_does_not_block_control_frames(AppStat
     std::atomic<bool> release_receiver(false);
     std::thread hold_thread([&]() {
         UniqueSocket accepted(accept(hold_listener.get(), NULL, NULL));
-        assert(accepted.valid());
+        TEST_ASSERT(accepted.valid());
         int buffer_size = 1024;
         setsockopt(
             accepted.get(), SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&buffer_size), sizeof(buffer_size));
@@ -1356,8 +1356,8 @@ static void assert_tcp_data_write_pressure_does_not_block_control_frames(AppStat
     open_v4_tunnel(state, &client_socket, &server_thread, "connect", "tcp", 1ULL);
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpConnect, 1U, Json{{"endpoint", hold_endpoint}}));
-    assert(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpConnectOk);
-    assert(wait_until_true(receiver_ready, 1000UL));
+    TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpConnectOk);
+    TEST_ASSERT(wait_until_true(receiver_ready, 1000UL));
 
     std::vector<unsigned char> payload(PORT_TUNNEL_MAX_DATA_LEN, 0x51U);
     PortTunnelFrame heartbeat = empty_frame(PortTunnelFrameType::TunnelHeartbeat, 0U);
@@ -1377,12 +1377,12 @@ static void assert_tcp_data_write_pressure_does_not_block_control_frames(AppStat
             continue;
         }
         if (frame.type == PortTunnelFrameType::TunnelHeartbeatAck) {
-            assert(frame.meta == heartbeat.meta);
+            TEST_ASSERT(frame.meta == heartbeat.meta);
             saw_ack = true;
             break;
         }
     }
-    assert(saw_ack);
+    TEST_ASSERT(saw_ack);
 
     writer_thread.join();
     release_receiver.store(true);
@@ -1398,26 +1398,26 @@ static void assert_tunnel_udp_bind_emits_two_peer_datagrams(AppState& state) {
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::UdpBind, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
     const PortTunnelFrame bind_ok = read_tunnel_frame(client_socket.get());
-    assert(bind_ok.type == PortTunnelFrameType::UdpBindOk);
+    TEST_ASSERT(bind_ok.type == PortTunnelFrameType::UdpBindOk);
     const std::string endpoint = Json::parse(bind_ok.meta).at("endpoint").get<std::string>();
 
     UniqueSocket peer_a(bind_port_forward_socket("127.0.0.1:0", "udp"));
     UniqueSocket peer_b(bind_port_forward_socket("127.0.0.1:0", "udp"));
     socklen_t peer_len = 0;
     const sockaddr_storage peer = parse_port_forward_peer(endpoint, &peer_len);
-    assert(sendto(peer_a.get(), "udp-a", 5, 0, reinterpret_cast<const sockaddr*>(&peer), peer_len) == 5);
-    assert(sendto(peer_b.get(), "udp-b", 5, 0, reinterpret_cast<const sockaddr*>(&peer), peer_len) == 5);
+    TEST_ASSERT(sendto(peer_a.get(), "udp-a", 5, 0, reinterpret_cast<const sockaddr*>(&peer), peer_len) == 5);
+    TEST_ASSERT(sendto(peer_b.get(), "udp-b", 5, 0, reinterpret_cast<const sockaddr*>(&peer), peer_len) == 5);
 
     const PortTunnelFrame first = read_tunnel_frame(client_socket.get());
     const PortTunnelFrame second = read_tunnel_frame(client_socket.get());
-    assert(first.type == PortTunnelFrameType::UdpDatagram);
-    assert(second.type == PortTunnelFrameType::UdpDatagram);
+    TEST_ASSERT(first.type == PortTunnelFrameType::UdpDatagram);
+    TEST_ASSERT(second.type == PortTunnelFrameType::UdpDatagram);
     std::vector<std::string> payloads;
     payloads.push_back(std::string(first.data.begin(), first.data.end()));
     payloads.push_back(std::string(second.data.begin(), second.data.end()));
     std::sort(payloads.begin(), payloads.end());
-    assert(payloads[0] == "udp-a");
-    assert(payloads[1] == "udp-b");
+    TEST_ASSERT(payloads[0] == "udp-a");
+    TEST_ASSERT(payloads[1] == "udp-b");
 
     close_tunnel(&client_socket, &server_thread);
 }
@@ -1432,7 +1432,7 @@ static void assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(A
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
     const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
-    assert(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
     const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
 
     close_tunnel(&client_socket, &server_thread);
@@ -1440,9 +1440,9 @@ static void assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(A
     open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL, session_id);
 
     UniqueSocket peer(connect_port_forward_socket(endpoint, "tcp"));
-    assert(peer.valid());
+    TEST_ASSERT(peer.valid());
     const PortTunnelFrame accepted = read_tunnel_frame(client_socket.get());
-    assert(accepted.type == PortTunnelFrameType::TcpAccept);
+    TEST_ASSERT(accepted.type == PortTunnelFrameType::TcpAccept);
 
     send_tunnel_frame(
         client_socket.get(),
@@ -1450,8 +1450,8 @@ static void assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(A
                    0U,
                    Json{{"forward_id", "fwd_cpp_test"}, {"generation", 1ULL}, {"reason", "operator_close"}}));
     const PortTunnelFrame closed = read_tunnel_frame(client_socket.get());
-    assert(closed.type == PortTunnelFrameType::TunnelClosed);
-    assert(Json::parse(closed.meta).at("generation").get<uint64_t>() == 1ULL);
+    TEST_ASSERT(closed.type == PortTunnelFrameType::TunnelClosed);
+    TEST_ASSERT(Json::parse(closed.meta).at("generation").get<uint64_t>() == 1ULL);
 
     close_tunnel(&client_socket, &server_thread);
 }
@@ -1472,12 +1472,12 @@ static void assert_detached_session_releases_active_tcp_accept_budget(const fs::
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
     const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
-    assert(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
     const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
 
     UniqueSocket first_peer(connect_port_forward_socket(endpoint, "tcp"));
     const PortTunnelFrame first_accept = read_tunnel_frame(client_socket.get());
-    assert(first_accept.type == PortTunnelFrameType::TcpAccept);
+    TEST_ASSERT(first_accept.type == PortTunnelFrameType::TcpAccept);
 
     close_tunnel(&client_socket, &server_thread);
     first_peer.reset();
@@ -1486,7 +1486,7 @@ static void assert_detached_session_releases_active_tcp_accept_budget(const fs::
 
     UniqueSocket second_peer(connect_port_forward_socket(endpoint, "tcp"));
     const PortTunnelFrame second_accept = read_tunnel_frame(client_socket.get());
-    assert(second_accept.type == PortTunnelFrameType::TcpAccept);
+    TEST_ASSERT(second_accept.type == PortTunnelFrameType::TcpAccept);
 
     close_tunnel(&client_socket, &server_thread);
 }
@@ -1502,7 +1502,7 @@ static void assert_expired_tunnel_session_is_released(AppState& state) {
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
     const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
-    assert(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
     const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
 
     close_tunnel(&client_socket, &server_thread);
@@ -1513,14 +1513,14 @@ static void assert_expired_tunnel_session_is_released(AppState& state) {
         client_socket.get(),
         json_frame(PortTunnelFrameType::TunnelOpen, 0U, tunnel_open_meta("listen", "tcp", 1ULL, session_id)));
     const PortTunnelFrame error = read_tunnel_frame(client_socket.get());
-    assert(error.type == PortTunnelFrameType::Error);
+    TEST_ASSERT(error.type == PortTunnelFrameType::Error);
     const Json error_meta = Json::parse(error.meta);
-    assert(error_meta.at("code").get<std::string>() == "port_tunnel_resume_expired");
+    TEST_ASSERT(error_meta.at("code").get<std::string>() == "port_tunnel_resume_expired");
 
     close_tunnel(&client_socket, &server_thread);
 
     UniqueSocket rebound(bind_port_forward_socket(endpoint, "tcp"));
-    assert(rebound.valid());
+    TEST_ASSERT(rebound.valid());
 }
 
 static void assert_http_streaming_routes(AppState& state, const fs::path& root) {
@@ -1541,8 +1541,8 @@ static void assert_http_streaming_routes(AppState& state, const fs::path& root) 
                    << chunked_body(archive);
 
     const std::string import_response = run_single_request(state, import_request.str());
-    assert(import_response.find("HTTP/1.1 200 OK\r\n") == 0);
-    assert(read_text_file(imported_path) == "streamed import");
+    TEST_ASSERT(import_response.find("HTTP/1.1 200 OK\r\n") == 0);
+    TEST_ASSERT(read_text_file(imported_path) == "streamed import");
 
     const fs::path export_path = root / "export.txt";
     write_text_file(export_path, "streamed export");
@@ -1554,12 +1554,12 @@ static void assert_http_streaming_routes(AppState& state, const fs::path& root) 
                    << export_body;
 
     const std::string export_response = run_single_request(state, export_request.str());
-    assert(export_response.find("HTTP/1.1 200 OK\r\n") == 0);
-    assert(export_response.find("Transfer-Encoding: chunked\r\n") != std::string::npos);
-    assert(export_response.find("Connection: close\r\n") == std::string::npos);
-    assert(export_response.find("Content-Length:") == std::string::npos);
-    assert(export_response.find("x-remote-exec-source-type: file\r\n") != std::string::npos);
-    assert(single_file_tar_body(decode_chunked_response_body(export_response)) == "streamed export");
+    TEST_ASSERT(export_response.find("HTTP/1.1 200 OK\r\n") == 0);
+    TEST_ASSERT(export_response.find("Transfer-Encoding: chunked\r\n") != std::string::npos);
+    TEST_ASSERT(export_response.find("Connection: close\r\n") == std::string::npos);
+    TEST_ASSERT(export_response.find("Content-Length:") == std::string::npos);
+    TEST_ASSERT(export_response.find("x-remote-exec-source-type: file\r\n") != std::string::npos);
+    TEST_ASSERT(single_file_tar_body(decode_chunked_response_body(export_response)) == "streamed export");
 
     const fs::path sandbox_root = root / "sandbox";
     const fs::path read_allowed = sandbox_root / "read";
@@ -1584,8 +1584,8 @@ static void assert_http_streaming_routes(AppState& state, const fs::path& root) 
                           << "\r\n"
                           << denied_export_body;
     const std::string denied_export_response = run_single_request(sandbox_state, denied_export_request.str());
-    assert(denied_export_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
-    assert(Json::parse(response_body(denied_export_response)).at("code").get<std::string>() == "sandbox_denied");
+    TEST_ASSERT(denied_export_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
+    TEST_ASSERT(Json::parse(response_body(denied_export_response)).at("code").get<std::string>() == "sandbox_denied");
 
     std::ostringstream denied_import_request;
     denied_import_request << "POST /v1/transfer/import HTTP/1.1\r\n"
@@ -1600,9 +1600,9 @@ static void assert_http_streaming_routes(AppState& state, const fs::path& root) 
                           << "\r\n"
                           << chunked_body(archive);
     const std::string denied_import_response = run_single_request(sandbox_state, denied_import_request.str());
-    assert(denied_import_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
-    assert(Json::parse(response_body(denied_import_response)).at("code").get<std::string>() == "sandbox_denied");
-    assert(!fs::exists(outside / "imported.txt"));
+    TEST_ASSERT(denied_import_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
+    TEST_ASSERT(Json::parse(response_body(denied_import_response)).at("code").get<std::string>() == "sandbox_denied");
+    TEST_ASSERT(!fs::exists(outside / "imported.txt"));
 }
 
 static void assert_tunnel_rejects_invalid_requests(AppState& state) {
