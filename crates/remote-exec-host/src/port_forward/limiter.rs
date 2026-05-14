@@ -7,7 +7,7 @@ use remote_exec_proto::rpc::RpcErrorCode;
 use crate::config::HostPortForwardCapacityLimits;
 use crate::{HostPortForwardLimits, HostRpcError};
 
-use super::error::rpc_error;
+use super::error::request_error;
 #[derive(Debug)]
 pub struct PortForwardLimiter {
     limits: HostPortForwardCapacityLimits,
@@ -170,5 +170,5 @@ impl Drop for PortForwardPermit {
 }
 
 fn limit_error(message: &'static str) -> HostRpcError {
-    rpc_error(RpcErrorCode::PortTunnelLimitExceeded, message)
+    request_error(RpcErrorCode::PortTunnelLimitExceeded, message)
 }

@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::HostRpcError;
 
-use super::error::{SessionCloseMode, rpc_error};
+use super::error::{SessionCloseMode, operational_error};
 use super::limiter::{PortForwardLimiter, PortForwardPermit};
 use super::session_store::TunnelSessionStore;
 use super::udp::tunnel_udp_read_loop_attached_session;
@@ -322,7 +322,7 @@ pub(super) async fn reactivate_retained_udp_bind(
         return Ok(());
     };
     let attachment = session.current_attachment().await.ok_or_else(|| {
-        rpc_error(
+        operational_error(
             RpcErrorCode::PortTunnelClosed,
             "port tunnel attachment is closed",
         )

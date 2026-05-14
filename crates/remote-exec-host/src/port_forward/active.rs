@@ -6,7 +6,7 @@ use remote_exec_proto::rpc::RpcErrorCode;
 
 use crate::HostRpcError;
 
-use super::error::rpc_error;
+use super::error::{operational_error, request_error};
 use super::session::{AttachmentState, SessionState};
 use super::{
     ActiveTunnelState, ConnectRuntimeState, TunnelSender, TunnelState, tunnel_error_frame,
@@ -261,14 +261,14 @@ impl RequiredTunnelAccess {
 }
 
 fn tunnel_open_required_error(operation: &str) -> HostRpcError {
-    rpc_error(
+    request_error(
         RpcErrorCode::InvalidPortTunnel,
         format!("{operation} requires tunnel open"),
     )
 }
 
 fn role_required_error(operation: &str, role: &str) -> HostRpcError {
-    rpc_error(
+    request_error(
         RpcErrorCode::InvalidPortTunnel,
         format!("{operation} requires an open {role} tunnel"),
     )
@@ -281,7 +281,7 @@ fn protocol_required_error(
 ) -> HostRpcError {
     let protocol = protocol_label(protocol);
     let role = role.map(|value| format!(" {value}")).unwrap_or_default();
-    rpc_error(
+    request_error(
         RpcErrorCode::InvalidPortTunnel,
         format!("{operation} requires an open {protocol}{role} tunnel"),
     )
@@ -350,7 +350,7 @@ fn protocol_label(protocol: TunnelForwardProtocol) -> &'static str {
 
 async fn current_listen_context(session: Arc<SessionState>) -> Result<ListenContext, HostRpcError> {
     let attachment = session.current_attachment().await.ok_or_else(|| {
-        rpc_error(
+        operational_error(
             RpcErrorCode::PortTunnelClosed,
             "port tunnel attachment is closed",
         )

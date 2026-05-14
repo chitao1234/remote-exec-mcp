@@ -42,7 +42,7 @@ impl TunnelSender {
             _permit: permit,
         };
         self.tx.send(queued).await.map_err(|_| {
-            error::rpc_error(
+            error::operational_error(
                 RpcErrorCode::PortTunnelClosed,
                 "port tunnel writer is closed",
             )

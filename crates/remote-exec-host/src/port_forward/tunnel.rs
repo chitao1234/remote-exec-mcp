@@ -14,7 +14,7 @@ use tokio::sync::{Mutex, mpsc};
 
 use super::active::{connection_generation, send_tunnel_error, send_tunnel_error_code};
 use super::codec::decode_frame_meta;
-use super::error::rpc_error;
+use super::error::request_error;
 use super::frames::{frame as raw_frame, meta_frame};
 use super::session::{
     SessionState, attach_session_to_tunnel, close_listen_session, close_mode_for_tunnel_result,
@@ -60,7 +60,7 @@ where
     let (mut reader, mut writer) = tokio::io::split(stream);
     read_preface(&mut reader)
         .await
-        .map_err(|err| rpc_error(RpcErrorCode::InvalidPortTunnel, err.to_string()))?;
+        .map_err(|err| request_error(RpcErrorCode::InvalidPortTunnel, err.to_string()))?;
 
     let (tx, mut rx) = mpsc::channel::<QueuedFrame>(TUNNEL_FRAME_QUEUE_CAPACITY);
     let sender = TunnelSender {
@@ -141,7 +141,7 @@ where
                             true,
                         )
                         .await;
-                        return Err(rpc_error(RpcErrorCode::InvalidPortTunnel, err.to_string()));
+                        return Err(request_error(RpcErrorCode::InvalidPortTunnel, err.to_string()));
                     }
                 }
             }
@@ -192,7 +192,7 @@ pub(super) async fn handle_tunnel_frame(
         FrameType::Close => tunnel_close_stream(&tunnel, frame.stream_id).await,
         FrameType::UdpBind => tunnel_udp_bind(tunnel, frame).await,
         FrameType::UdpDatagram => tunnel_udp_datagram(&tunnel, frame).await,
-        _ => Err(rpc_error(
+        _ => Err(request_error(
             RpcErrorCode::InvalidPortTunnel,
             format!("unexpected frame type `{:?}` from broker", frame.frame_type),
         )),
@@ -204,7 +204,7 @@ pub(super) async fn tunnel_open(
     frame: Frame,
 ) -> Result<(), HostRpcError> {
     if frame.stream_id != 0 {
-        return Err(rpc_error(
+        return Err(request_error(
             RpcErrorCode::InvalidPortTunnel,
             "tunnel open must use stream_id 0",
         ));
@@ -274,7 +274,7 @@ async fn activate_connect_tunnel(
 ) -> Result<(), HostRpcError> {
     let mut active = tunnel.active.lock().await;
     if !matches!(*active, ActiveTunnelState::Unopened) {
-        return Err(rpc_error(
+        return Err(request_error(
             RpcErrorCode::PortTunnelAlreadyAttached,
             "port tunnel is already open",
         ));
@@ -290,7 +290,7 @@ async fn activate_listen_tunnel(
 ) -> Result<(), HostRpcError> {
     let mut active = tunnel.active.lock().await;
     if !matches!(*active, ActiveTunnelState::Unopened) {
-        return Err(rpc_error(
+        return Err(request_error(
             RpcErrorCode::PortTunnelAlreadyAttached,
             "port tunnel is already open",
         ));
@@ -301,7 +301,7 @@ async fn activate_listen_tunnel(
 
 async fn tunnel_close(tunnel: Arc<TunnelState>, frame: Frame) -> Result<(), HostRpcError> {
     if frame.stream_id != 0 {
-        return Err(rpc_error(
+        return Err(request_error(
             RpcErrorCode::InvalidPortTunnel,
             "tunnel close must use stream_id 0",
         ));
@@ -348,7 +348,7 @@ async fn acquire_listen_open_session(
                 .get(session_id)
                 .await
                 .ok_or_else(|| {
-                    rpc_error(
+                    request_error(
                         RpcErrorCode::UnknownPortTunnelSession,
                         "unknown port tunnel session",
                     )
@@ -356,7 +356,7 @@ async fn acquire_listen_open_session(
             if session.is_expired().await {
                 tunnel.state.port_forward_sessions.remove(session_id).await;
                 session.close_retained_resources().await;
-                return Err(rpc_error(
+                return Err(request_error(
                     RpcErrorCode::PortTunnelResumeExpired,
                     "port tunnel resume expired",
                 ));
@@ -448,13 +448,13 @@ async fn ensure_tunnel_generation(
     frame_generation: u64,
 ) -> Result<(), HostRpcError> {
     let current_generation = connection_generation(tunnel).await.ok_or_else(|| {
-        rpc_error(
+        request_error(
             RpcErrorCode::InvalidPortTunnel,
             "frame generation requires an active tunnel",
         )
     })?;
     if frame_generation != current_generation {
-        return Err(rpc_error(
+        return Err(request_error(
             RpcErrorCode::PortTunnelGenerationMismatch,
             format!(
                 "frame generation `{frame_generation}` does not match tunnel generation `{current_generation}`"

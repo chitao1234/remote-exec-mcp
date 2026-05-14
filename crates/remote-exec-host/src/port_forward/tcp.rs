@@ -20,7 +20,7 @@ use super::active::{
     send_tunnel_error_code,
 };
 use super::codec::decode_frame_meta;
-use super::error::{SessionCloseMode, rpc_error};
+use super::error::{SessionCloseMode, operational_error, request_error};
 use super::frames::{data_frame, empty_frame, endpoint_ok_frame, meta_frame};
 use super::session::{
     AttachmentState, SessionState, close_attached_session, listener_stream_id, udp_bind_stream_id,
@@ -134,8 +134,8 @@ async fn tcp_connect_with_timeout(
         .connect_timeout();
     tokio::time::timeout(connect_timeout, TcpStream::connect(endpoint))
         .await
-        .map_err(|_| rpc_error(RpcErrorCode::PortConnectFailed, "tcp connect timed out"))?
-        .map_err(|err| rpc_error(RpcErrorCode::PortConnectFailed, err.to_string()))
+        .map_err(|_| operational_error(RpcErrorCode::PortConnectFailed, "tcp connect timed out"))?
+        .map_err(|err| operational_error(RpcErrorCode::PortConnectFailed, err.to_string()))
 }
 
 pub(super) async fn tunnel_tcp_listen(
@@ -147,15 +147,15 @@ pub(super) async fn tunnel_tcp_listen(
         .require_listen_session(TunnelForwardProtocol::Tcp, "tcp listen")?;
     let meta: EndpointMeta = decode_frame_meta(&frame)?;
     let endpoint = normalize_endpoint(&meta.endpoint)
-        .map_err(|err| rpc_error(RpcErrorCode::InvalidEndpoint, err.to_string()))?;
+        .map_err(|err| request_error(RpcErrorCode::InvalidEndpoint, err.to_string()))?;
     let listener = Arc::new(
         TcpListener::bind(&endpoint)
             .await
-            .map_err(|err| rpc_error(RpcErrorCode::PortBindFailed, err.to_string()))?,
+            .map_err(|err| operational_error(RpcErrorCode::PortBindFailed, err.to_string()))?,
     );
     let bound_endpoint = listener
         .local_addr()
-        .map_err(|err| rpc_error(RpcErrorCode::PortBindFailed, err.to_string()))?
+        .map_err(|err| operational_error(RpcErrorCode::PortBindFailed, err.to_string()))?
         .to_string();
     listen
         .session()
@@ -302,7 +302,7 @@ pub(super) async fn tunnel_tcp_connect_connection_local(
 ) -> Result<(), HostRpcError> {
     let meta: EndpointMeta = decode_frame_meta(&frame)?;
     let endpoint = ensure_nonzero_connect_endpoint(&meta.endpoint)
-        .map_err(|err| rpc_error(RpcErrorCode::InvalidEndpoint, err.to_string()))?;
+        .map_err(|err| request_error(RpcErrorCode::InvalidEndpoint, err.to_string()))?;
     let stream = tcp_connect_with_timeout(&tunnel, endpoint.as_str()).await?;
     let stream_permit = tunnel
         .state
@@ -451,13 +451,13 @@ pub(super) async fn tunnel_tcp_data(
         .map_err(|err| match err {
             mpsc::error::TrySendError::Full(_) => {
                 writer.cancel.cancel();
-                rpc_error(
+                request_error(
                     RpcErrorCode::PortTunnelLimitExceeded,
                     "tcp write queue limit reached",
                 )
             }
             mpsc::error::TrySendError::Closed(_) => {
-                rpc_error(RpcErrorCode::PortConnectionClosed, "connection was closed")
+                operational_error(RpcErrorCode::PortConnectionClosed, "connection was closed")
             }
         })
 }
@@ -514,7 +514,7 @@ async fn lookup_tcp_writer(
     optional_tcp_writer(tcp_streams, stream_id)
         .await
         .ok_or_else(|| {
-            rpc_error(
+            request_error(
                 RpcErrorCode::UnknownPortConnection,
                 format!("unknown tunnel tcp stream `{stream_id}`"),
             )

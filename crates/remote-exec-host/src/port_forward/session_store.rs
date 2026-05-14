@@ -7,7 +7,7 @@ use remote_exec_proto::rpc::RpcErrorCode;
 
 use crate::HostRpcError;
 
-use super::error::rpc_error;
+use super::error::request_error;
 use super::session::SessionState;
 
 #[derive(Clone, Default)]
@@ -23,7 +23,7 @@ impl TunnelSessionStore {
     ) -> Result<(), HostRpcError> {
         let mut sessions = self.sessions.lock().await;
         if sessions.len() >= max_sessions {
-            return Err(rpc_error(
+            return Err(request_error(
                 RpcErrorCode::PortTunnelLimitExceeded,
                 "retained port tunnel session limit reached",
             ));
