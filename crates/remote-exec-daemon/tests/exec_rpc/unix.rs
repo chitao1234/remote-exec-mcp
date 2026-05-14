@@ -39,6 +39,29 @@ min_ms = 3000
 }
 
 #[tokio::test]
+async fn exec_start_includes_session_limit_warning_when_threshold_crossed() {
+    let fixture =
+        support::spawn::spawn_daemon_with_extra_config("builder-a", "max_open_sessions = 5").await;
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &unix_start_request("printf ready; sleep 2", false, Some(250), Some(2_000)),
+        )
+        .await;
+
+    assert!(response.output().running, "{response:#?}");
+    assert_eq!(response.output().warnings.len(), 1);
+    assert_eq!(
+        response.output().warnings[0].code,
+        "exec_session_limit_approaching"
+    );
+    assert_eq!(
+        response.output().warnings[0].message,
+        "Target `builder-a` now has 1 open exec sessions."
+    );
+}
+
+#[tokio::test]
 async fn exec_start_uses_login_shell_by_default_when_login_is_omitted() {
     let home = tempfile::tempdir().unwrap();
     std::fs::write(

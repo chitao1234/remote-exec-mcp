@@ -282,11 +282,14 @@ async fn store_running_session(
         .sessions
         .insert(daemon_session_id.clone(), session)
         .await;
-    let warnings = session_limit_warnings(
-        &state.config.target,
-        insert_outcome.crossed_warning_threshold,
-        insert_outcome.warning_threshold,
-    );
+    let warnings = if insert_outcome.crossed_warning_threshold {
+        vec![ExecWarning::session_limit_approaching(
+            &state.config.target,
+            insert_outcome.warning_threshold,
+        )]
+    } else {
+        Vec::new()
+    };
     let response = running_session_response(
         state,
         daemon_session_id.clone(),
@@ -317,21 +320,6 @@ fn running_session_response(
         max_output_tokens,
         warnings,
     )
-}
-
-fn session_limit_warnings(
-    target: &str,
-    crossed_warning_threshold: bool,
-    warning_threshold: usize,
-) -> Vec<ExecWarning> {
-    if crossed_warning_threshold {
-        vec![ExecWarning::session_limit_approaching(
-            target,
-            warning_threshold,
-        )]
-    } else {
-        Vec::new()
-    }
 }
 
 fn ensure_requested_tty_supported(state: &Arc<AppState>, tty: bool) -> Result<(), HostRpcError> {
