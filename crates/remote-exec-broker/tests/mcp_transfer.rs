@@ -932,7 +932,7 @@ async fn transfer_files_rejects_same_local_path_before_mutation() {
 }
 
 #[tokio::test]
-async fn transfer_files_accepts_windows_remote_paths_on_non_windows_hosts() {
+async fn transfer_files_rejects_exact_normalized_windows_remote_duplicates_on_non_windows_hosts() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon_platform("windows", false).await;
 
     let error = transfer_single_source_error(
@@ -940,7 +940,7 @@ async fn transfer_files_accepts_windows_remote_paths_on_non_windows_hosts() {
         "builder-a",
         "C:/Work/Artifact.txt",
         "builder-a",
-        r"c:\work\artifact.txt",
+        r"C:\Work\Artifact.txt",
         Some("replace"),
         true,
     )
@@ -950,7 +950,36 @@ async fn transfer_files_accepts_windows_remote_paths_on_non_windows_hosts() {
 }
 
 #[tokio::test]
-async fn transfer_files_accepts_msys_and_cygwin_windows_remote_paths_on_non_windows_hosts() {
+async fn transfer_files_allows_case_only_windows_remote_path_differences_on_non_windows_hosts() {
+    let fixture = support::spawn_broker_with_plain_http_stub_daemon().await;
+
+    let result = transfer_single_source(
+        &fixture,
+        "builder-xp",
+        "C:/Work/Artifact.txt",
+        "builder-xp",
+        r"c:\work\artifact.txt",
+        Some("replace"),
+        true,
+    )
+    .await;
+
+    let export = fixture
+        .last_transfer_export()
+        .await
+        .expect("transfer export");
+    let import = fixture
+        .last_transfer_import()
+        .await
+        .expect("transfer import");
+    assert_eq!(export.request.path, "C:/Work/Artifact.txt");
+    assert_eq!(import.destination_path, r"c:\work\artifact.txt");
+    assert_eq!(result.structured_content["source_type"], "directory");
+}
+
+#[tokio::test]
+async fn transfer_files_rejects_msys_and_cygwin_windows_remote_duplicates_after_syntax_normalization()
+ {
     let fixture = support::spawners::spawn_broker_with_stub_daemon_platform("windows", false).await;
 
     let error = transfer_single_source_error(
@@ -958,7 +987,7 @@ async fn transfer_files_accepts_msys_and_cygwin_windows_remote_paths_on_non_wind
         "builder-a",
         "/c/Work/Artifact.txt",
         "builder-a",
-        "/cygdrive/c/work/artifact.txt",
+        "/cygdrive/c/Work/Artifact.txt",
         Some("replace"),
         true,
     )
@@ -968,21 +997,32 @@ async fn transfer_files_accepts_msys_and_cygwin_windows_remote_paths_on_non_wind
 }
 
 #[tokio::test]
-async fn transfer_files_accepts_single_slash_windows_remote_paths_for_synthetic_posix_roots() {
-    let fixture = support::spawners::spawn_broker_with_stub_daemon_platform("windows", false).await;
+async fn transfer_files_allows_case_only_single_slash_windows_remote_paths_for_synthetic_posix_roots()
+ {
+    let fixture = support::spawn_broker_with_plain_http_stub_daemon().await;
 
-    let error = transfer_single_source_error(
+    let result = transfer_single_source(
         &fixture,
-        "builder-a",
+        "builder-xp",
         "/tmp/Artifact.txt",
-        "builder-a",
+        "builder-xp",
         "/tmp/artifact.txt",
         Some("replace"),
         true,
     )
     .await;
 
-    assert!(error.contains("source and destination must differ"));
+    let export = fixture
+        .last_transfer_export()
+        .await
+        .expect("transfer export");
+    let import = fixture
+        .last_transfer_import()
+        .await
+        .expect("transfer import");
+    assert_eq!(export.request.path, "/tmp/Artifact.txt");
+    assert_eq!(import.destination_path, "/tmp/artifact.txt");
+    assert_eq!(result.structured_content["source_type"], "directory");
 }
 
 #[cfg(unix)]

@@ -155,6 +155,10 @@ pub fn normalize_for_system(policy: PathPolicy, raw: &str) -> String {
     }
 }
 
+pub fn syntax_eq_for_policy(policy: PathPolicy, left: &str, right: &str) -> bool {
+    normalize_for_system(policy, left) == normalize_for_system(policy, right)
+}
+
 pub fn basename_for_policy(policy: PathPolicy, raw: &str) -> Option<String> {
     let normalized = normalize_for_system(policy, raw);
     match policy.style {
@@ -232,7 +236,7 @@ pub fn normalize_relative_path(path: &Path) -> Option<PathBuf> {
 mod tests {
     use super::{
         basename_for_policy, is_absolute_for_policy, join_for_policy, linux_path_policy,
-        normalize_for_system, normalize_relative_path, same_path_for_policy, windows_path_policy,
+        normalize_for_system, normalize_relative_path, syntax_eq_for_policy, windows_path_policy,
     };
 
     #[test]
@@ -249,29 +253,29 @@ mod tests {
     }
 
     #[test]
-    fn windows_same_path_ignores_case_and_separator_style() {
+    fn windows_syntax_eq_normalizes_separator_style_and_drive_aliases() {
         let policy = windows_path_policy();
-        assert!(same_path_for_policy(
+        assert!(syntax_eq_for_policy(
             policy,
             r"C:\Work\Artifact.txt",
-            "c:/work/artifact.txt"
+            "C:/Work/Artifact.txt"
         ));
-        assert!(same_path_for_policy(
+        assert!(syntax_eq_for_policy(
             policy,
             "/c/Work/Artifact.txt",
-            r"c:\work\artifact.txt"
+            r"C:\Work\Artifact.txt"
         ));
-        assert!(same_path_for_policy(
+        assert!(syntax_eq_for_policy(
             policy,
             "/cygdrive/c/Work/Artifact.txt",
-            r"c:\work\artifact.txt"
+            r"C:\Work\Artifact.txt"
         ));
     }
 
     #[test]
-    fn windows_same_path_handles_unicode_casefold() {
+    fn windows_syntax_eq_preserves_case_differences() {
         let policy = windows_path_policy();
-        assert!(same_path_for_policy(
+        assert!(!syntax_eq_for_policy(
             policy,
             r"C:\RÉSUMÉ\Ärger.txt",
             "c:/résumé/ärger.TXT"
@@ -279,9 +283,9 @@ mod tests {
     }
 
     #[test]
-    fn linux_same_path_preserves_case_sensitivity() {
+    fn linux_syntax_eq_preserves_case_sensitivity() {
         let policy = linux_path_policy();
-        assert!(!same_path_for_policy(
+        assert!(!syntax_eq_for_policy(
             policy,
             "/tmp/Artifact.txt",
             "/tmp/artifact.txt"

@@ -1,7 +1,7 @@
 use anyhow::Context;
 use remote_exec_proto::path::{
     PathPolicy, basename_for_policy, host_policy, is_absolute_for_policy, join_for_policy,
-    linux_path_policy, same_path_for_policy, windows_path_policy,
+    linux_path_policy, same_path_for_policy, syntax_eq_for_policy, windows_path_policy,
 };
 use remote_exec_proto::public::{TransferDestinationMode, TransferEndpoint};
 use remote_exec_proto::rpc::{RpcErrorCode, TransferPathInfoRequest};
@@ -94,8 +94,9 @@ pub(super) async fn ensure_distinct_endpoints(
     }
 
     let policy = endpoint_policy(state, source).await?;
+    let context = endpoint_target_context(state, &source.target).await?;
     anyhow::ensure!(
-        !same_path_for_policy(policy, &source.path, &destination.path),
+        !paths_match_for_preflight(context, policy, &source.path, &destination.path),
         "source and destination must differ"
     );
     Ok(())
@@ -110,6 +111,7 @@ pub(super) async fn ensure_multi_source_basenames_are_unique(
         return Ok(());
     }
 
+    let destination_context = endpoint_target_context(state, &destination.target).await?;
     let destination_policy = endpoint_policy(state, destination).await?;
     let mut seen_paths: Vec<String> = Vec::with_capacity(sources.len());
     for source in sources {
@@ -122,7 +124,8 @@ pub(super) async fn ensure_multi_source_basenames_are_unique(
         })?;
         let candidate = join_for_policy(destination_policy, &destination.path, &basename);
         anyhow::ensure!(
-            !seen_paths.iter().any(|existing| same_path_for_policy(
+            !seen_paths.iter().any(|existing| paths_match_for_preflight(
+                destination_context,
                 destination_policy,
                 existing,
                 &candidate
@@ -183,7 +186,8 @@ async fn resolve_into_directory_destination(
         })?;
         let candidate = join_child_for_context(destination_context, &destination.path, &basename);
         anyhow::ensure!(
-            !candidates.iter().any(|existing| same_path_for_policy(
+            !candidates.iter().any(|existing| paths_match_for_preflight(
+                destination_context,
                 destination_policy,
                 existing,
                 &candidate
@@ -196,6 +200,18 @@ async fn resolve_into_directory_destination(
     match candidates.as_slice() {
         [candidate] => Ok(candidate.clone()),
         _ => Ok(destination.path.clone()),
+    }
+}
+
+fn paths_match_for_preflight(
+    context: EndpointTargetContext,
+    policy: PathPolicy,
+    left: &str,
+    right: &str,
+) -> bool {
+    match context {
+        EndpointTargetContext::Local { .. } => same_path_for_policy(policy, left, right),
+        EndpointTargetContext::Remote { .. } => syntax_eq_for_policy(policy, left, right),
     }
 }
 
