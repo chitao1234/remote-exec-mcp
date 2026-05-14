@@ -370,7 +370,8 @@ async fn tunnel_tcp_read_loop<T: TcpReadLoopContext>(
         };
         match read {
             Ok(0) => {
-                let _ = send_tcp_read_frame(&target, empty_frame(FrameType::TcpEof, stream_id)).await;
+                let _ =
+                    send_tcp_read_frame(&target, empty_frame(FrameType::TcpEof, stream_id)).await;
                 clear_tcp_read_cancel(&target, stream_id).await;
                 return;
             }
