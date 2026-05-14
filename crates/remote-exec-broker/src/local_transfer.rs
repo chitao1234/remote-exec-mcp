@@ -1,12 +1,12 @@
 use std::path::{Path, PathBuf};
 
+use remote_exec_host::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
 use remote_exec_proto::path::{
     PathPolicy, host_policy, is_absolute_for_policy, normalize_for_system,
 };
 use remote_exec_proto::rpc::{
     TransferImportRequest, TransferImportResponse, TransferPathInfoResponse, TransferSourceType,
 };
-use remote_exec_proto::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
 use remote_exec_proto::transfer::{TransferCompression, TransferLimits};
 
 use crate::daemon_client::DaemonClientError;
@@ -115,7 +115,7 @@ pub fn path_info(
         ));
     }
     let path = PathBuf::from(normalize_for_system(policy, path));
-    authorize_path(policy, sandbox, SandboxAccess::Write, &path).map_err(|err| {
+    authorize_path(sandbox, SandboxAccess::Write, &path).map_err(|err| {
         crate::local_backend::map_local_transfer_error(
             remote_exec_host::TransferError::sandbox_denied(err.to_string()),
         )

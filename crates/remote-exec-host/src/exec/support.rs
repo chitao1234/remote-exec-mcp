@@ -2,14 +2,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use remote_exec_proto::path::PathPolicy;
 use remote_exec_proto::rpc::{
     ExecCompletedResponse, ExecOutputResponse, ExecResponse, ExecRunningResponse, ExecWarning,
     RpcErrorCode,
 };
-use remote_exec_proto::sandbox::{SandboxAccess, SandboxError, authorize_path};
 
-use crate::{AppState, HostRpcError, config::YieldTimeOperation, host_path};
+use crate::{
+    AppState, HostRpcError,
+    config::YieldTimeOperation,
+    host_path,
+    sandbox::{SandboxAccess, SandboxError, authorize_path},
+};
 
 use super::{output, session, timing::EXEC_POLL_INTERVAL};
 
@@ -41,7 +44,7 @@ pub fn ensure_sandbox_access(
     access: SandboxAccess,
     path: &Path,
 ) -> Result<(), SandboxError> {
-    authorize_path(host_path_policy(), state.sandbox.as_ref(), access, path)
+    authorize_path(state.sandbox.as_ref(), access, path)
 }
 
 pub fn internal_error(err: anyhow::Error) -> HostRpcError {
@@ -151,10 +154,6 @@ pub(super) fn finish_response(
             warnings: Vec::new(),
         },
     })
-}
-
-fn host_path_policy() -> PathPolicy {
-    host_path::host_path_policy()
 }
 
 // Chunk ids are short-lived response correlation hints, not globally unique

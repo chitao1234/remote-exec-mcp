@@ -5,10 +5,10 @@ mod single;
 use std::path::{Path, PathBuf};
 
 use remote_exec_proto::rpc::{TransferSourceType, TransferSymlinkMode};
-use remote_exec_proto::sandbox::CompiledFilesystemSandbox;
 use remote_exec_proto::transfer::TransferCompression;
 
 use crate::error::TransferError;
+use crate::sandbox::CompiledFilesystemSandbox;
 
 use super::exclude_matcher::ExcludeMatcher;
 use super::{

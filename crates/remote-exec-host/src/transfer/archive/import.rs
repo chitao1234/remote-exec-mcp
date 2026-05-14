@@ -5,15 +5,15 @@ use remote_exec_proto::rpc::{
     TransferImportRequest, TransferImportResponse, TransferOverwrite, TransferSourceType,
     TransferSymlinkMode, TransferWarning,
 };
-use remote_exec_proto::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
 use remote_exec_proto::transfer::TransferLimits;
 
 use crate::error::TransferError;
+use crate::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
 
 use super::codec::{open_archive_reader, wrap_archive_reader};
 use super::entry::{ensure_supported_archive_entry_type, normalize_archive_entry_path};
 use super::summary::{is_transfer_summary_path, read_transfer_summary};
-use super::{archive_error_to_transfer_error, host_path, host_policy, internal_transfer_error};
+use super::{archive_error_to_transfer_error, host_path, internal_transfer_error};
 
 pub async fn import_archive_from_file(
     archive_path: &Path,
@@ -68,7 +68,7 @@ async fn prepare_import_destination(
     windows_posix_root: Option<&Path>,
 ) -> anyhow::Result<(std::path::PathBuf, bool)> {
     let destination = host_path(&request.destination_path, windows_posix_root)?;
-    authorize_path(host_policy(), sandbox, SandboxAccess::Write, &destination).map_err(|err| {
+    authorize_path(sandbox, SandboxAccess::Write, &destination).map_err(|err| {
         crate::transfer::transfer_error_from_sandbox_error(
             "transfer destination path",
             &request.destination_path,

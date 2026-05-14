@@ -4,9 +4,11 @@ use std::time::{Duration, Instant};
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecStartResponse, ExecWarning, ExecWriteRequest, RpcErrorCode,
 };
-use remote_exec_proto::sandbox::SandboxAccess;
 
-use crate::{AppState, HostRpcError, config::YieldTimeOperation, error::logged_bad_request};
+use crate::{
+    AppState, HostRpcError, config::YieldTimeOperation, error::logged_bad_request,
+    sandbox::SandboxAccess,
+};
 
 use super::{
     session, shell,

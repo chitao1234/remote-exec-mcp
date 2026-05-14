@@ -1,14 +1,11 @@
 use std::sync::Arc;
 
-use remote_exec_proto::{
-    rpc::{PortForwardProtocolVersion, TargetInfoResponse},
-    sandbox::{CompiledFilesystemSandbox, compile_filesystem_sandbox},
-};
+use remote_exec_proto::rpc::{PortForwardProtocolVersion, TargetInfoResponse};
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
-use crate::{HostRuntimeConfig, WindowsPtyBackendOverride};
+use crate::{HostRuntimeConfig, WindowsPtyBackendOverride, sandbox::CompiledFilesystemSandbox};
 
 #[derive(Clone, Default)]
 pub struct BackgroundTasks {
@@ -59,7 +56,7 @@ pub fn build_runtime_state(mut config: HostRuntimeConfig) -> anyhow::Result<Host
     let sandbox = config
         .sandbox
         .as_ref()
-        .map(|sandbox| compile_filesystem_sandbox(crate::host_path::host_path_policy(), sandbox))
+        .map(crate::sandbox::compile_filesystem_sandbox)
         .transpose()?;
     let default_shell = crate::exec::shell::resolve_default_shell(
         config.default_shell.as_deref(),

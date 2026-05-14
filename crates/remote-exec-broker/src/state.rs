@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::Context;
-use remote_exec_proto::sandbox::CompiledFilesystemSandbox;
+use remote_exec_host::sandbox::CompiledFilesystemSandbox;
 use remote_exec_proto::transfer::TransferLimits;
 
 use crate::{port_forward, session_store::SessionStore, target::TargetHandle};

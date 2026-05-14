@@ -8,9 +8,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use remote_exec_proto::rpc::{PatchApplyRequest, PatchApplyResponse, RpcErrorCode};
-use remote_exec_proto::sandbox::SandboxError;
 
-use crate::{AppState, HostRpcError, error::logged_bad_request};
+use crate::{AppState, HostRpcError, error::logged_bad_request, sandbox::SandboxError};
 
 const LF: &str = "\n";
 const CRLF: &str = "\r\n";

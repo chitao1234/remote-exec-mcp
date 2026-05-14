@@ -1,12 +1,11 @@
 use std::path::{Component, Path, PathBuf};
 
-use remote_exec_proto::sandbox::SandboxAccess;
 use tokio::fs;
 
 use super::ensure_trailing_newline;
 use super::parser::{PatchAction, UpdateChunk};
 use super::text_codec::PatchTextFile;
-use crate::AppState;
+use crate::{AppState, sandbox::SandboxAccess};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolvedAction {

@@ -6,11 +6,13 @@ use remote_exec_proto::rpc::{
     TransferExportRequest, TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
     TransferPathInfoResponse,
 };
-use remote_exec_proto::sandbox::{SandboxAccess, SandboxError, authorize_path};
 use remote_exec_proto::transfer::TransferCompression;
 
-use crate::AppState;
-use crate::error::TransferError;
+use crate::{
+    AppState,
+    error::TransferError,
+    sandbox::{SandboxAccess, SandboxError, authorize_path},
+};
 
 pub fn path_info_for_request(
     state: &AppState,
@@ -18,13 +20,9 @@ pub fn path_info_for_request(
 ) -> Result<TransferPathInfoResponse, TransferError> {
     let path = archive::host_path(&req.path, state.config.windows_posix_root.as_deref())
         .map_err(|err| TransferError::internal(err.to_string()))?;
-    authorize_path(
-        archive::host_policy(),
-        state.sandbox.as_ref(),
-        SandboxAccess::Write,
-        &path,
-    )
-    .map_err(|err| transfer_error_from_sandbox_error("transfer endpoint path", &req.path, err))?;
+    authorize_path(state.sandbox.as_ref(), SandboxAccess::Write, &path).map_err(|err| {
+        transfer_error_from_sandbox_error("transfer endpoint path", &req.path, err)
+    })?;
 
     match std::fs::symlink_metadata(&path) {
         Ok(metadata) => {

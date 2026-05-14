@@ -9,10 +9,10 @@ use image::codecs::jpeg::JpegEncoder;
 use image::codecs::webp::WebPEncoder;
 use image::{DynamicImage, ImageFormat};
 use remote_exec_proto::rpc::{ImageReadRequest, ImageReadResponse};
-use remote_exec_proto::sandbox::SandboxAccess;
 
 use crate::AppState;
 use crate::error::ImageError;
+use crate::sandbox::SandboxAccess;
 
 const MAX_WIDTH: u32 = 2048;
 const MAX_HEIGHT: u32 = 2048;

@@ -8,6 +8,7 @@ pub(crate) mod logging;
 pub mod patch;
 pub mod path_compare;
 pub mod port_forward;
+pub mod sandbox;
 pub mod state;
 pub mod transfer;
 

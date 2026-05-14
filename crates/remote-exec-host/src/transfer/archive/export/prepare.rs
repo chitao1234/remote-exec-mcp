@@ -1,12 +1,12 @@
 use std::path::{Path, PathBuf};
 
 use remote_exec_proto::rpc::{TransferSourceType, TransferSymlinkMode};
-use remote_exec_proto::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
 
 use crate::error::TransferError;
+use crate::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
 
 use super::super::exclude_matcher::ExcludeMatcher;
-use super::super::{host_path, host_policy};
+use super::super::host_path;
 use super::PreparedExport;
 
 pub(super) async fn prepare_export_path(
@@ -18,7 +18,7 @@ pub(super) async fn prepare_export_path(
 ) -> anyhow::Result<PreparedExport> {
     let source_text = path.to_string();
     let source_path = host_path(&source_text, windows_posix_root)?;
-    authorize_path(host_policy(), sandbox, SandboxAccess::Read, &source_path).map_err(|err| {
+    authorize_path(sandbox, SandboxAccess::Read, &source_path).map_err(|err| {
         crate::transfer::transfer_error_from_sandbox_error(
             "transfer source path",
             &source_text,

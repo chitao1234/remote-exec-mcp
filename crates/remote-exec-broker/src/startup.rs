@@ -1,10 +1,6 @@
 use std::collections::BTreeMap;
 
-use remote_exec_proto::{
-    path::host_policy,
-    rpc::TargetInfoResponse,
-    sandbox::{CompiledFilesystemSandbox, compile_filesystem_sandbox},
-};
+use remote_exec_proto::rpc::TargetInfoResponse;
 
 use crate::{
     BrokerState, config,
@@ -53,11 +49,11 @@ pub async fn build_state(config: config::ValidatedBrokerConfig) -> anyhow::Resul
 
 fn compile_host_sandbox(
     config: &config::BrokerConfig,
-) -> anyhow::Result<Option<CompiledFilesystemSandbox>> {
+) -> anyhow::Result<Option<remote_exec_host::sandbox::CompiledFilesystemSandbox>> {
     Ok(config
         .host_sandbox
         .as_ref()
-        .map(|sandbox| compile_filesystem_sandbox(host_policy(), sandbox))
+        .map(remote_exec_host::sandbox::compile_filesystem_sandbox)
         .transpose()?)
 }
 
