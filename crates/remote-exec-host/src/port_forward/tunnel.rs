@@ -25,8 +25,8 @@ use super::tcp::{
 };
 use super::udp::{tunnel_udp_bind, tunnel_udp_datagram};
 use super::{
-    ActiveTunnelState, ConnectRuntimeState, PortForwardPermit, QueuedFrame, TunnelMode,
-    TunnelSender, TunnelState,
+    ActiveTunnelState, ConnectRuntimeState, PortForwardPermit, QueuedFrame, TunnelSender,
+    TunnelState,
 };
 
 // Keep enough buffered slack for queued data plus follow-up control frames
@@ -71,9 +71,8 @@ where
         state: state.clone(),
         cancel: state.shutdown.child_token(),
         tx: sender,
-        open_mode: tokio::sync::Mutex::new(TunnelMode::Unopened),
         last_generation: std::sync::atomic::AtomicU64::new(0),
-        active: Mutex::new(None),
+        active: Mutex::new(ActiveTunnelState::Unopened),
         _connection_permit: connection_permit,
     });
     let writer_cancel = tunnel.cancel.clone();
@@ -250,38 +249,53 @@ async fn tunnel_open_connect(
     tunnel: Arc<TunnelState>,
     meta: TunnelOpenMeta,
 ) -> Result<(), HostRpcError> {
-    claim_tunnel_mode(
-        &tunnel,
-        TunnelMode::Connect {
-            protocol: meta.protocol,
-        },
-    )
-    .await?;
     tunnel
         .last_generation
         .store(meta.generation, Ordering::Release);
-    *tunnel.active.lock().await = Some(ActiveTunnelState::Connect(Arc::new(ConnectRuntimeState {
-        tx: tunnel.tx.clone(),
-        cancel: tunnel.cancel.child_token(),
-        generation: meta.generation,
-        tcp_streams: Mutex::new(std::collections::HashMap::new()),
-        udp_binds: Mutex::new(std::collections::HashMap::new()),
-    })));
+    activate_connect_tunnel(
+        &tunnel,
+        meta.protocol,
+        Arc::new(ConnectRuntimeState {
+            tx: tunnel.tx.clone(),
+            cancel: tunnel.cancel.child_token(),
+            generation: meta.generation,
+            tcp_streams: Mutex::new(std::collections::HashMap::new()),
+            udp_binds: Mutex::new(std::collections::HashMap::new()),
+        }),
+    )
+    .await?;
     send_tunnel_ready(&tunnel, meta.generation, None, None).await
 }
 
-async fn claim_tunnel_mode(
+async fn activate_connect_tunnel(
     tunnel: &Arc<TunnelState>,
-    mode: TunnelMode,
+    protocol: TunnelForwardProtocol,
+    runtime: Arc<ConnectRuntimeState>,
 ) -> Result<(), HostRpcError> {
-    let mut open_mode = tunnel.open_mode.lock().await;
-    if !matches!(*open_mode, TunnelMode::Unopened) {
+    let mut active = tunnel.active.lock().await;
+    if !matches!(*active, ActiveTunnelState::Unopened) {
         return Err(rpc_error(
             RpcErrorCode::PortTunnelAlreadyAttached,
             "port tunnel is already open",
         ));
     }
-    *open_mode = mode;
+    *active = ActiveTunnelState::Connect { protocol, runtime };
+    Ok(())
+}
+
+async fn activate_listen_tunnel(
+    tunnel: &Arc<TunnelState>,
+    protocol: TunnelForwardProtocol,
+    session: Arc<SessionState>,
+) -> Result<(), HostRpcError> {
+    let mut active = tunnel.active.lock().await;
+    if !matches!(*active, ActiveTunnelState::Unopened) {
+        return Err(rpc_error(
+            RpcErrorCode::PortTunnelAlreadyAttached,
+            "port tunnel is already open",
+        ));
+    }
+    *active = ActiveTunnelState::Listen { protocol, session };
     Ok(())
 }
 
@@ -382,11 +396,17 @@ async fn open_listen_session(
     protocol: TunnelForwardProtocol,
 ) -> Result<(), HostRpcError> {
     listen_session.session.set_generation(generation);
-    if let Err(err) = claim_tunnel_mode(tunnel, TunnelMode::Listen { protocol }).await {
+    if let Err(err) = activate_listen_tunnel(tunnel, protocol, listen_session.session.clone()).await
+    {
         cleanup_inserted_listen_session(tunnel, listen_session).await;
         return Err(err);
     }
-    attach_session_to_tunnel(&listen_session.session, tunnel).await
+    if let Err(err) = attach_session_to_tunnel(&listen_session.session, tunnel).await {
+        *tunnel.active.lock().await = ActiveTunnelState::Unopened;
+        cleanup_inserted_listen_session(tunnel, listen_session).await;
+        return Err(err);
+    }
+    Ok(())
 }
 
 async fn cleanup_inserted_listen_session(
@@ -444,19 +464,17 @@ async fn ensure_tunnel_generation(
     Ok(())
 }
 
-pub(super) async fn tunnel_mode(tunnel: &Arc<TunnelState>) -> TunnelMode {
-    tunnel.open_mode.lock().await.clone()
-}
-
 async fn close_tunnel_runtime(tunnel: &Arc<TunnelState>, mode: super::error::SessionCloseMode) {
-    let Some(active) = tunnel.active.lock().await.take() else {
-        return;
-    };
+    let active = std::mem::replace(
+        &mut *tunnel.active.lock().await,
+        ActiveTunnelState::Unopened,
+    );
     match active {
-        ActiveTunnelState::Listen(session) => {
+        ActiveTunnelState::Unopened => {}
+        ActiveTunnelState::Listen { session, .. } => {
             close_listen_session(tunnel, session, mode).await;
         }
-        ActiveTunnelState::Connect(runtime) => {
+        ActiveTunnelState::Connect { runtime, .. } => {
             runtime.cancel.cancel();
             for (_, mut stream) in runtime.tcp_streams.lock().await.drain() {
                 if let Some(cancel) = stream.cancel.take() {

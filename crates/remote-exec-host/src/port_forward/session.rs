@@ -199,7 +199,6 @@ pub(super) async fn attach_session_to_tunnel(
         task.abort();
     }
     *session.resume_deadline.lock().await = None;
-    *tunnel.active.lock().await = Some(ActiveTunnelState::Listen(session.clone()));
     session.attachment_notify.notify_waiters();
     Ok(())
 }
@@ -207,13 +206,14 @@ pub(super) async fn attach_session_to_tunnel(
 pub(super) async fn close_attached_session(tunnel: &Arc<TunnelState>, mode: SessionCloseMode) {
     let session = {
         let mut active = tunnel.active.lock().await;
-        match active.take() {
-            Some(ActiveTunnelState::Listen(session)) => Some(session),
-            Some(other) => {
-                *active = Some(other);
-                None
+        match &*active {
+            ActiveTunnelState::Listen { .. } => {
+                match std::mem::replace(&mut *active, ActiveTunnelState::Unopened) {
+                    ActiveTunnelState::Listen { session, .. } => Some(session),
+                    _ => unreachable!("matched listen state before replacement"),
+                }
             }
-            None => None,
+            _ => None,
         }
     };
     let Some(session) = session else {

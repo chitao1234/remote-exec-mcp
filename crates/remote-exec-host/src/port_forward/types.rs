@@ -17,16 +17,22 @@ pub(super) struct TunnelState {
     pub(super) state: Arc<AppState>,
     pub(super) cancel: CancellationToken,
     pub(super) tx: TunnelSender,
-    pub(super) open_mode: Mutex<TunnelMode>,
     pub(super) last_generation: AtomicU64,
-    pub(super) active: Mutex<Option<ActiveTunnelState>>,
+    pub(super) active: Mutex<ActiveTunnelState>,
     pub(super) _connection_permit: PortForwardPermit,
 }
 
 #[derive(Clone)]
 pub(super) enum ActiveTunnelState {
-    Connect(Arc<ConnectRuntimeState>),
-    Listen(Arc<session::SessionState>),
+    Unopened,
+    Connect {
+        protocol: TunnelForwardProtocol,
+        runtime: Arc<ConnectRuntimeState>,
+    },
+    Listen {
+        protocol: TunnelForwardProtocol,
+        session: Arc<session::SessionState>,
+    },
 }
 
 #[derive(Clone)]
@@ -87,11 +93,4 @@ pub(super) struct ErrorMeta {
     pub(super) fatal: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) generation: Option<u64>,
-}
-
-#[derive(Clone)]
-pub(super) enum TunnelMode {
-    Unopened,
-    Connect { protocol: TunnelForwardProtocol },
-    Listen { protocol: TunnelForwardProtocol },
 }

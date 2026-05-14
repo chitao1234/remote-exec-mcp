@@ -8,10 +8,8 @@ use crate::HostRpcError;
 
 use super::error::rpc_error;
 use super::session::{AttachmentState, SessionState};
-use super::tunnel::tunnel_mode;
 use super::{
-    ActiveTunnelState, ConnectRuntimeState, TunnelMode, TunnelSender, TunnelState,
-    tunnel_error_frame,
+    ActiveTunnelState, ConnectRuntimeState, TunnelSender, TunnelState, tunnel_error_frame,
 };
 
 #[derive(Clone)]
@@ -292,26 +290,26 @@ fn protocol_required_error(
 pub(super) async fn active_access(
     tunnel: &Arc<TunnelState>,
 ) -> Result<ActiveTunnelAccess, HostRpcError> {
-    match tunnel_mode(tunnel).await {
-        TunnelMode::Unopened => Ok(ActiveTunnelAccess::Unopened),
-        TunnelMode::Connect { protocol } => Ok(ActiveTunnelAccess::Connect {
+    match tunnel.active.lock().await.clone() {
+        ActiveTunnelState::Unopened => Ok(ActiveTunnelAccess::Unopened),
+        ActiveTunnelState::Connect { protocol, runtime } => Ok(ActiveTunnelAccess::Connect {
             protocol,
-            context: current_connect_context(tunnel).await?,
+            context: ConnectContext { runtime },
         }),
-        TunnelMode::Listen { protocol } => Ok(ActiveTunnelAccess::Listen {
+        ActiveTunnelState::Listen { protocol, session } => Ok(ActiveTunnelAccess::Listen {
             protocol,
-            context: current_listen_context(tunnel).await?,
+            context: current_listen_context(session).await?,
         }),
     }
 }
 
 pub(super) async fn connection_generation(tunnel: &Arc<TunnelState>) -> Option<u64> {
     match tunnel.active.lock().await.clone() {
-        Some(ActiveTunnelState::Connect(runtime)) => Some(runtime.generation),
-        Some(ActiveTunnelState::Listen(session)) => {
+        ActiveTunnelState::Connect { runtime, .. } => Some(runtime.generation),
+        ActiveTunnelState::Listen { session, .. } => {
             Some(session.generation.load(Ordering::Acquire))
         }
-        None => {
+        ActiveTunnelState::Unopened => {
             let generation = tunnel.last_generation.load(Ordering::Acquire);
             (generation != 0).then_some(generation)
         }
@@ -350,28 +348,7 @@ fn protocol_label(protocol: TunnelForwardProtocol) -> &'static str {
     }
 }
 
-async fn current_connect_context(
-    tunnel: &Arc<TunnelState>,
-) -> Result<ConnectContext, HostRpcError> {
-    match tunnel.active.lock().await.clone() {
-        Some(ActiveTunnelState::Connect(runtime)) => Ok(ConnectContext { runtime }),
-        Some(ActiveTunnelState::Listen(_)) | None => Err(rpc_error(
-            RpcErrorCode::InvalidPortTunnel,
-            "connect tunnel runtime is unavailable",
-        )),
-    }
-}
-
-async fn current_listen_context(tunnel: &Arc<TunnelState>) -> Result<ListenContext, HostRpcError> {
-    let session = match tunnel.active.lock().await.clone() {
-        Some(ActiveTunnelState::Listen(session)) => session,
-        Some(ActiveTunnelState::Connect(_)) | None => {
-            return Err(rpc_error(
-                RpcErrorCode::InvalidPortTunnel,
-                "listen tunnel session is unavailable",
-            ));
-        }
-    };
+async fn current_listen_context(session: Arc<SessionState>) -> Result<ListenContext, HostRpcError> {
     let attachment = session.current_attachment().await.ok_or_else(|| {
         rpc_error(
             RpcErrorCode::PortTunnelClosed,

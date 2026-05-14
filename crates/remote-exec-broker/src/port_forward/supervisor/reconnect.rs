@@ -104,7 +104,7 @@ async fn reconnect_listen_tunnel(
 
 async fn reconnect_connect_epoch(runtime: &ForwardRuntime) -> anyhow::Result<Option<ForwardEpoch>> {
     mark_connect_reconnecting(runtime, "connect-side transport loss").await?;
-    let generation = runtime.listen_session.advance_generation();
+    let generation = runtime.listen_session.advance_generation().await;
     runtime
         .store
         .set_forward_generation(runtime.forward_id(), generation)
@@ -183,7 +183,7 @@ async fn recover_listen_side_tunnels(
     runtime
         .mark_reconnecting(ForwardPortSideRole::Listen, "listen-side tunnel lost")
         .await?;
-    let generation = runtime.listen_session.advance_generation();
+    let generation = runtime.listen_session.advance_generation().await;
     runtime
         .store
         .set_forward_generation(runtime.forward_id(), generation)
@@ -310,23 +310,24 @@ where
 pub(in crate::port_forward) async fn close_listen_session(
     control: Arc<ListenSessionControl>,
 ) -> anyhow::Result<()> {
-    let current_tunnel = control.current_tunnel().await;
-    if let Some(tunnel) = current_tunnel {
-        match close_listener_on_tunnel(&tunnel, control.listener_stream_id).await {
-            Ok(()) => {
-                return close_tunnel_after_listener_ack(
-                    &tunnel,
-                    &control.forward_id,
-                    control.current_generation(),
-                    "operator_close",
-                )
-                .await;
-            }
-            Err(err) if is_retryable_transport_error(&err) => {}
-            Err(err) => return Err(err),
+    let snapshot = control.snapshot().await;
+    let Some(tunnel) = snapshot.current_tunnel else {
+        return Ok(());
+    };
+    match close_listener_on_tunnel(&tunnel, control.listener_stream_id).await {
+        Ok(()) => {
+            return close_tunnel_after_listener_ack(
+                &tunnel,
+                &control.forward_id,
+                snapshot.generation,
+                "operator_close",
+            )
+            .await;
         }
+        Err(err) if is_retryable_transport_error(&err) => {}
+        Err(err) => return Err(err),
     }
-    let generation = control.current_generation();
+    let generation = snapshot.generation;
     let tunnel = resume_listen_session_inner(&control, generation).await?;
     control
         .replace_current_tunnel(generation, tunnel.clone())
@@ -480,5 +481,24 @@ mod tests {
             "listener close was already acknowledged before transport loss: {result:?}"
         );
         daemon.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn close_listen_session_without_retained_tunnel_is_a_noop() {
+        let control = Arc::new(ListenSessionControl::new_for_test(
+            SideHandle::local().unwrap(),
+            "fwd_test".to_string(),
+            "tunnel_session_test".to_string(),
+            ForwardPortProtocol::Tcp,
+            Duration::from_secs(10),
+            PortTunnel::DEFAULT_MAX_QUEUED_BYTES,
+            None,
+        ));
+
+        let result = close_listen_session(control).await;
+        assert!(
+            result.is_ok(),
+            "missing retained listen tunnel should not trigger reconnect-on-close: {result:?}"
+        );
     }
 }

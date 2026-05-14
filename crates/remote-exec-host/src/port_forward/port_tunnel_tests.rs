@@ -710,12 +710,10 @@ async fn tcp_close_after_peer_eof_does_not_cancel_queued_writer_shutdown() {
         state: state.clone(),
         cancel: state.shutdown.child_token(),
         tx: sender.clone(),
-        open_mode: tokio::sync::Mutex::new(TunnelMode::Connect {
-            protocol: TunnelForwardProtocol::Tcp,
-        }),
         last_generation: AtomicU64::new(1),
-        active: tokio::sync::Mutex::new(Some(ActiveTunnelState::Connect(Arc::new(
-            ConnectRuntimeState {
+        active: tokio::sync::Mutex::new(ActiveTunnelState::Connect {
+            protocol: TunnelForwardProtocol::Tcp,
+            runtime: Arc::new(ConnectRuntimeState {
                 tx: sender,
                 cancel: state.shutdown.child_token(),
                 generation: 1,
@@ -734,8 +732,8 @@ async fn tcp_close_after_peer_eof_does_not_cancel_queued_writer_shutdown() {
                     },
                 )])),
                 udp_binds: tokio::sync::Mutex::new(HashMap::new()),
-            },
-        )))),
+            }),
+        }),
         _connection_permit: state
             .port_forward_limiter
             .try_acquire_tunnel_connection()
@@ -777,12 +775,10 @@ async fn tunnel_tcp_eof_waits_for_full_writer_queue() {
         state: state.clone(),
         cancel: state.shutdown.child_token(),
         tx: sender.clone(),
-        open_mode: tokio::sync::Mutex::new(TunnelMode::Connect {
-            protocol: TunnelForwardProtocol::Tcp,
-        }),
         last_generation: AtomicU64::new(1),
-        active: tokio::sync::Mutex::new(Some(ActiveTunnelState::Connect(Arc::new(
-            ConnectRuntimeState {
+        active: tokio::sync::Mutex::new(ActiveTunnelState::Connect {
+            protocol: TunnelForwardProtocol::Tcp,
+            runtime: Arc::new(ConnectRuntimeState {
                 tx: sender,
                 cancel: state.shutdown.child_token(),
                 generation: 1,
@@ -801,8 +797,8 @@ async fn tunnel_tcp_eof_waits_for_full_writer_queue() {
                     },
                 )])),
                 udp_binds: tokio::sync::Mutex::new(HashMap::new()),
-            },
-        )))),
+            }),
+        }),
         _connection_permit: state
             .port_forward_limiter
             .try_acquire_tunnel_connection()
@@ -857,9 +853,8 @@ async fn concurrent_tunnel_open_allows_only_one_mode() {
         state: state.clone(),
         cancel: state.shutdown.child_token(),
         tx: sender,
-        open_mode: tokio::sync::Mutex::new(TunnelMode::Unopened),
         last_generation: AtomicU64::new(0),
-        active: tokio::sync::Mutex::new(None),
+        active: tokio::sync::Mutex::new(ActiveTunnelState::Unopened),
         _connection_permit: state
             .port_forward_limiter
             .try_acquire_tunnel_connection()

@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use remote_exec_proto::public::ForwardPortProtocol as PublicForwardPortProtocol;
@@ -18,12 +17,17 @@ pub(super) struct ListenSessionControl {
     pub(super) listener_stream_id: u32,
     pub(super) resume_timeout: Duration,
     pub(super) max_tunnel_queued_bytes: usize,
-    generation: AtomicU64,
     state: Mutex<ListenSessionState>,
 }
 
 struct ListenSessionState {
+    generation: u64,
     current_tunnel: Option<Arc<PortTunnel>>,
+}
+
+pub(super) struct ListenSessionSnapshot {
+    pub(super) generation: u64,
+    pub(super) current_tunnel: Option<Arc<PortTunnel>>,
 }
 
 pub(super) struct ListenSessionParams {
@@ -48,29 +52,36 @@ impl ListenSessionControl {
             listener_stream_id: params.listener_stream_id,
             resume_timeout: params.resume_timeout,
             max_tunnel_queued_bytes: params.max_tunnel_queued_bytes,
-            generation: AtomicU64::new(params.generation),
             state: Mutex::new(ListenSessionState {
+                generation: params.generation,
                 current_tunnel: Some(params.tunnel),
             }),
         }
     }
 
+    pub(super) async fn snapshot(&self) -> ListenSessionSnapshot {
+        self.with_session_state(|state| ListenSessionSnapshot {
+            generation: state.generation,
+            current_tunnel: state.current_tunnel.clone(),
+        })
+        .await
+    }
+
     pub(super) async fn current_tunnel(&self) -> Option<Arc<PortTunnel>> {
-        self.with_session_state(|state| state.current_tunnel.clone())
-            .await
+        self.snapshot().await.current_tunnel
     }
 
-    pub(super) fn current_generation(&self) -> u64 {
-        self.generation.load(Ordering::Acquire)
-    }
-
-    pub(super) fn advance_generation(&self) -> u64 {
-        self.generation.fetch_add(1, Ordering::AcqRel) + 1
+    pub(super) async fn advance_generation(&self) -> u64 {
+        self.with_session_state(|state| {
+            state.generation += 1;
+            state.generation
+        })
+        .await
     }
 
     pub(super) async fn replace_current_tunnel(&self, generation: u64, tunnel: Arc<PortTunnel>) {
-        self.generation.store(generation, Ordering::Release);
         self.with_session_state(|state| {
+            state.generation = generation;
             state.current_tunnel = Some(tunnel);
         })
         .await;
@@ -102,8 +113,8 @@ impl ListenSessionControl {
             listener_stream_id: LISTEN_SESSION_STREAM_ID,
             resume_timeout,
             max_tunnel_queued_bytes,
-            generation: AtomicU64::new(super::epoch::INITIAL_FORWARD_GENERATION),
             state: Mutex::new(ListenSessionState {
+                generation: super::epoch::INITIAL_FORWARD_GENERATION,
                 current_tunnel: tunnel,
             }),
         }
