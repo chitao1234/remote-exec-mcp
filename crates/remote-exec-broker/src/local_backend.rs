@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
-    PatchApplyRequest, PatchApplyResponse, TargetInfoResponse, TransferPathInfoRequest,
-    TransferPathInfoResponse,
+    PatchApplyRequest, PatchApplyResponse, TargetInfoResponse,
 };
 
 use crate::daemon_client::{DaemonClientError, DaemonRpcCode};
@@ -71,14 +70,6 @@ impl LocalDaemonClient {
         remote_exec_host::image::read_image_local(self.state.clone(), req.clone())
             .await
             .map_err(map_local_image_error)
-    }
-
-    pub async fn transfer_path_info(
-        &self,
-        req: &TransferPathInfoRequest,
-    ) -> Result<TransferPathInfoResponse, DaemonClientError> {
-        remote_exec_host::transfer::path_info_for_request(&self.state, req)
-            .map_err(map_local_transfer_error)
     }
 }
 

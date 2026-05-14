@@ -95,36 +95,36 @@ impl TargetHandle {
         }
     }
 
-    pub async fn cached_daemon_info(&self) -> Option<CachedDaemonInfo> {
+    pub(crate) async fn cached_daemon_info(&self) -> Option<CachedDaemonInfo> {
         self.cached_daemon_info.lock().await.clone()
     }
 
-    pub async fn target_info(&self) -> Result<TargetInfoResponse, DaemonClientError> {
+    pub(crate) async fn target_info(&self) -> Result<TargetInfoResponse, DaemonClientError> {
         dispatch_backend!(self, target_info())
     }
 
-    pub async fn exec_start(
+    pub(crate) async fn exec_start(
         &self,
         req: &ExecStartRequest,
     ) -> Result<ExecResponse, DaemonClientError> {
         dispatch_backend!(self, exec_start(req))
     }
 
-    pub async fn exec_write(
+    pub(crate) async fn exec_write(
         &self,
         req: &ExecWriteRequest,
     ) -> Result<ExecResponse, DaemonClientError> {
         dispatch_backend!(self, exec_write(req))
     }
 
-    pub async fn patch_apply(
+    pub(crate) async fn patch_apply(
         &self,
         req: &PatchApplyRequest,
     ) -> Result<PatchApplyResponse, DaemonClientError> {
         dispatch_backend!(self, patch_apply(req))
     }
 
-    pub async fn image_read(
+    pub(crate) async fn image_read(
         &self,
         req: &ImageReadRequest,
     ) -> Result<ImageReadResponse, DaemonClientError> {
@@ -141,14 +141,7 @@ impl TargetHandle {
         }
     }
 
-    pub async fn transfer_path_info(
-        &self,
-        req: &TransferPathInfoRequest,
-    ) -> Result<TransferPathInfoResponse, DaemonClientError> {
-        dispatch_backend!(self, transfer_path_info(req))
-    }
-
-    pub async fn port_tunnel(
+    pub(crate) async fn port_tunnel(
         &self,
         max_queued_bytes: usize,
     ) -> Result<crate::port_forward::PortTunnel, DaemonClientError> {
@@ -166,13 +159,13 @@ impl TargetHandle {
         }
     }
 
-    pub async fn clear_cached_daemon_info(&self) {
+    pub(crate) async fn clear_cached_daemon_info(&self) {
         *self.identity_verified.lock().await = false;
         *self.cached_daemon_info.lock().await = None;
         tracing::info!("cleared cached daemon identity and metadata");
     }
 
-    pub async fn ensure_identity_verified(&self, name: &str) -> anyhow::Result<()> {
+    pub(crate) async fn ensure_identity_verified(&self, name: &str) -> anyhow::Result<()> {
         let mut identity_verified = self.identity_verified.lock().await;
         if *identity_verified {
             return Ok(());
@@ -207,11 +200,11 @@ impl TargetHandle {
 }
 
 impl RemoteTargetHandle<'_> {
-    pub async fn cached_daemon_info(&self) -> Option<CachedDaemonInfo> {
+    pub(crate) async fn cached_daemon_info(&self) -> Option<CachedDaemonInfo> {
         self.handle.cached_daemon_info().await
     }
 
-    pub async fn transfer_export_to_file(
+    pub(crate) async fn transfer_export_to_file(
         &self,
         req: &TransferExportRequest,
         archive_path: &std::path::Path,
@@ -219,21 +212,21 @@ impl RemoteTargetHandle<'_> {
         self.client.transfer_export_to_file(req, archive_path).await
     }
 
-    pub async fn transfer_export_stream(
+    pub(crate) async fn transfer_export_stream(
         &self,
         req: &TransferExportRequest,
     ) -> Result<TransferExportStream, DaemonClientError> {
         self.client.transfer_export_stream(req).await
     }
 
-    pub async fn transfer_path_info(
+    pub(crate) async fn transfer_path_info(
         &self,
         req: &TransferPathInfoRequest,
     ) -> Result<TransferPathInfoResponse, DaemonClientError> {
         self.client.transfer_path_info(req).await
     }
 
-    pub async fn transfer_import_from_file(
+    pub(crate) async fn transfer_import_from_file(
         &self,
         archive_path: &std::path::Path,
         req: &TransferImportRequest,
@@ -243,7 +236,7 @@ impl RemoteTargetHandle<'_> {
             .await
     }
 
-    pub async fn transfer_import_from_body(
+    pub(crate) async fn transfer_import_from_body(
         &self,
         req: &TransferImportRequest,
         body: reqwest::Body,
@@ -251,7 +244,7 @@ impl RemoteTargetHandle<'_> {
         self.client.transfer_import_from_body(req, body).await
     }
 
-    pub async fn clear_on_transport_error<T>(
+    pub(crate) async fn clear_on_transport_error<T>(
         &self,
         result: Result<T, DaemonClientError>,
     ) -> Result<T, DaemonClientError> {
