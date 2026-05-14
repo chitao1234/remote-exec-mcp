@@ -141,9 +141,7 @@ mod tests {
         tokio::task::yield_now().await;
 
         tokio::time::timeout(Duration::from_millis(200), async {
-            tasks
-                .spawn("child", async move { Ok(()) })
-                .await;
+            tasks.spawn("child", async move { Ok(()) }).await;
         })
         .await
         .expect("join_all should not hold the task set mutex while awaiting joins");

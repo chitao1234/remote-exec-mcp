@@ -66,7 +66,7 @@ mod tests {
         TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
         TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
         TRANSFER_SYMLINK_MODE_HEADER, TransferImportMetadata, TransferOverwrite,
-        TransferSourceType, TransferSymlinkMode,
+        TransferSourceType, TransferSymlinkMode, transfer_destination_path_header_value,
     };
     use remote_exec_proto::transfer::TransferCompression;
 
@@ -115,7 +115,7 @@ mod tests {
 
         assert_eq!(
             request.headers()[TRANSFER_DESTINATION_PATH_HEADER],
-            "/tmp/out"
+            transfer_destination_path_header_value("/tmp/out")
         );
         assert_eq!(request.headers()[TRANSFER_OVERWRITE_HEADER], "replace");
         assert_eq!(request.headers()[TRANSFER_CREATE_PARENT_HEADER], "false");
