@@ -23,6 +23,40 @@
 
 namespace fs = test_fs;
 
+#ifndef _WIN32
+class ScopedEnvVar {
+  public:
+    explicit ScopedEnvVar(const char* name) : name_(name), had_original_(false) {
+        const char* original_raw = std::getenv(name_.c_str());
+        had_original_ = original_raw != NULL;
+        if (had_original_) {
+            original_ = original_raw;
+        }
+    }
+
+    ~ScopedEnvVar() {
+        if (had_original_) {
+            assert(setenv(name_.c_str(), original_.c_str(), 1) == 0);
+        } else {
+            assert(unsetenv(name_.c_str()) == 0);
+        }
+    }
+
+    void set(const std::string& value) const {
+        assert(setenv(name_.c_str(), value.c_str(), 1) == 0);
+    }
+
+    void unset() const {
+        assert(unsetenv(name_.c_str()) == 0);
+    }
+
+  private:
+    std::string name_;
+    std::string original_;
+    bool had_original_;
+};
+#endif
+
 static fs::path make_test_root() {
     const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-session-store-test";
     fs::remove_all(root);
@@ -237,14 +271,12 @@ static void assert_posix_exec_uses_parent_built_environment_and_path(SessionStor
     chmod(helper.c_str(), 0755);
 
     const char* old_path_raw = std::getenv("PATH");
-    const bool had_old_path = old_path_raw != NULL;
-    const std::string old_path = had_old_path ? old_path_raw : "";
+    const std::string old_path = old_path_raw != NULL ? old_path_raw : "";
+    ScopedEnvVar path_guard("PATH");
+    ScopedEnvVar term_guard("TERM");
     const std::string new_path = bin_dir.string() + ":" + old_path;
-    assert(setenv("PATH", new_path.c_str(), 1) == 0);
-    const char* old_term_raw = std::getenv("TERM");
-    const bool had_old_term = old_term_raw != NULL;
-    const std::string old_term = had_old_term ? old_term_raw : "";
-    assert(unsetenv("TERM") == 0);
+    path_guard.set(new_path);
+    term_guard.unset();
 
     const Json pipe_response = start_test_command(
         store, "env-helper", root.string(), shell, false, 5000UL, DEFAULT_MAX_OUTPUT_TOKENS, yield_time, 64UL);
@@ -258,16 +290,6 @@ static void assert_posix_exec_uses_parent_built_environment_and_path(SessionStor
         assert(normalize_output(pty_response.at("output").get<std::string>()) == "C.UTF-8|C.UTF-8|xterm-256color\n");
     }
 
-    if (had_old_path) {
-        assert(setenv("PATH", old_path.c_str(), 1) == 0);
-    } else {
-        assert(unsetenv("PATH") == 0);
-    }
-    if (had_old_term) {
-        assert(setenv("TERM", old_term.c_str(), 1) == 0);
-    } else {
-        assert(unsetenv("TERM") == 0);
-    }
 #endif
 }
 

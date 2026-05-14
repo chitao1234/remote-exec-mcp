@@ -51,6 +51,50 @@ bool stat_is_directory(const struct stat& st) {
     return (st.st_mode & S_IFMT) == S_IFDIR;
 }
 
+#ifdef _WIN32
+class ScopedFindHandle {
+  public:
+    explicit ScopedFindHandle(HANDLE handle) : handle_(handle) {
+    }
+
+    ~ScopedFindHandle() {
+        if (handle_ != INVALID_HANDLE_VALUE) {
+            FindClose(handle_);
+        }
+    }
+
+    HANDLE get() const {
+        return handle_;
+    }
+
+    bool valid() const {
+        return handle_ != INVALID_HANDLE_VALUE;
+    }
+
+  private:
+    HANDLE handle_;
+};
+#else
+class ScopedDirHandle {
+  public:
+    explicit ScopedDirHandle(DIR* dir) : dir_(dir) {
+    }
+
+    ~ScopedDirHandle() {
+        if (dir_ != NULL) {
+            closedir(dir_);
+        }
+    }
+
+    DIR* get() const {
+        return dir_;
+    }
+
+  private:
+    DIR* dir_;
+};
+#endif
+
 void remove_existing_path(const std::string& path) {
     if (!path_exists(path)) {
         return;
@@ -175,8 +219,8 @@ std::vector<DirectoryEntry> list_directory_entries(const std::string& path) {
     pattern.push_back('*');
 
     WIN32_FIND_DATAA find_data;
-    HANDLE handle = FindFirstFileA(pattern.c_str(), &find_data);
-    if (handle == INVALID_HANDLE_VALUE) {
+    ScopedFindHandle handle(FindFirstFileA(pattern.c_str(), &find_data));
+    if (!handle.valid()) {
         throw std::runtime_error("unable to read directory " + path);
     }
 
@@ -190,21 +234,20 @@ std::vector<DirectoryEntry> list_directory_entries(const std::string& path) {
             !entry_is_symlink && (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
         entries.push_back(
             DirectoryEntry{name, entry_is_directory, !entry_is_directory && !entry_is_symlink, entry_is_symlink});
-    } while (FindNextFileA(handle, &find_data) != 0);
+    } while (FindNextFileA(handle.get(), &find_data) != 0);
 
     const DWORD last_error = GetLastError();
-    FindClose(handle);
     if (last_error != ERROR_NO_MORE_FILES) {
         throw std::runtime_error("unable to read directory " + path);
     }
 #else
-    DIR* dir = opendir(path.c_str());
-    if (dir == NULL) {
+    ScopedDirHandle dir(opendir(path.c_str()));
+    if (dir.get() == NULL) {
         throw std::runtime_error("unable to read directory " + path);
     }
 
     dirent* entry = NULL;
-    while ((entry = readdir(dir)) != NULL) {
+    while ((entry = readdir(dir.get())) != NULL) {
         const std::string name(entry->d_name);
         if (name == "." || name == "..") {
             continue;
@@ -212,12 +255,10 @@ std::vector<DirectoryEntry> list_directory_entries(const std::string& path) {
         const std::string child = join_path(path, name);
         struct stat st;
         if (!stat_path_no_follow(child, &st)) {
-            closedir(dir);
             throw std::runtime_error("unable to stat path " + child);
         }
         entries.push_back(DirectoryEntry{name, S_ISDIR(st.st_mode), S_ISREG(st.st_mode), S_ISLNK(st.st_mode)});
     }
-    closedir(dir);
 #endif
 
     std::sort(entries.begin(), entries.end(), [](const DirectoryEntry& left, const DirectoryEntry& right) {

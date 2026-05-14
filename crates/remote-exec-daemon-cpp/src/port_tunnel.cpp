@@ -1,3 +1,5 @@
+#include <cassert>
+
 #include "port_tunnel_service.h"
 
 const std::size_t READ_BUF_SIZE = 64U * 1024U;
@@ -45,13 +47,15 @@ static bool try_acquire_counter(std::atomic<unsigned long>& counter, unsigned lo
     return false;
 }
 
-static void release_counter(std::atomic<unsigned long>& counter) {
+static void release_counter(std::atomic<unsigned long>& counter, const char* counter_name) {
     unsigned long current = counter.load();
     while (current > 0UL) {
         if (counter.compare_exchange_weak(current, current - 1UL)) {
             return;
         }
     }
+    log_message(LOG_ERROR, "port_tunnel", std::string("attempted to release exhausted counter `") + counter_name + "`");
+    assert(false && "port-tunnel counter released below zero");
 }
 
 bool PortTunnelService::try_acquire_worker() {
@@ -59,7 +63,7 @@ bool PortTunnelService::try_acquire_worker() {
 }
 
 void PortTunnelService::release_worker() {
-    release_counter(active_workers_);
+    release_counter(active_workers_, "active_workers");
 }
 
 unsigned long PortTunnelService::max_workers() const {
@@ -75,7 +79,7 @@ bool PortTunnelService::try_acquire_retained_session() {
 }
 
 void PortTunnelService::release_retained_session() {
-    release_counter(retained_sessions_);
+    release_counter(retained_sessions_, "retained_sessions");
 }
 
 bool PortTunnelService::try_acquire_retained_listener() {
@@ -83,7 +87,7 @@ bool PortTunnelService::try_acquire_retained_listener() {
 }
 
 void PortTunnelService::release_retained_listener() {
-    release_counter(retained_listeners_);
+    release_counter(retained_listeners_, "retained_listeners");
 }
 
 bool PortTunnelService::try_acquire_udp_bind() {
@@ -91,7 +95,7 @@ bool PortTunnelService::try_acquire_udp_bind() {
 }
 
 void PortTunnelService::release_udp_bind() {
-    release_counter(udp_binds_);
+    release_counter(udp_binds_, "udp_binds");
 }
 
 bool PortTunnelService::try_acquire_active_tcp_stream() {
@@ -99,7 +103,7 @@ bool PortTunnelService::try_acquire_active_tcp_stream() {
 }
 
 void PortTunnelService::release_active_tcp_stream() {
-    release_counter(active_tcp_streams_);
+    release_counter(active_tcp_streams_, "active_tcp_streams");
 }
 
 PortTunnelWorkerLease::PortTunnelWorkerLease(const std::shared_ptr<PortTunnelService>& service) : service_(service) {
