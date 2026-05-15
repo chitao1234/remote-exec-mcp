@@ -1,0 +1,70 @@
+name: BSD Periodic CI
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  bsd-test:
+    name: BSD test (${{ matrix.os.label }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - label: FreeBSD
+            name: freebsd
+            architecture: x86-64
+            version: "15.0"
+            rust_setup: rustup
+          - label: OpenBSD
+            name: openbsd
+            architecture: x86-64
+            version: "7.8"
+            rust_setup: package
+          - label: NetBSD
+            name: netbsd
+            architecture: x86-64
+            version: "10.1"
+            rust_setup: rustup
+          - label: DragonFly BSD
+            name: dragonflybsd
+            architecture: x86-64
+            version: "6.4.2"
+            rust_setup: package
+
+    defaults:
+      run:
+        shell: cpa.sh {0}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Start ${{ matrix.os.label }} VM
+        uses: cross-platform-actions/action@v1.0.0
+        with:
+          operating_system: ${{ matrix.os.name }}
+          architecture: ${{ matrix.os.architecture }}
+          version: ${{ matrix.os.version }}
+          memory: 6G
+          cpu_count: 4
+
+      - name: Record guest details
+        env:
+          BSD_RUST_SETUP: ${{ matrix.os.rust_setup }}
+        run: |
+          uname -a
+          printf 'rust setup mode: %s\n' "$BSD_RUST_SETUP"
