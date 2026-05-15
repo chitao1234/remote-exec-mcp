@@ -14,34 +14,6 @@ The third recurring problem is oversized, low-seam runtime code in the most conc
 
 ## Prioritized Findings
 
-### 1. No single authoritative public contract exists
-
-Severity: High
-
-Evidence: `AGENTS.md:7`, `AGENTS.md:137`, `README.md:12`, `README.md:76`, `skills/using-remote-exec-mcp/SKILL.md:13`, `crates/remote-exec-broker/src/mcp_server.rs:136`, `crates/remote-exec-broker/src/client.rs:170`, `crates/remote-exec-broker/src/tools/registry.rs:3`, `crates/remote-exec-broker/src/bin/remote_exec.rs:454`
-
-Why this is a smell:
-
-The repository explicitly says the live contract is spread across `README.md`, `AGENTS.md`, config examples, the skill, and `remote-exec-proto`. The broker then repeats the tool surface again in the MCP router, the direct-mode client dispatcher, the tool registry enum, and the CLI command dispatcher. That means a small public-surface change turns into a multi-file synchronization exercise by default.
-
-How to solve it:
-
-Make `remote-exec-proto` plus one human-facing document the canonical contract source. Reduce `AGENTS.md` and the operator skill to role-specific guidance that links back to that canonical surface. In the broker, replace manual parallel registries with one declarative tool catalog that drives MCP registration, direct mode dispatch, CLI exposure, and tool metadata.
-
-### 2. `exec_command` contains an ad hoc `apply_patch` interception layer
-
-Severity: High
-
-Evidence: `crates/remote-exec-broker/src/tools/exec.rs:45`, `crates/remote-exec-broker/src/tools/exec_intercept.rs:64`, `crates/remote-exec-broker/src/tools/exec.rs:219`, `crates/remote-exec-broker/src/tools/exec_format.rs:19`, `crates/remote-exec-broker/src/tools/patch.rs:40`
-
-Why this is a smell:
-
-The broker currently sniffs shell command text, reroutes patch-like invocations, and fabricates exec-shaped results. That is a layering break: behavior depends on shell text and quoting heuristics instead of schema. It also creates two subtly different patch surfaces, one explicit and one hidden behind command interception.
-
-How to solve it:
-
-Deprecate the interception path or move it behind an explicit compatibility flag. Make `apply_patch` the only real patch surface, with one structured result shape and one validation path. If legacy command compatibility must remain, isolate it in a small adapter module with explicit tests and a planned removal path.
-
 ### 3. Rust error modeling loses type information too early
 
 Severity: High
@@ -162,11 +134,11 @@ Evidence: `crates/remote-exec-broker/src/config.rs:34`, `configs/broker.example.
 
 Why this is a smell:
 
-The broker code defaults to structured content enabled, but the checked-in example disables it. The C++ README says the daemon builds as C++11 across supported toolchains, while the MSVC path is pinned to `/std:c++14`. These are not catastrophic bugs, but they show that documentation and build plumbing can already drift away from the effective contract.
+The broker code defaults to structured content enabled, but the checked-in example disables it. These are not catastrophic bugs, but they show that documentation and build plumbing can already drift away from the effective contract.
 
 How to solve it:
 
-Add smoke tests that load the real example configs and verify the intended default behavior. Make the C++ build matrix data-driven from one inventory and enforce the declared language level in one canonical place used by all entry points. Separate “recommended example” from “alternate compatibility example” when defaults intentionally differ.
+Add smoke tests that load the real example configs and verify the intended default behavior. Make the C++ build matrix data-driven from one inventory. Separate “recommended example” from “alternate compatibility example” when defaults intentionally differ.
 
 ## Recommended Repair Order
 
