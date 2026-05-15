@@ -467,10 +467,10 @@ async fn cleanup_tcp_stream(tcp_streams: &TcpStreamMap, stream_id: u32) {
 }
 
 async fn cancel_tcp_stream(tcp_streams: &TcpStreamMap, stream_id: u32) {
-    if let Some(mut stream) = tcp_streams.lock().await.remove(&stream_id)
-        && let Some(cancel) = stream.cancel.take()
-    {
-        cancel.cancel();
+    if let Some(mut stream) = tcp_streams.lock().await.remove(&stream_id) {
+        if let Some(cancel) = stream.cancel.take() {
+            cancel.cancel();
+        }
     }
 }
 
@@ -498,10 +498,10 @@ pub(super) async fn tunnel_tcp_eof(
         .protocol_access_if(TunnelForwardProtocol::Tcp)
     {
         let tcp_streams = access.tcp_streams();
-        if let Some(writer) = optional_tcp_writer(tcp_streams, stream_id).await
-            && send_tcp_shutdown(&writer).await
-        {
-            clear_tcp_cancel(tcp_streams, stream_id).await;
+        if let Some(writer) = optional_tcp_writer(tcp_streams, stream_id).await {
+            if send_tcp_shutdown(&writer).await {
+                clear_tcp_cancel(tcp_streams, stream_id).await;
+            }
         }
     }
     Ok(())
@@ -542,15 +542,15 @@ pub(super) async fn tunnel_close_stream(
             if let Some(reader) = listen.udp_readers().lock().await.remove(&stream_id) {
                 reader.cancel.cancel();
             }
-            if let Some(bind_stream_id) = udp_bind_stream_id(listen.session()).await
-                && bind_stream_id == stream_id
-            {
-                close_attached_session(tunnel, SessionCloseMode::GracefulClose).await;
+            if let Some(bind_stream_id) = udp_bind_stream_id(listen.session()).await {
+                if bind_stream_id == stream_id {
+                    close_attached_session(tunnel, SessionCloseMode::GracefulClose).await;
+                }
             }
-            if let Some(listener_stream) = listener_stream_id(listen.session()).await
-                && listener_stream == stream_id
-            {
-                close_attached_session(tunnel, SessionCloseMode::GracefulClose).await;
+            if let Some(listener_stream) = listener_stream_id(listen.session()).await {
+                if listener_stream == stream_id {
+                    close_attached_session(tunnel, SessionCloseMode::GracefulClose).await;
+                }
             }
         }
         ActiveTunnelRole::Connect(connect) => {

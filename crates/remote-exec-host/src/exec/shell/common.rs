@@ -6,6 +6,7 @@ use anyhow::Context;
 use crate::config::ProcessEnvironment;
 use crate::host_path;
 
+#[allow(unexpected_cfgs)]
 pub fn apply_session_environment_overrides(
     environment: &mut ProcessEnvironment,
     shell: &str,

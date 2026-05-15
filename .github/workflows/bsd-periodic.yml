@@ -135,7 +135,7 @@ jobs:
           setup_rust() {
             case "$BSD_RUST_SETUP" in
               rustup)
-                ./.github/bin/rustup-init -y --profile minimal --default-toolchain stable
+                ./.github/bin/rustup-init -y --profile minimal --default-toolchain 1.85.0
                 . "$CARGO_HOME/env"
                 ;;
               package)

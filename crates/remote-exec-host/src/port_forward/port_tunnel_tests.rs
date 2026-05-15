@@ -1220,10 +1220,10 @@ async fn wait_until_session_removed(state: &AppState, session_id: &str) {
         if !state.port_forward_sessions.contains(session_id).await {
             return;
         }
-        if let Some(session) = state.port_forward_sessions.get(session_id).await
-            && !session.has_retained_listener().await
-        {
-            return;
+        if let Some(session) = state.port_forward_sessions.get(session_id).await {
+            if !session.has_retained_listener().await {
+                return;
+            }
         }
         if tokio::time::Instant::now() >= deadline {
             break;
