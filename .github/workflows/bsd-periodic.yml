@@ -17,6 +17,9 @@ jobs:
     name: BSD test (${{ matrix.os.label }})
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    env:
+      BSD_NAME: ${{ matrix.os.name }}
+      BSD_RUST_SETUP: ${{ matrix.os.rust_setup }}
 
     strategy:
       fail-fast: false
@@ -79,6 +82,7 @@ jobs:
       - name: Start ${{ matrix.os.label }} VM
         uses: cross-platform-actions/action@master
         with:
+          environment_variables: BSD_NAME BSD_RUST_SETUP CARGO_TERM_COLOR RUST_BACKTRACE
           operating_system: ${{ matrix.os.name }}
           architecture: ${{ matrix.os.architecture }}
           version: ${{ matrix.os.version }}
@@ -86,17 +90,12 @@ jobs:
           cpu_count: 4
 
       - name: Record guest details
-        env:
-          BSD_RUST_SETUP: ${{ matrix.os.rust_setup }}
         run: |
           set -eu
           uname -a
           printf 'rust setup mode: %s\n' "$BSD_RUST_SETUP"
 
       - name: Run C++ and Rust tests on ${{ matrix.os.label }}
-        env:
-          BSD_NAME: ${{ matrix.os.name }}
-          BSD_RUST_SETUP: ${{ matrix.os.rust_setup }}
         run: |
           set -eu
 
