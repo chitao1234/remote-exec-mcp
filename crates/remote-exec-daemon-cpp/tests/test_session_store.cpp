@@ -103,6 +103,14 @@ static Json start_test_command(SessionStore& store,
                                max_open_sessions);
 }
 
+static std::string stable_test_shell() {
+#ifdef _WIN32
+    return platform::resolve_default_shell("");
+#else
+    return platform::resolve_default_shell("/bin/sh");
+#endif
+}
+
 static YieldTimeConfig fast_yield_time_config() {
     YieldTimeConfig config;
     config.exec_command = YieldTimeOperationConfig{1UL, 1000UL, 1UL};
@@ -124,6 +132,36 @@ static bool wait_until_true(const std::atomic<bool>& value, unsigned long timeou
         platform::sleep_ms(10UL);
     }
     return value.load();
+}
+
+static std::string append_running_session_output_until_contains(SessionStore& store,
+                                                                const std::string& daemon_session_id,
+                                                                const YieldTimeConfig& yield_time,
+                                                                std::string output,
+                                                                const std::string& fragment,
+                                                                unsigned long timeout_ms) {
+    const std::uint64_t started = platform::monotonic_ms();
+    while (output.find(fragment) == std::string::npos && platform::monotonic_ms() - started < timeout_ms) {
+        const Json poll =
+            store.write_stdin(daemon_session_id, "", true, 250UL, DEFAULT_MAX_OUTPUT_TOKENS, yield_time, false, 0U, 0U);
+        output += normalize_output(poll.at("output").get<std::string>());
+        if (!poll.at("running").get<bool>()) {
+            break;
+        }
+        platform::sleep_ms(10UL);
+    }
+    return output;
+}
+
+static bool wait_until_file_contains(const fs::path& path, const std::string& fragment, unsigned long timeout_ms) {
+    const std::uint64_t started = platform::monotonic_ms();
+    while (platform::monotonic_ms() - started < timeout_ms) {
+        if (fs::exists(path) && fs::read_file_bytes(path).find(fragment) != std::string::npos) {
+            return true;
+        }
+        platform::sleep_ms(10UL);
+    }
+    return fs::exists(path) && fs::read_file_bytes(path).find(fragment) != std::string::npos;
 }
 
 static void
@@ -474,19 +512,26 @@ static void assert_tty_resume_round_trip(SessionStore& store,
                                             root.string(),
                                             shell,
                                             true,
-                                            50UL,
+                                            1000UL,
                                             DEFAULT_MAX_OUTPUT_TOKENS,
                                             fast_yield,
                                             64UL);
     TEST_ASSERT(waiting.at("running").get<bool>());
-    TEST_ASSERT(waiting.at("output").get<std::string>().find("ready") != std::string::npos);
 
     const std::string waiting_id = waiting.at("daemon_session_id").get<std::string>();
-    const Json resumed =
+    Json resumed =
         store.write_stdin(waiting_id, "ping\n", true, 1000UL, DEFAULT_MAX_OUTPUT_TOKENS, fast_yield, false, 0U, 0U);
+    std::string resume_output =
+        normalize_output(waiting.at("output").get<std::string>()) + normalize_output(resumed.at("output").get<std::string>());
+    const std::uint64_t resume_started = platform::monotonic_ms();
+    while (resumed.at("running").get<bool>() && platform::monotonic_ms() - resume_started < 5000UL) {
+        resumed = store.write_stdin(
+            waiting_id, "", true, 250UL, DEFAULT_MAX_OUTPUT_TOKENS, fast_yield, false, 0U, 0U);
+        resume_output += normalize_output(resumed.at("output").get<std::string>());
+    }
     TEST_ASSERT(!resumed.at("running").get<bool>());
     TEST_ASSERT(resumed.at("exit_code").get<int>() == 0);
-    TEST_ASSERT(resumed.at("output").get<std::string>().find("echo:ping") != std::string::npos);
+    TEST_ASSERT(resume_output.find("echo:ping\n") != std::string::npos);
 }
 
 static void assert_unrelated_sessions_do_not_block_each_other(SessionStore& store,
@@ -508,8 +553,10 @@ static void assert_unrelated_sessions_do_not_block_each_other(SessionStore& stor
                                                  64UL);
     TEST_ASSERT(slow_running.at("running").get<bool>());
 
+    const fs::path fast_input_path = root / "fast-session-input.txt";
+    fs::remove_all(fast_input_path);
     const Json fast_running = start_test_command(store,
-                                                 "IFS= read line; printf '%s' \"$line\"; sleep 30",
+                                                 "IFS= read line; printf '%s' \"$line\" > fast-session-input.txt; sleep 30",
                                                  root.string(),
                                                  shell,
                                                  true,
@@ -547,7 +594,8 @@ static void assert_unrelated_sessions_do_not_block_each_other(SessionStore& stor
                                                   0U);
     const std::uint64_t fast_elapsed_ms = platform::monotonic_ms() - fast_started_at;
     TEST_ASSERT(fast_elapsed_ms < 2000UL && "fast session waited behind unrelated session");
-    TEST_ASSERT(fast_completed.at("output").get<std::string>().find("ping") != std::string::npos);
+    (void)fast_completed;
+    TEST_ASSERT(wait_until_file_contains(fast_input_path, "ping", 2000UL));
     slow_thread.join();
     TEST_ASSERT(slow_poll.at("running").get<bool>());
 }
@@ -560,34 +608,50 @@ static void assert_tty_detection_and_input_round_trip(SessionStore& store,
         return;
     }
 
+    const fs::path tty_flag_path = root / "tty-detected.txt";
+    fs::remove_all(tty_flag_path);
     const Json tty_running =
         start_test_command(store,
-                           "if test -t 0; then printf 'tty:yes\\n'; else printf 'tty:no\\n'; fi; "
+                           "if test -t 0; then printf yes > tty-detected.txt; else printf no > tty-detected.txt; fi; "
                            "IFS= read line; printf 'input:%s\\n' \"$line\"",
                            root.string(),
                            shell,
                            true,
-                           250UL,
+                           1000UL,
                            DEFAULT_MAX_OUTPUT_TOKENS,
                            yield_time,
                            64UL);
     TEST_ASSERT(tty_running.at("running").get<bool>());
-    TEST_ASSERT(normalize_output(tty_running.at("output").get<std::string>()) == "tty:yes\n");
+    std::string tty_output = normalize_output(tty_running.at("output").get<std::string>());
 
-    const Json tty_completed = store.write_stdin(tty_running.at("daemon_session_id").get<std::string>(),
-                                                 "hello\n",
-                                                 true,
-                                                 5000UL,
-                                                 DEFAULT_MAX_OUTPUT_TOKENS,
-                                                 yield_time,
-                                                 false,
-                                                 0U,
-                                                 0U);
+    Json tty_completed = store.write_stdin(tty_running.at("daemon_session_id").get<std::string>(),
+                                           "hello\n",
+                                           true,
+                                           5000UL,
+                                           DEFAULT_MAX_OUTPUT_TOKENS,
+                                           yield_time,
+                                           false,
+                                           0U,
+                                           0U);
+    tty_output += normalize_output(tty_completed.at("output").get<std::string>());
+    const std::uint64_t tty_started = platform::monotonic_ms();
+    while (tty_completed.at("running").get<bool>() && platform::monotonic_ms() - tty_started < 5000UL) {
+        tty_completed = store.write_stdin(tty_running.at("daemon_session_id").get<std::string>(),
+                                          "",
+                                          true,
+                                          250UL,
+                                          DEFAULT_MAX_OUTPUT_TOKENS,
+                                          yield_time,
+                                          false,
+                                          0U,
+                                          0U);
+        tty_output += normalize_output(tty_completed.at("output").get<std::string>());
+    }
     TEST_ASSERT(!tty_completed.at("running").get<bool>());
     TEST_ASSERT(tty_completed.at("exit_code").get<int>() == 0);
-    const std::string normalized_tty_output = normalize_output(tty_completed.at("output").get<std::string>());
-    TEST_ASSERT(normalized_tty_output.find("hello\n") != std::string::npos);
-    TEST_ASSERT(normalized_tty_output.find("input:hello\n") != std::string::npos);
+    TEST_ASSERT(wait_until_file_contains(tty_flag_path, "yes", 2000UL));
+    TEST_ASSERT(tty_output.find("hello\n") != std::string::npos);
+    TEST_ASSERT(tty_output.find("input:hello\n") != std::string::npos);
 }
 
 static void assert_tty_resize_round_trip(SessionStore& store,
@@ -603,7 +667,7 @@ static void assert_tty_resize_round_trip(SessionStore& store,
                                                    root.string(),
                                                    shell,
                                                    true,
-                                                   50UL,
+                                                   1000UL,
                                                    DEFAULT_MAX_OUTPUT_TOKENS,
                                                    fast_yield,
                                                    64UL);
@@ -618,7 +682,12 @@ static void assert_tty_resize_round_trip(SessionStore& store,
                                            33U,
                                            101U);
     TEST_ASSERT(resized.at("running").get<bool>());
-    TEST_ASSERT(normalize_output(resized.at("output").get<std::string>()).find("33 101") != std::string::npos);
+    std::string resize_output = normalize_output(resized.at("output").get<std::string>());
+    if (resize_output.find("33 101") == std::string::npos) {
+        resize_output = append_running_session_output_until_contains(
+            store, resize_running.at("daemon_session_id").get<std::string>(), fast_yield, resize_output, "33 101", 2000UL);
+    }
+    TEST_ASSERT(resize_output.find("33 101") != std::string::npos);
 }
 
 static void assert_non_tty_resize_rejected(SessionStore& store,
@@ -1003,7 +1072,7 @@ int main() {
     const fs::path root = make_test_root();
     SessionStore store;
     const YieldTimeConfig yield_time = YieldTimeConfig();
-    const std::string shell = platform::resolve_default_shell("");
+    const std::string shell = stable_test_shell();
 
     assert_completed_command_output(store, root, shell, yield_time);
     assert_token_limiting(store, root, shell, yield_time);

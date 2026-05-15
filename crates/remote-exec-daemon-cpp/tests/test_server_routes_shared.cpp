@@ -22,6 +22,18 @@
 
 namespace fs = test_fs;
 
+namespace {
+
+std::string stable_test_shell() {
+#ifdef _WIN32
+    return platform::resolve_default_shell("");
+#else
+    return platform::resolve_default_shell("/bin/sh");
+#endif
+}
+
+} // namespace
+
 fs::path make_server_routes_test_root(const std::string& directory_name) {
     const fs::path root = fs::temp_directory_path() / directory_name;
     fs::remove_all(root);
@@ -33,7 +45,7 @@ void initialize_server_routes_state(AppState& state, const fs::path& root) {
     state.config = make_server_routes_test_config(root);
     state.daemon_instance_id = "test-instance";
     state.hostname = "test-host";
-    state.default_shell = platform::resolve_default_shell("");
+    state.default_shell = stable_test_shell();
     state.port_tunnel_service = create_port_tunnel_service(state.config.port_forward_limits);
 }
 
