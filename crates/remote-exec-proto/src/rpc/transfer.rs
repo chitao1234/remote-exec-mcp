@@ -25,6 +25,22 @@ pub struct TransferHeaders {
     pub symlink_mode: Option<String>,
 }
 
+impl TransferHeaders {
+    pub fn from_lookup<F>(mut lookup: F) -> Result<Self, TransferHeaderError>
+    where
+        F: FnMut(&'static str) -> Result<Option<String>, TransferHeaderError>,
+    {
+        Ok(Self {
+            destination_path: lookup(TRANSFER_DESTINATION_PATH_HEADER)?,
+            overwrite: lookup(TRANSFER_OVERWRITE_HEADER)?,
+            create_parent: lookup(TRANSFER_CREATE_PARENT_HEADER)?,
+            source_type: lookup(TRANSFER_SOURCE_TYPE_HEADER)?,
+            compression: lookup(TRANSFER_COMPRESSION_HEADER)?,
+            symlink_mode: lookup(TRANSFER_SYMLINK_MODE_HEADER)?,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct TransferWarning {
     pub code: String,
@@ -171,6 +187,24 @@ pub fn parse_transfer_import_metadata(
         compression: parse_optional_compression(headers)?,
         symlink_mode: parse_optional_symlink_mode(headers)?,
     })
+}
+
+pub fn parse_transfer_export_metadata_from_lookup<F>(
+    lookup: F,
+) -> Result<TransferExportMetadata, TransferHeaderError>
+where
+    F: FnMut(&'static str) -> Result<Option<String>, TransferHeaderError>,
+{
+    parse_transfer_export_metadata(&TransferHeaders::from_lookup(lookup)?)
+}
+
+pub fn parse_transfer_import_metadata_from_lookup<F>(
+    lookup: F,
+) -> Result<TransferImportMetadata, TransferHeaderError>
+where
+    F: FnMut(&'static str) -> Result<Option<String>, TransferHeaderError>,
+{
+    parse_transfer_import_metadata(&TransferHeaders::from_lookup(lookup)?)
 }
 
 fn required_transfer_header(

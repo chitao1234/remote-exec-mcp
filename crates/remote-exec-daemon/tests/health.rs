@@ -106,13 +106,13 @@ async fn target_info_is_available_over_plain_http() {
 
     assert_eq!(info.target, "builder-a");
     assert_eq!(
-        info.hostname,
+        info.identity.hostname,
         gethostname::gethostname().to_string_lossy().into_owned()
     );
-    assert_eq!(info.platform, std::env::consts::OS);
-    assert_eq!(info.arch, std::env::consts::ARCH);
+    assert_eq!(info.identity.platform, std::env::consts::OS);
+    assert_eq!(info.identity.arch, std::env::consts::ARCH);
     assert_eq!(
-        info.supports_pty,
+        info.capabilities.supports_pty,
         remote_exec_daemon::exec::session::supports_pty_for_mode(PtyMode::Auto)
     );
     assert!(info.supports_image_read);

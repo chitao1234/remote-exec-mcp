@@ -184,7 +184,7 @@ mod tests {
         }))
         .unwrap();
 
-        assert_eq!(info.port_forward_protocol_version, None);
+        assert_eq!(info.capabilities.port_forward_protocol_version, None);
     }
 
     #[test]
@@ -204,7 +204,8 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            info.port_forward_protocol_version
+            info.capabilities
+                .port_forward_protocol_version
                 .map(crate::rpc::PortForwardProtocolVersion::get),
             Some(4)
         );

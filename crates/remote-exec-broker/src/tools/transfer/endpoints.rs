@@ -351,9 +351,10 @@ impl EndpointTargetContext {
     }
 
     fn remote(info: crate::CachedDaemonInfo) -> Self {
-        let accepts_single_slash_windows_absolute = info.platform.eq_ignore_ascii_case("windows");
+        let accepts_single_slash_windows_absolute =
+            info.identity.platform.eq_ignore_ascii_case("windows");
         Self::Remote {
-            policy: remote_policy(&info.platform),
+            policy: remote_policy(&info.identity.platform),
             accepts_single_slash_windows_absolute,
             supports_transfer_compression: info.supports_transfer_compression,
         }

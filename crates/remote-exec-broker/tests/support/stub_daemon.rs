@@ -27,8 +27,9 @@ use remote_exec_proto::port_tunnel::{
     UPGRADE_TOKEN, read_frame, read_preface, write_frame, write_preface,
 };
 use remote_exec_proto::rpc::{
-    ExecWarning, ExecWriteRequest, HealthCheckResponse, ImageReadResponse, PatchApplyRequest,
-    PatchApplyResponse, PortForwardProtocolVersion, RpcErrorBody, TargetInfoResponse,
+    DaemonIdentity, ExecWarning, ExecWriteRequest, HealthCheckResponse, ImageReadResponse,
+    PatchApplyRequest, PatchApplyResponse, PortForwardProtocolVersion, RpcErrorBody,
+    TargetCapabilities, TargetInfoResponse,
 };
 #[cfg(test)]
 use tokio::io::AsyncWriteExt;
@@ -871,16 +872,20 @@ async fn target_info(State(state): State<StubDaemonState>) -> Json<TargetInfoRes
 
     Json(TargetInfoResponse {
         target: state.target,
-        daemon_version: "0.1.0".to_string(),
         daemon_instance_id,
-        hostname: state.target_hostname,
-        platform: state.target_platform,
-        arch: state.target_arch,
-        supports_pty: state.target_supports_pty,
+        identity: DaemonIdentity {
+            daemon_version: "0.1.0".to_string(),
+            hostname: state.target_hostname,
+            platform: state.target_platform,
+            arch: state.target_arch,
+        },
+        capabilities: TargetCapabilities {
+            supports_pty: state.target_supports_pty,
+            supports_port_forward: state.target_supports_port_forward,
+            port_forward_protocol_version: state.target_port_forward_protocol_version,
+        },
         supports_image_read: true,
         supports_transfer_compression: state.target_supports_transfer_compression,
-        supports_port_forward: state.target_supports_port_forward,
-        port_forward_protocol_version: state.target_port_forward_protocol_version,
     })
 }
 
@@ -1118,7 +1123,7 @@ where
         .spawn("stub-inner-port-tunnel", async move {
             remote_exec_host::port_forward::serve_tunnel(tunnel_state, daemon_side)
                 .await
-                .map_err(|err| anyhow::anyhow!("{}: {}", err.code, err.message))
+                .map_err(|err| anyhow::anyhow!("{}: {}", err.wire_code(), err.message))
         })
         .await;
     write_preface(&mut broker_side).await?;

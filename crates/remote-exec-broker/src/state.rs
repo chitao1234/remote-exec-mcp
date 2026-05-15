@@ -36,8 +36,9 @@ impl BrokerState {
         handle.ensure_identity_verified(name).await?;
         if let Some(info) = handle.cached_daemon_info().await {
             anyhow::ensure!(
-                info.supports_port_forward
+                info.capabilities.supports_port_forward
                     && info
+                        .capabilities
                         .port_forward_protocol_version
                         .is_some_and(|version| version.get() >= 4),
                 "target `{name}` does not support port forward protocol version 4"

@@ -174,7 +174,7 @@ pub struct TransferExportMetadata {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TransferImportRequest {
+pub struct TransferImportSpec {
     pub destination_path: String,
     pub overwrite: TransferOverwrite,
     pub create_parent: bool,
@@ -184,44 +184,11 @@ pub struct TransferImportRequest {
     pub symlink_mode: TransferSymlinkMode,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TransferImportMetadata {
-    pub destination_path: String,
-    pub overwrite: TransferOverwrite,
-    pub create_parent: bool,
-    pub source_type: TransferSourceType,
-    pub compression: TransferCompression,
-    pub symlink_mode: TransferSymlinkMode,
-}
+pub type TransferImportRequest = TransferImportSpec;
+pub type TransferImportMetadata = TransferImportSpec;
 
-impl TransferImportRequest {
+impl TransferImportSpec {
     pub fn metadata(&self) -> TransferImportMetadata {
-        TransferImportMetadata::from(self)
-    }
-}
-
-impl From<&TransferImportRequest> for TransferImportMetadata {
-    fn from(value: &TransferImportRequest) -> Self {
-        Self {
-            destination_path: value.destination_path.clone(),
-            overwrite: value.overwrite.clone(),
-            create_parent: value.create_parent,
-            source_type: value.source_type.clone(),
-            compression: value.compression.clone(),
-            symlink_mode: value.symlink_mode.clone(),
-        }
-    }
-}
-
-impl From<TransferImportMetadata> for TransferImportRequest {
-    fn from(value: TransferImportMetadata) -> Self {
-        Self {
-            destination_path: value.destination_path,
-            overwrite: value.overwrite,
-            create_parent: value.create_parent,
-            source_type: value.source_type,
-            compression: value.compression,
-            symlink_mode: value.symlink_mode,
-        }
+        self.clone()
     }
 }

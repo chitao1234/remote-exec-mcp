@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use remote_exec_proto::rpc::{
-    ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
-    PatchApplyRequest, PatchApplyResponse, PortForwardProtocolVersion, TargetInfoResponse,
-    TransferExportRequest, TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
-    TransferPathInfoResponse,
+    DaemonIdentity, ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest,
+    ImageReadResponse, PatchApplyRequest, PatchApplyResponse, TargetCapabilities,
+    TargetInfoResponse, TransferExportRequest, TransferImportRequest, TransferImportResponse,
+    TransferPathInfoRequest, TransferPathInfoResponse,
 };
 use tokio::sync::Mutex;
 
@@ -23,14 +23,9 @@ macro_rules! dispatch_backend {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CachedDaemonInfo {
-    pub daemon_version: String,
-    pub hostname: String,
-    pub platform: String,
-    pub arch: String,
-    pub supports_pty: bool,
+    pub identity: DaemonIdentity,
+    pub capabilities: TargetCapabilities,
     pub supports_transfer_compression: bool,
-    pub supports_port_forward: bool,
-    pub port_forward_protocol_version: Option<PortForwardProtocolVersion>,
 }
 
 #[derive(Clone)]
@@ -84,14 +79,9 @@ impl TargetHandle {
 
     fn cache_from_target_info(info: &TargetInfoResponse) -> CachedDaemonInfo {
         CachedDaemonInfo {
-            daemon_version: info.daemon_version.clone(),
-            hostname: info.hostname.clone(),
-            platform: info.platform.clone(),
-            arch: info.arch.clone(),
-            supports_pty: info.supports_pty,
+            identity: info.identity.clone(),
+            capabilities: info.capabilities.clone(),
             supports_transfer_compression: info.supports_transfer_compression,
-            supports_port_forward: info.supports_port_forward,
-            port_forward_protocol_version: info.port_forward_protocol_version,
         }
     }
 
@@ -189,10 +179,10 @@ impl TargetHandle {
             target = %name,
             daemon_name = %info.target,
             daemon_instance_id = %info.daemon_instance_id,
-            platform = %info.platform,
-            arch = %info.arch,
-            hostname = %info.hostname,
-            supports_pty = info.supports_pty,
+            platform = %info.identity.platform,
+            arch = %info.identity.arch,
+            hostname = %info.identity.hostname,
+            supports_pty = info.capabilities.supports_pty,
             "verified target identity"
         );
         Ok(())

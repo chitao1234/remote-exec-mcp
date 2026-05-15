@@ -10,22 +10,34 @@ pub struct HealthCheckResponse {
     pub daemon_instance_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TargetInfoResponse {
-    pub target: String,
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct DaemonIdentity {
     pub daemon_version: String,
-    pub daemon_instance_id: String,
     pub hostname: String,
     pub platform: String,
     pub arch: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct TargetCapabilities {
     pub supports_pty: bool,
-    pub supports_image_read: bool,
-    #[serde(default)]
-    pub supports_transfer_compression: bool,
     #[serde(default)]
     pub supports_port_forward: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub port_forward_protocol_version: Option<PortForwardProtocolVersion>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TargetInfoResponse {
+    pub target: String,
+    pub daemon_instance_id: String,
+    #[serde(flatten)]
+    pub identity: DaemonIdentity,
+    #[serde(flatten)]
+    pub capabilities: TargetCapabilities,
+    pub supports_image_read: bool,
+    #[serde(default)]
+    pub supports_transfer_compression: bool,
 }
 
 #[derive(

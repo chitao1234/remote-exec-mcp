@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use remote_exec_proto::rpc::{PortForwardProtocolVersion, TargetInfoResponse};
+use remote_exec_proto::rpc::{
+    DaemonIdentity, PortForwardProtocolVersion, TargetCapabilities, TargetInfoResponse,
+};
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -101,16 +103,20 @@ pub fn build_runtime_state(mut config: HostRuntimeConfig) -> anyhow::Result<Host
 pub fn target_info_response(state: &HostRuntimeState, daemon_version: &str) -> TargetInfoResponse {
     TargetInfoResponse {
         target: state.config.target.clone(),
-        daemon_version: daemon_version.to_string(),
         daemon_instance_id: state.daemon_instance_id.clone(),
-        hostname: gethostname::gethostname().to_string_lossy().into_owned(),
-        platform: std::env::consts::OS.to_string(),
-        arch: std::env::consts::ARCH.to_string(),
-        supports_pty: state.supports_pty,
+        identity: DaemonIdentity {
+            daemon_version: daemon_version.to_string(),
+            hostname: gethostname::gethostname().to_string_lossy().into_owned(),
+            platform: std::env::consts::OS.to_string(),
+            arch: std::env::consts::ARCH.to_string(),
+        },
+        capabilities: TargetCapabilities {
+            supports_pty: state.supports_pty,
+            supports_port_forward: true,
+            port_forward_protocol_version: Some(PortForwardProtocolVersion::v4()),
+        },
         supports_image_read: true,
         supports_transfer_compression: state.supports_transfer_compression,
-        supports_port_forward: true,
-        port_forward_protocol_version: Some(PortForwardProtocolVersion::v4()),
     }
 }
 

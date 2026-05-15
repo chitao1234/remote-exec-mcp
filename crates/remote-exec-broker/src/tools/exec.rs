@@ -413,7 +413,7 @@ async fn target_path_policy(target: &crate::TargetHandle) -> anyhow::Result<Path
         .await
         .context("target info missing after identity verification")?;
 
-    Ok(if info.platform.eq_ignore_ascii_case("windows") {
+    Ok(if info.identity.platform.eq_ignore_ascii_case("windows") {
         windows_path_policy()
     } else {
         linux_path_policy()

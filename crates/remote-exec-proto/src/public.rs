@@ -1,7 +1,10 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::rpc::{ExecPtySize, ExecWarning, PortForwardProtocolVersion, TransferWarning};
+use crate::rpc::{
+    DaemonIdentity, ExecPtySize, ExecWarning, TargetCapabilities, TargetInfoResponse,
+    TransferWarning,
+};
 pub use crate::transfer::{TransferOverwrite, TransferSourceType, TransferSymlinkMode};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -59,14 +62,19 @@ pub struct CommandToolResult {
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct ListTargetDaemonInfo {
-    pub daemon_version: String,
-    pub hostname: String,
-    pub platform: String,
-    pub arch: String,
-    pub supports_pty: bool,
-    pub supports_port_forward: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub port_forward_protocol_version: Option<PortForwardProtocolVersion>,
+    #[serde(flatten)]
+    pub identity: DaemonIdentity,
+    #[serde(flatten)]
+    pub capabilities: TargetCapabilities,
+}
+
+impl From<&TargetInfoResponse> for ListTargetDaemonInfo {
+    fn from(value: &TargetInfoResponse) -> Self {
+        Self {
+            identity: value.identity.clone(),
+            capabilities: value.capabilities.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]

@@ -149,10 +149,10 @@ fn log_local_target_enabled(info: &TargetInfoResponse) {
     tracing::info!(
         target = LOCAL_TARGET_NAME,
         daemon_instance_id = %info.daemon_instance_id,
-        platform = %info.platform,
-        arch = %info.arch,
-        hostname = %info.hostname,
-        supports_pty = info.supports_pty,
+        platform = %info.identity.platform,
+        arch = %info.identity.arch,
+        hostname = %info.identity.hostname,
+        supports_pty = info.capabilities.supports_pty,
         supports_transfer_compression = info.supports_transfer_compression,
         "enabled embedded local target"
     );
@@ -169,10 +169,10 @@ fn log_remote_target_available(
         http_auth_enabled = target_config.http_auth.is_some(),
         daemon_name = %info.target,
         daemon_instance_id = %info.daemon_instance_id,
-        platform = %info.platform,
-        arch = %info.arch,
-        hostname = %info.hostname,
-        supports_pty = info.supports_pty,
+        platform = %info.identity.platform,
+        arch = %info.identity.arch,
+        hostname = %info.identity.hostname,
+        supports_pty = info.capabilities.supports_pty,
         supports_transfer_compression = info.supports_transfer_compression,
         "target available during broker startup"
     );

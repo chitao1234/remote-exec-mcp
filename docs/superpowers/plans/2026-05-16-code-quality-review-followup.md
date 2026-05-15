@@ -76,11 +76,11 @@
 - Run: `cargo test -p remote-exec-broker --test multi_target -- --nocapture`
 - Expect: no behavioral drift in transfer behavior, and capability data should come from shared typed structs instead of duplicated parallel definitions.
 
-- [ ] Extract shared daemon identity/capability structs in `remote-exec-proto`
-- [ ] Introduce one canonical transfer metadata/envelope model and keep HTTP header encoding as an adapter layer
-- [ ] Update broker and daemon code to consume the shared types instead of parallel local shapes
-- [ ] Run focused transfer and capability verification
-- [ ] Commit
+- [x] Extract shared daemon identity/capability structs in `remote-exec-proto`
+- [x] Introduce one canonical transfer metadata/envelope model and keep HTTP header encoding as an adapter layer
+- [x] Update broker and daemon code to consume the shared types instead of parallel local shapes
+- [x] Run focused transfer and capability verification
+- [x] Commit
 
 ### Task 3: Remove legacy public-shape and config duplication
 

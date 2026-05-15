@@ -13,13 +13,17 @@ pub use exec::{
 };
 pub use image::{EmptyResponse, ImageReadRequest, ImageReadResponse};
 pub use patch::{PatchApplyRequest, PatchApplyResponse};
-pub use target::{HealthCheckResponse, PortForwardProtocolVersion, TargetInfoResponse};
+pub use target::{
+    DaemonIdentity, HealthCheckResponse, PortForwardProtocolVersion, TargetCapabilities,
+    TargetInfoResponse,
+};
 pub use transfer::{
     TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER,
     TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER, TRANSFER_SYMLINK_MODE_HEADER,
     TransferHeaderError, TransferHeaderErrorKind, TransferHeaderPairs, TransferHeaders,
     TransferImportResponse, TransferPathInfoRequest, TransferPathInfoResponse, TransferWarning,
-    parse_transfer_export_metadata, parse_transfer_import_metadata,
+    parse_transfer_export_metadata, parse_transfer_export_metadata_from_lookup,
+    parse_transfer_import_metadata, parse_transfer_import_metadata_from_lookup,
     transfer_destination_path_header_value, transfer_export_header_pairs,
     transfer_import_header_pairs,
 };

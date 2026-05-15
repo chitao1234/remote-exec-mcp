@@ -20,16 +20,8 @@ pub async fn list_targets(
             .cached_daemon_info()
             .await
             .map(|info| ListTargetDaemonInfo {
-                daemon_version: info.daemon_version,
-                hostname: info.hostname,
-                platform: info.platform,
-                arch: info.arch,
-                supports_pty: info.supports_pty,
-                supports_port_forward: info.supports_port_forward,
-                port_forward_protocol_version: info
-                    .supports_port_forward
-                    .then_some(info.port_forward_protocol_version)
-                    .flatten(),
+                identity: info.identity,
+                capabilities: info.capabilities,
             });
         targets.push(ListTargetEntry {
             name: name.clone(),
@@ -66,18 +58,23 @@ fn format_targets_text(targets: &[ListTargetEntry]) -> String {
             Some(info) => format!(
                 "- {}: {}/{}, host={}, version={}, pty={}, forward_ports={}{}",
                 target.name,
-                info.platform,
-                info.arch,
-                info.hostname,
-                info.daemon_version,
-                if info.supports_pty { "yes" } else { "no" },
-                if info.supports_port_forward {
+                info.identity.platform.as_str(),
+                info.identity.arch.as_str(),
+                info.identity.hostname.as_str(),
+                info.identity.daemon_version.as_str(),
+                if info.capabilities.supports_pty {
                     "yes"
                 } else {
                     "no"
                 },
-                if info.supports_port_forward {
-                    info.port_forward_protocol_version
+                if info.capabilities.supports_port_forward {
+                    "yes"
+                } else {
+                    "no"
+                },
+                if info.capabilities.supports_port_forward {
+                    info.capabilities
+                        .port_forward_protocol_version
                         .map(|version| format!(", forward_protocol=v{}", version.get()))
                         .unwrap_or_default()
                 } else {
