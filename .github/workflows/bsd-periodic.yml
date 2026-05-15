@@ -77,7 +77,7 @@ jobs:
           chmod +x .github/bin/rustup-init
 
       - name: Start ${{ matrix.os.label }} VM
-        uses: cross-platform-actions/action@v1.0.0
+        uses: cross-platform-actions/action@master
         with:
           operating_system: ${{ matrix.os.name }}
           architecture: ${{ matrix.os.architecture }}
