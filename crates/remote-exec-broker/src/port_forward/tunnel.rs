@@ -738,20 +738,25 @@ mod tests {
                 .unwrap();
         }
 
-        for index in 0..128 {
-            remote_exec_proto::port_tunnel::write_frame(
-                &mut daemon_side,
-                &Frame {
-                    frame_type: FrameType::TcpData,
-                    flags: 0,
-                    stream_id: 10 + index,
-                    meta: Vec::new(),
-                    data: vec![index as u8; 16],
-                },
-            )
-            .await
-            .unwrap();
-        }
+        let daemon_writer = tokio::spawn(async move {
+            for index in 0..128 {
+                if remote_exec_proto::port_tunnel::write_frame(
+                    &mut daemon_side,
+                    &Frame {
+                        frame_type: FrameType::TcpData,
+                        flags: 0,
+                        stream_id: 10 + index,
+                        meta: Vec::new(),
+                        data: vec![index as u8; 16],
+                    },
+                )
+                .await
+                .is_err()
+                {
+                    return;
+                }
+            }
+        });
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         tunnel.abort().await;
@@ -768,5 +773,13 @@ mod tests {
         result
             .unwrap()
             .expect("abort should force blocked tunnel tasks to stop promptly");
+
+        daemon_writer.abort();
+        let writer_join = tokio::time::timeout(std::time::Duration::from_secs(1), daemon_writer)
+            .await
+            .expect("test helper writer should stop promptly");
+        if let Err(err) = writer_join {
+            assert!(err.is_cancelled(), "daemon writer join failed: {err}");
+        }
     }
 }
