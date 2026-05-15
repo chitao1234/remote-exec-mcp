@@ -170,7 +170,7 @@ jobs:
           rust_status=0
 
           set +e
-          bmake -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-bsd HOST_CXX=c++ all-posix
+          bmake -k -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-bsd HOST_CXX=c++ all-posix
           cpp_status=$?
           if [ "$cpp_status" -eq 0 ]; then
             bmake -k -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-bsd HOST_CXX=c++ check-posix

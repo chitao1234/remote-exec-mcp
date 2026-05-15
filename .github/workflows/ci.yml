@@ -65,15 +65,6 @@ jobs:
         with:
           arch: x64
 
-      - name: Build C++ daemon for Rust integration tests
-        if: runner.os == 'Linux'
-        run: make -C crates/remote-exec-daemon-cpp all-posix
-
-      - name: Build C++ daemon for Rust integration tests
-        if: runner.os == 'Windows'
-        shell: cmd
-        run: nmake /f crates\remote-exec-daemon-cpp\NMakefile all-msvc-native
-
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
@@ -82,15 +73,51 @@ jobs:
 
       - name: Run tests
         if: runner.os == 'Linux'
+        shell: bash
         env:
           REMOTE_EXEC_CPP_DAEMON: ${{ github.workspace }}/crates/remote-exec-daemon-cpp/build/remote-exec-daemon-cpp
-        run: cargo test --workspace --locked
+        run: |
+          set -eu
+          cpp_status=0
+          rust_status=0
+
+          set +e
+          make -k -C crates/remote-exec-daemon-cpp all-posix
+          cpp_status=$?
+
+          cargo test --workspace --locked --no-fail-fast
+          rust_status=$?
+          set -e
+
+          printf 'C++ build status: %s\n' "$cpp_status"
+          printf 'Rust test status: %s\n' "$rust_status"
+
+          if [ "$cpp_status" -ne 0 ] || [ "$rust_status" -ne 0 ]; then
+            exit 1
+          fi
 
       - name: Run tests
         if: runner.os == 'Windows'
+        shell: cmd
         env:
           REMOTE_EXEC_CPP_DAEMON: ${{ github.workspace }}\crates\remote-exec-daemon-cpp\build\remote-exec-daemon-cpp-msvc.exe
-        run: cargo test --workspace --locked
+        run: |
+          @echo off
+          setlocal EnableExtensions
+          set "cpp_status=0"
+          set "rust_status=0"
+
+          nmake /K /f crates\remote-exec-daemon-cpp\NMakefile all-msvc-native
+          if errorlevel 1 set "cpp_status=%errorlevel%"
+
+          cargo test --workspace --locked --no-fail-fast
+          if errorlevel 1 set "rust_status=%errorlevel%"
+
+          echo C++ build status: %cpp_status%
+          echo Rust test status: %rust_status%
+
+          if not "%cpp_status%"=="0" exit /b 1
+          if not "%rust_status%"=="0" exit /b 1
 
   rust-test-no-default-features:
     name: Rust no-default-features (ubuntu-latest)
@@ -111,14 +138,32 @@ jobs:
         with:
           cache-on-failure: true
 
-      - name: Test broker without default features
-        run: cargo test -p remote-exec-broker --no-default-features --tests --locked
+      - name: Run no-default-features tests
+        shell: bash
+        run: |
+          set -eu
+          broker_status=0
+          daemon_status=0
+          host_status=0
 
-      - name: Test daemon without default features
-        run: cargo test -p remote-exec-daemon --no-default-features --tests --locked
+          set +e
+          cargo test -p remote-exec-broker --no-default-features --tests --locked --no-fail-fast
+          broker_status=$?
 
-      - name: Test host without default features
-        run: cargo test -p remote-exec-host --no-default-features --tests --locked
+          cargo test -p remote-exec-daemon --no-default-features --tests --locked --no-fail-fast
+          daemon_status=$?
+
+          cargo test -p remote-exec-host --no-default-features --tests --locked --no-fail-fast
+          host_status=$?
+          set -e
+
+          printf 'broker status: %s\n' "$broker_status"
+          printf 'daemon status: %s\n' "$daemon_status"
+          printf 'host status: %s\n' "$host_status"
+
+          if [ "$broker_status" -ne 0 ] || [ "$daemon_status" -ne 0 ] || [ "$host_status" -ne 0 ]; then
+            exit 1
+          fi
 
   rust-clippy:
     name: Rust clippy (${{ matrix.os }})
@@ -225,10 +270,10 @@ jobs:
         run: |
           jobs="$(nproc)"
 
-          make -j"${jobs}" -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-posix check-posix &
+          make -k -j"${jobs}" -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-posix check-posix &
           posix_pid="$!"
 
-          make -j"${jobs}" -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-windows-xp check-windows-xp &
+          make -k -j"${jobs}" -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-windows-xp check-windows-xp &
           xp_pid="$!"
 
           posix_status=0
@@ -244,4 +289,4 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: |
-          nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-native
+          nmake /K /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-native
