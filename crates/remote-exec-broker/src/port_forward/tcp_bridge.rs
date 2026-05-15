@@ -1099,10 +1099,13 @@ mod tests {
         let listen_tunnel = Arc::new(PortTunnel::from_stream(listen_broker_side).unwrap());
         let connect_io = ScriptedTunnelIo::default();
         let connect_tunnel = Arc::new(PortTunnel::from_stream(connect_io.clone()).unwrap());
-        let mut limits = ForwardLimits::default();
-        limits.max_pending_tcp_bytes_per_stream = 4;
-        limits.max_pending_tcp_bytes_per_forward = 4;
-        let runtime = tcp_test_runtime_with_limits(listen_tunnel.clone(), connect_tunnel.clone(), limits);
+        let limits = ForwardLimits {
+            max_pending_tcp_bytes_per_stream: 4,
+            max_pending_tcp_bytes_per_forward: 4,
+            ..ForwardLimits::default()
+        };
+        let runtime =
+            tcp_test_runtime_with_limits(listen_tunnel.clone(), connect_tunnel.clone(), limits);
         runtime
             .store
             .insert(test_record(&runtime, "127.0.0.1:10000"))
