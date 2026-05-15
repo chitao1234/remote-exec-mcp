@@ -38,7 +38,11 @@ pub async fn tunnel(
                             )
                             .await
                             {
-                                tracing::warn!(error = %err.message, code = %err.code, "port tunnel ended with error");
+                                tracing::warn!(
+                                    error = %err.message,
+                                    code = err.wire_code(),
+                                    "port tunnel ended with error"
+                                );
                             }
                         }
                         Err(err) => {

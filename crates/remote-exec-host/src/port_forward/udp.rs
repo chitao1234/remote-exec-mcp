@@ -274,7 +274,7 @@ async fn tunnel_udp_read_loop(
             Ok(frame) => frame,
             Err(err) => {
                 target
-                    .send_error_code(stream_id, err.code.to_string(), err.message)
+                    .send_error_code(stream_id, err.wire_code().to_string(), err.message)
                     .await;
                 return;
             }
@@ -288,19 +288,19 @@ async fn tunnel_udp_read_loop(
                     .send_forward_drop(
                         stream_id,
                         ForwardDropKind::UdpDatagram,
-                        err.code.to_string(),
+                        err.wire_code().to_string(),
                         err.message.clone(),
                     )
                     .await;
                 tracing::debug!(
-                    code = %err.code,
+                    code = err.wire_code(),
                     message = %err.message,
                     "dropping udp datagram due to local port tunnel pressure"
                 );
                 continue;
             }
             target
-                .send_error_code(stream_id, err.code.to_string(), err.message)
+                .send_error_code(stream_id, err.wire_code().to_string(), err.message)
                 .await;
             target.close_on_terminal_send_failure(stream_id).await;
             return;

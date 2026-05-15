@@ -5,7 +5,7 @@ use remote_exec_proto::rpc::{RpcErrorBody, RpcErrorCode};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostRpcError {
     pub status: u16,
-    pub code: String,
+    pub code: RpcErrorCode,
     pub message: String,
 }
 
@@ -13,23 +13,17 @@ impl HostRpcError {
     pub fn new(status: u16, code: RpcErrorCode, message: impl Into<String>) -> Self {
         Self {
             status,
-            code: code.wire_value().to_string(),
+            code,
             message: message.into(),
         }
     }
 
-    pub fn code(&self) -> Option<RpcErrorCode> {
-        RpcErrorCode::from_wire_value(&self.code)
+    pub fn wire_code(&self) -> &'static str {
+        self.code.wire_value()
     }
 
     pub fn into_rpc_parts(self) -> (u16, RpcErrorBody) {
-        (
-            self.status,
-            RpcErrorBody {
-                code: self.code,
-                message: self.message,
-            },
-        )
+        (self.status, RpcErrorBody::new(self.code, self.message))
     }
 }
 
@@ -165,19 +159,97 @@ define_domain_error!(
     }
 );
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PatchErrorKind {
+    SandboxDenied,
+    Failed,
+}
+
+#[derive(Debug)]
+pub(crate) struct PatchError {
+    kind: PatchErrorKind,
+    message: String,
+}
+
+impl PatchError {
+    pub(crate) fn sandbox_denied(message: impl Into<String>) -> Self {
+        Self::new(PatchErrorKind::SandboxDenied, message)
+    }
+
+    pub(crate) fn failed(message: impl Into<String>) -> Self {
+        Self::new(PatchErrorKind::Failed, message)
+    }
+
+    pub(crate) fn failed_error(err: impl fmt::Display) -> Self {
+        Self::failed(err.to_string())
+    }
+
+    pub(crate) fn code(&self) -> RpcErrorCode {
+        match self.kind {
+            PatchErrorKind::SandboxDenied => RpcErrorCode::SandboxDenied,
+            PatchErrorKind::Failed => RpcErrorCode::PatchFailed,
+        }
+    }
+
+    fn into_host_rpc_error(self) -> HostRpcError {
+        let code = self.code();
+        let message = self.message;
+        tracing::warn!(code = code.wire_value(), %message, "daemon request rejected");
+        bad_request(code, message)
+    }
+
+    fn new(kind: PatchErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for PatchError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for PatchError {}
+
+impl From<PatchError> for HostRpcError {
+    fn from(value: PatchError) -> Self {
+        value.into_host_rpc_error()
+    }
+}
+
+impl From<crate::sandbox::SandboxError> for PatchError {
+    fn from(value: crate::sandbox::SandboxError) -> Self {
+        Self::sandbox_denied(value.to_string())
+    }
+}
+
+impl From<std::io::Error> for PatchError {
+    fn from(value: std::io::Error) -> Self {
+        Self::failed_error(value)
+    }
+}
+
+impl From<std::string::FromUtf8Error> for PatchError {
+    fn from(value: std::string::FromUtf8Error) -> Self {
+        Self::failed_error(value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{HostRpcError, ImageError, TransferError};
+    use remote_exec_proto::rpc::RpcErrorCode;
+
+    use super::{HostRpcError, ImageError, PatchError, TransferError};
 
     #[test]
     fn transfer_internal_maps_to_internal_error_server_response() {
         let err: HostRpcError = TransferError::internal("transfer boom").into();
         assert_eq!(err.status, 500);
-        assert_eq!(err.code, "internal_error");
-        assert_eq!(
-            err.code(),
-            Some(remote_exec_proto::rpc::RpcErrorCode::Internal)
-        );
+        assert_eq!(err.code, RpcErrorCode::Internal);
+        assert_eq!(err.wire_code(), "internal_error");
         assert_eq!(err.message, "transfer boom");
     }
 
@@ -185,11 +257,8 @@ mod tests {
     fn image_internal_maps_to_internal_error_server_response() {
         let err: HostRpcError = ImageError::internal("image boom").into();
         assert_eq!(err.status, 500);
-        assert_eq!(err.code, "internal_error");
-        assert_eq!(
-            err.code(),
-            Some(remote_exec_proto::rpc::RpcErrorCode::Internal)
-        );
+        assert_eq!(err.code, RpcErrorCode::Internal);
+        assert_eq!(err.wire_code(), "internal_error");
         assert_eq!(err.message, "image boom");
     }
 
@@ -197,11 +266,17 @@ mod tests {
     fn image_decode_failed_stays_a_client_error() {
         let err: HostRpcError = ImageError::decode_failed("bad image bytes").into();
         assert_eq!(err.status, 400);
-        assert_eq!(err.code, "image_decode_failed");
-        assert_eq!(
-            err.code(),
-            Some(remote_exec_proto::rpc::RpcErrorCode::ImageDecodeFailed)
-        );
+        assert_eq!(err.code, RpcErrorCode::ImageDecodeFailed);
+        assert_eq!(err.wire_code(), "image_decode_failed");
         assert_eq!(err.message, "bad image bytes");
+    }
+
+    #[test]
+    fn patch_failed_stays_a_client_error() {
+        let err: HostRpcError = PatchError::failed("patch boom").into();
+        assert_eq!(err.status, 400);
+        assert_eq!(err.code, RpcErrorCode::PatchFailed);
+        assert_eq!(err.wire_code(), "patch_failed");
+        assert_eq!(err.message, "patch boom");
     }
 }

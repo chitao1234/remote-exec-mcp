@@ -222,12 +222,12 @@ pub(super) async fn tunnel_tcp_accept_loop(session: Arc<SessionState>, listener:
                     &attachment.tx,
                     listener_stream_id(&session).await.unwrap_or(0),
                     ForwardDropKind::TcpStream,
-                    err.code.as_str(),
+                    err.wire_code(),
                     err.message.clone(),
                 )
                 .await;
                 tracing::debug!(
-                    code = %err.code,
+                    code = err.wire_code(),
                     message = %err.message,
                     "dropping accepted tcp stream due to local port tunnel pressure"
                 );
@@ -263,7 +263,7 @@ pub(super) async fn tunnel_tcp_accept_loop(session: Arc<SessionState>, listener:
                     &attachment.tx,
                     Some(session.generation()),
                     stream_id,
-                    err.code.as_str(),
+                    err.wire_code(),
                     err.message,
                     false,
                 )
@@ -384,8 +384,13 @@ async fn tunnel_tcp_read_loop<T: TcpReadLoopContext>(
                 )
                 .await
                 {
-                    send_tcp_read_error_code(&target, stream_id, err.code.to_string(), err.message)
-                        .await;
+                    send_tcp_read_error_code(
+                        &target,
+                        stream_id,
+                        err.wire_code().to_string(),
+                        err.message,
+                    )
+                    .await;
                     cancel_tcp_read_stream(&target, stream_id).await;
                     return;
                 }

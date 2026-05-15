@@ -16,8 +16,8 @@ pub(super) async fn write_prepared_export_to_file(
     archive_path: PathBuf,
     compression: remote_exec_proto::transfer::TransferCompression,
     symlink_mode: TransferSymlinkMode,
-) -> anyhow::Result<Vec<TransferWarning>> {
-    tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<TransferWarning>> {
+) -> Result<Vec<TransferWarning>, TransferError> {
+    tokio::task::spawn_blocking(move || -> Result<Vec<TransferWarning>, TransferError> {
         let mut warnings = Vec::new();
         with_archive_builder(&archive_path, &compression, |builder| {
             warnings = append_export_source(
@@ -29,10 +29,12 @@ pub(super) async fn write_prepared_export_to_file(
             )?;
             append_transfer_summary(builder, &warnings)?;
             Ok(())
-        })?;
+        })
+        .map_err(super::super::archive_error_to_transfer_error)?;
         Ok(warnings)
     })
-    .await?
+    .await
+    .map_err(super::super::internal_transfer_error)?
 }
 
 pub(super) async fn write_prepared_export_to_writer<W>(
@@ -40,11 +42,11 @@ pub(super) async fn write_prepared_export_to_writer<W>(
     writer: W,
     compression: remote_exec_proto::transfer::TransferCompression,
     symlink_mode: TransferSymlinkMode,
-) -> anyhow::Result<Vec<TransferWarning>>
+) -> Result<Vec<TransferWarning>, TransferError>
 where
     W: Write + Send + 'static,
 {
-    tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<TransferWarning>> {
+    tokio::task::spawn_blocking(move || -> Result<Vec<TransferWarning>, TransferError> {
         let mut warnings = Vec::new();
         with_archive_writer(writer, &compression, |builder| {
             warnings = append_export_source(
@@ -56,10 +58,12 @@ where
             )?;
             append_transfer_summary(builder, &warnings)?;
             Ok(())
-        })?;
+        })
+        .map_err(super::super::archive_error_to_transfer_error)?;
         Ok(warnings)
     })
-    .await?
+    .await
+    .map_err(super::super::internal_transfer_error)?
 }
 
 fn append_export_source<W: Write>(

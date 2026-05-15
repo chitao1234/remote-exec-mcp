@@ -413,7 +413,7 @@ async fn background_task_tracker_joins_shutdown_tunnel() {
         .spawn("test port-forward tunnel", async move {
             serve_tunnel(tunnel_state, daemon_side)
                 .await
-                .map_err(|err| anyhow::anyhow!("{}: {}", err.code, err.message))
+                .map_err(|err| anyhow::anyhow!("{}: {}", err.wire_code(), err.message))
         })
         .await;
 
@@ -671,7 +671,7 @@ async fn tunnel_connection_limit_rejects_second_concurrent_tunnel() {
         .expect("second tunnel should be rejected promptly")
         .unwrap();
     let error = result.expect_err("second tunnel should exceed the connection limit");
-    assert_eq!(error.code, "port_tunnel_limit_exceeded");
+    assert_eq!(error.code, RpcErrorCode::PortTunnelLimitExceeded);
 }
 
 #[tokio::test]
@@ -899,7 +899,7 @@ async fn concurrent_tunnel_open_allows_only_one_mode() {
         .filter(|result| {
             result
                 .as_ref()
-                .is_err_and(|err| err.code == RpcErrorCode::PortTunnelAlreadyAttached.wire_value())
+                .is_err_and(|err| err.code == RpcErrorCode::PortTunnelAlreadyAttached)
         })
         .count();
     assert_eq!(success_count, 1);

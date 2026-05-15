@@ -155,7 +155,7 @@ where
                 &tunnel.tx,
                 generation,
                 stream_id,
-                err.code,
+                err.wire_code(),
                 err.message.clone(),
                 false,
             )

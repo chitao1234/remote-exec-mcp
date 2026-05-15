@@ -6,7 +6,7 @@ use crate::error::TransferError;
 use crate::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
 
 use super::super::exclude_matcher::ExcludeMatcher;
-use super::super::host_path;
+use super::super::{archive_error_to_transfer_error, host_path, internal_transfer_error};
 use super::PreparedExport;
 
 pub(super) async fn prepare_export_path(
@@ -15,9 +15,10 @@ pub(super) async fn prepare_export_path(
     exclude: &[String],
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
-) -> anyhow::Result<PreparedExport> {
+) -> Result<PreparedExport, TransferError> {
     let source_text = path.to_string();
-    let source_path = host_path(&source_text, windows_posix_root)?;
+    let source_path =
+        host_path(&source_text, windows_posix_root).map_err(internal_transfer_error)?;
     authorize_path(sandbox, SandboxAccess::Read, &source_path).map_err(|err| {
         crate::transfer::transfer_error_from_sandbox_error(
             "transfer source path",
@@ -39,7 +40,8 @@ pub(super) async fn prepare_export_path(
             }
         })?;
     let source_type = export_source_type_from_metadata(&source_path, &metadata, symlink_mode)?;
-    let exclude_matcher = ExcludeMatcher::compile(exclude)?;
+    let exclude_matcher =
+        ExcludeMatcher::compile(exclude).map_err(archive_error_to_transfer_error)?;
 
     Ok(PreparedExport {
         source_path,
@@ -52,12 +54,12 @@ fn export_source_type_from_metadata(
     path: &PathBuf,
     metadata: &std::fs::Metadata,
     symlink_mode: &TransferSymlinkMode,
-) -> anyhow::Result<TransferSourceType> {
+) -> Result<TransferSourceType, TransferError> {
     if metadata.file_type().is_symlink() {
         match symlink_mode {
             TransferSymlinkMode::Preserve => return Ok(TransferSourceType::File),
             TransferSymlinkMode::Follow => {
-                let target_metadata = std::fs::metadata(path)?;
+                let target_metadata = std::fs::metadata(path).map_err(internal_transfer_error)?;
                 if target_metadata.is_file() {
                     return Ok(TransferSourceType::File);
                 }
@@ -67,15 +69,13 @@ fn export_source_type_from_metadata(
                 return Err(TransferError::source_unsupported(format!(
                     "transfer source symlink target `{}` is not a regular file or directory",
                     path.display()
-                ))
-                .into());
+                )));
             }
             TransferSymlinkMode::Skip => {
                 return Err(TransferError::source_unsupported(format!(
                     "transfer source contains unsupported symlink `{}`",
                     path.display()
-                ))
-                .into());
+                )));
             }
         }
     }
@@ -89,6 +89,5 @@ fn export_source_type_from_metadata(
     Err(TransferError::source_unsupported(format!(
         "transfer source path `{}` is not a regular file or directory",
         path.display()
-    ))
-    .into())
+    )))
 }

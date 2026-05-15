@@ -9,7 +9,10 @@ use std::sync::Arc;
 
 use remote_exec_proto::rpc::{PatchApplyRequest, PatchApplyResponse, RpcErrorCode};
 
-use crate::{AppState, HostRpcError, error::logged_bad_request, sandbox::SandboxError};
+use crate::{
+    AppState, HostRpcError,
+    error::{PatchError, logged_bad_request},
+};
 
 const LF: &str = "\n";
 const CRLF: &str = "\r\n";
@@ -30,7 +33,7 @@ pub async fn apply_patch_local(
         .map_err(|err| logged_bad_request(RpcErrorCode::PatchFailed, err.to_string()))?;
     let summary = execute_actions(&state, &cwd, actions)
         .await
-        .map_err(map_patch_error)?;
+        .map_err(HostRpcError::from)?;
     tracing::info!(
         target = %state.config.target,
         updated_paths = summary.len(),
@@ -51,7 +54,7 @@ async fn execute_actions(
     state: &Arc<AppState>,
     cwd: &Path,
     actions: Vec<parser::PatchAction>,
-) -> anyhow::Result<Vec<String>> {
+) -> Result<Vec<String>, PatchError> {
     let mut summary = Vec::with_capacity(actions.len());
 
     for action in actions {
@@ -104,15 +107,6 @@ async fn execute_actions(
     }
 
     Ok(summary)
-}
-
-fn map_patch_error(err: anyhow::Error) -> HostRpcError {
-    let code = if err.downcast_ref::<SandboxError>().is_some() {
-        RpcErrorCode::SandboxDenied
-    } else {
-        RpcErrorCode::PatchFailed
-    };
-    logged_bad_request(code, err.to_string())
 }
 
 fn detect_line_ending(text: &str) -> &'static str {

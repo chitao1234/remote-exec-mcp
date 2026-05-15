@@ -22,9 +22,8 @@ pub async fn import_archive_from_file(
     windows_posix_root: Option<&Path>,
     limits: TransferLimits,
 ) -> Result<TransferImportResponse, TransferError> {
-    let (destination, replaced) = prepare_import_destination(request, sandbox, windows_posix_root)
-        .await
-        .map_err(archive_error_to_transfer_error)?;
+    let (destination, replaced) =
+        prepare_import_destination(request, sandbox, windows_posix_root).await?;
     let archive_path = archive_path.to_path_buf();
     let request = request.clone();
 
@@ -33,7 +32,6 @@ pub async fn import_archive_from_file(
     })
     .await
     .map_err(internal_transfer_error)?
-    .map_err(archive_error_to_transfer_error)
 }
 
 pub async fn import_archive_from_async_reader<R>(
@@ -46,28 +44,28 @@ pub async fn import_archive_from_async_reader<R>(
 where
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
 {
-    let (destination, replaced) = prepare_import_destination(request, sandbox, windows_posix_root)
-        .await
-        .map_err(archive_error_to_transfer_error)?;
+    let (destination, replaced) =
+        prepare_import_destination(request, sandbox, windows_posix_root).await?;
     let request = request.clone();
     let runtime = tokio::runtime::Handle::current();
 
     tokio::task::spawn_blocking(move || {
         let reader = tokio_util::io::SyncIoBridge::new_with_handle(reader, runtime);
-        let reader = wrap_archive_reader(reader, &request.compression)?;
+        let reader = wrap_archive_reader(reader, &request.compression)
+            .map_err(archive_error_to_transfer_error)?;
         extract_archive_from_reader(reader, &destination, &request, replaced, limits)
     })
     .await
     .map_err(internal_transfer_error)?
-    .map_err(archive_error_to_transfer_error)
 }
 
 async fn prepare_import_destination(
     request: &TransferImportRequest,
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
-) -> anyhow::Result<(std::path::PathBuf, bool)> {
-    let destination = host_path(&request.destination_path, windows_posix_root)?;
+) -> Result<(std::path::PathBuf, bool), TransferError> {
+    let destination = host_path(&request.destination_path, windows_posix_root)
+        .map_err(internal_transfer_error)?;
     authorize_path(sandbox, SandboxAccess::Write, &destination).map_err(|err| {
         crate::transfer::transfer_error_from_sandbox_error(
             "transfer destination path",
@@ -83,10 +81,12 @@ async fn prepare_import_destination(
 async fn prepare_destination(
     destination: &Path,
     request: &TransferImportRequest,
-) -> anyhow::Result<bool> {
+) -> Result<bool, TransferError> {
     if let Some(parent) = destination.parent() {
         if request.create_parent {
-            tokio::fs::create_dir_all(parent).await?;
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(internal_transfer_error)?;
         } else {
             let parent_exists = tokio::fs::metadata(parent)
                 .await
@@ -96,8 +96,7 @@ async fn prepare_destination(
                 return Err(TransferError::parent_missing(format!(
                     "destination parent `{}` does not exist",
                     parent.display()
-                ))
-                .into());
+                )));
             }
         }
     }
@@ -107,23 +106,26 @@ async fn prepare_destination(
             TransferOverwrite::Fail => Err(TransferError::destination_exists(format!(
                 "destination path `{}` already exists",
                 destination.display()
-            ))
-            .into()),
+            ))),
             TransferOverwrite::Merge => {
                 ensure_merge_destination_is_compatible(destination, &metadata, request)?;
                 Ok(false)
             }
             TransferOverwrite::Replace => {
                 if metadata.is_dir() {
-                    tokio::fs::remove_dir_all(destination).await?;
+                    tokio::fs::remove_dir_all(destination)
+                        .await
+                        .map_err(internal_transfer_error)?;
                 } else {
-                    tokio::fs::remove_file(destination).await?;
+                    tokio::fs::remove_file(destination)
+                        .await
+                        .map_err(internal_transfer_error)?;
                 }
                 Ok(true)
             }
         },
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(err) => Err(err.into()),
+        Err(err) => Err(internal_transfer_error(err)),
     }
 }
 
@@ -131,13 +133,12 @@ fn ensure_merge_destination_is_compatible(
     destination: &Path,
     metadata: &std::fs::Metadata,
     request: &TransferImportRequest,
-) -> anyhow::Result<()> {
+) -> Result<(), TransferError> {
     if metadata.file_type().is_symlink() {
         return Err(TransferError::destination_unsupported(format!(
             "destination path contains unsupported symlink `{}`",
             destination.display()
-        ))
-        .into());
+        )));
     }
 
     match request.source_type {
@@ -146,8 +147,7 @@ fn ensure_merge_destination_is_compatible(
                 return Err(TransferError::destination_unsupported(format!(
                     "destination path `{}` is a directory",
                     destination.display()
-                ))
-                .into());
+                )));
             }
         }
         TransferSourceType::Directory | TransferSourceType::Multiple => {
@@ -155,8 +155,7 @@ fn ensure_merge_destination_is_compatible(
                 return Err(TransferError::destination_unsupported(format!(
                     "destination path `{}` is not a directory",
                     destination.display()
-                ))
-                .into());
+                )));
             }
         }
     }
@@ -170,8 +169,9 @@ fn extract_archive(
     request: &TransferImportRequest,
     replaced: bool,
     limits: TransferLimits,
-) -> anyhow::Result<TransferImportResponse> {
-    let reader = open_archive_reader(archive_path, &request.compression)?;
+) -> Result<TransferImportResponse, TransferError> {
+    let reader = open_archive_reader(archive_path, &request.compression)
+        .map_err(archive_error_to_transfer_error)?;
     extract_archive_from_reader(reader, destination_path, request, replaced, limits)
 }
 
@@ -181,7 +181,7 @@ fn extract_archive_from_reader<R: Read>(
     request: &TransferImportRequest,
     replaced: bool,
     limits: TransferLimits,
-) -> anyhow::Result<TransferImportResponse> {
+) -> Result<TransferImportResponse, TransferError> {
     let mut summary = new_import_summary(request, replaced);
 
     let mut archive = tar::Archive::new(reader);
@@ -193,14 +193,16 @@ fn extract_archive_from_reader<R: Read>(
             &request.symlink_mode,
             &mut summary,
             limits,
-        )?,
+        )
+        .map_err(archive_error_to_transfer_error)?,
         TransferSourceType::Directory | TransferSourceType::Multiple => extract_tree_archive(
             &mut archive,
             destination_path,
             &request.symlink_mode,
             &mut summary,
             limits,
-        )?,
+        )
+        .map_err(archive_error_to_transfer_error)?,
     }
 
     Ok(summary)

@@ -23,7 +23,7 @@ pub(super) enum SessionCloseMode {
 }
 
 pub(super) fn is_recoverable_pressure_error(error: &HostRpcError) -> bool {
-    error.code() == Some(RpcErrorCode::PortTunnelLimitExceeded)
+    error.code == RpcErrorCode::PortTunnelLimitExceeded
 }
 
 #[cfg(test)]
@@ -36,13 +36,13 @@ mod tests {
     fn request_error_stays_bad_request() {
         let error = request_error(RpcErrorCode::InvalidPortTunnel, "bad tunnel");
         assert_eq!(error.status, 400);
-        assert_eq!(error.code, RpcErrorCode::InvalidPortTunnel.wire_value());
+        assert_eq!(error.code, RpcErrorCode::InvalidPortTunnel);
     }
 
     #[test]
     fn operational_error_uses_server_side_status() {
         let error = operational_error(RpcErrorCode::PortConnectFailed, "connect failed");
         assert_eq!(error.status, 502);
-        assert_eq!(error.code, RpcErrorCode::PortConnectFailed.wire_value());
+        assert_eq!(error.code, RpcErrorCode::PortConnectFailed);
     }
 }

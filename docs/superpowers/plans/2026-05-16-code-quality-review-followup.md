@@ -46,11 +46,11 @@
 - Run: `cargo test -p remote-exec-daemon --test transfer_rpc`
 - Expect: existing RPC error codes remain stable while internal conversions become simpler and more typed.
 
-- [ ] Inspect the remaining `HostRpcError`, patch, and archive error seams and confirm the minimal typed model to use
-- [ ] Introduce typed patch/archive error paths and keep `RpcErrorCode` typed internally
-- [ ] Remove avoidable `String`/`anyhow` reconstruction from the daemon-facing host boundary
-- [ ] Run focused Rust verification
-- [ ] Commit
+- [x] Inspect the remaining `HostRpcError`, patch, and archive error seams and confirm the minimal typed model to use
+- [x] Introduce typed patch/archive error paths and keep `RpcErrorCode` typed internally
+- [x] Remove avoidable `String`/`anyhow` reconstruction from the daemon-facing host boundary
+- [x] Run focused Rust verification
+- [x] Commit
 
 ### Task 2: Consolidate shared capability and transfer modeling
 

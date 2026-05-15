@@ -4,6 +4,8 @@ use std::path::Path;
 use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
 use encoding_rs::{Encoding, UTF_16BE, UTF_16LE};
 
+use crate::error::PatchError;
+
 #[derive(Debug, Clone)]
 pub(crate) struct PatchTextFile {
     pub(crate) text: String,
@@ -20,12 +22,15 @@ enum PatchTextEncoding {
 }
 
 impl PatchTextFile {
-    pub(crate) async fn read(path: &Path, allow_encoding_autodetect: bool) -> anyhow::Result<Self> {
+    pub(crate) async fn read(
+        path: &Path,
+        allow_encoding_autodetect: bool,
+    ) -> Result<Self, PatchError> {
         let bytes = tokio::fs::read(path).await?;
         Self::from_bytes(bytes, allow_encoding_autodetect)
     }
 
-    pub(crate) fn encode(&self, text: &str) -> anyhow::Result<Vec<u8>> {
+    pub(crate) fn encode(&self, text: &str) -> Result<Vec<u8>, PatchError> {
         match &self.encoding {
             PatchTextEncoding::Utf8 => Ok(text.as_bytes().to_vec()),
             PatchTextEncoding::Detected { encoding, bom } => {
@@ -38,7 +43,7 @@ impl PatchTextFile {
         }
     }
 
-    fn from_bytes(bytes: Vec<u8>, allow_encoding_autodetect: bool) -> anyhow::Result<Self> {
+    fn from_bytes(bytes: Vec<u8>, allow_encoding_autodetect: bool) -> Result<Self, PatchError> {
         match String::from_utf8(bytes) {
             Ok(text) => Ok(Self {
                 text,
@@ -50,17 +55,19 @@ impl PatchTextFile {
                 let content_bytes = &bytes[bom_len..];
                 let text = decode_without_replacement(encoding, content_bytes)?.into_owned();
 
-                anyhow::ensure!(
-                    looks_like_text(&text),
-                    "detected {} content does not look like text",
-                    encoding.name()
-                );
+                if !looks_like_text(&text) {
+                    return Err(PatchError::failed(format!(
+                        "detected {} content does not look like text",
+                        encoding.name()
+                    )));
+                }
 
-                anyhow::ensure!(
-                    encode_text_for_encoding(encoding, &text)?.as_slice() == content_bytes,
-                    "detected {} content did not round-trip cleanly",
-                    encoding.name()
-                );
+                if encode_text_for_encoding(encoding, &text)?.as_slice() != content_bytes {
+                    return Err(PatchError::failed(format!(
+                        "detected {} content did not round-trip cleanly",
+                        encoding.name()
+                    )));
+                }
 
                 Ok(Self {
                     text,
@@ -88,10 +95,12 @@ fn detect_encoding(bytes: &[u8]) -> (&'static Encoding, usize) {
 fn decode_without_replacement<'a>(
     encoding: &'static Encoding,
     bytes: &'a [u8],
-) -> anyhow::Result<Cow<'a, str>> {
+) -> Result<Cow<'a, str>, PatchError> {
     encoding
         .decode_without_bom_handling_and_without_replacement(bytes)
-        .ok_or_else(|| anyhow::anyhow!("target file is not valid {} text", encoding.name()))
+        .ok_or_else(|| {
+            PatchError::failed(format!("target file is not valid {} text", encoding.name()))
+        })
 }
 
 fn looks_like_text(text: &str) -> bool {
@@ -108,7 +117,10 @@ fn looks_like_text(text: &str) -> bool {
     suspicious_controls == 0 || suspicious_controls * 20 <= char_count.max(1)
 }
 
-fn encode_text_for_encoding(encoding: &'static Encoding, text: &str) -> anyhow::Result<Vec<u8>> {
+fn encode_text_for_encoding(
+    encoding: &'static Encoding,
+    text: &str,
+) -> Result<Vec<u8>, PatchError> {
     // encoding_rs handles the WHATWG legacy text encodings we care about
     // directly. UTF-16 is the exception: its Rust encode API intentionally
     // emits UTF-8 bytes, so preserve UTF-16LE/BE manually here.
@@ -127,11 +139,12 @@ fn encode_text_for_encoding(encoding: &'static Encoding, text: &str) -> anyhow::
     }
 
     let (encoded, _, had_errors) = encoding.encode(text);
-    anyhow::ensure!(
-        !had_errors,
-        "updated text cannot be represented in detected {} encoding",
-        encoding.name()
-    );
+    if had_errors {
+        return Err(PatchError::failed(format!(
+            "updated text cannot be represented in detected {} encoding",
+            encoding.name()
+        )));
+    }
     Ok(encoded.into_owned())
 }
 

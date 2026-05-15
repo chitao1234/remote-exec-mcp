@@ -1,11 +1,12 @@
 use super::matcher;
 use super::parser::UpdateChunk;
+use crate::error::PatchError;
 
 pub fn apply_hunks(
     current: &str,
     hunks: &[UpdateChunk],
     line_ending: &str,
-) -> anyhow::Result<String> {
+) -> Result<String, PatchError> {
     let original_lines = split_current_lines(current);
     let replacements = plan_replacements(&original_lines, hunks)?;
     let mut lines = original_lines;
@@ -33,7 +34,7 @@ struct ResolvedSegments {
 fn plan_replacements(
     original_lines: &[String],
     hunks: &[UpdateChunk],
-) -> anyhow::Result<Vec<PlannedReplacement>> {
+) -> Result<Vec<PlannedReplacement>, PatchError> {
     let mut replacements = Vec::with_capacity(hunks.len());
     let mut working_lines = original_lines.to_vec();
     let mut search_start = 0;
@@ -76,14 +77,14 @@ fn resolve_hunk_start(
     lines: &[String],
     hunk: &UpdateChunk,
     search_start: usize,
-) -> anyhow::Result<usize> {
+) -> Result<usize, PatchError> {
     match hunk.change_context.as_ref() {
         Some(ctx) => {
             let search_start = search_start.min(lines.len());
 
             let found =
                 matcher::seek_sequence(lines, std::slice::from_ref(ctx), search_start, false);
-            found.ok_or_else(|| anyhow::anyhow!("context line `{ctx}` not found"))
+            found.ok_or_else(|| PatchError::failed(format!("context line `{ctx}` not found")))
         }
         None => Ok(search_start.min(lines.len())),
     }
@@ -93,7 +94,7 @@ fn resolve_segments(
     lines: &[String],
     hunk: &UpdateChunk,
     start: usize,
-) -> anyhow::Result<ResolvedSegments> {
+) -> Result<ResolvedSegments, PatchError> {
     let initial = ResolvedSegments {
         old_lines: hunk.old_lines.clone(),
         new_lines: hunk.new_lines.clone(),
@@ -117,10 +118,10 @@ fn resolve_segments(
         }
     }
 
-    anyhow::bail!(
+    Err(PatchError::failed(format!(
         "failed to find hunk lines `{}`",
         initial.old_lines.join("\n")
-    )
+    )))
 }
 
 fn strip_trailing_empty_sentinel(segments: &ResolvedSegments) -> Option<ResolvedSegments> {
@@ -145,7 +146,7 @@ fn resolve_replacement_start(
     hunk: &UpdateChunk,
     start: usize,
     segments: &ResolvedSegments,
-) -> anyhow::Result<usize> {
+) -> Result<usize, PatchError> {
     if segments.old_lines.is_empty() {
         return Ok(if !hunk.is_end_of_file && hunk.change_context.is_some() {
             start.min(lines.len())
@@ -155,10 +156,10 @@ fn resolve_replacement_start(
     }
 
     seek_hunk_sequence(lines, &segments.old_lines, start, hunk.is_end_of_file).ok_or_else(|| {
-        anyhow::anyhow!(
+        PatchError::failed(format!(
             "failed to find hunk lines `{}`",
             segments.old_lines.join("\n")
-        )
+        ))
     })
 }
 
@@ -225,12 +226,16 @@ fn eof_insert_index(lines: &[String]) -> usize {
     }
 }
 
-fn translate_to_original_index(current_index: usize, line_offset: isize) -> anyhow::Result<usize> {
+fn translate_to_original_index(
+    current_index: usize,
+    line_offset: isize,
+) -> Result<usize, PatchError> {
     let original_index = current_index as isize - line_offset;
-    anyhow::ensure!(
-        original_index >= 0,
-        "planned replacement index became negative"
-    );
+    if original_index < 0 {
+        return Err(PatchError::failed(
+            "planned replacement index became negative",
+        ));
+    }
     Ok(original_index as usize)
 }
 

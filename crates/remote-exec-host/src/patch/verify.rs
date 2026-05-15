@@ -5,7 +5,7 @@ use tokio::fs;
 use super::ensure_trailing_newline;
 use super::parser::{PatchAction, UpdateChunk};
 use super::text_codec::PatchTextFile;
-use crate::{AppState, sandbox::SandboxAccess};
+use crate::{AppState, error::PatchError, sandbox::SandboxAccess};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolvedAction {
@@ -31,7 +31,7 @@ pub async fn resolve_action(
     state: &std::sync::Arc<AppState>,
     cwd: &Path,
     action: PatchAction,
-) -> anyhow::Result<ResolvedAction> {
+) -> Result<ResolvedAction, PatchError> {
     match action {
         PatchAction::Add { path, lines } => {
             let absolute_path = resolve_patch_path(state, cwd, &path);
@@ -60,11 +60,12 @@ pub async fn resolve_action(
             let absolute_path = resolve_patch_path(state, cwd, &path);
             crate::exec::ensure_sandbox_access(state, SandboxAccess::Write, &absolute_path)?;
             let metadata = fs::metadata(&absolute_path).await?;
-            anyhow::ensure!(
-                metadata.is_file(),
-                "`{}` is not a file",
-                display_relative(cwd, &absolute_path)
-            );
+            if !metadata.is_file() {
+                return Err(PatchError::failed(format!(
+                    "`{}` is not a file",
+                    display_relative(cwd, &absolute_path)
+                )));
+            }
             let _ = PatchTextFile::read(
                 &absolute_path,
                 state

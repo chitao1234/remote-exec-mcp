@@ -64,15 +64,13 @@ pub async fn export_path_to_file(
 ) -> Result<ExportPathResult, TransferError> {
     let prepared =
         prepare::prepare_export_path(path, &symlink_mode, exclude, sandbox, windows_posix_root)
-            .await
-            .map_err(archive_error_to_transfer_error)?;
+            .await?;
     let archive_path = archive_path.to_path_buf();
     let source_type = prepared.source_type.clone();
 
     let warnings =
         single::write_prepared_export_to_file(prepared, archive_path, compression, symlink_mode)
-            .await
-            .map_err(archive_error_to_transfer_error)?;
+            .await?;
 
     Ok(ExportPathResult {
         source_type,
@@ -90,8 +88,7 @@ pub async fn export_path_to_stream(
 ) -> Result<ExportedArchiveStream, TransferError> {
     let prepared =
         prepare::prepare_export_path(path, &symlink_mode, exclude, sandbox, windows_posix_root)
-            .await
-            .map_err(archive_error_to_transfer_error)?;
+            .await?;
     let source_type = prepared.source_type.clone();
     let (reader, writer) = tokio::io::duplex(STREAM_BUFFER_SIZE);
     let task_compression = compression.clone();
@@ -125,10 +122,11 @@ pub async fn bundle_archives_to_file(
 
     let result = tokio::task::spawn_blocking(move || {
         bundle::bundle_archives_to_file(&sources, &archive_path, &compression)
+            .map_err(archive_error_to_transfer_error)
     })
     .await
     .map_err(internal_transfer_error)?;
-    result.map_err(archive_error_to_transfer_error)?;
+    result?;
 
     Ok(())
 }
