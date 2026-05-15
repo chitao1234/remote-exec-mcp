@@ -56,138 +56,214 @@ async fn run_udp_forward_epoch(
                 ).await;
             }
             frame = listen_tunnel.recv() => {
-                let frame = match recoverable_tunnel_frame(
+                if let Some(control) = handle_listen_udp_tunnel_event(
+                    runtime,
+                    &connect_tunnel,
+                    &connectors,
+                    &mut connector_stream_ids,
+                    &connector_bind_endpoint,
                     frame,
-                    "reading udp listen tunnel",
-                    "listen-side udp tunnel error",
-                    || async { Ok(ForwardLoopControl::RecoverTunnel(TunnelRole::Listen)) },
                 )
                 .await?
                 {
-                    TunnelFrameOutcome::Frame(frame) => frame,
-                    TunnelFrameOutcome::Control(control) => return Ok(control),
-                };
-                match frame.frame_type {
-                    FrameType::UdpDatagram => {
-                        let datagram: UdpDatagramMeta = decode_tunnel_meta(&frame)?;
-                        let connector_stream_id = match udp_connector_stream_id(
-                            &connect_tunnel,
-                            &connectors,
-                            &mut connector_stream_ids,
-                            &connector_bind_endpoint,
-                            datagram.peer.clone(),
-                            runtime.limits.max_udp_peers,
-                        ).await {
-                            Ok(stream_id) => stream_id,
-                            Err(UdpConnectorError::LimitExceeded) => {
-                                runtime.record_dropped_datagram().await;
-                                continue;
-                            }
-                            Err(UdpConnectorError::Transport(err)) => {
-                                runtime.record_dropped_datagram().await;
-                                return classify_transport_failure(
-                                    err,
-                                    "opening udp connector stream",
-                                    TunnelRole::Connect,
-                                );
-                            }
-                        };
-                        if let Err(err) = connect_tunnel.send(Frame {
-                            frame_type: FrameType::UdpDatagram,
-                            flags: 0,
-                            stream_id: connector_stream_id,
-                            meta: encode_tunnel_meta(&UdpDatagramMeta {
-                                peer: runtime.connect_endpoint().to_string(),
-                            })?,
-                            data: frame.data,
-                        }).await {
-                            runtime.record_dropped_datagram().await;
-                            if is_backpressure_error(&err) {
-                                continue;
-                            }
-                            return classify_transport_failure(
-                                err,
-                                "relaying udp datagram to connect tunnel",
-                                TunnelRole::Connect,
-                            );
-                        }
-                    }
-                    FrameType::Close => return Ok(ForwardLoopControl::Cancelled),
-                    FrameType::Error if frame.stream_id == runtime.listen_session.listener_stream_id => {
-                        let meta = decode_tunnel_error_frame(&frame);
-                        if is_recoverable_pressure_tunnel_error(&meta) {
-                            runtime.record_dropped_datagram().await;
-                            continue;
-                        }
-                        return Err(format_terminal_tunnel_error(&meta))
-                            .context("listen-side udp tunnel error");
-                    }
-                    FrameType::ForwardDrop => {
-                        apply_forward_drop_report(
-                            &runtime.store,
-                            runtime.forward_id(),
-                            &frame,
-                        )
-                        .await?;
-                    }
-                    _ => {}
+                    return Ok(control);
                 }
             }
             frame = connect_tunnel.recv() => {
-                let frame = match recoverable_tunnel_frame(
+                if let Some(control) = handle_connect_udp_tunnel_event(
+                    runtime,
+                    &listen_tunnel,
+                    &connectors,
                     frame,
-                    "reading udp connect tunnel",
-                    "connect-side udp tunnel error",
-                    || async { Ok(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)) },
                 )
                 .await?
                 {
-                    TunnelFrameOutcome::Frame(frame) => frame,
-                    TunnelFrameOutcome::Control(control) => return Ok(control),
-                };
-                match frame.frame_type {
-                    FrameType::UdpBindOk => {}
-                    FrameType::Error => {
-                        runtime.record_dropped_datagram().await;
-                        remove_udp_connector(
-                            &connectors,
-                            frame.stream_id,
-                        )
-                        .await;
-                    }
-                    FrameType::UdpDatagram => {
-                        let Some(peer) = connectors.peer_for_stream_id(frame.stream_id).await else {
-                            continue;
-                        };
-                        connectors.get_mut_by_peer(&peer, |connector| {
-                            connector.last_used = Instant::now();
-                        }).await;
-                        if let Err(err) = listen_tunnel.send(Frame {
-                            frame_type: FrameType::UdpDatagram,
-                            flags: 0,
-                            stream_id: 1,
-                            meta: encode_tunnel_meta(&UdpDatagramMeta { peer })?,
-                            data: frame.data,
-                        }).await {
-                            return classify_transport_failure(
-                                err,
-                                "relaying udp datagram to listen tunnel",
-                                TunnelRole::Listen,
-                            );
-                        }
-                    }
-                    FrameType::Close => {
-                        let _ = connectors.remove_by_stream_id(frame.stream_id).await;
-                    }
-                    FrameType::ForwardDrop => {
-                        // Public forward drop accounting is driven by the listen-side tunnel.
-                        // Connect-side UDP connector churn is peer-local cleanup only.
-                    }
-                    _ => {}
+                    return Ok(control);
                 }
             }
         }
     }
+}
+
+async fn handle_listen_udp_tunnel_event(
+    runtime: &ForwardRuntime,
+    connect_tunnel: &Arc<PortTunnel>,
+    connectors: &UdpConnectorMap,
+    connector_stream_ids: &mut StreamIdAllocator,
+    connector_bind_endpoint: &str,
+    frame_result: anyhow::Result<Frame>,
+) -> anyhow::Result<Option<ForwardLoopControl>> {
+    let frame = match recoverable_tunnel_frame(
+        frame_result,
+        "reading udp listen tunnel",
+        "listen-side udp tunnel error",
+        || async { Ok(ForwardLoopControl::RecoverTunnel(TunnelRole::Listen)) },
+    )
+    .await?
+    {
+        TunnelFrameOutcome::Frame(frame) => frame,
+        TunnelFrameOutcome::Control(control) => return Ok(Some(control)),
+    };
+    match frame.frame_type {
+        FrameType::UdpDatagram => {
+            handle_listen_udp_datagram(
+                runtime,
+                connect_tunnel,
+                connectors,
+                connector_stream_ids,
+                connector_bind_endpoint,
+                frame,
+            )
+            .await
+        }
+        FrameType::Close => Ok(Some(ForwardLoopControl::Cancelled)),
+        FrameType::Error if frame.stream_id == runtime.listen_session.listener_stream_id => {
+            let meta = decode_tunnel_error_frame(&frame);
+            if is_recoverable_pressure_tunnel_error(&meta) {
+                runtime.record_dropped_datagram().await;
+                return Ok(None);
+            }
+            Err(format_terminal_tunnel_error(&meta)).context("listen-side udp tunnel error")
+        }
+        FrameType::ForwardDrop => {
+            apply_forward_drop_report(&runtime.store, runtime.forward_id(), &frame).await?;
+            Ok(None)
+        }
+        _ => Ok(None),
+    }
+}
+
+async fn handle_listen_udp_datagram(
+    runtime: &ForwardRuntime,
+    connect_tunnel: &Arc<PortTunnel>,
+    connectors: &UdpConnectorMap,
+    connector_stream_ids: &mut StreamIdAllocator,
+    connector_bind_endpoint: &str,
+    frame: Frame,
+) -> anyhow::Result<Option<ForwardLoopControl>> {
+    let datagram: UdpDatagramMeta = decode_tunnel_meta(&frame)?;
+    let connector_stream_id = match udp_connector_stream_id(
+        connect_tunnel,
+        connectors,
+        connector_stream_ids,
+        connector_bind_endpoint,
+        datagram.peer.clone(),
+        runtime.limits.max_udp_peers,
+    )
+    .await
+    {
+        Ok(stream_id) => stream_id,
+        Err(UdpConnectorError::LimitExceeded) => {
+            runtime.record_dropped_datagram().await;
+            return Ok(None);
+        }
+        Err(UdpConnectorError::Transport(err)) => {
+            runtime.record_dropped_datagram().await;
+            return classify_transport_failure(
+                err,
+                "opening udp connector stream",
+                TunnelRole::Connect,
+            )
+            .map(Some);
+        }
+    };
+    if let Err(err) = connect_tunnel
+        .send(Frame {
+            frame_type: FrameType::UdpDatagram,
+            flags: 0,
+            stream_id: connector_stream_id,
+            meta: encode_tunnel_meta(&UdpDatagramMeta {
+                peer: runtime.connect_endpoint().to_string(),
+            })?,
+            data: frame.data,
+        })
+        .await
+    {
+        runtime.record_dropped_datagram().await;
+        if is_backpressure_error(&err) {
+            return Ok(None);
+        }
+        return classify_transport_failure(
+            err,
+            "relaying udp datagram to connect tunnel",
+            TunnelRole::Connect,
+        )
+        .map(Some);
+    }
+    Ok(None)
+}
+
+async fn handle_connect_udp_tunnel_event(
+    runtime: &ForwardRuntime,
+    listen_tunnel: &Arc<PortTunnel>,
+    connectors: &UdpConnectorMap,
+    frame_result: anyhow::Result<Frame>,
+) -> anyhow::Result<Option<ForwardLoopControl>> {
+    let frame = match recoverable_tunnel_frame(
+        frame_result,
+        "reading udp connect tunnel",
+        "connect-side udp tunnel error",
+        || async { Ok(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)) },
+    )
+    .await?
+    {
+        TunnelFrameOutcome::Frame(frame) => frame,
+        TunnelFrameOutcome::Control(control) => return Ok(Some(control)),
+    };
+    match frame.frame_type {
+        FrameType::UdpBindOk => Ok(None),
+        FrameType::Error => {
+            runtime.record_dropped_datagram().await;
+            remove_udp_connector(connectors, frame.stream_id).await;
+            Ok(None)
+        }
+        FrameType::UdpDatagram => {
+            handle_connect_udp_datagram(listen_tunnel, connectors, frame).await
+        }
+        FrameType::Close => {
+            let _ = connectors.remove_by_stream_id(frame.stream_id).await;
+            Ok(None)
+        }
+        FrameType::ForwardDrop => {
+            // Public forward drop accounting is driven by the listen-side tunnel.
+            // Connect-side UDP connector churn is peer-local cleanup only.
+            Ok(None)
+        }
+        _ => Ok(None),
+    }
+}
+
+async fn handle_connect_udp_datagram(
+    listen_tunnel: &Arc<PortTunnel>,
+    connectors: &UdpConnectorMap,
+    frame: Frame,
+) -> anyhow::Result<Option<ForwardLoopControl>> {
+    let Some(peer) = connectors.peer_for_stream_id(frame.stream_id).await else {
+        return Ok(None);
+    };
+    connectors
+        .get_mut_by_peer(&peer, |connector| {
+            connector.last_used = Instant::now();
+        })
+        .await;
+    if let Err(err) = listen_tunnel
+        .send(Frame {
+            frame_type: FrameType::UdpDatagram,
+            flags: 0,
+            stream_id: 1,
+            meta: encode_tunnel_meta(&UdpDatagramMeta { peer })?,
+            data: frame.data,
+        })
+        .await
+    {
+        return classify_transport_failure(
+            err,
+            "relaying udp datagram to listen tunnel",
+            TunnelRole::Listen,
+        )
+        .map(Some);
+    }
+    Ok(None)
 }
 
 async fn udp_connector_stream_id(

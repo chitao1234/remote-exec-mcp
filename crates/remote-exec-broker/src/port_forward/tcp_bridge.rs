@@ -601,31 +601,21 @@ async fn queue_or_send_tcp_connect_frame(
             }
         }
     } else {
-        let Some(stream) = state.connect_streams.get_mut(&connect_stream_id) else {
-            return Ok(None);
-        };
-        let added = frame_data_bytes(&frame);
-        let next_stream_total = stream.pending_bytes.saturating_add(added);
-        let next_forward_total = state.pending_budget.total_bytes.saturating_add(added);
-        if next_stream_total > runtime.limits.max_pending_tcp_bytes_per_stream
-            || next_forward_total > runtime.limits.max_pending_tcp_bytes_per_forward
-        {
-            let listen_stream_id = stream.listen_stream_id;
-            let _removed = remove_tcp_stream_entry_and_settle_active(
-                runtime,
-                state,
-                connect_stream_id,
-                TcpActiveStreamSettlement::Dropped,
-            )
-            .await
-            .expect("pending tcp stream exists");
-            let _ = connect_tunnel.close_stream(connect_stream_id).await;
-            let _ = listen_tunnel.close_stream(listen_stream_id).await;
-            return Ok(None);
+        match try_queue_pending_tcp_connect_frame(runtime, state, connect_stream_id, frame) {
+            None | Some(PendingTcpConnectFrameQueueResult::Queued) => {}
+            Some(PendingTcpConnectFrameQueueResult::LimitExceeded { listen_stream_id }) => {
+                drop_overflowed_pending_tcp_stream(
+                    runtime,
+                    connect_tunnel,
+                    listen_tunnel,
+                    state,
+                    connect_stream_id,
+                    listen_stream_id,
+                )
+                .await;
+                return Ok(None);
+            }
         }
-        stream.pending_bytes = next_stream_total;
-        state.pending_budget.total_bytes = next_forward_total;
-        stream.pending_frames.push(frame);
     }
     Ok(None)
 }
@@ -696,6 +686,11 @@ enum ConnectTunnelFrameSend {
 enum TcpPairCloseReason {
     ConnectError,
     ConnectPressure,
+}
+
+enum PendingTcpConnectFrameQueueResult {
+    Queued,
+    LimitExceeded { listen_stream_id: u32 },
 }
 
 #[derive(Clone, Copy)]
@@ -813,6 +808,49 @@ async fn close_tcp_pair_if_fully_eof(
 
 fn frame_data_bytes(frame: &Frame) -> usize {
     frame.meta.len().saturating_add(frame.data.len())
+}
+
+fn try_queue_pending_tcp_connect_frame(
+    runtime: &ForwardRuntime,
+    state: &mut TcpForwardState,
+    connect_stream_id: u32,
+    frame: Frame,
+) -> Option<PendingTcpConnectFrameQueueResult> {
+    let stream = state.connect_streams.get_mut(&connect_stream_id)?;
+    let added = frame_data_bytes(&frame);
+    let next_stream_total = stream.pending_bytes.saturating_add(added);
+    let next_forward_total = state.pending_budget.total_bytes.saturating_add(added);
+    if next_stream_total > runtime.limits.max_pending_tcp_bytes_per_stream
+        || next_forward_total > runtime.limits.max_pending_tcp_bytes_per_forward
+    {
+        return Some(PendingTcpConnectFrameQueueResult::LimitExceeded {
+            listen_stream_id: stream.listen_stream_id,
+        });
+    }
+    stream.pending_bytes = next_stream_total;
+    state.pending_budget.total_bytes = next_forward_total;
+    stream.pending_frames.push(frame);
+    Some(PendingTcpConnectFrameQueueResult::Queued)
+}
+
+async fn drop_overflowed_pending_tcp_stream(
+    runtime: &ForwardRuntime,
+    connect_tunnel: &Arc<PortTunnel>,
+    listen_tunnel: &Arc<PortTunnel>,
+    state: &mut TcpForwardState,
+    connect_stream_id: u32,
+    listen_stream_id: u32,
+) {
+    let _removed = remove_tcp_stream_entry_and_settle_active(
+        runtime,
+        state,
+        connect_stream_id,
+        TcpActiveStreamSettlement::Dropped,
+    )
+    .await
+    .expect("pending tcp stream exists");
+    let _ = connect_tunnel.close_stream(connect_stream_id).await;
+    let _ = listen_tunnel.close_stream(listen_stream_id).await;
 }
 
 fn remove_stream_entry(
@@ -1052,6 +1090,84 @@ mod tests {
             .expect("tcp epoch should stop after cancellation")
             .unwrap()
             .expect("data backpressure should not fail the forward");
+        assert!(matches!(control, ForwardLoopControl::Cancelled));
+    }
+
+    #[tokio::test]
+    async fn pending_tcp_data_limit_drops_unready_stream_without_leaking_active_count() {
+        let (listen_broker_side, mut listen_daemon_side) = tokio::io::duplex(4096);
+        let listen_tunnel = Arc::new(PortTunnel::from_stream(listen_broker_side).unwrap());
+        let connect_io = ScriptedTunnelIo::default();
+        let connect_tunnel = Arc::new(PortTunnel::from_stream(connect_io.clone()).unwrap());
+        let mut limits = ForwardLimits::default();
+        limits.max_pending_tcp_bytes_per_stream = 4;
+        limits.max_pending_tcp_bytes_per_forward = 4;
+        let runtime = tcp_test_runtime_with_limits(listen_tunnel.clone(), connect_tunnel.clone(), limits);
+        runtime
+            .store
+            .insert(test_record(&runtime, "127.0.0.1:10000"))
+            .await;
+        let cancel = runtime.cancel.clone();
+
+        let epoch_runtime = runtime.clone();
+        let epoch = tokio::spawn({
+            let listen_tunnel = listen_tunnel.clone();
+            let connect_tunnel = connect_tunnel.clone();
+            async move { run_tcp_test_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
+        });
+
+        write_frame(
+            &mut listen_daemon_side,
+            &Frame {
+                frame_type: FrameType::TcpAccept,
+                flags: 0,
+                stream_id: 11,
+                meta: serde_json::to_vec(&serde_json::json!({
+                    "listener_stream_id": 1
+                }))
+                .unwrap(),
+                data: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+        connect_io
+            .wait_for_written_frame(FrameType::TcpConnect, 1)
+            .await;
+
+        write_frame(
+            &mut listen_daemon_side,
+            &Frame {
+                frame_type: FrameType::TcpData,
+                flags: 0,
+                stream_id: 11,
+                meta: Vec::new(),
+                data: b"overflow".to_vec(),
+            },
+        )
+        .await
+        .unwrap();
+        connect_io.wait_for_written_frame(FrameType::Close, 1).await;
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let entries = runtime.store.list(&filter_one(runtime.forward_id())).await;
+                if entries[0].dropped_tcp_streams == 1 {
+                    assert_eq!(entries[0].active_tcp_streams, 0);
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("pending tcp limit should drop the unready stream");
+
+        cancel.cancel();
+        let control = tokio::time::timeout(Duration::from_secs(1), epoch)
+            .await
+            .expect("tcp epoch should stop after cancellation")
+            .unwrap()
+            .expect("pending limit drop should not fail the forward");
         assert!(matches!(control, ForwardLoopControl::Cancelled));
     }
 
@@ -1677,6 +1793,14 @@ mod tests {
         listen_tunnel: Arc<PortTunnel>,
         connect_tunnel: Arc<PortTunnel>,
     ) -> ForwardRuntime {
+        tcp_test_runtime_with_limits(listen_tunnel, connect_tunnel, ForwardLimits::default())
+    }
+
+    fn tcp_test_runtime_with_limits(
+        listen_tunnel: Arc<PortTunnel>,
+        connect_tunnel: Arc<PortTunnel>,
+        limits: ForwardLimits,
+    ) -> ForwardRuntime {
         let initial_epoch = tcp_test_epoch(listen_tunnel.clone(), connect_tunnel.clone());
         let listen_session = Arc::new(ListenSessionControl::new_for_test(
             SideHandle::local().unwrap(),
@@ -1695,7 +1819,7 @@ mod tests {
                 PublicForwardPortProtocol::Tcp,
                 "127.0.0.1:1".to_string(),
             ),
-            ForwardLimits::default(),
+            limits,
             Default::default(),
             listen_session,
             initial_epoch,
