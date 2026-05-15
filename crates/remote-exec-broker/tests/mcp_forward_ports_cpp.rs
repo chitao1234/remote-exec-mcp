@@ -1158,11 +1158,11 @@ fn exec_request(cmd: &str) -> ExecCommandInput {
         target: "builder-cpp".to_string(),
         cmd: cmd.to_string(),
         workdir: None,
-        shell: None,
+        shell: Some("/bin/sh".to_string()),
         tty: false,
         yield_time_ms: Some(1),
         max_output_tokens: None,
-        login: None,
+        login: Some(false),
     }
 }
 

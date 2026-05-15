@@ -1,5 +1,59 @@
 use super::*;
 
+const EXPECTED_ENV_OVERLAY_OUTPUT: &str = "dumb|1|cat|cat|1|C|en_US.UTF-8|";
+const ENV_OVERLAY_COMMAND: &str = "printf '%s|%s|%s|%s|%s|%s|%s|%s' \"$TERM\" \"$NO_COLOR\" \"$PAGER\" \"$GIT_PAGER\" \"$CODEX_CI\" \"$LANG\" \"$LC_CTYPE\" \"$LC_ALL\"";
+
+fn install_login_shell_probe() -> (tempfile::TempDir, String, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let shell_path = tempdir.path().join("probe-shell");
+    let first_arg_path = tempdir.path().join("probe-shell.first_arg");
+    std::fs::write(
+        &shell_path,
+        "#!/bin/sh\nprintf '%s' \"$1\" > \"$0.first_arg\"\nexec /bin/sh \"$@\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&shell_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    (
+        tempdir,
+        shell_path.to_string_lossy().into_owned(),
+        first_arg_path,
+    )
+}
+
+async fn collect_exec_output_until_exit(
+    fixture: &support::fixture::DaemonFixture,
+    mut response: ExecResponse,
+) -> (Option<i32>, String) {
+    let mut output = response.output().output.clone();
+    for _ in 0..4 {
+        if !response.running() {
+            return (response.output().exit_code, output);
+        }
+
+        let next = fixture
+            .rpc::<ExecWriteRequest, ExecResponse>(
+                "/v1/exec/write",
+                &ExecWriteRequest {
+                    daemon_session_id: response
+                        .daemon_session_id()
+                        .expect("running response should carry daemon_session_id")
+                        .to_string(),
+                    chars: String::new(),
+                    yield_time_ms: Some(COMPLETED_COMMAND_YIELD_MS),
+                    max_output_tokens: None,
+                    pty_size: None,
+                },
+            )
+            .await;
+        output.push_str(&next.output().output);
+        response = next;
+    }
+
+    panic!("exec session did not finish within 4 polls: {response:#?}");
+}
+
 #[tokio::test]
 async fn exec_start_returns_a_live_session_for_long_running_tty_processes() {
     let fixture = support::spawn::spawn_daemon("builder-a").await;
@@ -63,24 +117,15 @@ async fn exec_start_includes_session_limit_warning_when_threshold_crossed() {
 
 #[tokio::test]
 async fn exec_start_uses_login_shell_by_default_when_login_is_omitted() {
-    let home = tempfile::tempdir().unwrap();
-    std::fs::write(
-        home.path().join(".profile"),
-        "export LOGIN_SENTINEL=from_profile\n",
-    )
-    .unwrap();
-    let home_text = home.path().to_string_lossy().into_owned();
-    let fixture = support::spawn::spawn_daemon_with_process_environment(
-        "builder-a",
-        process_environment_with(&[("HOME", &home_text)]),
-    )
-    .await;
+    let (_probe_dir, probe_shell, first_arg_path) = install_login_shell_probe();
+    let fixture = support::spawn::spawn_daemon("builder-a").await;
 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &unix_start_request_with_login(
-                "printf '%s' \"$LOGIN_SENTINEL\"",
+            &test_exec_start_request(
+                Some(&probe_shell),
+                "printf login-probe",
                 false,
                 Some(COMPLETED_COMMAND_YIELD_MS),
                 None,
@@ -89,8 +134,12 @@ async fn exec_start_uses_login_shell_by_default_when_login_is_omitted() {
         )
         .await;
 
-    assert_eq!(response.output().exit_code, Some(0));
-    assert_eq!(response.output().output, "from_profile");
+    assert_eq!(response.output().exit_code, Some(0), "{response:#?}");
+    assert!(
+        response.output().output.contains("login-probe"),
+        "{response:#?}"
+    );
+    assert_eq!(std::fs::read_to_string(first_arg_path).unwrap(), "-l");
 }
 
 #[tokio::test]
@@ -148,25 +197,20 @@ async fn exec_start_rejects_explicit_login_when_disabled_by_config() {
 
 #[tokio::test]
 async fn exec_start_uses_non_login_shell_when_policy_disabled_and_login_is_omitted() {
-    let home = tempfile::tempdir().unwrap();
-    std::fs::write(
-        home.path().join(".profile"),
-        "export LOGIN_SENTINEL=from_profile\n",
-    )
-    .unwrap();
-    let home_text = home.path().to_string_lossy().into_owned();
+    let (_probe_dir, probe_shell, first_arg_path) = install_login_shell_probe();
     let fixture = support::spawn::spawn_daemon_with_extra_config_and_process_environment(
         "builder-a",
         "allow_login_shell = false",
-        process_environment_with(&[("HOME", &home_text)]),
+        ProcessEnvironment::default(),
     )
     .await;
 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
-            &unix_start_request_with_login(
-                "printf '%s' \"$LOGIN_SENTINEL\"",
+            &test_exec_start_request(
+                Some(&probe_shell),
+                "printf login-disabled",
                 false,
                 Some(COMPLETED_COMMAND_YIELD_MS),
                 None,
@@ -175,8 +219,9 @@ async fn exec_start_uses_non_login_shell_when_policy_disabled_and_login_is_omitt
         )
         .await;
 
-    assert_eq!(response.output().exit_code, Some(0));
-    assert_eq!(response.output().output, "");
+    assert_eq!(response.output().exit_code, Some(0), "{response:#?}");
+    assert_eq!(response.output().output, "login-disabled");
+    assert_eq!(std::fs::read_to_string(first_arg_path).unwrap(), "-c");
 }
 
 #[tokio::test]
@@ -237,7 +282,7 @@ async fn env_overlay_is_applied_in_pipe_mode() {
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
             &unix_start_request(
-                "printf '%s|%s|%s|%s|%s|%s|%s|%s' \"$TERM\" \"$NO_COLOR\" \"$PAGER\" \"$GIT_PAGER\" \"$CODEX_CI\" \"$LANG\" \"$LC_CTYPE\" \"$LC_ALL\"",
+                ENV_OVERLAY_COMMAND,
                 false,
                 Some(COMPLETED_COMMAND_YIELD_MS),
                 None,
@@ -246,7 +291,7 @@ async fn env_overlay_is_applied_in_pipe_mode() {
         .await;
 
     assert_eq!(response.output().exit_code, Some(0));
-    assert_eq!(response.output().output, "dumb|1|cat|cat|1|C|en_US.UTF-8|");
+    assert_eq!(response.output().output, EXPECTED_ENV_OVERLAY_OUTPUT);
 }
 
 #[tokio::test]
@@ -271,16 +316,17 @@ async fn env_overlay_is_applied_in_pty_mode() {
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
             &unix_start_request(
-                "printf '%s|%s|%s|%s|%s|%s|%s|%s' \"$TERM\" \"$NO_COLOR\" \"$PAGER\" \"$GIT_PAGER\" \"$CODEX_CI\" \"$LANG\" \"$LC_CTYPE\" \"$LC_ALL\"",
+                &format!("{ENV_OVERLAY_COMMAND}; sleep 1"),
                 true,
-                Some(COMPLETED_COMMAND_YIELD_MS),
+                Some(250),
                 None,
             ),
         )
         .await;
 
-    assert_eq!(response.output().exit_code, Some(0));
-    assert_eq!(response.output().output, "dumb|1|cat|cat|1|C|en_US.UTF-8|");
+    let (exit_code, output) = collect_exec_output_until_exit(&fixture, response).await;
+    assert_eq!(exit_code, Some(0));
+    assert_eq!(output, EXPECTED_ENV_OVERLAY_OUTPUT);
 }
 
 #[tokio::test]

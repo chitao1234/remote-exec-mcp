@@ -56,12 +56,13 @@ pub fn long_running_tty_exec_input(target: &str) -> serde_json::Value {
     #[cfg(windows)]
     let cmd = "echo hello & ping -n 30 127.0.0.1 >nul";
     #[cfg(not(windows))]
-    let cmd = "printf hello; sleep 30";
+    let cmd = "printf hello; read line";
 
     #[cfg(windows)]
     let mut arguments = serde_json::json!({
         "target": target,
         "cmd": cmd,
+        "login": false,
         "tty": true,
         "yield_time_ms": 250,
     });
@@ -69,6 +70,8 @@ pub fn long_running_tty_exec_input(target: &str) -> serde_json::Value {
     let arguments = serde_json::json!({
         "target": target,
         "cmd": cmd,
+        "login": false,
+        "shell": "/bin/sh",
         "tty": true,
         "yield_time_ms": 250,
     });
