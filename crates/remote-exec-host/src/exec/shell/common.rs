@@ -4,6 +4,7 @@ use std::process::{Command, Stdio};
 use anyhow::Context;
 
 use crate::config::ProcessEnvironment;
+use crate::exec::session::SpawnCommand;
 use crate::host_path;
 
 #[allow(unexpected_cfgs)]
@@ -22,58 +23,82 @@ pub fn apply_session_environment_overrides(
     }
 }
 
-pub fn shell_argv(shell: &str, login: bool, cmd: &str) -> Vec<String> {
-    shell_argv_for_platform(cfg!(windows), shell, login, cmd)
+pub fn shell_command(shell: &str, login: bool, cmd: &str) -> SpawnCommand {
+    shell_command_for_platform(cfg!(windows), shell, login, cmd)
 }
 
-fn shell_argv_with_login_flag(shell: &str, login: bool, cmd: &str) -> Vec<String> {
-    let mut argv = vec![shell.to_string()];
+fn shell_command_with_login_flag(shell: &str, login: bool, cmd: &str) -> SpawnCommand {
+    let mut args = Vec::new();
     if login {
-        argv.push("-l".to_string());
+        args.push("-l".to_string());
     }
-    argv.push("-c".to_string());
-    argv.push(cmd.to_string());
-    argv
+    args.push("-c".to_string());
+    args.push(cmd.to_string());
+    SpawnCommand {
+        program: shell.to_string(),
+        argv0: None,
+        args,
+    }
 }
 
-pub(super) fn shell_argv_for_platform(
+fn unix_shell_command(shell: &str, login: bool, cmd: &str) -> SpawnCommand {
+    SpawnCommand {
+        program: shell.to_string(),
+        argv0: login.then(|| format!("-{}", shell_basename(shell))),
+        args: vec!["-c".to_string(), cmd.to_string()],
+    }
+}
+
+pub(super) fn shell_command_for_platform(
     is_windows: bool,
     shell: &str,
     login: bool,
     cmd: &str,
-) -> Vec<String> {
+) -> SpawnCommand {
     let lower = shell_basename_lower(shell);
 
     if is_windows_powershell_family(&lower) {
-        let mut argv = vec![shell.to_string()];
+        let mut args = Vec::new();
         if !login {
-            argv.push("-NoProfile".to_string());
+            args.push("-NoProfile".to_string());
         }
-        argv.push("-Command".to_string());
-        argv.push(cmd.to_string());
-        return argv;
+        args.push("-Command".to_string());
+        args.push(cmd.to_string());
+        return SpawnCommand {
+            program: shell.to_string(),
+            argv0: None,
+            args,
+        };
     }
 
     if is_windows && is_windows_bash_family(&lower) {
-        return shell_argv_with_login_flag(shell, login, cmd);
+        return shell_command_with_login_flag(shell, login, cmd);
     }
 
     if is_windows {
-        let mut argv = vec![shell.to_string()];
+        let mut args = Vec::new();
         if is_windows_cmd_family(&lower) {
             if !login {
-                argv.push("/D".to_string());
+                args.push("/D".to_string());
             }
-            argv.push("/C".to_string());
-            argv.push(cmd.to_string());
-            return argv;
+            args.push("/C".to_string());
+            args.push(cmd.to_string());
+            return SpawnCommand {
+                program: shell.to_string(),
+                argv0: None,
+                args,
+            };
         }
-        argv.push("/C".to_string());
-        argv.push(cmd.to_string());
-        return argv;
+        args.push("/C".to_string());
+        args.push(cmd.to_string());
+        return SpawnCommand {
+            program: shell.to_string(),
+            argv0: None,
+            args,
+        };
     }
 
-    shell_argv_with_login_flag(shell, login, cmd)
+    unix_shell_command(shell, login, cmd)
 }
 
 pub(super) fn probe_shell_for_platform(
@@ -81,9 +106,9 @@ pub(super) fn probe_shell_for_platform(
     shell: &str,
     environment: &ProcessEnvironment,
 ) -> anyhow::Result<()> {
-    let argv = shell_argv_for_platform(is_windows, shell, false, "exit 0");
-    let mut command = Command::new(&argv[0]);
-    command.args(&argv[1..]);
+    let command_spec = shell_command_for_platform(is_windows, shell, false, "exit 0");
+    let mut command = Command::new(&command_spec.program);
+    command.args(&command_spec.args);
     command.stdin(Stdio::null());
     command.stdout(Stdio::null());
     command.stderr(Stdio::null());
@@ -108,11 +133,11 @@ pub(super) fn is_path_like(command: &str) -> bool {
 }
 
 pub(super) fn shell_basename_lower(shell: &str) -> String {
-    shell
-        .rsplit(['\\', '/'])
-        .next()
-        .unwrap_or(shell)
-        .to_ascii_lowercase()
+    shell_basename(shell).to_ascii_lowercase()
+}
+
+fn shell_basename(shell: &str) -> &str {
+    shell.rsplit(['\\', '/']).next().unwrap_or(shell)
 }
 
 pub(super) fn is_windows_powershell_family(lower: &str) -> bool {
@@ -158,87 +183,89 @@ pub(super) fn should_set_chere_invoking_for_platform(
 
 #[cfg(test)]
 mod tests {
-    use super::{shell_argv_for_platform, should_set_chere_invoking_for_platform};
+    use crate::exec::session::SpawnCommand;
+
+    use super::{shell_command_for_platform, should_set_chere_invoking_for_platform};
 
     #[cfg(unix)]
     #[test]
-    fn unix_shell_argv_uses_dash_c_for_non_login_shells() {
+    fn unix_shell_command_uses_dash_c_for_non_login_shells() {
         assert_eq!(
-            shell_argv_for_platform(false, "/bin/sh", false, "printf ok"),
-            vec![
-                "/bin/sh".to_string(),
-                "-c".to_string(),
-                "printf ok".to_string(),
-            ]
+            shell_command_for_platform(false, "/bin/sh", false, "printf ok"),
+            SpawnCommand {
+                program: "/bin/sh".to_string(),
+                argv0: None,
+                args: vec!["-c".to_string(), "printf ok".to_string()],
+            }
         );
     }
 
     #[cfg(unix)]
     #[test]
-    fn unix_shell_argv_uses_dash_l_then_dash_c_for_login_shells() {
+    fn unix_shell_command_uses_login_argv0_for_login_shells() {
         assert_eq!(
-            shell_argv_for_platform(false, "/bin/sh", true, "printf ok"),
-            vec![
-                "/bin/sh".to_string(),
-                "-l".to_string(),
-                "-c".to_string(),
-                "printf ok".to_string(),
-            ]
+            shell_command_for_platform(false, "/bin/sh", true, "printf ok"),
+            SpawnCommand {
+                program: "/bin/sh".to_string(),
+                argv0: Some("-sh".to_string()),
+                args: vec!["-c".to_string(), "printf ok".to_string()],
+            }
         );
     }
 
     #[test]
-    fn windows_shell_argv_suppresses_profiles_and_autorun_only_for_non_login_requests() {
+    fn windows_shell_command_suppresses_profiles_and_autorun_only_for_non_login_requests() {
         assert_eq!(
-            shell_argv_for_platform(true, "pwsh.exe", false, "Write-Output ok"),
-            vec![
-                "pwsh.exe".to_string(),
-                "-NoProfile".to_string(),
-                "-Command".to_string(),
-                "Write-Output ok".to_string(),
-            ]
+            shell_command_for_platform(true, "pwsh.exe", false, "Write-Output ok"),
+            SpawnCommand {
+                program: "pwsh.exe".to_string(),
+                argv0: None,
+                args: vec![
+                    "-NoProfile".to_string(),
+                    "-Command".to_string(),
+                    "Write-Output ok".to_string(),
+                ],
+            }
         );
         assert_eq!(
-            shell_argv_for_platform(true, "pwsh.exe", true, "Write-Output ok"),
-            vec![
-                "pwsh.exe".to_string(),
-                "-Command".to_string(),
-                "Write-Output ok".to_string(),
-            ]
+            shell_command_for_platform(true, "pwsh.exe", true, "Write-Output ok"),
+            SpawnCommand {
+                program: "pwsh.exe".to_string(),
+                argv0: None,
+                args: vec!["-Command".to_string(), "Write-Output ok".to_string()],
+            }
         );
         assert_eq!(
-            shell_argv_for_platform(true, "cmd.exe", false, "echo ok"),
-            vec![
-                "cmd.exe".to_string(),
-                "/D".to_string(),
-                "/C".to_string(),
-                "echo ok".to_string(),
-            ]
+            shell_command_for_platform(true, "cmd.exe", false, "echo ok"),
+            SpawnCommand {
+                program: "cmd.exe".to_string(),
+                argv0: None,
+                args: vec!["/D".to_string(), "/C".to_string(), "echo ok".to_string()],
+            }
         );
         assert_eq!(
-            shell_argv_for_platform(true, "cmd.exe", true, "echo ok"),
-            vec![
-                "cmd.exe".to_string(),
-                "/C".to_string(),
-                "echo ok".to_string(),
-            ]
+            shell_command_for_platform(true, "cmd.exe", true, "echo ok"),
+            SpawnCommand {
+                program: "cmd.exe".to_string(),
+                argv0: None,
+                args: vec!["/C".to_string(), "echo ok".to_string()],
+            }
         );
         assert_eq!(
-            shell_argv_for_platform(true, "bash.exe", false, "printf ok"),
-            vec![
-                "bash.exe".to_string(),
-                "-c".to_string(),
-                "printf ok".to_string(),
-            ]
+            shell_command_for_platform(true, "bash.exe", false, "printf ok"),
+            SpawnCommand {
+                program: "bash.exe".to_string(),
+                argv0: None,
+                args: vec!["-c".to_string(), "printf ok".to_string()],
+            }
         );
         assert_eq!(
-            shell_argv_for_platform(true, "bash.exe", true, "printf ok"),
-            vec![
-                "bash.exe".to_string(),
-                "-l".to_string(),
-                "-c".to_string(),
-                "printf ok".to_string(),
-            ]
+            shell_command_for_platform(true, "bash.exe", true, "printf ok"),
+            SpawnCommand {
+                program: "bash.exe".to_string(),
+                argv0: None,
+                args: vec!["-l".to_string(), "-c".to_string(), "printf ok".to_string()],
+            }
         );
     }
 

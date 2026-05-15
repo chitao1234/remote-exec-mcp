@@ -14,8 +14,32 @@ use super::capability::supports_pty;
 use super::child::{PtySession, SessionChild};
 use super::live::{LiveSession, new_live_session};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpawnCommand {
+    pub program: String,
+    pub argv0: Option<String>,
+    pub args: Vec<String>,
+}
+
+impl SpawnCommand {
+    pub fn from_argv(argv: &[String]) -> anyhow::Result<Self> {
+        anyhow::ensure!(!argv.is_empty(), "spawn command argv must not be empty");
+        Ok(Self {
+            program: argv[0].clone(),
+            argv0: None,
+            args: argv[1..].to_vec(),
+        })
+    }
+
+    pub fn argv(&self) -> Vec<String> {
+        std::iter::once(self.program.clone())
+            .chain(self.args.iter().cloned())
+            .collect()
+    }
+}
+
 pub fn spawn_with_windows_pty_backend_override(
-    cmd: &[String],
+    cmd: &SpawnCommand,
     cwd: &std::path::Path,
     tty: bool,
     windows_pty_backend_override: Option<WindowsPtyBackendOverride>,
@@ -44,22 +68,26 @@ pub fn spawn(
     tty: bool,
     environment: &ProcessEnvironment,
 ) -> anyhow::Result<LiveSession> {
-    spawn_with_windows_pty_backend_override(cmd, cwd, tty, None, environment)
+    let cmd = SpawnCommand::from_argv(cmd)?;
+    spawn_with_windows_pty_backend_override(&cmd, cwd, tty, None, environment)
 }
 
 #[cfg(windows)]
-pub async fn windows_pty_debug_report(cmd: &[String], cwd: &std::path::Path) -> String {
+pub async fn windows_pty_debug_report(cmd: &SpawnCommand, cwd: &std::path::Path) -> String {
     super::windows::debug_report(cmd, cwd).await
 }
 
 pub(super) fn spawn_pty(
-    cmd: &[String],
+    cmd: &SpawnCommand,
     cwd: &std::path::Path,
     environment: &ProcessEnvironment,
 ) -> anyhow::Result<LiveSession> {
     let pty = NativePtySystem::default().openpty(default_pty_size())?;
-    let mut builder = CommandBuilder::new(&cmd[0]);
-    for arg in &cmd[1..] {
+    let mut builder = CommandBuilder::new(&cmd.program);
+    if let Some(argv0) = &cmd.argv0 {
+        builder.arg0(argv0);
+    }
+    for arg in &cmd.args {
         builder.arg(arg);
     }
     builder.cwd(cwd);
@@ -83,19 +111,23 @@ pub(super) fn spawn_pty(
 }
 
 fn spawn_pipe(
-    cmd: &[String],
+    cmd: &SpawnCommand,
     cwd: &std::path::Path,
     environment: &ProcessEnvironment,
 ) -> anyhow::Result<LiveSession> {
     let (reader, writer) = os_pipe::pipe()?;
     let stderr = writer.try_clone()?;
-    let mut command = Command::new(&cmd[0]);
+    let mut command = Command::new(&cmd.program);
     command
-        .args(&cmd[1..])
+        .args(&cmd.args)
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::from(writer))
         .stderr(Stdio::from(stderr));
+    #[cfg(unix)]
+    if let Some(argv0) = &cmd.argv0 {
+        command.arg0(argv0);
+    }
     super::environment::apply_overlay_std_command(&mut command, environment);
     #[cfg(unix)]
     unsafe {

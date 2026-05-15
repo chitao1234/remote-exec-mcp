@@ -3,25 +3,6 @@ use super::*;
 const EXPECTED_ENV_OVERLAY_OUTPUT: &str = "dumb|1|cat|cat|1|C|en_US.UTF-8|";
 const ENV_OVERLAY_COMMAND: &str = "printf '%s|%s|%s|%s|%s|%s|%s|%s' \"$TERM\" \"$NO_COLOR\" \"$PAGER\" \"$GIT_PAGER\" \"$CODEX_CI\" \"$LANG\" \"$LC_CTYPE\" \"$LC_ALL\"";
 
-fn install_login_shell_probe() -> (tempfile::TempDir, String, std::path::PathBuf) {
-    use std::os::unix::fs::PermissionsExt;
-
-    let tempdir = tempfile::tempdir().unwrap();
-    let shell_path = tempdir.path().join("probe-shell");
-    let first_arg_path = tempdir.path().join("probe-shell.first_arg");
-    std::fs::write(
-        &shell_path,
-        "#!/bin/sh\nprintf '%s' \"$1\" > \"$0.first_arg\"\nexec /bin/sh \"$@\"\n",
-    )
-    .unwrap();
-    std::fs::set_permissions(&shell_path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    (
-        tempdir,
-        shell_path.to_string_lossy().into_owned(),
-        first_arg_path,
-    )
-}
-
 async fn collect_exec_output_until_exit(
     fixture: &support::fixture::DaemonFixture,
     mut response: ExecResponse,
@@ -117,15 +98,25 @@ async fn exec_start_includes_session_limit_warning_when_threshold_crossed() {
 
 #[tokio::test]
 async fn exec_start_uses_login_shell_by_default_when_login_is_omitted() {
-    let (_probe_dir, probe_shell, first_arg_path) = install_login_shell_probe();
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let home = tempfile::tempdir().unwrap();
+    std::fs::write(
+        home.path().join(".profile"),
+        "export LOGIN_SENTINEL=from_profile\n",
+    )
+    .unwrap();
+    let home_text = home.path().to_string_lossy().into_owned();
+    let fixture = support::spawn::spawn_daemon_with_process_environment(
+        "builder-a",
+        process_environment_with(&[("HOME", &home_text), ("SHELL", TEST_SHELL)]),
+    )
+    .await;
 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
             &test_exec_start_request(
-                Some(&probe_shell),
-                "printf login-probe",
+                None,
+                "printf '%s' \"$LOGIN_SENTINEL\"",
                 false,
                 Some(COMPLETED_COMMAND_YIELD_MS),
                 None,
@@ -136,10 +127,9 @@ async fn exec_start_uses_login_shell_by_default_when_login_is_omitted() {
 
     assert_eq!(response.output().exit_code, Some(0), "{response:#?}");
     assert!(
-        response.output().output.contains("login-probe"),
+        response.output().output.contains("from_profile"),
         "{response:#?}"
     );
-    assert_eq!(std::fs::read_to_string(first_arg_path).unwrap(), "-l");
 }
 
 #[tokio::test]
@@ -197,11 +187,17 @@ async fn exec_start_rejects_explicit_login_when_disabled_by_config() {
 
 #[tokio::test]
 async fn exec_start_uses_non_login_shell_when_policy_disabled_and_login_is_omitted() {
-    let (_probe_dir, probe_shell, first_arg_path) = install_login_shell_probe();
+    let home = tempfile::tempdir().unwrap();
+    std::fs::write(
+        home.path().join(".profile"),
+        "export LOGIN_SENTINEL=from_profile\n",
+    )
+    .unwrap();
+    let home_text = home.path().to_string_lossy().into_owned();
     let fixture = support::spawn::spawn_daemon_with_extra_config_and_process_environment(
         "builder-a",
         "allow_login_shell = false",
-        ProcessEnvironment::default(),
+        process_environment_with(&[("HOME", &home_text), ("SHELL", TEST_SHELL)]),
     )
     .await;
 
@@ -209,8 +205,8 @@ async fn exec_start_uses_non_login_shell_when_policy_disabled_and_login_is_omitt
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
             &test_exec_start_request(
-                Some(&probe_shell),
-                "printf login-disabled",
+                None,
+                "printf '%s' \"$LOGIN_SENTINEL\"",
                 false,
                 Some(COMPLETED_COMMAND_YIELD_MS),
                 None,
@@ -220,8 +216,7 @@ async fn exec_start_uses_non_login_shell_when_policy_disabled_and_login_is_omitt
         .await;
 
     assert_eq!(response.output().exit_code, Some(0), "{response:#?}");
-    assert_eq!(response.output().output, "login-disabled");
-    assert_eq!(std::fs::read_to_string(first_arg_path).unwrap(), "-c");
+    assert_eq!(response.output().output, "");
 }
 
 #[tokio::test]

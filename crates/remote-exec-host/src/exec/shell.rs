@@ -8,7 +8,7 @@ use std::path::Path;
 
 use crate::config::ProcessEnvironment;
 
-pub use common::{apply_session_environment_overrides, shell_argv};
+pub use common::{apply_session_environment_overrides, shell_command};
 
 pub fn platform_supports_login_shells() -> bool {
     true

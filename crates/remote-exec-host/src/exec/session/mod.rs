@@ -14,7 +14,7 @@ pub use capability::{
 };
 #[cfg(windows)]
 pub use spawn::windows_pty_debug_report;
-pub use spawn::{spawn, spawn_with_windows_pty_backend_override};
+pub use spawn::{SpawnCommand, spawn, spawn_with_windows_pty_backend_override};
 
 pub use child::PtySession;
 pub use live::LiveSession;

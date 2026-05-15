@@ -11,7 +11,7 @@ use winptyrs::EnvBlock;
 
 use crate::config::{ProcessEnvironment, WindowsPtyBackendOverride};
 
-use super::{LiveSession, portable_pty_probe, spawn_pty};
+use super::{LiveSession, SpawnCommand, portable_pty_probe, spawn_pty};
 #[cfg(feature = "winpty")]
 use super::{SessionChild, new_live_session};
 
@@ -136,7 +136,7 @@ pub(super) fn supports_pty_with_override(
 }
 
 pub(super) fn spawn_tty_session(
-    cmd: &[String],
+    cmd: &SpawnCommand,
     cwd: &Path,
     windows_pty_backend_override: Option<WindowsPtyBackendOverride>,
     environment: &ProcessEnvironment,
@@ -147,7 +147,9 @@ pub(super) fn spawn_tty_session(
         compiled_winpty_probe,
     ) {
         Some(PtyBackend::PortablePty) => spawn_pty(cmd, cwd, environment),
-        Some(PtyBackend::Winpty) => spawn_compiled_winpty_session(cmd, cwd, environment),
+        Some(PtyBackend::Winpty) => {
+            spawn_compiled_winpty_session(cmd.argv().as_slice(), cwd, environment)
+        }
         None => bail!("tty is not supported on this host"),
     }
 }
@@ -296,7 +298,7 @@ async fn summarize_windows_backend_session(
 
 async fn smoke_test_windows_backend(
     backend: PtyBackend,
-    cmd: &[String],
+    cmd: &SpawnCommand,
     cwd: &Path,
     environment: &ProcessEnvironment,
 ) -> String {
@@ -305,20 +307,23 @@ async fn smoke_test_windows_backend(
             Ok(session) => summarize_windows_backend_session(session, backend).await,
             Err(err) => format!("{} smoke test: spawn failed: {err}", backend.debug_name()),
         },
-        PtyBackend::Winpty => match spawn_compiled_winpty_session(cmd, cwd, environment) {
-            Ok(session) => summarize_windows_backend_session(session, backend).await,
-            Err(err) => format!("{} smoke test: spawn failed: {err}", backend.debug_name()),
-        },
+        PtyBackend::Winpty => {
+            match spawn_compiled_winpty_session(cmd.argv().as_slice(), cwd, environment) {
+                Ok(session) => summarize_windows_backend_session(session, backend).await,
+                Err(err) => format!("{} smoke test: spawn failed: {err}", backend.debug_name()),
+            }
+        }
     }
 }
 
-pub(super) async fn debug_report(cmd: &[String], cwd: &Path) -> String {
+pub(super) async fn debug_report(cmd: &SpawnCommand, cwd: &Path) -> String {
     let diagnostics = collect_pty_diagnostics();
     let environment = ProcessEnvironment::capture_current();
+    let argv = cmd.argv();
     let mut lines = vec![
         "Windows PTY diagnostics".to_string(),
         format!("cwd: {}", cwd.display()),
-        format!("argv: {cmd:?}"),
+        format!("argv: {argv:?}"),
         format!(
             "selected backend: {}",
             diagnostics

@@ -29,7 +29,7 @@ pub async fn exec_start_local(
     log_exec_start_request(&state, &req);
     let prepared = prepare_exec_start(&state, &req)?;
     let mut session = session::spawn_with_windows_pty_backend_override(
-        &prepared.argv,
+        &prepared.command,
         &prepared.cwd,
         req.tty,
         state.windows_pty_backend_override,
@@ -189,7 +189,7 @@ async fn prepare_exec_write_session(
 
 struct PreparedExecStart {
     cwd: std::path::PathBuf,
-    argv: Vec<String>,
+    command: session::SpawnCommand,
     process_environment: crate::config::ProcessEnvironment,
     yield_time_ms: u64,
 }
@@ -231,7 +231,7 @@ fn prepare_exec_start(
 
     Ok(PreparedExecStart {
         cwd,
-        argv: shell::shell_argv(&shell, login, &req.cmd),
+        command: shell::shell_command(&shell, login, &req.cmd),
         process_environment,
         yield_time_ms,
     })
