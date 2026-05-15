@@ -18,7 +18,7 @@ impl TargetHandle {
         normalize_tool_result(self.clear_on_transport_error(result).await, rpc_mode)
     }
 
-    pub async fn clear_on_transport_error<T>(
+    pub(crate) async fn clear_on_transport_error<T>(
         &self,
         result: Result<T, DaemonClientError>,
     ) -> Result<T, DaemonClientError> {

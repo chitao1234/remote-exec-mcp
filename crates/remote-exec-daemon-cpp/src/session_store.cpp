@@ -13,6 +13,11 @@
 #include "session_response_builder.h"
 #include "session_store.h"
 
+void erase_session_if_current(BasicMutex& mutex,
+                              std::map<std::string, std::shared_ptr<LiveSession>>& sessions,
+                              const std::string& daemon_session_id,
+                              const std::shared_ptr<LiveSession>& session);
+
 namespace {
 
 std::atomic<unsigned long> next_id(1UL);
@@ -69,7 +74,8 @@ unsigned long warning_threshold(unsigned long max_open_sessions) {
 
 bool crosses_warning_threshold(std::size_t open_sessions, unsigned long max_open_sessions) {
     const unsigned long threshold = warning_threshold(max_open_sessions);
-    return open_sessions < threshold && open_sessions + 1U >= threshold;
+    const std::size_t next_open_sessions = open_sessions + 1U;
+    return open_sessions < threshold && next_open_sessions >= threshold;
 }
 
 std::size_t protected_recent_count(std::size_t open_sessions) {
@@ -162,6 +168,65 @@ void retire_session(const std::shared_ptr<LiveSession>& session) {
     if (session->process.get() != nullptr) {
         session->process->terminate();
     }
+}
+
+void apply_write_stdin_request_locked(LiveSession* session,
+                                      const std::string& chars,
+                                      bool has_pty_size,
+                                      unsigned short pty_rows,
+                                      unsigned short pty_cols) {
+    if (has_pty_size) {
+        if (pty_rows == 0U || pty_cols == 0U) {
+            throw ProcessPtyResizeUnsupportedError("PTY rows and cols must be greater than zero");
+        }
+        session->process->resize_pty(pty_rows, pty_cols);
+    }
+
+    if (chars.empty()) {
+        return;
+    }
+    if (!session->stdin_open) {
+        throw StdinClosedError(
+            "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open");
+    }
+    try {
+        session->process->write_stdin(chars);
+    } catch (const ProcessStdinClosedError& ex) {
+        session->stdin_open = false;
+        throw StdinClosedError(ex.what());
+    }
+}
+
+Json finalize_completed_write_stdin(BasicMutex& mutex,
+                                    std::map<std::string, std::shared_ptr<LiveSession>>& sessions,
+                                    unsigned long* pending_starts,
+                                    const std::string& daemon_session_id,
+                                    const std::shared_ptr<LiveSession>& session,
+                                    const PollResult& poll_result,
+                                    unsigned long max_output_tokens) {
+    retire_session(session);
+    erase_session_if_current(mutex, sessions, daemon_session_id, session);
+    join_session_pump(session.get());
+    Json response = build_session_response(nullptr,
+                                           false,
+                                           session->started_at_ms,
+                                           true,
+                                           poll_result.exit_code,
+                                           poll_result.output,
+                                           max_output_tokens,
+                                           empty_exec_warnings());
+    unsigned long open_sessions = 0UL;
+    {
+        BasicLockGuard lock(mutex);
+        open_sessions = static_cast<unsigned long>(sessions.size() + *pending_starts);
+    }
+    LogMessageBuilder message("session completed");
+    message
+        .quoted_field("daemon_session_id", daemon_session_id)
+        .field("exit_code", poll_result.exit_code)
+        .field("open_sessions", open_sessions);
+    log_message(LOG_INFO, "session_store", message.str());
+    return response;
 }
 
 } // namespace
@@ -389,13 +454,13 @@ Json SessionStore::start_command(const std::string& target,
         pending_start.release_locked();
         if (!poll_result.completed) {
             const unsigned long threshold = warning_threshold(max_open_sessions);
-            const bool crossed_warning_threshold = crosses_warning_threshold(sessions_.size(), max_open_sessions);
+            const std::size_t open_sessions_before_store = sessions_.size();
             session->last_touched_order.store(make_touch_order());
             sessions_[session->id] = session;
             LogMessageBuilder message("stored live session");
             message.quoted_field("daemon_session_id", session->id).field("open_sessions", sessions_.size());
             log_message(LOG_INFO, "session_store", message.str());
-            if (crossed_warning_threshold) {
+            if (crosses_warning_threshold(open_sessions_before_store, max_open_sessions)) {
                 warnings = session_limit_warning(target, threshold);
             }
         }
@@ -460,26 +525,7 @@ Json SessionStore::write_stdin(const std::string& daemon_session_id,
                 log_message(LOG_WARN, "session_store", "unknown daemon session `" + daemon_session_id + "`");
                 throw UnknownSessionError("Unknown daemon session");
             }
-
-            if (has_pty_size) {
-                if (pty_rows == 0U || pty_cols == 0U) {
-                    throw ProcessPtyResizeUnsupportedError("PTY rows and cols must be greater than zero");
-                }
-                session->process->resize_pty(pty_rows, pty_cols);
-            }
-
-            if (!chars.empty()) {
-                if (!session->stdin_open) {
-                    throw StdinClosedError(
-                        "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open");
-                }
-                try {
-                    session->process->write_stdin(chars);
-                } catch (const ProcessStdinClosedError& ex) {
-                    session->stdin_open = false;
-                    throw StdinClosedError(ex.what());
-                }
-            }
+            apply_write_stdin_request_locked(session.get(), chars, has_pty_size, pty_rows, pty_cols);
         }
         const YieldTimeOperationConfig& operation_config =
             chars.empty() ? yield_time.write_stdin_poll : yield_time.write_stdin_input;
@@ -488,30 +534,14 @@ Json SessionStore::write_stdin(const std::string& daemon_session_id,
     }
 
     if (poll_result.completed) {
-        retire_session(session);
-        erase_session_if_current(mutex_, sessions_, daemon_session_id, session);
-        join_session_pump(session.get());
-        Json response = build_session_response(nullptr,
-                                               false,
-                                               session->started_at_ms,
-                                               true,
-                                               poll_result.exit_code,
-                                               poll_result.output,
-                                               max_output_tokens,
-                                               empty_exec_warnings());
-        {
-            unsigned long open_sessions = 0UL;
-            {
-                BasicLockGuard lock(mutex_);
-                open_sessions = static_cast<unsigned long>(sessions_.size() + pending_starts_);
-            }
-            LogMessageBuilder message("session completed");
-            message.quoted_field("daemon_session_id", daemon_session_id)
-                .field("exit_code", poll_result.exit_code)
-                .field("open_sessions", open_sessions);
-            log_message(LOG_INFO, "session_store", message.str());
-        }
-        return response;
+        return finalize_completed_write_stdin(
+            mutex_,
+            sessions_,
+            &pending_starts_,
+            daemon_session_id,
+            session,
+            poll_result,
+            max_output_tokens);
     }
 
     {
