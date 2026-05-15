@@ -744,6 +744,7 @@ async fn exec_command_preserves_output_after_external_pipeline_steps() {
                 "target": "builder-a",
                 "cmd": "printf 'marker\\n'; printf 'external\\n' | cat; printf 'done\\n'",
                 "shell": "/bin/sh",
+                "login": false,
                 "tty": false,
                 "yield_time_ms": 10_000
             }),

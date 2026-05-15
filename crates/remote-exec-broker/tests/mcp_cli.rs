@@ -4,11 +4,18 @@ mod support;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 async fn run_cli(args: &[&str]) -> std::process::Output {
-    tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec"))
-        .args(args)
-        .output()
-        .await
-        .unwrap()
+    let args = args
+        .iter()
+        .map(|arg| (*arg).to_string())
+        .collect::<Vec<_>>();
+    tokio::task::spawn_blocking(move || {
+        std::process::Command::new(env!("CARGO_BIN_EXE_remote-exec"))
+            .args(&args)
+            .output()
+    })
+    .await
+    .unwrap()
+    .unwrap()
 }
 
 fn assert_exit_code(output: &std::process::Output, expected: i32) {

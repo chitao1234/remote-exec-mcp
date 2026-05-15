@@ -15,8 +15,10 @@ use super::*;
 use crate::{
     AppState, HostRuntimeConfig, ProcessEnvironment, PtyMode, YieldTimeConfig, build_runtime_state,
 };
+#[cfg(windows)]
 use std::sync::atomic::{AtomicU32, Ordering};
 
+#[cfg(windows)]
 static NEXT_LOOPBACK_HOST: AtomicU32 = AtomicU32::new(1);
 
 #[tokio::test]
@@ -1208,10 +1210,7 @@ fn free_windows_loopback_endpoint() -> String {
 
 #[cfg(not(windows))]
 fn unique_loopback_bind_endpoint() -> String {
-    let value = NEXT_LOOPBACK_HOST.fetch_add(1, Ordering::Relaxed);
-    let third_octet = (value / 254) % 254 + 1;
-    let fourth_octet = value % 254 + 1;
-    format!("127.42.{third_octet}.{fourth_octet}:0")
+    "127.0.0.1:0".to_string()
 }
 
 async fn wait_until_session_removed(state: &AppState, session_id: &str) {
