@@ -100,10 +100,15 @@ static void assert_concurrent_patch_writes_share_no_fixed_temp_path(const fs::pa
     }
 }
 
-int main() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-xp-patch-test";
+static fs::path make_test_root() {
+    const fs::path root = fs::unique_test_root("remote-exec-xp-patch-test");
     fs::remove_all(root);
     fs::create_directories(root);
+    return root;
+}
+
+int main() {
+    const fs::path root = make_test_root();
 
     write_text(root / "hello.txt", "hello\n");
     const std::string update_patch = "*** Begin Patch\n"

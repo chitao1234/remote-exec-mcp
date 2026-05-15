@@ -219,6 +219,10 @@ inline path temp_directory_path() {
     return path(temp);
 }
 
+inline unsigned long current_process_id() {
+    return static_cast<unsigned long>(GetCurrentProcessId());
+}
+
 inline bool exists(const path& target) {
     return GetFileAttributesW(wide_from_utf8(target.string()).c_str()) != INVALID_FILE_ATTRIBUTES;
 }
@@ -311,6 +315,10 @@ inline path temp_directory_path() {
         temp = "/tmp";
     }
     return path(temp);
+}
+
+inline unsigned long current_process_id() {
+    return static_cast<unsigned long>(getpid());
 }
 
 inline bool exists(const path& target) {
@@ -523,6 +531,10 @@ private:
 };
 
 #endif
+
+inline path unique_test_root(const std::string& name) {
+    return temp_directory_path() / (name + "-" + std::to_string(current_process_id()));
+}
 
 } // namespace test_fs
 
