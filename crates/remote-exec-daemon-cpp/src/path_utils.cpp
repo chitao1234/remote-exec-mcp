@@ -219,7 +219,12 @@ bool remove_directory(const std::string& path) {
 
 bool rename_path(const std::string& source, const std::string& destination) {
 #ifdef _WIN32
-    return _wrename(wide_from_utf8(source).c_str(), wide_from_utf8(destination).c_str()) == 0;
+    if (MoveFileExW(
+            wide_from_utf8(source).c_str(), wide_from_utf8(destination).c_str(), MOVEFILE_REPLACE_EXISTING) != 0) {
+        return true;
+    }
+    errno = last_error_to_errno(GetLastError());
+    return false;
 #else
     return std::rename(source.c_str(), destination.c_str()) == 0;
 #endif
