@@ -10,6 +10,9 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_BUILD_OVERRIDE_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
   RUST_BACKTRACE: "1"
 
 jobs:
@@ -82,7 +85,7 @@ jobs:
       - name: Start ${{ matrix.os.label }} VM
         uses: cross-platform-actions/action@master
         with:
-          environment_variables: BSD_NAME BSD_RUST_SETUP CARGO_TERM_COLOR RUST_BACKTRACE
+          environment_variables: BSD_NAME BSD_RUST_SETUP CARGO_TERM_COLOR CARGO_INCREMENTAL CARGO_PROFILE_BUILD_OVERRIDE_DEBUG CARGO_PROFILE_TEST_DEBUG RUST_BACKTRACE
           operating_system: ${{ matrix.os.name }}
           architecture: ${{ matrix.os.architecture }}
           version: ${{ matrix.os.version }}
