@@ -116,11 +116,18 @@ jobs:
             if command -v bmake >/dev/null 2>&1; then
               return 0
             fi
-            mkdir -p "$HOME/.local/bin"
-            printf '%s\n' '#!/bin/sh' 'exec make "$@"' > "$HOME/.local/bin/bmake"
-            chmod +x "$HOME/.local/bin/bmake"
-            PATH="$HOME/.local/bin:$PATH"
-            export PATH
+            case "$BSD_NAME" in
+              openbsd)
+                run_as_root pkg_add bmake
+                PATH="/usr/local/bin:$PATH"
+                export PATH
+                ;;
+              *)
+                echo "bmake is required on $BSD_NAME but was not found" >&2
+                return 1
+                ;;
+            esac
+            command -v bmake >/dev/null 2>&1
           }
 
           setup_rust() {
@@ -158,7 +165,26 @@ jobs:
           rustc --version
           bmake --version || true
 
-          bmake -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-bsd HOST_CXX=c++ check-posix
+          cpp_daemon="$PWD/crates/remote-exec-daemon-cpp/build/ci-bsd/remote-exec-daemon-cpp"
+          cpp_status=0
+          rust_status=0
 
-          REMOTE_EXEC_CPP_DAEMON="$PWD/crates/remote-exec-daemon-cpp/build/ci-bsd/remote-exec-daemon-cpp" \
-            cargo test --workspace --all-features --locked
+          set +e
+          bmake -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-bsd HOST_CXX=c++ all-posix
+          cpp_status=$?
+          if [ "$cpp_status" -eq 0 ]; then
+            bmake -k -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-bsd HOST_CXX=c++ check-posix
+            cpp_status=$?
+          fi
+
+          REMOTE_EXEC_CPP_DAEMON="$cpp_daemon" \
+            cargo test --workspace --all-features --locked --no-fail-fast
+          rust_status=$?
+          set -e
+
+          printf 'C++ status: %s\n' "$cpp_status"
+          printf 'Rust status: %s\n' "$rust_status"
+
+          if [ "$cpp_status" -ne 0 ] || [ "$rust_status" -ne 0 ]; then
+            exit 1
+          fi
