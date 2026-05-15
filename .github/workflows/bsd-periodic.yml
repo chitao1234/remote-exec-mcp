@@ -53,6 +53,29 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Download rustup-init for ${{ matrix.os.label }}
+        if: matrix.os.rust_setup == 'rustup'
+        shell: bash
+        run: |
+          set -euo pipefail
+          case '${{ matrix.os.name }}' in
+            freebsd)
+              rustup_target='x86_64-unknown-freebsd'
+              ;;
+            netbsd)
+              rustup_target='x86_64-unknown-netbsd'
+              ;;
+            *)
+              echo "unexpected rustup BSD target: ${{ matrix.os.name }}" >&2
+              exit 1
+              ;;
+          esac
+          mkdir -p .github/bin
+          curl -fsSL \
+            "https://static.rust-lang.org/rustup/dist/${rustup_target}/rustup-init" \
+            -o .github/bin/rustup-init
+          chmod +x .github/bin/rustup-init
+
       - name: Start ${{ matrix.os.label }} VM
         uses: cross-platform-actions/action@v1.0.0
         with:
@@ -66,5 +89,77 @@ jobs:
         env:
           BSD_RUST_SETUP: ${{ matrix.os.rust_setup }}
         run: |
+          set -eu
           uname -a
           printf 'rust setup mode: %s\n' "$BSD_RUST_SETUP"
+
+      - name: Run C++ and Rust tests on ${{ matrix.os.label }}
+        env:
+          BSD_NAME: ${{ matrix.os.name }}
+          BSD_RUST_SETUP: ${{ matrix.os.rust_setup }}
+        run: |
+          set -eu
+
+          run_as_root() {
+            if command -v sudo >/dev/null 2>&1; then
+              sudo "$@"
+            elif command -v doas >/dev/null 2>&1; then
+              doas "$@"
+            elif [ "$(id -u)" -eq 0 ]; then
+              "$@"
+            else
+              echo "no supported privilege escalation command found" >&2
+              return 1
+            fi
+          }
+
+          ensure_bmake() {
+            if command -v bmake >/dev/null 2>&1; then
+              return 0
+            fi
+            mkdir -p "$HOME/.local/bin"
+            printf '%s\n' '#!/bin/sh' 'exec make "$@"' > "$HOME/.local/bin/bmake"
+            chmod +x "$HOME/.local/bin/bmake"
+            PATH="$HOME/.local/bin:$PATH"
+            export PATH
+          }
+
+          setup_rust() {
+            case "$BSD_RUST_SETUP" in
+              rustup)
+                ./.github/bin/rustup-init -y --profile minimal --default-toolchain stable
+                . "$HOME/.cargo/env"
+                ;;
+              package)
+                case "$BSD_NAME" in
+                  openbsd)
+                    run_as_root pkg_add rust
+                    ;;
+                  dragonflybsd)
+                    run_as_root pkg install -y rust
+                    ;;
+                  *)
+                    echo "unexpected packaged-rust BSD target: $BSD_NAME" >&2
+                    return 1
+                    ;;
+                esac
+                ;;
+              *)
+                echo "unexpected rust setup mode: $BSD_RUST_SETUP" >&2
+                return 1
+                ;;
+            esac
+          }
+
+          ensure_bmake
+          setup_rust
+
+          c++ --version
+          cargo --version
+          rustc --version
+          bmake --version || true
+
+          bmake -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-bsd HOST_CXX=c++ check-posix
+
+          REMOTE_EXEC_CPP_DAEMON="$PWD/crates/remote-exec-daemon-cpp/build/ci-bsd/remote-exec-daemon-cpp" \
+            cargo test --workspace --all-features --locked
