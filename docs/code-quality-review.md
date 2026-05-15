@@ -1,6 +1,7 @@
 # Code Quality Review
 
 Date: 2026-05-15
+Updated: 2026-05-16
 
 Scope: read-only review of the full `remote-exec-mcp` workspace. No production code was modified. Findings were synthesized from four parallel subsystem reviews plus local verification across the broker, shared Rust core, C++ daemon, and workspace-level structure.
 
@@ -8,25 +9,25 @@ Scope: read-only review of the full `remote-exec-mcp` workspace. No production c
 
 The project has strong explicit architecture rules, but a large share of the implementation cost is being paid as manual synchronization. The same public contract is repeated across docs, schemas, registries, CLI wiring, broker handlers, daemon routes, test stubs, and the C++ implementation. That creates drift risk and makes changes review-heavy even when behavior is simple.
 
-The second recurring problem is type erosion at subsystem boundaries. Several important flows start typed, then get flattened into `String` or `anyhow::Error`, and later reconstructed with downcasts, text matching, or ad hoc helper logic. That weakens exhaustiveness, makes tests more prose-sensitive, and raises the chance of silent contract divergence.
+The second recurring problem is uneven type discipline at subsystem boundaries. Some areas have already improved and now use focused domain errors, but other important flows still flatten into `String` or `anyhow::Error` and recover meaning later with downcasts or helper logic. That weakens exhaustiveness, makes tests more wording-sensitive, and raises the chance of silent contract divergence.
 
-The third recurring problem is oversized, low-seam runtime code in the most concurrent areas, especially port forwarding and the C++ daemon transport layer. The code is not obviously broken, but it is harder to reason about than it needs to be, and the current structure makes safe change expensive.
+The third recurring problem is oversized, low-seam runtime code in the most concurrent areas, especially the C++ daemon transport layer and the remaining detached-worker parts of C++ port forwarding. These areas are not uniformly broken, and some ownership cleanup has already landed, but the remaining structure still makes safe change more expensive than it should be.
 
 ## Prioritized Findings
 
-### 3. Rust error modeling loses type information too early
+### 3. Rust error modeling is still inconsistent at some boundaries
 
-Severity: High
+Severity: Medium
 
 Evidence: `crates/remote-exec-proto/src/rpc/error.rs:9`, `crates/remote-exec-host/src/error.rs:6`, `crates/remote-exec-daemon/src/rpc_error.rs:6`, `crates/remote-exec-host/src/patch/mod.rs:50`, `crates/remote-exec-host/src/transfer/archive/mod.rs:62`, `crates/remote-exec-host/src/transfer/mod.rs:21`
 
 Why this is a smell:
 
-Important domain failures begin as typed concepts, but many are flattened into `String` codes or `anyhow::Error` internally and then rebuilt later with downcasts or text matching. That pattern weakens exhaustiveness and increases the chance that new error cases land in the wrong bucket or become test-coupled to wording.
+This area has improved since earlier audit rounds: transfer and image flows already have focused domain errors. The remaining issue is inconsistency. `HostRpcError` still stores the RPC code as a `String`, patch execution still collapses into `anyhow::Error`, and some archive-to-transfer conversion still relies on generic wrapping. That leaves the error model harder to extend and reason about than it needs to be.
 
 How to solve it:
 
-Keep domain errors typed until the outermost transport boundary. Introduce focused enums such as `PatchError`, `TransferArchiveError`, and a typed `HostRpcError` that carries `RpcErrorCode` directly. Perform HTTP or tool-level serialization once, at the daemon or broker edge, rather than piecemeal in each subsystem.
+Keep domain errors typed until the outermost transport boundary in the places that still flatten early. Introduce focused enums such as `PatchError`, keep `HostRpcError` typed internally with `RpcErrorCode`, and limit `anyhow` usage to truly internal aggregation seams. This does not require rewriting the now-typed transfer and image paths; it requires finishing the remaining holdouts.
 
 ### 4. The C++ daemon HTTP contract is split across ad hoc layers
 
@@ -42,23 +43,23 @@ How to solve it:
 
 Introduce one internal route registry for the C++ daemon that declares path, method, request mode, and response mode. Move route names, header names, and protocol version constants into one internal contract header used by all transport paths. That does not require a large abstraction layer; it requires one place of truth.
 
-### 5. The C++ port-forward runtime has weak ownership and shutdown semantics
+### 5. The C++ port-forward runtime still relies on detached worker supervision in key paths
 
-Severity: High
+Severity: Medium
 
 Evidence: `crates/remote-exec-daemon-cpp/src/port_tunnel_spawn.cpp:43`, `crates/remote-exec-daemon-cpp/src/port_tunnel_tcp.cpp:4`, `crates/remote-exec-daemon-cpp/src/port_tunnel_udp.cpp:5`, `crates/remote-exec-daemon-cpp/src/port_tunnel_session.cpp:163`
 
 Why this is a smell:
 
-The port-forward subsystem relies on detached or immediately untracked worker threads, manual atomic budget counters, and shared/weak pointer coordination. That is the most concurrency-heavy part of the C++ daemon, yet it has the loosest lifetime ownership model. The current shape makes reconnect, shutdown, and failure attribution harder to reason about.
+This finding needs narrower wording than it did in earlier rounds. The subsystem now has a real `PortTunnelService` owner with explicit session teardown, retained-resource cleanup, and budget release. The remaining problem is that worker execution still relies on detached or otherwise untracked threads in the hottest concurrency paths. That makes shutdown, failure surfacing, and future supervision changes harder than they should be.
 
 How to solve it:
 
-Move port-forward work under a joinable worker group or bounded pool owned by one service object. Give that owner explicit responsibility for cancellation, shutdown, budget enforcement, and error surfacing. This is a structural simplification, not a feature rewrite.
+Keep `PortTunnelService` as the owner, but move worker execution under a tracked worker group or equivalent supervision model. The goal is not another large redesign; it is to finish the lifecycle model so the service owns worker startup, cancellation, shutdown, and failure accounting explicitly instead of delegating that responsibility to detached threads.
 
 ### 6. `remote-exec-pki` is carrying repository-specific bootstrap UX and config policy
 
-Severity: High
+Severity: Medium
 
 Evidence: `crates/remote-exec-pki/src/lib.rs:6`, `crates/remote-exec-pki/src/manifest.rs:88`, `crates/remote-exec-admin/src/certs.rs:27`
 
@@ -126,41 +127,41 @@ How to solve it:
 
 Promote shared test support into a small dev-only workspace crate. Split large scenario suites by concern, such as codec, session store, reconnect semantics, TCP, and UDP. Keep a smaller number of end-to-end tunnel scenarios, but move most logic checks into narrower harnesses and reusable helpers.
 
-### 11. Examples, tests, and build entry points already show contract drift
+### 11. Examples and effective defaults still diverge in at least one user-visible place
 
-Severity: Medium
+Severity: Low
 
-Evidence: `crates/remote-exec-broker/src/config.rs:34`, `configs/broker.example.toml:72`, `crates/remote-exec-broker/tests/mcp_cli.rs:24`, `crates/remote-exec-daemon-cpp/README.md:13`, `crates/remote-exec-daemon-cpp/NMakefile:72`
+Evidence: `crates/remote-exec-broker/src/config.rs:34`, `configs/broker.example.toml:72`
 
 Why this is a smell:
 
-The broker code defaults to structured content enabled, but the checked-in example disables it. These are not catastrophic bugs, but they show that documentation and build plumbing can already drift away from the effective contract.
+The most concrete example is the broker structured-content default: the code defaults it on, while the checked-in example turns it off. This is not a severe runtime bug, but it is exactly the sort of user-facing drift that causes confusion because operators infer defaults from example configs.
 
 How to solve it:
 
-Add smoke tests that load the real example configs and verify the intended default behavior. Make the C++ build matrix data-driven from one inventory. Separate “recommended example” from “alternate compatibility example” when defaults intentionally differ.
+Add smoke tests that load the real example configs and assert the intended behavior, then decide whether the example is meant to be a recommended default or an alternate compatibility configuration. If the difference is intentional, label it explicitly instead of leaving readers to infer that it reflects the default path.
 
 ## Recommended Repair Order
 
-### Phase 1: Collapse manual contract duplication
+### Phase 1: Finish typed and shared Rust boundaries
 
-Start by creating one tool catalog and one canonical contract source. This has the highest leverage because it reduces review burden everywhere else. It also aligns with the repo’s own change-guidance sections, which currently reveal how broad the blast radius already is.
+Start with the Rust-side seams that are already close to the desired shape: typed host/patch errors, shared daemon capability structs, and transfer metadata normalization. This lowers the amount of stringly glue that later work has to route around.
 
-### Phase 2: Restore typed boundaries
+### Phase 2: Remove legacy public-shape and config duplication
 
-Next, fix error and capability modeling. Keep `RpcErrorCode` typed, add typed patch/transfer errors, and extract shared capability structs. This is a contained refactor with good payoff for test quality and future feature work.
+Next, remove avoidable duplication in public input and config composition. That includes collapsing `transfer_files` around `sources`, reducing broker/daemon/host config mirroring, and clarifying example-vs-default behavior where the repo currently sends mixed signals.
 
-### Phase 3: Remove legacy shape debt
+### Phase 3: Move repository-specific operator UX out of reusable crates
 
-Simplify `transfer_files` to one source shape and promote under-typed fields like `view_image.detail` to enums. These are public-surface cleanups that will reduce normalization code and backend-specific validation drift.
+Once the runtime seams are cleaner, move repo-specific bootstrap rendering and operator text out of `remote-exec-pki` and into `remote-exec-admin`. That is a boundary cleanup and should stay separate from the more mechanical protocol and config refactors.
 
-### Phase 4: Rebuild the C++ internal contract seams
+### Phase 4: Rebuild the C++ daemon’s internal contract seams
 
-Introduce a C++ route registry, centralize contract constants, and move port-forward execution under supervised ownership. This is the riskiest technical area, so it should happen after the shared contract work above narrows the moving parts.
+Introduce a route registry or equivalent single internal contract inventory for the C++ daemon, then centralize the shared path/header/version constants used by routing, transfer, and port-forward upgrade handling. This keeps future parity work from depending on scattered literal strings and hand-maintained tables.
 
-### Phase 5: Clean up test and build ownership
+### Phase 5: Finish C++ worker supervision and test-support cleanup
 
-Finish by creating a real test-support crate, splitting the largest scenario suites, and making build/example defaults testable. This will not fix architecture by itself, but it will lower the cost of maintaining the earlier changes.
+Finish by replacing the remaining detached-worker seams in C++ port forwarding with tracked supervision, then clean up test ownership by promoting shared helpers into a small dev-only crate and splitting the heaviest scenario files. This lowers maintenance cost after the higher-value boundary fixes above land.
 
 ## Closing Assessment
 
