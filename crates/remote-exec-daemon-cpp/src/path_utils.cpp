@@ -21,6 +21,9 @@ namespace path_utils {
 #ifdef _WIN32
 namespace {
 
+const unsigned int RENAME_RETRY_ATTEMPTS = 8U;
+const unsigned long RENAME_RETRY_MAX_DELAY_MS = 16UL;
+
 std::wstring wide_mode_from_ascii(const char* mode) {
     std::wstring wide;
     while (mode != nullptr && *mode != '\0') {
@@ -40,10 +43,15 @@ int last_error_to_errno(DWORD error) {
         return ENOENT;
     case ERROR_ACCESS_DENIED:
     case ERROR_SHARING_VIOLATION:
+    case ERROR_LOCK_VIOLATION:
         return EACCES;
     default:
         return EIO;
     }
+}
+
+bool should_retry_rename_error(DWORD error) {
+    return error == ERROR_ACCESS_DENIED || error == ERROR_SHARING_VIOLATION || error == ERROR_LOCK_VIOLATION;
 }
 
 } // namespace
@@ -219,11 +227,27 @@ bool remove_directory(const std::string& path) {
 
 bool rename_path(const std::string& source, const std::string& destination) {
 #ifdef _WIN32
-    if (MoveFileExW(
-            wide_from_utf8(source).c_str(), wide_from_utf8(destination).c_str(), MOVEFILE_REPLACE_EXISTING) != 0) {
-        return true;
+    const std::wstring wide_source = wide_from_utf8(source);
+    const std::wstring wide_destination = wide_from_utf8(destination);
+    DWORD last_error = ERROR_SUCCESS;
+    unsigned long retry_delay_ms = 1UL;
+
+    for (unsigned int attempt = 0U; attempt < RENAME_RETRY_ATTEMPTS; ++attempt) {
+        if (MoveFileExW(wide_source.c_str(), wide_destination.c_str(), MOVEFILE_REPLACE_EXISTING) != 0) {
+            return true;
+        }
+        last_error = GetLastError();
+        if (!should_retry_rename_error(last_error) || attempt + 1U == RENAME_RETRY_ATTEMPTS) {
+            errno = last_error_to_errno(last_error);
+            return false;
+        }
+        Sleep(retry_delay_ms);
+        if (retry_delay_ms < RENAME_RETRY_MAX_DELAY_MS) {
+            retry_delay_ms *= 2UL;
+        }
     }
-    errno = last_error_to_errno(GetLastError());
+
+    errno = last_error_to_errno(last_error);
     return false;
 #else
     return std::rename(source.c_str(), destination.c_str()) == 0;

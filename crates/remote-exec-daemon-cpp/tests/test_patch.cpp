@@ -1,4 +1,5 @@
 #include <atomic>
+#include <iostream>
 #include "test_assert.h"
 #include <sstream>
 #include <stdexcept>
@@ -77,7 +78,8 @@ static void assert_concurrent_patch_writes_share_no_fixed_temp_path(const fs::pa
                 }
                 try {
                     (void)apply_patch(root.string(), patch);
-                } catch (const std::runtime_error&) {
+                } catch (const std::runtime_error& error) {
+                    std::cerr << "concurrent patch failure: " << error.what() << "\n";
                     failure_count.fetch_add(1);
                 }
             }));
