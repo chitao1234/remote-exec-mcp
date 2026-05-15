@@ -557,6 +557,16 @@ Windows CI job: POSIX runtime tests run on Linux, Windows XP-compatible test
 binaries run under Wine on Linux when available, and the 32-bit host-native MSVC
 NMAKE path runs on `windows-latest`.
 
+A separate periodic/manual GitHub Actions workflow exercises BSD coverage inside
+GitHub-hosted BSD VMs for FreeBSD, OpenBSD, NetBSD, and DragonFly BSD. Each BSD
+entry runs the supported BSD make path with
+`bmake -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-bsd check-posix`,
+then reuses the resulting `remote-exec-daemon-cpp` binary through
+`REMOTE_EXEC_CPP_DAEMON` while running `cargo test --workspace --all-features`.
+FreeBSD and NetBSD bootstrap Rust with `rustup`; OpenBSD and DragonFly BSD use
+their packaged Rust toolchains. The BSD workflow is intentionally periodic and
+manually runnable rather than part of the required push/pull-request gate.
+
 Windows GNU compile-only checks from Linux:
 
 ```bash
