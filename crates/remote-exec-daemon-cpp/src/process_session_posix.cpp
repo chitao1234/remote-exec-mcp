@@ -131,7 +131,7 @@ PosixPipePair create_posix_pipe(const char* label) {
 }
 
 UniqueFd open_dev_null_read() {
-    UniqueFd fd(open("/dev/null", O_RDONLY));
+    UniqueFd fd(open("/dev/null", O_RDONLY | O_CLOEXEC));
     if (!fd.valid()) {
         throw std::runtime_error(std::string("open(/dev/null) failed: ") + std::strerror(errno));
     }
@@ -165,7 +165,9 @@ PosixPtyPair create_posix_pty() {
     std::memset(&size, 0, sizeof(size));
     size.ws_row = kDefaultPtyRows;
     size.ws_col = kDefaultPtyCols;
-    ioctl(master.get(), TIOCSWINSZ, &size);
+    if (ioctl(master.get(), TIOCSWINSZ, &size) != 0) {
+        throw std::runtime_error(std::string("ioctl(TIOCSWINSZ) failed: ") + std::strerror(errno));
+    }
 
     PosixPtyPair pair;
     pair.master = std::move(master);
@@ -380,6 +382,7 @@ void exec_shell_child(const std::vector<char*>& exec_argv,
                       const std::string& executable_path,
                       const ExecEnvironment& environment,
                       const std::string& workdir) {
+    signal(SIGPIPE, SIG_DFL);
     if (!workdir.empty() && chdir(workdir.c_str()) != 0) {
         _exit(126);
     }
@@ -596,7 +599,9 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     }
 
     if (pid == 0) {
-        setpgid(0, 0);
+        if (setpgid(0, 0) != 0) {
+            _exit(126);
+        }
         if (dup2(stdin_null.get(), STDIN_FILENO) < 0 || dup2(stdout_pipe.write_end.get(), STDOUT_FILENO) < 0 ||
             dup2(stdout_pipe.write_end.get(), STDERR_FILENO) < 0) {
             _exit(126);

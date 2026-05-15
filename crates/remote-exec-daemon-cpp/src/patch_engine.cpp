@@ -220,6 +220,10 @@ std::string read_text_file(const std::string& path) {
 void write_text_atomic(const std::string& path, const std::string& content) {
     path_utils::create_parent_directories(path);
     const std::string temp_path = unique_atomic_write_temp_path(path);
+#ifndef _WIN32
+    struct stat existing;
+    const bool preserve_mode = path_utils::stat_path(path, &existing);
+#endif
 
     ScopedFile output(path_utils::open_file(temp_path, "wb"));
     if (!output.valid()) {
@@ -231,6 +235,12 @@ void write_text_atomic(const std::string& path, const std::string& content) {
     if (output.close() != 0) {
         throw std::runtime_error("unable to write " + temp_path);
     }
+#ifndef _WIN32
+    if (preserve_mode && chmod(temp_path.c_str(), existing.st_mode) != 0) {
+        (void)path_utils::remove_path(temp_path);
+        throw std::runtime_error("unable to preserve mode for " + temp_path);
+    }
+#endif
 
     if (!path_utils::rename_path(temp_path, path)) {
         (void)path_utils::remove_path(temp_path);

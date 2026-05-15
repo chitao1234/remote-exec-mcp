@@ -189,7 +189,7 @@ SOCKET bind_port_forward_socket(const std::string& endpoint, const std::string& 
     SOCKET bound_socket = INVALID_SOCKET;
 
     for (addrinfo* current = result; current != nullptr; current = current->ai_next) {
-        bound_socket = socket(current->ai_family, current->ai_socktype, current->ai_protocol);
+        bound_socket = create_socket_cloexec(current->ai_family, current->ai_socktype, current->ai_protocol);
         if (bound_socket == INVALID_SOCKET) {
             continue;
         }
@@ -225,7 +225,7 @@ SOCKET connect_port_forward_socket(const std::string& endpoint, const std::strin
     SOCKET connected_socket = INVALID_SOCKET;
 
     for (addrinfo* current = result; current != nullptr; current = current->ai_next) {
-        connected_socket = socket(current->ai_family, current->ai_socktype, current->ai_protocol);
+        connected_socket = create_socket_cloexec(current->ai_family, current->ai_socktype, current->ai_protocol);
         if (connected_socket == INVALID_SOCKET) {
             continue;
         }

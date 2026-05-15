@@ -15,6 +15,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #else
+#include <fcntl.h>
 #include <netdb.h>
 #include <signal.h>
 #include <sys/socket.h>
@@ -44,6 +45,16 @@ void throw_socket_option_error(const std::string& option, int error) {
     throw std::runtime_error(socket_error_message_from_code("setsockopt(" + option + ")", error));
 }
 
+#ifndef _WIN32
+bool set_socket_cloexec_flag(SOCKET socket) {
+    const int flags = fcntl(socket, F_GETFD, 0);
+    if (flags < 0) {
+        return false;
+    }
+    return fcntl(socket, F_SETFD, flags | FD_CLOEXEC) == 0;
+}
+#endif
+
 } // namespace
 
 void close_socket(SOCKET socket) {
@@ -59,6 +70,34 @@ void shutdown_socket(SOCKET socket) {
     shutdown(socket, SD_BOTH);
 #else
     shutdown(socket, SHUT_RDWR);
+#endif
+}
+
+SOCKET create_socket_cloexec(int family, int type, int protocol) {
+#ifdef _WIN32
+    return socket(family, type, protocol);
+#else
+    SOCKET created = INVALID_SOCKET;
+#ifdef SOCK_CLOEXEC
+    created = socket(family, type | SOCK_CLOEXEC, protocol);
+    if (created != INVALID_SOCKET) {
+        return created;
+    }
+    if (errno != EINVAL) {
+        return INVALID_SOCKET;
+    }
+#endif
+    created = socket(family, type, protocol);
+    if (created == INVALID_SOCKET) {
+        return INVALID_SOCKET;
+    }
+    if (set_socket_cloexec_flag(created)) {
+        return created;
+    }
+    const int cloexec_error = errno;
+    close_socket(created);
+    errno = cloexec_error;
+    return INVALID_SOCKET;
 #endif
 }
 
@@ -426,7 +465,7 @@ SOCKET create_listener(const DaemonConfig& config) {
 
     SOCKET listener = INVALID_SOCKET;
     for (addrinfo* current = result; current != nullptr; current = current->ai_next) {
-        listener = socket(current->ai_family, current->ai_socktype, current->ai_protocol);
+        listener = create_socket_cloexec(current->ai_family, current->ai_socktype, current->ai_protocol);
         if (listener == INVALID_SOCKET) {
             continue;
         }
@@ -456,5 +495,19 @@ SOCKET create_listener(const DaemonConfig& config) {
 }
 
 SOCKET accept_client(SOCKET listener) {
-    return accept(listener, nullptr, nullptr);
+    SOCKET client = accept(listener, nullptr, nullptr);
+    if (client == INVALID_SOCKET) {
+        return client;
+    }
+#ifndef _WIN32
+    if (set_socket_cloexec_flag(client)) {
+        return client;
+    }
+    const int cloexec_error = errno;
+    close_socket(client);
+    errno = cloexec_error;
+    return INVALID_SOCKET;
+#else
+    return client;
+#endif
 }

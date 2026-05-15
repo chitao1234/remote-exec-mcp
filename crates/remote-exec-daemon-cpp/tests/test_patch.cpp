@@ -7,6 +7,10 @@
 #include <thread>
 #include <vector>
 
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
+
 #include "patch_engine.h"
 #include "test_filesystem.h"
 
@@ -102,6 +106,28 @@ static void assert_concurrent_patch_writes_share_no_fixed_temp_path(const fs::pa
     }
 }
 
+#ifndef _WIN32
+static void assert_patch_update_preserves_existing_mode(const fs::path& root) {
+    const fs::path script = root / "script.sh";
+    write_text(script, "#!/bin/sh\nexit 0\n");
+    TEST_ASSERT(chmod(script.string().c_str(), 0755) == 0);
+
+    const std::string patch = "*** Begin Patch\n"
+                              "*** Update File: script.sh\n"
+                              "@@\n"
+                              "-exit 0\n"
+                              "+exit 1\n"
+                              "*** End Patch\n";
+
+    PatchApplyResult result = apply_patch(root.string(), patch);
+    TEST_ASSERT(result.output.find("M script.sh") != std::string::npos);
+
+    struct stat st;
+    TEST_ASSERT(stat(script.string().c_str(), &st) == 0);
+    TEST_ASSERT((st.st_mode & 0777) == 0755);
+}
+#endif
+
 static fs::path make_test_root() {
     const fs::path root = fs::unique_test_root("remote-exec-xp-patch-test");
     fs::remove_all(root);
@@ -125,6 +151,9 @@ int main() {
     TEST_ASSERT(update_result.updated_paths.size() == 1);
     TEST_ASSERT(update_result.updated_paths[0] == "M hello.txt");
     TEST_ASSERT(read_text(root / "hello.txt") == "hello xp\n");
+#ifndef _WIN32
+    assert_patch_update_preserves_existing_mode(root);
+#endif
 
     write_text(root / "crlf.txt", "hello\r\nworld\r\n");
     const std::string crlf_patch = "*** Begin Patch\n"

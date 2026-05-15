@@ -102,6 +102,7 @@ int send_bounded(SOCKET client, const char* data, std::size_t remaining, int fla
 std::string socket_error_message(const std::string& operation);
 void close_socket(SOCKET socket);
 void shutdown_socket(SOCKET socket);
+SOCKET create_socket_cloexec(int family, int type, int protocol);
 void set_socket_timeout_ms(SOCKET socket, unsigned long timeout_ms);
 bool try_read_http_request_head(SOCKET client, std::size_t max_header_bytes, HttpRequestHead* head);
 HttpRequestHead read_http_request_head(SOCKET client, std::size_t max_header_bytes);
