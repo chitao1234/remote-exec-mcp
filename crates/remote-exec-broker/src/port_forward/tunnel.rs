@@ -231,6 +231,9 @@ impl PortTunnel {
 
     pub async fn abort(&self) {
         self.cancel.cancel();
+        abort_tunnel_task(&mut *self.reader_task.lock().await);
+        abort_tunnel_task(&mut *self.writer_task.lock().await);
+        abort_tunnel_task(&mut *self.heartbeat_task.lock().await);
     }
 
     pub async fn wait_closed(&self, timeout: Duration) -> anyhow::Result<()> {
@@ -261,8 +264,19 @@ async fn wait_for_tunnel_task(
     let Some(task) = task else {
         return Ok(());
     };
-    task.await
-        .map_err(|err| anyhow::anyhow!("port tunnel {name} task join failed: {err}"))
+    match task.await {
+        Ok(()) => Ok(()),
+        Err(err) if err.is_cancelled() => Ok(()),
+        Err(err) => Err(anyhow::anyhow!(
+            "port tunnel {name} task join failed: {err}"
+        )),
+    }
+}
+
+fn abort_tunnel_task(task: &mut Option<JoinHandle<()>>) {
+    if let Some(task) = task.as_ref() {
+        task.abort();
+    }
 }
 
 async fn run_heartbeat_loop(
@@ -707,7 +721,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wait_closed_uses_a_single_total_timeout_budget() {
+    async fn abort_stops_blocked_tunnel_tasks_within_one_total_timeout_budget() {
         let (broker_side, mut daemon_side) = tokio::io::duplex(1);
         let tunnel = PortTunnel::from_stream(broker_side).unwrap();
 
@@ -751,13 +765,8 @@ mod tests {
             result.is_ok(),
             "wait_closed should finish within one total timeout budget"
         );
-        let err = result
+        result
             .unwrap()
-            .expect_err("blocked tunnel tasks should time out once, not hang for three budgets");
-        assert!(
-            err.to_string()
-                .contains("timed out waiting for port tunnel"),
-            "{err:#}"
-        );
+            .expect("abort should force blocked tunnel tasks to stop promptly");
     }
 }
