@@ -94,6 +94,8 @@ jobs:
           set -eu
           uname -a
           printf 'rust setup mode: %s\n' "$BSD_RUST_SETUP"
+          df -h .
+          df -h /var/tmp || true
 
       - name: Run C++ and Rust tests on ${{ matrix.os.label }}
         run: |
@@ -112,29 +114,29 @@ jobs:
             fi
           }
 
-          ensure_bmake() {
-            if command -v bmake >/dev/null 2>&1; then
-              return 0
-            fi
+          ensure_make_tool() {
             case "$BSD_NAME" in
               openbsd)
-                run_as_root pkg_add bmake
+                if ! command -v gmake >/dev/null 2>&1; then
+                  run_as_root pkg_add gmake
+                fi
                 PATH="/usr/local/bin:$PATH"
                 export PATH
+                MAKE_CMD=gmake
                 ;;
               *)
-                echo "bmake is required on $BSD_NAME but was not found" >&2
-                return 1
+                MAKE_CMD=make
                 ;;
             esac
-            command -v bmake >/dev/null 2>&1
+            export MAKE_CMD
+            command -v "$MAKE_CMD" >/dev/null 2>&1
           }
 
           setup_rust() {
             case "$BSD_RUST_SETUP" in
               rustup)
                 ./.github/bin/rustup-init -y --profile minimal --default-toolchain stable
-                . "$HOME/.cargo/env"
+                . "$CARGO_HOME/env"
                 ;;
               package)
                 case "$BSD_NAME" in
@@ -157,23 +159,38 @@ jobs:
             esac
           }
 
-          ensure_bmake
+          work_root=/var/tmp/remote-exec-bsd-ci
+          cargo_home="$work_root/cargo-home"
+          rustup_home="$work_root/rustup-home"
+          cargo_target_dir="$work_root/target"
+          cpp_build_dir="$work_root/cpp-build"
+          tmp_dir="$work_root/tmp"
+
+          mkdir -p "$cargo_home" "$rustup_home" "$cargo_target_dir" "$cpp_build_dir" "$tmp_dir"
+          export CARGO_HOME="$cargo_home"
+          export RUSTUP_HOME="$rustup_home"
+          export CARGO_TARGET_DIR="$cargo_target_dir"
+          export TMPDIR="$tmp_dir"
+
+          ensure_make_tool
           setup_rust
 
           c++ --version
           cargo --version
           rustc --version
-          bmake --version || true
+          printf 'make command: %s\n' "$MAKE_CMD"
+          "$MAKE_CMD" -v >/dev/null 2>&1 || true
+          df -h "$work_root" || true
 
-          cpp_daemon="$PWD/crates/remote-exec-daemon-cpp/build/ci-bsd/remote-exec-daemon-cpp"
+          cpp_daemon="$cpp_build_dir/remote-exec-daemon-cpp"
           cpp_status=0
           rust_status=0
 
           set +e
-          bmake -k -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-bsd HOST_CXX=c++ all-posix
+          "$MAKE_CMD" -k -C crates/remote-exec-daemon-cpp BUILD_DIR="$cpp_build_dir" HOST_CXX=c++ all-posix
           cpp_status=$?
           if [ "$cpp_status" -eq 0 ]; then
-            bmake -k -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-bsd HOST_CXX=c++ check-posix
+            "$MAKE_CMD" -k -C crates/remote-exec-daemon-cpp BUILD_DIR="$cpp_build_dir" HOST_CXX=c++ check-posix
             cpp_status=$?
           fi
 
