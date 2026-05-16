@@ -49,7 +49,33 @@ pub struct TunnelLimitSummary {
 pub struct TunnelCloseMeta {
     pub forward_id: String,
     pub generation: u64,
-    pub reason: String,
+    reason: String,
+}
+
+impl TunnelCloseMeta {
+    pub fn operator_close(forward_id: impl Into<String>, generation: u64) -> Self {
+        Self {
+            forward_id: forward_id.into(),
+            generation,
+            reason: TUNNEL_CLOSE_REASON_OPERATOR_CLOSE.to_string(),
+        }
+    }
+
+    pub fn from_raw_reason(
+        forward_id: impl Into<String>,
+        generation: u64,
+        reason: impl Into<String>,
+    ) -> Self {
+        Self {
+            forward_id: forward_id.into(),
+            generation,
+            reason: reason.into(),
+        }
+    }
+
+    pub fn reason(&self) -> &str {
+        &self.reason
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -83,21 +109,61 @@ pub enum ForwardDropKind {
 pub struct ForwardDropMeta {
     pub kind: ForwardDropKind,
     pub count: u64,
-    pub reason: String,
+    reason: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+}
+
+impl ForwardDropMeta {
+    pub fn new(
+        kind: ForwardDropKind,
+        count: u64,
+        reason: impl Into<String>,
+        message: Option<String>,
+    ) -> Self {
+        Self {
+            kind,
+            count,
+            reason: reason.into(),
+            message,
+        }
+    }
+
+    pub fn reason(&self) -> &str {
+        &self.reason
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct TunnelErrorMeta {
     #[serde(default)]
-    pub code: String,
+    code: String,
     #[serde(default = "default_tunnel_error_message")]
     pub message: String,
     #[serde(default)]
     pub fatal: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<u64>,
+}
+
+impl TunnelErrorMeta {
+    pub fn new(
+        code: impl Into<String>,
+        message: impl Into<String>,
+        fatal: bool,
+        generation: Option<u64>,
+    ) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+            fatal,
+            generation,
+        }
+    }
+
+    pub fn wire_code(&self) -> &str {
+        &self.code
+    }
 }
 
 fn default_tunnel_error_message() -> String {

@@ -411,12 +411,12 @@ mod tests {
             frame_type: FrameType::Error,
             flags: 0,
             stream_id: LISTEN_SESSION_STREAM_ID,
-            meta: encode_tunnel_meta(&TunnelErrorMeta {
-                code: TUNNEL_ERROR_CODE_LISTENER_OPEN_FAILED.to_string(),
-                message: "listen refused".to_string(),
-                fatal: false,
-                generation: None,
-            })
+            meta: encode_tunnel_meta(&TunnelErrorMeta::new(
+                TUNNEL_ERROR_CODE_LISTENER_OPEN_FAILED,
+                "listen refused",
+                false,
+                None,
+            ))
             .unwrap(),
             data: Vec::new(),
         });

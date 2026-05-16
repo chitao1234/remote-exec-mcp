@@ -381,11 +381,11 @@ async fn close_tunnel_generation(
             frame_type: FrameType::TunnelClose,
             flags: 0,
             stream_id: 0,
-            meta: encode_tunnel_meta(&TunnelCloseMeta {
-                forward_id: forward_id.to_string(),
+            meta: encode_tunnel_meta(&TunnelCloseMeta::from_raw_reason(
+                forward_id,
                 generation,
-                reason: reason.to_string(),
-            })?,
+                reason,
+            ))?,
             data: Vec::new(),
         })
         .await?;

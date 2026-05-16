@@ -60,12 +60,7 @@ async fn send_forward_drop_report(
     tx.send(frames::meta_frame(
         FrameType::ForwardDrop,
         stream_id,
-        &ForwardDropMeta {
-            kind,
-            count: 1,
-            reason: reason.into(),
-            message: Some(message.into()),
-        },
+        &ForwardDropMeta::new(kind, 1, reason, Some(message.into())),
     )?)
     .await
 }

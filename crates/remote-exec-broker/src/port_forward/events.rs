@@ -40,11 +40,8 @@ impl TunnelErrorMeta {
 
     pub(super) fn code(&self) -> Option<&str> {
         self.meta.as_ref().and_then(|meta| {
-            if meta.code.is_empty() {
-                None
-            } else {
-                Some(meta.code.as_str())
-            }
+            let code = meta.wire_code();
+            if code.is_empty() { None } else { Some(code) }
         })
     }
 

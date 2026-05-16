@@ -721,14 +721,12 @@ async fn tcp_listener_forward_drop_counts_drop_without_failing_forward() {
             frame_type: FrameType::ForwardDrop,
             flags: 0,
             stream_id: 1,
-            meta: serde_json::to_vec(&ForwardDropMeta {
-                kind: ForwardDropKind::TcpStream,
-                count: 2,
-                reason: RpcErrorCode::PortTunnelLimitExceeded
-                    .wire_value()
-                    .to_string(),
-                message: Some("port tunnel active tcp stream limit reached".to_string()),
-            })
+            meta: serde_json::to_vec(&ForwardDropMeta::new(
+                ForwardDropKind::TcpStream,
+                2,
+                RpcErrorCode::PortTunnelLimitExceeded.wire_value(),
+                Some("port tunnel active tcp stream limit reached".to_string()),
+            ))
             .unwrap(),
             data: Vec::new(),
         },

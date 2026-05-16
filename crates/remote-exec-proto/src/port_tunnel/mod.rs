@@ -63,12 +63,12 @@ mod tests {
                     frame_type: FrameType::ForwardDrop,
                     flags: 0,
                     stream_id: 1,
-                    meta: serde_json::to_vec(&ForwardDropMeta {
-                        kind: ForwardDropKind::TcpStream,
-                        count: 2,
-                        reason: "port_tunnel_limit_exceeded".to_string(),
-                        message: Some("port tunnel active tcp stream limit reached".to_string()),
-                    })
+                    meta: serde_json::to_vec(&ForwardDropMeta::new(
+                        ForwardDropKind::TcpStream,
+                        2,
+                        "port_tunnel_limit_exceeded",
+                        Some("port tunnel active tcp stream limit reached".to_string()),
+                    ))
                     .unwrap(),
                     data: Vec::new(),
                 },
@@ -83,7 +83,7 @@ mod tests {
         let meta: ForwardDropMeta = serde_json::from_slice(&frame.meta).unwrap();
         assert_eq!(meta.kind, ForwardDropKind::TcpStream);
         assert_eq!(meta.count, 2);
-        assert_eq!(meta.reason, "port_tunnel_limit_exceeded");
+        assert_eq!(meta.reason(), "port_tunnel_limit_exceeded");
     }
 
     #[test]

@@ -4,10 +4,9 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use remote_exec_proto::port_tunnel::{
-    Frame, FrameType, TUNNEL_CLOSE_REASON_OPERATOR_CLOSE, TUNNEL_PROTOCOL_VERSION,
-    TUNNEL_PROTOCOL_VERSION_HEADER, TunnelCloseMeta, TunnelErrorMeta, TunnelForwardProtocol,
-    TunnelOpenMeta, TunnelReadyMeta, TunnelRole, UPGRADE_TOKEN, read_frame, write_frame,
-    write_preface,
+    Frame, FrameType, TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, TunnelCloseMeta,
+    TunnelErrorMeta, TunnelForwardProtocol, TunnelOpenMeta, TunnelReadyMeta, TunnelRole,
+    UPGRADE_TOKEN, read_frame, write_frame, write_preface,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -96,7 +95,7 @@ async fn port_tunnel_rejects_reserved_legacy_session_frames() {
         assert_eq!(error.frame_type, FrameType::Error);
         assert_eq!(error.stream_id, 0);
         let error_meta: TunnelErrorMeta = serde_json::from_slice(&error.meta).unwrap();
-        assert_eq!(error_meta.code, "invalid_port_tunnel");
+        assert_eq!(error_meta.wire_code(), "invalid_port_tunnel");
         assert!(
             error_meta.message.contains("unexpected frame type"),
             "unexpected legacy-frame error message: {}",
@@ -144,11 +143,7 @@ async fn tunnel_open_ready_and_close_round_trip() {
             frame_type: FrameType::TunnelClose,
             flags: 0,
             stream_id: 0,
-            meta: serde_json::to_vec(&TunnelCloseMeta {
-                forward_id: "fwd_test".to_string(),
-                generation: 1,
-                reason: TUNNEL_CLOSE_REASON_OPERATOR_CLOSE.to_string(),
-            })
+            meta: serde_json::to_vec(&TunnelCloseMeta::operator_close("fwd_test", 1))
             .unwrap(),
             data: Vec::new(),
         },
@@ -226,7 +221,7 @@ max_retained_sessions = 1
     assert_eq!(error.frame_type, FrameType::Error);
     assert_eq!(error.stream_id, 0);
     let error_meta: TunnelErrorMeta = serde_json::from_slice(&error.meta).unwrap();
-    assert_eq!(error_meta.code, "port_tunnel_limit_exceeded");
+    assert_eq!(error_meta.wire_code(), "port_tunnel_limit_exceeded");
 }
 
 #[tokio::test]
@@ -285,11 +280,11 @@ async fn port_tunnel_rejects_old_generation_frames() {
             frame_type: FrameType::TunnelClose,
             flags: 0,
             stream_id: 0,
-            meta: serde_json::to_vec(&TunnelCloseMeta {
-                forward_id: "fwd_test".to_string(),
-                generation: 1,
-                reason: "stale_close".to_string(),
-            })
+            meta: serde_json::to_vec(&TunnelCloseMeta::from_raw_reason(
+                "fwd_test",
+                1,
+                "stale_close",
+            ))
             .unwrap(),
             data: Vec::new(),
         },
@@ -301,7 +296,7 @@ async fn port_tunnel_rejects_old_generation_frames() {
     assert_eq!(error.frame_type, FrameType::Error);
     assert_eq!(error.stream_id, 0);
     let error_meta: TunnelErrorMeta = serde_json::from_slice(&error.meta).unwrap();
-    assert_eq!(error_meta.code, "port_tunnel_generation_mismatch");
+    assert_eq!(error_meta.wire_code(), "port_tunnel_generation_mismatch");
     assert_eq!(error_meta.generation, Some(2));
 }
 
@@ -331,11 +326,10 @@ async fn tunnel_close_releases_tcp_listener() {
             frame_type: FrameType::TunnelClose,
             flags: 0,
             stream_id: 0,
-            meta: serde_json::to_vec(&TunnelCloseMeta {
-                forward_id: "fwd_close_release".to_string(),
-                generation: 1,
-                reason: TUNNEL_CLOSE_REASON_OPERATOR_CLOSE.to_string(),
-            })
+            meta: serde_json::to_vec(&TunnelCloseMeta::operator_close(
+                "fwd_close_release",
+                1,
+            ))
             .unwrap(),
             data: Vec::new(),
         },

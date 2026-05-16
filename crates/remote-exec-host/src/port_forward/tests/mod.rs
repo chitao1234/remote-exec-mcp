@@ -203,7 +203,7 @@ async fn tcp_write_queue_limit_releases_active_stream_capacity() {
             match frame.frame_type {
                 FrameType::Error if frame.stream_id == 1 => {
                     let meta = decode_frame_meta::<TunnelErrorMeta>(&frame).unwrap();
-                    if meta.code
+                    if meta.wire_code()
                         == remote_exec_proto::rpc::RpcErrorCode::PortTunnelLimitExceeded
                             .wire_value()
                     {
@@ -493,7 +493,7 @@ async fn legacy_session_frames_are_reserved_but_unsupported() {
         assert_eq!(error.frame_type, FrameType::Error);
         assert_eq!(error.stream_id, 0);
         let meta = decode_frame_meta::<TunnelErrorMeta>(&error).unwrap();
-        assert_eq!(meta.code, "invalid_port_tunnel");
+        assert_eq!(meta.wire_code(), "invalid_port_tunnel");
     }
 }
 
@@ -657,7 +657,7 @@ async fn active_tcp_accept_limit_drops_accept_without_listener_error() {
     let meta: ForwardDropMeta = serde_json::from_slice(&drop_report.meta).unwrap();
     assert_eq!(meta.kind, ForwardDropKind::TcpStream);
     assert_eq!(meta.count, 1);
-    assert_eq!(meta.reason, "port_tunnel_limit_exceeded");
+    assert_eq!(meta.reason(), "port_tunnel_limit_exceeded");
 }
 
 #[tokio::test]
@@ -1007,7 +1007,7 @@ async fn retained_udp_queued_byte_pressure_reports_drop() {
     let meta: ForwardDropMeta = serde_json::from_slice(&drop_report.meta).unwrap();
     assert_eq!(meta.kind, ForwardDropKind::UdpDatagram);
     assert_eq!(meta.count, 1);
-    assert_eq!(meta.reason, "port_tunnel_limit_exceeded");
+    assert_eq!(meta.reason(), "port_tunnel_limit_exceeded");
 }
 
 fn test_state() -> Arc<AppState> {
@@ -1348,11 +1348,7 @@ fn tunnel_close_frame(stream_id: u32, generation: u64, reason: impl Into<String>
     meta_frame(
         FrameType::TunnelClose,
         stream_id,
-        &TunnelCloseMeta {
-            forward_id: "fwd_test".to_string(),
-            generation,
-            reason: reason.into(),
-        },
+        &TunnelCloseMeta::from_raw_reason("fwd_test", generation, reason),
     )
 }
 
@@ -1378,7 +1374,7 @@ fn assert_error_code(frame: Frame, stream_id: u32, code: &str) {
     assert_eq!(frame.frame_type, FrameType::Error);
     assert_eq!(frame.stream_id, stream_id);
     let meta = decode_frame_meta::<TunnelErrorMeta>(&frame).unwrap();
-    assert_eq!(meta.code, code);
+    assert_eq!(meta.wire_code(), code);
     assert!(!meta.fatal);
 }
 
