@@ -191,13 +191,58 @@ async fn handle_listen_tcp_accept(
         runtime.record_dropped_stream().await;
         return Ok(None);
     }
-    let Some(connect_stream_id) = connect_stream_ids.next() else {
-        debug_assert!(connect_stream_ids.needs_generation_rotation());
-        let _ = listen_tunnel.close_stream(frame.stream_id).await;
-        settle_active_tcp_stream(runtime, TcpActiveStreamSettlement::Dropped).await;
-        close_active_tcp_listen_streams(runtime, listen_tunnel, state).await?;
+    let Some(connect_stream_id) =
+        allocate_connect_stream_id(runtime, listen_tunnel, state, connect_stream_ids, frame.stream_id)
+            .await?
+    else {
         return Ok(Some(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)));
     };
+    if let Some(control) = send_tcp_connect_open(
+        runtime,
+        listen_tunnel,
+        connect_tunnel,
+        frame.stream_id,
+        connect_stream_id,
+    )
+    .await?
+    {
+        return Ok(Some(control));
+    }
+    record_tcp_stream_pair(state, frame.stream_id, connect_stream_id);
+    tracing::debug!(
+        forward_id = %runtime.forward_id(),
+        listener_stream_id = accept.listener_stream_id,
+        accepted_stream_id = frame.stream_id,
+        connect_stream_id,
+        "paired tcp tunnel streams"
+    );
+    Ok(None)
+}
+
+async fn allocate_connect_stream_id(
+    runtime: &ForwardRuntime,
+    listen_tunnel: &Arc<PortTunnel>,
+    state: &mut TcpForwardState,
+    connect_stream_ids: &mut StreamIdAllocator,
+    listen_stream_id: u32,
+) -> anyhow::Result<Option<u32>> {
+    let Some(connect_stream_id) = connect_stream_ids.next() else {
+        debug_assert!(connect_stream_ids.needs_generation_rotation());
+        let _ = listen_tunnel.close_stream(listen_stream_id).await;
+        settle_active_tcp_stream(runtime, TcpActiveStreamSettlement::Dropped).await;
+        close_active_tcp_listen_streams(runtime, listen_tunnel, state).await?;
+        return Ok(None);
+    };
+    Ok(Some(connect_stream_id))
+}
+
+async fn send_tcp_connect_open(
+    runtime: &ForwardRuntime,
+    listen_tunnel: &Arc<PortTunnel>,
+    connect_tunnel: &Arc<PortTunnel>,
+    listen_stream_id: u32,
+    connect_stream_id: u32,
+) -> anyhow::Result<Option<ForwardLoopControl>> {
     if let Err(err) = connect_tunnel
         .send(Frame {
             frame_type: FrameType::TcpConnect,
@@ -211,24 +256,28 @@ async fn handle_listen_tcp_accept(
         .await
     {
         if is_retryable_transport_error(&err) {
-            return close_unpaired_listen_stream_after_connect_loss(
-                runtime,
-                listen_tunnel,
-                frame.stream_id,
-            )
-            .await
-            .map(Some);
+            return close_unpaired_listen_stream_after_connect_loss(runtime, listen_tunnel, listen_stream_id)
+                .await
+                .map(Some);
         }
         settle_active_tcp_stream(runtime, TcpActiveStreamSettlement::Dropped).await;
         return Err(err).context("connecting tcp forward destination");
     }
+    Ok(None)
+}
+
+fn record_tcp_stream_pair(
+    state: &mut TcpForwardState,
+    listen_stream_id: u32,
+    connect_stream_id: u32,
+) {
     state
         .listen_to_connect
-        .insert(frame.stream_id, connect_stream_id);
+        .insert(listen_stream_id, connect_stream_id);
     state.connect_streams.insert(
         connect_stream_id,
         TcpConnectStream {
-            listen_stream_id: frame.stream_id,
+            listen_stream_id,
             ready: false,
             listen_eof: false,
             connect_eof: false,
@@ -236,14 +285,6 @@ async fn handle_listen_tcp_accept(
             pending_bytes: 0,
         },
     );
-    tracing::debug!(
-        forward_id = %runtime.forward_id(),
-        listener_stream_id = accept.listener_stream_id,
-        accepted_stream_id = frame.stream_id,
-        connect_stream_id,
-        "paired tcp tunnel streams"
-    );
-    Ok(None)
 }
 
 async fn handle_listen_tcp_data(

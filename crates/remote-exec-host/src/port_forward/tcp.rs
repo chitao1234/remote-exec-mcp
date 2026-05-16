@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+use std::net::SocketAddr;
 
 use remote_exec_proto::port_forward::{ensure_nonzero_connect_endpoint, normalize_endpoint};
 use remote_exec_proto::port_tunnel::{
@@ -27,12 +28,32 @@ use super::session::{
     wait_for_session_attachment,
 };
 use super::{
-    READ_BUF_SIZE, TCP_WRITE_QUEUE_FRAMES, TcpStreamEntry, TcpWriteCommand, TcpWriterHandle,
-    TunnelState, send_forward_drop_report,
+    PortForwardPermit, READ_BUF_SIZE, TCP_WRITE_QUEUE_FRAMES, TcpStreamEntry, TcpWriteCommand,
+    TcpWriterHandle, TunnelState, send_forward_drop_report,
 };
 
 const TCP_CONTROL_SEND_TIMEOUT: Duration = Duration::from_secs(1);
 type TcpStreamMap = tokio::sync::Mutex<std::collections::HashMap<u32, TcpStreamEntry>>;
+
+enum AcceptLoopOutcome {
+    Continue,
+    Return,
+    Accepted {
+        attachment: Arc<AttachmentState>,
+        stream: TcpStream,
+        peer: SocketAddr,
+    },
+}
+
+enum RegisteredAcceptedTcpStream {
+    Continue,
+    Return,
+    Spawn {
+        stream_id: u32,
+        reader: OwnedReadHalf,
+        stream_cancel: CancellationToken,
+    },
+}
 
 trait TcpReadLoopContext {
     fn tx(&self) -> &super::TunnelSender;
@@ -185,96 +206,33 @@ pub(super) async fn tunnel_tcp_listen(
 
 pub(super) async fn tunnel_tcp_accept_loop(session: Arc<SessionState>, listener: Arc<TcpListener>) {
     loop {
-        let Some(attachment) = wait_for_session_attachment(&session).await else {
-            return;
+        let (attachment, stream, peer) = match accept_attached_tcp_stream(&session, &listener).await {
+            AcceptLoopOutcome::Continue => continue,
+            AcceptLoopOutcome::Return => return,
+            AcceptLoopOutcome::Accepted {
+                attachment,
+                stream,
+                peer,
+            } => (attachment, stream, peer),
         };
-        let accepted = tokio::select! {
-            _ = session.root_cancel.cancelled() => return,
-            _ = attachment.cancel.cancelled() => continue,
-            accepted = listener.accept() => accepted,
+        let Some(stream_permit) =
+            acquire_active_tcp_stream_permit(&session, &attachment, &stream).await
+        else {
+            continue;
         };
-        let (stream, peer) = match accepted {
-            Ok(accepted) => accepted,
-            Err(err) => {
-                let _ = send_tunnel_error(
-                    &attachment.tx,
-                    Some(session.generation()),
-                    listener_stream_id(&session).await.unwrap_or(0),
-                    RpcErrorCode::PortAcceptFailed,
-                    err.to_string(),
-                    false,
-                )
-                .await;
+        let registered =
+            register_accepted_tcp_stream(&session, &attachment, stream_permit, stream, peer).await;
+        let RegisteredAcceptedTcpStream::Spawn {
+            stream_id,
+            reader,
+            stream_cancel,
+        } = registered
+        else {
+            if matches!(registered, RegisteredAcceptedTcpStream::Return) {
                 return;
             }
-        };
-        // `accept()` can win the race against attachment cancellation. Drop the accepted
-        // socket here so it is not attributed to the next attachment generation.
-        if attachment.cancel.is_cancelled() {
-            drop(stream);
             continue;
-        }
-        let stream_permit = match attachment.tx.limiter.try_acquire_active_tcp_stream() {
-            Ok(permit) => permit,
-            Err(err) => {
-                drop(stream);
-                let _ = send_forward_drop_report(
-                    &attachment.tx,
-                    listener_stream_id(&session).await.unwrap_or(0),
-                    ForwardDropKind::TcpStream,
-                    err.wire_code(),
-                    err.message.clone(),
-                )
-                .await;
-                tracing::debug!(
-                    code = err.wire_code(),
-                    message = %err.message,
-                    "dropping accepted tcp stream due to local port tunnel pressure"
-                );
-                continue;
-            }
         };
-        let stream_id = session
-            .next_daemon_stream_id
-            .fetch_add(2, Ordering::Relaxed);
-        let listener_stream = listener_stream_id(&session).await.unwrap_or(0);
-        let (reader, writer) = stream.into_split();
-        let stream_cancel = attachment.cancel.child_token();
-        attachment.tcp_streams.lock().await.insert(
-            stream_id,
-            TcpStreamEntry {
-                writer: spawn_tcp_writer_task(writer, stream_cancel.clone()),
-                _permit: stream_permit,
-                cancel: Some(stream_cancel.clone()),
-            },
-        );
-        let accept_frame = match meta_frame(
-            FrameType::TcpAccept,
-            stream_id,
-            &TcpAcceptMeta {
-                listener_stream_id: listener_stream,
-                peer: peer.to_string(),
-            },
-        ) {
-            Ok(frame) => frame,
-            Err(err) => {
-                cancel_tcp_stream(&attachment.tcp_streams, stream_id).await;
-                let _ = send_tunnel_error_code(
-                    &attachment.tx,
-                    Some(session.generation()),
-                    stream_id,
-                    err.wire_code(),
-                    err.message,
-                    false,
-                )
-                .await;
-                continue;
-            }
-        };
-        if attachment.tx.send(accept_frame).await.is_err() {
-            cancel_tcp_stream(&attachment.tcp_streams, stream_id).await;
-            return;
-        }
         tokio::spawn(tunnel_tcp_read_loop_attached_session(
             session.clone(),
             attachment,
@@ -282,6 +240,124 @@ pub(super) async fn tunnel_tcp_accept_loop(session: Arc<SessionState>, listener:
             reader,
             stream_cancel,
         ));
+    }
+}
+
+async fn accept_attached_tcp_stream(
+    session: &Arc<SessionState>,
+    listener: &Arc<TcpListener>,
+) -> AcceptLoopOutcome {
+    let Some(attachment) = wait_for_session_attachment(session).await else {
+        return AcceptLoopOutcome::Return;
+    };
+    let accepted = tokio::select! {
+        _ = session.root_cancel.cancelled() => return AcceptLoopOutcome::Return,
+        _ = attachment.cancel.cancelled() => return AcceptLoopOutcome::Continue,
+        accepted = listener.accept() => accepted,
+    };
+    let (stream, peer) = match accepted {
+        Ok(accepted) => accepted,
+        Err(err) => {
+            let _ = send_tunnel_error(
+                &attachment.tx,
+                Some(session.generation()),
+                listener_stream_id(session).await.unwrap_or(0),
+                RpcErrorCode::PortAcceptFailed,
+                err.to_string(),
+                false,
+            )
+            .await;
+            return AcceptLoopOutcome::Return;
+        }
+    };
+    if attachment.cancel.is_cancelled() {
+        drop(stream);
+        return AcceptLoopOutcome::Continue;
+    }
+    AcceptLoopOutcome::Accepted {
+        attachment,
+        stream,
+        peer,
+    }
+}
+
+async fn acquire_active_tcp_stream_permit(
+    session: &Arc<SessionState>,
+    attachment: &Arc<AttachmentState>,
+    stream: &TcpStream,
+) -> Option<PortForwardPermit> {
+    match attachment.tx.limiter.try_acquire_active_tcp_stream() {
+        Ok(permit) => Some(permit),
+        Err(err) => {
+            let _ = stream;
+            let _ = send_forward_drop_report(
+                &attachment.tx,
+                listener_stream_id(session).await.unwrap_or(0),
+                ForwardDropKind::TcpStream,
+                err.wire_code(),
+                err.message.clone(),
+            )
+            .await;
+            tracing::debug!(
+                code = err.wire_code(),
+                message = %err.message,
+                "dropping accepted tcp stream due to local port tunnel pressure"
+            );
+            None
+        }
+    }
+}
+
+async fn register_accepted_tcp_stream(
+    session: &Arc<SessionState>,
+    attachment: &Arc<AttachmentState>,
+    stream_permit: PortForwardPermit,
+    stream: TcpStream,
+    peer: SocketAddr,
+) -> RegisteredAcceptedTcpStream {
+    let stream_id = session.next_daemon_stream_id.fetch_add(2, Ordering::Relaxed);
+    let listener_stream = listener_stream_id(session).await.unwrap_or(0);
+    let (reader, writer) = stream.into_split();
+    let stream_cancel = attachment.cancel.child_token();
+    attachment.tcp_streams.lock().await.insert(
+        stream_id,
+        TcpStreamEntry {
+            writer: spawn_tcp_writer_task(writer, stream_cancel.clone()),
+            _permit: stream_permit,
+            cancel: Some(stream_cancel.clone()),
+        },
+    );
+    let accept_frame = match meta_frame(
+        FrameType::TcpAccept,
+        stream_id,
+        &TcpAcceptMeta {
+            listener_stream_id: listener_stream,
+            peer: peer.to_string(),
+        },
+    ) {
+        Ok(frame) => frame,
+        Err(err) => {
+            cancel_tcp_stream(&attachment.tcp_streams, stream_id).await;
+            let _ = send_tunnel_error_code(
+                &attachment.tx,
+                Some(session.generation()),
+                stream_id,
+                err.wire_code(),
+                err.message,
+                false,
+            )
+            .await;
+            return RegisteredAcceptedTcpStream::Continue;
+        }
+    };
+    if attachment.tx.send(accept_frame).await.is_err() {
+        cancel_tcp_stream(&attachment.tcp_streams, stream_id).await;
+        return RegisteredAcceptedTcpStream::Return;
+    }
+    RegisteredAcceptedTcpStream::Spawn {
+        stream_id,
+        reader,
+        stream_cancel,
     }
 }
 
