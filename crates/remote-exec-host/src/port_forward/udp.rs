@@ -20,95 +20,94 @@ use super::frames::{endpoint_ok_frame, frame as raw_frame, meta_frame};
 use super::session::{AttachmentState, SessionState, reactivate_retained_udp_bind};
 use super::{ConnectionLocalUdpBind, READ_BUF_SIZE, TunnelState, send_forward_drop_report};
 
+trait UdpTunnelContext: Send + Sync {
+    fn tx(&self) -> &super::TunnelSender;
+    fn generation(&self) -> u64;
+}
+
+impl UdpTunnelContext for ConnectContext {
+    fn tx(&self) -> &super::TunnelSender {
+        ConnectContext::tx(self)
+    }
+
+    fn generation(&self) -> u64 {
+        ConnectContext::generation(self)
+    }
+}
+
+impl UdpTunnelContext for ListenContext {
+    fn tx(&self) -> &super::TunnelSender {
+        ListenContext::tx(self)
+    }
+
+    fn generation(&self) -> u64 {
+        ListenContext::generation(self)
+    }
+}
+
+async fn send_udp_datagram<T: UdpTunnelContext + ?Sized>(
+    target: &T,
+    stream_id: u32,
+    meta: Vec<u8>,
+    data: Vec<u8>,
+) -> Result<(), HostRpcError> {
+    let frame = raw_frame(FrameType::UdpDatagram, stream_id, meta, data);
+    target.tx().send(frame).await
+}
+
+async fn send_udp_error_code<T: UdpTunnelContext + ?Sized>(
+    target: &T,
+    stream_id: u32,
+    code: String,
+    message: String,
+) {
+    let _ = send_tunnel_error_code(
+        target.tx(),
+        Some(target.generation()),
+        stream_id,
+        code,
+        message,
+        false,
+    )
+    .await;
+}
+
+async fn send_udp_read_failed<T: UdpTunnelContext + ?Sized>(
+    target: &T,
+    stream_id: u32,
+    message: String,
+) {
+    let _ = send_tunnel_error(
+        target.tx(),
+        Some(target.generation()),
+        stream_id,
+        RpcErrorCode::PortReadFailed,
+        message,
+        false,
+    )
+    .await;
+}
+
+async fn send_udp_forward_drop<T: UdpTunnelContext + ?Sized>(
+    target: &T,
+    stream_id: u32,
+    kind: ForwardDropKind,
+    reason: String,
+    message: String,
+) {
+    let _ = send_forward_drop_report(target.tx(), stream_id, kind, reason, message).await;
+}
+
 enum UdpReadLoopTarget {
     Connect(ConnectContext),
     Listen(ListenContext),
 }
 
 impl UdpReadLoopTarget {
-    async fn send_datagram(
-        &self,
-        stream_id: u32,
-        meta: Vec<u8>,
-        data: Vec<u8>,
-    ) -> Result<(), HostRpcError> {
-        let frame = raw_frame(FrameType::UdpDatagram, stream_id, meta, data);
+    fn context(&self) -> &dyn UdpTunnelContext {
         match self {
-            Self::Connect(context) => context.tx().send(frame).await,
-            Self::Listen(context) => context.tx().send(frame).await,
-        }
-    }
-
-    async fn send_error_code(&self, stream_id: u32, code: String, message: String) {
-        match self {
-            Self::Connect(context) => {
-                let _ = send_tunnel_error_code(
-                    context.tx(),
-                    Some(context.generation()),
-                    stream_id,
-                    code,
-                    message,
-                    false,
-                )
-                .await;
-            }
-            Self::Listen(context) => {
-                let _ = send_tunnel_error_code(
-                    context.tx(),
-                    Some(context.generation()),
-                    stream_id,
-                    code,
-                    message,
-                    false,
-                )
-                .await;
-            }
-        }
-    }
-
-    async fn send_read_failed(&self, stream_id: u32, message: String) {
-        match self {
-            Self::Connect(context) => {
-                let _ = send_tunnel_error(
-                    context.tx(),
-                    Some(context.generation()),
-                    stream_id,
-                    RpcErrorCode::PortReadFailed,
-                    message,
-                    false,
-                )
-                .await;
-            }
-            Self::Listen(context) => {
-                let _ = send_tunnel_error(
-                    context.tx(),
-                    Some(context.generation()),
-                    stream_id,
-                    RpcErrorCode::PortReadFailed,
-                    message,
-                    false,
-                )
-                .await;
-            }
-        }
-    }
-
-    async fn send_forward_drop(
-        &self,
-        stream_id: u32,
-        kind: ForwardDropKind,
-        reason: String,
-        message: String,
-    ) {
-        match self {
-            Self::Connect(context) => {
-                let _ =
-                    send_forward_drop_report(context.tx(), stream_id, kind, reason, message).await;
-            }
-            Self::Listen(context) => {
-                let _ =
-                    send_forward_drop_report(context.tx(), stream_id, kind, reason, message).await;
-            }
+            Self::Connect(c) => c,
+            Self::Listen(c) => c,
         }
     }
 
@@ -251,6 +250,7 @@ async fn tunnel_udp_read_loop(
     socket: Arc<UdpSocket>,
     cancel: CancellationToken,
 ) {
+    let ctx = target.context();
     let mut buf = vec![0; READ_BUF_SIZE];
     loop {
         let received = tokio::select! {
@@ -260,7 +260,7 @@ async fn tunnel_udp_read_loop(
         let (read, peer) = match received {
             Ok(received) => received,
             Err(err) => {
-                target.send_read_failed(stream_id, err.to_string()).await;
+                send_udp_read_failed(ctx, stream_id, err.to_string()).await;
                 return;
             }
         };
@@ -273,25 +273,22 @@ async fn tunnel_udp_read_loop(
         ) {
             Ok(frame) => frame,
             Err(err) => {
-                target
-                    .send_error_code(stream_id, err.wire_code().to_string(), err.message)
+                send_udp_error_code(ctx, stream_id, err.wire_code().to_string(), err.message)
                     .await;
                 return;
             }
         };
-        if let Err(err) = target
-            .send_datagram(stream_id, frame.meta, buf[..read].to_vec())
-            .await
+        if let Err(err) = send_udp_datagram(ctx, stream_id, frame.meta, buf[..read].to_vec()).await
         {
             if is_recoverable_pressure_error(&err) {
-                target
-                    .send_forward_drop(
-                        stream_id,
-                        ForwardDropKind::UdpDatagram,
-                        err.wire_code().to_string(),
-                        err.message.clone(),
-                    )
-                    .await;
+                send_udp_forward_drop(
+                    ctx,
+                    stream_id,
+                    ForwardDropKind::UdpDatagram,
+                    err.wire_code().to_string(),
+                    err.message.clone(),
+                )
+                .await;
                 tracing::debug!(
                     code = err.wire_code(),
                     message = %err.message,
@@ -299,9 +296,7 @@ async fn tunnel_udp_read_loop(
                 );
                 continue;
             }
-            target
-                .send_error_code(stream_id, err.wire_code().to_string(), err.message)
-                .await;
+            send_udp_error_code(ctx, stream_id, err.wire_code().to_string(), err.message).await;
             target.close_on_terminal_send_failure(stream_id).await;
             return;
         }
