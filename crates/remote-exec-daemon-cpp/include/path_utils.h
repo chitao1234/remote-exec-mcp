@@ -1,13 +1,8 @@
-#ifndef REMOTE_EXEC_PATH_UTILS_H
-#define REMOTE_EXEC_PATH_UTILS_H
+#pragma once
 
 #include <cstdio>
 #include <string>
 #include <sys/stat.h>
-
-#ifdef _WIN32
-#include <string>
-#endif
 
 namespace path_utils {
 
@@ -29,5 +24,3 @@ std::string utf8_from_wide(const std::wstring& value);
 #endif
 
 } // namespace path_utils
-
-#endif

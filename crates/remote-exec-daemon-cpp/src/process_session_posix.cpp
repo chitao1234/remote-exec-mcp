@@ -26,10 +26,10 @@ extern char** environ;
 
 namespace {
 
-const unsigned short kDefaultPtyRows = 24;
-const unsigned short kDefaultPtyCols = 120;
+const unsigned short DEFAULT_PTY_ROWS = 24;
+const unsigned short DEFAULT_PTY_COLS = 120;
 // Grace period for cooperative shutdown before escalating from SIGTERM to SIGKILL.
-const int kTerminateGraceMs = 50;
+const int TERMINATE_GRACE_MS = 50;
 
 #ifdef REMOTE_EXEC_CPP_TESTING
 std::atomic<unsigned long> g_test_exit_poll_delay_ms(0UL);
@@ -140,7 +140,7 @@ UniqueFd open_dev_null_read() {
 
 void kill_process_group(pid_t pid) {
     kill(-pid, SIGTERM);
-    platform::sleep_ms(kTerminateGraceMs);
+    platform::sleep_ms(TERMINATE_GRACE_MS);
     kill(-pid, SIGKILL);
 }
 
@@ -163,8 +163,8 @@ PosixPtyPair create_posix_pty() {
 
     struct winsize size;
     std::memset(&size, 0, sizeof(size));
-    size.ws_row = kDefaultPtyRows;
-    size.ws_col = kDefaultPtyCols;
+    size.ws_row = DEFAULT_PTY_ROWS;
+    size.ws_col = DEFAULT_PTY_COLS;
     if (ioctl(master.get(), TIOCSWINSZ, &size) != 0) {
         throw std::runtime_error(std::string("ioctl(TIOCSWINSZ) failed: ") + std::strerror(errno));
     }

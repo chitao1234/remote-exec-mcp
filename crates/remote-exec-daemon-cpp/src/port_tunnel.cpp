@@ -25,7 +25,7 @@ struct PortTunnelService::TrackedWorkerThread {
 #endif
 };
 
-const std::size_t READ_BUF_SIZE = 64U * 1024U;
+const std::size_t READ_BUFFER_SIZE = 64U * 1024U;
 const std::size_t TCP_WRITE_QUEUE_LIMIT = 8U;
 const unsigned long RETAINED_SOCKET_POLL_TIMEOUT_MS = 100UL;
 #ifdef REMOTE_EXEC_CPP_TESTING

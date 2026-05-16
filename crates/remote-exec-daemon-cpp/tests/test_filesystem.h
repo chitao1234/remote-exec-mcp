@@ -1,5 +1,4 @@
-#ifndef REMOTE_EXEC_TEST_FILESYSTEM_H
-#define REMOTE_EXEC_TEST_FILESYSTEM_H
+#pragma once
 
 #include <cstdlib>
 #include <cstdio>
@@ -537,5 +536,3 @@ inline path unique_test_root(const std::string& name) {
 }
 
 } // namespace test_fs
-
-#endif

@@ -23,7 +23,7 @@
 #include "win32_thread.h"
 #endif
 
-extern const std::size_t READ_BUF_SIZE;
+extern const std::size_t READ_BUFFER_SIZE;
 extern const std::size_t TCP_WRITE_QUEUE_LIMIT;
 extern const unsigned long RETAINED_SOCKET_POLL_TIMEOUT_MS;
 extern const unsigned long RESUME_TIMEOUT_MS;

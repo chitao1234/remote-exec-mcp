@@ -160,7 +160,7 @@ void PortTunnelConnection::tcp_connect(const PortTunnelFrame& frame) {
 }
 
 void PortTunnelConnection::tcp_read_loop(uint32_t stream_id, std::shared_ptr<TunnelTcpStream> stream) {
-    std::vector<unsigned char> buffer(READ_BUF_SIZE);
+    std::vector<unsigned char> buffer(READ_BUFFER_SIZE);
     for (;;) {
         const int received =
             recv(stream->socket.get(), reinterpret_cast<char*>(buffer.data()), static_cast<int>(buffer.size()), 0);

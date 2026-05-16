@@ -14,7 +14,7 @@ bool PortTunnelService::spawn_udp_bind_loop(const std::shared_ptr<PortTunnelSess
 void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& session,
                                       uint32_t stream_id,
                                       const std::shared_ptr<TunnelUdpSocket>& socket_value) {
-    std::vector<unsigned char> buffer(READ_BUF_SIZE);
+    std::vector<unsigned char> buffer(READ_BUFFER_SIZE);
     for (;;) {
         std::shared_ptr<PortTunnelSessionAttachment> attachment = wait_for_attachment(session);
         if (attachment.get() == nullptr) {
@@ -158,7 +158,7 @@ void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
 
 void PortTunnelConnection::udp_read_loop_connection_local(uint32_t stream_id,
                                                           std::shared_ptr<TunnelUdpSocket> socket_value) {
-    std::vector<unsigned char> buffer(READ_BUF_SIZE);
+    std::vector<unsigned char> buffer(READ_BUFFER_SIZE);
     for (;;) {
         sockaddr_storage peer_address;
         std::memset(&peer_address, 0, sizeof(peer_address));

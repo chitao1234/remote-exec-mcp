@@ -40,7 +40,7 @@ struct PollResult {
 };
 
 const unsigned long EXIT_POLL_INTERVAL_MS = 25UL;
-const unsigned long RECENT_PROTECTION_COUNT = 8UL;
+const unsigned long RECENT_PROTECTED_SESSION_COUNT = 8UL;
 const unsigned long WARNING_THRESHOLD_HEADROOM = 4UL;
 
 struct PruneCandidate {
@@ -82,7 +82,7 @@ std::size_t protected_recent_count(std::size_t open_sessions) {
     if (open_sessions == 0U) {
         return 0U;
     }
-    return std::min<std::size_t>(RECENT_PROTECTION_COUNT, open_sessions - 1U);
+    return std::min<std::size_t>(RECENT_PROTECTED_SESSION_COUNT, open_sessions - 1U);
 }
 
 std::shared_ptr<LiveSession> launch_live_session(
