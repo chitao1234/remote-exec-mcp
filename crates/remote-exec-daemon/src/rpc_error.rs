@@ -3,11 +3,13 @@ use axum::http::StatusCode;
 use remote_exec_host::HostRpcError;
 use remote_exec_proto::rpc::{RpcErrorBody, RpcErrorCode};
 
-pub(crate) fn bad_request(message: impl Into<String>) -> (StatusCode, Json<RpcErrorBody>) {
+pub(crate) type RpcError = (StatusCode, Json<RpcErrorBody>);
+
+pub(crate) fn bad_request(message: impl Into<String>) -> RpcError {
     crate::exec::rpc_error(RpcErrorCode::BadRequest, message)
 }
 
-pub(crate) fn host_rpc_error_response(err: HostRpcError) -> (StatusCode, Json<RpcErrorBody>) {
+pub(crate) fn host_rpc_error_response(err: HostRpcError) -> RpcError {
     let (status, body) = err.into_http_rpc_parts("daemon");
     (
         StatusCode::from_u16(status).expect("normalized HostRpcError status is valid"),
@@ -15,7 +17,7 @@ pub(crate) fn host_rpc_error_response(err: HostRpcError) -> (StatusCode, Json<Rp
     )
 }
 
-pub(crate) fn domain_error_response<E>(err: E) -> (StatusCode, Json<RpcErrorBody>)
+pub(crate) fn domain_error_response<E>(err: E) -> RpcError
 where
     E: Into<HostRpcError>,
 {

@@ -1,11 +1,11 @@
-use axum::Json;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::HeaderMap;
 use remote_exec_proto::rpc::{
-    RpcErrorBody, TransferExportMetadata, TransferHeaderError, TransferImportMetadata,
-    TransferSourceType, parse_transfer_import_metadata_from_lookup, transfer_export_header_pairs,
+    TransferExportMetadata, TransferHeaderError, TransferImportMetadata, TransferSourceType,
+    parse_transfer_import_metadata_from_lookup, transfer_export_header_pairs,
 };
 use remote_exec_proto::transfer::TransferCompression;
 
+use crate::rpc_error::RpcError;
 use crate::rpc_error::bad_request;
 
 pub(crate) fn export_metadata(
@@ -31,7 +31,7 @@ pub(crate) fn apply_export_headers(
 
 pub(crate) fn parse_import_metadata(
     headers: &HeaderMap,
-) -> Result<TransferImportMetadata, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<TransferImportMetadata, RpcError> {
     parse_transfer_import_metadata_from_lookup(|name| axum_header_string(headers, name))
         .map_err(|err| bad_request(err.to_string()))
 }

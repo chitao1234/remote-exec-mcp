@@ -13,11 +13,13 @@ use remote_exec_proto::port_tunnel::{
 };
 use remote_exec_proto::rpc::{RpcErrorBody, RpcErrorCode};
 
+use crate::rpc_error::RpcError;
+
 pub async fn tunnel(
     State(state): State<Arc<crate::AppState>>,
     headers: HeaderMap,
     request: axum::extract::Request,
-) -> Result<Response, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<Response, RpcError> {
     validate_upgrade_headers(&headers)?;
     let connection_permit = remote_exec_host::port_forward::reserve_tunnel_connection(&state)
         .map_err(crate::rpc_error::host_rpc_error_response)?;
@@ -64,7 +66,7 @@ pub async fn tunnel(
         .into_response())
 }
 
-fn validate_upgrade_headers(headers: &HeaderMap) -> Result<(), (StatusCode, Json<RpcErrorBody>)> {
+fn validate_upgrade_headers(headers: &HeaderMap) -> Result<(), RpcError> {
     if !header_contains_token(headers, CONNECTION.as_str(), "upgrade") {
         return Err(bad_upgrade_request("missing `Connection: Upgrade` header"));
     }
@@ -101,7 +103,7 @@ fn header_eq(headers: &HeaderMap, name: &str, expected: &str) -> bool {
         .is_some_and(|value| value.eq_ignore_ascii_case(expected))
 }
 
-fn bad_upgrade_request(message: impl Into<String>) -> (StatusCode, Json<RpcErrorBody>) {
+fn bad_upgrade_request(message: impl Into<String>) -> RpcError {
     (
         StatusCode::BAD_REQUEST,
         Json(RpcErrorBody::new(RpcErrorCode::BadRequest, message)),

@@ -7,22 +7,23 @@ use std::sync::Arc;
 use axum::Json;
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::HeaderMap;
 use axum::response::Response;
 use futures_util::TryStreamExt;
 use http_body_util::BodyExt;
 use remote_exec_proto::rpc::{
-    RpcErrorBody, TransferExportRequest, TransferImportResponse, TransferPathInfoRequest,
+    TransferExportRequest, TransferImportResponse, TransferPathInfoRequest,
     TransferPathInfoResponse,
 };
 
 use crate::AppState;
+use crate::rpc_error::RpcError;
 use crate::rpc_error::domain_error_response;
 
 pub async fn path_info(
     State(state): State<Arc<AppState>>,
     Json(req): Json<TransferPathInfoRequest>,
-) -> Result<Json<TransferPathInfoResponse>, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<Json<TransferPathInfoResponse>, RpcError> {
     remote_exec_host::transfer::path_info_for_request(state.as_ref(), &req)
         .map(Json)
         .map_err(domain_error_response)
@@ -31,7 +32,7 @@ pub async fn path_info(
 pub async fn export_path(
     State(state): State<Arc<AppState>>,
     Json(req): Json<TransferExportRequest>,
-) -> Result<Response, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<Response, RpcError> {
     tracing::info!(
         path = %req.path,
         compression = codec::compression_header_value(&req.compression),
@@ -62,7 +63,7 @@ pub async fn import_archive(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     body: Body,
-) -> Result<Json<TransferImportResponse>, (StatusCode, Json<RpcErrorBody>)> {
+) -> Result<Json<TransferImportResponse>, RpcError> {
     let metadata = codec::parse_import_metadata(&headers)?;
     tracing::info!(
         destination_path = %metadata.destination_path,
