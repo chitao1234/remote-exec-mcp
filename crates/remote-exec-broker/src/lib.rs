@@ -1,4 +1,5 @@
 mod broker_tls;
+pub mod cli;
 mod client;
 mod config;
 mod daemon_client;

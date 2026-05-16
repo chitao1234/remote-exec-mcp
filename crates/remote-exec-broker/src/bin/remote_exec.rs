@@ -1,17 +1,18 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
-use anyhow::Context;
-use base64::Engine;
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
+use remote_exec_broker::cli::{
+    build_apply_patch_input, build_exec_command_input, build_forward_ports_close_input,
+    build_forward_ports_list_input, build_forward_ports_open_input, build_transfer_files_input,
+    build_view_image_input, build_write_stdin_input, emit_response, emit_view_image_response,
+    resolve_login_flag, write_image_output,
+};
 use remote_exec_broker::{Connection, RemoteExecClient, ToolResponse};
 use remote_exec_proto::public::{
-    ApplyPatchInput, ExecCommandInput, ForwardPortProtocol, ForwardPortSpec, ForwardPortsInput,
-    ListTargetsInput, TransferDestinationMode, TransferEndpoint, TransferFilesInput,
-    TransferOverwrite, TransferSymlinkMode, ViewImageInput, WriteStdinInput,
+    ForwardPortsInput, ListTargetsInput, TransferDestinationMode, TransferOverwrite,
+    TransferSymlinkMode,
 };
-use remote_exec_proto::rpc::ExecPtySize;
-use tokio::io::AsyncReadExt;
 
 const CLI_AFTER_HELP: &str = "\
 Connection modes:
@@ -552,97 +553,68 @@ async fn run_forward_ports(
     emit_and_status(&response, json)
 }
 
-fn exec_command_input(args: ExecCommandArgs) -> ExecCommandInput {
-    ExecCommandInput {
-        target: args.target,
-        cmd: args.cmd,
-        workdir: args.workdir,
-        shell: args.shell,
-        tty: args.tty,
-        yield_time_ms: args.yield_time_ms,
-        max_output_tokens: args.max_output_tokens,
-        login: resolve_login_flag(args.login, args.no_login),
-    }
+fn exec_command_input(args: ExecCommandArgs) -> remote_exec_proto::public::ExecCommandInput {
+    build_exec_command_input(
+        args.target,
+        args.cmd,
+        args.workdir,
+        args.shell,
+        args.tty,
+        args.yield_time_ms,
+        args.max_output_tokens,
+        resolve_login_flag(args.login, args.no_login),
+    )
 }
 
-async fn write_stdin_input(args: WriteStdinArgs) -> anyhow::Result<WriteStdinInput> {
-    Ok(WriteStdinInput {
-        session_id: args.session_id,
-        chars: load_optional_text_input(args.chars, args.chars_file).await?,
-        yield_time_ms: args.yield_time_ms,
-        max_output_tokens: args.max_output_tokens,
-        pty_size: write_stdin_pty_size(args.pty_rows, args.pty_cols)?,
-        target: args.target,
-    })
+async fn write_stdin_input(
+    args: WriteStdinArgs,
+) -> anyhow::Result<remote_exec_proto::public::WriteStdinInput> {
+    build_write_stdin_input(
+        args.session_id,
+        args.chars,
+        args.chars_file,
+        args.yield_time_ms,
+        args.max_output_tokens,
+        args.pty_rows,
+        args.pty_cols,
+        args.target,
+    )
+    .await
 }
 
-fn write_stdin_pty_size(
-    rows: Option<u16>,
-    cols: Option<u16>,
-) -> anyhow::Result<Option<ExecPtySize>> {
-    match (rows, cols) {
-        (None, None) => Ok(None),
-        (Some(rows), Some(cols)) if rows > 0 && cols > 0 => Ok(Some(ExecPtySize { rows, cols })),
-        (Some(_), Some(_)) => anyhow::bail!("--pty-rows and --pty-cols must be greater than zero"),
-        _ => anyhow::bail!("--pty-rows and --pty-cols must be provided together"),
-    }
+async fn apply_patch_input(
+    args: ApplyPatchArgs,
+) -> anyhow::Result<remote_exec_proto::public::ApplyPatchInput> {
+    build_apply_patch_input(args.target, args.input, args.input_file, args.workdir).await
 }
 
-async fn apply_patch_input(args: ApplyPatchArgs) -> anyhow::Result<ApplyPatchInput> {
-    Ok(ApplyPatchInput {
-        target: args.target,
-        input: load_required_text_input(args.input, args.input_file).await?,
-        workdir: args.workdir,
-    })
+fn view_image_input(args: ViewImageArgs) -> remote_exec_proto::public::ViewImageInput {
+    build_view_image_input(args.target, args.path, args.workdir, args.detail)
 }
 
-fn view_image_input(args: ViewImageArgs) -> ViewImageInput {
-    ViewImageInput {
-        target: args.target,
-        path: args.path,
-        workdir: args.workdir,
-        detail: args.detail,
-    }
-}
-
-fn transfer_files_input(args: TransferFilesArgs) -> anyhow::Result<TransferFilesInput> {
-    let endpoints = args
-        .sources
-        .iter()
-        .map(|endpoint| parse_transfer_endpoint(endpoint))
-        .collect::<anyhow::Result<Vec<_>>>()?;
-
-    Ok(TransferFilesInput {
-        source: None,
-        sources: endpoints,
-        destination: parse_transfer_endpoint(&args.destination)?,
-        exclude: args.exclude,
-        overwrite: args.overwrite.into(),
-        destination_mode: args.destination_mode.into(),
-        symlink_mode: args.symlink_mode.into(),
-        create_parent: args.create_parent,
-    })
+fn transfer_files_input(
+    args: TransferFilesArgs,
+) -> anyhow::Result<remote_exec_proto::public::TransferFilesInput> {
+    build_transfer_files_input(
+        &args.sources,
+        &args.destination,
+        args.exclude,
+        args.overwrite.into(),
+        args.destination_mode.into(),
+        args.symlink_mode.into(),
+        args.create_parent,
+    )
 }
 
 fn forward_ports_input(args: ForwardPortsArgs) -> anyhow::Result<ForwardPortsInput> {
     Ok(match args.action {
-        ForwardPortsActionArgs::Open(args) => ForwardPortsInput::Open {
-            listen_side: args.listen_side,
-            connect_side: args.connect_side,
-            forwards: args
-                .forwards
-                .iter()
-                .map(|value| parse_forward_spec(value))
-                .collect::<anyhow::Result<Vec<_>>>()?,
-        },
-        ForwardPortsActionArgs::List(args) => ForwardPortsInput::List {
-            listen_side: args.listen_side,
-            connect_side: args.connect_side,
-            forward_ids: args.forward_ids,
-        },
-        ForwardPortsActionArgs::Close(args) => ForwardPortsInput::Close {
-            forward_ids: args.forward_ids,
-        },
+        ForwardPortsActionArgs::Open(args) => {
+            build_forward_ports_open_input(args.listen_side, args.connect_side, &args.forwards)?
+        }
+        ForwardPortsActionArgs::List(args) => {
+            build_forward_ports_list_input(args.listen_side, args.connect_side, args.forward_ids)
+        }
+        ForwardPortsActionArgs::Close(args) => build_forward_ports_close_input(args.forward_ids),
     })
 }
 
@@ -658,168 +630,9 @@ impl ConnectionArgs {
     }
 }
 
-fn resolve_login_flag(login: bool, no_login: bool) -> Option<bool> {
-    match (login, no_login) {
-        (true, false) => Some(true),
-        (false, true) => Some(false),
-        _ => None,
-    }
-}
-
-async fn load_required_text_input(
-    inline: Option<String>,
-    file: Option<PathBuf>,
-) -> anyhow::Result<String> {
-    load_optional_text_input(inline, file)
-        .await?
-        .context("missing required text input")
-}
-
-async fn load_optional_text_input(
-    inline: Option<String>,
-    file: Option<PathBuf>,
-) -> anyhow::Result<Option<String>> {
-    match (inline, file) {
-        (Some(text), None) => Ok(Some(text)),
-        (None, Some(path)) => Ok(Some(read_text_path(&path).await?)),
-        (None, None) => Ok(None),
-        (Some(_), Some(_)) => anyhow::bail!("provide either inline text or a file path, not both"),
-    }
-}
-
-async fn read_text_path(path: &Path) -> anyhow::Result<String> {
-    let bytes = if path == Path::new("-") {
-        let mut bytes = Vec::new();
-        tokio::io::stdin()
-            .read_to_end(&mut bytes)
-            .await
-            .context("reading stdin")?;
-        bytes
-    } else {
-        tokio::fs::read(path)
-            .await
-            .with_context(|| format!("reading {}", path.display()))?
-    };
-
-    String::from_utf8(bytes).context("text input was not valid UTF-8")
-}
-
-fn parse_transfer_endpoint(value: &str) -> anyhow::Result<TransferEndpoint> {
-    let (target, path) = value
-        .split_once(':')
-        .with_context(|| format!("invalid endpoint `{value}`; expected <target>:<path>"))?;
-    anyhow::ensure!(!target.is_empty(), "endpoint target must not be empty");
-    anyhow::ensure!(!path.is_empty(), "endpoint path must not be empty");
-
-    Ok(TransferEndpoint {
-        target: target.to_string(),
-        path: path.to_string(),
-    })
-}
-
-fn parse_forward_spec(value: &str) -> anyhow::Result<ForwardPortSpec> {
-    let (protocol, endpoints) = value.split_once(':').with_context(|| {
-        format!("invalid forward `{value}`; expected <protocol>:<listen>=<connect>")
-    })?;
-    let (listen_endpoint, connect_endpoint) = endpoints.split_once('=').with_context(|| {
-        format!("invalid forward `{value}`; expected <protocol>:<listen>=<connect>")
-    })?;
-    let protocol = match protocol {
-        "tcp" => ForwardPortProtocol::Tcp,
-        "udp" => ForwardPortProtocol::Udp,
-        other => anyhow::bail!("unsupported forward protocol `{other}`"),
-    };
-    anyhow::ensure!(
-        !listen_endpoint.is_empty(),
-        "forward listen endpoint must not be empty"
-    );
-    anyhow::ensure!(
-        !connect_endpoint.is_empty(),
-        "forward connect endpoint must not be empty"
-    );
-
-    Ok(ForwardPortSpec {
-        listen_endpoint: listen_endpoint.to_string(),
-        connect_endpoint: connect_endpoint.to_string(),
-        protocol,
-    })
-}
-
-fn emit_response(response: &ToolResponse, json: bool) -> anyhow::Result<()> {
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(response).context("serializing CLI response")?
-        );
-        return Ok(());
-    }
-
-    if response.is_error {
-        if !response.text_output.is_empty() {
-            eprintln!("{}", response.text_output);
-        }
-        return Ok(());
-    }
-
-    if !response.text_output.is_empty() {
-        println!("{}", response.text_output);
-    }
-
-    Ok(())
-}
-
 fn emit_and_status(response: &ToolResponse, json: bool) -> CliResult<u8> {
     emit_response(response, json).map_err(CliError::usage)?;
     Ok(status_code(response))
-}
-
-fn emit_view_image_response(
-    response: &ToolResponse,
-    json: bool,
-    output_path: Option<&Path>,
-) -> anyhow::Result<()> {
-    if json {
-        return emit_response(response, true);
-    }
-
-    if response.is_error {
-        return emit_response(response, false);
-    }
-
-    if let Some(path) = output_path {
-        println!("Wrote image to {}", path.display());
-        return Ok(());
-    }
-
-    if let Some(image_url) = response.first_image_url() {
-        println!("{image_url}");
-    }
-
-    Ok(())
-}
-
-async fn write_image_output(response: &ToolResponse, out: &Path) -> anyhow::Result<()> {
-    let image_url = response
-        .first_image_url()
-        .context("view_image response did not include an image payload")?;
-    let bytes = decode_data_url(&image_url)?;
-    tokio::fs::write(out, bytes)
-        .await
-        .with_context(|| format!("writing {}", out.display()))?;
-    Ok(())
-}
-
-fn decode_data_url(image_url: &str) -> anyhow::Result<Vec<u8>> {
-    let (metadata, payload) = image_url
-        .split_once(',')
-        .context("image payload was not a valid data URL")?;
-    anyhow::ensure!(
-        metadata.starts_with("data:") && metadata.ends_with(";base64"),
-        "image payload was not a base64 data URL"
-    );
-    base64::engine::general_purpose::STANDARD
-        .decode(payload)
-        .context("decoding image data URL")
 }
 
 fn status_code(response: &ToolResponse) -> u8 {
