@@ -5,7 +5,7 @@ use remote_exec_proto::rpc::TargetInfoResponse;
 use crate::{
     BrokerState, config,
     daemon_client::{DaemonClient, DaemonClientError},
-    local_backend::LocalDaemonClient,
+    local::backend::LocalDaemonClient,
     port_forward,
     session_store::SessionStore,
     state::LOCAL_TARGET_NAME,

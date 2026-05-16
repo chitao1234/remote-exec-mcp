@@ -1,6 +1,6 @@
 use crate::TargetHandle;
 use crate::daemon_client::DaemonClientError;
-use crate::local_port_backend::LocalPortClient;
+use crate::local::port::LocalPortClient;
 use crate::state::LOCAL_TARGET_NAME;
 
 use super::tunnel::PortTunnel;

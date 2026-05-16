@@ -6,7 +6,7 @@ use remote_exec_proto::rpc::{
 #[derive(Clone)]
 pub(crate) enum TargetBackend {
     Remote(crate::daemon_client::DaemonClient),
-    Local(crate::local_backend::LocalDaemonClient),
+    Local(crate::local::backend::LocalDaemonClient),
 }
 
 impl TargetBackend {

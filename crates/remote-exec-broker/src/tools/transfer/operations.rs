@@ -22,7 +22,7 @@ struct ExportArchiveResult {
 }
 
 enum SingleSourceExport {
-    Local(crate::local_transfer::ExportedArchiveStream),
+    Local(crate::local::transfer::ExportedArchiveStream),
     Remote(crate::daemon_client::TransferExportStream),
 }
 
@@ -116,10 +116,10 @@ pub(super) async fn transfer_multiple_sources(
 
     let bundled = tempfile::NamedTempFile::new()?;
     let bundled_path = bundled.into_temp_path();
-    crate::local_transfer::bundle_archives_to_file(
+    crate::local::transfer::bundle_archives_to_file(
         exported_sources
             .iter()
-            .map(|source| crate::local_transfer::BundledArchiveSource {
+            .map(|source| crate::local::transfer::BundledArchiveSource {
                 source_path: source.endpoint.path.clone(),
                 source_policy: source.source_policy,
                 source_type: source.source_type.clone(),
@@ -172,7 +172,7 @@ async fn export_endpoint_to_archive(
 
     match TransferEndpointTarget::from_endpoint(endpoint) {
         TransferEndpointTarget::Local => {
-            let exported = crate::local_transfer::export_path_to_archive(
+            let exported = crate::local::transfer::export_path_to_archive(
                 &endpoint.path,
                 archive_path,
                 &request,
@@ -196,7 +196,7 @@ async fn export_single_source(
 ) -> anyhow::Result<SingleSourceExport> {
     match TransferEndpointTarget::from_endpoint(source) {
         TransferEndpointTarget::Local => Ok(SingleSourceExport::Local(
-            crate::local_transfer::export_path_to_stream(
+            crate::local::transfer::export_path_to_stream(
                 &source.path,
                 request,
                 state.host_sandbox.as_ref(),
@@ -221,7 +221,7 @@ async fn import_archive_to_endpoint(
 ) -> anyhow::Result<TransferImportResponse> {
     match TransferEndpointTarget::from_endpoint(endpoint) {
         TransferEndpointTarget::Local => {
-            crate::local_transfer::import_archive_from_file(
+            crate::local::transfer::import_archive_from_file(
                 archive_path,
                 request,
                 state.host_sandbox.as_ref(),
@@ -243,7 +243,7 @@ async fn import_single_source(
 ) -> anyhow::Result<TransferImportResponse> {
     match TransferEndpointTarget::from_endpoint(destination) {
         TransferEndpointTarget::Local => {
-            crate::local_transfer::import_archive_from_async_reader(
+            crate::local::transfer::import_archive_from_async_reader(
                 exported.into_async_read(),
                 request,
                 state.host_sandbox.as_ref(),
