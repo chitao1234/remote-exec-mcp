@@ -1,9 +1,10 @@
 #[cfg(windows)]
 use std::path::PathBuf;
+use std::path::Path;
 
 use crate::state::LOCAL_TARGET_NAME;
 
-use super::{BrokerConfig, McpServerConfig, SseInterval};
+use super::{BrokerConfig, McpServerConfig, SseInterval, ValidatedBrokerConfig};
 
 fn valid_target_config(name: &str) -> String {
     if cfg!(feature = "broker-tls") {
@@ -25,15 +26,22 @@ allow_insecure_http = true
     }
 }
 
+fn toml_string(path: &Path) -> toml::Value {
+    toml::Value::String(path.display().to_string())
+}
+
+async fn load_config(dir: &tempfile::TempDir, text: impl AsRef<str>) -> anyhow::Result<ValidatedBrokerConfig> {
+    let config_path = dir.path().join("broker.toml");
+    tokio::fs::write(&config_path, text.as_ref()).await?;
+    BrokerConfig::load(&config_path).await
+}
+
 #[tokio::test]
 async fn load_rejects_reserved_local_target_name() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("broker.toml");
-    tokio::fs::write(&config_path, valid_target_config(LOCAL_TARGET_NAME))
+    let err = load_config(&dir, valid_target_config(LOCAL_TARGET_NAME))
         .await
-        .unwrap();
-
-    let err = BrokerConfig::load(&config_path).await.unwrap_err();
+        .unwrap_err();
     assert!(
         err.to_string()
             .contains("configured target name `local` is reserved"),
@@ -44,21 +52,15 @@ async fn load_rejects_reserved_local_target_name() {
 #[tokio::test]
 async fn load_accepts_non_reserved_target_names() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("broker.toml");
-    tokio::fs::write(&config_path, valid_target_config("builder-a"))
-        .await
-        .unwrap();
-
-    let config = BrokerConfig::load(&config_path).await.unwrap();
+    let config = load_config(&dir, valid_target_config("builder-a")).await.unwrap();
     assert!(config.targets.contains_key("builder-a"));
 }
 
 #[tokio::test]
 async fn load_accepts_remote_target_timeout_config() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("broker.toml");
-    tokio::fs::write(
-        &config_path,
+    let config = load_config(
+        &dir,
         r#"[targets.builder-a]
 base_url = "http://127.0.0.1:8181"
 allow_insecure_http = true
@@ -72,8 +74,6 @@ startup_probe_ms = 4567
     )
     .await
     .unwrap();
-
-    let config = BrokerConfig::load(&config_path).await.unwrap();
     let timeouts = config.targets["builder-a"].timeouts;
     assert_eq!(timeouts.connect_ms, 1234);
     assert_eq!(timeouts.read_ms, 2345);
@@ -88,9 +88,8 @@ startup_probe_ms = 4567
 #[tokio::test]
 async fn load_rejects_zero_remote_target_timeout() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("broker.toml");
-    tokio::fs::write(
-        &config_path,
+    let err = load_config(
+        &dir,
         r#"[targets.builder-a]
 base_url = "http://127.0.0.1:8181"
 allow_insecure_http = true
@@ -100,9 +99,7 @@ request_ms = 0
 "#,
     )
     .await
-    .unwrap();
-
-    let err = BrokerConfig::load(&config_path).await.unwrap_err();
+    .unwrap_err();
     assert!(
         err.to_string()
             .contains("target `builder-a` timeouts.request_ms must be greater than zero"),
@@ -114,9 +111,8 @@ request_ms = 0
 #[tokio::test]
 async fn load_accepts_https_targets_even_when_broker_tls_feature_disabled() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("broker.toml");
-    tokio::fs::write(
-        &config_path,
+    let config = load_config(
+        &dir,
         r#"[targets.builder-a]
 base_url = "https://127.0.0.1:8443"
 ca_pem = "/tmp/ca.pem"
@@ -126,26 +122,21 @@ client_key_pem = "/tmp/broker.key"
     )
     .await
     .unwrap();
-
-    let config = BrokerConfig::load(&config_path).await.unwrap();
     assert_eq!(config.targets["builder-a"].base_url, "https://127.0.0.1:8443");
 }
 
 #[tokio::test]
 async fn load_accepts_local_only_broker_config() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("broker.toml");
-    tokio::fs::write(
-        &config_path,
+    let config = load_config(
+        &dir,
         format!(
             "[local]\ndefault_workdir = {}\nallow_login_shell = false\n",
-            toml::Value::String(dir.path().display().to_string())
+            toml_string(dir.path())
         ),
     )
     .await
     .unwrap();
-
-    let config = BrokerConfig::load(&config_path).await.unwrap();
     assert!(config.targets.is_empty());
     assert_eq!(
         config.local.as_ref().map(|local| &local.default_workdir),
@@ -162,19 +153,16 @@ async fn load_accepts_local_only_broker_config() {
 #[tokio::test]
 async fn load_rejects_missing_local_default_workdir() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("broker.toml");
     let missing_workdir = dir.path().join("missing-local-workdir");
-    tokio::fs::write(
-        &config_path,
+    let err = load_config(
+        &dir,
         format!(
             "[local]\ndefault_workdir = {}\n",
-            toml::Value::String(missing_workdir.display().to_string())
+            toml_string(&missing_workdir)
         ),
     )
     .await
-    .unwrap();
-
-    let err = BrokerConfig::load(&config_path).await.unwrap_err();
+    .unwrap_err();
     assert!(
         err.to_string().contains("local.default_workdir")
             && err.to_string().contains("does not exist"),
@@ -186,18 +174,15 @@ async fn load_rejects_missing_local_default_workdir() {
 #[tokio::test]
 async fn load_accepts_local_windows_posix_root() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("broker.toml");
-    tokio::fs::write(
-        &config_path,
+    let config = load_config(
+        &dir,
         format!(
             "[local]\ndefault_workdir = {}\nwindows_posix_root = \"C:\\\\msys64\"\n",
-            toml::Value::String(dir.path().display().to_string())
+            toml_string(dir.path())
         ),
     )
     .await
     .unwrap();
-
-    let config = BrokerConfig::load(&config_path).await.unwrap();
     assert_eq!(
         config
             .local
@@ -213,18 +198,15 @@ async fn load_normalizes_local_default_workdir_through_windows_posix_root() {
     let dir = tempfile::tempdir().unwrap();
     let synthetic_root = dir.path().join("msys64");
     std::fs::create_dir_all(synthetic_root.join("tmp")).unwrap();
-    let config_path = dir.path().join("broker.toml");
-    tokio::fs::write(
-        &config_path,
+    let config = load_config(
+        &dir,
         format!(
             "[local]\ndefault_workdir = \"/tmp\"\nwindows_posix_root = {}\n",
-            toml::Value::String(synthetic_root.display().to_string())
+            toml_string(&synthetic_root)
         ),
     )
     .await
     .unwrap();
-
-    let config = BrokerConfig::load(&config_path).await.unwrap();
     assert_eq!(
         config
             .local
@@ -237,18 +219,15 @@ async fn load_normalizes_local_default_workdir_through_windows_posix_root() {
 #[tokio::test]
 async fn load_accepts_local_apply_patch_encoding_autodetect() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("broker.toml");
-    tokio::fs::write(
-        &config_path,
+    let config = load_config(
+        &dir,
         format!(
             "[local]\ndefault_workdir = {}\nexperimental_apply_patch_target_encoding_autodetect = true\n",
-            toml::Value::String(dir.path().display().to_string())
+            toml_string(dir.path())
         ),
     )
     .await
     .unwrap();
-
-    let config = BrokerConfig::load(&config_path).await.unwrap();
     assert_eq!(
         config
             .local
@@ -261,9 +240,8 @@ async fn load_accepts_local_apply_patch_encoding_autodetect() {
 #[tokio::test]
 async fn load_accepts_disabling_structured_content() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("broker.toml");
-    tokio::fs::write(
-        &config_path,
+    let config = load_config(
+        &dir,
         format!(
             "disable_structured_content = true\n\n{}",
             valid_target_config("builder-a")
@@ -271,8 +249,6 @@ async fn load_accepts_disabling_structured_content() {
     )
     .await
     .unwrap();
-
-    let config = BrokerConfig::load(&config_path).await.unwrap();
     assert!(config.disable_structured_content);
 }
 

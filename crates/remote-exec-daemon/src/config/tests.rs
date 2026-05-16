@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::{DaemonConfig, DaemonTransport, YieldTimeConfig, YieldTimeOperation};
+use super::{DaemonConfig, DaemonTransport, ValidatedDaemonConfig, YieldTimeConfig, YieldTimeOperation};
 
 fn neutral_toml_path(path: &Path) -> toml::Value {
     toml::Value::String(path.display().to_string())
@@ -10,26 +10,27 @@ fn neutral_workdir(dir: &tempfile::TempDir) -> toml::Value {
     neutral_toml_path(dir.path())
 }
 
+fn http_config(workdir: toml::Value, extra: &str) -> String {
+    format!(
+        r#"
+target = "builder-a"
+listen = "127.0.0.1:8080"
+default_workdir = {workdir}
+transport = "http"
+{extra}"#
+    )
+}
+
+async fn load_config(dir: &tempfile::TempDir, text: impl AsRef<str>) -> anyhow::Result<ValidatedDaemonConfig> {
+    let config_path = dir.path().join("daemon.toml");
+    tokio::fs::write(&config_path, text.as_ref()).await?;
+    DaemonConfig::load(&config_path).await
+}
+
 #[tokio::test]
 async fn load_accepts_http_transport_without_tls_block() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("daemon.toml");
-    tokio::fs::write(
-        &config_path,
-        format!(
-            r#"
-target = "builder-a"
-listen = "127.0.0.1:8080"
-default_workdir = {}
-transport = "http"
-"#,
-            neutral_workdir(&dir)
-        ),
-    )
-    .await
-    .unwrap();
-
-    let config = DaemonConfig::load(&config_path).await.unwrap();
+    let config = load_config(&dir, http_config(neutral_workdir(&dir), "")).await.unwrap();
     assert!(matches!(config.transport, DaemonTransport::Http));
     assert!(config.http_auth.is_none());
     assert!(config.tls.is_none());
@@ -44,24 +45,12 @@ transport = "http"
 #[tokio::test]
 async fn load_accepts_max_open_sessions_override() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("daemon.toml");
-    tokio::fs::write(
-        &config_path,
-        format!(
-            r#"
-target = "builder-a"
-listen = "127.0.0.1:8080"
-default_workdir = {}
-transport = "http"
-max_open_sessions = 7
-"#,
-            neutral_workdir(&dir)
-        ),
+    let config = load_config(
+        &dir,
+        http_config(neutral_workdir(&dir), "max_open_sessions = 7\n"),
     )
     .await
     .unwrap();
-
-    let config = DaemonConfig::load(&config_path).await.unwrap();
     assert_eq!(config.max_open_sessions, 7);
     assert_eq!(
         remote_exec_host::HostRuntimeConfig::from(&config).max_open_sessions,
@@ -72,24 +61,12 @@ max_open_sessions = 7
 #[tokio::test]
 async fn load_rejects_zero_max_open_sessions() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("daemon.toml");
-    tokio::fs::write(
-        &config_path,
-        format!(
-            r#"
-target = "builder-a"
-listen = "127.0.0.1:8080"
-default_workdir = {}
-transport = "http"
-max_open_sessions = 0
-"#,
-            neutral_workdir(&dir)
-        ),
+    let err = load_config(
+        &dir,
+        http_config(neutral_workdir(&dir), "max_open_sessions = 0\n"),
     )
     .await
-    .unwrap();
-
-    let err = DaemonConfig::load(&config_path).await.unwrap_err();
+    .unwrap_err();
     assert!(
         err.to_string()
             .contains("max_open_sessions must be greater than zero"),
@@ -102,9 +79,8 @@ max_open_sessions = 0
 async fn load_accepts_windows_posix_root() {
     let dir = tempfile::tempdir().unwrap();
     let synthetic_root = dir.path().join("msys64");
-    let config_path = dir.path().join("daemon.toml");
-    tokio::fs::write(
-        &config_path,
+    let config = load_config(
+        &dir,
         format!(
             r#"
 target = "builder-a"
@@ -119,8 +95,6 @@ transport = "http"
     )
     .await
     .unwrap();
-
-    let config = DaemonConfig::load(&config_path).await.unwrap();
     assert_eq!(config.windows_posix_root, Some(synthetic_root));
 }
 
@@ -132,9 +106,8 @@ async fn load_normalizes_default_workdir_through_windows_posix_root() {
     let posix_workdir_name = "tmp";
     let posix_workdir = format!("/{posix_workdir_name}");
     std::fs::create_dir_all(synthetic_root.join(posix_workdir_name)).unwrap();
-    let config_path = dir.path().join("daemon.toml");
-    tokio::fs::write(
-        &config_path,
+    let config = load_config(
+        &dir,
         format!(
             r#"
 target = "builder-a"
@@ -148,8 +121,6 @@ transport = "http"
     )
     .await
     .unwrap();
-
-    let config = DaemonConfig::load(&config_path).await.unwrap();
     assert_eq!(
         config.default_workdir,
         synthetic_root.join(posix_workdir_name)
@@ -193,24 +164,10 @@ default_workdir = {}
 #[tokio::test]
 async fn load_rejects_missing_default_workdir() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("daemon.toml");
     let missing_workdir = dir.path().join("missing-workdir");
-    tokio::fs::write(
-        &config_path,
-        format!(
-            r#"
-target = "builder-a"
-listen = "127.0.0.1:8080"
-default_workdir = {}
-transport = "http"
-"#,
-            toml::Value::String(missing_workdir.display().to_string())
-        ),
-    )
-    .await
-    .unwrap();
-
-    let err = DaemonConfig::load(&config_path).await.unwrap_err();
+    let err = load_config(&dir, http_config(neutral_toml_path(&missing_workdir), ""))
+        .await
+        .unwrap_err();
     assert!(
         err.to_string().contains("default_workdir") && err.to_string().contains("does not exist"),
         "unexpected error: {err}"
