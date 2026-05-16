@@ -1,3 +1,5 @@
+use remote_exec_proto::port_forward::ForwardId;
+
 fn new_id(prefix: &str) -> String {
     format!("{prefix}_{}", uuid::Uuid::new_v4().simple())
 }
@@ -18,8 +20,8 @@ pub fn new_public_session_id() -> String {
     new_id("sess")
 }
 
-pub fn new_forward_id() -> String {
-    new_id("fwd")
+pub fn new_forward_id() -> ForwardId {
+    ForwardId::new(new_id("fwd"))
 }
 
 #[cfg(test)]
@@ -30,6 +32,6 @@ mod tests {
         assert!(super::new_exec_session_id().starts_with("sess_"));
         assert!(super::new_tunnel_session_id().starts_with("ptun_"));
         assert!(super::new_public_session_id().starts_with("sess_"));
-        assert!(super::new_forward_id().starts_with("fwd_"));
+        assert!(super::new_forward_id().as_str().starts_with("fwd_"));
     }
 }

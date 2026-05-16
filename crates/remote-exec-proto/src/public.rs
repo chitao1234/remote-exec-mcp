@@ -22,6 +22,7 @@ pub use crate::transfer::{TransferOverwrite, TransferSourceType, TransferSymlink
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::port_forward::ForwardId;
     use crate::port_tunnel::TunnelForwardProtocol;
 
     #[test]
@@ -46,7 +47,7 @@ mod tests {
         );
         assert_eq!(
             ForwardPortsInput::Close {
-                forward_ids: vec!["fwd_123".to_string()],
+                forward_ids: vec![ForwardId::new("fwd_123")],
             }
             .action(),
             ForwardPortsAction::Close
@@ -68,7 +69,7 @@ mod tests {
     #[test]
     fn forward_port_entry_serializes_additive_v4_state() {
         let entry = ForwardPortEntry {
-            forward_id: "fwd_test".to_string(),
+            forward_id: ForwardId::new("fwd_test"),
             listen_side: "local".to_string(),
             listen_endpoint: "127.0.0.1:10000".to_string(),
             connect_side: "builder-a".to_string(),

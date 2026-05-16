@@ -16,6 +16,7 @@ pub use meta::{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::port_forward::ForwardId;
 
     #[tokio::test]
     async fn v4_control_frames_round_trip() {
@@ -28,7 +29,7 @@ mod tests {
                     flags: 0,
                     stream_id: 0,
                     meta: serde_json::to_vec(&TunnelOpenMeta {
-                        forward_id: "fwd_test".to_string(),
+                        forward_id: ForwardId::new("fwd_test"),
                         role: TunnelRole::Listen,
                         side: "builder-a".to_string(),
                         generation: 4,
@@ -47,7 +48,7 @@ mod tests {
         assert_eq!(frame.frame_type, FrameType::TunnelOpen);
         assert_eq!(frame.stream_id, 0);
         let meta: TunnelOpenMeta = serde_json::from_slice(&frame.meta).unwrap();
-        assert_eq!(meta.forward_id, "fwd_test");
+        assert_eq!(meta.forward_id.as_str(), "fwd_test");
         assert_eq!(meta.role, TunnelRole::Listen);
         assert_eq!(meta.generation, 4);
         assert_eq!(meta.resume_session_id.as_deref(), Some("sess_test"));

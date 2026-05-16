@@ -1,3 +1,59 @@
+use std::borrow::Borrow;
+use std::fmt;
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+#[serde(transparent)]
+pub struct ForwardId(String);
+
+impl ForwardId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ForwardId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl AsRef<str> for ForwardId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Borrow<str> for ForwardId {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for ForwardId {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for ForwardId {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl PartialEq<str> for ForwardId {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum PortForwardProtoError {
     #[error("endpoint must not be empty")]

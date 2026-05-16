@@ -3,6 +3,7 @@ mod support;
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use remote_exec_proto::port_forward::ForwardId;
 use remote_exec_proto::port_tunnel::{
     Frame, FrameType, TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, TunnelCloseMeta,
     TunnelErrorMeta, TunnelForwardProtocol, TunnelOpenMeta, TunnelReadyMeta, TunnelRole,
@@ -117,7 +118,7 @@ async fn tunnel_open_ready_and_close_round_trip() {
             flags: 0,
             stream_id: 0,
             meta: serde_json::to_vec(&TunnelOpenMeta {
-                forward_id: "fwd_test".to_string(),
+                forward_id: ForwardId::new("fwd_test"),
                 role: TunnelRole::Listen,
                 side: "builder-a".to_string(),
                 generation: 1,
@@ -176,7 +177,7 @@ max_tunnel_queued_bytes = 4096
             flags: 0,
             stream_id: 0,
             meta: serde_json::to_vec(&TunnelOpenMeta {
-                forward_id: "fwd_limits".to_string(),
+                forward_id: ForwardId::new("fwd_limits"),
                 role: TunnelRole::Connect,
                 side: "builder-a".to_string(),
                 generation: 7,
@@ -258,7 +259,7 @@ async fn port_tunnel_rejects_old_generation_frames() {
             flags: 0,
             stream_id: 0,
             meta: serde_json::to_vec(&TunnelOpenMeta {
-                forward_id: "fwd_test".to_string(),
+                forward_id: ForwardId::new("fwd_test"),
                 role: TunnelRole::Listen,
                 side: "builder-a".to_string(),
                 generation: 2,
@@ -465,7 +466,7 @@ async fn write_tunnel_open(stream: &mut tokio::net::TcpStream, forward_id: &str)
             flags: 0,
             stream_id: 0,
             meta: serde_json::to_vec(&TunnelOpenMeta {
-                forward_id: forward_id.to_string(),
+                forward_id: ForwardId::new(forward_id),
                 role: TunnelRole::Listen,
                 side: "builder-a".to_string(),
                 generation: 1,

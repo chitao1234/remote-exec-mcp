@@ -136,7 +136,7 @@ async fn open_tunnel_with_role(
             flags: 0,
             stream_id: 0,
             meta: encode_tunnel_meta(&TunnelOpenMeta {
-                forward_id: forward_id.to_string(),
+                forward_id: forward_id.into(),
                 role,
                 side: side.name().to_string(),
                 generation,

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
+use remote_exec_proto::port_forward::ForwardId;
 use remote_exec_proto::port_tunnel::{
     EndpointMeta, Frame, FrameType, MAX_DATA_LEN, TUNNEL_CLOSE_REASON_OPERATOR_CLOSE,
     TunnelCloseMeta, TunnelErrorMeta, TunnelForwardProtocol, TunnelHeartbeatMeta, TunnelOpenMeta,
@@ -448,7 +449,7 @@ async fn tunnel_ready_reports_configured_limits() {
             flags: 0,
             stream_id: 0,
             meta: serde_json::to_vec(&TunnelOpenMeta {
-                forward_id: "fwd_limits".to_string(),
+                forward_id: ForwardId::new("fwd_limits"),
                 role: TunnelRole::Connect,
                 side: "test".to_string(),
                 generation: 7,
@@ -871,7 +872,7 @@ async fn concurrent_tunnel_open_allows_only_one_mode() {
         flags: 0,
         stream_id: 0,
         meta: serde_json::to_vec(&TunnelOpenMeta {
-            forward_id: "forward-a".to_string(),
+            forward_id: ForwardId::new("forward-a"),
             role: TunnelRole::Listen,
             side: "test".to_string(),
             generation: 1,
@@ -961,7 +962,7 @@ async fn retained_udp_queued_byte_pressure_reports_drop() {
             flags: 0,
             stream_id: 0,
             meta: serde_json::to_vec(&TunnelOpenMeta {
-                forward_id: "fwd_test".to_string(),
+                forward_id: ForwardId::new("fwd_test"),
                 role: TunnelRole::Listen,
                 side: "test".to_string(),
                 generation: 1,
@@ -1103,7 +1104,7 @@ async fn write_tunnel_open_on_writer<W>(
             flags: 0,
             stream_id: 0,
             meta: serde_json::to_vec(&TunnelOpenMeta {
-                forward_id: "fwd_test".to_string(),
+                forward_id: ForwardId::new("fwd_test"),
                 role,
                 side: "test".to_string(),
                 generation: 1,

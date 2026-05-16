@@ -69,7 +69,7 @@ async fn resume_listen_session_inner(
 ) -> anyhow::Result<Arc<PortTunnel>> {
     let opened = open_listen_session(
         &control.side,
-        &control.forward_id,
+        control.forward_id.as_str(),
         control.protocol,
         generation,
         Some(control.session_id.clone()),
@@ -109,7 +109,7 @@ async fn reconnect_connect_epoch(runtime: &ForwardRuntime) -> anyhow::Result<Opt
     let generation = runtime.listen_session.advance_generation().await;
     runtime
         .store
-        .set_forward_generation(runtime.forward_id(), generation)
+        .set_forward_generation(runtime.forward_id().as_str(), generation)
         .await;
     let Some(listen_tunnel) = reconnect_listen_tunnel(
         runtime.listen_session.clone(),
@@ -188,7 +188,7 @@ async fn recover_listen_side_tunnels(
     let generation = runtime.listen_session.advance_generation().await;
     runtime
         .store
-        .set_forward_generation(runtime.forward_id(), generation)
+        .set_forward_generation(runtime.forward_id().as_str(), generation)
         .await;
     let Some(listen_tunnel) = reconnect_listen_tunnel(
         runtime.listen_session.clone(),
@@ -223,7 +223,7 @@ async fn recover_connect_side_tunnel_after_listen_recovery(
     runtime
         .store
         .mark_connect_reopening_after_listen_recovery(
-            runtime.forward_id(),
+            runtime.forward_id().as_str(),
             reason.to_string(),
             runtime.limits.max_reconnecting_forwards,
         )
@@ -251,7 +251,7 @@ async fn retry_open_connect_tunnel(
         || async {
             open_data_tunnel(
                 runtime.connect_side(),
-                runtime.forward_id(),
+                runtime.forward_id().as_str(),
                 runtime.protocol(),
                 generation,
                 runtime.limits.max_tunnel_queued_bytes,
@@ -320,7 +320,7 @@ pub(in crate::port_forward) async fn close_listen_session(
         Ok(()) => {
             return close_tunnel_after_listener_ack(
                 &tunnel,
-                &control.forward_id,
+                control.forward_id.as_str(),
                 snapshot.generation,
                 TUNNEL_CLOSE_REASON_OPERATOR_CLOSE,
             )
@@ -337,7 +337,7 @@ pub(in crate::port_forward) async fn close_listen_session(
     close_listener_on_tunnel(&tunnel, control.listener_stream_id).await?;
     close_tunnel_after_listener_ack(
         &tunnel,
-        &control.forward_id,
+        control.forward_id.as_str(),
         generation,
         TUNNEL_CLOSE_REASON_OPERATOR_CLOSE,
     )
@@ -443,6 +443,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use remote_exec_proto::port_forward::ForwardId;
     use remote_exec_proto::port_tunnel::{Frame, FrameType, read_frame, write_frame};
     use remote_exec_proto::public::ForwardPortProtocol;
 
@@ -456,7 +457,7 @@ mod tests {
         let tunnel = Arc::new(PortTunnel::from_stream(broker_side).unwrap());
         let control = Arc::new(ListenSessionControl::new_for_test(
             SideHandle::local().unwrap(),
-            "fwd_test".to_string(),
+            ForwardId::new("fwd_test"),
             "tunnel_session_test".to_string(),
             ForwardPortProtocol::Tcp,
             Duration::from_secs(10),
@@ -494,7 +495,7 @@ mod tests {
     async fn close_listen_session_without_retained_tunnel_is_a_noop() {
         let control = Arc::new(ListenSessionControl::new_for_test(
             SideHandle::local().unwrap(),
-            "fwd_test".to_string(),
+            ForwardId::new("fwd_test"),
             "tunnel_session_test".to_string(),
             ForwardPortProtocol::Tcp,
             Duration::from_secs(10),

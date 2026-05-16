@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::task::{Context as TaskContext, Poll};
 use std::time::Duration;
 
+use remote_exec_proto::port_forward::ForwardId;
 use remote_exec_proto::port_tunnel::{
     ForwardDropKind, ForwardDropMeta, Frame, FrameType, read_frame, write_frame,
 };
@@ -97,7 +98,7 @@ async fn tcp_accept_send_failure_recovers_connect_tunnel_without_leaking_active_
         ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)
     ));
 
-    let entries = runtime.store.list(&filter_one(runtime.forward_id())).await;
+    let entries = runtime.store.list(&filter_one(runtime.forward_id().as_str())).await;
     assert_eq!(entries[0].active_tcp_streams, 0);
 }
 
@@ -162,7 +163,7 @@ async fn ready_tcp_data_send_backpressure_counts_dropped_stream() {
 
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            let entries = runtime.store.list(&filter_one(runtime.forward_id())).await;
+            let entries = runtime.store.list(&filter_one(runtime.forward_id().as_str())).await;
             if entries[0].dropped_tcp_streams == 1 {
                 assert_eq!(entries[0].active_tcp_streams, 0);
                 return;
@@ -231,7 +232,7 @@ async fn pending_tcp_data_limit_drops_unready_stream_without_leaking_active_coun
 
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            let entries = runtime.store.list(&filter_one(runtime.forward_id())).await;
+            let entries = runtime.store.list(&filter_one(runtime.forward_id().as_str())).await;
             if entries[0].dropped_tcp_streams == 1 {
                 assert_eq!(entries[0].active_tcp_streams, 0);
                 return;
@@ -260,7 +261,7 @@ async fn ready_tcp_data_send_failure_recovers_connect_tunnel() {
 
     let listen_session = Arc::new(ListenSessionControl::new_for_test(
         SideHandle::local().unwrap(),
-        "fwd_test".to_string(),
+        ForwardId::new("fwd_test"),
         "test-session".to_string(),
         PublicForwardPortProtocol::Tcp,
         Duration::from_secs(30),
@@ -270,7 +271,7 @@ async fn ready_tcp_data_send_failure_recovers_connect_tunnel() {
     let cancel = CancellationToken::new();
     let runtime = ForwardRuntime::new(
         ForwardIdentity::new(
-            "fwd_test".to_string(),
+            ForwardId::new("fwd_test"),
             SideHandle::local().unwrap(),
             SideHandle::local().unwrap(),
             PublicForwardPortProtocol::Tcp,
@@ -354,7 +355,7 @@ async fn pending_tcp_flush_send_failure_recovers_connect_tunnel() {
 
     let listen_session = Arc::new(ListenSessionControl::new_for_test(
         SideHandle::local().unwrap(),
-        "fwd_test".to_string(),
+        ForwardId::new("fwd_test"),
         "test-session".to_string(),
         PublicForwardPortProtocol::Tcp,
         Duration::from_secs(30),
@@ -364,7 +365,7 @@ async fn pending_tcp_flush_send_failure_recovers_connect_tunnel() {
     let cancel = CancellationToken::new();
     let runtime = ForwardRuntime::new(
         ForwardIdentity::new(
-            "fwd_test".to_string(),
+            ForwardId::new("fwd_test"),
             SideHandle::local().unwrap(),
             SideHandle::local().unwrap(),
             PublicForwardPortProtocol::Tcp,
@@ -469,7 +470,7 @@ async fn listen_close_before_connect_ready_releases_active_stream() {
 
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            let entries = runtime.store.list(&filter_one(runtime.forward_id())).await;
+            let entries = runtime.store.list(&filter_one(runtime.forward_id().as_str())).await;
             if entries[0].active_tcp_streams == 0 {
                 return;
             }
@@ -575,7 +576,7 @@ async fn fully_drained_tcp_pair_closes_both_daemon_streams() {
 
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            let entries = runtime.store.list(&filter_one(runtime.forward_id())).await;
+            let entries = runtime.store.list(&filter_one(runtime.forward_id().as_str())).await;
             if entries[0].active_tcp_streams == 0 {
                 return;
             }
@@ -676,7 +677,7 @@ async fn tcp_listener_pressure_error_counts_drop_without_failing_forward() {
 
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            let entries = runtime.store.list(&filter_one(runtime.forward_id())).await;
+            let entries = runtime.store.list(&filter_one(runtime.forward_id().as_str())).await;
             if entries[0].dropped_tcp_streams == 1 {
                 return;
             }
@@ -736,7 +737,7 @@ async fn tcp_listener_forward_drop_counts_drop_without_failing_forward() {
 
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            let entries = runtime.store.list(&filter_one(runtime.forward_id())).await;
+            let entries = runtime.store.list(&filter_one(runtime.forward_id().as_str())).await;
             if entries[0].dropped_tcp_streams == 2 {
                 return;
             }
@@ -821,7 +822,7 @@ fn tcp_test_runtime_with_limits(
     let initial_epoch = tcp_test_epoch(listen_tunnel.clone(), connect_tunnel.clone());
     let listen_session = Arc::new(ListenSessionControl::new_for_test(
         SideHandle::local().unwrap(),
-        "fwd_test".to_string(),
+        ForwardId::new("fwd_test"),
         "test-session".to_string(),
         PublicForwardPortProtocol::Tcp,
         Duration::from_secs(30),
@@ -830,7 +831,7 @@ fn tcp_test_runtime_with_limits(
     ));
     ForwardRuntime::new(
         ForwardIdentity::new(
-            "fwd_test".to_string(),
+            ForwardId::new("fwd_test"),
             SideHandle::local().unwrap(),
             SideHandle::local().unwrap(),
             PublicForwardPortProtocol::Tcp,

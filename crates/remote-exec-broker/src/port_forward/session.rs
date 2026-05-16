@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use remote_exec_proto::port_forward::ForwardId;
 use remote_exec_proto::public::ForwardPortProtocol as PublicForwardPortProtocol;
 use tokio::sync::Mutex;
 
@@ -11,7 +12,7 @@ pub(super) const LISTEN_SESSION_STREAM_ID: u32 = 1;
 
 pub(super) struct ListenSessionControl {
     pub(super) side: SideHandle,
-    pub(super) forward_id: String,
+    pub(super) forward_id: ForwardId,
     pub(super) session_id: String,
     pub(super) protocol: PublicForwardPortProtocol,
     pub(super) listener_stream_id: u32,
@@ -32,7 +33,7 @@ pub(super) struct ListenSessionSnapshot {
 
 pub(super) struct ListenSessionParams {
     pub(super) side: SideHandle,
-    pub(super) forward_id: String,
+    pub(super) forward_id: ForwardId,
     pub(super) session_id: String,
     pub(super) protocol: PublicForwardPortProtocol,
     pub(super) listener_stream_id: u32,
@@ -98,7 +99,7 @@ impl ListenSessionControl {
     #[cfg(test)]
     pub(super) fn new_for_test(
         side: SideHandle,
-        forward_id: String,
+        forward_id: ForwardId,
         session_id: String,
         protocol: PublicForwardPortProtocol,
         resume_timeout: Duration,

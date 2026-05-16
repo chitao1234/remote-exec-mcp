@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::task::{Context as TaskContext, Poll, Waker};
 use std::time::Duration;
 
+use remote_exec_proto::port_forward::ForwardId;
 use remote_exec_proto::port_tunnel::{Frame, FrameType, HEADER_LEN};
 use remote_exec_proto::public::ForwardPortEntry;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
@@ -131,14 +132,14 @@ pub(super) fn filter_one(forward_id: &str) -> PortForwardFilter {
     PortForwardFilter {
         listen_side: None,
         connect_side: None,
-        forward_ids: vec![forward_id.to_string()],
+        forward_ids: vec![ForwardId::new(forward_id)],
     }
 }
 
 pub(super) fn test_record(runtime: &ForwardRuntime, listen_endpoint: &str) -> PortForwardRecord {
     PortForwardRecord::new(
         ForwardPortEntry::new_open(
-            runtime.forward_id().to_string(),
+            runtime.forward_id().clone(),
             runtime.listen_side().name().to_string(),
             listen_endpoint.to_string(),
             runtime.connect_side().name().to_string(),

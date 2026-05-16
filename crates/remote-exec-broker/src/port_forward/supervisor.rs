@@ -4,6 +4,7 @@ mod tunnel_open;
 
 use std::sync::Arc;
 
+use remote_exec_proto::port_forward::ForwardId;
 use remote_exec_proto::public::{
     ForwardPortEntry, ForwardPortLimitSummary, ForwardPortProtocol as PublicForwardPortProtocol,
     ForwardPortSideRole,
@@ -27,7 +28,7 @@ pub(super) use reconnect::{
 
 #[derive(Clone)]
 pub(super) struct ForwardIdentity {
-    forward_id: String,
+    forward_id: ForwardId,
     listen_side: SideHandle,
     connect_side: SideHandle,
     protocol: PublicForwardPortProtocol,
@@ -36,7 +37,7 @@ pub(super) struct ForwardIdentity {
 
 impl ForwardIdentity {
     pub(super) fn new(
-        forward_id: String,
+        forward_id: ForwardId,
         listen_side: SideHandle,
         connect_side: SideHandle,
         protocol: PublicForwardPortProtocol,
@@ -51,7 +52,7 @@ impl ForwardIdentity {
         }
     }
 
-    pub(super) fn forward_id(&self) -> &str {
+    pub(super) fn forward_id(&self) -> &ForwardId {
         &self.forward_id
     }
 
@@ -144,7 +145,7 @@ impl ForwardRuntime {
         }
     }
 
-    pub(super) fn forward_id(&self) -> &str {
+    pub(super) fn forward_id(&self) -> &ForwardId {
         self.identity.forward_id()
     }
 
@@ -170,7 +171,7 @@ impl ForwardRuntime {
 
     pub(super) async fn record_dropped_datagram(&self) {
         self.store
-            .update_entry(self.forward_id(), |entry| {
+            .update_entry(self.forward_id().as_str(), |entry| {
                 entry.dropped_udp_datagrams += 1;
             })
             .await;
@@ -178,7 +179,7 @@ impl ForwardRuntime {
 
     pub(super) async fn record_dropped_stream(&self) {
         self.store
-            .update_entry(self.forward_id(), |entry| {
+            .update_entry(self.forward_id().as_str(), |entry| {
                 entry.dropped_tcp_streams += 1;
             })
             .await;
@@ -189,7 +190,7 @@ impl ForwardRuntime {
             return;
         }
         self.store
-            .update_entry(self.forward_id(), |entry| {
+            .update_entry(self.forward_id().as_str(), |entry| {
                 entry.dropped_tcp_streams += count;
                 entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(count);
             })
@@ -198,7 +199,7 @@ impl ForwardRuntime {
 
     pub(super) async fn release_active_stream(&self) {
         self.store
-            .update_entry(self.forward_id(), |entry| {
+            .update_entry(self.forward_id().as_str(), |entry| {
                 entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(1);
             })
             .await;
@@ -206,7 +207,7 @@ impl ForwardRuntime {
 
     pub(super) async fn record_dropped_active_stream(&self) {
         self.store
-            .update_entry(self.forward_id(), |entry| {
+            .update_entry(self.forward_id().as_str(), |entry| {
                 entry.dropped_tcp_streams += 1;
                 entry.active_tcp_streams = entry.active_tcp_streams.saturating_sub(1);
             })
@@ -217,7 +218,7 @@ impl ForwardRuntime {
         let mut reserved = false;
         let mut saw_entry = false;
         self.store
-            .update_entry(self.forward_id(), |entry| {
+            .update_entry(self.forward_id().as_str(), |entry| {
                 saw_entry = true;
                 if entry.active_tcp_streams < self.limits.max_active_tcp_streams {
                     entry.active_tcp_streams += 1;
@@ -235,7 +236,7 @@ impl ForwardRuntime {
     ) -> anyhow::Result<()> {
         self.store
             .mark_reconnecting(
-                self.forward_id(),
+                self.forward_id().as_str(),
                 side,
                 reason.to_string(),
                 self.limits.max_reconnecting_forwards,
@@ -244,7 +245,9 @@ impl ForwardRuntime {
     }
 
     pub(super) async fn mark_active(&self, side: ForwardPortSideRole) {
-        self.store.mark_ready(self.forward_id(), side).await;
+        self.store
+            .mark_ready(self.forward_id().as_str(), side)
+            .await;
     }
 }
 
@@ -276,7 +279,7 @@ fn spawn_forward(runtime: ForwardRuntime, store: super::store::PortForwardStore)
             let error_text = format!("{err:#}");
             runtime.cancel.cancel();
             store
-                .mark_failed(runtime.forward_id(), error_text.clone())
+                .mark_failed(runtime.forward_id().as_str(), error_text.clone())
                 .await;
             tracing::warn!(
                 forward_id = %runtime.forward_id(),

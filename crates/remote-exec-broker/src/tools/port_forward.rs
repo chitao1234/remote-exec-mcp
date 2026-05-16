@@ -1,3 +1,4 @@
+use remote_exec_proto::port_forward::ForwardId;
 use remote_exec_proto::public::{
     ForwardPortEntry, ForwardPortPhase, ForwardPortStatus, ForwardPortsAction, ForwardPortsInput,
     ForwardPortsResult,
@@ -159,7 +160,7 @@ async fn list_forwards(
     started: std::time::Instant,
     listen_side: Option<String>,
     connect_side: Option<String>,
-    forward_ids: Vec<String>,
+    forward_ids: Vec<ForwardId>,
 ) -> anyhow::Result<ToolCallOutput> {
     tracing::info!(
         tool = "forward_ports",
@@ -187,7 +188,7 @@ async fn list_forwards(
 async fn close_forwards(
     state: &crate::BrokerState,
     started: std::time::Instant,
-    forward_ids: Vec<String>,
+    forward_ids: Vec<ForwardId>,
 ) -> anyhow::Result<ToolCallOutput> {
     anyhow::ensure!(
         !forward_ids.is_empty(),

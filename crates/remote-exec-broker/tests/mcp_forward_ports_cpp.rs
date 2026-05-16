@@ -8,6 +8,7 @@ use std::time::Duration;
 use remote_exec_broker::{Connection, RemoteExecClient, ToolResponse};
 #[cfg(unix)]
 use remote_exec_proto::public::{ExecCommandInput, WriteStdinInput};
+use remote_exec_proto::port_forward::ForwardId;
 use remote_exec_proto::public::{ForwardPortProtocol, ForwardPortsInput};
 use std::io::Write;
 use tempfile::TempDir;
@@ -477,7 +478,7 @@ async fn real_cpp_daemon_releases_listener_after_broker_crash() {
         .call_tool(
             "forward_ports",
             &ForwardPortsInput::Close {
-                forward_ids: vec![reopened_forward_id],
+                forward_ids: vec![reopened_forward_id.into()],
             },
         )
         .await
@@ -685,7 +686,7 @@ pty = "none"
             .call_tool(
                 "forward_ports",
                 &ForwardPortsInput::Close {
-                    forward_ids: vec![forward_id],
+                    forward_ids: vec![forward_id.into()],
                 },
             )
             .await
@@ -755,7 +756,7 @@ async fn wait_for_forward_ready(
             .call_tool(
                 "forward_ports",
                 &ForwardPortsInput::List {
-                    forward_ids: vec![forward_id.to_string()],
+                    forward_ids: vec![ForwardId::new(forward_id)],
                     listen_side: None,
                     connect_side: None,
                 },

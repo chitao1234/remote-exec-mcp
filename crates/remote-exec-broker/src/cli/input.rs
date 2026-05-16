@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
+use remote_exec_proto::port_forward::ForwardId;
 use remote_exec_proto::public::{
     ApplyPatchInput, ExecCommandInput, ForwardPortSpec, ForwardPortsInput, TransferEndpoint,
     TransferFilesInput, ViewImageInput, WriteStdinInput,
@@ -140,12 +141,14 @@ pub fn build_forward_ports_list_input(
     ForwardPortsInput::List {
         listen_side,
         connect_side,
-        forward_ids,
+        forward_ids: forward_ids.into_iter().map(ForwardId::new).collect(),
     }
 }
 
 pub fn build_forward_ports_close_input(forward_ids: Vec<String>) -> ForwardPortsInput {
-    ForwardPortsInput::Close { forward_ids }
+    ForwardPortsInput::Close {
+        forward_ids: forward_ids.into_iter().map(ForwardId::new).collect(),
+    }
 }
 
 pub fn resolve_login_flag(login: bool, no_login: bool) -> Option<bool> {

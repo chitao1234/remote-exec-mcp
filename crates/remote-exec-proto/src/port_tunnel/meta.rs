@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::port_forward::ForwardId;
+
 pub const TUNNEL_CLOSE_REASON_OPERATOR_CLOSE: &str = "operator_close";
 pub const TUNNEL_ERROR_CODE_LISTENER_OPEN_FAILED: &str = "listener_open_failed";
 
@@ -19,7 +21,7 @@ pub enum TunnelForwardProtocol {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct TunnelOpenMeta {
-    pub forward_id: String,
+    pub forward_id: ForwardId,
     pub role: TunnelRole,
     pub side: String,
     pub generation: u64,
@@ -47,13 +49,13 @@ pub struct TunnelLimitSummary {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct TunnelCloseMeta {
-    pub forward_id: String,
+    pub forward_id: ForwardId,
     pub generation: u64,
     reason: String,
 }
 
 impl TunnelCloseMeta {
-    pub fn operator_close(forward_id: impl Into<String>, generation: u64) -> Self {
+    pub fn operator_close(forward_id: impl Into<ForwardId>, generation: u64) -> Self {
         Self {
             forward_id: forward_id.into(),
             generation,
@@ -62,7 +64,7 @@ impl TunnelCloseMeta {
     }
 
     pub fn from_raw_reason(
-        forward_id: impl Into<String>,
+        forward_id: impl Into<ForwardId>,
         generation: u64,
         reason: impl Into<String>,
     ) -> Self {
@@ -85,7 +87,7 @@ pub struct TunnelHeartbeatMeta {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ForwardRecoveringMeta {
-    pub forward_id: String,
+    pub forward_id: ForwardId,
     pub role: TunnelRole,
     pub old_generation: u64,
     pub reason: String,
@@ -93,7 +95,7 @@ pub struct ForwardRecoveringMeta {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ForwardRecoveredMeta {
-    pub forward_id: String,
+    pub forward_id: ForwardId,
     pub role: TunnelRole,
     pub generation: u64,
 }

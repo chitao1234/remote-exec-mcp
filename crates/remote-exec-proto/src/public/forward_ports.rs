@@ -1,6 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::port_forward::ForwardId;
 use crate::port_tunnel::TunnelForwardProtocol;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -17,10 +18,10 @@ pub enum ForwardPortsInput {
         #[serde(default)]
         connect_side: Option<String>,
         #[serde(default)]
-        forward_ids: Vec<String>,
+        forward_ids: Vec<ForwardId>,
     },
     Close {
-        forward_ids: Vec<String>,
+        forward_ids: Vec<ForwardId>,
     },
 }
 
@@ -84,7 +85,7 @@ pub enum ForwardPortsAction {
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct ForwardPortEntry {
-    pub forward_id: String,
+    pub forward_id: ForwardId,
     pub listen_side: String,
     pub listen_endpoint: String,
     pub connect_side: String,
@@ -185,7 +186,7 @@ pub struct ForwardPortLimitSummary {
 
 impl ForwardPortEntry {
     pub fn new_open(
-        forward_id: String,
+        forward_id: ForwardId,
         listen_side: String,
         listen_endpoint: String,
         connect_side: String,

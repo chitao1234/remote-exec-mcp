@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use remote_exec_proto::port_forward::{ensure_nonzero_connect_endpoint, normalize_endpoint};
+use remote_exec_proto::port_forward::{ForwardId, ensure_nonzero_connect_endpoint, normalize_endpoint};
 use remote_exec_proto::port_tunnel::{EndpointMeta, Frame, FrameType};
 use remote_exec_proto::public::{
     ForwardPortEntry, ForwardPortLimitSummary, ForwardPortProtocol as PublicForwardPortProtocol,
@@ -62,7 +62,7 @@ struct ForwardOpenContext {
     store: PortForwardStore,
     listen_side: SideHandle,
     connect_side: SideHandle,
-    forward_id: String,
+    forward_id: ForwardId,
     listen_endpoint: String,
     connect_endpoint: String,
     requested_limits: ForwardPortLimitSummary,
@@ -116,7 +116,7 @@ async fn open_protocol_forward(
     let initial_generation = INITIAL_FORWARD_GENERATION;
     let opened_listen = open_listen_session_for_forward(
         &listen_side,
-        &forward_id,
+        forward_id.as_str(),
         kind,
         initial_generation,
         limits.max_tunnel_queued_bytes as usize,
@@ -124,7 +124,7 @@ async fn open_protocol_forward(
     .await?;
     let opened_connect = open_connect_tunnel_for_forward(
         &connect_side,
-        &forward_id,
+        forward_id.as_str(),
         kind,
         initial_generation,
         limits.max_tunnel_queued_bytes as usize,
@@ -426,7 +426,7 @@ mod tests {
                 store: PortForwardStore::default(),
                 listen_side: SideHandle::local().unwrap(),
                 connect_side: SideHandle::local().unwrap(),
-                forward_id: "fwd_test".to_string(),
+                forward_id: ForwardId::new("fwd_test"),
                 listen_endpoint: "127.0.0.1:10000".to_string(),
                 connect_endpoint: "127.0.0.1:10001".to_string(),
                 requested_limits: BrokerPortForwardLimits::default().public_summary(),

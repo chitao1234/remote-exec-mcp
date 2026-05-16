@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use remote_exec_proto::port_forward::ForwardId;
 use remote_exec_proto::public::{
     ForwardPortEntry, ForwardPortPhase, ForwardPortSideHealth, ForwardPortSideRole,
     ForwardPortSideState, ForwardPortStatus, Timestamp,
@@ -57,7 +58,7 @@ impl PortForwardStore {
             .count()
     }
 
-    pub async fn close(&self, forward_ids: &[String]) -> anyhow::Result<Vec<ForwardPortEntry>> {
+    pub async fn close(&self, forward_ids: &[ForwardId]) -> anyhow::Result<Vec<ForwardPortEntry>> {
         let _close_guard = self.close_lock.lock().await;
         let candidates = self.take_close_candidates(forward_ids).await?;
         drop(_close_guard);
@@ -85,14 +86,14 @@ impl PortForwardStore {
 
     async fn validated_unique_close_ids(
         &self,
-        forward_ids: &[String],
-    ) -> anyhow::Result<Vec<String>> {
+        forward_ids: &[ForwardId],
+    ) -> anyhow::Result<Vec<ForwardId>> {
         let state = self.state.read().await;
         let mut seen = HashSet::with_capacity(forward_ids.len());
         let mut unique = Vec::with_capacity(forward_ids.len());
         for forward_id in forward_ids {
             anyhow::ensure!(
-                state.entries.contains_key(forward_id),
+                state.entries.contains_key(forward_id.as_str()),
                 "unknown forward_id `{forward_id}`"
             );
             if seen.insert(forward_id) {
@@ -104,7 +105,7 @@ impl PortForwardStore {
 
     async fn take_close_candidates(
         &self,
-        forward_ids: &[String],
+        forward_ids: &[ForwardId],
     ) -> anyhow::Result<Vec<PortForwardCloseCandidate>> {
         let forward_ids = self.validated_unique_close_ids(forward_ids).await?;
         let mut state = self.state.write().await;
@@ -112,7 +113,7 @@ impl PortForwardStore {
         for forward_id in forward_ids {
             let record = state
                 .entries
-                .remove(&forward_id)
+                .remove(forward_id.as_str())
                 .ok_or_else(|| anyhow::anyhow!("unknown forward_id `{forward_id}`"))?;
             if is_reconnecting_entry(&record.entry) {
                 state.reconnecting_count = state.reconnecting_count.saturating_sub(1);
@@ -234,7 +235,7 @@ impl PortForwardStore {
 
 #[derive(Default)]
 struct PortForwardStoreState {
-    entries: HashMap<String, PortForwardRecord>,
+    entries: HashMap<ForwardId, PortForwardRecord>,
     reconnecting_count: usize,
 }
 
@@ -316,7 +317,7 @@ fn adjust_reconnecting_count(count: &mut usize, before: bool, after: bool) {
 pub struct PortForwardFilter {
     pub listen_side: Option<String>,
     pub connect_side: Option<String>,
-    pub forward_ids: Vec<String>,
+    pub forward_ids: Vec<ForwardId>,
 }
 
 impl PortForwardFilter {
@@ -358,7 +359,7 @@ impl PortForwardRecord {
 }
 
 struct PortForwardCloseCandidate {
-    forward_id: String,
+    forward_id: ForwardId,
     record: PortForwardRecord,
 }
 
@@ -654,12 +655,12 @@ mod tests {
 
         let blocked_close = tokio::spawn({
             let store = store.clone();
-            async move { store.close(&["fwd_blocked".to_string()]).await }
+            async move { store.close(&[ForwardId::new("fwd_blocked")]).await }
         });
         tokio::task::yield_now().await;
 
         let ready_close = tokio::time::timeout(Duration::from_millis(200), async {
-            store.close(&["fwd_ready".to_string()]).await
+            store.close(&[ForwardId::new("fwd_ready")]).await
         })
         .await;
         assert!(
@@ -676,14 +677,14 @@ mod tests {
         PortForwardFilter {
             listen_side: None,
             connect_side: None,
-            forward_ids: vec![forward_id.to_string()],
+            forward_ids: vec![ForwardId::new(forward_id)],
         }
     }
 
     fn test_record(forward_id: &str) -> PortForwardRecord {
         PortForwardRecord::new(
             ForwardPortEntry::new_open(
-                forward_id.to_string(),
+                ForwardId::new(forward_id),
                 "local".to_string(),
                 "127.0.0.1:10000".to_string(),
                 "builder-a".to_string(),
@@ -701,7 +702,7 @@ mod tests {
             ),
             Arc::new(ListenSessionControl::new_for_test(
                 SideHandle::local().unwrap(),
-                forward_id.to_string(),
+                ForwardId::new(forward_id),
                 format!("session-{forward_id}"),
                 ForwardPortProtocol::Tcp,
                 Duration::from_secs(5),

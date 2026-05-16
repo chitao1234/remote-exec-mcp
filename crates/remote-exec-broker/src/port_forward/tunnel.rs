@@ -482,6 +482,7 @@ pub(super) fn is_retryable_transport_error(err: &anyhow::Error) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use remote_exec_proto::port_forward::ForwardId;
     use remote_exec_proto::port_tunnel::{
         Frame, FrameType, TUNNEL_ERROR_CODE_LISTENER_OPEN_FAILED,
         TunnelErrorMeta as ProtoTunnelErrorMeta, TunnelForwardProtocol, TunnelOpenMeta, TunnelRole,
@@ -592,7 +593,7 @@ mod tests {
                 flags: 0,
                 stream_id: 0,
                 meta: serde_json::to_vec(&TunnelOpenMeta {
-                    forward_id: "fwd_test".to_string(),
+                    forward_id: ForwardId::new("fwd_test"),
                     role: TunnelRole::Listen,
                     side: "local".to_string(),
                     generation: 1,

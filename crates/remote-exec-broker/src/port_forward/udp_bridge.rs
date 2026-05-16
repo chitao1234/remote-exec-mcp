@@ -126,7 +126,7 @@ async fn handle_listen_udp_tunnel_event(
             Err(format_terminal_tunnel_error(&meta)).context("listen-side udp tunnel error")
         }
         FrameType::ForwardDrop => {
-            apply_forward_drop_report(&runtime.store, runtime.forward_id(), &frame).await?;
+            apply_forward_drop_report(&runtime.store, runtime.forward_id().as_str(), &frame).await?;
             Ok(None)
         }
         _ => Ok(None),
@@ -343,6 +343,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
+    use remote_exec_proto::port_forward::ForwardId;
     use remote_exec_proto::port_tunnel::{ForwardDropKind, ForwardDropMeta, write_frame};
     use remote_exec_proto::public::ForwardPortProtocol as PublicForwardPortProtocol;
     use remote_exec_proto::rpc::RpcErrorCode;
@@ -580,7 +581,7 @@ mod tests {
 
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
-                let entries = runtime.store.list(&filter_one(runtime.forward_id())).await;
+                let entries = runtime.store.list(&filter_one(runtime.forward_id().as_str())).await;
                 if entries[0].dropped_udp_datagrams == 1 {
                     return;
                 }
@@ -640,7 +641,7 @@ mod tests {
 
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
-                let entries = runtime.store.list(&filter_one(runtime.forward_id())).await;
+                let entries = runtime.store.list(&filter_one(runtime.forward_id().as_str())).await;
                 if entries[0].dropped_udp_datagrams == 3 {
                     return;
                 }
@@ -666,7 +667,7 @@ mod tests {
         let initial_epoch = udp_test_epoch(listen_tunnel.clone(), connect_tunnel.clone());
         let listen_session = Arc::new(ListenSessionControl::new_for_test(
             SideHandle::local().unwrap(),
-            "fwd_test".to_string(),
+            ForwardId::new("fwd_test"),
             "test-session".to_string(),
             PublicForwardPortProtocol::Udp,
             Duration::from_secs(30),
@@ -675,7 +676,7 @@ mod tests {
         ));
         ForwardRuntime::new(
             ForwardIdentity::new(
-                "fwd_test".to_string(),
+                ForwardId::new("fwd_test"),
                 SideHandle::local().unwrap(),
                 SideHandle::local().unwrap(),
                 PublicForwardPortProtocol::Udp,
