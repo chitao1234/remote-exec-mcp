@@ -8,6 +8,7 @@ use remote_exec_proto::public::{
 use remote_exec_proto::rpc::ExecPtySize;
 use tokio::io::AsyncReadExt;
 
+#[allow(clippy::too_many_arguments, reason = "CLI field passthrough helper")]
 pub fn build_exec_command_input(
     target: String,
     cmd: String,
@@ -30,6 +31,7 @@ pub fn build_exec_command_input(
     }
 }
 
+#[allow(clippy::too_many_arguments, reason = "CLI field passthrough helper")]
 pub async fn build_write_stdin_input(
     session_id: String,
     chars: Option<String>,
