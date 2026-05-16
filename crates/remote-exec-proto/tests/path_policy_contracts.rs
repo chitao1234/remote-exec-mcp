@@ -1,9 +1,6 @@
 use std::sync::OnceLock;
 
-use remote_exec_proto::path::{
-    PathPolicy, basename_for_policy, is_absolute_for_policy, join_for_policy, linux_path_policy,
-    normalize_for_system, syntax_eq_for_policy, windows_path_policy,
-};
+use remote_exec_proto::path::{PathPolicy, linux_path_policy, windows_path_policy};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -79,7 +76,7 @@ fn policy(style: &str) -> PathPolicy {
 fn shared_path_policy_absolute_cases_match() {
     for case in &contracts().is_absolute {
         assert_eq!(
-            is_absolute_for_policy(policy(&case.style), &case.raw),
+            policy(&case.style).is_absolute(&case.raw),
             case.expected,
             "{}",
             case.name
@@ -91,7 +88,7 @@ fn shared_path_policy_absolute_cases_match() {
 fn shared_path_policy_normalization_cases_match() {
     for case in &contracts().normalize_for_system {
         assert_eq!(
-            normalize_for_system(policy(&case.style), &case.raw),
+            policy(&case.style).normalize_for_system(&case.raw),
             case.expected,
             "{}",
             case.name
@@ -103,7 +100,7 @@ fn shared_path_policy_normalization_cases_match() {
 fn shared_path_policy_syntax_eq_cases_match() {
     for case in &contracts().syntax_eq {
         assert_eq!(
-            syntax_eq_for_policy(policy(&case.style), &case.left, &case.right),
+            policy(&case.style).syntax_eq(&case.left, &case.right),
             case.expected,
             "{}",
             case.name
@@ -115,7 +112,7 @@ fn shared_path_policy_syntax_eq_cases_match() {
 fn shared_path_policy_join_cases_match() {
     for case in &contracts().join {
         assert_eq!(
-            join_for_policy(policy(&case.style), &case.base, &case.child),
+            policy(&case.style).join(&case.base, &case.child),
             case.expected,
             "{}",
             case.name
@@ -127,7 +124,7 @@ fn shared_path_policy_join_cases_match() {
 fn shared_path_policy_basename_cases_match() {
     for case in &contracts().basename {
         assert_eq!(
-            basename_for_policy(policy(&case.style), &case.raw),
+            policy(&case.style).basename(&case.raw),
             case.expected,
             "{}",
             case.name

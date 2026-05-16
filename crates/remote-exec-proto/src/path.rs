@@ -165,22 +165,6 @@ fn normalize_windows_separators(raw: &str) -> String {
     format!("{normalized_prefix}{normalized_rest}")
 }
 
-pub fn is_absolute_for_policy(policy: PathPolicy, raw: &str) -> bool {
-    policy.is_absolute(raw)
-}
-
-pub fn normalize_for_system(policy: PathPolicy, raw: &str) -> String {
-    policy.normalize_for_system(raw)
-}
-
-pub fn syntax_eq_for_policy(policy: PathPolicy, left: &str, right: &str) -> bool {
-    policy.syntax_eq(left, right)
-}
-
-pub fn basename_for_policy(policy: PathPolicy, raw: &str) -> Option<String> {
-    policy.basename(raw)
-}
-
 fn split_windows_path_basename(raw: &str) -> Option<String> {
     let (prefix, rest) = split_windows_prefix(raw);
     let trimmed = rest.trim_end_matches('\\');
@@ -201,10 +185,6 @@ fn split_windows_path_basename(raw: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-pub fn join_for_policy(policy: PathPolicy, base: &str, child: &str) -> String {
-    policy.join(base, child)
-}
-
 pub fn normalize_relative_path(path: &Path) -> Option<PathBuf> {
     let mut normalized = PathBuf::new();
 
@@ -221,81 +201,55 @@ pub fn normalize_relative_path(path: &Path) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        basename_for_policy, is_absolute_for_policy, join_for_policy, linux_path_policy,
-        normalize_for_system, normalize_relative_path, syntax_eq_for_policy, windows_path_policy,
-    };
+    use super::{linux_path_policy, normalize_relative_path, windows_path_policy};
 
     #[test]
     fn windows_absolute_path_accepts_both_separator_forms() {
         let policy = windows_path_policy();
-        assert!(is_absolute_for_policy(policy, r"C:\work\artifact.txt"));
-        assert!(is_absolute_for_policy(policy, "C:/work/artifact.txt"));
-        assert!(is_absolute_for_policy(policy, "/c/work/artifact.txt"));
-        assert!(is_absolute_for_policy(
-            policy,
-            "/cygdrive/c/work/artifact.txt"
-        ));
-        assert!(!is_absolute_for_policy(policy, r"work\artifact.txt"));
+        assert!(policy.is_absolute(r"C:\work\artifact.txt"));
+        assert!(policy.is_absolute("C:/work/artifact.txt"));
+        assert!(policy.is_absolute("/c/work/artifact.txt"));
+        assert!(policy.is_absolute("/cygdrive/c/work/artifact.txt"));
+        assert!(!policy.is_absolute(r"work\artifact.txt"));
     }
 
     #[test]
     fn windows_syntax_eq_normalizes_separator_style_and_drive_aliases() {
         let policy = windows_path_policy();
-        assert!(syntax_eq_for_policy(
-            policy,
-            r"C:\Work\Artifact.txt",
-            "C:/Work/Artifact.txt"
-        ));
-        assert!(syntax_eq_for_policy(
-            policy,
-            "/c/Work/Artifact.txt",
-            r"C:\Work\Artifact.txt"
-        ));
-        assert!(syntax_eq_for_policy(
-            policy,
-            "/cygdrive/c/Work/Artifact.txt",
-            r"C:\Work\Artifact.txt"
-        ));
+        assert!(policy.syntax_eq(r"C:\Work\Artifact.txt", "C:/Work/Artifact.txt"));
+        assert!(policy.syntax_eq("/c/Work/Artifact.txt", r"C:\Work\Artifact.txt"));
+        assert!(policy.syntax_eq("/cygdrive/c/Work/Artifact.txt", r"C:\Work\Artifact.txt"));
     }
 
     #[test]
     fn windows_syntax_eq_preserves_case_differences() {
         let policy = windows_path_policy();
-        assert!(!syntax_eq_for_policy(
-            policy,
-            r"C:\RÉSUMÉ\Ärger.txt",
-            "c:/résumé/ärger.TXT"
-        ));
+        assert!(!policy.syntax_eq(r"C:\RÉSUMÉ\Ärger.txt", "c:/résumé/ärger.TXT"));
     }
 
     #[test]
     fn linux_syntax_eq_preserves_case_sensitivity() {
         let policy = linux_path_policy();
-        assert!(!syntax_eq_for_policy(
-            policy,
-            "/tmp/Artifact.txt",
-            "/tmp/artifact.txt"
-        ));
+        assert!(!policy.syntax_eq("/tmp/Artifact.txt", "/tmp/artifact.txt"));
     }
 
     #[test]
     fn windows_system_normalization_emits_backslashes() {
         let policy = windows_path_policy();
         assert_eq!(
-            normalize_for_system(policy, "C:/work/releases/current.txt"),
+            policy.normalize_for_system("C:/work/releases/current.txt"),
             r"C:\work\releases\current.txt"
         );
         assert_eq!(
-            normalize_for_system(policy, "/c/work/releases/current.txt"),
+            policy.normalize_for_system("/c/work/releases/current.txt"),
             r"C:\work\releases\current.txt"
         );
         assert_eq!(
-            normalize_for_system(policy, "/cygdrive/c/work/releases/current.txt"),
+            policy.normalize_for_system("/cygdrive/c/work/releases/current.txt"),
             r"C:\work\releases\current.txt"
         );
         assert_eq!(
-            normalize_for_system(policy, "//server/share/releases/current.txt"),
+            policy.normalize_for_system("//server/share/releases/current.txt"),
             r"\\server\share\releases\current.txt"
         );
     }
@@ -304,7 +258,7 @@ mod tests {
     fn linux_join_uses_forward_slashes() {
         let policy = linux_path_policy();
         assert_eq!(
-            join_for_policy(policy, "outer", "nested/file.txt"),
+            policy.join("outer", "nested/file.txt"),
             "outer/nested/file.txt"
         );
     }
@@ -313,39 +267,39 @@ mod tests {
     fn basename_for_policy_handles_posix_paths() {
         let policy = linux_path_policy();
         assert_eq!(
-            basename_for_policy(policy, "/tmp/build/output.tar"),
+            policy.basename("/tmp/build/output.tar"),
             Some("output.tar".to_string())
         );
-        assert_eq!(basename_for_policy(policy, "/"), None);
+        assert_eq!(policy.basename("/"), None);
     }
 
     #[test]
     fn basename_for_policy_handles_windows_paths() {
         let policy = windows_path_policy();
         assert_eq!(
-            basename_for_policy(policy, "C:/work/releases/current.txt"),
+            policy.basename("C:/work/releases/current.txt"),
             Some("current.txt".to_string())
         );
         assert_eq!(
-            basename_for_policy(policy, "/cygdrive/c/work/releases"),
+            policy.basename("/cygdrive/c/work/releases"),
             Some("releases".to_string())
         );
-        assert_eq!(basename_for_policy(policy, r"C:\"), Some("C".to_string()));
+        assert_eq!(policy.basename(r"C:\"), Some("C".to_string()));
     }
 
     #[test]
     fn windows_join_normalizes_both_separator_styles() {
         let policy = windows_path_policy();
         assert_eq!(
-            join_for_policy(policy, "C:/work/releases", "nested/file.txt"),
+            policy.join("C:/work/releases", "nested/file.txt"),
             r"C:\work\releases\nested\file.txt"
         );
         assert_eq!(
-            join_for_policy(policy, r"C:\work\releases", r"nested\file.txt"),
+            policy.join(r"C:\work\releases", r"nested\file.txt"),
             r"C:\work\releases\nested\file.txt"
         );
         assert_eq!(
-            join_for_policy(policy, r"C:\work\releases", "/c/other/file.txt"),
+            policy.join(r"C:\work\releases", "/c/other/file.txt"),
             r"C:\other\file.txt"
         );
     }
