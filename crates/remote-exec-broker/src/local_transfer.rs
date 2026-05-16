@@ -155,7 +155,9 @@ pub async fn bundle_archives_to_file(
             .map(
                 |source| remote_exec_host::transfer::archive::BundledArchiveSource {
                     source_path: PathBuf::from(
-                        source.source_policy.normalize_for_system(&source.source_path),
+                        source
+                            .source_policy
+                            .normalize_for_system(&source.source_path),
                     ),
                     source_policy: source.source_policy,
                     source_type: source.source_type,

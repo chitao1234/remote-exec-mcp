@@ -15,9 +15,6 @@ pub struct ImageReadResponse {
     pub detail: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct EmptyResponse {}
-
 #[cfg(test)]
 mod tests {
     use super::ImageReadRequest;

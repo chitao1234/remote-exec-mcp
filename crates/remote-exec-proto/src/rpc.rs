@@ -11,7 +11,7 @@ pub use exec::{
     ExecCompletedResponse, ExecOutputResponse, ExecPtySize, ExecResponse, ExecRunningResponse,
     ExecStartRequest, ExecStartResponse, ExecWarning, ExecWriteRequest, ExecWriteResponse,
 };
-pub use image::{EmptyResponse, ImageReadRequest, ImageReadResponse};
+pub use image::{ImageReadRequest, ImageReadResponse};
 pub use patch::{PatchApplyRequest, PatchApplyResponse};
 pub use target::{
     DaemonIdentity, HealthCheckResponse, PortForwardProtocolVersion, TargetCapabilities,
