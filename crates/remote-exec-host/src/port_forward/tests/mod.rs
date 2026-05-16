@@ -278,7 +278,7 @@ async fn resumed_tcp_listener_session_closes_with_retained_generation() {
     let state = test_state();
     let listen_endpoint = free_loopback_endpoint();
     let (_listen_bound_endpoint, session_id) =
-        open_v4_resumable_tcp_listener(&state, &listen_endpoint).await;
+        open_resumable_tcp_listener(&state, &listen_endpoint).await;
 
     let mut resumed = resume_session(&state, &session_id, TunnelForwardProtocol::Tcp).await;
     write_frame(
@@ -1133,10 +1133,6 @@ async fn open_resumable_tcp_listener(state: &Arc<AppState>, endpoint: &str) -> (
     let bound_endpoint = endpoint_from_frame(&ok);
     drop(broker_side);
     (bound_endpoint, session_id)
-}
-
-async fn open_v4_resumable_tcp_listener(state: &Arc<AppState>, endpoint: &str) -> (String, String) {
-    open_resumable_tcp_listener(state, endpoint).await
 }
 
 async fn open_resumable_udp_bind(state: &Arc<AppState>, endpoint: &str) -> (String, String) {

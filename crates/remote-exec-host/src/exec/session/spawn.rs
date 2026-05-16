@@ -146,7 +146,6 @@ fn spawn_pipe(
     let (sender, receiver) = unbounded_channel();
     let session = new_live_session(false, SessionChild::Pipe(Box::new(child)), receiver);
 
-    let _ = (cmd, cwd);
     spawn_output_reader(reader, sender);
 
     Ok(session)
