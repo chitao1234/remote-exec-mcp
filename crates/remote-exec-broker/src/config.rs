@@ -273,7 +273,6 @@ impl LocalTargetConfig {
             process_environment: ProcessEnvironment::capture_current(),
         }
     }
-
 }
 
 impl McpServerConfig {

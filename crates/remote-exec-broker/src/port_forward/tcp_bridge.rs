@@ -953,6 +953,20 @@ mod tests {
         }
     }
 
+    fn tcp_accept_frame(stream_id: u32, listener_stream_id: u32) -> Frame {
+        Frame {
+            frame_type: FrameType::TcpAccept,
+            flags: 0,
+            stream_id,
+            meta: encode_tunnel_meta(&TcpAcceptMeta {
+                listener_stream_id,
+                peer: "127.0.0.1:0".to_string(),
+            })
+            .unwrap(),
+            data: Vec::new(),
+        }
+    }
+
     #[tokio::test]
     async fn tcp_accept_send_failure_recovers_connect_tunnel_without_leaking_active_stream() {
         let (listen_broker_side, mut listen_daemon_side) = tokio::io::duplex(4096);
@@ -965,21 +979,9 @@ mod tests {
             .insert(test_record(&runtime, "127.0.0.1:10000"))
             .await;
 
-        write_frame(
-            &mut listen_daemon_side,
-            &Frame {
-                frame_type: FrameType::TcpAccept,
-                flags: 0,
-                stream_id: 11,
-                meta: serde_json::to_vec(&serde_json::json!({
-                    "listener_stream_id": 1
-                }))
-                .unwrap(),
-                data: Vec::new(),
-            },
-        )
-        .await
-        .unwrap();
+        write_frame(&mut listen_daemon_side, &tcp_accept_frame(11, 1))
+            .await
+            .unwrap();
 
         let control = tokio::time::timeout(
             Duration::from_secs(1),
@@ -1021,21 +1023,9 @@ mod tests {
             async move { run_tcp_test_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
         });
 
-        write_frame(
-            &mut listen_daemon_side,
-            &Frame {
-                frame_type: FrameType::TcpAccept,
-                flags: 0,
-                stream_id: 11,
-                meta: serde_json::to_vec(&serde_json::json!({
-                    "listener_stream_id": 1
-                }))
-                .unwrap(),
-                data: Vec::new(),
-            },
-        )
-        .await
-        .unwrap();
+        write_frame(&mut listen_daemon_side, &tcp_accept_frame(11, 1))
+            .await
+            .unwrap();
 
         let connect =
             tokio::time::timeout(Duration::from_secs(1), read_frame(&mut connect_daemon_side))
@@ -1119,21 +1109,9 @@ mod tests {
             async move { run_tcp_test_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
         });
 
-        write_frame(
-            &mut listen_daemon_side,
-            &Frame {
-                frame_type: FrameType::TcpAccept,
-                flags: 0,
-                stream_id: 11,
-                meta: serde_json::to_vec(&serde_json::json!({
-                    "listener_stream_id": 1
-                }))
-                .unwrap(),
-                data: Vec::new(),
-            },
-        )
-        .await
-        .unwrap();
+        write_frame(&mut listen_daemon_side, &tcp_accept_frame(11, 1))
+            .await
+            .unwrap();
         connect_io
             .wait_for_written_frame(FrameType::TcpConnect, 1)
             .await;
@@ -1213,21 +1191,9 @@ mod tests {
             async move { run_tcp_test_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
         });
 
-        write_frame(
-            &mut listen_daemon_side,
-            &Frame {
-                frame_type: FrameType::TcpAccept,
-                flags: 0,
-                stream_id: 11,
-                meta: serde_json::to_vec(&serde_json::json!({
-                    "listener_stream_id": 1
-                }))
-                .unwrap(),
-                data: Vec::new(),
-            },
-        )
-        .await
-        .unwrap();
+        write_frame(&mut listen_daemon_side, &tcp_accept_frame(11, 1))
+            .await
+            .unwrap();
         connect_io
             .wait_for_written_frame(FrameType::TcpConnect, 1)
             .await;
@@ -1320,21 +1286,9 @@ mod tests {
             async move { run_tcp_test_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
         });
 
-        write_frame(
-            &mut listen_daemon_side,
-            &Frame {
-                frame_type: FrameType::TcpAccept,
-                flags: 0,
-                stream_id: 11,
-                meta: serde_json::to_vec(&serde_json::json!({
-                    "listener_stream_id": 1
-                }))
-                .unwrap(),
-                data: Vec::new(),
-            },
-        )
-        .await
-        .unwrap();
+        write_frame(&mut listen_daemon_side, &tcp_accept_frame(11, 1))
+            .await
+            .unwrap();
         connect_io
             .wait_for_written_frame(FrameType::TcpConnect, 1)
             .await;
@@ -1394,21 +1348,9 @@ mod tests {
             async move { run_tcp_test_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
         });
 
-        write_frame(
-            &mut listen_daemon_side,
-            &Frame {
-                frame_type: FrameType::TcpAccept,
-                flags: 0,
-                stream_id: 11,
-                meta: serde_json::to_vec(&serde_json::json!({
-                    "listener_stream_id": 1
-                }))
-                .unwrap(),
-                data: Vec::new(),
-            },
-        )
-        .await
-        .unwrap();
+        write_frame(&mut listen_daemon_side, &tcp_accept_frame(11, 1))
+            .await
+            .unwrap();
         connect_io
             .wait_for_written_frame(FrameType::TcpConnect, 1)
             .await;
@@ -1480,21 +1422,9 @@ mod tests {
             async move { run_tcp_test_epoch(&epoch_runtime, listen_tunnel, connect_tunnel).await }
         });
 
-        write_frame(
-            &mut listen_daemon_side,
-            &Frame {
-                frame_type: FrameType::TcpAccept,
-                flags: 0,
-                stream_id: 11,
-                meta: serde_json::to_vec(&serde_json::json!({
-                    "listener_stream_id": 1
-                }))
-                .unwrap(),
-                data: Vec::new(),
-            },
-        )
-        .await
-        .unwrap();
+        write_frame(&mut listen_daemon_side, &tcp_accept_frame(11, 1))
+            .await
+            .unwrap();
         connect_io
             .wait_for_written_frame(FrameType::TcpConnect, 1)
             .await;
@@ -1744,21 +1674,9 @@ mod tests {
             async move { run_tcp_test_epoch(&runtime, listen_tunnel, connect_tunnel).await }
         });
 
-        write_frame(
-            &mut listen_daemon_side,
-            &Frame {
-                frame_type: FrameType::TcpAccept,
-                flags: 0,
-                stream_id: 11,
-                meta: serde_json::to_vec(&serde_json::json!({
-                    "listener_stream_id": 1
-                }))
-                .unwrap(),
-                data: Vec::new(),
-            },
-        )
-        .await
-        .unwrap();
+        write_frame(&mut listen_daemon_side, &tcp_accept_frame(11, 1))
+            .await
+            .unwrap();
         connect_io
             .wait_for_written_frame(FrameType::TcpConnect, 1)
             .await;

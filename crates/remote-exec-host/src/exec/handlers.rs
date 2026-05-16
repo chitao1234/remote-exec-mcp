@@ -361,7 +361,7 @@ fn resolve_login_request(
 }
 
 fn log_exec_start_request(state: &Arc<AppState>, req: &ExecStartRequest) {
-    let cmd_preview = crate::logging::preview_text(&req.cmd, 120);
+    let cmd_preview = remote_exec_util::preview_text(&req.cmd, 120);
     tracing::info!(
         target = %state.config.target,
         tty = req.tty,

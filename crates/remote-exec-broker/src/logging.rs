@@ -10,7 +10,3 @@ pub fn init_logging() {
         remote_exec_util::init_compact_stderr_logging(REMOTE_EXEC_LOG_ENV, DEFAULT_FILTER);
     });
 }
-
-pub fn preview_text(raw: &str, limit: usize) -> String {
-    remote_exec_util::preview_text(raw, limit)
-}

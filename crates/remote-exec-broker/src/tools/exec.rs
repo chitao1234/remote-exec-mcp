@@ -28,7 +28,7 @@ pub async fn exec_command(
     let started = Instant::now();
     let target_name = input.target.clone();
     crate::request_context::set_current_target(target_name.clone());
-    let cmd_preview = crate::logging::preview_text(&input.cmd, 120);
+    let cmd_preview = remote_exec_util::preview_text(&input.cmd, 120);
     tracing::info!(
         tool = "exec_command",
         target = %target_name,

@@ -21,7 +21,7 @@ fn log_patch_audit(target_name: &str, response: &PatchApplyResponse) {
     let preview = if response.updated_paths.is_empty() {
         String::new()
     } else {
-        crate::logging::preview_text(&response.updated_paths.join(", "), 240)
+        remote_exec_util::preview_text(&response.updated_paths.join(", "), 240)
     };
     let tool = crate::request_context::current()
         .map(|context| context.tool())

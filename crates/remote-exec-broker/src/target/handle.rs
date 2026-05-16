@@ -113,10 +113,12 @@ impl TargetHandle {
     }
 
     pub(crate) fn as_remote(&self) -> Option<RemoteTargetHandle<'_>> {
-        self.backend.remote_client().map(|client| RemoteTargetHandle {
-            handle: self,
-            client,
-        })
+        self.backend
+            .remote_client()
+            .map(|client| RemoteTargetHandle {
+                handle: self,
+                client,
+            })
     }
 
     pub(crate) async fn port_tunnel(

@@ -359,6 +359,19 @@ mod tests {
     use super::super::tunnel::PortTunnel;
     use super::*;
 
+    fn udp_datagram_frame(stream_id: u32, peer: &str, data: &[u8]) -> Frame {
+        Frame {
+            frame_type: FrameType::UdpDatagram,
+            flags: 0,
+            stream_id,
+            meta: encode_tunnel_meta(&UdpDatagramMeta {
+                peer: peer.to_string(),
+            })
+            .unwrap(),
+            data: data.to_vec(),
+        }
+    }
+
     #[tokio::test]
     async fn udp_connector_limit_refuses_new_peer_without_evicting_existing_peer() {
         let tunnel = SideHandle::local()
@@ -419,16 +432,7 @@ mod tests {
 
         write_frame(
             &mut listen_daemon_side,
-            &Frame {
-                frame_type: FrameType::UdpDatagram,
-                flags: 0,
-                stream_id: 1,
-                meta: serde_json::to_vec(&serde_json::json!({
-                    "peer": "127.0.0.1:11001"
-                }))
-                .unwrap(),
-                data: b"first".to_vec(),
-            },
+            &udp_datagram_frame(1, "127.0.0.1:11001", b"first"),
         )
         .await
         .unwrap();
@@ -463,16 +467,7 @@ mod tests {
 
         write_frame(
             &mut listen_daemon_side,
-            &Frame {
-                frame_type: FrameType::UdpDatagram,
-                flags: 0,
-                stream_id: 1,
-                meta: serde_json::to_vec(&serde_json::json!({
-                    "peer": "127.0.0.1:11002"
-                }))
-                .unwrap(),
-                data: b"first".to_vec(),
-            },
+            &udp_datagram_frame(1, "127.0.0.1:11002", b"first"),
         )
         .await
         .unwrap();
@@ -487,16 +482,7 @@ mod tests {
         wait_until_send_fails(&connect_tunnel).await;
         write_frame(
             &mut listen_daemon_side,
-            &Frame {
-                frame_type: FrameType::UdpDatagram,
-                flags: 0,
-                stream_id: 1,
-                meta: serde_json::to_vec(&serde_json::json!({
-                    "peer": "127.0.0.1:11002"
-                }))
-                .unwrap(),
-                data: b"after-loss".to_vec(),
-            },
+            &udp_datagram_frame(1, "127.0.0.1:11002", b"after-loss"),
         )
         .await
         .unwrap();
