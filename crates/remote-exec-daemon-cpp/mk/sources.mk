@@ -52,9 +52,13 @@ SESSION_STORE_SUPPORT_SRCS = \
 	$(SOURCE_PREFIX)src/output_renderer.cpp \
 	$(SOURCE_PREFIX)src/session_response_builder.cpp
 
-BASIC_MUTEX_POSIX_SRCS = $(SOURCE_PREFIX)src/basic_mutex.cpp
+BASIC_MUTEX_POSIX_SRCS = \
+	$(SOURCE_PREFIX)src/basic_mutex.cpp \
+	$(SOURCE_PREFIX)src/basic_mutex_posix.cpp
 
-BASIC_MUTEX_WINDOWS_SRCS = $(SOURCE_PREFIX)src/basic_mutex.cpp
+BASIC_MUTEX_WINDOWS_SRCS = \
+	$(SOURCE_PREFIX)src/basic_mutex.cpp \
+	$(SOURCE_PREFIX)src/basic_mutex_win32.cpp
 
 SERVER_TRANSPORT_POSIX_SRCS = $(SOURCE_PREFIX)src/server_transport.cpp
 
