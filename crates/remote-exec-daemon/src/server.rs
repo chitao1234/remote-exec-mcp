@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use axum::Json;
 use axum::extract::State;
-use remote_exec_proto::rpc::{HealthCheckResponse, TargetInfoResponse};
+use remote_exec_proto::rpc::{HealthCheckResponse, HealthStatus, TargetInfoResponse};
 
 use crate::AppState;
 use crate::config::DaemonConfig;
@@ -49,7 +49,7 @@ where
 
 pub(crate) async fn health(State(state): State<Arc<AppState>>) -> Json<HealthCheckResponse> {
     Json(HealthCheckResponse {
-        status: "ok".to_string(),
+        status: HealthStatus::Ok,
         daemon_version: env!("CARGO_PKG_VERSION").to_string(),
         daemon_instance_id: state.daemon_instance_id.clone(),
     })

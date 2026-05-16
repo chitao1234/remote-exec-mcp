@@ -14,8 +14,8 @@ pub use exec::{
 pub use image::{ImageReadRequest, ImageReadResponse};
 pub use patch::{PatchApplyRequest, PatchApplyResponse};
 pub use target::{
-    DaemonIdentity, HealthCheckResponse, PortForwardProtocolVersion, TargetCapabilities,
-    TargetInfoResponse,
+    DaemonIdentity, HealthCheckResponse, HealthStatus, PortForwardProtocolVersion,
+    TargetCapabilities, TargetInfoResponse,
 };
 pub use transfer::{
     TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER,

@@ -27,9 +27,9 @@ use remote_exec_proto::port_tunnel::{
     UPGRADE_TOKEN, read_frame, read_preface, write_frame, write_preface,
 };
 use remote_exec_proto::rpc::{
-    DaemonIdentity, ExecWarning, ExecWriteRequest, HealthCheckResponse, ImageReadResponse,
-    PatchApplyRequest, PatchApplyResponse, PortForwardProtocolVersion, RpcErrorBody,
-    TargetCapabilities, TargetInfoResponse,
+    DaemonIdentity, ExecWarning, ExecWriteRequest, HealthCheckResponse, HealthStatus,
+    ImageReadResponse, PatchApplyRequest, PatchApplyResponse, PortForwardProtocolVersion,
+    RpcErrorBody, TargetCapabilities, TargetInfoResponse,
 };
 #[cfg(test)]
 use tokio::io::AsyncWriteExt;
@@ -861,7 +861,7 @@ async fn require_bearer_auth(
 
 async fn health(State(state): State<StubDaemonState>) -> Json<HealthCheckResponse> {
     Json(HealthCheckResponse {
-        status: "ok".to_string(),
+        status: HealthStatus::Ok,
         daemon_version: "0.1.0".to_string(),
         daemon_instance_id: state.daemon_instance_id.lock().await.clone(),
     })
