@@ -32,25 +32,6 @@ bool terminate_descendants_after_exit_locked(LiveSession* session) {
     return false;
 }
 
-void wait_for_generation_change_locked(LiveSession* session,
-                                       std::uint64_t baseline_generation,
-                                       std::uint64_t deadline_ms,
-                                       unsigned long max_wait_ms) {
-    while (!session->closing && session->output_.generation == baseline_generation) {
-        const std::uint64_t now = platform::monotonic_ms();
-        if (now >= deadline_ms) {
-            return;
-        }
-        unsigned long remaining = static_cast<unsigned long>(deadline_ms - now);
-        if (max_wait_ms > 0UL) {
-            remaining = std::min(remaining, max_wait_ms);
-        }
-        if (!session->cond_.timed_wait_ms(session->mutex_, remaining)) {
-            return;
-        }
-    }
-}
-
 void pump_session_output(const std::shared_ptr<LiveSession>& session) {
     for (;;) {
         {
@@ -105,6 +86,25 @@ unsigned __stdcall session_output_pump_entry(void* raw_context) {
 #endif
 
 } // namespace
+
+void wait_for_generation_change_locked(LiveSession* session,
+                                       std::uint64_t baseline_generation,
+                                       std::uint64_t deadline_ms,
+                                       unsigned long max_wait_ms) {
+    while (!session->closing && session->output_.generation == baseline_generation) {
+        const std::uint64_t now = platform::monotonic_ms();
+        if (now >= deadline_ms) {
+            return;
+        }
+        unsigned long remaining = static_cast<unsigned long>(deadline_ms - now);
+        if (max_wait_ms > 0UL) {
+            remaining = std::min(remaining, max_wait_ms);
+        }
+        if (!session->cond_.timed_wait_ms(session->mutex_, remaining)) {
+            return;
+        }
+    }
+}
 
 bool mark_session_exit_locked(LiveSession* session) {
     if (session->output_.exited) {
