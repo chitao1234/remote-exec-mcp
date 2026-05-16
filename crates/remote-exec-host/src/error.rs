@@ -178,66 +178,16 @@ define_domain_error!(
     }
 );
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PatchErrorKind {
-    SandboxDenied,
-    Failed,
-}
-
-#[derive(Debug)]
-pub(crate) struct PatchError {
-    kind: PatchErrorKind,
-    message: String,
-}
-
-impl PatchError {
-    pub(crate) fn sandbox_denied(message: impl Into<String>) -> Self {
-        Self::new(PatchErrorKind::SandboxDenied, message)
+define_domain_error!(
+    PatchError,
+    PatchErrorKind,
+    "daemon internal patch error",
+    {
+        sandbox_denied => SandboxDenied => RpcErrorCode::SandboxDenied,
+        failed => Failed => RpcErrorCode::PatchFailed,
+        internal => Internal => RpcErrorCode::Internal,
     }
-
-    pub(crate) fn failed(message: impl Into<String>) -> Self {
-        Self::new(PatchErrorKind::Failed, message)
-    }
-
-    pub(crate) fn failed_error(err: impl fmt::Display) -> Self {
-        Self::failed(err.to_string())
-    }
-
-    pub(crate) fn code(&self) -> RpcErrorCode {
-        match self.kind {
-            PatchErrorKind::SandboxDenied => RpcErrorCode::SandboxDenied,
-            PatchErrorKind::Failed => RpcErrorCode::PatchFailed,
-        }
-    }
-
-    fn into_host_rpc_error(self) -> HostRpcError {
-        let code = self.code();
-        let message = self.message;
-        tracing::warn!(code = code.wire_value(), %message, "daemon request rejected");
-        bad_request(code, message)
-    }
-
-    fn new(kind: PatchErrorKind, message: impl Into<String>) -> Self {
-        Self {
-            kind,
-            message: message.into(),
-        }
-    }
-}
-
-impl fmt::Display for PatchError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for PatchError {}
-
-impl From<PatchError> for HostRpcError {
-    fn from(value: PatchError) -> Self {
-        value.into_host_rpc_error()
-    }
-}
+);
 
 impl From<crate::sandbox::SandboxError> for PatchError {
     fn from(value: crate::sandbox::SandboxError) -> Self {
@@ -247,13 +197,13 @@ impl From<crate::sandbox::SandboxError> for PatchError {
 
 impl From<std::io::Error> for PatchError {
     fn from(value: std::io::Error) -> Self {
-        Self::failed_error(value)
+        Self::failed(value.to_string())
     }
 }
 
 impl From<std::string::FromUtf8Error> for PatchError {
     fn from(value: std::string::FromUtf8Error) -> Self {
-        Self::failed_error(value)
+        Self::failed(value.to_string())
     }
 }
 

@@ -138,7 +138,7 @@ pub async fn write_stdin(
                 error = %err,
                 "broker tool failed"
             );
-            Err(anyhow::anyhow!("write_stdin failed: {err}"))
+            Err(err.context("write_stdin failed"))
         }
     }
 }

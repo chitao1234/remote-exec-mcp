@@ -206,13 +206,19 @@ impl DaemonClient {
 async fn open_transfer_import_body(
     archive_path: &std::path::Path,
 ) -> Result<(u64, reqwest::Body), DaemonClientError> {
-    let file = tokio::fs::File::open(archive_path)
-        .await
-        .map_err(|err| DaemonClientError::Transport(err.into()))?;
+    let file = tokio::fs::File::open(archive_path).await.map_err(|err| {
+        DaemonClientError::Transport(
+            anyhow::Error::from(err).context(format!("open {}", archive_path.display())),
+        )
+    })?;
     let file_len = file
         .metadata()
         .await
-        .map_err(|err| DaemonClientError::Transport(err.into()))?
+        .map_err(|err| {
+            DaemonClientError::Transport(
+                anyhow::Error::from(err).context(format!("metadata {}", archive_path.display())),
+            )
+        })?
         .len();
     let body = reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(file));
     Ok((file_len, body))

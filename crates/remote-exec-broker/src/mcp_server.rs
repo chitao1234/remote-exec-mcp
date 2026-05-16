@@ -54,7 +54,7 @@ pub fn tool_error_result(text: String) -> CallToolResult {
 }
 
 pub fn format_tool_error(err: anyhow::Error) -> CallToolResult {
-    let message = err.to_string();
+    let message = format!("{err:#}");
     if let Some(context) = crate::request_context::current() {
         tracing::warn!(
             request_id = %context.request_id(),
