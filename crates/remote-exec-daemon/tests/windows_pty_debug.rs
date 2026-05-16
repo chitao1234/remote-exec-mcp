@@ -163,9 +163,11 @@ async fn windows_pty_debug_report_prints_backend_diagnostics() {
         "/C".to_string(),
         "echo hello & ping -n 30 127.0.0.1 >nul".to_string(),
     ];
+    let spawn_cmd = remote_exec_daemon::exec::session::SpawnCommand::from_argv(&cmd).unwrap();
 
     let report =
-        remote_exec_daemon::exec::session::windows_pty_debug_report(&cmd, tempdir.path()).await;
+        remote_exec_daemon::exec::session::windows_pty_debug_report(&spawn_cmd, tempdir.path())
+            .await;
 
     let normalized_env = [
         ("NO_COLOR", "1"),
