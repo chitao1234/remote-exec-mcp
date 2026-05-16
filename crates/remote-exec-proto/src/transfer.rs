@@ -48,25 +48,11 @@ pub enum TransferSourceType {
     Multiple,
 }
 
-const TRANSFER_SOURCE_TYPE_WIRE_VALUES: &[(TransferSourceType, &str)] = &[
-    (TransferSourceType::File, "file"),
-    (TransferSourceType::Directory, "directory"),
-    (TransferSourceType::Multiple, "multiple"),
-];
-
-impl TransferSourceType {
-    pub fn wire_value(&self) -> &'static str {
-        match self {
-            Self::File => "file",
-            Self::Directory => "directory",
-            Self::Multiple => "multiple",
-        }
-    }
-
-    pub fn from_wire_value(value: &str) -> Option<Self> {
-        wire::from_wire_value(value, TRANSFER_SOURCE_TYPE_WIRE_VALUES)
-    }
-}
+wire::wire_value_mappings!(TransferSourceType {
+    File => "file",
+    Directory => "directory",
+    Multiple => "multiple",
+});
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -77,25 +63,11 @@ pub enum TransferOverwrite {
     Replace,
 }
 
-const TRANSFER_OVERWRITE_WIRE_VALUES: &[(TransferOverwrite, &str)] = &[
-    (TransferOverwrite::Fail, "fail"),
-    (TransferOverwrite::Merge, "merge"),
-    (TransferOverwrite::Replace, "replace"),
-];
-
-impl TransferOverwrite {
-    pub fn wire_value(&self) -> &'static str {
-        match self {
-            Self::Fail => "fail",
-            Self::Merge => "merge",
-            Self::Replace => "replace",
-        }
-    }
-
-    pub fn from_wire_value(value: &str) -> Option<Self> {
-        wire::from_wire_value(value, TRANSFER_OVERWRITE_WIRE_VALUES)
-    }
-}
+wire::wire_value_mappings!(TransferOverwrite {
+    Fail => "fail",
+    Merge => "merge",
+    Replace => "replace",
+});
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -106,25 +78,11 @@ pub enum TransferSymlinkMode {
     Skip,
 }
 
-const TRANSFER_SYMLINK_MODE_WIRE_VALUES: &[(TransferSymlinkMode, &str)] = &[
-    (TransferSymlinkMode::Preserve, "preserve"),
-    (TransferSymlinkMode::Follow, "follow"),
-    (TransferSymlinkMode::Skip, "skip"),
-];
-
-impl TransferSymlinkMode {
-    pub fn wire_value(&self) -> &'static str {
-        match self {
-            Self::Preserve => "preserve",
-            Self::Follow => "follow",
-            Self::Skip => "skip",
-        }
-    }
-
-    pub fn from_wire_value(value: &str) -> Option<Self> {
-        wire::from_wire_value(value, TRANSFER_SYMLINK_MODE_WIRE_VALUES)
-    }
-}
+wire::wire_value_mappings!(TransferSymlinkMode {
+    Preserve => "preserve",
+    Follow => "follow",
+    Skip => "skip",
+});
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -134,25 +92,14 @@ pub enum TransferCompression {
     Zstd,
 }
 
-const TRANSFER_COMPRESSION_WIRE_VALUES: &[(TransferCompression, &str)] = &[
-    (TransferCompression::None, "none"),
-    (TransferCompression::Zstd, "zstd"),
-];
+wire::wire_value_mappings!(TransferCompression {
+    None => "none",
+    Zstd => "zstd",
+});
 
 impl TransferCompression {
     pub fn is_none(&self) -> bool {
         matches!(self, Self::None)
-    }
-
-    pub fn wire_value(&self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Zstd => "zstd",
-        }
-    }
-
-    pub fn from_wire_value(value: &str) -> Option<Self> {
-        wire::from_wire_value(value, TRANSFER_COMPRESSION_WIRE_VALUES)
     }
 }
 

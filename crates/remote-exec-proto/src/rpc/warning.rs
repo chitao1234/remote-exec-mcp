@@ -8,39 +8,12 @@ pub enum WarningCode {
     TransferSkippedSymlink,
 }
 
-const WARNING_CODE_WIRE_VALUES: &[(WarningCode, &str)] = &[
-    (
-        WarningCode::ApplyPatchViaExecCommand,
-        "apply_patch_via_exec_command",
-    ),
-    (
-        WarningCode::ExecSessionLimitApproaching,
-        "exec_session_limit_approaching",
-    ),
-    (
-        WarningCode::TransferSkippedUnsupportedEntry,
-        "transfer_skipped_unsupported_entry",
-    ),
-    (
-        WarningCode::TransferSkippedSymlink,
-        "transfer_skipped_symlink",
-    ),
-];
-
-impl WarningCode {
-    pub fn wire_value(self) -> &'static str {
-        match self {
-            Self::ApplyPatchViaExecCommand => "apply_patch_via_exec_command",
-            Self::ExecSessionLimitApproaching => "exec_session_limit_approaching",
-            Self::TransferSkippedUnsupportedEntry => "transfer_skipped_unsupported_entry",
-            Self::TransferSkippedSymlink => "transfer_skipped_symlink",
-        }
-    }
-
-    pub fn from_wire_value(value: &str) -> Option<Self> {
-        wire::from_wire_value(value, WARNING_CODE_WIRE_VALUES)
-    }
-}
+wire::wire_value_mappings!(WarningCode {
+    ApplyPatchViaExecCommand => "apply_patch_via_exec_command",
+    ExecSessionLimitApproaching => "exec_session_limit_approaching",
+    TransferSkippedUnsupportedEntry => "transfer_skipped_unsupported_entry",
+    TransferSkippedSymlink => "transfer_skipped_symlink",
+});
 
 #[cfg(test)]
 mod tests {
