@@ -44,7 +44,6 @@ pub async fn run_until<F>(config: ValidatedDaemonConfig, shutdown: F) -> Result<
 where
     F: Future<Output = ()> + Send,
 {
-    tls::install_crypto_provider()?;
     let daemon_config = Arc::new(config.into_inner());
     let listener = server_transport::bind_listener(daemon_config.listen)?;
     run_until_on_bound_listener(daemon_config, listener, shutdown).await

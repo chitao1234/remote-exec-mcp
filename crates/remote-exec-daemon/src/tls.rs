@@ -1,7 +1,3 @@
-use std::sync::Arc;
-
-use axum::Router;
-
 use crate::config::{DaemonConfig, DaemonTransport};
 
 #[allow(
@@ -33,39 +29,6 @@ pub(crate) fn validate_config(config: &DaemonConfig) -> anyhow::Result<()> {
     }
 
     tls_impl::validate_config(config)
-}
-
-pub async fn serve(app: Router, daemon_config: Arc<DaemonConfig>) -> anyhow::Result<()> {
-    serve_with_shutdown(app, daemon_config, std::future::pending::<()>()).await
-}
-
-pub async fn serve_with_shutdown(
-    app: Router,
-    daemon_config: Arc<DaemonConfig>,
-    shutdown: impl std::future::Future<Output = ()> + Send,
-) -> anyhow::Result<()> {
-    let listener = crate::server_transport::bind_listener(daemon_config.listen)?;
-    crate::server_transport::serve_with_shutdown_on_listener(app, daemon_config, listener, shutdown)
-        .await
-}
-
-pub async fn serve_http(app: Router, daemon_config: Arc<DaemonConfig>) -> anyhow::Result<()> {
-    serve_http_with_shutdown(app, daemon_config, std::future::pending::<()>()).await
-}
-
-pub async fn serve_http_with_shutdown(
-    app: Router,
-    daemon_config: Arc<DaemonConfig>,
-    shutdown: impl std::future::Future<Output = ()> + Send,
-) -> anyhow::Result<()> {
-    let listener = crate::server_transport::bind_listener(daemon_config.listen)?;
-    crate::server_transport::serve_http_with_shutdown_on_listener(
-        app,
-        daemon_config,
-        listener,
-        shutdown,
-    )
-    .await
 }
 
 #[cfg(test)]

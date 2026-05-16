@@ -9,22 +9,6 @@ use remote_exec_proto::rpc::{HealthCheckResponse, HealthStatus, TargetInfoRespon
 use crate::AppState;
 use crate::config::DaemonConfig;
 
-pub async fn serve(state: AppState, daemon_config: Arc<DaemonConfig>) -> Result<()> {
-    serve_with_shutdown(state, daemon_config, std::future::pending::<()>()).await
-}
-
-pub async fn serve_with_shutdown<F>(
-    state: AppState,
-    daemon_config: Arc<DaemonConfig>,
-    shutdown: F,
-) -> Result<()>
-where
-    F: Future<Output = ()> + Send,
-{
-    let listener = crate::server_transport::bind_listener(daemon_config.listen)?;
-    serve_with_shutdown_on_listener(state, daemon_config, listener, shutdown).await
-}
-
 pub(crate) async fn serve_with_shutdown_on_listener<F>(
     state: AppState,
     daemon_config: Arc<DaemonConfig>,
