@@ -1,0 +1,10 @@
+{
+  "headers": {
+    "source_type": "x-remote-exec-source-type",
+    "compression": "x-remote-exec-compression",
+    "destination_path": "x-remote-exec-destination-path",
+    "overwrite": "x-remote-exec-overwrite",
+    "create_parent": "x-remote-exec-create-parent",
+    "symlink_mode": "x-remote-exec-symlink-mode"
+  }
+}

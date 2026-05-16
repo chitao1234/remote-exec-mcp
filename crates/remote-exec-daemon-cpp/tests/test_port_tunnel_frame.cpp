@@ -1,5 +1,6 @@
 #include "port_tunnel_frame.h"
 
+#include "test_contract_fixtures.h"
 #include "test_assert.h"
 #include <string>
 #include <vector>
@@ -31,7 +32,7 @@ void assert_control_frame_round_trips(PortTunnelFrameType type) {
 
 std::vector<unsigned char>
 frame_header(unsigned char frame_type, uint32_t stream_id, uint32_t meta_len, uint32_t data_len) {
-    std::vector<unsigned char> bytes(16U, 0U);
+    std::vector<unsigned char> bytes(PORT_TUNNEL_HEADER_LEN, 0U);
     bytes[0] = frame_type;
     bytes[4] = static_cast<unsigned char>((stream_id >> 24) & 0xffU);
     bytes[5] = static_cast<unsigned char>((stream_id >> 16) & 0xffU);
@@ -48,10 +49,46 @@ frame_header(unsigned char frame_type, uint32_t stream_id, uint32_t meta_len, ui
     return bytes;
 }
 
+void assert_frame_type_matches_contract(const char* name, PortTunnelFrameType type) {
+    TEST_ASSERT(test_contract::port_tunnel_contract().at("frame_types").at(name).get<unsigned int>() ==
+                static_cast<unsigned int>(type));
+}
+
 } // namespace
 
 int main() {
-    TEST_ASSERT(std::string(port_tunnel_preface(), port_tunnel_preface_size()) == "REPFWD1\n");
+    const Json& contract = test_contract::port_tunnel_contract();
+    const std::string expected_preface = contract.at("preface_ascii").get<std::string>();
+    TEST_ASSERT(std::string(port_tunnel_preface(), port_tunnel_preface_size()) == expected_preface);
+    TEST_ASSERT(port_tunnel_preface_size() == expected_preface.size());
+    TEST_ASSERT(PORT_TUNNEL_HEADER_LEN == contract.at("header_length").get<std::size_t>());
+    TEST_ASSERT(PORT_TUNNEL_MAX_META_LEN == contract.at("max_meta_length").get<std::size_t>());
+    TEST_ASSERT(PORT_TUNNEL_MAX_DATA_LEN == contract.at("max_data_length").get<std::size_t>());
+    assert_frame_type_matches_contract("Error", PortTunnelFrameType::Error);
+    assert_frame_type_matches_contract("Close", PortTunnelFrameType::Close);
+    assert_frame_type_matches_contract("SessionOpen", PortTunnelFrameType::SessionOpen);
+    assert_frame_type_matches_contract("SessionReady", PortTunnelFrameType::SessionReady);
+    assert_frame_type_matches_contract("SessionResume", PortTunnelFrameType::SessionResume);
+    assert_frame_type_matches_contract("SessionResumed", PortTunnelFrameType::SessionResumed);
+    assert_frame_type_matches_contract("TunnelOpen", PortTunnelFrameType::TunnelOpen);
+    assert_frame_type_matches_contract("TunnelReady", PortTunnelFrameType::TunnelReady);
+    assert_frame_type_matches_contract("TunnelClose", PortTunnelFrameType::TunnelClose);
+    assert_frame_type_matches_contract("TcpListen", PortTunnelFrameType::TcpListen);
+    assert_frame_type_matches_contract("TcpListenOk", PortTunnelFrameType::TcpListenOk);
+    assert_frame_type_matches_contract("TcpAccept", PortTunnelFrameType::TcpAccept);
+    assert_frame_type_matches_contract("TcpConnect", PortTunnelFrameType::TcpConnect);
+    assert_frame_type_matches_contract("TcpConnectOk", PortTunnelFrameType::TcpConnectOk);
+    assert_frame_type_matches_contract("TcpData", PortTunnelFrameType::TcpData);
+    assert_frame_type_matches_contract("TcpEof", PortTunnelFrameType::TcpEof);
+    assert_frame_type_matches_contract("TunnelClosed", PortTunnelFrameType::TunnelClosed);
+    assert_frame_type_matches_contract("TunnelHeartbeat", PortTunnelFrameType::TunnelHeartbeat);
+    assert_frame_type_matches_contract("TunnelHeartbeatAck", PortTunnelFrameType::TunnelHeartbeatAck);
+    assert_frame_type_matches_contract("ForwardRecovering", PortTunnelFrameType::ForwardRecovering);
+    assert_frame_type_matches_contract("ForwardRecovered", PortTunnelFrameType::ForwardRecovered);
+    assert_frame_type_matches_contract("ForwardDrop", PortTunnelFrameType::ForwardDrop);
+    assert_frame_type_matches_contract("UdpBind", PortTunnelFrameType::UdpBind);
+    assert_frame_type_matches_contract("UdpBindOk", PortTunnelFrameType::UdpBindOk);
+    assert_frame_type_matches_contract("UdpDatagram", PortTunnelFrameType::UdpDatagram);
 
     PortTunnelFrame frame;
     frame.type = PortTunnelFrameType::TcpData;

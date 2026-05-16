@@ -14,7 +14,9 @@
 #include "port_forward_endpoint.h"
 #include "port_tunnel.h"
 #include "process_session.h"
+#include "server_contract.h"
 #include "server_routes.h"
+#include "test_contract_fixtures.h"
 #include "test_filesystem.h"
 #include "test_server_routes_shared.h"
 #include "test_text_file.h"
@@ -155,12 +157,12 @@ static HttpRequest transfer_import_request(const fs::path& destination, const st
     HttpRequest request;
     request.method = "POST";
     request.path = "/v1/transfer/import";
-    request.headers["x-remote-exec-source-type"] = "file";
-    request.headers["x-remote-exec-destination-path"] = encoded_destination_path_header(destination);
-    request.headers["x-remote-exec-overwrite"] = "replace";
-    request.headers["x-remote-exec-create-parent"] = "true";
-    request.headers["x-remote-exec-symlink-mode"] = "preserve";
-    request.headers["x-remote-exec-compression"] = "none";
+    request.headers[server_contract::TRANSFER_SOURCE_TYPE_HEADER] = "file";
+    request.headers[server_contract::TRANSFER_DESTINATION_PATH_HEADER] = encoded_destination_path_header(destination);
+    request.headers[server_contract::TRANSFER_OVERWRITE_HEADER] = "replace";
+    request.headers[server_contract::TRANSFER_CREATE_PARENT_HEADER] = "true";
+    request.headers[server_contract::TRANSFER_SYMLINK_MODE_HEADER] = "preserve";
+    request.headers[server_contract::TRANSFER_COMPRESSION_HEADER] = "none";
     request.body = archive;
     return request;
 }
@@ -190,7 +192,8 @@ static void assert_target_info_and_basic_helpers(AppState& state) {
     TEST_ASSERT(info.at("supports_pty").get<bool>() == process_session_supports_pty());
     TEST_ASSERT(info.at("supports_image_read").get<bool>());
     TEST_ASSERT(info.at("supports_port_forward").get<bool>());
-    TEST_ASSERT(info.at("port_forward_protocol_version").get<int>() == 4);
+    TEST_ASSERT(info.at("port_forward_protocol_version").get<unsigned int>() ==
+                server_contract::PORT_TUNNEL_PROTOCOL_VERSION);
 
     HttpRequest generated_request;
     generated_request.method = "POST";
@@ -201,6 +204,30 @@ static void assert_target_info_and_basic_helpers(AppState& state) {
 
     TEST_ASSERT(normalize_port_forward_endpoint("8080") == "127.0.0.1:8080");
     TEST_ASSERT(base64_decode_bytes(base64_encode_bytes(std::string("hello\0world", 11))).size() == 11);
+}
+
+static void assert_shared_server_contract() {
+    const Json& port_tunnel_contract = test_contract::port_tunnel_contract();
+    const Json& transfer_headers = test_contract::transfer_headers_contract().at("headers");
+
+    TEST_ASSERT(port_tunnel_contract.at("protocol_version_header").get<std::string>() ==
+                server_contract::PORT_TUNNEL_VERSION_HEADER);
+    TEST_ASSERT(port_tunnel_contract.at("protocol_version_value").get<std::string>() ==
+                server_contract::PORT_TUNNEL_VERSION_VALUE);
+    TEST_ASSERT(port_tunnel_contract.at("protocol_version_number").get<unsigned int>() ==
+                server_contract::PORT_TUNNEL_PROTOCOL_VERSION);
+    TEST_ASSERT(port_tunnel_contract.at("upgrade_token").get<std::string>() ==
+                server_contract::PORT_TUNNEL_UPGRADE_TOKEN);
+
+    TEST_ASSERT(transfer_headers.at("destination_path").get<std::string>() ==
+                server_contract::TRANSFER_DESTINATION_PATH_HEADER);
+    TEST_ASSERT(transfer_headers.at("overwrite").get<std::string>() == server_contract::TRANSFER_OVERWRITE_HEADER);
+    TEST_ASSERT(transfer_headers.at("create_parent").get<std::string>() ==
+                server_contract::TRANSFER_CREATE_PARENT_HEADER);
+    TEST_ASSERT(transfer_headers.at("source_type").get<std::string>() == server_contract::TRANSFER_SOURCE_TYPE_HEADER);
+    TEST_ASSERT(transfer_headers.at("compression").get<std::string>() == server_contract::TRANSFER_COMPRESSION_HEADER);
+    TEST_ASSERT(transfer_headers.at("symlink_mode").get<std::string>() ==
+                server_contract::TRANSFER_SYMLINK_MODE_HEADER);
 }
 
 static void assert_transfer_export_errors(AppState& state, const fs::path& root) {
@@ -334,9 +361,9 @@ static std::string assert_transfer_export_and_exclude_routes(AppState& state, co
     const HttpResponse export_response =
         route_request(state, json_request("/v1/transfer/export", Json{{"path", source_file.string()}}));
     TEST_ASSERT(export_response.status == 200);
-    TEST_ASSERT(export_response.headers.at("Content-Type") == "application/octet-stream");
-    TEST_ASSERT(export_response.headers.at("x-remote-exec-source-type") == "file");
-    TEST_ASSERT(export_response.headers.at("x-remote-exec-compression") == "none");
+    TEST_ASSERT(export_response.headers.at("Content-Type") == server_contract::TRANSFER_EXPORT_CONTENT_TYPE);
+    TEST_ASSERT(export_response.headers.at(server_contract::TRANSFER_SOURCE_TYPE_HEADER) == "file");
+    TEST_ASSERT(export_response.headers.at(server_contract::TRANSFER_COMPRESSION_HEADER) == "none");
     TEST_ASSERT(!export_response.body.empty());
 
     const fs::path exclude_source = root / "transfer-exclude-source";
@@ -383,12 +410,13 @@ static void assert_transfer_import_success(AppState& state, const fs::path& root
     HttpRequest import_request;
     import_request.method = "POST";
     import_request.path = "/v1/transfer/import";
-    import_request.headers["x-remote-exec-source-type"] = "file";
-    import_request.headers["x-remote-exec-destination-path"] = encoded_destination_path_header(root / "transfer-dest.txt");
-    import_request.headers["x-remote-exec-overwrite"] = "replace";
-    import_request.headers["x-remote-exec-create-parent"] = "true";
-    import_request.headers["x-remote-exec-symlink-mode"] = "preserve";
-    import_request.headers["x-remote-exec-compression"] = "none";
+    import_request.headers[server_contract::TRANSFER_SOURCE_TYPE_HEADER] = "file";
+    import_request.headers[server_contract::TRANSFER_DESTINATION_PATH_HEADER] =
+        encoded_destination_path_header(root / "transfer-dest.txt");
+    import_request.headers[server_contract::TRANSFER_OVERWRITE_HEADER] = "replace";
+    import_request.headers[server_contract::TRANSFER_CREATE_PARENT_HEADER] = "true";
+    import_request.headers[server_contract::TRANSFER_SYMLINK_MODE_HEADER] = "preserve";
+    import_request.headers[server_contract::TRANSFER_COMPRESSION_HEADER] = "none";
     import_request.body = export_body;
 
     const HttpResponse import_response = route_request(state, import_request);
@@ -406,8 +434,8 @@ static void assert_transfer_import_optional_defaults(AppState& state,
                                                      const fs::path& root,
                                                      const std::string& export_body) {
     HttpRequest optional_defaults_import = transfer_import_request(root / "transfer-defaults.txt", export_body);
-    optional_defaults_import.headers.erase("x-remote-exec-symlink-mode");
-    optional_defaults_import.headers.erase("x-remote-exec-compression");
+    optional_defaults_import.headers.erase(server_contract::TRANSFER_SYMLINK_MODE_HEADER);
+    optional_defaults_import.headers.erase(server_contract::TRANSFER_COMPRESSION_HEADER);
     const HttpResponse optional_defaults_response = route_request(state, optional_defaults_import);
     TEST_ASSERT(optional_defaults_response.status == 200);
     TEST_ASSERT(read_text_file(root / "transfer-defaults.txt") == "route transfer payload");
@@ -417,34 +445,52 @@ static void assert_transfer_import_header_validation(AppState& state,
                                                      const fs::path& root,
                                                      const std::string& export_body) {
     HttpRequest missing_create_parent = transfer_import_request(root / "missing-create-parent.txt", export_body);
-    missing_create_parent.headers.erase("x-remote-exec-create-parent");
+    missing_create_parent.headers.erase(server_contract::TRANSFER_CREATE_PARENT_HEADER);
     assert_bad_request_for_transfer_import(
-        state, missing_create_parent, root / "missing-create-parent.txt", "x-remote-exec-create-parent");
+        state,
+        missing_create_parent,
+        root / "missing-create-parent.txt",
+        server_contract::TRANSFER_CREATE_PARENT_HEADER);
 
     HttpRequest invalid_create_parent = transfer_import_request(root / "invalid-create-parent.txt", export_body);
-    invalid_create_parent.headers["x-remote-exec-create-parent"] = "yes";
+    invalid_create_parent.headers[server_contract::TRANSFER_CREATE_PARENT_HEADER] = "yes";
     assert_bad_request_for_transfer_import(
-        state, invalid_create_parent, root / "invalid-create-parent.txt", "x-remote-exec-create-parent");
+        state,
+        invalid_create_parent,
+        root / "invalid-create-parent.txt",
+        server_contract::TRANSFER_CREATE_PARENT_HEADER);
 
     HttpRequest invalid_source_type = transfer_import_request(root / "invalid-source-type.txt", export_body);
-    invalid_source_type.headers["x-remote-exec-source-type"] = "folder";
+    invalid_source_type.headers[server_contract::TRANSFER_SOURCE_TYPE_HEADER] = "folder";
     assert_bad_request_for_transfer_import(
-        state, invalid_source_type, root / "invalid-source-type.txt", "x-remote-exec-source-type");
+        state,
+        invalid_source_type,
+        root / "invalid-source-type.txt",
+        server_contract::TRANSFER_SOURCE_TYPE_HEADER);
 
     HttpRequest invalid_overwrite = transfer_import_request(root / "invalid-overwrite.txt", export_body);
-    invalid_overwrite.headers["x-remote-exec-overwrite"] = "clobber";
+    invalid_overwrite.headers[server_contract::TRANSFER_OVERWRITE_HEADER] = "clobber";
     assert_bad_request_for_transfer_import(
-        state, invalid_overwrite, root / "invalid-overwrite.txt", "x-remote-exec-overwrite");
+        state,
+        invalid_overwrite,
+        root / "invalid-overwrite.txt",
+        server_contract::TRANSFER_OVERWRITE_HEADER);
 
     HttpRequest invalid_compression = transfer_import_request(root / "invalid-compression.txt", export_body);
-    invalid_compression.headers["x-remote-exec-compression"] = "gzip";
+    invalid_compression.headers[server_contract::TRANSFER_COMPRESSION_HEADER] = "gzip";
     assert_bad_request_for_transfer_import(
-        state, invalid_compression, root / "invalid-compression.txt", "x-remote-exec-compression");
+        state,
+        invalid_compression,
+        root / "invalid-compression.txt",
+        server_contract::TRANSFER_COMPRESSION_HEADER);
 
     HttpRequest invalid_symlink_mode = transfer_import_request(root / "invalid-symlink-mode.txt", export_body);
-    invalid_symlink_mode.headers["x-remote-exec-symlink-mode"] = "copy";
+    invalid_symlink_mode.headers[server_contract::TRANSFER_SYMLINK_MODE_HEADER] = "copy";
     assert_bad_request_for_transfer_import(
-        state, invalid_symlink_mode, root / "invalid-symlink-mode.txt", "x-remote-exec-symlink-mode");
+        state,
+        invalid_symlink_mode,
+        root / "invalid-symlink-mode.txt",
+        server_contract::TRANSFER_SYMLINK_MODE_HEADER);
 }
 
 static void assert_transfer_import_rejects_file_merge_into_directory(AppState& state,
@@ -454,13 +500,13 @@ static void assert_transfer_import_rejects_file_merge_into_directory(AppState& s
     HttpRequest merge_file_into_directory_request;
     merge_file_into_directory_request.method = "POST";
     merge_file_into_directory_request.path = "/v1/transfer/import";
-    merge_file_into_directory_request.headers["x-remote-exec-source-type"] = "file";
-    merge_file_into_directory_request.headers["x-remote-exec-destination-path"] =
+    merge_file_into_directory_request.headers[server_contract::TRANSFER_SOURCE_TYPE_HEADER] = "file";
+    merge_file_into_directory_request.headers[server_contract::TRANSFER_DESTINATION_PATH_HEADER] =
         encoded_destination_path_header(root / "merge-dir");
-    merge_file_into_directory_request.headers["x-remote-exec-overwrite"] = "merge";
-    merge_file_into_directory_request.headers["x-remote-exec-create-parent"] = "true";
-    merge_file_into_directory_request.headers["x-remote-exec-symlink-mode"] = "preserve";
-    merge_file_into_directory_request.headers["x-remote-exec-compression"] = "none";
+    merge_file_into_directory_request.headers[server_contract::TRANSFER_OVERWRITE_HEADER] = "merge";
+    merge_file_into_directory_request.headers[server_contract::TRANSFER_CREATE_PARENT_HEADER] = "true";
+    merge_file_into_directory_request.headers[server_contract::TRANSFER_SYMLINK_MODE_HEADER] = "preserve";
+    merge_file_into_directory_request.headers[server_contract::TRANSFER_COMPRESSION_HEADER] = "none";
     merge_file_into_directory_request.body = export_body;
     const HttpResponse merge_file_into_directory_response = route_request(state, merge_file_into_directory_request);
     TEST_ASSERT(merge_file_into_directory_response.status == 400);
@@ -503,13 +549,13 @@ static void assert_sandbox_import_denied(AppState& sandbox_state,
     HttpRequest sandbox_import_denied_request;
     sandbox_import_denied_request.method = "POST";
     sandbox_import_denied_request.path = "/v1/transfer/import";
-    sandbox_import_denied_request.headers["x-remote-exec-source-type"] = "file";
-    sandbox_import_denied_request.headers["x-remote-exec-destination-path"] =
+    sandbox_import_denied_request.headers[server_contract::TRANSFER_SOURCE_TYPE_HEADER] = "file";
+    sandbox_import_denied_request.headers[server_contract::TRANSFER_DESTINATION_PATH_HEADER] =
         encoded_destination_path_header(outside / "dest.txt");
-    sandbox_import_denied_request.headers["x-remote-exec-overwrite"] = "replace";
-    sandbox_import_denied_request.headers["x-remote-exec-create-parent"] = "true";
-    sandbox_import_denied_request.headers["x-remote-exec-symlink-mode"] = "preserve";
-    sandbox_import_denied_request.headers["x-remote-exec-compression"] = "none";
+    sandbox_import_denied_request.headers[server_contract::TRANSFER_OVERWRITE_HEADER] = "replace";
+    sandbox_import_denied_request.headers[server_contract::TRANSFER_CREATE_PARENT_HEADER] = "true";
+    sandbox_import_denied_request.headers[server_contract::TRANSFER_SYMLINK_MODE_HEADER] = "preserve";
+    sandbox_import_denied_request.headers[server_contract::TRANSFER_COMPRESSION_HEADER] = "none";
     sandbox_import_denied_request.body = export_body;
     const HttpResponse sandbox_import_denied = route_request(sandbox_state, sandbox_import_denied_request);
     assert_sandbox_denied(sandbox_import_denied);
@@ -525,13 +571,13 @@ static void assert_sandbox_symlink_target_denied(AppState& sandbox_state, const 
     HttpRequest sandbox_symlink_target_denied_request;
     sandbox_symlink_target_denied_request.method = "POST";
     sandbox_symlink_target_denied_request.path = "/v1/transfer/import";
-    sandbox_symlink_target_denied_request.headers["x-remote-exec-source-type"] = "directory";
-    sandbox_symlink_target_denied_request.headers["x-remote-exec-destination-path"] =
+    sandbox_symlink_target_denied_request.headers[server_contract::TRANSFER_SOURCE_TYPE_HEADER] = "directory";
+    sandbox_symlink_target_denied_request.headers[server_contract::TRANSFER_DESTINATION_PATH_HEADER] =
         encoded_destination_path_header(write_allowed);
-    sandbox_symlink_target_denied_request.headers["x-remote-exec-overwrite"] = "merge";
-    sandbox_symlink_target_denied_request.headers["x-remote-exec-create-parent"] = "true";
-    sandbox_symlink_target_denied_request.headers["x-remote-exec-symlink-mode"] = "preserve";
-    sandbox_symlink_target_denied_request.headers["x-remote-exec-compression"] = "none";
+    sandbox_symlink_target_denied_request.headers[server_contract::TRANSFER_OVERWRITE_HEADER] = "merge";
+    sandbox_symlink_target_denied_request.headers[server_contract::TRANSFER_CREATE_PARENT_HEADER] = "true";
+    sandbox_symlink_target_denied_request.headers[server_contract::TRANSFER_SYMLINK_MODE_HEADER] = "preserve";
+    sandbox_symlink_target_denied_request.headers[server_contract::TRANSFER_COMPRESSION_HEADER] = "none";
     sandbox_symlink_target_denied_request.body = denied_symlink_archive;
     const HttpResponse sandbox_symlink_target_denied =
         route_request(sandbox_state, sandbox_symlink_target_denied_request);
@@ -604,6 +650,7 @@ static void assert_sandbox_routes(const fs::path& root) {
 }
 
 void run_platform_neutral_server_route_tests(AppState& state, const fs::path& root) {
+    assert_shared_server_contract();
     assert_target_info_and_basic_helpers(state);
     assert_transfer_export_errors(state, root);
     assert_image_routes(state, root);
