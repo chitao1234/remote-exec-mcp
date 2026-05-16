@@ -38,17 +38,24 @@ fn windows_default_shell_prefers_git_bash_before_pwsh_and_cmd() {
     let environment = make_environment(&[], Some(tempdir.path()), Some(r"C:\custom\cmd.exe"));
 
     assert_eq!(
-        resolve_default_windows_shell_with_validator(None, &environment, None, |candidate, _, _| {
-            match candidate {
-                candidate if candidate == git_bash.to_string_lossy() => Ok(candidate.to_string()),
-                "pwsh.exe" => Ok(r"C:\tools\pwsh.exe".to_string()),
-                "powershell.exe" => Ok(r"C:\tools\powershell.exe".to_string()),
-                "powershell" => Ok(r"C:\tools\powershell".to_string()),
-                r"C:\custom\cmd.exe" => Ok(r"C:\custom\cmd.exe".to_string()),
-                "cmd.exe" => Ok("cmd.exe".to_string()),
-                _ => anyhow::bail!("missing"),
+        resolve_default_windows_shell_with_validator(
+            None,
+            &environment,
+            None,
+            |candidate, _, _| {
+                match candidate {
+                    candidate if candidate == git_bash.to_string_lossy() => {
+                        Ok(candidate.to_string())
+                    }
+                    "pwsh.exe" => Ok(r"C:\tools\pwsh.exe".to_string()),
+                    "powershell.exe" => Ok(r"C:\tools\powershell.exe".to_string()),
+                    "powershell" => Ok(r"C:\tools\powershell".to_string()),
+                    r"C:\custom\cmd.exe" => Ok(r"C:\custom\cmd.exe".to_string()),
+                    "cmd.exe" => Ok("cmd.exe".to_string()),
+                    _ => anyhow::bail!("missing"),
+                }
             }
-        })
+        )
         .unwrap(),
         git_bash.to_string_lossy()
     );
@@ -59,16 +66,21 @@ fn windows_default_shell_falls_back_to_pwsh_before_legacy_powershell_and_cmd() {
     let environment = make_environment(&[], None, Some(r"C:\custom\cmd.exe"));
 
     assert_eq!(
-        resolve_default_windows_shell_with_validator(None, &environment, None, |candidate, _, _| {
-            match candidate {
-                "pwsh.exe" => Ok(r"C:\tools\pwsh.exe".to_string()),
-                "powershell.exe" => Ok(r"C:\tools\powershell.exe".to_string()),
-                "powershell" => Ok(r"C:\tools\powershell".to_string()),
-                r"C:\custom\cmd.exe" => Ok(r"C:\custom\cmd.exe".to_string()),
-                "cmd.exe" => Ok("cmd.exe".to_string()),
-                _ => anyhow::bail!("missing"),
+        resolve_default_windows_shell_with_validator(
+            None,
+            &environment,
+            None,
+            |candidate, _, _| {
+                match candidate {
+                    "pwsh.exe" => Ok(r"C:\tools\pwsh.exe".to_string()),
+                    "powershell.exe" => Ok(r"C:\tools\powershell.exe".to_string()),
+                    "powershell" => Ok(r"C:\tools\powershell".to_string()),
+                    r"C:\custom\cmd.exe" => Ok(r"C:\custom\cmd.exe".to_string()),
+                    "cmd.exe" => Ok("cmd.exe".to_string()),
+                    _ => anyhow::bail!("missing"),
+                }
             }
-        })
+        )
         .unwrap(),
         r"C:\tools\pwsh.exe"
     );
@@ -92,12 +104,17 @@ fn windows_default_shell_can_derive_git_bash_from_git_exe_on_path() {
     let environment = make_environment(&[&git_cmd], None, Some(r"C:\custom\cmd.exe"));
 
     assert_eq!(
-        resolve_default_windows_shell_with_validator(None, &environment, None, |candidate: &str, _, _| {
-            if candidate == git_bash.to_string_lossy() {
-                return Ok(candidate.to_string());
+        resolve_default_windows_shell_with_validator(
+            None,
+            &environment,
+            None,
+            |candidate: &str, _, _| {
+                if candidate == git_bash.to_string_lossy() {
+                    return Ok(candidate.to_string());
+                }
+                anyhow::bail!("missing")
             }
-            anyhow::bail!("missing")
-        })
+        )
         .unwrap(),
         git_bash.to_string_lossy()
     );
@@ -108,12 +125,17 @@ fn windows_default_shell_falls_back_to_comspec() {
     let environment = make_environment(&[], None, Some(r"C:\custom\cmd.exe"));
 
     assert_eq!(
-        resolve_default_windows_shell_with_validator(None, &environment, None, |candidate, _, _| {
-            match candidate {
-                r"C:\custom\cmd.exe" => Ok(r"C:\custom\cmd.exe".to_string()),
-                _ => anyhow::bail!("missing"),
+        resolve_default_windows_shell_with_validator(
+            None,
+            &environment,
+            None,
+            |candidate, _, _| {
+                match candidate {
+                    r"C:\custom\cmd.exe" => Ok(r"C:\custom\cmd.exe".to_string()),
+                    _ => anyhow::bail!("missing"),
+                }
             }
-        })
+        )
         .unwrap(),
         r"C:\custom\cmd.exe"
     );

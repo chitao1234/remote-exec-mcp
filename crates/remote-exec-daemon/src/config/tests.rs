@@ -1,6 +1,8 @@
 use std::path::Path;
 
-use super::{DaemonConfig, DaemonTransport, ValidatedDaemonConfig, YieldTimeConfig, YieldTimeOperation};
+use super::{
+    DaemonConfig, DaemonTransport, ValidatedDaemonConfig, YieldTimeConfig, YieldTimeOperation,
+};
 
 fn neutral_toml_path(path: &Path) -> toml::Value {
     toml::Value::String(path.display().to_string())
@@ -21,7 +23,10 @@ transport = "http"
     )
 }
 
-async fn load_config(dir: &tempfile::TempDir, text: impl AsRef<str>) -> anyhow::Result<ValidatedDaemonConfig> {
+async fn load_config(
+    dir: &tempfile::TempDir,
+    text: impl AsRef<str>,
+) -> anyhow::Result<ValidatedDaemonConfig> {
     let config_path = dir.path().join("daemon.toml");
     tokio::fs::write(&config_path, text.as_ref()).await?;
     DaemonConfig::load(&config_path).await
@@ -30,7 +35,9 @@ async fn load_config(dir: &tempfile::TempDir, text: impl AsRef<str>) -> anyhow::
 #[tokio::test]
 async fn load_accepts_http_transport_without_tls_block() {
     let dir = tempfile::tempdir().unwrap();
-    let config = load_config(&dir, http_config(neutral_workdir(&dir), "")).await.unwrap();
+    let config = load_config(&dir, http_config(neutral_workdir(&dir), ""))
+        .await
+        .unwrap();
     assert!(matches!(config.transport, DaemonTransport::Http));
     assert!(config.http_auth.is_none());
     assert!(config.tls.is_none());

@@ -1,6 +1,6 @@
+use std::path::Path;
 #[cfg(windows)]
 use std::path::PathBuf;
-use std::path::Path;
 
 use crate::state::LOCAL_TARGET_NAME;
 
@@ -30,7 +30,10 @@ fn toml_string(path: &Path) -> toml::Value {
     toml::Value::String(path.display().to_string())
 }
 
-async fn load_config(dir: &tempfile::TempDir, text: impl AsRef<str>) -> anyhow::Result<ValidatedBrokerConfig> {
+async fn load_config(
+    dir: &tempfile::TempDir,
+    text: impl AsRef<str>,
+) -> anyhow::Result<ValidatedBrokerConfig> {
     let config_path = dir.path().join("broker.toml");
     tokio::fs::write(&config_path, text.as_ref()).await?;
     BrokerConfig::load(&config_path).await
@@ -52,7 +55,9 @@ async fn load_rejects_reserved_local_target_name() {
 #[tokio::test]
 async fn load_accepts_non_reserved_target_names() {
     let dir = tempfile::tempdir().unwrap();
-    let config = load_config(&dir, valid_target_config("builder-a")).await.unwrap();
+    let config = load_config(&dir, valid_target_config("builder-a"))
+        .await
+        .unwrap();
     assert!(config.targets.contains_key("builder-a"));
 }
 
@@ -122,7 +127,10 @@ client_key_pem = "/tmp/broker.key"
     )
     .await
     .unwrap();
-    assert_eq!(config.targets["builder-a"].base_url, "https://127.0.0.1:8443");
+    assert_eq!(
+        config.targets["builder-a"].base_url,
+        "https://127.0.0.1:8443"
+    );
 }
 
 #[tokio::test]
@@ -303,7 +311,10 @@ expected_daemon_name = "builder-xp"
 
     let config = BrokerConfig::load(&config_path).await.unwrap();
     assert!(config.targets["builder-xp"].allow_insecure_http);
-    assert_eq!(config.targets["builder-xp"].base_url, "http://127.0.0.1:8181");
+    assert_eq!(
+        config.targets["builder-xp"].base_url,
+        "http://127.0.0.1:8181"
+    );
     assert_eq!(
         config.targets["builder-xp"].expected_daemon_name.as_deref(),
         Some("builder-xp")
@@ -403,7 +414,8 @@ pinned_server_cert_pem = "/tmp/pin.pem"
 
     let err = BrokerConfig::load(&config_path).await.unwrap_err();
     assert!(
-        err.to_string().contains("cannot set pinned_server_cert_pem"),
+        err.to_string()
+            .contains("cannot set pinned_server_cert_pem"),
         "unexpected error: {err}"
     );
 }

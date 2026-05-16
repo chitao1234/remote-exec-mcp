@@ -13,8 +13,12 @@ use tokio_util::sync::CancellationToken;
 
 use super::super::epoch::{ForwardEpoch, INITIAL_FORWARD_GENERATION};
 use super::super::side::SideHandle;
-use super::super::supervisor::{ForwardIdentity, ForwardLimits, ForwardRuntime, ListenSessionControl};
-use super::super::test_support::{ScriptedTunnelIo, filter_one, test_record, wait_until_send_fails};
+use super::super::supervisor::{
+    ForwardIdentity, ForwardLimits, ForwardRuntime, ListenSessionControl,
+};
+use super::super::test_support::{
+    ScriptedTunnelIo, filter_one, test_record, wait_until_send_fails,
+};
 use super::super::tunnel::PortTunnel;
 use super::*;
 
@@ -46,10 +50,7 @@ impl AsyncWrite for PendingReadBrokenWrite {
         Poll::Ready(Ok(()))
     }
 
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        _cx: &mut TaskContext<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut TaskContext<'_>) -> Poll<std::io::Result<()>> {
         Poll::Ready(Ok(()))
     }
 }
@@ -105,9 +106,8 @@ async fn ready_tcp_data_send_backpressure_counts_dropped_stream() {
     let (listen_broker_side, mut listen_daemon_side) = tokio::io::duplex(4096);
     let listen_tunnel = Arc::new(PortTunnel::from_stream(listen_broker_side).unwrap());
     let (connect_broker_side, mut connect_daemon_side) = tokio::io::duplex(4096);
-    let connect_tunnel = Arc::new(
-        PortTunnel::from_stream_with_max_queued_bytes(connect_broker_side, 1).unwrap(),
-    );
+    let connect_tunnel =
+        Arc::new(PortTunnel::from_stream_with_max_queued_bytes(connect_broker_side, 1).unwrap());
     let runtime = tcp_test_runtime(listen_tunnel.clone(), connect_tunnel.clone());
     runtime
         .store
@@ -126,10 +126,11 @@ async fn ready_tcp_data_send_backpressure_counts_dropped_stream() {
         .await
         .unwrap();
 
-    let connect = tokio::time::timeout(Duration::from_secs(1), read_frame(&mut connect_daemon_side))
-        .await
-        .expect("tcp accept should open a connect stream")
-        .unwrap();
+    let connect =
+        tokio::time::timeout(Duration::from_secs(1), read_frame(&mut connect_daemon_side))
+            .await
+            .expect("tcp accept should open a connect stream")
+            .unwrap();
     assert_eq!(connect.frame_type, FrameType::TcpConnect);
     assert_eq!(connect.stream_id, 1);
 
@@ -192,7 +193,8 @@ async fn pending_tcp_data_limit_drops_unready_stream_without_leaking_active_coun
         max_pending_tcp_bytes_per_forward: 4,
         ..ForwardLimits::default()
     };
-    let runtime = tcp_test_runtime_with_limits(listen_tunnel.clone(), connect_tunnel.clone(), limits);
+    let runtime =
+        tcp_test_runtime_with_limits(listen_tunnel.clone(), connect_tunnel.clone(), limits);
     runtime
         .store
         .insert(test_record(&runtime, "127.0.0.1:10000"))
@@ -556,10 +558,11 @@ async fn fully_drained_tcp_pair_closes_both_daemon_streams() {
         data: Vec::new(),
     });
     connect_io.wait_for_written_frame(FrameType::Close, 1).await;
-    let listen_eof = tokio::time::timeout(Duration::from_secs(1), read_frame(&mut listen_daemon_side))
-        .await
-        .expect("connect-side EOF should relay to the listen-side stream")
-        .unwrap();
+    let listen_eof =
+        tokio::time::timeout(Duration::from_secs(1), read_frame(&mut listen_daemon_side))
+            .await
+            .expect("connect-side EOF should relay to the listen-side stream")
+            .unwrap();
     assert_eq!(listen_eof.frame_type, FrameType::TcpEof);
     assert_eq!(listen_eof.stream_id, 11);
     let listen_close =
@@ -805,7 +808,10 @@ async fn tcp_accepted_stream_error_closes_pair_without_failing_forward() {
     assert!(matches!(control, ForwardLoopControl::Cancelled));
 }
 
-fn tcp_test_runtime(listen_tunnel: Arc<PortTunnel>, connect_tunnel: Arc<PortTunnel>) -> ForwardRuntime {
+fn tcp_test_runtime(
+    listen_tunnel: Arc<PortTunnel>,
+    connect_tunnel: Arc<PortTunnel>,
+) -> ForwardRuntime {
     tcp_test_runtime_with_limits(listen_tunnel, connect_tunnel, ForwardLimits::default())
 }
 
