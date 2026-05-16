@@ -1,5 +1,6 @@
 mod open;
 mod reconnect;
+mod tunnel_open;
 
 use std::sync::Arc;
 

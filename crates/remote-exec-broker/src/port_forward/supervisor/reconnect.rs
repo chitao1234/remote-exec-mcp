@@ -11,8 +11,8 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::super::epoch::ForwardEpoch;
-use super::open::{open_data_tunnel, open_listen_session};
 use super::{ForwardRuntime, ListenSessionControl};
+use super::tunnel_open::{open_data_tunnel, open_listen_session};
 use crate::port_forward::events::ForwardLoopControl;
 use crate::port_forward::tunnel::{
     PortTunnel, decode_tunnel_meta, encode_tunnel_meta, is_retryable_transport_error, tunnel_error,
