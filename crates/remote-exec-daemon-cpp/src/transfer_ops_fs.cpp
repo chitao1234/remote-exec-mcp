@@ -91,7 +91,14 @@ class ScopedDirHandle {
 };
 #endif
 
-void remove_existing_path(const std::string& path) {
+static const std::size_t MAX_REMOVE_DEPTH = 256;
+
+void remove_existing_path_recursive(const std::string& path, std::size_t depth) {
+    if (depth > MAX_REMOVE_DEPTH) {
+        throw std::runtime_error("remove_existing_path exceeded maximum depth of " +
+                                 std::to_string(MAX_REMOVE_DEPTH));
+    }
+
     if (!path_exists(path)) {
         return;
     }
@@ -99,7 +106,7 @@ void remove_existing_path(const std::string& path) {
     if (is_directory(path)) {
         const std::vector<DirectoryEntry> entries = list_directory_entries(path);
         for (std::size_t i = 0; i < entries.size(); ++i) {
-            remove_existing_path(join_path(path, entries[i].name));
+            remove_existing_path_recursive(join_path(path, entries[i].name), depth + 1);
         }
 #ifdef _WIN32
         if (!path_utils::remove_directory(path)) {
@@ -114,6 +121,10 @@ void remove_existing_path(const std::string& path) {
     if (!path_utils::remove_path(path)) {
         throw std::runtime_error("unable to remove existing file " + path);
     }
+}
+
+void remove_existing_path(const std::string& path) {
+    remove_existing_path_recursive(path, 0);
 }
 
 } // namespace
