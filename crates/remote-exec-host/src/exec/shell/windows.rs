@@ -60,31 +60,39 @@ where
             .with_context(|| format!("configured default shell `{shell}` is not usable"));
     }
 
-    if let Some(shell) = find_windows_bash(environment, windows_posix_root) {
-        if let Ok(shell) = validate(&shell, environment, windows_posix_root) {
+    for candidate in default_windows_shell_candidates(environment, windows_posix_root) {
+        if let Ok(shell) = validate(&candidate, environment, windows_posix_root) {
             return Ok(shell);
         }
-    }
-
-    for candidate in ["pwsh.exe", "powershell.exe", "powershell"] {
-        if let Ok(shell) = validate(candidate, environment, windows_posix_root) {
-            return Ok(shell);
-        }
-    }
-
-    if let Some(shell) = environment.comspec().filter(|value| !value.is_empty()) {
-        if let Ok(shell) = validate(shell, environment, windows_posix_root) {
-            return Ok(shell);
-        }
-    }
-
-    if let Ok(shell) = validate("cmd.exe", environment, windows_posix_root) {
-        return Ok(shell);
     }
 
     anyhow::bail!(
         "no usable default shell found; tried Git Bash, pwsh.exe, powershell.exe, COMSPEC, and cmd.exe"
     );
+}
+
+fn default_windows_shell_candidates(
+    environment: &ProcessEnvironment,
+    windows_posix_root: Option<&Path>,
+) -> Vec<String> {
+    let mut candidates = Vec::new();
+
+    if let Some(shell) = find_windows_bash(environment, windows_posix_root) {
+        candidates.push(shell);
+    }
+
+    candidates.extend(
+        ["pwsh.exe", "powershell.exe", "powershell"]
+            .into_iter()
+            .map(str::to_string),
+    );
+
+    if let Some(shell) = environment.comspec().filter(|value| !value.is_empty()) {
+        candidates.push(shell.to_string());
+    }
+
+    candidates.push("cmd.exe".to_string());
+    candidates
 }
 
 #[cfg_attr(test, allow(dead_code))]

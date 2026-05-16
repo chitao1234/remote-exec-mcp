@@ -1,7 +1,7 @@
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
-use std::net::SocketAddr;
 
 use remote_exec_proto::port_forward::{ensure_nonzero_connect_endpoint, normalize_endpoint};
 use remote_exec_proto::port_tunnel::{
@@ -206,7 +206,8 @@ pub(super) async fn tunnel_tcp_listen(
 
 pub(super) async fn tunnel_tcp_accept_loop(session: Arc<SessionState>, listener: Arc<TcpListener>) {
     loop {
-        let (attachment, stream, peer) = match accept_attached_tcp_stream(&session, &listener).await {
+        let (attachment, stream, peer) = match accept_attached_tcp_stream(&session, &listener).await
+        {
             AcceptLoopOutcome::Continue => continue,
             AcceptLoopOutcome::Return => return,
             AcceptLoopOutcome::Accepted {
@@ -315,7 +316,9 @@ async fn register_accepted_tcp_stream(
     stream: TcpStream,
     peer: SocketAddr,
 ) -> RegisteredAcceptedTcpStream {
-    let stream_id = session.next_daemon_stream_id.fetch_add(2, Ordering::Relaxed);
+    let stream_id = session
+        .next_daemon_stream_id
+        .fetch_add(2, Ordering::Relaxed);
     let listener_stream = listener_stream_id(session).await.unwrap_or(0);
     let (reader, writer) = stream.into_split();
     let stream_cancel = attachment.cancel.child_token();

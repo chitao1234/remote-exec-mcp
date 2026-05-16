@@ -191,9 +191,14 @@ async fn handle_listen_tcp_accept(
         runtime.record_dropped_stream().await;
         return Ok(None);
     }
-    let Some(connect_stream_id) =
-        allocate_connect_stream_id(runtime, listen_tunnel, state, connect_stream_ids, frame.stream_id)
-            .await?
+    let Some(connect_stream_id) = allocate_connect_stream_id(
+        runtime,
+        listen_tunnel,
+        state,
+        connect_stream_ids,
+        frame.stream_id,
+    )
+    .await?
     else {
         return Ok(Some(ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)));
     };
@@ -256,9 +261,13 @@ async fn send_tcp_connect_open(
         .await
     {
         if is_retryable_transport_error(&err) {
-            return close_unpaired_listen_stream_after_connect_loss(runtime, listen_tunnel, listen_stream_id)
-                .await
-                .map(Some);
+            return close_unpaired_listen_stream_after_connect_loss(
+                runtime,
+                listen_tunnel,
+                listen_stream_id,
+            )
+            .await
+            .map(Some);
         }
         settle_active_tcp_stream(runtime, TcpActiveStreamSettlement::Dropped).await;
         return Err(err).context("connecting tcp forward destination");

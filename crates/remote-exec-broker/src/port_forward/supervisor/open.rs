@@ -293,8 +293,12 @@ async fn open_listener_for_forward(
         limits,
     } = opened;
     let listener_stream_id = LISTEN_SESSION_STREAM_ID;
-    let listener_open_context =
-        open_context(kind, ForwardSide::Listen, listen_side.name(), listen_endpoint);
+    let listener_open_context = open_context(
+        kind,
+        ForwardSide::Listen,
+        listen_side.name(),
+        listen_endpoint,
+    );
     listen_tunnel
         .send(Frame {
             frame_type: kind.listen_frame_type,
@@ -312,7 +316,12 @@ async fn open_listener_for_forward(
         listener_stream_id,
         kind.listen_ok_frame_type,
         listener_open_context,
-        open_context(kind, ForwardSide::Listen, listen_side.name(), listen_endpoint),
+        open_context(
+            kind,
+            ForwardSide::Listen,
+            listen_side.name(),
+            listen_endpoint,
+        ),
     )
     .await
     {
