@@ -43,10 +43,11 @@ mod tests {
         use crate::config::{
             DaemonConfig, DaemonTransport, ProcessEnvironment, PtyMode, YieldTimeConfig,
         };
+        use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
 
         fn tls_transport_config() -> Arc<DaemonConfig> {
             Arc::new(DaemonConfig {
-                target: "builder-a".to_string(),
+                target: DEFAULT_TEST_TARGET.to_string(),
                 listen: "127.0.0.1:9443".parse().unwrap(),
                 default_workdir: PathBuf::from("."),
                 windows_posix_root: None,

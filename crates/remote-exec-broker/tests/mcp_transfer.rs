@@ -3,6 +3,9 @@ mod support;
 #[cfg(unix)]
 use std::process::Command;
 
+use remote_exec_test_support::test_helpers::{
+    DEFAULT_TEST_TARGET, TEST_BEARER_SECRET, XP_TEST_TARGET,
+};
 use rmcp::model::{CallToolRequestParams, PaginatedRequestParams};
 use support::transfer_archive::{
     SINGLE_FILE_ENTRY, decode_archive, raw_tar_file_with_path, read_archive_paths,
@@ -94,7 +97,7 @@ async fn transfer_files_defaults_to_merge_overwrite() {
         &fixture,
         "local",
         source.display(),
-        "builder-xp",
+        XP_TEST_TARGET,
         "/srv/remote.txt",
         None,
         true,
@@ -228,7 +231,7 @@ async fn transfer_files_into_directory_resolves_single_source_basename() {
                     "path": source.display().to_string()
                 },
                 "destination": {
-                    "target": "builder-xp",
+                    "target": XP_TEST_TARGET,
                     "path": "/srv/inbox"
                 },
                 "destination_mode": "into_directory",
@@ -272,7 +275,7 @@ async fn transfer_files_auto_mode_treats_trailing_separator_as_directory() {
                     "path": source.display().to_string()
                 },
                 "destination": {
-                    "target": "builder-xp",
+                    "target": XP_TEST_TARGET,
                     "path": "C:/srv/inbox/"
                 },
                 "create_parent": true
@@ -308,7 +311,7 @@ async fn transfer_files_auto_mode_treats_existing_directory_as_directory() {
                     "path": source.display().to_string()
                 },
                 "destination": {
-                    "target": "builder-xp",
+                    "target": XP_TEST_TARGET,
                     "path": "C:/srv/inbox"
                 },
                 "create_parent": true
@@ -342,7 +345,7 @@ async fn transfer_files_auto_mode_keeps_missing_single_destination_exact() {
                     "path": source.display().to_string()
                 },
                 "destination": {
-                    "target": "builder-xp",
+                    "target": XP_TEST_TARGET,
                     "path": "C:/srv/inbox"
                 },
                 "create_parent": true
@@ -381,7 +384,7 @@ async fn transfer_files_auto_mode_treats_not_found_path_info_as_missing_exact() 
                     "path": source.display().to_string()
                 },
                 "destination": {
-                    "target": "builder-xp",
+                    "target": XP_TEST_TARGET,
                     "path": "C:/srv/inbox"
                 },
                 "create_parent": true
@@ -417,7 +420,7 @@ async fn transfer_files_auto_mode_does_not_treat_message_only_unknown_endpoint_a
                     "path": source.display().to_string()
                 },
                 "destination": {
-                    "target": "builder-xp",
+                    "target": XP_TEST_TARGET,
                     "path": "C:/srv/inbox"
                 },
                 "create_parent": true
@@ -431,7 +434,8 @@ async fn transfer_files_auto_mode_does_not_treat_message_only_unknown_endpoint_a
 
 #[tokio::test]
 async fn transfer_files_uses_bearer_auth_for_remote_imports() {
-    let fixture = support::spawners::spawn_broker_with_stub_daemon_http_auth("shared-secret").await;
+    let fixture =
+        support::spawners::spawn_broker_with_stub_daemon_http_auth(TEST_BEARER_SECRET).await;
     let source = fixture._tempdir.path().join("source.txt");
     std::fs::write(&source, "hello auth\n").unwrap();
 
@@ -439,7 +443,7 @@ async fn transfer_files_uses_bearer_auth_for_remote_imports() {
         &fixture,
         "local",
         source.display(),
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         "/srv/remote.txt",
         Some("fail"),
         false,
@@ -458,12 +462,13 @@ async fn transfer_files_uses_bearer_auth_for_remote_imports() {
 
 #[tokio::test]
 async fn transfer_files_uses_bearer_auth_for_remote_exports() {
-    let fixture = support::spawners::spawn_broker_with_stub_daemon_http_auth("shared-secret").await;
+    let fixture =
+        support::spawners::spawn_broker_with_stub_daemon_http_auth(TEST_BEARER_SECRET).await;
     let destination = fixture._tempdir.path().join("download");
 
     let result = transfer_single_source(
         &fixture,
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         "/srv/export",
         "local",
         destination.display(),
@@ -490,7 +495,7 @@ async fn transfer_files_forwards_exclude_patterns_to_remote_exports() {
             "transfer_files",
             serde_json::json!({
                 "source": {
-                    "target": "builder-xp",
+                    "target": XP_TEST_TARGET,
                     "path": "/srv/reports"
                 },
                 "destination": {
@@ -623,7 +628,7 @@ async fn transfer_files_copies_local_directory_to_plain_http_remote() {
                     "path": source.display().to_string()
                 },
                 "destination": {
-                    "target": "builder-xp",
+                    "target": XP_TEST_TARGET,
                     "path": "C:/dest/tree"
                 },
                 "overwrite": "replace",
@@ -678,7 +683,7 @@ async fn transfer_files_bundles_multiple_local_sources_for_plain_http_remote_imp
                     }
                 ],
                 "destination": {
-                    "target": "builder-xp",
+                    "target": XP_TEST_TARGET,
                     "path": "C:/dest/bundle"
                 },
                 "overwrite": "replace",
@@ -712,7 +717,7 @@ async fn transfer_files_copies_local_file_to_plain_http_remote_as_single_file_ta
         &fixture,
         "local",
         source.display(),
-        "builder-xp",
+        XP_TEST_TARGET,
         "C:/dest/file.txt",
         Some("fail"),
         true,
@@ -746,7 +751,7 @@ async fn transfer_files_auto_negotiates_zstd_when_supported() {
         &fixture,
         "local",
         source.display(),
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         "/tmp/dest.txt",
         Some("fail"),
         true,
@@ -775,7 +780,7 @@ async fn transfer_files_falls_back_to_none_when_target_does_not_support_compress
         &fixture,
         "local",
         source.display(),
-        "builder-xp",
+        XP_TEST_TARGET,
         "C:/dest/file.txt",
         Some("fail"),
         true,
@@ -802,7 +807,7 @@ async fn transfer_files_rejects_public_compression_field() {
             "path": source.display().to_string()
         },
         "destination": {
-            "target": "builder-a",
+            "target": DEFAULT_TEST_TARGET,
             "path": "/tmp/dest.txt"
         },
         "overwrite": "fail",
@@ -832,7 +837,7 @@ async fn transfer_files_copies_plain_http_remote_file_to_local_from_single_file_
 
     let result = transfer_single_source(
         &fixture,
-        "builder-xp",
+        XP_TEST_TARGET,
         "C:/remote/file.txt",
         "local",
         destination.display(),
@@ -856,7 +861,7 @@ async fn transfer_files_copies_plain_http_remote_directory_to_local() {
 
     let result = transfer_single_source(
         &fixture,
-        "builder-xp",
+        XP_TEST_TARGET,
         "C:/remote-exec/tree",
         "local",
         destination.display(),
@@ -890,7 +895,7 @@ async fn transfer_files_rejects_remote_directory_entries_that_escape_local_desti
             "transfer_files",
             serde_json::json!({
                 "source": {
-                    "target": "builder-xp",
+                    "target": XP_TEST_TARGET,
                     "path": "C:/remote-exec/tree"
                 },
                 "destination": {
@@ -938,9 +943,9 @@ async fn transfer_files_rejects_exact_normalized_windows_remote_duplicates_on_no
 
     let error = transfer_single_source_error(
         &fixture,
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         "C:/Work/Artifact.txt",
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         r"C:\Work\Artifact.txt",
         Some("replace"),
         true,
@@ -956,9 +961,9 @@ async fn transfer_files_allows_case_only_windows_remote_path_differences_on_non_
 
     let result = transfer_single_source(
         &fixture,
-        "builder-xp",
+        XP_TEST_TARGET,
         "C:/Work/Artifact.txt",
-        "builder-xp",
+        XP_TEST_TARGET,
         r"c:\work\artifact.txt",
         Some("replace"),
         true,
@@ -985,9 +990,9 @@ async fn transfer_files_rejects_msys_and_cygwin_windows_remote_duplicates_after_
 
     let error = transfer_single_source_error(
         &fixture,
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         "/c/Work/Artifact.txt",
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         "/cygdrive/c/Work/Artifact.txt",
         Some("replace"),
         true,
@@ -1004,9 +1009,9 @@ async fn transfer_files_allows_case_only_single_slash_windows_remote_paths_for_s
 
     let result = transfer_single_source(
         &fixture,
-        "builder-xp",
+        XP_TEST_TARGET,
         "/tmp/Artifact.txt",
-        "builder-xp",
+        XP_TEST_TARGET,
         "/tmp/artifact.txt",
         Some("replace"),
         true,

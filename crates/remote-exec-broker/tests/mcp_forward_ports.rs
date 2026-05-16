@@ -3,6 +3,7 @@ mod support;
 
 use std::time::Duration;
 
+use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::test]
@@ -231,7 +232,7 @@ async fn forward_ports_rejects_targets_without_tunnel_protocol_version() {
             "forward_ports",
             serde_json::json!({
                 "action": "open",
-                "listen_side": "builder-a",
+                "listen_side": DEFAULT_TEST_TARGET,
                 "connect_side": "local",
                 "forwards": [{
                     "listen_endpoint": "127.0.0.1:0",
@@ -277,7 +278,7 @@ max_reconnecting_forwards = 7
     let echo_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let echo_addr = echo_listener.local_addr().unwrap();
 
-    let open = open_tcp_forward(&fixture, "builder-a", "local", echo_addr).await;
+    let open = open_tcp_forward(&fixture, DEFAULT_TEST_TARGET, "local", echo_addr).await;
     let forward_id = forward_id_from(&open);
     let limits = &open.structured_content["forwards"][0]["limits"];
     assert_eq!(limits["max_active_tcp_streams"], 3);
@@ -385,7 +386,7 @@ async fn forward_ports_closes_active_tcp_streams_after_connect_tunnel_drop() {
         }
     });
 
-    let open = open_tcp_forward(&fixture, "local", "builder-a", echo_addr).await;
+    let open = open_tcp_forward(&fixture, "local", DEFAULT_TEST_TARGET, echo_addr).await;
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
 
@@ -449,7 +450,7 @@ async fn forward_ports_connect_side_reconnect_retries_transient_open_failures() 
     .await;
 
     let echo = spawn_tcp_echo().await;
-    let open = open_tcp_forward(&fixture, "local", "builder-a", echo).await;
+    let open = open_tcp_forward(&fixture, "local", DEFAULT_TEST_TARGET, echo).await;
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
     support::stub_daemon::fail_next_port_tunnel_upgrades(&fixture.stub_state, 2).await;
@@ -484,7 +485,7 @@ async fn forward_ports_recovers_idle_connect_tunnel_after_heartbeat_timeout() {
     .await;
 
     let echo = spawn_tcp_echo().await;
-    let open = open_tcp_forward(&fixture, "local", "builder-a", echo).await;
+    let open = open_tcp_forward(&fixture, "local", DEFAULT_TEST_TARGET, echo).await;
     let forward_id = forward_id_from(&open);
 
     support::stub_daemon::wait_for_connect_port_tunnel_transports(&fixture.stub_state, 1).await;
@@ -518,7 +519,7 @@ async fn forward_ports_listen_side_recovery_retries_transient_connect_reopen_fai
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
 
     let echo = spawn_tcp_echo().await;
-    let open = open_tcp_forward(&fixture, "builder-a", "builder-a", echo).await;
+    let open = open_tcp_forward(&fixture, DEFAULT_TEST_TARGET, DEFAULT_TEST_TARGET, echo).await;
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
     support::stub_daemon::drop_next_connect_tunnel_opens(&fixture.stub_state, 2).await;
@@ -552,7 +553,7 @@ async fn forward_ports_reports_resumed_listen_ready_while_connect_reopens_after_
         support::stub_daemon::block_connect_tunnel_open_after_first(&fixture.stub_state).await;
 
     let echo = spawn_tcp_echo().await;
-    let open = open_tcp_forward(&fixture, "builder-a", "builder-a", echo).await;
+    let open = open_tcp_forward(&fixture, DEFAULT_TEST_TARGET, DEFAULT_TEST_TARGET, echo).await;
     let forward_id = forward_id_from(&open);
 
     support::stub_daemon::wait_for_listen_port_tunnel_transports(&fixture.stub_state, 1).await;
@@ -590,7 +591,7 @@ async fn forward_ports_reports_reconnecting_until_connect_side_is_ready() {
         support::stub_daemon::block_session_ready_after_first(&fixture.stub_state).await;
 
     let echo = spawn_tcp_echo().await;
-    let open = open_tcp_forward(&fixture, "local", "builder-a", echo).await;
+    let open = open_tcp_forward(&fixture, "local", DEFAULT_TEST_TARGET, echo).await;
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
 
@@ -647,7 +648,7 @@ max_reconnecting_forwards = 1
             serde_json::json!({
                 "action": "open",
                 "listen_side": "local",
-                "connect_side": "builder-a",
+                "connect_side": DEFAULT_TEST_TARGET,
                 "forwards": [
                     {
                         "listen_endpoint": "127.0.0.1:0",
@@ -873,7 +874,7 @@ async fn forward_ports_records_failure_when_runtime_fails_before_multi_open_fini
             "forward_ports",
             serde_json::json!({
                 "action": "open",
-                "listen_side": "builder-a",
+                "listen_side": DEFAULT_TEST_TARGET,
                 "connect_side": "local",
                 "forwards": [
                     {
@@ -929,7 +930,7 @@ async fn forward_ports_closes_pending_tcp_stream_when_remote_connect_never_ackno
         }
     });
 
-    let open = open_tcp_forward(&fixture, "local", "builder-a", upstream_addr).await;
+    let open = open_tcp_forward(&fixture, "local", DEFAULT_TEST_TARGET, upstream_addr).await;
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
 
@@ -1074,7 +1075,7 @@ max_tunnel_queued_bytes = 4096
         }
     });
 
-    let open = open_tcp_forward(&fixture, "local", "builder-a", upstream_addr).await;
+    let open = open_tcp_forward(&fixture, "local", DEFAULT_TEST_TARGET, upstream_addr).await;
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
     assert_eq!(
@@ -1145,7 +1146,7 @@ max_tunnel_queued_bytes = 4096
         }
     });
 
-    let open = open_udp_forward(&fixture, "local", "builder-a", echo_addr).await;
+    let open = open_udp_forward(&fixture, "local", DEFAULT_TEST_TARGET, echo_addr).await;
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
     assert_eq!(
@@ -1251,7 +1252,7 @@ async fn forward_ports_retries_udp_connector_after_bind_error() {
         }
     });
 
-    let open = open_udp_forward(&fixture, "local", "builder-a", echo_addr).await;
+    let open = open_udp_forward(&fixture, "local", DEFAULT_TEST_TARGET, echo_addr).await;
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
 
@@ -1300,7 +1301,7 @@ async fn forward_ports_drops_udp_datagrams_under_pressure() {
         .await;
     support::stub_daemon::enable_reconnectable_port_tunnel(&fixture.stub_state).await;
 
-    let open = open_udp_forward(&fixture, "local", "builder-a", "127.0.0.1:9").await;
+    let open = open_udp_forward(&fixture, "local", DEFAULT_TEST_TARGET, "127.0.0.1:9").await;
     let forward_id = forward_id_from(&open);
     let listen_endpoint = listen_endpoint_from(&open);
 

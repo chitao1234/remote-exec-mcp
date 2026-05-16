@@ -1,4 +1,5 @@
 use super::*;
+use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
 
 #[tokio::test]
 async fn broker_keeps_healthy_targets_available_when_one_target_is_down() {
@@ -8,7 +9,7 @@ async fn broker_keeps_healthy_targets_available_when_one_target_is_down() {
         .call_tool(
             "apply_patch",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "input": "*** Begin Patch\n*** Add File: ok.txt\n+ok\n*** End Patch\n"
             }),
         )
@@ -35,7 +36,7 @@ async fn broker_rejects_unverified_target_if_it_returns_as_the_wrong_daemon() {
         .call_tool(
             "apply_patch",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "input": "*** Begin Patch\n*** Add File: ok.txt\n+ok\n*** End Patch\n"
             }),
         )

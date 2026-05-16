@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use remote_exec_broker::{Connection, RemoteExecClient};
 use remote_exec_proto::public::{ForwardPortProtocol, ForwardPortSpec, ForwardPortsInput};
+use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -17,7 +18,7 @@ async fn sessions_are_isolated_per_target() {
         .broker
         .call_tool(
             "exec_command",
-            support::long_running_tty_exec_input("builder-a"),
+            support::long_running_tty_exec_input(DEFAULT_TEST_TARGET),
         )
         .await;
 
@@ -28,13 +29,13 @@ async fn sessions_are_isolated_per_target() {
             "write_stdin",
             serde_json::json!({
                 "session_id": session_id,
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "chars": "",
                 "yield_time_ms": 250
             }),
         )
         .await;
-    assert_eq!(polled.structured_content["target"], "builder-a");
+    assert_eq!(polled.structured_content["target"], DEFAULT_TEST_TARGET);
 
     let mismatch = cluster
         .broker
@@ -60,7 +61,7 @@ async fn patch_and_image_calls_only_touch_the_selected_target() {
         .call_tool(
             "apply_patch",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "input": "*** Begin Patch\n*** Add File: marker.txt\n+builder-a\n*** End Patch\n"
             }),
         )
@@ -88,7 +89,7 @@ async fn patch_and_image_calls_only_touch_the_selected_target() {
         .call_tool_error(
             "view_image",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "path": "builder-b.png",
                 "detail": "original"
             }),
@@ -109,7 +110,7 @@ async fn sessions_are_invalidated_after_daemon_restart() {
         .broker
         .call_tool(
             "exec_command",
-            support::long_running_tty_exec_input("builder-a"),
+            support::long_running_tty_exec_input(DEFAULT_TEST_TARGET),
         )
         .await;
     let session_id = started.structured_content["session_id"]
@@ -125,7 +126,7 @@ async fn sessions_are_invalidated_after_daemon_restart() {
             "write_stdin",
             serde_json::json!({
                 "session_id": session_id,
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "chars": "",
                 "yield_time_ms": 5000
             }),
@@ -134,7 +135,7 @@ async fn sessions_are_invalidated_after_daemon_restart() {
     support::assert_correlated_tool_error(
         &invalidated,
         "write_stdin",
-        Some("builder-a"),
+        Some(DEFAULT_TEST_TARGET),
         &format!("write_stdin failed: Unknown process id {session_id}"),
     );
 
@@ -144,7 +145,7 @@ async fn sessions_are_invalidated_after_daemon_restart() {
             "write_stdin",
             serde_json::json!({
                 "session_id": started.structured_content["session_id"],
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "chars": ""
             }),
         )
@@ -152,7 +153,7 @@ async fn sessions_are_invalidated_after_daemon_restart() {
     support::assert_correlated_tool_error(
         &unknown,
         "write_stdin",
-        Some("builder-a"),
+        Some(DEFAULT_TEST_TARGET),
         &format!("write_stdin failed: Unknown process id {session_id}"),
     );
 }
@@ -169,7 +170,7 @@ async fn forward_ports_reports_daemon_listen_port_conflicts_cleanly() {
             "forward_ports",
             serde_json::json!({
                 "action": "open",
-                "listen_side": "builder-a",
+                "listen_side": DEFAULT_TEST_TARGET,
                 "connect_side": "local",
                 "forwards": [{
                     "listen_endpoint": occupied_addr.to_string(),
@@ -198,7 +199,7 @@ async fn forward_ports_relays_remote_udp_datagrams_from_two_peers_full_duplex() 
             "forward_ports",
             serde_json::json!({
                 "action": "open",
-                "listen_side": "builder-a",
+                "listen_side": DEFAULT_TEST_TARGET,
                 "connect_side": "local",
                 "forwards": [{
                     "listen_endpoint": "127.0.0.1:0",
@@ -262,7 +263,12 @@ async fn forward_ports_reconnect_after_live_tunnel_drop_and_accept_new_tcp_conne
 
     let open = cluster
         .broker
-        .open_tcp_forward("builder-a", "local", "127.0.0.1:0", &echo_addr.to_string())
+        .open_tcp_forward(
+            DEFAULT_TEST_TARGET,
+            "local",
+            "127.0.0.1:0",
+            &echo_addr.to_string(),
+        )
         .await;
     let forward_id = open.forward_id();
     let listen_endpoint = open.listen_endpoint();
@@ -294,7 +300,12 @@ async fn forward_ports_reconnect_after_connect_side_tunnel_drop_and_accept_new_t
 
     let open = cluster
         .broker
-        .open_tcp_forward("local", "builder-a", "127.0.0.1:0", &echo_addr.to_string())
+        .open_tcp_forward(
+            "local",
+            DEFAULT_TEST_TARGET,
+            "127.0.0.1:0",
+            &echo_addr.to_string(),
+        )
         .await;
     let forward_id = open.forward_id();
     let listen_endpoint = open.listen_endpoint();
@@ -384,7 +395,12 @@ async fn terminal_port_tunnel_corruption_releases_remote_listener_without_waitin
 
     let open = cluster
         .broker
-        .open_tcp_forward("builder-a", "local", "127.0.0.1:0", &echo_addr.to_string())
+        .open_tcp_forward(
+            DEFAULT_TEST_TARGET,
+            "local",
+            "127.0.0.1:0",
+            &echo_addr.to_string(),
+        )
         .await;
     let listen_endpoint = open.listen_endpoint();
 
@@ -400,7 +416,12 @@ async fn forward_ports_reconnect_after_live_tunnel_drop_and_relays_future_udp_da
 
     let open = cluster
         .broker
-        .open_udp_forward("builder-a", "local", "127.0.0.1:0", &udp_echo.to_string())
+        .open_udp_forward(
+            DEFAULT_TEST_TARGET,
+            "local",
+            "127.0.0.1:0",
+            &udp_echo.to_string(),
+        )
         .await;
     let forward_id = open.forward_id();
     let listen_endpoint = open.listen_endpoint();
@@ -434,7 +455,12 @@ async fn forward_ports_reconnect_after_connect_side_tunnel_drop_and_relays_futur
 
     let open = cluster
         .broker
-        .open_udp_forward("local", "builder-a", "127.0.0.1:0", &udp_echo.to_string())
+        .open_udp_forward(
+            "local",
+            DEFAULT_TEST_TARGET,
+            "127.0.0.1:0",
+            &udp_echo.to_string(),
+        )
         .await;
     let forward_id = open.forward_id();
     let listen_endpoint = open.listen_endpoint();
@@ -505,7 +531,7 @@ async fn forward_ports_release_remote_listeners_when_broker_stops() {
             "forward_ports",
             serde_json::json!({
                 "action": "open",
-                "listen_side": "builder-a",
+                "listen_side": DEFAULT_TEST_TARGET,
                 "connect_side": "local",
                 "forwards": [{
                     "listen_endpoint": "127.0.0.1:0",
@@ -528,7 +554,7 @@ async fn forward_ports_release_remote_listeners_when_broker_stops() {
 
 #[tokio::test]
 async fn forward_ports_release_remote_listeners_after_broker_crash() {
-    let daemon_a = support::DaemonFixture::spawn("builder-a").await;
+    let daemon_a = support::DaemonFixture::spawn(DEFAULT_TEST_TARGET).await;
     let daemon_b = support::DaemonFixture::spawn("builder-b").await;
     let mut broker = support::HttpBrokerFixture::spawn(&daemon_a, &daemon_b).await;
     let client = RemoteExecClient::connect(Connection::StreamableHttp {
@@ -541,7 +567,7 @@ async fn forward_ports_release_remote_listeners_after_broker_crash() {
         .call_tool(
             "forward_ports",
             &ForwardPortsInput::Open {
-                listen_side: "builder-a".to_string(),
+                listen_side: DEFAULT_TEST_TARGET.to_string(),
                 connect_side: "local".to_string(),
                 forwards: vec![ForwardPortSpec {
                     listen_endpoint: "127.0.0.1:0".to_string(),
@@ -569,7 +595,7 @@ async fn forward_ports_release_remote_listeners_after_broker_crash() {
             "forward_ports",
             serde_json::json!({
                 "action": "open",
-                "listen_side": "builder-a",
+                "listen_side": DEFAULT_TEST_TARGET,
                 "connect_side": "local",
                 "forwards": [{
                     "listen_endpoint": listen_endpoint,
@@ -633,7 +659,7 @@ async fn forward_ports_fail_cleanly_after_daemon_restart_and_can_reopen() {
             "forward_ports",
             serde_json::json!({
                 "action": "open",
-                "listen_side": "builder-a",
+                "listen_side": DEFAULT_TEST_TARGET,
                 "connect_side": "local",
                 "forwards": [{
                     "listen_endpoint": "127.0.0.1:0",
@@ -691,7 +717,7 @@ async fn forward_ports_fail_cleanly_after_daemon_restart_and_can_reopen() {
             "forward_ports",
             serde_json::json!({
                 "action": "open",
-                "listen_side": "builder-a",
+                "listen_side": DEFAULT_TEST_TARGET,
                 "connect_side": "local",
                 "forwards": [{
                     "listen_endpoint": "127.0.0.1:0",
@@ -741,7 +767,7 @@ async fn exec_command_preserves_output_after_external_pipeline_steps() {
         .call_tool(
             "exec_command",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "cmd": "printf 'marker\\n'; printf 'external\\n' | cat; printf 'done\\n'",
                 "shell": "/bin/sh",
                 "login": false,
@@ -751,7 +777,7 @@ async fn exec_command_preserves_output_after_external_pipeline_steps() {
         )
         .await;
 
-    assert_eq!(result.structured_content["target"], "builder-a");
+    assert_eq!(result.structured_content["target"], DEFAULT_TEST_TARGET);
     assert_eq!(result.structured_content["exit_code"], 0);
     assert_eq!(
         result.structured_content["output"],
@@ -777,7 +803,7 @@ async fn transfer_files_copies_local_file_to_remote_exact_destination_path() {
                     "path": source.display().to_string()
                 },
                 "destination": {
-                    "target": "builder-a",
+                    "target": DEFAULT_TEST_TARGET,
                     "path": destination.display().to_string()
                 },
                 "overwrite": "fail",
@@ -789,7 +815,7 @@ async fn transfer_files_copies_local_file_to_remote_exact_destination_path() {
     assert_eq!(std::fs::read_to_string(&destination).unwrap(), "artifact\n");
     assert_eq!(
         result.structured_content["destination"]["target"],
-        "builder-a"
+        DEFAULT_TEST_TARGET
     );
     assert!(
         !cluster
@@ -814,7 +840,7 @@ async fn transfer_files_copies_remote_file_back_to_local() {
             "transfer_files",
             serde_json::json!({
                 "source": {
-                    "target": "builder-a",
+                    "target": DEFAULT_TEST_TARGET,
                     "path": source.display().to_string()
                 },
                 "destination": {
@@ -828,7 +854,10 @@ async fn transfer_files_copies_remote_file_back_to_local() {
         .await;
 
     assert_eq!(std::fs::read_to_string(&destination).unwrap(), "done\n");
-    assert_eq!(result.structured_content["source"]["target"], "builder-a");
+    assert_eq!(
+        result.structured_content["source"]["target"],
+        DEFAULT_TEST_TARGET
+    );
 }
 
 #[tokio::test]
@@ -854,7 +883,7 @@ async fn transfer_files_moves_remote_directory_between_targets_without_basename_
             "transfer_files",
             serde_json::json!({
                 "source": {
-                    "target": "builder-a",
+                    "target": DEFAULT_TEST_TARGET,
                     "path": source_root.display().to_string()
                 },
                 "destination": {
@@ -908,7 +937,7 @@ async fn transfer_files_bundles_multiple_local_sources_with_zstd_for_remote_dest
                     }
                 ],
                 "destination": {
-                    "target": "builder-a",
+                    "target": DEFAULT_TEST_TARGET,
                     "path": destination.display().to_string()
                 },
                 "overwrite": "replace",

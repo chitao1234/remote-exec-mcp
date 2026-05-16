@@ -1,6 +1,10 @@
 use std::future::Future;
 use std::time::Duration;
 
+pub const DEFAULT_TEST_TARGET: &str = "builder-a";
+pub const XP_TEST_TARGET: &str = "builder-xp";
+pub const TEST_BEARER_SECRET: &str = "shared-secret";
+
 pub fn toml_string(value: &str) -> String {
     toml::Value::String(value.to_string()).to_string()
 }

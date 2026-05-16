@@ -13,6 +13,7 @@ use remote_exec_daemon::config::ProcessEnvironment;
 use remote_exec_proto::rpc::{ExecResponse, ExecStartRequest, ExecWriteRequest};
 #[cfg(windows)]
 use support::spawn::WindowsPtyTestBackend;
+use support::test_helpers::DEFAULT_TEST_TARGET;
 
 #[cfg(unix)]
 const TEST_SHELL: &str = "/bin/sh";
@@ -81,7 +82,8 @@ macro_rules! for_each_windows_pty_backend {
     ($backend:ident, $fixture:ident, $body:block) => {{
         for $backend in support::spawn::supported_windows_pty_backends() {
             let $fixture =
-                support::spawn::spawn_daemon_for_windows_pty_backend("builder-a", $backend).await;
+                support::spawn::spawn_daemon_for_windows_pty_backend(DEFAULT_TEST_TARGET, $backend)
+                    .await;
             $body
         }
     }};
@@ -93,7 +95,7 @@ macro_rules! for_each_windows_pty_backend_with_environment {
         for $backend in support::spawn::supported_windows_pty_backends() {
             let $fixture =
                 support::spawn::spawn_daemon_for_windows_pty_backend_with_process_environment(
-                    "builder-a",
+                    DEFAULT_TEST_TARGET,
                     $backend,
                     $environment.clone(),
                 )

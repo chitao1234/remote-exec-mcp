@@ -1,6 +1,7 @@
 #[path = "support/mod.rs"]
 mod support;
 
+use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 async fn run_cli(args: &[&str]) -> std::process::Output {
@@ -51,7 +52,7 @@ async fn remote_exec_cli_lists_targets_from_broker_config() {
     assert_eq!(response["is_error"], false);
     assert_eq!(
         response["structured_content"]["targets"][0]["name"],
-        "builder-a"
+        DEFAULT_TEST_TARGET
     );
 }
 
@@ -90,7 +91,7 @@ async fn remote_exec_cli_returns_usage_code_for_input_errors() {
         .arg(&fixture.config_path)
         .arg("apply-patch")
         .arg("--target")
-        .arg("builder-a")
+        .arg(DEFAULT_TEST_TARGET)
         .arg("--input-file")
         .arg(&missing_patch)
         .output()
@@ -204,7 +205,7 @@ path = "/mcp"
     assert_eq!(response["is_error"], false);
     assert_eq!(
         response["structured_content"]["targets"][0]["name"],
-        "builder-a"
+        DEFAULT_TEST_TARGET
     );
 }
 

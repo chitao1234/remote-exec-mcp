@@ -3,7 +3,9 @@ mod support;
 use axum::http::StatusCode;
 use image::{ImageBuffer, Rgba};
 use remote_exec_proto::rpc::{RpcErrorBody, RpcErrorCode};
-use remote_exec_test_support::test_helpers::utf16le_bom_bytes;
+use remote_exec_test_support::test_helpers::{
+    DEFAULT_TEST_TARGET, TEST_BEARER_SECRET, XP_TEST_TARGET, utf16le_bom_bytes,
+};
 use rmcp::model::PaginatedRequestParams;
 
 #[tokio::test]
@@ -13,7 +15,7 @@ async fn apply_patch_returns_plain_text_without_structured_output() {
         .call_tool(
             "apply_patch",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "input": "*** Begin Patch\n*** Add File: hello.txt\n+hello\n*** End Patch\n",
                 "workdir": "."
             }),
@@ -35,7 +37,7 @@ async fn apply_patch_forwards_to_explicitly_enabled_insecure_http_target() {
         .call_tool(
             "apply_patch",
             serde_json::json!({
-                "target": "builder-xp",
+                "target": XP_TEST_TARGET,
                 "input": "*** Begin Patch\n*** Add File: hello.txt\n+hello xp\n*** End Patch\n",
             }),
         )
@@ -59,12 +61,13 @@ async fn apply_patch_forwards_to_explicitly_enabled_insecure_http_target() {
 
 #[tokio::test]
 async fn apply_patch_forwards_to_http_target_with_bearer_auth() {
-    let fixture = support::spawners::spawn_broker_with_stub_daemon_http_auth("shared-secret").await;
+    let fixture =
+        support::spawners::spawn_broker_with_stub_daemon_http_auth(TEST_BEARER_SECRET).await;
     let result = fixture
         .call_tool(
             "apply_patch",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "input": "*** Begin Patch\n*** Add File: hello.txt\n+hello auth\n*** End Patch\n",
             }),
         )
@@ -93,7 +96,7 @@ async fn malformed_patch_footer_is_rejected_by_stub_daemon() {
         .call_tool_error(
             "apply_patch",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "input": "*** Begin Patch\n*** Add File: missing-footer.txt\n+hello\n"
             }),
         )
@@ -121,7 +124,7 @@ async fn list_targets_returns_cached_daemon_info_and_null_for_unavailable_target
         serde_json::json!({
             "targets": [
                 {
-                    "name": "builder-a",
+                    "name": DEFAULT_TEST_TARGET,
                     "daemon_info": {
                         "daemon_version": "0.1.0",
                         "hostname": "builder-a-host",
@@ -274,7 +277,7 @@ async fn view_image_returns_input_image_content_and_structured_content() {
         .call_tool(
             "view_image",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "path": "chart.png",
                 "detail": "original"
             }),
@@ -286,7 +289,7 @@ async fn view_image_returns_input_image_content_and_structured_content() {
         result.raw_content[0]["image_url"],
         "data:image/png;base64,AAAA"
     );
-    assert_eq!(result.structured_content["target"], "builder-a");
+    assert_eq!(result.structured_content["target"], DEFAULT_TEST_TARGET);
     assert_eq!(result.structured_content["detail"], "original");
 }
 
@@ -321,7 +324,7 @@ async fn view_image_keeps_input_image_content_when_broker_disables_structured_co
         .call_tool(
             "view_image",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "path": "chart.png",
                 "detail": "original"
             }),
@@ -353,7 +356,7 @@ async fn view_image_returns_text_only_errors_without_input_image_content() {
         .raw_tool_result(
             "view_image",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "path": "chart.png"
             }),
         )
@@ -363,7 +366,7 @@ async fn view_image_returns_text_only_errors_without_input_image_content() {
     support::assert_correlated_tool_error(
         &result.text_output,
         "view_image",
-        Some("builder-a"),
+        Some(DEFAULT_TEST_TARGET),
         "unable to locate image at `/tmp/chart.png`: No such file or directory (os error 2)",
     );
     assert_eq!(
@@ -392,7 +395,7 @@ async fn view_image_invalid_detail_matches_daemon_message() {
         .raw_tool_result(
             "view_image",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "path": "chart.png",
                 "detail": "low"
             }),
@@ -403,7 +406,7 @@ async fn view_image_invalid_detail_matches_daemon_message() {
     support::assert_correlated_tool_error(
         &result.text_output,
         "view_image",
-        Some("builder-a"),
+        Some(DEFAULT_TEST_TARGET),
         "view_image.detail only supports `original`; omit `detail` for default resized behavior, got `low`",
     );
 }

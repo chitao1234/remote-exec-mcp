@@ -3,6 +3,7 @@ mod support;
 use encoding_rs::{BIG5, EUC_KR, Encoding, GBK, SHIFT_JIS};
 use remote_exec_proto::rpc::{PatchApplyRequest, PatchApplyResponse};
 use remote_exec_test_support::test_helpers::utf16le_bom_bytes;
+use support::test_helpers::DEFAULT_TEST_TARGET;
 
 fn encoded_bytes(encoding: &'static Encoding, text: &str) -> Vec<u8> {
     let (encoded, _, had_errors) = encoding.encode(text);
@@ -16,7 +17,7 @@ fn encoded_bytes(encoding: &'static Encoding, text: &str) -> Vec<u8> {
 
 #[tokio::test]
 async fn add_file_overwrites_existing_content() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("demo.txt");
     tokio::fs::write(&path, "old\n").await.unwrap();
 
@@ -43,7 +44,7 @@ async fn add_file_overwrites_existing_content() {
 
 #[tokio::test]
 async fn update_file_preserves_crlf_line_endings() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("crlf.txt");
     tokio::fs::write(&path, b"hello\r\nworld\r\n")
         .await
@@ -77,7 +78,7 @@ async fn update_file_preserves_crlf_line_endings() {
 #[cfg(windows)]
 #[tokio::test]
 async fn apply_patch_accepts_msys_style_workdir_on_windows() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let workdir = fixture.workdir.join("msys-workdir");
     tokio::fs::create_dir_all(&workdir).await.unwrap();
 
@@ -103,7 +104,7 @@ async fn apply_patch_accepts_msys_style_workdir_on_windows() {
 #[cfg(windows)]
 #[tokio::test]
 async fn apply_patch_accepts_cygwin_style_absolute_paths_on_windows() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("cygdrive-demo.txt");
 
     let response = fixture
@@ -126,15 +127,17 @@ async fn apply_patch_accepts_cygwin_style_absolute_paths_on_windows() {
 #[cfg(windows)]
 #[tokio::test]
 async fn apply_patch_accepts_windows_posix_root_paths_on_windows() {
-    let fixture =
-        support::spawn::spawn_daemon_with_extra_config_for_workdir("builder-a", |workdir| {
+    let fixture = support::spawn::spawn_daemon_with_extra_config_for_workdir(
+        DEFAULT_TEST_TARGET,
+        |workdir| {
             let root = workdir.join("synthetic-msys-root");
             format!(
                 "windows_posix_root = {}\n",
                 toml::Value::String(root.display().to_string())
             )
-        })
-        .await;
+        },
+    )
+    .await;
     let root = fixture.workdir.join("synthetic-msys-root");
     let workdir = root.join("usr").join("src");
     tokio::fs::create_dir_all(&workdir).await.unwrap();
@@ -160,7 +163,7 @@ async fn apply_patch_accepts_windows_posix_root_paths_on_windows() {
 
 #[tokio::test]
 async fn update_file_accepts_end_of_file_marker() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("plain.txt");
     tokio::fs::write(&path, "before\nmiddle\nbefore\n")
         .await
@@ -194,7 +197,7 @@ async fn update_file_accepts_end_of_file_marker() {
 
 #[tokio::test]
 async fn update_file_replaces_blank_last_real_line_at_end_of_file() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("plain.txt");
     tokio::fs::write(&path, "alpha\n\n").await.unwrap();
 
@@ -226,7 +229,7 @@ async fn update_file_replaces_blank_last_real_line_at_end_of_file() {
 
 #[tokio::test]
 async fn update_file_accepts_first_chunk_without_explicit_header() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("plain.txt");
     tokio::fs::write(&path, "before\nmiddle\n").await.unwrap();
 
@@ -256,7 +259,7 @@ async fn update_file_accepts_first_chunk_without_explicit_header() {
 
 #[tokio::test]
 async fn update_file_matches_old_lines_ignoring_trailing_whitespace() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("plain.txt");
     tokio::fs::write(&path, "alpha  \ntail\n").await.unwrap();
 
@@ -287,7 +290,7 @@ async fn update_file_matches_old_lines_ignoring_trailing_whitespace() {
 
 #[tokio::test]
 async fn update_file_matches_change_context_after_unicode_normalization() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("plain.txt");
     tokio::fs::write(&path, "start\nalpha — “beta\u{00a0}gamma”\ntail\n")
         .await
@@ -319,7 +322,7 @@ async fn update_file_matches_change_context_after_unicode_normalization() {
 
 #[tokio::test]
 async fn update_file_matches_old_lines_after_unicode_normalization() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("plain.txt");
     tokio::fs::write(&path, "start\nalpha — “beta\u{00a0}gamma”\ntail\n")
         .await
@@ -352,7 +355,7 @@ async fn update_file_matches_old_lines_after_unicode_normalization() {
 
 #[tokio::test]
 async fn update_file_rejects_singleton_empty_eof_hunk_without_trailing_newline() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("plain.txt");
     tokio::fs::write(&path, "alpha").await.unwrap();
 
@@ -381,7 +384,7 @@ async fn update_file_rejects_singleton_empty_eof_hunk_without_trailing_newline()
 
 #[tokio::test]
 async fn update_move_accepts_horizontal_whitespace_on_control_lines() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let source = fixture.workdir.join("old.txt");
     let destination = fixture.workdir.join("new.txt");
     tokio::fs::write(&source, "old\n").await.unwrap();
@@ -416,7 +419,7 @@ async fn update_move_accepts_horizontal_whitespace_on_control_lines() {
 
 #[tokio::test]
 async fn update_file_rejects_non_eof_match_for_end_of_file_marker() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("plain.txt");
     tokio::fs::write(&path, "before\nmiddle\ntail\n")
         .await
@@ -450,7 +453,7 @@ async fn update_file_rejects_non_eof_match_for_end_of_file_marker() {
 
 #[tokio::test]
 async fn update_file_appends_at_eof_for_pure_addition_with_matching_context() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("plain.txt");
     tokio::fs::write(&path, "before\ntail\n").await.unwrap();
 
@@ -481,7 +484,7 @@ async fn update_file_appends_at_eof_for_pure_addition_with_matching_context() {
 
 #[tokio::test]
 async fn update_file_rejects_eof_pure_addition_when_context_is_missing() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("plain.txt");
     tokio::fs::write(&path, "before\ntail\n").await.unwrap();
 
@@ -512,7 +515,7 @@ async fn update_file_rejects_eof_pure_addition_when_context_is_missing() {
 
 #[tokio::test]
 async fn later_failures_leave_earlier_files_mutated() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
         .await
         .unwrap();
@@ -547,7 +550,7 @@ async fn later_failures_leave_earlier_files_mutated() {
 
 #[tokio::test]
 async fn delete_directory_failure_leaves_earlier_mutation_applied() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
         .await
         .unwrap();
@@ -585,7 +588,7 @@ async fn delete_directory_failure_leaves_earlier_mutation_applied() {
 
 #[tokio::test]
 async fn non_utf8_update_source_failure_leaves_earlier_mutation_applied() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
         .await
         .unwrap();
@@ -626,7 +629,7 @@ async fn non_utf8_update_source_failure_leaves_earlier_mutation_applied() {
 
 #[tokio::test]
 async fn non_utf8_delete_source_failure_leaves_earlier_mutation_applied() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
         .await
         .unwrap();
@@ -664,7 +667,7 @@ async fn non_utf8_delete_source_failure_leaves_earlier_mutation_applied() {
 
 #[tokio::test]
 async fn utf16le_update_source_still_fails_when_autodetect_is_disabled() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("utf16.txt");
     tokio::fs::write(&path, utf16le_bom_bytes("hello\r\nworld\r\n"))
         .await
@@ -698,7 +701,7 @@ async fn utf16le_update_source_still_fails_when_autodetect_is_disabled() {
 #[tokio::test]
 async fn update_file_autodetects_utf16le_target_encoding_when_enabled() {
     let fixture = support::spawn::spawn_daemon_with_extra_config(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         "experimental_apply_patch_target_encoding_autodetect = true",
     )
     .await;
@@ -735,7 +738,7 @@ async fn update_file_autodetects_utf16le_target_encoding_when_enabled() {
 #[tokio::test]
 async fn delete_file_autodetects_utf16le_target_encoding_when_enabled() {
     let fixture = support::spawn::spawn_daemon_with_extra_config(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         "experimental_apply_patch_target_encoding_autodetect = true",
     )
     .await;
@@ -761,7 +764,7 @@ async fn delete_file_autodetects_utf16le_target_encoding_when_enabled() {
 #[tokio::test]
 async fn update_file_autodetects_common_east_asian_encodings_when_enabled() {
     let fixture = support::spawn::spawn_daemon_with_extra_config(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         "experimental_apply_patch_target_encoding_autodetect = true",
     )
     .await;
@@ -842,7 +845,7 @@ async fn update_file_autodetects_common_east_asian_encodings_when_enabled() {
 #[tokio::test]
 async fn add_file_overwrite_preserves_utf16le_target_encoding_when_enabled() {
     let fixture = support::spawn::spawn_daemon_with_extra_config(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         "experimental_apply_patch_target_encoding_autodetect = true",
     )
     .await;
@@ -871,7 +874,7 @@ async fn add_file_overwrite_preserves_utf16le_target_encoding_when_enabled() {
 
 #[tokio::test]
 async fn execution_failures_do_not_roll_back_earlier_file_changes() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     tokio::fs::write(fixture.workdir.join("first.txt"), "before\n")
         .await
         .unwrap();
@@ -911,7 +914,7 @@ async fn execution_failures_do_not_roll_back_earlier_file_changes() {
 
 #[tokio::test]
 async fn update_file_applies_repeated_context_additions_in_order() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("plain.txt");
     tokio::fs::write(&path, "a\nmarker\nb\nmarker\nc\n")
         .await
@@ -945,8 +948,9 @@ async fn update_file_applies_repeated_context_additions_in_order() {
 
 #[tokio::test]
 async fn apply_patch_uses_resolved_paths_not_workdir_for_sandbox_checks() {
-    let fixture =
-        support::spawn::spawn_daemon_with_extra_config_for_workdir("builder-a", |workdir| {
+    let fixture = support::spawn::spawn_daemon_with_extra_config_for_workdir(
+        DEFAULT_TEST_TARGET,
+        |workdir| {
             let allow = toml::Value::Array(vec![toml::Value::String(
                 workdir.join("visible").display().to_string(),
             )]);
@@ -955,8 +959,9 @@ async fn apply_patch_uses_resolved_paths_not_workdir_for_sandbox_checks() {
 allow = {allow}
 "#
             )
-        })
-        .await;
+        },
+    )
+    .await;
     tokio::fs::create_dir_all(fixture.workdir.join("visible"))
         .await
         .unwrap();
@@ -986,8 +991,9 @@ allow = {allow}
 
 #[tokio::test]
 async fn apply_patch_rejects_writes_outside_sandbox() {
-    let fixture =
-        support::spawn::spawn_daemon_with_extra_config_for_workdir("builder-a", |workdir| {
+    let fixture = support::spawn::spawn_daemon_with_extra_config_for_workdir(
+        DEFAULT_TEST_TARGET,
+        |workdir| {
             let allow = toml::Value::Array(vec![toml::Value::String(
                 workdir.join("visible").display().to_string(),
             )]);
@@ -996,8 +1002,9 @@ async fn apply_patch_rejects_writes_outside_sandbox() {
 allow = {allow}
 "#
             )
-        })
-        .await;
+        },
+    )
+    .await;
     tokio::fs::create_dir_all(fixture.workdir.join("blocked"))
         .await
         .unwrap();

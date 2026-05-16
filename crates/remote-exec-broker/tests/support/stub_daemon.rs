@@ -40,6 +40,7 @@ use tokio_util::sync::CancellationToken;
 
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
 use super::certs::TestCerts;
+use super::test_helpers::DEFAULT_TEST_TARGET;
 
 #[path = "stub_daemon_exec.rs"]
 mod stub_daemon_exec;
@@ -704,7 +705,12 @@ pub(super) async fn spawn_daemon_with_platform(
         .await
         .expect("bind TLS stub daemon listener");
     let addr = listener.local_addr().expect("read TLS stub daemon addr");
-    let state = stub_daemon_state("builder-a", exec_write_behavior, platform, supports_pty);
+    let state = stub_daemon_state(
+        DEFAULT_TEST_TARGET,
+        exec_write_behavior,
+        platform,
+        supports_pty,
+    );
     spawn_named_daemon_on_listener(certs, listener, state.clone()).await;
     (addr, state)
 }
@@ -716,7 +722,12 @@ pub(super) async fn spawn_plain_http_daemon_with_platform(
 ) -> (std::net::SocketAddr, StubDaemonState) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let state = stub_daemon_state("builder-a", exec_write_behavior, platform, supports_pty);
+    let state = stub_daemon_state(
+        DEFAULT_TEST_TARGET,
+        exec_write_behavior,
+        platform,
+        supports_pty,
+    );
     spawn_named_plain_http_daemon_on_listener(listener, state.clone()).await;
     (addr, state)
 }

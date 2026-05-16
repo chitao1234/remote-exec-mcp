@@ -3,11 +3,13 @@
 #[path = "support/mod.rs"]
 mod support;
 
+use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
+
 #[tokio::test]
 async fn broker_can_skip_server_name_verification_for_https_targets() {
     let fixture = support::spawners::spawn_broker_with_tls_stub_daemon_and_daemon_spec(
         remote_exec_pki::DaemonCertSpec {
-            target: "builder-a".to_string(),
+            target: DEFAULT_TEST_TARGET.to_string(),
             sans: vec![remote_exec_pki::SubjectAltName::Dns(
                 "builder-a.example.com".to_string(),
             )],
@@ -20,7 +22,7 @@ async fn broker_can_skip_server_name_verification_for_https_targets() {
         .call_tool(
             "apply_patch",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "input": "*** Begin Patch\n*** Add File: skip-san.txt\n+ok\n*** End Patch\n"
             }),
         )
@@ -47,7 +49,7 @@ async fn broker_accepts_matching_pinned_server_certificate() {
         .call_tool(
             "apply_patch",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "input": "*** Begin Patch\n*** Add File: pinned.txt\n+ok\n*** End Patch\n"
             }),
         )
@@ -85,7 +87,7 @@ async fn broker_rejects_mismatched_pinned_server_certificate() {
         .call_tool_error(
             "apply_patch",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "input": "*** Begin Patch\n*** Add File: bad-pin.txt\n+nope\n*** End Patch\n"
             }),
         )

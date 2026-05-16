@@ -2,6 +2,10 @@ use std::path::Path;
 #[cfg(windows)]
 use std::path::PathBuf;
 
+use remote_exec_test_support::test_helpers::{
+    DEFAULT_TEST_TARGET, TEST_BEARER_SECRET, XP_TEST_TARGET,
+};
+
 use crate::state::LOCAL_TARGET_NAME;
 
 use super::{BrokerConfig, McpServerConfig, SseInterval, ValidatedBrokerConfig};
@@ -55,10 +59,10 @@ async fn load_rejects_reserved_local_target_name() {
 #[tokio::test]
 async fn load_accepts_non_reserved_target_names() {
     let dir = tempfile::tempdir().unwrap();
-    let config = load_config(&dir, valid_target_config("builder-a"))
+    let config = load_config(&dir, valid_target_config(DEFAULT_TEST_TARGET))
         .await
         .unwrap();
-    assert!(config.targets.contains_key("builder-a"));
+    assert!(config.targets.contains_key(DEFAULT_TEST_TARGET));
 }
 
 #[tokio::test]
@@ -79,7 +83,7 @@ startup_probe_ms = 4567
     )
     .await
     .unwrap();
-    let timeouts = config.targets["builder-a"].timeouts;
+    let timeouts = config.targets[DEFAULT_TEST_TARGET].timeouts;
     assert_eq!(timeouts.connect_ms, 1234);
     assert_eq!(timeouts.read_ms, 2345);
     assert_eq!(timeouts.request_ms, 3456);
@@ -128,7 +132,7 @@ client_key_pem = "/tmp/broker.key"
     .await
     .unwrap();
     assert_eq!(
-        config.targets["builder-a"].base_url,
+        config.targets[DEFAULT_TEST_TARGET].base_url,
         "https://127.0.0.1:8443"
     );
 }
@@ -252,7 +256,7 @@ async fn load_accepts_disabling_structured_content() {
         &dir,
         format!(
             "disable_structured_content = true\n\n{}",
-            valid_target_config("builder-a")
+            valid_target_config(DEFAULT_TEST_TARGET)
         ),
     )
     .await
@@ -310,14 +314,16 @@ expected_daemon_name = "builder-xp"
     .unwrap();
 
     let config = BrokerConfig::load(&config_path).await.unwrap();
-    assert!(config.targets["builder-xp"].allow_insecure_http);
+    assert!(config.targets[XP_TEST_TARGET].allow_insecure_http);
     assert_eq!(
-        config.targets["builder-xp"].base_url,
+        config.targets[XP_TEST_TARGET].base_url,
         "http://127.0.0.1:8181"
     );
     assert_eq!(
-        config.targets["builder-xp"].expected_daemon_name.as_deref(),
-        Some("builder-xp")
+        config.targets[XP_TEST_TARGET]
+            .expected_daemon_name
+            .as_deref(),
+        Some(XP_TEST_TARGET)
     );
 }
 
@@ -341,11 +347,11 @@ bearer_token = "shared-secret"
 
     let config = BrokerConfig::load(&config_path).await.unwrap();
     assert_eq!(
-        config.targets["builder-xp"]
+        config.targets[XP_TEST_TARGET]
             .http_auth
             .as_ref()
             .map(|auth| auth.bearer_token.as_str()),
-        Some("shared-secret")
+        Some(TEST_BEARER_SECRET)
     );
 }
 

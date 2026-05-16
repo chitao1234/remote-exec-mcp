@@ -12,6 +12,7 @@ use super::stub_daemon::{
     set_transfer_export_file_response, set_transfer_path_info_error_response,
     set_transfer_path_info_response,
 };
+use super::test_helpers::DEFAULT_TEST_TARGET;
 
 pub struct BrokerFixture {
     pub _tempdir: TempDir,
@@ -52,7 +53,7 @@ impl BrokerFixture {
             "forward_ports",
             serde_json::json!({
                 "action": "open",
-                "listen_side": "builder-a",
+                "listen_side": DEFAULT_TEST_TARGET,
                 "connect_side": "local",
                 "forwards": [{
                     "listen_endpoint": "127.0.0.1:0",
@@ -69,7 +70,7 @@ impl BrokerFixture {
             "forward_ports",
             serde_json::json!({
                 "action": "open",
-                "listen_side": "builder-a",
+                "listen_side": DEFAULT_TEST_TARGET,
                 "connect_side": "local",
                 "forwards": [{
                     "listen_endpoint": "127.0.0.1:0",
@@ -193,7 +194,7 @@ impl BrokerFixture {
             .call_tool(
                 "exec_command",
                 serde_json::json!({
-                    "target": "builder-a",
+                    "target": DEFAULT_TEST_TARGET,
                     "cmd": "printf ready; sleep 2",
                     "tty": true,
                     "yield_time_ms": 10

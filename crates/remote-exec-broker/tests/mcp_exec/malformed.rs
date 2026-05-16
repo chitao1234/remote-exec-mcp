@@ -1,4 +1,5 @@
 use super::*;
+use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
 
 #[tokio::test]
 async fn exec_command_reports_malformed_running_response_without_daemon_session_id() {
@@ -9,7 +10,7 @@ async fn exec_command_reports_malformed_running_response_without_daemon_session_
         .call_tool_error(
             "exec_command",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "cmd": "printf ready; sleep 2",
                 "tty": true,
                 "yield_time_ms": 250
@@ -20,7 +21,7 @@ async fn exec_command_reports_malformed_running_response_without_daemon_session_
     support::assert_correlated_tool_error(
         &error,
         "exec_command",
-        Some("builder-a"),
+        Some(DEFAULT_TEST_TARGET),
         "daemon returned malformed exec response: running response missing daemon_session_id",
     );
 }
@@ -45,7 +46,7 @@ async fn write_stdin_reports_malformed_completed_response_without_exit_code() {
     support::assert_correlated_tool_error(
         &error,
         "write_stdin",
-        Some("builder-a"),
+        Some(DEFAULT_TEST_TARGET),
         "write_stdin failed: daemon returned malformed exec response: completed response missing exit_code",
     );
 }

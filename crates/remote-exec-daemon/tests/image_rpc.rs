@@ -7,6 +7,7 @@ use std::path::Path;
 use base64::Engine;
 use image::ImageFormat;
 use remote_exec_proto::rpc::{ImageReadRequest, ImageReadResponse};
+use support::test_helpers::DEFAULT_TEST_TARGET;
 
 async fn write_png(path: &Path, width: u32, height: u32) {
     write_image(path, width, height, ImageFormat::Png).await;
@@ -35,7 +36,7 @@ fn decode_data_url(image_url: &str) -> (String, Vec<u8>) {
 }
 
 async fn assert_default_passthrough(extension: &str, format: ImageFormat, expected_mime: &str) {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join(format!("small.{extension}"));
     write_image(&path, 64, 64, format).await;
     let original = tokio::fs::read(&path).await.unwrap();
@@ -64,7 +65,7 @@ async fn assert_resized_output(
     width: u32,
     height: u32,
 ) {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join(format!("large.{extension}"));
     write_image(&path, width, height, format).await;
 
@@ -89,7 +90,7 @@ async fn assert_resized_output(
 
 #[tokio::test]
 async fn image_read_preserves_large_passthrough_within_2048_square_threshold() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("tall.webp");
     write_image(&path, 64, 2048, ImageFormat::WebP).await;
     let original = tokio::fs::read(&path).await.unwrap();
@@ -120,7 +121,7 @@ async fn image_read_preserves_small_png_jpeg_and_webp_bytes_by_default() {
 
 #[tokio::test]
 async fn image_read_preserves_original_detail_for_passthrough_formats() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("original.webp");
     write_image(&path, 2050, 64, ImageFormat::WebP).await;
     let original = tokio::fs::read(&path).await.unwrap();
@@ -154,7 +155,7 @@ async fn image_read_resizes_large_jpeg_and_keeps_jpeg_encoding() {
 
 #[tokio::test]
 async fn image_read_reencodes_gif_in_default_mode() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("anim.gif");
     write_image(&path, 64, 64, ImageFormat::Gif).await;
     let original = tokio::fs::read(&path).await.unwrap();
@@ -177,7 +178,7 @@ async fn image_read_reencodes_gif_in_default_mode() {
 
 #[tokio::test]
 async fn image_read_reports_missing_file_with_path_context() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
 
     let err = fixture
         .rpc_error(
@@ -198,7 +199,7 @@ async fn image_read_reports_missing_file_with_path_context() {
 #[cfg(windows)]
 #[tokio::test]
 async fn image_read_accepts_msys_style_absolute_paths_on_windows() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("msys-path.png");
     write_png(&path, 48, 48).await;
     let original = tokio::fs::read(&path).await.unwrap();
@@ -222,15 +223,17 @@ async fn image_read_accepts_msys_style_absolute_paths_on_windows() {
 #[cfg(windows)]
 #[tokio::test]
 async fn image_read_accepts_windows_posix_root_paths_on_windows() {
-    let fixture =
-        support::spawn::spawn_daemon_with_extra_config_for_workdir("builder-a", |workdir| {
+    let fixture = support::spawn::spawn_daemon_with_extra_config_for_workdir(
+        DEFAULT_TEST_TARGET,
+        |workdir| {
             let root = workdir.join("synthetic-msys-root");
             format!(
                 "windows_posix_root = {}\n",
                 toml::Value::String(root.display().to_string())
             )
-        })
-        .await;
+        },
+    )
+    .await;
     let root = fixture.workdir.join("synthetic-msys-root");
     let path = root.join("assets").join("synthetic-root.png");
     tokio::fs::create_dir_all(path.parent().unwrap())
@@ -257,7 +260,7 @@ async fn image_read_accepts_windows_posix_root_paths_on_windows() {
 
 #[tokio::test]
 async fn image_read_rejects_directory_paths_with_path_context() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let dir = fixture.workdir.join("nested");
     tokio::fs::create_dir_all(&dir).await.unwrap();
 
@@ -281,7 +284,7 @@ async fn image_read_rejects_directory_paths_with_path_context() {
 
 #[tokio::test]
 async fn image_read_wraps_invalid_image_failures_with_path_context() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("broken.png");
     write_invalid_bytes(&path).await;
 
@@ -303,7 +306,7 @@ async fn image_read_wraps_invalid_image_failures_with_path_context() {
 
 #[tokio::test]
 async fn image_read_rejects_unknown_detail_values() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let path = fixture.workdir.join("small.png");
     write_png(&path, 32, 32).await;
 
@@ -327,8 +330,9 @@ async fn image_read_rejects_unknown_detail_values() {
 
 #[tokio::test]
 async fn image_read_uses_resolved_path_not_workdir_for_sandbox_checks() {
-    let fixture =
-        support::spawn::spawn_daemon_with_extra_config_for_workdir("builder-a", |workdir| {
+    let fixture = support::spawn::spawn_daemon_with_extra_config_for_workdir(
+        DEFAULT_TEST_TARGET,
+        |workdir| {
             let allow = toml::Value::Array(vec![toml::Value::String(
                 workdir.join("visible").display().to_string(),
             )]);
@@ -337,8 +341,9 @@ async fn image_read_uses_resolved_path_not_workdir_for_sandbox_checks() {
 allow = {allow}
 "#
             )
-        })
-        .await;
+        },
+    )
+    .await;
     let visible = fixture.workdir.join("visible");
     let hidden = fixture.workdir.join("hidden");
     tokio::fs::create_dir_all(&visible).await.unwrap();
@@ -361,8 +366,9 @@ allow = {allow}
 
 #[tokio::test]
 async fn image_read_rejects_paths_outside_read_sandbox() {
-    let fixture =
-        support::spawn::spawn_daemon_with_extra_config_for_workdir("builder-a", |workdir| {
+    let fixture = support::spawn::spawn_daemon_with_extra_config_for_workdir(
+        DEFAULT_TEST_TARGET,
+        |workdir| {
             let allow = toml::Value::Array(vec![toml::Value::String(
                 workdir.join("visible").display().to_string(),
             )]);
@@ -371,8 +377,9 @@ async fn image_read_rejects_paths_outside_read_sandbox() {
 allow = {allow}
 "#
             )
-        })
-        .await;
+        },
+    )
+    .await;
     let hidden = fixture.workdir.join("hidden");
     tokio::fs::create_dir_all(&hidden).await.unwrap();
     write_png(&hidden.join("blocked.png"), 16, 16).await;
@@ -395,7 +402,7 @@ allow = {allow}
 #[cfg(unix)]
 #[tokio::test]
 async fn image_read_reports_permission_denied_as_internal_error() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let hidden = fixture.workdir.join("hidden");
     tokio::fs::create_dir_all(&hidden).await.unwrap();
     write_png(&hidden.join("blocked.png"), 16, 16).await;

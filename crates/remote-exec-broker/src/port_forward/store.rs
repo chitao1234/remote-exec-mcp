@@ -465,6 +465,7 @@ mod tests {
 
     use super::*;
     use crate::port_forward::SideHandle;
+    use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
 
     #[tokio::test]
     async fn mark_ready_keeps_forward_reconnecting_until_both_sides_ready() {
@@ -686,7 +687,7 @@ mod tests {
                 ForwardId::new(forward_id),
                 "local".to_string(),
                 "127.0.0.1:10000".to_string(),
-                "builder-a".to_string(),
+                DEFAULT_TEST_TARGET.to_string(),
                 "127.0.0.1:10001".to_string(),
                 ForwardPortProtocol::Tcp,
                 ForwardPortLimitSummary {

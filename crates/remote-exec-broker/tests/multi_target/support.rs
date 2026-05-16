@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use remote_exec_proto::port_tunnel::{read_frame, write_frame};
 use remote_exec_test_support::test_helpers;
+use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
     model::{CallToolRequestParams, CallToolResult, ClientInfo},
@@ -30,7 +31,7 @@ pub struct ClusterFixture {
 }
 
 pub async fn spawn_cluster() -> ClusterFixture {
-    let daemon_a = DaemonFixture::spawn("builder-a").await;
+    let daemon_a = DaemonFixture::spawn(DEFAULT_TEST_TARGET).await;
     let daemon_b = DaemonFixture::spawn("builder-b").await;
     let broker = BrokerFixture::spawn(&daemon_a, &daemon_b).await;
 
@@ -966,13 +967,14 @@ mod tests {
 
     use tokio::sync::Mutex;
 
+    use super::DEFAULT_TEST_TARGET;
     use super::{DaemonFixture, TunnelDropProxy, build_http_client};
 
     #[test]
     fn target_config_fragment_renders_insecure_http_target() {
         let fixture = DaemonFixture {
             _tempdir: tempfile::tempdir().unwrap(),
-            target: "builder-a".to_string(),
+            target: DEFAULT_TEST_TARGET.to_string(),
             addr: "127.0.0.1:9443".parse().unwrap(),
             backend_addr: "127.0.0.1:9444".parse().unwrap(),
             workdir: PathBuf::from("/tmp/workdir"),
@@ -995,11 +997,11 @@ mod tests {
             .expect("config fragment should parse as TOML");
 
         assert_eq!(
-            parsed["targets"]["builder-a"]["base_url"].as_str(),
+            parsed["targets"][DEFAULT_TEST_TARGET]["base_url"].as_str(),
             Some("http://127.0.0.1:9443")
         );
         assert_eq!(
-            parsed["targets"]["builder-a"]["allow_insecure_http"].as_bool(),
+            parsed["targets"][DEFAULT_TEST_TARGET]["allow_insecure_http"].as_bool(),
             Some(true)
         );
     }

@@ -1,4 +1,5 @@
 use super::*;
+use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
 
 #[tokio::test]
 async fn exec_command_returns_opaque_session_id_and_session_command() {
@@ -7,7 +8,7 @@ async fn exec_command_returns_opaque_session_id_and_session_command() {
         .call_tool(
             "exec_command",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "cmd": "printf ready; sleep 2",
                 "tty": true,
                 "yield_time_ms": 250
@@ -40,7 +41,7 @@ async fn exec_command_intercepts_direct_apply_patch_and_wraps_exec_output() {
         .call_tool(
             "exec_command",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "cmd": format!("apply_patch '{patch}'"),
             }),
         )
@@ -79,7 +80,7 @@ async fn exec_command_non_matching_patch_text_still_uses_exec_start() {
         .call_tool(
             "exec_command",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "cmd": raw_patch,
                 "tty": true,
                 "yield_time_ms": 250
@@ -115,7 +116,7 @@ async fn exec_command_intercepts_applypatch_heredoc_with_cd_wrapper() {
         .call_tool(
             "exec_command",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "cmd": cmd,
                 "workdir": "outer"
             }),
@@ -147,7 +148,7 @@ async fn exec_command_intercepts_apply_patch_whitespace_tolerant_forms() {
         .call_tool(
             "exec_command",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "cmd": format!(" \tapply_patch\t  '{direct_patch}' \t"),
             }),
         )
@@ -179,7 +180,7 @@ async fn exec_command_intercepts_apply_patch_whitespace_tolerant_forms() {
         .call_tool(
             "exec_command",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "cmd": heredoc_cmd,
                 "workdir": "outer"
             }),
@@ -215,7 +216,7 @@ async fn exec_command_intercepts_windows_shell_wrappers() {
         .call_tool(
             "exec_command",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "cmd": format!("cmd /c apply_patch '{patch}'"),
             }),
         )
@@ -230,7 +231,7 @@ async fn exec_command_intercepts_windows_shell_wrappers() {
         .call_tool(
             "exec_command",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "cmd": format!("pwsh -NoProfile -Command \"apply_patch '{patch}'\""),
             }),
         )
@@ -250,7 +251,7 @@ async fn exec_command_invalid_intercepted_patch_surfaces_tool_error() {
         .call_tool_error(
             "exec_command",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "cmd": "apply_patch 'not a patch'"
             }),
         )
@@ -273,7 +274,7 @@ async fn exec_command_intercepted_apply_patch_warning_in_structured_content_and_
         .raw_tool_result(
             "exec_command",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "cmd": format!("apply_patch '{patch}'"),
             }),
         )
@@ -298,7 +299,7 @@ async fn exec_command_intercepted_apply_patch_warning_error_is_visible_in_text()
         .raw_tool_result(
             "exec_command",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "cmd": "apply_patch 'not a patch'",
             }),
         )
@@ -326,7 +327,7 @@ async fn exec_command_forwarded_session_warning_in_structured_content_and_text()
         .raw_tool_result(
             "exec_command",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "cmd": "printf ready; sleep 2",
                 "tty": true,
                 "yield_time_ms": 250

@@ -394,6 +394,7 @@ async fn wait_for_shutdown_signal() {
 mod tests {
     use super::format_tool_error;
     use crate::request_context::RequestContext;
+    use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
 
     fn error_text(result: rmcp::model::CallToolResult) -> String {
         result.content[0]
@@ -407,7 +408,7 @@ mod tests {
     #[tokio::test]
     async fn tool_errors_include_request_context_and_preserve_suffix() {
         let context = RequestContext::new("exec_command");
-        context.set_target("builder-a");
+        context.set_target(DEFAULT_TEST_TARGET);
 
         let text = crate::request_context::scope(context, async {
             error_text(format_tool_error(anyhow::anyhow!("daemon unavailable")))

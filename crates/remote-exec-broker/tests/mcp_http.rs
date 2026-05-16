@@ -3,6 +3,7 @@ mod support;
 
 use remote_exec_broker::{Connection, RemoteExecClient};
 use remote_exec_proto::public::{ExecCommandInput, ListTargetsInput};
+use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
 
 #[tokio::test]
 async fn broker_serves_tools_over_streamable_http() {
@@ -20,14 +21,14 @@ async fn broker_serves_tools_over_streamable_http() {
     assert!(!targets.is_error);
     assert_eq!(
         targets.structured_content["targets"][0]["name"],
-        "builder-a"
+        DEFAULT_TEST_TARGET
     );
 
     let started = client
         .call_tool(
             "exec_command",
             &ExecCommandInput {
-                target: "builder-a".to_string(),
+                target: DEFAULT_TEST_TARGET.to_string(),
                 cmd: "printf ready".to_string(),
                 workdir: None,
                 shell: None,

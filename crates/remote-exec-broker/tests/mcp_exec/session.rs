@@ -1,4 +1,5 @@
 use super::*;
+use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
 
 #[tokio::test]
 async fn write_stdin_routes_by_public_session_id_and_preserves_original_command_metadata() {
@@ -7,7 +8,7 @@ async fn write_stdin_routes_by_public_session_id_and_preserves_original_command_
         .call_tool(
             "exec_command",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "cmd": "printf ready; sleep 2",
                 "tty": true,
                 "yield_time_ms": 250
@@ -30,7 +31,7 @@ async fn write_stdin_routes_by_public_session_id_and_preserves_original_command_
         )
         .await;
 
-    assert_eq!(result.structured_content["target"], "builder-a");
+    assert_eq!(result.structured_content["target"], DEFAULT_TEST_TARGET);
     assert!(
         result.structured_content["output"]
             .as_str()
@@ -56,7 +57,7 @@ async fn write_stdin_forwards_pty_size_to_daemon_session() {
         .call_tool(
             "exec_command",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "cmd": "sleep 30",
                 "tty": true,
                 "yield_time_ms": 250,
@@ -109,7 +110,7 @@ async fn write_stdin_uses_generated_daemon_session_id_from_stub() {
         .call_tool(
             "exec_command",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "cmd": "printf ready; sleep 2",
                 "tty": true,
                 "yield_time_ms": 10
@@ -125,7 +126,7 @@ async fn write_stdin_uses_generated_daemon_session_id_from_stub() {
             "write_stdin",
             serde_json::json!({
                 "session_id": session_id,
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "chars": ""
             }),
         )
@@ -145,7 +146,7 @@ async fn write_stdin_wraps_stub_stale_daemon_session_as_unknown_process_id() {
         .call_tool(
             "exec_command",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "cmd": "printf ready; sleep 2",
                 "tty": true,
                 "yield_time_ms": 10
@@ -166,7 +167,7 @@ async fn write_stdin_wraps_stub_stale_daemon_session_as_unknown_process_id() {
             "write_stdin",
             serde_json::json!({
                 "session_id": public_session_id,
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "chars": ""
             }),
         )
@@ -175,7 +176,7 @@ async fn write_stdin_wraps_stub_stale_daemon_session_as_unknown_process_id() {
     support::assert_correlated_tool_error(
         &error,
         "write_stdin",
-        Some("builder-a"),
+        Some(DEFAULT_TEST_TARGET),
         &format!("write_stdin failed: Unknown process id {public_session_id}"),
     );
 }
@@ -211,7 +212,7 @@ async fn write_stdin_wraps_daemon_unknown_session_as_unknown_process_id() {
         .call_tool(
             "exec_command",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "cmd": "printf ready; sleep 30",
                 "tty": true,
                 "yield_time_ms": 250
@@ -237,7 +238,7 @@ async fn write_stdin_wraps_daemon_unknown_session_as_unknown_process_id() {
     support::assert_correlated_tool_error(
         &error,
         "write_stdin",
-        Some("builder-a"),
+        Some(DEFAULT_TEST_TARGET),
         &format!(
             "write_stdin failed: Unknown process id {}",
             started.structured_content["session_id"].as_str().unwrap()
@@ -253,7 +254,7 @@ async fn write_stdin_keeps_session_after_retryable_daemon_error() {
         .call_tool(
             "exec_command",
             serde_json::json!({
-                "target": "builder-a",
+                "target": DEFAULT_TEST_TARGET,
                 "cmd": "printf ready; sleep 30",
                 "tty": true,
                 "yield_time_ms": 250
@@ -278,7 +279,7 @@ async fn write_stdin_keeps_session_after_retryable_daemon_error() {
     support::assert_correlated_tool_error(
         &first,
         "write_stdin",
-        Some("builder-a"),
+        Some(DEFAULT_TEST_TARGET),
         "write_stdin failed: temporary_failure: temporary failure (500 Internal Server Error)",
     );
     assert!(first.contains("temporary_failure"));
@@ -293,5 +294,5 @@ async fn write_stdin_keeps_session_after_retryable_daemon_error() {
             }),
         )
         .await;
-    assert_eq!(second.structured_content["target"], "builder-a");
+    assert_eq!(second.structured_content["target"], DEFAULT_TEST_TARGET);
 }

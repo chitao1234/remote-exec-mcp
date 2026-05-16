@@ -10,11 +10,12 @@ use remote_exec_proto::request_id::{REQUEST_ID_HEADER, RequestId};
 use remote_exec_proto::rpc::TargetInfoResponse;
 use reqwest::StatusCode;
 use reqwest::header::{AUTHORIZATION, WWW_AUTHENTICATE};
+use support::test_helpers::{DEFAULT_TEST_TARGET, TEST_BEARER_SECRET};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 fn startup_validation_config() -> DaemonConfig {
     DaemonConfig {
-        target: "builder-a".to_string(),
+        target: DEFAULT_TEST_TARGET.to_string(),
         listen: SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
         default_workdir: std::env::temp_dir(),
         windows_posix_root: None,
@@ -47,7 +48,7 @@ async fn raw_http_request(addr: SocketAddr, request: &str) -> String {
 
 #[tokio::test]
 async fn daemon_echoes_or_generates_request_id_header() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
 
     let echoed = fixture
         .client
@@ -82,7 +83,7 @@ async fn daemon_echoes_or_generates_request_id_header() {
 
 #[tokio::test]
 async fn target_info_is_available_over_plain_http() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
 
     let health = fixture
         .client
@@ -104,7 +105,7 @@ async fn target_info_is_available_over_plain_http() {
         .await
         .unwrap();
 
-    assert_eq!(info.target, "builder-a");
+    assert_eq!(info.target, DEFAULT_TEST_TARGET);
     assert_eq!(
         info.identity.hostname,
         gethostname::gethostname().to_string_lossy().into_owned()
@@ -121,7 +122,7 @@ async fn target_info_is_available_over_plain_http() {
 
 #[tokio::test]
 async fn daemon_rejects_http_1_0_rpc_requests() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
 
     let response = raw_http_request(
         fixture.addr,
@@ -142,7 +143,7 @@ async fn daemon_rejects_http_1_0_rpc_requests() {
 #[tokio::test]
 async fn plain_http_bearer_auth_rejects_missing_or_invalid_tokens() {
     let fixture = support::spawn::spawn_daemon_with_extra_config(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         r#"
 [http_auth]
 bearer_token = "shared-secret"
@@ -180,7 +181,7 @@ bearer_token = "shared-secret"
 #[tokio::test]
 async fn plain_http_bearer_auth_accepts_matching_token() {
     let fixture = support::spawn::spawn_daemon_with_extra_config(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         r#"
 [http_auth]
 bearer_token = "shared-secret"
@@ -191,7 +192,7 @@ bearer_token = "shared-secret"
     let info = fixture
         .client
         .post(fixture.url("/v1/target-info"))
-        .header(AUTHORIZATION, "Bearer shared-secret")
+        .header(AUTHORIZATION, format!("Bearer {TEST_BEARER_SECRET}"))
         .json(&serde_json::json!({}))
         .send()
         .await
@@ -200,7 +201,7 @@ bearer_token = "shared-secret"
         .await
         .unwrap();
 
-    assert_eq!(info.target, "builder-a");
+    assert_eq!(info.target, DEFAULT_TEST_TARGET);
 }
 
 #[tokio::test]

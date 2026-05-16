@@ -603,13 +603,14 @@ mod tests {
     use remote_exec_proto::request_id::{REQUEST_ID_HEADER, RequestId};
 
     use super::*;
+    use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     fn test_client(authorization: Option<HeaderValue>) -> DaemonClient {
         crate::install_crypto_provider().unwrap();
         DaemonClient {
             client: reqwest::Client::builder().build().unwrap(),
-            target_name: "builder-a".to_string(),
+            target_name: DEFAULT_TEST_TARGET.to_string(),
             base_url: "http://127.0.0.1:9".to_string(),
             authorization,
             request_timeout: crate::config::TargetTimeoutConfig::default().request_timeout(),
@@ -631,7 +632,7 @@ mod tests {
 
         let client = DaemonClient {
             client: reqwest::Client::builder().build().unwrap(),
-            target_name: "builder-a".to_string(),
+            target_name: DEFAULT_TEST_TARGET.to_string(),
             base_url: format!("http://{addr}"),
             authorization: None,
             request_timeout: timeout,
@@ -850,7 +851,7 @@ mod tests {
 
         let upgraded = DaemonClient {
             client: reqwest::Client::builder().build().unwrap(),
-            target_name: "builder-a".to_string(),
+            target_name: DEFAULT_TEST_TARGET.to_string(),
             base_url: format!("http://{addr}"),
             authorization: None,
             request_timeout: crate::config::TargetTimeoutConfig::default().request_timeout(),

@@ -37,7 +37,7 @@ async fn collect_exec_output_until_exit(
 
 #[tokio::test]
 async fn exec_start_returns_a_live_session_for_long_running_tty_processes() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
@@ -53,7 +53,7 @@ async fn exec_start_returns_a_live_session_for_long_running_tty_processes() {
 #[tokio::test]
 async fn exec_start_uses_configured_exec_yield_time_policy() {
     let fixture = support::spawn::spawn_daemon_with_extra_config(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         r#"[yield_time.exec_command]
 default_ms = 3000
 max_ms = 3000
@@ -75,8 +75,11 @@ min_ms = 3000
 
 #[tokio::test]
 async fn exec_start_includes_session_limit_warning_when_threshold_crossed() {
-    let fixture =
-        support::spawn::spawn_daemon_with_extra_config("builder-a", "max_open_sessions = 5").await;
+    let fixture = support::spawn::spawn_daemon_with_extra_config(
+        DEFAULT_TEST_TARGET,
+        "max_open_sessions = 5",
+    )
+    .await;
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
@@ -92,7 +95,7 @@ async fn exec_start_includes_session_limit_warning_when_threshold_crossed() {
     );
     assert_eq!(
         response.output().warnings[0].message,
-        "Target `builder-a` now has 1 open exec sessions."
+        format!("Target `{DEFAULT_TEST_TARGET}` now has 1 open exec sessions.")
     );
 }
 
@@ -106,7 +109,7 @@ async fn exec_start_uses_login_shell_by_default_when_login_is_omitted() {
     .unwrap();
     let home_text = home.path().to_string_lossy().into_owned();
     let fixture = support::spawn::spawn_daemon_with_process_environment(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         process_environment_with(&[("HOME", &home_text), ("SHELL", TEST_SHELL)]),
     )
     .await;
@@ -135,7 +138,7 @@ async fn exec_start_uses_login_shell_by_default_when_login_is_omitted() {
 #[tokio::test]
 async fn exec_start_uses_configured_default_shell_when_shell_is_omitted() {
     let fixture = support::spawn::spawn_daemon_with_extra_config_and_process_environment(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         &format!(
             "default_shell = {}",
             toml::Value::String(TEST_SHELL.to_string())
@@ -164,9 +167,11 @@ async fn exec_start_uses_configured_default_shell_when_shell_is_omitted() {
 
 #[tokio::test]
 async fn exec_start_rejects_explicit_login_when_disabled_by_config() {
-    let fixture =
-        support::spawn::spawn_daemon_with_extra_config("builder-a", "allow_login_shell = false")
-            .await;
+    let fixture = support::spawn::spawn_daemon_with_extra_config(
+        DEFAULT_TEST_TARGET,
+        "allow_login_shell = false",
+    )
+    .await;
 
     let err = fixture
         .rpc_error(
@@ -195,7 +200,7 @@ async fn exec_start_uses_non_login_shell_when_policy_disabled_and_login_is_omitt
     .unwrap();
     let home_text = home.path().to_string_lossy().into_owned();
     let fixture = support::spawn::spawn_daemon_with_extra_config_and_process_environment(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         "allow_login_shell = false",
         process_environment_with(&[("HOME", &home_text), ("SHELL", TEST_SHELL)]),
     )
@@ -222,7 +227,8 @@ async fn exec_start_uses_non_login_shell_when_policy_disabled_and_login_is_omitt
 #[tokio::test]
 async fn exec_start_rejects_tty_when_disabled_by_config() {
     let fixture =
-        support::spawn::spawn_daemon_with_extra_config("builder-a", r#"pty = "none""#).await;
+        support::spawn::spawn_daemon_with_extra_config(DEFAULT_TEST_TARGET, r#"pty = "none""#)
+            .await;
 
     let err = fixture
         .rpc_error(
@@ -237,7 +243,7 @@ async fn exec_start_rejects_tty_when_disabled_by_config() {
 #[tokio::test]
 async fn exec_start_rejects_cwd_outside_exec_sandbox() {
     let fixture = support::spawn::spawn_daemon_with_extra_config(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         r#"[sandbox.exec_cwd]
 deny = ["/"]
 "#,
@@ -258,7 +264,7 @@ deny = ["/"]
 #[tokio::test]
 async fn env_overlay_is_applied_in_pipe_mode() {
     let fixture = support::spawn::spawn_daemon_with_process_environment(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         process_environment_with(&[
             ("TERM", "rainbow-terminal"),
             ("NO_COLOR", "0"),
@@ -292,7 +298,7 @@ async fn env_overlay_is_applied_in_pipe_mode() {
 #[tokio::test]
 async fn env_overlay_is_applied_in_pty_mode() {
     let fixture = support::spawn::spawn_daemon_with_process_environment(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         process_environment_with(&[
             ("TERM", "rainbow-terminal"),
             ("NO_COLOR", "0"),
@@ -327,7 +333,7 @@ async fn env_overlay_is_applied_in_pty_mode() {
 #[tokio::test]
 async fn env_overlay_prefers_lang_c_plus_lc_ctype_when_c_utf8_is_unavailable() {
     let fixture = support::spawn::spawn_daemon_with_process_environment(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         process_environment_with(&[(
             "REMOTE_EXEC_TEST_LOCALE_OUTPUT",
             "fr_FR.UTF-8\nen_US.UTF-8\n",
@@ -354,7 +360,7 @@ async fn env_overlay_prefers_lang_c_plus_lc_ctype_when_c_utf8_is_unavailable() {
 #[tokio::test]
 async fn env_overlay_falls_back_to_lang_c_only_when_no_utf8_locale_is_available() {
     let fixture = support::spawn::spawn_daemon_with_process_environment(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         process_environment_with(&[(
             "REMOTE_EXEC_TEST_LOCALE_OUTPUT",
             "C\nPOSIX\nen_US.ISO8859-1\n",
@@ -380,7 +386,7 @@ async fn env_overlay_falls_back_to_lang_c_only_when_no_utf8_locale_is_available(
 
 #[tokio::test]
 async fn omitted_max_output_tokens_defaults_to_ten_thousand() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
@@ -407,7 +413,7 @@ async fn omitted_max_output_tokens_defaults_to_ten_thousand() {
 
 #[tokio::test]
 async fn exec_start_truncates_output_to_max_output_tokens() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
@@ -430,7 +436,7 @@ async fn exec_start_truncates_output_to_max_output_tokens() {
 
 #[tokio::test]
 async fn exec_output_preserves_trailing_newline_when_within_max_output_tokens() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
@@ -450,7 +456,7 @@ async fn exec_output_preserves_trailing_newline_when_within_max_output_tokens() 
 
 #[tokio::test]
 async fn exec_output_drains_late_output_after_exit() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
@@ -471,7 +477,7 @@ async fn exec_output_drains_late_output_after_exit() {
 
 #[tokio::test]
 async fn exec_output_preserves_pipe_mode_output_after_external_pipeline_steps() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
@@ -492,7 +498,7 @@ async fn exec_output_preserves_pipe_mode_output_after_external_pipeline_steps() 
 
 #[tokio::test]
 async fn exec_output_uses_one_pipe_for_stdout_and_stderr_in_pipe_mode() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
@@ -513,7 +519,7 @@ async fn exec_output_uses_one_pipe_for_stdout_and_stderr_in_pipe_mode() {
 
 #[tokio::test]
 async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let started = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
@@ -553,7 +559,7 @@ async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens() {
 
 #[tokio::test]
 async fn exec_write_rejects_non_tty_sessions_when_chars_are_present() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let started = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
@@ -584,7 +590,7 @@ async fn exec_write_rejects_non_tty_sessions_when_chars_are_present() {
 
 #[tokio::test]
 async fn exec_write_round_trips_pty_input_without_echo_assumptions() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let started = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
@@ -626,7 +632,7 @@ async fn exec_write_round_trips_pty_input_without_echo_assumptions() {
 
 #[tokio::test]
 async fn exec_write_resizes_pty_before_polling_output() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let started = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
@@ -669,7 +675,7 @@ async fn exec_write_resizes_pty_before_polling_output() {
 
 #[tokio::test]
 async fn exec_write_rejects_zero_pty_size() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let started = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
@@ -702,7 +708,7 @@ async fn exec_write_rejects_zero_pty_size() {
 async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon() {
     use std::time::{Duration, Instant};
 
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
 
     let slow = fixture
         .rpc::<ExecStartRequest, ExecResponse>(

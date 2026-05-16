@@ -217,6 +217,8 @@ mod tests {
     use tokio::io::AsyncReadExt;
 
     use crate::config::{BrokerConfig, LocalTargetConfig, TargetConfig, TargetTimeoutConfig};
+    #[cfg(not(feature = "broker-tls"))]
+    use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
 
     use super::build_state;
 
@@ -344,7 +346,7 @@ mod tests {
     async fn build_state_rejects_https_targets_when_broker_tls_feature_disabled() {
         let mut targets = BTreeMap::new();
         targets.insert(
-            "builder-a".to_string(),
+            DEFAULT_TEST_TARGET.to_string(),
             TargetConfig {
                 base_url: "https://127.0.0.1:9443".to_string(),
                 http_auth: None,

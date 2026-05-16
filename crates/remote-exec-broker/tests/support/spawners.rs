@@ -19,7 +19,9 @@ use super::stub_daemon::{
     spawn_plain_http_stub_on_listener, spawn_plain_http_unknown_session_exec_write_daemon,
     stub_daemon_state,
 };
-use super::test_helpers::{ReadinessWaitOutcome, poll_until_ready, toml_string};
+use super::test_helpers::{
+    DEFAULT_TEST_TARGET, ReadinessWaitOutcome, XP_TEST_TARGET, poll_until_ready, toml_string,
+};
 
 const TEST_HTTP_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const TEST_HTTP_READY_POLL: Duration = Duration::from_millis(50);
@@ -300,7 +302,7 @@ pub async fn spawn_broker_with_tls_stub_daemon_and_extra_target_config(
     spawn_broker_fixture_from_config(
         tempdir,
         &[BrokerConfigTarget {
-            name: "builder-a",
+            name: DEFAULT_TEST_TARGET,
             addr,
             transport: BrokerTargetTransport::Https(&certs),
             extra_config: Some(extra_target_config),
@@ -326,7 +328,7 @@ pub async fn spawn_broker_with_tls_stub_daemon_and_daemon_spec(
     spawn_broker_fixture_from_config(
         tempdir,
         &[BrokerConfigTarget {
-            name: "builder-a",
+            name: DEFAULT_TEST_TARGET,
             addr,
             transport: BrokerTargetTransport::Https(&certs),
             extra_config: Some(extra_target_config),
@@ -345,7 +347,7 @@ pub async fn spawn_broker_with_stub_daemon() -> BrokerFixture {
     spawn_broker_fixture_from_config(
         tempdir,
         &[BrokerConfigTarget {
-            name: "builder-a",
+            name: DEFAULT_TEST_TARGET,
             addr,
             transport: BrokerTargetTransport::Http,
             extra_config: None,
@@ -362,7 +364,12 @@ pub async fn spawn_broker_with_stub_daemon_http_auth(bearer_token: &str) -> Brok
     let tempdir = tempfile::tempdir().unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let mut stub_state = stub_daemon_state("builder-a", ExecWriteBehavior::Success, "linux", true);
+    let mut stub_state = stub_daemon_state(
+        DEFAULT_TEST_TARGET,
+        ExecWriteBehavior::Success,
+        "linux",
+        true,
+    );
     set_transfer_compression_support(&mut stub_state, false);
     set_required_bearer_token(&mut stub_state, bearer_token);
     spawn_plain_http_stub_on_listener(listener, stub_state.clone()).await;
@@ -374,7 +381,7 @@ bearer_token = {}"#,
     spawn_broker_fixture_from_config(
         tempdir,
         &[BrokerConfigTarget {
-            name: "builder-a",
+            name: DEFAULT_TEST_TARGET,
             addr,
             transport: BrokerTargetTransport::Http,
             extra_config: Some(&auth_config),
@@ -393,7 +400,7 @@ pub async fn spawn_broker_config_with_stub_daemon() -> BrokerConfigFixture {
     broker_config_fixture_from_config(
         tempdir,
         &[BrokerConfigTarget {
-            name: "builder-a",
+            name: DEFAULT_TEST_TARGET,
             addr,
             transport: BrokerTargetTransport::Http,
             extra_config: None,
@@ -467,7 +474,7 @@ pub async fn spawn_streamable_http_broker_with_stub_daemon() -> HttpBrokerFixtur
     let broker_config = write_broker_fixture_config(
         &tempdir,
         &[BrokerConfigTarget {
-            name: "builder-a",
+            name: DEFAULT_TEST_TARGET,
             addr: daemon_addr,
             transport: BrokerTargetTransport::Http,
             extra_config: None,
@@ -514,7 +521,7 @@ pub async fn spawn_broker_with_stub_daemon_platform(
     spawn_broker_fixture_from_config(
         tempdir,
         &[BrokerConfigTarget {
-            name: "builder-a",
+            name: DEFAULT_TEST_TARGET,
             addr,
             transport: BrokerTargetTransport::Http,
             extra_config: None,
@@ -531,14 +538,19 @@ pub async fn spawn_broker_with_stub_port_forward_version(version: u32) -> Broker
     let tempdir = tempfile::tempdir().unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let mut stub_state = stub_daemon_state("builder-a", ExecWriteBehavior::Success, "linux", true);
+    let mut stub_state = stub_daemon_state(
+        DEFAULT_TEST_TARGET,
+        ExecWriteBehavior::Success,
+        "linux",
+        true,
+    );
     set_port_forward_support(&mut stub_state, true, version);
     spawn_plain_http_stub_on_listener(listener, stub_state.clone()).await;
 
     spawn_broker_fixture_from_config(
         tempdir,
         &[BrokerConfigTarget {
-            name: "builder-a",
+            name: DEFAULT_TEST_TARGET,
             addr,
             transport: BrokerTargetTransport::Http,
             extra_config: None,
@@ -591,14 +603,19 @@ async fn spawn_broker_with_local_and_stub_port_forward_version_and_extra_config(
     let local_workdir = create_local_workdir(&tempdir);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let mut stub_state = stub_daemon_state("builder-a", ExecWriteBehavior::Success, "linux", true);
+    let mut stub_state = stub_daemon_state(
+        DEFAULT_TEST_TARGET,
+        ExecWriteBehavior::Success,
+        "linux",
+        true,
+    );
     set_port_forward_support(&mut stub_state, true, version);
     spawn_plain_http_stub_on_listener(listener, stub_state.clone()).await;
 
     spawn_broker_fixture_from_config(
         tempdir,
         &[BrokerConfigTarget {
-            name: "builder-a",
+            name: DEFAULT_TEST_TARGET,
             addr,
             transport: BrokerTargetTransport::Http,
             extra_config: None,
@@ -618,7 +635,7 @@ async fn spawn_broker_with_local_and_stub_port_forward_version_and_extra_config(
 pub async fn spawn_broker_with_plain_http_stub_daemon() -> BrokerFixture {
     let tempdir = tempfile::tempdir().unwrap();
     let mut stub_state =
-        stub_daemon_state("builder-xp", ExecWriteBehavior::Success, "windows", false);
+        stub_daemon_state(XP_TEST_TARGET, ExecWriteBehavior::Success, "windows", false);
     set_transfer_compression_support(&mut stub_state, false);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -627,7 +644,7 @@ pub async fn spawn_broker_with_plain_http_stub_daemon() -> BrokerFixture {
     spawn_broker_fixture_from_config(
         tempdir,
         &[BrokerConfigTarget {
-            name: "builder-xp",
+            name: XP_TEST_TARGET,
             addr,
             transport: BrokerTargetTransport::Http,
             extra_config: None,
@@ -656,7 +673,7 @@ pub async fn spawn_broker_with_reverse_ordered_targets() -> BrokerFixture {
                 extra_config: None,
             },
             BrokerConfigTarget {
-                name: "builder-a",
+                name: DEFAULT_TEST_TARGET,
                 addr: live_addr,
                 transport: BrokerTargetTransport::Http,
                 extra_config: None,
@@ -680,7 +697,7 @@ pub async fn spawn_broker_with_live_and_dead_targets() -> BrokerFixture {
         tempdir,
         &[
             BrokerConfigTarget {
-                name: "builder-a",
+                name: DEFAULT_TEST_TARGET,
                 addr: live_addr,
                 transport: BrokerTargetTransport::Http,
                 extra_config: None,
@@ -707,7 +724,7 @@ pub async fn spawn_broker_with_retryable_exec_write_error() -> BrokerFixture {
     spawn_broker_fixture_from_config(
         tempdir,
         &[BrokerConfigTarget {
-            name: "builder-a",
+            name: DEFAULT_TEST_TARGET,
             addr,
             transport: BrokerTargetTransport::Http,
             extra_config: None,
@@ -727,7 +744,7 @@ pub async fn spawn_broker_with_unknown_session_exec_write_error() -> BrokerFixtu
     spawn_broker_fixture_from_config(
         tempdir,
         &[BrokerConfigTarget {
-            name: "builder-a",
+            name: DEFAULT_TEST_TARGET,
             addr,
             transport: BrokerTargetTransport::Http,
             extra_config: None,
@@ -752,7 +769,7 @@ startup_probe_ms = 100"#;
         &tempdir,
         &[
             BrokerConfigTarget {
-                name: "builder-a",
+                name: DEFAULT_TEST_TARGET,
                 addr: live_addr,
                 transport: BrokerTargetTransport::Http,
                 extra_config: None,
@@ -931,7 +948,7 @@ pub async fn spawn_broker_with_stub_daemon_and_structured_content_disabled() -> 
     spawn_broker_fixture_from_config(
         tempdir,
         &[BrokerConfigTarget {
-            name: "builder-a",
+            name: DEFAULT_TEST_TARGET,
             addr,
             transport: BrokerTargetTransport::Http,
             extra_config: None,

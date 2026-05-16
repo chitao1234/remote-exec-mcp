@@ -9,11 +9,12 @@ use remote_exec_proto::port_tunnel::{
     TunnelErrorMeta, TunnelForwardProtocol, TunnelOpenMeta, TunnelReadyMeta, TunnelRole,
     UPGRADE_TOKEN, read_frame, write_frame, write_preface,
 };
+use support::test_helpers::DEFAULT_TEST_TARGET;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::test]
 async fn port_tunnel_upgrade_accepts_http11_and_binds_tcp_listener() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let mut stream = open_tunnel(fixture.addr).await;
 
     write_preface(&mut stream).await.unwrap();
@@ -37,7 +38,7 @@ async fn port_tunnel_upgrade_accepts_http11_and_binds_tcp_listener() {
 
 #[tokio::test]
 async fn port_tunnel_rejects_http10_upgrade_request() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let response = raw_http_request(
         fixture.addr,
         &format!(
@@ -57,7 +58,7 @@ async fn port_tunnel_rejects_http10_upgrade_request() {
 
 #[tokio::test]
 async fn port_tunnel_requires_v4_header() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let response = fixture
         .client
         .post(fixture.url("/v1/port/tunnel"))
@@ -81,7 +82,7 @@ async fn port_tunnel_requires_v4_header() {
 #[tokio::test]
 async fn port_tunnel_rejects_reserved_legacy_session_frames() {
     for frame_type in [FrameType::SessionOpen, FrameType::SessionResume] {
-        let fixture = support::spawn::spawn_daemon("builder-a").await;
+        let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
         let mut stream = open_tunnel(fixture.addr).await;
 
         write_preface(&mut stream).await.unwrap();
@@ -107,7 +108,7 @@ async fn port_tunnel_rejects_reserved_legacy_session_frames() {
 
 #[tokio::test]
 async fn tunnel_open_ready_and_close_round_trip() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let mut stream = open_tunnel(fixture.addr).await;
 
     write_preface(&mut stream).await.unwrap();
@@ -120,7 +121,7 @@ async fn tunnel_open_ready_and_close_round_trip() {
             meta: serde_json::to_vec(&TunnelOpenMeta {
                 forward_id: ForwardId::new("fwd_test"),
                 role: TunnelRole::Listen,
-                side: "builder-a".to_string(),
+                side: DEFAULT_TEST_TARGET.to_string(),
                 generation: 1,
                 protocol: TunnelForwardProtocol::Tcp,
                 resume_session_id: None,
@@ -158,7 +159,7 @@ async fn tunnel_open_ready_and_close_round_trip() {
 #[tokio::test]
 async fn tunnel_open_ready_reports_configured_limits() {
     let fixture = support::spawn::spawn_daemon_with_extra_config(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         r#"[port_forward_limits]
 max_active_tcp_streams = 3
 max_udp_binds = 5
@@ -178,7 +179,7 @@ max_tunnel_queued_bytes = 4096
             meta: serde_json::to_vec(&TunnelOpenMeta {
                 forward_id: ForwardId::new("fwd_limits"),
                 role: TunnelRole::Connect,
-                side: "builder-a".to_string(),
+                side: DEFAULT_TEST_TARGET.to_string(),
                 generation: 7,
                 protocol: TunnelForwardProtocol::Tcp,
                 resume_session_id: None,
@@ -202,7 +203,7 @@ max_tunnel_queued_bytes = 4096
 #[tokio::test]
 async fn port_tunnel_rejects_retained_session_limit() {
     let fixture = support::spawn::spawn_daemon_with_extra_config(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         r#"[port_forward_limits]
 max_retained_sessions = 1
 "#,
@@ -227,7 +228,7 @@ max_retained_sessions = 1
 #[tokio::test]
 async fn port_tunnel_rejects_second_concurrent_tunnel_limit() {
     let fixture = support::spawn::spawn_daemon_with_extra_config(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         r#"[port_forward_limits]
 max_tunnel_connections = 1
 "#,
@@ -247,7 +248,7 @@ max_tunnel_connections = 1
 
 #[tokio::test]
 async fn port_tunnel_rejects_old_generation_frames() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let mut stream = open_tunnel(fixture.addr).await;
 
     write_preface(&mut stream).await.unwrap();
@@ -260,7 +261,7 @@ async fn port_tunnel_rejects_old_generation_frames() {
             meta: serde_json::to_vec(&TunnelOpenMeta {
                 forward_id: ForwardId::new("fwd_test"),
                 role: TunnelRole::Listen,
-                side: "builder-a".to_string(),
+                side: DEFAULT_TEST_TARGET.to_string(),
                 generation: 2,
                 protocol: TunnelForwardProtocol::Tcp,
                 resume_session_id: None,
@@ -302,7 +303,7 @@ async fn port_tunnel_rejects_old_generation_frames() {
 
 #[tokio::test]
 async fn tunnel_close_releases_tcp_listener() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let mut stream = open_tunnel(fixture.addr).await;
 
     write_preface(&mut stream).await.unwrap();
@@ -342,7 +343,7 @@ async fn tunnel_close_releases_tcp_listener() {
 
 #[tokio::test]
 async fn terminal_port_tunnel_error_releases_tcp_listener_without_waiting_for_resume_timeout() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let mut stream = open_tunnel(fixture.addr).await;
 
     write_preface(&mut stream).await.unwrap();
@@ -388,7 +389,7 @@ async fn terminal_port_tunnel_error_releases_tcp_listener_without_waiting_for_re
 
 #[tokio::test]
 async fn terminal_port_tunnel_error_returns_fatal_error_frame_before_closing() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let mut stream = open_tunnel(fixture.addr).await;
 
     write_preface(&mut stream).await.unwrap();
@@ -464,7 +465,7 @@ async fn write_tunnel_open(stream: &mut tokio::net::TcpStream, forward_id: &str)
             meta: serde_json::to_vec(&TunnelOpenMeta {
                 forward_id: ForwardId::new(forward_id),
                 role: TunnelRole::Listen,
-                side: "builder-a".to_string(),
+                side: DEFAULT_TEST_TARGET.to_string(),
                 generation: 1,
                 protocol: TunnelForwardProtocol::Tcp,
                 resume_session_id: None,

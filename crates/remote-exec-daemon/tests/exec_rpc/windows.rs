@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn exec_start_allows_login_requests_on_windows_when_enabled() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
@@ -32,7 +32,7 @@ async fn exec_start_allows_login_requests_on_windows_when_enabled() {
 #[tokio::test]
 async fn exec_start_uses_configured_exec_yield_time_policy() {
     let fixture = support::spawn::spawn_daemon_with_extra_config(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         r#"[yield_time.exec_command]
 default_ms = 3000
 max_ms = 3000
@@ -66,9 +66,11 @@ min_ms = 3000
 
 #[tokio::test]
 async fn exec_start_rejects_login_requests_on_windows_when_disabled_by_config() {
-    let fixture =
-        support::spawn::spawn_daemon_with_extra_config("builder-a", "allow_login_shell = false")
-            .await;
+    let fixture = support::spawn::spawn_daemon_with_extra_config(
+        DEFAULT_TEST_TARGET,
+        "allow_login_shell = false",
+    )
+    .await;
 
     let err = fixture
         .rpc_error(
@@ -91,7 +93,7 @@ async fn exec_start_rejects_login_requests_on_windows_when_disabled_by_config() 
 #[tokio::test]
 async fn exec_start_uses_configured_default_shell_when_shell_is_omitted() {
     let fixture = support::spawn::spawn_daemon_with_extra_config_and_process_environment(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         r#"default_shell = "cmd.exe""#,
         process_environment_with(&[("PATH", ""), ("COMSPEC", "missing-cmd.exe")]),
     )
@@ -128,7 +130,7 @@ async fn exec_start_prefers_git_bash_when_shell_is_omitted_on_windows() {
         return;
     };
 
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
@@ -154,7 +156,7 @@ async fn exec_start_resolves_bare_bash_shell_requests_to_git_bash_on_windows() {
         return;
     };
 
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
@@ -180,7 +182,7 @@ async fn exec_start_preserves_workdir_for_git_bash_login_shells_on_windows() {
         return;
     };
 
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let workdir = fixture.workdir.join("git bash cwd");
     std::fs::create_dir_all(&workdir).unwrap();
 
@@ -208,7 +210,7 @@ async fn exec_start_preserves_workdir_for_git_bash_login_shells_on_windows() {
 
 #[tokio::test]
 async fn exec_start_accepts_msys_style_workdir_on_windows() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let workdir = fixture.workdir.join("msys workdir");
     std::fs::create_dir_all(&workdir).unwrap();
 
@@ -236,15 +238,17 @@ async fn exec_start_accepts_msys_style_workdir_on_windows() {
 
 #[tokio::test]
 async fn exec_start_accepts_windows_posix_root_workdirs_on_windows() {
-    let fixture =
-        support::spawn::spawn_daemon_with_extra_config_for_workdir("builder-a", |workdir| {
+    let fixture = support::spawn::spawn_daemon_with_extra_config_for_workdir(
+        DEFAULT_TEST_TARGET,
+        |workdir| {
             let root = workdir.join("synthetic-msys-root");
             format!(
                 "windows_posix_root = {}\n",
                 toml::Value::String(root.display().to_string())
             )
-        })
-        .await;
+        },
+    )
+    .await;
     let root = fixture.workdir.join("synthetic-msys-root");
     let workdir = root.join("tmp").join("demo");
     std::fs::create_dir_all(&workdir).unwrap();
@@ -281,7 +285,7 @@ async fn exec_start_resolves_windows_posix_root_shells_and_sets_chere_invoking()
     };
 
     let fixture = support::spawn::spawn_daemon_with_extra_config(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         &format!(
             "windows_posix_root = {}\ndefault_shell = \"/usr/bin/bash\"\n",
             toml::Value::String(root.display().to_string())
@@ -322,7 +326,7 @@ async fn exec_start_uses_git_bash_login_profiles_when_shell_is_omitted() {
     .unwrap();
     let home_text = home.path().to_string_lossy().into_owned();
     let fixture = support::spawn::spawn_daemon_with_process_environment(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         process_environment_with(&[("HOME", &home_text)]),
     )
     .await;
@@ -349,7 +353,8 @@ async fn exec_start_uses_git_bash_login_profiles_when_shell_is_omitted() {
 #[tokio::test]
 async fn exec_start_rejects_tty_when_disabled_by_config_on_windows() {
     let fixture =
-        support::spawn::spawn_daemon_with_extra_config("builder-a", r#"pty = "none""#).await;
+        support::spawn::spawn_daemon_with_extra_config(DEFAULT_TEST_TARGET, r#"pty = "none""#)
+            .await;
 
     let err = fixture
         .rpc_error(
@@ -472,7 +477,7 @@ async fn exec_start_preserves_workdir_for_git_bash_login_shells_over_windows_pty
 #[tokio::test]
 async fn env_overlay_is_applied_in_pipe_mode_on_windows() {
     let fixture = support::spawn::spawn_daemon_with_process_environment(
-        "builder-a",
+        DEFAULT_TEST_TARGET,
         process_environment_with(&[
             ("TERM", "rainbow-terminal"),
             ("NO_COLOR", "0"),
@@ -552,7 +557,7 @@ async fn env_overlay_is_applied_in_pty_mode_on_windows() {
 
 #[tokio::test]
 async fn omitted_max_output_tokens_defaults_to_ten_thousand_on_windows() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
@@ -579,7 +584,7 @@ async fn omitted_max_output_tokens_defaults_to_ten_thousand_on_windows() {
 
 #[tokio::test]
 async fn exec_start_truncates_output_to_max_output_tokens_on_windows() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
@@ -602,7 +607,7 @@ async fn exec_start_truncates_output_to_max_output_tokens_on_windows() {
 
 #[tokio::test]
 async fn exec_output_preserves_trailing_newline_when_within_max_output_tokens_on_windows() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
 
     let response = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
@@ -678,7 +683,7 @@ async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens_on_windows() 
 
 #[tokio::test]
 async fn exec_write_rejects_non_tty_sessions_when_chars_are_present_on_windows() {
-    let fixture = support::spawn::spawn_daemon("builder-a").await;
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let started = fixture
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
@@ -825,7 +830,7 @@ async fn exec_start_accepts_git_bash_aliases_on_windows() {
     };
 
     for alias in ["bash", "sh", "git-bash"] {
-        let fixture = support::spawn::spawn_daemon("builder-a").await;
+        let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
         let response = fixture
             .rpc::<ExecStartRequest, ExecResponse>(
                 "/v1/exec/start",
