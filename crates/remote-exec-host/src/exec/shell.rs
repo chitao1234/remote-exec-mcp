@@ -3,6 +3,8 @@ mod common;
 mod unix;
 #[cfg(any(test, windows))]
 mod windows;
+#[cfg(not(any(unix, windows)))]
+compile_error!("remote-exec-host shell selection is only supported on unix and windows targets");
 
 use std::path::Path;
 
