@@ -74,6 +74,14 @@ struct OpenedTunnels {
     connect: OpenDataTunnel,
 }
 
+struct ReadyListenTunnel {
+    tunnel: Arc<PortTunnel>,
+    response_endpoint: String,
+    session_id: String,
+    resume_timeout: std::time::Duration,
+    limits: remote_exec_proto::port_tunnel::TunnelLimitSummary,
+}
+
 pub async fn open_forward(
     store: PortForwardStore,
     limits: ForwardPortLimitSummary,
@@ -198,54 +206,25 @@ async fn build_opened_forward(
         requested_limits,
         kind,
     } = context;
-    let OpenListenSession {
+    let connect_tunnel = opened.connect.tunnel;
+    let ready_listen = open_listener_for_forward(
+        &listen_side,
+        &listen_endpoint,
+        kind,
+        opened.listen,
+        &connect_tunnel,
+    )
+    .await?;
+    let ReadyListenTunnel {
         tunnel: listen_tunnel,
+        response_endpoint: listen_response,
         session_id,
         resume_timeout,
         limits: listen_limits,
-    } = opened.listen;
+    } = ready_listen;
     let limits = effective_forward_limits(requested_limits, &listen_limits, &opened.connect.limits);
-    let connect_tunnel = opened.connect.tunnel;
     let initial_generation = INITIAL_FORWARD_GENERATION;
     let listener_stream_id = LISTEN_SESSION_STREAM_ID;
-    let listener_open_context = open_context(
-        kind,
-        ForwardSide::Listen,
-        listen_side.name(),
-        &listen_endpoint,
-    );
-    listen_tunnel
-        .send(Frame {
-            frame_type: kind.listen_frame_type,
-            flags: 0,
-            stream_id: listener_stream_id,
-            meta: encode_tunnel_meta(&EndpointMeta {
-                endpoint: listen_endpoint.clone(),
-            })?,
-            data: Vec::new(),
-        })
-        .await
-        .with_context(|| listener_open_context.clone())?;
-    let listen_response = match wait_for_listener_ready(
-        &listen_tunnel,
-        listener_stream_id,
-        kind.listen_ok_frame_type,
-        listener_open_context,
-        open_context(
-            kind,
-            ForwardSide::Listen,
-            listen_side.name(),
-            &listen_endpoint,
-        ),
-    )
-    .await
-    {
-        Ok(endpoint) => endpoint,
-        Err(err) => {
-            connect_tunnel.abort().await;
-            return Err(err);
-        }
-    };
     let listen_session = Arc::new(ListenSessionControl::new(ListenSessionParams {
         side: listen_side.clone(),
         forward_id: forward_id.clone(),
@@ -297,6 +276,58 @@ async fn build_opened_forward(
             cancel,
         ),
         runtime,
+    })
+}
+
+async fn open_listener_for_forward(
+    listen_side: &SideHandle,
+    listen_endpoint: &str,
+    kind: ForwardOpenKind,
+    opened: OpenListenSession,
+    connect_tunnel: &Arc<PortTunnel>,
+) -> anyhow::Result<ReadyListenTunnel> {
+    let OpenListenSession {
+        tunnel: listen_tunnel,
+        session_id,
+        resume_timeout,
+        limits,
+    } = opened;
+    let listener_stream_id = LISTEN_SESSION_STREAM_ID;
+    let listener_open_context =
+        open_context(kind, ForwardSide::Listen, listen_side.name(), listen_endpoint);
+    listen_tunnel
+        .send(Frame {
+            frame_type: kind.listen_frame_type,
+            flags: 0,
+            stream_id: listener_stream_id,
+            meta: encode_tunnel_meta(&EndpointMeta {
+                endpoint: listen_endpoint.to_string(),
+            })?,
+            data: Vec::new(),
+        })
+        .await
+        .with_context(|| listener_open_context.clone())?;
+    let response_endpoint = match wait_for_listener_ready(
+        &listen_tunnel,
+        listener_stream_id,
+        kind.listen_ok_frame_type,
+        listener_open_context,
+        open_context(kind, ForwardSide::Listen, listen_side.name(), listen_endpoint),
+    )
+    .await
+    {
+        Ok(endpoint) => endpoint,
+        Err(err) => {
+            connect_tunnel.abort().await;
+            return Err(err);
+        }
+    };
+    Ok(ReadyListenTunnel {
+        tunnel: listen_tunnel,
+        response_endpoint,
+        session_id,
+        resume_timeout,
+        limits,
     })
 }
 
