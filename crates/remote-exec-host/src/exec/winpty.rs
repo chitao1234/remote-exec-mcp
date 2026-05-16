@@ -18,7 +18,7 @@ pub(crate) struct WinptySession {
 }
 
 fn map_winpty_error(err: winptyrs::Error) -> anyhow::Error {
-    anyhow::anyhow!(err.to_string())
+    anyhow::Error::new(err)
 }
 
 fn lock_winpty<'a, T>(

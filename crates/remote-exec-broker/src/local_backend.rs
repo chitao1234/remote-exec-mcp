@@ -82,10 +82,10 @@ pub(crate) fn map_local_transfer_error(err: remote_exec_host::TransferError) -> 
 }
 
 pub(crate) fn map_host_rpc_error(err: remote_exec_host::HostRpcError) -> DaemonClientError {
-    let (status, body) = err.into_rpc_parts();
+    let (status, body) = err.into_http_rpc_parts("broker_local");
     DaemonClientError::Rpc {
         status: reqwest::StatusCode::from_u16(status)
-            .unwrap_or(reqwest::StatusCode::INTERNAL_SERVER_ERROR),
+            .expect("normalized HostRpcError status is valid"),
         code: Some(DaemonRpcCode::from_wire_value(body.code)),
         message: body.message,
     }

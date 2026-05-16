@@ -22,6 +22,25 @@ impl HostRpcError {
         self.code.wire_value()
     }
 
+    pub fn into_http_rpc_parts(self, sink: &'static str) -> (u16, RpcErrorBody) {
+        let normalized_status = if (100..=999).contains(&self.status) {
+            self.status
+        } else {
+            tracing::error!(
+                sink,
+                status = self.status,
+                code = self.code.wire_value(),
+                message = %self.message,
+                "invalid host rpc http status; normalizing to 500"
+            );
+            500
+        };
+        (
+            normalized_status,
+            RpcErrorBody::new(self.code, self.message),
+        )
+    }
+
     pub fn into_rpc_parts(self) -> (u16, RpcErrorBody) {
         (self.status, RpcErrorBody::new(self.code, self.message))
     }
@@ -278,5 +297,23 @@ mod tests {
         assert_eq!(err.code, RpcErrorCode::PatchFailed);
         assert_eq!(err.wire_code(), "patch_failed");
         assert_eq!(err.message, "patch boom");
+    }
+
+    #[test]
+    fn invalid_http_status_normalizes_to_internal_server_error() {
+        let err = HostRpcError::new(42, RpcErrorCode::Internal, "invalid status");
+        let (status, body) = err.into_http_rpc_parts("test");
+        assert_eq!(status, 500);
+        assert_eq!(body.code, "internal_error");
+        assert_eq!(body.message, "invalid status");
+    }
+
+    #[test]
+    fn valid_http_status_is_preserved_during_http_normalization() {
+        let err = HostRpcError::new(599, RpcErrorCode::Internal, "status preserved");
+        let (status, body) = err.into_http_rpc_parts("test");
+        assert_eq!(status, 599);
+        assert_eq!(body.code, "internal_error");
+        assert_eq!(body.message, "status preserved");
     }
 }
