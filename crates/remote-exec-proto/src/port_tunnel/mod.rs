@@ -8,7 +8,8 @@ pub use codec::{
 };
 pub use meta::{
     EndpointMeta, ForwardDropKind, ForwardDropMeta, ForwardRecoveredMeta, ForwardRecoveringMeta,
-    TcpAcceptMeta, TunnelCloseMeta, TunnelErrorMeta, TunnelForwardProtocol, TunnelHeartbeatMeta,
+    TUNNEL_CLOSE_REASON_OPERATOR_CLOSE, TUNNEL_ERROR_CODE_LISTENER_OPEN_FAILED, TcpAcceptMeta,
+    TunnelCloseMeta, TunnelErrorMeta, TunnelForwardProtocol, TunnelHeartbeatMeta,
     TunnelLimitSummary, TunnelOpenMeta, TunnelReadyMeta, TunnelRole, UdpDatagramMeta,
 };
 

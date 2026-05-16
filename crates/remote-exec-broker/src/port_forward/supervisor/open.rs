@@ -509,7 +509,9 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use remote_exec_proto::port_tunnel::{TunnelErrorMeta, TunnelLimitSummary};
+    use remote_exec_proto::port_tunnel::{
+        TUNNEL_ERROR_CODE_LISTENER_OPEN_FAILED, TunnelErrorMeta, TunnelLimitSummary,
+    };
 
     use super::*;
     use crate::port_forward::BrokerPortForwardLimits;
@@ -531,7 +533,7 @@ mod tests {
             flags: 0,
             stream_id: LISTEN_SESSION_STREAM_ID,
             meta: encode_tunnel_meta(&TunnelErrorMeta {
-                code: "listener_open_failed".to_string(),
+                code: TUNNEL_ERROR_CODE_LISTENER_OPEN_FAILED.to_string(),
                 message: "listen refused".to_string(),
                 fatal: false,
                 generation: None,
@@ -571,7 +573,9 @@ mod tests {
             Err(err) => err,
         };
         assert!(
-            format!("{err:#}").contains("listener_open_failed: listen refused"),
+            format!("{err:#}").contains(&format!(
+                "{TUNNEL_ERROR_CODE_LISTENER_OPEN_FAILED}: listen refused"
+            )),
             "unexpected error: {err:#}"
         );
         tokio::time::timeout(Duration::from_millis(50), async {

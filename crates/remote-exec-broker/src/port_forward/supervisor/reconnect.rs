@@ -3,7 +3,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
-use remote_exec_proto::port_tunnel::{Frame, FrameType, TunnelCloseMeta, TunnelRole};
+use remote_exec_proto::port_tunnel::{
+    Frame, FrameType, TUNNEL_CLOSE_REASON_OPERATOR_CLOSE, TunnelCloseMeta, TunnelRole,
+};
 use remote_exec_proto::public::ForwardPortSideRole;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -320,7 +322,7 @@ pub(in crate::port_forward) async fn close_listen_session(
                 &tunnel,
                 &control.forward_id,
                 snapshot.generation,
-                "operator_close",
+                TUNNEL_CLOSE_REASON_OPERATOR_CLOSE,
             )
             .await;
         }
@@ -333,8 +335,13 @@ pub(in crate::port_forward) async fn close_listen_session(
         .replace_current_tunnel(generation, tunnel.clone())
         .await;
     close_listener_on_tunnel(&tunnel, control.listener_stream_id).await?;
-    close_tunnel_after_listener_ack(&tunnel, &control.forward_id, generation, "operator_close")
-        .await
+    close_tunnel_after_listener_ack(
+        &tunnel,
+        &control.forward_id,
+        generation,
+        TUNNEL_CLOSE_REASON_OPERATOR_CLOSE,
+    )
+    .await
 }
 
 async fn close_listener_on_tunnel(tunnel: &Arc<PortTunnel>, stream_id: u32) -> anyhow::Result<()> {

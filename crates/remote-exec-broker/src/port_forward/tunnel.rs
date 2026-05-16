@@ -483,8 +483,9 @@ pub(super) fn is_retryable_transport_error(err: &anyhow::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use remote_exec_proto::port_tunnel::{
-        Frame, FrameType, TunnelErrorMeta as ProtoTunnelErrorMeta, TunnelForwardProtocol,
-        TunnelOpenMeta, TunnelRole,
+        Frame, FrameType, TUNNEL_CLOSE_REASON_OPERATOR_CLOSE,
+        TUNNEL_ERROR_CODE_LISTENER_OPEN_FAILED, TunnelErrorMeta as ProtoTunnelErrorMeta,
+        TunnelForwardProtocol, TunnelOpenMeta, TunnelRole,
     };
 
     use super::super::side::SideHandle;
@@ -502,7 +503,7 @@ mod tests {
                 meta: serde_json::to_vec(&remote_exec_proto::port_tunnel::TunnelCloseMeta {
                     forward_id: "fwd_test".to_string(),
                     generation: 1,
-                    reason: "operator_close".to_string(),
+                    reason: TUNNEL_CLOSE_REASON_OPERATOR_CLOSE.to_string(),
                 })
                 .unwrap(),
                 data: Vec::new(),
@@ -565,7 +566,7 @@ mod tests {
     fn format_terminal_tunnel_error_uses_shared_proto_code() {
         let meta = TunnelErrorMeta::decoded(
             ProtoTunnelErrorMeta {
-                code: "listener_open_failed".to_string(),
+                code: TUNNEL_ERROR_CODE_LISTENER_OPEN_FAILED.to_string(),
                 message: "listen refused".to_string(),
                 fatal: true,
                 generation: Some(3),
@@ -575,7 +576,7 @@ mod tests {
 
         assert_eq!(
             format_terminal_tunnel_error(&meta).to_string(),
-            "listener_open_failed: listen refused"
+            format!("{TUNNEL_ERROR_CODE_LISTENER_OPEN_FAILED}: listen refused")
         );
     }
 

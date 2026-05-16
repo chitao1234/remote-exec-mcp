@@ -18,7 +18,9 @@ static void assert_tunnel_open_ready_and_close_round_trip(AppState& state) {
         client_socket.get(),
         json_frame(PortTunnelFrameType::TunnelClose,
                    0U,
-                   Json{{"forward_id", "fwd_cpp_test"}, {"generation", 1ULL}, {"reason", "operator_close"}}));
+                   Json{{"forward_id", "fwd_cpp_test"},
+                        {"generation", 1ULL},
+                        {"reason", kTunnelCloseReasonOperatorClose}}));
     const PortTunnelFrame closed = read_tunnel_frame(client_socket.get());
     TEST_ASSERT(closed.type == PortTunnelFrameType::TunnelClosed);
     TEST_ASSERT(closed.stream_id == 0U);

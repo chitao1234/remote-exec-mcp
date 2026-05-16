@@ -4,9 +4,10 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use remote_exec_proto::port_tunnel::{
-    Frame, FrameType, TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, TunnelCloseMeta,
-    TunnelErrorMeta, TunnelForwardProtocol, TunnelOpenMeta, TunnelReadyMeta, TunnelRole,
-    UPGRADE_TOKEN, read_frame, write_frame, write_preface,
+    Frame, FrameType, TUNNEL_CLOSE_REASON_OPERATOR_CLOSE, TUNNEL_PROTOCOL_VERSION,
+    TUNNEL_PROTOCOL_VERSION_HEADER, TunnelCloseMeta, TunnelErrorMeta, TunnelForwardProtocol,
+    TunnelOpenMeta, TunnelReadyMeta, TunnelRole, UPGRADE_TOKEN, read_frame, write_frame,
+    write_preface,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -146,7 +147,7 @@ async fn tunnel_open_ready_and_close_round_trip() {
             meta: serde_json::to_vec(&TunnelCloseMeta {
                 forward_id: "fwd_test".to_string(),
                 generation: 1,
-                reason: "operator_close".to_string(),
+                reason: TUNNEL_CLOSE_REASON_OPERATOR_CLOSE.to_string(),
             })
             .unwrap(),
             data: Vec::new(),
@@ -333,7 +334,7 @@ async fn tunnel_close_releases_tcp_listener() {
             meta: serde_json::to_vec(&TunnelCloseMeta {
                 forward_id: "fwd_close_release".to_string(),
                 generation: 1,
-                reason: "operator_close".to_string(),
+                reason: TUNNEL_CLOSE_REASON_OPERATOR_CLOSE.to_string(),
             })
             .unwrap(),
             data: Vec::new(),

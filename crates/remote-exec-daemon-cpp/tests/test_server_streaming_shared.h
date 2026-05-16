@@ -21,6 +21,8 @@
 
 namespace fs = test_fs;
 
+static const char kTunnelCloseReasonOperatorClose[] = "operator_close";
+
 fs::path make_test_root();
 
 bool wait_until_true(const std::atomic<bool>& value, unsigned long timeout_ms);

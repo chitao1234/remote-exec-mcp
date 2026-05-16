@@ -58,7 +58,9 @@ static void assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(A
         client_socket.get(),
         json_frame(PortTunnelFrameType::TunnelClose,
                    0U,
-                   Json{{"forward_id", "fwd_cpp_test"}, {"generation", 1ULL}, {"reason", "operator_close"}}));
+                   Json{{"forward_id", "fwd_cpp_test"},
+                        {"generation", 1ULL},
+                        {"reason", kTunnelCloseReasonOperatorClose}}));
     const PortTunnelFrame closed = read_tunnel_frame(client_socket.get());
     TEST_ASSERT(closed.type == PortTunnelFrameType::TunnelClosed);
     TEST_ASSERT(Json::parse(closed.meta).at("generation").get<uint64_t>() == 1ULL);

@@ -4,9 +4,10 @@ use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 use remote_exec_proto::port_tunnel::{
-    EndpointMeta, Frame, FrameType, MAX_DATA_LEN, TunnelCloseMeta, TunnelErrorMeta,
-    TunnelForwardProtocol, TunnelHeartbeatMeta, TunnelOpenMeta, TunnelReadyMeta, TunnelRole,
-    decode_frame_meta, encode_frame_meta, read_frame, write_frame, write_preface,
+    EndpointMeta, Frame, FrameType, MAX_DATA_LEN, TUNNEL_CLOSE_REASON_OPERATOR_CLOSE,
+    TunnelCloseMeta, TunnelErrorMeta, TunnelForwardProtocol, TunnelHeartbeatMeta, TunnelOpenMeta,
+    TunnelReadyMeta, TunnelRole, decode_frame_meta, encode_frame_meta, read_frame, write_frame,
+    write_preface,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 
@@ -279,9 +280,12 @@ async fn resumed_tcp_listener_session_closes_with_retained_generation() {
         open_v4_resumable_tcp_listener(&state, &listen_endpoint).await;
 
     let mut resumed = resume_session(&state, &session_id, TunnelForwardProtocol::Tcp).await;
-    write_frame(&mut resumed, &tunnel_close_frame(0, 1, "operator_close"))
-        .await
-        .unwrap();
+    write_frame(
+        &mut resumed,
+        &tunnel_close_frame(0, 1, TUNNEL_CLOSE_REASON_OPERATOR_CLOSE),
+    )
+    .await
+    .unwrap();
 
     let frame = read_frame(&mut resumed).await.unwrap();
     assert_eq!(frame.frame_type, FrameType::TunnelClosed);

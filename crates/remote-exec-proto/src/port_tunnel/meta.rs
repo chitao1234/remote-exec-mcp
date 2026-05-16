@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+pub const TUNNEL_CLOSE_REASON_OPERATOR_CLOSE: &str = "operator_close";
+pub const TUNNEL_ERROR_CODE_LISTENER_OPEN_FAILED: &str = "listener_open_failed";
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TunnelRole {
