@@ -144,8 +144,7 @@ async fn tunnel_open_ready_and_close_round_trip() {
             frame_type: FrameType::TunnelClose,
             flags: 0,
             stream_id: 0,
-            meta: serde_json::to_vec(&TunnelCloseMeta::operator_close("fwd_test", 1))
-            .unwrap(),
+            meta: serde_json::to_vec(&TunnelCloseMeta::operator_close("fwd_test", 1)).unwrap(),
             data: Vec::new(),
         },
     )
@@ -327,11 +326,8 @@ async fn tunnel_close_releases_tcp_listener() {
             frame_type: FrameType::TunnelClose,
             flags: 0,
             stream_id: 0,
-            meta: serde_json::to_vec(&TunnelCloseMeta::operator_close(
-                "fwd_close_release",
-                1,
-            ))
-            .unwrap(),
+            meta: serde_json::to_vec(&TunnelCloseMeta::operator_close("fwd_close_release", 1))
+                .unwrap(),
             data: Vec::new(),
         },
     )

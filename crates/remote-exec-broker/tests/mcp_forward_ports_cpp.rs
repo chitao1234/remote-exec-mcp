@@ -6,9 +6,9 @@ use std::sync::{Arc, Once};
 use std::time::Duration;
 
 use remote_exec_broker::{Connection, RemoteExecClient, ToolResponse};
+use remote_exec_proto::port_forward::ForwardId;
 #[cfg(unix)]
 use remote_exec_proto::public::{ExecCommandInput, WriteStdinInput};
-use remote_exec_proto::port_forward::ForwardId;
 use remote_exec_proto::public::{ForwardPortProtocol, ForwardPortsInput};
 use std::io::Write;
 use tempfile::TempDir;

@@ -246,7 +246,12 @@ impl<'a> RpcCallContext<'a> {
     }
 
     fn log_status_error(self, status: reqwest::StatusCode) {
-        log_rpc!(warn, self, self.kind.label("returned error status"), status = status.as_u16(),);
+        log_rpc!(
+            warn,
+            self,
+            self.kind.label("returned error status"),
+            status = status.as_u16(),
+        );
     }
 
     fn log_read_error(self, err: &reqwest::Error) {

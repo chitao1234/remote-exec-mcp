@@ -131,7 +131,8 @@ async fn handle_listen_tunnel_event(
         }
         FrameType::Error => handle_listen_error(runtime, connect_tunnel, state, frame).await,
         FrameType::ForwardDrop => {
-            apply_forward_drop_report(&runtime.store, runtime.forward_id().as_str(), &frame).await?;
+            apply_forward_drop_report(&runtime.store, runtime.forward_id().as_str(), &frame)
+                .await?;
             Ok(None)
         }
         _ => Ok(None),

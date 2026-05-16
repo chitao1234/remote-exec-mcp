@@ -273,8 +273,7 @@ async fn tunnel_udp_read_loop(
         ) {
             Ok(frame) => frame,
             Err(err) => {
-                send_udp_error_code(ctx, stream_id, err.wire_code().to_string(), err.message)
-                    .await;
+                send_udp_error_code(ctx, stream_id, err.wire_code().to_string(), err.message).await;
                 return;
             }
         };

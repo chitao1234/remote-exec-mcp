@@ -39,11 +39,13 @@ pub async fn read_image_local(
 
     let cwd = crate::exec::resolve_workdir(&state, req.workdir.as_deref())
         .map_err(|err| ImageError::internal(err.to_string()))?;
-    let path = crate::host_path::lexical_normalize(&crate::exec::resolve_input_path_with_windows_posix_root(
-        &cwd,
-        &req.path,
-        state.config.windows_posix_root.as_deref(),
-    ));
+    let path = crate::host_path::lexical_normalize(
+        &crate::exec::resolve_input_path_with_windows_posix_root(
+            &cwd,
+            &req.path,
+            state.config.windows_posix_root.as_deref(),
+        ),
+    );
     crate::exec::ensure_sandbox_access(&state, SandboxAccess::Read, &path)
         .map_err(|err| ImageError::sandbox_denied(err.to_string()))?;
     let metadata = tokio::fs::metadata(&path)

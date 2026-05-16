@@ -404,10 +404,7 @@ async fn transfer_files_auto_mode_does_not_treat_message_only_unknown_endpoint_a
     fixture
         .set_transfer_path_info_error_response(
             axum::http::StatusCode::BAD_REQUEST,
-            remote_exec_proto::rpc::RpcErrorBody::from_raw_code(
-                "",
-                "unknown endpoint",
-            ),
+            remote_exec_proto::rpc::RpcErrorBody::from_raw_code("", "unknown endpoint"),
         )
         .await;
 

@@ -382,9 +382,7 @@ async fn close_tunnel_generation(
             flags: 0,
             stream_id: 0,
             meta: encode_tunnel_meta(&TunnelCloseMeta::from_raw_reason(
-                forward_id,
-                generation,
-                reason,
+                forward_id, generation, reason,
             ))?,
             data: Vec::new(),
         })

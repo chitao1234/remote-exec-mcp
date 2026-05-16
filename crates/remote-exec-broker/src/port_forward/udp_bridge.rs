@@ -126,7 +126,8 @@ async fn handle_listen_udp_tunnel_event(
             Err(format_terminal_tunnel_error(&meta)).context("listen-side udp tunnel error")
         }
         FrameType::ForwardDrop => {
-            apply_forward_drop_report(&runtime.store, runtime.forward_id().as_str(), &frame).await?;
+            apply_forward_drop_report(&runtime.store, runtime.forward_id().as_str(), &frame)
+                .await?;
             Ok(None)
         }
         _ => Ok(None),
@@ -581,7 +582,10 @@ mod tests {
 
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
-                let entries = runtime.store.list(&filter_one(runtime.forward_id().as_str())).await;
+                let entries = runtime
+                    .store
+                    .list(&filter_one(runtime.forward_id().as_str()))
+                    .await;
                 if entries[0].dropped_udp_datagrams == 1 {
                     return;
                 }
@@ -641,7 +645,10 @@ mod tests {
 
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
-                let entries = runtime.store.list(&filter_one(runtime.forward_id().as_str())).await;
+                let entries = runtime
+                    .store
+                    .list(&filter_one(runtime.forward_id().as_str()))
+                    .await;
                 if entries[0].dropped_udp_datagrams == 3 {
                     return;
                 }

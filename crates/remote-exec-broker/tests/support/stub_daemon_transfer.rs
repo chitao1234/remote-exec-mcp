@@ -190,10 +190,7 @@ pub(super) async fn transfer_import(
     .map_err(|err| {
         (
             StatusCode::BAD_REQUEST,
-            Json(RpcErrorBody::new(
-                RpcErrorCode::BadRequest,
-                err.to_string(),
-            )),
+            Json(RpcErrorBody::new(RpcErrorCode::BadRequest, err.to_string())),
         )
     })?
     .destination_path;

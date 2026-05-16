@@ -254,7 +254,6 @@ impl PortForwardStoreState {
     }
 }
 
-
 fn ensure_reconnect_capacity(
     state: &mut PortForwardStoreState,
     forward_id: &str,

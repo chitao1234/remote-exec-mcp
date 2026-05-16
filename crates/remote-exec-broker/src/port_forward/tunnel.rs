@@ -501,9 +501,7 @@ mod tests {
                 flags: 0,
                 stream_id: 0,
                 meta: serde_json::to_vec(
-                    &remote_exec_proto::port_tunnel::TunnelCloseMeta::operator_close(
-                        "fwd_test", 1,
-                    ),
+                    &remote_exec_proto::port_tunnel::TunnelCloseMeta::operator_close("fwd_test", 1),
                 )
                 .unwrap(),
                 data: Vec::new(),

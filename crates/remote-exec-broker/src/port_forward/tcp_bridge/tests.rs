@@ -98,7 +98,10 @@ async fn tcp_accept_send_failure_recovers_connect_tunnel_without_leaking_active_
         ForwardLoopControl::RecoverTunnel(TunnelRole::Connect)
     ));
 
-    let entries = runtime.store.list(&filter_one(runtime.forward_id().as_str())).await;
+    let entries = runtime
+        .store
+        .list(&filter_one(runtime.forward_id().as_str()))
+        .await;
     assert_eq!(entries[0].active_tcp_streams, 0);
 }
 
@@ -163,7 +166,10 @@ async fn ready_tcp_data_send_backpressure_counts_dropped_stream() {
 
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            let entries = runtime.store.list(&filter_one(runtime.forward_id().as_str())).await;
+            let entries = runtime
+                .store
+                .list(&filter_one(runtime.forward_id().as_str()))
+                .await;
             if entries[0].dropped_tcp_streams == 1 {
                 assert_eq!(entries[0].active_tcp_streams, 0);
                 return;
@@ -232,7 +238,10 @@ async fn pending_tcp_data_limit_drops_unready_stream_without_leaking_active_coun
 
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            let entries = runtime.store.list(&filter_one(runtime.forward_id().as_str())).await;
+            let entries = runtime
+                .store
+                .list(&filter_one(runtime.forward_id().as_str()))
+                .await;
             if entries[0].dropped_tcp_streams == 1 {
                 assert_eq!(entries[0].active_tcp_streams, 0);
                 return;
@@ -470,7 +479,10 @@ async fn listen_close_before_connect_ready_releases_active_stream() {
 
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            let entries = runtime.store.list(&filter_one(runtime.forward_id().as_str())).await;
+            let entries = runtime
+                .store
+                .list(&filter_one(runtime.forward_id().as_str()))
+                .await;
             if entries[0].active_tcp_streams == 0 {
                 return;
             }
@@ -576,7 +588,10 @@ async fn fully_drained_tcp_pair_closes_both_daemon_streams() {
 
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            let entries = runtime.store.list(&filter_one(runtime.forward_id().as_str())).await;
+            let entries = runtime
+                .store
+                .list(&filter_one(runtime.forward_id().as_str()))
+                .await;
             if entries[0].active_tcp_streams == 0 {
                 return;
             }
@@ -677,7 +692,10 @@ async fn tcp_listener_pressure_error_counts_drop_without_failing_forward() {
 
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            let entries = runtime.store.list(&filter_one(runtime.forward_id().as_str())).await;
+            let entries = runtime
+                .store
+                .list(&filter_one(runtime.forward_id().as_str()))
+                .await;
             if entries[0].dropped_tcp_streams == 1 {
                 return;
             }
@@ -737,7 +755,10 @@ async fn tcp_listener_forward_drop_counts_drop_without_failing_forward() {
 
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            let entries = runtime.store.list(&filter_one(runtime.forward_id().as_str())).await;
+            let entries = runtime
+                .store
+                .list(&filter_one(runtime.forward_id().as_str()))
+                .await;
             if entries[0].dropped_tcp_streams == 2 {
                 return;
             }

@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use remote_exec_proto::port_forward::{ForwardId, ensure_nonzero_connect_endpoint, normalize_endpoint};
+use remote_exec_proto::port_forward::{
+    ForwardId, ensure_nonzero_connect_endpoint, normalize_endpoint,
+};
 use remote_exec_proto::port_tunnel::{EndpointMeta, Frame, FrameType};
 use remote_exec_proto::public::{
     ForwardPortEntry, ForwardPortLimitSummary, ForwardPortProtocol as PublicForwardPortProtocol,
