@@ -168,8 +168,7 @@ impl DaemonClient {
             RpcCallKind::TransferImport,
             req.destination_path.as_str(),
         );
-        let mut request =
-            codec::apply_import_headers(self.request("/v1/transfer/import"), &req.metadata());
+        let mut request = codec::apply_import_headers(self.request("/v1/transfer/import"), &req);
         if let Some(file_len) = file_len {
             request = request.header(CONTENT_LENGTH, file_len);
         }

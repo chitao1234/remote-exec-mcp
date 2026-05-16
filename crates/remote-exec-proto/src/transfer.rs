@@ -121,7 +121,7 @@ pub struct TransferExportMetadata {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TransferImportSpec {
+pub struct TransferImportRequest {
     pub destination_path: String,
     pub overwrite: TransferOverwrite,
     pub create_parent: bool,
@@ -131,11 +131,4 @@ pub struct TransferImportSpec {
     pub symlink_mode: TransferSymlinkMode,
 }
 
-pub type TransferImportRequest = TransferImportSpec;
-pub type TransferImportMetadata = TransferImportSpec;
-
-impl TransferImportSpec {
-    pub fn metadata(&self) -> TransferImportMetadata {
-        self.clone()
-    }
-}
+pub type TransferImportMetadata = TransferImportRequest;
