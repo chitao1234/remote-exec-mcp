@@ -18,8 +18,8 @@ impl LocalDaemonClient {
         sandbox: Option<remote_exec_proto::sandbox::FilesystemSandbox>,
         enable_transfer_compression: bool,
     ) -> anyhow::Result<Self> {
-        let embedded = config.embedded_host_config(sandbox, enable_transfer_compression);
-        let state = remote_exec_host::build_runtime_state(embedded.into_host_runtime_config())?;
+        let host_config = config.host_runtime_config(sandbox, enable_transfer_compression);
+        let state = remote_exec_host::build_runtime_state(host_config)?;
         Ok(Self {
             state: Arc::new(state),
         })

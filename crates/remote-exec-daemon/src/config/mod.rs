@@ -3,7 +3,7 @@ use std::ops::Deref;
 use std::path::PathBuf;
 
 use anyhow::Context;
-use remote_exec_host::{EmbeddedHostConfig, HostRuntimeConfig};
+use remote_exec_host::HostRuntimeConfig;
 pub use remote_exec_proto::auth::HttpAuthConfig;
 use remote_exec_proto::sandbox::FilesystemSandbox;
 use remote_exec_proto::transfer::TransferLimits;
@@ -74,9 +74,9 @@ pub struct TlsConfig {
     pub pinned_client_cert_pem: Option<PathBuf>,
 }
 
-impl From<EmbeddedHostConfig> for DaemonConfig {
-    fn from(value: EmbeddedHostConfig) -> Self {
-        let EmbeddedHostConfig {
+impl From<HostRuntimeConfig> for DaemonConfig {
+    fn from(value: HostRuntimeConfig) -> Self {
+        let HostRuntimeConfig {
             target,
             default_workdir,
             windows_posix_root,
@@ -116,46 +116,6 @@ impl From<EmbeddedHostConfig> for DaemonConfig {
 }
 
 impl DaemonConfig {
-    fn embedded_host_config(&self) -> EmbeddedHostConfig {
-        EmbeddedHostConfig {
-            target: self.target.clone(),
-            default_workdir: self.default_workdir.clone(),
-            windows_posix_root: self.windows_posix_root.clone(),
-            sandbox: self.sandbox.clone(),
-            enable_transfer_compression: self.enable_transfer_compression,
-            transfer_limits: self.transfer_limits,
-            max_open_sessions: self.max_open_sessions,
-            allow_login_shell: self.allow_login_shell,
-            pty: self.pty,
-            default_shell: self.default_shell.clone(),
-            yield_time: self.yield_time,
-            port_forward_limits: self.port_forward_limits,
-            experimental_apply_patch_target_encoding_autodetect: self
-                .experimental_apply_patch_target_encoding_autodetect,
-            process_environment: self.process_environment.clone(),
-        }
-    }
-
-    fn into_embedded_host_config(self) -> EmbeddedHostConfig {
-        EmbeddedHostConfig {
-            target: self.target,
-            default_workdir: self.default_workdir,
-            windows_posix_root: self.windows_posix_root,
-            sandbox: self.sandbox,
-            enable_transfer_compression: self.enable_transfer_compression,
-            transfer_limits: self.transfer_limits,
-            max_open_sessions: self.max_open_sessions,
-            allow_login_shell: self.allow_login_shell,
-            pty: self.pty,
-            default_shell: self.default_shell,
-            yield_time: self.yield_time,
-            port_forward_limits: self.port_forward_limits,
-            experimental_apply_patch_target_encoding_autodetect: self
-                .experimental_apply_patch_target_encoding_autodetect,
-            process_environment: self.process_environment,
-        }
-    }
-
     fn normalized_default_workdir(&self) -> PathBuf {
         remote_exec_host::config::normalize_configured_workdir(
             &self.default_workdir,
@@ -219,13 +179,45 @@ impl Deref for ValidatedDaemonConfig {
 
 impl From<DaemonConfig> for HostRuntimeConfig {
     fn from(value: DaemonConfig) -> Self {
-        value.into_embedded_host_config().into_host_runtime_config()
+        Self {
+            target: value.target,
+            default_workdir: value.default_workdir,
+            windows_posix_root: value.windows_posix_root,
+            sandbox: value.sandbox,
+            enable_transfer_compression: value.enable_transfer_compression,
+            transfer_limits: value.transfer_limits,
+            max_open_sessions: value.max_open_sessions,
+            allow_login_shell: value.allow_login_shell,
+            pty: value.pty,
+            default_shell: value.default_shell,
+            yield_time: value.yield_time,
+            port_forward_limits: value.port_forward_limits,
+            experimental_apply_patch_target_encoding_autodetect: value
+                .experimental_apply_patch_target_encoding_autodetect,
+            process_environment: value.process_environment,
+        }
     }
 }
 
 impl From<&DaemonConfig> for HostRuntimeConfig {
     fn from(value: &DaemonConfig) -> Self {
-        value.embedded_host_config().into_host_runtime_config()
+        Self {
+            target: value.target.clone(),
+            default_workdir: value.default_workdir.clone(),
+            windows_posix_root: value.windows_posix_root.clone(),
+            sandbox: value.sandbox.clone(),
+            enable_transfer_compression: value.enable_transfer_compression,
+            transfer_limits: value.transfer_limits,
+            max_open_sessions: value.max_open_sessions,
+            allow_login_shell: value.allow_login_shell,
+            pty: value.pty,
+            default_shell: value.default_shell.clone(),
+            yield_time: value.yield_time,
+            port_forward_limits: value.port_forward_limits,
+            experimental_apply_patch_target_encoding_autodetect: value
+                .experimental_apply_patch_target_encoding_autodetect,
+            process_environment: value.process_environment.clone(),
+        }
     }
 }
 

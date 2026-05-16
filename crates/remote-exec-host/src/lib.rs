@@ -12,7 +12,7 @@ pub mod state;
 pub mod transfer;
 
 pub use config::{
-    EmbeddedHostConfig, HostPortForwardLimits, HostRuntimeConfig, ProcessEnvironment, PtyMode,
+    HostPortForwardLimits, HostRuntimeConfig, ProcessEnvironment, PtyMode,
     WindowsPtyBackendOverride, YieldTimeConfig, YieldTimeOperation, YieldTimeOperationConfig,
 };
 pub use error::{HostRpcError, ImageError, ImageErrorKind, TransferError, TransferErrorKind};

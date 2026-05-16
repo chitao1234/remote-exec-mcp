@@ -49,24 +49,6 @@ pub struct HostRuntimeConfig {
     pub process_environment: ProcessEnvironment,
 }
 
-#[derive(Debug, Clone)]
-pub struct EmbeddedHostConfig {
-    pub target: String,
-    pub default_workdir: PathBuf,
-    pub windows_posix_root: Option<PathBuf>,
-    pub sandbox: Option<FilesystemSandbox>,
-    pub enable_transfer_compression: bool,
-    pub transfer_limits: TransferLimits,
-    pub max_open_sessions: usize,
-    pub allow_login_shell: bool,
-    pub pty: PtyMode,
-    pub default_shell: Option<String>,
-    pub yield_time: YieldTimeConfig,
-    pub port_forward_limits: HostPortForwardLimits,
-    pub experimental_apply_patch_target_encoding_autodetect: bool,
-    pub process_environment: ProcessEnvironment,
-}
-
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(default)]
 pub struct HostPortForwardLimits {
@@ -174,28 +156,6 @@ impl HostPortForwardTimeouts {
             "port_forward_limits.connect_timeout_ms must be greater than zero"
         );
         Ok(())
-    }
-}
-
-impl EmbeddedHostConfig {
-    pub fn into_host_runtime_config(self) -> HostRuntimeConfig {
-        HostRuntimeConfig {
-            target: self.target,
-            default_workdir: self.default_workdir,
-            windows_posix_root: self.windows_posix_root,
-            sandbox: self.sandbox,
-            enable_transfer_compression: self.enable_transfer_compression,
-            transfer_limits: self.transfer_limits,
-            max_open_sessions: self.max_open_sessions,
-            allow_login_shell: self.allow_login_shell,
-            pty: self.pty,
-            default_shell: self.default_shell,
-            yield_time: self.yield_time,
-            port_forward_limits: self.port_forward_limits,
-            experimental_apply_patch_target_encoding_autodetect: self
-                .experimental_apply_patch_target_encoding_autodetect,
-            process_environment: self.process_environment,
-        }
     }
 }
 

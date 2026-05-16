@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::Context;
 use remote_exec_host::config::DEFAULT_MAX_OPEN_SESSIONS;
 use remote_exec_host::{
-    EmbeddedHostConfig, HostPortForwardLimits, ProcessEnvironment, PtyMode, YieldTimeConfig,
+    HostPortForwardLimits, HostRuntimeConfig, ProcessEnvironment, PtyMode, YieldTimeConfig,
 };
 pub use remote_exec_proto::auth::HttpAuthConfig;
 use remote_exec_proto::sandbox::FilesystemSandbox;
@@ -250,12 +250,12 @@ impl LocalTargetConfig {
         )
     }
 
-    pub fn embedded_host_config(
+    pub fn host_runtime_config(
         &self,
         sandbox: Option<FilesystemSandbox>,
         enable_transfer_compression: bool,
-    ) -> EmbeddedHostConfig {
-        EmbeddedHostConfig {
+    ) -> HostRuntimeConfig {
+        HostRuntimeConfig {
             target: LOCAL_TARGET_NAME.to_string(),
             default_workdir: self.default_workdir.clone(),
             windows_posix_root: self.windows_posix_root.clone(),

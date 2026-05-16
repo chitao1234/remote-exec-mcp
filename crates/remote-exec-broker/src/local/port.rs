@@ -4,7 +4,7 @@ use std::sync::{Arc, OnceLock};
 use anyhow::Context;
 use remote_exec_host::config::DEFAULT_MAX_OPEN_SESSIONS;
 use remote_exec_host::{
-    EmbeddedHostConfig, HostPortForwardLimits, ProcessEnvironment, PtyMode, YieldTimeConfig,
+    HostPortForwardLimits, HostRuntimeConfig, ProcessEnvironment, PtyMode, YieldTimeConfig,
 };
 use remote_exec_proto::transfer::TransferLimits;
 
@@ -39,13 +39,13 @@ impl LocalPortClient {
 fn build_local_port_runtime() -> anyhow::Result<remote_exec_host::HostRuntimeState> {
     let default_workdir =
         std::env::current_dir().context("resolving current directory for local port runtime")?;
-    let config = embedded_local_port_forward_config(default_workdir);
+    let config = local_port_forward_config(default_workdir);
 
-    remote_exec_host::build_runtime_state(config.into_host_runtime_config())
+    remote_exec_host::build_runtime_state(config)
 }
 
-fn embedded_local_port_forward_config(default_workdir: PathBuf) -> EmbeddedHostConfig {
-    EmbeddedHostConfig {
+fn local_port_forward_config(default_workdir: PathBuf) -> HostRuntimeConfig {
+    HostRuntimeConfig {
         target: LOCAL_TARGET_NAME.to_string(),
         default_workdir,
         windows_posix_root: None,
