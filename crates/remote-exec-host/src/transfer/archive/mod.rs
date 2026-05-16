@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 
 use crate::host_path;
 use remote_exec_proto::path::PathPolicy;
-use remote_exec_proto::path::normalize_for_system;
 use remote_exec_proto::rpc::{TransferSourceType, TransferWarning};
 use remote_exec_proto::transfer::TransferCompression;
 
@@ -51,7 +50,7 @@ pub(crate) fn host_path(raw: &str, windows_posix_root: Option<&Path>) -> anyhow:
     let policy = host_path::host_path_policy();
     Ok(
         host_path::resolve_absolute_input_path(raw, windows_posix_root)
-            .unwrap_or_else(|| PathBuf::from(normalize_for_system(policy, raw))),
+            .unwrap_or_else(|| PathBuf::from(policy.normalize_for_system(raw))),
     )
 }
 

@@ -11,6 +11,71 @@ pub struct PathPolicy {
     pub style: PathStyle,
 }
 
+impl PathPolicy {
+    pub fn is_absolute(self, raw: &str) -> bool {
+        match self.style {
+            PathStyle::Posix => raw.starts_with('/'),
+            PathStyle::Windows => {
+                let bytes = raw.as_bytes();
+                (bytes.len() >= 3
+                    && bytes[0].is_ascii_alphabetic()
+                    && bytes[1] == b':'
+                    && (bytes[2] == b'\\' || bytes[2] == b'/'))
+                    || raw.starts_with(r"\\")
+                    || raw.starts_with("//")
+                    || translate_windows_posix_drive_path(raw).is_some()
+            }
+        }
+    }
+
+    pub fn normalize_for_system(self, raw: &str) -> String {
+        match self.style {
+            PathStyle::Posix => raw.to_string(),
+            PathStyle::Windows => translate_windows_posix_drive_path(raw)
+                .unwrap_or_else(|| normalize_windows_separators(raw)),
+        }
+    }
+
+    pub fn syntax_eq(self, left: &str, right: &str) -> bool {
+        self.normalize_for_system(left) == self.normalize_for_system(right)
+    }
+
+    pub fn basename(self, raw: &str) -> Option<String> {
+        let normalized = self.normalize_for_system(raw);
+        match self.style {
+            PathStyle::Posix => normalized
+                .trim_end_matches('/')
+                .rsplit('/')
+                .find(|segment| !segment.is_empty())
+                .map(str::to_string),
+            PathStyle::Windows => split_windows_path_basename(&normalized),
+        }
+    }
+
+    pub fn join(self, base: &str, child: &str) -> String {
+        let normalized_child = self.normalize_for_system(child);
+        if normalized_child.is_empty() || self.is_absolute(&normalized_child) {
+            return normalized_child;
+        }
+
+        let normalized_base = self.normalize_for_system(base);
+        if normalized_base.is_empty() {
+            return normalized_child;
+        }
+
+        let separator = match self.style {
+            PathStyle::Posix => '/',
+            PathStyle::Windows => '\\',
+        };
+
+        if normalized_base.ends_with(separator) {
+            format!("{normalized_base}{normalized_child}")
+        } else {
+            format!("{normalized_base}{separator}{normalized_child}")
+        }
+    }
+}
+
 pub fn linux_path_policy() -> PathPolicy {
     PathPolicy {
         style: PathStyle::Posix,
@@ -101,43 +166,19 @@ fn normalize_windows_separators(raw: &str) -> String {
 }
 
 pub fn is_absolute_for_policy(policy: PathPolicy, raw: &str) -> bool {
-    match policy.style {
-        PathStyle::Posix => raw.starts_with('/'),
-        PathStyle::Windows => {
-            let bytes = raw.as_bytes();
-            (bytes.len() >= 3
-                && bytes[0].is_ascii_alphabetic()
-                && bytes[1] == b':'
-                && (bytes[2] == b'\\' || bytes[2] == b'/'))
-                || raw.starts_with(r"\\")
-                || raw.starts_with("//")
-                || translate_windows_posix_drive_path(raw).is_some()
-        }
-    }
+    policy.is_absolute(raw)
 }
 
 pub fn normalize_for_system(policy: PathPolicy, raw: &str) -> String {
-    match policy.style {
-        PathStyle::Posix => raw.to_string(),
-        PathStyle::Windows => translate_windows_posix_drive_path(raw)
-            .unwrap_or_else(|| normalize_windows_separators(raw)),
-    }
+    policy.normalize_for_system(raw)
 }
 
 pub fn syntax_eq_for_policy(policy: PathPolicy, left: &str, right: &str) -> bool {
-    normalize_for_system(policy, left) == normalize_for_system(policy, right)
+    policy.syntax_eq(left, right)
 }
 
 pub fn basename_for_policy(policy: PathPolicy, raw: &str) -> Option<String> {
-    let normalized = normalize_for_system(policy, raw);
-    match policy.style {
-        PathStyle::Posix => normalized
-            .trim_end_matches('/')
-            .rsplit('/')
-            .find(|segment| !segment.is_empty())
-            .map(str::to_string),
-        PathStyle::Windows => split_windows_path_basename(&normalized),
-    }
+    policy.basename(raw)
 }
 
 fn split_windows_path_basename(raw: &str) -> Option<String> {
@@ -161,26 +202,7 @@ fn split_windows_path_basename(raw: &str) -> Option<String> {
 }
 
 pub fn join_for_policy(policy: PathPolicy, base: &str, child: &str) -> String {
-    let normalized_child = normalize_for_system(policy, child);
-    if normalized_child.is_empty() || is_absolute_for_policy(policy, &normalized_child) {
-        return normalized_child;
-    }
-
-    let normalized_base = normalize_for_system(policy, base);
-    if normalized_base.is_empty() {
-        return normalized_child;
-    }
-
-    let separator = match policy.style {
-        PathStyle::Posix => '/',
-        PathStyle::Windows => '\\',
-    };
-
-    if normalized_base.ends_with(separator) {
-        format!("{normalized_base}{normalized_child}")
-    } else {
-        format!("{normalized_base}{separator}{normalized_child}")
-    }
+    policy.join(base, child)
 }
 
 pub fn normalize_relative_path(path: &Path) -> Option<PathBuf> {

@@ -1,9 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use remote_exec_host::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
-use remote_exec_proto::path::{
-    PathPolicy, host_policy, is_absolute_for_policy, normalize_for_system,
-};
+use remote_exec_proto::path::{PathPolicy, host_policy};
 use remote_exec_proto::rpc::{
     TransferImportRequest, TransferImportResponse, TransferPathInfoResponse, TransferSourceType,
 };
@@ -107,14 +105,14 @@ pub fn path_info(
     sandbox: Option<&CompiledFilesystemSandbox>,
 ) -> Result<TransferPathInfoResponse, DaemonClientError> {
     let policy = host_policy();
-    if !is_absolute_for_policy(policy, path) {
+    if !policy.is_absolute(path) {
         return Err(crate::local_backend::map_local_transfer_error(
             remote_exec_host::TransferError::path_not_absolute(format!(
                 "transfer endpoint path `{path}` is not absolute"
             )),
         ));
     }
-    let path = PathBuf::from(normalize_for_system(policy, path));
+    let path = PathBuf::from(policy.normalize_for_system(path));
     authorize_path(sandbox, SandboxAccess::Write, &path).map_err(|err| {
         crate::local_backend::map_local_transfer_error(
             remote_exec_host::TransferError::sandbox_denied(err.to_string()),
@@ -156,10 +154,9 @@ pub async fn bundle_archives_to_file(
             .into_iter()
             .map(
                 |source| remote_exec_host::transfer::archive::BundledArchiveSource {
-                    source_path: PathBuf::from(normalize_for_system(
-                        source.source_policy,
-                        &source.source_path,
-                    )),
+                    source_path: PathBuf::from(
+                        source.source_policy.normalize_for_system(&source.source_path),
+                    ),
                     source_policy: source.source_policy,
                     source_type: source.source_type,
                     compression: source.compression,

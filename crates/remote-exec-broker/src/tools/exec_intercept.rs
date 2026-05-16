@@ -1,4 +1,4 @@
-use remote_exec_proto::path::{PathPolicy, join_for_policy, normalize_for_system};
+use remote_exec_proto::path::PathPolicy;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterceptedApplyPatch {
@@ -131,8 +131,8 @@ fn split_cd_wrapper<'a>(
 
             return (
                 Some(match workdir {
-                    Some(base) => join_for_policy(path_policy, base, path),
-                    None => normalize_for_system(path_policy, path),
+                    Some(base) => path_policy.join(base, path),
+                    None => path_policy.normalize_for_system(path),
                 }),
                 trim_horizontal_start(tail),
             );

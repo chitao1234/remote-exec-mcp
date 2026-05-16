@@ -1,7 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use remote_exec_proto::path::{is_absolute_for_policy, normalize_for_system};
-
 #[cfg(windows)]
 use remote_exec_proto::path::windows_path_policy;
 
@@ -16,8 +14,8 @@ pub fn resolve_absolute_input_path(
     windows_posix_root: Option<&Path>,
 ) -> Option<PathBuf> {
     let policy = host_path_policy();
-    if is_absolute_for_policy(policy, raw) {
-        return Some(PathBuf::from(normalize_for_system(policy, raw)));
+    if policy.is_absolute(raw) {
+        return Some(PathBuf::from(policy.normalize_for_system(raw)));
     }
 
     synthetic_windows_posix_absolute_path(raw, windows_posix_root)
@@ -26,7 +24,7 @@ pub fn resolve_absolute_input_path(
 pub fn resolve_input_path(base: &Path, raw: &str, windows_posix_root: Option<&Path>) -> PathBuf {
     let policy = host_path_policy();
     resolve_absolute_input_path(raw, windows_posix_root)
-        .unwrap_or_else(|| base.join(normalize_for_system(policy, raw)))
+        .unwrap_or_else(|| base.join(policy.normalize_for_system(raw)))
 }
 
 #[cfg(windows)]
@@ -59,7 +57,7 @@ fn synthetic_windows_posix_absolute_path(
         return Some(root.to_path_buf());
     }
 
-    Some(root.join(normalize_for_system(windows_path_policy(), tail)))
+    Some(root.join(windows_path_policy().normalize_for_system(tail)))
 }
 
 #[cfg(not(windows))]

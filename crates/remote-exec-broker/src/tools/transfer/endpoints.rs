@@ -3,8 +3,7 @@ use std::path::Path;
 use anyhow::Context;
 use remote_exec_host::path_compare;
 use remote_exec_proto::path::{
-    PathPolicy, basename_for_policy, host_policy, is_absolute_for_policy, join_for_policy,
-    linux_path_policy, syntax_eq_for_policy, windows_path_policy,
+    PathPolicy, host_policy, linux_path_policy, windows_path_policy,
 };
 use remote_exec_proto::public::{TransferDestinationMode, TransferEndpoint};
 use remote_exec_proto::rpc::{RpcErrorCode, TransferPathInfoRequest};
@@ -119,13 +118,13 @@ pub(super) async fn ensure_multi_source_basenames_are_unique(
     let mut seen_paths: Vec<String> = Vec::with_capacity(sources.len());
     for source in sources {
         let source_policy = endpoint_policy(state, source).await?;
-        let basename = basename_for_policy(source_policy, &source.path).ok_or_else(|| {
+        let basename = source_policy.basename(&source.path).ok_or_else(|| {
             anyhow::anyhow!(
                 "transfer source path `{}` has no usable basename for multi-source transfer",
                 source.path
             )
         })?;
-        let candidate = join_for_policy(destination_policy, &destination.path, &basename);
+        let candidate = destination_policy.join(&destination.path, &basename);
         anyhow::ensure!(
             !seen_paths.iter().any(|existing| paths_match_for_preflight(
                 destination_context,
@@ -181,7 +180,7 @@ async fn resolve_into_directory_destination(
     let mut candidates: Vec<String> = Vec::with_capacity(sources.len());
     for source in sources {
         let source_policy = endpoint_policy(state, source).await?;
-        let basename = basename_for_policy(source_policy, &source.path).ok_or_else(|| {
+        let basename = source_policy.basename(&source.path).ok_or_else(|| {
             anyhow::anyhow!(
                 "transfer source path `{}` has no usable basename for destination directory mode",
                 source.path
@@ -216,7 +215,7 @@ fn paths_match_for_preflight(
         EndpointTargetContext::Local { .. } => {
             path_compare::path_eq(Path::new(left), Path::new(right))
         }
-        EndpointTargetContext::Remote { .. } => syntax_eq_for_policy(policy, left, right),
+        EndpointTargetContext::Remote { .. } => policy.syntax_eq(left, right),
     }
 }
 
@@ -229,7 +228,7 @@ fn join_child_for_context(context: EndpointTargetContext, base: &str, child: &st
         }
     ) && base.starts_with('/')
         && !base.starts_with("//")
-        && !is_absolute_for_policy(context.policy(), base)
+        && !context.policy().is_absolute(base)
     {
         let trimmed_base = base.trim_end_matches('/');
         if trimmed_base.is_empty() {
@@ -238,7 +237,7 @@ fn join_child_for_context(context: EndpointTargetContext, base: &str, child: &st
             format!("{trimmed_base}/{child}")
         }
     } else {
-        join_for_policy(context.policy(), base, child)
+        context.policy().join(base, child)
     }
 }
 
@@ -367,7 +366,7 @@ impl EndpointTargetContext {
     }
 
     fn is_absolute_path(self, path: &str) -> bool {
-        is_absolute_for_policy(self.policy(), path)
+        self.policy().is_absolute(path)
             || matches!(
                 self,
                 Self::Remote {

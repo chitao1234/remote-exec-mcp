@@ -1,7 +1,6 @@
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 
-use remote_exec_proto::path::is_absolute_for_policy;
 use remote_exec_proto::sandbox::{FilesystemSandbox, SandboxPathList};
 
 use crate::{host_path, path_compare};
@@ -87,7 +86,7 @@ pub fn authorize_path(
     path: &Path,
 ) -> Result<(), SandboxError> {
     let policy = host_path::host_path_policy();
-    if !is_absolute_for_policy(policy, &path.to_string_lossy()) {
+    if !policy.is_absolute(&path.to_string_lossy()) {
         return Err(SandboxError::NotAbsolute {
             path: path.to_path_buf(),
         });
@@ -148,13 +147,13 @@ fn compile_list(
 
 fn compile_root(access_label: &str, list_label: &str, raw: &str) -> Result<PathBuf, SandboxError> {
     let policy = host_path::host_path_policy();
-    if !is_absolute_for_policy(policy, raw) {
+    if !policy.is_absolute(raw) {
         return Err(SandboxError::denied(format!(
             "sandbox {access_label}.{list_label} path `{raw}` is not absolute"
         )));
     }
 
-    let normalized = PathBuf::from(remote_exec_proto::path::normalize_for_system(policy, raw));
+    let normalized = PathBuf::from(policy.normalize_for_system(raw));
     canonicalize_for_sandbox(&normalized).map_err(|err| {
         SandboxError::denied(format!(
             "sandbox {access_label}.{list_label} path `{}` is invalid: {err}",

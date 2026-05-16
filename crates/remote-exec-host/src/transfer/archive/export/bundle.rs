@@ -1,7 +1,6 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use remote_exec_proto::path::basename_for_policy;
 use remote_exec_proto::rpc::{TransferSourceType, TransferWarning};
 use remote_exec_proto::transfer::TransferCompression;
 
@@ -34,7 +33,7 @@ fn append_source_archive<W: Write>(
     source: &BundledArchiveSource,
 ) -> anyhow::Result<Vec<TransferWarning>> {
     let source_path = source.source_path.to_string_lossy();
-    let root_name = basename_for_policy(source.source_policy, &source_path).ok_or_else(|| {
+    let root_name = source.source_policy.basename(&source_path).ok_or_else(|| {
         anyhow::anyhow!(
             "transfer source path `{}` has no usable basename for multi-source transfer",
             source.source_path.display()
