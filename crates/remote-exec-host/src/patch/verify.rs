@@ -118,8 +118,8 @@ fn display_relative(base: &Path, path: &Path) -> String {
 }
 
 fn relative_patch_path(base: &Path, path: &Path) -> Option<String> {
-    let base = lexical_normalize(base);
-    let path = lexical_normalize(path);
+    let base = crate::host_path::lexical_normalize(base);
+    let path = crate::host_path::lexical_normalize(path);
     let base_components: Vec<_> = base.components().collect();
     let path_components: Vec<_> = path.components().collect();
     let root_len = base_components
@@ -177,22 +177,6 @@ fn patch_display_path(path: &Path) -> String {
     } else {
         text
     }
-}
-
-fn lexical_normalize(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                let _ = normalized.pop();
-            }
-            other => normalized.push(other.as_os_str()),
-        }
-    }
-
-    normalized
 }
 
 fn path_component_eq(left: Component<'_>, right: Component<'_>) -> bool {

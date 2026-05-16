@@ -1,7 +1,7 @@
 use std::fmt::Display;
 use std::io::Cursor;
 use std::io::ErrorKind;
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use base64::Engine;
@@ -39,7 +39,7 @@ pub async fn read_image_local(
 
     let cwd = crate::exec::resolve_workdir(&state, req.workdir.as_deref())
         .map_err(|err| ImageError::internal(err.to_string()))?;
-    let path = normalize_path(&crate::exec::resolve_input_path_with_windows_posix_root(
+    let path = crate::host_path::lexical_normalize(&crate::exec::resolve_input_path_with_windows_posix_root(
         &cwd,
         &req.path,
         state.config.windows_posix_root.as_deref(),
@@ -73,20 +73,6 @@ pub async fn read_image_local(
         image_url,
         detail: req.detail.filter(|value| value == "original"),
     })
-}
-
-fn normalize_path(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                normalized.pop();
-            }
-            other => normalized.push(other.as_os_str()),
-        }
-    }
-    normalized
 }
 
 fn passthrough_format(format: ImageFormat) -> bool {

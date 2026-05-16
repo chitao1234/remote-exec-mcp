@@ -1,9 +1,23 @@
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 #[cfg(windows)]
 use remote_exec_proto::path::windows_path_policy;
 
 pub use remote_exec_proto::path::host_policy as host_path_policy;
+
+pub(crate) fn lexical_normalize(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                let _ = normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
+}
 
 pub fn is_input_path_absolute(raw: &str, windows_posix_root: Option<&Path>) -> bool {
     resolve_absolute_input_path(raw, windows_posix_root).is_some()

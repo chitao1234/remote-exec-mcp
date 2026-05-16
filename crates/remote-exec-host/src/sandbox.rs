@@ -1,5 +1,5 @@
 use std::ffi::OsString;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use remote_exec_proto::sandbox::{FilesystemSandbox, SandboxPathList};
 
@@ -163,18 +163,18 @@ fn compile_root(access_label: &str, list_label: &str, raw: &str) -> Result<PathB
 }
 
 fn canonicalize_for_sandbox(path: &Path) -> Result<PathBuf, SandboxError> {
-    let normalized = lexical_normalize(path);
+    let normalized = host_path::lexical_normalize(path);
     let mut probe = normalized.as_path();
     let mut missing_components = Vec::<OsString>::new();
 
     loop {
         match std::fs::canonicalize(probe) {
             Ok(canonical) => {
-                let mut rebuilt = lexical_normalize(&canonical);
+                let mut rebuilt = host_path::lexical_normalize(&canonical);
                 for component in missing_components.iter().rev() {
                     rebuilt.push(component);
                 }
-                return Ok(lexical_normalize(&rebuilt));
+                return Ok(host_path::lexical_normalize(&rebuilt));
             }
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                 let component = probe.file_name().ok_or_else(|| {
@@ -199,22 +199,6 @@ fn canonicalize_for_sandbox(path: &Path) -> Result<PathBuf, SandboxError> {
             }
         }
     }
-}
-
-fn lexical_normalize(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                let _ = normalized.pop();
-            }
-            other => normalized.push(other.as_os_str()),
-        }
-    }
-
-    normalized
 }
 
 #[cfg(test)]
