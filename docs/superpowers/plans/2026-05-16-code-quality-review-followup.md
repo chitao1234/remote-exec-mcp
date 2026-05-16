@@ -221,8 +221,8 @@
 - Run: relevant C++ checks for touched C++ code
 - Expect: docs/examples/tool help align with the cleaned-up implementation and the workspace passes its normal quality gates.
 
-- [ ] Sweep the affected docs/examples/skill text for newly stale wording
-- [ ] Run the full relevant quality gates for the touched Rust and C++ surfaces
-- [ ] Fix any remaining drift or verification failures discovered by the sweep
-- [ ] Run final verification again
-- [ ] Commit
+- [x] Sweep the affected docs/examples/skill text for newly stale wording
+- [x] Run the full relevant quality gates for the touched Rust and C++ surfaces
+- [x] Fix any remaining drift or verification failures discovered by the sweep
+- [x] Run final verification again
+- [x] Commit
