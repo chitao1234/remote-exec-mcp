@@ -30,6 +30,7 @@ const unsigned short DEFAULT_PTY_ROWS = 24;
 const unsigned short DEFAULT_PTY_COLS = 120;
 // Grace period for cooperative shutdown before escalating from SIGTERM to SIGKILL.
 const int TERMINATE_GRACE_MS = 50;
+const std::size_t PROCESS_OUTPUT_READ_BUFFER_SIZE = 4U * 1024U;
 
 #ifdef REMOTE_EXEC_CPP_TESTING
 std::atomic<unsigned long> g_test_exit_poll_delay_ms(0UL);
@@ -460,7 +461,7 @@ public:
     std::string read_output(bool block, bool* eof, std::string* carry) override {
         *eof = false;
         std::string raw;
-        char buffer[4096];
+        char buffer[PROCESS_OUTPUT_READ_BUFFER_SIZE];
         const int read_fd = output_read_.valid() ? output_read_.get() : input_write_.get();
         if (block && !readable_now(read_fd)) {
             wait_until_readable(read_fd);

@@ -33,6 +33,9 @@ int send_bounded(SOCKET client, const char* data, std::size_t remaining, int fla
 
 namespace {
 
+const std::size_t HTTP_READ_BUFFER_SIZE = 4U * 1024U;
+const std::size_t HTTP_RAW_BUFFER_COMPACT_THRESHOLD = 8U * 1024U;
+
 std::size_t parse_chunk_size_line(const std::string& line) {
     try {
         return parse_http_chunk_size_line(line);
@@ -86,7 +89,7 @@ void UniqueSocket::reset(SOCKET socket) {
 
 bool try_read_http_request_head(SOCKET client, std::size_t max_header_bytes, HttpRequestHead* head) {
     std::string data;
-    char buffer[4096];
+    char buffer[HTTP_READ_BUFFER_SIZE];
 
     for (;;) {
         const int received = recv(client, buffer, sizeof(buffer), 0);
@@ -219,7 +222,7 @@ std::size_t HttpRequestBodyStream::read_chunked_body(char* data, std::size_t max
 
 void HttpRequestBodyStream::ensure_raw_available(std::size_t size) {
     while (raw_.size() - raw_offset_ < size) {
-        char buffer[4096];
+        char buffer[HTTP_READ_BUFFER_SIZE];
         const int received = recv(client_, buffer, sizeof(buffer), 0);
         if (received == 0) {
             throw BadHttpRequest("incomplete http request body");
@@ -237,7 +240,7 @@ void HttpRequestBodyStream::ensure_raw_available(std::size_t size) {
 
 void HttpRequestBodyStream::ensure_raw_line() {
     while (raw_.find("\r\n", raw_offset_) == std::string::npos) {
-        char buffer[4096];
+        char buffer[HTTP_READ_BUFFER_SIZE];
         const int received = recv(client_, buffer, sizeof(buffer), 0);
         if (received == 0) {
             throw BadHttpRequest("incomplete http request body");
@@ -255,7 +258,7 @@ void HttpRequestBodyStream::ensure_raw_line() {
 
 void HttpRequestBodyStream::consume_raw(std::size_t size) {
     raw_offset_ += size;
-    if (raw_offset_ > 8192U && raw_offset_ * 2U > raw_.size()) {
+    if (raw_offset_ > HTTP_RAW_BUFFER_COMPACT_THRESHOLD && raw_offset_ * 2U > raw_.size()) {
         raw_.erase(0, raw_offset_);
         raw_offset_ = 0;
     }
