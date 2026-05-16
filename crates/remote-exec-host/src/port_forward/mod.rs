@@ -90,4 +90,4 @@ pub(super) fn tunnel_error_frame(
 }
 
 #[cfg(test)]
-mod port_tunnel_tests;
+mod tests;

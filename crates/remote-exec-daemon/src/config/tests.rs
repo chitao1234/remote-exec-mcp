@@ -32,12 +32,28 @@ async fn load_config(
     DaemonConfig::load(&config_path).await
 }
 
+async fn load_http_config_with_extra(
+    dir: &tempfile::TempDir,
+    extra: &str,
+) -> anyhow::Result<ValidatedDaemonConfig> {
+    load_config(dir, http_config(neutral_workdir(dir), extra)).await
+}
+
+async fn load_config_error(dir: &tempfile::TempDir, text: impl AsRef<str>) -> String {
+    load_config(dir, text).await.unwrap_err().to_string()
+}
+
+async fn load_http_config_error(dir: &tempfile::TempDir, extra: &str) -> String {
+    load_http_config_with_extra(dir, extra)
+        .await
+        .unwrap_err()
+        .to_string()
+}
+
 #[tokio::test]
 async fn load_accepts_http_transport_without_tls_block() {
     let dir = tempfile::tempdir().unwrap();
-    let config = load_config(&dir, http_config(neutral_workdir(&dir), ""))
-        .await
-        .unwrap();
+    let config = load_http_config_with_extra(&dir, "").await.unwrap();
     assert!(matches!(config.transport, DaemonTransport::Http));
     assert!(config.http_auth.is_none());
     assert!(config.tls.is_none());
@@ -52,12 +68,9 @@ async fn load_accepts_http_transport_without_tls_block() {
 #[tokio::test]
 async fn load_accepts_max_open_sessions_override() {
     let dir = tempfile::tempdir().unwrap();
-    let config = load_config(
-        &dir,
-        http_config(neutral_workdir(&dir), "max_open_sessions = 7\n"),
-    )
-    .await
-    .unwrap();
+    let config = load_http_config_with_extra(&dir, "max_open_sessions = 7\n")
+        .await
+        .unwrap();
     assert_eq!(config.max_open_sessions, 7);
     assert_eq!(
         remote_exec_host::HostRuntimeConfig::from(&config).max_open_sessions,
@@ -68,15 +81,9 @@ async fn load_accepts_max_open_sessions_override() {
 #[tokio::test]
 async fn load_rejects_zero_max_open_sessions() {
     let dir = tempfile::tempdir().unwrap();
-    let err = load_config(
-        &dir,
-        http_config(neutral_workdir(&dir), "max_open_sessions = 0\n"),
-    )
-    .await
-    .unwrap_err();
+    let err = load_http_config_error(&dir, "max_open_sessions = 0\n").await;
     assert!(
-        err.to_string()
-            .contains("max_open_sessions must be greater than zero"),
+        err.contains("max_open_sessions must be greater than zero"),
         "unexpected error: {err}"
     );
 }
@@ -137,9 +144,8 @@ transport = "http"
 #[tokio::test]
 async fn load_rejects_default_tls_transport_without_tls_block() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("daemon.toml");
-    tokio::fs::write(
-        &config_path,
+    let err = load_config_error(
+        &dir,
         format!(
             r#"
 target = "builder-a"
@@ -149,20 +155,15 @@ default_workdir = {}
             neutral_workdir(&dir)
         ),
     )
-    .await
-    .unwrap();
-
-    let err = DaemonConfig::load(&config_path).await.unwrap_err();
+    .await;
     if cfg!(feature = "tls") {
         assert!(
-            err.to_string()
-                .contains("tls config is required when transport = \"tls\""),
+            err.contains("tls config is required when transport = \"tls\""),
             "unexpected error: {err}"
         );
     } else {
         assert!(
-            err.to_string()
-                .contains(crate::tls::FEATURE_REQUIRED_MESSAGE),
+            err.contains(crate::tls::FEATURE_REQUIRED_MESSAGE),
             "unexpected error: {err}"
         );
     }
@@ -172,11 +173,9 @@ default_workdir = {}
 async fn load_rejects_missing_default_workdir() {
     let dir = tempfile::tempdir().unwrap();
     let missing_workdir = dir.path().join("missing-workdir");
-    let err = load_config(&dir, http_config(neutral_toml_path(&missing_workdir), ""))
-        .await
-        .unwrap_err();
+    let err = load_config_error(&dir, http_config(neutral_toml_path(&missing_workdir), "")).await;
     assert!(
-        err.to_string().contains("default_workdir") && err.to_string().contains("does not exist"),
+        err.contains("default_workdir") && err.contains("does not exist"),
         "unexpected error: {err}"
     );
 }
@@ -218,9 +217,8 @@ fn yield_time_defaults_preserve_existing_behavior() {
 #[tokio::test]
 async fn load_merges_partial_yield_time_overrides() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("daemon.toml");
-    tokio::fs::write(
-        &config_path,
+    let config = load_config(
+        &dir,
         format!(
             r#"
 target = "builder-a"
@@ -239,8 +237,6 @@ default_ms = 12000
     )
     .await
     .unwrap();
-
-    let config = DaemonConfig::load(&config_path).await.unwrap();
     assert_eq!(config.yield_time.exec_command.default_ms, 10_000);
     assert_eq!(config.yield_time.exec_command.min_ms, 250);
     assert_eq!(config.yield_time.exec_command.max_ms, 60_000);
@@ -253,55 +249,31 @@ default_ms = 12000
 #[tokio::test]
 async fn load_accepts_port_forward_connect_timeout_override() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("daemon.toml");
-    tokio::fs::write(
-        &config_path,
-        format!(
-            r#"
-target = "builder-a"
-listen = "127.0.0.1:8080"
-default_workdir = {}
-transport = "http"
-
+    let config = load_http_config_with_extra(
+        &dir,
+        r#"
 [port_forward_limits]
 connect_timeout_ms = 7000
 "#,
-            neutral_workdir(&dir)
-        ),
     )
     .await
     .unwrap();
-
-    let config = DaemonConfig::load(&config_path).await.unwrap();
     assert_eq!(config.port_forward_limits.connect_timeout_ms, 7_000);
 }
 
 #[tokio::test]
 async fn load_rejects_zero_port_forward_connect_timeout() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("daemon.toml");
-    tokio::fs::write(
-        &config_path,
-        format!(
-            r#"
-target = "builder-a"
-listen = "127.0.0.1:8080"
-default_workdir = {}
-transport = "http"
-
+    let err = load_http_config_error(
+        &dir,
+        r#"
 [port_forward_limits]
 connect_timeout_ms = 0
 "#,
-            neutral_workdir(&dir)
-        ),
     )
-    .await
-    .unwrap();
-
-    let err = DaemonConfig::load(&config_path).await.unwrap_err();
+    .await;
     assert!(
-        err.to_string()
-            .contains("port_forward_limits.connect_timeout_ms must be greater than zero"),
+        err.contains("port_forward_limits.connect_timeout_ms must be greater than zero"),
         "unexpected error: {err}"
     );
 }
@@ -309,29 +281,17 @@ connect_timeout_ms = 0
 #[tokio::test]
 async fn load_rejects_invalid_transfer_limit_bounds() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("daemon.toml");
-    tokio::fs::write(
-        &config_path,
-        format!(
-            r#"
-target = "builder-a"
-listen = "127.0.0.1:8080"
-default_workdir = {}
-transport = "http"
-
+    let err = load_http_config_error(
+        &dir,
+        r#"
 [transfer_limits]
 max_archive_bytes = 8
 max_entry_bytes = 16
 "#,
-            neutral_workdir(&dir)
-        ),
     )
-    .await
-    .unwrap();
-
-    let err = DaemonConfig::load(&config_path).await.unwrap_err();
+    .await;
     assert!(
-        err.to_string().contains(
+        err.contains(
             "transfer_limits.max_entry_bytes must be less than or equal to transfer_limits.max_archive_bytes"
         ),
         "unexpected error: {err}"
@@ -341,30 +301,17 @@ max_entry_bytes = 16
 #[tokio::test]
 async fn load_rejects_invalid_yield_time_bounds() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("daemon.toml");
-    tokio::fs::write(
-        &config_path,
-        format!(
-            r#"
-target = "builder-a"
-listen = "127.0.0.1:8080"
-default_workdir = {}
-transport = "http"
-
+    let err = load_http_config_error(
+        &dir,
+        r#"
 [yield_time.exec_command]
 default_ms = 100
 min_ms = 200
 "#,
-            neutral_workdir(&dir)
-        ),
     )
-    .await
-    .unwrap();
-
-    let err = DaemonConfig::load(&config_path).await.unwrap_err();
+    .await;
     assert!(
-        err.to_string()
-            .contains("yield_time.exec_command.default_ms must be between"),
+        err.contains("yield_time.exec_command.default_ms must be between"),
         "unexpected error: {err}"
     );
 }
@@ -415,50 +362,27 @@ pinned_client_cert_pem = {}
 #[tokio::test]
 async fn load_accepts_experimental_apply_patch_target_encoding_autodetect() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("daemon.toml");
-    tokio::fs::write(
-        &config_path,
-        format!(
-            r#"
-target = "builder-a"
-listen = "127.0.0.1:9443"
-default_workdir = {}
-transport = "http"
-experimental_apply_patch_target_encoding_autodetect = true
-"#,
-            neutral_workdir(&dir)
-        ),
+    let config = load_http_config_with_extra(
+        &dir,
+        "experimental_apply_patch_target_encoding_autodetect = true\n",
     )
     .await
     .unwrap();
-
-    let config = DaemonConfig::load(&config_path).await.unwrap();
     assert!(config.experimental_apply_patch_target_encoding_autodetect);
 }
 
 #[tokio::test]
 async fn load_accepts_http_bearer_auth() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("daemon.toml");
-    tokio::fs::write(
-        &config_path,
-        format!(
-            r#"
-target = "builder-a"
-listen = "127.0.0.1:8080"
-default_workdir = {}
-transport = "http"
-
+    let config = load_http_config_with_extra(
+        &dir,
+        r#"
 [http_auth]
 bearer_token = "shared-secret"
 "#,
-            neutral_workdir(&dir)
-        ),
     )
     .await
     .unwrap();
-
-    let config = DaemonConfig::load(&config_path).await.unwrap();
     assert_eq!(
         config
             .http_auth
@@ -478,29 +402,16 @@ bearer_token = "shared-secret"
 #[tokio::test]
 async fn load_rejects_empty_http_bearer_auth() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("daemon.toml");
-    tokio::fs::write(
-        &config_path,
-        format!(
-            r#"
-target = "builder-a"
-listen = "127.0.0.1:8080"
-default_workdir = {}
-transport = "http"
-
+    let err = load_http_config_error(
+        &dir,
+        r#"
 [http_auth]
 bearer_token = ""
 "#,
-            neutral_workdir(&dir)
-        ),
     )
-    .await
-    .unwrap();
-
-    let err = DaemonConfig::load(&config_path).await.unwrap_err();
+    .await;
     assert!(
-        err.to_string()
-            .contains("http_auth.bearer_token must not be empty"),
+        err.contains("http_auth.bearer_token must not be empty"),
         "unexpected error: {err}"
     );
 }
@@ -508,13 +419,12 @@ bearer_token = ""
 #[tokio::test]
 async fn load_rejects_pinned_client_cert_for_http_transport() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("daemon.toml");
     let daemon_cert = dir.path().join("daemon.pem");
     let daemon_key = dir.path().join("daemon.key");
     let ca_cert = dir.path().join("ca.pem");
     let broker_cert = dir.path().join("broker.pem");
-    tokio::fs::write(
-        &config_path,
+    let err = load_config_error(
+        &dir,
         format!(
             r#"
 target = "builder-a"
@@ -535,13 +445,9 @@ pinned_client_cert_pem = {}
             neutral_toml_path(&broker_cert)
         ),
     )
-    .await
-    .unwrap();
-
-    let err = DaemonConfig::load(&config_path).await.unwrap_err();
+    .await;
     assert!(
-        err.to_string()
-            .contains("pinned_client_cert_pem requires transport = \"tls\""),
+        err.contains("pinned_client_cert_pem requires transport = \"tls\""),
         "unexpected error: {err}"
     );
 }
@@ -550,12 +456,11 @@ pinned_client_cert_pem = {}
 #[tokio::test]
 async fn load_rejects_explicit_tls_transport_when_tls_feature_disabled() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("daemon.toml");
     let daemon_cert = dir.path().join("daemon.pem");
     let daemon_key = dir.path().join("daemon.key");
     let ca_cert = dir.path().join("ca.pem");
-    tokio::fs::write(
-        &config_path,
+    let err = load_config_error(
+        &dir,
         format!(
             r#"
 target = "builder-a"
@@ -574,13 +479,9 @@ ca_pem = {}
             neutral_toml_path(&ca_cert)
         ),
     )
-    .await
-    .unwrap();
-
-    let err = DaemonConfig::load(&config_path).await.unwrap_err();
+    .await;
     assert!(
-        err.to_string()
-            .contains(crate::tls::FEATURE_REQUIRED_MESSAGE),
+        err.contains(crate::tls::FEATURE_REQUIRED_MESSAGE),
         "unexpected error: {err}"
     );
 }
