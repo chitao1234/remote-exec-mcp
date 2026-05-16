@@ -1,0 +1,85 @@
+{
+  "path_eq": [
+    {
+      "name": "posix_exact_match",
+      "platform": "posix",
+      "left": "/tmp/project/file.txt",
+      "right": "/tmp/project/file.txt",
+      "expected": true
+    },
+    {
+      "name": "posix_case_difference_is_not_equal",
+      "platform": "posix",
+      "left": "/tmp/Artifact.txt",
+      "right": "/tmp/artifact.txt",
+      "expected": false
+    },
+    {
+      "name": "windows_unicode_case_difference_is_equal",
+      "platform": "windows",
+      "left": "C:\\RÉSUMÉ\\Ärger.txt",
+      "right": "c:\\résumé\\ärger.txt",
+      "expected": true
+    }
+  ],
+  "path_has_prefix": [
+    {
+      "name": "posix_exact_prefix_matches",
+      "platform": "posix",
+      "path": "/tmp/project/file.txt",
+      "prefix": "/tmp/project",
+      "expected": true
+    },
+    {
+      "name": "posix_case_difference_breaks_prefix_match",
+      "platform": "posix",
+      "path": "/tmp/project/file.txt",
+      "prefix": "/TMP/project",
+      "expected": false
+    },
+    {
+      "name": "windows_case_insensitive_prefix_matches",
+      "platform": "windows",
+      "path": "C:\\RÉSUMÉ\\bin\\zsh.exe",
+      "prefix": "c:\\résumé",
+      "expected": true
+    },
+    {
+      "name": "windows_sibling_prefix_does_not_match",
+      "platform": "windows",
+      "path": "C:\\RÉSUMÉ-tools\\bin\\zsh.exe",
+      "prefix": "c:\\résumé",
+      "expected": false
+    }
+  ],
+  "path_is_within": [
+    {
+      "name": "posix_path_within_exact_prefix",
+      "platform": "posix",
+      "path": "/tmp/project/file.txt",
+      "root": "/tmp/project",
+      "expected": true
+    },
+    {
+      "name": "posix_path_within_rejects_case_difference",
+      "platform": "posix",
+      "path": "/tmp/project/file.txt",
+      "root": "/TMP/project",
+      "expected": false
+    },
+    {
+      "name": "windows_path_within_is_case_insensitive",
+      "platform": "windows",
+      "path": "C:\\RÉSUMÉ\\bin\\zsh.exe",
+      "root": "c:\\résumé",
+      "expected": true
+    },
+    {
+      "name": "windows_path_within_rejects_sibling_path",
+      "platform": "windows",
+      "path": "C:\\RÉSUMÉ-tools\\bin\\zsh.exe",
+      "root": "c:\\résumé",
+      "expected": false
+    }
+  ]
+}

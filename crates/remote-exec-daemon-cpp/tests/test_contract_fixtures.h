@@ -58,4 +58,19 @@ inline const Json& transfer_headers_contract() {
     return fixture;
 }
 
+inline const Json& path_policy_cases() {
+    static const Json fixture = load_contract_fixture("path_policy_cases.json");
+    return fixture;
+}
+
+inline const Json& path_compare_cases() {
+    static const Json fixture = load_contract_fixture("path_compare_cases.json");
+    return fixture;
+}
+
+inline const Json& sandbox_cases() {
+    static const Json fixture = load_contract_fixture("sandbox_cases.json");
+    return fixture;
+}
+
 } // namespace test_contract

@@ -17,4 +17,6 @@ PathPolicy host_path_policy();
 
 bool is_absolute_for_policy(PathPolicy policy, const std::string& raw);
 std::string normalize_for_system(PathPolicy policy, const std::string& raw);
+bool syntax_eq_for_policy(PathPolicy policy, const std::string& left, const std::string& right);
 std::string join_for_policy(PathPolicy policy, const std::string& base, const std::string& child);
+bool basename_for_policy(PathPolicy policy, const std::string& raw, std::string* basename);

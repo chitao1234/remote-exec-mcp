@@ -1,0 +1,165 @@
+{
+  "is_absolute": [
+    {
+      "name": "windows_drive_backslash_is_absolute",
+      "style": "windows",
+      "raw": "C:\\work\\artifact.txt",
+      "expected": true
+    },
+    {
+      "name": "windows_drive_slash_is_absolute",
+      "style": "windows",
+      "raw": "C:/work/artifact.txt",
+      "expected": true
+    },
+    {
+      "name": "windows_posix_drive_alias_is_absolute",
+      "style": "windows",
+      "raw": "/c/work/artifact.txt",
+      "expected": true
+    },
+    {
+      "name": "windows_cygdrive_alias_is_absolute",
+      "style": "windows",
+      "raw": "/cygdrive/c/work/artifact.txt",
+      "expected": true
+    },
+    {
+      "name": "windows_unc_path_is_absolute",
+      "style": "windows",
+      "raw": "//server/share/releases/current.txt",
+      "expected": true
+    },
+    {
+      "name": "windows_relative_path_is_not_absolute",
+      "style": "windows",
+      "raw": "work\\artifact.txt",
+      "expected": false
+    }
+  ],
+  "normalize_for_system": [
+    {
+      "name": "windows_drive_path_uses_backslashes",
+      "style": "windows",
+      "raw": "C:/work/releases/current.txt",
+      "expected": "C:\\work\\releases\\current.txt"
+    },
+    {
+      "name": "windows_posix_drive_alias_normalizes",
+      "style": "windows",
+      "raw": "/c/work/releases/current.txt",
+      "expected": "C:\\work\\releases\\current.txt"
+    },
+    {
+      "name": "windows_cygdrive_alias_normalizes",
+      "style": "windows",
+      "raw": "/cygdrive/c/work/releases/current.txt",
+      "expected": "C:\\work\\releases\\current.txt"
+    },
+    {
+      "name": "windows_unc_path_normalizes_separators",
+      "style": "windows",
+      "raw": "//server/share/releases/current.txt",
+      "expected": "\\\\server\\share\\releases\\current.txt"
+    }
+  ],
+  "syntax_eq": [
+    {
+      "name": "windows_separator_styles_compare_equal",
+      "style": "windows",
+      "left": "C:\\Work\\Artifact.txt",
+      "right": "C:/Work/Artifact.txt",
+      "expected": true
+    },
+    {
+      "name": "windows_drive_aliases_compare_equal",
+      "style": "windows",
+      "left": "/c/Work/Artifact.txt",
+      "right": "C:\\Work\\Artifact.txt",
+      "expected": true
+    },
+    {
+      "name": "windows_cygdrive_aliases_compare_equal",
+      "style": "windows",
+      "left": "/cygdrive/c/Work/Artifact.txt",
+      "right": "C:\\Work\\Artifact.txt",
+      "expected": true
+    },
+    {
+      "name": "windows_syntax_equality_preserves_case_differences",
+      "style": "windows",
+      "left": "C:\\RÉSUMÉ\\Ärger.txt",
+      "right": "c:/résumé/ärger.TXT",
+      "expected": false
+    },
+    {
+      "name": "posix_syntax_equality_preserves_case",
+      "style": "posix",
+      "left": "/tmp/Artifact.txt",
+      "right": "/tmp/artifact.txt",
+      "expected": false
+    }
+  ],
+  "join": [
+    {
+      "name": "posix_join_uses_forward_slashes",
+      "style": "posix",
+      "base": "outer",
+      "child": "nested/file.txt",
+      "expected": "outer/nested/file.txt"
+    },
+    {
+      "name": "windows_join_normalizes_mixed_separators",
+      "style": "windows",
+      "base": "C:/work/releases",
+      "child": "nested/file.txt",
+      "expected": "C:\\work\\releases\\nested\\file.txt"
+    },
+    {
+      "name": "windows_join_preserves_backslash_children",
+      "style": "windows",
+      "base": "C:\\work\\releases",
+      "child": "nested\\file.txt",
+      "expected": "C:\\work\\releases\\nested\\file.txt"
+    },
+    {
+      "name": "windows_join_replaces_with_absolute_child",
+      "style": "windows",
+      "base": "C:\\work\\releases",
+      "child": "/c/other/file.txt",
+      "expected": "C:\\other\\file.txt"
+    }
+  ],
+  "basename": [
+    {
+      "name": "posix_basename_extracts_filename",
+      "style": "posix",
+      "raw": "/tmp/build/output.tar",
+      "expected": "output.tar"
+    },
+    {
+      "name": "posix_root_has_no_basename",
+      "style": "posix",
+      "raw": "/",
+      "expected": null
+    },
+    {
+      "name": "windows_basename_extracts_filename",
+      "style": "windows",
+      "raw": "C:/work/releases/current.txt",
+      "expected": "current.txt"
+    },
+    {
+      "name": "windows_cygdrive_basename_extracts_tail",
+      "style": "windows",
+      "raw": "/cygdrive/c/work/releases",
+      "expected": "releases"
+    },
+    {
+      "name": "windows_drive_root_reports_drive_component",
+      "style": "windows",
+      "raw": "C:\\",
+      "expected": "C"
+    }
+  ]
+}

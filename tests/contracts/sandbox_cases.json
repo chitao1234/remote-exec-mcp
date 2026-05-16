@@ -1,0 +1,145 @@
+{
+  "compile": [
+    {
+      "name": "reject_relative_exec_cwd_rule",
+      "access": "exec_cwd",
+      "allow": [
+        "relative/path"
+      ],
+      "deny": [],
+      "expected": "compile_error",
+      "expected_message_fragment": "not absolute"
+    },
+    {
+      "name": "allow_missing_ancestor_rule_when_parent_exists",
+      "access": "read",
+      "allow": [
+        "{root}/future/child"
+      ],
+      "deny": [],
+      "setup": {
+        "dirs": [
+          "{root}"
+        ]
+      },
+      "expected": "ok"
+    }
+  ],
+  "authorize": [
+    {
+      "name": "relative_request_path_is_rejected",
+      "access": "read",
+      "allow": [
+        "{root}/allowed"
+      ],
+      "deny": [],
+      "path": "relative/path",
+      "expected": "not_absolute",
+      "expected_message_fragment": "not absolute",
+      "setup": {
+        "dirs": [
+          "{root}/allowed"
+        ]
+      }
+    },
+    {
+      "name": "deny_rule_overrides_allow_root",
+      "access": "write",
+      "allow": [
+        "{root}/allowed"
+      ],
+      "deny": [
+        "{root}/allowed/secret"
+      ],
+      "path": "{root}/allowed/secret/key.txt",
+      "expected": "deny",
+      "expected_message_fragment": "denied by sandbox rule",
+      "setup": {
+        "dirs": [
+          "{root}/allowed/secret",
+          "{root}/allowed-sibling"
+        ]
+      }
+    },
+    {
+      "name": "non_empty_allow_list_requires_membership",
+      "access": "write",
+      "allow": [
+        "{root}/allowed"
+      ],
+      "deny": [],
+      "path": "{root}/allowed-sibling/nope.txt",
+      "expected": "deny",
+      "expected_message_fragment": "outside the configured sandbox",
+      "setup": {
+        "dirs": [
+          "{root}/allowed",
+          "{root}/allowed-sibling"
+        ]
+      }
+    },
+    {
+      "name": "deny_only_list_allows_outside_denied_root",
+      "access": "read",
+      "allow": [],
+      "deny": [
+        "{root}/allowed/secret"
+      ],
+      "path": "{root}/sibling/ok.txt",
+      "expected": "allow",
+      "setup": {
+        "dirs": [
+          "{root}/allowed/secret",
+          "{root}/sibling"
+        ]
+      }
+    },
+    {
+      "name": "missing_ancestor_path_is_authorized_under_allow_root",
+      "access": "read",
+      "allow": [
+        "{root}/allowed"
+      ],
+      "deny": [],
+      "path": "{root}/allowed/missing/deeper/file.txt",
+      "expected": "allow",
+      "setup": {
+        "dirs": [
+          "{root}/allowed"
+        ]
+      }
+    },
+    {
+      "name": "symlink_target_outside_allow_root_is_denied",
+      "platforms": [
+        "posix"
+      ],
+      "access": "read",
+      "allow": [
+        "{root}/allowed"
+      ],
+      "deny": [],
+      "path": "{root}/allowed/link/secret.txt",
+      "expected": "deny",
+      "expected_message_fragment": "outside the configured sandbox",
+      "setup": {
+        "dirs": [
+          "{root}/allowed",
+          "{root}/outside"
+        ],
+        "files": [
+          {
+            "path": "{root}/outside/secret.txt",
+            "contents": "secret"
+          }
+        ],
+        "symlinks": [
+          {
+            "path": "{root}/allowed/link",
+            "target": "{root}/outside"
+          }
+        ]
+      }
+    }
+  ]
+}
