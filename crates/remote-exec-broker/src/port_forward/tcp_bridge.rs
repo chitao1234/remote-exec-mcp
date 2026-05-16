@@ -135,7 +135,10 @@ async fn handle_listen_tunnel_event(
                 .await?;
             Ok(None)
         }
-        _ => Ok(None),
+        other => {
+            tracing::debug!(frame_type = ?other, stream_id = frame.stream_id, "ignoring unexpected listen tunnel frame");
+            Ok(None)
+        }
     }
 }
 
@@ -174,7 +177,10 @@ async fn handle_connect_tunnel_event(
             handle_connect_tcp_eof(runtime, listen_tunnel, connect_tunnel, state, frame).await
         }
         FrameType::Close => handle_connect_close(runtime, listen_tunnel, state, frame).await,
-        _ => Ok(None),
+        other => {
+            tracing::debug!(frame_type = ?other, stream_id = frame.stream_id, "ignoring unexpected connect tunnel frame");
+            Ok(None)
+        }
     }
 }
 

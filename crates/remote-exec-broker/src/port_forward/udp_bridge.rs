@@ -130,7 +130,10 @@ async fn handle_listen_udp_tunnel_event(
                 .await?;
             Ok(None)
         }
-        _ => Ok(None),
+        other => {
+            tracing::debug!(frame_type = ?other, stream_id = frame.stream_id, "ignoring unexpected udp listen tunnel frame");
+            Ok(None)
+        }
     }
 }
 
@@ -230,7 +233,10 @@ async fn handle_connect_udp_tunnel_event(
             // Connect-side UDP connector churn is peer-local cleanup only.
             Ok(None)
         }
-        _ => Ok(None),
+        other => {
+            tracing::debug!(frame_type = ?other, stream_id = frame.stream_id, "ignoring unexpected udp connect tunnel frame");
+            Ok(None)
+        }
     }
 }
 
