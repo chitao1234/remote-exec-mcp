@@ -1,5 +1,6 @@
 use clap::Parser;
 
+mod bootstrap;
 mod certs;
 mod cli;
 

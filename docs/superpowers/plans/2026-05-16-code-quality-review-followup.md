@@ -134,10 +134,10 @@
 - Run: `cargo test -p remote-exec-pki --test dev_init_bundle`
 - Expect: the admin CLI still emits the expected bootstrap guidance, while the PKI crate stops owning repo-specific snippet rendering.
 
-- [ ] Split manifest/data concerns from bootstrap rendering concerns
-- [ ] Move snippet rendering and operator-facing text into `remote-exec-admin`
-- [ ] Keep `remote-exec-pki` limited to reusable certificate and manifest responsibilities
-- [ ] Run focused admin and PKI verification
+- [x] Split manifest/data concerns from bootstrap rendering concerns
+- [x] Move snippet rendering and operator-facing text into `remote-exec-admin`
+- [x] Keep `remote-exec-pki` limited to reusable certificate and manifest responsibilities
+- [x] Run focused admin and PKI verification
 - [ ] Commit
 
 ### Task 5: Introduce a C++ daemon route registry and shared contract constants

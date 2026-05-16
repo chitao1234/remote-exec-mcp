@@ -28,7 +28,7 @@ fn run_dev_init(args: DevInitArgs) -> anyhow::Result<()> {
     let manifest =
         remote_exec_pki::write_dev_init_bundle(&spec, &bundle, &args.out_dir, args.force)?;
 
-    println!("{}", remote_exec_pki::render_config_snippets(&manifest));
+    println!("{}", crate::bootstrap::render_dev_init_output(&manifest));
     Ok(())
 }
 
