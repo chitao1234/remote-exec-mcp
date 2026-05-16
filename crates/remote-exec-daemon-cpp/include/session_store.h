@@ -10,7 +10,7 @@
 #include "http_helpers.h"
 #include "live_session.h"
 
-static const unsigned long DEFAULT_MAX_OUTPUT_TOKENS = 10000UL;
+static constexpr unsigned long DEFAULT_MAX_OUTPUT_TOKENS = 10000UL;
 
 struct ExecStartRequestSpec;
 

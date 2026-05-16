@@ -55,8 +55,8 @@ struct TransferLimitConfig {
     std::uint64_t max_entry_bytes;
 };
 
-static const std::uint64_t DEFAULT_TRANSFER_MAX_ARCHIVE_BYTES = 512ULL * 1024ULL * 1024ULL;
-static const std::uint64_t DEFAULT_TRANSFER_MAX_ENTRY_BYTES = 512ULL * 1024ULL * 1024ULL;
+static constexpr std::uint64_t DEFAULT_TRANSFER_MAX_ARCHIVE_BYTES = 512ULL * 1024ULL * 1024ULL;
+static constexpr std::uint64_t DEFAULT_TRANSFER_MAX_ENTRY_BYTES = 512ULL * 1024ULL * 1024ULL;
 
 inline TransferLimitConfig default_transfer_limit_config() {
     TransferLimitConfig config;

@@ -6,9 +6,9 @@
 #include <string>
 #include <vector>
 
-static const std::size_t PORT_TUNNEL_HEADER_LEN = 16U;
-static const std::size_t PORT_TUNNEL_MAX_META_LEN = 16U * 1024U;
-static const std::size_t PORT_TUNNEL_MAX_DATA_LEN = 256U * 1024U;
+static constexpr std::size_t PORT_TUNNEL_HEADER_LEN = 16U;
+static constexpr std::size_t PORT_TUNNEL_MAX_META_LEN = 16U * 1024U;
+static constexpr std::size_t PORT_TUNNEL_MAX_DATA_LEN = 256U * 1024U;
 
 enum class PortTunnelFrameType : unsigned char {
     Error = 1,
