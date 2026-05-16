@@ -2,6 +2,7 @@
 #include "port_tunnel_connection.h"
 #include "port_tunnel_sender.h"
 #include "port_tunnel_service.h"
+#include "server_contract.h"
 
 struct TunnelOpenMetadata {
     std::string role;
@@ -75,9 +76,11 @@ int handle_port_tunnel_upgrade(AppState& state, SOCKET client, const HttpRequest
         send_all(client, render_http_response(response));
         return response.status;
     }
-    if (request.method != "POST" || request.path != "/v1/port/tunnel" || !connection_header_has_upgrade(request) ||
-        header_token_lower(request, "upgrade") != "remote-exec-port-tunnel" ||
-        request.header("x-remote-exec-port-tunnel-version") != "4") {
+    if (request.method != "POST" ||
+        request.path != server_contract::route_path(server_contract::ROUTE_PORT_TUNNEL) ||
+        !connection_header_has_upgrade(request) ||
+        header_token_lower(request, "upgrade") != server_contract::PORT_TUNNEL_UPGRADE_TOKEN ||
+        request.header(server_contract::PORT_TUNNEL_VERSION_HEADER) != server_contract::PORT_TUNNEL_VERSION_VALUE) {
         HttpResponse response;
         write_rpc_error(response, 400, "bad_request", "invalid port tunnel upgrade request");
         write_request_id_header(response, request);
@@ -88,7 +91,7 @@ int handle_port_tunnel_upgrade(AppState& state, SOCKET client, const HttpRequest
     const std::string request_id = request_id_for_request(request);
     std::map<std::string, std::string> response_headers;
     response_headers[request_id_header_name()] = request_id;
-    send_all(client, render_http_upgrade_response("remote-exec-port-tunnel", response_headers));
+    send_all(client, render_http_upgrade_response(server_contract::PORT_TUNNEL_UPGRADE_TOKEN, response_headers));
     if (!state.port_tunnel_service) {
         state.port_tunnel_service = create_port_tunnel_service(state.config.port_forward_limits);
     }

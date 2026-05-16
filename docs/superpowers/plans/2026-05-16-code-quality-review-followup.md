@@ -163,10 +163,10 @@
 - Run: `make -C crates/remote-exec-daemon-cpp test-host-server-streaming`
 - Expect: route dispatch and shared constants come from one internal source without changing observable behavior.
 
-- [ ] Define one internal route/contract inventory for the C++ daemon
-- [ ] Move shared path/header/version literals to that inventory and wire existing handlers through it
-- [ ] Update route/transport/codec code to consume the shared contract layer
-- [ ] Run focused C++ verification
+- [x] Define one internal route/contract inventory for the C++ daemon
+- [x] Move shared path/header/version literals to that inventory and wire existing handlers through it
+- [x] Update route/transport/codec code to consume the shared contract layer
+- [x] Run focused C++ verification
 - [ ] Commit
 
 ### Task 6: Replace remaining detached worker seams and clean up test support

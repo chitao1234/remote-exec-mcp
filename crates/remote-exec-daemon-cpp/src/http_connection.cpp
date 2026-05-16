@@ -8,6 +8,7 @@
 #include "logging.h"
 #include "platform.h"
 #include "port_tunnel.h"
+#include "server_contract.h"
 #include "server.h"
 #include "server_request_utils.h"
 #include "server_route_common.h"
@@ -273,7 +274,7 @@ int handle_client_request(AppState& state,
     const HttpRequestBodyFraming framing = parse_request_body_framing_or_throw_bad_request(request);
     HttpRequestBodyStream body(client, request_head.initial_body, framing, state.config.max_request_body_bytes);
 
-    if (request.path == "/v1/transfer/export") {
+    if (request.path == server_contract::route_path(server_contract::ROUTE_TRANSFER_EXPORT)) {
         const int status = handle_streaming_transfer_export(state, request, &body, client);
         log_request_result(request, status, started_at_ms);
         return status;
@@ -286,7 +287,7 @@ int handle_client_request(AppState& state,
     }
 
     HttpResponse response;
-    if (request.path == "/v1/transfer/import") {
+    if (request.path == server_contract::route_path(server_contract::ROUTE_TRANSFER_IMPORT)) {
         response = handle_streaming_transfer_import(state, request, &body);
     } else {
         request.body = read_request_body_to_string(&body);

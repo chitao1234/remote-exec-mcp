@@ -1,6 +1,7 @@
 #include <cstdlib>
 
 #include "port_tunnel_service.h"
+#include "server_contract.h"
 
 const std::size_t READ_BUF_SIZE = 64U * 1024U;
 const std::size_t TCP_WRITE_QUEUE_LIMIT = 8U;
@@ -244,7 +245,8 @@ void mark_retained_listener_closed(const std::shared_ptr<RetainedTcpListener>& l
 }
 
 bool is_port_tunnel_upgrade_request(const HttpRequest& request) {
-    return request.method == "POST" && request.path == "/v1/port/tunnel";
+    return request.method == "POST" &&
+           request.path == server_contract::route_path(server_contract::ROUTE_PORT_TUNNEL);
 }
 
 std::shared_ptr<PortTunnelService> create_port_tunnel_service(const PortForwardLimitConfig& limits) {

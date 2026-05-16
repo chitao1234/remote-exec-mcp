@@ -4,16 +4,10 @@
 #include "base64_codec.h"
 #include "logging.h"
 #include "rpc_failures.h"
+#include "server_contract.h"
 #include "transfer_http_codec.h"
 
 namespace {
-
-const char* DESTINATION_PATH_HEADER = "x-remote-exec-destination-path";
-const char* OVERWRITE_HEADER = "x-remote-exec-overwrite";
-const char* CREATE_PARENT_HEADER = "x-remote-exec-create-parent";
-const char* SOURCE_TYPE_HEADER = "x-remote-exec-source-type";
-const char* COMPRESSION_HEADER = "x-remote-exec-compression";
-const char* SYMLINK_MODE_HEADER = "x-remote-exec-symlink-mode";
 
 std::string missing_header_message(const char* name) {
     return std::string("missing header `") + name + "`";
@@ -58,7 +52,8 @@ bool parse_create_parent(const std::string& value) {
         return false;
     }
     throw TransferFailure(TransferRpcCode::BadRequest,
-                          invalid_header_message(CREATE_PARENT_HEADER, "expected `true` or `false`"));
+                          invalid_header_message(
+                              server_contract::TRANSFER_CREATE_PARENT_HEADER, "expected `true` or `false`"));
 }
 
 std::string decode_destination_path_header(const std::string& encoded) {
@@ -67,7 +62,8 @@ std::string decode_destination_path_header(const std::string& encoded) {
     } catch (const std::runtime_error& ex) {
         throw TransferFailure(
             TransferRpcCode::BadRequest,
-            invalid_header_message(DESTINATION_PATH_HEADER, "expected base64-encoded UTF-8 path: " + std::string(ex.what())));
+            invalid_header_message(server_contract::TRANSFER_DESTINATION_PATH_HEADER,
+                                   "expected base64-encoded UTF-8 path: " + std::string(ex.what())));
     }
 }
 
@@ -82,32 +78,38 @@ void require_uncompressed_transfer(const std::string& compression) {
 
 TransferImportMetadata parse_transfer_import_metadata(const HttpRequest& request) {
     TransferImportMetadata metadata;
-    metadata.destination_path = decode_destination_path_header(required_header(request, DESTINATION_PATH_HEADER));
-    const std::string overwrite = required_header(request, OVERWRITE_HEADER);
+    metadata.destination_path =
+        decode_destination_path_header(required_header(request, server_contract::TRANSFER_DESTINATION_PATH_HEADER));
+    const std::string overwrite = required_header(request, server_contract::TRANSFER_OVERWRITE_HEADER);
     if (!parse_transfer_overwrite_wire_value(overwrite, &metadata.overwrite)) {
         throw TransferFailure(TransferRpcCode::BadRequest,
-                              invalid_header_message(OVERWRITE_HEADER, "unsupported value `" + overwrite + "`"));
+                              invalid_header_message(server_contract::TRANSFER_OVERWRITE_HEADER,
+                                                     "unsupported value `" + overwrite + "`"));
     }
-    metadata.create_parent = parse_create_parent(required_header(request, CREATE_PARENT_HEADER));
-    const std::string source_type = required_header(request, SOURCE_TYPE_HEADER);
+    metadata.create_parent =
+        parse_create_parent(required_header(request, server_contract::TRANSFER_CREATE_PARENT_HEADER));
+    const std::string source_type = required_header(request, server_contract::TRANSFER_SOURCE_TYPE_HEADER);
     if (!parse_transfer_source_type_wire_value(source_type, &metadata.source_type)) {
         throw TransferFailure(TransferRpcCode::BadRequest,
-                              invalid_header_message(SOURCE_TYPE_HEADER, "unsupported value `" + source_type + "`"));
+                              invalid_header_message(server_contract::TRANSFER_SOURCE_TYPE_HEADER,
+                                                     "unsupported value `" + source_type + "`"));
     }
-    metadata.compression = optional_header_or(request, COMPRESSION_HEADER, "none");
-    require_one_of(COMPRESSION_HEADER, metadata.compression, {"none", "zstd"});
-    const std::string symlink_mode = optional_header_or(request, SYMLINK_MODE_HEADER, "preserve");
+    metadata.compression = optional_header_or(request, server_contract::TRANSFER_COMPRESSION_HEADER, "none");
+    require_one_of(server_contract::TRANSFER_COMPRESSION_HEADER, metadata.compression, {"none", "zstd"});
+    const std::string symlink_mode =
+        optional_header_or(request, server_contract::TRANSFER_SYMLINK_MODE_HEADER, "preserve");
     if (!parse_transfer_symlink_mode_wire_value(symlink_mode, &metadata.symlink_mode)) {
         throw TransferFailure(TransferRpcCode::BadRequest,
-                              invalid_header_message(SYMLINK_MODE_HEADER, "unsupported value `" + symlink_mode + "`"));
+                              invalid_header_message(server_contract::TRANSFER_SYMLINK_MODE_HEADER,
+                                                     "unsupported value `" + symlink_mode + "`"));
     }
     return metadata;
 }
 
 void write_transfer_export_headers(HttpResponse& response, const ExportedPayload& payload) {
-    response.headers["Content-Type"] = "application/octet-stream";
-    response.headers["x-remote-exec-source-type"] = transfer_source_type_wire_value(payload.source_type);
-    response.headers["x-remote-exec-compression"] = "none";
+    response.headers["Content-Type"] = server_contract::TRANSFER_EXPORT_CONTENT_TYPE;
+    response.headers[server_contract::TRANSFER_SOURCE_TYPE_HEADER] = transfer_source_type_wire_value(payload.source_type);
+    response.headers[server_contract::TRANSFER_COMPRESSION_HEADER] = "none";
 }
 
 Json transfer_warnings_json(const std::vector<TransferWarning>& warnings) {
