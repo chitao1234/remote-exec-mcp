@@ -12,15 +12,6 @@ use crate::daemon_client::{DaemonClientError, TransferExportResponse, TransferEx
 
 use super::{TargetBackend, ensure_expected_daemon_name};
 
-macro_rules! dispatch_backend {
-    ($self:expr, $method:ident ( $($arg:expr),* $(,)? )) => {{
-        match &$self.backend {
-            TargetBackend::Remote(client) => client.$method($($arg),*).await,
-            TargetBackend::Local(client) => client.$method($($arg),*).await,
-        }
-    }};
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CachedDaemonInfo {
     pub identity: DaemonIdentity,
@@ -90,63 +81,49 @@ impl TargetHandle {
     }
 
     pub(crate) async fn target_info(&self) -> Result<TargetInfoResponse, DaemonClientError> {
-        dispatch_backend!(self, target_info())
+        self.backend.target_info().await
     }
 
     pub(crate) async fn exec_start(
         &self,
         req: &ExecStartRequest,
     ) -> Result<ExecResponse, DaemonClientError> {
-        dispatch_backend!(self, exec_start(req))
+        self.backend.exec_start(req).await
     }
 
     pub(crate) async fn exec_write(
         &self,
         req: &ExecWriteRequest,
     ) -> Result<ExecResponse, DaemonClientError> {
-        dispatch_backend!(self, exec_write(req))
+        self.backend.exec_write(req).await
     }
 
     pub(crate) async fn patch_apply(
         &self,
         req: &PatchApplyRequest,
     ) -> Result<PatchApplyResponse, DaemonClientError> {
-        dispatch_backend!(self, patch_apply(req))
+        self.backend.patch_apply(req).await
     }
 
     pub(crate) async fn image_read(
         &self,
         req: &ImageReadRequest,
     ) -> Result<ImageReadResponse, DaemonClientError> {
-        dispatch_backend!(self, image_read(req))
+        self.backend.image_read(req).await
     }
 
     pub(crate) fn as_remote(&self) -> Option<RemoteTargetHandle<'_>> {
-        match &self.backend {
-            TargetBackend::Remote(client) => Some(RemoteTargetHandle {
-                handle: self,
-                client,
-            }),
-            TargetBackend::Local(_) => None,
-        }
+        self.backend.remote_client().map(|client| RemoteTargetHandle {
+            handle: self,
+            client,
+        })
     }
 
     pub(crate) async fn port_tunnel(
         &self,
         max_queued_bytes: usize,
     ) -> Result<crate::port_forward::PortTunnel, DaemonClientError> {
-        match &self.backend {
-            TargetBackend::Remote(client) => {
-                crate::port_forward::PortTunnel::from_stream_with_max_queued_bytes(
-                    client.port_tunnel().await?,
-                    max_queued_bytes,
-                )
-            }
-            TargetBackend::Local(client) => {
-                crate::port_forward::PortTunnel::local(client.port_tunnel_state(), max_queued_bytes)
-                    .await
-            }
-        }
+        self.backend.port_tunnel(max_queued_bytes).await
     }
 
     pub(crate) async fn clear_cached_daemon_info(&self) {

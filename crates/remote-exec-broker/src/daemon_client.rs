@@ -410,7 +410,7 @@ impl DaemonClient {
             })?
             .map_err(|err| self.rpc_transport_error("/v1/port/tunnel", started, err))?;
         if response.status() != reqwest::StatusCode::SWITCHING_PROTOCOLS {
-            return Err(decode_rpc_error_lenient(response).await);
+            return Err(decode_rpc_error(response, RpcErrorDecodePolicy::Lenient).await);
         }
         let mut upgraded = tokio::time::timeout(PORT_TUNNEL_UPGRADE_TIMEOUT, response.upgrade())
             .await
@@ -725,8 +725,12 @@ impl DaemonClient {
 
         log_error(response.status());
         match decode_policy {
-            RpcErrorDecodePolicy::Strict => Err(decode_rpc_error_strict(response).await),
-            RpcErrorDecodePolicy::Lenient => Err(decode_rpc_error_lenient(response).await),
+            RpcErrorDecodePolicy::Strict => {
+                Err(decode_rpc_error(response, RpcErrorDecodePolicy::Strict).await)
+            }
+            RpcErrorDecodePolicy::Lenient => {
+                Err(decode_rpc_error(response, RpcErrorDecodePolicy::Lenient).await)
+            }
         }
     }
 
@@ -819,19 +823,17 @@ pub(crate) fn normalize_tool_result<T>(
     result.map_err(|err| err.into_tool_error(rpc_mode))
 }
 
-async fn decode_rpc_error_strict(response: reqwest::Response) -> DaemonClientError {
+async fn decode_rpc_error(
+    response: reqwest::Response,
+    decode_policy: RpcErrorDecodePolicy,
+) -> DaemonClientError {
     let status = response.status();
     match response.text().await {
         Ok(body) => decode_rpc_error_body(status, body),
-        Err(err) => DaemonClientError::Transport(err.into()),
-    }
-}
-
-async fn decode_rpc_error_lenient(response: reqwest::Response) -> DaemonClientError {
-    let status = response.status();
-    match response.text().await {
-        Ok(body) => decode_rpc_error_body(status, body),
-        Err(err) => decode_rpc_error_body(status, err.to_string()),
+        Err(err) => match decode_policy {
+            RpcErrorDecodePolicy::Strict => DaemonClientError::Transport(err.into()),
+            RpcErrorDecodePolicy::Lenient => decode_rpc_error_body(status, err.to_string()),
+        },
     }
 }
 

@@ -274,26 +274,6 @@ impl LocalTargetConfig {
         }
     }
 
-    pub(crate) fn embedded_port_forward_host_config(
-        default_workdir: PathBuf,
-    ) -> EmbeddedHostConfig {
-        EmbeddedHostConfig {
-            target: LOCAL_TARGET_NAME.to_string(),
-            default_workdir,
-            windows_posix_root: None,
-            sandbox: None,
-            enable_transfer_compression: false,
-            transfer_limits: TransferLimits::default(),
-            max_open_sessions: DEFAULT_MAX_OPEN_SESSIONS,
-            allow_login_shell: false,
-            pty: PtyMode::None,
-            default_shell: None,
-            yield_time: YieldTimeConfig::default(),
-            port_forward_limits: HostPortForwardLimits::default(),
-            experimental_apply_patch_target_encoding_autodetect: false,
-            process_environment: ProcessEnvironment::capture_current(),
-        }
-    }
 }
 
 impl McpServerConfig {
