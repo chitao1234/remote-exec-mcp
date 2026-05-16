@@ -47,12 +47,8 @@ pub struct ExportPathResult {
     pub warnings: Vec<TransferWarning>,
 }
 
-pub(crate) fn host_policy() -> PathPolicy {
-    host_path::host_path_policy()
-}
-
 pub(crate) fn host_path(raw: &str, windows_posix_root: Option<&Path>) -> anyhow::Result<PathBuf> {
-    let policy = host_policy();
+    let policy = host_path::host_path_policy();
     Ok(
         host_path::resolve_absolute_input_path(raw, windows_posix_root)
             .unwrap_or_else(|| PathBuf::from(normalize_for_system(policy, raw))),

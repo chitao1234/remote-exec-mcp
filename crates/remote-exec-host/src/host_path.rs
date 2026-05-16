@@ -1,21 +1,11 @@
 use std::path::{Path, PathBuf};
 
-use remote_exec_proto::path::{
-    PathPolicy, is_absolute_for_policy, linux_path_policy, normalize_for_system,
-    windows_path_policy,
-};
+use remote_exec_proto::path::{is_absolute_for_policy, normalize_for_system};
 
-pub fn host_path_policy() -> PathPolicy {
-    host_path_policy_for_platform(cfg!(windows))
-}
+#[cfg(windows)]
+use remote_exec_proto::path::windows_path_policy;
 
-fn host_path_policy_for_platform(is_windows: bool) -> PathPolicy {
-    if is_windows {
-        windows_path_policy()
-    } else {
-        linux_path_policy()
-    }
-}
+pub use remote_exec_proto::path::host_policy as host_path_policy;
 
 pub fn is_input_path_absolute(raw: &str, windows_posix_root: Option<&Path>) -> bool {
     resolve_absolute_input_path(raw, windows_posix_root).is_some()

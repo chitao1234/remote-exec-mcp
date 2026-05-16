@@ -102,7 +102,7 @@ pub fn authorize_path(
     if let Some(deny_root) = rules
         .deny
         .iter()
-        .find(|deny_root| path_is_within(deny_root, &resolved))
+        .find(|deny_root| path_compare::path_is_within(&resolved, deny_root))
     {
         return Err(SandboxError::denied(format!(
             "{} access to `{}` is denied by sandbox rule `{}`",
@@ -116,7 +116,7 @@ pub fn authorize_path(
         || rules
             .allow
             .iter()
-            .any(|allow_root| path_is_within(allow_root, &resolved))
+            .any(|allow_root| path_compare::path_is_within(&resolved, allow_root))
     {
         return Ok(());
     }
@@ -216,10 +216,6 @@ fn lexical_normalize(path: &Path) -> PathBuf {
     }
 
     normalized
-}
-
-fn path_is_within(root: &Path, path: &Path) -> bool {
-    path_compare::path_is_within(path, root)
 }
 
 #[cfg(test)]
