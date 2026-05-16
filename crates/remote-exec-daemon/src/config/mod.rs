@@ -179,23 +179,7 @@ impl Deref for ValidatedDaemonConfig {
 
 impl From<DaemonConfig> for HostRuntimeConfig {
     fn from(value: DaemonConfig) -> Self {
-        Self {
-            target: value.target,
-            default_workdir: value.default_workdir,
-            windows_posix_root: value.windows_posix_root,
-            sandbox: value.sandbox,
-            enable_transfer_compression: value.enable_transfer_compression,
-            transfer_limits: value.transfer_limits,
-            max_open_sessions: value.max_open_sessions,
-            allow_login_shell: value.allow_login_shell,
-            pty: value.pty,
-            default_shell: value.default_shell,
-            yield_time: value.yield_time,
-            port_forward_limits: value.port_forward_limits,
-            experimental_apply_patch_target_encoding_autodetect: value
-                .experimental_apply_patch_target_encoding_autodetect,
-            process_environment: value.process_environment,
-        }
+        Self::from(&value)
     }
 }
 

@@ -199,13 +199,12 @@ impl TargetConfig {
         self.validate_https_transport(name)
     }
 
-    pub(crate) fn transport_kind(&self, name: &str) -> anyhow::Result<TargetTransportKind> {
-        self.validate(name)?;
-        Ok(if self.base_url.starts_with("http://") {
+    pub(crate) fn transport_kind(&self) -> TargetTransportKind {
+        if self.base_url.starts_with("http://") {
             TargetTransportKind::Http
         } else {
             TargetTransportKind::Https
-        })
+        }
     }
 
     fn validate_http_transport(&self, name: &str) -> anyhow::Result<()> {
