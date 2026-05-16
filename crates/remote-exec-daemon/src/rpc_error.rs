@@ -12,7 +12,7 @@ pub(crate) fn bad_request(message: impl Into<String>) -> RpcError {
 pub(crate) fn host_rpc_error_response(err: HostRpcError) -> RpcError {
     let (status, body) = err.into_http_rpc_parts("daemon");
     (
-        StatusCode::from_u16(status).expect("normalized HostRpcError status is valid"),
+        StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
         Json(body),
     )
 }

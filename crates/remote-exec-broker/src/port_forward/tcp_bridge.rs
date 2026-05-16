@@ -821,14 +821,17 @@ async fn close_tcp_pair_if_fully_eof(
     if !fully_eof {
         return Ok(None);
     }
-    let stream = remove_tcp_stream_entry_and_settle_active(
+    let Some(stream) = remove_tcp_stream_entry_and_settle_active(
         runtime,
         state,
         connect_stream_id,
         TcpActiveStreamSettlement::Release,
     )
     .await
-    .expect("fully drained tcp stream exists");
+    else {
+        debug_assert!(false, "fully drained tcp stream exists");
+        return Ok(None);
+    };
     let listen_stream_id = stream.listen_stream_id;
     if let Err(err) = connect_tunnel.close_stream(connect_stream_id).await {
         if is_retryable_transport_error(&err) {
@@ -898,8 +901,7 @@ async fn drop_overflowed_pending_tcp_stream(
         connect_stream_id,
         TcpActiveStreamSettlement::Dropped,
     )
-    .await
-    .expect("pending tcp stream exists");
+    .await;
     let _ = connect_tunnel.close_stream(connect_stream_id).await;
     let _ = listen_tunnel.close_stream(listen_stream_id).await;
 }
