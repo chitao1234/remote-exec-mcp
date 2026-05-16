@@ -8,11 +8,11 @@ use remote_exec_proto::port_tunnel::{
 };
 use remote_exec_proto::public::ForwardPortProtocol as PublicForwardPortProtocol;
 
+use crate::port_forward::PORT_FORWARD_TUNNEL_READY_TIMEOUT;
 use crate::port_forward::side::SideHandle;
 use crate::port_forward::tunnel::{
     PortTunnel, decode_tunnel_meta, encode_tunnel_meta, tunnel_error,
 };
-use crate::port_forward::PORT_FORWARD_TUNNEL_READY_TIMEOUT;
 
 pub(super) struct OpenListenSession {
     pub(super) tunnel: Arc<PortTunnel>,

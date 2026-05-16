@@ -11,11 +11,11 @@ use crate::{
 };
 
 use super::{
-    session, shell,
     policy::{
         ensure_sandbox_access, finish_response, has_exited, internal_error, poll_once, poll_until,
         resolve_workdir, running_response, write_chars, write_yield_time_operation,
     },
+    session, shell,
     store::{SessionLease, SessionLockError},
     timing::EXEC_POLL_INTERVAL,
 };

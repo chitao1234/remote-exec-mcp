@@ -1,8 +1,8 @@
-mod backend;
 mod capabilities;
+mod dispatch;
 mod handle;
 
-pub(crate) use backend::TargetBackend;
+pub(crate) use dispatch::TargetBackend;
 pub(crate) use handle::RemoteTargetHandle;
 pub use handle::{CachedDaemonInfo, TargetHandle};
 
