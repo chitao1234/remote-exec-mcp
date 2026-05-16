@@ -338,15 +338,25 @@ void mark_tcp_stream_closed(const std::shared_ptr<TunnelTcpStream>& stream) {
     }
 }
 
+bool close_udp_socket_locked(TunnelUdpSocket* socket_value) {
+    if (socket_value->closed) {
+        return false;
+    }
+    socket_value->closed = true;
+    shutdown_socket(socket_value->socket.get());
+    socket_value->socket.reset();
+    if (socket_value->udp_bind_budget_acquired) {
+        socket_value->udp_bind_budget_acquired = false;
+        return true;
+    }
+    return false;
+}
+
 void mark_udp_socket_closed(const std::shared_ptr<TunnelUdpSocket>& socket_value) {
     std::shared_ptr<PortTunnelService> service_to_release;
-    BasicLockGuard lock(socket_value->mutex);
-    if (!socket_value->closed) {
-        socket_value->closed = true;
-        shutdown_socket(socket_value->socket.get());
-        socket_value->socket.reset();
-        if (socket_value->udp_bind_budget_acquired) {
-            socket_value->udp_bind_budget_acquired = false;
+    {
+        BasicLockGuard lock(socket_value->mutex);
+        if (close_udp_socket_locked(socket_value.get())) {
             service_to_release = socket_value->service.lock();
         }
     }
@@ -391,15 +401,25 @@ int wait_socket_readable(SOCKET socket, unsigned long timeout_ms) {
 #endif
 }
 
+bool close_retained_listener_locked(RetainedTcpListener* listener) {
+    if (listener->closed) {
+        return false;
+    }
+    listener->closed = true;
+    shutdown_socket(listener->listener.get());
+    listener->listener.reset();
+    if (listener->retained_listener_budget_acquired) {
+        listener->retained_listener_budget_acquired = false;
+        return true;
+    }
+    return false;
+}
+
 void mark_retained_listener_closed(const std::shared_ptr<RetainedTcpListener>& listener) {
     std::shared_ptr<PortTunnelService> service_to_release;
-    BasicLockGuard lock(listener->mutex);
-    if (!listener->closed) {
-        listener->closed = true;
-        shutdown_socket(listener->listener.get());
-        listener->listener.reset();
-        if (listener->retained_listener_budget_acquired) {
-            listener->retained_listener_budget_acquired = false;
+    {
+        BasicLockGuard lock(listener->mutex);
+        if (close_retained_listener_locked(listener.get())) {
             service_to_release = listener->service.lock();
         }
     }

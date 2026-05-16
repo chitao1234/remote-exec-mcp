@@ -56,10 +56,12 @@ struct RetainedTcpListener {
 
 void mark_tcp_stream_closed(const std::shared_ptr<TunnelTcpStream>& stream);
 void mark_udp_socket_closed(const std::shared_ptr<TunnelUdpSocket>& socket_value);
+bool close_udp_socket_locked(TunnelUdpSocket* socket_value);
 bool tcp_stream_closed(const std::shared_ptr<TunnelTcpStream>& stream);
 bool udp_socket_closed(const std::shared_ptr<TunnelUdpSocket>& socket_value);
 bool retained_listener_closed(const std::shared_ptr<RetainedTcpListener>& listener);
 void mark_retained_listener_closed(const std::shared_ptr<RetainedTcpListener>& listener);
+bool close_retained_listener_locked(RetainedTcpListener* listener);
 
 class ConnectionLocalStreams {
 public:

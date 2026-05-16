@@ -16,15 +16,7 @@ void close_retained_listener_for_service(const std::shared_ptr<RetainedTcpListen
     bool release_budget = false;
     {
         BasicLockGuard lock(listener->mutex);
-        if (!listener->closed) {
-            listener->closed = true;
-            shutdown_socket(listener->listener.get());
-            listener->listener.reset();
-            if (listener->retained_listener_budget_acquired) {
-                listener->retained_listener_budget_acquired = false;
-                release_budget = true;
-            }
-        }
+        release_budget = close_retained_listener_locked(listener.get());
     }
     if (release_budget) {
         service.release_retained_listener();
@@ -35,15 +27,7 @@ void close_udp_socket_for_service(const std::shared_ptr<TunnelUdpSocket>& socket
     bool release_budget = false;
     {
         BasicLockGuard lock(socket_value->mutex);
-        if (!socket_value->closed) {
-            socket_value->closed = true;
-            shutdown_socket(socket_value->socket.get());
-            socket_value->socket.reset();
-            if (socket_value->udp_bind_budget_acquired) {
-                socket_value->udp_bind_budget_acquired = false;
-                release_budget = true;
-            }
-        }
+        release_budget = close_udp_socket_locked(socket_value.get());
     }
     if (release_budget) {
         service.release_udp_bind();
