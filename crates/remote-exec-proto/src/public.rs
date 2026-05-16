@@ -95,7 +95,7 @@ mod tests {
             dropped_tcp_streams: 2,
             dropped_udp_datagrams: 3,
             reconnect_attempts: 4,
-            last_reconnect_at: Some(Timestamp("2026-05-08T00:00:00Z".to_string())),
+            last_reconnect_at: Some(Timestamp::from_unix_secs(1715126400)),
             limits: ForwardPortLimitSummary {
                 max_active_tcp_streams: 256,
                 max_udp_peers: 256,

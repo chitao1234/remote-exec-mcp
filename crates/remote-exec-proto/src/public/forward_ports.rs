@@ -107,7 +107,23 @@ pub struct ForwardPortEntry {
 
 #[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(transparent)]
-pub struct Timestamp(pub String);
+pub struct Timestamp(String);
+
+impl Timestamp {
+    pub fn now() -> Self {
+        Self(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+                .to_string(),
+        )
+    }
+
+    pub fn from_unix_secs(secs: u64) -> Self {
+        Self(secs.to_string())
+    }
+}
 
 #[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

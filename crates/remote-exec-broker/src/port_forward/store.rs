@@ -253,13 +253,6 @@ impl PortForwardStoreState {
     }
 }
 
-fn unix_timestamp_string() -> String {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-        .to_string()
-}
 
 fn ensure_reconnect_capacity(
     state: &mut PortForwardStoreState,
@@ -285,7 +278,7 @@ fn ensure_reconnect_capacity(
 
 fn prepare_reconnect_entry(entry: &mut ForwardPortEntry) {
     entry.reconnect_attempts += 1;
-    entry.last_reconnect_at = Some(Timestamp(unix_timestamp_string()));
+    entry.last_reconnect_at = Some(Timestamp::now());
 }
 
 fn side_state_mut(
