@@ -60,9 +60,13 @@ BASIC_MUTEX_WINDOWS_SRCS = \
 	$(SOURCE_PREFIX)src/basic_mutex.cpp \
 	$(SOURCE_PREFIX)src/basic_mutex_win32.cpp
 
-SERVER_TRANSPORT_POSIX_SRCS = $(SOURCE_PREFIX)src/server_transport.cpp
+SERVER_TRANSPORT_POSIX_SRCS = \
+	$(SOURCE_PREFIX)src/server_transport.cpp \
+	$(SOURCE_PREFIX)src/server_transport_posix.cpp
 
-SERVER_TRANSPORT_WINDOWS_SRCS = $(SOURCE_PREFIX)src/server_transport.cpp
+SERVER_TRANSPORT_WINDOWS_SRCS = \
+	$(SOURCE_PREFIX)src/server_transport.cpp \
+	$(SOURCE_PREFIX)src/server_transport_win32.cpp
 
 BASE_COMMON_SRCS_NO_MAIN = \
 	$(SOURCE_PREFIX)src/config.cpp \

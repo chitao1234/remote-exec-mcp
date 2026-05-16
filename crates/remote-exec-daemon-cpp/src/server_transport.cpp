@@ -1,165 +1,22 @@
 #include <algorithm>
-#include <cctype>
-#include <cerrno>
 #include <climits>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
-#include <limits>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 
 #ifdef _WIN32
-#include <windows.h>
-#include <winsock2.h>
 #include <ws2tcpip.h>
 #else
-#include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
-#include <signal.h>
 #include <sys/socket.h>
-#include <sys/time.h>
-#include <sys/types.h>
-#include <unistd.h>
 #endif
 
 #include "http_codec.h"
 #include "http_request.h"
 #include "server_transport.h"
-#include "win32_error.h"
-
-namespace {
-
-std::string socket_error_message_from_code(const std::string& operation, int error) {
-#ifndef _WIN32
-    std::ostringstream out;
-    out << operation << " failed";
-    out << ": " << std::strerror(error);
-    return out.str();
-#else
-    return error_message_from_code(operation.c_str(), static_cast<unsigned long>(error));
-#endif
-}
-
-void throw_socket_option_error(const std::string& option, int error) {
-    throw std::runtime_error(socket_error_message_from_code("setsockopt(" + option + ")", error));
-}
-
-#ifndef _WIN32
-bool set_socket_cloexec_flag(SOCKET socket) {
-    const int flags = fcntl(socket, F_GETFD, 0);
-    if (flags < 0) {
-        return false;
-    }
-    return fcntl(socket, F_SETFD, flags | FD_CLOEXEC) == 0;
-}
-#endif
-
-} // namespace
-
-void close_socket(SOCKET socket) {
-#ifdef _WIN32
-    closesocket(socket);
-#else
-    close(socket);
-#endif
-}
-
-void shutdown_socket(SOCKET socket) {
-#ifdef _WIN32
-    shutdown(socket, SD_BOTH);
-#else
-    shutdown(socket, SHUT_RDWR);
-#endif
-}
-
-SOCKET create_socket_cloexec(int family, int type, int protocol) {
-#ifdef _WIN32
-    return socket(family, type, protocol);
-#else
-    SOCKET created = INVALID_SOCKET;
-#ifdef SOCK_CLOEXEC
-    created = socket(family, type | SOCK_CLOEXEC, protocol);
-    if (created != INVALID_SOCKET) {
-        return created;
-    }
-    if (errno != EINVAL) {
-        return INVALID_SOCKET;
-    }
-#endif
-    created = socket(family, type, protocol);
-    if (created == INVALID_SOCKET) {
-        return INVALID_SOCKET;
-    }
-    if (set_socket_cloexec_flag(created)) {
-        return created;
-    }
-    const int cloexec_error = errno;
-    close_socket(created);
-    errno = cloexec_error;
-    return INVALID_SOCKET;
-#endif
-}
-
-void set_socket_timeout_ms(SOCKET socket, unsigned long timeout_ms) {
-#ifdef _WIN32
-    const DWORD value = static_cast<DWORD>(timeout_ms);
-    if (setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&value), sizeof(value)) != 0) {
-        throw_socket_option_error("SO_RCVTIMEO", WSAGetLastError());
-    }
-    if (setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&value), sizeof(value)) != 0) {
-        throw_socket_option_error("SO_SNDTIMEO", WSAGetLastError());
-    }
-#else
-    timeval value;
-    value.tv_sec = static_cast<long>(timeout_ms / 1000UL);
-    value.tv_usec = static_cast<long>((timeout_ms % 1000UL) * 1000UL);
-    if (setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &value, sizeof(value)) != 0) {
-        throw_socket_option_error("SO_RCVTIMEO", errno);
-    }
-    if (setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, &value, sizeof(value)) != 0) {
-        throw_socket_option_error("SO_SNDTIMEO", errno);
-    }
-#endif
-}
-
-int last_socket_error() {
-#ifdef _WIN32
-    return WSAGetLastError();
-#else
-    return errno;
-#endif
-}
-
-std::string socket_error_message(const std::string& operation) {
-    return socket_error_message_from_code(operation, last_socket_error());
-}
-
-bool would_block_error(int error) {
-#ifdef _WIN32
-    return error == WSAEWOULDBLOCK;
-#else
-    return error == EAGAIN || error == EWOULDBLOCK;
-#endif
-}
-
-bool peer_disconnected_send_error(int error) {
-#ifdef _WIN32
-    return error == WSAECONNABORTED || error == WSAECONNRESET || error == WSAESHUTDOWN;
-#else
-    return error == EPIPE || error == ECONNRESET || error == ENOTCONN;
-#endif
-}
-
-bool receive_timeout_error(int error) {
-#ifdef _WIN32
-    return error == WSAETIMEDOUT || error == WSAEWOULDBLOCK;
-#else
-    return error == EAGAIN || error == EWOULDBLOCK;
-#endif
-}
+#include "server_transport_internal.h"
 
 std::size_t bounded_socket_io_size(std::size_t remaining) {
     const std::size_t max_chunk = static_cast<std::size_t>(INT_MAX);
@@ -225,23 +82,6 @@ void UniqueSocket::reset(SOCKET socket) {
         close_socket(socket_);
     }
     socket_ = socket;
-}
-
-NetworkSession::NetworkSession() {
-#ifdef _WIN32
-    WSADATA wsa_data;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
-        throw std::runtime_error("WSAStartup failed");
-    }
-#else
-    signal(SIGPIPE, SIG_IGN);
-#endif
-}
-
-NetworkSession::~NetworkSession() {
-#ifdef _WIN32
-    WSACleanup();
-#endif
 }
 
 bool try_read_http_request_head(SOCKET client, std::size_t max_header_bytes, HttpRequestHead* head) {
@@ -494,22 +334,4 @@ SOCKET create_listener(const DaemonConfig& config) {
     }
 
     return listener;
-}
-
-SOCKET accept_client(SOCKET listener) {
-    SOCKET client = accept(listener, nullptr, nullptr);
-    if (client == INVALID_SOCKET) {
-        return client;
-    }
-#ifndef _WIN32
-    if (set_socket_cloexec_flag(client)) {
-        return client;
-    }
-    const int cloexec_error = errno;
-    close_socket(client);
-    errno = cloexec_error;
-    return INVALID_SOCKET;
-#else
-    return client;
-#endif
 }
