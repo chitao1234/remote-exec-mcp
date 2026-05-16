@@ -60,6 +60,8 @@ pub struct DaemonConfig {
     pub process_environment: ProcessEnvironment,
     #[serde(default)]
     pub tls: Option<TlsConfig>,
+    #[serde(default = "default_request_timeout_ms")]
+    pub request_timeout_ms: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -111,6 +113,7 @@ impl From<HostRuntimeConfig> for DaemonConfig {
             experimental_apply_patch_target_encoding_autodetect,
             process_environment,
             tls: None,
+            request_timeout_ms: default_request_timeout_ms(),
         }
     }
 }
@@ -138,8 +141,16 @@ impl DaemonConfig {
     pub fn validate(&self) -> anyhow::Result<()> {
         HostRuntimeConfig::from(self).validate()?;
         self.validate_http_auth()?;
+        anyhow::ensure!(
+            self.request_timeout_ms > 0,
+            "request_timeout_ms must be greater than zero"
+        );
         crate::tls::validate_config(self)?;
         Ok(())
+    }
+
+    pub fn request_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(self.request_timeout_ms)
     }
 
     pub fn into_validated(mut self) -> anyhow::Result<ValidatedDaemonConfig> {
@@ -227,4 +238,8 @@ fn default_enable_transfer_compression() -> bool {
 
 fn default_max_open_sessions() -> usize {
     remote_exec_host::config::DEFAULT_MAX_OPEN_SESSIONS
+}
+
+fn default_request_timeout_ms() -> u64 {
+    300_000
 }

@@ -765,6 +765,7 @@ pub(super) async fn spawn_named_daemon_on_listener(
             ca_pem: certs.ca_cert.clone(),
             pinned_client_cert_pem: None,
         }),
+        request_timeout_ms: 300_000,
     };
 
     let task_state = state.clone();

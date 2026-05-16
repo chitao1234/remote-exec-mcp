@@ -465,6 +465,7 @@ expected_daemon_name = {expected_daemon_name}
             experimental_apply_patch_target_encoding_autodetect: false,
             process_environment: remote_exec_daemon::config::ProcessEnvironment::capture_current(),
             tls: None,
+            request_timeout_ms: 300_000,
         }
     }
 

@@ -75,6 +75,7 @@ fn base_daemon_config(
         experimental_apply_patch_target_encoding_autodetect: false,
         process_environment,
         tls: None,
+        request_timeout_ms: 300_000,
     }
 }
 

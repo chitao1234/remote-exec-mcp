@@ -67,6 +67,11 @@ allow_login_shell = true
 #max_ms = 30000
 #min_ms = 250
 
+# Optional. Maximum time in milliseconds the daemon allows a single RPC request
+# to run before returning HTTP 408. Does not apply to port tunnel connections
+# (which are long-lived). Defaults to 300000 (5 minutes).
+#request_timeout_ms = 300000
+
 # Optional daemon-side forwarding limits.
 # Rust daemons enforce all values below daemon-wide. C++ daemon builds expose
 # matching flat INI keys in crates/remote-exec-daemon-cpp/config/daemon-cpp.example.ini.

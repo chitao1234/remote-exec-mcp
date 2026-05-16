@@ -67,6 +67,7 @@ async fn spawn_daemon_with_tls_pty_mode(
             ca_pem: certs.ca_cert.clone(),
             pinned_client_cert_pem: None,
         }),
+        request_timeout_ms: 300_000,
     };
 
     let (shutdown, server_thread) = super::spawn_background_daemon(config, listener);
@@ -147,6 +148,7 @@ pub async fn spawn_daemon_with_pinned_client_cert(
             ca_pem: certs.ca_cert.clone(),
             pinned_client_cert_pem: Some(pinned_client_cert_pem),
         }),
+        request_timeout_ms: 300_000,
     };
 
     let (shutdown, server_thread) = super::spawn_background_daemon(config, listener);
