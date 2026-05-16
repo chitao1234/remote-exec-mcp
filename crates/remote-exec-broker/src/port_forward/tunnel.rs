@@ -57,7 +57,7 @@ impl PortTunnel {
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
-        let (mut reader, mut writer) = tokio::io::split(stream);
+        let (reader, mut writer) = tokio::io::split(stream);
         let (tx, mut write_rx) = mpsc::channel::<QueuedFrame>(128);
         let (read_tx, read_rx) = mpsc::channel::<anyhow::Result<Frame>>(128);
         let (heartbeat_ack_tx, heartbeat_ack_rx) = watch::channel(0u64);
@@ -96,72 +96,13 @@ impl PortTunnel {
         });
         let reader_cancel = cancel.clone();
         let reader_tx = tx.clone();
-        let reader_task = tokio::spawn(async move {
-            let heartbeat_ack_tx = heartbeat_ack_tx;
-            loop {
-                tokio::select! {
-                    _ = reader_cancel.cancelled() => return,
-                    frame = read_frame(&mut reader) => {
-                        match frame {
-                            Ok(frame) => {
-                                match frame.frame_type {
-                                    FrameType::TunnelHeartbeatAck => {
-                                        if let Ok(meta) =
-                                            serde_json::from_slice::<TunnelHeartbeatMeta>(&frame.meta)
-                                        {
-                                            let _ = heartbeat_ack_tx.send(meta.nonce);
-                                        }
-                                        continue;
-                                    }
-                                    FrameType::TunnelHeartbeat => {
-                                        let ack = Frame {
-                                            frame_type: FrameType::TunnelHeartbeatAck,
-                                            flags: 0,
-                                            stream_id: 0,
-                                            meta: frame.meta,
-                                            data: Vec::new(),
-                                        };
-                                        match reader_tx.try_send(QueuedFrame {
-                                            frame: ack,
-                                            charge: 0,
-                                        }) {
-                                            Ok(()) => {}
-                                            Err(mpsc::error::TrySendError::Full(_)) => {
-                                                tracing::debug!(
-                                                    "port tunnel writer queue is full; dropping heartbeat ack"
-                                                );
-                                            }
-                                            Err(mpsc::error::TrySendError::Closed(_)) => return,
-                                        }
-                                        continue;
-                                    }
-                                    _ => {}
-                                }
-                                if read_tx.send(Ok(frame)).await.is_err() {
-                                    return;
-                                }
-                            }
-                            Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
-                                let _ = read_tx
-                                    .send(Err(std::io::Error::new(
-                                        std::io::ErrorKind::UnexpectedEof,
-                                        "port tunnel closed",
-                                    )
-                                    .into()))
-                                    .await;
-                                reader_cancel.cancel();
-                                return;
-                            }
-                            Err(err) => {
-                                let _ = read_tx.send(Err(err.into())).await;
-                                reader_cancel.cancel();
-                                return;
-                            }
-                        }
-                    }
-                }
-            }
-        });
+        let reader_task = tokio::spawn(run_reader_loop(
+            reader,
+            read_tx,
+            reader_tx,
+            heartbeat_ack_tx,
+            reader_cancel,
+        ));
         Ok(Self {
             tx,
             rx: Mutex::new(read_rx),
@@ -276,6 +217,78 @@ async fn wait_for_tunnel_task(
 fn abort_tunnel_task(task: &mut Option<JoinHandle<()>>) {
     if let Some(task) = task.as_ref() {
         task.abort();
+    }
+}
+
+async fn run_reader_loop<R: AsyncRead + Unpin>(
+    mut reader: R,
+    read_tx: mpsc::Sender<anyhow::Result<Frame>>,
+    write_tx: mpsc::Sender<QueuedFrame>,
+    heartbeat_ack_tx: watch::Sender<u64>,
+    cancel: CancellationToken,
+) {
+    loop {
+        tokio::select! {
+            _ = cancel.cancelled() => return,
+            frame = read_frame(&mut reader) => {
+                match frame {
+                    Ok(frame) => {
+                        match frame.frame_type {
+                            FrameType::TunnelHeartbeatAck => {
+                                if let Ok(meta) =
+                                    serde_json::from_slice::<TunnelHeartbeatMeta>(&frame.meta)
+                                {
+                                    let _ = heartbeat_ack_tx.send(meta.nonce);
+                                }
+                                continue;
+                            }
+                            FrameType::TunnelHeartbeat => {
+                                let ack = Frame {
+                                    frame_type: FrameType::TunnelHeartbeatAck,
+                                    flags: 0,
+                                    stream_id: 0,
+                                    meta: frame.meta,
+                                    data: Vec::new(),
+                                };
+                                match write_tx.try_send(QueuedFrame {
+                                    frame: ack,
+                                    charge: 0,
+                                }) {
+                                    Ok(()) => {}
+                                    Err(mpsc::error::TrySendError::Full(_)) => {
+                                        tracing::debug!(
+                                            "port tunnel writer queue is full; dropping heartbeat ack"
+                                        );
+                                    }
+                                    Err(mpsc::error::TrySendError::Closed(_)) => return,
+                                }
+                                continue;
+                            }
+                            _ => {}
+                        }
+                        if read_tx.send(Ok(frame)).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
+                        let _ = read_tx
+                            .send(Err(std::io::Error::new(
+                                std::io::ErrorKind::UnexpectedEof,
+                                "port tunnel closed",
+                            )
+                            .into()))
+                            .await;
+                        cancel.cancel();
+                        return;
+                    }
+                    Err(err) => {
+                        let _ = read_tx.send(Err(err.into())).await;
+                        cancel.cancel();
+                        return;
+                    }
+                }
+            }
+        }
     }
 }
 

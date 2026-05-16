@@ -12,8 +12,8 @@ use axum::response::Response;
 use futures_util::TryStreamExt;
 use http_body_util::BodyExt;
 use remote_exec_proto::rpc::{
-    RpcErrorBody, TransferExportRequest, TransferImportRequest, TransferImportResponse,
-    TransferPathInfoRequest, TransferPathInfoResponse,
+    RpcErrorBody, TransferExportRequest, TransferImportResponse, TransferPathInfoRequest,
+    TransferPathInfoResponse,
 };
 
 use crate::AppState;
@@ -76,7 +76,7 @@ pub async fn import_archive(
     let reader = tokio_util::io::StreamReader::new(
         BodyExt::into_data_stream(body).map_err(std::io::Error::other),
     );
-    let request = TransferImportRequest::from(metadata.clone());
+    let request = metadata.clone();
     let summary = remote_exec_host::transfer::import_archive_local(state, request, reader)
         .await
         .map_err(domain_error_response)?;
