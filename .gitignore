@@ -4,3 +4,4 @@ broker*.toml
 daemon*.toml
 remote-exec-certs/
 .codex/
+.cache/

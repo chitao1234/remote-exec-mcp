@@ -13,6 +13,7 @@
 
 #include "config.h"
 #include "platform.h"
+#include "server_request_utils.h"
 #ifndef _WIN32
 #include "posix_child_reaper.h"
 #endif
@@ -90,17 +91,16 @@ static Json start_test_command(SessionStore& store,
                                unsigned long max_output_tokens,
                                const YieldTimeConfig& yield_time,
                                unsigned long max_open_sessions) {
-    return store.start_command("cpp-test",
-                               command,
-                               workdir,
-                               shell,
-                               false,
-                               tty,
-                               true,
-                               yield_time_ms,
-                               max_output_tokens,
-                               yield_time,
-                               max_open_sessions);
+    ExecStartRequestSpec request;
+    request.cmd = command;
+    request.workdir = workdir;
+    request.shell = shell;
+    request.login_requested = false;
+    request.tty_requested = tty;
+    request.has_yield_time_ms = true;
+    request.yield_time_ms = yield_time_ms;
+    request.max_output_tokens = max_output_tokens;
+    return store.start_command("cpp-test", request, yield_time, max_open_sessions);
 }
 
 static std::string stable_test_shell() {

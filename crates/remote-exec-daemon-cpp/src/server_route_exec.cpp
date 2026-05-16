@@ -13,14 +13,7 @@ HttpResponse handle_exec_start(AppState& state, const HttpRequest& request) {
     try {
         const ExecStartRequestSpec parsed = prepare_exec_start_request(state, request);
         Json exec_response = state.sessions.start_command(state.config.target,
-                                                          parsed.cmd,
-                                                          parsed.workdir,
-                                                          parsed.shell,
-                                                          parsed.login_requested,
-                                                          parsed.tty_requested,
-                                                          parsed.has_yield_time_ms,
-                                                          parsed.yield_time_ms,
-                                                          parsed.max_output_tokens,
+                                                          parsed,
                                                           state.config.yield_time,
                                                           state.config.max_open_sessions);
         log_message(LOG_INFO,

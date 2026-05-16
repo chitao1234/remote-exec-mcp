@@ -12,6 +12,8 @@
 
 static const unsigned long DEFAULT_MAX_OUTPUT_TOKENS = 10000UL;
 
+struct ExecStartRequestSpec;
+
 class UnknownSessionError : public std::runtime_error {
 public:
     explicit UnknownSessionError(const std::string& message) : std::runtime_error(message) {}
@@ -33,14 +35,7 @@ public:
     ~SessionStore();
 
     Json start_command(const std::string& target,
-                       const std::string& command,
-                       const std::string& workdir,
-                       const std::string& shell,
-                       bool login,
-                       bool tty,
-                       bool has_yield_time_ms,
-                       unsigned long yield_time_ms,
-                       unsigned long max_output_tokens,
+                       const ExecStartRequestSpec& request,
                        const YieldTimeConfig& yield_time,
                        unsigned long max_open_sessions);
     Json write_stdin(const std::string& daemon_session_id,

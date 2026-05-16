@@ -8,6 +8,7 @@
 #include "output_renderer.h"
 #include "platform.h"
 #include "process_session.h"
+#include "server_request_utils.h"
 #include "session_pump.h"
 #include "session_pump_internal.h"
 #include "session_response_builder.h"
@@ -398,14 +399,7 @@ bool SessionStore::prune_one_session_for_start(unsigned long max_open_sessions) 
 }
 
 Json SessionStore::start_command(const std::string& target,
-                                 const std::string& command,
-                                 const std::string& workdir,
-                                 const std::string& shell,
-                                 bool login,
-                                 bool tty,
-                                 bool has_yield_time_ms,
-                                 unsigned long yield_time_ms,
-                                 unsigned long max_output_tokens,
+                                 const ExecStartRequestSpec& request,
                                  const YieldTimeConfig& yield_time,
                                  unsigned long max_open_sessions) {
     if (!reserve_pending_start(max_open_sessions)) {
@@ -415,19 +409,19 @@ Json SessionStore::start_command(const std::string& target,
 
     {
         LogMessageBuilder message("start_command");
-        message.quoted_field("cmd_preview", preview_text(command, 120))
-            .quoted_field("workdir", workdir)
-            .quoted_field("shell", shell)
-            .bool_field("login", login)
-            .bool_field("tty", tty);
+        message.quoted_field("cmd_preview", preview_text(request.cmd, 120))
+            .quoted_field("workdir", request.workdir)
+            .quoted_field("shell", request.shell)
+            .bool_field("login", request.login_requested)
+            .bool_field("tty", request.tty_requested);
         log_message(LOG_INFO, "session_store", message.str());
     }
-    std::shared_ptr<LiveSession> session = launch_live_session(command, workdir, shell, login, tty);
+    std::shared_ptr<LiveSession> session = launch_live_session(request.cmd, request.workdir, request.shell, request.login_requested, request.tty_requested);
     start_session_pump(session);
 
-    const unsigned long timeout_ms = resolve_yield_time_ms(yield_time.exec_command, has_yield_time_ms, yield_time_ms);
+    const unsigned long timeout_ms = resolve_yield_time_ms(yield_time.exec_command, request.has_yield_time_ms, request.yield_time_ms);
     BasicLockGuard operation_lock(session->operation_mutex_);
-    const PollResult poll_result = wait_for_session_activity(session, timeout_ms, max_output_tokens);
+    const PollResult poll_result = wait_for_session_activity(session, timeout_ms, request.max_output_tokens);
 
     Json warnings = empty_exec_warnings();
     {
@@ -456,7 +450,7 @@ Json SessionStore::start_command(const std::string& target,
                                                true,
                                                poll_result.exit_code,
                                                poll_result.output,
-                                               max_output_tokens,
+                                               request.max_output_tokens,
                                                empty_exec_warnings());
         {
             LogMessageBuilder message("command completed before session handoff");
@@ -467,7 +461,7 @@ Json SessionStore::start_command(const std::string& target,
     }
 
     return build_session_response(
-        session->id.c_str(), true, session->started_at_ms, false, 0, poll_result.output, max_output_tokens, warnings);
+        session->id.c_str(), true, session->started_at_ms, false, 0, poll_result.output, request.max_output_tokens, warnings);
 }
 
 Json SessionStore::write_stdin(const std::string& daemon_session_id,
