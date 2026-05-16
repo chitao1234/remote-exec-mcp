@@ -3,55 +3,10 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use remote_exec_proto::port_forward::ForwardId;
 use remote_exec_proto::public::{
-    ApplyPatchInput, ExecCommandInput, ForwardPortSpec, ForwardPortsInput, TransferEndpoint,
-    TransferFilesInput, ViewImageInput, WriteStdinInput,
+    ApplyPatchInput, ForwardPortSpec, ForwardPortsInput, TransferEndpoint, ViewImageInput,
 };
 use remote_exec_proto::rpc::ExecPtySize;
 use tokio::io::AsyncReadExt;
-
-#[allow(clippy::too_many_arguments, reason = "CLI field passthrough helper")]
-pub fn build_exec_command_input(
-    target: String,
-    cmd: String,
-    workdir: Option<String>,
-    shell: Option<String>,
-    tty: bool,
-    yield_time_ms: Option<u64>,
-    max_output_tokens: Option<u32>,
-    login: Option<bool>,
-) -> ExecCommandInput {
-    ExecCommandInput {
-        target,
-        cmd,
-        workdir,
-        shell,
-        tty,
-        yield_time_ms,
-        max_output_tokens,
-        login,
-    }
-}
-
-#[allow(clippy::too_many_arguments, reason = "CLI field passthrough helper")]
-pub async fn build_write_stdin_input(
-    session_id: String,
-    chars: Option<String>,
-    chars_file: Option<PathBuf>,
-    yield_time_ms: Option<u64>,
-    max_output_tokens: Option<u32>,
-    pty_rows: Option<u16>,
-    pty_cols: Option<u16>,
-    target: Option<String>,
-) -> anyhow::Result<WriteStdinInput> {
-    Ok(WriteStdinInput {
-        session_id,
-        chars: load_optional_text_input(chars, chars_file).await?,
-        yield_time_ms,
-        max_output_tokens,
-        pty_size: write_stdin_pty_size(pty_rows, pty_cols)?,
-        target,
-    })
-}
 
 pub fn write_stdin_pty_size(
     rows: Option<u16>,
@@ -90,32 +45,6 @@ pub fn build_view_image_input(
         workdir,
         detail,
     }
-}
-
-pub fn build_transfer_files_input(
-    sources: &[String],
-    destination: &str,
-    exclude: Vec<String>,
-    overwrite: remote_exec_proto::public::TransferOverwrite,
-    destination_mode: remote_exec_proto::public::TransferDestinationMode,
-    symlink_mode: remote_exec_proto::public::TransferSymlinkMode,
-    create_parent: bool,
-) -> anyhow::Result<TransferFilesInput> {
-    let endpoints = sources
-        .iter()
-        .map(|endpoint| parse_transfer_endpoint(endpoint))
-        .collect::<anyhow::Result<Vec<_>>>()?;
-
-    Ok(TransferFilesInput {
-        source: None,
-        sources: endpoints,
-        destination: parse_transfer_endpoint(destination)?,
-        exclude,
-        overwrite,
-        destination_mode,
-        symlink_mode,
-        create_parent,
-    })
 }
 
 pub fn build_forward_ports_open_input(

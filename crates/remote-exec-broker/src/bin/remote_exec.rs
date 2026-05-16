@@ -3,10 +3,10 @@ use std::process::ExitCode;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use remote_exec_broker::cli::{
-    build_apply_patch_input, build_exec_command_input, build_forward_ports_close_input,
-    build_forward_ports_list_input, build_forward_ports_open_input, build_transfer_files_input,
-    build_view_image_input, build_write_stdin_input, emit_response, emit_view_image_response,
-    resolve_login_flag, write_image_output,
+    build_apply_patch_input, build_forward_ports_close_input, build_forward_ports_list_input,
+    build_forward_ports_open_input, build_view_image_input, emit_response,
+    emit_view_image_response, load_optional_text_input, parse_transfer_endpoint,
+    resolve_login_flag, write_image_output, write_stdin_pty_size,
 };
 use remote_exec_broker::{Connection, RemoteExecClient, ToolResponse};
 use remote_exec_proto::public::{
@@ -554,32 +554,29 @@ async fn run_forward_ports(
 }
 
 fn exec_command_input(args: ExecCommandArgs) -> remote_exec_proto::public::ExecCommandInput {
-    build_exec_command_input(
-        args.target,
-        args.cmd,
-        args.workdir,
-        args.shell,
-        args.tty,
-        args.yield_time_ms,
-        args.max_output_tokens,
-        resolve_login_flag(args.login, args.no_login),
-    )
+    remote_exec_proto::public::ExecCommandInput {
+        target: args.target,
+        cmd: args.cmd,
+        workdir: args.workdir,
+        shell: args.shell,
+        tty: args.tty,
+        yield_time_ms: args.yield_time_ms,
+        max_output_tokens: args.max_output_tokens,
+        login: resolve_login_flag(args.login, args.no_login),
+    }
 }
 
 async fn write_stdin_input(
     args: WriteStdinArgs,
 ) -> anyhow::Result<remote_exec_proto::public::WriteStdinInput> {
-    build_write_stdin_input(
-        args.session_id,
-        args.chars,
-        args.chars_file,
-        args.yield_time_ms,
-        args.max_output_tokens,
-        args.pty_rows,
-        args.pty_cols,
-        args.target,
-    )
-    .await
+    Ok(remote_exec_proto::public::WriteStdinInput {
+        session_id: args.session_id,
+        chars: load_optional_text_input(args.chars, args.chars_file).await?,
+        yield_time_ms: args.yield_time_ms,
+        max_output_tokens: args.max_output_tokens,
+        pty_size: write_stdin_pty_size(args.pty_rows, args.pty_cols)?,
+        target: args.target,
+    })
 }
 
 async fn apply_patch_input(
@@ -595,15 +592,22 @@ fn view_image_input(args: ViewImageArgs) -> remote_exec_proto::public::ViewImage
 fn transfer_files_input(
     args: TransferFilesArgs,
 ) -> anyhow::Result<remote_exec_proto::public::TransferFilesInput> {
-    build_transfer_files_input(
-        &args.sources,
-        &args.destination,
-        args.exclude,
-        args.overwrite.into(),
-        args.destination_mode.into(),
-        args.symlink_mode.into(),
-        args.create_parent,
-    )
+    let endpoints = args
+        .sources
+        .iter()
+        .map(|endpoint| parse_transfer_endpoint(endpoint))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
+    Ok(remote_exec_proto::public::TransferFilesInput {
+        source: None,
+        sources: endpoints,
+        destination: parse_transfer_endpoint(&args.destination)?,
+        exclude: args.exclude,
+        overwrite: args.overwrite.into(),
+        destination_mode: args.destination_mode.into(),
+        symlink_mode: args.symlink_mode.into(),
+        create_parent: args.create_parent,
+    })
 }
 
 fn forward_ports_input(args: ForwardPortsArgs) -> anyhow::Result<ForwardPortsInput> {
