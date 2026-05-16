@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use remote_exec_proto::port_tunnel::{read_frame, write_frame};
+use remote_exec_test_support::test_helpers;
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
     model::{CallToolRequestParams, CallToolResult, ClientInfo},
@@ -17,9 +18,6 @@ use tokio::task::JoinHandle;
 
 #[path = "../support/streamable_http_child.rs"]
 mod streamable_http_child;
-#[path = "../../../../tests/support/test_helpers.rs"]
-mod test_helpers;
-
 const BROKER_TOOL_CALL_TIMEOUT: Duration = Duration::from_secs(30);
 const BROKER_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 const MULTI_TARGET_READY_TIMEOUT: Duration = Duration::from_secs(20);

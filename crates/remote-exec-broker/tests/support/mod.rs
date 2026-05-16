@@ -5,10 +5,22 @@ pub mod fixture;
 pub mod spawners;
 pub mod streamable_http_child;
 pub mod stub_daemon;
-#[path = "../../../../tests/support/test_helpers.rs"]
-pub mod test_helpers;
-#[path = "../../../../tests/support/transfer_archive.rs"]
-pub mod transfer_archive;
+
+#[allow(
+    unused_imports,
+    reason = "Different broker integration tests use different shared helper subsets"
+)]
+pub mod test_helpers {
+    pub use remote_exec_test_support::test_helpers::*;
+}
+
+#[allow(
+    unused_imports,
+    reason = "Different broker integration tests use different shared helper subsets"
+)]
+pub mod transfer_archive {
+    pub use remote_exec_test_support::transfer_archive::*;
+}
 
 #[allow(
     unused_imports,

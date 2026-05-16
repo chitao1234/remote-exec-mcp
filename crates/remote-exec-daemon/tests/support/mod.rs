@@ -2,10 +2,22 @@
 mod certs;
 pub mod fixture;
 pub mod spawn;
-#[path = "../../../../tests/support/test_helpers.rs"]
-pub mod test_helpers;
-#[path = "../../../../tests/support/transfer_archive.rs"]
-pub mod transfer_archive;
+
+#[allow(
+    unused_imports,
+    reason = "Different daemon integration tests use different shared helper subsets"
+)]
+pub mod test_helpers {
+    pub use remote_exec_test_support::test_helpers::*;
+}
+
+#[allow(
+    unused_imports,
+    reason = "Different daemon integration tests use different shared helper subsets"
+)]
+pub mod transfer_archive {
+    pub use remote_exec_test_support::transfer_archive::*;
+}
 
 #[cfg(windows)]
 #[allow(

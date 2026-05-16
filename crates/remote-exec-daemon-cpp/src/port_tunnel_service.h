@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <map>
 #include <memory>
 #include <thread>
@@ -38,6 +39,9 @@ public:
                              uint32_t stream_id,
                              const std::shared_ptr<TunnelUdpSocket>& socket_value,
                              bool worker_acquired = false);
+    bool spawn_tracked_worker(const char* operation,
+                              bool worker_acquired,
+                              const std::function<void()>& work);
     bool try_acquire_worker();
     void release_worker();
     unsigned long max_workers() const;
@@ -52,9 +56,16 @@ public:
     void release_active_tcp_stream();
 
 private:
+    struct TrackedWorkerThread;
+
     PortTunnelService(const PortTunnelService&);
     PortTunnelService& operator=(const PortTunnelService&);
 
+    void mark_worker_finished(const std::shared_ptr<TrackedWorkerThread>& worker);
+    void collect_finished_workers(std::vector<std::shared_ptr<TrackedWorkerThread>>* finished_workers);
+    void join_workers(const std::vector<std::shared_ptr<TrackedWorkerThread>>& workers);
+    void join_all_workers();
+    void close_all_sessions_for_shutdown();
     bool schedule_session_expiry(const std::shared_ptr<PortTunnelSession>& session);
     bool ensure_expiry_scheduler_started_locked();
     void stop_expiry_scheduler();
@@ -73,6 +84,8 @@ private:
     std::atomic<unsigned long> retained_listeners_;
     std::atomic<unsigned long> udp_binds_;
     std::atomic<unsigned long> active_tcp_streams_;
+    BasicMutex worker_threads_mutex_;
+    std::vector<std::shared_ptr<TrackedWorkerThread>> worker_threads_;
     PortForwardLimitConfig limits_;
     std::map<std::string, std::shared_ptr<PortTunnelSession>> sessions_;
     std::uint64_t next_session_sequence_;
@@ -91,12 +104,12 @@ private:
 
 class PortTunnelWorkerLease {
 public:
-    explicit PortTunnelWorkerLease(const std::shared_ptr<PortTunnelService>& service);
+    explicit PortTunnelWorkerLease(PortTunnelService* service);
     ~PortTunnelWorkerLease();
 
 private:
     PortTunnelWorkerLease(const PortTunnelWorkerLease&);
     PortTunnelWorkerLease& operator=(const PortTunnelWorkerLease&);
 
-    std::shared_ptr<PortTunnelService> service_;
+    PortTunnelService* service_;
 };

@@ -195,6 +195,31 @@ void PortTunnelService::close_session(const std::shared_ptr<PortTunnelSession>& 
     finish_terminal_session_teardown(teardown, *this);
 }
 
+void PortTunnelService::close_all_sessions_for_shutdown() {
+    std::vector<std::shared_ptr<PortTunnelSession>> sessions;
+    {
+        BasicLockGuard store_lock(mutex_);
+        for (std::map<std::string, std::shared_ptr<PortTunnelSession>>::const_iterator it = sessions_.begin();
+             it != sessions_.end();
+             ++it) {
+            sessions.push_back(it->second);
+        }
+        sessions_.clear();
+    }
+
+    for (std::size_t i = 0; i < sessions.size(); ++i) {
+        SessionTeardownState teardown;
+        {
+            BasicLockGuard lock(sessions[i]->mutex);
+            if (sessions[i]->closed || sessions[i]->expired) {
+                continue;
+            }
+            teardown = collect_terminal_session_teardown_locked(sessions[i], false);
+        }
+        finish_terminal_session_teardown(teardown, *this);
+    }
+}
+
 SessionRetainedInstallResult PortTunnelService::install_session_tcp_listener(
     const std::shared_ptr<PortTunnelSession>& session,
     uint32_t stream_id,

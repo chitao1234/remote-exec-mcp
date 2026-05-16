@@ -1605,6 +1605,7 @@ dependencies = [
  "remote-exec-host",
  "remote-exec-pki",
  "remote-exec-proto",
+ "remote-exec-test-support",
  "remote-exec-util",
  "reqwest",
  "rmcp",
@@ -1646,6 +1647,7 @@ dependencies = [
  "remote-exec-host",
  "remote-exec-pki",
  "remote-exec-proto",
+ "remote-exec-test-support",
  "remote-exec-util",
  "reqwest",
  "rustls",
@@ -1726,6 +1728,16 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "remote-exec-test-support"
+version = "0.1.0"
+dependencies = [
+ "tar",
+ "tokio",
+ "toml",
+ "zstd",
 ]
 
 [[package]]

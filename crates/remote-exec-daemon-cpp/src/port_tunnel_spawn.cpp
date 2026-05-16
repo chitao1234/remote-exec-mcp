@@ -1,7 +1,6 @@
 #include "port_tunnel_spawn.h"
 
 #include <atomic>
-#include <functional>
 
 #include "port_tunnel_connection.h"
 #include "port_tunnel_service.h"
@@ -23,62 +22,6 @@ static bool consume_forced_tcp_read_thread_failure() {
     return false;
 }
 #endif
-
-namespace {
-
-#ifdef _WIN32
-struct WorkerThreadContext {
-    std::shared_ptr<PortTunnelService> service;
-    std::function<void()> work;
-};
-
-unsigned __stdcall worker_thread_entry(void* raw_context) {
-    std::unique_ptr<WorkerThreadContext> context(static_cast<WorkerThreadContext*>(raw_context));
-    PortTunnelWorkerLease lease(context->service);
-    context->work();
-    return 0;
-}
-#endif
-
-bool spawn_worker_thread(const char* operation,
-                         const std::shared_ptr<PortTunnelService>& service,
-                         bool worker_acquired,
-                         const std::function<void()>& work) {
-    if (!worker_acquired && !service->try_acquire_worker()) {
-        return false;
-    }
-#ifdef _WIN32
-    std::unique_ptr<WorkerThreadContext> context(new WorkerThreadContext());
-    context->service = service;
-    context->work = work;
-    HANDLE handle = begin_win32_thread(worker_thread_entry, context.get());
-    if (handle != nullptr) {
-        context.release();
-        CloseHandle(handle);
-        return true;
-    }
-    service->release_worker();
-    return false;
-#else
-    try {
-        std::thread([service, work]() {
-            PortTunnelWorkerLease lease(service);
-            work();
-        }).detach();
-    } catch (const std::exception& ex) {
-        log_tunnel_exception(operation, ex);
-        service->release_worker();
-        return false;
-    } catch (...) {
-        log_unknown_tunnel_exception(operation);
-        service->release_worker();
-        return false;
-    }
-    return true;
-#endif
-}
-
-} // namespace
 
 TcpReadStartGate::TcpReadStartGate() : released_(false) {
 }
@@ -111,12 +54,15 @@ bool spawn_tcp_read_thread(const std::shared_ptr<PortTunnelService>& service,
         return false;
     }
 #endif
-    return spawn_worker_thread("spawn tcp read thread", service, worker_acquired, [tunnel, stream_id, stream, start_gate]() {
-        if (start_gate.get() != nullptr) {
-            start_gate->wait();
-        }
-        tunnel->tcp_read_loop(stream_id, stream);
-    });
+    return service->spawn_tracked_worker(
+        "spawn tcp read thread",
+        worker_acquired,
+        [tunnel, stream_id, stream, start_gate]() {
+            if (start_gate.get() != nullptr) {
+                start_gate->wait();
+            }
+            tunnel->tcp_read_loop(stream_id, stream);
+        });
 }
 
 bool spawn_tcp_write_thread(const std::shared_ptr<PortTunnelService>& service,
@@ -124,7 +70,7 @@ bool spawn_tcp_write_thread(const std::shared_ptr<PortTunnelService>& service,
                             uint32_t stream_id,
                             const std::shared_ptr<TunnelTcpStream>& stream,
                             bool worker_acquired) {
-    return spawn_worker_thread("spawn tcp write thread", service, worker_acquired, [tunnel, stream_id, stream]() {
+    return service->spawn_tracked_worker("spawn tcp write thread", worker_acquired, [tunnel, stream_id, stream]() {
         tunnel->tcp_write_loop(stream_id, stream);
     });
 }
@@ -134,7 +80,7 @@ bool spawn_udp_read_thread(const std::shared_ptr<PortTunnelService>& service,
                            uint32_t stream_id,
                            const std::shared_ptr<TunnelUdpSocket>& socket_value,
                            bool worker_acquired) {
-    return spawn_worker_thread("spawn udp read thread", service, worker_acquired, [tunnel, stream_id, socket_value]() {
+    return service->spawn_tracked_worker("spawn udp read thread", worker_acquired, [tunnel, stream_id, socket_value]() {
         tunnel->udp_read_loop_connection_local(stream_id, socket_value);
     });
 }

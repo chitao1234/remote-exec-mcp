@@ -4,55 +4,9 @@
 bool PortTunnelService::spawn_tcp_listener_loop(const std::shared_ptr<PortTunnelSession>& session,
                                                 const std::shared_ptr<RetainedTcpListener>& listener,
                                                 bool worker_acquired) {
-    std::shared_ptr<PortTunnelService> service = shared_from_this();
-    if (!worker_acquired && !service->try_acquire_worker()) {
-        return false;
-    }
-#ifdef _WIN32
-    struct Context {
-        std::shared_ptr<PortTunnelService> service;
-        std::shared_ptr<PortTunnelSession> session;
-        std::shared_ptr<RetainedTcpListener> listener;
-    };
-
-    struct ThreadEntry {
-        static unsigned __stdcall entry(void* raw_context) {
-            std::unique_ptr<Context> context(static_cast<Context*>(raw_context));
-            PortTunnelWorkerLease lease(context->service);
-            context->service->tcp_accept_loop(context->session, context->listener);
-            return 0;
-        }
-    };
-
-    std::unique_ptr<Context> context(new Context());
-    context->service = service;
-    context->session = session;
-    context->listener = listener;
-    HANDLE handle = begin_win32_thread(&ThreadEntry::entry, context.get());
-    if (handle != nullptr) {
-        context.release();
-        CloseHandle(handle);
-        return true;
-    }
-    service->release_worker();
-    return false;
-#else
-    try {
-        std::thread([service, session, listener]() {
-            PortTunnelWorkerLease lease(service);
-            service->tcp_accept_loop(session, listener);
-        }).detach();
-    } catch (const std::exception& ex) {
-        log_tunnel_exception("spawn tcp listener thread", ex);
-        service->release_worker();
-        return false;
-    } catch (...) {
-        log_unknown_tunnel_exception("spawn tcp listener thread");
-        service->release_worker();
-        return false;
-    }
-    return true;
-#endif
+    return spawn_tracked_worker("spawn tcp listener thread", worker_acquired, [this, session, listener]() {
+        tcp_accept_loop(session, listener);
+    });
 }
 
 void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>& session,

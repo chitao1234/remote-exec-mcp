@@ -3,6 +3,28 @@
 #include "port_tunnel_service.h"
 #include "server_contract.h"
 
+struct PortTunnelService::TrackedWorkerThread {
+    TrackedWorkerThread() : finished(false)
+#ifdef _WIN32
+                           ,
+                           handle(nullptr),
+                           thread_id(0U)
+#else
+                           ,
+                           thread()
+#endif
+    {
+    }
+
+    std::atomic<bool> finished;
+#ifdef _WIN32
+    HANDLE handle;
+    DWORD thread_id;
+#else
+    std::unique_ptr<std::thread> thread;
+#endif
+};
+
 const std::size_t READ_BUF_SIZE = 64U * 1024U;
 const std::size_t TCP_WRITE_QUEUE_LIMIT = 8U;
 const unsigned long RETAINED_SOCKET_POLL_TIMEOUT_MS = 100UL;
@@ -36,6 +58,8 @@ PortTunnelService::PortTunnelService(const PortForwardLimitConfig& limits)
 
 PortTunnelService::~PortTunnelService() {
     stop_expiry_scheduler();
+    close_all_sessions_for_shutdown();
+    join_all_workers();
 }
 
 static bool try_acquire_counter(std::atomic<unsigned long>& counter, unsigned long limit) {
@@ -107,11 +131,151 @@ void PortTunnelService::release_active_tcp_stream() {
     release_counter(active_tcp_streams_, "active_tcp_streams");
 }
 
-PortTunnelWorkerLease::PortTunnelWorkerLease(const std::shared_ptr<PortTunnelService>& service) : service_(service) {
+bool PortTunnelService::spawn_tracked_worker(const char* operation,
+                                             bool worker_acquired,
+                                             const std::function<void()>& work) {
+    if (!worker_acquired && !try_acquire_worker()) {
+        return false;
+    }
+
+    std::vector<std::shared_ptr<TrackedWorkerThread>> finished_workers;
+    collect_finished_workers(&finished_workers);
+
+    std::shared_ptr<TrackedWorkerThread> worker(new TrackedWorkerThread());
+
+#ifdef _WIN32
+    struct Context {
+        PortTunnelService* service;
+        std::shared_ptr<TrackedWorkerThread> worker;
+        std::function<void()> work;
+        const char* operation;
+    };
+
+    struct ThreadEntry {
+        static unsigned __stdcall entry(void* raw_context) {
+            std::unique_ptr<Context> context(static_cast<Context*>(raw_context));
+            context->worker->thread_id = GetCurrentThreadId();
+            PortTunnelWorkerLease lease(context->service);
+            try {
+                context->work();
+            } catch (const std::exception& ex) {
+                log_tunnel_exception(context->operation, ex);
+            } catch (...) {
+                log_unknown_tunnel_exception(context->operation);
+            }
+            context->service->mark_worker_finished(context->worker);
+            return 0;
+        }
+    };
+
+    std::unique_ptr<Context> context(new Context());
+    context->service = this;
+    context->worker = worker;
+    context->work = work;
+    context->operation = operation;
+
+    HANDLE handle = begin_win32_thread(&ThreadEntry::entry, context.get());
+    if (handle == nullptr) {
+        join_workers(finished_workers);
+        release_worker();
+        return false;
+    }
+    worker->handle = handle;
+    context.release();
+#else
+    try {
+        worker->thread.reset(new std::thread([this, worker, work, operation]() {
+            PortTunnelWorkerLease lease(this);
+            try {
+                work();
+            } catch (const std::exception& ex) {
+                log_tunnel_exception(operation, ex);
+            } catch (...) {
+                log_unknown_tunnel_exception(operation);
+            }
+            mark_worker_finished(worker);
+        }));
+    } catch (const std::exception& ex) {
+        join_workers(finished_workers);
+        log_tunnel_exception(operation, ex);
+        release_worker();
+        return false;
+    } catch (...) {
+        join_workers(finished_workers);
+        log_unknown_tunnel_exception(operation);
+        release_worker();
+        return false;
+    }
+#endif
+
+    {
+        BasicLockGuard lock(worker_threads_mutex_);
+        worker_threads_.push_back(worker);
+    }
+    join_workers(finished_workers);
+    return true;
+}
+
+void PortTunnelService::mark_worker_finished(const std::shared_ptr<TrackedWorkerThread>& worker) {
+    if (worker.get() != nullptr) {
+        worker->finished.store(true);
+    }
+}
+
+void PortTunnelService::collect_finished_workers(std::vector<std::shared_ptr<TrackedWorkerThread>>* finished_workers) {
+    BasicLockGuard lock(worker_threads_mutex_);
+    for (std::vector<std::shared_ptr<TrackedWorkerThread>>::iterator it = worker_threads_.begin();
+         it != worker_threads_.end();) {
+        if (!(*it)->finished.load()) {
+            ++it;
+            continue;
+        }
+        finished_workers->push_back(*it);
+        it = worker_threads_.erase(it);
+    }
+}
+
+void PortTunnelService::join_workers(const std::vector<std::shared_ptr<TrackedWorkerThread>>& workers) {
+    for (std::size_t i = 0; i < workers.size(); ++i) {
+#ifdef _WIN32
+        if (workers[i]->handle != nullptr) {
+            if (workers[i]->thread_id == GetCurrentThreadId()) {
+                CloseHandle(workers[i]->handle);
+                workers[i]->handle = nullptr;
+                continue;
+            }
+            WaitForSingleObject(workers[i]->handle, INFINITE);
+            CloseHandle(workers[i]->handle);
+            workers[i]->handle = nullptr;
+        }
+#else
+        if (workers[i]->thread.get() != nullptr) {
+            if (workers[i]->thread->get_id() == std::this_thread::get_id()) {
+                workers[i]->thread->detach();
+                workers[i]->thread.reset();
+                continue;
+            }
+            workers[i]->thread->join();
+            workers[i]->thread.reset();
+        }
+#endif
+    }
+}
+
+void PortTunnelService::join_all_workers() {
+    std::vector<std::shared_ptr<TrackedWorkerThread>> workers;
+    {
+        BasicLockGuard lock(worker_threads_mutex_);
+        workers.swap(worker_threads_);
+    }
+    join_workers(workers);
+}
+
+PortTunnelWorkerLease::PortTunnelWorkerLease(PortTunnelService* service) : service_(service) {
 }
 
 PortTunnelWorkerLease::~PortTunnelWorkerLease() {
-    if (service_.get() != nullptr) {
+    if (service_ != nullptr) {
         service_->release_worker();
     }
 }

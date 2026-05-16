@@ -6,57 +6,9 @@ bool PortTunnelService::spawn_udp_bind_loop(const std::shared_ptr<PortTunnelSess
                                             uint32_t stream_id,
                                             const std::shared_ptr<TunnelUdpSocket>& socket_value,
                                             bool worker_acquired) {
-    std::shared_ptr<PortTunnelService> service = shared_from_this();
-    if (!worker_acquired && !service->try_acquire_worker()) {
-        return false;
-    }
-#ifdef _WIN32
-    struct Context {
-        std::shared_ptr<PortTunnelService> service;
-        std::shared_ptr<PortTunnelSession> session;
-        uint32_t stream_id;
-        std::shared_ptr<TunnelUdpSocket> socket_value;
-    };
-
-    struct ThreadEntry {
-        static unsigned __stdcall entry(void* raw_context) {
-            std::unique_ptr<Context> context(static_cast<Context*>(raw_context));
-            PortTunnelWorkerLease lease(context->service);
-            context->service->udp_read_loop(context->session, context->stream_id, context->socket_value);
-            return 0;
-        }
-    };
-
-    std::unique_ptr<Context> context(new Context());
-    context->service = service;
-    context->session = session;
-    context->stream_id = stream_id;
-    context->socket_value = socket_value;
-    HANDLE handle = begin_win32_thread(&ThreadEntry::entry, context.get());
-    if (handle != nullptr) {
-        context.release();
-        CloseHandle(handle);
-        return true;
-    }
-    service->release_worker();
-    return false;
-#else
-    try {
-        std::thread([service, session, stream_id, socket_value]() {
-            PortTunnelWorkerLease lease(service);
-            service->udp_read_loop(session, stream_id, socket_value);
-        }).detach();
-    } catch (const std::exception& ex) {
-        log_tunnel_exception("spawn udp bind thread", ex);
-        service->release_worker();
-        return false;
-    } catch (...) {
-        log_unknown_tunnel_exception("spawn udp bind thread");
-        service->release_worker();
-        return false;
-    }
-    return true;
-#endif
+    return spawn_tracked_worker("spawn udp bind thread", worker_acquired, [this, session, stream_id, socket_value]() {
+        udp_read_loop(session, stream_id, socket_value);
+    });
 }
 
 void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& session,

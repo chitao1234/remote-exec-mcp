@@ -110,7 +110,7 @@
 - [x] Refactor daemon and embedded-host config composition to reduce field-by-field mirroring
 - [x] Add example-config/default-behavior smoke coverage and clarify intentional non-default examples
 - [x] Run focused broker and daemon verification
-- [ ] Commit
+- [x] Commit
 
 ### Task 4: Move repository-specific bootstrap rendering out of `remote-exec-pki`
 
@@ -138,7 +138,7 @@
 - [x] Move snippet rendering and operator-facing text into `remote-exec-admin`
 - [x] Keep `remote-exec-pki` limited to reusable certificate and manifest responsibilities
 - [x] Run focused admin and PKI verification
-- [ ] Commit
+- [x] Commit
 
 ### Task 5: Introduce a C++ daemon route registry and shared contract constants
 
@@ -167,7 +167,7 @@
 - [x] Move shared path/header/version literals to that inventory and wire existing handlers through it
 - [x] Update route/transport/codec code to consume the shared contract layer
 - [x] Run focused C++ verification
-- [ ] Commit
+- [x] Commit
 
 ### Task 6: Replace remaining detached worker seams and clean up test support
 
@@ -194,11 +194,11 @@
 - Run: `cargo test -p remote-exec-daemon --test port_forward_rpc`
 - Expect: C++ port-forward workers have explicit supervision, and test-support reuse becomes more structural and less file-include driven.
 
-- [ ] Replace detached or untracked C++ port-forward worker startup with tracked supervision under `PortTunnelService`
-- [ ] Preserve teardown, budget, and reconnect semantics while tightening failure accounting
-- [ ] Extract shared Rust test helpers into a clearer dev-only support seam and reduce direct `#[path = ...]` inclusion
-- [ ] Run focused C++ and broker/daemon port-forward verification
-- [ ] Commit
+- [x] Replace detached or untracked C++ port-forward worker startup with tracked supervision under `PortTunnelService`
+- [x] Preserve teardown, budget, and reconnect semantics while tightening failure accounting
+- [x] Extract shared Rust test helpers into a clearer dev-only support seam and reduce direct `#[path = ...]` inclusion
+- [x] Run focused C++ and broker/daemon port-forward verification
+- [x] Commit
 
 ### Task 7: Final drift sweep
 
