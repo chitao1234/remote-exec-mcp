@@ -338,4 +338,52 @@ mod tests {
             assert_eq!(handle.cached_daemon_info().await, None);
         }
     }
+
+    #[cfg(not(feature = "broker-tls"))]
+    #[tokio::test]
+    async fn build_state_rejects_https_targets_when_broker_tls_feature_disabled() {
+        let mut targets = BTreeMap::new();
+        targets.insert(
+            "builder-a".to_string(),
+            TargetConfig {
+                base_url: "https://127.0.0.1:9443".to_string(),
+                http_auth: None,
+                timeouts: TargetTimeoutConfig::default(),
+                ca_pem: Some("/tmp/ca.pem".into()),
+                client_cert_pem: Some("/tmp/broker.pem".into()),
+                client_key_pem: Some("/tmp/broker.key".into()),
+                allow_insecure_http: false,
+                skip_server_name_verification: false,
+                pinned_server_cert_pem: None,
+                expected_daemon_name: None,
+            },
+        );
+
+        let err = match build_state(
+            BrokerConfig {
+                mcp: Default::default(),
+                host_sandbox: None,
+                enable_transfer_compression: true,
+                transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
+                disable_structured_content: false,
+                port_forward_limits: Default::default(),
+                targets,
+                local: None,
+            }
+            .into_validated()
+            .unwrap(),
+        )
+        .await
+        {
+            Ok(_) => panic!("expected HTTPS target construction to fail without broker-tls"),
+            Err(err) => err,
+        };
+
+        assert!(
+            err.to_string().contains(
+                "https:// support requires the remote-exec-broker `broker-tls` Cargo feature"
+            ),
+            "unexpected error: {err}"
+        );
+    }
 }

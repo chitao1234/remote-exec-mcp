@@ -613,12 +613,8 @@ fn transfer_files_input(args: TransferFilesArgs) -> anyhow::Result<TransferFiles
         .collect::<anyhow::Result<Vec<_>>>()?;
 
     Ok(TransferFilesInput {
-        source: (endpoints.len() == 1).then(|| endpoints[0].clone()),
-        sources: if endpoints.len() == 1 {
-            Vec::new()
-        } else {
-            endpoints
-        },
+        source: None,
+        sources: endpoints,
         destination: parse_transfer_endpoint(&args.destination)?,
         exclude: args.exclude,
         overwrite: args.overwrite.into(),

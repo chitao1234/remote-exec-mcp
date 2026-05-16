@@ -7,10 +7,6 @@ pub(crate) async fn build_daemon_https_client(_: &TargetConfig) -> anyhow::Resul
     anyhow::bail!(BROKER_TLS_FEATURE_REQUIRED_MESSAGE);
 }
 
-pub(crate) fn ensure_https_target_supported(name: &str) -> anyhow::Result<()> {
-    anyhow::bail!("target `{name}` uses https://; {BROKER_TLS_FEATURE_REQUIRED_MESSAGE}");
-}
-
 pub(crate) fn ensure_broker_url_supported(url: &str) -> anyhow::Result<()> {
     if url.starts_with("https://") {
         anyhow::bail!("broker URL `{url}` uses https://; {BROKER_TLS_FEATURE_REQUIRED_MESSAGE}");

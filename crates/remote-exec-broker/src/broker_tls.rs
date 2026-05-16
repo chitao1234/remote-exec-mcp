@@ -7,8 +7,7 @@ mod implementation;
 mod implementation;
 
 pub(crate) use implementation::{
-    build_daemon_https_client, ensure_broker_url_supported, ensure_https_target_supported,
-    install_crypto_provider,
+    build_daemon_https_client, ensure_broker_url_supported, install_crypto_provider,
 };
 
 #[cfg(test)]
@@ -31,18 +30,6 @@ mod tests {
         assert!(
             err.to_string().contains(
                 "https:// support requires the remote-exec-broker `broker-tls` Cargo feature"
-            ),
-            "unexpected error: {err}",
-        );
-    }
-
-    #[cfg(not(feature = "broker-tls"))]
-    #[test]
-    fn https_targets_are_rejected_when_feature_disabled() {
-        let err = super::ensure_https_target_supported("builder-a").unwrap_err();
-        assert!(
-            err.to_string().contains(
-                "target `builder-a` uses https://; https:// support requires the remote-exec-broker `broker-tls` Cargo feature"
             ),
             "unexpected error: {err}",
         );

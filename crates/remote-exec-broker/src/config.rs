@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context;
+use remote_exec_host::config::DEFAULT_MAX_OPEN_SESSIONS;
 use remote_exec_host::{
     EmbeddedHostConfig, HostPortForwardLimits, ProcessEnvironment, PtyMode, YieldTimeConfig,
 };
@@ -184,7 +185,7 @@ pub struct LocalTargetConfig {
 }
 
 impl TargetConfig {
-    pub(crate) fn validated_transport(&self, name: &str) -> anyhow::Result<TargetTransportKind> {
+    pub(crate) fn validate(&self, name: &str) -> anyhow::Result<()> {
         self.timeouts.validate(name)?;
 
         if let Some(http_auth) = &self.http_auth {
@@ -192,12 +193,19 @@ impl TargetConfig {
         }
 
         if self.base_url.starts_with("http://") {
-            self.validate_http_transport(name)?;
-            return Ok(TargetTransportKind::Http);
+            return self.validate_http_transport(name);
         }
 
-        self.validate_https_transport(name)?;
-        Ok(TargetTransportKind::Https)
+        self.validate_https_transport(name)
+    }
+
+    pub(crate) fn transport_kind(&self, name: &str) -> anyhow::Result<TargetTransportKind> {
+        self.validate(name)?;
+        Ok(if self.base_url.starts_with("http://") {
+            TargetTransportKind::Http
+        } else {
+            TargetTransportKind::Https
+        })
     }
 
     fn validate_http_transport(&self, name: &str) -> anyhow::Result<()> {
@@ -221,7 +229,6 @@ impl TargetConfig {
             self.base_url.starts_with("https://"),
             "target `{name}` base_url must start with http:// or https://"
         );
-        crate::broker_tls::ensure_https_target_supported(name)?;
         anyhow::ensure!(self.ca_pem.is_some(), "target `{name}` is missing ca_pem");
         anyhow::ensure!(
             self.client_cert_pem.is_some(),
@@ -255,6 +262,7 @@ impl LocalTargetConfig {
             sandbox,
             enable_transfer_compression,
             transfer_limits: self.transfer_limits,
+            max_open_sessions: DEFAULT_MAX_OPEN_SESSIONS,
             allow_login_shell: self.allow_login_shell,
             pty: self.pty,
             default_shell: self.default_shell.clone(),
@@ -276,6 +284,7 @@ impl LocalTargetConfig {
             sandbox: None,
             enable_transfer_compression: false,
             transfer_limits: TransferLimits::default(),
+            max_open_sessions: DEFAULT_MAX_OPEN_SESSIONS,
             allow_login_shell: false,
             pty: PtyMode::None,
             default_shell: None,
@@ -325,7 +334,7 @@ impl BrokerConfig {
             )?;
         }
         for (name, target) in &self.targets {
-            target.validated_transport(name)?;
+            target.validate(name)?;
         }
         Ok(())
     }
@@ -541,7 +550,7 @@ request_ms = 0
 
     #[cfg(not(feature = "broker-tls"))]
     #[tokio::test]
-    async fn load_rejects_https_targets_when_broker_tls_feature_disabled() {
+    async fn load_accepts_https_targets_even_when_broker_tls_feature_disabled() {
         let dir = tempfile::tempdir().unwrap();
         let config_path = dir.path().join("broker.toml");
         tokio::fs::write(
@@ -556,12 +565,10 @@ client_key_pem = "/tmp/broker.key"
         .await
         .unwrap();
 
-        let err = BrokerConfig::load(&config_path).await.unwrap_err();
-        assert!(
-            err.to_string().contains(
-                "https:// support requires the remote-exec-broker `broker-tls` Cargo feature"
-            ),
-            "unexpected error: {err}"
+        let config = BrokerConfig::load(&config_path).await.unwrap();
+        assert_eq!(
+            config.targets["builder-a"].base_url,
+            "https://127.0.0.1:8443"
         );
     }
 
@@ -708,6 +715,18 @@ client_key_pem = "/tmp/broker.key"
 
         let config = BrokerConfig::load(&config_path).await.unwrap();
         assert!(config.disable_structured_content);
+    }
+
+    #[tokio::test]
+    async fn bundled_broker_example_preserves_intentional_structured_content_override() {
+        let example_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../configs/broker.example.toml");
+        let example_text = tokio::fs::read_to_string(&example_path).await.unwrap();
+
+        let config: BrokerConfig = toml::from_str(&example_text).unwrap();
+        config.validate().unwrap();
+        assert!(config.disable_structured_content);
+        assert!(matches!(config.mcp, McpServerConfig::Stdio));
     }
 
     #[tokio::test]

@@ -123,6 +123,17 @@ pub struct TransferFilesInput {
     pub create_parent: bool,
 }
 
+impl TransferFilesInput {
+    pub fn resolved_sources(&self) -> anyhow::Result<Vec<TransferEndpoint>> {
+        match (&self.source, self.sources.is_empty()) {
+            (Some(_), false) => anyhow::bail!("provide either `source` or `sources`, not both"),
+            (Some(source), true) => Ok(vec![source.clone()]),
+            (None, false) => Ok(self.sources.clone()),
+            (None, true) => anyhow::bail!("`sources` must contain at least one entry"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct TransferFilesResult {
     #[serde(skip_serializing_if = "Option::is_none")]

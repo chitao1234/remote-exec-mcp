@@ -18,8 +18,8 @@ pub async fn transfer_files(
     input: TransferFilesInput,
 ) -> anyhow::Result<ToolCallOutput> {
     let started = std::time::Instant::now();
-    crate::request_context::set_current_targets(input_targets(&input));
-    let sources = resolve_sources(&input)?;
+    let sources = input.resolved_sources()?;
+    crate::request_context::set_current_targets(input_targets(&sources, &input.destination));
     let requested_destination = input.destination.clone();
     let compression =
         negotiate_transfer_compression(state, &sources, &requested_destination).await?;
@@ -90,21 +90,12 @@ pub async fn transfer_files(
     )
 }
 
-fn resolve_sources(input: &TransferFilesInput) -> anyhow::Result<Vec<TransferEndpoint>> {
-    match (&input.source, input.sources.is_empty()) {
-        (Some(_), false) => anyhow::bail!("provide either `source` or `sources`, not both"),
-        (Some(source), true) => Ok(vec![source.clone()]),
-        (None, false) => Ok(input.sources.clone()),
-        (None, true) => anyhow::bail!("`sources` must contain at least one entry"),
-    }
-}
-
-fn input_targets(input: &TransferFilesInput) -> Vec<&str> {
-    let mut targets = Vec::new();
-    if let Some(source) = &input.source {
-        targets.push(source.target.as_str());
-    }
-    targets.extend(input.sources.iter().map(|source| source.target.as_str()));
-    targets.push(input.destination.target.as_str());
+fn input_targets<'a>(
+    sources: &'a [TransferEndpoint],
+    destination: &'a TransferEndpoint,
+) -> Vec<&'a str> {
+    let mut targets = Vec::with_capacity(sources.len() + 1);
+    targets.extend(sources.iter().map(|source| source.target.as_str()));
+    targets.push(destination.target.as_str());
     targets
 }

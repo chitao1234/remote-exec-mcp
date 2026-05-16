@@ -101,7 +101,7 @@ mod tests {
     fn host_internal_errors_preserve_server_status_for_local_backend() {
         let err = super::map_host_rpc_error(remote_exec_host::HostRpcError {
             status: 500,
-            code: RpcErrorCode::Internal.wire_value().to_string(),
+            code: RpcErrorCode::Internal,
             message: "boom".to_string(),
         });
 
@@ -121,7 +121,7 @@ mod tests {
     fn invalid_host_status_falls_back_to_internal_server_error() {
         let err = super::map_host_rpc_error(remote_exec_host::HostRpcError {
             status: 42,
-            code: RpcErrorCode::Internal.wire_value().to_string(),
+            code: RpcErrorCode::Internal,
             message: "invalid status".to_string(),
         });
 

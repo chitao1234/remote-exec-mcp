@@ -19,6 +19,15 @@
 # resources are reclaimed when their internal HTTP/1.1 Upgrade tunnels close or
 # their reconnect grace window expires.
 
+# Optional. When false, the broker rejects `transfer_files` requests that set
+# `compression = "zstd"` and keeps all transfer payloads uncompressed.
+#enable_transfer_compression = true
+
+# Optional. Defaults to false. This example intentionally sets it to true to
+# demonstrate text-only MCP responses for clients that do not consume
+# `structuredContent`.
+disable_structured_content = true
+
 [targets.builder-a]
 # Requires the broker to be built with its default `broker-tls` Cargo feature.
 base_url = "https://builder-a.example.com:9443"
@@ -59,19 +68,11 @@ expected_daemon_name = "builder-xp"
 #[targets.builder-xp.http_auth]
 #bearer_token = "replace-me"
 
-# Optional. When false, the broker rejects `transfer_files` requests that set
-# `compression = "zstd"` and keeps all transfer payloads uncompressed.
-#enable_transfer_compression = true
-
 # Optional broker-host transfer import safety limits for endpoints that use
 # `target = "local"`.
 #[transfer_limits]
 #max_archive_bytes = 536870912
 #max_entry_bytes = 536870912
-
-# Optional. When true, the broker omits MCP `structuredContent` from successful
-# tool results and only returns normal content items.
-disable_structured_content = true
 
 # Optional broker-owned forwarding limits.
 # These are separate from daemon-side v4 tunnel limits and are enforced by the

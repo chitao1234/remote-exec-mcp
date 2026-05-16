@@ -32,10 +32,6 @@ pub(crate) fn install_crypto_provider() -> anyhow::Result<()> {
     .map_err(|message| anyhow::anyhow!(message.clone()))
 }
 
-pub(crate) fn ensure_https_target_supported(_: &str) -> anyhow::Result<()> {
-    Ok(())
-}
-
 pub(crate) fn ensure_broker_url_supported(_: &str) -> anyhow::Result<()> {
     Ok(())
 }

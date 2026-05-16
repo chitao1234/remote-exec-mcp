@@ -106,10 +106,10 @@
 - Run: `cargo test -p remote-exec-daemon --test health`
 - Expect: one canonical broker-side transfer input path, less config field copying, and example/default behavior covered by tests.
 
-- [ ] Normalize broker and CLI handling around `sources`, keeping `source` as a compatibility adapter if still required
-- [ ] Refactor daemon and embedded-host config composition to reduce field-by-field mirroring
-- [ ] Add example-config/default-behavior smoke coverage and clarify intentional non-default examples
-- [ ] Run focused broker and daemon verification
+- [x] Normalize broker and CLI handling around `sources`, keeping `source` as a compatibility adapter if still required
+- [x] Refactor daemon and embedded-host config composition to reduce field-by-field mirroring
+- [x] Add example-config/default-behavior smoke coverage and clarify intentional non-default examples
+- [x] Run focused broker and daemon verification
 - [ ] Commit
 
 ### Task 4: Move repository-specific bootstrap rendering out of `remote-exec-pki`

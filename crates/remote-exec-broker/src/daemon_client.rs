@@ -335,7 +335,7 @@ impl DaemonClient {
         let target_name = target_name.into();
         crate::install_crypto_provider()?;
         let timeouts = config.timeouts;
-        let client = match config.validated_transport(&target_name)? {
+        let client = match config.transport_kind(&target_name)? {
             TargetTransportKind::Http => build_http_daemon_client(timeouts)?,
             TargetTransportKind::Https => {
                 crate::broker_tls::build_daemon_https_client(config).await?
