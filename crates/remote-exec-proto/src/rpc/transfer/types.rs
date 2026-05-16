@@ -6,11 +6,22 @@ use crate::transfer::TransferSourceType;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct TransferWarning {
-    pub code: String,
+    code: String,
     pub message: String,
 }
 
 impl TransferWarning {
+    pub fn wire_code(&self) -> &str {
+        &self.code
+    }
+
+    pub fn from_raw_code(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
     pub fn skipped_unsupported_entry(path: impl std::fmt::Display) -> Self {
         Self {
             code: WarningCode::TransferSkippedUnsupportedEntry

@@ -120,7 +120,7 @@ async fn transfer_path_info_rejects_relative_paths_with_explicit_code() {
         .json::<remote_exec_proto::rpc::RpcErrorBody>()
         .await
         .unwrap();
-    assert_eq!(err.code, "transfer_path_not_absolute");
+    assert_eq!(err.wire_code(), "transfer_path_not_absolute");
     assert!(err.message.contains("relative/output"));
 }
 
@@ -160,7 +160,7 @@ async fn transfer_path_info_reports_permission_denied_as_internal_error() {
         .json::<remote_exec_proto::rpc::RpcErrorBody>()
         .await
         .unwrap();
-    assert_eq!(err.code, "internal_error");
+    assert_eq!(err.wire_code(), "internal_error");
     assert!(err.message.contains("Permission denied"));
 }
 
@@ -205,7 +205,7 @@ async fn export_reports_missing_sources_with_explicit_code() {
         .json::<remote_exec_proto::rpc::RpcErrorBody>()
         .await
         .unwrap();
-    assert_eq!(err.code, "transfer_source_missing");
+    assert_eq!(err.wire_code(), "transfer_source_missing");
     assert!(err.message.contains("missing.txt"));
 }
 
@@ -307,7 +307,7 @@ async fn export_directory_skips_special_files_with_warning() {
     let summary = response.json::<TransferImportResponse>().await.unwrap();
     assert_eq!(summary.warnings.len(), 1);
     assert_eq!(
-        summary.warnings[0].code,
+        summary.warnings[0].wire_code(),
         "transfer_skipped_unsupported_entry"
     );
     assert!(
@@ -891,7 +891,7 @@ async fn import_directory_merge_rejects_existing_file_destination() {
         .json::<remote_exec_proto::rpc::RpcErrorBody>()
         .await
         .unwrap();
-    assert_eq!(err.code, "transfer_destination_unsupported");
+    assert_eq!(err.wire_code(), "transfer_destination_unsupported");
     assert_eq!(
         tokio::fs::read_to_string(&destination).await.unwrap(),
         "not a directory\n"
@@ -922,7 +922,7 @@ async fn import_rejects_existing_destination_when_overwrite_is_fail() {
         .json::<remote_exec_proto::rpc::RpcErrorBody>()
         .await
         .unwrap();
-    assert_eq!(err.code, "transfer_destination_exists");
+    assert_eq!(err.wire_code(), "transfer_destination_exists");
     assert_eq!(
         tokio::fs::read_to_string(&destination).await.unwrap(),
         "old\n"
@@ -965,7 +965,7 @@ async fn import_rejects_missing_destination_header_as_bad_request() {
         .json::<remote_exec_proto::rpc::RpcErrorBody>()
         .await
         .unwrap();
-    assert_eq!(err.code, "bad_request");
+    assert_eq!(err.wire_code(), "bad_request");
     assert!(err.message.contains(TRANSFER_DESTINATION_PATH_HEADER));
 }
 
@@ -1006,7 +1006,7 @@ async fn import_rejects_missing_create_parent_header_as_bad_request() {
         .json::<remote_exec_proto::rpc::RpcErrorBody>()
         .await
         .unwrap();
-    assert_eq!(err.code, "bad_request");
+    assert_eq!(err.wire_code(), "bad_request");
     assert!(err.message.contains(TRANSFER_CREATE_PARENT_HEADER));
     assert!(!destination.exists());
 }
@@ -1049,7 +1049,7 @@ async fn import_rejects_invalid_create_parent_header_as_bad_request() {
         .json::<remote_exec_proto::rpc::RpcErrorBody>()
         .await
         .unwrap();
-    assert_eq!(err.code, "bad_request");
+    assert_eq!(err.wire_code(), "bad_request");
     assert!(err.message.contains(TRANSFER_CREATE_PARENT_HEADER));
     assert!(!destination.exists());
 }
@@ -1092,7 +1092,7 @@ async fn import_rejects_invalid_metadata_enum_header_as_bad_request() {
         .json::<remote_exec_proto::rpc::RpcErrorBody>()
         .await
         .unwrap();
-    assert_eq!(err.code, "bad_request");
+    assert_eq!(err.wire_code(), "bad_request");
     assert!(err.message.contains(TRANSFER_OVERWRITE_HEADER));
     assert!(!destination.exists());
 }
@@ -1148,7 +1148,7 @@ max_entry_bytes = 8
         .json::<remote_exec_proto::rpc::RpcErrorBody>()
         .await
         .unwrap();
-    assert_eq!(err.code, "transfer_failed");
+    assert_eq!(err.wire_code(), "transfer_failed");
     assert!(err.message.contains("exceeds transfer entry limit"));
     assert!(!destination.exists());
 }
@@ -1207,7 +1207,7 @@ async fn import_rejects_missing_parent_when_create_parent_is_false() {
         .json::<remote_exec_proto::rpc::RpcErrorBody>()
         .await
         .unwrap();
-    assert_eq!(err.code, "transfer_parent_missing");
+    assert_eq!(err.wire_code(), "transfer_parent_missing");
     assert!(!destination.exists());
 }
 
@@ -1231,7 +1231,7 @@ async fn import_rejects_directory_entries_that_escape_destination() {
         .json::<remote_exec_proto::rpc::RpcErrorBody>()
         .await
         .unwrap();
-    assert_eq!(err.code, "transfer_source_unsupported");
+    assert_eq!(err.wire_code(), "transfer_source_unsupported");
     assert!(
         err.message.contains("archive path")
             || err.message.contains("escapes destination")
@@ -1274,7 +1274,7 @@ allow = {allow}
         .json::<remote_exec_proto::rpc::RpcErrorBody>()
         .await
         .unwrap();
-    assert_eq!(err.code, "sandbox_denied");
+    assert_eq!(err.wire_code(), "sandbox_denied");
     assert!(err.message.contains("read access"));
 }
 
@@ -1305,7 +1305,7 @@ async fn export_rejects_zstd_when_transfer_compression_is_disabled() {
         .json::<remote_exec_proto::rpc::RpcErrorBody>()
         .await
         .unwrap();
-    assert_eq!(err.code, "transfer_compression_unsupported");
+    assert_eq!(err.wire_code(), "transfer_compression_unsupported");
 }
 
 #[tokio::test]
@@ -1342,7 +1342,7 @@ allow = {allow}
         .json::<remote_exec_proto::rpc::RpcErrorBody>()
         .await
         .unwrap();
-    assert_eq!(err.code, "sandbox_denied");
+    assert_eq!(err.wire_code(), "sandbox_denied");
     assert!(err.message.contains("write access"));
     assert!(!blocked_destination.exists());
 }

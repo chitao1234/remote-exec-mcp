@@ -190,7 +190,7 @@ async fn image_read_reports_missing_file_with_path_context() {
         )
         .await;
 
-    assert_eq!(err.code, "image_missing");
+    assert_eq!(err.wire_code(), "image_missing");
     assert!(err.message.contains("unable to locate image at"));
     assert!(err.message.contains("missing.png"));
 }
@@ -272,7 +272,7 @@ async fn image_read_rejects_directory_paths_with_path_context() {
         )
         .await;
 
-    assert_eq!(err.code, "image_not_file");
+    assert_eq!(err.wire_code(), "image_not_file");
     assert_eq!(
         err.message,
         format!("image path `{}` is not a file", dir.display())
@@ -296,7 +296,7 @@ async fn image_read_wraps_invalid_image_failures_with_path_context() {
         )
         .await;
 
-    assert_eq!(err.code, "image_decode_failed");
+    assert_eq!(err.wire_code(), "image_decode_failed");
     assert!(err.message.contains("unable to process image at"));
     assert!(err.message.contains("broken.png"));
 }
@@ -318,7 +318,7 @@ async fn image_read_rejects_unknown_detail_values() {
         )
         .await;
 
-    assert_eq!(err.code, "invalid_detail");
+    assert_eq!(err.wire_code(), "invalid_detail");
     assert_eq!(
         err.message,
         "view_image.detail only supports `original`; omit `detail` for default resized behavior, got `low`"
@@ -388,7 +388,7 @@ allow = {allow}
         )
         .await;
 
-    assert_eq!(err.code, "sandbox_denied");
+    assert_eq!(err.wire_code(), "sandbox_denied");
     assert!(err.message.contains("read access"));
 }
 
@@ -428,6 +428,6 @@ async fn image_read_reports_permission_denied_as_internal_error() {
         .json::<remote_exec_proto::rpc::RpcErrorBody>()
         .await
         .unwrap();
-    assert_eq!(err.code, "internal_error");
+    assert_eq!(err.wire_code(), "internal_error");
     assert!(err.message.contains("blocked.png") || err.message.contains("Permission denied"));
 }

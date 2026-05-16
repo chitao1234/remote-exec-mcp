@@ -117,10 +117,7 @@ mod tests {
     fn prepend_warning_text_prefixes_single_warning() {
         let text = prepend_warning_text(
             "Process exited with code 0".to_string(),
-            &[ExecWarning {
-                code: "example".to_string(),
-                message: "Visible warning".to_string(),
-            }],
+            &[ExecWarning::from_raw_code("example", "Visible warning")],
         );
 
         assert_eq!(

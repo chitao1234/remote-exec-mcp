@@ -86,7 +86,7 @@ pub(crate) fn map_host_rpc_error(err: remote_exec_host::HostRpcError) -> DaemonC
     DaemonClientError::Rpc {
         status: reqwest::StatusCode::from_u16(status)
             .expect("normalized HostRpcError status is valid"),
-        code: Some(DaemonRpcCode::from_wire_value(body.code)),
+        code: Some(DaemonRpcCode::from_wire_value(body.wire_code())),
         message: body.message,
     }
 }

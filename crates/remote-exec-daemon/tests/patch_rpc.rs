@@ -375,7 +375,7 @@ async fn update_file_rejects_singleton_empty_eof_hunk_without_trailing_newline()
         )
         .await;
 
-    assert_eq!(err.code, "patch_failed");
+    assert_eq!(err.wire_code(), "patch_failed");
     assert_eq!(tokio::fs::read_to_string(path).await.unwrap(), "alpha");
 }
 
@@ -441,7 +441,7 @@ async fn update_file_rejects_non_eof_match_for_end_of_file_marker() {
         )
         .await;
 
-    assert_eq!(err.code, "patch_failed");
+    assert_eq!(err.wire_code(), "patch_failed");
     assert_eq!(
         tokio::fs::read_to_string(path).await.unwrap(),
         "before\nmiddle\ntail\n",
@@ -503,7 +503,7 @@ async fn update_file_rejects_eof_pure_addition_when_context_is_missing() {
         )
         .await;
 
-    assert_eq!(err.code, "patch_failed");
+    assert_eq!(err.wire_code(), "patch_failed");
     assert_eq!(
         tokio::fs::read_to_string(path).await.unwrap(),
         "before\ntail\n",
@@ -536,7 +536,7 @@ async fn later_failures_leave_earlier_files_mutated() {
         )
         .await;
 
-    assert_eq!(err.code, "patch_failed");
+    assert_eq!(err.wire_code(), "patch_failed");
     assert_eq!(
         tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
             .await
@@ -574,7 +574,7 @@ async fn delete_directory_failure_leaves_earlier_mutation_applied() {
         )
         .await;
 
-    assert_eq!(err.code, "patch_failed");
+    assert_eq!(err.wire_code(), "patch_failed");
     assert_eq!(
         tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
             .await
@@ -615,7 +615,7 @@ async fn non_utf8_update_source_failure_leaves_earlier_mutation_applied() {
         )
         .await;
 
-    assert_eq!(err.code, "patch_failed");
+    assert_eq!(err.wire_code(), "patch_failed");
     assert_eq!(
         tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
             .await
@@ -653,7 +653,7 @@ async fn non_utf8_delete_source_failure_leaves_earlier_mutation_applied() {
         )
         .await;
 
-    assert_eq!(err.code, "patch_failed");
+    assert_eq!(err.wire_code(), "patch_failed");
     assert_eq!(
         tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
             .await
@@ -688,7 +688,7 @@ async fn utf16le_update_source_still_fails_when_autodetect_is_disabled() {
         )
         .await;
 
-    assert_eq!(err.code, "patch_failed");
+    assert_eq!(err.wire_code(), "patch_failed");
     assert_eq!(
         tokio::fs::read(path).await.unwrap(),
         utf16le_bom_bytes("hello\r\nworld\r\n")
@@ -899,7 +899,7 @@ async fn execution_failures_do_not_roll_back_earlier_file_changes() {
         )
         .await;
 
-    assert_eq!(err.code, "patch_failed");
+    assert_eq!(err.wire_code(), "patch_failed");
     assert_eq!(
         tokio::fs::read_to_string(fixture.workdir.join("first.txt"))
             .await
@@ -1013,7 +1013,7 @@ allow = {allow}
         )
         .await;
 
-    assert_eq!(err.code, "sandbox_denied");
+    assert_eq!(err.wire_code(), "sandbox_denied");
     assert!(err.message.contains("write access"));
     assert!(
         tokio::fs::metadata(fixture.workdir.join("blocked/nope.txt"))

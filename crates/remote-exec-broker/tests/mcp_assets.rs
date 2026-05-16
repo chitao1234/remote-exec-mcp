@@ -2,7 +2,7 @@ mod support;
 
 use axum::http::StatusCode;
 use image::{ImageBuffer, Rgba};
-use remote_exec_proto::rpc::RpcErrorBody;
+use remote_exec_proto::rpc::{RpcErrorBody, RpcErrorCode};
 use remote_exec_test_support::test_helpers::utf16le_bom_bytes;
 use rmcp::model::PaginatedRequestParams;
 
@@ -342,12 +342,10 @@ async fn view_image_returns_text_only_errors_without_input_image_content() {
     fixture
         .set_image_read_response(support::stub_daemon::StubImageReadResponse::Error {
             status: StatusCode::BAD_REQUEST,
-            body: RpcErrorBody {
-                code: "image_missing".to_string(),
-                message:
-                    "unable to locate image at `/tmp/chart.png`: No such file or directory (os error 2)"
-                        .to_string(),
-            },
+            body: RpcErrorBody::new(
+                RpcErrorCode::ImageMissing,
+                "unable to locate image at `/tmp/chart.png`: No such file or directory (os error 2)",
+            ),
         })
         .await;
 
@@ -383,12 +381,10 @@ async fn view_image_invalid_detail_matches_daemon_message() {
     fixture
         .set_image_read_response(support::stub_daemon::StubImageReadResponse::Error {
             status: StatusCode::BAD_REQUEST,
-            body: RpcErrorBody {
-                code: "invalid_detail".to_string(),
-                message:
-                    "view_image.detail only supports `original`; omit `detail` for default resized behavior, got `low`"
-                        .to_string(),
-            },
+            body: RpcErrorBody::new(
+                RpcErrorCode::InvalidDetail,
+                "view_image.detail only supports `original`; omit `detail` for default resized behavior, got `low`",
+            ),
         })
         .await;
 

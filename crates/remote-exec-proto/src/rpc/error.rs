@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RpcErrorBody {
-    pub code: String,
+    code: String,
     pub message: String,
 }
 
@@ -139,8 +139,19 @@ impl RpcErrorBody {
         }
     }
 
+    pub fn from_raw_code(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
     pub fn code(&self) -> Option<RpcErrorCode> {
         RpcErrorCode::from_wire_value(&self.code)
+    }
+
+    pub fn wire_code(&self) -> &str {
+        &self.code
     }
 }
 

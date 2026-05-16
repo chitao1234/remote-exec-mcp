@@ -5,7 +5,7 @@ use axum::response::IntoResponse;
 use axum::response::Response;
 use remote_exec_proto::rpc::{
     ExecCompletedResponse, ExecOutputResponse, ExecResponse, ExecRunningResponse, ExecStartRequest,
-    ExecWriteRequest, RpcErrorBody,
+    ExecWriteRequest, RpcErrorBody, RpcErrorCode,
 };
 
 use super::StubDaemonState;
@@ -86,10 +86,10 @@ pub(super) async fn exec_write(
     if req.daemon_session_id != expected_daemon_session_id {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(RpcErrorBody {
-                code: "unknown_session".to_string(),
-                message: "Unknown daemon session".to_string(),
-            }),
+            Json(RpcErrorBody::new(
+                RpcErrorCode::UnknownSession,
+                "Unknown daemon session",
+            )),
         ));
     }
 
@@ -102,19 +102,19 @@ pub(super) async fn exec_write(
             *behavior = ExecWriteBehavior::Success;
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(RpcErrorBody {
-                    code: "temporary_failure".to_string(),
-                    message: "temporary failure".to_string(),
-                }),
+                Json(RpcErrorBody::from_raw_code(
+                    "temporary_failure",
+                    "temporary failure",
+                )),
             ));
         }
         ExecWriteBehavior::UnknownSession => {
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(RpcErrorBody {
-                    code: "unknown_session".to_string(),
-                    message: "Unknown daemon session".to_string(),
-                }),
+                Json(RpcErrorBody::new(
+                    RpcErrorCode::UnknownSession,
+                    "Unknown daemon session",
+                )),
             ));
         }
         ExecWriteBehavior::MalformedCompletedMissingExitCode => {}

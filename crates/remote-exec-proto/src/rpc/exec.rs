@@ -164,7 +164,7 @@ pub struct ExecWriteResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct ExecWarning {
-    pub code: String,
+    code: String,
     pub message: String,
 }
 
@@ -172,6 +172,17 @@ impl ExecWarning {
     pub fn new(code: super::WarningCode, message: impl Into<String>) -> Self {
         Self {
             code: code.wire_value().to_string(),
+            message: message.into(),
+        }
+    }
+
+    pub fn wire_code(&self) -> &str {
+        &self.code
+    }
+
+    pub fn from_raw_code(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
             message: message.into(),
         }
     }
@@ -272,7 +283,7 @@ mod tests {
     #[test]
     fn session_limit_warning_message_uses_supplied_open_session_count() {
         let warning = super::ExecWarning::session_limit_approaching("builder-a", 9);
-        assert_eq!(warning.code, "exec_session_limit_approaching");
+        assert_eq!(warning.wire_code(), "exec_session_limit_approaching");
         assert_eq!(
             warning.message,
             "Target `builder-a` now has 9 open exec sessions."

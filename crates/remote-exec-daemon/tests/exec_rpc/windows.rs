@@ -85,7 +85,7 @@ async fn exec_start_rejects_login_requests_on_windows_when_disabled_by_config() 
         )
         .await;
 
-    assert_eq!(err.code, "login_shell_disabled");
+    assert_eq!(err.wire_code(), "login_shell_disabled");
 }
 
 #[tokio::test]
@@ -366,7 +366,7 @@ async fn exec_start_rejects_tty_when_disabled_by_config_on_windows() {
         )
         .await;
 
-    assert_eq!(err.code, "tty_disabled");
+    assert_eq!(err.wire_code(), "tty_disabled");
 }
 
 #[tokio::test]
@@ -703,7 +703,7 @@ async fn exec_write_rejects_non_tty_sessions_when_chars_are_present_on_windows()
         )
         .await;
 
-    assert_eq!(err.code, "stdin_closed");
+    assert_eq!(err.wire_code(), "stdin_closed");
     assert!(err.message.contains("tty=true"));
 }
 

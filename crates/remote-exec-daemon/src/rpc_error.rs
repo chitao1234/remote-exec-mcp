@@ -37,7 +37,7 @@ mod tests {
             "invalid status",
         ));
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(body.0.code, "internal_error");
+        assert_eq!(body.0.wire_code(), "internal_error");
         assert_eq!(body.0.message, "invalid status");
     }
 }

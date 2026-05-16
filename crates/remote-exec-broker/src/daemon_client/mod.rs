@@ -577,7 +577,7 @@ fn decode_rpc_error_body(status: reqwest::StatusCode, body: String) -> DaemonCli
     if let Ok(error) = serde_json::from_str::<RpcErrorBody>(&body) {
         DaemonClientError::Rpc {
             status,
-            code: Some(DaemonRpcCode::from_wire_value(error.code)),
+            code: Some(DaemonRpcCode::from_wire_value(error.wire_code())),
             message: error.message,
         }
     } else {

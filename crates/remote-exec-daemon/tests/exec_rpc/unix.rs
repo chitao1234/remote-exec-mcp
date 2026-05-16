@@ -87,7 +87,7 @@ async fn exec_start_includes_session_limit_warning_when_threshold_crossed() {
     assert!(response.output().running, "{response:#?}");
     assert_eq!(response.output().warnings.len(), 1);
     assert_eq!(
-        response.output().warnings[0].code,
+        response.output().warnings[0].wire_code(),
         "exec_session_limit_approaching"
     );
     assert_eq!(
@@ -181,7 +181,7 @@ async fn exec_start_rejects_explicit_login_when_disabled_by_config() {
         )
         .await;
 
-    assert_eq!(err.code, "login_shell_disabled");
+    assert_eq!(err.wire_code(), "login_shell_disabled");
     assert!(err.message.contains("login shells are disabled"));
 }
 
@@ -231,7 +231,7 @@ async fn exec_start_rejects_tty_when_disabled_by_config() {
         )
         .await;
 
-    assert_eq!(err.code, "tty_disabled");
+    assert_eq!(err.wire_code(), "tty_disabled");
 }
 
 #[tokio::test]
@@ -251,7 +251,7 @@ deny = ["/"]
         )
         .await;
 
-    assert_eq!(err.code, "sandbox_denied");
+    assert_eq!(err.wire_code(), "sandbox_denied");
     assert!(err.message.contains("exec_cwd access"));
 }
 
@@ -578,7 +578,7 @@ async fn exec_write_rejects_non_tty_sessions_when_chars_are_present() {
         )
         .await;
 
-    assert_eq!(err.code, "stdin_closed");
+    assert_eq!(err.wire_code(), "stdin_closed");
     assert!(err.message.contains("tty=true"));
 }
 
@@ -694,7 +694,7 @@ async fn exec_write_rejects_zero_pty_size() {
         )
         .await;
 
-    assert_eq!(err.code, "invalid_pty_size");
+    assert_eq!(err.wire_code(), "invalid_pty_size");
     assert!(err.message.contains("greater than zero"));
 }
 

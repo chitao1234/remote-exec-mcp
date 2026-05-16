@@ -71,7 +71,7 @@ async fn port_tunnel_requires_v4_header() {
 
     assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
     let body: remote_exec_proto::rpc::RpcErrorBody = response.json().await.unwrap();
-    assert_eq!(body.code, "bad_request");
+    assert_eq!(body.wire_code(), "bad_request");
     assert!(
         body.message
             .contains("x-remote-exec-port-tunnel-version: 4")
@@ -247,7 +247,7 @@ max_tunnel_connections = 1
         .expect("second tunnel should be rejected promptly");
     assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
     let error: remote_exec_proto::rpc::RpcErrorBody = response.json().await.unwrap();
-    assert_eq!(error.code, "port_tunnel_limit_exceeded");
+    assert_eq!(error.wire_code(), "port_tunnel_limit_exceeded");
 }
 
 #[tokio::test]

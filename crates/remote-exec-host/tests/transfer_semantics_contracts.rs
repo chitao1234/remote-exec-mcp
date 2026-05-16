@@ -362,7 +362,7 @@ fn sorted_expected_symlinks(links: &[SymlinkSpec]) -> Vec<(String, String)> {
 fn sorted_warning_codes(warnings: &[remote_exec_proto::rpc::TransferWarning]) -> Vec<String> {
     let mut codes: Vec<_> = warnings
         .iter()
-        .map(|warning| warning.code.clone())
+        .map(|warning| warning.wire_code().to_string())
         .collect();
     codes.sort();
     codes

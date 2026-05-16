@@ -5,7 +5,7 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use remote_exec_proto::rpc::{
-    RpcErrorBody, TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
+    RpcErrorBody, RpcErrorCode, TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
     TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
     TRANSFER_SYMLINK_MODE_HEADER, TransferExportRequest, TransferHeaders, TransferImportResponse,
     TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType, TransferWarning,
@@ -190,10 +190,10 @@ pub(super) async fn transfer_import(
     .map_err(|err| {
         (
             StatusCode::BAD_REQUEST,
-            Json(RpcErrorBody {
-                code: "bad_request".to_string(),
-                message: err.to_string(),
-            }),
+            Json(RpcErrorBody::new(
+                RpcErrorCode::BadRequest,
+                err.to_string(),
+            )),
         )
     })?
     .destination_path;
@@ -379,9 +379,11 @@ fn read_transfer_summary<R: std::io::Read>(entry: &mut tar::Entry<R>) -> Vec<Tra
         .as_array()
         .into_iter()
         .flatten()
-        .map(|warning| TransferWarning {
-            code: warning["code"].as_str().unwrap_or_default().to_string(),
-            message: warning["message"].as_str().unwrap_or_default().to_string(),
+        .map(|warning| {
+            TransferWarning::from_raw_code(
+                warning["code"].as_str().unwrap_or_default(),
+                warning["message"].as_str().unwrap_or_default(),
+            )
         })
         .collect()
 }

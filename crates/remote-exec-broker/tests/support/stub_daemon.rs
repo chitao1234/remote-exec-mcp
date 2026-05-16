@@ -29,7 +29,7 @@ use remote_exec_proto::port_tunnel::{
 use remote_exec_proto::rpc::{
     DaemonIdentity, ExecWarning, ExecWriteRequest, HealthCheckResponse, HealthStatus,
     ImageReadResponse, PatchApplyRequest, PatchApplyResponse, PortForwardProtocolVersion,
-    RpcErrorBody, TargetCapabilities, TargetInfoResponse,
+    RpcErrorBody, RpcErrorCode, TargetCapabilities, TargetInfoResponse,
 };
 #[cfg(test)]
 use tokio::io::AsyncWriteExt;
@@ -851,10 +851,10 @@ async fn require_bearer_auth(
     (
         StatusCode::UNAUTHORIZED,
         [(WWW_AUTHENTICATE, "Bearer")],
-        Json(RpcErrorBody {
-            code: "unauthorized".to_string(),
-            message: "missing or invalid bearer token".to_string(),
-        }),
+        Json(RpcErrorBody::new(
+            RpcErrorCode::Unauthorized,
+            "missing or invalid bearer token",
+        )),
     )
         .into_response()
 }
@@ -941,19 +941,19 @@ async fn patch_apply(
     if lines.first().copied().map(trim_horizontal) != Some("*** Begin Patch") {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(RpcErrorBody {
-                code: "patch_failed".to_string(),
-                message: "invalid patch header".to_string(),
-            }),
+            Json(RpcErrorBody::new(
+                RpcErrorCode::PatchFailed,
+                "invalid patch header",
+            )),
         ));
     }
     if lines.last().copied().map(trim_horizontal) != Some("*** End Patch") {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(RpcErrorBody {
-                code: "patch_failed".to_string(),
-                message: "invalid patch footer".to_string(),
-            }),
+            Json(RpcErrorBody::new(
+                RpcErrorCode::PatchFailed,
+                "invalid patch footer",
+            )),
         ));
     }
 
@@ -1544,29 +1544,26 @@ fn header_eq(headers: &HeaderMap, name: &str, expected: &str) -> bool {
 fn unsupported_port_tunnel_request() -> (StatusCode, Json<RpcErrorBody>) {
     (
         StatusCode::BAD_REQUEST,
-        Json(RpcErrorBody {
-            code: "unsupported_operation".to_string(),
-            message: "stub port tunnel support is disabled".to_string(),
-        }),
+        Json(RpcErrorBody::from_raw_code(
+            "unsupported_operation",
+            "stub port tunnel support is disabled",
+        )),
     )
 }
 
 fn bad_port_tunnel_request(message: impl Into<String>) -> (StatusCode, Json<RpcErrorBody>) {
     (
         StatusCode::BAD_REQUEST,
-        Json(RpcErrorBody {
-            code: "bad_request".to_string(),
-            message: message.into(),
-        }),
+        Json(RpcErrorBody::new(RpcErrorCode::BadRequest, message)),
     )
 }
 
 fn port_tunnel_unavailable_request(message: impl Into<String>) -> (StatusCode, Json<RpcErrorBody>) {
     (
         StatusCode::SERVICE_UNAVAILABLE,
-        Json(RpcErrorBody {
-            code: "port_tunnel_unavailable".to_string(),
-            message: message.into(),
-        }),
+        Json(RpcErrorBody::new(
+            RpcErrorCode::PortTunnelUnavailable,
+            message,
+        )),
     )
 }

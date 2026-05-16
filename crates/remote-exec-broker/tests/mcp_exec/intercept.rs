@@ -316,10 +316,10 @@ async fn exec_command_intercepted_apply_patch_warning_error_is_visible_in_text()
 async fn exec_command_forwarded_session_warning_in_structured_content_and_text() {
     let fixture = support::spawners::spawn_broker_with_stub_daemon().await;
     fixture
-        .set_exec_start_warnings(vec![remote_exec_proto::rpc::ExecWarning {
-            code: "exec_session_limit_approaching".to_string(),
-            message: "Target `builder-a` now has 60 open exec sessions.".to_string(),
-        }])
+        .set_exec_start_warnings(vec![remote_exec_proto::rpc::ExecWarning::new(
+            remote_exec_proto::rpc::WarningCode::ExecSessionLimitApproaching,
+            "Target `builder-a` now has 60 open exec sessions.",
+        )])
         .await;
 
     let result = fixture

@@ -365,10 +365,10 @@ async fn transfer_files_auto_mode_treats_not_found_path_info_as_missing_exact() 
     fixture
         .set_transfer_path_info_error_response(
             axum::http::StatusCode::NOT_FOUND,
-            remote_exec_proto::rpc::RpcErrorBody {
-                code: "not_found".to_string(),
-                message: "path info probe unavailable".to_string(),
-            },
+            remote_exec_proto::rpc::RpcErrorBody::new(
+                remote_exec_proto::rpc::RpcErrorCode::NotFound,
+                "path info probe unavailable",
+            ),
         )
         .await;
 
@@ -404,10 +404,10 @@ async fn transfer_files_auto_mode_does_not_treat_message_only_unknown_endpoint_a
     fixture
         .set_transfer_path_info_error_response(
             axum::http::StatusCode::BAD_REQUEST,
-            remote_exec_proto::rpc::RpcErrorBody {
-                code: String::new(),
-                message: "unknown endpoint".to_string(),
-            },
+            remote_exec_proto::rpc::RpcErrorBody::from_raw_code(
+                "",
+                "unknown endpoint",
+            ),
         )
         .await;
 

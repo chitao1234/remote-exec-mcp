@@ -304,7 +304,7 @@ mod tests {
         let err = HostRpcError::new(42, RpcErrorCode::Internal, "invalid status");
         let (status, body) = err.into_http_rpc_parts("test");
         assert_eq!(status, 500);
-        assert_eq!(body.code, "internal_error");
+        assert_eq!(body.wire_code(), "internal_error");
         assert_eq!(body.message, "invalid status");
     }
 
@@ -313,7 +313,7 @@ mod tests {
         let err = HostRpcError::new(599, RpcErrorCode::Internal, "status preserved");
         let (status, body) = err.into_http_rpc_parts("test");
         assert_eq!(status, 599);
-        assert_eq!(body.code, "internal_error");
+        assert_eq!(body.wire_code(), "internal_error");
         assert_eq!(body.message, "status preserved");
     }
 }
