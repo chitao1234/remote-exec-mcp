@@ -3,13 +3,8 @@ mod support;
 use axum::http::StatusCode;
 use image::{ImageBuffer, Rgba};
 use remote_exec_proto::rpc::RpcErrorBody;
+use remote_exec_test_support::test_helpers::utf16le_bom_bytes;
 use rmcp::model::PaginatedRequestParams;
-
-fn utf16le_bom_bytes(text: &str) -> Vec<u8> {
-    let mut bytes = vec![0xFF, 0xFE];
-    bytes.extend(text.encode_utf16().flat_map(|unit| unit.to_le_bytes()));
-    bytes
-}
 
 #[tokio::test]
 async fn apply_patch_returns_plain_text_without_structured_output() {

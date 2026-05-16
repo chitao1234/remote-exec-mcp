@@ -2,12 +2,7 @@ mod support;
 
 use encoding_rs::{BIG5, EUC_KR, Encoding, GBK, SHIFT_JIS};
 use remote_exec_proto::rpc::{PatchApplyRequest, PatchApplyResponse};
-
-fn utf16le_bom_bytes(text: &str) -> Vec<u8> {
-    let mut bytes = vec![0xFF, 0xFE];
-    bytes.extend(text.encode_utf16().flat_map(|unit| unit.to_le_bytes()));
-    bytes
-}
+use remote_exec_test_support::test_helpers::utf16le_bom_bytes;
 
 fn encoded_bytes(encoding: &'static Encoding, text: &str) -> Vec<u8> {
     let (encoded, _, had_errors) = encoding.encode(text);
