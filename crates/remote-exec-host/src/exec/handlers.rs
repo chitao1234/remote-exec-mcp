@@ -12,11 +12,11 @@ use crate::{
 
 use super::{
     session, shell,
-    store::{SessionLease, SessionLockError},
-    support::{
+    policy::{
         ensure_sandbox_access, finish_response, has_exited, internal_error, poll_once, poll_until,
         resolve_workdir, running_response, write_chars, write_yield_time_operation,
     },
+    store::{SessionLease, SessionLockError},
     timing::EXEC_POLL_INTERVAL,
 };
 
@@ -172,7 +172,7 @@ async fn prepare_exec_write_session(
                 "PTY rows and cols must be greater than zero",
             ));
         }
-        super::support::resize_pty(&mut session, size)
+        super::policy::resize_pty(&mut session, size)
             .await
             .map_err(|err| logged_bad_request(RpcErrorCode::TtyUnsupported, err.to_string()))?;
     }
