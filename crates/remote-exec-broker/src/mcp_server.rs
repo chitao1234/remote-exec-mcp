@@ -307,71 +307,59 @@ pub async fn serve(
             sse_keep_alive,
             sse_retry,
         } => {
-            serve_streamable_http(
-                state,
-                *listen,
+            let listen = *listen;
+            let stateful = *stateful;
+            let sse_keep_alive = sse_keep_alive.as_duration();
+            let sse_retry = sse_retry.as_duration();
+
+            let cancellation_token = CancellationToken::new();
+            let server_state = state.clone();
+            let service: StreamableHttpService<
+                _,
+                rmcp::transport::streamable_http_server::session::local::LocalSessionManager,
+            > = StreamableHttpService::new(
+                move || Ok(BrokerServer::new(server_state.clone())),
+                Default::default(),
+                StreamableHttpServerConfig::default()
+                    .with_sse_keep_alive(sse_keep_alive)
+                    .with_sse_retry(sse_retry)
+                    .with_stateful_mode(stateful)
+                    .with_cancellation_token(cancellation_token.child_token()),
+            );
+            let router = Router::new().nest_service(path.as_str(), service);
+            let listener = tokio::net::TcpListener::bind(listen)
+                .await
+                .with_context(|| {
+                    format!("binding broker MCP streamable HTTP listener on {listen}")
+                })?;
+            let local_addr = listener
+                .local_addr()
+                .context("reading broker listener address")?;
+
+            tracing::info!(
+                listen = %local_addr,
                 path,
-                *stateful,
-                sse_keep_alive.as_duration(),
-                sse_retry.as_duration(),
-            )
-            .await
+                stateful,
+                sse_keep_alive_ms = sse_keep_alive.map(|d| d.as_millis() as u64),
+                sse_retry_ms = sse_retry.map(|d| d.as_millis() as u64),
+                "starting broker MCP streamable HTTP service"
+            );
+
+            let shutdown_token = cancellation_token.clone();
+            let result = axum::serve(listener, router)
+                .with_graceful_shutdown(async move {
+                    wait_for_shutdown_signal().await;
+                    shutdown_token.cancel();
+                })
+                .await
+                .context("running broker MCP streamable HTTP service");
+            crate::port_forward::close_all(&state.port_forwards).await;
+            result?;
+
+            tracing::info!("broker MCP streamable HTTP service stopped");
+            Ok(())
         }
     }
-}
-
-async fn serve_streamable_http(
-    state: crate::BrokerState,
-    listen: std::net::SocketAddr,
-    path: &str,
-    stateful: bool,
-    sse_keep_alive: Option<std::time::Duration>,
-    sse_retry: Option<std::time::Duration>,
-) -> anyhow::Result<()> {
-    let cancellation_token = CancellationToken::new();
-    let server_state = state.clone();
-    let service: StreamableHttpService<
-        _,
-        rmcp::transport::streamable_http_server::session::local::LocalSessionManager,
-    > = StreamableHttpService::new(
-        move || Ok(BrokerServer::new(server_state.clone())),
-        Default::default(),
-        StreamableHttpServerConfig::default()
-            .with_sse_keep_alive(sse_keep_alive)
-            .with_sse_retry(sse_retry)
-            .with_stateful_mode(stateful)
-            .with_cancellation_token(cancellation_token.child_token()),
-    );
-    let router = Router::new().nest_service(path, service);
-    let listener = tokio::net::TcpListener::bind(listen)
-        .await
-        .with_context(|| format!("binding broker MCP streamable HTTP listener on {listen}"))?;
-    let local_addr = listener
-        .local_addr()
-        .context("reading broker listener address")?;
-
-    tracing::info!(
-        listen = %local_addr,
-        path,
-        stateful,
-        sse_keep_alive_ms = sse_keep_alive.map(|duration| duration.as_millis() as u64),
-        sse_retry_ms = sse_retry.map(|duration| duration.as_millis() as u64),
-        "starting broker MCP streamable HTTP service"
-    );
-
-    let shutdown_token = cancellation_token.clone();
-    let result = axum::serve(listener, router)
-        .with_graceful_shutdown(async move {
-            wait_for_shutdown_signal().await;
-            shutdown_token.cancel();
-        })
-        .await
-        .context("running broker MCP streamable HTTP service");
-    crate::port_forward::close_all(&state.port_forwards).await;
-    result?;
-
-    tracing::info!("broker MCP streamable HTTP service stopped");
-    Ok(())
 }
 
 async fn wait_for_shutdown_signal() {
