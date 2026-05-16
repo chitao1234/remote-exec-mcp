@@ -1,7 +1,8 @@
+use std::borrow::Cow;
 use std::future::Future;
 
 use anyhow::Context;
-use remote_exec_proto::port_tunnel::Frame;
+use remote_exec_proto::port_tunnel::{Frame, TunnelErrorMeta as ProtoTunnelErrorMeta};
 
 use super::tunnel::{
     classify_recoverable_tunnel_event, format_terminal_tunnel_error, is_retryable_transport_error,
@@ -18,11 +19,56 @@ pub(super) enum ForwardSideEvent {
 
 #[derive(Clone, Debug)]
 pub(super) struct TunnelErrorMeta {
-    pub(super) code: Option<String>,
-    pub(super) message: String,
-    pub(super) fatal: bool,
-    pub(super) generation: Option<u64>,
+    pub(super) meta: Option<ProtoTunnelErrorMeta>,
     pub(super) stream_id: u32,
+}
+
+impl TunnelErrorMeta {
+    pub(super) fn decoded(meta: ProtoTunnelErrorMeta, stream_id: u32) -> Self {
+        Self {
+            meta: Some(meta),
+            stream_id,
+        }
+    }
+
+    pub(super) fn fallback(stream_id: u32) -> Self {
+        Self {
+            meta: None,
+            stream_id,
+        }
+    }
+
+    pub(super) fn code(&self) -> Option<&str> {
+        self.meta.as_ref().and_then(|meta| {
+            if meta.code.is_empty() {
+                None
+            } else {
+                Some(meta.code.as_str())
+            }
+        })
+    }
+
+    pub(super) fn message(&self) -> Cow<'_, str> {
+        match &self.meta {
+            Some(meta) => Cow::Borrowed(meta.message.as_str()),
+            None => Cow::Owned(format!(
+                "port tunnel returned error on stream {}",
+                self.stream_id
+            )),
+        }
+    }
+
+    pub(super) fn fatal(&self) -> bool {
+        self.meta.as_ref().map(|meta| meta.fatal).unwrap_or(true)
+    }
+
+    pub(super) fn generation(&self) -> Option<u64> {
+        self.meta.as_ref().and_then(|meta| meta.generation)
+    }
+
+    pub(super) fn used_fallback(&self) -> bool {
+        self.meta.is_none()
+    }
 }
 
 pub(super) enum ForwardLoopControl {

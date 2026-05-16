@@ -87,11 +87,18 @@ pub struct ForwardDropMeta {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct TunnelErrorMeta {
+    #[serde(default)]
     pub code: String,
+    #[serde(default = "default_tunnel_error_message")]
     pub message: String,
+    #[serde(default)]
     pub fatal: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<u64>,
+}
+
+fn default_tunnel_error_message() -> String {
+    "port tunnel error".to_string()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

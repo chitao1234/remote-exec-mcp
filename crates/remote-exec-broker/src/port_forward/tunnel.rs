@@ -364,7 +364,7 @@ pub(super) fn is_backpressure_error(err: &anyhow::Error) -> bool {
 }
 
 pub(super) fn is_recoverable_pressure_tunnel_error(meta: &TunnelErrorMeta) -> bool {
-    meta.code.as_deref().and_then(RpcErrorCode::from_wire_value)
+    meta.code().and_then(RpcErrorCode::from_wire_value)
         == Some(RpcErrorCode::PortTunnelLimitExceeded)
 }
 
@@ -412,54 +412,25 @@ pub(super) fn tunnel_error(frame: &Frame) -> anyhow::Error {
 }
 
 pub(super) fn decode_tunnel_error_frame(frame: &Frame) -> TunnelErrorMeta {
-    let fallback = || TunnelErrorMeta {
-        code: None,
-        message: format!("port tunnel returned error on stream {}", frame.stream_id),
-        fatal: true,
-        generation: None,
-        stream_id: frame.stream_id,
-    };
-    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&frame.meta) else {
-        return fallback();
-    };
-    TunnelErrorMeta {
-        code: value
-            .get("code")
-            .and_then(|code| code.as_str())
-            .map(ToOwned::to_owned),
-        message: value
-            .get("message")
-            .and_then(|message| message.as_str())
-            .unwrap_or("port tunnel error")
-            .to_string(),
-        fatal: value
-            .get("fatal")
-            .and_then(|fatal| fatal.as_bool())
-            .unwrap_or(false),
-        generation: value
-            .get("generation")
-            .and_then(|generation| generation.as_u64()),
-        stream_id: frame.stream_id,
-    }
+    decode_port_tunnel_meta::<remote_exec_proto::port_tunnel::TunnelErrorMeta>(frame)
+        .map(|meta| TunnelErrorMeta::decoded(meta, frame.stream_id))
+        .unwrap_or_else(|_| TunnelErrorMeta::fallback(frame.stream_id))
 }
 
 pub(super) fn format_terminal_tunnel_error(meta: &TunnelErrorMeta) -> anyhow::Error {
+    let message = meta.message();
     tracing::debug!(
-        code = ?meta.code,
-        generation = ?meta.generation,
+        code = ?meta.code(),
+        generation = ?meta.generation(),
         stream_id = meta.stream_id,
-        fatal = meta.fatal,
-        message = %meta.message,
+        fatal = meta.fatal(),
+        message = %message,
+        used_fallback = meta.used_fallback(),
         "port tunnel reported terminal error"
     );
-    match meta.code.as_deref() {
-        Some(code) => anyhow::anyhow!("{code}: {}", meta.message),
-        None if meta.message
-            == format!("port tunnel returned error on stream {}", meta.stream_id) =>
-        {
-            anyhow::anyhow!("{}", meta.message)
-        }
-        None => anyhow::anyhow!("{}", meta.message),
+    match meta.code() {
+        Some(code) => anyhow::anyhow!("{code}: {message}"),
+        None => anyhow::anyhow!("{message}"),
     }
 }
 
@@ -467,7 +438,7 @@ pub(super) fn classify_recoverable_tunnel_event(result: anyhow::Result<Frame>) -
     match result {
         Ok(frame) if frame.frame_type == FrameType::Error => {
             let meta = decode_tunnel_error_frame(&frame);
-            if meta.fatal {
+            if meta.fatal() {
                 ForwardSideEvent::TerminalTunnelError(meta)
             } else {
                 ForwardSideEvent::Frame(frame)
@@ -512,7 +483,8 @@ pub(super) fn is_retryable_transport_error(err: &anyhow::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use remote_exec_proto::port_tunnel::{
-        Frame, FrameType, TunnelForwardProtocol, TunnelOpenMeta, TunnelRole,
+        Frame, FrameType, TunnelErrorMeta as ProtoTunnelErrorMeta, TunnelForwardProtocol,
+        TunnelOpenMeta, TunnelRole,
     };
 
     use super::super::side::SideHandle;
@@ -548,6 +520,63 @@ mod tests {
             .wait_closed(std::time::Duration::from_secs(1))
             .await
             .unwrap();
+    }
+
+    #[test]
+    fn decode_tunnel_error_frame_uses_proto_defaults_for_partial_meta() {
+        let frame = Frame {
+            frame_type: FrameType::Error,
+            flags: 0,
+            stream_id: 7,
+            meta: serde_json::to_vec(&serde_json::json!({
+                "message": "listen refused",
+            }))
+            .unwrap(),
+            data: Vec::new(),
+        };
+
+        let meta = decode_tunnel_error_frame(&frame);
+        assert_eq!(meta.code(), None);
+        assert_eq!(meta.message(), "listen refused");
+        assert!(!meta.fatal());
+        assert_eq!(meta.generation(), None);
+        assert!(!meta.used_fallback());
+    }
+
+    #[test]
+    fn decode_tunnel_error_frame_falls_back_for_malformed_meta() {
+        let frame = Frame {
+            frame_type: FrameType::Error,
+            flags: 0,
+            stream_id: 7,
+            meta: b"{not-json".to_vec(),
+            data: Vec::new(),
+        };
+
+        let meta = decode_tunnel_error_frame(&frame);
+        assert_eq!(meta.code(), None);
+        assert_eq!(meta.message(), "port tunnel returned error on stream 7");
+        assert!(meta.fatal());
+        assert_eq!(meta.generation(), None);
+        assert!(meta.used_fallback());
+    }
+
+    #[test]
+    fn format_terminal_tunnel_error_uses_shared_proto_code() {
+        let meta = TunnelErrorMeta::decoded(
+            ProtoTunnelErrorMeta {
+                code: "listener_open_failed".to_string(),
+                message: "listen refused".to_string(),
+                fatal: true,
+                generation: Some(3),
+            },
+            11,
+        );
+
+        assert_eq!(
+            format_terminal_tunnel_error(&meta).to_string(),
+            "listener_open_failed: listen refused"
+        );
     }
 
     #[tokio::test]
