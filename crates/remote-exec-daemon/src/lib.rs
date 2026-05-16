@@ -8,6 +8,7 @@ pub mod patch;
 pub mod port_forward;
 pub(crate) mod rpc_error;
 pub mod server;
+pub(crate) mod server_transport;
 #[cfg(feature = "test-support")]
 pub mod test_support;
 pub mod tls;
@@ -45,7 +46,7 @@ where
 {
     tls::install_crypto_provider()?;
     let daemon_config = Arc::new(config.into_inner());
-    let listener = tls::bind_listener(daemon_config.listen)?;
+    let listener = server_transport::bind_listener(daemon_config.listen)?;
     run_until_on_bound_listener(daemon_config, listener, shutdown).await
 }
 

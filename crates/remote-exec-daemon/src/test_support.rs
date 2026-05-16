@@ -30,7 +30,8 @@ pub async fn serve_tls_on_listener<F>(
 where
     F: Future<Output = ()> + Send,
 {
-    crate::tls::serve_with_shutdown_on_listener(app, daemon_config, listener, shutdown).await
+    crate::server_transport::serve_with_shutdown_on_listener(app, daemon_config, listener, shutdown)
+        .await
 }
 
 pub async fn serve_http_on_listener<F>(
@@ -42,5 +43,11 @@ pub async fn serve_http_on_listener<F>(
 where
     F: Future<Output = ()> + Send,
 {
-    crate::tls::serve_http_with_shutdown_on_listener(app, daemon_config, listener, shutdown).await
+    crate::server_transport::serve_http_with_shutdown_on_listener(
+        app,
+        daemon_config,
+        listener,
+        shutdown,
+    )
+    .await
 }

@@ -59,7 +59,7 @@ pub async fn serve_tls_with_shutdown<F>(
 where
     F: Future<Output = ()> + Send,
 {
-    let listener = super::bind_listener(daemon_config.listen)?;
+    let listener = crate::server_transport::bind_listener(daemon_config.listen)?;
     serve_tls_with_shutdown_on_listener(app, daemon_config, listener, shutdown).await
 }
 
