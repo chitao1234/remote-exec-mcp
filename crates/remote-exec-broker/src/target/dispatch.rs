@@ -9,54 +9,48 @@ pub(crate) enum TargetBackend {
     Local(crate::local::backend::LocalDaemonClient),
 }
 
+macro_rules! dispatch_rpc {
+    ($self:expr, $method:ident $(, $arg:expr)*) => {
+        match $self {
+            Self::Remote(client) => client.$method($($arg),*).await,
+            Self::Local(client) => client.$method($($arg),*).await,
+        }
+    };
+}
+
 impl TargetBackend {
     pub(crate) async fn target_info(
         &self,
     ) -> Result<TargetInfoResponse, crate::daemon_client::DaemonClientError> {
-        match self {
-            Self::Remote(client) => client.target_info().await,
-            Self::Local(client) => client.target_info().await,
-        }
+        dispatch_rpc!(self, target_info)
     }
 
     pub(crate) async fn exec_start(
         &self,
         req: &ExecStartRequest,
     ) -> Result<ExecResponse, crate::daemon_client::DaemonClientError> {
-        match self {
-            Self::Remote(client) => client.exec_start(req).await,
-            Self::Local(client) => client.exec_start(req).await,
-        }
+        dispatch_rpc!(self, exec_start, req)
     }
 
     pub(crate) async fn exec_write(
         &self,
         req: &ExecWriteRequest,
     ) -> Result<ExecResponse, crate::daemon_client::DaemonClientError> {
-        match self {
-            Self::Remote(client) => client.exec_write(req).await,
-            Self::Local(client) => client.exec_write(req).await,
-        }
+        dispatch_rpc!(self, exec_write, req)
     }
 
     pub(crate) async fn patch_apply(
         &self,
         req: &PatchApplyRequest,
     ) -> Result<PatchApplyResponse, crate::daemon_client::DaemonClientError> {
-        match self {
-            Self::Remote(client) => client.patch_apply(req).await,
-            Self::Local(client) => client.patch_apply(req).await,
-        }
+        dispatch_rpc!(self, patch_apply, req)
     }
 
     pub(crate) async fn image_read(
         &self,
         req: &ImageReadRequest,
     ) -> Result<ImageReadResponse, crate::daemon_client::DaemonClientError> {
-        match self {
-            Self::Remote(client) => client.image_read(req).await,
-            Self::Local(client) => client.image_read(req).await,
-        }
+        dispatch_rpc!(self, image_read, req)
     }
 
     pub(crate) fn remote_client(&self) -> Option<&crate::daemon_client::DaemonClient> {
