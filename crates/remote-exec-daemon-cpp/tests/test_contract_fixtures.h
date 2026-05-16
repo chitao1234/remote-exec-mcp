@@ -73,4 +73,9 @@ inline const Json& sandbox_cases() {
     return fixture;
 }
 
+inline const Json& transfer_semantics_contract() {
+    static const Json fixture = load_contract_fixture("transfer_semantics/contract.json");
+    return fixture;
+}
+
 } // namespace test_contract

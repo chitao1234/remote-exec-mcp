@@ -1233,7 +1233,9 @@ async fn import_rejects_directory_entries_that_escape_destination() {
         .unwrap();
     assert_eq!(err.code, "transfer_source_unsupported");
     assert!(
-        err.message.contains("must not have `..`") || err.message.contains("unsupported entry")
+        err.message.contains("archive path")
+            || err.message.contains("escapes destination")
+            || err.message.contains("unsupported entry")
     );
     assert!(!escaped.exists());
 }

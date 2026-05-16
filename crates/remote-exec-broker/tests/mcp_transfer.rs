@@ -906,7 +906,11 @@ async fn transfer_files_rejects_remote_directory_entries_that_escape_local_desti
         )
         .await;
 
-    assert!(error.contains("must not have `..`") || error.contains("unsupported entry"));
+    assert!(
+        error.contains("archive path")
+            || error.contains("escapes destination")
+            || error.contains("unsupported entry")
+    );
     assert!(!escaped.exists());
 }
 

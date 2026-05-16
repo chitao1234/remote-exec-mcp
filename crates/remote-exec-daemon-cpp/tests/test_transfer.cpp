@@ -14,6 +14,7 @@
 #endif
 
 #include "rpc_failures.h"
+#include "test_contract_fixtures.h"
 #include "test_filesystem.h"
 #include "transfer_ops.h"
 
@@ -244,12 +245,235 @@ static std::vector<std::string> read_tar_paths(const std::string& archive) {
     return paths;
 }
 
+static std::vector<std::pair<std::string, std::string> > read_tar_symlinks(const std::string& archive) {
+    std::vector<std::pair<std::string, std::string> > symlinks;
+    std::size_t offset = 0;
+    std::string long_name;
+
+    while (offset + 512 <= archive.size() && !block_is_zero(archive.data() + offset)) {
+        const char* header = archive.data() + offset;
+        std::size_t path_length = 0;
+        while (path_length < 100 && header[path_length] != '\0') {
+            ++path_length;
+        }
+        std::string path(header, path_length);
+        const char typeflag = header[156] == '\0' ? '0' : header[156];
+        const std::uint64_t size = parse_octal_value(header + 124, 12);
+        const std::size_t body_offset = offset + 512;
+        const std::size_t padded_size = ((static_cast<std::size_t>(size) + 511) / 512) * 512;
+
+        if (typeflag == 'L') {
+            long_name = archive.substr(body_offset, static_cast<std::size_t>(size));
+            while (!long_name.empty() && long_name[long_name.size() - 1] == '\0') {
+                long_name.erase(long_name.size() - 1);
+            }
+            offset = body_offset + padded_size;
+            continue;
+        }
+
+        if (!long_name.empty()) {
+            path = long_name;
+            long_name.clear();
+        }
+
+        if (typeflag == '2') {
+            std::size_t target_length = 0;
+            while (target_length < 100 && header[157 + target_length] != '\0') {
+                ++target_length;
+            }
+            symlinks.push_back(std::make_pair(path, std::string(header + 157, target_length)));
+        }
+
+        offset = body_offset + padded_size;
+    }
+
+    return symlinks;
+}
+
 #ifndef _WIN32
 static std::uint64_t read_first_tar_mode(const std::string& archive) {
     TEST_ASSERT(archive.size() >= 512);
     return parse_octal_value(archive.data() + 100, 8);
 }
 #endif
+
+static std::string replace_all(std::string value, const std::string& needle, const std::string& replacement) {
+    std::string::size_type position = 0;
+    while ((position = value.find(needle, position)) != std::string::npos) {
+        value.replace(position, needle.size(), replacement);
+        position += replacement.size();
+    }
+    return value;
+}
+
+static std::string apply_template(const std::string& raw, const fs::path& root) {
+    return replace_all(raw, "{root}", root.string());
+}
+
+static bool case_applies_to_host(const Json& case_json) {
+    if (!case_json.contains("platforms")) {
+        return true;
+    }
+#ifdef _WIN32
+    const std::string platform = "windows";
+#else
+    const std::string platform = "posix";
+#endif
+    const Json& platforms = case_json.at("platforms");
+    for (Json::const_iterator it = platforms.begin(); it != platforms.end(); ++it) {
+        if (it->get<std::string>() == platform) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void apply_setup(const fs::path& root, const Json& setup) {
+    if (setup.is_null()) {
+        return;
+    }
+
+    if (setup.contains("dirs")) {
+        const Json& dirs = setup.at("dirs");
+        for (Json::const_iterator it = dirs.begin(); it != dirs.end(); ++it) {
+            fs::create_directories(apply_template(it->get<std::string>(), root));
+        }
+    }
+
+    if (setup.contains("files")) {
+        const Json& files = setup.at("files");
+        for (Json::const_iterator it = files.begin(); it != files.end(); ++it) {
+            const fs::path path = apply_template(it->at("path").get<std::string>(), root);
+            fs::create_directories(path.parent_path());
+            write_text(path, it->at("contents").get<std::string>());
+        }
+    }
+
+#ifndef _WIN32
+    if (setup.contains("symlinks")) {
+        const Json& symlinks = setup.at("symlinks");
+        for (Json::const_iterator it = symlinks.begin(); it != symlinks.end(); ++it) {
+            const fs::path path = apply_template(it->at("path").get<std::string>(), root);
+            fs::create_directories(path.parent_path());
+            fs::create_symlink(apply_template(it->at("target").get<std::string>(), root), path);
+        }
+    }
+
+    if (setup.contains("fifos")) {
+        const Json& fifos = setup.at("fifos");
+        for (Json::const_iterator it = fifos.begin(); it != fifos.end(); ++it) {
+            const fs::path path = apply_template(it->get<std::string>(), root);
+            fs::create_directories(path.parent_path());
+            TEST_ASSERT(mkfifo(path.c_str(), 0600) == 0);
+        }
+    }
+#endif
+}
+
+static TransferSourceType source_type_from_wire(const std::string& value) {
+    TransferSourceType source_type = TransferSourceType::File;
+    TEST_ASSERT(parse_transfer_source_type_wire_value(value, &source_type));
+    return source_type;
+}
+
+static TransferOverwrite overwrite_from_wire(const std::string& value) {
+    TransferOverwrite overwrite = TransferOverwrite::Fail;
+    TEST_ASSERT(parse_transfer_overwrite_wire_value(value, &overwrite));
+    return overwrite;
+}
+
+static TransferSymlinkMode symlink_mode_from_wire(const std::string& value) {
+    TransferSymlinkMode symlink_mode = TransferSymlinkMode::Preserve;
+    TEST_ASSERT(parse_transfer_symlink_mode_wire_value(value, &symlink_mode));
+    return symlink_mode;
+}
+
+static std::vector<std::string> sorted_strings(std::vector<std::string> values) {
+    std::sort(values.begin(), values.end());
+    return values;
+}
+
+static std::vector<std::string> warning_codes(const std::vector<TransferWarning>& warnings) {
+    std::vector<std::string> codes;
+    for (std::size_t i = 0; i < warnings.size(); ++i) {
+        codes.push_back(warnings[i].code);
+    }
+    return sorted_strings(codes);
+}
+
+static std::vector<std::string> json_string_array(const Json& values) {
+    std::vector<std::string> out;
+    for (Json::const_iterator it = values.begin(); it != values.end(); ++it) {
+        out.push_back(it->get<std::string>());
+    }
+    return out;
+}
+
+static void assert_string_vectors_equal(std::vector<std::string> actual, std::vector<std::string> expected) {
+    actual = sorted_strings(actual);
+    expected = sorted_strings(expected);
+    TEST_ASSERT(actual.size() == expected.size());
+    for (std::size_t i = 0; i < actual.size(); ++i) {
+        TEST_ASSERT(actual[i] == expected[i]);
+    }
+}
+
+static void assert_file_contents_match(const fs::path& root, const Json& files) {
+    for (Json::const_iterator it = files.begin(); it != files.end(); ++it) {
+        const fs::path path = apply_template(it->at("path").get<std::string>(), root);
+        TEST_ASSERT(read_text(path) == it->at("contents").get<std::string>());
+    }
+}
+
+static void assert_missing_paths_match(const fs::path& root, const Json& paths) {
+    for (Json::const_iterator it = paths.begin(); it != paths.end(); ++it) {
+        TEST_ASSERT(!fs::exists(apply_template(it->get<std::string>(), root)));
+    }
+}
+
+#ifndef _WIN32
+static void assert_symlink_targets_match(const fs::path& root, const Json& symlinks) {
+    for (Json::const_iterator it = symlinks.begin(); it != symlinks.end(); ++it) {
+        const fs::path path = apply_template(it->at("path").get<std::string>(), root);
+        const fs::path expected = apply_template(it->at("target").get<std::string>(), root);
+        TEST_ASSERT(fs::read_symlink(path) == expected);
+    }
+}
+#else
+static void assert_symlink_targets_match(const fs::path&, const Json& symlinks) {
+    TEST_ASSERT(symlinks.empty());
+}
+#endif
+
+static std::string build_archive_from_contract_entries(const Json& entries) {
+    std::string archive;
+    for (Json::const_iterator it = entries.begin(); it != entries.end(); ++it) {
+        const std::string type = it->at("type").get<std::string>();
+        if (type == "directory") {
+            append_tar_directory(archive, it->at("path").get<std::string>());
+            continue;
+        }
+        if (type == "file") {
+            append_tar_file(archive, it->at("path").get<std::string>(), it->at("contents").get<std::string>());
+            continue;
+        }
+        if (type == "symlink") {
+            append_tar_symlink(
+                &archive, it->at("path").get<std::string>(), it->at("target").get<std::string>());
+            continue;
+        }
+        TEST_ASSERT(false);
+    }
+    finalize_tar(archive);
+    return archive;
+}
+
+static fs::path roundtrip_destination_for_source_type(const fs::path& root, TransferSourceType source_type) {
+    if (source_type == TransferSourceType::File) {
+        return root / "roundtrip.txt";
+    }
+    return root / "roundtrip";
+}
 
 static void assert_transfer_type_wire_helpers() {
     TEST_ASSERT(std::string(transfer_source_type_wire_value(TransferSourceType::File)) == "file");
@@ -873,6 +1097,138 @@ static void assert_multiple_sources_import() {
     TEST_ASSERT(read_text(root / "dest" / "nested" / "beta.txt") == "beta");
 }
 
+static void assert_shared_transfer_contract_cases() {
+    const Json& contract = test_contract::transfer_semantics_contract();
+
+    const Json& import_cases = contract.at("import_cases");
+    for (Json::const_iterator it = import_cases.begin(); it != import_cases.end(); ++it) {
+        if (!case_applies_to_host(*it)) {
+            continue;
+        }
+
+        const fs::path root = fs::temp_directory_path() /
+                              ("remote-exec-cpp-transfer-contract-import-" + it->at("name").get<std::string>());
+        fs::remove_all(root);
+        fs::create_directories(root);
+        apply_setup(root, it->contains("setup") ? it->at("setup") : Json());
+
+        const std::string archive = build_archive_from_contract_entries(it->at("archive_entries"));
+        const fs::path destination = apply_template(it->at("destination_path").get<std::string>(), root);
+        const Json& expected = it->at("expected");
+
+        if (expected.contains("error_message_fragment")) {
+            bool rejected = false;
+            try {
+                (void)import_path(archive,
+                                  source_type_from_wire(it->at("source_type").get<std::string>()),
+                                  destination.string(),
+                                  overwrite_from_wire(it->at("overwrite").get<std::string>()),
+                                  it->at("create_parent").get<bool>(),
+                                  symlink_mode_from_wire(it->at("symlink_mode").get<std::string>()));
+            } catch (const TransferFailure& failure) {
+                rejected = failure.message.find(expected.at("error_message_fragment").get<std::string>()) !=
+                           std::string::npos;
+            }
+            TEST_ASSERT(rejected);
+            continue;
+        }
+
+        const ImportSummary imported = import_path(archive,
+                                                   source_type_from_wire(it->at("source_type").get<std::string>()),
+                                                   destination.string(),
+                                                   overwrite_from_wire(it->at("overwrite").get<std::string>()),
+                                                   it->at("create_parent").get<bool>(),
+                                                   symlink_mode_from_wire(it->at("symlink_mode").get<std::string>()));
+
+        if (expected.contains("replaced")) {
+            TEST_ASSERT(imported.replaced == expected.at("replaced").get<bool>());
+        }
+        if (expected.contains("files_copied")) {
+            TEST_ASSERT(imported.files_copied == expected.at("files_copied").get<std::uint64_t>());
+        }
+        if (expected.contains("directories_copied_at_least")) {
+            TEST_ASSERT(imported.directories_copied >= expected.at("directories_copied_at_least").get<std::uint64_t>());
+        }
+        assert_string_vectors_equal(warning_codes(imported.warnings), json_string_array(expected.at("warning_codes")));
+        if (expected.contains("file_contents")) {
+            assert_file_contents_match(root, expected.at("file_contents"));
+        }
+        if (expected.contains("missing_paths")) {
+            assert_missing_paths_match(root, expected.at("missing_paths"));
+        }
+        if (expected.contains("symlink_targets")) {
+            assert_symlink_targets_match(root, expected.at("symlink_targets"));
+        }
+    }
+
+    const Json& export_cases = contract.at("export_cases");
+    for (Json::const_iterator it = export_cases.begin(); it != export_cases.end(); ++it) {
+        if (!case_applies_to_host(*it)) {
+            continue;
+        }
+
+        const fs::path root = fs::temp_directory_path() /
+                              ("remote-exec-cpp-transfer-contract-export-" + it->at("name").get<std::string>());
+        fs::remove_all(root);
+        fs::create_directories(root);
+        apply_setup(root, it->contains("setup") ? it->at("setup") : Json());
+
+        const ExportedPayload exported =
+            export_path(apply_template(it->at("path").get<std::string>(), root),
+                        symlink_mode_from_wire(it->at("symlink_mode").get<std::string>()));
+        const Json& expected = it->at("expected");
+
+        TEST_ASSERT(transfer_source_type_wire_value(exported.source_type) == expected.at("source_type").get<std::string>());
+        const std::vector<std::string> archive_paths = read_tar_paths(exported.bytes);
+        assert_string_vectors_equal(archive_paths, json_string_array(expected.at("archive_paths")));
+
+        if (expected.contains("missing_archive_paths")) {
+            const Json& missing_archive_paths = expected.at("missing_archive_paths");
+            for (Json::const_iterator missing = missing_archive_paths.begin(); missing != missing_archive_paths.end();
+                 ++missing) {
+                TEST_ASSERT(std::find(archive_paths.begin(), archive_paths.end(), missing->get<std::string>()) ==
+                            archive_paths.end());
+            }
+        }
+
+        std::vector<std::string> actual_archive_symlinks;
+        const std::vector<std::pair<std::string, std::string> > symlinks = read_tar_symlinks(exported.bytes);
+        for (std::size_t i = 0; i < symlinks.size(); ++i) {
+            actual_archive_symlinks.push_back(symlinks[i].first + "\n" + symlinks[i].second);
+        }
+
+        std::vector<std::string> expected_archive_symlinks;
+        if (expected.contains("archive_symlinks")) {
+            const Json& archive_symlinks = expected.at("archive_symlinks");
+            for (Json::const_iterator link = archive_symlinks.begin(); link != archive_symlinks.end(); ++link) {
+                expected_archive_symlinks.push_back(
+                    link->at("path").get<std::string>() + "\n" + link->at("target").get<std::string>());
+            }
+        }
+        assert_string_vectors_equal(actual_archive_symlinks, expected_archive_symlinks);
+
+        const ImportSummary roundtrip = import_path(exported.bytes,
+                                                    exported.source_type,
+                                                    roundtrip_destination_for_source_type(root, exported.source_type)
+                                                        .string(),
+                                                    TransferOverwrite::Replace,
+                                                    true,
+                                                    symlink_mode_from_wire(it->at("symlink_mode").get<std::string>()));
+
+        assert_string_vectors_equal(
+            warning_codes(roundtrip.warnings), json_string_array(expected.at("roundtrip_warning_codes")));
+        if (expected.contains("roundtrip_file_contents")) {
+            assert_file_contents_match(root, expected.at("roundtrip_file_contents"));
+        }
+        if (expected.contains("roundtrip_missing_paths")) {
+            assert_missing_paths_match(root, expected.at("roundtrip_missing_paths"));
+        }
+        if (expected.contains("roundtrip_symlink_targets")) {
+            assert_symlink_targets_match(root, expected.at("roundtrip_symlink_targets"));
+        }
+    }
+}
+
 int main() {
     TEST_ASSERT(std::string(transfer_error_code_name(TransferRpcCode::SourceMissing)) == "transfer_source_missing");
     TEST_ASSERT(std::string(transfer_error_code_name(TransferRpcCode::CompressionUnsupported)) ==
@@ -915,5 +1271,6 @@ int main() {
 #endif
     assert_directory_traversal_is_rejected();
     assert_multiple_sources_import();
+    assert_shared_transfer_contract_cases();
     return 0;
 }

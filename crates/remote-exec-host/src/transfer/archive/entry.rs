@@ -1,11 +1,28 @@
-use std::path::{Path, PathBuf};
-
-use remote_exec_proto::path::normalize_relative_path;
+use std::path::{Component, Path, PathBuf};
 
 use crate::error::TransferError;
 
 pub(super) fn normalize_archive_entry_path(raw_path: &Path) -> anyhow::Result<PathBuf> {
-    normalize_relative_path(raw_path).ok_or_else(|| unsupported_archive_entry(raw_path))
+    let mut normalized = PathBuf::new();
+
+    for component in raw_path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => normalized.push(part),
+            Component::ParentDir => {
+                return Err(
+                    TransferError::source_unsupported("archive path escapes destination").into(),
+                );
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                return Err(
+                    TransferError::source_unsupported("archive path must be relative").into(),
+                );
+            }
+        }
+    }
+
+    Ok(normalized)
 }
 
 pub(super) fn ensure_supported_archive_entry_type(

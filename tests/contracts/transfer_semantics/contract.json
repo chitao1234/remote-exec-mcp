@@ -1,0 +1,341 @@
+{
+  "import_cases": [
+    {
+      "name": "directory_replace_removes_stale_entries",
+      "source_type": "directory",
+      "overwrite": "replace",
+      "create_parent": true,
+      "symlink_mode": "preserve",
+      "destination_path": "{root}/dest",
+      "setup": {
+        "dirs": [
+          "{root}/dest/stale"
+        ],
+        "files": [
+          {
+            "path": "{root}/dest/stale/old.txt",
+            "contents": "old"
+          }
+        ]
+      },
+      "archive_entries": [
+        {
+          "type": "directory",
+          "path": "."
+        },
+        {
+          "type": "file",
+          "path": "fresh.txt",
+          "contents": "fresh"
+        }
+      ],
+      "expected": {
+        "replaced": true,
+        "files_copied": 1,
+        "directories_copied_at_least": 1,
+        "warning_codes": [],
+        "file_contents": [
+          {
+            "path": "{root}/dest/fresh.txt",
+            "contents": "fresh"
+          }
+        ],
+        "missing_paths": [
+          "{root}/dest/stale/old.txt"
+        ]
+      }
+    },
+    {
+      "name": "directory_merge_preserves_existing_entries",
+      "source_type": "directory",
+      "overwrite": "merge",
+      "create_parent": true,
+      "symlink_mode": "preserve",
+      "destination_path": "{root}/dest",
+      "setup": {
+        "dirs": [
+          "{root}/dest/nested"
+        ],
+        "files": [
+          {
+            "path": "{root}/dest/stale.txt",
+            "contents": "stale"
+          },
+          {
+            "path": "{root}/dest/nested/old.txt",
+            "contents": "old"
+          }
+        ]
+      },
+      "archive_entries": [
+        {
+          "type": "directory",
+          "path": "."
+        },
+        {
+          "type": "directory",
+          "path": "nested"
+        },
+        {
+          "type": "file",
+          "path": "nested/fresh.txt",
+          "contents": "fresh"
+        }
+      ],
+      "expected": {
+        "replaced": false,
+        "files_copied": 1,
+        "directories_copied_at_least": 1,
+        "warning_codes": [],
+        "file_contents": [
+          {
+            "path": "{root}/dest/nested/fresh.txt",
+            "contents": "fresh"
+          },
+          {
+            "path": "{root}/dest/stale.txt",
+            "contents": "stale"
+          },
+          {
+            "path": "{root}/dest/nested/old.txt",
+            "contents": "old"
+          }
+        ]
+      }
+    },
+    {
+      "name": "directory_traversal_is_rejected",
+      "source_type": "directory",
+      "overwrite": "replace",
+      "create_parent": true,
+      "symlink_mode": "preserve",
+      "destination_path": "{root}/dest",
+      "archive_entries": [
+        {
+          "type": "file",
+          "path": "../escape.txt",
+          "contents": "bad"
+        }
+      ],
+      "expected": {
+        "error_message_fragment": "archive path"
+      }
+    },
+    {
+      "name": "symlink_skip_emits_warning",
+      "source_type": "directory",
+      "overwrite": "replace",
+      "create_parent": true,
+      "symlink_mode": "skip",
+      "destination_path": "{root}/dest",
+      "archive_entries": [
+        {
+          "type": "file",
+          "path": "alpha.txt",
+          "contents": "alpha"
+        },
+        {
+          "type": "symlink",
+          "path": "alpha-link",
+          "target": "alpha.txt"
+        }
+      ],
+      "expected": {
+        "replaced": false,
+        "files_copied": 1,
+        "directories_copied_at_least": 1,
+        "warning_codes": [
+          "transfer_skipped_symlink"
+        ],
+        "file_contents": [
+          {
+            "path": "{root}/dest/alpha.txt",
+            "contents": "alpha"
+          }
+        ],
+        "missing_paths": [
+          "{root}/dest/alpha-link"
+        ]
+      }
+    },
+    {
+      "name": "symlink_preserve_recreates_link",
+      "platforms": [
+        "posix"
+      ],
+      "source_type": "directory",
+      "overwrite": "replace",
+      "create_parent": true,
+      "symlink_mode": "preserve",
+      "destination_path": "{root}/dest",
+      "archive_entries": [
+        {
+          "type": "file",
+          "path": "alpha.txt",
+          "contents": "alpha"
+        },
+        {
+          "type": "symlink",
+          "path": "alpha-link",
+          "target": "alpha.txt"
+        }
+      ],
+      "expected": {
+        "replaced": false,
+        "files_copied": 2,
+        "directories_copied_at_least": 1,
+        "warning_codes": [],
+        "file_contents": [
+          {
+            "path": "{root}/dest/alpha.txt",
+            "contents": "alpha"
+          }
+        ],
+        "symlink_targets": [
+          {
+            "path": "{root}/dest/alpha-link",
+            "target": "alpha.txt"
+          }
+        ]
+      }
+    }
+  ],
+  "export_cases": [
+    {
+      "name": "directory_symlink_preserve_round_trips_link_entry",
+      "platforms": [
+        "posix"
+      ],
+      "path": "{root}/source",
+      "symlink_mode": "preserve",
+      "setup": {
+        "dirs": [
+          "{root}/source"
+        ],
+        "files": [
+          {
+            "path": "{root}/source/alpha.txt",
+            "contents": "alpha"
+          }
+        ],
+        "symlinks": [
+          {
+            "path": "{root}/source/alpha-link",
+            "target": "alpha.txt"
+          }
+        ]
+      },
+      "expected": {
+        "source_type": "directory",
+        "archive_paths": [
+          ".",
+          "alpha.txt",
+          "alpha-link"
+        ],
+        "archive_symlinks": [
+          {
+            "path": "alpha-link",
+            "target": "alpha.txt"
+          }
+        ],
+        "roundtrip_warning_codes": [],
+        "roundtrip_file_contents": [
+          {
+            "path": "{root}/roundtrip/alpha.txt",
+            "contents": "alpha"
+          }
+        ],
+        "roundtrip_symlink_targets": [
+          {
+            "path": "{root}/roundtrip/alpha-link",
+            "target": "alpha.txt"
+          }
+        ]
+      }
+    },
+    {
+      "name": "directory_special_file_warning_round_trips_summary",
+      "platforms": [
+        "posix"
+      ],
+      "path": "{root}/source",
+      "symlink_mode": "preserve",
+      "setup": {
+        "dirs": [
+          "{root}/source"
+        ],
+        "files": [
+          {
+            "path": "{root}/source/regular.txt",
+            "contents": "regular"
+          }
+        ],
+        "fifos": [
+          "{root}/source/events.fifo"
+        ]
+      },
+      "expected": {
+        "source_type": "directory",
+        "archive_paths": [
+          ".",
+          "regular.txt",
+          ".remote-exec-transfer-summary.json"
+        ],
+        "missing_archive_paths": [
+          "events.fifo"
+        ],
+        "roundtrip_warning_codes": [
+          "transfer_skipped_unsupported_entry"
+        ],
+        "roundtrip_file_contents": [
+          {
+            "path": "{root}/roundtrip/regular.txt",
+            "contents": "regular"
+          }
+        ],
+        "roundtrip_missing_paths": [
+          "{root}/roundtrip/events.fifo",
+          "{root}/roundtrip/.remote-exec-transfer-summary.json"
+        ]
+      }
+    },
+    {
+      "name": "top_level_symlink_follow_exports_as_single_file",
+      "platforms": [
+        "posix"
+      ],
+      "path": "{root}/link.txt",
+      "symlink_mode": "follow",
+      "setup": {
+        "dirs": [
+          "{root}"
+        ],
+        "files": [
+          {
+            "path": "{root}/target.txt",
+            "contents": "target"
+          }
+        ],
+        "symlinks": [
+          {
+            "path": "{root}/link.txt",
+            "target": "{root}/target.txt"
+          }
+        ]
+      },
+      "expected": {
+        "source_type": "file",
+        "archive_paths": [
+          ".remote-exec-file"
+        ],
+        "roundtrip_warning_codes": [],
+        "roundtrip_file_contents": [
+          {
+            "path": "{root}/roundtrip.txt",
+            "contents": "target"
+          }
+        ]
+      }
+    }
+  ]
+}
