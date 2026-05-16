@@ -108,11 +108,7 @@ void remove_existing_path_recursive(const std::string& path, std::size_t depth) 
         for (std::size_t i = 0; i < entries.size(); ++i) {
             remove_existing_path_recursive(join_path(path, entries[i].name), depth + 1);
         }
-#ifdef _WIN32
         if (!path_utils::remove_directory(path)) {
-#else
-        if (!path_utils::remove_directory(path)) {
-#endif
             throw std::runtime_error("unable to remove existing directory " + path);
         }
         return;

@@ -24,10 +24,10 @@
 
 namespace {
 
-enum PatchKind {
-    PATCH_ADD,
-    PATCH_DELETE,
-    PATCH_UPDATE,
+enum class PatchKind {
+    Add,
+    Delete,
+    Update,
 };
 
 struct UpdateChunk {
@@ -46,14 +46,14 @@ struct PatchAction {
     std::vector<UpdateChunk> chunks;
 };
 
-enum LineEndingKind {
-    LINE_ENDING_LF,
-    LINE_ENDING_CRLF,
+enum class LineEndingKind {
+    Lf,
+    Crlf,
 };
 
-enum NormalizedPathKind {
-    NORMALIZED_RELATIVE_PATH,
-    NORMALIZED_ABSOLUTE_PATH,
+enum class NormalizedPathKind {
+    Relative,
+    Absolute,
 };
 
 struct NormalizedPathPrefix {
@@ -79,7 +79,7 @@ NormalizedPathPrefix normalized_path_prefix(const std::string& raw, NormalizedPa
     NormalizedPathPrefix prefix;
     prefix.start = 0;
 
-    if (kind == NORMALIZED_RELATIVE_PATH) {
+    if (kind == NormalizedPathKind::Relative) {
         return prefix;
     }
 
@@ -113,7 +113,7 @@ void push_normalized_segment(std::vector<std::string>* parts, const std::string&
     }
     if (segment == "..") {
         if (parts->empty()) {
-            if (kind == NORMALIZED_RELATIVE_PATH) {
+            if (kind == NormalizedPathKind::Relative) {
                 throw std::runtime_error("path traversal is not supported");
             }
         } else {
@@ -164,11 +164,11 @@ std::string normalize_path_segments(const std::string& raw, NormalizedPathKind k
 }
 
 std::string normalize_relative_path(const std::string& raw) {
-    return normalize_path_segments(raw, NORMALIZED_RELATIVE_PATH);
+    return normalize_path_segments(raw, NormalizedPathKind::Relative);
 }
 
 std::string normalize_absolute_path(const std::string& raw) {
-    return normalize_path_segments(raw, NORMALIZED_ABSOLUTE_PATH);
+    return normalize_path_segments(raw, NormalizedPathKind::Absolute);
 }
 
 std::string normalize_patch_path(const std::string& raw) {
@@ -288,15 +288,15 @@ LineEndingKind detect_line_ending(const std::string& text) {
             continue;
         }
         if (i > 0 && text[i - 1] == '\r') {
-            return LINE_ENDING_CRLF;
+            return LineEndingKind::Crlf;
         }
-        return LINE_ENDING_LF;
+        return LineEndingKind::Lf;
     }
-    return LINE_ENDING_LF;
+    return LineEndingKind::Lf;
 }
 
 const char* line_ending_text(LineEndingKind line_ending) {
-    return line_ending == LINE_ENDING_CRLF ? "\r\n" : "\n";
+    return line_ending == LineEndingKind::Crlf ? "\r\n" : "\n";
 }
 
 std::string join_lines(const std::vector<std::string>& lines, bool trailing_newline, LineEndingKind line_ending) {
@@ -371,7 +371,7 @@ std::vector<PatchAction> parse_patch(const std::string& patch_text) {
         const std::string& line = lines[index];
         if (starts_with(line, "*** Add File: ")) {
             PatchAction action;
-            action.kind = PATCH_ADD;
+            action.kind = PatchKind::Add;
             action.path = normalize_patch_path(line.substr(14));
             ++index;
             while (index + 1 < lines.size() && !is_structural_line(lines[index])) {
@@ -387,7 +387,7 @@ std::vector<PatchAction> parse_patch(const std::string& patch_text) {
 
         if (starts_with(line, "*** Delete File: ")) {
             PatchAction action;
-            action.kind = PATCH_DELETE;
+            action.kind = PatchKind::Delete;
             action.path = normalize_patch_path(line.substr(17));
             actions.push_back(action);
             ++index;
@@ -396,7 +396,7 @@ std::vector<PatchAction> parse_patch(const std::string& patch_text) {
 
         if (starts_with(line, "*** Update File: ")) {
             PatchAction action;
-            action.kind = PATCH_UPDATE;
+            action.kind = PatchKind::Update;
             action.path = normalize_patch_path(line.substr(17));
             ++index;
 
@@ -539,7 +539,7 @@ static std::string apply_update_chunks(const std::string& old_text, const std::v
 }
 
 std::string render_added_content(const std::vector<std::string>& lines) {
-    return join_lines(lines, !lines.empty(), LINE_ENDING_LF);
+    return join_lines(lines, !lines.empty(), LineEndingKind::Lf);
 }
 
 } // namespace
@@ -561,13 +561,13 @@ apply_patch(const std::string& root, const std::string& patch_text, const PatchP
             }
         }
 
-        if (action.kind == PATCH_ADD) {
+        if (action.kind == PatchKind::Add) {
             write_text_atomic(source_path, render_added_content(action.lines));
             summary.push_back("A " + action.path);
             continue;
         }
 
-        if (action.kind == PATCH_DELETE) {
+        if (action.kind == PatchKind::Delete) {
             remove_file_required(source_path);
             summary.push_back("D " + action.path);
             continue;

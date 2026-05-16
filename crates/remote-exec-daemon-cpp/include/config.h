@@ -6,27 +6,27 @@
 #include "filesystem_sandbox.h"
 #include "transfer_ops.h"
 
-static const unsigned long DEFAULT_YIELD_TIME_EXEC_COMMAND_DEFAULT_MS = 10000UL;
-static const unsigned long DEFAULT_YIELD_TIME_EXEC_COMMAND_MAX_MS = 30000UL;
-static const unsigned long DEFAULT_YIELD_TIME_EXEC_COMMAND_MIN_MS = 250UL;
-static const unsigned long DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_DEFAULT_MS = 5000UL;
-static const unsigned long DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_MAX_MS = 300000UL;
-static const unsigned long DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_MIN_MS = 5000UL;
-static const unsigned long DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_DEFAULT_MS = 250UL;
-static const unsigned long DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_MAX_MS = 30000UL;
-static const unsigned long DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_MIN_MS = 250UL;
-static const unsigned long DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS = 256UL;
-static const unsigned long DEFAULT_PORT_FORWARD_MAX_RETAINED_SESSIONS = 64UL;
-static const unsigned long DEFAULT_PORT_FORWARD_MAX_RETAINED_LISTENERS = 64UL;
-static const unsigned long DEFAULT_PORT_FORWARD_MAX_UDP_BINDS = 64UL;
-static const unsigned long DEFAULT_PORT_FORWARD_MAX_ACTIVE_TCP_STREAMS = 1024UL;
-static const unsigned long DEFAULT_PORT_FORWARD_MAX_TUNNEL_QUEUED_BYTES = 8UL * 1024UL * 1024UL;
-static const unsigned long DEFAULT_PORT_FORWARD_TUNNEL_IO_TIMEOUT_MS = 30000UL;
-static const unsigned long DEFAULT_PORT_FORWARD_CONNECT_TIMEOUT_MS = 10000UL;
-static const unsigned long DEFAULT_HTTP_CONNECTION_IDLE_TIMEOUT_MS = 30000UL;
-static const std::size_t DEFAULT_MAX_REQUEST_HEADER_BYTES = 64UL * 1024UL;
-static const std::size_t DEFAULT_MAX_REQUEST_BODY_BYTES = 512UL * 1024UL * 1024UL;
-static const unsigned long DEFAULT_MAX_OPEN_SESSIONS = 64UL;
+constexpr unsigned long DEFAULT_YIELD_TIME_EXEC_COMMAND_DEFAULT_MS = 10000UL;
+constexpr unsigned long DEFAULT_YIELD_TIME_EXEC_COMMAND_MAX_MS = 30000UL;
+constexpr unsigned long DEFAULT_YIELD_TIME_EXEC_COMMAND_MIN_MS = 250UL;
+constexpr unsigned long DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_DEFAULT_MS = 5000UL;
+constexpr unsigned long DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_MAX_MS = 300000UL;
+constexpr unsigned long DEFAULT_YIELD_TIME_WRITE_STDIN_POLL_MIN_MS = 5000UL;
+constexpr unsigned long DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_DEFAULT_MS = 250UL;
+constexpr unsigned long DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_MAX_MS = 30000UL;
+constexpr unsigned long DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_MIN_MS = 250UL;
+constexpr unsigned long DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS = 256UL;
+constexpr unsigned long DEFAULT_PORT_FORWARD_MAX_RETAINED_SESSIONS = 64UL;
+constexpr unsigned long DEFAULT_PORT_FORWARD_MAX_RETAINED_LISTENERS = 64UL;
+constexpr unsigned long DEFAULT_PORT_FORWARD_MAX_UDP_BINDS = 64UL;
+constexpr unsigned long DEFAULT_PORT_FORWARD_MAX_ACTIVE_TCP_STREAMS = 1024UL;
+constexpr unsigned long DEFAULT_PORT_FORWARD_MAX_TUNNEL_QUEUED_BYTES = 8UL * 1024UL * 1024UL;
+constexpr unsigned long DEFAULT_PORT_FORWARD_TUNNEL_IO_TIMEOUT_MS = 30000UL;
+constexpr unsigned long DEFAULT_PORT_FORWARD_CONNECT_TIMEOUT_MS = 10000UL;
+constexpr unsigned long DEFAULT_HTTP_CONNECTION_IDLE_TIMEOUT_MS = 30000UL;
+constexpr std::size_t DEFAULT_MAX_REQUEST_HEADER_BYTES = 64UL * 1024UL;
+constexpr std::size_t DEFAULT_MAX_REQUEST_BODY_BYTES = 512UL * 1024UL * 1024UL;
+constexpr unsigned long DEFAULT_MAX_OPEN_SESSIONS = 64UL;
 
 struct YieldTimeOperationConfig {
     YieldTimeOperationConfig() : default_ms(0UL), max_ms(0UL), min_ms(0UL) {}
