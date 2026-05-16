@@ -1,8 +1,27 @@
 #include <sstream>
 
+#include "logging.h"
 #include "port_tunnel_connection.h"
 #include "port_tunnel_spawn.h"
 #include "port_tunnel_service.h"
+
+namespace {
+
+void log_tunnel_send_failure(const char* frame_kind, const std::exception& ex) {
+    log_message(
+        LOG_WARN,
+        "port_tunnel",
+        std::string("dropping ") + frame_kind + " frame after send failure: " + ex.what());
+}
+
+void log_unknown_tunnel_send_failure(const char* frame_kind) {
+    log_message(
+        LOG_WARN,
+        "port_tunnel",
+        std::string("dropping ") + frame_kind + " frame after unknown send failure");
+}
+
+} // namespace
 
 void PortTunnelConnection::send_error(uint32_t stream_id, const std::string& code, const std::string& message) {
     PortTunnelFrame frame;
@@ -13,7 +32,10 @@ void PortTunnelConnection::send_error(uint32_t stream_id, const std::string& cod
         Json{{"code", code}, {"message", message}, {"fatal", false}, {"generation", current_generation()}}.dump();
     try {
         send_frame(frame);
-    } catch (const std::exception&) {
+    } catch (const std::exception& ex) {
+        log_tunnel_send_failure("error", ex);
+    } catch (...) {
+        log_unknown_tunnel_send_failure("error");
     }
 }
 
@@ -28,7 +50,10 @@ void PortTunnelConnection::send_terminal_error(uint32_t stream_id,
         Json{{"code", code}, {"message", message}, {"fatal", true}, {"generation", current_generation()}}.dump();
     try {
         send_frame(frame);
-    } catch (const std::exception&) {
+    } catch (const std::exception& ex) {
+        log_tunnel_send_failure("terminal error", ex);
+    } catch (...) {
+        log_unknown_tunnel_send_failure("terminal error");
     }
 }
 
@@ -43,7 +68,10 @@ void PortTunnelConnection::send_forward_drop(uint32_t stream_id,
     frame.meta = Json{{"kind", kind}, {"count", 1U}, {"reason", reason}, {"message", message}}.dump();
     try {
         send_frame(frame);
-    } catch (const std::exception&) {
+    } catch (const std::exception& ex) {
+        log_tunnel_send_failure("forward drop", ex);
+    } catch (...) {
+        log_unknown_tunnel_send_failure("forward drop");
     }
 }
 

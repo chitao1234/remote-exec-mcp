@@ -18,6 +18,7 @@
 
 #include "port_forward_endpoint.h"
 #include "port_forward_error.h"
+#include "win32_error.h"
 
 namespace {
 
@@ -64,14 +65,20 @@ resolve_endpoint(const std::string& endpoint, const std::string& protocol, int f
     addrinfo* result = nullptr;
     const int status = getaddrinfo(parsed.host.c_str(), parsed.port.c_str(), &hints, &result);
     if (status != 0 || result == nullptr) {
-        std::ostringstream message;
-        message << "resolving endpoint `" << endpoint << "` failed";
+        const std::string operation = "resolving endpoint `" + endpoint + "`";
 #ifdef _WIN32
-        message << ": " << status;
+        const std::string message = error_message_from_code(operation.c_str(), static_cast<unsigned long>(status));
 #else
+        std::ostringstream message;
+        message << operation << " failed";
         message << ": " << gai_strerror(status);
+        const std::string message_text = message.str();
 #endif
-        throw PortForwardError(400, error_code, message.str());
+#ifdef _WIN32
+        throw PortForwardError(400, error_code, message);
+#else
+        throw PortForwardError(400, error_code, message_text);
+#endif
     }
     return result;
 }

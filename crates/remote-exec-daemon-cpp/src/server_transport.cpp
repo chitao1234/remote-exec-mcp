@@ -28,18 +28,19 @@
 #include "http_codec.h"
 #include "http_request.h"
 #include "server_transport.h"
+#include "win32_error.h"
 
 namespace {
 
 std::string socket_error_message_from_code(const std::string& operation, int error) {
+#ifndef _WIN32
     std::ostringstream out;
     out << operation << " failed";
-#ifndef _WIN32
     out << ": " << std::strerror(error);
-#else
-    out << ": " << error;
-#endif
     return out.str();
+#else
+    return error_message_from_code(operation.c_str(), static_cast<unsigned long>(error));
+#endif
 }
 
 void throw_socket_option_error(const std::string& option, int error) {
