@@ -14,6 +14,8 @@ use super::capability::supports_pty;
 use super::child::{PtySession, SessionChild};
 use super::live::{LiveSession, new_live_session};
 
+const PIPE_OUTPUT_READ_BUFFER_SIZE: usize = 8 * 1024;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpawnCommand {
     pub program: String,
@@ -155,7 +157,7 @@ where
     R: Read + Send + 'static,
 {
     std::thread::spawn(move || {
-        let mut buffer = [0u8; 8192];
+        let mut buffer = [0u8; PIPE_OUTPUT_READ_BUFFER_SIZE];
         let mut decoder = Utf8PipeDecoder::new();
         loop {
             match reader.read(&mut buffer) {

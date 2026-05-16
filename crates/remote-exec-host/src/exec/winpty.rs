@@ -10,6 +10,9 @@ use winptyrs::{AgentBuilder, AgentFlags, Child, EnvBlock, MouseMode, Pty, PtySiz
 
 const WINPTY_LIVE_OUTPUT_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const WINPTY_EXIT_DRAIN_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const WINPTY_DEFAULT_COLS: u16 = 120;
+const WINPTY_DEFAULT_ROWS: u16 = 24;
+const WINPTY_OPEN_TIMEOUT_MS: u32 = 10_000;
 
 pub(crate) struct WinptySession {
     child: Arc<Mutex<Child>>,
@@ -32,9 +35,12 @@ fn lock_winpty<'a, T>(
 
 fn winpty_builder() -> AgentBuilder {
     AgentBuilder::new()
-        .size(PtySize::new(120, 24).expect("default winpty size is valid"))
+        .size(
+            PtySize::new(WINPTY_DEFAULT_COLS, WINPTY_DEFAULT_ROWS)
+                .expect("default winpty size is valid"),
+        )
         .mouse_mode(MouseMode::None)
-        .timeout_ms(10_000)
+        .timeout_ms(WINPTY_OPEN_TIMEOUT_MS)
         .agent_flags(AgentFlags::COLOR_ESCAPES)
 }
 
