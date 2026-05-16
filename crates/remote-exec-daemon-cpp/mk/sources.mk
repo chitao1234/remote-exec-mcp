@@ -127,6 +127,11 @@ HOST_SERVER_TRANSPORT_SRCS = \
 	$(SOURCE_PREFIX)src/http_helpers.cpp \
 	$(SOURCE_PREFIX)src/text_utils.cpp
 
+WINDOWS_SERVER_TRANSPORT_TEST_SRCS = \
+	$(HOST_SERVER_TRANSPORT_SRCS) \
+	$(SOURCE_PREFIX)src/path_utils.cpp \
+	$(SOURCE_PREFIX)src/win32_error.cpp
+
 HOST_SERVER_STREAMING_SRCS = \
 	$(SOURCE_PREFIX)tests/test_server_streaming.cpp \
 	$(SOURCE_PREFIX)tests/test_server_streaming_shared.cpp \
@@ -166,6 +171,11 @@ HOST_CONNECTION_MANAGER_SRCS = \
 	$(SOURCE_PREFIX)src/basic_mutex.cpp \
 	$(SOURCE_PREFIX)src/platform.cpp \
 	$(SOURCE_PREFIX)src/logging.cpp
+
+WINDOWS_CONNECTION_MANAGER_TEST_SRCS = \
+	$(HOST_CONNECTION_MANAGER_SRCS) \
+	$(SOURCE_PREFIX)src/path_utils.cpp \
+	$(SOURCE_PREFIX)src/win32_error.cpp
 
 SERVER_RUNTIME_TEST_SUPPORT_SRCS = \
 	$(SOURCE_PREFIX)tests/test_server_runtime.cpp \
