@@ -375,13 +375,6 @@ pub(super) async fn open_listen_session(
     })
 }
 
-fn tunnel_protocol(protocol: PublicForwardPortProtocol) -> TunnelForwardProtocol {
-    match protocol {
-        PublicForwardPortProtocol::Tcp => TunnelForwardProtocol::Tcp,
-        PublicForwardPortProtocol::Udp => TunnelForwardProtocol::Udp,
-    }
-}
-
 pub(super) async fn open_connect_tunnel(
     side: &SideHandle,
     max_queued_bytes: usize,
@@ -451,7 +444,7 @@ async fn open_tunnel_with_role(
                 role,
                 side: side.name().to_string(),
                 generation,
-                protocol: tunnel_protocol(protocol),
+                protocol: TunnelForwardProtocol::from(protocol),
                 resume_session_id,
             })?,
             data: Vec::new(),

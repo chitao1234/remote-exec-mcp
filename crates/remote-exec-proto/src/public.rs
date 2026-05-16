@@ -1,6 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::port_tunnel::TunnelForwardProtocol;
 use crate::rpc::{
     DaemonIdentity, ExecPtySize, ExecWarning, TargetCapabilities, TargetInfoResponse,
     TransferWarning,
@@ -200,6 +201,16 @@ pub enum ForwardPortsInput {
     },
 }
 
+impl ForwardPortsInput {
+    pub fn action(&self) -> ForwardPortsAction {
+        match self {
+            Self::Open { .. } => ForwardPortsAction::Open,
+            Self::List { .. } => ForwardPortsAction::List,
+            Self::Close { .. } => ForwardPortsAction::Close,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ForwardPortSpec {
@@ -216,13 +227,31 @@ pub enum ForwardPortProtocol {
     Udp,
 }
 
+impl From<ForwardPortProtocol> for TunnelForwardProtocol {
+    fn from(value: ForwardPortProtocol) -> Self {
+        match value {
+            ForwardPortProtocol::Tcp => Self::Tcp,
+            ForwardPortProtocol::Udp => Self::Udp,
+        }
+    }
+}
+
+impl From<TunnelForwardProtocol> for ForwardPortProtocol {
+    fn from(value: TunnelForwardProtocol) -> Self {
+        match value {
+            TunnelForwardProtocol::Tcp => Self::Tcp,
+            TunnelForwardProtocol::Udp => Self::Udp,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct ForwardPortsResult {
     pub action: ForwardPortsAction,
     pub forwards: Vec<ForwardPortEntry>,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ForwardPortsAction {
     Open,
@@ -362,6 +391,47 @@ impl ForwardPortEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn forward_ports_input_reports_matching_action() {
+        assert_eq!(
+            ForwardPortsInput::Open {
+                listen_side: "local".to_string(),
+                connect_side: "builder-a".to_string(),
+                forwards: Vec::new(),
+            }
+            .action(),
+            ForwardPortsAction::Open
+        );
+        assert_eq!(
+            ForwardPortsInput::List {
+                listen_side: None,
+                connect_side: None,
+                forward_ids: Vec::new(),
+            }
+            .action(),
+            ForwardPortsAction::List
+        );
+        assert_eq!(
+            ForwardPortsInput::Close {
+                forward_ids: vec!["fwd_123".to_string()],
+            }
+            .action(),
+            ForwardPortsAction::Close
+        );
+    }
+
+    #[test]
+    fn forward_port_protocol_round_trips_through_tunnel_protocol() {
+        assert_eq!(
+            ForwardPortProtocol::from(TunnelForwardProtocol::from(ForwardPortProtocol::Tcp)),
+            ForwardPortProtocol::Tcp
+        );
+        assert_eq!(
+            ForwardPortProtocol::from(TunnelForwardProtocol::from(ForwardPortProtocol::Udp)),
+            ForwardPortProtocol::Udp
+        );
+    }
 
     #[test]
     fn forward_port_entry_serializes_additive_v4_state() {
