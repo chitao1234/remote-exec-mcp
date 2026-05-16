@@ -11,33 +11,6 @@
 
 namespace {
 
-bool is_http_token_char(char ch) {
-    const unsigned char value = static_cast<unsigned char>(ch);
-    if (std::isalnum(value) != 0) {
-        return true;
-    }
-    switch (ch) {
-    case '!':
-    case '#':
-    case '$':
-    case '%':
-    case '&':
-    case '\'':
-    case '*':
-    case '+':
-    case '-':
-    case '.':
-    case '^':
-    case '_':
-    case '`':
-    case '|':
-    case '~':
-        return true;
-    default:
-        return false;
-    }
-}
-
 void validate_token(const std::string& value, const std::string& error_message) {
     if (value.empty()) {
         throw HttpParseError(error_message);

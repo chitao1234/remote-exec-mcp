@@ -18,17 +18,11 @@
 
 #include "path_utils.h"
 #include "platform.h"
+#include "text_utils.h"
 
 namespace {
 
 #ifdef _WIN32
-std::string lowercase_ascii(std::string value) {
-    for (std::size_t i = 0; i < value.size(); ++i) {
-        value[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(value[i])));
-    }
-    return value;
-}
-
 std::string shell_basename_lower(const std::string& shell) {
     const std::size_t slash = shell.find_last_of("/\\");
     const std::string base = slash == std::string::npos ? shell : shell.substr(slash + 1);

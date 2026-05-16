@@ -16,19 +16,7 @@
 #endif
 
 #include "platform.h"
-
-namespace {
-
-#ifndef _WIN32
-std::string lowercase_ascii(std::string value) {
-    for (std::size_t i = 0; i < value.size(); ++i) {
-        value[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(value[i])));
-    }
-    return value;
-}
-#endif
-
-} // namespace
+#include "text_utils.h"
 
 namespace platform {
 

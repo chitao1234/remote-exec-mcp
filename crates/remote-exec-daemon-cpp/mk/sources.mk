@@ -114,6 +114,7 @@ HOST_PATCH_SRCS = \
 	$(SOURCE_PREFIX)tests/test_patch.cpp \
 	$(SOURCE_PREFIX)src/patch_engine.cpp \
 	$(SOURCE_PREFIX)src/platform.cpp \
+	$(SOURCE_PREFIX)src/text_utils.cpp \
 	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/path_policy.cpp
 
@@ -131,7 +132,8 @@ HOST_CONFIG_SRCS = \
 
 HOST_BASIC_MUTEX_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)tests/test_basic_mutex.cpp \
-	$(SOURCE_PREFIX)src/platform.cpp
+	$(SOURCE_PREFIX)src/platform.cpp \
+	$(SOURCE_PREFIX)src/text_utils.cpp
 
 HOST_BASIC_MUTEX_SRCS = \
 	$(HOST_BASIC_MUTEX_TEST_COMMON_SRCS) \
@@ -275,6 +277,7 @@ HOST_SERVER_ROUTES_COMMON_SRCS = \
 
 HOST_SANDBOX_SRCS = \
 	$(SOURCE_PREFIX)tests/test_sandbox.cpp \
+	$(SOURCE_PREFIX)src/text_utils.cpp \
 	$(POLICY_SRCS)
 
 HOST_PORT_TUNNEL_FRAME_SRCS = \

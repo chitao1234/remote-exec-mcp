@@ -3,18 +3,12 @@
 #include <string>
 
 #include "path_policy.h"
+#include "text_utils.h"
 
 namespace {
 
 bool is_ascii_alpha(char ch) {
     return std::isalpha(static_cast<unsigned char>(ch)) != 0;
-}
-
-std::string lowercase_ascii(std::string value) {
-    for (std::size_t i = 0; i < value.size(); ++i) {
-        value[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(value[i])));
-    }
-    return value;
 }
 
 std::string normalize_windows_path_chars(std::string value) {

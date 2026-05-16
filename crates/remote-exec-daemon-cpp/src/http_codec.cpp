@@ -41,33 +41,6 @@ int hex_digit_value(char ch) {
     return -1;
 }
 
-bool is_http_token_char(char ch) {
-    const unsigned char value = static_cast<unsigned char>(ch);
-    if (std::isalnum(value) != 0) {
-        return true;
-    }
-    switch (ch) {
-    case '!':
-    case '#':
-    case '$':
-    case '%':
-    case '&':
-    case '\'':
-    case '*':
-    case '+':
-    case '-':
-    case '.':
-    case '^':
-    case '_':
-    case '`':
-    case '|':
-    case '~':
-        return true;
-    default:
-        return false;
-    }
-}
-
 bool is_valid_header_value(const std::string& value) {
     for (std::size_t i = 0; i < value.size(); ++i) {
         const unsigned char ch = static_cast<unsigned char>(value[i]);
