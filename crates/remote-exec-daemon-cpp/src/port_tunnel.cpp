@@ -472,8 +472,7 @@ bool TunnelUdpSocket::is_closed() {
 }
 
 bool session_is_unavailable(const std::shared_ptr<PortTunnelSession>& session) {
-    BasicLockGuard lock(session->mutex);
-    return session->closed || session->expired;
+    return session->is_unavailable();
 }
 
 int wait_socket_readable(SOCKET socket, unsigned long timeout_ms) {

@@ -169,8 +169,7 @@ std::shared_ptr<PortTunnelSessionAttachment> PortTunnelConnection::session_attac
     if (session.get() == nullptr) {
         return std::shared_ptr<PortTunnelSessionAttachment>();
     }
-    BasicLockGuard lock(session->mutex);
-    return session->attachment;
+    return session->current_attachment();
 }
 
 std::shared_ptr<PortTunnelSessionAttachment> PortTunnelConnection::current_session_attachment() {
@@ -266,14 +265,10 @@ bool PortTunnelConnection::accept_session_tcp_stream(const std::shared_ptr<PortT
             stream->close();
             return false;
         }
-        BasicLockGuard session_lock(session->mutex);
-        if (session->closed || session->expired || session->attachment.get() != attachment.get()) {
-            stream->close();
-            return false;
-        }
-        stream_id = session->next_daemon_stream_id;
-        session->next_daemon_stream_id += 2U;
-        attachment->local_streams.insert_tcp(stream_id, stream);
+    }
+    if (!session->insert_tcp_stream_if_attached(attachment, stream, &stream_id)) {
+        stream->close();
+        return false;
     }
 
     if (!service_->try_acquire_worker()) {

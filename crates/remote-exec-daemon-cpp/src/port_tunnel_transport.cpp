@@ -293,30 +293,22 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
                 throw PortForwardError(400, "unknown_port_tunnel_session", "unknown port tunnel session");
             }
 
-            bool expired = false;
-            {
-                BasicLockGuard lock(session->mutex);
-                if (session->closed) {
-                    throw PortForwardError(400, "unknown_port_tunnel_session", "unknown port tunnel session");
-                }
-                if (session->attachment.get() != nullptr) {
-                    throw PortForwardError(
-                        400, "port_tunnel_already_attached", "port tunnel session is already attached");
-                }
-                expired = session->expired || (session->resume_deadline_ms != 0ULL &&
-                                               platform::monotonic_ms() >= session->resume_deadline_ms);
-                session->generation = generation;
+            const PortTunnelSessionResumeResult resume_result =
+                session->prepare_resume(generation, platform::monotonic_ms());
+            if (resume_result == PortTunnelSessionResumeResult::Unknown) {
+                throw PortForwardError(400, "unknown_port_tunnel_session", "unknown port tunnel session");
             }
-            if (expired) {
+            if (resume_result == PortTunnelSessionResumeResult::AlreadyAttached) {
+                throw PortForwardError(
+                    400, "port_tunnel_already_attached", "port tunnel session is already attached");
+            }
+            if (resume_result == PortTunnelSessionResumeResult::Expired) {
                 service_->close_session(session);
                 throw PortForwardError(400, "port_tunnel_resume_expired", "port tunnel resume expired");
             }
         } else {
             session = service_->create_session();
-            {
-                BasicLockGuard lock(session->mutex);
-                session->generation = generation;
-            }
+            session->set_generation(generation);
         }
 
         {
