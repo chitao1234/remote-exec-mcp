@@ -9,49 +9,74 @@
 
 class PortTunnelService;
 
+enum class PortTunnelBudgetKind {
+    None,
+    RetainedSession,
+    RetainedListener,
+    UdpBind,
+    ActiveTcpStream,
+};
+
+class PortTunnelBudgetLease {
+public:
+    PortTunnelBudgetLease();
+    ~PortTunnelBudgetLease();
+
+    static PortTunnelBudgetLease adopt(const std::shared_ptr<PortTunnelService>& service,
+                                       PortTunnelBudgetKind kind);
+
+    PortTunnelBudgetLease(PortTunnelBudgetLease&& other);
+    PortTunnelBudgetLease& operator=(PortTunnelBudgetLease&& other);
+
+    void reset();
+    bool valid() const;
+
+private:
+    PortTunnelBudgetLease(const PortTunnelBudgetLease&);
+    PortTunnelBudgetLease& operator=(const PortTunnelBudgetLease&);
+
+    std::weak_ptr<PortTunnelService> service_;
+    PortTunnelBudgetKind kind_;
+};
+
 struct TunnelTcpStream {
     TunnelTcpStream(SOCKET socket_value,
-                    const std::shared_ptr<PortTunnelService>& service_value,
-                    bool active_stream_budget)
-        : socket(socket_value), service(service_value), closed(false),
-          active_stream_budget_acquired(active_stream_budget), writer_closed(false), writer_shutdown_requested(false) {}
+                    PortTunnelBudgetLease active_stream_budget_value)
+        : socket(socket_value), active_stream_budget(std::move(active_stream_budget_value)), closed(false),
+          writer_closed(false), writer_shutdown_requested(false) {}
 
     UniqueSocket socket;
-    std::weak_ptr<PortTunnelService> service;
+    PortTunnelBudgetLease active_stream_budget;
     BasicMutex mutex;
     BasicCondVar writer_cond;
     std::vector<std::vector<unsigned char>> write_queue;
     bool closed;
-    bool active_stream_budget_acquired;
     bool writer_closed;
     bool writer_shutdown_requested;
 };
 
 struct TunnelUdpSocket {
-    TunnelUdpSocket(SOCKET socket_value, const std::shared_ptr<PortTunnelService>& service_value, bool udp_bind_budget)
-        : socket(socket_value), service(service_value), closed(false), udp_bind_budget_acquired(udp_bind_budget) {}
+    TunnelUdpSocket(SOCKET socket_value, PortTunnelBudgetLease udp_bind_budget_value)
+        : socket(socket_value), udp_bind_budget(std::move(udp_bind_budget_value)), closed(false) {}
 
     UniqueSocket socket;
-    std::weak_ptr<PortTunnelService> service;
+    PortTunnelBudgetLease udp_bind_budget;
     BasicMutex mutex;
     bool closed;
-    bool udp_bind_budget_acquired;
 };
 
 struct RetainedTcpListener {
     RetainedTcpListener(uint32_t stream_id_value,
                         SOCKET listener_socket,
-                        const std::shared_ptr<PortTunnelService>& service_value,
-                        bool retained_listener_budget)
-        : stream_id(stream_id_value), listener(listener_socket), service(service_value), closed(false),
-          retained_listener_budget_acquired(retained_listener_budget) {}
+                        PortTunnelBudgetLease retained_listener_budget_value)
+        : stream_id(stream_id_value), listener(listener_socket),
+          retained_listener_budget(std::move(retained_listener_budget_value)), closed(false) {}
 
     uint32_t stream_id;
     UniqueSocket listener;
-    std::weak_ptr<PortTunnelService> service;
+    PortTunnelBudgetLease retained_listener_budget;
     BasicMutex mutex;
     bool closed;
-    bool retained_listener_budget_acquired;
 };
 
 void mark_tcp_stream_closed(const std::shared_ptr<TunnelTcpStream>& stream);

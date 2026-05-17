@@ -1,4 +1,5 @@
 #include <sstream>
+#include <utility>
 
 #include "logging.h"
 #include "port_tunnel_connection.h"
@@ -248,7 +249,8 @@ bool PortTunnelConnection::accept_session_tcp_stream(const std::shared_ptr<PortT
                                                      const std::string& peer) {
     uint32_t stream_id = 0U;
     bool worker_acquired = false;
-    if (!service_->try_acquire_active_tcp_stream()) {
+    PortTunnelBudgetLease active_stream_budget;
+    if (!service_->try_acquire_active_tcp_stream(&active_stream_budget)) {
         send_forward_drop(listener_stream_id,
                           "tcp_stream",
                           "port_tunnel_limit_exceeded",
@@ -256,7 +258,8 @@ bool PortTunnelConnection::accept_session_tcp_stream(const std::shared_ptr<PortT
         return false;
     }
 
-    std::shared_ptr<TunnelTcpStream> stream(new TunnelTcpStream(accepted_socket.release(), service_, true));
+    std::shared_ptr<TunnelTcpStream> stream(
+        new TunnelTcpStream(accepted_socket.release(), std::move(active_stream_budget)));
     {
         BasicLockGuard state_lock(state_mutex_);
         if (closed() || session_.get() != session.get()) {

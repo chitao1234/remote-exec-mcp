@@ -33,9 +33,9 @@ enum class SessionRetainedInstallResult { Installed, Conflict, Unavailable };
 struct PortTunnelSession {
     PortTunnelSession(const std::string& session_id_value,
                       const std::shared_ptr<PortTunnelService>& service_value,
-                      bool retained_budget)
+                      PortTunnelBudgetLease retained_budget)
         : session_id(session_id_value), service(service_value), closed(false), expired(false), resume_deadline_ms(0ULL),
-          generation(0ULL), retained_session_budget_acquired(retained_budget), next_daemon_stream_id(2U) {}
+          generation(0ULL), retained_session_budget(std::move(retained_budget)), next_daemon_stream_id(2U) {}
 
     std::string session_id;
     std::weak_ptr<PortTunnelService> service;
@@ -45,7 +45,7 @@ struct PortTunnelSession {
     bool expired;
     std::uint64_t resume_deadline_ms;
     std::uint64_t generation;
-    bool retained_session_budget_acquired;
+    PortTunnelBudgetLease retained_session_budget;
     std::shared_ptr<PortTunnelSessionAttachment> attachment;
     PortTunnelRetainedResource retained_resource;
     std::uint32_t next_daemon_stream_id;

@@ -1,4 +1,5 @@
 #include <sstream>
+#include <utility>
 
 #include "port_tunnel_connection.h"
 #include "port_tunnel_service.h"
@@ -11,27 +12,14 @@ std::string next_opaque_id(const char* prefix, std::uint64_t sequence) {
     return out.str();
 }
 
-void close_retained_listener_for_service(const std::shared_ptr<RetainedTcpListener>& listener,
-                                         PortTunnelService& service) {
-    bool release_budget = false;
-    {
-        BasicLockGuard lock(listener->mutex);
-        release_budget = close_retained_listener_locked(listener.get());
-    }
-    if (release_budget) {
-        service.release_retained_listener();
-    }
+void close_retained_listener_for_service(const std::shared_ptr<RetainedTcpListener>& listener) {
+    BasicLockGuard lock(listener->mutex);
+    close_retained_listener_locked(listener.get());
 }
 
-void close_udp_socket_for_service(const std::shared_ptr<TunnelUdpSocket>& socket_value, PortTunnelService& service) {
-    bool release_budget = false;
-    {
-        BasicLockGuard lock(socket_value->mutex);
-        release_budget = close_udp_socket_locked(socket_value.get());
-    }
-    if (release_budget) {
-        service.release_udp_bind();
-    }
+void close_udp_socket_for_service(const std::shared_ptr<TunnelUdpSocket>& socket_value) {
+    BasicLockGuard lock(socket_value->mutex);
+    close_udp_socket_locked(socket_value.get());
 }
 
 void close_connection_local_streams(ConnectionLocalStreams* local_streams) {
@@ -69,12 +57,11 @@ void clear_retained_resource_locked(const std::shared_ptr<PortTunnelSession>& se
 }
 
 struct SessionTeardownState {
-    SessionTeardownState() : release_retained_session_budget(false) {}
+    SessionTeardownState() {}
 
     std::shared_ptr<PortTunnelSessionAttachment> attachment;
     std::shared_ptr<RetainedTcpListener> retained_listener;
     std::shared_ptr<TunnelUdpSocket> udp_bind;
-    bool release_retained_session_budget;
 };
 
 SessionTeardownState collect_terminal_session_teardown_locked(const std::shared_ptr<PortTunnelSession>& session,
@@ -85,32 +72,27 @@ SessionTeardownState collect_terminal_session_teardown_locked(const std::shared_
     session->resume_deadline_ms = 0ULL;
     state.attachment = session->attachment;
     session->attachment.reset();
-    if (session->retained_session_budget_acquired) {
-        session->retained_session_budget_acquired = false;
-        state.release_retained_session_budget = true;
-    }
+    session->retained_session_budget.reset();
     clear_retained_resource_locked(session, &state.retained_listener, &state.udp_bind);
     session->state_changed.broadcast();
     return state;
 }
 
-void finish_terminal_session_teardown(const SessionTeardownState& state, PortTunnelService& service) {
+void finish_terminal_session_teardown(const SessionTeardownState& state) {
     close_session_attachment(state.attachment);
-    if (state.release_retained_session_budget) {
-        service.release_retained_session();
-    }
     if (state.retained_listener.get() != nullptr) {
-        close_retained_listener_for_service(state.retained_listener, service);
+        close_retained_listener_for_service(state.retained_listener);
     }
     if (state.udp_bind.get() != nullptr) {
-        close_udp_socket_for_service(state.udp_bind, service);
+        close_udp_socket_for_service(state.udp_bind);
     }
 }
 
 } // namespace
 
 std::shared_ptr<PortTunnelSession> PortTunnelService::create_session() {
-    if (!try_acquire_retained_session()) {
+    PortTunnelBudgetLease retained_budget;
+    if (!try_acquire_retained_session(&retained_budget)) {
         throw PortForwardError(400, "port_tunnel_limit_exceeded", "port tunnel retained session limit reached");
     }
 
@@ -119,7 +101,7 @@ std::shared_ptr<PortTunnelSession> PortTunnelService::create_session() {
     {
         BasicLockGuard lock(mutex_);
         const std::string session_id = next_opaque_id("ptun_", next_session_sequence_++);
-        session.reset(new PortTunnelSession(session_id, service, true));
+        session.reset(new PortTunnelSession(session_id, service, std::move(retained_budget)));
         sessions_[session->session_id] = session;
     }
     return session;
@@ -176,7 +158,7 @@ void PortTunnelService::close_session(const std::shared_ptr<PortTunnelSession>& 
         }
         teardown = collect_terminal_session_teardown_locked(session, false);
     }
-    finish_terminal_session_teardown(teardown, *this);
+    finish_terminal_session_teardown(teardown);
 }
 
 void PortTunnelService::close_all_sessions_for_shutdown() {
@@ -200,7 +182,7 @@ void PortTunnelService::close_all_sessions_for_shutdown() {
             }
             teardown = collect_terminal_session_teardown_locked(sessions[i], false);
         }
-        finish_terminal_session_teardown(teardown, *this);
+        finish_terminal_session_teardown(teardown);
     }
 }
 
@@ -420,7 +402,7 @@ void PortTunnelService::expire_session_if_needed(const std::shared_ptr<PortTunne
         }
         teardown = collect_terminal_session_teardown_locked(session, true);
     }
-    finish_terminal_session_teardown(teardown, *this);
+    finish_terminal_session_teardown(teardown);
 }
 
 std::shared_ptr<PortTunnelSessionAttachment>

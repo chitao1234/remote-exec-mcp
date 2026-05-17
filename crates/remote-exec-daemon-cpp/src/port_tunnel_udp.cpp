@@ -2,6 +2,8 @@
 #include "port_tunnel_spawn.h"
 #include "port_tunnel_service.h"
 
+#include <utility>
+
 bool PortTunnelService::spawn_udp_bind_loop(const std::shared_ptr<PortTunnelSession>& session,
                                             uint32_t stream_id,
                                             const std::shared_ptr<TunnelUdpSocket>& socket_value,
@@ -107,20 +109,19 @@ void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
     }
 
     const std::string endpoint = normalize_port_forward_endpoint(frame_meta_string(frame, "endpoint"));
-    if (!service_->try_acquire_udp_bind()) {
+    PortTunnelBudgetLease udp_bind_budget;
+    if (!service_->try_acquire_udp_bind(&udp_bind_budget)) {
         throw PortForwardError(400, "port_tunnel_limit_exceeded", "port tunnel udp bind limit reached");
     }
 
     std::shared_ptr<TunnelUdpSocket> socket_value;
     try {
-        socket_value.reset(new TunnelUdpSocket(bind_port_forward_socket(endpoint, "udp"), service_, true));
+        socket_value.reset(new TunnelUdpSocket(bind_port_forward_socket(endpoint, "udp"), std::move(udp_bind_budget)));
     } catch (const std::exception& ex) {
         log_tunnel_exception("create udp bind socket", ex);
-        service_->release_udp_bind();
         throw;
     } catch (...) {
         log_unknown_tunnel_exception("create udp bind socket");
-        service_->release_udp_bind();
         throw;
     }
     const std::string bound_endpoint = socket_local_endpoint(socket_value->socket.get());

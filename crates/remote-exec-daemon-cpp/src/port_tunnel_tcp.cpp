@@ -1,6 +1,8 @@
 #include "port_tunnel_connection.h"
 #include "port_tunnel_service.h"
 
+#include <utility>
+
 bool PortTunnelService::spawn_tcp_listener_loop(const std::shared_ptr<PortTunnelSession>& session,
                                                 const std::shared_ptr<RetainedTcpListener>& listener,
                                                 bool worker_acquired) {
@@ -94,21 +96,20 @@ void PortTunnelConnection::tcp_listen(const PortTunnelFrame& frame) {
     const std::string endpoint = normalize_port_forward_endpoint(frame_meta_string(frame, "endpoint"));
     std::string bound_endpoint;
 
-    if (!service_->try_acquire_retained_listener()) {
+    PortTunnelBudgetLease listener_budget;
+    if (!service_->try_acquire_retained_listener(&listener_budget)) {
         throw PortForwardError(400, "port_tunnel_limit_exceeded", "port tunnel retained listener limit reached");
     }
     std::shared_ptr<PortTunnelSession> session = current_session();
     std::shared_ptr<RetainedTcpListener> listener;
     try {
         UniqueSocket listener_socket(bind_port_forward_socket(endpoint, "tcp"));
-        listener.reset(new RetainedTcpListener(frame.stream_id, listener_socket.release(), service_, true));
+        listener.reset(new RetainedTcpListener(frame.stream_id, listener_socket.release(), std::move(listener_budget)));
     } catch (const std::exception& ex) {
         log_tunnel_exception("create tcp listener", ex);
-        service_->release_retained_listener();
         throw;
     } catch (...) {
         log_unknown_tunnel_exception("create tcp listener");
-        service_->release_retained_listener();
         throw;
     }
     bound_endpoint = socket_local_endpoint(listener->listener.get());
@@ -143,19 +144,14 @@ void PortTunnelConnection::tcp_connect(const PortTunnelFrame& frame) {
 
     const std::string endpoint = ensure_nonzero_connect_endpoint(frame_meta_string(frame, "endpoint"));
 
-    if (!service_->try_acquire_active_tcp_stream()) {
+    PortTunnelBudgetLease active_stream_budget;
+    if (!service_->try_acquire_active_tcp_stream(&active_stream_budget)) {
         throw PortForwardError(400, "port_tunnel_limit_exceeded", "port tunnel active tcp stream limit reached");
     }
 
-    std::shared_ptr<TunnelTcpStream> stream;
-    try {
-        UniqueSocket connected_socket(
-            connect_port_forward_socket(endpoint, "tcp", service_->limits().connect_timeout_ms));
-        stream.reset(new TunnelTcpStream(connected_socket.release(), service_, true));
-    } catch (...) {
-        service_->release_active_tcp_stream();
-        throw;
-    }
+    UniqueSocket connected_socket(connect_port_forward_socket(endpoint, "tcp", service_->limits().connect_timeout_ms));
+    std::shared_ptr<TunnelTcpStream> stream(
+        new TunnelTcpStream(connected_socket.release(), std::move(active_stream_budget)));
 
     connection_local_streams_.insert_tcp(frame.stream_id, stream);
     if (!service_->try_acquire_worker()) {

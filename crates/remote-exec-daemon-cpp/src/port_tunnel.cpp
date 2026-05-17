@@ -97,6 +97,73 @@ void PortTunnelService::release_worker() {
     release_counter(active_workers_, "active_workers");
 }
 
+PortTunnelBudgetLease::PortTunnelBudgetLease() : service_(), kind_(PortTunnelBudgetKind::None) {
+}
+
+PortTunnelBudgetLease::~PortTunnelBudgetLease() {
+    reset();
+}
+
+PortTunnelBudgetLease PortTunnelBudgetLease::adopt(const std::shared_ptr<PortTunnelService>& service,
+                                                   PortTunnelBudgetKind kind) {
+    PortTunnelBudgetLease lease;
+    lease.service_ = service;
+    lease.kind_ = kind;
+    return lease;
+}
+
+PortTunnelBudgetLease::PortTunnelBudgetLease(PortTunnelBudgetLease&& other)
+    : service_(other.service_), kind_(other.kind_) {
+    other.service_.reset();
+    other.kind_ = PortTunnelBudgetKind::None;
+}
+
+PortTunnelBudgetLease& PortTunnelBudgetLease::operator=(PortTunnelBudgetLease&& other) {
+    if (this != &other) {
+        reset();
+        service_ = other.service_;
+        kind_ = other.kind_;
+        other.service_.reset();
+        other.kind_ = PortTunnelBudgetKind::None;
+    }
+    return *this;
+}
+
+void PortTunnelBudgetLease::reset() {
+    if (kind_ == PortTunnelBudgetKind::None) {
+        return;
+    }
+
+    const PortTunnelBudgetKind kind = kind_;
+    kind_ = PortTunnelBudgetKind::None;
+    std::shared_ptr<PortTunnelService> service = service_.lock();
+    service_.reset();
+    if (service.get() == nullptr) {
+        return;
+    }
+
+    switch (kind) {
+    case PortTunnelBudgetKind::RetainedSession:
+        service->release_retained_session();
+        return;
+    case PortTunnelBudgetKind::RetainedListener:
+        service->release_retained_listener();
+        return;
+    case PortTunnelBudgetKind::UdpBind:
+        service->release_udp_bind();
+        return;
+    case PortTunnelBudgetKind::ActiveTcpStream:
+        service->release_active_tcp_stream();
+        return;
+    case PortTunnelBudgetKind::None:
+        return;
+    }
+}
+
+bool PortTunnelBudgetLease::valid() const {
+    return kind_ != PortTunnelBudgetKind::None;
+}
+
 unsigned long PortTunnelService::max_workers() const {
     return limits_.max_worker_threads;
 }
@@ -109,12 +176,32 @@ bool PortTunnelService::try_acquire_retained_session() {
     return try_acquire_counter(retained_sessions_, limits_.max_retained_sessions);
 }
 
+bool PortTunnelService::try_acquire_retained_session(PortTunnelBudgetLease* lease) {
+    if (!try_acquire_retained_session()) {
+        return false;
+    }
+    if (lease != nullptr) {
+        *lease = PortTunnelBudgetLease::adopt(shared_from_this(), PortTunnelBudgetKind::RetainedSession);
+    }
+    return true;
+}
+
 void PortTunnelService::release_retained_session() {
     release_counter(retained_sessions_, "retained_sessions");
 }
 
 bool PortTunnelService::try_acquire_retained_listener() {
     return try_acquire_counter(retained_listeners_, limits_.max_retained_listeners);
+}
+
+bool PortTunnelService::try_acquire_retained_listener(PortTunnelBudgetLease* lease) {
+    if (!try_acquire_retained_listener()) {
+        return false;
+    }
+    if (lease != nullptr) {
+        *lease = PortTunnelBudgetLease::adopt(shared_from_this(), PortTunnelBudgetKind::RetainedListener);
+    }
+    return true;
 }
 
 void PortTunnelService::release_retained_listener() {
@@ -125,12 +212,32 @@ bool PortTunnelService::try_acquire_udp_bind() {
     return try_acquire_counter(udp_binds_, limits_.max_udp_binds);
 }
 
+bool PortTunnelService::try_acquire_udp_bind(PortTunnelBudgetLease* lease) {
+    if (!try_acquire_udp_bind()) {
+        return false;
+    }
+    if (lease != nullptr) {
+        *lease = PortTunnelBudgetLease::adopt(shared_from_this(), PortTunnelBudgetKind::UdpBind);
+    }
+    return true;
+}
+
 void PortTunnelService::release_udp_bind() {
     release_counter(udp_binds_, "udp_binds");
 }
 
 bool PortTunnelService::try_acquire_active_tcp_stream() {
     return try_acquire_counter(active_tcp_streams_, limits_.max_active_tcp_streams);
+}
+
+bool PortTunnelService::try_acquire_active_tcp_stream(PortTunnelBudgetLease* lease) {
+    if (!try_acquire_active_tcp_stream()) {
+        return false;
+    }
+    if (lease != nullptr) {
+        *lease = PortTunnelBudgetLease::adopt(shared_from_this(), PortTunnelBudgetKind::ActiveTcpStream);
+    }
+    return true;
 }
 
 void PortTunnelService::release_active_tcp_stream() {
@@ -325,7 +432,6 @@ PortTunnelFrame make_empty_frame(PortTunnelFrameType type, uint32_t stream_id) {
 }
 
 void mark_tcp_stream_closed(const std::shared_ptr<TunnelTcpStream>& stream) {
-    std::shared_ptr<PortTunnelService> service_to_release;
     BasicLockGuard lock(stream->mutex);
     if (!stream->closed) {
         stream->closed = true;
@@ -335,13 +441,7 @@ void mark_tcp_stream_closed(const std::shared_ptr<TunnelTcpStream>& stream) {
         stream->writer_cond.broadcast();
         shutdown_socket(stream->socket.get());
         stream->socket.reset();
-        if (stream->active_stream_budget_acquired) {
-            stream->active_stream_budget_acquired = false;
-            service_to_release = stream->service.lock();
-        }
-    }
-    if (service_to_release.get() != nullptr) {
-        service_to_release->release_active_tcp_stream();
+        stream->active_stream_budget.reset();
     }
 }
 
@@ -352,24 +452,13 @@ bool close_udp_socket_locked(TunnelUdpSocket* socket_value) {
     socket_value->closed = true;
     shutdown_socket(socket_value->socket.get());
     socket_value->socket.reset();
-    if (socket_value->udp_bind_budget_acquired) {
-        socket_value->udp_bind_budget_acquired = false;
-        return true;
-    }
-    return false;
+    socket_value->udp_bind_budget.reset();
+    return true;
 }
 
 void mark_udp_socket_closed(const std::shared_ptr<TunnelUdpSocket>& socket_value) {
-    std::shared_ptr<PortTunnelService> service_to_release;
-    {
-        BasicLockGuard lock(socket_value->mutex);
-        if (close_udp_socket_locked(socket_value.get())) {
-            service_to_release = socket_value->service.lock();
-        }
-    }
-    if (service_to_release.get() != nullptr) {
-        service_to_release->release_udp_bind();
-    }
+    BasicLockGuard lock(socket_value->mutex);
+    close_udp_socket_locked(socket_value.get());
 }
 
 bool tcp_stream_closed(const std::shared_ptr<TunnelTcpStream>& stream) {
@@ -429,24 +518,13 @@ bool close_retained_listener_locked(RetainedTcpListener* listener) {
     listener->closed = true;
     shutdown_socket(listener->listener.get());
     listener->listener.reset();
-    if (listener->retained_listener_budget_acquired) {
-        listener->retained_listener_budget_acquired = false;
-        return true;
-    }
-    return false;
+    listener->retained_listener_budget.reset();
+    return true;
 }
 
 void mark_retained_listener_closed(const std::shared_ptr<RetainedTcpListener>& listener) {
-    std::shared_ptr<PortTunnelService> service_to_release;
-    {
-        BasicLockGuard lock(listener->mutex);
-        if (close_retained_listener_locked(listener.get())) {
-            service_to_release = listener->service.lock();
-        }
-    }
-    if (service_to_release.get() != nullptr) {
-        service_to_release->release_retained_listener();
-    }
+    BasicLockGuard lock(listener->mutex);
+    close_retained_listener_locked(listener.get());
 }
 
 bool is_port_tunnel_upgrade_request(const HttpRequest& request) {

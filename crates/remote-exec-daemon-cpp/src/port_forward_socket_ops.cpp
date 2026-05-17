@@ -1,5 +1,6 @@
 #include "port_forward_socket_ops.h"
 
+#include <climits>
 #include <cstring>
 #include <sstream>
 
