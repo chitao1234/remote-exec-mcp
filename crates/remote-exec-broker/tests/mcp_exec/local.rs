@@ -10,6 +10,10 @@ const LOCAL_LONG_RUNNING_CMD: &str = "printf ready; sleep 2";
 #[cfg(windows)]
 const LOCAL_LONG_RUNNING_CMD: &str = "echo ready & ping -n 3 127.0.0.1 >nul";
 
+#[cfg(windows)]
+const LOCAL_PIPE_MODE_STDOUT_STDERR_CMD: &str =
+    "echo stdout-1&echo stderr-1>&2&echo stdout-2&echo stderr-2>&2";
+
 #[tokio::test]
 async fn exec_command_and_write_stdin_work_for_enabled_local_target() {
     let fixture = support::spawners::spawn_broker_with_local_target().await;
@@ -107,5 +111,30 @@ async fn exec_command_local_pipe_mode_preserves_stdout_stderr_order() {
     assert_eq!(
         result.structured_content["output"],
         serde_json::json!("stdout-1\nstderr-1\nstdout-2\nstderr-2\n")
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn exec_command_local_pipe_mode_preserves_stdout_stderr_order() {
+    let fixture = support::spawners::spawn_broker_with_local_target().await;
+    let result = fixture
+        .call_tool(
+            "exec_command",
+            serde_json::json!({
+                "target": "local",
+                "cmd": LOCAL_PIPE_MODE_STDOUT_STDERR_CMD,
+                "shell": LOCAL_TEST_SHELL,
+                "login": false,
+                "tty": false,
+                "yield_time_ms": 10_000
+            }),
+        )
+        .await;
+
+    assert_eq!(result.structured_content["exit_code"], 0);
+    assert_eq!(
+        result.structured_content["output"].as_str().unwrap().replace("\r\n", "\n"),
+        "stdout-1\nstderr-1\nstdout-2\nstderr-2\n"
     );
 }

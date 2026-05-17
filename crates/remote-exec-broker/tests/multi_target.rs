@@ -10,6 +10,16 @@ use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
 use std::os::unix::fs::PermissionsExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+#[cfg(unix)]
+const PIPE_MODE_SHELL: &str = "/bin/sh";
+#[cfg(windows)]
+const PIPE_MODE_SHELL: &str = "cmd.exe";
+
+#[cfg(unix)]
+const PIPE_MODE_OUTPUT_CMD: &str = "printf 'marker\\n'; printf 'external\\n' | cat; printf 'done\\n'";
+#[cfg(windows)]
+const PIPE_MODE_OUTPUT_CMD: &str = r#"echo marker&echo external|findstr .&echo done"#;
+
 #[tokio::test]
 async fn sessions_are_isolated_per_target() {
     let cluster = support::spawn_cluster().await;
@@ -768,8 +778,8 @@ async fn exec_command_preserves_output_after_external_pipeline_steps() {
             "exec_command",
             serde_json::json!({
                 "target": DEFAULT_TEST_TARGET,
-                "cmd": "printf 'marker\\n'; printf 'external\\n' | cat; printf 'done\\n'",
-                "shell": "/bin/sh",
+                "cmd": PIPE_MODE_OUTPUT_CMD,
+                "shell": PIPE_MODE_SHELL,
                 "login": false,
                 "tty": false,
                 "yield_time_ms": 10_000
@@ -782,6 +792,34 @@ async fn exec_command_preserves_output_after_external_pipeline_steps() {
     assert_eq!(
         result.structured_content["output"],
         serde_json::Value::String("marker\nexternal\ndone\n".to_string())
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn exec_command_preserves_output_after_external_pipeline_steps() {
+    let cluster = support::spawn_cluster().await;
+
+    let result = cluster
+        .broker
+        .call_tool(
+            "exec_command",
+            serde_json::json!({
+                "target": DEFAULT_TEST_TARGET,
+                "cmd": PIPE_MODE_OUTPUT_CMD,
+                "shell": PIPE_MODE_SHELL,
+                "login": false,
+                "tty": false,
+                "yield_time_ms": 10_000
+            }),
+        )
+        .await;
+
+    assert_eq!(result.structured_content["target"], DEFAULT_TEST_TARGET);
+    assert_eq!(result.structured_content["exit_code"], 0);
+    assert_eq!(
+        result.structured_content["output"].as_str().unwrap().replace("\r\n", "\n"),
+        "marker\nexternal\ndone\n"
     );
 }
 

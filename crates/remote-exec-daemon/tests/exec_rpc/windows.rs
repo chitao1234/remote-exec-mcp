@@ -1,5 +1,9 @@
 use super::*;
 
+const WINDOWS_PIPE_MODE_EXTERNAL_PIPELINE_CMD: &str = r#"echo marker&echo external|findstr .&echo done"#;
+const WINDOWS_PIPE_MODE_STDOUT_STDERR_CMD: &str =
+    "echo stdout-1&echo stderr-1>&2&echo stdout-2&echo stderr-2>&2";
+
 #[tokio::test]
 async fn exec_start_allows_login_requests_on_windows_when_enabled() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
@@ -710,6 +714,54 @@ async fn exec_write_rejects_non_tty_sessions_when_chars_are_present_on_windows()
 
     assert_eq!(err.wire_code(), "stdin_closed");
     assert!(err.message.contains("tty=true"));
+}
+
+#[tokio::test]
+async fn exec_output_preserves_pipe_mode_output_after_external_pipeline_steps_on_windows() {
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &windows_cmd_start_request(
+                WINDOWS_PIPE_MODE_EXTERNAL_PIPELINE_CMD,
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+            ),
+        )
+        .await;
+
+    assert!(!response.output().running);
+    assert_eq!(response.output().exit_code, Some(0));
+    assert_eq!(
+        response.output().output.replace('\r', ""),
+        "marker\nexternal\ndone\n"
+    );
+}
+
+#[tokio::test]
+async fn exec_output_uses_one_pipe_for_stdout_and_stderr_in_pipe_mode_on_windows() {
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &windows_cmd_start_request(
+                WINDOWS_PIPE_MODE_STDOUT_STDERR_CMD,
+                false,
+                Some(COMPLETED_COMMAND_YIELD_MS),
+                None,
+            ),
+        )
+        .await;
+
+    assert!(!response.output().running);
+    assert_eq!(response.output().exit_code, Some(0));
+    assert_eq!(
+        response.output().output.replace('\r', ""),
+        "stdout-1\nstderr-1\nstdout-2\nstderr-2\n"
+    );
 }
 
 #[tokio::test]
