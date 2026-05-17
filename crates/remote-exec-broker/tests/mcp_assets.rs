@@ -238,6 +238,38 @@ async fn apply_patch_runs_against_enabled_local_target() {
 }
 
 #[tokio::test]
+async fn apply_patch_local_target_preflights_later_failures_before_mutation() {
+    let fixture = support::spawners::spawn_broker_with_local_target().await;
+    let workdir = fixture.local_workdir();
+    let path = workdir.join("first.txt");
+    std::fs::write(&path, "before\n").unwrap();
+
+    let result = fixture
+        .raw_tool_result(
+            "apply_patch",
+            serde_json::json!({
+                "target": "local",
+                "input": concat!(
+                    "*** Begin Patch\n",
+                    "*** Update File: first.txt\n",
+                    "@@\n",
+                    "-before\n",
+                    "+after\n",
+                    "*** Delete File: missing.txt\n",
+                    "*** End Patch\n",
+                ),
+                "workdir": workdir.display().to_string()
+            }),
+        )
+        .await;
+
+    assert!(result.is_error, "expected preflight error");
+    assert!(result.text_output.contains(" tool=apply_patch "));
+    assert!(result.text_output.contains(" target=local: "));
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "before\n");
+}
+
+#[tokio::test]
 async fn apply_patch_local_target_can_autodetect_existing_target_encoding_when_enabled() {
     let fixture =
         support::spawners::spawn_broker_with_local_target_apply_patch_encoding_autodetect().await;
