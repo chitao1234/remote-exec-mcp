@@ -62,9 +62,8 @@ void log_unknown_tunnel_exception(const char* operation) {
 }
 
 PortTunnelService::PortTunnelService(const PortForwardLimitConfig& limits)
-    : active_workers_(0UL), retained_sessions_(0UL), retained_listeners_(0UL), udp_binds_(0UL),
-      active_tcp_streams_(0UL), worker_group_(new WorkerGroup()), limits_(limits), next_session_sequence_(1ULL),
-      expiry_shutdown_(false), expiry_thread_started_(false)
+    : budget_state_(new PortTunnelBudgetState()), worker_group_(new WorkerGroup()), limits_(limits),
+      next_session_sequence_(1ULL), expiry_shutdown_(false), expiry_thread_started_(false)
 #ifdef _WIN32
       ,
       expiry_thread_(nullptr),
@@ -108,7 +107,7 @@ static void release_counter(std::atomic<unsigned long>& counter, const char* cou
 }
 
 bool PortTunnelService::try_acquire_worker() {
-    return try_acquire_counter(active_workers_, limits_.max_worker_threads);
+    return try_acquire_counter(budget_state_->active_workers, limits_.max_worker_threads);
 }
 
 bool PortTunnelService::try_acquire_worker(PortTunnelWorkerLease* lease) {
@@ -116,42 +115,42 @@ bool PortTunnelService::try_acquire_worker(PortTunnelWorkerLease* lease) {
         return false;
     }
     if (lease != nullptr) {
-        *lease = PortTunnelWorkerLease(this);
+        *lease = PortTunnelWorkerLease(budget_state_);
     }
     return true;
 }
 
 void PortTunnelService::release_worker() {
-    release_counter(active_workers_, "active_workers");
+    release_counter(budget_state_->active_workers, "active_workers");
 }
 
-PortTunnelBudgetLease::PortTunnelBudgetLease() : service_(), kind_(PortTunnelBudgetKind::None) {
+PortTunnelBudgetLease::PortTunnelBudgetLease() : budget_state_(), kind_(PortTunnelBudgetKind::None) {
 }
 
 PortTunnelBudgetLease::~PortTunnelBudgetLease() {
     reset();
 }
 
-PortTunnelBudgetLease PortTunnelBudgetLease::adopt(const std::shared_ptr<PortTunnelService>& service,
+PortTunnelBudgetLease PortTunnelBudgetLease::adopt(const std::shared_ptr<PortTunnelBudgetState>& budget_state,
                                                    PortTunnelBudgetKind kind) {
     PortTunnelBudgetLease lease;
-    lease.service_ = service;
+    lease.budget_state_ = budget_state;
     lease.kind_ = kind;
     return lease;
 }
 
 PortTunnelBudgetLease::PortTunnelBudgetLease(PortTunnelBudgetLease&& other)
-    : service_(other.service_), kind_(other.kind_) {
-    other.service_.reset();
+    : budget_state_(other.budget_state_), kind_(other.kind_) {
+    other.budget_state_.reset();
     other.kind_ = PortTunnelBudgetKind::None;
 }
 
 PortTunnelBudgetLease& PortTunnelBudgetLease::operator=(PortTunnelBudgetLease&& other) {
     if (this != &other) {
         reset();
-        service_ = other.service_;
+        budget_state_ = other.budget_state_;
         kind_ = other.kind_;
-        other.service_.reset();
+        other.budget_state_.reset();
         other.kind_ = PortTunnelBudgetKind::None;
     }
     return *this;
@@ -164,24 +163,24 @@ void PortTunnelBudgetLease::reset() {
 
     const PortTunnelBudgetKind kind = kind_;
     kind_ = PortTunnelBudgetKind::None;
-    std::shared_ptr<PortTunnelService> service = service_.lock();
-    service_.reset();
-    if (service.get() == nullptr) {
+    std::shared_ptr<PortTunnelBudgetState> budget_state = budget_state_;
+    budget_state_.reset();
+    if (budget_state.get() == nullptr) {
         return;
     }
 
     switch (kind) {
     case PortTunnelBudgetKind::RetainedSession:
-        service->release_retained_session();
+        release_counter(budget_state->retained_sessions, "retained_sessions");
         return;
     case PortTunnelBudgetKind::RetainedListener:
-        service->release_retained_listener();
+        release_counter(budget_state->retained_listeners, "retained_listeners");
         return;
     case PortTunnelBudgetKind::UdpBind:
-        service->release_udp_bind();
+        release_counter(budget_state->udp_binds, "udp_binds");
         return;
     case PortTunnelBudgetKind::ActiveTcpStream:
-        service->release_active_tcp_stream();
+        release_counter(budget_state->active_tcp_streams, "active_tcp_streams");
         return;
     case PortTunnelBudgetKind::None:
         return;
@@ -201,7 +200,7 @@ const PortForwardLimitConfig& PortTunnelService::limits() const {
 }
 
 bool PortTunnelService::try_acquire_retained_session() {
-    return try_acquire_counter(retained_sessions_, limits_.max_retained_sessions);
+    return try_acquire_counter(budget_state_->retained_sessions, limits_.max_retained_sessions);
 }
 
 bool PortTunnelService::try_acquire_retained_session(PortTunnelBudgetLease* lease) {
@@ -209,17 +208,17 @@ bool PortTunnelService::try_acquire_retained_session(PortTunnelBudgetLease* leas
         return false;
     }
     if (lease != nullptr) {
-        *lease = PortTunnelBudgetLease::adopt(shared_from_this(), PortTunnelBudgetKind::RetainedSession);
+        *lease = PortTunnelBudgetLease::adopt(budget_state_, PortTunnelBudgetKind::RetainedSession);
     }
     return true;
 }
 
 void PortTunnelService::release_retained_session() {
-    release_counter(retained_sessions_, "retained_sessions");
+    release_counter(budget_state_->retained_sessions, "retained_sessions");
 }
 
 bool PortTunnelService::try_acquire_retained_listener() {
-    return try_acquire_counter(retained_listeners_, limits_.max_retained_listeners);
+    return try_acquire_counter(budget_state_->retained_listeners, limits_.max_retained_listeners);
 }
 
 bool PortTunnelService::try_acquire_retained_listener(PortTunnelBudgetLease* lease) {
@@ -227,17 +226,17 @@ bool PortTunnelService::try_acquire_retained_listener(PortTunnelBudgetLease* lea
         return false;
     }
     if (lease != nullptr) {
-        *lease = PortTunnelBudgetLease::adopt(shared_from_this(), PortTunnelBudgetKind::RetainedListener);
+        *lease = PortTunnelBudgetLease::adopt(budget_state_, PortTunnelBudgetKind::RetainedListener);
     }
     return true;
 }
 
 void PortTunnelService::release_retained_listener() {
-    release_counter(retained_listeners_, "retained_listeners");
+    release_counter(budget_state_->retained_listeners, "retained_listeners");
 }
 
 bool PortTunnelService::try_acquire_udp_bind() {
-    return try_acquire_counter(udp_binds_, limits_.max_udp_binds);
+    return try_acquire_counter(budget_state_->udp_binds, limits_.max_udp_binds);
 }
 
 bool PortTunnelService::try_acquire_udp_bind(PortTunnelBudgetLease* lease) {
@@ -245,17 +244,17 @@ bool PortTunnelService::try_acquire_udp_bind(PortTunnelBudgetLease* lease) {
         return false;
     }
     if (lease != nullptr) {
-        *lease = PortTunnelBudgetLease::adopt(shared_from_this(), PortTunnelBudgetKind::UdpBind);
+        *lease = PortTunnelBudgetLease::adopt(budget_state_, PortTunnelBudgetKind::UdpBind);
     }
     return true;
 }
 
 void PortTunnelService::release_udp_bind() {
-    release_counter(udp_binds_, "udp_binds");
+    release_counter(budget_state_->udp_binds, "udp_binds");
 }
 
 bool PortTunnelService::try_acquire_active_tcp_stream() {
-    return try_acquire_counter(active_tcp_streams_, limits_.max_active_tcp_streams);
+    return try_acquire_counter(budget_state_->active_tcp_streams, limits_.max_active_tcp_streams);
 }
 
 bool PortTunnelService::try_acquire_active_tcp_stream(PortTunnelBudgetLease* lease) {
@@ -263,13 +262,13 @@ bool PortTunnelService::try_acquire_active_tcp_stream(PortTunnelBudgetLease* lea
         return false;
     }
     if (lease != nullptr) {
-        *lease = PortTunnelBudgetLease::adopt(shared_from_this(), PortTunnelBudgetKind::ActiveTcpStream);
+        *lease = PortTunnelBudgetLease::adopt(budget_state_, PortTunnelBudgetKind::ActiveTcpStream);
     }
     return true;
 }
 
 void PortTunnelService::release_active_tcp_stream() {
-    release_counter(active_tcp_streams_, "active_tcp_streams");
+    release_counter(budget_state_->active_tcp_streams, "active_tcp_streams");
 }
 
 bool PortTunnelService::spawn_tracked_worker(const char* operation,
@@ -416,21 +415,22 @@ void PortTunnelService::WorkerGroup::join_all() {
     join_workers(workers);
 }
 
-PortTunnelWorkerLease::PortTunnelWorkerLease() : service_(nullptr) {
+PortTunnelWorkerLease::PortTunnelWorkerLease() : budget_state_() {
 }
 
-PortTunnelWorkerLease::PortTunnelWorkerLease(PortTunnelService* service) : service_(service) {
+PortTunnelWorkerLease::PortTunnelWorkerLease(const std::shared_ptr<PortTunnelBudgetState>& budget_state)
+    : budget_state_(budget_state) {
 }
 
-PortTunnelWorkerLease::PortTunnelWorkerLease(PortTunnelWorkerLease&& other) : service_(other.service_) {
-    other.service_ = nullptr;
+PortTunnelWorkerLease::PortTunnelWorkerLease(PortTunnelWorkerLease&& other) : budget_state_(other.budget_state_) {
+    other.budget_state_.reset();
 }
 
 PortTunnelWorkerLease& PortTunnelWorkerLease::operator=(PortTunnelWorkerLease&& other) {
     if (this != &other) {
         reset();
-        service_ = other.service_;
-        other.service_ = nullptr;
+        budget_state_ = other.budget_state_;
+        other.budget_state_.reset();
     }
     return *this;
 }
@@ -440,15 +440,15 @@ PortTunnelWorkerLease::~PortTunnelWorkerLease() {
 }
 
 void PortTunnelWorkerLease::reset() {
-    if (service_ != nullptr) {
-        PortTunnelService* service = service_;
-        service_ = nullptr;
-        service->release_worker();
+    if (budget_state_.get() != nullptr) {
+        std::shared_ptr<PortTunnelBudgetState> budget_state = budget_state_;
+        budget_state_.reset();
+        release_counter(budget_state->active_workers, "active_workers");
     }
 }
 
 bool PortTunnelWorkerLease::valid() const {
-    return service_ != nullptr;
+    return budget_state_.get() != nullptr;
 }
 
 std::string header_token_lower(const HttpRequest& request, const std::string& name) {

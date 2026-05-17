@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -8,6 +9,18 @@
 #include "port_tunnel_common.h"
 
 class PortTunnelService;
+
+struct PortTunnelBudgetState {
+    PortTunnelBudgetState()
+        : active_workers(0UL), retained_sessions(0UL), retained_listeners(0UL), udp_binds(0UL),
+          active_tcp_streams(0UL) {}
+
+    std::atomic<unsigned long> active_workers;
+    std::atomic<unsigned long> retained_sessions;
+    std::atomic<unsigned long> retained_listeners;
+    std::atomic<unsigned long> udp_binds;
+    std::atomic<unsigned long> active_tcp_streams;
+};
 
 enum class PortTunnelBudgetKind {
     None,
@@ -22,7 +35,7 @@ public:
     PortTunnelBudgetLease();
     ~PortTunnelBudgetLease();
 
-    static PortTunnelBudgetLease adopt(const std::shared_ptr<PortTunnelService>& service,
+    static PortTunnelBudgetLease adopt(const std::shared_ptr<PortTunnelBudgetState>& budget_state,
                                        PortTunnelBudgetKind kind);
 
     PortTunnelBudgetLease(PortTunnelBudgetLease&& other);
@@ -35,7 +48,7 @@ private:
     PortTunnelBudgetLease(const PortTunnelBudgetLease&);
     PortTunnelBudgetLease& operator=(const PortTunnelBudgetLease&);
 
-    std::weak_ptr<PortTunnelService> service_;
+    std::shared_ptr<PortTunnelBudgetState> budget_state_;
     PortTunnelBudgetKind kind_;
 };
 

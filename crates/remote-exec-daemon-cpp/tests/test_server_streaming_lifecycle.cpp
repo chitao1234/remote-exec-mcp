@@ -4,6 +4,10 @@
 #include "../src/port_tunnel_service.h"
 #include "test_socket_pair.h"
 
+#include <cstdio>
+#include <cstdlib>
+#include <exception>
+
 static PortTunnelFrame read_required_tunnel_frame_with_timeout(SOCKET socket, unsigned long timeout_ms) {
     PortTunnelFrame frame;
     TEST_ASSERT(try_read_tunnel_frame_with_timeout(socket, timeout_ms, &frame));
@@ -375,6 +379,43 @@ static void assert_detached_listener_expiry_survives_last_external_service_ref(c
     wait_until_bindable(endpoint);
 }
 
+static void wait_until_udp_bindable(const std::string& endpoint) {
+    for (int attempt = 0; attempt < 40; ++attempt) {
+        try {
+            UniqueSocket rebound(bind_port_forward_socket(endpoint, "udp"));
+            if (rebound.valid()) {
+                return;
+            }
+        } catch (const std::exception&) {
+        }
+        platform::sleep_ms(25UL);
+    }
+    std::fprintf(stderr, "udp endpoint `%s` did not become bindable\n", endpoint.c_str());
+    std::abort();
+}
+
+static void assert_detached_udp_bind_expiry_survives_last_external_service_ref(const fs::path& root) {
+    AppState state;
+    initialize_state(state, root);
+
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    const PortTunnelFrame ready = open_v4_tunnel(state, &client_socket, &server_thread, "listen", "udp", 1ULL);
+    const Json ready_meta = Json::parse(ready.meta);
+    const unsigned long resume_timeout_ms = ready_meta.at("resume_timeout_ms").get<unsigned long>();
+
+    send_tunnel_frame(client_socket.get(),
+                      json_frame(PortTunnelFrameType::UdpBind, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
+    const PortTunnelFrame bind_ok = read_tunnel_frame(client_socket.get());
+    TEST_ASSERT(bind_ok.type == PortTunnelFrameType::UdpBindOk);
+    const std::string endpoint = Json::parse(bind_ok.meta).at("endpoint").get<std::string>();
+
+    close_tunnel(&client_socket, &server_thread);
+    state.port_tunnel_service.reset();
+    wait_past_resume_timeout(resume_timeout_ms);
+    wait_until_udp_bindable(endpoint);
+}
+
 void assert_tunnel_resume_and_expiry_paths(AppState& state) {
     const fs::path root(state.config.default_workdir);
 
@@ -389,4 +430,5 @@ void assert_tunnel_resume_and_expiry_paths(AppState& state) {
     assert_sender_close_handles_queued_control_frames();
     assert_expired_tunnel_session_is_released(state);
     assert_detached_listener_expiry_survives_last_external_service_ref(root);
+    assert_detached_udp_bind_expiry_survives_last_external_service_ref(root);
 }

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <functional>
 #include <map>
 #include <memory>
@@ -15,7 +14,7 @@ class PortTunnelConnection;
 class PortTunnelWorkerLease {
 public:
     PortTunnelWorkerLease();
-    explicit PortTunnelWorkerLease(PortTunnelService* service);
+    explicit PortTunnelWorkerLease(const std::shared_ptr<PortTunnelBudgetState>& budget_state);
     PortTunnelWorkerLease(PortTunnelWorkerLease&& other);
     PortTunnelWorkerLease& operator=(PortTunnelWorkerLease&& other);
     ~PortTunnelWorkerLease();
@@ -27,7 +26,7 @@ private:
     PortTunnelWorkerLease(const PortTunnelWorkerLease&);
     PortTunnelWorkerLease& operator=(const PortTunnelWorkerLease&);
 
-    PortTunnelService* service_;
+    std::shared_ptr<PortTunnelBudgetState> budget_state_;
 };
 
 class PortTunnelService : public std::enable_shared_from_this<PortTunnelService> {
@@ -100,11 +99,7 @@ private:
                        const std::shared_ptr<TunnelUdpSocket>& socket_value);
 
     BasicMutex mutex_;
-    std::atomic<unsigned long> active_workers_;
-    std::atomic<unsigned long> retained_sessions_;
-    std::atomic<unsigned long> retained_listeners_;
-    std::atomic<unsigned long> udp_binds_;
-    std::atomic<unsigned long> active_tcp_streams_;
+    std::shared_ptr<PortTunnelBudgetState> budget_state_;
     std::unique_ptr<WorkerGroup> worker_group_;
     PortForwardLimitConfig limits_;
     std::map<std::string, std::shared_ptr<PortTunnelSession>> sessions_;
