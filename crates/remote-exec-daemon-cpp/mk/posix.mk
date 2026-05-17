@@ -1,4 +1,4 @@
-HOST_CXX ?= g++
+HOST_CXX ?= c++
 
 HOST_PROD_OBJ_DIR := $(OBJ_DIR)/host-prod
 HOST_TEST_OBJ_DIR := $(OBJ_DIR)/host-test

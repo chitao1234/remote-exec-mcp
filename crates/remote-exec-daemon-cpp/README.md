@@ -5,7 +5,7 @@ Standalone C++11 daemon for `remote-exec-mcp`.
 This daemon is intentionally narrower than the Rust daemon, but it now has two
 build paths:
 
-- native POSIX hosts through `g++`
+- native POSIX hosts through the platform `c++` driver
 - Windows XP-compatible hosts through `i686-w64-mingw32-g++`
 - host-native Windows builds through MSVC/NMAKE
 - Windows XP-compatible hosts through MSVC/NMAKE with the `v141_xp` toolset
@@ -25,6 +25,10 @@ Build outputs are written to this directory's `build/` tree even when `make` is
 invoked from another working directory. Incremental builds reuse cached object
 files under `build/obj/`, so repeated `make` runs only rebuild sources whose
 inputs changed.
+
+GNU make, BSD make, and NMAKE default to optimized builds (`-O2` or `/O2`).
+Pass `DEBUG=1` to switch the relevant entry point to `-O0 -g` or
+`/Od /Zi /DEBUG`.
 
 Host-native POSIX daemon:
 
