@@ -196,9 +196,6 @@ When changing certificate/bootstrap behavior:
 - update `crates/remote-exec-pki`
 - update README TLS/bootstrap instructions and config examples
 
-Prefer focused changes inside the responsible crate. Do not use broad refactors
-to hide a contract change.
-
 ## Testing Expectations
 
 Run targeted tests for the area changed before broader checks.
