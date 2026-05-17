@@ -131,6 +131,31 @@ static void assert_retained_tcp_accept_worker_pressure_is_local_drop(const fs::p
     close_tunnel(&client_socket, &server_thread);
 }
 
+static void assert_retained_udp_bind_worker_failure_releases_udp_budget(const fs::path& root) {
+    PortForwardLimitConfig limits;
+    limits.max_worker_threads = 0UL;
+    limits.max_udp_binds = 1UL;
+
+    AppState state;
+    initialize_state_with_port_forward_limits(state, root, limits);
+
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_v4_tunnel(state, &client_socket, &server_thread, "listen", "udp", 1ULL);
+
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        send_tunnel_frame(client_socket.get(),
+                          json_frame(PortTunnelFrameType::UdpBind, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
+        const PortTunnelFrame error = read_tunnel_frame(client_socket.get());
+        TEST_ASSERT(error.type == PortTunnelFrameType::Error);
+        const Json meta = Json::parse(error.meta);
+        TEST_ASSERT(meta.at("code").get<std::string>() == "port_tunnel_limit_exceeded");
+        TEST_ASSERT(meta.at("message").get<std::string>() == "port tunnel worker limit reached");
+    }
+
+    close_tunnel(&client_socket, &server_thread);
+}
+
 static void assert_retained_tcp_accept_pressure_is_local_drop(const fs::path& root) {
     PortForwardLimitConfig limits;
     limits.max_worker_threads = 3UL;
@@ -412,6 +437,7 @@ void assert_tunnel_limit_and_pressure_paths(AppState& state) {
     assert_tcp_accept_read_thread_failure_drops_before_accept(root);
     assert_retained_tcp_accept_read_thread_failure_drops_before_accept(root);
     assert_retained_tcp_accept_worker_pressure_is_local_drop(root);
+    assert_retained_udp_bind_worker_failure_releases_udp_budget(root);
     assert_retained_tcp_accept_pressure_is_local_drop(root);
     assert_active_tcp_stream_limit_is_enforced_and_released(root);
     assert_active_tcp_accept_limit_is_enforced_and_released(root);
