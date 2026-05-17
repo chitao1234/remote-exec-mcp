@@ -4,8 +4,9 @@
 bool PortTunnelService::spawn_tcp_listener_loop(const std::shared_ptr<PortTunnelSession>& session,
                                                 const std::shared_ptr<RetainedTcpListener>& listener,
                                                 bool worker_acquired) {
-    return spawn_tracked_worker("spawn tcp listener thread", worker_acquired, [this, session, listener]() {
-        tcp_accept_loop(session, listener);
+    std::shared_ptr<PortTunnelService> self = shared_from_this();
+    return spawn_tracked_worker("spawn tcp listener thread", worker_acquired, [self, session, listener]() {
+        self->tcp_accept_loop(session, listener);
     });
 }
 
@@ -21,7 +22,14 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
             continue;
         }
 
-        const int ready = wait_socket_readable(listener->listener.get(), RETAINED_SOCKET_POLL_TIMEOUT_MS);
+        int ready = 0;
+        {
+            BasicLockGuard listener_lock(listener->mutex);
+            if (listener->closed) {
+                return;
+            }
+            ready = wait_socket_readable(listener->listener.get(), RETAINED_SOCKET_POLL_TIMEOUT_MS);
+        }
         if (ready == 0) {
             continue;
         }
@@ -30,7 +38,7 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
                 return;
             }
             if (connection->owns_attachment(attachment)) {
-                connection->send_error(listener->stream_id, "port_accept_failed", socket_error_message("select"));
+                connection->send_error(listener->stream_id, "port_accept_failed", socket_error_message("poll"));
             }
             return;
         }
@@ -41,7 +49,14 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
         sockaddr_storage peer_address;
         std::memset(&peer_address, 0, sizeof(peer_address));
         socklen_t peer_len = sizeof(peer_address);
-        const SOCKET accepted = accept(listener->listener.get(), reinterpret_cast<sockaddr*>(&peer_address), &peer_len);
+        SOCKET accepted = INVALID_SOCKET;
+        {
+            BasicLockGuard listener_lock(listener->mutex);
+            if (listener->closed) {
+                return;
+            }
+            accepted = accept(listener->listener.get(), reinterpret_cast<sockaddr*>(&peer_address), &peer_len);
+        }
         if (accepted == INVALID_SOCKET) {
             const int error = last_socket_error();
             if (receive_timeout_error(error)) {

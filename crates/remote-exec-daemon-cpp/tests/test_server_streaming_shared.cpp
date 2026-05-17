@@ -1,8 +1,14 @@
 #include "test_server_streaming_shared.h"
 
+#include <climits>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
+#ifndef _WIN32
+#include <poll.h>
+#endif
 
 #include "test_socket_pair.h"
 
@@ -117,6 +123,7 @@ PortTunnelFrame read_tunnel_frame(SOCKET socket) {
 }
 
 bool try_read_tunnel_frame_with_timeout(SOCKET socket, unsigned long timeout_ms, PortTunnelFrame* frame) {
+#ifdef _WIN32
     fd_set read_fds;
     FD_ZERO(&read_fds);
     FD_SET(socket, &read_fds);
@@ -124,6 +131,20 @@ bool try_read_tunnel_frame_with_timeout(SOCKET socket, unsigned long timeout_ms,
     timeout.tv_sec = static_cast<long>(timeout_ms / 1000UL);
     timeout.tv_usec = static_cast<long>((timeout_ms % 1000UL) * 1000UL);
     const int ready = select(socket + 1, &read_fds, NULL, NULL, &timeout);
+#else
+    struct pollfd descriptor;
+    descriptor.fd = socket;
+    descriptor.events = POLLIN;
+    descriptor.revents = 0;
+    const int timeout = timeout_ms > static_cast<unsigned long>(INT_MAX) ? INT_MAX : static_cast<int>(timeout_ms);
+    int ready;
+    for (;;) {
+        ready = poll(&descriptor, 1, timeout);
+        if (ready >= 0 || errno != EINTR) {
+            break;
+        }
+    }
+#endif
     TEST_ASSERT(ready >= 0);
     if (ready == 0) {
         return false;
@@ -133,6 +154,7 @@ bool try_read_tunnel_frame_with_timeout(SOCKET socket, unsigned long timeout_ms,
 }
 
 bool tcp_listener_has_pending_connection(SOCKET socket, unsigned long timeout_ms) {
+#ifdef _WIN32
     fd_set read_fds;
     FD_ZERO(&read_fds);
     FD_SET(socket, &read_fds);
@@ -142,6 +164,22 @@ bool tcp_listener_has_pending_connection(SOCKET socket, unsigned long timeout_ms
     const int ready = select(socket + 1, &read_fds, NULL, NULL, &timeout);
     TEST_ASSERT(ready >= 0);
     return ready > 0 && FD_ISSET(socket, &read_fds);
+#else
+    struct pollfd descriptor;
+    descriptor.fd = socket;
+    descriptor.events = POLLIN;
+    descriptor.revents = 0;
+    const int timeout = timeout_ms > static_cast<unsigned long>(INT_MAX) ? INT_MAX : static_cast<int>(timeout_ms);
+    int ready;
+    for (;;) {
+        ready = poll(&descriptor, 1, timeout);
+        if (ready >= 0 || errno != EINTR) {
+            break;
+        }
+    }
+    TEST_ASSERT(ready >= 0);
+    return ready > 0 && (descriptor.revents & POLLIN) != 0;
+#endif
 }
 
 void assert_tunnel_error_code(const PortTunnelFrame& frame, const std::string& code) {

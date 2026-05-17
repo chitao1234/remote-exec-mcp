@@ -1,4 +1,10 @@
+#include <climits>
 #include <cstdlib>
+
+#ifndef _WIN32
+#include <cerrno>
+#include <poll.h>
+#endif
 
 #include "port_tunnel_service.h"
 #include "server_contract.h"
@@ -145,7 +151,7 @@ bool PortTunnelService::spawn_tracked_worker(const char* operation,
 
 #ifdef _WIN32
     struct Context {
-        PortTunnelService* service;
+        std::shared_ptr<PortTunnelService> service;
         std::shared_ptr<TrackedWorkerThread> worker;
         std::function<void()> work;
         const char* operation;
@@ -155,7 +161,7 @@ bool PortTunnelService::spawn_tracked_worker(const char* operation,
         static unsigned __stdcall entry(void* raw_context) {
             std::unique_ptr<Context> context(static_cast<Context*>(raw_context));
             context->worker->thread_id = GetCurrentThreadId();
-            PortTunnelWorkerLease lease(context->service);
+            PortTunnelWorkerLease lease(context->service.get());
             try {
                 context->work();
             } catch (const std::exception& ex) {
@@ -169,7 +175,7 @@ bool PortTunnelService::spawn_tracked_worker(const char* operation,
     };
 
     std::unique_ptr<Context> context(new Context());
-    context->service = this;
+    context->service = shared_from_this();
     context->worker = worker;
     context->work = work;
     context->operation = operation;
@@ -184,8 +190,9 @@ bool PortTunnelService::spawn_tracked_worker(const char* operation,
     context.release();
 #else
     try {
-        worker->thread.reset(new std::thread([this, worker, work, operation]() {
-            PortTunnelWorkerLease lease(this);
+        std::shared_ptr<PortTunnelService> self = shared_from_this();
+        worker->thread.reset(new std::thread([self, worker, work, operation]() {
+            PortTunnelWorkerLease lease(self.get());
             try {
                 work();
             } catch (const std::exception& ex) {
@@ -193,7 +200,7 @@ bool PortTunnelService::spawn_tracked_worker(const char* operation,
             } catch (...) {
                 log_unknown_tunnel_exception(operation);
             }
-            mark_worker_finished(worker);
+            self->mark_worker_finished(worker);
         }));
     } catch (const std::exception& ex) {
         join_workers(finished_workers);
@@ -386,6 +393,7 @@ bool session_is_unavailable(const std::shared_ptr<PortTunnelSession>& session) {
 }
 
 int wait_socket_readable(SOCKET socket, unsigned long timeout_ms) {
+#ifdef _WIN32
     fd_set readfds;
     FD_ZERO(&readfds);
     FD_SET(socket, &readfds);
@@ -393,11 +401,24 @@ int wait_socket_readable(SOCKET socket, unsigned long timeout_ms) {
     timeval timeout;
     timeout.tv_sec = static_cast<long>(timeout_ms / 1000UL);
     timeout.tv_usec = static_cast<long>((timeout_ms % 1000UL) * 1000UL);
-
-#ifdef _WIN32
     return select(0, &readfds, nullptr, nullptr, &timeout);
 #else
-    return select(socket + 1, &readfds, nullptr, nullptr, &timeout);
+    struct pollfd descriptor;
+    descriptor.fd = socket;
+    descriptor.events = POLLIN;
+    descriptor.revents = 0;
+
+    const int timeout = timeout_ms > static_cast<unsigned long>(INT_MAX) ? INT_MAX : static_cast<int>(timeout_ms);
+    for (;;) {
+        const int ready = poll(&descriptor, 1, timeout);
+        if (ready >= 0) {
+            return ready;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        return -1;
+    }
 #endif
 }
 

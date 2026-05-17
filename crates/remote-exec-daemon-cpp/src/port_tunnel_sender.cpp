@@ -51,7 +51,6 @@ bool PortTunnelSender::ensure_writer_started_locked() {
         closed_.store(true);
         writer_shutdown_ = true;
         drain_queued_frame_reservations_locked();
-        shutdown_socket(client_);
         return false;
     }
     context.release();
@@ -69,14 +68,12 @@ bool PortTunnelSender::ensure_writer_started_locked() {
         closed_.store(true);
         writer_shutdown_ = true;
         drain_queued_frame_reservations_locked();
-        shutdown_socket(client_);
         return false;
     } catch (...) {
         log_unknown_tunnel_exception("spawn tunnel writer thread");
         closed_.store(true);
         writer_shutdown_ = true;
         drain_queued_frame_reservations_locked();
-        shutdown_socket(client_);
         return false;
     }
 #endif
@@ -105,7 +102,6 @@ void PortTunnelSender::writer_loop() {
             log_tunnel_exception("send port tunnel frame", ex);
             release_queued_frame_reservation(queued.charge_value);
             closed_.store(true);
-            shutdown_socket(client_);
             {
                 BasicLockGuard lock(writer_mutex_);
                 writer_shutdown_ = true;

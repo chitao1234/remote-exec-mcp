@@ -503,6 +503,13 @@ public:
                 continue;
             }
             if (read_count == 0) {
+                if (tty_ && output_may_resume()) {
+                    if (block) {
+                        platform::sleep_ms(1UL);
+                        continue;
+                    }
+                    break;
+                }
                 *eof = true;
                 break;
             }
@@ -513,6 +520,13 @@ public:
                 break;
             }
             if (errno == EIO) {
+                if (tty_ && output_may_resume()) {
+                    if (block) {
+                        platform::sleep_ms(1UL);
+                        continue;
+                    }
+                    break;
+                }
                 *eof = true;
                 break;
             }
@@ -561,6 +575,19 @@ public:
     }
 
 private:
+    bool output_may_resume() {
+        if (reaped_) {
+            return false;
+        }
+        int status = 0;
+        if (!poll_posix_child_exit(pid_, &status)) {
+            return true;
+        }
+        reaped_ = true;
+        record_exit_status(status, &exit_code_);
+        return false;
+    }
+
     pid_t pid_;
     bool tty_;
     UniqueFd input_write_;

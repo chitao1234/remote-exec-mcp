@@ -6,8 +6,9 @@ bool PortTunnelService::spawn_udp_bind_loop(const std::shared_ptr<PortTunnelSess
                                             uint32_t stream_id,
                                             const std::shared_ptr<TunnelUdpSocket>& socket_value,
                                             bool worker_acquired) {
-    return spawn_tracked_worker("spawn udp bind thread", worker_acquired, [this, session, stream_id, socket_value]() {
-        udp_read_loop(session, stream_id, socket_value);
+    std::shared_ptr<PortTunnelService> self = shared_from_this();
+    return spawn_tracked_worker("spawn udp bind thread", worker_acquired, [self, session, stream_id, socket_value]() {
+        self->udp_read_loop(session, stream_id, socket_value);
     });
 }
 
@@ -25,7 +26,14 @@ void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& 
             continue;
         }
 
-        const int ready = wait_socket_readable(socket_value->socket.get(), RETAINED_SOCKET_POLL_TIMEOUT_MS);
+        int ready = 0;
+        {
+            BasicLockGuard socket_lock(socket_value->mutex);
+            if (socket_value->closed) {
+                return;
+            }
+            ready = wait_socket_readable(socket_value->socket.get(), RETAINED_SOCKET_POLL_TIMEOUT_MS);
+        }
         if (ready == 0) {
             continue;
         }
@@ -45,12 +53,19 @@ void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& 
         sockaddr_storage peer_address;
         std::memset(&peer_address, 0, sizeof(peer_address));
         socklen_t peer_len = sizeof(peer_address);
-        const int received = recvfrom(socket_value->socket.get(),
-                                      reinterpret_cast<char*>(buffer.data()),
-                                      static_cast<int>(buffer.size()),
-                                      0,
-                                      reinterpret_cast<sockaddr*>(&peer_address),
-                                      &peer_len);
+        int received = 0;
+        {
+            BasicLockGuard socket_lock(socket_value->mutex);
+            if (socket_value->closed) {
+                return;
+            }
+            received = recvfrom(socket_value->socket.get(),
+                                reinterpret_cast<char*>(buffer.data()),
+                                static_cast<int>(buffer.size()),
+                                0,
+                                reinterpret_cast<sockaddr*>(&peer_address),
+                                &peer_len);
+        }
         if (received < 0) {
             const int error = last_socket_error();
             if (receive_timeout_error(error)) {

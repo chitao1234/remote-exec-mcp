@@ -107,12 +107,27 @@ PortTunnelConnection::PortTunnelConnection(SOCKET client, const std::shared_ptr<
 
 bool PortTunnelConnection::read_exact(unsigned char* data, std::size_t size) {
     std::size_t offset = 0;
+    const std::uint64_t started_at_ms = platform::monotonic_ms();
+    const unsigned long timeout_ms = service_->limits().tunnel_io_timeout_ms;
     while (offset < size) {
-        const int ready = wait_socket_readable(client_, service_->limits().tunnel_io_timeout_ms);
-        if (ready <= 0) {
+        if (closed()) {
             mark_closed();
-            shutdown_socket(client_);
             return false;
+        }
+        const std::uint64_t elapsed_ms = platform::monotonic_ms() - started_at_ms;
+        if (elapsed_ms >= timeout_ms) {
+            mark_closed();
+            return false;
+        }
+        const unsigned long remaining_ms = timeout_ms - static_cast<unsigned long>(elapsed_ms);
+        const unsigned long wait_ms = std::min<unsigned long>(remaining_ms, RETAINED_SOCKET_POLL_TIMEOUT_MS);
+        const int ready = wait_socket_readable(client_, wait_ms);
+        if (ready < 0) {
+            mark_closed();
+            return false;
+        }
+        if (ready == 0) {
+            continue;
         }
         const int received = recv_bounded(client_, reinterpret_cast<char*>(data + offset), size - offset, 0);
         if (received == 0) {

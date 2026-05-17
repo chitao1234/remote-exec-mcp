@@ -8,9 +8,11 @@
 #include <ws2tcpip.h>
 #else
 #include <arpa/inet.h>
+#include <cerrno>
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -110,6 +112,7 @@ void set_socket_nonblocking(SOCKET socket, bool enabled) {
 }
 
 bool wait_for_connect(SOCKET socket, unsigned long timeout_ms) {
+#ifdef _WIN32
     fd_set writefds;
     FD_ZERO(&writefds);
     FD_SET(socket, &writefds);
@@ -117,16 +120,30 @@ bool wait_for_connect(SOCKET socket, unsigned long timeout_ms) {
     timeval timeout;
     timeout.tv_sec = static_cast<long>(timeout_ms / 1000UL);
     timeout.tv_usec = static_cast<long>((timeout_ms % 1000UL) * 1000UL);
-
-#ifdef _WIN32
     const int selected = select(0, nullptr, &writefds, nullptr, &timeout);
 #else
-    const int selected = select(socket + 1, nullptr, &writefds, nullptr, &timeout);
+    struct pollfd descriptor;
+    descriptor.fd = socket;
+    descriptor.events = POLLOUT;
+    descriptor.revents = 0;
+
+    const int timeout = timeout_ms > static_cast<unsigned long>(INT_MAX) ? INT_MAX : static_cast<int>(timeout_ms);
+    int selected;
+    for (;;) {
+        selected = poll(&descriptor, 1, timeout);
+        if (selected >= 0 || errno != EINTR) {
+            break;
+        }
+    }
 #endif
     if (selected < 0) {
-        throw PortForwardError(400, "port_connect_failed", socket_error_message("select"));
+        throw PortForwardError(400, "port_connect_failed", socket_error_message("poll"));
     }
+#ifdef _WIN32
     return selected > 0 && FD_ISSET(socket, &writefds);
+#else
+    return selected > 0 && (descriptor.revents & POLLOUT) != 0;
+#endif
 }
 
 bool tcp_connect_with_timeout(SOCKET socket, const sockaddr* address, socklen_t address_len, unsigned long timeout_ms) {

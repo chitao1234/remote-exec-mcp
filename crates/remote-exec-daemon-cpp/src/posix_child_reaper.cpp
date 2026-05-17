@@ -14,6 +14,7 @@
 #include <vector>
 
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/select.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -114,13 +115,17 @@ void drain_signal_pipe() {
 
 void reaper_loop() {
     for (;;) {
-        fd_set read_fds;
-        FD_ZERO(&read_fds);
-        FD_SET(g_signal_pipe_read, &read_fds);
-        timeval timeout;
-        timeout.tv_sec = 1;
-        timeout.tv_usec = 0;
-        const int ready = select(g_signal_pipe_read + 1, &read_fds, nullptr, nullptr, &timeout);
+        struct pollfd descriptor;
+        descriptor.fd = g_signal_pipe_read;
+        descriptor.events = POLLIN;
+        descriptor.revents = 0;
+        int ready;
+        for (;;) {
+            ready = poll(&descriptor, 1, 1000);
+            if (ready >= 0 || errno != EINTR) {
+                break;
+            }
+        }
         if (ready > 0) {
             drain_signal_pipe();
         }
