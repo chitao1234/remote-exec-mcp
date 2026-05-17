@@ -3,6 +3,7 @@
 
 #include "port_tunnel_connection.h"
 #include "port_tunnel_service.h"
+#include "port_tunnel_thread.h"
 
 namespace {
 
@@ -474,22 +475,9 @@ void PortTunnelService::stop_expiry_scheduler() {
 #endif
     }
 #ifdef _WIN32
-    if (thread != nullptr) {
-        if (thread_id == GetCurrentThreadId()) {
-            CloseHandle(thread);
-            return;
-        }
-        WaitForSingleObject(thread, INFINITE);
-        CloseHandle(thread);
-    }
+    consume_port_tunnel_thread(&thread, thread_id);
 #else
-    if (thread.get() != nullptr) {
-        if (thread->get_id() == std::this_thread::get_id()) {
-            thread->detach();
-            return;
-        }
-        thread->join();
-    }
+    consume_port_tunnel_thread(&thread);
 #endif
 }
 

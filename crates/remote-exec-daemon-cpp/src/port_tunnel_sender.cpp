@@ -1,10 +1,10 @@
 #include "port_tunnel_sender.h"
 
-#include <cstdlib>
 #include <limits>
 
 #include "port_tunnel_connection.h"
 #include "port_tunnel_service.h"
+#include "port_tunnel_thread.h"
 
 PortTunnelSender::PortTunnelSender(SOCKET client, const std::shared_ptr<PortTunnelService>& service)
     : client_(client), service_(service), writer_started_(false), writer_shutdown_(false), writer_finished_(false),
@@ -56,25 +56,14 @@ void PortTunnelSender::join_writer_thread() {
         writer_thread_ = nullptr;
         writer_thread_id_ = 0U;
     }
-    if (thread != nullptr) {
-        if (thread_id == GetCurrentThreadId()) {
-            std::abort();
-        }
-        WaitForSingleObject(thread, INFINITE);
-        CloseHandle(thread);
-    }
+    consume_port_tunnel_thread(&thread, thread_id);
 #else
     std::unique_ptr<std::thread> thread;
     {
         BasicLockGuard lock(writer_mutex_);
         thread.swap(writer_thread_);
     }
-    if (thread.get() != nullptr) {
-        if (thread->get_id() == std::this_thread::get_id()) {
-            std::abort();
-        }
-        thread->join();
-    }
+    consume_port_tunnel_thread(&thread);
 #endif
 }
 

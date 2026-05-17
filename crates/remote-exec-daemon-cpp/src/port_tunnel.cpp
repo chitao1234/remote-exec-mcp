@@ -7,6 +7,7 @@
 #endif
 
 #include "port_tunnel_service.h"
+#include "port_tunnel_thread.h"
 #include "server_contract.h"
 
 struct PortTunnelService::WorkerGroup {
@@ -426,26 +427,9 @@ void PortTunnelService::WorkerGroup::collect_finished(std::vector<std::shared_pt
 void PortTunnelService::WorkerGroup::join_workers(const std::vector<std::shared_ptr<Thread>>& workers) {
     for (std::size_t i = 0; i < workers.size(); ++i) {
 #ifdef _WIN32
-        if (workers[i]->handle != nullptr) {
-            if (workers[i]->thread_id == GetCurrentThreadId()) {
-                CloseHandle(workers[i]->handle);
-                workers[i]->handle = nullptr;
-                continue;
-            }
-            WaitForSingleObject(workers[i]->handle, INFINITE);
-            CloseHandle(workers[i]->handle);
-            workers[i]->handle = nullptr;
-        }
+        consume_port_tunnel_thread(&workers[i]->handle, workers[i]->thread_id);
 #else
-        if (workers[i]->thread.get() != nullptr) {
-            if (workers[i]->thread->get_id() == std::this_thread::get_id()) {
-                workers[i]->thread->detach();
-                workers[i]->thread.reset();
-                continue;
-            }
-            workers[i]->thread->join();
-            workers[i]->thread.reset();
-        }
+        consume_port_tunnel_thread(&workers[i]->thread);
 #endif
     }
 }
