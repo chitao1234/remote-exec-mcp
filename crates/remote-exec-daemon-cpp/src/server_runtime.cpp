@@ -20,6 +20,7 @@
 #include "path_policy.h"
 #include "platform.h"
 #include "port_tunnel.h"
+#include "port_tunnel_service.h"
 #ifdef _WIN32
 #include "win32_thread.h"
 #endif
@@ -134,6 +135,9 @@ void ServerRuntime::request_shutdown() {
     }
 
     connections_.begin_shutdown();
+    if (state_.port_tunnel_service) {
+        state_.port_tunnel_service->shutdown();
+    }
 }
 
 void ServerRuntime::join() {

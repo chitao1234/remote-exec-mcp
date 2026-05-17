@@ -17,6 +17,7 @@ public:
     explicit PortTunnelService(const PortForwardLimitConfig& limits);
     ~PortTunnelService();
 
+    void shutdown();
     std::shared_ptr<PortTunnelSession> create_session();
     std::shared_ptr<PortTunnelSession> find_session(const std::string& session_id);
     void attach_session(const std::shared_ptr<PortTunnelSession>& session,

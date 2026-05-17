@@ -76,6 +76,10 @@ PortTunnelService::PortTunnelService(const PortForwardLimitConfig& limits)
 }
 
 PortTunnelService::~PortTunnelService() {
+    shutdown();
+}
+
+void PortTunnelService::shutdown() {
     stop_expiry_scheduler();
     close_all_sessions_for_shutdown();
     join_all_workers();
