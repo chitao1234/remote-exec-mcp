@@ -167,7 +167,7 @@ WINDOWS_SERVER_TRANSPORT_TEST_SRCS = \
 	$(SOURCE_PREFIX)src/path_utils.cpp \
 	$(SOURCE_PREFIX)src/win32_error.cpp
 
-HOST_SERVER_STREAMING_SRCS = \
+SERVER_STREAMING_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)tests/test_server_streaming.cpp \
 	$(SOURCE_PREFIX)tests/test_server_streaming_shared.cpp \
 	$(SOURCE_PREFIX)tests/test_server_streaming_routes.cpp \
@@ -175,10 +175,18 @@ HOST_SERVER_STREAMING_SRCS = \
 	$(SOURCE_PREFIX)tests/test_server_streaming_tcp.cpp \
 	$(SOURCE_PREFIX)tests/test_server_streaming_udp.cpp \
 	$(SOURCE_PREFIX)tests/test_server_streaming_limits.cpp \
-	$(SOURCE_PREFIX)tests/test_server_streaming_lifecycle.cpp \
+	$(SOURCE_PREFIX)tests/test_server_streaming_lifecycle.cpp
+
+HOST_SERVER_STREAMING_SRCS = \
+	$(SERVER_STREAMING_TEST_COMMON_SRCS) \
 	$(POSIX_BASE_SRCS_NO_MAIN) \
 	$(SOURCE_PREFIX)src/process_session_posix.cpp \
 	$(POSIX_CHILD_REAPER_SRCS)
+
+WINDOWS_SERVER_STREAMING_SRCS = \
+	$(SERVER_STREAMING_TEST_COMMON_SRCS) \
+	$(WINDOWS_BASE_SRCS_NO_MAIN) \
+	$(WINDOWS_DAEMON_SUPPORT_SRCS)
 
 HOST_SESSION_STORE_SRCS = \
 	$(SOURCE_PREFIX)tests/test_session_store.cpp \
@@ -337,7 +345,8 @@ PLATFORM_NEUTRAL_TEST_SRCS = \
 	$(HOST_PORT_TUNNEL_FRAME_SRCS)
 
 WINDOWS_CAPABLE_PROCESS_TEST_SRCS = \
-	$(SOURCE_PREFIX)tests/test_session_store.cpp
+	$(SOURCE_PREFIX)tests/test_session_store.cpp \
+	$(WINDOWS_SERVER_STREAMING_SRCS)
 
 WINDOWS_CAPABLE_ROUTE_TEST_SRCS = \
 	$(WINDOWS_SERVER_ROUTES_COMMON_TEST_SRCS) \

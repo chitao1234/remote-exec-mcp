@@ -6,10 +6,9 @@
 #include <cstring>
 #include <sstream>
 
-#include <sys/socket.h>
-
 #include "base64_codec.h"
 #include "path_policy.h"
+#include "test_socket_pair.h"
 
 static std::size_t response_content_length(const std::string& header_block) {
     const std::string marker = "\r\nContent-Length: ";
@@ -69,7 +68,11 @@ static std::string read_all_from_socket(SOCKET socket) {
 
 static void send_request_and_close_writer(SOCKET socket, const std::string& request) {
     send_all(socket, request);
+#ifdef _WIN32
+    shutdown(socket, SD_SEND);
+#else
     shutdown(socket, SHUT_WR);
+#endif
 }
 
 static std::string response_body(const std::string& response) {
@@ -195,11 +198,9 @@ static std::string encoded_destination_path_header(const fs::path& destination) 
 }
 
 static std::string run_single_request(AppState& state, const std::string& request) {
-    int sockets[2];
-    TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
-
-    UniqueSocket server_socket(sockets[0]);
-    UniqueSocket client_socket(sockets[1]);
+    ConnectedSocketPair sockets = make_connected_socket_pair();
+    UniqueSocket server_socket(std::move(sockets.first));
+    UniqueSocket client_socket(std::move(sockets.second));
     send_request_and_close_writer(client_socket.get(), request);
     handle_client(state, std::move(server_socket));
     return read_all_from_socket(client_socket.get());
@@ -227,11 +228,9 @@ json_post_request_with_extra_headers(const std::string& path, const Json& body, 
 }
 
 static void assert_persistent_json_requests_reuse_socket(AppState& state) {
-    int sockets[2];
-    TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
-
-    UniqueSocket server_socket(sockets[0]);
-    UniqueSocket client_socket(sockets[1]);
+    ConnectedSocketPair sockets = make_connected_socket_pair();
+    UniqueSocket server_socket(std::move(sockets.first));
+    UniqueSocket client_socket(std::move(sockets.second));
     std::thread server_thread(
         [&state](SOCKET socket) {
             UniqueSocket owned_socket(socket);

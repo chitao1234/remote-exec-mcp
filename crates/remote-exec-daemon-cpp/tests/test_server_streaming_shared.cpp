@@ -4,10 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 
-#include <netdb.h>
-#include <sys/select.h>
-#include <sys/socket.h>
-#include <sys/time.h>
+#include "test_socket_pair.h"
 
 namespace {
 
@@ -171,11 +168,9 @@ static std::thread start_server_thread(AppState& state, UniqueSocket* server_soc
 }
 
 void open_tunnel(AppState& state, UniqueSocket* client_socket, std::thread* server_thread) {
-    int sockets[2];
-    TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
-
-    UniqueSocket server_socket(sockets[0]);
-    client_socket->reset(sockets[1]);
+    ConnectedSocketPair sockets = make_connected_socket_pair();
+    UniqueSocket server_socket(std::move(sockets.first));
+    client_socket->reset(sockets.second.release());
     *server_thread = start_server_thread(state, &server_socket);
 
     send_all(client_socket->get(),
