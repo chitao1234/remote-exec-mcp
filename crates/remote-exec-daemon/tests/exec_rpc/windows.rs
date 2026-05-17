@@ -1,6 +1,7 @@
 use super::*;
 
-const WINDOWS_PIPE_MODE_EXTERNAL_PIPELINE_CMD: &str = r#"echo marker&echo external|findstr .&echo done"#;
+const WINDOWS_PIPE_MODE_EXTERNAL_PIPELINE_CMD: &str =
+    r#"echo marker&echo external|findstr .&echo done"#;
 const WINDOWS_PIPE_MODE_STDOUT_STDERR_CMD: &str =
     "echo stdout-1&echo stderr-1>&2&echo stdout-2&echo stderr-2>&2";
 

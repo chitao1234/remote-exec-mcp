@@ -16,7 +16,8 @@ const PIPE_MODE_SHELL: &str = "/bin/sh";
 const PIPE_MODE_SHELL: &str = "cmd.exe";
 
 #[cfg(unix)]
-const PIPE_MODE_OUTPUT_CMD: &str = "printf 'marker\\n'; printf 'external\\n' | cat; printf 'done\\n'";
+const PIPE_MODE_OUTPUT_CMD: &str =
+    "printf 'marker\\n'; printf 'external\\n' | cat; printf 'done\\n'";
 #[cfg(windows)]
 const PIPE_MODE_OUTPUT_CMD: &str = r#"echo marker&echo external|findstr .&echo done"#;
 
@@ -818,7 +819,10 @@ async fn exec_command_preserves_output_after_external_pipeline_steps() {
     assert_eq!(result.structured_content["target"], DEFAULT_TEST_TARGET);
     assert_eq!(result.structured_content["exit_code"], 0);
     assert_eq!(
-        result.structured_content["output"].as_str().unwrap().replace("\r\n", "\n"),
+        result.structured_content["output"]
+            .as_str()
+            .unwrap()
+            .replace("\r\n", "\n"),
         "marker\nexternal\ndone\n"
     );
 }

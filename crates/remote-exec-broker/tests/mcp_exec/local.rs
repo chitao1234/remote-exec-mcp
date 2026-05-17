@@ -134,7 +134,10 @@ async fn exec_command_local_pipe_mode_preserves_stdout_stderr_order() {
 
     assert_eq!(result.structured_content["exit_code"], 0);
     assert_eq!(
-        result.structured_content["output"].as_str().unwrap().replace("\r\n", "\n"),
+        result.structured_content["output"]
+            .as_str()
+            .unwrap()
+            .replace("\r\n", "\n"),
         "stdout-1\nstderr-1\nstdout-2\nstderr-2\n"
     );
 }
