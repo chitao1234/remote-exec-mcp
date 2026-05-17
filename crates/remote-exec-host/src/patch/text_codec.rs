@@ -22,6 +22,20 @@ enum PatchTextEncoding {
 }
 
 impl PatchTextFile {
+    pub(crate) fn utf8(text: String) -> Self {
+        Self {
+            text,
+            encoding: PatchTextEncoding::Utf8,
+        }
+    }
+
+    pub(crate) fn with_text(&self, text: String) -> Self {
+        Self {
+            text,
+            encoding: self.encoding.clone(),
+        }
+    }
+
     pub(crate) async fn read(
         path: &Path,
         allow_encoding_autodetect: bool,

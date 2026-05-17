@@ -1,10 +1,10 @@
 mod engine;
 mod matcher;
 pub mod parser;
+mod preflight;
 mod text_codec;
 mod verify;
 
-use std::path::Path;
 use std::sync::Arc;
 
 use remote_exec_proto::rpc::{PatchApplyRequest, PatchApplyResponse, RpcErrorCode};
@@ -31,9 +31,10 @@ pub async fn apply_patch_local(
         .map_err(crate::exec::internal_error)?;
     let actions = parser::parse_patch(&req.patch)
         .map_err(|err| logged_bad_request(RpcErrorCode::PatchFailed, err.to_string()))?;
-    let summary = execute_actions(&state, &cwd, actions)
+    let planned = preflight::plan_actions(&state, &cwd, actions)
         .await
         .map_err(HostRpcError::from)?;
+    let summary = execute_actions(planned).await.map_err(HostRpcError::from)?;
     tracing::info!(
         target = %state.config.target,
         updated_paths = summary.len(),
@@ -51,16 +52,13 @@ pub async fn apply_patch_local(
 }
 
 async fn execute_actions(
-    state: &Arc<AppState>,
-    cwd: &Path,
-    actions: Vec<parser::PatchAction>,
+    actions: Vec<preflight::PlannedAction>,
 ) -> Result<Vec<String>, PatchError> {
     let mut summary = Vec::with_capacity(actions.len());
 
     for action in actions {
-        let resolved = verify::resolve_action(state, cwd, action).await?;
-        match resolved {
-            verify::ResolvedAction::Add {
+        match action {
+            preflight::PlannedAction::Add {
                 path,
                 content,
                 summary_path,
@@ -71,33 +69,21 @@ async fn execute_actions(
                 tokio::fs::write(&path, content).await?;
                 summary.push(format!("A {summary_path}"));
             }
-            verify::ResolvedAction::Delete { path, summary_path } => {
+            preflight::PlannedAction::Delete { path, summary_path } => {
                 tokio::fs::remove_file(&path).await?;
                 summary.push(format!("D {summary_path}"));
             }
-            verify::ResolvedAction::Update {
+            preflight::PlannedAction::Update {
                 source_path,
                 destination_path,
-                hunks,
+                content,
                 summary_path,
                 remove_source,
             } => {
-                let current = text_codec::PatchTextFile::read(
-                    &source_path,
-                    state
-                        .config
-                        .experimental_apply_patch_target_encoding_autodetect,
-                )
-                .await?;
-                let line_ending = detect_line_ending(&current.text);
-                let content = ensure_trailing_newline(
-                    engine::apply_hunks(&current.text, &hunks, line_ending)?,
-                    line_ending,
-                );
                 if let Some(parent) = destination_path.parent() {
                     tokio::fs::create_dir_all(parent).await?;
                 }
-                tokio::fs::write(&destination_path, current.encode(&content)?).await?;
+                tokio::fs::write(&destination_path, content).await?;
                 if remove_source {
                     tokio::fs::remove_file(&source_path).await?;
                 }
