@@ -241,7 +241,7 @@ Useful Windows cross-target compile gates from Linux:
 - `cargo clippy --workspace --all-targets --all-features --target x86_64-pc-windows-gnu -- -D warnings`
 - `cargo build --workspace --all-targets --all-features --target x86_64-pc-windows-gnu`
 
-Do not run tests under Wine unless the task explicitly asks for Wine execution.
+Do test under Wine if that is needed and Wine is available.
 
 For cross-cutting or public-surface changes, finish with the quality gate from
 `README.md`:
