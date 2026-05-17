@@ -6,9 +6,7 @@ use std::sync::{Arc, Once};
 use std::time::Duration;
 
 use remote_exec_broker::{Connection, RemoteExecClient, ToolResponse};
-#[cfg(unix)]
 use remote_exec_proto::port_forward::ForwardId;
-#[cfg(unix)]
 use remote_exec_proto::public::{ExecCommandInput, WriteStdinInput};
 use remote_exec_proto::public::{ForwardPortProtocol, ForwardPortsInput};
 use std::io::Write;
@@ -136,7 +134,6 @@ async fn list_targets_reports_port_forward_protocol_version_for_real_cpp_daemon(
     );
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn broker_prunes_cpp_exec_sessions_when_daemon_limit_is_reached() {
     let Some(fixture) = CppDaemonBrokerFixture::spawn_with_daemon_config(
@@ -158,7 +155,10 @@ yield_time_write_stdin_input_min_ms = 1\n",
 
     let first = fixture
         .client
-        .call_tool("exec_command", &exec_request("printf first; sleep 30"))
+        .call_tool(
+            "exec_command",
+            &exec_request(&session_limit_command("first")),
+        )
         .await
         .unwrap();
     assert!(!first.is_error, "first exec failed: {}", first.text_output);
@@ -169,7 +169,10 @@ yield_time_write_stdin_input_min_ms = 1\n",
 
     let second = fixture
         .client
-        .call_tool("exec_command", &exec_request("printf second; sleep 30"))
+        .call_tool(
+            "exec_command",
+            &exec_request(&session_limit_command("second")),
+        )
         .await
         .unwrap();
     assert!(
@@ -184,7 +187,10 @@ yield_time_write_stdin_input_min_ms = 1\n",
 
     let third = fixture
         .client
-        .call_tool("exec_command", &exec_request("printf third; sleep 30"))
+        .call_tool(
+            "exec_command",
+            &exec_request(&session_limit_command("third")),
+        )
         .await
         .unwrap();
     assert!(!third.is_error, "third exec failed: {}", third.text_output);
@@ -298,7 +304,6 @@ async fn broker_forwards_udp_datagrams_through_real_cpp_daemon_full_duplex() {
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn cpp_forward_ports_reconnect_after_tunnel_drop() {
     let Some(fixture) = CppDaemonBrokerFixture::spawn().await else {
@@ -357,7 +362,6 @@ async fn cpp_forward_ports_reconnect_after_tunnel_drop() {
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn cpp_forward_ports_reconnect_after_connect_tunnel_drop() {
     let Some(fixture) = CppDaemonBrokerFixture::spawn().await else {
@@ -439,7 +443,6 @@ async fn cpp_forward_ports_reconnect_after_connect_tunnel_drop() {
     assert_eq!(close.structured_content["forwards"][0]["status"], "closed");
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn real_cpp_daemon_releases_listener_after_broker_crash() {
     let Some(mut fixture) = CrashableCppDaemonBrokerFixture::spawn().await else {
@@ -488,9 +491,11 @@ async fn real_cpp_daemon_releases_listener_after_broker_crash() {
     assert_eq!(closed.structured_content["forwards"][0]["status"], "closed");
 }
 
-#[cfg(windows)]
 #[tokio::test]
 async fn windows_cpp_daemon_smoke() {
+    #[cfg(not(windows))]
+    return;
+
     let Some(fixture) = CppDaemonBrokerFixture::spawn().await else {
         return;
     };
@@ -670,7 +675,6 @@ pty = "none"
         .await
     }
 
-    #[cfg(unix)]
     async fn open_tcp_forward_local_to_cpp(&self, connect_endpoint: &str) -> ToolResponse {
         self.open_forward(
             "local",
@@ -694,14 +698,16 @@ pty = "none"
             .unwrap()
     }
 
-    #[cfg(unix)]
     async fn drop_port_tunnels(&self) {
         self.proxy.drop_port_tunnels().await;
     }
 }
 
 fn cpp_daemon_skip_message() -> String {
-    let default = cpp_daemon_default_binary();
+    let default = cpp_daemon_default_binaries()
+        .into_iter()
+        .next()
+        .expect("at least one default C++ daemon path");
     format!(
         "set REMOTE_EXEC_CPP_DAEMON or build {} before running this test",
         default.display()
@@ -714,7 +720,11 @@ fn warn_missing_cpp_daemon_executable() {
             .map(PathBuf::from)
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "<not set>".to_string());
-        let default = cpp_daemon_default_binary();
+        let default_paths = cpp_daemon_default_binaries()
+            .into_iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
         let message = format!(
             "\n\
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\
@@ -725,11 +735,11 @@ fn warn_missing_cpp_daemon_executable() {
 !!! C++ daemon.                                                           !!!\n\
 !!!                                                                        !!!\n\
 !!! REMOTE_EXEC_CPP_DAEMON = {env_path}\n\
-!!! default checked path     = {default_path}\n\
+!!! default checked paths    = {default_paths}\n\
 !!!                                                                        !!!\n\
 !!! {skip_message}\n\
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n",
-            default_path = default.display(),
+            default_paths = default_paths,
             skip_message = cpp_daemon_skip_message()
         );
         let mut stderr = std::io::stderr().lock();
@@ -745,7 +755,6 @@ impl Drop for CppDaemonBrokerFixture {
     }
 }
 
-#[cfg(unix)]
 async fn wait_for_forward_ready(
     client: &RemoteExecClient,
     forward_id: &str,
@@ -777,14 +786,12 @@ async fn wait_for_forward_ready(
 
 struct TunnelDropProxy {
     listen_addr: std::net::SocketAddr,
-    #[cfg_attr(windows, allow(dead_code))]
     active_port_tunnels: Arc<Mutex<Vec<oneshot::Sender<()>>>>,
     background_tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
     shutdown: Option<oneshot::Sender<()>>,
     handle: Option<tokio::task::JoinHandle<()>>,
 }
 
-#[cfg(unix)]
 struct CrashableCppDaemonBrokerFixture {
     _tempdir: TempDir,
     broker_config: PathBuf,
@@ -793,7 +800,6 @@ struct CrashableCppDaemonBrokerFixture {
     daemon: tokio::process::Child,
 }
 
-#[cfg(unix)]
 impl CrashableCppDaemonBrokerFixture {
     async fn spawn() -> Option<Self> {
         let daemon_binary = match cpp_daemon_binary() {
@@ -943,7 +949,6 @@ path = "/mcp"
     }
 }
 
-#[cfg(unix)]
 impl Drop for CrashableCppDaemonBrokerFixture {
     fn drop(&mut self) {
         let _ = self.broker.start_kill();
@@ -995,7 +1000,6 @@ impl TunnelDropProxy {
         }
     }
 
-    #[cfg(unix)]
     async fn drop_port_tunnels(&self) {
         let mut active = self.active_port_tunnels.lock().await;
         for shutdown in active.drain(..) {
@@ -1005,7 +1009,6 @@ impl TunnelDropProxy {
         self.assert_no_task_panics().await;
     }
 
-    #[cfg(unix)]
     async fn assert_no_task_panics(&self) {
         let finished = {
             let mut tasks = self.background_tasks.lock().await;
@@ -1127,16 +1130,21 @@ fn cpp_daemon_binary() -> Option<PathBuf> {
         return path.exists().then_some(path);
     }
 
-    let path = cpp_daemon_default_binary();
-    path.exists().then_some(path)
+    cpp_daemon_default_binaries()
+        .into_iter()
+        .find(|path| path.exists())
 }
 
-fn cpp_daemon_default_binary() -> PathBuf {
-    cpp_daemon_dir().join(if cfg!(windows) {
-        "build/remote-exec-daemon-cpp.exe"
+fn cpp_daemon_default_binaries() -> Vec<PathBuf> {
+    let daemon_dir = cpp_daemon_dir();
+    if cfg!(windows) {
+        vec![
+            daemon_dir.join("build/remote-exec-daemon-cpp-msvc.exe"),
+            daemon_dir.join("build/remote-exec-daemon-cpp.exe"),
+        ]
     } else {
-        "build/remote-exec-daemon-cpp"
-    })
+        vec![daemon_dir.join("build/remote-exec-daemon-cpp")]
+    }
 }
 
 fn cpp_daemon_dir() -> PathBuf {
@@ -1154,13 +1162,12 @@ fn stage_cpp_daemon_binary(source: &Path, tempdir: &Path) -> PathBuf {
     staged
 }
 
-#[cfg(unix)]
 fn exec_request(cmd: &str) -> ExecCommandInput {
     ExecCommandInput {
         target: "builder-cpp".to_string(),
         cmd: cmd.to_string(),
         workdir: None,
-        shell: Some("/bin/sh".to_string()),
+        shell: Some(test_shell().to_string()),
         tty: false,
         yield_time_ms: Some(1),
         max_output_tokens: None,
@@ -1168,7 +1175,6 @@ fn exec_request(cmd: &str) -> ExecCommandInput {
     }
 }
 
-#[cfg(unix)]
 fn poll_request(session_id: &str) -> WriteStdinInput {
     WriteStdinInput {
         session_id: session_id.to_string(),
@@ -1178,6 +1184,26 @@ fn poll_request(session_id: &str) -> WriteStdinInput {
         pty_size: None,
         target: None,
     }
+}
+
+#[cfg(windows)]
+fn session_limit_command(label: &str) -> String {
+    format!("echo {label} & ping -n 30 127.0.0.1 >nul")
+}
+
+#[cfg(not(windows))]
+fn session_limit_command(label: &str) -> String {
+    format!("printf {label}; sleep 30")
+}
+
+#[cfg(windows)]
+fn test_shell() -> &'static str {
+    "cmd.exe"
+}
+
+#[cfg(not(windows))]
+fn test_shell() -> &'static str {
+    "/bin/sh"
 }
 
 async fn spawn_cpp_daemon_process(command: &mut tokio::process::Command) -> tokio::process::Child {
@@ -1254,7 +1280,6 @@ async fn wait_until_ready_http(addr: std::net::SocketAddr) {
     });
 }
 
-#[cfg(unix)]
 async fn wait_until_ready_mcp_http(url: &str) {
     remote_exec_broker::install_crypto_provider().unwrap();
     let client = reqwest::Client::builder().build().unwrap();
