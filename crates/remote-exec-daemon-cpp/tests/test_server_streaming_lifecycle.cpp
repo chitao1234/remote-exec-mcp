@@ -1,6 +1,8 @@
 #include "test_server_streaming_shared.h"
 
+#include "../src/port_tunnel_connection.h"
 #include "../src/port_tunnel_service.h"
+#include "test_socket_pair.h"
 
 static PortTunnelFrame read_required_tunnel_frame_with_timeout(SOCKET socket, unsigned long timeout_ms) {
     PortTunnelFrame frame;
@@ -301,6 +303,24 @@ static void assert_service_shutdown_closes_retained_listener_with_active_stream(
     close_tunnel(&client_socket, &server_thread);
 }
 
+static void assert_sender_close_handles_queued_control_frames() {
+    PortForwardLimitConfig limits;
+    std::shared_ptr<PortTunnelService> service = create_port_tunnel_service(limits);
+    ConnectedSocketPair sockets = make_connected_socket_pair();
+    UniqueSocket server_socket(std::move(sockets.first));
+    UniqueSocket peer_socket(std::move(sockets.second));
+    std::shared_ptr<PortTunnelConnection> connection(new PortTunnelConnection(server_socket.get(), service));
+
+    for (int i = 0; i < 4096; ++i) {
+        connection->send_error(1U, "queued_close_test", "queued close test frame");
+    }
+
+    peer_socket.reset();
+    connection.reset();
+    server_socket.reset();
+    service->shutdown();
+}
+
 static void assert_expired_tunnel_session_is_released(AppState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
@@ -344,5 +364,6 @@ void assert_tunnel_resume_and_expiry_paths(AppState& state) {
     assert_retained_udp_bind_closes_while_read_worker_waits(state);
     assert_service_shutdown_releases_detached_retained_listener(state);
     assert_service_shutdown_closes_retained_listener_with_active_stream(root);
+    assert_sender_close_handles_queued_control_frames();
     assert_expired_tunnel_session_is_released(state);
 }
