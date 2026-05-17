@@ -122,6 +122,51 @@ static void assert_tunnel_udp_bind_session_can_resume_after_transport_drop(AppSt
     close_tunnel(&client_socket, &server_thread);
 }
 
+static void assert_resumed_session_rejects_stale_generation_close(AppState& state) {
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    const PortTunnelFrame ready = open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
+    const Json ready_meta = Json::parse(ready.meta);
+    const std::string session_id = ready_meta.at("session_id").get<std::string>();
+
+    send_tunnel_frame(client_socket.get(),
+                      json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
+    const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
+    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
+
+    close_tunnel(&client_socket, &server_thread);
+
+    open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 2ULL, session_id);
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TunnelClose,
+                   0U,
+                   Json{{"forward_id", "fwd_cpp_test"},
+                        {"generation", 1ULL},
+                        {"reason", kTunnelCloseReasonOperatorClose}}));
+    PortTunnelFrame error = read_required_tunnel_frame_with_timeout(client_socket.get(), 1000UL);
+    assert_tunnel_error_code(error, "port_tunnel_generation_mismatch");
+
+    UniqueSocket peer(connect_port_forward_socket(endpoint, "tcp"));
+    const PortTunnelFrame accepted = read_required_tunnel_frame_with_timeout(client_socket.get(), 1000UL);
+    TEST_ASSERT(accepted.type == PortTunnelFrameType::TcpAccept);
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TunnelClose,
+                   0U,
+                   Json{{"forward_id", "fwd_cpp_test"},
+                        {"generation", 2ULL},
+                        {"reason", kTunnelCloseReasonOperatorClose}}));
+    const PortTunnelFrame closed = read_required_tunnel_frame_with_timeout(client_socket.get(), 1000UL);
+    TEST_ASSERT(closed.type == PortTunnelFrameType::TunnelClosed);
+    TEST_ASSERT(Json::parse(closed.meta).at("generation").get<uint64_t>() == 2ULL);
+
+    close_tunnel(&client_socket, &server_thread);
+}
+
 static void assert_retained_tcp_listener_closes_while_accept_worker_waits(AppState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
@@ -294,6 +339,7 @@ void assert_tunnel_resume_and_expiry_paths(AppState& state) {
     assert_detached_session_expiry_does_not_consume_worker_budget(root);
     assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(state);
     assert_tunnel_udp_bind_session_can_resume_after_transport_drop(state);
+    assert_resumed_session_rejects_stale_generation_close(state);
     assert_retained_tcp_listener_closes_while_accept_worker_waits(state);
     assert_retained_udp_bind_closes_while_read_worker_waits(state);
     assert_service_shutdown_releases_detached_retained_listener(state);
