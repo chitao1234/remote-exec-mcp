@@ -179,12 +179,37 @@ void PortTunnelConnection::udp_read_loop_connection_local(uint32_t stream_id,
         sockaddr_storage peer_address;
         std::memset(&peer_address, 0, sizeof(peer_address));
         socklen_t peer_len = sizeof(peer_address);
-        const int received = recvfrom(socket_value->socket.get(),
-                                      reinterpret_cast<char*>(buffer.data()),
-                                      static_cast<int>(buffer.size()),
-                                      0,
-                                      reinterpret_cast<sockaddr*>(&peer_address),
-                                      &peer_len);
+        int ready = 0;
+        {
+            BasicLockGuard socket_lock(socket_value->mutex);
+            if (socket_value->closed) {
+                return;
+            }
+            ready = wait_socket_readable(socket_value->socket.get(), RETAINED_SOCKET_POLL_TIMEOUT_MS);
+        }
+        if (ready == 0) {
+            continue;
+        }
+        if (ready < 0) {
+            if (!socket_value->is_closed()) {
+                send_error(stream_id, "port_read_failed", socket_error_message("select"));
+            }
+            return;
+        }
+
+        int received = 0;
+        {
+            BasicLockGuard socket_lock(socket_value->mutex);
+            if (socket_value->closed) {
+                return;
+            }
+            received = recvfrom(socket_value->socket.get(),
+                                reinterpret_cast<char*>(buffer.data()),
+                                static_cast<int>(buffer.size()),
+                                0,
+                                reinterpret_cast<sockaddr*>(&peer_address),
+                                &peer_len);
+        }
         if (received < 0) {
             if (!socket_value->is_closed()) {
                 send_error(stream_id, "port_read_failed", socket_error_message("recvfrom"));
@@ -229,12 +254,19 @@ void PortTunnelConnection::udp_datagram(const PortTunnelFrame& frame) {
     const std::string peer = frame_meta_string(frame, "peer");
     socklen_t peer_len = 0;
     const sockaddr_storage peer_address = parse_port_forward_peer(peer, &peer_len);
-    const int sent = sendto(socket_value->socket.get(),
-                            reinterpret_cast<const char*>(frame.data.data()),
-                            static_cast<int>(frame.data.size()),
-                            0,
-                            reinterpret_cast<const sockaddr*>(&peer_address),
-                            peer_len);
+    int sent = 0;
+    {
+        BasicLockGuard socket_lock(socket_value->mutex);
+        if (socket_value->closed) {
+            throw PortForwardError(400, "port_connection_closed", "udp bind was closed");
+        }
+        sent = sendto(socket_value->socket.get(),
+                      reinterpret_cast<const char*>(frame.data.data()),
+                      static_cast<int>(frame.data.size()),
+                      0,
+                      reinterpret_cast<const sockaddr*>(&peer_address),
+                      peer_len);
+    }
     if (sent < 0 || static_cast<std::size_t>(sent) != frame.data.size()) {
         throw PortForwardError(400, "port_write_failed", socket_error_message("sendto"));
     }
