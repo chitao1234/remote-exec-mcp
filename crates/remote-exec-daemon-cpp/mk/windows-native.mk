@@ -12,6 +12,7 @@ WINDOWS_NATIVE_HTTP_REQUEST := $(BUILD_DIR)/test_http_request.exe
 WINDOWS_NATIVE_SERVER_TRANSPORT := $(BUILD_DIR)/test_server_transport.exe
 WINDOWS_NATIVE_CONNECTION_MANAGER := $(BUILD_DIR)/test_connection_manager.exe
 WINDOWS_NATIVE_SERVER_ROUTES_COMMON := $(BUILD_DIR)/test_server_routes_common.exe
+WINDOWS_NATIVE_SERVER_ROUTES := $(BUILD_DIR)/test_server_routes.exe
 WINDOWS_NATIVE_SERVER_RUNTIME := $(BUILD_DIR)/test_server_runtime.exe
 WINDOWS_NATIVE_SANDBOX := $(BUILD_DIR)/test_sandbox.exe
 WINDOWS_NATIVE_PORT_TUNNEL_FRAME := $(BUILD_DIR)/test_port_tunnel_frame.exe
@@ -34,6 +35,7 @@ WINDOWS_NATIVE_PLATFORM_NEUTRAL_TEST_TARGETS := \
 	$(WINDOWS_NATIVE_SERVER_TRANSPORT) \
 	$(WINDOWS_NATIVE_CONNECTION_MANAGER) \
 	$(WINDOWS_NATIVE_SERVER_ROUTES_COMMON) \
+	$(WINDOWS_NATIVE_SERVER_ROUTES) \
 	$(WINDOWS_NATIVE_SANDBOX) \
 	$(WINDOWS_NATIVE_PORT_TUNNEL_FRAME)
 
@@ -55,6 +57,7 @@ WINDOWS_NATIVE_HTTP_REQUEST_SRCS := $(HOST_HTTP_REQUEST_SRCS)
 WINDOWS_NATIVE_SERVER_TRANSPORT_SRCS := $(WINDOWS_SERVER_TRANSPORT_TEST_SRCS)
 WINDOWS_NATIVE_CONNECTION_MANAGER_SRCS := $(WINDOWS_CONNECTION_MANAGER_TEST_SRCS)
 WINDOWS_NATIVE_SERVER_ROUTES_COMMON_SRCS := $(WINDOWS_SERVER_ROUTES_COMMON_TEST_SRCS)
+WINDOWS_NATIVE_SERVER_ROUTES_SRCS := $(WINDOWS_SERVER_ROUTES_TEST_SRCS)
 WINDOWS_NATIVE_SERVER_RUNTIME_SRCS := $(WINDOWS_SERVER_RUNTIME_TEST_SRCS)
 WINDOWS_NATIVE_SANDBOX_SRCS := $(HOST_SANDBOX_SRCS)
 WINDOWS_NATIVE_PORT_TUNNEL_FRAME_SRCS := $(HOST_PORT_TUNNEL_FRAME_SRCS)
@@ -69,6 +72,7 @@ WINDOWS_NATIVE_HTTP_REQUEST_OBJS := $(sort $(call cpp_objs,$(WINDOWS_NATIVE_TEST
 WINDOWS_NATIVE_SERVER_TRANSPORT_OBJS := $(sort $(call cpp_objs,$(WINDOWS_NATIVE_TEST_OBJ_DIR),$(WINDOWS_NATIVE_SERVER_TRANSPORT_SRCS)))
 WINDOWS_NATIVE_CONNECTION_MANAGER_OBJS := $(sort $(call cpp_objs,$(WINDOWS_NATIVE_TEST_OBJ_DIR),$(WINDOWS_NATIVE_CONNECTION_MANAGER_SRCS)))
 WINDOWS_NATIVE_SERVER_ROUTES_COMMON_OBJS := $(sort $(call cpp_objs,$(WINDOWS_NATIVE_TEST_OBJ_DIR),$(WINDOWS_NATIVE_SERVER_ROUTES_COMMON_SRCS)))
+WINDOWS_NATIVE_SERVER_ROUTES_OBJS := $(sort $(call cpp_objs,$(WINDOWS_NATIVE_TEST_OBJ_DIR),$(WINDOWS_NATIVE_SERVER_ROUTES_SRCS)))
 WINDOWS_NATIVE_SERVER_RUNTIME_OBJS := $(sort $(call cpp_objs,$(WINDOWS_NATIVE_TEST_OBJ_DIR),$(WINDOWS_NATIVE_SERVER_RUNTIME_SRCS)))
 WINDOWS_NATIVE_SANDBOX_OBJS := $(sort $(call cpp_objs,$(WINDOWS_NATIVE_TEST_OBJ_DIR),$(WINDOWS_NATIVE_SANDBOX_SRCS)))
 WINDOWS_NATIVE_PORT_TUNNEL_FRAME_OBJS := $(sort $(call cpp_objs,$(WINDOWS_NATIVE_TEST_OBJ_DIR),$(WINDOWS_NATIVE_PORT_TUNNEL_FRAME_SRCS)))
@@ -84,6 +88,7 @@ DEP_FILES += \
 	$(WINDOWS_NATIVE_SERVER_TRANSPORT_OBJS:.o=.d) \
 	$(WINDOWS_NATIVE_CONNECTION_MANAGER_OBJS:.o=.d) \
 	$(WINDOWS_NATIVE_SERVER_ROUTES_COMMON_OBJS:.o=.d) \
+	$(WINDOWS_NATIVE_SERVER_ROUTES_OBJS:.o=.d) \
 	$(WINDOWS_NATIVE_SERVER_RUNTIME_OBJS:.o=.d) \
 	$(WINDOWS_NATIVE_SANDBOX_OBJS:.o=.d) \
 	$(WINDOWS_NATIVE_PORT_TUNNEL_FRAME_OBJS:.o=.d)
@@ -135,6 +140,9 @@ $(eval $(call link_windows_native_test,$(WINDOWS_NATIVE_CONNECTION_MANAGER),$(WI
 $(eval $(call run_test,test-windows-native-server-routes-common,$(WINDOWS_NATIVE_SERVER_ROUTES_COMMON)))
 $(eval $(call link_windows_native_test,$(WINDOWS_NATIVE_SERVER_ROUTES_COMMON),$(WINDOWS_NATIVE_SERVER_ROUTES_COMMON_OBJS)))
 
+$(eval $(call run_test,test-windows-native-server-routes,$(WINDOWS_NATIVE_SERVER_ROUTES)))
+$(eval $(call link_windows_native_test,$(WINDOWS_NATIVE_SERVER_ROUTES),$(WINDOWS_NATIVE_SERVER_ROUTES_OBJS)))
+
 $(eval $(call run_test,test-windows-native-server-runtime,$(WINDOWS_NATIVE_SERVER_RUNTIME)))
 $(eval $(call link_windows_native_test,$(WINDOWS_NATIVE_SERVER_RUNTIME),$(WINDOWS_NATIVE_SERVER_RUNTIME_OBJS)))
 
@@ -154,6 +162,7 @@ test-windows-native: \
 	test-windows-native-server-transport \
 	test-windows-native-connection-manager \
 	test-windows-native-server-routes-common \
+	test-windows-native-server-routes \
 	test-windows-native-server-runtime \
 	test-windows-native-sandbox \
 	test-windows-native-port-tunnel-frame
@@ -172,6 +181,7 @@ check-windows-native: all-windows-native test-windows-native
 	test-windows-native-server-transport \
 	test-windows-native-connection-manager \
 	test-windows-native-server-routes-common \
+	test-windows-native-server-routes \
 	test-windows-native-server-runtime \
 	test-windows-native-sandbox \
 	test-windows-native-port-tunnel-frame \

@@ -31,6 +31,17 @@ static std::string normalize_output(const std::string& input) {
     return output;
 }
 
+static std::string trim_trailing_exec_output(std::string output) {
+    while (!output.empty()) {
+        const char ch = output[output.size() - 1];
+        if (ch != '\n' && ch != ' ' && ch != '\t') {
+            break;
+        }
+        output.erase(output.size() - 1);
+    }
+    return output;
+}
+
 static Json exec_write_json(AppState& state,
                             const std::string& daemon_session_id,
                             const std::string& chars,
@@ -94,6 +105,14 @@ static bool wait_until_file_contains(const fs::path& path, const std::string& fr
     return fs::exists(path) && fs::read_file_bytes(path).find(fragment) != std::string::npos;
 }
 
+static std::string long_running_non_tty_command() {
+#ifdef _WIN32
+    return "echo ready & ping -n 6 127.0.0.1 >nul";
+#else
+    return "printf ready; sleep 5";
+#endif
+}
+
 static void assert_exec_routes(AppState& state, const fs::path& root) {
     const HttpResponse missing_cmd_response =
         route_request(state, json_request("/v1/exec/start", Json{{"workdir", root.string()}}));
@@ -103,7 +122,7 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
     const HttpResponse non_tty_start_response = route_request(state,
                                                               json_request("/v1/exec/start",
                                                                            Json{
-                                                                               {"cmd", "printf ready; sleep 5"},
+                                                                               {"cmd", long_running_non_tty_command()},
                                                                                {"workdir", root.string()},
                                                                                {"login", false},
                                                                                {"tty", false},
@@ -112,8 +131,21 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
     TEST_ASSERT(non_tty_start_response.status == 200);
     const Json non_tty_started = Json::parse(non_tty_start_response.body);
     TEST_ASSERT(non_tty_started.at("running").get<bool>());
-    TEST_ASSERT(non_tty_started.at("output").get<std::string>() == "ready");
+    TEST_ASSERT(trim_trailing_exec_output(normalize_output(non_tty_started.at("output").get<std::string>())) ==
+                "ready");
 
+#ifdef _WIN32
+    const HttpResponse stdin_write_response = route_request(
+        state,
+        json_request("/v1/exec/write",
+                     Json{
+                         {"daemon_session_id", non_tty_started.at("daemon_session_id").get<std::string>()},
+                         {"chars", "hello\n"},
+                         {"yield_time_ms", 250},
+                     }));
+    TEST_ASSERT(stdin_write_response.status == 200);
+    TEST_ASSERT(Json::parse(stdin_write_response.body).at("running").get<bool>());
+#else
     const HttpResponse stdin_closed_response = route_request(
         state,
         json_request("/v1/exec/write",
@@ -124,6 +156,7 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
                      }));
     TEST_ASSERT(stdin_closed_response.status == 400);
     TEST_ASSERT(Json::parse(stdin_closed_response.body).at("code").get<std::string>() == "stdin_closed");
+#endif
 
     const HttpResponse invalid_pty_size_response = route_request(
         state,
