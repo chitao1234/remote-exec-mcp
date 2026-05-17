@@ -50,7 +50,7 @@ bool spawn_tcp_read_thread(const std::shared_ptr<PortTunnelService>& service,
         if (!worker_acquired && !service->try_acquire_worker()) {
             return false;
         }
-        service->release_worker();
+        PortTunnelWorkerLease worker_lease(service.get());
         return false;
     }
 #endif

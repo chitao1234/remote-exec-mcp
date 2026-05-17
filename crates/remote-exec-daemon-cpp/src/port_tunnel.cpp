@@ -274,6 +274,7 @@ bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelServi
     if (!worker_acquired && !service->try_acquire_worker()) {
         return false;
     }
+    std::shared_ptr<PortTunnelWorkerLease> worker_lease(new PortTunnelWorkerLease(service.get()));
 
     std::vector<std::shared_ptr<Thread>> finished_workers;
     collect_finished(&finished_workers);
@@ -284,6 +285,7 @@ bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelServi
     struct Context {
         std::shared_ptr<PortTunnelService> service;
         std::shared_ptr<Thread> worker;
+        std::shared_ptr<PortTunnelWorkerLease> worker_lease;
         std::function<void()> work;
         const char* operation;
     };
@@ -292,7 +294,6 @@ bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelServi
         static unsigned __stdcall entry(void* raw_context) {
             std::unique_ptr<Context> context(static_cast<Context*>(raw_context));
             context->worker->thread_id = GetCurrentThreadId();
-            PortTunnelWorkerLease lease(context->service.get());
             try {
                 context->work();
             } catch (const std::exception& ex) {
@@ -308,21 +309,21 @@ bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelServi
     std::unique_ptr<Context> context(new Context());
     context->service = service;
     context->worker = worker;
+    context->worker_lease = worker_lease;
     context->work = work;
     context->operation = operation;
 
     HANDLE handle = begin_win32_thread(&ThreadEntry::entry, context.get());
     if (handle == nullptr) {
         join_workers(finished_workers);
-        service->release_worker();
         return false;
     }
     worker->handle = handle;
     context.release();
+    worker_lease.reset();
 #else
     try {
-        worker->thread.reset(new std::thread([service, worker, work, operation]() {
-            PortTunnelWorkerLease lease(service.get());
+        worker->thread.reset(new std::thread([service, worker, worker_lease, work, operation]() {
             try {
                 work();
             } catch (const std::exception& ex) {
@@ -335,14 +336,13 @@ bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelServi
     } catch (const std::exception& ex) {
         join_workers(finished_workers);
         log_tunnel_exception(operation, ex);
-        service->release_worker();
         return false;
     } catch (...) {
         join_workers(finished_workers);
         log_unknown_tunnel_exception(operation);
-        service->release_worker();
         return false;
     }
+    worker_lease.reset();
 #endif
 
     {
