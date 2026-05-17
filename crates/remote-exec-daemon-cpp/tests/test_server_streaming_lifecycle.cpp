@@ -68,6 +68,52 @@ static void assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(A
     close_tunnel(&client_socket, &server_thread);
 }
 
+static void assert_tunnel_udp_bind_session_can_resume_after_transport_drop(AppState& state) {
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    const PortTunnelFrame ready = open_v4_tunnel(state, &client_socket, &server_thread, "listen", "udp", 1ULL);
+    const Json ready_meta = Json::parse(ready.meta);
+    const std::string session_id = ready_meta.at("session_id").get<std::string>();
+
+    send_tunnel_frame(client_socket.get(),
+                      json_frame(PortTunnelFrameType::UdpBind, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
+    const PortTunnelFrame bind_ok = read_tunnel_frame(client_socket.get());
+    TEST_ASSERT(bind_ok.type == PortTunnelFrameType::UdpBindOk);
+    const std::string endpoint = Json::parse(bind_ok.meta).at("endpoint").get<std::string>();
+
+    close_tunnel(&client_socket, &server_thread);
+
+    open_v4_tunnel(state, &client_socket, &server_thread, "listen", "udp", 2ULL, session_id);
+
+    UniqueSocket peer(bind_port_forward_socket("127.0.0.1:0", "udp"));
+    socklen_t peer_len = 0;
+    const sockaddr_storage destination = parse_port_forward_peer(endpoint, &peer_len);
+
+    PortTunnelFrame datagram;
+    bool received = false;
+    for (int attempt = 0; attempt < 20 && !received; ++attempt) {
+        TEST_ASSERT(sendto(peer.get(), "resume-udp", 10, 0, reinterpret_cast<const sockaddr*>(&destination), peer_len) ==
+                    10);
+        received = try_read_tunnel_frame_with_timeout(client_socket.get(), 100UL, &datagram);
+    }
+    TEST_ASSERT(received);
+    TEST_ASSERT(datagram.type == PortTunnelFrameType::UdpDatagram);
+    TEST_ASSERT(std::string(datagram.data.begin(), datagram.data.end()) == "resume-udp");
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TunnelClose,
+                   0U,
+                   Json{{"forward_id", "fwd_cpp_test"},
+                        {"generation", 2ULL},
+                        {"reason", kTunnelCloseReasonOperatorClose}}));
+    const PortTunnelFrame closed = read_tunnel_frame(client_socket.get());
+    TEST_ASSERT(closed.type == PortTunnelFrameType::TunnelClosed);
+    TEST_ASSERT(Json::parse(closed.meta).at("generation").get<uint64_t>() == 2ULL);
+
+    close_tunnel(&client_socket, &server_thread);
+}
+
 void assert_detached_session_releases_active_tcp_accept_budget(const fs::path& root) {
     PortForwardLimitConfig limits;
     limits.max_active_tcp_streams = 1UL;
@@ -140,5 +186,6 @@ void assert_tunnel_resume_and_expiry_paths(AppState& state) {
 
     assert_detached_session_expiry_does_not_consume_worker_budget(root);
     assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(state);
+    assert_tunnel_udp_bind_session_can_resume_after_transport_drop(state);
     assert_expired_tunnel_session_is_released(state);
 }

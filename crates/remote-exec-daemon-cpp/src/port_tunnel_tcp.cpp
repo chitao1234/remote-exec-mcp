@@ -25,13 +25,15 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
         }
 
         int ready = 0;
+        SOCKET listener_socket = INVALID_SOCKET;
         {
             BasicLockGuard listener_lock(listener->mutex);
             if (listener->closed) {
                 return;
             }
-            ready = wait_socket_readable(listener->listener.get(), RETAINED_SOCKET_POLL_TIMEOUT_MS);
+            listener_socket = listener->listener.get();
         }
+        ready = wait_socket_readable(listener_socket, RETAINED_SOCKET_POLL_TIMEOUT_MS);
         if (ready == 0) {
             continue;
         }
