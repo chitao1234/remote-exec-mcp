@@ -322,7 +322,10 @@ port forwards require a long-running broker, so prefer `--broker-url` for
 - applies Codex-style patches on one target
 - preserves existing `LF` versus `CRLF` style for updated files
 - supports the documented `*** End of File` marker
-- is intentionally non-transactional across multiple file actions
+- preflights deterministic failures such as sandbox denial, missing files,
+  non-file targets, decode failures, and unmatched hunks before writing
+- remains non-transactional for runtime races and write/remove failures that
+  happen after preflight; earlier executed actions remain applied
 - returns text output only
 - can use experimental target encoding autodetection when enabled in config
 

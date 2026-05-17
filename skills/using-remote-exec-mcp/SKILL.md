@@ -147,8 +147,12 @@ Guidance:
 - Use normal Codex patch syntax.
 - Relative patch paths resolve from `workdir` when supplied.
 - Existing `LF` versus `CRLF` style is preserved for updated files.
-- Multi-file patches are not transactional. If partial application would be
-  hard to recover from, split the patch.
+- `apply_patch` preflights deterministic failures before writing, including
+  missing files, non-file targets, sandbox denial, decode failures, and
+  unmatched hunks.
+- Multi-file patches are still not transactional for runtime races or
+  write/remove failures after preflight. If that residual partial-application
+  risk would be hard to recover from, split the patch.
 - Successful calls return text output only.
 
 ### `view_image`
