@@ -353,6 +353,28 @@ static void assert_expired_tunnel_session_is_released(AppState& state) {
     TEST_ASSERT(rebound.valid());
 }
 
+static void assert_detached_listener_expiry_survives_last_external_service_ref(const fs::path& root) {
+    AppState state;
+    initialize_state(state, root);
+
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    const PortTunnelFrame ready = open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
+    const Json ready_meta = Json::parse(ready.meta);
+    const unsigned long resume_timeout_ms = ready_meta.at("resume_timeout_ms").get<unsigned long>();
+
+    send_tunnel_frame(client_socket.get(),
+                      json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
+    const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
+    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
+
+    close_tunnel(&client_socket, &server_thread);
+    state.port_tunnel_service.reset();
+    wait_past_resume_timeout(resume_timeout_ms);
+    wait_until_bindable(endpoint);
+}
+
 void assert_tunnel_resume_and_expiry_paths(AppState& state) {
     const fs::path root(state.config.default_workdir);
 
@@ -366,4 +388,5 @@ void assert_tunnel_resume_and_expiry_paths(AppState& state) {
     assert_service_shutdown_closes_retained_listener_with_active_stream(root);
     assert_sender_close_handles_queued_control_frames();
     assert_expired_tunnel_session_is_released(state);
+    assert_detached_listener_expiry_survives_last_external_service_ref(root);
 }

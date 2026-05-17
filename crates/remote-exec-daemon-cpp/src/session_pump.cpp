@@ -14,8 +14,9 @@
 
 namespace {
 
-const unsigned long EXIT_DRAIN_INITIAL_WAIT_MS = 125UL;
-const unsigned long EXIT_DRAIN_QUIET_MS = 25UL;
+const unsigned long EXIT_DRAIN_IDLE_GRACE_MS = 250UL;
+const unsigned long EXIT_DRAIN_MAX_GRACE_MS = 2000UL;
+const unsigned long EXIT_DRAIN_TERMINATE_QUIET_MS = 25UL;
 
 void append_session_output_locked(LiveSession* session, const std::string& chunk) {
     if (!chunk.empty()) {
@@ -193,9 +194,32 @@ std::string take_session_output_locked(LiveSession* session, unsigned long max_o
 }
 
 bool drain_exited_session_output_locked(LiveSession* session, std::string* output, unsigned long max_output_tokens) {
-    bool signaled_descendants = false;
-    std::uint64_t deadline = platform::monotonic_ms() + EXIT_DRAIN_INITIAL_WAIT_MS;
+    const std::uint64_t max_deadline = platform::monotonic_ms() + EXIT_DRAIN_MAX_GRACE_MS;
+    std::uint64_t idle_deadline = platform::monotonic_ms() + EXIT_DRAIN_IDLE_GRACE_MS;
 
+    for (;;) {
+        if (!session->output_.buffered_output.empty()) {
+            *output += take_session_output_locked(session, max_output_tokens);
+            idle_deadline = platform::monotonic_ms() + EXIT_DRAIN_IDLE_GRACE_MS;
+        }
+        if (session->output_.eof || session->closing) {
+            return true;
+        }
+
+        const std::uint64_t now = platform::monotonic_ms();
+        if (now >= max_deadline || now >= idle_deadline) {
+            break;
+        }
+
+        const std::uint64_t seen_generation = session->output_.generation;
+        wait_for_generation_change_locked(session, seen_generation, std::min(max_deadline, idle_deadline), 0UL);
+    }
+
+    if (!terminate_descendants_after_exit_locked(session)) {
+        return false;
+    }
+
+    const std::uint64_t terminate_deadline = platform::monotonic_ms() + EXIT_DRAIN_TERMINATE_QUIET_MS;
     for (;;) {
         if (!session->output_.buffered_output.empty()) {
             *output += take_session_output_locked(session, max_output_tokens);
@@ -205,19 +229,11 @@ bool drain_exited_session_output_locked(LiveSession* session, std::string* outpu
         }
 
         const std::uint64_t now = platform::monotonic_ms();
-        if (now >= deadline) {
-            if (signaled_descendants) {
-                return session->output_.eof || session->closing;
-            }
-            if (!terminate_descendants_after_exit_locked(session)) {
-                return false;
-            }
-            signaled_descendants = true;
-            deadline = platform::monotonic_ms() + EXIT_DRAIN_QUIET_MS;
-            continue;
+        if (now >= terminate_deadline) {
+            return session->output_.eof || session->closing;
         }
 
         const std::uint64_t seen_generation = session->output_.generation;
-        wait_for_generation_change_locked(session, seen_generation, deadline, 0UL);
+        wait_for_generation_change_locked(session, seen_generation, terminate_deadline, 0UL);
     }
 }

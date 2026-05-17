@@ -67,7 +67,8 @@ PortTunnelService::PortTunnelService(const PortForwardLimitConfig& limits)
       expiry_shutdown_(false), expiry_thread_started_(false)
 #ifdef _WIN32
       ,
-      expiry_thread_(nullptr)
+      expiry_thread_(nullptr),
+      expiry_thread_id_(0U)
 #else
       ,
       expiry_thread_()

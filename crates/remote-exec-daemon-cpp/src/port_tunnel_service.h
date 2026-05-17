@@ -90,7 +90,7 @@ private:
     bool schedule_session_expiry(const std::shared_ptr<PortTunnelSession>& session);
     bool ensure_expiry_scheduler_started_locked();
     void stop_expiry_scheduler();
-    void expiry_scheduler_loop();
+    void expiry_scheduler_loop(const std::shared_ptr<PortTunnelService>& self);
     void expire_session_if_needed(const std::shared_ptr<PortTunnelSession>& session);
     std::shared_ptr<PortTunnelSessionAttachment> wait_for_attachment(const std::shared_ptr<PortTunnelSession>& session);
     void tcp_accept_loop(const std::shared_ptr<PortTunnelSession>& session,
@@ -116,6 +116,7 @@ private:
     bool expiry_thread_started_;
 #ifdef _WIN32
     HANDLE expiry_thread_;
+    DWORD expiry_thread_id_;
     static unsigned __stdcall expiry_thread_entry(void* raw_context);
 #else
     std::unique_ptr<std::thread> expiry_thread_;
