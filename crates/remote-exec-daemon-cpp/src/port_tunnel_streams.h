@@ -45,6 +45,9 @@ struct TunnelTcpStream {
         : socket(socket_value), active_stream_budget(std::move(active_stream_budget_value)), closed(false),
           writer_closed(false), writer_shutdown_requested(false) {}
 
+    void close();
+    bool is_closed();
+
     UniqueSocket socket;
     PortTunnelBudgetLease active_stream_budget;
     BasicMutex mutex;
@@ -59,6 +62,10 @@ struct TunnelUdpSocket {
     TunnelUdpSocket(SOCKET socket_value, PortTunnelBudgetLease udp_bind_budget_value)
         : socket(socket_value), udp_bind_budget(std::move(udp_bind_budget_value)), closed(false) {}
 
+    void close();
+    bool close_locked();
+    bool is_closed();
+
     UniqueSocket socket;
     PortTunnelBudgetLease udp_bind_budget;
     BasicMutex mutex;
@@ -72,21 +79,16 @@ struct RetainedTcpListener {
         : stream_id(stream_id_value), listener(listener_socket),
           retained_listener_budget(std::move(retained_listener_budget_value)), closed(false) {}
 
+    void close();
+    bool close_locked();
+    bool is_closed();
+
     uint32_t stream_id;
     UniqueSocket listener;
     PortTunnelBudgetLease retained_listener_budget;
     BasicMutex mutex;
     bool closed;
 };
-
-void mark_tcp_stream_closed(const std::shared_ptr<TunnelTcpStream>& stream);
-void mark_udp_socket_closed(const std::shared_ptr<TunnelUdpSocket>& socket_value);
-bool close_udp_socket_locked(TunnelUdpSocket* socket_value);
-bool tcp_stream_closed(const std::shared_ptr<TunnelTcpStream>& stream);
-bool udp_socket_closed(const std::shared_ptr<TunnelUdpSocket>& socket_value);
-bool retained_listener_closed(const std::shared_ptr<RetainedTcpListener>& listener);
-void mark_retained_listener_closed(const std::shared_ptr<RetainedTcpListener>& listener);
-bool close_retained_listener_locked(RetainedTcpListener* listener);
 
 class ConnectionLocalStreams {
 public:

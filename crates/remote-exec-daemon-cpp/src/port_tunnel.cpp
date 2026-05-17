@@ -431,49 +431,44 @@ PortTunnelFrame make_empty_frame(PortTunnelFrameType type, uint32_t stream_id) {
     return frame;
 }
 
-void mark_tcp_stream_closed(const std::shared_ptr<TunnelTcpStream>& stream) {
-    BasicLockGuard lock(stream->mutex);
-    if (!stream->closed) {
-        stream->closed = true;
-        stream->writer_closed = true;
-        stream->writer_shutdown_requested = true;
-        stream->write_queue.clear();
-        stream->writer_cond.broadcast();
-        shutdown_socket(stream->socket.get());
-        stream->socket.reset();
-        stream->active_stream_budget.reset();
+void TunnelTcpStream::close() {
+    BasicLockGuard lock(mutex);
+    if (!closed) {
+        closed = true;
+        writer_closed = true;
+        writer_shutdown_requested = true;
+        write_queue.clear();
+        writer_cond.broadcast();
+        shutdown_socket(socket.get());
+        socket.reset();
+        active_stream_budget.reset();
     }
 }
 
-bool close_udp_socket_locked(TunnelUdpSocket* socket_value) {
-    if (socket_value->closed) {
+bool TunnelTcpStream::is_closed() {
+    BasicLockGuard lock(mutex);
+    return closed;
+}
+
+void TunnelUdpSocket::close() {
+    BasicLockGuard lock(mutex);
+    close_locked();
+}
+
+bool TunnelUdpSocket::close_locked() {
+    if (closed) {
         return false;
     }
-    socket_value->closed = true;
-    shutdown_socket(socket_value->socket.get());
-    socket_value->socket.reset();
-    socket_value->udp_bind_budget.reset();
+    closed = true;
+    shutdown_socket(socket.get());
+    socket.reset();
+    udp_bind_budget.reset();
     return true;
 }
 
-void mark_udp_socket_closed(const std::shared_ptr<TunnelUdpSocket>& socket_value) {
-    BasicLockGuard lock(socket_value->mutex);
-    close_udp_socket_locked(socket_value.get());
-}
-
-bool tcp_stream_closed(const std::shared_ptr<TunnelTcpStream>& stream) {
-    BasicLockGuard lock(stream->mutex);
-    return stream->closed;
-}
-
-bool udp_socket_closed(const std::shared_ptr<TunnelUdpSocket>& socket_value) {
-    BasicLockGuard lock(socket_value->mutex);
-    return socket_value->closed;
-}
-
-bool retained_listener_closed(const std::shared_ptr<RetainedTcpListener>& listener) {
-    BasicLockGuard lock(listener->mutex);
-    return listener->closed;
+bool TunnelUdpSocket::is_closed() {
+    BasicLockGuard lock(mutex);
+    return closed;
 }
 
 bool session_is_unavailable(const std::shared_ptr<PortTunnelSession>& session) {
@@ -511,20 +506,25 @@ int wait_socket_readable(SOCKET socket, unsigned long timeout_ms) {
 #endif
 }
 
-bool close_retained_listener_locked(RetainedTcpListener* listener) {
-    if (listener->closed) {
+void RetainedTcpListener::close() {
+    BasicLockGuard lock(mutex);
+    close_locked();
+}
+
+bool RetainedTcpListener::close_locked() {
+    if (closed) {
         return false;
     }
-    listener->closed = true;
-    shutdown_socket(listener->listener.get());
-    listener->listener.reset();
-    listener->retained_listener_budget.reset();
+    closed = true;
+    shutdown_socket(listener.get());
+    listener.reset();
+    retained_listener_budget.reset();
     return true;
 }
 
-void mark_retained_listener_closed(const std::shared_ptr<RetainedTcpListener>& listener) {
-    BasicLockGuard lock(listener->mutex);
-    close_retained_listener_locked(listener.get());
+bool RetainedTcpListener::is_closed() {
+    BasicLockGuard lock(mutex);
+    return closed;
 }
 
 bool is_port_tunnel_upgrade_request(const HttpRequest& request) {

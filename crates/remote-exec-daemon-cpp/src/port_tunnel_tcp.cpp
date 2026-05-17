@@ -36,7 +36,7 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
             continue;
         }
         if (ready < 0) {
-            if (retained_listener_closed(listener) || session_is_unavailable(session)) {
+            if (listener->is_closed() || session_is_unavailable(session)) {
                 return;
             }
             if (connection->owns_attachment(attachment)) {
@@ -64,7 +64,7 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
             if (receive_timeout_error(error)) {
                 continue;
             }
-            if (retained_listener_closed(listener) || session_is_unavailable(session)) {
+            if (listener->is_closed() || session_is_unavailable(session)) {
                 return;
             }
             if (connection->owns_attachment(attachment)) {
@@ -114,14 +114,14 @@ void PortTunnelConnection::tcp_listen(const PortTunnelFrame& frame) {
     }
     bound_endpoint = socket_local_endpoint(listener->listener.get());
     if (!service_->try_acquire_worker()) {
-        mark_retained_listener_closed(listener);
+        listener->close();
         send_worker_limit(frame.stream_id);
         return;
     }
     const SessionRetainedInstallResult install_result =
         service_->install_session_tcp_listener(session, frame.stream_id, listener);
     if (install_result != SessionRetainedInstallResult::Installed) {
-        mark_retained_listener_closed(listener);
+        listener->close();
         service_->release_worker();
         if (install_result == SessionRetainedInstallResult::Conflict) {
             throw PortForwardError(400, "invalid_port_tunnel", "listen session already has a retained resource");
@@ -176,25 +176,25 @@ void PortTunnelConnection::tcp_read_loop(uint32_t stream_id, std::shared_ptr<Tun
         const int received =
             recv(stream->socket.get(), reinterpret_cast<char*>(buffer.data()), static_cast<int>(buffer.size()), 0);
         if (received == 0) {
-            if (tcp_stream_closed(stream)) {
+            if (stream->is_closed()) {
                 return;
             }
             send_frame(make_empty_frame(PortTunnelFrameType::TcpEof, stream_id));
             return;
         }
         if (received < 0) {
-            if (!tcp_stream_closed(stream)) {
+            if (!stream->is_closed()) {
                 send_error(stream_id, "port_read_failed", socket_error_message("recv"));
             }
             return;
         }
-        if (tcp_stream_closed(stream)) {
+        if (stream->is_closed()) {
             return;
         }
         PortTunnelFrame frame = make_empty_frame(PortTunnelFrameType::TcpData, stream_id);
         frame.data.assign(buffer.begin(), buffer.begin() + received);
         if (!send_data_frame_or_limit_error(frame)) {
-            mark_tcp_stream_closed(stream);
+            stream->close();
             return;
         }
     }
@@ -223,10 +223,10 @@ void PortTunnelConnection::tcp_write_loop(uint32_t stream_id, std::shared_ptr<Tu
         try {
             send_all_bytes(stream->socket.get(), reinterpret_cast<const char*>(data.data()), data.size());
         } catch (const std::exception& ex) {
-            if (!tcp_stream_closed(stream)) {
+            if (!stream->is_closed()) {
                 send_error(stream_id, "port_write_failed", ex.what());
             }
-            mark_tcp_stream_closed(stream);
+            stream->close();
             return;
         }
     }
@@ -257,7 +257,7 @@ void PortTunnelConnection::tcp_data(uint32_t stream_id, const std::vector<unsign
             return;
         }
     }
-    mark_tcp_stream_closed(stream);
+    stream->close();
     throw PortForwardError(400, "port_tunnel_limit_exceeded", "tcp write queue limit reached");
 }
 

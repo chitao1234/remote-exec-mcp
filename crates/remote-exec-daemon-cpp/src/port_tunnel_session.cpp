@@ -14,12 +14,12 @@ std::string next_opaque_id(const char* prefix, std::uint64_t sequence) {
 
 void close_retained_listener_for_service(const std::shared_ptr<RetainedTcpListener>& listener) {
     BasicLockGuard lock(listener->mutex);
-    close_retained_listener_locked(listener.get());
+    listener->close_locked();
 }
 
 void close_udp_socket_for_service(const std::shared_ptr<TunnelUdpSocket>& socket_value) {
     BasicLockGuard lock(socket_value->mutex);
-    close_udp_socket_locked(socket_value.get());
+    socket_value->close_locked();
 }
 
 void close_connection_local_streams(ConnectionLocalStreams* local_streams) {
@@ -27,10 +27,10 @@ void close_connection_local_streams(ConnectionLocalStreams* local_streams) {
     std::vector<std::shared_ptr<TunnelUdpSocket>> udp_sockets;
     local_streams->drain(&tcp_streams, &udp_sockets);
     for (std::size_t i = 0; i < tcp_streams.size(); ++i) {
-        mark_tcp_stream_closed(tcp_streams[i]);
+        tcp_streams[i]->close();
     }
     for (std::size_t i = 0; i < udp_sockets.size(); ++i) {
-        mark_udp_socket_closed(udp_sockets[i]);
+        udp_sockets[i]->close();
     }
 }
 
@@ -246,10 +246,10 @@ bool PortTunnelService::close_session_retained_resource(const std::shared_ptr<Po
     }
 
     if (retained_listener.get() != nullptr) {
-        mark_retained_listener_closed(retained_listener);
+        retained_listener->close();
     }
     if (udp_bind.get() != nullptr) {
-        mark_udp_socket_closed(udp_bind);
+        udp_bind->close();
     }
     return true;
 }

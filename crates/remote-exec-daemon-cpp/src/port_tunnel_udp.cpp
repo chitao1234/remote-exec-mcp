@@ -40,7 +40,7 @@ void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& 
             continue;
         }
         if (ready < 0) {
-            if (udp_socket_closed(socket_value) || session_is_unavailable(session)) {
+            if (socket_value->is_closed() || session_is_unavailable(session)) {
                 return;
             }
             if (connection->owns_attachment(attachment)) {
@@ -73,7 +73,7 @@ void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& 
             if (receive_timeout_error(error)) {
                 continue;
             }
-            if (udp_socket_closed(socket_value) || session_is_unavailable(session)) {
+            if (socket_value->is_closed() || session_is_unavailable(session)) {
                 return;
             }
             if (connection->owns_attachment(attachment)) {
@@ -81,7 +81,7 @@ void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& 
             }
             return;
         }
-        if (udp_socket_closed(socket_value) || session_is_unavailable(session)) {
+        if (socket_value->is_closed() || session_is_unavailable(session)) {
             return;
         }
         if (!connection->owns_attachment(attachment)) {
@@ -129,14 +129,14 @@ void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
     if (session_mode_active()) {
         std::shared_ptr<PortTunnelSession> session = current_session();
         if (!service_->try_acquire_worker()) {
-            mark_udp_socket_closed(socket_value);
+            socket_value->close();
             send_worker_limit(frame.stream_id);
             return;
         }
         const SessionRetainedInstallResult install_result =
             service_->install_session_udp_bind(session, frame.stream_id, socket_value);
         if (install_result != SessionRetainedInstallResult::Installed) {
-            mark_udp_socket_closed(socket_value);
+            socket_value->close();
             service_->release_worker();
             if (install_result == SessionRetainedInstallResult::Conflict) {
                 throw PortForwardError(400, "invalid_port_tunnel", "listen session already has a retained resource");
@@ -150,7 +150,7 @@ void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
         }
     } else {
         if (!service_->try_acquire_worker()) {
-            mark_udp_socket_closed(socket_value);
+            socket_value->close();
             send_worker_limit(frame.stream_id);
             return;
         }
@@ -158,9 +158,9 @@ void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
         if (!spawn_udp_read_thread(service_, shared_from_this(), frame.stream_id, socket_value, true)) {
             std::shared_ptr<TunnelUdpSocket> removed_socket = connection_local_streams_.remove_udp(frame.stream_id);
             if (removed_socket.get() != nullptr) {
-                mark_udp_socket_closed(removed_socket);
+                removed_socket->close();
             } else {
-                mark_udp_socket_closed(socket_value);
+                socket_value->close();
             }
             send_worker_limit(frame.stream_id);
             return;
@@ -186,12 +186,12 @@ void PortTunnelConnection::udp_read_loop_connection_local(uint32_t stream_id,
                                       reinterpret_cast<sockaddr*>(&peer_address),
                                       &peer_len);
         if (received < 0) {
-            if (!udp_socket_closed(socket_value)) {
+            if (!socket_value->is_closed()) {
                 send_error(stream_id, "port_read_failed", socket_error_message("recvfrom"));
             }
             return;
         }
-        if (udp_socket_closed(socket_value)) {
+        if (socket_value->is_closed()) {
             return;
         }
         PortTunnelFrame frame = make_empty_frame(PortTunnelFrameType::UdpDatagram, stream_id);
