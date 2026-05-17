@@ -325,6 +325,26 @@ static void assert_service_shutdown_rejects_new_sessions() {
     TEST_ASSERT(rejected);
 }
 
+static void assert_resource_close_paths_are_idempotent() {
+    std::shared_ptr<RetainedTcpListener> listener(
+        new RetainedTcpListener(1U, bind_port_forward_socket("127.0.0.1:0", "tcp"), PortTunnelBudgetLease()));
+    listener->close();
+    listener->close();
+    TEST_ASSERT(listener->is_closed());
+
+    std::shared_ptr<TunnelUdpSocket> udp_bind(
+        new TunnelUdpSocket(bind_port_forward_socket("127.0.0.1:0", "udp"), PortTunnelBudgetLease()));
+    udp_bind->close();
+    udp_bind->close();
+    TEST_ASSERT(udp_bind->is_closed());
+
+    ConnectedSocketPair sockets = make_connected_socket_pair();
+    std::shared_ptr<TunnelTcpStream> stream(new TunnelTcpStream(sockets.first.release(), PortTunnelBudgetLease()));
+    stream->close();
+    stream->close();
+    TEST_ASSERT(stream->is_closed());
+}
+
 static void assert_sender_close_handles_queued_control_frames() {
     PortForwardLimitConfig limits;
     std::shared_ptr<PortTunnelService> service = create_port_tunnel_service(limits);
@@ -446,6 +466,7 @@ void assert_tunnel_resume_and_expiry_paths(AppState& state) {
     assert_service_shutdown_releases_detached_retained_listener(state);
     assert_service_shutdown_closes_retained_listener_with_active_stream(root);
     assert_service_shutdown_rejects_new_sessions();
+    assert_resource_close_paths_are_idempotent();
     assert_sender_close_handles_queued_control_frames();
     assert_expired_tunnel_session_is_released(state);
     assert_detached_listener_expiry_survives_last_external_service_ref(root);

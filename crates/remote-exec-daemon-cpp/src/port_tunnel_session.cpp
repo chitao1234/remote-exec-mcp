@@ -19,16 +19,6 @@ std::string next_opaque_id(const char* prefix, std::uint64_t sequence) {
     return out.str();
 }
 
-void close_retained_listener_for_service(const std::shared_ptr<RetainedTcpListener>& listener) {
-    BasicLockGuard lock(listener->mutex);
-    listener->close_locked();
-}
-
-void close_udp_socket_for_service(const std::shared_ptr<TunnelUdpSocket>& socket_value) {
-    BasicLockGuard lock(socket_value->mutex);
-    socket_value->close_locked();
-}
-
 void close_connection_local_streams(ConnectionLocalStreams* local_streams) {
     std::vector<std::shared_ptr<TunnelTcpStream>> tcp_streams;
     std::vector<std::shared_ptr<TunnelUdpSocket>> udp_sockets;
@@ -91,10 +81,10 @@ PortTunnelSessionTeardown collect_terminal_session_teardown_locked(PortTunnelSes
 void finish_terminal_session_teardown(const PortTunnelSessionTeardown& state) {
     close_session_attachment(state.attachment);
     if (state.retained_listener.get() != nullptr) {
-        close_retained_listener_for_service(state.retained_listener);
+        state.retained_listener->close();
     }
     if (state.udp_bind.get() != nullptr) {
-        close_udp_socket_for_service(state.udp_bind);
+        state.udp_bind->close();
     }
 }
 
