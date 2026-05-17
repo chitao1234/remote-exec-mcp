@@ -15,7 +15,7 @@
 class PortTunnelConnection;
 class PortTunnelService;
 
-class PortTunnelSender : public std::enable_shared_from_this<PortTunnelSender> {
+class PortTunnelSender {
 public:
     PortTunnelSender(SOCKET client, const std::shared_ptr<PortTunnelService>& service);
     ~PortTunnelSender();

@@ -1,5 +1,6 @@
 #include "port_tunnel_sender.h"
 
+#include <cstdlib>
 #include <limits>
 
 #include "port_tunnel_connection.h"
@@ -57,8 +58,7 @@ void PortTunnelSender::join_writer_thread() {
     }
     if (thread != nullptr) {
         if (thread_id == GetCurrentThreadId()) {
-            CloseHandle(thread);
-            return;
+            std::abort();
         }
         WaitForSingleObject(thread, INFINITE);
         CloseHandle(thread);
@@ -71,8 +71,7 @@ void PortTunnelSender::join_writer_thread() {
     }
     if (thread.get() != nullptr) {
         if (thread->get_id() == std::this_thread::get_id()) {
-            thread->detach();
-            return;
+            std::abort();
         }
         thread->join();
     }
@@ -85,7 +84,7 @@ bool PortTunnelSender::ensure_writer_started_locked() {
     }
 #ifdef _WIN32
     struct Context {
-        std::shared_ptr<PortTunnelSender> sender;
+        PortTunnelSender* sender;
     };
     struct ThreadEntry {
         static unsigned __stdcall entry(void* raw_context) {
@@ -95,7 +94,7 @@ bool PortTunnelSender::ensure_writer_started_locked() {
         }
     };
     std::unique_ptr<Context> context(new Context());
-    context->sender = shared_from_this();
+    context->sender = this;
     HANDLE handle = begin_win32_thread(&ThreadEntry::entry, context.get());
     if (handle == nullptr) {
         closed_.store(true);
@@ -110,8 +109,7 @@ bool PortTunnelSender::ensure_writer_started_locked() {
     return true;
 #else
     try {
-        std::shared_ptr<PortTunnelSender> self = shared_from_this();
-        writer_thread_.reset(new std::thread([self]() { self->writer_loop(); }));
+        writer_thread_.reset(new std::thread([this]() { writer_loop(); }));
         writer_started_ = true;
         return true;
     } catch (const std::exception& ex) {
