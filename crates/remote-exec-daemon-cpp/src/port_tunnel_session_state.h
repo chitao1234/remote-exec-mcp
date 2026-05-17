@@ -30,6 +30,7 @@ struct PortTunnelRetainedResource {
 
 enum class SessionRetainedInstallResult { Installed, Conflict, Unavailable };
 enum class PortTunnelSessionResumeResult { Ready, Unknown, AlreadyAttached, Expired };
+enum class PortTunnelSessionState { New, Attached, Detached, Closed, Expired };
 
 struct PortTunnelSessionTeardown {
     PortTunnelSessionTeardown() : transitioned(false) {}
@@ -44,8 +45,9 @@ struct PortTunnelSession {
     PortTunnelSession(const std::string& session_id_value,
                       const std::shared_ptr<PortTunnelService>& service_value,
                       PortTunnelBudgetLease retained_budget)
-        : session_id(session_id_value), service(service_value), closed(false), expired(false), resume_deadline_ms(0ULL),
-          generation(0ULL), retained_session_budget(std::move(retained_budget)), next_daemon_stream_id(2U) {}
+        : session_id(session_id_value), service(service_value), state(PortTunnelSessionState::New),
+          resume_deadline_ms(0ULL), generation(0ULL), retained_session_budget(std::move(retained_budget)),
+          next_daemon_stream_id(2U) {}
 
     std::shared_ptr<PortTunnelSessionAttachment> attach(const std::shared_ptr<PortTunnelConnection>& connection);
     std::shared_ptr<PortTunnelSessionAttachment> detach_until(std::uint64_t deadline_ms, bool* detached);
@@ -73,8 +75,7 @@ struct PortTunnelSession {
     std::weak_ptr<PortTunnelService> service;
     BasicMutex mutex;
     BasicCondVar state_changed;
-    bool closed;
-    bool expired;
+    PortTunnelSessionState state;
     std::uint64_t resume_deadline_ms;
     std::uint64_t generation;
     PortTunnelBudgetLease retained_session_budget;

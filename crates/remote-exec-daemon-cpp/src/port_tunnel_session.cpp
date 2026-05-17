@@ -63,11 +63,22 @@ void move_retained_resource_to_teardown(const PortTunnelRetainedResource& resour
     }
 }
 
+bool session_state_terminal(PortTunnelSessionState state) {
+    return state == PortTunnelSessionState::Closed || state == PortTunnelSessionState::Expired;
+}
+
+bool session_state_available(PortTunnelSessionState state) {
+    return !session_state_terminal(state);
+}
+
+bool session_state_attached(PortTunnelSessionState state) {
+    return state == PortTunnelSessionState::Attached;
+}
+
 PortTunnelSessionTeardown collect_terminal_session_teardown_locked(PortTunnelSession* session, bool mark_expired) {
     PortTunnelSessionTeardown state;
     state.transitioned = true;
-    session->closed = !mark_expired;
-    session->expired = mark_expired;
+    session->state = mark_expired ? PortTunnelSessionState::Expired : PortTunnelSessionState::Closed;
     session->resume_deadline_ms = 0ULL;
     state.attachment = session->attachment;
     session->attachment.reset();
@@ -100,8 +111,10 @@ void close_retained_resource(const PortTunnelRetainedResource& resource) {
 std::shared_ptr<PortTunnelSessionAttachment>
 PortTunnelSession::attach(const std::shared_ptr<PortTunnelConnection>& connection) {
     BasicLockGuard lock(mutex);
-    closed = false;
-    expired = false;
+    if (!session_state_available(state)) {
+        return std::shared_ptr<PortTunnelSessionAttachment>();
+    }
+    state = PortTunnelSessionState::Attached;
     resume_deadline_ms = 0ULL;
     std::shared_ptr<PortTunnelSessionAttachment> previous = attachment;
     attachment.reset(new PortTunnelSessionAttachment(connection));
@@ -112,12 +125,13 @@ PortTunnelSession::attach(const std::shared_ptr<PortTunnelConnection>& connectio
 std::shared_ptr<PortTunnelSessionAttachment> PortTunnelSession::detach_until(std::uint64_t deadline_ms,
                                                                              bool* detached) {
     BasicLockGuard lock(mutex);
-    if (closed || expired) {
+    if (!session_state_available(state)) {
         if (detached != nullptr) {
             *detached = false;
         }
         return std::shared_ptr<PortTunnelSessionAttachment>();
     }
+    state = PortTunnelSessionState::Detached;
     resume_deadline_ms = deadline_ms;
     std::shared_ptr<PortTunnelSessionAttachment> previous = attachment;
     attachment.reset();
@@ -130,7 +144,7 @@ std::shared_ptr<PortTunnelSessionAttachment> PortTunnelSession::detach_until(std
 
 PortTunnelSessionTeardown PortTunnelSession::close_terminal(bool mark_expired) {
     BasicLockGuard lock(mutex);
-    if (closed || (mark_expired && expired)) {
+    if (session_state_terminal(state)) {
         return PortTunnelSessionTeardown();
     }
     return collect_terminal_session_teardown_locked(this, mark_expired);
@@ -138,7 +152,7 @@ PortTunnelSessionTeardown PortTunnelSession::close_terminal(bool mark_expired) {
 
 PortTunnelSessionTeardown PortTunnelSession::expire_if_due(std::uint64_t now_ms) {
     BasicLockGuard lock(mutex);
-    if (closed || expired || attachment.get() != nullptr) {
+    if (state != PortTunnelSessionState::Detached || attachment.get() != nullptr) {
         return PortTunnelSessionTeardown();
     }
     if (resume_deadline_ms == 0ULL || now_ms < resume_deadline_ms) {
@@ -149,7 +163,8 @@ PortTunnelSessionTeardown PortTunnelSession::expire_if_due(std::uint64_t now_ms)
 
 bool PortTunnelSession::detached_deadline(std::uint64_t* deadline_ms) {
     BasicLockGuard lock(mutex);
-    const bool detached = !closed && !expired && attachment.get() == nullptr && resume_deadline_ms != 0ULL;
+    const bool detached = state == PortTunnelSessionState::Detached && attachment.get() == nullptr &&
+                          resume_deadline_ms != 0ULL;
     if (deadline_ms != nullptr) {
         *deadline_ms = resume_deadline_ms;
     }
@@ -159,13 +174,13 @@ bool PortTunnelSession::detached_deadline(std::uint64_t* deadline_ms) {
 PortTunnelSessionResumeResult PortTunnelSession::prepare_resume(std::uint64_t generation_value,
                                                                 std::uint64_t now_ms) {
     BasicLockGuard lock(mutex);
-    if (closed) {
+    if (state == PortTunnelSessionState::Closed) {
         return PortTunnelSessionResumeResult::Unknown;
     }
-    if (attachment.get() != nullptr) {
+    if (session_state_attached(state) || attachment.get() != nullptr) {
         return PortTunnelSessionResumeResult::AlreadyAttached;
     }
-    if (expired || (resume_deadline_ms != 0ULL && now_ms >= resume_deadline_ms)) {
+    if (state == PortTunnelSessionState::Expired || (resume_deadline_ms != 0ULL && now_ms >= resume_deadline_ms)) {
         return PortTunnelSessionResumeResult::Expired;
     }
     generation = generation_value;
@@ -185,7 +200,8 @@ std::shared_ptr<PortTunnelSessionAttachment> PortTunnelSession::current_attachme
 std::shared_ptr<PortTunnelConnection> PortTunnelSession::connection_for_attachment(
     const std::shared_ptr<PortTunnelSessionAttachment>& expected_attachment) {
     BasicLockGuard lock(mutex);
-    if (closed || expired || expected_attachment.get() == nullptr || attachment.get() != expected_attachment.get()) {
+    if (!session_state_attached(state) || expected_attachment.get() == nullptr ||
+        attachment.get() != expected_attachment.get()) {
         return std::shared_ptr<PortTunnelConnection>();
     }
     return expected_attachment->connection.lock();
@@ -196,7 +212,7 @@ bool PortTunnelSession::insert_tcp_stream_if_attached(
     const std::shared_ptr<TunnelTcpStream>& stream,
     std::uint32_t* stream_id) {
     BasicLockGuard lock(mutex);
-    if (closed || expired || attachment.get() != expected_attachment.get()) {
+    if (!session_state_attached(state) || attachment.get() != expected_attachment.get()) {
         return false;
     }
     const std::uint32_t next_stream_id = next_daemon_stream_id;
@@ -211,7 +227,7 @@ bool PortTunnelSession::insert_tcp_stream_if_attached(
 SessionRetainedInstallResult
 PortTunnelSession::install_tcp_listener(uint32_t stream_id, const std::shared_ptr<RetainedTcpListener>& listener) {
     BasicLockGuard lock(mutex);
-    if (closed || expired || attachment.get() == nullptr) {
+    if (!session_state_attached(state) || attachment.get() == nullptr) {
         return SessionRetainedInstallResult::Unavailable;
     }
     if (retained_resource.kind != PortTunnelRetainedResourceKind::None) {
@@ -227,7 +243,7 @@ PortTunnelSession::install_tcp_listener(uint32_t stream_id, const std::shared_pt
 SessionRetainedInstallResult
 PortTunnelSession::install_udp_bind(uint32_t stream_id, const std::shared_ptr<TunnelUdpSocket>& socket_value) {
     BasicLockGuard lock(mutex);
-    if (closed || expired || attachment.get() == nullptr) {
+    if (!session_state_attached(state) || attachment.get() == nullptr) {
         return SessionRetainedInstallResult::Unavailable;
     }
     if (retained_resource.kind != PortTunnelRetainedResourceKind::None) {
@@ -266,7 +282,7 @@ PortTunnelRetainedResource PortTunnelSession::remove_retained_resource(uint32_t 
 std::shared_ptr<PortTunnelSessionAttachment> PortTunnelSession::wait_for_attachment(unsigned long wait_ms) {
     BasicLockGuard lock(mutex);
     for (;;) {
-        if (closed || expired) {
+        if (session_state_terminal(state)) {
             return std::shared_ptr<PortTunnelSessionAttachment>();
         }
         if (attachment.get() != nullptr) {
@@ -278,7 +294,7 @@ std::shared_ptr<PortTunnelSessionAttachment> PortTunnelSession::wait_for_attachm
 
 bool PortTunnelSession::is_unavailable() {
     BasicLockGuard lock(mutex);
-    return closed || expired;
+    return session_state_terminal(state);
 }
 
 std::shared_ptr<PortTunnelSession> PortTunnelService::create_session() {
