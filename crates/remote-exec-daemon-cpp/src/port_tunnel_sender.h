@@ -5,6 +5,9 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#ifndef _WIN32
+#include <thread>
+#endif
 
 #include "basic_mutex.h"
 #include "port_tunnel_common.h"
@@ -15,6 +18,7 @@ class PortTunnelService;
 class PortTunnelSender : public std::enable_shared_from_this<PortTunnelSender> {
 public:
     PortTunnelSender(SOCKET client, const std::shared_ptr<PortTunnelService>& service);
+    ~PortTunnelSender();
 
     bool closed() const;
     void mark_closed();
@@ -36,6 +40,7 @@ private:
     };
 
     void writer_loop();
+    void join_writer_thread();
     bool ensure_writer_started_locked();
     bool enqueue_encoded_frame(std::vector<unsigned char> bytes, unsigned long charge_value);
     bool try_reserve_data_frame(const PortTunnelFrame& frame, unsigned long* charge_value);
@@ -51,6 +56,12 @@ private:
     bool writer_started_;
     bool writer_shutdown_;
     bool writer_finished_;
+#ifdef _WIN32
+    HANDLE writer_thread_;
+    DWORD writer_thread_id_;
+#else
+    std::unique_ptr<std::thread> writer_thread_;
+#endif
     std::atomic<bool> closed_;
     std::atomic<unsigned long> queued_bytes_;
 };

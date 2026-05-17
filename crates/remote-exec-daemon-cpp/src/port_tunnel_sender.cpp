@@ -7,7 +7,19 @@
 
 PortTunnelSender::PortTunnelSender(SOCKET client, const std::shared_ptr<PortTunnelService>& service)
     : client_(client), service_(service), writer_started_(false), writer_shutdown_(false), writer_finished_(false),
+      writer_thread_(
+#ifdef _WIN32
+          nullptr
+#endif
+          ),
+#ifdef _WIN32
+      writer_thread_id_(0U),
+#endif
       closed_(false), queued_bytes_(0UL) {
+}
+
+PortTunnelSender::~PortTunnelSender() {
+    mark_closed();
 }
 
 bool PortTunnelSender::closed() const {
@@ -15,18 +27,56 @@ bool PortTunnelSender::closed() const {
 }
 
 void PortTunnelSender::mark_closed() {
-    closed_.store(true);
-    BasicLockGuard lock(writer_mutex_);
-    writer_shutdown_ = true;
-    if (!writer_started_ || writer_finished_) {
-        drain_queued_frame_reservations_locked();
-        writer_cond_.broadcast();
-        return;
+    {
+        BasicLockGuard lock(writer_mutex_);
+        closed_.store(true);
+        writer_shutdown_ = true;
+        if (!writer_started_ || writer_finished_) {
+            drain_queued_frame_reservations_locked();
+            writer_cond_.broadcast();
+        } else {
+            writer_cond_.broadcast();
+            while (!writer_finished_) {
+                writer_cond_.wait(writer_mutex_);
+            }
+        }
     }
-    writer_cond_.broadcast();
-    while (!writer_finished_) {
-        writer_cond_.wait(writer_mutex_);
+    join_writer_thread();
+}
+
+void PortTunnelSender::join_writer_thread() {
+#ifdef _WIN32
+    HANDLE thread = nullptr;
+    DWORD thread_id = 0U;
+    {
+        BasicLockGuard lock(writer_mutex_);
+        thread = writer_thread_;
+        thread_id = writer_thread_id_;
+        writer_thread_ = nullptr;
+        writer_thread_id_ = 0U;
     }
+    if (thread != nullptr) {
+        if (thread_id == GetCurrentThreadId()) {
+            CloseHandle(thread);
+            return;
+        }
+        WaitForSingleObject(thread, INFINITE);
+        CloseHandle(thread);
+    }
+#else
+    std::unique_ptr<std::thread> thread;
+    {
+        BasicLockGuard lock(writer_mutex_);
+        thread.swap(writer_thread_);
+    }
+    if (thread.get() != nullptr) {
+        if (thread->get_id() == std::this_thread::get_id()) {
+            thread->detach();
+            return;
+        }
+        thread->join();
+    }
+#endif
 }
 
 bool PortTunnelSender::ensure_writer_started_locked() {
@@ -51,16 +101,17 @@ bool PortTunnelSender::ensure_writer_started_locked() {
         closed_.store(true);
         writer_shutdown_ = true;
         drain_queued_frame_reservations_locked();
+        writer_cond_.broadcast();
         return false;
     }
+    writer_thread_ = handle;
     context.release();
-    CloseHandle(handle);
     writer_started_ = true;
     return true;
 #else
     try {
         std::shared_ptr<PortTunnelSender> self = shared_from_this();
-        std::thread([self]() { self->writer_loop(); }).detach();
+        writer_thread_.reset(new std::thread([self]() { self->writer_loop(); }));
         writer_started_ = true;
         return true;
     } catch (const std::exception& ex) {
@@ -80,6 +131,12 @@ bool PortTunnelSender::ensure_writer_started_locked() {
 }
 
 void PortTunnelSender::writer_loop() {
+#ifdef _WIN32
+    {
+        BasicLockGuard lock(writer_mutex_);
+        writer_thread_id_ = GetCurrentThreadId();
+    }
+#endif
     for (;;) {
         QueuedFrame queued;
         {
