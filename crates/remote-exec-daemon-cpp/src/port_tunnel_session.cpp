@@ -281,6 +281,10 @@ bool PortTunnelSession::is_unavailable() {
 }
 
 std::shared_ptr<PortTunnelSession> PortTunnelService::create_session() {
+    if (!is_running()) {
+        throw PortForwardError(400, "port_tunnel_shutting_down", "port tunnel service is shutting down");
+    }
+
     PortTunnelBudgetLease retained_budget;
     if (!try_acquire_retained_session(&retained_budget)) {
         throw PortForwardError(400, "port_tunnel_limit_exceeded", "port tunnel retained session limit reached");
@@ -290,6 +294,9 @@ std::shared_ptr<PortTunnelSession> PortTunnelService::create_session() {
     std::shared_ptr<PortTunnelService> service = shared_from_this();
     {
         BasicLockGuard lock(mutex_);
+        if (!is_running_locked()) {
+            throw PortForwardError(400, "port_tunnel_shutting_down", "port tunnel service is shutting down");
+        }
         const std::string session_id = next_opaque_id("ptun_", next_session_sequence_++);
         session.reset(new PortTunnelSession(session_id, service, std::move(retained_budget)));
         sessions_[session->session_id] = session;
@@ -299,6 +306,9 @@ std::shared_ptr<PortTunnelSession> PortTunnelService::create_session() {
 
 std::shared_ptr<PortTunnelSession> PortTunnelService::find_session(const std::string& session_id) {
     BasicLockGuard lock(mutex_);
+    if (!is_running_locked()) {
+        return std::shared_ptr<PortTunnelSession>();
+    }
     std::map<std::string, std::shared_ptr<PortTunnelSession>>::iterator it = sessions_.find(session_id);
     if (it == sessions_.end()) {
         return std::shared_ptr<PortTunnelSession>();
@@ -359,6 +369,9 @@ SessionRetainedInstallResult PortTunnelService::install_session_tcp_listener(
     const std::shared_ptr<PortTunnelSession>& session,
     uint32_t stream_id,
     const std::shared_ptr<RetainedTcpListener>& listener) {
+    if (!is_running()) {
+        return SessionRetainedInstallResult::Unavailable;
+    }
     return session->install_tcp_listener(stream_id, listener);
 }
 
@@ -366,6 +379,9 @@ SessionRetainedInstallResult
 PortTunnelService::install_session_udp_bind(const std::shared_ptr<PortTunnelSession>& session,
                                             uint32_t stream_id,
                                             const std::shared_ptr<TunnelUdpSocket>& socket_value) {
+    if (!is_running()) {
+        return SessionRetainedInstallResult::Unavailable;
+    }
     return session->install_udp_bind(stream_id, socket_value);
 }
 

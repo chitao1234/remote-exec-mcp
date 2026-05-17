@@ -4,6 +4,8 @@
 #include "../src/port_tunnel_service.h"
 #include "test_socket_pair.h"
 
+#include "port_forward_error.h"
+
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
@@ -274,6 +276,7 @@ static void assert_service_shutdown_releases_detached_retained_listener(AppState
     close_tunnel(&client_socket, &server_thread);
 
     state.port_tunnel_service->shutdown();
+    state.port_tunnel_service->shutdown();
     state.port_tunnel_service.reset();
     wait_until_bindable(endpoint);
 }
@@ -297,6 +300,7 @@ static void assert_service_shutdown_closes_retained_listener_with_active_stream(
     TEST_ASSERT(accepted.type == PortTunnelFrameType::TcpAccept);
 
     state.port_tunnel_service->shutdown();
+    state.port_tunnel_service->shutdown();
     wait_until_bindable(endpoint);
 
     TEST_ASSERT(socket_readable_within(peer.get(), 1000UL));
@@ -305,6 +309,20 @@ static void assert_service_shutdown_closes_retained_listener_with_active_stream(
     TEST_ASSERT(received <= 0);
 
     close_tunnel(&client_socket, &server_thread);
+}
+
+static void assert_service_shutdown_rejects_new_sessions() {
+    std::shared_ptr<PortTunnelService> service = create_port_tunnel_service(PortForwardLimitConfig());
+    service->shutdown();
+    service->shutdown();
+
+    bool rejected = false;
+    try {
+        service->create_session();
+    } catch (const PortForwardError& ex) {
+        rejected = ex.code() == "port_tunnel_shutting_down";
+    }
+    TEST_ASSERT(rejected);
 }
 
 static void assert_sender_close_handles_queued_control_frames() {
@@ -427,6 +445,7 @@ void assert_tunnel_resume_and_expiry_paths(AppState& state) {
     assert_retained_udp_bind_closes_while_read_worker_waits(state);
     assert_service_shutdown_releases_detached_retained_listener(state);
     assert_service_shutdown_closes_retained_listener_with_active_stream(root);
+    assert_service_shutdown_rejects_new_sessions();
     assert_sender_close_handles_queued_control_frames();
     assert_expired_tunnel_session_is_released(state);
     assert_detached_listener_expiry_survives_last_external_service_ref(root);

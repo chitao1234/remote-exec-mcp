@@ -80,10 +80,19 @@ public:
 
 private:
     struct WorkerGroup;
+    enum class LifecycleState {
+        Running,
+        Stopping,
+        Stopped
+    };
 
     PortTunnelService(const PortTunnelService&);
     PortTunnelService& operator=(const PortTunnelService&);
 
+    bool begin_shutdown();
+    void finish_shutdown();
+    bool is_running();
+    bool is_running_locked() const;
     void join_all_workers();
     void close_all_sessions_for_shutdown();
     bool schedule_session_expiry(const std::shared_ptr<PortTunnelSession>& session);
@@ -99,6 +108,7 @@ private:
                        const std::shared_ptr<TunnelUdpSocket>& socket_value);
 
     BasicMutex mutex_;
+    LifecycleState lifecycle_state_;
     std::shared_ptr<PortTunnelBudgetState> budget_state_;
     std::unique_ptr<WorkerGroup> worker_group_;
     PortForwardLimitConfig limits_;

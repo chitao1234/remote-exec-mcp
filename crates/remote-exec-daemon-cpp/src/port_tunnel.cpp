@@ -62,8 +62,9 @@ void log_unknown_tunnel_exception(const char* operation) {
 }
 
 PortTunnelService::PortTunnelService(const PortForwardLimitConfig& limits)
-    : budget_state_(new PortTunnelBudgetState()), worker_group_(new WorkerGroup()), limits_(limits),
-      next_session_sequence_(1ULL), expiry_shutdown_(false), expiry_thread_started_(false)
+    : lifecycle_state_(LifecycleState::Running), budget_state_(new PortTunnelBudgetState()),
+      worker_group_(new WorkerGroup()), limits_(limits), next_session_sequence_(1ULL), expiry_shutdown_(false),
+      expiry_thread_started_(false)
 #ifdef _WIN32
       ,
       expiry_thread_(nullptr),
@@ -80,9 +81,36 @@ PortTunnelService::~PortTunnelService() {
 }
 
 void PortTunnelService::shutdown() {
+    if (!begin_shutdown()) {
+        return;
+    }
     stop_expiry_scheduler();
     close_all_sessions_for_shutdown();
     join_all_workers();
+    finish_shutdown();
+}
+
+bool PortTunnelService::begin_shutdown() {
+    BasicLockGuard lock(mutex_);
+    if (lifecycle_state_ != LifecycleState::Running) {
+        return false;
+    }
+    lifecycle_state_ = LifecycleState::Stopping;
+    return true;
+}
+
+void PortTunnelService::finish_shutdown() {
+    BasicLockGuard lock(mutex_);
+    lifecycle_state_ = LifecycleState::Stopped;
+}
+
+bool PortTunnelService::is_running() {
+    BasicLockGuard lock(mutex_);
+    return is_running_locked();
+}
+
+bool PortTunnelService::is_running_locked() const {
+    return lifecycle_state_ == LifecycleState::Running;
 }
 
 static bool try_acquire_counter(std::atomic<unsigned long>& counter, unsigned long limit) {
@@ -107,6 +135,10 @@ static void release_counter(std::atomic<unsigned long>& counter, const char* cou
 }
 
 bool PortTunnelService::try_acquire_worker() {
+    BasicLockGuard lock(mutex_);
+    if (!is_running_locked()) {
+        return false;
+    }
     return try_acquire_counter(budget_state_->active_workers, limits_.max_worker_threads);
 }
 
@@ -200,6 +232,10 @@ const PortForwardLimitConfig& PortTunnelService::limits() const {
 }
 
 bool PortTunnelService::try_acquire_retained_session() {
+    BasicLockGuard lock(mutex_);
+    if (!is_running_locked()) {
+        return false;
+    }
     return try_acquire_counter(budget_state_->retained_sessions, limits_.max_retained_sessions);
 }
 
@@ -218,6 +254,10 @@ void PortTunnelService::release_retained_session() {
 }
 
 bool PortTunnelService::try_acquire_retained_listener() {
+    BasicLockGuard lock(mutex_);
+    if (!is_running_locked()) {
+        return false;
+    }
     return try_acquire_counter(budget_state_->retained_listeners, limits_.max_retained_listeners);
 }
 
@@ -236,6 +276,10 @@ void PortTunnelService::release_retained_listener() {
 }
 
 bool PortTunnelService::try_acquire_udp_bind() {
+    BasicLockGuard lock(mutex_);
+    if (!is_running_locked()) {
+        return false;
+    }
     return try_acquire_counter(budget_state_->udp_binds, limits_.max_udp_binds);
 }
 
@@ -254,6 +298,10 @@ void PortTunnelService::release_udp_bind() {
 }
 
 bool PortTunnelService::try_acquire_active_tcp_stream() {
+    BasicLockGuard lock(mutex_);
+    if (!is_running_locked()) {
+        return false;
+    }
     return try_acquire_counter(budget_state_->active_tcp_streams, limits_.max_active_tcp_streams);
 }
 
