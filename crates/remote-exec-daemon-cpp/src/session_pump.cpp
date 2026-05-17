@@ -14,6 +14,8 @@
 
 namespace {
 
+// After the parent exits, keep draining descendant-held stdout/stderr until the
+// stream is idle or the Rust-aligned max grace is reached, then terminate children.
 const unsigned long EXIT_DRAIN_IDLE_GRACE_MS = 250UL;
 const unsigned long EXIT_DRAIN_MAX_GRACE_MS = 2000UL;
 const unsigned long EXIT_DRAIN_TERMINATE_QUIET_MS = 25UL;

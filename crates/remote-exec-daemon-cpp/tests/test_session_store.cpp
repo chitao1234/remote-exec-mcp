@@ -250,25 +250,6 @@ static void assert_posix_locale_and_late_output(SessionStore& store,
     TEST_ASSERT(locale_response.at("exit_code").get<int>() == 0);
     TEST_ASSERT(locale_response.at("output").get<std::string>() == "C.UTF-8 C.UTF-8\n");
 
-    const Json late_output = start_test_command(
-        store, "(sleep 0.08; printf 'late tail') &", root.string(), shell, false, 5000UL, 10UL, yield_time, 64UL);
-    TEST_ASSERT(!late_output.at("running").get<bool>());
-    TEST_ASSERT(late_output.at("exit_code").get<int>() == 0);
-    TEST_ASSERT(late_output.at("output").get<std::string>() == "late tail");
-
-    const Json stdout_held_open = start_test_command(store,
-                                                     "exec 3>&1; (sleep 30 >&3) & printf 'done\\n'; sleep 0.05",
-                                                     root.string(),
-                                                     shell,
-                                                     false,
-                                                     250UL,
-                                                     DEFAULT_MAX_OUTPUT_TOKENS,
-                                                     yield_time,
-                                                     64UL);
-    TEST_ASSERT(!stdout_held_open.at("running").get<bool>());
-    TEST_ASSERT(stdout_held_open.at("exit_code").get<int>() == 0);
-    TEST_ASSERT(stdout_held_open.at("output").get<std::string>() == "done\n");
-
     const Json newline_preserved =
         start_test_command(store, "printf 'one two\\n'", root.string(), shell, false, 5000UL, 3UL, yield_time, 64UL);
     TEST_ASSERT(newline_preserved.at("original_token_count").get<unsigned long>() == 2UL);
@@ -287,6 +268,74 @@ static void assert_posix_locale_and_late_output(SessionStore& store,
     TEST_ASSERT(!stdin_closed_response.at("running").get<bool>());
     TEST_ASSERT(stdin_closed_response.at("exit_code").get<int>() == 0);
     TEST_ASSERT(stdin_closed_response.at("output").get<std::string>() == "stdin:closed\n");
+#endif
+}
+
+static void assert_posix_exit_drain_boundaries(SessionStore& store,
+                                               const fs::path& root,
+                                               const std::string& shell,
+                                               const YieldTimeConfig& yield_time) {
+#ifdef _WIN32
+    (void)store;
+    (void)root;
+    (void)shell;
+    (void)yield_time;
+#else
+    const Json late_output = start_test_command(
+        store, "(sleep 0.08; printf 'late tail') &", root.string(), shell, false, 5000UL, 10UL, yield_time, 64UL);
+    TEST_ASSERT(!late_output.at("running").get<bool>());
+    TEST_ASSERT(late_output.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(late_output.at("output").get<std::string>() == "late tail");
+
+    const Json idle_grace_output = start_test_command(
+        store, "(sleep 0.15; printf 'idle tail') &", root.string(), shell, false, 5000UL, 10UL, yield_time, 64UL);
+    TEST_ASSERT(!idle_grace_output.at("running").get<bool>());
+    TEST_ASSERT(idle_grace_output.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(idle_grace_output.at("output").get<std::string>() == "idle tail");
+
+    const Json repeated_output = start_test_command(
+        store,
+        "(sleep 0.05; printf 'chunk1 '; sleep 0.12; printf 'chunk2 '; sleep 0.12; printf 'chunk3') &",
+        root.string(),
+        shell,
+        false,
+        5000UL,
+        DEFAULT_MAX_OUTPUT_TOKENS,
+        yield_time,
+        64UL);
+    TEST_ASSERT(!repeated_output.at("running").get<bool>());
+    TEST_ASSERT(repeated_output.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(repeated_output.at("output").get<std::string>() == "chunk1 chunk2 chunk3");
+
+    const std::uint64_t max_grace_started = platform::monotonic_ms();
+    const Json noisy_descendant = start_test_command(
+        store,
+        "(i=0; while [ $i -lt 80 ]; do printf 'tick'; i=$((i + 1)); sleep 0.05; done) &",
+        root.string(),
+        shell,
+        false,
+        5000UL,
+        DEFAULT_MAX_OUTPUT_TOKENS,
+        yield_time,
+        64UL);
+    const std::uint64_t max_grace_elapsed = platform::monotonic_ms() - max_grace_started;
+    TEST_ASSERT(!noisy_descendant.at("running").get<bool>());
+    TEST_ASSERT(noisy_descendant.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(!noisy_descendant.at("output").get<std::string>().empty());
+    TEST_ASSERT(max_grace_elapsed < 3500ULL && "exit drain did not enforce max grace");
+
+    const Json stdout_held_open = start_test_command(store,
+                                                     "exec 3>&1; (sleep 30 >&3) & printf 'done\\n'; sleep 0.05",
+                                                     root.string(),
+                                                     shell,
+                                                     false,
+                                                     250UL,
+                                                     DEFAULT_MAX_OUTPUT_TOKENS,
+                                                     yield_time,
+                                                     64UL);
+    TEST_ASSERT(!stdout_held_open.at("running").get<bool>());
+    TEST_ASSERT(stdout_held_open.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(stdout_held_open.at("output").get<std::string>() == "done\n");
 #endif
 }
 
@@ -1079,6 +1128,7 @@ int main() {
     assert_completed_command_output(store, root, shell, yield_time);
     assert_token_limiting(store, root, shell, yield_time);
     assert_posix_locale_and_late_output(store, root, shell, yield_time);
+    assert_posix_exit_drain_boundaries(store, root, shell, yield_time);
     assert_posix_exec_uses_parent_built_environment_and_path(store, root, shell, yield_time);
 #ifndef _WIN32
     assert_posix_sigchld_reaper_reaps_exited_session_children(root, shell);
