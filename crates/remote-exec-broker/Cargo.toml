@@ -13,8 +13,8 @@ broker-tls = [
     "reqwest/rustls-no-provider",
     "rmcp/reqwest-tls-no-provider",
 ]
-daemon-tls = []
-winpty = ["remote-exec-host/winpty"]
+daemon-tls = ["remote-exec-daemon/tls"]
+winpty = ["remote-exec-host/winpty", "remote-exec-daemon/winpty"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -45,7 +45,7 @@ uuid = { workspace = true }
 [dev-dependencies]
 gethostname = { workspace = true }
 image = { workspace = true }
-remote-exec-daemon = { path = "../remote-exec-daemon", features = ["test-support"] }
+remote-exec-daemon = { path = "../remote-exec-daemon", default-features = false, features = ["test-support"] }
 remote-exec-pki = { path = "../remote-exec-pki" }
 remote-exec-test-support = { path = "../remote-exec-test-support" }
 tar = { workspace = true }
