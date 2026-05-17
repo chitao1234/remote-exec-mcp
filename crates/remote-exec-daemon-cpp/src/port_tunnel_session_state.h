@@ -55,6 +55,8 @@ struct PortTunnelSession {
     PortTunnelSessionResumeResult prepare_resume(std::uint64_t generation_value, std::uint64_t now_ms);
     void set_generation(std::uint64_t generation_value);
     std::shared_ptr<PortTunnelSessionAttachment> current_attachment();
+    std::shared_ptr<PortTunnelConnection>
+    connection_for_attachment(const std::shared_ptr<PortTunnelSessionAttachment>& expected_attachment);
     bool insert_tcp_stream_if_attached(const std::shared_ptr<PortTunnelSessionAttachment>& expected_attachment,
                                        const std::shared_ptr<TunnelTcpStream>& stream,
                                        std::uint32_t* stream_id);

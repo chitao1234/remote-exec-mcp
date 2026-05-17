@@ -23,7 +23,7 @@ void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& 
         if (attachment.get() == nullptr) {
             return;
         }
-        std::shared_ptr<PortTunnelConnection> connection = attachment->connection.lock();
+        std::shared_ptr<PortTunnelConnection> connection = session->connection_for_attachment(attachment);
         if (connection.get() == nullptr) {
             continue;
         }
@@ -45,12 +45,13 @@ void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& 
             if (socket_value->is_closed() || session_is_unavailable(session)) {
                 return;
             }
-            if (connection->owns_attachment(attachment)) {
+            connection = session->connection_for_attachment(attachment);
+            if (connection.get() != nullptr) {
                 connection->send_error(stream_id, "port_read_failed", socket_error_message("select"));
             }
             return;
         }
-        if (!connection->owns_attachment(attachment)) {
+        if (session->connection_for_attachment(attachment).get() == nullptr) {
             continue;
         }
 
@@ -78,7 +79,8 @@ void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& 
             if (socket_value->is_closed() || session_is_unavailable(session)) {
                 return;
             }
-            if (connection->owns_attachment(attachment)) {
+            connection = session->connection_for_attachment(attachment);
+            if (connection.get() != nullptr) {
                 connection->send_error(stream_id, "port_read_failed", socket_error_message("recvfrom"));
             }
             return;
@@ -86,7 +88,8 @@ void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& 
         if (socket_value->is_closed() || session_is_unavailable(session)) {
             return;
         }
-        if (!connection->owns_attachment(attachment)) {
+        connection = session->connection_for_attachment(attachment);
+        if (connection.get() == nullptr) {
             continue;
         }
         std::vector<unsigned char> payload(buffer.begin(), buffer.begin() + received);

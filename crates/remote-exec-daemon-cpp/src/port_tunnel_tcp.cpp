@@ -19,7 +19,7 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
         if (attachment.get() == nullptr) {
             return;
         }
-        std::shared_ptr<PortTunnelConnection> connection = attachment->connection.lock();
+        std::shared_ptr<PortTunnelConnection> connection = session->connection_for_attachment(attachment);
         if (connection.get() == nullptr) {
             continue;
         }
@@ -41,12 +41,13 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
             if (listener->is_closed() || session_is_unavailable(session)) {
                 return;
             }
-            if (connection->owns_attachment(attachment)) {
+            connection = session->connection_for_attachment(attachment);
+            if (connection.get() != nullptr) {
                 connection->send_error(listener->stream_id, "port_accept_failed", socket_error_message("poll"));
             }
             return;
         }
-        if (!connection->owns_attachment(attachment)) {
+        if (session->connection_for_attachment(attachment).get() == nullptr) {
             continue;
         }
 
@@ -69,13 +70,15 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
             if (listener->is_closed() || session_is_unavailable(session)) {
                 return;
             }
-            if (connection->owns_attachment(attachment)) {
+            connection = session->connection_for_attachment(attachment);
+            if (connection.get() != nullptr) {
                 connection->send_error(listener->stream_id, "port_accept_failed", socket_error_message("accept"));
             }
             return;
         }
         UniqueSocket accepted_socket(accepted);
-        if (!connection->owns_attachment(attachment)) {
+        connection = session->connection_for_attachment(attachment);
+        if (connection.get() == nullptr) {
             continue;
         }
         if (!connection->accept_session_tcp_stream(

@@ -175,6 +175,15 @@ std::shared_ptr<PortTunnelSessionAttachment> PortTunnelSession::current_attachme
     return attachment;
 }
 
+std::shared_ptr<PortTunnelConnection> PortTunnelSession::connection_for_attachment(
+    const std::shared_ptr<PortTunnelSessionAttachment>& expected_attachment) {
+    BasicLockGuard lock(mutex);
+    if (closed || expired || expected_attachment.get() == nullptr || attachment.get() != expected_attachment.get()) {
+        return std::shared_ptr<PortTunnelConnection>();
+    }
+    return expected_attachment->connection.lock();
+}
+
 bool PortTunnelSession::insert_tcp_stream_if_attached(
     const std::shared_ptr<PortTunnelSessionAttachment>& expected_attachment,
     const std::shared_ptr<TunnelTcpStream>& stream,
