@@ -12,6 +12,24 @@
 
 class PortTunnelConnection;
 
+class PortTunnelWorkerLease {
+public:
+    PortTunnelWorkerLease();
+    explicit PortTunnelWorkerLease(PortTunnelService* service);
+    PortTunnelWorkerLease(PortTunnelWorkerLease&& other);
+    PortTunnelWorkerLease& operator=(PortTunnelWorkerLease&& other);
+    ~PortTunnelWorkerLease();
+
+    void reset();
+    bool valid() const;
+
+private:
+    PortTunnelWorkerLease(const PortTunnelWorkerLease&);
+    PortTunnelWorkerLease& operator=(const PortTunnelWorkerLease&);
+
+    PortTunnelService* service_;
+};
+
 class PortTunnelService : public std::enable_shared_from_this<PortTunnelService> {
 public:
     explicit PortTunnelService(const PortForwardLimitConfig& limits);
@@ -35,15 +53,16 @@ public:
     bool close_session_retained_resource(const std::shared_ptr<PortTunnelSession>& session, uint32_t stream_id);
     bool spawn_tcp_listener_loop(const std::shared_ptr<PortTunnelSession>& session,
                                  const std::shared_ptr<RetainedTcpListener>& listener,
-                                 bool worker_acquired = false);
+                                 PortTunnelWorkerLease worker_lease = PortTunnelWorkerLease());
     bool spawn_udp_bind_loop(const std::shared_ptr<PortTunnelSession>& session,
                              uint32_t stream_id,
                              const std::shared_ptr<TunnelUdpSocket>& socket_value,
-                             bool worker_acquired = false);
+                             PortTunnelWorkerLease worker_lease = PortTunnelWorkerLease());
     bool spawn_tracked_worker(const char* operation,
-                              bool worker_acquired,
+                              PortTunnelWorkerLease worker_lease,
                               const std::function<void()>& work);
     bool try_acquire_worker();
+    bool try_acquire_worker(PortTunnelWorkerLease* lease);
     void release_worker();
     unsigned long max_workers() const;
     const PortForwardLimitConfig& limits() const;
@@ -101,16 +120,4 @@ private:
 #else
     std::unique_ptr<std::thread> expiry_thread_;
 #endif
-};
-
-class PortTunnelWorkerLease {
-public:
-    explicit PortTunnelWorkerLease(PortTunnelService* service);
-    ~PortTunnelWorkerLease();
-
-private:
-    PortTunnelWorkerLease(const PortTunnelWorkerLease&);
-    PortTunnelWorkerLease& operator=(const PortTunnelWorkerLease&);
-
-    PortTunnelService* service_;
 };

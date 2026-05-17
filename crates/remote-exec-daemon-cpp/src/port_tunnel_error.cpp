@@ -117,16 +117,13 @@ bool PortTunnelConnection::send_tcp_success_after_io_threads_started(const PortT
                                                                      ConnectionLocalStreams* local_streams,
                                                                      uint32_t stream_id,
                                                                      const std::shared_ptr<TunnelTcpStream>& stream,
-                                                                     bool worker_acquired) {
+                                                                     PortTunnelWorkerLease worker_lease) {
     std::shared_ptr<TcpReadStartGate> start_gate(new TcpReadStartGate());
-    if (!spawn_tcp_write_thread(service_, shared_from_this(), stream_id, stream, false)) {
+    if (!spawn_tcp_write_thread(service_, shared_from_this(), stream_id, stream)) {
         drop_tcp_stream(local_streams, stream_id, stream);
-        if (worker_acquired) {
-            service_->release_worker();
-        }
         return false;
     }
-    if (!spawn_tcp_read_thread(service_, shared_from_this(), stream_id, stream, worker_acquired, start_gate)) {
+    if (!spawn_tcp_read_thread(service_, shared_from_this(), stream_id, stream, std::move(worker_lease), start_gate)) {
         drop_tcp_stream(local_streams, stream_id, stream);
         return false;
     }
@@ -247,7 +244,7 @@ bool PortTunnelConnection::accept_session_tcp_stream(const std::shared_ptr<PortT
                                                      UniqueSocket accepted_socket,
                                                      const std::string& peer) {
     uint32_t stream_id = 0U;
-    bool worker_acquired = false;
+    PortTunnelWorkerLease worker_lease;
     PortTunnelBudgetLease active_stream_budget;
     if (!service_->try_acquire_active_tcp_stream(&active_stream_budget)) {
         send_forward_drop(listener_stream_id,
@@ -271,24 +268,23 @@ bool PortTunnelConnection::accept_session_tcp_stream(const std::shared_ptr<PortT
         return false;
     }
 
-    if (!service_->try_acquire_worker()) {
+    if (!service_->try_acquire_worker(&worker_lease)) {
         attachment->local_streams.remove_tcp(stream_id);
         stream->close();
         send_forward_drop(
             listener_stream_id, "tcp_stream", "port_tunnel_limit_exceeded", "port tunnel worker limit reached");
         return false;
     }
-    worker_acquired = true;
 
     PortTunnelFrame frame = make_empty_frame(PortTunnelFrameType::TcpAccept, stream_id);
     frame.meta = Json{{"listener_stream_id", listener_stream_id}, {"peer", peer}}.dump();
     if (!owns_attachment(attachment) || closed()) {
         drop_tcp_stream(&attachment->local_streams, stream_id, stream);
-        service_->release_worker();
         return false;
     }
 
-    if (!send_tcp_success_after_io_threads_started(frame, &attachment->local_streams, stream_id, stream, worker_acquired)) {
+    if (!send_tcp_success_after_io_threads_started(
+            frame, &attachment->local_streams, stream_id, stream, std::move(worker_lease))) {
         return false;
     }
     return true;

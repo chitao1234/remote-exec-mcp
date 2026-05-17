@@ -34,7 +34,7 @@ struct PortTunnelService::WorkerGroup {
 
     bool spawn(const std::shared_ptr<PortTunnelService>& service,
                const char* operation,
-               bool worker_acquired,
+               PortTunnelWorkerLease worker_lease,
                const std::function<void()>& work);
     void collect_finished(std::vector<std::shared_ptr<Thread>>* finished_workers);
     void join_workers(const std::vector<std::shared_ptr<Thread>>& workers);
@@ -108,6 +108,16 @@ static void release_counter(std::atomic<unsigned long>& counter, const char* cou
 
 bool PortTunnelService::try_acquire_worker() {
     return try_acquire_counter(active_workers_, limits_.max_worker_threads);
+}
+
+bool PortTunnelService::try_acquire_worker(PortTunnelWorkerLease* lease) {
+    if (!try_acquire_worker()) {
+        return false;
+    }
+    if (lease != nullptr) {
+        *lease = PortTunnelWorkerLease(this);
+    }
+    return true;
 }
 
 void PortTunnelService::release_worker() {
@@ -262,19 +272,19 @@ void PortTunnelService::release_active_tcp_stream() {
 }
 
 bool PortTunnelService::spawn_tracked_worker(const char* operation,
-                                             bool worker_acquired,
+                                             PortTunnelWorkerLease worker_lease,
                                              const std::function<void()>& work) {
-    return worker_group_->spawn(shared_from_this(), operation, worker_acquired, work);
+    return worker_group_->spawn(shared_from_this(), operation, std::move(worker_lease), work);
 }
 
 bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelService>& service,
                                            const char* operation,
-                                           bool worker_acquired,
+                                           PortTunnelWorkerLease worker_lease,
                                            const std::function<void()>& work) {
-    if (!worker_acquired && !service->try_acquire_worker()) {
+    if (!worker_lease.valid() && !service->try_acquire_worker(&worker_lease)) {
         return false;
     }
-    std::shared_ptr<PortTunnelWorkerLease> worker_lease(new PortTunnelWorkerLease(service.get()));
+    std::shared_ptr<PortTunnelWorkerLease> worker_lease_holder(new PortTunnelWorkerLease(std::move(worker_lease)));
 
     std::vector<std::shared_ptr<Thread>> finished_workers;
     collect_finished(&finished_workers);
@@ -285,7 +295,7 @@ bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelServi
     struct Context {
         std::shared_ptr<PortTunnelService> service;
         std::shared_ptr<Thread> worker;
-        std::shared_ptr<PortTunnelWorkerLease> worker_lease;
+        std::shared_ptr<PortTunnelWorkerLease> worker_lease_holder;
         std::function<void()> work;
         const char* operation;
     };
@@ -309,7 +319,7 @@ bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelServi
     std::unique_ptr<Context> context(new Context());
     context->service = service;
     context->worker = worker;
-    context->worker_lease = worker_lease;
+    context->worker_lease_holder = worker_lease_holder;
     context->work = work;
     context->operation = operation;
 
@@ -320,10 +330,10 @@ bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelServi
     }
     worker->handle = handle;
     context.release();
-    worker_lease.reset();
+    worker_lease_holder.reset();
 #else
     try {
-        worker->thread.reset(new std::thread([service, worker, worker_lease, work, operation]() {
+        worker->thread.reset(new std::thread([service, worker, worker_lease_holder, work, operation]() {
             try {
                 work();
             } catch (const std::exception& ex) {
@@ -342,7 +352,7 @@ bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelServi
         log_unknown_tunnel_exception(operation);
         return false;
     }
-    worker_lease.reset();
+    worker_lease_holder.reset();
 #endif
 
     {
@@ -405,13 +415,39 @@ void PortTunnelService::WorkerGroup::join_all() {
     join_workers(workers);
 }
 
+PortTunnelWorkerLease::PortTunnelWorkerLease() : service_(nullptr) {
+}
+
 PortTunnelWorkerLease::PortTunnelWorkerLease(PortTunnelService* service) : service_(service) {
 }
 
-PortTunnelWorkerLease::~PortTunnelWorkerLease() {
-    if (service_ != nullptr) {
-        service_->release_worker();
+PortTunnelWorkerLease::PortTunnelWorkerLease(PortTunnelWorkerLease&& other) : service_(other.service_) {
+    other.service_ = nullptr;
+}
+
+PortTunnelWorkerLease& PortTunnelWorkerLease::operator=(PortTunnelWorkerLease&& other) {
+    if (this != &other) {
+        reset();
+        service_ = other.service_;
+        other.service_ = nullptr;
     }
+    return *this;
+}
+
+PortTunnelWorkerLease::~PortTunnelWorkerLease() {
+    reset();
+}
+
+void PortTunnelWorkerLease::reset() {
+    if (service_ != nullptr) {
+        PortTunnelService* service = service_;
+        service_ = nullptr;
+        service->release_worker();
+    }
+}
+
+bool PortTunnelWorkerLease::valid() const {
+    return service_ != nullptr;
 }
 
 std::string header_token_lower(const HttpRequest& request, const std::string& name) {

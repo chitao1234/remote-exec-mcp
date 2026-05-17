@@ -7,6 +7,7 @@
 #include "port_tunnel_session_state.h"
 
 class PortTunnelService;
+class PortTunnelWorkerLease;
 class PortTunnelSender;
 
 class PortTunnelConnection : public std::enable_shared_from_this<PortTunnelConnection> {
@@ -50,7 +51,7 @@ private:
                                                    ConnectionLocalStreams* local_streams,
                                                    uint32_t stream_id,
                                                    const std::shared_ptr<TunnelTcpStream>& stream,
-                                                   bool worker_acquired);
+                                                   PortTunnelWorkerLease worker_lease);
     void drop_tcp_stream(ConnectionLocalStreams* local_streams,
                          uint32_t stream_id,
                          const std::shared_ptr<TunnelTcpStream>& fallback);

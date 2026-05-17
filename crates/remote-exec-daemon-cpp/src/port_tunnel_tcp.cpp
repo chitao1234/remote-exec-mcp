@@ -5,9 +5,9 @@
 
 bool PortTunnelService::spawn_tcp_listener_loop(const std::shared_ptr<PortTunnelSession>& session,
                                                 const std::shared_ptr<RetainedTcpListener>& listener,
-                                                bool worker_acquired) {
+                                                PortTunnelWorkerLease worker_lease) {
     std::shared_ptr<PortTunnelService> self = shared_from_this();
-    return spawn_tracked_worker("spawn tcp listener thread", worker_acquired, [self, session, listener]() {
+    return spawn_tracked_worker("spawn tcp listener thread", std::move(worker_lease), [self, session, listener]() {
         self->tcp_accept_loop(session, listener);
     });
 }
@@ -118,7 +118,8 @@ void PortTunnelConnection::tcp_listen(const PortTunnelFrame& frame) {
         throw;
     }
     bound_endpoint = socket_local_endpoint(listener->listener.get());
-    if (!service_->try_acquire_worker()) {
+    PortTunnelWorkerLease worker_lease;
+    if (!service_->try_acquire_worker(&worker_lease)) {
         listener->close();
         send_worker_limit(frame.stream_id);
         return;
@@ -127,13 +128,12 @@ void PortTunnelConnection::tcp_listen(const PortTunnelFrame& frame) {
         service_->install_session_tcp_listener(session, frame.stream_id, listener);
     if (install_result != SessionRetainedInstallResult::Installed) {
         listener->close();
-        service_->release_worker();
         if (install_result == SessionRetainedInstallResult::Conflict) {
             throw PortForwardError(400, "invalid_port_tunnel", "listen session already has a retained resource");
         }
         throw PortForwardError(400, "invalid_port_tunnel", "listen session is unavailable");
     }
-    if (!service_->spawn_tcp_listener_loop(session, listener, true)) {
+    if (!service_->spawn_tcp_listener_loop(session, listener, std::move(worker_lease))) {
         service_->close_session_retained_resource(session, frame.stream_id);
         send_worker_limit(frame.stream_id);
         return;
@@ -159,7 +159,8 @@ void PortTunnelConnection::tcp_connect(const PortTunnelFrame& frame) {
         new TunnelTcpStream(connected_socket.release(), std::move(active_stream_budget)));
 
     connection_local_streams_.insert_tcp(frame.stream_id, stream);
-    if (!service_->try_acquire_worker()) {
+    PortTunnelWorkerLease worker_lease;
+    if (!service_->try_acquire_worker(&worker_lease)) {
         drop_tcp_stream(&connection_local_streams_, frame.stream_id, stream);
         send_worker_limit(frame.stream_id);
         return;
@@ -169,7 +170,7 @@ void PortTunnelConnection::tcp_connect(const PortTunnelFrame& frame) {
             &connection_local_streams_,
             frame.stream_id,
             stream,
-            true)) {
+            std::move(worker_lease))) {
         send_worker_limit(frame.stream_id);
         return;
     }
