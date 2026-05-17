@@ -65,6 +65,7 @@ mod tests {
                 experimental_apply_patch_target_encoding_autodetect: false,
                 process_environment: ProcessEnvironment::capture_current(),
                 tls: None,
+                request_timeout_ms: 300_000,
             })
         }
 
