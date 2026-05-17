@@ -36,6 +36,9 @@ Host-native POSIX daemon:
 - `make all-posix`
 - `make check`
 - `make check-posix`
+- `make stress-posix` runs repeated `check-posix -j 8` loops for
+  load-sensitive lifecycle flakes. Override with `STRESS_RUNS=<n>` and
+  `STRESS_JOBS=<n>`.
 
 Windows XP-compatible cross-build:
 
@@ -111,6 +114,7 @@ the Windows XP cross-build targets:
 - `bmake all-posix`
 - `bmake check`
 - `bmake check-posix`
+- `bmake stress-posix`
 
 Invoke BSD make from this directory, or use `bmake -C
 crates/remote-exec-daemon-cpp ...` from the repository root, so the relative

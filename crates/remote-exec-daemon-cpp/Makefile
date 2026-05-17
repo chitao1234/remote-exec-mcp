@@ -7,6 +7,8 @@ BUILD_DIR ?= build
 OBJ_DIR = ${BUILD_DIR}/obj
 
 HOST_CXX ?= c++
+STRESS_RUNS ?= 10
+STRESS_JOBS ?= 8
 
 COMMON_CPPFLAGS = -Iinclude -Ithird_party
 DEBUG ?= 0
@@ -61,6 +63,14 @@ check: check-posix
 
 check-posix: ${HOST_TEST_PHONY_TARGETS} all-posix
 
+stress-posix:
+	@i=1; \
+	while [ $$i -le ${STRESS_RUNS} ]; do \
+		echo "stress-posix iteration $$i/${STRESS_RUNS}"; \
+		${MAKE} check-posix -j ${STRESS_JOBS} || exit $$?; \
+		i=$$((i + 1)); \
+	done
+
 test-server-streaming: ${HOST_SERVER_STREAMING_TEST_TARGET}
 
 .for test in ${HOST_POSIX_TESTS}
@@ -93,5 +103,5 @@ ${HOST_TEST_OBJ_DIR}/${src:S|.cpp|.o|}: ${src}
 clean:
 	rm -rf ${BUILD_DIR}
 
-.PHONY: all all-posix check check-posix clean test-server-streaming \
+.PHONY: all all-posix check check-posix clean stress-posix test-server-streaming \
 	${HOST_TEST_PHONY_TARGETS}

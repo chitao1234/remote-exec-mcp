@@ -1,4 +1,6 @@
 HOST_CXX ?= c++
+STRESS_RUNS ?= 10
+STRESS_JOBS ?= 8
 
 HOST_PROD_OBJ_DIR := $(OBJ_DIR)/host-prod
 HOST_TEST_OBJ_DIR := $(OBJ_DIR)/host-test
@@ -59,4 +61,12 @@ test-server-streaming: $(HOST_SERVER_STREAMING_TEST_TARGET)
 
 check-posix: $(HOST_TEST_PHONY_TARGETS) all-posix
 
-.PHONY: all-posix $(HOST_TEST_PHONY_TARGETS) test-server-streaming check-posix
+stress-posix:
+	@i=1; \
+	while [ $$i -le $(STRESS_RUNS) ]; do \
+		echo "stress-posix iteration $$i/$(STRESS_RUNS)"; \
+		$(MAKE) check-posix -j $(STRESS_JOBS) || exit $$?; \
+		i=$$((i + 1)); \
+	done
+
+.PHONY: all-posix $(HOST_TEST_PHONY_TARGETS) test-server-streaming check-posix stress-posix
