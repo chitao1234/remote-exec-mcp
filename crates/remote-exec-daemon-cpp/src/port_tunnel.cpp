@@ -9,26 +9,39 @@
 #include "port_tunnel_service.h"
 #include "server_contract.h"
 
-struct PortTunnelService::TrackedWorkerThread {
-    TrackedWorkerThread() : finished(false)
+struct PortTunnelService::WorkerGroup {
+    struct Thread {
+        Thread() : finished(false)
 #ifdef _WIN32
-                           ,
-                           handle(nullptr),
-                           thread_id(0U)
+                 ,
+                 handle(nullptr),
+                 thread_id(0U)
 #else
-                           ,
-                           thread()
+                 ,
+                 thread()
 #endif
-    {
-    }
+        {
+        }
 
-    std::atomic<bool> finished;
+        std::atomic<bool> finished;
 #ifdef _WIN32
-    HANDLE handle;
-    DWORD thread_id;
+        HANDLE handle;
+        DWORD thread_id;
 #else
-    std::unique_ptr<std::thread> thread;
+        std::unique_ptr<std::thread> thread;
 #endif
+    };
+
+    bool spawn(const std::shared_ptr<PortTunnelService>& service,
+               const char* operation,
+               bool worker_acquired,
+               const std::function<void()>& work);
+    void collect_finished(std::vector<std::shared_ptr<Thread>>* finished_workers);
+    void join_workers(const std::vector<std::shared_ptr<Thread>>& workers);
+    void join_all();
+
+    BasicMutex mutex;
+    std::vector<std::shared_ptr<Thread>> threads;
 };
 
 const std::size_t READ_BUFFER_SIZE = 64U * 1024U;
@@ -50,8 +63,8 @@ void log_unknown_tunnel_exception(const char* operation) {
 
 PortTunnelService::PortTunnelService(const PortForwardLimitConfig& limits)
     : active_workers_(0UL), retained_sessions_(0UL), retained_listeners_(0UL), udp_binds_(0UL),
-      active_tcp_streams_(0UL), limits_(limits), next_session_sequence_(1ULL), expiry_shutdown_(false),
-      expiry_thread_started_(false)
+      active_tcp_streams_(0UL), worker_group_(new WorkerGroup()), limits_(limits), next_session_sequence_(1ULL),
+      expiry_shutdown_(false), expiry_thread_started_(false)
 #ifdef _WIN32
       ,
       expiry_thread_(nullptr)
@@ -247,19 +260,26 @@ void PortTunnelService::release_active_tcp_stream() {
 bool PortTunnelService::spawn_tracked_worker(const char* operation,
                                              bool worker_acquired,
                                              const std::function<void()>& work) {
-    if (!worker_acquired && !try_acquire_worker()) {
+    return worker_group_->spawn(shared_from_this(), operation, worker_acquired, work);
+}
+
+bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelService>& service,
+                                           const char* operation,
+                                           bool worker_acquired,
+                                           const std::function<void()>& work) {
+    if (!worker_acquired && !service->try_acquire_worker()) {
         return false;
     }
 
-    std::vector<std::shared_ptr<TrackedWorkerThread>> finished_workers;
-    collect_finished_workers(&finished_workers);
+    std::vector<std::shared_ptr<Thread>> finished_workers;
+    collect_finished(&finished_workers);
 
-    std::shared_ptr<TrackedWorkerThread> worker(new TrackedWorkerThread());
+    std::shared_ptr<Thread> worker(new Thread());
 
 #ifdef _WIN32
     struct Context {
         std::shared_ptr<PortTunnelService> service;
-        std::shared_ptr<TrackedWorkerThread> worker;
+        std::shared_ptr<Thread> worker;
         std::function<void()> work;
         const char* operation;
     };
@@ -276,13 +296,13 @@ bool PortTunnelService::spawn_tracked_worker(const char* operation,
             } catch (...) {
                 log_unknown_tunnel_exception(context->operation);
             }
-            context->service->mark_worker_finished(context->worker);
+            context->worker->finished.store(true);
             return 0;
         }
     };
 
     std::unique_ptr<Context> context(new Context());
-    context->service = shared_from_this();
+    context->service = service;
     context->worker = worker;
     context->work = work;
     context->operation = operation;
@@ -290,16 +310,15 @@ bool PortTunnelService::spawn_tracked_worker(const char* operation,
     HANDLE handle = begin_win32_thread(&ThreadEntry::entry, context.get());
     if (handle == nullptr) {
         join_workers(finished_workers);
-        release_worker();
+        service->release_worker();
         return false;
     }
     worker->handle = handle;
     context.release();
 #else
     try {
-        std::shared_ptr<PortTunnelService> self = shared_from_this();
-        worker->thread.reset(new std::thread([self, worker, work, operation]() {
-            PortTunnelWorkerLease lease(self.get());
+        worker->thread.reset(new std::thread([service, worker, work, operation]() {
+            PortTunnelWorkerLease lease(service.get());
             try {
                 work();
             } catch (const std::exception& ex) {
@@ -307,49 +326,42 @@ bool PortTunnelService::spawn_tracked_worker(const char* operation,
             } catch (...) {
                 log_unknown_tunnel_exception(operation);
             }
-            self->mark_worker_finished(worker);
+            worker->finished.store(true);
         }));
     } catch (const std::exception& ex) {
         join_workers(finished_workers);
         log_tunnel_exception(operation, ex);
-        release_worker();
+        service->release_worker();
         return false;
     } catch (...) {
         join_workers(finished_workers);
         log_unknown_tunnel_exception(operation);
-        release_worker();
+        service->release_worker();
         return false;
     }
 #endif
 
     {
-        BasicLockGuard lock(worker_threads_mutex_);
-        worker_threads_.push_back(worker);
+        BasicLockGuard lock(mutex);
+        threads.push_back(worker);
     }
     join_workers(finished_workers);
     return true;
 }
 
-void PortTunnelService::mark_worker_finished(const std::shared_ptr<TrackedWorkerThread>& worker) {
-    if (worker.get() != nullptr) {
-        worker->finished.store(true);
-    }
-}
-
-void PortTunnelService::collect_finished_workers(std::vector<std::shared_ptr<TrackedWorkerThread>>* finished_workers) {
-    BasicLockGuard lock(worker_threads_mutex_);
-    for (std::vector<std::shared_ptr<TrackedWorkerThread>>::iterator it = worker_threads_.begin();
-         it != worker_threads_.end();) {
+void PortTunnelService::WorkerGroup::collect_finished(std::vector<std::shared_ptr<Thread>>* finished_workers) {
+    BasicLockGuard lock(mutex);
+    for (std::vector<std::shared_ptr<Thread>>::iterator it = threads.begin(); it != threads.end();) {
         if (!(*it)->finished.load()) {
             ++it;
             continue;
         }
         finished_workers->push_back(*it);
-        it = worker_threads_.erase(it);
+        it = threads.erase(it);
     }
 }
 
-void PortTunnelService::join_workers(const std::vector<std::shared_ptr<TrackedWorkerThread>>& workers) {
+void PortTunnelService::WorkerGroup::join_workers(const std::vector<std::shared_ptr<Thread>>& workers) {
     for (std::size_t i = 0; i < workers.size(); ++i) {
 #ifdef _WIN32
         if (workers[i]->handle != nullptr) {
@@ -377,10 +389,14 @@ void PortTunnelService::join_workers(const std::vector<std::shared_ptr<TrackedWo
 }
 
 void PortTunnelService::join_all_workers() {
-    std::vector<std::shared_ptr<TrackedWorkerThread>> workers;
+    worker_group_->join_all();
+}
+
+void PortTunnelService::WorkerGroup::join_all() {
+    std::vector<std::shared_ptr<Thread>> workers;
     {
-        BasicLockGuard lock(worker_threads_mutex_);
-        workers.swap(worker_threads_);
+        BasicLockGuard lock(mutex);
+        workers.swap(threads);
     }
     join_workers(workers);
 }
