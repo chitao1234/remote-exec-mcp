@@ -153,7 +153,7 @@ bool try_read_tunnel_frame_with_timeout(SOCKET socket, unsigned long timeout_ms,
     return true;
 }
 
-bool tcp_listener_has_pending_connection(SOCKET socket, unsigned long timeout_ms) {
+bool socket_readable_within(SOCKET socket, unsigned long timeout_ms) {
 #ifdef _WIN32
     fd_set read_fds;
     FD_ZERO(&read_fds);
@@ -180,6 +180,10 @@ bool tcp_listener_has_pending_connection(SOCKET socket, unsigned long timeout_ms
     TEST_ASSERT(ready >= 0);
     return ready > 0 && (descriptor.revents & POLLIN) != 0;
 #endif
+}
+
+bool tcp_listener_has_pending_connection(SOCKET socket, unsigned long timeout_ms) {
+    return socket_readable_within(socket, timeout_ms);
 }
 
 void assert_tunnel_error_code(const PortTunnelFrame& frame, const std::string& code) {

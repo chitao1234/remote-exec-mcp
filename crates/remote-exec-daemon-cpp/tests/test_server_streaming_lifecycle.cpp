@@ -227,6 +227,35 @@ static void assert_service_shutdown_releases_detached_retained_listener(AppState
     wait_until_bindable(endpoint);
 }
 
+static void assert_service_shutdown_closes_retained_listener_with_active_stream(const fs::path& root) {
+    AppState state;
+    initialize_state(state, root);
+
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
+
+    send_tunnel_frame(client_socket.get(),
+                      json_frame(PortTunnelFrameType::TcpListen, 1U, Json{{"endpoint", "127.0.0.1:0"}}));
+    const PortTunnelFrame listen_ok = read_tunnel_frame(client_socket.get());
+    TEST_ASSERT(listen_ok.type == PortTunnelFrameType::TcpListenOk);
+    const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
+
+    UniqueSocket peer(connect_port_forward_socket(endpoint, "tcp"));
+    const PortTunnelFrame accepted = read_tunnel_frame(client_socket.get());
+    TEST_ASSERT(accepted.type == PortTunnelFrameType::TcpAccept);
+
+    state.port_tunnel_service->shutdown();
+    wait_until_bindable(endpoint);
+
+    TEST_ASSERT(socket_readable_within(peer.get(), 1000UL));
+    char buffer = '\0';
+    const int received = recv(peer.get(), &buffer, 1, 0);
+    TEST_ASSERT(received <= 0);
+
+    close_tunnel(&client_socket, &server_thread);
+}
+
 static void assert_expired_tunnel_session_is_released(AppState& state) {
     UniqueSocket client_socket;
     std::thread server_thread;
@@ -268,5 +297,6 @@ void assert_tunnel_resume_and_expiry_paths(AppState& state) {
     assert_retained_tcp_listener_closes_while_accept_worker_waits(state);
     assert_retained_udp_bind_closes_while_read_worker_waits(state);
     assert_service_shutdown_releases_detached_retained_listener(state);
+    assert_service_shutdown_closes_retained_listener_with_active_stream(root);
     assert_expired_tunnel_session_is_released(state);
 }
