@@ -492,10 +492,8 @@ async fn real_cpp_daemon_releases_listener_after_broker_crash() {
 }
 
 #[tokio::test]
+#[cfg(not(windows))]
 async fn windows_cpp_daemon_smoke() {
-    #[cfg(not(windows))]
-    return;
-
     let Some(fixture) = CppDaemonBrokerFixture::spawn().await else {
         return;
     };
