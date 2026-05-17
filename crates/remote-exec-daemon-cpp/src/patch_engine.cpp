@@ -1,11 +1,13 @@
 #include <atomic>
 #include <algorithm>
+#include <cerrno>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <functional>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #ifdef _WIN32
@@ -44,6 +46,34 @@ struct PatchAction {
     std::string move_to;
     std::vector<std::string> lines;
     std::vector<UpdateChunk> chunks;
+};
+
+struct PlannedFile {
+    std::string text;
+};
+
+struct PlannedPathState {
+    bool deleted;
+    PlannedFile file;
+};
+
+struct PlannedPathEntry {
+    std::string path;
+    PlannedPathState state;
+};
+
+struct PlannedAction {
+    PatchKind kind;
+    std::string source_path;
+    std::string destination_path;
+    std::string summary_path;
+    std::string content;
+    bool remove_source;
+};
+
+struct PathOverlay {
+    std::vector<PlannedPathEntry> files;
+    std::vector<std::string> directories;
 };
 
 enum class LineEndingKind {
@@ -193,6 +223,18 @@ std::string resolve_patch_path(const std::string& root, const std::string& path)
 bool file_exists(const std::string& path) {
     struct stat st;
     return path_utils::stat_path(path, &st);
+}
+
+bool is_regular_file_mode(const struct stat& st) {
+    return (st.st_mode & S_IFMT) == S_IFREG;
+}
+
+bool is_directory_mode(const struct stat& st) {
+    return (st.st_mode & S_IFMT) == S_IFDIR;
+}
+
+bool paths_equal(const std::string& left, const std::string& right) {
+    return syntax_eq_for_policy(host_path_policy(), left, right);
 }
 
 std::string read_text_file(const std::string& path) {
@@ -542,45 +584,295 @@ std::string render_added_content(const std::vector<std::string>& lines) {
     return join_lines(lines, !lines.empty(), LineEndingKind::Lf);
 }
 
+PlannedPathState planned_file_state(const std::string& text) {
+    PlannedPathState state;
+    state.deleted = false;
+    state.file.text = text;
+    return state;
+}
+
+PlannedPathState planned_deleted_state() {
+    PlannedPathState state;
+    state.deleted = true;
+    return state;
+}
+
+PlannedPathEntry* find_overlay_entry(PathOverlay* overlay, const std::string& path) {
+    for (std::size_t i = 0; i < overlay->files.size(); ++i) {
+        if (paths_equal(overlay->files[i].path, path)) {
+            return &overlay->files[i];
+        }
+    }
+    return nullptr;
+}
+
+const PlannedPathEntry* find_overlay_entry(const PathOverlay& overlay, const std::string& path) {
+    for (std::size_t i = 0; i < overlay.files.size(); ++i) {
+        if (paths_equal(overlay.files[i].path, path)) {
+            return &overlay.files[i];
+        }
+    }
+    return nullptr;
+}
+
+void set_overlay_state(PathOverlay* overlay, const std::string& path, const PlannedPathState& state) {
+    PlannedPathEntry* existing = find_overlay_entry(overlay, path);
+    if (existing != nullptr) {
+        existing->state = state;
+        return;
+    }
+
+    PlannedPathEntry entry;
+    entry.path = path;
+    entry.state = state;
+    overlay->files.push_back(entry);
+}
+
+bool overlay_contains_directory(const PathOverlay& overlay, const std::string& path) {
+    for (std::size_t i = 0; i < overlay.directories.size(); ++i) {
+        if (paths_equal(overlay.directories[i], path)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void mark_overlay_directory(PathOverlay* overlay, const std::string& path) {
+    if (path.empty() || overlay_contains_directory(*overlay, path)) {
+        return;
+    }
+    overlay->directories.push_back(path);
+}
+
+void mark_overlay_parent_directories(PathOverlay* overlay, const std::string& path) {
+    std::string parent = path_utils::parent_directory(path);
+    while (!parent.empty()) {
+        mark_overlay_directory(overlay, parent);
+        parent = path_utils::parent_directory(parent);
+    }
+}
+
+void require_stat_or_missing(const std::string& path, struct stat* st, bool* exists) {
+    errno = 0;
+    if (path_utils::stat_path(path, st)) {
+        *exists = true;
+        return;
+    }
+    if (errno == ENOENT) {
+        *exists = false;
+        return;
+    }
+    throw std::runtime_error("unable to stat " + path);
+}
+
+void ensure_parent_directories_can_exist(const std::string& path, const PathOverlay& overlay) {
+    std::string parent = path_utils::parent_directory(path);
+    while (!parent.empty()) {
+        const PlannedPathEntry* planned = find_overlay_entry(overlay, parent);
+        if (planned != nullptr) {
+            if (!planned->state.deleted) {
+                throw std::runtime_error("parent path is not a directory: " + parent);
+            }
+            parent = path_utils::parent_directory(parent);
+            continue;
+        }
+        if (overlay_contains_directory(overlay, parent)) {
+            parent = path_utils::parent_directory(parent);
+            continue;
+        }
+
+        struct stat st;
+        bool exists = false;
+        require_stat_or_missing(parent, &st, &exists);
+        if (exists && !is_directory_mode(st)) {
+            throw std::runtime_error("parent path is not a directory: " + parent);
+        }
+        parent = path_utils::parent_directory(parent);
+    }
+}
+
+void ensure_writable_file_target(const std::string& path, const PathOverlay& overlay) {
+    if (overlay_contains_directory(overlay, path)) {
+        throw std::runtime_error("patch target is not a file: " + path);
+    }
+    ensure_parent_directories_can_exist(path, overlay);
+
+    const PlannedPathEntry* planned = find_overlay_entry(overlay, path);
+    if (planned != nullptr) {
+        return;
+    }
+
+    struct stat st;
+    bool exists = false;
+    require_stat_or_missing(path, &st, &exists);
+    if (exists && !is_regular_file_mode(st)) {
+        throw std::runtime_error("patch target is not a file: " + path);
+    }
+}
+
+PlannedFile require_planned_file(const std::string& path, const PathOverlay& overlay) {
+    if (overlay_contains_directory(overlay, path)) {
+        throw std::runtime_error("patch target is not a file: " + path);
+    }
+
+    const PlannedPathEntry* planned = find_overlay_entry(overlay, path);
+    if (planned != nullptr) {
+        if (planned->state.deleted) {
+            throw std::runtime_error("unable to read " + path);
+        }
+        return planned->state.file;
+    }
+
+    struct stat st;
+    bool exists = false;
+    require_stat_or_missing(path, &st, &exists);
+    if (!exists || !is_regular_file_mode(st)) {
+        throw std::runtime_error("unable to read " + path);
+    }
+
+    PlannedFile file;
+    file.text = read_text_file(path);
+    return file;
+}
+
+PlannedAction plan_add_action(const std::string& root,
+                              const PatchAction& action,
+                              const PatchPathAuthorizer& authorizer,
+                              PathOverlay* overlay) {
+    const std::string source_path = resolve_patch_path(root, action.path);
+    if (authorizer) {
+        authorizer(source_path);
+    }
+    ensure_writable_file_target(source_path, *overlay);
+
+    const std::string content = render_added_content(action.lines);
+    mark_overlay_parent_directories(overlay, source_path);
+    set_overlay_state(overlay, source_path, planned_file_state(content));
+
+    PlannedAction planned;
+    planned.kind = PatchKind::Add;
+    planned.source_path = source_path;
+    planned.destination_path = source_path;
+    planned.summary_path = action.path;
+    planned.content = content;
+    planned.remove_source = false;
+    return planned;
+}
+
+PlannedAction plan_delete_action(const std::string& root,
+                                 const PatchAction& action,
+                                 const PatchPathAuthorizer& authorizer,
+                                 PathOverlay* overlay) {
+    const std::string source_path = resolve_patch_path(root, action.path);
+    if (authorizer) {
+        authorizer(source_path);
+    }
+    (void)require_planned_file(source_path, *overlay);
+    set_overlay_state(overlay, source_path, planned_deleted_state());
+
+    PlannedAction planned;
+    planned.kind = PatchKind::Delete;
+    planned.source_path = source_path;
+    planned.destination_path = source_path;
+    planned.summary_path = action.path;
+    planned.remove_source = false;
+    return planned;
+}
+
+PlannedAction plan_update_action(const std::string& root,
+                                 const PatchAction& action,
+                                 const PatchPathAuthorizer& authorizer,
+                                 PathOverlay* overlay) {
+    const std::string source_path = resolve_patch_path(root, action.path);
+    if (authorizer) {
+        authorizer(source_path);
+    }
+    const PlannedFile current = require_planned_file(source_path, *overlay);
+    const std::string destination_path =
+        action.move_to.empty() ? source_path : resolve_patch_path(root, action.move_to);
+    const bool remove_source = !action.move_to.empty() && !paths_equal(source_path, destination_path);
+    if (remove_source) {
+        if (authorizer) {
+            authorizer(destination_path);
+        }
+        ensure_writable_file_target(destination_path, *overlay);
+    }
+
+    const std::string content = apply_update_chunks(current.text, action.chunks);
+    mark_overlay_parent_directories(overlay, destination_path);
+    if (remove_source) {
+        set_overlay_state(overlay, source_path, planned_deleted_state());
+    }
+    set_overlay_state(overlay, destination_path, planned_file_state(content));
+
+    PlannedAction planned;
+    planned.kind = PatchKind::Update;
+    planned.source_path = source_path;
+    planned.destination_path = destination_path;
+    planned.summary_path = action.move_to.empty() ? action.path : action.move_to;
+    planned.content = content;
+    planned.remove_source = remove_source;
+    return planned;
+}
+
+std::vector<PlannedAction>
+plan_patch_actions(const std::string& root,
+                   const std::vector<PatchAction>& actions,
+                   const PatchPathAuthorizer& authorizer) {
+    PathOverlay overlay;
+    std::vector<PlannedAction> planned;
+    planned.reserve(actions.size());
+
+    for (std::size_t i = 0; i < actions.size(); ++i) {
+        const PatchAction& action = actions[i];
+        if (action.kind == PatchKind::Add) {
+            planned.push_back(plan_add_action(root, action, authorizer, &overlay));
+            continue;
+        }
+        if (action.kind == PatchKind::Delete) {
+            planned.push_back(plan_delete_action(root, action, authorizer, &overlay));
+            continue;
+        }
+        planned.push_back(plan_update_action(root, action, authorizer, &overlay));
+    }
+
+    return planned;
+}
+
+std::vector<std::string> execute_planned_actions(const std::vector<PlannedAction>& actions) {
+    std::vector<std::string> summary;
+    summary.reserve(actions.size());
+
+    for (std::size_t i = 0; i < actions.size(); ++i) {
+        const PlannedAction& action = actions[i];
+        if (action.kind == PatchKind::Add) {
+            write_text_atomic(action.source_path, action.content);
+            summary.push_back("A " + action.summary_path);
+            continue;
+        }
+        if (action.kind == PatchKind::Delete) {
+            remove_file_required(action.source_path);
+            summary.push_back("D " + action.summary_path);
+            continue;
+        }
+
+        write_text_atomic(action.destination_path, action.content);
+        if (action.remove_source && file_exists(action.source_path)) {
+            remove_file_required(action.source_path);
+        }
+        summary.push_back("M " + action.summary_path);
+    }
+
+    return summary;
+}
+
 } // namespace
 
 PatchApplyResult
 apply_patch(const std::string& root, const std::string& patch_text, const PatchPathAuthorizer& authorizer) {
     const std::vector<PatchAction> actions = parse_patch(patch_text);
-    std::vector<std::string> summary;
-
-    for (std::size_t i = 0; i < actions.size(); ++i) {
-        const PatchAction& action = actions[i];
-        const std::string source_path = resolve_patch_path(root, action.path);
-        const std::string destination_path =
-            action.move_to.empty() ? source_path : resolve_patch_path(root, action.move_to);
-        if (authorizer) {
-            authorizer(source_path);
-            if (destination_path != source_path) {
-                authorizer(destination_path);
-            }
-        }
-
-        if (action.kind == PatchKind::Add) {
-            write_text_atomic(source_path, render_added_content(action.lines));
-            summary.push_back("A " + action.path);
-            continue;
-        }
-
-        if (action.kind == PatchKind::Delete) {
-            remove_file_required(source_path);
-            summary.push_back("D " + action.path);
-            continue;
-        }
-
-        const std::string old_text = read_text_file(source_path);
-        const std::string new_text = apply_update_chunks(old_text, action.chunks);
-        write_text_atomic(destination_path, new_text);
-        if (!action.move_to.empty() && destination_path != source_path && file_exists(source_path)) {
-            remove_file_required(source_path);
-        }
-        summary.push_back("M " + (action.move_to.empty() ? action.path : action.move_to));
-    }
+    const std::vector<PlannedAction> planned = plan_patch_actions(root, actions, authorizer);
+    const std::vector<std::string> summary = execute_planned_actions(planned);
 
     std::ostringstream out;
     out << "Success. Updated the following files:\n";

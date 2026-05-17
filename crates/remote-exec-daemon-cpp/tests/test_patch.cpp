@@ -330,7 +330,109 @@ int main() {
                                       "*** End Patch\n";
 
     expect_patch_failure(root, partial_patch);
-    TEST_ASSERT(read_text(root / "partial-first.txt") == "after\n");
+    TEST_ASSERT(read_text(root / "partial-first.txt") == "before\n");
+
+    write_text(root / "partial-dir-first.txt", "before\n");
+    fs::create_directories(root / "partial-dir");
+    const std::string partial_dir_patch = "*** Begin Patch\n"
+                                          "*** Update File: partial-dir-first.txt\n"
+                                          "@@\n"
+                                          "-before\n"
+                                          "+after\n"
+                                          "*** Delete File: partial-dir\n"
+                                          "*** End Patch\n";
+
+    expect_patch_failure(root, partial_dir_patch);
+    TEST_ASSERT(read_text(root / "partial-dir-first.txt") == "before\n");
+
+    write_text(root / "partial-hunk-first.txt", "before\n");
+    write_text(root / "partial-hunk-second.txt", "unchanged\n");
+    const std::string partial_hunk_patch = "*** Begin Patch\n"
+                                           "*** Update File: partial-hunk-first.txt\n"
+                                           "@@\n"
+                                           "-before\n"
+                                           "+after\n"
+                                           "*** Update File: partial-hunk-second.txt\n"
+                                           "@@\n"
+                                           "-missing\n"
+                                           "+changed\n"
+                                           "*** End Patch\n";
+
+    expect_patch_failure(root, partial_hunk_patch);
+    TEST_ASSERT(read_text(root / "partial-hunk-first.txt") == "before\n");
+    TEST_ASSERT(read_text(root / "partial-hunk-second.txt") == "unchanged\n");
+
+    write_text(root / "partial-parent-first.txt", "before\n");
+    write_text(root / "partial-blocked", "not a directory\n");
+    const std::string partial_parent_patch = "*** Begin Patch\n"
+                                             "*** Update File: partial-parent-first.txt\n"
+                                             "@@\n"
+                                             "-before\n"
+                                             "+after\n"
+                                             "*** Add File: partial-blocked/child.txt\n"
+                                             "+child\n"
+                                             "*** End Patch\n";
+
+    expect_patch_failure(root, partial_parent_patch);
+    TEST_ASSERT(read_text(root / "partial-parent-first.txt") == "before\n");
+    TEST_ASSERT(!fs::exists(root / "partial-blocked" / "child.txt"));
+
+    const std::string add_then_update_patch = "*** Begin Patch\n"
+                                              "*** Add File: planned.txt\n"
+                                              "+before\n"
+                                              "*** Update File: planned.txt\n"
+                                              "@@\n"
+                                              "-before\n"
+                                              "+after\n"
+                                              "*** End Patch\n";
+
+    PatchApplyResult add_then_update_result = apply_patch(root.string(), add_then_update_patch);
+    TEST_ASSERT(add_then_update_result.output.find("A planned.txt") != std::string::npos);
+    TEST_ASSERT(add_then_update_result.output.find("M planned.txt") != std::string::npos);
+    TEST_ASSERT(read_text(root / "planned.txt") == "after\n");
+
+    write_text(root / "planned-delete.txt", "before\n");
+    const std::string update_then_delete_patch = "*** Begin Patch\n"
+                                                 "*** Update File: planned-delete.txt\n"
+                                                 "@@\n"
+                                                 "-before\n"
+                                                 "+after\n"
+                                                 "*** Delete File: planned-delete.txt\n"
+                                                 "*** End Patch\n";
+
+    PatchApplyResult update_then_delete_result = apply_patch(root.string(), update_then_delete_patch);
+    TEST_ASSERT(update_then_delete_result.output.find("M planned-delete.txt") != std::string::npos);
+    TEST_ASSERT(update_then_delete_result.output.find("D planned-delete.txt") != std::string::npos);
+    TEST_ASSERT(!fs::exists(root / "planned-delete.txt"));
+
+    write_text(root / "planned-move-old.txt", "before\n");
+    const std::string move_then_update_patch = "*** Begin Patch\n"
+                                               "*** Update File: planned-move-old.txt\n"
+                                               "*** Move to: planned-move-new.txt\n"
+                                               "@@\n"
+                                               "-before\n"
+                                               "+middle\n"
+                                               "*** Update File: planned-move-new.txt\n"
+                                               "@@\n"
+                                               "-middle\n"
+                                               "+after\n"
+                                               "*** End Patch\n";
+
+    PatchApplyResult move_then_update_result = apply_patch(root.string(), move_then_update_patch);
+    TEST_ASSERT(move_then_update_result.output.find("M planned-move-new.txt") != std::string::npos);
+    TEST_ASSERT(!fs::exists(root / "planned-move-old.txt"));
+    TEST_ASSERT(read_text(root / "planned-move-new.txt") == "after\n");
+
+    const std::string add_then_delete_patch = "*** Begin Patch\n"
+                                              "*** Add File: planned-transient.txt\n"
+                                              "+hello\n"
+                                              "*** Delete File: planned-transient.txt\n"
+                                              "*** End Patch\n";
+
+    PatchApplyResult add_then_delete_result = apply_patch(root.string(), add_then_delete_patch);
+    TEST_ASSERT(add_then_delete_result.output.find("A planned-transient.txt") != std::string::npos);
+    TEST_ASSERT(add_then_delete_result.output.find("D planned-transient.txt") != std::string::npos);
+    TEST_ASSERT(!fs::exists(root / "planned-transient.txt"));
 
     const fs::path blocked_path = root / "blocked.txt";
     fs::create_directories(blocked_path);
