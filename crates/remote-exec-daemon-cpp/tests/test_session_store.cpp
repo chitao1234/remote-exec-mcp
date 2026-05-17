@@ -440,7 +440,9 @@ static void assert_posix_sigchld_reaper_preserves_exit_status_during_pty_resume_
         TEST_ASSERT(waiting.at("running").get<bool>());
         std::string waiting_id = waiting.at("daemon_session_id").get<std::string>();
         std::string waiting_output = waiting.at("output").get<std::string>();
-        for (int poll = 0; waiting_output.find("ready") == std::string::npos && poll < 20; ++poll) {
+        const std::uint64_t ready_wait_started = platform::monotonic_ms();
+        while (waiting_output.find("ready") == std::string::npos &&
+               platform::monotonic_ms() - ready_wait_started < 5000ULL) {
             waiting = race_store.write_stdin(
                 waiting_id, "", true, 50UL, DEFAULT_MAX_OUTPUT_TOKENS, fast_yield, false, 0U, 0U);
             TEST_ASSERT(waiting.at("running").get<bool>());

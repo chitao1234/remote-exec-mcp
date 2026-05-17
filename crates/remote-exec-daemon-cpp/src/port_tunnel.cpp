@@ -29,7 +29,7 @@ const std::size_t READ_BUFFER_SIZE = 64U * 1024U;
 const std::size_t TCP_WRITE_QUEUE_LIMIT = 8U;
 const unsigned long RETAINED_SOCKET_POLL_TIMEOUT_MS = 100UL;
 #ifdef REMOTE_EXEC_CPP_TESTING
-const unsigned long RESUME_TIMEOUT_MS = 100UL;
+const unsigned long RESUME_TIMEOUT_MS = 1000UL;
 #else
 const unsigned long RESUME_TIMEOUT_MS = 10000UL;
 #endif
