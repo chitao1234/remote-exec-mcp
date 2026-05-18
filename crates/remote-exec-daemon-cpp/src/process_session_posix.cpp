@@ -115,6 +115,13 @@ struct PosixPtyPair {
     std::string slave_path;
 };
 
+void set_fd_cloexec_or_throw(int fd, const std::string& label) {
+    const int flags = fcntl(fd, F_GETFD);
+    if (flags < 0 || fcntl(fd, F_SETFD, flags | FD_CLOEXEC) != 0) {
+        throw std::runtime_error(label + " fcntl(FD_CLOEXEC) failed: " + safe_strerror(errno));
+    }
+}
+
 PosixPipePair create_posix_pipe(const char* label) {
     int fds[2];
 #ifdef __linux__
@@ -126,20 +133,8 @@ PosixPipePair create_posix_pipe(const char* label) {
         throw std::runtime_error(std::string(label) + " failed: " + safe_strerror(errno));
     }
     try {
-        const int read_flags = fcntl(fds[0], F_GETFD, 0);
-        if (read_flags < 0) {
-            throw std::runtime_error(std::string(label) + " fcntl(F_GETFD) failed: " + safe_strerror(errno));
-        }
-        if (fcntl(fds[0], F_SETFD, read_flags | FD_CLOEXEC) != 0) {
-            throw std::runtime_error(std::string(label) + " fcntl(F_SETFD) failed: " + safe_strerror(errno));
-        }
-        const int write_flags = fcntl(fds[1], F_GETFD, 0);
-        if (write_flags < 0) {
-            throw std::runtime_error(std::string(label) + " fcntl(F_GETFD) failed: " + safe_strerror(errno));
-        }
-        if (fcntl(fds[1], F_SETFD, write_flags | FD_CLOEXEC) != 0) {
-            throw std::runtime_error(std::string(label) + " fcntl(F_SETFD) failed: " + safe_strerror(errno));
-        }
+        set_fd_cloexec_or_throw(fds[0], std::string(label) + " fd[0]");
+        set_fd_cloexec_or_throw(fds[1], std::string(label) + " fd[1]");
     } catch (...) {
         close(fds[0]);
         close(fds[1]);
@@ -153,10 +148,21 @@ PosixPipePair create_posix_pipe(const char* label) {
 }
 
 UniqueFd open_dev_null_read() {
-    UniqueFd fd(open("/dev/null", O_RDONLY | O_CLOEXEC));
+    int flags = O_RDONLY;
+#ifdef O_CLOEXEC
+    flags |= O_CLOEXEC;
+#endif
+    int raw_fd = open("/dev/null", flags);
+#ifdef O_CLOEXEC
+    if (raw_fd < 0 && errno == EINVAL) {
+        raw_fd = open("/dev/null", O_RDONLY);
+    }
+#endif
+    UniqueFd fd(raw_fd);
     if (!fd.valid()) {
         throw std::runtime_error(std::string("open(/dev/null) failed: ") + safe_strerror(errno));
     }
+    set_fd_cloexec_or_throw(fd.get(), "open(/dev/null)");
     return fd;
 }
 
@@ -171,10 +177,7 @@ PosixPtyPair create_posix_pty() {
     if (!master.valid()) {
         throw std::runtime_error(std::string("posix_openpt failed: ") + safe_strerror(errno));
     }
-    const int fd_flags = fcntl(master.get(), F_GETFD);
-    if (fd_flags < 0 || fcntl(master.get(), F_SETFD, fd_flags | FD_CLOEXEC) != 0) {
-        throw std::runtime_error(std::string("fcntl(FD_CLOEXEC) on pty master failed: ") + safe_strerror(errno));
-    }
+    set_fd_cloexec_or_throw(master.get(), "pty master");
     if (grantpt(master.get()) != 0) {
         throw std::runtime_error(std::string("grantpt failed: ") + safe_strerror(errno));
     }
