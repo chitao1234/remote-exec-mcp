@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cerrno>
+#include <cstddef>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -22,6 +23,16 @@
 #include "platform.h"
 #include "posix_child_reaper.h"
 #include "process_session.h"
+
+#if defined(__GNUC__)
+extern "C" int posix_openpt(int flags) __attribute__((weak));
+extern "C" int grantpt(int fd) __attribute__((weak));
+extern "C" int unlockpt(int fd) __attribute__((weak));
+extern "C" char* ptsname(int fd) __attribute__((weak));
+#if defined(__GLIBC__) || defined(__FreeBSD__)
+extern "C" int ptsname_r(int fd, char* buffer, std::size_t buffer_len) __attribute__((weak));
+#endif
+#endif
 
 extern char** environ;
 
@@ -172,7 +183,48 @@ void kill_process_group(pid_t pid) {
     kill(-pid, SIGKILL);
 }
 
+bool posix_pty_api_available() {
+#if defined(__GNUC__)
+    return posix_openpt != nullptr && grantpt != nullptr && unlockpt != nullptr && ptsname != nullptr;
+#else
+    return true;
+#endif
+}
+
+std::string pty_slave_path(int master_fd) {
+#if defined(__GLIBC__) || defined(__FreeBSD__)
+#if defined(__GNUC__)
+    int (*ptsname_r_fn)(int, char*, std::size_t) = ptsname_r;
+    if (ptsname_r_fn != nullptr) {
+        char pts_buf[256];
+        if (ptsname_r_fn(master_fd, pts_buf, sizeof(pts_buf)) != 0) {
+            throw std::runtime_error(std::string("ptsname_r failed: ") + safe_strerror(errno));
+        }
+        return std::string(pts_buf);
+    }
+#else
+    char pts_buf[256];
+    if (ptsname_r(master_fd, pts_buf, sizeof(pts_buf)) != 0) {
+        throw std::runtime_error(std::string("ptsname_r failed: ") + safe_strerror(errno));
+    }
+    return std::string(pts_buf);
+#endif
+#endif
+
+    static BasicMutex ptsname_mutex;
+    BasicLockGuard ptsname_lock(ptsname_mutex);
+    char* slave_name = ptsname(master_fd);
+    if (slave_name == nullptr) {
+        throw std::runtime_error(std::string("ptsname failed: ") + safe_strerror(errno));
+    }
+    return std::string(slave_name);
+}
+
 PosixPtyPair create_posix_pty() {
+    if (!posix_pty_api_available()) {
+        throw std::runtime_error("POSIX PTY APIs are unavailable");
+    }
+
     UniqueFd master(posix_openpt(O_RDWR | O_NOCTTY));
     if (!master.valid()) {
         throw std::runtime_error(std::string("posix_openpt failed: ") + safe_strerror(errno));
@@ -184,25 +236,7 @@ PosixPtyPair create_posix_pty() {
     if (unlockpt(master.get()) != 0) {
         throw std::runtime_error(std::string("unlockpt failed: ") + safe_strerror(errno));
     }
-
-#if defined(__GLIBC__) || defined(__FreeBSD__)
-    char pts_buf[256];
-    if (ptsname_r(master.get(), pts_buf, sizeof(pts_buf)) != 0) {
-        throw std::runtime_error(std::string("ptsname_r failed: ") + safe_strerror(errno));
-    }
-    std::string slave_path(pts_buf);
-#else
-    static BasicMutex ptsname_mutex;
-    std::string slave_path;
-    {
-        BasicLockGuard ptsname_lock(ptsname_mutex);
-        char* slave_name = ptsname(master.get());
-        if (slave_name == nullptr) {
-            throw std::runtime_error(std::string("ptsname failed: ") + safe_strerror(errno));
-        }
-        slave_path.assign(slave_name);
-    }
-#endif
+    const std::string slave_path = pty_slave_path(master.get());
 
     struct winsize size;
     std::memset(&size, 0, sizeof(size));
