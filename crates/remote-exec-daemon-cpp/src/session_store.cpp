@@ -153,6 +153,20 @@ void retire_session(const std::shared_ptr<LiveSession>& session) {
     }
 }
 
+void retire_and_join_session(const std::shared_ptr<LiveSession>& session) {
+    retire_session(session);
+    join_session_pump(session.get());
+}
+
+void retire_remove_and_join_session(BasicMutex& mutex,
+                                    std::map<std::string, std::shared_ptr<LiveSession>>& sessions,
+                                    const std::string& daemon_session_id,
+                                    const std::shared_ptr<LiveSession>& session) {
+    retire_session(session);
+    erase_session_if_current(mutex, sessions, daemon_session_id, session);
+    join_session_pump(session.get());
+}
+
 void apply_write_stdin_request_locked(LiveSession* session,
                                       const std::string& chars,
                                       bool has_pty_size,
@@ -187,9 +201,7 @@ Json finalize_completed_write_stdin(BasicMutex& mutex,
                                     const std::shared_ptr<LiveSession>& session,
                                     const PollResult& poll_result,
                                     unsigned long max_output_tokens) {
-    retire_session(session);
-    erase_session_if_current(mutex, sessions, daemon_session_id, session);
-    join_session_pump(session.get());
+    retire_remove_and_join_session(mutex, sessions, daemon_session_id, session);
     Json response = build_session_response(nullptr,
                                            false,
                                            session->started_at_ms,
@@ -246,8 +258,7 @@ SessionStore::~SessionStore() {
     }
 
     for (std::size_t i = 0; i < sessions.size(); ++i) {
-        retire_session(sessions[i]);
-        join_session_pump(sessions[i].get());
+        retire_and_join_session(sessions[i]);
     }
 }
 
@@ -383,8 +394,7 @@ bool SessionStore::prune_one_session_for_start(unsigned long max_open_sessions) 
             continue;
         }
 
-        retire_session(removed);
-        join_session_pump(removed.get());
+        retire_and_join_session(removed);
 
         unsigned long open_sessions_after_prune = 0UL;
         {
@@ -426,8 +436,7 @@ Json SessionStore::start_command(const std::string& target,
         BasicLockGuard operation_lock(session->operation_mutex_);
         poll_result = wait_for_session_activity(session, timeout_ms, request.max_output_tokens);
     } catch (...) {
-        retire_session(session);
-        join_session_pump(session.get());
+        retire_and_join_session(session);
         throw;
     }
 
@@ -450,8 +459,7 @@ Json SessionStore::start_command(const std::string& target,
     }
 
     if (poll_result.completed) {
-        retire_session(session);
-        join_session_pump(session.get());
+        retire_and_join_session(session);
         Json response = build_session_response(nullptr,
                                                false,
                                                session->started_at_ms,
