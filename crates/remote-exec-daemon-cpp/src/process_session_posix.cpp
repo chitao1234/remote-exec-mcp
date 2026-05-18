@@ -18,6 +18,7 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include "basic_mutex.h"
 #include "platform.h"
 #include "posix_child_reaper.h"
 #include "process_session.h"
@@ -181,18 +182,23 @@ PosixPtyPair create_posix_pty() {
         throw std::runtime_error(std::string("unlockpt failed: ") + safe_strerror(errno));
     }
 
-#ifdef __GLIBC__
+#if defined(__GLIBC__) || defined(__FreeBSD__)
     char pts_buf[256];
     if (ptsname_r(master.get(), pts_buf, sizeof(pts_buf)) != 0) {
         throw std::runtime_error(std::string("ptsname_r failed: ") + safe_strerror(errno));
     }
     std::string slave_path(pts_buf);
 #else
-    char* slave_name = ptsname(master.get());
-    if (slave_name == nullptr) {
-        throw std::runtime_error(std::string("ptsname failed: ") + safe_strerror(errno));
+    static BasicMutex ptsname_mutex;
+    std::string slave_path;
+    {
+        BasicLockGuard ptsname_lock(ptsname_mutex);
+        char* slave_name = ptsname(master.get());
+        if (slave_name == nullptr) {
+            throw std::runtime_error(std::string("ptsname failed: ") + safe_strerror(errno));
+        }
+        slave_path.assign(slave_name);
     }
-    std::string slave_path(slave_name);
 #endif
 
     struct winsize size;
