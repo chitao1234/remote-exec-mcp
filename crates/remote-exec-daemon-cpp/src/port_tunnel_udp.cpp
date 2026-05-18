@@ -1,9 +1,6 @@
 #include "port_tunnel_connection.h"
 #include "port_tunnel_spawn.h"
 #include "port_tunnel_service.h"
-#ifndef _WIN32
-#include "posix_eintr.h"
-#endif
 
 #include <cerrno>
 #include <utility>
@@ -71,24 +68,11 @@ void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& 
             if (socket_value->closed) {
                 return;
             }
-            received =
-#ifdef _WIN32
-                recvfrom(socket_value->socket.get(),
-                         reinterpret_cast<char*>(buffer.data()),
-                         static_cast<int>(buffer.size()),
-                         0,
-                         reinterpret_cast<sockaddr*>(&peer_address),
-                         &peer_len);
-#else
-                posix_eintr::retry<int>([&]() {
-                    return recvfrom(socket_value->socket.get(),
-                                    reinterpret_cast<char*>(buffer.data()),
-                                    static_cast<int>(buffer.size()),
-                                    0,
-                                    reinterpret_cast<sockaddr*>(&peer_address),
-                                    &peer_len);
-                });
-#endif
+            received = recv_port_forward_datagram(socket_value->socket.get(),
+                                                  reinterpret_cast<char*>(buffer.data()),
+                                                  buffer.size(),
+                                                  reinterpret_cast<sockaddr*>(&peer_address),
+                                                  &peer_len);
         }
         if (received < 0) {
             const int error = last_socket_error();
@@ -235,24 +219,11 @@ void PortTunnelConnection::udp_read_loop_connection_local(uint32_t stream_id,
             if (socket_value->closed) {
                 return;
             }
-            received =
-#ifdef _WIN32
-                recvfrom(socket_value->socket.get(),
-                         reinterpret_cast<char*>(buffer.data()),
-                         static_cast<int>(buffer.size()),
-                         0,
-                         reinterpret_cast<sockaddr*>(&peer_address),
-                         &peer_len);
-#else
-                posix_eintr::retry<int>([&]() {
-                    return recvfrom(socket_value->socket.get(),
-                                    reinterpret_cast<char*>(buffer.data()),
-                                    static_cast<int>(buffer.size()),
-                                    0,
-                                    reinterpret_cast<sockaddr*>(&peer_address),
-                                    &peer_len);
-                });
-#endif
+            received = recv_port_forward_datagram(socket_value->socket.get(),
+                                                  reinterpret_cast<char*>(buffer.data()),
+                                                  buffer.size(),
+                                                  reinterpret_cast<sockaddr*>(&peer_address),
+                                                  &peer_len);
         }
         if (received < 0) {
             const int error = last_socket_error();
@@ -309,24 +280,11 @@ void PortTunnelConnection::udp_datagram(const PortTunnelFrame& frame) {
             if (socket_value->closed) {
                 throw PortForwardError(400, "port_connection_closed", "udp bind was closed");
             }
-            sent =
-#ifdef _WIN32
-                sendto(socket_value->socket.get(),
-                       reinterpret_cast<const char*>(frame.data.data()),
-                       static_cast<int>(frame.data.size()),
-                       0,
-                       reinterpret_cast<const sockaddr*>(&peer_address),
-                       peer_len);
-#else
-                posix_eintr::retry<int>([&]() {
-                    return sendto(socket_value->socket.get(),
-                                  reinterpret_cast<const char*>(frame.data.data()),
-                                  static_cast<int>(frame.data.size()),
-                                  0,
-                                  reinterpret_cast<const sockaddr*>(&peer_address),
-                                  peer_len);
-                });
-#endif
+            sent = send_port_forward_datagram(socket_value->socket.get(),
+                                              reinterpret_cast<const char*>(frame.data.data()),
+                                              frame.data.size(),
+                                              reinterpret_cast<const sockaddr*>(&peer_address),
+                                              peer_len);
         }
         if (sent >= 0) {
             break;

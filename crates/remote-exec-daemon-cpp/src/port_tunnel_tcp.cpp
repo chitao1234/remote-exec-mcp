@@ -1,9 +1,6 @@
 #include "port_tunnel_connection.h"
 #include "port_forward_socket_ops.h"
 #include "port_tunnel_service.h"
-#ifndef _WIN32
-#include "posix_eintr.h"
-#endif
 
 #include <cerrno>
 #include <exception>
@@ -69,13 +66,7 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
                 return;
             }
             accepted =
-#ifdef _WIN32
-                accept(listener->listener.get(), reinterpret_cast<sockaddr*>(&peer_address), &peer_len);
-#else
-                posix_eintr::retry<int>([&]() {
-                    return accept(listener->listener.get(), reinterpret_cast<sockaddr*>(&peer_address), &peer_len);
-                });
-#endif
+                accept_port_forward_peer(listener->listener.get(), reinterpret_cast<sockaddr*>(&peer_address), &peer_len);
         }
         if (accepted == INVALID_SOCKET) {
             const int error = last_socket_error();
@@ -262,11 +253,7 @@ void PortTunnelConnection::tcp_write_loop(uint32_t stream_id, std::shared_ptr<Tu
             return;
         }
     }
-#ifdef _WIN32
-    shutdown(stream->socket.get(), SD_SEND);
-#else
-    shutdown(stream->socket.get(), SHUT_WR);
-#endif
+    shutdown_port_forward_send(stream->socket.get());
 }
 
 void PortTunnelConnection::tcp_data(uint32_t stream_id, const std::vector<unsigned char>& data) {

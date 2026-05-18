@@ -198,6 +198,67 @@ bool tcp_connect_with_timeout(SOCKET socket, const sockaddr* address, socklen_t 
 
 } // namespace
 
+SOCKET accept_port_forward_peer(SOCKET listener, sockaddr* peer_address, socklen_t* peer_len) {
+#ifdef _WIN32
+    return accept(listener, peer_address, peer_len);
+#else
+    return posix_eintr::retry<int>([&]() { return accept(listener, peer_address, peer_len); });
+#endif
+}
+
+int recv_port_forward_datagram(SOCKET socket,
+                               char* data,
+                               std::size_t size,
+                               sockaddr* peer_address,
+                               socklen_t* peer_len) {
+#ifdef _WIN32
+    return recvfrom(socket,
+                    data,
+                    static_cast<int>(bounded_socket_io_size(size)),
+                    0,
+                    peer_address,
+                    peer_len);
+#else
+    return posix_eintr::retry<int>([&]() {
+        return recvfrom(socket,
+                        data,
+                        static_cast<int>(bounded_socket_io_size(size)),
+                        0,
+                        peer_address,
+                        peer_len);
+    });
+#endif
+}
+
+int send_port_forward_datagram(SOCKET socket,
+                               const char* data,
+                               std::size_t size,
+                               const sockaddr* peer_address,
+                               socklen_t peer_len) {
+    if (size > static_cast<std::size_t>(INT_MAX)) {
+#ifdef _WIN32
+        WSASetLastError(WSAEMSGSIZE);
+#else
+        errno = EMSGSIZE;
+#endif
+        return -1;
+    }
+#ifdef _WIN32
+    return sendto(socket, data, static_cast<int>(size), 0, peer_address, peer_len);
+#else
+    return posix_eintr::retry<int>(
+        [&]() { return sendto(socket, data, static_cast<int>(size), 0, peer_address, peer_len); });
+#endif
+}
+
+void shutdown_port_forward_send(SOCKET socket) {
+#ifdef _WIN32
+    shutdown(socket, SD_SEND);
+#else
+    shutdown(socket, SHUT_WR);
+#endif
+}
+
 std::string printable_port_forward_endpoint(const sockaddr* address, socklen_t address_len) {
     char host[NI_MAXHOST];
     char service[NI_MAXSERV];
