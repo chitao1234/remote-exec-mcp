@@ -205,6 +205,11 @@ void PortTunnelConnection::tcp_read_loop(uint32_t stream_id, std::shared_ptr<Tun
             return;
         }
         if (received < 0) {
+#ifndef _WIN32
+            if (last_socket_error() == EINTR) {
+                continue;
+            }
+#endif
             if (!stream->is_closed()) {
                 send_error(stream_id, "port_read_failed", socket_error_message("recv"));
             }
