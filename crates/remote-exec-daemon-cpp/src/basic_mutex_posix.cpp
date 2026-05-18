@@ -18,9 +18,32 @@ void BasicMutex::unlock() {
     pthread_mutex_unlock(&mutex_);
 }
 
-BasicCondVar::BasicCondVar() {
-    pthread_cond_init(&cond_, nullptr);
+namespace {
+
+bool init_condvar_monotonic(pthread_cond_t* cond) {
+#if defined(__APPLE__)
+    pthread_cond_init(cond, nullptr);
+    return false;
+#else
+    pthread_condattr_t attr;
+    if (pthread_condattr_init(&attr) != 0) {
+        pthread_cond_init(cond, nullptr);
+        return false;
+    }
+    if (pthread_condattr_setclock(&attr, CLOCK_MONOTONIC) != 0) {
+        pthread_condattr_destroy(&attr);
+        pthread_cond_init(cond, nullptr);
+        return false;
+    }
+    pthread_cond_init(cond, &attr);
+    pthread_condattr_destroy(&attr);
+    return true;
+#endif
 }
+
+} // namespace
+
+BasicCondVar::BasicCondVar() : uses_monotonic_(init_condvar_monotonic(&cond_)) {}
 
 BasicCondVar::~BasicCondVar() {
     pthread_cond_destroy(&cond_);
@@ -32,7 +55,7 @@ void BasicCondVar::wait(BasicMutex& mutex) {
 
 bool BasicCondVar::timed_wait_ms(BasicMutex& mutex, unsigned long timeout_ms) {
     struct timespec deadline;
-    clock_gettime(CLOCK_REALTIME, &deadline);
+    clock_gettime(uses_monotonic_ ? CLOCK_MONOTONIC : CLOCK_REALTIME, &deadline);
     deadline.tv_sec += static_cast<time_t>(timeout_ms / 1000UL);
     deadline.tv_nsec += static_cast<long>((timeout_ms % 1000UL) * 1000000UL);
     if (deadline.tv_nsec >= 1000000000L) {

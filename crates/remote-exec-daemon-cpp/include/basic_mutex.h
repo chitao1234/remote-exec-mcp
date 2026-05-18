@@ -47,6 +47,7 @@ private:
     long waiters_;
 #else
     pthread_cond_t cond_;
+    bool uses_monotonic_;
 #endif
 };
 
