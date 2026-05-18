@@ -1,6 +1,7 @@
 #include "test_assert.h"
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <sstream>
 #include <string>
 
@@ -20,6 +21,20 @@ namespace fs = test_fs;
 
 static const unsigned long TEST_TIMEOUT_MS = 1000UL;
 
+static DaemonConfig make_runtime_test_config(const fs::path& root) {
+    DaemonConfig config;
+    config.target = "cpp-test";
+    config.listen_host = "127.0.0.1";
+    config.listen_port = 0;
+    config.default_workdir = root.string();
+    config.default_shell.clear();
+    config.allow_login_shell = true;
+    config.max_request_header_bytes = DEFAULT_MAX_REQUEST_HEADER_BYTES;
+    config.max_request_body_bytes = DEFAULT_MAX_REQUEST_BODY_BYTES;
+    config.max_open_sessions = DEFAULT_MAX_OPEN_SESSIONS;
+    return config;
+}
+
 static std::string read_all_from_socket(SOCKET socket) {
     std::string output;
     char buffer[4096];
@@ -31,6 +46,19 @@ static std::string read_all_from_socket(SOCKET socket) {
         output.append(buffer, static_cast<std::size_t>(received));
     }
     return output;
+}
+
+static std::string read_http_head_from_socket(SOCKET socket) {
+    set_socket_timeout_ms(socket, TEST_TIMEOUT_MS);
+    std::string response;
+    while (response.find("\r\n\r\n") == std::string::npos) {
+        char ch = '\0';
+        const int received = recv(socket, &ch, 1, 0);
+        TEST_ASSERT(received > 0);
+        response.push_back(ch);
+    }
+    set_socket_timeout_ms(socket, 0UL);
+    return response;
 }
 
 static bool wait_for_active_connections(ConnectionManager& manager, unsigned long expected, unsigned long timeout_ms) {
@@ -91,32 +119,84 @@ static void assert_health_request(ServerRuntime& runtime, unsigned short port) {
     TEST_ASSERT(wait_for_active_connections(runtime.connection_manager(), 0UL, TEST_TIMEOUT_MS));
 }
 
+static std::unique_ptr<ServerRuntime> start_runtime(const DaemonConfig& config, unsigned short* port) {
+    std::unique_ptr<ServerRuntime> runtime(new ServerRuntime(config));
+    runtime->start_accept_loop();
+    *port = runtime->bound_port();
+    TEST_ASSERT(*port != 0);
+    return runtime;
+}
+
+static void assert_runtime_shutdown_with_idle_connection(const DaemonConfig& config) {
+    unsigned short port = 0;
+    std::unique_ptr<ServerRuntime> runtime = start_runtime(config, &port);
+    UniqueSocket client(connect_client(port));
+    TEST_ASSERT(wait_for_active_connections(runtime->connection_manager(), 1UL, TEST_TIMEOUT_MS));
+
+    runtime->request_shutdown();
+    runtime->join();
+    TEST_ASSERT(runtime->connection_manager().active_count() == 0UL);
+}
+
+static void assert_runtime_shutdown_with_blocked_request_body(const DaemonConfig& config) {
+    unsigned short port = 0;
+    std::unique_ptr<ServerRuntime> runtime = start_runtime(config, &port);
+    UniqueSocket client(connect_client(port));
+    TEST_ASSERT(wait_for_active_connections(runtime->connection_manager(), 1UL, TEST_TIMEOUT_MS));
+
+    send_all(client.get(),
+             "POST /v1/health HTTP/1.1\r\n"
+             "Content-Length: 100\r\n"
+             "\r\n"
+             "partial-body");
+
+    runtime->request_shutdown();
+    runtime->join();
+    TEST_ASSERT(runtime->connection_manager().active_count() == 0UL);
+}
+
+static void assert_runtime_shutdown_with_upgraded_tunnel_connection(const DaemonConfig& config) {
+    unsigned short port = 0;
+    std::unique_ptr<ServerRuntime> runtime = start_runtime(config, &port);
+    UniqueSocket client(connect_client(port));
+    TEST_ASSERT(wait_for_active_connections(runtime->connection_manager(), 1UL, TEST_TIMEOUT_MS));
+
+    send_all(client.get(),
+             "POST /v1/port/tunnel HTTP/1.1\r\n"
+             "Connection: Upgrade\r\n"
+             "Upgrade: remote-exec-port-tunnel\r\n"
+             "X-Remote-Exec-Port-Tunnel-Version: 4\r\n"
+             "Content-Length: 0\r\n"
+             "\r\n");
+    const std::string response = read_http_head_from_socket(client.get());
+    TEST_ASSERT(response.find("HTTP/1.1 101 Switching Protocols\r\n") == 0);
+
+    runtime->request_shutdown();
+    runtime->join();
+    TEST_ASSERT(runtime->connection_manager().active_count() == 0UL);
+}
+
 int main() {
     NetworkSession network;
     const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-server-runtime-test";
     fs::remove_all(root);
     fs::create_directories(root);
 
-    DaemonConfig config;
-    config.target = "cpp-test";
-    config.listen_host = "127.0.0.1";
-    config.listen_port = 0;
-    config.default_workdir = root.string();
-    config.default_shell.clear();
-    config.allow_login_shell = true;
-    config.max_request_header_bytes = DEFAULT_MAX_REQUEST_HEADER_BYTES;
-    config.max_request_body_bytes = DEFAULT_MAX_REQUEST_BODY_BYTES;
-    config.max_open_sessions = DEFAULT_MAX_OPEN_SESSIONS;
+    const DaemonConfig config = make_runtime_test_config(root);
 
-    ServerRuntime runtime(config);
-    runtime.start_accept_loop();
-    const unsigned short port = runtime.bound_port();
-    TEST_ASSERT(port != 0);
-    assert_health_request(runtime, port);
+    {
+        unsigned short port = 0;
+        std::unique_ptr<ServerRuntime> runtime = start_runtime(config, &port);
+        assert_health_request(*runtime, port);
 
-    runtime.request_shutdown();
-    runtime.maintenance_once();
-    TEST_ASSERT(runtime.connection_manager().active_count() == 0UL);
-    runtime.join();
-    TEST_ASSERT(runtime.connection_manager().active_count() == 0UL);
+        runtime->request_shutdown();
+        runtime->maintenance_once();
+        TEST_ASSERT(runtime->connection_manager().active_count() == 0UL);
+        runtime->join();
+        TEST_ASSERT(runtime->connection_manager().active_count() == 0UL);
+    }
+
+    assert_runtime_shutdown_with_idle_connection(config);
+    assert_runtime_shutdown_with_blocked_request_body(config);
+    assert_runtime_shutdown_with_upgraded_tunnel_connection(config);
 }
