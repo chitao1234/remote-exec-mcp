@@ -1,6 +1,9 @@
 #include "port_tunnel_connection.h"
 #include "port_forward_socket_ops.h"
 #include "port_tunnel_service.h"
+#ifndef _WIN32
+#include "posix_eintr.h"
+#endif
 
 #include <cerrno>
 #include <exception>
@@ -65,11 +68,18 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
             if (listener->closed) {
                 return;
             }
-            accepted = accept(listener->listener.get(), reinterpret_cast<sockaddr*>(&peer_address), &peer_len);
+            accepted =
+#ifdef _WIN32
+                accept(listener->listener.get(), reinterpret_cast<sockaddr*>(&peer_address), &peer_len);
+#else
+                posix_eintr::retry<int>([&]() {
+                    return accept(listener->listener.get(), reinterpret_cast<sockaddr*>(&peer_address), &peer_len);
+                });
+#endif
         }
         if (accepted == INVALID_SOCKET) {
             const int error = last_socket_error();
-            if (receive_timeout_error(error) || error == EINTR || error == ECONNABORTED) {
+            if (receive_timeout_error(error) || error == ECONNABORTED) {
                 continue;
             }
             if (listener->is_closed() || session_is_unavailable(session)) {
@@ -196,7 +206,7 @@ void PortTunnelConnection::tcp_read_loop(uint32_t stream_id, std::shared_ptr<Tun
     std::vector<unsigned char> buffer(READ_BUFFER_SIZE);
     for (;;) {
         const int received =
-            recv(stream->socket.get(), reinterpret_cast<char*>(buffer.data()), static_cast<int>(buffer.size()), 0);
+            recv_bounded(stream->socket.get(), reinterpret_cast<char*>(buffer.data()), buffer.size(), 0);
         if (received == 0) {
             if (stream->is_closed()) {
                 return;
@@ -205,11 +215,6 @@ void PortTunnelConnection::tcp_read_loop(uint32_t stream_id, std::shared_ptr<Tun
             return;
         }
         if (received < 0) {
-#ifndef _WIN32
-            if (last_socket_error() == EINTR) {
-                continue;
-            }
-#endif
             if (!stream->is_closed()) {
                 send_error(stream_id, "port_read_failed", socket_error_message("recv"));
             }

@@ -22,7 +22,11 @@
 #include "path_policy.h"
 #include "path_utils.h"
 #include "platform.h"
+#ifndef _WIN32
+#include "posix_eintr.h"
+#endif
 #include "scoped_file.h"
+#include "stdio_retry.h"
 
 namespace {
 
@@ -245,7 +249,7 @@ std::string read_text_file(const std::string& path) {
     std::string text;
     char buffer[8192];
     while (true) {
-        const std::size_t received = std::fread(buffer, 1, sizeof(buffer), input.get());
+        const std::size_t received = stdio_retry::fread_some(input.get(), buffer, sizeof(buffer));
         if (received > 0U) {
             text.append(buffer, received);
         }
@@ -271,14 +275,14 @@ void write_text_atomic(const std::string& path, const std::string& content) {
     if (!output.valid()) {
         throw std::runtime_error("unable to write " + temp_path);
     }
-    if (!content.empty() && std::fwrite(content.data(), 1, content.size(), output.get()) != content.size()) {
+    if (!content.empty() && !stdio_retry::fwrite_all(output.get(), content.data(), content.size())) {
         throw std::runtime_error("unable to write " + temp_path);
     }
     if (output.close() != 0) {
         throw std::runtime_error("unable to write " + temp_path);
     }
 #ifndef _WIN32
-    if (preserve_mode && chmod(temp_path.c_str(), existing.st_mode) != 0) {
+    if (preserve_mode && posix_eintr::retry<int>([&]() { return chmod(temp_path.c_str(), existing.st_mode); }) != 0) {
         (void)path_utils::remove_path(temp_path);
         throw std::runtime_error("unable to preserve mode for " + temp_path);
     }

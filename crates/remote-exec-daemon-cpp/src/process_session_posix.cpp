@@ -22,6 +22,7 @@
 #include "basic_mutex.h"
 #include "platform.h"
 #include "posix_child_reaper.h"
+#include "posix_eintr.h"
 #include "process_session.h"
 
 #if defined(__GNUC__)
@@ -127,8 +128,8 @@ struct PosixPtyPair {
 };
 
 void set_fd_cloexec_or_throw(int fd, const std::string& label) {
-    const int flags = fcntl(fd, F_GETFD);
-    if (flags < 0 || fcntl(fd, F_SETFD, flags | FD_CLOEXEC) != 0) {
+    const int flags = posix_eintr::retry<int>([&]() { return fcntl(fd, F_GETFD); });
+    if (flags < 0 || posix_eintr::retry<int>([&]() { return fcntl(fd, F_SETFD, flags | FD_CLOEXEC); }) != 0) {
         throw std::runtime_error(label + " fcntl(FD_CLOEXEC) failed: " + safe_strerror(errno));
     }
 }
@@ -136,11 +137,11 @@ void set_fd_cloexec_or_throw(int fd, const std::string& label) {
 PosixPipePair create_posix_pipe(const char* label) {
     int fds[2];
 #ifdef __linux__
-    if (pipe2(fds, O_CLOEXEC) != 0) {
+    if (posix_eintr::retry<int>([&]() { return pipe2(fds, O_CLOEXEC); }) != 0) {
         throw std::runtime_error(std::string(label) + " failed: " + safe_strerror(errno));
     }
 #else
-    if (pipe(fds) != 0) {
+    if (posix_eintr::retry<int>([&]() { return pipe(fds); }) != 0) {
         throw std::runtime_error(std::string(label) + " failed: " + safe_strerror(errno));
     }
     try {
@@ -163,10 +164,10 @@ UniqueFd open_dev_null_read() {
 #ifdef O_CLOEXEC
     flags |= O_CLOEXEC;
 #endif
-    int raw_fd = open("/dev/null", flags);
+    int raw_fd = posix_eintr::retry<int>([&]() { return open("/dev/null", flags); });
 #ifdef O_CLOEXEC
     if (raw_fd < 0 && errno == EINVAL) {
-        raw_fd = open("/dev/null", O_RDONLY);
+        raw_fd = posix_eintr::retry<int>([&]() { return open("/dev/null", O_RDONLY); });
     }
 #endif
     UniqueFd fd(raw_fd);
@@ -225,15 +226,15 @@ PosixPtyPair create_posix_pty() {
         throw std::runtime_error("POSIX PTY APIs are unavailable");
     }
 
-    UniqueFd master(posix_openpt(O_RDWR | O_NOCTTY));
+    UniqueFd master(posix_eintr::retry<int>([]() { return posix_openpt(O_RDWR | O_NOCTTY); }));
     if (!master.valid()) {
         throw std::runtime_error(std::string("posix_openpt failed: ") + safe_strerror(errno));
     }
     set_fd_cloexec_or_throw(master.get(), "pty master");
-    if (grantpt(master.get()) != 0) {
+    if (posix_eintr::retry<int>([&]() { return grantpt(master.get()); }) != 0) {
         throw std::runtime_error(std::string("grantpt failed: ") + safe_strerror(errno));
     }
-    if (unlockpt(master.get()) != 0) {
+    if (posix_eintr::retry<int>([&]() { return unlockpt(master.get()); }) != 0) {
         throw std::runtime_error(std::string("unlockpt failed: ") + safe_strerror(errno));
     }
     const std::string slave_path = pty_slave_path(master.get());
@@ -242,7 +243,7 @@ PosixPtyPair create_posix_pty() {
     std::memset(&size, 0, sizeof(size));
     size.ws_row = DEFAULT_PTY_ROWS;
     size.ws_col = DEFAULT_PTY_COLS;
-    if (ioctl(master.get(), TIOCSWINSZ, &size) != 0) {
+    if (posix_eintr::retry<int>([&]() { return ioctl(master.get(), TIOCSWINSZ, &size); }) != 0) {
         throw std::runtime_error(std::string("ioctl(TIOCSWINSZ) failed: ") + safe_strerror(errno));
     }
 
@@ -324,16 +325,14 @@ bool readable_now(int fd) {
     descriptor.revents = 0;
 
     for (;;) {
-        const int result = poll(&descriptor, 1, 0);
+        const int result = posix_eintr::poll_for_ms(&descriptor, 1, 0UL);
         if (result > 0) {
             return (descriptor.revents & (POLLIN | POLLHUP | POLLERR)) != 0;
         }
         if (result == 0) {
             return false;
         }
-        if (errno != EINTR) {
-            throw std::runtime_error(std::string("poll failed: ") + safe_strerror(errno));
-        }
+        throw std::runtime_error(std::string("poll failed: ") + safe_strerror(errno));
     }
 }
 
@@ -344,12 +343,9 @@ void wait_until_readable(int fd) {
     descriptor.revents = 0;
 
     for (;;) {
-        const int result = poll(&descriptor, 1, -1);
+        const int result = posix_eintr::poll_forever(&descriptor, 1);
         if (result > 0) {
             return;
-        }
-        if (result < 0 && errno == EINTR) {
-            continue;
         }
         if (result < 0) {
             throw std::runtime_error(std::string("poll failed: ") + safe_strerror(errno));
@@ -437,7 +433,7 @@ std::string resolve_exec_path(const std::string& program, const ExecEnvironment&
         }
         const std::string dir = current.empty() ? "." : current;
         const std::string candidate = dir + "/" + program;
-        if (access(candidate.c_str(), X_OK) == 0) {
+        if (posix_eintr::retry<int>([&]() { return access(candidate.c_str(), X_OK); }) == 0) {
             return candidate;
         }
         current.clear();
@@ -460,13 +456,15 @@ void exec_shell_child(const std::vector<char*>& exec_argv,
                       const ExecEnvironment& environment,
                       const std::string& workdir) {
     signal(SIGPIPE, SIG_DFL);
-    if (!workdir.empty() && chdir(workdir.c_str()) != 0) {
+    if (!workdir.empty() && posix_eintr::retry<int>([&]() { return chdir(workdir.c_str()); }) != 0) {
         _exit(126);
     }
 
-    execve(executable_path.c_str(),
-           const_cast<char* const*>(&exec_argv[0]),
-           const_cast<char* const*>(&environment.pointers[0]));
+    posix_eintr::retry<int>([&]() {
+        return execve(executable_path.c_str(),
+                      const_cast<char* const*>(&exec_argv[0]),
+                      const_cast<char* const*>(&environment.pointers[0]));
+    });
     _exit(127);
 }
 
@@ -499,11 +497,9 @@ public:
         const char* data = chars.data();
         std::size_t remaining = chars.size();
         while (remaining > 0) {
-            const ssize_t written = write(input_write_.get(), data, remaining);
+            const ssize_t written =
+                posix_eintr::retry<ssize_t>([&]() { return write(input_write_.get(), data, remaining); });
             if (written < 0) {
-                if (errno == EINTR) {
-                    continue;
-                }
                 if (errno == EPIPE || errno == EIO) {
                     throw ProcessStdinClosedError(
                         "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open");
@@ -529,7 +525,7 @@ public:
         std::memset(&size, 0, sizeof(size));
         size.ws_row = rows;
         size.ws_col = cols;
-        if (ioctl(input_write_.get(), TIOCSWINSZ, &size) != 0) {
+        if (posix_eintr::retry<int>([&]() { return ioctl(input_write_.get(), TIOCSWINSZ, &size); }) != 0) {
             throw std::runtime_error(std::string("ioctl(TIOCSWINSZ) failed: ") + safe_strerror(errno));
         }
     }
@@ -543,7 +539,8 @@ public:
             wait_until_readable(read_fd);
         }
         while (block || readable_now(read_fd)) {
-            const ssize_t read_count = read(read_fd, buffer, sizeof(buffer));
+            const ssize_t read_count =
+                posix_eintr::retry<ssize_t>([&]() { return read(read_fd, buffer, sizeof(buffer)); });
             if (read_count > 0) {
                 raw.append(buffer, static_cast<std::size_t>(read_count));
                 block = false;
@@ -559,9 +556,6 @@ public:
                 }
                 *eof = true;
                 break;
-            }
-            if (errno == EINTR) {
-                continue;
             }
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 break;
@@ -678,16 +672,18 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
 
         if (pid == 0) {
             setsid();
-            const int slave_fd = open(pty.slave_path.c_str(), O_RDWR);
+            const int slave_fd = posix_eintr::retry<int>([&]() { return open(pty.slave_path.c_str(), O_RDWR); });
             if (slave_fd < 0) {
                 _exit(126);
             }
 #ifdef TIOCSCTTY
-            ioctl(slave_fd, TIOCSCTTY, 0);
+            (void)posix_eintr::retry<int>([&]() { return ioctl(slave_fd, TIOCSCTTY, 0); });
 #endif
-            dup2(slave_fd, STDIN_FILENO);
-            dup2(slave_fd, STDOUT_FILENO);
-            dup2(slave_fd, STDERR_FILENO);
+            if (posix_eintr::retry<int>([&]() { return dup2(slave_fd, STDIN_FILENO); }) < 0 ||
+                posix_eintr::retry<int>([&]() { return dup2(slave_fd, STDOUT_FILENO); }) < 0 ||
+                posix_eintr::retry<int>([&]() { return dup2(slave_fd, STDERR_FILENO); }) < 0) {
+                _exit(126);
+            }
             if (slave_fd > STDERR_FILENO) {
                 close(slave_fd);
             }
@@ -707,11 +703,12 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     }
 
     if (pid == 0) {
-        if (setpgid(0, 0) != 0) {
+        if (posix_eintr::retry<int>([]() { return setpgid(0, 0); }) != 0) {
             _exit(126);
         }
-        if (dup2(stdin_null.get(), STDIN_FILENO) < 0 || dup2(stdout_pipe.write_end.get(), STDOUT_FILENO) < 0 ||
-            dup2(stdout_pipe.write_end.get(), STDERR_FILENO) < 0) {
+        if (posix_eintr::retry<int>([&]() { return dup2(stdin_null.get(), STDIN_FILENO); }) < 0 ||
+            posix_eintr::retry<int>([&]() { return dup2(stdout_pipe.write_end.get(), STDOUT_FILENO); }) < 0 ||
+            posix_eintr::retry<int>([&]() { return dup2(stdout_pipe.write_end.get(), STDERR_FILENO); }) < 0) {
             _exit(126);
         }
 
@@ -721,7 +718,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
         exec_shell_child(exec_argv, executable_path, exec_environment, workdir);
     }
 
-    setpgid(pid, pid);
+    posix_eintr::retry<int>([&]() { return setpgid(pid, pid); });
     stdin_null.reset();
     stdout_pipe.write_end.reset();
 

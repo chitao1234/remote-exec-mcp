@@ -10,6 +10,9 @@
 #endif
 
 #include "path_utils.h"
+#ifndef _WIN32
+#include "posix_eintr.h"
+#endif
 #include "rpc_failures.h"
 #include "transfer_glob.h"
 #include "transfer_ops_internal.h"
@@ -55,7 +58,8 @@ void handle_skipped_symlink(ExportContext* context, const std::string& path) {
 #ifndef _WIN32
 std::string read_symlink_target(const std::string& path) {
     char target_buffer[4096];
-    const ssize_t target_len = readlink(path.c_str(), target_buffer, sizeof(target_buffer) - 1);
+    const ssize_t target_len =
+        posix_eintr::retry<ssize_t>([&]() { return readlink(path.c_str(), target_buffer, sizeof(target_buffer) - 1); });
     if (target_len < 0) {
         throw std::runtime_error("unable to read symlink " + path);
     }

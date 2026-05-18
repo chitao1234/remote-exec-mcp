@@ -17,6 +17,7 @@
 #include "rpc_failures.h"
 #include "path_utils.h"
 #include "scoped_file.h"
+#include "stdio_retry.h"
 #include "transfer_ops_internal.h"
 
 using Json = nlohmann::json;
@@ -235,7 +236,7 @@ void append_file_entry_from_path(TransferArchiveSink* archive,
     std::uint64_t remaining = file_size;
     while (remaining > 0U) {
         const std::size_t requested = remaining < sizeof(buffer) ? static_cast<std::size_t>(remaining) : sizeof(buffer);
-        const std::size_t received = std::fread(buffer, 1, requested, input.get());
+        const std::size_t received = stdio_retry::fread_some(input.get(), buffer, requested);
         if (received != requested) {
             throw std::runtime_error("unable to read transfer source");
         }

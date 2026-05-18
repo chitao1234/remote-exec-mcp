@@ -21,6 +21,7 @@
 
 #include "basic_mutex.h"
 #include "logging.h"
+#include "posix_eintr.h"
 
 namespace {
 
@@ -38,30 +39,26 @@ std::atomic<unsigned long> g_test_reap_delay_ms(0UL);
 #endif
 
 void set_cloexec_nonblock(int fd) {
-    const int fd_flags = fcntl(fd, F_GETFD, 0);
+    const int fd_flags = posix_eintr::retry<int>([&]() { return fcntl(fd, F_GETFD, 0); });
     if (fd_flags >= 0) {
-        fcntl(fd, F_SETFD, fd_flags | FD_CLOEXEC);
+        posix_eintr::retry<int>([&]() { return fcntl(fd, F_SETFD, fd_flags | FD_CLOEXEC); });
     }
-    const int status_flags = fcntl(fd, F_GETFL, 0);
+    const int status_flags = posix_eintr::retry<int>([&]() { return fcntl(fd, F_GETFL, 0); });
     if (status_flags >= 0) {
-        fcntl(fd, F_SETFL, status_flags | O_NONBLOCK);
+        posix_eintr::retry<int>([&]() { return fcntl(fd, F_SETFL, status_flags | O_NONBLOCK); });
     }
 }
 
 void sigchld_handler(int) {
     if (g_signal_pipe_write >= 0) {
         const unsigned char byte = 1U;
-        (void)write(g_signal_pipe_write, &byte, 1U);
+        ssize_t ignored = write(g_signal_pipe_write, &byte, 1U);
+        (void)ignored;
     }
 }
 
 pid_t waitpid_retry_on_eintr(pid_t pid, int* status, int options) {
-    for (;;) {
-        const pid_t result = waitpid(pid, status, options);
-        if (result >= 0 || errno != EINTR) {
-            return result;
-        }
-    }
+    return posix_eintr::retry<pid_t>([&]() { return waitpid(pid, status, options); });
 }
 
 bool take_reaped_locked(pid_t pid, int* status) {
@@ -111,7 +108,8 @@ void reap_registered_children() {
 
 void drain_signal_pipe() {
     unsigned char buffer[64];
-    while (g_signal_pipe_read >= 0 && read(g_signal_pipe_read, buffer, sizeof(buffer)) > 0) {
+    while (g_signal_pipe_read >= 0 &&
+           posix_eintr::retry<ssize_t>([&]() { return read(g_signal_pipe_read, buffer, sizeof(buffer)); }) > 0) {
     }
 }
 
@@ -121,13 +119,7 @@ void reaper_loop() {
         descriptor.fd = g_signal_pipe_read;
         descriptor.events = POLLIN;
         descriptor.revents = 0;
-        int ready;
-        for (;;) {
-            ready = poll(&descriptor, 1, 1000);
-            if (ready >= 0 || errno != EINTR) {
-                break;
-            }
-        }
+        const int ready = posix_eintr::poll_for_ms(&descriptor, 1, 1000UL);
         if (ready > 0) {
             drain_signal_pipe();
         }
@@ -143,7 +135,7 @@ void install_posix_child_reaper() {
         return;
     }
     int fds[2];
-    if (pipe(fds) != 0) {
+    if (posix_eintr::retry<int>([&]() { return pipe(fds); }) != 0) {
         throw std::runtime_error(std::string("pipe(SIGCHLD) failed: ") + std::strerror(errno));
     }
     g_signal_pipe_read = fds[0];
@@ -172,7 +164,7 @@ void shutdown_posix_child_reaper() {
     g_stopping.store(true, std::memory_order_relaxed);
     if (g_signal_pipe_write >= 0) {
         const char byte = 1;
-        ssize_t ignored = write(g_signal_pipe_write, &byte, 1);
+        ssize_t ignored = posix_eintr::retry<ssize_t>([&]() { return write(g_signal_pipe_write, &byte, 1); });
         (void)ignored;
     }
     if (g_reaper_thread != nullptr) {

@@ -18,6 +18,9 @@
 #endif
 
 #include "path_utils.h"
+#ifndef _WIN32
+#include "posix_eintr.h"
+#endif
 #include "rpc_failures.h"
 #include "transfer_ops_internal.h"
 
@@ -202,11 +205,11 @@ void write_symlink(const std::string& target, const std::string& path) {
         if (is_directory(path)) {
             throw TransferFailure(TransferRpcCode::DestinationUnsupported, "destination path is a directory");
         }
-        if (std::remove(path.c_str()) != 0) {
+        if (!path_utils::remove_path(path)) {
             throw std::runtime_error("unable to remove existing file " + path);
         }
     }
-    if (symlink(target.c_str(), path.c_str()) != 0) {
+    if (posix_eintr::retry<int>([&]() { return symlink(target.c_str(), path.c_str()); }) != 0) {
         throw std::runtime_error("unable to create symlink " + path);
     }
 #endif
@@ -244,14 +247,17 @@ std::vector<DirectoryEntry> list_directory_entries(const std::string& path) {
         throw std::runtime_error("unable to read directory " + path);
     }
 #else
-    ScopedDirHandle dir(opendir(path.c_str()));
+    ScopedDirHandle dir(posix_eintr::retry_null<DIR*>([&]() { return opendir(path.c_str()); }));
     if (dir.get() == nullptr) {
         throw std::runtime_error("unable to read directory " + path);
     }
 
     dirent* entry = nullptr;
     errno = 0;
-    while ((entry = readdir(dir.get())) != nullptr) {
+    while ((entry = posix_eintr::retry_null<dirent*>([&]() {
+                errno = 0;
+                return readdir(dir.get());
+            })) != nullptr) {
         const std::string name(entry->d_name);
         if (name == "." || name == "..") {
             continue;

@@ -16,6 +16,10 @@
 #include <unistd.h>
 #endif
 
+#ifndef _WIN32
+#include "posix_eintr.h"
+#endif
+
 namespace path_utils {
 
 #ifdef _WIN32
@@ -138,7 +142,7 @@ void make_directory_if_missing(const std::string& path) {
 #ifdef _WIN32
     if (_wmkdir(wide_from_utf8(path).c_str()) != 0 && errno != EEXIST) {
 #else
-    if (mkdir(path.c_str(), 0777) != 0 && errno != EEXIST) {
+    if (posix_eintr::retry<int>([&]() { return mkdir(path.c_str(), 0777); }) != 0 && errno != EEXIST) {
 #endif
         throw std::runtime_error("unable to create directory " + path);
     }
@@ -174,7 +178,7 @@ FILE* open_file(const std::string& path, const char* mode) {
 #ifdef _WIN32
     return _wfopen(wide_from_utf8(path).c_str(), wide_mode_from_ascii(mode).c_str());
 #else
-    return std::fopen(path.c_str(), mode);
+    return posix_eintr::retry_null<FILE*>([&]() { return std::fopen(path.c_str(), mode); });
 #endif
 }
 
@@ -197,7 +201,7 @@ bool stat_path(const std::string& path, struct stat* st) {
         (static_cast<unsigned long long>(data.nFileSizeHigh) << 32) | data.nFileSizeLow);
     return true;
 #else
-    return stat(path.c_str(), st) == 0;
+    return posix_eintr::retry<int>([&]() { return stat(path.c_str(), st); }) == 0;
 #endif
 }
 
@@ -205,7 +209,7 @@ bool lstat_path(const std::string& path, struct stat* st) {
 #ifdef _WIN32
     return stat_path(path, st);
 #else
-    return lstat(path.c_str(), st) == 0;
+    return posix_eintr::retry<int>([&]() { return lstat(path.c_str(), st); }) == 0;
 #endif
 }
 
@@ -213,7 +217,7 @@ bool remove_path(const std::string& path) {
 #ifdef _WIN32
     return _wremove(wide_from_utf8(path).c_str()) == 0;
 #else
-    return std::remove(path.c_str()) == 0;
+    return posix_eintr::retry<int>([&]() { return std::remove(path.c_str()); }) == 0;
 #endif
 }
 
@@ -221,7 +225,7 @@ bool remove_directory(const std::string& path) {
 #ifdef _WIN32
     return _wrmdir(wide_from_utf8(path).c_str()) == 0;
 #else
-    return rmdir(path.c_str()) == 0;
+    return posix_eintr::retry<int>([&]() { return rmdir(path.c_str()); }) == 0;
 #endif
 }
 
@@ -250,7 +254,7 @@ bool rename_path(const std::string& source, const std::string& destination) {
     errno = last_error_to_errno(last_error);
     return false;
 #else
-    return std::rename(source.c_str(), destination.c_str()) == 0;
+    return posix_eintr::retry<int>([&]() { return std::rename(source.c_str(), destination.c_str()); }) == 0;
 #endif
 }
 

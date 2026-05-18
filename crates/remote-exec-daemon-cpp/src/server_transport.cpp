@@ -15,6 +15,9 @@
 
 #include "http_codec.h"
 #include "http_request.h"
+#ifndef _WIN32
+#include "posix_eintr.h"
+#endif
 #include "server_transport.h"
 #include "server_transport_internal.h"
 
@@ -24,11 +27,21 @@ std::size_t bounded_socket_io_size(std::size_t remaining) {
 }
 
 int recv_bounded(SOCKET client, char* data, std::size_t remaining, int flags) {
+#ifdef _WIN32
     return recv(client, data, static_cast<int>(bounded_socket_io_size(remaining)), flags);
+#else
+    return posix_eintr::retry<int>(
+        [&]() { return recv(client, data, static_cast<int>(bounded_socket_io_size(remaining)), flags); });
+#endif
 }
 
 int send_bounded(SOCKET client, const char* data, std::size_t remaining, int flags) {
+#ifdef _WIN32
     return send(client, data, static_cast<int>(bounded_socket_io_size(remaining)), flags);
+#else
+    return posix_eintr::retry<int>(
+        [&]() { return send(client, data, static_cast<int>(bounded_socket_io_size(remaining)), flags); });
+#endif
 }
 
 namespace {
@@ -94,7 +107,7 @@ bool try_read_http_request_head(SOCKET client, std::size_t max_header_bytes, Htt
     std::size_t search_offset = 0;
 
     for (;;) {
-        const int received = recv(client, buffer, sizeof(buffer), 0);
+        const int received = recv_bounded(client, buffer, sizeof(buffer), 0);
         if (received == 0) {
             if (data.empty()) {
                 return false;
@@ -109,11 +122,6 @@ bool try_read_http_request_head(SOCKET client, std::size_t max_header_bytes, Htt
                 }
                 throw BadHttpRequest("incomplete http request");
             }
-#ifndef _WIN32
-            if (error == EINTR) {
-                continue;
-            }
-#endif
             throw std::runtime_error(socket_error_message("recv"));
         }
 
@@ -231,7 +239,7 @@ std::size_t HttpRequestBodyStream::read_chunked_body(char* data, std::size_t max
 void HttpRequestBodyStream::ensure_raw_available(std::size_t size) {
     while (raw_.size() - raw_offset_ < size) {
         char buffer[HTTP_READ_BUFFER_SIZE];
-        const int received = recv(client_, buffer, sizeof(buffer), 0);
+        const int received = recv_bounded(client_, buffer, sizeof(buffer), 0);
         if (received == 0) {
             throw BadHttpRequest("incomplete http request body");
         }
@@ -240,11 +248,6 @@ void HttpRequestBodyStream::ensure_raw_available(std::size_t size) {
             if (would_block_error(error)) {
                 throw BadHttpRequest("incomplete http request body");
             }
-#ifndef _WIN32
-            if (error == EINTR) {
-                continue;
-            }
-#endif
             throw std::runtime_error(socket_error_message("recv"));
         }
         raw_.append(buffer, received);
@@ -257,7 +260,7 @@ void HttpRequestBodyStream::ensure_raw_line() {
             throw BadHttpRequest("chunked request line too long");
         }
         char buffer[HTTP_READ_BUFFER_SIZE];
-        const int received = recv(client_, buffer, sizeof(buffer), 0);
+        const int received = recv_bounded(client_, buffer, sizeof(buffer), 0);
         if (received == 0) {
             throw BadHttpRequest("incomplete http request body");
         }
@@ -266,11 +269,6 @@ void HttpRequestBodyStream::ensure_raw_line() {
             if (would_block_error(error)) {
                 throw BadHttpRequest("incomplete http request body");
             }
-#ifndef _WIN32
-            if (error == EINTR) {
-                continue;
-            }
-#endif
             throw std::runtime_error(socket_error_message("recv"));
         }
         raw_.append(buffer, received);
@@ -307,11 +305,6 @@ void send_all_bytes(SOCKET client, const char* data, std::size_t size) {
         const int sent = send_bounded(client, data + offset, size - offset, 0);
         if (sent <= 0) {
             const int error = last_socket_error();
-#ifndef _WIN32
-            if (error == EINTR) {
-                continue;
-            }
-#endif
             throw SocketSendError(socket_error_message("send"), peer_disconnected_send_error(error));
         }
         offset += static_cast<std::size_t>(sent);
@@ -330,7 +323,14 @@ SOCKET create_listener(const DaemonConfig& config) {
     hints.ai_flags = AI_PASSIVE;
 
     addrinfo* result = nullptr;
-    if (getaddrinfo(config.listen_host.c_str(), port_buffer, &hints, &result) != 0) {
+    const int resolve_status =
+#ifdef _WIN32
+        getaddrinfo(config.listen_host.c_str(), port_buffer, &hints, &result);
+#else
+        posix_eintr::retry_eai_system(
+            [&]() { return getaddrinfo(config.listen_host.c_str(), port_buffer, &hints, &result); });
+#endif
+    if (resolve_status != 0) {
         throw std::runtime_error("getaddrinfo failed");
     }
 

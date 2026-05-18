@@ -254,7 +254,7 @@ void ServerRuntime::accept_loop() {
             UniqueSocket client(accept_client(listener_socket));
             if (!client.valid()) {
                 const int error = last_socket_error();
-                if (receive_timeout_error(error) || error == EINTR) {
+                if (receive_timeout_error(error)) {
                     break;
                 }
 #ifndef _WIN32

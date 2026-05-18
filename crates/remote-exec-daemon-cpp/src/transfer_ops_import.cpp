@@ -12,8 +12,12 @@
 #endif
 
 #include "path_utils.h"
-#include "scoped_file.h"
+#ifndef _WIN32
+#include "posix_eintr.h"
+#endif
 #include "rpc_failures.h"
+#include "scoped_file.h"
+#include "stdio_retry.h"
 #include "transfer_ops_internal.h"
 
 namespace {
@@ -263,7 +267,7 @@ void copy_reader_to_file(TransferArchiveReader& reader,
     while (remaining > 0U) {
         const std::size_t requested = remaining < sizeof(buffer) ? static_cast<std::size_t>(remaining) : sizeof(buffer);
         read_exact_or_throw(reader, buffer, requested, "truncated tar entry body");
-        if (std::fwrite(buffer, 1, requested, output.get()) != requested) {
+        if (!stdio_retry::fwrite_all(output.get(), buffer, requested)) {
             throw std::runtime_error("unable to write destination file");
         }
         remaining -= static_cast<std::uint64_t>(requested);
@@ -272,10 +276,10 @@ void copy_reader_to_file(TransferArchiveReader& reader,
 #ifndef _WIN32
     if ((mode & 0111U) != 0U) {
         struct stat st;
-        if (fstat(fileno(output.get()), &st) != 0) {
+        if (posix_eintr::retry<int>([&]() { return fstat(fileno(output.get()), &st); }) != 0) {
             throw std::runtime_error("unable to read destination file mode");
         }
-        if (fchmod(fileno(output.get()), st.st_mode | 0111) != 0) {
+        if (posix_eintr::retry<int>([&]() { return fchmod(fileno(output.get()), st.st_mode | 0111); }) != 0) {
             throw std::runtime_error("unable to update destination file mode");
         }
     }

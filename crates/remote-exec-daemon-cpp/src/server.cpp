@@ -15,43 +15,70 @@
 #include "path_utils.h"
 #include "platform.h"
 #ifndef _WIN32
+#include "posix_eintr.h"
 #include "posix_child_reaper.h"
 #endif
 #include "scoped_file.h"
 #include "server.h"
 #include "server_runtime.h"
+#include "stdio_retry.h"
 
 #ifndef _WIN32
 namespace {
 
 int g_shutdown_pipe_read = -1;
 int g_shutdown_pipe_write = -1;
+volatile sig_atomic_t g_shutdown_requested = 0;
 
 void shutdown_signal_handler(int) {
+    g_shutdown_requested = 1;
     const char byte = 1;
-    ssize_t ignored = write(g_shutdown_pipe_write, &byte, 1);
-    (void)ignored;
+    if (g_shutdown_pipe_write >= 0) {
+        ssize_t ignored = write(g_shutdown_pipe_write, &byte, 1);
+        (void)ignored;
+    }
+}
+
+bool set_fd_cloexec_nonblock(int fd) {
+    const int fd_flags = posix_eintr::retry<int>([&]() { return fcntl(fd, F_GETFD); });
+    if (fd_flags < 0 || posix_eintr::retry<int>([&]() { return fcntl(fd, F_SETFD, fd_flags | FD_CLOEXEC); }) != 0) {
+        return false;
+    }
+    const int status_flags = posix_eintr::retry<int>([&]() { return fcntl(fd, F_GETFL); });
+    if (status_flags < 0 ||
+        posix_eintr::retry<int>([&]() { return fcntl(fd, F_SETFL, status_flags | O_NONBLOCK); }) != 0) {
+        return false;
+    }
+    return true;
 }
 
 bool install_shutdown_signal_handlers() {
     int fds[2];
-    if (pipe(fds) != 0) {
+    if (posix_eintr::retry<int>([&]() { return pipe(fds); }) != 0) {
         return false;
     }
     g_shutdown_pipe_read = fds[0];
     g_shutdown_pipe_write = fds[1];
-    fcntl(fds[0], F_SETFD, fcntl(fds[0], F_GETFD) | FD_CLOEXEC);
-    fcntl(fds[0], F_SETFL, fcntl(fds[0], F_GETFL) | O_NONBLOCK);
-    fcntl(fds[1], F_SETFD, fcntl(fds[1], F_GETFD) | FD_CLOEXEC);
-    fcntl(fds[1], F_SETFL, fcntl(fds[1], F_GETFL) | O_NONBLOCK);
+    if (!set_fd_cloexec_nonblock(fds[0]) || !set_fd_cloexec_nonblock(fds[1])) {
+        close(fds[0]);
+        close(fds[1]);
+        g_shutdown_pipe_read = -1;
+        g_shutdown_pipe_write = -1;
+        return false;
+    }
 
     struct sigaction sa;
     std::memset(&sa, 0, sizeof(sa));
     sa.sa_handler = shutdown_signal_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
-    sigaction(SIGTERM, &sa, nullptr);
-    sigaction(SIGINT, &sa, nullptr);
+    if (sigaction(SIGTERM, &sa, nullptr) != 0 || sigaction(SIGINT, &sa, nullptr) != 0) {
+        close(fds[0]);
+        close(fds[1]);
+        g_shutdown_pipe_read = -1;
+        g_shutdown_pipe_write = -1;
+        return false;
+    }
     return true;
 }
 
@@ -60,12 +87,16 @@ void wait_for_shutdown_signal() {
     pfd.fd = g_shutdown_pipe_read;
     pfd.events = POLLIN;
     pfd.revents = 0;
-    for (;;) {
+    while (!g_shutdown_requested) {
+        pfd.revents = 0;
         const int result = poll(&pfd, 1, -1);
         if (result > 0) {
             return;
         }
-        if (result < 0 && errno != EINTR) {
+        if (result < 0 && errno == EINTR) {
+            continue;
+        }
+        if (result < 0) {
             return;
         }
     }
@@ -100,7 +131,7 @@ static void write_test_bound_addr_file(const DaemonConfig& config, unsigned shor
         throw std::runtime_error("failed to open test_bound_addr_file");
     }
     const std::string line = config.listen_host + ":" + std::to_string(bound_port) + "\n";
-    if (std::fwrite(line.data(), 1, line.size(), out.get()) != line.size() || out.close() != 0) {
+    if (!stdio_retry::fwrite_all(out.get(), line.data(), line.size()) || out.close() != 0) {
         throw std::runtime_error("failed to write test_bound_addr_file");
     }
 }

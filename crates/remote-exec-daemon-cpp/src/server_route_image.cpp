@@ -11,6 +11,7 @@
 #include "scoped_file.h"
 #include "server_request_utils.h"
 #include "server_route_image.h"
+#include "stdio_retry.h"
 
 namespace {
 
@@ -56,7 +57,7 @@ std::string read_binary_file_bytes(const std::string& path) {
     std::string bytes;
     char buffer[8192];
     while (true) {
-        const std::size_t received = std::fread(buffer, 1, sizeof(buffer), input.get());
+        const std::size_t received = stdio_retry::fread_some(input.get(), buffer, sizeof(buffer));
         if (received > 0U) {
             bytes.append(buffer, received);
         }

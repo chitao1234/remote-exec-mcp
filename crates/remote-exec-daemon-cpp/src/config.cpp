@@ -10,6 +10,7 @@
 #include "config.h"
 #include "path_utils.h"
 #include "scoped_file.h"
+#include "stdio_retry.h"
 #include "text_utils.h"
 
 typedef std::map<std::string, std::string> ConfigValues;
@@ -178,7 +179,7 @@ static ConfigValues read_config_values(const std::string& path) {
     std::string contents;
     char buffer[4096];
     while (true) {
-        const std::size_t received = std::fread(buffer, 1, sizeof(buffer), input.get());
+        const std::size_t received = stdio_retry::fread_some(input.get(), buffer, sizeof(buffer));
         if (received > 0U) {
             contents.append(buffer, received);
         }

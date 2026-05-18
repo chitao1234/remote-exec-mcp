@@ -18,6 +18,9 @@
 
 #include "path_utils.h"
 #include "platform.h"
+#ifndef _WIN32
+#include "posix_eintr.h"
+#endif
 #include "text_utils.h"
 
 namespace {
@@ -52,7 +55,8 @@ bool is_disallowed_unix_shell(const std::string& shell) {
 
 bool is_executable_file(const std::string& path) {
     struct stat st;
-    return stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode) && access(path.c_str(), X_OK) == 0;
+    return posix_eintr::retry<int>([&]() { return stat(path.c_str(), &st); }) == 0 && S_ISREG(st.st_mode) &&
+           posix_eintr::retry<int>([&]() { return access(path.c_str(), X_OK); }) == 0;
 }
 
 bool probe_unix_shell(const std::string& shell) {
@@ -66,10 +70,8 @@ bool probe_unix_shell(const std::string& shell) {
     }
 
     int status = 0;
-    while (waitpid(pid, &status, 0) < 0) {
-        if (errno != EINTR) {
-            return false;
-        }
+    if (posix_eintr::retry<pid_t>([&]() { return waitpid(pid, &status, 0); }) < 0) {
+        return false;
     }
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }

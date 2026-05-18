@@ -1,6 +1,9 @@
 #include "port_tunnel_connection.h"
 #include "port_tunnel_spawn.h"
 #include "port_tunnel_service.h"
+#ifndef _WIN32
+#include "posix_eintr.h"
+#endif
 
 #include <cerrno>
 #include <utility>
@@ -68,16 +71,28 @@ void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& 
             if (socket_value->closed) {
                 return;
             }
-            received = recvfrom(socket_value->socket.get(),
-                                reinterpret_cast<char*>(buffer.data()),
-                                static_cast<int>(buffer.size()),
-                                0,
-                                reinterpret_cast<sockaddr*>(&peer_address),
-                                &peer_len);
+            received =
+#ifdef _WIN32
+                recvfrom(socket_value->socket.get(),
+                         reinterpret_cast<char*>(buffer.data()),
+                         static_cast<int>(buffer.size()),
+                         0,
+                         reinterpret_cast<sockaddr*>(&peer_address),
+                         &peer_len);
+#else
+                posix_eintr::retry<int>([&]() {
+                    return recvfrom(socket_value->socket.get(),
+                                    reinterpret_cast<char*>(buffer.data()),
+                                    static_cast<int>(buffer.size()),
+                                    0,
+                                    reinterpret_cast<sockaddr*>(&peer_address),
+                                    &peer_len);
+                });
+#endif
         }
         if (received < 0) {
             const int error = last_socket_error();
-            if (receive_timeout_error(error) || error == EINTR) {
+            if (receive_timeout_error(error)) {
                 continue;
             }
             if (socket_value->is_closed() || session_is_unavailable(session)) {
@@ -220,16 +235,28 @@ void PortTunnelConnection::udp_read_loop_connection_local(uint32_t stream_id,
             if (socket_value->closed) {
                 return;
             }
-            received = recvfrom(socket_value->socket.get(),
-                                reinterpret_cast<char*>(buffer.data()),
-                                static_cast<int>(buffer.size()),
-                                0,
-                                reinterpret_cast<sockaddr*>(&peer_address),
-                                &peer_len);
+            received =
+#ifdef _WIN32
+                recvfrom(socket_value->socket.get(),
+                         reinterpret_cast<char*>(buffer.data()),
+                         static_cast<int>(buffer.size()),
+                         0,
+                         reinterpret_cast<sockaddr*>(&peer_address),
+                         &peer_len);
+#else
+                posix_eintr::retry<int>([&]() {
+                    return recvfrom(socket_value->socket.get(),
+                                    reinterpret_cast<char*>(buffer.data()),
+                                    static_cast<int>(buffer.size()),
+                                    0,
+                                    reinterpret_cast<sockaddr*>(&peer_address),
+                                    &peer_len);
+                });
+#endif
         }
         if (received < 0) {
             const int error = last_socket_error();
-            if (receive_timeout_error(error) || error == EINTR) {
+            if (receive_timeout_error(error)) {
                 continue;
             }
             if (!socket_value->is_closed()) {
@@ -282,22 +309,29 @@ void PortTunnelConnection::udp_datagram(const PortTunnelFrame& frame) {
             if (socket_value->closed) {
                 throw PortForwardError(400, "port_connection_closed", "udp bind was closed");
             }
-            sent = sendto(socket_value->socket.get(),
-                          reinterpret_cast<const char*>(frame.data.data()),
-                          static_cast<int>(frame.data.size()),
-                          0,
-                          reinterpret_cast<const sockaddr*>(&peer_address),
-                          peer_len);
+            sent =
+#ifdef _WIN32
+                sendto(socket_value->socket.get(),
+                       reinterpret_cast<const char*>(frame.data.data()),
+                       static_cast<int>(frame.data.size()),
+                       0,
+                       reinterpret_cast<const sockaddr*>(&peer_address),
+                       peer_len);
+#else
+                posix_eintr::retry<int>([&]() {
+                    return sendto(socket_value->socket.get(),
+                                  reinterpret_cast<const char*>(frame.data.data()),
+                                  static_cast<int>(frame.data.size()),
+                                  0,
+                                  reinterpret_cast<const sockaddr*>(&peer_address),
+                                  peer_len);
+                });
+#endif
         }
         if (sent >= 0) {
             break;
         }
         const int error = last_socket_error();
-#ifndef _WIN32
-        if (error == EINTR) {
-            continue;
-        }
-#endif
         if (receive_timeout_error(error)
 #ifndef _WIN32
             || error == ENOBUFS
