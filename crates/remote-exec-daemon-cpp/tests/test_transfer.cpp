@@ -562,6 +562,55 @@ static void assert_file_transfer_blocks_raw_bytes() {
     TEST_ASSERT(rejected);
 }
 
+static void assert_transfer_requires_tar_terminator() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-terminator";
+    fs::remove_all(root);
+    fs::create_directories(root);
+
+    std::string unterminated_file_archive;
+    append_tar_file(unterminated_file_archive, SINGLE_FILE_ENTRY, "payload");
+    bool rejected_file = false;
+    try {
+        (void)import_path(unterminated_file_archive,
+                          TransferSourceType::File,
+                          (root / "file.txt").string(),
+                          TransferOverwrite::Replace,
+                          true);
+    } catch (const TransferFailure& failure) {
+        rejected_file = failure.code == TransferRpcCode::TransferFailed;
+    }
+    TEST_ASSERT(rejected_file);
+
+    std::string unterminated_directory_archive;
+    append_tar_file(unterminated_directory_archive, "payload.txt", "payload");
+    bool rejected_directory = false;
+    try {
+        (void)import_path(unterminated_directory_archive,
+                          TransferSourceType::Directory,
+                          (root / "dest").string(),
+                          TransferOverwrite::Replace,
+                          true);
+    } catch (const TransferFailure& failure) {
+        rejected_directory = failure.code == TransferRpcCode::TransferFailed;
+    }
+    TEST_ASSERT(rejected_directory);
+
+    std::string single_zero_block_archive;
+    append_tar_file(single_zero_block_archive, "payload.txt", "payload");
+    single_zero_block_archive.append(512, '\0');
+    bool rejected_single_zero = false;
+    try {
+        (void)import_path(single_zero_block_archive,
+                          TransferSourceType::Directory,
+                          (root / "single-zero").string(),
+                          TransferOverwrite::Replace,
+                          true);
+    } catch (const TransferFailure& failure) {
+        rejected_single_zero = failure.code == TransferRpcCode::TransferFailed;
+    }
+    TEST_ASSERT(rejected_single_zero);
+}
+
 static void assert_transfer_rejects_entry_size_over_limit() {
     const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-size-limit";
     fs::remove_all(root);
@@ -1328,6 +1377,7 @@ int main() {
     assert_file_transfer();
     assert_file_transfer_blocks_unexpected_entry_path();
     assert_file_transfer_blocks_raw_bytes();
+    assert_transfer_requires_tar_terminator();
     assert_transfer_rejects_entry_size_over_limit();
     assert_transfer_rejects_unrepresentable_tar_size();
     assert_transfer_rejects_summary_size_over_limit();

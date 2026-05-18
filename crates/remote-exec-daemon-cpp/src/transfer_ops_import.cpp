@@ -225,6 +225,14 @@ void skip_exact(TransferArchiveReader& reader, std::uint64_t size, const std::st
     }
 }
 
+void require_archive_terminator(TransferArchiveReader& reader) {
+    std::vector<char> terminator(TAR_BLOCK_SIZE);
+    read_exact_or_throw(reader, terminator.data(), terminator.size(), "truncated tar terminator");
+    if (!is_zero_block(terminator.data())) {
+        throw TransferFailure(TransferRpcCode::SourceUnsupported, "invalid tar terminator");
+    }
+}
+
 std::uint64_t entry_padding(std::uint64_t size) {
     const std::uint64_t remainder = size % TAR_BLOCK_SIZE;
     return remainder == 0U ? 0U : static_cast<std::uint64_t>(TAR_BLOCK_SIZE) - remainder;
@@ -331,7 +339,8 @@ void consume_file_archive_tail(TransferArchiveReader& reader,
     std::vector<char> block(TAR_BLOCK_SIZE);
     while (reader.read_exact_or_eof(block.data(), block.size())) {
         if (is_zero_block(block.data())) {
-            continue;
+            require_archive_terminator(reader);
+            return;
         }
 
         const TarHeaderView header = parse_header(block.data());
@@ -355,6 +364,8 @@ void consume_file_archive_tail(TransferArchiveReader& reader,
     if (!pending_long_name.empty()) {
         throw TransferFailure(TransferRpcCode::SourceUnsupported, "dangling GNU long name entry");
     }
+
+    throw TransferFailure(TransferRpcCode::TransferFailed, "missing tar terminator");
 }
 
 ImportSummary import_file_from_tar(TransferArchiveReader& reader,
@@ -427,7 +438,8 @@ ImportSummary import_directory_from_tar(TransferArchiveReader& reader,
 
     while (reader.read_exact_or_eof(block.data(), block.size())) {
         if (is_zero_block(block.data())) {
-            break;
+            require_archive_terminator(reader);
+            return summary;
         }
 
         const TarHeaderView header = parse_header(block.data());
@@ -504,7 +516,7 @@ ImportSummary import_directory_from_tar(TransferArchiveReader& reader,
         throw TransferFailure(TransferRpcCode::SourceUnsupported, "dangling GNU long name entry");
     }
 
-    return summary;
+    throw TransferFailure(TransferRpcCode::TransferFailed, "missing tar terminator");
 }
 
 } // namespace
