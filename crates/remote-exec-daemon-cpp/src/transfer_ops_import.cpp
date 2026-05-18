@@ -269,22 +269,22 @@ void copy_reader_to_file(TransferArchiveReader& reader,
         remaining -= static_cast<std::uint64_t>(requested);
     }
     skip_entry_padding(reader, size);
-    if (output.close() != 0) {
-        throw std::runtime_error("unable to write destination file");
-    }
 #ifndef _WIN32
     if ((mode & 0111U) != 0U) {
         struct stat st;
-        if (!path_utils::stat_path(path, &st)) {
+        if (fstat(fileno(output.get()), &st) != 0) {
             throw std::runtime_error("unable to read destination file mode");
         }
-        if (chmod(path.c_str(), st.st_mode | 0111) != 0) {
+        if (fchmod(fileno(output.get()), st.st_mode | 0111) != 0) {
             throw std::runtime_error("unable to update destination file mode");
         }
     }
 #else
     (void)mode;
 #endif
+    if (output.close() != 0) {
+        throw std::runtime_error("unable to write destination file");
+    }
 }
 
 TransferWarning skipped_symlink_warning(const std::string& path) {
