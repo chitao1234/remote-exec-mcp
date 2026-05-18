@@ -538,30 +538,32 @@ public:
     std::string flush_carry(std::string* carry) override { return decode_utf8_output(carry, "", true); }
 
     bool has_exited(int* exit_code) override {
-        if (reaped_) {
-            *exit_code = exit_code_;
+        if (reaped_.load(std::memory_order_acquire)) {
+            *exit_code = exit_code_.load(std::memory_order_relaxed);
             return true;
         }
 
         maybe_apply_test_exit_poll_delay();
         int status = 0;
         if (poll_posix_child_exit(pid_, &status)) {
-            reaped_ = true;
-            record_exit_status(status, &exit_code_);
-            *exit_code = exit_code_;
+            int code = 0;
+            record_exit_status(status, &code);
+            exit_code_.store(code, std::memory_order_relaxed);
+            reaped_.store(true, std::memory_order_release);
+            *exit_code = code;
             return true;
         }
         return false;
     }
 
     void terminate() override {
-        if (pid_ <= 0 || reaped_) {
+        if (pid_ <= 0 || reaped_.load(std::memory_order_acquire)) {
             return;
         }
         kill_process_group(pid_);
         int ignored_status = 0;
         if (wait_posix_child_exit(pid_, &ignored_status)) {
-            reaped_ = true;
+            reaped_.store(true, std::memory_order_release);
         }
         return;
     }
@@ -576,15 +578,17 @@ public:
 
 private:
     bool output_may_resume() {
-        if (reaped_) {
+        if (reaped_.load(std::memory_order_acquire)) {
             return false;
         }
         int status = 0;
         if (!poll_posix_child_exit(pid_, &status)) {
             return true;
         }
-        reaped_ = true;
-        record_exit_status(status, &exit_code_);
+        int code = 0;
+        record_exit_status(status, &code);
+        exit_code_.store(code, std::memory_order_relaxed);
+        reaped_.store(true, std::memory_order_release);
         return false;
     }
 
@@ -592,8 +596,8 @@ private:
     bool tty_;
     UniqueFd input_write_;
     UniqueFd output_read_;
-    bool reaped_;
-    int exit_code_;
+    std::atomic<bool> reaped_;
+    std::atomic<int> exit_code_;
 };
 
 } // namespace
