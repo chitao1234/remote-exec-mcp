@@ -4,7 +4,6 @@
 #include <string>
 
 #ifndef _WIN32
-#include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
 #include <unistd.h>
@@ -16,6 +15,7 @@
 #ifndef _WIN32
 #include "posix_eintr.h"
 #include "posix_child_reaper.h"
+#include "posix_fd.h"
 #endif
 #include "scoped_file.h"
 #include "server.h"
@@ -38,19 +38,6 @@ void shutdown_signal_handler(int) {
     }
 }
 
-bool set_fd_cloexec_nonblock(int fd) {
-    const int fd_flags = posix_eintr::retry<int>([&]() { return fcntl(fd, F_GETFD); });
-    if (fd_flags < 0 || posix_eintr::retry<int>([&]() { return fcntl(fd, F_SETFD, fd_flags | FD_CLOEXEC); }) != 0) {
-        return false;
-    }
-    const int status_flags = posix_eintr::retry<int>([&]() { return fcntl(fd, F_GETFL); });
-    if (status_flags < 0 ||
-        posix_eintr::retry<int>([&]() { return fcntl(fd, F_SETFL, status_flags | O_NONBLOCK); }) != 0) {
-        return false;
-    }
-    return true;
-}
-
 bool install_shutdown_signal_handlers() {
     int fds[2];
     if (posix_eintr::retry<int>([&]() { return pipe(fds); }) != 0) {
@@ -58,7 +45,7 @@ bool install_shutdown_signal_handlers() {
     }
     g_shutdown_pipe_read = fds[0];
     g_shutdown_pipe_write = fds[1];
-    if (!set_fd_cloexec_nonblock(fds[0]) || !set_fd_cloexec_nonblock(fds[1])) {
+    if (!posix_fd::set_cloexec_nonblocking(fds[0]) || !posix_fd::set_cloexec_nonblocking(fds[1])) {
         close(fds[0]);
         close(fds[1]);
         g_shutdown_pipe_read = -1;

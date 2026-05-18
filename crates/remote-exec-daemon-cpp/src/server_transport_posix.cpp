@@ -1,6 +1,5 @@
 #include <cerrno>
 #include <cstring>
-#include <fcntl.h>
 #include <netdb.h>
 #include <signal.h>
 #include <sstream>
@@ -12,6 +11,7 @@
 #include <unistd.h>
 
 #include "posix_eintr.h"
+#include "posix_fd.h"
 #include "server_transport.h"
 #include "server_transport_internal.h"
 
@@ -29,11 +29,7 @@ void throw_socket_option_error(const std::string& option, int error) {
 }
 
 bool set_socket_cloexec_flag(SOCKET socket) {
-    const int flags = posix_eintr::retry<int>([&]() { return fcntl(socket, F_GETFD, 0); });
-    if (flags < 0) {
-        return false;
-    }
-    return posix_eintr::retry<int>([&]() { return fcntl(socket, F_SETFD, flags | FD_CLOEXEC); }) == 0;
+    return posix_fd::set_cloexec(socket);
 }
 
 } // namespace

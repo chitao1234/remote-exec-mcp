@@ -10,7 +10,6 @@
 #else
 #include <arpa/inet.h>
 #include <cerrno>
-#include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <poll.h>
@@ -23,6 +22,7 @@
 #include "port_forward_error.h"
 #ifndef _WIN32
 #include "posix_eintr.h"
+#include "posix_fd.h"
 #endif
 #include "win32_error.h"
 
@@ -112,12 +112,7 @@ void set_socket_nonblocking(SOCKET socket, bool enabled) {
         throw PortForwardError(400, "port_connect_failed", socket_error_message("ioctlsocket"));
     }
 #else
-    const int flags = posix_eintr::retry<int>([&]() { return fcntl(socket, F_GETFL, 0); });
-    if (flags < 0) {
-        throw PortForwardError(400, "port_connect_failed", socket_error_message("fcntl"));
-    }
-    const int updated = enabled ? (flags | O_NONBLOCK) : (flags & ~O_NONBLOCK);
-    if (posix_eintr::retry<int>([&]() { return fcntl(socket, F_SETFL, updated); }) != 0) {
+    if (!posix_fd::set_nonblocking(socket, enabled)) {
         throw PortForwardError(400, "port_connect_failed", socket_error_message("fcntl"));
     }
 #endif

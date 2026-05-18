@@ -23,6 +23,7 @@
 #include "platform.h"
 #include "posix_child_reaper.h"
 #include "posix_eintr.h"
+#include "posix_fd.h"
 #include "process_session.h"
 
 #if defined(__GNUC__)
@@ -128,8 +129,7 @@ struct PosixPtyPair {
 };
 
 void set_fd_cloexec_or_throw(int fd, const std::string& label) {
-    const int flags = posix_eintr::retry<int>([&]() { return fcntl(fd, F_GETFD); });
-    if (flags < 0 || posix_eintr::retry<int>([&]() { return fcntl(fd, F_SETFD, flags | FD_CLOEXEC); }) != 0) {
+    if (!posix_fd::set_cloexec(fd)) {
         throw std::runtime_error(label + " fcntl(FD_CLOEXEC) failed: " + safe_strerror(errno));
     }
 }

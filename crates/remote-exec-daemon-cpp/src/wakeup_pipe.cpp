@@ -2,34 +2,20 @@
 
 #include <cerrno>
 #include <cstring>
-#include <fcntl.h>
 #include <stdexcept>
 #include <string>
 #include <unistd.h>
 
 #include "posix_eintr.h"
+#include "posix_fd.h"
 #include "wakeup_pipe.h"
-
-namespace {
-
-bool set_fd_cloexec_nonblock(int fd) {
-    const int fd_flags = posix_eintr::retry<int>([&]() { return fcntl(fd, F_GETFD); });
-    if (fd_flags < 0 || posix_eintr::retry<int>([&]() { return fcntl(fd, F_SETFD, fd_flags | FD_CLOEXEC); }) != 0) {
-        return false;
-    }
-    const int status_flags = posix_eintr::retry<int>([&]() { return fcntl(fd, F_GETFL); });
-    return status_flags >= 0 &&
-           posix_eintr::retry<int>([&]() { return fcntl(fd, F_SETFL, status_flags | O_NONBLOCK); }) == 0;
-}
-
-} // namespace
 
 WakeupPipe::WakeupPipe() : read_end_(INVALID_SOCKET), write_end_(INVALID_SOCKET), signaled_(false) {
     int fds[2];
     if (posix_eintr::retry<int>([&]() { return pipe(fds); }) != 0) {
         throw std::runtime_error(std::string("wakeup pipe creation failed: ") + std::strerror(errno));
     }
-    if (!set_fd_cloexec_nonblock(fds[0]) || !set_fd_cloexec_nonblock(fds[1])) {
+    if (!posix_fd::set_cloexec_nonblocking(fds[0]) || !posix_fd::set_cloexec_nonblocking(fds[1])) {
         close(fds[0]);
         close(fds[1]);
         throw std::runtime_error(std::string("wakeup pipe fcntl failed: ") + std::strerror(errno));

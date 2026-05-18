@@ -13,7 +13,6 @@
 #include <thread>
 #include <vector>
 
-#include <fcntl.h>
 #include <poll.h>
 #include <sys/select.h>
 #include <sys/wait.h>
@@ -22,6 +21,7 @@
 #include "basic_mutex.h"
 #include "logging.h"
 #include "posix_eintr.h"
+#include "posix_fd.h"
 
 namespace {
 
@@ -37,17 +37,6 @@ std::thread* g_reaper_thread = nullptr;
 #ifdef REMOTE_EXEC_CPP_TESTING
 std::atomic<unsigned long> g_test_reap_delay_ms(0UL);
 #endif
-
-void set_cloexec_nonblock(int fd) {
-    const int fd_flags = posix_eintr::retry<int>([&]() { return fcntl(fd, F_GETFD, 0); });
-    if (fd_flags >= 0) {
-        posix_eintr::retry<int>([&]() { return fcntl(fd, F_SETFD, fd_flags | FD_CLOEXEC); });
-    }
-    const int status_flags = posix_eintr::retry<int>([&]() { return fcntl(fd, F_GETFL, 0); });
-    if (status_flags >= 0) {
-        posix_eintr::retry<int>([&]() { return fcntl(fd, F_SETFL, status_flags | O_NONBLOCK); });
-    }
-}
 
 void sigchld_handler(int) {
     if (g_signal_pipe_write >= 0) {
@@ -140,8 +129,8 @@ void install_posix_child_reaper() {
     }
     g_signal_pipe_read = fds[0];
     g_signal_pipe_write = fds[1];
-    set_cloexec_nonblock(g_signal_pipe_read);
-    set_cloexec_nonblock(g_signal_pipe_write);
+    (void)posix_fd::set_cloexec_nonblocking(g_signal_pipe_read);
+    (void)posix_fd::set_cloexec_nonblocking(g_signal_pipe_write);
 
     struct sigaction action;
     std::memset(&action, 0, sizeof(action));
