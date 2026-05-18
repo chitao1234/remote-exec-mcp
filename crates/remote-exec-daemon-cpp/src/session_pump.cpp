@@ -14,11 +14,9 @@
 
 namespace {
 
-// After the parent exits, keep draining descendant-held stdout/stderr until the
-// stream is idle or the Rust-aligned max grace is reached, then terminate children.
-const unsigned long EXIT_DRAIN_IDLE_GRACE_MS = 250UL;
-const unsigned long EXIT_DRAIN_MAX_GRACE_MS = 2000UL;
-const unsigned long EXIT_DRAIN_TERMINATE_QUIET_MS = 25UL;
+const unsigned long DEFAULT_EXIT_DRAIN_IDLE_GRACE_MS = 250UL;
+const unsigned long DEFAULT_EXIT_DRAIN_MAX_GRACE_MS = 2000UL;
+const unsigned long DEFAULT_EXIT_DRAIN_TERMINATE_QUIET_MS = 25UL;
 
 void append_session_output_locked(LiveSession* session, const std::string& chunk) {
     if (!chunk.empty()) {
@@ -89,6 +87,14 @@ unsigned __stdcall session_output_pump_entry(void* raw_context) {
 #endif
 
 } // namespace
+
+SessionOutputDrainPolicy default_session_output_drain_policy() {
+    SessionOutputDrainPolicy policy;
+    policy.idle_grace_ms = DEFAULT_EXIT_DRAIN_IDLE_GRACE_MS;
+    policy.max_grace_ms = DEFAULT_EXIT_DRAIN_MAX_GRACE_MS;
+    policy.terminate_quiet_ms = DEFAULT_EXIT_DRAIN_TERMINATE_QUIET_MS;
+    return policy;
+}
 
 void wait_for_generation_change_locked(LiveSession* session,
                                        std::uint64_t baseline_generation,
@@ -195,14 +201,17 @@ std::string take_session_output_locked(LiveSession* session, unsigned long max_o
     return output;
 }
 
-bool drain_exited_session_output_locked(LiveSession* session, std::string* output, unsigned long max_output_tokens) {
-    const std::uint64_t max_deadline = platform::monotonic_ms() + EXIT_DRAIN_MAX_GRACE_MS;
-    std::uint64_t idle_deadline = platform::monotonic_ms() + EXIT_DRAIN_IDLE_GRACE_MS;
+bool drain_exited_session_output_locked(LiveSession* session,
+                                        std::string* output,
+                                        unsigned long max_output_tokens,
+                                        const SessionOutputDrainPolicy& policy) {
+    const std::uint64_t max_deadline = platform::monotonic_ms() + policy.max_grace_ms;
+    std::uint64_t idle_deadline = platform::monotonic_ms() + policy.idle_grace_ms;
 
     for (;;) {
         if (!session->output_.buffered_output.empty()) {
             *output += take_session_output_locked(session, max_output_tokens);
-            idle_deadline = platform::monotonic_ms() + EXIT_DRAIN_IDLE_GRACE_MS;
+            idle_deadline = platform::monotonic_ms() + policy.idle_grace_ms;
         }
         if (session->output_.eof || session->closing) {
             return true;
@@ -221,7 +230,7 @@ bool drain_exited_session_output_locked(LiveSession* session, std::string* outpu
         return false;
     }
 
-    const std::uint64_t terminate_deadline = platform::monotonic_ms() + EXIT_DRAIN_TERMINATE_QUIET_MS;
+    const std::uint64_t terminate_deadline = platform::monotonic_ms() + policy.terminate_quiet_ms;
     for (;;) {
         if (!session->output_.buffered_output.empty()) {
             *output += take_session_output_locked(session, max_output_tokens);

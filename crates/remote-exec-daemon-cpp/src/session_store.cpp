@@ -126,7 +126,8 @@ PollResult wait_for_session_activity(const std::shared_ptr<LiveSession>& session
             seen_generation = session->output_.generation;
         }
         if (snapshot.exited) {
-            if (!drain_exited_session_output_locked(session.get(), &output, max_output_tokens)) {
+            const SessionOutputDrainPolicy drain_policy = default_session_output_drain_policy();
+            if (!drain_exited_session_output_locked(session.get(), &output, max_output_tokens, drain_policy)) {
                 return PollResult{output, false, 0};
             }
             const SessionSnapshot completed = session_snapshot_locked(*session);
