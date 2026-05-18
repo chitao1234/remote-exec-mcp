@@ -250,6 +250,7 @@ std::vector<DirectoryEntry> list_directory_entries(const std::string& path) {
     }
 
     dirent* entry = nullptr;
+    errno = 0;
     while ((entry = readdir(dir.get())) != nullptr) {
         const std::string name(entry->d_name);
         if (name == "." || name == "..") {
@@ -261,6 +262,10 @@ std::vector<DirectoryEntry> list_directory_entries(const std::string& path) {
             throw std::runtime_error("unable to stat path " + child);
         }
         entries.push_back(DirectoryEntry{name, S_ISDIR(st.st_mode), S_ISREG(st.st_mode), S_ISLNK(st.st_mode)});
+        errno = 0;
+    }
+    if (errno != 0) {
+        throw std::runtime_error("unable to read directory " + path);
     }
 #endif
 
