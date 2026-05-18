@@ -69,6 +69,20 @@ inline int poll_forever(struct pollfd* fds, nfds_t nfds) {
     }
 }
 
+template <typename StopRequested>
+int poll_forever_until(struct pollfd* fds, nfds_t nfds, StopRequested stop_requested) {
+    for (;;) {
+        if (stop_requested()) {
+            return 0;
+        }
+        clear_revents(fds, nfds);
+        const int result = poll(fds, nfds, -1);
+        if (result >= 0 || errno != EINTR) {
+            return result;
+        }
+    }
+}
+
 inline int poll_for_ms(struct pollfd* fds, nfds_t nfds, unsigned long timeout_ms) {
     const std::uint64_t start_ms = platform::monotonic_ms();
     for (;;) {
