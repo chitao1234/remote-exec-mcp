@@ -25,6 +25,11 @@ void shutdown_socket(SOCKET socket) {
     shutdown(socket, SD_BOTH);
 }
 
+bool set_socket_cloexec(SOCKET socket) {
+    (void)socket;
+    return true;
+}
+
 SOCKET create_socket_cloexec(int family, int type, int protocol) {
     return socket(family, type, protocol);
 }

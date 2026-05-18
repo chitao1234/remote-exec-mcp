@@ -78,6 +78,7 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
             return;
         }
         UniqueSocket accepted_socket(accepted);
+        set_socket_cloexec(accepted_socket.get());
         connection = session->connection_for_attachment(attachment);
         if (connection.get() == nullptr) {
             continue;

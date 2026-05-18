@@ -45,6 +45,10 @@ void shutdown_socket(SOCKET socket) {
     shutdown(socket, SHUT_RDWR);
 }
 
+bool set_socket_cloexec(SOCKET socket) {
+    return set_socket_cloexec_flag(socket);
+}
+
 SOCKET create_socket_cloexec(int family, int type, int protocol) {
     SOCKET created = INVALID_SOCKET;
 #ifdef SOCK_CLOEXEC
