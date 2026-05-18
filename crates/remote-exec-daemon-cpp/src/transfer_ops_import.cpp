@@ -160,6 +160,7 @@ void write_validated_symlink(const std::string& raw_target,
                              const std::string& output_path,
                              const TransferPathAuthorizer& authorizer) {
     const std::string target = validate_relative_symlink_target(raw_target);
+    authorize_path_if_present(authorizer, output_path);
     authorize_path_if_present(authorizer, resolved_symlink_target_path(output_path, target));
     write_symlink(target, output_path);
 }
@@ -255,8 +256,10 @@ void copy_reader_to_file(TransferArchiveReader& reader,
                          std::uint64_t size,
                          std::uint64_t mode,
                          std::uint64_t copied_so_far,
-                         const TransferLimitConfig& limits) {
+                         const TransferLimitConfig& limits,
+                         const TransferPathAuthorizer& authorizer) {
     ensure_transfer_entry_within_limits(size, copied_so_far, limits);
+    authorize_path_if_present(authorizer, path);
     ScopedFile output(path_utils::open_file(path, "wb"));
     if (!output.valid()) {
         throw std::runtime_error("unable to write destination file");
@@ -362,7 +365,7 @@ ImportSummary import_file_from_tar(TransferArchiveReader& reader,
                                    const TransferLimitConfig& limits,
                                    const TransferPathAuthorizer& authorizer) {
     const bool replaced =
-        prepare_destination_path(absolute_path, TransferSourceType::File, overwrite, create_parent);
+        prepare_destination_path(absolute_path, TransferSourceType::File, overwrite, create_parent, authorizer);
     ensure_not_existing_symlink(absolute_path);
 
     std::vector<char> block(TAR_BLOCK_SIZE);
@@ -391,7 +394,7 @@ ImportSummary import_file_from_tar(TransferArchiveReader& reader,
         }
         skip_exact(reader, entry_body_with_padding(header.size), "truncated tar entry body");
     } else {
-        copy_reader_to_file(reader, absolute_path, header.size, header.mode, 0U, limits);
+        copy_reader_to_file(reader, absolute_path, header.size, header.mode, 0U, limits, authorizer);
         bytes_copied = header.size;
     }
 
@@ -415,7 +418,7 @@ ImportSummary import_directory_from_tar(TransferArchiveReader& reader,
                                         TransferSymlinkMode symlink_mode,
                                         const TransferLimitConfig& limits,
                                         const TransferPathAuthorizer& authorizer) {
-    const bool replaced = prepare_destination_path(absolute_path, source_type, overwrite, create_parent);
+    const bool replaced = prepare_destination_path(absolute_path, source_type, overwrite, create_parent, authorizer);
     make_directory_if_missing(absolute_path);
 
     ImportSummary summary = {source_type, 0, 0, 1, replaced, std::vector<TransferWarning>()};
@@ -449,10 +452,11 @@ ImportSummary import_directory_from_tar(TransferArchiveReader& reader,
             continue;
         }
         const std::string output_path = materialize_archive_path(absolute_path, relative_path);
-        ensure_no_existing_symlink_in_path(absolute_path, relative_path);
 
         if (header.typeflag == '5') {
             if (relative_path != ".") {
+                authorize_path_if_present(authorizer, output_path);
+                ensure_no_existing_symlink_in_path(absolute_path, relative_path);
                 ensure_parent_directory(output_path, true);
                 make_directory_if_missing(output_path);
                 summary.directories_copied += 1;
@@ -473,6 +477,8 @@ ImportSummary import_directory_from_tar(TransferArchiveReader& reader,
             if (relative_path == ".") {
                 throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive symlink entry cannot target root");
             }
+            authorize_path_if_present(authorizer, output_path);
+            ensure_no_existing_symlink_in_path(absolute_path, relative_path);
             write_validated_symlink(header.link_name, output_path, authorizer);
             summary.files_copied += 1;
             skip_exact(reader, entry_body_with_padding(header.size), "truncated tar entry body");
@@ -486,8 +492,10 @@ ImportSummary import_directory_from_tar(TransferArchiveReader& reader,
             throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive file entry cannot target root");
         }
 
+        authorize_path_if_present(authorizer, output_path);
+        ensure_no_existing_symlink_in_path(absolute_path, relative_path);
         ensure_parent_directory(output_path, true);
-        copy_reader_to_file(reader, output_path, header.size, header.mode, summary.bytes_copied, limits);
+        copy_reader_to_file(reader, output_path, header.size, header.mode, summary.bytes_copied, limits, authorizer);
         summary.bytes_copied += header.size;
         summary.files_copied += 1;
     }

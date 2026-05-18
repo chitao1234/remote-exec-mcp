@@ -15,6 +15,7 @@ struct TransferExportRequestSpec {
     TransferSourceType source_type;
     TransferSymlinkMode symlink_mode;
     std::vector<std::string> exclude;
+    TransferPathAuthorizer authorizer;
 };
 
 struct TransferImportRequestSpec {
@@ -71,6 +72,7 @@ void authorize_sandbox_path(const AppState& state, SandboxAccess access, const s
 std::string resolve_absolute_transfer_path(const std::string& path);
 std::string resolve_authorized_transfer_path(const AppState& state, const std::string& path, SandboxAccess access);
 PatchPathAuthorizer make_patch_path_authorizer(const AppState& state);
+TransferPathAuthorizer make_transfer_read_authorizer(const AppState& state);
 TransferExportRequestSpec prepare_transfer_export_request(const AppState& state, const Json& body);
 TransferImportRequestSpec prepare_transfer_import_request(const AppState& state, const HttpRequest& request);
 void write_transfer_error_response(HttpResponse& response, const SandboxError& ex);

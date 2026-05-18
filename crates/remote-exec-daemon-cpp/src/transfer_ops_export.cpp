@@ -33,6 +33,7 @@ private:
 
 struct ExportContext {
     ExportOptions options;
+    TransferPathAuthorizer authorizer;
     std::vector<TransferWarning> warnings;
     std::set<std::pair<unsigned long long, unsigned long long>> followed_inodes;
     unsigned int recursion_depth;
@@ -42,6 +43,12 @@ const unsigned int MAX_EXPORT_RECURSION_DEPTH = 256U;
 
 void add_warning(std::vector<TransferWarning>* warnings, const std::string& code, const std::string& message) {
     warnings->push_back(TransferWarning{code, message});
+}
+
+void authorize_path_if_present(const TransferPathAuthorizer& authorizer, const std::string& path) {
+    if (authorizer) {
+        authorizer(path);
+    }
 }
 
 void handle_unsupported_entry(ExportContext* context, const std::string& path) {
@@ -133,6 +140,8 @@ void append_directory_contents(TransferArchiveSink* archive,
         } else if (exclude_matcher.is_excluded_path(child_rel)) {
             continue;
         }
+
+        authorize_path_if_present(context->authorizer, child_path);
 
         if (entry.is_directory) {
             append_directory_entry(archive, child_rel);
@@ -264,11 +273,14 @@ void export_path_to_sink_as(TransferArchiveSink& sink,
                             const std::string& absolute_path,
                             TransferSourceType source_type,
                             TransferSymlinkMode symlink_mode,
-                            const std::vector<std::string>& exclude) {
+                            const std::vector<std::string>& exclude,
+                            const TransferPathAuthorizer& authorizer) {
     ExportContext context;
     context.options = normalized_options(symlink_mode, exclude);
+    context.authorizer = authorizer;
     context.recursion_depth = 0U;
     validate_export_path(absolute_path, context.options);
+    authorize_path_if_present(context.authorizer, absolute_path);
     const transfer_glob::Matcher exclude_matcher(context.options.exclude);
 
     if (source_type == TransferSourceType::File) {
@@ -288,17 +300,19 @@ void export_path_to_sink_as(TransferArchiveSink& sink,
 TransferSourceType export_path_to_sink(TransferArchiveSink& sink,
                                        const std::string& absolute_path,
                                        TransferSymlinkMode symlink_mode,
-                                       const std::vector<std::string>& exclude) {
+                                       const std::vector<std::string>& exclude,
+                                       const TransferPathAuthorizer& authorizer) {
     const TransferSourceType source_type = export_path_source_type(absolute_path, symlink_mode);
-    export_path_to_sink_as(sink, absolute_path, source_type, symlink_mode, exclude);
+    export_path_to_sink_as(sink, absolute_path, source_type, symlink_mode, exclude, authorizer);
     return source_type;
 }
 
 ExportedPayload export_path(const std::string& absolute_path,
                             TransferSymlinkMode symlink_mode,
-                            const std::vector<std::string>& exclude) {
+                            const std::vector<std::string>& exclude,
+                            const TransferPathAuthorizer& authorizer) {
     std::string archive;
     StringTransferArchiveSink sink(&archive);
-    const TransferSourceType source_type = export_path_to_sink(sink, absolute_path, symlink_mode, exclude);
+    const TransferSourceType source_type = export_path_to_sink(sink, absolute_path, symlink_mode, exclude, authorizer);
     return ExportedPayload{source_type, archive};
 }

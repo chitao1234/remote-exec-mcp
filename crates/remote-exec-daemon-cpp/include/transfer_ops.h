@@ -88,18 +88,21 @@ public:
 
 ExportedPayload export_path(const std::string& absolute_path,
                             TransferSymlinkMode symlink_mode = TransferSymlinkMode::Preserve,
-                            const std::vector<std::string>& exclude = std::vector<std::string>());
+                            const std::vector<std::string>& exclude = std::vector<std::string>(),
+                            const TransferPathAuthorizer& authorizer = TransferPathAuthorizer());
 TransferSourceType export_path_source_type(const std::string& absolute_path,
                                            TransferSymlinkMode symlink_mode = TransferSymlinkMode::Preserve);
 TransferSourceType export_path_to_sink(TransferArchiveSink& sink,
                                        const std::string& absolute_path,
                                        TransferSymlinkMode symlink_mode = TransferSymlinkMode::Preserve,
-                                       const std::vector<std::string>& exclude = std::vector<std::string>());
+                                       const std::vector<std::string>& exclude = std::vector<std::string>(),
+                                       const TransferPathAuthorizer& authorizer = TransferPathAuthorizer());
 void export_path_to_sink_as(TransferArchiveSink& sink,
                             const std::string& absolute_path,
                             TransferSourceType source_type,
                             TransferSymlinkMode symlink_mode = TransferSymlinkMode::Preserve,
-                            const std::vector<std::string>& exclude = std::vector<std::string>());
+                            const std::vector<std::string>& exclude = std::vector<std::string>(),
+                            const TransferPathAuthorizer& authorizer = TransferPathAuthorizer());
 PathInfo path_info(const std::string& absolute_path);
 ImportSummary import_path(const std::string& bytes,
                           TransferSourceType source_type,

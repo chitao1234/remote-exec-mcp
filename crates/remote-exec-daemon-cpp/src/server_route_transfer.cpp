@@ -12,8 +12,8 @@ HttpResponse handle_transfer_export(AppState& state, const HttpRequest& request)
     try {
         const Json body = parse_json_body(request);
         const TransferExportRequestSpec export_request = prepare_transfer_export_request(state, body);
-        const ExportedPayload payload =
-            export_path(export_request.path, export_request.symlink_mode, export_request.exclude);
+        const ExportedPayload payload = export_path(
+            export_request.path, export_request.symlink_mode, export_request.exclude, export_request.authorizer);
         log_message(LOG_INFO,
                     "server",
                     "transfer/export path=`" + export_request.path + "` source_type=`" +

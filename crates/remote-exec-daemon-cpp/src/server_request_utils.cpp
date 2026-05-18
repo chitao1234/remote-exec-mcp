@@ -200,6 +200,13 @@ TransferPathAuthorizer make_transfer_write_authorizer(const AppState& state) {
     return [&state](const std::string& path) { authorize_sandbox_path(state, SANDBOX_WRITE, path); };
 }
 
+TransferPathAuthorizer make_transfer_read_authorizer(const AppState& state) {
+    if (!state.sandbox_enabled) {
+        return TransferPathAuthorizer();
+    }
+    return [&state](const std::string& path) { authorize_sandbox_path(state, SANDBOX_READ, path); };
+}
+
 TransferExportRequestSpec prepare_transfer_export_request(const AppState& state, const Json& body) {
     require_uncompressed_transfer(body.value("compression", std::string("none")));
 
@@ -210,6 +217,7 @@ TransferExportRequestSpec prepare_transfer_export_request(const AppState& state,
         throw TransferFailure(TransferRpcCode::SourceUnsupported, "unsupported transfer symlink mode");
     }
     request.exclude = transfer_exclude_or_empty(body);
+    request.authorizer = make_transfer_read_authorizer(state);
     request.source_type = export_path_source_type(request.path, request.symlink_mode);
     return request;
 }

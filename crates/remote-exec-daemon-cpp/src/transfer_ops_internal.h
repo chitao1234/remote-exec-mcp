@@ -49,7 +49,8 @@ std::vector<DirectoryEntry> list_directory_entries(const std::string& path);
 bool prepare_destination_path(const std::string& absolute_path,
                               TransferSourceType source_type,
                               TransferOverwrite overwrite,
-                              bool create_parent);
+                              bool create_parent,
+                              const TransferPathAuthorizer& authorizer);
 
 void append_archive_terminator(TransferArchiveSink* archive);
 void append_directory_entry(TransferArchiveSink* archive, const std::string& rel_path);

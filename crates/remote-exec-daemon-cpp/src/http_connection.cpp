@@ -214,8 +214,12 @@ int handle_streaming_transfer_export(const AppState& state,
         send_transfer_export_headers(client, ExportedPayload{export_request.source_type, std::string()}, request);
         headers_sent = true;
         ChunkedTransferArchiveSink sink(client);
-        export_path_to_sink_as(
-            sink, export_request.path, export_request.source_type, export_request.symlink_mode, export_request.exclude);
+        export_path_to_sink_as(sink,
+                               export_request.path,
+                               export_request.source_type,
+                               export_request.symlink_mode,
+                               export_request.exclude,
+                               export_request.authorizer);
         sink.finish();
         return 200;
     } catch (const SandboxError& ex) {

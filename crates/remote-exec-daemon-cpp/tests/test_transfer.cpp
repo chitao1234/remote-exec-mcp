@@ -409,6 +409,14 @@ static std::vector<std::string> json_string_array(const Json& values) {
     return out;
 }
 
+static TransferPathAuthorizer deny_path_containing(const std::string& needle) {
+    return [needle](const std::string& path) {
+        if (path.find(needle) != std::string::npos) {
+            throw TransferFailure(TransferRpcCode::SandboxDenied, "denied path " + path);
+        }
+    };
+}
+
 static void assert_string_vectors_equal(std::vector<std::string> actual, std::vector<std::string> expected) {
     actual = sorted_strings(actual);
     expected = sorted_strings(expected);
@@ -761,6 +769,26 @@ static void assert_directory_export_excludes_matching_entries() {
     TEST_ASSERT(!fs::exists(root / "dest" / "src" / "a.cpp"));
 }
 
+static void assert_directory_export_authorizer_checks_children() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-export-authorizer";
+    fs::remove_all(root);
+    fs::create_directories(root / "source");
+    write_text(root / "source" / "public.txt", "public");
+    write_text(root / "source" / "secret.txt", "secret");
+
+    bool rejected = false;
+    try {
+        (void)export_path((root / "source").string(),
+                          TransferSymlinkMode::Preserve,
+                          std::vector<std::string>(),
+                          deny_path_containing("secret.txt"));
+    } catch (const TransferFailure& failure) {
+        rejected = failure.code == TransferRpcCode::SandboxDenied;
+    }
+
+    TEST_ASSERT(rejected);
+}
+
 static void assert_single_file_export_ignores_exclude_patterns() {
     const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-exclude-file";
     fs::remove_all(root);
@@ -1097,6 +1125,62 @@ static void assert_multiple_sources_import() {
     TEST_ASSERT(read_text(root / "dest" / "nested" / "beta.txt") == "beta");
 }
 
+static void assert_directory_import_authorizer_checks_children() {
+    std::string archive;
+    append_tar_file(archive, "public.txt", "public");
+    append_tar_file(archive, "secret.txt", "secret");
+    finalize_tar(archive);
+
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-import-authorizer";
+    fs::remove_all(root);
+
+    bool rejected = false;
+    try {
+        (void)import_path(archive,
+                          TransferSourceType::Directory,
+                          (root / "dest").string(),
+                          TransferOverwrite::Replace,
+                          true,
+                          TransferSymlinkMode::Preserve,
+                          default_transfer_limit_config(),
+                          deny_path_containing("secret.txt"));
+    } catch (const TransferFailure& failure) {
+        rejected = failure.code == TransferRpcCode::SandboxDenied;
+    }
+
+    TEST_ASSERT(rejected);
+    TEST_ASSERT(!fs::exists(root / "dest" / "secret.txt"));
+}
+
+static void assert_directory_replace_authorizer_checks_existing_children() {
+    std::string archive;
+    append_tar_file(archive, "fresh.txt", "fresh");
+    finalize_tar(archive);
+
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-replace-authorizer";
+    fs::remove_all(root);
+    fs::create_directories(root / "dest");
+    write_text(root / "dest" / "secret.txt", "keep");
+
+    bool rejected = false;
+    try {
+        (void)import_path(archive,
+                          TransferSourceType::Directory,
+                          (root / "dest").string(),
+                          TransferOverwrite::Replace,
+                          true,
+                          TransferSymlinkMode::Preserve,
+                          default_transfer_limit_config(),
+                          deny_path_containing("secret.txt"));
+    } catch (const TransferFailure& failure) {
+        rejected = failure.code == TransferRpcCode::SandboxDenied;
+    }
+
+    TEST_ASSERT(rejected);
+    TEST_ASSERT(read_text(root / "dest" / "secret.txt") == "keep");
+    TEST_ASSERT(!fs::exists(root / "dest" / "fresh.txt"));
+}
+
 static void assert_shared_transfer_contract_cases() {
     const Json& contract = test_contract::transfer_semantics_contract();
 
@@ -1253,6 +1337,7 @@ int main() {
     assert_directory_merge_behavior();
     assert_directory_long_path_round_trip();
     assert_directory_export_excludes_matching_entries();
+    assert_directory_export_authorizer_checks_children();
     assert_single_file_export_ignores_exclude_patterns();
 #ifndef _WIN32
     assert_symlink_sources_are_preserved_by_default();
@@ -1271,6 +1356,8 @@ int main() {
 #endif
     assert_directory_traversal_is_rejected();
     assert_multiple_sources_import();
+    assert_directory_import_authorizer_checks_children();
+    assert_directory_replace_authorizer_checks_existing_children();
     assert_shared_transfer_contract_cases();
     return 0;
 }

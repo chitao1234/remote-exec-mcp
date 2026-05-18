@@ -96,6 +96,32 @@ class ScopedDirHandle {
 
 static const std::size_t MAX_REMOVE_DEPTH = 256;
 
+void authorize_path_if_present(const TransferPathAuthorizer& authorizer, const std::string& path) {
+    if (authorizer) {
+        authorizer(path);
+    }
+}
+
+void authorize_existing_path_recursive(const std::string& path,
+                                       const TransferPathAuthorizer& authorizer,
+                                       std::size_t depth) {
+    if (!authorizer || !path_exists(path)) {
+        return;
+    }
+    if (depth > MAX_REMOVE_DEPTH) {
+        throw std::runtime_error("authorize_existing_path exceeded maximum depth of " +
+                                 std::to_string(MAX_REMOVE_DEPTH));
+    }
+
+    authorizer(path);
+    if (is_directory(path)) {
+        const std::vector<DirectoryEntry> entries = list_directory_entries(path);
+        for (std::size_t i = 0; i < entries.size(); ++i) {
+            authorize_existing_path_recursive(join_path(path, entries[i].name), authorizer, depth + 1);
+        }
+    }
+}
+
 void remove_existing_path_recursive(const std::string& path, std::size_t depth) {
     if (depth > MAX_REMOVE_DEPTH) {
         throw std::runtime_error("remove_existing_path exceeded maximum depth of " +
@@ -284,7 +310,9 @@ std::vector<DirectoryEntry> list_directory_entries(const std::string& path) {
 bool prepare_destination_path(const std::string& absolute_path,
                               TransferSourceType source_type,
                               TransferOverwrite overwrite,
-                              bool create_parent) {
+                              bool create_parent,
+                              const TransferPathAuthorizer& authorizer) {
+    authorize_path_if_present(authorizer, absolute_path);
     const bool existed = path_exists(absolute_path);
     if (existed && overwrite == TransferOverwrite::Fail) {
         throw TransferFailure(TransferRpcCode::DestinationExists, "destination path already exists");
@@ -312,6 +340,7 @@ bool prepare_destination_path(const std::string& absolute_path,
     }
 
     if (existed && overwrite == TransferOverwrite::Replace) {
+        authorize_existing_path_recursive(absolute_path, authorizer, 0);
         remove_existing_path(absolute_path);
     }
 
