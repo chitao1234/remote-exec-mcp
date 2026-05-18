@@ -276,17 +276,36 @@ void PortTunnelConnection::udp_datagram(const PortTunnelFrame& frame) {
     socklen_t peer_len = 0;
     const sockaddr_storage peer_address = parse_port_forward_peer(peer, &peer_len);
     int sent = 0;
-    {
-        BasicLockGuard socket_lock(socket_value->mutex);
-        if (socket_value->closed) {
-            throw PortForwardError(400, "port_connection_closed", "udp bind was closed");
+    for (;;) {
+        {
+            BasicLockGuard socket_lock(socket_value->mutex);
+            if (socket_value->closed) {
+                throw PortForwardError(400, "port_connection_closed", "udp bind was closed");
+            }
+            sent = sendto(socket_value->socket.get(),
+                          reinterpret_cast<const char*>(frame.data.data()),
+                          static_cast<int>(frame.data.size()),
+                          0,
+                          reinterpret_cast<const sockaddr*>(&peer_address),
+                          peer_len);
         }
-        sent = sendto(socket_value->socket.get(),
-                      reinterpret_cast<const char*>(frame.data.data()),
-                      static_cast<int>(frame.data.size()),
-                      0,
-                      reinterpret_cast<const sockaddr*>(&peer_address),
-                      peer_len);
+        if (sent >= 0) {
+            break;
+        }
+        const int error = last_socket_error();
+#ifndef _WIN32
+        if (error == EINTR) {
+            continue;
+        }
+#endif
+        if (receive_timeout_error(error)
+#ifndef _WIN32
+            || error == ENOBUFS
+#endif
+        ) {
+            return;
+        }
+        throw PortForwardError(400, "port_write_failed", socket_error_message("sendto"));
     }
     if (sent < 0 || static_cast<std::size_t>(sent) != frame.data.size()) {
         throw PortForwardError(400, "port_write_failed", socket_error_message("sendto"));
