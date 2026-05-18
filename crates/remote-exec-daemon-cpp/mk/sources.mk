@@ -21,6 +21,7 @@ RPC_FAILURE_SRCS = $(SOURCE_PREFIX)src/rpc_failures.cpp
 POSIX_CHILD_REAPER_SRCS = $(SOURCE_PREFIX)src/posix_child_reaper.cpp
 
 ROUTE_SRCS = \
+	$(SOURCE_PREFIX)src/daemon_capabilities.cpp \
 	$(SOURCE_PREFIX)src/server_contract.cpp \
 	$(SOURCE_PREFIX)src/server_routes.cpp \
 	$(SOURCE_PREFIX)src/server_route_common.cpp \

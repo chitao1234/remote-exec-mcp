@@ -1,10 +1,9 @@
 #include <string>
 
 #include "common.h"
+#include "daemon_capabilities.h"
 #include "patch_engine.h"
 #include "platform.h"
-#include "process_session.h"
-#include "server_contract.h"
 #include "server_request_utils.h"
 #include "server_route_common.h"
 
@@ -28,20 +27,16 @@ HttpResponse handle_health(const AppState& state) {
 
 HttpResponse handle_target_info(const AppState& state) {
     HttpResponse response;
-    write_json(response,
-               Json{
-                   {"target", state.config.target},
-                   {"daemon_version", REMOTE_EXEC_CPP_VERSION},
-                   {"daemon_instance_id", state.daemon_instance_id},
-                   {"hostname", state.hostname},
-                   {"platform", platform::platform_name()},
-                   {"arch", platform::arch_name()},
-                   {"supports_pty", process_session_supports_pty()},
-                   {"supports_image_read", true},
-                   {"supports_transfer_compression", false},
-                   {"supports_port_forward", true},
-                   {"port_forward_protocol_version", server_contract::PORT_TUNNEL_PROTOCOL_VERSION},
-               });
+    Json body{
+        {"target", state.config.target},
+        {"daemon_version", REMOTE_EXEC_CPP_VERSION},
+        {"daemon_instance_id", state.daemon_instance_id},
+        {"hostname", state.hostname},
+        {"platform", platform::platform_name()},
+        {"arch", platform::arch_name()},
+    };
+    write_daemon_capabilities(&body, detect_daemon_capabilities());
+    write_json(response, body);
     return response;
 }
 
