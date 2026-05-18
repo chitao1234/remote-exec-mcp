@@ -1,8 +1,10 @@
 #include <atomic>
 #include "test_assert.h"
+#include <cerrno>
 #include <cstdint>
 #ifndef _WIN32
 #include <cstdlib>
+#include <signal.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -163,6 +165,34 @@ static bool wait_until_file_contains(const fs::path& path, const std::string& fr
     }
     return fs::exists(path) && fs::read_file_bytes(path).find(fragment) != std::string::npos;
 }
+
+#ifndef _WIN32
+static bool process_exists(pid_t pid) {
+    if (pid <= 0) {
+        return false;
+    }
+    if (kill(pid, 0) == 0) {
+        return true;
+    }
+    return errno != ESRCH;
+}
+
+static pid_t read_pid_file(const fs::path& path) {
+    TEST_ASSERT(fs::exists(path));
+    return static_cast<pid_t>(std::strtol(fs::read_file_bytes(path).c_str(), NULL, 10));
+}
+
+static bool wait_until_process_exits(pid_t pid, unsigned long timeout_ms) {
+    const std::uint64_t started = platform::monotonic_ms();
+    while (platform::monotonic_ms() - started < timeout_ms) {
+        if (!process_exists(pid)) {
+            return true;
+        }
+        platform::sleep_ms(25UL);
+    }
+    return !process_exists(pid);
+}
+#endif
 
 static void
 assert_unknown_session(SessionStore& store, const std::string& daemon_session_id, const YieldTimeConfig& yield_time) {
@@ -550,6 +580,36 @@ static void assert_non_tty_stdin_closed_rejected(SessionStore& store,
     TEST_ASSERT(stdin_closed_rejected);
 }
 
+static void assert_terminal_write_removes_completed_session(SessionStore& store,
+                                                            const fs::path& root,
+                                                            const std::string& shell) {
+    if (!process_session_supports_pty()) {
+        return;
+    }
+
+    const YieldTimeConfig fast_yield = fast_yield_time_config();
+    const Json waiting = start_test_command(store,
+                                            "printf 'ready\\n'; IFS= read line; printf 'final:%s\\n' \"$line\"",
+                                            root.string(),
+                                            shell,
+                                            true,
+                                            1000UL,
+                                            DEFAULT_MAX_OUTPUT_TOKENS,
+                                            fast_yield,
+                                            64UL);
+    TEST_ASSERT(waiting.at("running").get<bool>());
+    const std::string session_id = waiting.at("daemon_session_id").get<std::string>();
+
+    const Json completed =
+        store.write_stdin(session_id, "done\n", true, 5000UL, DEFAULT_MAX_OUTPUT_TOKENS, fast_yield, false, 0U, 0U);
+    TEST_ASSERT(!completed.at("running").get<bool>());
+    TEST_ASSERT(completed.at("daemon_session_id").is_null());
+    TEST_ASSERT(completed.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(completed.at("original_token_count").get<unsigned long>() >= 2UL);
+    TEST_ASSERT(normalize_output(completed.at("output").get<std::string>()).find("final:done") != std::string::npos);
+    assert_unknown_session(store, session_id, fast_yield);
+}
+
 static void assert_tty_resume_round_trip(SessionStore& store,
                                          const fs::path& root,
                                          const std::string& shell) {
@@ -777,6 +837,38 @@ static void assert_non_tty_resize_rejected(SessionStore& store,
     TEST_ASSERT(non_tty_resize_rejected);
 }
 
+static void assert_session_store_destruction_terminates_process_group(const fs::path& root,
+                                                                      const std::string& shell) {
+    const fs::path parent_pid_path = root / "destructor-parent.pid";
+    const fs::path child_pid_path = root / "destructor-child.pid";
+    fs::remove_all(parent_pid_path);
+    fs::remove_all(child_pid_path);
+
+    {
+        SessionStore scoped_store;
+        const YieldTimeConfig fast_yield = fast_yield_time_config();
+        const Json running = start_test_command(scoped_store,
+                                                "printf '%s' $$ > destructor-parent.pid; "
+                                                "(sleep 30) & printf '%s' $! > destructor-child.pid; "
+                                                "printf ready; sleep 30",
+                                                root.string(),
+                                                shell,
+                                                false,
+                                                250UL,
+                                                DEFAULT_MAX_OUTPUT_TOKENS,
+                                                fast_yield,
+                                                64UL);
+        TEST_ASSERT(running.at("running").get<bool>());
+        TEST_ASSERT(wait_until_file_contains(parent_pid_path, "", 2000UL));
+        TEST_ASSERT(wait_until_file_contains(child_pid_path, "", 2000UL));
+    }
+
+    const pid_t parent_pid = read_pid_file(parent_pid_path);
+    const pid_t child_pid = read_pid_file(child_pid_path);
+    TEST_ASSERT(wait_until_process_exits(parent_pid, 2000UL));
+    TEST_ASSERT(wait_until_process_exits(child_pid, 2000UL));
+}
+
 static void assert_session_limit_prunes_oldest_running(const fs::path& root, const std::string& shell) {
     SessionStore limit_store;
     const YieldTimeConfig fast_yield = fast_yield_time_config();
@@ -985,6 +1077,7 @@ static void assert_stdin_and_tty_behavior(SessionStore& store,
                                           const YieldTimeConfig& yield_time) {
 #ifndef _WIN32
     assert_non_tty_stdin_closed_rejected(store, root, shell, yield_time);
+    assert_terminal_write_removes_completed_session(store, root, shell);
     assert_tty_resume_round_trip(store, root, shell);
     assert_unrelated_sessions_do_not_block_each_other(store, root, shell, yield_time);
     assert_tty_detection_and_input_round_trip(store, root, shell, yield_time);
@@ -1029,6 +1122,7 @@ static void assert_pruning_and_recency_behavior(const fs::path& root, const std:
     assert_recent_session_survives_limit_prune(root, shell);
     assert_exited_session_is_pruned_before_live_session(root, shell);
     assert_recent_session_is_protected_from_prune(root, shell);
+    assert_session_store_destruction_terminates_process_group(root, shell);
 #endif
 }
 
