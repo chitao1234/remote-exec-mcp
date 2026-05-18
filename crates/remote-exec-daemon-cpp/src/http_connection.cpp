@@ -222,6 +222,7 @@ int handle_streaming_transfer_export(const AppState& state,
         const std::string message = ex.what();
         log_message(LOG_WARN, "server", "transfer/export failed: " + message);
         if (headers_sent) {
+            try { send_all(client, "0\r\n\r\n"); } catch (...) {}
             return 200;
         }
 
@@ -234,6 +235,7 @@ int handle_streaming_transfer_export(const AppState& state,
     } catch (const TransferFailure& failure) {
         log_message(LOG_WARN, "server", "transfer/export failed: " + failure.message);
         if (headers_sent) {
+            try { send_all(client, "0\r\n\r\n"); } catch (...) {}
             return 200;
         }
 
@@ -247,6 +249,7 @@ int handle_streaming_transfer_export(const AppState& state,
         const std::string message = ex.what();
         log_message(LOG_WARN, "server", "transfer/export failed: " + message);
         if (headers_sent) {
+            try { send_all(client, "0\r\n\r\n"); } catch (...) {}
             return 200;
         }
 
