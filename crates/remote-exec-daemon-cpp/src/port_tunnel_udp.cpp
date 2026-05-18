@@ -2,6 +2,7 @@
 #include "port_tunnel_spawn.h"
 #include "port_tunnel_service.h"
 
+#include <cerrno>
 #include <utility>
 
 bool PortTunnelService::spawn_udp_bind_loop(const std::shared_ptr<PortTunnelSession>& session,
@@ -74,7 +75,7 @@ void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& 
         }
         if (received < 0) {
             const int error = last_socket_error();
-            if (receive_timeout_error(error)) {
+            if (receive_timeout_error(error) || error == EINTR) {
                 continue;
             }
             if (socket_value->is_closed() || session_is_unavailable(session)) {
@@ -221,6 +222,10 @@ void PortTunnelConnection::udp_read_loop_connection_local(uint32_t stream_id,
                                 &peer_len);
         }
         if (received < 0) {
+            const int error = last_socket_error();
+            if (receive_timeout_error(error) || error == EINTR) {
+                continue;
+            }
             if (!socket_value->is_closed()) {
                 send_error(stream_id, "port_read_failed", socket_error_message("recvfrom"));
             }
