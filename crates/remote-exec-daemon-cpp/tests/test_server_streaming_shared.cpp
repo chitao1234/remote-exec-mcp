@@ -1,7 +1,5 @@
 #include "test_server_streaming_shared.h"
 
-#include <climits>
-#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -9,6 +7,8 @@
 
 #ifndef _WIN32
 #include <poll.h>
+
+#include "posix_eintr.h"
 #endif
 
 #include "test_socket_pair.h"
@@ -269,14 +269,7 @@ bool try_read_tunnel_frame_with_timeout(SOCKET socket, unsigned long timeout_ms,
     descriptor.fd = socket;
     descriptor.events = POLLIN;
     descriptor.revents = 0;
-    const int timeout = timeout_ms > static_cast<unsigned long>(INT_MAX) ? INT_MAX : static_cast<int>(timeout_ms);
-    int ready;
-    for (;;) {
-        ready = poll(&descriptor, 1, timeout);
-        if (ready >= 0 || errno != EINTR) {
-            break;
-        }
-    }
+    const int ready = posix_eintr::poll_for_ms(&descriptor, 1, timeout_ms);
 #endif
     TEST_ASSERT(ready >= 0);
     if (ready == 0) {
@@ -302,14 +295,7 @@ bool socket_readable_within(SOCKET socket, unsigned long timeout_ms) {
     descriptor.fd = socket;
     descriptor.events = POLLIN;
     descriptor.revents = 0;
-    const int timeout = timeout_ms > static_cast<unsigned long>(INT_MAX) ? INT_MAX : static_cast<int>(timeout_ms);
-    int ready;
-    for (;;) {
-        ready = poll(&descriptor, 1, timeout);
-        if (ready >= 0 || errno != EINTR) {
-            break;
-        }
-    }
+    const int ready = posix_eintr::poll_for_ms(&descriptor, 1, timeout_ms);
     TEST_ASSERT(ready >= 0);
     return ready > 0 && (descriptor.revents & POLLIN) != 0;
 #endif

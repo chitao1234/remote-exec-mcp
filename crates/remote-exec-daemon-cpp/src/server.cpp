@@ -4,7 +4,6 @@
 #include <string>
 
 #ifndef _WIN32
-#include <cerrno>
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
@@ -88,17 +87,11 @@ void wait_for_shutdown_signal() {
     pfd.events = POLLIN;
     pfd.revents = 0;
     while (!g_shutdown_requested) {
-        pfd.revents = 0;
-        const int result = poll(&pfd, 1, -1);
+        const int result = posix_eintr::poll_forever(&pfd, 1);
         if (result > 0) {
             return;
         }
-        if (result < 0 && errno == EINTR) {
-            continue;
-        }
-        if (result < 0) {
-            return;
-        }
+        return;
     }
 }
 
