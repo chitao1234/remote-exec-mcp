@@ -1,6 +1,7 @@
 #include "port_tunnel_connection.h"
 #include "port_tunnel_service.h"
 
+#include <cerrno>
 #include <utility>
 
 bool PortTunnelService::spawn_tcp_listener_loop(const std::shared_ptr<PortTunnelSession>& session,
@@ -64,7 +65,7 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
         }
         if (accepted == INVALID_SOCKET) {
             const int error = last_socket_error();
-            if (receive_timeout_error(error)) {
+            if (receive_timeout_error(error) || error == EINTR || error == ECONNABORTED) {
                 continue;
             }
             if (listener->is_closed() || session_is_unavailable(session)) {
