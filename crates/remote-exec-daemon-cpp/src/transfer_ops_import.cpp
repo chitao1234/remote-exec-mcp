@@ -1,8 +1,10 @@
+#include <atomic>
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <fstream>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -50,6 +52,14 @@ std::vector<std::string> split_archive_path(const std::string& path) {
 std::string normalize_archive_separators(std::string value) {
     std::replace(value.begin(), value.end(), '\\', '/');
     return value;
+}
+
+std::string unique_atomic_write_temp_path(const std::string& path) {
+    static std::atomic<unsigned long> next_suffix(1UL);
+
+    std::ostringstream out;
+    out << path << ".tmp." << next_suffix.fetch_add(1UL);
+    return out.str();
 }
 
 std::string validate_relative_archive_path(const std::string& raw_path) {
@@ -268,37 +278,48 @@ void copy_reader_to_file(TransferArchiveReader& reader,
                          const TransferPathAuthorizer& authorizer) {
     ensure_transfer_entry_within_limits(size, copied_so_far, limits);
     authorize_path_if_present(authorizer, path);
-    ScopedFile output(path_utils::open_file(path, "wb"));
+    const std::string temp_path = unique_atomic_write_temp_path(path);
+    authorize_path_if_present(authorizer, temp_path);
+    ScopedFile output(path_utils::open_file(temp_path, "wb"));
     if (!output.valid()) {
         throw std::runtime_error("unable to write destination file");
     }
-
-    char buffer[8192];
-    std::uint64_t remaining = size;
-    while (remaining > 0U) {
-        const std::size_t requested = remaining < sizeof(buffer) ? static_cast<std::size_t>(remaining) : sizeof(buffer);
-        read_exact_or_throw(reader, buffer, requested, "truncated tar entry body");
-        if (!stdio_retry::fwrite_all(output.get(), buffer, requested)) {
+    try {
+        char buffer[8192];
+        std::uint64_t remaining = size;
+        while (remaining > 0U) {
+            const std::size_t requested =
+                remaining < sizeof(buffer) ? static_cast<std::size_t>(remaining) : sizeof(buffer);
+            read_exact_or_throw(reader, buffer, requested, "truncated tar entry body");
+            if (!stdio_retry::fwrite_all(output.get(), buffer, requested)) {
+                throw std::runtime_error("unable to write destination file");
+            }
+            remaining -= static_cast<std::uint64_t>(requested);
+        }
+        skip_entry_padding(reader, size);
+#ifndef _WIN32
+        if ((mode & 0111U) != 0U) {
+            struct stat st;
+            if (posix_eintr::retry<int>([&]() { return fstat(fileno(output.get()), &st); }) != 0) {
+                throw std::runtime_error("unable to read destination file mode");
+            }
+            if (posix_eintr::retry<int>([&]() { return fchmod(fileno(output.get()), st.st_mode | 0111); }) != 0) {
+                throw std::runtime_error("unable to update destination file mode");
+            }
+        }
+#else
+        (void)mode;
+#endif
+        if (output.close() != 0) {
             throw std::runtime_error("unable to write destination file");
         }
-        remaining -= static_cast<std::uint64_t>(requested);
-    }
-    skip_entry_padding(reader, size);
-#ifndef _WIN32
-    if ((mode & 0111U) != 0U) {
-        struct stat st;
-        if (posix_eintr::retry<int>([&]() { return fstat(fileno(output.get()), &st); }) != 0) {
-            throw std::runtime_error("unable to read destination file mode");
+        if (!path_utils::rename_path(temp_path, path)) {
+            (void)path_utils::remove_path(temp_path);
+            throw std::runtime_error("unable to rename temporary destination file");
         }
-        if (posix_eintr::retry<int>([&]() { return fchmod(fileno(output.get()), st.st_mode | 0111); }) != 0) {
-            throw std::runtime_error("unable to update destination file mode");
-        }
-    }
-#else
-    (void)mode;
-#endif
-    if (output.close() != 0) {
-        throw std::runtime_error("unable to write destination file");
+    } catch (...) {
+        (void)path_utils::remove_path(temp_path);
+        throw;
     }
 }
 

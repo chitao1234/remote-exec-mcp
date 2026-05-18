@@ -159,6 +159,27 @@ static std::string tar_with_declared_file_size(const std::string& path, std::uin
     return archive;
 }
 
+static std::string tar_with_truncated_file_body(const std::string& path,
+                                                std::uint64_t declared_size,
+                                                const std::string& body) {
+    std::string header(512, '\0');
+    set_bytes(&header, 0, 100, path);
+    header.replace(100, 8, octal_field(8, 0644));
+    header.replace(108, 8, octal_field(8, 0));
+    header.replace(116, 8, octal_field(8, 0));
+    header.replace(124, 12, octal_field(12, declared_size));
+    header.replace(136, 12, octal_field(12, 0));
+    header[156] = '0';
+    set_bytes(&header, 257, 6, "ustar ");
+    set_bytes(&header, 263, 2, " \0");
+    write_checksum(&header);
+
+    std::string archive;
+    archive.append(header);
+    archive.append(body);
+    return archive;
+}
+
 static std::uint64_t parse_octal_value(const char* data, std::size_t size) {
     std::size_t index = 0;
     while (index < size && (data[index] == ' ' || data[index] == '\0')) {
@@ -609,6 +630,28 @@ static void assert_transfer_requires_tar_terminator() {
         rejected_single_zero = failure.code == TransferRpcCode::TransferFailed;
     }
     TEST_ASSERT(rejected_single_zero);
+}
+
+static void assert_partial_file_import_cleans_up_destination() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-partial-cleanup";
+    fs::remove_all(root);
+    fs::create_directories(root);
+
+    const std::string archive =
+        tar_with_truncated_file_body(SINGLE_FILE_ENTRY, 1024ULL, std::string(128, 'x'));
+    bool rejected = false;
+    try {
+        (void)import_path(archive,
+                          TransferSourceType::File,
+                          (root / "dest.txt").string(),
+                          TransferOverwrite::Replace,
+                          true);
+    } catch (const TransferFailure& failure) {
+        rejected = failure.code == TransferRpcCode::TransferFailed;
+    }
+
+    TEST_ASSERT(rejected);
+    TEST_ASSERT(!fs::exists(root / "dest.txt"));
 }
 
 static void assert_transfer_rejects_entry_size_over_limit() {
@@ -1378,6 +1421,7 @@ int main() {
     assert_file_transfer_blocks_unexpected_entry_path();
     assert_file_transfer_blocks_raw_bytes();
     assert_transfer_requires_tar_terminator();
+    assert_partial_file_import_cleans_up_destination();
     assert_transfer_rejects_entry_size_over_limit();
     assert_transfer_rejects_unrepresentable_tar_size();
     assert_transfer_rejects_summary_size_over_limit();
