@@ -22,6 +22,7 @@
 namespace fs = test_fs;
 
 static const char kTunnelCloseReasonOperatorClose[] = "operator_close";
+static const unsigned long kTunnelFrameReadTimeoutMs = 5000UL;
 
 fs::path make_test_root();
 
@@ -35,7 +36,13 @@ void initialize_state_with_worker_limit(AppState& state, const fs::path& root, u
 void initialize_state(AppState& state, const fs::path& root);
 void enable_sandbox(AppState& state);
 
+const char* tunnel_frame_type_name(PortTunnelFrameType type);
 PortTunnelFrame read_tunnel_frame(SOCKET socket);
+PortTunnelFrame read_tunnel_frame_for_phase(SOCKET socket, const char* phase, unsigned long timeout_ms);
+PortTunnelFrame expect_tunnel_frame(SOCKET socket,
+                                    PortTunnelFrameType expected_type,
+                                    const char* phase,
+                                    unsigned long timeout_ms = kTunnelFrameReadTimeoutMs);
 void send_tunnel_frame(SOCKET socket, const PortTunnelFrame& frame);
 bool try_read_tunnel_frame_with_timeout(SOCKET socket, unsigned long timeout_ms, PortTunnelFrame* frame);
 bool socket_readable_within(SOCKET socket, unsigned long timeout_ms);

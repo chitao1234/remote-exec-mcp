@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <sstream>
 
 #ifndef _WIN32
 #include <poll.h>
@@ -75,13 +76,64 @@ void enable_sandbox(AppState& state) {
     }
 }
 
-static void recv_exact_or_assert(SOCKET socket, char* data, std::size_t size) {
+static std::string socket_label(SOCKET socket) {
+    std::ostringstream out;
+    out << static_cast<unsigned long long>(socket);
+    return out.str();
+}
+
+static std::uint64_t deadline_after(unsigned long timeout_ms) {
+    return platform::monotonic_ms() + timeout_ms;
+}
+
+static unsigned long remaining_timeout_ms(std::uint64_t deadline_ms) {
+    const std::uint64_t now = platform::monotonic_ms();
+    if (now >= deadline_ms) {
+        return 0UL;
+    }
+    const std::uint64_t remaining = deadline_ms - now;
+    return remaining > static_cast<std::uint64_t>(ULONG_MAX) ? ULONG_MAX : static_cast<unsigned long>(remaining);
+}
+
+static std::string tunnel_read_failure_message(SOCKET socket,
+                                               const char* phase,
+                                               const char* detail,
+                                               std::size_t offset,
+                                               std::size_t size) {
+    std::ostringstream out;
+    out << "tunnel frame read failed";
+    out << " phase=`" << phase << "`";
+    out << " socket=" << socket_label(socket);
+    out << " detail=`" << detail << "`";
+    out << " offset=" << offset;
+    out << " size=" << size;
+    return out.str();
+}
+
+static bool socket_readable_until(SOCKET socket, std::uint64_t deadline_ms) {
+    return socket_readable_within(socket, remaining_timeout_ms(deadline_ms));
+}
+
+static bool recv_exact_until(SOCKET socket, char* data, std::size_t size, std::uint64_t deadline_ms, const char* phase) {
     std::size_t offset = 0;
     while (offset < size) {
+        if (!socket_readable_until(socket, deadline_ms)) {
+            TEST_FAIL_MESSAGE(tunnel_read_failure_message(socket, phase, "timeout", offset, size));
+        }
         const int received = recv(socket, data + offset, static_cast<int>(size - offset), 0);
-        TEST_ASSERT(received > 0);
+        if (received == 0) {
+            TEST_FAIL_MESSAGE(tunnel_read_failure_message(socket, phase, "peer disconnected", offset, size));
+        }
+        if (received < 0) {
+            TEST_FAIL_MESSAGE(tunnel_read_failure_message(socket, phase, "recv failed", offset, size));
+        }
         offset += static_cast<std::size_t>(received);
     }
+    return true;
+}
+
+static void recv_exact_or_assert(SOCKET socket, char* data, std::size_t size) {
+    recv_exact_until(socket, data, size, deadline_after(kTunnelFrameReadTimeoutMs), "http-head");
 }
 
 static uint32_t read_u32_be(const std::vector<unsigned char>& bytes, std::size_t offset) {
@@ -108,18 +160,99 @@ void send_tunnel_frame(SOCKET socket, const PortTunnelFrame& frame) {
     send_all_bytes(socket, reinterpret_cast<const char*>(encoded.data()), encoded.size());
 }
 
-PortTunnelFrame read_tunnel_frame(SOCKET socket) {
+const char* tunnel_frame_type_name(PortTunnelFrameType type) {
+    switch (type) {
+    case PortTunnelFrameType::Close:
+        return "Close";
+    case PortTunnelFrameType::TunnelOpen:
+        return "TunnelOpen";
+    case PortTunnelFrameType::TunnelReady:
+        return "TunnelReady";
+    case PortTunnelFrameType::TunnelClosed:
+        return "TunnelClosed";
+    case PortTunnelFrameType::TunnelClose:
+        return "TunnelClose";
+    case PortTunnelFrameType::TunnelHeartbeat:
+        return "TunnelHeartbeat";
+    case PortTunnelFrameType::TunnelHeartbeatAck:
+        return "TunnelHeartbeatAck";
+    case PortTunnelFrameType::Error:
+        return "Error";
+    case PortTunnelFrameType::TcpListen:
+        return "TcpListen";
+    case PortTunnelFrameType::TcpListenOk:
+        return "TcpListenOk";
+    case PortTunnelFrameType::TcpAccept:
+        return "TcpAccept";
+    case PortTunnelFrameType::TcpConnect:
+        return "TcpConnect";
+    case PortTunnelFrameType::TcpConnectOk:
+        return "TcpConnectOk";
+    case PortTunnelFrameType::TcpData:
+        return "TcpData";
+    case PortTunnelFrameType::TcpEof:
+        return "TcpEof";
+    case PortTunnelFrameType::UdpBind:
+        return "UdpBind";
+    case PortTunnelFrameType::UdpBindOk:
+        return "UdpBindOk";
+    case PortTunnelFrameType::UdpDatagram:
+        return "UdpDatagram";
+    case PortTunnelFrameType::SessionOpen:
+        return "SessionOpen";
+    case PortTunnelFrameType::SessionReady:
+        return "SessionReady";
+    case PortTunnelFrameType::SessionResume:
+        return "SessionResume";
+    case PortTunnelFrameType::SessionResumed:
+        return "SessionResumed";
+    case PortTunnelFrameType::ForwardRecovering:
+        return "ForwardRecovering";
+    case PortTunnelFrameType::ForwardRecovered:
+        return "ForwardRecovered";
+    case PortTunnelFrameType::ForwardDrop:
+        return "ForwardDrop";
+    }
+    return "Unknown";
+}
+
+PortTunnelFrame read_tunnel_frame_for_phase(SOCKET socket, const char* phase, unsigned long timeout_ms) {
+    const std::uint64_t deadline_ms = deadline_after(timeout_ms);
     std::vector<unsigned char> bytes(PORT_TUNNEL_HEADER_LEN, 0U);
-    recv_exact_or_assert(socket, reinterpret_cast<char*>(bytes.data()), PORT_TUNNEL_HEADER_LEN);
+    recv_exact_until(socket, reinterpret_cast<char*>(bytes.data()), PORT_TUNNEL_HEADER_LEN, deadline_ms, phase);
     const uint32_t meta_len = read_u32_be(bytes, 8U);
     const uint32_t data_len = read_u32_be(bytes, 12U);
     bytes.resize(PORT_TUNNEL_HEADER_LEN + meta_len + data_len);
     if (meta_len + data_len > 0U) {
-        recv_exact_or_assert(socket,
-                             reinterpret_cast<char*>(bytes.data() + PORT_TUNNEL_HEADER_LEN),
-                             static_cast<std::size_t>(meta_len + data_len));
+        recv_exact_until(socket,
+                         reinterpret_cast<char*>(bytes.data() + PORT_TUNNEL_HEADER_LEN),
+                         static_cast<std::size_t>(meta_len + data_len),
+                         deadline_ms,
+                         phase);
     }
     return decode_port_tunnel_frame(bytes);
+}
+
+PortTunnelFrame read_tunnel_frame(SOCKET socket) {
+    return read_tunnel_frame_for_phase(socket, "read_tunnel_frame", kTunnelFrameReadTimeoutMs);
+}
+
+PortTunnelFrame expect_tunnel_frame(SOCKET socket,
+                                    PortTunnelFrameType expected_type,
+                                    const char* phase,
+                                    unsigned long timeout_ms) {
+    const PortTunnelFrame frame = read_tunnel_frame_for_phase(socket, phase, timeout_ms);
+    if (frame.type != expected_type) {
+        std::ostringstream out;
+        out << "unexpected tunnel frame";
+        out << " phase=`" << phase << "`";
+        out << " socket=" << socket_label(socket);
+        out << " expected=" << tunnel_frame_type_name(expected_type);
+        out << " actual=" << tunnel_frame_type_name(frame.type);
+        out << " stream_id=" << frame.stream_id;
+        TEST_FAIL_MESSAGE(out.str());
+    }
+    return frame;
 }
 
 bool try_read_tunnel_frame_with_timeout(SOCKET socket, unsigned long timeout_ms, PortTunnelFrame* frame) {
@@ -149,7 +282,7 @@ bool try_read_tunnel_frame_with_timeout(SOCKET socket, unsigned long timeout_ms,
     if (ready == 0) {
         return false;
     }
-    *frame = read_tunnel_frame(socket);
+    *frame = read_tunnel_frame_for_phase(socket, "try_read_tunnel_frame_with_timeout", timeout_ms);
     return true;
 }
 
@@ -283,9 +416,7 @@ PortTunnelFrame open_v4_tunnel(AppState& state,
                       json_frame(PortTunnelFrameType::TunnelOpen,
                                  0U,
                                  tunnel_open_meta(role, protocol, generation, resume_session_id)));
-    const PortTunnelFrame ready = read_tunnel_frame(client_socket->get());
-    TEST_ASSERT(ready.type == PortTunnelFrameType::TunnelReady);
-    return ready;
+    return expect_tunnel_frame(client_socket->get(), PortTunnelFrameType::TunnelReady, "open_v4_tunnel ready");
 }
 
 void close_tunnel(UniqueSocket* client_socket, std::thread* server_thread) {
