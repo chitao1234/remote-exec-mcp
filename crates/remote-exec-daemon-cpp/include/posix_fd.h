@@ -3,6 +3,7 @@
 #ifndef _WIN32
 
 #include <fcntl.h>
+#include <unistd.h>
 
 #include "posix_eintr.h"
 
@@ -24,6 +25,15 @@ inline bool set_nonblocking(int fd, bool enabled = true) {
 
 inline bool set_cloexec_nonblocking(int fd) {
     return set_cloexec(fd) && set_nonblocking(fd);
+}
+
+// close() consumes descriptor ownership even when it reports EINTR; do not retry it.
+inline int close_consuming(int fd) {
+    return ::close(fd);
+}
+
+inline void close_ignoring_errors(int fd) {
+    (void)close_consuming(fd);
 }
 
 } // namespace posix_fd

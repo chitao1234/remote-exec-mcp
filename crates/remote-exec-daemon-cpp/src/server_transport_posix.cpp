@@ -35,7 +35,7 @@ bool set_socket_cloexec_flag(SOCKET socket) {
 } // namespace
 
 void close_socket(SOCKET socket) {
-    close(socket);
+    posix_fd::close_ignoring_errors(socket);
 }
 
 void shutdown_socket(SOCKET socket) {

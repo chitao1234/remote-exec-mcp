@@ -109,7 +109,7 @@ public:
 
     void reset(int fd = -1) {
         if (valid()) {
-            close(fd_);
+            posix_fd::close_ignoring_errors(fd_);
         }
         fd_ = fd;
     }
@@ -148,8 +148,8 @@ PosixPipePair create_posix_pipe(const char* label) {
         set_fd_cloexec_or_throw(fds[0], std::string(label) + " fd[0]");
         set_fd_cloexec_or_throw(fds[1], std::string(label) + " fd[1]");
     } catch (...) {
-        close(fds[0]);
-        close(fds[1]);
+        posix_fd::close_ignoring_errors(fds[0]);
+        posix_fd::close_ignoring_errors(fds[1]);
         throw;
     }
 #endif
@@ -685,7 +685,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
                 _exit(126);
             }
             if (slave_fd > STDERR_FILENO) {
-                close(slave_fd);
+                posix_fd::close_ignoring_errors(slave_fd);
             }
             pty.master.reset();
             exec_shell_child(exec_argv, executable_path, exec_environment, workdir);
