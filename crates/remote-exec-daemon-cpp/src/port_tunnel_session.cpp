@@ -7,12 +7,6 @@
 
 namespace {
 
-#ifdef _WIN32
-struct ExpiryThreadContext {
-    std::shared_ptr<PortTunnelService> service;
-};
-#endif
-
 std::string next_opaque_id(const char* prefix, std::uint64_t sequence) {
     std::ostringstream out;
     out << prefix << platform::monotonic_ms() << "_" << sequence;
@@ -626,12 +620,12 @@ bool PortTunnelService::schedule_session_expiry(const std::shared_ptr<PortTunnel
 
 #ifdef _WIN32
 unsigned __stdcall PortTunnelService::expiry_thread_entry(void* raw_context) {
-    std::unique_ptr<ExpiryThreadContext> context(static_cast<ExpiryThreadContext*>(raw_context));
+    PortTunnelService* service = static_cast<PortTunnelService*>(raw_context);
     {
-        BasicLockGuard lock(context->service->expiry_mutex_);
-        context->service->expiry_thread_id_ = GetCurrentThreadId();
+        BasicLockGuard lock(service->expiry_mutex_);
+        service->expiry_thread_id_ = GetCurrentThreadId();
     }
-    context->service->expiry_scheduler_loop(context->service);
+    service->expiry_scheduler_loop();
     return 0;
 }
 #endif
@@ -640,19 +634,16 @@ bool PortTunnelService::ensure_expiry_scheduler_started_locked() {
     if (expiry_thread_started_) {
         return true;
     }
-    std::shared_ptr<PortTunnelService> self = shared_from_this();
 #ifdef _WIN32
-    std::unique_ptr<ExpiryThreadContext> context(new ExpiryThreadContext());
-    context->service = self;
-    HANDLE handle = begin_win32_thread(&PortTunnelService::expiry_thread_entry, context.get());
+    HANDLE handle = begin_win32_thread(&PortTunnelService::expiry_thread_entry, this);
     if (handle == nullptr) {
         return false;
     }
     expiry_thread_ = handle;
-    context.release();
 #else
     try {
-        expiry_thread_.reset(new std::thread([self]() { self->expiry_scheduler_loop(self); }));
+        PortTunnelService* self = this;
+        expiry_thread_.reset(new std::thread([self]() { self->expiry_scheduler_loop(); }));
     } catch (const std::exception& ex) {
         log_tunnel_exception("spawn session expiry scheduler", ex);
         expiry_thread_.reset();
@@ -696,7 +687,7 @@ void PortTunnelService::stop_expiry_scheduler() {
 #endif
 }
 
-void PortTunnelService::expiry_scheduler_loop(const std::shared_ptr<PortTunnelService>& self) {
+void PortTunnelService::expiry_scheduler_loop() {
     for (;;) {
         std::vector<std::shared_ptr<PortTunnelSession>> due_sessions;
         unsigned long wait_ms = RESUME_TIMEOUT_MS;
@@ -739,10 +730,6 @@ void PortTunnelService::expiry_scheduler_loop(const std::shared_ptr<PortTunnelSe
 
                 if (!due_sessions.empty()) {
                     break;
-                }
-                if (expiry_sessions_.empty() && self.use_count() == 1L) {
-                    log_message(LOG_DEBUG, "port_tunnel", "expiry scheduler idle exit");
-                    return;
                 }
                 expiry_cond_.timed_wait_ms(expiry_mutex_, wait_ms);
             }
