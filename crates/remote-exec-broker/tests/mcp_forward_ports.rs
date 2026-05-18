@@ -423,7 +423,8 @@ async fn forward_ports_closes_active_tcp_streams_after_connect_tunnel_drop() {
         wait_for_forward_phase(&fixture, &forward_id, "ready", Duration::from_secs(5)).await;
     assert_eq!(forward["status"], "open");
     assert_eq!(forward["phase"], "ready");
-    assert_eq!(forward["dropped_tcp_streams"], 1);
+    let dropped = wait_for_tcp_drop_count(&fixture, &forward_id, 1, Duration::from_secs(5)).await;
+    assert_eq!(dropped["dropped_tcp_streams"], 1);
     assert!(forward["reconnect_attempts"].as_u64().unwrap() >= 1);
     assert_eq!(forward["connect_state"]["health"], "ready");
 
