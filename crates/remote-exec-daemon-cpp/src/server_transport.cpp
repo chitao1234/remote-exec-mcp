@@ -91,6 +91,7 @@ void UniqueSocket::reset(SOCKET socket) {
 bool try_read_http_request_head(SOCKET client, std::size_t max_header_bytes, HttpRequestHead* head) {
     std::string data;
     char buffer[HTTP_READ_BUFFER_SIZE];
+    std::size_t search_offset = 0;
 
     for (;;) {
         const int received = recv(client, buffer, sizeof(buffer), 0);
@@ -112,11 +113,12 @@ bool try_read_http_request_head(SOCKET client, std::size_t max_header_bytes, Htt
         }
 
         data.append(buffer, received);
-        const std::size_t header_end = data.find("\r\n\r\n");
+        const std::size_t header_end = data.find("\r\n\r\n", search_offset);
         if (header_end == std::string::npos) {
             if (data.size() > max_header_bytes) {
                 throw BadHttpRequest("http request headers too large");
             }
+            search_offset = data.size() > 3U ? data.size() - 3U : 0U;
             continue;
         }
 
