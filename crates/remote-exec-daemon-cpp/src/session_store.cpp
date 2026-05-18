@@ -419,9 +419,16 @@ Json SessionStore::start_command(const std::string& target,
     std::shared_ptr<LiveSession> session = launch_live_session(request.cmd, request.workdir, request.shell, request.login_requested, request.tty_requested);
     start_session_pump(session);
 
-    const unsigned long timeout_ms = resolve_yield_time_ms(yield_time.exec_command, request.has_yield_time_ms, request.yield_time_ms);
-    BasicLockGuard operation_lock(session->operation_mutex_);
-    const PollResult poll_result = wait_for_session_activity(session, timeout_ms, request.max_output_tokens);
+    PollResult poll_result;
+    try {
+        const unsigned long timeout_ms = resolve_yield_time_ms(yield_time.exec_command, request.has_yield_time_ms, request.yield_time_ms);
+        BasicLockGuard operation_lock(session->operation_mutex_);
+        poll_result = wait_for_session_activity(session, timeout_ms, request.max_output_tokens);
+    } catch (...) {
+        retire_session(session);
+        join_session_pump(session.get());
+        throw;
+    }
 
     Json warnings = empty_exec_warnings();
     {
