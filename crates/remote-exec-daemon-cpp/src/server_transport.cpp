@@ -109,6 +109,11 @@ bool try_read_http_request_head(SOCKET client, std::size_t max_header_bytes, Htt
                 }
                 throw BadHttpRequest("incomplete http request");
             }
+#ifndef _WIN32
+            if (error == EINTR) {
+                continue;
+            }
+#endif
             throw std::runtime_error(socket_error_message("recv"));
         }
 
@@ -235,6 +240,11 @@ void HttpRequestBodyStream::ensure_raw_available(std::size_t size) {
             if (would_block_error(error)) {
                 continue;
             }
+#ifndef _WIN32
+            if (error == EINTR) {
+                continue;
+            }
+#endif
             throw std::runtime_error(socket_error_message("recv"));
         }
         raw_.append(buffer, received);
@@ -256,6 +266,11 @@ void HttpRequestBodyStream::ensure_raw_line() {
             if (would_block_error(error)) {
                 continue;
             }
+#ifndef _WIN32
+            if (error == EINTR) {
+                continue;
+            }
+#endif
             throw std::runtime_error(socket_error_message("recv"));
         }
         raw_.append(buffer, received);
@@ -292,6 +307,11 @@ void send_all_bytes(SOCKET client, const char* data, std::size_t size) {
         const int sent = send_bounded(client, data + offset, size - offset, 0);
         if (sent <= 0) {
             const int error = last_socket_error();
+#ifndef _WIN32
+            if (error == EINTR) {
+                continue;
+            }
+#endif
             throw SocketSendError(socket_error_message("send"), peer_disconnected_send_error(error));
         }
         offset += static_cast<std::size_t>(sent);

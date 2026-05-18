@@ -163,6 +163,11 @@ bool PortTunnelConnection::read_exact(unsigned char* data, std::size_t size) {
             return false;
         }
         if (received < 0) {
+#ifndef _WIN32
+            if (last_socket_error() == EINTR) {
+                continue;
+            }
+#endif
             log_message(LOG_DEBUG,
                         "port_tunnel",
                         LogMessageBuilder("tunnel read stopped")
