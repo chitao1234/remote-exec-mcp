@@ -170,6 +170,10 @@ PosixPtyPair create_posix_pty() {
     if (!master.valid()) {
         throw std::runtime_error(std::string("posix_openpt failed: ") + safe_strerror(errno));
     }
+    const int fd_flags = fcntl(master.get(), F_GETFD);
+    if (fd_flags < 0 || fcntl(master.get(), F_SETFD, fd_flags | FD_CLOEXEC) != 0) {
+        throw std::runtime_error(std::string("fcntl(FD_CLOEXEC) on pty master failed: ") + safe_strerror(errno));
+    }
     if (grantpt(master.get()) != 0) {
         throw std::runtime_error(std::string("grantpt failed: ") + safe_strerror(errno));
     }
