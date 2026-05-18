@@ -49,6 +49,11 @@ struct PortTunnelSession {
           resume_deadline_ms(0ULL), generation(0ULL), retained_session_budget(std::move(retained_budget)),
           next_daemon_stream_id(2U) {}
 
+    // Owns one retained tunnel session and its retained TCP listener or UDP bind.
+    // Connection attachments own connection-local streams. close_terminal() and
+    // expire_if_due() return teardown work so callers can close sockets and wake
+    // workers without holding the session mutex. Remaining helper close paths in
+    // port_tunnel_session.cpp only delegate to resource-owned close() methods.
     std::shared_ptr<PortTunnelSessionAttachment> attach(const std::shared_ptr<PortTunnelConnection>& connection);
     std::shared_ptr<PortTunnelSessionAttachment> detach_until(std::uint64_t deadline_ms, bool* detached);
     PortTunnelSessionTeardown close_terminal(bool mark_expired);

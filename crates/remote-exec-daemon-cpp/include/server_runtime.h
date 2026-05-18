@@ -13,6 +13,11 @@ public:
     explicit ServerRuntime(const DaemonConfig& config);
     ~ServerRuntime();
 
+    // Top-level daemon runtime owner. It owns AppState, the listener socket, the
+    // accept and maintenance threads, the HTTP ConnectionManager, and the
+    // PortTunnelService stored in AppState. request_shutdown() closes the
+    // listener and asks child owners to stop; join() consumes runtime threads and
+    // waits for connection workers before final maintenance.
     void start_accept_loop();
     void request_shutdown();
     void join();

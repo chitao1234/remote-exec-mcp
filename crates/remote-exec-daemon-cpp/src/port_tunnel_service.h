@@ -34,6 +34,10 @@ public:
     explicit PortTunnelService(const PortForwardLimitConfig& limits);
     ~PortTunnelService();
 
+    // Owns retained tunnel sessions, budget state, retained worker records, and
+    // the expiry scheduler. shutdown() is the authoritative terminal path:
+    // sessions are transitioned to terminal state, resources are closed outside
+    // service locks, and worker/scheduler threads are consumed by their owners.
     void shutdown();
     std::shared_ptr<PortTunnelSession> create_session();
     std::shared_ptr<PortTunnelSession> find_session(const std::string& session_id);

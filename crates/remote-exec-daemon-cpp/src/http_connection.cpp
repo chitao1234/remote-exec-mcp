@@ -24,6 +24,10 @@ class HttpBodyTransferArchiveReader : public TransferArchiveReader {
 public:
     explicit HttpBodyTransferArchiveReader(HttpRequestBodyStream* body) : body_(body) {}
 
+    // Transfer route handlers are connection-worker scoped: they read from the
+    // current HTTP request body and write the current response on the worker's
+    // socket. They do not retain ownership after handle_client_request()
+    // returns; interruption is driven by ConnectionManager socket shutdown.
     bool read_exact_or_eof(char* data, std::size_t size) {
         std::size_t offset = 0;
         while (offset < size) {

@@ -34,6 +34,10 @@ public:
     SessionStore();
     ~SessionStore();
 
+    // Owns daemon-local exec session IDs. start_command() installs a LiveSession
+    // after process launch succeeds; write_stdin() may retire and remove a
+    // completed session. Destruction retires all remaining sessions, terminates
+    // their processes, and joins output pump threads outside the store mutex.
     Json start_command(const std::string& target,
                        const ExecStartRequestSpec& request,
                        const YieldTimeConfig& yield_time,

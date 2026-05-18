@@ -11,6 +11,10 @@
 class PortTunnelService;
 
 struct AppState {
+    // AppState is owned by ServerRuntime and shared by route handlers only for
+    // the lifetime of a connection worker. Route handlers may create or close
+    // subsystem resources through these owners, but they do not own the runtime
+    // threads, listener socket, or daemon shutdown sequence.
     DaemonConfig config;
     std::string daemon_instance_id;
     std::string hostname;
