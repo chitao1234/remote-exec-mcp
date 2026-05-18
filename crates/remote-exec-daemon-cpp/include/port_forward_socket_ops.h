@@ -33,4 +33,6 @@ void shutdown_port_forward_send(SOCKET socket);
 std::string printable_port_forward_endpoint(const sockaddr* address, socklen_t address_len);
 std::string socket_local_endpoint(SOCKET socket);
 void send_all_socket(SOCKET socket, const std::string& data);
+int wait_socket_readable(SOCKET socket, unsigned long timeout_ms);
+int wait_socket_readable_or_wakeup(SOCKET socket, SOCKET wakeup_fd, unsigned long timeout_ms);
 sockaddr_storage parse_port_forward_peer(const std::string& peer, socklen_t* peer_len);

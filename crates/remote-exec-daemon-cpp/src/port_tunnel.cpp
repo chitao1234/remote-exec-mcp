@@ -1,14 +1,6 @@
 #include <climits>
 #include <cstdlib>
 
-#ifndef _WIN32
-#include <cerrno>
-#include <poll.h>
-#endif
-
-#ifndef _WIN32
-#include "posix_eintr.h"
-#endif
 #include "port_tunnel_service.h"
 #include "port_tunnel_thread.h"
 #include "server_contract.h"
@@ -692,70 +684,6 @@ bool TunnelUdpSocket::is_closed() {
 
 bool session_is_unavailable(const std::shared_ptr<PortTunnelSession>& session) {
     return session->is_unavailable();
-}
-
-int wait_socket_readable(SOCKET socket, unsigned long timeout_ms) {
-#ifdef _WIN32
-    fd_set readfds;
-    FD_ZERO(&readfds);
-    FD_SET(socket, &readfds);
-
-    timeval timeout;
-    timeout.tv_sec = static_cast<long>(timeout_ms / 1000UL);
-    timeout.tv_usec = static_cast<long>((timeout_ms % 1000UL) * 1000UL);
-    return select(0, &readfds, nullptr, nullptr, &timeout);
-#else
-    struct pollfd descriptor;
-    descriptor.fd = socket;
-    descriptor.events = POLLIN;
-    descriptor.revents = 0;
-
-    const int ready = posix_eintr::poll_for_ms(&descriptor, 1, timeout_ms);
-    if (ready > 0 && (descriptor.revents & (POLLNVAL | POLLERR)) != 0) {
-        return -1;
-    }
-    return ready;
-#endif
-}
-
-int wait_socket_readable_or_wakeup(SOCKET socket, SOCKET wakeup_fd, unsigned long timeout_ms) {
-#ifdef _WIN32
-    fd_set readfds;
-    FD_ZERO(&readfds);
-    FD_SET(socket, &readfds);
-    FD_SET(wakeup_fd, &readfds);
-
-    timeval timeout;
-    timeout.tv_sec = static_cast<long>(timeout_ms / 1000UL);
-    timeout.tv_usec = static_cast<long>((timeout_ms % 1000UL) * 1000UL);
-    const int ready = select(0, &readfds, nullptr, nullptr, &timeout);
-    if (ready <= 0) {
-        return ready;
-    }
-    if (FD_ISSET(wakeup_fd, &readfds)) {
-        return -1;
-    }
-    return ready;
-#else
-    struct pollfd fds[2];
-    fds[0].fd = socket;
-    fds[0].events = POLLIN;
-    fds[0].revents = 0;
-    fds[1].fd = wakeup_fd;
-    fds[1].events = POLLIN;
-    fds[1].revents = 0;
-
-    const int ready = posix_eintr::poll_for_ms(fds, 2, timeout_ms);
-    if (ready > 0) {
-        if (fds[1].revents & (POLLIN | POLLHUP | POLLNVAL | POLLERR)) {
-            return -1;
-        }
-        if (fds[0].revents & (POLLNVAL | POLLERR)) {
-            return -1;
-        }
-    }
-    return ready;
-#endif
 }
 
 void RetainedTcpListener::close() {
