@@ -156,3 +156,91 @@ technically a resource leak.
 `waitpid(pid, status, 0)` is called under `g_mutex`, blocking all concurrent
 child management for the duration. Can cause latency spikes during session
 pruning.
+
+## Round 2 — Fixed Issues
+
+### MEDIUM-HIGH — ensure_raw_line unbounded buffer growth (DoS)
+
+`src/server_transport.cpp:241-257`
+
+When reading chunked bodies, `ensure_raw_line()` loops calling `recv` and
+appending to `raw_` until it finds `\r\n`. A malicious client can send a
+continuous stream of non-CRLF bytes, growing `raw_` without bound and
+exhausting memory. The `max_body_bytes_` check only fires after the chunk size
+is parsed, not during the line read itself. Same issue in
+`consume_chunk_trailers()`.
+
+### MEDIUM — No file size limit in image_read
+
+`src/server_route_image.cpp:40-65`
+
+`read_binary_file_bytes` reads an entire file into memory with no size cap. A
+request pointing to a large file causes unbounded allocation. The response then
+base64-encodes it, amplifying memory usage by ~33%.
+
+### LOW — Negative st_size wraps to huge uint64 in tar export
+
+`src/transfer_ops_tar.cpp:223`
+
+`static_cast<std::uint64_t>(st.st_size)` wraps negative values to near-UINT64_MAX,
+causing the export to emit a bogus tar header and attempt an enormous read.
+
+### LOW — Missing chunked terminator on export error after headers sent
+
+`src/http_connection.cpp:220-259`
+
+When `export_path_to_sink_as` throws after chunked response headers are sent,
+the chunked terminator (`0\r\n\r\n`) is never written. The HTTP response stream
+is left in an invalid state.
+
+### LOW — Integer overflow in output_renderer on 32-bit
+
+`src/output_renderer.cpp:81`
+
+`max_output_tokens * BYTES_PER_TOKEN` can overflow `size_t` on 32-bit platforms
+when `max_output_tokens` is large.
+
+## Round 2 — Documented But Not Fixed
+
+### MEDIUM — Symlink TOCTOU races in tar import
+
+`src/transfer_ops_import.cpp:127-139,448` and `src/transfer_ops_fs.cpp:96-124,195-213`
+
+Multiple TOCTOU races between symlink checks and file writes. Between
+validation and use, a local attacker could swap a directory for a symlink,
+causing writes to land outside the destination. Fixing requires `openat()`-style
+directory-fd-relative operations.
+
+### MEDIUM — Patch engine does not verify symlink-free path
+
+`src/patch_engine.cpp:262-290`
+
+`write_text_atomic` creates parent directories and writes via temp+rename
+without checking whether path components are symlinks. The
+`PatchPathAuthorizer` validates the logical path but not the physical state.
+
+### LOW-MEDIUM — Quadratic header search in try_read_http_request_head
+
+`src/server_transport.cpp:90-132`
+
+Each recv appends to a buffer then searches from the beginning for `\r\n\r\n`.
+With max_header_bytes=64KB and 1-byte-at-a-time delivery, this is O(n^2) CPU.
+Bounded by max_header_bytes and per-connection threading.
+
+### LOW-MEDIUM — Zero body-read timeout enables slowloris on body
+
+`src/http_connection.cpp:318`
+
+After reading headers, socket timeout is set to 0 (infinite). A client sending
+headers with large Content-Length then stopping holds the connection thread
+indefinitely. Combined with no per-IP limit, 64 such connections block the
+daemon.
+
+### LOW — Potential std::terminate if exception after start_session_pump
+
+`src/session_store.cpp:420+`
+
+If `wait_for_session_activity` throws after `start_session_pump`, no
+`join_session_pump` is called. The pump thread's last `shared_ptr` drop
+destroys a joinable `std::thread`, calling `std::terminate()`.
+
