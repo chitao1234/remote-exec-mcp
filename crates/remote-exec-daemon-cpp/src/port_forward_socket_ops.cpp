@@ -143,7 +143,7 @@ bool wait_for_connect(SOCKET socket, unsigned long timeout_ms) {
 #ifdef _WIN32
     return selected > 0 && FD_ISSET(socket, &writefds);
 #else
-    return selected > 0 && (descriptor.revents & POLLOUT) != 0;
+    return selected > 0 && (descriptor.revents & (POLLOUT | POLLERR | POLLHUP)) != 0;
 #endif
 }
 
