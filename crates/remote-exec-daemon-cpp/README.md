@@ -161,6 +161,52 @@ Logs go to `stderr`. Set `REMOTE_EXEC_LOG=debug` to raise the level, or use a
 shared filter string such as
 `REMOTE_EXEC_LOG=warn,remote_exec_daemon_cpp=debug`.
 
+## Lifecycle Debugging
+
+Lifecycle-sensitive tests should fail with bounded diagnostics instead of
+waiting forever on a socket read. Keep normal test output quiet with
+`REMOTE_EXEC_LOG=off`, and enable port-forward/session lifecycle traces only
+when chasing a race:
+
+```sh
+REMOTE_EXEC_LOG=debug make test-host-server-streaming
+REMOTE_EXEC_LOG=debug make test-host-session-store
+```
+
+The debug logs include tunnel session IDs, generations, close modes, retained
+resource kinds, worker start/finish events, writer shutdown, and tunnel read
+timeout decisions. These logs are intentionally `DEBUG` level so automated
+checks can continue to run with `REMOTE_EXEC_LOG=off`.
+
+Use the stress target for load-sensitive POSIX flakes:
+
+```sh
+make STRESS_RUNS=10 STRESS_JOBS=8 stress-posix
+bmake STRESS_RUNS=10 STRESS_JOBS=8 stress-posix
+```
+
+When a test is stuck or has already printed the failing process ID, attach a
+debugger to the running test process:
+
+```sh
+gdb -p <pid>
+```
+
+For a debugger-first reproduction, run the test binary directly:
+
+```sh
+REMOTE_EXEC_LOG=debug gdb --args build/test_server_streaming
+REMOTE_EXEC_LOG=debug gdb --args build/test_session_store
+```
+
+For Windows-shared lifecycle changes, run the XP-compatible path. On non-Windows
+hosts this uses Wine when `WINDOWS_XP_TEST_RUNNER` is unset and Wine is
+available:
+
+```sh
+make check-windows-xp
+```
+
 Idle keep-alive HTTP connections wait up to `http_connection_idle_timeout_ms`
 for the next request header before the daemon closes the socket.
 

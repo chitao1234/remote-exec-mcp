@@ -30,6 +30,13 @@ bool PortTunnelSender::closed() const {
 void PortTunnelSender::mark_closed() {
     {
         BasicLockGuard lock(writer_mutex_);
+        log_message(LOG_DEBUG,
+                    "port_tunnel",
+                    LogMessageBuilder("sender close requested")
+                        .bool_field("writer_started", writer_started_)
+                        .bool_field("writer_finished", writer_finished_)
+                        .field("queued_bytes", queued_bytes_.load())
+                        .str());
         closed_.store(true);
         writer_shutdown_ = true;
         if (!writer_started_ || writer_finished_) {
@@ -78,7 +85,9 @@ bool PortTunnelSender::ensure_writer_started_locked() {
     struct ThreadEntry {
         static unsigned __stdcall entry(void* raw_context) {
             std::unique_ptr<Context> context(static_cast<Context*>(raw_context));
+            log_message(LOG_DEBUG, "port_tunnel", "sender writer start");
             context->sender->writer_loop();
+            log_message(LOG_DEBUG, "port_tunnel", "sender writer stop");
             return 0;
         }
     };
@@ -98,7 +107,11 @@ bool PortTunnelSender::ensure_writer_started_locked() {
     return true;
 #else
     try {
-        writer_thread_.reset(new std::thread([this]() { writer_loop(); }));
+        writer_thread_.reset(new std::thread([this]() {
+            log_message(LOG_DEBUG, "port_tunnel", "sender writer start");
+            writer_loop();
+            log_message(LOG_DEBUG, "port_tunnel", "sender writer stop");
+        }));
         writer_started_ = true;
         return true;
     } catch (const std::exception& ex) {
@@ -132,6 +145,7 @@ void PortTunnelSender::writer_loop() {
                 writer_cond_.wait(writer_mutex_);
             }
             if (writer_queue_.empty()) {
+                log_message(LOG_DEBUG, "port_tunnel", "sender writer drained");
                 writer_finished_ = true;
                 writer_cond_.broadcast();
                 return;

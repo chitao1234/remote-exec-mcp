@@ -135,11 +135,26 @@ bool PortTunnelConnection::send_tcp_success_after_io_threads_started(const PortT
 void PortTunnelConnection::close_current_session(PortTunnelCloseMode mode) {
     std::shared_ptr<PortTunnelSession> session = current_session();
     if (session.get() != nullptr) {
+        log_message(LOG_DEBUG,
+                    "port_tunnel",
+                    LogMessageBuilder("connection close session")
+                        .quoted_field("session_id", session->session_id)
+                        .raw(std::string("mode=") + port_tunnel_close_mode_name(mode))
+                        .field("generation", current_generation())
+                        .str());
         if (mode == PortTunnelCloseMode::RetryableDetach) {
             service_->detach_session(session);
         } else if (mode == PortTunnelCloseMode::GracefulClose || mode == PortTunnelCloseMode::TerminalFailure) {
             service_->close_session(session);
         }
+    } else {
+        log_message(LOG_DEBUG,
+                    "port_tunnel",
+                    LogMessageBuilder("connection close session")
+                        .raw("session=none")
+                        .raw(std::string("mode=") + port_tunnel_close_mode_name(mode))
+                        .field("generation", current_generation())
+                        .str());
     }
 }
 
@@ -148,6 +163,13 @@ void PortTunnelConnection::close_connection_local_state() {
     std::vector<std::shared_ptr<TunnelUdpSocket>> udp_sockets;
     mark_closed();
     connection_local_streams_.drain(&tcp_streams, &udp_sockets);
+    log_message(LOG_DEBUG,
+                "port_tunnel",
+                LogMessageBuilder("connection close local state")
+                    .field("generation", current_generation())
+                    .field("tcp_streams", tcp_streams.size())
+                    .field("udp_sockets", udp_sockets.size())
+                    .str());
     for (std::size_t i = 0; i < tcp_streams.size(); ++i) {
         tcp_streams[i]->close();
     }
@@ -197,6 +219,17 @@ PortTunnelMode PortTunnelConnection::current_mode() {
 void PortTunnelConnection::require_mode(PortTunnelMode mode, PortTunnelProtocol protocol, const std::string& message) {
     BasicLockGuard lock(state_mutex_);
     if (mode_ != mode || protocol_ != protocol) {
+        log_message(LOG_DEBUG,
+                    "port_tunnel",
+                    LogMessageBuilder("tunnel invariant rejected")
+                        .raw("invariant=mode_protocol")
+                        .raw(std::string("current_mode=") + port_tunnel_mode_name(mode_))
+                        .raw(std::string("current_protocol=") + port_tunnel_protocol_name(protocol_))
+                        .raw(std::string("expected_mode=") + port_tunnel_mode_name(mode))
+                        .raw(std::string("expected_protocol=") + port_tunnel_protocol_name(protocol))
+                        .field("generation", current_generation())
+                        .quoted_field("message", message)
+                        .str());
         throw PortForwardError(400, "invalid_port_tunnel", message);
     }
 }
@@ -219,6 +252,13 @@ void PortTunnelConnection::ensure_generation(std::uint64_t frame_generation) con
         std::ostringstream message;
         message << "frame generation `" << frame_generation << "` does not match tunnel generation `" << generation
                 << "`";
+        log_message(LOG_DEBUG,
+                    "port_tunnel",
+                    LogMessageBuilder("tunnel invariant rejected")
+                        .raw("invariant=generation")
+                        .field("frame_generation", frame_generation)
+                        .field("tunnel_generation", generation)
+                        .str());
         throw PortForwardError(400, "port_tunnel_generation_mismatch", message.str());
     }
 }

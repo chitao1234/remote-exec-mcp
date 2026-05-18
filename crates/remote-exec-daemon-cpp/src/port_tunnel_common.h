@@ -49,6 +49,9 @@ enum class PortTunnelMode {
     Connect,
 };
 
+const char* port_tunnel_close_mode_name(PortTunnelCloseMode mode);
+const char* port_tunnel_protocol_name(PortTunnelProtocol protocol);
+const char* port_tunnel_mode_name(PortTunnelMode mode);
 std::string header_token_lower(const HttpRequest& request, const std::string& name);
 bool connection_header_has_upgrade(const HttpRequest& request);
 std::string frame_meta_string(const PortTunnelFrame& frame, const std::string& key);

@@ -111,11 +111,26 @@ bool PortTunnelConnection::read_exact(unsigned char* data, std::size_t size) {
     const unsigned long timeout_ms = service_->limits().tunnel_io_timeout_ms;
     while (offset < size) {
         if (closed()) {
+            log_message(LOG_DEBUG,
+                        "port_tunnel",
+                        LogMessageBuilder("tunnel read stopped")
+                            .raw("reason=connection_closed")
+                            .field("offset", offset)
+                            .field("size", size)
+                            .str());
             mark_closed();
             return false;
         }
         const std::uint64_t elapsed_ms = platform::monotonic_ms() - started_at_ms;
         if (elapsed_ms >= timeout_ms) {
+            log_message(LOG_DEBUG,
+                        "port_tunnel",
+                        LogMessageBuilder("tunnel read stopped")
+                            .raw("reason=timeout")
+                            .field("offset", offset)
+                            .field("size", size)
+                            .field("timeout_ms", timeout_ms)
+                            .str());
             mark_closed();
             return false;
         }
@@ -123,6 +138,13 @@ bool PortTunnelConnection::read_exact(unsigned char* data, std::size_t size) {
         const unsigned long wait_ms = std::min<unsigned long>(remaining_ms, RETAINED_SOCKET_POLL_TIMEOUT_MS);
         const int ready = wait_socket_readable(client_, wait_ms);
         if (ready < 0) {
+            log_message(LOG_DEBUG,
+                        "port_tunnel",
+                        LogMessageBuilder("tunnel read stopped")
+                            .raw("reason=socket_wait_failed")
+                            .field("offset", offset)
+                            .field("size", size)
+                            .str());
             mark_closed();
             return false;
         }
@@ -131,9 +153,23 @@ bool PortTunnelConnection::read_exact(unsigned char* data, std::size_t size) {
         }
         const int received = recv_bounded(client_, reinterpret_cast<char*>(data + offset), size - offset, 0);
         if (received == 0) {
+            log_message(LOG_DEBUG,
+                        "port_tunnel",
+                        LogMessageBuilder("tunnel read stopped")
+                            .raw("reason=peer_eof")
+                            .field("offset", offset)
+                            .field("size", size)
+                            .str());
             return false;
         }
         if (received < 0) {
+            log_message(LOG_DEBUG,
+                        "port_tunnel",
+                        LogMessageBuilder("tunnel read stopped")
+                            .raw("reason=recv_failed")
+                            .field("offset", offset)
+                            .field("size", size)
+                            .str());
             return false;
         }
         offset += static_cast<std::size_t>(received);
@@ -192,6 +228,7 @@ void PortTunnelConnection::mark_closed() {
 
 void PortTunnelConnection::run() {
     if (!read_preface()) {
+        log_message(LOG_DEBUG, "port_tunnel", "tunnel connection closed before valid preface");
         return;
     }
 
@@ -211,6 +248,12 @@ void PortTunnelConnection::run() {
         close_mode = PortTunnelCloseMode::TerminalFailure;
         send_terminal_error(0U, "invalid_port_tunnel", "unknown port tunnel failure");
     }
+    log_message(LOG_DEBUG,
+                "port_tunnel",
+                LogMessageBuilder("tunnel connection closing")
+                    .raw(std::string("close_mode=") + port_tunnel_close_mode_name(close_mode))
+                    .field("generation", current_generation())
+                    .str());
     close_current_session(close_mode);
     close_connection_local_state();
 }
@@ -283,6 +326,15 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
         throw PortForwardError(400, "invalid_port_tunnel", "unknown tunnel protocol");
     }
     set_generation(generation);
+    log_message(LOG_DEBUG,
+                "port_tunnel",
+                LogMessageBuilder("tunnel open")
+                    .quoted_field("role", role)
+                    .quoted_field("protocol", protocol)
+                    .field("generation", generation)
+                    .bool_field("resume", meta.has_resume_session_id)
+                    .quoted_field("resume_session_id", meta.resume_session_id)
+                    .str());
 
     if (role == "listen") {
         std::shared_ptr<PortTunnelSession> session;
@@ -347,6 +399,12 @@ void PortTunnelConnection::tunnel_close(const PortTunnelFrame& frame) {
     }
     const TunnelCloseMetadata meta = parse_tunnel_close_metadata(frame);
     ensure_generation(meta.generation);
+    log_message(LOG_DEBUG,
+                "port_tunnel",
+                LogMessageBuilder("tunnel close frame")
+                    .field("generation", meta.generation)
+                    .field("meta_bytes", frame.meta.size())
+                    .str());
     PortTunnelFrame closed = make_empty_frame(PortTunnelFrameType::TunnelClosed, 0U);
     closed.meta = frame.meta;
     send_frame(closed);

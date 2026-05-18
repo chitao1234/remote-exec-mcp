@@ -62,6 +62,42 @@ void log_unknown_tunnel_exception(const char* operation) {
     log_message(LOG_WARN, "port_tunnel", std::string(operation) + " failed with an unknown exception");
 }
 
+const char* port_tunnel_close_mode_name(PortTunnelCloseMode mode) {
+    switch (mode) {
+    case PortTunnelCloseMode::RetryableDetach:
+        return "retryable_detach";
+    case PortTunnelCloseMode::GracefulClose:
+        return "graceful_close";
+    case PortTunnelCloseMode::TerminalFailure:
+        return "terminal_failure";
+    }
+    return "unknown";
+}
+
+const char* port_tunnel_protocol_name(PortTunnelProtocol protocol) {
+    switch (protocol) {
+    case PortTunnelProtocol::None:
+        return "none";
+    case PortTunnelProtocol::Tcp:
+        return "tcp";
+    case PortTunnelProtocol::Udp:
+        return "udp";
+    }
+    return "unknown";
+}
+
+const char* port_tunnel_mode_name(PortTunnelMode mode) {
+    switch (mode) {
+    case PortTunnelMode::Unopened:
+        return "unopened";
+    case PortTunnelMode::Listen:
+        return "listen";
+    case PortTunnelMode::Connect:
+        return "connect";
+    }
+    return "unknown";
+}
+
 PortTunnelService::PortTunnelService(const PortForwardLimitConfig& limits)
     : lifecycle_state_(LifecycleState::Running), budget_state_(new PortTunnelBudgetState()),
       worker_group_(new WorkerGroup()), limits_(limits), next_session_sequence_(1ULL), expiry_shutdown_(false),
@@ -94,15 +130,18 @@ void PortTunnelService::shutdown() {
 bool PortTunnelService::begin_shutdown() {
     BasicLockGuard lock(mutex_);
     if (lifecycle_state_ != LifecycleState::Running) {
+        log_message(LOG_DEBUG, "port_tunnel", "shutdown request ignored state=not_running");
         return false;
     }
     lifecycle_state_ = LifecycleState::Stopping;
+    log_message(LOG_DEBUG, "port_tunnel", "shutdown begin state=stopping");
     return true;
 }
 
 void PortTunnelService::finish_shutdown() {
     BasicLockGuard lock(mutex_);
     lifecycle_state_ = LifecycleState::Stopped;
+    log_message(LOG_DEBUG, "port_tunnel", "shutdown finish state=stopped");
 }
 
 bool PortTunnelService::is_running() {
@@ -353,6 +392,12 @@ bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelServi
         static unsigned __stdcall entry(void* raw_context) {
             std::unique_ptr<Context> context(static_cast<Context*>(raw_context));
             context->worker->thread_id = GetCurrentThreadId();
+            log_message(LOG_DEBUG,
+                        "port_tunnel",
+                        LogMessageBuilder("worker start")
+                            .quoted_field("operation", context->operation)
+                            .field("thread_id", context->worker->thread_id)
+                            .str());
             try {
                 context->work();
             } catch (const std::exception& ex) {
@@ -360,6 +405,12 @@ bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelServi
             } catch (...) {
                 log_unknown_tunnel_exception(context->operation);
             }
+            log_message(LOG_DEBUG,
+                        "port_tunnel",
+                        LogMessageBuilder("worker finish")
+                            .quoted_field("operation", context->operation)
+                            .field("thread_id", context->worker->thread_id)
+                            .str());
             context->worker->finished.store(true);
             return 0;
         }
@@ -383,6 +434,9 @@ bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelServi
 #else
     try {
         worker->thread.reset(new std::thread([service, worker, worker_lease_holder, work, operation]() {
+            log_message(LOG_DEBUG,
+                        "port_tunnel",
+                        LogMessageBuilder("worker start").quoted_field("operation", operation).str());
             try {
                 work();
             } catch (const std::exception& ex) {
@@ -390,6 +444,9 @@ bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelServi
             } catch (...) {
                 log_unknown_tunnel_exception(operation);
             }
+            log_message(LOG_DEBUG,
+                        "port_tunnel",
+                        LogMessageBuilder("worker finish").quoted_field("operation", operation).str());
             worker->finished.store(true);
         }));
     } catch (const std::exception& ex) {
