@@ -25,42 +25,49 @@ pub enum ForwardPortsInput {
     },
 }
 
-// schemars generates a `oneOf` schema for internally-tagged enums without a
-// top-level `"type": "object"`. MCP clients (notably Claude Code) require
-// `inputSchema.type === "object"`, so we inject it manually.
+// The Anthropic API rejects oneOf/allOf/anyOf at the top level of tool input
+// schemas, and schemars generates a top-level oneOf for internally-tagged enums.
+// We produce a flat object schema instead; serde deserialization still enforces
+// the per-action field requirements.
 impl JsonSchema for ForwardPortsInput {
     fn schema_name() -> std::borrow::Cow<'static, str> {
         std::borrow::Cow::Borrowed("ForwardPortsInput")
     }
 
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        #[derive(JsonSchema)]
-        #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
-        #[allow(dead_code)]
-        enum ForwardPortsInputSchema {
-            Open {
-                listen_side: String,
-                connect_side: String,
-                forwards: Vec<ForwardPortSpec>,
-            },
-            List {
-                #[serde(default)]
-                listen_side: Option<String>,
-                #[serde(default)]
-                connect_side: Option<String>,
-                #[serde(default)]
-                forward_ids: Vec<ForwardId>,
-            },
-            Close {
-                forward_ids: Vec<ForwardId>,
-            },
-        }
+        let spec_schema = generator.subschema_for::<ForwardPortSpec>();
 
-        let mut schema = <ForwardPortsInputSchema as JsonSchema>::json_schema(generator);
-        if let Some(map) = schema.as_object_mut() {
-            map.insert("type".to_string(), serde_json::json!("object"));
-        }
-        schema
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["open", "list", "close"],
+                    "description": "The action to perform."
+                },
+                "listen_side": {
+                    "type": "string",
+                    "description": "Target name or \"local\" for the listening side. Required for open, optional filter for list."
+                },
+                "connect_side": {
+                    "type": "string",
+                    "description": "Target name or \"local\" for the connecting side. Required for open, optional filter for list."
+                },
+                "forwards": {
+                    "type": "array",
+                    "items": spec_schema,
+                    "description": "Port forward specifications. Required for open."
+                },
+                "forward_ids": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Forward IDs to list or close. Required for close, optional filter for list."
+                }
+            },
+            "required": ["action"]
+        })
+        .try_into()
+        .expect("forward_ports flat schema is a valid JSON Schema object")
     }
 }
 

@@ -116,7 +116,7 @@ mod tests {
     }
 
     #[test]
-    fn forward_ports_input_schema_has_type_object() {
+    fn forward_ports_input_schema_has_type_object_without_top_level_combinators() {
         use schemars::generate::SchemaSettings;
         let generator = SchemaSettings::draft2020_12().into_generator();
         let schema = generator.into_root_schema_for::<ForwardPortsInput>();
@@ -124,11 +124,17 @@ mod tests {
         assert_eq!(
             value.get("type").and_then(|v| v.as_str()),
             Some("object"),
-            "forward_ports inputSchema must have top-level type=object for MCP client compatibility"
+            "inputSchema must have top-level type=object for MCP client compatibility"
         );
         assert!(
-            value.get("oneOf").is_some(),
-            "forward_ports inputSchema should still contain oneOf variants"
+            value.get("oneOf").is_none()
+                && value.get("allOf").is_none()
+                && value.get("anyOf").is_none(),
+            "Anthropic API rejects oneOf/allOf/anyOf at the top level of tool input schemas"
+        );
+        assert!(
+            value.get("properties").is_some(),
+            "flat schema should have properties"
         );
     }
 }
