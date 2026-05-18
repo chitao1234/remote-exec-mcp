@@ -94,6 +94,8 @@ bool connect_in_progress_error(int error) {
 #endif
 }
 
+} // namespace
+
 void set_socket_nonblocking(SOCKET socket, bool enabled) {
 #ifdef _WIN32
     u_long mode = enabled ? 1UL : 0UL;
@@ -112,6 +114,7 @@ void set_socket_nonblocking(SOCKET socket, bool enabled) {
 #endif
 }
 
+namespace {
 bool wait_for_connect(SOCKET socket, unsigned long timeout_ms) {
 #ifdef _WIN32
     fd_set writefds;

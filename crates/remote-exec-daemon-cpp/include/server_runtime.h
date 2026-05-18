@@ -7,6 +7,7 @@
 
 #include "connection_manager.h"
 #include "server.h"
+#include "wakeup_pipe.h"
 
 class ServerRuntime {
 public:
@@ -41,6 +42,7 @@ private:
     ConnectionManager connections_;
     mutable BasicMutex mutex_;
     UniqueSocket listener_;
+    WakeupPipe shutdown_wakeup_;
     bool shutting_down_;
 #ifdef _WIN32
     HANDLE accept_thread_;

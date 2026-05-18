@@ -105,6 +105,7 @@ void shutdown_socket(SOCKET socket);
 bool set_socket_cloexec(SOCKET socket);
 SOCKET create_socket_cloexec(int family, int type, int protocol);
 void set_socket_timeout_ms(SOCKET socket, unsigned long timeout_ms);
+int wait_socket_readable_or_wakeup(SOCKET socket, SOCKET wakeup_fd, unsigned long timeout_ms);
 bool try_read_http_request_head(SOCKET client, std::size_t max_header_bytes, HttpRequestHead* head);
 HttpRequestHead read_http_request_head(SOCKET client, std::size_t max_header_bytes);
 void send_all(SOCKET client, const std::string& data);

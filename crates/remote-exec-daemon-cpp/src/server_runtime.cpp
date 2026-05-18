@@ -1,5 +1,6 @@
 #include "server_runtime.h"
 
+#include <cerrno>
 #include <cstring>
 #include <memory>
 #include <sstream>
@@ -19,6 +20,7 @@
 #include "logging.h"
 #include "path_policy.h"
 #include "platform.h"
+#include "port_forward_socket_ops.h"
 #include "port_tunnel.h"
 #include "port_tunnel_service.h"
 #ifdef _WIN32
@@ -122,17 +124,11 @@ void ServerRuntime::start_accept_loop() {
 }
 
 void ServerRuntime::request_shutdown() {
-    SOCKET listener_socket = INVALID_SOCKET;
     {
         BasicLockGuard lock(mutex_);
         shutting_down_ = true;
-        listener_socket = listener_.release();
     }
-
-    if (listener_socket != INVALID_SOCKET) {
-        shutdown_socket(listener_socket);
-        close_socket(listener_socket);
-    }
+    shutdown_wakeup_.signal();
 
     connections_.begin_shutdown();
     if (state_.port_tunnel_service) {
@@ -231,31 +227,56 @@ void ServerRuntime::maintenance_loop() {
 
 void ServerRuntime::accept_loop() {
     SOCKET listener_socket = INVALID_SOCKET;
+    SOCKET wakeup_fd = shutdown_wakeup_.read_fd();
     {
         BasicLockGuard lock(mutex_);
         listener_socket = listener_.get();
     }
+    if (listener_socket == INVALID_SOCKET) {
+        return;
+    }
+    set_socket_nonblocking(listener_socket, true);
 
-    while (listener_socket != INVALID_SOCKET) {
-        UniqueSocket client(accept_client(listener_socket));
-        if (!client.valid()) {
-            bool shutting_down = false;
-            {
-                BasicLockGuard lock(mutex_);
-                shutting_down = shutting_down_;
-            }
-            if (shutting_down) {
+    for (;;) {
+        const int ready = wait_socket_readable_or_wakeup(listener_socket, wakeup_fd, 1000UL);
+        if (ready < 0) {
+            return;
+        }
+        if (ready == 0) {
+            BasicLockGuard lock(mutex_);
+            if (shutting_down_) {
                 return;
             }
-            log_message(LOG_WARN, "server", "accept failed");
             continue;
         }
 
-        if (!connections_.try_start(std::move(client), [this](SOCKET socket) {
-                UniqueSocket client(socket);
-                handle_client(this->state(), std::move(client));
-            })) {
-            log_message(LOG_WARN, "server", "dropping client connection during shutdown");
+        for (;;) {
+            UniqueSocket client(accept_client(listener_socket));
+            if (!client.valid()) {
+                const int error = last_socket_error();
+                if (receive_timeout_error(error) || error == EINTR) {
+                    break;
+                }
+#ifndef _WIN32
+                if (error == ECONNABORTED) {
+                    break;
+                }
+#endif
+                BasicLockGuard lock(mutex_);
+                if (shutting_down_) {
+                    return;
+                }
+                log_message(LOG_WARN, "server", "accept failed");
+                break;
+            }
+            set_socket_cloexec(client.get());
+
+            if (!connections_.try_start(std::move(client), [this](SOCKET socket) {
+                    UniqueSocket client(socket);
+                    handle_client(this->state(), std::move(client));
+                })) {
+                log_message(LOG_WARN, "server", "dropping client connection during shutdown");
+            }
         }
     }
 }

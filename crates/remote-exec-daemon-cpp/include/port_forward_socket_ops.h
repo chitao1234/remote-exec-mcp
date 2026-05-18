@@ -13,6 +13,7 @@
 #include "server_transport.h"
 
 SOCKET bind_port_forward_socket(const std::string& endpoint, const std::string& protocol);
+void set_socket_nonblocking(SOCKET socket, bool enabled);
 SOCKET connect_port_forward_socket(const std::string& endpoint,
                                    const std::string& protocol,
                                    unsigned long timeout_ms = DEFAULT_PORT_FORWARD_CONNECT_TIMEOUT_MS);
