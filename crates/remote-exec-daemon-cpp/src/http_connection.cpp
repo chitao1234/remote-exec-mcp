@@ -18,6 +18,7 @@
 #include "text_utils.h"
 #include "transfer_http_codec.h"
 #include "transfer_ops.h"
+#include "transfer_request_utils.h"
 
 namespace {
 

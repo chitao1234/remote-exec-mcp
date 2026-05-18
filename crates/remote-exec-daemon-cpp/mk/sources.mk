@@ -30,7 +30,8 @@ ROUTE_SRCS = \
 	$(SOURCE_PREFIX)src/server_route_exec.cpp \
 	$(SOURCE_PREFIX)src/server_route_image.cpp \
 	$(SOURCE_PREFIX)src/server_route_transfer.cpp \
-	$(SOURCE_PREFIX)src/transfer_http_codec.cpp
+	$(SOURCE_PREFIX)src/transfer_http_codec.cpp \
+	$(SOURCE_PREFIX)src/transfer_request_utils.cpp
 
 PORT_FORWARD_SRCS = \
 	$(SOURCE_PREFIX)src/port_forward_endpoint.cpp \
