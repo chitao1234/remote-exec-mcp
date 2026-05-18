@@ -46,6 +46,7 @@ PortTunnelFrame expect_tunnel_frame(SOCKET socket,
 void send_tunnel_frame(SOCKET socket, const PortTunnelFrame& frame);
 bool try_read_tunnel_frame_with_timeout(SOCKET socket, unsigned long timeout_ms, PortTunnelFrame* frame);
 bool socket_readable_within(SOCKET socket, unsigned long timeout_ms);
+void assert_socket_closed_within(SOCKET socket, unsigned long timeout_ms);
 bool tcp_listener_has_pending_connection(SOCKET socket, unsigned long timeout_ms);
 
 void assert_tunnel_error_code(const PortTunnelFrame& frame, const std::string& code);

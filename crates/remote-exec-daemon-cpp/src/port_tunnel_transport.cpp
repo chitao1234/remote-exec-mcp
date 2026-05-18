@@ -206,8 +206,12 @@ bool PortTunnelConnection::read_frame(PortTunnelFrame* frame) {
     return true;
 }
 
-void PortTunnelConnection::send_frame(const PortTunnelFrame& frame) {
-    sender_->send_frame(frame);
+bool PortTunnelConnection::send_frame(const PortTunnelFrame& frame) {
+    if (sender_->send_frame(frame)) {
+        return true;
+    }
+    mark_closed();
+    return false;
 }
 
 bool PortTunnelConnection::send_data_frame_or_limit_error(const PortTunnelFrame& frame) {

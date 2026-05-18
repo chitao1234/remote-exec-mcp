@@ -301,6 +301,13 @@ bool socket_readable_within(SOCKET socket, unsigned long timeout_ms) {
 #endif
 }
 
+void assert_socket_closed_within(SOCKET socket, unsigned long timeout_ms) {
+    TEST_ASSERT(socket_readable_within(socket, timeout_ms));
+    char byte = '\0';
+    const int received = recv(socket, &byte, 1, 0);
+    TEST_ASSERT(received <= 0);
+}
+
 bool tcp_listener_has_pending_connection(SOCKET socket, unsigned long timeout_ms) {
     return socket_readable_within(socket, timeout_ms);
 }

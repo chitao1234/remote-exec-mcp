@@ -22,7 +22,7 @@ public:
 
     bool closed() const;
     void mark_closed();
-    void send_frame(const PortTunnelFrame& frame);
+    bool send_frame(const PortTunnelFrame& frame);
     bool send_data_frame_or_limit_error(PortTunnelConnection& connection, const PortTunnelFrame& frame);
     bool send_data_frame_or_drop_on_limit(PortTunnelConnection& connection, const PortTunnelFrame& frame);
 
@@ -30,23 +30,37 @@ private:
     PortTunnelSender(const PortTunnelSender&);
     PortTunnelSender& operator=(const PortTunnelSender&);
 
+    enum class QueueReservationKind { None, Data, Control };
+
     struct QueuedFrame {
-        QueuedFrame() : charge_value(0UL) {}
-        QueuedFrame(std::vector<unsigned char> bytes_value, unsigned long charge)
-            : bytes(std::move(bytes_value)), charge_value(charge) {}
+        QueuedFrame() : charge_kind(QueueReservationKind::None), charge_value(0UL) {}
+        QueuedFrame(std::vector<unsigned char> bytes_value, QueueReservationKind kind, unsigned long charge)
+            : bytes(std::move(bytes_value)), charge_kind(kind), charge_value(charge) {}
 
         std::vector<unsigned char> bytes;
+        QueueReservationKind charge_kind;
         unsigned long charge_value;
     };
 
     void writer_loop();
     void join_writer_thread();
     bool ensure_writer_started_locked();
-    bool enqueue_encoded_frame(std::vector<unsigned char> bytes, unsigned long charge_value);
-    bool try_reserve_queued_bytes(unsigned long charge_value);
+    bool enqueue_encoded_frame(std::vector<unsigned char> bytes,
+                               QueueReservationKind charge_kind,
+                               unsigned long charge_value);
+    unsigned long control_queue_byte_limit() const;
+    bool try_reserve_queued_bytes(std::atomic<unsigned long>& counter,
+                                  unsigned long limit,
+                                  unsigned long charge_value);
+    bool try_reserve_frame_bytes(std::size_t byte_count,
+                                 std::atomic<unsigned long>& counter,
+                                 unsigned long limit,
+                                 unsigned long* charge_value);
     bool try_reserve_data_frame(const PortTunnelFrame& frame, unsigned long* charge_value);
+    bool try_reserve_control_frame(const std::vector<unsigned char>& bytes, unsigned long* charge_value);
     void release_data_frame_reservation(unsigned long charge_value);
-    void release_queued_frame_reservation(unsigned long charge_value);
+    void release_control_frame_reservation(unsigned long charge_value);
+    void release_queued_frame_reservation(QueueReservationKind charge_kind, unsigned long charge_value);
     void drain_queued_frame_reservations_locked();
 
     SOCKET client_;
@@ -64,5 +78,6 @@ private:
     std::unique_ptr<std::thread> writer_thread_;
 #endif
     std::atomic<bool> closed_;
-    std::atomic<unsigned long> queued_bytes_;
+    std::atomic<unsigned long> queued_data_bytes_;
+    std::atomic<unsigned long> queued_control_bytes_;
 };

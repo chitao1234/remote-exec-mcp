@@ -372,6 +372,25 @@ static void assert_partial_tunnel_frame_times_out(const fs::path& root) {
     client_socket.reset();
 }
 
+static void assert_control_frame_queue_limit_closes_tunnel(const fs::path& root) {
+    PortForwardLimitConfig limits;
+    limits.max_tunnel_queued_bytes = 1024UL;
+
+    AppState state;
+    initialize_state_with_port_forward_limits(state, root, limits);
+
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    open_v4_tunnel(state, &client_socket, &server_thread, "connect", "tcp", 1ULL);
+
+    PortTunnelFrame heartbeat = empty_frame(PortTunnelFrameType::TunnelHeartbeat, 0U);
+    heartbeat.meta.assign(8UL * 1024UL, 'x');
+    send_tunnel_frame(client_socket.get(), heartbeat);
+    assert_socket_closed_within(client_socket.get(), 2000UL);
+
+    close_tunnel(&client_socket, &server_thread);
+}
+
 static void assert_tcp_data_write_pressure_does_not_block_control_frames(AppState& state) {
     UniqueSocket hold_listener(bind_port_forward_socket("127.0.0.1:0", "tcp"));
     const std::string hold_endpoint = socket_local_endpoint(hold_listener.get());
@@ -444,5 +463,6 @@ void assert_tunnel_limit_and_pressure_paths(AppState& state) {
     assert_tunnel_queued_byte_limit_is_enforced(root);
     assert_udp_queued_byte_pressure_reports_drop(root);
     assert_partial_tunnel_frame_times_out(root);
+    assert_control_frame_queue_limit_closes_tunnel(root);
     assert_tcp_data_write_pressure_does_not_block_control_frames(state);
 }

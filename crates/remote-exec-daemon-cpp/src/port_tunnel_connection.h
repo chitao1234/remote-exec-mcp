@@ -42,7 +42,7 @@ private:
     bool read_exact(unsigned char* data, std::size_t size);
     bool read_preface();
     bool read_frame(PortTunnelFrame* frame);
-    void send_frame(const PortTunnelFrame& frame);
+    bool send_frame(const PortTunnelFrame& frame);
     bool send_data_frame_or_limit_error(const PortTunnelFrame& frame);
     bool send_data_frame_or_drop_on_limit(const PortTunnelFrame& frame);
     bool closed() const;
