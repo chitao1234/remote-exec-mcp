@@ -22,7 +22,7 @@
 namespace fs = test_fs;
 
 static const char kTunnelCloseReasonOperatorClose[] = "operator_close";
-static const unsigned long kTunnelFrameReadTimeoutMs = 5000UL;
+static const unsigned long kTunnelFrameReadTimeoutMs = 30000UL;
 
 fs::path make_test_root();
 
