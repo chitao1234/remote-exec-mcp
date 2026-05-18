@@ -7,6 +7,7 @@
 
 #include "basic_mutex.h"
 #include "port_tunnel_common.h"
+#include "wakeup_pipe.h"
 
 class PortTunnelService;
 
@@ -81,6 +82,7 @@ struct TunnelUdpSocket {
     UniqueSocket socket;
     PortTunnelBudgetLease udp_bind_budget;
     BasicMutex mutex;
+    WakeupPipe wakeup;
     bool closed;
 };
 
@@ -98,6 +100,7 @@ struct RetainedTcpListener {
     UniqueSocket listener;
     PortTunnelBudgetLease retained_listener_budget;
     BasicMutex mutex;
+    WakeupPipe wakeup;
     bool closed;
 };
 

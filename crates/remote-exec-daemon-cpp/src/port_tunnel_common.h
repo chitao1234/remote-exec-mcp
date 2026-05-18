@@ -57,3 +57,4 @@ bool connection_header_has_upgrade(const HttpRequest& request);
 std::string frame_meta_string(const PortTunnelFrame& frame, const std::string& key);
 PortTunnelFrame make_empty_frame(PortTunnelFrameType type, uint32_t stream_id);
 int wait_socket_readable(SOCKET socket, unsigned long timeout_ms);
+int wait_socket_readable_or_wakeup(SOCKET socket, SOCKET wakeup_fd, unsigned long timeout_ms);

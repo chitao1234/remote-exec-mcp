@@ -32,14 +32,16 @@ void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& 
 
         int ready = 0;
         SOCKET socket = INVALID_SOCKET;
+        SOCKET wakeup_fd = INVALID_SOCKET;
         {
             BasicLockGuard socket_lock(socket_value->mutex);
             if (socket_value->closed) {
                 return;
             }
             socket = socket_value->socket.get();
+            wakeup_fd = socket_value->wakeup.read_fd();
         }
-        ready = wait_socket_readable(socket, RETAINED_SOCKET_POLL_TIMEOUT_MS);
+        ready = wait_socket_readable_or_wakeup(socket, wakeup_fd, RETAINED_SOCKET_POLL_TIMEOUT_MS);
         if (ready == 0) {
             continue;
         }
@@ -190,14 +192,16 @@ void PortTunnelConnection::udp_read_loop_connection_local(uint32_t stream_id,
         socklen_t peer_len = sizeof(peer_address);
         int ready = 0;
         SOCKET socket = INVALID_SOCKET;
+        SOCKET wakeup_fd = INVALID_SOCKET;
         {
             BasicLockGuard socket_lock(socket_value->mutex);
             if (socket_value->closed) {
                 return;
             }
             socket = socket_value->socket.get();
+            wakeup_fd = socket_value->wakeup.read_fd();
         }
-        ready = wait_socket_readable(socket, RETAINED_SOCKET_POLL_TIMEOUT_MS);
+        ready = wait_socket_readable_or_wakeup(socket, wakeup_fd, RETAINED_SOCKET_POLL_TIMEOUT_MS);
         if (ready == 0) {
             continue;
         }

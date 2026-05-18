@@ -582,6 +582,7 @@ void TunnelUdpSocket::close() {
         return;
     }
     closed = true;
+    wakeup.signal();
     shutdown_socket(socket.get());
     socket.reset();
     udp_bind_budget.reset();
@@ -629,12 +630,63 @@ int wait_socket_readable(SOCKET socket, unsigned long timeout_ms) {
 #endif
 }
 
+int wait_socket_readable_or_wakeup(SOCKET socket, SOCKET wakeup_fd, unsigned long timeout_ms) {
+#ifdef _WIN32
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(socket, &readfds);
+    FD_SET(wakeup_fd, &readfds);
+
+    timeval timeout;
+    timeout.tv_sec = static_cast<long>(timeout_ms / 1000UL);
+    timeout.tv_usec = static_cast<long>((timeout_ms % 1000UL) * 1000UL);
+    const int ready = select(0, &readfds, nullptr, nullptr, &timeout);
+    if (ready <= 0) {
+        return ready;
+    }
+    if (FD_ISSET(wakeup_fd, &readfds)) {
+        return -1;
+    }
+    return ready;
+#else
+    struct pollfd fds[2];
+    fds[0].fd = socket;
+    fds[0].events = POLLIN;
+    fds[0].revents = 0;
+    fds[1].fd = wakeup_fd;
+    fds[1].events = POLLIN;
+    fds[1].revents = 0;
+
+    const int timeout = timeout_ms > static_cast<unsigned long>(INT_MAX) ? INT_MAX : static_cast<int>(timeout_ms);
+    for (;;) {
+        const int ready = poll(fds, 2, timeout);
+        if (ready > 0) {
+            if (fds[1].revents & (POLLIN | POLLHUP | POLLNVAL | POLLERR)) {
+                return -1;
+            }
+            if (fds[0].revents & (POLLNVAL | POLLERR)) {
+                return -1;
+            }
+            return ready;
+        }
+        if (ready == 0) {
+            return 0;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        return -1;
+    }
+#endif
+}
+
 void RetainedTcpListener::close() {
     BasicLockGuard lock(mutex);
     if (closed) {
         return;
     }
     closed = true;
+    wakeup.signal();
     shutdown_socket(listener.get());
     listener.reset();
     retained_listener_budget.reset();
