@@ -220,6 +220,9 @@ void append_file_entry_from_path(TransferArchiveSink* archive,
     if (!input.valid()) {
         throw TransferFailure(TransferRpcCode::SourceMissing, "transfer source missing");
     }
+    if (st.st_size < 0) {
+        throw std::runtime_error("unable to read transfer source");
+    }
     const std::uint64_t file_size = static_cast<std::uint64_t>(st.st_size);
 
     const bool long_name_emitted = rel_path.size() > 100;
