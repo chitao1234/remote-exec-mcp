@@ -318,7 +318,7 @@ void handle_client(AppState& state, UniqueSocket client) {
             if (!try_read_http_request_head(client.get(), state.config.max_request_header_bytes, &request_head)) {
                 return;
             }
-            set_socket_timeout_ms(client.get(), 0UL);
+            set_socket_timeout_ms(client.get(), state.config.http_connection_idle_timeout_ms);
 
             bool close_after_response = false;
             handle_client_request(state, client.get(), request_head, &close_after_response);
