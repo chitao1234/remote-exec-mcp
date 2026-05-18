@@ -114,4 +114,21 @@ mod tests {
         assert_eq!(value["limits"]["max_tunnel_queued_bytes"], 8388608);
         assert_eq!(value["limits"]["max_reconnecting_forwards"], 16);
     }
+
+    #[test]
+    fn forward_ports_input_schema_has_type_object() {
+        use schemars::generate::SchemaSettings;
+        let generator = SchemaSettings::draft2020_12().into_generator();
+        let schema = generator.into_root_schema_for::<ForwardPortsInput>();
+        let value = serde_json::to_value(schema).unwrap();
+        assert_eq!(
+            value.get("type").and_then(|v| v.as_str()),
+            Some("object"),
+            "forward_ports inputSchema must have top-level type=object for MCP client compatibility"
+        );
+        assert!(
+            value.get("oneOf").is_some(),
+            "forward_ports inputSchema should still contain oneOf variants"
+        );
+    }
 }

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::port_forward::ForwardId;
 use crate::port_tunnel::TunnelForwardProtocol;
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ForwardPortsInput {
     Open {
@@ -23,6 +23,45 @@ pub enum ForwardPortsInput {
     Close {
         forward_ids: Vec<ForwardId>,
     },
+}
+
+// schemars generates a `oneOf` schema for internally-tagged enums without a
+// top-level `"type": "object"`. MCP clients (notably Claude Code) require
+// `inputSchema.type === "object"`, so we inject it manually.
+impl JsonSchema for ForwardPortsInput {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("ForwardPortsInput")
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        #[derive(JsonSchema)]
+        #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+        #[allow(dead_code)]
+        enum ForwardPortsInputSchema {
+            Open {
+                listen_side: String,
+                connect_side: String,
+                forwards: Vec<ForwardPortSpec>,
+            },
+            List {
+                #[serde(default)]
+                listen_side: Option<String>,
+                #[serde(default)]
+                connect_side: Option<String>,
+                #[serde(default)]
+                forward_ids: Vec<ForwardId>,
+            },
+            Close {
+                forward_ids: Vec<ForwardId>,
+            },
+        }
+
+        let mut schema = <ForwardPortsInputSchema as JsonSchema>::json_schema(generator);
+        if let Some(map) = schema.as_object_mut() {
+            map.insert("type".to_string(), serde_json::json!("object"));
+        }
+        schema
+    }
 }
 
 impl ForwardPortsInput {
