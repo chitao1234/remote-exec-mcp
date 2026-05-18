@@ -176,6 +176,7 @@ void PortTunnelConnection::close_connection_local_state() {
     for (std::size_t i = 0; i < udp_sockets.size(); ++i) {
         udp_sockets[i]->close();
     }
+    client_ = INVALID_SOCKET;
 }
 
 std::shared_ptr<PortTunnelSession> PortTunnelConnection::current_session() {
