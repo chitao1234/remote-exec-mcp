@@ -8,12 +8,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#include <winsock2.h>
-#include <ws2tcpip.h>
 #else
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
 #include <thread>
 #endif
 
@@ -33,30 +28,6 @@ std::string daemon_instance_id() {
     std::ostringstream out;
     out << platform::monotonic_ms();
     return out.str();
-}
-
-unsigned short socket_bound_port_or_zero(SOCKET socket) {
-    if (socket == INVALID_SOCKET) {
-        return 0;
-    }
-
-    sockaddr_storage address;
-    std::memset(&address, 0, sizeof(address));
-    socklen_t address_len = sizeof(address);
-    if (getsockname(socket, reinterpret_cast<sockaddr*>(&address), &address_len) != 0) {
-        return 0;
-    }
-
-    if (address.ss_family == AF_INET) {
-        const sockaddr_in* ipv4 = reinterpret_cast<const sockaddr_in*>(&address);
-        return ntohs(ipv4->sin_port);
-    }
-    if (address.ss_family == AF_INET6) {
-        const sockaddr_in6* ipv6 = reinterpret_cast<const sockaddr_in6*>(&address);
-        return ntohs(ipv6->sin6_port);
-    }
-
-    return 0;
 }
 
 } // namespace

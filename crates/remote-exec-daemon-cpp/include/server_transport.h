@@ -110,5 +110,6 @@ bool try_read_http_request_head(SOCKET client, std::size_t max_header_bytes, Htt
 HttpRequestHead read_http_request_head(SOCKET client, std::size_t max_header_bytes);
 void send_all(SOCKET client, const std::string& data);
 void send_all_bytes(SOCKET client, const char* data, std::size_t size);
+unsigned short socket_bound_port_or_zero(SOCKET socket);
 SOCKET create_listener(const DaemonConfig& config);
 SOCKET accept_client(SOCKET listener);

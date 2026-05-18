@@ -8,6 +8,7 @@
 #ifdef _WIN32
 #include <ws2tcpip.h>
 #else
+#include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -49,6 +50,40 @@ namespace {
 const std::size_t HTTP_READ_BUFFER_SIZE = 4U * 1024U;
 const std::size_t HTTP_RAW_BUFFER_COMPACT_THRESHOLD = 8U * 1024U;
 const std::size_t HTTP_MAX_CHUNK_LINE_SIZE = 4U * 1024U;
+
+int set_socket_reuse_addr(SOCKET socket) {
+    int yes = 1;
+#ifdef _WIN32
+    return setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
+#else
+    return posix_eintr::retry<int>(
+        [&]() { return setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)); });
+#endif
+}
+
+int bind_listener_socket(SOCKET socket, const sockaddr* address, int address_len) {
+#ifdef _WIN32
+    return bind(socket, address, address_len);
+#else
+    return posix_eintr::retry<int>([&]() { return bind(socket, address, static_cast<socklen_t>(address_len)); });
+#endif
+}
+
+int listen_socket(SOCKET socket, int backlog) {
+#ifdef _WIN32
+    return listen(socket, backlog);
+#else
+    return posix_eintr::retry<int>([&]() { return listen(socket, backlog); });
+#endif
+}
+
+int get_socket_name(SOCKET socket, sockaddr* address, socklen_t* address_len) {
+#ifdef _WIN32
+    return getsockname(socket, address, address_len);
+#else
+    return posix_eintr::retry<int>([&]() { return getsockname(socket, address, address_len); });
+#endif
+}
 
 std::size_t parse_chunk_size_line(const std::string& line) {
     try {
@@ -311,6 +346,30 @@ void send_all_bytes(SOCKET client, const char* data, std::size_t size) {
     }
 }
 
+unsigned short socket_bound_port_or_zero(SOCKET socket) {
+    if (socket == INVALID_SOCKET) {
+        return 0;
+    }
+
+    sockaddr_storage address;
+    std::memset(&address, 0, sizeof(address));
+    socklen_t address_len = sizeof(address);
+    if (get_socket_name(socket, reinterpret_cast<sockaddr*>(&address), &address_len) != 0) {
+        return 0;
+    }
+
+    if (address.ss_family == AF_INET) {
+        const sockaddr_in* ipv4 = reinterpret_cast<const sockaddr_in*>(&address);
+        return ntohs(ipv4->sin_port);
+    }
+    if (address.ss_family == AF_INET6) {
+        const sockaddr_in6* ipv6 = reinterpret_cast<const sockaddr_in6*>(&address);
+        return ntohs(ipv6->sin6_port);
+    }
+
+    return 0;
+}
+
 SOCKET create_listener(const DaemonConfig& config) {
     char port_buffer[16];
     std::snprintf(port_buffer, sizeof(port_buffer), "%d", config.listen_port);
@@ -341,10 +400,9 @@ SOCKET create_listener(const DaemonConfig& config) {
             continue;
         }
 
-        int yes = 1;
-        setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
+        (void)set_socket_reuse_addr(listener);
 
-        if (bind(listener, current->ai_addr, static_cast<int>(current->ai_addrlen)) == 0) {
+        if (bind_listener_socket(listener, current->ai_addr, static_cast<int>(current->ai_addrlen)) == 0) {
             break;
         }
 
@@ -357,7 +415,7 @@ SOCKET create_listener(const DaemonConfig& config) {
         throw std::runtime_error(socket_error_message("bind"));
     }
 
-    if (listen(listener, SOMAXCONN) != 0) {
+    if (listen_socket(listener, SOMAXCONN) != 0) {
         close_socket(listener);
         throw std::runtime_error(socket_error_message("listen"));
     }
