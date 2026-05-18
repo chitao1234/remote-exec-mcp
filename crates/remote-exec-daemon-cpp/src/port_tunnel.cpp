@@ -615,6 +615,9 @@ int wait_socket_readable(SOCKET socket, unsigned long timeout_ms) {
     const int timeout = timeout_ms > static_cast<unsigned long>(INT_MAX) ? INT_MAX : static_cast<int>(timeout_ms);
     for (;;) {
         const int ready = poll(&descriptor, 1, timeout);
+        if (ready > 0 && (descriptor.revents & (POLLNVAL | POLLERR)) != 0) {
+            return -1;
+        }
         if (ready >= 0) {
             return ready;
         }
