@@ -125,7 +125,9 @@ void PortTunnelConnection::udp_bind(const PortTunnelFrame& frame) {
 
     std::shared_ptr<TunnelUdpSocket> socket_value;
     try {
-        socket_value.reset(new TunnelUdpSocket(bind_port_forward_socket(endpoint, "udp"), std::move(udp_bind_budget)));
+        SOCKET raw_socket = bind_port_forward_socket(endpoint, "udp");
+        set_socket_nonblocking(raw_socket, true);
+        socket_value.reset(new TunnelUdpSocket(raw_socket, std::move(udp_bind_budget)));
     } catch (const std::exception& ex) {
         log_tunnel_exception("create udp bind socket", ex);
         throw;

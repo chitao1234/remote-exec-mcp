@@ -113,6 +113,7 @@ void PortTunnelConnection::tcp_listen(const PortTunnelFrame& frame) {
     std::shared_ptr<RetainedTcpListener> listener;
     try {
         UniqueSocket listener_socket(bind_port_forward_socket(endpoint, "tcp"));
+        set_socket_nonblocking(listener_socket.get(), true);
         listener.reset(new RetainedTcpListener(frame.stream_id, listener_socket.release(), std::move(listener_budget)));
     } catch (const std::exception& ex) {
         log_tunnel_exception("create tcp listener", ex);
