@@ -1,7 +1,9 @@
 #include "port_tunnel_connection.h"
+#include "port_forward_socket_ops.h"
 #include "port_tunnel_service.h"
 
 #include <cerrno>
+#include <exception>
 #include <utility>
 
 bool PortTunnelService::spawn_tcp_listener_loop(const std::shared_ptr<PortTunnelSession>& session,
@@ -81,6 +83,15 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
         }
         UniqueSocket accepted_socket(accepted);
         set_socket_cloexec(accepted_socket.get());
+        try {
+            set_socket_nonblocking(accepted_socket.get(), false);
+        } catch (const std::exception& ex) {
+            connection = session->connection_for_attachment(attachment);
+            if (connection.get() != nullptr) {
+                connection->send_error(listener->stream_id, "port_accept_failed", ex.what());
+            }
+            continue;
+        }
         connection = session->connection_for_attachment(attachment);
         if (connection.get() == nullptr) {
             continue;

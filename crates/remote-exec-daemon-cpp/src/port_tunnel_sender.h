@@ -43,6 +43,7 @@ private:
     void join_writer_thread();
     bool ensure_writer_started_locked();
     bool enqueue_encoded_frame(std::vector<unsigned char> bytes, unsigned long charge_value);
+    bool try_reserve_queued_bytes(unsigned long charge_value);
     bool try_reserve_data_frame(const PortTunnelFrame& frame, unsigned long* charge_value);
     void release_data_frame_reservation(unsigned long charge_value);
     void release_queued_frame_reservation(unsigned long charge_value);

@@ -270,6 +270,12 @@ void ServerRuntime::accept_loop() {
                 break;
             }
             set_socket_cloexec(client.get());
+            try {
+                set_socket_nonblocking(client.get(), false);
+            } catch (const std::exception& ex) {
+                log_message(LOG_WARN, "server", std::string("accepted socket setup failed: ") + ex.what());
+                continue;
+            }
 
             if (!connections_.try_start(std::move(client), [this](SOCKET socket) {
                     UniqueSocket client(socket);

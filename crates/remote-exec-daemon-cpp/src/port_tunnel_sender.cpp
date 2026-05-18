@@ -188,8 +188,24 @@ bool PortTunnelSender::enqueue_encoded_frame(std::vector<unsigned char> bytes, u
 
 void PortTunnelSender::send_frame(const PortTunnelFrame& frame) {
     std::vector<unsigned char> bytes = encode_port_tunnel_frame(frame);
-    const unsigned long charge = static_cast<unsigned long>(bytes.size());
-    (void)enqueue_encoded_frame(std::move(bytes), charge);
+    (void)enqueue_encoded_frame(std::move(bytes), 0UL);
+}
+
+bool PortTunnelSender::try_reserve_queued_bytes(unsigned long charge_value) {
+    const unsigned long limit = service_->limits().max_tunnel_queued_bytes;
+    if (charge_value > limit) {
+        return false;
+    }
+    unsigned long current = queued_bytes_.load();
+    for (;;) {
+        if (current > limit || current > limit - charge_value) {
+            return false;
+        }
+        if (queued_bytes_.compare_exchange_weak(current, current + charge_value)) {
+            break;
+        }
+    }
+    return true;
 }
 
 bool PortTunnelSender::try_reserve_data_frame(const PortTunnelFrame& frame, unsigned long* charge_value) {
@@ -198,20 +214,7 @@ bool PortTunnelSender::try_reserve_data_frame(const PortTunnelFrame& frame, unsi
         return false;
     }
     *charge_value = static_cast<unsigned long>(charge);
-    const unsigned long limit = service_->limits().max_tunnel_queued_bytes;
-    if (*charge_value > limit) {
-        return false;
-    }
-    unsigned long current = queued_bytes_.load();
-    for (;;) {
-        if (current > limit || current > limit - *charge_value) {
-            return false;
-        }
-        if (queued_bytes_.compare_exchange_weak(current, current + *charge_value)) {
-            break;
-        }
-    }
-    return true;
+    return try_reserve_queued_bytes(*charge_value);
 }
 
 void PortTunnelSender::release_data_frame_reservation(unsigned long charge_value) {

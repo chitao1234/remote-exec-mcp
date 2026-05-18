@@ -238,7 +238,7 @@ void HttpRequestBodyStream::ensure_raw_available(std::size_t size) {
         if (received < 0) {
             const int error = last_socket_error();
             if (would_block_error(error)) {
-                continue;
+                throw BadHttpRequest("incomplete http request body");
             }
 #ifndef _WIN32
             if (error == EINTR) {
@@ -264,7 +264,7 @@ void HttpRequestBodyStream::ensure_raw_line() {
         if (received < 0) {
             const int error = last_socket_error();
             if (would_block_error(error)) {
-                continue;
+                throw BadHttpRequest("incomplete http request body");
             }
 #ifndef _WIN32
             if (error == EINTR) {

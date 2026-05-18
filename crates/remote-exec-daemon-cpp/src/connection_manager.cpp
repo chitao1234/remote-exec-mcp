@@ -2,6 +2,33 @@
 
 #include <vector>
 
+namespace {
+
+class ConnectionStartGate {
+public:
+    ConnectionStartGate() : released_(false) {}
+
+    void release() {
+        BasicLockGuard lock(mutex_);
+        released_ = true;
+        cond_.broadcast();
+    }
+
+    void wait() {
+        BasicLockGuard lock(mutex_);
+        while (!released_) {
+            cond_.wait(mutex_);
+        }
+    }
+
+private:
+    BasicMutex mutex_;
+    BasicCondVar cond_;
+    bool released_;
+};
+
+} // namespace
+
 struct ConnectionManager::WorkerRecord {
     WorkerRecord(unsigned long worker_id_value,
                  SOCKET socket_value,
@@ -50,12 +77,15 @@ void ConnectionManager::run_worker(const std::shared_ptr<WorkerRecord>& record) 
 }
 
 #ifdef _WIN32
+struct ConnectionManager::WorkerContext {
+    ConnectionManager* manager;
+    std::shared_ptr<WorkerRecord> record;
+    std::shared_ptr<ConnectionStartGate> start_gate;
+};
+
 unsigned __stdcall ConnectionManager::worker_thread_entry(void* raw_context) {
-    struct WorkerContext {
-        ConnectionManager* manager;
-        std::shared_ptr<WorkerRecord> record;
-    };
     std::unique_ptr<WorkerContext> context(static_cast<WorkerContext*>(raw_context));
+    context->start_gate->wait();
     context->manager->run_worker(context->record);
     return 0;
 }
@@ -63,28 +93,52 @@ unsigned __stdcall ConnectionManager::worker_thread_entry(void* raw_context) {
 
 bool ConnectionManager::try_start(UniqueSocket client, std::function<void(SOCKET)> worker_main) {
     std::shared_ptr<WorkerRecord> record;
+    std::shared_ptr<ConnectionStartGate> start_gate(new ConnectionStartGate());
     {
         BasicLockGuard lock(mutex_);
         if (shutting_down_ || workers_.size() >= max_active_connections_) {
             return false;
         }
         const unsigned long worker_id = next_worker_id_++;
-        record.reset(new WorkerRecord(worker_id, client.release(), std::move(worker_main)));
+        record.reset(new WorkerRecord(worker_id, client.get(), std::move(worker_main)));
         workers_[worker_id] = record;
+        client.release();
+#ifndef _WIN32
+        try {
+            record->thread.reset(new std::thread([this, record, start_gate]() {
+                start_gate->wait();
+                run_worker(record);
+            }));
+        } catch (...) {
+            {
+                BasicLockGuard state_lock(record->state_mutex);
+                if (record->socket != INVALID_SOCKET) {
+                    close_socket(record->socket);
+                    record->socket = INVALID_SOCKET;
+                }
+            }
+            workers_.erase(record->worker_id);
+            state_changed_.broadcast();
+            return false;
+        }
+#endif
         state_changed_.broadcast();
     }
 
 #ifdef _WIN32
-    struct WorkerContext {
-        ConnectionManager* manager;
-        std::shared_ptr<WorkerRecord> record;
-    };
     std::unique_ptr<WorkerContext> thread_context(new WorkerContext());
     thread_context->manager = this;
     thread_context->record = record;
+    thread_context->start_gate = start_gate;
     HANDLE handle = begin_win32_thread(&ConnectionManager::worker_thread_entry, thread_context.get());
     if (handle == nullptr) {
-        close_socket(record->socket);
+        {
+            BasicLockGuard state_lock(record->state_mutex);
+            if (record->socket != INVALID_SOCKET) {
+                close_socket(record->socket);
+                record->socket = INVALID_SOCKET;
+            }
+        }
         BasicLockGuard lock(mutex_);
         workers_.erase(record->worker_id);
         state_changed_.broadcast();
@@ -92,8 +146,9 @@ bool ConnectionManager::try_start(UniqueSocket client, std::function<void(SOCKET
     }
     record->thread_handle = handle;
     thread_context.release();
+    start_gate->release();
 #else
-    record->thread.reset(new std::thread(&ConnectionManager::run_worker, this, record));
+    start_gate->release();
 #endif
     return true;
 }

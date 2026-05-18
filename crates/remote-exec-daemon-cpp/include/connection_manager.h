@@ -37,6 +37,9 @@ public:
 
 private:
     struct WorkerRecord;
+#ifdef _WIN32
+    struct WorkerContext;
+#endif
     void run_worker(const std::shared_ptr<WorkerRecord>& record);
 #ifdef _WIN32
     static unsigned __stdcall worker_thread_entry(void* raw_context);

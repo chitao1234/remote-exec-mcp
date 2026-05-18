@@ -746,6 +746,10 @@ void PortTunnelService::expiry_scheduler_loop() {
 
 void PortTunnelService::expire_session_if_needed(const std::shared_ptr<PortTunnelSession>& session) {
     PortTunnelSessionTeardown teardown = session->expire_if_due(platform::monotonic_ms());
+    if (teardown.transitioned) {
+        BasicLockGuard store_lock(mutex_);
+        sessions_.erase(session->session_id);
+    }
     finish_terminal_session_teardown(teardown);
 }
 

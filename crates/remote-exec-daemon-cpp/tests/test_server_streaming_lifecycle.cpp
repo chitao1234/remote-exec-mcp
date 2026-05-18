@@ -379,6 +379,12 @@ static void assert_expired_tunnel_session_is_released(AppState& state) {
 
     close_tunnel(&client_socket, &server_thread);
     wait_past_resume_timeout(resume_timeout_ms);
+    const std::uint64_t removal_deadline = platform::monotonic_ms() + 2000ULL;
+    while (state.port_tunnel_service->find_session(session_id).get() != nullptr &&
+           platform::monotonic_ms() < removal_deadline) {
+        platform::sleep_ms(10UL);
+    }
+    TEST_ASSERT(state.port_tunnel_service->find_session(session_id).get() == nullptr);
 
     open_tunnel(state, &client_socket, &server_thread);
     send_tunnel_frame(
@@ -387,7 +393,7 @@ static void assert_expired_tunnel_session_is_released(AppState& state) {
     const PortTunnelFrame error = read_tunnel_frame(client_socket.get());
     TEST_ASSERT(error.type == PortTunnelFrameType::Error);
     const Json error_meta = Json::parse(error.meta);
-    TEST_ASSERT(error_meta.at("code").get<std::string>() == "port_tunnel_resume_expired");
+    TEST_ASSERT(error_meta.at("code").get<std::string>() == "unknown_port_tunnel_session");
 
     close_tunnel(&client_socket, &server_thread);
 
