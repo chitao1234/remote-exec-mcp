@@ -1,5 +1,31 @@
 #pragma once
 
+// Lock ordering for the port tunnel subsystem.
+//
+// Nested acquisitions (must always be acquired in this order):
+//   PortTunnelService::expiry_mutex_
+//     -> PortTunnelSession::mutex          (expiry_scheduler_loop reads session state)
+//       -> ConnectionLocalStreams::mutex_   (insert_tcp_stream_if_attached)
+//
+// Independent leaf locks (never held while acquiring another mutex, never
+// acquired while another mutex is held):
+//   PortTunnelService::mutex_        — released before calling session/worker methods
+//   PortTunnelConnection::state_mutex_
+//   PortTunnelSender::writer_mutex_
+//   WorkerGroup::mutex
+//   RetainedTcpListener::mutex
+//   TunnelUdpSocket::mutex
+//   TunnelTcpStream::mutex
+//   TcpReadStartGate::mutex_
+//
+// Key invariants:
+//   - Service::mutex_ is never held when calling into session methods.
+//     close_session() erases from the map under mutex_, releases it, then
+//     calls session->close_terminal().
+//   - expiry_scheduler_loop releases expiry_mutex_ before calling
+//     expire_session_if_needed() which may acquire Service::mutex_.
+//   - Budget counters use atomics, not mutexes.
+
 #include <functional>
 #include <map>
 #include <memory>
