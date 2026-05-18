@@ -320,6 +320,31 @@ void assert_http_streaming_routes(AppState& state, const fs::path& root) {
     TEST_ASSERT(denied_export_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
     TEST_ASSERT(Json::parse(response_body(denied_export_response)).at("code").get<std::string>() == "sandbox_denied");
 
+    const fs::path recursive_read_root = read_allowed / "recursive";
+    const fs::path recursive_denied = recursive_read_root / "secret";
+    fs::create_directories(recursive_denied);
+    write_text_file(recursive_read_root / "visible.txt", "visible");
+    write_text_file(recursive_denied / "hidden.txt", "hidden");
+
+    AppState recursive_deny_state;
+    initialize_state(recursive_deny_state, root);
+    recursive_deny_state.config.sandbox_configured = true;
+    recursive_deny_state.config.sandbox.read.allow.push_back(read_allowed.string());
+    recursive_deny_state.config.sandbox.read.deny.push_back(recursive_denied.string());
+    enable_sandbox(recursive_deny_state);
+
+    const std::string recursive_deny_body = Json{{"path", recursive_read_root.string()}}.dump();
+    std::ostringstream recursive_deny_request;
+    recursive_deny_request << "POST /v1/transfer/export HTTP/1.1\r\n"
+                           << "Content-Length: " << recursive_deny_body.size() << "\r\n"
+                           << "\r\n"
+                           << recursive_deny_body;
+    const std::string recursive_deny_response = run_single_request(recursive_deny_state, recursive_deny_request.str());
+    TEST_ASSERT(recursive_deny_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
+    TEST_ASSERT(recursive_deny_response.find("Transfer-Encoding: chunked\r\n") == std::string::npos);
+    TEST_ASSERT(Json::parse(response_body(recursive_deny_response)).at("code").get<std::string>() ==
+                "sandbox_denied");
+
     std::ostringstream denied_import_request;
     denied_import_request << "POST /v1/transfer/import HTTP/1.1\r\n"
                           << "Transfer-Encoding: chunked\r\n"

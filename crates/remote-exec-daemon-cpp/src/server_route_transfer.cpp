@@ -17,8 +17,8 @@ HttpResponse handle_transfer_export(AppState& state, const HttpRequest& request)
         log_message(LOG_INFO,
                     "server",
                     "transfer/export path=`" + export_request.path + "` source_type=`" +
-                        transfer_source_type_wire_value(export_request.source_type) + "`");
-        write_transfer_export_headers(response, ExportedPayload{export_request.source_type, payload.bytes});
+                        transfer_source_type_wire_value(payload.source_type) + "`");
+        write_transfer_export_headers(response, payload);
         response.body = payload.bytes;
     } catch (const SandboxError& ex) {
         log_message(LOG_WARN, "server", std::string("transfer/export failed: ") + ex.what());

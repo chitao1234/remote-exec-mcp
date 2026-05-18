@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdint>
 #include <sstream>
 #include <string>
@@ -45,34 +46,6 @@ public:
 
 private:
     HttpRequestBodyStream* body_;
-};
-
-class ChunkedTransferArchiveSink : public TransferArchiveSink {
-public:
-    explicit ChunkedTransferArchiveSink(SOCKET client) : client_(client), finished_(false) {}
-
-    void write(const char* data, std::size_t size) {
-        if (size == 0U) {
-            return;
-        }
-        std::ostringstream header;
-        header << std::hex << size << "\r\n";
-        send_all(client_, header.str());
-        send_all_bytes(client_, data, size);
-        send_all(client_, "\r\n");
-    }
-
-    void finish() {
-        if (finished_) {
-            return;
-        }
-        send_all(client_, "0\r\n\r\n");
-        finished_ = true;
-    }
-
-private:
-    SOCKET client_;
-    bool finished_;
 };
 
 std::string read_request_body_to_string(HttpRequestBodyStream* body) {
@@ -188,6 +161,26 @@ void send_transfer_export_headers(SOCKET client, const ExportedPayload& payload,
     send_all(client, out.str());
 }
 
+void send_chunked_bytes(SOCKET client, const std::string& bytes) {
+    static const std::size_t CHUNK_SIZE = 64U * 1024U;
+    std::size_t offset = 0;
+    while (offset < bytes.size()) {
+        const std::size_t size = std::min<std::size_t>(CHUNK_SIZE, bytes.size() - offset);
+        std::ostringstream header;
+        header << std::hex << size << "\r\n";
+        send_all(client, header.str());
+        send_all_bytes(client, bytes.data() + offset, size);
+        send_all(client, "\r\n");
+        offset += size;
+    }
+    send_all(client, "0\r\n\r\n");
+}
+
+void send_transfer_export_response(SOCKET client, const ExportedPayload& payload, const HttpRequest& request) {
+    send_transfer_export_headers(client, payload, request);
+    send_chunked_bytes(client, payload.bytes);
+}
+
 int handle_streaming_transfer_export(const AppState& state,
                                      const HttpRequest& request_head,
                                      HttpRequestBodyStream* body,
@@ -200,36 +193,25 @@ int handle_streaming_transfer_export(const AppState& state,
         return rejection.status;
     }
 
-    bool headers_sent = false;
     try {
         HttpRequest request = request_head;
         request.body = read_request_body_to_string(body);
         const Json body_json = parse_json_body(request);
         const TransferExportRequestSpec export_request = prepare_transfer_export_request(state, body_json);
+        const ExportedPayload payload = export_path(export_request.path,
+                                                    export_request.symlink_mode,
+                                                    export_request.exclude,
+                                                    export_request.authorizer);
         log_message(LOG_INFO,
                     "server",
                     "transfer/export path=`" + export_request.path + "` source_type=`" +
-                        transfer_source_type_wire_value(export_request.source_type) + "`");
+                        transfer_source_type_wire_value(payload.source_type) + "`");
 
-        send_transfer_export_headers(client, ExportedPayload{export_request.source_type, std::string()}, request);
-        headers_sent = true;
-        ChunkedTransferArchiveSink sink(client);
-        export_path_to_sink_as(sink,
-                               export_request.path,
-                               export_request.source_type,
-                               export_request.symlink_mode,
-                               export_request.exclude,
-                               export_request.authorizer);
-        sink.finish();
+        send_transfer_export_response(client, payload, request);
         return 200;
     } catch (const SandboxError& ex) {
         const std::string message = ex.what();
         log_message(LOG_WARN, "server", "transfer/export failed: " + message);
-        if (headers_sent) {
-            try { send_all(client, "0\r\n\r\n"); } catch (...) {}
-            return 200;
-        }
-
         HttpResponse response;
         response.status = 400;
         write_transfer_error_response(response, ex);
@@ -238,25 +220,17 @@ int handle_streaming_transfer_export(const AppState& state,
         return response.status;
     } catch (const TransferFailure& failure) {
         log_message(LOG_WARN, "server", "transfer/export failed: " + failure.message);
-        if (headers_sent) {
-            try { send_all(client, "0\r\n\r\n"); } catch (...) {}
-            return 200;
-        }
-
         HttpResponse response;
         response.status = transfer_error_status(failure.code);
         write_transfer_error_response(response, failure);
         write_request_id_header(response, request_head);
         try_send_response(client, response);
         return response.status;
+    } catch (const SocketSendError&) {
+        throw;
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
         log_message(LOG_WARN, "server", "transfer/export failed: " + message);
-        if (headers_sent) {
-            try { send_all(client, "0\r\n\r\n"); } catch (...) {}
-            return 200;
-        }
-
         HttpResponse response;
         response.status = transfer_error_status(TransferRpcCode::Internal);
         write_transfer_internal_error_response(response, message);
