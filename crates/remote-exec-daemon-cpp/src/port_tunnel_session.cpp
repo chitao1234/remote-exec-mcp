@@ -324,6 +324,9 @@ bool PortTunnelSession::insert_tcp_stream_if_attached(
     if (!session_state_attached(state) || attachment.get() != expected_attachment.get()) {
         return false;
     }
+    if (next_daemon_stream_id > UINT32_MAX - 2U) {
+        return false;
+    }
     const std::uint32_t next_stream_id = next_daemon_stream_id;
     next_daemon_stream_id += 2U;
     expected_attachment->local_streams.insert_tcp(next_stream_id, stream);

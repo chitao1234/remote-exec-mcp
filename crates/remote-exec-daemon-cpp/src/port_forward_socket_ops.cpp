@@ -225,6 +225,9 @@ SOCKET bind_port_forward_socket(const std::string& endpoint, const std::string& 
 
         int yes = 1;
         setsockopt(bound_socket, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
+        if (current->ai_family == AF_INET6) {
+            setsockopt(bound_socket, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<const char*>(&yes), sizeof(yes));
+        }
 
         if (bind(bound_socket, current->ai_addr, static_cast<int>(current->ai_addrlen)) == 0) {
             break;

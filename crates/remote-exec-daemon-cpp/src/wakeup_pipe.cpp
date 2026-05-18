@@ -1,6 +1,10 @@
 #ifndef _WIN32
 
+#include <cerrno>
+#include <cstring>
 #include <fcntl.h>
+#include <stdexcept>
+#include <string>
 #include <unistd.h>
 
 #include "wakeup_pipe.h"
@@ -8,12 +12,16 @@
 WakeupPipe::WakeupPipe() : read_end_(INVALID_SOCKET), write_end_(INVALID_SOCKET), signaled_(false) {
     int fds[2];
     if (pipe(fds) != 0) {
-        return;
+        throw std::runtime_error(std::string("wakeup pipe creation failed: ") + std::strerror(errno));
     }
-    fcntl(fds[0], F_SETFD, fcntl(fds[0], F_GETFD) | FD_CLOEXEC);
-    fcntl(fds[0], F_SETFL, fcntl(fds[0], F_GETFL) | O_NONBLOCK);
-    fcntl(fds[1], F_SETFD, fcntl(fds[1], F_GETFD) | FD_CLOEXEC);
-    fcntl(fds[1], F_SETFL, fcntl(fds[1], F_GETFL) | O_NONBLOCK);
+    if (fcntl(fds[0], F_SETFD, fcntl(fds[0], F_GETFD) | FD_CLOEXEC) != 0 ||
+        fcntl(fds[0], F_SETFL, fcntl(fds[0], F_GETFL) | O_NONBLOCK) != 0 ||
+        fcntl(fds[1], F_SETFD, fcntl(fds[1], F_GETFD) | FD_CLOEXEC) != 0 ||
+        fcntl(fds[1], F_SETFL, fcntl(fds[1], F_GETFL) | O_NONBLOCK) != 0) {
+        close(fds[0]);
+        close(fds[1]);
+        throw std::runtime_error(std::string("wakeup pipe fcntl failed: ") + std::strerror(errno));
+    }
     read_end_ = fds[0];
     write_end_ = fds[1];
 }

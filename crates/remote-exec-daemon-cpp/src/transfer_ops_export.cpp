@@ -1,12 +1,15 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #ifndef _WIN32
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
+#include "path_utils.h"
 #include "rpc_failures.h"
 #include "transfer_glob.h"
 #include "transfer_ops_internal.h"
@@ -28,8 +31,11 @@ private:
 struct ExportContext {
     ExportOptions options;
     std::vector<TransferWarning> warnings;
-    std::set<std::string> followed_directories;
+    std::set<std::pair<unsigned long long, unsigned long long>> followed_inodes;
+    unsigned int recursion_depth;
 };
+
+const unsigned int MAX_EXPORT_RECURSION_DEPTH = 256U;
 
 void add_warning(std::vector<TransferWarning>* warnings, const std::string& code, const std::string& message) {
     warnings->push_back(TransferWarning{code, message});
@@ -76,13 +82,26 @@ bool append_followed_symlink_entry(TransferArchiveSink* archive,
                                    const transfer_glob::Matcher& exclude_matcher,
                                    ExportContext* context) {
     if (is_directory_follow(child_path)) {
-        if (context->followed_directories.count(child_path) != 0) {
+        if (context->recursion_depth >= MAX_EXPORT_RECURSION_DEPTH) {
             handle_skipped_symlink(context, child_path);
             return true;
         }
-        context->followed_directories.insert(child_path);
+#ifndef _WIN32
+        struct stat st;
+        if (path_utils::stat_path(child_path, &st)) {
+            const std::pair<unsigned long long, unsigned long long> inode_key(
+                static_cast<unsigned long long>(st.st_dev), static_cast<unsigned long long>(st.st_ino));
+            if (context->followed_inodes.count(inode_key) != 0) {
+                handle_skipped_symlink(context, child_path);
+                return true;
+            }
+            context->followed_inodes.insert(inode_key);
+        }
+#endif
+        ++context->recursion_depth;
         append_directory_entry(archive, child_rel);
         append_directory_contents(archive, child_path, child_rel, exclude_matcher, context);
+        --context->recursion_depth;
         return true;
     }
     if (is_regular_file_follow(child_path)) {
@@ -244,6 +263,7 @@ void export_path_to_sink_as(TransferArchiveSink& sink,
                             const std::vector<std::string>& exclude) {
     ExportContext context;
     context.options = normalized_options(symlink_mode, exclude);
+    context.recursion_depth = 0U;
     validate_export_path(absolute_path, context.options);
     const transfer_glob::Matcher exclude_matcher(context.options.exclude);
 

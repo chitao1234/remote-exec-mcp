@@ -188,7 +188,8 @@ bool PortTunnelSender::enqueue_encoded_frame(std::vector<unsigned char> bytes, u
 
 void PortTunnelSender::send_frame(const PortTunnelFrame& frame) {
     std::vector<unsigned char> bytes = encode_port_tunnel_frame(frame);
-    (void)enqueue_encoded_frame(std::move(bytes), 0UL);
+    const unsigned long charge = static_cast<unsigned long>(bytes.size());
+    (void)enqueue_encoded_frame(std::move(bytes), charge);
 }
 
 bool PortTunnelSender::try_reserve_data_frame(const PortTunnelFrame& frame, unsigned long* charge_value) {
