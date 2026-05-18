@@ -349,6 +349,9 @@ bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelServi
                                            const char* operation,
                                            PortTunnelWorkerLease worker_lease,
                                            const std::function<void()>& work) {
+    if (!service->is_running()) {
+        return false;
+    }
     if (!worker_lease.valid() && !service->try_acquire_worker(&worker_lease)) {
         return false;
     }
