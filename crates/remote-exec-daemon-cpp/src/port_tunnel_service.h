@@ -66,21 +66,16 @@ public:
                               const std::function<void()>& work);
     bool try_acquire_worker();
     bool try_acquire_worker(PortTunnelWorkerLease* lease);
-    void release_worker();
     unsigned long max_workers() const;
     const PortForwardLimitConfig& limits() const;
     bool try_acquire_retained_session(PortTunnelBudgetLease* lease);
     bool try_acquire_retained_session();
-    void release_retained_session();
     bool try_acquire_retained_listener(PortTunnelBudgetLease* lease);
     bool try_acquire_retained_listener();
-    void release_retained_listener();
     bool try_acquire_udp_bind(PortTunnelBudgetLease* lease);
     bool try_acquire_udp_bind();
-    void release_udp_bind();
     bool try_acquire_active_tcp_stream(PortTunnelBudgetLease* lease);
     bool try_acquire_active_tcp_stream();
-    void release_active_tcp_stream();
 
 private:
     struct WorkerGroup;

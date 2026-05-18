@@ -192,10 +192,6 @@ bool PortTunnelService::try_acquire_worker(PortTunnelWorkerLease* lease) {
     return true;
 }
 
-void PortTunnelService::release_worker() {
-    release_counter(budget_state_->active_workers, "active_workers");
-}
-
 PortTunnelBudgetLease::PortTunnelBudgetLease() : budget_state_(), kind_(PortTunnelBudgetKind::None) {
 }
 
@@ -289,10 +285,6 @@ bool PortTunnelService::try_acquire_retained_session(PortTunnelBudgetLease* leas
     return true;
 }
 
-void PortTunnelService::release_retained_session() {
-    release_counter(budget_state_->retained_sessions, "retained_sessions");
-}
-
 bool PortTunnelService::try_acquire_retained_listener() {
     BasicLockGuard lock(mutex_);
     if (!is_running_locked()) {
@@ -309,10 +301,6 @@ bool PortTunnelService::try_acquire_retained_listener(PortTunnelBudgetLease* lea
         *lease = PortTunnelBudgetLease::adopt(budget_state_, PortTunnelBudgetKind::RetainedListener);
     }
     return true;
-}
-
-void PortTunnelService::release_retained_listener() {
-    release_counter(budget_state_->retained_listeners, "retained_listeners");
 }
 
 bool PortTunnelService::try_acquire_udp_bind() {
@@ -333,10 +321,6 @@ bool PortTunnelService::try_acquire_udp_bind(PortTunnelBudgetLease* lease) {
     return true;
 }
 
-void PortTunnelService::release_udp_bind() {
-    release_counter(budget_state_->udp_binds, "udp_binds");
-}
-
 bool PortTunnelService::try_acquire_active_tcp_stream() {
     BasicLockGuard lock(mutex_);
     if (!is_running_locked()) {
@@ -353,10 +337,6 @@ bool PortTunnelService::try_acquire_active_tcp_stream(PortTunnelBudgetLease* lea
         *lease = PortTunnelBudgetLease::adopt(budget_state_, PortTunnelBudgetKind::ActiveTcpStream);
     }
     return true;
-}
-
-void PortTunnelService::release_active_tcp_stream() {
-    release_counter(budget_state_->active_tcp_streams, "active_tcp_streams");
 }
 
 bool PortTunnelService::spawn_tracked_worker(const char* operation,
@@ -598,18 +578,13 @@ bool TunnelTcpStream::is_closed() {
 
 void TunnelUdpSocket::close() {
     BasicLockGuard lock(mutex);
-    close_locked();
-}
-
-bool TunnelUdpSocket::close_locked() {
     if (closed) {
-        return false;
+        return;
     }
     closed = true;
     shutdown_socket(socket.get());
     socket.reset();
     udp_bind_budget.reset();
-    return true;
 }
 
 bool TunnelUdpSocket::is_closed() {
@@ -653,18 +628,13 @@ int wait_socket_readable(SOCKET socket, unsigned long timeout_ms) {
 
 void RetainedTcpListener::close() {
     BasicLockGuard lock(mutex);
-    close_locked();
-}
-
-bool RetainedTcpListener::close_locked() {
     if (closed) {
-        return false;
+        return;
     }
     closed = true;
     shutdown_socket(listener.get());
     listener.reset();
     retained_listener_budget.reset();
-    return true;
 }
 
 bool RetainedTcpListener::is_closed() {

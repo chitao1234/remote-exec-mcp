@@ -76,7 +76,6 @@ struct TunnelUdpSocket {
         : socket(socket_value), udp_bind_budget(std::move(udp_bind_budget_value)), closed(false) {}
 
     void close();
-    bool close_locked();
     bool is_closed();
 
     UniqueSocket socket;
@@ -93,7 +92,6 @@ struct RetainedTcpListener {
           retained_listener_budget(std::move(retained_listener_budget_value)), closed(false) {}
 
     void close();
-    bool close_locked();
     bool is_closed();
 
     uint32_t stream_id;
