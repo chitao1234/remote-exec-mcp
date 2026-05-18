@@ -35,6 +35,7 @@ namespace {
 
 const std::size_t HTTP_READ_BUFFER_SIZE = 4U * 1024U;
 const std::size_t HTTP_RAW_BUFFER_COMPACT_THRESHOLD = 8U * 1024U;
+const std::size_t HTTP_MAX_CHUNK_LINE_SIZE = 4U * 1024U;
 
 std::size_t parse_chunk_size_line(const std::string& line) {
     try {
@@ -240,6 +241,9 @@ void HttpRequestBodyStream::ensure_raw_available(std::size_t size) {
 
 void HttpRequestBodyStream::ensure_raw_line() {
     while (raw_.find("\r\n", raw_offset_) == std::string::npos) {
+        if (raw_.size() - raw_offset_ > HTTP_MAX_CHUNK_LINE_SIZE) {
+            throw BadHttpRequest("chunked request line too long");
+        }
         char buffer[HTTP_READ_BUFFER_SIZE];
         const int received = recv(client_, buffer, sizeof(buffer), 0);
         if (received == 0) {
