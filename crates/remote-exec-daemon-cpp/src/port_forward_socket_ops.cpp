@@ -1,6 +1,7 @@
 #include "port_forward_socket_ops.h"
 
 #include <climits>
+#include <cstdint>
 #include <cstring>
 #include <sstream>
 
@@ -21,6 +22,7 @@
 
 #include "port_forward_endpoint.h"
 #include "port_forward_error.h"
+#include "platform.h"
 #include "win32_error.h"
 
 namespace {
@@ -94,6 +96,20 @@ bool connect_in_progress_error(int error) {
 #endif
 }
 
+#ifndef _WIN32
+int remaining_poll_timeout_ms(std::uint64_t start_ms, unsigned long timeout_ms) {
+    const std::uint64_t elapsed_ms = platform::monotonic_ms() - start_ms;
+    if (elapsed_ms >= static_cast<std::uint64_t>(timeout_ms)) {
+        return 0;
+    }
+    const std::uint64_t remaining_ms = static_cast<std::uint64_t>(timeout_ms) - elapsed_ms;
+    if (remaining_ms > static_cast<std::uint64_t>(INT_MAX)) {
+        return INT_MAX;
+    }
+    return static_cast<int>(remaining_ms);
+}
+#endif
+
 } // namespace
 
 void set_socket_nonblocking(SOCKET socket, bool enabled) {
@@ -131,11 +147,17 @@ bool wait_for_connect(SOCKET socket, unsigned long timeout_ms) {
     descriptor.events = POLLOUT;
     descriptor.revents = 0;
 
-    const int timeout = timeout_ms > static_cast<unsigned long>(INT_MAX) ? INT_MAX : static_cast<int>(timeout_ms);
+    const std::uint64_t start_ms = platform::monotonic_ms();
     int selected;
     for (;;) {
+        descriptor.revents = 0;
+        const int timeout = remaining_poll_timeout_ms(start_ms, timeout_ms);
         selected = poll(&descriptor, 1, timeout);
         if (selected >= 0 || errno != EINTR) {
+            break;
+        }
+        if (timeout == 0) {
+            selected = 0;
             break;
         }
     }
