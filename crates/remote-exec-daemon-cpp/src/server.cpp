@@ -107,38 +107,43 @@ static void write_test_bound_addr_file(const DaemonConfig& config, unsigned shor
 
 int run_server(const DaemonConfig& config) {
     NetworkSession network;
-    ServerRuntime runtime(config);
+    {
+        ServerRuntime runtime(config);
 #ifndef _WIN32
-    install_posix_child_reaper();
-    install_shutdown_signal_handlers();
+        install_posix_child_reaper();
+        install_shutdown_signal_handlers();
 #else
-    g_runtime_for_shutdown = &runtime;
-    SetConsoleCtrlHandler(console_ctrl_handler, TRUE);
+        g_runtime_for_shutdown = &runtime;
+        SetConsoleCtrlHandler(console_ctrl_handler, TRUE);
 #endif
-    runtime.start_accept_loop();
-    const unsigned short bound_port = runtime.bound_port();
-    write_test_bound_addr_file(runtime.state().config, bound_port);
+        runtime.start_accept_loop();
+        const unsigned short bound_port = runtime.bound_port();
+        write_test_bound_addr_file(runtime.state().config, bound_port);
 
-    LogMessageBuilder message("listening");
-    message.raw("on")
-        .raw(runtime.state().config.listen_host)
-        .field("port", bound_port)
-        .quoted_field("target", runtime.state().config.target)
-        .bool_field("http_auth_enabled", !runtime.state().config.http_auth_bearer_token.empty())
-        .quoted_field("platform", platform::platform_name())
-        .quoted_field("arch", platform::arch_name())
-        .quoted_field("default_shell", runtime.state().default_shell)
-        .quoted_field("daemon_instance_id", runtime.state().daemon_instance_id);
-    log_message(LOG_INFO, "server", message.str());
+        LogMessageBuilder message("listening");
+        message.raw("on")
+            .raw(runtime.state().config.listen_host)
+            .field("port", bound_port)
+            .quoted_field("target", runtime.state().config.target)
+            .bool_field("http_auth_enabled", !runtime.state().config.http_auth_bearer_token.empty())
+            .quoted_field("platform", platform::platform_name())
+            .quoted_field("arch", platform::arch_name())
+            .quoted_field("default_shell", runtime.state().default_shell)
+            .quoted_field("daemon_instance_id", runtime.state().daemon_instance_id);
+        log_message(LOG_INFO, "server", message.str());
 
 #ifndef _WIN32
-    wait_for_shutdown_signal();
-    log_message(LOG_INFO, "server", "shutdown signal received");
-    runtime.request_shutdown();
+        wait_for_shutdown_signal();
+        log_message(LOG_INFO, "server", "shutdown signal received");
+        runtime.request_shutdown();
 #endif
-    runtime.join();
+        runtime.join();
 #ifdef _WIN32
-    g_runtime_for_shutdown = nullptr;
+        g_runtime_for_shutdown = nullptr;
+#endif
+    }
+#ifndef _WIN32
+    shutdown_posix_child_reaper();
 #endif
     log_message(LOG_INFO, "server", "shutdown complete");
     return 0;

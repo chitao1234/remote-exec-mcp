@@ -30,6 +30,8 @@ std::map<pid_t, int> g_reaped;
 int g_signal_pipe_read = -1;
 int g_signal_pipe_write = -1;
 bool g_installed = false;
+std::atomic<bool> g_stopping(false);
+std::thread* g_reaper_thread = nullptr;
 
 #ifdef REMOTE_EXEC_CPP_TESTING
 std::atomic<unsigned long> g_test_reap_delay_ms(0UL);
@@ -114,7 +116,7 @@ void drain_signal_pipe() {
 }
 
 void reaper_loop() {
-    for (;;) {
+    while (!g_stopping.load(std::memory_order_relaxed)) {
         struct pollfd descriptor;
         descriptor.fd = g_signal_pipe_read;
         descriptor.events = POLLIN;
@@ -158,9 +160,26 @@ void install_posix_child_reaper() {
         throw std::runtime_error(std::string("sigaction(SIGCHLD) failed: ") + std::strerror(errno));
     }
 
-    std::thread(reaper_loop).detach();
+    g_reaper_thread = new std::thread(reaper_loop);
     g_installed = true;
     log_message(LOG_INFO, "posix_child_reaper", "installed SIGCHLD child reaper");
+}
+
+void shutdown_posix_child_reaper() {
+    if (!g_installed) {
+        return;
+    }
+    g_stopping.store(true, std::memory_order_relaxed);
+    if (g_signal_pipe_write >= 0) {
+        const char byte = 1;
+        ssize_t ignored = write(g_signal_pipe_write, &byte, 1);
+        (void)ignored;
+    }
+    if (g_reaper_thread != nullptr) {
+        g_reaper_thread->join();
+        delete g_reaper_thread;
+        g_reaper_thread = nullptr;
+    }
 }
 
 void register_posix_child(pid_t pid) {
