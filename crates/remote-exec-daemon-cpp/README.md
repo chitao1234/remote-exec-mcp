@@ -58,8 +58,10 @@ Port forwarding has stricter ownership rules because it is reconnect-aware.
 `PortTunnelService` owns global limits and the retained session map,
 `PortTunnelSession` owns retained session state and retained resources,
 `PortTunnelConnection` owns one upgraded tunnel connection and connection-local
-streams, and the resource objects own their sockets and budget leases. Close
-work should be returned to callers and performed outside unrelated locks.
+streams, and the resource objects own their sockets and budget leases. Resource
+objects move through explicit `open`, `closing`, and `closed` states; callers
+should ask the resource for its state instead of carrying separate closed flags.
+Close work should be returned to callers and performed outside unrelated locks.
 
 ## Build
 

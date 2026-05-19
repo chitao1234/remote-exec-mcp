@@ -328,21 +328,27 @@ static void assert_service_shutdown_rejects_new_sessions() {
 static void assert_resource_close_paths_are_idempotent() {
     std::shared_ptr<RetainedTcpListener> listener(
         new RetainedTcpListener(1U, bind_port_forward_socket("127.0.0.1:0", "tcp"), PortTunnelBudgetLease()));
+    TEST_ASSERT(listener->resource_state_snapshot() == PortTunnelResourceState::Open);
     listener->close();
     listener->close();
     TEST_ASSERT(listener->is_closed());
+    TEST_ASSERT(listener->resource_state_snapshot() == PortTunnelResourceState::Closed);
 
     std::shared_ptr<TunnelUdpSocket> udp_bind(
         new TunnelUdpSocket(bind_port_forward_socket("127.0.0.1:0", "udp"), PortTunnelBudgetLease()));
+    TEST_ASSERT(udp_bind->resource_state_snapshot() == PortTunnelResourceState::Open);
     udp_bind->close();
     udp_bind->close();
     TEST_ASSERT(udp_bind->is_closed());
+    TEST_ASSERT(udp_bind->resource_state_snapshot() == PortTunnelResourceState::Closed);
 
     ConnectedSocketPair sockets = make_connected_socket_pair();
     std::shared_ptr<TunnelTcpStream> stream(new TunnelTcpStream(sockets.first.release(), PortTunnelBudgetLease()));
+    TEST_ASSERT(stream->resource_state_snapshot() == PortTunnelResourceState::Open);
     stream->close();
     stream->close();
     TEST_ASSERT(stream->is_closed());
+    TEST_ASSERT(stream->resource_state_snapshot() == PortTunnelResourceState::Closed);
 }
 
 static void assert_sender_close_handles_queued_control_frames() {

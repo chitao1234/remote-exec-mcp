@@ -35,7 +35,7 @@ void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& 
         SOCKET wakeup_fd = INVALID_SOCKET;
         {
             BasicLockGuard socket_lock(socket_value->mutex);
-            if (socket_value->closed) {
+            if (socket_value->is_closing_or_closed_locked()) {
                 return;
             }
             socket = socket_value->socket.get();
@@ -65,7 +65,7 @@ void PortTunnelService::udp_read_loop(const std::shared_ptr<PortTunnelSession>& 
         int received = 0;
         {
             BasicLockGuard socket_lock(socket_value->mutex);
-            if (socket_value->closed) {
+            if (socket_value->is_closing_or_closed_locked()) {
                 return;
             }
             received = recv_port_forward_datagram(socket_value->socket.get(),
@@ -196,7 +196,7 @@ void PortTunnelConnection::udp_read_loop_connection_local(uint32_t stream_id,
         SOCKET wakeup_fd = INVALID_SOCKET;
         {
             BasicLockGuard socket_lock(socket_value->mutex);
-            if (socket_value->closed) {
+            if (socket_value->is_closing_or_closed_locked()) {
                 return;
             }
             socket = socket_value->socket.get();
@@ -216,7 +216,7 @@ void PortTunnelConnection::udp_read_loop_connection_local(uint32_t stream_id,
         int received = 0;
         {
             BasicLockGuard socket_lock(socket_value->mutex);
-            if (socket_value->closed) {
+            if (socket_value->is_closing_or_closed_locked()) {
                 return;
             }
             received = recv_port_forward_datagram(socket_value->socket.get(),
@@ -277,7 +277,7 @@ void PortTunnelConnection::udp_datagram(const PortTunnelFrame& frame) {
     for (;;) {
         {
             BasicLockGuard socket_lock(socket_value->mutex);
-            if (socket_value->closed) {
+            if (socket_value->is_closing_or_closed_locked()) {
                 throw PortForwardError(400, "port_connection_closed", "udp bind was closed");
             }
             sent = send_port_forward_datagram(socket_value->socket.get(),

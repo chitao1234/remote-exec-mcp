@@ -31,6 +31,10 @@ enum class PortTunnelBudgetKind {
     ActiveTcpStream,
 };
 
+enum class PortTunnelResourceState { Open, Closing, Closed };
+
+const char* port_tunnel_resource_state_name(PortTunnelResourceState state);
+
 class PortTunnelBudgetLease {
 public:
     PortTunnelBudgetLease();
@@ -56,34 +60,40 @@ private:
 struct TunnelTcpStream {
     TunnelTcpStream(SOCKET socket_value,
                     PortTunnelBudgetLease active_stream_budget_value)
-        : socket(socket_value), active_stream_budget(std::move(active_stream_budget_value)), closed(false),
+        : socket(socket_value), active_stream_budget(std::move(active_stream_budget_value)),
+          resource_state(PortTunnelResourceState::Open),
           writer_closed(false), writer_shutdown_requested(false) {}
 
     void close();
     bool is_closed();
+    bool is_closing_or_closed_locked() const;
+    PortTunnelResourceState resource_state_snapshot();
 
     UniqueSocket socket;
     PortTunnelBudgetLease active_stream_budget;
     BasicMutex mutex;
     BasicCondVar writer_cond;
     std::vector<std::vector<unsigned char>> write_queue;
-    bool closed;
+    PortTunnelResourceState resource_state;
     bool writer_closed;
     bool writer_shutdown_requested;
 };
 
 struct TunnelUdpSocket {
     TunnelUdpSocket(SOCKET socket_value, PortTunnelBudgetLease udp_bind_budget_value)
-        : socket(socket_value), udp_bind_budget(std::move(udp_bind_budget_value)), closed(false) {}
+        : socket(socket_value), udp_bind_budget(std::move(udp_bind_budget_value)),
+          resource_state(PortTunnelResourceState::Open) {}
 
     void close();
     bool is_closed();
+    bool is_closing_or_closed_locked() const;
+    PortTunnelResourceState resource_state_snapshot();
 
     UniqueSocket socket;
     PortTunnelBudgetLease udp_bind_budget;
     BasicMutex mutex;
     WakeupPipe wakeup;
-    bool closed;
+    PortTunnelResourceState resource_state;
 };
 
 struct RetainedTcpListener {
@@ -91,17 +101,20 @@ struct RetainedTcpListener {
                         SOCKET listener_socket,
                         PortTunnelBudgetLease retained_listener_budget_value)
         : stream_id(stream_id_value), listener(listener_socket),
-          retained_listener_budget(std::move(retained_listener_budget_value)), closed(false) {}
+          retained_listener_budget(std::move(retained_listener_budget_value)),
+          resource_state(PortTunnelResourceState::Open) {}
 
     void close();
     bool is_closed();
+    bool is_closing_or_closed_locked() const;
+    PortTunnelResourceState resource_state_snapshot();
 
     uint32_t stream_id;
     UniqueSocket listener;
     PortTunnelBudgetLease retained_listener_budget;
     BasicMutex mutex;
     WakeupPipe wakeup;
-    bool closed;
+    PortTunnelResourceState resource_state;
 };
 
 class ConnectionLocalStreams {

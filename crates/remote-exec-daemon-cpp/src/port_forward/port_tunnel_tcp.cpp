@@ -32,7 +32,7 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
         SOCKET wakeup_fd = INVALID_SOCKET;
         {
             BasicLockGuard listener_lock(listener->mutex);
-            if (listener->closed) {
+            if (listener->is_closing_or_closed_locked()) {
                 return;
             }
             listener_socket = listener->listener.get();
@@ -62,7 +62,7 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
         SOCKET accepted = INVALID_SOCKET;
         {
             BasicLockGuard listener_lock(listener->mutex);
-            if (listener->closed) {
+            if (listener->is_closing_or_closed_locked()) {
                 return;
             }
             accepted =
@@ -227,11 +227,11 @@ void PortTunnelConnection::tcp_write_loop(uint32_t stream_id, std::shared_ptr<Tu
         std::vector<unsigned char> data;
         {
             BasicLockGuard lock(stream->mutex);
-            while (!stream->closed && stream->write_queue.empty() && !stream->writer_closed &&
+            while (!stream->is_closing_or_closed_locked() && stream->write_queue.empty() && !stream->writer_closed &&
                    !stream->writer_shutdown_requested) {
                 stream->writer_cond.wait(stream->mutex);
             }
-            if (stream->closed || stream->writer_closed) {
+            if (stream->is_closing_or_closed_locked() || stream->writer_closed) {
                 return;
             }
             if (stream->write_queue.empty() && stream->writer_shutdown_requested) {
@@ -263,7 +263,7 @@ void PortTunnelConnection::tcp_data(uint32_t stream_id, const std::vector<unsign
     }
     {
         BasicLockGuard lock(stream->mutex);
-        if (stream->closed || stream->writer_closed || stream->writer_shutdown_requested) {
+        if (stream->is_closing_or_closed_locked() || stream->writer_closed || stream->writer_shutdown_requested) {
             throw PortForwardError(400, "port_connection_closed", "connection was closed");
         }
         if (stream->write_queue.size() >= TCP_WRITE_QUEUE_LIMIT) {
