@@ -83,7 +83,6 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
             return;
         }
         UniqueSocket accepted_socket(accepted);
-        set_socket_cloexec(accepted_socket.get());
         try {
             set_socket_nonblocking(accepted_socket.get(), false);
         } catch (const std::exception& ex) {

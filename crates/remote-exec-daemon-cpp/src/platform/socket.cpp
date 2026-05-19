@@ -82,6 +82,24 @@ SOCKET accept_socket(SOCKET listener, sockaddr* peer_address, socklen_t* peer_le
 #endif
 }
 
+SOCKET accept_socket_cloexec(SOCKET listener, sockaddr* peer_address, socklen_t* peer_len) {
+    SOCKET client = accept_socket(listener, peer_address, peer_len);
+    if (client == INVALID_SOCKET) {
+        return client;
+    }
+    if (set_socket_cloexec(client)) {
+        return client;
+    }
+    const int cloexec_error = last_socket_error();
+    close_socket(client);
+#ifdef _WIN32
+    WSASetLastError(cloexec_error);
+#else
+    errno = cloexec_error;
+#endif
+    return INVALID_SOCKET;
+}
+
 UniqueSocket::UniqueSocket() : socket_(INVALID_SOCKET) {
 }
 

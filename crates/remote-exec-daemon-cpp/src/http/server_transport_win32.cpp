@@ -2,5 +2,5 @@
 #include "http/server_transport.h"
 
 SOCKET accept_client(SOCKET listener) {
-    return accept(listener, nullptr, nullptr);
+    return accept_socket_cloexec(listener, nullptr, nullptr);
 }

@@ -155,7 +155,7 @@ bool tcp_connect_with_timeout(SOCKET socket, const sockaddr* address, socklen_t 
 } // namespace
 
 SOCKET accept_port_forward_peer(SOCKET listener, sockaddr* peer_address, socklen_t* peer_len) {
-    return accept_socket(listener, peer_address, peer_len);
+    return accept_socket_cloexec(listener, peer_address, peer_len);
 }
 
 int recv_port_forward_datagram(SOCKET socket,

@@ -227,7 +227,6 @@ void ServerRuntime::accept_loop() {
                 log_message(LOG_WARN, "server", "accept failed");
                 break;
             }
-            set_socket_cloexec(client.get());
             try {
                 set_socket_nonblocking(client.get(), false);
             } catch (const std::exception& ex) {
