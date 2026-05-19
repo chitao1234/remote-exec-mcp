@@ -10,7 +10,7 @@
 #include "core/config.h"
 #include "platform/path_utils.h"
 #include "platform/scoped_file.h"
-#include "stdio_retry.h"
+#include "core/stdio_retry.h"
 #include "core/text_utils.h"
 
 typedef std::map<std::string, std::string> ConfigValues;

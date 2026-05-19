@@ -19,7 +19,7 @@
 #endif
 #include "rpc/rpc_failures.h"
 #include "platform/scoped_file.h"
-#include "../core/stdio_retry.h"
+#include "core/stdio_retry.h"
 #include "transfer_ops_internal.h"
 
 namespace {

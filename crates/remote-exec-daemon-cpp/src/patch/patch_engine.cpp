@@ -26,7 +26,7 @@
 #include "platform/posix_eintr.h"
 #endif
 #include "platform/scoped_file.h"
-#include "../core/stdio_retry.h"
+#include "core/stdio_retry.h"
 
 namespace {
 

@@ -9,7 +9,7 @@
 #include "platform/path_utils.h"
 #include "rpc/rpc_failures.h"
 #include "platform/scoped_file.h"
-#include "../core/stdio_retry.h"
+#include "core/stdio_retry.h"
 
 namespace {
 
