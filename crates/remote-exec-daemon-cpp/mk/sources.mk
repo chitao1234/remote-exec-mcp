@@ -12,9 +12,9 @@ TRANSFER_SRCS = \
 	$(SOURCE_PREFIX)src/transfer/transfer_glob.cpp
 
 POLICY_SRCS = \
-	$(SOURCE_PREFIX)src/path_policy.cpp \
-	$(SOURCE_PREFIX)src/path_compare.cpp \
-	$(SOURCE_PREFIX)src/filesystem_sandbox.cpp
+	$(SOURCE_PREFIX)src/policy/path_policy.cpp \
+	$(SOURCE_PREFIX)src/policy/path_compare.cpp \
+	$(SOURCE_PREFIX)src/policy/filesystem_sandbox.cpp
 
 RPC_FAILURE_SRCS = $(SOURCE_PREFIX)src/rpc_failures.cpp
 
@@ -131,7 +131,7 @@ HOST_PATCH_SRCS = \
 	$(SOURCE_PREFIX)src/platform.cpp \
 	$(SOURCE_PREFIX)src/text_utils.cpp \
 	$(PATH_UTILS_SRCS) \
-	$(SOURCE_PREFIX)src/path_policy.cpp
+	$(SOURCE_PREFIX)src/policy/path_policy.cpp
 
 HOST_TRANSFER_SRCS = \
 	$(SOURCE_PREFIX)tests/test_transfer.cpp \
