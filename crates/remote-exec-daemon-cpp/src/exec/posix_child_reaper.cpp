@@ -22,6 +22,7 @@
 #include "core/logging.h"
 #include "platform/posix_eintr.h"
 #include "platform/posix_fd.h"
+#include "platform/posix_process.h"
 
 namespace {
 
@@ -40,14 +41,8 @@ std::atomic<unsigned long> g_test_reap_delay_ms(0UL);
 
 void sigchld_handler(int) {
     if (g_signal_pipe_write >= 0) {
-        const unsigned char byte = 1U;
-        ssize_t ignored = write(g_signal_pipe_write, &byte, 1U);
-        (void)ignored;
+        posix_fd::write_signal_safe_wakeup_byte(g_signal_pipe_write);
     }
-}
-
-pid_t waitpid_retry_on_eintr(pid_t pid, int* status, int options) {
-    return posix_eintr::retry<pid_t>([&]() { return waitpid(pid, status, options); });
 }
 
 bool take_reaped_locked(pid_t pid, int* status) {
@@ -76,7 +71,7 @@ void reap_registered_children() {
         }
         int status = 0;
         for (;;) {
-            const pid_t result = waitpid_retry_on_eintr(pids[i], &status, WNOHANG);
+            const pid_t result = posix_process::wait_pid(pids[i], &status, WNOHANG);
             if (result == pids[i]) {
 #ifdef REMOTE_EXEC_CPP_TESTING
                 const unsigned long delay_ms = g_test_reap_delay_ms.load();
@@ -97,8 +92,7 @@ void reap_registered_children() {
 
 void drain_signal_pipe() {
     unsigned char buffer[64];
-    while (g_signal_pipe_read >= 0 &&
-           posix_eintr::retry<ssize_t>([&]() { return read(g_signal_pipe_read, buffer, sizeof(buffer)); }) > 0) {
+    while (g_signal_pipe_read >= 0 && posix_fd::read_retry(g_signal_pipe_read, buffer, sizeof(buffer)) > 0) {
     }
 }
 
@@ -124,13 +118,13 @@ void install_posix_child_reaper() {
         return;
     }
     int fds[2];
-    if (posix_eintr::retry<int>([&]() { return pipe(fds); }) != 0) {
+    if (posix_fd::create_cloexec_pipe(fds) != 0) {
         throw std::runtime_error(std::string("pipe(SIGCHLD) failed: ") + std::strerror(errno));
     }
     g_signal_pipe_read = fds[0];
     g_signal_pipe_write = fds[1];
-    (void)posix_fd::set_cloexec_nonblocking(g_signal_pipe_read);
-    (void)posix_fd::set_cloexec_nonblocking(g_signal_pipe_write);
+    (void)posix_fd::set_nonblocking(g_signal_pipe_read);
+    (void)posix_fd::set_nonblocking(g_signal_pipe_write);
 
     struct sigaction action;
     std::memset(&action, 0, sizeof(action));
@@ -153,7 +147,7 @@ void shutdown_posix_child_reaper() {
     g_stopping.store(true, std::memory_order_relaxed);
     if (g_signal_pipe_write >= 0) {
         const char byte = 1;
-        ssize_t ignored = posix_eintr::retry<ssize_t>([&]() { return write(g_signal_pipe_write, &byte, 1); });
+        ssize_t ignored = posix_fd::write_retry(g_signal_pipe_write, &byte, 1);
         (void)ignored;
     }
     if (g_reaper_thread != nullptr) {
@@ -185,7 +179,7 @@ bool poll_posix_child_exit(pid_t pid, int* status) {
         return true;
     }
 
-    const pid_t result = waitpid_retry_on_eintr(pid, status, WNOHANG);
+    const pid_t result = posix_process::wait_pid(pid, status, WNOHANG);
     if (result == pid) {
         g_registered.erase(pid);
         g_reaped.erase(pid);
@@ -214,7 +208,7 @@ bool wait_posix_child_exit(pid_t pid, int* status) {
         return true;
     }
 
-    const pid_t result = waitpid_retry_on_eintr(pid, status, 0);
+    const pid_t result = posix_process::wait_pid(pid, status, 0);
     if (result == pid) {
         g_registered.erase(pid);
         g_reaped.erase(pid);

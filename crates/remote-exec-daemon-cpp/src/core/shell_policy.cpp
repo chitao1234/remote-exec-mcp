@@ -19,9 +19,14 @@
 #include "platform/path_utils.h"
 #include "platform/platform.h"
 #ifndef _WIN32
-#include "platform/posix_eintr.h"
+#include "platform/posix_fd.h"
+#include "platform/posix_process.h"
 #endif
 #include "core/text_utils.h"
+
+#ifndef _WIN32
+extern char** environ;
+#endif
 
 namespace {
 
@@ -55,22 +60,27 @@ bool is_disallowed_unix_shell(const std::string& shell) {
 
 bool is_executable_file(const std::string& path) {
     struct stat st;
-    return posix_eintr::retry<int>([&]() { return stat(path.c_str(), &st); }) == 0 && S_ISREG(st.st_mode) &&
-           posix_eintr::retry<int>([&]() { return access(path.c_str(), X_OK); }) == 0;
+    return path_utils::stat_path(path, &st) && S_ISREG(st.st_mode) && posix_fd::access_path(path.c_str(), X_OK) == 0;
 }
 
 bool probe_unix_shell(const std::string& shell) {
-    const pid_t pid = fork();
+    const pid_t pid = posix_process::fork_process();
     if (pid < 0) {
         return false;
     }
     if (pid == 0) {
-        execl(shell.c_str(), shell.c_str(), "-c", "exit 0", static_cast<char*>(nullptr));
+        char* const argv[] = {
+            const_cast<char*>(shell.c_str()),
+            const_cast<char*>("-c"),
+            const_cast<char*>("exit 0"),
+            nullptr,
+        };
+        posix_process::execve_process(shell.c_str(), argv, environ);
         _exit(127);
     }
 
     int status = 0;
-    if (posix_eintr::retry<pid_t>([&]() { return waitpid(pid, &status, 0); }) < 0) {
+    if (posix_process::wait_pid(pid, &status, 0) < 0) {
         return false;
     }
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;

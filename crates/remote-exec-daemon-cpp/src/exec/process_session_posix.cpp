@@ -24,6 +24,7 @@
 #include "exec/posix_child_reaper.h"
 #include "platform/posix_eintr.h"
 #include "platform/posix_fd.h"
+#include "platform/posix_process.h"
 #include "exec/process_session.h"
 
 #if defined(__GNUC__)
@@ -99,23 +100,9 @@ void set_fd_cloexec_or_throw(int fd, const std::string& label) {
 
 PosixPipePair create_posix_pipe(const char* label) {
     int fds[2];
-#ifdef __linux__
-    if (posix_eintr::retry<int>([&]() { return pipe2(fds, O_CLOEXEC); }) != 0) {
+    if (posix_fd::create_cloexec_pipe(fds) != 0) {
         throw std::runtime_error(std::string(label) + " failed: " + safe_strerror(errno));
     }
-#else
-    if (posix_eintr::retry<int>([&]() { return pipe(fds); }) != 0) {
-        throw std::runtime_error(std::string(label) + " failed: " + safe_strerror(errno));
-    }
-    try {
-        set_fd_cloexec_or_throw(fds[0], std::string(label) + " fd[0]");
-        set_fd_cloexec_or_throw(fds[1], std::string(label) + " fd[1]");
-    } catch (...) {
-        posix_fd::close_ignoring_errors(fds[0]);
-        posix_fd::close_ignoring_errors(fds[1]);
-        throw;
-    }
-#endif
     PosixPipePair pair;
     pair.read_end.reset(fds[0]);
     pair.write_end.reset(fds[1]);
@@ -123,28 +110,18 @@ PosixPipePair create_posix_pipe(const char* label) {
 }
 
 UniqueFd open_dev_null_read() {
-    int flags = O_RDONLY;
-#ifdef O_CLOEXEC
-    flags |= O_CLOEXEC;
-#endif
-    int raw_fd = posix_eintr::retry<int>([&]() { return open("/dev/null", flags); });
-#ifdef O_CLOEXEC
-    if (raw_fd < 0 && errno == EINVAL) {
-        raw_fd = posix_eintr::retry<int>([&]() { return open("/dev/null", O_RDONLY); });
-    }
-#endif
+    int raw_fd = posix_fd::open_cloexec_path("/dev/null", O_RDONLY);
     UniqueFd fd(raw_fd);
     if (!fd.valid()) {
         throw std::runtime_error(std::string("open(/dev/null) failed: ") + safe_strerror(errno));
     }
-    set_fd_cloexec_or_throw(fd.get(), "open(/dev/null)");
     return fd;
 }
 
 void kill_process_group(pid_t pid) {
-    kill(-pid, SIGTERM);
+    (void)posix_process::signal_process_group(pid, SIGTERM);
     platform::sleep_ms(TERMINATE_GRACE_MS);
-    kill(-pid, SIGKILL);
+    (void)posix_process::signal_process_group(pid, SIGKILL);
 }
 
 bool posix_pty_api_available() {
@@ -206,7 +183,7 @@ PosixPtyPair create_posix_pty() {
     std::memset(&size, 0, sizeof(size));
     size.ws_row = DEFAULT_PTY_ROWS;
     size.ws_col = DEFAULT_PTY_COLS;
-    if (posix_eintr::retry<int>([&]() { return ioctl(master.get(), TIOCSWINSZ, &size); }) != 0) {
+    if (posix_fd::ioctl_retry(master.get(), TIOCSWINSZ, &size) != 0) {
         throw std::runtime_error(std::string("ioctl(TIOCSWINSZ) failed: ") + safe_strerror(errno));
     }
 
@@ -396,7 +373,7 @@ std::string resolve_exec_path(const std::string& program, const ExecEnvironment&
         }
         const std::string dir = current.empty() ? "." : current;
         const std::string candidate = dir + "/" + program;
-        if (posix_eintr::retry<int>([&]() { return access(candidate.c_str(), X_OK); }) == 0) {
+        if (posix_fd::access_path(candidate.c_str(), X_OK) == 0) {
             return candidate;
         }
         current.clear();
@@ -419,15 +396,13 @@ void exec_shell_child(const std::vector<char*>& exec_argv,
                       const ExecEnvironment& environment,
                       const std::string& workdir) {
     signal(SIGPIPE, SIG_DFL);
-    if (!workdir.empty() && posix_eintr::retry<int>([&]() { return chdir(workdir.c_str()); }) != 0) {
+    if (!workdir.empty() && posix_fd::change_directory(workdir.c_str()) != 0) {
         _exit(126);
     }
 
-    posix_eintr::retry<int>([&]() {
-        return execve(executable_path.c_str(),
-                      const_cast<char* const*>(&exec_argv[0]),
-                      const_cast<char* const*>(&environment.pointers[0]));
-    });
+    posix_process::execve_process(executable_path.c_str(),
+                                  const_cast<char* const*>(&exec_argv[0]),
+                                  const_cast<char* const*>(&environment.pointers[0]));
     _exit(127);
 }
 
@@ -460,8 +435,7 @@ public:
         const char* data = chars.data();
         std::size_t remaining = chars.size();
         while (remaining > 0) {
-            const ssize_t written =
-                posix_eintr::retry<ssize_t>([&]() { return write(input_write_.get(), data, remaining); });
+            const ssize_t written = posix_fd::write_retry(input_write_.get(), data, remaining);
             if (written < 0) {
                 if (errno == EPIPE || errno == EIO) {
                     throw ProcessStdinClosedError(
@@ -488,7 +462,7 @@ public:
         std::memset(&size, 0, sizeof(size));
         size.ws_row = rows;
         size.ws_col = cols;
-        if (posix_eintr::retry<int>([&]() { return ioctl(input_write_.get(), TIOCSWINSZ, &size); }) != 0) {
+        if (posix_fd::ioctl_retry(input_write_.get(), TIOCSWINSZ, &size) != 0) {
             throw std::runtime_error(std::string("ioctl(TIOCSWINSZ) failed: ") + safe_strerror(errno));
         }
     }
@@ -502,8 +476,7 @@ public:
             wait_until_readable(read_fd);
         }
         while (block || readable_now(read_fd)) {
-            const ssize_t read_count =
-                posix_eintr::retry<ssize_t>([&]() { return read(read_fd, buffer, sizeof(buffer)); });
+            const ssize_t read_count = posix_fd::read_retry(read_fd, buffer, sizeof(buffer));
             if (read_count > 0) {
                 raw.append(buffer, static_cast<std::size_t>(read_count));
                 block = false;
@@ -628,23 +601,23 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
 
     if (tty) {
         PosixPtyPair pty = create_posix_pty();
-        const pid_t pid = fork();
+        const pid_t pid = posix_process::fork_process();
         if (pid < 0) {
             throw std::runtime_error(std::string("fork failed: ") + safe_strerror(errno));
         }
 
         if (pid == 0) {
             setsid();
-            const int slave_fd = posix_eintr::retry<int>([&]() { return open(pty.slave_path.c_str(), O_RDWR); });
+            const int slave_fd = posix_fd::open_path(pty.slave_path.c_str(), O_RDWR);
             if (slave_fd < 0) {
                 _exit(126);
             }
 #ifdef TIOCSCTTY
-            (void)posix_eintr::retry<int>([&]() { return ioctl(slave_fd, TIOCSCTTY, 0); });
+            (void)posix_fd::ioctl_retry(slave_fd, TIOCSCTTY, 0);
 #endif
-            if (posix_eintr::retry<int>([&]() { return dup2(slave_fd, STDIN_FILENO); }) < 0 ||
-                posix_eintr::retry<int>([&]() { return dup2(slave_fd, STDOUT_FILENO); }) < 0 ||
-                posix_eintr::retry<int>([&]() { return dup2(slave_fd, STDERR_FILENO); }) < 0) {
+            if (posix_fd::dup_to(slave_fd, STDIN_FILENO) < 0 ||
+                posix_fd::dup_to(slave_fd, STDOUT_FILENO) < 0 ||
+                posix_fd::dup_to(slave_fd, STDERR_FILENO) < 0) {
                 _exit(126);
             }
             if (slave_fd > STDERR_FILENO) {
@@ -660,18 +633,18 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     PosixPipePair stdout_pipe = create_posix_pipe("pipe(stdout)");
     UniqueFd stdin_null = open_dev_null_read();
 
-    const pid_t pid = fork();
+    const pid_t pid = posix_process::fork_process();
     if (pid < 0) {
         throw std::runtime_error(std::string("fork failed: ") + safe_strerror(errno));
     }
 
     if (pid == 0) {
-        if (posix_eintr::retry<int>([]() { return setpgid(0, 0); }) != 0) {
+        if (posix_process::set_process_group(0, 0) != 0) {
             _exit(126);
         }
-        if (posix_eintr::retry<int>([&]() { return dup2(stdin_null.get(), STDIN_FILENO); }) < 0 ||
-            posix_eintr::retry<int>([&]() { return dup2(stdout_pipe.write_end.get(), STDOUT_FILENO); }) < 0 ||
-            posix_eintr::retry<int>([&]() { return dup2(stdout_pipe.write_end.get(), STDERR_FILENO); }) < 0) {
+        if (posix_fd::dup_to(stdin_null.get(), STDIN_FILENO) < 0 ||
+            posix_fd::dup_to(stdout_pipe.write_end.get(), STDOUT_FILENO) < 0 ||
+            posix_fd::dup_to(stdout_pipe.write_end.get(), STDERR_FILENO) < 0) {
             _exit(126);
         }
 
@@ -681,7 +654,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
         exec_shell_child(exec_argv, executable_path, exec_environment, workdir);
     }
 
-    posix_eintr::retry<int>([&]() { return setpgid(pid, pid); });
+    posix_process::set_process_group(pid, pid);
     stdin_null.reset();
     stdout_pipe.write_end.reset();
 

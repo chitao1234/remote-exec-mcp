@@ -4,18 +4,16 @@
 #include <cstring>
 #include <stdexcept>
 #include <string>
-#include <unistd.h>
 
-#include "platform/posix_eintr.h"
 #include "platform/posix_fd.h"
 #include "platform/wakeup_pipe.h"
 
 WakeupPipe::WakeupPipe() : read_end_(INVALID_SOCKET), write_end_(INVALID_SOCKET), signaled_(false) {
     int fds[2];
-    if (posix_eintr::retry<int>([&]() { return pipe(fds); }) != 0) {
+    if (posix_fd::create_cloexec_pipe(fds) != 0) {
         throw std::runtime_error(std::string("wakeup pipe creation failed: ") + std::strerror(errno));
     }
-    if (!posix_fd::set_cloexec_nonblocking(fds[0]) || !posix_fd::set_cloexec_nonblocking(fds[1])) {
+    if (!posix_fd::set_nonblocking(fds[0]) || !posix_fd::set_nonblocking(fds[1])) {
         posix_fd::close_ignoring_errors(fds[0]);
         posix_fd::close_ignoring_errors(fds[1]);
         throw std::runtime_error(std::string("wakeup pipe fcntl failed: ") + std::strerror(errno));

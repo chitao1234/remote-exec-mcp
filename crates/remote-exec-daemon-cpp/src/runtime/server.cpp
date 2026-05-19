@@ -31,21 +31,19 @@ volatile sig_atomic_t g_shutdown_requested = 0;
 
 void shutdown_signal_handler(int) {
     g_shutdown_requested = 1;
-    const char byte = 1;
     if (g_shutdown_pipe_write >= 0) {
-        ssize_t ignored = write(g_shutdown_pipe_write, &byte, 1);
-        (void)ignored;
+        posix_fd::write_signal_safe_wakeup_byte(g_shutdown_pipe_write);
     }
 }
 
 bool install_shutdown_signal_handlers() {
     int fds[2];
-    if (posix_eintr::retry<int>([&]() { return pipe(fds); }) != 0) {
+    if (posix_fd::create_cloexec_pipe(fds) != 0) {
         return false;
     }
     g_shutdown_pipe_read = fds[0];
     g_shutdown_pipe_write = fds[1];
-    if (!posix_fd::set_cloexec_nonblocking(fds[0]) || !posix_fd::set_cloexec_nonblocking(fds[1])) {
+    if (!posix_fd::set_nonblocking(fds[0]) || !posix_fd::set_nonblocking(fds[1])) {
         posix_fd::close_ignoring_errors(fds[0]);
         posix_fd::close_ignoring_errors(fds[1]);
         g_shutdown_pipe_read = -1;
