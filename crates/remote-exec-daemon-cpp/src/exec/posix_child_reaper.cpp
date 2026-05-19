@@ -5,7 +5,6 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
-#include <csignal>
 #include <cstring>
 #include <map>
 #include <set>
@@ -23,6 +22,7 @@
 #include "platform/posix_eintr.h"
 #include "platform/posix_fd.h"
 #include "platform/posix_process.h"
+#include "platform/posix_signal.h"
 
 namespace {
 
@@ -126,12 +126,7 @@ void install_posix_child_reaper() {
     (void)posix_fd::set_nonblocking(g_signal_pipe_read);
     (void)posix_fd::set_nonblocking(g_signal_pipe_write);
 
-    struct sigaction action;
-    std::memset(&action, 0, sizeof(action));
-    action.sa_handler = sigchld_handler;
-    sigemptyset(&action.sa_mask);
-    action.sa_flags = SA_RESTART | SA_NOCLDSTOP;
-    if (sigaction(SIGCHLD, &action, nullptr) != 0) {
+    if (posix_signal::install_handler(SIGCHLD, sigchld_handler, SA_RESTART | SA_NOCLDSTOP) != 0) {
         throw std::runtime_error(std::string("sigaction(SIGCHLD) failed: ") + std::strerror(errno));
     }
 

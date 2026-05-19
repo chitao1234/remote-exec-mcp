@@ -1,11 +1,10 @@
 #include <cstdio>
-#include <cstring>
 #include <stdexcept>
 #include <string>
 
 #ifndef _WIN32
 #include <poll.h>
-#include <signal.h>
+#include <csignal>
 #include <unistd.h>
 #endif
 
@@ -16,6 +15,7 @@
 #include "platform/posix_eintr.h"
 #include "exec/posix_child_reaper.h"
 #include "platform/posix_fd.h"
+#include "platform/posix_signal.h"
 #endif
 #include "platform/scoped_file.h"
 #include "runtime/server.h"
@@ -51,12 +51,8 @@ bool install_shutdown_signal_handlers() {
         return false;
     }
 
-    struct sigaction sa;
-    std::memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = shutdown_signal_handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    if (sigaction(SIGTERM, &sa, nullptr) != 0 || sigaction(SIGINT, &sa, nullptr) != 0) {
+    if (posix_signal::install_handler(SIGTERM, shutdown_signal_handler, 0) != 0 ||
+        posix_signal::install_handler(SIGINT, shutdown_signal_handler, 0) != 0) {
         posix_fd::close_ignoring_errors(fds[0]);
         posix_fd::close_ignoring_errors(fds[1]);
         g_shutdown_pipe_read = -1;

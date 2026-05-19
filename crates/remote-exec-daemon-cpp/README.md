@@ -19,6 +19,44 @@ shape. Current live behavior is documented here and in the repository root
 `README.md`. The dated material under the top-level `docs/` tree is historical
 implementation detail, not the current contract.
 
+## Architecture Boundaries
+
+The C++ daemon is split by ownership rather than by build target:
+
+- `platform/` owns raw OS primitives, compatibility fallbacks, fd/handle/socket
+  wrappers, EINTR retry policy, close-on-exec and inheritance behavior, wakeup
+  helpers, monotonic waits, PTY probes, process waits, and signal installation.
+- `runtime/` owns daemon lifecycle, accept/maintenance workers, connection
+  accounting, shutdown propagation, and daemon-owned thread joins.
+- `http/` owns request parsing, body streams, response rendering, upgrade
+  mechanics, and transport lifetime.
+- `rpc/` owns route dispatch, request validation, typed error translation, and
+  capability response shaping.
+- `policy/` owns path comparison and sandbox evaluation.
+- `exec/`, `transfer/`, and `port_forward/` own their feature behavior and use
+  the lower layers instead of touching raw OS calls directly.
+
+Feature code should not call raw blocking OS APIs such as `read`, `write`,
+`recv`, `send`, `accept`, `connect`, `poll`, `select`, `waitpid`,
+`pthread_cond_*`, `fcntl`, `open`, `pipe`, `sigaction`, `kill`, `execve`,
+`fork`, `bind`, `listen`, `setsockopt`, `getsockname`, `ioctl`, filesystem
+mutation calls, or Win32 wait/process/socket primitives when a platform wrapper
+exists. If a new raw OS call is required, add the wrapper or fallback in
+`platform/` first, then call that wrapper from the feature module.
+
+The POSIX design intentionally does not use `openat`. Path authorization must
+therefore be complete and consistent for every materialized path, but it must
+not be described as race-free filesystem security. Recursive transfer import,
+export, replacement, and cleanup code must authorize the concrete path it is
+about to open, remove, create, or rename.
+
+Port forwarding has stricter ownership rules because it is reconnect-aware.
+`PortTunnelService` owns global limits and the retained session map,
+`PortTunnelSession` owns retained session state and retained resources,
+`PortTunnelConnection` owns one upgraded tunnel connection and connection-local
+streams, and the resource objects own their sockets and budget leases. Close
+work should be returned to callers and performed outside unrelated locks.
+
 ## Build
 
 Build outputs are written to this directory's `build/` tree even when `make` is
