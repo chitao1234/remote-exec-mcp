@@ -247,11 +247,7 @@ int send_port_forward_datagram(SOCKET socket,
 }
 
 void shutdown_port_forward_send(SOCKET socket) {
-#ifdef _WIN32
-    shutdown(socket, SD_SEND);
-#else
-    shutdown(socket, SHUT_WR);
-#endif
+    shutdown_socket_send(socket);
 }
 
 int wait_socket_readable(SOCKET socket, unsigned long timeout_ms) {

@@ -47,7 +47,11 @@ void close_socket(SOCKET socket) {
 }
 
 void shutdown_socket(SOCKET socket) {
-    shutdown(socket, SHUT_RDWR);
+    (void)posix_eintr::retry<int>([&]() { return shutdown(socket, SHUT_RDWR); });
+}
+
+void shutdown_socket_send(SOCKET socket) {
+    (void)posix_eintr::retry<int>([&]() { return shutdown(socket, SHUT_WR); });
 }
 
 bool set_socket_cloexec(SOCKET socket) {

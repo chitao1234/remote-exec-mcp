@@ -33,6 +33,10 @@ void shutdown_socket(SOCKET socket) {
     shutdown(socket, SD_BOTH);
 }
 
+void shutdown_socket_send(SOCKET socket) {
+    shutdown(socket, SD_SEND);
+}
+
 bool set_socket_cloexec(SOCKET socket) {
     (void)socket;
     return true;

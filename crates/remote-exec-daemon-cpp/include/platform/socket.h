@@ -50,6 +50,7 @@ int send_bounded(SOCKET client, const char* data, std::size_t remaining, int fla
 std::string socket_error_message(const std::string& operation);
 void close_socket(SOCKET socket);
 void shutdown_socket(SOCKET socket);
+void shutdown_socket_send(SOCKET socket);
 bool set_socket_cloexec(SOCKET socket);
 SOCKET create_socket_cloexec(int family, int type, int protocol);
 void set_socket_timeout_ms(SOCKET socket, unsigned long timeout_ms);
