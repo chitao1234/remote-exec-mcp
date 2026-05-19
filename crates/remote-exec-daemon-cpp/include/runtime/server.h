@@ -6,7 +6,7 @@
 #include "core/config.h"
 #include "policy/filesystem_sandbox.h"
 #include "platform/socket.h"
-#include "session_store.h"
+#include "exec/session_store.h"
 
 class PortTunnelService;
 

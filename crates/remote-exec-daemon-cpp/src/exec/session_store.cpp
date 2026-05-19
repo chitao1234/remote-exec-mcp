@@ -7,12 +7,12 @@
 #include "core/logging.h"
 #include "output_renderer.h"
 #include "platform/platform.h"
-#include "process_session.h"
+#include "exec/process_session.h"
 #include "rpc/exec_request_utils.h"
-#include "session_pump.h"
+#include "exec/session_pump.h"
 #include "session_pump_internal.h"
 #include "session_response_builder.h"
-#include "session_store.h"
+#include "exec/session_store.h"
 
 void erase_session_if_current(BasicMutex& mutex,
                               std::map<std::string, std::shared_ptr<LiveSession>>& sessions,

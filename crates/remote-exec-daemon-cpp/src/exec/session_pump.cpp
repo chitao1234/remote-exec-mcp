@@ -1,4 +1,4 @@
-#include "session_pump.h"
+#include "exec/session_pump.h"
 
 #include <algorithm>
 #include <stdexcept>
@@ -7,7 +7,7 @@
 #include "runtime/daemon_thread.h"
 #include "core/logging.h"
 #include "platform/platform.h"
-#include "process_session.h"
+#include "exec/process_session.h"
 #include "session_pump_internal.h"
 #ifdef _WIN32
 #include "platform/win32_thread.h"

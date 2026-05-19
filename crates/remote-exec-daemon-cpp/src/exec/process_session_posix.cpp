@@ -21,10 +21,10 @@
 
 #include "platform/basic_mutex.h"
 #include "platform/platform.h"
-#include "posix_child_reaper.h"
+#include "exec/posix_child_reaper.h"
 #include "platform/posix_eintr.h"
 #include "platform/posix_fd.h"
-#include "process_session.h"
+#include "exec/process_session.h"
 
 #if defined(__GNUC__)
 extern "C" int posix_openpt(int flags) __attribute__((weak));

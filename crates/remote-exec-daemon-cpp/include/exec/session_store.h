@@ -8,7 +8,7 @@
 #include "platform/basic_mutex.h"
 #include "core/config.h"
 #include "http/http_helpers.h"
-#include "live_session.h"
+#include "exec/live_session.h"
 
 static constexpr unsigned long DEFAULT_MAX_OUTPUT_TOKENS = 10000UL;
 

@@ -4,7 +4,7 @@
 
 #include <windows.h>
 
-#include "console_output.h"
+#include "exec/console_output.h"
 #include "platform/win32_error.h"
 
 namespace {

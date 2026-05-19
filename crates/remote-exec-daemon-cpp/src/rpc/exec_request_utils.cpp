@@ -2,7 +2,7 @@
 
 #include "http/http_helpers.h"
 #include "platform/platform.h"
-#include "process_session.h"
+#include "exec/process_session.h"
 #include "runtime/server.h"
 #include "rpc/server_request_utils.h"
 

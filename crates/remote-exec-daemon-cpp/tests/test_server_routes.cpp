@@ -5,7 +5,7 @@
 
 #include "http/http_helpers.h"
 #include "platform/platform.h"
-#include "process_session.h"
+#include "exec/process_session.h"
 #include "rpc/server_routes.h"
 #include "test_server_routes_shared.h"
 

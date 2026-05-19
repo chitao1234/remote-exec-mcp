@@ -1,6 +1,6 @@
 #include "rpc/daemon_capabilities.h"
 
-#include "process_session.h"
+#include "exec/process_session.h"
 #include "rpc/server_contract.h"
 
 DaemonCapabilities detect_daemon_capabilities() {

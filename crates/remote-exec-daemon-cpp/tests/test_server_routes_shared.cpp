@@ -13,7 +13,7 @@
 #include "platform/platform.h"
 #include "port_forward_endpoint.h"
 #include "port_tunnel.h"
-#include "process_session.h"
+#include "exec/process_session.h"
 #include "rpc/server_contract.h"
 #include "rpc/server_routes.h"
 #include "test_contract_fixtures.h"

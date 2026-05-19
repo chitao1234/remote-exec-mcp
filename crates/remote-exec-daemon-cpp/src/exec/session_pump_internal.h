@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-#include "live_session.h"
+#include "exec/live_session.h"
 
 struct SessionOutputDrainPolicy {
     // After parent exit, drain descendant-held stdout/stderr until idle or max

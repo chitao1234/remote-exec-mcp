@@ -17,10 +17,10 @@
 #include "platform/platform.h"
 #include "rpc/server_request_utils.h"
 #ifndef _WIN32
-#include "posix_child_reaper.h"
+#include "exec/posix_child_reaper.h"
 #endif
-#include "process_session.h"
-#include "session_store.h"
+#include "exec/process_session.h"
+#include "exec/session_store.h"
 #include "test_filesystem.h"
 #include "test_text_file.h"
 

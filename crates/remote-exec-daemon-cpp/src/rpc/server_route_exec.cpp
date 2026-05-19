@@ -2,7 +2,7 @@
 
 #include "rpc/exec_request_utils.h"
 #include "core/logging.h"
-#include "process_session.h"
+#include "exec/process_session.h"
 #include "rpc/server_route_common.h"
 #include "rpc/server_route_exec.h"
 

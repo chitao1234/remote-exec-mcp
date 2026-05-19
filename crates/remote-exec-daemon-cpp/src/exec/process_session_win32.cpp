@@ -9,9 +9,9 @@
 #include <windows.h>
 #include <winsock2.h>
 
-#include "console_output.h"
+#include "exec/console_output.h"
 #include "platform/platform.h"
-#include "process_session.h"
+#include "exec/process_session.h"
 #include "platform/win32_error.h"
 #include "platform/win32_scoped.h"
 

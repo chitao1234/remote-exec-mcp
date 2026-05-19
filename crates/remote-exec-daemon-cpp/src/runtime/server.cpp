@@ -14,7 +14,7 @@
 #include "platform/platform.h"
 #ifndef _WIN32
 #include "platform/posix_eintr.h"
-#include "posix_child_reaper.h"
+#include "exec/posix_child_reaper.h"
 #include "platform/posix_fd.h"
 #endif
 #include "platform/scoped_file.h"
