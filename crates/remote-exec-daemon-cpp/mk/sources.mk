@@ -83,6 +83,7 @@ PORT_FORWARD_SRCS = \
 	$(SOURCE_PREFIX)src/port_forward/port_tunnel_transport.cpp \
 	$(SOURCE_PREFIX)src/port_forward/port_tunnel_tcp.cpp \
 	$(SOURCE_PREFIX)src/port_forward/port_tunnel_udp.cpp \
+	$(SOURCE_PREFIX)src/port_forward/port_tunnel_workers.cpp \
 	$(SOURCE_PREFIX)src/port_forward/port_tunnel_error.cpp
 
 BASE64_SRCS = $(SOURCE_PREFIX)src/codec/base64_codec.cpp
