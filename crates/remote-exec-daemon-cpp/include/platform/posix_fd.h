@@ -114,11 +114,19 @@ inline int open_cloexec_path(const char* path, int flags) {
 }
 
 inline ssize_t read_retry(int fd, void* data, std::size_t size) {
-    return posix_eintr::retry<ssize_t>([&]() { return read(fd, data, size); });
+    ssize_t result;
+    do {
+        result = ::read(fd, data, size);
+    } while (result == static_cast<ssize_t>(-1) && errno == EINTR);
+    return result;
 }
 
 inline ssize_t write_retry(int fd, const void* data, std::size_t size) {
-    return posix_eintr::retry<ssize_t>([&]() { return write(fd, data, size); });
+    ssize_t result;
+    do {
+        result = ::write(fd, data, size);
+    } while (result == static_cast<ssize_t>(-1) && errno == EINTR);
+    return result;
 }
 
 inline int dup_to(int source_fd, int target_fd) {
@@ -256,9 +264,9 @@ inline int wait_until_readable_or_hangup(int fd) {
 }
 
 inline void write_signal_safe_wakeup_byte(int fd) {
-    const unsigned char byte = 1U;
+    const unsigned char wakeup_byte = 1U;
     // Async-signal-safe notification is best effort; do not loop in a handler.
-    const ssize_t ignored = write(fd, &byte, 1U);
+    const ssize_t ignored = ::write(fd, &wakeup_byte, 1U);
     (void)ignored;
 }
 

@@ -146,8 +146,8 @@ void shutdown_posix_child_reaper() {
     }
     g_stopping.store(true, std::memory_order_relaxed);
     if (g_signal_pipe_write >= 0) {
-        const char byte = 1;
-        ssize_t ignored = posix_fd::write_retry(g_signal_pipe_write, &byte, 1);
+        const char wakeup_byte = 1;
+        ssize_t ignored = posix_fd::write_retry(g_signal_pipe_write, &wakeup_byte, 1);
         (void)ignored;
     }
     if (g_reaper_thread != nullptr) {
