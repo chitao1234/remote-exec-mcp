@@ -3,7 +3,7 @@
 
 #include "port_tunnel_connection.h"
 #include "port_tunnel_service.h"
-#include "../runtime/daemon_thread.h"
+#include "runtime/daemon_thread.h"
 
 namespace {
 

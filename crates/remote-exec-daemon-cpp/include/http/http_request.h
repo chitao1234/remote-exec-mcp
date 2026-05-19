@@ -3,7 +3,7 @@
 #include <stdexcept>
 #include <string>
 
-#include "http_helpers.h"
+#include "http/http_helpers.h"
 
 class HttpParseError : public std::runtime_error {
 public:

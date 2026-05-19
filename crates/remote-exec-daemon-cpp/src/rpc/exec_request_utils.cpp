@@ -1,9 +1,9 @@
 #include "exec_request_utils.h"
 
-#include "http_helpers.h"
+#include "http/http_helpers.h"
 #include "platform/platform.h"
 #include "process_session.h"
-#include "server.h"
+#include "runtime/server.h"
 #include "server_request_utils.h"
 
 namespace {

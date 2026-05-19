@@ -1,4 +1,4 @@
-#include "server_runtime.h"
+#include "runtime/server_runtime.h"
 
 #include <cerrno>
 #include <cstring>
@@ -12,7 +12,7 @@
 #include <thread>
 #endif
 
-#include "daemon_thread.h"
+#include "runtime/daemon_thread.h"
 #include "core/logging.h"
 #include "path_policy.h"
 #include "platform/platform.h"

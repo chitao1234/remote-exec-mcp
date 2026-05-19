@@ -1,8 +1,8 @@
-#include "connection_manager.h"
+#include "runtime/connection_manager.h"
 
 #include <vector>
 
-#include "daemon_thread.h"
+#include "runtime/daemon_thread.h"
 
 namespace {
 

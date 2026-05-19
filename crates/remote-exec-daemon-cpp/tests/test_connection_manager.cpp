@@ -2,7 +2,7 @@
 #include "test_assert.h"
 #include <utility>
 
-#include "connection_manager.h"
+#include "runtime/connection_manager.h"
 #include "platform/platform.h"
 #include "test_socket_pair.h"
 

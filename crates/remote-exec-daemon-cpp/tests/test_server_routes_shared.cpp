@@ -8,7 +8,7 @@
 #include "base64_codec.h"
 #include "core/config.h"
 #include "filesystem_sandbox.h"
-#include "http_helpers.h"
+#include "http/http_helpers.h"
 #include "path_policy.h"
 #include "platform/platform.h"
 #include "port_forward_endpoint.h"

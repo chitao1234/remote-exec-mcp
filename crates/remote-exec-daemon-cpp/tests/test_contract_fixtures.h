@@ -3,7 +3,7 @@
 #include <stdexcept>
 #include <string>
 
-#include "http_helpers.h"
+#include "http/http_helpers.h"
 #include "test_filesystem.h"
 
 #ifdef _WIN32

@@ -1,7 +1,7 @@
 #include "transfer_request_utils.h"
 
 #include "path_policy.h"
-#include "server.h"
+#include "runtime/server.h"
 #include "server_request_utils.h"
 
 namespace {

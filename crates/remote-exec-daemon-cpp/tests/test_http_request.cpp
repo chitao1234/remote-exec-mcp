@@ -1,8 +1,8 @@
 #include "test_assert.h"
 #include <string>
 
-#include "http_helpers.h"
-#include "http_request.h"
+#include "http/http_helpers.h"
+#include "http/http_request.h"
 
 static void assert_rejects(const std::string& raw) {
     bool rejected = false;

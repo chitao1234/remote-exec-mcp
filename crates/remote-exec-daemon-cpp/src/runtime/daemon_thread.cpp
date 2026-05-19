@@ -1,4 +1,4 @@
-#include "daemon_thread.h"
+#include "runtime/daemon_thread.h"
 
 #ifdef _WIN32
 void consume_daemon_thread(HANDLE* thread, DWORD thread_id) {

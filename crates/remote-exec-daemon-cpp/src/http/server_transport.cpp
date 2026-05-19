@@ -14,12 +14,12 @@
 #include <sys/socket.h>
 #endif
 
-#include "http_codec.h"
-#include "http_request.h"
+#include "http/http_codec.h"
+#include "http/http_request.h"
 #ifndef _WIN32
 #include "platform/posix_eintr.h"
 #endif
-#include "server_transport.h"
+#include "http/server_transport.h"
 #include "server_transport_internal.h"
 
 std::size_t bounded_socket_io_size(std::size_t remaining) {

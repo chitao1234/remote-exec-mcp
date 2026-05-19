@@ -4,17 +4,17 @@
 #include <string>
 #include <vector>
 
-#include "http_helpers.h"
-#include "http_request.h"
+#include "http/http_helpers.h"
+#include "http/http_request.h"
 #include "core/logging.h"
 #include "platform/platform.h"
 #include "port_tunnel.h"
 #include "server_contract.h"
-#include "server.h"
+#include "runtime/server.h"
 #include "server_request_utils.h"
 #include "server_route_common.h"
 #include "server_routes.h"
-#include "server_transport.h"
+#include "http/server_transport.h"
 #include "core/text_utils.h"
 #include "transfer_http_codec.h"
 #include "transfer_ops.h"

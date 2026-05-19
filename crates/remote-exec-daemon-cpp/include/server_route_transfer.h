@@ -1,7 +1,7 @@
 #pragma once
 
-#include "http_helpers.h"
-#include "server.h"
+#include "http/http_helpers.h"
+#include "runtime/server.h"
 
 HttpResponse handle_transfer_export(AppState& state, const HttpRequest& request);
 HttpResponse handle_transfer_path_info(AppState& state, const HttpRequest& request);

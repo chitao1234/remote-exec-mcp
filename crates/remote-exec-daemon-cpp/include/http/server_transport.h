@@ -12,7 +12,7 @@ const int INVALID_SOCKET = -1;
 #endif
 
 #include "core/config.h"
-#include "http_codec.h"
+#include "http/http_codec.h"
 
 class BadHttpRequest : public std::runtime_error {
 public:

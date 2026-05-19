@@ -11,7 +11,7 @@
 #include <sys/types.h>
 #endif
 
-#include "server_transport.h"
+#include "http/server_transport.h"
 
 SOCKET bind_port_forward_socket(const std::string& endpoint, const std::string& protocol);
 void set_socket_nonblocking(SOCKET socket, bool enabled);

@@ -3,7 +3,7 @@
 #include <string>
 #include <thread>
 
-#include "http_helpers.h"
+#include "http/http_helpers.h"
 #include "platform/platform.h"
 #include "process_session.h"
 #include "server_routes.h"

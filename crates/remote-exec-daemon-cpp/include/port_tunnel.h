@@ -3,8 +3,8 @@
 #include <memory>
 
 #include "core/config.h"
-#include "http_helpers.h"
-#include "server.h"
+#include "http/http_helpers.h"
+#include "runtime/server.h"
 
 class PortTunnelService;
 

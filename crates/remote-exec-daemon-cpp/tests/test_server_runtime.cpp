@@ -14,7 +14,7 @@
 #endif
 
 #include "platform/platform.h"
-#include "server_runtime.h"
+#include "runtime/server_runtime.h"
 #include "test_filesystem.h"
 
 namespace fs = test_fs;

@@ -10,14 +10,14 @@
 #include <winsock2.h>
 #endif
 
-#include "http_helpers.h"
+#include "http/http_helpers.h"
 #include "core/logging.h"
 #include "platform/platform.h"
 #include "port_forward_endpoint.h"
 #include "port_forward_error.h"
 #include "port_forward_socket_ops.h"
 #include "port_tunnel_frame.h"
-#include "server_transport.h"
+#include "http/server_transport.h"
 #include "core/text_utils.h"
 #ifdef _WIN32
 #include "platform/win32_thread.h"

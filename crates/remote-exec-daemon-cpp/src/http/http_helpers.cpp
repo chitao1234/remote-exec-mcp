@@ -2,7 +2,7 @@
 #include <sstream>
 #include <stdexcept>
 
-#include "http_helpers.h"
+#include "http/http_helpers.h"
 
 namespace {
 

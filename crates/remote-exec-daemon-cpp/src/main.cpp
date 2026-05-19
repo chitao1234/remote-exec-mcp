@@ -3,7 +3,7 @@
 
 #include "core/config.h"
 #include "core/logging.h"
-#include "server.h"
+#include "runtime/server.h"
 
 int main(int argc, char** argv) {
     init_logging();

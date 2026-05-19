@@ -7,14 +7,14 @@
 #include <vector>
 
 #include "core/config.h"
-#include "http_helpers.h"
+#include "http/http_helpers.h"
 #include "platform/platform.h"
 #include "port_forward_endpoint.h"
 #include "port_forward_socket_ops.h"
 #include "port_tunnel.h"
 #include "port_tunnel_frame.h"
-#include "server.h"
-#include "server_transport.h"
+#include "runtime/server.h"
+#include "http/server_transport.h"
 #include "test_assert.h"
 #include "test_filesystem.h"
 #include "test_server_routes_shared.h"

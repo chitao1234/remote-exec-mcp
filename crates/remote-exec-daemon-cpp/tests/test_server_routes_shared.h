@@ -2,7 +2,7 @@
 
 #include <string>
 
-#include "server.h"
+#include "runtime/server.h"
 #include "test_filesystem.h"
 
 test_fs::path make_server_routes_test_root(const std::string& directory_name);

@@ -5,8 +5,8 @@
 #include <thread>
 #endif
 
-#include "connection_manager.h"
-#include "server.h"
+#include "runtime/connection_manager.h"
+#include "runtime/server.h"
 #include "platform/wakeup_pipe.h"
 
 class ServerRuntime {

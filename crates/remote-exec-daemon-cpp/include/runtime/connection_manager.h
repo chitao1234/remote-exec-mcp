@@ -12,7 +12,7 @@
 #endif
 
 #include "platform/basic_mutex.h"
-#include "server_transport.h"
+#include "http/server_transport.h"
 #ifdef _WIN32
 #include "platform/win32_thread.h"
 #endif

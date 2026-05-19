@@ -2,9 +2,9 @@
 
 #include <string>
 
-#include "http_helpers.h"
+#include "http/http_helpers.h"
 #include "core/logging.h"
-#include "server.h"
+#include "runtime/server.h"
 
 HttpResponse make_rpc_error_response(int status, const std::string& code, const std::string& message);
 HttpResponse handle_health(const AppState& state);

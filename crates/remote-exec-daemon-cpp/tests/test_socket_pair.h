@@ -11,7 +11,7 @@
 #include <sys/socket.h>
 #endif
 
-#include "server_transport.h"
+#include "http/server_transport.h"
 
 struct ConnectedSocketPair {
     ConnectedSocketPair(UniqueSocket first_socket, UniqueSocket second_socket)

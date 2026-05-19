@@ -18,8 +18,8 @@
 #include "platform/posix_fd.h"
 #endif
 #include "platform/scoped_file.h"
-#include "server.h"
-#include "server_runtime.h"
+#include "runtime/server.h"
+#include "runtime/server_runtime.h"
 #include "../core/stdio_retry.h"
 
 #ifndef _WIN32

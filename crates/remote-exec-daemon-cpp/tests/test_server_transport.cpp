@@ -6,8 +6,8 @@
 #include <stdexcept>
 #include <utility>
 
-#include "http_request.h"
-#include "server_transport.h"
+#include "http/http_request.h"
+#include "http/server_transport.h"
 #include "test_socket_pair.h"
 
 int main() {

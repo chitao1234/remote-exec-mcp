@@ -4,9 +4,9 @@
 
 #include "exec_request_utils.h"
 #include "filesystem_sandbox.h"
-#include "http_helpers.h"
+#include "http/http_helpers.h"
 #include "patch_engine.h"
-#include "server.h"
+#include "runtime/server.h"
 
 bool reject_before_route(const AppState& state, const HttpRequest& request, HttpResponse* response);
 std::string resolve_workdir(const AppState& state, const Json& body);

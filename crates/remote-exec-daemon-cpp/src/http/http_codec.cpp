@@ -3,7 +3,7 @@
 #include <map>
 #include <string>
 
-#include "http_codec.h"
+#include "http/http_codec.h"
 #include "core/text_utils.h"
 
 namespace {

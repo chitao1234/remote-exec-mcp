@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-#include "http_helpers.h"
+#include "http/http_helpers.h"
 
 Json build_session_response(const char* daemon_session_id,
                             bool running,
