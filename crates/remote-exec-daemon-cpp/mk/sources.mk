@@ -75,6 +75,7 @@ PORT_FORWARD_SRCS = \
 	$(SOURCE_PREFIX)src/port_forward/port_tunnel_sender.cpp \
 	$(SOURCE_PREFIX)src/port_forward/port_tunnel_service.cpp \
 	$(SOURCE_PREFIX)src/port_forward/port_tunnel_session.cpp \
+	$(SOURCE_PREFIX)src/port_forward/port_tunnel_session_teardown.cpp \
 	$(SOURCE_PREFIX)src/port_forward/port_tunnel_spawn.cpp \
 	$(SOURCE_PREFIX)src/port_forward/port_tunnel_streams.cpp \
 	$(SOURCE_PREFIX)src/port_forward/port_tunnel_transport.cpp \
