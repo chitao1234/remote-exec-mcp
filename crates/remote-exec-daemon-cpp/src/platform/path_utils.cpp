@@ -1,4 +1,4 @@
-#include "path_utils.h"
+#include "platform/path_utils.h"
 
 #include <algorithm>
 #include <cstring>
@@ -17,7 +17,7 @@
 #endif
 
 #ifndef _WIN32
-#include "posix_eintr.h"
+#include "platform/posix_eintr.h"
 #endif
 
 namespace path_utils {

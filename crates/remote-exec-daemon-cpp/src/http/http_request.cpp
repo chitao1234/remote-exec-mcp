@@ -7,7 +7,7 @@
 
 #include "http_codec.h"
 #include "http_request.h"
-#include "text_utils.h"
+#include "core/text_utils.h"
 
 namespace {
 

@@ -2,7 +2,7 @@
 
 #include <ws2tcpip.h>
 
-#include "wakeup_pipe.h"
+#include "platform/wakeup_pipe.h"
 
 WakeupPipe::WakeupPipe() : read_end_(INVALID_SOCKET), write_end_(INVALID_SOCKET), signaled_(false) {
     SOCKET listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);

@@ -3,8 +3,8 @@
 
 #include <windows.h>
 
-#include "path_utils.h"
-#include "win32_error.h"
+#include "platform/path_utils.h"
+#include "platform/win32_error.h"
 
 namespace {
 

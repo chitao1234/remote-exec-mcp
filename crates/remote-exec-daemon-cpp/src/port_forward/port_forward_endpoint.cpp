@@ -4,7 +4,7 @@
 #include <sstream>
 
 #include "port_forward_error.h"
-#include "text_utils.h"
+#include "core/text_utils.h"
 
 namespace {
 

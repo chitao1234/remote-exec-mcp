@@ -13,7 +13,7 @@
 #include <sys/socket.h>
 #endif
 
-#include "platform.h"
+#include "platform/platform.h"
 #include "server_runtime.h"
 #include "test_filesystem.h"
 

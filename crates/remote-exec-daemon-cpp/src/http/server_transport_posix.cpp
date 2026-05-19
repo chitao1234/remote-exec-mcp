@@ -10,8 +10,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "posix_eintr.h"
-#include "posix_fd.h"
+#include "platform/posix_eintr.h"
+#include "platform/posix_fd.h"
 #include "server_transport.h"
 #include "server_transport_internal.h"
 

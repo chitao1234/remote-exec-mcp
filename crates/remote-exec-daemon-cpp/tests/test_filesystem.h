@@ -18,7 +18,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #endif
-#include "scoped_file.h"
+#include "platform/scoped_file.h"
 
 namespace test_fs {
 

@@ -2,7 +2,7 @@
 #include <cctype>
 #include <string>
 
-#include "text_utils.h"
+#include "core/text_utils.h"
 
 bool is_http_token_char(char ch) {
     const unsigned char value = static_cast<unsigned char>(ch);

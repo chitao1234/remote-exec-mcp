@@ -11,16 +11,16 @@
 #endif
 
 #include "http_helpers.h"
-#include "logging.h"
-#include "platform.h"
+#include "core/logging.h"
+#include "platform/platform.h"
 #include "port_forward_endpoint.h"
 #include "port_forward_error.h"
 #include "port_forward_socket_ops.h"
 #include "port_tunnel_frame.h"
 #include "server_transport.h"
-#include "text_utils.h"
+#include "core/text_utils.h"
 #ifdef _WIN32
-#include "win32_thread.h"
+#include "platform/win32_thread.h"
 #endif
 
 extern const std::size_t READ_BUFFER_SIZE;

@@ -1,4 +1,4 @@
-#include "basic_mutex.h"
+#include "platform/basic_mutex.h"
 
 BasicMutex::BasicMutex() {
     InitializeCriticalSection(&mutex_);

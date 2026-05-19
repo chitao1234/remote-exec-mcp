@@ -3,7 +3,7 @@
 #include <memory>
 #include <string>
 
-#include "config.h"
+#include "core/config.h"
 #include "filesystem_sandbox.h"
 #include "server_transport.h"
 #include "session_store.h"

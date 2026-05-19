@@ -1,8 +1,8 @@
 #include <cstdio>
 #include <exception>
 
-#include "config.h"
-#include "logging.h"
+#include "core/config.h"
+#include "core/logging.h"
 #include "server.h"
 
 int main(int argc, char** argv) {

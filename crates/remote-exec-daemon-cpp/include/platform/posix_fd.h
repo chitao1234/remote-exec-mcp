@@ -5,7 +5,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#include "posix_eintr.h"
+#include "platform/posix_eintr.h"
 
 namespace posix_fd {
 

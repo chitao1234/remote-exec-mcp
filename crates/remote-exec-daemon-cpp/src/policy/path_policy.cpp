@@ -3,7 +3,7 @@
 #include <string>
 
 #include "path_policy.h"
-#include "text_utils.h"
+#include "core/text_utils.h"
 
 namespace {
 

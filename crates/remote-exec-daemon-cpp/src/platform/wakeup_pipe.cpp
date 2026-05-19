@@ -6,9 +6,9 @@
 #include <string>
 #include <unistd.h>
 
-#include "posix_eintr.h"
-#include "posix_fd.h"
-#include "wakeup_pipe.h"
+#include "platform/posix_eintr.h"
+#include "platform/posix_fd.h"
+#include "platform/wakeup_pipe.h"
 
 WakeupPipe::WakeupPipe() : read_end_(INVALID_SOCKET), write_end_(INVALID_SOCKET), signaled_(false) {
     int fds[2];

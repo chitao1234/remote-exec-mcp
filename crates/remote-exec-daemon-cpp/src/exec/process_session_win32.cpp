@@ -10,10 +10,10 @@
 #include <winsock2.h>
 
 #include "console_output.h"
-#include "platform.h"
+#include "platform/platform.h"
 #include "process_session.h"
-#include "win32_error.h"
-#include "win32_scoped.h"
+#include "platform/win32_error.h"
+#include "platform/win32_scoped.h"
 
 namespace {
 

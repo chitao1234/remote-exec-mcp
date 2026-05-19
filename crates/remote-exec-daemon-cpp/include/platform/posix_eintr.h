@@ -9,7 +9,7 @@
 #include <netdb.h>
 #include <poll.h>
 
-#include "platform.h"
+#include "platform/platform.h"
 
 namespace posix_eintr {
 

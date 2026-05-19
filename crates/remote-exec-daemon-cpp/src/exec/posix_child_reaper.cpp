@@ -18,10 +18,10 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "basic_mutex.h"
-#include "logging.h"
-#include "posix_eintr.h"
-#include "posix_fd.h"
+#include "platform/basic_mutex.h"
+#include "core/logging.h"
+#include "platform/posix_eintr.h"
+#include "platform/posix_fd.h"
 
 namespace {
 

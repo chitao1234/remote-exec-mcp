@@ -6,9 +6,9 @@
 #include <thread>
 #include <vector>
 
-#include "config.h"
+#include "core/config.h"
 #include "http_helpers.h"
-#include "platform.h"
+#include "platform/platform.h"
 #include "port_forward_endpoint.h"
 #include "port_forward_socket_ops.h"
 #include "port_tunnel.h"

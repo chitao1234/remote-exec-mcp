@@ -2,7 +2,7 @@
 #include <string>
 
 #include "base64_codec.h"
-#include "logging.h"
+#include "core/logging.h"
 #include "rpc_failures.h"
 #include "server_contract.h"
 #include "transfer_http_codec.h"

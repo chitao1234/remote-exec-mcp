@@ -13,8 +13,8 @@
 #include <sys/time.h>
 #endif
 
-#include "logging.h"
-#include "text_utils.h"
+#include "core/logging.h"
+#include "core/text_utils.h"
 
 static bool parse_level_token(const std::string& raw, LogLevel* level) {
     const std::string token = lowercase_ascii(trim_ascii(raw));

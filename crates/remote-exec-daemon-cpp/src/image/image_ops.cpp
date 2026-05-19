@@ -6,9 +6,9 @@
 #include <string>
 #include <sys/stat.h>
 
-#include "path_utils.h"
+#include "platform/path_utils.h"
 #include "rpc_failures.h"
-#include "scoped_file.h"
+#include "platform/scoped_file.h"
 #include "../core/stdio_retry.h"
 
 namespace {

@@ -16,12 +16,12 @@
 #include <unistd.h>
 #endif
 
-#include "path_utils.h"
-#include "platform.h"
+#include "platform/path_utils.h"
+#include "platform/platform.h"
 #ifndef _WIN32
-#include "posix_eintr.h"
+#include "platform/posix_eintr.h"
 #endif
-#include "text_utils.h"
+#include "core/text_utils.h"
 
 namespace {
 

@@ -6,11 +6,11 @@
 #include <string>
 
 #include "base64_codec.h"
-#include "config.h"
+#include "core/config.h"
 #include "filesystem_sandbox.h"
 #include "http_helpers.h"
 #include "path_policy.h"
-#include "platform.h"
+#include "platform/platform.h"
 #include "port_forward_endpoint.h"
 #include "port_tunnel.h"
 #include "process_session.h"

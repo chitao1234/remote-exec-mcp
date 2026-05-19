@@ -32,7 +32,7 @@
 #include <thread>
 #include <vector>
 
-#include "config.h"
+#include "core/config.h"
 #include "port_tunnel_session_state.h"
 
 class PortTunnelConnection;

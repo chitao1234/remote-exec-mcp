@@ -3,8 +3,8 @@
 #include <thread>
 #include <vector>
 
-#include "basic_mutex.h"
-#include "platform.h"
+#include "platform/basic_mutex.h"
+#include "platform/platform.h"
 
 int main() {
     BasicMutex mutex;

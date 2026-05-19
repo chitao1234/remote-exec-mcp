@@ -4,7 +4,7 @@
 #include <sstream>
 
 #include "output_renderer.h"
-#include "platform.h"
+#include "platform/platform.h"
 
 namespace {
 

@@ -7,7 +7,7 @@
 
 #include "connection_manager.h"
 #include "server.h"
-#include "wakeup_pipe.h"
+#include "platform/wakeup_pipe.h"
 
 class ServerRuntime {
 public:

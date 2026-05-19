@@ -3,7 +3,7 @@
 #include <utility>
 
 #include "connection_manager.h"
-#include "platform.h"
+#include "platform/platform.h"
 #include "test_socket_pair.h"
 
 static void hold_worker(SOCKET socket, std::atomic<bool>& release) {

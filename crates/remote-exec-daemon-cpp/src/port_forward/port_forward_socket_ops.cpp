@@ -21,10 +21,10 @@
 #include "port_forward_endpoint.h"
 #include "port_forward_error.h"
 #ifndef _WIN32
-#include "posix_eintr.h"
-#include "posix_fd.h"
+#include "platform/posix_eintr.h"
+#include "platform/posix_fd.h"
 #endif
-#include "win32_error.h"
+#include "platform/win32_error.h"
 
 namespace {
 

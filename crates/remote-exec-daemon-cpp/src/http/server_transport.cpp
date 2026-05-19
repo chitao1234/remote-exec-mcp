@@ -17,7 +17,7 @@
 #include "http_codec.h"
 #include "http_request.h"
 #ifndef _WIN32
-#include "posix_eintr.h"
+#include "platform/posix_eintr.h"
 #endif
 #include "server_transport.h"
 #include "server_transport_internal.h"

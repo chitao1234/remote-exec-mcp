@@ -4,9 +4,9 @@
 #include <string>
 #include <vector>
 
-#include "logging.h"
+#include "core/logging.h"
 #include "output_renderer.h"
-#include "platform.h"
+#include "platform/platform.h"
 #include "process_session.h"
 #include "exec_request_utils.h"
 #include "session_pump.h"

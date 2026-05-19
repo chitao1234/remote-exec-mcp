@@ -3,7 +3,7 @@
 #include <string>
 
 #include "http_helpers.h"
-#include "logging.h"
+#include "core/logging.h"
 #include "server.h"
 
 HttpResponse make_rpc_error_response(int status, const std::string& code, const std::string& message);

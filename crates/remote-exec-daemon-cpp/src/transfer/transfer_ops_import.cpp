@@ -13,12 +13,12 @@
 #include <sys/stat.h>
 #endif
 
-#include "path_utils.h"
+#include "platform/path_utils.h"
 #ifndef _WIN32
-#include "posix_eintr.h"
+#include "platform/posix_eintr.h"
 #endif
 #include "rpc_failures.h"
-#include "scoped_file.h"
+#include "platform/scoped_file.h"
 #include "../core/stdio_retry.h"
 #include "transfer_ops_internal.h"
 

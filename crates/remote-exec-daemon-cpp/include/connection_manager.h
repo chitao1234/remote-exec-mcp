@@ -11,10 +11,10 @@
 #include <thread>
 #endif
 
-#include "basic_mutex.h"
+#include "platform/basic_mutex.h"
 #include "server_transport.h"
 #ifdef _WIN32
-#include "win32_thread.h"
+#include "platform/win32_thread.h"
 #endif
 
 class ConnectionManager {

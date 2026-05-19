@@ -5,12 +5,12 @@
 #include <string>
 
 #include "../runtime/daemon_thread.h"
-#include "logging.h"
-#include "platform.h"
+#include "core/logging.h"
+#include "platform/platform.h"
 #include "process_session.h"
 #include "session_pump_internal.h"
 #ifdef _WIN32
-#include "win32_thread.h"
+#include "platform/win32_thread.h"
 #endif
 
 namespace {

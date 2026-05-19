@@ -13,14 +13,14 @@
 #endif
 
 #include "daemon_thread.h"
-#include "logging.h"
+#include "core/logging.h"
 #include "path_policy.h"
-#include "platform.h"
+#include "platform/platform.h"
 #include "port_forward_socket_ops.h"
 #include "port_tunnel.h"
 #include "../port_forward/port_tunnel_service.h"
 #ifdef _WIN32
-#include "win32_thread.h"
+#include "platform/win32_thread.h"
 #endif
 
 namespace {

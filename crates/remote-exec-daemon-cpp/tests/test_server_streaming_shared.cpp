@@ -8,7 +8,7 @@
 #ifndef _WIN32
 #include <poll.h>
 
-#include "posix_eintr.h"
+#include "platform/posix_eintr.h"
 #endif
 
 #include "test_socket_pair.h"

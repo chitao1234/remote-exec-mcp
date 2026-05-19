@@ -4,7 +4,7 @@
 #include <thread>
 
 #include "http_helpers.h"
-#include "platform.h"
+#include "platform/platform.h"
 #include "process_session.h"
 #include "server_routes.h"
 #include "test_server_routes_shared.h"

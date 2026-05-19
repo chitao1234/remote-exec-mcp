@@ -15,8 +15,8 @@
 #include <unistd.h>
 #endif
 
-#include "platform.h"
-#include "text_utils.h"
+#include "platform/platform.h"
+#include "core/text_utils.h"
 
 namespace platform {
 

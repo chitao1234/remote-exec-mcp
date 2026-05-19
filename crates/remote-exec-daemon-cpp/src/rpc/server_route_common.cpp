@@ -1,9 +1,9 @@
 #include <string>
 
-#include "common.h"
+#include "core/common.h"
 #include "daemon_capabilities.h"
 #include "patch_engine.h"
-#include "platform.h"
+#include "platform/platform.h"
 #include "server_request_utils.h"
 #include "server_route_common.h"
 

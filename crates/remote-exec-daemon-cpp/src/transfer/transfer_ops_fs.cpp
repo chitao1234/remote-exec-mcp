@@ -17,9 +17,9 @@
 #include <unistd.h>
 #endif
 
-#include "path_utils.h"
+#include "platform/path_utils.h"
 #ifndef _WIN32
-#include "posix_eintr.h"
+#include "platform/posix_eintr.h"
 #endif
 #include "rpc_failures.h"
 #include "transfer_ops_internal.h"

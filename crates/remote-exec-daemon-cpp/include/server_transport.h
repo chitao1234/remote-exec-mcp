@@ -11,7 +11,7 @@ typedef int SOCKET;
 const int INVALID_SOCKET = -1;
 #endif
 
-#include "config.h"
+#include "core/config.h"
 #include "http_codec.h"
 
 class BadHttpRequest : public std::runtime_error {

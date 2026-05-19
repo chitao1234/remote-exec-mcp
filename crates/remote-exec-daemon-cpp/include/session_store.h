@@ -5,8 +5,8 @@
 #include <stdexcept>
 #include <string>
 
-#include "basic_mutex.h"
-#include "config.h"
+#include "platform/basic_mutex.h"
+#include "core/config.h"
 #include "http_helpers.h"
 #include "live_session.h"
 

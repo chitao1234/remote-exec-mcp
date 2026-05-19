@@ -2,7 +2,7 @@
 
 #include <memory>
 
-#include "config.h"
+#include "core/config.h"
 #include "http_helpers.h"
 #include "server.h"
 

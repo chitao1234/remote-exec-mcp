@@ -19,11 +19,11 @@
 #include <termios.h>
 #include <unistd.h>
 
-#include "basic_mutex.h"
-#include "platform.h"
+#include "platform/basic_mutex.h"
+#include "platform/platform.h"
 #include "posix_child_reaper.h"
-#include "posix_eintr.h"
-#include "posix_fd.h"
+#include "platform/posix_eintr.h"
+#include "platform/posix_fd.h"
 #include "process_session.h"
 
 #if defined(__GNUC__)

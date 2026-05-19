@@ -2,7 +2,7 @@
 #include <cstdio>
 #include <string>
 
-#include "config.h"
+#include "core/config.h"
 #include "test_filesystem.h"
 
 namespace fs = test_fs;

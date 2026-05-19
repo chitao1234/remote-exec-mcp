@@ -5,9 +5,9 @@
 #include <utility>
 #include <vector>
 
-#include "basic_mutex.h"
+#include "platform/basic_mutex.h"
 #include "port_tunnel_common.h"
-#include "wakeup_pipe.h"
+#include "platform/wakeup_pipe.h"
 
 class PortTunnelService;
 

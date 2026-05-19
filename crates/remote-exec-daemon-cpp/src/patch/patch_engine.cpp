@@ -20,12 +20,12 @@
 
 #include "patch_engine.h"
 #include "path_policy.h"
-#include "path_utils.h"
-#include "platform.h"
+#include "platform/path_utils.h"
+#include "platform/platform.h"
 #ifndef _WIN32
-#include "posix_eintr.h"
+#include "platform/posix_eintr.h"
 #endif
-#include "scoped_file.h"
+#include "platform/scoped_file.h"
 #include "../core/stdio_retry.h"
 
 namespace {

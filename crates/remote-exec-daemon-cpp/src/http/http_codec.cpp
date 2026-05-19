@@ -4,7 +4,7 @@
 #include <string>
 
 #include "http_codec.h"
-#include "text_utils.h"
+#include "core/text_utils.h"
 
 namespace {
 

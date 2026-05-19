@@ -9,15 +9,15 @@
 #include <unistd.h>
 #endif
 
-#include "logging.h"
-#include "path_utils.h"
-#include "platform.h"
+#include "core/logging.h"
+#include "platform/path_utils.h"
+#include "platform/platform.h"
 #ifndef _WIN32
-#include "posix_eintr.h"
+#include "platform/posix_eintr.h"
 #include "posix_child_reaper.h"
-#include "posix_fd.h"
+#include "platform/posix_fd.h"
 #endif
-#include "scoped_file.h"
+#include "platform/scoped_file.h"
 #include "server.h"
 #include "server_runtime.h"
 #include "../core/stdio_retry.h"

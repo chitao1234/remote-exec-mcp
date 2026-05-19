@@ -2,7 +2,7 @@
 
 #include "base64_codec.h"
 #include "image_ops.h"
-#include "logging.h"
+#include "core/logging.h"
 #include "rpc_failures.h"
 #include "server_request_utils.h"
 #include "server_route_image.h"
