@@ -78,6 +78,34 @@ void ConnectionManager::run_worker(const std::shared_ptr<WorkerRecord>& record) 
     state_changed_.broadcast();
 }
 
+void ConnectionManager::close_worker_socket(const std::shared_ptr<WorkerRecord>& record) {
+    BasicLockGuard state_lock(record->state_mutex);
+    if (record->socket != INVALID_SOCKET) {
+        close_socket(record->socket);
+        record->socket = INVALID_SOCKET;
+    }
+}
+
+void ConnectionManager::shutdown_worker_socket(const std::shared_ptr<WorkerRecord>& record) {
+    BasicLockGuard state_lock(record->state_mutex);
+    if (record->socket != INVALID_SOCKET) {
+        shutdown_socket(record->socket);
+    }
+}
+
+void ConnectionManager::join_worker_thread(const std::shared_ptr<WorkerRecord>& record) {
+#ifdef _WIN32
+    join_daemon_thread(&record->thread_handle);
+#else
+    join_daemon_thread(&record->thread);
+#endif
+}
+
+void ConnectionManager::erase_worker_record_locked(const std::shared_ptr<WorkerRecord>& record) {
+    workers_.erase(record->worker_id);
+    state_changed_.broadcast();
+}
+
 #ifdef _WIN32
 struct ConnectionManager::WorkerContext {
     ConnectionManager* manager;
@@ -112,15 +140,8 @@ bool ConnectionManager::try_start(UniqueSocket client, std::function<void(SOCKET
                 run_worker(record);
             }));
         } catch (...) {
-            {
-                BasicLockGuard state_lock(record->state_mutex);
-                if (record->socket != INVALID_SOCKET) {
-                    close_socket(record->socket);
-                    record->socket = INVALID_SOCKET;
-                }
-            }
-            workers_.erase(record->worker_id);
-            state_changed_.broadcast();
+            close_worker_socket(record);
+            erase_worker_record_locked(record);
             return false;
         }
 #endif
@@ -134,16 +155,9 @@ bool ConnectionManager::try_start(UniqueSocket client, std::function<void(SOCKET
     thread_context->start_gate = start_gate;
     HANDLE handle = begin_win32_thread(&ConnectionManager::worker_thread_entry, thread_context.get());
     if (handle == nullptr) {
-        {
-            BasicLockGuard state_lock(record->state_mutex);
-            if (record->socket != INVALID_SOCKET) {
-                close_socket(record->socket);
-                record->socket = INVALID_SOCKET;
-            }
-        }
+        close_worker_socket(record);
         BasicLockGuard lock(mutex_);
-        workers_.erase(record->worker_id);
-        state_changed_.broadcast();
+        erase_worker_record_locked(record);
         return false;
     }
     record->thread_handle = handle;
@@ -169,10 +183,7 @@ void ConnectionManager::begin_shutdown() {
     }
 
     for (std::size_t i = 0; i < snapshot.size(); ++i) {
-        BasicLockGuard state_lock(snapshot[i]->state_mutex);
-        if (snapshot[i]->socket != INVALID_SOCKET) {
-            shutdown_socket(snapshot[i]->socket);
-        }
+        shutdown_worker_socket(snapshot[i]);
     }
 }
 
@@ -198,11 +209,7 @@ void ConnectionManager::reap_finished() {
     }
 
     for (std::size_t i = 0; i < finished.size(); ++i) {
-#ifdef _WIN32
-        join_daemon_thread(&finished[i]->thread_handle);
-#else
-        join_daemon_thread(&finished[i]->thread);
-#endif
+        join_worker_thread(finished[i]);
     }
 }
 

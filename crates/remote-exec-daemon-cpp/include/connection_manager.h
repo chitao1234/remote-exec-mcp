@@ -44,6 +44,10 @@ private:
 #ifdef _WIN32
     static unsigned __stdcall worker_thread_entry(void* raw_context);
 #endif
+    static void close_worker_socket(const std::shared_ptr<WorkerRecord>& record);
+    static void shutdown_worker_socket(const std::shared_ptr<WorkerRecord>& record);
+    static void join_worker_thread(const std::shared_ptr<WorkerRecord>& record);
+    void erase_worker_record_locked(const std::shared_ptr<WorkerRecord>& record);
 
     unsigned long max_active_connections_;
     mutable BasicMutex mutex_;
