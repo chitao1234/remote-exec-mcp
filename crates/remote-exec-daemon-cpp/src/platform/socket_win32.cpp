@@ -76,6 +76,10 @@ bool receive_timeout_error(int error) {
     return error == WSAETIMEDOUT || error == WSAEWOULDBLOCK;
 }
 
+bool connect_in_progress_socket_error(int error) {
+    return error == WSAEWOULDBLOCK || error == WSAEINPROGRESS;
+}
+
 NetworkSession::NetworkSession() {
     WSADATA wsa_data;
     if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
@@ -104,6 +108,59 @@ int wait_socket_readable_or_wakeup(SOCKET socket, SOCKET wakeup_fd, unsigned lon
         return -1;
     }
     return ready;
+}
+
+int wait_socket_readable(SOCKET socket, unsigned long timeout_ms) {
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(socket, &readfds);
+
+    timeval timeout;
+    timeout.tv_sec = static_cast<long>(timeout_ms / 1000UL);
+    timeout.tv_usec = static_cast<long>((timeout_ms % 1000UL) * 1000UL);
+    return select(0, &readfds, nullptr, nullptr, &timeout);
+}
+
+int wait_socket_writable(SOCKET socket, unsigned long timeout_ms) {
+    fd_set writefds;
+    FD_ZERO(&writefds);
+    FD_SET(socket, &writefds);
+
+    timeval timeout;
+    timeout.tv_sec = static_cast<long>(timeout_ms / 1000UL);
+    timeout.tv_usec = static_cast<long>((timeout_ms % 1000UL) * 1000UL);
+    const int selected = select(0, nullptr, &writefds, nullptr, &timeout);
+    if (selected <= 0) {
+        return selected;
+    }
+    return FD_ISSET(socket, &writefds) ? 1 : 0;
+}
+
+int socket_error_option(SOCKET socket, int* socket_error) {
+    socklen_t socket_error_len = static_cast<socklen_t>(sizeof(*socket_error));
+    return getsockopt(socket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(socket_error), &socket_error_len);
+}
+
+int set_socket_reuseaddr(SOCKET socket) {
+    int yes = 1;
+    return setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
+}
+
+int set_socket_ipv6_only(SOCKET socket) {
+    int yes = 1;
+    return setsockopt(socket, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<const char*>(&yes), sizeof(yes));
+}
+
+int bind_socket(SOCKET socket, const sockaddr* address, socklen_t address_len) {
+    return bind(socket, address, static_cast<int>(address_len));
+}
+
+int listen_socket(SOCKET socket, int backlog) {
+    return listen(socket, backlog);
+}
+
+int socket_name(SOCKET socket, sockaddr* address, socklen_t* address_len) {
+    return get_socket_name(socket, address, address_len);
 }
 
 unsigned short socket_bound_port_or_zero(SOCKET socket) {

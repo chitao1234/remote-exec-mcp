@@ -1,6 +1,5 @@
 #include "port_forward/port_forward_socket_ops.h"
 
-#include <climits>
 #include <cstring>
 #include <sstream>
 
@@ -12,7 +11,6 @@
 #include <cerrno>
 #include <netdb.h>
 #include <netinet/in.h>
-#include <poll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -95,14 +93,6 @@ resolve_endpoint(const std::string& endpoint, const std::string& protocol, int f
     return result;
 }
 
-bool connect_in_progress_error(int error) {
-#ifdef _WIN32
-    return error == WSAEWOULDBLOCK || error == WSAEINPROGRESS;
-#else
-    return error == EINPROGRESS || error == EINTR;
-#endif
-}
-
 } // namespace
 
 void set_socket_nonblocking(SOCKET socket, bool enabled) {
@@ -120,42 +110,22 @@ void set_socket_nonblocking(SOCKET socket, bool enabled) {
 
 namespace {
 bool wait_for_connect(SOCKET socket, unsigned long timeout_ms) {
-#ifdef _WIN32
-    fd_set writefds;
-    FD_ZERO(&writefds);
-    FD_SET(socket, &writefds);
-
-    timeval timeout;
-    timeout.tv_sec = static_cast<long>(timeout_ms / 1000UL);
-    timeout.tv_usec = static_cast<long>((timeout_ms % 1000UL) * 1000UL);
-    const int selected = select(0, nullptr, &writefds, nullptr, &timeout);
-#else
-    struct pollfd descriptor;
-    descriptor.fd = socket;
-    descriptor.events = POLLOUT;
-    descriptor.revents = 0;
-
-    const int selected = posix_eintr::poll_for_ms(&descriptor, 1, timeout_ms);
-#endif
+    const int selected = wait_socket_writable(socket, timeout_ms);
     if (selected < 0) {
         throw PortForwardError(400, "port_connect_failed", socket_error_message("poll"));
     }
-#ifdef _WIN32
-    return selected > 0 && FD_ISSET(socket, &writefds);
-#else
-    return selected > 0 && (descriptor.revents & (POLLOUT | POLLERR | POLLHUP)) != 0;
-#endif
+    return selected > 0;
 }
 
 bool tcp_connect_with_timeout(SOCKET socket, const sockaddr* address, socklen_t address_len, unsigned long timeout_ms) {
     set_socket_nonblocking(socket, true);
-    if (connect(socket, address, static_cast<int>(address_len)) == 0) {
+    if (connect_socket(socket, address, address_len) == 0) {
         set_socket_nonblocking(socket, false);
         return true;
     }
 
     const int connect_error = last_socket_error();
-    if (!connect_in_progress_error(connect_error)) {
+    if (!connect_in_progress_socket_error(connect_error)) {
         set_socket_nonblocking(socket, false);
         return false;
     }
@@ -166,16 +136,7 @@ bool tcp_connect_with_timeout(SOCKET socket, const sockaddr* address, socklen_t 
     }
 
     int socket_error = 0;
-    socklen_t socket_error_len = static_cast<socklen_t>(sizeof(socket_error));
-    if (
-#ifdef _WIN32
-        getsockopt(socket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&socket_error), &socket_error_len)
-#else
-        posix_eintr::retry<int>([&]() {
-            return getsockopt(socket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&socket_error), &socket_error_len);
-        })
-#endif
-            != 0) {
+    if (socket_error_option(socket, &socket_error) != 0) {
         set_socket_nonblocking(socket, false);
         throw PortForwardError(400, "port_connect_failed", socket_error_message("getsockopt"));
     }
@@ -194,11 +155,7 @@ bool tcp_connect_with_timeout(SOCKET socket, const sockaddr* address, socklen_t 
 } // namespace
 
 SOCKET accept_port_forward_peer(SOCKET listener, sockaddr* peer_address, socklen_t* peer_len) {
-#ifdef _WIN32
-    return accept(listener, peer_address, peer_len);
-#else
-    return posix_eintr::retry<int>([&]() { return accept(listener, peer_address, peer_len); });
-#endif
+    return accept_socket(listener, peer_address, peer_len);
 }
 
 int recv_port_forward_datagram(SOCKET socket,
@@ -206,23 +163,7 @@ int recv_port_forward_datagram(SOCKET socket,
                                std::size_t size,
                                sockaddr* peer_address,
                                socklen_t* peer_len) {
-#ifdef _WIN32
-    return recvfrom(socket,
-                    data,
-                    static_cast<int>(bounded_socket_io_size(size)),
-                    0,
-                    peer_address,
-                    peer_len);
-#else
-    return posix_eintr::retry<int>([&]() {
-        return recvfrom(socket,
-                        data,
-                        static_cast<int>(bounded_socket_io_size(size)),
-                        0,
-                        peer_address,
-                        peer_len);
-    });
-#endif
+    return recvfrom_bounded(socket, data, size, peer_address, peer_len);
 }
 
 int send_port_forward_datagram(SOCKET socket,
@@ -230,48 +171,11 @@ int send_port_forward_datagram(SOCKET socket,
                                std::size_t size,
                                const sockaddr* peer_address,
                                socklen_t peer_len) {
-    if (size > static_cast<std::size_t>(INT_MAX)) {
-#ifdef _WIN32
-        WSASetLastError(WSAEMSGSIZE);
-#else
-        errno = EMSGSIZE;
-#endif
-        return -1;
-    }
-#ifdef _WIN32
-    return sendto(socket, data, static_cast<int>(size), 0, peer_address, peer_len);
-#else
-    return posix_eintr::retry<int>(
-        [&]() { return sendto(socket, data, static_cast<int>(size), 0, peer_address, peer_len); });
-#endif
+    return sendto_bounded(socket, data, size, peer_address, peer_len);
 }
 
 void shutdown_port_forward_send(SOCKET socket) {
     shutdown_socket_send(socket);
-}
-
-int wait_socket_readable(SOCKET socket, unsigned long timeout_ms) {
-#ifdef _WIN32
-    fd_set readfds;
-    FD_ZERO(&readfds);
-    FD_SET(socket, &readfds);
-
-    timeval timeout;
-    timeout.tv_sec = static_cast<long>(timeout_ms / 1000UL);
-    timeout.tv_usec = static_cast<long>((timeout_ms % 1000UL) * 1000UL);
-    return select(0, &readfds, nullptr, nullptr, &timeout);
-#else
-    struct pollfd descriptor;
-    descriptor.fd = socket;
-    descriptor.events = POLLIN;
-    descriptor.revents = 0;
-
-    const int ready = posix_eintr::poll_for_ms(&descriptor, 1, timeout_ms);
-    if (ready > 0 && (descriptor.revents & (POLLNVAL | POLLERR)) != 0) {
-        return -1;
-    }
-    return ready;
-#endif
 }
 
 std::string printable_port_forward_endpoint(const sockaddr* address, socklen_t address_len) {
@@ -311,14 +215,7 @@ std::string socket_local_endpoint(SOCKET socket) {
     sockaddr_storage address;
     std::memset(&address, 0, sizeof(address));
     socklen_t address_len = sizeof(address);
-    if (
-#ifdef _WIN32
-        getsockname(socket, reinterpret_cast<sockaddr*>(&address), &address_len)
-#else
-        posix_eintr::retry<int>(
-            [&]() { return getsockname(socket, reinterpret_cast<sockaddr*>(&address), &address_len); })
-#endif
-            != 0) {
+    if (socket_name(socket, reinterpret_cast<sockaddr*>(&address), &address_len) != 0) {
         throw PortForwardError(400, "port_bind_failed", socket_error_message("getsockname"));
     }
     return printable_port_forward_endpoint(reinterpret_cast<sockaddr*>(&address), address_len);
@@ -334,35 +231,12 @@ SOCKET bind_port_forward_socket(const std::string& endpoint, const std::string& 
             continue;
         }
 
-        int yes = 1;
-        (void)
-#ifdef _WIN32
-            setsockopt(bound_socket, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
-#else
-            posix_eintr::retry<int>([&]() {
-                return setsockopt(bound_socket, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
-            });
-#endif
+        (void)set_socket_reuseaddr(bound_socket);
         if (current->ai_family == AF_INET6) {
-            (void)
-#ifdef _WIN32
-                setsockopt(bound_socket, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<const char*>(&yes), sizeof(yes));
-#else
-                posix_eintr::retry<int>([&]() {
-                    return setsockopt(
-                        bound_socket, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<const char*>(&yes), sizeof(yes));
-                });
-#endif
+            (void)set_socket_ipv6_only(bound_socket);
         }
 
-        if (
-#ifdef _WIN32
-            bind(bound_socket, current->ai_addr, static_cast<int>(current->ai_addrlen))
-#else
-            posix_eintr::retry<int>(
-                [&]() { return bind(bound_socket, current->ai_addr, static_cast<int>(current->ai_addrlen)); })
-#endif
-                == 0) {
+        if (bind_socket(bound_socket, current->ai_addr, static_cast<socklen_t>(current->ai_addrlen)) == 0) {
             break;
         }
 
@@ -376,13 +250,7 @@ SOCKET bind_port_forward_socket(const std::string& endpoint, const std::string& 
         throw PortForwardError(400, "port_bind_failed", socket_error_message("bind"));
     }
 
-    if (protocol == "tcp" &&
-#ifdef _WIN32
-        listen(bound_socket, SOMAXCONN)
-#else
-        posix_eintr::retry<int>([&]() { return listen(bound_socket, SOMAXCONN); })
-#endif
-            != 0) {
+    if (protocol == "tcp" && listen_socket(bound_socket, SOMAXCONN) != 0) {
         const std::string message = socket_error_message("listen");
         close_socket(bound_socket);
         throw PortForwardError(400, "port_bind_failed", message);
@@ -407,14 +275,8 @@ SOCKET connect_port_forward_socket(const std::string& endpoint, const std::strin
                 connected = tcp_connect_with_timeout(
                     connected_socket, current->ai_addr, static_cast<socklen_t>(current->ai_addrlen), timeout_ms);
             } else {
-                connected =
-#ifdef _WIN32
-                    connect(connected_socket, current->ai_addr, static_cast<int>(current->ai_addrlen))
-#else
-                    posix_eintr::retry<int>(
-                        [&]() { return connect(connected_socket, current->ai_addr, static_cast<int>(current->ai_addrlen)); })
-#endif
-                    == 0;
+                connected = connect_socket(
+                                connected_socket, current->ai_addr, static_cast<socklen_t>(current->ai_addrlen)) == 0;
             }
         } catch (...) {
             close_socket(connected_socket);

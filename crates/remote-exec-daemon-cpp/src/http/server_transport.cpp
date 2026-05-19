@@ -27,32 +27,6 @@ const std::size_t HTTP_READ_BUFFER_SIZE = 4U * 1024U;
 const std::size_t HTTP_RAW_BUFFER_COMPACT_THRESHOLD = 8U * 1024U;
 const std::size_t HTTP_MAX_CHUNK_LINE_SIZE = 4U * 1024U;
 
-int set_socket_reuse_addr(SOCKET socket) {
-    int yes = 1;
-#ifdef _WIN32
-    return setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
-#else
-    return posix_eintr::retry<int>(
-        [&]() { return setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)); });
-#endif
-}
-
-int bind_listener_socket(SOCKET socket, const sockaddr* address, int address_len) {
-#ifdef _WIN32
-    return bind(socket, address, address_len);
-#else
-    return posix_eintr::retry<int>([&]() { return bind(socket, address, static_cast<socklen_t>(address_len)); });
-#endif
-}
-
-int listen_socket(SOCKET socket, int backlog) {
-#ifdef _WIN32
-    return listen(socket, backlog);
-#else
-    return posix_eintr::retry<int>([&]() { return listen(socket, backlog); });
-#endif
-}
-
 std::size_t parse_chunk_size_line(const std::string& line) {
     try {
         return parse_http_chunk_size_line(line);
@@ -303,9 +277,9 @@ SOCKET create_listener(const DaemonConfig& config) {
             continue;
         }
 
-        (void)set_socket_reuse_addr(listener);
+        (void)set_socket_reuseaddr(listener);
 
-        if (bind_listener_socket(listener, current->ai_addr, static_cast<int>(current->ai_addrlen)) == 0) {
+        if (bind_socket(listener, current->ai_addr, static_cast<socklen_t>(current->ai_addrlen)) == 0) {
             break;
         }
 

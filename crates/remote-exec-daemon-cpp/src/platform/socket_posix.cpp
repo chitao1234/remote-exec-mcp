@@ -116,6 +116,10 @@ bool receive_timeout_error(int error) {
     return error == EAGAIN || error == EWOULDBLOCK;
 }
 
+bool connect_in_progress_socket_error(int error) {
+    return error == EINPROGRESS || error == EINTR;
+}
+
 NetworkSession::NetworkSession() {
     signal(SIGPIPE, SIG_IGN);
 }
@@ -142,6 +146,65 @@ int wait_socket_readable_or_wakeup(SOCKET socket, SOCKET wakeup_fd, unsigned lon
         }
     }
     return ready;
+}
+
+int wait_socket_readable(SOCKET socket, unsigned long timeout_ms) {
+    struct pollfd descriptor;
+    descriptor.fd = socket;
+    descriptor.events = POLLIN;
+    descriptor.revents = 0;
+
+    const int ready = posix_eintr::poll_for_ms(&descriptor, 1, timeout_ms);
+    if (ready > 0 && (descriptor.revents & (POLLNVAL | POLLERR)) != 0) {
+        return -1;
+    }
+    return ready;
+}
+
+int wait_socket_writable(SOCKET socket, unsigned long timeout_ms) {
+    struct pollfd descriptor;
+    descriptor.fd = socket;
+    descriptor.events = POLLOUT;
+    descriptor.revents = 0;
+
+    const int ready = posix_eintr::poll_for_ms(&descriptor, 1, timeout_ms);
+    if (ready <= 0) {
+        return ready;
+    }
+    if ((descriptor.revents & POLLNVAL) != 0) {
+        return -1;
+    }
+    return (descriptor.revents & (POLLOUT | POLLERR | POLLHUP)) != 0 ? 1 : 0;
+}
+
+int socket_error_option(SOCKET socket, int* socket_error) {
+    socklen_t socket_error_len = static_cast<socklen_t>(sizeof(*socket_error));
+    return posix_eintr::retry<int>(
+        [&]() { return getsockopt(socket, SOL_SOCKET, SO_ERROR, socket_error, &socket_error_len); });
+}
+
+int set_socket_reuseaddr(SOCKET socket) {
+    int yes = 1;
+    return posix_eintr::retry<int>(
+        [&]() { return setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)); });
+}
+
+int set_socket_ipv6_only(SOCKET socket) {
+    int yes = 1;
+    return posix_eintr::retry<int>(
+        [&]() { return setsockopt(socket, IPPROTO_IPV6, IPV6_V6ONLY, &yes, sizeof(yes)); });
+}
+
+int bind_socket(SOCKET socket, const sockaddr* address, socklen_t address_len) {
+    return posix_eintr::retry<int>([&]() { return bind(socket, address, address_len); });
+}
+
+int listen_socket(SOCKET socket, int backlog) {
+    return posix_eintr::retry<int>([&]() { return listen(socket, backlog); });
+}
+
+int socket_name(SOCKET socket, sockaddr* address, socklen_t* address_len) {
+    return get_socket_name(socket, address, address_len);
 }
 
 unsigned short socket_bound_port_or_zero(SOCKET socket) {

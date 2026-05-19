@@ -5,6 +5,7 @@
 #ifdef _WIN32
 #include <winsock2.h>
 #else
+#include <cerrno>
 #include <sys/socket.h>
 
 #include "platform/posix_eintr.h"
@@ -30,6 +31,54 @@ int send_bounded(SOCKET client, const char* data, std::size_t remaining, int fla
 #else
     return posix_eintr::retry<int>(
         [&]() { return send(client, data, static_cast<int>(bounded_socket_io_size(remaining)), flags); });
+#endif
+}
+
+int recvfrom_bounded(SOCKET socket, char* data, std::size_t size, sockaddr* peer_address, socklen_t* peer_len) {
+#ifdef _WIN32
+    return recvfrom(socket, data, static_cast<int>(bounded_socket_io_size(size)), 0, peer_address, peer_len);
+#else
+    return posix_eintr::retry<int>([&]() {
+        return recvfrom(socket,
+                        data,
+                        static_cast<int>(bounded_socket_io_size(size)),
+                        0,
+                        peer_address,
+                        peer_len);
+    });
+#endif
+}
+
+int sendto_bounded(SOCKET socket, const char* data, std::size_t size, const sockaddr* peer_address, socklen_t peer_len) {
+    if (size > static_cast<std::size_t>(INT_MAX)) {
+#ifdef _WIN32
+        WSASetLastError(WSAEMSGSIZE);
+#else
+        errno = EMSGSIZE;
+#endif
+        return -1;
+    }
+#ifdef _WIN32
+    return sendto(socket, data, static_cast<int>(size), 0, peer_address, peer_len);
+#else
+    return posix_eintr::retry<int>(
+        [&]() { return sendto(socket, data, static_cast<int>(size), 0, peer_address, peer_len); });
+#endif
+}
+
+int connect_socket(SOCKET socket, const sockaddr* address, socklen_t address_len) {
+#ifdef _WIN32
+    return connect(socket, address, static_cast<int>(address_len));
+#else
+    return posix_eintr::retry<int>([&]() { return connect(socket, address, address_len); });
+#endif
+}
+
+SOCKET accept_socket(SOCKET listener, sockaddr* peer_address, socklen_t* peer_len) {
+#ifdef _WIN32
+    return accept(listener, peer_address, peer_len);
+#else
+    return posix_eintr::retry<int>([&]() { return accept(listener, peer_address, peer_len); });
 #endif
 }
 
