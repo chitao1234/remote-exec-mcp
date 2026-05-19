@@ -54,13 +54,14 @@ struct PortTunnelSession {
     // expire_if_due() return teardown work so callers can close sockets and wake
     // workers without holding the session mutex. Remaining helper close paths in
     // port_tunnel_session.cpp only delegate to resource-owned close() methods.
-    std::shared_ptr<PortTunnelSessionAttachment> attach(const std::shared_ptr<PortTunnelConnection>& connection);
+    bool attach_new(const std::shared_ptr<PortTunnelConnection>& connection, std::uint64_t generation_value);
+    PortTunnelSessionResumeResult attach_resumed(const std::shared_ptr<PortTunnelConnection>& connection,
+                                                 std::uint64_t generation_value,
+                                                 std::uint64_t now_ms);
     std::shared_ptr<PortTunnelSessionAttachment> detach_until(std::uint64_t deadline_ms, bool* detached);
     PortTunnelSessionTeardown close_terminal(bool mark_expired);
     PortTunnelSessionTeardown expire_if_due(std::uint64_t now_ms);
     bool detached_deadline(std::uint64_t* deadline_ms);
-    PortTunnelSessionResumeResult prepare_resume(std::uint64_t generation_value, std::uint64_t now_ms);
-    void set_generation(std::uint64_t generation_value);
     std::shared_ptr<PortTunnelSessionAttachment> current_attachment();
     std::shared_ptr<PortTunnelConnection>
     connection_for_attachment(const std::shared_ptr<PortTunnelSessionAttachment>& expected_attachment);

@@ -22,10 +22,6 @@ bool session_state_terminal(PortTunnelSessionState state) {
     return state == PortTunnelSessionState::Closed || state == PortTunnelSessionState::Expired;
 }
 
-bool session_state_available(PortTunnelSessionState state) {
-    return !session_state_terminal(state);
-}
-
 bool session_state_attached(PortTunnelSessionState state) {
     return state == PortTunnelSessionState::Attached;
 }
@@ -140,26 +136,86 @@ bool session_resume_expired_locked(const PortTunnelSession* session, std::uint64
 
 } // namespace
 
-std::shared_ptr<PortTunnelSessionAttachment>
-PortTunnelSession::attach(const std::shared_ptr<PortTunnelConnection>& connection) {
+bool PortTunnelSession::attach_new(const std::shared_ptr<PortTunnelConnection>& connection,
+                                   std::uint64_t generation_value) {
     BasicLockGuard lock(mutex);
-    if (!session_state_available(state)) {
+    if (state != PortTunnelSessionState::New || attachment.get() != nullptr) {
         log_message(LOG_DEBUG,
                     "port_tunnel",
-                    LogMessageBuilder("session attach rejected")
+                    LogMessageBuilder("session new attach rejected")
                         .quoted_field("session_id", session_id)
                         .raw(std::string("state=") + session_state_name(state))
                         .field("generation", generation)
+                        .field("requested_generation", generation_value)
                         .str());
-        return std::shared_ptr<PortTunnelSessionAttachment>();
+        return false;
     }
-    return transition_session_to_attached_locked(this, connection);
+    generation = generation_value;
+    transition_session_to_attached_locked(this, connection);
+    return true;
+}
+
+PortTunnelSessionResumeResult
+PortTunnelSession::attach_resumed(const std::shared_ptr<PortTunnelConnection>& connection,
+                                  std::uint64_t generation_value,
+                                  std::uint64_t now_ms) {
+    BasicLockGuard lock(mutex);
+    if (state == PortTunnelSessionState::Closed) {
+        log_message(LOG_DEBUG,
+                    "port_tunnel",
+                    LogMessageBuilder("session resume attach rejected")
+                        .quoted_field("session_id", session_id)
+                        .raw("reason=closed")
+                        .field("generation", generation)
+                        .field("requested_generation", generation_value)
+                        .str());
+        return PortTunnelSessionResumeResult::Unknown;
+    }
+    if (session_state_attached(state) || attachment.get() != nullptr) {
+        log_message(LOG_DEBUG,
+                    "port_tunnel",
+                    LogMessageBuilder("session resume attach rejected")
+                        .quoted_field("session_id", session_id)
+                        .raw("reason=already_attached")
+                        .field("generation", generation)
+                        .field("requested_generation", generation_value)
+                        .str());
+        return PortTunnelSessionResumeResult::AlreadyAttached;
+    }
+    if (session_resume_expired_locked(this, now_ms)) {
+        log_message(LOG_DEBUG,
+                    "port_tunnel",
+                    LogMessageBuilder("session resume attach rejected")
+                        .quoted_field("session_id", session_id)
+                        .raw("reason=expired")
+                        .field("generation", generation)
+                        .field("requested_generation", generation_value)
+                        .field("now_ms", now_ms)
+                        .field("resume_deadline_ms", resume_deadline_ms)
+                        .str());
+        return PortTunnelSessionResumeResult::Expired;
+    }
+    if (state != PortTunnelSessionState::Detached || resume_deadline_ms == 0ULL) {
+        log_message(LOG_DEBUG,
+                    "port_tunnel",
+                    LogMessageBuilder("session resume attach rejected")
+                        .quoted_field("session_id", session_id)
+                        .raw("reason=not_detached")
+                        .raw(std::string("state=") + session_state_name(state))
+                        .field("generation", generation)
+                        .field("requested_generation", generation_value)
+                        .str());
+        return PortTunnelSessionResumeResult::Unknown;
+    }
+    generation = generation_value;
+    transition_session_to_attached_locked(this, connection);
+    return PortTunnelSessionResumeResult::Ready;
 }
 
 std::shared_ptr<PortTunnelSessionAttachment> PortTunnelSession::detach_until(std::uint64_t deadline_ms,
                                                                              bool* detached) {
     BasicLockGuard lock(mutex);
-    if (!session_state_available(state)) {
+    if (state != PortTunnelSessionState::Attached || attachment.get() == nullptr) {
         if (detached != nullptr) {
             *detached = false;
         }
@@ -220,60 +276,6 @@ bool PortTunnelSession::detached_deadline(std::uint64_t* deadline_ms) {
         *deadline_ms = resume_deadline_ms;
     }
     return detached;
-}
-
-PortTunnelSessionResumeResult PortTunnelSession::prepare_resume(std::uint64_t generation_value,
-                                                                std::uint64_t now_ms) {
-    BasicLockGuard lock(mutex);
-    if (state == PortTunnelSessionState::Closed) {
-        log_message(LOG_DEBUG,
-                    "port_tunnel",
-                    LogMessageBuilder("session resume rejected")
-                        .quoted_field("session_id", session_id)
-                        .raw("reason=closed")
-                        .field("generation", generation)
-                        .field("requested_generation", generation_value)
-                        .str());
-        return PortTunnelSessionResumeResult::Unknown;
-    }
-    if (session_state_attached(state) || attachment.get() != nullptr) {
-        log_message(LOG_DEBUG,
-                    "port_tunnel",
-                    LogMessageBuilder("session resume rejected")
-                        .quoted_field("session_id", session_id)
-                        .raw("reason=already_attached")
-                        .field("generation", generation)
-                        .field("requested_generation", generation_value)
-                        .str());
-        return PortTunnelSessionResumeResult::AlreadyAttached;
-    }
-    if (session_resume_expired_locked(this, now_ms)) {
-        log_message(LOG_DEBUG,
-                    "port_tunnel",
-                    LogMessageBuilder("session resume rejected")
-                        .quoted_field("session_id", session_id)
-                        .raw("reason=expired")
-                        .field("generation", generation)
-                        .field("requested_generation", generation_value)
-                        .field("now_ms", now_ms)
-                        .field("resume_deadline_ms", resume_deadline_ms)
-                        .str());
-        return PortTunnelSessionResumeResult::Expired;
-    }
-    generation = generation_value;
-    log_message(LOG_DEBUG,
-                "port_tunnel",
-                LogMessageBuilder("session resume ready")
-                    .quoted_field("session_id", session_id)
-                    .field("generation", generation)
-                    .field("resume_deadline_ms", resume_deadline_ms)
-                    .str());
-    return PortTunnelSessionResumeResult::Ready;
-}
-
-void PortTunnelSession::set_generation(std::uint64_t generation_value) {
-    BasicLockGuard lock(mutex);
-    generation = generation_value;
 }
 
 std::shared_ptr<PortTunnelSessionAttachment> PortTunnelSession::current_attachment() {

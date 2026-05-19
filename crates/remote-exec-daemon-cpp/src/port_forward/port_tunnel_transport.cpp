@@ -344,29 +344,15 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
 
     if (role == "listen") {
         std::shared_ptr<PortTunnelSession> session;
+        PortTunnelSessionResumeResult resume_result = PortTunnelSessionResumeResult::Ready;
         if (meta.has_resume_session_id) {
             const std::string session_id = meta.resume_session_id;
             session = service_->find_session(session_id);
             if (session.get() == nullptr) {
                 throw PortForwardError(400, "unknown_port_tunnel_session", "unknown port tunnel session");
             }
-
-            const PortTunnelSessionResumeResult resume_result =
-                session->prepare_resume(generation, platform::monotonic_ms());
-            if (resume_result == PortTunnelSessionResumeResult::Unknown) {
-                throw PortForwardError(400, "unknown_port_tunnel_session", "unknown port tunnel session");
-            }
-            if (resume_result == PortTunnelSessionResumeResult::AlreadyAttached) {
-                throw PortForwardError(
-                    400, "port_tunnel_already_attached", "port tunnel session is already attached");
-            }
-            if (resume_result == PortTunnelSessionResumeResult::Expired) {
-                service_->close_session(session);
-                throw PortForwardError(400, "port_tunnel_resume_expired", "port tunnel resume expired");
-            }
         } else {
             session = service_->create_session();
-            session->set_generation(generation);
         }
 
         {
@@ -375,7 +361,42 @@ void PortTunnelConnection::tunnel_open(const PortTunnelFrame& frame) {
             mode_ = PortTunnelMode::Listen;
             protocol_ = tunnel_protocol;
         }
-        service_->attach_session(session, shared_from_this());
+        if (meta.has_resume_session_id) {
+            resume_result =
+                service_->attach_resumed_session(session, shared_from_this(), generation, platform::monotonic_ms());
+            if (resume_result != PortTunnelSessionResumeResult::Ready) {
+                {
+                    BasicLockGuard lock(state_mutex_);
+                    if (session_.get() == session.get()) {
+                        session_.reset();
+                        mode_ = PortTunnelMode::Unopened;
+                        protocol_ = PortTunnelProtocol::None;
+                    }
+                }
+                if (resume_result == PortTunnelSessionResumeResult::Unknown) {
+                    throw PortForwardError(400, "unknown_port_tunnel_session", "unknown port tunnel session");
+                }
+                if (resume_result == PortTunnelSessionResumeResult::AlreadyAttached) {
+                    throw PortForwardError(
+                        400, "port_tunnel_already_attached", "port tunnel session is already attached");
+                }
+                if (resume_result == PortTunnelSessionResumeResult::Expired) {
+                    service_->close_session(session);
+                    throw PortForwardError(400, "port_tunnel_resume_expired", "port tunnel resume expired");
+                }
+            }
+        } else if (!service_->attach_new_session(session, shared_from_this(), generation)) {
+            {
+                BasicLockGuard lock(state_mutex_);
+                if (session_.get() == session.get()) {
+                    session_.reset();
+                    mode_ = PortTunnelMode::Unopened;
+                    protocol_ = PortTunnelProtocol::None;
+                }
+            }
+            service_->close_session(session);
+            throw PortForwardError(400, "invalid_port_tunnel", "port tunnel session could not be attached");
+        }
 
         const PortForwardLimitConfig& limits = service_->limits();
         const unsigned long resume_timeout_ms = RESUME_TIMEOUT_MS;

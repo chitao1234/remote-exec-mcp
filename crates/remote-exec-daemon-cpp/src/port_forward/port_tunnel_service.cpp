@@ -58,9 +58,24 @@ std::shared_ptr<PortTunnelSession> PortTunnelService::find_session(const std::st
     return it->second;
 }
 
-void PortTunnelService::attach_session(const std::shared_ptr<PortTunnelSession>& session,
-                                       const std::shared_ptr<PortTunnelConnection>& connection) {
-    close_session_attachment(session->attach(connection));
+bool PortTunnelService::attach_new_session(const std::shared_ptr<PortTunnelSession>& session,
+                                           const std::shared_ptr<PortTunnelConnection>& connection,
+                                           std::uint64_t generation) {
+    if (!is_running()) {
+        return false;
+    }
+    return session->attach_new(connection, generation);
+}
+
+PortTunnelSessionResumeResult
+PortTunnelService::attach_resumed_session(const std::shared_ptr<PortTunnelSession>& session,
+                                          const std::shared_ptr<PortTunnelConnection>& connection,
+                                          std::uint64_t generation,
+                                          std::uint64_t now_ms) {
+    if (!is_running()) {
+        return PortTunnelSessionResumeResult::Unknown;
+    }
+    return session->attach_resumed(connection, generation, now_ms);
 }
 
 void PortTunnelService::detach_session(const std::shared_ptr<PortTunnelSession>& session) {

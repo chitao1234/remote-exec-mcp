@@ -67,8 +67,13 @@ public:
     void shutdown();
     std::shared_ptr<PortTunnelSession> create_session();
     std::shared_ptr<PortTunnelSession> find_session(const std::string& session_id);
-    void attach_session(const std::shared_ptr<PortTunnelSession>& session,
-                        const std::shared_ptr<PortTunnelConnection>& connection);
+    bool attach_new_session(const std::shared_ptr<PortTunnelSession>& session,
+                            const std::shared_ptr<PortTunnelConnection>& connection,
+                            std::uint64_t generation);
+    PortTunnelSessionResumeResult attach_resumed_session(const std::shared_ptr<PortTunnelSession>& session,
+                                                         const std::shared_ptr<PortTunnelConnection>& connection,
+                                                         std::uint64_t generation,
+                                                         std::uint64_t now_ms);
     void detach_session(const std::shared_ptr<PortTunnelSession>& session);
     void close_session(const std::shared_ptr<PortTunnelSession>& session);
     SessionRetainedInstallResult install_session_tcp_listener(const std::shared_ptr<PortTunnelSession>& session,

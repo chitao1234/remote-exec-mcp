@@ -4,16 +4,109 @@
 #include "../src/port_forward/port_tunnel_service.h"
 #include "test_socket_pair.h"
 
+#include "platform/deadline.h"
 #include "port_forward/port_forward_error.h"
 
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <memory>
 
 static PortTunnelFrame read_required_tunnel_frame_with_timeout(SOCKET socket, unsigned long timeout_ms) {
     PortTunnelFrame frame;
     TEST_ASSERT(try_read_tunnel_frame_with_timeout(socket, timeout_ms, &frame));
     return frame;
+}
+
+static std::shared_ptr<PortTunnelConnection>
+make_test_tunnel_connection(const std::shared_ptr<PortTunnelService>& service) {
+    return std::shared_ptr<PortTunnelConnection>(new PortTunnelConnection(INVALID_SOCKET, service));
+}
+
+static void assert_session_transition_rules_are_strict() {
+    std::shared_ptr<PortTunnelService> service = create_port_tunnel_service(PortForwardLimitConfig());
+    std::shared_ptr<PortTunnelSession> session = service->create_session();
+    std::shared_ptr<PortTunnelConnection> first_connection = make_test_tunnel_connection(service);
+    std::shared_ptr<PortTunnelConnection> second_connection = make_test_tunnel_connection(service);
+
+    bool detached = true;
+    TEST_ASSERT(session->detach_until(platform::monotonic_deadline_after_ms(1000UL), &detached).get() == nullptr);
+    TEST_ASSERT(!detached);
+    TEST_ASSERT(session->state == PortTunnelSessionState::New);
+
+    TEST_ASSERT(session->attach_resumed(first_connection, 1ULL, platform::monotonic_ms()) ==
+                PortTunnelSessionResumeResult::Unknown);
+    TEST_ASSERT(session->state == PortTunnelSessionState::New);
+
+    TEST_ASSERT(session->attach_new(first_connection, 1ULL));
+    TEST_ASSERT(session->state == PortTunnelSessionState::Attached);
+    TEST_ASSERT(session->generation == 1ULL);
+    TEST_ASSERT(session->current_attachment().get() != nullptr);
+
+    TEST_ASSERT(!session->attach_new(second_connection, 2ULL));
+    TEST_ASSERT(session->attach_resumed(second_connection, 2ULL, platform::monotonic_ms()) ==
+                PortTunnelSessionResumeResult::AlreadyAttached);
+    TEST_ASSERT(session->state == PortTunnelSessionState::Attached);
+    TEST_ASSERT(session->generation == 1ULL);
+
+    std::shared_ptr<PortTunnelSessionAttachment> first_attachment =
+        session->detach_until(platform::monotonic_deadline_after_ms(1000UL), &detached);
+    TEST_ASSERT(detached);
+    TEST_ASSERT(first_attachment.get() != nullptr);
+    TEST_ASSERT(session->state == PortTunnelSessionState::Detached);
+    TEST_ASSERT(session->current_attachment().get() == nullptr);
+
+    TEST_ASSERT(session->detach_until(platform::monotonic_deadline_after_ms(1000UL), &detached).get() == nullptr);
+    TEST_ASSERT(!detached);
+    TEST_ASSERT(!session->attach_new(first_connection, 3ULL));
+    TEST_ASSERT(session->state == PortTunnelSessionState::Detached);
+
+    TEST_ASSERT(session->attach_resumed(second_connection, 2ULL, platform::monotonic_ms()) ==
+                PortTunnelSessionResumeResult::Ready);
+    TEST_ASSERT(session->state == PortTunnelSessionState::Attached);
+    TEST_ASSERT(session->generation == 2ULL);
+
+    PortTunnelSessionTeardown teardown = session->close_terminal(false);
+    TEST_ASSERT(teardown.transitioned);
+    TEST_ASSERT(session->state == PortTunnelSessionState::Closed);
+    TEST_ASSERT(session->attach_resumed(first_connection, 3ULL, platform::monotonic_ms()) ==
+                PortTunnelSessionResumeResult::Unknown);
+
+    service->shutdown();
+}
+
+static void assert_attached_session_rejects_second_resume(AppState& state) {
+    UniqueSocket client_socket;
+    std::thread server_thread;
+    const PortTunnelFrame ready = open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 1ULL);
+    const std::string session_id = Json::parse(ready.meta).at("session_id").get<std::string>();
+
+    close_tunnel(&client_socket, &server_thread);
+
+    open_v4_tunnel(state, &client_socket, &server_thread, "listen", "tcp", 2ULL, session_id);
+
+    UniqueSocket second_client;
+    std::thread second_thread;
+    open_tunnel(state, &second_client, &second_thread);
+    send_tunnel_frame(second_client.get(),
+                      json_frame(PortTunnelFrameType::TunnelOpen,
+                                 0U,
+                                 tunnel_open_meta("listen", "tcp", 3ULL, session_id)));
+    assert_tunnel_error_code(read_required_tunnel_frame_with_timeout(second_client.get(), 1000UL),
+                             "port_tunnel_already_attached");
+
+    send_tunnel_frame(
+        client_socket.get(),
+        json_frame(PortTunnelFrameType::TunnelClose,
+                   0U,
+                   Json{{"forward_id", "fwd_cpp_test"},
+                        {"generation", 2ULL},
+                        {"reason", kTunnelCloseReasonOperatorClose}}));
+    TEST_ASSERT(read_required_tunnel_frame_with_timeout(client_socket.get(), 1000UL).type ==
+                PortTunnelFrameType::TunnelClosed);
+
+    close_tunnel(&second_client, &second_thread);
+    close_tunnel(&client_socket, &server_thread);
 }
 
 static void assert_detached_session_expiry_does_not_consume_worker_budget(const fs::path& root) {
@@ -469,6 +562,8 @@ static void assert_detached_udp_bind_expiry_survives_last_external_service_ref(c
 void assert_tunnel_resume_and_expiry_paths(AppState& state) {
     const fs::path root(state.config.default_workdir);
 
+    assert_session_transition_rules_are_strict();
+    assert_attached_session_rejects_second_resume(state);
     assert_detached_session_expiry_does_not_consume_worker_budget(root);
     assert_tunnel_tcp_listener_session_can_resume_after_transport_drop(state);
     assert_tunnel_udp_bind_session_can_resume_after_transport_drop(state);
