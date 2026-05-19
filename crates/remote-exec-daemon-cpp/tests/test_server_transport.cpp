@@ -1,14 +1,62 @@
 #include "test_assert.h"
 #include <climits>
+#include <cstring>
 #include <limits>
 #include <string>
 
 #include <stdexcept>
 #include <utility>
 
+#ifndef _WIN32
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#endif
+
 #include "http/http_request.h"
 #include "http/server_transport.h"
 #include "test_socket_pair.h"
+
+#ifndef _WIN32
+namespace {
+
+void assert_socket_has_cloexec(SOCKET socket) {
+    const int flags = fcntl(socket, F_GETFD, 0);
+    TEST_ASSERT(flags >= 0);
+    TEST_ASSERT((flags & FD_CLOEXEC) != 0);
+}
+
+void assert_accept_socket_cloexec_sets_cloexec() {
+    test_network_session();
+
+    UniqueSocket listener(create_socket_cloexec(AF_INET, SOCK_STREAM, IPPROTO_TCP));
+    TEST_ASSERT(listener.valid());
+    assert_socket_has_cloexec(listener.get());
+
+    sockaddr_in address;
+    std::memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = 0;
+
+    TEST_ASSERT(bind_socket(listener.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
+    TEST_ASSERT(listen_socket(listener.get(), 1) == 0);
+
+    socklen_t address_len = sizeof(address);
+    TEST_ASSERT(socket_name(listener.get(), reinterpret_cast<sockaddr*>(&address), &address_len) == 0);
+
+    UniqueSocket client(create_socket_cloexec(AF_INET, SOCK_STREAM, IPPROTO_TCP));
+    TEST_ASSERT(client.valid());
+    assert_socket_has_cloexec(client.get());
+    TEST_ASSERT(connect_socket(client.get(), reinterpret_cast<sockaddr*>(&address), address_len) == 0);
+
+    UniqueSocket accepted(accept_socket_cloexec(listener.get(), nullptr, nullptr));
+    TEST_ASSERT(accepted.valid());
+    assert_socket_has_cloexec(accepted.get());
+}
+
+} // namespace
+#endif
 
 int main() {
     bool rejected_invalid_timeout_socket = false;
@@ -24,6 +72,10 @@ int main() {
     TEST_ASSERT(bounded_socket_io_size(static_cast<std::size_t>(INT_MAX)) == static_cast<std::size_t>(INT_MAX));
     TEST_ASSERT(bounded_socket_io_size(static_cast<std::size_t>(INT_MAX) + 1U) == static_cast<std::size_t>(INT_MAX));
     TEST_ASSERT(bounded_socket_io_size(std::numeric_limits<std::size_t>::max()) == static_cast<std::size_t>(INT_MAX));
+
+#ifndef _WIN32
+    assert_accept_socket_cloexec_sets_cloexec();
+#endif
 
     ConnectedSocketPair sockets = make_connected_socket_pair();
     UniqueSocket reader(std::move(sockets.first));

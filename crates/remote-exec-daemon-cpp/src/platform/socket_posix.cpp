@@ -37,6 +37,16 @@ bool set_socket_cloexec_flag(SOCKET socket) {
     return posix_fd::set_cloexec(socket);
 }
 
+void apply_socket_sigpipe_policy(SOCKET socket) {
+#if !REMOTE_EXEC_CPP_HAVE_MSG_NOSIGNAL && REMOTE_EXEC_CPP_HAVE_SO_NOSIGPIPE
+    int yes = 1;
+    (void)posix_eintr::retry<int>(
+        [&]() { return setsockopt(socket, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes)); });
+#else
+    (void)socket;
+#endif
+}
+
 int get_socket_name(SOCKET socket, sockaddr* address, socklen_t* address_len) {
     return posix_eintr::retry<int>([&]() { return getsockname(socket, address, address_len); });
 }
@@ -64,6 +74,7 @@ SOCKET create_socket_cloexec(int family, int type, int protocol) {
 #if REMOTE_EXEC_CPP_HAVE_SOCK_CLOEXEC
     created = posix_eintr::retry<int>([&]() { return socket(family, type | SOCK_CLOEXEC, protocol); });
     if (created != INVALID_SOCKET) {
+        apply_socket_sigpipe_policy(created);
         return created;
     }
     if (errno != EINVAL) {
@@ -75,6 +86,7 @@ SOCKET create_socket_cloexec(int family, int type, int protocol) {
         return INVALID_SOCKET;
     }
     if (set_socket_cloexec_flag(created)) {
+        apply_socket_sigpipe_policy(created);
         return created;
     }
     const int cloexec_error = errno;

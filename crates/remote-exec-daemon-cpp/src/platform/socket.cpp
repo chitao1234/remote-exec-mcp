@@ -9,7 +9,28 @@
 #include <sys/socket.h>
 
 #include "platform/posix_eintr.h"
+#include "remote_exec_cpp_config.h"
 #endif
+
+#ifndef _WIN32
+#if REMOTE_EXEC_CPP_HAVE_ACCEPT4 && REMOTE_EXEC_CPP_HAVE_SOCK_CLOEXEC
+extern "C" int accept4(int, sockaddr*, socklen_t*, int);
+#endif
+#endif
+
+namespace {
+
+#ifndef _WIN32
+int send_without_sigpipe_flags(int flags) {
+#if REMOTE_EXEC_CPP_HAVE_MSG_NOSIGNAL
+    return flags | MSG_NOSIGNAL;
+#else
+    return flags;
+#endif
+}
+#endif
+
+} // namespace
 
 std::size_t bounded_socket_io_size(std::size_t remaining) {
     const std::size_t max_chunk = static_cast<std::size_t>(INT_MAX);
@@ -29,8 +50,9 @@ int send_bounded(SOCKET client, const char* data, std::size_t remaining, int fla
 #ifdef _WIN32
     return send(client, data, static_cast<int>(bounded_socket_io_size(remaining)), flags);
 #else
+    const int send_flags = send_without_sigpipe_flags(flags);
     return posix_eintr::retry<int>(
-        [&]() { return send(client, data, static_cast<int>(bounded_socket_io_size(remaining)), flags); });
+        [&]() { return send(client, data, static_cast<int>(bounded_socket_io_size(remaining)), send_flags); });
 #endif
 }
 
@@ -61,8 +83,10 @@ int sendto_bounded(SOCKET socket, const char* data, std::size_t size, const sock
 #ifdef _WIN32
     return sendto(socket, data, static_cast<int>(size), 0, peer_address, peer_len);
 #else
-    return posix_eintr::retry<int>(
-        [&]() { return sendto(socket, data, static_cast<int>(size), 0, peer_address, peer_len); });
+    const int send_flags = send_without_sigpipe_flags(0);
+    return posix_eintr::retry<int>([&]() {
+        return sendto(socket, data, static_cast<int>(size), send_flags, peer_address, peer_len);
+    });
 #endif
 }
 
@@ -112,6 +136,18 @@ SOCKET accept_socket(SOCKET listener, sockaddr* peer_address, socklen_t* peer_le
 }
 
 SOCKET accept_socket_cloexec(SOCKET listener, sockaddr* peer_address, socklen_t* peer_len) {
+#ifndef _WIN32
+#if REMOTE_EXEC_CPP_HAVE_ACCEPT4 && REMOTE_EXEC_CPP_HAVE_SOCK_CLOEXEC
+    SOCKET accepted_with_flags = posix_eintr::retry<int>(
+        [&]() { return accept4(listener, peer_address, peer_len, SOCK_CLOEXEC); });
+    if (accepted_with_flags != INVALID_SOCKET) {
+        return accepted_with_flags;
+    }
+    if (errno != EINVAL && errno != ENOSYS) {
+        return INVALID_SOCKET;
+    }
+#endif
+#endif
     SOCKET client = accept_socket(listener, peer_address, peer_len);
     if (client == INVALID_SOCKET) {
         return client;
