@@ -23,6 +23,10 @@ inline int set_process_group(pid_t pid, pid_t pgid) {
     return posix_eintr::retry<int>([&]() { return setpgid(pid, pgid); });
 }
 
+inline pid_t create_session() {
+    return posix_eintr::retry<pid_t>([]() { return setsid(); });
+}
+
 inline int signal_process_group(pid_t pid, int signal_number) {
     return posix_eintr::retry<int>([&]() { return kill(-pid, signal_number); });
 }

@@ -542,7 +542,9 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
         }
 
         if (pid == 0) {
-            setsid();
+            if (posix_process::create_session() < 0) {
+                _exit(126);
+            }
             const int slave_fd = posix_fd::open_path(pty.slave_path.c_str(), O_RDWR);
             if (slave_fd < 0) {
                 _exit(126);
