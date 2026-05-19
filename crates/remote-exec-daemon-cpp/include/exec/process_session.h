@@ -24,6 +24,9 @@ public:
     static std::unique_ptr<ProcessSession>
     launch(const std::string& command, const std::string& workdir, const std::string& shell, bool login, bool tty);
 
+    // Owns OS-specific process handles, stdio/PTY handles, process waiting,
+    // and termination mechanics. Callers own daemon session identity and
+    // output-drain policy; backends should not mutate the session map.
     virtual void write_stdin(const std::string& chars) = 0;
     virtual void resize_pty(unsigned short rows, unsigned short cols) = 0;
     virtual std::string read_output(bool block, bool* eof, std::string* carry) = 0;

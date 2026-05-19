@@ -10,6 +10,19 @@
 
 class ProcessSession;
 
+enum class SessionOutputDrainStopReason {
+    None,
+    OutputEof,
+    StoreClosing,
+    PumpError,
+    IdleGraceExpired,
+    MaxGraceExpired,
+    DescendantTerminateUnsupported,
+    DescendantTerminateTimeout,
+};
+
+const char* session_output_drain_stop_reason_name(SessionOutputDrainStopReason reason);
+
 struct SessionOutputState {
     SessionOutputState();
 
@@ -19,6 +32,18 @@ struct SessionOutputState {
     bool exited;
     int exit_code;
     std::uint64_t generation;
+
+    // Drain ownership lives with the session output state. Process backends
+    // only answer whether descendants can be asked to close inherited output
+    // handles; SessionStore and the output pump use this state to decide when
+    // a parent-exited session is still publicly running.
+    bool drain_started;
+    std::uint64_t drain_started_at_ms;
+    std::uint64_t drain_last_output_at_ms;
+    bool descendant_cleanup_attempted;
+    bool descendant_cleanup_supported;
+    std::uint64_t descendant_cleanup_started_at_ms;
+    SessionOutputDrainStopReason last_drain_stop_reason;
 };
 
 struct LiveSession {

@@ -1,6 +1,7 @@
 #include "exec/session_pump.h"
 
 #include <algorithm>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -18,9 +19,73 @@ const unsigned long DEFAULT_EXIT_DRAIN_IDLE_GRACE_MS = 250UL;
 const unsigned long DEFAULT_EXIT_DRAIN_MAX_GRACE_MS = 2000UL;
 const unsigned long DEFAULT_EXIT_DRAIN_TERMINATE_QUIET_MS = 25UL;
 
+std::uint64_t deadline_after_ms(std::uint64_t started_at_ms, unsigned long timeout_ms) {
+    const std::uint64_t timeout = static_cast<std::uint64_t>(timeout_ms);
+    const std::uint64_t max_deadline = std::numeric_limits<std::uint64_t>::max();
+    return max_deadline - started_at_ms < timeout ? max_deadline : started_at_ms + timeout;
+}
+
+void record_session_drain_stop_locked(LiveSession* session, SessionOutputDrainStopReason reason) {
+    session->output_.last_drain_stop_reason = reason;
+}
+
+SessionOutputDrainResult make_session_drain_result_locked(LiveSession* session,
+                                                          bool completed,
+                                                          SessionOutputDrainStopReason reason) {
+    record_session_drain_stop_locked(session, reason);
+    return SessionOutputDrainResult(completed, reason);
+}
+
+void ensure_session_drain_started_locked(LiveSession* session) {
+    if (session->output_.drain_started) {
+        return;
+    }
+    const std::uint64_t now = platform::monotonic_ms();
+    session->output_.drain_started = true;
+    session->output_.drain_started_at_ms = now;
+    session->output_.drain_last_output_at_ms = now;
+}
+
+void note_session_drain_output_locked(LiveSession* session) {
+    if (!session->output_.drain_started) {
+        ensure_session_drain_started_locked(session);
+    }
+    session->output_.drain_last_output_at_ms = platform::monotonic_ms();
+    record_session_drain_stop_locked(session, SessionOutputDrainStopReason::None);
+}
+
+SessionOutputDrainStopReason grace_deadline_stop_reason_locked(LiveSession* session,
+                                                               const SessionOutputDrainPolicy& policy,
+                                                               std::uint64_t* next_deadline_ms) {
+    const std::uint64_t max_deadline =
+        deadline_after_ms(session->output_.drain_started_at_ms, policy.max_grace_ms);
+    const std::uint64_t idle_deadline =
+        deadline_after_ms(session->output_.drain_last_output_at_ms, policy.idle_grace_ms);
+
+    if (platform::monotonic_deadline_expired(max_deadline)) {
+        return SessionOutputDrainStopReason::MaxGraceExpired;
+    }
+    if (platform::monotonic_deadline_expired(idle_deadline)) {
+        return SessionOutputDrainStopReason::IdleGraceExpired;
+    }
+
+    *next_deadline_ms = std::min(max_deadline, idle_deadline);
+    return SessionOutputDrainStopReason::None;
+}
+
+SessionOutputDrainStopReason eof_stop_reason_locked(const LiveSession* session) {
+    if (session->output_.last_drain_stop_reason == SessionOutputDrainStopReason::PumpError) {
+        return SessionOutputDrainStopReason::PumpError;
+    }
+    return SessionOutputDrainStopReason::OutputEof;
+}
+
 void append_session_output_locked(LiveSession* session, const std::string& chunk) {
     if (!chunk.empty()) {
         session->output_.buffered_output += chunk;
+        if (session->output_.exited) {
+            note_session_drain_output_locked(session);
+        }
         ++session->output_.generation;
         session->cond_.broadcast();
     }
@@ -56,7 +121,7 @@ void pump_session_output(const std::shared_ptr<LiveSession>& session) {
             log_message(LOG_WARN, "session", std::string("session output pump failed: ") + ex.what());
             BasicLockGuard lock(session->mutex_);
             session->output_.decode_carry = carry;
-            finish_session_output_locked(session.get());
+            finish_session_output_locked(session.get(), SessionOutputDrainStopReason::PumpError);
             session->retired = true;
             return;
         }
@@ -68,13 +133,35 @@ void pump_session_output(const std::shared_ptr<LiveSession>& session) {
         session->output_.decode_carry = carry;
         append_session_output_locked(session.get(), chunk);
         if (eof) {
-            finish_session_output_locked(session.get());
+            finish_session_output_locked(session.get(), SessionOutputDrainStopReason::OutputEof);
             return;
         }
     }
 }
 
 } // namespace
+
+const char* session_output_drain_stop_reason_name(SessionOutputDrainStopReason reason) {
+    switch (reason) {
+    case SessionOutputDrainStopReason::None:
+        return "none";
+    case SessionOutputDrainStopReason::OutputEof:
+        return "output_eof";
+    case SessionOutputDrainStopReason::StoreClosing:
+        return "store_closing";
+    case SessionOutputDrainStopReason::PumpError:
+        return "pump_error";
+    case SessionOutputDrainStopReason::IdleGraceExpired:
+        return "idle_grace_expired";
+    case SessionOutputDrainStopReason::MaxGraceExpired:
+        return "max_grace_expired";
+    case SessionOutputDrainStopReason::DescendantTerminateUnsupported:
+        return "descendant_terminate_unsupported";
+    case SessionOutputDrainStopReason::DescendantTerminateTimeout:
+        return "descendant_terminate_timeout";
+    }
+    return "unknown";
+}
 
 SessionOutputDrainPolicy default_session_output_drain_policy() {
     SessionOutputDrainPolicy policy;
@@ -83,6 +170,13 @@ SessionOutputDrainPolicy default_session_output_drain_policy() {
     policy.terminate_quiet_ms = DEFAULT_EXIT_DRAIN_TERMINATE_QUIET_MS;
     return policy;
 }
+
+SessionOutputDrainResult::SessionOutputDrainResult()
+    : completed(false), reason(SessionOutputDrainStopReason::None) {}
+
+SessionOutputDrainResult::SessionOutputDrainResult(bool completed_value,
+                                                   SessionOutputDrainStopReason reason_value)
+    : completed(completed_value), reason(reason_value) {}
 
 void wait_for_generation_change_locked(LiveSession* session,
                                        std::uint64_t baseline_generation,
@@ -110,6 +204,7 @@ bool mark_session_exit_locked(LiveSession* session) {
     if (session->process->has_exited(&exit_code)) {
         session->output_.exited = true;
         session->output_.exit_code = exit_code;
+        ensure_session_drain_started_locked(session);
         ++session->output_.generation;
         session->cond_.broadcast();
         return true;
@@ -117,13 +212,17 @@ bool mark_session_exit_locked(LiveSession* session) {
     return false;
 }
 
-void finish_session_output_locked(LiveSession* session) {
+void finish_session_output_locked(LiveSession* session, SessionOutputDrainStopReason reason) {
     const std::string flushed = session->process->flush_carry(&session->output_.decode_carry);
     if (!flushed.empty()) {
         session->output_.buffered_output += flushed;
+        if (session->output_.exited) {
+            note_session_drain_output_locked(session);
+        }
     }
     session->output_.eof = true;
     mark_session_exit_locked(session);
+    record_session_drain_stop_locked(session, reason);
     ++session->output_.generation;
     session->cond_.broadcast();
 }
@@ -154,49 +253,65 @@ std::string take_session_output_locked(LiveSession* session, unsigned long max_o
     return output;
 }
 
-bool drain_exited_session_output_locked(LiveSession* session,
-                                        std::string* output,
-                                        unsigned long max_output_tokens,
-                                        const SessionOutputDrainPolicy& policy) {
-    platform::MonotonicDeadline max_deadline(policy.max_grace_ms);
-    platform::MonotonicDeadline idle_deadline(policy.idle_grace_ms);
+SessionOutputDrainResult drain_exited_session_output_locked(LiveSession* session,
+                                                            std::string* output,
+                                                            unsigned long max_output_tokens,
+                                                            const SessionOutputDrainPolicy& policy) {
+    ensure_session_drain_started_locked(session);
 
+    SessionOutputDrainStopReason grace_stop_reason = SessionOutputDrainStopReason::None;
     for (;;) {
         if (!session->output_.buffered_output.empty()) {
             *output += take_session_output_locked(session, max_output_tokens);
-            idle_deadline.reset_after(policy.idle_grace_ms);
+            note_session_drain_output_locked(session);
         }
-        if (session->output_.eof || session->closing) {
-            return true;
+        if (session->output_.eof) {
+            return make_session_drain_result_locked(session, true, eof_stop_reason_locked(session));
+        }
+        if (session->closing) {
+            return make_session_drain_result_locked(session, true, SessionOutputDrainStopReason::StoreClosing);
         }
 
-        if (max_deadline.expired() || idle_deadline.expired()) {
+        std::uint64_t next_deadline_ms = 0ULL;
+        grace_stop_reason = grace_deadline_stop_reason_locked(session, policy, &next_deadline_ms);
+        if (grace_stop_reason != SessionOutputDrainStopReason::None) {
             break;
         }
 
         const std::uint64_t seen_generation = session->output_.generation;
-        wait_for_generation_change_locked(
-            session, seen_generation, std::min(max_deadline.deadline_ms(), idle_deadline.deadline_ms()), 0UL);
+        wait_for_generation_change_locked(session, seen_generation, next_deadline_ms, 0UL);
+    }
+    record_session_drain_stop_locked(session, grace_stop_reason);
+
+    if (!session->output_.descendant_cleanup_attempted) {
+        session->output_.descendant_cleanup_attempted = true;
+        session->output_.descendant_cleanup_supported = terminate_descendants_after_exit_locked(session);
+        session->output_.descendant_cleanup_started_at_ms = platform::monotonic_ms();
+    }
+    if (!session->output_.descendant_cleanup_supported) {
+        return make_session_drain_result_locked(
+            session, false, SessionOutputDrainStopReason::DescendantTerminateUnsupported);
     }
 
-    if (!terminate_descendants_after_exit_locked(session)) {
-        return false;
-    }
-
-    platform::MonotonicDeadline terminate_deadline(policy.terminate_quiet_ms);
     for (;;) {
         if (!session->output_.buffered_output.empty()) {
             *output += take_session_output_locked(session, max_output_tokens);
         }
-        if (session->output_.eof || session->closing) {
-            return true;
+        if (session->output_.eof) {
+            return make_session_drain_result_locked(session, true, eof_stop_reason_locked(session));
+        }
+        if (session->closing) {
+            return make_session_drain_result_locked(session, true, SessionOutputDrainStopReason::StoreClosing);
         }
 
-        if (terminate_deadline.expired()) {
-            return session->output_.eof || session->closing;
+        const std::uint64_t terminate_deadline_ms =
+            deadline_after_ms(session->output_.descendant_cleanup_started_at_ms, policy.terminate_quiet_ms);
+        if (platform::monotonic_deadline_expired(terminate_deadline_ms)) {
+            return make_session_drain_result_locked(
+                session, false, SessionOutputDrainStopReason::DescendantTerminateTimeout);
         }
 
         const std::uint64_t seen_generation = session->output_.generation;
-        wait_for_generation_change_locked(session, seen_generation, terminate_deadline.deadline_ms(), 0UL);
+        wait_for_generation_change_locked(session, seen_generation, terminate_deadline_ms, 0UL);
     }
 }

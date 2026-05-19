@@ -39,6 +39,7 @@ struct PollResult {
     std::string output;
     bool completed;
     int exit_code;
+    SessionOutputDrainStopReason drain_stop_reason;
 };
 
 const unsigned long EXIT_POLL_INTERVAL_MS = 25UL;
@@ -61,6 +62,12 @@ struct SessionSnapshot {
 
 Json empty_exec_warnings() {
     return Json::array();
+}
+
+void add_drain_stop_reason(LogMessageBuilder* message, SessionOutputDrainStopReason reason) {
+    if (reason != SessionOutputDrainStopReason::None) {
+        message->quoted_field("drain_stop_reason", session_output_drain_stop_reason_name(reason));
+    }
 }
 
 Json session_limit_warning(const std::string& target, unsigned long open_sessions) {
@@ -128,15 +135,17 @@ PollResult wait_for_session_activity(const std::shared_ptr<LiveSession>& session
         }
         if (snapshot.exited) {
             const SessionOutputDrainPolicy drain_policy = default_session_output_drain_policy();
-            if (!drain_exited_session_output_locked(session.get(), &output, max_output_tokens, drain_policy)) {
-                return PollResult{output, false, 0};
+            const SessionOutputDrainResult drain_result =
+                drain_exited_session_output_locked(session.get(), &output, max_output_tokens, drain_policy);
+            if (!drain_result.completed) {
+                return PollResult{output, false, 0, drain_result.reason};
             }
             const SessionSnapshot completed = session_snapshot_locked(*session);
-            return PollResult{output, true, completed.exit_code};
+            return PollResult{output, true, completed.exit_code, drain_result.reason};
         }
 
         if (timeout_ms == 0UL || deadline.expired()) {
-            return PollResult{output, false, 0};
+            return PollResult{output, false, 0, SessionOutputDrainStopReason::None};
         }
 
         wait_for_generation_change_locked(session.get(), seen_generation, deadline.deadline_ms(), EXIT_POLL_INTERVAL_MS);
@@ -220,13 +229,17 @@ Json finalize_completed_write_stdin(BasicMutex& mutex,
         .quoted_field("daemon_session_id", daemon_session_id)
         .field("exit_code", poll_result.exit_code)
         .field("open_sessions", open_sessions);
+    add_drain_stop_reason(&message, poll_result.drain_stop_reason);
     log_message(LOG_INFO, "session_store", message.str());
     return response;
 }
 
 } // namespace
 
-SessionOutputState::SessionOutputState() : eof(false), exited(false), exit_code(0), generation(0) {
+SessionOutputState::SessionOutputState()
+    : eof(false), exited(false), exit_code(0), generation(0), drain_started(false), drain_started_at_ms(0),
+      drain_last_output_at_ms(0), descendant_cleanup_attempted(false), descendant_cleanup_supported(false),
+      descendant_cleanup_started_at_ms(0), last_drain_stop_reason(SessionOutputDrainStopReason::None) {
 }
 
 LiveSession::LiveSession()
@@ -467,6 +480,7 @@ Json SessionStore::start_command(const std::string& target,
         {
             LogMessageBuilder message("command completed before session handoff");
             message.field("exit_code", poll_result.exit_code).field("output_chars", poll_result.output.size());
+            add_drain_stop_reason(&message, poll_result.drain_stop_reason);
             log_message(LOG_INFO, "session_store", message.str());
         }
         return response;
@@ -534,6 +548,7 @@ Json SessionStore::write_stdin(const std::string& daemon_session_id,
     {
         LogMessageBuilder message("session still running");
         message.quoted_field("daemon_session_id", session->id);
+        add_drain_stop_reason(&message, poll_result.drain_stop_reason);
         log_message(LOG_INFO, "session_store", message.str());
     }
     return build_session_response(session->id.c_str(),

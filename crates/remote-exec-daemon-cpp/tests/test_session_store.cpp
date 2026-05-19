@@ -23,8 +23,135 @@
 #include "exec/session_store.h"
 #include "test_filesystem.h"
 #include "test_text_file.h"
+#include "../src/exec/session_pump_internal.h"
 
 namespace fs = test_fs;
+
+class DrainMockProcessSession : public ProcessSession {
+  public:
+    explicit DrainMockProcessSession(bool descendant_cleanup_supported)
+        : descendant_cleanup_supported_(descendant_cleanup_supported), terminate_descendants_calls_(0) {}
+
+    void write_stdin(const std::string& chars) override { (void)chars; }
+
+    void resize_pty(unsigned short rows, unsigned short cols) override {
+        (void)rows;
+        (void)cols;
+    }
+
+    std::string read_output(bool block, bool* eof, std::string* carry) override {
+        (void)block;
+        (void)carry;
+        *eof = false;
+        return std::string();
+    }
+
+    std::string flush_carry(std::string* carry) override {
+        carry->clear();
+        return std::string();
+    }
+
+    bool has_exited(int* exit_code) override {
+        *exit_code = 0;
+        return true;
+    }
+
+    void terminate() override {}
+
+    bool terminate_descendants() override {
+        ++terminate_descendants_calls_;
+        return descendant_cleanup_supported_;
+    }
+
+    int terminate_descendants_calls() const { return terminate_descendants_calls_; }
+
+  private:
+    bool descendant_cleanup_supported_;
+    int terminate_descendants_calls_;
+};
+
+static SessionOutputDrainPolicy test_drain_policy(unsigned long idle_ms,
+                                                  unsigned long max_ms,
+                                                  unsigned long terminate_quiet_ms) {
+    SessionOutputDrainPolicy policy;
+    policy.idle_grace_ms = idle_ms;
+    policy.max_grace_ms = max_ms;
+    policy.terminate_quiet_ms = terminate_quiet_ms;
+    return policy;
+}
+
+static void mark_mock_session_exited(LiveSession* session) {
+    session->output_.exited = true;
+    session->output_.exit_code = 0;
+}
+
+static void assert_explicit_drain_stop_reasons() {
+    {
+        LiveSession session;
+        DrainMockProcessSession* process = new DrainMockProcessSession(false);
+        session.process.reset(process);
+        mark_mock_session_exited(&session);
+
+        std::string output;
+        BasicLockGuard lock(session.mutex_);
+        const SessionOutputDrainResult result = drain_exited_session_output_locked(
+            &session, &output, DEFAULT_MAX_OUTPUT_TOKENS, test_drain_policy(100UL, 0UL, 0UL));
+        TEST_ASSERT(!result.completed);
+        TEST_ASSERT(result.reason == SessionOutputDrainStopReason::DescendantTerminateUnsupported);
+        TEST_ASSERT(session.output_.last_drain_stop_reason ==
+                    SessionOutputDrainStopReason::DescendantTerminateUnsupported);
+        TEST_ASSERT(session.output_.descendant_cleanup_attempted);
+        TEST_ASSERT(!session.output_.descendant_cleanup_supported);
+        TEST_ASSERT(process->terminate_descendants_calls() == 1);
+
+        const SessionOutputDrainResult second_result = drain_exited_session_output_locked(
+            &session, &output, DEFAULT_MAX_OUTPUT_TOKENS, test_drain_policy(100UL, 0UL, 0UL));
+        TEST_ASSERT(!second_result.completed);
+        TEST_ASSERT(second_result.reason == SessionOutputDrainStopReason::DescendantTerminateUnsupported);
+        TEST_ASSERT(process->terminate_descendants_calls() == 1);
+    }
+
+    {
+        LiveSession session;
+        DrainMockProcessSession* process = new DrainMockProcessSession(true);
+        session.process.reset(process);
+        mark_mock_session_exited(&session);
+
+        std::string output;
+        BasicLockGuard lock(session.mutex_);
+        const SessionOutputDrainResult result = drain_exited_session_output_locked(
+            &session, &output, DEFAULT_MAX_OUTPUT_TOKENS, test_drain_policy(100UL, 0UL, 0UL));
+        TEST_ASSERT(!result.completed);
+        TEST_ASSERT(result.reason == SessionOutputDrainStopReason::DescendantTerminateTimeout);
+        TEST_ASSERT(session.output_.last_drain_stop_reason ==
+                    SessionOutputDrainStopReason::DescendantTerminateTimeout);
+        TEST_ASSERT(session.output_.descendant_cleanup_attempted);
+        TEST_ASSERT(session.output_.descendant_cleanup_supported);
+        TEST_ASSERT(process->terminate_descendants_calls() == 1);
+
+        const SessionOutputDrainResult second_result = drain_exited_session_output_locked(
+            &session, &output, DEFAULT_MAX_OUTPUT_TOKENS, test_drain_policy(100UL, 0UL, 0UL));
+        TEST_ASSERT(!second_result.completed);
+        TEST_ASSERT(second_result.reason == SessionOutputDrainStopReason::DescendantTerminateTimeout);
+        TEST_ASSERT(process->terminate_descendants_calls() == 1);
+    }
+
+    {
+        LiveSession session;
+        session.process.reset(new DrainMockProcessSession(false));
+        mark_mock_session_exited(&session);
+        session.output_.eof = true;
+        session.output_.last_drain_stop_reason = SessionOutputDrainStopReason::PumpError;
+
+        std::string output;
+        BasicLockGuard lock(session.mutex_);
+        const SessionOutputDrainResult result = drain_exited_session_output_locked(
+            &session, &output, DEFAULT_MAX_OUTPUT_TOKENS, test_drain_policy(0UL, 0UL, 0UL));
+        TEST_ASSERT(result.completed);
+        TEST_ASSERT(result.reason == SessionOutputDrainStopReason::PumpError);
+        TEST_ASSERT(session.output_.last_drain_stop_reason == SessionOutputDrainStopReason::PumpError);
+    }
+}
 
 #ifndef _WIN32
 class ScopedEnvVar {
@@ -1217,6 +1344,7 @@ int main() {
     const YieldTimeConfig yield_time = YieldTimeConfig();
     const std::string shell = stable_test_shell();
 
+    assert_explicit_drain_stop_reasons();
     assert_completed_command_output(store, root, shell, yield_time);
     assert_token_limiting(store, root, shell, yield_time);
     assert_posix_locale_and_late_output(store, root, shell, yield_time);
