@@ -1,8 +1,10 @@
+#include <exception>
 #include <sstream>
 #include <string>
 
 #include <windows.h>
 
+#include "core/logging.h"
 #include "platform/path_utils.h"
 #include "platform/win32_error.h"
 
@@ -53,7 +55,10 @@ std::string error_message_from_code(const char* prefix, unsigned long error) {
         try {
             out << ": " << path_utils::utf8_from_wide(wide_message) << " (error " << error << ")";
             return out.str();
-        } catch (const std::exception&) {
+        } catch (const std::exception& ex) {
+            log_message(LOG_WARN,
+                        "win32_error",
+                        std::string("Win32 error message conversion failed; using numeric fallback: ") + ex.what());
         }
     }
 

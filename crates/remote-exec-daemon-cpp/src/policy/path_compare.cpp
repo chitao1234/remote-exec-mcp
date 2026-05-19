@@ -7,6 +7,7 @@
 #include <windows.h>
 #endif
 
+#include "core/logging.h"
 #include "policy/path_compare.h"
 #include "policy/path_policy.h"
 
@@ -141,7 +142,12 @@ bool component_equal(const std::string& left, const std::string& right) {
                    static_cast<int>(left_wide.size()),
                    right_wide.empty() ? nullptr : right_wide.data(),
                    static_cast<int>(right_wide.size())) == CSTR_EQUAL;
-    } catch (const std::exception&) {
+    } catch (const std::exception& ex) {
+        LogMessageBuilder message("Windows path comparison fallback to ASCII case folding");
+        message.quoted_field("left", preview_text(left, 120))
+            .quoted_field("right", preview_text(right, 120))
+            .raw(std::string("error=") + ex.what());
+        log_message(LOG_WARN, "path_policy", message.str());
         return ascii_case_equal(left, right);
     }
 }

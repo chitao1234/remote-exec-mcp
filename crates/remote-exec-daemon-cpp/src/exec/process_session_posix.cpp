@@ -18,6 +18,7 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include "core/logging.h"
 #include "platform/platform.h"
 #include "exec/posix_child_reaper.h"
 #include "platform/posix_fd.h"
@@ -516,7 +517,10 @@ bool process_session_supports_pty() {
         try {
             PosixPtyPair pair = create_posix_pty();
             return pair.master.valid() && !pair.slave_path.empty();
-        } catch (const std::exception&) {
+        } catch (const std::exception& ex) {
+            log_message(LOG_WARN,
+                        "process_session",
+                        std::string("POSIX PTY probe failed; tty support disabled: ") + ex.what());
             return false;
         }
     }();

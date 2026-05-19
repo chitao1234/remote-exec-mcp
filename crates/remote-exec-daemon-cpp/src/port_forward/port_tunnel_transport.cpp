@@ -245,9 +245,11 @@ void PortTunnelConnection::run() {
         }
     } catch (const std::exception& ex) {
         close_mode = PortTunnelCloseMode::TerminalFailure;
+        log_tunnel_exception("run port tunnel connection", ex);
         send_terminal_error(0U, "invalid_port_tunnel", ex.what());
     } catch (...) {
         close_mode = PortTunnelCloseMode::TerminalFailure;
+        log_unknown_tunnel_exception("run port tunnel connection");
         send_terminal_error(0U, "invalid_port_tunnel", "unknown port tunnel failure");
     }
     log_message(LOG_DEBUG,
@@ -298,8 +300,10 @@ void PortTunnelConnection::handle_frame(const PortTunnelFrame& frame) {
             break;
         }
     } catch (const PortForwardError& ex) {
+        log_tunnel_exception("handle port tunnel frame", ex);
         send_error(frame.stream_id, ex.code(), ex.what());
     } catch (const std::exception& ex) {
+        log_tunnel_exception("handle port tunnel frame", ex);
         send_error(frame.stream_id, "internal_error", ex.what());
     }
 }

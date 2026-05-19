@@ -86,6 +86,7 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
         try {
             set_socket_nonblocking(accepted_socket.get(), false);
         } catch (const std::exception& ex) {
+            log_tunnel_exception("configure accepted tcp stream", ex);
             connection = session->connection_for_attachment(attachment);
             if (connection.get() != nullptr) {
                 connection->send_error(listener->stream_id, "port_accept_failed", ex.what());
@@ -245,6 +246,7 @@ void PortTunnelConnection::tcp_write_loop(uint32_t stream_id, std::shared_ptr<Tu
         try {
             send_all_bytes(stream->socket.get(), reinterpret_cast<const char*>(data.data()), data.size());
         } catch (const std::exception& ex) {
+            log_tunnel_exception("write tcp stream", ex);
             if (!stream->is_closed()) {
                 send_error(stream_id, "port_write_failed", ex.what());
             }

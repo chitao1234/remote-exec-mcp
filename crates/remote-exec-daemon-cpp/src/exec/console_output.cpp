@@ -1,9 +1,11 @@
+#include <atomic>
 #include <cwchar>
 #include <stdexcept>
 #include <string>
 
 #include <windows.h>
 
+#include "core/logging.h"
 #include "exec/console_output.h"
 #include "platform/win32_error.h"
 
@@ -11,6 +13,18 @@ namespace {
 
 std::string replacement_utf8() {
     return "\xEF\xBF\xBD";
+}
+
+void log_console_decode_fallback_once(const char* fallback, const std::exception& ex, bool ansi_fallback) {
+    static std::atomic<bool> logged_oem_to_ansi(false);
+    static std::atomic<bool> logged_ansi_to_replacement(false);
+    std::atomic<bool>* flag = ansi_fallback ? &logged_oem_to_ansi : &logged_ansi_to_replacement;
+    if (flag->exchange(true)) {
+        return;
+    }
+    log_message(LOG_WARN,
+                "console_output",
+                std::string("console output decode failed; falling back to ") + fallback + ": " + ex.what());
 }
 
 std::string utf8_from_wide(const std::wstring& wide) {
@@ -70,10 +84,12 @@ std::string decode_console_output(std::string* carry, const std::string& raw_chu
 
     try {
         return utf8_from_code_page(GetOEMCP(), raw);
-    } catch (const std::exception&) {
+    } catch (const std::exception& ex) {
+        log_console_decode_fallback_once("ANSI code page", ex, true);
         try {
             return utf8_from_code_page(CP_ACP, raw);
-        } catch (const std::exception&) {
+        } catch (const std::exception& fallback_ex) {
+            log_console_decode_fallback_once("replacement characters", fallback_ex, false);
             std::string fallback;
             for (std::size_t index = 0; index < raw.size(); ++index) {
                 const unsigned char ch = static_cast<unsigned char>(raw[index]);

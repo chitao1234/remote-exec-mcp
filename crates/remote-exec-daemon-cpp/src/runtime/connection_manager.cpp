@@ -1,7 +1,9 @@
 #include "runtime/connection_manager.h"
 
+#include <exception>
 #include <vector>
 
+#include "core/logging.h"
 #include "runtime/daemon_thread.h"
 
 namespace {
@@ -109,7 +111,23 @@ bool ConnectionManager::try_start(UniqueSocket client, std::function<void(SOCKET
                 start_gate->wait();
                 run_worker(record);
             }));
+        } catch (const std::exception& ex) {
+            log_message(LOG_WARN,
+                        "connection_manager",
+                        LogMessageBuilder("worker thread spawn failed")
+                            .field("worker_id", record->worker_id)
+                            .raw(std::string("error=") + ex.what())
+                            .str());
+            close_worker_socket(record);
+            erase_worker_record_locked(record);
+            return false;
         } catch (...) {
+            log_message(LOG_WARN,
+                        "connection_manager",
+                        LogMessageBuilder("worker thread spawn failed")
+                            .field("worker_id", record->worker_id)
+                            .raw("error=unknown exception")
+                            .str());
             close_worker_socket(record);
             erase_worker_record_locked(record);
             return false;
