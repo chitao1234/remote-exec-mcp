@@ -20,7 +20,7 @@
 #include "scoped_file.h"
 #include "server.h"
 #include "server_runtime.h"
-#include "stdio_retry.h"
+#include "../stdio_retry.h"
 
 #ifndef _WIN32
 namespace {

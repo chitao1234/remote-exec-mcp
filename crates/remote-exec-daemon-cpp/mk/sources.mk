@@ -28,7 +28,13 @@ POSIX_PROCESS_SESSION_SRCS = \
 	$(SOURCE_PREFIX)src/exec/process_session_posix.cpp \
 	$(POSIX_CHILD_REAPER_SRCS)
 
-DAEMON_THREAD_SRCS = $(SOURCE_PREFIX)src/daemon_thread.cpp
+DAEMON_THREAD_SRCS = $(SOURCE_PREFIX)src/runtime/daemon_thread.cpp
+
+RUNTIME_SRCS = \
+	$(SOURCE_PREFIX)src/runtime/server.cpp \
+	$(SOURCE_PREFIX)src/runtime/server_runtime.cpp \
+	$(SOURCE_PREFIX)src/runtime/connection_manager.cpp \
+	$(DAEMON_THREAD_SRCS)
 
 PLATFORM_SRCS = $(SOURCE_PREFIX)src/platform/platform.cpp
 
@@ -109,12 +115,9 @@ BASE_COMMON_SRCS_NO_MAIN = \
 	$(PLATFORM_SRCS) \
 	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/shell_policy.cpp \
-	$(SOURCE_PREFIX)src/server.cpp \
-	$(SOURCE_PREFIX)src/server_runtime.cpp \
+	$(RUNTIME_SRCS) \
 	$(SESSION_STORE_SRCS) \
 	$(PATCH_SRCS) \
-	$(SOURCE_PREFIX)src/connection_manager.cpp \
-	$(DAEMON_THREAD_SRCS) \
 	$(ROUTE_SRCS) \
 	$(PORT_FORWARD_SRCS) \
 	$(BASE64_SRCS) \
@@ -231,7 +234,7 @@ HOST_SESSION_STORE_SRCS = \
 
 HOST_CONNECTION_MANAGER_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)tests/test_connection_manager.cpp \
-	$(SOURCE_PREFIX)src/connection_manager.cpp \
+	$(SOURCE_PREFIX)src/runtime/connection_manager.cpp \
 	$(SOURCE_PREFIX)src/http/http_codec.cpp \
 	$(SOURCE_PREFIX)src/http/http_request.cpp \
 	$(SOURCE_PREFIX)src/http/http_helpers.cpp \

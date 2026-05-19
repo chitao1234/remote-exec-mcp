@@ -4,7 +4,7 @@
 #include <stdexcept>
 #include <string>
 
-#include "../daemon_thread.h"
+#include "../runtime/daemon_thread.h"
 #include "logging.h"
 #include "platform.h"
 #include "process_session.h"
