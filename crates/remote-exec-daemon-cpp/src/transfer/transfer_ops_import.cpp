@@ -9,14 +9,7 @@
 #include <string>
 #include <vector>
 
-#ifndef _WIN32
-#include <sys/stat.h>
-#endif
-
 #include "platform/path_utils.h"
-#ifndef _WIN32
-#include "platform/posix_eintr.h"
-#endif
 #include "rpc/rpc_failures.h"
 #include "platform/scoped_file.h"
 #include "core/stdio_retry.h"
@@ -299,11 +292,7 @@ void copy_reader_to_file(TransferArchiveReader& reader,
         skip_entry_padding(reader, size);
 #ifndef _WIN32
         if ((mode & 0111U) != 0U) {
-            struct stat st;
-            if (posix_eintr::retry<int>([&]() { return fstat(fileno(output.get()), &st); }) != 0) {
-                throw std::runtime_error("unable to read destination file mode");
-            }
-            if (posix_eintr::retry<int>([&]() { return fchmod(fileno(output.get()), st.st_mode | 0111); }) != 0) {
+            if (!path_utils::add_executable_bits(output.get())) {
                 throw std::runtime_error("unable to update destination file mode");
             }
         }

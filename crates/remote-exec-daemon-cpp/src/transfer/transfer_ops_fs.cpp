@@ -7,20 +7,13 @@
 #include <vector>
 
 #ifdef _WIN32
-#include <direct.h>
 #include <sys/stat.h>
 #include <windows.h>
 #else
-#include <dirent.h>
 #include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
 #endif
 
 #include "platform/path_utils.h"
-#ifndef _WIN32
-#include "platform/posix_eintr.h"
-#endif
 #include "rpc/rpc_failures.h"
 #include "transfer_ops_internal.h"
 
@@ -49,50 +42,6 @@ bool stat_is_regular_file(const struct stat& st) {
 bool stat_is_directory(const struct stat& st) {
     return (st.st_mode & S_IFMT) == S_IFDIR;
 }
-
-#ifdef _WIN32
-class ScopedFindHandle {
-  public:
-    explicit ScopedFindHandle(HANDLE handle) : handle_(handle) {
-    }
-
-    ~ScopedFindHandle() {
-        if (handle_ != INVALID_HANDLE_VALUE) {
-            FindClose(handle_);
-        }
-    }
-
-    HANDLE get() const {
-        return handle_;
-    }
-
-    bool valid() const {
-        return handle_ != INVALID_HANDLE_VALUE;
-    }
-
-  private:
-    HANDLE handle_;
-};
-#else
-class ScopedDirHandle {
-  public:
-    explicit ScopedDirHandle(DIR* dir) : dir_(dir) {
-    }
-
-    ~ScopedDirHandle() {
-        if (dir_ != nullptr) {
-            closedir(dir_);
-        }
-    }
-
-    DIR* get() const {
-        return dir_;
-    }
-
-  private:
-    DIR* dir_;
-};
-#endif
 
 static const std::size_t MAX_REMOVE_DEPTH = 256;
 
@@ -235,7 +184,7 @@ void write_symlink(const std::string& target, const std::string& path) {
             throw std::runtime_error("unable to remove existing file " + path);
         }
     }
-    if (posix_eintr::retry<int>([&]() { return symlink(target.c_str(), path.c_str()); }) != 0) {
+    if (!path_utils::create_symlink(target, path)) {
         throw std::runtime_error("unable to create symlink " + path);
     }
 #endif
@@ -243,63 +192,11 @@ void write_symlink(const std::string& target, const std::string& path) {
 
 std::vector<DirectoryEntry> list_directory_entries(const std::string& path) {
     std::vector<DirectoryEntry> entries;
-#ifdef _WIN32
-    std::wstring pattern = path_utils::wide_from_utf8(path);
-    if (!pattern.empty() && pattern[pattern.size() - 1] != '\\' && pattern[pattern.size() - 1] != '/') {
-        pattern.push_back(L'\\');
+    const std::vector<path_utils::DirectoryEntryInfo> platform_entries = path_utils::read_directory_entries(path);
+    for (std::size_t i = 0; i < platform_entries.size(); ++i) {
+        const path_utils::DirectoryEntryInfo& entry = platform_entries[i];
+        entries.push_back(DirectoryEntry{entry.name, entry.is_directory, entry.is_regular_file, entry.is_symlink});
     }
-    pattern.push_back(L'*');
-
-    WIN32_FIND_DATAW find_data;
-    ScopedFindHandle handle(FindFirstFileW(pattern.c_str(), &find_data));
-    if (!handle.valid()) {
-        throw std::runtime_error("unable to read directory " + path);
-    }
-
-    do {
-        const std::string name = path_utils::utf8_from_wide(find_data.cFileName);
-        if (name == "." || name == "..") {
-            continue;
-        }
-        const bool entry_is_symlink = (find_data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
-        const bool entry_is_directory =
-            !entry_is_symlink && (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-        entries.push_back(
-            DirectoryEntry{name, entry_is_directory, !entry_is_directory && !entry_is_symlink, entry_is_symlink});
-    } while (FindNextFileW(handle.get(), &find_data) != 0);
-
-    const DWORD last_error = GetLastError();
-    if (last_error != ERROR_NO_MORE_FILES) {
-        throw std::runtime_error("unable to read directory " + path);
-    }
-#else
-    ScopedDirHandle dir(posix_eintr::retry_null<DIR*>([&]() { return opendir(path.c_str()); }));
-    if (dir.get() == nullptr) {
-        throw std::runtime_error("unable to read directory " + path);
-    }
-
-    dirent* entry = nullptr;
-    errno = 0;
-    while ((entry = posix_eintr::retry_null<dirent*>([&]() {
-                errno = 0;
-                return readdir(dir.get());
-            })) != nullptr) {
-        const std::string name(entry->d_name);
-        if (name == "." || name == "..") {
-            continue;
-        }
-        const std::string child = join_path(path, name);
-        struct stat st;
-        if (!stat_path_no_follow(child, &st)) {
-            throw std::runtime_error("unable to stat path " + child);
-        }
-        entries.push_back(DirectoryEntry{name, S_ISDIR(st.st_mode), S_ISREG(st.st_mode), S_ISLNK(st.st_mode)});
-        errno = 0;
-    }
-    if (errno != 0) {
-        throw std::runtime_error("unable to read directory " + path);
-    }
-#endif
 
     std::sort(entries.begin(), entries.end(), [](const DirectoryEntry& left, const DirectoryEntry& right) {
         return left.name < right.name;

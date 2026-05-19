@@ -4,6 +4,7 @@
 #include <cstring>
 #include <cerrno>
 #include <stdexcept>
+#include <vector>
 
 #ifdef _WIN32
 #include <direct.h>
@@ -11,6 +12,7 @@
 #include <wchar.h>
 #include <windows.h>
 #else
+#include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -58,8 +60,56 @@ bool should_retry_rename_error(DWORD error) {
     return error == ERROR_ACCESS_DENIED || error == ERROR_SHARING_VIOLATION || error == ERROR_LOCK_VIOLATION;
 }
 
-} // namespace
+class ScopedFindHandle {
+  public:
+    explicit ScopedFindHandle(HANDLE handle) : handle_(handle) {}
 
+    ~ScopedFindHandle() {
+        if (handle_ != INVALID_HANDLE_VALUE) {
+            FindClose(handle_);
+        }
+    }
+
+    HANDLE get() const {
+        return handle_;
+    }
+
+    bool valid() const {
+        return handle_ != INVALID_HANDLE_VALUE;
+    }
+
+  private:
+    HANDLE handle_;
+};
+
+} // namespace
+#else
+namespace {
+
+const std::size_t MAX_SYMLINK_TARGET_BYTES = 1024U * 1024U;
+
+class ScopedDirHandle {
+  public:
+    explicit ScopedDirHandle(DIR* dir) : dir_(dir) {}
+
+    ~ScopedDirHandle() {
+        if (dir_ != nullptr) {
+            closedir(dir_);
+        }
+    }
+
+    DIR* get() const {
+        return dir_;
+    }
+
+  private:
+    DIR* dir_;
+};
+
+} // namespace
+#endif
+
+#ifdef _WIN32
 std::wstring wide_from_utf8(const std::string& value) {
     if (value.empty()) {
         return std::wstring();
@@ -256,6 +306,154 @@ bool rename_path(const std::string& source, const std::string& destination) {
 #else
     return posix_eintr::retry<int>([&]() { return std::rename(source.c_str(), destination.c_str()); }) == 0;
 #endif
+}
+
+bool set_path_mode(const std::string& path, unsigned int mode) {
+#ifdef _WIN32
+    return _wchmod(wide_from_utf8(path).c_str(), static_cast<int>(mode)) == 0;
+#else
+    return posix_eintr::retry<int>([&]() { return chmod(path.c_str(), static_cast<mode_t>(mode)); }) == 0;
+#endif
+}
+
+bool add_executable_bits(FILE* file) {
+    if (file == nullptr) {
+        errno = EINVAL;
+        return false;
+    }
+#ifdef _WIN32
+    (void)file;
+    return true;
+#else
+    const int fd = fileno(file);
+    if (fd < 0) {
+        return false;
+    }
+    struct stat st;
+    if (posix_eintr::retry<int>([&]() { return fstat(fd, &st); }) != 0) {
+        return false;
+    }
+    return posix_eintr::retry<int>([&]() { return fchmod(fd, st.st_mode | 0111); }) == 0;
+#endif
+}
+
+bool read_symlink_target(const std::string& path, std::string* target) {
+    if (target == nullptr) {
+        errno = EINVAL;
+        return false;
+    }
+#ifdef _WIN32
+    (void)path;
+#ifdef ENOSYS
+    errno = ENOSYS;
+#else
+    errno = EINVAL;
+#endif
+    return false;
+#else
+    std::size_t capacity = 4096U;
+    while (capacity <= MAX_SYMLINK_TARGET_BYTES) {
+        std::vector<char> buffer(capacity);
+        const ssize_t target_len =
+            posix_eintr::retry<ssize_t>([&]() { return readlink(path.c_str(), buffer.data(), buffer.size()); });
+        if (target_len < 0) {
+            return false;
+        }
+        if (static_cast<std::size_t>(target_len) < buffer.size()) {
+            target->assign(buffer.data(), static_cast<std::size_t>(target_len));
+            return true;
+        }
+        if (capacity > MAX_SYMLINK_TARGET_BYTES / 2U) {
+            break;
+        }
+        capacity *= 2U;
+    }
+    errno = ENAMETOOLONG;
+    return false;
+#endif
+}
+
+bool create_symlink(const std::string& target, const std::string& path) {
+#ifdef _WIN32
+    (void)target;
+    (void)path;
+#ifdef ENOSYS
+    errno = ENOSYS;
+#else
+    errno = EINVAL;
+#endif
+    return false;
+#else
+    return posix_eintr::retry<int>([&]() { return symlink(target.c_str(), path.c_str()); }) == 0;
+#endif
+}
+
+std::vector<DirectoryEntryInfo> read_directory_entries(const std::string& path) {
+    std::vector<DirectoryEntryInfo> entries;
+#ifdef _WIN32
+    std::wstring pattern = wide_from_utf8(path);
+    if (!pattern.empty() && pattern[pattern.size() - 1] != '\\' && pattern[pattern.size() - 1] != '/') {
+        pattern.push_back(L'\\');
+    }
+    pattern.push_back(L'*');
+
+    WIN32_FIND_DATAW find_data;
+    ScopedFindHandle handle(FindFirstFileW(pattern.c_str(), &find_data));
+    if (!handle.valid()) {
+        errno = last_error_to_errno(GetLastError());
+        throw std::runtime_error("unable to read directory " + path);
+    }
+
+    do {
+        const std::string name = utf8_from_wide(find_data.cFileName);
+        if (name == "." || name == "..") {
+            continue;
+        }
+        const bool entry_is_symlink = (find_data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+        const bool entry_is_directory =
+            !entry_is_symlink && (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        entries.push_back(
+            DirectoryEntryInfo{name, entry_is_directory, !entry_is_directory && !entry_is_symlink, entry_is_symlink});
+    } while (FindNextFileW(handle.get(), &find_data) != 0);
+
+    const DWORD last_error = GetLastError();
+    if (last_error != ERROR_NO_MORE_FILES) {
+        errno = last_error_to_errno(last_error);
+        throw std::runtime_error("unable to read directory " + path);
+    }
+#else
+    ScopedDirHandle dir(posix_eintr::retry_null<DIR*>([&]() { return opendir(path.c_str()); }));
+    if (dir.get() == nullptr) {
+        throw std::runtime_error("unable to read directory " + path);
+    }
+
+    dirent* entry = nullptr;
+    errno = 0;
+    while ((entry = posix_eintr::retry_null<dirent*>([&]() {
+                errno = 0;
+                return readdir(dir.get());
+            })) != nullptr) {
+        const std::string name(entry->d_name);
+        if (name == "." || name == "..") {
+            continue;
+        }
+        const std::string child = join_path(path, name);
+        struct stat st;
+        if (!lstat_path(child, &st)) {
+            throw std::runtime_error("unable to stat path " + child);
+        }
+        entries.push_back(DirectoryEntryInfo{name, S_ISDIR(st.st_mode), S_ISREG(st.st_mode), S_ISLNK(st.st_mode)});
+        errno = 0;
+    }
+    if (errno != 0) {
+        throw std::runtime_error("unable to read directory " + path);
+    }
+#endif
+
+    std::sort(entries.begin(), entries.end(), [](const DirectoryEntryInfo& left, const DirectoryEntryInfo& right) {
+        return left.name < right.name;
+    });
+    return entries;
 }
 
 } // namespace path_utils

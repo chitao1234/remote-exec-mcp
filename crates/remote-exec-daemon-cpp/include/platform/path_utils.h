@@ -3,8 +3,16 @@
 #include <cstdio>
 #include <string>
 #include <sys/stat.h>
+#include <vector>
 
 namespace path_utils {
+
+struct DirectoryEntryInfo {
+    std::string name;
+    bool is_directory;
+    bool is_regular_file;
+    bool is_symlink;
+};
 
 char native_separator();
 std::string parent_directory(const std::string& path);
@@ -17,6 +25,11 @@ bool lstat_path(const std::string& path, struct stat* st);
 bool remove_path(const std::string& path);
 bool remove_directory(const std::string& path);
 bool rename_path(const std::string& source, const std::string& destination);
+bool set_path_mode(const std::string& path, unsigned int mode);
+bool add_executable_bits(FILE* file);
+bool read_symlink_target(const std::string& path, std::string* target);
+bool create_symlink(const std::string& target, const std::string& path);
+std::vector<DirectoryEntryInfo> read_directory_entries(const std::string& path);
 
 #ifdef _WIN32
 std::wstring wide_from_utf8(const std::string& value);

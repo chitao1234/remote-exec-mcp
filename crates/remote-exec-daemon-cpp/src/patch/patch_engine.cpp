@@ -22,9 +22,6 @@
 #include "policy/path_policy.h"
 #include "platform/path_utils.h"
 #include "platform/platform.h"
-#ifndef _WIN32
-#include "platform/posix_eintr.h"
-#endif
 #include "platform/scoped_file.h"
 #include "core/stdio_retry.h"
 
@@ -282,7 +279,7 @@ void write_text_atomic(const std::string& path, const std::string& content) {
         throw std::runtime_error("unable to write " + temp_path);
     }
 #ifndef _WIN32
-    if (preserve_mode && posix_eintr::retry<int>([&]() { return chmod(temp_path.c_str(), existing.st_mode); }) != 0) {
+    if (preserve_mode && !path_utils::set_path_mode(temp_path, static_cast<unsigned int>(existing.st_mode))) {
         (void)path_utils::remove_path(temp_path);
         throw std::runtime_error("unable to preserve mode for " + temp_path);
     }
