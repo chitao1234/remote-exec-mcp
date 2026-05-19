@@ -12,10 +12,8 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <stdlib.h>
-#include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <termios.h>
 #include <unistd.h>
 
 #include "core/logging.h"
@@ -138,14 +136,6 @@ PosixPtyPair create_posix_pty() {
     pair.master = std::move(master);
     pair.slave_path = slave_path;
     return pair;
-}
-
-bool set_pty_window_size(int fd, unsigned short rows, unsigned short cols) {
-    struct winsize size;
-    std::memset(&size, 0, sizeof(size));
-    size.ws_row = rows;
-    size.ws_col = cols;
-    return posix_fd::ioctl_retry(fd, TIOCSWINSZ, &size) == 0;
 }
 
 std::string replacement_utf8() {
@@ -394,7 +384,7 @@ public:
         if (rows == 0U || cols == 0U) {
             throw ProcessPtyResizeUnsupportedError("PTY rows and cols must be greater than zero");
         }
-        if (!set_pty_window_size(input_write_.get(), rows, cols)) {
+        if (!posix_fd::set_pty_window_size(input_write_.get(), rows, cols)) {
             throw std::runtime_error(std::string("ioctl(TIOCSWINSZ) failed: ") + safe_strerror(errno));
         }
     }
@@ -549,11 +539,9 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
             if (slave_fd < 0) {
                 _exit(126);
             }
-#ifdef TIOCSCTTY
-            (void)posix_fd::ioctl_retry(slave_fd, TIOCSCTTY, 0);
-#endif
+            posix_fd::make_controlling_terminal_best_effort(slave_fd);
             // DragonFly rejects TIOCSWINSZ on the master until the slave side is open.
-            if (!set_pty_window_size(slave_fd, DEFAULT_PTY_ROWS, DEFAULT_PTY_COLS)) {
+            if (!posix_fd::set_pty_window_size(slave_fd, DEFAULT_PTY_ROWS, DEFAULT_PTY_COLS)) {
                 _exit(126);
             }
             if (posix_fd::dup_to(slave_fd, STDIN_FILENO) < 0 ||

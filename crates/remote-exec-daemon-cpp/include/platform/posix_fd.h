@@ -4,6 +4,7 @@
 
 #include <cerrno>
 #include <cstddef>
+#include <cstring>
 #include <fcntl.h>
 #include <poll.h>
 #include <stdlib.h>
@@ -11,6 +12,7 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <termios.h>
 #include <unistd.h>
 
 #include "remote_exec_cpp_config.h"
@@ -217,6 +219,22 @@ inline bool pty_slave_path(int master_fd, std::string* slave_path) {
     errno = ENOSYS;
     return false;
 #endif
+}
+
+inline void make_controlling_terminal_best_effort(int fd) {
+#ifdef TIOCSCTTY
+    (void)ioctl_retry(fd, TIOCSCTTY, 0);
+#else
+    (void)fd;
+#endif
+}
+
+inline bool set_pty_window_size(int fd, unsigned short rows, unsigned short cols) {
+    struct winsize size;
+    std::memset(&size, 0, sizeof(size));
+    size.ws_row = rows;
+    size.ws_col = cols;
+    return ioctl_retry(fd, TIOCSWINSZ, &size) == 0;
 }
 
 inline int poll_readable_or_hangup(int fd, unsigned long timeout_ms, bool* readable) {
