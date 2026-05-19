@@ -16,7 +16,11 @@ POLICY_SRCS = \
 	$(SOURCE_PREFIX)src/policy/path_compare.cpp \
 	$(SOURCE_PREFIX)src/policy/filesystem_sandbox.cpp
 
-RPC_FAILURE_SRCS = $(SOURCE_PREFIX)src/rpc_failures.cpp
+RPC_FAILURE_SRCS = $(SOURCE_PREFIX)src/rpc/rpc_failures.cpp
+
+PATCH_SRCS = $(SOURCE_PREFIX)src/patch/patch_engine.cpp
+
+IMAGE_SRCS = $(SOURCE_PREFIX)src/image/image_ops.cpp
 
 POSIX_CHILD_REAPER_SRCS = $(SOURCE_PREFIX)src/exec/posix_child_reaper.cpp
 
@@ -37,7 +41,7 @@ HTTP_SRCS = \
 ROUTE_SRCS = \
 	$(SOURCE_PREFIX)src/rpc/daemon_capabilities.cpp \
 	$(SOURCE_PREFIX)src/rpc/exec_request_utils.cpp \
-	$(SOURCE_PREFIX)src/image_ops.cpp \
+	$(IMAGE_SRCS) \
 	$(SOURCE_PREFIX)src/rpc/server_contract.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_request_utils.cpp \
 	$(SOURCE_PREFIX)src/rpc/server_routes.cpp \
@@ -63,7 +67,7 @@ PORT_FORWARD_SRCS = \
 	$(SOURCE_PREFIX)src/port_forward/port_tunnel_udp.cpp \
 	$(SOURCE_PREFIX)src/port_forward/port_tunnel_error.cpp
 
-BASE64_SRCS = $(SOURCE_PREFIX)src/base64_codec.cpp
+BASE64_SRCS = $(SOURCE_PREFIX)src/codec/base64_codec.cpp
 
 PATH_UTILS_SRCS = $(SOURCE_PREFIX)src/platform/path_utils.cpp
 
@@ -108,7 +112,7 @@ BASE_COMMON_SRCS_NO_MAIN = \
 	$(SOURCE_PREFIX)src/server.cpp \
 	$(SOURCE_PREFIX)src/server_runtime.cpp \
 	$(SESSION_STORE_SRCS) \
-	$(SOURCE_PREFIX)src/patch_engine.cpp \
+	$(PATCH_SRCS) \
 	$(SOURCE_PREFIX)src/connection_manager.cpp \
 	$(DAEMON_THREAD_SRCS) \
 	$(ROUTE_SRCS) \
@@ -137,7 +141,7 @@ POSIX_SRCS = \
 
 HOST_PATCH_SRCS = \
 	$(SOURCE_PREFIX)tests/test_patch.cpp \
-	$(SOURCE_PREFIX)src/patch_engine.cpp \
+	$(PATCH_SRCS) \
 	$(PLATFORM_SRCS) \
 	$(SOURCE_PREFIX)src/text_utils.cpp \
 	$(PATH_UTILS_SRCS) \
@@ -268,7 +272,7 @@ SERVER_ROUTES_TEST_COMMON_SRCS = \
 	$(PLATFORM_SRCS) \
 	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/shell_policy.cpp \
-	$(SOURCE_PREFIX)src/patch_engine.cpp \
+	$(PATCH_SRCS) \
 	$(SOURCE_PREFIX)src/logging.cpp \
 	$(SOURCE_PREFIX)src/config.cpp \
 	$(SOURCE_PREFIX)src/text_utils.cpp \
