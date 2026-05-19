@@ -5,12 +5,25 @@
 #include <cerrno>
 #include <cstddef>
 #include <fcntl.h>
+#include <poll.h>
+#include <string>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "platform/basic_mutex.h"
 #include "platform/posix_eintr.h"
+
+#if defined(__GNUC__)
+extern "C" int posix_openpt(int flags) __attribute__((weak));
+extern "C" int grantpt(int fd) __attribute__((weak));
+extern "C" int unlockpt(int fd) __attribute__((weak));
+extern "C" char* ptsname(int fd) __attribute__((weak));
+#if defined(__GLIBC__) || defined(__FreeBSD__)
+extern "C" int ptsname_r(int fd, char* buffer, std::size_t buffer_len) __attribute__((weak));
+#endif
+#endif
 
 namespace posix_fd {
 
@@ -123,6 +136,123 @@ inline int access_path(const char* path, int mode) {
 
 inline int change_directory(const char* path) {
     return posix_eintr::retry<int>([&]() { return chdir(path); });
+}
+
+inline bool pty_api_available() {
+#if defined(__GNUC__)
+    return posix_openpt != nullptr && grantpt != nullptr && unlockpt != nullptr && ptsname != nullptr;
+#else
+    return true;
+#endif
+}
+
+inline int open_pty_master(int flags) {
+    if (!pty_api_available()) {
+        errno = ENOSYS;
+        return -1;
+    }
+    return posix_eintr::retry<int>([&]() { return posix_openpt(flags); });
+}
+
+inline int grant_pty(int fd) {
+#if defined(__GNUC__)
+    if (grantpt == nullptr) {
+        errno = ENOSYS;
+        return -1;
+    }
+#endif
+    return posix_eintr::retry<int>([&]() { return grantpt(fd); });
+}
+
+inline int unlock_pty(int fd) {
+#if defined(__GNUC__)
+    if (unlockpt == nullptr) {
+        errno = ENOSYS;
+        return -1;
+    }
+#endif
+    return posix_eintr::retry<int>([&]() { return unlockpt(fd); });
+}
+
+inline bool pty_slave_path(int master_fd, std::string* slave_path) {
+    if (slave_path == nullptr) {
+        errno = EINVAL;
+        return false;
+    }
+#if defined(__GLIBC__) || defined(__FreeBSD__)
+#if defined(__GNUC__)
+    int (*ptsname_r_fn)(int, char*, std::size_t) = ptsname_r;
+    if (ptsname_r_fn != nullptr) {
+        char pts_buf[256];
+        const int result = ptsname_r_fn(master_fd, pts_buf, sizeof(pts_buf));
+        if (result != 0) {
+            errno = result;
+            return false;
+        }
+        *slave_path = pts_buf;
+        return true;
+    }
+#else
+    char pts_buf[256];
+    const int result = ptsname_r(master_fd, pts_buf, sizeof(pts_buf));
+    if (result != 0) {
+        errno = result;
+        return false;
+    }
+    *slave_path = pts_buf;
+    return true;
+#endif
+#endif
+
+#if defined(__GNUC__)
+    if (ptsname == nullptr) {
+        errno = ENOSYS;
+        return false;
+    }
+#endif
+    static BasicMutex ptsname_mutex;
+    BasicLockGuard ptsname_lock(ptsname_mutex);
+    char* slave_name = ptsname(master_fd);
+    if (slave_name == nullptr) {
+        return false;
+    }
+    *slave_path = slave_name;
+    return true;
+}
+
+inline int poll_readable_or_hangup(int fd, unsigned long timeout_ms, bool* readable) {
+    if (readable == nullptr) {
+        errno = EINVAL;
+        return -1;
+    }
+    struct pollfd descriptor;
+    descriptor.fd = fd;
+    descriptor.events = POLLIN | POLLHUP | POLLERR;
+    descriptor.revents = 0;
+
+    const int result = posix_eintr::poll_for_ms(&descriptor, 1, timeout_ms);
+    if (result < 0) {
+        return -1;
+    }
+    *readable = result > 0 && (descriptor.revents & (POLLIN | POLLHUP | POLLERR)) != 0;
+    return 0;
+}
+
+inline int wait_until_readable_or_hangup(int fd) {
+    struct pollfd descriptor;
+    descriptor.fd = fd;
+    descriptor.events = POLLIN | POLLHUP | POLLERR;
+    descriptor.revents = 0;
+
+    for (;;) {
+        const int result = posix_eintr::poll_forever(&descriptor, 1);
+        if (result > 0) {
+            return 0;
+        }
+        if (result < 0) {
+            return -1;
+        }
+    }
 }
 
 inline void write_signal_safe_wakeup_byte(int fd) {

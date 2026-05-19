@@ -10,7 +10,6 @@
 #include <vector>
 
 #include <fcntl.h>
-#include <poll.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <sys/ioctl.h>
@@ -19,23 +18,11 @@
 #include <termios.h>
 #include <unistd.h>
 
-#include "platform/basic_mutex.h"
 #include "platform/platform.h"
 #include "exec/posix_child_reaper.h"
-#include "platform/posix_eintr.h"
 #include "platform/posix_fd.h"
 #include "platform/posix_process.h"
 #include "exec/process_session.h"
-
-#if defined(__GNUC__)
-extern "C" int posix_openpt(int flags) __attribute__((weak));
-extern "C" int grantpt(int fd) __attribute__((weak));
-extern "C" int unlockpt(int fd) __attribute__((weak));
-extern "C" char* ptsname(int fd) __attribute__((weak));
-#if defined(__GLIBC__) || defined(__FreeBSD__)
-extern "C" int ptsname_r(int fd, char* buffer, std::size_t buffer_len) __attribute__((weak));
-#endif
-#endif
 
 extern char** environ;
 
@@ -124,60 +111,26 @@ void kill_process_group(pid_t pid) {
     (void)posix_process::signal_process_group(pid, SIGKILL);
 }
 
-bool posix_pty_api_available() {
-#if defined(__GNUC__)
-    return posix_openpt != nullptr && grantpt != nullptr && unlockpt != nullptr && ptsname != nullptr;
-#else
-    return true;
-#endif
-}
-
-std::string pty_slave_path(int master_fd) {
-#if defined(__GLIBC__) || defined(__FreeBSD__)
-#if defined(__GNUC__)
-    int (*ptsname_r_fn)(int, char*, std::size_t) = ptsname_r;
-    if (ptsname_r_fn != nullptr) {
-        char pts_buf[256];
-        if (ptsname_r_fn(master_fd, pts_buf, sizeof(pts_buf)) != 0) {
-            throw std::runtime_error(std::string("ptsname_r failed: ") + safe_strerror(errno));
-        }
-        return std::string(pts_buf);
-    }
-#else
-    char pts_buf[256];
-    if (ptsname_r(master_fd, pts_buf, sizeof(pts_buf)) != 0) {
-        throw std::runtime_error(std::string("ptsname_r failed: ") + safe_strerror(errno));
-    }
-    return std::string(pts_buf);
-#endif
-#endif
-
-    static BasicMutex ptsname_mutex;
-    BasicLockGuard ptsname_lock(ptsname_mutex);
-    char* slave_name = ptsname(master_fd);
-    if (slave_name == nullptr) {
-        throw std::runtime_error(std::string("ptsname failed: ") + safe_strerror(errno));
-    }
-    return std::string(slave_name);
-}
-
 PosixPtyPair create_posix_pty() {
-    if (!posix_pty_api_available()) {
+    if (!posix_fd::pty_api_available()) {
         throw std::runtime_error("POSIX PTY APIs are unavailable");
     }
 
-    UniqueFd master(posix_eintr::retry<int>([]() { return posix_openpt(O_RDWR | O_NOCTTY); }));
+    UniqueFd master(posix_fd::open_pty_master(O_RDWR | O_NOCTTY));
     if (!master.valid()) {
         throw std::runtime_error(std::string("posix_openpt failed: ") + safe_strerror(errno));
     }
     set_fd_cloexec_or_throw(master.get(), "pty master");
-    if (posix_eintr::retry<int>([&]() { return grantpt(master.get()); }) != 0) {
+    if (posix_fd::grant_pty(master.get()) != 0) {
         throw std::runtime_error(std::string("grantpt failed: ") + safe_strerror(errno));
     }
-    if (posix_eintr::retry<int>([&]() { return unlockpt(master.get()); }) != 0) {
+    if (posix_fd::unlock_pty(master.get()) != 0) {
         throw std::runtime_error(std::string("unlockpt failed: ") + safe_strerror(errno));
     }
-    const std::string slave_path = pty_slave_path(master.get());
+    std::string slave_path;
+    if (!posix_fd::pty_slave_path(master.get(), &slave_path)) {
+        throw std::runtime_error(std::string("ptsname failed: ") + safe_strerror(errno));
+    }
 
     struct winsize size;
     std::memset(&size, 0, sizeof(size));
@@ -259,37 +212,16 @@ std::string decode_utf8_output(std::string* carry, const std::string& raw_chunk,
 }
 
 bool readable_now(int fd) {
-    struct pollfd descriptor;
-    descriptor.fd = fd;
-    descriptor.events = POLLIN | POLLHUP | POLLERR;
-    descriptor.revents = 0;
-
-    for (;;) {
-        const int result = posix_eintr::poll_for_ms(&descriptor, 1, 0UL);
-        if (result > 0) {
-            return (descriptor.revents & (POLLIN | POLLHUP | POLLERR)) != 0;
-        }
-        if (result == 0) {
-            return false;
-        }
+    bool readable = false;
+    if (posix_fd::poll_readable_or_hangup(fd, 0UL, &readable) != 0) {
         throw std::runtime_error(std::string("poll failed: ") + safe_strerror(errno));
     }
+    return readable;
 }
 
 void wait_until_readable(int fd) {
-    struct pollfd descriptor;
-    descriptor.fd = fd;
-    descriptor.events = POLLIN | POLLHUP | POLLERR;
-    descriptor.revents = 0;
-
-    for (;;) {
-        const int result = posix_eintr::poll_forever(&descriptor, 1);
-        if (result > 0) {
-            return;
-        }
-        if (result < 0) {
-            throw std::runtime_error(std::string("poll failed: ") + safe_strerror(errno));
-        }
+    if (posix_fd::wait_until_readable_or_hangup(fd) != 0) {
+        throw std::runtime_error(std::string("poll failed: ") + safe_strerror(errno));
     }
 }
 
