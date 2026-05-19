@@ -133,18 +133,18 @@ PosixPtyPair create_posix_pty() {
         throw std::runtime_error(std::string("ptsname failed: ") + safe_strerror(errno));
     }
 
-    struct winsize size;
-    std::memset(&size, 0, sizeof(size));
-    size.ws_row = DEFAULT_PTY_ROWS;
-    size.ws_col = DEFAULT_PTY_COLS;
-    if (posix_fd::ioctl_retry(master.get(), TIOCSWINSZ, &size) != 0) {
-        throw std::runtime_error(std::string("ioctl(TIOCSWINSZ) failed: ") + safe_strerror(errno));
-    }
-
     PosixPtyPair pair;
     pair.master = std::move(master);
     pair.slave_path = slave_path;
     return pair;
+}
+
+bool set_pty_window_size(int fd, unsigned short rows, unsigned short cols) {
+    struct winsize size;
+    std::memset(&size, 0, sizeof(size));
+    size.ws_row = rows;
+    size.ws_col = cols;
+    return posix_fd::ioctl_retry(fd, TIOCSWINSZ, &size) == 0;
 }
 
 std::string replacement_utf8() {
@@ -391,11 +391,7 @@ public:
         if (rows == 0U || cols == 0U) {
             throw ProcessPtyResizeUnsupportedError("PTY rows and cols must be greater than zero");
         }
-        struct winsize size;
-        std::memset(&size, 0, sizeof(size));
-        size.ws_row = rows;
-        size.ws_col = cols;
-        if (posix_fd::ioctl_retry(input_write_.get(), TIOCSWINSZ, &size) != 0) {
+        if (!set_pty_window_size(input_write_.get(), rows, cols)) {
             throw std::runtime_error(std::string("ioctl(TIOCSWINSZ) failed: ") + safe_strerror(errno));
         }
     }
@@ -551,6 +547,10 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
 #ifdef TIOCSCTTY
             (void)posix_fd::ioctl_retry(slave_fd, TIOCSCTTY, 0);
 #endif
+            // DragonFly rejects TIOCSWINSZ on the master until the slave side is open.
+            if (!set_pty_window_size(slave_fd, DEFAULT_PTY_ROWS, DEFAULT_PTY_COLS)) {
+                _exit(126);
+            }
             if (posix_fd::dup_to(slave_fd, STDIN_FILENO) < 0 ||
                 posix_fd::dup_to(slave_fd, STDOUT_FILENO) < 0 ||
                 posix_fd::dup_to(slave_fd, STDERR_FILENO) < 0) {

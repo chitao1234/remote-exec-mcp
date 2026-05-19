@@ -287,7 +287,7 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
             route_request(state,
                           json_request("/v1/exec/start",
                                        Json{
-                                           {"cmd", "printf ready; IFS= read line; stty size; sleep 30"},
+                                           {"cmd", "stty size; printf ready; IFS= read line; stty size; sleep 30"},
                                            {"workdir", root.string()},
                                            {"login", false},
                                            {"tty", true},
@@ -296,6 +296,12 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
         TEST_ASSERT(resize_start_response.status == 200);
         const Json resize_started = Json::parse(resize_start_response.body);
         TEST_ASSERT(resize_started.at("running").get<bool>());
+        std::string initial_size_output = normalize_output(resize_started.at("output").get<std::string>());
+        if (initial_size_output.find("24 120") == std::string::npos) {
+            initial_size_output = append_running_exec_output_until_contains(
+                state, resize_started.at("daemon_session_id").get<std::string>(), initial_size_output, "24 120", 2000UL);
+        }
+        TEST_ASSERT(initial_size_output.find("24 120") != std::string::npos);
 
         const Json resized = exec_write_json_with_pty_size(
             state, resize_started.at("daemon_session_id").get<std::string>(), "\n", 1000UL, 33U, 101U);
