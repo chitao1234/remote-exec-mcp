@@ -17,8 +17,8 @@
 #include "http/server_transport.h"
 #include "policy/path_policy.h"
 #include "platform/platform.h"
-#include "port_forward_socket_ops.h"
-#include "port_tunnel.h"
+#include "port_forward/port_forward_socket_ops.h"
+#include "port_forward/port_tunnel.h"
 #include "../port_forward/port_tunnel_service.h"
 #ifdef _WIN32
 #include "platform/win32_thread.h"

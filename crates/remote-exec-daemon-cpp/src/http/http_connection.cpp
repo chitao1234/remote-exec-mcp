@@ -8,7 +8,7 @@
 #include "http/http_request.h"
 #include "core/logging.h"
 #include "platform/platform.h"
-#include "port_tunnel.h"
+#include "port_forward/port_tunnel.h"
 #include "rpc/server_contract.h"
 #include "runtime/server.h"
 #include "rpc/server_request_utils.h"

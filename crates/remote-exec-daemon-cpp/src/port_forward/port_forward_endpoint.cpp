@@ -1,9 +1,9 @@
-#include "port_forward_endpoint.h"
+#include "port_forward/port_forward_endpoint.h"
 
 #include <cctype>
 #include <sstream>
 
-#include "port_forward_error.h"
+#include "port_forward/port_forward_error.h"
 #include "core/text_utils.h"
 
 namespace {

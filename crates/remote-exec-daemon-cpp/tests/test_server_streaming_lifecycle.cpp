@@ -4,7 +4,7 @@
 #include "../src/port_forward/port_tunnel_service.h"
 #include "test_socket_pair.h"
 
-#include "port_forward_error.h"
+#include "port_forward/port_forward_error.h"
 
 #include <cstdio>
 #include <cstdlib>

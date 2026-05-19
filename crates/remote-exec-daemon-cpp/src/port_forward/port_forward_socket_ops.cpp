@@ -1,4 +1,4 @@
-#include "port_forward_socket_ops.h"
+#include "port_forward/port_forward_socket_ops.h"
 
 #include <climits>
 #include <cstring>
@@ -18,8 +18,8 @@
 #include <unistd.h>
 #endif
 
-#include "port_forward_endpoint.h"
-#include "port_forward_error.h"
+#include "port_forward/port_forward_endpoint.h"
+#include "port_forward/port_forward_error.h"
 #ifndef _WIN32
 #include "platform/posix_eintr.h"
 #include "platform/posix_fd.h"
