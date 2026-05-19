@@ -16,15 +16,7 @@ const unsigned long MIN_CONTROL_QUEUE_BYTES = 4UL * 1024UL;
 
 PortTunnelSender::PortTunnelSender(SOCKET client, const std::shared_ptr<PortTunnelService>& service)
     : client_(client), service_(service), writer_started_(false), writer_shutdown_(false), writer_finished_(false),
-      writer_thread_(
-#ifdef _WIN32
-          nullptr
-#endif
-          ),
-#ifdef _WIN32
-      writer_thread_id_(0U),
-#endif
-      closed_(false), queued_data_bytes_(0UL), queued_control_bytes_(0UL) {
+      writer_thread_(), closed_(false), queued_data_bytes_(0UL), queued_control_bytes_(0UL) {
 }
 
 PortTunnelSender::~PortTunnelSender() {
@@ -62,59 +54,18 @@ void PortTunnelSender::mark_closed() {
 }
 
 void PortTunnelSender::join_writer_thread() {
-#ifdef _WIN32
-    HANDLE thread = nullptr;
-    DWORD thread_id = 0U;
-    {
-        BasicLockGuard lock(writer_mutex_);
-        thread = writer_thread_;
-        thread_id = writer_thread_id_;
-        writer_thread_ = nullptr;
-        writer_thread_id_ = 0U;
-    }
-    consume_daemon_thread(&thread, thread_id);
-#else
     std::unique_ptr<std::thread> thread;
     {
         BasicLockGuard lock(writer_mutex_);
         thread.swap(writer_thread_);
     }
     consume_daemon_thread(&thread);
-#endif
 }
 
 bool PortTunnelSender::ensure_writer_started_locked() {
     if (writer_started_) {
         return true;
     }
-#ifdef _WIN32
-    struct Context {
-        PortTunnelSender* sender;
-    };
-    struct ThreadEntry {
-        static unsigned __stdcall entry(void* raw_context) {
-            std::unique_ptr<Context> context(static_cast<Context*>(raw_context));
-            log_message(LOG_DEBUG, "port_tunnel", "sender writer start");
-            context->sender->writer_loop();
-            log_message(LOG_DEBUG, "port_tunnel", "sender writer stop");
-            return 0;
-        }
-    };
-    std::unique_ptr<Context> context(new Context());
-    context->sender = this;
-    HANDLE handle = begin_win32_thread(&ThreadEntry::entry, context.get());
-    if (handle == nullptr) {
-        closed_.store(true);
-        writer_shutdown_ = true;
-        drain_queued_frame_reservations_locked();
-        writer_cond_.broadcast();
-        return false;
-    }
-    writer_thread_ = handle;
-    context.release();
-    writer_started_ = true;
-    return true;
-#else
     try {
         writer_thread_.reset(new std::thread([this]() {
             log_message(LOG_DEBUG, "port_tunnel", "sender writer start");
@@ -136,16 +87,9 @@ bool PortTunnelSender::ensure_writer_started_locked() {
         drain_queued_frame_reservations_locked();
         return false;
     }
-#endif
 }
 
 void PortTunnelSender::writer_loop() {
-#ifdef _WIN32
-    {
-        BasicLockGuard lock(writer_mutex_);
-        writer_thread_id_ = GetCurrentThreadId();
-    }
-#endif
     for (;;) {
         QueuedFrame queued;
         {

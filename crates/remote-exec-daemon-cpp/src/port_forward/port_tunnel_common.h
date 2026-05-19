@@ -5,11 +5,6 @@
 #include <memory>
 #include <string>
 
-#ifdef _WIN32
-#include <windows.h>
-#include <winsock2.h>
-#endif
-
 #include "http/http_helpers.h"
 #include "core/logging.h"
 #include "platform/platform.h"
@@ -19,9 +14,6 @@
 #include "port_forward/port_tunnel_frame.h"
 #include "http/server_transport.h"
 #include "core/text_utils.h"
-#ifdef _WIN32
-#include "platform/win32_thread.h"
-#endif
 
 extern const std::size_t READ_BUFFER_SIZE;
 extern const std::size_t TCP_WRITE_QUEUE_LIMIT;

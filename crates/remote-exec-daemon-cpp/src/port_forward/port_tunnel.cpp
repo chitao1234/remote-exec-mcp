@@ -8,15 +8,7 @@
 PortTunnelService::PortTunnelService(const PortForwardLimitConfig& limits)
     : lifecycle_state_(LifecycleState::Running), budget_state_(new PortTunnelBudgetState()),
       worker_group_(new WorkerGroup()), limits_(limits), next_session_sequence_(1ULL), expiry_shutdown_(false),
-      expiry_thread_started_(false)
-#ifdef _WIN32
-      ,
-      expiry_thread_(nullptr),
-      expiry_thread_id_(0U)
-#else
-      ,
-      expiry_thread_()
-#endif
+      expiry_thread_started_(false), expiry_thread_()
 {
 }
 

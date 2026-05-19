@@ -231,10 +231,6 @@ SessionOutputState::SessionOutputState() : eof(false), exited(false), exit_code(
 
 LiveSession::LiveSession()
     : started_at_ms(0), last_touched_order(0), stdin_open(false), retired(false), closing(false), pump_started(false)
-#ifdef _WIN32
-      ,
-      pump_thread_(nullptr)
-#endif
 {
 }
 

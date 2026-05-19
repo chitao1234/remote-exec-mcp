@@ -5,12 +5,7 @@
 #include <memory>
 #include <sstream>
 #include <stdexcept>
-
-#ifdef _WIN32
-#include <windows.h>
-#else
 #include <thread>
-#endif
 
 #include "runtime/daemon_thread.h"
 #include "core/logging.h"
@@ -20,9 +15,6 @@
 #include "port_forward/port_forward_socket_ops.h"
 #include "port_forward/port_tunnel.h"
 #include "../port_forward/port_tunnel_service.h"
-#ifdef _WIN32
-#include "platform/win32_thread.h"
-#endif
 
 namespace {
 
@@ -35,14 +27,7 @@ std::string daemon_instance_id() {
 } // namespace
 
 ServerRuntime::ServerRuntime(const DaemonConfig& config)
-    : connections_(config.max_open_sessions), shutting_down_(false)
-#ifdef _WIN32
-      ,
-      accept_thread_(nullptr), maintenance_thread_(nullptr)
-#else
-      ,
-      accept_thread_(), maintenance_thread_()
-#endif
+    : connections_(config.max_open_sessions), shutting_down_(false), accept_thread_(), maintenance_thread_()
 {
     state_.config = config;
     state_.daemon_instance_id = daemon_instance_id();
@@ -63,11 +48,7 @@ ServerRuntime::~ServerRuntime() {
 void ServerRuntime::start_accept_loop() {
     {
         BasicLockGuard lock(mutex_);
-#ifdef _WIN32
-        if (accept_thread_ != nullptr || maintenance_thread_ != nullptr) {
-#else
         if (accept_thread_.get() != nullptr || maintenance_thread_.get() != nullptr) {
-#endif
             throw std::runtime_error("server runtime accept loop already started");
         }
         if (listener_.valid()) {
@@ -77,23 +58,8 @@ void ServerRuntime::start_accept_loop() {
         listener_.reset(create_listener(state_.config));
     }
 
-#ifdef _WIN32
-    accept_thread_ = begin_win32_thread(&ServerRuntime::accept_thread_entry, this);
-    if (accept_thread_ == nullptr) {
-        request_shutdown();
-        join();
-        throw std::runtime_error("_beginthreadex failed");
-    }
-    maintenance_thread_ = begin_win32_thread(&ServerRuntime::maintenance_thread_entry, this);
-    if (maintenance_thread_ == nullptr) {
-        request_shutdown();
-        join();
-        throw std::runtime_error("_beginthreadex failed");
-    }
-#else
     accept_thread_.reset(new std::thread(&ServerRuntime::accept_loop, this));
     maintenance_thread_.reset(new std::thread(&ServerRuntime::maintenance_loop, this));
-#endif
 }
 
 void ServerRuntime::request_shutdown() {
@@ -110,24 +76,12 @@ void ServerRuntime::request_shutdown() {
 }
 
 void ServerRuntime::join() {
-#ifdef _WIN32
-    HANDLE accept_thread = nullptr;
-    HANDLE maintenance_thread = nullptr;
-#else
     std::unique_ptr<std::thread> accept_thread;
     std::unique_ptr<std::thread> maintenance_thread;
-#endif
     {
         BasicLockGuard lock(mutex_);
-#ifdef _WIN32
-        accept_thread = accept_thread_;
-        maintenance_thread = maintenance_thread_;
-        accept_thread_ = nullptr;
-        maintenance_thread_ = nullptr;
-#else
         accept_thread.swap(accept_thread_);
         maintenance_thread.swap(maintenance_thread_);
-#endif
     }
 
     join_daemon_thread(&accept_thread);
@@ -243,17 +197,3 @@ void ServerRuntime::accept_loop() {
         }
     }
 }
-
-#ifdef _WIN32
-unsigned __stdcall ServerRuntime::accept_thread_entry(void* raw_context) {
-    ServerRuntime* runtime = static_cast<ServerRuntime*>(raw_context);
-    runtime->accept_loop();
-    return 0;
-}
-
-unsigned __stdcall ServerRuntime::maintenance_thread_entry(void* raw_context) {
-    ServerRuntime* runtime = static_cast<ServerRuntime*>(raw_context);
-    runtime->maintenance_loop();
-    return 0;
-}
-#endif

@@ -1,9 +1,7 @@
 #pragma once
 
-#ifndef _WIN32
 #include <memory>
 #include <thread>
-#endif
 
 #include "runtime/connection_manager.h"
 #include "runtime/server.h"
@@ -33,10 +31,6 @@ public:
 private:
     void accept_loop();
     void maintenance_loop();
-#ifdef _WIN32
-    static unsigned __stdcall accept_thread_entry(void* raw_context);
-    static unsigned __stdcall maintenance_thread_entry(void* raw_context);
-#endif
 
     AppState state_;
     ConnectionManager connections_;
@@ -44,11 +38,6 @@ private:
     UniqueSocket listener_;
     WakeupPipe shutdown_wakeup_;
     bool shutting_down_;
-#ifdef _WIN32
-    HANDLE accept_thread_;
-    HANDLE maintenance_thread_;
-#else
     std::unique_ptr<std::thread> accept_thread_;
     std::unique_ptr<std::thread> maintenance_thread_;
-#endif
 };

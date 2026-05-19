@@ -3,11 +3,9 @@
 #include <atomic>
 #include <deque>
 #include <memory>
+#include <thread>
 #include <utility>
 #include <vector>
-#ifndef _WIN32
-#include <thread>
-#endif
 
 #include "platform/basic_mutex.h"
 #include "port_tunnel_common.h"
@@ -71,12 +69,7 @@ private:
     bool writer_started_;
     bool writer_shutdown_;
     bool writer_finished_;
-#ifdef _WIN32
-    HANDLE writer_thread_;
-    DWORD writer_thread_id_;
-#else
     std::unique_ptr<std::thread> writer_thread_;
-#endif
     std::atomic<bool> closed_;
     std::atomic<unsigned long> queued_data_bytes_;
     std::atomic<unsigned long> queued_control_bytes_;

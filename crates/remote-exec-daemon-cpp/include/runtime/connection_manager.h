@@ -3,19 +3,10 @@
 #include <functional>
 #include <map>
 #include <memory>
-
-#ifdef _WIN32
-#include <windows.h>
-#include <winsock2.h>
-#else
 #include <thread>
-#endif
 
 #include "platform/basic_mutex.h"
 #include "platform/socket.h"
-#ifdef _WIN32
-#include "platform/win32_thread.h"
-#endif
 
 class ConnectionManager {
 public:
@@ -37,13 +28,7 @@ public:
 
 private:
     struct WorkerRecord;
-#ifdef _WIN32
-    struct WorkerContext;
-#endif
     void run_worker(const std::shared_ptr<WorkerRecord>& record);
-#ifdef _WIN32
-    static unsigned __stdcall worker_thread_entry(void* raw_context);
-#endif
     static void close_worker_socket(const std::shared_ptr<WorkerRecord>& record);
     static void shutdown_worker_socket(const std::shared_ptr<WorkerRecord>& record);
     static void join_worker_thread(const std::shared_ptr<WorkerRecord>& record);

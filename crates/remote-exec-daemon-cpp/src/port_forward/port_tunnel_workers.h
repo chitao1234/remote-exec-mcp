@@ -5,10 +5,6 @@
 #include <thread>
 #include <vector>
 
-#ifdef _WIN32
-#include <windows.h>
-#endif
-
 #include "platform/basic_mutex.h"
 #include "port_tunnel_service.h"
 
@@ -19,12 +15,7 @@ struct PortTunnelService::WorkerGroup {
         Thread();
 
         std::atomic<bool> finished;
-#ifdef _WIN32
-        HANDLE handle;
-        DWORD thread_id;
-#else
         std::unique_ptr<std::thread> thread;
-#endif
     };
 
     bool spawn(const std::shared_ptr<PortTunnelService>& service,

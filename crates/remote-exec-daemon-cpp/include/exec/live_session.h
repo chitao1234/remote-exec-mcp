@@ -4,13 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-
-#ifdef _WIN32
-#include <windows.h>
-#include <winsock2.h>
-#else
 #include <thread>
-#endif
 
 #include "platform/basic_mutex.h"
 
@@ -49,9 +43,5 @@ struct LiveSession {
     bool retired;
     bool closing;
     bool pump_started;
-#ifdef _WIN32
-    HANDLE pump_thread_;
-#else
     std::unique_ptr<std::thread> pump_thread_;
-#endif
 };

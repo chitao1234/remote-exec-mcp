@@ -144,11 +144,5 @@ private:
     std::vector<std::weak_ptr<PortTunnelSession>> expiry_sessions_;
     bool expiry_shutdown_;
     bool expiry_thread_started_;
-#ifdef _WIN32
-    HANDLE expiry_thread_;
-    DWORD expiry_thread_id_;
-    static unsigned __stdcall expiry_thread_entry(void* raw_context);
-#else
     std::unique_ptr<std::thread> expiry_thread_;
-#endif
 };

@@ -3,15 +3,13 @@
 #include <algorithm>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 #include "runtime/daemon_thread.h"
 #include "core/logging.h"
 #include "platform/platform.h"
 #include "exec/process_session.h"
 #include "session_pump_internal.h"
-#ifdef _WIN32
-#include "platform/win32_thread.h"
-#endif
 
 namespace {
 
@@ -75,18 +73,6 @@ void pump_session_output(const std::shared_ptr<LiveSession>& session) {
     }
 }
 
-#ifdef _WIN32
-struct SessionPumpContext {
-    std::shared_ptr<LiveSession> session;
-};
-
-unsigned __stdcall session_output_pump_entry(void* raw_context) {
-    std::unique_ptr<SessionPumpContext> context(static_cast<SessionPumpContext*>(raw_context));
-    pump_session_output(context->session);
-    return 0;
-}
-#endif
-
 } // namespace
 
 SessionOutputDrainPolicy default_session_output_drain_policy() {
@@ -142,34 +128,6 @@ void finish_session_output_locked(LiveSession* session) {
     session->cond_.broadcast();
 }
 
-#ifdef _WIN32
-void start_session_pump(const std::shared_ptr<LiveSession>& session) {
-    BasicLockGuard lock(session->mutex_);
-    if (session->pump_started) {
-        return;
-    }
-    std::unique_ptr<SessionPumpContext> context(new SessionPumpContext());
-    context->session = session;
-    HANDLE handle = begin_win32_thread(session_output_pump_entry, context.get());
-    if (handle == nullptr) {
-        throw std::runtime_error("_beginthreadex failed");
-    }
-    session->pump_thread_ = handle;
-    session->pump_started = true;
-    context.release();
-}
-
-void join_session_pump(LiveSession* session) {
-    HANDLE handle = nullptr;
-    {
-        BasicLockGuard lock(session->mutex_);
-        handle = session->pump_thread_;
-        session->pump_thread_ = nullptr;
-        session->pump_started = false;
-    }
-    join_daemon_thread(&handle);
-}
-#else
 void start_session_pump(const std::shared_ptr<LiveSession>& session) {
     BasicLockGuard lock(session->mutex_);
     if (session->pump_started) {
@@ -188,7 +146,6 @@ void join_session_pump(LiveSession* session) {
     }
     join_daemon_thread(&thread);
 }
-#endif
 
 std::string take_session_output_locked(LiveSession* session, unsigned long max_output_tokens) {
     (void)max_output_tokens;
