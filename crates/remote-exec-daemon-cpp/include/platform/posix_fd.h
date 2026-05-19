@@ -6,23 +6,28 @@
 #include <cstddef>
 #include <fcntl.h>
 #include <poll.h>
+#include <stdlib.h>
 #include <string>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "remote_exec_cpp_config.h"
 #include "platform/basic_mutex.h"
 #include "platform/posix_eintr.h"
 
-#if defined(__GNUC__)
-extern "C" int posix_openpt(int flags) __attribute__((weak));
-extern "C" int grantpt(int fd) __attribute__((weak));
-extern "C" int unlockpt(int fd) __attribute__((weak));
-extern "C" char* ptsname(int fd) __attribute__((weak));
-#if defined(__GLIBC__) || defined(__FreeBSD__)
-extern "C" int ptsname_r(int fd, char* buffer, std::size_t buffer_len) __attribute__((weak));
+#if REMOTE_EXEC_CPP_HAVE_POSIX_OPENPT
+extern "C" int posix_openpt(int flags);
 #endif
+#if REMOTE_EXEC_CPP_HAVE_GRANTPT
+extern "C" int grantpt(int fd);
+#endif
+#if REMOTE_EXEC_CPP_HAVE_UNLOCKPT
+extern "C" int unlockpt(int fd);
+#endif
+#if REMOTE_EXEC_CPP_HAVE_PTSNAME
+extern "C" char* ptsname(int fd);
 #endif
 
 namespace posix_fd {
@@ -59,7 +64,7 @@ inline int create_pipe(int fds[2]) {
 }
 
 inline int create_cloexec_pipe(int fds[2]) {
-#if defined(__linux__) && defined(O_CLOEXEC)
+#if REMOTE_EXEC_CPP_HAVE_PIPE2 && REMOTE_EXEC_CPP_HAVE_O_CLOEXEC
     if (posix_eintr::retry<int>([&]() { return pipe2(fds, O_CLOEXEC); }) == 0) {
         return 0;
     }
@@ -91,7 +96,7 @@ inline int open_path(const char* path, int flags, mode_t mode) {
 
 inline int open_cloexec_path(const char* path, int flags) {
     int raw_fd = -1;
-#ifdef O_CLOEXEC
+#if REMOTE_EXEC_CPP_HAVE_O_CLOEXEC
     raw_fd = open_path(path, flags | O_CLOEXEC);
     if (raw_fd >= 0) {
         return raw_fd;
@@ -147,39 +152,39 @@ inline int change_directory(const char* path) {
 }
 
 inline bool pty_api_available() {
-#if defined(__GNUC__)
-    return posix_openpt != nullptr && grantpt != nullptr && unlockpt != nullptr && ptsname != nullptr;
-#else
-    return true;
-#endif
+    return REMOTE_EXEC_CPP_HAVE_POSIX_OPENPT && REMOTE_EXEC_CPP_HAVE_GRANTPT &&
+           REMOTE_EXEC_CPP_HAVE_UNLOCKPT &&
+           (REMOTE_EXEC_CPP_HAVE_PTSNAME_R || REMOTE_EXEC_CPP_HAVE_PTSNAME);
 }
 
 inline int open_pty_master(int flags) {
-    if (!pty_api_available()) {
-        errno = ENOSYS;
-        return -1;
-    }
+#if REMOTE_EXEC_CPP_HAVE_POSIX_OPENPT
     return posix_eintr::retry<int>([&]() { return posix_openpt(flags); });
+#else
+    (void)flags;
+    errno = ENOSYS;
+    return -1;
+#endif
 }
 
 inline int grant_pty(int fd) {
-#if defined(__GNUC__)
-    if (grantpt == nullptr) {
-        errno = ENOSYS;
-        return -1;
-    }
-#endif
+#if REMOTE_EXEC_CPP_HAVE_GRANTPT
     return posix_eintr::retry<int>([&]() { return grantpt(fd); });
+#else
+    (void)fd;
+    errno = ENOSYS;
+    return -1;
+#endif
 }
 
 inline int unlock_pty(int fd) {
-#if defined(__GNUC__)
-    if (unlockpt == nullptr) {
-        errno = ENOSYS;
-        return -1;
-    }
-#endif
+#if REMOTE_EXEC_CPP_HAVE_UNLOCKPT
     return posix_eintr::retry<int>([&]() { return unlockpt(fd); });
+#else
+    (void)fd;
+    errno = ENOSYS;
+    return -1;
+#endif
 }
 
 inline bool pty_slave_path(int master_fd, std::string* slave_path) {
@@ -187,20 +192,7 @@ inline bool pty_slave_path(int master_fd, std::string* slave_path) {
         errno = EINVAL;
         return false;
     }
-#if defined(__GLIBC__) || defined(__FreeBSD__)
-#if defined(__GNUC__)
-    int (*ptsname_r_fn)(int, char*, std::size_t) = ptsname_r;
-    if (ptsname_r_fn != nullptr) {
-        char pts_buf[256];
-        const int result = ptsname_r_fn(master_fd, pts_buf, sizeof(pts_buf));
-        if (result != 0) {
-            errno = result;
-            return false;
-        }
-        *slave_path = pts_buf;
-        return true;
-    }
-#else
+#if REMOTE_EXEC_CPP_HAVE_PTSNAME_R
     char pts_buf[256];
     const int result = ptsname_r(master_fd, pts_buf, sizeof(pts_buf));
     if (result != 0) {
@@ -210,14 +202,8 @@ inline bool pty_slave_path(int master_fd, std::string* slave_path) {
     *slave_path = pts_buf;
     return true;
 #endif
-#endif
 
-#if defined(__GNUC__)
-    if (ptsname == nullptr) {
-        errno = ENOSYS;
-        return false;
-    }
-#endif
+#if REMOTE_EXEC_CPP_HAVE_PTSNAME
     static BasicMutex ptsname_mutex;
     BasicLockGuard ptsname_lock(ptsname_mutex);
     char* slave_name = ptsname(master_fd);
@@ -226,6 +212,11 @@ inline bool pty_slave_path(int master_fd, std::string* slave_path) {
     }
     *slave_path = slave_name;
     return true;
+#else
+    (void)master_fd;
+    errno = ENOSYS;
+    return false;
+#endif
 }
 
 inline int poll_readable_or_hangup(int fd, unsigned long timeout_ms, bool* readable) {

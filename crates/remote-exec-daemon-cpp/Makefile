@@ -27,11 +27,13 @@ TEST_CXXFLAGS ?= ${BASE_CXXFLAGS}
 PROD_LDFLAGS ?=
 TEST_LDFLAGS ?=
 DEPFLAGS = -MMD -MP
-HOST_PROD_CPPFLAGS = ${COMMON_CPPFLAGS}
+POSIX_CONFIG_HEADER = ${BUILD_DIR}/generated/remote_exec_cpp_config.h
+POSIX_CONFIG_SCRIPT = ${MAKEFILE_DIR}scripts/write_posix_config_header.sh
+HOST_PROD_CPPFLAGS = -I${BUILD_DIR}/generated ${COMMON_CPPFLAGS}
 HOST_PROD_CXXFLAGS = ${PROD_CXXFLAGS} ${POSIX_PTHREAD_FLAGS}
 HOST_PROD_LDFLAGS ?= ${PROD_LDFLAGS}
 HOST_PROD_LDLIBS = ${POSIX_PTHREAD_FLAGS}
-HOST_TEST_CPPFLAGS = ${COMMON_CPPFLAGS} -DREMOTE_EXEC_CPP_TESTING
+HOST_TEST_CPPFLAGS = -I${BUILD_DIR}/generated ${COMMON_CPPFLAGS} -DREMOTE_EXEC_CPP_TESTING
 HOST_TEST_CXXFLAGS = ${TEST_CXXFLAGS} ${POSIX_PTHREAD_FLAGS}
 HOST_TEST_LDFLAGS ?= ${TEST_LDFLAGS}
 HOST_TEST_LDLIBS = ${POSIX_PTHREAD_FLAGS}
@@ -74,6 +76,8 @@ check: check-posix
 
 check-posix: ${HOST_TEST_PHONY_TARGETS} all-posix
 
+force-posix-config:
+
 stress-posix:
 	@i=1; \
 	while [ $$i -le ${STRESS_RUNS} ]; do \
@@ -93,6 +97,15 @@ ${POSIX_TARGET}: ${POSIX_OBJS}
 	mkdir -p ${.TARGET:H}
 	${HOST_CXX} ${HOST_PROD_CXXFLAGS} ${HOST_PROD_LDFLAGS} -o ${.TARGET} ${.ALLSRC} ${HOST_PROD_LDLIBS}
 
+${POSIX_CONFIG_HEADER}: ${POSIX_CONFIG_SCRIPT} force-posix-config
+	mkdir -p ${.TARGET:H}
+	HOST_CXX="${HOST_CXX}" \
+	    PROBE_CPPFLAGS="${COMMON_CPPFLAGS}" \
+	    PROBE_CXXFLAGS="${PROD_CXXFLAGS} ${POSIX_PTHREAD_FLAGS}" \
+	    PROBE_LDFLAGS="${HOST_PROD_LDFLAGS}" \
+	    PROBE_LDLIBS="${HOST_PROD_LDLIBS}" \
+	    sh ${POSIX_CONFIG_SCRIPT} ${.TARGET}
+
 .for test in ${HOST_POSIX_TESTS}
 ${HOST_${test}}: ${HOST_${test}_OBJS}
 	mkdir -p ${.TARGET:H}
@@ -100,13 +113,13 @@ ${HOST_${test}}: ${HOST_${test}_OBJS}
 .endfor
 
 .for src in ${POSIX_SRCS}
-${HOST_PROD_OBJ_DIR}/${src:S|.cpp|.o|}: ${src}
+${HOST_PROD_OBJ_DIR}/${src:S|.cpp|.o|}: ${src} ${POSIX_CONFIG_HEADER}
 	mkdir -p ${.TARGET:H}
 	${HOST_CXX} ${HOST_PROD_CPPFLAGS} ${HOST_PROD_CXXFLAGS} ${DEPFLAGS} -c -o ${.TARGET} ${src}
 .endfor
 
 .for src in ${HOST_TEST_COMPILE_SRCS}
-${HOST_TEST_OBJ_DIR}/${src:S|.cpp|.o|}: ${src}
+${HOST_TEST_OBJ_DIR}/${src:S|.cpp|.o|}: ${src} ${POSIX_CONFIG_HEADER}
 	mkdir -p ${.TARGET:H}
 	${HOST_CXX} ${HOST_TEST_CPPFLAGS} ${HOST_TEST_CXXFLAGS} ${DEPFLAGS} -c -o ${.TARGET} ${src}
 .endfor
@@ -118,5 +131,5 @@ ${HOST_TEST_OBJ_DIR}/${src:S|.cpp|.o|}: ${src}
 clean:
 	rm -rf ${BUILD_DIR}
 
-.PHONY: all all-posix check check-posix clean stress-posix test-server-streaming \
+.PHONY: all all-posix check check-posix clean force-posix-config stress-posix test-server-streaming \
 	${HOST_TEST_PHONY_TARGETS}

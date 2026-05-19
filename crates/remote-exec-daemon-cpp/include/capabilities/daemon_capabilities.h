@@ -2,6 +2,7 @@
 
 #include "json.hpp"
 
+struct AppState;
 using Json = nlohmann::json;
 
 struct DaemonCapabilities {
@@ -12,5 +13,5 @@ struct DaemonCapabilities {
     unsigned int port_forward_protocol_version;
 };
 
-DaemonCapabilities detect_daemon_capabilities();
+DaemonCapabilities detect_daemon_capabilities(const AppState& state);
 void write_daemon_capabilities(Json* target, const DaemonCapabilities& capabilities);

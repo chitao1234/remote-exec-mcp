@@ -30,6 +30,8 @@ TEXT_UTILS_SRCS = $(SOURCE_PREFIX)src/core/text_utils.cpp
 
 SHELL_POLICY_SRCS = $(SOURCE_PREFIX)src/core/shell_policy.cpp
 
+CAPABILITIES_SRCS = $(SOURCE_PREFIX)src/capabilities/daemon_capabilities.cpp
+
 POSIX_CHILD_REAPER_SRCS = $(SOURCE_PREFIX)src/exec/posix_child_reaper.cpp
 
 POSIX_PROCESS_SESSION_SRCS = \
@@ -53,7 +55,6 @@ HTTP_SRCS = \
 	$(SOURCE_PREFIX)src/http/http_request.cpp
 
 ROUTE_SRCS = \
-	$(SOURCE_PREFIX)src/rpc/daemon_capabilities.cpp \
 	$(SOURCE_PREFIX)src/rpc/exec_request_utils.cpp \
 	$(IMAGE_SRCS) \
 	$(SOURCE_PREFIX)src/rpc/server_contract.cpp \
@@ -140,6 +141,7 @@ BASE_COMMON_SRCS_NO_MAIN = \
 	$(SHELL_POLICY_SRCS) \
 	$(RUNTIME_SRCS) \
 	$(SESSION_STORE_SRCS) \
+	$(CAPABILITIES_SRCS) \
 	$(PATCH_SRCS) \
 	$(ROUTE_SRCS) \
 	$(PORT_FORWARD_SRCS) \
@@ -293,6 +295,7 @@ WINDOWS_SERVER_RUNTIME_TEST_SUPPORT_SRCS = \
 
 SERVER_ROUTES_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)tests/test_server_routes_shared.cpp \
+	$(CAPABILITIES_SRCS) \
 	$(ROUTE_SRCS) \
 	$(SOURCE_PREFIX)src/http/http_codec.cpp \
 	$(SOURCE_PREFIX)src/http/http_helpers.cpp \

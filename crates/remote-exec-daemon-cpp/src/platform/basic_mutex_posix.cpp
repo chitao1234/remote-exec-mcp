@@ -3,8 +3,10 @@
 #include <cerrno>
 #include <ctime>
 
-#if defined(CLOCK_MONOTONIC) && defined(__GNUC__) && !defined(__APPLE__)
-extern "C" int pthread_condattr_setclock(pthread_condattr_t* attr, clockid_t clock_id) __attribute__((weak));
+#include "remote_exec_cpp_config.h"
+
+#if REMOTE_EXEC_CPP_HAVE_PTHREAD_CONDATTR_SETCLOCK
+extern "C" int pthread_condattr_setclock(pthread_condattr_t* attr, clockid_t clock_id);
 #endif
 
 BasicMutex::BasicMutex() {
@@ -25,23 +27,11 @@ void BasicMutex::unlock() {
 
 namespace {
 
-bool pthread_condattr_setclock_available() {
-#if defined(CLOCK_MONOTONIC) && defined(__GNUC__) && !defined(__APPLE__)
-    return pthread_condattr_setclock != nullptr;
-#else
-    return false;
-#endif
-}
-
 bool init_condvar_monotonic(pthread_cond_t* cond) {
-#if !defined(CLOCK_MONOTONIC)
+#if !defined(CLOCK_MONOTONIC) || !REMOTE_EXEC_CPP_HAVE_PTHREAD_CONDATTR_SETCLOCK
     pthread_cond_init(cond, nullptr);
     return false;
 #else
-    if (!pthread_condattr_setclock_available()) {
-        pthread_cond_init(cond, nullptr);
-        return false;
-    }
     pthread_condattr_t attr;
     if (pthread_condattr_init(&attr) != 0) {
         pthread_cond_init(cond, nullptr);

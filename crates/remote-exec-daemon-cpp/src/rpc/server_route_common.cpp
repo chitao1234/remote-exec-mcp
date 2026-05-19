@@ -1,9 +1,9 @@
 #include <string>
 
+#include "capabilities/daemon_capabilities.h"
 #include "core/common.h"
 #include "exec/process_session.h"
 #include "exec/session_store.h"
-#include "rpc/daemon_capabilities.h"
 #include "patch/patch_engine.h"
 #include "platform/platform.h"
 #include "rpc/exec_request_utils.h"
@@ -173,7 +173,7 @@ HttpResponse handle_target_info(const AppState& state) {
         {"platform", platform::platform_name()},
         {"arch", platform::arch_name()},
     };
-    write_daemon_capabilities(&body, detect_daemon_capabilities());
+    write_daemon_capabilities(&body, detect_daemon_capabilities(state));
     write_json(response, body);
     return response;
 }

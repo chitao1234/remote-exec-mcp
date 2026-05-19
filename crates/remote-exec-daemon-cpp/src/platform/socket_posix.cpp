@@ -18,6 +18,7 @@
 
 #include "platform/posix_eintr.h"
 #include "platform/posix_fd.h"
+#include "remote_exec_cpp_config.h"
 
 namespace {
 
@@ -60,7 +61,7 @@ bool set_socket_cloexec(SOCKET socket) {
 
 SOCKET create_socket_cloexec(int family, int type, int protocol) {
     SOCKET created = INVALID_SOCKET;
-#ifdef SOCK_CLOEXEC
+#if REMOTE_EXEC_CPP_HAVE_SOCK_CLOEXEC
     created = posix_eintr::retry<int>([&]() { return socket(family, type | SOCK_CLOEXEC, protocol); });
     if (created != INVALID_SOCKET) {
         return created;
