@@ -1,10 +1,10 @@
 #include <string>
 
-#include "exec_request_utils.h"
+#include "rpc/exec_request_utils.h"
 #include "core/logging.h"
 #include "process_session.h"
-#include "server_route_common.h"
-#include "server_route_exec.h"
+#include "rpc/server_route_common.h"
+#include "rpc/server_route_exec.h"
 
 HttpResponse handle_exec_start(AppState& state, const HttpRequest& request) {
     HttpResponse response;

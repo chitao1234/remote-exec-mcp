@@ -11,8 +11,8 @@
 #include <unistd.h>
 #endif
 
-#include "filesystem_sandbox.h"
-#include "path_compare.h"
+#include "policy/filesystem_sandbox.h"
+#include "policy/path_compare.h"
 
 namespace {
 

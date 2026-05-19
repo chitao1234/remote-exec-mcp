@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include "rpc_failures.h"
+#include "rpc/rpc_failures.h"
 
 namespace {
 

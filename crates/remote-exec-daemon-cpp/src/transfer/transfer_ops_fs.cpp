@@ -21,7 +21,7 @@
 #ifndef _WIN32
 #include "platform/posix_eintr.h"
 #endif
-#include "rpc_failures.h"
+#include "rpc/rpc_failures.h"
 #include "transfer_ops_internal.h"
 
 namespace transfer_ops_internal {

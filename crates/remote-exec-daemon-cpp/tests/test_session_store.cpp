@@ -15,7 +15,7 @@
 
 #include "core/config.h"
 #include "platform/platform.h"
-#include "server_request_utils.h"
+#include "rpc/server_request_utils.h"
 #ifndef _WIN32
 #include "posix_child_reaper.h"
 #endif

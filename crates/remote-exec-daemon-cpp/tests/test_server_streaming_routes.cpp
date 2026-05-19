@@ -7,7 +7,7 @@
 #include <sstream>
 
 #include "base64_codec.h"
-#include "path_policy.h"
+#include "policy/path_policy.h"
 #include "test_socket_pair.h"
 
 static std::size_t response_content_length(const std::string& header_block) {

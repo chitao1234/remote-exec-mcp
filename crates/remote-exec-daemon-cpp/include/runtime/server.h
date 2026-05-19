@@ -4,7 +4,7 @@
 #include <string>
 
 #include "core/config.h"
-#include "filesystem_sandbox.h"
+#include "policy/filesystem_sandbox.h"
 #include "platform/socket.h"
 #include "session_store.h"
 

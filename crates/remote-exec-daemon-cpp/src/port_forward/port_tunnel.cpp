@@ -3,7 +3,7 @@
 
 #include "port_tunnel_service.h"
 #include "runtime/daemon_thread.h"
-#include "server_contract.h"
+#include "rpc/server_contract.h"
 
 struct PortTunnelService::WorkerGroup {
     WorkerGroup() : shutting_down(false) {}

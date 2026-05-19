@@ -19,7 +19,7 @@
 #endif
 
 #include "patch_engine.h"
-#include "path_policy.h"
+#include "policy/path_policy.h"
 #include "platform/path_utils.h"
 #include "platform/platform.h"
 #ifndef _WIN32

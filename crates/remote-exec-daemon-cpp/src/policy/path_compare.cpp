@@ -7,8 +7,8 @@
 #include <windows.h>
 #endif
 
-#include "path_compare.h"
-#include "path_policy.h"
+#include "policy/path_compare.h"
+#include "policy/path_policy.h"
 
 namespace {
 

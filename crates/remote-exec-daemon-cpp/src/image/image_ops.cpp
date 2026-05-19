@@ -7,7 +7,7 @@
 #include <sys/stat.h>
 
 #include "platform/path_utils.h"
-#include "rpc_failures.h"
+#include "rpc/rpc_failures.h"
 #include "platform/scoped_file.h"
 #include "../core/stdio_retry.h"
 

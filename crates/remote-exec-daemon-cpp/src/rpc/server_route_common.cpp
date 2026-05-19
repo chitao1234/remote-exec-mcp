@@ -1,11 +1,11 @@
 #include <string>
 
 #include "core/common.h"
-#include "daemon_capabilities.h"
+#include "rpc/daemon_capabilities.h"
 #include "patch_engine.h"
 #include "platform/platform.h"
-#include "server_request_utils.h"
-#include "server_route_common.h"
+#include "rpc/server_request_utils.h"
+#include "rpc/server_route_common.h"
 
 HttpResponse make_rpc_error_response(int status, const std::string& code, const std::string& message) {
     HttpResponse response;

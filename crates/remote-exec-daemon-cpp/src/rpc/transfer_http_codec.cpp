@@ -3,9 +3,9 @@
 
 #include "base64_codec.h"
 #include "core/logging.h"
-#include "rpc_failures.h"
-#include "server_contract.h"
-#include "transfer_http_codec.h"
+#include "rpc/rpc_failures.h"
+#include "rpc/server_contract.h"
+#include "rpc/transfer_http_codec.h"
 
 namespace {
 

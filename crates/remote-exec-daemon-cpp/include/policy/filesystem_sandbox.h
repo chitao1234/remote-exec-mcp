@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "path_policy.h"
+#include "policy/path_policy.h"
 
 struct SandboxPathList {
     std::vector<std::string> allow;

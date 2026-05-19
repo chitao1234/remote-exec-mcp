@@ -3,10 +3,10 @@
 #include <string>
 #include <vector>
 
-#include "filesystem_sandbox.h"
+#include "policy/filesystem_sandbox.h"
 #include "http/http_helpers.h"
-#include "rpc_failures.h"
-#include "transfer_http_codec.h"
+#include "rpc/rpc_failures.h"
+#include "rpc/transfer_http_codec.h"
 
 struct AppState;
 

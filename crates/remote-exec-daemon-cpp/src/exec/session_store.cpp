@@ -8,7 +8,7 @@
 #include "output_renderer.h"
 #include "platform/platform.h"
 #include "process_session.h"
-#include "exec_request_utils.h"
+#include "rpc/exec_request_utils.h"
 #include "session_pump.h"
 #include "session_pump_internal.h"
 #include "session_response_builder.h"

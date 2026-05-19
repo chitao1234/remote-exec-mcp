@@ -2,7 +2,7 @@
 #include <cctype>
 #include <string>
 
-#include "path_policy.h"
+#include "policy/path_policy.h"
 #include "core/text_utils.h"
 
 namespace {

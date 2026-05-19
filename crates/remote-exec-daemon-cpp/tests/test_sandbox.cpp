@@ -1,9 +1,9 @@
 #include "test_assert.h"
 #include <string>
 
-#include "filesystem_sandbox.h"
-#include "path_compare.h"
-#include "path_policy.h"
+#include "policy/filesystem_sandbox.h"
+#include "policy/path_compare.h"
+#include "policy/path_policy.h"
 #include "test_contract_fixtures.h"
 #include "test_filesystem.h"
 

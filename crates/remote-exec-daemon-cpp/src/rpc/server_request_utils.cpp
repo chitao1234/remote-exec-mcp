@@ -1,7 +1,7 @@
 #include <string>
 
-#include "path_policy.h"
-#include "server_request_utils.h"
+#include "policy/path_policy.h"
+#include "rpc/server_request_utils.h"
 
 namespace {
 

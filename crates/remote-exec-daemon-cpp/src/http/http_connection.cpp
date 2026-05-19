@@ -9,16 +9,16 @@
 #include "core/logging.h"
 #include "platform/platform.h"
 #include "port_tunnel.h"
-#include "server_contract.h"
+#include "rpc/server_contract.h"
 #include "runtime/server.h"
-#include "server_request_utils.h"
-#include "server_route_common.h"
-#include "server_routes.h"
+#include "rpc/server_request_utils.h"
+#include "rpc/server_route_common.h"
+#include "rpc/server_routes.h"
 #include "http/server_transport.h"
 #include "core/text_utils.h"
-#include "transfer_http_codec.h"
+#include "rpc/transfer_http_codec.h"
 #include "transfer_ops.h"
-#include "transfer_request_utils.h"
+#include "rpc/transfer_request_utils.h"
 
 namespace {
 

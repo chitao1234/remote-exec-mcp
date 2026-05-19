@@ -1,6 +1,6 @@
 #include <cstddef>
 
-#include "server_contract.h"
+#include "rpc/server_contract.h"
 
 namespace {
 

@@ -1,4 +1,4 @@
-#include "rpc_failures.h"
+#include "rpc/rpc_failures.h"
 
 TransferFailure::TransferFailure(TransferRpcCode code, const std::string& message)
     : std::runtime_error(message), code(code), message(message) {

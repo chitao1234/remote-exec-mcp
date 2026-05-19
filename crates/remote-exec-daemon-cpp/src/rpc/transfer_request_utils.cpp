@@ -1,8 +1,8 @@
-#include "transfer_request_utils.h"
+#include "rpc/transfer_request_utils.h"
 
-#include "path_policy.h"
+#include "policy/path_policy.h"
 #include "runtime/server.h"
-#include "server_request_utils.h"
+#include "rpc/server_request_utils.h"
 
 namespace {
 

@@ -2,7 +2,7 @@
 #include "port_tunnel_connection.h"
 #include "port_tunnel_sender.h"
 #include "port_tunnel_service.h"
-#include "server_contract.h"
+#include "rpc/server_contract.h"
 
 struct TunnelOpenMetadata {
     std::string role;
