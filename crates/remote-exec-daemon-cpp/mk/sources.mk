@@ -36,19 +36,19 @@ ROUTE_SRCS = \
 	$(SOURCE_PREFIX)src/transfer_request_utils.cpp
 
 PORT_FORWARD_SRCS = \
-	$(SOURCE_PREFIX)src/port_forward_endpoint.cpp \
-	$(SOURCE_PREFIX)src/port_forward_error.cpp \
-	$(SOURCE_PREFIX)src/port_forward_socket_ops.cpp \
-	$(SOURCE_PREFIX)src/port_tunnel_frame.cpp \
-	$(SOURCE_PREFIX)src/port_tunnel.cpp \
-	$(SOURCE_PREFIX)src/port_tunnel_sender.cpp \
-	$(SOURCE_PREFIX)src/port_tunnel_session.cpp \
-	$(SOURCE_PREFIX)src/port_tunnel_spawn.cpp \
-	$(SOURCE_PREFIX)src/port_tunnel_streams.cpp \
-	$(SOURCE_PREFIX)src/port_tunnel_transport.cpp \
-	$(SOURCE_PREFIX)src/port_tunnel_tcp.cpp \
-	$(SOURCE_PREFIX)src/port_tunnel_udp.cpp \
-	$(SOURCE_PREFIX)src/port_tunnel_error.cpp
+	$(SOURCE_PREFIX)src/port_forward/port_forward_endpoint.cpp \
+	$(SOURCE_PREFIX)src/port_forward/port_forward_error.cpp \
+	$(SOURCE_PREFIX)src/port_forward/port_forward_socket_ops.cpp \
+	$(SOURCE_PREFIX)src/port_forward/port_tunnel_frame.cpp \
+	$(SOURCE_PREFIX)src/port_forward/port_tunnel.cpp \
+	$(SOURCE_PREFIX)src/port_forward/port_tunnel_sender.cpp \
+	$(SOURCE_PREFIX)src/port_forward/port_tunnel_session.cpp \
+	$(SOURCE_PREFIX)src/port_forward/port_tunnel_spawn.cpp \
+	$(SOURCE_PREFIX)src/port_forward/port_tunnel_streams.cpp \
+	$(SOURCE_PREFIX)src/port_forward/port_tunnel_transport.cpp \
+	$(SOURCE_PREFIX)src/port_forward/port_tunnel_tcp.cpp \
+	$(SOURCE_PREFIX)src/port_forward/port_tunnel_udp.cpp \
+	$(SOURCE_PREFIX)src/port_forward/port_tunnel_error.cpp
 
 BASE64_SRCS = $(SOURCE_PREFIX)src/base64_codec.cpp
 
@@ -307,7 +307,7 @@ HOST_SANDBOX_SRCS = \
 
 HOST_PORT_TUNNEL_FRAME_SRCS = \
 	$(SOURCE_PREFIX)tests/test_port_tunnel_frame.cpp \
-	$(SOURCE_PREFIX)src/port_tunnel_frame.cpp
+	$(SOURCE_PREFIX)src/port_forward/port_tunnel_frame.cpp
 
 WINDOWS_DAEMON_SUPPORT_SRCS = \
 	$(SOURCE_PREFIX)src/process_session_win32.cpp \

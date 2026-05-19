@@ -1,7 +1,7 @@
 #include "test_server_streaming_shared.h"
 
-#include "../src/port_tunnel_connection.h"
-#include "../src/port_tunnel_service.h"
+#include "../src/port_forward/port_tunnel_connection.h"
+#include "../src/port_forward/port_tunnel_service.h"
 #include "test_socket_pair.h"
 
 #include "port_forward_error.h"

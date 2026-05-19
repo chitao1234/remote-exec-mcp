@@ -2,7 +2,7 @@
 #include <cstdlib>
 
 #include "port_tunnel_service.h"
-#include "daemon_thread.h"
+#include "../daemon_thread.h"
 #include "server_contract.h"
 
 struct PortTunnelService::WorkerGroup {

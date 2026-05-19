@@ -18,7 +18,7 @@
 #include "platform.h"
 #include "port_forward_socket_ops.h"
 #include "port_tunnel.h"
-#include "port_tunnel_service.h"
+#include "port_forward/port_tunnel_service.h"
 #ifdef _WIN32
 #include "win32_thread.h"
 #endif
