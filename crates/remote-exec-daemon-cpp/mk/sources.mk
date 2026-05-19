@@ -70,6 +70,7 @@ PORT_FORWARD_SRCS = \
 	$(SOURCE_PREFIX)src/port_forward/port_forward_endpoint.cpp \
 	$(SOURCE_PREFIX)src/port_forward/port_forward_error.cpp \
 	$(SOURCE_PREFIX)src/port_forward/port_forward_socket_ops.cpp \
+	$(SOURCE_PREFIX)src/port_forward/port_tunnel_common.cpp \
 	$(SOURCE_PREFIX)src/port_forward/port_tunnel_frame.cpp \
 	$(SOURCE_PREFIX)src/port_forward/port_tunnel.cpp \
 	$(SOURCE_PREFIX)src/port_forward/port_tunnel_sender.cpp \
