@@ -1,7 +1,7 @@
 #include <initializer_list>
 #include <string>
 
-#include "base64_codec.h"
+#include "codec/base64_codec.h"
 #include "core/logging.h"
 #include "rpc/rpc_failures.h"
 #include "rpc/server_contract.h"

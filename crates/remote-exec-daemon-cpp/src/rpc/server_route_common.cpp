@@ -2,7 +2,7 @@
 
 #include "core/common.h"
 #include "rpc/daemon_capabilities.h"
-#include "patch_engine.h"
+#include "patch/patch_engine.h"
 #include "platform/platform.h"
 #include "rpc/server_request_utils.h"
 #include "rpc/server_route_common.h"

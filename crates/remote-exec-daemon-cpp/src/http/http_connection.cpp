@@ -17,7 +17,7 @@
 #include "http/server_transport.h"
 #include "core/text_utils.h"
 #include "rpc/transfer_http_codec.h"
-#include "transfer_ops.h"
+#include "transfer/transfer_ops.h"
 #include "rpc/transfer_request_utils.h"
 
 namespace {

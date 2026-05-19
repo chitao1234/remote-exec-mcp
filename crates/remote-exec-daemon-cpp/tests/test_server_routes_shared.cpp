@@ -5,7 +5,7 @@
 #include <iterator>
 #include <string>
 
-#include "base64_codec.h"
+#include "codec/base64_codec.h"
 #include "core/config.h"
 #include "policy/filesystem_sandbox.h"
 #include "http/http_helpers.h"
@@ -20,7 +20,7 @@
 #include "test_filesystem.h"
 #include "test_server_routes_shared.h"
 #include "test_text_file.h"
-#include "transfer_ops.h"
+#include "transfer/transfer_ops.h"
 
 namespace fs = test_fs;
 

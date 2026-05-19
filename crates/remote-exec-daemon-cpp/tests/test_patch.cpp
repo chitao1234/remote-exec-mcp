@@ -11,7 +11,7 @@
 #include <sys/stat.h>
 #endif
 
-#include "patch_engine.h"
+#include "patch/patch_engine.h"
 #include "test_filesystem.h"
 
 namespace fs = test_fs;

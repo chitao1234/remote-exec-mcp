@@ -6,7 +6,7 @@
 #include <cstring>
 #include <sstream>
 
-#include "base64_codec.h"
+#include "codec/base64_codec.h"
 #include "policy/path_policy.h"
 #include "test_socket_pair.h"
 

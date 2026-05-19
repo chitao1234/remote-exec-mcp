@@ -4,7 +4,7 @@
 #include <vector>
 
 #include "http/http_helpers.h"
-#include "transfer_ops.h"
+#include "transfer/transfer_ops.h"
 
 struct TransferImportMetadata {
     std::string destination_path;

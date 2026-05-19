@@ -1,4 +1,4 @@
-#include "image_ops.h"
+#include "image/image_ops.h"
 
 #include <cerrno>
 #include <cstdio>

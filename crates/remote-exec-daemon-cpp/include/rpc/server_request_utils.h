@@ -5,7 +5,7 @@
 #include "rpc/exec_request_utils.h"
 #include "policy/filesystem_sandbox.h"
 #include "http/http_helpers.h"
-#include "patch_engine.h"
+#include "patch/patch_engine.h"
 #include "runtime/server.h"
 
 bool reject_before_route(const AppState& state, const HttpRequest& request, HttpResponse* response);

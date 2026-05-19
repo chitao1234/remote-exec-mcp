@@ -1,7 +1,7 @@
 #include <string>
 
-#include "base64_codec.h"
-#include "image_ops.h"
+#include "codec/base64_codec.h"
+#include "image/image_ops.h"
 #include "core/logging.h"
 #include "rpc/rpc_failures.h"
 #include "rpc/server_request_utils.h"
