@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "daemon_thread.h"
 #include "logging.h"
 #include "platform.h"
 #include "process_session.h"
@@ -166,10 +167,7 @@ void join_session_pump(LiveSession* session) {
         session->pump_thread_ = nullptr;
         session->pump_started = false;
     }
-    if (handle != nullptr) {
-        WaitForSingleObject(handle, INFINITE);
-        CloseHandle(handle);
-    }
+    join_daemon_thread(&handle);
 }
 #else
 void start_session_pump(const std::shared_ptr<LiveSession>& session) {
@@ -188,9 +186,7 @@ void join_session_pump(LiveSession* session) {
         thread.swap(session->pump_thread_);
         session->pump_started = false;
     }
-    if (thread.get() != nullptr) {
-        thread->join();
-    }
+    join_daemon_thread(&thread);
 }
 #endif
 

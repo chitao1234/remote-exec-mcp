@@ -1,7 +1,7 @@
-#include "port_tunnel_thread.h"
+#include "daemon_thread.h"
 
 #ifdef _WIN32
-void consume_port_tunnel_thread(HANDLE* thread, DWORD thread_id) {
+void consume_daemon_thread(HANDLE* thread, DWORD thread_id) {
     HANDLE handle = *thread;
     *thread = nullptr;
     if (handle == nullptr) {
@@ -12,8 +12,18 @@ void consume_port_tunnel_thread(HANDLE* thread, DWORD thread_id) {
     }
     CloseHandle(handle);
 }
+
+void join_daemon_thread(HANDLE* thread) {
+    HANDLE handle = *thread;
+    *thread = nullptr;
+    if (handle == nullptr) {
+        return;
+    }
+    WaitForSingleObject(handle, INFINITE);
+    CloseHandle(handle);
+}
 #else
-void consume_port_tunnel_thread(std::unique_ptr<std::thread>* thread) {
+void consume_daemon_thread(std::unique_ptr<std::thread>* thread) {
     std::unique_ptr<std::thread> owned;
     owned.swap(*thread);
     if (owned.get() == nullptr) {
@@ -24,5 +34,9 @@ void consume_port_tunnel_thread(std::unique_ptr<std::thread>* thread) {
         return;
     }
     owned->join();
+}
+
+void join_daemon_thread(std::unique_ptr<std::thread>* thread) {
+    consume_daemon_thread(thread);
 }
 #endif

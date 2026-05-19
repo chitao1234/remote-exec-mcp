@@ -3,7 +3,7 @@
 
 #include "port_tunnel_connection.h"
 #include "port_tunnel_service.h"
-#include "port_tunnel_thread.h"
+#include "daemon_thread.h"
 
 namespace {
 
@@ -684,9 +684,9 @@ void PortTunnelService::stop_expiry_scheduler() {
     }
     log_message(LOG_DEBUG, "port_tunnel", "expiry scheduler stop requested");
 #ifdef _WIN32
-    consume_port_tunnel_thread(&thread, thread_id);
+    consume_daemon_thread(&thread, thread_id);
 #else
-    consume_port_tunnel_thread(&thread);
+    consume_daemon_thread(&thread);
 #endif
 }
 

@@ -2,7 +2,7 @@
 #include <cstdlib>
 
 #include "port_tunnel_service.h"
-#include "port_tunnel_thread.h"
+#include "daemon_thread.h"
 #include "server_contract.h"
 
 struct PortTunnelService::WorkerGroup {
@@ -462,7 +462,7 @@ bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelServi
     } catch (const std::exception& ex) {
         if (worker->handle != nullptr) {
             start_gate->cancel();
-            consume_port_tunnel_thread(&worker->handle, worker->thread_id);
+            consume_daemon_thread(&worker->handle, worker->thread_id);
         }
         join_workers(finished_workers);
         log_tunnel_exception(operation, ex);
@@ -470,7 +470,7 @@ bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelServi
     } catch (...) {
         if (worker->handle != nullptr) {
             start_gate->cancel();
-            consume_port_tunnel_thread(&worker->handle, worker->thread_id);
+            consume_daemon_thread(&worker->handle, worker->thread_id);
         }
         join_workers(finished_workers);
         log_unknown_tunnel_exception(operation);
@@ -506,7 +506,7 @@ bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelServi
     } catch (const std::exception& ex) {
         if (worker->thread.get() != nullptr) {
             start_gate->cancel();
-            consume_port_tunnel_thread(&worker->thread);
+            consume_daemon_thread(&worker->thread);
         }
         join_workers(finished_workers);
         log_tunnel_exception(operation, ex);
@@ -514,7 +514,7 @@ bool PortTunnelService::WorkerGroup::spawn(const std::shared_ptr<PortTunnelServi
     } catch (...) {
         if (worker->thread.get() != nullptr) {
             start_gate->cancel();
-            consume_port_tunnel_thread(&worker->thread);
+            consume_daemon_thread(&worker->thread);
         }
         join_workers(finished_workers);
         log_unknown_tunnel_exception(operation);
@@ -553,9 +553,9 @@ void PortTunnelService::WorkerGroup::collect_finished(std::vector<std::shared_pt
 void PortTunnelService::WorkerGroup::join_workers(const std::vector<std::shared_ptr<Thread>>& workers) {
     for (std::size_t i = 0; i < workers.size(); ++i) {
 #ifdef _WIN32
-        consume_port_tunnel_thread(&workers[i]->handle, workers[i]->thread_id);
+        consume_daemon_thread(&workers[i]->handle, workers[i]->thread_id);
 #else
-        consume_port_tunnel_thread(&workers[i]->thread);
+        consume_daemon_thread(&workers[i]->thread);
 #endif
     }
 }

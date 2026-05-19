@@ -12,6 +12,7 @@
 #include <thread>
 #endif
 
+#include "daemon_thread.h"
 #include "logging.h"
 #include "path_policy.h"
 #include "platform.h"
@@ -128,23 +129,8 @@ void ServerRuntime::join() {
 #endif
     }
 
-#ifdef _WIN32
-    if (accept_thread != nullptr) {
-        WaitForSingleObject(accept_thread, INFINITE);
-        CloseHandle(accept_thread);
-    }
-    if (maintenance_thread != nullptr) {
-        WaitForSingleObject(maintenance_thread, INFINITE);
-        CloseHandle(maintenance_thread);
-    }
-#else
-    if (accept_thread.get() != nullptr) {
-        accept_thread->join();
-    }
-    if (maintenance_thread.get() != nullptr) {
-        maintenance_thread->join();
-    }
-#endif
+    join_daemon_thread(&accept_thread);
+    join_daemon_thread(&maintenance_thread);
 
     connections_.begin_shutdown();
     connections_.wait_for_all();

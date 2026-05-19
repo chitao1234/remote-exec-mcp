@@ -2,6 +2,8 @@
 
 #include <vector>
 
+#include "daemon_thread.h"
+
 namespace {
 
 class ConnectionStartGate {
@@ -197,16 +199,9 @@ void ConnectionManager::reap_finished() {
 
     for (std::size_t i = 0; i < finished.size(); ++i) {
 #ifdef _WIN32
-        if (finished[i]->thread_handle != nullptr) {
-            WaitForSingleObject(finished[i]->thread_handle, INFINITE);
-            CloseHandle(finished[i]->thread_handle);
-            finished[i]->thread_handle = nullptr;
-        }
+        join_daemon_thread(&finished[i]->thread_handle);
 #else
-        if (finished[i]->thread.get() != nullptr) {
-            finished[i]->thread->join();
-            finished[i]->thread.reset();
-        }
+        join_daemon_thread(&finished[i]->thread);
 #endif
     }
 }

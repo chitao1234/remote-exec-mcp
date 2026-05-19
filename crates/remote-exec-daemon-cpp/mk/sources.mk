@@ -20,6 +20,8 @@ RPC_FAILURE_SRCS = $(SOURCE_PREFIX)src/rpc_failures.cpp
 
 POSIX_CHILD_REAPER_SRCS = $(SOURCE_PREFIX)src/posix_child_reaper.cpp
 
+DAEMON_THREAD_SRCS = $(SOURCE_PREFIX)src/daemon_thread.cpp
+
 ROUTE_SRCS = \
 	$(SOURCE_PREFIX)src/daemon_capabilities.cpp \
 	$(SOURCE_PREFIX)src/exec_request_utils.cpp \
@@ -43,7 +45,6 @@ PORT_FORWARD_SRCS = \
 	$(SOURCE_PREFIX)src/port_tunnel_session.cpp \
 	$(SOURCE_PREFIX)src/port_tunnel_spawn.cpp \
 	$(SOURCE_PREFIX)src/port_tunnel_streams.cpp \
-	$(SOURCE_PREFIX)src/port_tunnel_thread.cpp \
 	$(SOURCE_PREFIX)src/port_tunnel_transport.cpp \
 	$(SOURCE_PREFIX)src/port_tunnel_tcp.cpp \
 	$(SOURCE_PREFIX)src/port_tunnel_udp.cpp \
@@ -95,6 +96,7 @@ BASE_COMMON_SRCS_NO_MAIN = \
 	$(SOURCE_PREFIX)src/session_pump.cpp \
 	$(SOURCE_PREFIX)src/patch_engine.cpp \
 	$(SOURCE_PREFIX)src/connection_manager.cpp \
+	$(DAEMON_THREAD_SRCS) \
 	$(ROUTE_SRCS) \
 	$(PORT_FORWARD_SRCS) \
 	$(BASE64_SRCS) \
@@ -203,6 +205,7 @@ HOST_SESSION_STORE_SRCS = \
 	$(SESSION_STORE_SUPPORT_SRCS) \
 	$(SOURCE_PREFIX)src/session_store.cpp \
 	$(SOURCE_PREFIX)src/session_pump.cpp \
+	$(DAEMON_THREAD_SRCS) \
 	$(SOURCE_PREFIX)src/process_session_posix.cpp \
 	$(POSIX_CHILD_REAPER_SRCS) \
 	$(SOURCE_PREFIX)src/platform.cpp \
@@ -221,7 +224,8 @@ HOST_CONNECTION_MANAGER_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)src/http_helpers.cpp \
 	$(SOURCE_PREFIX)src/text_utils.cpp \
 	$(SOURCE_PREFIX)src/platform.cpp \
-	$(SOURCE_PREFIX)src/logging.cpp
+	$(SOURCE_PREFIX)src/logging.cpp \
+	$(DAEMON_THREAD_SRCS)
 
 HOST_CONNECTION_MANAGER_SRCS = \
 	$(HOST_CONNECTION_MANAGER_TEST_COMMON_SRCS) \
@@ -262,6 +266,7 @@ SERVER_ROUTES_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)src/logging.cpp \
 	$(SOURCE_PREFIX)src/config.cpp \
 	$(SOURCE_PREFIX)src/text_utils.cpp \
+	$(DAEMON_THREAD_SRCS) \
 	$(TRANSFER_SRCS) \
 	$(POLICY_SRCS) \
 	$(RPC_FAILURE_SRCS) \
@@ -326,7 +331,8 @@ WINDOWS_SESSION_STORE_TEST_SRCS = \
 	$(BASIC_MUTEX_WINDOWS_SRCS) \
 	$(SOURCE_PREFIX)src/logging.cpp \
 	$(SOURCE_PREFIX)src/config.cpp \
-	$(SOURCE_PREFIX)src/text_utils.cpp
+	$(SOURCE_PREFIX)src/text_utils.cpp \
+	$(DAEMON_THREAD_SRCS)
 
 WINDOWS_SERVER_ROUTES_COMMON_TEST_SRCS = \
 	$(SOURCE_PREFIX)tests/test_server_routes_common.cpp \

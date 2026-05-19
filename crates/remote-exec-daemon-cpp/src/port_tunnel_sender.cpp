@@ -2,9 +2,9 @@
 
 #include <limits>
 
+#include "daemon_thread.h"
 #include "port_tunnel_connection.h"
 #include "port_tunnel_service.h"
-#include "port_tunnel_thread.h"
 
 namespace {
 
@@ -72,14 +72,14 @@ void PortTunnelSender::join_writer_thread() {
         writer_thread_ = nullptr;
         writer_thread_id_ = 0U;
     }
-    consume_port_tunnel_thread(&thread, thread_id);
+    consume_daemon_thread(&thread, thread_id);
 #else
     std::unique_ptr<std::thread> thread;
     {
         BasicLockGuard lock(writer_mutex_);
         thread.swap(writer_thread_);
     }
-    consume_port_tunnel_thread(&thread);
+    consume_daemon_thread(&thread);
 #endif
 }
 
