@@ -1,5 +1,58 @@
 #include "port_tunnel_streams.h"
 
+void TunnelTcpStream::close() {
+    BasicLockGuard lock(mutex);
+    if (!closed) {
+        closed = true;
+        writer_closed = true;
+        writer_shutdown_requested = true;
+        write_queue.clear();
+        writer_cond.broadcast();
+        shutdown_socket(socket.get());
+        socket.reset();
+        active_stream_budget.reset();
+    }
+}
+
+bool TunnelTcpStream::is_closed() {
+    BasicLockGuard lock(mutex);
+    return closed;
+}
+
+void TunnelUdpSocket::close() {
+    BasicLockGuard lock(mutex);
+    if (closed) {
+        return;
+    }
+    closed = true;
+    wakeup.signal();
+    shutdown_socket(socket.get());
+    socket.reset();
+    udp_bind_budget.reset();
+}
+
+bool TunnelUdpSocket::is_closed() {
+    BasicLockGuard lock(mutex);
+    return closed;
+}
+
+void RetainedTcpListener::close() {
+    BasicLockGuard lock(mutex);
+    if (closed) {
+        return;
+    }
+    closed = true;
+    wakeup.signal();
+    shutdown_socket(listener.get());
+    listener.reset();
+    retained_listener_budget.reset();
+}
+
+bool RetainedTcpListener::is_closed() {
+    BasicLockGuard lock(mutex);
+    return closed;
+}
+
 void ConnectionLocalStreams::insert_tcp(uint32_t stream_id, const std::shared_ptr<TunnelTcpStream>& stream) {
     BasicLockGuard lock(mutex_);
     tcp_streams_[stream_id] = stream;

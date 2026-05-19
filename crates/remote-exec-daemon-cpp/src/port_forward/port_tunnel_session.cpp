@@ -444,3 +444,7 @@ bool PortTunnelSession::is_unavailable() {
     BasicLockGuard lock(mutex);
     return session_state_terminal(state);
 }
+
+bool session_is_unavailable(const std::shared_ptr<PortTunnelSession>& session) {
+    return session->is_unavailable();
+}

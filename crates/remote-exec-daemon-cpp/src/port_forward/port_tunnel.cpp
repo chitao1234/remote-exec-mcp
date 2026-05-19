@@ -285,63 +285,6 @@ bool PortTunnelWorkerLease::valid() const {
     return budget_state_.get() != nullptr;
 }
 
-void TunnelTcpStream::close() {
-    BasicLockGuard lock(mutex);
-    if (!closed) {
-        closed = true;
-        writer_closed = true;
-        writer_shutdown_requested = true;
-        write_queue.clear();
-        writer_cond.broadcast();
-        shutdown_socket(socket.get());
-        socket.reset();
-        active_stream_budget.reset();
-    }
-}
-
-bool TunnelTcpStream::is_closed() {
-    BasicLockGuard lock(mutex);
-    return closed;
-}
-
-void TunnelUdpSocket::close() {
-    BasicLockGuard lock(mutex);
-    if (closed) {
-        return;
-    }
-    closed = true;
-    wakeup.signal();
-    shutdown_socket(socket.get());
-    socket.reset();
-    udp_bind_budget.reset();
-}
-
-bool TunnelUdpSocket::is_closed() {
-    BasicLockGuard lock(mutex);
-    return closed;
-}
-
-bool session_is_unavailable(const std::shared_ptr<PortTunnelSession>& session) {
-    return session->is_unavailable();
-}
-
-void RetainedTcpListener::close() {
-    BasicLockGuard lock(mutex);
-    if (closed) {
-        return;
-    }
-    closed = true;
-    wakeup.signal();
-    shutdown_socket(listener.get());
-    listener.reset();
-    retained_listener_budget.reset();
-}
-
-bool RetainedTcpListener::is_closed() {
-    BasicLockGuard lock(mutex);
-    return closed;
-}
-
 bool is_port_tunnel_upgrade_request(const HttpRequest& request) {
     return request.method == "POST" &&
            request.path == server_contract::route_path(server_contract::ROUTE_PORT_TUNNEL);
