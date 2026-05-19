@@ -9,6 +9,7 @@
 #include "core/logging.h"
 #include "platform/platform.h"
 #include "port_forward/port_tunnel.h"
+#include "rpc/rpc_failures.h"
 #include "rpc/server_contract.h"
 #include "runtime/server.h"
 #include "rpc/server_request_utils.h"
@@ -33,12 +34,17 @@ public:
     bool read_exact_or_eof(char* data, std::size_t size) {
         std::size_t offset = 0;
         while (offset < size) {
-            const std::size_t received = body_->read(data + offset, size - offset);
+            std::size_t received = 0U;
+            try {
+                received = body_->read(data + offset, size - offset);
+            } catch (const BadHttpRequest& ex) {
+                throw TransferFailure(TransferRpcCode::TransferFailed, ex.what());
+            }
             if (received == 0U) {
                 if (offset == 0U) {
                     return false;
                 }
-                throw std::runtime_error("truncated transfer body");
+                throw TransferFailure(TransferRpcCode::TransferFailed, "truncated transfer body");
             }
             offset += received;
         }

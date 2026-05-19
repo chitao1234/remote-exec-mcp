@@ -438,6 +438,13 @@ static TransferPathAuthorizer deny_path_containing(const std::string& needle) {
     };
 }
 
+class CaptureArchiveSink : public TransferArchiveSink {
+public:
+    void write(const char* data, std::size_t size) { bytes.append(data, size); }
+
+    std::string bytes;
+};
+
 static void assert_string_vectors_equal(std::vector<std::string> actual, std::vector<std::string> expected) {
     actual = sorted_strings(actual);
     expected = sorted_strings(expected);
@@ -630,6 +637,23 @@ static void assert_transfer_requires_tar_terminator() {
         rejected_single_zero = failure.code == TransferRpcCode::TransferFailed;
     }
     TEST_ASSERT(rejected_single_zero);
+
+    std::string trailing_garbage_archive;
+    append_tar_file(trailing_garbage_archive, "payload.txt", "payload");
+    finalize_tar(trailing_garbage_archive);
+    trailing_garbage_archive.append(512, 'x');
+    bool rejected_trailing_garbage = false;
+    try {
+        (void)import_path(trailing_garbage_archive,
+                          TransferSourceType::Directory,
+                          (root / "trailing-garbage").string(),
+                          TransferOverwrite::Replace,
+                          true);
+    } catch (const TransferFailure& failure) {
+        rejected_trailing_garbage = failure.message.find("trailing data") != std::string::npos;
+    }
+    TEST_ASSERT(rejected_trailing_garbage);
+    TEST_ASSERT(!fs::exists(root / "trailing-garbage" / "payload.txt"));
 }
 
 static void assert_partial_file_import_cleans_up_destination() {
@@ -652,6 +676,47 @@ static void assert_partial_file_import_cleans_up_destination() {
 
     TEST_ASSERT(rejected);
     TEST_ASSERT(!fs::exists(root / "dest.txt"));
+}
+
+static void assert_invalid_replace_keeps_existing_destination() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-invalid-replace";
+    fs::remove_all(root);
+    fs::create_directories(root / "dest-dir");
+    write_text(root / "dest.txt", "old file");
+    write_text(root / "dest-dir" / "old.txt", "old directory");
+
+    const std::string truncated_file_archive =
+        tar_with_truncated_file_body(SINGLE_FILE_ENTRY, 1024ULL, std::string(128, 'x'));
+    bool rejected_file = false;
+    try {
+        (void)import_path(truncated_file_archive,
+                          TransferSourceType::File,
+                          (root / "dest.txt").string(),
+                          TransferOverwrite::Replace,
+                          true);
+    } catch (const TransferFailure& failure) {
+        rejected_file = failure.code == TransferRpcCode::TransferFailed;
+    }
+    TEST_ASSERT(rejected_file);
+    TEST_ASSERT(read_text(root / "dest.txt") == "old file");
+
+    std::string directory_archive;
+    append_tar_file(directory_archive, "fresh.txt", "fresh");
+    finalize_tar(directory_archive);
+    directory_archive.append(512, 'x');
+    bool rejected_directory = false;
+    try {
+        (void)import_path(directory_archive,
+                          TransferSourceType::Directory,
+                          (root / "dest-dir").string(),
+                          TransferOverwrite::Replace,
+                          true);
+    } catch (const TransferFailure& failure) {
+        rejected_directory = failure.message.find("trailing data") != std::string::npos;
+    }
+    TEST_ASSERT(rejected_directory);
+    TEST_ASSERT(read_text(root / "dest-dir" / "old.txt") == "old directory");
+    TEST_ASSERT(!fs::exists(root / "dest-dir" / "fresh.txt"));
 }
 
 static void assert_transfer_rejects_entry_size_over_limit() {
@@ -879,6 +944,30 @@ static void assert_directory_export_authorizer_checks_children() {
     }
 
     TEST_ASSERT(rejected);
+}
+
+static void assert_directory_export_sink_is_not_committed_on_failure() {
+    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-export-sink-failure";
+    fs::remove_all(root);
+    fs::create_directories(root / "source");
+    write_text(root / "source" / "public.txt", "public");
+    write_text(root / "source" / "secret.txt", "secret");
+
+    CaptureArchiveSink sink;
+    bool rejected = false;
+    try {
+        export_path_to_sink_as(sink,
+                               (root / "source").string(),
+                               TransferSourceType::Directory,
+                               TransferSymlinkMode::Preserve,
+                               std::vector<std::string>(),
+                               deny_path_containing("secret.txt"));
+    } catch (const TransferFailure& failure) {
+        rejected = failure.code == TransferRpcCode::SandboxDenied;
+    }
+
+    TEST_ASSERT(rejected);
+    TEST_ASSERT(sink.bytes.empty());
 }
 
 static void assert_single_file_export_ignores_exclude_patterns() {
@@ -1241,6 +1330,7 @@ static void assert_directory_import_authorizer_checks_children() {
     }
 
     TEST_ASSERT(rejected);
+    TEST_ASSERT(!fs::exists(root / "dest" / "public.txt"));
     TEST_ASSERT(!fs::exists(root / "dest" / "secret.txt"));
 }
 
@@ -1422,6 +1512,7 @@ int main() {
     assert_file_transfer_blocks_raw_bytes();
     assert_transfer_requires_tar_terminator();
     assert_partial_file_import_cleans_up_destination();
+    assert_invalid_replace_keeps_existing_destination();
     assert_transfer_rejects_entry_size_over_limit();
     assert_transfer_rejects_unrepresentable_tar_size();
     assert_transfer_rejects_summary_size_over_limit();
@@ -1432,6 +1523,7 @@ int main() {
     assert_directory_long_path_round_trip();
     assert_directory_export_excludes_matching_entries();
     assert_directory_export_authorizer_checks_children();
+    assert_directory_export_sink_is_not_committed_on_failure();
     assert_single_file_export_ignores_exclude_patterns();
 #ifndef _WIN32
     assert_symlink_sources_are_preserved_by_default();
