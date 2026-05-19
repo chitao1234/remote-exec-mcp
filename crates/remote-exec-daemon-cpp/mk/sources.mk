@@ -4,12 +4,12 @@
 # NMAKE. Rule logic stays in dialect-specific makefiles.
 
 TRANSFER_SRCS = \
-	$(SOURCE_PREFIX)src/transfer_ops.cpp \
-	$(SOURCE_PREFIX)src/transfer_ops_fs.cpp \
-	$(SOURCE_PREFIX)src/transfer_ops_tar.cpp \
-	$(SOURCE_PREFIX)src/transfer_ops_export.cpp \
-	$(SOURCE_PREFIX)src/transfer_ops_import.cpp \
-	$(SOURCE_PREFIX)src/transfer_glob.cpp
+	$(SOURCE_PREFIX)src/transfer/transfer_ops.cpp \
+	$(SOURCE_PREFIX)src/transfer/transfer_ops_fs.cpp \
+	$(SOURCE_PREFIX)src/transfer/transfer_ops_tar.cpp \
+	$(SOURCE_PREFIX)src/transfer/transfer_ops_export.cpp \
+	$(SOURCE_PREFIX)src/transfer/transfer_ops_import.cpp \
+	$(SOURCE_PREFIX)src/transfer/transfer_glob.cpp
 
 POLICY_SRCS = \
 	$(SOURCE_PREFIX)src/path_policy.cpp \
