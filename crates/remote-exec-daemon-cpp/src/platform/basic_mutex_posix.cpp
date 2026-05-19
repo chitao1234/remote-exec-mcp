@@ -1,5 +1,6 @@
 #include "platform/basic_mutex.h"
 
+#include <cerrno>
 #include <ctime>
 
 #if defined(CLOCK_MONOTONIC) && defined(__GNUC__) && !defined(__APPLE__)
@@ -77,7 +78,8 @@ BasicCondVar::~BasicCondVar() {
 }
 
 void BasicCondVar::wait(BasicMutex& mutex) {
-    pthread_cond_wait(&cond_, &mutex.mutex_);
+    while (pthread_cond_wait(&cond_, &mutex.mutex_) == EINTR) {
+    }
 }
 
 bool BasicCondVar::timed_wait_ms(BasicMutex& mutex, unsigned long timeout_ms) {
@@ -89,7 +91,11 @@ bool BasicCondVar::timed_wait_ms(BasicMutex& mutex, unsigned long timeout_ms) {
         ++deadline.tv_sec;
         deadline.tv_nsec -= 1000000000L;
     }
-    return pthread_cond_timedwait(&cond_, &mutex.mutex_, &deadline) == 0;
+    int result = 0;
+    do {
+        result = pthread_cond_timedwait(&cond_, &mutex.mutex_, &deadline);
+    } while (result == EINTR);
+    return result == 0;
 }
 
 void BasicCondVar::signal() {
