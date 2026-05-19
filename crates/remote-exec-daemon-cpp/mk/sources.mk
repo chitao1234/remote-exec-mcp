@@ -29,17 +29,18 @@ HTTP_SRCS = \
 	$(SOURCE_PREFIX)src/http/http_request.cpp
 
 ROUTE_SRCS = \
-	$(SOURCE_PREFIX)src/daemon_capabilities.cpp \
-	$(SOURCE_PREFIX)src/exec_request_utils.cpp \
+	$(SOURCE_PREFIX)src/rpc/daemon_capabilities.cpp \
+	$(SOURCE_PREFIX)src/rpc/exec_request_utils.cpp \
 	$(SOURCE_PREFIX)src/image_ops.cpp \
-	$(SOURCE_PREFIX)src/server_contract.cpp \
-	$(SOURCE_PREFIX)src/server_routes.cpp \
-	$(SOURCE_PREFIX)src/server_route_common.cpp \
-	$(SOURCE_PREFIX)src/server_route_exec.cpp \
-	$(SOURCE_PREFIX)src/server_route_image.cpp \
-	$(SOURCE_PREFIX)src/server_route_transfer.cpp \
-	$(SOURCE_PREFIX)src/transfer_http_codec.cpp \
-	$(SOURCE_PREFIX)src/transfer_request_utils.cpp
+	$(SOURCE_PREFIX)src/rpc/server_contract.cpp \
+	$(SOURCE_PREFIX)src/rpc/server_request_utils.cpp \
+	$(SOURCE_PREFIX)src/rpc/server_routes.cpp \
+	$(SOURCE_PREFIX)src/rpc/server_route_common.cpp \
+	$(SOURCE_PREFIX)src/rpc/server_route_exec.cpp \
+	$(SOURCE_PREFIX)src/rpc/server_route_image.cpp \
+	$(SOURCE_PREFIX)src/rpc/server_route_transfer.cpp \
+	$(SOURCE_PREFIX)src/rpc/transfer_http_codec.cpp \
+	$(SOURCE_PREFIX)src/rpc/transfer_request_utils.cpp
 
 PORT_FORWARD_SRCS = \
 	$(SOURCE_PREFIX)src/port_forward/port_forward_endpoint.cpp \
@@ -92,7 +93,6 @@ BASE_COMMON_SRCS_NO_MAIN = \
 	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/shell_policy.cpp \
 	$(SOURCE_PREFIX)src/server.cpp \
-	$(SOURCE_PREFIX)src/server_request_utils.cpp \
 	$(SOURCE_PREFIX)src/server_runtime.cpp \
 	$(SESSION_STORE_SUPPORT_SRCS) \
 	$(SOURCE_PREFIX)src/session_store.cpp \
@@ -265,7 +265,6 @@ SERVER_ROUTES_TEST_COMMON_SRCS = \
 	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/shell_policy.cpp \
 	$(SOURCE_PREFIX)src/patch_engine.cpp \
-	$(SOURCE_PREFIX)src/server_request_utils.cpp \
 	$(SOURCE_PREFIX)src/logging.cpp \
 	$(SOURCE_PREFIX)src/config.cpp \
 	$(SOURCE_PREFIX)src/text_utils.cpp \
