@@ -11,7 +11,8 @@
 #include <sys/types.h>
 #endif
 
-#include "http/server_transport.h"
+#include "core/config.h"
+#include "platform/socket.h"
 
 SOCKET bind_port_forward_socket(const std::string& endpoint, const std::string& protocol);
 void set_socket_nonblocking(SOCKET socket, bool enabled);
@@ -34,5 +35,4 @@ std::string printable_port_forward_endpoint(const sockaddr* address, socklen_t a
 std::string socket_local_endpoint(SOCKET socket);
 void send_all_socket(SOCKET socket, const std::string& data);
 int wait_socket_readable(SOCKET socket, unsigned long timeout_ms);
-int wait_socket_readable_or_wakeup(SOCKET socket, SOCKET wakeup_fd, unsigned long timeout_ms);
 sockaddr_storage parse_port_forward_peer(const std::string& peer, socklen_t* peer_len);

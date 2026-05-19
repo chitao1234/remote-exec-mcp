@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <climits>
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
@@ -16,34 +15,11 @@
 
 #include "http/http_codec.h"
 #include "http/http_request.h"
+#include "platform/socket.h"
 #ifndef _WIN32
 #include "platform/posix_eintr.h"
 #endif
 #include "http/server_transport.h"
-#include "server_transport_internal.h"
-
-std::size_t bounded_socket_io_size(std::size_t remaining) {
-    const std::size_t max_chunk = static_cast<std::size_t>(INT_MAX);
-    return remaining > max_chunk ? max_chunk : remaining;
-}
-
-int recv_bounded(SOCKET client, char* data, std::size_t remaining, int flags) {
-#ifdef _WIN32
-    return recv(client, data, static_cast<int>(bounded_socket_io_size(remaining)), flags);
-#else
-    return posix_eintr::retry<int>(
-        [&]() { return recv(client, data, static_cast<int>(bounded_socket_io_size(remaining)), flags); });
-#endif
-}
-
-int send_bounded(SOCKET client, const char* data, std::size_t remaining, int flags) {
-#ifdef _WIN32
-    return send(client, data, static_cast<int>(bounded_socket_io_size(remaining)), flags);
-#else
-    return posix_eintr::retry<int>(
-        [&]() { return send(client, data, static_cast<int>(bounded_socket_io_size(remaining)), flags); });
-#endif
-}
 
 namespace {
 
@@ -77,14 +53,6 @@ int listen_socket(SOCKET socket, int backlog) {
 #endif
 }
 
-int get_socket_name(SOCKET socket, sockaddr* address, socklen_t* address_len) {
-#ifdef _WIN32
-    return getsockname(socket, address, address_len);
-#else
-    return posix_eintr::retry<int>([&]() { return getsockname(socket, address, address_len); });
-#endif
-}
-
 std::size_t parse_chunk_size_line(const std::string& line) {
     try {
         return parse_http_chunk_size_line(line);
@@ -94,47 +62,6 @@ std::size_t parse_chunk_size_line(const std::string& line) {
 }
 
 } // namespace
-
-UniqueSocket::UniqueSocket() : socket_(INVALID_SOCKET) {
-}
-
-UniqueSocket::UniqueSocket(SOCKET socket) : socket_(socket) {
-}
-
-UniqueSocket::~UniqueSocket() {
-    reset();
-}
-
-UniqueSocket::UniqueSocket(UniqueSocket&& other) : socket_(other.release()) {
-}
-
-UniqueSocket& UniqueSocket::operator=(UniqueSocket&& other) {
-    if (this != &other) {
-        reset(other.release());
-    }
-    return *this;
-}
-
-SOCKET UniqueSocket::get() const {
-    return socket_;
-}
-
-bool UniqueSocket::valid() const {
-    return socket_ != INVALID_SOCKET;
-}
-
-SOCKET UniqueSocket::release() {
-    const SOCKET released = socket_;
-    socket_ = INVALID_SOCKET;
-    return released;
-}
-
-void UniqueSocket::reset(SOCKET socket) {
-    if (valid()) {
-        close_socket(socket_);
-    }
-    socket_ = socket;
-}
 
 bool try_read_http_request_head(SOCKET client, std::size_t max_header_bytes, HttpRequestHead* head) {
     std::string data;
@@ -344,30 +271,6 @@ void send_all_bytes(SOCKET client, const char* data, std::size_t size) {
         }
         offset += static_cast<std::size_t>(sent);
     }
-}
-
-unsigned short socket_bound_port_or_zero(SOCKET socket) {
-    if (socket == INVALID_SOCKET) {
-        return 0;
-    }
-
-    sockaddr_storage address;
-    std::memset(&address, 0, sizeof(address));
-    socklen_t address_len = sizeof(address);
-    if (get_socket_name(socket, reinterpret_cast<sockaddr*>(&address), &address_len) != 0) {
-        return 0;
-    }
-
-    if (address.ss_family == AF_INET) {
-        const sockaddr_in* ipv4 = reinterpret_cast<const sockaddr_in*>(&address);
-        return ntohs(ipv4->sin_port);
-    }
-    if (address.ss_family == AF_INET6) {
-        const sockaddr_in6* ipv6 = reinterpret_cast<const sockaddr_in6*>(&address);
-        return ntohs(ipv6->sin6_port);
-    }
-
-    return 0;
 }
 
 SOCKET create_listener(const DaemonConfig& config) {

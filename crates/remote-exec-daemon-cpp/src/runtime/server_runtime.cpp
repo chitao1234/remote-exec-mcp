@@ -14,6 +14,7 @@
 
 #include "runtime/daemon_thread.h"
 #include "core/logging.h"
+#include "http/server_transport.h"
 #include "path_policy.h"
 #include "platform/platform.h"
 #include "port_forward_socket_ops.h"

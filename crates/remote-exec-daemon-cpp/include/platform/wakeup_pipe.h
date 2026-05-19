@@ -1,6 +1,6 @@
 #pragma once
 
-#include "http/server_transport.h"
+#include "platform/socket.h"
 
 struct WakeupPipe {
     WakeupPipe();

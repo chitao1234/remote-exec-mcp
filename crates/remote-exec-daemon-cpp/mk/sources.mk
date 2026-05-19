@@ -107,11 +107,21 @@ BASIC_MUTEX_WINDOWS_SRCS = \
 WAKEUP_PIPE_POSIX_SRCS = $(SOURCE_PREFIX)src/platform/wakeup_pipe.cpp
 WAKEUP_PIPE_WINDOWS_SRCS = $(SOURCE_PREFIX)src/platform/wakeup_pipe_win32.cpp
 
+SOCKET_COMMON_SRCS = $(SOURCE_PREFIX)src/platform/socket.cpp
+SOCKET_POSIX_SRCS = \
+	$(SOCKET_COMMON_SRCS) \
+	$(SOURCE_PREFIX)src/platform/socket_posix.cpp
+SOCKET_WINDOWS_SRCS = \
+	$(SOCKET_COMMON_SRCS) \
+	$(SOURCE_PREFIX)src/platform/socket_win32.cpp
+
 SERVER_TRANSPORT_POSIX_SRCS = \
+	$(SOCKET_POSIX_SRCS) \
 	$(SOURCE_PREFIX)src/http/server_transport.cpp \
 	$(SOURCE_PREFIX)src/http/server_transport_posix.cpp
 
 SERVER_TRANSPORT_WINDOWS_SRCS = \
+	$(SOCKET_WINDOWS_SRCS) \
 	$(SOURCE_PREFIX)src/http/server_transport.cpp \
 	$(SOURCE_PREFIX)src/http/server_transport_win32.cpp
 
@@ -195,6 +205,7 @@ HOST_SERVER_TRANSPORT_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)src/http/http_codec.cpp \
 	$(SOURCE_PREFIX)src/http/http_request.cpp \
 	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
+	$(PLATFORM_SRCS) \
 	$(TEXT_UTILS_SRCS)
 
 HOST_SERVER_TRANSPORT_SRCS = \
