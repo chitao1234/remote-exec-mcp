@@ -22,6 +22,8 @@ POSIX_CHILD_REAPER_SRCS = $(SOURCE_PREFIX)src/posix_child_reaper.cpp
 
 DAEMON_THREAD_SRCS = $(SOURCE_PREFIX)src/daemon_thread.cpp
 
+PLATFORM_SRCS = $(SOURCE_PREFIX)src/platform/platform.cpp
+
 HTTP_SRCS = \
 	$(SOURCE_PREFIX)src/http/http_codec.cpp \
 	$(SOURCE_PREFIX)src/http/http_connection.cpp \
@@ -59,22 +61,24 @@ PORT_FORWARD_SRCS = \
 
 BASE64_SRCS = $(SOURCE_PREFIX)src/base64_codec.cpp
 
-PATH_UTILS_SRCS = $(SOURCE_PREFIX)src/path_utils.cpp
+PATH_UTILS_SRCS = $(SOURCE_PREFIX)src/platform/path_utils.cpp
+
+WIN32_ERROR_SRCS = $(SOURCE_PREFIX)src/platform/win32_error.cpp
 
 SESSION_STORE_SUPPORT_SRCS = \
 	$(SOURCE_PREFIX)src/output_renderer.cpp \
 	$(SOURCE_PREFIX)src/session_response_builder.cpp
 
 BASIC_MUTEX_POSIX_SRCS = \
-	$(SOURCE_PREFIX)src/basic_mutex.cpp \
-	$(SOURCE_PREFIX)src/basic_mutex_posix.cpp
+	$(SOURCE_PREFIX)src/platform/basic_mutex.cpp \
+	$(SOURCE_PREFIX)src/platform/basic_mutex_posix.cpp
 
 BASIC_MUTEX_WINDOWS_SRCS = \
-	$(SOURCE_PREFIX)src/basic_mutex.cpp \
-	$(SOURCE_PREFIX)src/basic_mutex_win32.cpp
+	$(SOURCE_PREFIX)src/platform/basic_mutex.cpp \
+	$(SOURCE_PREFIX)src/platform/basic_mutex_win32.cpp
 
-WAKEUP_PIPE_POSIX_SRCS = $(SOURCE_PREFIX)src/wakeup_pipe.cpp
-WAKEUP_PIPE_WINDOWS_SRCS = $(SOURCE_PREFIX)src/wakeup_pipe_win32.cpp
+WAKEUP_PIPE_POSIX_SRCS = $(SOURCE_PREFIX)src/platform/wakeup_pipe.cpp
+WAKEUP_PIPE_WINDOWS_SRCS = $(SOURCE_PREFIX)src/platform/wakeup_pipe_win32.cpp
 
 SERVER_TRANSPORT_POSIX_SRCS = \
 	$(SOURCE_PREFIX)src/http/server_transport.cpp \
@@ -89,7 +93,7 @@ BASE_COMMON_SRCS_NO_MAIN = \
 	$(HTTP_SRCS) \
 	$(SOURCE_PREFIX)src/logging.cpp \
 	$(SOURCE_PREFIX)src/text_utils.cpp \
-	$(SOURCE_PREFIX)src/platform.cpp \
+	$(PLATFORM_SRCS) \
 	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/shell_policy.cpp \
 	$(SOURCE_PREFIX)src/server.cpp \
@@ -128,7 +132,7 @@ POSIX_SRCS = \
 HOST_PATCH_SRCS = \
 	$(SOURCE_PREFIX)tests/test_patch.cpp \
 	$(SOURCE_PREFIX)src/patch_engine.cpp \
-	$(SOURCE_PREFIX)src/platform.cpp \
+	$(PLATFORM_SRCS) \
 	$(SOURCE_PREFIX)src/text_utils.cpp \
 	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/policy/path_policy.cpp
@@ -147,7 +151,7 @@ HOST_CONFIG_SRCS = \
 
 HOST_BASIC_MUTEX_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)tests/test_basic_mutex.cpp \
-	$(SOURCE_PREFIX)src/platform.cpp \
+	$(PLATFORM_SRCS) \
 	$(SOURCE_PREFIX)src/text_utils.cpp
 
 HOST_BASIC_MUTEX_SRCS = \
@@ -179,8 +183,8 @@ HOST_SERVER_TRANSPORT_SRCS = \
 WINDOWS_SERVER_TRANSPORT_TEST_SRCS = \
 	$(HOST_SERVER_TRANSPORT_TEST_COMMON_SRCS) \
 	$(SERVER_TRANSPORT_WINDOWS_SRCS) \
-	$(SOURCE_PREFIX)src/path_utils.cpp \
-	$(SOURCE_PREFIX)src/win32_error.cpp
+	$(PATH_UTILS_SRCS) \
+	$(WIN32_ERROR_SRCS)
 
 SERVER_STREAMING_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)tests/test_server_streaming.cpp \
@@ -211,7 +215,7 @@ HOST_SESSION_STORE_SRCS = \
 	$(DAEMON_THREAD_SRCS) \
 	$(SOURCE_PREFIX)src/process_session_posix.cpp \
 	$(POSIX_CHILD_REAPER_SRCS) \
-	$(SOURCE_PREFIX)src/platform.cpp \
+	$(PLATFORM_SRCS) \
 	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/shell_policy.cpp \
 	$(BASIC_MUTEX_POSIX_SRCS) \
@@ -226,7 +230,7 @@ HOST_CONNECTION_MANAGER_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)src/http/http_request.cpp \
 	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
 	$(SOURCE_PREFIX)src/text_utils.cpp \
-	$(SOURCE_PREFIX)src/platform.cpp \
+	$(PLATFORM_SRCS) \
 	$(SOURCE_PREFIX)src/logging.cpp \
 	$(DAEMON_THREAD_SRCS)
 
@@ -239,8 +243,8 @@ WINDOWS_CONNECTION_MANAGER_TEST_SRCS = \
 	$(HOST_CONNECTION_MANAGER_TEST_COMMON_SRCS) \
 	$(SERVER_TRANSPORT_WINDOWS_SRCS) \
 	$(BASIC_MUTEX_WINDOWS_SRCS) \
-	$(SOURCE_PREFIX)src/path_utils.cpp \
-	$(SOURCE_PREFIX)src/win32_error.cpp
+	$(PATH_UTILS_SRCS) \
+	$(WIN32_ERROR_SRCS)
 
 SERVER_RUNTIME_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)tests/test_server_runtime.cpp
@@ -261,7 +265,7 @@ SERVER_ROUTES_TEST_COMMON_SRCS = \
 	$(SESSION_STORE_SUPPORT_SRCS) \
 	$(SOURCE_PREFIX)src/session_store.cpp \
 	$(SOURCE_PREFIX)src/session_pump.cpp \
-	$(SOURCE_PREFIX)src/platform.cpp \
+	$(PLATFORM_SRCS) \
 	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/shell_policy.cpp \
 	$(SOURCE_PREFIX)src/patch_engine.cpp \
@@ -314,7 +318,7 @@ HOST_PORT_TUNNEL_FRAME_SRCS = \
 WINDOWS_DAEMON_SUPPORT_SRCS = \
 	$(SOURCE_PREFIX)src/process_session_win32.cpp \
 	$(SOURCE_PREFIX)src/console_output.cpp \
-	$(SOURCE_PREFIX)src/win32_error.cpp
+	$(WIN32_ERROR_SRCS)
 
 WINDOWS_DAEMON_SRCS = \
 	$(WINDOWS_BASE_SRCS_NO_MAIN) \
@@ -327,7 +331,7 @@ WINDOWS_SESSION_STORE_TEST_SRCS = \
 	$(SOURCE_PREFIX)src/session_store.cpp \
 	$(SOURCE_PREFIX)src/session_pump.cpp \
 	$(WINDOWS_DAEMON_SUPPORT_SRCS) \
-	$(SOURCE_PREFIX)src/platform.cpp \
+	$(PLATFORM_SRCS) \
 	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/shell_policy.cpp \
 	$(BASIC_MUTEX_WINDOWS_SRCS) \
