@@ -65,6 +65,7 @@ static std::string safe_strerror(int errnum) {
 // Grace period for cooperative shutdown before escalating from SIGTERM to SIGKILL.
 const int TERMINATE_GRACE_MS = 50;
 const std::size_t PROCESS_OUTPUT_READ_BUFFER_SIZE = 4U * 1024U;
+using posix_fd::UniqueFd;
 
 #ifdef REMOTE_EXEC_CPP_TESTING
 std::atomic<unsigned long> g_test_exit_poll_delay_ms(0UL);
@@ -79,44 +80,6 @@ void maybe_apply_test_exit_poll_delay() {
 void maybe_apply_test_exit_poll_delay() {
 }
 #endif
-
-class UniqueFd {
-public:
-    UniqueFd() : fd_(-1) {}
-    explicit UniqueFd(int fd) : fd_(fd) {}
-    ~UniqueFd() { reset(); }
-
-    UniqueFd(UniqueFd&& other) : fd_(other.release()) {}
-    UniqueFd& operator=(UniqueFd&& other) {
-        if (this != &other) {
-            reset(other.release());
-        }
-        return *this;
-    }
-
-    UniqueFd(const UniqueFd&) = delete;
-    UniqueFd& operator=(const UniqueFd&) = delete;
-
-    int get() const { return fd_; }
-
-    bool valid() const { return fd_ >= 0; }
-
-    int release() {
-        const int released = fd_;
-        fd_ = -1;
-        return released;
-    }
-
-    void reset(int fd = -1) {
-        if (valid()) {
-            posix_fd::close_ignoring_errors(fd_);
-        }
-        fd_ = fd;
-    }
-
-private:
-    int fd_;
-};
 
 struct PosixPipePair {
     UniqueFd read_end;

@@ -36,6 +36,44 @@ inline void close_ignoring_errors(int fd) {
     (void)close_consuming(fd);
 }
 
+class UniqueFd {
+public:
+    UniqueFd() : fd_(-1) {}
+    explicit UniqueFd(int fd) : fd_(fd) {}
+    ~UniqueFd() { reset(); }
+
+    UniqueFd(UniqueFd&& other) : fd_(other.release()) {}
+    UniqueFd& operator=(UniqueFd&& other) {
+        if (this != &other) {
+            reset(other.release());
+        }
+        return *this;
+    }
+
+    UniqueFd(const UniqueFd&) = delete;
+    UniqueFd& operator=(const UniqueFd&) = delete;
+
+    int get() const { return fd_; }
+
+    bool valid() const { return fd_ >= 0; }
+
+    int release() {
+        const int released = fd_;
+        fd_ = -1;
+        return released;
+    }
+
+    void reset(int fd = -1) {
+        if (valid()) {
+            close_ignoring_errors(fd_);
+        }
+        fd_ = fd;
+    }
+
+private:
+    int fd_;
+};
+
 } // namespace posix_fd
 
 #endif
