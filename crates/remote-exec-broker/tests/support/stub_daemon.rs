@@ -30,6 +30,7 @@ use remote_exec_proto::rpc::{
     DaemonIdentity, ExecWarning, ExecWriteRequest, HealthCheckResponse, HealthStatus,
     ImageReadResponse, PatchApplyRequest, PatchApplyResponse, PortForwardProtocolVersion,
     RpcErrorBody, RpcErrorCode, TargetCapabilities, TargetInfoResponse,
+    TransferStreamProtocolVersion,
 };
 #[cfg(test)]
 use tokio::io::AsyncWriteExt;
@@ -895,6 +896,7 @@ async fn target_info(State(state): State<StubDaemonState>) -> Json<TargetInfoRes
             supports_pty: state.target_supports_pty,
             supports_port_forward: state.target_supports_port_forward,
             port_forward_protocol_version: state.target_port_forward_protocol_version,
+            transfer_stream_protocol_version: Some(TransferStreamProtocolVersion::v2()),
         },
         supports_image_read: true,
         supports_transfer_compression: state.target_supports_transfer_compression,
