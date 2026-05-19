@@ -7,6 +7,7 @@
 
 #include "runtime/daemon_thread.h"
 #include "core/logging.h"
+#include "platform/deadline.h"
 #include "platform/platform.h"
 #include "exec/process_session.h"
 #include "session_pump_internal.h"
@@ -88,11 +89,10 @@ void wait_for_generation_change_locked(LiveSession* session,
                                        std::uint64_t deadline_ms,
                                        unsigned long max_wait_ms) {
     while (!session->closing && session->output_.generation == baseline_generation) {
-        const std::uint64_t now = platform::monotonic_ms();
-        if (now >= deadline_ms) {
+        if (platform::monotonic_deadline_expired(deadline_ms)) {
             return;
         }
-        unsigned long remaining = static_cast<unsigned long>(deadline_ms - now);
+        unsigned long remaining = platform::monotonic_deadline_remaining_ms(deadline_ms);
         if (max_wait_ms > 0UL) {
             remaining = std::min(remaining, max_wait_ms);
         }
@@ -158,32 +158,32 @@ bool drain_exited_session_output_locked(LiveSession* session,
                                         std::string* output,
                                         unsigned long max_output_tokens,
                                         const SessionOutputDrainPolicy& policy) {
-    const std::uint64_t max_deadline = platform::monotonic_ms() + policy.max_grace_ms;
-    std::uint64_t idle_deadline = platform::monotonic_ms() + policy.idle_grace_ms;
+    platform::MonotonicDeadline max_deadline(policy.max_grace_ms);
+    platform::MonotonicDeadline idle_deadline(policy.idle_grace_ms);
 
     for (;;) {
         if (!session->output_.buffered_output.empty()) {
             *output += take_session_output_locked(session, max_output_tokens);
-            idle_deadline = platform::monotonic_ms() + policy.idle_grace_ms;
+            idle_deadline.reset_after(policy.idle_grace_ms);
         }
         if (session->output_.eof || session->closing) {
             return true;
         }
 
-        const std::uint64_t now = platform::monotonic_ms();
-        if (now >= max_deadline || now >= idle_deadline) {
+        if (max_deadline.expired() || idle_deadline.expired()) {
             break;
         }
 
         const std::uint64_t seen_generation = session->output_.generation;
-        wait_for_generation_change_locked(session, seen_generation, std::min(max_deadline, idle_deadline), 0UL);
+        wait_for_generation_change_locked(
+            session, seen_generation, std::min(max_deadline.deadline_ms(), idle_deadline.deadline_ms()), 0UL);
     }
 
     if (!terminate_descendants_after_exit_locked(session)) {
         return false;
     }
 
-    const std::uint64_t terminate_deadline = platform::monotonic_ms() + policy.terminate_quiet_ms;
+    platform::MonotonicDeadline terminate_deadline(policy.terminate_quiet_ms);
     for (;;) {
         if (!session->output_.buffered_output.empty()) {
             *output += take_session_output_locked(session, max_output_tokens);
@@ -192,12 +192,11 @@ bool drain_exited_session_output_locked(LiveSession* session,
             return true;
         }
 
-        const std::uint64_t now = platform::monotonic_ms();
-        if (now >= terminate_deadline) {
+        if (terminate_deadline.expired()) {
             return session->output_.eof || session->closing;
         }
 
         const std::uint64_t seen_generation = session->output_.generation;
-        wait_for_generation_change_locked(session, seen_generation, terminate_deadline, 0UL);
+        wait_for_generation_change_locked(session, seen_generation, terminate_deadline.deadline_ms(), 0UL);
     }
 }

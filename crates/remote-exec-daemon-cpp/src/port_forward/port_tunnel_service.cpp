@@ -4,6 +4,7 @@
 #include "port_tunnel_connection.h"
 #include "port_tunnel_service.h"
 #include "port_tunnel_session_teardown.h"
+#include "platform/deadline.h"
 
 namespace {
 
@@ -65,7 +66,7 @@ void PortTunnelService::attach_session(const std::shared_ptr<PortTunnelSession>&
 void PortTunnelService::detach_session(const std::shared_ptr<PortTunnelSession>& session) {
     bool detached = false;
     std::shared_ptr<PortTunnelSessionAttachment> attachment =
-        session->detach_until(platform::monotonic_ms() + RESUME_TIMEOUT_MS, &detached);
+        session->detach_until(platform::monotonic_deadline_after_ms(RESUME_TIMEOUT_MS), &detached);
     if (!detached) {
         return;
     }

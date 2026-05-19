@@ -9,6 +9,7 @@
 #include <netdb.h>
 #include <poll.h>
 
+#include "platform/deadline.h"
 #include "platform/platform.h"
 
 namespace posix_eintr {
@@ -39,18 +40,6 @@ int retry_eai_system(Callable call) {
         result = call();
     } while (result == EAI_SYSTEM && errno == EINTR);
     return result;
-}
-
-inline int remaining_timeout_ms(std::uint64_t start_ms, unsigned long timeout_ms) {
-    const std::uint64_t elapsed_ms = platform::monotonic_ms() - start_ms;
-    if (elapsed_ms >= static_cast<std::uint64_t>(timeout_ms)) {
-        return 0;
-    }
-    const std::uint64_t remaining_ms = static_cast<std::uint64_t>(timeout_ms) - elapsed_ms;
-    if (remaining_ms > static_cast<std::uint64_t>(INT_MAX)) {
-        return INT_MAX;
-    }
-    return static_cast<int>(remaining_ms);
 }
 
 inline void clear_revents(struct pollfd* fds, nfds_t nfds) {
@@ -84,15 +73,15 @@ int poll_forever_until(struct pollfd* fds, nfds_t nfds, StopRequested stop_reque
 }
 
 inline int poll_for_ms(struct pollfd* fds, nfds_t nfds, unsigned long timeout_ms) {
-    const std::uint64_t start_ms = platform::monotonic_ms();
+    platform::MonotonicDeadline deadline(timeout_ms);
     for (;;) {
         clear_revents(fds, nfds);
-        const int timeout = remaining_timeout_ms(start_ms, timeout_ms);
+        const int timeout = deadline.remaining_ms_int();
         const int result = poll(fds, nfds, timeout);
         if (result >= 0 || errno != EINTR) {
             return result;
         }
-        if (timeout == 0) {
+        if (deadline.expired()) {
             return 0;
         }
     }

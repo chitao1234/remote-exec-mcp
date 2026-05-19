@@ -44,6 +44,10 @@ mutation calls, or Win32 wait/process/socket primitives when a platform wrapper
 exists. If a new raw OS call is required, add the wrapper or fallback in
 `platform/` first, then call that wrapper from the feature module.
 
+Feature code should also avoid hand-rolled elapsed/remaining timeout arithmetic
+for blocking waits. Use `platform/deadline.h` so timeout saturation, bounded
+wait slices, and POSIX `poll` retry behavior stay in one place.
+
 The POSIX design intentionally does not use `openat`. Path authorization must
 therefore be complete and consistent for every materialized path, but it must
 not be described as race-free filesystem security. Recursive transfer import,

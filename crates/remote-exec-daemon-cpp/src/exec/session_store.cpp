@@ -6,6 +6,7 @@
 
 #include "core/logging.h"
 #include "output_renderer.h"
+#include "platform/deadline.h"
 #include "platform/platform.h"
 #include "exec/process_session.h"
 #include "rpc/exec_request_utils.h"
@@ -113,7 +114,7 @@ SessionSnapshot session_snapshot_locked(const LiveSession& session) {
 PollResult wait_for_session_activity(const std::shared_ptr<LiveSession>& session,
                                      unsigned long timeout_ms,
                                      unsigned long max_output_tokens) {
-    const std::uint64_t deadline = platform::monotonic_ms() + timeout_ms;
+    platform::MonotonicDeadline deadline(timeout_ms);
     BasicLockGuard session_lock(session->mutex_);
     std::string output;
     std::uint64_t seen_generation = session->output_.generation;
@@ -134,12 +135,11 @@ PollResult wait_for_session_activity(const std::shared_ptr<LiveSession>& session
             return PollResult{output, true, completed.exit_code};
         }
 
-        const std::uint64_t now = platform::monotonic_ms();
-        if (timeout_ms == 0UL || now >= deadline) {
+        if (timeout_ms == 0UL || deadline.expired()) {
             return PollResult{output, false, 0};
         }
 
-        wait_for_generation_change_locked(session.get(), seen_generation, deadline, EXIT_POLL_INTERVAL_MS);
+        wait_for_generation_change_locked(session.get(), seen_generation, deadline.deadline_ms(), EXIT_POLL_INTERVAL_MS);
     }
 }
 

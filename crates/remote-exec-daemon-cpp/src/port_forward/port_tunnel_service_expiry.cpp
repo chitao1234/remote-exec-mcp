@@ -5,6 +5,7 @@
 
 #include "port_tunnel_service.h"
 #include "port_tunnel_session_teardown.h"
+#include "platform/deadline.h"
 #include "runtime/daemon_thread.h"
 
 bool PortTunnelService::schedule_session_expiry(const std::shared_ptr<PortTunnelSession>& session) {
@@ -93,9 +94,9 @@ void PortTunnelService::expiry_scheduler_loop() {
                         continue;
                     }
 
-                    const std::uint64_t remaining = deadline - now;
+                    const unsigned long remaining = platform::monotonic_deadline_remaining_ms(deadline);
                     if (remaining < wait_ms) {
-                        wait_ms = static_cast<unsigned long>(remaining);
+                        wait_ms = remaining;
                     }
                     ++it;
                 }
