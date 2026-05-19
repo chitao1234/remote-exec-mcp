@@ -9,7 +9,6 @@
 #else
 #include <arpa/inet.h>
 #include <cerrno>
-#include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -19,7 +18,6 @@
 #include "port_forward/port_forward_endpoint.h"
 #include "port_forward/port_forward_error.h"
 #ifndef _WIN32
-#include "platform/posix_eintr.h"
 #include "platform/posix_fd.h"
 #endif
 #include "platform/win32_error.h"
@@ -67,13 +65,7 @@ resolve_endpoint(const std::string& endpoint, const std::string& protocol, int f
     hints.ai_flags = flags;
 
     addrinfo* result = nullptr;
-    const int status =
-#ifdef _WIN32
-        getaddrinfo(parsed.host.c_str(), parsed.port.c_str(), &hints, &result);
-#else
-        posix_eintr::retry_eai_system(
-            [&]() { return getaddrinfo(parsed.host.c_str(), parsed.port.c_str(), &hints, &result); });
-#endif
+    const int status = resolve_socket_addresses(parsed.host.c_str(), parsed.port.c_str(), &hints, &result);
     if (status != 0 || result == nullptr) {
         const std::string operation = "resolving endpoint `" + endpoint + "`";
 #ifdef _WIN32
@@ -181,26 +173,13 @@ void shutdown_port_forward_send(SOCKET socket) {
 std::string printable_port_forward_endpoint(const sockaddr* address, socklen_t address_len) {
     char host[NI_MAXHOST];
     char service[NI_MAXSERV];
-    const int result =
-#ifdef _WIN32
-        getnameinfo(address,
-                    address_len,
-                    host,
-                    sizeof(host),
-                    service,
-                    sizeof(service),
-                    NI_NUMERICHOST | NI_NUMERICSERV);
-#else
-        posix_eintr::retry_eai_system([&]() {
-            return getnameinfo(address,
-                               address_len,
-                               host,
-                               sizeof(host),
-                               service,
-                               sizeof(service),
-                               NI_NUMERICHOST | NI_NUMERICSERV);
-        });
-#endif
+    const int result = socket_address_name_info(address,
+                                                address_len,
+                                                host,
+                                                static_cast<socklen_t>(sizeof(host)),
+                                                service,
+                                                static_cast<socklen_t>(sizeof(service)),
+                                                NI_NUMERICHOST | NI_NUMERICSERV);
     if (result != 0) {
         return "unknown:0";
     }
@@ -244,7 +223,7 @@ SOCKET bind_port_forward_socket(const std::string& endpoint, const std::string& 
         bound_socket = INVALID_SOCKET;
     }
 
-    freeaddrinfo(result);
+    release_socket_addresses(result);
 
     if (bound_socket == INVALID_SOCKET) {
         throw PortForwardError(400, "port_bind_failed", socket_error_message("bind"));
@@ -280,11 +259,11 @@ SOCKET connect_port_forward_socket(const std::string& endpoint, const std::strin
             }
         } catch (...) {
             close_socket(connected_socket);
-            freeaddrinfo(result);
+            release_socket_addresses(result);
             throw;
         }
         if (connected) {
-            freeaddrinfo(result);
+            release_socket_addresses(result);
             return connected_socket;
         }
 
@@ -292,7 +271,7 @@ SOCKET connect_port_forward_socket(const std::string& endpoint, const std::strin
         connected_socket = INVALID_SOCKET;
     }
 
-    freeaddrinfo(result);
+    release_socket_addresses(result);
 
     if (connected_socket == INVALID_SOCKET) {
         throw PortForwardError(400, "port_connect_failed", socket_error_message("connect"));
@@ -321,6 +300,6 @@ sockaddr_storage parse_port_forward_peer(const std::string& peer, socklen_t* pee
         std::memcpy(&address, result->ai_addr, result->ai_addrlen);
         *peer_len = static_cast<socklen_t>(result->ai_addrlen);
     }
-    freeaddrinfo(result);
+    release_socket_addresses(result);
     return address;
 }

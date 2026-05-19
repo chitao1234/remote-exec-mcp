@@ -7,6 +7,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #else
+#include <netdb.h>
 #include <sys/socket.h>
 typedef int SOCKET;
 const int INVALID_SOCKET = -1;
@@ -52,6 +53,15 @@ int recv_bounded(SOCKET client, char* data, std::size_t remaining, int flags);
 int send_bounded(SOCKET client, const char* data, std::size_t remaining, int flags);
 int recvfrom_bounded(SOCKET socket, char* data, std::size_t size, sockaddr* peer_address, socklen_t* peer_len);
 int sendto_bounded(SOCKET socket, const char* data, std::size_t size, const sockaddr* peer_address, socklen_t peer_len);
+int resolve_socket_addresses(const char* node, const char* service, const addrinfo* hints, addrinfo** result);
+void release_socket_addresses(addrinfo* addresses);
+int socket_address_name_info(const sockaddr* address,
+                             socklen_t address_len,
+                             char* host,
+                             socklen_t host_len,
+                             char* service,
+                             socklen_t service_len,
+                             int flags);
 std::string socket_error_message(const std::string& operation);
 void close_socket(SOCKET socket);
 void shutdown_socket(SOCKET socket);

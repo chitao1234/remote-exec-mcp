@@ -8,7 +8,6 @@
 #include <ws2tcpip.h>
 #else
 #include <arpa/inet.h>
-#include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #endif
@@ -16,9 +15,6 @@
 #include "http/http_codec.h"
 #include "http/http_request.h"
 #include "platform/socket.h"
-#ifndef _WIN32
-#include "platform/posix_eintr.h"
-#endif
 #include "http/server_transport.h"
 
 namespace {
@@ -259,13 +255,7 @@ SOCKET create_listener(const DaemonConfig& config) {
     hints.ai_flags = AI_PASSIVE;
 
     addrinfo* result = nullptr;
-    const int resolve_status =
-#ifdef _WIN32
-        getaddrinfo(config.listen_host.c_str(), port_buffer, &hints, &result);
-#else
-        posix_eintr::retry_eai_system(
-            [&]() { return getaddrinfo(config.listen_host.c_str(), port_buffer, &hints, &result); });
-#endif
+    const int resolve_status = resolve_socket_addresses(config.listen_host.c_str(), port_buffer, &hints, &result);
     if (resolve_status != 0) {
         throw std::runtime_error("getaddrinfo failed");
     }
@@ -286,7 +276,7 @@ SOCKET create_listener(const DaemonConfig& config) {
         close_socket(listener);
         listener = INVALID_SOCKET;
     }
-    freeaddrinfo(result);
+    release_socket_addresses(result);
 
     if (listener == INVALID_SOCKET) {
         throw std::runtime_error(socket_error_message("bind"));

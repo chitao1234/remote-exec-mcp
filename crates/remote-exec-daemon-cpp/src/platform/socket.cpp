@@ -66,6 +66,35 @@ int sendto_bounded(SOCKET socket, const char* data, std::size_t size, const sock
 #endif
 }
 
+int resolve_socket_addresses(const char* node, const char* service, const addrinfo* hints, addrinfo** result) {
+#ifdef _WIN32
+    return getaddrinfo(node, service, hints, result);
+#else
+    return posix_eintr::retry_eai_system([&]() { return getaddrinfo(node, service, hints, result); });
+#endif
+}
+
+void release_socket_addresses(addrinfo* addresses) {
+    if (addresses != nullptr) {
+        freeaddrinfo(addresses);
+    }
+}
+
+int socket_address_name_info(const sockaddr* address,
+                             socklen_t address_len,
+                             char* host,
+                             socklen_t host_len,
+                             char* service,
+                             socklen_t service_len,
+                             int flags) {
+#ifdef _WIN32
+    return getnameinfo(address, address_len, host, host_len, service, service_len, flags);
+#else
+    return posix_eintr::retry_eai_system(
+        [&]() { return getnameinfo(address, address_len, host, host_len, service, service_len, flags); });
+#endif
+}
+
 int connect_socket(SOCKET socket, const sockaddr* address, socklen_t address_len) {
 #ifdef _WIN32
     return connect(socket, address, static_cast<int>(address_len));
