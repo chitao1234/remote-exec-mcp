@@ -18,7 +18,11 @@ POLICY_SRCS = \
 
 RPC_FAILURE_SRCS = $(SOURCE_PREFIX)src/rpc_failures.cpp
 
-POSIX_CHILD_REAPER_SRCS = $(SOURCE_PREFIX)src/posix_child_reaper.cpp
+POSIX_CHILD_REAPER_SRCS = $(SOURCE_PREFIX)src/exec/posix_child_reaper.cpp
+
+POSIX_PROCESS_SESSION_SRCS = \
+	$(SOURCE_PREFIX)src/exec/process_session_posix.cpp \
+	$(POSIX_CHILD_REAPER_SRCS)
 
 DAEMON_THREAD_SRCS = $(SOURCE_PREFIX)src/daemon_thread.cpp
 
@@ -66,8 +70,13 @@ PATH_UTILS_SRCS = $(SOURCE_PREFIX)src/platform/path_utils.cpp
 WIN32_ERROR_SRCS = $(SOURCE_PREFIX)src/platform/win32_error.cpp
 
 SESSION_STORE_SUPPORT_SRCS = \
-	$(SOURCE_PREFIX)src/output_renderer.cpp \
-	$(SOURCE_PREFIX)src/session_response_builder.cpp
+	$(SOURCE_PREFIX)src/exec/output_renderer.cpp \
+	$(SOURCE_PREFIX)src/exec/session_response_builder.cpp
+
+SESSION_STORE_SRCS = \
+	$(SESSION_STORE_SUPPORT_SRCS) \
+	$(SOURCE_PREFIX)src/exec/session_store.cpp \
+	$(SOURCE_PREFIX)src/exec/session_pump.cpp
 
 BASIC_MUTEX_POSIX_SRCS = \
 	$(SOURCE_PREFIX)src/platform/basic_mutex.cpp \
@@ -98,9 +107,7 @@ BASE_COMMON_SRCS_NO_MAIN = \
 	$(SOURCE_PREFIX)src/shell_policy.cpp \
 	$(SOURCE_PREFIX)src/server.cpp \
 	$(SOURCE_PREFIX)src/server_runtime.cpp \
-	$(SESSION_STORE_SUPPORT_SRCS) \
-	$(SOURCE_PREFIX)src/session_store.cpp \
-	$(SOURCE_PREFIX)src/session_pump.cpp \
+	$(SESSION_STORE_SRCS) \
 	$(SOURCE_PREFIX)src/patch_engine.cpp \
 	$(SOURCE_PREFIX)src/connection_manager.cpp \
 	$(DAEMON_THREAD_SRCS) \
@@ -126,8 +133,7 @@ WINDOWS_BASE_SRCS_NO_MAIN = \
 POSIX_SRCS = \
 	$(POSIX_BASE_SRCS_NO_MAIN) \
 	$(SOURCE_PREFIX)src/main.cpp \
-	$(SOURCE_PREFIX)src/process_session_posix.cpp \
-	$(POSIX_CHILD_REAPER_SRCS)
+	$(POSIX_PROCESS_SESSION_SRCS)
 
 HOST_PATCH_SRCS = \
 	$(SOURCE_PREFIX)tests/test_patch.cpp \
@@ -199,8 +205,7 @@ SERVER_STREAMING_TEST_COMMON_SRCS = \
 HOST_SERVER_STREAMING_SRCS = \
 	$(SERVER_STREAMING_TEST_COMMON_SRCS) \
 	$(POSIX_BASE_SRCS_NO_MAIN) \
-	$(SOURCE_PREFIX)src/process_session_posix.cpp \
-	$(POSIX_CHILD_REAPER_SRCS)
+	$(POSIX_PROCESS_SESSION_SRCS)
 
 WINDOWS_SERVER_STREAMING_SRCS = \
 	$(SERVER_STREAMING_TEST_COMMON_SRCS) \
@@ -209,12 +214,9 @@ WINDOWS_SERVER_STREAMING_SRCS = \
 
 HOST_SESSION_STORE_SRCS = \
 	$(SOURCE_PREFIX)tests/test_session_store.cpp \
-	$(SESSION_STORE_SUPPORT_SRCS) \
-	$(SOURCE_PREFIX)src/session_store.cpp \
-	$(SOURCE_PREFIX)src/session_pump.cpp \
+	$(SESSION_STORE_SRCS) \
 	$(DAEMON_THREAD_SRCS) \
-	$(SOURCE_PREFIX)src/process_session_posix.cpp \
-	$(POSIX_CHILD_REAPER_SRCS) \
+	$(POSIX_PROCESS_SESSION_SRCS) \
 	$(PLATFORM_SRCS) \
 	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/shell_policy.cpp \
@@ -262,9 +264,7 @@ SERVER_ROUTES_TEST_COMMON_SRCS = \
 	$(ROUTE_SRCS) \
 	$(SOURCE_PREFIX)src/http/http_codec.cpp \
 	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
-	$(SESSION_STORE_SUPPORT_SRCS) \
-	$(SOURCE_PREFIX)src/session_store.cpp \
-	$(SOURCE_PREFIX)src/session_pump.cpp \
+	$(SESSION_STORE_SRCS) \
 	$(PLATFORM_SRCS) \
 	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/shell_policy.cpp \
@@ -293,14 +293,12 @@ WINDOWS_SERVER_ROUTES_TEST_SUPPORT_SRCS = \
 
 HOST_SERVER_RUNTIME_SRCS = \
 	$(HOST_SERVER_RUNTIME_TEST_SUPPORT_SRCS) \
-	$(SOURCE_PREFIX)src/process_session_posix.cpp \
-	$(POSIX_CHILD_REAPER_SRCS)
+	$(POSIX_PROCESS_SESSION_SRCS)
 
 HOST_SERVER_ROUTES_SRCS = \
 	$(SOURCE_PREFIX)tests/test_server_routes.cpp \
 	$(HOST_SERVER_ROUTES_TEST_SUPPORT_SRCS) \
-	$(SOURCE_PREFIX)src/process_session_posix.cpp \
-	$(POSIX_CHILD_REAPER_SRCS)
+	$(POSIX_PROCESS_SESSION_SRCS)
 
 HOST_SERVER_ROUTES_COMMON_SRCS = \
 	$(SOURCE_PREFIX)tests/test_server_routes_common.cpp \
@@ -316,8 +314,8 @@ HOST_PORT_TUNNEL_FRAME_SRCS = \
 	$(SOURCE_PREFIX)src/port_forward/port_tunnel_frame.cpp
 
 WINDOWS_DAEMON_SUPPORT_SRCS = \
-	$(SOURCE_PREFIX)src/process_session_win32.cpp \
-	$(SOURCE_PREFIX)src/console_output.cpp \
+	$(SOURCE_PREFIX)src/exec/process_session_win32.cpp \
+	$(SOURCE_PREFIX)src/exec/console_output.cpp \
 	$(WIN32_ERROR_SRCS)
 
 WINDOWS_DAEMON_SRCS = \
@@ -327,9 +325,7 @@ WINDOWS_DAEMON_SRCS = \
 
 WINDOWS_SESSION_STORE_TEST_SRCS = \
 	$(SOURCE_PREFIX)tests/test_session_store.cpp \
-	$(SESSION_STORE_SUPPORT_SRCS) \
-	$(SOURCE_PREFIX)src/session_store.cpp \
-	$(SOURCE_PREFIX)src/session_pump.cpp \
+	$(SESSION_STORE_SRCS) \
 	$(WINDOWS_DAEMON_SUPPORT_SRCS) \
 	$(PLATFORM_SRCS) \
 	$(PATH_UTILS_SRCS) \
