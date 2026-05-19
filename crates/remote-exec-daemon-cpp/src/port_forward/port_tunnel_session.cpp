@@ -58,7 +58,51 @@ const char* retained_resource_kind_name(PortTunnelRetainedResourceKind kind) {
     return "unknown";
 }
 
-PortTunnelSessionTeardown collect_terminal_session_teardown_locked(PortTunnelSession* session, bool mark_expired) {
+// These transition helpers require PortTunnelSession::mutex to be held. They
+// return attachment/resource work to close after the caller releases the lock.
+std::shared_ptr<PortTunnelSessionAttachment>
+transition_session_to_attached_locked(PortTunnelSession* session,
+                                      const std::shared_ptr<PortTunnelConnection>& connection) {
+    const PortTunnelSessionState previous_state = session->state;
+    session->state = PortTunnelSessionState::Attached;
+    session->resume_deadline_ms = 0ULL;
+    std::shared_ptr<PortTunnelSessionAttachment> previous = session->attachment;
+    session->attachment.reset(new PortTunnelSessionAttachment(connection));
+    session->state_changed.broadcast();
+    log_message(LOG_DEBUG,
+                "port_tunnel",
+                LogMessageBuilder("session attach")
+                    .quoted_field("session_id", session->session_id)
+                    .raw(std::string("from=") + session_state_name(previous_state))
+                    .raw(std::string("to=") + session_state_name(session->state))
+                    .field("generation", session->generation)
+                    .bool_field("replaced_attachment", previous.get() != nullptr)
+                    .str());
+    return previous;
+}
+
+std::shared_ptr<PortTunnelSessionAttachment> transition_session_to_detached_locked(PortTunnelSession* session,
+                                                                                  std::uint64_t deadline_ms) {
+    const PortTunnelSessionState previous_state = session->state;
+    session->state = PortTunnelSessionState::Detached;
+    session->resume_deadline_ms = deadline_ms;
+    std::shared_ptr<PortTunnelSessionAttachment> previous = session->attachment;
+    session->attachment.reset();
+    session->state_changed.broadcast();
+    log_message(LOG_DEBUG,
+                "port_tunnel",
+                LogMessageBuilder("session detach")
+                    .quoted_field("session_id", session->session_id)
+                    .raw(std::string("from=") + session_state_name(previous_state))
+                    .raw(std::string("to=") + session_state_name(session->state))
+                    .field("generation", session->generation)
+                    .field("resume_deadline_ms", session->resume_deadline_ms)
+                    .bool_field("had_attachment", previous.get() != nullptr)
+                    .str());
+    return previous;
+}
+
+PortTunnelSessionTeardown transition_session_to_terminal_locked(PortTunnelSession* session, bool mark_expired) {
     PortTunnelSessionTeardown state;
     const PortTunnelSessionState previous_state = session->state;
     const PortTunnelRetainedResourceKind previous_resource_kind = session->retained_resource.kind;
@@ -84,6 +128,16 @@ PortTunnelSessionTeardown collect_terminal_session_teardown_locked(PortTunnelSes
     return state;
 }
 
+bool session_has_detached_deadline_locked(const PortTunnelSession* session) {
+    return session->state == PortTunnelSessionState::Detached && session->attachment.get() == nullptr &&
+           session->resume_deadline_ms != 0ULL;
+}
+
+bool session_resume_expired_locked(const PortTunnelSession* session, std::uint64_t now_ms) {
+    return session->state == PortTunnelSessionState::Expired ||
+           (session->resume_deadline_ms != 0ULL && now_ms >= session->resume_deadline_ms);
+}
+
 } // namespace
 
 std::shared_ptr<PortTunnelSessionAttachment>
@@ -99,22 +153,7 @@ PortTunnelSession::attach(const std::shared_ptr<PortTunnelConnection>& connectio
                         .str());
         return std::shared_ptr<PortTunnelSessionAttachment>();
     }
-    const PortTunnelSessionState previous_state = state;
-    state = PortTunnelSessionState::Attached;
-    resume_deadline_ms = 0ULL;
-    std::shared_ptr<PortTunnelSessionAttachment> previous = attachment;
-    attachment.reset(new PortTunnelSessionAttachment(connection));
-    state_changed.broadcast();
-    log_message(LOG_DEBUG,
-                "port_tunnel",
-                LogMessageBuilder("session attach")
-                    .quoted_field("session_id", session_id)
-                    .raw(std::string("from=") + session_state_name(previous_state))
-                    .raw(std::string("to=") + session_state_name(state))
-                    .field("generation", generation)
-                    .bool_field("replaced_attachment", previous.get() != nullptr)
-                    .str());
-    return previous;
+    return transition_session_to_attached_locked(this, connection);
 }
 
 std::shared_ptr<PortTunnelSessionAttachment> PortTunnelSession::detach_until(std::uint64_t deadline_ms,
@@ -133,26 +172,10 @@ std::shared_ptr<PortTunnelSessionAttachment> PortTunnelSession::detach_until(std
                         .str());
         return std::shared_ptr<PortTunnelSessionAttachment>();
     }
-    const PortTunnelSessionState previous_state = state;
-    state = PortTunnelSessionState::Detached;
-    resume_deadline_ms = deadline_ms;
-    std::shared_ptr<PortTunnelSessionAttachment> previous = attachment;
-    attachment.reset();
-    state_changed.broadcast();
     if (detached != nullptr) {
         *detached = true;
     }
-    log_message(LOG_DEBUG,
-                "port_tunnel",
-                LogMessageBuilder("session detach")
-                    .quoted_field("session_id", session_id)
-                    .raw(std::string("from=") + session_state_name(previous_state))
-                    .raw(std::string("to=") + session_state_name(state))
-                    .field("generation", generation)
-                    .field("resume_deadline_ms", resume_deadline_ms)
-                    .bool_field("had_attachment", previous.get() != nullptr)
-                    .str());
-    return previous;
+    return transition_session_to_detached_locked(this, deadline_ms);
 }
 
 PortTunnelSessionTeardown PortTunnelSession::close_terminal(bool mark_expired) {
@@ -168,7 +191,7 @@ PortTunnelSessionTeardown PortTunnelSession::close_terminal(bool mark_expired) {
                         .str());
         return PortTunnelSessionTeardown();
     }
-    return collect_terminal_session_teardown_locked(this, mark_expired);
+    return transition_session_to_terminal_locked(this, mark_expired);
 }
 
 PortTunnelSessionTeardown PortTunnelSession::expire_if_due(std::uint64_t now_ms) {
@@ -187,13 +210,12 @@ PortTunnelSessionTeardown PortTunnelSession::expire_if_due(std::uint64_t now_ms)
                     .field("now_ms", now_ms)
                     .field("resume_deadline_ms", resume_deadline_ms)
                     .str());
-    return collect_terminal_session_teardown_locked(this, true);
+    return transition_session_to_terminal_locked(this, true);
 }
 
 bool PortTunnelSession::detached_deadline(std::uint64_t* deadline_ms) {
     BasicLockGuard lock(mutex);
-    const bool detached = state == PortTunnelSessionState::Detached && attachment.get() == nullptr &&
-                          resume_deadline_ms != 0ULL;
+    const bool detached = session_has_detached_deadline_locked(this);
     if (deadline_ms != nullptr) {
         *deadline_ms = resume_deadline_ms;
     }
@@ -225,7 +247,7 @@ PortTunnelSessionResumeResult PortTunnelSession::prepare_resume(std::uint64_t ge
                         .str());
         return PortTunnelSessionResumeResult::AlreadyAttached;
     }
-    if (state == PortTunnelSessionState::Expired || (resume_deadline_ms != 0ULL && now_ms >= resume_deadline_ms)) {
+    if (session_resume_expired_locked(this, now_ms)) {
         log_message(LOG_DEBUG,
                     "port_tunnel",
                     LogMessageBuilder("session resume rejected")
