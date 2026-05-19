@@ -11,11 +11,15 @@ static void write_text(const fs::path& path, const std::string& value) {
     fs::write_file_bytes(path, value);
 }
 
-static std::string minimal_config_text() {
+static std::string quote_config_value(const std::string& value) {
+    return "\"" + value + "\"";
+}
+
+static std::string minimal_config_text(const fs::path& default_workdir) {
     return "target = builder-cpp\n"
            "listen_host = 0.0.0.0\n"
            "listen_port = 8181\n"
-           "default_workdir = C:\\work\n";
+           "default_workdir = " + quote_config_value(default_workdir.string()) + "\n";
 }
 
 static bool config_rejected(const fs::path& path) {
@@ -54,6 +58,10 @@ int main() {
     const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-config-test";
     fs::remove_all(root);
     fs::create_directories(root);
+    const fs::path default_workdir = root / "work";
+    const fs::path spaced_workdir = root / "work dir";
+    fs::create_directories(default_workdir);
+    fs::create_directories(spaced_workdir);
 
     const fs::path config_path = root / "daemon-cpp.ini";
     write_text(config_path,
@@ -61,7 +69,7 @@ int main() {
                "target = builder-cpp\n"
                "listen_host = 0.0.0.0\n"
                "listen_port = 8181\n"
-               "default_workdir = \"C:\\work dir\"\n"
+               "default_workdir = " + quote_config_value(spaced_workdir.string()) + "\n"
                "default_shell = /bin/sh\n"
                "allow_login_shell = false\n"
                "http_auth_bearer_token = shared-secret\n"
@@ -89,7 +97,7 @@ int main() {
     TEST_ASSERT(config.target == "builder-cpp");
     TEST_ASSERT(config.listen_host == "0.0.0.0");
     TEST_ASSERT(config.listen_port == 8181);
-    TEST_ASSERT(config.default_workdir == "C:\\work dir");
+    TEST_ASSERT(config.default_workdir == spaced_workdir.string());
     TEST_ASSERT(config.default_shell == "/bin/sh");
     TEST_ASSERT(!config.allow_login_shell);
     TEST_ASSERT(config.http_auth_bearer_token == "shared-secret");
@@ -118,18 +126,26 @@ int main() {
     TEST_ASSERT(config.yield_time.write_stdin_input.min_ms == 250UL);
     TEST_ASSERT(!config.sandbox_configured);
 
+    const fs::path sandbox_workdir = root / "sandbox-work";
+    const fs::path sandbox_tmp_workdir = root / "tmp-work";
+    const fs::path sandbox_assets = root / "assets";
+    fs::create_directories(sandbox_workdir);
+    fs::create_directories(sandbox_tmp_workdir);
+    fs::create_directories(sandbox_assets);
     const fs::path sandbox_config_path = root / "sandbox.ini";
     write_text(sandbox_config_path,
                "target = sandbox-cpp\n"
                "listen_host = 127.0.0.1\n"
                "listen_port = 8181\n"
-               "default_workdir = /work\n"
-               "sandbox_exec_cwd_allow = /work;/tmp/work\n"
-               "sandbox_exec_cwd_deny = /work/private\n"
-               "sandbox_read_allow = /work;/assets\n"
-               "sandbox_read_deny = /work/.git;/assets/secrets\n"
-               "sandbox_write_allow = /work\n"
-               "sandbox_write_deny = /work/.git;/work/readonly\n");
+               "default_workdir = " + quote_config_value(sandbox_workdir.string()) + "\n"
+               "sandbox_exec_cwd_allow = " + sandbox_workdir.string() + ";" + sandbox_tmp_workdir.string() + "\n"
+               "sandbox_exec_cwd_deny = " + (sandbox_workdir / "private").string() + "\n"
+               "sandbox_read_allow = " + sandbox_workdir.string() + ";" + sandbox_assets.string() + "\n"
+               "sandbox_read_deny = " + (sandbox_workdir / ".git").string() + ";" +
+                   (sandbox_assets / "secrets").string() + "\n"
+               "sandbox_write_allow = " + sandbox_workdir.string() + "\n"
+               "sandbox_write_deny = " + (sandbox_workdir / ".git").string() + ";" +
+                   (sandbox_workdir / "readonly").string() + "\n");
     const DaemonConfig sandbox_config = load_config(sandbox_config_path.string());
     TEST_ASSERT(sandbox_config.port_forward_limits.max_worker_threads == DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS);
     TEST_ASSERT(sandbox_config.port_forward_limits.max_retained_sessions == DEFAULT_PORT_FORWARD_MAX_RETAINED_SESSIONS);
@@ -144,13 +160,13 @@ int main() {
     TEST_ASSERT(sandbox_config.transfer_limits.max_entry_bytes == DEFAULT_TRANSFER_MAX_ENTRY_BYTES);
     TEST_ASSERT(sandbox_config.sandbox_configured);
     TEST_ASSERT(sandbox_config.sandbox.exec_cwd.allow.size() == 2);
-    TEST_ASSERT(sandbox_config.sandbox.exec_cwd.allow[0] == "/work");
-    TEST_ASSERT(sandbox_config.sandbox.exec_cwd.allow[1] == "/tmp/work");
-    TEST_ASSERT(sandbox_config.sandbox.exec_cwd.deny[0] == "/work/private");
-    TEST_ASSERT(sandbox_config.sandbox.read.allow[1] == "/assets");
-    TEST_ASSERT(sandbox_config.sandbox.read.deny[1] == "/assets/secrets");
-    TEST_ASSERT(sandbox_config.sandbox.write.allow[0] == "/work");
-    TEST_ASSERT(sandbox_config.sandbox.write.deny[1] == "/work/readonly");
+    TEST_ASSERT(sandbox_config.sandbox.exec_cwd.allow[0] == sandbox_workdir.string());
+    TEST_ASSERT(sandbox_config.sandbox.exec_cwd.allow[1] == sandbox_tmp_workdir.string());
+    TEST_ASSERT(sandbox_config.sandbox.exec_cwd.deny[0] == (sandbox_workdir / "private").string());
+    TEST_ASSERT(sandbox_config.sandbox.read.allow[1] == sandbox_assets.string());
+    TEST_ASSERT(sandbox_config.sandbox.read.deny[1] == (sandbox_assets / "secrets").string());
+    TEST_ASSERT(sandbox_config.sandbox.write.allow[0] == sandbox_workdir.string());
+    TEST_ASSERT(sandbox_config.sandbox.write.deny[1] == (sandbox_workdir / "readonly").string());
 
     const YieldTimeConfig defaults = YieldTimeConfig();
     TEST_ASSERT(resolve_yield_time_ms(defaults.exec_command, false, 0UL) == DEFAULT_YIELD_TIME_EXEC_COMMAND_DEFAULT_MS);
@@ -170,20 +186,30 @@ int main() {
                "target = builder-cpp\n"
                "listen_host = 0.0.0.0\n"
                "listen_port = 8181\n"
-               "default_workdir = C:\\work\n"
+               "default_workdir = " + quote_config_value(default_workdir.string()) + "\n"
                "port_forward_max_worker_threads = 0\n");
     TEST_ASSERT(config_rejected(invalid_worker_limit_path));
 
+    const fs::path missing_workdir_config_path = root / "missing-workdir.ini";
+    write_text(missing_workdir_config_path, minimal_config_text(root / "missing-workdir"));
+    TEST_ASSERT(config_rejected(missing_workdir_config_path));
+
+    const fs::path file_workdir = root / "file-workdir";
+    write_text(file_workdir, "not a directory\n");
+    const fs::path file_workdir_config_path = root / "file-workdir.ini";
+    write_text(file_workdir_config_path, minimal_config_text(file_workdir));
+    TEST_ASSERT(config_rejected(file_workdir_config_path));
+
     const fs::path invalid_transfer_zero_path = root / "invalid-transfer-zero.ini";
     write_text(invalid_transfer_zero_path,
-               minimal_config_text() + "transfer_max_archive_bytes = 0\n"
-                                       "transfer_max_entry_bytes = 1\n");
+               minimal_config_text(default_workdir) + "transfer_max_archive_bytes = 0\n"
+                                                      "transfer_max_entry_bytes = 1\n");
     TEST_ASSERT(config_rejected(invalid_transfer_zero_path));
 
     const fs::path invalid_transfer_bounds_path = root / "invalid-transfer-bounds.ini";
     write_text(invalid_transfer_bounds_path,
-               minimal_config_text() + "transfer_max_archive_bytes = 8\n"
-                                       "transfer_max_entry_bytes = 9\n");
+               minimal_config_text(default_workdir) + "transfer_max_archive_bytes = 8\n"
+                                                      "transfer_max_entry_bytes = 9\n");
     TEST_ASSERT(config_rejected(invalid_transfer_bounds_path));
 
     const char* invalid_limit_keys[] = {
@@ -198,7 +224,7 @@ int main() {
     };
     for (std::size_t index = 0; index < sizeof(invalid_limit_keys) / sizeof(invalid_limit_keys[0]); ++index) {
         const fs::path invalid_limit_path = root / ("invalid-" + std::string(invalid_limit_keys[index]) + ".ini");
-        write_text(invalid_limit_path, minimal_config_text() + invalid_limit_keys[index] + " = 0\n");
+        write_text(invalid_limit_path, minimal_config_text(default_workdir) + invalid_limit_keys[index] + " = 0\n");
         TEST_ASSERT(config_rejected(invalid_limit_path));
     }
 
@@ -207,7 +233,7 @@ int main() {
                "target = builder-cpp\n"
                "listen_host = 0.0.0.0\n"
                "listen_port = 8181\n"
-               "default_workdir = C:\\work\n"
+               "default_workdir = " + quote_config_value(default_workdir.string()) + "\n"
                "yield_time_exec_command_default_ms = 10\n"
                "yield_time_exec_command_min_ms = 20\n");
     TEST_ASSERT(config_rejected(invalid_yield_path));
@@ -217,7 +243,7 @@ int main() {
                "target = builder-cpp\n"
                "listen_host = 0.0.0.0\n"
                "listen_port = 8181\n"
-               "default_workdir = C:\\work\n"
+               "default_workdir = " + quote_config_value(default_workdir.string()) + "\n"
                "http_auth_bearer_token = bad token\n");
     TEST_ASSERT(config_rejected(invalid_auth_path));
 
@@ -226,7 +252,7 @@ int main() {
                "target = builder-cpp\n"
                "listen_host = 0.0.0.0\n"
                "listen_port = 70000\n"
-               "default_workdir = C:\\work\n");
+               "default_workdir = " + quote_config_value(default_workdir.string()) + "\n");
     TEST_ASSERT(config_rejected(invalid_port_path));
 
     return 0;

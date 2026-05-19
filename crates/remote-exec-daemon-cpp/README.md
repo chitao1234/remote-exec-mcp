@@ -326,6 +326,7 @@ listen_host = 0.0.0.0
 listen_port = 8181
 
 # POSIX example.
+# The configured default workdir must exist when the daemon starts.
 default_workdir = /work
 # default_shell = /bin/bash
 

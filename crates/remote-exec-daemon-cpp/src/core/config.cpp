@@ -6,6 +6,7 @@
 #include <map>
 #include <sstream>
 #include <stdexcept>
+#include <sys/stat.h>
 
 #include "core/config.h"
 #include "platform/path_utils.h"
@@ -294,6 +295,20 @@ static void validate_transfer_limits(const TransferLimitConfig& limits) {
     }
 }
 
+static void validate_existing_directory(const std::string& path, const std::string& key) {
+    struct stat info;
+    if (!path_utils::stat_path(path, &info)) {
+        throw std::runtime_error(key + " `" + path + "` does not exist");
+    }
+#ifdef _WIN32
+    if ((info.st_mode & S_IFDIR) == 0) {
+#else
+    if (!S_ISDIR(info.st_mode)) {
+#endif
+        throw std::runtime_error(key + " `" + path + "` must be a directory");
+    }
+}
+
 static FilesystemSandbox read_sandbox(const ConfigValues& values) {
     FilesystemSandbox sandbox;
     sandbox.exec_cwd.allow = read_optional_path_list(values, "sandbox_exec_cwd_allow");
@@ -306,6 +321,7 @@ static FilesystemSandbox read_sandbox(const ConfigValues& values) {
 }
 
 static void validate_daemon_config(const DaemonConfig& config) {
+    validate_existing_directory(config.default_workdir, "default_workdir");
     if (config.listen_port == 0 && config.test_bound_addr_file.empty()) {
         throw std::runtime_error("listen_port = 0 requires test_bound_addr_file");
     }
