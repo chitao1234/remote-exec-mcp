@@ -7,7 +7,6 @@
 #include <cstring>
 #include <netinet/in.h>
 #include <poll.h>
-#include <signal.h>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -18,6 +17,7 @@
 
 #include "platform/posix_eintr.h"
 #include "platform/posix_fd.h"
+#include "platform/posix_signal.h"
 #include "remote_exec_cpp_config.h"
 
 namespace {
@@ -134,7 +134,9 @@ bool connect_in_progress_socket_error(int error) {
 }
 
 NetworkSession::NetworkSession() {
-    signal(SIGPIPE, SIG_IGN);
+    if (posix_signal::ignore_signal(SIGPIPE) != 0) {
+        throw std::runtime_error(socket_error_message_from_code("sigaction(SIGPIPE)", errno));
+    }
 }
 
 NetworkSession::~NetworkSession() {

@@ -23,6 +23,7 @@
 #include "exec/posix_child_reaper.h"
 #include "platform/posix_fd.h"
 #include "platform/posix_process.h"
+#include "platform/posix_signal.h"
 #include "exec/process_session.h"
 
 extern char** environ;
@@ -328,7 +329,9 @@ void exec_shell_child(const std::vector<char*>& exec_argv,
                       const std::string& executable_path,
                       const ExecEnvironment& environment,
                       const std::string& workdir) {
-    signal(SIGPIPE, SIG_DFL);
+    if (posix_signal::restore_default(SIGPIPE) != 0) {
+        _exit(126);
+    }
     if (!workdir.empty() && posix_fd::change_directory(workdir.c_str()) != 0) {
         _exit(126);
     }

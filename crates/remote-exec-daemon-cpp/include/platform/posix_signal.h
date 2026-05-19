@@ -18,6 +18,14 @@ inline int install_handler(int signal_number, SignalHandler handler, int flags) 
     return sigaction(signal_number, &action, nullptr);
 }
 
+inline int ignore_signal(int signal_number) {
+    return install_handler(signal_number, SIG_IGN, 0);
+}
+
+inline int restore_default(int signal_number) {
+    return install_handler(signal_number, SIG_DFL, 0);
+}
+
 } // namespace posix_signal
 
 #endif
