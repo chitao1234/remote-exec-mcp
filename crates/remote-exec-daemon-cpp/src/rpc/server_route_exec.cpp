@@ -2,15 +2,11 @@
 
 #include "rpc/exec_request_utils.h"
 #include "core/logging.h"
-#include "exec/process_session.h"
 #include "rpc/server_route_common.h"
 #include "rpc/server_route_exec.h"
 
 HttpResponse handle_exec_start(AppState& state, const HttpRequest& request) {
-    HttpResponse response;
-    response.status = 200;
-
-    try {
+    return handle_exec_rpc_route("exec/start", ExecRouteKind::Start, [&](HttpResponse& response) {
         const ExecStartRequestSpec parsed = prepare_exec_start_request(state, request);
         Json exec_response = state.sessions.start_command(state.config.target,
                                                           parsed,
@@ -22,28 +18,11 @@ HttpResponse handle_exec_start(AppState& state, const HttpRequest& request) {
                         preview_text(parsed.cmd, 120) + "`");
         exec_response["daemon_instance_id"] = state.daemon_instance_id;
         write_json(response, exec_response);
-    } catch (const SessionLimitError& ex) {
-        log_message(LOG_WARN, "server", std::string("exec/start rejected: ") + ex.what());
-        write_rpc_error(response, 429, "session_limit_exceeded", ex.what());
-    } catch (const SandboxError& ex) {
-        log_message(LOG_WARN, "server", std::string("exec/start denied: ") + ex.what());
-        write_rpc_error(response, 400, "sandbox_denied", ex.what());
-    } catch (const ExecRequestFailure& ex) {
-        log_message(level_for_status(ex.status), "server", std::string("exec/start rejected: ") + ex.what());
-        write_rpc_error(response, ex.status, ex.code, ex.message);
-    } catch (const std::exception& ex) {
-        log_message(LOG_ERROR, "server", std::string("exec/start failed: ") + ex.what());
-        write_rpc_error(response, 500, "internal_error", ex.what());
-    }
-
-    return response;
+    });
 }
 
 HttpResponse handle_exec_write(AppState& state, const HttpRequest& request) {
-    HttpResponse response;
-    response.status = 200;
-
-    try {
+    return handle_exec_rpc_route("exec/write", ExecRouteKind::Write, [&](HttpResponse& response) {
         const ExecWriteRequestSpec parsed = prepare_exec_write_request(request);
         {
             LogMessageBuilder message("exec/write");
@@ -62,23 +41,5 @@ HttpResponse handle_exec_write(AppState& state, const HttpRequest& request) {
                                                         parsed.pty_size.cols);
         exec_response["daemon_instance_id"] = state.daemon_instance_id;
         write_json(response, exec_response);
-    } catch (const UnknownSessionError& ex) {
-        log_message(LOG_WARN, "server", std::string("exec/write unknown session: ") + ex.what());
-        write_rpc_error(response, 400, "unknown_session", ex.what());
-    } catch (const StdinClosedError& ex) {
-        log_message(LOG_WARN, "server", std::string("exec/write stdin closed: ") + ex.what());
-        write_rpc_error(response, 400, "stdin_closed", ex.what());
-    } catch (const ProcessPtyResizeUnsupportedError& ex) {
-        log_message(LOG_WARN, "server", std::string("exec/write pty resize unsupported: ") + ex.what());
-        write_rpc_error(response, 400, "tty_unsupported", ex.what());
-    } catch (const ExecRequestFailure& ex) {
-        log_message(level_for_status(ex.status), "server", std::string("exec/write rejected: ") + ex.what());
-        write_rpc_error(response, ex.status, ex.code, ex.message);
-    } catch (const std::exception& ex) {
-        const std::string message = ex.what();
-        log_message(LOG_ERROR, "server", std::string("exec/write failed: ") + message);
-        write_rpc_error(response, 500, "internal_error", message);
-    }
-
-    return response;
+    });
 }
