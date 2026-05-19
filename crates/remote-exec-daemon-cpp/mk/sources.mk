@@ -22,6 +22,12 @@ POSIX_CHILD_REAPER_SRCS = $(SOURCE_PREFIX)src/posix_child_reaper.cpp
 
 DAEMON_THREAD_SRCS = $(SOURCE_PREFIX)src/daemon_thread.cpp
 
+HTTP_SRCS = \
+	$(SOURCE_PREFIX)src/http/http_codec.cpp \
+	$(SOURCE_PREFIX)src/http/http_connection.cpp \
+	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
+	$(SOURCE_PREFIX)src/http/http_request.cpp
+
 ROUTE_SRCS = \
 	$(SOURCE_PREFIX)src/daemon_capabilities.cpp \
 	$(SOURCE_PREFIX)src/exec_request_utils.cpp \
@@ -70,19 +76,16 @@ WAKEUP_PIPE_POSIX_SRCS = $(SOURCE_PREFIX)src/wakeup_pipe.cpp
 WAKEUP_PIPE_WINDOWS_SRCS = $(SOURCE_PREFIX)src/wakeup_pipe_win32.cpp
 
 SERVER_TRANSPORT_POSIX_SRCS = \
-	$(SOURCE_PREFIX)src/server_transport.cpp \
-	$(SOURCE_PREFIX)src/server_transport_posix.cpp
+	$(SOURCE_PREFIX)src/http/server_transport.cpp \
+	$(SOURCE_PREFIX)src/http/server_transport_posix.cpp
 
 SERVER_TRANSPORT_WINDOWS_SRCS = \
-	$(SOURCE_PREFIX)src/server_transport.cpp \
-	$(SOURCE_PREFIX)src/server_transport_win32.cpp
+	$(SOURCE_PREFIX)src/http/server_transport.cpp \
+	$(SOURCE_PREFIX)src/http/server_transport_win32.cpp
 
 BASE_COMMON_SRCS_NO_MAIN = \
 	$(SOURCE_PREFIX)src/config.cpp \
-	$(SOURCE_PREFIX)src/http_codec.cpp \
-	$(SOURCE_PREFIX)src/http_connection.cpp \
-	$(SOURCE_PREFIX)src/http_helpers.cpp \
-	$(SOURCE_PREFIX)src/http_request.cpp \
+	$(HTTP_SRCS) \
 	$(SOURCE_PREFIX)src/logging.cpp \
 	$(SOURCE_PREFIX)src/text_utils.cpp \
 	$(SOURCE_PREFIX)src/platform.cpp \
@@ -157,16 +160,16 @@ WINDOWS_BASIC_MUTEX_TEST_SRCS = \
 
 HOST_HTTP_REQUEST_SRCS = \
 	$(SOURCE_PREFIX)tests/test_http_request.cpp \
-	$(SOURCE_PREFIX)src/http_codec.cpp \
-	$(SOURCE_PREFIX)src/http_request.cpp \
-	$(SOURCE_PREFIX)src/http_helpers.cpp \
+	$(SOURCE_PREFIX)src/http/http_codec.cpp \
+	$(SOURCE_PREFIX)src/http/http_request.cpp \
+	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
 	$(SOURCE_PREFIX)src/text_utils.cpp
 
 HOST_SERVER_TRANSPORT_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)tests/test_server_transport.cpp \
-	$(SOURCE_PREFIX)src/http_codec.cpp \
-	$(SOURCE_PREFIX)src/http_request.cpp \
-	$(SOURCE_PREFIX)src/http_helpers.cpp \
+	$(SOURCE_PREFIX)src/http/http_codec.cpp \
+	$(SOURCE_PREFIX)src/http/http_request.cpp \
+	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
 	$(SOURCE_PREFIX)src/text_utils.cpp
 
 HOST_SERVER_TRANSPORT_SRCS = \
@@ -219,9 +222,9 @@ HOST_SESSION_STORE_SRCS = \
 HOST_CONNECTION_MANAGER_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)tests/test_connection_manager.cpp \
 	$(SOURCE_PREFIX)src/connection_manager.cpp \
-	$(SOURCE_PREFIX)src/http_codec.cpp \
-	$(SOURCE_PREFIX)src/http_request.cpp \
-	$(SOURCE_PREFIX)src/http_helpers.cpp \
+	$(SOURCE_PREFIX)src/http/http_codec.cpp \
+	$(SOURCE_PREFIX)src/http/http_request.cpp \
+	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
 	$(SOURCE_PREFIX)src/text_utils.cpp \
 	$(SOURCE_PREFIX)src/platform.cpp \
 	$(SOURCE_PREFIX)src/logging.cpp \
@@ -253,8 +256,8 @@ WINDOWS_SERVER_RUNTIME_TEST_SUPPORT_SRCS = \
 SERVER_ROUTES_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)tests/test_server_routes_shared.cpp \
 	$(ROUTE_SRCS) \
-	$(SOURCE_PREFIX)src/http_codec.cpp \
-	$(SOURCE_PREFIX)src/http_helpers.cpp \
+	$(SOURCE_PREFIX)src/http/http_codec.cpp \
+	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
 	$(SESSION_STORE_SUPPORT_SRCS) \
 	$(SOURCE_PREFIX)src/session_store.cpp \
 	$(SOURCE_PREFIX)src/session_pump.cpp \
