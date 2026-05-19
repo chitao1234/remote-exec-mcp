@@ -17,7 +17,7 @@
 #include "rpc_failures.h"
 #include "path_utils.h"
 #include "scoped_file.h"
-#include "../stdio_retry.h"
+#include "../core/stdio_retry.h"
 #include "transfer_ops_internal.h"
 
 using Json = nlohmann::json;

@@ -22,6 +22,14 @@ PATCH_SRCS = $(SOURCE_PREFIX)src/patch/patch_engine.cpp
 
 IMAGE_SRCS = $(SOURCE_PREFIX)src/image/image_ops.cpp
 
+CONFIG_SRCS = $(SOURCE_PREFIX)src/core/config.cpp
+
+LOGGING_SRCS = $(SOURCE_PREFIX)src/core/logging.cpp
+
+TEXT_UTILS_SRCS = $(SOURCE_PREFIX)src/core/text_utils.cpp
+
+SHELL_POLICY_SRCS = $(SOURCE_PREFIX)src/core/shell_policy.cpp
+
 POSIX_CHILD_REAPER_SRCS = $(SOURCE_PREFIX)src/exec/posix_child_reaper.cpp
 
 POSIX_PROCESS_SESSION_SRCS = \
@@ -108,13 +116,13 @@ SERVER_TRANSPORT_WINDOWS_SRCS = \
 	$(SOURCE_PREFIX)src/http/server_transport_win32.cpp
 
 BASE_COMMON_SRCS_NO_MAIN = \
-	$(SOURCE_PREFIX)src/config.cpp \
+	$(CONFIG_SRCS) \
 	$(HTTP_SRCS) \
-	$(SOURCE_PREFIX)src/logging.cpp \
-	$(SOURCE_PREFIX)src/text_utils.cpp \
+	$(LOGGING_SRCS) \
+	$(TEXT_UTILS_SRCS) \
 	$(PLATFORM_SRCS) \
 	$(PATH_UTILS_SRCS) \
-	$(SOURCE_PREFIX)src/shell_policy.cpp \
+	$(SHELL_POLICY_SRCS) \
 	$(RUNTIME_SRCS) \
 	$(SESSION_STORE_SRCS) \
 	$(PATCH_SRCS) \
@@ -146,7 +154,7 @@ HOST_PATCH_SRCS = \
 	$(SOURCE_PREFIX)tests/test_patch.cpp \
 	$(PATCH_SRCS) \
 	$(PLATFORM_SRCS) \
-	$(SOURCE_PREFIX)src/text_utils.cpp \
+	$(TEXT_UTILS_SRCS) \
 	$(PATH_UTILS_SRCS) \
 	$(SOURCE_PREFIX)src/policy/path_policy.cpp
 
@@ -158,14 +166,14 @@ HOST_TRANSFER_SRCS = \
 
 HOST_CONFIG_SRCS = \
 	$(SOURCE_PREFIX)tests/test_config.cpp \
-	$(SOURCE_PREFIX)src/config.cpp \
+	$(CONFIG_SRCS) \
 	$(PATH_UTILS_SRCS) \
-	$(SOURCE_PREFIX)src/text_utils.cpp
+	$(TEXT_UTILS_SRCS)
 
 HOST_BASIC_MUTEX_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)tests/test_basic_mutex.cpp \
 	$(PLATFORM_SRCS) \
-	$(SOURCE_PREFIX)src/text_utils.cpp
+	$(TEXT_UTILS_SRCS)
 
 HOST_BASIC_MUTEX_SRCS = \
 	$(HOST_BASIC_MUTEX_TEST_COMMON_SRCS) \
@@ -180,14 +188,14 @@ HOST_HTTP_REQUEST_SRCS = \
 	$(SOURCE_PREFIX)src/http/http_codec.cpp \
 	$(SOURCE_PREFIX)src/http/http_request.cpp \
 	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
-	$(SOURCE_PREFIX)src/text_utils.cpp
+	$(TEXT_UTILS_SRCS)
 
 HOST_SERVER_TRANSPORT_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)tests/test_server_transport.cpp \
 	$(SOURCE_PREFIX)src/http/http_codec.cpp \
 	$(SOURCE_PREFIX)src/http/http_request.cpp \
 	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
-	$(SOURCE_PREFIX)src/text_utils.cpp
+	$(TEXT_UTILS_SRCS)
 
 HOST_SERVER_TRANSPORT_SRCS = \
 	$(HOST_SERVER_TRANSPORT_TEST_COMMON_SRCS) \
@@ -226,11 +234,11 @@ HOST_SESSION_STORE_SRCS = \
 	$(POSIX_PROCESS_SESSION_SRCS) \
 	$(PLATFORM_SRCS) \
 	$(PATH_UTILS_SRCS) \
-	$(SOURCE_PREFIX)src/shell_policy.cpp \
+	$(SHELL_POLICY_SRCS) \
 	$(BASIC_MUTEX_POSIX_SRCS) \
-	$(SOURCE_PREFIX)src/logging.cpp \
-	$(SOURCE_PREFIX)src/config.cpp \
-	$(SOURCE_PREFIX)src/text_utils.cpp
+	$(LOGGING_SRCS) \
+	$(CONFIG_SRCS) \
+	$(TEXT_UTILS_SRCS)
 
 HOST_CONNECTION_MANAGER_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)tests/test_connection_manager.cpp \
@@ -238,9 +246,9 @@ HOST_CONNECTION_MANAGER_TEST_COMMON_SRCS = \
 	$(SOURCE_PREFIX)src/http/http_codec.cpp \
 	$(SOURCE_PREFIX)src/http/http_request.cpp \
 	$(SOURCE_PREFIX)src/http/http_helpers.cpp \
-	$(SOURCE_PREFIX)src/text_utils.cpp \
+	$(TEXT_UTILS_SRCS) \
 	$(PLATFORM_SRCS) \
-	$(SOURCE_PREFIX)src/logging.cpp \
+	$(LOGGING_SRCS) \
 	$(DAEMON_THREAD_SRCS)
 
 HOST_CONNECTION_MANAGER_SRCS = \
@@ -274,11 +282,11 @@ SERVER_ROUTES_TEST_COMMON_SRCS = \
 	$(SESSION_STORE_SRCS) \
 	$(PLATFORM_SRCS) \
 	$(PATH_UTILS_SRCS) \
-	$(SOURCE_PREFIX)src/shell_policy.cpp \
+	$(SHELL_POLICY_SRCS) \
 	$(PATCH_SRCS) \
-	$(SOURCE_PREFIX)src/logging.cpp \
-	$(SOURCE_PREFIX)src/config.cpp \
-	$(SOURCE_PREFIX)src/text_utils.cpp \
+	$(LOGGING_SRCS) \
+	$(CONFIG_SRCS) \
+	$(TEXT_UTILS_SRCS) \
 	$(DAEMON_THREAD_SRCS) \
 	$(TRANSFER_SRCS) \
 	$(POLICY_SRCS) \
@@ -313,7 +321,7 @@ HOST_SERVER_ROUTES_COMMON_SRCS = \
 
 HOST_SANDBOX_SRCS = \
 	$(SOURCE_PREFIX)tests/test_sandbox.cpp \
-	$(SOURCE_PREFIX)src/text_utils.cpp \
+	$(TEXT_UTILS_SRCS) \
 	$(POLICY_SRCS)
 
 HOST_PORT_TUNNEL_FRAME_SRCS = \
@@ -336,11 +344,11 @@ WINDOWS_SESSION_STORE_TEST_SRCS = \
 	$(WINDOWS_DAEMON_SUPPORT_SRCS) \
 	$(PLATFORM_SRCS) \
 	$(PATH_UTILS_SRCS) \
-	$(SOURCE_PREFIX)src/shell_policy.cpp \
+	$(SHELL_POLICY_SRCS) \
 	$(BASIC_MUTEX_WINDOWS_SRCS) \
-	$(SOURCE_PREFIX)src/logging.cpp \
-	$(SOURCE_PREFIX)src/config.cpp \
-	$(SOURCE_PREFIX)src/text_utils.cpp \
+	$(LOGGING_SRCS) \
+	$(CONFIG_SRCS) \
+	$(TEXT_UTILS_SRCS) \
 	$(DAEMON_THREAD_SRCS)
 
 WINDOWS_SERVER_ROUTES_COMMON_TEST_SRCS = \
