@@ -506,9 +506,14 @@ static void assert_posix_sigchld_reaper_preserves_exit_status_during_pty_resume_
     set_process_session_test_exit_poll_delay_ms(50UL);
 
     for (int attempt = 0; attempt < 10; ++attempt) {
+        const std::string ready_file_name = "pty-race-ready-" + std::to_string(attempt) + ".txt";
+        const fs::path ready_path = root / ready_file_name;
+        fs::remove_all(ready_path);
+
         SessionStore race_store;
         Json waiting = start_test_command(race_store,
-                                          "printf 'ready\\n'; IFS= read line; printf 'echo:%s\\n' \"$line\"",
+                                          "printf 'ready\\n'; printf 'ready\\n' > " + ready_file_name +
+                                              "; IFS= read line; printf 'echo:%s\\n' \"$line\"",
                                           root.string(),
                                           race_shell,
                                           true,
@@ -519,22 +524,15 @@ static void assert_posix_sigchld_reaper_preserves_exit_status_during_pty_resume_
         TEST_ASSERT(waiting.at("running").get<bool>());
         std::string waiting_id = waiting.at("daemon_session_id").get<std::string>();
         std::string waiting_output = waiting.at("output").get<std::string>();
-        const std::uint64_t ready_wait_started = platform::monotonic_ms();
-        while (waiting_output.find("ready") == std::string::npos &&
-               platform::monotonic_ms() - ready_wait_started < 5000ULL) {
-            waiting = race_store.write_stdin(
-                waiting_id, "", true, 50UL, DEFAULT_MAX_OUTPUT_TOKENS, fast_yield, false, 0U, 0U);
-            TEST_ASSERT(waiting.at("running").get<bool>());
-            waiting_id = waiting.at("daemon_session_id").get<std::string>();
-            waiting_output += waiting.at("output").get<std::string>();
-        }
-        TEST_ASSERT(waiting_output.find("ready") != std::string::npos);
+        TEST_ASSERT(wait_until_file_contains(ready_path, "ready", 5000UL));
 
         const Json resumed = race_store.write_stdin(
             waiting_id, "ping\n", true, 1000UL, DEFAULT_MAX_OUTPUT_TOKENS, fast_yield, false, 0U, 0U);
+        const std::string resumed_output = waiting_output + resumed.at("output").get<std::string>();
         TEST_ASSERT(!resumed.at("running").get<bool>());
         TEST_ASSERT(resumed.at("exit_code").get<int>() == 0);
-        TEST_ASSERT(resumed.at("output").get<std::string>().find("echo:ping") != std::string::npos);
+        TEST_ASSERT(resumed_output.find("ready") != std::string::npos);
+        TEST_ASSERT(resumed_output.find("echo:ping") != std::string::npos);
     }
 
     set_process_session_test_exit_poll_delay_ms(0UL);
