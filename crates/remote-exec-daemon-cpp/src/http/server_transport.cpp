@@ -3,6 +3,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <sstream>
 
 #ifdef _WIN32
 #include <ws2tcpip.h>
@@ -227,6 +228,39 @@ void HttpRequestBodyStream::consume_chunk_trailers() {
     }
 }
 
+HttpChunkedResponseWriter::HttpChunkedResponseWriter(SOCKET client) : client_(client) {
+}
+
+void HttpChunkedResponseWriter::write_chunk(const char* data, std::size_t size) {
+    std::ostringstream header;
+    header << std::hex << size << "\r\n";
+    send_all(client_, header.str());
+    if (size != 0U) {
+        send_all_bytes(client_, data, size);
+    }
+    send_all(client_, "\r\n");
+}
+
+void HttpChunkedResponseWriter::write_chunk(const std::string& data) {
+    write_chunk(data.data(), data.size());
+}
+
+void HttpChunkedResponseWriter::finish() {
+    send_all(client_, "0\r\n\r\n");
+}
+
+std::string read_request_body_to_string(HttpRequestBodyStream* body) {
+    std::string output;
+    char buffer[8192];
+    for (;;) {
+        const std::size_t received = body->read(buffer, sizeof(buffer));
+        if (received == 0U) {
+            return output;
+        }
+        output.append(buffer, received);
+    }
+}
+
 void send_all(SOCKET client, const std::string& data) {
     send_all_bytes(client, data.data(), data.size());
 }
@@ -241,6 +275,20 @@ void send_all_bytes(SOCKET client, const char* data, std::size_t size) {
         }
         offset += static_cast<std::size_t>(sent);
     }
+}
+
+void send_http_response(SOCKET client, const HttpResponse& response) {
+    send_all(client, render_http_response(response));
+}
+
+void send_http_response_head(SOCKET client, const HttpResponse& response) {
+    send_all(client, render_http_response_head(response));
+}
+
+void send_http_upgrade_response(SOCKET client,
+                                const std::string& upgrade_token,
+                                const std::map<std::string, std::string>& headers) {
+    send_all(client, render_http_upgrade_response(upgrade_token, headers));
 }
 
 SOCKET create_listener(const DaemonConfig& config) {

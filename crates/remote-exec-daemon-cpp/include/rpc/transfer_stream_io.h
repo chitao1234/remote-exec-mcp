@@ -52,7 +52,7 @@ private:
 
 class ChunkedTransferStreamArchiveSink : public TransferArchiveSink {
 public:
-    explicit ChunkedTransferStreamArchiveSink(SOCKET client);
+    explicit ChunkedTransferStreamArchiveSink(HttpChunkedResponseWriter* chunks);
 
     void send_preface();
     void write(const char* data, std::size_t size);
@@ -60,7 +60,7 @@ public:
     void send_error_payload(const std::string& payload);
 
 private:
-    SOCKET client_;
+    HttpChunkedResponseWriter* chunks_;
     std::uint64_t archive_bytes_;
 };
 

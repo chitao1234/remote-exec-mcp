@@ -3,7 +3,6 @@
 
 #include "port_tunnel_service.h"
 #include "port_tunnel_workers.h"
-#include "rpc/server_contract.h"
 
 PortTunnelService::PortTunnelService(const PortForwardLimitConfig& limits)
     : lifecycle_state_(LifecycleState::Running), budget_state_(new PortTunnelBudgetState()),
@@ -275,11 +274,6 @@ void PortTunnelWorkerLease::reset() {
 
 bool PortTunnelWorkerLease::valid() const {
     return budget_state_.get() != nullptr;
-}
-
-bool is_port_tunnel_upgrade_request(const HttpRequest& request) {
-    return request.method == "POST" &&
-           request.path == server_contract::route_path(server_contract::ROUTE_PORT_TUNNEL);
 }
 
 std::shared_ptr<PortTunnelService> create_port_tunnel_service(const PortForwardLimitConfig& limits) {

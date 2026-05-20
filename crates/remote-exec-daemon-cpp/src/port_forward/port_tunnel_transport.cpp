@@ -1,4 +1,5 @@
 #include "port_forward/port_tunnel.h"
+#include "http/server_transport.h"
 #include "port_tunnel_connection.h"
 #include "port_tunnel_sender.h"
 #include "port_tunnel_service.h"
@@ -74,7 +75,7 @@ int handle_port_tunnel_upgrade(AppState& state, SOCKET client, const HttpRequest
         HttpResponse response;
         write_bearer_auth_challenge(response);
         write_request_id_header(response, request);
-        send_all(client, render_http_response(response));
+        send_http_response(client, response);
         return response.status;
     }
     if (request.method != "POST" ||
@@ -85,14 +86,14 @@ int handle_port_tunnel_upgrade(AppState& state, SOCKET client, const HttpRequest
         HttpResponse response;
         write_rpc_error(response, 400, "bad_request", "invalid port tunnel upgrade request");
         write_request_id_header(response, request);
-        send_all(client, render_http_response(response));
+        send_http_response(client, response);
         return response.status;
     }
 
     const std::string request_id = request_id_for_request(request);
     std::map<std::string, std::string> response_headers;
     response_headers[request_id_header_name()] = request_id;
-    send_all(client, render_http_upgrade_response(server_contract::PORT_TUNNEL_UPGRADE_TOKEN, response_headers));
+    send_http_upgrade_response(client, server_contract::PORT_TUNNEL_UPGRADE_TOKEN, response_headers);
     if (!state.port_tunnel_service) {
         state.port_tunnel_service = create_port_tunnel_service(state.config.port_forward_limits);
     }

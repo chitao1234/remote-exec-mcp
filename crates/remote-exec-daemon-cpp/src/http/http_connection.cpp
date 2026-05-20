@@ -6,9 +6,7 @@
 #include "core/logging.h"
 #include "platform/platform.h"
 #include "port_forward/port_tunnel.h"
-#include "rpc/server_contract.h"
 #include "runtime/server.h"
-#include "rpc/server_request_utils.h"
 #include "rpc/server_route_common.h"
 #include "rpc/server_route_transfer.h"
 #include "rpc/server_routes.h"
@@ -16,18 +14,6 @@
 #include "core/text_utils.h"
 
 namespace {
-
-std::string read_request_body_to_string(HttpRequestBodyStream* body) {
-    std::string output;
-    char buffer[8192];
-    for (;;) {
-        const std::size_t received = body->read(buffer, sizeof(buffer));
-        if (received == 0U) {
-            return output;
-        }
-        output.append(buffer, received);
-    }
-}
 
 bool request_connection_close_requested(const HttpRequest& request) {
     const std::string value = lowercase_ascii(request.header("connection"));
@@ -60,7 +46,17 @@ bool log_send_failure(const SocketSendError& ex) {
 
 bool try_send_response(SOCKET client, const HttpResponse& response) {
     try {
-        send_all(client, render_http_response(response));
+        send_http_response(client, response);
+        return true;
+    } catch (const SocketSendError& ex) {
+        log_send_failure(ex);
+        return false;
+    }
+}
+
+bool try_send_response_head(SOCKET client, const HttpResponse& response) {
+    try {
+        send_http_response_head(client, response);
         return true;
     } catch (const SocketSendError& ex) {
         log_send_failure(ex);
@@ -84,6 +80,31 @@ void log_request_result(const HttpRequest& request, int status, std::uint64_t st
     log_message(level_for_status(status), "server", message.str());
 }
 
+int handle_streaming_transfer_export_request(const AppState& state,
+                                             SOCKET client,
+                                             const HttpRequest& request,
+                                             HttpRequestBodyStream* body,
+                                             bool* close_after_response) {
+    StreamingTransferExport transfer;
+    HttpResponse response = prepare_streaming_transfer_export(state, request, body, &transfer);
+    write_request_id_header(response, request);
+    if (response.status != 200) {
+        if (!try_send_response(client, response)) {
+            *close_after_response = true;
+        }
+        return response.status;
+    }
+
+    if (!try_send_response_head(client, response)) {
+        *close_after_response = true;
+        return response.status;
+    }
+
+    HttpChunkedResponseWriter chunks(client);
+    run_streaming_transfer_export(transfer, &chunks);
+    return response.status;
+}
+
 int handle_client_request(AppState& state,
                           SOCKET client,
                           const HttpRequestHead& request_head,
@@ -94,13 +115,14 @@ int handle_client_request(AppState& state,
     *close_after_response = request_connection_close_requested(request);
     const HttpRequestBodyFraming framing = parse_request_body_framing_or_throw_bad_request(request);
     HttpRequestBodyStream body(client, request_head.initial_body, framing, state.config.max_request_body_bytes);
+    const RouteExecutionMode mode = route_execution_mode(request);
 
-    if (request.path == server_contract::route_path(server_contract::ROUTE_TRANSFER_EXPORT)) {
-        const int status = handle_streaming_transfer_export(state, request, &body, client);
+    if (mode == ROUTE_EXECUTION_STREAMING_EXPORT) {
+        const int status = handle_streaming_transfer_export_request(state, client, request, &body, close_after_response);
         log_request_result(request, status, started_at_ms);
         return status;
     }
-    if (is_port_tunnel_upgrade_request(request)) {
+    if (mode == ROUTE_EXECUTION_UPGRADE) {
         const int status = handle_port_tunnel_upgrade(state, client, request);
         log_request_result(request, status, started_at_ms);
         *close_after_response = true;
@@ -108,7 +130,7 @@ int handle_client_request(AppState& state,
     }
 
     HttpResponse response;
-    if (request.path == server_contract::route_path(server_contract::ROUTE_TRANSFER_IMPORT)) {
+    if (mode == ROUTE_EXECUTION_STREAMING_IMPORT) {
         response = handle_streaming_transfer_import(state, request, &body);
     } else {
         request.body = read_request_body_to_string(&body);

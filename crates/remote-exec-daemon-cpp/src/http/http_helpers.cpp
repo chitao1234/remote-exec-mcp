@@ -131,20 +131,25 @@ static std::string reason_phrase(int status) {
     }
 }
 
-std::string render_http_response(const HttpResponse& res) {
+std::string render_http_response_head(const HttpResponse& res) {
     std::ostringstream out;
     out << "HTTP/1.1 " << res.status << ' ' << reason_phrase(res.status) << "\r\n";
 
-    std::map<std::string, std::string> headers = res.headers;
-    headers["Content-Length"] = std::to_string(res.body.size());
-
-    for (std::map<std::string, std::string>::const_iterator it = headers.begin(); it != headers.end(); ++it) {
+    for (std::map<std::string, std::string>::const_iterator it = res.headers.begin(); it != res.headers.end(); ++it) {
         out << it->first << ": " << it->second << "\r\n";
     }
 
     out << "\r\n";
-    out << res.body;
     return out.str();
+}
+
+std::string render_http_response(const HttpResponse& res) {
+    HttpResponse response = res;
+    response.headers["Content-Length"] = std::to_string(response.body.size());
+
+    std::string rendered = render_http_response_head(response);
+    rendered += response.body;
+    return rendered;
 }
 
 std::string render_http_upgrade_response(const std::string& upgrade_token,

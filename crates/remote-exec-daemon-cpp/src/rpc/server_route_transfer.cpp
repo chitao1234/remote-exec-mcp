@@ -1,4 +1,3 @@
-#include <sstream>
 #include <string>
 
 #include "core/logging.h"
@@ -11,18 +10,6 @@
 #include "rpc/transfer_stream_io.h"
 
 namespace {
-
-std::string read_request_body_to_string(HttpRequestBodyStream* body) {
-    std::string output;
-    char buffer[8192];
-    for (;;) {
-        const std::size_t received = body->read(buffer, sizeof(buffer));
-        if (received == 0U) {
-            return output;
-        }
-        output.append(buffer, received);
-    }
-}
 
 void log_transfer_export_success(const TransferExportRequestSpec& export_request, const ExportedPayload& payload) {
     log_message(LOG_INFO,
@@ -61,37 +48,6 @@ void write_transfer_import_success(HttpResponse& response,
                                    const ImportSummary& summary) {
     log_transfer_import_summary(import_request.destination_path, summary);
     write_json(response, transfer_summary_json(summary));
-}
-
-void send_transfer_export_headers(SOCKET client, const ExportedPayload& payload, const HttpRequest& request) {
-    HttpResponse response;
-    response.status = 200;
-    response.headers["Transfer-Encoding"] = "chunked";
-    write_transfer_export_headers(response, payload);
-    write_request_id_header(response, request);
-
-    std::ostringstream out;
-    out << "HTTP/1.1 200 OK\r\n";
-    for (std::map<std::string, std::string>::const_iterator it = response.headers.begin(); it != response.headers.end();
-         ++it) {
-        out << it->first << ": " << it->second << "\r\n";
-    }
-    out << "\r\n";
-    send_all(client, out.str());
-}
-
-bool try_send_streaming_transfer_response(SOCKET client, const HttpResponse& response) {
-    try {
-        send_all(client, render_http_response(response));
-        return true;
-    } catch (const SocketSendError& ex) {
-        if (ex.peer_disconnected()) {
-            log_message(LOG_WARN, "server", std::string("client disconnected during send: ") + ex.what());
-            return false;
-        }
-        log_message(LOG_ERROR, "server", std::string("send failed: ") + ex.what());
-        return false;
-    }
 }
 
 } // namespace
@@ -150,80 +106,52 @@ handle_streaming_transfer_import(const AppState& state, const HttpRequest& reque
     });
 }
 
-int handle_streaming_transfer_export(const AppState& state,
-                                     const HttpRequest& request_head,
-                                     HttpRequestBodyStream* body,
-                                     SOCKET client) {
-    HttpResponse rejection;
-    rejection.status = 200;
-    if (reject_before_route(state, request_head, &rejection)) {
-        write_request_id_header(rejection, request_head);
-        send_all(client, render_http_response(rejection));
-        return rejection.status;
+HttpResponse prepare_streaming_transfer_export(const AppState& state,
+                                               const HttpRequest& request_head,
+                                               HttpRequestBodyStream* body,
+                                               StreamingTransferExport* transfer) {
+    HttpResponse response;
+    response.status = 200;
+    if (reject_before_route(state, request_head, &response)) {
+        return response;
     }
 
-    try {
+    return handle_transfer_rpc_route("transfer/export", [&](HttpResponse& route_response) {
         HttpRequest request = request_head;
         require_transfer_stream_version(request);
         request.body = read_request_body_to_string(body);
         const Json body_json = parse_json_body(request);
-        const TransferExportRequestSpec export_request = prepare_transfer_export_request(state, body_json);
-        const ExportedPayload payload = ExportedPayload{export_request.source_type, std::string()};
-        send_transfer_export_headers(client, payload, request);
+        transfer->request = prepare_transfer_export_request(state, body_json);
+        transfer->response_payload = ExportedPayload{transfer->request.source_type, std::string()};
+        route_response.headers["Transfer-Encoding"] = "chunked";
+        write_transfer_export_headers(route_response, transfer->response_payload);
+    });
+}
 
-        ChunkedTransferStreamArchiveSink sink(client);
-        sink.send_preface();
-        try {
-            export_path_to_sink_as(sink,
-                                   export_request.path,
-                                   export_request.source_type,
-                                   export_request.symlink_mode,
-                                   export_request.exclude,
-                                   export_request.authorizer);
-            log_transfer_export_success(export_request, payload);
-            sink.send_complete();
-        } catch (const SandboxError& ex) {
-            const std::string message = ex.what();
-            log_message(LOG_WARN, "server", "transfer/export failed after stream start: " + message);
-            sink.send_error_payload(transfer_stream::error_payload(TransferRpcCode::SandboxDenied, ex.what()));
-        } catch (const TransferFailure& failure) {
-            log_message(LOG_WARN, "server", "transfer/export failed after stream start: " + failure.message);
-            sink.send_error_payload(transfer_stream::error_payload(failure));
-        } catch (const SocketSendError&) {
-            throw;
-        } catch (const std::exception& ex) {
-            const std::string message = ex.what();
-            log_message(LOG_WARN, "server", "transfer/export failed after stream start: " + message);
-            sink.send_error_payload(transfer_stream::error_payload(ex));
-        }
-        return 200;
+void run_streaming_transfer_export(const StreamingTransferExport& transfer, HttpChunkedResponseWriter* chunks) {
+    ChunkedTransferStreamArchiveSink sink(chunks);
+    sink.send_preface();
+    try {
+        export_path_to_sink_as(sink,
+                               transfer.request.path,
+                               transfer.request.source_type,
+                               transfer.request.symlink_mode,
+                               transfer.request.exclude,
+                               transfer.request.authorizer);
+        log_transfer_export_success(transfer.request, transfer.response_payload);
+        sink.send_complete();
     } catch (const SandboxError& ex) {
         const std::string message = ex.what();
-        log_message(LOG_WARN, "server", "transfer/export failed: " + message);
-        HttpResponse response;
-        response.status = 400;
-        write_transfer_error_response(response, ex);
-        write_request_id_header(response, request_head);
-        try_send_streaming_transfer_response(client, response);
-        return response.status;
+        log_message(LOG_WARN, "server", "transfer/export failed after stream start: " + message);
+        sink.send_error_payload(transfer_stream::error_payload(TransferRpcCode::SandboxDenied, ex.what()));
     } catch (const TransferFailure& failure) {
-        log_message(LOG_WARN, "server", "transfer/export failed: " + failure.message);
-        HttpResponse response;
-        response.status = transfer_error_status(failure.code);
-        write_transfer_error_response(response, failure);
-        write_request_id_header(response, request_head);
-        try_send_streaming_transfer_response(client, response);
-        return response.status;
+        log_message(LOG_WARN, "server", "transfer/export failed after stream start: " + failure.message);
+        sink.send_error_payload(transfer_stream::error_payload(failure));
     } catch (const SocketSendError&) {
         throw;
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
-        log_message(LOG_WARN, "server", "transfer/export failed: " + message);
-        HttpResponse response;
-        response.status = transfer_error_status(TransferRpcCode::Internal);
-        write_transfer_internal_error_response(response, message);
-        write_request_id_header(response, request_head);
-        try_send_streaming_transfer_response(client, response);
-        return response.status;
+        log_message(LOG_WARN, "server", "transfer/export failed after stream start: " + message);
+        sink.send_error_payload(transfer_stream::error_payload(ex));
     }
 }

@@ -3,32 +3,9 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
-#include <sstream>
 
 #include "rpc/server_contract.h"
 #include "rpc/transfer_stream_codec.h"
-
-namespace {
-
-void send_http_chunk(SOCKET client, const char* data, std::size_t size) {
-    std::ostringstream header;
-    header << std::hex << size << "\r\n";
-    send_all(client, header.str());
-    if (size != 0U) {
-        send_all_bytes(client, data, size);
-    }
-    send_all(client, "\r\n");
-}
-
-void send_http_chunk(SOCKET client, const std::string& bytes) {
-    send_http_chunk(client, bytes.data(), bytes.size());
-}
-
-void send_chunked_terminator(SOCKET client) {
-    send_all(client, "0\r\n\r\n");
-}
-
-} // namespace
 
 TransferStreamArchiveReader::TransferStreamArchiveReader()
     : offset_(0U), preface_read_(false), terminal_(false) {
@@ -169,13 +146,13 @@ std::size_t StringTransferStreamArchiveReader::read_transport(char* data, std::s
     return count;
 }
 
-ChunkedTransferStreamArchiveSink::ChunkedTransferStreamArchiveSink(SOCKET client)
-    : client_(client), archive_bytes_(0U) {
+ChunkedTransferStreamArchiveSink::ChunkedTransferStreamArchiveSink(HttpChunkedResponseWriter* chunks)
+    : chunks_(chunks), archive_bytes_(0U) {
 }
 
 void ChunkedTransferStreamArchiveSink::send_preface() {
-    send_http_chunk(
-        client_, std::string(server_contract::TRANSFER_STREAM_PREFACE, server_contract::TRANSFER_STREAM_PREFACE_LEN));
+    chunks_->write_chunk(
+        std::string(server_contract::TRANSFER_STREAM_PREFACE, server_contract::TRANSFER_STREAM_PREFACE_LEN));
 }
 
 void ChunkedTransferStreamArchiveSink::write(const char* data, std::size_t size) {
@@ -183,20 +160,20 @@ void ChunkedTransferStreamArchiveSink::write(const char* data, std::size_t size)
     while (offset < size) {
         const std::size_t chunk_size =
             std::min<std::size_t>(server_contract::TRANSFER_STREAM_DATA_FRAME_MAX_BYTES, size - offset);
-        send_http_chunk(client_, transfer_stream::data_frame(data + offset, chunk_size));
+        chunks_->write_chunk(transfer_stream::data_frame(data + offset, chunk_size));
         archive_bytes_ += static_cast<std::uint64_t>(chunk_size);
         offset += chunk_size;
     }
 }
 
 void ChunkedTransferStreamArchiveSink::send_complete() {
-    send_http_chunk(client_, transfer_stream::complete_frame(archive_bytes_));
-    send_chunked_terminator(client_);
+    chunks_->write_chunk(transfer_stream::complete_frame(archive_bytes_));
+    chunks_->finish();
 }
 
 void ChunkedTransferStreamArchiveSink::send_error_payload(const std::string& payload) {
-    send_http_chunk(client_, transfer_stream::error_frame(payload));
-    send_chunked_terminator(client_);
+    chunks_->write_chunk(transfer_stream::error_frame(payload));
+    chunks_->finish();
 }
 
 std::string framed_transfer_body(const std::string& archive) {
