@@ -138,6 +138,16 @@ PosixPtyPair create_posix_pty() {
     return pair;
 }
 
+void verify_posix_pty_launch_setup(const PosixPtyPair& pair) {
+    UniqueFd slave(posix_fd::open_cloexec_path(pair.slave_path.c_str(), O_RDWR | O_NOCTTY));
+    if (!slave.valid()) {
+        throw std::runtime_error(std::string("open(pty slave) failed: ") + safe_strerror(errno));
+    }
+    if (!posix_fd::set_pty_window_size(slave.get(), DEFAULT_PTY_ROWS, DEFAULT_PTY_COLS)) {
+        throw std::runtime_error(std::string("ioctl(TIOCSWINSZ on pty slave) failed: ") + safe_strerror(errno));
+    }
+}
+
 std::string replacement_utf8() {
     return "\xEF\xBF\xBD";
 }
@@ -505,6 +515,7 @@ bool process_session_supports_pty() {
     static const bool supported = []() {
         try {
             PosixPtyPair pair = create_posix_pty();
+            verify_posix_pty_launch_setup(pair);
             return pair.master.valid() && !pair.slave_path.empty();
         } catch (const std::exception& ex) {
             log_message(LOG_WARN,
