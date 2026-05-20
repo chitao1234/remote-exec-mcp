@@ -7,8 +7,12 @@
 #include "rpc/server_contract.h"
 #include "rpc/transfer_stream_codec.h"
 
-TransferStreamArchiveReader::TransferStreamArchiveReader()
-    : offset_(0U), preface_read_(false), terminal_(false) {
+void TransferStreamChunkWriter::write_chunk(const std::string& data) {
+    write_chunk(data.data(), data.size());
+}
+
+TransferStreamArchiveReader::TransferStreamArchiveReader(TransferStreamByteReader* reader)
+    : reader_(reader), offset_(0U), preface_read_(false), terminal_(false) {
 }
 
 bool TransferStreamArchiveReader::read_exact_or_eof(char* data, std::size_t size) {
@@ -60,7 +64,7 @@ void TransferStreamArchiveReader::read_transport_exact(char* data,
                                                        const std::string& label) {
     std::size_t offset = 0U;
     while (offset < size) {
-        const std::size_t received = read_transport(data + offset, size - offset);
+        const std::size_t received = reader_->read(data + offset, size - offset);
         if (received == 0U) {
             throw TransferFailure(TransferRpcCode::TransferFailed, "transfer stream ended before " + label);
         }
@@ -121,22 +125,11 @@ bool TransferStreamArchiveReader::read_next_data_frame_or_terminal() {
     }
 }
 
-HttpBodyTransferArchiveReader::HttpBodyTransferArchiveReader(HttpRequestBodyStream* body) : body_(body) {
-}
-
-std::size_t HttpBodyTransferArchiveReader::read_transport(char* data, std::size_t size) {
-    try {
-        return body_->read(data, size);
-    } catch (const BadHttpRequest& ex) {
-        throw TransferFailure(TransferRpcCode::TransferFailed, ex.what());
-    }
-}
-
-StringTransferStreamArchiveReader::StringTransferStreamArchiveReader(const std::string* body)
+StringTransferStreamByteReader::StringTransferStreamByteReader(const std::string* body)
     : body_(body), offset_(0U) {
 }
 
-std::size_t StringTransferStreamArchiveReader::read_transport(char* data, std::size_t size) {
+std::size_t StringTransferStreamByteReader::read(char* data, std::size_t size) {
     if (offset_ >= body_->size()) {
         return 0U;
     }
@@ -146,7 +139,7 @@ std::size_t StringTransferStreamArchiveReader::read_transport(char* data, std::s
     return count;
 }
 
-ChunkedTransferStreamArchiveSink::ChunkedTransferStreamArchiveSink(HttpChunkedResponseWriter* chunks)
+ChunkedTransferStreamArchiveSink::ChunkedTransferStreamArchiveSink(TransferStreamChunkWriter* chunks)
     : chunks_(chunks), archive_bytes_(0U) {
 }
 

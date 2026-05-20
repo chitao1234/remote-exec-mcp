@@ -11,6 +11,34 @@
 
 namespace {
 
+class HttpBodyTransferStreamReader : public TransferStreamByteReader {
+public:
+    explicit HttpBodyTransferStreamReader(HttpRequestBodyStream* body) : body_(body) {}
+
+    std::size_t read(char* data, std::size_t size) override {
+        try {
+            return body_->read(data, size);
+        } catch (const BadHttpRequest& ex) {
+            throw TransferFailure(TransferRpcCode::TransferFailed, ex.what());
+        }
+    }
+
+private:
+    HttpRequestBodyStream* body_;
+};
+
+class HttpChunkedTransferStreamWriter : public TransferStreamChunkWriter {
+public:
+    explicit HttpChunkedTransferStreamWriter(HttpChunkedResponseWriter* chunks) : chunks_(chunks) {}
+
+    void write_chunk(const char* data, std::size_t size) override { chunks_->write_chunk(data, size); }
+
+    void finish() override { chunks_->finish(); }
+
+private:
+    HttpChunkedResponseWriter* chunks_;
+};
+
 void log_transfer_export_success(const TransferExportRequestSpec& export_request, const ExportedPayload& payload) {
     log_message(LOG_INFO,
                 "server",
@@ -39,7 +67,8 @@ ImportSummary run_transfer_import(const TransferImportRequestSpec& import_reques
 }
 
 ImportSummary run_transfer_import(const TransferImportRequestSpec& import_request, const std::string& body) {
-    StringTransferStreamArchiveReader archive_reader(&body);
+    StringTransferStreamByteReader body_reader(&body);
+    TransferStreamArchiveReader archive_reader(&body_reader);
     return run_transfer_import(import_request, archive_reader);
 }
 
@@ -99,7 +128,8 @@ handle_streaming_transfer_import(const AppState& state, const HttpRequest& reque
         require_transfer_stream_version(request);
         require_transfer_stream_content_type(request);
         const TransferImportRequestSpec import_request = prepare_transfer_import_request(state, request);
-        HttpBodyTransferArchiveReader archive_reader(body);
+        HttpBodyTransferStreamReader body_reader(body);
+        TransferStreamArchiveReader archive_reader(&body_reader);
         write_transfer_import_success(route_response,
                                       import_request,
                                       run_transfer_import(import_request, archive_reader));
@@ -129,7 +159,8 @@ HttpResponse prepare_streaming_transfer_export(const AppState& state,
 }
 
 void run_streaming_transfer_export(const StreamingTransferExport& transfer, HttpChunkedResponseWriter* chunks) {
-    ChunkedTransferStreamArchiveSink sink(chunks);
+    HttpChunkedTransferStreamWriter chunk_writer(chunks);
+    ChunkedTransferStreamArchiveSink sink(&chunk_writer);
     sink.send_preface();
     try {
         export_path_to_sink_as(sink,

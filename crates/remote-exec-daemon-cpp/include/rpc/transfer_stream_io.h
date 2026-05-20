@@ -4,46 +4,45 @@
 #include <cstdint>
 #include <string>
 
-#include "http/server_transport.h"
 #include "transfer/transfer_ops.h"
+
+class TransferStreamByteReader {
+public:
+    virtual ~TransferStreamByteReader() {}
+    virtual std::size_t read(char* data, std::size_t size) = 0;
+};
+
+class TransferStreamChunkWriter {
+public:
+    virtual ~TransferStreamChunkWriter() {}
+    void write_chunk(const std::string& data);
+    virtual void write_chunk(const char* data, std::size_t size) = 0;
+    virtual void finish() = 0;
+};
 
 class TransferStreamArchiveReader : public TransferArchiveReader {
 public:
-    TransferStreamArchiveReader();
+    explicit TransferStreamArchiveReader(TransferStreamByteReader* reader);
 
     bool read_exact_or_eof(char* data, std::size_t size);
-
-protected:
-    virtual std::size_t read_transport(char* data, std::size_t size) = 0;
 
 private:
     void read_preface();
     void read_transport_exact(char* data, std::size_t size, const std::string& label);
     bool read_next_data_frame_or_terminal();
 
+    TransferStreamByteReader* reader_;
     std::string data_;
     std::size_t offset_;
     bool preface_read_;
     bool terminal_;
 };
 
-class HttpBodyTransferArchiveReader : public TransferStreamArchiveReader {
+class StringTransferStreamByteReader : public TransferStreamByteReader {
 public:
-    explicit HttpBodyTransferArchiveReader(HttpRequestBodyStream* body);
+    explicit StringTransferStreamByteReader(const std::string* body);
 
-protected:
-    std::size_t read_transport(char* data, std::size_t size);
-
-private:
-    HttpRequestBodyStream* body_;
-};
-
-class StringTransferStreamArchiveReader : public TransferStreamArchiveReader {
-public:
-    explicit StringTransferStreamArchiveReader(const std::string* body);
-
-protected:
-    std::size_t read_transport(char* data, std::size_t size);
+    std::size_t read(char* data, std::size_t size) override;
 
 private:
     const std::string* body_;
@@ -52,7 +51,7 @@ private:
 
 class ChunkedTransferStreamArchiveSink : public TransferArchiveSink {
 public:
-    explicit ChunkedTransferStreamArchiveSink(HttpChunkedResponseWriter* chunks);
+    explicit ChunkedTransferStreamArchiveSink(TransferStreamChunkWriter* chunks);
 
     void send_preface();
     void write(const char* data, std::size_t size);
@@ -60,7 +59,7 @@ public:
     void send_error_payload(const std::string& payload);
 
 private:
-    HttpChunkedResponseWriter* chunks_;
+    TransferStreamChunkWriter* chunks_;
     std::uint64_t archive_bytes_;
 };
 
