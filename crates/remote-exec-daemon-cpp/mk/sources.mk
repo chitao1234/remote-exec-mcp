@@ -66,6 +66,7 @@ ROUTE_SRCS = \
 	$(SOURCE_PREFIX)src/rpc/server_route_transfer.cpp \
 	$(SOURCE_PREFIX)src/rpc/transfer_http_codec.cpp \
 	$(SOURCE_PREFIX)src/rpc/transfer_stream_codec.cpp \
+	$(SOURCE_PREFIX)src/rpc/transfer_stream_io.cpp \
 	$(SOURCE_PREFIX)src/rpc/transfer_request_utils.cpp
 
 PORT_FORWARD_SRCS = \
