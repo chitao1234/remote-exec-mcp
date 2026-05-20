@@ -666,7 +666,8 @@ fn validate_relative_symlink_target(target: &Path) -> anyhow::Result<PathBuf> {
         || normalized.starts_with("//")
         || normalized
             .as_bytes()
-            .get(1).is_some_and(|separator| *separator == b':')
+            .get(1)
+            .is_some_and(|separator| *separator == b':')
     {
         return Err(
             TransferError::source_unsupported("archive symlink target must be relative").into(),
