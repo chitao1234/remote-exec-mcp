@@ -3,6 +3,23 @@ use super::*;
 const EXPECTED_ENV_OVERLAY_OUTPUT: &str = "dumb|1|cat|cat|1|C|en_US.UTF-8|";
 const ENV_OVERLAY_COMMAND: &str = "printf '%s|%s|%s|%s|%s|%s|%s|%s' \"$TERM\" \"$NO_COLOR\" \"$PAGER\" \"$GIT_PAGER\" \"$CODEX_CI\" \"$LANG\" \"$LC_CTYPE\" \"$LC_ALL\"";
 
+fn pty_size_output_matches(output: &str, rows: u16, cols: u16) -> bool {
+    let normalized = output
+        .replace(['\0', '\r', '\n', '\t'], " ")
+        .to_ascii_lowercase();
+    let compact = normalized.split_whitespace().collect::<Vec<_>>().join(" ");
+    let rows = rows.to_string();
+    let cols = cols.to_string();
+
+    compact.contains(&format!("{rows} {cols}"))
+        || (compact.contains(&format!("rows {rows}"))
+            && compact.contains(&format!("columns {cols}")))
+        || (compact.contains(&format!("rows = {rows}"))
+            && compact.contains(&format!("columns = {cols}")))
+        || (compact.contains(&format!("{rows} rows"))
+            && compact.contains(&format!("{cols} columns")))
+}
+
 async fn collect_exec_output_until_exit(
     fixture: &support::fixture::DaemonFixture,
     mut response: ExecResponse,
@@ -637,7 +654,7 @@ async fn exec_write_resizes_pty_before_polling_output() {
         .rpc::<ExecStartRequest, ExecResponse>(
             "/v1/exec/start",
             &unix_start_request(
-                "printf ready; IFS= read -r _; stty size; sleep 30",
+                "printf ready; IFS= read -r _; stty -a; sleep 30",
                 true,
                 Some(250),
                 None,
@@ -667,7 +684,7 @@ async fn exec_write_resizes_pty_before_polling_output() {
 
     assert!(response.output().running);
     assert!(
-        response.output().output.contains("33 101"),
+        pty_size_output_matches(&response.output().output, 33, 101),
         "PTY size output did not include resized dimensions: {:?}",
         response.output().output
     );
