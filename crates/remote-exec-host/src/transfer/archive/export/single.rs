@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use remote_exec_proto::rpc::{TransferSourceType, TransferSymlinkMode, TransferWarning};
 
 use crate::error::TransferError;
+use crate::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
 
 use super::super::SINGLE_FILE_ENTRY;
 use super::super::codec::{with_archive_builder, with_archive_writer};
@@ -55,6 +56,7 @@ pub(super) fn write_prepared_export_to_file_sync(
             prepared.source_type,
             &prepared.exclude_matcher,
             &symlink_mode,
+            prepared.sandbox.as_ref(),
         )?;
         append_transfer_summary(builder, &warnings)?;
         Ok(())
@@ -80,6 +82,7 @@ where
             prepared.source_type,
             &prepared.exclude_matcher,
             &symlink_mode,
+            prepared.sandbox.as_ref(),
         )?;
         append_transfer_summary(builder, &warnings)?;
         Ok(())
@@ -94,6 +97,7 @@ fn append_export_source<W: Write>(
     source_type: TransferSourceType,
     exclude_matcher: &ExcludeMatcher,
     symlink_mode: &TransferSymlinkMode,
+    sandbox: Option<&CompiledFilesystemSandbox>,
 ) -> anyhow::Result<Vec<TransferWarning>> {
     let mut warnings = Vec::new();
     match source_type {
@@ -103,10 +107,12 @@ fn append_export_source<W: Write>(
                 source_path,
                 Path::new(SINGLE_FILE_ENTRY),
                 symlink_mode,
+                sandbox,
             )?;
         }
         TransferSourceType::Directory => {
             let mut visited = HashSet::new();
+            authorize_source_path(sandbox, source_path)?;
             mark_directory_visited(source_path, &mut visited)?;
             builder.append_dir(".", source_path)?;
             append_directory_entries(
@@ -115,6 +121,7 @@ fn append_export_source<W: Write>(
                 source_path,
                 exclude_matcher,
                 symlink_mode,
+                sandbox,
                 &mut warnings,
                 &mut visited,
             )?;
@@ -133,6 +140,7 @@ fn append_directory_entries<W: Write>(
     current: &Path,
     exclude_matcher: &ExcludeMatcher,
     symlink_mode: &TransferSymlinkMode,
+    sandbox: Option<&CompiledFilesystemSandbox>,
     warnings: &mut Vec<TransferWarning>,
     visited: &mut HashSet<PathBuf>,
 ) -> anyhow::Result<()> {
@@ -149,6 +157,7 @@ fn append_directory_entries<W: Write>(
         } else if exclude_matcher.is_excluded_path(&rel_text) {
             continue;
         }
+        authorize_source_path(sandbox, &path)?;
         if metadata.file_type().is_symlink() {
             match symlink_mode {
                 TransferSymlinkMode::Preserve => {
@@ -165,6 +174,7 @@ fn append_directory_entries<W: Write>(
                                 &path,
                                 exclude_matcher,
                                 symlink_mode,
+                                sandbox,
                                 warnings,
                                 visited,
                             )?;
@@ -192,6 +202,7 @@ fn append_directory_entries<W: Write>(
                     &path,
                     exclude_matcher,
                     symlink_mode,
+                    sandbox,
                     warnings,
                     visited,
                 )?;
@@ -218,7 +229,9 @@ fn append_file_or_symlink_entry<W: Write>(
     source_path: &Path,
     archive_path: &Path,
     symlink_mode: &TransferSymlinkMode,
+    sandbox: Option<&CompiledFilesystemSandbox>,
 ) -> anyhow::Result<()> {
+    authorize_source_path(sandbox, source_path)?;
     let metadata = std::fs::symlink_metadata(source_path)?;
     if metadata.file_type().is_symlink() {
         match symlink_mode {
@@ -257,4 +270,18 @@ fn append_symlink_entry<W: Write>(
 
 fn handle_unsupported_entry(path: &Path, warnings: &mut Vec<TransferWarning>) {
     warnings.push(TransferWarning::skipped_unsupported_entry(path.display()));
+}
+
+fn authorize_source_path(
+    sandbox: Option<&CompiledFilesystemSandbox>,
+    path: &Path,
+) -> anyhow::Result<()> {
+    authorize_path(sandbox, SandboxAccess::Read, path).map_err(|err| {
+        crate::transfer::transfer_error_from_sandbox_error(
+            "transfer source path",
+            &path.display().to_string(),
+            err,
+        )
+        .into()
+    })
 }

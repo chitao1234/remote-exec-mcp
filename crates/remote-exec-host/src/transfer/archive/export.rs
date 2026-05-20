@@ -32,6 +32,7 @@ pub(super) struct PreparedExport {
     pub(super) source_path: PathBuf,
     pub(super) source_type: TransferSourceType,
     pub(super) exclude_matcher: ExcludeMatcher,
+    pub(super) sandbox: Option<CompiledFilesystemSandbox>,
 }
 
 pub async fn export_path_to_archive(

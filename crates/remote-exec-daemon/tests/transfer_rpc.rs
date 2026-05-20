@@ -129,6 +129,63 @@ fn decode_transfer_stream_body(body: &[u8]) -> Vec<u8> {
     }
 }
 
+fn decode_transfer_stream_error(body: &[u8]) -> remote_exec_proto::rpc::RpcErrorBody {
+    assert!(body.starts_with(TRANSFER_STREAM_PREFACE));
+    let mut offset = TRANSFER_STREAM_PREFACE.len();
+
+    loop {
+        let header_end = offset + TRANSFER_STREAM_FRAME_HEADER_LEN;
+        let header = decode_transfer_stream_frame_header(
+            body[offset..header_end]
+                .try_into()
+                .expect("frame header length"),
+        )
+        .unwrap();
+        offset = header_end;
+        let payload_end = offset + header.payload_len as usize;
+        let payload = &body[offset..payload_end];
+        offset = payload_end;
+
+        match header.frame_type {
+            TransferStreamFrameType::Data => {}
+            TransferStreamFrameType::Complete => {
+                panic!("expected transfer stream error frame, got complete frame");
+            }
+            TransferStreamFrameType::Error => {
+                assert_eq!(offset, body.len());
+                return serde_json::from_slice(payload).unwrap();
+            }
+        }
+    }
+}
+
+async fn transfer_stream_error_from_response(
+    response: reqwest::Response,
+) -> remote_exec_proto::rpc::RpcErrorBody {
+    assert_eq!(
+        response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        TRANSFER_STREAM_CONTENT_TYPE
+    );
+    decode_transfer_stream_error(&response.bytes().await.unwrap())
+}
+
+fn directory_tar_with_symlink_target(target: &str) -> Vec<u8> {
+    let mut builder = tar::Builder::new(Vec::new());
+    let mut link = tar::Header::new_gnu();
+    link.set_entry_type(tar::EntryType::Symlink);
+    link.set_size(0);
+    builder
+        .append_link(&mut link, "link", target)
+        .expect("append symlink entry");
+    builder.finish().expect("finish tar");
+    builder.into_inner().expect("tar bytes")
+}
+
 #[tokio::test]
 async fn export_file_streams_archive_and_reports_file_source_type() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
@@ -1219,6 +1276,54 @@ max_entry_bytes = 8
 }
 
 #[tokio::test]
+async fn import_rejects_missing_tar_terminator() {
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
+    let destination = fixture.workdir.join("unterminated.txt");
+    let mut body = raw_tar_file_with_path(".remote-exec-file", b"payload\n");
+    body.truncate(body.len() - 1024);
+
+    let response = fixture
+        .raw_post_bytes(
+            "/v1/transfer/import",
+            &import_headers(destination.display(), "replace", "true", "file"),
+            body,
+        )
+        .await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let err = response
+        .json::<remote_exec_proto::rpc::RpcErrorBody>()
+        .await
+        .unwrap();
+    assert_eq!(err.wire_code(), "transfer_failed");
+    assert!(err.message.contains("tar terminator"));
+}
+
+#[tokio::test]
+async fn import_rejects_trailing_data_after_tar_terminator() {
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
+    let destination = fixture.workdir.join("trailing.txt");
+    let mut body = raw_tar_file_with_path(".remote-exec-file", b"payload\n");
+    body.extend_from_slice(&[1_u8; 512]);
+
+    let response = fixture
+        .raw_post_bytes(
+            "/v1/transfer/import",
+            &import_headers(destination.display(), "replace", "true", "file"),
+            body,
+        )
+        .await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let err = response
+        .json::<remote_exec_proto::rpc::RpcErrorBody>()
+        .await
+        .unwrap();
+    assert_eq!(err.wire_code(), "transfer_source_unsupported");
+    assert!(err.message.contains("trailing data after tar terminator"));
+}
+
+#[tokio::test]
 async fn import_replaces_directory_with_file_at_the_exact_destination_path() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let source = fixture.workdir.join("tool.txt");
@@ -1306,6 +1411,30 @@ async fn import_rejects_directory_entries_that_escape_destination() {
 }
 
 #[tokio::test]
+async fn import_rejects_symlink_targets_that_escape_destination() {
+    let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
+    let destination = fixture.workdir.join("release");
+    let bytes = directory_tar_with_symlink_target("../escaped.txt");
+
+    let response = fixture
+        .raw_post_bytes(
+            "/v1/transfer/import",
+            &import_headers(destination.display(), "replace", "true", "directory"),
+            bytes,
+        )
+        .await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let err = response
+        .json::<remote_exec_proto::rpc::RpcErrorBody>()
+        .await
+        .unwrap();
+    assert_eq!(err.wire_code(), "transfer_source_unsupported");
+    assert!(err.message.contains("symlink target escapes destination"));
+    assert!(!destination.join("link").exists());
+}
+
+#[tokio::test]
 async fn export_rejects_paths_outside_read_sandbox() {
     let fixture = support::spawn::spawn_daemon_with_extra_config_for_workdir(
         DEFAULT_TEST_TARGET,
@@ -1341,6 +1470,54 @@ allow = {allow}
         .json::<remote_exec_proto::rpc::RpcErrorBody>()
         .await
         .unwrap();
+    assert_eq!(err.wire_code(), "sandbox_denied");
+    assert!(err.message.contains("read access"));
+}
+
+#[tokio::test]
+async fn export_stream_reports_recursive_read_sandbox_denial() {
+    let fixture = support::spawn::spawn_daemon_with_extra_config_for_workdir(
+        DEFAULT_TEST_TARGET,
+        |workdir| {
+            let source = workdir.join("source");
+            let allow = toml::Value::Array(vec![toml::Value::String(source.display().to_string())]);
+            let deny = toml::Value::Array(vec![toml::Value::String(
+                source.join("secret").display().to_string(),
+            )]);
+            format!(
+                r#"[sandbox.read]
+allow = {allow}
+deny = {deny}
+"#
+            )
+        },
+    )
+    .await;
+    let source = fixture.workdir.join("source");
+    tokio::fs::create_dir_all(source.join("secret"))
+        .await
+        .unwrap();
+    tokio::fs::write(source.join("public.txt"), "public\n")
+        .await
+        .unwrap();
+    tokio::fs::write(source.join("secret/hidden.txt"), "hidden\n")
+        .await
+        .unwrap();
+
+    let response = fixture
+        .raw_post_json(
+            "/v1/transfer/export",
+            &TransferExportRequest {
+                path: source.display().to_string(),
+                compression: TransferCompression::None,
+                symlink_mode: Default::default(),
+                exclude: Vec::new(),
+            },
+        )
+        .await;
+
+    assert!(response.status().is_success());
+    let err = transfer_stream_error_from_response(response).await;
     assert_eq!(err.wire_code(), "sandbox_denied");
     assert!(err.message.contains("read access"));
 }
@@ -1414,4 +1591,91 @@ allow = {allow}
     assert_eq!(err.wire_code(), "sandbox_denied");
     assert!(err.message.contains("write access"));
     assert!(!blocked_destination.exists());
+}
+
+#[tokio::test]
+async fn import_rejects_recursive_child_outside_write_sandbox() {
+    let fixture = support::spawn::spawn_daemon_with_extra_config_for_workdir(
+        DEFAULT_TEST_TARGET,
+        |workdir| {
+            let destination = workdir.join("allowed");
+            let allow =
+                toml::Value::Array(vec![toml::Value::String(destination.display().to_string())]);
+            let deny = toml::Value::Array(vec![toml::Value::String(
+                destination.join("blocked").display().to_string(),
+            )]);
+            format!(
+                r#"[sandbox.write]
+allow = {allow}
+deny = {deny}
+"#
+            )
+        },
+    )
+    .await;
+    let destination = fixture.workdir.join("allowed");
+    let bytes = raw_tar_file_with_path("blocked/secret.txt", b"secret\n");
+
+    let response = fixture
+        .raw_post_bytes(
+            "/v1/transfer/import",
+            &import_headers(destination.display(), "replace", "true", "directory"),
+            bytes,
+        )
+        .await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let err = response
+        .json::<remote_exec_proto::rpc::RpcErrorBody>()
+        .await
+        .unwrap();
+    assert_eq!(err.wire_code(), "sandbox_denied");
+    assert!(err.message.contains("write access"));
+    assert!(!destination.join("blocked").exists());
+}
+
+#[tokio::test]
+async fn import_replace_authorizes_existing_children_before_removal() {
+    let fixture = support::spawn::spawn_daemon_with_extra_config_for_workdir(
+        DEFAULT_TEST_TARGET,
+        |workdir| {
+            let destination = workdir.join("allowed");
+            let allow =
+                toml::Value::Array(vec![toml::Value::String(destination.display().to_string())]);
+            let deny = toml::Value::Array(vec![toml::Value::String(
+                destination.join("blocked").display().to_string(),
+            )]);
+            format!(
+                r#"[sandbox.write]
+allow = {allow}
+deny = {deny}
+"#
+            )
+        },
+    )
+    .await;
+    let destination = fixture.workdir.join("allowed");
+    tokio::fs::create_dir_all(destination.join("blocked"))
+        .await
+        .unwrap();
+    tokio::fs::write(destination.join("blocked/old.txt"), "old\n")
+        .await
+        .unwrap();
+    let bytes = raw_tar_file_with_path(".remote-exec-file", b"new\n");
+
+    let response = fixture
+        .raw_post_bytes(
+            "/v1/transfer/import",
+            &import_headers(destination.display(), "replace", "true", "file"),
+            bytes,
+        )
+        .await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let err = response
+        .json::<remote_exec_proto::rpc::RpcErrorBody>()
+        .await
+        .unwrap();
+    assert_eq!(err.wire_code(), "sandbox_denied");
+    assert!(destination.join("blocked/old.txt").exists());
 }

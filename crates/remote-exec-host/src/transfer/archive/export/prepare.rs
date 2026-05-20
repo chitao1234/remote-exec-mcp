@@ -47,6 +47,7 @@ pub(super) async fn prepare_export_path(
         source_path,
         source_type,
         exclude_matcher,
+        sandbox: sandbox.cloned(),
     })
 }
 

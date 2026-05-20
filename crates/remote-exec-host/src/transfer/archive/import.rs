@@ -1,5 +1,5 @@
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use remote_exec_proto::rpc::{
     TransferImportRequest, TransferImportResponse, TransferOverwrite, TransferSourceType,
@@ -15,6 +15,15 @@ use super::entry::{ensure_supported_archive_entry_type, normalize_archive_entry_
 use super::summary::{is_transfer_summary_path, read_transfer_summary};
 use super::{archive_error_to_transfer_error, host_path, internal_transfer_error};
 
+const TAR_BLOCK_SIZE: usize = 512;
+const MAX_REPLACE_AUTHORIZATION_DEPTH: usize = 256;
+
+struct PreparedImport {
+    destination: PathBuf,
+    replaced: bool,
+    sandbox: Option<CompiledFilesystemSandbox>,
+}
+
 pub async fn import_archive_from_file(
     archive_path: &Path,
     request: &TransferImportRequest,
@@ -22,13 +31,19 @@ pub async fn import_archive_from_file(
     windows_posix_root: Option<&Path>,
     limits: TransferLimits,
 ) -> Result<TransferImportResponse, TransferError> {
-    let (destination, replaced) =
-        prepare_import_destination(request, sandbox, windows_posix_root).await?;
+    let prepared = prepare_import_destination(request, sandbox, windows_posix_root).await?;
     let archive_path = archive_path.to_path_buf();
     let request = request.clone();
 
     tokio::task::spawn_blocking(move || {
-        extract_archive(&archive_path, &destination, &request, replaced, limits)
+        extract_archive(
+            &archive_path,
+            &prepared.destination,
+            &request,
+            prepared.replaced,
+            prepared.sandbox.as_ref(),
+            limits,
+        )
     })
     .await
     .map_err(internal_transfer_error)?
@@ -44,8 +59,7 @@ pub async fn import_archive_from_async_reader<R>(
 where
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
 {
-    let (destination, replaced) =
-        prepare_import_destination(request, sandbox, windows_posix_root).await?;
+    let prepared = prepare_import_destination(request, sandbox, windows_posix_root).await?;
     let request = request.clone();
     let runtime = tokio::runtime::Handle::current();
 
@@ -53,7 +67,14 @@ where
         let reader = tokio_util::io::SyncIoBridge::new_with_handle(reader, runtime);
         let reader = wrap_archive_reader(reader, &request.compression)
             .map_err(archive_error_to_transfer_error)?;
-        extract_archive_from_reader(reader, &destination, &request, replaced, limits)
+        extract_archive_from_reader(
+            reader,
+            &prepared.destination,
+            &request,
+            prepared.replaced,
+            prepared.sandbox.as_ref(),
+            limits,
+        )
     })
     .await
     .map_err(internal_transfer_error)?
@@ -63,27 +84,33 @@ async fn prepare_import_destination(
     request: &TransferImportRequest,
     sandbox: Option<&CompiledFilesystemSandbox>,
     windows_posix_root: Option<&Path>,
-) -> Result<(std::path::PathBuf, bool), TransferError> {
+) -> Result<PreparedImport, TransferError> {
     let destination = host_path(&request.destination_path, windows_posix_root)
         .map_err(internal_transfer_error)?;
-    authorize_path(sandbox, SandboxAccess::Write, &destination).map_err(|err| {
-        crate::transfer::transfer_error_from_sandbox_error(
-            "transfer destination path",
-            &request.destination_path,
-            err,
-        )
-    })?;
+    authorize_write_path(sandbox, &destination, &request.destination_path)?;
 
-    let replaced = prepare_destination(&destination, request).await?;
-    Ok((destination, replaced))
+    let replaced = prepare_destination(&destination, request, sandbox).await?;
+    Ok(PreparedImport {
+        destination,
+        replaced,
+        sandbox: sandbox.cloned(),
+    })
 }
 
 async fn prepare_destination(
     destination: &Path,
     request: &TransferImportRequest,
+    sandbox: Option<&CompiledFilesystemSandbox>,
 ) -> Result<bool, TransferError> {
     if let Some(parent) = destination.parent() {
         if request.create_parent {
+            let parent_exists = tokio::fs::metadata(parent)
+                .await
+                .map(|metadata| metadata.is_dir())
+                .unwrap_or(false);
+            if !parent_exists {
+                authorize_write_path(sandbox, parent, &parent.display().to_string())?;
+            }
             tokio::fs::create_dir_all(parent)
                 .await
                 .map_err(internal_transfer_error)?;
@@ -112,6 +139,7 @@ async fn prepare_destination(
                 Ok(false)
             }
             TransferOverwrite::Replace => {
+                authorize_existing_path_recursive(sandbox, destination, 0)?;
                 if metadata.is_dir() {
                     tokio::fs::remove_dir_all(destination)
                         .await
@@ -168,11 +196,12 @@ fn extract_archive(
     destination_path: &Path,
     request: &TransferImportRequest,
     replaced: bool,
+    sandbox: Option<&CompiledFilesystemSandbox>,
     limits: TransferLimits,
 ) -> Result<TransferImportResponse, TransferError> {
     let reader = open_archive_reader(archive_path, &request.compression)
         .map_err(archive_error_to_transfer_error)?;
-    extract_archive_from_reader(reader, destination_path, request, replaced, limits)
+    extract_archive_from_reader(reader, destination_path, request, replaced, sandbox, limits)
 }
 
 fn extract_archive_from_reader<R: Read>(
@@ -180,6 +209,7 @@ fn extract_archive_from_reader<R: Read>(
     destination_path: &Path,
     request: &TransferImportRequest,
     replaced: bool,
+    sandbox: Option<&CompiledFilesystemSandbox>,
     limits: TransferLimits,
 ) -> Result<TransferImportResponse, TransferError> {
     let mut summary = new_import_summary(request, replaced);
@@ -192,6 +222,7 @@ fn extract_archive_from_reader<R: Read>(
             destination_path,
             &request.symlink_mode,
             &mut summary,
+            sandbox,
             limits,
         )
         .map_err(archive_error_to_transfer_error)?,
@@ -200,11 +231,13 @@ fn extract_archive_from_reader<R: Read>(
             destination_path,
             &request.symlink_mode,
             &mut summary,
+            sandbox,
             limits,
         )
         .map_err(archive_error_to_transfer_error)?,
     }
 
+    validate_archive_terminator(archive)?;
     Ok(summary)
 }
 
@@ -227,6 +260,7 @@ fn extract_single_file_archive<R: Read>(
     destination_path: &Path,
     symlink_mode: &TransferSymlinkMode,
     summary: &mut TransferImportResponse,
+    sandbox: Option<&CompiledFilesystemSandbox>,
     limits: TransferLimits,
 ) -> anyhow::Result<()> {
     let mut entries = archive.entries()?;
@@ -241,7 +275,7 @@ fn extract_single_file_archive<R: Read>(
     }
 
     if entry_type.is_symlink() {
-        write_archive_symlink(&mut entry, destination_path, symlink_mode, summary)?;
+        write_archive_symlink(&mut entry, destination_path, symlink_mode, summary, sandbox)?;
     } else {
         summary.bytes_copied = write_archive_file(&mut entry, destination_path, limits, 0)?;
         summary.files_copied = 1;
@@ -266,12 +300,20 @@ fn extract_tree_archive<R: Read>(
     destination_path: &Path,
     symlink_mode: &TransferSymlinkMode,
     summary: &mut TransferImportResponse,
+    sandbox: Option<&CompiledFilesystemSandbox>,
     limits: TransferLimits,
 ) -> anyhow::Result<()> {
     std::fs::create_dir_all(destination_path)?;
     for entry in archive.entries()? {
         let mut entry = entry?;
-        extract_tree_archive_entry(&mut entry, destination_path, symlink_mode, summary, limits)?;
+        extract_tree_archive_entry(
+            &mut entry,
+            destination_path,
+            symlink_mode,
+            summary,
+            sandbox,
+            limits,
+        )?;
     }
     Ok(())
 }
@@ -281,6 +323,7 @@ fn extract_tree_archive_entry<R: Read>(
     destination_path: &Path,
     symlink_mode: &TransferSymlinkMode,
     summary: &mut TransferImportResponse,
+    sandbox: Option<&CompiledFilesystemSandbox>,
     limits: TransferLimits,
 ) -> anyhow::Result<()> {
     let raw_rel = entry.path()?.to_path_buf();
@@ -296,6 +339,7 @@ fn extract_tree_archive_entry<R: Read>(
     let out = destination_path.join(&rel);
     let entry_type = entry.header().entry_type();
     ensure_supported_archive_entry_type(entry_type, &raw_rel)?;
+    authorize_materialized_path(sandbox, destination_path, &out)?;
     ensure_no_existing_symlink_in_path(destination_path, &out)?;
 
     if entry_type.is_dir() {
@@ -305,7 +349,7 @@ fn extract_tree_archive_entry<R: Read>(
     }
 
     if entry_type.is_symlink() {
-        write_archive_symlink(entry, &out, symlink_mode, summary)?;
+        write_archive_symlink(entry, &out, symlink_mode, summary, sandbox)?;
         return Ok(());
     }
 
@@ -319,9 +363,11 @@ fn write_archive_symlink<R: Read>(
     path: &Path,
     symlink_mode: &TransferSymlinkMode,
     summary: &mut TransferImportResponse,
+    sandbox: Option<&CompiledFilesystemSandbox>,
 ) -> anyhow::Result<()> {
     match symlink_import_action(symlink_mode, entry, path)? {
         SymlinkImportAction::Preserve(target) => {
+            authorize_symlink_target(sandbox, path, &target)?;
             ensure_not_existing_symlink(path)?;
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
@@ -380,7 +426,9 @@ fn symlink_import_action<R: Read>(
                     path.display()
                 ))
             })?;
-            Ok(SymlinkImportAction::Preserve(target.into_owned()))
+            Ok(SymlinkImportAction::Preserve(
+                validate_relative_symlink_target(&target)?,
+            ))
         }
         TransferSymlinkMode::Skip => Ok(SymlinkImportAction::Skip),
         TransferSymlinkMode::Follow => Ok(SymlinkImportAction::Unsupported),
@@ -497,4 +545,143 @@ fn restore_executable_bits(path: &Path, mode: u32) -> anyhow::Result<()> {
 #[cfg(not(unix))]
 fn restore_executable_bits(_path: &Path, _mode: u32) -> anyhow::Result<()> {
     Ok(())
+}
+
+fn validate_archive_terminator<R: Read>(archive: tar::Archive<R>) -> Result<(), TransferError> {
+    let mut reader = archive.into_inner();
+    let mut block = [0_u8; TAR_BLOCK_SIZE];
+
+    if !read_tar_block_or_eof(&mut reader, &mut block)? {
+        return Err(TransferError::failed("missing tar terminator"));
+    }
+    if !block.iter().all(|byte| *byte == 0) {
+        return Err(TransferError::source_unsupported("invalid tar terminator"));
+    }
+
+    while read_tar_block_or_eof(&mut reader, &mut block)? {
+        if !block.iter().all(|byte| *byte == 0) {
+            return Err(TransferError::source_unsupported(
+                "trailing data after tar terminator",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn read_tar_block_or_eof<R: Read>(
+    reader: &mut R,
+    block: &mut [u8; TAR_BLOCK_SIZE],
+) -> Result<bool, TransferError> {
+    let mut offset = 0;
+    while offset < block.len() {
+        match reader.read(&mut block[offset..]) {
+            Ok(0) if offset == 0 => return Ok(false),
+            Ok(0) => return Err(TransferError::failed("truncated tar terminator")),
+            Ok(read) => offset += read,
+            Err(err) => return Err(TransferError::failed(err.to_string())),
+        }
+    }
+    Ok(true)
+}
+
+fn authorize_existing_path_recursive(
+    sandbox: Option<&CompiledFilesystemSandbox>,
+    path: &Path,
+    depth: usize,
+) -> Result<(), TransferError> {
+    if sandbox.is_none() {
+        return Ok(());
+    }
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(internal_transfer_error(err)),
+    };
+    if depth > MAX_REPLACE_AUTHORIZATION_DEPTH {
+        return Err(TransferError::internal(format!(
+            "authorize existing transfer destination exceeded maximum depth {MAX_REPLACE_AUTHORIZATION_DEPTH}"
+        )));
+    }
+
+    authorize_write_path(sandbox, path, &path.display().to_string())?;
+    if metadata.is_dir() {
+        for entry in std::fs::read_dir(path).map_err(internal_transfer_error)? {
+            let entry = entry.map_err(internal_transfer_error)?;
+            authorize_existing_path_recursive(sandbox, &entry.path(), depth + 1)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn authorize_materialized_path(
+    sandbox: Option<&CompiledFilesystemSandbox>,
+    destination_root: &Path,
+    path: &Path,
+) -> Result<(), TransferError> {
+    if sandbox.is_none() {
+        return Ok(());
+    }
+    let relative = path.strip_prefix(destination_root).unwrap_or(path);
+    let mut current = destination_root.to_path_buf();
+    authorize_write_path(sandbox, &current, &current.display().to_string())?;
+    for component in relative.components() {
+        current.push(component);
+        authorize_write_path(sandbox, &current, &current.display().to_string())?;
+    }
+    Ok(())
+}
+
+fn authorize_symlink_target(
+    sandbox: Option<&CompiledFilesystemSandbox>,
+    link_path: &Path,
+    relative_target: &Path,
+) -> Result<(), TransferError> {
+    let target_path = link_path
+        .parent()
+        .map(|parent| parent.join(relative_target))
+        .unwrap_or_else(|| relative_target.to_path_buf());
+    authorize_write_path(sandbox, &target_path, &target_path.display().to_string())
+}
+
+fn authorize_write_path(
+    sandbox: Option<&CompiledFilesystemSandbox>,
+    path: &Path,
+    raw_path: &str,
+) -> Result<(), TransferError> {
+    authorize_path(sandbox, SandboxAccess::Write, path).map_err(|err| {
+        crate::transfer::transfer_error_from_sandbox_error(
+            "transfer destination path",
+            raw_path,
+            err,
+        )
+    })
+}
+
+fn validate_relative_symlink_target(target: &Path) -> anyhow::Result<PathBuf> {
+    let normalized = target.to_string_lossy().replace('\\', "/");
+    if normalized.is_empty()
+        || normalized.starts_with('/')
+        || normalized.starts_with("//")
+        || normalized
+            .as_bytes()
+            .get(1)
+            .map_or(false, |separator| *separator == b':')
+    {
+        return Err(
+            TransferError::source_unsupported("archive symlink target must be relative").into(),
+        );
+    }
+
+    for part in normalized.split('/') {
+        if part.is_empty() || part == "." || part == ".." {
+            return Err(TransferError::source_unsupported(
+                "archive symlink target escapes destination",
+            )
+            .into());
+        }
+    }
+
+    Ok(PathBuf::from(normalized))
 }
