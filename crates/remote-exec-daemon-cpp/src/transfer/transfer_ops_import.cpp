@@ -1,10 +1,7 @@
-#include <atomic>
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
-#include <fstream>
 #include <limits>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -46,34 +43,6 @@ std::string normalize_archive_separators(std::string value) {
     std::replace(value.begin(), value.end(), '\\', '/');
     return value;
 }
-
-std::string unique_atomic_write_temp_path(const std::string& path) {
-    static std::atomic<unsigned long> next_suffix(1UL);
-
-    std::ostringstream out;
-    out << path << ".tmp." << next_suffix.fetch_add(1UL);
-    return out.str();
-}
-
-enum ImportPlanEntryKind {
-    IMPORT_PLAN_DIRECTORY,
-    IMPORT_PLAN_FILE,
-    IMPORT_PLAN_SYMLINK,
-};
-
-struct ImportPlanEntry {
-    ImportPlanEntryKind kind;
-    std::string relative_path;
-    std::string body;
-    std::uint64_t mode;
-    std::string symlink_target;
-    std::string temp_path;
-};
-
-struct ImportPlan {
-    ImportSummary summary;
-    std::vector<ImportPlanEntry> entries;
-};
 
 std::string validate_relative_archive_path(const std::string& raw_path) {
     std::string normalized = normalize_archive_separators(raw_path);
@@ -288,68 +257,40 @@ read_gnu_long_name_from_reader(TransferArchiveReader& reader, std::uint64_t size
     return value;
 }
 
-void write_body_to_file_atomic(const std::string& path,
-                               const std::string& body,
-                               std::uint64_t mode,
-                               const TransferPathAuthorizer& authorizer,
-                               const std::string& planned_temp_path) {
+void write_entry_body_to_file(TransferArchiveReader& reader,
+                              const std::string& path,
+                              std::uint64_t size,
+                              std::uint64_t mode,
+                              const TransferPathAuthorizer& authorizer) {
     authorize_path_if_present(authorizer, path);
-    const std::string temp_path = planned_temp_path.empty() ? unique_atomic_write_temp_path(path) : planned_temp_path;
-    authorize_path_if_present(authorizer, temp_path);
-    ScopedFile output(path_utils::open_file(temp_path, "wb"));
+    ScopedFile output(path_utils::open_file(path, "wb"));
     if (!output.valid()) {
         throw std::runtime_error("unable to write destination file");
     }
-    try {
-        if (!body.empty() && !stdio_retry::fwrite_all(output.get(), body.data(), body.size())) {
+
+    char buffer[8192];
+    std::uint64_t remaining = size;
+    while (remaining > 0U) {
+        const std::size_t requested = remaining < sizeof(buffer) ? static_cast<std::size_t>(remaining) : sizeof(buffer);
+        read_exact_or_throw(reader, buffer, requested, "truncated tar entry body");
+        if (!stdio_retry::fwrite_all(output.get(), buffer, requested)) {
             throw std::runtime_error("unable to write destination file");
         }
-#ifndef _WIN32
-        if ((mode & 0111U) != 0U) {
-            if (!path_utils::add_executable_bits(output.get())) {
-                throw std::runtime_error("unable to update destination file mode");
-            }
-        }
-#else
-        (void)mode;
-#endif
-        if (output.close() != 0) {
-            throw std::runtime_error("unable to write destination file");
-        }
-        if (!path_utils::rename_path(temp_path, path)) {
-            (void)path_utils::remove_path(temp_path);
-            throw std::runtime_error("unable to rename temporary destination file");
-        }
-    } catch (...) {
-        (void)path_utils::remove_path(temp_path);
-        throw;
+        remaining -= static_cast<std::uint64_t>(requested);
     }
-}
 
-ImportPlanEntry directory_plan_entry(const std::string& relative_path) {
-    ImportPlanEntry entry;
-    entry.kind = IMPORT_PLAN_DIRECTORY;
-    entry.relative_path = relative_path;
-    entry.mode = 0U;
-    return entry;
-}
-
-ImportPlanEntry file_plan_entry(const std::string& relative_path, std::string body, std::uint64_t mode) {
-    ImportPlanEntry entry;
-    entry.kind = IMPORT_PLAN_FILE;
-    entry.relative_path = relative_path;
-    entry.body.swap(body);
-    entry.mode = mode;
-    return entry;
-}
-
-ImportPlanEntry symlink_plan_entry(const std::string& relative_path, const std::string& target) {
-    ImportPlanEntry entry;
-    entry.kind = IMPORT_PLAN_SYMLINK;
-    entry.relative_path = relative_path;
-    entry.mode = 0U;
-    entry.symlink_target = target;
-    return entry;
+#ifndef _WIN32
+    if ((mode & 0111U) != 0U) {
+        if (!path_utils::add_executable_bits(output.get())) {
+            throw std::runtime_error("unable to update destination file mode");
+        }
+    }
+#else
+    (void)mode;
+#endif
+    if (output.close() != 0) {
+        throw std::runtime_error("unable to write destination file");
+    }
 }
 
 TransferWarning skipped_symlink_warning(const std::string& path) {
@@ -418,140 +359,6 @@ void consume_file_archive_tail(TransferArchiveReader& reader,
     throw TransferFailure(TransferRpcCode::TransferFailed, "missing tar terminator");
 }
 
-ImportPlan plan_file_import(TransferArchiveReader& reader,
-                            TransferSymlinkMode symlink_mode,
-                            const TransferLimitConfig& limits) {
-    std::vector<char> block(TAR_BLOCK_SIZE);
-    read_exact_or_throw(reader, block.data(), block.size(), "archive is empty");
-    const TarHeaderView header = parse_header(block.data());
-    if (header.typeflag != '0' && header.typeflag != '2') {
-        throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive entry is not a regular file");
-    }
-    if (header.path != SINGLE_FILE_ENTRY) {
-        throw TransferFailure(TransferRpcCode::SourceUnsupported,
-                              "file archive entry path must be " + std::string(SINGLE_FILE_ENTRY));
-    }
-
-    ImportPlan plan;
-    plan.summary = ImportSummary{
-        TransferSourceType::File,
-        0,
-        1,
-        0,
-        false,
-        std::vector<TransferWarning>(),
-    };
-
-    if (header.typeflag == '2') {
-        switch (symlink_import_action(symlink_mode, std::string(SINGLE_FILE_ENTRY))) {
-        case SYMLINK_IMPORT_SKIP:
-            plan.summary.warnings.push_back(skipped_symlink_warning(std::string(SINGLE_FILE_ENTRY)));
-            plan.summary.files_copied = 0;
-            break;
-        case SYMLINK_IMPORT_PRESERVE:
-            plan.entries.push_back(symlink_plan_entry(".", validate_relative_symlink_target(header.link_name)));
-            break;
-        }
-        skip_exact(reader, entry_body_with_padding(header.size), "truncated tar entry body");
-    } else {
-        ensure_transfer_entry_within_limits(header.size, 0U, limits);
-        std::string body = read_exact_string(reader, header.size, "truncated tar entry body");
-        skip_entry_padding(reader, header.size);
-        plan.entries.push_back(file_plan_entry(".", body, header.mode));
-        plan.summary.bytes_copied = header.size;
-    }
-
-    consume_file_archive_tail(reader, &plan.summary.warnings, limits);
-
-    return plan;
-}
-
-ImportPlan plan_directory_import(TransferArchiveReader& reader,
-                                 TransferSourceType source_type,
-                                 TransferSymlinkMode symlink_mode,
-                                 const TransferLimitConfig& limits) {
-    ImportPlan plan;
-    plan.summary = {source_type, 0, 0, 1, false, std::vector<TransferWarning>()};
-    std::string pending_long_name;
-    std::vector<char> block(TAR_BLOCK_SIZE);
-
-    while (reader.read_exact_or_eof(block.data(), block.size())) {
-        if (is_zero_block(block.data())) {
-            require_archive_terminator(reader);
-            return plan;
-        }
-
-        const TarHeaderView header = parse_header(block.data());
-
-        if (header.typeflag == 'L') {
-            pending_long_name = read_gnu_long_name_from_reader(reader, header.size, limits);
-            continue;
-        }
-
-        const std::string raw_path = pending_long_name.empty() ? header.path : pending_long_name;
-        pending_long_name.clear();
-        const std::string relative_path = validate_relative_archive_path(raw_path);
-        if (is_transfer_summary_path(relative_path)) {
-            if (header.typeflag != '0') {
-                throw TransferFailure(TransferRpcCode::SourceUnsupported,
-                                      "transfer summary archive entry is not a regular file");
-            }
-            append_warnings(&plan.summary.warnings,
-                            read_transfer_summary(
-                                read_limited_metadata_string(reader, header.size, limits, "truncated tar entry body")));
-            skip_entry_padding(reader, header.size);
-            continue;
-        }
-
-        if (header.typeflag == '5') {
-            if (relative_path != ".") {
-                plan.entries.push_back(directory_plan_entry(relative_path));
-                plan.summary.directories_copied += 1;
-            }
-            skip_exact(reader, entry_body_with_padding(header.size), "truncated tar entry body");
-            continue;
-        }
-
-        if (header.typeflag == '2') {
-            switch (symlink_import_action(symlink_mode, "")) {
-            case SYMLINK_IMPORT_SKIP:
-                plan.summary.warnings.push_back(skipped_symlink_warning(relative_path));
-                skip_exact(reader, entry_body_with_padding(header.size), "truncated tar entry body");
-                continue;
-            case SYMLINK_IMPORT_PRESERVE:
-                break;
-            }
-            if (relative_path == ".") {
-                throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive symlink entry cannot target root");
-            }
-            plan.entries.push_back(symlink_plan_entry(relative_path, validate_relative_symlink_target(header.link_name)));
-            plan.summary.files_copied += 1;
-            skip_exact(reader, entry_body_with_padding(header.size), "truncated tar entry body");
-            continue;
-        }
-
-        if (header.typeflag != '0') {
-            throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive contains unsupported entry");
-        }
-        if (relative_path == ".") {
-            throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive file entry cannot target root");
-        }
-
-        ensure_transfer_entry_within_limits(header.size, plan.summary.bytes_copied, limits);
-        std::string body = read_exact_string(reader, header.size, "truncated tar entry body");
-        skip_entry_padding(reader, header.size);
-        plan.entries.push_back(file_plan_entry(relative_path, body, header.mode));
-        plan.summary.bytes_copied += header.size;
-        plan.summary.files_copied += 1;
-    }
-
-    if (!pending_long_name.empty()) {
-        throw TransferFailure(TransferRpcCode::SourceUnsupported, "dangling GNU long name entry");
-    }
-
-    throw TransferFailure(TransferRpcCode::TransferFailed, "missing tar terminator");
-}
-
 void authorize_materialized_relative_path(const std::string& destination_root,
                                           const std::string& relative_path,
                                           const TransferPathAuthorizer& authorizer) {
@@ -571,102 +378,149 @@ void authorize_materialized_relative_path(const std::string& destination_root,
     }
 }
 
-void authorize_import_plan(const ImportPlan& plan,
-                           const std::string& absolute_path,
-                           const TransferPathAuthorizer& authorizer) {
-    if (!authorizer) {
-        return;
+ImportSummary import_file_archive(TransferArchiveReader& reader,
+                                  const std::string& absolute_path,
+                                  TransferOverwrite overwrite,
+                                  bool create_parent,
+                                  TransferSymlinkMode symlink_mode,
+                                  const TransferLimitConfig& limits,
+                                  const TransferPathAuthorizer& authorizer) {
+    std::vector<char> block(TAR_BLOCK_SIZE);
+    read_exact_or_throw(reader, block.data(), block.size(), "archive is empty");
+    const TarHeaderView header = parse_header(block.data());
+    if (header.typeflag != '0' && header.typeflag != '2') {
+        throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive entry is not a regular file");
+    }
+    if (header.path != SINGLE_FILE_ENTRY) {
+        throw TransferFailure(TransferRpcCode::SourceUnsupported,
+                              "file archive entry path must be " + std::string(SINGLE_FILE_ENTRY));
     }
 
-    authorizer(absolute_path);
-    for (std::size_t i = 0; i < plan.entries.size(); ++i) {
-        const ImportPlanEntry& entry = plan.entries[i];
-        const std::string output_path = materialize_archive_path(absolute_path, entry.relative_path);
-        authorize_materialized_relative_path(absolute_path, entry.relative_path, authorizer);
-        if (entry.kind == IMPORT_PLAN_SYMLINK) {
-            authorizer(resolved_symlink_target_path(output_path, entry.symlink_target));
-        }
-    }
-}
-
-void prepare_import_plan_commit_paths(ImportPlan* plan,
-                                      const std::string& absolute_path,
-                                      const TransferPathAuthorizer& authorizer) {
-    authorize_import_plan(*plan, absolute_path, authorizer);
-
-    for (std::size_t i = 0; i < plan->entries.size(); ++i) {
-        ImportPlanEntry& entry = plan->entries[i];
-        if (entry.kind != IMPORT_PLAN_FILE) {
-            continue;
-        }
-        const std::string output_path = materialize_archive_path(absolute_path, entry.relative_path);
-        entry.temp_path = unique_atomic_write_temp_path(output_path);
-        authorize_path_if_present(authorizer, entry.temp_path);
-    }
-}
-
-ImportSummary execute_file_import_plan(const ImportPlan& plan,
-                                       const std::string& absolute_path,
-                                       TransferOverwrite overwrite,
-                                       bool create_parent,
-                                       const TransferPathAuthorizer& authorizer) {
-    ImportSummary summary = plan.summary;
+    ImportSummary summary = {TransferSourceType::File, 0, 1, 0, false, std::vector<TransferWarning>()};
     summary.replaced =
         prepare_destination_path(absolute_path, TransferSourceType::File, overwrite, create_parent, authorizer);
-    if (plan.entries.empty()) {
-        return summary;
+
+    if (header.typeflag == '2') {
+        switch (symlink_import_action(symlink_mode, std::string(SINGLE_FILE_ENTRY))) {
+        case SYMLINK_IMPORT_SKIP:
+            summary.warnings.push_back(skipped_symlink_warning(std::string(SINGLE_FILE_ENTRY)));
+            summary.files_copied = 0;
+            break;
+        case SYMLINK_IMPORT_PRESERVE:
+            ensure_not_existing_symlink(absolute_path);
+            write_validated_symlink(header.link_name, absolute_path, authorizer);
+            break;
+        }
+        skip_exact(reader, entry_body_with_padding(header.size), "truncated tar entry body");
+    } else {
+        ensure_transfer_entry_within_limits(header.size, 0U, limits);
+        ensure_not_existing_symlink(absolute_path);
+        write_entry_body_to_file(reader, absolute_path, header.size, header.mode, authorizer);
+        skip_entry_padding(reader, header.size);
+        summary.bytes_copied = header.size;
     }
 
-    ensure_not_existing_symlink(absolute_path);
-    const ImportPlanEntry& entry = plan.entries[0];
-    if (entry.kind == IMPORT_PLAN_FILE) {
-        write_body_to_file_atomic(absolute_path, entry.body, entry.mode, authorizer, entry.temp_path);
-        return summary;
-    }
-    if (entry.kind == IMPORT_PLAN_SYMLINK) {
-        write_validated_symlink(entry.symlink_target, absolute_path, authorizer);
-        return summary;
-    }
-
-    throw TransferFailure(TransferRpcCode::SourceUnsupported, "file archive contains unsupported entry");
+    consume_file_archive_tail(reader, &summary.warnings, limits);
+    return summary;
 }
 
-ImportSummary execute_directory_import_plan(const ImportPlan& plan,
-                                            const std::string& absolute_path,
-                                            TransferSourceType source_type,
-                                            TransferOverwrite overwrite,
-                                            bool create_parent,
-                                            const TransferPathAuthorizer& authorizer) {
-    ImportSummary summary = plan.summary;
+ImportSummary import_tree_archive(TransferArchiveReader& reader,
+                                  TransferSourceType source_type,
+                                  const std::string& absolute_path,
+                                  TransferOverwrite overwrite,
+                                  bool create_parent,
+                                  TransferSymlinkMode symlink_mode,
+                                  const TransferLimitConfig& limits,
+                                  const TransferPathAuthorizer& authorizer) {
+    ImportSummary summary = {source_type, 0, 0, 1, false, std::vector<TransferWarning>()};
     summary.replaced = prepare_destination_path(absolute_path, source_type, overwrite, create_parent, authorizer);
     make_directory_if_missing(absolute_path);
 
-    for (std::size_t i = 0; i < plan.entries.size(); ++i) {
-        const ImportPlanEntry& entry = plan.entries[i];
-        const std::string output_path = materialize_archive_path(absolute_path, entry.relative_path);
+    std::string pending_long_name;
+    std::vector<char> block(TAR_BLOCK_SIZE);
+    while (reader.read_exact_or_eof(block.data(), block.size())) {
+        if (is_zero_block(block.data())) {
+            require_archive_terminator(reader);
+            return summary;
+        }
 
-        if (entry.kind == IMPORT_PLAN_DIRECTORY) {
-            ensure_no_existing_symlink_in_path(absolute_path, entry.relative_path);
-            ensure_parent_directory(output_path, true);
-            make_directory_if_missing(output_path);
+        const TarHeaderView header = parse_header(block.data());
+
+        if (header.typeflag == 'L') {
+            pending_long_name = read_gnu_long_name_from_reader(reader, header.size, limits);
             continue;
         }
 
-        if (entry.kind == IMPORT_PLAN_SYMLINK) {
-            ensure_no_existing_symlink_in_path(absolute_path, entry.relative_path);
-            write_validated_symlink(entry.symlink_target, output_path, authorizer);
+        const std::string raw_path = pending_long_name.empty() ? header.path : pending_long_name;
+        pending_long_name.clear();
+        const std::string relative_path = validate_relative_archive_path(raw_path);
+        if (is_transfer_summary_path(relative_path)) {
+            if (header.typeflag != '0') {
+                throw TransferFailure(TransferRpcCode::SourceUnsupported,
+                                      "transfer summary archive entry is not a regular file");
+            }
+            append_warnings(&summary.warnings,
+                            read_transfer_summary(
+                                read_limited_metadata_string(reader, header.size, limits, "truncated tar entry body")));
+            skip_entry_padding(reader, header.size);
             continue;
         }
 
-        if (entry.kind == IMPORT_PLAN_FILE) {
-            ensure_no_existing_symlink_in_path(absolute_path, entry.relative_path);
-            ensure_parent_directory(output_path, true);
-            write_body_to_file_atomic(output_path, entry.body, entry.mode, authorizer, entry.temp_path);
+        const std::string output_path = materialize_archive_path(absolute_path, relative_path);
+        if (header.typeflag == '5') {
+            if (relative_path != ".") {
+                authorize_materialized_relative_path(absolute_path, relative_path, authorizer);
+                ensure_no_existing_symlink_in_path(absolute_path, relative_path);
+                ensure_parent_directory(output_path, true);
+                make_directory_if_missing(output_path);
+                summary.directories_copied += 1;
+            }
+            skip_exact(reader, entry_body_with_padding(header.size), "truncated tar entry body");
             continue;
         }
+
+        if (header.typeflag == '2') {
+            switch (symlink_import_action(symlink_mode, "")) {
+            case SYMLINK_IMPORT_SKIP:
+                summary.warnings.push_back(skipped_symlink_warning(relative_path));
+                skip_exact(reader, entry_body_with_padding(header.size), "truncated tar entry body");
+                continue;
+            case SYMLINK_IMPORT_PRESERVE:
+                break;
+            }
+            if (relative_path == ".") {
+                throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive symlink entry cannot target root");
+            }
+            authorize_materialized_relative_path(absolute_path, relative_path, authorizer);
+            ensure_no_existing_symlink_in_path(absolute_path, relative_path);
+            write_validated_symlink(header.link_name, output_path, authorizer);
+            summary.files_copied += 1;
+            skip_exact(reader, entry_body_with_padding(header.size), "truncated tar entry body");
+            continue;
+        }
+
+        if (header.typeflag != '0') {
+            throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive contains unsupported entry");
+        }
+        if (relative_path == ".") {
+            throw TransferFailure(TransferRpcCode::SourceUnsupported, "archive file entry cannot target root");
+        }
+
+        ensure_transfer_entry_within_limits(header.size, summary.bytes_copied, limits);
+        authorize_materialized_relative_path(absolute_path, relative_path, authorizer);
+        ensure_no_existing_symlink_in_path(absolute_path, relative_path);
+        ensure_parent_directory(output_path, true);
+        write_entry_body_to_file(reader, output_path, header.size, header.mode, authorizer);
+        skip_entry_padding(reader, header.size);
+        summary.bytes_copied += header.size;
+        summary.files_copied += 1;
     }
 
-    return summary;
+    if (!pending_long_name.empty()) {
+        throw TransferFailure(TransferRpcCode::SourceUnsupported, "dangling GNU long name entry");
+    }
+
+    throw TransferFailure(TransferRpcCode::TransferFailed, "missing tar terminator");
 }
 
 } // namespace
@@ -700,19 +554,16 @@ ImportSummary import_path_from_reader(TransferArchiveReader& reader,
     }
 
     if (source_type == TransferSourceType::File) {
-        ImportPlan plan = plan_file_import(reader, options.symlink_mode, limits);
-        prepare_import_plan_commit_paths(&plan, absolute_path, authorizer);
-        return execute_file_import_plan(plan, absolute_path, overwrite, create_parent, authorizer);
+        return import_file_archive(
+            reader, absolute_path, overwrite, create_parent, options.symlink_mode, limits, authorizer);
     }
     if (source_type == TransferSourceType::Directory) {
-        ImportPlan plan = plan_directory_import(reader, source_type, options.symlink_mode, limits);
-        prepare_import_plan_commit_paths(&plan, absolute_path, authorizer);
-        return execute_directory_import_plan(plan, absolute_path, source_type, overwrite, create_parent, authorizer);
+        return import_tree_archive(
+            reader, source_type, absolute_path, overwrite, create_parent, options.symlink_mode, limits, authorizer);
     }
     if (source_type == TransferSourceType::Multiple) {
-        ImportPlan plan = plan_directory_import(reader, source_type, options.symlink_mode, limits);
-        prepare_import_plan_commit_paths(&plan, absolute_path, authorizer);
-        return execute_directory_import_plan(plan, absolute_path, source_type, overwrite, create_parent, authorizer);
+        return import_tree_archive(
+            reader, source_type, absolute_path, overwrite, create_parent, options.symlink_mode, limits, authorizer);
     }
     throw TransferFailure(TransferRpcCode::SourceUnsupported, "unsupported transfer source type");
 }

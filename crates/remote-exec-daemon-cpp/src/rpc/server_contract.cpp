@@ -34,7 +34,16 @@ const char TRANSFER_CREATE_PARENT_HEADER[] = "x-remote-exec-create-parent";
 const char TRANSFER_SOURCE_TYPE_HEADER[] = "x-remote-exec-source-type";
 const char TRANSFER_COMPRESSION_HEADER[] = "x-remote-exec-compression";
 const char TRANSFER_SYMLINK_MODE_HEADER[] = "x-remote-exec-symlink-mode";
-const char TRANSFER_EXPORT_CONTENT_TYPE[] = "application/octet-stream";
+const char TRANSFER_EXPORT_CONTENT_TYPE[] = "application/vnd.remote-exec.transfer-stream.v2";
+const char TRANSFER_STREAM_VERSION_HEADER[] = "x-remote-exec-transfer-stream-version";
+const char TRANSFER_STREAM_VERSION_VALUE[] = "2";
+const char TRANSFER_STREAM_CONTENT_TYPE[] = "application/vnd.remote-exec.transfer-stream.v2";
+const char TRANSFER_STREAM_PREFACE[] = "REXFER2\n";
+const unsigned int TRANSFER_STREAM_PROTOCOL_VERSION = 2U;
+const std::size_t TRANSFER_STREAM_PREFACE_LEN = 8U;
+const std::size_t TRANSFER_STREAM_FRAME_HEADER_LEN = 12U;
+const std::size_t TRANSFER_STREAM_DATA_FRAME_MAX_BYTES = 64U * 1024U;
+const std::size_t TRANSFER_STREAM_CONTROL_FRAME_MAX_BYTES = 64U * 1024U;
 
 const char PORT_TUNNEL_UPGRADE_TOKEN[] = "remote-exec-port-tunnel";
 const char PORT_TUNNEL_VERSION_HEADER[] = "x-remote-exec-port-tunnel-version";

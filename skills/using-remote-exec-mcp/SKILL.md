@@ -213,6 +213,8 @@ Guidance:
 - Use `destination_mode: "exact"` to force exact final-path behavior.
 - `overwrite: "merge"` overlays without deleting unrelated directory entries.
 - `overwrite: "replace"` removes the destination first.
+- Transfers are not transactional; a failure can leave partial destination
+  changes.
 - `exclude` is matched relative to each source root with `/` as the logical
   separator on every platform.
 - `symlink_mode` is `preserve`, `follow`, or `skip`.

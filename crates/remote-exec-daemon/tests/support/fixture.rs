@@ -2,7 +2,12 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::thread::JoinHandle;
 
-use remote_exec_proto::rpc::RpcErrorBody;
+use remote_exec_proto::rpc::{
+    RpcErrorBody, TRANSFER_STREAM_CONTENT_TYPE, TRANSFER_STREAM_DATA_FRAME_MAX_BYTES,
+    TRANSFER_STREAM_PREFACE, TRANSFER_STREAM_PROTOCOL_VERSION, TRANSFER_STREAM_VERSION_HEADER,
+    TransferStreamComplete, TransferStreamFrameHeader, TransferStreamFrameType,
+    encode_transfer_stream_frame_header,
+};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tempfile::TempDir;
@@ -49,12 +54,14 @@ impl DaemonFixture {
     where
         Req: Serialize + ?Sized,
     {
-        self.client
-            .post(self.url(path))
-            .json(body)
-            .send()
-            .await
-            .unwrap()
+        let mut request = self.client.post(self.url(path));
+        if path == "/v1/transfer/export" {
+            request = request.header(
+                TRANSFER_STREAM_VERSION_HEADER,
+                TRANSFER_STREAM_PROTOCOL_VERSION.to_string(),
+            );
+        }
+        request.json(body).send().await.unwrap()
     }
 
     pub async fn raw_post_bytes(
@@ -67,6 +74,17 @@ impl DaemonFixture {
         for (name, value) in headers {
             request = request.header(*name, value);
         }
+        let body = if path == "/v1/transfer/import" {
+            request = request
+                .header(reqwest::header::CONTENT_TYPE, TRANSFER_STREAM_CONTENT_TYPE)
+                .header(
+                    TRANSFER_STREAM_VERSION_HEADER,
+                    TRANSFER_STREAM_PROTOCOL_VERSION.to_string(),
+                );
+            framed_transfer_body(body)
+        } else {
+            body
+        };
         request.body(body).send().await.unwrap()
     }
 
@@ -102,6 +120,31 @@ impl DaemonFixture {
         assert!(!response.status().is_success());
         response.json::<RpcErrorBody>().await.unwrap()
     }
+}
+
+fn framed_transfer_body(body: Vec<u8>) -> Vec<u8> {
+    let mut output = Vec::new();
+    output.extend_from_slice(TRANSFER_STREAM_PREFACE);
+    for chunk in body.chunks(TRANSFER_STREAM_DATA_FRAME_MAX_BYTES as usize) {
+        let header = encode_transfer_stream_frame_header(TransferStreamFrameHeader {
+            frame_type: TransferStreamFrameType::Data,
+            payload_len: chunk.len() as u64,
+        });
+        output.extend_from_slice(&header);
+        output.extend_from_slice(chunk);
+    }
+
+    let complete = serde_json::to_vec(&TransferStreamComplete {
+        archive_bytes: body.len() as u64,
+    })
+    .unwrap();
+    let header = encode_transfer_stream_frame_header(TransferStreamFrameHeader {
+        frame_type: TransferStreamFrameType::Complete,
+        payload_len: complete.len() as u64,
+    });
+    output.extend_from_slice(&header);
+    output.extend_from_slice(&complete);
+    output
 }
 
 impl Drop for DaemonFixture {

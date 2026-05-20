@@ -1,4 +1,6 @@
-use futures_util::TryStreamExt;
+mod transfer_stream;
+
+use futures_util::{StreamExt, TryStreamExt};
 
 use remote_exec_proto::port_tunnel::{
     TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, UPGRADE_TOKEN, write_preface,
@@ -30,14 +32,16 @@ pub struct TransferExportStream {
 }
 
 impl TransferExportStream {
-    pub fn into_body(self) -> reqwest::Body {
-        reqwest::Body::wrap_stream(self.response.bytes_stream())
+    pub fn into_stream(
+        self,
+    ) -> impl futures_util::Stream<Item = Result<bytes::Bytes, DaemonClientError>> {
+        transfer_stream::decode_response_body(self.response)
     }
 
     pub fn into_async_read(self) -> impl tokio::io::AsyncRead + Send + Unpin + 'static {
-        tokio_util::io::StreamReader::new(
-            self.response.bytes_stream().map_err(std::io::Error::other),
-        )
+        let stream =
+            transfer_stream::decode_response_body(self.response).map_err(std::io::Error::other);
+        tokio_util::io::StreamReader::new(stream.boxed())
     }
 }
 

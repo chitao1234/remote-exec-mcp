@@ -20,6 +20,7 @@ DaemonCapabilities detect_daemon_capabilities(const AppState& state) {
     capabilities.supports_port_forward = port_forward_runtime_available(state);
     capabilities.port_forward_protocol_version =
         capabilities.supports_port_forward ? server_contract::PORT_TUNNEL_PROTOCOL_VERSION : 0U;
+    capabilities.transfer_stream_protocol_version = server_contract::TRANSFER_STREAM_PROTOCOL_VERSION;
     return capabilities;
 }
 
@@ -29,4 +30,5 @@ void write_daemon_capabilities(Json* target, const DaemonCapabilities& capabilit
     (*target)["supports_transfer_compression"] = capabilities.supports_transfer_compression;
     (*target)["supports_port_forward"] = capabilities.supports_port_forward;
     (*target)["port_forward_protocol_version"] = capabilities.port_forward_protocol_version;
+    (*target)["transfer_stream_protocol_version"] = capabilities.transfer_stream_protocol_version;
 }

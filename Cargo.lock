@@ -1594,6 +1594,7 @@ dependencies = [
  "anyhow",
  "axum",
  "base64",
+ "bytes",
  "clap",
  "futures-util",
  "gethostname",
@@ -1631,6 +1632,7 @@ dependencies = [
  "anyhow",
  "axum",
  "base64",
+ "bytes",
  "chardetng",
  "encoding_rs",
  "futures-util",
@@ -1674,6 +1676,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
+ "bytes",
  "chardetng",
  "encoding_rs",
  "futures-util",

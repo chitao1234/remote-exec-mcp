@@ -275,20 +275,16 @@ void export_path_to_sink_as(TransferArchiveSink& sink,
     validate_export_path(absolute_path, context.options);
     authorize_path_if_present(context.authorizer, absolute_path);
     const transfer_glob::Matcher exclude_matcher(context.options.exclude);
-    std::string archive_bytes;
-    StringTransferArchiveSink archive_sink(&archive_bytes);
 
     if (source_type == TransferSourceType::File) {
-        export_file_as_tar(&archive_sink, absolute_path, context.options);
+        export_file_as_tar(&sink, absolute_path, context.options);
     } else if (source_type == TransferSourceType::Directory) {
-        export_directory_as_tar(&archive_sink, absolute_path, exclude_matcher, &context);
+        export_directory_as_tar(&sink, absolute_path, exclude_matcher, &context);
     } else if (source_type == TransferSourceType::Multiple) {
         throw TransferFailure(TransferRpcCode::SourceUnsupported, "multiple source type is only supported for import");
     } else {
         throw TransferFailure(TransferRpcCode::SourceUnsupported, "unsupported transfer source type");
     }
-
-    sink.write_string(archive_bytes);
 }
 
 TransferSourceType export_path_to_sink(TransferArchiveSink& sink,

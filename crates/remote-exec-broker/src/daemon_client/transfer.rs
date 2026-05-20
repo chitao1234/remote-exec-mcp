@@ -1,16 +1,16 @@
-use futures_util::TryStreamExt;
+use futures_util::{StreamExt, TryStream, TryStreamExt};
 
 use remote_exec_proto::rpc::{
-    TransferExportMetadata, TransferExportRequest, TransferImportRequest, TransferImportResponse,
-    TransferPathInfoRequest, TransferPathInfoResponse,
+    TRANSFER_STREAM_PROTOCOL_VERSION, TRANSFER_STREAM_VERSION_HEADER, TransferExportMetadata,
+    TransferExportRequest, TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
+    TransferPathInfoResponse,
 };
-use reqwest::header::CONTENT_LENGTH;
 
 use crate::tools::transfer::codec;
 
 use super::{
     DaemonClient, DaemonClientError, RpcCallContext, RpcCallKind, RpcErrorDecodePolicy,
-    TransferExportResponse, TransferExportStream,
+    TransferExportResponse, TransferExportStream, transfer_stream,
 };
 
 impl DaemonClient {
@@ -68,9 +68,10 @@ impl DaemonClient {
         req: &TransferImportRequest,
     ) -> Result<TransferImportResponse, DaemonClientError> {
         let started = std::time::Instant::now();
-        let (file_len, body) = open_transfer_import_body(archive_path).await?;
+        let stream = open_transfer_import_stream(archive_path).await?;
+        let body = transfer_stream::encode_request_body(stream);
         let response = self
-            .send_transfer_import_request(req, Some(file_len), body, started)
+            .send_transfer_import_request(req, body, started)
             .await?;
         let summary = self
             .decode_transfer_import_response(req, started, response)
@@ -85,14 +86,19 @@ impl DaemonClient {
         Ok(summary)
     }
 
-    pub async fn transfer_import_from_body(
+    pub async fn transfer_import_from_archive_stream<S, E>(
         &self,
         req: &TransferImportRequest,
-        body: reqwest::Body,
-    ) -> Result<TransferImportResponse, DaemonClientError> {
+        stream: S,
+    ) -> Result<TransferImportResponse, DaemonClientError>
+    where
+        S: TryStream<Ok = bytes::Bytes, Error = E> + Send + 'static,
+        E: std::error::Error + Send + Sync + 'static,
+    {
         let started = std::time::Instant::now();
+        let body = transfer_stream::encode_request_body(stream);
         let response = self
-            .send_transfer_import_request(req, None, body, started)
+            .send_transfer_import_request(req, body, started)
             .await?;
         self.decode_transfer_import_response(req, started, response)
             .await
@@ -111,7 +117,13 @@ impl DaemonClient {
             req.path.as_str(),
         );
         self.send_request_with_policy(
-            self.request("/v1/transfer/export").json(req).send(),
+            self.request("/v1/transfer/export")
+                .header(
+                    TRANSFER_STREAM_VERSION_HEADER,
+                    TRANSFER_STREAM_PROTOCOL_VERSION.to_string(),
+                )
+                .json(req)
+                .send(),
             RpcErrorDecodePolicy::Lenient,
             |err| context.log_transport_error(err),
             |status| context.log_status_error(status),
@@ -146,7 +158,9 @@ impl DaemonClient {
             .await
             .map_err(|err| DaemonClientError::Transport(err.into()))?;
         let mut stream = tokio_util::io::StreamReader::new(
-            response.bytes_stream().map_err(std::io::Error::other),
+            transfer_stream::decode_response_body(response)
+                .map_err(std::io::Error::other)
+                .boxed(),
         );
         tokio::io::copy(&mut stream, &mut file)
             .await
@@ -157,7 +171,6 @@ impl DaemonClient {
     async fn send_transfer_import_request(
         &self,
         req: &TransferImportRequest,
-        file_len: Option<u64>,
         body: reqwest::Body,
         started: std::time::Instant,
     ) -> Result<reqwest::Response, DaemonClientError> {
@@ -168,10 +181,7 @@ impl DaemonClient {
             RpcCallKind::TransferImport,
             req.destination_path.as_str(),
         );
-        let mut request = codec::apply_import_headers(self.request("/v1/transfer/import"), req);
-        if let Some(file_len) = file_len {
-            request = request.header(CONTENT_LENGTH, file_len);
-        }
+        let request = codec::apply_import_headers(self.request("/v1/transfer/import"), req);
         self.send_request_with_policy(
             request.body(body).send(),
             RpcErrorDecodePolicy::Lenient,
@@ -203,23 +213,13 @@ impl DaemonClient {
     }
 }
 
-async fn open_transfer_import_body(
+async fn open_transfer_import_stream(
     archive_path: &std::path::Path,
-) -> Result<(u64, reqwest::Body), DaemonClientError> {
+) -> Result<tokio_util::io::ReaderStream<tokio::fs::File>, DaemonClientError> {
     let file = tokio::fs::File::open(archive_path).await.map_err(|err| {
         DaemonClientError::Transport(
             anyhow::Error::from(err).context(format!("open {}", archive_path.display())),
         )
     })?;
-    let file_len = file
-        .metadata()
-        .await
-        .map_err(|err| {
-            DaemonClientError::Transport(
-                anyhow::Error::from(err).context(format!("metadata {}", archive_path.display())),
-            )
-        })?
-        .len();
-    let body = reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(file));
-    Ok((file_len, body))
+    Ok(tokio_util::io::ReaderStream::new(file))
 }

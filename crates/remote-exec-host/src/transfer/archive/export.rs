@@ -2,21 +2,31 @@ mod bundle;
 mod prepare;
 mod single;
 
+use std::io;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 
+use bytes::Bytes;
 use remote_exec_proto::rpc::{TransferSourceType, TransferSymlinkMode};
 use remote_exec_proto::transfer::TransferCompression;
+use tokio::sync::mpsc;
 
 use crate::error::TransferError;
 use crate::sandbox::CompiledFilesystemSandbox;
 
 use super::exclude_matcher::ExcludeMatcher;
 use super::{
-    BundledArchiveSource, ExportPathResult, ExportedArchive, ExportedArchiveStream,
-    archive_error_to_transfer_error, internal_transfer_error,
+    BundledArchiveSource, ExportArchiveStreamItem, ExportPathResult, ExportedArchive,
+    ExportedArchiveByteStream, ExportedArchiveStream, archive_error_to_transfer_error,
+    internal_transfer_error,
 };
 
 const STREAM_BUFFER_SIZE: usize = 64 * 1024;
+const EXPORT_STREAM_CHANNEL_DEPTH: usize = 16;
 
 pub(super) struct PreparedExport {
     pub(super) source_path: PathBuf,
@@ -113,6 +123,49 @@ pub async fn export_path_to_stream(
     })
 }
 
+pub async fn export_path_to_byte_stream(
+    path: &str,
+    compression: TransferCompression,
+    symlink_mode: TransferSymlinkMode,
+    exclude: &[String],
+    sandbox: Option<&CompiledFilesystemSandbox>,
+    windows_posix_root: Option<&Path>,
+) -> Result<ExportedArchiveByteStream, TransferError> {
+    let prepared =
+        prepare::prepare_export_path(path, &symlink_mode, exclude, sandbox, windows_posix_root)
+            .await?;
+    let source_type = prepared.source_type.clone();
+    let stream_compression = compression.clone();
+    let stream_symlink_mode = symlink_mode.clone();
+    let (sender, receiver) = mpsc::channel(EXPORT_STREAM_CHANNEL_DEPTH);
+
+    tokio::task::spawn_blocking(move || {
+        let archive_bytes = Arc::new(AtomicU64::new(0));
+        let writer = ChannelArchiveWriter {
+            sender: sender.clone(),
+            archive_bytes: Arc::clone(&archive_bytes),
+        };
+        let terminal = match single::write_prepared_export_to_writer_sync(
+            prepared,
+            writer,
+            stream_compression,
+            stream_symlink_mode,
+        ) {
+            Ok(_) => ExportArchiveStreamItem::Complete {
+                archive_bytes: archive_bytes.load(Ordering::Relaxed),
+            },
+            Err(err) => ExportArchiveStreamItem::Error(err),
+        };
+        let _ = sender.blocking_send(terminal);
+    });
+
+    Ok(ExportedArchiveByteStream {
+        source_type,
+        compression,
+        receiver,
+    })
+}
+
 pub async fn bundle_archives_to_file(
     sources: Vec<BundledArchiveSource>,
     archive_path: &Path,
@@ -129,4 +182,32 @@ pub async fn bundle_archives_to_file(
     result?;
 
     Ok(())
+}
+
+struct ChannelArchiveWriter {
+    sender: mpsc::Sender<ExportArchiveStreamItem>,
+    archive_bytes: Arc<AtomicU64>,
+}
+
+impl Write for ChannelArchiveWriter {
+    fn write(&mut self, mut buf: &[u8]) -> io::Result<usize> {
+        let total = buf.len();
+        while !buf.is_empty() {
+            let chunk_len = buf.len().min(STREAM_BUFFER_SIZE);
+            let chunk = Bytes::copy_from_slice(&buf[..chunk_len]);
+            self.sender
+                .blocking_send(ExportArchiveStreamItem::Data(chunk))
+                .map_err(|_| {
+                    io::Error::new(io::ErrorKind::BrokenPipe, "transfer stream receiver closed")
+                })?;
+            self.archive_bytes
+                .fetch_add(chunk_len as u64, Ordering::Relaxed);
+            buf = &buf[chunk_len..];
+        }
+        Ok(total)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }

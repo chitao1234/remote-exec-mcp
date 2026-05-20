@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -18,20 +19,7 @@ pub(super) async fn write_prepared_export_to_file(
     symlink_mode: TransferSymlinkMode,
 ) -> Result<Vec<TransferWarning>, TransferError> {
     tokio::task::spawn_blocking(move || -> Result<Vec<TransferWarning>, TransferError> {
-        let mut warnings = Vec::new();
-        with_archive_builder(&archive_path, &compression, |builder| {
-            warnings = append_export_source(
-                builder,
-                &prepared.source_path,
-                prepared.source_type,
-                &prepared.exclude_matcher,
-                &symlink_mode,
-            )?;
-            append_transfer_summary(builder, &warnings)?;
-            Ok(())
-        })
-        .map_err(super::super::archive_error_to_transfer_error)?;
-        Ok(warnings)
+        write_prepared_export_to_file_sync(prepared, archive_path, compression, symlink_mode)
     })
     .await
     .map_err(super::super::internal_transfer_error)?
@@ -47,23 +35,57 @@ where
     W: Write + Send + 'static,
 {
     tokio::task::spawn_blocking(move || -> Result<Vec<TransferWarning>, TransferError> {
-        let mut warnings = Vec::new();
-        with_archive_writer(writer, &compression, |builder| {
-            warnings = append_export_source(
-                builder,
-                &prepared.source_path,
-                prepared.source_type,
-                &prepared.exclude_matcher,
-                &symlink_mode,
-            )?;
-            append_transfer_summary(builder, &warnings)?;
-            Ok(())
-        })
-        .map_err(super::super::archive_error_to_transfer_error)?;
-        Ok(warnings)
+        write_prepared_export_to_writer_sync(prepared, writer, compression, symlink_mode)
     })
     .await
     .map_err(super::super::internal_transfer_error)?
+}
+
+pub(super) fn write_prepared_export_to_file_sync(
+    prepared: PreparedExport,
+    archive_path: PathBuf,
+    compression: remote_exec_proto::transfer::TransferCompression,
+    symlink_mode: TransferSymlinkMode,
+) -> Result<Vec<TransferWarning>, TransferError> {
+    let mut warnings = Vec::new();
+    with_archive_builder(&archive_path, &compression, |builder| {
+        warnings = append_export_source(
+            builder,
+            &prepared.source_path,
+            prepared.source_type,
+            &prepared.exclude_matcher,
+            &symlink_mode,
+        )?;
+        append_transfer_summary(builder, &warnings)?;
+        Ok(())
+    })
+    .map_err(super::super::archive_error_to_transfer_error)?;
+    Ok(warnings)
+}
+
+pub(super) fn write_prepared_export_to_writer_sync<W>(
+    prepared: PreparedExport,
+    writer: W,
+    compression: remote_exec_proto::transfer::TransferCompression,
+    symlink_mode: TransferSymlinkMode,
+) -> Result<Vec<TransferWarning>, TransferError>
+where
+    W: Write + Send + 'static,
+{
+    let mut warnings = Vec::new();
+    with_archive_writer(writer, &compression, |builder| {
+        warnings = append_export_source(
+            builder,
+            &prepared.source_path,
+            prepared.source_type,
+            &prepared.exclude_matcher,
+            &symlink_mode,
+        )?;
+        append_transfer_summary(builder, &warnings)?;
+        Ok(())
+    })
+    .map_err(super::super::archive_error_to_transfer_error)?;
+    Ok(warnings)
 }
 
 fn append_export_source<W: Write>(
@@ -84,6 +106,8 @@ fn append_export_source<W: Write>(
             )?;
         }
         TransferSourceType::Directory => {
+            let mut visited = HashSet::new();
+            mark_directory_visited(source_path, &mut visited)?;
             builder.append_dir(".", source_path)?;
             append_directory_entries(
                 builder,
@@ -92,6 +116,7 @@ fn append_export_source<W: Write>(
                 exclude_matcher,
                 symlink_mode,
                 &mut warnings,
+                &mut visited,
             )?;
         }
         TransferSourceType::Multiple => {
@@ -109,6 +134,7 @@ fn append_directory_entries<W: Write>(
     exclude_matcher: &ExcludeMatcher,
     symlink_mode: &TransferSymlinkMode,
     warnings: &mut Vec<TransferWarning>,
+    visited: &mut HashSet<PathBuf>,
 ) -> anyhow::Result<()> {
     for entry in std::fs::read_dir(current)? {
         let entry = entry?;
@@ -131,15 +157,20 @@ fn append_directory_entries<W: Write>(
                 TransferSymlinkMode::Follow => {
                     let target_metadata = std::fs::metadata(&path)?;
                     if target_metadata.is_dir() {
-                        builder.append_dir(rel, &path)?;
-                        append_directory_entries(
-                            builder,
-                            root,
-                            &path,
-                            exclude_matcher,
-                            symlink_mode,
-                            warnings,
-                        )?;
+                        if mark_directory_visited(&path, visited)? {
+                            builder.append_dir(rel, &path)?;
+                            append_directory_entries(
+                                builder,
+                                root,
+                                &path,
+                                exclude_matcher,
+                                symlink_mode,
+                                warnings,
+                                visited,
+                            )?;
+                        } else {
+                            handle_unsupported_entry(&path, warnings);
+                        }
                     } else if target_metadata.is_file() {
                         builder.append_path_with_name(&path, rel)?;
                     } else {
@@ -153,15 +184,20 @@ fn append_directory_entries<W: Write>(
             continue;
         }
         if metadata.is_dir() {
-            builder.append_dir(rel, &path)?;
-            append_directory_entries(
-                builder,
-                root,
-                &path,
-                exclude_matcher,
-                symlink_mode,
-                warnings,
-            )?;
+            if mark_directory_visited(&path, visited)? {
+                builder.append_dir(rel, &path)?;
+                append_directory_entries(
+                    builder,
+                    root,
+                    &path,
+                    exclude_matcher,
+                    symlink_mode,
+                    warnings,
+                    visited,
+                )?;
+            } else {
+                handle_unsupported_entry(&path, warnings);
+            }
         } else if metadata.is_file() {
             builder.append_path_with_name(&path, rel)?;
         } else {
@@ -170,6 +206,11 @@ fn append_directory_entries<W: Write>(
     }
 
     Ok(())
+}
+
+fn mark_directory_visited(path: &Path, visited: &mut HashSet<PathBuf>) -> anyhow::Result<bool> {
+    let canonical = std::fs::canonicalize(path)?;
+    Ok(visited.insert(canonical))
 }
 
 fn append_file_or_symlink_entry<W: Write>(

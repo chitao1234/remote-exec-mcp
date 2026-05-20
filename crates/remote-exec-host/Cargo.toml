@@ -12,6 +12,7 @@ winpty = ["dep:winptyrs"]
 [dependencies]
 anyhow = { workspace = true }
 base64 = { workspace = true }
+bytes = { workspace = true }
 chardetng = { workspace = true }
 encoding_rs = { workspace = true }
 futures-util = { workspace = true }

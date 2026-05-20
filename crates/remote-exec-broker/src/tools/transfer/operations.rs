@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use bytes::Bytes;
+use futures_util::{StreamExt, TryStreamExt};
 use remote_exec_proto::public::{TransferEndpoint, TransferOverwrite, TransferSymlinkMode};
 use remote_exec_proto::rpc::{
     TransferExportRequest, TransferImportRequest, TransferImportResponse, TransferSourceType,
@@ -26,6 +28,8 @@ enum SingleSourceExport {
     Remote(crate::daemon_client::TransferExportStream),
 }
 
+type ArchiveStream = futures_util::stream::BoxStream<'static, Result<Bytes, std::io::Error>>;
+
 impl SingleSourceExport {
     fn source_type(&self) -> &TransferSourceType {
         match self {
@@ -41,12 +45,13 @@ impl SingleSourceExport {
         }
     }
 
-    fn into_body(self) -> reqwest::Body {
+    fn into_archive_stream(self) -> ArchiveStream {
         match self {
-            Self::Local(exported) => {
-                reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(exported.reader))
-            }
-            Self::Remote(exported) => exported.into_body(),
+            Self::Local(exported) => tokio_util::io::ReaderStream::new(exported.reader).boxed(),
+            Self::Remote(exported) => exported
+                .into_stream()
+                .map_err(std::io::Error::other)
+                .boxed(),
         }
     }
 }
@@ -252,7 +257,13 @@ async fn import_single_source(
             .await
         }
         TransferEndpointTarget::Remote(target_name) => {
-            import_remote_body_to_endpoint(state, target_name, exported.into_body(), request).await
+            import_remote_stream_to_endpoint(
+                state,
+                target_name,
+                exported.into_archive_stream(),
+                request,
+            )
+            .await
         }
     }
 }
@@ -290,16 +301,18 @@ async fn import_remote_archive_to_endpoint(
     .await
 }
 
-async fn import_remote_body_to_endpoint(
+async fn import_remote_stream_to_endpoint(
     state: &crate::BrokerState,
     target_name: &str,
-    body: reqwest::Body,
+    stream: ArchiveStream,
     request: &TransferImportRequest,
 ) -> anyhow::Result<TransferImportResponse> {
     let target = verified_remote_target(state, target_name).await?;
     handle_remote_transfer_result(
         target,
-        target.transfer_import_from_body(request, body).await,
+        target
+            .transfer_import_from_archive_stream(request, stream)
+            .await,
     )
     .await
 }

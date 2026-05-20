@@ -205,12 +205,18 @@ impl RemoteTargetHandle<'_> {
             .await
     }
 
-    pub(crate) async fn transfer_import_from_body(
+    pub(crate) async fn transfer_import_from_archive_stream<S, E>(
         &self,
         req: &TransferImportRequest,
-        body: reqwest::Body,
-    ) -> Result<TransferImportResponse, DaemonClientError> {
-        self.client.transfer_import_from_body(req, body).await
+        stream: S,
+    ) -> Result<TransferImportResponse, DaemonClientError>
+    where
+        S: futures_util::TryStream<Ok = bytes::Bytes, Error = E> + Send + 'static,
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        self.client
+            .transfer_import_from_archive_stream(req, stream)
+            .await
     }
 
     pub(crate) async fn clear_on_transport_error<T>(

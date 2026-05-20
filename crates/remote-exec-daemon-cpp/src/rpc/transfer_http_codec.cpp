@@ -76,6 +76,22 @@ void require_uncompressed_transfer(const std::string& compression) {
     }
 }
 
+void require_transfer_stream_version(const HttpRequest& request) {
+    const std::string version = required_header(request, server_contract::TRANSFER_STREAM_VERSION_HEADER);
+    if (version != server_contract::TRANSFER_STREAM_VERSION_VALUE) {
+        throw TransferFailure(TransferRpcCode::BadRequest,
+                              "unsupported transfer stream protocol version `" + version + "`");
+    }
+}
+
+void require_transfer_stream_content_type(const HttpRequest& request) {
+    const std::string content_type = required_header(request, "content-type");
+    if (content_type != server_contract::TRANSFER_STREAM_CONTENT_TYPE) {
+        throw TransferFailure(TransferRpcCode::BadRequest,
+                              "unsupported transfer stream content type `" + content_type + "`");
+    }
+}
+
 TransferImportMetadata parse_transfer_import_metadata(const HttpRequest& request) {
     TransferImportMetadata metadata;
     metadata.destination_path =
@@ -108,6 +124,8 @@ TransferImportMetadata parse_transfer_import_metadata(const HttpRequest& request
 
 void write_transfer_export_headers(HttpResponse& response, const ExportedPayload& payload) {
     response.headers["Content-Type"] = server_contract::TRANSFER_EXPORT_CONTENT_TYPE;
+    response.headers[server_contract::TRANSFER_STREAM_VERSION_HEADER] =
+        server_contract::TRANSFER_STREAM_VERSION_VALUE;
     response.headers[server_contract::TRANSFER_SOURCE_TYPE_HEADER] = transfer_source_type_wire_value(payload.source_type);
     response.headers[server_contract::TRANSFER_COMPRESSION_HEADER] = "none";
 }

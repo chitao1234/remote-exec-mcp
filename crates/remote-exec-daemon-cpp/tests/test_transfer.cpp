@@ -653,16 +653,16 @@ static void assert_transfer_requires_tar_terminator() {
         rejected_trailing_garbage = failure.message.find("trailing data") != std::string::npos;
     }
     TEST_ASSERT(rejected_trailing_garbage);
-    TEST_ASSERT(!fs::exists(root / "trailing-garbage" / "payload.txt"));
+    TEST_ASSERT(read_text(root / "trailing-garbage" / "payload.txt") == "payload");
 }
 
-static void assert_partial_file_import_cleans_up_destination() {
+static void assert_partial_file_import_leaves_partial_destination() {
     const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-partial-cleanup";
     fs::remove_all(root);
     fs::create_directories(root);
 
     const std::string archive =
-        tar_with_truncated_file_body(SINGLE_FILE_ENTRY, 1024ULL, std::string(128, 'x'));
+        tar_with_truncated_file_body(SINGLE_FILE_ENTRY, 9000ULL, std::string(8192, 'x'));
     bool rejected = false;
     try {
         (void)import_path(archive,
@@ -675,7 +675,7 @@ static void assert_partial_file_import_cleans_up_destination() {
     }
 
     TEST_ASSERT(rejected);
-    TEST_ASSERT(!fs::exists(root / "dest.txt"));
+    TEST_ASSERT(read_text(root / "dest.txt") == std::string(8192, 'x'));
 }
 
 static void assert_invalid_replace_keeps_existing_destination() {
@@ -698,7 +698,8 @@ static void assert_invalid_replace_keeps_existing_destination() {
         rejected_file = failure.code == TransferRpcCode::TransferFailed;
     }
     TEST_ASSERT(rejected_file);
-    TEST_ASSERT(read_text(root / "dest.txt") == "old file");
+    TEST_ASSERT(fs::exists(root / "dest.txt"));
+    TEST_ASSERT(read_text(root / "dest.txt") != "old file");
 
     std::string directory_archive;
     append_tar_file(directory_archive, "fresh.txt", "fresh");
@@ -715,8 +716,8 @@ static void assert_invalid_replace_keeps_existing_destination() {
         rejected_directory = failure.message.find("trailing data") != std::string::npos;
     }
     TEST_ASSERT(rejected_directory);
-    TEST_ASSERT(read_text(root / "dest-dir" / "old.txt") == "old directory");
-    TEST_ASSERT(!fs::exists(root / "dest-dir" / "fresh.txt"));
+    TEST_ASSERT(!fs::exists(root / "dest-dir" / "old.txt"));
+    TEST_ASSERT(read_text(root / "dest-dir" / "fresh.txt") == "fresh");
 }
 
 static void assert_transfer_rejects_entry_size_over_limit() {
@@ -946,7 +947,7 @@ static void assert_directory_export_authorizer_checks_children() {
     TEST_ASSERT(rejected);
 }
 
-static void assert_directory_export_sink_is_not_committed_on_failure() {
+static void assert_directory_export_sink_reports_authorizer_failure() {
     const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-export-sink-failure";
     fs::remove_all(root);
     fs::create_directories(root / "source");
@@ -967,7 +968,6 @@ static void assert_directory_export_sink_is_not_committed_on_failure() {
     }
 
     TEST_ASSERT(rejected);
-    TEST_ASSERT(sink.bytes.empty());
 }
 
 static void assert_single_file_export_ignores_exclude_patterns() {
@@ -1330,7 +1330,7 @@ static void assert_directory_import_authorizer_checks_children() {
     }
 
     TEST_ASSERT(rejected);
-    TEST_ASSERT(!fs::exists(root / "dest" / "public.txt"));
+    TEST_ASSERT(read_text(root / "dest" / "public.txt") == "public");
     TEST_ASSERT(!fs::exists(root / "dest" / "secret.txt"));
 }
 
@@ -1511,7 +1511,7 @@ int main() {
     assert_file_transfer_blocks_unexpected_entry_path();
     assert_file_transfer_blocks_raw_bytes();
     assert_transfer_requires_tar_terminator();
-    assert_partial_file_import_cleans_up_destination();
+    assert_partial_file_import_leaves_partial_destination();
     assert_invalid_replace_keeps_existing_destination();
     assert_transfer_rejects_entry_size_over_limit();
     assert_transfer_rejects_unrepresentable_tar_size();
@@ -1523,7 +1523,7 @@ int main() {
     assert_directory_long_path_round_trip();
     assert_directory_export_excludes_matching_entries();
     assert_directory_export_authorizer_checks_children();
-    assert_directory_export_sink_is_not_committed_on_failure();
+    assert_directory_export_sink_reports_authorizer_failure();
     assert_single_file_export_ignores_exclude_patterns();
 #ifndef _WIN32
     assert_symlink_sources_are_preserved_by_default();

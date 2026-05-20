@@ -193,6 +193,80 @@ static std::string chunked_body(const std::string& body) {
     return out.str();
 }
 
+static void append_u64_be(std::string* output, std::uint64_t value) {
+    for (std::size_t i = 0; i < 8U; ++i) {
+        output->push_back(static_cast<char>((value >> ((7U - i) * 8U)) & 0xffU));
+    }
+}
+
+static std::uint64_t read_u64_be(const std::string& value, std::size_t offset) {
+    std::uint64_t output = 0U;
+    for (std::size_t i = 0; i < 8U; ++i) {
+        output = (output << 8U) | static_cast<unsigned char>(value[offset + i]);
+    }
+    return output;
+}
+
+static std::string transfer_frame(unsigned char frame_type, const std::string& payload) {
+    std::string output;
+    output.push_back(static_cast<char>(frame_type));
+    output.append(3, '\0');
+    append_u64_be(&output, static_cast<std::uint64_t>(payload.size()));
+    output.append(payload);
+    return output;
+}
+
+static std::string framed_transfer_body(const std::string& archive) {
+    std::string output = "REXFER2\n";
+    output += transfer_frame(0x01, archive);
+    output += transfer_frame(0x02, Json{{"archive_bytes", archive.size()}}.dump());
+    return output;
+}
+
+static std::string decode_framed_transfer_archive(const std::string& body) {
+    TEST_ASSERT(body.compare(0, 8, "REXFER2\n") == 0);
+    std::size_t offset = 8U;
+    std::string archive;
+    for (;;) {
+        TEST_ASSERT(offset + 12U <= body.size());
+        const unsigned char frame_type = static_cast<unsigned char>(body[offset]);
+        TEST_ASSERT(body[offset + 1U] == '\0');
+        TEST_ASSERT(body[offset + 2U] == '\0');
+        TEST_ASSERT(body[offset + 3U] == '\0');
+        const std::uint64_t payload_len = read_u64_be(body, offset + 4U);
+        offset += 12U;
+        TEST_ASSERT(payload_len <= static_cast<std::uint64_t>(body.size() - offset));
+        const std::string payload = body.substr(offset, static_cast<std::size_t>(payload_len));
+        offset += static_cast<std::size_t>(payload_len);
+        if (frame_type == 0x01U) {
+            archive += payload;
+            continue;
+        }
+        if (frame_type == 0x02U) {
+            TEST_ASSERT(Json::parse(payload).at("archive_bytes").get<std::uint64_t>() == archive.size());
+            return archive;
+        }
+        TEST_ASSERT(false);
+    }
+}
+
+static Json decode_framed_transfer_error(const std::string& body) {
+    TEST_ASSERT(body.compare(0, 8, "REXFER2\n") == 0);
+    std::size_t offset = 8U;
+    for (;;) {
+        TEST_ASSERT(offset + 12U <= body.size());
+        const unsigned char frame_type = static_cast<unsigned char>(body[offset]);
+        const std::uint64_t payload_len = read_u64_be(body, offset + 4U);
+        offset += 12U;
+        TEST_ASSERT(payload_len <= static_cast<std::uint64_t>(body.size() - offset));
+        const std::string payload = body.substr(offset, static_cast<std::size_t>(payload_len));
+        offset += static_cast<std::size_t>(payload_len);
+        if (frame_type == 0x03U) {
+            return Json::parse(payload);
+        }
+    }
+}
+
 static std::string encoded_destination_path_header(const fs::path& destination) {
     return base64_encode_bytes(destination.string());
 }
@@ -264,6 +338,8 @@ void assert_http_streaming_routes(AppState& state, const fs::path& root) {
     std::ostringstream import_request;
     import_request << "POST /v1/transfer/import HTTP/1.1\r\n"
                    << "Transfer-Encoding: chunked\r\n"
+                   << "Content-Type: application/vnd.remote-exec.transfer-stream.v2\r\n"
+                   << "x-remote-exec-transfer-stream-version: 2\r\n"
                    << "x-remote-exec-source-type: file\r\n"
                    << "x-remote-exec-destination-path: " << encoded_destination_path_header(imported_path) << "\r\n"
                    << "x-remote-exec-overwrite: replace\r\n"
@@ -271,7 +347,7 @@ void assert_http_streaming_routes(AppState& state, const fs::path& root) {
                    << "x-remote-exec-symlink-mode: preserve\r\n"
                    << "x-remote-exec-compression: none\r\n"
                    << "\r\n"
-                   << chunked_body(archive);
+                   << chunked_body(framed_transfer_body(archive));
 
     const std::string import_response = run_single_request(state, import_request.str());
     TEST_ASSERT(import_response.find("HTTP/1.1 200 OK\r\n") == 0);
@@ -283,6 +359,7 @@ void assert_http_streaming_routes(AppState& state, const fs::path& root) {
     std::ostringstream export_request;
     export_request << "POST /v1/transfer/export HTTP/1.1\r\n"
                    << "Content-Length: " << export_body.size() << "\r\n"
+                   << "x-remote-exec-transfer-stream-version: 2\r\n"
                    << "\r\n"
                    << export_body;
 
@@ -292,7 +369,8 @@ void assert_http_streaming_routes(AppState& state, const fs::path& root) {
     TEST_ASSERT(export_response.find("Connection: close\r\n") == std::string::npos);
     TEST_ASSERT(export_response.find("Content-Length:") == std::string::npos);
     TEST_ASSERT(export_response.find("x-remote-exec-source-type: file\r\n") != std::string::npos);
-    TEST_ASSERT(single_file_tar_body(decode_chunked_response_body(export_response)) == "streamed export");
+    TEST_ASSERT(single_file_tar_body(decode_framed_transfer_archive(decode_chunked_response_body(export_response))) ==
+                "streamed export");
 
     const fs::path sandbox_root = root / "sandbox";
     const fs::path read_allowed = sandbox_root / "read";
@@ -314,6 +392,7 @@ void assert_http_streaming_routes(AppState& state, const fs::path& root) {
     std::ostringstream denied_export_request;
     denied_export_request << "POST /v1/transfer/export HTTP/1.1\r\n"
                           << "Content-Length: " << denied_export_body.size() << "\r\n"
+                          << "x-remote-exec-transfer-stream-version: 2\r\n"
                           << "\r\n"
                           << denied_export_body;
     const std::string denied_export_response = run_single_request(sandbox_state, denied_export_request.str());
@@ -337,17 +416,21 @@ void assert_http_streaming_routes(AppState& state, const fs::path& root) {
     std::ostringstream recursive_deny_request;
     recursive_deny_request << "POST /v1/transfer/export HTTP/1.1\r\n"
                            << "Content-Length: " << recursive_deny_body.size() << "\r\n"
+                           << "x-remote-exec-transfer-stream-version: 2\r\n"
                            << "\r\n"
                            << recursive_deny_body;
     const std::string recursive_deny_response = run_single_request(recursive_deny_state, recursive_deny_request.str());
-    TEST_ASSERT(recursive_deny_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
-    TEST_ASSERT(recursive_deny_response.find("Transfer-Encoding: chunked\r\n") == std::string::npos);
-    TEST_ASSERT(Json::parse(response_body(recursive_deny_response)).at("code").get<std::string>() ==
-                "sandbox_denied");
+    TEST_ASSERT(recursive_deny_response.find("HTTP/1.1 200 OK\r\n") == 0);
+    TEST_ASSERT(recursive_deny_response.find("Transfer-Encoding: chunked\r\n") != std::string::npos);
+    TEST_ASSERT(decode_framed_transfer_error(decode_chunked_response_body(recursive_deny_response))
+                    .at("code")
+                    .get<std::string>() == "sandbox_denied");
 
     std::ostringstream denied_import_request;
     denied_import_request << "POST /v1/transfer/import HTTP/1.1\r\n"
                           << "Transfer-Encoding: chunked\r\n"
+                          << "Content-Type: application/vnd.remote-exec.transfer-stream.v2\r\n"
+                          << "x-remote-exec-transfer-stream-version: 2\r\n"
                           << "x-remote-exec-source-type: file\r\n"
                           << "x-remote-exec-destination-path: "
                           << encoded_destination_path_header(outside / "imported.txt") << "\r\n"
@@ -356,7 +439,7 @@ void assert_http_streaming_routes(AppState& state, const fs::path& root) {
                           << "x-remote-exec-symlink-mode: preserve\r\n"
                           << "x-remote-exec-compression: none\r\n"
                           << "\r\n"
-                          << chunked_body(archive);
+                          << chunked_body(framed_transfer_body(archive));
     const std::string denied_import_response = run_single_request(sandbox_state, denied_import_request.str());
     TEST_ASSERT(denied_import_response.find("HTTP/1.1 400 Bad Request\r\n") == 0);
     TEST_ASSERT(Json::parse(response_body(denied_import_response)).at("code").get<std::string>() == "sandbox_denied");

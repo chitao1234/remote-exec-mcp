@@ -1,14 +1,17 @@
 use remote_exec_proto::rpc::{
+    TRANSFER_STREAM_CONTENT_TYPE, TRANSFER_STREAM_PROTOCOL_VERSION, TRANSFER_STREAM_VERSION_HEADER,
     TransferExportMetadata, TransferHeaderError, TransferImportMetadata,
     parse_transfer_export_metadata_from_lookup, transfer_import_header_pairs,
 };
 use remote_exec_proto::transfer::TransferCompression;
+use reqwest::header::CONTENT_TYPE;
 
 use crate::daemon_client::DaemonClientError;
 
 pub(crate) fn parse_export_metadata(
     headers: &reqwest::header::HeaderMap,
 ) -> Result<TransferExportMetadata, DaemonClientError> {
+    require_transfer_stream_headers(headers)?;
     parse_transfer_export_metadata_from_lookup(|name| reqwest_header_string(headers, name))
         .map_err(|err| DaemonClientError::Decode(err.into()))
 }
@@ -17,6 +20,12 @@ pub(crate) fn apply_import_headers(
     builder: reqwest::RequestBuilder,
     metadata: &TransferImportMetadata,
 ) -> reqwest::RequestBuilder {
+    let builder = builder
+        .header(CONTENT_TYPE, TRANSFER_STREAM_CONTENT_TYPE)
+        .header(
+            TRANSFER_STREAM_VERSION_HEADER,
+            TRANSFER_STREAM_PROTOCOL_VERSION.to_string(),
+        );
     transfer_import_header_pairs(metadata)
         .into_iter()
         .fold(builder, |builder, (name, value)| {
@@ -43,21 +52,73 @@ fn reqwest_header_string(
         .transpose()
 }
 
+fn require_transfer_stream_headers(
+    headers: &reqwest::header::HeaderMap,
+) -> Result<(), DaemonClientError> {
+    let expected_version = TRANSFER_STREAM_PROTOCOL_VERSION.to_string();
+    match headers
+        .get(TRANSFER_STREAM_VERSION_HEADER)
+        .and_then(|value| value.to_str().ok())
+    {
+        Some(value) if value == expected_version => {}
+        Some(value) => {
+            return Err(DaemonClientError::Decode(anyhow::anyhow!(
+                "daemon returned unsupported transfer stream protocol version `{value}`"
+            )));
+        }
+        None => {
+            return Err(DaemonClientError::Decode(anyhow::anyhow!(
+                "daemon response missing `{TRANSFER_STREAM_VERSION_HEADER}`"
+            )));
+        }
+    }
+
+    match headers
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+    {
+        Some(value) if value == TRANSFER_STREAM_CONTENT_TYPE => Ok(()),
+        Some(value) => Err(DaemonClientError::Decode(anyhow::anyhow!(
+            "daemon returned unsupported transfer stream content type `{value}`"
+        ))),
+        None => Err(DaemonClientError::Decode(anyhow::anyhow!(
+            "daemon response missing `{}`",
+            CONTENT_TYPE.as_str()
+        ))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use remote_exec_proto::rpc::{
         TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
         TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
-        TRANSFER_SYMLINK_MODE_HEADER, TransferImportMetadata, TransferOverwrite,
-        TransferSourceType, TransferSymlinkMode, transfer_destination_path_header_value,
+        TRANSFER_STREAM_CONTENT_TYPE, TRANSFER_STREAM_PROTOCOL_VERSION,
+        TRANSFER_STREAM_VERSION_HEADER, TRANSFER_SYMLINK_MODE_HEADER, TransferImportMetadata,
+        TransferOverwrite, TransferSourceType, TransferSymlinkMode,
+        transfer_destination_path_header_value,
     };
     use remote_exec_proto::transfer::TransferCompression;
+    use reqwest::header::CONTENT_TYPE;
 
     use super::*;
 
+    fn transfer_stream_export_headers() -> reqwest::header::HeaderMap {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(CONTENT_TYPE, TRANSFER_STREAM_CONTENT_TYPE.parse().unwrap());
+        headers.insert(
+            TRANSFER_STREAM_VERSION_HEADER,
+            TRANSFER_STREAM_PROTOCOL_VERSION
+                .to_string()
+                .parse()
+                .unwrap(),
+        );
+        headers
+    }
+
     #[test]
     fn transfer_codec_parses_export_metadata_from_reqwest_headers() {
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = transfer_stream_export_headers();
         headers.insert(TRANSFER_SOURCE_TYPE_HEADER, "directory".parse().unwrap());
 
         let parsed = parse_export_metadata(&headers).unwrap();
@@ -68,7 +129,7 @@ mod tests {
 
     #[test]
     fn transfer_codec_rejects_invalid_export_source_type_as_decode_error() {
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = transfer_stream_export_headers();
         headers.insert(TRANSFER_SOURCE_TYPE_HEADER, "folder".parse().unwrap());
 
         let err = parse_export_metadata(&headers).unwrap_err();

@@ -4,7 +4,9 @@ use anyhow::Context;
 use remote_exec_host::path_compare;
 use remote_exec_proto::path::{PathPolicy, host_policy, linux_path_policy, windows_path_policy};
 use remote_exec_proto::public::{TransferDestinationMode, TransferEndpoint};
-use remote_exec_proto::rpc::{RpcErrorCode, TransferPathInfoRequest};
+use remote_exec_proto::rpc::{
+    RpcErrorCode, TRANSFER_STREAM_PROTOCOL_VERSION, TransferPathInfoRequest,
+};
 use remote_exec_proto::transfer::TransferCompression;
 
 use crate::daemon_client::{RpcToolErrorMode, normalize_tool_error};
@@ -56,9 +58,10 @@ async fn endpoint_target_context(
 ) -> anyhow::Result<EndpointTargetContext> {
     match TransferEndpointTarget::from_name(target_name) {
         TransferEndpointTarget::Local => Ok(EndpointTargetContext::local()),
-        TransferEndpointTarget::Remote(target_name) => Ok(EndpointTargetContext::remote(
+        TransferEndpointTarget::Remote(target_name) => EndpointTargetContext::remote(
+            target_name,
             verified_remote_daemon_info(state, target_name).await?,
-        )),
+        ),
     }
 }
 
@@ -347,14 +350,22 @@ impl EndpointTargetContext {
         }
     }
 
-    fn remote(info: crate::CachedDaemonInfo) -> Self {
+    fn remote(target_name: &str, info: crate::CachedDaemonInfo) -> anyhow::Result<Self> {
+        let transfer_stream_version = info
+            .capabilities
+            .transfer_stream_protocol_version
+            .map(|version| version.get());
+        anyhow::ensure!(
+            transfer_stream_version == Some(TRANSFER_STREAM_PROTOCOL_VERSION),
+            "target `{target_name}` does not support transfer stream protocol version {TRANSFER_STREAM_PROTOCOL_VERSION}"
+        );
         let accepts_single_slash_windows_absolute =
             info.identity.platform.eq_ignore_ascii_case("windows");
-        Self::Remote {
+        Ok(Self::Remote {
             policy: remote_policy(&info.identity.platform),
             accepts_single_slash_windows_absolute,
             supports_transfer_compression: info.supports_transfer_compression,
-        }
+        })
     }
 
     fn policy(self) -> PathPolicy {

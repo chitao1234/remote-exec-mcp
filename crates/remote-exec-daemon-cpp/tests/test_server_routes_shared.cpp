@@ -154,17 +154,88 @@ static std::string encoded_destination_path_header(const fs::path& destination) 
     return base64_encode_bytes(destination.string());
 }
 
-static HttpRequest transfer_import_request(const fs::path& destination, const std::string& archive) {
+static void append_u64_be(std::string* output, std::uint64_t value) {
+    for (std::size_t i = 0; i < 8U; ++i) {
+        output->push_back(static_cast<char>((value >> ((7U - i) * 8U)) & 0xffU));
+    }
+}
+
+static std::uint64_t read_u64_be(const std::string& value, std::size_t offset) {
+    std::uint64_t output = 0U;
+    for (std::size_t i = 0; i < 8U; ++i) {
+        output = (output << 8U) | static_cast<unsigned char>(value[offset + i]);
+    }
+    return output;
+}
+
+static std::string transfer_frame(unsigned char frame_type, const std::string& payload) {
+    std::string output;
+    output.push_back(static_cast<char>(frame_type));
+    output.append(3, '\0');
+    append_u64_be(&output, static_cast<std::uint64_t>(payload.size()));
+    output.append(payload);
+    return output;
+}
+
+static std::string framed_transfer_body(const std::string& archive) {
+    std::string output(server_contract::TRANSFER_STREAM_PREFACE, server_contract::TRANSFER_STREAM_PREFACE_LEN);
+    output += transfer_frame(0x01, archive);
+    output += transfer_frame(0x02, Json{{"archive_bytes", archive.size()}}.dump());
+    return output;
+}
+
+static std::string decode_framed_transfer_archive(const std::string& body) {
+    TEST_ASSERT(body.compare(0, server_contract::TRANSFER_STREAM_PREFACE_LEN, server_contract::TRANSFER_STREAM_PREFACE) ==
+                0);
+    std::size_t offset = server_contract::TRANSFER_STREAM_PREFACE_LEN;
+    std::string archive;
+    for (;;) {
+        TEST_ASSERT(offset + server_contract::TRANSFER_STREAM_FRAME_HEADER_LEN <= body.size());
+        const unsigned char frame_type = static_cast<unsigned char>(body[offset]);
+        TEST_ASSERT(body[offset + 1U] == '\0');
+        TEST_ASSERT(body[offset + 2U] == '\0');
+        TEST_ASSERT(body[offset + 3U] == '\0');
+        const std::uint64_t payload_len = read_u64_be(body, offset + 4U);
+        offset += server_contract::TRANSFER_STREAM_FRAME_HEADER_LEN;
+        TEST_ASSERT(payload_len <= static_cast<std::uint64_t>(body.size() - offset));
+        const std::string payload = body.substr(offset, static_cast<std::size_t>(payload_len));
+        offset += static_cast<std::size_t>(payload_len);
+        if (frame_type == 0x01U) {
+            archive += payload;
+            continue;
+        }
+        if (frame_type == 0x02U) {
+            TEST_ASSERT(Json::parse(payload).at("archive_bytes").get<std::uint64_t>() == archive.size());
+            return archive;
+        }
+        TEST_ASSERT(false);
+    }
+}
+
+static HttpRequest transfer_export_request(const Json& body) {
+    HttpRequest request = json_request("/v1/transfer/export", body);
+    request.headers[server_contract::TRANSFER_STREAM_VERSION_HEADER] =
+        server_contract::TRANSFER_STREAM_VERSION_VALUE;
+    return request;
+}
+
+static HttpRequest transfer_import_request(const fs::path& destination,
+                                           const std::string& archive,
+                                           const char* source_type = "file",
+                                           const char* overwrite = "replace") {
     HttpRequest request;
     request.method = "POST";
     request.path = "/v1/transfer/import";
-    request.headers[server_contract::TRANSFER_SOURCE_TYPE_HEADER] = "file";
+    request.headers["content-type"] = server_contract::TRANSFER_STREAM_CONTENT_TYPE;
+    request.headers[server_contract::TRANSFER_STREAM_VERSION_HEADER] =
+        server_contract::TRANSFER_STREAM_VERSION_VALUE;
+    request.headers[server_contract::TRANSFER_SOURCE_TYPE_HEADER] = source_type;
     request.headers[server_contract::TRANSFER_DESTINATION_PATH_HEADER] = encoded_destination_path_header(destination);
-    request.headers[server_contract::TRANSFER_OVERWRITE_HEADER] = "replace";
+    request.headers[server_contract::TRANSFER_OVERWRITE_HEADER] = overwrite;
     request.headers[server_contract::TRANSFER_CREATE_PARENT_HEADER] = "true";
     request.headers[server_contract::TRANSFER_SYMLINK_MODE_HEADER] = "preserve";
     request.headers[server_contract::TRANSFER_COMPRESSION_HEADER] = "none";
-    request.body = archive;
+    request.body = framed_transfer_body(archive);
     return request;
 }
 
@@ -193,6 +264,8 @@ static void assert_target_info_and_basic_helpers(AppState& state) {
     TEST_ASSERT(info.at("supports_pty").get<bool>() == process_session_supports_pty());
     TEST_ASSERT(info.at("supports_image_read").get<bool>());
     TEST_ASSERT(!info.at("supports_transfer_compression").get<bool>());
+    TEST_ASSERT(info.at("transfer_stream_protocol_version").get<unsigned int>() ==
+                server_contract::TRANSFER_STREAM_PROTOCOL_VERSION);
     TEST_ASSERT(info.at("supports_port_forward").get<bool>());
     TEST_ASSERT(info.at("port_forward_protocol_version").get<unsigned int>() ==
                 server_contract::PORT_TUNNEL_PROTOCOL_VERSION);
@@ -242,12 +315,12 @@ static void assert_shared_server_contract() {
 static void assert_transfer_export_errors(AppState& state, const fs::path& root) {
     const HttpResponse compression_response = route_request(
         state,
-        json_request("/v1/transfer/export", Json{{"path", (root / "missing.txt").string()}, {"compression", "zstd"}}));
+        transfer_export_request(Json{{"path", (root / "missing.txt").string()}, {"compression", "zstd"}}));
     TEST_ASSERT(compression_response.status == 400);
     TEST_ASSERT(Json::parse(compression_response.body).at("code").get<std::string>() == "transfer_compression_unsupported");
 
     const HttpResponse missing_source_response =
-        route_request(state, json_request("/v1/transfer/export", Json{{"path", (root / "missing.txt").string()}}));
+        route_request(state, transfer_export_request(Json{{"path", (root / "missing.txt").string()}}));
     TEST_ASSERT(missing_source_response.status == 400);
     TEST_ASSERT(Json::parse(missing_source_response.body).at("code").get<std::string>() == "transfer_source_missing");
 }
@@ -368,12 +441,15 @@ static std::string assert_transfer_export_and_exclude_routes(AppState& state, co
     write_text_file(source_file, "route transfer payload");
 
     const HttpResponse export_response =
-        route_request(state, json_request("/v1/transfer/export", Json{{"path", source_file.string()}}));
+        route_request(state, transfer_export_request(Json{{"path", source_file.string()}}));
     TEST_ASSERT(export_response.status == 200);
     TEST_ASSERT(export_response.headers.at("Content-Type") == server_contract::TRANSFER_EXPORT_CONTENT_TYPE);
+    TEST_ASSERT(export_response.headers.at(server_contract::TRANSFER_STREAM_VERSION_HEADER) ==
+                server_contract::TRANSFER_STREAM_VERSION_VALUE);
     TEST_ASSERT(export_response.headers.at(server_contract::TRANSFER_SOURCE_TYPE_HEADER) == "file");
     TEST_ASSERT(export_response.headers.at(server_contract::TRANSFER_COMPRESSION_HEADER) == "none");
     TEST_ASSERT(!export_response.body.empty());
+    const std::string export_archive = decode_framed_transfer_archive(export_response.body);
 
     const fs::path exclude_source = root / "transfer-exclude-source";
     fs::create_directories(exclude_source / ".git");
@@ -388,9 +464,9 @@ static std::string assert_transfer_export_and_exclude_routes(AppState& state, co
     exclude_patterns.push_back(".git/**");
     const HttpResponse export_excluded_response = route_request(
         state,
-        json_request("/v1/transfer/export", Json{{"path", exclude_source.string()}, {"exclude", exclude_patterns}}));
+        transfer_export_request(Json{{"path", exclude_source.string()}, {"exclude", exclude_patterns}}));
     TEST_ASSERT(export_excluded_response.status == 200);
-    const ImportSummary excluded_import = import_path(export_excluded_response.body,
+    const ImportSummary excluded_import = import_path(decode_framed_transfer_archive(export_excluded_response.body),
                                                       TransferSourceType::Directory,
                                                       (root / "transfer-exclude-dest").string(),
                                                       TransferOverwrite::Replace,
@@ -406,27 +482,17 @@ static std::string assert_transfer_export_and_exclude_routes(AppState& state, co
     malformed_exclude.push_back("tmp/[abc");
     const HttpResponse invalid_exclude_response = route_request(
         state,
-        json_request("/v1/transfer/export", Json{{"path", exclude_source.string()}, {"exclude", malformed_exclude}}));
+        transfer_export_request(Json{{"path", exclude_source.string()}, {"exclude", malformed_exclude}}));
     TEST_ASSERT(invalid_exclude_response.status == 400);
     const Json invalid_exclude = Json::parse(invalid_exclude_response.body);
     TEST_ASSERT(invalid_exclude.at("code").get<std::string>() == "transfer_failed");
     TEST_ASSERT(invalid_exclude.at("message").get<std::string>().find("invalid exclude pattern") != std::string::npos);
 
-    return export_response.body;
+    return export_archive;
 }
 
 static void assert_transfer_import_success(AppState& state, const fs::path& root, const std::string& export_body) {
-    HttpRequest import_request;
-    import_request.method = "POST";
-    import_request.path = "/v1/transfer/import";
-    import_request.headers[server_contract::TRANSFER_SOURCE_TYPE_HEADER] = "file";
-    import_request.headers[server_contract::TRANSFER_DESTINATION_PATH_HEADER] =
-        encoded_destination_path_header(root / "transfer-dest.txt");
-    import_request.headers[server_contract::TRANSFER_OVERWRITE_HEADER] = "replace";
-    import_request.headers[server_contract::TRANSFER_CREATE_PARENT_HEADER] = "true";
-    import_request.headers[server_contract::TRANSFER_SYMLINK_MODE_HEADER] = "preserve";
-    import_request.headers[server_contract::TRANSFER_COMPRESSION_HEADER] = "none";
-    import_request.body = export_body;
+    HttpRequest import_request = transfer_import_request(root / "transfer-dest.txt", export_body);
 
     const HttpResponse import_response = route_request(state, import_request);
     TEST_ASSERT(import_response.status == 200);
@@ -506,17 +572,8 @@ static void assert_transfer_import_rejects_file_merge_into_directory(AppState& s
                                                                      const fs::path& root,
                                                                      const std::string& export_body) {
     fs::create_directories(root / "merge-dir");
-    HttpRequest merge_file_into_directory_request;
-    merge_file_into_directory_request.method = "POST";
-    merge_file_into_directory_request.path = "/v1/transfer/import";
-    merge_file_into_directory_request.headers[server_contract::TRANSFER_SOURCE_TYPE_HEADER] = "file";
-    merge_file_into_directory_request.headers[server_contract::TRANSFER_DESTINATION_PATH_HEADER] =
-        encoded_destination_path_header(root / "merge-dir");
-    merge_file_into_directory_request.headers[server_contract::TRANSFER_OVERWRITE_HEADER] = "merge";
-    merge_file_into_directory_request.headers[server_contract::TRANSFER_CREATE_PARENT_HEADER] = "true";
-    merge_file_into_directory_request.headers[server_contract::TRANSFER_SYMLINK_MODE_HEADER] = "preserve";
-    merge_file_into_directory_request.headers[server_contract::TRANSFER_COMPRESSION_HEADER] = "none";
-    merge_file_into_directory_request.body = export_body;
+    HttpRequest merge_file_into_directory_request =
+        transfer_import_request(root / "merge-dir", export_body, "file", "merge");
     const HttpResponse merge_file_into_directory_response = route_request(state, merge_file_into_directory_request);
     TEST_ASSERT(merge_file_into_directory_response.status == 400);
     const Json merge_file_into_directory_error = Json::parse(merge_file_into_directory_response.body);
@@ -537,7 +594,7 @@ static void assert_sandbox_denied(const HttpResponse& response) {
 
 static void assert_sandbox_export_and_path_info_denied(AppState& sandbox_state, const fs::path& outside) {
     const HttpResponse sandbox_export_denied = route_request(
-        sandbox_state, json_request("/v1/transfer/export", Json{{"path", (outside / "outside.txt").string()}}));
+        sandbox_state, transfer_export_request(Json{{"path", (outside / "outside.txt").string()}}));
     assert_sandbox_denied(sandbox_export_denied);
 
     const HttpResponse sandbox_path_info_denied = route_request(
@@ -547,25 +604,15 @@ static void assert_sandbox_export_and_path_info_denied(AppState& sandbox_state, 
 
 static std::string assert_sandbox_export_allowed(AppState& sandbox_state, const fs::path& read_allowed) {
     const HttpResponse sandbox_export_allowed = route_request(
-        sandbox_state, json_request("/v1/transfer/export", Json{{"path", (read_allowed / "source.txt").string()}}));
+        sandbox_state, transfer_export_request(Json{{"path", (read_allowed / "source.txt").string()}}));
     TEST_ASSERT(sandbox_export_allowed.status == 200);
-    return sandbox_export_allowed.body;
+    return decode_framed_transfer_archive(sandbox_export_allowed.body);
 }
 
 static void assert_sandbox_import_denied(AppState& sandbox_state,
                                          const fs::path& outside,
                                          const std::string& export_body) {
-    HttpRequest sandbox_import_denied_request;
-    sandbox_import_denied_request.method = "POST";
-    sandbox_import_denied_request.path = "/v1/transfer/import";
-    sandbox_import_denied_request.headers[server_contract::TRANSFER_SOURCE_TYPE_HEADER] = "file";
-    sandbox_import_denied_request.headers[server_contract::TRANSFER_DESTINATION_PATH_HEADER] =
-        encoded_destination_path_header(outside / "dest.txt");
-    sandbox_import_denied_request.headers[server_contract::TRANSFER_OVERWRITE_HEADER] = "replace";
-    sandbox_import_denied_request.headers[server_contract::TRANSFER_CREATE_PARENT_HEADER] = "true";
-    sandbox_import_denied_request.headers[server_contract::TRANSFER_SYMLINK_MODE_HEADER] = "preserve";
-    sandbox_import_denied_request.headers[server_contract::TRANSFER_COMPRESSION_HEADER] = "none";
-    sandbox_import_denied_request.body = export_body;
+    HttpRequest sandbox_import_denied_request = transfer_import_request(outside / "dest.txt", export_body);
     const HttpResponse sandbox_import_denied = route_request(sandbox_state, sandbox_import_denied_request);
     assert_sandbox_denied(sandbox_import_denied);
 }
@@ -577,17 +624,8 @@ static void assert_sandbox_symlink_target_denied(AppState& sandbox_state, const 
     append_tar_symlink(&denied_symlink_archive, "allowed-link", "denied-link-target/secret.txt");
     finalize_tar(&denied_symlink_archive);
 
-    HttpRequest sandbox_symlink_target_denied_request;
-    sandbox_symlink_target_denied_request.method = "POST";
-    sandbox_symlink_target_denied_request.path = "/v1/transfer/import";
-    sandbox_symlink_target_denied_request.headers[server_contract::TRANSFER_SOURCE_TYPE_HEADER] = "directory";
-    sandbox_symlink_target_denied_request.headers[server_contract::TRANSFER_DESTINATION_PATH_HEADER] =
-        encoded_destination_path_header(write_allowed);
-    sandbox_symlink_target_denied_request.headers[server_contract::TRANSFER_OVERWRITE_HEADER] = "merge";
-    sandbox_symlink_target_denied_request.headers[server_contract::TRANSFER_CREATE_PARENT_HEADER] = "true";
-    sandbox_symlink_target_denied_request.headers[server_contract::TRANSFER_SYMLINK_MODE_HEADER] = "preserve";
-    sandbox_symlink_target_denied_request.headers[server_contract::TRANSFER_COMPRESSION_HEADER] = "none";
-    sandbox_symlink_target_denied_request.body = denied_symlink_archive;
+    HttpRequest sandbox_symlink_target_denied_request =
+        transfer_import_request(write_allowed, denied_symlink_archive, "directory", "merge");
     const HttpResponse sandbox_symlink_target_denied =
         route_request(sandbox_state, sandbox_symlink_target_denied_request);
     assert_sandbox_denied(sandbox_symlink_target_denied);

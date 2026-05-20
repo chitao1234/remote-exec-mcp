@@ -349,6 +349,7 @@ port forwards require a long-running broker, so prefer `--broker-url` for
 - supports `exclude` glob patterns relative to each source root
 - skips unsupported special files inside directory trees with warnings
 - does not expose a public compression option; compression is broker-internal
+- is not transactional; failed transfers can leave partial destination changes
 
 `forward_ports`:
 

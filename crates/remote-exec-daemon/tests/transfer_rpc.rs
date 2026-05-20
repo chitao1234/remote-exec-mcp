@@ -6,8 +6,11 @@ use std::path::Path;
 
 use remote_exec_proto::rpc::{
     TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER,
-    TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER, TransferExportRequest,
-    TransferImportResponse, TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType,
+    TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER, TRANSFER_STREAM_CONTENT_TYPE,
+    TRANSFER_STREAM_FRAME_HEADER_LEN, TRANSFER_STREAM_PREFACE, TRANSFER_STREAM_PROTOCOL_VERSION,
+    TRANSFER_STREAM_VERSION_HEADER, TransferExportRequest, TransferImportResponse,
+    TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType, TransferStreamComplete,
+    TransferStreamFrameType, decode_transfer_stream_frame_header,
     transfer_destination_path_header_value,
 };
 use remote_exec_proto::transfer::TransferCompression;
@@ -69,6 +72,63 @@ fn encoded_destination_header(destination: impl ToString) -> (&'static str, Stri
     )
 }
 
+async fn archive_bytes_from_response(response: reqwest::Response) -> Vec<u8> {
+    assert_eq!(
+        response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        TRANSFER_STREAM_CONTENT_TYPE
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(TRANSFER_STREAM_VERSION_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        TRANSFER_STREAM_PROTOCOL_VERSION.to_string()
+    );
+    decode_transfer_stream_body(&response.bytes().await.unwrap())
+}
+
+fn decode_transfer_stream_body(body: &[u8]) -> Vec<u8> {
+    assert!(body.starts_with(TRANSFER_STREAM_PREFACE));
+    let mut offset = TRANSFER_STREAM_PREFACE.len();
+    let mut archive = Vec::new();
+
+    loop {
+        let header_end = offset + TRANSFER_STREAM_FRAME_HEADER_LEN;
+        let header = decode_transfer_stream_frame_header(
+            body[offset..header_end]
+                .try_into()
+                .expect("frame header length"),
+        )
+        .unwrap();
+        offset = header_end;
+        let payload_end = offset + header.payload_len as usize;
+        let payload = &body[offset..payload_end];
+        offset = payload_end;
+
+        match header.frame_type {
+            TransferStreamFrameType::Data => archive.extend_from_slice(payload),
+            TransferStreamFrameType::Complete => {
+                let complete: TransferStreamComplete = serde_json::from_slice(payload).unwrap();
+                assert_eq!(complete.archive_bytes, archive.len() as u64);
+                assert_eq!(offset, body.len());
+                return archive;
+            }
+            TransferStreamFrameType::Error => {
+                let error: remote_exec_proto::rpc::RpcErrorBody =
+                    serde_json::from_slice(payload).unwrap();
+                panic!("unexpected transfer stream error: {}", error.message);
+            }
+        }
+    }
+}
+
 #[tokio::test]
 async fn export_file_streams_archive_and_reports_file_source_type() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
@@ -87,7 +147,7 @@ async fn export_file_streams_archive_and_reports_file_source_type() {
             .unwrap(),
         "file"
     );
-    assert!(!response.bytes().await.unwrap().is_empty());
+    assert!(!archive_bytes_from_response(response).await.is_empty());
 }
 
 #[tokio::test]
@@ -183,7 +243,7 @@ async fn export_file_supports_zstd_compression() {
             .unwrap(),
         "zstd"
     );
-    let bytes = response.bytes().await.unwrap();
+    let bytes = archive_bytes_from_response(response).await;
     let decoded = decode_archive(&bytes, "zstd");
     let mut archive = tar::Archive::new(std::io::Cursor::new(decoded));
     let mut entries = archive.entries().unwrap();
@@ -234,7 +294,7 @@ async fn export_directory_preserves_symlinks_by_default() {
         .await;
 
     assert!(response.status().is_success());
-    let bytes = response.bytes().await.unwrap().to_vec();
+    let bytes = archive_bytes_from_response(response).await;
     let mut archive = tar::Archive::new(std::io::Cursor::new(bytes));
     let symlink = archive
         .entries()
@@ -285,7 +345,7 @@ async fn export_directory_skips_special_files_with_warning() {
             .is_none()
     );
 
-    let bytes = response.bytes().await.unwrap().to_vec();
+    let bytes = archive_bytes_from_response(response).await;
     let mut archive = tar::Archive::new(std::io::Cursor::new(bytes));
     let paths = archive
         .entries()
@@ -387,7 +447,7 @@ async fn export_directory_excludes_matching_entries_relative_to_source_root() {
         .await;
 
     assert!(response.status().is_success());
-    let bytes = response.bytes().await.unwrap().to_vec();
+    let bytes = archive_bytes_from_response(response).await;
     let mut archive = tar::Archive::new(std::io::Cursor::new(bytes));
     let paths = archive
         .entries()
@@ -429,7 +489,7 @@ async fn export_single_file_ignores_exclude_patterns() {
         .await;
 
     assert!(response.status().is_success());
-    let bytes = response.bytes().await.unwrap();
+    let bytes = archive_bytes_from_response(response).await;
     let mut archive = tar::Archive::new(std::io::Cursor::new(bytes));
     let mut entries = archive.entries().unwrap();
     let entry = entries.next().unwrap().unwrap();
@@ -462,7 +522,7 @@ async fn export_file_preserves_executable_mode_in_archive_header() {
             },
         )
         .await;
-    let bytes = response.bytes().await.unwrap();
+    let bytes = archive_bytes_from_response(response).await;
     let mut archive = tar::Archive::new(std::io::Cursor::new(bytes));
     let mut entries = archive.entries().unwrap();
     let header = entries.next().unwrap().unwrap().header().clone();
@@ -488,7 +548,7 @@ async fn import_accepts_forward_slash_windows_destination_paths() {
             },
         )
         .await;
-    let bytes = exported.bytes().await.unwrap().to_vec();
+    let bytes = archive_bytes_from_response(exported).await;
     let destination = fixture.workdir.join("release").join("artifact.txt");
     let destination_text = destination.display().to_string().replace('\\', "/");
 
@@ -541,7 +601,7 @@ async fn export_accepts_msys_style_windows_source_paths() {
             .unwrap(),
         "file"
     );
-    assert!(!response.bytes().await.unwrap().is_empty());
+    assert!(!archive_bytes_from_response(response).await.is_empty());
 }
 
 #[cfg(windows)]
@@ -562,7 +622,7 @@ async fn import_accepts_cygwin_style_windows_destination_paths() {
             },
         )
         .await;
-    let bytes = exported.bytes().await.unwrap().to_vec();
+    let bytes = archive_bytes_from_response(exported).await;
     let destination = fixture
         .workdir
         .join("cygdrive-release")
@@ -622,7 +682,7 @@ async fn export_accepts_windows_posix_root_source_paths() {
         .await;
 
     assert!(response.status().is_success());
-    assert!(!response.bytes().await.unwrap().is_empty());
+    assert!(!archive_bytes_from_response(response).await.is_empty());
 }
 
 #[cfg(windows)]
@@ -653,7 +713,7 @@ async fn import_accepts_windows_posix_root_destination_paths() {
             },
         )
         .await;
-    let bytes = exported.bytes().await.unwrap().to_vec();
+    let bytes = archive_bytes_from_response(exported).await;
     let root = fixture.workdir.join("synthetic-msys-root");
     let destination = root.join("release").join("artifact.txt");
 
@@ -700,7 +760,7 @@ async fn import_directory_replaces_exact_destination_and_preserves_exec_bits() {
     }
 
     let exported = export_path(&fixture, source_root.display(), TransferCompression::None).await;
-    let bytes = exported.bytes().await.unwrap().to_vec();
+    let bytes = archive_bytes_from_response(exported).await;
     let destination = fixture.workdir.join("release");
 
     let response = fixture
@@ -829,7 +889,7 @@ async fn import_directory_merge_preserves_unrelated_destination_entries() {
         .unwrap();
 
     let exported = export_path(&fixture, source_root.display(), TransferCompression::None).await;
-    let bytes = exported.bytes().await.unwrap().to_vec();
+    let bytes = archive_bytes_from_response(exported).await;
 
     let response = fixture
         .raw_post_bytes(
@@ -912,7 +972,7 @@ async fn import_rejects_existing_destination_when_overwrite_is_fail() {
     tokio::fs::write(&destination, "old\n").await.unwrap();
 
     let exported = export_path(&fixture, source.display(), TransferCompression::None).await;
-    let bytes = exported.bytes().await.unwrap().to_vec();
+    let bytes = archive_bytes_from_response(exported).await;
 
     let response = fixture
         .raw_post_bytes(
@@ -951,7 +1011,7 @@ async fn import_rejects_missing_destination_header_as_bad_request() {
             },
         )
         .await;
-    let bytes = exported.bytes().await.unwrap().to_vec();
+    let bytes = archive_bytes_from_response(exported).await;
 
     let response = fixture
         .raw_post_bytes(
@@ -991,7 +1051,7 @@ async fn import_rejects_missing_create_parent_header_as_bad_request() {
             },
         )
         .await;
-    let bytes = exported.bytes().await.unwrap().to_vec();
+    let bytes = archive_bytes_from_response(exported).await;
     let destination = fixture.workdir.join("missing-create-parent.txt");
 
     let response = fixture
@@ -1033,7 +1093,7 @@ async fn import_rejects_invalid_create_parent_header_as_bad_request() {
             },
         )
         .await;
-    let bytes = exported.bytes().await.unwrap().to_vec();
+    let bytes = archive_bytes_from_response(exported).await;
     let destination = fixture.workdir.join("invalid-create-parent.txt");
 
     let response = fixture
@@ -1076,7 +1136,7 @@ async fn import_rejects_invalid_metadata_enum_header_as_bad_request() {
             },
         )
         .await;
-    let bytes = exported.bytes().await.unwrap().to_vec();
+    let bytes = archive_bytes_from_response(exported).await;
     let destination = fixture.workdir.join("invalid-overwrite.txt");
 
     let response = fixture
@@ -1109,7 +1169,7 @@ async fn import_accepts_omitted_optional_metadata_defaults() {
     tokio::fs::write(&source, "artifact\n").await.unwrap();
 
     let exported = export_path(&fixture, source.display(), TransferCompression::None).await;
-    let bytes = exported.bytes().await.unwrap().to_vec();
+    let bytes = archive_bytes_from_response(exported).await;
     let destination = fixture.workdir.join("defaults.txt");
 
     let response = fixture
@@ -1172,7 +1232,7 @@ async fn import_replaces_directory_with_file_at_the_exact_destination_path() {
         .unwrap();
 
     let exported = export_path(&fixture, source.display(), TransferCompression::None).await;
-    let bytes = exported.bytes().await.unwrap().to_vec();
+    let bytes = archive_bytes_from_response(exported).await;
 
     let response = fixture
         .raw_post_bytes(
@@ -1197,7 +1257,7 @@ async fn import_rejects_missing_parent_when_create_parent_is_false() {
     tokio::fs::write(&source, "artifact\n").await.unwrap();
 
     let exported = export_path(&fixture, source.display(), TransferCompression::None).await;
-    let bytes = exported.bytes().await.unwrap().to_vec();
+    let bytes = archive_bytes_from_response(exported).await;
 
     let response = fixture
         .raw_post_bytes(
@@ -1336,7 +1396,7 @@ allow = {allow}
     tokio::fs::write(&source, "artifact\n").await.unwrap();
 
     let exported = export_path(&fixture, source.display(), TransferCompression::None).await;
-    let bytes = exported.bytes().await.unwrap().to_vec();
+    let bytes = archive_bytes_from_response(exported).await;
 
     let response = fixture
         .raw_post_bytes(

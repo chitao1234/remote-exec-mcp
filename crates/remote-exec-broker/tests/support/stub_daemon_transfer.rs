@@ -3,12 +3,16 @@ use std::io::Cursor;
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header::CONTENT_TYPE};
 use remote_exec_proto::rpc::{
     RpcErrorBody, RpcErrorCode, TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER,
     TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
-    TRANSFER_SYMLINK_MODE_HEADER, TransferExportRequest, TransferHeaders, TransferImportResponse,
-    TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType, TransferWarning,
+    TRANSFER_STREAM_CONTENT_TYPE, TRANSFER_STREAM_DATA_FRAME_MAX_BYTES,
+    TRANSFER_STREAM_FRAME_HEADER_LEN, TRANSFER_STREAM_PREFACE, TRANSFER_STREAM_PROTOCOL_VERSION,
+    TRANSFER_STREAM_VERSION_HEADER, TRANSFER_SYMLINK_MODE_HEADER, TransferExportRequest,
+    TransferHeaders, TransferImportResponse, TransferPathInfoRequest, TransferPathInfoResponse,
+    TransferSourceType, TransferStreamComplete, TransferStreamFrameHeader, TransferStreamFrameType,
+    TransferWarning, decode_transfer_stream_frame_header, encode_transfer_stream_frame_header,
     parse_transfer_import_metadata,
 };
 use remote_exec_proto::transfer::TransferCompression;
@@ -113,8 +117,10 @@ pub(crate) async fn set_transfer_path_info_error_response(
 
 pub(super) async fn transfer_export(
     State(state): State<StubDaemonState>,
+    headers: HeaderMap,
     Json(req): Json<TransferExportRequest>,
 ) -> Result<(HeaderMap, Vec<u8>), (StatusCode, Json<RpcErrorBody>)> {
+    require_transfer_stream_headers(&headers)?;
     *state.last_transfer_export.lock().await = Some(StubTransferExportCapture {
         request: req.clone(),
     });
@@ -140,7 +146,15 @@ pub(super) async fn transfer_export(
                     TransferCompression::Zstd => "zstd",
                 }),
             );
-            Ok((headers, body))
+            headers.insert(
+                CONTENT_TYPE,
+                HeaderValue::from_static(TRANSFER_STREAM_CONTENT_TYPE),
+            );
+            headers.insert(
+                TRANSFER_STREAM_VERSION_HEADER,
+                HeaderValue::from_static("2"),
+            );
+            Ok((headers, framed_transfer_body(&body)))
         }
         StubTransferExportResponse::Error { status, body } => Err((status, Json(body))),
     }
@@ -161,6 +175,7 @@ pub(super) async fn transfer_import(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<TransferImportResponse>, (StatusCode, Json<RpcErrorBody>)> {
+    require_transfer_stream_headers(&headers)?;
     let destination_path = parse_transfer_import_metadata(&TransferHeaders {
         destination_path: headers
             .get(TRANSFER_DESTINATION_PATH_HEADER)
@@ -220,6 +235,8 @@ pub(super) async fn transfer_import(
         .unwrap_or_default()
         .to_string();
 
+    let archive_body = decode_transfer_stream_body(&body)?;
+
     *state.last_transfer_import.lock().await = Some(StubTransferImportCapture {
         destination_path,
         source_type: source_type.clone(),
@@ -227,8 +244,8 @@ pub(super) async fn transfer_import(
         overwrite: overwrite.clone(),
         create_parent,
         symlink_mode,
-        body_len: body.len(),
-        body: body.to_vec(),
+        body_len: archive_body.len(),
+        body: archive_body.clone(),
     });
 
     let parsed_source_type = match source_type.as_str() {
@@ -237,7 +254,7 @@ pub(super) async fn transfer_import(
         _ => TransferSourceType::File,
     };
     let (bytes_copied, files_copied, directories_copied, warnings) =
-        summarize_archive(&body, &parsed_source_type, &compression);
+        summarize_archive(&archive_body, &parsed_source_type, &compression);
 
     Ok(Json(TransferImportResponse {
         source_type: parsed_source_type.clone(),
@@ -247,6 +264,123 @@ pub(super) async fn transfer_import(
         replaced: overwrite == "replace",
         warnings,
     }))
+}
+
+fn require_transfer_stream_headers(
+    headers: &HeaderMap,
+) -> Result<(), (StatusCode, Json<RpcErrorBody>)> {
+    let expected_version = TRANSFER_STREAM_PROTOCOL_VERSION.to_string();
+    match headers
+        .get(TRANSFER_STREAM_VERSION_HEADER)
+        .and_then(|value| value.to_str().ok())
+    {
+        Some(value) if value == expected_version => {}
+        Some(value) => {
+            return Err(bad_request(format!(
+                "unsupported transfer stream protocol version `{value}`"
+            )));
+        }
+        None => {
+            return Err(bad_request(format!(
+                "missing header `{TRANSFER_STREAM_VERSION_HEADER}`"
+            )));
+        }
+    }
+
+    if let Some(value) = headers
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+    {
+        if value != TRANSFER_STREAM_CONTENT_TYPE && value != "application/json" {
+            return Err(bad_request(format!(
+                "unsupported transfer stream content type `{value}`"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn bad_request(message: String) -> (StatusCode, Json<RpcErrorBody>) {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(RpcErrorBody::new(RpcErrorCode::BadRequest, message)),
+    )
+}
+
+fn framed_transfer_body(body: &[u8]) -> Vec<u8> {
+    let mut output = Vec::new();
+    output.extend_from_slice(TRANSFER_STREAM_PREFACE);
+    for chunk in body.chunks(TRANSFER_STREAM_DATA_FRAME_MAX_BYTES as usize) {
+        let header = encode_transfer_stream_frame_header(TransferStreamFrameHeader {
+            frame_type: TransferStreamFrameType::Data,
+            payload_len: chunk.len() as u64,
+        });
+        output.extend_from_slice(&header);
+        output.extend_from_slice(chunk);
+    }
+    let complete = serde_json::to_vec(&TransferStreamComplete {
+        archive_bytes: body.len() as u64,
+    })
+    .unwrap();
+    let header = encode_transfer_stream_frame_header(TransferStreamFrameHeader {
+        frame_type: TransferStreamFrameType::Complete,
+        payload_len: complete.len() as u64,
+    });
+    output.extend_from_slice(&header);
+    output.extend_from_slice(&complete);
+    output
+}
+
+fn decode_transfer_stream_body(body: &[u8]) -> Result<Vec<u8>, (StatusCode, Json<RpcErrorBody>)> {
+    if !body.starts_with(TRANSFER_STREAM_PREFACE) {
+        return Err(bad_request("invalid transfer stream preface".to_string()));
+    }
+    let mut offset = TRANSFER_STREAM_PREFACE.len();
+    let mut archive = Vec::new();
+
+    loop {
+        if body.len().saturating_sub(offset) < TRANSFER_STREAM_FRAME_HEADER_LEN {
+            return Err(bad_request(
+                "transfer stream ended before frame header".to_string(),
+            ));
+        }
+        let header_end = offset + TRANSFER_STREAM_FRAME_HEADER_LEN;
+        let header = decode_transfer_stream_frame_header(
+            body[offset..header_end]
+                .try_into()
+                .expect("frame header length"),
+        )
+        .map_err(|err| bad_request(err.to_string()))?;
+        offset = header_end;
+        let payload_len = header.payload_len as usize;
+        if body.len().saturating_sub(offset) < payload_len {
+            return Err(bad_request(
+                "transfer stream ended before frame payload".to_string(),
+            ));
+        }
+        let payload_end = offset + payload_len;
+        let payload = &body[offset..payload_end];
+        offset = payload_end;
+
+        match header.frame_type {
+            TransferStreamFrameType::Data => archive.extend_from_slice(payload),
+            TransferStreamFrameType::Complete => {
+                let complete: TransferStreamComplete =
+                    serde_json::from_slice(payload).map_err(|err| bad_request(err.to_string()))?;
+                if complete.archive_bytes != archive.len() as u64 {
+                    return Err(bad_request(
+                        "transfer stream complete byte count mismatch".to_string(),
+                    ));
+                }
+                return Ok(archive);
+            }
+            TransferStreamFrameType::Error => {
+                let error: RpcErrorBody =
+                    serde_json::from_slice(payload).map_err(|err| bad_request(err.to_string()))?;
+                return Err((StatusCode::BAD_REQUEST, Json(error)));
+            }
+        }
+    }
 }
 
 fn stub_directory_archive() -> Vec<u8> {

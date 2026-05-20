@@ -15,6 +15,7 @@ winpty = ["dep:winptyrs", "remote-exec-host/winpty"]
 anyhow = { workspace = true }
 axum = { workspace = true }
 base64 = { workspace = true }
+bytes = { workspace = true }
 chardetng = { workspace = true }
 encoding_rs = { workspace = true }
 futures-util = { workspace = true }
