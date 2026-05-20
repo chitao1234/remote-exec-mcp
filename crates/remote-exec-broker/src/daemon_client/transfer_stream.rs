@@ -2,8 +2,9 @@ use bytes::Bytes;
 use futures_util::{Stream, StreamExt, TryStream, TryStreamExt};
 use remote_exec_proto::rpc::{
     RpcErrorBody, RpcErrorCode, TRANSFER_STREAM_FRAME_HEADER_LEN, TRANSFER_STREAM_PREFACE,
-    TransferStreamComplete, TransferStreamFrameHeader, TransferStreamFrameType,
-    decode_transfer_stream_frame_header, encode_transfer_stream_frame_header,
+    TransferStreamComplete, TransferStreamFrameType, decode_transfer_stream_frame_header,
+    encode_transfer_stream_complete_frame, encode_transfer_stream_data_frame,
+    parse_transfer_stream_complete_payload,
 };
 use reqwest::StatusCode;
 
@@ -89,27 +90,11 @@ where
 }
 
 pub(crate) fn data_frame(payload: &[u8]) -> Bytes {
-    let header = encode_transfer_stream_frame_header(TransferStreamFrameHeader {
-        frame_type: TransferStreamFrameType::Data,
-        payload_len: payload.len() as u64,
-    });
-    let mut bytes = Vec::with_capacity(header.len() + payload.len());
-    bytes.extend_from_slice(&header);
-    bytes.extend_from_slice(payload);
-    Bytes::from(bytes)
+    Bytes::from(encode_transfer_stream_data_frame(payload))
 }
 
 pub(crate) fn complete_frame(archive_bytes: u64) -> Bytes {
-    let payload = serde_json::to_vec(&TransferStreamComplete { archive_bytes })
-        .expect("transfer complete payload serializes");
-    let header = encode_transfer_stream_frame_header(TransferStreamFrameHeader {
-        frame_type: TransferStreamFrameType::Complete,
-        payload_len: payload.len() as u64,
-    });
-    let mut bytes = Vec::with_capacity(header.len() + payload.len());
-    bytes.extend_from_slice(&header);
-    bytes.extend_from_slice(&payload);
-    Bytes::from(bytes)
+    Bytes::from(encode_transfer_stream_complete_frame(archive_bytes))
 }
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -240,7 +225,8 @@ where
 }
 
 fn parse_complete_payload(payload: &[u8]) -> Result<TransferStreamComplete, DaemonClientError> {
-    serde_json::from_slice(payload).map_err(|err| DaemonClientError::Decode(err.into()))
+    parse_transfer_stream_complete_payload(payload)
+        .map_err(|err| DaemonClientError::Decode(err.into()))
 }
 
 fn error_payload_to_client_error(payload: &[u8]) -> DaemonClientError {
@@ -275,16 +261,10 @@ fn status_for_terminal_error(code: Option<RpcErrorCode>) -> StatusCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use remote_exec_proto::rpc::encode_transfer_stream_frame;
 
     fn frame(frame_type: TransferStreamFrameType, payload: &[u8]) -> Bytes {
-        let header = encode_transfer_stream_frame_header(TransferStreamFrameHeader {
-            frame_type,
-            payload_len: payload.len() as u64,
-        });
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&header);
-        bytes.extend_from_slice(payload);
-        Bytes::from(bytes)
+        Bytes::from(encode_transfer_stream_frame(frame_type, payload))
     }
 
     fn complete_payload() -> Vec<u8> {

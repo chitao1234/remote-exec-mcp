@@ -16,8 +16,9 @@ use remote_exec_host::transfer::archive::ExportArchiveStreamItem;
 use remote_exec_proto::rpc::{
     RpcErrorBody, TRANSFER_STREAM_FRAME_HEADER_LEN, TRANSFER_STREAM_PREFACE, TransferExportRequest,
     TransferImportResponse, TransferPathInfoRequest, TransferPathInfoResponse,
-    TransferStreamComplete, TransferStreamFrameHeader, TransferStreamFrameType,
-    decode_transfer_stream_frame_header, encode_transfer_stream_frame_header,
+    TransferStreamFrameType, decode_transfer_stream_frame_header,
+    encode_transfer_stream_complete_frame, encode_transfer_stream_data_frame,
+    encode_transfer_stream_frame, parse_transfer_stream_complete_payload,
 };
 
 use crate::AppState;
@@ -224,7 +225,7 @@ where
 }
 
 fn parse_complete_payload(payload: &[u8]) -> Result<(), std::io::Error> {
-    serde_json::from_slice::<TransferStreamComplete>(payload)
+    parse_transfer_stream_complete_payload(payload)
         .map(|_| ())
         .map_err(|err| {
             invalid_transfer_stream(format!("malformed transfer stream complete frame: {err}"))
@@ -290,39 +291,19 @@ fn framed_export_stream(
 }
 
 fn data_frame(bytes: Bytes) -> Bytes {
-    let header = encode_transfer_stream_frame_header(TransferStreamFrameHeader {
-        frame_type: TransferStreamFrameType::Data,
-        payload_len: bytes.len() as u64,
-    });
-    let mut output = Vec::with_capacity(header.len() + bytes.len());
-    output.extend_from_slice(&header);
-    output.extend_from_slice(&bytes);
-    Bytes::from(output)
+    Bytes::from(encode_transfer_stream_data_frame(&bytes))
 }
 
 fn complete_frame(archive_bytes: u64) -> Bytes {
-    let payload = serde_json::to_vec(&TransferStreamComplete { archive_bytes })
-        .expect("transfer complete payload serializes");
-    let header = encode_transfer_stream_frame_header(TransferStreamFrameHeader {
-        frame_type: TransferStreamFrameType::Complete,
-        payload_len: payload.len() as u64,
-    });
-    let mut output = Vec::with_capacity(header.len() + payload.len());
-    output.extend_from_slice(&header);
-    output.extend_from_slice(&payload);
-    Bytes::from(output)
+    Bytes::from(encode_transfer_stream_complete_frame(archive_bytes))
 }
 
 fn error_frame(error: RpcErrorBody) -> Bytes {
     let payload = serde_json::to_vec(&error).expect("transfer error payload serializes");
-    let header = encode_transfer_stream_frame_header(TransferStreamFrameHeader {
-        frame_type: TransferStreamFrameType::Error,
-        payload_len: payload.len() as u64,
-    });
-    let mut output = Vec::with_capacity(header.len() + payload.len());
-    output.extend_from_slice(&header);
-    output.extend_from_slice(&payload);
-    Bytes::from(output)
+    Bytes::from(encode_transfer_stream_frame(
+        TransferStreamFrameType::Error,
+        &payload,
+    ))
 }
 
 fn transfer_error_body(err: remote_exec_host::TransferError) -> RpcErrorBody {

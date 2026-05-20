@@ -19,7 +19,9 @@ pub use stream::{
     TRANSFER_STREAM_PREFACE, TRANSFER_STREAM_PROTOCOL_VERSION, TRANSFER_STREAM_VERSION_HEADER,
     TransferStreamComplete, TransferStreamFrameDecodeError, TransferStreamFrameHeader,
     TransferStreamFrameType, decode_transfer_stream_frame_header,
-    encode_transfer_stream_frame_header,
+    encode_transfer_stream_complete_frame, encode_transfer_stream_data_frame,
+    encode_transfer_stream_frame, encode_transfer_stream_frame_header,
+    parse_transfer_stream_complete_payload,
 };
 pub use types::{
     TransferHeaderError, TransferHeaderErrorKind, TransferImportResponse, TransferPathInfoRequest,

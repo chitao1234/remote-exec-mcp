@@ -13,124 +13,9 @@
 #include "rpc/server_route_transfer.h"
 #include "rpc/transfer_http_codec.h"
 #include "rpc/transfer_request_utils.h"
+#include "rpc/transfer_stream_codec.h"
 
 namespace {
-
-enum TransferStreamFrameType {
-    TRANSFER_STREAM_FRAME_DATA = 0x01,
-    TRANSFER_STREAM_FRAME_COMPLETE = 0x02,
-    TRANSFER_STREAM_FRAME_ERROR = 0x03,
-};
-
-TransferRpcCode transfer_rpc_code_from_wire_value(const std::string& code) {
-    if (code == "bad_request") {
-        return TransferRpcCode::BadRequest;
-    }
-    if (code == "sandbox_denied") {
-        return TransferRpcCode::SandboxDenied;
-    }
-    if (code == "transfer_path_not_absolute") {
-        return TransferRpcCode::PathNotAbsolute;
-    }
-    if (code == "transfer_destination_exists") {
-        return TransferRpcCode::DestinationExists;
-    }
-    if (code == "transfer_parent_missing") {
-        return TransferRpcCode::ParentMissing;
-    }
-    if (code == "transfer_destination_unsupported") {
-        return TransferRpcCode::DestinationUnsupported;
-    }
-    if (code == "transfer_compression_unsupported") {
-        return TransferRpcCode::CompressionUnsupported;
-    }
-    if (code == "transfer_source_unsupported") {
-        return TransferRpcCode::SourceUnsupported;
-    }
-    if (code == "transfer_source_missing") {
-        return TransferRpcCode::SourceMissing;
-    }
-    if (code == "internal_error") {
-        return TransferRpcCode::Internal;
-    }
-    return TransferRpcCode::TransferFailed;
-}
-
-std::uint64_t read_u64_be(const unsigned char* data) {
-    std::uint64_t value = 0U;
-    for (std::size_t i = 0; i < 8U; ++i) {
-        value = (value << 8U) | static_cast<std::uint64_t>(data[i]);
-    }
-    return value;
-}
-
-void write_u64_be(std::uint64_t value, char* output) {
-    for (std::size_t i = 0; i < 8U; ++i) {
-        output[7U - i] = static_cast<char>(value & 0xffU);
-        value >>= 8U;
-    }
-}
-
-std::string encode_transfer_stream_frame(unsigned char frame_type, const char* payload, std::size_t payload_size) {
-    std::string frame(server_contract::TRANSFER_STREAM_FRAME_HEADER_LEN, '\0');
-    frame[0] = static_cast<char>(frame_type);
-    frame[1] = '\0';
-    frame[2] = '\0';
-    frame[3] = '\0';
-    write_u64_be(static_cast<std::uint64_t>(payload_size), &frame[4]);
-    frame.append(payload, payload_size);
-    return frame;
-}
-
-std::string encode_transfer_stream_frame(unsigned char frame_type, const std::string& payload) {
-    return encode_transfer_stream_frame(frame_type, payload.data(), payload.size());
-}
-
-std::string transfer_complete_payload(std::uint64_t archive_bytes) {
-    return Json{{"archive_bytes", archive_bytes}}.dump();
-}
-
-std::string transfer_error_payload(TransferRpcCode code, const std::string& message) {
-    return Json{{"code", transfer_error_code_name(code)}, {"message", message}}.dump();
-}
-
-std::string transfer_error_payload(const SandboxError& ex) {
-    return transfer_error_payload(TransferRpcCode::SandboxDenied, ex.what());
-}
-
-std::string transfer_error_payload(const TransferFailure& failure) {
-    return transfer_error_payload(failure.code, failure.message);
-}
-
-std::string transfer_error_payload(const std::exception& ex) {
-    return transfer_error_payload(TransferRpcCode::Internal, ex.what());
-}
-
-void parse_complete_payload(const std::string& payload) {
-    try {
-        const Json body = Json::parse(payload);
-        (void)body.at("archive_bytes").get<std::uint64_t>();
-    } catch (const TransferFailure&) {
-        throw;
-    } catch (const std::exception& ex) {
-        throw TransferFailure(TransferRpcCode::BadRequest,
-                              std::string("malformed transfer stream complete frame: ") + ex.what());
-    }
-}
-
-void throw_error_payload(const std::string& payload) {
-    try {
-        const Json body = Json::parse(payload);
-        const std::string code = body.value("code", std::string("transfer_failed"));
-        const std::string message = body.value("message", std::string("transfer stream error"));
-        throw TransferFailure(transfer_rpc_code_from_wire_value(code), message);
-    } catch (const TransferFailure&) {
-        throw;
-    } catch (const std::exception& ex) {
-        throw TransferFailure(TransferRpcCode::BadRequest,
-                              std::string("malformed transfer stream error frame: ") + ex.what());
-    }
-}
 
 class TransferStreamArchiveReader : public TransferArchiveReader {
 public:
@@ -212,10 +97,10 @@ private:
             if (header[2] != 0U || header[3] != 0U) {
                 throw TransferFailure(TransferRpcCode::BadRequest, "transfer stream frame reserved field must be zero");
             }
-            const std::uint64_t payload_len = read_u64_be(header + 4);
+            const std::uint64_t payload_len = transfer_stream::read_u64_be(header + 4);
             const std::uint64_t limit =
-                frame_type == TRANSFER_STREAM_FRAME_DATA ? server_contract::TRANSFER_STREAM_DATA_FRAME_MAX_BYTES
-                                                         : server_contract::TRANSFER_STREAM_CONTROL_FRAME_MAX_BYTES;
+                frame_type == transfer_stream::FRAME_DATA ? server_contract::TRANSFER_STREAM_DATA_FRAME_MAX_BYTES
+                                                          : server_contract::TRANSFER_STREAM_CONTROL_FRAME_MAX_BYTES;
             if (payload_len > limit) {
                 throw TransferFailure(TransferRpcCode::BadRequest, "transfer stream frame payload is too large");
             }
@@ -228,7 +113,7 @@ private:
                 read_transport_exact(&payload[0], payload.size(), "transfer stream frame payload");
             }
 
-            if (frame_type == TRANSFER_STREAM_FRAME_DATA) {
+            if (frame_type == transfer_stream::FRAME_DATA) {
                 if (payload.empty()) {
                     continue;
                 }
@@ -236,13 +121,13 @@ private:
                 offset_ = 0U;
                 return true;
             }
-            if (frame_type == TRANSFER_STREAM_FRAME_COMPLETE) {
-                parse_complete_payload(payload);
+            if (frame_type == transfer_stream::FRAME_COMPLETE) {
+                transfer_stream::parse_complete_payload(payload);
                 terminal_ = true;
                 return false;
             }
-            if (frame_type == TRANSFER_STREAM_FRAME_ERROR) {
-                throw_error_payload(payload);
+            if (frame_type == transfer_stream::FRAME_ERROR) {
+                transfer_stream::throw_error_payload(payload);
             }
             throw TransferFailure(TransferRpcCode::BadRequest, "transfer stream frame type is unknown");
         }
@@ -316,11 +201,10 @@ std::string framed_transfer_body(const std::string& archive) {
     while (offset < archive.size()) {
         const std::size_t size =
             std::min<std::size_t>(server_contract::TRANSFER_STREAM_DATA_FRAME_MAX_BYTES, archive.size() - offset);
-        body += encode_transfer_stream_frame(TRANSFER_STREAM_FRAME_DATA, archive.data() + offset, size);
+        body += transfer_stream::data_frame(archive.data() + offset, size);
         offset += size;
     }
-    const std::string complete = transfer_complete_payload(static_cast<std::uint64_t>(archive.size()));
-    body += encode_transfer_stream_frame(TRANSFER_STREAM_FRAME_COMPLETE, complete);
+    body += transfer_stream::complete_frame(static_cast<std::uint64_t>(archive.size()));
     return body;
 }
 
@@ -406,21 +290,19 @@ public:
         while (offset < size) {
             const std::size_t chunk_size =
                 std::min<std::size_t>(server_contract::TRANSFER_STREAM_DATA_FRAME_MAX_BYTES, size - offset);
-            send_http_chunk(
-                client_, encode_transfer_stream_frame(TRANSFER_STREAM_FRAME_DATA, data + offset, chunk_size));
+            send_http_chunk(client_, transfer_stream::data_frame(data + offset, chunk_size));
             archive_bytes_ += static_cast<std::uint64_t>(chunk_size);
             offset += chunk_size;
         }
     }
 
     void send_complete() {
-        const std::string payload = transfer_complete_payload(archive_bytes_);
-        send_http_chunk(client_, encode_transfer_stream_frame(TRANSFER_STREAM_FRAME_COMPLETE, payload));
+        send_http_chunk(client_, transfer_stream::complete_frame(archive_bytes_));
         send_chunked_terminator(client_);
     }
 
     void send_error_payload(const std::string& payload) {
-        send_http_chunk(client_, encode_transfer_stream_frame(TRANSFER_STREAM_FRAME_ERROR, payload));
+        send_http_chunk(client_, transfer_stream::error_frame(payload));
         send_chunked_terminator(client_);
     }
 
@@ -534,16 +416,16 @@ int handle_streaming_transfer_export(const AppState& state,
         } catch (const SandboxError& ex) {
             const std::string message = ex.what();
             log_message(LOG_WARN, "server", "transfer/export failed after stream start: " + message);
-            sink.send_error_payload(transfer_error_payload(ex));
+            sink.send_error_payload(transfer_stream::error_payload(TransferRpcCode::SandboxDenied, ex.what()));
         } catch (const TransferFailure& failure) {
             log_message(LOG_WARN, "server", "transfer/export failed after stream start: " + failure.message);
-            sink.send_error_payload(transfer_error_payload(failure));
+            sink.send_error_payload(transfer_stream::error_payload(failure));
         } catch (const SocketSendError&) {
             throw;
         } catch (const std::exception& ex) {
             const std::string message = ex.what();
             log_message(LOG_WARN, "server", "transfer/export failed after stream start: " + message);
-            sink.send_error_payload(transfer_error_payload(ex));
+            sink.send_error_payload(transfer_stream::error_payload(ex));
         }
         return 200;
     } catch (const SandboxError& ex) {

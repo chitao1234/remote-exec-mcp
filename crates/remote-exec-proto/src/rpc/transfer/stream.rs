@@ -75,6 +75,36 @@ pub fn encode_transfer_stream_frame_header(header: TransferStreamFrameHeader) ->
     output
 }
 
+pub fn encode_transfer_stream_frame(
+    frame_type: TransferStreamFrameType,
+    payload: &[u8],
+) -> Vec<u8> {
+    let header = encode_transfer_stream_frame_header(TransferStreamFrameHeader {
+        frame_type,
+        payload_len: payload.len() as u64,
+    });
+    let mut output = Vec::with_capacity(header.len() + payload.len());
+    output.extend_from_slice(&header);
+    output.extend_from_slice(payload);
+    output
+}
+
+pub fn encode_transfer_stream_data_frame(payload: &[u8]) -> Vec<u8> {
+    encode_transfer_stream_frame(TransferStreamFrameType::Data, payload)
+}
+
+pub fn encode_transfer_stream_complete_frame(archive_bytes: u64) -> Vec<u8> {
+    let payload = serde_json::to_vec(&TransferStreamComplete { archive_bytes })
+        .expect("transfer complete payload serializes");
+    encode_transfer_stream_frame(TransferStreamFrameType::Complete, &payload)
+}
+
+pub fn parse_transfer_stream_complete_payload(
+    payload: &[u8],
+) -> Result<TransferStreamComplete, serde_json::Error> {
+    serde_json::from_slice(payload)
+}
+
 pub fn decode_transfer_stream_frame_header(
     bytes: [u8; TRANSFER_STREAM_FRAME_HEADER_LEN],
 ) -> Result<TransferStreamFrameHeader, TransferStreamFrameDecodeError> {
@@ -118,6 +148,41 @@ mod tests {
         let decoded = decode_transfer_stream_frame_header(encoded).unwrap();
 
         assert_eq!(decoded, header);
+    }
+
+    #[test]
+    fn data_frame_encodes_header_and_payload() {
+        let encoded = encode_transfer_stream_data_frame(b"abc");
+        let header: [u8; TRANSFER_STREAM_FRAME_HEADER_LEN] = encoded
+            [..TRANSFER_STREAM_FRAME_HEADER_LEN]
+            .try_into()
+            .unwrap();
+
+        assert_eq!(
+            decode_transfer_stream_frame_header(header).unwrap(),
+            TransferStreamFrameHeader {
+                frame_type: TransferStreamFrameType::Data,
+                payload_len: 3,
+            }
+        );
+        assert_eq!(&encoded[TRANSFER_STREAM_FRAME_HEADER_LEN..], b"abc");
+    }
+
+    #[test]
+    fn complete_frame_payload_round_trips() {
+        let encoded = encode_transfer_stream_complete_frame(42);
+        let header: [u8; TRANSFER_STREAM_FRAME_HEADER_LEN] = encoded
+            [..TRANSFER_STREAM_FRAME_HEADER_LEN]
+            .try_into()
+            .unwrap();
+        let decoded = decode_transfer_stream_frame_header(header).unwrap();
+
+        assert_eq!(decoded.frame_type, TransferStreamFrameType::Complete);
+        assert_eq!(
+            parse_transfer_stream_complete_payload(&encoded[TRANSFER_STREAM_FRAME_HEADER_LEN..])
+                .unwrap(),
+            TransferStreamComplete { archive_bytes: 42 }
+        );
     }
 
     #[test]
