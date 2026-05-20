@@ -14,7 +14,6 @@
 #include "platform/platform.h"
 #include "port_forward/port_forward_endpoint.h"
 #include "port_forward/port_tunnel.h"
-#include "exec/process_session.h"
 #include "rpc/server_contract.h"
 #include "rpc/server_routes.h"
 #include "test_contract_fixtures.h"
@@ -49,6 +48,7 @@ void initialize_server_routes_state(AppState& state, const fs::path& root) {
     state.daemon_instance_id = "test-instance";
     state.hostname = "test-host";
     state.default_shell = stable_test_shell();
+    state.capabilities = detect_daemon_capabilities();
     state.port_tunnel_service = create_port_tunnel_service(state.config.port_forward_limits);
 }
 
@@ -261,7 +261,7 @@ static void assert_target_info_and_basic_helpers(AppState& state) {
     TEST_ASSERT(info_response.headers.at(request_id_header_name()) == "client-req-123");
     const Json info = Json::parse(info_response.body);
     TEST_ASSERT(info.at("target").get<std::string>() == "cpp-test");
-    TEST_ASSERT(info.at("supports_pty").get<bool>() == process_session_supports_pty());
+    TEST_ASSERT(info.at("supports_pty").get<bool>() == state.capabilities.supports_pty);
     TEST_ASSERT(info.at("supports_image_read").get<bool>());
     TEST_ASSERT(!info.at("supports_transfer_compression").get<bool>());
     TEST_ASSERT(info.at("transfer_stream_protocol_version").get<unsigned int>() ==
@@ -269,13 +269,6 @@ static void assert_target_info_and_basic_helpers(AppState& state) {
     TEST_ASSERT(info.at("supports_port_forward").get<bool>());
     TEST_ASSERT(info.at("port_forward_protocol_version").get<unsigned int>() ==
                 server_contract::PORT_TUNNEL_PROTOCOL_VERSION);
-
-    std::shared_ptr<PortTunnelService> saved_port_tunnel_service = state.port_tunnel_service;
-    state.port_tunnel_service.reset();
-    const DaemonCapabilities capabilities_without_forwarding = detect_daemon_capabilities(state);
-    TEST_ASSERT(!capabilities_without_forwarding.supports_port_forward);
-    TEST_ASSERT(capabilities_without_forwarding.port_forward_protocol_version == 0U);
-    state.port_tunnel_service = saved_port_tunnel_service;
 
     HttpRequest generated_request;
     generated_request.method = "POST";

@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 
+#include "capabilities/daemon_capabilities.h"
 #include "core/config.h"
 #include "policy/filesystem_sandbox.h"
 #include "platform/socket.h"
@@ -19,6 +20,7 @@ struct AppState {
     std::string daemon_instance_id;
     std::string hostname;
     std::string default_shell;
+    DaemonCapabilities capabilities;
     bool sandbox_enabled = false;
     CompiledFilesystemSandbox sandbox;
     SessionStore sessions;

@@ -2,10 +2,11 @@
 
 #include "json.hpp"
 
-struct AppState;
 using Json = nlohmann::json;
 
 struct DaemonCapabilities {
+    DaemonCapabilities();
+
     bool supports_pty;
     bool supports_image_read;
     bool supports_transfer_compression;
@@ -14,5 +15,5 @@ struct DaemonCapabilities {
     unsigned int transfer_stream_protocol_version;
 };
 
-DaemonCapabilities detect_daemon_capabilities(const AppState& state);
+DaemonCapabilities detect_daemon_capabilities();
 void write_daemon_capabilities(Json* target, const DaemonCapabilities& capabilities);

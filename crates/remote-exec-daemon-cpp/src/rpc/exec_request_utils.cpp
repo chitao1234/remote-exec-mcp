@@ -2,7 +2,6 @@
 
 #include "http/http_helpers.h"
 #include "platform/platform.h"
-#include "exec/process_session.h"
 #include "runtime/server.h"
 #include "rpc/server_request_utils.h"
 
@@ -62,7 +61,7 @@ ExecStartRequestSpec prepare_exec_start_request(const AppState& state, const Htt
         parsed.max_output_tokens = requested_max_output_tokens(body);
         parsed.cmd = body.at("cmd").get<std::string>();
         parsed.tty_requested = body.value("tty", false);
-        if (parsed.tty_requested && !process_session_supports_pty()) {
+        if (parsed.tty_requested && !state.capabilities.supports_pty) {
             throw ExecRequestFailure(400, "tty_unsupported", "tty is not supported on this host");
         }
 

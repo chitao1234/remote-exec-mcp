@@ -7,13 +7,14 @@
 #include <stdexcept>
 #include <thread>
 
-#include "runtime/daemon_thread.h"
+#include "capabilities/daemon_capabilities.h"
 #include "core/logging.h"
 #include "http/server_transport.h"
 #include "policy/path_policy.h"
 #include "platform/platform.h"
 #include "port_forward/port_forward_socket_ops.h"
 #include "port_forward/port_tunnel.h"
+#include "runtime/daemon_thread.h"
 #include "../port_forward/port_tunnel_service.h"
 
 namespace {
@@ -33,6 +34,7 @@ ServerRuntime::ServerRuntime(const DaemonConfig& config)
     state_.daemon_instance_id = daemon_instance_id();
     state_.hostname = platform::hostname();
     state_.default_shell = platform::resolve_default_shell(config.default_shell);
+    state_.capabilities = detect_daemon_capabilities();
     state_.sandbox_enabled = config.sandbox_configured;
     if (state_.sandbox_enabled) {
         state_.sandbox = compile_filesystem_sandbox(config.sandbox);

@@ -173,7 +173,7 @@ HttpResponse handle_target_info(const AppState& state) {
         {"platform", platform::platform_name()},
         {"arch", platform::arch_name()},
     };
-    write_daemon_capabilities(&body, detect_daemon_capabilities(state));
+    write_daemon_capabilities(&body, state.capabilities);
     write_json(response, body);
     return response;
 }
