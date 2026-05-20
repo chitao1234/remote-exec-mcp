@@ -134,6 +134,7 @@ fn append_export_source<W: Write>(
     Ok(warnings)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn append_directory_entries<W: Write>(
     builder: &mut tar::Builder<W>,
     root: &Path,
