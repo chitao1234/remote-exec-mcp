@@ -5,11 +5,12 @@ use std::time::Duration;
 use remote_exec_proto::port_tunnel::{read_frame, write_frame};
 use remote_exec_test_support::test_helpers;
 use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
+#[cfg(not(any(target_os = "solaris", target_os = "illumos")))]
+use rmcp::transport::TokioChildProcess;
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
     model::{CallToolRequestParams, CallToolResult, ClientInfo},
     service::RunningService,
-    transport::TokioChildProcess,
 };
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -17,8 +18,13 @@ use tokio::net::TcpListener;
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
 
+#[cfg(any(target_os = "solaris", target_os = "illumos"))]
+#[path = "../support/blocking_child_process.rs"]
+mod blocking_child_process;
 #[path = "../support/streamable_http_child.rs"]
 mod streamable_http_child;
+#[cfg(any(target_os = "solaris", target_os = "illumos"))]
+use blocking_child_process::BlockingChildProcess;
 const BROKER_TOOL_CALL_TIMEOUT: Duration = Duration::from_secs(30);
 const BROKER_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 const MULTI_TARGET_READY_TIMEOUT: Duration = Duration::from_secs(20);
@@ -138,8 +144,7 @@ impl BrokerFixture {
         let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_remote-exec-broker"));
         command.arg(&config_path);
         apply_quiet_test_logging(&mut command);
-        let transport = TokioChildProcess::new(command).unwrap();
-        let client = DummyClientHandler.serve(transport).await.unwrap();
+        let client = serve_broker_child_stdio(command).await;
 
         Self {
             _tempdir: tempdir,
@@ -241,6 +246,22 @@ impl BrokerFixture {
 
         ToolResult::from_call_tool_result(result)
     }
+}
+
+#[cfg(any(target_os = "solaris", target_os = "illumos"))]
+async fn serve_broker_child_stdio(
+    command: tokio::process::Command,
+) -> RunningService<RoleClient, DummyClientHandler> {
+    let transport = BlockingChildProcess::spawn(command).unwrap();
+    DummyClientHandler.serve(transport).await.unwrap()
+}
+
+#[cfg(not(any(target_os = "solaris", target_os = "illumos")))]
+async fn serve_broker_child_stdio(
+    command: tokio::process::Command,
+) -> RunningService<RoleClient, DummyClientHandler> {
+    let transport = TokioChildProcess::new(command).unwrap();
+    DummyClientHandler.serve(transport).await.unwrap()
 }
 
 pub struct HttpBrokerFixture {
