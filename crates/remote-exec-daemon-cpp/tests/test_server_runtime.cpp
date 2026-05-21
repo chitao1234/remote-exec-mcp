@@ -33,6 +33,7 @@ static DaemonConfig make_runtime_test_config(const fs::path& root) {
     config.max_request_header_bytes = DEFAULT_MAX_REQUEST_HEADER_BYTES;
     config.max_request_body_bytes = DEFAULT_MAX_REQUEST_BODY_BYTES;
     config.max_open_sessions = DEFAULT_MAX_OPEN_SESSIONS;
+    config.port_forward_limits.tunnel_io_timeout_ms = 100UL;
     return config;
 }
 
