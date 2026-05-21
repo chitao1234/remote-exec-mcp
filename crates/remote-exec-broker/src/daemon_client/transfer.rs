@@ -3,15 +3,40 @@ use futures_util::{StreamExt, TryStream, TryStreamExt};
 use remote_exec_proto::rpc::{
     TRANSFER_STREAM_PROTOCOL_VERSION, TRANSFER_STREAM_VERSION_HEADER, TransferExportMetadata,
     TransferExportRequest, TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
-    TransferPathInfoResponse,
+    TransferPathInfoResponse, TransferSourceType,
 };
 
 use crate::tools::transfer::codec;
 
 use super::{
     DaemonClient, DaemonClientError, RpcCallContext, RpcCallKind, RpcErrorDecodePolicy,
-    TransferExportResponse, TransferExportStream, transfer_stream,
+    transfer_stream,
 };
+
+#[derive(Debug, Clone)]
+pub struct TransferExportResponse {
+    pub source_type: TransferSourceType,
+}
+
+#[derive(Debug)]
+pub struct TransferExportStream {
+    pub source_type: TransferSourceType,
+    pub(super) response: reqwest::Response,
+}
+
+impl TransferExportStream {
+    pub fn into_stream(
+        self,
+    ) -> impl futures_util::Stream<Item = Result<bytes::Bytes, DaemonClientError>> {
+        transfer_stream::decode_response_body(self.response)
+    }
+
+    pub fn into_async_read(self) -> impl tokio::io::AsyncRead + Send + Unpin + 'static {
+        let stream =
+            transfer_stream::decode_response_body(self.response).map_err(std::io::Error::other);
+        tokio_util::io::StreamReader::new(stream.boxed())
+    }
+}
 
 impl DaemonClient {
     pub async fn transfer_path_info(
