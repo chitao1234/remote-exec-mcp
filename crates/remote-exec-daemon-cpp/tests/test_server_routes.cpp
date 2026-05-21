@@ -1,4 +1,5 @@
 #include "test_assert.h"
+#include <cctype>
 #include <cstdint>
 #include <string>
 #include <thread>
@@ -29,6 +30,41 @@ static std::string normalize_output(const std::string& input) {
         }
     }
     return output;
+}
+
+static std::string compact_pty_size_output(const std::string& input) {
+    std::string output;
+    output.reserve(input.size());
+    bool previous_space = true;
+    for (std::string::const_iterator it = input.begin(); it != input.end(); ++it) {
+        const unsigned char ch = static_cast<unsigned char>(*it);
+        const bool separator = ch == '\0' || ch == '\r' || ch == '\n' || ch == '\t' || ch == ';' || ch == '=' ||
+                               ch == ',';
+        if (separator || std::isspace(ch)) {
+            if (!previous_space) {
+                output.push_back(' ');
+                previous_space = true;
+            }
+            continue;
+        }
+        output.push_back(static_cast<char>(std::tolower(ch)));
+        previous_space = false;
+    }
+    if (!output.empty() && output[output.size() - 1] == ' ') {
+        output.erase(output.size() - 1);
+    }
+    return output;
+}
+
+static bool pty_size_output_matches(const std::string& output, unsigned short rows, unsigned short cols) {
+    const std::string compact = compact_pty_size_output(output);
+    const std::string row_text = std::to_string(rows);
+    const std::string col_text = std::to_string(cols);
+    return compact.find(row_text + " " + col_text) != std::string::npos ||
+           (compact.find("rows " + row_text) != std::string::npos &&
+            compact.find("columns " + col_text) != std::string::npos) ||
+           (compact.find(row_text + " rows") != std::string::npos &&
+            compact.find(col_text + " columns") != std::string::npos);
 }
 
 static std::string trim_trailing_exec_output(std::string output) {
@@ -84,6 +120,24 @@ static std::string append_running_exec_output_until_contains(AppState& state,
                                                              unsigned long timeout_ms) {
     const std::uint64_t started = platform::monotonic_ms();
     while (output.find(fragment) == std::string::npos && platform::monotonic_ms() - started < timeout_ms) {
+        const Json poll = exec_write_json(state, daemon_session_id, "", 250UL);
+        output += normalize_output(poll.at("output").get<std::string>());
+        if (!poll.at("running").get<bool>()) {
+            break;
+        }
+        platform::sleep_ms(10UL);
+    }
+    return output;
+}
+
+static std::string append_running_exec_output_until_pty_size(AppState& state,
+                                                             const std::string& daemon_session_id,
+                                                             std::string output,
+                                                             unsigned short rows,
+                                                             unsigned short cols,
+                                                             unsigned long timeout_ms) {
+    const std::uint64_t started = platform::monotonic_ms();
+    while (!pty_size_output_matches(output, rows, cols) && platform::monotonic_ms() - started < timeout_ms) {
         const Json poll = exec_write_json(state, daemon_session_id, "", 250UL);
         output += normalize_output(poll.at("output").get<std::string>());
         if (!poll.at("running").get<bool>()) {
@@ -287,7 +341,7 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
             route_request(state,
                           json_request("/v1/exec/start",
                                        Json{
-                                           {"cmd", "stty size; printf ready; IFS= read line; stty size; sleep 30"},
+                                           {"cmd", "stty -a; printf ready; IFS= read line; stty -a; sleep 30"},
                                            {"workdir", root.string()},
                                            {"login", false},
                                            {"tty", true},
@@ -297,21 +351,21 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
         const Json resize_started = Json::parse(resize_start_response.body);
         TEST_ASSERT(resize_started.at("running").get<bool>());
         std::string initial_size_output = normalize_output(resize_started.at("output").get<std::string>());
-        if (initial_size_output.find("24 120") == std::string::npos) {
-            initial_size_output = append_running_exec_output_until_contains(
-                state, resize_started.at("daemon_session_id").get<std::string>(), initial_size_output, "24 120", 2000UL);
+        if (!pty_size_output_matches(initial_size_output, 24U, 120U)) {
+            initial_size_output = append_running_exec_output_until_pty_size(
+                state, resize_started.at("daemon_session_id").get<std::string>(), initial_size_output, 24U, 120U, 2000UL);
         }
-        TEST_ASSERT(initial_size_output.find("24 120") != std::string::npos);
+        TEST_ASSERT(pty_size_output_matches(initial_size_output, 24U, 120U));
 
         const Json resized = exec_write_json_with_pty_size(
             state, resize_started.at("daemon_session_id").get<std::string>(), "\n", 1000UL, 33U, 101U);
         TEST_ASSERT(resized.at("running").get<bool>());
         std::string resize_output = normalize_output(resized.at("output").get<std::string>());
-        if (resize_output.find("33 101") == std::string::npos) {
-            resize_output = append_running_exec_output_until_contains(
-                state, resize_started.at("daemon_session_id").get<std::string>(), resize_output, "33 101", 2000UL);
+        if (!pty_size_output_matches(resize_output, 33U, 101U)) {
+            resize_output = append_running_exec_output_until_pty_size(
+                state, resize_started.at("daemon_session_id").get<std::string>(), resize_output, 33U, 101U, 2000UL);
         }
-        TEST_ASSERT(resize_output.find("33 101") != std::string::npos);
+        TEST_ASSERT(pty_size_output_matches(resize_output, 33U, 101U));
     }
 }
 

@@ -1,6 +1,7 @@
 #include <atomic>
 #include "test_assert.h"
 #include <cerrno>
+#include <cctype>
 #include <cstdint>
 #ifndef _WIN32
 #include <cstdlib>
@@ -211,6 +212,43 @@ static std::string normalize_output(const std::string& input) {
     return output;
 }
 
+#ifndef _WIN32
+static std::string compact_pty_size_output(const std::string& input) {
+    std::string output;
+    output.reserve(input.size());
+    bool previous_space = true;
+    for (std::string::const_iterator it = input.begin(); it != input.end(); ++it) {
+        const unsigned char ch = static_cast<unsigned char>(*it);
+        const bool separator = ch == '\0' || ch == '\r' || ch == '\n' || ch == '\t' || ch == ';' || ch == '=' ||
+                               ch == ',';
+        if (separator || std::isspace(ch)) {
+            if (!previous_space) {
+                output.push_back(' ');
+                previous_space = true;
+            }
+            continue;
+        }
+        output.push_back(static_cast<char>(std::tolower(ch)));
+        previous_space = false;
+    }
+    if (!output.empty() && output[output.size() - 1] == ' ') {
+        output.erase(output.size() - 1);
+    }
+    return output;
+}
+
+static bool pty_size_output_matches(const std::string& output, unsigned short rows, unsigned short cols) {
+    const std::string compact = compact_pty_size_output(output);
+    const std::string row_text = std::to_string(rows);
+    const std::string col_text = std::to_string(cols);
+    return compact.find(row_text + " " + col_text) != std::string::npos ||
+           (compact.find("rows " + row_text) != std::string::npos &&
+            compact.find("columns " + col_text) != std::string::npos) ||
+           (compact.find(row_text + " rows") != std::string::npos &&
+            compact.find(col_text + " columns") != std::string::npos);
+}
+#endif
+
 static Json start_test_command(SessionStore& store,
                                const std::string& command,
                                const std::string& workdir,
@@ -240,6 +278,7 @@ static std::string stable_test_shell() {
 #endif
 }
 
+#ifndef _WIN32
 static YieldTimeConfig fast_yield_time_config() {
     YieldTimeConfig config;
     config.exec_command = YieldTimeOperationConfig{1UL, 1000UL, 1UL};
@@ -263,14 +302,15 @@ static bool wait_until_true(const std::atomic<bool>& value, unsigned long timeou
     return value.load();
 }
 
-static std::string append_running_session_output_until_contains(SessionStore& store,
+static std::string append_running_session_output_until_pty_size(SessionStore& store,
                                                                 const std::string& daemon_session_id,
                                                                 const YieldTimeConfig& yield_time,
                                                                 std::string output,
-                                                                const std::string& fragment,
+                                                                unsigned short rows,
+                                                                unsigned short cols,
                                                                 unsigned long timeout_ms) {
     const std::uint64_t started = platform::monotonic_ms();
-    while (output.find(fragment) == std::string::npos && platform::monotonic_ms() - started < timeout_ms) {
+    while (!pty_size_output_matches(output, rows, cols) && platform::monotonic_ms() - started < timeout_ms) {
         const Json poll =
             store.write_stdin(daemon_session_id, "", true, 250UL, DEFAULT_MAX_OUTPUT_TOKENS, yield_time, false, 0U, 0U);
         output += normalize_output(poll.at("output").get<std::string>());
@@ -331,6 +371,7 @@ assert_unknown_session(SessionStore& store, const std::string& daemon_session_id
     }
     TEST_ASSERT(rejected);
 }
+#endif
 
 static void assert_completed_command_output(SessionStore& store,
                                             const fs::path& root,
@@ -899,7 +940,7 @@ static void assert_tty_resize_round_trip(SessionStore& store,
 
     const YieldTimeConfig fast_yield = fast_yield_time_config();
     const Json resize_running = start_test_command(store,
-                                                   "printf ready; IFS= read line; stty size; sleep 30",
+                                                   "printf ready; IFS= read line; stty -a; sleep 30",
                                                    root.string(),
                                                    shell,
                                                    true,
@@ -919,11 +960,11 @@ static void assert_tty_resize_round_trip(SessionStore& store,
                                            101U);
     TEST_ASSERT(resized.at("running").get<bool>());
     std::string resize_output = normalize_output(resized.at("output").get<std::string>());
-    if (resize_output.find("33 101") == std::string::npos) {
-        resize_output = append_running_session_output_until_contains(
-            store, resize_running.at("daemon_session_id").get<std::string>(), fast_yield, resize_output, "33 101", 2000UL);
+    if (!pty_size_output_matches(resize_output, 33U, 101U)) {
+        resize_output = append_running_session_output_until_pty_size(
+            store, resize_running.at("daemon_session_id").get<std::string>(), fast_yield, resize_output, 33U, 101U, 2000UL);
     }
-    TEST_ASSERT(resize_output.find("33 101") != std::string::npos);
+    TEST_ASSERT(pty_size_output_matches(resize_output, 33U, 101U));
 }
 
 static void assert_non_tty_resize_rejected(SessionStore& store,

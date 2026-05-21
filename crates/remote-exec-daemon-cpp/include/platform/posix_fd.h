@@ -272,6 +272,23 @@ inline int wait_until_readable_or_hangup(int fd) {
     }
 }
 
+inline int wait_until_writable_or_hangup(int fd) {
+    struct pollfd descriptor;
+    descriptor.fd = fd;
+    descriptor.events = POLLOUT | POLLHUP | POLLERR;
+    descriptor.revents = 0;
+
+    for (;;) {
+        const int result = posix_eintr::poll_forever(&descriptor, 1);
+        if (result > 0) {
+            return 0;
+        }
+        if (result < 0) {
+            return -1;
+        }
+    }
+}
+
 inline void write_signal_safe_wakeup_byte(int fd) {
     const unsigned char wakeup_byte = 1U;
     // Async-signal-safe notification is best effort; do not loop in a handler.

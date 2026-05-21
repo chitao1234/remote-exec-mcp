@@ -52,6 +52,7 @@ static std::string safe_strerror(int errnum) {
 }
 // Grace period for cooperative shutdown before escalating from SIGTERM to SIGKILL.
 const int TERMINATE_GRACE_MS = 50;
+const unsigned long PTY_READ_POLL_INTERVAL_MS = 25UL;
 const std::size_t PROCESS_OUTPUT_READ_BUFFER_SIZE = 4U * 1024U;
 using posix_fd::UniqueFd;
 
@@ -121,6 +122,9 @@ PosixPtyPair create_posix_pty() {
         throw std::runtime_error(std::string("posix_openpt failed: ") + safe_strerror(errno));
     }
     set_fd_cloexec_or_throw(master.get(), "pty master");
+    if (!posix_fd::set_nonblocking(master.get())) {
+        throw std::runtime_error(std::string("fcntl(O_NONBLOCK on pty master) failed: ") + safe_strerror(errno));
+    }
     if (posix_fd::grant_pty(master.get()) != 0) {
         throw std::runtime_error(std::string("grantpt failed: ") + safe_strerror(errno));
     }
@@ -377,6 +381,12 @@ public:
                     throw ProcessStdinClosedError(
                         "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open");
                 }
+                if (tty_ && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                    if (posix_fd::wait_until_writable_or_hangup(input_write_.get()) != 0) {
+                        throw std::runtime_error(std::string("poll(stdin) failed: ") + safe_strerror(errno));
+                    }
+                    continue;
+                }
                 throw std::runtime_error(std::string("write(stdin) failed: ") + safe_strerror(errno));
             }
             if (written == 0) {
@@ -404,10 +414,11 @@ public:
         std::string raw;
         char buffer[PROCESS_OUTPUT_READ_BUFFER_SIZE];
         const int read_fd = output_read_.valid() ? output_read_.get() : input_write_.get();
-        if (block && !readable_now(read_fd)) {
-            wait_until_readable(read_fd);
+        bool drain_pty_after_exit = false;
+        if (block) {
+            drain_pty_after_exit = wait_for_output_readable(read_fd);
         }
-        while (block || readable_now(read_fd)) {
+        while (block || drain_pty_after_exit || readable_now(read_fd)) {
             const ssize_t read_count = posix_fd::read_retry(read_fd, buffer, sizeof(buffer));
             if (read_count > 0) {
                 raw.append(buffer, static_cast<std::size_t>(read_count));
@@ -426,6 +437,9 @@ public:
                 break;
             }
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                if (tty_ && (drain_pty_after_exit || !output_may_resume())) {
+                    *eof = true;
+                }
                 break;
             }
             if (errno == EIO) {
@@ -486,6 +500,28 @@ public:
     }
 
 private:
+    bool wait_for_output_readable(int read_fd) {
+        if (!tty_) {
+            if (!readable_now(read_fd)) {
+                wait_until_readable(read_fd);
+            }
+            return false;
+        }
+
+        for (;;) {
+            bool readable = false;
+            if (posix_fd::poll_readable_or_hangup(read_fd, PTY_READ_POLL_INTERVAL_MS, &readable) != 0) {
+                throw std::runtime_error(std::string("poll failed: ") + safe_strerror(errno));
+            }
+            if (readable) {
+                return false;
+            }
+            if (!output_may_resume()) {
+                return true;
+            }
+        }
+    }
+
     bool output_may_resume() {
         if (reaped_.load(std::memory_order_acquire)) {
             return false;
