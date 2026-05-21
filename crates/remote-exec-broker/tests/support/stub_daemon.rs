@@ -24,13 +24,16 @@ use remote_exec_host::{
 };
 use remote_exec_proto::port_tunnel::{
     Frame, FrameType, TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, TunnelLimitSummary,
-    UPGRADE_TOKEN, read_frame, read_preface, write_frame, write_preface,
+    UPGRADE_TOKEN,
 };
 use remote_exec_proto::rpc::{
     DaemonIdentity, ExecWarning, ExecWriteRequest, HealthCheckResponse, HealthStatus,
     ImageReadResponse, PatchApplyRequest, PatchApplyResponse, PortForwardProtocolVersion,
     RpcErrorBody, RpcErrorCode, TargetCapabilities, TargetInfoResponse,
     TransferStreamProtocolVersion,
+};
+use remote_exec_test_support::port_tunnel_io::{
+    read_frame, read_preface, write_frame, write_preface,
 };
 #[cfg(test)]
 use tokio::io::AsyncWriteExt;

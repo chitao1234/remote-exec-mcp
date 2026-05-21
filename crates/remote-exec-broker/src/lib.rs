@@ -7,6 +7,7 @@ mod local;
 mod logging;
 mod mcp_server;
 mod port_forward;
+mod port_tunnel_io;
 mod request_context;
 mod session_store;
 mod startup;

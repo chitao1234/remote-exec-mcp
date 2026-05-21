@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use remote_exec_proto::port_tunnel::{
     Frame, FrameType, TunnelHeartbeatMeta, decode_frame_meta as decode_port_tunnel_meta,
-    encode_frame_meta as encode_port_tunnel_meta, read_frame, write_frame, write_preface,
+    encode_frame_meta as encode_port_tunnel_meta,
 };
 use remote_exec_proto::rpc::RpcErrorCode;
 use serde::Serialize;
@@ -15,6 +15,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::daemon_client::DaemonClientError;
+use crate::port_tunnel_io::{read_frame, write_frame, write_preface};
 
 use super::events::{ForwardSideEvent, TunnelErrorMeta};
 use super::timings::timings;
@@ -501,6 +502,8 @@ mod tests {
         TunnelErrorMeta as ProtoTunnelErrorMeta, TunnelForwardProtocol, TunnelOpenMeta, TunnelRole,
     };
 
+    use crate::port_tunnel_io::{read_frame, write_frame};
+
     use super::super::side::SideHandle;
     use super::*;
 
@@ -522,9 +525,7 @@ mod tests {
             .await
             .unwrap();
 
-        let close = remote_exec_proto::port_tunnel::read_frame(&mut daemon_side)
-            .await
-            .unwrap();
+        let close = read_frame(&mut daemon_side).await.unwrap();
         assert_eq!(close.frame_type, FrameType::TunnelClose);
         drop(daemon_side);
         tunnel.abort().await;
@@ -644,7 +645,7 @@ mod tests {
         let (broker_side, mut daemon_side) = tokio::io::duplex(4096);
         let tunnel = PortTunnel::from_stream(broker_side).unwrap();
         let heartbeat_meta = serde_json::to_vec(&serde_json::json!({ "nonce": 1 })).unwrap();
-        remote_exec_proto::port_tunnel::write_frame(
+        write_frame(
             &mut daemon_side,
             &Frame {
                 frame_type: FrameType::TunnelHeartbeatAck,
@@ -656,7 +657,7 @@ mod tests {
         )
         .await
         .unwrap();
-        remote_exec_proto::port_tunnel::write_frame(
+        write_frame(
             &mut daemon_side,
             &Frame {
                 frame_type: FrameType::TunnelReady,
@@ -689,9 +690,7 @@ mod tests {
 
         let heartbeat = tokio::time::timeout(std::time::Duration::from_secs(1), async {
             loop {
-                let frame = remote_exec_proto::port_tunnel::read_frame(&mut daemon_side)
-                    .await
-                    .unwrap();
+                let frame = read_frame(&mut daemon_side).await.unwrap();
                 if frame.frame_type == FrameType::TunnelHeartbeat {
                     return frame;
                 }
@@ -727,7 +726,7 @@ mod tests {
         }
         tokio::task::yield_now().await;
 
-        remote_exec_proto::port_tunnel::write_frame(
+        write_frame(
             &mut daemon_side,
             &Frame {
                 frame_type: FrameType::TunnelHeartbeat,
@@ -739,7 +738,7 @@ mod tests {
         )
         .await
         .unwrap();
-        remote_exec_proto::port_tunnel::write_frame(
+        write_frame(
             &mut daemon_side,
             &Frame {
                 frame_type: FrameType::TcpData,
@@ -781,7 +780,7 @@ mod tests {
 
         let daemon_writer = tokio::spawn(async move {
             for index in 0..128 {
-                if remote_exec_proto::port_tunnel::write_frame(
+                if write_frame(
                     &mut daemon_side,
                     &Frame {
                         frame_type: FrameType::TcpData,

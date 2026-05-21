@@ -6,7 +6,7 @@ use std::time::Duration;
 use crate::{AppState, HostRpcError};
 use remote_exec_proto::port_tunnel::{
     Frame, FrameType, TunnelCloseMeta, TunnelForwardProtocol, TunnelLimitSummary, TunnelOpenMeta,
-    TunnelReadyMeta, TunnelRole, read_frame, read_preface, write_frame,
+    TunnelReadyMeta, TunnelRole,
 };
 use remote_exec_proto::rpc::RpcErrorCode;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -23,6 +23,7 @@ use super::session::{
 use super::tcp::{
     tunnel_close_stream, tunnel_tcp_connect, tunnel_tcp_data, tunnel_tcp_eof, tunnel_tcp_listen,
 };
+use super::tunnel_io::{read_frame, read_preface, write_frame};
 use super::udp::{tunnel_udp_bind, tunnel_udp_datagram};
 use super::{
     ActiveTunnelState, ConnectRuntimeState, PortForwardPermit, QueuedFrame, TunnelSender,

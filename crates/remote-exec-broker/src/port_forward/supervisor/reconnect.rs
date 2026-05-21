@@ -442,8 +442,10 @@ mod tests {
     use std::time::Duration;
 
     use remote_exec_proto::port_forward::ForwardId;
-    use remote_exec_proto::port_tunnel::{Frame, FrameType, read_frame, write_frame};
+    use remote_exec_proto::port_tunnel::{Frame, FrameType};
     use remote_exec_proto::public::ForwardPortProtocol;
+
+    use crate::port_tunnel_io::{read_frame, write_frame};
 
     use super::super::super::session::LISTEN_SESSION_STREAM_ID;
     use super::super::super::side::SideHandle;

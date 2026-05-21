@@ -351,10 +351,12 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use remote_exec_proto::port_forward::ForwardId;
-    use remote_exec_proto::port_tunnel::{ForwardDropKind, ForwardDropMeta, write_frame};
+    use remote_exec_proto::port_tunnel::{ForwardDropKind, ForwardDropMeta};
     use remote_exec_proto::public::ForwardPortProtocol as PublicForwardPortProtocol;
     use remote_exec_proto::rpc::RpcErrorCode;
     use tokio_util::sync::CancellationToken;
+
+    use crate::port_tunnel_io::write_frame;
 
     use super::super::epoch::{ForwardEpoch, INITIAL_FORWARD_GENERATION};
     use super::super::side::SideHandle;

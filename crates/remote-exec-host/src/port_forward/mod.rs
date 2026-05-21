@@ -8,6 +8,7 @@ mod session_store;
 mod tcp;
 mod timings;
 mod tunnel;
+mod tunnel_io;
 mod types;
 mod udp;
 

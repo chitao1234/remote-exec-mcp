@@ -7,8 +7,9 @@ use remote_exec_proto::port_forward::ForwardId;
 use remote_exec_proto::port_tunnel::{
     Frame, FrameType, TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, TunnelCloseMeta,
     TunnelErrorMeta, TunnelForwardProtocol, TunnelOpenMeta, TunnelReadyMeta, TunnelRole,
-    UPGRADE_TOKEN, read_frame, write_frame, write_preface,
+    UPGRADE_TOKEN,
 };
+use remote_exec_test_support::port_tunnel_io::{read_frame, write_frame, write_preface};
 use support::test_helpers::DEFAULT_TEST_TARGET;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 

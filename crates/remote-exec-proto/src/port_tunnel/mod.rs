@@ -2,9 +2,10 @@ mod codec;
 mod meta;
 
 pub use codec::{
-    Frame, FrameType, HEADER_LEN, MAX_DATA_LEN, MAX_META_LEN, PREFACE, TUNNEL_PROTOCOL_VERSION,
-    TUNNEL_PROTOCOL_VERSION_HEADER, UPGRADE_TOKEN, decode_frame_meta, encode_frame_meta,
-    read_frame, read_preface, write_frame, write_preface,
+    Frame, FrameHeader, FrameType, HEADER_LEN, MAX_DATA_LEN, MAX_META_LEN, PREFACE,
+    TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, UPGRADE_TOKEN, decode_frame,
+    decode_frame_header, decode_frame_meta, encode_frame, encode_frame_header, encode_frame_meta,
+    frame_from_parts,
 };
 pub use meta::{
     EndpointMeta, ForwardDropKind, ForwardDropMeta, ForwardRecoveredMeta, ForwardRecoveringMeta,
@@ -18,33 +19,29 @@ mod tests {
     use super::*;
     use crate::port_forward::ForwardId;
 
-    #[tokio::test]
-    async fn v4_control_frames_round_trip() {
-        let (mut client, mut server) = tokio::io::duplex(4096);
-        let writer = tokio::spawn(async move {
-            write_frame(
-                &mut client,
-                &Frame {
-                    frame_type: FrameType::TunnelOpen,
-                    flags: 0,
-                    stream_id: 0,
-                    meta: serde_json::to_vec(&TunnelOpenMeta {
-                        forward_id: ForwardId::new("fwd_test"),
-                        role: TunnelRole::Listen,
-                        side: "builder-a".to_string(),
-                        generation: 4,
-                        protocol: TunnelForwardProtocol::Tcp,
-                        resume_session_id: Some("sess_test".to_string()),
-                    })
-                    .unwrap(),
-                    data: Vec::new(),
-                },
-            )
-            .await
+    fn round_trip(frame: &Frame) -> Frame {
+        let bytes = encode_frame(frame).unwrap();
+        decode_frame(&bytes).unwrap()
+    }
+
+    #[test]
+    fn v4_control_frames_round_trip() {
+        let frame = round_trip(&Frame {
+            frame_type: FrameType::TunnelOpen,
+            flags: 0,
+            stream_id: 0,
+            meta: serde_json::to_vec(&TunnelOpenMeta {
+                forward_id: ForwardId::new("fwd_test"),
+                role: TunnelRole::Listen,
+                side: "builder-a".to_string(),
+                generation: 4,
+                protocol: TunnelForwardProtocol::Tcp,
+                resume_session_id: Some("sess_test".to_string()),
+            })
+            .unwrap(),
+            data: Vec::new(),
         });
 
-        let frame = read_frame(&mut server).await.unwrap();
-        writer.await.unwrap().unwrap();
         assert_eq!(frame.frame_type, FrameType::TunnelOpen);
         assert_eq!(frame.stream_id, 0);
         let meta: TunnelOpenMeta = serde_json::from_slice(&frame.meta).unwrap();
@@ -54,31 +51,22 @@ mod tests {
         assert_eq!(meta.resume_session_id.as_deref(), Some("sess_test"));
     }
 
-    #[tokio::test]
-    async fn forward_drop_frame_round_trip() {
-        let (mut client, mut server) = tokio::io::duplex(1024);
-        let writer = tokio::spawn(async move {
-            write_frame(
-                &mut client,
-                &Frame {
-                    frame_type: FrameType::ForwardDrop,
-                    flags: 0,
-                    stream_id: 1,
-                    meta: serde_json::to_vec(&ForwardDropMeta::new(
-                        ForwardDropKind::TcpStream,
-                        2,
-                        "port_tunnel_limit_exceeded",
-                        Some("port tunnel active tcp stream limit reached".to_string()),
-                    ))
-                    .unwrap(),
-                    data: Vec::new(),
-                },
-            )
-            .await
+    #[test]
+    fn forward_drop_frame_round_trip() {
+        let frame = round_trip(&Frame {
+            frame_type: FrameType::ForwardDrop,
+            flags: 0,
+            stream_id: 1,
+            meta: serde_json::to_vec(&ForwardDropMeta::new(
+                ForwardDropKind::TcpStream,
+                2,
+                "port_tunnel_limit_exceeded",
+                Some("port tunnel active tcp stream limit reached".to_string()),
+            ))
+            .unwrap(),
+            data: Vec::new(),
         });
 
-        let frame = read_frame(&mut server).await.unwrap();
-        writer.await.unwrap().unwrap();
         assert_eq!(frame.frame_type, FrameType::ForwardDrop);
         assert_eq!(frame.stream_id, 1);
         let meta: ForwardDropMeta = serde_json::from_slice(&frame.meta).unwrap();
@@ -96,50 +84,32 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn session_control_frames_round_trip() {
-        let (mut client, mut server) = tokio::io::duplex(1024);
-        let writer = tokio::spawn(async move {
-            write_frame(
-                &mut client,
-                &Frame {
-                    frame_type: FrameType::SessionResume,
-                    flags: 0,
-                    stream_id: 0,
-                    meta: br#"{"session_id":"sess_123"}"#.to_vec(),
-                    data: Vec::new(),
-                },
-            )
-            .await
+    #[test]
+    fn session_control_frames_round_trip() {
+        let frame = round_trip(&Frame {
+            frame_type: FrameType::SessionResume,
+            flags: 0,
+            stream_id: 0,
+            meta: br#"{"session_id":"sess_123"}"#.to_vec(),
+            data: Vec::new(),
         });
 
-        let frame = read_frame(&mut server).await.unwrap();
-        writer.await.unwrap().unwrap();
         assert_eq!(frame.frame_type, FrameType::SessionResume);
         assert_eq!(frame.stream_id, 0);
         assert_eq!(frame.meta, br#"{"session_id":"sess_123"}"#);
     }
 
-    #[tokio::test]
-    async fn frame_round_trip_preserves_binary_payload() {
-        let (mut client, mut server) = tokio::io::duplex(1024);
+    #[test]
+    fn frame_round_trip_preserves_binary_payload() {
         let payload = vec![0, 1, 2, 255, b'R', b'\n'];
-        let writer = tokio::spawn(async move {
-            write_frame(
-                &mut client,
-                &Frame {
-                    frame_type: FrameType::TcpData,
-                    flags: 7,
-                    stream_id: 3,
-                    meta: br#"{"note":"binary"}"#.to_vec(),
-                    data: payload,
-                },
-            )
-            .await
+        let frame = round_trip(&Frame {
+            frame_type: FrameType::TcpData,
+            flags: 7,
+            stream_id: 3,
+            meta: br#"{"note":"binary"}"#.to_vec(),
+            data: payload,
         });
 
-        let frame = read_frame(&mut server).await.unwrap();
-        writer.await.unwrap().unwrap();
         assert_eq!(frame.frame_type, FrameType::TcpData);
         assert_eq!(frame.flags, 7);
         assert_eq!(frame.stream_id, 3);
@@ -147,26 +117,41 @@ mod tests {
         assert_eq!(frame.data, vec![0, 1, 2, 255, b'R', b'\n']);
     }
 
-    #[tokio::test]
-    async fn oversized_meta_is_rejected() {
+    #[test]
+    fn oversized_meta_is_rejected() {
         let mut bytes = Vec::from([FrameType::Error as u8, 0, 0, 0]);
         bytes.extend_from_slice(&1u32.to_be_bytes());
         bytes.extend_from_slice(&((MAX_META_LEN as u32) + 1).to_be_bytes());
         bytes.extend_from_slice(&0u32.to_be_bytes());
 
-        let err = read_frame(&mut bytes.as_slice()).await.unwrap_err();
+        let err = decode_frame(&bytes).unwrap_err();
 
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     }
 
-    #[tokio::test]
-    async fn oversized_data_is_rejected() {
+    #[test]
+    fn oversized_data_is_rejected() {
         let mut bytes = Vec::from([FrameType::TcpData as u8, 0, 0, 0]);
         bytes.extend_from_slice(&1u32.to_be_bytes());
         bytes.extend_from_slice(&0u32.to_be_bytes());
         bytes.extend_from_slice(&((MAX_DATA_LEN as u32) + 1).to_be_bytes());
 
-        let err = read_frame(&mut bytes.as_slice()).await.unwrap_err();
+        let err = decode_frame(&bytes).unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn frame_from_parts_rejects_body_length_mismatch() {
+        let header = FrameHeader {
+            frame_type: FrameType::TcpData,
+            flags: 0,
+            stream_id: 1,
+            meta_len: 2,
+            data_len: 3,
+        };
+
+        let err = frame_from_parts(header, vec![1], vec![1, 2, 3]).unwrap_err();
 
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     }

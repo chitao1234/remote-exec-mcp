@@ -7,12 +7,12 @@ use remote_exec_proto::port_forward::ForwardId;
 use remote_exec_proto::port_tunnel::{
     EndpointMeta, Frame, FrameType, MAX_DATA_LEN, TUNNEL_CLOSE_REASON_OPERATOR_CLOSE,
     TunnelCloseMeta, TunnelErrorMeta, TunnelForwardProtocol, TunnelHeartbeatMeta, TunnelOpenMeta,
-    TunnelReadyMeta, TunnelRole, decode_frame_meta, encode_frame_meta, read_frame, write_frame,
-    write_preface,
+    TunnelReadyMeta, TunnelRole, decode_frame_meta, encode_frame_meta,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 
 use super::tcp::{tunnel_close_stream, tunnel_tcp_eof};
+use super::tunnel_io::{read_frame, write_frame, write_preface};
 use super::*;
 use crate::{
     AppState, HostRuntimeConfig, ProcessEnvironment, PtyMode, YieldTimeConfig, build_runtime_state,

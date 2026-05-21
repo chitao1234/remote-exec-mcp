@@ -5,7 +5,7 @@ use std::task::{Context as TaskContext, Poll, Waker};
 use std::time::Duration;
 
 use remote_exec_proto::port_forward::ForwardId;
-use remote_exec_proto::port_tunnel::{Frame, FrameType, HEADER_LEN};
+use remote_exec_proto::port_tunnel::{Frame, FrameType, HEADER_LEN, encode_frame};
 use remote_exec_proto::public::ForwardPortEntry;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
@@ -175,13 +175,5 @@ pub(super) async fn wait_until_send_fails(tunnel: &PortTunnel) {
 }
 
 fn frame_bytes(frame: &Frame) -> Vec<u8> {
-    let mut bytes = vec![0; HEADER_LEN];
-    bytes[0] = frame.frame_type as u8;
-    bytes[1] = frame.flags;
-    bytes[4..8].copy_from_slice(&frame.stream_id.to_be_bytes());
-    bytes[8..12].copy_from_slice(&(frame.meta.len() as u32).to_be_bytes());
-    bytes[12..16].copy_from_slice(&(frame.data.len() as u32).to_be_bytes());
-    bytes.extend_from_slice(&frame.meta);
-    bytes.extend_from_slice(&frame.data);
-    bytes
+    encode_frame(frame).expect("test frame should be encodable")
 }

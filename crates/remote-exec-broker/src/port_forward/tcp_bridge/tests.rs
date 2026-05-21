@@ -4,13 +4,13 @@ use std::task::{Context as TaskContext, Poll};
 use std::time::Duration;
 
 use remote_exec_proto::port_forward::ForwardId;
-use remote_exec_proto::port_tunnel::{
-    ForwardDropKind, ForwardDropMeta, Frame, FrameType, read_frame, write_frame,
-};
+use remote_exec_proto::port_tunnel::{ForwardDropKind, ForwardDropMeta, Frame, FrameType};
 use remote_exec_proto::public::ForwardPortProtocol as PublicForwardPortProtocol;
 use remote_exec_proto::rpc::RpcErrorCode;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio_util::sync::CancellationToken;
+
+use crate::port_tunnel_io::{read_frame, write_frame};
 
 use super::super::epoch::{ForwardEpoch, INITIAL_FORWARD_GENERATION};
 use super::super::side::SideHandle;

@@ -1,7 +1,9 @@
 use remote_exec_proto::port_tunnel::{
-    TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, UPGRADE_TOKEN, write_preface,
+    TUNNEL_PROTOCOL_VERSION, TUNNEL_PROTOCOL_VERSION_HEADER, UPGRADE_TOKEN,
 };
 use reqwest::header::{CONNECTION, CONTENT_LENGTH, UPGRADE};
+
+use crate::port_tunnel_io::write_preface;
 
 use super::{DaemonClient, DaemonClientError, RpcErrorDecodePolicy, decode_rpc_error};
 

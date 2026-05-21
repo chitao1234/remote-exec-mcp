@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use remote_exec_proto::port_tunnel::{read_frame, write_frame};
+use remote_exec_test_support::port_tunnel_io::{read_frame, write_frame};
 use remote_exec_test_support::test_helpers;
 use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
 use rmcp::{

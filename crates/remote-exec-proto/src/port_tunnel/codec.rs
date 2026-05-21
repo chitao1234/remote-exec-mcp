@@ -2,7 +2,6 @@ use std::io::{self, ErrorKind};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const PREFACE: &[u8; 8] = b"REPFWD1\n";
 pub const HEADER_LEN: usize = 16;
@@ -113,6 +112,15 @@ impl Frame {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrameHeader {
+    pub frame_type: FrameType,
+    pub flags: u8,
+    pub stream_id: u32,
+    pub meta_len: usize,
+    pub data_len: usize,
+}
+
 pub fn encode_frame_meta<T: Serialize>(meta: &T) -> Result<Vec<u8>, serde_json::Error> {
     serde_json::to_vec(meta)
 }
@@ -121,32 +129,7 @@ pub fn decode_frame_meta<T: DeserializeOwned>(frame: &Frame) -> Result<T, serde_
     serde_json::from_slice(&frame.meta)
 }
 
-pub async fn write_preface<W>(writer: &mut W) -> io::Result<()>
-where
-    W: AsyncWrite + Unpin,
-{
-    writer.write_all(PREFACE).await
-}
-
-pub async fn read_preface<R>(reader: &mut R) -> io::Result<()>
-where
-    R: AsyncRead + Unpin,
-{
-    let mut preface = [0; PREFACE.len()];
-    reader.read_exact(&mut preface).await?;
-    if &preface != PREFACE {
-        return Err(io::Error::new(
-            ErrorKind::InvalidData,
-            "invalid port tunnel preface",
-        ));
-    }
-    Ok(())
-}
-
-pub async fn write_frame<W>(writer: &mut W, frame: &Frame) -> io::Result<()>
-where
-    W: AsyncWrite + Unpin,
-{
+pub fn encode_frame_header(frame: &Frame) -> io::Result<[u8; HEADER_LEN]> {
     if frame.meta.len() > MAX_META_LEN {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
@@ -166,19 +149,19 @@ where
     header[4..8].copy_from_slice(&frame.stream_id.to_be_bytes());
     header[8..12].copy_from_slice(&(frame.meta.len() as u32).to_be_bytes());
     header[12..16].copy_from_slice(&(frame.data.len() as u32).to_be_bytes());
-
-    writer.write_all(&header).await?;
-    writer.write_all(&frame.meta).await?;
-    writer.write_all(&frame.data).await
+    Ok(header)
 }
 
-pub async fn read_frame<R>(reader: &mut R) -> io::Result<Frame>
-where
-    R: AsyncRead + Unpin,
-{
-    let mut header = [0; HEADER_LEN];
-    reader.read_exact(&mut header).await?;
+pub fn encode_frame(frame: &Frame) -> io::Result<Vec<u8>> {
+    let header = encode_frame_header(frame)?;
+    let mut bytes = Vec::with_capacity(frame.wire_len());
+    bytes.extend_from_slice(&header);
+    bytes.extend_from_slice(&frame.meta);
+    bytes.extend_from_slice(&frame.data);
+    Ok(bytes)
+}
 
+pub fn decode_frame_header(header: [u8; HEADER_LEN]) -> io::Result<FrameHeader> {
     if header[2] != 0 || header[3] != 0 {
         return Err(io::Error::new(
             ErrorKind::InvalidData,
@@ -205,16 +188,68 @@ where
         ));
     }
 
-    let mut meta = vec![0; meta_len as usize];
-    reader.read_exact(&mut meta).await?;
-    let mut data = vec![0; data_len as usize];
-    reader.read_exact(&mut data).await?;
-
-    Ok(Frame {
+    Ok(FrameHeader {
         frame_type,
         flags,
         stream_id,
+        meta_len: meta_len as usize,
+        data_len: data_len as usize,
+    })
+}
+
+pub fn frame_from_parts(header: FrameHeader, meta: Vec<u8>, data: Vec<u8>) -> io::Result<Frame> {
+    if meta.len() != header.meta_len {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            "port tunnel metadata length does not match header",
+        ));
+    }
+    if data.len() != header.data_len {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            "port tunnel data length does not match header",
+        ));
+    }
+
+    Ok(Frame {
+        frame_type: header.frame_type,
+        flags: header.flags,
+        stream_id: header.stream_id,
         meta,
         data,
     })
+}
+
+pub fn decode_frame(bytes: &[u8]) -> io::Result<Frame> {
+    if bytes.len() < HEADER_LEN {
+        return Err(io::Error::new(
+            ErrorKind::UnexpectedEof,
+            "port tunnel frame header is incomplete",
+        ));
+    }
+    let mut raw_header = [0; HEADER_LEN];
+    raw_header.copy_from_slice(&bytes[..HEADER_LEN]);
+    let header = decode_frame_header(raw_header)?;
+    let frame_len = HEADER_LEN
+        .checked_add(header.meta_len)
+        .and_then(|len| len.checked_add(header.data_len))
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "port tunnel frame is too large"))?;
+    if bytes.len() < frame_len {
+        return Err(io::Error::new(
+            ErrorKind::UnexpectedEof,
+            "port tunnel frame body is incomplete",
+        ));
+    }
+    if bytes.len() > frame_len {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            "port tunnel frame has trailing bytes",
+        ));
+    }
+    let meta_end = HEADER_LEN + header.meta_len;
+    frame_from_parts(
+        header,
+        bytes[HEADER_LEN..meta_end].to_vec(),
+        bytes[meta_end..frame_len].to_vec(),
+    )
 }
