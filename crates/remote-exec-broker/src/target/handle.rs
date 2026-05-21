@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use anyhow::Context;
+use remote_exec_proto::path::{PathPolicy, linux_path_policy, windows_path_policy};
 use remote_exec_proto::rpc::{
     DaemonIdentity, ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest,
     ImageReadResponse, PatchApplyRequest, PatchApplyResponse, TargetCapabilities,
@@ -17,6 +19,20 @@ pub struct CachedDaemonInfo {
     pub identity: DaemonIdentity,
     pub capabilities: TargetCapabilities,
     pub supports_transfer_compression: bool,
+}
+
+impl CachedDaemonInfo {
+    pub(crate) fn platform_is_windows(&self) -> bool {
+        self.identity.platform.eq_ignore_ascii_case("windows")
+    }
+
+    pub(crate) fn path_policy(&self) -> PathPolicy {
+        if self.platform_is_windows() {
+            windows_path_policy()
+        } else {
+            linux_path_policy()
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -78,6 +94,16 @@ impl TargetHandle {
 
     pub(crate) async fn cached_daemon_info(&self) -> Option<CachedDaemonInfo> {
         self.cached_daemon_info.lock().await.clone()
+    }
+
+    pub(crate) async fn verified_cached_daemon_info(
+        &self,
+        name: &str,
+    ) -> anyhow::Result<CachedDaemonInfo> {
+        self.ensure_identity_verified(name).await?;
+        self.cached_daemon_info()
+            .await
+            .context("target info missing after identity verification")
     }
 
     pub(crate) async fn target_info(&self) -> Result<TargetInfoResponse, DaemonClientError> {

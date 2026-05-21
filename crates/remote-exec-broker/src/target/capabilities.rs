@@ -8,13 +8,11 @@ use crate::daemon_client::{DaemonClientError, RpcToolErrorMode, normalize_tool_r
 use super::TargetHandle;
 
 impl TargetHandle {
-    async fn checked_call<T>(
+    async fn normalize_checked_result<T>(
         &self,
-        target_name: &str,
         rpc_mode: RpcToolErrorMode,
         result: Result<T, DaemonClientError>,
     ) -> anyhow::Result<T> {
-        self.ensure_identity_verified(target_name).await?;
         normalize_tool_result(self.clear_on_transport_error(result).await, rpc_mode)
     }
 
@@ -33,12 +31,9 @@ impl TargetHandle {
         target_name: &str,
         req: &ExecStartRequest,
     ) -> anyhow::Result<ExecResponse> {
-        self.checked_call(
-            target_name,
-            RpcToolErrorMode::Full,
-            self.exec_start(req).await,
-        )
-        .await
+        self.ensure_identity_verified(target_name).await?;
+        self.normalize_checked_result(RpcToolErrorMode::Full, self.exec_start(req).await)
+            .await
     }
 
     pub async fn patch_apply_checked(
@@ -46,12 +41,9 @@ impl TargetHandle {
         target_name: &str,
         req: &PatchApplyRequest,
     ) -> anyhow::Result<PatchApplyResponse> {
-        self.checked_call(
-            target_name,
-            RpcToolErrorMode::Full,
-            self.patch_apply(req).await,
-        )
-        .await
+        self.ensure_identity_verified(target_name).await?;
+        self.normalize_checked_result(RpcToolErrorMode::Full, self.patch_apply(req).await)
+            .await
     }
 
     pub async fn image_read_checked(
@@ -59,11 +51,8 @@ impl TargetHandle {
         target_name: &str,
         req: &ImageReadRequest,
     ) -> anyhow::Result<ImageReadResponse> {
-        self.checked_call(
-            target_name,
-            RpcToolErrorMode::MessageOnly,
-            self.image_read(req).await,
-        )
-        .await
+        self.ensure_identity_verified(target_name).await?;
+        self.normalize_checked_result(RpcToolErrorMode::MessageOnly, self.image_read(req).await)
+            .await
     }
 }

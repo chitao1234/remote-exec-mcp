@@ -27,13 +27,18 @@ impl BrokerState {
             .with_context(|| format!("unknown target `{name}`"))
     }
 
+    pub async fn verified_target(&self, name: &str) -> anyhow::Result<&TargetHandle> {
+        let handle = self.target(name)?;
+        handle.ensure_identity_verified(name).await?;
+        Ok(handle)
+    }
+
     pub async fn forwarding_side(&self, name: &str) -> anyhow::Result<port_forward::SideHandle> {
         if name == LOCAL_TARGET_NAME && !self.targets.contains_key(LOCAL_TARGET_NAME) {
             return port_forward::SideHandle::local();
         }
 
-        let handle = self.target(name)?;
-        handle.ensure_identity_verified(name).await?;
+        let handle = self.verified_target(name).await?;
         if let Some(info) = handle.cached_daemon_info().await {
             anyhow::ensure!(
                 info.capabilities.supports_port_forward

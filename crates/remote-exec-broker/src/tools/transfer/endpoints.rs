@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::Context;
 use remote_exec_host::path_compare;
-use remote_exec_proto::path::{PathPolicy, host_policy, linux_path_policy, windows_path_policy};
+use remote_exec_proto::path::{PathPolicy, host_policy};
 use remote_exec_proto::public::{TransferDestinationMode, TransferEndpoint};
 use remote_exec_proto::rpc::{
     RpcErrorCode, TRANSFER_STREAM_PROTOCOL_VERSION, TransferPathInfoRequest,
@@ -34,8 +34,7 @@ pub(super) async fn verified_remote_target<'a>(
     state: &'a crate::BrokerState,
     target_name: &'a str,
 ) -> anyhow::Result<crate::target::RemoteTargetHandle<'a>> {
-    let target = state.target(target_name)?;
-    target.ensure_identity_verified(target_name).await?;
+    let target = state.verified_target(target_name).await?;
     target
         .as_remote()
         .with_context(|| format!("target `{target_name}` is not a remote transfer target"))
@@ -359,10 +358,9 @@ impl EndpointTargetContext {
             transfer_stream_version == Some(TRANSFER_STREAM_PROTOCOL_VERSION),
             "target `{target_name}` does not support transfer stream protocol version {TRANSFER_STREAM_PROTOCOL_VERSION}"
         );
-        let accepts_single_slash_windows_absolute =
-            info.identity.platform.eq_ignore_ascii_case("windows");
+        let accepts_single_slash_windows_absolute = info.platform_is_windows();
         Ok(Self::Remote {
-            policy: remote_policy(&info.identity.platform),
+            policy: info.path_policy(),
             accepts_single_slash_windows_absolute,
             supports_transfer_compression: info.supports_transfer_compression,
         })
@@ -393,13 +391,5 @@ impl EndpointTargetContext {
                 ..
             } => Some(supports_transfer_compression),
         }
-    }
-}
-
-fn remote_policy(platform: &str) -> PathPolicy {
-    if platform.eq_ignore_ascii_case("windows") {
-        windows_path_policy()
-    } else {
-        linux_path_policy()
     }
 }

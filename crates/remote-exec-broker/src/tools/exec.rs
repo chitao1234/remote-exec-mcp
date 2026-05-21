@@ -1,7 +1,7 @@
 use anyhow::Context;
 use std::time::Instant;
 
-use remote_exec_proto::path::{PathPolicy, linux_path_policy, windows_path_policy};
+use remote_exec_proto::path::PathPolicy;
 use remote_exec_proto::public::{CommandToolResult, ExecCommandInput, WriteStdinInput};
 use remote_exec_proto::rpc::{
     ExecCompletedResponse, ExecOutputResponse, ExecResponse, ExecRunningResponse, ExecStartRequest,
@@ -39,8 +39,7 @@ pub async fn exec_command(
         "broker tool started"
     );
     let target = state.target(&input.target)?;
-    target.ensure_identity_verified(&input.target).await?;
-    let path_policy = target_path_policy(target).await?;
+    let path_policy = target_path_policy(&input.target, target).await?;
 
     if let Some(output) =
         maybe_intercepted_exec_output(state, &input, &target_name, started, path_policy).await?
@@ -407,15 +406,11 @@ fn validate_completed_output(response: &ExecOutputResponse) -> anyhow::Result<()
     Ok(())
 }
 
-async fn target_path_policy(target: &crate::TargetHandle) -> anyhow::Result<PathPolicy> {
-    let info = target
-        .cached_daemon_info()
-        .await
-        .context("target info missing after identity verification")?;
+async fn target_path_policy(
+    target_name: &str,
+    target: &crate::TargetHandle,
+) -> anyhow::Result<PathPolicy> {
+    let info = target.verified_cached_daemon_info(target_name).await?;
 
-    Ok(if info.identity.platform.eq_ignore_ascii_case("windows") {
-        windows_path_policy()
-    } else {
-        linux_path_policy()
-    })
+    Ok(info.path_policy())
 }
