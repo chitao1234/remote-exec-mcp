@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 
-#[cfg(any(target_os = "solaris", target_os = "illumos"))]
 pub mod blocking_child_process;
 pub mod certs;
 pub mod fixture;

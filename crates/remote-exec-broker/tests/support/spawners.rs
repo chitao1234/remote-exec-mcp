@@ -2,11 +2,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use rmcp::ServiceExt;
-#[cfg(not(any(target_os = "solaris", target_os = "illumos")))]
-use rmcp::transport::TokioChildProcess;
 use tempfile::TempDir;
 
-#[cfg(any(target_os = "solaris", target_os = "illumos"))]
 use super::blocking_child_process::BlockingChildProcess;
 #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
 use super::certs::{TestCerts, write_test_certs_for_daemon_spec};
@@ -293,19 +290,10 @@ async fn spawn_broker_child_with_env(
     serve_broker_child_stdio(command).await
 }
 
-#[cfg(any(target_os = "solaris", target_os = "illumos"))]
 async fn serve_broker_child_stdio(
     command: tokio::process::Command,
 ) -> rmcp::service::RunningService<rmcp::RoleClient, DummyClientHandler> {
     let transport = BlockingChildProcess::spawn(command).unwrap();
-    DummyClientHandler.serve(transport).await.unwrap()
-}
-
-#[cfg(not(any(target_os = "solaris", target_os = "illumos")))]
-async fn serve_broker_child_stdio(
-    command: tokio::process::Command,
-) -> rmcp::service::RunningService<rmcp::RoleClient, DummyClientHandler> {
-    let transport = TokioChildProcess::new(command).unwrap();
     DummyClientHandler.serve(transport).await.unwrap()
 }
 

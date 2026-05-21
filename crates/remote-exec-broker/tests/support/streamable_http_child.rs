@@ -3,10 +3,7 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-#[cfg(any(target_os = "solaris", target_os = "illumos"))]
 use std::io::Read;
-#[cfg(not(any(target_os = "solaris", target_os = "illumos")))]
-use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::oneshot;
 
 const STREAMABLE_HTTP_LOG_FILTER: &str = "warn,remote_exec_broker=info";
@@ -46,35 +43,18 @@ pub async fn wait_for_streamable_http_bound_addr(
     }
 }
 
-#[cfg(not(any(target_os = "solaris", target_os = "illumos")))]
 fn spawn_stderr_reader(
     stderr: tokio::process::ChildStderr,
     captured: Arc<Mutex<Vec<String>>>,
     addr_tx: oneshot::Sender<SocketAddr>,
 ) {
-    tokio::spawn(async move {
-        let mut lines = BufReader::new(stderr).lines();
-        let mut addr_tx = Some(addr_tx);
-        while let Some(line) = lines.next_line().await.unwrap() {
-            handle_stderr_line(&captured, &mut addr_tx, line);
-        }
-    });
-}
-
-#[cfg(any(target_os = "solaris", target_os = "illumos"))]
-fn spawn_stderr_reader(
-    stderr: tokio::process::ChildStderr,
-    captured: Arc<Mutex<Vec<String>>>,
-    addr_tx: oneshot::Sender<SocketAddr>,
-) {
-    let stderr = std::fs::File::from(stderr.into_owned_fd().unwrap());
+    let stderr = child_stderr_file(stderr);
     std::thread::Builder::new()
         .name("mcp-http-child-stderr".to_string())
         .spawn(move || read_stderr_without_readiness(stderr, captured, addr_tx))
         .expect("spawn streamable HTTP broker stderr reader");
 }
 
-#[cfg(any(target_os = "solaris", target_os = "illumos"))]
 fn read_stderr_without_readiness(
     mut stderr: std::fs::File,
     captured: Arc<Mutex<Vec<String>>>,
@@ -119,6 +99,16 @@ fn read_stderr_without_readiness(
             String::from_utf8_lossy(&pending).into_owned(),
         );
     }
+}
+
+#[cfg(unix)]
+fn child_stderr_file(stderr: tokio::process::ChildStderr) -> std::fs::File {
+    std::fs::File::from(stderr.into_owned_fd().unwrap())
+}
+
+#[cfg(windows)]
+fn child_stderr_file(stderr: tokio::process::ChildStderr) -> std::fs::File {
+    std::fs::File::from(stderr.into_owned_handle().unwrap())
 }
 
 fn handle_stderr_line(
