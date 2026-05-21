@@ -27,7 +27,7 @@ int main() {
 }
 EOF
 
-for libs in "" "-lsocket" "-lsocket -lnsl" "-lnsl -lsocket"; do
+for libs in "" "-lsocket" "-lsocket -lnsl" "-lnsl -lsocket" "-lnetwork"; do
     if $HOST_CXX $PROBE_CPPFLAGS $PROBE_CXXFLAGS \
         -o "$binary" "$source" \
         $PROBE_LDFLAGS $PROBE_LDLIBS $libs >/dev/null 2>&1; then

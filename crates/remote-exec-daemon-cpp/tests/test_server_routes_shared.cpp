@@ -34,6 +34,17 @@ std::string stable_test_shell() {
 #endif
 }
 
+#ifndef _WIN32
+bool path_can_be_opened_for_read(const fs::path& path) {
+    FILE* probe = std::fopen(path.string().c_str(), "rb");
+    if (probe == NULL) {
+        return false;
+    }
+    std::fclose(probe);
+    return true;
+}
+#endif
+
 } // namespace
 
 fs::path make_server_routes_test_root(const std::string& directory_name) {
@@ -364,12 +375,22 @@ static void assert_image_routes(AppState& state, const fs::path& root) {
         base64_decode_bytes(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg=="));
     fs::permissions(blocked_image_dir, fs::perms::none, fs::perm_options::replace);
-    const HttpResponse blocked_image_response = route_request(
-        state, json_request("/v1/image/read", Json{{"path", "blocked-image/blocked.png"}, {"workdir", root.string()}}));
+    const fs::path blocked_image_path = blocked_image_dir / "blocked.png";
+    const bool platform_enforces_blocked_directory = !path_can_be_opened_for_read(blocked_image_path);
+    HttpResponse blocked_image_response;
+    // Haiku can run with root-like single-user filesystem access, so first
+    // verify that chmod actually denies this read on the current target.
+    if (platform_enforces_blocked_directory) {
+        blocked_image_response = route_request(
+            state,
+            json_request("/v1/image/read", Json{{"path", "blocked-image/blocked.png"}, {"workdir", root.string()}}));
+    }
     fs::permissions(blocked_image_dir, fs::perms::owner_all, fs::perm_options::replace);
-    TEST_ASSERT(blocked_image_response.status == 500);
-    const Json blocked_image_error = Json::parse(blocked_image_response.body);
-    TEST_ASSERT(blocked_image_error.at("code").get<std::string>() == "internal_error");
+    if (platform_enforces_blocked_directory) {
+        TEST_ASSERT(blocked_image_response.status == 500);
+        const Json blocked_image_error = Json::parse(blocked_image_response.body);
+        TEST_ASSERT(blocked_image_error.at("code").get<std::string>() == "internal_error");
+    }
 #endif
 }
 
@@ -420,12 +441,19 @@ static void assert_transfer_path_info_routes(AppState& state, const fs::path& ro
     fs::create_directories(blocked_transfer_dir);
     write_text_file(blocked_transfer_dir / "inside.txt", "secret");
     fs::permissions(blocked_transfer_dir, fs::perms::none, fs::perm_options::replace);
-    const HttpResponse blocked_transfer_info_response = route_request(
-        state, json_request("/v1/transfer/path-info", Json{{"path", (blocked_transfer_dir / "inside.txt").string()}}));
+    const fs::path blocked_transfer_file = blocked_transfer_dir / "inside.txt";
+    const bool platform_enforces_blocked_transfer_directory = !path_can_be_opened_for_read(blocked_transfer_file);
+    HttpResponse blocked_transfer_info_response;
+    if (platform_enforces_blocked_transfer_directory) {
+        blocked_transfer_info_response =
+            route_request(state, json_request("/v1/transfer/path-info", Json{{"path", blocked_transfer_file.string()}}));
+    }
     fs::permissions(blocked_transfer_dir, fs::perms::owner_all, fs::perm_options::replace);
-    TEST_ASSERT(blocked_transfer_info_response.status == 500);
-    const Json blocked_transfer_info_error = Json::parse(blocked_transfer_info_response.body);
-    TEST_ASSERT(blocked_transfer_info_error.at("code").get<std::string>() == "internal_error");
+    if (platform_enforces_blocked_transfer_directory) {
+        TEST_ASSERT(blocked_transfer_info_response.status == 500);
+        const Json blocked_transfer_info_error = Json::parse(blocked_transfer_info_response.body);
+        TEST_ASSERT(blocked_transfer_info_error.at("code").get<std::string>() == "internal_error");
+    }
 #endif
 }
 

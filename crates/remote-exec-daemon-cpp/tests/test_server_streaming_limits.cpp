@@ -411,6 +411,8 @@ static void assert_tcp_data_write_pressure_does_not_block_control_frames(AppStat
     UniqueSocket client_socket;
     std::thread server_thread;
     open_v4_tunnel(state, &client_socket, &server_thread, "connect", "tcp", 1ULL);
+    // Build a deterministic TCP write backlog without depending on kernel socket-buffer behavior.
+    set_forced_tcp_write_thread_start_delay_ms(1500UL);
     send_tunnel_frame(client_socket.get(),
                       json_frame(PortTunnelFrameType::TcpConnect, 1U, Json{{"endpoint", hold_endpoint}}));
     TEST_ASSERT(read_tunnel_frame(client_socket.get()).type == PortTunnelFrameType::TcpConnectOk);
@@ -419,14 +421,12 @@ static void assert_tcp_data_write_pressure_does_not_block_control_frames(AppStat
     std::vector<unsigned char> payload(PORT_TUNNEL_MAX_DATA_LEN, 0x51U);
     PortTunnelFrame heartbeat = empty_frame(PortTunnelFrameType::TunnelHeartbeat, 0U);
     heartbeat.meta = Json{{"nonce", 1}}.dump();
-    std::thread writer_thread([&]() {
-        for (int i = 0; i < 64; ++i) {
-            send_tunnel_frame(client_socket.get(), data_frame(PortTunnelFrameType::TcpData, 1U, payload));
-        }
-        send_tunnel_frame(client_socket.get(), heartbeat);
-    });
+    for (int i = 0; i < 8; ++i) {
+        send_tunnel_frame(client_socket.get(), data_frame(PortTunnelFrameType::TcpData, 1U, payload));
+    }
+    send_tunnel_frame(client_socket.get(), heartbeat);
 
-    const std::uint64_t deadline = platform::monotonic_ms() + 2000ULL;
+    const std::uint64_t deadline = platform::monotonic_ms() + 3000ULL;
     bool saw_ack = false;
     while (platform::monotonic_ms() < deadline) {
         PortTunnelFrame frame;
@@ -441,7 +441,6 @@ static void assert_tcp_data_write_pressure_does_not_block_control_frames(AppStat
     }
     TEST_ASSERT(saw_ack);
 
-    writer_thread.join();
     release_receiver.store(true);
     hold_thread.join();
     close_tunnel(&client_socket, &server_thread);

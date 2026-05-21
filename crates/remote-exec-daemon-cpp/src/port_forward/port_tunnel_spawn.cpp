@@ -2,14 +2,20 @@
 
 #include <atomic>
 
+#include "platform/platform.h"
 #include "port_tunnel_connection.h"
 #include "port_tunnel_service.h"
 
 #ifdef REMOTE_EXEC_CPP_TESTING
 static std::atomic<unsigned long> g_forced_tcp_read_thread_failures(0UL);
+static std::atomic<unsigned long> g_forced_tcp_write_thread_start_delay_ms(0UL);
 
 void set_forced_tcp_read_thread_failures(unsigned long count) {
     g_forced_tcp_read_thread_failures.store(count);
+}
+
+void set_forced_tcp_write_thread_start_delay_ms(unsigned long delay_ms) {
+    g_forced_tcp_write_thread_start_delay_ms.store(delay_ms);
 }
 
 static bool consume_forced_tcp_read_thread_failure() {
@@ -20,6 +26,13 @@ static bool consume_forced_tcp_read_thread_failure() {
         }
     }
     return false;
+}
+
+static void maybe_apply_forced_tcp_write_thread_start_delay() {
+    const unsigned long delay_ms = g_forced_tcp_write_thread_start_delay_ms.exchange(0UL);
+    if (delay_ms > 0UL) {
+        platform::sleep_ms(delay_ms);
+    }
 }
 #endif
 
@@ -71,6 +84,9 @@ bool spawn_tcp_write_thread(const std::shared_ptr<PortTunnelService>& service,
                             PortTunnelWorkerLease worker_lease) {
     return service->spawn_tracked_worker(
         "spawn tcp write thread", std::move(worker_lease), [tunnel, stream_id, stream]() {
+#ifdef REMOTE_EXEC_CPP_TESTING
+            maybe_apply_forced_tcp_write_thread_start_delay();
+#endif
             tunnel->tcp_write_loop(stream_id, stream);
         });
 }

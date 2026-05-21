@@ -566,7 +566,10 @@ static void assert_posix_exec_uses_parent_built_environment_and_path(SessionStor
     const Json pipe_response = start_test_command(
         store, "env-helper", root.string(), shell, false, 5000UL, DEFAULT_MAX_OUTPUT_TOKENS, yield_time, 64UL);
     TEST_ASSERT(pipe_response.at("exit_code").get<int>() == 0);
-    TEST_ASSERT(pipe_response.at("output").get<std::string>() == "C.UTF-8|C.UTF-8|\n");
+    const std::string pipe_output = pipe_response.at("output").get<std::string>();
+    // Haiku /bin/sh initializes TERM=dumb even under env -i; LC_ALL/LANG are
+    // still the daemon-provided values this test is asserting.
+    TEST_ASSERT(pipe_output == "C.UTF-8|C.UTF-8|\n" || pipe_output == "C.UTF-8|C.UTF-8|dumb\n");
 
     if (process_session_supports_pty()) {
         const Json pty_response = start_test_command(

@@ -14,4 +14,5 @@ create_port_tunnel_service(const PortForwardLimitConfig& limits = PortForwardLim
 
 #ifdef REMOTE_EXEC_CPP_TESTING
 void set_forced_tcp_read_thread_failures(unsigned long count);
+void set_forced_tcp_write_thread_start_delay_ms(unsigned long delay_ms);
 #endif
