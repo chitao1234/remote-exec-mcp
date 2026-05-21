@@ -74,6 +74,13 @@ static bool wait_for_active_connections(ConnectionManager& manager, unsigned lon
     return manager.active_count() == expected;
 }
 
+static void request_shutdown_and_join_quickly(ServerRuntime& runtime) {
+    const std::uint64_t started_at_ms = platform::monotonic_ms();
+    runtime.request_shutdown();
+    runtime.join();
+    TEST_ASSERT(platform::monotonic_ms() - started_at_ms < TEST_TIMEOUT_MS);
+}
+
 static SOCKET connect_client(unsigned short port) {
     std::ostringstream service;
     service << port;
@@ -135,8 +142,7 @@ static void assert_runtime_shutdown_with_idle_connection(const DaemonConfig& con
     UniqueSocket client(connect_client(port));
     TEST_ASSERT(wait_for_active_connections(runtime->connection_manager(), 1UL, TEST_TIMEOUT_MS));
 
-    runtime->request_shutdown();
-    runtime->join();
+    request_shutdown_and_join_quickly(*runtime);
     TEST_ASSERT(runtime->connection_manager().active_count() == 0UL);
 }
 
@@ -152,8 +158,7 @@ static void assert_runtime_shutdown_with_blocked_request_body(const DaemonConfig
              "\r\n"
              "partial-body");
 
-    runtime->request_shutdown();
-    runtime->join();
+    request_shutdown_and_join_quickly(*runtime);
     TEST_ASSERT(runtime->connection_manager().active_count() == 0UL);
 }
 
@@ -173,8 +178,7 @@ static void assert_runtime_shutdown_with_upgraded_tunnel_connection(const Daemon
     const std::string response = read_http_head_from_socket(client.get());
     TEST_ASSERT(response.find("HTTP/1.1 101 Switching Protocols\r\n") == 0);
 
-    runtime->request_shutdown();
-    runtime->join();
+    request_shutdown_and_join_quickly(*runtime);
     TEST_ASSERT(runtime->connection_manager().active_count() == 0UL);
 }
 

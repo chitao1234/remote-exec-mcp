@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
@@ -15,6 +16,7 @@
 
 #include "http/http_codec.h"
 #include "http/http_request.h"
+#include "platform/deadline.h"
 #include "platform/socket.h"
 #include "http/server_transport.h"
 
@@ -23,12 +25,70 @@ namespace {
 const std::size_t HTTP_READ_BUFFER_SIZE = 4U * 1024U;
 const std::size_t HTTP_RAW_BUFFER_COMPACT_THRESHOLD = 8U * 1024U;
 const std::size_t HTTP_MAX_CHUNK_LINE_SIZE = 4U * 1024U;
+const unsigned long DEFAULT_CONTROLLED_READ_POLL_TIMEOUT_MS = 1000UL;
 
 std::size_t parse_chunk_size_line(const std::string& line) {
     try {
         return parse_http_chunk_size_line(line);
     } catch (const HttpProtocolError& ex) {
         throw BadHttpRequest(ex.what());
+    }
+}
+
+bool has_idle_deadline(const HttpReadControl& read_control) {
+    return read_control.idle_timeout_ms != 0UL;
+}
+
+std::uint64_t read_deadline_after(const HttpReadControl* read_control) {
+    if (read_control == nullptr || !has_idle_deadline(*read_control)) {
+        return 0U;
+    }
+    return platform::monotonic_deadline_after_ms(read_control->idle_timeout_ms);
+}
+
+void reset_read_deadline(const HttpReadControl* read_control, std::uint64_t* deadline_ms) {
+    if (read_control != nullptr && has_idle_deadline(*read_control)) {
+        *deadline_ms = platform::monotonic_deadline_after_ms(read_control->idle_timeout_ms);
+    }
+}
+
+bool read_deadline_expired(const HttpReadControl& read_control, std::uint64_t deadline_ms) {
+    return has_idle_deadline(read_control) && platform::monotonic_deadline_expired(deadline_ms);
+}
+
+unsigned long controlled_read_wait_ms(const HttpReadControl& read_control, std::uint64_t deadline_ms) {
+    unsigned long wait_ms = read_control.poll_timeout_ms;
+    if (wait_ms == 0UL) {
+        wait_ms =
+            has_idle_deadline(read_control) ? read_control.idle_timeout_ms : DEFAULT_CONTROLLED_READ_POLL_TIMEOUT_MS;
+    }
+    if (has_idle_deadline(read_control)) {
+        const unsigned long remaining_ms = platform::monotonic_deadline_remaining_ms(deadline_ms);
+        wait_ms = remaining_ms < wait_ms ? remaining_ms : wait_ms;
+    }
+    return wait_ms == 0UL ? 1UL : wait_ms;
+}
+
+bool wait_for_controlled_read(SOCKET client, const HttpReadControl& read_control, std::uint64_t deadline_ms) {
+    for (;;) {
+        if (read_control.should_stop()) {
+            return false;
+        }
+        if (read_deadline_expired(read_control, deadline_ms)) {
+            return true;
+        }
+
+        const int ready = wait_socket_readable(client, controlled_read_wait_ms(read_control, deadline_ms));
+        if (ready > 0) {
+            return true;
+        }
+        if (ready == 0) {
+            continue;
+        }
+        if (read_control.should_stop()) {
+            return false;
+        }
+        throw std::runtime_error(socket_error_message("select"));
     }
 }
 
@@ -80,6 +140,67 @@ bool try_read_http_request_head(SOCKET client, std::size_t max_header_bytes, Htt
     throw BadHttpRequest("incomplete http request");
 }
 
+bool try_read_http_request_head_controlled(SOCKET client,
+                                           std::size_t max_header_bytes,
+                                           const HttpReadControl& read_control,
+                                           HttpRequestHead* head) {
+    std::string data;
+    char buffer[HTTP_READ_BUFFER_SIZE];
+    std::size_t search_offset = 0;
+    std::uint64_t deadline_ms = read_deadline_after(&read_control);
+
+    for (;;) {
+        if (!wait_for_controlled_read(client, read_control, deadline_ms)) {
+            return false;
+        }
+        if (read_deadline_expired(read_control, deadline_ms)) {
+            if (data.empty()) {
+                return false;
+            }
+            throw BadHttpRequest("incomplete http request");
+        }
+
+        const int received = recv_bounded(client, buffer, sizeof(buffer), 0);
+        if (received == 0) {
+            if (data.empty()) {
+                return false;
+            }
+            break;
+        }
+        if (received < 0) {
+            const int error = last_socket_error();
+            if (receive_timeout_error(error)) {
+                continue;
+            }
+            if (read_control.should_stop()) {
+                return false;
+            }
+            throw std::runtime_error(socket_error_message("recv"));
+        }
+
+        reset_read_deadline(&read_control, &deadline_ms);
+        data.append(buffer, received);
+        const std::size_t header_end = data.find("\r\n\r\n", search_offset);
+        if (header_end == std::string::npos) {
+            if (data.size() > max_header_bytes) {
+                throw BadHttpRequest("http request headers too large");
+            }
+            search_offset = data.size() > 3U ? data.size() - 3U : 0U;
+            continue;
+        }
+
+        if (header_end + 4U > max_header_bytes) {
+            throw BadHttpRequest("http request headers too large");
+        }
+
+        head->raw_headers = data.substr(0, header_end);
+        head->initial_body = data.substr(header_end + 4U);
+        return true;
+    }
+
+    throw BadHttpRequest("incomplete http request");
+}
+
 HttpRequestHead read_http_request_head(SOCKET client, std::size_t max_header_bytes) {
     HttpRequestHead head;
     if (try_read_http_request_head(client, max_header_bytes, &head)) {
@@ -93,9 +214,17 @@ HttpRequestBodyStream::HttpRequestBodyStream(SOCKET client,
                                              const std::string& initial_body,
                                              const HttpRequestBodyFraming& framing,
                                              std::size_t max_body_bytes)
-    : client_(client), raw_(initial_body), raw_offset_(0), framing_(framing), decoded_size_(0),
-      max_body_bytes_(max_body_bytes), remaining_content_length_(framing.content_length), remaining_chunk_size_(0),
-      chunked_finished_(false) {
+    : HttpRequestBodyStream(client, initial_body, framing, max_body_bytes, nullptr) {
+}
+
+HttpRequestBodyStream::HttpRequestBodyStream(SOCKET client,
+                                             const std::string& initial_body,
+                                             const HttpRequestBodyFraming& framing,
+                                             std::size_t max_body_bytes,
+                                             const HttpReadControl* read_control)
+    : client_(client), read_control_(read_control), read_deadline_ms_(read_deadline_after(read_control)),
+      raw_(initial_body), raw_offset_(0), framing_(framing), decoded_size_(0), max_body_bytes_(max_body_bytes),
+      remaining_content_length_(framing.content_length), remaining_chunk_size_(0), chunked_finished_(false) {
     if (!framing_.chunked && remaining_content_length_ > max_body_bytes_) {
         throw BadHttpRequest("http request body too large");
     }
@@ -171,19 +300,7 @@ std::size_t HttpRequestBodyStream::read_chunked_body(char* data, std::size_t max
 
 void HttpRequestBodyStream::ensure_raw_available(std::size_t size) {
     while (raw_.size() - raw_offset_ < size) {
-        char buffer[HTTP_READ_BUFFER_SIZE];
-        const int received = recv_bounded(client_, buffer, sizeof(buffer), 0);
-        if (received == 0) {
-            throw BadHttpRequest("incomplete http request body");
-        }
-        if (received < 0) {
-            const int error = last_socket_error();
-            if (would_block_error(error)) {
-                throw BadHttpRequest("incomplete http request body");
-            }
-            throw std::runtime_error(socket_error_message("recv"));
-        }
-        raw_.append(buffer, received);
+        append_from_socket();
     }
 }
 
@@ -192,20 +309,44 @@ void HttpRequestBodyStream::ensure_raw_line() {
         if (raw_.size() - raw_offset_ > HTTP_MAX_CHUNK_LINE_SIZE) {
             throw BadHttpRequest("chunked request line too long");
         }
-        char buffer[HTTP_READ_BUFFER_SIZE];
-        const int received = recv_bounded(client_, buffer, sizeof(buffer), 0);
-        if (received == 0) {
+        append_from_socket();
+    }
+}
+
+void HttpRequestBodyStream::append_from_socket() {
+    if (read_control_ != nullptr) {
+        if (!wait_for_controlled_read(client_, *read_control_, read_deadline_ms_)) {
+            throw HttpConnectionShutdown("server shutting down");
+        }
+        if (read_deadline_expired(*read_control_, read_deadline_ms_)) {
             throw BadHttpRequest("incomplete http request body");
         }
-        if (received < 0) {
-            const int error = last_socket_error();
-            if (would_block_error(error)) {
-                throw BadHttpRequest("incomplete http request body");
-            }
-            throw std::runtime_error(socket_error_message("recv"));
-        }
-        raw_.append(buffer, received);
     }
+
+    char buffer[HTTP_READ_BUFFER_SIZE];
+    const int received = recv_bounded(client_, buffer, sizeof(buffer), 0);
+    if (received == 0) {
+        if (read_control_ != nullptr && read_control_->should_stop()) {
+            throw HttpConnectionShutdown("server shutting down");
+        }
+        throw BadHttpRequest("incomplete http request body");
+    }
+    if (received < 0) {
+        const int error = last_socket_error();
+        if (read_control_ != nullptr && receive_timeout_error(error)) {
+            return;
+        }
+        if (receive_timeout_error(error)) {
+            throw BadHttpRequest("incomplete http request body");
+        }
+        if (read_control_ != nullptr && read_control_->should_stop()) {
+            throw HttpConnectionShutdown("server shutting down");
+        }
+        throw std::runtime_error(socket_error_message("recv"));
+    }
+
+    reset_read_deadline(read_control_, &read_deadline_ms_);
+    raw_.append(buffer, received);
 }
 
 void HttpRequestBodyStream::consume_raw(std::size_t size) {

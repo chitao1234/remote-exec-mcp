@@ -69,6 +69,7 @@ void ServerRuntime::request_shutdown() {
         BasicLockGuard lock(mutex_);
         shutting_down_ = true;
     }
+    state_.shutdown_requested.store(true);
     shutdown_wakeup_.signal();
 
     connections_.begin_shutdown();

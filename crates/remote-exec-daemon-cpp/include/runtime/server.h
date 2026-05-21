@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <string>
 
@@ -22,6 +23,7 @@ struct AppState {
     std::string default_shell;
     DaemonCapabilities capabilities;
     bool sandbox_enabled = false;
+    std::atomic<bool> shutdown_requested{false};
     CompiledFilesystemSandbox sandbox;
     SessionStore sessions;
     std::shared_ptr<PortTunnelService> port_tunnel_service;

@@ -14,9 +14,9 @@ public:
     ~ConnectionManager();
 
     // Owns one worker thread per accepted HTTP connection. begin_shutdown()
-    // prevents new workers and shutdowns tracked sockets to wake blocking I/O;
-    // reap_finished() and wait_for_all() are the only join paths. Worker code
-    // owns request handling, but not the thread record that supervises it.
+    // prevents new workers and asks active workers to stop; reap_finished() and
+    // wait_for_all() are the only join paths. Worker code owns request handling,
+    // while this manager supervises thread lifetime.
     bool try_start(UniqueSocket client, std::function<void(SOCKET)> worker_main);
     void begin_shutdown();
     void reap_finished();

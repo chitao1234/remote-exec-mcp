@@ -1,6 +1,7 @@
 #include "runtime/connection_manager.h"
 
 #include <exception>
+#include <utility>
 #include <vector>
 
 #include "core/logging.h"
@@ -79,10 +80,17 @@ void ConnectionManager::close_worker_socket(const std::shared_ptr<WorkerRecord>&
 }
 
 void ConnectionManager::shutdown_worker_socket(const std::shared_ptr<WorkerRecord>& record) {
+#ifdef _WIN32
+    // Winsock forbids closesocket() while another thread is in a Winsock call
+    // on the same socket, and shutdown() does not reliably wake recv() on XP.
+    // Windows workers observe runtime shutdown through bounded read waits.
+    (void)record;
+#else
     BasicLockGuard state_lock(record->state_mutex);
     if (record->socket != INVALID_SOCKET) {
         shutdown_socket(record->socket);
     }
+#endif
 }
 
 void ConnectionManager::join_worker_thread(const std::shared_ptr<WorkerRecord>& record) {

@@ -15,6 +15,8 @@
 
 namespace {
 
+const unsigned long HTTP_SHUTDOWN_READ_POLL_MS = 100UL;
+
 bool request_connection_close_requested(const HttpRequest& request) {
     const std::string value = lowercase_ascii(request.header("connection"));
     std::size_t offset = 0;
@@ -108,13 +110,15 @@ int handle_streaming_transfer_export_request(const AppState& state,
 int handle_client_request(AppState& state,
                           SOCKET client,
                           const HttpRequestHead& request_head,
+                          const HttpReadControl& read_control,
                           bool* close_after_response) {
     const std::uint64_t started_at_ms = platform::monotonic_ms();
     HttpRequest request = parse_http_request_head(request_head.raw_headers);
     assign_request_id(request);
     *close_after_response = request_connection_close_requested(request);
     const HttpRequestBodyFraming framing = parse_request_body_framing_or_throw_bad_request(request);
-    HttpRequestBodyStream body(client, request_head.initial_body, framing, state.config.max_request_body_bytes);
+    HttpRequestBodyStream body(
+        client, request_head.initial_body, framing, state.config.max_request_body_bytes, &read_control);
     const RouteExecutionMode mode = route_execution_mode(request);
 
     if (mode == ROUTE_EXECUTION_STREAMING_EXPORT) {
@@ -147,20 +151,28 @@ int handle_client_request(AppState& state,
 } // namespace
 
 void handle_client(AppState& state, UniqueSocket client) {
+    HttpReadControl read_control;
+    read_control.idle_timeout_ms = state.config.http_connection_idle_timeout_ms;
+    read_control.poll_timeout_ms = HTTP_SHUTDOWN_READ_POLL_MS;
+    read_control.stop_requested = [&state]() { return state.shutdown_requested.load(); };
+
     for (;;) {
         try {
             set_socket_timeout_ms(client.get(), state.config.http_connection_idle_timeout_ms);
             HttpRequestHead request_head;
-            if (!try_read_http_request_head(client.get(), state.config.max_request_header_bytes, &request_head)) {
+            if (!try_read_http_request_head_controlled(
+                    client.get(), state.config.max_request_header_bytes, read_control, &request_head)) {
                 return;
             }
             set_socket_timeout_ms(client.get(), state.config.http_connection_idle_timeout_ms);
 
             bool close_after_response = false;
-            handle_client_request(state, client.get(), request_head, &close_after_response);
+            handle_client_request(state, client.get(), request_head, read_control, &close_after_response);
             if (close_after_response) {
                 return;
             }
+        } catch (const HttpConnectionShutdown&) {
+            return;
         } catch (const BadHttpRequest& ex) {
             log_message(LOG_WARN, "server", ex.what());
             HttpResponse response;
