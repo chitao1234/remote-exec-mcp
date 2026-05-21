@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::future::Future;
 use std::num::NonZeroU32;
 use std::path::Path;
-#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+#[cfg(feature = "broker-tls")]
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -42,7 +42,7 @@ use tokio::sync::{Mutex, Notify, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+#[cfg(feature = "broker-tls")]
 use super::certs::TestCerts;
 use super::test_helpers::DEFAULT_TEST_TARGET;
 
@@ -647,7 +647,7 @@ pub(crate) async fn assert_no_stub_task_panics(state: &StubDaemonState) {
     }
 }
 
-#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+#[cfg(feature = "broker-tls")]
 pub(super) async fn spawn_stub_daemon(
     certs: &TestCerts,
 ) -> (std::net::SocketAddr, StubDaemonState) {
@@ -659,7 +659,7 @@ pub(super) async fn spawn_plain_http_stub_daemon() -> (std::net::SocketAddr, Stu
 }
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
-#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+#[cfg(feature = "broker-tls")]
 pub(super) async fn spawn_retryable_exec_write_daemon(
     certs: &TestCerts,
 ) -> (std::net::SocketAddr, StubDaemonState) {
@@ -672,7 +672,7 @@ pub(super) async fn spawn_plain_http_retryable_exec_write_daemon()
 }
 
 #[allow(dead_code, reason = "Shared across broker integration test crates")]
-#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+#[cfg(feature = "broker-tls")]
 pub(super) async fn spawn_unknown_session_exec_write_daemon(
     certs: &TestCerts,
 ) -> (std::net::SocketAddr, StubDaemonState) {
@@ -684,7 +684,7 @@ pub(super) async fn spawn_plain_http_unknown_session_exec_write_daemon()
     spawn_plain_http_daemon(ExecWriteBehavior::UnknownSession).await
 }
 
-#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+#[cfg(feature = "broker-tls")]
 async fn spawn_daemon(
     certs: &TestCerts,
     exec_write_behavior: ExecWriteBehavior,
@@ -698,7 +698,7 @@ async fn spawn_plain_http_daemon(
     spawn_plain_http_daemon_with_platform(exec_write_behavior, "linux", true).await
 }
 
-#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+#[cfg(feature = "broker-tls")]
 pub(super) async fn spawn_daemon_with_platform(
     certs: &TestCerts,
     exec_write_behavior: ExecWriteBehavior,
@@ -736,7 +736,7 @@ pub(super) async fn spawn_plain_http_daemon_with_platform(
     (addr, state)
 }
 
-#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+#[cfg(feature = "broker-tls")]
 pub(super) async fn spawn_named_daemon_on_listener(
     certs: &TestCerts,
     listener: tokio::net::TcpListener,
@@ -986,7 +986,7 @@ fn trim_horizontal(value: &str) -> &str {
     value.trim_matches([' ', '\t'])
 }
 
-#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+#[cfg(feature = "broker-tls")]
 async fn wait_until_ready(certs: &TestCerts, addr: std::net::SocketAddr) {
     let ca = reqwest::Certificate::from_pem(&std::fs::read(&certs.ca_cert).unwrap()).unwrap();
     let client = reqwest::Client::builder()

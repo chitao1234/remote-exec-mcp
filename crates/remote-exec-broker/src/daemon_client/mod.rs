@@ -10,6 +10,7 @@ pub use client::DaemonClient;
 pub use error::{DaemonClientError, DaemonRpcCode, RpcToolErrorMode};
 pub use transfer::{TransferExportResponse, TransferExportStream};
 
+#[cfg(feature = "broker-tls")]
 pub(crate) use client::apply_daemon_client_timeouts;
 pub(crate) use error::{normalize_tool_error, normalize_tool_result};
 pub(in crate::daemon_client) use logging::{RpcCallContext, RpcCallKind};

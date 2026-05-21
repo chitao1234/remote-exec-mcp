@@ -1,4 +1,4 @@
-#![cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+#![cfg(feature = "broker-tls")]
 
 #[path = "support/mod.rs"]
 mod support;

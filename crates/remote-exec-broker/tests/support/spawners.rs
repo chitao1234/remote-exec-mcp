@@ -5,13 +5,13 @@ use rmcp::ServiceExt;
 use tempfile::TempDir;
 
 use super::blocking_child_process::BlockingChildProcess;
-#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+#[cfg(feature = "broker-tls")]
 use super::certs::{TestCerts, write_test_certs_for_daemon_spec};
 use super::fixture::{BrokerFixture, DummyClientHandler};
 use super::streamable_http_child::{
     configure_streamable_http_broker_child, wait_for_streamable_http_bound_addr,
 };
-#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+#[cfg(feature = "broker-tls")]
 use super::stub_daemon::spawn_stub_daemon;
 use super::stub_daemon::{
     ExecWriteBehavior, StubDaemonState, set_port_forward_support, set_required_bearer_token,
@@ -74,9 +74,9 @@ struct BrokerConfigTarget<'a> {
 #[derive(Clone, Copy)]
 enum BrokerTargetTransport<'a> {
     Http,
-    #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+    #[cfg(feature = "broker-tls")]
     Https(&'a TestCerts),
-    #[cfg(not(all(feature = "broker-tls", feature = "daemon-tls")))]
+    #[cfg(not(feature = "broker-tls"))]
     _Lifetime(std::marker::PhantomData<&'a ()>),
 }
 
@@ -120,7 +120,7 @@ expected_daemon_name = {expected_daemon_name}
             expected_daemon_name = toml_string(target.name),
             extra_config = extra_config,
         ),
-        #[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+        #[cfg(feature = "broker-tls")]
         BrokerTargetTransport::Https(certs) => format!(
             r#"[targets.{name}]
 base_url = {base_url}
@@ -137,7 +137,7 @@ expected_daemon_name = {expected_daemon_name}
             expected_daemon_name = toml_string(target.name),
             extra_config = extra_config,
         ),
-        #[cfg(not(all(feature = "broker-tls", feature = "daemon-tls")))]
+        #[cfg(not(feature = "broker-tls"))]
         BrokerTargetTransport::_Lifetime(_) => {
             unreachable!("lifetime marker variant is never constructed")
         }
@@ -297,7 +297,7 @@ async fn serve_broker_child_stdio(
     DummyClientHandler.serve(transport).await.unwrap()
 }
 
-#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+#[cfg(feature = "broker-tls")]
 pub async fn spawn_broker_with_tls_stub_daemon_and_extra_target_config(
     certs: TestCerts,
     extra_target_config: &str,
@@ -322,7 +322,7 @@ pub async fn spawn_broker_with_tls_stub_daemon_and_extra_target_config(
     .await
 }
 
-#[cfg(all(feature = "broker-tls", feature = "daemon-tls"))]
+#[cfg(feature = "broker-tls")]
 pub async fn spawn_broker_with_tls_stub_daemon_and_daemon_spec(
     daemon_spec: remote_exec_pki::DaemonCertSpec,
     extra_target_config: &str,
