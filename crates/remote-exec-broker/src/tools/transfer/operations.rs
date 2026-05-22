@@ -12,6 +12,7 @@ use crate::daemon_client::{DaemonClientError, RpcToolErrorMode, normalize_tool_r
 use crate::local::BrokerHostOrTarget;
 
 use super::endpoints::endpoint_policy;
+use super::plan::{TransferExecutionOptions, TransferPlan};
 
 struct ExportedSourceArchive {
     endpoint: TransferEndpoint,
@@ -57,16 +58,18 @@ impl SingleSourceExport {
     }
 }
 
-#[derive(Clone, Copy)]
-pub(super) struct TransferExecutionOptions<'a> {
-    pub(super) overwrite: &'a TransferOverwrite,
-    pub(super) compression: &'a TransferCompression,
-    pub(super) exclude: &'a [String],
-    pub(super) symlink_mode: &'a TransferSymlinkMode,
-    pub(super) create_parent: bool,
+pub(super) async fn execute_transfer_plan(
+    state: &crate::BrokerState,
+    plan: &TransferPlan,
+) -> anyhow::Result<(TransferSourceType, TransferImportResponse)> {
+    let options = plan.execution_options();
+    match plan.sources.as_slice() {
+        [source] => transfer_single_source(state, source, &plan.destination, options).await,
+        _ => transfer_multiple_sources(state, &plan.sources, &plan.destination, options).await,
+    }
 }
 
-pub(super) async fn transfer_single_source(
+async fn transfer_single_source(
     state: &crate::BrokerState,
     source: &TransferEndpoint,
     destination: &TransferEndpoint,
@@ -92,7 +95,7 @@ pub(super) async fn transfer_single_source(
     Ok((source_type, summary))
 }
 
-pub(super) async fn transfer_multiple_sources(
+async fn transfer_multiple_sources(
     state: &crate::BrokerState,
     sources: &[TransferEndpoint],
     destination: &TransferEndpoint,
