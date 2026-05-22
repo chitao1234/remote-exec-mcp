@@ -9,10 +9,8 @@ use remote_exec_broker::cli::{
     resolve_login_flag, write_image_output, write_stdin_pty_size,
 };
 use remote_exec_broker::{Connection, RemoteExecClient, ToolResponse};
-use remote_exec_proto::public::{
-    ForwardPortsInput, ListTargetsInput, TransferDestinationMode, TransferOverwrite,
-    TransferSymlinkMode,
-};
+use remote_exec_proto::public::{ForwardPortsInput, ListTargetsInput, TransferDestinationMode};
+use remote_exec_proto::transfer::{TransferOverwrite, TransferSymlinkMode};
 
 const CLI_AFTER_HELP: &str = "\
 Connection modes:

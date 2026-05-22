@@ -1,8 +1,10 @@
-use remote_exec_proto::public::{TransferEndpoint, TransferOverwrite, TransferSymlinkMode};
+use remote_exec_proto::public::TransferEndpoint;
 use remote_exec_proto::rpc::{
-    TransferExportRequest, TransferImportRequest, TransferImportResponse, TransferSourceType,
+    TransferExportRequest, TransferImportRequest, TransferImportResponse,
 };
-use remote_exec_proto::transfer::TransferCompression;
+use remote_exec_proto::transfer::{
+    TransferCompression, TransferOverwrite, TransferSourceType, TransferSymlinkMode,
+};
 
 use super::backend::{TransferArchiveStream, TransferBackend, backend_for_endpoint};
 use super::endpoints::endpoint_policy;

@@ -1,11 +1,10 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use remote_exec_proto::rpc::{
-    TransferImportRequest, TransferImportResponse, TransferOverwrite, TransferSourceType,
-    TransferSymlinkMode, TransferWarning,
+use remote_exec_proto::rpc::{TransferImportRequest, TransferImportResponse, TransferWarning};
+use remote_exec_proto::transfer::{
+    TransferLimits, TransferOverwrite, TransferSourceType, TransferSymlinkMode,
 };
-use remote_exec_proto::transfer::TransferLimits;
 
 use crate::error::TransferError;
 use crate::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};

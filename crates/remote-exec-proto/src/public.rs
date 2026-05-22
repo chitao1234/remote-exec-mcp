@@ -17,8 +17,6 @@ pub use transfer::{
     TransferDestinationMode, TransferEndpoint, TransferFilesInput, TransferFilesResult,
 };
 
-pub use crate::transfer::{TransferOverwrite, TransferSourceType, TransferSymlinkMode};
-
 #[cfg(test)]
 mod tests {
     use super::*;

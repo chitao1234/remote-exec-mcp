@@ -9,11 +9,11 @@ use remote_exec_proto::rpc::{
     TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER, TRANSFER_STREAM_CONTENT_TYPE,
     TRANSFER_STREAM_FRAME_HEADER_LEN, TRANSFER_STREAM_PREFACE, TRANSFER_STREAM_PROTOCOL_VERSION,
     TRANSFER_STREAM_VERSION_HEADER, TransferExportRequest, TransferImportResponse,
-    TransferPathInfoRequest, TransferPathInfoResponse, TransferSourceType, TransferStreamComplete,
+    TransferPathInfoRequest, TransferPathInfoResponse, TransferStreamComplete,
     TransferStreamFrameType, decode_transfer_stream_frame_header,
     transfer_destination_path_header_value,
 };
-use remote_exec_proto::transfer::TransferCompression;
+use remote_exec_proto::transfer::{TransferCompression, TransferSourceType};
 use support::test_helpers::DEFAULT_TEST_TARGET;
 #[cfg(unix)]
 use support::transfer_archive::directory_tar_with_symlink;
@@ -832,7 +832,7 @@ async fn import_directory_replaces_exact_destination_and_preserves_exec_bits() {
     let summary = response.json::<TransferImportResponse>().await.unwrap();
     assert_eq!(
         summary.source_type,
-        remote_exec_proto::rpc::TransferSourceType::Directory
+        remote_exec_proto::transfer::TransferSourceType::Directory
     );
     assert_eq!(summary.files_copied, 1);
     assert_eq!(summary.directories_copied, 3);

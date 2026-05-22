@@ -11,8 +11,8 @@ use std::sync::{
 };
 
 use bytes::Bytes;
-use remote_exec_proto::rpc::{TransferSourceType, TransferSymlinkMode};
 use remote_exec_proto::transfer::TransferCompression;
+use remote_exec_proto::transfer::{TransferSourceType, TransferSymlinkMode};
 use tokio::sync::mpsc;
 
 use crate::error::TransferError;

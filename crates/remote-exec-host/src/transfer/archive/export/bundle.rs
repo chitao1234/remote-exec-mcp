@@ -1,8 +1,8 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use remote_exec_proto::rpc::{TransferSourceType, TransferWarning};
 use remote_exec_proto::transfer::TransferCompression;
+use remote_exec_proto::{rpc::TransferWarning, transfer::TransferSourceType};
 
 use crate::error::TransferError;
 

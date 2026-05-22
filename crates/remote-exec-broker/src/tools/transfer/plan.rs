@@ -1,8 +1,5 @@
-use remote_exec_proto::public::{
-    TransferDestinationMode, TransferEndpoint, TransferFilesInput, TransferOverwrite,
-    TransferSymlinkMode,
-};
-use remote_exec_proto::transfer::TransferCompression;
+use remote_exec_proto::public::{TransferDestinationMode, TransferEndpoint, TransferFilesInput};
+use remote_exec_proto::transfer::{TransferCompression, TransferOverwrite, TransferSymlinkMode};
 
 use super::endpoints::{
     ensure_absolute, ensure_distinct_endpoints, ensure_multi_source_basenames_are_unique,

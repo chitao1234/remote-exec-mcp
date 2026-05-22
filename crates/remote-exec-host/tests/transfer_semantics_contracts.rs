@@ -9,8 +9,8 @@ use remote_exec_host::{
     transfer::archive::{ExportedArchive, export_path_to_archive, import_archive_from_file},
 };
 use remote_exec_proto::{
-    rpc::{TransferImportRequest, TransferOverwrite, TransferSourceType, TransferSymlinkMode},
-    transfer::TransferCompression,
+    rpc::TransferImportRequest,
+    transfer::{TransferCompression, TransferOverwrite, TransferSourceType, TransferSymlinkMode},
 };
 use serde::Deserialize;
 

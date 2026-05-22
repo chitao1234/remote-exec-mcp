@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use remote_exec_proto::rpc::{TransferSourceType, TransferSymlinkMode};
+use remote_exec_proto::transfer::{TransferSourceType, TransferSymlinkMode};
 
 use crate::error::TransferError;
 use crate::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};

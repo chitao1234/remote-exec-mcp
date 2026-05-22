@@ -8,9 +8,9 @@ use remote_exec_host::sandbox::CompiledFilesystemSandbox;
 use remote_exec_proto::public::TransferEndpoint;
 use remote_exec_proto::rpc::{
     TransferExportRequest, TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
-    TransferPathInfoResponse, TransferSourceType,
+    TransferPathInfoResponse,
 };
-use remote_exec_proto::transfer::TransferLimits;
+use remote_exec_proto::transfer::{TransferLimits, TransferSourceType};
 
 use crate::daemon_client::{
     DaemonClientError, RpcToolErrorMode, TransferExportResponse, normalize_tool_result,

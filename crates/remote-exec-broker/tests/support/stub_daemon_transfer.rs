@@ -11,11 +11,11 @@ use remote_exec_proto::rpc::{
     TRANSFER_STREAM_FRAME_HEADER_LEN, TRANSFER_STREAM_PREFACE, TRANSFER_STREAM_PROTOCOL_VERSION,
     TRANSFER_STREAM_VERSION_HEADER, TRANSFER_SYMLINK_MODE_HEADER, TransferExportRequest,
     TransferHeaders, TransferImportResponse, TransferPathInfoRequest, TransferPathInfoResponse,
-    TransferSourceType, TransferStreamComplete, TransferStreamFrameHeader, TransferStreamFrameType,
-    TransferWarning, decode_transfer_stream_frame_header, encode_transfer_stream_frame_header,
+    TransferStreamComplete, TransferStreamFrameHeader, TransferStreamFrameType, TransferWarning,
+    decode_transfer_stream_frame_header, encode_transfer_stream_frame_header,
     parse_transfer_import_metadata,
 };
-use remote_exec_proto::transfer::TransferCompression;
+use remote_exec_proto::transfer::{TransferCompression, TransferSourceType};
 use tar::{Builder, EntryType, Header};
 
 use super::StubDaemonState;

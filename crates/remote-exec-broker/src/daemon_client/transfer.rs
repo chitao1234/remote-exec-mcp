@@ -3,8 +3,9 @@ use futures_util::{StreamExt, TryStream, TryStreamExt};
 use remote_exec_proto::rpc::{
     TRANSFER_STREAM_PROTOCOL_VERSION, TRANSFER_STREAM_VERSION_HEADER, TransferExportMetadata,
     TransferExportRequest, TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
-    TransferPathInfoResponse, TransferSourceType,
+    TransferPathInfoResponse,
 };
+use remote_exec_proto::transfer::TransferSourceType;
 
 use crate::tools::transfer::codec;
 

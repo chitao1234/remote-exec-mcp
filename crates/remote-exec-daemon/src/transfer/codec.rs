@@ -2,10 +2,10 @@ use axum::http::HeaderMap;
 use axum::http::header::CONTENT_TYPE;
 use remote_exec_proto::rpc::{
     TRANSFER_STREAM_CONTENT_TYPE, TRANSFER_STREAM_PROTOCOL_VERSION, TRANSFER_STREAM_VERSION_HEADER,
-    TransferExportMetadata, TransferHeaderError, TransferImportMetadata, TransferSourceType,
+    TransferExportMetadata, TransferHeaderError, TransferImportMetadata,
     parse_transfer_import_metadata_from_lookup, transfer_export_header_pairs,
 };
-use remote_exec_proto::transfer::TransferCompression;
+use remote_exec_proto::transfer::{TransferCompression, TransferSourceType};
 
 use crate::rpc_error::RpcError;
 use crate::rpc_error::bad_request;

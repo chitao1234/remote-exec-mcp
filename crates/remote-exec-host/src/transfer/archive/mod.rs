@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use crate::host_path;
 use remote_exec_proto::path::PathPolicy;
-use remote_exec_proto::rpc::{TransferSourceType, TransferWarning};
 use remote_exec_proto::transfer::TransferCompression;
+use remote_exec_proto::{rpc::TransferWarning, transfer::TransferSourceType};
 
 mod codec;
 mod entry;

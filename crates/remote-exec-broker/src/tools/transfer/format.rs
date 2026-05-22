@@ -1,9 +1,6 @@
-use remote_exec_proto::public::{
-    TransferDestinationMode, TransferEndpoint, TransferFilesResult, TransferSourceType,
-    TransferSymlinkMode as PublicTransferSymlinkMode,
-};
+use remote_exec_proto::public::{TransferDestinationMode, TransferEndpoint, TransferFilesResult};
 use remote_exec_proto::rpc::TransferImportResponse;
-use remote_exec_proto::transfer::TransferCompression;
+use remote_exec_proto::transfer::{TransferCompression, TransferSourceType, TransferSymlinkMode};
 
 use crate::mcp_server::ToolCallOutput;
 
@@ -11,7 +8,7 @@ pub(super) struct CompletedTransfer {
     pub requested_destination: TransferEndpoint,
     pub destination: TransferEndpoint,
     pub destination_mode: TransferDestinationMode,
-    pub symlink_mode: PublicTransferSymlinkMode,
+    pub symlink_mode: TransferSymlinkMode,
     pub source_type: TransferSourceType,
     pub summary: TransferImportResponse,
 }

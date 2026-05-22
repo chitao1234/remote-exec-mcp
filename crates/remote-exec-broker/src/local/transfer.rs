@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 use remote_exec_host::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};
 use remote_exec_proto::path::{PathPolicy, host_policy};
 use remote_exec_proto::rpc::{
-    TransferImportRequest, TransferImportResponse, TransferPathInfoResponse, TransferSourceType,
+    TransferImportRequest, TransferImportResponse, TransferPathInfoResponse,
 };
-use remote_exec_proto::transfer::{TransferCompression, TransferLimits};
+use remote_exec_proto::transfer::{TransferCompression, TransferLimits, TransferSourceType};
 
 use crate::daemon_client::DaemonClientError;
 

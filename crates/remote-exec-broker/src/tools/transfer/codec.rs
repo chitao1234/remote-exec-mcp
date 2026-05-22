@@ -95,10 +95,11 @@ mod tests {
         TRANSFER_DESTINATION_PATH_HEADER, TRANSFER_OVERWRITE_HEADER, TRANSFER_SOURCE_TYPE_HEADER,
         TRANSFER_STREAM_CONTENT_TYPE, TRANSFER_STREAM_PROTOCOL_VERSION,
         TRANSFER_STREAM_VERSION_HEADER, TRANSFER_SYMLINK_MODE_HEADER, TransferImportMetadata,
-        TransferOverwrite, TransferSourceType, TransferSymlinkMode,
         transfer_destination_path_header_value,
     };
-    use remote_exec_proto::transfer::TransferCompression;
+    use remote_exec_proto::transfer::{
+        TransferCompression, TransferOverwrite, TransferSourceType, TransferSymlinkMode,
+    };
     use reqwest::header::CONTENT_TYPE;
 
     use super::*;

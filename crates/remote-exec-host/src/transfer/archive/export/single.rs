@@ -2,7 +2,10 @@ use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use remote_exec_proto::rpc::{TransferSourceType, TransferSymlinkMode, TransferWarning};
+use remote_exec_proto::{
+    rpc::TransferWarning,
+    transfer::{TransferSourceType, TransferSymlinkMode},
+};
 
 use crate::error::TransferError;
 use crate::sandbox::{CompiledFilesystemSandbox, SandboxAccess, authorize_path};

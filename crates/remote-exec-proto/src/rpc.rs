@@ -38,5 +38,5 @@ pub use warning::WarningCode;
 
 pub use crate::transfer::{
     TransferCompression, TransferExportMetadata, TransferExportRequest, TransferImportMetadata,
-    TransferImportRequest, TransferOverwrite, TransferSourceType, TransferSymlinkMode,
+    TransferImportRequest,
 };
