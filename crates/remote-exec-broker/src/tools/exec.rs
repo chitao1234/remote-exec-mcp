@@ -1,3 +1,6 @@
+mod format;
+mod intercept;
+
 use anyhow::Context;
 
 use remote_exec_proto::path::PathPolicy;
@@ -7,12 +10,12 @@ use remote_exec_proto::rpc::{
     ExecStartResponse, ExecWarning, ExecWriteRequest, ExecWriteResponse, RpcErrorCode,
 };
 
-use super::exec_format::{
-    format_command_text, format_intercepted_patch_text, format_poll_text, prepend_warning_text,
-};
-use super::exec_intercept::maybe_intercept_apply_patch;
 use crate::daemon_client::RpcToolErrorMode;
 use crate::mcp_server::ToolCallOutput;
+use format::{
+    format_command_text, format_intercepted_patch_text, format_poll_text, prepend_warning_text,
+};
+use intercept::maybe_intercept_apply_patch;
 
 struct WriteStdinCompletion {
     output: ToolCallOutput,

@@ -1,9 +1,9 @@
 use remote_exec_proto::path::PathPolicy;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InterceptedApplyPatch {
-    pub patch: String,
-    pub workdir: Option<String>,
+pub(super) struct InterceptedApplyPatch {
+    pub(super) patch: String,
+    pub(super) workdir: Option<String>,
 }
 
 fn is_horizontal_whitespace(ch: char) -> bool {
@@ -61,7 +61,7 @@ fn strip_shell_wrapper(cmd: &str) -> &str {
     trimmed
 }
 
-pub fn maybe_intercept_apply_patch(
+pub(super) fn maybe_intercept_apply_patch(
     cmd: &str,
     workdir: Option<&str>,
     path_policy: PathPolicy,
