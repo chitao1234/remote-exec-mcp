@@ -14,11 +14,11 @@ use super::streamable_http_child::{
 #[cfg(feature = "broker-tls")]
 use super::stub_daemon::spawn_stub_daemon;
 use super::stub_daemon::{
-    ExecWriteBehavior, StubDaemonState, set_port_forward_support, set_required_bearer_token,
-    set_transfer_compression_support, spawn_plain_http_daemon_with_platform,
-    spawn_plain_http_retryable_exec_write_daemon, spawn_plain_http_stub_daemon,
-    spawn_plain_http_stub_on_listener, spawn_plain_http_unknown_session_exec_write_daemon,
-    stub_daemon_state,
+    ExecWriteBehavior, StubDaemonState, set_file_tool_support, set_port_forward_support,
+    set_required_bearer_token, set_transfer_compression_support,
+    spawn_plain_http_daemon_with_platform, spawn_plain_http_retryable_exec_write_daemon,
+    spawn_plain_http_stub_daemon, spawn_plain_http_stub_on_listener,
+    spawn_plain_http_unknown_session_exec_write_daemon, stub_daemon_state,
 };
 use super::test_helpers::{
     DEFAULT_TEST_TARGET, ReadinessWaitOutcome, XP_TEST_TARGET, poll_until_ready, toml_string,
@@ -362,6 +362,57 @@ pub async fn spawn_broker_with_stub_daemon() -> BrokerFixture {
         None,
         None,
         None,
+        stub_state,
+    )
+    .await
+}
+
+pub async fn spawn_broker_with_stub_daemon_and_extra_config(
+    extra_top_level: &str,
+) -> BrokerFixture {
+    let tempdir = tempfile::tempdir().unwrap();
+    let (addr, stub_state) = spawn_plain_http_stub_daemon().await;
+    spawn_broker_fixture_from_config(
+        tempdir,
+        &[BrokerConfigTarget {
+            name: DEFAULT_TEST_TARGET,
+            addr,
+            transport: BrokerTargetTransport::Http,
+            extra_config: None,
+        }],
+        None,
+        None,
+        Some(extra_top_level),
+        stub_state,
+    )
+    .await
+}
+
+pub async fn spawn_broker_with_stub_daemon_without_file_tool_support(
+    extra_top_level: &str,
+) -> BrokerFixture {
+    let tempdir = tempfile::tempdir().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let mut stub_state = stub_daemon_state(
+        DEFAULT_TEST_TARGET,
+        ExecWriteBehavior::Success,
+        "linux",
+        true,
+    );
+    set_file_tool_support(&mut stub_state, false);
+    spawn_plain_http_stub_on_listener(listener, stub_state.clone()).await;
+    spawn_broker_fixture_from_config(
+        tempdir,
+        &[BrokerConfigTarget {
+            name: DEFAULT_TEST_TARGET,
+            addr,
+            transport: BrokerTargetTransport::Http,
+            extra_config: None,
+        }],
+        None,
+        None,
+        Some(extra_top_level),
         stub_state,
     )
     .await

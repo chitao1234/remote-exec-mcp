@@ -83,13 +83,22 @@ pub async fn write_file_local(
         target = %state.config.target,
         path = %req.path,
         content_len = req.content.len(),
+        max_bytes = req.max_bytes,
         "file write received"
     );
 
+    if req.max_bytes == 0 {
+        return Err(FileError::invalid_request(
+            "write.max_bytes must be greater than zero",
+        ));
+    }
+
     let path = resolve_file_path(&state, &req.path);
     crate::exec::ensure_sandbox_access(&state, SandboxAccess::Write, &path)?;
-    let created = ensure_writable_file_target(&path).await?;
-    let content = encode_for_existing_file(&state, &path, &req.content, !created).await?;
+    let target = ensure_writable_file_target(&path, req.max_bytes).await?;
+    let content =
+        encode_for_existing_file(&state, &path, &req.content, !target.created, req.max_bytes)
+            .await?;
     tokio::fs::write(&path, content)
         .await
         .map_err(|err| write_error(&path, err))?;
@@ -97,13 +106,13 @@ pub async fn write_file_local(
     tracing::info!(
         target = %state.config.target,
         path = %path.display(),
-        created,
+        created = target.created,
         line_count,
         "file write completed"
     );
 
     Ok(FileWriteResponse {
-        created,
+        created: target.created,
         line_count,
     })
 }
@@ -118,9 +127,15 @@ pub async fn edit_file_local(
         old_string_len = req.old_string.len(),
         new_string_len = req.new_string.len(),
         replace_all = req.replace_all,
+        max_bytes = req.max_bytes,
         "file edit received"
     );
 
+    if req.max_bytes == 0 {
+        return Err(FileError::invalid_request(
+            "edit.max_bytes must be greater than zero",
+        ));
+    }
     if req.old_string.is_empty() {
         return Err(FileError::invalid_request(
             "edit.old_string must not be empty",
@@ -138,8 +153,9 @@ pub async fn edit_file_local(
             path.display()
         )));
     }
+    enforce_max_bytes(&path, metadata.len(), req.max_bytes)?;
 
-    let text = read_text_file(&state, &path).await?;
+    let text = read_text_file_with_max_bytes(&state, &path, req.max_bytes).await?;
     let matches = text.text.match_indices(&req.old_string).count();
     match matches {
         0 => {
@@ -165,7 +181,7 @@ pub async fn edit_file_local(
     };
     let content = text
         .encode(&updated)
-        .map_err(|err| text_decode_error(&path, err))?;
+        .map_err(|err| text_write_encoding_error(&path, err))?;
     tokio::fs::write(&path, content)
         .await
         .map_err(|err| write_error(&path, err))?;
@@ -191,6 +207,10 @@ struct RenderedRead {
     eof: bool,
 }
 
+struct WritableFileTarget {
+    created: bool,
+}
+
 fn resolve_file_path(state: &Arc<AppState>, raw: &str) -> PathBuf {
     crate::host_path::lexical_normalize(&crate::exec::resolve_input_path_with_windows_posix_root(
         &state.config.default_workdir,
@@ -199,14 +219,20 @@ fn resolve_file_path(state: &Arc<AppState>, raw: &str) -> PathBuf {
     ))
 }
 
-async fn ensure_writable_file_target(path: &Path) -> Result<bool, FileError> {
+async fn ensure_writable_file_target(
+    path: &Path,
+    max_bytes: u64,
+) -> Result<WritableFileTarget, FileError> {
     match tokio::fs::metadata(path).await {
-        Ok(metadata) if metadata.is_file() => Ok(false),
+        Ok(metadata) if metadata.is_file() => {
+            enforce_max_bytes(path, metadata.len(), max_bytes)?;
+            Ok(WritableFileTarget { created: false })
+        }
         Ok(_) => Err(FileError::not_file(format!(
             "file path `{}` is not a file",
             path.display()
         ))),
-        Err(err) if err.kind() == ErrorKind::NotFound => Ok(true),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(WritableFileTarget { created: true }),
         Err(err) => Err(FileError::write_failed(format!(
             "unable to access file `{}`: {err}",
             path.display()
@@ -219,25 +245,15 @@ async fn encode_for_existing_file(
     path: &Path,
     content: &str,
     existing: bool,
+    max_bytes: u64,
 ) -> Result<Vec<u8>, FileError> {
     if !existing {
         return Ok(content.as_bytes().to_vec());
     }
 
-    let text = read_text_file(state, path).await?;
+    let text = read_text_file_with_max_bytes(state, path, max_bytes).await?;
     text.encode(content)
-        .map_err(|err| text_decode_error(path, err))
-}
-
-async fn read_text_file(state: &Arc<AppState>, path: &Path) -> Result<TextFile, FileError> {
-    TextFile::read(
-        path,
-        state
-            .config
-            .experimental_apply_patch_target_encoding_autodetect,
-    )
-    .await
-    .map_err(|err| text_decode_error(path, err))
+        .map_err(|err| text_write_encoding_error(path, err))
 }
 
 async fn read_text_file_with_max_bytes(
@@ -247,22 +263,15 @@ async fn read_text_file_with_max_bytes(
 ) -> Result<TextFile, FileError> {
     let bytes = tokio::fs::read(path)
         .await
-        .map_err(|err| text_decode_error(path, TextFileError::Io(err)))?;
-    if bytes.len() as u64 > max_bytes {
-        return Err(FileError::too_large(format!(
-            "file `{}` is {} bytes, exceeding max_read_bytes {}",
-            path.display(),
-            bytes.len(),
-            max_bytes
-        )));
-    }
+        .map_err(|err| text_read_error(path, TextFileError::Io(err)))?;
+    enforce_max_bytes(path, bytes.len() as u64, max_bytes)?;
     TextFile::from_bytes(
         bytes,
         state
             .config
             .experimental_apply_patch_target_encoding_autodetect,
     )
-    .map_err(|err| text_decode_error(path, err))
+    .map_err(|err| text_read_error(path, err))
 }
 
 fn render_read_output(text: &str, offset: Option<u64>, limit: u64) -> RenderedRead {
@@ -332,7 +341,17 @@ fn metadata_error(path: &Path, err: std::io::Error) -> FileError {
     }
 }
 
-fn text_decode_error(path: &Path, err: TextFileError) -> FileError {
+fn enforce_max_bytes(path: &Path, len: u64, max_bytes: u64) -> Result<(), FileError> {
+    if len > max_bytes {
+        return Err(FileError::too_large(format!(
+            "file `{}` is {len} bytes, exceeding max_read_bytes {max_bytes}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn text_read_error(path: &Path, err: TextFileError) -> FileError {
     match err.kind() {
         TextFileErrorKind::Io => {
             FileError::read_failed(format!("unable to read file `{}`: {err}", path.display()))
@@ -344,6 +363,13 @@ fn text_decode_error(path: &Path, err: TextFileError) -> FileError {
             ))
         }
     }
+}
+
+fn text_write_encoding_error(path: &Path, err: TextFileError) -> FileError {
+    FileError::write_failed(format!(
+        "unable to encode updated text for file `{}`: {err}",
+        path.display()
+    ))
 }
 
 fn write_error(path: &Path, err: std::io::Error) -> FileError {

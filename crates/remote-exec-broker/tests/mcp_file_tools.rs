@@ -1,6 +1,7 @@
 mod support;
 
 use remote_exec_broker::{Connection, RemoteExecClient};
+use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
 use rmcp::model::PaginatedRequestParams;
 
 fn toml_path(path: &std::path::Path) -> String {
@@ -135,6 +136,80 @@ async fn enabled_file_read_formats_line_numbers_and_reminders() {
         result.text_output,
         "(offset out of range, file only has 3 lines)"
     );
+}
+
+#[tokio::test]
+async fn remote_file_tools_forward_configured_byte_limit() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon_and_extra_config(
+        hidden_file_tools_config(),
+    )
+    .await;
+
+    fixture
+        .call_tool(
+            "read",
+            serde_json::json!({
+                "target": DEFAULT_TEST_TARGET,
+                "file_path": "sample.txt"
+            }),
+        )
+        .await;
+    assert_eq!(
+        fixture.last_file_read_request().await.unwrap().max_bytes,
+        1048576
+    );
+
+    fixture
+        .call_tool(
+            "write",
+            serde_json::json!({
+                "target": DEFAULT_TEST_TARGET,
+                "file_path": "sample.txt",
+                "content": "updated\n"
+            }),
+        )
+        .await;
+    assert_eq!(
+        fixture.last_file_write_request().await.unwrap().max_bytes,
+        1048576
+    );
+
+    fixture
+        .call_tool(
+            "edit",
+            serde_json::json!({
+                "target": DEFAULT_TEST_TARGET,
+                "file_path": "sample.txt",
+                "old_string": "before",
+                "new_string": "after"
+            }),
+        )
+        .await;
+    assert_eq!(
+        fixture.last_file_edit_request().await.unwrap().max_bytes,
+        1048576
+    );
+}
+
+#[tokio::test]
+async fn remote_file_tools_reject_targets_without_file_capability() {
+    let fixture = support::spawners::spawn_broker_with_stub_daemon_without_file_tool_support(
+        hidden_file_tools_config(),
+    )
+    .await;
+
+    let err = fixture
+        .call_tool_error(
+            "read",
+            serde_json::json!({
+                "target": DEFAULT_TEST_TARGET,
+                "file_path": "sample.txt"
+            }),
+        )
+        .await;
+
+    assert!(err.contains("does not support file tool protocol version 1"));
+    assert!(fixture.last_file_read_request().await.is_none());
 }
 
 #[tokio::test]

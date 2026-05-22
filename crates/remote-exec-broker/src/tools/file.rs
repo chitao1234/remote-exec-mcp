@@ -66,6 +66,7 @@ pub async fn write(
             &FileWriteRequest {
                 path: input.file_path.clone(),
                 content: input.content,
+                max_bytes: state.tools.file.max_read_bytes,
             },
         )
         .await?;
@@ -103,6 +104,7 @@ pub async fn edit(state: &crate::BrokerState, input: EditInput) -> anyhow::Resul
                 old_string: input.old_string,
                 new_string: input.new_string,
                 replace_all: input.replace_all,
+                max_bytes: state.tools.file.max_read_bytes,
             },
         )
         .await?;

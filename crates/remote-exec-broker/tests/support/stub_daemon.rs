@@ -89,6 +89,7 @@ pub(crate) struct StubDaemonState {
     pub(super) target_supports_transfer_compression: bool,
     target_supports_port_forward: bool,
     target_port_forward_protocol_version: Option<PortForwardProtocolVersion>,
+    target_file_tool_protocol_version: Option<FileToolProtocolVersion>,
     required_bearer_token: Option<String>,
     pub(super) exec_write_behavior: Arc<Mutex<ExecWriteBehavior>>,
     pub(super) exec_start_behavior: Arc<Mutex<ExecStartBehavior>>,
@@ -129,6 +130,7 @@ pub(super) fn stub_daemon_state(
         target_supports_transfer_compression: true,
         target_supports_port_forward: false,
         target_port_forward_protocol_version: None,
+        target_file_tool_protocol_version: Some(FileToolProtocolVersion::v1()),
         required_bearer_token: None,
         exec_write_behavior: Arc::new(Mutex::new(exec_write_behavior)),
         exec_start_behavior: Arc::new(Mutex::new(ExecStartBehavior::Success)),
@@ -186,6 +188,14 @@ pub(super) fn set_port_forward_support(state: &mut StubDaemonState, enabled: boo
     state.target_supports_port_forward = enabled;
     state.target_port_forward_protocol_version = if enabled {
         NonZeroU32::new(version).map(PortForwardProtocolVersion::new)
+    } else {
+        None
+    };
+}
+
+pub(super) fn set_file_tool_support(state: &mut StubDaemonState, enabled: bool) {
+    state.target_file_tool_protocol_version = if enabled {
+        Some(FileToolProtocolVersion::v1())
     } else {
         None
     };
@@ -490,7 +500,7 @@ async fn target_info(State(state): State<StubDaemonState>) -> Json<TargetInfoRes
             supports_port_forward: state.target_supports_port_forward,
             port_forward_protocol_version: state.target_port_forward_protocol_version,
             transfer_stream_protocol_version: Some(TransferStreamProtocolVersion::v2()),
-            file_tool_protocol_version: Some(FileToolProtocolVersion::v1()),
+            file_tool_protocol_version: state.target_file_tool_protocol_version,
         },
         supports_image_read: true,
         supports_transfer_compression: state.target_supports_transfer_compression,

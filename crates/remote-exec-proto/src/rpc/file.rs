@@ -21,6 +21,7 @@ pub struct FileReadResponse {
 pub struct FileWriteRequest {
     pub path: String,
     pub content: String,
+    pub max_bytes: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -35,6 +36,7 @@ pub struct FileEditRequest {
     pub old_string: String,
     pub new_string: String,
     pub replace_all: bool,
+    pub max_bytes: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
