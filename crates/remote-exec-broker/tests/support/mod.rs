@@ -2,6 +2,7 @@
 
 pub mod blocking_child_process;
 pub mod certs;
+pub mod cpp_daemon;
 pub mod fixture;
 pub mod spawners;
 pub mod streamable_http_child;
