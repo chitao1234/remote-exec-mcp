@@ -81,6 +81,13 @@ static std::string response_body(const std::string& response) {
     return response.substr(header_end + 4);
 }
 
+static void assert_json_response_code(const std::string& response,
+                                      const std::string& status_line,
+                                      const std::string& code) {
+    TEST_ASSERT(response.find(status_line) == 0);
+    TEST_ASSERT(Json::parse(response_body(response)).at("code").get<std::string>() == code);
+}
+
 static std::string decode_chunked_response_body(const std::string& response) {
     const std::string body = response_body(response);
     std::string decoded;
@@ -330,8 +337,91 @@ static void assert_persistent_json_requests_reuse_socket(AppState& state) {
     server_thread.join();
 }
 
+static void assert_http_auth_and_rejection_paths(AppState& state, const fs::path& root) {
+    const std::string missing_auth_response = run_single_request(state, json_post_request("/v1/health", Json::object()));
+    assert_json_response_code(missing_auth_response, "HTTP/1.1 401 Unauthorized\r\n", "unauthorized");
+    TEST_ASSERT(missing_auth_response.find("WWW-Authenticate: Bearer\r\n") != std::string::npos);
+
+    const std::string wrong_auth_response =
+        run_single_request(state,
+                           json_post_request_with_extra_headers(
+                               "/v1/health", Json::object(), "Authorization: Bearer wrong-secret\r\n"));
+    assert_json_response_code(wrong_auth_response, "HTTP/1.1 401 Unauthorized\r\n", "unauthorized");
+
+    const std::string ok_response =
+        run_single_request(state,
+                           json_post_request_with_extra_headers(
+                               "/v1/health", Json::object(), "Authorization: Bearer shared-secret\r\n"));
+    TEST_ASSERT(ok_response.find("HTTP/1.1 200 OK\r\n") == 0);
+    TEST_ASSERT(Json::parse(response_body(ok_response)).at("status").get<std::string>() == "ok");
+
+    AppState unauthenticated_state;
+    initialize_state(unauthenticated_state, root);
+
+    const std::string get_response = run_single_request(
+        unauthenticated_state,
+        "GET /v1/health HTTP/1.1\r\n"
+        "Content-Length: 0\r\n"
+        "\r\n");
+    assert_json_response_code(get_response, "HTTP/1.1 405 Method Not Allowed\r\n", "method_not_allowed");
+
+    const std::string not_found_response =
+        run_single_request(unauthenticated_state, json_post_request("/v1/not-found", Json::object()));
+    assert_json_response_code(not_found_response, "HTTP/1.1 404 Not Found\r\n", "not_found");
+}
+
+static void assert_http_request_limits_through_connection_path(const fs::path& root) {
+    AppState header_limit_state;
+    initialize_state(header_limit_state, root);
+    header_limit_state.config.max_request_header_bytes = 48U;
+
+    std::ostringstream oversized_header_request;
+    oversized_header_request << "POST /v1/health HTTP/1.1\r\n"
+                             << "X-Too-Large: " << std::string(80, 'x') << "\r\n"
+                             << "\r\n";
+    const std::string header_limit_response =
+        run_single_request(header_limit_state, oversized_header_request.str());
+    assert_json_response_code(header_limit_response, "HTTP/1.1 400 Bad Request\r\n", "bad_request");
+    TEST_ASSERT(response_body(header_limit_response).find("http request headers too large") != std::string::npos);
+
+    AppState content_length_limit_state;
+    initialize_state(content_length_limit_state, root);
+    content_length_limit_state.config.max_request_body_bytes = 4U;
+
+    const std::string content_length_limit_response = run_single_request(
+        content_length_limit_state,
+        "POST /v1/health HTTP/1.1\r\n"
+        "Content-Length: 5\r\n"
+        "\r\n"
+        "12345");
+    assert_json_response_code(content_length_limit_response, "HTTP/1.1 400 Bad Request\r\n", "bad_request");
+    TEST_ASSERT(response_body(content_length_limit_response).find("http request body too large") != std::string::npos);
+
+    AppState chunked_limit_state;
+    initialize_state(chunked_limit_state, root);
+    chunked_limit_state.config.max_request_body_bytes = 4U;
+
+    const std::string chunked_limit_response = run_single_request(
+        chunked_limit_state,
+        "POST /v1/health HTTP/1.1\r\n"
+        "Transfer-Encoding: chunked\r\n"
+        "\r\n"
+        "5\r\n"
+        "12345\r\n"
+        "0\r\n"
+        "\r\n");
+    assert_json_response_code(chunked_limit_response, "HTTP/1.1 400 Bad Request\r\n", "bad_request");
+    TEST_ASSERT(response_body(chunked_limit_response).find("http request body too large") != std::string::npos);
+}
+
 void assert_http_streaming_routes(AppState& state, const fs::path& root) {
     assert_persistent_json_requests_reuse_socket(state);
+
+    AppState auth_state;
+    initialize_state(auth_state, root);
+    auth_state.config.http_auth_bearer_token = "shared-secret";
+    assert_http_auth_and_rejection_paths(auth_state, root);
+    assert_http_request_limits_through_connection_path(root);
 
     const std::string archive = tar_with_single_file("streamed import");
     const fs::path imported_path = root / "imported.txt";
