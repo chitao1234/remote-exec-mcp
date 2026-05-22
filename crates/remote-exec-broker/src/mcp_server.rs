@@ -8,6 +8,7 @@ use rmcp::{
     transport::{StreamableHttpServerConfig, StreamableHttpService},
 };
 use std::future::Future;
+use std::pin::Pin;
 use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 
@@ -18,6 +19,9 @@ pub struct ToolCallOutput {
     pub content: Vec<Content>,
     pub structured: Option<serde_json::Value>,
 }
+
+pub(crate) type ToolCallFuture<'a> =
+    Pin<Box<dyn Future<Output = anyhow::Result<ToolCallOutput>> + Send + 'a>>;
 
 impl ToolCallOutput {
     pub fn text_and_structured(text: String, structured: serde_json::Value) -> Self {
@@ -109,22 +113,20 @@ impl BrokerServer {
         !self.state.disable_structured_content
     }
 
-    async fn finish_scoped_tool_call<F>(&self, tool: BrokerTool, future: F) -> CallToolResult
-    where
-        F: Future<Output = anyhow::Result<ToolCallOutput>>,
-    {
+    async fn finish_scoped_tool_call(
+        &self,
+        tool: BrokerTool,
+        future: ToolCallFuture<'_>,
+    ) -> CallToolResult {
         finish_scoped_tool_call(tool, self.include_structured_content(), future).await
     }
 }
 
-pub(crate) async fn finish_scoped_tool_call<F>(
+pub(crate) async fn finish_scoped_tool_call(
     tool: BrokerTool,
     include_structured_content: bool,
-    future: F,
-) -> CallToolResult
-where
-    F: Future<Output = anyhow::Result<ToolCallOutput>>,
-{
+    future: ToolCallFuture<'_>,
+) -> CallToolResult {
     let context = RequestContext::new(tool.name());
     crate::request_context::scope(context.clone(), async {
         let started = Instant::now();
@@ -187,7 +189,7 @@ impl BrokerServer {
         Ok(self
             .finish_scoped_tool_call(
                 BrokerTool::ListTargets,
-                crate::tools::targets::list_targets(&self.state, input),
+                Box::pin(crate::tools::targets::list_targets(&self.state, input)),
             )
             .await)
     }
@@ -203,7 +205,7 @@ impl BrokerServer {
         Ok(self
             .finish_scoped_tool_call(
                 BrokerTool::ExecCommand,
-                crate::tools::exec::exec_command(&self.state, input),
+                Box::pin(crate::tools::exec::exec_command(&self.state, input)),
             )
             .await)
     }
@@ -219,7 +221,7 @@ impl BrokerServer {
         Ok(self
             .finish_scoped_tool_call(
                 BrokerTool::WriteStdin,
-                crate::tools::exec::write_stdin(&self.state, input),
+                Box::pin(crate::tools::exec::write_stdin(&self.state, input)),
             )
             .await)
     }
@@ -235,7 +237,7 @@ impl BrokerServer {
         Ok(self
             .finish_scoped_tool_call(
                 BrokerTool::ApplyPatch,
-                crate::tools::patch::apply_patch(&self.state, input),
+                Box::pin(crate::tools::patch::apply_patch(&self.state, input)),
             )
             .await)
     }
@@ -252,7 +254,7 @@ impl BrokerServer {
         Ok(self
             .finish_scoped_tool_call(
                 BrokerTool::ViewImage,
-                crate::tools::image::view_image(&self.state, input),
+                Box::pin(crate::tools::image::view_image(&self.state, input)),
             )
             .await)
     }
@@ -268,7 +270,7 @@ impl BrokerServer {
         Ok(self
             .finish_scoped_tool_call(
                 BrokerTool::TransferFiles,
-                crate::tools::transfer::transfer_files(&self.state, input),
+                Box::pin(crate::tools::transfer::transfer_files(&self.state, input)),
             )
             .await)
     }
@@ -284,7 +286,10 @@ impl BrokerServer {
         Ok(self
             .finish_scoped_tool_call(
                 BrokerTool::ForwardPorts,
-                crate::tools::port_forward::forward_ports(&self.state, input),
+                Box::pin(crate::tools::port_forward::forward_ports(
+                    &self.state,
+                    input,
+                )),
             )
             .await)
     }
@@ -301,7 +306,7 @@ impl BrokerServer {
         Ok(self
             .finish_scoped_tool_call(
                 BrokerTool::Read,
-                crate::tools::file::read(&self.state, input),
+                Box::pin(crate::tools::file::read(&self.state, input)),
             )
             .await)
     }
@@ -317,7 +322,7 @@ impl BrokerServer {
         Ok(self
             .finish_scoped_tool_call(
                 BrokerTool::Write,
-                crate::tools::file::write(&self.state, input),
+                Box::pin(crate::tools::file::write(&self.state, input)),
             )
             .await)
     }
@@ -333,7 +338,7 @@ impl BrokerServer {
         Ok(self
             .finish_scoped_tool_call(
                 BrokerTool::Edit,
-                crate::tools::file::edit(&self.state, input),
+                Box::pin(crate::tools::file::edit(&self.state, input)),
             )
             .await)
     }
