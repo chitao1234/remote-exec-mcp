@@ -8,6 +8,7 @@ use rmcp::{
     transport::{StreamableHttpServerConfig, StreamableHttpService},
 };
 use std::future::Future;
+use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::request_context::RequestContext;
@@ -53,21 +54,16 @@ pub fn tool_error_result(text: String) -> CallToolResult {
     CallToolResult::error(vec![Content::text(text)])
 }
 
-pub fn format_tool_error(err: anyhow::Error) -> CallToolResult {
-    let message = format!("{err:#}");
+fn format_tool_error_without_logging(err: anyhow::Error) -> CallToolResult {
+    format_tool_error_message(&format!("{err:#}"))
+}
+
+fn format_tool_error_message(message: &str) -> CallToolResult {
     if let Some(context) = crate::request_context::current() {
-        tracing::warn!(
-            request_id = %context.request_id(),
-            tool = context.tool(),
-            target = context.target().unwrap_or("-"),
-            error = %message,
-            "broker tool returned error"
-        );
-        return tool_error_result(format_correlated_error(&message, &context));
+        return tool_error_result(format_correlated_error(message, &context));
     }
 
-    tracing::warn!(error = %message, "broker tool returned error");
-    tool_error_result(message)
+    tool_error_result(message.to_string())
 }
 
 fn format_correlated_error(
@@ -109,28 +105,68 @@ impl BrokerServer {
         !self.state.disable_structured_content
     }
 
-    fn finish_tool_call(&self, result: anyhow::Result<ToolCallOutput>) -> CallToolResult {
-        match result {
-            Ok(output) => output.into_call_tool_result(self.include_structured_content()),
-            Err(err) => format_tool_error(err),
-        }
-    }
-
     async fn finish_scoped_tool_call<F>(&self, tool: BrokerTool, future: F) -> CallToolResult
     where
         F: Future<Output = anyhow::Result<ToolCallOutput>>,
     {
-        let context = RequestContext::new(tool.name());
-        crate::request_context::scope(context.clone(), async {
-            tracing::debug!(
-                request_id = %context.request_id(),
-                tool = context.tool(),
-                "broker tool request context created"
-            );
-            self.finish_tool_call(future.await)
-        })
-        .await
+        finish_scoped_tool_call(tool, self.include_structured_content(), future).await
     }
+}
+
+pub(crate) async fn finish_scoped_tool_call<F>(
+    tool: BrokerTool,
+    include_structured_content: bool,
+    future: F,
+) -> CallToolResult
+where
+    F: Future<Output = anyhow::Result<ToolCallOutput>>,
+{
+    let context = RequestContext::new(tool.name());
+    crate::request_context::scope(context.clone(), async {
+        let started = Instant::now();
+        tracing::debug!(
+            request_id = %context.request_id(),
+            tool = context.tool(),
+            "broker tool request context created"
+        );
+        tracing::info!(
+            request_id = %context.request_id(),
+            tool = context.tool(),
+            "broker tool started"
+        );
+
+        let result = future.await;
+        let snapshot = crate::request_context::current()
+            .expect("request context should be available in scoped tool call");
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        match &result {
+            Ok(_) => {
+                tracing::info!(
+                    request_id = %snapshot.request_id(),
+                    tool = snapshot.tool(),
+                    target = snapshot.target().unwrap_or("-"),
+                    elapsed_ms,
+                    "broker tool completed"
+                );
+            }
+            Err(err) => {
+                tracing::warn!(
+                    request_id = %snapshot.request_id(),
+                    tool = snapshot.tool(),
+                    target = snapshot.target().unwrap_or("-"),
+                    elapsed_ms,
+                    error = %format!("{err:#}"),
+                    "broker tool failed"
+                );
+            }
+        }
+
+        match result {
+            Ok(output) => output.into_call_tool_result(include_structured_content),
+            Err(err) => format_tool_error_without_logging(err),
+        }
+    })
+    .await
 }
 
 #[tool_router]
@@ -392,7 +428,7 @@ async fn wait_for_shutdown_signal() {
 
 #[cfg(test)]
 mod tests {
-    use super::format_tool_error;
+    use super::format_tool_error_without_logging;
     use crate::request_context::RequestContext;
     use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
 
@@ -411,7 +447,9 @@ mod tests {
         context.set_target(DEFAULT_TEST_TARGET);
 
         let text = crate::request_context::scope(context, async {
-            error_text(format_tool_error(anyhow::anyhow!("daemon unavailable")))
+            error_text(format_tool_error_without_logging(anyhow::anyhow!(
+                "daemon unavailable"
+            )))
         })
         .await;
 
@@ -428,7 +466,9 @@ mod tests {
         let context = RequestContext::new("list_targets");
 
         let text = crate::request_context::scope(context, async {
-            error_text(format_tool_error(anyhow::anyhow!("bad list")))
+            error_text(format_tool_error_without_logging(anyhow::anyhow!(
+                "bad list"
+            )))
         })
         .await;
 

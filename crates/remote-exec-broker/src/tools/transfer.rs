@@ -15,7 +15,6 @@ pub async fn transfer_files(
     state: &crate::BrokerState,
     input: TransferFilesInput,
 ) -> anyhow::Result<ToolCallOutput> {
-    let started = std::time::Instant::now();
     let request = TransferPlanRequest::from_input(input)?;
     crate::request_context::set_current_targets(request.input_targets());
     let plan = plan_transfer(state, request).await?;
@@ -33,13 +32,12 @@ pub async fn transfer_files(
         destination_mode = ?plan.destination_mode,
         symlink_mode = ?plan.symlink_mode,
         create_parent = plan.create_parent,
-        "broker tool started"
+        "transfer plan ready"
     );
 
     let (source_type, summary) = execute_transfer_plan(state, &plan).await?;
 
     finish_transfer(
-        started,
         &plan.sources,
         CompletedTransfer {
             requested_destination: plan.requested_destination.clone(),

@@ -11,22 +11,19 @@ pub async fn forward_ports(
     state: &crate::BrokerState,
     input: ForwardPortsInput,
 ) -> anyhow::Result<ToolCallOutput> {
-    let started = std::time::Instant::now();
     crate::request_context::set_current_targets(input_targets(&input));
     match input {
         ForwardPortsInput::Open {
             listen_side,
             connect_side,
             forwards,
-        } => open_forwards(state, started, listen_side, connect_side, forwards).await,
+        } => open_forwards(state, listen_side, connect_side, forwards).await,
         ForwardPortsInput::List {
             listen_side,
             connect_side,
             forward_ids,
-        } => list_forwards(state, started, listen_side, connect_side, forward_ids).await,
-        ForwardPortsInput::Close { forward_ids } => {
-            close_forwards(state, started, forward_ids).await
-        }
+        } => list_forwards(state, listen_side, connect_side, forward_ids).await,
+        ForwardPortsInput::Close { forward_ids } => close_forwards(state, forward_ids).await,
     }
 }
 
@@ -60,7 +57,6 @@ fn input_targets(input: &ForwardPortsInput) -> Vec<&str> {
 
 async fn open_forwards(
     state: &crate::BrokerState,
-    started: std::time::Instant,
     listen_side_name: String,
     connect_side_name: String,
     forwards: Vec<remote_exec_proto::public::ForwardPortSpec>,
@@ -84,7 +80,7 @@ async fn open_forwards(
         listen_side = %listen_side_name,
         connect_side = %connect_side_name,
         forward_count = forwards.len(),
-        "broker tool started"
+        "port forwards open requested"
     );
 
     let listen_side = state.forwarding_side(&listen_side_name).await?;
@@ -124,8 +120,7 @@ async fn open_forwards(
         tool = "forward_ports",
         action = "open",
         opened_forwards = result_entries.len(),
-        elapsed_ms = started.elapsed().as_millis() as u64,
-        "broker tool completed"
+        "port forwards opened"
     );
 
     finish_forward_ports(ForwardPortsAction::Open, result_entries)
@@ -157,7 +152,6 @@ async fn enforce_open_limits(
 
 async fn list_forwards(
     state: &crate::BrokerState,
-    started: std::time::Instant,
     listen_side: Option<String>,
     connect_side: Option<String>,
     forward_ids: Vec<ForwardId>,
@@ -165,7 +159,7 @@ async fn list_forwards(
     tracing::info!(
         tool = "forward_ports",
         action = "list",
-        "broker tool started"
+        "port forwards list requested"
     );
     let entries = state
         .port_forwards
@@ -179,15 +173,13 @@ async fn list_forwards(
         tool = "forward_ports",
         action = "list",
         forward_count = entries.len(),
-        elapsed_ms = started.elapsed().as_millis() as u64,
-        "broker tool completed"
+        "port forwards listed"
     );
     finish_forward_ports(ForwardPortsAction::List, entries)
 }
 
 async fn close_forwards(
     state: &crate::BrokerState,
-    started: std::time::Instant,
     forward_ids: Vec<ForwardId>,
 ) -> anyhow::Result<ToolCallOutput> {
     anyhow::ensure!(
@@ -198,15 +190,14 @@ async fn close_forwards(
         tool = "forward_ports",
         action = "close",
         forward_count = forward_ids.len(),
-        "broker tool started"
+        "port forwards close requested"
     );
     let entries = state.port_forwards.close(&forward_ids).await?;
     tracing::info!(
         tool = "forward_ports",
         action = "close",
         closed_forwards = entries.len(),
-        elapsed_ms = started.elapsed().as_millis() as u64,
-        "broker tool completed"
+        "port forwards closed"
     );
     finish_forward_ports(ForwardPortsAction::Close, entries)
 }

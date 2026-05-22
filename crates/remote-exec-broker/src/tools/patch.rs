@@ -41,7 +41,6 @@ pub async fn apply_patch(
     state: &crate::BrokerState,
     input: ApplyPatchInput,
 ) -> anyhow::Result<ToolCallOutput> {
-    let started = std::time::Instant::now();
     let target_name = input.target.clone();
     crate::request_context::set_current_target(target_name.clone());
     let patch_len = input.input.len();
@@ -50,26 +49,9 @@ pub async fn apply_patch(
         target = %target_name,
         patch_len,
         has_workdir = input.workdir.is_some(),
-        "broker tool started"
+        "patch apply requested"
     );
-    let output = forward_patch(state, &input.target, input.input, input.workdir)
-        .await
-        .inspect_err(|err| {
-            tracing::warn!(
-                tool = "apply_patch",
-                target = %target_name,
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                error = %err,
-                "broker tool failed"
-            );
-        })?;
-
-    tracing::info!(
-        tool = "apply_patch",
-        target = %target_name,
-        elapsed_ms = started.elapsed().as_millis() as u64,
-        "broker tool completed"
-    );
+    let output = forward_patch(state, &input.target, input.input, input.workdir).await?;
 
     Ok(ToolCallOutput::text(output))
 }

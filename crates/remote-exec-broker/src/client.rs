@@ -175,21 +175,17 @@ async fn call_direct_tool(
     let Some(tool) = BrokerTool::from_name(name) else {
         return crate::mcp_server::tool_error_result(format!("unknown tool `{name}`"));
     };
-    let context = crate::request_context::RequestContext::new(tool.name());
 
     macro_rules! invoke_tool {
         ($input:ty, $handler:path) => {{
-            crate::request_context::scope(context, async move {
-                let input = match deserialize_tool_arguments::<$input>(name, arguments) {
-                    Ok(input) => input,
-                    Err(err) => return crate::mcp_server::format_tool_error(err),
-                };
-
-                match $handler(state, input).await {
-                    Ok(output) => output.into_call_tool_result(!state.disable_structured_content),
-                    Err(err) => crate::mcp_server::format_tool_error(err),
-                }
-            })
+            crate::mcp_server::finish_scoped_tool_call(
+                tool,
+                !state.disable_structured_content,
+                async move {
+                    let input = deserialize_tool_arguments::<$input>(name, arguments)?;
+                    $handler(state, input).await
+                },
+            )
             .await
         }};
     }

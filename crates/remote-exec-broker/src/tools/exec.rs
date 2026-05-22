@@ -1,5 +1,4 @@
 use anyhow::Context;
-use std::time::Instant;
 
 use remote_exec_proto::path::PathPolicy;
 use remote_exec_proto::public::{CommandToolResult, ExecCommandInput, WriteStdinInput};
@@ -25,7 +24,6 @@ pub async fn exec_command(
     state: &crate::BrokerState,
     input: ExecCommandInput,
 ) -> anyhow::Result<ToolCallOutput> {
-    let started = Instant::now();
     let target_name = input.target.clone();
     crate::request_context::set_current_target(target_name.clone());
     let cmd_preview = remote_exec_util::preview_text(&input.cmd, 120);
@@ -36,13 +34,13 @@ pub async fn exec_command(
         has_workdir = input.workdir.is_some(),
         has_shell = input.shell.is_some(),
         cmd_preview = %cmd_preview,
-        "broker tool started"
+        "exec command requested"
     );
     let target = state.configured_target(&input.target)?;
     let path_policy = target_path_policy(&input.target, target).await?;
 
     if let Some(output) =
-        maybe_intercepted_exec_output(state, &input, &target_name, started, path_policy).await?
+        maybe_intercepted_exec_output(state, &input, &target_name, path_policy).await?
     {
         return Ok(output);
     }
@@ -56,20 +54,7 @@ pub async fn exec_command(
         max_output_tokens: input.max_output_tokens,
         login: input.login,
     };
-    let response = match target.exec_start_checked(&input.target, &request).await {
-        Ok(response) => response,
-        Err(err) => {
-            tracing::warn!(
-                tool = "exec_command",
-                target = %target_name,
-                intercepted = false,
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                error = %err,
-                "broker tool failed"
-            );
-            return Err(err);
-        }
-    };
+    let response = target.exec_start_checked(&input.target, &request).await?;
     validate_exec_response(&response)?;
 
     let session_command = input.cmd.clone();
@@ -89,8 +74,7 @@ pub async fn exec_command(
         exit_code = output.exit_code,
         public_session_id = session_id.as_deref().unwrap_or("-"),
         daemon_instance_id = %output.daemon_instance_id,
-        elapsed_ms = started.elapsed().as_millis() as u64,
-        "broker tool completed"
+        "exec command completed"
     );
 
     exec_command_output(input.target, session_command, response, session_id)
@@ -100,7 +84,6 @@ pub async fn write_stdin(
     state: &crate::BrokerState,
     input: WriteStdinInput,
 ) -> anyhow::Result<ToolCallOutput> {
-    let started = Instant::now();
     let session_id = input.session_id.clone();
     let requested_target = input.target.clone();
     if let Some(target) = &requested_target {
@@ -113,33 +96,20 @@ pub async fn write_stdin(
         requested_target = requested_target.as_deref().unwrap_or("-"),
         chars_len,
         empty_poll = chars_len == 0,
-        "broker tool started"
+        "exec stdin requested"
     );
-    match write_stdin_inner(state, input).await {
-        Ok(result) => {
-            tracing::info!(
-                tool = "write_stdin",
-                session_id = %session_id,
-                requested_target = requested_target.as_deref().unwrap_or("-"),
-                running = result.running,
-                exit_code = result.exit_code.unwrap_or(-1),
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                "broker tool completed"
-            );
-            Ok(result.output)
-        }
-        Err(err) => {
-            tracing::warn!(
-                tool = "write_stdin",
-                session_id = %session_id,
-                requested_target = requested_target.as_deref().unwrap_or("-"),
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                error = %err,
-                "broker tool failed"
-            );
-            Err(err.context("write_stdin failed"))
-        }
-    }
+    let result = write_stdin_inner(state, input)
+        .await
+        .context("write_stdin failed")?;
+    tracing::info!(
+        tool = "write_stdin",
+        session_id = %session_id,
+        requested_target = requested_target.as_deref().unwrap_or("-"),
+        running = result.running,
+        exit_code = result.exit_code.unwrap_or(-1),
+        "exec stdin completed"
+    );
+    Ok(result.output)
 }
 
 async fn write_stdin_inner(
@@ -179,7 +149,6 @@ async fn maybe_intercepted_exec_output(
     state: &crate::BrokerState,
     input: &ExecCommandInput,
     target_name: &str,
-    started: Instant,
     path_policy: PathPolicy,
 ) -> anyhow::Result<Option<ToolCallOutput>> {
     let Some(intercepted) =
@@ -196,24 +165,13 @@ async fn maybe_intercepted_exec_output(
         intercepted.workdir,
     )
     .await
-    .map_err(|err| {
-        tracing::warn!(
-            tool = "exec_command",
-            target = %target_name,
-            intercepted = true,
-            elapsed_ms = started.elapsed().as_millis() as u64,
-            error = %err,
-            "broker tool failed"
-        );
-        anyhow::anyhow!(prepend_warning_text(err.to_string(), &warnings))
-    })?;
+    .map_err(|err| anyhow::anyhow!(prepend_warning_text(err.to_string(), &warnings)))?;
 
     tracing::info!(
         tool = "exec_command",
         target = %target_name,
         intercepted = true,
-        elapsed_ms = started.elapsed().as_millis() as u64,
-        "broker tool completed"
+        "exec command intercepted"
     );
     Ok(Some(ToolCallOutput::text_and_structured(
         prepend_warning_text(format_intercepted_patch_text(&output), &warnings),

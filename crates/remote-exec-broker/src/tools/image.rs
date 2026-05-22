@@ -9,7 +9,6 @@ pub async fn view_image(
     state: &crate::BrokerState,
     input: ViewImageInput,
 ) -> anyhow::Result<ToolCallOutput> {
-    let started = std::time::Instant::now();
     let target_name = input.target.clone();
     crate::request_context::set_current_target(target_name.clone());
     let detail = input.detail.clone();
@@ -20,10 +19,10 @@ pub async fn view_image(
         path = %path,
         detail = detail.as_deref().unwrap_or("default"),
         has_workdir = input.workdir.is_some(),
-        "broker tool started"
+        "image read requested"
     );
     let target = state.configured_target(&input.target)?;
-    let response = match target
+    let response = target
         .image_read_checked(
             &input.target,
             &ImageReadRequest {
@@ -32,22 +31,7 @@ pub async fn view_image(
                 detail: input.detail.clone(),
             },
         )
-        .await
-    {
-        Ok(response) => response,
-        Err(err) => {
-            tracing::warn!(
-                tool = "view_image",
-                target = %target_name,
-                path = %path,
-                detail = detail.as_deref().unwrap_or("default"),
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                error = %err,
-                "broker tool failed"
-            );
-            return Err(err);
-        }
-    };
+        .await?;
     let image_content = content_from_data_url(&response.image_url)?;
 
     tracing::info!(
@@ -55,8 +39,7 @@ pub async fn view_image(
         target = %target_name,
         path = %path,
         detail = response.detail.as_deref().unwrap_or("default"),
-        elapsed_ms = started.elapsed().as_millis() as u64,
-        "broker tool completed"
+        "image read completed"
     );
 
     Ok(ToolCallOutput::content_and_structured(

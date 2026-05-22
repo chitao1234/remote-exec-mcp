@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use remote_exec_proto::public::{
     TransferDestinationMode, TransferEndpoint, TransferFilesResult, TransferSourceType,
     TransferSymlinkMode as PublicTransferSymlinkMode,
@@ -19,7 +17,6 @@ pub(super) struct CompletedTransfer {
 }
 
 pub(super) fn finish_transfer(
-    started: Instant,
     sources: &[TransferEndpoint],
     completed: CompletedTransfer,
 ) -> anyhow::Result<ToolCallOutput> {
@@ -45,8 +42,7 @@ pub(super) fn finish_transfer(
         source_count = sources.len(),
         destination_target = %destination_target,
         destination_path = %destination_path,
-        elapsed_ms = started.elapsed().as_millis() as u64,
-        "broker tool completed"
+        "transfer completed"
     );
     Ok(ToolCallOutput::text_and_structured(
         format_transfer_text(&result),
