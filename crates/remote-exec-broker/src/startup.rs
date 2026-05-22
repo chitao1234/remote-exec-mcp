@@ -75,7 +75,7 @@ async fn insert_local_target(
     targets.insert(
         local::TARGET_NAME.to_string(),
         TargetHandle::verified(
-            TargetBackend::Local(client),
+            TargetBackend::local(client),
             Some(local::TARGET_NAME.to_string()),
             &info,
         ),
@@ -117,7 +117,7 @@ async fn build_remote_target_handle(
         Err(_) => {
             log_remote_target_startup_probe_timeout(name, target_config);
             Ok(TargetHandle::unavailable(
-                TargetBackend::Remote(client),
+                TargetBackend::remote(client),
                 target_config.expected_daemon_name.clone(),
             ))
         }
@@ -129,7 +129,7 @@ async fn build_remote_target_handle(
             )?;
             log_remote_target_available(name, target_config, &info);
             Ok(TargetHandle::verified(
-                TargetBackend::Remote(client),
+                TargetBackend::remote(client),
                 target_config.expected_daemon_name.clone(),
                 &info,
             ))
@@ -137,7 +137,7 @@ async fn build_remote_target_handle(
         Ok(Err(DaemonClientError::Transport(err))) => {
             log_remote_target_unavailable(name, target_config, &err);
             Ok(TargetHandle::unavailable(
-                TargetBackend::Remote(client),
+                TargetBackend::remote(client),
                 target_config.expected_daemon_name.clone(),
             ))
         }

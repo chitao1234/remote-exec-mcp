@@ -1,80 +1,199 @@
+use std::sync::Arc;
+
+use futures_util::future::BoxFuture;
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
     PatchApplyRequest, PatchApplyResponse, TargetInfoResponse,
 };
 
+use crate::daemon_client::{DaemonClient, DaemonClientError};
+use crate::local::backend::LocalDaemonClient;
+use crate::port_forward::PortTunnel;
+
 #[derive(Clone)]
-pub(crate) enum TargetBackend {
-    Remote(crate::daemon_client::DaemonClient),
-    Local(crate::local::backend::LocalDaemonClient),
+pub(crate) struct TargetBackend {
+    client: Arc<dyn TargetBackendClient>,
 }
 
-macro_rules! dispatch_rpc {
-    ($self:expr, $method:ident $(, $arg:expr)*) => {
-        match $self {
-            Self::Remote(client) => client.$method($($arg),*).await,
-            Self::Local(client) => client.$method($($arg),*).await,
-        }
-    };
+trait TargetBackendClient: Send + Sync {
+    fn target_info(&self) -> BoxFuture<'_, Result<TargetInfoResponse, DaemonClientError>>;
+
+    fn exec_start<'a>(
+        &'a self,
+        req: &'a ExecStartRequest,
+    ) -> BoxFuture<'a, Result<ExecResponse, DaemonClientError>>;
+
+    fn exec_write<'a>(
+        &'a self,
+        req: &'a ExecWriteRequest,
+    ) -> BoxFuture<'a, Result<ExecResponse, DaemonClientError>>;
+
+    fn patch_apply<'a>(
+        &'a self,
+        req: &'a PatchApplyRequest,
+    ) -> BoxFuture<'a, Result<PatchApplyResponse, DaemonClientError>>;
+
+    fn image_read<'a>(
+        &'a self,
+        req: &'a ImageReadRequest,
+    ) -> BoxFuture<'a, Result<ImageReadResponse, DaemonClientError>>;
+
+    fn port_tunnel(
+        &self,
+        max_queued_bytes: usize,
+    ) -> BoxFuture<'_, Result<PortTunnel, DaemonClientError>>;
+
+    fn remote_client(&self) -> Option<&DaemonClient> {
+        None
+    }
 }
 
 impl TargetBackend {
-    pub(crate) async fn target_info(
-        &self,
-    ) -> Result<TargetInfoResponse, crate::daemon_client::DaemonClientError> {
-        dispatch_rpc!(self, target_info)
+    pub(crate) fn remote(client: DaemonClient) -> Self {
+        Self::new(client)
+    }
+
+    pub(crate) fn local(client: LocalDaemonClient) -> Self {
+        Self::new(client)
+    }
+
+    fn new(client: impl TargetBackendClient + 'static) -> Self {
+        Self {
+            client: Arc::new(client),
+        }
+    }
+
+    pub(crate) async fn target_info(&self) -> Result<TargetInfoResponse, DaemonClientError> {
+        self.client.target_info().await
     }
 
     pub(crate) async fn exec_start(
         &self,
         req: &ExecStartRequest,
-    ) -> Result<ExecResponse, crate::daemon_client::DaemonClientError> {
-        dispatch_rpc!(self, exec_start, req)
+    ) -> Result<ExecResponse, DaemonClientError> {
+        self.client.exec_start(req).await
     }
 
     pub(crate) async fn exec_write(
         &self,
         req: &ExecWriteRequest,
-    ) -> Result<ExecResponse, crate::daemon_client::DaemonClientError> {
-        dispatch_rpc!(self, exec_write, req)
+    ) -> Result<ExecResponse, DaemonClientError> {
+        self.client.exec_write(req).await
     }
 
     pub(crate) async fn patch_apply(
         &self,
         req: &PatchApplyRequest,
-    ) -> Result<PatchApplyResponse, crate::daemon_client::DaemonClientError> {
-        dispatch_rpc!(self, patch_apply, req)
+    ) -> Result<PatchApplyResponse, DaemonClientError> {
+        self.client.patch_apply(req).await
     }
 
     pub(crate) async fn image_read(
         &self,
         req: &ImageReadRequest,
-    ) -> Result<ImageReadResponse, crate::daemon_client::DaemonClientError> {
-        dispatch_rpc!(self, image_read, req)
+    ) -> Result<ImageReadResponse, DaemonClientError> {
+        self.client.image_read(req).await
     }
 
-    pub(crate) fn remote_client(&self) -> Option<&crate::daemon_client::DaemonClient> {
-        match self {
-            Self::Remote(client) => Some(client),
-            Self::Local(_) => None,
-        }
+    pub(crate) fn remote_client(&self) -> Option<&DaemonClient> {
+        self.client.remote_client()
     }
 
     pub(crate) async fn port_tunnel(
         &self,
         max_queued_bytes: usize,
-    ) -> Result<crate::port_forward::PortTunnel, crate::daemon_client::DaemonClientError> {
-        match self {
-            Self::Remote(client) => {
-                crate::port_forward::PortTunnel::from_stream_with_max_queued_bytes(
-                    client.port_tunnel().await?,
-                    max_queued_bytes,
-                )
-            }
-            Self::Local(client) => {
-                crate::port_forward::PortTunnel::local(client.port_tunnel_state(), max_queued_bytes)
-                    .await
-            }
-        }
+    ) -> Result<PortTunnel, DaemonClientError> {
+        self.client.port_tunnel(max_queued_bytes).await
+    }
+}
+
+impl TargetBackendClient for DaemonClient {
+    fn target_info(&self) -> BoxFuture<'_, Result<TargetInfoResponse, DaemonClientError>> {
+        Box::pin(DaemonClient::target_info(self))
+    }
+
+    fn exec_start<'a>(
+        &'a self,
+        req: &'a ExecStartRequest,
+    ) -> BoxFuture<'a, Result<ExecResponse, DaemonClientError>> {
+        Box::pin(DaemonClient::exec_start(self, req))
+    }
+
+    fn exec_write<'a>(
+        &'a self,
+        req: &'a ExecWriteRequest,
+    ) -> BoxFuture<'a, Result<ExecResponse, DaemonClientError>> {
+        Box::pin(DaemonClient::exec_write(self, req))
+    }
+
+    fn patch_apply<'a>(
+        &'a self,
+        req: &'a PatchApplyRequest,
+    ) -> BoxFuture<'a, Result<PatchApplyResponse, DaemonClientError>> {
+        Box::pin(DaemonClient::patch_apply(self, req))
+    }
+
+    fn image_read<'a>(
+        &'a self,
+        req: &'a ImageReadRequest,
+    ) -> BoxFuture<'a, Result<ImageReadResponse, DaemonClientError>> {
+        Box::pin(DaemonClient::image_read(self, req))
+    }
+
+    fn port_tunnel(
+        &self,
+        max_queued_bytes: usize,
+    ) -> BoxFuture<'_, Result<PortTunnel, DaemonClientError>> {
+        Box::pin(async move {
+            PortTunnel::from_stream_with_max_queued_bytes(
+                DaemonClient::port_tunnel(self).await?,
+                max_queued_bytes,
+            )
+        })
+    }
+
+    fn remote_client(&self) -> Option<&DaemonClient> {
+        Some(self)
+    }
+}
+
+impl TargetBackendClient for LocalDaemonClient {
+    fn target_info(&self) -> BoxFuture<'_, Result<TargetInfoResponse, DaemonClientError>> {
+        Box::pin(LocalDaemonClient::target_info(self))
+    }
+
+    fn exec_start<'a>(
+        &'a self,
+        req: &'a ExecStartRequest,
+    ) -> BoxFuture<'a, Result<ExecResponse, DaemonClientError>> {
+        Box::pin(LocalDaemonClient::exec_start(self, req))
+    }
+
+    fn exec_write<'a>(
+        &'a self,
+        req: &'a ExecWriteRequest,
+    ) -> BoxFuture<'a, Result<ExecResponse, DaemonClientError>> {
+        Box::pin(LocalDaemonClient::exec_write(self, req))
+    }
+
+    fn patch_apply<'a>(
+        &'a self,
+        req: &'a PatchApplyRequest,
+    ) -> BoxFuture<'a, Result<PatchApplyResponse, DaemonClientError>> {
+        Box::pin(LocalDaemonClient::patch_apply(self, req))
+    }
+
+    fn image_read<'a>(
+        &'a self,
+        req: &'a ImageReadRequest,
+    ) -> BoxFuture<'a, Result<ImageReadResponse, DaemonClientError>> {
+        Box::pin(LocalDaemonClient::image_read(self, req))
+    }
+
+    fn port_tunnel(
+        &self,
+        max_queued_bytes: usize,
+    ) -> BoxFuture<'_, Result<PortTunnel, DaemonClientError>> {
+        Box::pin(async move { PortTunnel::local(self.port_tunnel_state(), max_queued_bytes).await })
     }
 }
