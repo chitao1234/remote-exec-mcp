@@ -43,7 +43,7 @@ pub struct ReadInput {
 
 Semantics:
 
-- `offset` is a zero-based line offset. Omitted means `0`.
+- `offset` is a one-based line number. Omitted or `0` means `1`.
 - `limit` is a line count. Omitted means broker config
   `default_read_limit_lines`, initially `2000`.
 - Reject `limit = 0`.
@@ -383,7 +383,8 @@ Broker config and routing:
 Broker/Rust daemon behavior:
 
 - `read` default limit is `2000` lines.
-- `read` uses zero-based offset and one-based displayed line numbers.
+- `read` uses one-based offset and one-based displayed line numbers.
+- `read` treats `offset = 0` as `offset = 1`.
 - `read` emits `file is empty`.
 - `read` emits `offset out of range, file only has X lines`.
 - `read` emits `EOF reached, file has N lines`.
