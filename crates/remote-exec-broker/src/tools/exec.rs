@@ -38,7 +38,7 @@ pub async fn exec_command(
         cmd_preview = %cmd_preview,
         "broker tool started"
     );
-    let target = state.target(&input.target)?;
+    let target = state.configured_target(&input.target)?;
     let path_policy = target_path_policy(&input.target, target).await?;
 
     if let Some(output) =
@@ -160,7 +160,7 @@ async fn write_stdin_inner(
         );
     }
 
-    let target = state.target(&record.target)?;
+    let target = state.configured_target(&record.target)?;
     let response = forward_exec_write(state, target, &record, input).await?;
     validate_exec_response(&response)?;
     let write_response = ExecWriteResponse { response };

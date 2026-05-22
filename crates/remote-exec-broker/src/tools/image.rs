@@ -22,7 +22,7 @@ pub async fn view_image(
         has_workdir = input.workdir.is_some(),
         "broker tool started"
     );
-    let target = state.target(&input.target)?;
+    let target = state.configured_target(&input.target)?;
     let response = match target
         .image_read_checked(
             &input.target,

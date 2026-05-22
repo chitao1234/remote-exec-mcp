@@ -14,8 +14,8 @@ use remote_exec_proto::sandbox::FilesystemSandbox;
 use remote_exec_proto::transfer::TransferLimits;
 use serde::Deserialize;
 
+use crate::local;
 use crate::port_forward::BrokerPortForwardLimits;
-use crate::state::LOCAL_TARGET_NAME;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BrokerConfig {
@@ -255,7 +255,7 @@ impl LocalTargetConfig {
         enable_transfer_compression: bool,
     ) -> HostRuntimeConfig {
         HostRuntimeConfig {
-            target: LOCAL_TARGET_NAME.to_string(),
+            target: local::TARGET_NAME.to_string(),
             default_workdir: self.default_workdir.clone(),
             windows_posix_root: self.windows_posix_root.clone(),
             sandbox,
@@ -301,8 +301,9 @@ impl BrokerConfig {
         self.transfer_limits.validate()?;
         self.port_forward_limits.validate()?;
         anyhow::ensure!(
-            !self.targets.contains_key(LOCAL_TARGET_NAME),
-            "configured target name `{LOCAL_TARGET_NAME}` is reserved for broker-host filesystem access"
+            !self.targets.contains_key(local::TARGET_NAME),
+            "configured target name `{}` is reserved for broker-host filesystem access",
+            local::TARGET_NAME
         );
         if let Some(local) = &self.local {
             local.transfer_limits.validate()?;

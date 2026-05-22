@@ -9,8 +9,9 @@ use remote_exec_proto::rpc::{
 use remote_exec_proto::transfer::TransferCompression;
 
 use crate::daemon_client::{DaemonClientError, RpcToolErrorMode, normalize_tool_result};
+use crate::local::BrokerHostOrTarget;
 
-use super::endpoints::{TransferEndpointTarget, endpoint_policy, verified_remote_target};
+use super::endpoints::endpoint_policy;
 
 struct ExportedSourceArchive {
     endpoint: TransferEndpoint,
@@ -175,8 +176,8 @@ async fn export_endpoint_to_archive(
 ) -> anyhow::Result<ExportArchiveResult> {
     let request = build_export_request(endpoint, compression, exclude, symlink_mode);
 
-    match TransferEndpointTarget::from_endpoint(endpoint) {
-        TransferEndpointTarget::Local => {
+    match BrokerHostOrTarget::from_transfer_endpoint(endpoint) {
+        BrokerHostOrTarget::BrokerHost => {
             let exported = crate::local::transfer::export_path_to_archive(
                 &endpoint.path,
                 archive_path,
@@ -188,7 +189,7 @@ async fn export_endpoint_to_archive(
                 source_type: exported.source_type,
             })
         }
-        TransferEndpointTarget::Remote(target_name) => {
+        BrokerHostOrTarget::Target(target_name) => {
             export_remote_endpoint_to_archive(state, target_name, &request, archive_path).await
         }
     }
@@ -199,8 +200,8 @@ async fn export_single_source(
     source: &TransferEndpoint,
     request: &TransferExportRequest,
 ) -> anyhow::Result<SingleSourceExport> {
-    match TransferEndpointTarget::from_endpoint(source) {
-        TransferEndpointTarget::Local => Ok(SingleSourceExport::Local(
+    match BrokerHostOrTarget::from_transfer_endpoint(source) {
+        BrokerHostOrTarget::BrokerHost => Ok(SingleSourceExport::Local(
             crate::local::transfer::export_path_to_stream(
                 &source.path,
                 request,
@@ -208,8 +209,8 @@ async fn export_single_source(
             )
             .await?,
         )),
-        TransferEndpointTarget::Remote(target_name) => {
-            let target = verified_remote_target(state, target_name).await?;
+        BrokerHostOrTarget::Target(target_name) => {
+            let target = state.verified_remote_target(target_name).await?;
             let exported =
                 handle_remote_transfer_result(target, target.transfer_export_stream(request).await)
                     .await?;
@@ -224,8 +225,8 @@ async fn import_archive_to_endpoint(
     endpoint: &TransferEndpoint,
     request: &TransferImportRequest,
 ) -> anyhow::Result<TransferImportResponse> {
-    match TransferEndpointTarget::from_endpoint(endpoint) {
-        TransferEndpointTarget::Local => {
+    match BrokerHostOrTarget::from_transfer_endpoint(endpoint) {
+        BrokerHostOrTarget::BrokerHost => {
             crate::local::transfer::import_archive_from_file(
                 archive_path,
                 request,
@@ -234,7 +235,7 @@ async fn import_archive_to_endpoint(
             )
             .await
         }
-        TransferEndpointTarget::Remote(target_name) => {
+        BrokerHostOrTarget::Target(target_name) => {
             import_remote_archive_to_endpoint(state, target_name, archive_path, request).await
         }
     }
@@ -246,8 +247,8 @@ async fn import_single_source(
     request: &TransferImportRequest,
     exported: SingleSourceExport,
 ) -> anyhow::Result<TransferImportResponse> {
-    match TransferEndpointTarget::from_endpoint(destination) {
-        TransferEndpointTarget::Local => {
+    match BrokerHostOrTarget::from_transfer_endpoint(destination) {
+        BrokerHostOrTarget::BrokerHost => {
             crate::local::transfer::import_archive_from_async_reader(
                 exported.into_async_read(),
                 request,
@@ -256,7 +257,7 @@ async fn import_single_source(
             )
             .await
         }
-        TransferEndpointTarget::Remote(target_name) => {
+        BrokerHostOrTarget::Target(target_name) => {
             import_remote_stream_to_endpoint(
                 state,
                 target_name,
@@ -274,7 +275,7 @@ async fn export_remote_endpoint_to_archive(
     request: &TransferExportRequest,
     archive_path: &Path,
 ) -> anyhow::Result<ExportArchiveResult> {
-    let target = verified_remote_target(state, target_name).await?;
+    let target = state.verified_remote_target(target_name).await?;
     let exported = handle_remote_transfer_result(
         target,
         target.transfer_export_to_file(request, archive_path).await,
@@ -291,7 +292,7 @@ async fn import_remote_archive_to_endpoint(
     archive_path: &Path,
     request: &TransferImportRequest,
 ) -> anyhow::Result<TransferImportResponse> {
-    let target = verified_remote_target(state, target_name).await?;
+    let target = state.verified_remote_target(target_name).await?;
     handle_remote_transfer_result(
         target,
         target
@@ -307,7 +308,7 @@ async fn import_remote_stream_to_endpoint(
     stream: ArchiveStream,
     request: &TransferImportRequest,
 ) -> anyhow::Result<TransferImportResponse> {
-    let target = verified_remote_target(state, target_name).await?;
+    let target = state.verified_remote_target(target_name).await?;
     handle_remote_transfer_result(
         target,
         target

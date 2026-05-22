@@ -8,7 +8,7 @@ use remote_exec_host::{
 };
 use remote_exec_proto::transfer::TransferLimits;
 
-use crate::state::LOCAL_TARGET_NAME;
+use crate::local::TARGET_NAME;
 
 #[derive(Clone)]
 pub struct LocalPortClient {
@@ -46,7 +46,7 @@ fn build_local_port_runtime() -> anyhow::Result<remote_exec_host::HostRuntimeSta
 
 fn local_port_forward_config(default_workdir: PathBuf) -> HostRuntimeConfig {
     HostRuntimeConfig {
-        target: LOCAL_TARGET_NAME.to_string(),
+        target: TARGET_NAME.to_string(),
         default_workdir,
         windows_posix_root: None,
         sandbox: None,

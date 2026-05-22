@@ -701,7 +701,7 @@ mod tests {
                 },
             ),
             Arc::new(ListenSessionControl::new_for_test(
-                SideHandle::local().unwrap(),
+                SideHandle::broker_host().unwrap(),
                 ForwardId::new(forward_id),
                 format!("session-{forward_id}"),
                 ForwardPortProtocol::Tcp,

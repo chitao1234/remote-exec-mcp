@@ -9,7 +9,7 @@ pub async fn forward_patch(
     patch: String,
     workdir: Option<String>,
 ) -> anyhow::Result<String> {
-    let target = state.target(target_name)?;
+    let target = state.configured_target(target_name)?;
     let response = target
         .patch_apply_checked(target_name, &PatchApplyRequest { patch, workdir })
         .await?;

@@ -456,7 +456,7 @@ mod tests {
         let (broker_side, mut daemon_side) = tokio::io::duplex(4096);
         let tunnel = Arc::new(PortTunnel::from_stream(broker_side).unwrap());
         let control = Arc::new(ListenSessionControl::new_for_test(
-            SideHandle::local().unwrap(),
+            SideHandle::broker_host().unwrap(),
             ForwardId::new("fwd_test"),
             "tunnel_session_test".to_string(),
             ForwardPortProtocol::Tcp,
@@ -494,7 +494,7 @@ mod tests {
     #[tokio::test]
     async fn close_listen_session_without_retained_tunnel_is_a_noop() {
         let control = Arc::new(ListenSessionControl::new_for_test(
-            SideHandle::local().unwrap(),
+            SideHandle::broker_host().unwrap(),
             ForwardId::new("fwd_test"),
             "tunnel_session_test".to_string(),
             ForwardPortProtocol::Tcp,

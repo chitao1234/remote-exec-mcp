@@ -1,7 +1,7 @@
 use crate::TargetHandle;
 use crate::daemon_client::DaemonClientError;
+use crate::local::TARGET_NAME;
 use crate::local::port::LocalPortClient;
-use crate::state::LOCAL_TARGET_NAME;
 
 use super::tunnel::PortTunnel;
 
@@ -12,7 +12,7 @@ pub enum SideHandle {
 }
 
 impl SideHandle {
-    pub fn local() -> anyhow::Result<Self> {
+    pub fn broker_host() -> anyhow::Result<Self> {
         Ok(Self::Local(LocalPortClient::global()?))
     }
 
@@ -23,7 +23,7 @@ impl SideHandle {
     pub fn name(&self) -> &str {
         match self {
             Self::Target { name, .. } => name,
-            Self::Local(_) => LOCAL_TARGET_NAME,
+            Self::Local(_) => TARGET_NAME,
         }
     }
 

@@ -5,10 +5,10 @@ use remote_exec_proto::rpc::TargetInfoResponse;
 use crate::{
     BrokerState, config,
     daemon_client::{DaemonClient, DaemonClientError},
+    local,
     local::backend::LocalDaemonClient,
     port_forward,
     session_store::SessionStore,
-    state::LOCAL_TARGET_NAME,
     target::{TargetBackend, TargetHandle, ensure_expected_daemon_name},
 };
 
@@ -73,10 +73,10 @@ async fn insert_local_target(
     let info = client.target_info().await?;
     log_local_target_enabled(&info);
     targets.insert(
-        LOCAL_TARGET_NAME.to_string(),
+        local::TARGET_NAME.to_string(),
         TargetHandle::verified(
             TargetBackend::Local(client),
-            Some(LOCAL_TARGET_NAME.to_string()),
+            Some(local::TARGET_NAME.to_string()),
             &info,
         ),
     );
@@ -147,7 +147,7 @@ async fn build_remote_target_handle(
 
 fn log_local_target_enabled(info: &TargetInfoResponse) {
     tracing::info!(
-        target = LOCAL_TARGET_NAME,
+        target = local::TARGET_NAME,
         daemon_instance_id = %info.daemon_instance_id,
         platform = %info.identity.platform,
         arch = %info.identity.arch,

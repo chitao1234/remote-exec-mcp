@@ -6,7 +6,7 @@ use remote_exec_test_support::test_helpers::{
     DEFAULT_TEST_TARGET, TEST_BEARER_SECRET, XP_TEST_TARGET,
 };
 
-use crate::state::LOCAL_TARGET_NAME;
+use crate::local::TARGET_NAME;
 
 use super::{BrokerConfig, McpServerConfig, SseInterval, ValidatedBrokerConfig};
 
@@ -46,7 +46,7 @@ async fn load_config(
 #[tokio::test]
 async fn load_rejects_reserved_local_target_name() {
     let dir = tempfile::tempdir().unwrap();
-    let err = load_config(&dir, valid_target_config(LOCAL_TARGET_NAME))
+    let err = load_config(&dir, valid_target_config(TARGET_NAME))
         .await
         .unwrap_err();
     assert!(

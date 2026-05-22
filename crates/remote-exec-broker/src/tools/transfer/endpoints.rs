@@ -1,6 +1,5 @@
 use std::path::Path;
 
-use anyhow::Context;
 use remote_exec_host::path_compare;
 use remote_exec_proto::path::{PathPolicy, host_policy};
 use remote_exec_proto::public::{TransferDestinationMode, TransferEndpoint};
@@ -10,7 +9,7 @@ use remote_exec_proto::rpc::{
 use remote_exec_proto::transfer::TransferCompression;
 
 use crate::daemon_client::{RpcToolErrorMode, normalize_tool_error};
-use crate::state::LOCAL_TARGET_NAME;
+use crate::local::BrokerHostOrTarget;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EndpointTargetContext {
@@ -24,40 +23,25 @@ enum EndpointTargetContext {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum TransferEndpointTarget<'a> {
-    Local,
-    Remote(&'a str),
-}
-
-pub(super) async fn verified_remote_target<'a>(
-    state: &'a crate::BrokerState,
-    target_name: &'a str,
-) -> anyhow::Result<crate::target::RemoteTargetHandle<'a>> {
-    let target = state.verified_target(target_name).await?;
-    target
-        .as_remote()
-        .with_context(|| format!("target `{target_name}` is not a remote transfer target"))
-}
-
 async fn verified_remote_daemon_info(
     state: &crate::BrokerState,
     target_name: &str,
 ) -> anyhow::Result<crate::CachedDaemonInfo> {
-    verified_remote_target(state, target_name)
+    state
+        .verified_remote_target(target_name)
         .await?
         .cached_daemon_info()
         .await
-        .context("target info missing after identity verification")
+        .ok_or_else(|| anyhow::anyhow!("target info missing after identity verification"))
 }
 
 async fn endpoint_target_context(
     state: &crate::BrokerState,
     target_name: &str,
 ) -> anyhow::Result<EndpointTargetContext> {
-    match TransferEndpointTarget::from_name(target_name) {
-        TransferEndpointTarget::Local => Ok(EndpointTargetContext::local()),
-        TransferEndpointTarget::Remote(target_name) => EndpointTargetContext::remote(
+    match BrokerHostOrTarget::from_name(target_name) {
+        BrokerHostOrTarget::BrokerHost => Ok(EndpointTargetContext::local()),
+        BrokerHostOrTarget::Target(target_name) => EndpointTargetContext::remote(
             target_name,
             verified_remote_daemon_info(state, target_name).await?,
         ),
@@ -256,12 +240,12 @@ async fn existing_destination_is_directory(
     state: &crate::BrokerState,
     destination: &TransferEndpoint,
 ) -> anyhow::Result<bool> {
-    let result = match TransferEndpointTarget::from_endpoint(destination) {
-        TransferEndpointTarget::Local => {
+    let result = match BrokerHostOrTarget::from_transfer_endpoint(destination) {
+        BrokerHostOrTarget::BrokerHost => {
             crate::local::transfer::path_info(&destination.path, state.host_sandbox.as_ref())
         }
-        TransferEndpointTarget::Remote(target_name) => {
-            let target = verified_remote_target(state, target_name).await?;
+        BrokerHostOrTarget::Target(target_name) => {
+            let target = state.verified_remote_target(target_name).await?;
             target
                 .clear_on_transport_error(
                     target
@@ -325,20 +309,6 @@ pub(super) async fn negotiate_transfer_compression(
         Ok(TransferCompression::Zstd)
     } else {
         Ok(TransferCompression::None)
-    }
-}
-
-impl<'a> TransferEndpointTarget<'a> {
-    pub(super) fn from_name(target_name: &'a str) -> Self {
-        if target_name == LOCAL_TARGET_NAME {
-            Self::Local
-        } else {
-            Self::Remote(target_name)
-        }
-    }
-
-    pub(super) fn from_endpoint(endpoint: &'a TransferEndpoint) -> Self {
-        Self::from_name(&endpoint.target)
     }
 }
 

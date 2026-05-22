@@ -269,7 +269,7 @@ async fn ready_tcp_data_send_failure_recovers_connect_tunnel() {
     let connect_tunnel = Arc::new(PortTunnel::from_stream(connect_io.clone()).unwrap());
 
     let listen_session = Arc::new(ListenSessionControl::new_for_test(
-        SideHandle::local().unwrap(),
+        SideHandle::broker_host().unwrap(),
         ForwardId::new("fwd_test"),
         "test-session".to_string(),
         PublicForwardPortProtocol::Tcp,
@@ -281,8 +281,8 @@ async fn ready_tcp_data_send_failure_recovers_connect_tunnel() {
     let runtime = ForwardRuntime::new(
         ForwardIdentity::new(
             ForwardId::new("fwd_test"),
-            SideHandle::local().unwrap(),
-            SideHandle::local().unwrap(),
+            SideHandle::broker_host().unwrap(),
+            SideHandle::broker_host().unwrap(),
             PublicForwardPortProtocol::Tcp,
             "127.0.0.1:1".to_string(),
         ),
@@ -363,7 +363,7 @@ async fn pending_tcp_flush_send_failure_recovers_connect_tunnel() {
     let connect_tunnel = Arc::new(PortTunnel::from_stream(connect_io.clone()).unwrap());
 
     let listen_session = Arc::new(ListenSessionControl::new_for_test(
-        SideHandle::local().unwrap(),
+        SideHandle::broker_host().unwrap(),
         ForwardId::new("fwd_test"),
         "test-session".to_string(),
         PublicForwardPortProtocol::Tcp,
@@ -375,8 +375,8 @@ async fn pending_tcp_flush_send_failure_recovers_connect_tunnel() {
     let runtime = ForwardRuntime::new(
         ForwardIdentity::new(
             ForwardId::new("fwd_test"),
-            SideHandle::local().unwrap(),
-            SideHandle::local().unwrap(),
+            SideHandle::broker_host().unwrap(),
+            SideHandle::broker_host().unwrap(),
             PublicForwardPortProtocol::Tcp,
             "127.0.0.1:1".to_string(),
         ),
@@ -842,7 +842,7 @@ fn tcp_test_runtime_with_limits(
 ) -> ForwardRuntime {
     let initial_epoch = tcp_test_epoch(listen_tunnel.clone(), connect_tunnel.clone());
     let listen_session = Arc::new(ListenSessionControl::new_for_test(
-        SideHandle::local().unwrap(),
+        SideHandle::broker_host().unwrap(),
         ForwardId::new("fwd_test"),
         "test-session".to_string(),
         PublicForwardPortProtocol::Tcp,
@@ -853,8 +853,8 @@ fn tcp_test_runtime_with_limits(
     ForwardRuntime::new(
         ForwardIdentity::new(
             ForwardId::new("fwd_test"),
-            SideHandle::local().unwrap(),
-            SideHandle::local().unwrap(),
+            SideHandle::broker_host().unwrap(),
+            SideHandle::broker_host().unwrap(),
             PublicForwardPortProtocol::Tcp,
             "127.0.0.1:1".to_string(),
         ),

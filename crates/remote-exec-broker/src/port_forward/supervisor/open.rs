@@ -426,8 +426,8 @@ mod tests {
         let result = build_opened_forward(
             ForwardOpenContext {
                 store: PortForwardStore::default(),
-                listen_side: SideHandle::local().unwrap(),
-                connect_side: SideHandle::local().unwrap(),
+                listen_side: SideHandle::broker_host().unwrap(),
+                connect_side: SideHandle::broker_host().unwrap(),
                 forward_id: ForwardId::new("fwd_test"),
                 listen_endpoint: "127.0.0.1:10000".to_string(),
                 connect_endpoint: "127.0.0.1:10001".to_string(),
