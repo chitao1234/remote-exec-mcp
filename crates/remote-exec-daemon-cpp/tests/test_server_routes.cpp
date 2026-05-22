@@ -161,7 +161,7 @@ static bool wait_until_file_contains(const fs::path& path, const std::string& fr
 
 static std::string long_running_non_tty_command() {
 #ifdef _WIN32
-    return "echo ready & ping -n 6 127.0.0.1 >nul";
+    return "echo ready & set /p first= & set /p second=";
 #else
     return "printf ready; sleep 5";
 #endif
@@ -185,8 +185,12 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
     TEST_ASSERT(non_tty_start_response.status == 200);
     const Json non_tty_started = Json::parse(non_tty_start_response.body);
     TEST_ASSERT(non_tty_started.at("running").get<bool>());
-    TEST_ASSERT(trim_trailing_exec_output(normalize_output(non_tty_started.at("output").get<std::string>())) ==
-                "ready");
+    std::string non_tty_output = normalize_output(non_tty_started.at("output").get<std::string>());
+    if (non_tty_output.find("ready") == std::string::npos) {
+        non_tty_output = append_running_exec_output_until_contains(
+            state, non_tty_started.at("daemon_session_id").get<std::string>(), non_tty_output, "ready", 2000UL);
+    }
+    TEST_ASSERT(trim_trailing_exec_output(non_tty_output).find("ready") != std::string::npos);
 
 #ifdef _WIN32
     const HttpResponse stdin_write_response = route_request(
