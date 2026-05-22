@@ -11,12 +11,12 @@ use tokio_util::sync::CancellationToken;
 use crate::{HostRuntimeConfig, WindowsPtyBackendOverride, sandbox::CompiledFilesystemSandbox};
 
 #[derive(Clone, Default)]
-pub struct BackgroundTasks {
+pub(crate) struct BackgroundTasks {
     tasks: Arc<Mutex<JoinSet<()>>>,
 }
 
 impl BackgroundTasks {
-    pub async fn spawn<F>(&self, name: &'static str, task: F)
+    pub(crate) async fn spawn<F>(&self, name: &'static str, task: F)
     where
         F: std::future::Future<Output = anyhow::Result<()>> + Send + 'static,
     {
@@ -27,7 +27,7 @@ impl BackgroundTasks {
         });
     }
 
-    pub async fn join_all(&self) {
+    pub(crate) async fn join_all(&self) {
         loop {
             let mut tasks = {
                 let mut tasks = self.tasks.lock().await;
@@ -47,18 +47,55 @@ impl BackgroundTasks {
 
 #[derive(Clone)]
 pub struct HostRuntimeState {
-    pub config: Arc<HostRuntimeConfig>,
-    pub default_shell: String,
-    pub sandbox: Option<CompiledFilesystemSandbox>,
-    pub supports_pty: bool,
-    pub supports_transfer_compression: bool,
-    pub windows_pty_backend_override: Option<WindowsPtyBackendOverride>,
-    pub daemon_instance_id: String,
-    pub shutdown: CancellationToken,
-    pub sessions: crate::exec::store::SessionStore,
-    pub port_forward_sessions: crate::port_forward::TunnelSessionStore,
-    pub port_forward_limiter: Arc<crate::port_forward::PortForwardLimiter>,
-    pub background_tasks: BackgroundTasks,
+    pub(crate) config: Arc<HostRuntimeConfig>,
+    pub(crate) default_shell: String,
+    pub(crate) sandbox: Option<CompiledFilesystemSandbox>,
+    pub(crate) supports_pty: bool,
+    pub(crate) supports_transfer_compression: bool,
+    pub(crate) windows_pty_backend_override: Option<WindowsPtyBackendOverride>,
+    pub(crate) daemon_instance_id: String,
+    pub(crate) shutdown: CancellationToken,
+    pub(crate) sessions: crate::exec::store::SessionStore,
+    pub(crate) port_forward_sessions: crate::port_forward::TunnelSessionStore,
+    pub(crate) port_forward_limiter: Arc<crate::port_forward::PortForwardLimiter>,
+    pub(crate) background_tasks: BackgroundTasks,
+}
+
+impl HostRuntimeState {
+    pub fn default_shell(&self) -> &str {
+        &self.default_shell
+    }
+
+    pub fn supports_pty(&self) -> bool {
+        self.supports_pty
+    }
+
+    pub fn supports_transfer_compression(&self) -> bool {
+        self.supports_transfer_compression
+    }
+
+    pub fn daemon_instance_id(&self) -> &str {
+        &self.daemon_instance_id
+    }
+
+    pub fn shutdown_token(&self) -> CancellationToken {
+        self.shutdown.clone()
+    }
+
+    pub fn cancel_shutdown(&self) {
+        self.shutdown.cancel();
+    }
+
+    pub async fn spawn_background_task<F>(&self, name: &'static str, task: F)
+    where
+        F: std::future::Future<Output = anyhow::Result<()>> + Send + 'static,
+    {
+        self.background_tasks.spawn(name, task).await;
+    }
+
+    pub async fn join_background_tasks(&self) {
+        self.background_tasks.join_all().await;
+    }
 }
 
 pub fn build_runtime_state(mut config: HostRuntimeConfig) -> anyhow::Result<HostRuntimeState> {

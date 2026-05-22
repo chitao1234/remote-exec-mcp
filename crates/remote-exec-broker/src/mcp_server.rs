@@ -89,7 +89,7 @@ fn format_correlated_error(
 
 #[derive(Clone)]
 pub struct BrokerServer {
-    pub state: crate::BrokerState,
+    state: crate::BrokerState,
     tool_router: ToolRouter<Self>,
 }
 

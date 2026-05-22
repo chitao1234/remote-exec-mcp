@@ -1136,8 +1136,7 @@ where
     let tunnel_state = state.port_tunnel_state.clone();
     state
         .port_tunnel_state
-        .background_tasks
-        .spawn("stub-inner-port-tunnel", async move {
+        .spawn_background_task("stub-inner-port-tunnel", async move {
             remote_exec_host::port_forward::serve_tunnel(tunnel_state, daemon_side)
                 .await
                 .map_err(|err| anyhow::anyhow!("{}: {}", err.wire_code(), err.message))

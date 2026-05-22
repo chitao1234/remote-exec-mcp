@@ -27,7 +27,7 @@ where
         shutdown,
     )
     .await;
-    state.background_tasks.join_all().await;
+    state.join_background_tasks().await;
     result
 }
 
@@ -35,7 +35,7 @@ pub(crate) async fn health(State(state): State<Arc<AppState>>) -> Json<HealthChe
     Json(HealthCheckResponse {
         status: HealthStatus::Ok,
         daemon_version: env!("CARGO_PKG_VERSION").to_string(),
-        daemon_instance_id: state.daemon_instance_id.clone(),
+        daemon_instance_id: state.daemon_instance_id().to_string(),
     })
 }
 

@@ -77,17 +77,17 @@ where
         transport = ?daemon_config.transport,
         http_auth_enabled = daemon_config.http_auth.is_some(),
         default_workdir = %daemon_config.default_workdir.display(),
-        default_shell = %state.default_shell,
-        supports_pty = state.supports_pty,
-        supports_transfer_compression = state.supports_transfer_compression,
+        default_shell = %state.default_shell(),
+        supports_pty = state.supports_pty(),
+        supports_transfer_compression = state.supports_transfer_compression(),
         pty_mode = ?daemon_config.pty,
-        daemon_instance_id = %state.daemon_instance_id,
+        daemon_instance_id = %state.daemon_instance_id(),
         "starting daemon"
     );
     let shutdown_state = state.clone();
     let shutdown = async move {
         shutdown.await;
-        shutdown_state.shutdown.cancel();
+        shutdown_state.cancel_shutdown();
     };
     server::serve_with_shutdown_on_listener(state, daemon_config, listener, shutdown).await
 }

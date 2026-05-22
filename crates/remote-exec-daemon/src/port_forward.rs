@@ -25,16 +25,16 @@ pub async fn tunnel(
         .map_err(crate::rpc_error::host_rpc_error_response)?;
     let on_upgrade = upgrade::on(request);
 
-    let shutdown = state.shutdown.clone();
-    let background_tasks = state.background_tasks.clone();
-    background_tasks
-        .spawn("port-forward tunnel", async move {
+    let shutdown = state.shutdown_token();
+    let tunnel_state = state.clone();
+    state
+        .spawn_background_task("port-forward tunnel", async move {
             tokio::select! {
                 upgraded = on_upgrade => {
                     match upgraded {
                         Ok(upgraded) => {
                             if let Err(err) = remote_exec_host::port_forward::serve_tunnel_with_permit(
-                                state,
+                                tunnel_state,
                                 TokioIo::new(upgraded),
                                 connection_permit,
                             )

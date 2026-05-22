@@ -336,7 +336,7 @@ impl PortForwardFilter {
 }
 
 pub struct PortForwardRecord {
-    pub entry: ForwardPortEntry,
+    pub(super) entry: ForwardPortEntry,
     close_handle: Arc<PortForwardCloseHandle>,
 }
 
