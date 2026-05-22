@@ -11,6 +11,8 @@ use remote_exec_proto::transfer::TransferCompression;
 use crate::daemon_client::{RpcToolErrorMode, normalize_tool_error};
 use crate::local::BrokerHostOrTarget;
 
+use super::backend::{TransferBackend, backend_for_endpoint};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EndpointTargetContext {
     Local {
@@ -240,23 +242,12 @@ async fn existing_destination_is_directory(
     state: &crate::BrokerState,
     destination: &TransferEndpoint,
 ) -> anyhow::Result<bool> {
-    let result = match BrokerHostOrTarget::from_transfer_endpoint(destination) {
-        BrokerHostOrTarget::BrokerHost => {
-            crate::local::transfer::path_info(&destination.path, state.host_sandbox.as_ref())
-        }
-        BrokerHostOrTarget::Target(target_name) => {
-            let target = state.verified_remote_target(target_name).await?;
-            target
-                .clear_on_transport_error(
-                    target
-                        .transfer_path_info(&TransferPathInfoRequest {
-                            path: destination.path.clone(),
-                        })
-                        .await,
-                )
-                .await
-        }
-    };
+    let backend = backend_for_endpoint(state, destination).await?;
+    let result = backend
+        .path_info(&TransferPathInfoRequest {
+            path: destination.path.clone(),
+        })
+        .await;
 
     match result {
         Ok(info) => Ok(info.exists && info.is_directory),

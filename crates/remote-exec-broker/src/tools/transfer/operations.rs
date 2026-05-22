@@ -1,16 +1,10 @@
-use std::path::Path;
-
-use bytes::Bytes;
-use futures_util::{StreamExt, TryStreamExt};
 use remote_exec_proto::public::{TransferEndpoint, TransferOverwrite, TransferSymlinkMode};
 use remote_exec_proto::rpc::{
     TransferExportRequest, TransferImportRequest, TransferImportResponse, TransferSourceType,
 };
 use remote_exec_proto::transfer::TransferCompression;
 
-use crate::daemon_client::{DaemonClientError, RpcToolErrorMode, normalize_tool_result};
-use crate::local::BrokerHostOrTarget;
-
+use super::backend::{TransferArchiveStream, TransferBackend, backend_for_endpoint};
 use super::endpoints::endpoint_policy;
 use super::plan::{TransferExecutionOptions, TransferPlan};
 
@@ -19,43 +13,6 @@ struct ExportedSourceArchive {
     source_policy: remote_exec_proto::path::PathPolicy,
     source_type: TransferSourceType,
     temp_path: tempfile::TempPath,
-}
-
-struct ExportArchiveResult {
-    source_type: TransferSourceType,
-}
-
-enum SingleSourceExport {
-    Local(crate::local::transfer::ExportedArchiveStream),
-    Remote(crate::daemon_client::TransferExportStream),
-}
-
-type ArchiveStream = futures_util::stream::BoxStream<'static, Result<Bytes, std::io::Error>>;
-
-impl SingleSourceExport {
-    fn source_type(&self) -> &TransferSourceType {
-        match self {
-            Self::Local(exported) => &exported.source_type,
-            Self::Remote(exported) => &exported.source_type,
-        }
-    }
-
-    fn into_async_read(self) -> Box<dyn tokio::io::AsyncRead + Send + Unpin + 'static> {
-        match self {
-            Self::Local(exported) => Box::new(exported.reader),
-            Self::Remote(exported) => Box::new(exported.into_async_read()),
-        }
-    }
-
-    fn into_archive_stream(self) -> ArchiveStream {
-        match self {
-            Self::Local(exported) => tokio_util::io::ReaderStream::new(exported.reader).boxed(),
-            Self::Remote(exported) => exported
-                .into_stream()
-                .map_err(std::io::Error::other)
-                .boxed(),
-        }
-    }
 }
 
 pub(super) async fn execute_transfer_plan(
@@ -172,153 +129,51 @@ fn build_export_request(
 async fn export_endpoint_to_archive(
     state: &crate::BrokerState,
     endpoint: &TransferEndpoint,
-    archive_path: &Path,
+    archive_path: &std::path::Path,
     compression: &TransferCompression,
     exclude: &[String],
     symlink_mode: &TransferSymlinkMode,
-) -> anyhow::Result<ExportArchiveResult> {
+) -> anyhow::Result<super::backend::ExportedArchive> {
     let request = build_export_request(endpoint, compression, exclude, symlink_mode);
-
-    match BrokerHostOrTarget::from_transfer_endpoint(endpoint) {
-        BrokerHostOrTarget::BrokerHost => {
-            let exported = crate::local::transfer::export_path_to_archive(
-                &endpoint.path,
-                archive_path,
-                &request,
-                state.host_sandbox.as_ref(),
-            )
-            .await?;
-            Ok(ExportArchiveResult {
-                source_type: exported.source_type,
-            })
-        }
-        BrokerHostOrTarget::Target(target_name) => {
-            export_remote_endpoint_to_archive(state, target_name, &request, archive_path).await
-        }
-    }
+    backend_for_endpoint(state, endpoint)
+        .await?
+        .export_to_file(&request, archive_path)
+        .await
 }
 
 async fn export_single_source(
     state: &crate::BrokerState,
     source: &TransferEndpoint,
     request: &TransferExportRequest,
-) -> anyhow::Result<SingleSourceExport> {
-    match BrokerHostOrTarget::from_transfer_endpoint(source) {
-        BrokerHostOrTarget::BrokerHost => Ok(SingleSourceExport::Local(
-            crate::local::transfer::export_path_to_stream(
-                &source.path,
-                request,
-                state.host_sandbox.as_ref(),
-            )
-            .await?,
-        )),
-        BrokerHostOrTarget::Target(target_name) => {
-            let target = state.verified_remote_target(target_name).await?;
-            let exported =
-                handle_remote_transfer_result(target, target.transfer_export_stream(request).await)
-                    .await?;
-            Ok(SingleSourceExport::Remote(exported))
-        }
-    }
+) -> anyhow::Result<TransferArchiveStream> {
+    backend_for_endpoint(state, source)
+        .await?
+        .export_stream(request)
+        .await
 }
 
 async fn import_archive_to_endpoint(
     state: &crate::BrokerState,
-    archive_path: &Path,
+    archive_path: &std::path::Path,
     endpoint: &TransferEndpoint,
     request: &TransferImportRequest,
 ) -> anyhow::Result<TransferImportResponse> {
-    match BrokerHostOrTarget::from_transfer_endpoint(endpoint) {
-        BrokerHostOrTarget::BrokerHost => {
-            crate::local::transfer::import_archive_from_file(
-                archive_path,
-                request,
-                state.host_sandbox.as_ref(),
-                state.transfer_limits,
-            )
-            .await
-        }
-        BrokerHostOrTarget::Target(target_name) => {
-            import_remote_archive_to_endpoint(state, target_name, archive_path, request).await
-        }
-    }
+    backend_for_endpoint(state, endpoint)
+        .await?
+        .import_from_file(archive_path, request)
+        .await
 }
 
 async fn import_single_source(
     state: &crate::BrokerState,
     destination: &TransferEndpoint,
     request: &TransferImportRequest,
-    exported: SingleSourceExport,
+    exported: TransferArchiveStream,
 ) -> anyhow::Result<TransferImportResponse> {
-    match BrokerHostOrTarget::from_transfer_endpoint(destination) {
-        BrokerHostOrTarget::BrokerHost => {
-            crate::local::transfer::import_archive_from_async_reader(
-                exported.into_async_read(),
-                request,
-                state.host_sandbox.as_ref(),
-                state.transfer_limits,
-            )
-            .await
-        }
-        BrokerHostOrTarget::Target(target_name) => {
-            import_remote_stream_to_endpoint(
-                state,
-                target_name,
-                exported.into_archive_stream(),
-                request,
-            )
-            .await
-        }
-    }
-}
-
-async fn export_remote_endpoint_to_archive(
-    state: &crate::BrokerState,
-    target_name: &str,
-    request: &TransferExportRequest,
-    archive_path: &Path,
-) -> anyhow::Result<ExportArchiveResult> {
-    let target = state.verified_remote_target(target_name).await?;
-    let exported = handle_remote_transfer_result(
-        target,
-        target.transfer_export_to_file(request, archive_path).await,
-    )
-    .await?;
-    Ok(ExportArchiveResult {
-        source_type: exported.source_type,
-    })
-}
-
-async fn import_remote_archive_to_endpoint(
-    state: &crate::BrokerState,
-    target_name: &str,
-    archive_path: &Path,
-    request: &TransferImportRequest,
-) -> anyhow::Result<TransferImportResponse> {
-    let target = state.verified_remote_target(target_name).await?;
-    handle_remote_transfer_result(
-        target,
-        target
-            .transfer_import_from_file(archive_path, request)
-            .await,
-    )
-    .await
-}
-
-async fn import_remote_stream_to_endpoint(
-    state: &crate::BrokerState,
-    target_name: &str,
-    stream: ArchiveStream,
-    request: &TransferImportRequest,
-) -> anyhow::Result<TransferImportResponse> {
-    let target = state.verified_remote_target(target_name).await?;
-    handle_remote_transfer_result(
-        target,
-        target
-            .transfer_import_from_archive_stream(request, stream)
-            .await,
-    )
-    .await
+    backend_for_endpoint(state, destination)
+        .await?
+        .import_stream(request, exported)
+        .await
 }
 
 fn build_import_request(
@@ -337,14 +192,4 @@ fn build_import_request(
         compression: compression.clone(),
         symlink_mode: symlink_mode.clone(),
     }
-}
-
-async fn handle_remote_transfer_result<T>(
-    target: crate::target::RemoteTargetHandle<'_>,
-    result: Result<T, DaemonClientError>,
-) -> anyhow::Result<T> {
-    normalize_tool_result(
-        target.clear_on_transport_error(result).await,
-        RpcToolErrorMode::MessageOnly,
-    )
 }

@@ -25,12 +25,6 @@ pub struct TransferExportStream {
 }
 
 impl TransferExportStream {
-    pub fn into_stream(
-        self,
-    ) -> impl futures_util::Stream<Item = Result<bytes::Bytes, DaemonClientError>> {
-        transfer_stream::decode_response_body(self.response)
-    }
-
     pub fn into_async_read(self) -> impl tokio::io::AsyncRead + Send + Unpin + 'static {
         let stream =
             transfer_stream::decode_response_body(self.response).map_err(std::io::Error::other);
