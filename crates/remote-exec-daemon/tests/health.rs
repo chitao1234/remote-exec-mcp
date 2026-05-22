@@ -119,6 +119,12 @@ async fn target_info_is_available_over_plain_http() {
     );
     assert!(info.supports_image_read);
     assert!(info.supports_transfer_compression);
+    assert_eq!(
+        info.capabilities
+            .file_tool_protocol_version
+            .map(|version| version.get()),
+        Some(1)
+    );
 }
 
 #[tokio::test]

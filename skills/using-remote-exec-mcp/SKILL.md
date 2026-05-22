@@ -1,6 +1,6 @@
 ---
 name: using-remote-exec-mcp
-description: Use when work must happen through a remote-exec-mcp broker on a named target or broker-host `local`, including target discovery, remote command execution, live session input, remote patching, image reads, file transfer, port forwarding, or the `remote-exec` CLI
+description: Use when work must happen through a remote-exec-mcp broker on a named target or broker-host `local`, including target discovery, remote command execution, live session input, remote patching, optional hidden text-file tools, image reads, file transfer, port forwarding, or the `remote-exec` CLI
 ---
 
 # Using remote-exec-mcp
@@ -10,9 +10,11 @@ does not require repository knowledge.
 
 ## Mental Model
 
-- The broker exposes seven MCP tools: `list_targets`, `exec_command`,
+- The broker exposes seven standard MCP tools: `list_targets`, `exec_command`,
   `write_stdin`, `apply_patch`, `view_image`, `transfer_files`, and
   `forward_ports`.
+- Brokers may additionally expose default-hidden `read`, `write`, and `edit`
+  tools only when config explicitly enables them.
 - Every machine-local operation is scoped to a logical `target`.
 - `local` means the broker host, not necessarily your current shell.
 - `session_id` and `forward_id` are opaque broker runtime tokens. Do not treat
@@ -30,7 +32,7 @@ does not require repository knowledge.
 - `forward_ports` can use side `"local"` even when `local` does not appear in
   `list_targets`.
 - If broker structured content is disabled, rely on normal text/image content.
-  `apply_patch` is text-only either way.
+  `apply_patch`, `read`, `write`, and `edit` are text-only either way.
 - Tool errors include `request_id`, `tool`, and `target` when known. Keep the
   request ID for broker and daemon log correlation.
 
@@ -41,7 +43,8 @@ does not require repository knowledge.
 3. Use endpoint-native paths: `/srv/app/file` on Unix, `C:/work/file` on
    Windows. Windows targets may also accept MSYS/Cygwin-style paths such as
    `/c/work/file`.
-4. Use `exec_command`, `apply_patch`, or `view_image` for one endpoint.
+4. Use `exec_command`, `apply_patch`, `view_image`, or enabled hidden file
+   tools for one endpoint.
 5. Use `transfer_files` for endpoint-to-endpoint copy.
 6. Use `forward_ports` for TCP/UDP tunneling.
 7. If `exec_command` returns `session_id`, keep it and use `write_stdin` until
@@ -53,6 +56,9 @@ does not require repository knowledge.
 - Run a command on one target: `exec_command`
 - Continue or poll a live command: `write_stdin`
 - Edit files on one target with patch syntax: `apply_patch`
+- If enabled, read a text file with line prefixes: `read`
+- If enabled, overwrite or create a text file: `write`
+- If enabled, replace text in a file: `edit`
 - Read an image file from one target: `view_image`
 - Copy files or directories between endpoints: `transfer_files`
 - Open, list, or close TCP/UDP forwards: `forward_ports`
@@ -154,6 +160,57 @@ Guidance:
   write/remove failures after preflight. If that residual partial-application
   risk would be hard to recover from, split the patch.
 - Successful calls return text output only.
+
+### Hidden `read`, `write`, `edit`
+
+These tools are default-hidden and may be absent from `list_tools`.
+
+Read:
+
+```json
+{
+  "target": "builder-a",
+  "file_path": "src/main.rs",
+  "offset": 1,
+  "limit": 2000
+}
+```
+
+Write:
+
+```json
+{
+  "target": "builder-a",
+  "file_path": "notes.txt",
+  "content": "hello\n"
+}
+```
+
+Edit:
+
+```json
+{
+  "target": "builder-a",
+  "file_path": "notes.txt",
+  "old_string": "hello",
+  "new_string": "hello world",
+  "replace_all": false
+}
+```
+
+Guidance:
+
+- No `workdir` field exists. Relative paths resolve from the target
+  daemon/default workdir.
+- `read.offset` is one-based; omitted or `0` means line `1`.
+- `read.limit` is in lines and defaults to the broker config limit.
+- `read` prefixes every returned line as `N: text` and ends with a reminder
+  describing EOF, an out-of-range offset, an empty file, or the displayed range.
+- `write` overwrites the file or creates it if missing.
+- `edit` rejects multiple `old_string` matches unless `replace_all` is true.
+- `read`, `write`, and `edit` use the same experimental target encoding
+  autodetection policy as `apply_patch` when enabled.
+- C++ daemon targets do not currently advertise this capability.
 
 ### `view_image`
 

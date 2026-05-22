@@ -1,19 +1,18 @@
 use std::borrow::Cow;
+use std::fmt;
 use std::path::Path;
 
 use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
 use encoding_rs::{Encoding, UTF_16BE, UTF_16LE};
 
-use crate::error::PatchError;
-
 #[derive(Debug, Clone)]
-pub(crate) struct PatchTextFile {
+pub(crate) struct TextFile {
     pub(crate) text: String,
-    encoding: PatchTextEncoding,
+    encoding: TextEncoding,
 }
 
 #[derive(Debug, Clone)]
-enum PatchTextEncoding {
+enum TextEncoding {
     Utf8,
     Detected {
         encoding: &'static Encoding,
@@ -21,11 +20,27 @@ enum PatchTextEncoding {
     },
 }
 
-impl PatchTextFile {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TextFileErrorKind {
+    Io,
+    Decode,
+    Encode,
+    Binary,
+}
+
+#[derive(Debug)]
+pub(crate) enum TextFileError {
+    Io(std::io::Error),
+    Decode(String),
+    Encode(String),
+    Binary(String),
+}
+
+impl TextFile {
     pub(crate) fn utf8(text: String) -> Self {
         Self {
             text,
-            encoding: PatchTextEncoding::Utf8,
+            encoding: TextEncoding::Utf8,
         }
     }
 
@@ -39,15 +54,15 @@ impl PatchTextFile {
     pub(crate) async fn read(
         path: &Path,
         allow_encoding_autodetect: bool,
-    ) -> Result<Self, PatchError> {
-        let bytes = tokio::fs::read(path).await?;
+    ) -> Result<Self, TextFileError> {
+        let bytes = tokio::fs::read(path).await.map_err(TextFileError::Io)?;
         Self::from_bytes(bytes, allow_encoding_autodetect)
     }
 
-    pub(crate) fn encode(&self, text: &str) -> Result<Vec<u8>, PatchError> {
+    pub(crate) fn encode(&self, text: &str) -> Result<Vec<u8>, TextFileError> {
         match &self.encoding {
-            PatchTextEncoding::Utf8 => Ok(text.as_bytes().to_vec()),
-            PatchTextEncoding::Detected { encoding, bom } => {
+            TextEncoding::Utf8 => Ok(text.as_bytes().to_vec()),
+            TextEncoding::Detected { encoding, bom } => {
                 let encoded = encode_text_for_encoding(encoding, text)?;
                 let mut output = Vec::with_capacity(bom.len() + encoded.len());
                 output.extend_from_slice(bom);
@@ -57,11 +72,14 @@ impl PatchTextFile {
         }
     }
 
-    fn from_bytes(bytes: Vec<u8>, allow_encoding_autodetect: bool) -> Result<Self, PatchError> {
+    pub(crate) fn from_bytes(
+        bytes: Vec<u8>,
+        allow_encoding_autodetect: bool,
+    ) -> Result<Self, TextFileError> {
         match String::from_utf8(bytes) {
             Ok(text) => Ok(Self {
                 text,
-                encoding: PatchTextEncoding::Utf8,
+                encoding: TextEncoding::Utf8,
             }),
             Err(err) if allow_encoding_autodetect => {
                 let bytes = err.into_bytes();
@@ -70,14 +88,14 @@ impl PatchTextFile {
                 let text = decode_without_replacement(encoding, content_bytes)?.into_owned();
 
                 if !looks_like_text(&text) {
-                    return Err(PatchError::failed(format!(
+                    return Err(TextFileError::Binary(format!(
                         "detected {} content does not look like text",
                         encoding.name()
                     )));
                 }
 
                 if encode_text_for_encoding(encoding, &text)?.as_slice() != content_bytes {
-                    return Err(PatchError::failed(format!(
+                    return Err(TextFileError::Decode(format!(
                         "detected {} content did not round-trip cleanly",
                         encoding.name()
                     )));
@@ -85,13 +103,44 @@ impl PatchTextFile {
 
                 Ok(Self {
                     text,
-                    encoding: PatchTextEncoding::Detected {
+                    encoding: TextEncoding::Detected {
                         encoding,
                         bom: bytes[..bom_len].to_vec(),
                     },
                 })
             }
-            Err(err) => Err(err.into()),
+            Err(err) => Err(TextFileError::Decode(err.to_string())),
+        }
+    }
+}
+
+impl TextFileError {
+    pub(crate) fn kind(&self) -> TextFileErrorKind {
+        match self {
+            Self::Io(_) => TextFileErrorKind::Io,
+            Self::Decode(_) => TextFileErrorKind::Decode,
+            Self::Encode(_) => TextFileErrorKind::Encode,
+            Self::Binary(_) => TextFileErrorKind::Binary,
+        }
+    }
+}
+
+impl fmt::Display for TextFileError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(err) => write!(f, "{err}"),
+            Self::Decode(message) | Self::Encode(message) | Self::Binary(message) => {
+                f.write_str(message)
+            }
+        }
+    }
+}
+
+impl std::error::Error for TextFileError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(err) => Some(err),
+            Self::Decode(_) | Self::Encode(_) | Self::Binary(_) => None,
         }
     }
 }
@@ -109,11 +158,11 @@ fn detect_encoding(bytes: &[u8]) -> (&'static Encoding, usize) {
 fn decode_without_replacement<'a>(
     encoding: &'static Encoding,
     bytes: &'a [u8],
-) -> Result<Cow<'a, str>, PatchError> {
+) -> Result<Cow<'a, str>, TextFileError> {
     encoding
         .decode_without_bom_handling_and_without_replacement(bytes)
         .ok_or_else(|| {
-            PatchError::failed(format!("target file is not valid {} text", encoding.name()))
+            TextFileError::Decode(format!("target file is not valid {} text", encoding.name()))
         })
 }
 
@@ -134,7 +183,7 @@ fn looks_like_text(text: &str) -> bool {
 fn encode_text_for_encoding(
     encoding: &'static Encoding,
     text: &str,
-) -> Result<Vec<u8>, PatchError> {
+) -> Result<Vec<u8>, TextFileError> {
     // encoding_rs handles the WHATWG legacy text encodings we care about
     // directly. UTF-16 is the exception: its Rust encode API intentionally
     // emits UTF-8 bytes, so preserve UTF-16LE/BE manually here.
@@ -154,7 +203,7 @@ fn encode_text_for_encoding(
 
     let (encoded, _, had_errors) = encoding.encode(text);
     if had_errors {
-        return Err(PatchError::failed(format!(
+        return Err(TextFileError::Encode(format!(
             "updated text cannot be represented in detected {} encoding",
             encoding.name()
         )));
@@ -166,14 +215,14 @@ fn encode_text_for_encoding(
 mod tests {
     use encoding_rs::{BIG5, EUC_KR, GBK, SHIFT_JIS};
 
-    use super::{PatchTextFile, encode_text_for_encoding};
+    use super::{TextFile, encode_text_for_encoding};
 
     #[test]
     fn autodetect_decodes_utf16le_with_bom_and_preserves_encoding() {
         let mut bytes = vec![0xFF, 0xFE];
         bytes.extend([b'h', 0, b'i', 0, b'\n', 0]);
 
-        let file = PatchTextFile::from_bytes(bytes.clone(), true).unwrap();
+        let file = TextFile::from_bytes(bytes.clone(), true).unwrap();
 
         assert_eq!(file.text, "hi\n");
         assert_eq!(file.encode("bye\n").unwrap(), {
@@ -186,14 +235,13 @@ mod tests {
 
     #[test]
     fn autodetect_rejects_invalid_utf8_when_disabled() {
-        let err = PatchTextFile::from_bytes(vec![0xFF, 0xFE, 0xFD], false).unwrap_err();
+        let err = TextFile::from_bytes(vec![0xFF, 0xFE, 0xFD], false).unwrap_err();
         assert!(err.to_string().contains("invalid utf-8"));
     }
 
     #[test]
     fn autodetect_rejects_likely_binary_content() {
-        let err =
-            PatchTextFile::from_bytes(vec![0xFF, 0x00, 0xFE, 0x01, 0xFD, 0x02], true).unwrap_err();
+        let err = TextFile::from_bytes(vec![0xFF, 0x00, 0xFE, 0x01, 0xFD, 0x02], true).unwrap_err();
         assert!(err.to_string().contains("does not look like text"));
     }
 
@@ -224,7 +272,7 @@ mod tests {
 
         for (encoding, original_text, updated_text) in cases {
             let original_bytes = encode_text_for_encoding(encoding, original_text).unwrap();
-            let file = PatchTextFile::from_bytes(original_bytes, true).unwrap();
+            let file = TextFile::from_bytes(original_bytes, true).unwrap();
 
             assert_eq!(
                 file.text,

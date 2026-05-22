@@ -1,5 +1,6 @@
 mod assets;
 mod exec;
+mod file;
 mod forward_ports;
 mod transfer;
 
@@ -8,6 +9,7 @@ pub use exec::{
     CommandToolResult, ExecCommandInput, ListTargetDaemonInfo, ListTargetEntry, ListTargetsInput,
     ListTargetsResult, WriteStdinInput,
 };
+pub use file::{EditInput, ReadInput, WriteInput};
 pub use forward_ports::{
     ForwardPortEntry, ForwardPortLimitSummary, ForwardPortPhase, ForwardPortProtocol,
     ForwardPortSideHealth, ForwardPortSideRole, ForwardPortSideState, ForwardPortSpec,

@@ -38,6 +38,8 @@ The MCP tool surface is:
 - `view_image`
 - `transfer_files`
 - `forward_ports`
+- default-hidden `read`, `write`, and `edit` when explicitly enabled in broker
+  config
 
 The architecture is intentionally split:
 
@@ -46,11 +48,12 @@ The architecture is intentionally split:
   `forward_id` namespaces, and hosts the `remote-exec` CLI client
   implementation.
 - `remote-exec-host`: shared Rust host runtime used by the Rust daemon and
-  broker-host `local` behavior. It owns transport-neutral exec, patch, image,
-  transfer, path, sandbox, and port-forward host logic.
+  broker-host `local` behavior. It owns transport-neutral exec, patch, text
+  file, image, transfer, path, sandbox, and port-forward host logic.
 - `remote-exec-daemon`: per-machine Rust HTTP/1.1 JSON daemon. It supports mTLS
-  by default, optional plain HTTP, command sessions, patching, image reads,
-  transfer import/export, sandbox checks, and v4 port-forward upgrade tunnels.
+  by default, optional plain HTTP, command sessions, patching, text file
+  reads/writes/edits, image reads, transfer import/export, sandbox checks, and
+  v4 port-forward upgrade tunnels.
 - `remote-exec-daemon-cpp`: standalone plain-HTTP C++11 daemon. It shares the
   broker-daemon protocol where implemented, supports native POSIX and Windows
   XP-compatible builds, and intentionally omits TLS and transfer compression.
@@ -79,6 +82,7 @@ C++11, and XP-targeting C++11 split actually needs them.
 - `crates/remote-exec-host/src/`: shared host runtime.
 - `crates/remote-exec-host/src/exec/`: host-local command/session backends.
 - `crates/remote-exec-host/src/transfer/`: transfer archive import/export.
+- `crates/remote-exec-host/src/file.rs`: host-local hidden file tool logic.
 - `crates/remote-exec-host/src/port_forward/`: daemon-side v4 tunnel session
   and TCP/UDP endpoint runtime.
 - `crates/remote-exec-daemon/src/`: Rust daemon config, TLS, HTTP routes, and

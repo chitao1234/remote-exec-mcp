@@ -95,10 +95,14 @@ pub struct BrokerServer {
 
 impl BrokerServer {
     pub fn new(state: crate::BrokerState) -> Self {
-        Self {
-            state,
-            tool_router: Self::tool_router(),
+        let mut tool_router = Self::tool_router();
+        for tool in BrokerTool::HIDDEN {
+            if !tool.enabled_by_config(&state.tools) {
+                tool_router.remove_route(tool.name());
+            }
         }
+
+        Self { state, tool_router }
     }
 
     fn include_structured_content(&self) -> bool {
@@ -284,6 +288,55 @@ impl BrokerServer {
             )
             .await)
     }
+
+    #[tool(
+        name = "read",
+        description = "Read a text file from a configured target machine.",
+        annotations(read_only_hint = true)
+    )]
+    async fn read(
+        &self,
+        Parameters(input): Parameters<remote_exec_proto::public::ReadInput>,
+    ) -> Result<CallToolResult, McpError> {
+        Ok(self
+            .finish_scoped_tool_call(
+                BrokerTool::Read,
+                crate::tools::file::read(&self.state, input),
+            )
+            .await)
+    }
+
+    #[tool(
+        name = "write",
+        description = "Overwrite or create a text file on a configured target machine."
+    )]
+    async fn write(
+        &self,
+        Parameters(input): Parameters<remote_exec_proto::public::WriteInput>,
+    ) -> Result<CallToolResult, McpError> {
+        Ok(self
+            .finish_scoped_tool_call(
+                BrokerTool::Write,
+                crate::tools::file::write(&self.state, input),
+            )
+            .await)
+    }
+
+    #[tool(
+        name = "edit",
+        description = "Replace text in a file on a configured target machine."
+    )]
+    async fn edit(
+        &self,
+        Parameters(input): Parameters<remote_exec_proto::public::EditInput>,
+    ) -> Result<CallToolResult, McpError> {
+        Ok(self
+            .finish_scoped_tool_call(
+                BrokerTool::Edit,
+                crate::tools::file::edit(&self.state, input),
+            )
+            .await)
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
@@ -311,6 +364,31 @@ mod tool_router_contract_tests {
         actual.sort_unstable();
         expected.sort_unstable();
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn default_server_hides_hidden_file_tools() {
+        let state = crate::BrokerState {
+            enable_transfer_compression: true,
+            transfer_limits: Default::default(),
+            disable_structured_content: false,
+            tools: Default::default(),
+            port_forward_limits: Default::default(),
+            host_sandbox: None,
+            sessions: Default::default(),
+            port_forwards: Default::default(),
+            targets: Default::default(),
+        };
+        let router = BrokerServer::new(state).tool_router;
+        let names: std::collections::BTreeSet<_> = router
+            .list_all()
+            .into_iter()
+            .map(|tool| tool.name.into_owned())
+            .collect();
+
+        assert!(!names.contains("read"));
+        assert!(!names.contains("write"));
+        assert!(!names.contains("edit"));
     }
 }
 

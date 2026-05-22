@@ -189,7 +189,38 @@ define_domain_error!(
     }
 );
 
+define_domain_error!(
+    FileError,
+    FileErrorKind,
+    "daemon internal file tool error",
+    {
+        invalid_request => InvalidRequest => RpcErrorCode::BadRequest,
+        sandbox_denied => SandboxDenied => RpcErrorCode::SandboxDenied,
+        missing => Missing => RpcErrorCode::FileMissing,
+        not_file => NotFile => RpcErrorCode::FileNotFile,
+        decode_failed => DecodeFailed => RpcErrorCode::FileDecodeFailed,
+        too_large => TooLarge => RpcErrorCode::FileTooLarge,
+        old_string_not_found => OldStringNotFound => RpcErrorCode::FileOldStringNotFound,
+        old_string_ambiguous => OldStringAmbiguous => RpcErrorCode::FileOldStringAmbiguous,
+        read_failed => ReadFailed => RpcErrorCode::FileReadFailed,
+        write_failed => WriteFailed => RpcErrorCode::FileWriteFailed,
+        internal => Internal => RpcErrorCode::Internal,
+    }
+);
+
+impl From<crate::text_file::TextFileError> for PatchError {
+    fn from(value: crate::text_file::TextFileError) -> Self {
+        Self::failed(value.to_string())
+    }
+}
+
 impl From<crate::sandbox::SandboxError> for PatchError {
+    fn from(value: crate::sandbox::SandboxError) -> Self {
+        Self::sandbox_denied(value.to_string())
+    }
+}
+
+impl From<crate::sandbox::SandboxError> for FileError {
     fn from(value: crate::sandbox::SandboxError) -> Self {
         Self::sandbox_denied(value.to_string())
     }
@@ -211,7 +242,7 @@ impl From<std::string::FromUtf8Error> for PatchError {
 mod tests {
     use remote_exec_proto::rpc::RpcErrorCode;
 
-    use super::{HostRpcError, ImageError, PatchError, TransferError};
+    use super::{FileError, HostRpcError, ImageError, PatchError, TransferError};
 
     #[test]
     fn transfer_internal_maps_to_internal_error_server_response() {
@@ -247,6 +278,15 @@ mod tests {
         assert_eq!(err.code, RpcErrorCode::PatchFailed);
         assert_eq!(err.wire_code(), "patch_failed");
         assert_eq!(err.message, "patch boom");
+    }
+
+    #[test]
+    fn file_decode_failed_stays_a_client_error() {
+        let err: HostRpcError = FileError::decode_failed("not text").into();
+        assert_eq!(err.status, 400);
+        assert_eq!(err.code, RpcErrorCode::FileDecodeFailed);
+        assert_eq!(err.wire_code(), "file_decode_failed");
+        assert_eq!(err.message, "not text");
     }
 
     #[test]

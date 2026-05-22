@@ -1,7 +1,8 @@
 use remote_exec_proto::request_id::REQUEST_ID_HEADER;
 use remote_exec_proto::rpc::{
-    ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
-    PatchApplyRequest, PatchApplyResponse, TargetInfoResponse,
+    ExecResponse, ExecStartRequest, ExecWriteRequest, FileEditRequest, FileEditResponse,
+    FileReadRequest, FileReadResponse, FileWriteRequest, FileWriteResponse, ImageReadRequest,
+    ImageReadResponse, PatchApplyRequest, PatchApplyResponse, TargetInfoResponse,
 };
 use reqwest::header::{AUTHORIZATION, HeaderValue};
 
@@ -79,6 +80,27 @@ impl DaemonClient {
         req: &ImageReadRequest,
     ) -> Result<ImageReadResponse, DaemonClientError> {
         self.post("/v1/image/read", req).await
+    }
+
+    pub async fn file_read(
+        &self,
+        req: &FileReadRequest,
+    ) -> Result<FileReadResponse, DaemonClientError> {
+        self.post("/v1/file/read", req).await
+    }
+
+    pub async fn file_write(
+        &self,
+        req: &FileWriteRequest,
+    ) -> Result<FileWriteResponse, DaemonClientError> {
+        self.post("/v1/file/write", req).await
+    }
+
+    pub async fn file_edit(
+        &self,
+        req: &FileEditRequest,
+    ) -> Result<FileEditResponse, DaemonClientError> {
+        self.post("/v1/file/edit", req).await
     }
 
     pub(super) async fn post<Req, Resp>(

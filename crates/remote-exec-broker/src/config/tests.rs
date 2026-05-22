@@ -265,6 +265,74 @@ async fn load_accepts_disabling_structured_content() {
 }
 
 #[tokio::test]
+async fn load_defaults_hidden_file_tools_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = load_config(&dir, valid_target_config(DEFAULT_TEST_TARGET))
+        .await
+        .unwrap();
+
+    assert!(!config.tools.file.read);
+    assert!(!config.tools.file.write);
+    assert!(!config.tools.file.edit);
+    assert_eq!(config.tools.file.default_read_limit_lines, 2_000);
+    assert_eq!(config.tools.file.max_read_limit_lines, 20_000);
+    assert_eq!(config.tools.file.max_read_bytes, 4 * 1024 * 1024);
+}
+
+#[tokio::test]
+async fn load_accepts_enabled_hidden_file_tools() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = load_config(
+        &dir,
+        format!(
+            r#"[tools.file]
+read = true
+write = true
+edit = true
+default_read_limit_lines = 100
+max_read_limit_lines = 500
+max_read_bytes = 4096
+
+{}"#,
+            valid_target_config(DEFAULT_TEST_TARGET)
+        ),
+    )
+    .await
+    .unwrap();
+
+    assert!(config.tools.file.read);
+    assert!(config.tools.file.write);
+    assert!(config.tools.file.edit);
+    assert_eq!(config.tools.file.default_read_limit_lines, 100);
+    assert_eq!(config.tools.file.max_read_limit_lines, 500);
+    assert_eq!(config.tools.file.max_read_bytes, 4096);
+}
+
+#[tokio::test]
+async fn load_rejects_invalid_hidden_file_tool_limits() {
+    let dir = tempfile::tempdir().unwrap();
+    let err = load_config(
+        &dir,
+        format!(
+            r#"[tools.file]
+default_read_limit_lines = 50
+max_read_limit_lines = 10
+
+{}"#,
+            valid_target_config(DEFAULT_TEST_TARGET)
+        ),
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+        err.to_string()
+            .contains("tools.file.default_read_limit_lines must be less than or equal"),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
 async fn bundled_broker_example_preserves_intentional_structured_content_override() {
     let example_path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/broker.example.toml");

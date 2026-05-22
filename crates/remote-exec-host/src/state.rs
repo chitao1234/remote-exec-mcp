@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use remote_exec_proto::rpc::{
-    DaemonIdentity, PortForwardProtocolVersion, TargetCapabilities, TargetInfoResponse,
-    TransferStreamProtocolVersion,
+    DaemonIdentity, FileToolProtocolVersion, PortForwardProtocolVersion, TargetCapabilities,
+    TargetInfoResponse, TransferStreamProtocolVersion,
 };
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
@@ -153,6 +153,7 @@ pub fn target_info_response(state: &HostRuntimeState, daemon_version: &str) -> T
             supports_port_forward: true,
             port_forward_protocol_version: Some(PortForwardProtocolVersion::v4()),
             transfer_stream_protocol_version: Some(TransferStreamProtocolVersion::v2()),
+            file_tool_protocol_version: Some(FileToolProtocolVersion::v1()),
         },
         supports_image_read: true,
         supports_transfer_compression: state.supports_transfer_compression,

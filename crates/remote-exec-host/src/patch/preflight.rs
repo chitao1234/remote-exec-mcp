@@ -6,10 +6,9 @@ use tokio::fs;
 use super::{
     detect_line_ending, engine, ensure_trailing_newline,
     parser::PatchAction,
-    text_codec::PatchTextFile,
     verify::{display_relative, resolve_patch_path},
 };
-use crate::{AppState, error::PatchError, sandbox::SandboxAccess};
+use crate::{AppState, error::PatchError, sandbox::SandboxAccess, text_file::TextFile};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum PlannedAction {
@@ -33,7 +32,7 @@ pub(super) enum PlannedAction {
 
 #[derive(Debug, Clone)]
 struct PlannedFile {
-    text: PatchTextFile,
+    text: TextFile,
     content: Vec<u8>,
 }
 
@@ -157,7 +156,7 @@ async fn plan_add(
         }
         None => PlannedFile {
             content: text.as_bytes().to_vec(),
-            text: PatchTextFile::utf8(text),
+            text: TextFile::utf8(text),
         },
     };
 
@@ -344,7 +343,7 @@ async fn require_file(
             display_relative(cwd, path)
         )));
     }
-    let text = PatchTextFile::read(
+    let text = TextFile::read(
         path,
         state
             .config
@@ -370,7 +369,7 @@ async fn file_from_overlay_or_disk(
 
     match fs::metadata(path).await {
         Ok(metadata) if metadata.is_file() => {
-            let text = PatchTextFile::read(
+            let text = TextFile::read(
                 path,
                 state
                     .config

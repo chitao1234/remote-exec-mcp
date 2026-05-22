@@ -1,3 +1,5 @@
+use crate::config::BrokerToolsConfig;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BrokerTool {
     ListTargets,
@@ -7,6 +9,9 @@ pub(crate) enum BrokerTool {
     ViewImage,
     TransferFiles,
     ForwardPorts,
+    Read,
+    Write,
+    Edit,
 }
 
 impl BrokerTool {
@@ -19,7 +24,12 @@ impl BrokerTool {
         Self::ViewImage,
         Self::TransferFiles,
         Self::ForwardPorts,
+        Self::Read,
+        Self::Write,
+        Self::Edit,
     ];
+
+    pub(crate) const HIDDEN: &'static [Self] = &[Self::Read, Self::Write, Self::Edit];
 
     pub(crate) fn from_name(name: &str) -> Option<Self> {
         match name {
@@ -30,6 +40,9 @@ impl BrokerTool {
             "view_image" => Some(Self::ViewImage),
             "transfer_files" => Some(Self::TransferFiles),
             "forward_ports" => Some(Self::ForwardPorts),
+            "read" => Some(Self::Read),
+            "write" => Some(Self::Write),
+            "edit" => Some(Self::Edit),
             _ => None,
         }
     }
@@ -43,6 +56,24 @@ impl BrokerTool {
             Self::ViewImage => "view_image",
             Self::TransferFiles => "transfer_files",
             Self::ForwardPorts => "forward_ports",
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Edit => "edit",
+        }
+    }
+
+    pub(crate) fn enabled_by_config(self, tools: &BrokerToolsConfig) -> bool {
+        match self {
+            Self::Read => tools.file.read,
+            Self::Write => tools.file.write,
+            Self::Edit => tools.file.edit,
+            Self::ListTargets
+            | Self::ExecCommand
+            | Self::WriteStdin
+            | Self::ApplyPatch
+            | Self::ViewImage
+            | Self::TransferFiles
+            | Self::ForwardPorts => true,
         }
     }
 }

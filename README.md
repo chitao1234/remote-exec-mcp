@@ -3,7 +3,8 @@
 `remote-exec-mcp` is a remote-first MCP server for running Codex-style local
 system tools on multiple Linux and Windows machines. Agents connect to one
 broker, choose an explicit target, and use familiar tools for command
-execution, stdin, patching, image reads, file transfer, and TCP/UDP forwarding.
+execution, stdin, patching, text-file reads/writes, image reads, file transfer,
+and TCP/UDP forwarding.
 
 The tool interface and behavior are influenced by
 [Codex](https://github.com/openai/codex), but this repository is a separate
@@ -30,6 +31,13 @@ Implemented public MCP tools:
 - `transfer_files`
 - `forward_ports`
 
+Default-hidden MCP tools, available only when explicitly enabled in broker
+config:
+
+- `read`
+- `write`
+- `edit`
+
 Implemented transports and runtimes:
 
 - broker MCP over stdio or streamable HTTP
@@ -53,8 +61,9 @@ drops daemon-local command sessions and forwarded sockets.
   config and call handlers in-process, or connect to a running streamable-HTTP
   broker.
 - `remote-exec-daemon`: Rust per-machine daemon. It executes commands, manages
-  sessions, applies patches, reads images, imports/exports transfer archives,
-  checks static path sandbox rules, and serves v4 port-forward upgrade tunnels.
+  sessions, applies patches, reads/writes text files, reads images,
+  imports/exports transfer archives, checks static path sandbox rules, and
+  serves v4 port-forward upgrade tunnels.
 - `remote-exec-host`: shared Rust host runtime reused by the Rust daemon and the
   broker-host `local` target.
 - `remote-exec-daemon-cpp`: standalone plain-HTTP C++11 daemon with native
@@ -112,6 +121,7 @@ Broker config covers:
 - optional broker-host `[local]` target
 - optional broker-host filesystem sandbox
 - optional structured-content toggle
+- optional default-hidden `read` / `write` / `edit` tools and limits
 - optional transfer and port-forward limits
 
 Daemon config covers:
@@ -329,6 +339,22 @@ port forwards require a long-running broker, so prefer `--broker-url` for
 - returns text output only
 - can use experimental target encoding autodetection when enabled in config
 
+Default-hidden file tools:
+
+- `read` reads one text file and returns text output only
+- `read.file_path`, `write.file_path`, and `edit.file_path` resolve relative to
+  the target default workdir unless they are target-native absolute paths
+- `read.offset` is one-based; omitted or `0` means line `1`
+- `read.limit` defaults to `tools.file.default_read_limit_lines`
+- `read` prefixes every returned line as `N: text`, then appends a reminder:
+  empty file, out-of-range offset, EOF reached, or showing `X-Y` of `N`
+- `write` overwrites an existing file or creates a new file
+- `edit` replaces `old_string` with `new_string`; if `old_string` matches more
+  than once, the call fails unless `replace_all = true`
+- `read`, `write`, and `edit` use the same experimental target encoding
+  autodetection policy as `apply_patch` when enabled on the target runtime
+- these tools are not listed or callable unless enabled under `[tools.file]`
+
 `view_image`:
 
 - reads an image from one target
@@ -375,7 +401,8 @@ port forwards require a long-running broker, so prefer `--broker-url` for
 The name `local` means the broker host.
 
 - `[local]` in broker config enables `target: "local"` for `exec_command`,
-  `write_stdin`, `apply_patch`, and `view_image`.
+  `write_stdin`, `apply_patch`, `view_image`, and the default-hidden
+  `read` / `write` / `edit` tools when those tools are enabled.
 - `transfer_files` can use `target: "local"` for broker-host filesystem access
   even when `[local]` is omitted.
 - `forward_ports` can use side `"local"` for broker-host network access even
@@ -398,6 +425,8 @@ are static allow/deny lists:
 - `exec_command` checks only the resolved starting `cwd`
 - command text is not inspected for arbitrary path references
 - `view_image` checks the resolved image path for read access
+- `read` checks the resolved file path for read access
+- `write` and `edit` check the resolved file path for write access
 - `apply_patch` checks resolved write targets
 - `transfer_files` checks source read access and destination write access on
   their respective endpoints
@@ -435,6 +464,7 @@ The C++ daemon intentionally supports a smaller surface than the Rust daemon:
 - POSIX PTY support when the host can allocate a PTY
 - Windows XP-compatible builds reject `tty = true`
 - PNG, JPEG, and WebP passthrough `view_image`
+- no default-hidden `read` / `write` / `edit` capability yet
 - file, directory, and broker-built multi-source transfers
 - POSIX symlink preserve/follow/skip modes
 - Windows XP-compatible symlink preservation skipped when unavailable

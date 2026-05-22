@@ -1,5 +1,6 @@
 pub mod config;
 pub mod exec;
+pub mod file;
 pub mod http;
 pub(crate) mod http_serve;
 pub mod image;

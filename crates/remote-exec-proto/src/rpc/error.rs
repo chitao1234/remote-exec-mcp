@@ -52,6 +52,14 @@ pub enum RpcErrorCode {
     TransferSourceMissing,
     TransferFailed,
     PatchFailed,
+    FileMissing,
+    FileNotFile,
+    FileDecodeFailed,
+    FileTooLarge,
+    FileOldStringNotFound,
+    FileOldStringAmbiguous,
+    FileReadFailed,
+    FileWriteFailed,
     Internal,
 }
 
@@ -102,6 +110,14 @@ macro_rules! rpc_error_code_mappings {
             TransferSourceMissing => "transfer_source_missing",
             TransferFailed => "transfer_failed",
             PatchFailed => "patch_failed",
+            FileMissing => "file_missing",
+            FileNotFile => "file_not_file",
+            FileDecodeFailed => "file_decode_failed",
+            FileTooLarge => "file_too_large",
+            FileOldStringNotFound => "file_old_string_not_found",
+            FileOldStringAmbiguous => "file_old_string_ambiguous",
+            FileReadFailed => "file_read_failed",
+            FileWriteFailed => "file_write_failed",
             Internal => "internal_error",
         }
     };

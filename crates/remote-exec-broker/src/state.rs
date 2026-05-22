@@ -16,6 +16,7 @@ pub struct BrokerState {
     pub(crate) enable_transfer_compression: bool,
     pub(crate) transfer_limits: TransferLimits,
     pub(crate) disable_structured_content: bool,
+    pub(crate) tools: crate::config::BrokerToolsConfig,
     pub(crate) port_forward_limits: port_forward::BrokerPortForwardLimits,
     pub(crate) host_sandbox: Option<CompiledFilesystemSandbox>,
     pub(crate) sessions: SessionStore,

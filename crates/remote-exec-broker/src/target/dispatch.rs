@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
 use remote_exec_proto::rpc::{
-    ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
-    PatchApplyRequest, PatchApplyResponse, TargetInfoResponse,
+    ExecResponse, ExecStartRequest, ExecWriteRequest, FileEditRequest, FileEditResponse,
+    FileReadRequest, FileReadResponse, FileWriteRequest, FileWriteResponse, ImageReadRequest,
+    ImageReadResponse, PatchApplyRequest, PatchApplyResponse, TargetInfoResponse,
 };
 
 use crate::daemon_client::{DaemonClient, DaemonClientError};
@@ -37,6 +38,21 @@ trait TargetBackendClient: Send + Sync {
         &'a self,
         req: &'a ImageReadRequest,
     ) -> BoxFuture<'a, Result<ImageReadResponse, DaemonClientError>>;
+
+    fn file_read<'a>(
+        &'a self,
+        req: &'a FileReadRequest,
+    ) -> BoxFuture<'a, Result<FileReadResponse, DaemonClientError>>;
+
+    fn file_write<'a>(
+        &'a self,
+        req: &'a FileWriteRequest,
+    ) -> BoxFuture<'a, Result<FileWriteResponse, DaemonClientError>>;
+
+    fn file_edit<'a>(
+        &'a self,
+        req: &'a FileEditRequest,
+    ) -> BoxFuture<'a, Result<FileEditResponse, DaemonClientError>>;
 
     fn port_tunnel(
         &self,
@@ -95,6 +111,27 @@ impl TargetBackend {
         self.client.image_read(req).await
     }
 
+    pub(crate) async fn file_read(
+        &self,
+        req: &FileReadRequest,
+    ) -> Result<FileReadResponse, DaemonClientError> {
+        self.client.file_read(req).await
+    }
+
+    pub(crate) async fn file_write(
+        &self,
+        req: &FileWriteRequest,
+    ) -> Result<FileWriteResponse, DaemonClientError> {
+        self.client.file_write(req).await
+    }
+
+    pub(crate) async fn file_edit(
+        &self,
+        req: &FileEditRequest,
+    ) -> Result<FileEditResponse, DaemonClientError> {
+        self.client.file_edit(req).await
+    }
+
     pub(crate) fn remote_client(&self) -> Option<&DaemonClient> {
         self.client.remote_client()
     }
@@ -138,6 +175,27 @@ impl TargetBackendClient for DaemonClient {
         req: &'a ImageReadRequest,
     ) -> BoxFuture<'a, Result<ImageReadResponse, DaemonClientError>> {
         Box::pin(DaemonClient::image_read(self, req))
+    }
+
+    fn file_read<'a>(
+        &'a self,
+        req: &'a FileReadRequest,
+    ) -> BoxFuture<'a, Result<FileReadResponse, DaemonClientError>> {
+        Box::pin(DaemonClient::file_read(self, req))
+    }
+
+    fn file_write<'a>(
+        &'a self,
+        req: &'a FileWriteRequest,
+    ) -> BoxFuture<'a, Result<FileWriteResponse, DaemonClientError>> {
+        Box::pin(DaemonClient::file_write(self, req))
+    }
+
+    fn file_edit<'a>(
+        &'a self,
+        req: &'a FileEditRequest,
+    ) -> BoxFuture<'a, Result<FileEditResponse, DaemonClientError>> {
+        Box::pin(DaemonClient::file_edit(self, req))
     }
 
     fn port_tunnel(
@@ -188,6 +246,27 @@ impl TargetBackendClient for LocalDaemonClient {
         req: &'a ImageReadRequest,
     ) -> BoxFuture<'a, Result<ImageReadResponse, DaemonClientError>> {
         Box::pin(LocalDaemonClient::image_read(self, req))
+    }
+
+    fn file_read<'a>(
+        &'a self,
+        req: &'a FileReadRequest,
+    ) -> BoxFuture<'a, Result<FileReadResponse, DaemonClientError>> {
+        Box::pin(LocalDaemonClient::file_read(self, req))
+    }
+
+    fn file_write<'a>(
+        &'a self,
+        req: &'a FileWriteRequest,
+    ) -> BoxFuture<'a, Result<FileWriteResponse, DaemonClientError>> {
+        Box::pin(LocalDaemonClient::file_write(self, req))
+    }
+
+    fn file_edit<'a>(
+        &'a self,
+        req: &'a FileEditRequest,
+    ) -> BoxFuture<'a, Result<FileEditResponse, DaemonClientError>> {
+        Box::pin(LocalDaemonClient::file_edit(self, req))
     }
 
     fn port_tunnel(

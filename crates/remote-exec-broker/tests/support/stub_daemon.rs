@@ -15,9 +15,9 @@ use axum::routing::post;
 use axum::{Json, Router};
 use futures_util::FutureExt;
 use remote_exec_proto::rpc::{
-    DaemonIdentity, ExecWarning, ExecWriteRequest, HealthCheckResponse, HealthStatus,
-    ImageReadResponse, PatchApplyRequest, PatchApplyResponse, PortForwardProtocolVersion,
-    RpcErrorBody, RpcErrorCode, TargetCapabilities, TargetInfoResponse,
+    DaemonIdentity, ExecWarning, ExecWriteRequest, FileToolProtocolVersion, HealthCheckResponse,
+    HealthStatus, ImageReadResponse, PatchApplyRequest, PatchApplyResponse,
+    PortForwardProtocolVersion, RpcErrorBody, RpcErrorCode, TargetCapabilities, TargetInfoResponse,
     TransferStreamProtocolVersion,
 };
 use tokio::sync::Mutex;
@@ -29,6 +29,8 @@ use super::test_helpers::DEFAULT_TEST_TARGET;
 
 #[path = "stub_daemon_exec.rs"]
 mod stub_daemon_exec;
+#[path = "stub_daemon_file.rs"]
+mod stub_daemon_file;
 #[path = "stub_daemon_image.rs"]
 mod stub_daemon_image;
 #[path = "stub_daemon_port_forward.rs"]
@@ -38,6 +40,10 @@ mod stub_daemon_transfer;
 
 pub(crate) use stub_daemon_exec::{ExecStartBehavior, ExecWriteBehavior};
 pub(crate) use stub_daemon_exec::{set_exec_start_behavior, set_exec_write_behavior};
+pub(crate) use stub_daemon_file::{
+    StubFileEditResponse, StubFileReadResponse, StubFileWriteResponse, set_file_edit_response,
+    set_file_read_response, set_file_write_response,
+};
 pub(crate) use stub_daemon_image::StubImageReadResponse;
 pub(crate) use stub_daemon_image::set_image_read_response;
 use stub_daemon_port_forward::StubPortForwardState;
@@ -90,9 +96,16 @@ pub(crate) struct StubDaemonState {
     pub(super) exec_start_calls: Arc<Mutex<usize>>,
     pub(super) last_exec_write_request: Arc<Mutex<Option<ExecWriteRequest>>>,
     pub(super) last_patch_request: Arc<Mutex<Option<PatchApplyRequest>>>,
+    pub(super) last_file_read_request: Arc<Mutex<Option<remote_exec_proto::rpc::FileReadRequest>>>,
+    pub(super) last_file_write_request:
+        Arc<Mutex<Option<remote_exec_proto::rpc::FileWriteRequest>>>,
+    pub(super) last_file_edit_request: Arc<Mutex<Option<remote_exec_proto::rpc::FileEditRequest>>>,
     pub(super) last_transfer_import: Arc<Mutex<Option<StubTransferImportCapture>>>,
     pub(super) last_transfer_export: Arc<Mutex<Option<StubTransferExportCapture>>>,
     pub(super) image_read_response: Arc<Mutex<StubImageReadResponse>>,
+    pub(super) file_read_response: Arc<Mutex<StubFileReadResponse>>,
+    pub(super) file_write_response: Arc<Mutex<StubFileWriteResponse>>,
+    pub(super) file_edit_response: Arc<Mutex<StubFileEditResponse>>,
     transfer_export_response: Arc<Mutex<stub_daemon_transfer::StubTransferExportResponse>>,
     transfer_path_info_response: Arc<Mutex<StubTransferPathInfoResponse>>,
     port_forward: StubPortForwardState,
@@ -123,12 +136,35 @@ pub(super) fn stub_daemon_state(
         exec_start_calls: Arc::new(Mutex::new(0)),
         last_exec_write_request: Arc::new(Mutex::new(None)),
         last_patch_request: Arc::new(Mutex::new(None)),
+        last_file_read_request: Arc::new(Mutex::new(None)),
+        last_file_write_request: Arc::new(Mutex::new(None)),
+        last_file_edit_request: Arc::new(Mutex::new(None)),
         last_transfer_import: Arc::new(Mutex::new(None)),
         last_transfer_export: Arc::new(Mutex::new(None)),
         image_read_response: Arc::new(Mutex::new(StubImageReadResponse::Success(
             ImageReadResponse {
                 image_url: "data:image/png;base64,AAAA".to_string(),
                 detail: None,
+            },
+        ))),
+        file_read_response: Arc::new(Mutex::new(StubFileReadResponse::Success(
+            remote_exec_proto::rpc::FileReadResponse {
+                output: "1: hello\n\n(EOF reached, file has 1 lines)".to_string(),
+                lines_returned: 1,
+                total_lines: 1,
+                eof: true,
+            },
+        ))),
+        file_write_response: Arc::new(Mutex::new(StubFileWriteResponse::Success(
+            remote_exec_proto::rpc::FileWriteResponse {
+                created: false,
+                line_count: 1,
+            },
+        ))),
+        file_edit_response: Arc::new(Mutex::new(StubFileEditResponse::Success(
+            remote_exec_proto::rpc::FileEditResponse {
+                replacements: 1,
+                line_count: 1,
             },
         ))),
         transfer_export_response: Arc::new(Mutex::new(
@@ -377,6 +413,9 @@ pub(super) fn stub_router(state: StubDaemonState) -> Router {
         .route("/v1/exec/start", post(stub_daemon_exec::exec_start))
         .route("/v1/exec/write", post(stub_daemon_exec::exec_write))
         .route("/v1/patch/apply", post(patch_apply))
+        .route("/v1/file/read", post(stub_daemon_file::file_read))
+        .route("/v1/file/write", post(stub_daemon_file::file_write))
+        .route("/v1/file/edit", post(stub_daemon_file::file_edit))
         .route(
             "/v1/transfer/path-info",
             post(stub_daemon_transfer::transfer_path_info),
@@ -451,6 +490,7 @@ async fn target_info(State(state): State<StubDaemonState>) -> Json<TargetInfoRes
             supports_port_forward: state.target_supports_port_forward,
             port_forward_protocol_version: state.target_port_forward_protocol_version,
             transfer_stream_protocol_version: Some(TransferStreamProtocolVersion::v2()),
+            file_tool_protocol_version: Some(FileToolProtocolVersion::v1()),
         },
         supports_image_read: true,
         supports_transfer_compression: state.target_supports_transfer_compression,

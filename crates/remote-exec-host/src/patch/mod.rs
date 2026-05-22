@@ -2,7 +2,6 @@ mod engine;
 mod matcher;
 pub mod parser;
 mod preflight;
-mod text_codec;
 mod verify;
 
 use std::sync::Arc;

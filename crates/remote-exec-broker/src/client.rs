@@ -12,8 +12,8 @@ use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
 use remote_exec_proto::public::{
-    ApplyPatchInput, ExecCommandInput, ForwardPortsInput, ListTargetsInput, TransferFilesInput,
-    ViewImageInput, WriteStdinInput,
+    ApplyPatchInput, EditInput, ExecCommandInput, ForwardPortsInput, ListTargetsInput, ReadInput,
+    TransferFilesInput, ViewImageInput, WriteInput, WriteStdinInput,
 };
 
 use crate::tools::registry::BrokerTool;
@@ -175,6 +175,9 @@ async fn call_direct_tool(
     let Some(tool) = BrokerTool::from_name(name) else {
         return crate::mcp_server::tool_error_result(format!("unknown tool `{name}`"));
     };
+    if !tool.enabled_by_config(&state.tools) {
+        return crate::mcp_server::tool_error_result(format!("unknown tool `{name}`"));
+    }
 
     macro_rules! invoke_tool {
         ($input:ty, $handler:path) => {{
@@ -204,6 +207,9 @@ async fn call_direct_tool(
         BrokerTool::ForwardPorts => {
             invoke_tool!(ForwardPortsInput, crate::tools::port_forward::forward_ports)
         }
+        BrokerTool::Read => invoke_tool!(ReadInput, crate::tools::file::read),
+        BrokerTool::Write => invoke_tool!(WriteInput, crate::tools::file::write),
+        BrokerTool::Edit => invoke_tool!(EditInput, crate::tools::file::edit),
     }
 }
 

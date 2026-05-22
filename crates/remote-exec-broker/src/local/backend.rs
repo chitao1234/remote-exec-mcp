@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use remote_exec_proto::rpc::{
-    ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest, ImageReadResponse,
-    PatchApplyRequest, PatchApplyResponse, TargetInfoResponse,
+    ExecResponse, ExecStartRequest, ExecWriteRequest, FileEditRequest, FileEditResponse,
+    FileReadRequest, FileReadResponse, FileWriteRequest, FileWriteResponse, ImageReadRequest,
+    ImageReadResponse, PatchApplyRequest, PatchApplyResponse, TargetInfoResponse,
 };
 
 use crate::daemon_client::{DaemonClientError, DaemonRpcCode};
@@ -71,9 +72,40 @@ impl LocalDaemonClient {
             .await
             .map_err(map_local_image_error)
     }
+
+    pub async fn file_read(
+        &self,
+        req: &FileReadRequest,
+    ) -> Result<FileReadResponse, DaemonClientError> {
+        remote_exec_host::file::read_file_local(self.state.clone(), req.clone())
+            .await
+            .map_err(map_local_file_error)
+    }
+
+    pub async fn file_write(
+        &self,
+        req: &FileWriteRequest,
+    ) -> Result<FileWriteResponse, DaemonClientError> {
+        remote_exec_host::file::write_file_local(self.state.clone(), req.clone())
+            .await
+            .map_err(map_local_file_error)
+    }
+
+    pub async fn file_edit(
+        &self,
+        req: &FileEditRequest,
+    ) -> Result<FileEditResponse, DaemonClientError> {
+        remote_exec_host::file::edit_file_local(self.state.clone(), req.clone())
+            .await
+            .map_err(map_local_file_error)
+    }
 }
 
 pub(crate) fn map_local_image_error(err: remote_exec_host::ImageError) -> DaemonClientError {
+    map_host_rpc_error(err.into())
+}
+
+pub(crate) fn map_local_file_error(err: remote_exec_host::FileError) -> DaemonClientError {
     map_host_rpc_error(err.into())
 }
 

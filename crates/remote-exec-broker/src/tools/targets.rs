@@ -98,6 +98,7 @@ mod tests {
             enable_transfer_compression: true,
             transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
             disable_structured_content: false,
+            tools: crate::config::BrokerToolsConfig::default(),
             port_forward_limits: crate::port_forward::BrokerPortForwardLimits::default(),
             host_sandbox: None,
             sessions: SessionStore::default(),

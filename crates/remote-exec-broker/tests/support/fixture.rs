@@ -6,9 +6,11 @@ use rmcp::{
 use tempfile::TempDir;
 
 use super::stub_daemon::{
-    ExecStartBehavior, ExecWriteBehavior, StubDaemonState, StubImageReadResponse,
-    StubTransferExportCapture, StubTransferImportCapture, set_exec_start_behavior,
-    set_exec_write_behavior, set_image_read_response, set_transfer_export_directory_response,
+    ExecStartBehavior, ExecWriteBehavior, StubDaemonState, StubFileEditResponse,
+    StubFileReadResponse, StubFileWriteResponse, StubImageReadResponse, StubTransferExportCapture,
+    StubTransferImportCapture, set_exec_start_behavior, set_exec_write_behavior,
+    set_file_edit_response, set_file_read_response, set_file_write_response,
+    set_image_read_response, set_transfer_export_directory_response,
     set_transfer_export_file_response, set_transfer_path_info_error_response,
     set_transfer_path_info_response,
 };
@@ -109,6 +111,20 @@ impl BrokerFixture {
         self.stub_state.last_patch_request.lock().await.clone()
     }
 
+    pub async fn last_file_read_request(&self) -> Option<remote_exec_proto::rpc::FileReadRequest> {
+        self.stub_state.last_file_read_request.lock().await.clone()
+    }
+
+    pub async fn last_file_write_request(
+        &self,
+    ) -> Option<remote_exec_proto::rpc::FileWriteRequest> {
+        self.stub_state.last_file_write_request.lock().await.clone()
+    }
+
+    pub async fn last_file_edit_request(&self) -> Option<remote_exec_proto::rpc::FileEditRequest> {
+        self.stub_state.last_file_edit_request.lock().await.clone()
+    }
+
     pub async fn last_exec_write_request(
         &self,
     ) -> Option<remote_exec_proto::rpc::ExecWriteRequest> {
@@ -148,6 +164,18 @@ impl BrokerFixture {
 
     pub async fn set_image_read_response(&self, response: StubImageReadResponse) {
         set_image_read_response(&self.stub_state, response).await;
+    }
+
+    pub async fn set_file_read_response(&self, response: StubFileReadResponse) {
+        set_file_read_response(&self.stub_state, response).await;
+    }
+
+    pub async fn set_file_write_response(&self, response: StubFileWriteResponse) {
+        set_file_write_response(&self.stub_state, response).await;
+    }
+
+    pub async fn set_file_edit_response(&self, response: StubFileEditResponse) {
+        set_file_edit_response(&self.stub_state, response).await;
     }
 
     pub async fn set_exec_start_warnings(

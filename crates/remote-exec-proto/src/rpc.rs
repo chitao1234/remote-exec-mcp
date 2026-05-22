@@ -1,5 +1,6 @@
 mod error;
 mod exec;
+mod file;
 mod image;
 mod patch;
 mod target;
@@ -11,11 +12,16 @@ pub use exec::{
     ExecCompletedResponse, ExecOutputResponse, ExecPtySize, ExecResponse, ExecRunningResponse,
     ExecStartRequest, ExecStartResponse, ExecWarning, ExecWriteRequest, ExecWriteResponse,
 };
+pub use file::{
+    FileEditRequest, FileEditResponse, FileReadRequest, FileReadResponse, FileWriteRequest,
+    FileWriteResponse,
+};
 pub use image::{ImageReadRequest, ImageReadResponse};
 pub use patch::{PatchApplyRequest, PatchApplyResponse};
 pub use target::{
-    DaemonIdentity, HealthCheckResponse, HealthStatus, PortForwardProtocolVersion,
-    TargetCapabilities, TargetInfoResponse, TransferStreamProtocolVersion,
+    DaemonIdentity, FileToolProtocolVersion, HealthCheckResponse, HealthStatus,
+    PortForwardProtocolVersion, TargetCapabilities, TargetInfoResponse,
+    TransferStreamProtocolVersion,
 };
 pub use transfer::{
     TRANSFER_COMPRESSION_HEADER, TRANSFER_CREATE_PARENT_HEADER, TRANSFER_DESTINATION_PATH_HEADER,

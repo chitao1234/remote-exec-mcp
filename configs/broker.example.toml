@@ -28,6 +28,17 @@
 # `structuredContent`.
 disable_structured_content = true
 
+# Optional default-hidden text file tools. All three are disabled by default
+# and must be explicitly enabled before they are listed or callable through MCP.
+# Paths resolve relative to the target daemon/default workdir unless absolute.
+#[tools.file]
+#read = false
+#write = false
+#edit = false
+#default_read_limit_lines = 2000
+#max_read_limit_lines = 20000
+#max_read_bytes = 4194304
+
 [targets.builder-a]
 # Requires the broker to be built with its default `broker-tls` Cargo feature.
 base_url = "https://builder-a.example.com:9443"
@@ -105,7 +116,8 @@ expected_daemon_name = "builder-xp"
 #allow = ["/srv/local-work"]
 #deny = ["/srv/local-work/.git", "/srv/local-work/readonly"]
 
-# Optional broker-host local target for exec_command, write_stdin, apply_patch, and view_image.
+# Optional broker-host local target for exec_command, write_stdin, apply_patch,
+# view_image, and enabled default-hidden read/write/edit tools.
 # When enabled, list_targets includes `local`.
 # `transfer_files` can still use broker-host filesystem access with `target: "local"` even if
 # this section is omitted.

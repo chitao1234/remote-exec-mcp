@@ -3,8 +3,9 @@ use std::sync::Arc;
 use anyhow::Context;
 use remote_exec_proto::path::{PathPolicy, linux_path_policy, windows_path_policy};
 use remote_exec_proto::rpc::{
-    DaemonIdentity, ExecResponse, ExecStartRequest, ExecWriteRequest, ImageReadRequest,
-    ImageReadResponse, PatchApplyRequest, PatchApplyResponse, TargetCapabilities,
+    DaemonIdentity, ExecResponse, ExecStartRequest, ExecWriteRequest, FileEditRequest,
+    FileEditResponse, FileReadRequest, FileReadResponse, FileWriteRequest, FileWriteResponse,
+    ImageReadRequest, ImageReadResponse, PatchApplyRequest, PatchApplyResponse, TargetCapabilities,
     TargetInfoResponse, TransferExportRequest, TransferImportRequest, TransferImportResponse,
     TransferPathInfoRequest, TransferPathInfoResponse,
 };
@@ -136,6 +137,27 @@ impl TargetHandle {
         req: &ImageReadRequest,
     ) -> Result<ImageReadResponse, DaemonClientError> {
         self.backend.image_read(req).await
+    }
+
+    pub(crate) async fn file_read(
+        &self,
+        req: &FileReadRequest,
+    ) -> Result<FileReadResponse, DaemonClientError> {
+        self.backend.file_read(req).await
+    }
+
+    pub(crate) async fn file_write(
+        &self,
+        req: &FileWriteRequest,
+    ) -> Result<FileWriteResponse, DaemonClientError> {
+        self.backend.file_write(req).await
+    }
+
+    pub(crate) async fn file_edit(
+        &self,
+        req: &FileEditRequest,
+    ) -> Result<FileEditResponse, DaemonClientError> {
+        self.backend.file_edit(req).await
     }
 
     pub(crate) fn as_remote(&self) -> Option<RemoteTargetHandle<'_>> {

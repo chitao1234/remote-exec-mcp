@@ -33,6 +33,8 @@ pub struct TargetCapabilities {
     pub port_forward_protocol_version: Option<PortForwardProtocolVersion>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transfer_stream_protocol_version: Option<TransferStreamProtocolVersion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_tool_protocol_version: Option<FileToolProtocolVersion>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -77,6 +79,26 @@ pub struct TransferStreamProtocolVersion(NonZeroU32);
 impl TransferStreamProtocolVersion {
     pub fn v2() -> Self {
         Self(NonZeroU32::new(2).expect("v2 is nonzero"))
+    }
+
+    pub fn new(value: NonZeroU32) -> Self {
+        Self(value)
+    }
+
+    pub fn get(self) -> u32 {
+        self.0.get()
+    }
+}
+
+#[derive(
+    Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord,
+)]
+#[serde(transparent)]
+pub struct FileToolProtocolVersion(NonZeroU32);
+
+impl FileToolProtocolVersion {
+    pub fn v1() -> Self {
+        Self(NonZeroU32::new(1).expect("v1 is nonzero"))
     }
 
     pub fn new(value: NonZeroU32) -> Self {

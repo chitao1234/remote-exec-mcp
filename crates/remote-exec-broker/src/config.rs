@@ -34,11 +34,76 @@ pub struct BrokerConfig {
     #[serde(default)]
     pub disable_structured_content: bool,
     #[serde(default)]
+    pub tools: BrokerToolsConfig,
+    #[serde(default)]
     pub port_forward_limits: BrokerPortForwardLimits,
 }
 
 #[derive(Debug, Clone)]
 pub struct ValidatedBrokerConfig(BrokerConfig);
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+pub struct BrokerToolsConfig {
+    #[serde(default)]
+    pub file: FileToolConfig,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+pub struct FileToolConfig {
+    #[serde(default)]
+    pub read: bool,
+    #[serde(default)]
+    pub write: bool,
+    #[serde(default)]
+    pub edit: bool,
+    #[serde(default = "default_file_tool_read_limit_lines")]
+    pub default_read_limit_lines: u64,
+    #[serde(default = "default_file_tool_max_read_limit_lines")]
+    pub max_read_limit_lines: u64,
+    #[serde(default = "default_file_tool_max_read_bytes")]
+    pub max_read_bytes: u64,
+}
+
+impl Default for FileToolConfig {
+    fn default() -> Self {
+        Self {
+            read: false,
+            write: false,
+            edit: false,
+            default_read_limit_lines: default_file_tool_read_limit_lines(),
+            max_read_limit_lines: default_file_tool_max_read_limit_lines(),
+            max_read_bytes: default_file_tool_max_read_bytes(),
+        }
+    }
+}
+
+impl FileToolConfig {
+    pub(crate) fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.default_read_limit_lines > 0,
+            "tools.file.default_read_limit_lines must be greater than zero"
+        );
+        anyhow::ensure!(
+            self.max_read_limit_lines > 0,
+            "tools.file.max_read_limit_lines must be greater than zero"
+        );
+        anyhow::ensure!(
+            self.default_read_limit_lines <= self.max_read_limit_lines,
+            "tools.file.default_read_limit_lines must be less than or equal to tools.file.max_read_limit_lines"
+        );
+        anyhow::ensure!(
+            self.max_read_bytes > 0,
+            "tools.file.max_read_bytes must be greater than zero"
+        );
+        Ok(())
+    }
+}
+
+impl BrokerToolsConfig {
+    pub(crate) fn validate(&self) -> anyhow::Result<()> {
+        self.file.validate()
+    }
+}
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(tag = "transport", rename_all = "snake_case")]
@@ -300,6 +365,7 @@ impl BrokerConfig {
         self.mcp.validate()?;
         self.transfer_limits.validate()?;
         self.port_forward_limits.validate()?;
+        self.tools.validate()?;
         anyhow::ensure!(
             !self.targets.contains_key(local::TARGET_NAME),
             "configured target name `{}` is reserved for broker-host filesystem access",
@@ -359,6 +425,18 @@ fn default_allow_login_shell() -> bool {
 
 fn default_enable_transfer_compression() -> bool {
     true
+}
+
+fn default_file_tool_read_limit_lines() -> u64 {
+    2_000
+}
+
+fn default_file_tool_max_read_limit_lines() -> u64 {
+    20_000
+}
+
+fn default_file_tool_max_read_bytes() -> u64 {
+    4 * 1024 * 1024
 }
 
 fn default_target_connect_timeout_ms() -> u64 {
