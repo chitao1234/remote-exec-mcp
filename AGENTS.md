@@ -5,13 +5,20 @@
 These instructions apply to the entire `remote-exec-mcp` workspace.
 
 Everything under `docs/` is historical planning and audit context unless a task
-explicitly asks for docs maintenance there. The live contract is maintained in:
+explicitly asks for docs maintenance there. The most important external-facing
+contracts are the MCP tool schemas/interfaces and operator-facing configuration
+and documentation maintained in:
 
 - `README.md`
 - `AGENTS.md`
 - `configs/*.example.toml`
 - `skills/using-remote-exec-mcp/SKILL.md`
-- public schemas in `crates/remote-exec-proto/src/`
+- MCP schemas in `crates/remote-exec-proto/src/public.rs` and
+  `crates/remote-exec-proto/src/public/`
+
+Rust crate APIs in this workspace are internal implementation details. Assume
+there are no Rust consumers outside this repository unless a task explicitly
+changes that assumption.
 
 ## Project Overview
 
@@ -22,7 +29,7 @@ and Windows XP-compatible build paths. In this repository, "Windows
 XP-compatible" means a toolchain and binary target that can both compile the C++
 daemon as C++11 and target Windows XP.
 
-The public tool surface is:
+The MCP tool surface is:
 
 - `list_targets`
 - `exec_command`
@@ -34,9 +41,10 @@ The public tool surface is:
 
 The architecture is intentionally split:
 
-- `remote-exec-broker`: public MCP server over stdio or streamable HTTP. It
-  validates `target`, routes calls, owns public `session_id` and `forward_id`
-  namespaces, and hosts the `remote-exec` CLI client implementation.
+- `remote-exec-broker`: MCP server over stdio or streamable HTTP. It
+  validates `target`, routes calls, owns MCP-visible `session_id` and
+  `forward_id` namespaces, and hosts the `remote-exec` CLI client
+  implementation.
 - `remote-exec-host`: shared Rust host runtime used by the Rust daemon and
   broker-host `local` behavior. It owns transport-neutral exec, patch, image,
   transfer, path, sandbox, and port-forward host logic.
@@ -44,10 +52,10 @@ The architecture is intentionally split:
   by default, optional plain HTTP, command sessions, patching, image reads,
   transfer import/export, sandbox checks, and v4 port-forward upgrade tunnels.
 - `remote-exec-daemon-cpp`: standalone plain-HTTP C++11 daemon. It shares the
-  broker-daemon contract where implemented, supports native POSIX and Windows
+  broker-daemon protocol where implemented, supports native POSIX and Windows
   XP-compatible builds, and intentionally omits TLS and transfer compression.
-- `remote-exec-proto`: shared public tool schemas, internal RPC payloads, path
-  helpers, sandbox helpers, and port-forward protocol types.
+- `remote-exec-proto`: shared MCP tool schemas, broker-daemon RPC payloads,
+  path helpers, sandbox helpers, and port-forward protocol types.
 - `remote-exec-admin`: operator CLI for certificate/bootstrap workflows.
 - `remote-exec-pki`: reusable certificate generation, manifest, and secure
   private-key write helpers.
@@ -63,10 +71,10 @@ C++11, and XP-targeting C++11 split actually needs them.
 - `crates/remote-exec-broker/src/mcp_server.rs`: MCP tool registration and
   stdio/HTTP serving.
 - `crates/remote-exec-broker/src/client.rs`: CLI/client-side tool invocation.
-- `crates/remote-exec-broker/src/tools/`: public tool handlers.
+- `crates/remote-exec-broker/src/tools/`: MCP tool handlers.
 - `crates/remote-exec-broker/src/port_forward/`: broker-owned forward store,
   supervision, TCP/UDP bridges, reconnect state, and limits.
-- `crates/remote-exec-broker/tests/`: public broker, CLI, transfer, TLS, HTTP,
+- `crates/remote-exec-broker/tests/`: MCP/broker, CLI, transfer, TLS, HTTP,
   port-forward, and multi-target coverage.
 - `crates/remote-exec-host/src/`: shared host runtime.
 - `crates/remote-exec-host/src/exec/`: host-local command/session backends.
@@ -78,7 +86,7 @@ C++11, and XP-targeting C++11 split actually needs them.
 - `crates/remote-exec-daemon/tests/`: Rust daemon RPC coverage.
 - `crates/remote-exec-daemon-cpp/`: C++ daemon source, public headers, config
   example, GNU/BSD/NMAKE build files, and C++ tests.
-- `crates/remote-exec-proto/src/public.rs`: MCP public arguments and results.
+- `crates/remote-exec-proto/src/public.rs`: MCP tool arguments and results.
 - `crates/remote-exec-proto/src/rpc.rs` and `src/rpc/`: broker-daemon RPC
   request/response and typed error contracts.
 - `crates/remote-exec-proto/src/port_forward.rs`: v4 frame and endpoint helpers.
@@ -92,12 +100,12 @@ C++11, and XP-targeting C++11 split actually needs them.
 
 ## Architecture Rules
 
-- Preserve broker-owned public ID namespaces. Public `session_id` and
+- Preserve broker-owned MCP-visible ID namespaces. MCP-visible `session_id` and
   `forward_id` values are opaque broker runtime tokens. Never expose
   daemon-local process IDs, daemon-local session IDs, stream IDs, or tunnel
-  internals through the public API.
+  internals through the MCP API.
 - Keep target selection explicit for machine-local operations. Broker-side
-  validation and routing are part of the contract.
+  validation and routing are part of the MCP interface contract.
 - Maintain per-target isolation. A session, file operation, or forward created
   for one target must not be usable as another target.
 - Keep `list_targets` broker-local and cache-based. It must not probe daemons at
@@ -128,13 +136,18 @@ C++11, and XP-targeting C++11 split actually needs them.
 - Forwarding reconnect preserves the forward and future listen-side traffic when
   only broker-daemon transport is lost and the daemon stays alive. Active TCP
   streams and UDP per-peer connector state are not preserved.
-- Keep Rust daemon and C++ daemon behavior aligned where they share a public or
-  broker-daemon contract. If C++ intentionally lacks a feature, report that
-  truthfully through target metadata or documented errors.
+- Keep Rust daemon and C++ daemon behavior aligned where they share MCP
+  behavior or broker-daemon protocol. If C++ intentionally lacks a feature,
+  report that truthfully through target metadata or documented errors.
+- Do not churn the broker-daemon protocol casually. It is internal to this
+  workspace and may be changed when the old protocol is badly designed,
+  insufficient for a new requirement, or clearly increasing maintenance risk,
+  but such changes should update Rust broker, Rust daemon, C++ daemon behavior
+  where applicable, and compatibility tests together.
 
 ## Change Guidance
 
-When changing public tool arguments, result fields, validation, text output, or
+When changing MCP tool arguments, result fields, validation, text output, or
 structured-content behavior, update these together:
 
 - `crates/remote-exec-proto/src/public.rs`
@@ -145,10 +158,11 @@ structured-content behavior, update these together:
 - `crates/remote-exec-broker/src/bin/remote_exec.rs` when the CLI surface should
   expose the behavior
 - Rust daemon RPC routes/handlers when daemon behavior changes
-- `crates/remote-exec-daemon-cpp` when the C++ daemon shares the contract
+- `crates/remote-exec-daemon-cpp` when the C++ daemon shares the behavior or
+  broker-daemon protocol
 - `README.md`, `configs/*.example.toml` when config or behavior changes, and
   `skills/using-remote-exec-mcp/SKILL.md` for user-facing tool changes
-- public broker tests, not only daemon internals
+- MCP/broker tests, not only daemon internals
 
 When changing broker-daemon RPC contracts:
 
@@ -159,6 +173,8 @@ When changing broker-daemon RPC contracts:
 - update `remote-exec-daemon-cpp` if the C++ daemon shares that route
 - keep typed RPC error codes stable where retry, normalization, or tests depend
   on them
+- protocol changes are allowed when they simplify a bad design or satisfy a new
+  requirement, but avoid compatibility churn without a concrete reason
 
 When changing `forward_ports`:
 
@@ -240,7 +256,7 @@ Useful Windows cross-target compile gates from Linux:
 
 Do test under wine if that is needed and wine is available.
 
-For cross-cutting or public-surface changes, finish with the quality gate from
+For cross-cutting or MCP/user-facing changes, finish with the quality gate from
 `README.md`:
 
 - `cargo test --workspace`
@@ -256,7 +272,7 @@ For cross-cutting or public-surface changes, finish with the quality gate from
 - `Cargo.lock` is tracked. Update it only when dependency changes require it.
 - Do not rewrite historical files under `docs/` unless the task explicitly asks
   for historical-doc maintenance.
-- If user-facing behavior changes, include or update public broker-surface tests
+- If user-facing behavior changes, include or update MCP/broker behavior tests
   and docs in the same change.
 - For C++ daemon work, keep GNU make, BSD make, and NMAKE entry points aligned
   only where they intentionally support the same build path. BSD make is
