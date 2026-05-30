@@ -60,7 +60,16 @@ $(error unsupported WINDOWS_WINPTY '$(WINDOWS_WINPTY)'; use auto, on, or off)
 endif
 
 WINDOWS_WINVER_HEX_TAG := $(patsubst 0x%,%,$(patsubst 0X%,%,$(WINDOWS_WINVER)))
-WINDOWS_WINVER_LABEL := $(if $(filter $(WINDOWS_WINVER),$(WINDOWS_WINVER_NT4)),nt4,$(if $(filter $(WINDOWS_WINVER),$(WINDOWS_WINVER_2000)),2000,$(if $(filter $(WINDOWS_WINVER),$(WINDOWS_WINVER_XP)),xp,winver$(WINDOWS_WINVER_HEX_TAG))))
+WINDOWS_WINVER_LABEL := winver$(WINDOWS_WINVER_HEX_TAG)
+ifeq ($(WINDOWS_WINVER),$(WINDOWS_WINVER_NT4))
+WINDOWS_WINVER_LABEL := nt4
+endif
+ifeq ($(WINDOWS_WINVER),$(WINDOWS_WINVER_2000))
+WINDOWS_WINVER_LABEL := 2000
+endif
+ifeq ($(WINDOWS_WINVER),$(WINDOWS_WINVER_XP))
+WINDOWS_WINVER_LABEL := xp
+endif
 WINDOWS_WS_TAG := ws$(WINDOWS_WINSOCK_VERSION)
 WINDOWS_VARIANT_AXIS_TAG := $(WINDOWS_WINVER_LABEL)-$(WINDOWS_WS_TAG)
 
@@ -71,23 +80,8 @@ WINDOWS_VARIANT_EXTRA_TEST_CASES :=
 WINDOWS_VARIANT_BUILD_ARTIFACTS :=
 WINDOWS_VARIANT_RUNTIME_ARTIFACTS :=
 
-ifeq ($(WINDOWS_WINPTY),on)
-WINDOWS_WINPTY_ENABLED := 1
-endif
-ifeq ($(WINDOWS_WINPTY),off)
-WINDOWS_WINPTY_ENABLED := 0
-endif
-ifndef WINDOWS_WINPTY_ENABLED
-ifeq ($(WINDOWS_WINSOCK_VERSION),$(WINDOWS_WINSOCK2))
-ifeq ($(WINDOWS_WINVER),$(WINDOWS_WINVER_XP))
-WINDOWS_WINPTY_ENABLED := 1
-else
-WINDOWS_WINPTY_ENABLED := 0
-endif
-else
-WINDOWS_WINPTY_ENABLED := 0
-endif
-endif
+WINDOWS_WINPTY_AUTO_ENABLED := $(if $(filter $(WINDOWS_WINSOCK_VERSION),$(WINDOWS_WINSOCK2)),$(if $(filter $(WINDOWS_WINVER),$(WINDOWS_WINVER_XP)),1,0),0)
+WINDOWS_WINPTY_ENABLED := $(if $(filter $(WINDOWS_WINPTY),on),1,$(if $(filter $(WINDOWS_WINPTY),off),0,$(WINDOWS_WINPTY_AUTO_ENABLED)))
 
 WINDOWS_VARIANT_BUILD_TAG := $(WINDOWS_TOOLCHAIN_BUILD_TAG)-winver$(WINDOWS_WINVER_HEX_TAG)-$(WINDOWS_WS_TAG)
 
@@ -100,6 +94,10 @@ WINPTY_AGENT_EXE := $(BUILD_DIR)/winpty-agent.exe
 WINPTY_LIB_OBJECTS := $(addprefix $(WINPTY_LIB_OBJ_DIR)/,$(addsuffix .o,$(WINPTY_LIBWINPTY_STEMS)))
 WINPTY_AGENT_OBJECTS := $(addprefix $(WINPTY_AGENT_OBJ_DIR)/,$(addsuffix .o,$(WINPTY_AGENT_STEMS)))
 WINDOWS_AR ?= $(shell $(WINDOWS_CXX) -print-prog-name=ar)
+WINDOWS_WINPTY_INCLUDE_CPPFLAGS := -I$(WINPTY_VENDOR_SRC_DIR)/include -I$(WINPTY_VENDOR_SRC_DIR) -I$(dir $(WINPTY_VERSION_HEADER))
+WINDOWS_WINPTY_VARIANT_CPPFLAGS := -DREMOTE_EXEC_CPP_HAS_WINPTY -DWINPTY_STATIC $(WINDOWS_WINPTY_INCLUDE_CPPFLAGS)
+WINDOWS_WINPTY_LDLIBS := $(WINPTY_STATIC_LIB) -ladvapi32 -lshell32 -luser32
+WINDOWS_WINPTY_COMMON_CPPFLAGS := $(WINDOWS_VARIANT_VERSION_CPPFLAGS) -DREMOTE_EXEC_CPP_HAS_WINPTY -DNOMINMAX -DUNICODE -D_UNICODE $(WINDOWS_PROD_CXXFLAGS) $(DEPFLAGS) $(WINDOWS_WINPTY_INCLUDE_CPPFLAGS)
 
 ifeq ($(WINDOWS_WINSOCK_VERSION),$(WINDOWS_WINSOCK1))
 WINDOWS_VARIANT_EXTRA_CPPFLAGS += -DREMOTE_EXEC_CPP_WINSOCK1
@@ -108,8 +106,8 @@ WINDOWS_VARIANT_EXTRA_TEST_CASES += WINSOCK1_SOCKET_BACKEND
 else
 WINDOWS_VARIANT_LDLIBS += -lws2_32
 ifeq ($(WINDOWS_WINPTY_ENABLED),1)
-WINDOWS_VARIANT_EXTRA_CPPFLAGS += -DREMOTE_EXEC_CPP_HAS_WINPTY -DWINPTY_STATIC -I$(WINPTY_VENDOR_SRC_DIR)/include -I$(WINPTY_VENDOR_SRC_DIR) -I$(dir $(WINPTY_VERSION_HEADER))
-WINDOWS_VARIANT_LDLIBS += $(WINPTY_STATIC_LIB) -ladvapi32 -lshell32 -luser32
+WINDOWS_VARIANT_EXTRA_CPPFLAGS += $(WINDOWS_WINPTY_VARIANT_CPPFLAGS)
+WINDOWS_VARIANT_LDLIBS += $(WINDOWS_WINPTY_LDLIBS)
 WINDOWS_VARIANT_BUILD_ARTIFACTS += $(WINPTY_STATIC_LIB)
 WINDOWS_VARIANT_RUNTIME_ARTIFACTS += $(WINPTY_AGENT_EXE)
 endif
@@ -258,11 +256,11 @@ $(WINPTY_VERSION_HEADER): $(WINPTY_VENDOR_DIR)/VERSION.txt
 
 $(WINPTY_LIB_OBJ_DIR)/%.o: $(WINPTY_VENDOR_SRC_DIR)/%.cc $(WINPTY_VERSION_HEADER)
 	mkdir -p $(dir $@)
-	$(WINDOWS_CXX) $(WINDOWS_VARIANT_VERSION_CPPFLAGS) -DREMOTE_EXEC_CPP_HAS_WINPTY -DWINPTY_STATIC -DNOMINMAX -DUNICODE -D_UNICODE $(WINDOWS_PROD_CXXFLAGS) $(DEPFLAGS) -I$(WINPTY_VENDOR_SRC_DIR)/include -I$(WINPTY_VENDOR_SRC_DIR) -I$(dir $(WINPTY_VERSION_HEADER)) -c -o $@ $<
+	$(WINDOWS_CXX) $(WINDOWS_WINPTY_COMMON_CPPFLAGS) -DWINPTY_STATIC -c -o $@ $<
 
 $(WINPTY_AGENT_OBJ_DIR)/%.o: $(WINPTY_VENDOR_SRC_DIR)/%.cc $(WINPTY_VERSION_HEADER)
 	mkdir -p $(dir $@)
-	$(WINDOWS_CXX) $(WINDOWS_VARIANT_VERSION_CPPFLAGS) -DREMOTE_EXEC_CPP_HAS_WINPTY -DWINPTY_AGENT_ASSERT -DNOMINMAX -DUNICODE -D_UNICODE $(WINDOWS_PROD_CXXFLAGS) $(DEPFLAGS) -I$(WINPTY_VENDOR_SRC_DIR)/include -I$(WINPTY_VENDOR_SRC_DIR) -I$(dir $(WINPTY_VERSION_HEADER)) -c -o $@ $<
+	$(WINDOWS_CXX) $(WINDOWS_WINPTY_COMMON_CPPFLAGS) -DWINPTY_AGENT_ASSERT -c -o $@ $<
 
 $(WINPTY_STATIC_LIB): $(WINPTY_LIB_OBJECTS)
 	mkdir -p $(dir $@)
@@ -290,65 +288,54 @@ $1:
 	$$(MAKE) $2 WINDOWS_TOOLCHAIN=$3 WINDOWS_WINVER=$4 WINDOWS_WIN32_WINNT=$5 WINDOWS_WINSOCK_VERSION=$6 BUILD_DIR=$$(BUILD_DIR)
 endef
 
-$(eval $(call define_windows_variant_alias,all-windows-nt4-ws1,all-windows,$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINSOCK1)))
-$(eval $(call define_windows_variant_alias,test-windows-nt4-ws1,test-windows,$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINSOCK1)))
-$(eval $(call define_windows_variant_alias,check-windows-nt4-ws1,check-windows,$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINSOCK1)))
+define define_windows_variant_alias_bundle
+$(foreach alias_name,$1,$(eval $(call define_windows_variant_alias,all-windows-$(alias_name),all-windows,$2,$3,$4,$5)))
+$(foreach alias_name,$1,$(eval $(call define_windows_variant_alias,test-windows-$(alias_name),test-windows,$2,$3,$4,$5)))
+$(foreach alias_name,$1,$(eval $(call define_windows_variant_alias,check-windows-$(alias_name),check-windows,$2,$3,$4,$5)))
+endef
 
-$(eval $(call define_windows_variant_alias,all-windows-2000,all-windows,$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_2000),$(WINDOWS_WINVER_2000),$(WINDOWS_WINSOCK2)))
-$(eval $(call define_windows_variant_alias,test-windows-2000,test-windows,$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_2000),$(WINDOWS_WINVER_2000),$(WINDOWS_WINSOCK2)))
-$(eval $(call define_windows_variant_alias,check-windows-2000,check-windows,$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_2000),$(WINDOWS_WINVER_2000),$(WINDOWS_WINSOCK2)))
-$(eval $(call define_windows_variant_alias,all-windows-2000-ws2,all-windows,$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_2000),$(WINDOWS_WINVER_2000),$(WINDOWS_WINSOCK2)))
-$(eval $(call define_windows_variant_alias,test-windows-2000-ws2,test-windows,$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_2000),$(WINDOWS_WINVER_2000),$(WINDOWS_WINSOCK2)))
-$(eval $(call define_windows_variant_alias,check-windows-2000-ws2,check-windows,$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_2000),$(WINDOWS_WINVER_2000),$(WINDOWS_WINSOCK2)))
+WINDOWS_NT4_WS1_ALIAS_NAMES := nt4-ws1
+WINDOWS_2000_ALIAS_NAMES := 2000 2000-ws2
+WINDOWS_XP_ALIAS_NAMES := xp xp-ws2
+WINDOWS_NATIVE_ALIAS_NAMES := native
 
-$(eval $(call define_windows_variant_alias,all-windows-xp,all-windows,$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_XP),$(WINDOWS_WINVER_XP),$(WINDOWS_WINSOCK2)))
-$(eval $(call define_windows_variant_alias,test-windows-xp,test-windows,$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_XP),$(WINDOWS_WINVER_XP),$(WINDOWS_WINSOCK2)))
-$(eval $(call define_windows_variant_alias,check-windows-xp,check-windows,$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_XP),$(WINDOWS_WINVER_XP),$(WINDOWS_WINSOCK2)))
-$(eval $(call define_windows_variant_alias,all-windows-xp-ws2,all-windows,$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_XP),$(WINDOWS_WINVER_XP),$(WINDOWS_WINSOCK2)))
-$(eval $(call define_windows_variant_alias,test-windows-xp-ws2,test-windows,$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_XP),$(WINDOWS_WINVER_XP),$(WINDOWS_WINSOCK2)))
-$(eval $(call define_windows_variant_alias,check-windows-xp-ws2,check-windows,$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_XP),$(WINDOWS_WINVER_XP),$(WINDOWS_WINSOCK2)))
-
-$(eval $(call define_windows_variant_alias,all-windows-native,all-windows,$(WINDOWS_NATIVE_TOOLCHAIN),$(WINDOWS_WINVER_XP),$(WINDOWS_WINVER_XP),$(WINDOWS_WINSOCK2)))
-$(eval $(call define_windows_variant_alias,test-windows-native,test-windows,$(WINDOWS_NATIVE_TOOLCHAIN),$(WINDOWS_WINVER_XP),$(WINDOWS_WINVER_XP),$(WINDOWS_WINSOCK2)))
-$(eval $(call define_windows_variant_alias,check-windows-native,check-windows,$(WINDOWS_NATIVE_TOOLCHAIN),$(WINDOWS_WINVER_XP),$(WINDOWS_WINVER_XP),$(WINDOWS_WINSOCK2)))
+$(eval $(call define_windows_variant_alias_bundle,$(WINDOWS_NT4_WS1_ALIAS_NAMES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINSOCK1)))
+$(eval $(call define_windows_variant_alias_bundle,$(WINDOWS_2000_ALIAS_NAMES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_2000),$(WINDOWS_WINVER_2000),$(WINDOWS_WINSOCK2)))
+$(eval $(call define_windows_variant_alias_bundle,$(WINDOWS_XP_ALIAS_NAMES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_XP),$(WINDOWS_WINVER_XP),$(WINDOWS_WINSOCK2)))
+$(eval $(call define_windows_variant_alias_bundle,$(WINDOWS_NATIVE_ALIAS_NAMES),$(WINDOWS_NATIVE_TOOLCHAIN),$(WINDOWS_WINVER_XP),$(WINDOWS_WINVER_XP),$(WINDOWS_WINSOCK2)))
 
 define define_windows_variant_test_alias
 $1:
 	$$(MAKE) $2 WINDOWS_TOOLCHAIN=$3 WINDOWS_WINVER=$4 WINDOWS_WIN32_WINNT=$5 WINDOWS_WINSOCK_VERSION=$6 BUILD_DIR=$$(BUILD_DIR)
 endef
 
-$(foreach test,$(WINDOWS_COMMON_TEST_CASES),$(eval $(call define_windows_variant_test_alias,test-windows-xp-$(WINDOWS_TEST_CASE_$(test)_NAME),$(call windows_test_case_phony,$(test)),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_XP),$(WINDOWS_WINVER_XP),$(WINDOWS_WINSOCK2))))
-$(foreach test,$(WINDOWS_COMMON_TEST_CASES),$(eval $(call define_windows_variant_test_alias,test-windows-2000-$(WINDOWS_TEST_CASE_$(test)_NAME),$(call windows_test_case_phony,$(test)),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_2000),$(WINDOWS_WINVER_2000),$(WINDOWS_WINSOCK2))))
-$(foreach test,$(WINDOWS_COMMON_TEST_CASES),$(eval $(call define_windows_variant_test_alias,test-windows-native-$(WINDOWS_TEST_CASE_$(test)_NAME),$(call windows_test_case_phony,$(test)),$(WINDOWS_NATIVE_TOOLCHAIN),$(WINDOWS_WINVER_XP),$(WINDOWS_WINVER_XP),$(WINDOWS_WINSOCK2))))
-$(foreach test,$(WINDOWS_COMMON_TEST_CASES) WINSOCK1_SOCKET_BACKEND,$(eval $(call define_windows_variant_test_alias,test-windows-nt4-ws1-$(WINDOWS_TEST_CASE_$(test)_NAME),$(call windows_test_case_phony,$(test)),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINSOCK1))))
+define define_windows_named_test_aliases
+$(foreach test,$2,$(eval $(call define_windows_variant_test_alias,test-windows-$1-$(WINDOWS_TEST_CASE_$(test)_NAME),$(call windows_test_case_phony,$(test)),$3,$4,$5,$6)))
+endef
 
-WINDOWS_XP_TEST_ALIAS_PHONIES := $(foreach test,$(WINDOWS_COMMON_TEST_CASES),test-windows-xp-$(WINDOWS_TEST_CASE_$(test)_NAME))
-WINDOWS_2000_TEST_ALIAS_PHONIES := $(foreach test,$(WINDOWS_COMMON_TEST_CASES),test-windows-2000-$(WINDOWS_TEST_CASE_$(test)_NAME))
-WINDOWS_NT4_WS1_TEST_ALIAS_PHONIES := $(foreach test,$(WINDOWS_COMMON_TEST_CASES) WINSOCK1_SOCKET_BACKEND,test-windows-nt4-ws1-$(WINDOWS_TEST_CASE_$(test)_NAME))
-WINDOWS_NATIVE_TEST_ALIAS_PHONIES := $(foreach test,$(WINDOWS_COMMON_TEST_CASES),test-windows-native-$(WINDOWS_TEST_CASE_$(test)_NAME))
+$(eval $(call define_windows_named_test_aliases,xp,$(WINDOWS_COMMON_TEST_CASES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_XP),$(WINDOWS_WINVER_XP),$(WINDOWS_WINSOCK2)))
+$(eval $(call define_windows_named_test_aliases,2000,$(WINDOWS_COMMON_TEST_CASES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_2000),$(WINDOWS_WINVER_2000),$(WINDOWS_WINSOCK2)))
+$(eval $(call define_windows_named_test_aliases,native,$(WINDOWS_COMMON_TEST_CASES),$(WINDOWS_NATIVE_TOOLCHAIN),$(WINDOWS_WINVER_XP),$(WINDOWS_WINVER_XP),$(WINDOWS_WINSOCK2)))
+$(eval $(call define_windows_named_test_aliases,nt4-ws1,$(WINDOWS_COMMON_TEST_CASES) WINSOCK1_SOCKET_BACKEND,$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINSOCK1)))
+
+windows_named_test_alias_phonies = $(foreach test,$2,test-windows-$1-$(WINDOWS_TEST_CASE_$(test)_NAME))
+windows_variant_alias_phonies = $(foreach alias_name,$1,all-windows-$(alias_name) test-windows-$(alias_name) check-windows-$(alias_name))
+
+WINDOWS_XP_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phonies,xp,$(WINDOWS_COMMON_TEST_CASES))
+WINDOWS_2000_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phonies,2000,$(WINDOWS_COMMON_TEST_CASES))
+WINDOWS_NT4_WS1_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phonies,nt4-ws1,$(WINDOWS_COMMON_TEST_CASES) WINSOCK1_SOCKET_BACKEND)
+WINDOWS_NATIVE_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phonies,native,$(WINDOWS_COMMON_TEST_CASES))
+WINDOWS_VARIANT_ALIAS_PHONIES := \
+	$(call windows_variant_alias_phonies,$(WINDOWS_NT4_WS1_ALIAS_NAMES)) \
+	$(call windows_variant_alias_phonies,$(WINDOWS_2000_ALIAS_NAMES)) \
+	$(call windows_variant_alias_phonies,$(WINDOWS_XP_ALIAS_NAMES)) \
+	$(call windows_variant_alias_phonies,$(WINDOWS_NATIVE_ALIAS_NAMES))
 
 .PHONY: \
 	all-windows \
 	test-windows \
 	check-windows \
-	all-windows-nt4-ws1 \
-	test-windows-nt4-ws1 \
-	check-windows-nt4-ws1 \
-	all-windows-2000 \
-	test-windows-2000 \
-	check-windows-2000 \
-	all-windows-2000-ws2 \
-	test-windows-2000-ws2 \
-	check-windows-2000-ws2 \
-	all-windows-xp \
-	test-windows-xp \
-	check-windows-xp \
-	all-windows-xp-ws2 \
-	test-windows-xp-ws2 \
-	check-windows-xp-ws2 \
-	all-windows-native \
-	test-windows-native \
-	check-windows-native \
+	$(WINDOWS_VARIANT_ALIAS_PHONIES) \
 	$(WINDOWS_VARIANT_TEST_PHONIES) \
 	$(WINDOWS_XP_TEST_ALIAS_PHONIES) \
 	$(WINDOWS_2000_TEST_ALIAS_PHONIES) \
