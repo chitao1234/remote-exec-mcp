@@ -60,6 +60,37 @@ bool should_retry_rename_error(DWORD error) {
     return error == ERROR_ACCESS_DENIED || error == ERROR_SHARING_VIOLATION || error == ERROR_LOCK_VIOLATION;
 }
 
+bool is_windows_separator(wchar_t ch) {
+    return ch == L'\\' || ch == L'/';
+}
+
+bool has_find_wildcard(const std::wstring& path) {
+    std::size_t start = 0U;
+    if (path.size() >= 4U && is_windows_separator(path[0]) && is_windows_separator(path[1]) &&
+        (path[2] == L'?' || path[2] == L'.') && is_windows_separator(path[3])) {
+        start = 4U;
+    }
+
+    for (std::size_t i = start; i < path.size(); ++i) {
+        if (path[i] == L'*' || path[i] == L'?') {
+            return true;
+        }
+    }
+    return false;
+}
+
+void fill_stat_from_win32_attributes(struct stat* st, DWORD attributes, DWORD file_size_high, DWORD file_size_low) {
+    std::memset(st, 0, sizeof(*st));
+    st->st_mode = (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ? S_IFDIR : S_IFREG;
+    if ((attributes & FILE_ATTRIBUTE_READONLY) != 0) {
+        st->st_mode |= 0444;
+    } else {
+        st->st_mode |= 0666;
+    }
+    st->st_size =
+        static_cast<_off_t>((static_cast<unsigned long long>(file_size_high) << 32) | file_size_low);
+}
+
 class ScopedFindHandle {
   public:
     explicit ScopedFindHandle(HANDLE handle) : handle_(handle) {}
@@ -234,22 +265,28 @@ FILE* open_file(const std::string& path, const char* mode) {
 
 bool stat_path(const std::string& path, struct stat* st) {
 #ifdef _WIN32
-    WIN32_FILE_ATTRIBUTE_DATA data;
-    if (!GetFileAttributesExW(wide_from_utf8(path).c_str(), GetFileExInfoStandard, &data)) {
-        errno = last_error_to_errno(GetLastError());
+    const std::wstring wide_path = wide_from_utf8(path);
+    if (has_find_wildcard(wide_path)) {
+        errno = last_error_to_errno(ERROR_INVALID_NAME);
         return false;
     }
 
-    std::memset(st, 0, sizeof(*st));
-    st->st_mode = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ? S_IFDIR : S_IFREG;
-    if ((data.dwFileAttributes & FILE_ATTRIBUTE_READONLY) != 0) {
-        st->st_mode |= 0444;
-    } else {
-        st->st_mode |= 0666;
+    WIN32_FIND_DATAW data;
+    ScopedFindHandle handle(FindFirstFileW(wide_path.c_str(), &data));
+    if (handle.valid()) {
+        fill_stat_from_win32_attributes(st, data.dwFileAttributes, data.nFileSizeHigh, data.nFileSizeLow);
+        return true;
     }
-    st->st_size = static_cast<_off_t>(
-        (static_cast<unsigned long long>(data.nFileSizeHigh) << 32) | data.nFileSizeLow);
-    return true;
+
+    const DWORD find_error = GetLastError();
+    const DWORD attributes = GetFileAttributesW(wide_path.c_str());
+    if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+        fill_stat_from_win32_attributes(st, attributes, 0U, 0U);
+        return true;
+    }
+
+    errno = last_error_to_errno(find_error);
+    return false;
 #else
     return posix_eintr::retry<int>([&]() { return stat(path.c_str(), st); }) == 0;
 #endif
