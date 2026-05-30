@@ -31,22 +31,6 @@ struct sockaddr_storage {
 #define SD_BOTH 2
 #endif
 
-#ifndef INET_ADDRSTRLEN
-#define INET_ADDRSTRLEN 16
-#endif
-#ifndef NI_MAXHOST
-#define NI_MAXHOST 1025
-#endif
-#ifndef NI_MAXSERV
-#define NI_MAXSERV 32
-#endif
-#ifndef NI_NUMERICHOST
-#define NI_NUMERICHOST 0x02
-#endif
-#ifndef NI_NUMERICSERV
-#define NI_NUMERICSERV 0x08
-#endif
-
 #else
 #include <winsock2.h>
 #include <ws2tcpip.h>
