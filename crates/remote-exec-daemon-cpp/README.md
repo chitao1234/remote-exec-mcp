@@ -103,17 +103,14 @@ Experimental Winsock 1.1 cross-build:
 
 - `make all-windows-xp-winsock1`
 - `make check-windows-xp-winsock1` for the compile/link gate and focused
-  IPv6-rejection runtime test.
+  Winsock 1 runtime tests.
 - This build defines `REMOTE_EXEC_CPP_WINSOCK1`, includes `<winsock.h>`, links
-  `wsock32`, calls `WSAStartup(1.1)`, and supports IPv4 sockets only. IPv6
-  listen or connect endpoints are rejected with an `invalid_endpoint` error
-  that asks the broker/downstream caller to use an IPv4 endpoint.
+  `wsock32`, sets `WINVER` and `_WIN32_WINNT` to `0x0400`, calls
+  `WSAStartup(1.1)`, and supports IPv4 sockets only. IPv6 listen or connect
+  endpoints are rejected with an `invalid_endpoint` error that asks the
+  broker/downstream caller to use an IPv4 endpoint.
 - The normal `all-windows-xp` and `check-windows-xp` targets remain on Winsock
   2 through `ws2_32`, with IPv6 and `getaddrinfo`/`getnameinfo` support.
-- The Winsock 1.1 target intentionally does not lower `_WIN32_WINNT` yet:
-  current MinGW-w64 headers have declaration problems below `0x0400`. Treat
-  the target as the socket-backend gate for the NT-era port, not the final NT
-  3.51 import-table gate.
 
 Host-native Windows MinGW build:
 
