@@ -182,7 +182,7 @@ endef
 
 all-windows-xp: $(WINDOWS_XP_TARGET)
 
-all-windows-xp-winsock1: $(WINDOWS_XP_WINSOCK1_TARGET)
+all-winsock1: $(WINDOWS_XP_WINSOCK1_TARGET)
 
 $(WINDOWS_XP_TARGET): $(WINDOWS_XP_OBJS)
 	mkdir -p $(dir $@)
@@ -253,16 +253,16 @@ $(eval $(call link_windows_xp_test,$(XP_SANDBOX),$(XP_SANDBOX_OBJS)))
 $(eval $(call run_windows_xp_test,test-windows-xp-port-tunnel-frame,$(XP_PORT_TUNNEL_FRAME)))
 $(eval $(call link_windows_xp_test,$(XP_PORT_TUNNEL_FRAME),$(XP_PORT_TUNNEL_FRAME_OBJS)))
 
-$(eval $(call run_windows_xp_test,test-windows-xp-winsock1-socket-backend,$(XP_WINSOCK1_SOCKET_BACKEND)))
+$(eval $(call run_windows_xp_test,test-winsock1-socket-backend,$(XP_WINSOCK1_SOCKET_BACKEND)))
 $(eval $(call link_windows_xp_winsock1_test,$(XP_WINSOCK1_SOCKET_BACKEND),$(XP_WINSOCK1_SOCKET_BACKEND_OBJS)))
 
-$(eval $(call run_windows_xp_test,test-windows-xp-winsock1-server-transport,$(XP_WINSOCK1_SERVER_TRANSPORT)))
+$(eval $(call run_windows_xp_test,test-winsock1-server-transport,$(XP_WINSOCK1_SERVER_TRANSPORT)))
 $(eval $(call link_windows_xp_winsock1_test,$(XP_WINSOCK1_SERVER_TRANSPORT),$(XP_WINSOCK1_SERVER_TRANSPORT_OBJS)))
 
-$(eval $(call run_windows_xp_test,test-windows-xp-winsock1-server-runtime,$(XP_WINSOCK1_SERVER_RUNTIME)))
+$(eval $(call run_windows_xp_test,test-winsock1-server-runtime,$(XP_WINSOCK1_SERVER_RUNTIME)))
 $(eval $(call link_windows_xp_winsock1_test,$(XP_WINSOCK1_SERVER_RUNTIME),$(XP_WINSOCK1_SERVER_RUNTIME_OBJS)))
 
-$(eval $(call run_windows_xp_test,test-windows-xp-winsock1-server-streaming,$(XP_WINSOCK1_SERVER_STREAMING)))
+$(eval $(call run_windows_xp_test,test-winsock1-server-streaming,$(XP_WINSOCK1_SERVER_STREAMING)))
 $(eval $(call link_windows_xp_winsock1_test,$(XP_WINSOCK1_SERVER_STREAMING),$(XP_WINSOCK1_SERVER_STREAMING_OBJS)))
 
 test-windows-xp: $(WINDOWS_XP_TEST_TARGETS)
@@ -284,12 +284,12 @@ test-windows-xp: $(WINDOWS_XP_TEST_TARGETS)
 
 check-windows-xp: all-windows-xp test-windows-xp
 
-test-windows-xp-winsock1: $(WINDOWS_XP_WINSOCK1_TEST_TARGETS)
+test-winsock1: $(WINDOWS_XP_WINSOCK1_TEST_TARGETS)
 	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_WINSOCK1_SOCKET_BACKEND)
 	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_WINSOCK1_SERVER_TRANSPORT)
 	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_WINSOCK1_SERVER_RUNTIME)
 	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_WINSOCK1_SERVER_STREAMING)
 
-check-windows-xp-winsock1: all-windows-xp-winsock1 test-windows-xp-winsock1
+check-winsock1: all-winsock1 test-winsock1
 
-.PHONY: all-windows-xp all-windows-xp-winsock1 test-windows-xp test-windows-xp-basic-mutex test-windows-xp-console-output test-windows-xp-patch test-windows-xp-session-store test-windows-xp-server-streaming test-windows-xp-transfer test-windows-xp-config test-windows-xp-http-request test-windows-xp-server-transport test-windows-xp-connection-manager test-windows-xp-server-routes-common test-windows-xp-server-routes test-windows-xp-server-runtime test-windows-xp-sandbox test-windows-xp-port-tunnel-frame test-windows-xp-winsock1-socket-backend test-windows-xp-winsock1-server-transport test-windows-xp-winsock1-server-runtime test-windows-xp-winsock1-server-streaming test-windows-xp-winsock1 check-windows-xp check-windows-xp-winsock1
+.PHONY: all-windows-xp all-winsock1 test-windows-xp test-windows-xp-basic-mutex test-windows-xp-console-output test-windows-xp-patch test-windows-xp-session-store test-windows-xp-server-streaming test-windows-xp-transfer test-windows-xp-config test-windows-xp-http-request test-windows-xp-server-transport test-windows-xp-connection-manager test-windows-xp-server-routes-common test-windows-xp-server-routes test-windows-xp-server-runtime test-windows-xp-sandbox test-windows-xp-port-tunnel-frame test-winsock1-socket-backend test-winsock1-server-transport test-winsock1-server-runtime test-winsock1-server-streaming test-winsock1 check-windows-xp check-winsock1

@@ -101,8 +101,8 @@ Windows XP-compatible cross-build:
 
 Experimental Winsock 1.1 cross-build:
 
-- `make all-windows-xp-winsock1`
-- `make check-windows-xp-winsock1` for the compile/link gate and focused
+- `make all-winsock1`
+- `make check-winsock1` for the compile/link gate and focused
   Winsock 1 runtime tests.
 - This build defines `REMOTE_EXEC_CPP_WINSOCK1`, includes `<winsock.h>`, links
   `wsock32`, sets `WINVER` and `_WIN32_WINNT` to `0x0400`, calls
