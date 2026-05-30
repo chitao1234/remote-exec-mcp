@@ -492,9 +492,8 @@ bmake -C crates/remote-exec-daemon-cpp check-posix
 ```
 
 `check-windows-xp` runs the Windows-capable C++ runtime suite through
-`WINDOWS_XP_TEST_RUNNER` when that variable is set and directly when it is
-empty. The GNU make default is `wine` on non-Windows hosts and empty on
-Windows.
+`WINDOWS_TEST_RUNNER` when that variable is set and directly when it is empty.
+The GNU make default is `wine` on non-Windows hosts and empty on Windows.
 
 From an x86 Visual Studio developer prompt:
 
@@ -545,6 +544,8 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 make -C crates/remote-exec-daemon-cpp check-posix
 make -C crates/remote-exec-daemon-cpp check-windows-xp
+# On Windows under MSYS2/MINGW32:
+make -C crates/remote-exec-daemon-cpp check-windows WINDOWS_TOOLCHAIN=native WINDOWS_PROFILE=xp
 # From an x86 Visual Studio developer prompt:
 nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-native
 # From an x86 Visual Studio developer prompt with a v141_xp-capable C++11 toolset:
@@ -565,6 +566,8 @@ make -C crates/remote-exec-daemon-cpp test-host-server-runtime
 make -C crates/remote-exec-daemon-cpp test-host-server-streaming
 make -C crates/remote-exec-daemon-cpp test-windows-xp-server-runtime
 make -C crates/remote-exec-daemon-cpp test-windows-xp-server-routes-common
+# On Windows under MSYS2/MINGW32:
+make -C crates/remote-exec-daemon-cpp test-windows-native-server-runtime
 ```
 
 No-default-features checks:

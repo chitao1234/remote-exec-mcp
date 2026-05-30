@@ -84,12 +84,25 @@ Host-native POSIX daemon:
   load-sensitive lifecycle flakes. Override with `STRESS_RUNS=<n>` and
   `STRESS_JOBS=<n>`.
 
-Windows cross-build:
+Windows GNU build matrix:
 
-- `make all-windows WINDOWS_PROFILE=xp`
-- `make check-windows WINDOWS_PROFILE=xp`
-- `make all-windows WINDOWS_PROFILE=winsock1`
-- `make check-windows WINDOWS_PROFILE=winsock1`
+- `make all-windows WINDOWS_TOOLCHAIN=cross WINDOWS_PROFILE=xp`
+- `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_PROFILE=xp`
+- `make all-windows WINDOWS_TOOLCHAIN=cross WINDOWS_PROFILE=winsock1`
+- `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_PROFILE=winsock1`
+- `make all-windows WINDOWS_TOOLCHAIN=native WINDOWS_PROFILE=xp` on Windows
+  under MSYS2/MINGW32
+- `make check-windows WINDOWS_TOOLCHAIN=native WINDOWS_PROFILE=xp` on Windows
+  under MSYS2/MINGW32
+- `make all-windows WINDOWS_TOOLCHAIN=native WINDOWS_PROFILE=winsock1` on
+  Windows under MSYS2/MINGW32
+- `make check-windows WINDOWS_TOOLCHAIN=native WINDOWS_PROFILE=winsock1` on
+  Windows under MSYS2/MINGW32
+- `WINDOWS_TOOLCHAIN=cross` uses `i686-w64-mingw32-g++`, links
+  `-static-libgcc -static-libstdc++`, and defaults `WINDOWS_TEST_RUNNER` to
+  `wine` on non-Windows hosts.
+- `WINDOWS_TOOLCHAIN=native` uses the host `g++` in a Windows GNU environment
+  and runs test binaries directly.
 - `WINDOWS_PROFILE=xp` builds the XP/Winsock 2 path: `WINVER=0x0501`,
   `_WIN32_WINNT=0x0501`, `ws2_32`, IPv6 support, and
   `getaddrinfo`/`getnameinfo`.
@@ -97,6 +110,8 @@ Windows cross-build:
   `WINVER=0x0400`, `_WIN32_WINNT=0x0400`, `REMOTE_EXEC_CPP_WINSOCK1`,
   `wsock32`, IPv4 only, and explicit rejection of IPv6 endpoints with an
   `invalid_endpoint` error.
+- The default `WINDOWS_TOOLCHAIN` is `cross` on non-Windows hosts and `native`
+  on Windows GNU hosts.
 - The default `WINDOWS_PROFILE` is `xp`.
 
 Compatibility aliases remain:
@@ -105,10 +120,8 @@ Compatibility aliases remain:
 - `make check-windows-xp`
 - `make all-winsock1`
 - `make check-winsock1`
-
-Host-native Windows MinGW build:
-
-- `make all-windows-native` on Windows under MSYS2/MINGW32
+- `make all-windows-native`
+- `make check-windows-native`
 
 Host-native Windows MSVC/NMAKE build:
 
@@ -141,9 +154,9 @@ Windows XP-compatible MSVC/NMAKE build:
 
 The top-level `GNUmakefile` is the GNU make public entry point. Shared source
 lists live in `mk/sources.mk`, shared GNU make helpers live in `mk/common.mk`,
-shared Windows cross-build profiles and helpers live in `mk/windows-cross.mk`,
-and host-native rules live in `mk/posix.mk`. GNU make prefers `GNUmakefile`, so
-plain `make` selects that file automatically.
+the shared Windows GNU build matrix lives in `mk/windows-gnu.mk`, and
+host-native POSIX rules live in `mk/posix.mk`. GNU make prefers `GNUmakefile`,
+so plain `make` selects that file automatically.
 
 `NMakefile` is intentionally separate from the GNU/BSD make entry points. It
 builds a host-native MSVC daemon and a Windows XP-compatible MSVC daemon, uses
@@ -156,7 +169,8 @@ Windows XP-compatible binaries and tests run under Wine on Linux and run
 natively on Windows when the XP-capable MSVC toolset is available. CI builds and
 runs the 32-bit host-native MSVC NMAKE test path on `windows-latest`. CI also
 builds
-`build/remote-exec-daemon-cpp.exe` with host-native MinGW on `windows-latest`,
+`build/remote-exec-daemon-cpp-native.exe` with host-native MinGW on
+`windows-latest`,
 exposes `C:\msys64\mingw32\bin` for the MinGW runtime DLLs, and runs the Rust
 broker `mcp_forward_ports_cpp::windows_cpp_daemon_smoke` integration test
 against that process.
@@ -203,6 +217,18 @@ Windows XP-compatible:
 
 ```bat
 build\remote-exec-daemon-cpp-xp.exe config\daemon-cpp.example.ini
+```
+
+Windows host-native GNU:
+
+```bat
+build\remote-exec-daemon-cpp-native.exe config\daemon-cpp.example.ini
+```
+
+Windows host-native GNU Winsock 1.1:
+
+```bat
+build\remote-exec-daemon-cpp-native-winsock1.exe config\daemon-cpp.example.ini
 ```
 
 Windows XP-compatible MSVC/NMAKE:
