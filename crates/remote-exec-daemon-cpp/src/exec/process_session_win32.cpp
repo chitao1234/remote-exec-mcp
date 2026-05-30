@@ -14,27 +14,16 @@
 #include "exec/process_session.h"
 #include "platform/win32_error.h"
 #include "platform/win32_scoped.h"
+#include "platform/win32_utf8.h"
 
 namespace {
 
 std::wstring wide_from_utf8(const std::string& value) {
-    if (value.empty()) {
-        return std::wstring();
+    try {
+        return win32_utf8::wide_from_utf8(value);
+    } catch (const std::exception& ex) {
+        throw std::runtime_error(std::string("unable to decode UTF-8 for CreateProcessW: ") + ex.what());
     }
-
-    const int wide_length =
-        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0);
-    if (wide_length <= 0) {
-        throw std::runtime_error(last_error_message("MultiByteToWideChar(CP_UTF8)"));
-    }
-
-    std::wstring wide(static_cast<std::size_t>(wide_length), L'\0');
-    if (MultiByteToWideChar(
-            CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), &wide[0], wide_length) <=
-        0) {
-        throw std::runtime_error(last_error_message("MultiByteToWideChar(CP_UTF8)"));
-    }
-    return wide;
 }
 
 std::string windows_quote_arg(const std::string& arg) {

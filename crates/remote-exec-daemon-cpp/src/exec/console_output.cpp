@@ -7,42 +7,12 @@
 #include "core/logging.h"
 #include "exec/console_output.h"
 #include "platform/win32_error.h"
+#include "platform/win32_utf8.h"
 
 namespace {
 
 std::string replacement_utf8() {
-    return "\xEF\xBF\xBD";
-}
-
-void append_utf8_code_point(std::string* out, unsigned int code_point) {
-    if (code_point <= 0x7FU) {
-        out->push_back(static_cast<char>(code_point));
-        return;
-    }
-    if (code_point <= 0x7FFU) {
-        out->push_back(static_cast<char>(0xC0U | (code_point >> 6U)));
-        out->push_back(static_cast<char>(0x80U | (code_point & 0x3FU)));
-        return;
-    }
-    if (code_point <= 0xFFFFU) {
-        out->push_back(static_cast<char>(0xE0U | (code_point >> 12U)));
-        out->push_back(static_cast<char>(0x80U | ((code_point >> 6U) & 0x3FU)));
-        out->push_back(static_cast<char>(0x80U | (code_point & 0x3FU)));
-        return;
-    }
-
-    out->push_back(static_cast<char>(0xF0U | (code_point >> 18U)));
-    out->push_back(static_cast<char>(0x80U | ((code_point >> 12U) & 0x3FU)));
-    out->push_back(static_cast<char>(0x80U | ((code_point >> 6U) & 0x3FU)));
-    out->push_back(static_cast<char>(0x80U | (code_point & 0x3FU)));
-}
-
-bool is_high_surrogate(unsigned int code_unit) {
-    return code_unit >= 0xD800U && code_unit <= 0xDBFFU;
-}
-
-bool is_low_surrogate(unsigned int code_unit) {
-    return code_unit >= 0xDC00U && code_unit <= 0xDFFFU;
+    return win32_utf8::replacement_utf8();
 }
 
 void log_console_decode_fallback_once(const char* fallback, const std::exception& ex, bool ansi_fallback) {
@@ -58,30 +28,7 @@ void log_console_decode_fallback_once(const char* fallback, const std::exception
 }
 
 std::string utf8_from_wide(const std::wstring& wide) {
-    std::string utf8;
-    for (std::size_t index = 0; index < wide.size(); ++index) {
-        const unsigned int code_unit = static_cast<unsigned int>(wide[index]);
-        if (is_high_surrogate(code_unit)) {
-            if (index + 1U < wide.size()) {
-                const unsigned int next = static_cast<unsigned int>(wide[index + 1U]);
-                if (is_low_surrogate(next)) {
-                    const unsigned int code_point =
-                        0x10000U + ((code_unit - 0xD800U) << 10U) + (next - 0xDC00U);
-                    append_utf8_code_point(&utf8, code_point);
-                    ++index;
-                    continue;
-                }
-            }
-            utf8 += replacement_utf8();
-            continue;
-        }
-        if (is_low_surrogate(code_unit)) {
-            utf8 += replacement_utf8();
-            continue;
-        }
-        append_utf8_code_point(&utf8, code_unit);
-    }
-    return utf8;
+    return win32_utf8::utf8_from_wide(wide);
 }
 
 std::string utf8_from_code_page(UINT code_page, const std::string& raw) {

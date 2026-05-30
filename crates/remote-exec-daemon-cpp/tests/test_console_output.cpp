@@ -6,6 +6,7 @@
 #include <windows.h>
 
 #include "exec/console_output.h"
+#include "platform/win32_utf8.h"
 
 namespace {
 
@@ -51,6 +52,39 @@ void test_wide_to_utf8() {
                                                                                       "y");
 }
 
+void test_utf8_to_wide() {
+    TEST_ASSERT(win32_utf8::wide_from_utf8("ascii") == L"ascii");
+
+    const std::wstring cjk = win32_utf8::wide_from_utf8("\xE4\xBD\xA0\xE5\xA5\xBD");
+    TEST_ASSERT(cjk.size() == 2U);
+    TEST_ASSERT(static_cast<unsigned int>(cjk[0]) == 0x4F60U);
+    TEST_ASSERT(static_cast<unsigned int>(cjk[1]) == 0x597DU);
+
+    const std::wstring supplementary = win32_utf8::wide_from_utf8("\xF0\x9F\x98\x80");
+    TEST_ASSERT(supplementary.size() == 2U);
+    TEST_ASSERT(static_cast<unsigned int>(supplementary[0]) == 0xD83DU);
+    TEST_ASSERT(static_cast<unsigned int>(supplementary[1]) == 0xDE00U);
+}
+
+void assert_invalid_utf8(const std::string& value) {
+    bool rejected = false;
+    try {
+        (void)win32_utf8::wide_from_utf8(value);
+    } catch (const std::exception&) {
+        rejected = true;
+    }
+    TEST_ASSERT(rejected);
+}
+
+void test_invalid_utf8_to_wide() {
+    assert_invalid_utf8("\x80");
+    assert_invalid_utf8("\xC0\xAF");
+    assert_invalid_utf8("\xE0\x80\xAF");
+    assert_invalid_utf8("\xED\xA0\x80");
+    assert_invalid_utf8("\xF4\x90\x80\x80");
+    assert_invalid_utf8("\xE4\xBD");
+}
+
 void test_code_page_decode() {
     assert_code_page_decode(936U, "\xC4\xE3\xBA\xC3", "\xE4\xBD\xA0\xE5\xA5\xBD");
     assert_code_page_decode(932U, "\x82\xB1\x82\xF1\x82\xC9\x82\xBF\x82\xCD", "\xE3\x81\x93\xE3\x82\x93"
@@ -81,6 +115,8 @@ void test_invalid_decode_fallback() {
 
 int main() {
     test_wide_to_utf8();
+    test_utf8_to_wide();
+    test_invalid_utf8_to_wide();
     test_code_page_decode();
     test_decode_carry();
     test_invalid_decode_fallback();

@@ -216,11 +216,11 @@ system OEM code page first and falls back to the ANSI code page if that decode
 fails, which covers legacy console encodings such as GBK, Shift-JIS, and Big5
 when the target Windows installation provides those code-page tables.
 
-The final UTF-16 to UTF-8 step is implemented in the daemon instead of relying
-on the `CP_UTF8` Windows code page, so command output decoding does not require
-the UTF-8 code page to be available on older Windows targets. Other daemon
-inputs such as JSON paths and command strings are still daemon-controlled UTF-8
-and are handled separately.
+Daemon-controlled UTF-8 inputs such as JSON paths and command strings are
+converted with a local UTF-8/UTF-16 implementation instead of relying on the
+`CP_UTF8` Windows code page. The command-output path still uses Windows NLS
+tables for legacy console code pages, but it does not require the UTF-8 code
+page to be available on older Windows targets.
 
 ## Lifecycle Debugging
 

@@ -5,6 +5,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include "platform/win32_utf8.h"
 #endif
 
 #include "core/logging.h"
@@ -74,23 +75,11 @@ ParsedPath parse_host_path(const std::string& raw) {
 typedef int(WINAPI * CompareStringOrdinalFn)(const WCHAR*, int, const WCHAR*, int, BOOL);
 
 std::wstring wide_from_utf8(const std::string& value) {
-    if (value.empty()) {
-        return std::wstring();
-    }
-
-    const int wide_length =
-        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0);
-    if (wide_length <= 0) {
+    try {
+        return win32_utf8::wide_from_utf8(value);
+    } catch (const std::exception&) {
         throw std::runtime_error("unable to decode UTF-8 path");
     }
-
-    std::wstring wide(static_cast<std::size_t>(wide_length), L'\0');
-    if (MultiByteToWideChar(
-            CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), &wide[0], wide_length) <=
-        0) {
-        throw std::runtime_error("unable to decode UTF-8 path");
-    }
-    return wide;
 }
 
 CompareStringOrdinalFn compare_string_ordinal_fn() {

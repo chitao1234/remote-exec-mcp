@@ -10,6 +10,7 @@
 #include <direct.h>
 #include <wchar.h>
 #include <windows.h>
+#include "platform/win32_utf8.h"
 #else
 #include <cerrno>
 #include <cstring>
@@ -86,42 +87,19 @@ inline path operator/(const path& base, const path& child) {
 
 #ifdef _WIN32
 inline std::wstring wide_from_utf8(const std::string& value) {
-    if (value.empty()) {
-        return std::wstring();
-    }
-
-    const int wide_length =
-        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), NULL, 0);
-    if (wide_length <= 0) {
+    try {
+        return win32_utf8::wide_from_utf8(value);
+    } catch (const std::exception&) {
         throw std::runtime_error("unable to decode UTF-8 path");
     }
-
-    std::wstring wide(static_cast<std::size_t>(wide_length), L'\0');
-    if (MultiByteToWideChar(
-            CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), &wide[0], wide_length) <=
-        0) {
-        throw std::runtime_error("unable to decode UTF-8 path");
-    }
-    return wide;
 }
 
 inline std::string utf8_from_wide(const std::wstring& value) {
-    if (value.empty()) {
-        return std::string();
-    }
-
-    const int utf8_length =
-        WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), NULL, 0, NULL, NULL);
-    if (utf8_length <= 0) {
+    try {
+        return win32_utf8::utf8_from_wide(value);
+    } catch (const std::exception&) {
         throw std::runtime_error("unable to encode UTF-8 path");
     }
-
-    std::string utf8(static_cast<std::size_t>(utf8_length), '\0');
-    if (WideCharToMultiByte(
-            CP_UTF8, 0, value.data(), static_cast<int>(value.size()), &utf8[0], utf8_length, NULL, NULL) <= 0) {
-        throw std::runtime_error("unable to encode UTF-8 path");
-    }
-    return utf8;
 }
 
 inline std::wstring wide_mode_from_ascii(const char* mode) {
