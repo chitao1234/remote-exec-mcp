@@ -1,5 +1,6 @@
 #ifdef _WIN32
 
+#include <cstddef>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -8,6 +9,11 @@
 
 #include <windows.h>
 
+#ifdef REMOTE_EXEC_CPP_HAS_WINPTY
+#include "winpty.h"
+#endif
+
+#include "core/logging.h"
 #include "exec/console_output.h"
 #include "platform/platform.h"
 #include "exec/process_session.h"
@@ -134,7 +140,7 @@ public:
     void resize_pty(unsigned short rows, unsigned short cols) override {
         (void)rows;
         (void)cols;
-        throw ProcessPtyResizeUnsupportedError("PTY resize is not supported on this host");
+        throw ProcessPtyResizeUnsupportedError("PTY resize requires a tty session");
     }
 
     std::string read_output(bool block, bool* eof, std::string* carry) override {
@@ -170,12 +176,548 @@ private:
     UniqueHandle stdout_read_;
 };
 
+#ifdef REMOTE_EXEC_CPP_HAS_WINPTY
+const unsigned short DEFAULT_PTY_ROWS = 24U;
+const unsigned short DEFAULT_PTY_COLS = 120U;
+const DWORD WINPTY_OPEN_TIMEOUT_MS = 10UL * 1000UL;
+
+std::string replacement_utf8() {
+    return "\xEF\xBF\xBD";
+}
+
+bool is_continuation(unsigned char ch) {
+    return (ch & 0xC0U) == 0x80U;
+}
+
+std::string decode_utf8_output(std::string* carry, const std::string& raw_chunk, bool flush) {
+    std::string raw = *carry;
+    raw += raw_chunk;
+    carry->clear();
+
+    std::string output;
+    for (std::size_t index = 0; index < raw.size();) {
+        const unsigned char ch = static_cast<unsigned char>(raw[index]);
+        if (ch < 0x80U) {
+            output.push_back(static_cast<char>(ch));
+            ++index;
+            continue;
+        }
+
+        std::size_t expected = 0U;
+        if (ch >= 0xC2U && ch <= 0xDFU) {
+            expected = 2U;
+        } else if (ch >= 0xE0U && ch <= 0xEFU) {
+            expected = 3U;
+        } else if (ch >= 0xF0U && ch <= 0xF4U) {
+            expected = 4U;
+        } else {
+            output += replacement_utf8();
+            ++index;
+            continue;
+        }
+
+        if (index + expected > raw.size()) {
+            if (!flush) {
+                carry->assign(raw, index, raw.size() - index);
+                break;
+            }
+            output += replacement_utf8();
+            ++index;
+            continue;
+        }
+
+        bool valid = true;
+        for (std::size_t offset = 1U; offset < expected; ++offset) {
+            if (!is_continuation(static_cast<unsigned char>(raw[index + offset]))) {
+                valid = false;
+                break;
+            }
+        }
+        if (!valid) {
+            output += replacement_utf8();
+            ++index;
+            continue;
+        }
+
+        output.append(raw, index, expected);
+        index += expected;
+    }
+
+    return output;
+}
+
+bool is_output_closed_error(DWORD error) {
+    return error == ERROR_BROKEN_PIPE || error == ERROR_NO_DATA || error == ERROR_PIPE_NOT_CONNECTED;
+}
+
+bool is_wine_runtime() {
+    const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    return ntdll != nullptr && GetProcAddress(ntdll, "wine_get_version") != nullptr;
+}
+
+std::string utf8_from_wide(const std::wstring& wide) {
+    try {
+        return win32_utf8::utf8_from_wide(wide);
+    } catch (const std::exception& ex) {
+        throw std::runtime_error(std::string("unable to encode UTF-8 from Win32 wide string: ") + ex.what());
+    }
+}
+
+class WinptyErrorHandle {
+public:
+    WinptyErrorHandle() : error_(nullptr) {}
+    ~WinptyErrorHandle() { reset(); }
+
+    winpty_error_ptr_t* out_ptr() {
+        reset();
+        return &error_;
+    }
+
+    winpty_error_ptr_t get() const { return error_; }
+
+    void reset() {
+        if (error_ != nullptr) {
+            winpty_error_free(error_);
+            error_ = nullptr;
+        }
+    }
+
+private:
+    winpty_error_ptr_t error_;
+};
+
+std::string winpty_error_message(const char* prefix, WinptyErrorHandle* error) {
+    std::ostringstream out;
+    out << prefix << " failed";
+    if (error->get() != nullptr) {
+        out << ": " << utf8_from_wide(winpty_error_msg(error->get()));
+        const DWORD code = winpty_error_code(error->get());
+        if (code != WINPTY_ERROR_SUCCESS) {
+            out << " (error " << code << ")";
+        }
+    }
+    return out.str();
+}
+
+class UniqueWinptyConfig {
+public:
+    UniqueWinptyConfig() : config_(nullptr) {}
+    explicit UniqueWinptyConfig(winpty_config_t* config) : config_(config) {}
+    ~UniqueWinptyConfig() { reset(); }
+
+    UniqueWinptyConfig(UniqueWinptyConfig&& other) : config_(other.release()) {}
+
+    UniqueWinptyConfig& operator=(UniqueWinptyConfig&& other) {
+        if (this != &other) {
+            reset(other.release());
+        }
+        return *this;
+    }
+
+    UniqueWinptyConfig(const UniqueWinptyConfig&) = delete;
+    UniqueWinptyConfig& operator=(const UniqueWinptyConfig&) = delete;
+
+    winpty_config_t* get() const { return config_; }
+
+    bool valid() const { return config_ != nullptr; }
+
+    winpty_config_t* release() {
+        winpty_config_t* released = config_;
+        config_ = nullptr;
+        return released;
+    }
+
+    void reset(winpty_config_t* config = nullptr) {
+        if (config_ != nullptr) {
+            winpty_config_free(config_);
+        }
+        config_ = config;
+    }
+
+private:
+    winpty_config_t* config_;
+};
+
+class UniqueWinptySpawnConfig {
+public:
+    UniqueWinptySpawnConfig() : config_(nullptr) {}
+    explicit UniqueWinptySpawnConfig(winpty_spawn_config_t* config) : config_(config) {}
+    ~UniqueWinptySpawnConfig() { reset(); }
+
+    UniqueWinptySpawnConfig(UniqueWinptySpawnConfig&& other) : config_(other.release()) {}
+
+    UniqueWinptySpawnConfig& operator=(UniqueWinptySpawnConfig&& other) {
+        if (this != &other) {
+            reset(other.release());
+        }
+        return *this;
+    }
+
+    UniqueWinptySpawnConfig(const UniqueWinptySpawnConfig&) = delete;
+    UniqueWinptySpawnConfig& operator=(const UniqueWinptySpawnConfig&) = delete;
+
+    winpty_spawn_config_t* get() const { return config_; }
+
+    bool valid() const { return config_ != nullptr; }
+
+    winpty_spawn_config_t* release() {
+        winpty_spawn_config_t* released = config_;
+        config_ = nullptr;
+        return released;
+    }
+
+    void reset(winpty_spawn_config_t* config = nullptr) {
+        if (config_ != nullptr) {
+            winpty_spawn_config_free(config_);
+        }
+        config_ = config;
+    }
+
+private:
+    winpty_spawn_config_t* config_;
+};
+
+class UniqueWinpty {
+public:
+    UniqueWinpty() : handle_(nullptr) {}
+    explicit UniqueWinpty(winpty_t* handle) : handle_(handle) {}
+    ~UniqueWinpty() { reset(); }
+
+    UniqueWinpty(UniqueWinpty&& other) : handle_(other.release()) {}
+
+    UniqueWinpty& operator=(UniqueWinpty&& other) {
+        if (this != &other) {
+            reset(other.release());
+        }
+        return *this;
+    }
+
+    UniqueWinpty(const UniqueWinpty&) = delete;
+    UniqueWinpty& operator=(const UniqueWinpty&) = delete;
+
+    winpty_t* get() const { return handle_; }
+
+    bool valid() const { return handle_ != nullptr; }
+
+    winpty_t* release() {
+        winpty_t* released = handle_;
+        handle_ = nullptr;
+        return released;
+    }
+
+    void reset(winpty_t* handle = nullptr) {
+        if (handle_ != nullptr) {
+            winpty_free(handle_);
+        }
+        handle_ = handle;
+    }
+
+private:
+    winpty_t* handle_;
+};
+
+UniqueWinptyConfig create_winpty_config() {
+    WinptyErrorHandle error;
+    UniqueWinptyConfig config(winpty_config_new(WINPTY_FLAG_COLOR_ESCAPES, error.out_ptr()));
+    if (!config.valid()) {
+        throw std::runtime_error(winpty_error_message("winpty_config_new", &error));
+    }
+    winpty_config_set_initial_size(config.get(), DEFAULT_PTY_COLS, DEFAULT_PTY_ROWS);
+    winpty_config_set_mouse_mode(config.get(), WINPTY_MOUSE_MODE_NONE);
+    winpty_config_set_agent_timeout(config.get(), WINPTY_OPEN_TIMEOUT_MS);
+    return config;
+}
+
+UniqueWinpty open_winpty_session() {
+    UniqueWinptyConfig config = create_winpty_config();
+    WinptyErrorHandle error;
+    UniqueWinpty winpty(winpty_open(config.get(), error.out_ptr()));
+    if (!winpty.valid()) {
+        throw std::runtime_error(winpty_error_message("winpty_open", &error));
+    }
+    return winpty;
+}
+
+UniqueHandle open_winpty_pipe(LPCWSTR name, DWORD desired_access) {
+    HANDLE handle =
+        CreateFileW(name, desired_access, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        throw std::runtime_error(last_error_message("CreateFileW"));
+    }
+    return UniqueHandle(handle);
+}
+
+UniqueHandle spawn_winpty_process(winpty_t* winpty,
+                                  const std::string& command,
+                                  const std::string& workdir,
+                                  const std::string& shell,
+                                  bool login) {
+    const std::vector<std::string> argv = platform::shell_argv(shell, login, command);
+    const std::string command_line = command_line_from_argv(argv);
+    std::wstring wide_command_line = wide_from_utf8(command_line);
+    std::wstring wide_workdir = workdir.empty() ? std::wstring() : wide_from_utf8(workdir);
+
+    WinptyErrorHandle error;
+    UniqueWinptySpawnConfig spawn_config(winpty_spawn_config_new(
+        WINPTY_SPAWN_FLAG_AUTO_SHUTDOWN | WINPTY_SPAWN_FLAG_EXIT_AFTER_SHUTDOWN,
+        nullptr,
+        wide_command_line.c_str(),
+        workdir.empty() ? nullptr : wide_workdir.c_str(),
+        nullptr,
+        error.out_ptr()));
+    if (!spawn_config.valid()) {
+        throw std::runtime_error(winpty_error_message("winpty_spawn_config_new", &error));
+    }
+
+    HANDLE process_handle = nullptr;
+    HANDLE thread_handle = nullptr;
+    DWORD create_process_error = 0;
+    if (winpty_spawn(winpty,
+                     spawn_config.get(),
+                     &process_handle,
+                     &thread_handle,
+                     &create_process_error,
+                     error.out_ptr()) == FALSE) {
+        if (error.get() != nullptr) {
+            throw std::runtime_error(winpty_error_message("winpty_spawn", &error));
+        }
+        throw std::runtime_error(error_message_from_code("CreateProcessW", create_process_error));
+    }
+
+    UniqueHandle process(process_handle);
+    UniqueHandle thread(thread_handle);
+    thread.reset();
+    return process;
+}
+
+std::string read_winpty_available_raw(HANDLE pipe, bool* eof) {
+    DWORD available = 0;
+    if (PeekNamedPipe(pipe, nullptr, 0, nullptr, &available, nullptr) == 0) {
+        const DWORD error = GetLastError();
+        if (is_output_closed_error(error)) {
+            *eof = true;
+            return "";
+        }
+        throw std::runtime_error(last_error_message("PeekNamedPipe"));
+    }
+
+    if (available == 0) {
+        return "";
+    }
+
+    std::string buffer;
+    buffer.resize(static_cast<std::size_t>(available));
+    DWORD read = 0;
+    if (ReadFile(pipe, &buffer[0], available, &read, nullptr) == 0) {
+        const DWORD error = GetLastError();
+        if (is_output_closed_error(error)) {
+            *eof = true;
+            return "";
+        }
+        throw std::runtime_error(last_error_message("ReadFile"));
+    }
+
+    if (read == 0U) {
+        *eof = true;
+        return "";
+    }
+
+    buffer.resize(static_cast<std::size_t>(read));
+    return buffer;
+}
+
+std::string read_winpty_blocking_raw(HANDLE pipe, bool* eof) {
+    char buffer[4096];
+    DWORD read = 0;
+    if (ReadFile(pipe, buffer, sizeof(buffer), &read, nullptr) == 0) {
+        const DWORD error = GetLastError();
+        if (is_output_closed_error(error)) {
+            *eof = true;
+            return "";
+        }
+        throw std::runtime_error(last_error_message("ReadFile"));
+    }
+
+    if (read == 0U) {
+        *eof = true;
+        return "";
+    }
+
+    return std::string(buffer, static_cast<std::size_t>(read));
+}
+
+bool run_taskkill_tree(DWORD pid) {
+    if (pid == 0U) {
+        return false;
+    }
+
+    std::vector<std::string> argv;
+    argv.push_back("taskkill.exe");
+    argv.push_back("/PID");
+    argv.push_back(std::to_string(pid));
+    argv.push_back("/T");
+    argv.push_back("/F");
+    const std::string command_line = command_line_from_argv(argv);
+    std::wstring wide_command_line = wide_from_utf8(command_line);
+    std::vector<wchar_t> mutable_command_line(wide_command_line.begin(), wide_command_line.end());
+    mutable_command_line.push_back(L'\0');
+
+    STARTUPINFOW startup_info;
+    ZeroMemory(&startup_info, sizeof(startup_info));
+    startup_info.cb = sizeof(startup_info);
+    startup_info.dwFlags = STARTF_USESHOWWINDOW;
+    startup_info.wShowWindow = SW_HIDE;
+
+    PROCESS_INFORMATION process_info;
+    ZeroMemory(&process_info, sizeof(process_info));
+
+    if (CreateProcessW(nullptr,
+                       &mutable_command_line[0],
+                       nullptr,
+                       nullptr,
+                       FALSE,
+                       CREATE_NO_WINDOW,
+                       nullptr,
+                       nullptr,
+                       &startup_info,
+                       &process_info) == 0) {
+        return false;
+    }
+
+    UniqueHandle process(process_info.hProcess);
+    UniqueHandle thread(process_info.hThread);
+    WaitForSingleObject(process.get(), INFINITE);
+
+    DWORD exit_code = 1;
+    if (GetExitCodeProcess(process.get(), &exit_code) == 0) {
+        return false;
+    }
+    return exit_code == 0;
+}
+
+class WinptyProcessSession : public ProcessSession {
+public:
+    WinptyProcessSession(UniqueWinpty winpty, UniqueHandle process_handle, UniqueHandle stdin_write, UniqueHandle stdout_read)
+        : winpty_(std::move(winpty)), process_handle_(std::move(process_handle)),
+          stdin_write_(std::move(stdin_write)), stdout_read_(std::move(stdout_read)), console_closed_(false) {}
+
+    ~WinptyProcessSession() override { terminate(); }
+
+    void write_stdin(const std::string& chars) override {
+        const char* data = chars.data();
+        std::size_t remaining = chars.size();
+        while (remaining > 0U) {
+            DWORD written = 0;
+            if (WriteFile(stdin_write_.get(), data, static_cast<DWORD>(remaining), &written, nullptr) == 0) {
+                const DWORD error = GetLastError();
+                if (is_stdin_closed_error(error)) {
+                    throw ProcessStdinClosedError(
+                        "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open");
+                }
+                throw std::runtime_error(last_error_message("WriteFile"));
+            }
+            if (written == 0U) {
+                throw std::runtime_error("WriteFile wrote zero bytes");
+            }
+            data += written;
+            remaining -= static_cast<std::size_t>(written);
+        }
+    }
+
+    void resize_pty(unsigned short rows, unsigned short cols) override {
+        if (rows == 0U || cols == 0U) {
+            throw ProcessPtyResizeUnsupportedError("PTY rows and cols must be greater than zero");
+        }
+        WinptyErrorHandle error;
+        if (winpty_set_size(winpty_.get(), static_cast<int>(cols), static_cast<int>(rows), error.out_ptr()) == FALSE) {
+            throw std::runtime_error(winpty_error_message("winpty_set_size", &error));
+        }
+    }
+
+    std::string read_output(bool block, bool* eof, std::string* carry) override {
+        *eof = false;
+        const std::string raw =
+            block ? read_winpty_blocking_raw(stdout_read_.get(), eof) : read_winpty_available_raw(stdout_read_.get(), eof);
+        return decode_utf8_output(carry, raw, false);
+    }
+
+    std::string flush_carry(std::string* carry) override { return decode_utf8_output(carry, "", true); }
+
+    bool has_exited(int* exit_code) override {
+        if (!process_handle_.valid()) {
+            *exit_code = 1;
+            return true;
+        }
+        if (WaitForSingleObject(process_handle_.get(), 0) != WAIT_OBJECT_0) {
+            return false;
+        }
+        DWORD raw_exit_code = 0;
+        GetExitCodeProcess(process_handle_.get(), &raw_exit_code);
+        *exit_code = static_cast<int>(raw_exit_code);
+        return true;
+    }
+
+    void terminate() override {
+        close_console();
+        ensure_process_tree_terminated();
+    }
+
+    bool terminate_descendants() override {
+        close_console();
+        ensure_process_tree_terminated();
+        return true;
+    }
+
+private:
+    void close_console() {
+        if (console_closed_) {
+            return;
+        }
+        stdin_write_.reset();
+        winpty_.reset();
+        console_closed_ = true;
+    }
+
+    void ensure_process_tree_terminated() {
+        if (!process_handle_.valid() || WaitForSingleObject(process_handle_.get(), 0) == WAIT_OBJECT_0) {
+            return;
+        }
+        const DWORD pid = GetProcessId(process_handle_.get());
+        (void)run_taskkill_tree(pid);
+    }
+
+    UniqueWinpty winpty_;
+    UniqueHandle process_handle_;
+    UniqueHandle stdin_write_;
+    UniqueHandle stdout_read_;
+    bool console_closed_;
+};
+
+std::unique_ptr<ProcessSession> launch_winpty_process_session(
+    const std::string& command, const std::string& workdir, const std::string& shell, bool login) {
+    UniqueWinpty winpty = open_winpty_session();
+    UniqueHandle stdin_write(open_winpty_pipe(winpty_conin_name(winpty.get()), GENERIC_WRITE));
+    UniqueHandle stdout_read(open_winpty_pipe(winpty_conout_name(winpty.get()), GENERIC_READ));
+    UniqueHandle process_handle(spawn_winpty_process(winpty.get(), command, workdir, shell, login));
+
+    return std::unique_ptr<ProcessSession>(
+        new WinptyProcessSession(std::move(winpty), std::move(process_handle), std::move(stdin_write), std::move(stdout_read)));
+}
+#endif
+
 } // namespace
 
 std::unique_ptr<ProcessSession> ProcessSession::launch(
     const std::string& command, const std::string& workdir, const std::string& shell, bool login, bool tty) {
     if (tty) {
+#ifdef REMOTE_EXEC_CPP_HAS_WINPTY
+        if (!process_session_supports_pty()) {
+            throw std::runtime_error("tty is not supported on this host");
+        }
+        return launch_winpty_process_session(command, workdir, shell, login);
+#else
         throw std::runtime_error("tty is not supported on this host");
+#endif
     }
 
     PipePair stdout_pipe = create_pipe_pair("CreatePipe(stdout)");
@@ -228,7 +770,26 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
 }
 
 bool process_session_supports_pty() {
+#ifdef REMOTE_EXEC_CPP_WINSOCK1
     return false;
+#elif defined(REMOTE_EXEC_CPP_HAS_WINPTY)
+    static const bool supported = []() {
+        if (is_wine_runtime()) {
+            return false;
+        }
+        try {
+            UniqueWinpty probe = open_winpty_session();
+            return probe.valid();
+        } catch (const std::exception& ex) {
+            log_message(
+                LOG_WARN, "process_session", std::string("WinPTY probe failed; tty support disabled: ") + ex.what());
+            return false;
+        }
+    }();
+    return supported;
+#else
+    return false;
+#endif
 }
 
 #endif

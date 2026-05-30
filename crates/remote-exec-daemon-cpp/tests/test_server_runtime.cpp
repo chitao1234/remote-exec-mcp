@@ -183,7 +183,7 @@ static void assert_runtime_shutdown_with_upgraded_tunnel_connection(const Daemon
 
 int main() {
     NetworkSession network;
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-server-runtime-test";
+    const fs::path root = fs::unique_test_root("remote-exec-cpp-server-runtime-test");
     fs::remove_all(root);
     fs::create_directories(root);
 

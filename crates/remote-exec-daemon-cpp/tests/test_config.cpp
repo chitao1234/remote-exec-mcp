@@ -55,7 +55,7 @@ int main() {
     TEST_ASSERT(default_config.yield_time.write_stdin_input.max_ms == DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_MAX_MS);
     TEST_ASSERT(default_config.yield_time.write_stdin_input.min_ms == DEFAULT_YIELD_TIME_WRITE_STDIN_INPUT_MIN_MS);
 
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-config-test";
+    const fs::path root = fs::unique_test_root("remote-exec-cpp-config-test");
     fs::remove_all(root);
     fs::create_directories(root);
     const fs::path default_workdir = root / "work";

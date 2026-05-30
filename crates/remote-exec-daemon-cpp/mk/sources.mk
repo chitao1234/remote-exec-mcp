@@ -372,6 +372,54 @@ WINDOWS_DAEMON_SUPPORT_SRCS = \
 	$(SOURCE_PREFIX)src/exec/console_output.cpp \
 	$(WIN32_ERROR_SRCS)
 
+WINPTY_VENDOR_DIR = $(SOURCE_PREFIX)../../winptyrs/crates/winptyrs-sys/vendor/winpty
+WINPTY_VENDOR_SRC_DIR = $(WINPTY_VENDOR_DIR)/src
+
+WINPTY_LIBWINPTY_STEMS = \
+	libwinpty/AgentLocation \
+	libwinpty/winpty \
+	shared/BackgroundDesktop \
+	shared/Buffer \
+	shared/DebugClient \
+	shared/GenRandom \
+	shared/OwnedHandle \
+	shared/StringUtil \
+	shared/WindowsSecurity \
+	shared/WindowsVersion \
+	shared/WinptyAssert \
+	shared/WinptyException \
+	shared/WinptyVersion
+
+WINPTY_AGENT_STEMS = \
+	agent/Agent \
+	agent/AgentCreateDesktop \
+	agent/ConsoleFont \
+	agent/ConsoleInput \
+	agent/ConsoleInputReencoding \
+	agent/ConsoleLine \
+	agent/DebugShowInput \
+	agent/DefaultInputMap \
+	agent/EventLoop \
+	agent/InputMap \
+	agent/LargeConsoleRead \
+	agent/NamedPipe \
+	agent/Scraper \
+	agent/Terminal \
+	agent/Win32Console \
+	agent/Win32ConsoleBuffer \
+	agent/main \
+	shared/BackgroundDesktop \
+	shared/Buffer \
+	shared/DebugClient \
+	shared/GenRandom \
+	shared/OwnedHandle \
+	shared/StringUtil \
+	shared/WindowsSecurity \
+	shared/WindowsVersion \
+	shared/WinptyAssert \
+	shared/WinptyException \
+	shared/WinptyVersion
+
 WINDOWS_DAEMON_SRCS = \
 	$(WINDOWS_BASE_SRCS_NO_MAIN) \
 	$(SOURCE_PREFIX)src/main.cpp \

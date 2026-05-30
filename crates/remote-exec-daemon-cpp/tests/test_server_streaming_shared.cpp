@@ -26,7 +26,7 @@ std::string stable_test_shell() {
 } // namespace
 
 fs::path make_test_root() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-server-streaming-test";
+    const fs::path root = fs::unique_test_root("remote-exec-cpp-server-streaming-test");
     fs::remove_all(root);
     fs::create_directories(root);
     return root;

@@ -48,7 +48,7 @@ bool path_can_be_opened_for_read(const fs::path& path) {
 } // namespace
 
 fs::path make_server_routes_test_root(const std::string& directory_name) {
-    const fs::path root = fs::temp_directory_path() / directory_name;
+    const fs::path root = fs::unique_test_root(directory_name);
     fs::remove_all(root);
     fs::create_directories(root);
     return root;

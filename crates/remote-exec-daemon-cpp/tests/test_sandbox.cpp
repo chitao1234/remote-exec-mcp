@@ -12,7 +12,7 @@ namespace fs = test_fs;
 namespace {
 
 fs::path make_test_root() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-sandbox-test";
+    const fs::path root = fs::unique_test_root("remote-exec-cpp-sandbox-test");
     fs::remove_all(root);
     fs::create_directories(root);
     return root;

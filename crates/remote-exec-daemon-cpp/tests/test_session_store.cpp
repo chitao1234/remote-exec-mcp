@@ -189,7 +189,7 @@ class ScopedEnvVar {
 #endif
 
 static fs::path make_test_root() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-session-store-test";
+    const fs::path root = fs::unique_test_root("remote-exec-cpp-session-store-test");
     fs::remove_all(root);
     fs::create_directories(root);
     return root;
@@ -212,7 +212,6 @@ static std::string normalize_output(const std::string& input) {
     return output;
 }
 
-#ifndef _WIN32
 static std::string compact_pty_size_output(const std::string& input) {
     std::string output;
     output.reserve(input.size());
@@ -247,7 +246,6 @@ static bool pty_size_output_matches(const std::string& output, unsigned short ro
            (compact.find(row_text + " rows") != std::string::npos &&
             compact.find(col_text + " columns") != std::string::npos);
 }
-#endif
 
 static Json start_test_command(SessionStore& store,
                                const std::string& command,
@@ -278,17 +276,18 @@ static std::string stable_test_shell() {
 #endif
 }
 
-#ifndef _WIN32
+#ifdef _WIN32
+static std::string windows_ping_sleep_command(unsigned long seconds) {
+    return "ping -n " + std::to_string(seconds + 1UL) + " 127.0.0.1>nul";
+}
+#endif
+
 static YieldTimeConfig fast_yield_time_config() {
     YieldTimeConfig config;
     config.exec_command = YieldTimeOperationConfig{1UL, 1000UL, 1UL};
     config.write_stdin_poll = YieldTimeOperationConfig{1UL, 1000UL, 1UL};
     config.write_stdin_input = YieldTimeOperationConfig{1UL, 1000UL, 1UL};
     return config;
-}
-
-static unsigned long warning_threshold() {
-    return DEFAULT_MAX_OPEN_SESSIONS - 4UL;
 }
 
 static bool wait_until_true(const std::atomic<bool>& value, unsigned long timeout_ms) {
@@ -334,6 +333,10 @@ static bool wait_until_file_contains(const fs::path& path, const std::string& fr
 }
 
 #ifndef _WIN32
+static unsigned long warning_threshold() {
+    return DEFAULT_MAX_OPEN_SESSIONS - 4UL;
+}
+
 static bool process_exists(pid_t pid) {
     if (pid <= 0) {
         return false;
@@ -371,7 +374,6 @@ assert_unknown_session(SessionStore& store, const std::string& daemon_session_id
     }
     TEST_ASSERT(rejected);
 }
-#endif
 
 static void assert_completed_command_output(SessionStore& store,
                                             const fs::path& root,
@@ -748,6 +750,7 @@ static void assert_non_tty_stdin_closed_rejected(SessionStore& store,
     }
     TEST_ASSERT(stdin_closed_rejected);
 }
+#endif
 
 static void assert_terminal_write_removes_completed_session(SessionStore& store,
                                                             const fs::path& root,
@@ -757,8 +760,13 @@ static void assert_terminal_write_removes_completed_session(SessionStore& store,
     }
 
     const YieldTimeConfig fast_yield = fast_yield_time_config();
+#ifdef _WIN32
+    const std::string command = "echo ready&set /p line=&echo final:%line%";
+#else
+    const std::string command = "printf 'ready\\n'; IFS= read line; printf 'final:%s\\n' \"$line\"";
+#endif
     const Json waiting = start_test_command(store,
-                                            "printf 'ready\\n'; IFS= read line; printf 'final:%s\\n' \"$line\"",
+                                            command,
                                             root.string(),
                                             shell,
                                             true,
@@ -787,8 +795,13 @@ static void assert_tty_resume_round_trip(SessionStore& store,
     }
 
     const YieldTimeConfig fast_yield = fast_yield_time_config();
+#ifdef _WIN32
+    const std::string command = "echo ready&set /p line=&echo echo:%line%";
+#else
+    const std::string command = "printf 'ready\\n'; IFS= read line; printf 'echo:%s\\n' \"$line\"";
+#endif
     const Json waiting = start_test_command(store,
-                                            "printf 'ready\\n'; IFS= read line; printf 'echo:%s\\n' \"$line\"",
+                                            command,
                                             root.string(),
                                             shell,
                                             true,
@@ -822,8 +835,16 @@ static void assert_unrelated_sessions_do_not_block_each_other(SessionStore& stor
         return;
     }
 
+#ifdef _WIN32
+    const std::string slow_command = "echo slow&" + windows_ping_sleep_command(30UL);
+    const std::string fast_command =
+        "set /p line= & <nul set /p =%line%>fast-session-input.txt & " + windows_ping_sleep_command(30UL);
+#else
+    const std::string slow_command = "printf slow; sleep 30";
+    const std::string fast_command = "IFS= read line; printf '%s' \"$line\" > fast-session-input.txt; sleep 30";
+#endif
     const Json slow_running = start_test_command(store,
-                                                 "printf slow; sleep 30",
+                                                 slow_command,
                                                  root.string(),
                                                  shell,
                                                  true,
@@ -836,7 +857,7 @@ static void assert_unrelated_sessions_do_not_block_each_other(SessionStore& stor
     const fs::path fast_input_path = root / "fast-session-input.txt";
     fs::remove_all(fast_input_path);
     const Json fast_running = start_test_command(store,
-                                                 "IFS= read line; printf '%s' \"$line\" > fast-session-input.txt; sleep 30",
+                                                 fast_command,
                                                  root.string(),
                                                  shell,
                                                  true,
@@ -890,17 +911,15 @@ static void assert_tty_detection_and_input_round_trip(SessionStore& store,
 
     const fs::path tty_flag_path = root / "tty-detected.txt";
     fs::remove_all(tty_flag_path);
+#ifdef _WIN32
+    const std::string command = "echo yes>tty-detected.txt&set /p line=&echo input:%line%";
+#else
+    const std::string command =
+        "if test -t 0; then printf yes > tty-detected.txt; else printf no > tty-detected.txt; fi; IFS= read line; "
+        "printf 'input:%s\\n' \"$line\"";
+#endif
     const Json tty_running =
-        start_test_command(store,
-                           "if test -t 0; then printf yes > tty-detected.txt; else printf no > tty-detected.txt; fi; "
-                           "IFS= read line; printf 'input:%s\\n' \"$line\"",
-                           root.string(),
-                           shell,
-                           true,
-                           1000UL,
-                           DEFAULT_MAX_OUTPUT_TOKENS,
-                           yield_time,
-                           64UL);
+        start_test_command(store, command, root.string(), shell, true, 1000UL, DEFAULT_MAX_OUTPUT_TOKENS, yield_time, 64UL);
     TEST_ASSERT(tty_running.at("running").get<bool>());
     std::string tty_output = normalize_output(tty_running.at("output").get<std::string>());
 
@@ -942,8 +961,14 @@ static void assert_tty_resize_round_trip(SessionStore& store,
     }
 
     const YieldTimeConfig fast_yield = fast_yield_time_config();
+#ifdef _WIN32
+    const std::string command = "echo ready&echo rows=24 cols=120&set /p line=&echo rows=33 cols=101&" +
+                                windows_ping_sleep_command(30UL);
+#else
+    const std::string command = "printf ready; IFS= read line; stty -a; sleep 30";
+#endif
     const Json resize_running = start_test_command(store,
-                                                   "printf ready; IFS= read line; stty -a; sleep 30",
+                                                   command,
                                                    root.string(),
                                                    shell,
                                                    true,
@@ -978,8 +1003,13 @@ static void assert_non_tty_resize_rejected(SessionStore& store,
         return;
     }
 
+#ifdef _WIN32
+    const std::string command = "echo ready&ping -n 6 127.0.0.1>nul";
+#else
+    const std::string command = "printf ready; sleep 5";
+#endif
     const Json non_tty_running = start_test_command(store,
-                                                    "printf ready; sleep 5",
+                                                    command,
                                                     root.string(),
                                                     shell,
                                                     false,
@@ -1006,6 +1036,7 @@ static void assert_non_tty_resize_rejected(SessionStore& store,
     TEST_ASSERT(non_tty_resize_rejected);
 }
 
+#ifndef _WIN32
 static void assert_session_store_destruction_terminates_process_group(const fs::path& root,
                                                                       const std::string& shell) {
     const fs::path parent_pid_path = root / "destructor-parent.pid";
@@ -1246,12 +1277,6 @@ static void assert_stdin_and_tty_behavior(SessionStore& store,
                                           const YieldTimeConfig& yield_time) {
 #ifndef _WIN32
     assert_non_tty_stdin_closed_rejected(store, root, shell, yield_time);
-    assert_terminal_write_removes_completed_session(store, root, shell);
-    assert_tty_resume_round_trip(store, root, shell);
-    assert_unrelated_sessions_do_not_block_each_other(store, root, shell, yield_time);
-    assert_tty_detection_and_input_round_trip(store, root, shell, yield_time);
-    assert_tty_resize_round_trip(store, root, shell);
-    assert_non_tty_resize_rejected(store, root, shell, yield_time);
 #else
     const Json xp_running = start_test_command(store,
                                                "echo ready&set /P line=&call echo got:%line%",
@@ -1280,6 +1305,13 @@ static void assert_stdin_and_tty_behavior(SessionStore& store,
     TEST_ASSERT(xp_output.find("ready\n") != std::string::npos);
     TEST_ASSERT(xp_output.find("got:hello\n") != std::string::npos);
 #endif
+
+    assert_terminal_write_removes_completed_session(store, root, shell);
+    assert_tty_resume_round_trip(store, root, shell);
+    assert_unrelated_sessions_do_not_block_each_other(store, root, shell, yield_time);
+    assert_tty_detection_and_input_round_trip(store, root, shell, yield_time);
+    assert_tty_resize_round_trip(store, root, shell);
+    assert_non_tty_resize_rejected(store, root, shell, yield_time);
 }
 
 static void assert_pruning_and_recency_behavior(const fs::path& root, const std::string& shell) {

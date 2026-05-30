@@ -167,6 +167,38 @@ static std::string long_running_non_tty_command() {
 #endif
 }
 
+static std::string slow_tty_command() {
+#ifdef _WIN32
+    return "echo slow&ping -n 31 127.0.0.1>nul";
+#else
+    return "printf slow; sleep 30";
+#endif
+}
+
+static std::string fast_tty_file_command() {
+#ifdef _WIN32
+    return "set /p line= & <nul set /p =%line%>fast-session-input.txt & ping -n 31 127.0.0.1>nul";
+#else
+    return "IFS= read line; printf '%s' \"$line\" > fast-session-input.txt; sleep 30";
+#endif
+}
+
+static std::string tty_round_trip_command() {
+#ifdef _WIN32
+    return "echo tty:yes&set /p line=&echo input:%line%";
+#else
+    return "if test -t 0; then printf 'tty:yes\\n'; else printf 'tty:no\\n'; fi; IFS= read line; printf 'input:%s\\n' \"$line\"";
+#endif
+}
+
+static std::string tty_resize_command() {
+#ifdef _WIN32
+    return "echo ready&echo rows=24 cols=120&set /p line=&echo rows=33 cols=101&ping -n 31 127.0.0.1>nul";
+#else
+    return "stty -a; printf ready; IFS= read line; stty -a; sleep 30";
+#endif
+}
+
 static void assert_exec_routes(AppState& state, const fs::path& root) {
     const HttpResponse missing_cmd_response =
         route_request(state, json_request("/v1/exec/start", Json{{"workdir", root.string()}}));
@@ -255,7 +287,7 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
         const HttpResponse slow_start_response = route_request(state,
                                                                json_request("/v1/exec/start",
                                                                             Json{
-                                                                                {"cmd", "printf slow; sleep 30"},
+                                                                                {"cmd", slow_tty_command()},
                                                                                 {"workdir", root.string()},
                                                                                 {"login", false},
                                                                                 {"tty", true},
@@ -271,7 +303,7 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
             route_request(state,
                           json_request("/v1/exec/start",
                                        Json{
-                                           {"cmd", "IFS= read line; printf '%s' \"$line\" > fast-session-input.txt; sleep 30"},
+                                           {"cmd", fast_tty_file_command()},
                                            {"workdir", root.string()},
                                            {"login", false},
                                            {"tty", true},
@@ -314,9 +346,7 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
             route_request(state,
                           json_request("/v1/exec/start",
                                        Json{
-                                           {"cmd",
-                                            "if test -t 0; then printf 'tty:yes\\n'; else printf 'tty:no\\n'; fi; "
-                                            "IFS= read line; printf 'input:%s\\n' \"$line\""},
+                                           {"cmd", tty_round_trip_command()},
                                            {"workdir", root.string()},
                                            {"login", false},
                                            {"tty", true},
@@ -345,7 +375,7 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
             route_request(state,
                           json_request("/v1/exec/start",
                                        Json{
-                                           {"cmd", "stty -a; printf ready; IFS= read line; stty -a; sleep 30"},
+                                           {"cmd", tty_resize_command()},
                                            {"workdir", root.string()},
                                            {"login", false},
                                            {"tty", true},

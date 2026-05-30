@@ -105,11 +105,12 @@ Windows GNU build matrix:
   and runs test binaries directly.
 - `WINDOWS_PROFILE=xp` builds the XP/Winsock 2 path: `WINVER=0x0501`,
   `_WIN32_WINNT=0x0501`, `ws2_32`, IPv6 support, and
-  `getaddrinfo`/`getnameinfo`.
+  `getaddrinfo`/`getnameinfo`. GNU builds also vendor `winpty`, so this profile
+  can expose PTY support when `winpty` is usable at runtime.
 - `WINDOWS_PROFILE=winsock1` builds the NT 4.0-era Winsock 1.1 path:
   `WINVER=0x0400`, `_WIN32_WINNT=0x0400`, `REMOTE_EXEC_CPP_WINSOCK1`,
   `wsock32`, IPv4 only, and explicit rejection of IPv6 endpoints with an
-  `invalid_endpoint` error.
+  `invalid_endpoint` error. This profile reports `supports_pty=false`.
 - The default `WINDOWS_TOOLCHAIN` is `cross` on non-Windows hosts and `native`
   on Windows GNU hosts.
 - The default `WINDOWS_PROFILE` is `xp`.
@@ -309,12 +310,16 @@ returned `output` field preserves their emitted order.
 
 POSIX builds support `tty=true` when the host can allocate a PTY. The daemon
 reports this through `/v1/target-info` as `supports_pty`, and rejects `tty=true`
-only when PTY allocation is unavailable. Windows XP-compatible builds always
-report `supports_pty=false`.
+only when PTY allocation is unavailable. Windows GNU `WINDOWS_PROFILE=xp`
+builds use vendored `winpty` for `tty=true` sessions when `winpty` is usable at
+runtime. `WINDOWS_PROFILE=winsock1` reports `supports_pty=false`. Under Wine,
+the XP profile also reports `supports_pty=false` because `winpty` behavior
+there is not treated as authoritative.
 
 POSIX builds support `write_stdin.pty_size` for live `tty=true` sessions by
-applying `TIOCSWINSZ` to the PTY master. Windows XP-compatible builds continue
-to reject `tty=true`, so resize requests return the same typed
+applying `TIOCSWINSZ` to the PTY master. Windows GNU `WINDOWS_PROFILE=xp`
+builds forward PTY resize requests through `winpty`. `WINDOWS_PROFILE=winsock1`
+continues to reject `tty=true`, so resize requests return the same typed
 unsupported-session error path.
 
 POSIX non-TTY exec intentionally starts child processes with stdin attached to
@@ -464,8 +469,10 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
 - plain HTTP only, with optional bearer-auth request authentication
 - daemon RPC is HTTP/1.1-only; sequential requests may reuse a persistent connection, but HTTP pipelining is not supported
 - no TLS support
-- PTY support is POSIX-only and depends on host PTY allocation
-- no PTY support in Windows XP-compatible builds
+- POSIX PTY support depends on host PTY allocation
+- Windows GNU `WINDOWS_PROFILE=xp` PTY support depends on `winpty` runtime
+  availability; Wine intentionally disables PTY capability reporting
+- no PTY support in `WINDOWS_PROFILE=winsock1`
 - `view_image` supports passthrough PNG, JPEG, and WebP only
 - omitted `view_image.detail` defaults to `original` because no resize/re-encode path exists
 - broker-owned `forward_id` values do not persist across broker restart
