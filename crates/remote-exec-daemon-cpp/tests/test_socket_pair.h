@@ -5,7 +5,7 @@
 #include <utility>
 
 #ifdef _WIN32
-#include <winsock2.h>
+#include "platform/win32_socket_compat.h"
 #else
 #include <netinet/in.h>
 #include <sys/socket.h>

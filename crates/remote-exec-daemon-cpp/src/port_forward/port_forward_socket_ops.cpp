@@ -2,10 +2,10 @@
 
 #include <cstring>
 #include <sstream>
+#include <vector>
 
 #ifdef _WIN32
-#include <winsock2.h>
-#include <ws2tcpip.h>
+#include "platform/win32_socket_compat.h"
 #else
 #include <arpa/inet.h>
 #include <cerrno>
@@ -21,7 +21,6 @@
 #ifndef _WIN32
 #include "platform/posix_fd.h"
 #endif
-#include "platform/win32_error.h"
 
 namespace {
 
@@ -54,36 +53,36 @@ ParsedPortForwardEndpoint endpoint_to_host_port(const std::string& endpoint) {
     return parsed;
 }
 
-addrinfo*
-resolve_endpoint(const std::string& endpoint, const std::string& protocol, int flags, const char* error_code) {
+std::vector<SocketAddress>
+resolve_endpoint(const std::string& endpoint, const std::string& protocol, bool passive, const char* error_code) {
     const ParsedPortForwardEndpoint parsed = endpoint_to_host_port(endpoint);
+#ifdef REMOTE_EXEC_CPP_WINSOCK1
+    if (parsed.host.find(':') != std::string::npos) {
+        throw PortForwardError(400,
+                               error_code,
+                               "IPv6 endpoint `" + endpoint +
+                                   "` is not supported by the Winsock 1 Windows build; use an IPv4 endpoint");
+    }
+#endif
 
-    addrinfo hints;
-    std::memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = protocol_to_socktype(protocol);
-    hints.ai_protocol = protocol_to_ipproto(protocol);
-    hints.ai_flags = flags;
+    SocketAddressQuery query;
+    query.family = AF_UNSPEC;
+    query.socktype = protocol_to_socktype(protocol);
+    query.protocol = protocol_to_ipproto(protocol);
+    query.passive = passive;
 
-    addrinfo* result = nullptr;
-    const int status = resolve_socket_addresses(parsed.host.c_str(), parsed.port.c_str(), &hints, &result);
-    if (status != 0 || result == nullptr) {
+    std::vector<SocketAddress> addresses;
+    std::string resolve_error;
+    if (!resolve_socket_addresses(parsed.host.c_str(), parsed.port.c_str(), query, &addresses, &resolve_error)) {
         const std::string operation = "resolving endpoint `" + endpoint + "`";
-#ifdef _WIN32
-        const std::string message = error_message_from_code(operation.c_str(), static_cast<unsigned long>(status));
-#else
         std::ostringstream message;
         message << operation << " failed";
-        message << ": " << gai_strerror(status);
-        const std::string message_text = message.str();
-#endif
-#ifdef _WIN32
-        throw PortForwardError(400, error_code, message);
-#else
-        throw PortForwardError(400, error_code, message_text);
-#endif
+        if (!resolve_error.empty()) {
+            message << ": " << resolve_error;
+        }
+        throw PortForwardError(400, error_code, message.str());
     }
-    return result;
+    return addresses;
 }
 
 } // namespace
@@ -172,23 +171,7 @@ void shutdown_port_forward_send(SOCKET socket) {
 }
 
 std::string printable_port_forward_endpoint(const sockaddr* address, socklen_t address_len) {
-    char host[NI_MAXHOST];
-    char service[NI_MAXSERV];
-    const int result = socket_address_name_info(address,
-                                                address_len,
-                                                host,
-                                                static_cast<socklen_t>(sizeof(host)),
-                                                service,
-                                                static_cast<socklen_t>(sizeof(service)),
-                                                NI_NUMERICHOST | NI_NUMERICSERV);
-    if (result != 0) {
-        return "unknown:0";
-    }
-
-    if (address->sa_family == AF_INET6) {
-        return "[" + std::string(host) + "]:" + std::string(service);
-    }
-    return std::string(host) + ":" + std::string(service);
+    return numeric_socket_address(address, address_len);
 }
 
 std::string socket_local_endpoint(SOCKET socket) {
@@ -202,29 +185,30 @@ std::string socket_local_endpoint(SOCKET socket) {
 }
 
 SOCKET bind_port_forward_socket(const std::string& endpoint, const std::string& protocol) {
-    addrinfo* result = resolve_endpoint(endpoint, protocol, AI_PASSIVE, "invalid_endpoint");
+    const std::vector<SocketAddress> addresses = resolve_endpoint(endpoint, protocol, true, "invalid_endpoint");
     SOCKET bound_socket = INVALID_SOCKET;
 
-    for (addrinfo* current = result; current != nullptr; current = current->ai_next) {
-        bound_socket = create_socket_cloexec(current->ai_family, current->ai_socktype, current->ai_protocol);
+    for (std::size_t i = 0; i < addresses.size(); ++i) {
+        const SocketAddress& current = addresses[i];
+        bound_socket = create_socket_cloexec(current.family, current.socktype, current.protocol);
         if (bound_socket == INVALID_SOCKET) {
             continue;
         }
 
         (void)set_socket_reuseaddr(bound_socket);
-        if (current->ai_family == AF_INET6) {
+#ifndef REMOTE_EXEC_CPP_WINSOCK1
+        if (current.family == AF_INET6) {
             (void)set_socket_ipv6_only(bound_socket);
         }
+#endif
 
-        if (bind_socket(bound_socket, current->ai_addr, static_cast<socklen_t>(current->ai_addrlen)) == 0) {
+        if (bind_socket(bound_socket, current.sockaddr_ptr(), current.address_len) == 0) {
             break;
         }
 
         close_socket(bound_socket);
         bound_socket = INVALID_SOCKET;
     }
-
-    release_socket_addresses(result);
 
     if (bound_socket == INVALID_SOCKET) {
         throw PortForwardError(400, "port_bind_failed", socket_error_message("bind"));
@@ -240,11 +224,12 @@ SOCKET bind_port_forward_socket(const std::string& endpoint, const std::string& 
 }
 
 SOCKET connect_port_forward_socket(const std::string& endpoint, const std::string& protocol, unsigned long timeout_ms) {
-    addrinfo* result = resolve_endpoint(endpoint, protocol, 0, "invalid_endpoint");
+    const std::vector<SocketAddress> addresses = resolve_endpoint(endpoint, protocol, false, "invalid_endpoint");
     SOCKET connected_socket = INVALID_SOCKET;
 
-    for (addrinfo* current = result; current != nullptr; current = current->ai_next) {
-        connected_socket = create_socket_cloexec(current->ai_family, current->ai_socktype, current->ai_protocol);
+    for (std::size_t i = 0; i < addresses.size(); ++i) {
+        const SocketAddress& current = addresses[i];
+        connected_socket = create_socket_cloexec(current.family, current.socktype, current.protocol);
         if (connected_socket == INVALID_SOCKET) {
             continue;
         }
@@ -253,26 +238,21 @@ SOCKET connect_port_forward_socket(const std::string& endpoint, const std::strin
         try {
             if (protocol == "tcp") {
                 connected = tcp_connect_with_timeout(
-                    connected_socket, current->ai_addr, static_cast<socklen_t>(current->ai_addrlen), timeout_ms);
+                    connected_socket, current.sockaddr_ptr(), current.address_len, timeout_ms);
             } else {
-                connected = connect_socket(
-                                connected_socket, current->ai_addr, static_cast<socklen_t>(current->ai_addrlen)) == 0;
+                connected = connect_socket(connected_socket, current.sockaddr_ptr(), current.address_len) == 0;
             }
         } catch (...) {
             close_socket(connected_socket);
-            release_socket_addresses(result);
             throw;
         }
         if (connected) {
-            release_socket_addresses(result);
             return connected_socket;
         }
 
         close_socket(connected_socket);
         connected_socket = INVALID_SOCKET;
     }
-
-    release_socket_addresses(result);
 
     if (connected_socket == INVALID_SOCKET) {
         throw PortForwardError(400, "port_connect_failed", socket_error_message("connect"));
@@ -292,15 +272,10 @@ void send_all_socket(SOCKET socket, const std::string& data) {
     }
 }
 
-sockaddr_storage parse_port_forward_peer(const std::string& peer, socklen_t* peer_len) {
-    addrinfo* result = resolve_endpoint(peer, "udp", 0, "invalid_endpoint");
-    sockaddr_storage address;
-    std::memset(&address, 0, sizeof(address));
-    *peer_len = 0;
-    if (result != nullptr) {
-        std::memcpy(&address, result->ai_addr, result->ai_addrlen);
-        *peer_len = static_cast<socklen_t>(result->ai_addrlen);
+SocketAddress parse_port_forward_peer(const std::string& peer) {
+    const std::vector<SocketAddress> addresses = resolve_endpoint(peer, "udp", false, "invalid_endpoint");
+    if (addresses.empty()) {
+        throw PortForwardError(400, "invalid_endpoint", "unable to resolve UDP peer `" + peer + "`");
     }
-    release_socket_addresses(result);
-    return address;
+    return addresses.front();
 }

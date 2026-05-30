@@ -271,8 +271,7 @@ void PortTunnelConnection::udp_datagram(const PortTunnelFrame& frame) {
         }
     }
     const std::string peer = frame_meta_string(frame, "peer");
-    socklen_t peer_len = 0;
-    const sockaddr_storage peer_address = parse_port_forward_peer(peer, &peer_len);
+    const SocketAddress peer_address = parse_port_forward_peer(peer);
     int sent = 0;
     for (;;) {
         {
@@ -283,8 +282,8 @@ void PortTunnelConnection::udp_datagram(const PortTunnelFrame& frame) {
             sent = send_port_forward_datagram(socket_value->socket.get(),
                                               reinterpret_cast<const char*>(frame.data.data()),
                                               frame.data.size(),
-                                              reinterpret_cast<const sockaddr*>(&peer_address),
-                                              peer_len);
+                                              peer_address.sockaddr_ptr(),
+                                              peer_address.address_len);
         }
         if (sent >= 0) {
             break;

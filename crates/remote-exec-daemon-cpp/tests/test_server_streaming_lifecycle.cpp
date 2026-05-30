@@ -195,13 +195,12 @@ static void assert_tunnel_udp_bind_session_can_resume_after_transport_drop(AppSt
     open_v4_tunnel(state, &client_socket, &server_thread, "listen", "udp", 2ULL, session_id);
 
     UniqueSocket peer(bind_port_forward_socket("127.0.0.1:0", "udp"));
-    socklen_t peer_len = 0;
-    const sockaddr_storage destination = parse_port_forward_peer(endpoint, &peer_len);
+    const SocketAddress destination = parse_port_forward_peer(endpoint);
 
     PortTunnelFrame datagram;
     bool received = false;
     for (int attempt = 0; attempt < 20 && !received; ++attempt) {
-        TEST_ASSERT(sendto(peer.get(), "resume-udp", 10, 0, reinterpret_cast<const sockaddr*>(&destination), peer_len) ==
+        TEST_ASSERT(sendto(peer.get(), "resume-udp", 10, 0, destination.sockaddr_ptr(), destination.address_len) ==
                     10);
         received = try_read_tunnel_frame_with_timeout(client_socket.get(), 100UL, &datagram);
     }

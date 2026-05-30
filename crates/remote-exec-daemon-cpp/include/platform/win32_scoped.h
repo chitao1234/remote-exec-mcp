@@ -2,8 +2,9 @@
 
 #include <stdexcept>
 
+#include "platform/win32_socket_compat.h"
+
 #include <windows.h>
-#include <winsock2.h>
 
 class UniqueHandle {
 public:
@@ -89,7 +90,12 @@ class WinsockSession {
 public:
     WinsockSession() {
         WSADATA wsa_data;
-        if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
+#ifdef REMOTE_EXEC_CPP_WINSOCK1
+        const WORD requested_version = MAKEWORD(1, 1);
+#else
+        const WORD requested_version = MAKEWORD(2, 2);
+#endif
+        if (WSAStartup(requested_version, &wsa_data) != 0) {
             throw std::runtime_error("WSAStartup failed");
         }
     }

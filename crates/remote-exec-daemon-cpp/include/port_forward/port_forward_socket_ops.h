@@ -4,8 +4,7 @@
 #include <string>
 
 #ifdef _WIN32
-#include <winsock2.h>
-#include <ws2tcpip.h>
+#include "platform/win32_socket_compat.h"
 #else
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -34,4 +33,4 @@ void shutdown_port_forward_send(SOCKET socket);
 std::string printable_port_forward_endpoint(const sockaddr* address, socklen_t address_len);
 std::string socket_local_endpoint(SOCKET socket);
 void send_all_socket(SOCKET socket, const std::string& data);
-sockaddr_storage parse_port_forward_peer(const std::string& peer, socklen_t* peer_len);
+SocketAddress parse_port_forward_peer(const std::string& peer);

@@ -1,7 +1,8 @@
 #include <sstream>
 #include <string>
 
-#include <winsock2.h>
+#include "platform/win32_socket_compat.h"
+
 #include <windows.h>
 
 #include "platform/win32_error.h"

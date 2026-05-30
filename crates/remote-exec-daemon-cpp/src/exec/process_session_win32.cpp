@@ -7,7 +7,6 @@
 #include <vector>
 
 #include <windows.h>
-#include <winsock2.h>
 
 #include "exec/console_output.h"
 #include "platform/platform.h"

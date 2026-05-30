@@ -1,8 +1,9 @@
 #ifdef _WIN32
 
-#include <ws2tcpip.h>
+#include <cstring>
 
 #include "platform/wakeup_pipe.h"
+#include "platform/win32_socket_compat.h"
 
 WakeupPipe::WakeupPipe() : read_end_(INVALID_SOCKET), write_end_(INVALID_SOCKET), signaled_(false) {
     SOCKET listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);

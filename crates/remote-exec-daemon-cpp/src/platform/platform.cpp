@@ -5,7 +5,6 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#include <winsock2.h>
 #else
 #include <cctype>
 #include <errno.h>

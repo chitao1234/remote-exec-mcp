@@ -51,6 +51,13 @@ int get_socket_name(SOCKET socket, sockaddr* address, socklen_t* address_len) {
     return posix_eintr::retry<int>([&]() { return getsockname(socket, address, address_len); });
 }
 
+std::string gai_error_message(const std::string& operation, int status) {
+    std::ostringstream out;
+    out << operation << " failed";
+    out << ": " << gai_strerror(status);
+    return out.str();
+}
+
 } // namespace
 
 void close_socket(SOCKET socket) {
@@ -140,6 +147,74 @@ NetworkSession::NetworkSession() {
 }
 
 NetworkSession::~NetworkSession() {
+}
+
+bool resolve_socket_addresses(const char* node,
+                              const char* service,
+                              const SocketAddressQuery& query,
+                              std::vector<SocketAddress>* addresses,
+                              std::string* error) {
+    addresses->clear();
+
+    addrinfo hints;
+    std::memset(&hints, 0, sizeof(hints));
+    hints.ai_family = query.family;
+    hints.ai_socktype = query.socktype;
+    hints.ai_protocol = query.protocol;
+    hints.ai_flags = query.passive ? AI_PASSIVE : 0;
+
+    addrinfo* result = nullptr;
+    const int status = posix_eintr::retry_eai_system([&]() { return getaddrinfo(node, service, &hints, &result); });
+    if (status != 0 || result == nullptr) {
+        if (error != nullptr) {
+            *error = gai_error_message("getaddrinfo", status);
+        }
+        return false;
+    }
+
+    for (addrinfo* current = result; current != nullptr; current = current->ai_next) {
+        if (current->ai_addrlen > sizeof(SocketAddress().address)) {
+            continue;
+        }
+        SocketAddress address;
+        address.family = current->ai_family;
+        address.socktype = current->ai_socktype;
+        address.protocol = current->ai_protocol;
+        address.address_len = static_cast<socklen_t>(current->ai_addrlen);
+        std::memcpy(&address.address, current->ai_addr, current->ai_addrlen);
+        addresses->push_back(address);
+    }
+    freeaddrinfo(result);
+
+    if (addresses->empty()) {
+        if (error != nullptr) {
+            *error = "getaddrinfo failed: no usable socket addresses";
+        }
+        return false;
+    }
+    return true;
+}
+
+std::string numeric_socket_address(const sockaddr* address, socklen_t address_len) {
+    char host[NI_MAXHOST];
+    char service[NI_MAXSERV];
+    const int result = posix_eintr::retry_eai_system([&]() {
+        return getnameinfo(address,
+                           address_len,
+                           host,
+                           static_cast<socklen_t>(sizeof(host)),
+                           service,
+                           static_cast<socklen_t>(sizeof(service)),
+                           NI_NUMERICHOST | NI_NUMERICSERV);
+    });
+    if (result != 0) {
+        return "unknown:0";
+    }
+
+    if (address->sa_family == AF_INET6) {
+        return "[" + std::string(host) + "]:" + std::string(service);
+    }
+    return std::string(host) + ":" + std::string(service);
 }
 
 int wait_socket_readable_or_wakeup(SOCKET socket, SOCKET wakeup_fd, unsigned long timeout_ms) {

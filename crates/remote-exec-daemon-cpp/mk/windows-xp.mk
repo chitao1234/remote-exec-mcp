@@ -16,6 +16,12 @@ WINDOWS_XP_TEST_CPPFLAGS := $(COMMON_CPPFLAGS) -DWIN32_LEAN_AND_MEAN -DUNICODE -
 WINDOWS_XP_TEST_CXXFLAGS := $(XP_TEST_CXXFLAGS)
 WINDOWS_XP_LDFLAGS := -static-libgcc -static-libstdc++
 WINDOWS_XP_LDLIBS := -lws2_32
+WINDOWS_XP_WINSOCK1_CPPFLAGS := -DREMOTE_EXEC_CPP_WINSOCK1
+WINDOWS_XP_WINSOCK1_LDLIBS := -lwsock32
+WINDOWS_XP_WINSOCK1_PROD_OBJ_DIR := $(OBJ_DIR)/windows-xp-winsock1-prod
+WINDOWS_XP_WINSOCK1_TEST_OBJ_DIR := $(OBJ_DIR)/windows-xp-winsock1-test
+WINDOWS_XP_WINSOCK1_TARGET := $(BUILD_DIR)/remote-exec-daemon-cpp-xp-winsock1.exe
+XP_WINSOCK1_SOCKET_BACKEND := $(BUILD_DIR)/test_winsock1_socket_backend-xp.exe
 
 WINDOWS_XP_SRCS := $(WINDOWS_DAEMON_SRCS)
 
@@ -93,8 +99,10 @@ XP_SERVER_RUNTIME_SRCS := $(WINDOWS_SERVER_RUNTIME_TEST_SRCS)
 XP_SANDBOX_SRCS := $(HOST_SANDBOX_SRCS)
 
 XP_PORT_TUNNEL_FRAME_SRCS := $(HOST_PORT_TUNNEL_FRAME_SRCS)
+XP_WINSOCK1_SOCKET_BACKEND_SRCS := $(WINDOWS_WINSOCK1_SOCKET_BACKEND_TEST_SRCS)
 
 WINDOWS_XP_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_PROD_OBJ_DIR),$(WINDOWS_XP_SRCS)))
+WINDOWS_XP_WINSOCK1_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_WINSOCK1_PROD_OBJ_DIR),$(WINDOWS_XP_SRCS)))
 XP_BASIC_MUTEX_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_BASIC_MUTEX_SRCS)))
 XP_CONSOLE_OUTPUT_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_CONSOLE_OUTPUT_SRCS)))
 XP_PATCH_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_PATCH_SRCS)))
@@ -110,9 +118,12 @@ XP_SERVER_ROUTES_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_
 XP_SERVER_RUNTIME_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_SERVER_RUNTIME_SRCS)))
 XP_SANDBOX_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_SANDBOX_SRCS)))
 XP_PORT_TUNNEL_FRAME_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_PORT_TUNNEL_FRAME_SRCS)))
+XP_WINSOCK1_SOCKET_BACKEND_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_WINSOCK1_TEST_OBJ_DIR),$(XP_WINSOCK1_SOCKET_BACKEND_SRCS)))
 
 DEP_FILES += \
 	$(WINDOWS_XP_OBJS:.o=.d) \
+	$(WINDOWS_XP_WINSOCK1_OBJS:.o=.d) \
+	$(XP_WINSOCK1_SOCKET_BACKEND_OBJS:.o=.d) \
 	$(XP_BASIC_MUTEX_OBJS:.o=.d) \
 	$(XP_CONSOLE_OUTPUT_OBJS:.o=.d) \
 	$(XP_PATCH_OBJS:.o=.d) \
@@ -140,15 +151,35 @@ $1: $2
 	$$(WINDOWS_XP_CXX) $$(WINDOWS_XP_TEST_CXXFLAGS) $$(WINDOWS_XP_LDFLAGS) -o $$@ $$^ $$(WINDOWS_XP_LDLIBS)
 endef
 
+define link_windows_xp_winsock1_test
+$1: $2
+	mkdir -p $$(dir $$@)
+	$$(WINDOWS_XP_CXX) $$(WINDOWS_XP_TEST_CXXFLAGS) $$(WINDOWS_XP_LDFLAGS) -o $$@ $$^ $$(WINDOWS_XP_WINSOCK1_LDLIBS)
+endef
+
 all-windows-xp: $(WINDOWS_XP_TARGET)
+
+all-windows-xp-winsock1: $(WINDOWS_XP_WINSOCK1_TARGET)
 
 $(WINDOWS_XP_TARGET): $(WINDOWS_XP_OBJS)
 	mkdir -p $(dir $@)
 	$(WINDOWS_XP_CXX) $(WINDOWS_XP_PROD_CXXFLAGS) $(WINDOWS_XP_LDFLAGS) -o $@ $^ $(WINDOWS_XP_LDLIBS)
 
+$(WINDOWS_XP_WINSOCK1_TARGET): $(WINDOWS_XP_WINSOCK1_OBJS)
+	mkdir -p $(dir $@)
+	$(WINDOWS_XP_CXX) $(WINDOWS_XP_PROD_CXXFLAGS) $(WINDOWS_XP_LDFLAGS) -o $@ $^ $(WINDOWS_XP_WINSOCK1_LDLIBS)
+
 $(WINDOWS_XP_PROD_OBJ_DIR)/%.o: $(MAKEFILE_DIR)%.cpp
 	mkdir -p $(dir $@)
 	$(WINDOWS_XP_CXX) $(WINDOWS_XP_PROD_CPPFLAGS) $(WINDOWS_XP_PROD_CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
+
+$(WINDOWS_XP_WINSOCK1_PROD_OBJ_DIR)/%.o: $(MAKEFILE_DIR)%.cpp
+	mkdir -p $(dir $@)
+	$(WINDOWS_XP_CXX) $(WINDOWS_XP_PROD_CPPFLAGS) $(WINDOWS_XP_WINSOCK1_CPPFLAGS) $(WINDOWS_XP_PROD_CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
+
+$(WINDOWS_XP_WINSOCK1_TEST_OBJ_DIR)/%.o: $(MAKEFILE_DIR)%.cpp
+	mkdir -p $(dir $@)
+	$(WINDOWS_XP_CXX) $(WINDOWS_XP_TEST_CPPFLAGS) $(WINDOWS_XP_WINSOCK1_CPPFLAGS) $(WINDOWS_XP_TEST_CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 $(WINDOWS_XP_TEST_OBJ_DIR)/%.o: $(MAKEFILE_DIR)%.cpp
 	mkdir -p $(dir $@)
@@ -199,6 +230,9 @@ $(eval $(call link_windows_xp_test,$(XP_SANDBOX),$(XP_SANDBOX_OBJS)))
 $(eval $(call run_windows_xp_test,test-windows-xp-port-tunnel-frame,$(XP_PORT_TUNNEL_FRAME)))
 $(eval $(call link_windows_xp_test,$(XP_PORT_TUNNEL_FRAME),$(XP_PORT_TUNNEL_FRAME_OBJS)))
 
+$(eval $(call run_windows_xp_test,test-windows-xp-winsock1-socket-backend,$(XP_WINSOCK1_SOCKET_BACKEND)))
+$(eval $(call link_windows_xp_winsock1_test,$(XP_WINSOCK1_SOCKET_BACKEND),$(XP_WINSOCK1_SOCKET_BACKEND_OBJS)))
+
 test-windows-xp: $(WINDOWS_XP_TEST_TARGETS)
 	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_BASIC_MUTEX)
 	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_CONSOLE_OUTPUT)
@@ -218,4 +252,9 @@ test-windows-xp: $(WINDOWS_XP_TEST_TARGETS)
 
 check-windows-xp: all-windows-xp test-windows-xp
 
-.PHONY: all-windows-xp test-windows-xp test-windows-xp-basic-mutex test-windows-xp-console-output test-windows-xp-patch test-windows-xp-session-store test-windows-xp-server-streaming test-windows-xp-transfer test-windows-xp-config test-windows-xp-http-request test-windows-xp-server-transport test-windows-xp-connection-manager test-windows-xp-server-routes-common test-windows-xp-server-routes test-windows-xp-server-runtime test-windows-xp-sandbox test-windows-xp-port-tunnel-frame check-windows-xp
+test-windows-xp-winsock1: $(XP_WINSOCK1_SOCKET_BACKEND)
+	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_WINSOCK1_SOCKET_BACKEND)
+
+check-windows-xp-winsock1: all-windows-xp-winsock1 test-windows-xp-winsock1
+
+.PHONY: all-windows-xp all-windows-xp-winsock1 test-windows-xp test-windows-xp-basic-mutex test-windows-xp-console-output test-windows-xp-patch test-windows-xp-session-store test-windows-xp-server-streaming test-windows-xp-transfer test-windows-xp-config test-windows-xp-http-request test-windows-xp-server-transport test-windows-xp-connection-manager test-windows-xp-server-routes-common test-windows-xp-server-routes test-windows-xp-server-runtime test-windows-xp-sandbox test-windows-xp-port-tunnel-frame test-windows-xp-winsock1-socket-backend test-windows-xp-winsock1 check-windows-xp check-windows-xp-winsock1

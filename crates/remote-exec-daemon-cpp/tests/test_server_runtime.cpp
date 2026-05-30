@@ -4,13 +4,12 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #ifdef _WIN32
-#include <ws2tcpip.h>
+#include "platform/win32_socket_compat.h"
 #else
-#include <netdb.h>
 #include <netinet/in.h>
-#include <sys/socket.h>
 #endif
 
 #include "http/server_transport.h"
@@ -85,29 +84,29 @@ static SOCKET connect_client(unsigned short port) {
     std::ostringstream service;
     service << port;
 
-    addrinfo hints;
-    std::memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_protocol = IPPROTO_TCP;
+    SocketAddressQuery query;
+    query.family = AF_INET;
+    query.socktype = SOCK_STREAM;
+    query.protocol = IPPROTO_TCP;
 
-    addrinfo* result = NULL;
-    TEST_ASSERT(getaddrinfo("127.0.0.1", service.str().c_str(), &hints, &result) == 0);
+    std::vector<SocketAddress> addresses;
+    std::string resolve_error;
+    TEST_ASSERT(resolve_socket_addresses("127.0.0.1", service.str().c_str(), query, &addresses, &resolve_error));
 
     SOCKET client = INVALID_SOCKET;
-    for (addrinfo* current = result; current != NULL; current = current->ai_next) {
-        client = socket(current->ai_family, current->ai_socktype, current->ai_protocol);
+    for (std::size_t i = 0; i < addresses.size(); ++i) {
+        const SocketAddress& current = addresses[i];
+        client = socket(current.family, current.socktype, current.protocol);
         if (client == INVALID_SOCKET) {
             continue;
         }
-        if (connect(client, current->ai_addr, static_cast<int>(current->ai_addrlen)) == 0) {
+        if (connect_socket(client, current.sockaddr_ptr(), current.address_len) == 0) {
             break;
         }
         close_socket(client);
         client = INVALID_SOCKET;
     }
 
-    freeaddrinfo(result);
     TEST_ASSERT(client != INVALID_SOCKET);
     return client;
 }

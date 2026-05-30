@@ -209,6 +209,15 @@ WINDOWS_CONSOLE_OUTPUT_TEST_SRCS = \
 	$(LOGGING_SRCS) \
 	$(TEXT_UTILS_SRCS)
 
+WINDOWS_WINSOCK1_SOCKET_BACKEND_TEST_SRCS = \
+	$(SOURCE_PREFIX)tests/test_winsock1_socket_backend.cpp \
+	$(SOURCE_PREFIX)src/port_forward/port_forward_endpoint.cpp \
+	$(SOURCE_PREFIX)src/port_forward/port_forward_error.cpp \
+	$(SOURCE_PREFIX)src/port_forward/port_forward_socket_ops.cpp \
+	$(SOCKET_WINDOWS_SRCS) \
+	$(TEXT_UTILS_SRCS) \
+	$(WIN32_ERROR_SRCS)
+
 HOST_HTTP_REQUEST_SRCS = \
 	$(SOURCE_PREFIX)tests/test_http_request.cpp \
 	$(SOURCE_PREFIX)src/http/http_codec.cpp \

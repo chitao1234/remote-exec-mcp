@@ -334,15 +334,14 @@ static void assert_udp_queued_byte_pressure_reports_drop(const fs::path& root) {
     const std::string endpoint = Json::parse(bind_ok.meta).at("endpoint").get<std::string>();
 
     UniqueSocket peer(bind_port_forward_socket("127.0.0.1:0", "udp"));
-    socklen_t peer_len = 0;
-    const sockaddr_storage destination = parse_port_forward_peer(endpoint, &peer_len);
+    const SocketAddress destination = parse_port_forward_peer(endpoint);
     std::vector<unsigned char> payload(512U, 7U);
     TEST_ASSERT(sendto(peer.get(),
                        reinterpret_cast<const char*>(payload.data()),
                        static_cast<int>(payload.size()),
                        0,
-                       reinterpret_cast<const sockaddr*>(&destination),
-                       peer_len) == static_cast<int>(payload.size()));
+                       destination.sockaddr_ptr(),
+                       destination.address_len) == static_cast<int>(payload.size()));
 
     PortTunnelFrame drop_report;
     TEST_ASSERT(try_read_tunnel_frame_with_timeout(client_socket.get(), 1000UL, &drop_report));

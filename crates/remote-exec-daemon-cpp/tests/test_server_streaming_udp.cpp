@@ -40,10 +40,9 @@ static void assert_tunnel_udp_bind_emits_two_peer_datagrams(AppState& state) {
 
     UniqueSocket peer_a(bind_port_forward_socket("127.0.0.1:0", "udp"));
     UniqueSocket peer_b(bind_port_forward_socket("127.0.0.1:0", "udp"));
-    socklen_t peer_len = 0;
-    const sockaddr_storage peer = parse_port_forward_peer(endpoint, &peer_len);
-    TEST_ASSERT(sendto(peer_a.get(), "udp-a", 5, 0, reinterpret_cast<const sockaddr*>(&peer), peer_len) == 5);
-    TEST_ASSERT(sendto(peer_b.get(), "udp-b", 5, 0, reinterpret_cast<const sockaddr*>(&peer), peer_len) == 5);
+    const SocketAddress peer = parse_port_forward_peer(endpoint);
+    TEST_ASSERT(sendto(peer_a.get(), "udp-a", 5, 0, peer.sockaddr_ptr(), peer.address_len) == 5);
+    TEST_ASSERT(sendto(peer_b.get(), "udp-b", 5, 0, peer.sockaddr_ptr(), peer.address_len) == 5);
 
     const PortTunnelFrame first = read_tunnel_frame(client_socket.get());
     const PortTunnelFrame second = read_tunnel_frame(client_socket.get());

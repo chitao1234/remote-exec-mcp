@@ -5,9 +5,10 @@
 #include <stdexcept>
 #include <string>
 #include <sstream>
+#include <vector>
 
 #ifdef _WIN32
-#include <ws2tcpip.h>
+#include "platform/win32_socket_compat.h"
 #else
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -436,36 +437,35 @@ SOCKET create_listener(const DaemonConfig& config) {
     char port_buffer[16];
     std::snprintf(port_buffer, sizeof(port_buffer), "%d", config.listen_port);
 
-    addrinfo hints;
-    std::memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_protocol = IPPROTO_TCP;
-    hints.ai_flags = AI_PASSIVE;
+    SocketAddressQuery query;
+    query.family = AF_INET;
+    query.socktype = SOCK_STREAM;
+    query.protocol = IPPROTO_TCP;
+    query.passive = true;
 
-    addrinfo* result = nullptr;
-    const int resolve_status = resolve_socket_addresses(config.listen_host.c_str(), port_buffer, &hints, &result);
-    if (resolve_status != 0) {
-        throw std::runtime_error("getaddrinfo failed");
+    std::vector<SocketAddress> addresses;
+    std::string resolve_error;
+    if (!resolve_socket_addresses(config.listen_host.c_str(), port_buffer, query, &addresses, &resolve_error)) {
+        throw std::runtime_error("resolve listen address failed: " + resolve_error);
     }
 
     SOCKET listener = INVALID_SOCKET;
-    for (addrinfo* current = result; current != nullptr; current = current->ai_next) {
-        listener = create_socket_cloexec(current->ai_family, current->ai_socktype, current->ai_protocol);
+    for (std::size_t i = 0; i < addresses.size(); ++i) {
+        const SocketAddress& current = addresses[i];
+        listener = create_socket_cloexec(current.family, current.socktype, current.protocol);
         if (listener == INVALID_SOCKET) {
             continue;
         }
 
         (void)set_socket_reuseaddr(listener);
 
-        if (bind_socket(listener, current->ai_addr, static_cast<socklen_t>(current->ai_addrlen)) == 0) {
+        if (bind_socket(listener, current.sockaddr_ptr(), current.address_len) == 0) {
             break;
         }
 
         close_socket(listener);
         listener = INVALID_SOCKET;
     }
-    release_socket_addresses(result);
 
     if (listener == INVALID_SOCKET) {
         throw std::runtime_error(socket_error_message("bind"));
