@@ -276,13 +276,15 @@ jobs:
           make -k -j"${jobs}" -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-windows-xp check-windows-xp &
           xp_pid="$!"
 
+          make -k -j"${jobs}" -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-winsock1 check-winsock1 &
+          winsock1_pid="$!"
+
           posix_status=0
           xp_status=0
+          winsock1_status=0
           wait "${posix_pid}" || posix_status="$?"
           wait "${xp_pid}" || xp_status="$?"
-
-          winsock1_status=0
-          make -k -j"${jobs}" -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-winsock1 check-winsock1 || winsock1_status="$?"
+          wait "${winsock1_pid}" || winsock1_status="$?"
 
           if [ "${posix_status}" -ne 0 ] || [ "${xp_status}" -ne 0 ] || [ "${winsock1_status}" -ne 0 ]; then
             exit 1
