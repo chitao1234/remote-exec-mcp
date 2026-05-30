@@ -2,7 +2,7 @@
 #
 # GNUmakefile remains the cross-platform public entry point. Keep this file
 # bmake-compatible, match the GNU host POSIX target surface, and intentionally
-# leave Windows XP cross-build targets to GNU make.
+# leave the Windows cross-build targets to GNU make.
 
 MAKEFILE_DIR = ${.CURDIR}/
 
