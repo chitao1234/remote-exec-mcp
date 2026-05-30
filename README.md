@@ -46,7 +46,7 @@ Implemented transports and runtimes:
 - broker-host `local` filesystem endpoint for transfers
 - broker-host `local` network side for port forwards
 - `remote-exec` CLI client for broker config or streamable HTTP use
-- standalone C++11 daemon for POSIX and Windows XP-compatible hosts
+- standalone C++11 daemon for POSIX and legacy Windows hosts
 
 Live exec sessions and live port forwards are in-memory runtime state. Broker
 restart drops public `session_id` and `forward_id` mappings. Daemon restart
@@ -67,7 +67,7 @@ drops daemon-local command sessions and forwarded sockets.
 - `remote-exec-host`: shared Rust host runtime reused by the Rust daemon and the
   broker-host `local` target.
 - `remote-exec-daemon-cpp`: standalone plain-HTTP C++11 daemon with native
-  POSIX, MinGW Windows XP-compatible, host-native MSVC, and MSVC
+  POSIX, MinGW legacy Windows, host-native MSVC, and MSVC
   v141_xp-compatible build paths.
 - `remote-exec-proto`: public MCP schemas, broker-daemon RPC schemas, path and
   sandbox helpers, and port-forward protocol types.
@@ -462,14 +462,15 @@ The C++ daemon intentionally supports a smaller surface than the Rust daemon:
 - plain HTTP only
 - no transfer compression
 - POSIX PTY support when the host can allocate a PTY
-- GNU Windows XP-compatible builds can expose `tty = true` through vendored
-  `winpty` when it is usable at runtime; `winsock1` builds reject `tty = true`
-  and GNU XP builds also disable PTY capability under Wine
+- GNU Windows Winsock 2 builds can expose `tty = true` through vendored
+  `winpty` when that backend is enabled for the build and usable at runtime;
+  `WINDOWS_WINSOCK_VERSION=1` builds reject `tty = true`, and GNU XP builds
+  also disable PTY capability under Wine
 - PNG, JPEG, and WebP passthrough `view_image`
 - no default-hidden `read` / `write` / `edit` capability yet
 - file, directory, and broker-built multi-source transfers
 - POSIX symlink preserve/follow/skip modes
-- Windows XP-compatible symlink preservation skipped when unavailable
+- Windows C++ builds skip symlink preservation when unavailable
 - v4 `forward_ports` tunnel support
 - static path sandboxing for exec cwd, transfer read/write paths, patch write
   targets, and image reads
@@ -489,11 +490,14 @@ Build paths:
 
 ```bash
 make -C crates/remote-exec-daemon-cpp check-posix
+make -C crates/remote-exec-daemon-cpp check-windows-2000
 make -C crates/remote-exec-daemon-cpp check-windows-xp
+make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws1
 bmake -C crates/remote-exec-daemon-cpp check-posix
 ```
 
-`check-windows-xp` runs the Windows-capable C++ runtime suite through
+The GNU make Windows runtime targets, such as `check-windows-2000`,
+`check-windows-xp`, and `check-windows-nt4-ws1`, run through
 `WINDOWS_TEST_RUNNER` when that variable is set and directly when it is empty.
 The GNU make default is `wine` on non-Windows hosts and empty on Windows.
 
@@ -545,9 +549,11 @@ cargo test --workspace
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 make -C crates/remote-exec-daemon-cpp check-posix
+make -C crates/remote-exec-daemon-cpp check-windows-2000
 make -C crates/remote-exec-daemon-cpp check-windows-xp
+make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws1
 # On Windows under MSYS2/MINGW32:
-make -C crates/remote-exec-daemon-cpp check-windows WINDOWS_TOOLCHAIN=native WINDOWS_PROFILE=xp
+make -C crates/remote-exec-daemon-cpp check-windows WINDOWS_TOOLCHAIN=native WINDOWS_WINVER=0x0501 WINDOWS_WINSOCK_VERSION=2
 # From an x86 Visual Studio developer prompt:
 nmake /f crates\remote-exec-daemon-cpp\NMakefile check-msvc-native
 # From an x86 Visual Studio developer prompt with a v141_xp-capable C++11 toolset:
@@ -592,9 +598,9 @@ broker integration tests consume a prebuilt C++ daemon binary when one is
 present, and skip the C++ daemon scenarios when it is absent; they do not build
 the C++ daemon themselves. CI builds that C++ daemon binary in an explicit step
 before the Rust test job. The standalone C++ daemon also has its own Linux and
-Windows CI job: POSIX runtime tests run on Linux, Windows XP-compatible and
-Winsock 1 test binaries run under Wine on Linux when available, and the 32-bit
-host-native MSVC NMAKE path runs on `windows-latest`.
+Windows CI job: POSIX runtime tests run on Linux, Windows 2000, Windows
+XP-compatible, and NT 4.0/Winsock 1 test binaries run under Wine on Linux when
+available, and the 32-bit host-native MSVC NMAKE path runs on `windows-latest`.
 
 A separate periodic/manual GitHub Actions workflow exercises BSD coverage inside
 GitHub-hosted BSD VMs for FreeBSD, OpenBSD, NetBSD, and DragonFly BSD. Each BSD

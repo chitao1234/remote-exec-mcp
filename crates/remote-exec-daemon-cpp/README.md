@@ -6,7 +6,7 @@ This daemon is intentionally narrower than the Rust daemon, but it now has two
 build paths:
 
 - native POSIX hosts through the platform `c++` driver
-- Windows XP-compatible hosts through `i686-w64-mingw32-g++`
+- legacy Windows hosts through `i686-w64-mingw32-g++`
 - host-native Windows builds through MSVC/NMAKE
 - Windows XP-compatible hosts through MSVC/NMAKE with the `v141_xp` toolset
 
@@ -86,41 +86,46 @@ Host-native POSIX daemon:
 
 Windows GNU build matrix:
 
-- `make all-windows WINDOWS_TOOLCHAIN=cross WINDOWS_PROFILE=xp`
-- `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_PROFILE=xp`
-- `make all-windows WINDOWS_TOOLCHAIN=cross WINDOWS_PROFILE=winsock1`
-- `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_PROFILE=winsock1`
-- `make all-windows WINDOWS_TOOLCHAIN=native WINDOWS_PROFILE=xp` on Windows
+- `make all-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0501 WINDOWS_WINSOCK_VERSION=2`
+- `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0501 WINDOWS_WINSOCK_VERSION=2`
+- `make all-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0500 WINDOWS_WINSOCK_VERSION=2`
+- `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0500 WINDOWS_WINSOCK_VERSION=2`
+- `make all-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=1`
+- `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=1`
+- `make all-windows WINDOWS_TOOLCHAIN=native WINDOWS_WINVER=0x0501 WINDOWS_WINSOCK_VERSION=2` on Windows
   under MSYS2/MINGW32
-- `make check-windows WINDOWS_TOOLCHAIN=native WINDOWS_PROFILE=xp` on Windows
+- `make check-windows WINDOWS_TOOLCHAIN=native WINDOWS_WINVER=0x0501 WINDOWS_WINSOCK_VERSION=2` on Windows
   under MSYS2/MINGW32
-- `make all-windows WINDOWS_TOOLCHAIN=native WINDOWS_PROFILE=winsock1` on
-  Windows under MSYS2/MINGW32
-- `make check-windows WINDOWS_TOOLCHAIN=native WINDOWS_PROFILE=winsock1` on
-  Windows under MSYS2/MINGW32
 - `WINDOWS_TOOLCHAIN=cross` uses `i686-w64-mingw32-g++`, links
   `-static-libgcc -static-libstdc++`, and defaults `WINDOWS_TEST_RUNNER` to
   `wine` on non-Windows hosts.
 - `WINDOWS_TOOLCHAIN=native` uses the host `g++` in a Windows GNU environment
   and runs test binaries directly.
-- `WINDOWS_PROFILE=xp` builds the XP/Winsock 2 path: `WINVER=0x0501`,
-  `_WIN32_WINNT=0x0501`, `ws2_32`, IPv6 support, and
-  `getaddrinfo`/`getnameinfo`. GNU builds also vendor `winpty`, so this profile
-  can expose PTY support when `winpty` is usable at runtime.
-- `WINDOWS_PROFILE=winsock1` builds the NT 4.0-era Winsock 1.1 path:
-  `WINVER=0x0400`, `_WIN32_WINNT=0x0400`, `REMOTE_EXEC_CPP_WINSOCK1`,
-  `wsock32`, IPv4 only, and explicit rejection of IPv6 endpoints with an
-  `invalid_endpoint` error. This profile reports `supports_pty=false`.
+- `WINDOWS_WINVER` and `WINDOWS_WIN32_WINNT` select the Win32 API floor. By
+  default `WINDOWS_WIN32_WINNT` follows `WINDOWS_WINVER`.
+- `WINDOWS_WINSOCK_VERSION=2` builds the Winsock 2 path: `ws2_32`, IPv6
+  support, and `getaddrinfo`/`getnameinfo`.
+- `WINDOWS_WINSOCK_VERSION=1` builds the NT-era Winsock 1.1 path:
+  `REMOTE_EXEC_CPP_WINSOCK1`, `wsock32`, IPv4 only, and explicit rejection of
+  IPv6 endpoints with an `invalid_endpoint` error.
+- `WINDOWS_WINPTY=auto|on|off` controls whether the GNU build vendors `winpty`.
+  `auto` currently enables `winpty` only for the XP/Winsock 2 combination.
+  Windows 2000 can already build as a first-class `WINVER` target, but remains
+  PTY-disabled under the current auto default until the backported `winpty`
+  path lands there.
 - The default `WINDOWS_TOOLCHAIN` is `cross` on non-Windows hosts and `native`
   on Windows GNU hosts.
-- The default `WINDOWS_PROFILE` is `xp`.
+- The defaults are `WINDOWS_WINVER=0x0501`,
+  `WINDOWS_WIN32_WINNT=WINDOWS_WINVER`, and `WINDOWS_WINSOCK_VERSION=2`.
 
 Compatibility aliases remain:
 
+- `make all-windows-nt4-ws1`
+- `make check-windows-nt4-ws1`
+- `make all-windows-2000`
+- `make check-windows-2000`
 - `make all-windows-xp`
 - `make check-windows-xp`
-- `make all-winsock1`
-- `make check-winsock1`
 - `make all-windows-native`
 - `make check-windows-native`
 
@@ -166,11 +171,11 @@ targets for both toolchains. The XP targets link as an x86 console program with
 a Windows XP minimum subsystem version.
 
 Runtime coverage note: host-native POSIX C++ daemon runtime tests run on Unix.
-Windows XP-compatible binaries and tests run under Wine on Linux and run
-natively on Windows when the XP-capable MSVC toolset is available. CI builds and
-runs the 32-bit host-native MSVC NMAKE test path on `windows-latest`. CI also
-builds
-`build/remote-exec-daemon-cpp-native.exe` with host-native MinGW on
+GNU legacy Windows binaries and tests run under Wine on Linux. MSVC native
+binaries and tests run on Windows, and MSVC XP-compatible binaries run natively
+there when the XP-capable toolset is available. CI builds and runs the 32-bit
+host-native MSVC NMAKE test path on `windows-latest`. CI also builds
+`build/remote-exec-daemon-cpp-native-xp-ws2.exe` with host-native MinGW on
 `windows-latest`,
 exposes `C:\msys64\mingw32\bin` for the MinGW runtime DLLs, and runs the Rust
 broker `mcp_forward_ports_cpp::windows_cpp_daemon_smoke` integration test
@@ -214,22 +219,28 @@ POSIX:
 build/remote-exec-daemon-cpp config/daemon-cpp.example.ini
 ```
 
-Windows XP-compatible:
+Windows XP-compatible GNU Winsock 2:
 
 ```bat
-build\remote-exec-daemon-cpp-xp.exe config\daemon-cpp.example.ini
+build\remote-exec-daemon-cpp-xp-ws2.exe config\daemon-cpp.example.ini
 ```
 
-Windows host-native GNU:
+Windows 2000-compatible GNU Winsock 2:
 
 ```bat
-build\remote-exec-daemon-cpp-native.exe config\daemon-cpp.example.ini
+build\remote-exec-daemon-cpp-2000-ws2.exe config\daemon-cpp.example.ini
 ```
 
-Windows host-native GNU Winsock 1.1:
+Windows host-native GNU XP/Winsock 2:
 
 ```bat
-build\remote-exec-daemon-cpp-native-winsock1.exe config\daemon-cpp.example.ini
+build\remote-exec-daemon-cpp-native-xp-ws2.exe config\daemon-cpp.example.ini
+```
+
+Windows NT 4.0-compatible GNU Winsock 1.1:
+
+```bat
+build\remote-exec-daemon-cpp-nt4-ws1.exe config\daemon-cpp.example.ini
 ```
 
 Windows XP-compatible MSVC/NMAKE:
@@ -300,6 +311,8 @@ and Wine is available:
 
 ```sh
 make check-windows-xp
+make check-windows-2000
+make check-windows-nt4-ws1
 ```
 
 Idle keep-alive HTTP connections wait up to `http_connection_idle_timeout_ms`
@@ -310,17 +323,19 @@ returned `output` field preserves their emitted order.
 
 POSIX builds support `tty=true` when the host can allocate a PTY. The daemon
 reports this through `/v1/target-info` as `supports_pty`, and rejects `tty=true`
-only when PTY allocation is unavailable. Windows GNU `WINDOWS_PROFILE=xp`
-builds use vendored `winpty` for `tty=true` sessions when `winpty` is usable at
-runtime. `WINDOWS_PROFILE=winsock1` reports `supports_pty=false`. Under Wine,
-the XP profile also reports `supports_pty=false` because `winpty` behavior
-there is not treated as authoritative.
+only when PTY allocation is unavailable. Windows GNU builds with
+`WINDOWS_WINSOCK_VERSION=2` use vendored `winpty` for `tty=true` sessions when
+`winpty` is usable at runtime. Builds with `WINDOWS_WINSOCK_VERSION=1`, or
+Winsock 2 builds where `WINDOWS_WINPTY` is effectively off, report
+`supports_pty=false`. Under Wine, the GNU WinPTY path also reports
+`supports_pty=false` because `winpty` behavior there is not treated as
+authoritative.
 
 POSIX builds support `write_stdin.pty_size` for live `tty=true` sessions by
-applying `TIOCSWINSZ` to the PTY master. Windows GNU `WINDOWS_PROFILE=xp`
-builds forward PTY resize requests through `winpty`. `WINDOWS_PROFILE=winsock1`
-continues to reject `tty=true`, so resize requests return the same typed
-unsupported-session error path.
+applying `TIOCSWINSZ` to the PTY master. Windows GNU builds with
+`WINDOWS_WINSOCK_VERSION=2` with `winpty` enabled forwards PTY resize requests
+through `winpty`. Builds without `winpty` continue to reject `tty=true`, so
+resize requests return the same typed unsupported-session error path.
 
 POSIX non-TTY exec intentionally starts child processes with stdin attached to
 `/dev/null`, matching the Rust daemon's closed-stdin behavior. Start POSIX
@@ -470,9 +485,10 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
 - daemon RPC is HTTP/1.1-only; sequential requests may reuse a persistent connection, but HTTP pipelining is not supported
 - no TLS support
 - POSIX PTY support depends on host PTY allocation
-- Windows GNU `WINDOWS_PROFILE=xp` PTY support depends on `winpty` runtime
-  availability; Wine intentionally disables PTY capability reporting
-- no PTY support in `WINDOWS_PROFILE=winsock1`
+- Windows GNU PTY support depends on `winpty` being enabled for the build and
+  available at runtime; Wine intentionally disables PTY capability reporting
+- no PTY support in `WINDOWS_WINSOCK_VERSION=1`, or in Winsock 2 builds where
+  `winpty` is disabled
 - `view_image` supports passthrough PNG, JPEG, and WebP only
 - omitted `view_image.detail` defaults to `original` because no resize/re-encode path exists
 - broker-owned `forward_id` values do not persist across broker restart

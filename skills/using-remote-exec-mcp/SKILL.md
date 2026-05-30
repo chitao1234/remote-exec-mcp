@@ -420,9 +420,9 @@ Port forward:
   XP-compatible" means the binary was built with a toolchain that supports both
   XP targeting and C++11.
 - POSIX C++ daemon targets support `tty: true` when PTY allocation is available.
-- GNU Windows XP-compatible C++ targets may support `tty: true` through
-  `winpty`; `winsock1` targets reject `tty: true`. Windows C++ targets use
-  `cmd.exe`.
+- Some GNU Windows C++ targets may support `tty: true` through `winpty`; trust
+  `supports_pty`. `WINDOWS_WINSOCK_VERSION=1` targets reject `tty: true`.
+  Windows C++ targets use `cmd.exe`.
 - POSIX C++ non-TTY exec starts with stdin closed. Use `tty: true` when later
   input matters.
 - Windows XP-compatible C++ non-TTY exec keeps stdin open for compatibility.

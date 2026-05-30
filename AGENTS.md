@@ -25,9 +25,11 @@ changes that assumption.
 This repository is a Rust 2024 workspace for a remote-first MCP server that
 exposes Codex-style local-system tools across configured Linux and Windows
 targets. It also contains a narrower standalone C++11 daemon with native POSIX
-and Windows XP-compatible build paths. In this repository, "Windows
-XP-compatible" means a toolchain and binary target that can both compile the C++
-daemon as C++11 and target Windows XP.
+and legacy Windows build paths. The GNU make matrix separates the Win32 API
+floor from the Winsock version, covering NT 4.0/Winsock 1, Windows 2000, and
+Windows XP combinations. In this repository, "Windows XP-compatible" means a
+toolchain and binary target that can both compile the C++ daemon as C++11 and
+target Windows XP.
 
 The MCP tool surface is:
 
@@ -55,8 +57,8 @@ The architecture is intentionally split:
   reads/writes/edits, image reads, transfer import/export, sandbox checks, and
   v4 port-forward upgrade tunnels.
 - `remote-exec-daemon-cpp`: standalone plain-HTTP C++11 daemon. It shares the
-  broker-daemon protocol where implemented, supports native POSIX and Windows
-  XP-compatible builds, and intentionally omits TLS and transfer compression.
+  broker-daemon protocol where implemented, supports native POSIX and legacy
+  Windows builds, and intentionally omits TLS and transfer compression.
 - `remote-exec-proto`: shared MCP tool schemas, broker-daemon RPC payloads,
   path helpers, sandbox helpers, and port-forward protocol types.
 - `remote-exec-admin`: operator CLI for certificate/bootstrap workflows.
@@ -64,7 +66,7 @@ The architecture is intentionally split:
   private-key write helpers.
 
 Avoid broad new abstraction layers unless the existing Linux, Windows, POSIX
-C++11, and XP-targeting C++11 split actually needs them.
+C++11, and legacy-Windows-targeting C++11 split actually needs them.
 
 ## Workspace Map
 

@@ -568,6 +568,9 @@ fn cpp_daemon_default_binaries() -> Vec<PathBuf> {
     if cfg!(windows) {
         vec![
             daemon_dir.join("build/remote-exec-daemon-cpp-msvc.exe"),
+            daemon_dir.join("build/remote-exec-daemon-cpp-native-xp-ws2.exe"),
+            daemon_dir.join("build/remote-exec-daemon-cpp-native-2000-ws2.exe"),
+            daemon_dir.join("build/remote-exec-daemon-cpp-native-nt4-ws1.exe"),
             daemon_dir.join("build/remote-exec-daemon-cpp-native.exe"),
             daemon_dir.join("build/remote-exec-daemon-cpp.exe"),
         ]
