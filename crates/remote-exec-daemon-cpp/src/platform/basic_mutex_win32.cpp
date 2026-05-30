@@ -49,17 +49,15 @@ bool BasicCondVar::timed_wait_ms(BasicMutex& mutex, unsigned long timeout_ms) {
 }
 
 void BasicCondVar::signal() {
-    // The Win32 emulation uses an auto-reset event for signal and a manual-reset
-    // event for broadcast. Peek waiters_ first so signal/broadcast stay no-ops
-    // when nobody is waiting; the last waiter released by broadcast resets the
-    // manual-reset event in timed_wait_ms().
-    if (InterlockedCompareExchange(&waiters_, 0, 0) > 0) {
+    // Callers hold the associated mutex, so waiters_ can be read directly and
+    // does not need the NT 4.0-only InterlockedCompareExchange.
+    if (waiters_ > 0) {
         SetEvent(signal_event_);
     }
 }
 
 void BasicCondVar::broadcast() {
-    if (InterlockedCompareExchange(&waiters_, 0, 0) > 0) {
+    if (waiters_ > 0) {
         SetEvent(broadcast_event_);
     }
 }
