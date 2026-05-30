@@ -84,33 +84,27 @@ Host-native POSIX daemon:
   load-sensitive lifecycle flakes. Override with `STRESS_RUNS=<n>` and
   `STRESS_JOBS=<n>`.
 
-Windows XP-compatible cross-build:
+Windows cross-build:
+
+- `make all-windows WINDOWS_PROFILE=xp`
+- `make check-windows WINDOWS_PROFILE=xp`
+- `make all-windows WINDOWS_PROFILE=winsock1`
+- `make check-windows WINDOWS_PROFILE=winsock1`
+- `WINDOWS_PROFILE=xp` builds the XP/Winsock 2 path: `WINVER=0x0501`,
+  `_WIN32_WINNT=0x0501`, `ws2_32`, IPv6 support, and
+  `getaddrinfo`/`getnameinfo`.
+- `WINDOWS_PROFILE=winsock1` builds the NT 4.0-era Winsock 1.1 path:
+  `WINVER=0x0400`, `_WIN32_WINNT=0x0400`, `REMOTE_EXEC_CPP_WINSOCK1`,
+  `wsock32`, IPv4 only, and explicit rejection of IPv6 endpoints with an
+  `invalid_endpoint` error.
+- The default `WINDOWS_PROFILE` is `xp`.
+
+Compatibility aliases remain:
 
 - `make all-windows-xp`
-- `make check-windows-xp`; this runs XP test binaries through
-  `WINDOWS_XP_TEST_RUNNER` when it is set, and directly when it is empty. The
-  default is `wine` on non-Windows hosts and empty on Windows.
-- `make test-windows-xp` for the XP runtime tests without rebuilding the daemon.
-- `make test-windows-xp-console-output`
-- `make test-windows-xp-session-store`
-- `make test-windows-xp-transfer`
-- `make test-windows-xp-server-routes-common`
-- `make test-windows-xp-server-runtime`
-- `make test-windows-xp-server-transport`
-- `make test-windows-xp-connection-manager`
-
-Experimental Winsock 1.1 cross-build:
-
+- `make check-windows-xp`
 - `make all-winsock1`
-- `make check-winsock1` for the compile/link gate and focused
-  Winsock 1 runtime tests.
-- This build defines `REMOTE_EXEC_CPP_WINSOCK1`, includes `<winsock.h>`, links
-  `wsock32`, sets `WINVER` and `_WIN32_WINNT` to `0x0400`, calls
-  `WSAStartup(1.1)`, and supports IPv4 sockets only. IPv6 listen or connect
-  endpoints are rejected with an `invalid_endpoint` error that asks the
-  broker/downstream caller to use an IPv4 endpoint.
-- The normal `all-windows-xp` and `check-windows-xp` targets remain on Winsock
-  2 through `ws2_32`, with IPv6 and `getaddrinfo`/`getnameinfo` support.
+- `make check-winsock1`
 
 Host-native Windows MinGW build:
 
@@ -147,11 +141,9 @@ Windows XP-compatible MSVC/NMAKE build:
 
 The top-level `GNUmakefile` is the GNU make public entry point. Shared source
 lists live in `mk/sources.mk`, shared GNU make helpers live in `mk/common.mk`,
-shared Windows cross-build helpers live in `mk/windows-cross.mk`, host-native
-rules live in `mk/posix.mk`, the Windows XP cross-build rules live in
-`mk/windows-xp.mk`, and the Winsock 1 cross-build rules live in
-`mk/windows-winsock1.mk`. GNU make prefers `GNUmakefile`, so plain `make`
-selects that file automatically.
+shared Windows cross-build profiles and helpers live in `mk/windows-cross.mk`,
+and host-native rules live in `mk/posix.mk`. GNU make prefers `GNUmakefile`, so
+plain `make` selects that file automatically.
 
 `NMakefile` is intentionally separate from the GNU/BSD make entry points. It
 builds a host-native MSVC daemon and a Windows XP-compatible MSVC daemon, uses
@@ -170,7 +162,7 @@ broker `mcp_forward_ports_cpp::windows_cpp_daemon_smoke` integration test
 against that process.
 
 BSD make has a separate POSIX-only entry point. It intentionally does not expose
-the Windows XP cross-build targets:
+the Windows cross-build targets:
 
 - `bmake`
 - `bmake all-posix`
@@ -275,9 +267,9 @@ REMOTE_EXEC_LOG=debug gdb --args build/test_server_streaming
 REMOTE_EXEC_LOG=debug gdb --args build/test_session_store
 ```
 
-For Windows-shared lifecycle changes, run the XP-compatible path. On non-Windows
-hosts this uses Wine when `WINDOWS_XP_TEST_RUNNER` is unset and Wine is
-available:
+For Windows-shared lifecycle changes, run the GNU make Windows cross-build
+path. On non-Windows hosts this uses Wine when `WINDOWS_TEST_RUNNER` is unset
+and Wine is available:
 
 ```sh
 make check-windows-xp

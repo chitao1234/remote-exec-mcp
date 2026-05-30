@@ -4,8 +4,6 @@ MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 include $(MAKEFILE_DIR)mk/common.mk
 include $(MAKEFILE_DIR)mk/posix.mk
 include $(MAKEFILE_DIR)mk/windows-cross.mk
-include $(MAKEFILE_DIR)mk/windows-xp.mk
-include $(MAKEFILE_DIR)mk/windows-winsock1.mk
 ifeq ($(OS),Windows_NT)
 include $(MAKEFILE_DIR)mk/windows-native.mk
 endif
