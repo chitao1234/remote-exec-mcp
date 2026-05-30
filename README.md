@@ -587,9 +587,9 @@ broker integration tests consume a prebuilt C++ daemon binary when one is
 present, and skip the C++ daemon scenarios when it is absent; they do not build
 the C++ daemon themselves. CI builds that C++ daemon binary in an explicit step
 before the Rust test job. The standalone C++ daemon also has its own Linux and
-Windows CI job: POSIX runtime tests run on Linux, Windows XP-compatible test
-binaries run under Wine on Linux when available, and the 32-bit host-native MSVC
-NMAKE path runs on `windows-latest`.
+Windows CI job: POSIX runtime tests run on Linux, Windows XP-compatible and
+Winsock 1 test binaries run under Wine on Linux when available, and the 32-bit
+host-native MSVC NMAKE path runs on `windows-latest`.
 
 A separate periodic/manual GitHub Actions workflow exercises BSD coverage inside
 GitHub-hosted BSD VMs for FreeBSD, OpenBSD, NetBSD, and DragonFly BSD. Each BSD

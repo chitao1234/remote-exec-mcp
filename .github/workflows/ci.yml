@@ -281,7 +281,10 @@ jobs:
           wait "${posix_pid}" || posix_status="$?"
           wait "${xp_pid}" || xp_status="$?"
 
-          if [ "${posix_status}" -ne 0 ] || [ "${xp_status}" -ne 0 ]; then
+          winsock1_status=0
+          make -k -j"${jobs}" -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-winsock1 check-winsock1 || winsock1_status="$?"
+
+          if [ "${posix_status}" -ne 0 ] || [ "${xp_status}" -ne 0 ] || [ "${winsock1_status}" -ne 0 ]; then
             exit 1
           fi
 
