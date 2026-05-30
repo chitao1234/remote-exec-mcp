@@ -202,6 +202,13 @@ WINDOWS_BASIC_MUTEX_TEST_SRCS = \
 	$(HOST_BASIC_MUTEX_TEST_COMMON_SRCS) \
 	$(BASIC_MUTEX_WINDOWS_SRCS)
 
+WINDOWS_CONSOLE_OUTPUT_TEST_SRCS = \
+	$(SOURCE_PREFIX)tests/test_console_output.cpp \
+	$(SOURCE_PREFIX)src/exec/console_output.cpp \
+	$(WIN32_ERROR_SRCS) \
+	$(LOGGING_SRCS) \
+	$(TEXT_UTILS_SRCS)
+
 HOST_HTTP_REQUEST_SRCS = \
 	$(SOURCE_PREFIX)tests/test_http_request.cpp \
 	$(SOURCE_PREFIX)src/http/http_codec.cpp \

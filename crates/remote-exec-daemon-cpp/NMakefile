@@ -32,6 +32,7 @@ MSVC_NATIVE_OBJ_DIR=$(BUILD_DIR)\obj\msvc-native
 MSVC_NATIVE_TEST_OBJ_DIR=$(BUILD_DIR)\obj\msvc-native-test
 MSVC_NATIVE_TARGET=$(BUILD_DIR)\remote-exec-daemon-cpp-msvc.exe
 MSVC_NATIVE_BASIC_MUTEX_TEST=$(BUILD_DIR)\test_basic_mutex-msvc.exe
+MSVC_NATIVE_CONSOLE_OUTPUT_TEST=$(BUILD_DIR)\test_console_output-msvc.exe
 MSVC_NATIVE_PATCH_TEST=$(BUILD_DIR)\test_patch-msvc.exe
 MSVC_NATIVE_SESSION_STORE_TEST=$(BUILD_DIR)\test_session_store-msvc.exe
 MSVC_NATIVE_SERVER_STREAMING_TEST=$(BUILD_DIR)\test_server_streaming-msvc.exe
@@ -50,6 +51,7 @@ MSVC_XP_OBJ_DIR=$(BUILD_DIR)\obj\msvc-xp
 MSVC_XP_TEST_OBJ_DIR=$(BUILD_DIR)\obj\msvc-xp-test
 MSVC_XP_TARGET=$(BUILD_DIR)\remote-exec-daemon-cpp-xp-msvc.exe
 MSVC_XP_BASIC_MUTEX_TEST=$(BUILD_DIR)\test_basic_mutex-xp-msvc.exe
+MSVC_XP_CONSOLE_OUTPUT_TEST=$(BUILD_DIR)\test_console_output-xp-msvc.exe
 MSVC_XP_PATCH_TEST=$(BUILD_DIR)\test_patch-xp-msvc.exe
 MSVC_XP_SESSION_STORE_TEST=$(BUILD_DIR)\test_session_store-xp-msvc.exe
 MSVC_XP_SERVER_STREAMING_TEST=$(BUILD_DIR)\test_server_streaming-xp-msvc.exe
@@ -130,6 +132,8 @@ MSVC_WIN32_DAEMON_SRCS=$(WINDOWS_DAEMON_SRCS)
 
 MSVC_WIN32_BASIC_MUTEX_TEST_SRCS=$(WINDOWS_BASIC_MUTEX_TEST_SRCS)
 
+MSVC_WIN32_CONSOLE_OUTPUT_TEST_SRCS=$(WINDOWS_CONSOLE_OUTPUT_TEST_SRCS)
+
 MSVC_WIN32_PATCH_TEST_SRCS=$(HOST_PATCH_SRCS)
 
 MSVC_WIN32_SESSION_STORE_TEST_SRCS=$(WINDOWS_SESSION_STORE_TEST_SRCS)
@@ -158,6 +162,7 @@ MSVC_WIN32_PORT_TUNNEL_FRAME_TEST_SRCS=$(HOST_PORT_TUNNEL_FRAME_SRCS)
 
 MSVC_NATIVE_TEST_PHONY_TARGETS= \
     test-msvc-native-basic-mutex \
+    test-msvc-native-console-output \
     test-msvc-native-patch \
     test-msvc-native-session-store \
     test-msvc-native-server-streaming \
@@ -174,6 +179,7 @@ MSVC_NATIVE_TEST_PHONY_TARGETS= \
 
 MSVC_XP_TEST_PHONY_TARGETS= \
     test-msvc-xp-basic-mutex \
+    test-msvc-xp-console-output \
     test-msvc-xp-patch \
     test-msvc-xp-session-store \
     test-msvc-xp-server-streaming \
@@ -197,6 +203,9 @@ all-msvc-xp: $(MSVC_XP_TARGET)
 test-msvc-native: $(MSVC_NATIVE_TEST_PHONY_TARGETS)
 
 test-msvc-native-basic-mutex: $(MSVC_NATIVE_BASIC_MUTEX_TEST)
+	$(MSVC_RUN_TEST)
+
+test-msvc-native-console-output: $(MSVC_NATIVE_CONSOLE_OUTPUT_TEST)
 	$(MSVC_RUN_TEST)
 
 test-msvc-native-patch: $(MSVC_NATIVE_PATCH_TEST)
@@ -241,6 +250,9 @@ test-msvc-native-port-tunnel-frame: $(MSVC_NATIVE_PORT_TUNNEL_FRAME_TEST)
 test-msvc-xp: $(MSVC_XP_TEST_PHONY_TARGETS)
 
 test-msvc-xp-basic-mutex: $(MSVC_XP_BASIC_MUTEX_TEST)
+	$(MSVC_RUN_TEST)
+
+test-msvc-xp-console-output: $(MSVC_XP_CONSOLE_OUTPUT_TEST)
 	$(MSVC_RUN_TEST)
 
 test-msvc-xp-patch: $(MSVC_XP_PATCH_TEST)
@@ -291,6 +303,10 @@ $(MSVC_NATIVE_TARGET): $(MSVC_WIN32_DAEMON_SRCS)
 	$(MSVC_BUILD_NATIVE)
 
 $(MSVC_NATIVE_BASIC_MUTEX_TEST): $(MSVC_WIN32_BASIC_MUTEX_TEST_SRCS)
+	@$(MSVC_PREP_NATIVE_TEST)
+	$(MSVC_BUILD_NATIVE_TEST)
+
+$(MSVC_NATIVE_CONSOLE_OUTPUT_TEST): $(MSVC_WIN32_CONSOLE_OUTPUT_TEST_SRCS)
 	@$(MSVC_PREP_NATIVE_TEST)
 	$(MSVC_BUILD_NATIVE_TEST)
 
@@ -354,6 +370,10 @@ $(MSVC_XP_BASIC_MUTEX_TEST): $(MSVC_WIN32_BASIC_MUTEX_TEST_SRCS)
 	@$(MSVC_PREP_XP_TEST)
 	$(MSVC_BUILD_XP_TEST)
 
+$(MSVC_XP_CONSOLE_OUTPUT_TEST): $(MSVC_WIN32_CONSOLE_OUTPUT_TEST_SRCS)
+	@$(MSVC_PREP_XP_TEST)
+	$(MSVC_BUILD_XP_TEST)
+
 $(MSVC_XP_PATCH_TEST): $(MSVC_WIN32_PATCH_TEST_SRCS)
 	@$(MSVC_PREP_XP_TEST)
 	$(MSVC_BUILD_XP_TEST)
@@ -409,4 +429,4 @@ $(MSVC_XP_PORT_TUNNEL_FRAME_TEST): $(MSVC_WIN32_PORT_TUNNEL_FRAME_TEST_SRCS)
 clean:
 	@if exist "$(BUILD_DIR)" rmdir /S /Q "$(BUILD_DIR)"
 
-.PHONY: all all-msvc-native all-msvc-xp test-msvc-native test-msvc-native-basic-mutex test-msvc-native-patch test-msvc-native-session-store test-msvc-native-server-streaming test-msvc-native-transfer test-msvc-native-config test-msvc-native-http-request test-msvc-native-server-transport test-msvc-native-connection-manager test-msvc-native-server-routes-common test-msvc-native-server-routes test-msvc-native-server-runtime test-msvc-native-sandbox test-msvc-native-port-tunnel-frame test-msvc-xp test-msvc-xp-basic-mutex test-msvc-xp-patch test-msvc-xp-session-store test-msvc-xp-server-streaming test-msvc-xp-transfer test-msvc-xp-config test-msvc-xp-http-request test-msvc-xp-server-transport test-msvc-xp-connection-manager test-msvc-xp-server-routes-common test-msvc-xp-server-routes test-msvc-xp-server-runtime test-msvc-xp-sandbox test-msvc-xp-port-tunnel-frame check-msvc-native check-msvc-xp clean
+.PHONY: all all-msvc-native all-msvc-xp test-msvc-native test-msvc-native-basic-mutex test-msvc-native-console-output test-msvc-native-patch test-msvc-native-session-store test-msvc-native-server-streaming test-msvc-native-transfer test-msvc-native-config test-msvc-native-http-request test-msvc-native-server-transport test-msvc-native-connection-manager test-msvc-native-server-routes-common test-msvc-native-server-routes test-msvc-native-server-runtime test-msvc-native-sandbox test-msvc-native-port-tunnel-frame test-msvc-xp test-msvc-xp-basic-mutex test-msvc-xp-console-output test-msvc-xp-patch test-msvc-xp-session-store test-msvc-xp-server-streaming test-msvc-xp-transfer test-msvc-xp-config test-msvc-xp-http-request test-msvc-xp-server-transport test-msvc-xp-connection-manager test-msvc-xp-server-routes-common test-msvc-xp-server-routes test-msvc-xp-server-runtime test-msvc-xp-sandbox test-msvc-xp-port-tunnel-frame check-msvc-native check-msvc-xp clean

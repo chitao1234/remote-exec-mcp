@@ -4,6 +4,7 @@ WINDOWS_NATIVE_PROD_OBJ_DIR := $(OBJ_DIR)/windows-native-prod
 WINDOWS_NATIVE_TEST_OBJ_DIR := $(OBJ_DIR)/windows-native-test
 WINDOWS_NATIVE_TARGET := $(BUILD_DIR)/remote-exec-daemon-cpp.exe
 WINDOWS_NATIVE_BASIC_MUTEX := $(BUILD_DIR)/test_basic_mutex.exe
+WINDOWS_NATIVE_CONSOLE_OUTPUT := $(BUILD_DIR)/test_console_output.exe
 WINDOWS_NATIVE_PATCH := $(BUILD_DIR)/test_patch.exe
 WINDOWS_NATIVE_SESSION_STORE := $(BUILD_DIR)/test_session_store.exe
 WINDOWS_NATIVE_SERVER_STREAMING := $(BUILD_DIR)/test_server_streaming.exe
@@ -29,6 +30,7 @@ WINDOWS_NATIVE_SRCS := $(WINDOWS_DAEMON_SRCS)
 
 WINDOWS_NATIVE_PLATFORM_NEUTRAL_TEST_TARGETS := \
 	$(WINDOWS_NATIVE_BASIC_MUTEX) \
+	$(WINDOWS_NATIVE_CONSOLE_OUTPUT) \
 	$(WINDOWS_NATIVE_PATCH) \
 	$(WINDOWS_NATIVE_TRANSFER) \
 	$(WINDOWS_NATIVE_CONFIG) \
@@ -52,6 +54,7 @@ WINDOWS_NATIVE_TEST_TARGETS := \
 	$(WINDOWS_NATIVE_SERVER_SMOKE_TEST_TARGETS)
 
 WINDOWS_NATIVE_BASIC_MUTEX_SRCS := $(WINDOWS_BASIC_MUTEX_TEST_SRCS)
+WINDOWS_NATIVE_CONSOLE_OUTPUT_SRCS := $(WINDOWS_CONSOLE_OUTPUT_TEST_SRCS)
 WINDOWS_NATIVE_PATCH_SRCS := $(HOST_PATCH_SRCS)
 WINDOWS_NATIVE_SESSION_STORE_SRCS := $(WINDOWS_SESSION_STORE_TEST_SRCS)
 WINDOWS_NATIVE_SERVER_STREAMING_SRCS := $(WINDOWS_SERVER_STREAMING_SRCS)
@@ -68,6 +71,7 @@ WINDOWS_NATIVE_PORT_TUNNEL_FRAME_SRCS := $(HOST_PORT_TUNNEL_FRAME_SRCS)
 
 WINDOWS_NATIVE_OBJS := $(sort $(call cpp_objs,$(WINDOWS_NATIVE_PROD_OBJ_DIR),$(WINDOWS_NATIVE_SRCS)))
 WINDOWS_NATIVE_BASIC_MUTEX_OBJS := $(sort $(call cpp_objs,$(WINDOWS_NATIVE_TEST_OBJ_DIR),$(WINDOWS_NATIVE_BASIC_MUTEX_SRCS)))
+WINDOWS_NATIVE_CONSOLE_OUTPUT_OBJS := $(sort $(call cpp_objs,$(WINDOWS_NATIVE_TEST_OBJ_DIR),$(WINDOWS_NATIVE_CONSOLE_OUTPUT_SRCS)))
 WINDOWS_NATIVE_PATCH_OBJS := $(sort $(call cpp_objs,$(WINDOWS_NATIVE_TEST_OBJ_DIR),$(WINDOWS_NATIVE_PATCH_SRCS)))
 WINDOWS_NATIVE_SESSION_STORE_OBJS := $(sort $(call cpp_objs,$(WINDOWS_NATIVE_TEST_OBJ_DIR),$(WINDOWS_NATIVE_SESSION_STORE_SRCS)))
 WINDOWS_NATIVE_SERVER_STREAMING_OBJS := $(sort $(call cpp_objs,$(WINDOWS_NATIVE_TEST_OBJ_DIR),$(WINDOWS_NATIVE_SERVER_STREAMING_SRCS)))
@@ -85,6 +89,7 @@ WINDOWS_NATIVE_PORT_TUNNEL_FRAME_OBJS := $(sort $(call cpp_objs,$(WINDOWS_NATIVE
 DEP_FILES += \
 	$(WINDOWS_NATIVE_OBJS:.o=.d) \
 	$(WINDOWS_NATIVE_BASIC_MUTEX_OBJS:.o=.d) \
+	$(WINDOWS_NATIVE_CONSOLE_OUTPUT_OBJS:.o=.d) \
 	$(WINDOWS_NATIVE_PATCH_OBJS:.o=.d) \
 	$(WINDOWS_NATIVE_SESSION_STORE_OBJS:.o=.d) \
 	$(WINDOWS_NATIVE_SERVER_STREAMING_OBJS:.o=.d) \
@@ -121,6 +126,9 @@ $(WINDOWS_NATIVE_TEST_OBJ_DIR)/%.o: $(MAKEFILE_DIR)%.cpp
 
 $(eval $(call run_test,test-windows-native-basic-mutex,$(WINDOWS_NATIVE_BASIC_MUTEX)))
 $(eval $(call link_windows_native_test,$(WINDOWS_NATIVE_BASIC_MUTEX),$(WINDOWS_NATIVE_BASIC_MUTEX_OBJS)))
+
+$(eval $(call run_test,test-windows-native-console-output,$(WINDOWS_NATIVE_CONSOLE_OUTPUT)))
+$(eval $(call link_windows_native_test,$(WINDOWS_NATIVE_CONSOLE_OUTPUT),$(WINDOWS_NATIVE_CONSOLE_OUTPUT_OBJS)))
 
 $(eval $(call run_test,test-windows-native-patch,$(WINDOWS_NATIVE_PATCH)))
 $(eval $(call link_windows_native_test,$(WINDOWS_NATIVE_PATCH),$(WINDOWS_NATIVE_PATCH_OBJS)))
@@ -163,6 +171,7 @@ $(eval $(call link_windows_native_test,$(WINDOWS_NATIVE_PORT_TUNNEL_FRAME),$(WIN
 
 test-windows-native: \
 	test-windows-native-basic-mutex \
+	test-windows-native-console-output \
 	test-windows-native-patch \
 	test-windows-native-session-store \
 	test-windows-native-server-streaming \
@@ -183,6 +192,7 @@ check-windows-native: all-windows-native test-windows-native
 	all-windows-native \
 	test-windows-native \
 	test-windows-native-basic-mutex \
+	test-windows-native-console-output \
 	test-windows-native-patch \
 	test-windows-native-session-store \
 	test-windows-native-server-streaming \

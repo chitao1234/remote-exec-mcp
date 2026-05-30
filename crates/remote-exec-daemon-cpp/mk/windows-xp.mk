@@ -20,6 +20,7 @@ WINDOWS_XP_LDLIBS := -lws2_32
 WINDOWS_XP_SRCS := $(WINDOWS_DAEMON_SRCS)
 
 XP_BASIC_MUTEX := $(BUILD_DIR)/test_basic_mutex-xp.exe
+XP_CONSOLE_OUTPUT := $(BUILD_DIR)/test_console_output-xp.exe
 XP_PATCH := $(BUILD_DIR)/test_patch-xp.exe
 XP_SESSION_STORE := $(BUILD_DIR)/test_session_store-xp.exe
 XP_SERVER_STREAMING := $(BUILD_DIR)/test_server_streaming-xp.exe
@@ -36,6 +37,7 @@ XP_PORT_TUNNEL_FRAME := $(BUILD_DIR)/test_port_tunnel_frame-xp.exe
 
 WINDOWS_XP_PLATFORM_NEUTRAL_TEST_TARGETS := \
 	$(XP_BASIC_MUTEX) \
+	$(XP_CONSOLE_OUTPUT) \
 	$(XP_PATCH) \
 	$(XP_TRANSFER) \
 	$(XP_CONFIG) \
@@ -59,6 +61,8 @@ WINDOWS_XP_TEST_TARGETS := \
 	$(WINDOWS_XP_SERVER_SMOKE_TEST_TARGETS)
 
 XP_BASIC_MUTEX_SRCS := $(WINDOWS_BASIC_MUTEX_TEST_SRCS)
+
+XP_CONSOLE_OUTPUT_SRCS := $(WINDOWS_CONSOLE_OUTPUT_TEST_SRCS)
 
 XP_PATCH_SRCS := $(HOST_PATCH_SRCS)
 
@@ -92,6 +96,7 @@ XP_PORT_TUNNEL_FRAME_SRCS := $(HOST_PORT_TUNNEL_FRAME_SRCS)
 
 WINDOWS_XP_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_PROD_OBJ_DIR),$(WINDOWS_XP_SRCS)))
 XP_BASIC_MUTEX_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_BASIC_MUTEX_SRCS)))
+XP_CONSOLE_OUTPUT_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_CONSOLE_OUTPUT_SRCS)))
 XP_PATCH_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_PATCH_SRCS)))
 XP_SESSION_STORE_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_SESSION_STORE_SRCS)))
 XP_SERVER_STREAMING_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$(XP_SERVER_STREAMING_SRCS)))
@@ -109,6 +114,7 @@ XP_PORT_TUNNEL_FRAME_OBJS := $(sort $(call cpp_objs,$(WINDOWS_XP_TEST_OBJ_DIR),$
 DEP_FILES += \
 	$(WINDOWS_XP_OBJS:.o=.d) \
 	$(XP_BASIC_MUTEX_OBJS:.o=.d) \
+	$(XP_CONSOLE_OUTPUT_OBJS:.o=.d) \
 	$(XP_PATCH_OBJS:.o=.d) \
 	$(XP_SESSION_STORE_OBJS:.o=.d) \
 	$(XP_SERVER_STREAMING_OBJS:.o=.d) \
@@ -151,6 +157,9 @@ $(WINDOWS_XP_TEST_OBJ_DIR)/%.o: $(MAKEFILE_DIR)%.cpp
 $(eval $(call run_windows_xp_test,test-windows-xp-basic-mutex,$(XP_BASIC_MUTEX)))
 $(eval $(call link_windows_xp_test,$(XP_BASIC_MUTEX),$(XP_BASIC_MUTEX_OBJS)))
 
+$(eval $(call run_windows_xp_test,test-windows-xp-console-output,$(XP_CONSOLE_OUTPUT)))
+$(eval $(call link_windows_xp_test,$(XP_CONSOLE_OUTPUT),$(XP_CONSOLE_OUTPUT_OBJS)))
+
 $(eval $(call run_windows_xp_test,test-windows-xp-patch,$(XP_PATCH)))
 $(eval $(call link_windows_xp_test,$(XP_PATCH),$(XP_PATCH_OBJS)))
 
@@ -192,6 +201,7 @@ $(eval $(call link_windows_xp_test,$(XP_PORT_TUNNEL_FRAME),$(XP_PORT_TUNNEL_FRAM
 
 test-windows-xp: $(WINDOWS_XP_TEST_TARGETS)
 	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_BASIC_MUTEX)
+	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_CONSOLE_OUTPUT)
 	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_PATCH)
 	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_SESSION_STORE)
 	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_XP_TEST_RUNNER) $(XP_SERVER_STREAMING)
@@ -208,4 +218,4 @@ test-windows-xp: $(WINDOWS_XP_TEST_TARGETS)
 
 check-windows-xp: all-windows-xp test-windows-xp
 
-.PHONY: all-windows-xp test-windows-xp test-windows-xp-basic-mutex test-windows-xp-patch test-windows-xp-session-store test-windows-xp-server-streaming test-windows-xp-transfer test-windows-xp-config test-windows-xp-http-request test-windows-xp-server-transport test-windows-xp-connection-manager test-windows-xp-server-routes-common test-windows-xp-server-routes test-windows-xp-server-runtime test-windows-xp-sandbox test-windows-xp-port-tunnel-frame check-windows-xp
+.PHONY: all-windows-xp test-windows-xp test-windows-xp-basic-mutex test-windows-xp-console-output test-windows-xp-patch test-windows-xp-session-store test-windows-xp-server-streaming test-windows-xp-transfer test-windows-xp-config test-windows-xp-http-request test-windows-xp-server-transport test-windows-xp-connection-manager test-windows-xp-server-routes-common test-windows-xp-server-routes test-windows-xp-server-runtime test-windows-xp-sandbox test-windows-xp-port-tunnel-frame check-windows-xp

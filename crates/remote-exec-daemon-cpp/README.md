@@ -91,6 +91,7 @@ Windows XP-compatible cross-build:
   `WINDOWS_XP_TEST_RUNNER` when it is set, and directly when it is empty. The
   default is `wine` on non-Windows hosts and empty on Windows.
 - `make test-windows-xp` for the XP runtime tests without rebuilding the daemon.
+- `make test-windows-xp-console-output`
 - `make test-windows-xp-session-store`
 - `make test-windows-xp-transfer`
 - `make test-windows-xp-server-routes-common`
@@ -109,6 +110,7 @@ Host-native Windows MSVC/NMAKE build:
 - `nmake /f NMakefile`
 - `nmake /f NMakefile all-msvc-native`
 - `nmake /f NMakefile check-msvc-native`
+- `nmake /f NMakefile test-msvc-native-console-output`
 - `nmake /f NMakefile test-msvc-native-session-store`
 - `nmake /f NMakefile test-msvc-native-transfer`
 - `nmake /f NMakefile test-msvc-native-server-routes-common`
@@ -122,6 +124,7 @@ Windows XP-compatible MSVC/NMAKE build:
   toolset, such as `vcvarsall.bat x86 -vcvars_ver=14.16`.
 - `nmake /f NMakefile all-msvc-xp`
 - `nmake /f NMakefile check-msvc-xp`
+- `nmake /f NMakefile test-msvc-xp-console-output`
 - `nmake /f NMakefile test-msvc-xp-session-store`
 - `nmake /f NMakefile test-msvc-xp-transfer`
 - `nmake /f NMakefile test-msvc-xp-server-routes-common`
@@ -204,6 +207,20 @@ build\remote-exec-daemon-cpp-xp-msvc.exe config\daemon-cpp.example.ini
 Logs go to `stderr`. Set `REMOTE_EXEC_LOG=debug` to raise the level, or use a
 shared filter string such as
 `REMOTE_EXEC_LOG=warn,remote_exec_daemon_cpp=debug`.
+
+## Windows Console Encoding
+
+Windows command stdout and stderr are captured as pipe bytes and normalized to
+UTF-8 before they are returned over RPC. The daemon decodes those bytes with the
+system OEM code page first and falls back to the ANSI code page if that decode
+fails, which covers legacy console encodings such as GBK, Shift-JIS, and Big5
+when the target Windows installation provides those code-page tables.
+
+The final UTF-16 to UTF-8 step is implemented in the daemon instead of relying
+on the `CP_UTF8` Windows code page, so command output decoding does not require
+the UTF-8 code page to be available on older Windows targets. Other daemon
+inputs such as JSON paths and command strings are still daemon-controlled UTF-8
+and are handled separately.
 
 ## Lifecycle Debugging
 

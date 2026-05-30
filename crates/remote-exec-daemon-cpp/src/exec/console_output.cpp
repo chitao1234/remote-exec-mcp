@@ -1,5 +1,4 @@
 #include <atomic>
-#include <cwchar>
 #include <stdexcept>
 #include <string>
 
@@ -15,6 +14,37 @@ std::string replacement_utf8() {
     return "\xEF\xBF\xBD";
 }
 
+void append_utf8_code_point(std::string* out, unsigned int code_point) {
+    if (code_point <= 0x7FU) {
+        out->push_back(static_cast<char>(code_point));
+        return;
+    }
+    if (code_point <= 0x7FFU) {
+        out->push_back(static_cast<char>(0xC0U | (code_point >> 6U)));
+        out->push_back(static_cast<char>(0x80U | (code_point & 0x3FU)));
+        return;
+    }
+    if (code_point <= 0xFFFFU) {
+        out->push_back(static_cast<char>(0xE0U | (code_point >> 12U)));
+        out->push_back(static_cast<char>(0x80U | ((code_point >> 6U) & 0x3FU)));
+        out->push_back(static_cast<char>(0x80U | (code_point & 0x3FU)));
+        return;
+    }
+
+    out->push_back(static_cast<char>(0xF0U | (code_point >> 18U)));
+    out->push_back(static_cast<char>(0x80U | ((code_point >> 12U) & 0x3FU)));
+    out->push_back(static_cast<char>(0x80U | ((code_point >> 6U) & 0x3FU)));
+    out->push_back(static_cast<char>(0x80U | (code_point & 0x3FU)));
+}
+
+bool is_high_surrogate(unsigned int code_unit) {
+    return code_unit >= 0xD800U && code_unit <= 0xDBFFU;
+}
+
+bool is_low_surrogate(unsigned int code_unit) {
+    return code_unit >= 0xDC00U && code_unit <= 0xDFFFU;
+}
+
 void log_console_decode_fallback_once(const char* fallback, const std::exception& ex, bool ansi_fallback) {
     static std::atomic<bool> logged_oem_to_ansi(false);
     static std::atomic<bool> logged_ansi_to_replacement(false);
@@ -28,21 +58,28 @@ void log_console_decode_fallback_once(const char* fallback, const std::exception
 }
 
 std::string utf8_from_wide(const std::wstring& wide) {
-    if (wide.empty()) {
-        return "";
-    }
-
-    const int utf8_length =
-        WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), nullptr, 0, nullptr, nullptr);
-    if (utf8_length <= 0) {
-        throw std::runtime_error(last_error_message("WideCharToMultiByte(CP_UTF8)"));
-    }
-
     std::string utf8;
-    utf8.resize(static_cast<std::size_t>(utf8_length));
-    if (WideCharToMultiByte(
-            CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), &utf8[0], utf8_length, nullptr, nullptr) <= 0) {
-        throw std::runtime_error(last_error_message("WideCharToMultiByte(CP_UTF8)"));
+    for (std::size_t index = 0; index < wide.size(); ++index) {
+        const unsigned int code_unit = static_cast<unsigned int>(wide[index]);
+        if (is_high_surrogate(code_unit)) {
+            if (index + 1U < wide.size()) {
+                const unsigned int next = static_cast<unsigned int>(wide[index + 1U]);
+                if (is_low_surrogate(next)) {
+                    const unsigned int code_point =
+                        0x10000U + ((code_unit - 0xD800U) << 10U) + (next - 0xDC00U);
+                    append_utf8_code_point(&utf8, code_point);
+                    ++index;
+                    continue;
+                }
+            }
+            utf8 += replacement_utf8();
+            continue;
+        }
+        if (is_low_surrogate(code_unit)) {
+            utf8 += replacement_utf8();
+            continue;
+        }
+        append_utf8_code_point(&utf8, code_unit);
     }
     return utf8;
 }
@@ -52,20 +89,29 @@ std::string utf8_from_code_page(UINT code_page, const std::string& raw) {
         return "";
     }
 
-    const int wide_length = MultiByteToWideChar(code_page, 0, raw.data(), static_cast<int>(raw.size()), nullptr, 0);
+    DWORD flags = MB_ERR_INVALID_CHARS;
+    int wide_length = MultiByteToWideChar(code_page, flags, raw.data(), static_cast<int>(raw.size()), nullptr, 0);
+    if (wide_length <= 0 && GetLastError() == ERROR_INVALID_FLAGS) {
+        flags = 0;
+        wide_length = MultiByteToWideChar(code_page, flags, raw.data(), static_cast<int>(raw.size()), nullptr, 0);
+    }
     if (wide_length <= 0) {
         throw std::runtime_error(last_error_message("MultiByteToWideChar"));
     }
 
     std::wstring wide;
     wide.resize(static_cast<std::size_t>(wide_length));
-    if (MultiByteToWideChar(code_page, 0, raw.data(), static_cast<int>(raw.size()), &wide[0], wide_length) <= 0) {
+    if (MultiByteToWideChar(code_page, flags, raw.data(), static_cast<int>(raw.size()), &wide[0], wide_length) <= 0) {
         throw std::runtime_error(last_error_message("MultiByteToWideChar"));
     }
     return utf8_from_wide(wide);
 }
 
-std::string decode_console_output(std::string* carry, const std::string& raw_chunk, bool flush) {
+std::string decode_console_output_with_code_pages(UINT primary_code_page,
+                                                  UINT fallback_code_page,
+                                                  std::string* carry,
+                                                  const std::string& raw_chunk,
+                                                  bool flush) {
     std::string raw = *carry;
     raw += raw_chunk;
     carry->clear();
@@ -74,7 +120,7 @@ std::string decode_console_output(std::string* carry, const std::string& raw_chu
         return "";
     }
 
-    if (!flush && IsDBCSLeadByteEx(GetOEMCP(), static_cast<BYTE>(raw[raw.size() - 1])) != 0) {
+    if (!flush && IsDBCSLeadByteEx(primary_code_page, static_cast<BYTE>(raw[raw.size() - 1])) != 0) {
         carry->push_back(raw[raw.size() - 1]);
         raw.erase(raw.size() - 1);
         if (raw.empty()) {
@@ -83,11 +129,11 @@ std::string decode_console_output(std::string* carry, const std::string& raw_chu
     }
 
     try {
-        return utf8_from_code_page(GetOEMCP(), raw);
+        return utf8_from_code_page(primary_code_page, raw);
     } catch (const std::exception& ex) {
         log_console_decode_fallback_once("ANSI code page", ex, true);
         try {
-            return utf8_from_code_page(CP_ACP, raw);
+            return utf8_from_code_page(fallback_code_page, raw);
         } catch (const std::exception& fallback_ex) {
             log_console_decode_fallback_once("replacement characters", fallback_ex, false);
             std::string fallback;
@@ -141,18 +187,37 @@ std::string read_blocking_raw(HANDLE pipe, bool* eof) {
 } // namespace
 
 std::string read_available_console_output(HANDLE pipe, std::string* carry) {
-    return decode_console_output(carry, read_available_raw(pipe), false);
+    return decode_console_output_with_code_pages(GetOEMCP(), CP_ACP, carry, read_available_raw(pipe), false);
 }
 
 std::string read_console_output(HANDLE pipe, bool block, bool* eof, std::string* carry) {
     *eof = false;
     if (block) {
-        return decode_console_output(carry, read_blocking_raw(pipe, eof), false);
+        return decode_console_output_with_code_pages(GetOEMCP(), CP_ACP, carry, read_blocking_raw(pipe, eof), false);
     }
 
-    return decode_console_output(carry, read_available_raw(pipe), false);
+    return decode_console_output_with_code_pages(GetOEMCP(), CP_ACP, carry, read_available_raw(pipe), false);
 }
 
 std::string flush_console_output_carry(std::string* carry) {
-    return decode_console_output(carry, "", true);
+    return decode_console_output_with_code_pages(GetOEMCP(), CP_ACP, carry, "", true);
 }
+
+#ifdef REMOTE_EXEC_CPP_TESTING
+std::string utf8_from_windows_wide_for_test(const std::wstring& wide) {
+    return utf8_from_wide(wide);
+}
+
+std::string utf8_from_windows_code_page_for_test(unsigned int code_page, const std::string& raw) {
+    return utf8_from_code_page(static_cast<UINT>(code_page), raw);
+}
+
+std::string decode_console_output_for_test(unsigned int primary_code_page,
+                                           unsigned int fallback_code_page,
+                                           std::string* carry,
+                                           const std::string& raw_chunk,
+                                           bool flush) {
+    return decode_console_output_with_code_pages(
+        static_cast<UINT>(primary_code_page), static_cast<UINT>(fallback_code_page), carry, raw_chunk, flush);
+}
+#endif
