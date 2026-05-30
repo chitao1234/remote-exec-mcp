@@ -1,0 +1,29 @@
+ifndef WINDOWS_CROSS_MK_INCLUDED
+WINDOWS_CROSS_MK_INCLUDED := 1
+
+WINDOWS_CXX ?= i686-w64-mingw32-g++
+WINE ?= wine
+ifeq ($(OS),Windows_NT)
+WINDOWS_TEST_RUNNER :=
+else
+WINDOWS_TEST_RUNNER ?= $(WINE)
+endif
+
+WINDOWS_COMMON_CPPFLAGS := $(COMMON_CPPFLAGS) -DWIN32_LEAN_AND_MEAN -DUNICODE -D_UNICODE
+WINDOWS_TEST_CXXFLAGS := $(XP_TEST_CXXFLAGS)
+WINDOWS_PROD_CXXFLAGS := $(PROD_CXXFLAGS)
+WINDOWS_LDFLAGS := -static-libgcc -static-libstdc++
+WINDOWS_TEST_ENV := REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_TEST_RUNNER)
+
+define run_windows_test
+$1: $2
+	$$(WINDOWS_TEST_ENV) $2
+endef
+
+define link_windows_test
+$1: $2
+	mkdir -p $$(dir $$@)
+	$$(WINDOWS_CXX) $$(WINDOWS_TEST_CXXFLAGS) $$(WINDOWS_LDFLAGS) -o $$@ $$^ $3
+endef
+
+endif

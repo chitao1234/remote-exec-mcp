@@ -1,16 +1,3 @@
-WINDOWS_CXX ?= i686-w64-mingw32-g++
-WINE ?= wine
-ifeq ($(OS),Windows_NT)
-WINDOWS_TEST_RUNNER :=
-else
-WINDOWS_TEST_RUNNER ?= $(WINE)
-endif
-
-WINDOWS_COMMON_CPPFLAGS := $(COMMON_CPPFLAGS) -DWIN32_LEAN_AND_MEAN -DUNICODE -D_UNICODE
-WINDOWS_TEST_CXXFLAGS := $(XP_TEST_CXXFLAGS)
-WINDOWS_PROD_CXXFLAGS := $(PROD_CXXFLAGS)
-WINDOWS_LDFLAGS := -static-libgcc -static-libstdc++
-
 WINDOWS_XP_PROD_OBJ_DIR := $(OBJ_DIR)/windows-xp-prod
 WINDOWS_XP_TEST_OBJ_DIR := $(OBJ_DIR)/windows-xp-test
 WINDOWS_XP_TARGET := $(BUILD_DIR)/remote-exec-daemon-cpp-xp.exe
@@ -132,17 +119,6 @@ DEP_FILES += \
 	$(XP_SANDBOX_OBJS:.o=.d) \
 	$(XP_PORT_TUNNEL_FRAME_OBJS:.o=.d)
 
-define run_windows_test
-$1: $2
-	REMOTE_EXEC_LOG=$$(TEST_LOG_LEVEL) $$(WINDOWS_TEST_RUNNER) $2
-endef
-
-define link_windows_xp_test
-$1: $2
-	mkdir -p $$(dir $$@)
-	$$(WINDOWS_CXX) $$(WINDOWS_TEST_CXXFLAGS) $$(WINDOWS_LDFLAGS) -o $$@ $$^ $$(WINDOWS_XP_LDLIBS)
-endef
-
 all-windows-xp: $(WINDOWS_XP_TARGET)
 
 $(WINDOWS_XP_TARGET): $(WINDOWS_XP_OBJS)
@@ -158,66 +134,66 @@ $(WINDOWS_XP_TEST_OBJ_DIR)/%.o: $(MAKEFILE_DIR)%.cpp
 	$(WINDOWS_CXX) $(WINDOWS_XP_TEST_CPPFLAGS) $(WINDOWS_TEST_CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 $(eval $(call run_windows_test,test-windows-xp-basic-mutex,$(XP_BASIC_MUTEX)))
-$(eval $(call link_windows_xp_test,$(XP_BASIC_MUTEX),$(XP_BASIC_MUTEX_OBJS)))
+$(eval $(call link_windows_test,$(XP_BASIC_MUTEX),$(XP_BASIC_MUTEX_OBJS),$(WINDOWS_XP_LDLIBS)))
 
 $(eval $(call run_windows_test,test-windows-xp-console-output,$(XP_CONSOLE_OUTPUT)))
-$(eval $(call link_windows_xp_test,$(XP_CONSOLE_OUTPUT),$(XP_CONSOLE_OUTPUT_OBJS)))
+$(eval $(call link_windows_test,$(XP_CONSOLE_OUTPUT),$(XP_CONSOLE_OUTPUT_OBJS),$(WINDOWS_XP_LDLIBS)))
 
 $(eval $(call run_windows_test,test-windows-xp-patch,$(XP_PATCH)))
-$(eval $(call link_windows_xp_test,$(XP_PATCH),$(XP_PATCH_OBJS)))
+$(eval $(call link_windows_test,$(XP_PATCH),$(XP_PATCH_OBJS),$(WINDOWS_XP_LDLIBS)))
 
 $(eval $(call run_windows_test,test-windows-xp-session-store,$(XP_SESSION_STORE)))
-$(eval $(call link_windows_xp_test,$(XP_SESSION_STORE),$(XP_SESSION_STORE_OBJS)))
+$(eval $(call link_windows_test,$(XP_SESSION_STORE),$(XP_SESSION_STORE_OBJS),$(WINDOWS_XP_LDLIBS)))
 
 $(eval $(call run_windows_test,test-windows-xp-server-streaming,$(XP_SERVER_STREAMING)))
-$(eval $(call link_windows_xp_test,$(XP_SERVER_STREAMING),$(XP_SERVER_STREAMING_OBJS)))
+$(eval $(call link_windows_test,$(XP_SERVER_STREAMING),$(XP_SERVER_STREAMING_OBJS),$(WINDOWS_XP_LDLIBS)))
 
 $(eval $(call run_windows_test,test-windows-xp-transfer,$(XP_TRANSFER)))
-$(eval $(call link_windows_xp_test,$(XP_TRANSFER),$(XP_TRANSFER_OBJS)))
+$(eval $(call link_windows_test,$(XP_TRANSFER),$(XP_TRANSFER_OBJS),$(WINDOWS_XP_LDLIBS)))
 
 $(eval $(call run_windows_test,test-windows-xp-config,$(XP_CONFIG)))
-$(eval $(call link_windows_xp_test,$(XP_CONFIG),$(XP_CONFIG_OBJS)))
+$(eval $(call link_windows_test,$(XP_CONFIG),$(XP_CONFIG_OBJS),$(WINDOWS_XP_LDLIBS)))
 
 $(eval $(call run_windows_test,test-windows-xp-http-request,$(XP_HTTP_REQUEST)))
-$(eval $(call link_windows_xp_test,$(XP_HTTP_REQUEST),$(XP_HTTP_REQUEST_OBJS)))
+$(eval $(call link_windows_test,$(XP_HTTP_REQUEST),$(XP_HTTP_REQUEST_OBJS),$(WINDOWS_XP_LDLIBS)))
 
 $(eval $(call run_windows_test,test-windows-xp-server-transport,$(XP_SERVER_TRANSPORT)))
-$(eval $(call link_windows_xp_test,$(XP_SERVER_TRANSPORT),$(XP_SERVER_TRANSPORT_OBJS)))
+$(eval $(call link_windows_test,$(XP_SERVER_TRANSPORT),$(XP_SERVER_TRANSPORT_OBJS),$(WINDOWS_XP_LDLIBS)))
 
 $(eval $(call run_windows_test,test-windows-xp-connection-manager,$(XP_CONNECTION_MANAGER)))
-$(eval $(call link_windows_xp_test,$(XP_CONNECTION_MANAGER),$(XP_CONNECTION_MANAGER_OBJS)))
+$(eval $(call link_windows_test,$(XP_CONNECTION_MANAGER),$(XP_CONNECTION_MANAGER_OBJS),$(WINDOWS_XP_LDLIBS)))
 
 $(eval $(call run_windows_test,test-windows-xp-server-routes-common,$(XP_SERVER_ROUTES_COMMON)))
-$(eval $(call link_windows_xp_test,$(XP_SERVER_ROUTES_COMMON),$(XP_SERVER_ROUTES_COMMON_OBJS)))
+$(eval $(call link_windows_test,$(XP_SERVER_ROUTES_COMMON),$(XP_SERVER_ROUTES_COMMON_OBJS),$(WINDOWS_XP_LDLIBS)))
 
 $(eval $(call run_windows_test,test-windows-xp-server-routes,$(XP_SERVER_ROUTES)))
-$(eval $(call link_windows_xp_test,$(XP_SERVER_ROUTES),$(XP_SERVER_ROUTES_OBJS)))
+$(eval $(call link_windows_test,$(XP_SERVER_ROUTES),$(XP_SERVER_ROUTES_OBJS),$(WINDOWS_XP_LDLIBS)))
 
 $(eval $(call run_windows_test,test-windows-xp-server-runtime,$(XP_SERVER_RUNTIME)))
-$(eval $(call link_windows_xp_test,$(XP_SERVER_RUNTIME),$(XP_SERVER_RUNTIME_OBJS)))
+$(eval $(call link_windows_test,$(XP_SERVER_RUNTIME),$(XP_SERVER_RUNTIME_OBJS),$(WINDOWS_XP_LDLIBS)))
 
 $(eval $(call run_windows_test,test-windows-xp-sandbox,$(XP_SANDBOX)))
-$(eval $(call link_windows_xp_test,$(XP_SANDBOX),$(XP_SANDBOX_OBJS)))
+$(eval $(call link_windows_test,$(XP_SANDBOX),$(XP_SANDBOX_OBJS),$(WINDOWS_XP_LDLIBS)))
 
 $(eval $(call run_windows_test,test-windows-xp-port-tunnel-frame,$(XP_PORT_TUNNEL_FRAME)))
-$(eval $(call link_windows_xp_test,$(XP_PORT_TUNNEL_FRAME),$(XP_PORT_TUNNEL_FRAME_OBJS)))
+$(eval $(call link_windows_test,$(XP_PORT_TUNNEL_FRAME),$(XP_PORT_TUNNEL_FRAME_OBJS),$(WINDOWS_XP_LDLIBS)))
 
 test-windows-xp: $(WINDOWS_XP_TEST_TARGETS)
-	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_TEST_RUNNER) $(XP_BASIC_MUTEX)
-	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_TEST_RUNNER) $(XP_CONSOLE_OUTPUT)
-	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_TEST_RUNNER) $(XP_PATCH)
-	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_TEST_RUNNER) $(XP_SESSION_STORE)
-	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_TEST_RUNNER) $(XP_SERVER_STREAMING)
-	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_TEST_RUNNER) $(XP_TRANSFER)
-	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_TEST_RUNNER) $(XP_CONFIG)
-	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_TEST_RUNNER) $(XP_HTTP_REQUEST)
-	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_TEST_RUNNER) $(XP_SERVER_TRANSPORT)
-	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_TEST_RUNNER) $(XP_CONNECTION_MANAGER)
-	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_TEST_RUNNER) $(XP_SERVER_ROUTES_COMMON)
-	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_TEST_RUNNER) $(XP_SERVER_ROUTES)
-	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_TEST_RUNNER) $(XP_SERVER_RUNTIME)
-	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_TEST_RUNNER) $(XP_SANDBOX)
-	REMOTE_EXEC_LOG=$(TEST_LOG_LEVEL) $(WINDOWS_TEST_RUNNER) $(XP_PORT_TUNNEL_FRAME)
+	$(WINDOWS_TEST_ENV) $(XP_BASIC_MUTEX)
+	$(WINDOWS_TEST_ENV) $(XP_CONSOLE_OUTPUT)
+	$(WINDOWS_TEST_ENV) $(XP_PATCH)
+	$(WINDOWS_TEST_ENV) $(XP_SESSION_STORE)
+	$(WINDOWS_TEST_ENV) $(XP_SERVER_STREAMING)
+	$(WINDOWS_TEST_ENV) $(XP_TRANSFER)
+	$(WINDOWS_TEST_ENV) $(XP_CONFIG)
+	$(WINDOWS_TEST_ENV) $(XP_HTTP_REQUEST)
+	$(WINDOWS_TEST_ENV) $(XP_SERVER_TRANSPORT)
+	$(WINDOWS_TEST_ENV) $(XP_CONNECTION_MANAGER)
+	$(WINDOWS_TEST_ENV) $(XP_SERVER_ROUTES_COMMON)
+	$(WINDOWS_TEST_ENV) $(XP_SERVER_ROUTES)
+	$(WINDOWS_TEST_ENV) $(XP_SERVER_RUNTIME)
+	$(WINDOWS_TEST_ENV) $(XP_SANDBOX)
+	$(WINDOWS_TEST_ENV) $(XP_PORT_TUNNEL_FRAME)
 
 check-windows-xp: all-windows-xp test-windows-xp
 

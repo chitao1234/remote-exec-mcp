@@ -147,8 +147,9 @@ Windows XP-compatible MSVC/NMAKE build:
 
 The top-level `GNUmakefile` is the GNU make public entry point. Shared source
 lists live in `mk/sources.mk`, shared GNU make helpers live in `mk/common.mk`,
-host-native rules live in `mk/posix.mk`, the Windows XP cross-build rules live
-in `mk/windows-xp.mk`, and the Winsock 1 cross-build rules live in
+shared Windows cross-build helpers live in `mk/windows-cross.mk`, host-native
+rules live in `mk/posix.mk`, the Windows XP cross-build rules live in
+`mk/windows-xp.mk`, and the Winsock 1 cross-build rules live in
 `mk/windows-winsock1.mk`. GNU make prefers `GNUmakefile`, so plain `make`
 selects that file automatically.
 
