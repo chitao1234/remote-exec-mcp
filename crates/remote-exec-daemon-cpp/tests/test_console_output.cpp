@@ -91,6 +91,7 @@ void test_code_page_decode() {
                                                                                "\xE3\x81\xAB\xE3\x81\xA1"
                                                                                "\xE3\x81\xAF");
     assert_code_page_decode(950U, "\xA7\x41\xA6\x6E", "\xE4\xBD\xA0\xE5\xA5\xBD");
+    assert_code_page_decode(949U, "\xC7\xD1\xB1\xDB", "\xED\x95\x9C\xEA\xB8\x80");
 }
 
 void assert_decode_split_carry(unsigned int code_page,
@@ -112,6 +113,7 @@ void test_decode_carry() {
     assert_decode_split_carry(936U, "\xC4", "\xE3", "\xE4\xBD\xA0");
     assert_decode_split_carry(932U, "\x82", "\xB1", "\xE3\x81\x93");
     assert_decode_split_carry(950U, "\xA4", "\xA4", "\xE4\xB8\xAD");
+    assert_decode_split_carry(949U, "\xC7", "\xD1", "\xED\x95\x9C");
 }
 
 void assert_decode_without_false_carry(unsigned int code_page,
@@ -130,6 +132,7 @@ void test_decode_complete_dbcs_character_does_not_carry_trail_byte() {
     assert_decode_without_false_carry(936U, "\xC4\xE3", "\xE4\xBD\xA0");
     assert_decode_without_false_carry(932U, "\x93\xFA", "\xE6\x97\xA5");
     assert_decode_without_false_carry(950U, "\xA4\xA4", "\xE4\xB8\xAD");
+    assert_decode_without_false_carry(949U, "\xC7\xD1", "\xED\x95\x9C");
 }
 
 void test_invalid_decode_fallback() {
