@@ -54,6 +54,23 @@ std::string utf8_from_code_page(UINT code_page, const std::string& raw) {
     return utf8_from_wide(wide);
 }
 
+void carry_incomplete_dbcs_suffix(UINT code_page, std::string* raw, std::string* carry) {
+    for (std::size_t index = 0; index < raw->size();) {
+        if (IsDBCSLeadByteEx(code_page, static_cast<BYTE>((*raw)[index])) == 0) {
+            ++index;
+            continue;
+        }
+
+        if (index + 1U == raw->size()) {
+            carry->assign(1U, (*raw)[index]);
+            raw->erase(index);
+            return;
+        }
+
+        index += 2U;
+    }
+}
+
 std::string decode_console_output_with_code_pages(UINT primary_code_page,
                                                   UINT fallback_code_page,
                                                   std::string* carry,
@@ -67,9 +84,8 @@ std::string decode_console_output_with_code_pages(UINT primary_code_page,
         return "";
     }
 
-    if (!flush && IsDBCSLeadByteEx(primary_code_page, static_cast<BYTE>(raw[raw.size() - 1])) != 0) {
-        carry->push_back(raw[raw.size() - 1]);
-        raw.erase(raw.size() - 1);
+    if (!flush) {
+        carry_incomplete_dbcs_suffix(primary_code_page, &raw, carry);
         if (raw.empty()) {
             return "";
         }

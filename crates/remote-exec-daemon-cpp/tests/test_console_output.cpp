@@ -93,16 +93,43 @@ void test_code_page_decode() {
     assert_code_page_decode(950U, "\xA7\x41\xA6\x6E", "\xE4\xBD\xA0\xE5\xA5\xBD");
 }
 
-void test_decode_carry() {
-    if (!code_page_available(932U)) {
+void assert_decode_split_carry(unsigned int code_page,
+                               const std::string& first_byte,
+                               const std::string& second_byte,
+                               const std::string& expected_utf8) {
+    if (!code_page_available(code_page)) {
         return;
     }
 
     std::string carry;
-    TEST_ASSERT(decode_console_output_for_test(932U, 1252U, &carry, "\x82", false).empty());
-    TEST_ASSERT(carry == "\x82");
-    TEST_ASSERT(decode_console_output_for_test(932U, 1252U, &carry, "\xB1", false) == "\xE3\x81\x93");
+    TEST_ASSERT(decode_console_output_for_test(code_page, 1252U, &carry, first_byte, false).empty());
+    TEST_ASSERT(carry == first_byte);
+    TEST_ASSERT(decode_console_output_for_test(code_page, 1252U, &carry, second_byte, false) == expected_utf8);
     TEST_ASSERT(carry.empty());
+}
+
+void test_decode_carry() {
+    assert_decode_split_carry(936U, "\xC4", "\xE3", "\xE4\xBD\xA0");
+    assert_decode_split_carry(932U, "\x82", "\xB1", "\xE3\x81\x93");
+    assert_decode_split_carry(950U, "\xA4", "\xA4", "\xE4\xB8\xAD");
+}
+
+void assert_decode_without_false_carry(unsigned int code_page,
+                                       const std::string& raw,
+                                       const std::string& expected_utf8) {
+    if (!code_page_available(code_page)) {
+        return;
+    }
+
+    std::string carry;
+    TEST_ASSERT(decode_console_output_for_test(code_page, 1252U, &carry, raw, false) == expected_utf8);
+    TEST_ASSERT(carry.empty());
+}
+
+void test_decode_complete_dbcs_character_does_not_carry_trail_byte() {
+    assert_decode_without_false_carry(936U, "\xC4\xE3", "\xE4\xBD\xA0");
+    assert_decode_without_false_carry(932U, "\x93\xFA", "\xE6\x97\xA5");
+    assert_decode_without_false_carry(950U, "\xA4\xA4", "\xE4\xB8\xAD");
 }
 
 void test_invalid_decode_fallback() {
@@ -119,6 +146,7 @@ int main() {
     test_invalid_utf8_to_wide();
     test_code_page_decode();
     test_decode_carry();
+    test_decode_complete_dbcs_character_does_not_carry_trail_byte();
     test_invalid_decode_fallback();
     return 0;
 }
