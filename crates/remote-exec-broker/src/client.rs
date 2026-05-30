@@ -184,10 +184,10 @@ async fn call_direct_tool(
             crate::mcp_server::finish_scoped_tool_call(
                 tool,
                 !state.disable_structured_content,
-                async move {
+                Box::pin(async move {
                     let input = deserialize_tool_arguments::<$input>(name, arguments)?;
                     $handler(state, input).await
-                },
+                }),
             )
             .await
         }};
