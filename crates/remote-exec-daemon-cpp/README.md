@@ -170,8 +170,10 @@ so plain `make` selects that file automatically.
 `NMakefile` is intentionally separate from the GNU/BSD make entry points. It
 builds a host-native MSVC daemon and a Windows XP-compatible MSVC daemon, uses
 the static C runtime (`/MT`), and exposes Win32 session/transfer runtime test
-targets for both toolchains. The XP targets link as an x86 console program with
-a Windows XP minimum subsystem version.
+targets for both toolchains. The public `*-native` and `*-xp` targets are
+compatibility aliases over shared `all-msvc`, `test-msvc`, and `check-msvc`
+rules selected by `MSVC_VARIANT=native` or `MSVC_VARIANT=xp`. The XP targets
+link as an x86 console program with a Windows XP minimum subsystem version.
 
 Runtime coverage note: host-native POSIX C++ daemon runtime tests run on Unix.
 GNU legacy Windows binaries and tests run under Wine on Linux. MSVC native
