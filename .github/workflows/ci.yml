@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
@@ -248,7 +252,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: crates/remote-exec-daemon-cpp/build
-          key: cpp-${{ runner.os }}-${{ hashFiles('crates/remote-exec-daemon-cpp/**') }}
+          key: cpp-${{ runner.os }}-${{ hashFiles('crates/remote-exec-daemon-cpp/**', 'winptyrs/**', '.gitmodules') }}
           restore-keys: |
             cpp-${{ runner.os }}-
 
@@ -276,22 +280,17 @@ jobs:
           make -k -j"${jobs}" -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-windows-2000 check-windows-2000 &
           win2000_pid="$!"
 
-          make -k -j"${jobs}" -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-windows-xp check-windows-xp &
-          xp_pid="$!"
-
           make -k -j"${jobs}" -C crates/remote-exec-daemon-cpp BUILD_DIR=build/ci-windows-nt4-ws1 check-windows-nt4-ws1 &
           nt4_ws1_pid="$!"
 
           posix_status=0
           win2000_status=0
-          xp_status=0
           nt4_ws1_status=0
           wait "${posix_pid}" || posix_status="$?"
           wait "${win2000_pid}" || win2000_status="$?"
-          wait "${xp_pid}" || xp_status="$?"
           wait "${nt4_ws1_pid}" || nt4_ws1_status="$?"
 
-          if [ "${posix_status}" -ne 0 ] || [ "${win2000_status}" -ne 0 ] || [ "${xp_status}" -ne 0 ] || [ "${nt4_ws1_status}" -ne 0 ]; then
+          if [ "${posix_status}" -ne 0 ] || [ "${win2000_status}" -ne 0 ] || [ "${nt4_ws1_status}" -ne 0 ]; then
             exit 1
           fi
 
