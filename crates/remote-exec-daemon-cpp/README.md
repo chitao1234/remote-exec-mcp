@@ -114,8 +114,8 @@ Windows GNU build matrix:
   `REMOTE_EXEC_CPP_WINSOCK1`, `wsock32`, IPv4 only, and explicit rejection of
   IPv6 endpoints with an `invalid_endpoint` error.
 - `WINDOWS_WINPTY=auto|on|off` controls whether the GNU build vendors `winpty`.
-  `auto` enables `winpty` for Windows 2000 and XP builds when
-  `WINDOWS_WINSOCK_VERSION=2`.
+  `auto` enables `winpty` for Windows 2000 and XP builds, independent of the
+  selected Winsock backend.
 - The MSVC/NMAKE native and XP entry points vendor the same `winpty` sources
   and stage `winpty-agent.exe` beside the built daemon and test binaries. NMAKE
   does not expose a Windows 2000 entry point.
@@ -332,19 +332,18 @@ returned `output` field preserves their emitted order.
 POSIX builds support `tty=true` when the host can allocate a PTY. The daemon
 reports this through `/v1/target-info` as `supports_pty`, and rejects `tty=true`
 only when PTY allocation is unavailable. Windows GNU builds for Windows 2000
-and XP with `WINDOWS_WINSOCK_VERSION=2` use vendored `winpty` for `tty=true`
-sessions when `winpty` is usable at runtime. The MSVC/NMAKE native and XP
-builds use the same vendored `winpty` path. Builds with
-`WINDOWS_WINSOCK_VERSION=1`, or GNU Winsock 2 builds where `WINDOWS_WINPTY` is
-effectively off, report
+and XP use vendored `winpty` for `tty=true` sessions when `winpty` is enabled
+for the build and usable at runtime. The MSVC/NMAKE native and XP builds use
+the same vendored `winpty` path. GNU Windows builds where `WINDOWS_WINPTY` is
+effectively off report
 `supports_pty=false`. Under Wine, the GNU WinPTY path also reports
 `supports_pty=false` because `winpty` behavior there is not treated as
 authoritative.
 
 POSIX builds support `write_stdin.pty_size` for live `tty=true` sessions by
-applying `TIOCSWINSZ` to the PTY master. Windows GNU builds with
-`WINDOWS_WINSOCK_VERSION=2` with `winpty` enabled forwards PTY resize requests
-through `winpty`. Builds without `winpty` continue to reject `tty=true`, so
+applying `TIOCSWINSZ` to the PTY master. Windows GNU builds with `winpty`
+enabled forward PTY resize requests through `winpty`. Builds without `winpty`
+continue to reject `tty=true`, so
 resize requests return the same typed unsupported-session error path.
 
 POSIX non-TTY exec intentionally starts child processes with stdin attached to
@@ -497,8 +496,7 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
 - POSIX PTY support depends on host PTY allocation
 - Windows GNU PTY support depends on `winpty` being enabled for the build and
   available at runtime; Wine intentionally disables PTY capability reporting
-- no PTY support in `WINDOWS_WINSOCK_VERSION=1`, or in Winsock 2 builds where
-  `winpty` is disabled
+- no PTY support in builds where `winpty` is disabled
 - `view_image` supports passthrough PNG, JPEG, and WebP only
 - omitted `view_image.detail` defaults to `original` because no resize/re-encode path exists
 - broker-owned `forward_id` values do not persist across broker restart

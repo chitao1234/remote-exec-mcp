@@ -729,9 +729,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
 }
 
 bool process_session_supports_pty() {
-#ifdef REMOTE_EXEC_CPP_WINSOCK1
-    return false;
-#elif defined(REMOTE_EXEC_CPP_HAS_WINPTY)
+#ifdef REMOTE_EXEC_CPP_HAS_WINPTY
     static const bool supported = []() {
         if (is_wine_runtime()) {
             return false;
