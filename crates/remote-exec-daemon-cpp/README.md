@@ -73,6 +73,11 @@ inputs changed.
 GNU make, BSD make, and NMAKE default to optimized builds (`-O2` or `/O2`).
 Pass `DEBUG=1` to switch the relevant entry point to `-O0 -g` or
 `/Od /Zi /DEBUG`.
+NMAKE passes `/utf-8` so MSVC reads UTF-8 source files consistently across
+host code pages, and enables `cl /MP` by default so each large multi-source
+compile step can use multiple cores even though `nmake` itself remains
+single-threaded. Override the compiler-side parallelism with `MSVC_JOBS=<n>`
+or force serial compilation with `MSVC_JOBS=1`.
 
 Host-native POSIX daemon:
 
@@ -170,8 +175,10 @@ so plain `make` selects that file automatically.
 `NMakefile` is intentionally separate from the GNU/BSD make entry points. It
 builds a host-native MSVC daemon and a Windows XP-compatible MSVC daemon, uses
 the static C runtime (`/MT`), and exposes Win32 session/transfer runtime test
-targets for both toolchains. The XP targets link as an x86 console program with
-a Windows XP minimum subsystem version.
+targets for both toolchains. The public `*-native` and `*-xp` targets are
+compatibility aliases over shared `all-msvc`, `test-msvc`, and `check-msvc`
+rules selected by `MSVC_VARIANT=native` or `MSVC_VARIANT=xp`. The XP targets
+link as an x86 console program with a Windows XP minimum subsystem version.
 
 Runtime coverage note: host-native POSIX C++ daemon runtime tests run on Unix.
 GNU legacy Windows binaries and tests run under Wine on Linux. MSVC native
