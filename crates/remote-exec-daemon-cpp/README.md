@@ -113,6 +113,9 @@ Windows GNU build matrix:
   Windows 2000 can already build as a first-class `WINVER` target, but remains
   PTY-disabled under the current auto default until the backported `winpty`
   path lands there.
+- The MSVC/NMAKE native and XP entry points vendor the same `winpty` sources
+  and stage `winpty-agent.exe` beside the built daemon and test binaries, so
+  their PTY coverage matches the Winsock 2 GNU path.
 - The default `WINDOWS_TOOLCHAIN` is `cross` on non-Windows hosts and `native`
   on Windows GNU hosts.
 - The defaults are `WINDOWS_WINVER=0x0501`,
@@ -325,8 +328,9 @@ POSIX builds support `tty=true` when the host can allocate a PTY. The daemon
 reports this through `/v1/target-info` as `supports_pty`, and rejects `tty=true`
 only when PTY allocation is unavailable. Windows GNU builds with
 `WINDOWS_WINSOCK_VERSION=2` use vendored `winpty` for `tty=true` sessions when
-`winpty` is usable at runtime. Builds with `WINDOWS_WINSOCK_VERSION=1`, or
-Winsock 2 builds where `WINDOWS_WINPTY` is effectively off, report
+`winpty` is usable at runtime. The MSVC/NMAKE native and XP builds use the same
+vendored `winpty` path. Builds with `WINDOWS_WINSOCK_VERSION=1`, or GNU Winsock
+2 builds where `WINDOWS_WINPTY` is effectively off, report
 `supports_pty=false`. Under Wine, the GNU WinPTY path also reports
 `supports_pty=false` because `winpty` behavior there is not treated as
 authoritative.

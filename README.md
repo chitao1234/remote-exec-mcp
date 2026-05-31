@@ -601,6 +601,8 @@ before the Rust test job. The standalone C++ daemon also has its own Linux and
 Windows CI job: POSIX runtime tests run on Linux, Windows 2000, Windows
 XP-compatible, and NT 4.0/Winsock 1 test binaries run under Wine on Linux when
 available, and the 32-bit host-native MSVC NMAKE path runs on `windows-latest`.
+That MSVC path now exercises the vendored winpty-backed PTY build instead of a
+PTY-disabled fallback.
 
 A separate periodic/manual GitHub Actions workflow exercises BSD coverage inside
 GitHub-hosted BSD VMs for FreeBSD, OpenBSD, NetBSD, and DragonFly BSD. Each BSD

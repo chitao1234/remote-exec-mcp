@@ -16,4 +16,5 @@ std::string decode_console_output_for_test(unsigned int primary_code_page,
                                            std::string* carry,
                                            const std::string& raw_chunk,
                                            bool flush);
+std::string decode_utf8_stream_for_test(std::string* carry, const std::string& raw_chunk, bool flush);
 #endif

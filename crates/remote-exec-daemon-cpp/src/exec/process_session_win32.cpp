@@ -15,6 +15,7 @@
 
 #include "core/logging.h"
 #include "exec/console_output.h"
+#include "exec/utf8_stream_decode.h"
 #include "platform/platform.h"
 #include "exec/process_session.h"
 #include "platform/win32_error.h"
@@ -180,71 +181,6 @@ private:
 const unsigned short DEFAULT_PTY_ROWS = 24U;
 const unsigned short DEFAULT_PTY_COLS = 120U;
 const DWORD WINPTY_OPEN_TIMEOUT_MS = 10UL * 1000UL;
-
-std::string replacement_utf8() {
-    return "\xEF\xBF\xBD";
-}
-
-bool is_continuation(unsigned char ch) {
-    return (ch & 0xC0U) == 0x80U;
-}
-
-std::string decode_utf8_output(std::string* carry, const std::string& raw_chunk, bool flush) {
-    std::string raw = *carry;
-    raw += raw_chunk;
-    carry->clear();
-
-    std::string output;
-    for (std::size_t index = 0; index < raw.size();) {
-        const unsigned char ch = static_cast<unsigned char>(raw[index]);
-        if (ch < 0x80U) {
-            output.push_back(static_cast<char>(ch));
-            ++index;
-            continue;
-        }
-
-        std::size_t expected = 0U;
-        if (ch >= 0xC2U && ch <= 0xDFU) {
-            expected = 2U;
-        } else if (ch >= 0xE0U && ch <= 0xEFU) {
-            expected = 3U;
-        } else if (ch >= 0xF0U && ch <= 0xF4U) {
-            expected = 4U;
-        } else {
-            output += replacement_utf8();
-            ++index;
-            continue;
-        }
-
-        if (index + expected > raw.size()) {
-            if (!flush) {
-                carry->assign(raw, index, raw.size() - index);
-                break;
-            }
-            output += replacement_utf8();
-            ++index;
-            continue;
-        }
-
-        bool valid = true;
-        for (std::size_t offset = 1U; offset < expected; ++offset) {
-            if (!is_continuation(static_cast<unsigned char>(raw[index + offset]))) {
-                valid = false;
-                break;
-            }
-        }
-        if (!valid) {
-            output += replacement_utf8();
-            ++index;
-            continue;
-        }
-
-        output.append(raw, index, expected);
-        index += expected;
-    }
-
-    return output;
-}
 
 bool is_output_closed_error(DWORD error) {
     return error == ERROR_BROKEN_PIPE || error == ERROR_NO_DATA || error == ERROR_PIPE_NOT_CONNECTED;
@@ -581,6 +517,10 @@ bool run_taskkill_tree(DWORD pid) {
                        nullptr,
                        &startup_info,
                        &process_info) == 0) {
+        log_message(LOG_WARN,
+                    "process_session",
+                    std::string("taskkill tree cleanup failed to start for pid ") + std::to_string(pid) + ": " +
+                        last_error_message("CreateProcessW"));
         return false;
     }
 
@@ -590,9 +530,19 @@ bool run_taskkill_tree(DWORD pid) {
 
     DWORD exit_code = 1;
     if (GetExitCodeProcess(process.get(), &exit_code) == 0) {
+        log_message(LOG_WARN,
+                    "process_session",
+                    std::string("taskkill tree cleanup exit check failed for pid ") + std::to_string(pid) + ": " +
+                        last_error_message("GetExitCodeProcess"));
         return false;
     }
-    return exit_code == 0;
+    if (exit_code != 0) {
+        log_message(LOG_WARN,
+                    "process_session",
+                    std::string("taskkill tree cleanup returned exit code ") + std::to_string(exit_code) +
+                        " for pid " + std::to_string(pid));
+    }
+    return true;
 }
 
 class WinptyProcessSession : public ProcessSession {
@@ -638,10 +588,12 @@ public:
         *eof = false;
         const std::string raw =
             block ? read_winpty_blocking_raw(stdout_read_.get(), eof) : read_winpty_available_raw(stdout_read_.get(), eof);
-        return decode_utf8_output(carry, raw, false);
+        return utf8_stream_decode::decode_utf8_stream_chunk(carry, raw, false);
     }
 
-    std::string flush_carry(std::string* carry) override { return decode_utf8_output(carry, "", true); }
+    std::string flush_carry(std::string* carry) override {
+        return utf8_stream_decode::decode_utf8_stream_chunk(carry, "", true);
+    }
 
     bool has_exited(int* exit_code) override {
         if (!process_handle_.valid()) {
@@ -659,13 +611,13 @@ public:
 
     void terminate() override {
         close_console();
-        ensure_process_tree_terminated();
+        (void)attempt_process_tree_termination();
+        ensure_process_terminated();
     }
 
     bool terminate_descendants() override {
         close_console();
-        ensure_process_tree_terminated();
-        return true;
+        return attempt_process_tree_termination();
     }
 
 private:
@@ -678,12 +630,19 @@ private:
         console_closed_ = true;
     }
 
-    void ensure_process_tree_terminated() {
+    bool attempt_process_tree_termination() {
+        if (!process_handle_.valid()) {
+            return false;
+        }
+        const DWORD pid = GetProcessId(process_handle_.get());
+        return run_taskkill_tree(pid);
+    }
+
+    void ensure_process_terminated() {
         if (!process_handle_.valid() || WaitForSingleObject(process_handle_.get(), 0) == WAIT_OBJECT_0) {
             return;
         }
-        const DWORD pid = GetProcessId(process_handle_.get());
-        (void)run_taskkill_tree(pid);
+        TerminateProcess(process_handle_.get(), 1);
     }
 
     UniqueWinpty winpty_;

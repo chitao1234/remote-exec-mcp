@@ -6,6 +6,7 @@
 
 #include "core/logging.h"
 #include "exec/console_output.h"
+#include "exec/utf8_stream_decode.h"
 #include "platform/win32_error.h"
 #include "platform/win32_utf8.h"
 
@@ -182,5 +183,9 @@ std::string decode_console_output_for_test(unsigned int primary_code_page,
                                            bool flush) {
     return decode_console_output_with_code_pages(
         static_cast<UINT>(primary_code_page), static_cast<UINT>(fallback_code_page), carry, raw_chunk, flush);
+}
+
+std::string decode_utf8_stream_for_test(std::string* carry, const std::string& raw_chunk, bool flush) {
+    return utf8_stream_decode::decode_utf8_stream_chunk(carry, raw_chunk, flush);
 }
 #endif

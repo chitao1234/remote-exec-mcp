@@ -141,6 +141,22 @@ void test_invalid_decode_fallback() {
     TEST_ASSERT(carry.empty());
 }
 
+void test_utf8_stream_decode_carry() {
+    std::string carry;
+    TEST_ASSERT(decode_utf8_stream_for_test(&carry, "\xED\x95", false).empty());
+    TEST_ASSERT(carry == "\xED\x95");
+    TEST_ASSERT(decode_utf8_stream_for_test(&carry, "\x9C", false) == "\xED\x95\x9C");
+    TEST_ASSERT(carry.empty());
+}
+
+void test_utf8_stream_decode_flush_replaces_incomplete_suffix() {
+    std::string carry;
+    TEST_ASSERT(decode_utf8_stream_for_test(&carry, "\xED\x95", false).empty());
+    TEST_ASSERT(carry == "\xED\x95");
+    TEST_ASSERT(decode_utf8_stream_for_test(&carry, "", true) == "\xEF\xBF\xBD");
+    TEST_ASSERT(carry.empty());
+}
+
 } // namespace
 
 int main() {
@@ -151,5 +167,7 @@ int main() {
     test_decode_carry();
     test_decode_complete_dbcs_character_does_not_carry_trail_byte();
     test_invalid_decode_fallback();
+    test_utf8_stream_decode_carry();
+    test_utf8_stream_decode_flush_replaces_incomplete_suffix();
     return 0;
 }

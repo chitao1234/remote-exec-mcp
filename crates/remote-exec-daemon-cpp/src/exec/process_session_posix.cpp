@@ -23,6 +23,7 @@
 #include "platform/posix_process.h"
 #include "platform/posix_signal.h"
 #include "exec/process_session.h"
+#include "exec/utf8_stream_decode.h"
 
 extern char** environ;
 
@@ -150,71 +151,6 @@ void verify_posix_pty_launch_setup(const PosixPtyPair& pair) {
     if (!posix_fd::set_pty_window_size(slave.get(), DEFAULT_PTY_ROWS, DEFAULT_PTY_COLS)) {
         throw std::runtime_error(std::string("ioctl(TIOCSWINSZ on pty slave) failed: ") + safe_strerror(errno));
     }
-}
-
-std::string replacement_utf8() {
-    return "\xEF\xBF\xBD";
-}
-
-bool is_continuation(unsigned char ch) {
-    return (ch & 0xC0U) == 0x80U;
-}
-
-std::string decode_utf8_output(std::string* carry, const std::string& raw_chunk, bool flush) {
-    std::string raw = *carry;
-    raw += raw_chunk;
-    carry->clear();
-
-    std::string output;
-    for (std::size_t i = 0; i < raw.size();) {
-        const unsigned char ch = static_cast<unsigned char>(raw[i]);
-        if (ch < 0x80U) {
-            output.push_back(static_cast<char>(ch));
-            ++i;
-            continue;
-        }
-
-        std::size_t expected = 0;
-        if (ch >= 0xC2U && ch <= 0xDFU) {
-            expected = 2;
-        } else if (ch >= 0xE0U && ch <= 0xEFU) {
-            expected = 3;
-        } else if (ch >= 0xF0U && ch <= 0xF4U) {
-            expected = 4;
-        } else {
-            output += replacement_utf8();
-            ++i;
-            continue;
-        }
-
-        if (i + expected > raw.size()) {
-            if (!flush) {
-                carry->assign(raw.substr(i));
-                break;
-            }
-            output += replacement_utf8();
-            break;
-        }
-
-        bool valid = true;
-        for (std::size_t j = 1; j < expected; ++j) {
-            if (!is_continuation(static_cast<unsigned char>(raw[i + j]))) {
-                valid = false;
-                break;
-            }
-        }
-
-        if (!valid) {
-            output += replacement_utf8();
-            ++i;
-            continue;
-        }
-
-        output.append(raw, i, expected);
-        i += expected;
-    }
-
-    return output;
 }
 
 bool readable_now(int fd) {
@@ -455,10 +391,12 @@ public:
             }
             throw std::runtime_error(std::string("read(stdout) failed: ") + safe_strerror(errno));
         }
-        return decode_utf8_output(carry, raw, false);
+        return utf8_stream_decode::decode_utf8_stream_chunk(carry, raw, false);
     }
 
-    std::string flush_carry(std::string* carry) override { return decode_utf8_output(carry, "", true); }
+    std::string flush_carry(std::string* carry) override {
+        return utf8_stream_decode::decode_utf8_stream_chunk(carry, "", true);
+    }
 
     bool has_exited(int* exit_code) override {
         if (reaped_.load(std::memory_order_acquire)) {

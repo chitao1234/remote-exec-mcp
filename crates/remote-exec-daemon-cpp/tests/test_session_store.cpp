@@ -23,6 +23,7 @@
 #include "exec/process_session.h"
 #include "exec/session_store.h"
 #include "test_filesystem.h"
+#include "test_pty_helpers.h"
 #include "test_text_file.h"
 #include "../src/exec/session_pump_internal.h"
 
@@ -212,41 +213,6 @@ static std::string normalize_output(const std::string& input) {
     return output;
 }
 
-static std::string compact_pty_size_output(const std::string& input) {
-    std::string output;
-    output.reserve(input.size());
-    bool previous_space = true;
-    for (std::string::const_iterator it = input.begin(); it != input.end(); ++it) {
-        const unsigned char ch = static_cast<unsigned char>(*it);
-        const bool separator = ch == '\0' || ch == '\r' || ch == '\n' || ch == '\t' || ch == ';' || ch == '=' ||
-                               ch == ',';
-        if (separator || std::isspace(ch)) {
-            if (!previous_space) {
-                output.push_back(' ');
-                previous_space = true;
-            }
-            continue;
-        }
-        output.push_back(static_cast<char>(std::tolower(ch)));
-        previous_space = false;
-    }
-    if (!output.empty() && output[output.size() - 1] == ' ') {
-        output.erase(output.size() - 1);
-    }
-    return output;
-}
-
-static bool pty_size_output_matches(const std::string& output, unsigned short rows, unsigned short cols) {
-    const std::string compact = compact_pty_size_output(output);
-    const std::string row_text = std::to_string(rows);
-    const std::string col_text = std::to_string(cols);
-    return compact.find(row_text + " " + col_text) != std::string::npos ||
-           (compact.find("rows " + row_text) != std::string::npos &&
-            compact.find("columns " + col_text) != std::string::npos) ||
-           (compact.find(row_text + " rows") != std::string::npos &&
-            compact.find(col_text + " columns") != std::string::npos);
-}
-
 static Json start_test_command(SessionStore& store,
                                const std::string& command,
                                const std::string& workdir,
@@ -276,12 +242,6 @@ static std::string stable_test_shell() {
 #endif
 }
 
-#ifdef _WIN32
-static std::string windows_ping_sleep_command(unsigned long seconds) {
-    return "ping -n " + std::to_string(seconds + 1UL) + " 127.0.0.1>nul";
-}
-#endif
-
 static YieldTimeConfig fast_yield_time_config() {
     YieldTimeConfig config;
     config.exec_command = YieldTimeOperationConfig{1UL, 1000UL, 1UL};
@@ -309,7 +269,8 @@ static std::string append_running_session_output_until_pty_size(SessionStore& st
                                                                 unsigned short cols,
                                                                 unsigned long timeout_ms) {
     const std::uint64_t started = platform::monotonic_ms();
-    while (!pty_size_output_matches(output, rows, cols) && platform::monotonic_ms() - started < timeout_ms) {
+    while (!test_exec_pty::pty_size_output_matches(output, rows, cols) &&
+           platform::monotonic_ms() - started < timeout_ms) {
         const Json poll =
             store.write_stdin(daemon_session_id, "", true, 250UL, DEFAULT_MAX_OUTPUT_TOKENS, yield_time, false, 0U, 0U);
         output += normalize_output(poll.at("output").get<std::string>());
@@ -319,17 +280,6 @@ static std::string append_running_session_output_until_pty_size(SessionStore& st
         platform::sleep_ms(10UL);
     }
     return output;
-}
-
-static bool wait_until_file_contains(const fs::path& path, const std::string& fragment, unsigned long timeout_ms) {
-    const std::uint64_t started = platform::monotonic_ms();
-    while (platform::monotonic_ms() - started < timeout_ms) {
-        if (fs::exists(path) && fs::read_file_bytes(path).find(fragment) != std::string::npos) {
-            return true;
-        }
-        platform::sleep_ms(10UL);
-    }
-    return fs::exists(path) && fs::read_file_bytes(path).find(fragment) != std::string::npos;
 }
 
 #ifndef _WIN32
@@ -697,7 +647,7 @@ static void assert_posix_sigchld_reaper_preserves_exit_status_during_pty_resume_
         TEST_ASSERT(waiting.at("running").get<bool>());
         std::string waiting_id = waiting.at("daemon_session_id").get<std::string>();
         std::string waiting_output = waiting.at("output").get<std::string>();
-        TEST_ASSERT(wait_until_file_contains(ready_path, "ready", 5000UL));
+        TEST_ASSERT(test_exec_pty::wait_until_file_contains(ready_path, "ready", 5000UL));
 
         const Json resumed = race_store.write_stdin(
             waiting_id, "ping\n", true, 1000UL, DEFAULT_MAX_OUTPUT_TOKENS, fast_yield, false, 0U, 0U);
@@ -755,7 +705,11 @@ static void assert_non_tty_stdin_closed_rejected(SessionStore& store,
 static void assert_terminal_write_removes_completed_session(SessionStore& store,
                                                             const fs::path& root,
                                                             const std::string& shell) {
-    if (!process_session_supports_pty()) {
+    const bool supports_pty = process_session_supports_pty();
+#ifdef _WIN32
+    test_exec_pty::assert_built_winpty_runtime_available(supports_pty);
+#endif
+    if (!supports_pty) {
         return;
     }
 
@@ -836,9 +790,10 @@ static void assert_unrelated_sessions_do_not_block_each_other(SessionStore& stor
     }
 
 #ifdef _WIN32
-    const std::string slow_command = "echo slow&" + windows_ping_sleep_command(30UL);
+    const std::string slow_command = "echo slow&" + test_exec_pty::windows_ping_sleep_command(30UL);
     const std::string fast_command =
-        "set /p line= & <nul set /p =%line%>fast-session-input.txt & " + windows_ping_sleep_command(30UL);
+        "set /p line= & <nul set /p =%line%>fast-session-input.txt & " +
+        test_exec_pty::windows_ping_sleep_command(30UL);
 #else
     const std::string slow_command = "printf slow; sleep 30";
     const std::string fast_command = "IFS= read line; printf '%s' \"$line\" > fast-session-input.txt; sleep 30";
@@ -896,7 +851,7 @@ static void assert_unrelated_sessions_do_not_block_each_other(SessionStore& stor
     const std::uint64_t fast_elapsed_ms = platform::monotonic_ms() - fast_started_at;
     TEST_ASSERT(fast_elapsed_ms < 2000UL && "fast session waited behind unrelated session");
     (void)fast_completed;
-    TEST_ASSERT(wait_until_file_contains(fast_input_path, "ping", 2000UL));
+    TEST_ASSERT(test_exec_pty::wait_until_file_contains(fast_input_path, "ping", 2000UL));
     slow_thread.join();
     TEST_ASSERT(slow_poll.at("running").get<bool>());
 }
@@ -948,7 +903,7 @@ static void assert_tty_detection_and_input_round_trip(SessionStore& store,
     }
     TEST_ASSERT(!tty_completed.at("running").get<bool>());
     TEST_ASSERT(tty_completed.at("exit_code").get<int>() == 0);
-    TEST_ASSERT(wait_until_file_contains(tty_flag_path, "yes", 2000UL));
+    TEST_ASSERT(test_exec_pty::wait_until_file_contains(tty_flag_path, "yes", 2000UL));
     TEST_ASSERT(tty_output.find("hello\n") != std::string::npos);
     TEST_ASSERT(tty_output.find("input:hello\n") != std::string::npos);
 }
@@ -963,7 +918,7 @@ static void assert_tty_resize_round_trip(SessionStore& store,
     const YieldTimeConfig fast_yield = fast_yield_time_config();
 #ifdef _WIN32
     const std::string command = "echo ready&echo rows=24 cols=120&set /p line=&echo rows=33 cols=101&" +
-                                windows_ping_sleep_command(30UL);
+                                test_exec_pty::windows_ping_sleep_command(30UL);
 #else
     const std::string command = "printf ready; IFS= read line; stty -a; sleep 30";
 #endif
@@ -988,11 +943,11 @@ static void assert_tty_resize_round_trip(SessionStore& store,
                                            101U);
     TEST_ASSERT(resized.at("running").get<bool>());
     std::string resize_output = normalize_output(resized.at("output").get<std::string>());
-    if (!pty_size_output_matches(resize_output, 33U, 101U)) {
+    if (!test_exec_pty::pty_size_output_matches(resize_output, 33U, 101U)) {
         resize_output = append_running_session_output_until_pty_size(
             store, resize_running.at("daemon_session_id").get<std::string>(), fast_yield, resize_output, 33U, 101U, 2000UL);
     }
-    TEST_ASSERT(pty_size_output_matches(resize_output, 33U, 101U));
+    TEST_ASSERT(test_exec_pty::pty_size_output_matches(resize_output, 33U, 101U));
 }
 
 static void assert_non_tty_resize_rejected(SessionStore& store,
@@ -1059,8 +1014,8 @@ static void assert_session_store_destruction_terminates_process_group(const fs::
                                                 fast_yield,
                                                 64UL);
         TEST_ASSERT(running.at("running").get<bool>());
-        TEST_ASSERT(wait_until_file_contains(parent_pid_path, "", 2000UL));
-        TEST_ASSERT(wait_until_file_contains(child_pid_path, "", 2000UL));
+        TEST_ASSERT(test_exec_pty::wait_until_file_contains(parent_pid_path, "", 2000UL));
+        TEST_ASSERT(test_exec_pty::wait_until_file_contains(child_pid_path, "", 2000UL));
     }
 
     const pid_t parent_pid = read_pid_file(parent_pid_path);

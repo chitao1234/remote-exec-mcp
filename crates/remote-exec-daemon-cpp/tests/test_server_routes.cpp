@@ -8,6 +8,7 @@
 #include "platform/platform.h"
 #include "exec/process_session.h"
 #include "rpc/server_routes.h"
+#include "test_pty_helpers.h"
 #include "test_server_routes_shared.h"
 
 namespace fs = test_fs;
@@ -30,41 +31,6 @@ static std::string normalize_output(const std::string& input) {
         }
     }
     return output;
-}
-
-static std::string compact_pty_size_output(const std::string& input) {
-    std::string output;
-    output.reserve(input.size());
-    bool previous_space = true;
-    for (std::string::const_iterator it = input.begin(); it != input.end(); ++it) {
-        const unsigned char ch = static_cast<unsigned char>(*it);
-        const bool separator = ch == '\0' || ch == '\r' || ch == '\n' || ch == '\t' || ch == ';' || ch == '=' ||
-                               ch == ',';
-        if (separator || std::isspace(ch)) {
-            if (!previous_space) {
-                output.push_back(' ');
-                previous_space = true;
-            }
-            continue;
-        }
-        output.push_back(static_cast<char>(std::tolower(ch)));
-        previous_space = false;
-    }
-    if (!output.empty() && output[output.size() - 1] == ' ') {
-        output.erase(output.size() - 1);
-    }
-    return output;
-}
-
-static bool pty_size_output_matches(const std::string& output, unsigned short rows, unsigned short cols) {
-    const std::string compact = compact_pty_size_output(output);
-    const std::string row_text = std::to_string(rows);
-    const std::string col_text = std::to_string(cols);
-    return compact.find(row_text + " " + col_text) != std::string::npos ||
-           (compact.find("rows " + row_text) != std::string::npos &&
-            compact.find("columns " + col_text) != std::string::npos) ||
-           (compact.find(row_text + " rows") != std::string::npos &&
-            compact.find(col_text + " columns") != std::string::npos);
 }
 
 static std::string trim_trailing_exec_output(std::string output) {
@@ -137,7 +103,8 @@ static std::string append_running_exec_output_until_pty_size(AppState& state,
                                                              unsigned short cols,
                                                              unsigned long timeout_ms) {
     const std::uint64_t started = platform::monotonic_ms();
-    while (!pty_size_output_matches(output, rows, cols) && platform::monotonic_ms() - started < timeout_ms) {
+    while (!test_exec_pty::pty_size_output_matches(output, rows, cols) &&
+           platform::monotonic_ms() - started < timeout_ms) {
         const Json poll = exec_write_json(state, daemon_session_id, "", 250UL);
         output += normalize_output(poll.at("output").get<std::string>());
         if (!poll.at("running").get<bool>()) {
@@ -146,17 +113,6 @@ static std::string append_running_exec_output_until_pty_size(AppState& state,
         platform::sleep_ms(10UL);
     }
     return output;
-}
-
-static bool wait_until_file_contains(const fs::path& path, const std::string& fragment, unsigned long timeout_ms) {
-    const std::uint64_t started = platform::monotonic_ms();
-    while (platform::monotonic_ms() - started < timeout_ms) {
-        if (fs::exists(path) && fs::read_file_bytes(path).find(fragment) != std::string::npos) {
-            return true;
-        }
-        platform::sleep_ms(10UL);
-    }
-    return fs::exists(path) && fs::read_file_bytes(path).find(fragment) != std::string::npos;
 }
 
 static std::string long_running_non_tty_command() {
@@ -169,7 +125,7 @@ static std::string long_running_non_tty_command() {
 
 static std::string slow_tty_command() {
 #ifdef _WIN32
-    return "echo slow&ping -n 31 127.0.0.1>nul";
+    return "echo slow&" + test_exec_pty::windows_ping_sleep_command(30UL);
 #else
     return "printf slow; sleep 30";
 #endif
@@ -177,7 +133,8 @@ static std::string slow_tty_command() {
 
 static std::string fast_tty_file_command() {
 #ifdef _WIN32
-    return "set /p line= & <nul set /p =%line%>fast-session-input.txt & ping -n 31 127.0.0.1>nul";
+    return "set /p line= & <nul set /p =%line%>fast-session-input.txt & " +
+           test_exec_pty::windows_ping_sleep_command(30UL);
 #else
     return "IFS= read line; printf '%s' \"$line\" > fast-session-input.txt; sleep 30";
 #endif
@@ -193,7 +150,8 @@ static std::string tty_round_trip_command() {
 
 static std::string tty_resize_command() {
 #ifdef _WIN32
-    return "echo ready&echo rows=24 cols=120&set /p line=&echo rows=33 cols=101&ping -n 31 127.0.0.1>nul";
+    return "echo ready&echo rows=24 cols=120&set /p line=&echo rows=33 cols=101&" +
+           test_exec_pty::windows_ping_sleep_command(30UL);
 #else
     return "stty -a; printf ready; IFS= read line; stty -a; sleep 30";
 #endif
@@ -283,7 +241,11 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
     TEST_ASSERT(invalid_session_id_type_response.status == 400);
     TEST_ASSERT(Json::parse(invalid_session_id_type_response.body).at("code").get<std::string>() == "bad_request");
 
-    if (process_session_supports_pty()) {
+    const bool supports_pty = process_session_supports_pty();
+#ifdef _WIN32
+    test_exec_pty::assert_built_winpty_runtime_available(supports_pty);
+#endif
+    if (supports_pty) {
         const HttpResponse slow_start_response = route_request(state,
                                                                json_request("/v1/exec/start",
                                                                             Json{
@@ -338,7 +300,7 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
         const std::uint64_t fast_elapsed_ms = platform::monotonic_ms() - fast_started_at;
         TEST_ASSERT(fast_write_response.status == 200);
         TEST_ASSERT(fast_elapsed_ms < 2000UL && "fast route request waited behind unrelated session");
-        TEST_ASSERT(wait_until_file_contains(fast_input_path, "ping", 2000UL));
+        TEST_ASSERT(test_exec_pty::wait_until_file_contains(fast_input_path, "ping", 2000UL));
         slow_thread.join();
         TEST_ASSERT(slow_poll_response.status == 200);
 
@@ -385,21 +347,21 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
         const Json resize_started = Json::parse(resize_start_response.body);
         TEST_ASSERT(resize_started.at("running").get<bool>());
         std::string initial_size_output = normalize_output(resize_started.at("output").get<std::string>());
-        if (!pty_size_output_matches(initial_size_output, 24U, 120U)) {
+        if (!test_exec_pty::pty_size_output_matches(initial_size_output, 24U, 120U)) {
             initial_size_output = append_running_exec_output_until_pty_size(
                 state, resize_started.at("daemon_session_id").get<std::string>(), initial_size_output, 24U, 120U, 2000UL);
         }
-        TEST_ASSERT(pty_size_output_matches(initial_size_output, 24U, 120U));
+        TEST_ASSERT(test_exec_pty::pty_size_output_matches(initial_size_output, 24U, 120U));
 
         const Json resized = exec_write_json_with_pty_size(
             state, resize_started.at("daemon_session_id").get<std::string>(), "\n", 1000UL, 33U, 101U);
         TEST_ASSERT(resized.at("running").get<bool>());
         std::string resize_output = normalize_output(resized.at("output").get<std::string>());
-        if (!pty_size_output_matches(resize_output, 33U, 101U)) {
+        if (!test_exec_pty::pty_size_output_matches(resize_output, 33U, 101U)) {
             resize_output = append_running_exec_output_until_pty_size(
                 state, resize_started.at("daemon_session_id").get<std::string>(), resize_output, 33U, 101U, 2000UL);
         }
-        TEST_ASSERT(pty_size_output_matches(resize_output, 33U, 101U));
+        TEST_ASSERT(test_exec_pty::pty_size_output_matches(resize_output, 33U, 101U));
     }
 }
 
