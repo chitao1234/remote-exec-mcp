@@ -73,6 +73,11 @@ inputs changed.
 GNU make, BSD make, and NMAKE default to optimized builds (`-O2` or `/O2`).
 Pass `DEBUG=1` to switch the relevant entry point to `-O0 -g` or
 `/Od /Zi /DEBUG`.
+NMAKE passes `/utf-8` so MSVC reads UTF-8 source files consistently across
+host code pages, and enables `cl /MP` by default so each large multi-source
+compile step can use multiple cores even though `nmake` itself remains
+single-threaded. Override the compiler-side parallelism with `MSVC_JOBS=<n>`
+or force serial compilation with `MSVC_JOBS=1`.
 
 Host-native POSIX daemon:
 
