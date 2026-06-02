@@ -104,7 +104,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         env:
-          REMOTE_EXEC_CPP_DAEMON: ${{ github.workspace }}\crates\remote-exec-daemon-cpp\build\remote-exec-daemon-cpp-msvc.exe
+          REMOTE_EXEC_CPP_DAEMON: ${{ github.workspace }}\crates\remote-exec-daemon-cpp\build\msvc-native\remote-exec-daemon-cpp-msvc.exe
         run: |
           @echo off
           setlocal EnableExtensions

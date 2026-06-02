@@ -197,12 +197,10 @@ Runtime coverage note: host-native POSIX C++ daemon runtime tests run on Unix.
 GNU legacy Windows binaries and tests run under Wine on Linux. MSVC native
 binaries and tests run on Windows, and MSVC XP-compatible binaries run natively
 there when the XP-capable toolset is available. CI builds and runs the 32-bit
-host-native MSVC NMAKE test path on `windows-latest`. CI also builds
-`build/remote-exec-daemon-cpp-native-xp-ws2.exe` with host-native MinGW on
-`windows-latest`,
-exposes `C:\msys64\mingw32\bin` for the MinGW runtime DLLs, and runs the Rust
-broker `mcp_forward_ports_cpp::windows_cpp_daemon_smoke` integration test
-against that process.
+host-native MSVC NMAKE test path on `windows-latest`. The Windows Rust test job
+first builds `build\msvc-native\remote-exec-daemon-cpp-msvc.exe`, then points
+`REMOTE_EXEC_CPP_DAEMON` at that binary while running the Rust integration
+tests.
 
 BSD make has a separate POSIX-only entry point. It intentionally does not expose
 the Windows cross-build targets:
@@ -275,7 +273,7 @@ build\remote-exec-daemon-cpp-nt4-ws2.exe config\daemon-cpp.example.ini
 Windows XP-compatible MSVC/NMAKE:
 
 ```bat
-build\remote-exec-daemon-cpp-xp-msvc.exe config\daemon-cpp.example.ini
+build\msvc-xp\remote-exec-daemon-cpp-xp-msvc.exe config\daemon-cpp.example.ini
 ```
 
 Logs go to `stderr`. Set `REMOTE_EXEC_LOG=debug` to raise the level, or use a

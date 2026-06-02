@@ -567,12 +567,13 @@ fn cpp_daemon_default_binaries() -> Vec<PathBuf> {
     let daemon_dir = cpp_daemon_dir();
     if cfg!(windows) {
         vec![
-            daemon_dir.join("build/remote-exec-daemon-cpp-msvc.exe"),
+            daemon_dir.join("build/msvc-native/remote-exec-daemon-cpp-msvc.exe"),
+            daemon_dir.join("build/msvc-xp/remote-exec-daemon-cpp-xp-msvc.exe"),
             daemon_dir.join("build/remote-exec-daemon-cpp-native-xp-ws2.exe"),
-            daemon_dir.join("build/remote-exec-daemon-cpp-native-2000-ws2.exe"),
-            daemon_dir.join("build/remote-exec-daemon-cpp-native-nt4-ws1.exe"),
-            daemon_dir.join("build/remote-exec-daemon-cpp-native.exe"),
-            daemon_dir.join("build/remote-exec-daemon-cpp.exe"),
+            daemon_dir.join("build/remote-exec-daemon-cpp-xp-ws2.exe"),
+            daemon_dir.join("build/remote-exec-daemon-cpp-2000-ws2.exe"),
+            daemon_dir.join("build/remote-exec-daemon-cpp-nt4-ws2.exe"),
+            daemon_dir.join("build/remote-exec-daemon-cpp-nt4-ws1.exe"),
         ]
     } else {
         vec![daemon_dir.join("build/remote-exec-daemon-cpp")]
@@ -591,7 +592,18 @@ fn stage_cpp_daemon_binary(source: &Path, tempdir: &Path) -> PathBuf {
     };
     let staged = tempdir.join(staged_name);
     std::fs::copy(source, &staged).unwrap();
+    stage_cpp_daemon_companion(source, tempdir, "winpty-agent.exe");
     staged
+}
+
+fn stage_cpp_daemon_companion(source: &Path, tempdir: &Path, file_name: &str) {
+    let Some(source_dir) = source.parent() else {
+        return;
+    };
+    let companion = source_dir.join(file_name);
+    if companion.exists() {
+        std::fs::copy(&companion, tempdir.join(file_name)).unwrap();
+    }
 }
 
 async fn spawn_cpp_daemon_process(command: &mut tokio::process::Command) -> tokio::process::Child {
