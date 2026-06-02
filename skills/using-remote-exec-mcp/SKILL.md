@@ -74,9 +74,7 @@ Input:
 ```
 
 Use `daemon_info.platform` for path choices, `supports_pty` before `tty: true`,
-and `supports_port_forward` / `port_forward_protocol_version` before remote
-forwarding. `port_forward_protocol_version: 4` means the target uses v4 tunnel
-semantics.
+and `supports_port_forward` before remote forwarding.
 
 ### `exec_command`
 
@@ -210,7 +208,8 @@ Guidance:
 - `edit` rejects multiple `old_string` matches unless `replace_all` is true.
 - `read`, `write`, and `edit` use the same experimental target encoding
   autodetection policy as `apply_patch` when enabled.
-- C++ daemon targets do not currently advertise this capability.
+- If these tools are absent, use `exec_command`, `apply_patch`, or
+  `transfer_files` instead.
 
 ### `view_image`
 
@@ -229,8 +228,7 @@ Guidance:
 - Use `workdir` only for relative path resolution.
 - Omit `detail` for the target default.
 - Use `detail: "original"` for full-fidelity inspection.
-- C++ daemon targets support passthrough PNG, JPEG, and WebP only, and omitted
-  `detail` defaults to `original`.
+- Format and resize support can vary by target; trust the tool result or error.
 
 ### `transfer_files`
 
@@ -321,10 +319,8 @@ Guidance:
 - Keep `forward_id` and close it explicitly when done.
 - Treat a forward as ready only when `phase = "ready"`. Legacy
   `status = "open"` can coexist with `phase = "reconnecting"`.
-- v4 forwards may recover from broker-daemon transport loss if the daemon stays
-  alive. Active TCP streams and UDP per-peer connector state do not survive
-  reconnect.
-- Broker or daemon restart destroys the useful public forward state; open a new
+- If a forward leaves `ready`, inspect `phase` and reopen it when needed.
+- Broker or target restart destroys useful public forward state; open a new
   forward.
 
 ## `remote-exec` CLI
@@ -411,27 +407,18 @@ Port forward:
 4. Use the forwarded service
 5. `forward_ports` close
 
-## Compatibility Notes
+## Capability Notes
 
-- PTY support is target-specific. Trust `supports_pty`.
-- Rust daemons support TLS by default; C++ daemon targets are plain HTTP.
-- C++ daemon targets are narrower than Rust daemon targets.
-- The C++ daemon uses C++11 on every supported build path. "Windows
-  XP-compatible" means the binary was built with a toolchain that supports both
-  XP targeting and C++11.
-- POSIX C++ daemon targets support `tty: true` when PTY allocation is available.
-- GNU Windows 2000 and XP C++ targets may support `tty: true` through
-  `winpty`; trust `supports_pty`. Winsock selection affects networking, not
-  PTY support.
-  Windows C++ targets use `cmd.exe`.
-- POSIX C++ non-TTY exec starts with stdin closed. Use `tty: true` when later
-  input matters.
-- Windows XP-compatible C++ non-TTY exec keeps stdin open for compatibility.
-- C++ transfers support regular files, directory trees, and broker-built
-  multi-source bundles. Compression, hard links, sparse files, and special files
-  are not public features there.
-- C++ forwarding uses the v4 tunnel protocol and reports the same public
-  `forward_ports` state shape as Rust targets where supported.
+- If you can connect to a target through the broker, treat it as supported for
+  the tools and capabilities it reports.
+- Do not infer behavior from operating system names, daemon implementation,
+  version strings, or build labels.
+- Trust `list_targets` capability fields and the tools exposed by the broker.
+- Use `supports_pty` before `tty: true`; if PTY support is false or unknown,
+  run non-interactively or expect a typed unsupported error.
+- Use `supports_port_forward` before opening forwards.
+- Optional tools, image detail modes, transfer features, shell behavior, and
+  stdin behavior can vary by target. Read tool results, warnings, and errors.
 
 ## Common Mistakes
 

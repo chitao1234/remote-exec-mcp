@@ -478,6 +478,9 @@ The C++ daemon standard level is C++11 on every supported build path. In this
 repository, "Windows XP-compatible" means using a toolchain that can target XP
 while compiling the daemon as C++11, such as the MinGW XP cross-build or an
 MSVC `v141_xp` setup.
+The minimum supported Windows runtime is Windows NT 3.51 through the GNU
+Winsock 1.1 variant; that same variant has also been tested on Windows NT 4.0.
+Non-Unicode Windows families, including Windows 9x/Me, remain unsupported.
 
 The Rust and C++ daemons share the `max_open_sessions` default of 64. C++ also
 has daemon-local safety knobs for its handwritten HTTP parser and blocking
@@ -597,11 +600,12 @@ broker integration tests consume a prebuilt C++ daemon binary when one is
 present, and skip the C++ daemon scenarios when it is absent; they do not build
 the C++ daemon themselves. CI builds that C++ daemon binary in an explicit step
 before the Rust test job. The standalone C++ daemon also has its own Linux and
-Windows CI job: POSIX runtime tests run on Linux, Windows 2000, Windows
-XP-compatible, and NT 4.0/Winsock 1 test binaries run under Wine on Linux when
-available, and the 32-bit host-native MSVC NMAKE path runs on `windows-latest`.
-That MSVC path now exercises the vendored winpty-backed PTY build instead of a
-PTY-disabled fallback.
+Windows CI job: POSIX runtime tests run on Linux, Windows 2000 and
+NT 4.0/Winsock 1 test binaries run under Wine on Linux when available, and the
+32-bit host-native MSVC NMAKE path runs on `windows-latest`. The GNU Winsock
+1.1 variant has also been manually tested on Windows NT 3.51. The MSVC path now
+exercises the vendored winpty-backed PTY build instead of a PTY-disabled
+fallback.
 
 A separate periodic/manual GitHub Actions workflow exercises BSD coverage inside
 GitHub-hosted BSD VMs for FreeBSD, OpenBSD, NetBSD, and DragonFly BSD. Each BSD

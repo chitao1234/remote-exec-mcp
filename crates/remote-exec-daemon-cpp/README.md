@@ -13,6 +13,9 @@ build paths:
 The daemon builds as C++11 across all supported toolchains. In this repository,
 "Windows XP-compatible" means a toolchain that can target Windows XP while
 compiling the daemon as C++11; it does not imply a pre-C++11 language level.
+The minimum supported Windows runtime is Windows NT 3.51 through the GNU
+Winsock 1.1 variant, which has also been tested on Windows NT 4.0. Non-Unicode
+Windows families, including Windows 9x/Me, remain unsupported.
 
 The former `remote-exec-daemon-xp` name referred to the original Windows XP-only
 shape. Current live behavior is documented here and in the repository root
@@ -113,6 +116,9 @@ Windows GNU build matrix:
 - `WINDOWS_WINSOCK_VERSION=1` builds the NT-era Winsock 1.1 path:
   `REMOTE_EXEC_CPP_WINSOCK1`, `wsock32`, IPv4 only, and explicit rejection of
   IPv6 endpoints with an `invalid_endpoint` error.
+- `WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=1` is the tested GNU
+  Winsock 1.1 path for Windows NT 3.51 and Windows NT 4.0. The `nt4-ws1`
+  alias names the API floor, not an NT 4.0-only runtime contract.
 - `WINDOWS_WINPTY=auto|on|off` controls whether the GNU build vendors `winpty`.
   `auto` enables `winpty` for Windows 2000 and XP builds, independent of the
   selected Winsock backend.
@@ -245,7 +251,7 @@ Windows host-native GNU XP/Winsock 2:
 build\remote-exec-daemon-cpp-native-xp-ws2.exe config\daemon-cpp.example.ini
 ```
 
-Windows NT 4.0-compatible GNU Winsock 1.1:
+Windows NT 3.51/4.0-compatible GNU Winsock 1.1:
 
 ```bat
 build\remote-exec-daemon-cpp-nt4-ws1.exe config\daemon-cpp.example.ini
@@ -349,8 +355,8 @@ resize requests return the same typed unsupported-session error path.
 POSIX non-TTY exec intentionally starts child processes with stdin attached to
 `/dev/null`, matching the Rust daemon's closed-stdin behavior. Start POSIX
 interactive commands with `tty=true` when later `write_stdin` input is needed.
-Windows XP-compatible non-TTY exec intentionally keeps its pipe-backed stdin
-open to preserve the original XP daemon behavior.
+Windows C++ non-TTY exec intentionally keeps its pipe-backed stdin open to
+preserve the original XP daemon behavior.
 
 The C++ daemon implements the same daemon-side HTTP/1.1 Upgrade tunnel used by
 broker `forward_ports`: TCP listeners/connectors, full-duplex UDP datagram
@@ -485,8 +491,8 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
   `default_shell`, then `SHELL`, passwd shell, `bash`, and `/bin/sh`.
 - POSIX exec uses `shell -c <cmd>` or `shell -l -c <cmd>` for login shells.
 - POSIX child processes currently force `LC_ALL=C.UTF-8` and `LANG=C.UTF-8`.
-- Windows XP-compatible exec supports `cmd.exe`; `login=false` adds `/D` before
-  `/C`, while `login=true` omits `/D`.
+- Windows C++ exec supports `cmd.exe`; `login=false` adds `/D` before `/C`,
+  while `login=true` omits `/D`.
 
 ## Limitations
 
@@ -497,6 +503,9 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
 - Windows GNU PTY support depends on `winpty` being enabled for the build and
   available at runtime; Wine intentionally disables PTY capability reporting
 - no PTY support in builds where `winpty` is disabled
+- Windows runtime support is limited to Unicode NT-family Windows. The GNU
+  Winsock 1.1 variant is the minimum supported path and has been tested on
+  Windows NT 3.51 and Windows NT 4.0. Non-Unicode Windows remain unsupported.
 - `view_image` supports passthrough PNG, JPEG, and WebP only
 - omitted `view_image.detail` defaults to `original` because no resize/re-encode path exists
 - broker-owned `forward_id` values do not persist across broker restart
@@ -512,7 +521,7 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
 - transfer imports are not transactional; failed imports can leave partial destination changes
 - POSIX transfer exports skip unsupported special entries in directory trees and report warnings
 - POSIX transfer symlink modes support preserving, following, or skipping symlinks
-- Windows XP-compatible transfer builds skip symlink entries inside directory transfers and import archives when preservation is unavailable; follow mode copies regular-file and directory targets when the platform exposes them
+- Windows C++ transfer builds skip symlink entries inside directory transfers and import archives when preservation is unavailable; follow mode copies regular-file and directory targets when the platform exposes them
 - transfer payloads use GNU tar for files and directories
 - single-file transfers use the fixed archive entry `.remote-exec-file`
 - transfer warnings use the reserved archive summary entry `.remote-exec-transfer-summary.json`, which is consumed during import and is not extracted
