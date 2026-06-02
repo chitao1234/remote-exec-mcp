@@ -11,6 +11,9 @@
 
 #include "platform/win32_error.h"
 #include "platform/win32_socket_compat.h"
+#include "platform/win32_winsock.h"
+
+#include <windows.h>
 
 namespace {
 
@@ -46,7 +49,6 @@ bool parse_numeric_port(const char* service, unsigned short* port) {
     return true;
 }
 
-#ifdef REMOTE_EXEC_CPP_WINSOCK1
 bool looks_like_ipv6_literal(const char* node) {
     return node != nullptr && std::strchr(node, ':') != nullptr;
 }
@@ -69,21 +71,37 @@ bool append_ipv4_address(unsigned long ipv4,
     return true;
 }
 
-bool resolve_winsock1_ipv4_addresses(const char* node,
-                                     unsigned short port,
-                                     const SocketAddressQuery& query,
-                                     std::vector<SocketAddress>* addresses,
-                                     std::string* error) {
+std::string numeric_ipv4_socket_address(const sockaddr* address) {
+    const sockaddr_in* ipv4 = reinterpret_cast<const sockaddr_in*>(address);
+    const unsigned char* bytes = reinterpret_cast<const unsigned char*>(&ipv4->sin_addr.s_addr);
+    char buffer[64];
+    std::snprintf(buffer,
+                  sizeof(buffer),
+                  "%u.%u.%u.%u:%u",
+                  static_cast<unsigned int>(bytes[0]),
+                  static_cast<unsigned int>(bytes[1]),
+                  static_cast<unsigned int>(bytes[2]),
+                  static_cast<unsigned int>(bytes[3]),
+                  static_cast<unsigned int>(ntohs(ipv4->sin_port)));
+    return buffer;
+}
+
+bool resolve_legacy_ipv4_addresses(const char* backend_name,
+                                   const char* node,
+                                   unsigned short port,
+                                   const SocketAddressQuery& query,
+                                   std::vector<SocketAddress>* addresses,
+                                   std::string* error) {
     if (query.family != AF_UNSPEC && query.family != AF_INET) {
         if (error != nullptr) {
-            *error = "Winsock 1 backend only supports IPv4 addresses";
+            *error = std::string(backend_name) + " only supports IPv4 addresses";
         }
         return false;
     }
 
     if (looks_like_ipv6_literal(node)) {
         if (error != nullptr) {
-            *error = "Winsock 1 backend does not support IPv6 endpoints";
+            *error = std::string(backend_name) + " does not support IPv6 endpoints";
         }
         return false;
     }
@@ -107,7 +125,7 @@ bool resolve_winsock1_ipv4_addresses(const char* node,
     }
     if (host->h_addrtype != AF_INET || host->h_length != static_cast<int>(sizeof(unsigned long))) {
         if (error != nullptr) {
-            *error = "gethostbyname failed: Winsock 1 backend only supports IPv4 addresses";
+            *error = std::string("gethostbyname failed: ") + backend_name + " only supports IPv4 addresses";
         }
         return false;
     }
@@ -121,6 +139,100 @@ bool resolve_winsock1_ipv4_addresses(const char* node,
     if (addresses->empty()) {
         if (error != nullptr) {
             *error = "gethostbyname failed: no usable IPv4 addresses";
+        }
+        return false;
+    }
+    return true;
+}
+
+#ifndef REMOTE_EXEC_CPP_WINSOCK1
+typedef int(WSAAPI* GetAddrInfoFn)(const char*, const char*, const addrinfo*, addrinfo**);
+typedef void(WSAAPI* FreeAddrInfoFn)(addrinfo*);
+typedef int(WSAAPI* GetNameInfoFn)(const sockaddr*, socklen_t, char*, DWORD, char*, DWORD, int);
+
+template <typename Fn>
+Fn proc_address_as(FARPROC proc) {
+    union ProcAddressCast {
+        FARPROC proc;
+        Fn fn;
+    } cast = {proc};
+    return cast.fn;
+}
+
+template <typename Fn>
+Fn load_ws2_32_proc(const char* name) {
+    HMODULE module = GetModuleHandleA("WS2_32.DLL");
+    if (module == nullptr) {
+        module = GetModuleHandleA("ws2_32.dll");
+    }
+    if (module == nullptr) {
+        return nullptr;
+    }
+    return proc_address_as<Fn>(GetProcAddress(module, name));
+}
+
+struct Winsock2AddressApi {
+    GetAddrInfoFn getaddrinfo;
+    FreeAddrInfoFn freeaddrinfo;
+    GetNameInfoFn getnameinfo;
+};
+
+Winsock2AddressApi load_winsock2_address_api() {
+    Winsock2AddressApi api;
+    api.getaddrinfo = load_ws2_32_proc<GetAddrInfoFn>("getaddrinfo");
+    api.freeaddrinfo = load_ws2_32_proc<FreeAddrInfoFn>("freeaddrinfo");
+    api.getnameinfo = load_ws2_32_proc<GetNameInfoFn>("getnameinfo");
+    return api;
+}
+
+bool resolve_winsock2_addresses(const char* node,
+                                const char* service,
+                                unsigned short port,
+                                const SocketAddressQuery& query,
+                                std::vector<SocketAddress>* addresses,
+                                std::string* error) {
+    const Winsock2AddressApi api = load_winsock2_address_api();
+    if (api.getaddrinfo == nullptr || api.freeaddrinfo == nullptr) {
+        return resolve_legacy_ipv4_addresses("Winsock 2 legacy resolver", node, port, query, addresses, error);
+    }
+
+    addrinfo hints;
+    std::memset(&hints, 0, sizeof(hints));
+    hints.ai_family = query.family;
+    hints.ai_socktype = query.socktype;
+    hints.ai_protocol = query.protocol;
+    hints.ai_flags = query.passive ? AI_PASSIVE : 0;
+
+    addrinfo* result = nullptr;
+    const int status = api.getaddrinfo(node, service, &hints, &result);
+    if (status != 0 || result == nullptr) {
+        if (error != nullptr) {
+            if (status == 0) {
+                *error = "getaddrinfo failed";
+            } else {
+                *error = socket_error_message_from_code("getaddrinfo", status);
+            }
+        }
+        return false;
+    }
+
+    for (addrinfo* current = result; current != nullptr; current = current->ai_next) {
+        if (current->ai_addrlen > sizeof(SocketAddress().address)) {
+            continue;
+        }
+        SocketAddress address;
+        address.family = current->ai_family;
+        address.socktype = current->ai_socktype;
+        address.protocol = current->ai_protocol;
+        address.address_len = static_cast<socklen_t>(current->ai_addrlen);
+        std::memcpy(&address.address, current->ai_addr, current->ai_addrlen);
+        addresses->push_back(address);
+    }
+    api.freeaddrinfo(result);
+
+    if (addresses->empty()) {
+        if (error != nullptr) {
+            *error = "getaddrinfo failed: no usable socket addresses";
         }
         return false;
     }
@@ -187,12 +299,7 @@ bool connect_in_progress_socket_error(int error) {
 
 NetworkSession::NetworkSession() {
     WSADATA wsa_data;
-#ifdef REMOTE_EXEC_CPP_WINSOCK1
-    const WORD requested_version = MAKEWORD(1, 1);
-#else
-    const WORD requested_version = MAKEWORD(2, 2);
-#endif
-    if (WSAStartup(requested_version, &wsa_data) != 0) {
+    if (remote_exec_win32::start_winsock(&wsa_data) != 0) {
         throw std::runtime_error("WSAStartup failed");
     }
 }
@@ -217,49 +324,9 @@ bool resolve_socket_addresses(const char* node,
     }
 
 #ifdef REMOTE_EXEC_CPP_WINSOCK1
-    return resolve_winsock1_ipv4_addresses(node, port, query, addresses, error);
+    return resolve_legacy_ipv4_addresses("Winsock 1 backend", node, port, query, addresses, error);
 #else
-    addrinfo hints;
-    std::memset(&hints, 0, sizeof(hints));
-    hints.ai_family = query.family;
-    hints.ai_socktype = query.socktype;
-    hints.ai_protocol = query.protocol;
-    hints.ai_flags = query.passive ? AI_PASSIVE : 0;
-
-    addrinfo* result = nullptr;
-    const int status = getaddrinfo(node, service, &hints, &result);
-    if (status != 0 || result == nullptr) {
-        if (error != nullptr) {
-            if (status == 0) {
-                *error = "getaddrinfo failed";
-            } else {
-                *error = socket_error_message_from_code("getaddrinfo", status);
-            }
-        }
-        return false;
-    }
-
-    for (addrinfo* current = result; current != nullptr; current = current->ai_next) {
-        if (current->ai_addrlen > sizeof(SocketAddress().address)) {
-            continue;
-        }
-        SocketAddress address;
-        address.family = current->ai_family;
-        address.socktype = current->ai_socktype;
-        address.protocol = current->ai_protocol;
-        address.address_len = static_cast<socklen_t>(current->ai_addrlen);
-        std::memcpy(&address.address, current->ai_addr, current->ai_addrlen);
-        addresses->push_back(address);
-    }
-    freeaddrinfo(result);
-
-    if (addresses->empty()) {
-        if (error != nullptr) {
-            *error = "getaddrinfo failed: no usable socket addresses";
-        }
-        return false;
-    }
-    return true;
+    return resolve_winsock2_addresses(node, service, port, query, addresses, error);
 #endif
 }
 
@@ -269,28 +336,25 @@ std::string numeric_socket_address(const sockaddr* address, socklen_t address_le
     if (address->sa_family != AF_INET) {
         return "unknown:0";
     }
-    const sockaddr_in* ipv4 = reinterpret_cast<const sockaddr_in*>(address);
-    const unsigned char* bytes = reinterpret_cast<const unsigned char*>(&ipv4->sin_addr.s_addr);
-    char buffer[64];
-    std::snprintf(buffer,
-                  sizeof(buffer),
-                  "%u.%u.%u.%u:%u",
-                  static_cast<unsigned int>(bytes[0]),
-                  static_cast<unsigned int>(bytes[1]),
-                  static_cast<unsigned int>(bytes[2]),
-                  static_cast<unsigned int>(bytes[3]),
-                  static_cast<unsigned int>(ntohs(ipv4->sin_port)));
-    return buffer;
+    return numeric_ipv4_socket_address(address);
 #else
+    const Winsock2AddressApi api = load_winsock2_address_api();
+    if (api.getnameinfo == nullptr) {
+        if (address->sa_family == AF_INET) {
+            return numeric_ipv4_socket_address(address);
+        }
+        return "unknown:0";
+    }
+
     char host[NI_MAXHOST];
     char service[NI_MAXSERV];
-    const int result = getnameinfo(address,
-                                   address_len,
-                                   host,
-                                   static_cast<socklen_t>(sizeof(host)),
-                                   service,
-                                   static_cast<socklen_t>(sizeof(service)),
-                                   NI_NUMERICHOST | NI_NUMERICSERV);
+    const int result = api.getnameinfo(address,
+                                       address_len,
+                                       host,
+                                       static_cast<DWORD>(sizeof(host)),
+                                       service,
+                                       static_cast<DWORD>(sizeof(service)),
+                                       NI_NUMERICHOST | NI_NUMERICSERV);
     if (result != 0) {
         return "unknown:0";
     }

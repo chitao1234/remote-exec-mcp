@@ -15,7 +15,8 @@ The daemon builds as C++11 across all supported toolchains. In this repository,
 compiling the daemon as C++11; it does not imply a pre-C++11 language level.
 The minimum supported Windows runtime is Windows NT 3.51 through the GNU
 Winsock 1.1 variant, which has also been tested on Windows NT 4.0. Non-Unicode
-Windows families, including Windows 9x/Me, remain unsupported.
+Windows families, including Windows 9x/Me, remain unsupported. The GNU Windows
+NT 4.0 API-floor build also supports Winsock 2 when that runtime is installed.
 
 The former `remote-exec-daemon-xp` name referred to the original Windows XP-only
 shape. Current live behavior is documented here and in the repository root
@@ -98,6 +99,8 @@ Windows GNU build matrix:
 - `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0501 WINDOWS_WINSOCK_VERSION=2`
 - `make all-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0500 WINDOWS_WINSOCK_VERSION=2`
 - `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0500 WINDOWS_WINSOCK_VERSION=2`
+- `make all-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=2`
+- `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=2`
 - `make all-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=1`
 - `make check-windows WINDOWS_TOOLCHAIN=cross WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=1`
 - `make all-windows WINDOWS_TOOLCHAIN=native WINDOWS_WINVER=0x0501 WINDOWS_WINSOCK_VERSION=2` on Windows
@@ -111,14 +114,18 @@ Windows GNU build matrix:
   and runs test binaries directly.
 - `WINDOWS_WINVER` and `WINDOWS_WIN32_WINNT` select the Win32 API floor. By
   default `WINDOWS_WIN32_WINNT` follows `WINDOWS_WINVER`.
-- `WINDOWS_WINSOCK_VERSION=2` builds the Winsock 2 path: `ws2_32`, IPv6
-  support, and `getaddrinfo`/`getnameinfo`.
+- `WINDOWS_WINSOCK_VERSION=2` builds the Winsock 2 path: `ws2_32`, negotiates
+  Winsock 2.2, 2.1, or 2.0 at startup, and uses native
+  `getaddrinfo`/`getnameinfo` when the runtime exports them. Older stacks
+  without those exports use IPv4 legacy resolution.
 - `WINDOWS_WINSOCK_VERSION=1` builds the NT-era Winsock 1.1 path:
   `REMOTE_EXEC_CPP_WINSOCK1`, `wsock32`, IPv4 only, and explicit rejection of
   IPv6 endpoints with an `invalid_endpoint` error.
 - `WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=1` is the tested GNU
   Winsock 1.1 path for Windows NT 3.51 and Windows NT 4.0. The `nt4-ws1`
   alias names the API floor, not an NT 4.0-only runtime contract.
+- `WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=2` is the GNU Windows NT 4.0
+  API-floor Winsock 2 path. Use `nt4-ws2` aliases for this variant.
 - `WINDOWS_WINPTY=auto|on|off` controls whether the GNU build vendors `winpty`.
   `auto` enables `winpty` for Windows 2000 and XP builds, independent of the
   selected Winsock backend.
@@ -134,6 +141,8 @@ Compatibility aliases remain:
 
 - `make all-windows-nt4-ws1`
 - `make check-windows-nt4-ws1`
+- `make all-windows-nt4-ws2`
+- `make check-windows-nt4-ws2`
 - `make all-windows-2000`
 - `make check-windows-2000`
 - `make all-windows-xp`
@@ -257,6 +266,12 @@ Windows NT 3.51/4.0-compatible GNU Winsock 1.1:
 build\remote-exec-daemon-cpp-nt4-ws1.exe config\daemon-cpp.example.ini
 ```
 
+Windows NT 4.0-compatible GNU Winsock 2:
+
+```bat
+build\remote-exec-daemon-cpp-nt4-ws2.exe config\daemon-cpp.example.ini
+```
+
 Windows XP-compatible MSVC/NMAKE:
 
 ```bat
@@ -327,6 +342,7 @@ and Wine is available:
 make check-windows-xp
 make check-windows-2000
 make check-windows-nt4-ws1
+make check-windows-nt4-ws2
 ```
 
 Idle keep-alive HTTP connections wait up to `http_connection_idle_timeout_ms`
@@ -505,7 +521,9 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
 - no PTY support in builds where `winpty` is disabled
 - Windows runtime support is limited to Unicode NT-family Windows. The GNU
   Winsock 1.1 variant is the minimum supported path and has been tested on
-  Windows NT 3.51 and Windows NT 4.0. Non-Unicode Windows remain unsupported.
+  Windows NT 3.51 and Windows NT 4.0. The GNU NT 4.0 API-floor build also
+  supports Winsock 2 when that runtime is installed. Non-Unicode Windows remain
+  unsupported.
 - `view_image` supports passthrough PNG, JPEG, and WebP only
 - omitted `view_image.detail` defaults to `original` because no resize/re-encode path exists
 - broker-owned `forward_id` values do not persist across broker restart

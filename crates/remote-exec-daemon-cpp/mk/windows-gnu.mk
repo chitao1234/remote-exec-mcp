@@ -297,11 +297,13 @@ $(foreach alias_name,$1,$(eval $(call define_windows_variant_alias,check-windows
 endef
 
 WINDOWS_NT4_WS1_ALIAS_NAMES := nt4-ws1
+WINDOWS_NT4_WS2_ALIAS_NAMES := nt4-ws2
 WINDOWS_2000_ALIAS_NAMES := 2000 2000-ws2
 WINDOWS_XP_ALIAS_NAMES := xp xp-ws2
 WINDOWS_NATIVE_ALIAS_NAMES := native
 
 $(eval $(call define_windows_variant_alias_bundle,$(WINDOWS_NT4_WS1_ALIAS_NAMES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINSOCK1)))
+$(eval $(call define_windows_variant_alias_bundle,$(WINDOWS_NT4_WS2_ALIAS_NAMES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINSOCK2)))
 $(eval $(call define_windows_variant_alias_bundle,$(WINDOWS_2000_ALIAS_NAMES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_2000),$(WINDOWS_WINVER_2000),$(WINDOWS_WINSOCK2)))
 $(eval $(call define_windows_variant_alias_bundle,$(WINDOWS_XP_ALIAS_NAMES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_XP),$(WINDOWS_WINVER_XP),$(WINDOWS_WINSOCK2)))
 $(eval $(call define_windows_variant_alias_bundle,$(WINDOWS_NATIVE_ALIAS_NAMES),$(WINDOWS_NATIVE_TOOLCHAIN),$(WINDOWS_WINVER_XP),$(WINDOWS_WINVER_XP),$(WINDOWS_WINSOCK2)))
@@ -319,6 +321,7 @@ $(eval $(call define_windows_named_test_aliases,xp,$(WINDOWS_COMMON_TEST_CASES),
 $(eval $(call define_windows_named_test_aliases,2000,$(WINDOWS_COMMON_TEST_CASES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_2000),$(WINDOWS_WINVER_2000),$(WINDOWS_WINSOCK2)))
 $(eval $(call define_windows_named_test_aliases,native,$(WINDOWS_COMMON_TEST_CASES),$(WINDOWS_NATIVE_TOOLCHAIN),$(WINDOWS_WINVER_XP),$(WINDOWS_WINVER_XP),$(WINDOWS_WINSOCK2)))
 $(eval $(call define_windows_named_test_aliases,nt4-ws1,$(WINDOWS_COMMON_TEST_CASES) WINSOCK1_SOCKET_BACKEND,$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINSOCK1)))
+$(eval $(call define_windows_named_test_aliases,nt4-ws2,$(WINDOWS_COMMON_TEST_CASES),$(WINDOWS_CROSS_TOOLCHAIN),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINVER_NT4),$(WINDOWS_WINSOCK2)))
 
 windows_named_test_alias_phonies = $(foreach test,$2,test-windows-$1-$(WINDOWS_TEST_CASE_$(test)_NAME))
 windows_variant_alias_phonies = $(foreach alias_name,$1,all-windows-$(alias_name) test-windows-$(alias_name) check-windows-$(alias_name))
@@ -326,9 +329,11 @@ windows_variant_alias_phonies = $(foreach alias_name,$1,all-windows-$(alias_name
 WINDOWS_XP_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phonies,xp,$(WINDOWS_COMMON_TEST_CASES))
 WINDOWS_2000_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phonies,2000,$(WINDOWS_COMMON_TEST_CASES))
 WINDOWS_NT4_WS1_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phonies,nt4-ws1,$(WINDOWS_COMMON_TEST_CASES) WINSOCK1_SOCKET_BACKEND)
+WINDOWS_NT4_WS2_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phonies,nt4-ws2,$(WINDOWS_COMMON_TEST_CASES))
 WINDOWS_NATIVE_TEST_ALIAS_PHONIES := $(call windows_named_test_alias_phonies,native,$(WINDOWS_COMMON_TEST_CASES))
 WINDOWS_VARIANT_ALIAS_PHONIES := \
 	$(call windows_variant_alias_phonies,$(WINDOWS_NT4_WS1_ALIAS_NAMES)) \
+	$(call windows_variant_alias_phonies,$(WINDOWS_NT4_WS2_ALIAS_NAMES)) \
 	$(call windows_variant_alias_phonies,$(WINDOWS_2000_ALIAS_NAMES)) \
 	$(call windows_variant_alias_phonies,$(WINDOWS_XP_ALIAS_NAMES)) \
 	$(call windows_variant_alias_phonies,$(WINDOWS_NATIVE_ALIAS_NAMES))
@@ -342,6 +347,7 @@ WINDOWS_VARIANT_ALIAS_PHONIES := \
 	$(WINDOWS_XP_TEST_ALIAS_PHONIES) \
 	$(WINDOWS_2000_TEST_ALIAS_PHONIES) \
 	$(WINDOWS_NT4_WS1_TEST_ALIAS_PHONIES) \
+	$(WINDOWS_NT4_WS2_TEST_ALIAS_PHONIES) \
 	$(WINDOWS_NATIVE_TEST_ALIAS_PHONIES)
 
 endif

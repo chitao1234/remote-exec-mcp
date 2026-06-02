@@ -3,6 +3,7 @@
 #include <stdexcept>
 
 #include "platform/win32_socket_compat.h"
+#include "platform/win32_winsock.h"
 
 #include <windows.h>
 
@@ -90,12 +91,7 @@ class WinsockSession {
 public:
     WinsockSession() {
         WSADATA wsa_data;
-#ifdef REMOTE_EXEC_CPP_WINSOCK1
-        const WORD requested_version = MAKEWORD(1, 1);
-#else
-        const WORD requested_version = MAKEWORD(2, 2);
-#endif
-        if (WSAStartup(requested_version, &wsa_data) != 0) {
+        if (remote_exec_win32::start_winsock(&wsa_data) != 0) {
             throw std::runtime_error("WSAStartup failed");
         }
     }

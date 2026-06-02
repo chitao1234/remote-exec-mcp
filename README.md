@@ -480,7 +480,9 @@ while compiling the daemon as C++11, such as the MinGW XP cross-build or an
 MSVC `v141_xp` setup.
 The minimum supported Windows runtime is Windows NT 3.51 through the GNU
 Winsock 1.1 variant; that same variant has also been tested on Windows NT 4.0.
-Non-Unicode Windows families, including Windows 9x/Me, remain unsupported.
+The GNU Windows NT 4.0 API-floor build also supports Winsock 2 when that
+runtime is installed. Non-Unicode Windows families, including Windows 9x/Me,
+remain unsupported.
 
 The Rust and C++ daemons share the `max_open_sessions` default of 64. C++ also
 has daemon-local safety knobs for its handwritten HTTP parser and blocking
@@ -495,13 +497,15 @@ make -C crates/remote-exec-daemon-cpp check-posix
 make -C crates/remote-exec-daemon-cpp check-windows-2000
 make -C crates/remote-exec-daemon-cpp check-windows-xp
 make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws1
+make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws2
 bmake -C crates/remote-exec-daemon-cpp check-posix
 ```
 
 The GNU make Windows runtime targets, such as `check-windows-2000`,
-`check-windows-xp`, and `check-windows-nt4-ws1`, run through
-`WINDOWS_TEST_RUNNER` when that variable is set and directly when it is empty.
-The GNU make default is `wine` on non-Windows hosts and empty on Windows.
+`check-windows-xp`, `check-windows-nt4-ws1`, and `check-windows-nt4-ws2`, run
+through `WINDOWS_TEST_RUNNER` when that variable is set and directly when it is
+empty. The GNU make default is `wine` on non-Windows hosts and empty on
+Windows.
 
 From an x86 Visual Studio developer prompt:
 
@@ -554,6 +558,7 @@ make -C crates/remote-exec-daemon-cpp check-posix
 make -C crates/remote-exec-daemon-cpp check-windows-2000
 make -C crates/remote-exec-daemon-cpp check-windows-xp
 make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws1
+make -C crates/remote-exec-daemon-cpp check-windows-nt4-ws2
 # On Windows under MSYS2/MINGW32:
 make -C crates/remote-exec-daemon-cpp check-windows WINDOWS_TOOLCHAIN=native WINDOWS_WINVER=0x0501 WINDOWS_WINSOCK_VERSION=2
 # From an x86 Visual Studio developer prompt:
