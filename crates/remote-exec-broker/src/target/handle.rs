@@ -8,7 +8,8 @@ use remote_exec_proto::rpc::{
     FileEditResponse, FileReadRequest, FileReadResponse, FileWriteRequest, FileWriteResponse,
     HealthCheckResponse, ImageReadRequest, ImageReadResponse, PatchApplyRequest,
     PatchApplyResponse, TargetCapabilities, TargetInfoResponse, TransferExportRequest,
-    TransferImportRequest, TransferImportResponse, TransferPathInfoRequest, TransferPathInfoResponse,
+    TransferImportRequest, TransferImportResponse, TransferPathInfoRequest,
+    TransferPathInfoResponse,
 };
 use tokio::sync::Mutex;
 
@@ -235,10 +236,9 @@ impl TargetHandle {
         let info = match self.target_info().await {
             Ok(info) => info,
             Err(DaemonClientError::Transport(err)) => {
-                *self.cached_health.lock().await =
-                    Some(CachedTargetHealth::unhealthy(&DaemonClientError::Transport(
-                        anyhow::anyhow!(err.to_string()),
-                    )));
+                *self.cached_health.lock().await = Some(CachedTargetHealth::unhealthy(
+                    &DaemonClientError::Transport(anyhow::anyhow!(err.to_string())),
+                ));
                 tracing::warn!(target = %name, ?err, "target identity verification failed");
                 return Err(DaemonClientError::Transport(err).into());
             }
@@ -288,7 +288,8 @@ impl TargetHandle {
                         self.expected_daemon_name.as_deref(),
                         &info.target,
                     )?;
-                    *self.cached_daemon_info.lock().await = Some(Self::cache_from_target_info(&info));
+                    *self.cached_daemon_info.lock().await =
+                        Some(Self::cache_from_target_info(&info));
                 }
 
                 Ok(instance_changed)

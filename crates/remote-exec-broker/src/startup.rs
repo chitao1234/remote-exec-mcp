@@ -410,6 +410,7 @@ mod tests {
                 disable_structured_content: false,
                 tools: Default::default(),
                 port_forward_limits: Default::default(),
+                health_refresh: Default::default(),
                 targets,
                 local: None,
             }
