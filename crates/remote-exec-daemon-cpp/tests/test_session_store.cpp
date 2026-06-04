@@ -213,6 +213,10 @@ static std::string normalize_output(const std::string& input) {
     return output;
 }
 
+static bool contains_terminal_escape(const std::string& input) {
+    return input.find('\x1b') != std::string::npos;
+}
+
 static Json start_test_command(SessionStore& store,
                                const std::string& command,
                                const std::string& workdir,
@@ -906,6 +910,9 @@ static void assert_tty_detection_and_input_round_trip(SessionStore& store,
     TEST_ASSERT(test_exec_pty::wait_until_file_contains(tty_flag_path, "yes", 2000UL));
     TEST_ASSERT(tty_output.find("hello\n") != std::string::npos);
     TEST_ASSERT(tty_output.find("input:hello\n") != std::string::npos);
+#ifdef _WIN32
+    TEST_ASSERT(!contains_terminal_escape(tty_output));
+#endif
 }
 
 static void assert_tty_resize_round_trip(SessionStore& store,

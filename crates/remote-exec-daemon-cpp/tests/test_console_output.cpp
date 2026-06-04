@@ -157,6 +157,32 @@ void test_utf8_stream_decode_flush_replaces_incomplete_suffix() {
     TEST_ASSERT(carry.empty());
 }
 
+void test_terminal_output_filter_strips_winpty_control_sequences() {
+    TerminalOutputFilter filter;
+    TEST_ASSERT(filter_terminal_output_for_test(
+                    &filter, "\x1b[0m\x1b[0Khello\x1b[0K\x1b[?25l\r\n\x1b[0K\x1b[?25h") == "hello\r\n");
+    TEST_ASSERT(drain_terminal_output_for_test(&filter).empty());
+}
+
+void test_terminal_output_filter_strips_osc_title_sequences() {
+    TerminalOutputFilter filter;
+    TEST_ASSERT(filter_terminal_output_for_test(
+                    &filter, "\x1b]0;C:\\Windows\\system32\\cmd.exe\x07hello \r\n") == "hello \r\n");
+    TEST_ASSERT(drain_terminal_output_for_test(&filter).empty());
+}
+
+void test_terminal_output_filter_handles_split_escape_sequences() {
+    TerminalOutputFilter filter;
+    TEST_ASSERT(filter_terminal_output_for_test(&filter, "before\x1b[") == "before");
+    TEST_ASSERT(filter_terminal_output_for_test(&filter, "0Kafter") == "after");
+    TEST_ASSERT(drain_terminal_output_for_test(&filter).empty());
+}
+
+void test_terminal_output_filter_applies_backspace_to_utf8_codepoints() {
+    TerminalOutputFilter filter;
+    TEST_ASSERT(filter_terminal_output_for_test(&filter, "\xE4\xBD\xA0\xE5\xA5\xBD\x08!\r\n") == "\xE4\xBD\xA0!\r\n");
+}
+
 } // namespace
 
 int main() {
@@ -169,5 +195,9 @@ int main() {
     test_invalid_decode_fallback();
     test_utf8_stream_decode_carry();
     test_utf8_stream_decode_flush_replaces_incomplete_suffix();
+    test_terminal_output_filter_strips_winpty_control_sequences();
+    test_terminal_output_filter_strips_osc_title_sequences();
+    test_terminal_output_filter_handles_split_escape_sequences();
+    test_terminal_output_filter_applies_backspace_to_utf8_codepoints();
     return 0;
 }

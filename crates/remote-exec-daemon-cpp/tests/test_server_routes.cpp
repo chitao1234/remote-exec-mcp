@@ -44,6 +44,10 @@ static std::string trim_trailing_exec_output(std::string output) {
     return output;
 }
 
+static bool contains_terminal_escape(const std::string& input) {
+    return input.find('\x1b') != std::string::npos;
+}
+
 static Json exec_write_json(AppState& state,
                             const std::string& daemon_session_id,
                             const std::string& chars,
@@ -332,6 +336,9 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
         TEST_ASSERT(output.find("tty:yes\n") != std::string::npos);
         TEST_ASSERT(output.find("hello\n") != std::string::npos);
         TEST_ASSERT(output.find("input:hello\n") != std::string::npos);
+#ifdef _WIN32
+        TEST_ASSERT(!contains_terminal_escape(output));
+#endif
 
         const HttpResponse resize_start_response =
             route_request(state,

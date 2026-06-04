@@ -148,6 +148,25 @@ std::string read_blocking_raw(HANDLE pipe, bool* eof) {
     return std::string(buffer, static_cast<std::size_t>(read));
 }
 
+bool is_c0_control(unsigned char byte) {
+    return byte <= 0x1FU || byte == 0x7FU;
+}
+
+bool is_utf8_continuation_byte(unsigned char byte) {
+    return (byte & 0xC0U) == 0x80U;
+}
+
+void pop_last_utf8_codepoint(std::string* output) {
+    if (output->empty()) {
+        return;
+    }
+    std::size_t index = output->size();
+    do {
+        --index;
+    } while (index > 0U && is_utf8_continuation_byte(static_cast<unsigned char>((*output)[index])));
+    output->erase(index);
+}
+
 } // namespace
 
 std::string read_available_console_output(HANDLE pipe, std::string* carry) {
@@ -165,6 +184,116 @@ std::string read_console_output(HANDLE pipe, bool block, bool* eof, std::string*
 
 std::string flush_console_output_carry(std::string* carry) {
     return decode_console_output_with_code_pages(GetOEMCP(), CP_ACP, carry, "", true);
+}
+
+TerminalOutputFilter::TerminalOutputFilter() : state_(State::Ground) {}
+
+std::string TerminalOutputFilter::filter_chunk(const std::string& chunk) {
+    std::string output;
+    output.reserve(chunk.size());
+    for (std::string::const_iterator it = chunk.begin(); it != chunk.end(); ++it) {
+        process_byte(static_cast<unsigned char>(*it), &output);
+    }
+    return output;
+}
+
+std::string TerminalOutputFilter::drain_pending() {
+    state_ = State::Ground;
+    return "";
+}
+
+void TerminalOutputFilter::process_byte(unsigned char byte, std::string* output) {
+    switch (state_) {
+    case State::Ground:
+        if (byte == 0x1BU) {
+            state_ = State::Escape;
+            return;
+        }
+        if (is_c0_control(byte)) {
+            emit_control(byte, output);
+            return;
+        }
+        output->push_back(static_cast<char>(byte));
+        return;
+    case State::Escape:
+        if (byte == '[') {
+            state_ = State::Csi;
+            return;
+        }
+        if (byte == ']') {
+            state_ = State::OscString;
+            return;
+        }
+        if (byte == 'P' || byte == 'X' || byte == '^' || byte == '_') {
+            state_ = State::IgnoreString;
+            return;
+        }
+        if (byte >= 0x20U && byte <= 0x2FU) {
+            state_ = State::EscapeIntermediate;
+            return;
+        }
+        if (byte == 0x1BU) {
+            return;
+        }
+        state_ = State::Ground;
+        return;
+    case State::EscapeIntermediate:
+        if (byte == 0x1BU) {
+            state_ = State::Escape;
+            return;
+        }
+        if (byte >= 0x30U && byte <= 0x7EU) {
+            state_ = State::Ground;
+        }
+        return;
+    case State::Csi:
+        if (byte == 0x1BU) {
+            state_ = State::Escape;
+            return;
+        }
+        if (byte >= 0x40U && byte <= 0x7EU) {
+            state_ = State::Ground;
+        }
+        return;
+    case State::OscString:
+        if (byte == 0x07U) {
+            state_ = State::Ground;
+            return;
+        }
+        if (byte == 0x1BU) {
+            state_ = State::IgnoreString;
+            return;
+        }
+        return;
+    case State::IgnoreString:
+        if (byte == '\\' || byte == 0x07U) {
+            state_ = State::Ground;
+            return;
+        }
+        if (byte == 0x1BU) {
+            return;
+        }
+        return;
+    }
+}
+
+void TerminalOutputFilter::emit_control(unsigned char byte, std::string* output) const {
+    switch (byte) {
+    case '\r':
+        output->push_back('\r');
+        return;
+    case '\n':
+        output->push_back('\n');
+        return;
+    case '\t':
+        output->push_back('\t');
+        return;
+    case 0x08U:
+        pop_last_utf8_codepoint(output);
+        return;
+    default:
+        return;
+    }
 }
 
 #ifdef REMOTE_EXEC_CPP_TESTING
@@ -187,5 +316,13 @@ std::string decode_console_output_for_test(unsigned int primary_code_page,
 
 std::string decode_utf8_stream_for_test(std::string* carry, const std::string& raw_chunk, bool flush) {
     return utf8_stream_decode::decode_utf8_stream_chunk(carry, raw_chunk, flush);
+}
+
+std::string filter_terminal_output_for_test(TerminalOutputFilter* filter, const std::string& chunk) {
+    return filter->filter_chunk(chunk);
+}
+
+std::string drain_terminal_output_for_test(TerminalOutputFilter* filter) {
+    return filter->drain_pending();
 }
 #endif

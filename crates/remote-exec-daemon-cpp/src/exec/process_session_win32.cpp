@@ -588,11 +588,13 @@ public:
         *eof = false;
         const std::string raw =
             block ? read_winpty_blocking_raw(stdout_read_.get(), eof) : read_winpty_available_raw(stdout_read_.get(), eof);
-        return utf8_stream_decode::decode_utf8_stream_chunk(carry, raw, false);
+        const std::string decoded = utf8_stream_decode::decode_utf8_stream_chunk(carry, raw, false);
+        return output_filter_.filter_chunk(decoded);
     }
 
     std::string flush_carry(std::string* carry) override {
-        return utf8_stream_decode::decode_utf8_stream_chunk(carry, "", true);
+        const std::string decoded = utf8_stream_decode::decode_utf8_stream_chunk(carry, "", true);
+        return output_filter_.filter_chunk(decoded) + output_filter_.drain_pending();
     }
 
     bool has_exited(int* exit_code) override {
@@ -650,6 +652,7 @@ private:
     UniqueHandle stdin_write_;
     UniqueHandle stdout_read_;
     bool console_closed_;
+    TerminalOutputFilter output_filter_;
 };
 
 std::unique_ptr<ProcessSession> launch_winpty_process_session(
