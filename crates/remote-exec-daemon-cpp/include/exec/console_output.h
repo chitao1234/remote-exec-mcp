@@ -74,6 +74,24 @@ private:
     std::string open_row_text_;
 };
 
+class WinptyTranscriptNormalizer {
+public:
+    WinptyTranscriptNormalizer();
+
+    std::string filter_chunk(const std::string& chunk);
+    std::string drain_pending();
+
+private:
+    void process_physical_line(const std::string& line, std::string* output);
+    void emit_logical_line(const std::string& line, std::string* output);
+    static bool split_large_gap_line(const std::string& line, std::string* left, std::string* right);
+    static std::string trim_trailing_spaces(const std::string& text);
+    static std::string trim_leading_spaces(const std::string& text);
+
+    std::string pending_physical_line_;
+    std::string pending_logical_fragment_;
+};
+
 #ifdef REMOTE_EXEC_CPP_TESTING
 std::string utf8_from_windows_wide_for_test(const std::wstring& wide);
 std::string utf8_from_windows_code_page_for_test(unsigned int code_page, const std::string& raw);
@@ -85,4 +103,6 @@ std::string decode_console_output_for_test(unsigned int primary_code_page,
 std::string decode_utf8_stream_for_test(std::string* carry, const std::string& raw_chunk, bool flush);
 std::string filter_terminal_output_for_test(TerminalOutputFilter* filter, const std::string& chunk);
 std::string drain_terminal_output_for_test(TerminalOutputFilter* filter);
+std::string normalize_winpty_transcript_chunk_for_test(WinptyTranscriptNormalizer* normalizer, const std::string& chunk);
+std::string drain_winpty_transcript_for_test(WinptyTranscriptNormalizer* normalizer);
 #endif

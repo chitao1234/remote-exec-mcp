@@ -255,8 +255,8 @@ bool is_prompt_marker_char(char ch) {
     return ch == '>' || ch == '$' || ch == '#';
 }
 
-bool closed_row_should_be_joinable(const std::string& text, int cursor_col) {
-    return cursor_col >= 80 && line_has_nonspace_char(text) && text.find_first_of(" \t") == std::string::npos;
+bool closed_row_should_be_joinable(const std::string& text, std::size_t physical_width) {
+    return physical_width >= 80U && line_has_nonspace_char(text) && text.find_first_of(" \t") == std::string::npos;
 }
 
 std::string merge_joinable_rows(const std::string& previous, const std::string& current) {
@@ -441,7 +441,7 @@ void TerminalOutputFilter::emit_control(unsigned char byte) {
             const std::size_t row = static_cast<std::size_t>(current_row_);
             const std::string row_text = serialize_physical_line(row);
             closed_row_text_[row] = row_text;
-            closed_row_joinable_[row] = closed_row_should_be_joinable(row_text, current_col_);
+            closed_row_joinable_[row] = closed_row_should_be_joinable(row_text, ensure_line(row).cells.size());
         }
         current_row_ += 1;
         current_col_ = 0;
@@ -523,11 +523,9 @@ void TerminalOutputFilter::dispatch_csi(char action) {
     switch (action) {
     case 'A':
         current_row_ = std::max(0, current_row_ - static_cast<int>(first));
-        set_cursor_col(0);
         return;
     case 'B':
         current_row_ += static_cast<int>(first);
-        set_cursor_col(0);
         return;
     case 'C':
         current_col_ += static_cast<int>(first);
@@ -867,6 +865,146 @@ std::string TerminalOutputFilter::emit_touched_rows() {
     return output;
 }
 
+WinptyTranscriptNormalizer::WinptyTranscriptNormalizer() {}
+
+std::string WinptyTranscriptNormalizer::filter_chunk(const std::string& chunk) {
+    pending_physical_line_ += chunk;
+
+    std::string output;
+    std::size_t newline = pending_physical_line_.find('\n');
+    while (newline != std::string::npos) {
+        std::string line = pending_physical_line_.substr(0, newline);
+        pending_physical_line_.erase(0, newline + 1U);
+        process_physical_line(line, &output);
+        newline = pending_physical_line_.find('\n');
+    }
+    return output;
+}
+
+std::string WinptyTranscriptNormalizer::drain_pending() {
+    std::string output;
+    if (!pending_physical_line_.empty()) {
+        process_physical_line(pending_physical_line_, &output);
+        pending_physical_line_.clear();
+    }
+    if (!pending_logical_fragment_.empty()) {
+        emit_logical_line(pending_logical_fragment_, &output);
+        pending_logical_fragment_.clear();
+    }
+    return output;
+}
+
+void WinptyTranscriptNormalizer::process_physical_line(const std::string& raw_line, std::string* output) {
+    if (output == nullptr) {
+        return;
+    }
+
+    std::string line = raw_line;
+    if (!line.empty() && line[line.size() - 1U] == '\r') {
+        line.erase(line.size() - 1U);
+    }
+
+    std::string left;
+    std::string right;
+    if (split_large_gap_line(line, &left, &right)) {
+        if (!pending_logical_fragment_.empty()) {
+            if (!left.empty()) {
+                emit_logical_line(pending_logical_fragment_ + trim_leading_spaces(left), output);
+            } else {
+                emit_logical_line(pending_logical_fragment_, output);
+            }
+            pending_logical_fragment_.clear();
+        } else if (!left.empty()) {
+            emit_logical_line(left, output);
+        }
+        pending_logical_fragment_ = right;
+        return;
+    }
+
+    if (!pending_logical_fragment_.empty()) {
+        emit_logical_line(pending_logical_fragment_ + trim_leading_spaces(line), output);
+        pending_logical_fragment_.clear();
+        return;
+    }
+
+    emit_logical_line(line, output);
+}
+
+void WinptyTranscriptNormalizer::emit_logical_line(const std::string& line, std::string* output) {
+    if (output == nullptr) {
+        return;
+    }
+    *output += line;
+    output->push_back('\n');
+}
+
+bool WinptyTranscriptNormalizer::split_large_gap_line(const std::string& line, std::string* left, std::string* right) {
+    const std::size_t min_gap = 48U;
+    const std::size_t min_physical_width = 96U;
+    const std::size_t max_right_fragment = 32U;
+
+    if (line.size() < min_physical_width) {
+        return false;
+    }
+
+    std::size_t best_start = std::string::npos;
+    std::size_t best_len = 0U;
+    for (std::size_t i = 0U; i < line.size();) {
+        if (line[i] != ' ') {
+            ++i;
+            continue;
+        }
+
+        std::size_t end = i;
+        while (end < line.size() && line[end] == ' ') {
+            ++end;
+        }
+
+        const std::size_t run_len = end - i;
+        if (run_len >= min_gap && end < line.size()) {
+            if (run_len > best_len) {
+                best_start = i;
+                best_len = run_len;
+            }
+        }
+        i = end;
+    }
+
+    if (best_start == std::string::npos) {
+        return false;
+    }
+
+    const std::string candidate_left = trim_trailing_spaces(line.substr(0, best_start));
+    const std::string candidate_right = line.substr(best_start + best_len);
+    if (candidate_right.empty() || candidate_right.size() > max_right_fragment || best_len * 2U < line.size()) {
+        return false;
+    }
+
+    if (left != nullptr) {
+        *left = candidate_left;
+    }
+    if (right != nullptr) {
+        *right = candidate_right;
+    }
+    return true;
+}
+
+std::string WinptyTranscriptNormalizer::trim_trailing_spaces(const std::string& text) {
+    std::size_t end = text.size();
+    while (end > 0U && text[end - 1U] == ' ') {
+        --end;
+    }
+    return text.substr(0, end);
+}
+
+std::string WinptyTranscriptNormalizer::trim_leading_spaces(const std::string& text) {
+    std::size_t start = 0U;
+    while (start < text.size() && text[start] == ' ') {
+        ++start;
+    }
+    return text.substr(start);
+}
+
 #ifdef REMOTE_EXEC_CPP_TESTING
 std::string utf8_from_windows_wide_for_test(const std::wstring& wide) {
     return utf8_from_wide(wide);
@@ -895,5 +1033,13 @@ std::string filter_terminal_output_for_test(TerminalOutputFilter* filter, const 
 
 std::string drain_terminal_output_for_test(TerminalOutputFilter* filter) {
     return filter->drain_pending();
+}
+
+std::string normalize_winpty_transcript_chunk_for_test(WinptyTranscriptNormalizer* normalizer, const std::string& chunk) {
+    return normalizer->filter_chunk(chunk);
+}
+
+std::string drain_winpty_transcript_for_test(WinptyTranscriptNormalizer* normalizer) {
+    return normalizer->drain_pending();
 }
 #endif
