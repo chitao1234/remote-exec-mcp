@@ -217,6 +217,21 @@ static std::string normalize_output(const std::string& input) {
 static bool contains_terminal_escape(const std::string& input) {
     return input.find('\x1b') != std::string::npos;
 }
+
+static bool contains_long_space_run(const std::string& input, std::size_t min_run) {
+    std::size_t run = 0U;
+    for (std::size_t i = 0; i < input.size(); ++i) {
+        if (input[i] == ' ') {
+            ++run;
+            if (run >= min_run) {
+                return true;
+            }
+        } else {
+            run = 0U;
+        }
+    }
+    return false;
+}
 #endif
 
 static std::string terminal_input_line(const std::string& value) {
@@ -1377,6 +1392,40 @@ static void assert_stdin_and_tty_behavior(SessionStore& store,
     TEST_ASSERT(xp_completed.at("exit_code").get<int>() == 0);
     TEST_ASSERT(xp_output.find("ready\n") != std::string::npos);
     TEST_ASSERT(xp_output.find("got:hello\n") != std::string::npos);
+
+    const Json cmd_running =
+        start_test_command(store, "cmd.exe", root.string(), shell, true, 1000UL, DEFAULT_MAX_OUTPUT_TOKENS, yield_time, 64UL);
+    TEST_ASSERT(cmd_running.at("running").get<bool>());
+    const std::string cmd_session_id = cmd_running.at("daemon_session_id").get<std::string>();
+    std::string cmd_output = normalize_output(cmd_running.at("output").get<std::string>());
+    Json cmd_response = store.write_stdin(cmd_session_id,
+                                          "echo hello\r\n",
+                                          true,
+                                          5000UL,
+                                          DEFAULT_MAX_OUTPUT_TOKENS,
+                                          yield_time,
+                                          false,
+                                          0U,
+                                          0U);
+    cmd_output += normalize_output(cmd_response.at("output").get<std::string>());
+    cmd_response = store.write_stdin(cmd_session_id,
+                                     "exit\r\n",
+                                     true,
+                                     5000UL,
+                                     DEFAULT_MAX_OUTPUT_TOKENS,
+                                     yield_time,
+                                     false,
+                                     0U,
+                                     0U);
+    cmd_output += normalize_output(cmd_response.at("output").get<std::string>());
+    cmd_response = poll_session_until_done(store, cmd_session_id, cmd_response, yield_time, &cmd_output, 5000UL);
+    TEST_ASSERT(!cmd_response.at("running").get<bool>());
+    TEST_ASSERT(cmd_response.at("exit_code").get<int>() == 0);
+    TEST_ASSERT(cmd_output.find("echo hello") != std::string::npos);
+    TEST_ASSERT(cmd_output.find("hello\n") != std::string::npos);
+    TEST_ASSERT(cmd_output.find("C:\\") != std::string::npos);
+    TEST_ASSERT(!contains_terminal_escape(cmd_output));
+    TEST_ASSERT(!contains_long_space_run(cmd_output, 32U));
 #endif
 
     assert_terminal_write_removes_completed_session(store, root, shell);

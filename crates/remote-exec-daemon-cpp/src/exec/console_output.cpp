@@ -1,6 +1,10 @@
+#include <algorithm>
 #include <atomic>
+#include <cctype>
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <windows.h>
 
@@ -152,19 +156,132 @@ bool is_c0_control(unsigned char byte) {
     return byte <= 0x1FU || byte == 0x7FU;
 }
 
-bool is_utf8_continuation_byte(unsigned char byte) {
-    return (byte & 0xC0U) == 0x80U;
+unsigned int decode_utf8_codepoint(const std::string& utf8) {
+    if (utf8.empty()) {
+        return 0U;
+    }
+
+    const unsigned char first = static_cast<unsigned char>(utf8[0]);
+    if ((first & 0x80U) == 0U) {
+        return first;
+    }
+    if ((first & 0xE0U) == 0xC0U && utf8.size() >= 2U) {
+        return ((first & 0x1FU) << 6U) | (static_cast<unsigned char>(utf8[1]) & 0x3FU);
+    }
+    if ((first & 0xF0U) == 0xE0U && utf8.size() >= 3U) {
+        return ((first & 0x0FU) << 12U) |
+               ((static_cast<unsigned char>(utf8[1]) & 0x3FU) << 6U) |
+               (static_cast<unsigned char>(utf8[2]) & 0x3FU);
+    }
+    if ((first & 0xF8U) == 0xF0U && utf8.size() >= 4U) {
+        return ((first & 0x07U) << 18U) |
+               ((static_cast<unsigned char>(utf8[1]) & 0x3FU) << 12U) |
+               ((static_cast<unsigned char>(utf8[2]) & 0x3FU) << 6U) |
+               (static_cast<unsigned char>(utf8[3]) & 0x3FU);
+    }
+    return 0U;
 }
 
-void pop_last_utf8_codepoint(std::string* output) {
-    if (output->empty()) {
-        return;
+bool is_combining_codepoint(unsigned int codepoint) {
+    return (codepoint >= 0x0300U && codepoint <= 0x036FU) ||
+           (codepoint >= 0x1AB0U && codepoint <= 0x1AFFU) ||
+           (codepoint >= 0x1DC0U && codepoint <= 0x1DFFU) ||
+           (codepoint >= 0x20D0U && codepoint <= 0x20FFU) ||
+           (codepoint >= 0xFE20U && codepoint <= 0xFE2FU);
+}
+
+bool is_wide_codepoint(unsigned int codepoint) {
+    if (codepoint >= 0x1100U &&
+        (codepoint <= 0x115FU || codepoint == 0x2329U || codepoint == 0x232AU ||
+         (codepoint >= 0x2E80U && codepoint <= 0xA4CFU && codepoint != 0x303FU) ||
+         (codepoint >= 0xAC00U && codepoint <= 0xD7A3U) ||
+         (codepoint >= 0xF900U && codepoint <= 0xFAFFU) ||
+         (codepoint >= 0xFE10U && codepoint <= 0xFE19U) ||
+         (codepoint >= 0xFE30U && codepoint <= 0xFE6FU) ||
+         (codepoint >= 0xFF00U && codepoint <= 0xFF60U) ||
+         (codepoint >= 0xFFE0U && codepoint <= 0xFFE6U))) {
+        return true;
     }
-    std::size_t index = output->size();
-    do {
-        --index;
-    } while (index > 0U && is_utf8_continuation_byte(static_cast<unsigned char>((*output)[index])));
-    output->erase(index);
+
+    return codepoint >= 0x1F300U && codepoint <= 0x1FAFFU;
+}
+
+unsigned int display_width_for_codepoint(unsigned int codepoint) {
+    if (codepoint == 0U) {
+        return 1U;
+    }
+    if (is_combining_codepoint(codepoint)) {
+        return 0U;
+    }
+    if (is_wide_codepoint(codepoint)) {
+        return 2U;
+    }
+    return 1U;
+}
+
+std::vector<unsigned int> parse_csi_params(const std::string& raw) {
+    std::vector<unsigned int> params;
+    if (raw.empty()) {
+        return params;
+    }
+
+    std::size_t start = 0U;
+    while (start <= raw.size()) {
+        const std::size_t end = raw.find(';', start);
+        const std::string token = raw.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        if (token.empty()) {
+            params.push_back(0U);
+        } else {
+            params.push_back(static_cast<unsigned int>(std::strtoul(token.c_str(), nullptr, 10)));
+        }
+        if (end == std::string::npos) {
+            break;
+        }
+        start = end + 1U;
+    }
+    return params;
+}
+
+bool line_has_nonspace_char(const std::string& text) {
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        if (text[i] != ' ') {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool is_prompt_marker_char(char ch) {
+    return ch == '>' || ch == '$' || ch == '#';
+}
+
+bool closed_row_should_be_joinable(const std::string& text, int cursor_col) {
+    return cursor_col >= 80 && line_has_nonspace_char(text) && text.find_first_of(" \t") == std::string::npos;
+}
+
+std::string merge_joinable_rows(const std::string& previous, const std::string& current) {
+    if (previous.empty()) {
+        return current;
+    }
+    if (current.empty()) {
+        return previous;
+    }
+
+    const std::size_t repeated = current.find(previous);
+    if (repeated == 0U) {
+        return current;
+    }
+    if (repeated != std::string::npos && repeated > 0U && is_prompt_marker_char(current[repeated - 1U])) {
+        return current.substr(repeated);
+    }
+
+    const std::size_t max_overlap = std::min(previous.size(), current.size());
+    for (std::size_t overlap = max_overlap; overlap > 0U; --overlap) {
+        if (previous.compare(previous.size() - overlap, overlap, current, 0U, overlap) == 0) {
+            return previous + current.substr(overlap);
+        }
+    }
+    return previous + current;
 }
 
 } // namespace
@@ -186,23 +303,57 @@ std::string flush_console_output_carry(std::string* carry) {
     return decode_console_output_with_code_pages(GetOEMCP(), CP_ACP, carry, "", true);
 }
 
-TerminalOutputFilter::TerminalOutputFilter() : state_(State::Ground) {}
+TerminalOutputFilter::TerminalOutputFilter()
+    : state_(State::Ground), current_row_(0), current_col_(0), has_open_row_(false), open_row_(0U) {}
 
 std::string TerminalOutputFilter::filter_chunk(const std::string& chunk) {
-    std::string output;
-    output.reserve(chunk.size());
+    std::string utf8_pending;
+    utf8_pending.reserve(4U);
+
     for (std::string::const_iterator it = chunk.begin(); it != chunk.end(); ++it) {
-        process_byte(static_cast<unsigned char>(*it), &output);
+        const unsigned char byte = static_cast<unsigned char>(*it);
+        if (state_ == State::Ground && byte != 0x1BU && !is_c0_control(byte)) {
+            utf8_pending.push_back(static_cast<char>(byte));
+            const unsigned char first = static_cast<unsigned char>(utf8_pending[0]);
+            const bool complete =
+                (first & 0x80U) == 0U ||
+                (utf8_pending.size() == 2U && (first & 0xE0U) == 0xC0U) ||
+                (utf8_pending.size() == 3U && (first & 0xF0U) == 0xE0U) ||
+                (utf8_pending.size() == 4U && (first & 0xF8U) == 0xF0U);
+            if (complete) {
+                emit_printable_codepoint(decode_utf8_codepoint(utf8_pending), utf8_pending);
+                utf8_pending.clear();
+            }
+            continue;
+        }
+
+        if (!utf8_pending.empty()) {
+            emit_printable_codepoint(decode_utf8_codepoint(utf8_pending), utf8_pending);
+            utf8_pending.clear();
+        }
+        process_byte(byte);
     }
-    return output;
+
+    if (!utf8_pending.empty()) {
+        emit_printable_codepoint(decode_utf8_codepoint(utf8_pending), utf8_pending);
+    }
+
+    return emit_touched_rows();
 }
 
 std::string TerminalOutputFilter::drain_pending() {
     state_ = State::Ground;
-    return "";
+    csi_buffer_.clear();
+    std::string output = emit_touched_rows();
+    if (has_open_row_) {
+        output.push_back('\n');
+        has_open_row_ = false;
+        open_row_text_.clear();
+    }
+    return output;
 }
 
-void TerminalOutputFilter::process_byte(unsigned char byte, std::string* output) {
+void TerminalOutputFilter::process_byte(unsigned char byte) {
     switch (state_) {
     case State::Ground:
         if (byte == 0x1BU) {
@@ -210,14 +361,13 @@ void TerminalOutputFilter::process_byte(unsigned char byte, std::string* output)
             return;
         }
         if (is_c0_control(byte)) {
-            emit_control(byte, output);
-            return;
+            emit_control(byte);
         }
-        output->push_back(static_cast<char>(byte));
         return;
     case State::Escape:
         if (byte == '[') {
             state_ = State::Csi;
+            csi_buffer_.clear();
             return;
         }
         if (byte == ']') {
@@ -232,10 +382,9 @@ void TerminalOutputFilter::process_byte(unsigned char byte, std::string* output)
             state_ = State::EscapeIntermediate;
             return;
         }
-        if (byte == 0x1BU) {
-            return;
+        if (byte != 0x1BU) {
+            state_ = State::Ground;
         }
-        state_ = State::Ground;
         return;
     case State::EscapeIntermediate:
         if (byte == 0x1BU) {
@@ -249,10 +398,17 @@ void TerminalOutputFilter::process_byte(unsigned char byte, std::string* output)
     case State::Csi:
         if (byte == 0x1BU) {
             state_ = State::Escape;
+            csi_buffer_.clear();
             return;
         }
         if (byte >= 0x40U && byte <= 0x7EU) {
+            dispatch_csi(static_cast<char>(byte));
             state_ = State::Ground;
+            csi_buffer_.clear();
+            return;
+        }
+        if ((byte >= 0x30U && byte <= 0x3FU) || byte == ';') {
+            csi_buffer_.push_back(static_cast<char>(byte));
         }
         return;
     case State::OscString:
@@ -262,38 +418,453 @@ void TerminalOutputFilter::process_byte(unsigned char byte, std::string* output)
         }
         if (byte == 0x1BU) {
             state_ = State::IgnoreString;
-            return;
         }
         return;
     case State::IgnoreString:
         if (byte == '\\' || byte == 0x07U) {
             state_ = State::Ground;
-            return;
-        }
-        if (byte == 0x1BU) {
-            return;
         }
         return;
     }
 }
 
-void TerminalOutputFilter::emit_control(unsigned char byte, std::string* output) const {
+void TerminalOutputFilter::emit_control(unsigned char byte) {
     switch (byte) {
     case '\r':
-        output->push_back('\r');
+        current_col_ = 0;
         return;
     case '\n':
-        output->push_back('\n');
+        if (has_open_row_ && open_row_ == static_cast<std::size_t>(current_row_)) {
+            open_row_text_.clear();
+        }
+        {
+            const std::size_t row = static_cast<std::size_t>(current_row_);
+            const std::string row_text = serialize_physical_line(row);
+            closed_row_text_[row] = row_text;
+            closed_row_joinable_[row] = closed_row_should_be_joinable(row_text, current_col_);
+        }
+        current_row_ += 1;
+        current_col_ = 0;
         return;
     case '\t':
-        output->push_back('\t');
+        do {
+            emit_explicit_space();
+        } while (current_col_ % 8 != 0);
         return;
     case 0x08U:
-        pop_last_utf8_codepoint(output);
+        if (current_col_ > 0) {
+            current_col_ -= 1;
+        }
         return;
     default:
         return;
     }
+}
+
+void TerminalOutputFilter::emit_printable_codepoint(unsigned int codepoint, const std::string& utf8) {
+    if (utf8 == " ") {
+        emit_explicit_space();
+        return;
+    }
+    write_cell_text(utf8, display_width_for_codepoint(codepoint), false);
+}
+
+void TerminalOutputFilter::emit_explicit_space() {
+    write_cell_text(" ", 1U, true);
+}
+
+void TerminalOutputFilter::write_cell_text(const std::string& text, unsigned int width, bool explicit_space) {
+    if (current_row_ < 0) {
+        current_row_ = 0;
+    }
+    if (current_col_ < 0) {
+        current_col_ = 0;
+    }
+
+    const std::size_t row = static_cast<std::size_t>(current_row_);
+    Line& line = ensure_line(row);
+    const unsigned int effective_width = width == 0U ? 1U : width;
+    clear_cells_range(&line, current_col_, current_col_ + static_cast<int>(effective_width));
+
+    if (line.cells.size() <= static_cast<std::size_t>(current_col_ + effective_width - 1U)) {
+        line.cells.resize(static_cast<std::size_t>(current_col_ + effective_width));
+    }
+
+    Cell& cell = line.cells[static_cast<std::size_t>(current_col_)];
+    cell.text = text;
+    cell.continuation = false;
+    cell.explicit_space = explicit_space;
+    cell.has_text = true;
+    cell.width = effective_width;
+
+    for (unsigned int i = 1U; i < effective_width; ++i) {
+        Cell& trailing = line.cells[static_cast<std::size_t>(current_col_) + i];
+        trailing.text.clear();
+        trailing.continuation = true;
+        trailing.explicit_space = false;
+        trailing.has_text = false;
+        trailing.width = 0U;
+    }
+
+    touch_row(row);
+    current_col_ += static_cast<int>(effective_width);
+}
+
+void TerminalOutputFilter::dispatch_csi(char action) {
+    std::string params = csi_buffer_;
+    bool private_mode = false;
+    if (!params.empty() && params[0] == '?') {
+        private_mode = true;
+        params.erase(0, 1);
+    }
+
+    const std::vector<unsigned int> parsed = parse_csi_params(params);
+    const unsigned int first = parsed.empty() || parsed[0] == 0U ? 1U : parsed[0];
+    switch (action) {
+    case 'A':
+        current_row_ = std::max(0, current_row_ - static_cast<int>(first));
+        set_cursor_col(0);
+        return;
+    case 'B':
+        current_row_ += static_cast<int>(first);
+        set_cursor_col(0);
+        return;
+    case 'C':
+        current_col_ += static_cast<int>(first);
+        return;
+    case 'D':
+        current_col_ = std::max(0, current_col_ - static_cast<int>(first));
+        return;
+    case 'G':
+        set_cursor_col(static_cast<int>(first == 0U ? 0U : first - 1U));
+        return;
+    case 'H':
+    case 'f': {
+        const unsigned int row = parsed.size() >= 1U && parsed[0] != 0U ? parsed[0] - 1U : 0U;
+        const unsigned int col = parsed.size() >= 2U && parsed[1] != 0U ? parsed[1] - 1U : 0U;
+        current_row_ = static_cast<int>(row);
+        set_cursor_col(static_cast<int>(col));
+        return;
+    }
+    case 'J':
+        clear_screen_from_cursor(parsed.empty() ? 0 : static_cast<int>(parsed[0]));
+        return;
+    case 'K':
+        clear_line_from_cursor(parsed.empty() ? 0 : static_cast<int>(parsed[0]));
+        return;
+    case 'm':
+        return;
+    case 'h':
+    case 'l':
+        if (private_mode) {
+            return;
+        }
+        return;
+    default:
+        return;
+    }
+}
+
+void TerminalOutputFilter::set_cursor_col(int col) {
+    current_col_ = std::max(0, col);
+}
+
+void TerminalOutputFilter::clear_line_from_cursor(int mode) {
+    if (current_row_ < 0) {
+        current_row_ = 0;
+    }
+    Line& line = ensure_line(static_cast<std::size_t>(current_row_));
+    if (mode == 2) {
+        line.cells.clear();
+    } else if (mode == 1) {
+        clear_cells_range(&line, 0, current_col_ + 1);
+    } else {
+        clear_cells_range(&line, current_col_, static_cast<int>(line.cells.size()));
+    }
+    touch_row(static_cast<std::size_t>(current_row_));
+}
+
+void TerminalOutputFilter::clear_screen_from_cursor(int mode) {
+    if (mode == 2) {
+        lines_.clear();
+        touched_rows_.clear();
+        closed_row_text_.clear();
+        closed_row_joinable_.clear();
+        current_row_ = 0;
+        current_col_ = 0;
+        has_open_row_ = false;
+        open_row_text_.clear();
+        return;
+    }
+
+    if (current_row_ < 0) {
+        current_row_ = 0;
+    }
+    clear_line_from_cursor(mode == 1 ? 1 : 0);
+    if (mode == 0) {
+        for (std::size_t row = static_cast<std::size_t>(current_row_ + 1); row < lines_.size(); ++row) {
+            lines_[row].cells.clear();
+            touch_row(row);
+        }
+    } else if (mode == 1) {
+        for (std::size_t row = 0U; row < static_cast<std::size_t>(current_row_); ++row) {
+            lines_[row].cells.clear();
+            touch_row(row);
+        }
+    }
+}
+
+void TerminalOutputFilter::touch_row(std::size_t row) {
+    if (row >= lines_.size()) {
+        lines_.resize(row + 1U);
+    }
+    if (!lines_[row].touched) {
+        lines_[row].touched = true;
+        touched_rows_.push_back(row);
+    }
+}
+
+TerminalOutputFilter::Line& TerminalOutputFilter::ensure_line(std::size_t row) {
+    if (row >= lines_.size()) {
+        lines_.resize(row + 1U);
+    }
+    return lines_[row];
+}
+
+bool TerminalOutputFilter::line_has_any_content(const Line& line) const {
+    for (std::size_t i = 0; i < line.cells.size(); ++i) {
+        const Cell& cell = line.cells[i];
+        if (cell.continuation) {
+            continue;
+        }
+        if (cell.has_text || cell.explicit_space) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void TerminalOutputFilter::clear_cells_range(Line* line, int start_col, int end_col) {
+    if (line == nullptr) {
+        return;
+    }
+    if (start_col < 0) {
+        start_col = 0;
+    }
+    if (end_col <= start_col) {
+        return;
+    }
+
+    int clear_start = start_col;
+    int clear_end = end_col;
+    if (line->cells.size() < static_cast<std::size_t>(clear_end)) {
+        line->cells.resize(static_cast<std::size_t>(clear_end));
+    }
+
+    while (clear_start > 0 &&
+           clear_start < static_cast<int>(line->cells.size()) &&
+           line->cells[static_cast<std::size_t>(clear_start)].continuation) {
+        --clear_start;
+    }
+
+    bool expanded = true;
+    while (expanded) {
+        expanded = false;
+        if (line->cells.size() < static_cast<std::size_t>(clear_end)) {
+            line->cells.resize(static_cast<std::size_t>(clear_end));
+        }
+        for (int col = clear_start; col < clear_end && col < static_cast<int>(line->cells.size()); ++col) {
+            const Cell& cell = line->cells[static_cast<std::size_t>(col)];
+            if (cell.continuation) {
+                int lead = col;
+                while (lead > 0 && line->cells[static_cast<std::size_t>(lead)].continuation) {
+                    --lead;
+                }
+                if (lead < clear_start) {
+                    clear_start = lead;
+                    expanded = true;
+                }
+                const Cell& lead_cell = line->cells[static_cast<std::size_t>(lead)];
+                const int cell_end = lead + static_cast<int>(lead_cell.width == 0U ? 1U : lead_cell.width);
+                if (cell_end > clear_end) {
+                    clear_end = cell_end;
+                    expanded = true;
+                }
+            } else if (cell.has_text && cell.width > 1U) {
+                const int cell_end = col + static_cast<int>(cell.width);
+                if (cell_end > clear_end) {
+                    clear_end = cell_end;
+                    expanded = true;
+                }
+            }
+        }
+    }
+
+    for (int col = clear_start; col < clear_end; ++col) {
+        Cell& cell = line->cells[static_cast<std::size_t>(col)];
+        cell.text.clear();
+        cell.continuation = false;
+        cell.explicit_space = false;
+        cell.has_text = false;
+        cell.width = 0U;
+    }
+}
+
+std::string TerminalOutputFilter::serialize_physical_line(std::size_t row) const {
+    if (row >= lines_.size()) {
+        return "";
+    }
+
+    const Line& line = lines_[row];
+    std::string out;
+    for (std::size_t i = 0; i < line.cells.size(); ++i) {
+        const Cell& cell = line.cells[i];
+        if (cell.continuation) {
+            continue;
+        }
+        if (cell.has_text) {
+            out += cell.text;
+        } else if (cell.explicit_space) {
+            out.push_back(' ');
+        }
+    }
+
+    while (!out.empty() && out[out.size() - 1] == ' ') {
+        out.erase(out.size() - 1);
+    }
+    return out;
+}
+
+std::string TerminalOutputFilter::emit_touched_rows() {
+    if (touched_rows_.empty()) {
+        return "";
+    }
+
+    std::sort(touched_rows_.begin(), touched_rows_.end());
+    touched_rows_.erase(std::unique(touched_rows_.begin(), touched_rows_.end()), touched_rows_.end());
+
+    std::string output;
+    for (std::size_t i = 0; i < touched_rows_.size(); ++i) {
+        const std::size_t row = touched_rows_[i];
+        if (row >= lines_.size()) {
+            continue;
+        }
+
+        Line& line = lines_[row];
+        const std::string current = serialize_physical_line(row);
+
+        if (!line_has_any_content(line) && has_open_row_ && open_row_ == row) {
+            output.push_back('\n');
+            has_open_row_ = false;
+            open_row_text_.clear();
+            closed_row_text_.erase(row);
+            closed_row_joinable_.erase(row);
+            line.touched = false;
+            continue;
+        }
+
+        if (!line_has_any_content(line) && !has_open_row_) {
+            line.touched = false;
+            continue;
+        }
+
+        const std::size_t previous_row = row == 0U ? 0U : row - 1U;
+        const std::map<std::size_t, std::string>::const_iterator previous_closed = closed_row_text_.find(previous_row);
+        const std::map<std::size_t, std::string>::const_iterator closed = closed_row_text_.find(row);
+        const bool closed_joinable =
+            closed != closed_row_text_.end() &&
+            closed_row_joinable_.find(row) != closed_row_joinable_.end() &&
+            closed_row_joinable_[row];
+        const bool join_previous_closed_row =
+            row > 0U &&
+            previous_closed != closed_row_text_.end() &&
+            closed_row_joinable_.find(previous_row) != closed_row_joinable_.end() &&
+            closed_row_joinable_[previous_row] &&
+            line_has_nonspace_char(current);
+        if (join_previous_closed_row) {
+            const std::string merged = merge_joinable_rows(previous_closed->second, current);
+            if (has_open_row_) {
+                output.push_back('\n');
+                has_open_row_ = false;
+                open_row_text_.clear();
+            }
+            output += merged;
+            has_open_row_ = true;
+            open_row_ = previous_row;
+            open_row_text_ = merged;
+            closed_row_text_.erase(previous_row);
+            closed_row_joinable_.erase(previous_row);
+            if (closed != closed_row_text_.end()) {
+                closed_row_text_[row] = merged;
+                closed_row_joinable_[row] = closed_joinable;
+            }
+            line.touched = false;
+            continue;
+        }
+
+        if (closed != closed_row_text_.end() && !closed_joinable && closed->second == current) {
+            if (has_open_row_ && open_row_ != row) {
+                output.push_back('\n');
+                has_open_row_ = false;
+                open_row_text_.clear();
+            }
+            output += current;
+            output.push_back('\n');
+            has_open_row_ = false;
+            open_row_text_.clear();
+            closed_row_text_.erase(row);
+            closed_row_joinable_.erase(row);
+            line.touched = false;
+            continue;
+        }
+
+        if (closed != closed_row_text_.end() && closed_joinable && closed->second == current) {
+            line.touched = false;
+            continue;
+        }
+
+        if (closed != closed_row_text_.end() && closed->second != current && line_has_nonspace_char(current)) {
+            if (has_open_row_) {
+                output.push_back('\n');
+                has_open_row_ = false;
+                open_row_text_.clear();
+            }
+            output += current;
+            output.push_back('\n');
+            closed_row_text_[row] = current;
+            closed_row_joinable_[row] = false;
+            line.touched = false;
+            continue;
+        }
+
+        if (!line_has_nonspace_char(current)) {
+            line.touched = false;
+            continue;
+        }
+
+        if (has_open_row_ && open_row_ == row) {
+            if (current != open_row_text_) {
+                const std::string suffix = current.substr(std::min(current.size(), open_row_text_.size()));
+                if (!suffix.empty()) {
+                    output += suffix;
+                }
+                open_row_text_ = current;
+            }
+        } else {
+            if (has_open_row_) {
+                output.push_back('\n');
+            }
+            output += current;
+            has_open_row_ = true;
+            open_row_ = row;
+            open_row_text_ = current;
+        }
+
+        line.touched = false;
+    }
+
+    touched_rows_.clear();
+    return output;
 }
 
 #ifdef REMOTE_EXEC_CPP_TESTING

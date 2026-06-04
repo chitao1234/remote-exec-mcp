@@ -1,6 +1,8 @@
 #pragma once
 
+#include <map>
 #include <string>
+#include <vector>
 
 #include <windows.h>
 
@@ -16,6 +18,23 @@ public:
     std::string drain_pending();
 
 private:
+    struct Cell {
+        Cell() : continuation(false), explicit_space(false), has_text(false), width(0U) {}
+
+        std::string text;
+        bool continuation;
+        bool explicit_space;
+        bool has_text;
+        unsigned int width;
+    };
+
+    struct Line {
+        Line() : touched(false) {}
+
+        std::vector<Cell> cells;
+        bool touched;
+    };
+
     enum class State {
         Ground,
         Escape,
@@ -25,10 +44,34 @@ private:
         IgnoreString,
     };
 
-    void process_byte(unsigned char byte, std::string* output);
-    void emit_control(unsigned char byte, std::string* output) const;
+    void process_byte(unsigned char byte);
+    void emit_control(unsigned char byte);
+    void emit_printable_codepoint(unsigned int codepoint, const std::string& utf8);
+    void emit_explicit_space();
+    void write_cell_text(const std::string& text, unsigned int width, bool explicit_space);
+    void dispatch_csi(char action);
+    void set_cursor_col(int col);
+    void clear_line_from_cursor(int mode);
+    void clear_screen_from_cursor(int mode);
+    void touch_row(std::size_t row);
+    Line& ensure_line(std::size_t row);
+    bool line_has_any_content(const Line& line) const;
+    void clear_cells_range(Line* line, int start_col, int end_col);
+    std::string serialize_physical_line(std::size_t row) const;
+    std::string emit_touched_rows();
+
+    std::vector<Line> lines_;
+    std::vector<std::size_t> touched_rows_;
+    std::map<std::size_t, std::string> closed_row_text_;
+    std::map<std::size_t, bool> closed_row_joinable_;
 
     State state_;
+    std::string csi_buffer_;
+    int current_row_;
+    int current_col_;
+    bool has_open_row_;
+    std::size_t open_row_;
+    std::string open_row_text_;
 };
 
 #ifdef REMOTE_EXEC_CPP_TESTING

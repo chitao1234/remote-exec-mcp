@@ -160,14 +160,14 @@ void test_utf8_stream_decode_flush_replaces_incomplete_suffix() {
 void test_terminal_output_filter_strips_winpty_control_sequences() {
     TerminalOutputFilter filter;
     TEST_ASSERT(filter_terminal_output_for_test(
-                    &filter, "\x1b[0m\x1b[0Khello\x1b[0K\x1b[?25l\r\n\x1b[0K\x1b[?25h") == "hello\r\n");
+                    &filter, "\x1b[0m\x1b[0Khello\x1b[0K\x1b[?25l\r\n\x1b[0K\x1b[?25h") == "hello\n");
     TEST_ASSERT(drain_terminal_output_for_test(&filter).empty());
 }
 
 void test_terminal_output_filter_strips_osc_title_sequences() {
     TerminalOutputFilter filter;
     TEST_ASSERT(filter_terminal_output_for_test(
-                    &filter, "\x1b]0;C:\\Windows\\system32\\cmd.exe\x07hello \r\n") == "hello \r\n");
+                    &filter, "\x1b]0;C:\\Windows\\system32\\cmd.exe\x07hello \r\n") == "hello\n");
     TEST_ASSERT(drain_terminal_output_for_test(&filter).empty());
 }
 
@@ -175,12 +175,35 @@ void test_terminal_output_filter_handles_split_escape_sequences() {
     TerminalOutputFilter filter;
     TEST_ASSERT(filter_terminal_output_for_test(&filter, "before\x1b[") == "before");
     TEST_ASSERT(filter_terminal_output_for_test(&filter, "0Kafter") == "after");
-    TEST_ASSERT(drain_terminal_output_for_test(&filter).empty());
+    TEST_ASSERT(drain_terminal_output_for_test(&filter) == "\n");
 }
 
 void test_terminal_output_filter_applies_backspace_to_utf8_codepoints() {
     TerminalOutputFilter filter;
-    TEST_ASSERT(filter_terminal_output_for_test(&filter, "\xE4\xBD\xA0\xE5\xA5\xBD\x08!\r\n") == "\xE4\xBD\xA0!\r\n");
+    TEST_ASSERT(filter_terminal_output_for_test(&filter, "\xE4\xBD\xA0\xE5\xA5\xBD\x08!\r\n") == "\xE4\xBD\xA0!\n");
+}
+
+void test_terminal_output_filter_collapses_winpty_prompt_rewrites() {
+    TerminalOutputFilter filter;
+    const std::string first =
+        filter_terminal_output_for_test(&filter,
+                                        "Microsoft Windows XP [\xE7\x89\x88\xE6\x9C\xAC 5.1.2600]"
+                                        "\x1b[105G(C\r\n)\x20"
+                                        "\xE7\x89\x88\xE6\x9D\x83\xE6\x89\x80\xE6\x9C\x89 1985-2001 Microsoft Corp.\r\n"
+                                        "\x1b[107GC:\\chi\r\n>\r");
+    const std::string second =
+        filter_terminal_output_for_test(&filter,
+                                        "\x1b[107GC:\\chi>e\r\n"
+                                        "cho hello\x1b[100Ghello\r\n"
+                                        "\x1b[107GC:\\chi>\r");
+    const std::string final = first + second + drain_terminal_output_for_test(&filter);
+
+    TEST_ASSERT(final.find("Microsoft Windows XP [\xE7\x89\x88\xE6\x9C\xAC 5.1.2600]") != std::string::npos);
+    TEST_ASSERT(final.find("\xE7\x89\x88\xE6\x9D\x83\xE6\x89\x80\xE6\x9C\x89 1985-2001 Microsoft Corp.") != std::string::npos);
+    TEST_ASSERT(final.find("C:\\chi>") != std::string::npos);
+    TEST_ASSERT(final.find("hellohello") != std::string::npos);
+    TEST_ASSERT(final.find("                                                                ") == std::string::npos);
+    TEST_ASSERT(final.find('\x1b') == std::string::npos);
 }
 
 } // namespace
@@ -199,5 +222,6 @@ int main() {
     test_terminal_output_filter_strips_osc_title_sequences();
     test_terminal_output_filter_handles_split_escape_sequences();
     test_terminal_output_filter_applies_backspace_to_utf8_codepoints();
+    test_terminal_output_filter_collapses_winpty_prompt_rewrites();
     return 0;
 }
