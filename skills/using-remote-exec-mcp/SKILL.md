@@ -63,6 +63,24 @@ does not require repository knowledge.
 - Copy files or directories between endpoints: `transfer_files`
 - Open, list, or close TCP/UDP forwards: `forward_ports`
 
+## MCP JSON vs CLI Arguments
+
+The MCP tools and the `remote-exec` CLI call the same broker behavior but do
+not use the same input syntax.
+
+- When calling MCP tools directly, use the JSON object shapes shown under
+  **MCP Tools**. Do not pass CLI shorthand strings.
+- When using the `remote-exec` CLI, use the flag syntax shown under
+  **`remote-exec` CLI**. The CLI accepts convenience shorthands and converts
+  them into MCP-shaped requests.
+- `transfer_files` MCP endpoints are objects such as
+  `{"target": "xp", "path": "C:/WINDOWS/win.ini"}`. The CLI shorthand
+  `xp:C:/WINDOWS/win.ini` is only for `remote-exec transfer-files`.
+- `forward_ports` MCP specs are objects with `listen_endpoint`,
+  `connect_endpoint`, and `protocol`. The CLI shorthand
+  `tcp:127.0.0.1:15432=127.0.0.1:5432` is only for
+  `remote-exec forward-ports`.
+
 ## MCP Tools
 
 ### `list_targets`
@@ -258,6 +276,11 @@ Required:
 
 Guidance:
 
+- MCP `source`, `sources[]`, and `destination` are endpoint objects. Do not
+  send CLI shorthand strings like `"local:/tmp/source.txt"` or
+  `"builder-a:/tmp/dest.txt"` as MCP endpoint values.
+- CLI equivalent:
+  `remote-exec transfer-files --source local:/tmp/source.txt --destination builder-a:/tmp/dest.txt`.
 - Paths must be absolute for their own endpoint.
 - `destination_mode: "auto"` gives single-source transfers `cp`-like behavior:
   copy under `destination.path` if it is an existing directory or ends in a path
@@ -310,6 +333,10 @@ Close:
 
 Guidance:
 
+- MCP `forwards[]` entries are objects. Do not send CLI shorthand strings like
+  `"tcp:127.0.0.1:15432=127.0.0.1:5432"` in MCP tool calls.
+- CLI equivalent:
+  `remote-exec forward-ports open --forward tcp:127.0.0.1:15432=127.0.0.1:5432`.
 - Supported protocols are `tcp` and `udp`.
 - Bare endpoint strings like `"8080"` mean `"127.0.0.1:8080"`.
 - `listen_endpoint` may use port `0`; read the returned `listen_endpoint` for
@@ -427,6 +454,7 @@ Port forward:
 - Running a command on one target and expecting it to read another target's
   filesystem.
 - Using shell tricks instead of `transfer_files` for cross-endpoint copy.
+- Copying CLI endpoint or forward shorthand into direct MCP tool calls.
 - Sending relative paths to `transfer_files`.
 - Assuming `overwrite: "merge"` deletes destination files absent from source.
 - Treating `status = "open"` as readiness for `forward_ports`; check `phase`.
