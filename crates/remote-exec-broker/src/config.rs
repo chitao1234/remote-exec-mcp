@@ -37,6 +37,8 @@ pub struct BrokerConfig {
     pub tools: BrokerToolsConfig,
     #[serde(default)]
     pub port_forward_limits: BrokerPortForwardLimits,
+    #[serde(default)]
+    pub health_refresh: BrokerHealthRefreshConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -46,6 +48,22 @@ pub struct ValidatedBrokerConfig(BrokerConfig);
 pub struct BrokerToolsConfig {
     #[serde(default)]
     pub file: FileToolConfig,
+}
+
+const DEFAULT_TARGET_HEALTH_REFRESH_INTERVAL_MS: u64 = 5_000;
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+pub struct BrokerHealthRefreshConfig {
+    #[serde(default = "default_target_health_refresh_interval_ms")]
+    pub interval_ms: u64,
+}
+
+impl Default for BrokerHealthRefreshConfig {
+    fn default() -> Self {
+        Self {
+            interval_ms: default_target_health_refresh_interval_ms(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -102,6 +120,20 @@ impl FileToolConfig {
 impl BrokerToolsConfig {
     pub(crate) fn validate(&self) -> anyhow::Result<()> {
         self.file.validate()
+    }
+}
+
+impl BrokerHealthRefreshConfig {
+    pub(crate) fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.interval_ms > 0,
+            "health_refresh.interval_ms must be greater than zero"
+        );
+        Ok(())
+    }
+
+    pub(crate) fn interval(self) -> Duration {
+        Duration::from_millis(self.interval_ms)
     }
 }
 
@@ -366,6 +398,7 @@ impl BrokerConfig {
         self.transfer_limits.validate()?;
         self.port_forward_limits.validate()?;
         self.tools.validate()?;
+        self.health_refresh.validate()?;
         anyhow::ensure!(
             !self.targets.contains_key(local::TARGET_NAME),
             "configured target name `{}` is reserved for broker-host filesystem access",
@@ -449,6 +482,10 @@ fn default_target_read_timeout_ms() -> u64 {
 
 fn default_target_request_timeout_ms() -> u64 {
     DEFAULT_TARGET_REQUEST_TIMEOUT_MS
+}
+
+fn default_target_health_refresh_interval_ms() -> u64 {
+    DEFAULT_TARGET_HEALTH_REFRESH_INTERVAL_MS
 }
 
 fn default_target_startup_probe_timeout_ms() -> u64 {

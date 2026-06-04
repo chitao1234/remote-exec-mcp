@@ -1,13 +1,14 @@
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use anyhow::Context;
 use remote_exec_proto::path::{PathPolicy, linux_path_policy, windows_path_policy};
 use remote_exec_proto::rpc::{
     DaemonIdentity, ExecResponse, ExecStartRequest, ExecWriteRequest, FileEditRequest,
     FileEditResponse, FileReadRequest, FileReadResponse, FileWriteRequest, FileWriteResponse,
-    ImageReadRequest, ImageReadResponse, PatchApplyRequest, PatchApplyResponse, TargetCapabilities,
-    TargetInfoResponse, TransferExportRequest, TransferImportRequest, TransferImportResponse,
-    TransferPathInfoRequest, TransferPathInfoResponse,
+    HealthCheckResponse, ImageReadRequest, ImageReadResponse, PatchApplyRequest,
+    PatchApplyResponse, TargetCapabilities, TargetInfoResponse, TransferExportRequest,
+    TransferImportRequest, TransferImportResponse, TransferPathInfoRequest, TransferPathInfoResponse,
 };
 use tokio::sync::Mutex;
 
@@ -17,6 +18,8 @@ use super::{TargetBackend, ensure_expected_daemon_name};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CachedDaemonInfo {
+    pub target: String,
+    pub daemon_instance_id: String,
     pub identity: DaemonIdentity,
     pub capabilities: TargetCapabilities,
     pub supports_transfer_compression: bool,
@@ -36,12 +39,43 @@ impl CachedDaemonInfo {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CachedTargetHealth {
+    pub healthy: bool,
+    pub daemon_version: Option<String>,
+    pub daemon_instance_id: Option<String>,
+    pub last_checked_at: SystemTime,
+    pub last_error: Option<String>,
+}
+
+impl CachedTargetHealth {
+    fn healthy(response: &HealthCheckResponse) -> Self {
+        Self {
+            healthy: true,
+            daemon_version: Some(response.daemon_version.clone()),
+            daemon_instance_id: Some(response.daemon_instance_id.clone()),
+            last_checked_at: SystemTime::now(),
+            last_error: None,
+        }
+    }
+
+    fn unhealthy(error: &DaemonClientError) -> Self {
+        Self {
+            healthy: false,
+            daemon_version: None,
+            daemon_instance_id: None,
+            last_checked_at: SystemTime::now(),
+            last_error: Some(error.to_string()),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct TargetHandle {
     pub(super) backend: TargetBackend,
     expected_daemon_name: Option<String>,
-    identity_verified: Arc<Mutex<bool>>,
     cached_daemon_info: Arc<Mutex<Option<CachedDaemonInfo>>>,
+    cached_health: Arc<Mutex<Option<CachedTargetHealth>>>,
 }
 
 #[derive(Clone, Copy)]
@@ -54,14 +88,14 @@ impl TargetHandle {
     fn new(
         backend: TargetBackend,
         expected_daemon_name: Option<String>,
-        identity_verified: bool,
         cached_daemon_info: Option<CachedDaemonInfo>,
+        cached_health: Option<CachedTargetHealth>,
     ) -> Self {
         Self {
             backend,
             expected_daemon_name,
-            identity_verified: Arc::new(Mutex::new(identity_verified)),
             cached_daemon_info: Arc::new(Mutex::new(cached_daemon_info)),
+            cached_health: Arc::new(Mutex::new(cached_health)),
         }
     }
 
@@ -73,8 +107,14 @@ impl TargetHandle {
         Self::new(
             backend,
             expected_daemon_name,
-            true,
             Some(Self::cache_from_target_info(info)),
+            Some(CachedTargetHealth {
+                healthy: true,
+                daemon_version: Some(info.identity.daemon_version.clone()),
+                daemon_instance_id: Some(info.daemon_instance_id.clone()),
+                last_checked_at: SystemTime::now(),
+                last_error: None,
+            }),
         )
     }
 
@@ -82,11 +122,13 @@ impl TargetHandle {
         backend: TargetBackend,
         expected_daemon_name: Option<String>,
     ) -> Self {
-        Self::new(backend, expected_daemon_name, false, None)
+        Self::new(backend, expected_daemon_name, None, None)
     }
 
     fn cache_from_target_info(info: &TargetInfoResponse) -> CachedDaemonInfo {
         CachedDaemonInfo {
+            target: info.target.clone(),
+            daemon_instance_id: info.daemon_instance_id.clone(),
             identity: info.identity.clone(),
             capabilities: info.capabilities.clone(),
             supports_transfer_compression: info.supports_transfer_compression,
@@ -101,10 +143,14 @@ impl TargetHandle {
         &self,
         name: &str,
     ) -> anyhow::Result<CachedDaemonInfo> {
-        self.ensure_identity_verified(name).await?;
+        self.ensure_daemon_info_cached(name).await?;
         self.cached_daemon_info()
             .await
             .context("target info missing after identity verification")
+    }
+
+    pub(crate) async fn health(&self) -> Result<HealthCheckResponse, DaemonClientError> {
+        self.backend.health().await
     }
 
     pub(crate) async fn target_info(&self) -> Result<TargetInfoResponse, DaemonClientError> {
@@ -176,23 +222,23 @@ impl TargetHandle {
         self.backend.port_tunnel(max_queued_bytes).await
     }
 
-    pub(crate) async fn clear_cached_daemon_info(&self) {
-        *self.identity_verified.lock().await = false;
+    pub(crate) async fn invalidate_cached_daemon_info(&self) {
         *self.cached_daemon_info.lock().await = None;
         tracing::info!("cleared cached daemon identity and metadata");
     }
 
-    pub(crate) async fn ensure_identity_verified(&self, name: &str) -> anyhow::Result<()> {
-        let mut identity_verified = self.identity_verified.lock().await;
-        if *identity_verified {
+    pub(crate) async fn ensure_daemon_info_cached(&self, name: &str) -> anyhow::Result<()> {
+        if self.cached_daemon_info.lock().await.is_some() {
             return Ok(());
         }
 
         let info = match self.target_info().await {
             Ok(info) => info,
             Err(DaemonClientError::Transport(err)) => {
-                *identity_verified = false;
-                *self.cached_daemon_info.lock().await = None;
+                *self.cached_health.lock().await =
+                    Some(CachedTargetHealth::unhealthy(&DaemonClientError::Transport(
+                        anyhow::anyhow!(err.to_string()),
+                    )));
                 tracing::warn!(target = %name, ?err, "target identity verification failed");
                 return Err(DaemonClientError::Transport(err).into());
             }
@@ -201,7 +247,13 @@ impl TargetHandle {
         ensure_expected_daemon_name(name, self.expected_daemon_name.as_deref(), &info.target)?;
 
         *self.cached_daemon_info.lock().await = Some(Self::cache_from_target_info(&info));
-        *identity_verified = true;
+        *self.cached_health.lock().await = Some(CachedTargetHealth {
+            healthy: true,
+            daemon_version: Some(info.identity.daemon_version.clone()),
+            daemon_instance_id: Some(info.daemon_instance_id.clone()),
+            last_checked_at: SystemTime::now(),
+            last_error: None,
+        });
         tracing::info!(
             target = %name,
             daemon_name = %info.target,
@@ -213,6 +265,44 @@ impl TargetHandle {
             "verified target identity"
         );
         Ok(())
+    }
+
+    pub(crate) async fn refresh_health_and_cache(&self, name: &str) -> anyhow::Result<bool> {
+        match self.health().await {
+            Ok(health) => {
+                *self.cached_health.lock().await = Some(CachedTargetHealth::healthy(&health));
+
+                let existing = self.cached_daemon_info().await;
+                let instance_changed = existing
+                    .as_ref()
+                    .map(|info| info.daemon_instance_id != health.daemon_instance_id)
+                    .unwrap_or(false);
+
+                if existing.is_none() || instance_changed {
+                    if instance_changed {
+                        self.invalidate_cached_daemon_info().await;
+                    }
+                    let info = self.target_info().await?;
+                    ensure_expected_daemon_name(
+                        name,
+                        self.expected_daemon_name.as_deref(),
+                        &info.target,
+                    )?;
+                    *self.cached_daemon_info.lock().await = Some(Self::cache_from_target_info(&info));
+                }
+
+                Ok(instance_changed)
+            }
+            Err(err) => {
+                *self.cached_health.lock().await = Some(CachedTargetHealth::unhealthy(&err));
+                if let DaemonClientError::Rpc { .. } | DaemonClientError::Decode(_) = &err {
+                    tracing::warn!(target = %name, error = %err, "target health refresh failed");
+                } else {
+                    tracing::warn!(target = %name, error = %err, "target unreachable during health refresh");
+                }
+                Err(err.into())
+            }
+        }
     }
 }
 
@@ -265,12 +355,5 @@ impl RemoteTargetHandle<'_> {
         self.client
             .transfer_import_from_archive_stream(req, stream)
             .await
-    }
-
-    pub(crate) async fn clear_on_transport_error<T>(
-        &self,
-        result: Result<T, DaemonClientError>,
-    ) -> Result<T, DaemonClientError> {
-        self.handle.clear_on_transport_error(result).await
     }
 }

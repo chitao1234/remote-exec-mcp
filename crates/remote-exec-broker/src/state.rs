@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use anyhow::Context;
 use remote_exec_host::sandbox::CompiledFilesystemSandbox;
 use remote_exec_proto::transfer::TransferLimits;
+use std::time::Duration;
 
 use crate::{
     local::{self, BrokerHostOrTarget},
@@ -16,6 +17,7 @@ pub struct BrokerState {
     pub(crate) enable_transfer_compression: bool,
     pub(crate) transfer_limits: TransferLimits,
     pub(crate) disable_structured_content: bool,
+    pub(crate) health_refresh_interval: Duration,
     pub(crate) tools: crate::config::BrokerToolsConfig,
     pub(crate) port_forward_limits: port_forward::BrokerPortForwardLimits,
     pub(crate) host_sandbox: Option<CompiledFilesystemSandbox>,
@@ -37,7 +39,7 @@ impl BrokerState {
 
     pub async fn verified_configured_target(&self, name: &str) -> anyhow::Result<&TargetHandle> {
         let handle = self.configured_target(name)?;
-        handle.ensure_identity_verified(name).await?;
+        handle.ensure_daemon_info_cached(name).await?;
         Ok(handle)
     }
 

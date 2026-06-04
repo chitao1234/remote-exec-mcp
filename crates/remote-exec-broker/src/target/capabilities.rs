@@ -14,17 +14,7 @@ impl TargetHandle {
         rpc_mode: RpcToolErrorMode,
         result: Result<T, DaemonClientError>,
     ) -> anyhow::Result<T> {
-        normalize_tool_result(self.clear_on_transport_error(result).await, rpc_mode)
-    }
-
-    pub(crate) async fn clear_on_transport_error<T>(
-        &self,
-        result: Result<T, DaemonClientError>,
-    ) -> Result<T, DaemonClientError> {
-        if matches!(result, Err(DaemonClientError::Transport(_))) {
-            self.clear_cached_daemon_info().await;
-        }
-        result
+        normalize_tool_result(result, rpc_mode)
     }
 
     pub async fn exec_start_checked(
@@ -32,7 +22,7 @@ impl TargetHandle {
         target_name: &str,
         req: &ExecStartRequest,
     ) -> anyhow::Result<ExecResponse> {
-        self.ensure_identity_verified(target_name).await?;
+        self.ensure_daemon_info_cached(target_name).await?;
         self.normalize_checked_result(RpcToolErrorMode::Full, self.exec_start(req).await)
             .await
     }
@@ -42,7 +32,7 @@ impl TargetHandle {
         target_name: &str,
         req: &PatchApplyRequest,
     ) -> anyhow::Result<PatchApplyResponse> {
-        self.ensure_identity_verified(target_name).await?;
+        self.ensure_daemon_info_cached(target_name).await?;
         self.normalize_checked_result(RpcToolErrorMode::Full, self.patch_apply(req).await)
             .await
     }
@@ -52,7 +42,7 @@ impl TargetHandle {
         target_name: &str,
         req: &ImageReadRequest,
     ) -> anyhow::Result<ImageReadResponse> {
-        self.ensure_identity_verified(target_name).await?;
+        self.ensure_daemon_info_cached(target_name).await?;
         self.normalize_checked_result(RpcToolErrorMode::MessageOnly, self.image_read(req).await)
             .await
     }
@@ -62,7 +52,7 @@ impl TargetHandle {
         target_name: &str,
         req: &FileReadRequest,
     ) -> anyhow::Result<FileReadResponse> {
-        self.ensure_identity_verified(target_name).await?;
+        self.ensure_daemon_info_cached(target_name).await?;
         self.normalize_checked_result(RpcToolErrorMode::Full, self.file_read(req).await)
             .await
     }
@@ -72,7 +62,7 @@ impl TargetHandle {
         target_name: &str,
         req: &FileWriteRequest,
     ) -> anyhow::Result<FileWriteResponse> {
-        self.ensure_identity_verified(target_name).await?;
+        self.ensure_daemon_info_cached(target_name).await?;
         self.normalize_checked_result(RpcToolErrorMode::Full, self.file_write(req).await)
             .await
     }
@@ -82,7 +72,7 @@ impl TargetHandle {
         target_name: &str,
         req: &FileEditRequest,
     ) -> anyhow::Result<FileEditResponse> {
-        self.ensure_identity_verified(target_name).await?;
+        self.ensure_daemon_info_cached(target_name).await?;
         self.normalize_checked_result(RpcToolErrorMode::Full, self.file_edit(req).await)
             .await
     }

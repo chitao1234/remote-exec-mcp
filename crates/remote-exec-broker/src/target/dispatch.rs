@@ -3,8 +3,8 @@ use std::sync::Arc;
 use futures_util::future::BoxFuture;
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWriteRequest, FileEditRequest, FileEditResponse,
-    FileReadRequest, FileReadResponse, FileWriteRequest, FileWriteResponse, ImageReadRequest,
-    ImageReadResponse, PatchApplyRequest, PatchApplyResponse, TargetInfoResponse,
+    FileReadRequest, FileReadResponse, FileWriteRequest, FileWriteResponse, HealthCheckResponse,
+    ImageReadRequest, ImageReadResponse, PatchApplyRequest, PatchApplyResponse, TargetInfoResponse,
 };
 
 use crate::daemon_client::{DaemonClient, DaemonClientError};
@@ -17,6 +17,8 @@ pub(crate) struct TargetBackend {
 }
 
 trait TargetBackendClient: Send + Sync {
+    fn health(&self) -> BoxFuture<'_, Result<HealthCheckResponse, DaemonClientError>>;
+
     fn target_info(&self) -> BoxFuture<'_, Result<TargetInfoResponse, DaemonClientError>>;
 
     fn exec_start<'a>(
@@ -83,6 +85,10 @@ impl TargetBackend {
         self.client.target_info().await
     }
 
+    pub(crate) async fn health(&self) -> Result<HealthCheckResponse, DaemonClientError> {
+        self.client.health().await
+    }
+
     pub(crate) async fn exec_start(
         &self,
         req: &ExecStartRequest,
@@ -145,6 +151,10 @@ impl TargetBackend {
 }
 
 impl TargetBackendClient for DaemonClient {
+    fn health(&self) -> BoxFuture<'_, Result<HealthCheckResponse, DaemonClientError>> {
+        Box::pin(DaemonClient::health(self))
+    }
+
     fn target_info(&self) -> BoxFuture<'_, Result<TargetInfoResponse, DaemonClientError>> {
         Box::pin(DaemonClient::target_info(self))
     }
@@ -216,6 +226,17 @@ impl TargetBackendClient for DaemonClient {
 }
 
 impl TargetBackendClient for LocalDaemonClient {
+    fn health(&self) -> BoxFuture<'_, Result<HealthCheckResponse, DaemonClientError>> {
+        Box::pin(async move {
+            let info = LocalDaemonClient::target_info(self).await?;
+            Ok(HealthCheckResponse {
+                status: remote_exec_proto::rpc::HealthStatus::Ok,
+                daemon_version: info.identity.daemon_version,
+                daemon_instance_id: info.daemon_instance_id,
+            })
+        })
+    }
+
     fn target_info(&self) -> BoxFuture<'_, Result<TargetInfoResponse, DaemonClientError>> {
         Box::pin(LocalDaemonClient::target_info(self))
     }

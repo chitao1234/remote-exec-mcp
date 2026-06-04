@@ -28,6 +28,12 @@
 # `structuredContent`.
 disable_structured_content = true
 
+# Optional periodic background refresh for cached remote target health and
+# daemon metadata. `list_targets` remains cache-backed and does not probe at
+# read time. Transient refresh failures do not clear last-known metadata.
+#[health_refresh]
+#interval_ms = 5000
+
 # Optional default-hidden text file tools. All three are disabled by default
 # and must be explicitly enabled before they are listed or callable through MCP.
 # Paths resolve relative to the target daemon/default workdir unless absolute.

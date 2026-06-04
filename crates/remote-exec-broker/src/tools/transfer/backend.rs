@@ -252,11 +252,7 @@ impl TransferBackend for RemoteTransferBackend<'_> {
         &'a self,
         request: &'a TransferPathInfoRequest,
     ) -> BoxFuture<'a, Result<TransferPathInfoResponse, DaemonClientError>> {
-        Box::pin(async move {
-            self.target
-                .clear_on_transport_error(self.target.transfer_path_info(request).await)
-                .await
-        })
+        Box::pin(async move { self.target.transfer_path_info(request).await })
     }
 
     fn export_to_file<'a>(
@@ -337,8 +333,6 @@ async fn handle_remote_transfer_result<T>(
     target: RemoteTargetHandle<'_>,
     result: Result<T, DaemonClientError>,
 ) -> anyhow::Result<T> {
-    normalize_tool_result(
-        target.clear_on_transport_error(result).await,
-        RpcToolErrorMode::MessageOnly,
-    )
+    let _ = target;
+    normalize_tool_result(result, RpcToolErrorMode::MessageOnly)
 }

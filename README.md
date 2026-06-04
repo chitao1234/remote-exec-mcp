@@ -84,6 +84,10 @@ Important invariants:
 
 - `list_targets` is broker-local cached inventory. It does not probe daemons at
   read time.
+- Cached target metadata is refreshed periodically in the background. Transient
+  reachability failures mark a target unhealthy but do not erase its last known
+  metadata; cached metadata is invalidated when the broker observes daemon
+  replacement or identity mismatch.
 - A temporarily unreachable target can still be configured. The broker may start
   successfully and verify that target before the first forwarded call.
 - Public `session_id` values are broker-owned opaque tokens, not daemon process
@@ -440,6 +444,8 @@ for normal Rust targets. Plain HTTP requires explicit opt-in.
 
 - Broker startup probes run concurrently and are bounded by
   `timeouts.startup_probe_ms`.
+- Broker target health refresh runs periodically in the background and updates
+  cached target metadata without probing from `list_targets` call paths.
 - Broker-daemon calls are bounded by per-target connect/read/request timeouts.
 - Rust daemon live exec sessions are capped by `max_open_sessions` and prune
   older sessions under pressure, preferring completed sessions. Broker-host

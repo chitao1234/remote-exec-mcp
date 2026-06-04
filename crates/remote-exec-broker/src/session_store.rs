@@ -62,4 +62,31 @@ impl SessionStore {
             );
         }
     }
+
+    pub async fn remove_target(&self, target: &str) {
+        let mut removed = Vec::new();
+        {
+            let mut guard = self.inner.write().await;
+            let session_ids = guard
+                .iter()
+                .filter(|(_, record)| record.target == target)
+                .map(|(session_id, _)| session_id.clone())
+                .collect::<Vec<_>>();
+            for session_id in session_ids {
+                if let Some(record) = guard.remove(&session_id) {
+                    removed.push(record);
+                }
+            }
+        }
+
+        for record in removed {
+            tracing::info!(
+                session_id = %record.session_id,
+                target = %record.target,
+                daemon_session_id = %record.daemon_session_id,
+                daemon_instance_id = %record.daemon_instance_id,
+                "removed broker session mapping after target refresh invalidation"
+            );
+        }
+    }
 }

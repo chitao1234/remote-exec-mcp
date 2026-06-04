@@ -23,6 +23,7 @@ pub async fn run(config: config::ValidatedBrokerConfig) -> anyhow::Result<()> {
         "starting broker"
     );
     let state = build_state(config).await?;
+    spawn_periodic_target_refresh(&state);
     tracing::info!(configured_targets = state.targets.len(), "broker ready");
     crate::mcp_server::serve(state, &mcp).await
 }
@@ -39,6 +40,7 @@ pub async fn build_state(config: config::ValidatedBrokerConfig) -> anyhow::Resul
         enable_transfer_compression: config.enable_transfer_compression,
         transfer_limits: config.transfer_limits,
         disable_structured_content: config.disable_structured_content,
+        health_refresh_interval: config.health_refresh.interval(),
         tools: config.tools,
         port_forward_limits: config.port_forward_limits,
         host_sandbox,
@@ -210,6 +212,39 @@ fn mcp_transport_name(config: &config::McpServerConfig) -> &'static str {
     }
 }
 
+fn spawn_periodic_target_refresh(state: &BrokerState) {
+    let state = state.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(state.health_refresh_interval);
+        loop {
+            interval.tick().await;
+            for (name, handle) in &state.targets {
+                if handle.as_remote().is_none() {
+                    continue;
+                }
+
+                match handle.refresh_health_and_cache(name).await {
+                    Ok(true) => {
+                        state.sessions.remove_target(name).await;
+                        tracing::info!(
+                            target = %name,
+                            "invalidated broker sessions after daemon instance change"
+                        );
+                    }
+                    Ok(false) => {}
+                    Err(err) => {
+                        tracing::debug!(
+                            target = %name,
+                            error = %err,
+                            "periodic target refresh did not update cached daemon metadata"
+                        );
+                    }
+                }
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -240,6 +275,7 @@ mod tests {
                 disable_structured_content: false,
                 tools: Default::default(),
                 port_forward_limits: Default::default(),
+                health_refresh: Default::default(),
                 targets: BTreeMap::new(),
                 local: Some(LocalTargetConfig {
                     default_workdir: tempdir.path().to_path_buf(),
@@ -324,6 +360,7 @@ mod tests {
                 disable_structured_content: false,
                 tools: Default::default(),
                 port_forward_limits: Default::default(),
+                health_refresh: Default::default(),
                 targets,
                 local: None,
             }

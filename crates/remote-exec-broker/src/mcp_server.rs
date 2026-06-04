@@ -377,6 +377,7 @@ mod tool_router_contract_tests {
             enable_transfer_compression: true,
             transfer_limits: Default::default(),
             disable_structured_content: false,
+            health_refresh_interval: std::time::Duration::from_secs(5),
             tools: Default::default(),
             port_forward_limits: Default::default(),
             host_sandbox: None,

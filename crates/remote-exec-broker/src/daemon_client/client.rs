@@ -1,8 +1,8 @@
 use remote_exec_proto::request_id::REQUEST_ID_HEADER;
 use remote_exec_proto::rpc::{
     ExecResponse, ExecStartRequest, ExecWriteRequest, FileEditRequest, FileEditResponse,
-    FileReadRequest, FileReadResponse, FileWriteRequest, FileWriteResponse, ImageReadRequest,
-    ImageReadResponse, PatchApplyRequest, PatchApplyResponse, TargetInfoResponse,
+    FileReadRequest, FileReadResponse, FileWriteRequest, FileWriteResponse, HealthCheckResponse,
+    ImageReadRequest, ImageReadResponse, PatchApplyRequest, PatchApplyResponse, TargetInfoResponse,
 };
 use reqwest::header::{AUTHORIZATION, HeaderValue};
 
@@ -52,6 +52,10 @@ impl DaemonClient {
 
     pub async fn target_info(&self) -> Result<TargetInfoResponse, DaemonClientError> {
         self.post("/v1/target-info", &serde_json::json!({})).await
+    }
+
+    pub async fn health(&self) -> Result<HealthCheckResponse, DaemonClientError> {
+        self.post("/v1/health", &serde_json::json!({})).await
     }
 
     pub async fn exec_start(
