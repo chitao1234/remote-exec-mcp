@@ -213,9 +213,11 @@ static std::string normalize_output(const std::string& input) {
     return output;
 }
 
+#ifdef _WIN32
 static bool contains_terminal_escape(const std::string& input) {
     return input.find('\x1b') != std::string::npos;
 }
+#endif
 
 static Json start_test_command(SessionStore& store,
                                const std::string& command,
@@ -285,6 +287,82 @@ static std::string append_running_session_output_until_pty_size(SessionStore& st
     }
     return output;
 }
+
+#ifdef _WIN32
+static std::string append_session_output_until_done(SessionStore& store,
+                                                    const std::string& daemon_session_id,
+                                                    const YieldTimeConfig& yield_time,
+                                                    std::string output,
+                                                    unsigned long timeout_ms) {
+    Json poll;
+    const std::uint64_t started = platform::monotonic_ms();
+    do {
+        poll =
+            store.write_stdin(daemon_session_id, "", true, 250UL, DEFAULT_MAX_OUTPUT_TOKENS, yield_time, false, 0U, 0U);
+        output += normalize_output(poll.at("output").get<std::string>());
+        if (!poll.at("running").get<bool>()) {
+            TEST_ASSERT(poll.at("exit_code").get<int>() == 0);
+            return output;
+        }
+        platform::sleep_ms(10UL);
+    } while (platform::monotonic_ms() - started < timeout_ms);
+
+    TEST_ASSERT(false && "session did not complete before timeout");
+    return output;
+}
+
+static void assert_windows_cmd_command_line_preserves_command_quotes(const std::string& shell) {
+    TEST_ASSERT(windows_process_command_line_for_test("echo \"A & B\"", shell, false) ==
+                shell + " /D /C echo \"A & B\"");
+    TEST_ASSERT(windows_process_command_line_for_test("for /f \"tokens=1,2\" %A in (\"alpha beta\") do @echo %A:%B",
+                                                     shell,
+                                                     false) ==
+                shell + " /D /C for /f \"tokens=1,2\" %A in (\"alpha beta\") do @echo %A:%B");
+    TEST_ASSERT(windows_process_command_line_for_test("echo ok", shell, true) == shell + " /C echo ok");
+    TEST_ASSERT(windows_process_command_line_for_test("echo ok", "C:\\Program Files\\cmd.exe", false) ==
+                "\"C:\\Program Files\\cmd.exe\" /D /C echo ok");
+}
+
+static std::string run_windows_quote_sensitive_command(SessionStore& store,
+                                                       const fs::path& root,
+                                                       const std::string& shell,
+                                                       const YieldTimeConfig& yield_time,
+                                                       bool tty) {
+    const std::string command =
+        "echo \"A & B\"&for /f \"tokens=1,2\" %A in (\"alpha beta\") do @echo for:%A:%B";
+    const Json started = start_test_command(
+        store, command, root.string(), shell, tty, 5000UL, DEFAULT_MAX_OUTPUT_TOKENS, yield_time, 64UL);
+
+    std::string output = normalize_output(started.at("output").get<std::string>());
+    if (started.at("running").get<bool>()) {
+        output = append_session_output_until_done(
+            store, started.at("daemon_session_id").get<std::string>(), yield_time, output, 5000UL);
+    } else {
+        TEST_ASSERT(started.at("exit_code").get<int>() == 0);
+    }
+    return output;
+}
+
+static void assert_windows_cmd_quotes_survive_non_tty_and_tty(SessionStore& store,
+                                                              const fs::path& root,
+                                                              const std::string& shell,
+                                                              const YieldTimeConfig& yield_time) {
+    const std::string non_tty_output =
+        run_windows_quote_sensitive_command(store, root, shell, yield_time, false);
+    TEST_ASSERT(non_tty_output.find("\"A & B\"\n") != std::string::npos);
+    TEST_ASSERT(non_tty_output.find("for:alpha:beta\n") != std::string::npos);
+    TEST_ASSERT(non_tty_output.find("\\\"") == std::string::npos);
+
+    if (!process_session_supports_pty()) {
+        return;
+    }
+
+    const std::string tty_output = run_windows_quote_sensitive_command(store, root, shell, yield_time, true);
+    TEST_ASSERT(tty_output.find("\"A & B\"\n") != std::string::npos);
+    TEST_ASSERT(tty_output.find("for:alpha:beta\n") != std::string::npos);
+    TEST_ASSERT(tty_output.find("\\\"") == std::string::npos);
+}
+#endif
 
 #ifndef _WIN32
 static unsigned long warning_threshold() {
@@ -1382,9 +1460,15 @@ int main() {
     const YieldTimeConfig yield_time = YieldTimeConfig();
     const std::string shell = stable_test_shell();
 
+#ifdef _WIN32
+    assert_windows_cmd_command_line_preserves_command_quotes(shell);
+#endif
     assert_explicit_drain_stop_reasons();
     assert_completed_command_output(store, root, shell, yield_time);
     assert_token_limiting(store, root, shell, yield_time);
+#ifdef _WIN32
+    assert_windows_cmd_quotes_survive_non_tty_and_tty(store, root, shell, yield_time);
+#endif
     assert_posix_locale_and_late_output(store, root, shell, yield_time);
     assert_posix_exit_drain_boundaries(store, root, shell, yield_time);
     assert_posix_exec_uses_parent_built_environment_and_path(store, root, shell, yield_time);

@@ -82,6 +82,39 @@ std::string command_line_from_argv(const std::vector<std::string>& argv) {
     return out.str();
 }
 
+std::string shell_basename_lower(const std::string& shell) {
+    const std::size_t slash = shell.find_last_of("/\\");
+    std::string base = slash == std::string::npos ? shell : shell.substr(slash + 1U);
+    for (std::size_t i = 0; i < base.size(); ++i) {
+        if (base[i] >= 'A' && base[i] <= 'Z') {
+            base[i] = static_cast<char>(base[i] - 'A' + 'a');
+        }
+    }
+    return base;
+}
+
+bool is_windows_cmd_family(const std::string& lower) {
+    return lower == "cmd.exe" || lower == "cmd";
+}
+
+std::string windows_process_command_line(const std::string& command, const std::string& shell, bool login) {
+    const std::string lower = shell_basename_lower(shell);
+    if (!is_windows_cmd_family(lower)) {
+        return command_line_from_argv(platform::shell_argv(shell, login, command));
+    }
+
+    std::ostringstream out;
+    out << windows_quote_arg(shell);
+    if (!login) {
+        out << " /D";
+    }
+    out << " /C";
+    if (!command.empty()) {
+        out << ' ' << command;
+    }
+    return out.str();
+}
+
 struct PipePair {
     UniqueHandle read_end;
     UniqueHandle write_end;
@@ -388,8 +421,7 @@ UniqueHandle spawn_winpty_process(winpty_t* winpty,
                                   const std::string& workdir,
                                   const std::string& shell,
                                   bool login) {
-    const std::vector<std::string> argv = platform::shell_argv(shell, login, command);
-    const std::string command_line = command_line_from_argv(argv);
+    const std::string command_line = windows_process_command_line(command, shell, login);
     std::wstring wide_command_line = wide_from_utf8(command_line);
     std::wstring wide_workdir = workdir.empty() ? std::wstring() : wide_from_utf8(workdir);
 
@@ -698,8 +730,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
     PROCESS_INFORMATION process_info;
     ZeroMemory(&process_info, sizeof(process_info));
 
-    const std::vector<std::string> argv = platform::shell_argv(shell, login, command);
-    const std::string command_line = command_line_from_argv(argv);
+    const std::string command_line = windows_process_command_line(command, shell, login);
     std::wstring wide_command_line = wide_from_utf8(command_line);
     std::vector<wchar_t> mutable_command_line(wide_command_line.begin(), wide_command_line.end());
     mutable_command_line.push_back(L'\0');
@@ -751,5 +782,13 @@ bool process_session_supports_pty() {
     return false;
 #endif
 }
+
+#ifdef REMOTE_EXEC_CPP_TESTING
+std::string windows_process_command_line_for_test(const std::string& command,
+                                                  const std::string& shell,
+                                                  bool login) {
+    return windows_process_command_line(command, shell, login);
+}
+#endif
 
 #endif
