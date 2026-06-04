@@ -30,6 +30,8 @@ inline ConnectedSocketPair make_connected_socket_pair() {
     test_network_session();
 
 #ifdef _WIN32
+    static const unsigned long WINDOWS_LOOPBACK_CONNECT_TIMEOUT_MS = 5000UL;
+
     UniqueSocket listener(socket(AF_INET, SOCK_STREAM, IPPROTO_TCP));
     TEST_ASSERT(listener.valid());
 
@@ -47,7 +49,22 @@ inline ConnectedSocketPair make_connected_socket_pair() {
 
     UniqueSocket client(socket(AF_INET, SOCK_STREAM, IPPROTO_TCP));
     TEST_ASSERT(client.valid());
-    TEST_ASSERT(connect(client.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
+
+    u_long nonblocking = 1UL;
+    TEST_ASSERT(ioctlsocket(client.get(), FIONBIO, &nonblocking) == 0);
+
+    if (connect_socket(client.get(), reinterpret_cast<sockaddr*>(&address), static_cast<socklen_t>(address_len)) != 0) {
+        const int connect_error = last_socket_error();
+        TEST_ASSERT(connect_in_progress_socket_error(connect_error));
+        TEST_ASSERT(wait_socket_writable(client.get(), WINDOWS_LOOPBACK_CONNECT_TIMEOUT_MS) > 0);
+
+        int socket_error = 0;
+        TEST_ASSERT(socket_error_option(client.get(), &socket_error) == 0);
+        TEST_ASSERT(socket_error == 0);
+    }
+
+    nonblocking = 0UL;
+    TEST_ASSERT(ioctlsocket(client.get(), FIONBIO, &nonblocking) == 0);
 
     const SOCKET accepted_socket = accept(listener.get(), NULL, NULL);
     TEST_ASSERT(accepted_socket != INVALID_SOCKET);
