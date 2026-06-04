@@ -57,6 +57,10 @@ bool read_deadline_expired(const HttpReadControl& read_control, std::uint64_t de
     return has_idle_deadline(read_control) && platform::monotonic_deadline_expired(deadline_ms);
 }
 
+bool deadline_expired(std::uint64_t deadline_ms) {
+    return deadline_ms != 0U && platform::monotonic_deadline_expired(deadline_ms);
+}
+
 unsigned long controlled_read_wait_ms(const HttpReadControl& read_control, std::uint64_t deadline_ms) {
     unsigned long wait_ms = read_control.poll_timeout_ms;
     if (wait_ms == 0UL) {
@@ -241,6 +245,29 @@ std::size_t HttpRequestBodyStream::read(char* data, std::size_t max_size) {
     return read_content_length_body(data, max_size);
 }
 
+bool HttpRequestBodyStream::fully_consumed() const {
+    return !has_remaining_body();
+}
+
+bool HttpRequestBodyStream::has_remaining_body() const {
+    if (framing_.chunked) {
+        return !chunked_finished_ || remaining_chunk_size_ != 0U || raw_.size() > raw_offset_;
+    }
+    return remaining_content_length_ != 0U;
+}
+
+bool HttpRequestBodyStream::discard_remaining_bounded(unsigned long timeout_ms, std::size_t max_bytes) {
+    if (!has_remaining_body()) {
+        return true;
+    }
+
+    const std::uint64_t deadline_ms = timeout_ms == 0UL ? 0U : platform::monotonic_deadline_after_ms(timeout_ms);
+    if (framing_.chunked) {
+        return try_discard_chunked_body(max_bytes, deadline_ms);
+    }
+    return try_discard_content_length_body(max_bytes, deadline_ms);
+}
+
 std::size_t HttpRequestBodyStream::read_content_length_body(char* data, std::size_t max_size) {
     if (remaining_content_length_ == 0U) {
         return 0;
@@ -365,6 +392,148 @@ void HttpRequestBodyStream::consume_chunk_trailers() {
         if (line_end == raw_offset_) {
             consume_raw(2);
             return;
+        }
+        consume_raw(line_end + 2U - raw_offset_);
+    }
+}
+
+bool HttpRequestBodyStream::try_discard_content_length_body(std::size_t max_bytes, std::uint64_t deadline_ms) {
+    std::size_t discarded = 0U;
+    while (remaining_content_length_ != 0U) {
+        if (discarded >= max_bytes || deadline_expired(deadline_ms)) {
+            return false;
+        }
+        if (!try_ensure_raw_available_until(1U, deadline_ms)) {
+            return false;
+        }
+
+        const std::size_t available = raw_.size() - raw_offset_;
+        std::size_t step = remaining_content_length_ < available ? remaining_content_length_ : available;
+        const std::size_t remaining_budget = max_bytes - discarded;
+        if (step > remaining_budget) {
+            step = remaining_budget;
+        }
+        if (step == 0U) {
+            return false;
+        }
+
+        consume_raw(step);
+        remaining_content_length_ -= step;
+        decoded_size_ += step;
+        discarded += step;
+    }
+    return true;
+}
+
+bool HttpRequestBodyStream::try_discard_chunked_body(std::size_t max_bytes, std::uint64_t deadline_ms) {
+    std::size_t discarded = 0U;
+    while (!chunked_finished_) {
+        while (remaining_chunk_size_ == 0U) {
+            if (!try_ensure_raw_line_until(deadline_ms)) {
+                return false;
+            }
+            const std::size_t line_end = raw_.find("\r\n", raw_offset_);
+            const std::size_t chunk_size = parse_chunk_size_line(raw_.substr(raw_offset_, line_end - raw_offset_));
+            consume_raw(line_end + 2U - raw_offset_);
+
+            if (chunk_size == 0U) {
+                if (!try_consume_chunk_trailers_until(deadline_ms)) {
+                    return false;
+                }
+                chunked_finished_ = true;
+                return true;
+            }
+            remaining_chunk_size_ = chunk_size;
+        }
+
+        while (remaining_chunk_size_ != 0U) {
+            if (discarded >= max_bytes || deadline_expired(deadline_ms)) {
+                return false;
+            }
+            if (!try_ensure_raw_available_until(1U, deadline_ms)) {
+                return false;
+            }
+
+            const std::size_t available = raw_.size() - raw_offset_;
+            std::size_t step = remaining_chunk_size_ < available ? remaining_chunk_size_ : available;
+            const std::size_t remaining_budget = max_bytes - discarded;
+            if (step > remaining_budget) {
+                step = remaining_budget;
+            }
+            if (step == 0U) {
+                return false;
+            }
+
+            consume_raw(step);
+            remaining_chunk_size_ -= step;
+            decoded_size_ += step;
+            discarded += step;
+        }
+
+        if (!try_ensure_raw_available_until(2U, deadline_ms)) {
+            return false;
+        }
+        if (raw_.compare(raw_offset_, 2U, "\r\n") != 0) {
+            throw BadHttpRequest("invalid chunked request body");
+        }
+        consume_raw(2U);
+    }
+
+    return true;
+}
+
+bool HttpRequestBodyStream::try_append_from_socket_until(std::uint64_t deadline_ms) {
+    if (deadline_expired(deadline_ms)) {
+        return false;
+    }
+
+    const unsigned long wait_ms = deadline_ms == 0U ? DEFAULT_CONTROLLED_READ_POLL_TIMEOUT_MS
+                                                     : platform::monotonic_deadline_remaining_ms(deadline_ms);
+    const int ready = wait_socket_readable(client_, wait_ms == 0UL ? 1UL : wait_ms);
+    if (ready <= 0) {
+        return false;
+    }
+
+    char buffer[HTTP_READ_BUFFER_SIZE];
+    const int received = recv_bounded(client_, buffer, sizeof(buffer), 0);
+    if (received <= 0) {
+        return false;
+    }
+
+    raw_.append(buffer, received);
+    return true;
+}
+
+bool HttpRequestBodyStream::try_ensure_raw_available_until(std::size_t size, std::uint64_t deadline_ms) {
+    while (raw_.size() - raw_offset_ < size) {
+        if (!try_append_from_socket_until(deadline_ms)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool HttpRequestBodyStream::try_ensure_raw_line_until(std::uint64_t deadline_ms) {
+    while (raw_.find("\r\n", raw_offset_) == std::string::npos) {
+        if (raw_.size() - raw_offset_ > HTTP_MAX_CHUNK_LINE_SIZE) {
+            throw BadHttpRequest("chunked request line too long");
+        }
+        if (!try_append_from_socket_until(deadline_ms)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool HttpRequestBodyStream::try_consume_chunk_trailers_until(std::uint64_t deadline_ms) {
+    for (;;) {
+        if (!try_ensure_raw_line_until(deadline_ms)) {
+            return false;
+        }
+        const std::size_t line_end = raw_.find("\r\n", raw_offset_);
+        if (line_end == raw_offset_) {
+            consume_raw(2U);
+            return true;
         }
         consume_raw(line_end + 2U - raw_offset_);
     }

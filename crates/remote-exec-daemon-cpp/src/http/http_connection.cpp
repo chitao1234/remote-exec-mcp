@@ -1,4 +1,6 @@
+#include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <string>
 
 #include "http/http_helpers.h"
@@ -16,6 +18,8 @@
 namespace {
 
 const unsigned long HTTP_SHUTDOWN_READ_POLL_MS = 100UL;
+const unsigned long HTTP_STREAMING_TRANSFER_BODY_IDLE_TIMEOUT_MS = 300000UL;
+const unsigned long HTTP_STREAMING_TRANSFER_DRAIN_TIMEOUT_MS = 300000UL;
 
 bool request_connection_close_requested(const HttpRequest& request) {
     const std::string value = lowercase_ascii(request.header("connection"));
@@ -117,9 +121,18 @@ int handle_client_request(AppState& state,
     assign_request_id(request);
     *close_after_response = request_connection_close_requested(request);
     const HttpRequestBodyFraming framing = parse_request_body_framing_or_throw_bad_request(request);
-    HttpRequestBodyStream body(
-        client, request_head.initial_body, framing, state.config.max_request_body_bytes, &read_control);
     const RouteExecutionMode mode = route_execution_mode(request);
+    HttpReadControl body_read_control = read_control;
+    if (mode == ROUTE_EXECUTION_STREAMING_IMPORT) {
+        body_read_control.idle_timeout_ms =
+            std::max(body_read_control.idle_timeout_ms, HTTP_STREAMING_TRANSFER_BODY_IDLE_TIMEOUT_MS);
+        set_socket_timeout_ms(client, body_read_control.idle_timeout_ms);
+    }
+    const std::size_t max_body_bytes =
+        mode == ROUTE_EXECUTION_STREAMING_IMPORT ? std::numeric_limits<std::size_t>::max()
+                                                 : state.config.max_request_body_bytes;
+    HttpRequestBodyStream body(
+        client, request_head.initial_body, framing, max_body_bytes, &body_read_control);
 
     if (mode == ROUTE_EXECUTION_STREAMING_EXPORT) {
         const int status = handle_streaming_transfer_export_request(state, client, request, &body, close_after_response);
@@ -136,6 +149,11 @@ int handle_client_request(AppState& state,
     HttpResponse response;
     if (mode == ROUTE_EXECUTION_STREAMING_IMPORT) {
         response = handle_streaming_transfer_import(state, request, &body);
+        if (!body.fully_consumed()) {
+            (void)body.discard_remaining_bounded(
+                HTTP_STREAMING_TRANSFER_DRAIN_TIMEOUT_MS, std::numeric_limits<std::size_t>::max());
+            *close_after_response = true;
+        }
     } else {
         request.body = read_request_body_to_string(&body);
         response = route_request(state, request);

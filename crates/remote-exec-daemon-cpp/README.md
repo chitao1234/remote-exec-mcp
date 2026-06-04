@@ -442,6 +442,8 @@ default_workdir = /work
 
 # Request/session safety limits.
 # max_request_header_bytes = 65536
+# Applies to buffered HTTP request bodies. Streaming transfer imports are bounded
+# by transfer_max_archive_bytes and transfer_max_entry_bytes instead.
 # max_request_body_bytes = 536870912
 # http_connection_idle_timeout_ms = 30000
 # transfer_max_archive_bytes = 536870912
@@ -486,6 +488,12 @@ request header/body byte limits are C++-specific because this daemon owns a
 handwritten HTTP parser, and `port_forward_max_worker_threads` plus
 `port_forward_tunnel_io_timeout_ms` are C++-specific because forwarding uses
 blocking socket workers.
+
+`max_request_body_bytes` applies to buffered HTTP request bodies. Streaming
+transfer imports are bounded by `transfer_max_archive_bytes` and
+`transfer_max_entry_bytes` instead, and the daemon allows a longer active
+read timeout for those streamed request bodies than for idle keep-alive
+connections.
 
 Sandbox rules mirror the Rust daemon's static allow/deny model:
 
@@ -532,7 +540,7 @@ Sandbox rules mirror the Rust daemon's static allow/deny model:
 - `transfer_files` accepts an optional export-side `exclude` array. Patterns match paths relative to each source root, use `/` as the logical separator on all platforms, and support `*`, `?`, `**`, `[abc]`, `[a-z]`, `[!abc]`, `[!a-c]`, `[^abc]`, and `[^a-c]`
 - excluded matches are silent, excluded directories are pruned recursively, and single-file sources ignore `exclude` in v1
 - daemon HTTP transfer imports and exports stream archive bodies instead of staging the full tar payload in memory
-- `transfer_max_archive_bytes` and `transfer_max_entry_bytes` bound imported archive file entries and in-memory tar metadata bodies
+- `transfer_max_archive_bytes` and `transfer_max_entry_bytes` bound streamed transfer imports; `max_request_body_bytes` still applies to buffered HTTP request bodies
 - transfer imports support `fail`, `merge`, and `replace` overwrite modes; `merge` overlays compatible existing destinations without deleting unrelated directory entries
 - transfer imports are not transactional; failed imports can leave partial destination changes
 - POSIX transfer exports skip unsupported special entries in directory trees and report warnings

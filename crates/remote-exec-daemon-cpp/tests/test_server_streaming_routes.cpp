@@ -200,6 +200,14 @@ static std::string chunked_body(const std::string& body) {
     return out.str();
 }
 
+static std::string chunked_data_only(const std::string& body) {
+    std::ostringstream out;
+    out << std::hex << body.size() << "\r\n";
+    out.write(body.data(), static_cast<std::streamsize>(body.size()));
+    out << "\r\n";
+    return out.str();
+}
+
 static void append_u64_be(std::string* output, std::uint64_t value) {
     for (std::size_t i = 0; i < 8U; ++i) {
         output->push_back(static_cast<char>((value >> ((7U - i) * 8U)) & 0xffU));
@@ -414,6 +422,84 @@ static void assert_http_request_limits_through_connection_path(const fs::path& r
     TEST_ASSERT(response_body(chunked_limit_response).find("http request body too large") != std::string::npos);
 }
 
+static void assert_streaming_import_ignores_generic_http_body_limit(const fs::path& root) {
+    AppState state;
+    initialize_state(state, root);
+    state.config.max_request_body_bytes = 32U;
+    state.config.transfer_limits.max_archive_bytes = 4096U;
+    state.config.transfer_limits.max_entry_bytes = 4096U;
+
+    const std::string archive = tar_with_single_file("stream body exceeds generic http limit");
+    TEST_ASSERT(framed_transfer_body(archive).size() > state.config.max_request_body_bytes);
+
+    const fs::path imported_path = root / "small-http-limit-import.txt";
+    std::ostringstream request;
+    request << "POST /v1/transfer/import HTTP/1.1\r\n"
+            << "Transfer-Encoding: chunked\r\n"
+            << "Content-Type: application/vnd.remote-exec.transfer-stream.v2\r\n"
+            << "x-remote-exec-transfer-stream-version: 2\r\n"
+            << "x-remote-exec-source-type: file\r\n"
+            << "x-remote-exec-destination-path: " << encoded_destination_path_header(imported_path) << "\r\n"
+            << "x-remote-exec-overwrite: replace\r\n"
+            << "x-remote-exec-create-parent: true\r\n"
+            << "x-remote-exec-symlink-mode: preserve\r\n"
+            << "x-remote-exec-compression: none\r\n"
+            << "\r\n"
+            << chunked_body(framed_transfer_body(archive));
+
+    const std::string response = run_single_request(state, request.str());
+    TEST_ASSERT(response.find("HTTP/1.1 200 OK\r\n") == 0);
+    TEST_ASSERT(read_text_file(imported_path) == "stream body exceeds generic http limit");
+}
+
+static void assert_streaming_import_failure_closes_connection_with_unread_body(const fs::path& root) {
+    AppState state;
+    initialize_state(state, root);
+    state.config.transfer_limits.max_archive_bytes = 16U;
+    state.config.transfer_limits.max_entry_bytes = 4096U;
+
+    const std::string archive = tar_with_single_file(std::string(128U, 'x'));
+    const std::string framed = framed_transfer_body(archive);
+    const fs::path imported_path = root / "failed-import.txt";
+
+    std::ostringstream request_head;
+    request_head << "POST /v1/transfer/import HTTP/1.1\r\n"
+                 << "Transfer-Encoding: chunked\r\n"
+                 << "Content-Type: application/vnd.remote-exec.transfer-stream.v2\r\n"
+                 << "x-remote-exec-transfer-stream-version: 2\r\n"
+                 << "x-remote-exec-source-type: file\r\n"
+                 << "x-remote-exec-destination-path: " << encoded_destination_path_header(imported_path) << "\r\n"
+                 << "x-remote-exec-overwrite: replace\r\n"
+                 << "x-remote-exec-create-parent: true\r\n"
+                 << "x-remote-exec-symlink-mode: preserve\r\n"
+                 << "x-remote-exec-compression: none\r\n"
+                 << "\r\n";
+
+    ConnectedSocketPair sockets = make_connected_socket_pair();
+    UniqueSocket server_socket(std::move(sockets.first));
+    UniqueSocket client_socket(std::move(sockets.second));
+    std::thread server_thread(
+        [&state](SOCKET socket) {
+            UniqueSocket owned_socket(socket);
+            handle_client(state, std::move(owned_socket));
+        },
+        server_socket.release());
+
+    send_all(client_socket.get(), request_head.str());
+
+    const std::size_t split_offset = 24U;
+    send_all(client_socket.get(), chunked_data_only(framed.substr(0U, split_offset)));
+
+    send_all(client_socket.get(), chunked_body(framed.substr(split_offset)));
+
+    const std::string response = read_content_length_response_from_socket(client_socket.get());
+    assert_json_response_code(response, "HTTP/1.1 400 Bad Request\r\n", "transfer_failed");
+
+    assert_socket_closed_within(client_socket.get(), 5000UL);
+    TEST_ASSERT(!fs::exists(imported_path));
+    server_thread.join();
+}
+
 void assert_http_streaming_routes(AppState& state, const fs::path& root) {
     assert_persistent_json_requests_reuse_socket(state);
 
@@ -422,6 +508,8 @@ void assert_http_streaming_routes(AppState& state, const fs::path& root) {
     auth_state.config.http_auth_bearer_token = "shared-secret";
     assert_http_auth_and_rejection_paths(auth_state, root);
     assert_http_request_limits_through_connection_path(root);
+    assert_streaming_import_ignores_generic_http_body_limit(root);
+    assert_streaming_import_failure_closes_connection_with_unread_body(root);
 
     const std::string archive = tar_with_single_file("streamed import");
     const fs::path imported_path = root / "imported.txt";

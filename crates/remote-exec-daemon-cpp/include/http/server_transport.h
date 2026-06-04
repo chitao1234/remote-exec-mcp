@@ -61,6 +61,9 @@ public:
                           const HttpReadControl* read_control);
 
     std::size_t read(char* data, std::size_t max_size);
+    bool fully_consumed() const;
+    bool has_remaining_body() const;
+    bool discard_remaining_bounded(unsigned long timeout_ms, std::size_t max_bytes);
 
 private:
     std::size_t read_content_length_body(char* data, std::size_t max_size);
@@ -70,6 +73,12 @@ private:
     void append_from_socket();
     void consume_raw(std::size_t size);
     void consume_chunk_trailers();
+    bool try_discard_content_length_body(std::size_t max_bytes, std::uint64_t deadline_ms);
+    bool try_discard_chunked_body(std::size_t max_bytes, std::uint64_t deadline_ms);
+    bool try_append_from_socket_until(std::uint64_t deadline_ms);
+    bool try_ensure_raw_available_until(std::size_t size, std::uint64_t deadline_ms);
+    bool try_ensure_raw_line_until(std::uint64_t deadline_ms);
+    bool try_consume_chunk_trailers_until(std::uint64_t deadline_ms);
 
     SOCKET client_;
     const HttpReadControl* read_control_;
