@@ -906,7 +906,7 @@ void WinptyTranscriptNormalizer::process_physical_line(const std::string& raw_li
 
     std::string left;
     std::string right;
-    if (split_large_gap_line(line, &left, &right)) {
+    if (split_winpty_repaint_line(line, &left, &right)) {
         if (!pending_logical_fragment_.empty()) {
             if (!left.empty()) {
                 emit_logical_line(pending_logical_fragment_ + trim_leading_spaces(left), output);
@@ -938,15 +938,20 @@ void WinptyTranscriptNormalizer::emit_logical_line(const std::string& line, std:
     output->push_back('\n');
 }
 
-bool WinptyTranscriptNormalizer::split_large_gap_line(const std::string& line, std::string* left, std::string* right) {
-    const std::size_t min_gap = 48U;
-    const std::size_t min_physical_width = 96U;
-    const std::size_t max_right_fragment = 32U;
+bool WinptyTranscriptNormalizer::split_winpty_repaint_line(const std::string& line,
+                                                           std::string* left,
+                                                           std::string* right) {
+    const std::size_t MIN_REPAINT_GAP = 48U;
+    const std::size_t MIN_REPAINT_ROW_WIDTH = 96U;
+    const std::size_t MAX_RIGHT_REPAINT_FRAGMENT = 32U;
 
-    if (line.size() < min_physical_width) {
+    if (line.size() < MIN_REPAINT_ROW_WIDTH) {
         return false;
     }
 
+    // Real XP winpty output can repaint a wrapped logical line as two physical
+    // fragments separated by most of the console width. Treat only extreme,
+    // right-edge fragments as repaints so normal column-aligned output survives.
     std::size_t best_start = std::string::npos;
     std::size_t best_len = 0U;
     for (std::size_t i = 0U; i < line.size();) {
@@ -961,7 +966,7 @@ bool WinptyTranscriptNormalizer::split_large_gap_line(const std::string& line, s
         }
 
         const std::size_t run_len = end - i;
-        if (run_len >= min_gap && end < line.size()) {
+        if (run_len >= MIN_REPAINT_GAP && end < line.size()) {
             if (run_len > best_len) {
                 best_start = i;
                 best_len = run_len;
@@ -976,7 +981,9 @@ bool WinptyTranscriptNormalizer::split_large_gap_line(const std::string& line, s
 
     const std::string candidate_left = trim_trailing_spaces(line.substr(0, best_start));
     const std::string candidate_right = line.substr(best_start + best_len);
-    if (candidate_right.empty() || candidate_right.size() > max_right_fragment || best_len * 2U < line.size()) {
+    if (candidate_right.empty() ||
+        candidate_right.size() > MAX_RIGHT_REPAINT_FRAGMENT ||
+        best_len * 2U < line.size()) {
         return false;
     }
 

@@ -240,6 +240,38 @@ void test_winpty_transcript_normalizer_splits_echo_output_from_prompt_repaint() 
     TEST_ASSERT(actual == expected);
 }
 
+void test_winpty_transcript_normalizer_handles_chunked_repaint_lines() {
+    WinptyTranscriptNormalizer normalizer;
+    std::string actual;
+    actual += normalize_winpty_transcript_chunk_for_test(
+        &normalizer, "\\winpty-probe>echo hello                                                ");
+    actual += normalize_winpty_transcript_chunk_for_test(
+        &normalizer, "                                          hello\n"
+                     "                                                   ");
+    actual += normalize_winpty_transcript_chunk_for_test(
+        &normalizer, "                                                               C:\\chi\n\\winpty");
+    actual += normalize_winpty_transcript_chunk_for_test(&normalizer, "-probe>\n");
+    actual += drain_winpty_transcript_for_test(&normalizer);
+
+    const std::string expected =
+        "\\winpty-probe>echo hello\n"
+        "hello\n"
+        "C:\\chi\\winpty-probe>\n";
+    TEST_ASSERT(actual == expected);
+}
+
+void test_winpty_transcript_normalizer_merges_pending_repaint_fragment() {
+    WinptyTranscriptNormalizer normalizer;
+    const std::string physical =
+        "                                                                                                                  C:\\chi\n"
+        "\\winpty-probe>\n";
+    const std::string expected = "C:\\chi\\winpty-probe>\n";
+
+    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical) +
+                               drain_winpty_transcript_for_test(&normalizer);
+    TEST_ASSERT(actual == expected);
+}
+
 void test_winpty_transcript_normalizer_preserves_regular_wide_spacing() {
     WinptyTranscriptNormalizer normalizer;
     const std::string physical =
@@ -269,6 +301,8 @@ int main() {
     test_terminal_output_filter_collapses_winpty_prompt_rewrites();
     test_winpty_transcript_normalizer_reconstructs_banner_and_prompt();
     test_winpty_transcript_normalizer_splits_echo_output_from_prompt_repaint();
+    test_winpty_transcript_normalizer_handles_chunked_repaint_lines();
+    test_winpty_transcript_normalizer_merges_pending_repaint_fragment();
     test_winpty_transcript_normalizer_preserves_regular_wide_spacing();
     return 0;
 }

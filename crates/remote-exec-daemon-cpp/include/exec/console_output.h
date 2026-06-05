@@ -84,7 +84,7 @@ public:
 private:
     void process_physical_line(const std::string& line, std::string* output);
     void emit_logical_line(const std::string& line, std::string* output);
-    static bool split_large_gap_line(const std::string& line, std::string* left, std::string* right);
+    static bool split_winpty_repaint_line(const std::string& line, std::string* left, std::string* right);
     static std::string trim_trailing_spaces(const std::string& text);
     static std::string trim_leading_spaces(const std::string& text);
 
