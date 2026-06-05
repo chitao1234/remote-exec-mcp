@@ -18,7 +18,9 @@
 #include "exec/utf8_stream_decode.h"
 #include "platform/platform.h"
 #include "exec/process_session.h"
+#include "platform/win32_dynamic.h"
 #include "platform/win32_error.h"
+#include "platform/win32_process_tree.h"
 #include "platform/win32_scoped.h"
 #include "platform/win32_utf8.h"
 
@@ -247,7 +249,8 @@ DWORD process_id_from_process_handle(HANDLE process) {
         return 0U;
     }
     const NtQueryInformationProcessFn query =
-        reinterpret_cast<NtQueryInformationProcessFn>(GetProcAddress(ntdll, "NtQueryInformationProcess"));
+        remote_exec_win32::proc_address_as<NtQueryInformationProcessFn>(
+            GetProcAddress(ntdll, "NtQueryInformationProcess"));
     if (query == nullptr) {
         return 0U;
     }
@@ -540,69 +543,6 @@ std::string read_winpty_available_raw(HANDLE pipe, bool* eof) {
     return buffer;
 }
 
-bool run_taskkill_tree(DWORD pid) {
-    if (pid == 0U) {
-        return false;
-    }
-
-    std::vector<std::string> argv;
-    argv.push_back("taskkill.exe");
-    argv.push_back("/PID");
-    argv.push_back(std::to_string(pid));
-    argv.push_back("/T");
-    argv.push_back("/F");
-    const std::string command_line = command_line_from_argv(argv);
-    std::wstring wide_command_line = wide_from_utf8(command_line);
-    std::vector<wchar_t> mutable_command_line(wide_command_line.begin(), wide_command_line.end());
-    mutable_command_line.push_back(L'\0');
-
-    STARTUPINFOW startup_info;
-    ZeroMemory(&startup_info, sizeof(startup_info));
-    startup_info.cb = sizeof(startup_info);
-    startup_info.dwFlags = STARTF_USESHOWWINDOW;
-    startup_info.wShowWindow = SW_HIDE;
-
-    PROCESS_INFORMATION process_info;
-    ZeroMemory(&process_info, sizeof(process_info));
-
-    if (CreateProcessW(nullptr,
-                       &mutable_command_line[0],
-                       nullptr,
-                       nullptr,
-                       FALSE,
-                       CREATE_NO_WINDOW,
-                       nullptr,
-                       nullptr,
-                       &startup_info,
-                       &process_info) == 0) {
-        log_message(LOG_WARN,
-                    "process_session",
-                    std::string("taskkill tree cleanup failed to start for pid ") + std::to_string(pid) + ": " +
-                        last_error_message("CreateProcessW"));
-        return false;
-    }
-
-    UniqueHandle process(process_info.hProcess);
-    UniqueHandle thread(process_info.hThread);
-    WaitForSingleObject(process.get(), INFINITE);
-
-    DWORD exit_code = 1;
-    if (GetExitCodeProcess(process.get(), &exit_code) == 0) {
-        log_message(LOG_WARN,
-                    "process_session",
-                    std::string("taskkill tree cleanup exit check failed for pid ") + std::to_string(pid) + ": " +
-                        last_error_message("GetExitCodeProcess"));
-        return false;
-    }
-    if (exit_code != 0) {
-        log_message(LOG_WARN,
-                    "process_session",
-                    std::string("taskkill tree cleanup returned exit code ") + std::to_string(exit_code) +
-                        " for pid " + std::to_string(pid));
-    }
-    return true;
-}
-
 class WinptyProcessSession : public ProcessSession {
 public:
     WinptyProcessSession(UniqueWinpty winpty,
@@ -741,7 +681,7 @@ private:
         if (!process_handle_.valid() || process_id_ == 0U) {
             return false;
         }
-        return run_taskkill_tree(process_id_);
+        return win32_process_tree::terminate_process_descendants(process_id_);
     }
 
     void ensure_process_terminated() {

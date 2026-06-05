@@ -5,6 +5,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include "platform/win32_dynamic.h"
 #include "platform/win32_utf8.h"
 #endif
 
@@ -88,7 +89,8 @@ CompareStringOrdinalFn compare_string_ordinal_fn() {
     if (!initialized) {
         HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
         if (kernel32 != nullptr) {
-            fn = reinterpret_cast<CompareStringOrdinalFn>(GetProcAddress(kernel32, "CompareStringOrdinal"));
+            fn = remote_exec_win32::proc_address_as<CompareStringOrdinalFn>(
+                GetProcAddress(kernel32, "CompareStringOrdinal"));
         }
         initialized = true;
     }

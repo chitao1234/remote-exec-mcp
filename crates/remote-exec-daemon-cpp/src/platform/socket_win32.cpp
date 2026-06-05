@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "platform/win32_error.h"
+#include "platform/win32_dynamic.h"
 #include "platform/win32_socket_compat.h"
 #include "platform/win32_winsock.h"
 
@@ -151,15 +152,6 @@ typedef void(WSAAPI* FreeAddrInfoFn)(addrinfo*);
 typedef int(WSAAPI* GetNameInfoFn)(const sockaddr*, socklen_t, char*, DWORD, char*, DWORD, int);
 
 template <typename Fn>
-Fn proc_address_as(FARPROC proc) {
-    union ProcAddressCast {
-        FARPROC proc;
-        Fn fn;
-    } cast = {proc};
-    return cast.fn;
-}
-
-template <typename Fn>
 Fn load_ws2_32_proc(const char* name) {
     HMODULE module = GetModuleHandleA("WS2_32.DLL");
     if (module == nullptr) {
@@ -168,7 +160,7 @@ Fn load_ws2_32_proc(const char* name) {
     if (module == nullptr) {
         return nullptr;
     }
-    return proc_address_as<Fn>(GetProcAddress(module, name));
+    return remote_exec_win32::proc_address_as<Fn>(GetProcAddress(module, name));
 }
 
 struct Winsock2AddressApi {

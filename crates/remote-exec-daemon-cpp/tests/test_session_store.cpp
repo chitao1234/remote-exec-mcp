@@ -2,9 +2,10 @@
 #include "test_assert.h"
 #include <cerrno>
 #include <cctype>
-#include <cstdint>
-#ifndef _WIN32
 #include <cstdlib>
+#include <cstdint>
+#include <cstring>
+#ifndef _WIN32
 #include <signal.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -16,6 +17,10 @@
 
 #include "core/config.h"
 #include "platform/platform.h"
+#ifdef _WIN32
+#include "platform/win32_process_tree.h"
+#include "platform/win32_scoped.h"
+#endif
 #include "rpc/server_request_utils.h"
 #ifndef _WIN32
 #include "exec/posix_child_reaper.h"
@@ -214,6 +219,109 @@ static std::string normalize_output(const std::string& input) {
 }
 
 #ifdef _WIN32
+static std::string windows_quote_arg_for_test(const std::string& arg) {
+    if (arg.empty()) {
+        return "\"\"";
+    }
+
+    bool needs_quotes = false;
+    for (std::size_t i = 0; i < arg.size(); ++i) {
+        if (arg[i] == ' ' || arg[i] == '\t' || arg[i] == '"') {
+            needs_quotes = true;
+            break;
+        }
+    }
+    if (!needs_quotes) {
+        return arg;
+    }
+
+    std::string quoted = "\"";
+    std::size_t backslashes = 0U;
+    for (std::size_t i = 0; i < arg.size(); ++i) {
+        const char ch = arg[i];
+        if (ch == '\\') {
+            ++backslashes;
+            continue;
+        }
+        if (ch == '"') {
+            quoted.append(backslashes * 2U + 1U, '\\');
+            quoted.push_back('"');
+            backslashes = 0U;
+            continue;
+        }
+        quoted.append(backslashes, '\\');
+        backslashes = 0U;
+        quoted.push_back(ch);
+    }
+    quoted.append(backslashes * 2U, '\\');
+    quoted.push_back('"');
+    return quoted;
+}
+
+static bool marker_count_increases(const fs::path& path, std::size_t baseline, unsigned long timeout_ms) {
+    const std::uint64_t started = platform::monotonic_ms();
+    while (platform::monotonic_ms() - started < timeout_ms) {
+        if (fs::exists(path) && fs::read_file_bytes(path).size() > baseline) {
+            return true;
+        }
+        platform::sleep_ms(25UL);
+    }
+    return fs::exists(path) && fs::read_file_bytes(path).size() > baseline;
+}
+
+static bool marker_count_stable(const fs::path& path, unsigned long timeout_ms) {
+    const std::size_t before = fs::exists(path) ? fs::read_file_bytes(path).size() : 0U;
+    platform::sleep_ms(timeout_ms);
+    const std::size_t after = fs::exists(path) ? fs::read_file_bytes(path).size() : 0U;
+    return before == after;
+}
+
+static void assert_win32_process_tree_terminates_descendants(const fs::path& root) {
+    const fs::path marker_path = root / "process-tree-marker.txt";
+    fs::remove_all(marker_path);
+
+    const std::string child_command =
+        "for /L %i in (1,1,200) do @echo tick>>" + windows_quote_arg_for_test(marker_path.string()) +
+        " & ping -n 2 127.0.0.1>nul";
+    const std::string parent_command =
+        "cmd.exe /D /C start \"remote-exec-tree-test\" /B cmd.exe /D /C " + windows_quote_arg_for_test(child_command) +
+        " & ping -n 31 127.0.0.1>nul";
+
+    std::wstring wide_parent_command = test_fs::wide_from_utf8(parent_command);
+    std::vector<wchar_t> mutable_command_line(wide_parent_command.begin(), wide_parent_command.end());
+    mutable_command_line.push_back(L'\0');
+    const std::wstring wide_workdir = test_fs::wide_from_utf8(root.string());
+
+    STARTUPINFOW startup_info;
+    ZeroMemory(&startup_info, sizeof(startup_info));
+    startup_info.cb = sizeof(startup_info);
+    startup_info.dwFlags = STARTF_USESHOWWINDOW;
+    startup_info.wShowWindow = SW_HIDE;
+
+    PROCESS_INFORMATION process_info;
+    ZeroMemory(&process_info, sizeof(process_info));
+    TEST_ASSERT(CreateProcessW(nullptr,
+                               &mutable_command_line[0],
+                               nullptr,
+                               nullptr,
+                               FALSE,
+                               CREATE_NO_WINDOW,
+                               nullptr,
+                               wide_workdir.c_str(),
+                               &startup_info,
+                               &process_info) != 0);
+
+    UniqueHandle parent_process(process_info.hProcess);
+    UniqueHandle parent_thread(process_info.hThread);
+    TEST_ASSERT(marker_count_increases(marker_path, 0U, 5000UL));
+    const std::size_t running_count = fs::read_file_bytes(marker_path).size();
+    TEST_ASSERT(marker_count_increases(marker_path, running_count, 5000UL));
+
+    TEST_ASSERT(win32_process_tree::terminate_process_tree(process_info.dwProcessId));
+    WaitForSingleObject(parent_process.get(), 5000UL);
+    TEST_ASSERT(marker_count_stable(marker_path, 1500UL));
+}
+
 static bool contains_terminal_escape(const std::string& input) {
     return input.find('\x1b') != std::string::npos;
 }
@@ -1544,6 +1652,7 @@ int main() {
 
 #ifdef _WIN32
     assert_windows_cmd_command_line_preserves_command_quotes(shell);
+    assert_win32_process_tree_terminates_descendants(root);
 #endif
     assert_explicit_drain_stop_reasons();
     assert_completed_command_output(store, root, shell, yield_time);

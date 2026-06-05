@@ -388,7 +388,8 @@ HOST_PORT_TUNNEL_FRAME_SRCS = \
 
 WINDOWS_DAEMON_SUPPORT_SRCS_NO_ERROR = \
 	$(SOURCE_PREFIX)src/exec/process_session_win32.cpp \
-	$(SOURCE_PREFIX)src/exec/console_output.cpp
+	$(SOURCE_PREFIX)src/exec/console_output.cpp \
+	$(SOURCE_PREFIX)src/platform/win32_process_tree.cpp
 
 WINDOWS_DAEMON_SUPPORT_SRCS = \
 	$(WINDOWS_DAEMON_SUPPORT_SRCS_NO_ERROR) \

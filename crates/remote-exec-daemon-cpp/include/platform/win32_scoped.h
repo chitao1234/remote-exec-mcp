@@ -1,10 +1,5 @@
 #pragma once
 
-#include <stdexcept>
-
-#include "platform/win32_socket_compat.h"
-#include "platform/win32_winsock.h"
-
 #include <windows.h>
 
 class UniqueHandle {
@@ -45,59 +40,4 @@ public:
 
 private:
     HANDLE handle_;
-};
-
-class UniqueSocket {
-public:
-    UniqueSocket() : socket_(INVALID_SOCKET) {}
-    explicit UniqueSocket(SOCKET socket) : socket_(socket) {}
-
-    ~UniqueSocket() { reset(); }
-
-    UniqueSocket(UniqueSocket&& other) : socket_(other.release()) {}
-
-    UniqueSocket& operator=(UniqueSocket&& other) {
-        if (this != &other) {
-            reset(other.release());
-        }
-        return *this;
-    }
-
-    UniqueSocket(const UniqueSocket&) = delete;
-    UniqueSocket& operator=(const UniqueSocket&) = delete;
-
-    SOCKET get() const { return socket_; }
-
-    bool valid() const { return socket_ != INVALID_SOCKET; }
-
-    SOCKET release() {
-        const SOCKET released = socket_;
-        socket_ = INVALID_SOCKET;
-        return released;
-    }
-
-    void reset(SOCKET socket = INVALID_SOCKET) {
-        if (valid()) {
-            closesocket(socket_);
-        }
-        socket_ = socket;
-    }
-
-private:
-    SOCKET socket_;
-};
-
-class WinsockSession {
-public:
-    WinsockSession() {
-        WSADATA wsa_data;
-        if (remote_exec_win32::start_winsock(&wsa_data) != 0) {
-            throw std::runtime_error("WSAStartup failed");
-        }
-    }
-
-    ~WinsockSession() { WSACleanup(); }
-
-    WinsockSession(const WinsockSession&) = delete;
-    WinsockSession& operator=(const WinsockSession&) = delete;
 };
