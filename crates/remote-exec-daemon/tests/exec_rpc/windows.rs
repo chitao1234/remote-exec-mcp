@@ -414,7 +414,7 @@ async fn exec_start_prefers_git_bash_for_windows_pty_when_shell_is_omitted() {
             backend.name()
         );
         assert_eq!(
-            strip_terminal_noise(&response.output().output).replace('\r', ""),
+            normalize_windows_pty_completed_output_for_assert(backend, &response.output().output),
             "git-bash-pty-ready",
             "{} output: {:?}",
             backend.name(),
@@ -468,8 +468,7 @@ async fn exec_start_preserves_workdir_for_git_bash_login_shells_over_windows_pty
             backend.name()
         );
         assert_eq!(
-            strip_terminal_noise(&response.output().output)
-                .replace('\r', "")
+            normalize_windows_pty_completed_output_for_assert(backend, &response.output().output)
                 .replace('\\', "/"),
             workdir.display().to_string().replace('\\', "/"),
             "{} output: {:?}",
@@ -550,7 +549,8 @@ async fn env_overlay_is_applied_in_pty_mode_on_windows() {
             "{} response: {response:#?}",
             backend.name()
         );
-        let normalized_output = strip_terminal_noise(&response.output().output);
+        let normalized_output =
+            normalize_windows_pty_completed_output_for_assert(backend, &response.output().output);
         assert!(
             normalized_output.ends_with(WINDOWS_ENV_OVERLAY_OUTPUT),
             "{} unexpected pty output: {:?}",
@@ -715,10 +715,7 @@ async fn exec_start_normalizes_winpty_repainted_split_lines_on_windows() {
 
     assert_eq!(response.output().exit_code, Some(0));
     let output = response.output().output.replace('\r', "");
-    assert!(
-        output.contains("hello\n") || output == "hello",
-        "winpty output missing normalized hello line: {output:?}"
-    );
+    assert_eq!(output, "hello\n", "winpty output did not normalize to one logical line");
     assert!(
         !output.contains("hell\no"),
         "winpty output preserved split repaint line: {output:?}"

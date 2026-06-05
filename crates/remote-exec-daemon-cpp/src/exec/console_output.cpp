@@ -392,11 +392,8 @@ std::string TerminalOutputFilter::drain_pending() {
     state_ = State::Ground;
     csi_buffer_.clear();
     std::string output = debounce_enabled_ ? emit_all_pending_rows() : emit_touched_rows();
-    if (has_open_row_) {
-        output.push_back('\n');
-        has_open_row_ = false;
-        open_row_text_.clear();
-    }
+    has_open_row_ = false;
+    open_row_text_.clear();
     return output;
 }
 
@@ -1029,11 +1026,35 @@ std::string WinptyTranscriptNormalizer::filter_chunk(const std::string& chunk) {
 std::string WinptyTranscriptNormalizer::drain_pending() {
     std::string output;
     if (!pending_physical_line_.empty()) {
-        process_physical_line(pending_physical_line_, &output);
+        std::string line = pending_physical_line_;
         pending_physical_line_.clear();
+        if (!line.empty() && line[line.size() - 1U] == '\r') {
+            line.erase(line.size() - 1U);
+        }
+
+        std::string left;
+        std::string right;
+        if (split_winpty_repaint_line(line, &left, &right)) {
+            if (!pending_logical_fragment_.empty()) {
+                if (!left.empty()) {
+                    emit_logical_line(pending_logical_fragment_ + trim_leading_spaces(left), &output);
+                } else {
+                    emit_logical_line(pending_logical_fragment_, &output);
+                }
+                pending_logical_fragment_.clear();
+            } else if (!left.empty()) {
+                emit_logical_line(left, &output);
+            }
+            output += right;
+        } else if (!pending_logical_fragment_.empty()) {
+            output += pending_logical_fragment_ + trim_leading_spaces(line);
+            pending_logical_fragment_.clear();
+        } else {
+            output += line;
+        }
     }
     if (!pending_logical_fragment_.empty()) {
-        emit_logical_line(pending_logical_fragment_, &output);
+        output += pending_logical_fragment_;
         pending_logical_fragment_.clear();
     }
     return output;

@@ -78,6 +78,18 @@ fn unix_start_request_with_login(
 }
 
 #[cfg(windows)]
+fn normalize_windows_pty_completed_output_for_assert(
+    backend: WindowsPtyTestBackend,
+    output: &str,
+) -> String {
+    let normalized = strip_terminal_noise(output).replace('\r', "");
+    match backend {
+        WindowsPtyTestBackend::Conpty => normalized,
+        WindowsPtyTestBackend::Winpty => normalized.trim_end_matches('\n').to_string(),
+    }
+}
+
+#[cfg(windows)]
 macro_rules! for_each_windows_pty_backend {
     ($backend:ident, $fixture:ident, $body:block) => {{
         for $backend in support::spawn::supported_windows_pty_backends() {
@@ -456,7 +468,7 @@ async fn assert_windows_powershell_command_quoting(
         backend.name()
     );
     assert_eq!(
-        strip_terminal_noise(&response.output().output),
+        normalize_windows_pty_completed_output_for_assert(backend, &response.output().output),
         r#"plain|two words|quote "mark"|trail\|C:\Program Files\Test Folder\"#,
         "{} output: {:?}",
         backend.name(),
@@ -578,7 +590,7 @@ async fn assert_windows_git_bash_command_quoting(
         backend.name()
     );
     assert_eq!(
-        strip_terminal_noise(&response.output().output).replace('\r', ""),
+        normalize_windows_pty_completed_output_for_assert(backend, &response.output().output),
         r#"two words|quote "mark"|literal $HOME & | ; * ?|C:\Program Files\Test Folder\"#,
         "{} output: {:?}",
         backend.name(),

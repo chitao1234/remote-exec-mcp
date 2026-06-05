@@ -210,7 +210,7 @@ void test_terminal_output_filter_handles_split_escape_sequences() {
     TerminalOutputFilter filter;
     TEST_ASSERT(filter_terminal_output_for_test(&filter, "before\x1b[") == "before");
     TEST_ASSERT(filter_terminal_output_for_test(&filter, "0Kafter") == "after");
-    TEST_ASSERT(drain_terminal_output_for_test(&filter) == "\n");
+    TEST_ASSERT(drain_terminal_output_for_test(&filter).empty());
 }
 
 void test_terminal_output_filter_applies_backspace_to_utf8_codepoints() {
@@ -246,7 +246,7 @@ void test_terminal_output_filter_debounces_touched_rows() {
     TEST_ASSERT(filter_terminal_output_at_for_test(&filter, "hello", 1000U).empty());
     TEST_ASSERT(flush_terminal_output_due_for_test(&filter, 1099U).empty());
     TEST_ASSERT(flush_terminal_output_due_for_test(&filter, 1100U) == "hello");
-    TEST_ASSERT(drain_terminal_output_for_test(&filter) == "\n");
+    TEST_ASSERT(drain_terminal_output_for_test(&filter).empty());
 }
 
 void test_terminal_output_filter_debounce_uses_latest_repaint() {
@@ -265,7 +265,22 @@ void test_terminal_output_filter_debounce_uses_latest_repaint() {
 void test_terminal_output_filter_debounce_drain_flushes_immediately() {
     TerminalOutputFilter filter(1000UL, 2000UL);
     TEST_ASSERT(filter_terminal_output_at_for_test(&filter, "prompt:", 1000U).empty());
-    TEST_ASSERT(drain_terminal_output_for_test(&filter) == "prompt:\n");
+    TEST_ASSERT(drain_terminal_output_for_test(&filter) == "prompt:");
+}
+
+void test_terminal_output_filter_does_not_finalize_partial_rows_on_flush_due() {
+    TerminalOutputFilter filter(100UL, 500UL);
+    WinptyTranscriptNormalizer normalizer;
+
+    TEST_ASSERT(filter_terminal_output_at_for_test(&filter, "prompt>echo hello\x1b[116Ghell\r\no", 1000U).empty());
+    TEST_ASSERT(normalize_winpty_transcript_chunk_for_test(&normalizer, flush_terminal_output_due_for_test(&filter, 1100U)).empty());
+    TEST_ASSERT(
+        normalize_winpty_transcript_chunk_for_test(&normalizer, filter_terminal_output_at_for_test(
+                                                                  &filter,
+                                                                  "\r\x1b[1Aprompt>echo hello\x1b[0K\r\nhello\r\n",
+                                                                  1150U))
+            .empty());
+    TEST_ASSERT(drain_winpty_transcript_for_test(&normalizer) == "prompt>echo hello\nhello");
 }
 
 void test_winpty_transcript_normalizer_reconstructs_banner_and_prompt() {
@@ -425,6 +440,7 @@ int main() {
     test_terminal_output_filter_debounces_touched_rows();
     test_terminal_output_filter_debounce_uses_latest_repaint();
     test_terminal_output_filter_debounce_drain_flushes_immediately();
+    test_terminal_output_filter_does_not_finalize_partial_rows_on_flush_due();
     test_winpty_transcript_normalizer_reconstructs_banner_and_prompt();
     test_winpty_transcript_normalizer_splits_echo_output_from_prompt_repaint();
     test_winpty_transcript_normalizer_handles_chunked_repaint_lines();
