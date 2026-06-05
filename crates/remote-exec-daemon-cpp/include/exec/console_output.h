@@ -77,17 +77,20 @@ private:
 class WinptyTranscriptNormalizer {
 public:
     WinptyTranscriptNormalizer();
+    explicit WinptyTranscriptNormalizer(std::size_t physical_width);
 
+    void set_physical_width(std::size_t physical_width);
     std::string filter_chunk(const std::string& chunk);
     std::string drain_pending();
 
 private:
     void process_physical_line(const std::string& line, std::string* output);
     void emit_logical_line(const std::string& line, std::string* output);
-    static bool split_winpty_repaint_line(const std::string& line, std::string* left, std::string* right);
+    bool split_winpty_repaint_line(const std::string& line, std::string* left, std::string* right) const;
     static std::string trim_trailing_spaces(const std::string& text);
     static std::string trim_leading_spaces(const std::string& text);
 
+    std::size_t physical_width_;
     std::string pending_physical_line_;
     std::string pending_logical_fragment_;
 };

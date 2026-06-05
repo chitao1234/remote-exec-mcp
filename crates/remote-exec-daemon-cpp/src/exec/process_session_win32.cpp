@@ -629,7 +629,7 @@ public:
                          UniqueHandle stdout_read)
         : winpty_(std::move(winpty)), process_handle_(std::move(process_handle)),
           process_id_(process_id), stdin_write_(std::move(stdin_write)), stdout_read_(std::move(stdout_read)),
-          console_closed_(false) {}
+          console_closed_(false), transcript_normalizer_(DEFAULT_PTY_COLS) {}
 
     ~WinptyProcessSession() override { terminate(); }
 
@@ -662,6 +662,7 @@ public:
         if (winpty_set_size(winpty_.get(), static_cast<int>(cols), static_cast<int>(rows), error.out_ptr()) == FALSE) {
             throw std::runtime_error(winpty_error_message("winpty_set_size", &error));
         }
+        transcript_normalizer_.set_physical_width(cols);
     }
 
     std::string read_output(bool block, bool* eof, std::string* carry) override {

@@ -304,6 +304,30 @@ void test_winpty_transcript_normalizer_preserves_regular_wide_spacing() {
     TEST_ASSERT(actual == physical);
 }
 
+void test_winpty_transcript_normalizer_uses_configured_width() {
+    WinptyTranscriptNormalizer normalizer(80U);
+    const std::string physical = winpty_repaint_physical_line("C:\\probe>echo hello", "hello", 80U) +
+                                 winpty_repaint_physical_line("", "C:\\probe", 80U) + ">\n";
+    const std::string expected =
+        "C:\\probe>echo hello\n"
+        "hello\n"
+        "C:\\probe>\n";
+
+    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical) +
+                               drain_winpty_transcript_for_test(&normalizer);
+    TEST_ASSERT(actual == expected);
+}
+
+void test_winpty_transcript_normalizer_ignores_non_width_sized_padding() {
+    WinptyTranscriptNormalizer normalizer(120U);
+    const std::string physical =
+        "C:\\probe>echo hello                                hello\n";
+
+    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical) +
+                               drain_winpty_transcript_for_test(&normalizer);
+    TEST_ASSERT(actual == physical);
+}
+
 } // namespace
 
 int main() {
@@ -327,5 +351,7 @@ int main() {
     test_winpty_transcript_normalizer_handles_windows_2000_short_wrap_fragment();
     test_winpty_transcript_normalizer_merges_pending_repaint_fragment();
     test_winpty_transcript_normalizer_preserves_regular_wide_spacing();
+    test_winpty_transcript_normalizer_uses_configured_width();
+    test_winpty_transcript_normalizer_ignores_non_width_sized_padding();
     return 0;
 }

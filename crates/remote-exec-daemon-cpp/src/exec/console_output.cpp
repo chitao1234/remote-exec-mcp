@@ -259,6 +259,25 @@ bool closed_row_should_be_joinable(const std::string& text, std::size_t physical
     return physical_width >= 80U && line_has_nonspace_char(text) && text.find_first_of(" \t") == std::string::npos;
 }
 
+std::size_t conservative_cell_count_for_utf8_text(const std::string& text) {
+    std::size_t width = 0U;
+    for (std::size_t index = 0U; index < text.size();) {
+        const unsigned char first = static_cast<unsigned char>(text[index]);
+        std::size_t length = 1U;
+        if ((first & 0xE0U) == 0xC0U && index + 1U < text.size()) {
+            length = 2U;
+        } else if ((first & 0xF0U) == 0xE0U && index + 2U < text.size()) {
+            length = 3U;
+        } else if ((first & 0xF8U) == 0xF0U && index + 3U < text.size()) {
+            length = 4U;
+        }
+
+        ++width;
+        index += length;
+    }
+    return width;
+}
+
 std::string merge_joinable_rows(const std::string& previous, const std::string& current) {
     if (previous.empty()) {
         return current;
@@ -865,7 +884,16 @@ std::string TerminalOutputFilter::emit_touched_rows() {
     return output;
 }
 
-WinptyTranscriptNormalizer::WinptyTranscriptNormalizer() {}
+WinptyTranscriptNormalizer::WinptyTranscriptNormalizer() : physical_width_(120U) {}
+
+WinptyTranscriptNormalizer::WinptyTranscriptNormalizer(std::size_t physical_width)
+    : physical_width_(physical_width == 0U ? 120U : physical_width) {}
+
+void WinptyTranscriptNormalizer::set_physical_width(std::size_t physical_width) {
+    if (physical_width != 0U) {
+        physical_width_ = physical_width;
+    }
+}
 
 std::string WinptyTranscriptNormalizer::filter_chunk(const std::string& chunk) {
     pending_physical_line_ += chunk;
@@ -940,22 +968,16 @@ void WinptyTranscriptNormalizer::emit_logical_line(const std::string& line, std:
 
 bool WinptyTranscriptNormalizer::split_winpty_repaint_line(const std::string& line,
                                                            std::string* left,
-                                                           std::string* right) {
-    const std::size_t MIN_REPAINT_GAP = 48U;
-    const std::size_t MIN_SHORT_FRAGMENT_REPAINT_GAP = 32U;
-    const std::size_t MIN_REPAINT_ROW_WIDTH = 96U;
-    const std::size_t MAX_RIGHT_REPAINT_FRAGMENT = 32U;
-    const std::size_t MAX_SHORT_RIGHT_REPAINT_FRAGMENT = 8U;
-
-    if (line.size() < MIN_REPAINT_ROW_WIDTH) {
+                                                           std::string* right) const {
+    // WinPTY screen-scrapes console rows. When a wrapped/repainted logical line
+    // is read back as one physical row, the right-edge fragment is positioned
+    // by padding through the configured row width. Use that known width rather
+    // than fixed gap constants.
+    const std::size_t line_width = conservative_cell_count_for_utf8_text(line);
+    if (line_width > physical_width_ || line_width + 1U < physical_width_) {
         return false;
     }
 
-    // Real XP winpty output can repaint a wrapped logical line as two physical
-    // fragments separated by most of the console width. Treat only extreme,
-    // right-edge fragments as repaints so normal column-aligned output survives.
-    std::size_t best_start = std::string::npos;
-    std::size_t best_len = 0U;
     for (std::size_t i = 0U; i < line.size();) {
         if (line[i] != ' ') {
             ++i;
@@ -968,39 +990,34 @@ bool WinptyTranscriptNormalizer::split_winpty_repaint_line(const std::string& li
         }
 
         const std::size_t run_len = end - i;
-        if (run_len >= MIN_SHORT_FRAGMENT_REPAINT_GAP && end < line.size()) {
-            if (run_len > best_len) {
-                best_start = i;
-                best_len = run_len;
+        if (end < line.size()) {
+            const std::string candidate_left = trim_trailing_spaces(line.substr(0, i));
+            const std::string candidate_right = line.substr(end);
+            const std::size_t left_width = conservative_cell_count_for_utf8_text(candidate_left);
+            const std::size_t right_width = conservative_cell_count_for_utf8_text(candidate_right);
+            if (!candidate_right.empty() && left_width + right_width <= line_width) {
+                const std::size_t right_start_col = conservative_cell_count_for_utf8_text(line.substr(0, end));
+                const std::size_t expected_gap = line_width - left_width - right_width;
+                const bool fills_row = run_len == expected_gap;
+                const bool right_edge_fragment = right_start_col + right_width == line_width;
+                const bool mostly_padding = run_len * 2U >= physical_width_;
+                const bool short_repaint_fragment =
+                    candidate_left.find_first_of(">$#") != std::string::npos && run_len * 4U >= physical_width_;
+                if (fills_row && right_edge_fragment && (mostly_padding || short_repaint_fragment)) {
+                    if (left != nullptr) {
+                        *left = candidate_left;
+                    }
+                    if (right != nullptr) {
+                        *right = candidate_right;
+                    }
+                    return true;
+                }
             }
         }
         i = end;
     }
 
-    if (best_start == std::string::npos) {
-        return false;
-    }
-
-    const std::string candidate_left = trim_trailing_spaces(line.substr(0, best_start));
-    const std::string candidate_right = line.substr(best_start + best_len);
-    const bool short_right_edge_fragment =
-        candidate_right.size() <= MAX_SHORT_RIGHT_REPAINT_FRAGMENT &&
-        candidate_left.find_first_of(">$#") != std::string::npos &&
-        best_len >= MIN_SHORT_FRAGMENT_REPAINT_GAP;
-    const bool wide_repaint_gap = best_len >= MIN_REPAINT_GAP && best_len * 2U >= line.size();
-    if (candidate_right.empty() ||
-        candidate_right.size() > MAX_RIGHT_REPAINT_FRAGMENT ||
-        (!wide_repaint_gap && !short_right_edge_fragment)) {
-        return false;
-    }
-
-    if (left != nullptr) {
-        *left = candidate_left;
-    }
-    if (right != nullptr) {
-        *right = candidate_right;
-    }
-    return true;
+    return false;
 }
 
 std::string WinptyTranscriptNormalizer::trim_trailing_spaces(const std::string& text) {
