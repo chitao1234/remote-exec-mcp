@@ -298,7 +298,7 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
             json_request("/v1/exec/write",
                          Json{
                              {"daemon_session_id", fast_started.at("daemon_session_id").get<std::string>()},
-                             {"chars", "ping\n"},
+                             {"chars", test_exec_pty::terminal_input_line("ping")},
                              {"yield_time_ms", 250},
                          }));
         const std::uint64_t fast_elapsed_ms = platform::monotonic_ms() - fast_started_at;

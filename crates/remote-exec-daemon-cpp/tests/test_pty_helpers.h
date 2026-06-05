@@ -60,6 +60,14 @@ inline bool wait_until_file_contains(const test_fs::path& path, const std::strin
     return test_fs::exists(path) && test_fs::read_file_bytes(path).find(fragment) != std::string::npos;
 }
 
+inline std::string terminal_input_line(const std::string& value) {
+#ifdef _WIN32
+    return value + "\r\n";
+#else
+    return value + "\n";
+#endif
+}
+
 #ifdef _WIN32
 inline std::string windows_ping_sleep_command(unsigned long seconds) {
     return "ping -n " + std::to_string(seconds + 1UL) + " 127.0.0.1>nul";
