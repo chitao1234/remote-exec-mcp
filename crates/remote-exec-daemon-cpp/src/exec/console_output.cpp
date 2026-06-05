@@ -1028,30 +1028,8 @@ std::string WinptyTranscriptNormalizer::drain_pending() {
     if (!pending_physical_line_.empty()) {
         std::string line = pending_physical_line_;
         pending_physical_line_.clear();
-        if (!line.empty() && line[line.size() - 1U] == '\r') {
-            line.erase(line.size() - 1U);
-        }
-
-        std::string left;
-        std::string right;
-        if (split_winpty_repaint_line(line, &left, &right)) {
-            if (!pending_logical_fragment_.empty()) {
-                if (!left.empty()) {
-                    emit_logical_line(pending_logical_fragment_ + trim_leading_spaces(left), &output);
-                } else {
-                    emit_logical_line(pending_logical_fragment_, &output);
-                }
-                pending_logical_fragment_.clear();
-            } else if (!left.empty()) {
-                emit_logical_line(left, &output);
-            }
-            output += right;
-        } else if (!pending_logical_fragment_.empty()) {
-            output += pending_logical_fragment_ + trim_leading_spaces(line);
-            pending_logical_fragment_.clear();
-        } else {
-            output += line;
-        }
+        // EOF finalization must surface the visible fragment without inventing a newline.
+        process_physical_line_with_mode(line, &output, TrailingFragmentMode::Emit);
     }
     if (!pending_logical_fragment_.empty()) {
         output += pending_logical_fragment_;
@@ -1061,6 +1039,13 @@ std::string WinptyTranscriptNormalizer::drain_pending() {
 }
 
 void WinptyTranscriptNormalizer::process_physical_line(const std::string& raw_line, std::string* output) {
+    process_physical_line_with_mode(raw_line, output, TrailingFragmentMode::Buffer);
+}
+
+void WinptyTranscriptNormalizer::process_physical_line_with_mode(
+    const std::string& raw_line,
+    std::string* output,
+    TrailingFragmentMode trailing_fragment_mode) {
     if (output == nullptr) {
         return;
     }
@@ -1073,35 +1058,67 @@ void WinptyTranscriptNormalizer::process_physical_line(const std::string& raw_li
     std::string left;
     std::string right;
     if (split_winpty_repaint_line(line, &left, &right)) {
-        if (!pending_logical_fragment_.empty()) {
-            if (!left.empty()) {
-                emit_logical_line(pending_logical_fragment_ + trim_leading_spaces(left), output);
-            } else {
-                emit_logical_line(pending_logical_fragment_, output);
-            }
-            pending_logical_fragment_.clear();
-        } else if (!left.empty()) {
-            emit_logical_line(left, output);
+        emit_repaint_prefix(left, output);
+        if (trailing_fragment_mode == TrailingFragmentMode::Buffer) {
+            pending_logical_fragment_ = right;
+        } else {
+            *output += right;
         }
-        pending_logical_fragment_ = right;
+        return;
+    }
+
+    emit_line_with_pending_fragment(line, output, trailing_fragment_mode == TrailingFragmentMode::Buffer);
+}
+
+void WinptyTranscriptNormalizer::emit_repaint_prefix(const std::string& left, std::string* output) {
+    if (output == nullptr) {
         return;
     }
 
     if (!pending_logical_fragment_.empty()) {
-        emit_logical_line(pending_logical_fragment_ + trim_leading_spaces(line), output);
+        if (!left.empty()) {
+            emit_logical_line(pending_logical_fragment_ + trim_leading_spaces(left), output);
+        } else {
+            emit_logical_line(pending_logical_fragment_, output);
+        }
+        pending_logical_fragment_.clear();
+    } else if (!left.empty()) {
+        emit_logical_line(left, output);
+    }
+}
+
+void WinptyTranscriptNormalizer::emit_line_with_pending_fragment(
+    const std::string& line,
+    std::string* output,
+    bool terminated) {
+    if (output == nullptr) {
+        return;
+    }
+
+    if (!pending_logical_fragment_.empty()) {
+        emit_logical_text(pending_logical_fragment_ + trim_leading_spaces(line), output, terminated);
         pending_logical_fragment_.clear();
         return;
     }
 
-    emit_logical_line(line, output);
+    emit_logical_text(line, output, terminated);
 }
 
 void WinptyTranscriptNormalizer::emit_logical_line(const std::string& line, std::string* output) {
+    emit_logical_text(line, output, true);
+}
+
+void WinptyTranscriptNormalizer::emit_logical_text(
+    const std::string& line,
+    std::string* output,
+    bool terminated) {
     if (output == nullptr) {
         return;
     }
     *output += line;
-    output->push_back('\n');
+    if (terminated) {
+        output->push_back('\n');
+    }
 }
 
 bool WinptyTranscriptNormalizer::split_winpty_repaint_line(const std::string& line,

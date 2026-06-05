@@ -105,8 +105,19 @@ public:
     std::string drain_pending();
 
 private:
+    enum class TrailingFragmentMode {
+        Buffer,
+        Emit,
+    };
+
     void process_physical_line(const std::string& line, std::string* output);
+    void process_physical_line_with_mode(const std::string& line,
+                                         std::string* output,
+                                         TrailingFragmentMode trailing_fragment_mode);
+    void emit_repaint_prefix(const std::string& left, std::string* output);
+    void emit_line_with_pending_fragment(const std::string& line, std::string* output, bool terminated);
     void emit_logical_line(const std::string& line, std::string* output);
+    void emit_logical_text(const std::string& line, std::string* output, bool terminated);
     bool split_winpty_repaint_line(const std::string& line, std::string* left, std::string* right) const;
     static std::string trim_trailing_spaces(const std::string& text);
     static std::string trim_leading_spaces(const std::string& text);
