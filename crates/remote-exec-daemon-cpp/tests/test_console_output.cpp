@@ -260,6 +260,22 @@ void test_winpty_transcript_normalizer_handles_chunked_repaint_lines() {
     TEST_ASSERT(actual == expected);
 }
 
+void test_winpty_transcript_normalizer_handles_windows_2000_short_wrap_fragment() {
+    WinptyTranscriptNormalizer normalizer;
+    const std::string physical =
+        "OCUME~1\\chi\\LOCALS~1\\Temp\\remote-exec-cpp-session-store-test-probe>echo hello                                       hell\n"
+        "o\n"
+        "C:\\DOCUME~1\\chi\\LOCALS~1\\Temp\\remote-exec-cpp-session-store-test-probe>\n";
+    const std::string expected =
+        "OCUME~1\\chi\\LOCALS~1\\Temp\\remote-exec-cpp-session-store-test-probe>echo hello\n"
+        "hello\n"
+        "C:\\DOCUME~1\\chi\\LOCALS~1\\Temp\\remote-exec-cpp-session-store-test-probe>\n";
+
+    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical) +
+                               drain_winpty_transcript_for_test(&normalizer);
+    TEST_ASSERT(actual == expected);
+}
+
 void test_winpty_transcript_normalizer_merges_pending_repaint_fragment() {
     WinptyTranscriptNormalizer normalizer;
     const std::string physical =
@@ -302,6 +318,7 @@ int main() {
     test_winpty_transcript_normalizer_reconstructs_banner_and_prompt();
     test_winpty_transcript_normalizer_splits_echo_output_from_prompt_repaint();
     test_winpty_transcript_normalizer_handles_chunked_repaint_lines();
+    test_winpty_transcript_normalizer_handles_windows_2000_short_wrap_fragment();
     test_winpty_transcript_normalizer_merges_pending_repaint_fragment();
     test_winpty_transcript_normalizer_preserves_regular_wide_spacing();
     return 0;

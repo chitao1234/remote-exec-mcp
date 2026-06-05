@@ -942,8 +942,10 @@ bool WinptyTranscriptNormalizer::split_winpty_repaint_line(const std::string& li
                                                            std::string* left,
                                                            std::string* right) {
     const std::size_t MIN_REPAINT_GAP = 48U;
+    const std::size_t MIN_SHORT_FRAGMENT_REPAINT_GAP = 32U;
     const std::size_t MIN_REPAINT_ROW_WIDTH = 96U;
     const std::size_t MAX_RIGHT_REPAINT_FRAGMENT = 32U;
+    const std::size_t MAX_SHORT_RIGHT_REPAINT_FRAGMENT = 8U;
 
     if (line.size() < MIN_REPAINT_ROW_WIDTH) {
         return false;
@@ -966,7 +968,7 @@ bool WinptyTranscriptNormalizer::split_winpty_repaint_line(const std::string& li
         }
 
         const std::size_t run_len = end - i;
-        if (run_len >= MIN_REPAINT_GAP && end < line.size()) {
+        if (run_len >= MIN_SHORT_FRAGMENT_REPAINT_GAP && end < line.size()) {
             if (run_len > best_len) {
                 best_start = i;
                 best_len = run_len;
@@ -981,9 +983,14 @@ bool WinptyTranscriptNormalizer::split_winpty_repaint_line(const std::string& li
 
     const std::string candidate_left = trim_trailing_spaces(line.substr(0, best_start));
     const std::string candidate_right = line.substr(best_start + best_len);
+    const bool short_right_edge_fragment =
+        candidate_right.size() <= MAX_SHORT_RIGHT_REPAINT_FRAGMENT &&
+        candidate_left.find_first_of(">$#") != std::string::npos &&
+        best_len >= MIN_SHORT_FRAGMENT_REPAINT_GAP;
+    const bool wide_repaint_gap = best_len >= MIN_REPAINT_GAP && best_len * 2U >= line.size();
     if (candidate_right.empty() ||
         candidate_right.size() > MAX_RIGHT_REPAINT_FRAGMENT ||
-        best_len * 2U < line.size()) {
+        (!wide_repaint_gap && !short_right_edge_fragment)) {
         return false;
     }
 
