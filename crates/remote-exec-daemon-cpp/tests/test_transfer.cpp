@@ -31,6 +31,10 @@ static void write_text(const fs::path& path, const std::string& value) {
     fs::write_file_bytes(path, value);
 }
 
+static fs::path transfer_test_root(const std::string& name) {
+    return fs::unique_test_root(name);
+}
+
 static std::string octal_field(std::size_t width, std::uint64_t value) {
     char buffer[64];
     std::snprintf(
@@ -538,7 +542,7 @@ static void assert_transfer_type_wire_helpers() {
 }
 
 static void assert_file_transfer() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-file";
+    const fs::path root = transfer_test_root("remote-exec-xp-transfer-file");
     fs::remove_all(root);
     fs::create_directories(root);
 
@@ -557,7 +561,7 @@ static void assert_file_transfer() {
 }
 
 static void assert_file_transfer_blocks_unexpected_entry_path() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-file-entry-path";
+    const fs::path root = transfer_test_root("remote-exec-xp-transfer-file-entry-path");
     fs::remove_all(root);
     fs::create_directories(root);
 
@@ -576,7 +580,7 @@ static void assert_file_transfer_blocks_unexpected_entry_path() {
 }
 
 static void assert_file_transfer_blocks_raw_bytes() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-file-raw";
+    const fs::path root = transfer_test_root("remote-exec-xp-transfer-file-raw");
     fs::remove_all(root);
     fs::create_directories(root);
 
@@ -591,7 +595,7 @@ static void assert_file_transfer_blocks_raw_bytes() {
 }
 
 static void assert_transfer_requires_tar_terminator() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-terminator";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-terminator");
     fs::remove_all(root);
     fs::create_directories(root);
 
@@ -657,7 +661,7 @@ static void assert_transfer_requires_tar_terminator() {
 }
 
 static void assert_partial_file_import_leaves_partial_destination() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-partial-cleanup";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-partial-cleanup");
     fs::remove_all(root);
     fs::create_directories(root);
 
@@ -679,7 +683,7 @@ static void assert_partial_file_import_leaves_partial_destination() {
 }
 
 static void assert_invalid_replace_keeps_existing_destination() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-invalid-replace";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-invalid-replace");
     fs::remove_all(root);
     fs::create_directories(root / "dest-dir");
     write_text(root / "dest.txt", "old file");
@@ -721,7 +725,7 @@ static void assert_invalid_replace_keeps_existing_destination() {
 }
 
 static void assert_transfer_rejects_entry_size_over_limit() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-size-limit";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-size-limit");
     fs::remove_all(root);
     fs::create_directories(root);
 
@@ -746,7 +750,7 @@ static void assert_transfer_rejects_entry_size_over_limit() {
 }
 
 static void assert_transfer_rejects_unrepresentable_tar_size() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-huge-size";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-huge-size");
     fs::remove_all(root);
     fs::create_directories(root);
 
@@ -766,7 +770,7 @@ static void assert_transfer_rejects_unrepresentable_tar_size() {
 }
 
 static void assert_transfer_rejects_summary_size_over_limit() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-summary-limit";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-summary-limit");
     fs::remove_all(root);
 
     std::string archive;
@@ -795,7 +799,7 @@ static void assert_transfer_rejects_summary_size_over_limit() {
 }
 
 static void assert_directory_round_trip() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-dir";
+    const fs::path root = transfer_test_root("remote-exec-xp-transfer-dir");
     fs::remove_all(root);
     fs::create_directories(root / "source" / "nested" / "empty");
     write_text(root / "source" / "nested" / "hello.txt", "hello directory");
@@ -816,7 +820,7 @@ static void assert_directory_round_trip() {
 }
 
 static void assert_directory_replace_behavior() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-replace";
+    const fs::path root = transfer_test_root("remote-exec-xp-transfer-replace");
     fs::remove_all(root);
     fs::create_directories(root / "source");
     fs::create_directories(root / "dest" / "stale");
@@ -833,7 +837,7 @@ static void assert_directory_replace_behavior() {
 }
 
 static void assert_path_info_reports_existing_directory() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-path-info";
+    const fs::path root = transfer_test_root("remote-exec-xp-transfer-path-info");
     fs::remove_all(root);
     fs::create_directories(root / "dest");
 
@@ -847,7 +851,7 @@ static void assert_path_info_reports_existing_directory() {
 }
 
 static void assert_directory_merge_behavior() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-merge";
+    const fs::path root = transfer_test_root("remote-exec-xp-transfer-merge");
     fs::remove_all(root);
     fs::create_directories(root / "source" / "nested");
     fs::create_directories(root / "dest" / "nested");
@@ -866,7 +870,7 @@ static void assert_directory_merge_behavior() {
 }
 
 static void assert_directory_long_path_round_trip() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-long";
+    const fs::path root = transfer_test_root("remote-exec-xp-transfer-long");
     fs::remove_all(root);
 
     const std::string long_name =
@@ -884,7 +888,7 @@ static void assert_directory_long_path_round_trip() {
 }
 
 static void assert_directory_export_excludes_matching_entries() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-exclude-dir";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-exclude-dir");
     fs::remove_all(root);
     fs::create_directories(root / "source" / ".git");
     fs::create_directories(root / "source" / "logs");
@@ -928,7 +932,7 @@ static void assert_directory_export_excludes_matching_entries() {
 }
 
 static void assert_directory_export_authorizer_checks_children() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-export-authorizer";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-export-authorizer");
     fs::remove_all(root);
     fs::create_directories(root / "source");
     write_text(root / "source" / "public.txt", "public");
@@ -948,7 +952,7 @@ static void assert_directory_export_authorizer_checks_children() {
 }
 
 static void assert_directory_export_sink_reports_authorizer_failure() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-export-sink-failure";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-export-sink-failure");
     fs::remove_all(root);
     fs::create_directories(root / "source");
     write_text(root / "source" / "public.txt", "public");
@@ -971,7 +975,7 @@ static void assert_directory_export_sink_reports_authorizer_failure() {
 }
 
 static void assert_single_file_export_ignores_exclude_patterns() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-exclude-file";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-exclude-file");
     fs::remove_all(root);
     fs::create_directories(root);
     write_text(root / "hello.txt", "hello");
@@ -988,7 +992,7 @@ static void assert_single_file_export_ignores_exclude_patterns() {
 
 #ifndef _WIN32
 static void assert_symlink_sources_are_preserved_by_default() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-symlink-preserve";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-symlink-preserve");
     fs::remove_all(root);
     fs::create_directories(root / "source");
     write_text(root / "source" / "regular.txt", "regular");
@@ -1000,7 +1004,7 @@ static void assert_symlink_sources_are_preserved_by_default() {
 }
 
 static void assert_top_level_file_symlink_can_be_followed() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-symlink-follow-file";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-symlink-follow-file");
     fs::remove_all(root);
     fs::create_directories(root);
     write_text(root / "target.txt", "target");
@@ -1016,7 +1020,7 @@ static void assert_top_level_file_symlink_can_be_followed() {
 }
 
 static void assert_top_level_symlink_is_preserved_without_following_target() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-symlink-preserve-root";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-symlink-preserve-root");
     fs::remove_all(root);
     fs::create_directories(root);
     fs::create_symlink("missing-target.txt", root / "broken-link.txt");
@@ -1031,7 +1035,7 @@ static void assert_top_level_symlink_is_preserved_without_following_target() {
 }
 
 static void assert_executable_bits_round_trip() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-executable";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-executable");
     fs::remove_all(root);
     fs::create_directories(root);
     const fs::path source = root / "tool.sh";
@@ -1062,7 +1066,7 @@ static void assert_executable_bits_round_trip() {
 }
 
 static void assert_transfer_skips_special_files_with_warning() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-special-skip";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-special-skip");
     fs::remove_all(root);
     fs::create_directories(root / "source");
     write_text(root / "source" / "regular.txt", "regular");
@@ -1084,7 +1088,7 @@ static void assert_transfer_skips_special_files_with_warning() {
 }
 
 static void assert_top_level_special_files_are_unsupported() {
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-top-special";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-top-special");
     fs::remove_all(root);
     fs::create_directories(root);
     const fs::path socket_path = root / "events.sock";
@@ -1115,7 +1119,7 @@ static void assert_symlink_import_preserves_links() {
     append_tar_symlink(&archive, "alpha-link", "alpha.txt");
     finalize_tar(archive);
 
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-symlink-import";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-symlink-import");
     fs::remove_all(root);
 
     const ImportSummary imported =
@@ -1132,7 +1136,7 @@ static void assert_symlink_import_skip_reports_warning() {
     append_tar_symlink(&archive, "alpha-link", "alpha.txt");
     finalize_tar(archive);
 
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-symlink-import-skip";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-symlink-import-skip");
     fs::remove_all(root);
 
     const ImportSummary imported = import_path(
@@ -1164,7 +1168,7 @@ static void assert_symlink_import_rejects_absolute_target() {
     append_tar_symlink(&archive, "bad-link", "/etc/passwd");
     finalize_tar(archive);
 
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-symlink-absolute";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-symlink-absolute");
     fs::remove_all(root);
     fs::create_directories(root);
 
@@ -1183,7 +1187,7 @@ static void assert_symlink_import_rejects_parent_target() {
     append_tar_symlink(&archive, "bad-link", "../escape.txt");
     finalize_tar(archive);
 
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-symlink-parent";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-symlink-parent");
     fs::remove_all(root);
     fs::create_directories(root);
 
@@ -1211,8 +1215,9 @@ static void assert_windows_symlink_import_modes_skip_with_warning() {
         append_tar_symlink(&archive, "alpha-link", "alpha.txt");
         finalize_tar(archive);
 
-        const fs::path root = fs::temp_directory_path() / ("remote-exec-cpp-transfer-win-symlink-import-" +
-                                                           std::string(transfer_symlink_mode_wire_value(modes[i])));
+        const fs::path root =
+            transfer_test_root("remote-exec-cpp-transfer-win-symlink-import-" +
+                               std::string(transfer_symlink_mode_wire_value(modes[i])));
         fs::remove_all(root);
 
         const ImportSummary imported =
@@ -1241,7 +1246,7 @@ static void assert_windows_symlink_import_modes_skip_with_warning() {
 
 static bool directory_import_rejects_path(const std::string& path) {
     const std::string archive = tar_with_single_file(path, "bad");
-    const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-traversal";
+    const fs::path root = transfer_test_root("remote-exec-xp-transfer-traversal");
     fs::remove_all(root);
 
     bool rejected = false;
@@ -1271,7 +1276,7 @@ static void assert_directory_traversal_is_rejected() {
     append_tar_entry(&long_name_archive, "ignored", '0', "bad");
     finalize_tar(long_name_archive);
 
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-long-name-traversal";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-long-name-traversal");
     fs::remove_all(root);
     bool rejected = false;
     try {
@@ -1293,7 +1298,7 @@ static void assert_multiple_sources_import() {
     append_tar_file(archive, "nested/beta.txt", "beta");
     finalize_tar(archive);
 
-    const fs::path root = fs::temp_directory_path() / "remote-exec-xp-transfer-multiple";
+    const fs::path root = transfer_test_root("remote-exec-xp-transfer-multiple");
     fs::remove_all(root);
 
     const ImportSummary imported =
@@ -1312,7 +1317,7 @@ static void assert_directory_import_authorizer_checks_children() {
     append_tar_file(archive, "secret.txt", "secret");
     finalize_tar(archive);
 
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-import-authorizer";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-import-authorizer");
     fs::remove_all(root);
 
     bool rejected = false;
@@ -1339,7 +1344,7 @@ static void assert_directory_replace_authorizer_checks_existing_children() {
     append_tar_file(archive, "fresh.txt", "fresh");
     finalize_tar(archive);
 
-    const fs::path root = fs::temp_directory_path() / "remote-exec-cpp-transfer-replace-authorizer";
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-replace-authorizer");
     fs::remove_all(root);
     fs::create_directories(root / "dest");
     write_text(root / "dest" / "secret.txt", "keep");
@@ -1372,8 +1377,8 @@ static void assert_shared_transfer_contract_cases() {
             continue;
         }
 
-        const fs::path root = fs::temp_directory_path() /
-                              ("remote-exec-cpp-transfer-contract-import-" + it->at("name").get<std::string>());
+        const fs::path root =
+            transfer_test_root("remote-exec-cpp-transfer-contract-import-" + it->at("name").get<std::string>());
         fs::remove_all(root);
         fs::create_directories(root);
         apply_setup(root, it->contains("setup") ? it->at("setup") : Json());
@@ -1433,8 +1438,8 @@ static void assert_shared_transfer_contract_cases() {
             continue;
         }
 
-        const fs::path root = fs::temp_directory_path() /
-                              ("remote-exec-cpp-transfer-contract-export-" + it->at("name").get<std::string>());
+        const fs::path root =
+            transfer_test_root("remote-exec-cpp-transfer-contract-export-" + it->at("name").get<std::string>());
         fs::remove_all(root);
         fs::create_directories(root);
         apply_setup(root, it->contains("setup") ? it->at("setup") : Json());
