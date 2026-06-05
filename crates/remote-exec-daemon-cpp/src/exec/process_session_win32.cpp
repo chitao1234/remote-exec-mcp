@@ -214,6 +214,9 @@ private:
 const unsigned short DEFAULT_PTY_ROWS = 24U;
 const unsigned short DEFAULT_PTY_COLS = 120U;
 const DWORD WINPTY_OPEN_TIMEOUT_MS = 10UL * 1000UL;
+const unsigned long WINPTY_TRANSCRIPT_DEBOUNCE_MS = 150UL;
+const unsigned long WINPTY_TRANSCRIPT_MAX_HOLD_MS = 500UL;
+const unsigned long WINPTY_READ_POLL_MS = 25UL;
 
 bool is_output_closed_error(DWORD error) {
     return error == ERROR_BROKEN_PIPE || error == ERROR_NO_DATA || error == ERROR_PIPE_NOT_CONNECTED;
@@ -537,26 +540,6 @@ std::string read_winpty_available_raw(HANDLE pipe, bool* eof) {
     return buffer;
 }
 
-std::string read_winpty_blocking_raw(HANDLE pipe, bool* eof) {
-    char buffer[4096];
-    DWORD read = 0;
-    if (ReadFile(pipe, buffer, sizeof(buffer), &read, nullptr) == 0) {
-        const DWORD error = GetLastError();
-        if (is_output_closed_error(error)) {
-            *eof = true;
-            return "";
-        }
-        throw std::runtime_error(last_error_message("ReadFile"));
-    }
-
-    if (read == 0U) {
-        *eof = true;
-        return "";
-    }
-
-    return std::string(buffer, static_cast<std::size_t>(read));
-}
-
 bool run_taskkill_tree(DWORD pid) {
     if (pid == 0U) {
         return false;
@@ -629,7 +612,8 @@ public:
                          UniqueHandle stdout_read)
         : winpty_(std::move(winpty)), process_handle_(std::move(process_handle)),
           process_id_(process_id), stdin_write_(std::move(stdin_write)), stdout_read_(std::move(stdout_read)),
-          console_closed_(false), transcript_normalizer_(DEFAULT_PTY_COLS) {}
+          console_closed_(false), output_filter_(WINPTY_TRANSCRIPT_DEBOUNCE_MS, WINPTY_TRANSCRIPT_MAX_HOLD_MS),
+          transcript_normalizer_(DEFAULT_PTY_COLS) {}
 
     ~WinptyProcessSession() override { terminate(); }
 
@@ -667,10 +651,36 @@ public:
 
     std::string read_output(bool block, bool* eof, std::string* carry) override {
         *eof = false;
-        const std::string raw =
-            block ? read_winpty_blocking_raw(stdout_read_.get(), eof) : read_winpty_available_raw(stdout_read_.get(), eof);
-        const std::string decoded = utf8_stream_decode::decode_utf8_stream_chunk(carry, raw, false);
-        return transcript_normalizer_.filter_chunk(output_filter_.filter_chunk(decoded));
+        std::string output = flush_due_output();
+        if (!output.empty() || !block) {
+            if (!output.empty()) {
+                return output;
+            }
+            return read_and_filter_available(eof, carry);
+        }
+
+        for (;;) {
+            const std::string raw = read_winpty_available_raw(stdout_read_.get(), eof);
+            if (!raw.empty() || *eof) {
+                if (*eof) {
+                    output += flush_carry(carry);
+                    return output;
+                }
+                return output + filter_raw(raw, carry);
+            }
+
+            output = flush_due_output();
+            if (!output.empty()) {
+                return output;
+            }
+
+            int exit_code = 0;
+            if (has_exited(&exit_code)) {
+                return output + flush_carry(carry);
+            }
+
+            platform::sleep_ms(WINPTY_READ_POLL_MS);
+        }
     }
 
     std::string flush_carry(std::string* carry) override {
@@ -705,6 +715,19 @@ public:
     }
 
 private:
+    std::string filter_raw(const std::string& raw, std::string* carry) {
+        const std::string decoded = utf8_stream_decode::decode_utf8_stream_chunk(carry, raw, false);
+        return transcript_normalizer_.filter_chunk(output_filter_.filter_chunk(decoded));
+    }
+
+    std::string read_and_filter_available(bool* eof, std::string* carry) {
+        return filter_raw(read_winpty_available_raw(stdout_read_.get(), eof), carry) + flush_due_output();
+    }
+
+    std::string flush_due_output() {
+        return transcript_normalizer_.filter_chunk(output_filter_.flush_due());
+    }
+
     void close_console() {
         if (console_closed_) {
             return;

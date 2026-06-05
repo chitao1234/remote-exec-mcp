@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
 #include <stdexcept>
 #include <string>
@@ -303,6 +304,10 @@ std::string merge_joinable_rows(const std::string& previous, const std::string& 
     return previous + current;
 }
 
+std::uint64_t console_output_monotonic_ms() {
+    return static_cast<std::uint64_t>(GetTickCount());
+}
+
 } // namespace
 
 std::string read_available_console_output(HANDLE pipe, std::string* carry) {
@@ -323,9 +328,18 @@ std::string flush_console_output_carry(std::string* carry) {
 }
 
 TerminalOutputFilter::TerminalOutputFilter()
-    : state_(State::Ground), current_row_(0), current_col_(0), has_open_row_(false), open_row_(0U) {}
+    : state_(State::Ground), current_row_(0), current_col_(0), has_open_row_(false), open_row_(0U),
+      debounce_ms_(0UL), max_hold_ms_(0UL), debounce_enabled_(false) {}
+
+TerminalOutputFilter::TerminalOutputFilter(unsigned long debounce_ms, unsigned long max_hold_ms)
+    : state_(State::Ground), current_row_(0), current_col_(0), has_open_row_(false), open_row_(0U),
+      debounce_ms_(debounce_ms), max_hold_ms_(max_hold_ms), debounce_enabled_(debounce_ms > 0UL) {}
 
 std::string TerminalOutputFilter::filter_chunk(const std::string& chunk) {
+    return filter_chunk_at(chunk, console_output_monotonic_ms());
+}
+
+std::string TerminalOutputFilter::filter_chunk_at(const std::string& chunk, std::uint64_t now_ms) {
     std::string utf8_pending;
     utf8_pending.reserve(4U);
 
@@ -357,13 +371,30 @@ std::string TerminalOutputFilter::filter_chunk(const std::string& chunk) {
         emit_printable_codepoint(decode_utf8_codepoint(utf8_pending), utf8_pending);
     }
 
-    return emit_touched_rows();
+    if (!debounce_enabled_) {
+        return emit_touched_rows();
+    }
+
+    queue_touched_rows(now_ms);
+    return emit_due_rows(now_ms);
+}
+
+std::string TerminalOutputFilter::flush_due() {
+    return flush_due_at(console_output_monotonic_ms());
+}
+
+std::string TerminalOutputFilter::flush_due_at(std::uint64_t now_ms) {
+    if (!debounce_enabled_) {
+        return emit_touched_rows();
+    }
+    queue_touched_rows(now_ms);
+    return emit_due_rows(now_ms);
 }
 
 std::string TerminalOutputFilter::drain_pending() {
     state_ = State::Ground;
     csi_buffer_.clear();
-    std::string output = emit_touched_rows();
+    std::string output = debounce_enabled_ ? emit_all_pending_rows() : emit_touched_rows();
     if (has_open_row_) {
         output.push_back('\n');
         has_open_row_ = false;
@@ -605,6 +636,7 @@ void TerminalOutputFilter::clear_screen_from_cursor(int mode) {
     if (mode == 2) {
         lines_.clear();
         touched_rows_.clear();
+        pending_rows_.clear();
         closed_row_text_.clear();
         closed_row_joinable_.clear();
         current_row_ = 0;
@@ -752,17 +784,52 @@ std::string TerminalOutputFilter::serialize_physical_line(std::size_t row) const
     return out;
 }
 
-std::string TerminalOutputFilter::emit_touched_rows() {
+void TerminalOutputFilter::queue_touched_rows(std::uint64_t now_ms) {
     if (touched_rows_.empty()) {
-        return "";
+        return;
     }
 
     std::sort(touched_rows_.begin(), touched_rows_.end());
     touched_rows_.erase(std::unique(touched_rows_.begin(), touched_rows_.end()), touched_rows_.end());
 
-    std::string output;
     for (std::size_t i = 0; i < touched_rows_.size(); ++i) {
         const std::size_t row = touched_rows_[i];
+        if (row >= lines_.size()) {
+            continue;
+        }
+        Line& line = lines_[row];
+        PendingRow& pending = pending_rows_[row];
+        if (pending.first_pending_at_ms == 0U) {
+            pending.first_pending_at_ms = now_ms;
+        }
+        pending.last_changed_at_ms = now_ms;
+        line.touched = false;
+    }
+
+    touched_rows_.clear();
+}
+
+bool TerminalOutputFilter::pending_row_due(const PendingRow& pending, std::uint64_t now_ms) const {
+    if (!debounce_enabled_) {
+        return true;
+    }
+    if (pending.last_changed_at_ms == 0U || pending.first_pending_at_ms == 0U) {
+        return true;
+    }
+    if (now_ms - pending.last_changed_at_ms >= static_cast<std::uint64_t>(debounce_ms_)) {
+        return true;
+    }
+    return max_hold_ms_ > 0UL && now_ms - pending.first_pending_at_ms >= static_cast<std::uint64_t>(max_hold_ms_);
+}
+
+std::string TerminalOutputFilter::emit_rows(const std::vector<std::size_t>& rows) {
+    if (rows.empty()) {
+        return "";
+    }
+
+    std::string output;
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        const std::size_t row = rows[i];
         if (row >= lines_.size()) {
             continue;
         }
@@ -880,7 +947,60 @@ std::string TerminalOutputFilter::emit_touched_rows() {
         line.touched = false;
     }
 
+    return output;
+}
+
+std::string TerminalOutputFilter::emit_touched_rows() {
+    if (touched_rows_.empty()) {
+        return "";
+    }
+
+    std::sort(touched_rows_.begin(), touched_rows_.end());
+    touched_rows_.erase(std::unique(touched_rows_.begin(), touched_rows_.end()), touched_rows_.end());
+    const std::string output = emit_rows(touched_rows_);
     touched_rows_.clear();
+    return output;
+}
+
+std::string TerminalOutputFilter::emit_due_rows(std::uint64_t now_ms) {
+    if (pending_rows_.empty()) {
+        return "";
+    }
+
+    std::vector<std::size_t> due_rows;
+    for (std::map<std::size_t, PendingRow>::const_iterator it = pending_rows_.begin(); it != pending_rows_.end();
+         ++it) {
+        if (pending_row_due(it->second, now_ms)) {
+            due_rows.push_back(it->first);
+        }
+    }
+    if (due_rows.empty()) {
+        return "";
+    }
+
+    const std::string output = emit_rows(due_rows);
+    for (std::size_t i = 0U; i < due_rows.size(); ++i) {
+        pending_rows_.erase(due_rows[i]);
+    }
+    return output;
+}
+
+std::string TerminalOutputFilter::emit_all_pending_rows() {
+    if (!touched_rows_.empty()) {
+        queue_touched_rows(console_output_monotonic_ms());
+    }
+    if (pending_rows_.empty()) {
+        return "";
+    }
+
+    std::vector<std::size_t> rows;
+    rows.reserve(pending_rows_.size());
+    for (std::map<std::size_t, PendingRow>::const_iterator it = pending_rows_.begin(); it != pending_rows_.end();
+         ++it) {
+        rows.push_back(it->first);
+    }
+    const std::string output = emit_rows(rows);
+    pending_rows_.clear();
     return output;
 }
 
@@ -1060,6 +1180,16 @@ std::string decode_utf8_stream_for_test(std::string* carry, const std::string& r
 
 std::string filter_terminal_output_for_test(TerminalOutputFilter* filter, const std::string& chunk) {
     return filter->filter_chunk(chunk);
+}
+
+std::string filter_terminal_output_at_for_test(TerminalOutputFilter* filter,
+                                               const std::string& chunk,
+                                               std::uint64_t now_ms) {
+    return filter->filter_chunk_at(chunk, now_ms);
+}
+
+std::string flush_terminal_output_due_for_test(TerminalOutputFilter* filter, std::uint64_t now_ms) {
+    return filter->flush_due_at(now_ms);
 }
 
 std::string drain_terminal_output_for_test(TerminalOutputFilter* filter) {

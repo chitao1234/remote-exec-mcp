@@ -241,6 +241,33 @@ void test_terminal_output_filter_collapses_winpty_prompt_rewrites() {
     TEST_ASSERT(final.find('\x1b') == std::string::npos);
 }
 
+void test_terminal_output_filter_debounces_touched_rows() {
+    TerminalOutputFilter filter(100UL, 500UL);
+    TEST_ASSERT(filter_terminal_output_at_for_test(&filter, "hello", 1000U).empty());
+    TEST_ASSERT(flush_terminal_output_due_for_test(&filter, 1099U).empty());
+    TEST_ASSERT(flush_terminal_output_due_for_test(&filter, 1100U) == "hello");
+    TEST_ASSERT(drain_terminal_output_for_test(&filter) == "\n");
+}
+
+void test_terminal_output_filter_debounce_uses_latest_repaint() {
+    TerminalOutputFilter filter(100UL, 500UL);
+    TEST_ASSERT(filter_terminal_output_at_for_test(&filter, "prompt>echo hello\x1b[116Ghell\r\no", 1000U).empty());
+    TEST_ASSERT(flush_terminal_output_due_for_test(&filter, 1050U).empty());
+    TEST_ASSERT(filter_terminal_output_at_for_test(&filter, "\r\x1b[1Aprompt>echo hello\x1b[0K\r\nhello", 1050U).empty());
+    TEST_ASSERT(flush_terminal_output_due_for_test(&filter, 1149U).empty());
+
+    const std::string emitted = flush_terminal_output_due_for_test(&filter, 1150U);
+    TEST_ASSERT(emitted.find("prompt>echo hello") != std::string::npos);
+    TEST_ASSERT(emitted.find("hello") != std::string::npos);
+    TEST_ASSERT(emitted.find("hell\no") == std::string::npos);
+}
+
+void test_terminal_output_filter_debounce_drain_flushes_immediately() {
+    TerminalOutputFilter filter(1000UL, 2000UL);
+    TEST_ASSERT(filter_terminal_output_at_for_test(&filter, "prompt:", 1000U).empty());
+    TEST_ASSERT(drain_terminal_output_for_test(&filter) == "prompt:\n");
+}
+
 void test_winpty_transcript_normalizer_reconstructs_banner_and_prompt() {
     WinptyTranscriptNormalizer normalizer;
     const std::string physical =
@@ -395,6 +422,9 @@ int main() {
     test_terminal_output_filter_handles_split_escape_sequences();
     test_terminal_output_filter_applies_backspace_to_utf8_codepoints();
     test_terminal_output_filter_collapses_winpty_prompt_rewrites();
+    test_terminal_output_filter_debounces_touched_rows();
+    test_terminal_output_filter_debounce_uses_latest_repaint();
+    test_terminal_output_filter_debounce_drain_flushes_immediately();
     test_winpty_transcript_normalizer_reconstructs_banner_and_prompt();
     test_winpty_transcript_normalizer_splits_echo_output_from_prompt_repaint();
     test_winpty_transcript_normalizer_handles_chunked_repaint_lines();
