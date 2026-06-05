@@ -394,7 +394,7 @@ static void assert_windows_cmd_quotes_survive_non_tty_and_tty(SessionStore& stor
     TEST_ASSERT(non_tty_output.find("for:alpha:beta\n") != std::string::npos);
     TEST_ASSERT(non_tty_output.find("\\\"") == std::string::npos);
 
-    if (!process_session_supports_pty()) {
+    if (test_exec_pty::should_skip_pty_tests(process_session_supports_pty())) {
         return;
     }
 
@@ -828,11 +828,7 @@ static void assert_non_tty_stdin_closed_rejected(SessionStore& store,
 static void assert_terminal_write_removes_completed_session(SessionStore& store,
                                                             const fs::path& root,
                                                             const std::string& shell) {
-    const bool supports_pty = process_session_supports_pty();
-#ifdef _WIN32
-    test_exec_pty::assert_built_winpty_runtime_available(supports_pty);
-#endif
-    if (!supports_pty) {
+    if (test_exec_pty::should_skip_pty_tests(process_session_supports_pty())) {
         return;
     }
 
@@ -869,7 +865,7 @@ static void assert_terminal_write_removes_completed_session(SessionStore& store,
 static void assert_tty_resume_round_trip(SessionStore& store,
                                          const fs::path& root,
                                          const std::string& shell) {
-    if (!process_session_supports_pty()) {
+    if (test_exec_pty::should_skip_pty_tests(process_session_supports_pty())) {
         return;
     }
 
@@ -910,7 +906,7 @@ static void assert_unrelated_sessions_do_not_block_each_other(SessionStore& stor
                                                               const fs::path& root,
                                                               const std::string& shell,
                                                               const YieldTimeConfig& yield_time) {
-    if (!process_session_supports_pty()) {
+    if (test_exec_pty::should_skip_pty_tests(process_session_supports_pty())) {
         return;
     }
 
@@ -985,7 +981,7 @@ static void assert_tty_detection_and_input_round_trip(SessionStore& store,
                                                       const fs::path& root,
                                                       const std::string& shell,
                                                       const YieldTimeConfig& yield_time) {
-    if (!process_session_supports_pty()) {
+    if (test_exec_pty::should_skip_pty_tests(process_session_supports_pty())) {
         return;
     }
 
@@ -1039,7 +1035,7 @@ static void assert_tty_detection_and_input_round_trip(SessionStore& store,
 static void assert_tty_resize_round_trip(SessionStore& store,
                                          const fs::path& root,
                                          const std::string& shell) {
-    if (!process_session_supports_pty()) {
+    if (test_exec_pty::should_skip_pty_tests(process_session_supports_pty())) {
         return;
     }
 
@@ -1085,7 +1081,7 @@ static void assert_non_tty_resize_rejected(SessionStore& store,
                                            const fs::path& root,
                                            const std::string& shell,
                                            const YieldTimeConfig& yield_time) {
-    if (!process_session_supports_pty()) {
+    if (test_exec_pty::should_skip_pty_tests(process_session_supports_pty())) {
         return;
     }
 
@@ -1392,6 +1388,10 @@ static void assert_stdin_and_tty_behavior(SessionStore& store,
     TEST_ASSERT(xp_completed.at("exit_code").get<int>() == 0);
     TEST_ASSERT(xp_output.find("ready\n") != std::string::npos);
     TEST_ASSERT(xp_output.find("got:hello\n") != std::string::npos);
+
+    if (test_exec_pty::should_skip_pty_tests(process_session_supports_pty())) {
+        return;
+    }
 
     const Json cmd_running =
         start_test_command(store, "cmd.exe", root.string(), shell, true, 1000UL, DEFAULT_MAX_OUTPUT_TOKENS, yield_time, 64UL);

@@ -27,6 +27,11 @@ bool code_page_available(unsigned int code_page) {
     }
 }
 
+std::string winpty_repaint_physical_line(const std::string& left, const std::string& right, std::size_t width) {
+    TEST_ASSERT(left.size() + right.size() <= width);
+    return left + std::string(width - left.size() - right.size(), ' ') + right + "\n";
+}
+
 void assert_code_page_decode(unsigned int code_page, const std::string& raw, const std::string& expected_utf8) {
     if (!code_page_available(code_page)) {
         return;
@@ -262,14 +267,15 @@ void test_winpty_transcript_normalizer_handles_chunked_repaint_lines() {
 
 void test_winpty_transcript_normalizer_handles_windows_2000_short_wrap_fragment() {
     WinptyTranscriptNormalizer normalizer;
-    const std::string physical =
-        "OCUME~1\\chi\\LOCALS~1\\Temp\\remote-exec-cpp-session-store-test-probe>echo hello                                       hell\n"
-        "o\n"
-        "C:\\DOCUME~1\\chi\\LOCALS~1\\Temp\\remote-exec-cpp-session-store-test-probe>\n";
+    const std::string user_profile = "DOCUME~1\\REMOTE~1\\LOCALS~1\\Temp\\remote-exec-cpp-session-store-test-probe";
+    const std::string wrapped_prompt_fragment = user_profile.substr(1U) + ">";
+    const std::string full_prompt = "C:\\" + user_profile + ">";
+    const std::string command_line = wrapped_prompt_fragment + "echo hello";
+    const std::string physical = winpty_repaint_physical_line(command_line, "hell", 120U) + "o\n" + full_prompt + "\n";
     const std::string expected =
-        "OCUME~1\\chi\\LOCALS~1\\Temp\\remote-exec-cpp-session-store-test-probe>echo hello\n"
-        "hello\n"
-        "C:\\DOCUME~1\\chi\\LOCALS~1\\Temp\\remote-exec-cpp-session-store-test-probe>\n";
+        command_line + "\n"
+        "hello\n" +
+        full_prompt + "\n";
 
     const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical) +
                                drain_winpty_transcript_for_test(&normalizer);

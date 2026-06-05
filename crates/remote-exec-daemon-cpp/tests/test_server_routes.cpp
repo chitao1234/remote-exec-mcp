@@ -245,11 +245,7 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
     TEST_ASSERT(invalid_session_id_type_response.status == 400);
     TEST_ASSERT(Json::parse(invalid_session_id_type_response.body).at("code").get<std::string>() == "bad_request");
 
-    const bool supports_pty = process_session_supports_pty();
-#ifdef _WIN32
-    test_exec_pty::assert_built_winpty_runtime_available(supports_pty);
-#endif
-    if (supports_pty) {
+    if (!test_exec_pty::should_skip_pty_tests(process_session_supports_pty())) {
         const HttpResponse slow_start_response = route_request(state,
                                                                json_request("/v1/exec/start",
                                                                             Json{

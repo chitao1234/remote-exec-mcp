@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cctype>
+#include <cstdio>
 #include <cstdint>
 #include <string>
 
@@ -88,5 +89,22 @@ inline void assert_built_winpty_runtime_available(bool runtime_supports_pty) {
 #endif
 }
 #endif
+
+inline bool should_skip_pty_tests(bool runtime_supports_pty) {
+#ifdef _WIN32
+#ifdef REMOTE_EXEC_CPP_HAS_WINPTY
+    if (!runtime_supports_pty && is_wine_runtime()) {
+        static bool warned = false;
+        if (!warned) {
+            std::fprintf(stderr, "warning: skipping PTY tests under Wine; WinPTY TTY support is unavailable\n");
+            warned = true;
+        }
+        return true;
+    }
+    assert_built_winpty_runtime_available(runtime_supports_pty);
+#endif
+#endif
+    return !runtime_supports_pty;
+}
 
 } // namespace test_exec_pty
