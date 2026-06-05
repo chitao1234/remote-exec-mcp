@@ -27,6 +27,22 @@ bool denied(const CompiledFilesystemSandbox* sandbox, SandboxAccess access, cons
     }
 }
 
+#ifdef _WIN32
+std::string short_path_for_test(const fs::path& path) {
+    const std::wstring wide = test_fs::wide_from_utf8(path.string());
+    DWORD length = GetShortPathNameW(wide.c_str(), NULL, 0);
+    if (length == 0U) {
+        return "";
+    }
+    std::vector<wchar_t> buffer(length + 1U);
+    length = GetShortPathNameW(wide.c_str(), &buffer[0], static_cast<DWORD>(buffer.size()));
+    if (length == 0U || length >= buffer.size()) {
+        return "";
+    }
+    return test_fs::utf8_from_wide(std::wstring(&buffer[0], length));
+}
+#endif
+
 std::string host_platform_label() {
 #ifdef _WIN32
     return "windows";
@@ -304,6 +320,12 @@ int main() {
     const CompiledFilesystemSandbox compiled = compile_filesystem_sandbox(write_sandbox);
 
     authorize_path(&compiled, SANDBOX_WRITE, (allowed / "new.txt").string());
+#ifdef _WIN32
+    const std::string short_allowed = short_path_for_test(allowed);
+    if (!short_allowed.empty() && short_allowed != allowed.string()) {
+        authorize_path(&compiled, SANDBOX_WRITE, short_allowed + "\\new-short-name.txt");
+    }
+#endif
     TEST_ASSERT(denied(&compiled, SANDBOX_WRITE, (denied_root / "key.txt").string()));
     TEST_ASSERT(denied(&compiled, SANDBOX_WRITE, (sibling / "nope.txt").string()));
 

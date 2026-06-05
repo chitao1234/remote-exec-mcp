@@ -125,7 +125,7 @@ bool component_equal(const std::string& left, const std::string& right) {
                        TRUE) == CSTR_EQUAL;
         }
         return CompareStringW(
-                   LOCALE_INVARIANT,
+                   LOCALE_USER_DEFAULT,
                    NORM_IGNORECASE,
                    left_wide.empty() ? nullptr : left_wide.data(),
                    static_cast<int>(left_wide.size()),

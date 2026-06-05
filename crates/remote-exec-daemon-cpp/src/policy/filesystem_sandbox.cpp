@@ -7,9 +7,14 @@
 #include <string>
 #include <vector>
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include <windows.h>
+
+#include "platform/win32_utf8.h"
+#else
 #include <unistd.h>
 #endif
+
 
 #include "policy/filesystem_sandbox.h"
 #include "policy/path_compare.h"
@@ -149,7 +154,172 @@ std::string lexical_normalize_for_policy(PathPolicy policy, const std::string& r
     return output;
 }
 
-#ifndef _WIN32
+#ifdef _WIN32
+std::wstring wide_from_utf8_path(const std::string& value) {
+    try {
+        return win32_utf8::wide_from_utf8(value);
+    } catch (const std::exception& ex) {
+        throw SandboxError(std::string("unable to decode path as UTF-8: ") + ex.what());
+    }
+}
+
+std::string utf8_from_wide_path(const std::wstring& value) {
+    try {
+        return win32_utf8::utf8_from_wide(value);
+    } catch (const std::exception& ex) {
+        throw SandboxError(std::string("unable to encode path as UTF-8: ") + ex.what());
+    }
+}
+
+std::string windows_error_code_message(const char* operation, DWORD error) {
+    std::ostringstream out;
+    out << operation << " failed with Windows error " << static_cast<unsigned long>(error);
+    return out.str();
+}
+
+std::string basename_for_windows_path(std::string path) {
+    while (path.size() > 3 && is_separator(windows_path_policy(), path[path.size() - 1])) {
+        path.erase(path.size() - 1);
+    }
+    const std::size_t slash = path.find_last_of("\\/");
+    if (slash == std::string::npos) {
+        return "";
+    }
+    if (path.size() >= 3 && slash == 2 && path[1] == ':') {
+        return "";
+    }
+    return path.substr(slash + 1);
+}
+
+std::string parent_for_windows_path(std::string path) {
+    while (path.size() > 3 && is_separator(windows_path_policy(), path[path.size() - 1])) {
+        path.erase(path.size() - 1);
+    }
+    const std::size_t slash = path.find_last_of("\\/");
+    if (slash == std::string::npos) {
+        return "";
+    }
+    if (path.size() >= 3 && slash == 2 && path[1] == ':') {
+        return path.substr(0, 3);
+    }
+    if (slash == 0) {
+        return path.substr(0, 1);
+    }
+    return path.substr(0, slash);
+}
+
+std::string full_windows_path_for_existing_path(const std::string& path) {
+    const std::wstring wide = wide_from_utf8_path(path);
+    DWORD length = GetFullPathNameW(wide.c_str(), 0, nullptr, nullptr);
+    if (length == 0U) {
+        throw SandboxError("unable to canonicalize `" + path + "`: " +
+                           windows_error_code_message("GetFullPathNameW", GetLastError()));
+    }
+
+    std::vector<wchar_t> buffer(length + 1U);
+    length = GetFullPathNameW(wide.c_str(), static_cast<DWORD>(buffer.size()), &buffer[0], nullptr);
+    if (length == 0U || length >= buffer.size()) {
+        throw SandboxError("unable to canonicalize `" + path + "`: " +
+                           windows_error_code_message("GetFullPathNameW", GetLastError()));
+    }
+    return lexical_normalize_for_policy(windows_path_policy(), utf8_from_wide_path(std::wstring(&buffer[0], length)));
+}
+
+std::string long_windows_leaf_for_existing_path(const std::string& path) {
+    const std::string full = full_windows_path_for_existing_path(path);
+    WIN32_FIND_DATAW data;
+    const std::wstring wide = wide_from_utf8_path(full);
+    HANDLE find = FindFirstFileW(wide.c_str(), &data);
+    if (find == INVALID_HANDLE_VALUE) {
+        throw SandboxError("unable to canonicalize `" + path + "`: " +
+                           windows_error_code_message("FindFirstFileW", GetLastError()));
+    }
+    FindClose(find);
+
+    const std::string parent = parent_for_windows_path(full);
+    const std::string long_name = utf8_from_wide_path(data.cFileName);
+    if (parent.empty() || long_name.empty()) {
+        return full;
+    }
+    return lexical_normalize_for_policy(windows_path_policy(), join_for_policy(windows_path_policy(), parent, long_name));
+}
+
+std::string canonicalize_existing_windows_path(const std::string& path) {
+    const PathPolicy policy = windows_path_policy();
+    const std::string full = full_windows_path_for_existing_path(path);
+    std::string prefix;
+    std::size_t start = 0U;
+
+    if (full.size() >= 3 && full[1] == ':' && is_separator(policy, full[2])) {
+        prefix = full.substr(0, 2);
+        prefix.push_back('\\');
+        start = 3U;
+    } else if (full.rfind("\\\\", 0) == 0) {
+        prefix = "\\\\";
+        start = 2U;
+    }
+
+    std::string rebuilt = prefix;
+    std::string current;
+    for (std::size_t index = start; index <= full.size(); ++index) {
+        if (index != full.size() && !is_separator(policy, full[index])) {
+            current.push_back(full[index]);
+            continue;
+        }
+        if (current.empty()) {
+            continue;
+        }
+
+        const std::string probe = join_for_policy(policy, rebuilt, current);
+        const std::string canonical_probe = long_windows_leaf_for_existing_path(probe);
+        std::string canonical_name;
+        if (!basename_for_policy(policy, canonical_probe, &canonical_name) || canonical_name.empty()) {
+            canonical_name = current;
+        }
+        rebuilt = join_for_policy(policy, rebuilt, canonical_name);
+        current.clear();
+    }
+
+    return lexical_normalize_for_policy(policy, rebuilt.empty() ? full : rebuilt);
+}
+
+std::string canonicalize_windows_for_sandbox(const std::string& path) {
+    const PathPolicy policy = windows_path_policy();
+    const std::string normalized = lexical_normalize_for_policy(policy, path);
+    std::string probe = normalized;
+    std::vector<std::string> missing_components;
+
+    for (;;) {
+        if (GetFileAttributesW(wide_from_utf8_path(probe).c_str()) != INVALID_FILE_ATTRIBUTES) {
+            std::string rebuilt = canonicalize_existing_windows_path(probe);
+            for (std::vector<std::string>::const_reverse_iterator it = missing_components.rbegin();
+                 it != missing_components.rend();
+                 ++it) {
+                rebuilt = join_for_policy(policy, rebuilt, *it);
+            }
+            return lexical_normalize_for_policy(policy, rebuilt);
+        }
+
+        const DWORD error = GetLastError();
+        if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) {
+            throw SandboxError("unable to canonicalize `" + normalized + "`: " +
+                               windows_error_code_message("GetFileAttributesW", error));
+        }
+
+        const std::string name = basename_for_windows_path(probe);
+        if (name.empty()) {
+            return normalized;
+        }
+        missing_components.push_back(name);
+
+        const std::string parent = parent_for_windows_path(probe);
+        if (parent.empty() || parent == probe) {
+            throw SandboxError("unable to resolve an existing ancestor for `" + normalized + "`");
+        }
+        probe = parent;
+    }
+}
+#else
 std::string basename_for_posix_path(std::string path) {
     while (path.size() > 1 && path[path.size() - 1] == '/') {
         path.erase(path.size() - 1);
@@ -220,14 +390,14 @@ std::string canonicalize_posix_for_sandbox(const std::string& path) {
 
 std::string canonicalize_for_sandbox(const std::string& path) {
     const PathPolicy policy = host_path_policy();
+#ifdef _WIN32
     if (policy.style == PATH_STYLE_WINDOWS) {
-        return lexical_normalize_for_policy(policy, path);
+        return canonicalize_windows_for_sandbox(path);
     }
-
-#ifndef _WIN32
-    return canonicalize_posix_for_sandbox(path);
-#else
     return lexical_normalize_for_policy(policy, path);
+#else
+    (void)policy;
+    return canonicalize_posix_for_sandbox(path);
 #endif
 }
 
