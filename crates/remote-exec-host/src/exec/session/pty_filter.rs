@@ -2,8 +2,11 @@ use std::borrow::Cow;
 
 use vte::{Params, Parser, Perform};
 
+#[cfg(feature = "winpty")]
+mod winpty;
+
 pub(super) struct TerminalOutputState {
-    parser: Parser,
+    filter: Box<dyn TerminalOutputFilter>,
 }
 
 #[derive(Debug, Default)]
@@ -15,14 +18,58 @@ pub(super) struct TerminalOutputResult {
 impl Default for TerminalOutputState {
     fn default() -> Self {
         Self {
-            parser: Parser::new(),
+            filter: Box::<ControlSequenceFilter>::default(),
         }
     }
 }
 
 impl TerminalOutputState {
+    #[cfg(feature = "winpty")]
+    pub(super) fn winpty() -> Self {
+        Self {
+            filter: Box::<winpty::WinptyOutputState>::default(),
+        }
+    }
+
     pub(super) fn filter_chunk(&mut self, chunk: &str) -> TerminalOutputResult {
-        let mut performer = TerminalOutputPerformer::default();
+        self.filter.filter_chunk(chunk)
+    }
+
+    pub(super) fn flush_due(&mut self) -> String {
+        self.filter.flush_due()
+    }
+
+    pub(super) fn drain_pending(&mut self) -> String {
+        self.filter.drain_pending()
+    }
+
+    pub(super) fn set_physical_width(&mut self, cols: u16) {
+        self.filter.set_physical_width(cols);
+    }
+}
+
+trait TerminalOutputFilter: Send {
+    fn filter_chunk(&mut self, chunk: &str) -> TerminalOutputResult;
+
+    fn flush_due(&mut self) -> String {
+        String::new()
+    }
+
+    fn drain_pending(&mut self) -> String {
+        String::new()
+    }
+
+    fn set_physical_width(&mut self, _cols: u16) {}
+}
+
+#[derive(Default)]
+struct ControlSequenceFilter {
+    parser: Parser,
+}
+
+impl TerminalOutputFilter for ControlSequenceFilter {
+    fn filter_chunk(&mut self, chunk: &str) -> TerminalOutputResult {
+        let mut performer = ControlSequencePerformer::default();
         self.parser.advance(&mut performer, chunk.as_bytes());
 
         TerminalOutputResult {
@@ -31,18 +78,18 @@ impl TerminalOutputState {
         }
     }
 
-    pub(super) fn drain_pending(&mut self) -> String {
+    fn drain_pending(&mut self) -> String {
         String::new()
     }
 }
 
 #[derive(Debug, Default)]
-struct TerminalOutputPerformer {
+struct ControlSequencePerformer {
     output: String,
     response: String,
 }
 
-impl Perform for TerminalOutputPerformer {
+impl Perform for ControlSequencePerformer {
     fn print(&mut self, ch: char) {
         self.output.push(ch);
     }
@@ -154,16 +201,6 @@ mod tests {
             .filter_chunk("\x1b[m\x1b]0;C:\\Windows\\system32\\cmd.exe\x07\x1b[?25hhello \r\n");
 
         assert_eq!(result.output, "hello \r\n");
-        assert_eq!(result.response, "");
-        assert_eq!(state.drain_pending(), "");
-    }
-
-    #[test]
-    fn terminal_output_state_strips_winpty_control_sequences() {
-        let mut state = TerminalOutputState::default();
-        let result = state.filter_chunk("\x1b[0m\x1b[0Khello\x1b[0K\x1b[?25l\r\n\x1b[0K\x1b[?25h");
-
-        assert_eq!(result.output, "hello\r\n");
         assert_eq!(result.response, "");
         assert_eq!(state.drain_pending(), "");
     }

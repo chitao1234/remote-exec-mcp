@@ -687,6 +687,111 @@ async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens_on_windows() 
 }
 
 #[tokio::test]
+async fn exec_start_normalizes_winpty_repainted_split_lines_on_windows() {
+    if !support::spawn::supported_windows_pty_backends().contains(&WindowsPtyTestBackend::Winpty) {
+        return;
+    }
+
+    let fixture = support::spawn::spawn_daemon_for_windows_pty_backend(
+        DEFAULT_TEST_TARGET,
+        WindowsPtyTestBackend::Winpty,
+    )
+    .await;
+
+    let response = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &windows_cmd_start_request("echo hello", true, Some(COMPLETED_COMMAND_YIELD_MS), None),
+        )
+        .await;
+
+    assert_eq!(response.output().exit_code, Some(0));
+    let output = response.output().output.replace('\r', "");
+    assert!(
+        output.contains("hello\n") || output == "hello",
+        "winpty output missing normalized hello line: {output:?}"
+    );
+    assert!(
+        !output.contains("hell\no"),
+        "winpty output preserved split repaint line: {output:?}"
+    );
+    assert!(
+        !output.contains("hellohello"),
+        "winpty output duplicated repaint output: {output:?}"
+    );
+    assert!(
+        !output.contains('\u{1b}'),
+        "winpty output leaked control sequence: {output:?}"
+    );
+}
+
+#[tokio::test]
+async fn exec_write_resizes_winpty_sessions_on_windows() {
+    if !support::spawn::supported_windows_pty_backends().contains(&WindowsPtyTestBackend::Winpty) {
+        return;
+    }
+
+    let fixture = support::spawn::spawn_daemon_for_windows_pty_backend(
+        DEFAULT_TEST_TARGET,
+        WindowsPtyTestBackend::Winpty,
+    )
+    .await;
+    let command = "$null = [Console]::In.ReadLine(); [Console]::Out.WriteLine(\"SIZE:$([Console]::WindowHeight):$([Console]::WindowWidth)\"); Start-Sleep -Seconds 1";
+    let started = fixture
+        .rpc::<ExecStartRequest, ExecResponse>(
+            "/v1/exec/start",
+            &windows_start_request(command, true, Some(250), None),
+        )
+        .await;
+
+    assert!(started.output().running, "start response: {started:#?}");
+    let session_id = started
+        .daemon_session_id()
+        .expect("live session")
+        .to_string();
+    let mut response = fixture
+        .rpc::<ExecWriteRequest, ExecResponse>(
+            "/v1/exec/write",
+            &ExecWriteRequest {
+                daemon_session_id: session_id.clone(),
+                chars: "go\n".to_string(),
+                yield_time_ms: Some(1_000),
+                max_output_tokens: None,
+                pty_size: Some(remote_exec_proto::rpc::ExecPtySize {
+                    rows: 33,
+                    cols: 101,
+                }),
+            },
+        )
+        .await;
+
+    let mut output = format!("{}{}", started.output().output, response.output().output);
+    for _ in 0..5 {
+        if output.contains("SIZE:33:101") || !response.output().running {
+            break;
+        }
+        response = fixture
+            .rpc::<ExecWriteRequest, ExecResponse>(
+                "/v1/exec/write",
+                &ExecWriteRequest {
+                    daemon_session_id: session_id.clone(),
+                    chars: String::new(),
+                    yield_time_ms: Some(1_000),
+                    max_output_tokens: None,
+                    pty_size: None,
+                },
+            )
+            .await;
+        output.push_str(&response.output().output);
+    }
+
+    assert!(
+        output.contains("SIZE:33:101"),
+        "winpty resize output did not report expected size: {output:?}"
+    );
+}
+
+#[tokio::test]
 async fn exec_write_rejects_non_tty_sessions_when_chars_are_present_on_windows() {
     let fixture = support::spawn::spawn_daemon(DEFAULT_TEST_TARGET).await;
     let started = fixture
@@ -818,15 +923,16 @@ async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon_on_windows(
         tokio::time::sleep(Duration::from_millis(200)).await;
 
         let started = Instant::now();
+        let fast_session_id = fast
+            .daemon_session_id()
+            .expect("fast session")
+            .to_string()
+            .to_string();
         let fast_response = fixture
             .rpc::<ExecWriteRequest, ExecResponse>(
                 "/v1/exec/write",
                 &ExecWriteRequest {
-                    daemon_session_id: fast
-                        .daemon_session_id()
-                        .expect("fast session")
-                        .to_string()
-                        .to_string(),
+                    daemon_session_id: fast_session_id.clone(),
                     chars: "ping\n".to_string(),
                     yield_time_ms: Some(250),
                     max_output_tokens: None,
@@ -841,9 +947,25 @@ async fn exec_write_does_not_block_unrelated_sessions_on_same_daemon_on_windows(
             backend.name(),
             started.elapsed()
         );
+        let mut fast_output = fast_response.output().output.clone();
+        if fast_output.is_empty() && fast_response.output().running {
+            let poll = fixture
+                .rpc::<ExecWriteRequest, ExecResponse>(
+                    "/v1/exec/write",
+                    &ExecWriteRequest {
+                        daemon_session_id: fast_session_id,
+                        chars: String::new(),
+                        yield_time_ms: Some(1_000),
+                        max_output_tokens: None,
+                        pty_size: None,
+                    },
+                )
+                .await;
+            fast_output.push_str(&poll.output().output);
+        }
         assert!(
-            fast_response.output().output.contains("ping"),
-            "{} fast response: {fast_response:#?}",
+            fast_output.contains("ping"),
+            "{} fast response: {fast_response:#?}; accumulated output: {fast_output:?}",
             backend.name()
         );
 

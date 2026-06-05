@@ -222,6 +222,13 @@ impl WinptySession {
             .map_err(map_winpty_error)
     }
 
+    pub(crate) fn resize(&self, size: remote_exec_proto::rpc::ExecPtySize) -> anyhow::Result<()> {
+        let size = PtySize::new(size.cols, size.rows).map_err(map_winpty_error)?;
+        lock_winpty(&self.pty, "pty")?
+            .resize(size)
+            .map_err(map_winpty_error)
+    }
+
     pub(crate) fn terminate(&self) -> anyhow::Result<()> {
         if self.try_wait()?.is_some() {
             return Ok(());

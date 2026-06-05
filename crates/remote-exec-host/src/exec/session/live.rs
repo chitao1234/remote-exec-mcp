@@ -29,6 +29,38 @@ pub(super) fn new_live_session(
     child: SessionChild,
     receiver: UnboundedReceiver<String>,
 ) -> LiveSession {
+    #[cfg(windows)]
+    let terminal_output_state = tty.then(super::pty_filter::TerminalOutputState::default);
+
+    new_live_session_with_terminal_output_state(
+        tty,
+        child,
+        receiver,
+        #[cfg(windows)]
+        terminal_output_state,
+    )
+}
+
+#[cfg(all(windows, feature = "winpty"))]
+pub(super) fn new_winpty_live_session(
+    tty: bool,
+    child: SessionChild,
+    receiver: UnboundedReceiver<String>,
+) -> LiveSession {
+    new_live_session_with_terminal_output_state(
+        tty,
+        child,
+        receiver,
+        Some(super::pty_filter::TerminalOutputState::winpty()),
+    )
+}
+
+fn new_live_session_with_terminal_output_state(
+    tty: bool,
+    child: SessionChild,
+    receiver: UnboundedReceiver<String>,
+    #[cfg(windows)] terminal_output_state: Option<super::pty_filter::TerminalOutputState>,
+) -> LiveSession {
     LiveSession {
         tty,
         started_at: Instant::now(),
@@ -37,7 +69,7 @@ pub(super) fn new_live_session(
         receiver,
         exit_code: None,
         #[cfg(windows)]
-        terminal_output_state: tty.then(super::pty_filter::TerminalOutputState::default),
+        terminal_output_state,
     }
 }
 
@@ -49,6 +81,9 @@ impl LiveSession {
             let chunk = self.filter_terminal_output(chunk)?;
             output.push_str(&chunk);
         }
+
+        #[cfg(windows)]
+        output.push_str(&self.flush_terminal_output_due());
 
         #[cfg(windows)]
         if self.exit_code.is_some() {
@@ -106,7 +141,12 @@ impl LiveSession {
         &mut self,
         size: remote_exec_proto::rpc::ExecPtySize,
     ) -> anyhow::Result<()> {
-        self.child.resize_pty(size)
+        self.child.resize_pty(size)?;
+        #[cfg(windows)]
+        if let Some(state) = &mut self.terminal_output_state {
+            state.set_physical_width(size.cols);
+        }
+        Ok(())
     }
 
     fn write_chars_internal(&mut self, chars: &str) -> anyhow::Result<()> {
@@ -154,6 +194,14 @@ impl LiveSession {
         self.terminal_output_state
             .as_mut()
             .map(super::pty_filter::TerminalOutputState::drain_pending)
+            .unwrap_or_default()
+    }
+
+    #[cfg(windows)]
+    fn flush_terminal_output_due(&mut self) -> String {
+        self.terminal_output_state
+            .as_mut()
+            .map(super::pty_filter::TerminalOutputState::flush_due)
             .unwrap_or_default()
     }
 

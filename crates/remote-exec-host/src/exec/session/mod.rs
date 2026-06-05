@@ -26,7 +26,7 @@ use capability::portable_pty_probe;
 #[cfg(all(windows, feature = "winpty"))]
 pub(super) use child::SessionChild;
 #[cfg(all(windows, feature = "winpty"))]
-use live::new_live_session;
+use live::new_winpty_live_session;
 #[cfg(windows)]
 use spawn::spawn_pty;
 

@@ -105,9 +105,7 @@ impl SessionChild {
                 pixel_height: 0,
             }),
             #[cfg(all(windows, feature = "winpty"))]
-            SessionChild::Winpty(_) => {
-                anyhow::bail!("PTY resize is not supported by the winpty backend")
-            }
+            SessionChild::Winpty(pty) => pty.resize(size),
             SessionChild::Pipe(_) => anyhow::bail!("PTY resize requires a tty session"),
         }
     }

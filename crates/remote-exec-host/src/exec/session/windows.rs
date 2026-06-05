@@ -13,7 +13,7 @@ use crate::config::{ProcessEnvironment, WindowsPtyBackendOverride};
 
 use super::{LiveSession, SpawnCommand, portable_pty_probe, spawn_pty};
 #[cfg(feature = "winpty")]
-use super::{SessionChild, new_live_session};
+use super::{SessionChild, new_winpty_live_session};
 
 #[cfg(any(test, windows))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,7 +89,7 @@ fn spawn_compiled_winpty_session(
 ) -> anyhow::Result<LiveSession> {
     let (session, receiver) =
         super::super::winpty::spawn_winpty(cmd, cwd, winpty_environment_block(environment))?;
-    Ok(new_live_session(
+    Ok(new_winpty_live_session(
         true,
         SessionChild::Winpty(session),
         receiver,
