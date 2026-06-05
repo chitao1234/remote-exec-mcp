@@ -32,6 +32,36 @@ std::string winpty_repaint_physical_line(const std::string& left, const std::str
     return left + std::string(width - left.size() - right.size(), ' ') + right + "\n";
 }
 
+void assert_winpty_command_repaint_width(std::size_t width) {
+    WinptyTranscriptNormalizer normalizer(width);
+    const std::string prompt = "C:\\p>";
+    const std::string command_line = prompt + "echo hello";
+    const std::string physical = winpty_repaint_physical_line(command_line, "hello", width) +
+                                 winpty_repaint_physical_line("", "C:\\p", width) + ">\n";
+    const std::string expected =
+        command_line + "\n"
+        "hello\n" +
+        prompt + "\n";
+
+    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical) +
+                               drain_winpty_transcript_for_test(&normalizer);
+    TEST_ASSERT(actual == expected);
+}
+
+void assert_winpty_one_column_short_repaint_width(std::size_t width) {
+    WinptyTranscriptNormalizer normalizer(width);
+    const std::string prompt = "C:\\p>";
+    const std::string command_line = prompt + "echo hello";
+    const std::string physical = winpty_repaint_physical_line(command_line, "hell", width - 1U) + "o\n";
+    const std::string expected =
+        command_line + "\n"
+        "hello\n";
+
+    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical) +
+                               drain_winpty_transcript_for_test(&normalizer);
+    TEST_ASSERT(actual == expected);
+}
+
 void assert_code_page_decode(unsigned int code_page, const std::string& raw, const std::string& expected_utf8) {
     if (!code_page_available(code_page)) {
         return;
@@ -305,16 +335,36 @@ void test_winpty_transcript_normalizer_preserves_regular_wide_spacing() {
 }
 
 void test_winpty_transcript_normalizer_uses_configured_width() {
-    WinptyTranscriptNormalizer normalizer(80U);
-    const std::string physical = winpty_repaint_physical_line("C:\\probe>echo hello", "hello", 80U) +
-                                 winpty_repaint_physical_line("", "C:\\probe", 80U) + ">\n";
-    const std::string expected =
-        "C:\\probe>echo hello\n"
-        "hello\n"
-        "C:\\probe>\n";
+    const std::size_t widths[] = {48U, 72U, 80U, 100U, 120U, 160U};
+    for (std::size_t i = 0U; i < sizeof(widths) / sizeof(widths[0]); ++i) {
+        assert_winpty_command_repaint_width(widths[i]);
+    }
+}
 
-    const std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, physical) +
-                               drain_winpty_transcript_for_test(&normalizer);
+void test_winpty_transcript_normalizer_accepts_one_column_short_rows() {
+    const std::size_t widths[] = {48U, 80U, 120U, 160U};
+    for (std::size_t i = 0U; i < sizeof(widths) / sizeof(widths[0]); ++i) {
+        assert_winpty_one_column_short_repaint_width(widths[i]);
+    }
+}
+
+void test_winpty_transcript_normalizer_updates_configured_width() {
+    WinptyTranscriptNormalizer normalizer(80U);
+    const std::string stale_width_physical = winpty_repaint_physical_line("C:\\p>echo hello", "hello", 100U);
+    std::string actual = normalize_winpty_transcript_chunk_for_test(&normalizer, stale_width_physical);
+
+    normalizer.set_physical_width(100U);
+    actual += normalize_winpty_transcript_chunk_for_test(
+        &normalizer,
+        winpty_repaint_physical_line("C:\\p>echo hello", "hello", 100U) +
+            winpty_repaint_physical_line("", "C:\\p", 100U) + ">\n");
+    actual += drain_winpty_transcript_for_test(&normalizer);
+
+    const std::string expected =
+        stale_width_physical +
+        "C:\\p>echo hello\n"
+        "hello\n"
+        "C:\\p>\n";
     TEST_ASSERT(actual == expected);
 }
 
@@ -352,6 +402,8 @@ int main() {
     test_winpty_transcript_normalizer_merges_pending_repaint_fragment();
     test_winpty_transcript_normalizer_preserves_regular_wide_spacing();
     test_winpty_transcript_normalizer_uses_configured_width();
+    test_winpty_transcript_normalizer_accepts_one_column_short_rows();
+    test_winpty_transcript_normalizer_updates_configured_width();
     test_winpty_transcript_normalizer_ignores_non_width_sized_padding();
     return 0;
 }
