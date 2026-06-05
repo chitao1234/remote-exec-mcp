@@ -9,10 +9,10 @@
 #include <sys/stat.h>
 
 #include "core/config.h"
-#include "platform/path_utils.h"
-#include "platform/scoped_file.h"
 #include "core/stdio_retry.h"
 #include "core/text_utils.h"
+#include "platform/path_utils.h"
+#include "platform/scoped_file.h"
 
 typedef std::map<std::string, std::string> ConfigValues;
 

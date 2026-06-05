@@ -7,15 +7,15 @@
 #include <stdexcept>
 #include <thread>
 
+#include "../port_forward/port_tunnel_service.h"
 #include "capabilities/daemon_capabilities.h"
 #include "core/logging.h"
 #include "http/server_transport.h"
-#include "policy/path_policy.h"
 #include "platform/platform.h"
+#include "policy/path_policy.h"
 #include "port_forward/port_forward_socket_ops.h"
 #include "port_forward/port_tunnel.h"
 #include "runtime/daemon_thread.h"
-#include "../port_forward/port_tunnel_service.h"
 
 namespace {
 
@@ -28,8 +28,7 @@ std::string daemon_instance_id() {
 } // namespace
 
 ServerRuntime::ServerRuntime(const DaemonConfig& config)
-    : connections_(config.max_open_sessions), shutting_down_(false), accept_thread_(), maintenance_thread_()
-{
+    : connections_(config.max_open_sessions), shutting_down_(false), accept_thread_(), maintenance_thread_() {
     state_.config = config;
     state_.daemon_instance_id = daemon_instance_id();
     state_.hostname = platform::hostname();

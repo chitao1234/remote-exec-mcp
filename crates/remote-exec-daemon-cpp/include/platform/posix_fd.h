@@ -15,9 +15,9 @@
 #include <termios.h>
 #include <unistd.h>
 
-#include "remote_exec_cpp_config.h"
 #include "platform/basic_mutex.h"
 #include "platform/posix_eintr.h"
+#include "remote_exec_cpp_config.h"
 
 #if REMOTE_EXEC_CPP_HAVE_POSIX_OPENPT
 extern "C" int posix_openpt(int flags);
@@ -148,8 +148,7 @@ inline int ioctl_retry_no_arg(int fd, unsigned long request) {
 #endif
 }
 
-template <typename Argument>
-int ioctl_retry(int fd, unsigned long request, Argument* argument) {
+template <typename Argument> int ioctl_retry(int fd, unsigned long request, Argument* argument) {
     return posix_eintr::retry<int>([&]() { return ioctl(fd, request, argument); });
 }
 
@@ -162,8 +161,7 @@ inline int change_directory(const char* path) {
 }
 
 inline bool pty_api_available() {
-    return REMOTE_EXEC_CPP_HAVE_POSIX_OPENPT && REMOTE_EXEC_CPP_HAVE_GRANTPT &&
-           REMOTE_EXEC_CPP_HAVE_UNLOCKPT &&
+    return REMOTE_EXEC_CPP_HAVE_POSIX_OPENPT && REMOTE_EXEC_CPP_HAVE_GRANTPT && REMOTE_EXEC_CPP_HAVE_UNLOCKPT &&
            (REMOTE_EXEC_CPP_HAVE_PTSNAME_R || REMOTE_EXEC_CPP_HAVE_PTSNAME);
 }
 

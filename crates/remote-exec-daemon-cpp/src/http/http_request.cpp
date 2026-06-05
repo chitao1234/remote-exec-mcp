@@ -5,9 +5,9 @@
 #include <stdexcept>
 #include <string>
 
+#include "core/text_utils.h"
 #include "http/http_codec.h"
 #include "http/http_request.h"
-#include "core/text_utils.h"
 
 namespace {
 

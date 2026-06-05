@@ -17,13 +17,13 @@
 #include <unistd.h>
 
 #include "core/logging.h"
-#include "platform/platform.h"
 #include "exec/posix_child_reaper.h"
+#include "exec/process_session.h"
+#include "exec/utf8_stream_decode.h"
+#include "platform/platform.h"
 #include "platform/posix_fd.h"
 #include "platform/posix_process.h"
 #include "platform/posix_signal.h"
-#include "exec/process_session.h"
-#include "exec/utf8_stream_decode.h"
 
 extern char** environ;
 
@@ -473,9 +473,8 @@ bool process_session_supports_pty() {
             verify_posix_pty_launch_setup(pair);
             return pair.master.valid() && !pair.slave_path.empty();
         } catch (const std::exception& ex) {
-            log_message(LOG_WARN,
-                        "process_session",
-                        std::string("POSIX PTY probe failed; tty support disabled: ") + ex.what());
+            log_message(
+                LOG_WARN, "process_session", std::string("POSIX PTY probe failed; tty support disabled: ") + ex.what());
             return false;
         }
     }();
@@ -510,8 +509,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
             if (!posix_fd::set_pty_window_size(slave_fd, DEFAULT_PTY_ROWS, DEFAULT_PTY_COLS)) {
                 _exit(126);
             }
-            if (posix_fd::dup_to(slave_fd, STDIN_FILENO) < 0 ||
-                posix_fd::dup_to(slave_fd, STDOUT_FILENO) < 0 ||
+            if (posix_fd::dup_to(slave_fd, STDIN_FILENO) < 0 || posix_fd::dup_to(slave_fd, STDOUT_FILENO) < 0 ||
                 posix_fd::dup_to(slave_fd, STDERR_FILENO) < 0) {
                 _exit(126);
             }

@@ -16,10 +16,9 @@
 
 #endif
 
-
+#include "platform/platform.h"
 #include "policy/filesystem_sandbox.h"
 #include "policy/path_compare.h"
-#include "platform/platform.h"
 
 namespace {
 
@@ -208,15 +207,15 @@ std::string full_windows_path_for_existing_path(const std::string& path) {
     const std::wstring wide = wide_from_utf8_path(path);
     DWORD length = GetFullPathNameW(wide.c_str(), 0, nullptr, nullptr);
     if (length == 0U) {
-        throw SandboxError("unable to canonicalize `" + path + "`: " +
-                           error_message_from_code("GetFullPathNameW", GetLastError()));
+        throw SandboxError("unable to canonicalize `" + path +
+                           "`: " + error_message_from_code("GetFullPathNameW", GetLastError()));
     }
 
     std::vector<wchar_t> buffer(length + 1U);
     length = GetFullPathNameW(wide.c_str(), static_cast<DWORD>(buffer.size()), &buffer[0], nullptr);
     if (length == 0U || length >= buffer.size()) {
-        throw SandboxError("unable to canonicalize `" + path + "`: " +
-                           error_message_from_code("GetFullPathNameW", GetLastError()));
+        throw SandboxError("unable to canonicalize `" + path +
+                           "`: " + error_message_from_code("GetFullPathNameW", GetLastError()));
     }
     return lexical_normalize_for_policy(windows_path_policy(), utf8_from_wide_path(std::wstring(&buffer[0], length)));
 }
@@ -227,8 +226,8 @@ std::string long_windows_leaf_for_existing_path(const std::string& path) {
     const std::wstring wide = wide_from_utf8_path(full);
     HANDLE find = FindFirstFileW(wide.c_str(), &data);
     if (find == INVALID_HANDLE_VALUE) {
-        throw SandboxError("unable to canonicalize `" + path + "`: " +
-                           error_message_from_code("FindFirstFileW", GetLastError()));
+        throw SandboxError("unable to canonicalize `" + path +
+                           "`: " + error_message_from_code("FindFirstFileW", GetLastError()));
     }
     FindClose(find);
 
@@ -237,7 +236,8 @@ std::string long_windows_leaf_for_existing_path(const std::string& path) {
     if (parent.empty() || long_name.empty()) {
         return full;
     }
-    return lexical_normalize_for_policy(windows_path_policy(), join_for_policy(windows_path_policy(), parent, long_name));
+    return lexical_normalize_for_policy(windows_path_policy(),
+                                        join_for_policy(windows_path_policy(), parent, long_name));
 }
 
 std::string canonicalize_existing_windows_path(const std::string& path) {
@@ -298,8 +298,8 @@ std::string canonicalize_windows_for_sandbox(const std::string& path) {
 
         const DWORD error = GetLastError();
         if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) {
-            throw SandboxError("unable to canonicalize `" + normalized + "`: " +
-                               error_message_from_code("GetFileAttributesW", error));
+            throw SandboxError("unable to canonicalize `" + normalized +
+                               "`: " + error_message_from_code("GetFileAttributesW", error));
         }
 
         const std::string name = basename_for_windows_path(probe);
@@ -366,7 +366,8 @@ std::string canonicalize_posix_for_sandbox(const std::string& path) {
         }
 
         if (errno != ENOENT) {
-            throw SandboxError("unable to canonicalize `" + normalized + "`: " + errno_error::message_from_errno(errno));
+            throw SandboxError("unable to canonicalize `" + normalized +
+                               "`: " + errno_error::message_from_errno(errno));
         }
 
         const std::string name = basename_for_posix_path(probe);

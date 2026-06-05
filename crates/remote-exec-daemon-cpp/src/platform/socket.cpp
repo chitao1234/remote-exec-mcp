@@ -63,17 +63,13 @@ int recvfrom_bounded(SOCKET socket, char* data, std::size_t size, sockaddr* peer
     return recvfrom(socket, data, static_cast<int>(bounded_socket_io_size(size)), 0, peer_address, peer_len);
 #else
     return posix_eintr::retry<int>([&]() {
-        return recvfrom(socket,
-                        data,
-                        static_cast<int>(bounded_socket_io_size(size)),
-                        0,
-                        peer_address,
-                        peer_len);
+        return recvfrom(socket, data, static_cast<int>(bounded_socket_io_size(size)), 0, peer_address, peer_len);
     });
 #endif
 }
 
-int sendto_bounded(SOCKET socket, const char* data, std::size_t size, const sockaddr* peer_address, socklen_t peer_len) {
+int sendto_bounded(
+    SOCKET socket, const char* data, std::size_t size, const sockaddr* peer_address, socklen_t peer_len) {
     if (size > static_cast<std::size_t>(INT_MAX)) {
 #ifdef _WIN32
         WSASetLastError(WSAEMSGSIZE);
@@ -86,9 +82,8 @@ int sendto_bounded(SOCKET socket, const char* data, std::size_t size, const sock
     return sendto(socket, data, static_cast<int>(size), 0, peer_address, peer_len);
 #else
     const int send_flags = send_without_sigpipe_flags(0);
-    return posix_eintr::retry<int>([&]() {
-        return sendto(socket, data, static_cast<int>(size), send_flags, peer_address, peer_len);
-    });
+    return posix_eintr::retry<int>(
+        [&]() { return sendto(socket, data, static_cast<int>(size), send_flags, peer_address, peer_len); });
 #endif
 }
 
@@ -111,8 +106,8 @@ SOCKET accept_socket(SOCKET listener, sockaddr* peer_address, socklen_t* peer_le
 SOCKET accept_socket_cloexec(SOCKET listener, sockaddr* peer_address, socklen_t* peer_len) {
 #ifndef _WIN32
 #if REMOTE_EXEC_CPP_HAVE_ACCEPT4 && REMOTE_EXEC_CPP_HAVE_SOCK_CLOEXEC
-    SOCKET accepted_with_flags = posix_eintr::retry<int>(
-        [&]() { return accept4(listener, peer_address, peer_len, SOCK_CLOEXEC); });
+    SOCKET accepted_with_flags =
+        posix_eintr::retry<int>([&]() { return accept4(listener, peer_address, peer_len, SOCK_CLOEXEC); });
     if (accepted_with_flags != INVALID_SOCKET) {
         return accepted_with_flags;
     }

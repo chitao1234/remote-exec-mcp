@@ -3,23 +3,18 @@
 
 #include "core/logging.h"
 #include "port_tunnel_connection.h"
-#include "port_tunnel_spawn.h"
 #include "port_tunnel_service.h"
+#include "port_tunnel_spawn.h"
 
 namespace {
 
 void log_tunnel_send_failure(const char* frame_kind, const std::exception& ex) {
     log_message(
-        LOG_WARN,
-        "port_tunnel",
-        std::string("dropping ") + frame_kind + " frame after send failure: " + ex.what());
+        LOG_WARN, "port_tunnel", std::string("dropping ") + frame_kind + " frame after send failure: " + ex.what());
 }
 
 void log_unknown_tunnel_send_failure(const char* frame_kind) {
-    log_message(
-        LOG_WARN,
-        "port_tunnel",
-        std::string("dropping ") + frame_kind + " frame after unknown send failure");
+    log_message(LOG_WARN, "port_tunnel", std::string("dropping ") + frame_kind + " frame after unknown send failure");
 }
 
 } // namespace
@@ -184,8 +179,8 @@ std::shared_ptr<PortTunnelSession> PortTunnelConnection::current_session() {
     return session_;
 }
 
-std::shared_ptr<PortTunnelSessionAttachment> PortTunnelConnection::session_attachment_for(
-    const std::shared_ptr<PortTunnelSession>& session) {
+std::shared_ptr<PortTunnelSessionAttachment>
+PortTunnelConnection::session_attachment_for(const std::shared_ptr<PortTunnelSession>& session) {
     if (session.get() == nullptr) {
         return std::shared_ptr<PortTunnelSessionAttachment>();
     }

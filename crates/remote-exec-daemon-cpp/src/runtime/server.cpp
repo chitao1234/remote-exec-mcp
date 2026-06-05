@@ -3,8 +3,8 @@
 #include <string>
 
 #ifndef _WIN32
-#include <poll.h>
 #include <csignal>
+#include <poll.h>
 #include <unistd.h>
 #endif
 
@@ -12,15 +12,15 @@
 #include "platform/path_utils.h"
 #include "platform/platform.h"
 #ifndef _WIN32
-#include "platform/posix_eintr.h"
 #include "exec/posix_child_reaper.h"
+#include "platform/posix_eintr.h"
 #include "platform/posix_fd.h"
 #include "platform/posix_signal.h"
 #endif
+#include "core/stdio_retry.h"
 #include "platform/scoped_file.h"
 #include "runtime/server.h"
 #include "runtime/server_runtime.h"
-#include "core/stdio_retry.h"
 
 #ifndef _WIN32
 namespace {
@@ -68,8 +68,7 @@ void wait_for_shutdown_signal() {
     pfd.events = POLLIN;
     pfd.revents = 0;
     while (!g_shutdown_requested) {
-        const int result =
-            posix_eintr::poll_forever_until(&pfd, 1, []() { return g_shutdown_requested != 0; });
+        const int result = posix_eintr::poll_forever_until(&pfd, 1, []() { return g_shutdown_requested != 0; });
         if (result > 0) {
             return;
         }

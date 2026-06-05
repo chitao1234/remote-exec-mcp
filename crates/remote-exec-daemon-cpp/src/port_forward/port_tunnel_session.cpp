@@ -78,7 +78,7 @@ transition_session_to_attached_locked(PortTunnelSession* session,
 }
 
 std::shared_ptr<PortTunnelSessionAttachment> transition_session_to_detached_locked(PortTunnelSession* session,
-                                                                                  std::uint64_t deadline_ms) {
+                                                                                   std::uint64_t deadline_ms) {
     const PortTunnelSessionState previous_state = session->state;
     session->state = PortTunnelSessionState::Detached;
     session->resume_deadline_ms = deadline_ms;
@@ -155,10 +155,9 @@ bool PortTunnelSession::attach_new(const std::shared_ptr<PortTunnelConnection>& 
     return true;
 }
 
-PortTunnelSessionResumeResult
-PortTunnelSession::attach_resumed(const std::shared_ptr<PortTunnelConnection>& connection,
-                                  std::uint64_t generation_value,
-                                  std::uint64_t now_ms) {
+PortTunnelSessionResumeResult PortTunnelSession::attach_resumed(const std::shared_ptr<PortTunnelConnection>& connection,
+                                                                std::uint64_t generation_value,
+                                                                std::uint64_t now_ms) {
     BasicLockGuard lock(mutex);
     if (state == PortTunnelSessionState::Closed) {
         log_message(LOG_DEBUG,
@@ -283,8 +282,8 @@ std::shared_ptr<PortTunnelSessionAttachment> PortTunnelSession::current_attachme
     return attachment;
 }
 
-std::shared_ptr<PortTunnelConnection> PortTunnelSession::connection_for_attachment(
-    const std::shared_ptr<PortTunnelSessionAttachment>& expected_attachment) {
+std::shared_ptr<PortTunnelConnection>
+PortTunnelSession::connection_for_attachment(const std::shared_ptr<PortTunnelSessionAttachment>& expected_attachment) {
     BasicLockGuard lock(mutex);
     if (!session_state_attached(state) || expected_attachment.get() == nullptr ||
         attachment.get() != expected_attachment.get()) {
@@ -352,8 +351,8 @@ PortTunnelSession::install_tcp_listener(uint32_t stream_id, const std::shared_pt
     return SessionRetainedInstallResult::Installed;
 }
 
-SessionRetainedInstallResult
-PortTunnelSession::install_udp_bind(uint32_t stream_id, const std::shared_ptr<TunnelUdpSocket>& socket_value) {
+SessionRetainedInstallResult PortTunnelSession::install_udp_bind(uint32_t stream_id,
+                                                                 const std::shared_ptr<TunnelUdpSocket>& socket_value) {
     BasicLockGuard lock(mutex);
     if (!session_state_attached(state) || attachment.get() == nullptr) {
         log_message(LOG_DEBUG,
@@ -393,8 +392,7 @@ PortTunnelSession::install_udp_bind(uint32_t stream_id, const std::shared_ptr<Tu
 
 std::shared_ptr<TunnelUdpSocket> PortTunnelSession::udp_bind_for(uint32_t stream_id) {
     BasicLockGuard lock(mutex);
-    if (retained_resource.kind != PortTunnelRetainedResourceKind::UdpBind ||
-        retained_resource.stream_id != stream_id) {
+    if (retained_resource.kind != PortTunnelRetainedResourceKind::UdpBind || retained_resource.stream_id != stream_id) {
         return std::shared_ptr<TunnelUdpSocket>();
     }
     return retained_resource.udp_bind;

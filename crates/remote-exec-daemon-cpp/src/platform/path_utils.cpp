@@ -1,17 +1,17 @@
 #include "platform/path_utils.h"
 
 #include <algorithm>
-#include <cstring>
 #include <cerrno>
+#include <cstring>
 #include <stdexcept>
 #include <vector>
 
 #ifdef _WIN32
+#include "platform/win32_utf8.h"
 #include <direct.h>
 #include <io.h>
 #include <wchar.h>
 #include <windows.h>
-#include "platform/win32_utf8.h"
 #else
 #include <dirent.h>
 #include <sys/stat.h>
@@ -88,12 +88,11 @@ void fill_stat_from_win32_attributes(struct stat* st, DWORD attributes, DWORD fi
     } else {
         st->st_mode |= 0666;
     }
-    st->st_size =
-        static_cast<_off_t>((static_cast<unsigned long long>(file_size_high) << 32) | file_size_low);
+    st->st_size = static_cast<_off_t>((static_cast<unsigned long long>(file_size_high) << 32) | file_size_low);
 }
 
 class ScopedFindHandle {
-  public:
+public:
     explicit ScopedFindHandle(HANDLE handle) : handle_(handle) {}
 
     ~ScopedFindHandle() {
@@ -102,15 +101,11 @@ class ScopedFindHandle {
         }
     }
 
-    HANDLE get() const {
-        return handle_;
-    }
+    HANDLE get() const { return handle_; }
 
-    bool valid() const {
-        return handle_ != INVALID_HANDLE_VALUE;
-    }
+    bool valid() const { return handle_ != INVALID_HANDLE_VALUE; }
 
-  private:
+private:
     HANDLE handle_;
 };
 
@@ -121,7 +116,7 @@ namespace {
 const std::size_t MAX_SYMLINK_TARGET_BYTES = 1024U * 1024U;
 
 class ScopedDirHandle {
-  public:
+public:
     explicit ScopedDirHandle(DIR* dir) : dir_(dir) {}
 
     ~ScopedDirHandle() {
@@ -130,11 +125,9 @@ class ScopedDirHandle {
         }
     }
 
-    DIR* get() const {
-        return dir_;
-    }
+    DIR* get() const { return dir_; }
 
-  private:
+private:
     DIR* dir_;
 };
 

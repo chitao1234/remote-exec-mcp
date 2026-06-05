@@ -6,9 +6,9 @@
 
 #include "capabilities/daemon_capabilities.h"
 #include "core/config.h"
-#include "policy/filesystem_sandbox.h"
-#include "platform/socket.h"
 #include "exec/session_store.h"
+#include "platform/socket.h"
+#include "policy/filesystem_sandbox.h"
 
 class PortTunnelService;
 

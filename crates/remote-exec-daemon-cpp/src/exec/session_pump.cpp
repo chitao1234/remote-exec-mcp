@@ -6,11 +6,11 @@
 #include <string>
 #include <thread>
 
-#include "runtime/daemon_thread.h"
 #include "core/logging.h"
+#include "exec/process_session.h"
 #include "platform/deadline.h"
 #include "platform/platform.h"
-#include "exec/process_session.h"
+#include "runtime/daemon_thread.h"
 #include "session_pump_internal.h"
 
 namespace {
@@ -29,9 +29,8 @@ void record_session_drain_stop_locked(LiveSession* session, SessionOutputDrainSt
     session->output_.last_drain_stop_reason = reason;
 }
 
-SessionOutputDrainResult make_session_drain_result_locked(LiveSession* session,
-                                                          bool completed,
-                                                          SessionOutputDrainStopReason reason) {
+SessionOutputDrainResult
+make_session_drain_result_locked(LiveSession* session, bool completed, SessionOutputDrainStopReason reason) {
     record_session_drain_stop_locked(session, reason);
     return SessionOutputDrainResult(completed, reason);
 }
@@ -57,8 +56,7 @@ void note_session_drain_output_locked(LiveSession* session) {
 SessionOutputDrainStopReason grace_deadline_stop_reason_locked(LiveSession* session,
                                                                const SessionOutputDrainPolicy& policy,
                                                                std::uint64_t* next_deadline_ms) {
-    const std::uint64_t max_deadline =
-        deadline_after_ms(session->output_.drain_started_at_ms, policy.max_grace_ms);
+    const std::uint64_t max_deadline = deadline_after_ms(session->output_.drain_started_at_ms, policy.max_grace_ms);
     const std::uint64_t idle_deadline =
         deadline_after_ms(session->output_.drain_last_output_at_ms, policy.idle_grace_ms);
 
@@ -171,12 +169,12 @@ SessionOutputDrainPolicy default_session_output_drain_policy() {
     return policy;
 }
 
-SessionOutputDrainResult::SessionOutputDrainResult()
-    : completed(false), reason(SessionOutputDrainStopReason::None) {}
+SessionOutputDrainResult::SessionOutputDrainResult() : completed(false), reason(SessionOutputDrainStopReason::None) {
+}
 
-SessionOutputDrainResult::SessionOutputDrainResult(bool completed_value,
-                                                   SessionOutputDrainStopReason reason_value)
-    : completed(completed_value), reason(reason_value) {}
+SessionOutputDrainResult::SessionOutputDrainResult(bool completed_value, SessionOutputDrainStopReason reason_value)
+    : completed(completed_value), reason(reason_value) {
+}
 
 void wait_for_generation_change_locked(LiveSession* session,
                                        std::uint64_t baseline_generation,

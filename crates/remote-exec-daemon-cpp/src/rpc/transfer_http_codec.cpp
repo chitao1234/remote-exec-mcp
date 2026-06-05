@@ -51,19 +51,18 @@ bool parse_create_parent(const std::string& value) {
     if (value == "false") {
         return false;
     }
-    throw TransferFailure(TransferRpcCode::BadRequest,
-                          invalid_header_message(
-                              server_contract::TRANSFER_CREATE_PARENT_HEADER, "expected `true` or `false`"));
+    throw TransferFailure(
+        TransferRpcCode::BadRequest,
+        invalid_header_message(server_contract::TRANSFER_CREATE_PARENT_HEADER, "expected `true` or `false`"));
 }
 
 std::string decode_destination_path_header(const std::string& encoded) {
     try {
         return base64_decode_bytes(encoded);
     } catch (const std::runtime_error& ex) {
-        throw TransferFailure(
-            TransferRpcCode::BadRequest,
-            invalid_header_message(server_contract::TRANSFER_DESTINATION_PATH_HEADER,
-                                   "expected base64-encoded UTF-8 path: " + std::string(ex.what())));
+        throw TransferFailure(TransferRpcCode::BadRequest,
+                              invalid_header_message(server_contract::TRANSFER_DESTINATION_PATH_HEADER,
+                                                     "expected base64-encoded UTF-8 path: " + std::string(ex.what())));
     }
 }
 
@@ -124,9 +123,9 @@ TransferImportMetadata parse_transfer_import_metadata(const HttpRequest& request
 
 void write_transfer_export_headers(HttpResponse& response, const ExportedPayload& payload) {
     response.headers["Content-Type"] = server_contract::TRANSFER_EXPORT_CONTENT_TYPE;
-    response.headers[server_contract::TRANSFER_STREAM_VERSION_HEADER] =
-        server_contract::TRANSFER_STREAM_VERSION_VALUE;
-    response.headers[server_contract::TRANSFER_SOURCE_TYPE_HEADER] = transfer_source_type_wire_value(payload.source_type);
+    response.headers[server_contract::TRANSFER_STREAM_VERSION_HEADER] = server_contract::TRANSFER_STREAM_VERSION_VALUE;
+    response.headers[server_contract::TRANSFER_SOURCE_TYPE_HEADER] =
+        transfer_source_type_wire_value(payload.source_type);
     response.headers[server_contract::TRANSFER_COMPRESSION_HEADER] = "none";
 }
 

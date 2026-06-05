@@ -2,9 +2,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <sstream>
 #include <stdexcept>
 #include <string>
-#include <sstream>
 #include <vector>
 
 #ifdef _WIN32
@@ -17,9 +17,9 @@
 
 #include "http/http_codec.h"
 #include "http/http_request.h"
+#include "http/server_transport.h"
 #include "platform/deadline.h"
 #include "platform/socket.h"
-#include "http/server_transport.h"
 
 namespace {
 
@@ -488,7 +488,7 @@ bool HttpRequestBodyStream::try_append_from_socket_until(std::uint64_t deadline_
     }
 
     const unsigned long wait_ms = deadline_ms == 0U ? DEFAULT_CONTROLLED_READ_POLL_TIMEOUT_MS
-                                                     : platform::monotonic_deadline_remaining_ms(deadline_ms);
+                                                    : platform::monotonic_deadline_remaining_ms(deadline_ms);
     const int ready = wait_socket_readable(client_, wait_ms == 0UL ? 1UL : wait_ms);
     if (ready <= 0) {
         return false;

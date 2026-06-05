@@ -561,6 +561,7 @@ Full quality gate:
 cargo test --workspace
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
+crates/remote-exec-daemon-cpp/scripts/clang_format.sh check
 make -C crates/remote-exec-daemon-cpp check-posix
 make -C crates/remote-exec-daemon-cpp check-windows-2000
 make -C crates/remote-exec-daemon-cpp check-windows-xp
@@ -592,6 +593,12 @@ make -C crates/remote-exec-daemon-cpp test-windows-xp-server-routes-common
 make -C crates/remote-exec-daemon-cpp test-windows-native-server-runtime
 ```
 
+C++ daemon sources are formatted with the root `.clang-format`. Use
+`crates/remote-exec-daemon-cpp/scripts/clang_format.sh format` to rewrite the
+owned C++ daemon sources, headers, and tests, and
+`crates/remote-exec-daemon-cpp/scripts/clang_format.sh check` to run the same
+format gate that CI enforces.
+
 No-default-features checks:
 
 ```bash
@@ -614,8 +621,9 @@ the C++ daemon themselves. CI builds that C++ daemon binary in an explicit step
 before the Rust test job. The standalone C++ daemon also has its own Linux and
 Windows CI job: POSIX runtime tests run on Linux, Windows 2000 and
 NT 4.0/Winsock 1 test binaries run under Wine on Linux when available, and the
-32-bit host-native MSVC NMAKE path runs on `windows-latest`. The GNU Winsock
-1.1 variant has also been manually tested on Windows NT 3.51. The MSVC path now
+32-bit host-native MSVC NMAKE path runs on `windows-latest`. CI also gates
+owned C++ daemon source formatting with `clang-format`. The GNU Winsock 1.1
+variant has also been manually tested on Windows NT 3.51. The MSVC path now
 exercises the vendored winpty-backed PTY build instead of a PTY-disabled
 fallback.
 

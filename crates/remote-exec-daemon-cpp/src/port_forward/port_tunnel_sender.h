@@ -47,9 +47,7 @@ private:
                                QueueReservationKind charge_kind,
                                unsigned long charge_value);
     unsigned long control_queue_byte_limit() const;
-    bool try_reserve_queued_bytes(std::atomic<unsigned long>& counter,
-                                  unsigned long limit,
-                                  unsigned long charge_value);
+    bool try_reserve_queued_bytes(std::atomic<unsigned long>& counter, unsigned long limit, unsigned long charge_value);
     bool try_reserve_frame_bytes(std::size_t byte_count,
                                  std::atomic<unsigned long>& counter,
                                  unsigned long limit,

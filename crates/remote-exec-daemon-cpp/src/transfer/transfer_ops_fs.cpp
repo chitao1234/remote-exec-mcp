@@ -73,8 +73,7 @@ void authorize_existing_path_recursive(const std::string& path,
 
 void remove_existing_path_recursive(const std::string& path, std::size_t depth) {
     if (depth > MAX_REMOVE_DEPTH) {
-        throw std::runtime_error("remove_existing_path exceeded maximum depth of " +
-                                 std::to_string(MAX_REMOVE_DEPTH));
+        throw std::runtime_error("remove_existing_path exceeded maximum depth of " + std::to_string(MAX_REMOVE_DEPTH));
     }
 
     if (!path_exists(path)) {

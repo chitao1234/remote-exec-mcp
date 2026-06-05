@@ -88,8 +88,7 @@ inline std::wstring wide_from_utf8(const std::string& value) {
             if ((first == 0xE0U && second < 0xA0U) || (first == 0xEDU && second > 0x9FU)) {
                 throw std::runtime_error("invalid UTF-8");
             }
-            append_wide_code_point(
-                &wide, ((first & 0x0FU) << 12U) | ((second & 0x3FU) << 6U) | (third & 0x3FU));
+            append_wide_code_point(&wide, ((first & 0x0FU) << 12U) | ((second & 0x3FU) << 6U) | (third & 0x3FU));
             index += 3U;
             continue;
         }
@@ -102,8 +101,8 @@ inline std::wstring wide_from_utf8(const std::string& value) {
                 throw std::runtime_error("invalid UTF-8");
             }
             append_wide_code_point(&wide,
-                                   ((first & 0x07U) << 18U) | ((second & 0x3FU) << 12U) |
-                                       ((third & 0x3FU) << 6U) | (fourth & 0x3FU));
+                                   ((first & 0x07U) << 18U) | ((second & 0x3FU) << 12U) | ((third & 0x3FU) << 6U) |
+                                       (fourth & 0x3FU));
             index += 4U;
             continue;
         }
@@ -125,8 +124,7 @@ inline std::string utf8_from_wide(const std::wstring& wide) {
             if (index + 1U < wide.size()) {
                 const unsigned int next = static_cast<unsigned int>(wide[index + 1U]);
                 if (is_low_surrogate(next)) {
-                    const unsigned int code_point =
-                        0x10000U + ((code_unit - 0xD800U) << 10U) + (next - 0xDC00U);
+                    const unsigned int code_point = 0x10000U + ((code_unit - 0xD800U) << 10U) + (next - 0xDC00U);
                     append_utf8_code_point(&utf8, code_point);
                     ++index;
                     continue;

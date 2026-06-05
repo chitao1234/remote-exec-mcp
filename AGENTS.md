@@ -269,11 +269,18 @@ For cross-cutting or MCP/user-facing changes, finish with the quality gate from
 - `cargo test --workspace`
 - `cargo fmt --all --check`
 - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+- `crates/remote-exec-daemon-cpp/scripts/clang_format.sh check`
 - relevant C++ checks for touched C++ code
 
 Before any commit, `cargo fmt --all --check` must pass. If a formatting problem
 is discovered only after a commit, add a separate format-correcting commit
 rather than folding unrelated formatting changes into a later commit.
+
+C++ daemon sources, headers, and tests are formatted with the root
+`.clang-format`. Run
+`crates/remote-exec-daemon-cpp/scripts/clang_format.sh format` before
+committing C++ changes, and expect
+`crates/remote-exec-daemon-cpp/scripts/clang_format.sh check` to pass in CI.
 
 ## Editing Notes
 

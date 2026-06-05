@@ -19,16 +19,10 @@ SOCKET connect_port_forward_socket(const std::string& endpoint,
                                    const std::string& protocol,
                                    unsigned long timeout_ms = DEFAULT_PORT_FORWARD_CONNECT_TIMEOUT_MS);
 SOCKET accept_port_forward_peer(SOCKET listener, sockaddr* peer_address, socklen_t* peer_len);
-int recv_port_forward_datagram(SOCKET socket,
-                               char* data,
-                               std::size_t size,
-                               sockaddr* peer_address,
-                               socklen_t* peer_len);
-int send_port_forward_datagram(SOCKET socket,
-                               const char* data,
-                               std::size_t size,
-                               const sockaddr* peer_address,
-                               socklen_t peer_len);
+int recv_port_forward_datagram(
+    SOCKET socket, char* data, std::size_t size, sockaddr* peer_address, socklen_t* peer_len);
+int send_port_forward_datagram(
+    SOCKET socket, const char* data, std::size_t size, const sockaddr* peer_address, socklen_t peer_len);
 void shutdown_port_forward_send(SOCKET socket);
 std::string printable_port_forward_endpoint(const sockaddr* address, socklen_t address_len);
 std::string socket_local_endpoint(SOCKET socket);

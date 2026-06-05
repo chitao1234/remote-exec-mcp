@@ -15,8 +15,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "platform/posix_eintr.h"
 #include "platform/platform.h"
+#include "platform/posix_eintr.h"
 #include "platform/posix_fd.h"
 #include "platform/posix_signal.h"
 #include "remote_exec_cpp_config.h"
@@ -41,8 +41,7 @@ bool set_socket_cloexec_flag(SOCKET socket) {
 void apply_socket_sigpipe_policy(SOCKET socket) {
 #if !REMOTE_EXEC_CPP_HAVE_MSG_NOSIGNAL && REMOTE_EXEC_CPP_HAVE_SO_NOSIGPIPE
     int yes = 1;
-    (void)posix_eintr::retry<int>(
-        [&]() { return setsockopt(socket, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes)); });
+    (void)posix_eintr::retry<int>([&]() { return setsockopt(socket, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes)); });
 #else
     (void)socket;
 #endif
@@ -276,14 +275,12 @@ int socket_error_option(SOCKET socket, int* socket_error) {
 
 int set_socket_reuseaddr(SOCKET socket) {
     int yes = 1;
-    return posix_eintr::retry<int>(
-        [&]() { return setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)); });
+    return posix_eintr::retry<int>([&]() { return setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)); });
 }
 
 int set_socket_ipv6_only(SOCKET socket) {
     int yes = 1;
-    return posix_eintr::retry<int>(
-        [&]() { return setsockopt(socket, IPPROTO_IPV6, IPV6_V6ONLY, &yes, sizeof(yes)); });
+    return posix_eintr::retry<int>([&]() { return setsockopt(socket, IPPROTO_IPV6, IPV6_V6ONLY, &yes, sizeof(yes)); });
 }
 
 int bind_socket(SOCKET socket, const sockaddr* address, socklen_t address_len) {

@@ -2,8 +2,8 @@
 
 #include "http/http_helpers.h"
 #include "platform/platform.h"
-#include "runtime/server.h"
 #include "rpc/server_request_utils.h"
+#include "runtime/server.h"
 
 namespace {
 
@@ -32,8 +32,7 @@ ExecPtySizeSpec requested_pty_size(const Json& body) {
         const unsigned long rows = pty_size.at("rows").get<unsigned long>();
         const unsigned long cols = pty_size.at("cols").get<unsigned long>();
         if (rows == 0UL || cols == 0UL || rows > 65535UL || cols > 65535UL) {
-            throw ExecRequestFailure(
-                400, "invalid_pty_size", "PTY rows and cols must be between 1 and 65535");
+            throw ExecRequestFailure(400, "invalid_pty_size", "PTY rows and cols must be between 1 and 65535");
         }
         result.present = true;
         result.rows = static_cast<unsigned short>(rows);
@@ -48,8 +47,11 @@ ExecPtySizeSpec requested_pty_size(const Json& body) {
 
 } // namespace
 
-ExecRequestFailure::ExecRequestFailure(int status_value, const std::string& code_value, const std::string& message_value)
-    : std::runtime_error(message_value), status(status_value), code(code_value), message(message_value) {}
+ExecRequestFailure::ExecRequestFailure(int status_value,
+                                       const std::string& code_value,
+                                       const std::string& message_value)
+    : std::runtime_error(message_value), status(status_value), code(code_value), message(message_value) {
+}
 
 ExecStartRequestSpec prepare_exec_start_request(const AppState& state, const HttpRequest& request) {
     try {
@@ -72,8 +74,7 @@ ExecStartRequestSpec prepare_exec_start_request(const AppState& state, const Htt
 
         const std::string shell_override = body.value("shell", std::string());
         if (!shell_override.empty() && !platform::shell_supported(shell_override)) {
-            throw ExecRequestFailure(
-                400, "unsupported_shell", "requested shell is not supported on this target");
+            throw ExecRequestFailure(400, "unsupported_shell", "requested shell is not supported on this target");
         }
         parsed.shell = platform::selected_shell(shell_override, state.default_shell);
         parsed.workdir = resolve_authorized_workdir(state, body, SANDBOX_EXEC_CWD);

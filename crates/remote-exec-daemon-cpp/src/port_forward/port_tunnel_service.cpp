@@ -1,10 +1,10 @@
 #include <sstream>
 #include <utility>
 
+#include "platform/deadline.h"
 #include "port_tunnel_connection.h"
 #include "port_tunnel_service.h"
 #include "port_tunnel_session_teardown.h"
-#include "platform/deadline.h"
 
 namespace {
 
@@ -131,10 +131,10 @@ void PortTunnelService::close_all_sessions_for_shutdown() {
     }
 }
 
-SessionRetainedInstallResult PortTunnelService::install_session_tcp_listener(
-    const std::shared_ptr<PortTunnelSession>& session,
-    uint32_t stream_id,
-    const std::shared_ptr<RetainedTcpListener>& listener) {
+SessionRetainedInstallResult
+PortTunnelService::install_session_tcp_listener(const std::shared_ptr<PortTunnelSession>& session,
+                                                uint32_t stream_id,
+                                                const std::shared_ptr<RetainedTcpListener>& listener) {
     if (!is_running()) {
         return SessionRetainedInstallResult::Unavailable;
     }

@@ -26,8 +26,7 @@ public:
     LogMessageBuilder& quoted_field(const std::string& name, const std::string& value);
     LogMessageBuilder& bool_field(const std::string& name, bool value);
 
-    template <typename T>
-    LogMessageBuilder& field(const std::string& name, const T& value) {
+    template <typename T> LogMessageBuilder& field(const std::string& name, const T& value) {
         append_separator();
         out_ << name << "=" << value;
         return *this;

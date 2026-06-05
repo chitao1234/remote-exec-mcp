@@ -6,8 +6,8 @@
 #include <vector>
 
 #include "platform/basic_mutex.h"
-#include "port_tunnel_common.h"
 #include "platform/wakeup_pipe.h"
+#include "port_tunnel_common.h"
 
 class PortTunnelService;
 
@@ -58,11 +58,9 @@ private:
 };
 
 struct TunnelTcpStream {
-    TunnelTcpStream(SOCKET socket_value,
-                    PortTunnelBudgetLease active_stream_budget_value)
+    TunnelTcpStream(SOCKET socket_value, PortTunnelBudgetLease active_stream_budget_value)
         : socket(socket_value), active_stream_budget(std::move(active_stream_budget_value)),
-          resource_state(PortTunnelResourceState::Open),
-          writer_closed(false), writer_shutdown_requested(false) {}
+          resource_state(PortTunnelResourceState::Open), writer_closed(false), writer_shutdown_requested(false) {}
 
     void close();
     bool is_closed();

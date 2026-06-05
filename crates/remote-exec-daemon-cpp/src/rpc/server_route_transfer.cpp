@@ -130,9 +130,8 @@ handle_streaming_transfer_import(const AppState& state, const HttpRequest& reque
         const TransferImportRequestSpec import_request = prepare_transfer_import_request(state, request);
         HttpBodyTransferStreamReader body_reader(body);
         TransferStreamArchiveReader archive_reader(&body_reader);
-        write_transfer_import_success(route_response,
-                                      import_request,
-                                      run_transfer_import(import_request, archive_reader));
+        write_transfer_import_success(
+            route_response, import_request, run_transfer_import(import_request, archive_reader));
     });
 }
 

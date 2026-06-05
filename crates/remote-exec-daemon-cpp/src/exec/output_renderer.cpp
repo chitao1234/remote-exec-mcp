@@ -79,8 +79,9 @@ std::string render_output(const std::string& output, unsigned long max_output_to
         return std::string();
     }
 
-    const std::size_t max_output_bytes =
-        max_output_tokens > SIZE_MAX / BYTES_PER_TOKEN ? SIZE_MAX : static_cast<std::size_t>(max_output_tokens) * BYTES_PER_TOKEN;
+    const std::size_t max_output_bytes = max_output_tokens > SIZE_MAX / BYTES_PER_TOKEN
+                                             ? SIZE_MAX
+                                             : static_cast<std::size_t>(max_output_tokens) * BYTES_PER_TOKEN;
     if (output.size() <= max_output_bytes) {
         return output;
     }

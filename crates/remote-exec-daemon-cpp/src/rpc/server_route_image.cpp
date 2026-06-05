@@ -1,8 +1,8 @@
 #include <string>
 
 #include "codec/base64_codec.h"
-#include "image/image_ops.h"
 #include "core/logging.h"
+#include "image/image_ops.h"
 #include "rpc/rpc_failures.h"
 #include "rpc/server_request_utils.h"
 #include "rpc/server_route_common.h"

@@ -3,9 +3,9 @@
 #include <memory>
 #include <thread>
 
+#include "platform/wakeup_pipe.h"
 #include "runtime/connection_manager.h"
 #include "runtime/server.h"
-#include "platform/wakeup_pipe.h"
 
 class ServerRuntime {
 public:

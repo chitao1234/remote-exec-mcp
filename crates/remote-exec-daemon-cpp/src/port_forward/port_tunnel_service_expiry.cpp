@@ -3,9 +3,9 @@
 #include <thread>
 #include <vector>
 
+#include "platform/deadline.h"
 #include "port_tunnel_service.h"
 #include "port_tunnel_session_teardown.h"
-#include "platform/deadline.h"
 #include "runtime/daemon_thread.h"
 
 bool PortTunnelService::schedule_session_expiry(const std::shared_ptr<PortTunnelSession>& session) {

@@ -78,11 +78,8 @@ void carry_incomplete_dbcs_suffix(UINT code_page, std::string* raw, std::string*
     }
 }
 
-std::string decode_console_output_with_code_pages(UINT primary_code_page,
-                                                  UINT fallback_code_page,
-                                                  std::string* carry,
-                                                  const std::string& raw_chunk,
-                                                  bool flush) {
+std::string decode_console_output_with_code_pages(
+    UINT primary_code_page, UINT fallback_code_page, std::string* carry, const std::string& raw_chunk, bool flush) {
     std::string raw = *carry;
     raw += raw_chunk;
     carry->clear();
@@ -171,24 +168,19 @@ unsigned int decode_utf8_codepoint(const std::string& utf8) {
         return ((first & 0x1FU) << 6U) | (static_cast<unsigned char>(utf8[1]) & 0x3FU);
     }
     if ((first & 0xF0U) == 0xE0U && utf8.size() >= 3U) {
-        return ((first & 0x0FU) << 12U) |
-               ((static_cast<unsigned char>(utf8[1]) & 0x3FU) << 6U) |
+        return ((first & 0x0FU) << 12U) | ((static_cast<unsigned char>(utf8[1]) & 0x3FU) << 6U) |
                (static_cast<unsigned char>(utf8[2]) & 0x3FU);
     }
     if ((first & 0xF8U) == 0xF0U && utf8.size() >= 4U) {
-        return ((first & 0x07U) << 18U) |
-               ((static_cast<unsigned char>(utf8[1]) & 0x3FU) << 12U) |
-               ((static_cast<unsigned char>(utf8[2]) & 0x3FU) << 6U) |
-               (static_cast<unsigned char>(utf8[3]) & 0x3FU);
+        return ((first & 0x07U) << 18U) | ((static_cast<unsigned char>(utf8[1]) & 0x3FU) << 12U) |
+               ((static_cast<unsigned char>(utf8[2]) & 0x3FU) << 6U) | (static_cast<unsigned char>(utf8[3]) & 0x3FU);
     }
     return 0U;
 }
 
 bool is_combining_codepoint(unsigned int codepoint) {
-    return (codepoint >= 0x0300U && codepoint <= 0x036FU) ||
-           (codepoint >= 0x1AB0U && codepoint <= 0x1AFFU) ||
-           (codepoint >= 0x1DC0U && codepoint <= 0x1DFFU) ||
-           (codepoint >= 0x20D0U && codepoint <= 0x20FFU) ||
+    return (codepoint >= 0x0300U && codepoint <= 0x036FU) || (codepoint >= 0x1AB0U && codepoint <= 0x1AFFU) ||
+           (codepoint >= 0x1DC0U && codepoint <= 0x1DFFU) || (codepoint >= 0x20D0U && codepoint <= 0x20FFU) ||
            (codepoint >= 0xFE20U && codepoint <= 0xFE2FU);
 }
 
@@ -196,12 +188,9 @@ bool is_wide_codepoint(unsigned int codepoint) {
     if (codepoint >= 0x1100U &&
         (codepoint <= 0x115FU || codepoint == 0x2329U || codepoint == 0x232AU ||
          (codepoint >= 0x2E80U && codepoint <= 0xA4CFU && codepoint != 0x303FU) ||
-         (codepoint >= 0xAC00U && codepoint <= 0xD7A3U) ||
-         (codepoint >= 0xF900U && codepoint <= 0xFAFFU) ||
-         (codepoint >= 0xFE10U && codepoint <= 0xFE19U) ||
-         (codepoint >= 0xFE30U && codepoint <= 0xFE6FU) ||
-         (codepoint >= 0xFF00U && codepoint <= 0xFF60U) ||
-         (codepoint >= 0xFFE0U && codepoint <= 0xFFE6U))) {
+         (codepoint >= 0xAC00U && codepoint <= 0xD7A3U) || (codepoint >= 0xF900U && codepoint <= 0xFAFFU) ||
+         (codepoint >= 0xFE10U && codepoint <= 0xFE19U) || (codepoint >= 0xFE30U && codepoint <= 0xFE6FU) ||
+         (codepoint >= 0xFF00U && codepoint <= 0xFF60U) || (codepoint >= 0xFFE0U && codepoint <= 0xFFE6U))) {
         return true;
     }
 
@@ -325,12 +314,14 @@ std::string flush_console_output_carry(std::string* carry) {
 }
 
 TerminalOutputFilter::TerminalOutputFilter()
-    : state_(State::Ground), current_row_(0), current_col_(0), has_open_row_(false), open_row_(0U),
-      debounce_ms_(0UL), max_hold_ms_(0UL), debounce_enabled_(false) {}
+    : state_(State::Ground), current_row_(0), current_col_(0), has_open_row_(false), open_row_(0U), debounce_ms_(0UL),
+      max_hold_ms_(0UL), debounce_enabled_(false) {
+}
 
 TerminalOutputFilter::TerminalOutputFilter(unsigned long debounce_ms, unsigned long max_hold_ms)
     : state_(State::Ground), current_row_(0), current_col_(0), has_open_row_(false), open_row_(0U),
-      debounce_ms_(debounce_ms), max_hold_ms_(max_hold_ms), debounce_enabled_(debounce_ms > 0UL) {}
+      debounce_ms_(debounce_ms), max_hold_ms_(max_hold_ms), debounce_enabled_(debounce_ms > 0UL) {
+}
 
 std::string TerminalOutputFilter::filter_chunk(const std::string& chunk) {
     return filter_chunk_at(chunk, platform::monotonic_ms());
@@ -345,11 +336,9 @@ std::string TerminalOutputFilter::filter_chunk_at(const std::string& chunk, std:
         if (state_ == State::Ground && byte != 0x1BU && !is_c0_control(byte)) {
             utf8_pending.push_back(static_cast<char>(byte));
             const unsigned char first = static_cast<unsigned char>(utf8_pending[0]);
-            const bool complete =
-                (first & 0x80U) == 0U ||
-                (utf8_pending.size() == 2U && (first & 0xE0U) == 0xC0U) ||
-                (utf8_pending.size() == 3U && (first & 0xF0U) == 0xE0U) ||
-                (utf8_pending.size() == 4U && (first & 0xF8U) == 0xF0U);
+            const bool complete = (first & 0x80U) == 0U || (utf8_pending.size() == 2U && (first & 0xE0U) == 0xC0U) ||
+                                  (utf8_pending.size() == 3U && (first & 0xF0U) == 0xE0U) ||
+                                  (utf8_pending.size() == 4U && (first & 0xF8U) == 0xF0U);
             if (complete) {
                 emit_printable_codepoint(decode_utf8_codepoint(utf8_pending), utf8_pending);
                 utf8_pending.clear();
@@ -704,8 +693,7 @@ void TerminalOutputFilter::clear_cells_range(Line* line, int start_col, int end_
         line->cells.resize(static_cast<std::size_t>(clear_end));
     }
 
-    while (clear_start > 0 &&
-           clear_start < static_cast<int>(line->cells.size()) &&
+    while (clear_start > 0 && clear_start < static_cast<int>(line->cells.size()) &&
            line->cells[static_cast<std::size_t>(clear_start)].continuation) {
         --clear_start;
     }
@@ -849,16 +837,12 @@ std::string TerminalOutputFilter::emit_rows(const std::vector<std::size_t>& rows
         const std::size_t previous_row = row == 0U ? 0U : row - 1U;
         const std::map<std::size_t, std::string>::const_iterator previous_closed = closed_row_text_.find(previous_row);
         const std::map<std::size_t, std::string>::const_iterator closed = closed_row_text_.find(row);
-        const bool closed_joinable =
-            closed != closed_row_text_.end() &&
-            closed_row_joinable_.find(row) != closed_row_joinable_.end() &&
-            closed_row_joinable_[row];
-        const bool join_previous_closed_row =
-            row > 0U &&
-            previous_closed != closed_row_text_.end() &&
-            closed_row_joinable_.find(previous_row) != closed_row_joinable_.end() &&
-            closed_row_joinable_[previous_row] &&
-            line_has_nonspace_char(current);
+        const bool closed_joinable = closed != closed_row_text_.end() &&
+                                     closed_row_joinable_.find(row) != closed_row_joinable_.end() &&
+                                     closed_row_joinable_[row];
+        const bool join_previous_closed_row = row > 0U && previous_closed != closed_row_text_.end() &&
+                                              closed_row_joinable_.find(previous_row) != closed_row_joinable_.end() &&
+                                              closed_row_joinable_[previous_row] && line_has_nonspace_char(current);
         if (join_previous_closed_row) {
             const std::string merged = merge_joinable_rows(previous_closed->second, current);
             if (has_open_row_) {
@@ -998,10 +982,12 @@ std::string TerminalOutputFilter::emit_all_pending_rows() {
     return output;
 }
 
-WinptyTranscriptNormalizer::WinptyTranscriptNormalizer() : physical_width_(120U) {}
+WinptyTranscriptNormalizer::WinptyTranscriptNormalizer() : physical_width_(120U) {
+}
 
 WinptyTranscriptNormalizer::WinptyTranscriptNormalizer(std::size_t physical_width)
-    : physical_width_(physical_width == 0U ? 120U : physical_width) {}
+    : physical_width_(physical_width == 0U ? 120U : physical_width) {
+}
 
 void WinptyTranscriptNormalizer::set_physical_width(std::size_t physical_width) {
     if (physical_width != 0U) {
@@ -1042,10 +1028,9 @@ void WinptyTranscriptNormalizer::process_physical_line(const std::string& raw_li
     process_physical_line_with_mode(raw_line, output, TrailingFragmentMode::Buffer);
 }
 
-void WinptyTranscriptNormalizer::process_physical_line_with_mode(
-    const std::string& raw_line,
-    std::string* output,
-    TrailingFragmentMode trailing_fragment_mode) {
+void WinptyTranscriptNormalizer::process_physical_line_with_mode(const std::string& raw_line,
+                                                                 std::string* output,
+                                                                 TrailingFragmentMode trailing_fragment_mode) {
     if (output == nullptr) {
         return;
     }
@@ -1087,10 +1072,9 @@ void WinptyTranscriptNormalizer::emit_repaint_prefix(const std::string& left, st
     }
 }
 
-void WinptyTranscriptNormalizer::emit_line_with_pending_fragment(
-    const std::string& line,
-    std::string* output,
-    bool terminated) {
+void WinptyTranscriptNormalizer::emit_line_with_pending_fragment(const std::string& line,
+                                                                 std::string* output,
+                                                                 bool terminated) {
     if (output == nullptr) {
         return;
     }
@@ -1108,10 +1092,7 @@ void WinptyTranscriptNormalizer::emit_logical_line(const std::string& line, std:
     emit_logical_text(line, output, true);
 }
 
-void WinptyTranscriptNormalizer::emit_logical_text(
-    const std::string& line,
-    std::string* output,
-    bool terminated) {
+void WinptyTranscriptNormalizer::emit_logical_text(const std::string& line, std::string* output, bool terminated) {
     if (output == nullptr) {
         return;
     }
@@ -1217,9 +1198,8 @@ std::string filter_terminal_output_for_test(TerminalOutputFilter* filter, const 
     return filter->filter_chunk(chunk);
 }
 
-std::string filter_terminal_output_at_for_test(TerminalOutputFilter* filter,
-                                               const std::string& chunk,
-                                               std::uint64_t now_ms) {
+std::string
+filter_terminal_output_at_for_test(TerminalOutputFilter* filter, const std::string& chunk, std::uint64_t now_ms) {
     return filter->filter_chunk_at(chunk, now_ms);
 }
 
@@ -1231,7 +1211,8 @@ std::string drain_terminal_output_for_test(TerminalOutputFilter* filter) {
     return filter->drain_pending();
 }
 
-std::string normalize_winpty_transcript_chunk_for_test(WinptyTranscriptNormalizer* normalizer, const std::string& chunk) {
+std::string normalize_winpty_transcript_chunk_for_test(WinptyTranscriptNormalizer* normalizer,
+                                                       const std::string& chunk) {
     return normalizer->filter_chunk(chunk);
 }
 

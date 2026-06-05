@@ -14,8 +14,7 @@
 
 namespace posix_eintr {
 
-template <typename Result, typename Callable>
-Result retry(Callable call) {
+template <typename Result, typename Callable> Result retry(Callable call) {
     Result result;
     do {
         result = call();
@@ -23,8 +22,7 @@ Result retry(Callable call) {
     return result;
 }
 
-template <typename Pointer, typename Callable>
-Pointer retry_null(Callable call) {
+template <typename Pointer, typename Callable> Pointer retry_null(Callable call) {
     Pointer result;
     do {
         result = call();
@@ -32,8 +30,7 @@ Pointer retry_null(Callable call) {
     return result;
 }
 
-template <typename Callable>
-int retry_eai_system(Callable call) {
+template <typename Callable> int retry_eai_system(Callable call) {
     int result;
     do {
         errno = 0;

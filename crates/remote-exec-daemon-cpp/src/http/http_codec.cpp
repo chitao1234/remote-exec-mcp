@@ -3,8 +3,8 @@
 #include <map>
 #include <string>
 
-#include "http/http_codec.h"
 #include "core/text_utils.h"
+#include "http/http_codec.h"
 
 namespace {
 

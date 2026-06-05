@@ -7,9 +7,7 @@ public:
     ScopedFile() : file_(nullptr) {}
     explicit ScopedFile(FILE* file) : file_(file) {}
 
-    ~ScopedFile() {
-        reset();
-    }
+    ~ScopedFile() { reset(); }
 
     ScopedFile(ScopedFile&& other) : file_(other.release()) {}
 
@@ -23,13 +21,9 @@ public:
     ScopedFile(const ScopedFile&) = delete;
     ScopedFile& operator=(const ScopedFile&) = delete;
 
-    FILE* get() const {
-        return file_;
-    }
+    FILE* get() const { return file_; }
 
-    bool valid() const {
-        return file_ != nullptr;
-    }
+    bool valid() const { return file_ != nullptr; }
 
     FILE* release() {
         FILE* file = file_;

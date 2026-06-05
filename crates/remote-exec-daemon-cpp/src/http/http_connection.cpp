@@ -3,17 +3,17 @@
 #include <limits>
 #include <string>
 
+#include "core/logging.h"
+#include "core/text_utils.h"
 #include "http/http_helpers.h"
 #include "http/http_request.h"
-#include "core/logging.h"
+#include "http/server_transport.h"
 #include "platform/platform.h"
 #include "port_forward/port_tunnel.h"
-#include "runtime/server.h"
 #include "rpc/server_route_common.h"
 #include "rpc/server_route_transfer.h"
 #include "rpc/server_routes.h"
-#include "http/server_transport.h"
-#include "core/text_utils.h"
+#include "runtime/server.h"
 
 namespace {
 
@@ -129,14 +129,14 @@ int handle_client_request(AppState& state,
             std::max(body_read_control.idle_timeout_ms, HTTP_STREAMING_TRANSFER_BODY_IDLE_TIMEOUT_MS);
         set_socket_timeout_ms(client, body_read_control.idle_timeout_ms);
     }
-    const std::size_t max_body_bytes =
-        mode == ROUTE_EXECUTION_STREAMING_IMPORT ? std::numeric_limits<std::size_t>::max()
-                                                 : state.config.max_request_body_bytes;
-    HttpRequestBodyStream body(
-        client, request_head.initial_body, framing, max_body_bytes, &body_read_control);
+    const std::size_t max_body_bytes = mode == ROUTE_EXECUTION_STREAMING_IMPORT
+                                           ? std::numeric_limits<std::size_t>::max()
+                                           : state.config.max_request_body_bytes;
+    HttpRequestBodyStream body(client, request_head.initial_body, framing, max_body_bytes, &body_read_control);
 
     if (mode == ROUTE_EXECUTION_STREAMING_EXPORT) {
-        const int status = handle_streaming_transfer_export_request(state, client, request, &body, close_after_response);
+        const int status =
+            handle_streaming_transfer_export_request(state, client, request, &body, close_after_response);
         log_request_result(request, status, started_at_ms);
         return status;
     }
@@ -151,8 +151,8 @@ int handle_client_request(AppState& state,
     if (mode == ROUTE_EXECUTION_STREAMING_IMPORT) {
         response = handle_streaming_transfer_import(state, request, &body);
         if (!body.fully_consumed()) {
-            (void)body.discard_remaining_bounded(
-                HTTP_STREAMING_TRANSFER_DRAIN_TIMEOUT_MS, std::numeric_limits<std::size_t>::max());
+            (void)body.discard_remaining_bounded(HTTP_STREAMING_TRANSFER_DRAIN_TIMEOUT_MS,
+                                                 std::numeric_limits<std::size_t>::max());
             *close_after_response = true;
         }
     } else {

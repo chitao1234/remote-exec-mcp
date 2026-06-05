@@ -14,8 +14,7 @@
 
 namespace remote_exec_win32 {
 
-template <typename Fn>
-Fn proc_address_as(FARPROC proc) {
+template <typename Fn> Fn proc_address_as(FARPROC proc) {
     union ProcAddressCast {
         FARPROC proc;
         Fn fn;

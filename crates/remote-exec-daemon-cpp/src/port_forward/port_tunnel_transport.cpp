@@ -1,9 +1,9 @@
-#include "port_forward/port_tunnel.h"
 #include "http/server_transport.h"
+#include "platform/deadline.h"
+#include "port_forward/port_tunnel.h"
 #include "port_tunnel_connection.h"
 #include "port_tunnel_sender.h"
 #include "port_tunnel_service.h"
-#include "platform/deadline.h"
 #include "rpc/server_contract.h"
 
 struct TunnelOpenMetadata {
@@ -78,8 +78,7 @@ int handle_port_tunnel_upgrade(AppState& state, SOCKET client, const HttpRequest
         send_http_response(client, response);
         return response.status;
     }
-    if (request.method != "POST" ||
-        request.path != server_contract::route_path(server_contract::ROUTE_PORT_TUNNEL) ||
+    if (request.method != "POST" || request.path != server_contract::route_path(server_contract::ROUTE_PORT_TUNNEL) ||
         !connection_header_has_upgrade(request) ||
         header_token_lower(request, "upgrade") != server_contract::PORT_TUNNEL_UPGRADE_TOKEN ||
         request.header(server_contract::PORT_TUNNEL_VERSION_HEADER) != server_contract::PORT_TUNNEL_VERSION_VALUE) {
@@ -105,7 +104,8 @@ int handle_port_tunnel_upgrade(AppState& state, SOCKET client, const HttpRequest
 
 PortTunnelConnection::PortTunnelConnection(SOCKET client, const std::shared_ptr<PortTunnelService>& service)
     : client_(client), service_(service), sender_(new PortTunnelSender(client, service)), generation_(0ULL),
-      mode_(PortTunnelMode::Unopened), protocol_(PortTunnelProtocol::None) {}
+      mode_(PortTunnelMode::Unopened), protocol_(PortTunnelProtocol::None) {
+}
 
 bool PortTunnelConnection::read_exact(unsigned char* data, std::size_t size) {
     std::size_t offset = 0;

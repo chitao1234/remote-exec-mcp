@@ -1,7 +1,7 @@
-#include <atomic>
 #include <algorithm>
-#include <cerrno>
+#include <atomic>
 #include <cctype>
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <functional>
@@ -18,12 +18,12 @@
 #include <unistd.h>
 #endif
 
+#include "core/stdio_retry.h"
 #include "patch/patch_engine.h"
-#include "policy/path_policy.h"
 #include "platform/path_utils.h"
 #include "platform/platform.h"
 #include "platform/scoped_file.h"
-#include "core/stdio_retry.h"
+#include "policy/path_policy.h"
 
 namespace {
 
@@ -816,10 +816,9 @@ PlannedAction plan_update_action(const std::string& root,
     return planned;
 }
 
-std::vector<PlannedAction>
-plan_patch_actions(const std::string& root,
-                   const std::vector<PatchAction>& actions,
-                   const PatchPathAuthorizer& authorizer) {
+std::vector<PlannedAction> plan_patch_actions(const std::string& root,
+                                              const std::vector<PatchAction>& actions,
+                                              const PatchPathAuthorizer& authorizer) {
     PathOverlay overlay;
     std::vector<PlannedAction> planned;
     planned.reserve(actions.size());

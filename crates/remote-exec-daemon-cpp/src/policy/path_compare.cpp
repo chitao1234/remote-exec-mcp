@@ -4,9 +4,9 @@
 #include <vector>
 
 #ifdef _WIN32
-#include <windows.h>
 #include "platform/win32_dynamic.h"
 #include "platform/win32_utf8.h"
+#include <windows.h>
 #endif
 
 #include "core/logging.h"
@@ -73,7 +73,7 @@ ParsedPath parse_host_path(const std::string& raw) {
 }
 
 #ifdef _WIN32
-typedef int(WINAPI * CompareStringOrdinalFn)(const WCHAR*, int, const WCHAR*, int, BOOL);
+typedef int(WINAPI* CompareStringOrdinalFn)(const WCHAR*, int, const WCHAR*, int, BOOL);
 
 std::wstring wide_from_utf8(const std::string& value) {
     try {
@@ -119,20 +119,18 @@ bool component_equal(const std::string& left, const std::string& right) {
         const std::wstring right_wide = wide_from_utf8(right);
         const CompareStringOrdinalFn ordinal = compare_string_ordinal_fn();
         if (ordinal != nullptr) {
-            return ordinal(
-                       left_wide.empty() ? nullptr : left_wide.data(),
-                       static_cast<int>(left_wide.size()),
-                       right_wide.empty() ? nullptr : right_wide.data(),
-                       static_cast<int>(right_wide.size()),
-                       TRUE) == CSTR_EQUAL;
+            return ordinal(left_wide.empty() ? nullptr : left_wide.data(),
+                           static_cast<int>(left_wide.size()),
+                           right_wide.empty() ? nullptr : right_wide.data(),
+                           static_cast<int>(right_wide.size()),
+                           TRUE) == CSTR_EQUAL;
         }
-        return CompareStringW(
-                   LOCALE_USER_DEFAULT,
-                   NORM_IGNORECASE,
-                   left_wide.empty() ? nullptr : left_wide.data(),
-                   static_cast<int>(left_wide.size()),
-                   right_wide.empty() ? nullptr : right_wide.data(),
-                   static_cast<int>(right_wide.size())) == CSTR_EQUAL;
+        return CompareStringW(LOCALE_USER_DEFAULT,
+                              NORM_IGNORECASE,
+                              left_wide.empty() ? nullptr : left_wide.data(),
+                              static_cast<int>(left_wide.size()),
+                              right_wide.empty() ? nullptr : right_wide.data(),
+                              static_cast<int>(right_wide.size())) == CSTR_EQUAL;
     } catch (const std::exception& ex) {
         LogMessageBuilder message("Windows path comparison fallback to ASCII case folding");
         message.quoted_field("left", preview_text(left, 120))

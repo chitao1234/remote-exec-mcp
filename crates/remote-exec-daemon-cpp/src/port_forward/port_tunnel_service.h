@@ -92,9 +92,8 @@ public:
                              uint32_t stream_id,
                              const std::shared_ptr<TunnelUdpSocket>& socket_value,
                              PortTunnelWorkerLease worker_lease = PortTunnelWorkerLease());
-    bool spawn_tracked_worker(const char* operation,
-                              PortTunnelWorkerLease worker_lease,
-                              const std::function<void()>& work);
+    bool
+    spawn_tracked_worker(const char* operation, PortTunnelWorkerLease worker_lease, const std::function<void()>& work);
     bool try_acquire_worker();
     bool try_acquire_worker(PortTunnelWorkerLease* lease);
     unsigned long max_workers() const;
@@ -110,11 +109,7 @@ public:
 
 private:
     struct WorkerGroup;
-    enum class LifecycleState {
-        Running,
-        Stopping,
-        Stopped
-    };
+    enum class LifecycleState { Running, Stopping, Stopped };
 
     PortTunnelService(const PortTunnelService&);
     PortTunnelService& operator=(const PortTunnelService&);

@@ -46,7 +46,5 @@ void set_process_session_test_exit_poll_delay_ms(unsigned long delay_ms);
 #endif
 
 #if defined(_WIN32) && defined(REMOTE_EXEC_CPP_TESTING)
-std::string windows_process_command_line_for_test(const std::string& command,
-                                                  const std::string& shell,
-                                                  bool login);
+std::string windows_process_command_line_for_test(const std::string& command, const std::string& shell, bool login);
 #endif

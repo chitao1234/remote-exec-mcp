@@ -35,13 +35,9 @@ private:
 } // namespace
 
 struct ConnectionManager::WorkerRecord {
-    WorkerRecord(unsigned long worker_id_value,
-                 SOCKET socket_value,
-                 std::function<void(SOCKET)> worker_main_value)
+    WorkerRecord(unsigned long worker_id_value, SOCKET socket_value, std::function<void(SOCKET)> worker_main_value)
         : worker_id(worker_id_value), socket(socket_value), worker_main(std::move(worker_main_value)), finished(false),
-          thread()
-    {
-    }
+          thread() {}
 
     unsigned long worker_id;
     SOCKET socket;

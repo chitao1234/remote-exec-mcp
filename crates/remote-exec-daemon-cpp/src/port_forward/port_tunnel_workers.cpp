@@ -40,10 +40,7 @@ private:
 PortTunnelService::WorkerGroup::WorkerGroup() : shutting_down(false) {
 }
 
-PortTunnelService::WorkerGroup::Thread::Thread() : finished(false)
-                                                 ,
-                                                 thread()
-{
+PortTunnelService::WorkerGroup::Thread::Thread() : finished(false), thread() {
 }
 
 bool PortTunnelService::spawn_tracked_worker(const char* operation,

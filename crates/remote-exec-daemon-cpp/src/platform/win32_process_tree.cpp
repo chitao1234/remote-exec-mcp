@@ -20,8 +20,7 @@ typedef BOOL(WINAPI* Process32FirstWFn)(HANDLE, LPPROCESSENTRY32W);
 typedef BOOL(WINAPI* Process32NextWFn)(HANDLE, LPPROCESSENTRY32W);
 
 struct ToolhelpApi {
-    ToolhelpApi()
-        : create_snapshot(nullptr), process_first(nullptr), process_next(nullptr), loaded(false) {}
+    ToolhelpApi() : create_snapshot(nullptr), process_first(nullptr), process_next(nullptr), loaded(false) {}
 
     CreateToolhelp32SnapshotFn create_snapshot;
     Process32FirstWFn process_first;
@@ -40,8 +39,7 @@ ToolhelpApi load_toolhelp_api() {
         GetProcAddress(kernel32, "CreateToolhelp32Snapshot"));
     api.process_first =
         remote_exec_win32::proc_address_as<Process32FirstWFn>(GetProcAddress(kernel32, "Process32FirstW"));
-    api.process_next =
-        remote_exec_win32::proc_address_as<Process32NextWFn>(GetProcAddress(kernel32, "Process32NextW"));
+    api.process_next = remote_exec_win32::proc_address_as<Process32NextWFn>(GetProcAddress(kernel32, "Process32NextW"));
     api.loaded = api.create_snapshot != nullptr && api.process_first != nullptr && api.process_next != nullptr;
     return api;
 }

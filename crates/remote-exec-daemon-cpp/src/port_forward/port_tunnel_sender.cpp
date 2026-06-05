@@ -2,9 +2,9 @@
 
 #include <limits>
 
-#include "runtime/daemon_thread.h"
 #include "port_tunnel_connection.h"
 #include "port_tunnel_service.h"
+#include "runtime/daemon_thread.h"
 
 namespace {
 
@@ -190,11 +190,11 @@ bool PortTunnelSender::try_reserve_frame_bytes(std::size_t byte_count,
 
 bool PortTunnelSender::try_reserve_data_frame(const PortTunnelFrame& frame, unsigned long* charge_value) {
     const std::size_t charge = PORT_TUNNEL_HEADER_LEN + frame.meta.size() + frame.data.size();
-    return try_reserve_frame_bytes(charge, queued_data_bytes_, service_->limits().max_tunnel_queued_bytes, charge_value);
+    return try_reserve_frame_bytes(
+        charge, queued_data_bytes_, service_->limits().max_tunnel_queued_bytes, charge_value);
 }
 
-bool PortTunnelSender::try_reserve_control_frame(const std::vector<unsigned char>& bytes,
-                                                 unsigned long* charge_value) {
+bool PortTunnelSender::try_reserve_control_frame(const std::vector<unsigned char>& bytes, unsigned long* charge_value) {
     return try_reserve_frame_bytes(bytes.size(), queued_control_bytes_, control_queue_byte_limit(), charge_value);
 }
 
@@ -206,8 +206,7 @@ void PortTunnelSender::release_control_frame_reservation(unsigned long charge_va
     queued_control_bytes_.fetch_sub(charge_value);
 }
 
-void PortTunnelSender::release_queued_frame_reservation(QueueReservationKind charge_kind,
-                                                        unsigned long charge_value) {
+void PortTunnelSender::release_queued_frame_reservation(QueueReservationKind charge_kind, unsigned long charge_value) {
     if (charge_value == 0UL) {
         return;
     }

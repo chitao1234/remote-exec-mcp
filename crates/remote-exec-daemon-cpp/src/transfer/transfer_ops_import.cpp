@@ -6,10 +6,10 @@
 #include <string>
 #include <vector>
 
-#include "platform/path_utils.h"
-#include "rpc/rpc_failures.h"
-#include "platform/scoped_file.h"
 #include "core/stdio_retry.h"
+#include "platform/path_utils.h"
+#include "platform/scoped_file.h"
+#include "rpc/rpc_failures.h"
 #include "transfer_ops_internal.h"
 
 namespace {

@@ -61,7 +61,8 @@ clockid_t condvar_deadline_clock(bool uses_monotonic) {
 
 } // namespace
 
-BasicCondVar::BasicCondVar() : uses_monotonic_(init_condvar_monotonic(&cond_)) {}
+BasicCondVar::BasicCondVar() : uses_monotonic_(init_condvar_monotonic(&cond_)) {
+}
 
 BasicCondVar::~BasicCondVar() {
     pthread_cond_destroy(&cond_);

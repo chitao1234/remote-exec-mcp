@@ -59,9 +59,7 @@ void TransferStreamArchiveReader::read_preface() {
     preface_read_ = true;
 }
 
-void TransferStreamArchiveReader::read_transport_exact(char* data,
-                                                       std::size_t size,
-                                                       const std::string& label) {
+void TransferStreamArchiveReader::read_transport_exact(char* data, std::size_t size, const std::string& label) {
     std::size_t offset = 0U;
     while (offset < size) {
         const std::size_t received = reader_->read(data + offset, size - offset);
@@ -125,8 +123,7 @@ bool TransferStreamArchiveReader::read_next_data_frame_or_terminal() {
     }
 }
 
-StringTransferStreamByteReader::StringTransferStreamByteReader(const std::string* body)
-    : body_(body), offset_(0U) {
+StringTransferStreamByteReader::StringTransferStreamByteReader(const std::string* body) : body_(body), offset_(0U) {
 }
 
 std::size_t StringTransferStreamByteReader::read(char* data, std::size_t size) {

@@ -67,9 +67,7 @@ bool spawn_tcp_read_thread(const std::shared_ptr<PortTunnelService>& service,
     }
 #endif
     return service->spawn_tracked_worker(
-        "spawn tcp read thread",
-        std::move(worker_lease),
-        [tunnel, stream_id, stream, start_gate]() {
+        "spawn tcp read thread", std::move(worker_lease), [tunnel, stream_id, stream, start_gate]() {
             if (start_gate.get() != nullptr) {
                 start_gate->wait();
             }

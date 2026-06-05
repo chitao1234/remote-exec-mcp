@@ -5,15 +5,15 @@
 #include <vector>
 
 #include "core/logging.h"
+#include "exec/process_session.h"
+#include "exec/session_pump.h"
+#include "exec/session_store.h"
 #include "output_renderer.h"
 #include "platform/deadline.h"
 #include "platform/platform.h"
-#include "exec/process_session.h"
 #include "rpc/exec_request_utils.h"
-#include "exec/session_pump.h"
 #include "session_pump_internal.h"
 #include "session_response_builder.h"
-#include "exec/session_store.h"
 
 void erase_session_if_current(BasicMutex& mutex,
                               std::map<std::string, std::shared_ptr<LiveSession>>& sessions,
@@ -148,7 +148,8 @@ PollResult wait_for_session_activity(const std::shared_ptr<LiveSession>& session
             return PollResult{output, false, 0, SessionOutputDrainStopReason::None};
         }
 
-        wait_for_generation_change_locked(session.get(), seen_generation, deadline.deadline_ms(), EXIT_POLL_INTERVAL_MS);
+        wait_for_generation_change_locked(
+            session.get(), seen_generation, deadline.deadline_ms(), EXIT_POLL_INTERVAL_MS);
     }
 }
 
@@ -192,8 +193,7 @@ void apply_write_stdin_request_locked(LiveSession* session,
         return;
     }
     if (!session->stdin_open) {
-        throw StdinClosedError(
-            "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open");
+        throw StdinClosedError("stdin is closed for this session; rerun exec_command with tty=true to keep stdin open");
     }
     try {
         session->process->write_stdin(chars);
@@ -225,8 +225,7 @@ Json finalize_completed_write_stdin(BasicMutex& mutex,
         open_sessions = static_cast<unsigned long>(sessions.size() + *pending_starts);
     }
     LogMessageBuilder message("session completed");
-    message
-        .quoted_field("daemon_session_id", daemon_session_id)
+    message.quoted_field("daemon_session_id", daemon_session_id)
         .field("exit_code", poll_result.exit_code)
         .field("open_sessions", open_sessions);
     add_drain_stop_reason(&message, poll_result.drain_stop_reason);
@@ -243,8 +242,7 @@ SessionOutputState::SessionOutputState()
 }
 
 LiveSession::LiveSession()
-    : started_at_ms(0), last_touched_order(0), stdin_open(false), retired(false), closing(false), pump_started(false)
-{
+    : started_at_ms(0), last_touched_order(0), stdin_open(false), retired(false), closing(false), pump_started(false) {
 }
 
 LiveSession::~LiveSession() {
@@ -436,12 +434,14 @@ Json SessionStore::start_command(const std::string& target,
             .bool_field("tty", request.tty_requested);
         log_message(LOG_INFO, "session_store", message.str());
     }
-    std::shared_ptr<LiveSession> session = launch_live_session(request.cmd, request.workdir, request.shell, request.login_requested, request.tty_requested);
+    std::shared_ptr<LiveSession> session = launch_live_session(
+        request.cmd, request.workdir, request.shell, request.login_requested, request.tty_requested);
     start_session_pump(session);
 
     PollResult poll_result;
     try {
-        const unsigned long timeout_ms = resolve_yield_time_ms(yield_time.exec_command, request.has_yield_time_ms, request.yield_time_ms);
+        const unsigned long timeout_ms =
+            resolve_yield_time_ms(yield_time.exec_command, request.has_yield_time_ms, request.yield_time_ms);
         BasicLockGuard operation_lock(session->operation_mutex_);
         poll_result = wait_for_session_activity(session, timeout_ms, request.max_output_tokens);
     } catch (...) {
@@ -486,8 +486,14 @@ Json SessionStore::start_command(const std::string& target,
         return response;
     }
 
-    return build_session_response(
-        session->id.c_str(), true, session->started_at_ms, false, 0, poll_result.output, request.max_output_tokens, warnings);
+    return build_session_response(session->id.c_str(),
+                                  true,
+                                  session->started_at_ms,
+                                  false,
+                                  0,
+                                  poll_result.output,
+                                  request.max_output_tokens,
+                                  warnings);
 }
 
 Json SessionStore::write_stdin(const std::string& daemon_session_id,
@@ -536,13 +542,7 @@ Json SessionStore::write_stdin(const std::string& daemon_session_id,
 
     if (poll_result.completed) {
         return finalize_completed_write_stdin(
-            mutex_,
-            sessions_,
-            &pending_starts_,
-            daemon_session_id,
-            session,
-            poll_result,
-            max_output_tokens);
+            mutex_, sessions_, &pending_starts_, daemon_session_id, session, poll_result, max_output_tokens);
     }
 
     {

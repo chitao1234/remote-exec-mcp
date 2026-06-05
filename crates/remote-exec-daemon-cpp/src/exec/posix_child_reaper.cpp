@@ -17,8 +17,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "platform/basic_mutex.h"
 #include "core/logging.h"
+#include "platform/basic_mutex.h"
 #include "platform/platform.h"
 #include "platform/posix_eintr.h"
 #include "platform/posix_fd.h"

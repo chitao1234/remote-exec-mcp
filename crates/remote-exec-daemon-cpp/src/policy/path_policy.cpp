@@ -2,8 +2,8 @@
 #include <cctype>
 #include <string>
 
-#include "policy/path_policy.h"
 #include "core/text_utils.h"
+#include "policy/path_policy.h"
 
 namespace {
 

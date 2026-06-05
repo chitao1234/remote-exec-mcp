@@ -1,5 +1,5 @@
-#include "port_tunnel_connection.h"
 #include "port_forward/port_forward_socket_ops.h"
+#include "port_tunnel_connection.h"
 #include "port_tunnel_service.h"
 
 #include <cerrno>
@@ -65,8 +65,8 @@ void PortTunnelService::tcp_accept_loop(const std::shared_ptr<PortTunnelSession>
             if (listener->is_closing_or_closed_locked()) {
                 return;
             }
-            accepted =
-                accept_port_forward_peer(listener->listener.get(), reinterpret_cast<sockaddr*>(&peer_address), &peer_len);
+            accepted = accept_port_forward_peer(
+                listener->listener.get(), reinterpret_cast<sockaddr*>(&peer_address), &peer_len);
         }
         if (accepted == INVALID_SOCKET) {
             const int error = last_socket_error();
@@ -182,12 +182,11 @@ void PortTunnelConnection::tcp_connect(const PortTunnelFrame& frame) {
         send_worker_limit(frame.stream_id);
         return;
     }
-    if (!send_tcp_success_after_io_threads_started(
-            make_empty_frame(PortTunnelFrameType::TcpConnectOk, frame.stream_id),
-            &connection_local_streams_,
-            frame.stream_id,
-            stream,
-            std::move(worker_lease))) {
+    if (!send_tcp_success_after_io_threads_started(make_empty_frame(PortTunnelFrameType::TcpConnectOk, frame.stream_id),
+                                                   &connection_local_streams_,
+                                                   frame.stream_id,
+                                                   stream,
+                                                   std::move(worker_lease))) {
         send_worker_limit(frame.stream_id);
         return;
     }

@@ -150,19 +150,13 @@ SOCKET accept_port_forward_peer(SOCKET listener, sockaddr* peer_address, socklen
     return accept_socket_cloexec(listener, peer_address, peer_len);
 }
 
-int recv_port_forward_datagram(SOCKET socket,
-                               char* data,
-                               std::size_t size,
-                               sockaddr* peer_address,
-                               socklen_t* peer_len) {
+int recv_port_forward_datagram(
+    SOCKET socket, char* data, std::size_t size, sockaddr* peer_address, socklen_t* peer_len) {
     return recvfrom_bounded(socket, data, size, peer_address, peer_len);
 }
 
-int send_port_forward_datagram(SOCKET socket,
-                               const char* data,
-                               std::size_t size,
-                               const sockaddr* peer_address,
-                               socklen_t peer_len) {
+int send_port_forward_datagram(
+    SOCKET socket, const char* data, std::size_t size, const sockaddr* peer_address, socklen_t peer_len) {
     return sendto_bounded(socket, data, size, peer_address, peer_len);
 }
 
@@ -237,8 +231,8 @@ SOCKET connect_port_forward_socket(const std::string& endpoint, const std::strin
         bool connected = false;
         try {
             if (protocol == "tcp") {
-                connected = tcp_connect_with_timeout(
-                    connected_socket, current.sockaddr_ptr(), current.address_len, timeout_ms);
+                connected =
+                    tcp_connect_with_timeout(connected_socket, current.sockaddr_ptr(), current.address_len, timeout_ms);
             } else {
                 connected = connect_socket(connected_socket, current.sockaddr_ptr(), current.address_len) == 0;
             }

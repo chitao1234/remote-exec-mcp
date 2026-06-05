@@ -4,12 +4,9 @@
 #include "rpc/server_contract.h"
 
 DaemonCapabilities::DaemonCapabilities()
-    : supports_pty(false),
-      supports_image_read(false),
-      supports_transfer_compression(false),
-      supports_port_forward(false),
-      port_forward_protocol_version(0U),
-      transfer_stream_protocol_version(0U) {}
+    : supports_pty(false), supports_image_read(false), supports_transfer_compression(false),
+      supports_port_forward(false), port_forward_protocol_version(0U), transfer_stream_protocol_version(0U) {
+}
 
 DaemonCapabilities detect_daemon_capabilities() {
     DaemonCapabilities capabilities;
