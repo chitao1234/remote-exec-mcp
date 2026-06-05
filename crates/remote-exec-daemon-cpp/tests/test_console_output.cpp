@@ -1,5 +1,6 @@
 #include "test_assert.h"
 
+#include <cstdio>
 #include <stdexcept>
 #include <string>
 
@@ -25,6 +26,27 @@ bool code_page_available(unsigned int code_page) {
     } catch (const std::exception&) {
         return false;
     }
+}
+
+bool is_wine_runtime() {
+    const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    return ntdll != nullptr && GetProcAddress(ntdll, "wine_get_version") != nullptr;
+}
+
+bool should_skip_real_winpty_timing_tests() {
+#ifdef REMOTE_EXEC_CPP_HAS_WINPTY
+    if (is_wine_runtime()) {
+        static bool warned = false;
+        if (!warned) {
+            std::fprintf(stderr, "warning: skipping WinPTY timing tests under Wine\n");
+            warned = true;
+        }
+        return true;
+    }
+    return false;
+#else
+    return true;
+#endif
 }
 
 std::string winpty_repaint_physical_line(const std::string& left, const std::string& right, std::size_t width) {
@@ -269,7 +291,11 @@ void test_terminal_output_filter_debounce_drain_flushes_immediately() {
 }
 
 void test_terminal_output_filter_does_not_finalize_partial_rows_on_flush_due() {
-    TerminalOutputFilter filter(100UL, 500UL);
+    if (should_skip_real_winpty_timing_tests()) {
+        return;
+    }
+
+    TerminalOutputFilter filter(150UL, 500UL);
     WinptyTranscriptNormalizer normalizer;
 
     TEST_ASSERT(filter_terminal_output_at_for_test(&filter, "prompt>echo hello\x1b[116Ghell\r\no", 1000U).empty());

@@ -23,6 +23,7 @@ impl Default for TerminalOutputState {
     }
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 impl TerminalOutputState {
     #[cfg(feature = "winpty")]
     pub(super) fn winpty() -> Self {
@@ -48,6 +49,7 @@ impl TerminalOutputState {
     }
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 trait TerminalOutputFilter: Send {
     fn filter_chunk(&mut self, chunk: &str) -> TerminalOutputResult;
 

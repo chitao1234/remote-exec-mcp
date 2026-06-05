@@ -32,7 +32,7 @@ impl TerminalOutputFilter for WinptyOutputState {
     }
 
     fn flush_due(&mut self) -> String {
-        let rendered = self.renderer.flush_due();
+        let rendered = self.renderer.flush_due_at(monotonic_ms());
         self.normalize_renderer_output(&rendered)
     }
 
@@ -49,7 +49,10 @@ impl TerminalOutputFilter for WinptyOutputState {
 }
 
 impl WinptyOutputState {
-    fn normalize_renderer_result(&mut self, rendered: TerminalOutputResult) -> TerminalOutputResult {
+    fn normalize_renderer_result(
+        &mut self,
+        rendered: TerminalOutputResult,
+    ) -> TerminalOutputResult {
         TerminalOutputResult {
             output: self.normalize_renderer_output(&rendered.output),
             response: rendered.response,
@@ -167,10 +170,6 @@ impl TerminalOutputRenderer {
         };
 
         TerminalOutputResult { output, response }
-    }
-
-    pub(super) fn flush_due(&mut self) -> String {
-        self.flush_due_at(monotonic_ms())
     }
 
     fn flush_due_at(&mut self, now_ms: u64) -> String {
