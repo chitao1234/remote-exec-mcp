@@ -32,25 +32,6 @@ namespace {
 const unsigned short DEFAULT_PTY_ROWS = 24;
 const unsigned short DEFAULT_PTY_COLS = 120;
 
-// strerror_r has different return types on GNU (char*) vs POSIX XSI (int).
-// These overloads let the compiler pick the right handler.
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-function"
-static std::string strerror_result(int ret, char* buf, int errnum) {
-    if (ret == 0) return std::string(buf);
-    return "errno " + std::to_string(errnum);
-}
-
-static std::string strerror_result(char* ret, char*, int) {
-    return std::string(ret);
-}
-#pragma GCC diagnostic pop
-
-static std::string safe_strerror(int errnum) {
-    char buf[256];
-    buf[0] = '\0';
-    return strerror_result(strerror_r(errnum, buf, sizeof(buf)), buf, errnum);
-}
 // Grace period for cooperative shutdown before escalating from SIGTERM to SIGKILL.
 const int TERMINATE_GRACE_MS = 50;
 const unsigned long PTY_READ_POLL_INTERVAL_MS = 25UL;
@@ -83,14 +64,14 @@ struct PosixPtyPair {
 
 void set_fd_cloexec_or_throw(int fd, const std::string& label) {
     if (!posix_fd::set_cloexec(fd)) {
-        throw std::runtime_error(label + " fcntl(FD_CLOEXEC) failed: " + safe_strerror(errno));
+        throw std::runtime_error(errno_error::operation_failed(label + " fcntl(FD_CLOEXEC)", errno));
     }
 }
 
 PosixPipePair create_posix_pipe(const char* label) {
     int fds[2];
     if (posix_fd::create_cloexec_pipe(fds) != 0) {
-        throw std::runtime_error(std::string(label) + " failed: " + safe_strerror(errno));
+        throw std::runtime_error(errno_error::operation_failed(label, errno));
     }
     PosixPipePair pair;
     pair.read_end.reset(fds[0]);
@@ -102,7 +83,7 @@ UniqueFd open_dev_null_read() {
     int raw_fd = posix_fd::open_cloexec_path("/dev/null", O_RDONLY);
     UniqueFd fd(raw_fd);
     if (!fd.valid()) {
-        throw std::runtime_error(std::string("open(/dev/null) failed: ") + safe_strerror(errno));
+        throw std::runtime_error(errno_error::operation_failed("open(/dev/null)", errno));
     }
     return fd;
 }
@@ -120,21 +101,21 @@ PosixPtyPair create_posix_pty() {
 
     UniqueFd master(posix_fd::open_pty_master(O_RDWR | O_NOCTTY));
     if (!master.valid()) {
-        throw std::runtime_error(std::string("posix_openpt failed: ") + safe_strerror(errno));
+        throw std::runtime_error(errno_error::operation_failed("posix_openpt", errno));
     }
     set_fd_cloexec_or_throw(master.get(), "pty master");
     if (!posix_fd::set_nonblocking(master.get())) {
-        throw std::runtime_error(std::string("fcntl(O_NONBLOCK on pty master) failed: ") + safe_strerror(errno));
+        throw std::runtime_error(errno_error::operation_failed("fcntl(O_NONBLOCK on pty master)", errno));
     }
     if (posix_fd::grant_pty(master.get()) != 0) {
-        throw std::runtime_error(std::string("grantpt failed: ") + safe_strerror(errno));
+        throw std::runtime_error(errno_error::operation_failed("grantpt", errno));
     }
     if (posix_fd::unlock_pty(master.get()) != 0) {
-        throw std::runtime_error(std::string("unlockpt failed: ") + safe_strerror(errno));
+        throw std::runtime_error(errno_error::operation_failed("unlockpt", errno));
     }
     std::string slave_path;
     if (!posix_fd::pty_slave_path(master.get(), &slave_path)) {
-        throw std::runtime_error(std::string("ptsname failed: ") + safe_strerror(errno));
+        throw std::runtime_error(errno_error::operation_failed("ptsname", errno));
     }
 
     PosixPtyPair pair;
@@ -146,24 +127,24 @@ PosixPtyPair create_posix_pty() {
 void verify_posix_pty_launch_setup(const PosixPtyPair& pair) {
     UniqueFd slave(posix_fd::open_cloexec_path(pair.slave_path.c_str(), O_RDWR | O_NOCTTY));
     if (!slave.valid()) {
-        throw std::runtime_error(std::string("open(pty slave) failed: ") + safe_strerror(errno));
+        throw std::runtime_error(errno_error::operation_failed("open(pty slave)", errno));
     }
     if (!posix_fd::set_pty_window_size(slave.get(), DEFAULT_PTY_ROWS, DEFAULT_PTY_COLS)) {
-        throw std::runtime_error(std::string("ioctl(TIOCSWINSZ on pty slave) failed: ") + safe_strerror(errno));
+        throw std::runtime_error(errno_error::operation_failed("ioctl(TIOCSWINSZ on pty slave)", errno));
     }
 }
 
 bool readable_now(int fd) {
     bool readable = false;
     if (posix_fd::poll_readable_or_hangup(fd, 0UL, &readable) != 0) {
-        throw std::runtime_error(std::string("poll failed: ") + safe_strerror(errno));
+        throw std::runtime_error(errno_error::operation_failed("poll", errno));
     }
     return readable;
 }
 
 void wait_until_readable(int fd) {
     if (posix_fd::wait_until_readable_or_hangup(fd) != 0) {
-        throw std::runtime_error(std::string("poll failed: ") + safe_strerror(errno));
+        throw std::runtime_error(errno_error::operation_failed("poll", errno));
     }
 }
 
@@ -319,11 +300,11 @@ public:
                 }
                 if (tty_ && (errno == EAGAIN || errno == EWOULDBLOCK)) {
                     if (posix_fd::wait_until_writable_or_hangup(input_write_.get()) != 0) {
-                        throw std::runtime_error(std::string("poll(stdin) failed: ") + safe_strerror(errno));
+                        throw std::runtime_error(errno_error::operation_failed("poll(stdin)", errno));
                     }
                     continue;
                 }
-                throw std::runtime_error(std::string("write(stdin) failed: ") + safe_strerror(errno));
+                throw std::runtime_error(errno_error::operation_failed("write(stdin)", errno));
             }
             if (written == 0) {
                 throw std::runtime_error("write(stdin) failed");
@@ -341,7 +322,7 @@ public:
             throw ProcessPtyResizeUnsupportedError("PTY rows and cols must be greater than zero");
         }
         if (!posix_fd::set_pty_window_size(input_write_.get(), rows, cols)) {
-            throw std::runtime_error(std::string("ioctl(TIOCSWINSZ) failed: ") + safe_strerror(errno));
+            throw std::runtime_error(errno_error::operation_failed("ioctl(TIOCSWINSZ)", errno));
         }
     }
 
@@ -389,7 +370,7 @@ public:
                 *eof = true;
                 break;
             }
-            throw std::runtime_error(std::string("read(stdout) failed: ") + safe_strerror(errno));
+            throw std::runtime_error(errno_error::operation_failed("read(stdout)", errno));
         }
         return utf8_stream_decode::decode_utf8_stream_chunk(carry, raw, false);
     }
@@ -449,7 +430,7 @@ private:
         for (;;) {
             bool readable = false;
             if (posix_fd::poll_readable_or_hangup(read_fd, PTY_READ_POLL_INTERVAL_MS, &readable) != 0) {
-                throw std::runtime_error(std::string("poll failed: ") + safe_strerror(errno));
+                throw std::runtime_error(errno_error::operation_failed("poll", errno));
             }
             if (readable) {
                 return false;
@@ -513,7 +494,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
         PosixPtyPair pty = create_posix_pty();
         const pid_t pid = posix_process::fork_process();
         if (pid < 0) {
-            throw std::runtime_error(std::string("fork failed: ") + safe_strerror(errno));
+            throw std::runtime_error(errno_error::operation_failed("fork", errno));
         }
 
         if (pid == 0) {
@@ -549,7 +530,7 @@ std::unique_ptr<ProcessSession> ProcessSession::launch(
 
     const pid_t pid = posix_process::fork_process();
     if (pid < 0) {
-        throw std::runtime_error(std::string("fork failed: ") + safe_strerror(errno));
+        throw std::runtime_error(errno_error::operation_failed("fork", errno));
     }
 
     if (pid == 0) {

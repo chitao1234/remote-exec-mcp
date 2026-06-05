@@ -19,6 +19,7 @@
 
 #include "platform/basic_mutex.h"
 #include "core/logging.h"
+#include "platform/platform.h"
 #include "platform/posix_eintr.h"
 #include "platform/posix_fd.h"
 #include "platform/posix_process.h"
@@ -119,7 +120,7 @@ void install_posix_child_reaper() {
     }
     int fds[2];
     if (posix_fd::create_cloexec_pipe(fds) != 0) {
-        throw std::runtime_error(std::string("pipe(SIGCHLD) failed: ") + std::strerror(errno));
+        throw std::runtime_error(errno_error::operation_failed("pipe(SIGCHLD)", errno));
     }
     g_signal_pipe_read = fds[0];
     g_signal_pipe_write = fds[1];
@@ -127,7 +128,7 @@ void install_posix_child_reaper() {
     (void)posix_fd::set_nonblocking(g_signal_pipe_write);
 
     if (posix_signal::install_handler(SIGCHLD, sigchld_handler, SA_RESTART | SA_NOCLDSTOP) != 0) {
-        throw std::runtime_error(std::string("sigaction(SIGCHLD) failed: ") + std::strerror(errno));
+        throw std::runtime_error(errno_error::operation_failed("sigaction(SIGCHLD)", errno));
     }
 
     g_reaper_thread = new std::thread(reaper_loop);
@@ -194,7 +195,7 @@ bool poll_posix_child_exit(pid_t pid, int* status) {
         return true;
     }
 
-    throw std::runtime_error(std::string("waitpid failed: ") + std::strerror(errno));
+    throw std::runtime_error(errno_error::operation_failed("waitpid", errno));
 }
 
 bool wait_posix_child_exit(pid_t pid, int* status) {

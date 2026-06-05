@@ -10,15 +10,17 @@
 #include <direct.h>
 #include <wchar.h>
 #include <windows.h>
+#include "platform/win32_error.h"
 #include "platform/win32_utf8.h"
 #else
 #include <cerrno>
-#include <cstring>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+
 #endif
+#include "platform/platform.h"
 #include "platform/scoped_file.h"
 
 namespace test_fs {
@@ -210,8 +212,8 @@ inline bool is_directory(const path& target) {
 }
 
 inline void throw_last_error(const std::string& operation, const path& target) {
-    throw std::runtime_error(operation + " failed for `" + target.string() +
-                             "`: " + std::to_string(static_cast<unsigned long>(GetLastError())));
+    throw std::runtime_error(operation + " failed for `" + target.string() + "`: " +
+                             error_message_from_code(operation.c_str(), GetLastError()));
 }
 
 inline void create_directory_if_missing(const path& target) {
@@ -283,7 +285,8 @@ inline void remove_all(const path& target) {
 #else
 
 inline void throw_errno(const std::string& operation, const path& target, int error) {
-    throw std::runtime_error(operation + " failed for `" + target.string() + "`: " + std::strerror(error));
+    throw std::runtime_error(operation + " failed for `" + target.string() + "`: " +
+                             errno_error::message_from_errno(error));
 }
 
 inline path temp_directory_path() {

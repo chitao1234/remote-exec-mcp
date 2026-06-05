@@ -3,21 +3,23 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
-#include <sstream>
 #include <string>
 #include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
 
+#include "platform/win32_error.h"
 #include "platform/win32_utf8.h"
 #else
 #include <unistd.h>
+
 #endif
 
 
 #include "policy/filesystem_sandbox.h"
 #include "policy/path_compare.h"
+#include "platform/platform.h"
 
 namespace {
 
@@ -171,12 +173,6 @@ std::string utf8_from_wide_path(const std::wstring& value) {
     }
 }
 
-std::string windows_error_code_message(const char* operation, DWORD error) {
-    std::ostringstream out;
-    out << operation << " failed with Windows error " << static_cast<unsigned long>(error);
-    return out.str();
-}
-
 std::string basename_for_windows_path(std::string path) {
     while (path.size() > 3 && is_separator(windows_path_policy(), path[path.size() - 1])) {
         path.erase(path.size() - 1);
@@ -213,14 +209,14 @@ std::string full_windows_path_for_existing_path(const std::string& path) {
     DWORD length = GetFullPathNameW(wide.c_str(), 0, nullptr, nullptr);
     if (length == 0U) {
         throw SandboxError("unable to canonicalize `" + path + "`: " +
-                           windows_error_code_message("GetFullPathNameW", GetLastError()));
+                           error_message_from_code("GetFullPathNameW", GetLastError()));
     }
 
     std::vector<wchar_t> buffer(length + 1U);
     length = GetFullPathNameW(wide.c_str(), static_cast<DWORD>(buffer.size()), &buffer[0], nullptr);
     if (length == 0U || length >= buffer.size()) {
         throw SandboxError("unable to canonicalize `" + path + "`: " +
-                           windows_error_code_message("GetFullPathNameW", GetLastError()));
+                           error_message_from_code("GetFullPathNameW", GetLastError()));
     }
     return lexical_normalize_for_policy(windows_path_policy(), utf8_from_wide_path(std::wstring(&buffer[0], length)));
 }
@@ -232,7 +228,7 @@ std::string long_windows_leaf_for_existing_path(const std::string& path) {
     HANDLE find = FindFirstFileW(wide.c_str(), &data);
     if (find == INVALID_HANDLE_VALUE) {
         throw SandboxError("unable to canonicalize `" + path + "`: " +
-                           windows_error_code_message("FindFirstFileW", GetLastError()));
+                           error_message_from_code("FindFirstFileW", GetLastError()));
     }
     FindClose(find);
 
@@ -303,7 +299,7 @@ std::string canonicalize_windows_for_sandbox(const std::string& path) {
         const DWORD error = GetLastError();
         if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) {
             throw SandboxError("unable to canonicalize `" + normalized + "`: " +
-                               windows_error_code_message("GetFileAttributesW", error));
+                               error_message_from_code("GetFileAttributesW", error));
         }
 
         const std::string name = basename_for_windows_path(probe);
@@ -370,7 +366,7 @@ std::string canonicalize_posix_for_sandbox(const std::string& path) {
         }
 
         if (errno != ENOENT) {
-            throw SandboxError("unable to canonicalize `" + normalized + "`: " + std::strerror(errno));
+            throw SandboxError("unable to canonicalize `" + normalized + "`: " + errno_error::message_from_errno(errno));
         }
 
         const std::string name = basename_for_posix_path(probe);

@@ -1,5 +1,4 @@
 #include <cerrno>
-#include <cstring>
 #include <stdexcept>
 #include <string>
 
@@ -12,6 +11,7 @@
 
 #include "rpc/rpc_failures.h"
 #include "platform/path_utils.h"
+#include "platform/platform.h"
 #include "transfer/transfer_ops.h"
 #include "transfer_ops_internal.h"
 
@@ -126,7 +126,7 @@ PathInfo path_info(const std::string& absolute_path) {
         if (error_code == ENOENT || error_code == ENOTDIR) {
             return PathInfo{false, false};
         }
-        throw TransferFailure(TransferRpcCode::Internal, std::strerror(error_code));
+        throw TransferFailure(TransferRpcCode::Internal, errno_error::message_from_errno(error_code));
     }
 
 #ifdef _WIN32

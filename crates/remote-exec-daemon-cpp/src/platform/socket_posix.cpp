@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include "platform/posix_eintr.h"
+#include "platform/platform.h"
 #include "platform/posix_fd.h"
 #include "platform/posix_signal.h"
 #include "remote_exec_cpp_config.h"
@@ -25,7 +26,7 @@ namespace {
 std::string socket_error_message_from_code(const std::string& operation, int error) {
     std::ostringstream out;
     out << operation << " failed";
-    out << ": " << std::strerror(error);
+    out << ": " << errno_error::message_from_errno(error);
     return out.str();
 }
 
