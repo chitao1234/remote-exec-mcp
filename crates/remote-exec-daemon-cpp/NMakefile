@@ -101,6 +101,7 @@ MSVC_WINPTY_AGENT_SRCS= \
     $(MSVC_WINPTY_VENDOR_SRC_DIR)\agent\main.cc \
     $(MSVC_WINPTY_VENDOR_SRC_DIR)\shared\BackgroundDesktop.cc \
     $(MSVC_WINPTY_VENDOR_SRC_DIR)\shared\Buffer.cc \
+    $(MSVC_WINPTY_VENDOR_SRC_DIR)\shared\ConsoleWindow.cc \
     $(MSVC_WINPTY_VENDOR_SRC_DIR)\shared\DebugClient.cc \
     $(MSVC_WINPTY_VENDOR_SRC_DIR)\shared\GenRandom.cc \
     $(MSVC_WINPTY_VENDOR_SRC_DIR)\shared\OwnedHandle.cc \

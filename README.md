@@ -468,9 +468,10 @@ The C++ daemon intentionally supports a smaller surface than the Rust daemon:
 - plain HTTP only
 - no transfer compression
 - POSIX PTY support when the host can allocate a PTY
-- GNU Windows 2000 and XP builds can expose `tty = true` through vendored
-  `winpty` when that backend is enabled for the build and usable at runtime;
-  GNU winpty builds also disable PTY capability under Wine
+- GNU Windows NT 4.0, Windows 2000, and XP API-floor builds can expose
+  `tty = true` through vendored `winpty` when that backend is enabled for the
+  build and usable at runtime; GNU winpty builds also disable PTY capability
+  under Wine
 - PNG, JPEG, and WebP passthrough `view_image`
 - no default-hidden `read` / `write` / `edit` capability yet
 - file, directory, and broker-built multi-source transfers

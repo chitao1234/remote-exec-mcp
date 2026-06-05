@@ -433,6 +433,7 @@ WINPTY_AGENT_STEMS = \
 	agent/main \
 	shared/BackgroundDesktop \
 	shared/Buffer \
+	shared/ConsoleWindow \
 	shared/DebugClient \
 	shared/GenRandom \
 	shared/OwnedHandle \

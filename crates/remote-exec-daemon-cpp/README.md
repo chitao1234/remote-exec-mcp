@@ -127,8 +127,8 @@ Windows GNU build matrix:
 - `WINDOWS_WINVER=0x0400 WINDOWS_WINSOCK_VERSION=2` is the GNU Windows NT 4.0
   API-floor Winsock 2 path. Use `nt4-ws2` aliases for this variant.
 - `WINDOWS_WINPTY=auto|on|off` controls whether the GNU build vendors `winpty`.
-  `auto` enables `winpty` for Windows 2000 and XP builds, independent of the
-  selected Winsock backend.
+  `auto` enables `winpty` for Windows NT 4.0, Windows 2000, and XP API-floor
+  builds, independent of the selected Winsock backend.
 - The MSVC/NMAKE native and XP entry points vendor the same `winpty` sources
   and stage `winpty-agent.exe` beside the built daemon and test binaries. NMAKE
   does not expose a Windows 2000 entry point.
@@ -351,11 +351,11 @@ returned `output` field preserves their emitted order.
 
 POSIX builds support `tty=true` when the host can allocate a PTY. The daemon
 reports this through `/v1/target-info` as `supports_pty`, and rejects `tty=true`
-only when PTY allocation is unavailable. Windows GNU builds for Windows 2000
-and XP use vendored `winpty` for `tty=true` sessions when `winpty` is enabled
-for the build and usable at runtime. The MSVC/NMAKE native and XP builds use
-the same vendored `winpty` path. GNU Windows builds where `WINDOWS_WINPTY` is
-effectively off report
+only when PTY allocation is unavailable. GNU Windows NT 4.0, Windows 2000, and
+XP API-floor builds use vendored `winpty` for `tty=true` sessions when `winpty`
+is enabled for the build and usable at runtime. The MSVC/NMAKE native and XP
+builds use the same vendored `winpty` path. GNU Windows builds where
+`WINDOWS_WINPTY` is effectively off report
 `supports_pty=false`. Under Wine, the GNU WinPTY path also reports
 `supports_pty=false` because `winpty` behavior there is not treated as
 authoritative.
