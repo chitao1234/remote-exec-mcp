@@ -28,20 +28,17 @@ impl Default for WinptyOutputState {
 impl TerminalOutputFilter for WinptyOutputState {
     fn filter_chunk(&mut self, chunk: &str) -> TerminalOutputResult {
         let rendered = self.renderer.filter_chunk(chunk);
-
-        TerminalOutputResult {
-            output: self.normalizer.filter_chunk(&rendered.output),
-            response: rendered.response,
-        }
+        self.normalize_renderer_result(rendered)
     }
 
     fn flush_due(&mut self) -> String {
         let rendered = self.renderer.flush_due();
-        self.normalizer.filter_chunk(&rendered)
+        self.normalize_renderer_output(&rendered)
     }
 
     fn drain_pending(&mut self) -> String {
-        let mut output = self.normalizer.filter_chunk(&self.renderer.drain_pending());
+        let rendered = self.renderer.drain_pending();
+        let mut output = self.normalize_renderer_output(&rendered);
         output.push_str(&self.normalizer.drain_pending());
         output
     }
@@ -51,20 +48,29 @@ impl TerminalOutputFilter for WinptyOutputState {
     }
 }
 
-#[cfg(test)]
 impl WinptyOutputState {
-    fn filter_chunk_at(&mut self, chunk: &str, now_ms: u64) -> TerminalOutputResult {
-        let rendered = self.renderer.filter_chunk_at(chunk, now_ms);
-
+    fn normalize_renderer_result(&mut self, rendered: TerminalOutputResult) -> TerminalOutputResult {
         TerminalOutputResult {
-            output: self.normalizer.filter_chunk(&rendered.output),
+            output: self.normalize_renderer_output(&rendered.output),
             response: rendered.response,
         }
     }
 
+    fn normalize_renderer_output(&mut self, output: &str) -> String {
+        self.normalizer.filter_chunk(output)
+    }
+}
+
+#[cfg(test)]
+impl WinptyOutputState {
+    fn filter_chunk_at(&mut self, chunk: &str, now_ms: u64) -> TerminalOutputResult {
+        let rendered = self.renderer.filter_chunk_at(chunk, now_ms);
+        self.normalize_renderer_result(rendered)
+    }
+
     fn flush_due_at(&mut self, now_ms: u64) -> String {
         let rendered = self.renderer.flush_due_at(now_ms);
-        self.normalizer.filter_chunk(&rendered)
+        self.normalize_renderer_output(&rendered)
     }
 }
 
@@ -740,6 +746,12 @@ struct WinptyTranscriptNormalizer {
     pending_logical_fragment: String,
 }
 
+#[derive(Clone, Copy)]
+enum TrailingFragmentMode {
+    Buffer,
+    Emit,
+}
+
 impl Default for WinptyTranscriptNormalizer {
     fn default() -> Self {
         Self::new(WINPTY_DEFAULT_COLS)
@@ -791,62 +803,76 @@ impl WinptyTranscriptNormalizer {
     }
 
     fn process_physical_line(&mut self, raw_line: &str, output: &mut String) {
-        let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
-
-        if let Some((left, right)) = self.split_winpty_repaint_line(line) {
-            if !self.pending_logical_fragment.is_empty() {
-                let pending = std::mem::take(&mut self.pending_logical_fragment);
-                if left.is_empty() {
-                    Self::emit_logical_line(&pending, output);
-                } else {
-                    Self::emit_logical_line(&(pending + Self::trim_leading_spaces(&left)), output);
-                }
-            } else if !left.is_empty() {
-                Self::emit_logical_line(&left, output);
-            }
-            self.pending_logical_fragment = right;
-            return;
-        }
-
-        if !self.pending_logical_fragment.is_empty() {
-            let pending = std::mem::take(&mut self.pending_logical_fragment);
-            Self::emit_logical_line(&(pending + Self::trim_leading_spaces(line)), output);
-            return;
-        }
-
-        Self::emit_logical_line(line, output);
+        self.process_physical_line_with_mode(raw_line, output, TrailingFragmentMode::Buffer);
     }
 
     fn process_final_physical_line(&mut self, raw_line: &str, output: &mut String) {
+        // EOF finalization must surface the visible fragment without inventing a newline.
+        self.process_physical_line_with_mode(raw_line, output, TrailingFragmentMode::Emit);
+    }
+
+    fn process_physical_line_with_mode(
+        &mut self,
+        raw_line: &str,
+        output: &mut String,
+        trailing_fragment_mode: TrailingFragmentMode,
+    ) {
         let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
 
         if let Some((left, right)) = self.split_winpty_repaint_line(line) {
-            if !self.pending_logical_fragment.is_empty() {
-                let pending = std::mem::take(&mut self.pending_logical_fragment);
-                if left.is_empty() {
-                    Self::emit_logical_line(&pending, output);
-                } else {
-                    Self::emit_logical_line(&(pending + Self::trim_leading_spaces(&left)), output);
-                }
-            } else if !left.is_empty() {
-                Self::emit_logical_line(&left, output);
+            self.emit_repaint_prefix(&left, output);
+            match trailing_fragment_mode {
+                TrailingFragmentMode::Buffer => self.pending_logical_fragment = right,
+                TrailingFragmentMode::Emit => output.push_str(&right),
             }
-            output.push_str(&right);
             return;
         }
 
+        self.emit_line_with_pending_fragment(
+            line,
+            output,
+            matches!(trailing_fragment_mode, TrailingFragmentMode::Buffer),
+        );
+    }
+
+    fn emit_repaint_prefix(&mut self, left: &str, output: &mut String) {
         if !self.pending_logical_fragment.is_empty() {
             let pending = std::mem::take(&mut self.pending_logical_fragment);
-            output.push_str(&(pending + Self::trim_leading_spaces(line)));
+            if left.is_empty() {
+                Self::emit_logical_line(&pending, output);
+            } else {
+                Self::emit_logical_line(&(pending + Self::trim_leading_spaces(left)), output);
+            }
+        } else if !left.is_empty() {
+            Self::emit_logical_line(left, output);
+        }
+    }
+
+    fn emit_line_with_pending_fragment(
+        &mut self,
+        line: &str,
+        output: &mut String,
+        terminated: bool,
+    ) {
+        if !self.pending_logical_fragment.is_empty() {
+            let pending = std::mem::take(&mut self.pending_logical_fragment);
+            let combined = pending + Self::trim_leading_spaces(line);
+            Self::emit_logical_text(&combined, output, terminated);
             return;
         }
 
-        output.push_str(line);
+        Self::emit_logical_text(line, output, terminated);
     }
 
     fn emit_logical_line(line: &str, output: &mut String) {
+        Self::emit_logical_text(line, output, true);
+    }
+
+    fn emit_logical_text(line: &str, output: &mut String, terminated: bool) {
         output.push_str(line);
-        output.push('\n');
+        if terminated {
+            output.push('\n');
+        }
     }
 
     fn split_winpty_repaint_line(&self, line: &str) -> Option<(String, String)> {
