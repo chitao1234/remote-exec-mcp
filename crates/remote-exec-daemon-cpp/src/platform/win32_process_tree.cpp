@@ -190,6 +190,10 @@ bool terminate_process_tree_impl(DWORD root_pid, bool include_root) {
 
 } // namespace
 
+bool process_tree_snapshot_supported() {
+    return toolhelp_api().loaded;
+}
+
 bool terminate_process_descendants(DWORD root_pid) {
     return terminate_process_tree_impl(root_pid, false);
 }

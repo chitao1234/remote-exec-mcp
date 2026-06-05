@@ -258,6 +258,22 @@ static std::string windows_quote_arg_for_test(const std::string& arg) {
     return quoted;
 }
 
+static std::string windows_stdin_echo_helper_command(const std::string& label) {
+    return test_exec_pty::windows_stdin_echo_helper_command("--session-store-helper", label);
+}
+
+static std::string windows_stdin_file_helper_command(const std::string& file_name, unsigned long sleep_seconds) {
+    return test_exec_pty::windows_stdin_file_helper_command("--session-store-helper", file_name, sleep_seconds);
+}
+
+static std::string windows_tty_flag_helper_command(const std::string& flag_file_name) {
+    return test_exec_pty::windows_tty_flag_helper_command("--session-store-helper", flag_file_name);
+}
+
+static std::string windows_resize_helper_command() {
+    return test_exec_pty::windows_resize_helper_command("--session-store-helper");
+}
+
 static bool marker_count_increases(const fs::path& path, std::size_t baseline, unsigned long timeout_ms) {
     const std::uint64_t started = platform::monotonic_ms();
     while (platform::monotonic_ms() - started < timeout_ms) {
@@ -277,6 +293,11 @@ static bool marker_count_stable(const fs::path& path, unsigned long timeout_ms) 
 }
 
 static void assert_win32_process_tree_terminates_descendants(const fs::path& root) {
+    if (!win32_process_tree::process_tree_snapshot_supported()) {
+        std::printf("skipping Win32 descendant process-tree termination test: process snapshots unavailable\n");
+        return;
+    }
+
     const fs::path marker_path = root / "process-tree-marker.txt";
     fs::remove_all(marker_path);
 
@@ -942,7 +963,7 @@ static void assert_terminal_write_removes_completed_session(SessionStore& store,
 
     const YieldTimeConfig fast_yield = fast_yield_time_config();
 #ifdef _WIN32
-    const std::string command = "echo ready&set /p line=&call echo final:%line%";
+    const std::string command = windows_stdin_echo_helper_command("final");
 #else
     const std::string command = "printf 'ready\\n'; IFS= read line; printf 'final:%s\\n' \"$line\"";
 #endif
@@ -979,7 +1000,7 @@ static void assert_tty_resume_round_trip(SessionStore& store,
 
     const YieldTimeConfig fast_yield = fast_yield_time_config();
 #ifdef _WIN32
-    const std::string command = "echo ready&set /p line=&call echo echo:%line%";
+    const std::string command = windows_stdin_echo_helper_command("echo");
 #else
     const std::string command = "printf 'ready\\n'; IFS= read line; printf 'echo:%s\\n' \"$line\"";
 #endif
@@ -1020,9 +1041,7 @@ static void assert_unrelated_sessions_do_not_block_each_other(SessionStore& stor
 
 #ifdef _WIN32
     const std::string slow_command = "echo slow&" + test_exec_pty::windows_ping_sleep_command(30UL);
-    const std::string fast_command =
-        "set /p line= & call echo %line%>fast-session-input.txt & " +
-        test_exec_pty::windows_ping_sleep_command(30UL);
+    const std::string fast_command = windows_stdin_file_helper_command("fast-session-input.txt", 30UL);
 #else
     const std::string slow_command = "printf slow; sleep 30";
     const std::string fast_command = "IFS= read line; printf '%s' \"$line\" > fast-session-input.txt; sleep 30";
@@ -1096,7 +1115,7 @@ static void assert_tty_detection_and_input_round_trip(SessionStore& store,
     const fs::path tty_flag_path = root / "tty-detected.txt";
     fs::remove_all(tty_flag_path);
 #ifdef _WIN32
-    const std::string command = "echo yes>tty-detected.txt&set /p line=&call echo input:%line%";
+    const std::string command = windows_tty_flag_helper_command("tty-detected.txt");
 #else
     const std::string command =
         "if test -t 0; then printf yes > tty-detected.txt; else printf no > tty-detected.txt; fi; IFS= read line; "
@@ -1149,8 +1168,7 @@ static void assert_tty_resize_round_trip(SessionStore& store,
 
     const YieldTimeConfig fast_yield = fast_yield_time_config();
 #ifdef _WIN32
-    const std::string command = "echo ready&echo rows=24 cols=120&set /p line=&echo rows=33 cols=101&" +
-                                test_exec_pty::windows_ping_sleep_command(30UL);
+    const std::string command = windows_resize_helper_command();
 #else
     const std::string command = "printf ready; IFS= read line; stty -a; sleep 30";
 #endif
@@ -1469,7 +1487,7 @@ static void assert_stdin_and_tty_behavior(SessionStore& store,
     assert_non_tty_stdin_closed_rejected(store, root, shell, yield_time);
 #else
     const Json xp_running = start_test_command(store,
-                                               "echo ready&set /P line=&call echo got:%line%",
+                                               windows_stdin_echo_helper_command("got"),
                                                root.string(),
                                                shell,
                                                false,
@@ -1641,7 +1659,15 @@ static void assert_threshold_warnings_follow_configured_limit(const fs::path& ro
 #endif
 }
 
-int main() {
+int main(int argc, char** argv) {
+#ifdef _WIN32
+    if (argc >= 2 && std::strcmp(argv[1], "--session-store-helper") == 0) {
+        return test_exec_pty::run_windows_stdin_helper(argc, argv, 2);
+    }
+#else
+    (void)argc;
+    (void)argv;
+#endif
 #ifndef _WIN32
     install_posix_child_reaper();
 #endif

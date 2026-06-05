@@ -44,9 +44,11 @@ static std::string trim_trailing_exec_output(std::string output) {
     return output;
 }
 
+#ifdef _WIN32
 static bool contains_terminal_escape(const std::string& input) {
     return input.find('\x1b') != std::string::npos;
 }
+#endif
 
 static Json exec_write_json(AppState& state,
                             const std::string& daemon_session_id,
@@ -100,6 +102,7 @@ static std::string append_running_exec_output_until_contains(AppState& state,
     return output;
 }
 
+#ifndef _WIN32
 static std::string append_running_exec_output_until_pty_size(AppState& state,
                                                              const std::string& daemon_session_id,
                                                              std::string output,
@@ -118,10 +121,27 @@ static std::string append_running_exec_output_until_pty_size(AppState& state,
     }
     return output;
 }
+#endif
+
+static Json poll_exec_until_done(AppState& state,
+                                 const std::string& daemon_session_id,
+                                 Json response,
+                                 std::string* output,
+                                 unsigned long timeout_ms) {
+    const std::uint64_t started = platform::monotonic_ms();
+    while (response.at("running").get<bool>() && platform::monotonic_ms() - started < timeout_ms) {
+        platform::sleep_ms(10UL);
+        response = exec_write_json(state, daemon_session_id, "", 250UL);
+        if (output != nullptr) {
+            output->append(normalize_output(response.at("output").get<std::string>()));
+        }
+    }
+    return response;
+}
 
 static std::string long_running_non_tty_command() {
 #ifdef _WIN32
-    return "echo ready & set /p first= & set /p second=";
+    return test_exec_pty::windows_stdin_echo_sleep_helper_command("--server-routes-helper", "ignored", 30UL);
 #else
     return "printf ready; sleep 5";
 #endif
@@ -137,8 +157,7 @@ static std::string slow_tty_command() {
 
 static std::string fast_tty_file_command() {
 #ifdef _WIN32
-    return "set /p line= & call echo %line%>fast-session-input.txt & " +
-           test_exec_pty::windows_ping_sleep_command(30UL);
+    return test_exec_pty::windows_stdin_file_helper_command("--server-routes-helper", "fast-session-input.txt", 30UL);
 #else
     return "IFS= read line; printf '%s' \"$line\" > fast-session-input.txt; sleep 30";
 #endif
@@ -146,7 +165,7 @@ static std::string fast_tty_file_command() {
 
 static std::string tty_round_trip_command() {
 #ifdef _WIN32
-    return "echo tty:yes&set /p line=&echo input:%line%";
+    return test_exec_pty::windows_tty_flag_helper_command("--server-routes-helper", "tty-detected.txt");
 #else
     return "if test -t 0; then printf 'tty:yes\\n'; else printf 'tty:no\\n'; fi; IFS= read line; printf 'input:%s\\n' \"$line\"";
 #endif
@@ -154,8 +173,7 @@ static std::string tty_round_trip_command() {
 
 static std::string tty_resize_command() {
 #ifdef _WIN32
-    return "echo ready&echo rows=24 cols=120&set /p line=&echo rows=33 cols=101&" +
-           test_exec_pty::windows_ping_sleep_command(30UL);
+    return test_exec_pty::windows_resize_helper_command("--server-routes-helper");
 #else
     return "stty -a; printf ready; IFS= read line; stty -a; sleep 30";
 #endif
@@ -324,11 +342,12 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
         }
         TEST_ASSERT(start_output.find("tty:yes\n") != std::string::npos);
 
-        const Json completed =
-            exec_write_json(state, started.at("daemon_session_id").get<std::string>(), "hello\n", 5000UL);
+        const std::string started_session_id = started.at("daemon_session_id").get<std::string>();
+        Json completed = exec_write_json(state, started_session_id, test_exec_pty::terminal_input_line("hello"), 5000UL);
+        std::string output = start_output + normalize_output(completed.at("output").get<std::string>());
+        completed = poll_exec_until_done(state, started_session_id, completed, &output, 5000UL);
         TEST_ASSERT(!completed.at("running").get<bool>());
         TEST_ASSERT(completed.at("exit_code").get<int>() == 0);
-        const std::string output = start_output + normalize_output(completed.at("output").get<std::string>());
         TEST_ASSERT(output.find("tty:yes\n") != std::string::npos);
         TEST_ASSERT(output.find("hello\n") != std::string::npos);
         TEST_ASSERT(output.find("input:hello\n") != std::string::npos);
@@ -349,26 +368,39 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
         TEST_ASSERT(resize_start_response.status == 200);
         const Json resize_started = Json::parse(resize_start_response.body);
         TEST_ASSERT(resize_started.at("running").get<bool>());
+        const std::string resize_session_id = resize_started.at("daemon_session_id").get<std::string>();
+#ifdef _WIN32
+        const Json resized = exec_write_json_with_pty_size(state, resize_session_id, "\r\n", 1000UL, 33U, 101U);
+        TEST_ASSERT(resized.at("running").get<bool>());
+#else
         std::string initial_size_output = normalize_output(resize_started.at("output").get<std::string>());
         if (!test_exec_pty::pty_size_output_matches(initial_size_output, 24U, 120U)) {
             initial_size_output = append_running_exec_output_until_pty_size(
-                state, resize_started.at("daemon_session_id").get<std::string>(), initial_size_output, 24U, 120U, 2000UL);
+                state, resize_session_id, initial_size_output, 24U, 120U, 2000UL);
         }
         TEST_ASSERT(test_exec_pty::pty_size_output_matches(initial_size_output, 24U, 120U));
 
-        const Json resized = exec_write_json_with_pty_size(
-            state, resize_started.at("daemon_session_id").get<std::string>(), "\n", 1000UL, 33U, 101U);
+        const Json resized = exec_write_json_with_pty_size(state, resize_session_id, "\n", 1000UL, 33U, 101U);
         TEST_ASSERT(resized.at("running").get<bool>());
         std::string resize_output = normalize_output(resized.at("output").get<std::string>());
         if (!test_exec_pty::pty_size_output_matches(resize_output, 33U, 101U)) {
             resize_output = append_running_exec_output_until_pty_size(
-                state, resize_started.at("daemon_session_id").get<std::string>(), resize_output, 33U, 101U, 2000UL);
+                state, resize_session_id, resize_output, 33U, 101U, 2000UL);
         }
         TEST_ASSERT(test_exec_pty::pty_size_output_matches(resize_output, 33U, 101U));
+#endif
     }
 }
 
-int main() {
+int main(int argc, char** argv) {
+#ifdef _WIN32
+    if (argc >= 2 && std::string(argv[1]) == "--server-routes-helper") {
+        return test_exec_pty::run_windows_stdin_helper(argc, argv, 2);
+    }
+#else
+    (void)argc;
+    (void)argv;
+#endif
     const fs::path root = make_server_routes_test_root("remote-exec-cpp-server-routes-test");
     AppState state;
     initialize_server_routes_state(state, root);
