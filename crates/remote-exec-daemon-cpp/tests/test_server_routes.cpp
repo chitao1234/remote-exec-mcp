@@ -137,7 +137,7 @@ static std::string slow_tty_command() {
 
 static std::string fast_tty_file_command() {
 #ifdef _WIN32
-    return "set /p line= & <nul set /p =%line%>fast-session-input.txt & " +
+    return "set /p line= & call echo %line%>fast-session-input.txt & " +
            test_exec_pty::windows_ping_sleep_command(30UL);
 #else
     return "IFS= read line; printf '%s' \"$line\" > fast-session-input.txt; sleep 30";
