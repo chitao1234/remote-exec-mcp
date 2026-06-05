@@ -297,9 +297,9 @@ impl TargetHandle {
             Err(err) => {
                 *self.cached_health.lock().await = Some(CachedTargetHealth::unhealthy(&err));
                 if let DaemonClientError::Rpc { .. } | DaemonClientError::Decode(_) = &err {
-                    tracing::warn!(target = %name, error = %err, "target health refresh failed");
+                    tracing::debug!(target = %name, error = %err, "target health refresh failed");
                 } else {
-                    tracing::warn!(target = %name, error = %err, "target unreachable during health refresh");
+                    tracing::debug!(target = %name, error = %err, "target unreachable during health refresh");
                 }
                 Err(err.into())
             }

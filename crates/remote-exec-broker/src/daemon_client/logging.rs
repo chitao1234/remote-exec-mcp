@@ -93,23 +93,48 @@ impl<'a> RpcCallContext<'a> {
     }
 
     pub(in crate::daemon_client) fn log_transport_error(self, err: &reqwest::Error) {
-        log_rpc!(warn, self, self.kind.label("transport failed"), error = %err,);
+        if self.is_health_rpc() {
+            log_rpc!(debug, self, self.kind.label("transport failed"), error = %err,);
+        } else {
+            log_rpc!(warn, self, self.kind.label("transport failed"), error = %err,);
+        }
     }
 
     pub(in crate::daemon_client) fn log_status_error(self, status: reqwest::StatusCode) {
-        log_rpc!(
-            warn,
-            self,
-            self.kind.label("returned error status"),
-            status = status.as_u16(),
-        );
+        if self.is_health_rpc() {
+            log_rpc!(
+                debug,
+                self,
+                self.kind.label("returned error status"),
+                status = status.as_u16(),
+            );
+        } else {
+            log_rpc!(
+                warn,
+                self,
+                self.kind.label("returned error status"),
+                status = status.as_u16(),
+            );
+        }
     }
 
     pub(in crate::daemon_client) fn log_read_error(self, err: &reqwest::Error) {
-        log_rpc!(warn, self, self.kind.label("body read failed"), error = %err,);
+        if self.is_health_rpc() {
+            log_rpc!(debug, self, self.kind.label("body read failed"), error = %err,);
+        } else {
+            log_rpc!(warn, self, self.kind.label("body read failed"), error = %err,);
+        }
     }
 
     pub(in crate::daemon_client) fn log_decode_error(self, err: &serde_json::Error) {
-        log_rpc!(warn, self, self.kind.label("decode failed"), error = %err,);
+        if self.is_health_rpc() {
+            log_rpc!(debug, self, self.kind.label("decode failed"), error = %err,);
+        } else {
+            log_rpc!(warn, self, self.kind.label("decode failed"), error = %err,);
+        }
+    }
+
+    pub(in crate::daemon_client) fn is_health_rpc(self) -> bool {
+        matches!(self.subject, RpcLogSubject::Path("/v1/health"))
     }
 }

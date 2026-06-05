@@ -29,7 +29,9 @@ pub async fn log_http_request(request: Request, next: Next) -> Response {
     let status = response.status();
     let elapsed_ms = started.elapsed().as_millis() as u64;
 
-    if status.is_server_error() {
+    if path == "/v1/health" {
+        tracing::debug!(request_id = %request_id, %method, path = %path, status = status.as_u16(), elapsed_ms, "http request completed");
+    } else if status.is_server_error() {
         tracing::error!(request_id = %request_id, %method, path = %path, status = status.as_u16(), elapsed_ms, "http request completed");
     } else if status.is_client_error() {
         tracing::warn!(request_id = %request_id, %method, path = %path, status = status.as_u16(), elapsed_ms, "http request completed");

@@ -12,6 +12,16 @@ use super::{
     DaemonClientError, RpcCallContext, RpcCallKind, RpcErrorDecodePolicy, decode_rpc_error,
 };
 
+macro_rules! trace_health_or_warn {
+    ($path:expr, $($fields:tt)*) => {
+        if $path == "/v1/health" {
+            tracing::debug!($($fields)*);
+        } else {
+            tracing::warn!($($fields)*);
+        }
+    };
+}
+
 #[derive(Clone)]
 pub struct DaemonClient {
     pub(super) client: reqwest::Client,
@@ -156,11 +166,13 @@ impl DaemonClient {
             Ok(result) => result,
             Err(_) => {
                 let timeout_ms = self.request_timeout.as_millis() as u64;
-                tracing::warn!(
+                let elapsed_ms = started.elapsed().as_millis() as u64;
+                trace_health_or_warn!(
+                    path,
                     target = %self.target_name,
                     base_url = %self.base_url,
                     path,
-                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    elapsed_ms,
                     timeout_ms,
                     "daemon rpc timed out"
                 );
@@ -235,11 +247,13 @@ impl DaemonClient {
         started: std::time::Instant,
         err: reqwest::Error,
     ) -> DaemonClientError {
-        tracing::warn!(
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        trace_health_or_warn!(
+            path,
             target = %self.target_name,
             base_url = %self.base_url,
             path,
-            elapsed_ms = started.elapsed().as_millis() as u64,
+            elapsed_ms,
             error = %err,
             "daemon rpc transport failed"
         );

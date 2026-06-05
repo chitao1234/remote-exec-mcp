@@ -83,7 +83,8 @@ void log_request_result(const HttpRequest& request, int status, std::uint64_t st
     message.field("request_id", request_id_for_request(request))
         .field("status", status)
         .field("elapsed_ms", (platform::monotonic_ms() - started_at_ms));
-    log_message(level_for_status(status), "server", message.str());
+    const LogLevel level = request.path == "/v1/health" ? LOG_DEBUG : level_for_status(status);
+    log_message(level, "server", message.str());
 }
 
 int handle_streaming_transfer_export_request(const AppState& state,
