@@ -13,6 +13,15 @@
 
 namespace fs = test_fs;
 
+namespace {
+
+#ifdef _WIN32
+const unsigned long WINDOWS_LIVE_SESSION_SLEEP_SECONDS = 8UL;
+const unsigned long WINDOWS_RESIZE_HELPER_SLEEP_SECONDS = 2UL;
+#endif
+
+} // namespace
+
 static HttpRequest json_request(const std::string& path, const Json& body) {
     HttpRequest request;
     request.method = "POST";
@@ -141,7 +150,8 @@ static Json poll_exec_until_done(AppState& state,
 
 static std::string long_running_non_tty_command() {
 #ifdef _WIN32
-    return test_exec_pty::windows_stdin_echo_sleep_helper_command("--server-routes-helper", "ignored", 30UL);
+    return test_exec_pty::windows_stdin_echo_sleep_helper_command(
+        "--server-routes-helper", "ignored", WINDOWS_LIVE_SESSION_SLEEP_SECONDS);
 #else
     return "printf ready; sleep 5";
 #endif
@@ -149,7 +159,7 @@ static std::string long_running_non_tty_command() {
 
 static std::string slow_tty_command() {
 #ifdef _WIN32
-    return "echo slow&" + test_exec_pty::windows_ping_sleep_command(30UL);
+    return "echo slow&" + test_exec_pty::windows_ping_sleep_command(WINDOWS_LIVE_SESSION_SLEEP_SECONDS);
 #else
     return "printf slow; sleep 30";
 #endif
@@ -157,7 +167,8 @@ static std::string slow_tty_command() {
 
 static std::string fast_tty_file_command() {
 #ifdef _WIN32
-    return test_exec_pty::windows_stdin_file_helper_command("--server-routes-helper", "fast-session-input.txt", 30UL);
+    return test_exec_pty::windows_stdin_file_helper_command(
+        "--server-routes-helper", "fast-session-input.txt", WINDOWS_LIVE_SESSION_SLEEP_SECONDS);
 #else
     return "IFS= read line; printf '%s' \"$line\" > fast-session-input.txt; sleep 30";
 #endif
@@ -173,7 +184,7 @@ static std::string tty_round_trip_command() {
 
 static std::string tty_resize_command() {
 #ifdef _WIN32
-    return test_exec_pty::windows_resize_helper_command("--server-routes-helper");
+    return test_exec_pty::windows_resize_helper_command("--server-routes-helper", WINDOWS_RESIZE_HELPER_SLEEP_SECONDS);
 #else
     return "stty -a; printf ready; IFS= read line; stty -a; sleep 30";
 #endif

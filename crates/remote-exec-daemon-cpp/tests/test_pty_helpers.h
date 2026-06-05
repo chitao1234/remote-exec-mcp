@@ -154,8 +154,9 @@ inline std::string windows_tty_flag_helper_command(const std::string& helper_arg
            windows_quote_arg(flag_file_name);
 }
 
-inline std::string windows_resize_helper_command(const std::string& helper_arg) {
-    return quoted_test_executable_path() + " " + windows_quote_arg(helper_arg) + " resize";
+inline std::string windows_resize_helper_command(const std::string& helper_arg, unsigned long sleep_seconds) {
+    return quoted_test_executable_path() + " " + windows_quote_arg(helper_arg) + " resize " +
+           std::to_string(sleep_seconds);
 }
 
 inline std::string read_stdin_line_for_helper() {
@@ -221,13 +222,14 @@ inline int run_windows_stdin_helper(int argc, char** argv, int mode_index) {
         return 0;
     }
     if (mode == "resize") {
-        TEST_ASSERT(argc == mode_index + 1);
+        TEST_ASSERT(argc == mode_index + 2);
         std::printf("ready\nrows=24 cols=120\n");
         std::fflush(stdout);
         (void)read_stdin_line_for_helper();
         std::printf("rows=33 cols=101\n");
         std::fflush(stdout);
-        platform::sleep_ms(30000UL);
+        const unsigned long sleep_seconds = parse_helper_sleep_seconds(argv[mode_index + 1]);
+        platform::sleep_ms(sleep_seconds * 1000UL);
         return 0;
     }
 

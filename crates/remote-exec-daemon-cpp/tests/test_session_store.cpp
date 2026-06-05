@@ -34,6 +34,10 @@
 
 namespace fs = test_fs;
 
+#ifdef _WIN32
+const unsigned long WINDOWS_RESIZE_HELPER_SLEEP_SECONDS = 2UL;
+#endif
+
 class DrainMockProcessSession : public ProcessSession {
   public:
     explicit DrainMockProcessSession(bool descendant_cleanup_supported)
@@ -271,7 +275,7 @@ static std::string windows_tty_flag_helper_command(const std::string& flag_file_
 }
 
 static std::string windows_resize_helper_command() {
-    return test_exec_pty::windows_resize_helper_command("--session-store-helper");
+    return test_exec_pty::windows_resize_helper_command("--session-store-helper", WINDOWS_RESIZE_HELPER_SLEEP_SECONDS);
 }
 
 static bool marker_count_increases(const fs::path& path, std::size_t baseline, unsigned long timeout_ms) {
