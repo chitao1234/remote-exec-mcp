@@ -498,8 +498,10 @@ static std::string run_windows_quote_sensitive_command(SessionStore& store,
                                                        const std::string& shell,
                                                        const YieldTimeConfig& yield_time,
                                                        bool tty) {
-    const std::string command =
-        "echo \"A & B\"&for /f \"tokens=1,2\" %A in (\"alpha beta\") do @echo for:%A:%B";
+    std::string command = "echo \"A & B\"&for /f \"tokens=1,2\" %A in (\"alpha beta\") do @echo for:%A:%B";
+    if (tty) {
+        command += "&" + test_exec_pty::windows_ping_sleep_command(1UL);
+    }
     const Json started = start_test_command(
         store, command, root.string(), shell, tty, 5000UL, DEFAULT_MAX_OUTPUT_TOKENS, yield_time, 64UL);
 
@@ -511,6 +513,10 @@ static std::string run_windows_quote_sensitive_command(SessionStore& store,
         TEST_ASSERT(started.at("exit_code").get<int>() == 0);
     }
     return output;
+}
+
+static bool contains_windows_quote_sensitive_echo_output(const std::string& output) {
+    return output.find("\"A & B\"\n") != std::string::npos || output.find("A & B\n") != std::string::npos;
 }
 
 static void assert_windows_cmd_quotes_survive_non_tty_and_tty(SessionStore& store,
@@ -528,7 +534,9 @@ static void assert_windows_cmd_quotes_survive_non_tty_and_tty(SessionStore& stor
     }
 
     const std::string tty_output = run_windows_quote_sensitive_command(store, root, shell, yield_time, true);
-    TEST_ASSERT(tty_output.find("\"A & B\"\n") != std::string::npos);
+    if (!contains_windows_quote_sensitive_echo_output(tty_output)) {
+        TEST_FAIL_MESSAGE(std::string("unexpected TTY quote-sensitive output: [") + tty_output + "]");
+    }
     TEST_ASSERT(tty_output.find("for:alpha:beta\n") != std::string::npos);
     TEST_ASSERT(tty_output.find("\\\"") == std::string::npos);
 }

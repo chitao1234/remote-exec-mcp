@@ -306,7 +306,12 @@ void test_terminal_output_filter_does_not_finalize_partial_rows_on_flush_due() {
                                                                   "\r\x1b[1Aprompt>echo hello\x1b[0K\r\nhello\r\n",
                                                                   1150U))
             .empty());
-    TEST_ASSERT(drain_winpty_transcript_for_test(&normalizer) == "prompt>echo hello\nhello");
+    TEST_ASSERT(normalize_winpty_transcript_chunk_for_test(&normalizer, flush_terminal_output_due_for_test(&filter, 1299U))
+                    .empty());
+    const std::string actual =
+        normalize_winpty_transcript_chunk_for_test(&normalizer, flush_terminal_output_due_for_test(&filter, 1300U)) +
+        drain_winpty_transcript_for_test(&normalizer);
+    TEST_ASSERT(actual == "prompt>echo hello\nhello\n");
 }
 
 void test_winpty_transcript_normalizer_reconstructs_banner_and_prompt() {
