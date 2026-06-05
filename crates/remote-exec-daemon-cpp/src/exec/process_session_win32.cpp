@@ -224,6 +224,40 @@ bool is_wine_runtime() {
     return ntdll != nullptr && GetProcAddress(ntdll, "wine_get_version") != nullptr;
 }
 
+DWORD process_id_from_process_handle(HANDLE process) {
+    typedef LONG NTSTATUS;
+    typedef NTSTATUS(WINAPI * NtQueryInformationProcessFn)(HANDLE, ULONG, PVOID, ULONG, PULONG);
+    struct ProcessBasicInformation {
+        PVOID reserved1;
+        PVOID peb_base_address;
+        PVOID reserved2[2];
+        ULONG_PTR unique_process_id;
+        PVOID reserved3;
+    };
+
+    if (process == nullptr || process == INVALID_HANDLE_VALUE) {
+        return 0U;
+    }
+
+    const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    if (ntdll == nullptr) {
+        return 0U;
+    }
+    const NtQueryInformationProcessFn query =
+        reinterpret_cast<NtQueryInformationProcessFn>(GetProcAddress(ntdll, "NtQueryInformationProcess"));
+    if (query == nullptr) {
+        return 0U;
+    }
+
+    ProcessBasicInformation info;
+    ZeroMemory(&info, sizeof(info));
+    const NTSTATUS status = query(process, 0, &info, sizeof(info), nullptr);
+    if (status < 0 || info.unique_process_id == 0U) {
+        return 0U;
+    }
+    return static_cast<DWORD>(info.unique_process_id);
+}
+
 std::string utf8_from_wide(const std::wstring& wide) {
     try {
         return win32_utf8::utf8_from_wide(wide);
@@ -416,11 +450,16 @@ UniqueHandle open_winpty_pipe(LPCWSTR name, DWORD desired_access) {
     return UniqueHandle(handle);
 }
 
-UniqueHandle spawn_winpty_process(winpty_t* winpty,
-                                  const std::string& command,
-                                  const std::string& workdir,
-                                  const std::string& shell,
-                                  bool login) {
+struct SpawnedWinptyProcess {
+    UniqueHandle process_handle;
+    DWORD process_id;
+};
+
+SpawnedWinptyProcess spawn_winpty_process(winpty_t* winpty,
+                                          const std::string& command,
+                                          const std::string& workdir,
+                                          const std::string& shell,
+                                          bool login) {
     const std::string command_line = windows_process_command_line(command, shell, login);
     std::wstring wide_command_line = wide_from_utf8(command_line);
     std::wstring wide_workdir = workdir.empty() ? std::wstring() : wide_from_utf8(workdir);
@@ -455,7 +494,11 @@ UniqueHandle spawn_winpty_process(winpty_t* winpty,
     UniqueHandle process(process_handle);
     UniqueHandle thread(thread_handle);
     thread.reset();
-    return process;
+
+    SpawnedWinptyProcess spawned;
+    spawned.process_handle = std::move(process);
+    spawned.process_id = process_id_from_process_handle(spawned.process_handle.get());
+    return spawned;
 }
 
 std::string read_winpty_available_raw(HANDLE pipe, bool* eof) {
@@ -579,9 +622,14 @@ bool run_taskkill_tree(DWORD pid) {
 
 class WinptyProcessSession : public ProcessSession {
 public:
-    WinptyProcessSession(UniqueWinpty winpty, UniqueHandle process_handle, UniqueHandle stdin_write, UniqueHandle stdout_read)
+    WinptyProcessSession(UniqueWinpty winpty,
+                         UniqueHandle process_handle,
+                         DWORD process_id,
+                         UniqueHandle stdin_write,
+                         UniqueHandle stdout_read)
         : winpty_(std::move(winpty)), process_handle_(std::move(process_handle)),
-          stdin_write_(std::move(stdin_write)), stdout_read_(std::move(stdout_read)), console_closed_(false) {}
+          process_id_(process_id), stdin_write_(std::move(stdin_write)), stdout_read_(std::move(stdout_read)),
+          console_closed_(false) {}
 
     ~WinptyProcessSession() override { terminate(); }
 
@@ -666,11 +714,10 @@ private:
     }
 
     bool attempt_process_tree_termination() {
-        if (!process_handle_.valid()) {
+        if (!process_handle_.valid() || process_id_ == 0U) {
             return false;
         }
-        const DWORD pid = GetProcessId(process_handle_.get());
-        return run_taskkill_tree(pid);
+        return run_taskkill_tree(process_id_);
     }
 
     void ensure_process_terminated() {
@@ -682,6 +729,7 @@ private:
 
     UniqueWinpty winpty_;
     UniqueHandle process_handle_;
+    DWORD process_id_;
     UniqueHandle stdin_write_;
     UniqueHandle stdout_read_;
     bool console_closed_;
@@ -694,10 +742,14 @@ std::unique_ptr<ProcessSession> launch_winpty_process_session(
     UniqueWinpty winpty = open_winpty_session();
     UniqueHandle stdin_write(open_winpty_pipe(winpty_conin_name(winpty.get()), GENERIC_WRITE));
     UniqueHandle stdout_read(open_winpty_pipe(winpty_conout_name(winpty.get()), GENERIC_READ));
-    UniqueHandle process_handle(spawn_winpty_process(winpty.get(), command, workdir, shell, login));
+    SpawnedWinptyProcess process = spawn_winpty_process(winpty.get(), command, workdir, shell, login);
 
     return std::unique_ptr<ProcessSession>(
-        new WinptyProcessSession(std::move(winpty), std::move(process_handle), std::move(stdin_write), std::move(stdout_read)));
+        new WinptyProcessSession(std::move(winpty),
+                                 std::move(process.process_handle),
+                                 process.process_id,
+                                 std::move(stdin_write),
+                                 std::move(stdout_read)));
 }
 #endif
 
