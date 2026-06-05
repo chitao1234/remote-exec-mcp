@@ -1284,10 +1284,16 @@ mod tests {
     fn winpty_output_state_does_not_finalize_partial_rows_on_flush_due() {
         let mut state = WinptyOutputState::default();
 
-        assert_eq!(state.filter_chunk_at("prompt>echo hello\x1b[116Ghell\r\no", 1000).output, "");
+        assert_eq!(
+            state
+                .filter_chunk_at("prompt>echo hello\x1b[116Ghell\r\no", 1000)
+                .output,
+            ""
+        );
         assert_eq!(state.flush_due_at(1100), "");
         assert_eq!(
-            state.filter_chunk_at("\r\x1b[1Aprompt>echo hello\x1b[0K\r\nhello\r\n", 1150)
+            state
+                .filter_chunk_at("\r\x1b[1Aprompt>echo hello\x1b[0K\r\nhello\r\n", 1150)
                 .output,
             ""
         );

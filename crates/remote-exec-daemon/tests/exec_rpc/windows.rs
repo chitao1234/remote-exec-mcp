@@ -711,11 +711,14 @@ async fn exec_start_normalizes_winpty_repainted_split_lines_on_windows() {
             "/v1/exec/start",
             &windows_cmd_start_request("echo hello", true, Some(COMPLETED_COMMAND_YIELD_MS), None),
         )
-    .await;
+        .await;
 
     assert_eq!(response.output().exit_code, Some(0));
     let output = response.output().output.replace('\r', "");
-    assert_eq!(output, "hello\n", "winpty output did not normalize to one logical line");
+    assert_eq!(
+        output, "hello\n",
+        "winpty output did not normalize to one logical line"
+    );
     assert!(
         !output.contains("hell\no"),
         "winpty output preserved split repaint line: {output:?}"
