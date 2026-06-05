@@ -218,6 +218,7 @@ WINDOWS_BASIC_MUTEX_TEST_SRCS = \
 WINDOWS_CONSOLE_OUTPUT_TEST_SRCS = \
 	$(SOURCE_PREFIX)tests/test_console_output.cpp \
 	$(SOURCE_PREFIX)src/exec/console_output.cpp \
+	$(PLATFORM_SRCS) \
 	$(WIN32_ERROR_SRCS) \
 	$(LOGGING_SRCS) \
 	$(TEXT_UTILS_SRCS)

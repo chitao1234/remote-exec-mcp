@@ -12,6 +12,7 @@
 #include "core/logging.h"
 #include "exec/console_output.h"
 #include "exec/utf8_stream_decode.h"
+#include "platform/platform.h"
 #include "platform/win32_error.h"
 #include "platform/win32_utf8.h"
 
@@ -304,10 +305,6 @@ std::string merge_joinable_rows(const std::string& previous, const std::string& 
     return previous + current;
 }
 
-std::uint64_t console_output_monotonic_ms() {
-    return static_cast<std::uint64_t>(GetTickCount());
-}
-
 } // namespace
 
 std::string read_available_console_output(HANDLE pipe, std::string* carry) {
@@ -336,7 +333,7 @@ TerminalOutputFilter::TerminalOutputFilter(unsigned long debounce_ms, unsigned l
       debounce_ms_(debounce_ms), max_hold_ms_(max_hold_ms), debounce_enabled_(debounce_ms > 0UL) {}
 
 std::string TerminalOutputFilter::filter_chunk(const std::string& chunk) {
-    return filter_chunk_at(chunk, console_output_monotonic_ms());
+    return filter_chunk_at(chunk, platform::monotonic_ms());
 }
 
 std::string TerminalOutputFilter::filter_chunk_at(const std::string& chunk, std::uint64_t now_ms) {
@@ -380,7 +377,7 @@ std::string TerminalOutputFilter::filter_chunk_at(const std::string& chunk, std:
 }
 
 std::string TerminalOutputFilter::flush_due() {
-    return flush_due_at(console_output_monotonic_ms());
+    return flush_due_at(platform::monotonic_ms());
 }
 
 std::string TerminalOutputFilter::flush_due_at(std::uint64_t now_ms) {
@@ -987,7 +984,7 @@ std::string TerminalOutputFilter::emit_due_rows(std::uint64_t now_ms) {
 
 std::string TerminalOutputFilter::emit_all_pending_rows() {
     if (!touched_rows_.empty()) {
-        queue_touched_rows(console_output_monotonic_ms());
+        queue_touched_rows(platform::monotonic_ms());
     }
     if (pending_rows_.empty()) {
         return "";
