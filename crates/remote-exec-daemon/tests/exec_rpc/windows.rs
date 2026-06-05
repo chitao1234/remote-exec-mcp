@@ -673,13 +673,21 @@ async fn exec_empty_poll_truncates_pty_output_to_max_output_tokens_on_windows() 
         );
         assert_eq!(
             response.output().original_token_count,
-            Some(7),
+            Some(if backend == WindowsPtyTestBackend::Winpty {
+                7
+            } else {
+                8
+            }),
             "{} response: {response:#?}",
             backend.name()
         );
         assert_eq!(
             strip_terminal_noise(&response.output().output),
-            "Total output lines: 1\n\n\u{2026}7 tokens truncated\u{2026}",
+            if backend == WindowsPtyTestBackend::Winpty {
+                "Total output lines: 1\n\n\u{2026}7 tokens truncated\u{2026}"
+            } else {
+                "Total output lines: 1\n\n\u{2026}8 tokens truncated\u{2026}"
+            },
             "{} response: {response:#?}",
             backend.name()
         );
@@ -703,7 +711,7 @@ async fn exec_start_normalizes_winpty_repainted_split_lines_on_windows() {
             "/v1/exec/start",
             &windows_cmd_start_request("echo hello", true, Some(COMPLETED_COMMAND_YIELD_MS), None),
         )
-        .await;
+    .await;
 
     assert_eq!(response.output().exit_code, Some(0));
     let output = response.output().output.replace('\r', "");

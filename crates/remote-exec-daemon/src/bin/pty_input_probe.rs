@@ -32,7 +32,7 @@ fn main() -> io::Result<()> {
         }
         "delayed_tokens" => {
             thread::sleep(Duration::from_millis(400));
-            stdout.write_all(b"one two three four five six")?;
+            stdout.write_all(b"one two three four five six\n")?;
             stdout.flush()?;
             thread::sleep(Duration::from_secs(30));
         }

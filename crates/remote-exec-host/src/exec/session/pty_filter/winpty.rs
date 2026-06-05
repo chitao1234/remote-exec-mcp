@@ -37,11 +37,7 @@ impl TerminalOutputFilter for WinptyOutputState {
 
     fn flush_due(&mut self) -> String {
         let rendered = self.renderer.flush_due();
-        let mut output = self.normalizer.filter_chunk(&rendered);
-        if !rendered.is_empty() {
-            output.push_str(&self.normalizer.flush_pending_partial_line());
-        }
-        output
+        self.normalizer.filter_chunk(&rendered)
     }
 
     fn drain_pending(&mut self) -> String {
@@ -52,6 +48,23 @@ impl TerminalOutputFilter for WinptyOutputState {
 
     fn set_physical_width(&mut self, cols: u16) {
         self.normalizer.set_physical_width(cols as usize);
+    }
+}
+
+#[cfg(test)]
+impl WinptyOutputState {
+    fn filter_chunk_at(&mut self, chunk: &str, now_ms: u64) -> TerminalOutputResult {
+        let rendered = self.renderer.filter_chunk_at(chunk, now_ms);
+
+        TerminalOutputResult {
+            output: self.normalizer.filter_chunk(&rendered.output),
+            response: rendered.response,
+        }
+    }
+
+    fn flush_due_at(&mut self, now_ms: u64) -> String {
+        let rendered = self.renderer.flush_due_at(now_ms);
+        self.normalizer.filter_chunk(&rendered)
     }
 }
 
@@ -172,7 +185,6 @@ impl TerminalOutputRenderer {
         } else {
             self.emit_touched_rows()
         };
-
         self.has_open_row = false;
         self.open_row_text.clear();
 
@@ -778,17 +790,6 @@ impl WinptyTranscriptNormalizer {
         output
     }
 
-    fn flush_pending_partial_line(&mut self) -> String {
-        if self.pending_physical_line.is_empty() {
-            return String::new();
-        }
-
-        let mut output = String::new();
-        let line = std::mem::take(&mut self.pending_physical_line);
-        self.process_final_physical_line(&line, &mut output);
-        output
-    }
-
     fn process_physical_line(&mut self, raw_line: &str, output: &mut String) {
         let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
 
@@ -1277,6 +1278,20 @@ mod tests {
 
         assert_eq!(renderer.filter_chunk_at("prompt:", 1000).output, "");
         assert_eq!(renderer.drain_pending(), "prompt:");
+    }
+
+    #[test]
+    fn winpty_output_state_does_not_finalize_partial_rows_on_flush_due() {
+        let mut state = WinptyOutputState::default();
+
+        assert_eq!(state.filter_chunk_at("prompt>echo hello\x1b[116Ghell\r\no", 1000).output, "");
+        assert_eq!(state.flush_due_at(1100), "");
+        assert_eq!(
+            state.filter_chunk_at("\r\x1b[1Aprompt>echo hello\x1b[0K\r\nhello\r\n", 1150)
+                .output,
+            ""
+        );
+        assert_eq!(state.drain_pending(), "prompt>echo hello\nhello\n");
     }
 
     #[test]
