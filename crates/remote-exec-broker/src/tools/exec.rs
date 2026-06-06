@@ -39,8 +39,7 @@ pub async fn exec_command(
         cmd_preview = %cmd_preview,
         "exec command requested"
     );
-    let target = state.configured_target(&input.target)?;
-    let path_policy = target_path_policy(&input.target, target).await?;
+    let (target, path_policy) = state.exec_target(&input.target).await?;
 
     if let Some(output) =
         maybe_intercepted_exec_output(state, &input, &target_name, path_policy).await?
@@ -133,7 +132,7 @@ async fn write_stdin_inner(
         );
     }
 
-    let target = state.configured_target(&record.target)?;
+    let target = state.session_target(&record.target).await?;
     let response = forward_exec_write(state, target, &record, input).await?;
     validate_exec_response(&response)?;
     let write_response = ExecWriteResponse { response };
@@ -361,13 +360,4 @@ fn validate_completed_output(response: &ExecOutputResponse) -> anyhow::Result<()
         "daemon returned malformed exec response: completed response missing exit_code"
     );
     Ok(())
-}
-
-async fn target_path_policy(
-    target_name: &str,
-    target: &crate::TargetHandle,
-) -> anyhow::Result<PathPolicy> {
-    let info = target.verified_cached_daemon_info(target_name).await?;
-
-    Ok(info.path_policy())
 }

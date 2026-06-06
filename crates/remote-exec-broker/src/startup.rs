@@ -12,6 +12,7 @@ use crate::{
     local::backend::LocalDaemonClient,
     port_forward,
     session_store::SessionStore,
+    state::BrokerStateInit,
     target::{TargetBackend, TargetHandle, ensure_expected_daemon_name},
 };
 
@@ -27,7 +28,10 @@ pub async fn run(config: config::ValidatedBrokerConfig) -> anyhow::Result<()> {
     );
     let state = build_state(config).await?;
     let target_refresh = PeriodicTargetRefreshTask::spawn(&state);
-    tracing::info!(configured_targets = state.targets.len(), "broker ready");
+    tracing::info!(
+        configured_targets = state.configured_target_count(),
+        "broker ready"
+    );
     let serve_result = crate::mcp_server::serve(state, &mcp).await;
     let refresh_result = target_refresh.shutdown().await;
 
@@ -52,7 +56,7 @@ pub async fn build_state(config: config::ValidatedBrokerConfig) -> anyhow::Resul
     insert_local_target(&config, &mut targets).await?;
     insert_remote_targets(&config.targets, &mut targets).await?;
 
-    Ok(BrokerState {
+    Ok(BrokerState::new(BrokerStateInit {
         enable_transfer_compression: config.enable_transfer_compression,
         transfer_limits: config.transfer_limits,
         disable_structured_content: config.disable_structured_content,
@@ -63,7 +67,7 @@ pub async fn build_state(config: config::ValidatedBrokerConfig) -> anyhow::Resul
         sessions: SessionStore::default(),
         port_forwards: port_forward::PortForwardStore::default(),
         targets,
-    })
+    }))
 }
 
 fn compile_host_sandbox(
@@ -258,15 +262,12 @@ async fn periodic_target_refresh_loop(state: BrokerState, cancel: CancellationTo
             _ = interval.tick() => {}
         }
 
-        for (name, handle) in &state.targets {
+        for name in state.remote_target_names() {
             if cancel.is_cancelled() {
                 return;
             }
-            if handle.as_remote().is_none() {
-                continue;
-            }
 
-            let refresh = handle.refresh_health_and_cache(name);
+            let refresh = state.refresh_remote_target_health(&name);
             let result = tokio::select! {
                 biased;
                 _ = cancel.cancelled() => return,
@@ -275,11 +276,11 @@ async fn periodic_target_refresh_loop(state: BrokerState, cancel: CancellationTo
 
             match result {
                 Ok(Some(previous_daemon_instance_id)) => {
-                    state.sessions.remove_target(name).await;
+                    state.sessions.remove_target(&name).await;
                     match state
                         .port_forwards
                         .close_target_instance(
-                            name,
+                            &name,
                             &previous_daemon_instance_id,
                             "target daemon instance changed",
                         )
@@ -456,9 +457,9 @@ mod tests {
             "startup probes did not run concurrently: {:?}",
             started.elapsed()
         );
-        assert_eq!(state.targets.len(), 4);
-        for handle in state.targets.values() {
-            assert_eq!(handle.cached_daemon_info().await, None);
+        assert_eq!(state.configured_target_count(), 4);
+        for snapshot in state.target_status_snapshots().await {
+            assert_eq!(snapshot.daemon_info, None);
         }
     }
 

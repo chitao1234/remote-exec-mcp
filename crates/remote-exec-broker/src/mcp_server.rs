@@ -235,7 +235,7 @@ mod tool_router_contract_tests {
 
     #[test]
     fn default_server_hides_hidden_file_tools() {
-        let state = crate::BrokerState {
+        let state = crate::BrokerState::new(crate::state::BrokerStateInit {
             enable_transfer_compression: true,
             transfer_limits: Default::default(),
             disable_structured_content: false,
@@ -246,7 +246,7 @@ mod tool_router_contract_tests {
             sessions: Default::default(),
             port_forwards: Default::default(),
             targets: Default::default(),
-        };
+        });
         let router = BrokerServer::new(state).tool_router;
         let names: std::collections::BTreeSet<_> = router
             .list_all()

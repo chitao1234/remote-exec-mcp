@@ -5,7 +5,6 @@ use remote_exec_proto::rpc::{
 };
 
 use crate::mcp_server::ToolCallOutput;
-use crate::target::TargetHandle;
 
 pub async fn read(state: &crate::BrokerState, input: ReadInput) -> anyhow::Result<ToolCallOutput> {
     let target_name = input.target.clone();
@@ -29,7 +28,7 @@ pub async fn read(state: &crate::BrokerState, input: ReadInput) -> anyhow::Resul
         max_bytes = state.tools.file.max_read_bytes,
         "file read requested"
     );
-    let target = file_tool_target(state, &target_name).await?;
+    let target = state.file_tool_target(&target_name).await?;
     let response = target
         .file_read_checked(
             &target_name,
@@ -59,7 +58,7 @@ pub async fn write(
         content_len = input.content.len(),
         "file write requested"
     );
-    let target = file_tool_target(state, &target_name).await?;
+    let target = state.file_tool_target(&target_name).await?;
     let response = target
         .file_write_checked(
             &target_name,
@@ -95,7 +94,7 @@ pub async fn edit(state: &crate::BrokerState, input: EditInput) -> anyhow::Resul
         replace_all = input.replace_all,
         "file edit requested"
     );
-    let target = file_tool_target(state, &target_name).await?;
+    let target = state.file_tool_target(&target_name).await?;
     let response = target
         .file_edit_checked(
             &target_name,
@@ -119,22 +118,6 @@ pub async fn edit(state: &crate::BrokerState, input: EditInput) -> anyhow::Resul
         "file updated successfully with {} lines, {} {replacement_label}",
         response.line_count, response.replacements
     )))
-}
-
-async fn file_tool_target<'a>(
-    state: &'a crate::BrokerState,
-    target_name: &str,
-) -> anyhow::Result<&'a TargetHandle> {
-    let target = state.configured_target(target_name)?;
-    let info = target.verified_cached_daemon_info(target_name).await?;
-    let Some(version) = info.capabilities.file_tool_protocol_version else {
-        anyhow::bail!("target `{target_name}` does not support file tool protocol version 1");
-    };
-    anyhow::ensure!(
-        version.get() >= 1,
-        "target `{target_name}` does not support file tool protocol version 1"
-    );
-    Ok(target)
 }
 
 fn log_read_completed(target: &str, path: &str, response: &FileReadResponse) {

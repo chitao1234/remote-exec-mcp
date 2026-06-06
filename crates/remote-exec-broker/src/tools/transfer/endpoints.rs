@@ -70,18 +70,6 @@ pub(super) enum EndpointTargetContext {
     },
 }
 
-async fn verified_remote_daemon_info(
-    state: &crate::BrokerState,
-    target_name: &str,
-) -> anyhow::Result<crate::CachedDaemonInfo> {
-    state
-        .verified_remote_target(target_name)
-        .await?
-        .cached_daemon_info()
-        .await
-        .ok_or_else(|| anyhow::anyhow!("target info missing after identity verification"))
-}
-
 async fn endpoint_target_context(
     state: &crate::BrokerState,
     target_name: &str,
@@ -90,7 +78,7 @@ async fn endpoint_target_context(
         BrokerHostOrTarget::BrokerHost => Ok(EndpointTargetContext::local()),
         BrokerHostOrTarget::Target(target_name) => EndpointTargetContext::remote(
             target_name,
-            verified_remote_daemon_info(state, target_name).await?,
+            state.transfer_remote_daemon_info(target_name).await?,
         ),
     }
 }

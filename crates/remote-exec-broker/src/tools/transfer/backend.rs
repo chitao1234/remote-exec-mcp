@@ -97,7 +97,7 @@ pub(super) async fn backend_for_endpoint<'a>(
         match crate::local::BrokerHostOrTarget::from_transfer_endpoint(endpoint) {
             crate::local::BrokerHostOrTarget::BrokerHost => broker_host_backend(state),
             crate::local::BrokerHostOrTarget::Target(target_name) => {
-                let target = state.verified_remote_target(target_name).await?;
+                let target = state.transfer_remote_target(target_name).await?;
                 TransferEndpointBackend::Remote(RemoteTransferBackend { target })
             }
         },
@@ -112,7 +112,7 @@ pub(super) async fn backend_for_planned_endpoint<'a>(
     Ok(match endpoint.context().planned_daemon_instance_id() {
         None => broker_host_backend(state),
         Some(planned_daemon_instance_id) => {
-            let target = state.verified_remote_target(&raw_endpoint.target).await?;
+            let target = state.transfer_remote_target(&raw_endpoint.target).await?;
             let current = target
                 .target_info()
                 .await

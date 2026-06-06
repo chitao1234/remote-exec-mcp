@@ -83,8 +83,8 @@ async fn open_forwards(
         "port forwards open requested"
     );
 
-    let listen_side = state.forwarding_side(&listen_side_name).await?;
-    let connect_side = state.forwarding_side(&connect_side_name).await?;
+    let listen_side = state.port_forward_side(&listen_side_name).await?;
+    let connect_side = state.port_forward_side(&connect_side_name).await?;
     let mut reservations = state
         .port_forwards
         .reserve_open_batch(

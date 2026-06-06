@@ -223,7 +223,7 @@ impl TargetHandle {
         self.runtime_snapshot().await.daemon_info
     }
 
-    pub(crate) async fn verified_cached_daemon_info(
+    pub(crate) async fn cached_daemon_info_after_verification(
         &self,
         name: &str,
     ) -> anyhow::Result<CachedDaemonInfo> {
@@ -387,8 +387,13 @@ impl TargetHandle {
 }
 
 impl RemoteTargetHandle<'_> {
-    pub(crate) async fn cached_daemon_info(&self) -> Option<CachedDaemonInfo> {
-        self.handle.cached_daemon_info().await
+    pub(crate) async fn cached_daemon_info_after_verification(
+        &self,
+        name: &str,
+    ) -> anyhow::Result<CachedDaemonInfo> {
+        self.handle
+            .cached_daemon_info_after_verification(name)
+            .await
     }
 
     pub(crate) async fn target_info(&self) -> Result<TargetInfoResponse, DaemonClientError> {

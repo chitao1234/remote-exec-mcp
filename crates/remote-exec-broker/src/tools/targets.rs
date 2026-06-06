@@ -10,17 +10,15 @@ pub async fn list_targets(
 ) -> anyhow::Result<ToolCallOutput> {
     // list_targets can report multiple configured targets, including unavailable ones,
     // so a synthetic single-target request context would be misleading.
-    let mut targets = Vec::with_capacity(state.targets.len());
-    for (name, handle) in &state.targets {
-        let daemon_info = handle
-            .cached_daemon_info()
-            .await
-            .map(|info| ListTargetDaemonInfo {
-                identity: info.identity,
-                capabilities: info.capabilities,
-            });
+    let snapshots = state.target_status_snapshots().await;
+    let mut targets = Vec::with_capacity(snapshots.len());
+    for snapshot in snapshots {
+        let daemon_info = snapshot.daemon_info.map(|info| ListTargetDaemonInfo {
+            identity: info.identity,
+            capabilities: info.capabilities,
+        });
         targets.push(ListTargetEntry {
-            name: name.clone(),
+            name: snapshot.name,
             daemon_info,
         });
     }
@@ -85,16 +83,14 @@ fn format_targets_text(targets: &[ListTargetEntry]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use remote_exec_proto::public::ListTargetsInput;
 
     use super::list_targets;
-    use crate::{BrokerState, session_store::SessionStore};
+    use crate::{BrokerState, session_store::SessionStore, state::BrokerStateInit};
 
     #[tokio::test]
     async fn list_targets_returns_empty_text_and_array_for_empty_state() {
-        let state = BrokerState {
+        let state = BrokerState::new(BrokerStateInit {
             enable_transfer_compression: true,
             transfer_limits: remote_exec_proto::transfer::TransferLimits::default(),
             disable_structured_content: false,
@@ -104,8 +100,8 @@ mod tests {
             host_sandbox: None,
             sessions: SessionStore::default(),
             port_forwards: crate::port_forward::PortForwardStore::default(),
-            targets: BTreeMap::new(),
-        };
+            targets: Default::default(),
+        });
 
         let result = list_targets(&state, ListTargetsInput {}).await.unwrap();
         let call_result = result.into_call_tool_result(true);

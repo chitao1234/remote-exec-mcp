@@ -1469,10 +1469,11 @@ mod tests {
             )
             .await
             .unwrap();
-        let closed_ids = closed
+        let mut closed_ids = closed
             .iter()
             .map(|entry| entry.forward_id.as_str())
             .collect::<Vec<_>>();
+        closed_ids.sort_unstable();
 
         assert_eq!(
             closed_ids,
