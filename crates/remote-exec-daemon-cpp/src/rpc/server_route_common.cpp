@@ -158,7 +158,7 @@ HttpResponse handle_health(const AppState& state) {
                Json{
                    {"status", "ok"},
                    {"daemon_version", REMOTE_EXEC_CPP_VERSION},
-                   {"daemon_instance_id", state.daemon_instance_id},
+                   {"daemon_instance_id", state.metadata.daemon_instance_id},
                });
     return response;
 }
@@ -168,12 +168,12 @@ HttpResponse handle_target_info(const AppState& state) {
     Json body{
         {"target", state.config.target},
         {"daemon_version", REMOTE_EXEC_CPP_VERSION},
-        {"daemon_instance_id", state.daemon_instance_id},
-        {"hostname", state.hostname},
+        {"daemon_instance_id", state.metadata.daemon_instance_id},
+        {"hostname", state.metadata.hostname},
         {"platform", platform::platform_name()},
         {"arch", platform::arch_name()},
     };
-    write_daemon_capabilities(&body, state.capabilities);
+    write_daemon_capabilities(&body, state.metadata.capabilities);
     write_json(response, body);
     return response;
 }
@@ -190,7 +190,7 @@ HttpResponse handle_patch_apply(AppState& state, const HttpRequest& request) {
         write_json(response,
                    Json{
                        {"output", result.output},
-                       {"daemon_instance_id", state.daemon_instance_id},
+                       {"daemon_instance_id", state.metadata.daemon_instance_id},
                        {"updated_paths", result.updated_paths},
                    });
     });

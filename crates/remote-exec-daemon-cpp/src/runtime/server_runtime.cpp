@@ -30,15 +30,15 @@ std::string daemon_instance_id() {
 ServerRuntime::ServerRuntime(const DaemonConfig& config)
     : connections_(config.max_open_sessions), shutting_down_(false), accept_thread_(), maintenance_thread_() {
     state_.config = config;
-    state_.daemon_instance_id = daemon_instance_id();
-    state_.hostname = platform::hostname();
-    state_.default_shell = platform::resolve_default_shell(config.default_shell);
-    state_.capabilities = detect_daemon_capabilities();
-    state_.sandbox_enabled = config.sandbox_configured;
-    if (state_.sandbox_enabled) {
-        state_.sandbox = compile_filesystem_sandbox(config.sandbox);
+    state_.metadata.daemon_instance_id = daemon_instance_id();
+    state_.metadata.hostname = platform::hostname();
+    state_.metadata.default_shell = platform::resolve_default_shell(config.default_shell);
+    state_.metadata.capabilities = detect_daemon_capabilities();
+    state_.sandbox.enabled = config.sandbox_configured;
+    if (state_.sandbox.enabled) {
+        state_.sandbox.compiled = compile_filesystem_sandbox(config.sandbox);
     }
-    state_.port_tunnel_service = create_port_tunnel_service(config.port_forward_limits);
+    state_.services.port_tunnel = create_port_tunnel_service(config.port_forward_limits);
 }
 
 ServerRuntime::~ServerRuntime() {
@@ -68,12 +68,12 @@ void ServerRuntime::request_shutdown() {
         BasicLockGuard lock(mutex_);
         shutting_down_ = true;
     }
-    state_.shutdown_requested.store(true);
+    state_.shutdown.requested.store(true);
     shutdown_wakeup_.signal();
 
     connections_.begin_shutdown();
-    if (state_.port_tunnel_service) {
-        state_.port_tunnel_service->shutdown();
+    if (state_.services.port_tunnel) {
+        state_.services.port_tunnel->shutdown();
     }
 }
 

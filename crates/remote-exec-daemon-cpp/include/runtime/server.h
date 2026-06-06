@@ -12,21 +12,39 @@
 
 class PortTunnelService;
 
-struct AppState {
-    // AppState is owned by ServerRuntime and shared by route handlers only for
-    // the lifetime of a connection worker. Route handlers may create or close
-    // subsystem resources through these owners, but they do not own the runtime
-    // threads, listener socket, or daemon shutdown sequence.
-    DaemonConfig config;
+struct AppMetadata {
     std::string daemon_instance_id;
     std::string hostname;
     std::string default_shell;
     DaemonCapabilities capabilities;
-    bool sandbox_enabled = false;
-    std::atomic<bool> shutdown_requested{false};
-    CompiledFilesystemSandbox sandbox;
+};
+
+struct AppSandboxState {
+    bool enabled = false;
+    CompiledFilesystemSandbox compiled;
+
+    const CompiledFilesystemSandbox* active() const { return enabled ? &compiled : nullptr; }
+};
+
+struct AppServices {
     SessionStore sessions;
-    std::shared_ptr<PortTunnelService> port_tunnel_service;
+    std::shared_ptr<PortTunnelService> port_tunnel;
+};
+
+struct AppShutdownState {
+    std::atomic<bool> requested{false};
+};
+
+struct AppState {
+    // AppState is owned by ServerRuntime and shared by route handlers only for
+    // the lifetime of a connection worker. Handlers may use these grouped
+    // owners, but they do not own the runtime threads, listener socket, or
+    // daemon shutdown sequence.
+    DaemonConfig config;
+    AppMetadata metadata;
+    AppSandboxState sandbox;
+    AppServices services;
+    AppShutdownState shutdown;
 };
 
 void handle_client(AppState& state, UniqueSocket client);

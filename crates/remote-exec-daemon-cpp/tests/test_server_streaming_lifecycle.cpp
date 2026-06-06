@@ -367,9 +367,9 @@ static void assert_service_shutdown_releases_detached_retained_listener(AppState
 
     close_tunnel(&client_socket, &server_thread);
 
-    state.port_tunnel_service->shutdown();
-    state.port_tunnel_service->shutdown();
-    state.port_tunnel_service.reset();
+    state.services.port_tunnel->shutdown();
+    state.services.port_tunnel->shutdown();
+    state.services.port_tunnel.reset();
     wait_until_bindable(endpoint);
 }
 
@@ -391,8 +391,8 @@ static void assert_service_shutdown_closes_retained_listener_with_active_stream(
     const PortTunnelFrame accepted = read_tunnel_frame(client_socket.get());
     TEST_ASSERT(accepted.type == PortTunnelFrameType::TcpAccept);
 
-    state.port_tunnel_service->shutdown();
-    state.port_tunnel_service->shutdown();
+    state.services.port_tunnel->shutdown();
+    state.services.port_tunnel->shutdown();
     wait_until_bindable(endpoint);
 
     TEST_ASSERT(socket_readable_within(peer.get(), 1000UL));
@@ -478,11 +478,11 @@ static void assert_expired_tunnel_session_is_released(AppState& state) {
     close_tunnel(&client_socket, &server_thread);
     wait_past_resume_timeout(resume_timeout_ms);
     const std::uint64_t removal_deadline = platform::monotonic_ms() + 2000ULL;
-    while (state.port_tunnel_service->find_session(session_id).get() != nullptr &&
+    while (state.services.port_tunnel->find_session(session_id).get() != nullptr &&
            platform::monotonic_ms() < removal_deadline) {
         platform::sleep_ms(10UL);
     }
-    TEST_ASSERT(state.port_tunnel_service->find_session(session_id).get() == nullptr);
+    TEST_ASSERT(state.services.port_tunnel->find_session(session_id).get() == nullptr);
 
     open_tunnel(state, &client_socket, &server_thread);
     send_tunnel_frame(
@@ -516,7 +516,7 @@ static void assert_detached_listener_expiry_survives_last_external_service_ref(c
     const std::string endpoint = Json::parse(listen_ok.meta).at("endpoint").get<std::string>();
 
     close_tunnel(&client_socket, &server_thread);
-    state.port_tunnel_service.reset();
+    state.services.port_tunnel.reset();
     wait_past_resume_timeout(resume_timeout_ms);
     wait_until_bindable(endpoint);
 }
@@ -553,7 +553,7 @@ static void assert_detached_udp_bind_expiry_survives_last_external_service_ref(c
     const std::string endpoint = Json::parse(bind_ok.meta).at("endpoint").get<std::string>();
 
     close_tunnel(&client_socket, &server_thread);
-    state.port_tunnel_service.reset();
+    state.services.port_tunnel.reset();
     wait_past_resume_timeout(resume_timeout_ms);
     wait_until_udp_bindable(endpoint);
 }

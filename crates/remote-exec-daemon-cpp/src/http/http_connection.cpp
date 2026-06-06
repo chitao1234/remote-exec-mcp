@@ -173,7 +173,7 @@ void handle_client(AppState& state, UniqueSocket client) {
     HttpReadControl read_control;
     read_control.idle_timeout_ms = state.config.http_connection_idle_timeout_ms;
     read_control.poll_timeout_ms = HTTP_SHUTDOWN_READ_POLL_MS;
-    read_control.stop_requested = [&state]() { return state.shutdown_requested.load(); };
+    read_control.stop_requested = [&state]() { return state.shutdown.requested.load(); };
 
     for (;;) {
         try {

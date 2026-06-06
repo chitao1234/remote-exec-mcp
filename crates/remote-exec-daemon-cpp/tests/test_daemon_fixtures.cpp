@@ -44,11 +44,11 @@ void initialize_test_daemon_state_with_port_forward_limits(AppState& state,
                                                            const PortForwardLimitConfig& limits) {
     state.config = make_test_daemon_config(root);
     state.config.port_forward_limits = limits;
-    state.daemon_instance_id = "test-instance";
-    state.hostname = "test-host";
-    state.default_shell = stable_test_shell();
-    state.capabilities = detect_daemon_capabilities();
-    state.port_tunnel_service = create_port_tunnel_service(limits);
+    state.metadata.daemon_instance_id = "test-instance";
+    state.metadata.hostname = "test-host";
+    state.metadata.default_shell = stable_test_shell();
+    state.metadata.capabilities = detect_daemon_capabilities();
+    state.services.port_tunnel = create_port_tunnel_service(limits);
 }
 
 void initialize_test_daemon_state_with_worker_limit(AppState& state,
@@ -64,9 +64,9 @@ void initialize_test_daemon_state(AppState& state, const test_fs::path& root) {
 }
 
 void enable_test_daemon_sandbox(AppState& state) {
-    state.sandbox_enabled = state.config.sandbox_configured;
-    if (state.sandbox_enabled) {
-        state.sandbox = compile_filesystem_sandbox(state.config.sandbox);
+    state.sandbox.enabled = state.config.sandbox_configured;
+    if (state.sandbox.enabled) {
+        state.sandbox.compiled = compile_filesystem_sandbox(state.config.sandbox);
     }
 }
 

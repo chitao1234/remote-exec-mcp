@@ -6,7 +6,7 @@
 namespace {
 
 const CompiledFilesystemSandbox* active_sandbox(const AppState& state) {
-    return state.sandbox_enabled ? &state.sandbox : nullptr;
+    return state.sandbox.active();
 }
 
 std::string resolve_path_from_base(const std::string& base, const std::string& raw) {
@@ -66,7 +66,7 @@ void authorize_sandbox_path(const AppState& state, SandboxAccess access, const s
 }
 
 PatchPathAuthorizer make_patch_path_authorizer(const AppState& state) {
-    if (!state.sandbox_enabled) {
+    if (!state.sandbox.enabled) {
         return PatchPathAuthorizer();
     }
     return [&state](const std::string& path) { authorize_sandbox_path(state, SANDBOX_WRITE, path); };

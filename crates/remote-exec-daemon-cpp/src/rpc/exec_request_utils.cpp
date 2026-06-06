@@ -63,7 +63,7 @@ ExecStartRequestSpec prepare_exec_start_request(const AppState& state, const Htt
         parsed.max_output_tokens = requested_max_output_tokens(body);
         parsed.cmd = body.at("cmd").get<std::string>();
         parsed.tty_requested = body.value("tty", false);
-        if (parsed.tty_requested && !state.capabilities.supports_pty) {
+        if (parsed.tty_requested && !state.metadata.capabilities.supports_pty) {
             throw ExecRequestFailure(400, "tty_unsupported", "tty is not supported on this host");
         }
 
@@ -76,7 +76,7 @@ ExecStartRequestSpec prepare_exec_start_request(const AppState& state, const Htt
         if (!shell_override.empty() && !platform::shell_supported(shell_override)) {
             throw ExecRequestFailure(400, "unsupported_shell", "requested shell is not supported on this target");
         }
-        parsed.shell = platform::selected_shell(shell_override, state.default_shell);
+        parsed.shell = platform::selected_shell(shell_override, state.metadata.default_shell);
         parsed.workdir = resolve_authorized_workdir(state, body, SANDBOX_EXEC_CWD);
         return parsed;
     } catch (const ExecRequestFailure&) {

@@ -242,7 +242,7 @@ static void assert_target_info_and_basic_helpers(AppState& state) {
     TEST_ASSERT(info_response.headers.at(request_id_header_name()) == "client-req-123");
     const Json info = Json::parse(info_response.body);
     TEST_ASSERT(info.at("target").get<std::string>() == "cpp-test");
-    TEST_ASSERT(info.at("supports_pty").get<bool>() == state.capabilities.supports_pty);
+    TEST_ASSERT(info.at("supports_pty").get<bool>() == state.metadata.capabilities.supports_pty);
     TEST_ASSERT(info.at("supports_image_read").get<bool>());
     TEST_ASSERT(!info.at("supports_transfer_compression").get<bool>());
     TEST_ASSERT(info.at("transfer_stream_protocol_version").get<unsigned int>() ==
@@ -376,7 +376,7 @@ static void assert_patch_route_audit_fields(AppState& state, const fs::path& roo
     TEST_ASSERT(response.status == 200);
     const Json body = Json::parse(response.body);
     TEST_ASSERT(body.at("output").get<std::string>().find("A patch-audit.txt") != std::string::npos);
-    TEST_ASSERT(body.at("daemon_instance_id").get<std::string>() == state.daemon_instance_id);
+    TEST_ASSERT(body.at("daemon_instance_id").get<std::string>() == state.metadata.daemon_instance_id);
     TEST_ASSERT(body.at("updated_paths").size() == 1);
     TEST_ASSERT(body.at("updated_paths")[0].get<std::string>() == "A patch-audit.txt");
     TEST_ASSERT(read_text_file(patch_file) == "audit\n");

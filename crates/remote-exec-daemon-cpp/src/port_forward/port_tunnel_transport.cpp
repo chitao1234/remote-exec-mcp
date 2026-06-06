@@ -93,11 +93,11 @@ int handle_port_tunnel_upgrade(AppState& state, SOCKET client, const HttpRequest
     std::map<std::string, std::string> response_headers;
     response_headers[request_id_header_name()] = request_id;
     send_http_upgrade_response(client, server_contract::PORT_TUNNEL_UPGRADE_TOKEN, response_headers);
-    if (!state.port_tunnel_service) {
-        state.port_tunnel_service = create_port_tunnel_service(state.config.port_forward_limits);
+    if (!state.services.port_tunnel) {
+        state.services.port_tunnel = create_port_tunnel_service(state.config.port_forward_limits);
     }
     set_socket_timeout_ms(client, state.config.port_forward_limits.tunnel_io_timeout_ms);
-    std::shared_ptr<PortTunnelConnection> tunnel(new PortTunnelConnection(client, state.port_tunnel_service));
+    std::shared_ptr<PortTunnelConnection> tunnel(new PortTunnelConnection(client, state.services.port_tunnel));
     tunnel->run();
     return 101;
 }

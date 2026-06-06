@@ -133,8 +133,8 @@ int run_server(const DaemonConfig& config) {
             .bool_field("http_auth_enabled", !runtime.state().config.http_auth_bearer_token.empty())
             .quoted_field("platform", platform::platform_name())
             .quoted_field("arch", platform::arch_name())
-            .quoted_field("default_shell", runtime.state().default_shell)
-            .quoted_field("daemon_instance_id", runtime.state().daemon_instance_id);
+            .quoted_field("default_shell", runtime.state().metadata.default_shell)
+            .quoted_field("daemon_instance_id", runtime.state().metadata.daemon_instance_id);
         log_message(LOG_INFO, "server", message.str());
 
 #ifndef _WIN32
