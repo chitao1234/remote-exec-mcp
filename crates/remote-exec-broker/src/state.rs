@@ -4,12 +4,14 @@ use std::time::Duration;
 use anyhow::Context;
 use remote_exec_host::sandbox::CompiledFilesystemSandbox;
 use remote_exec_proto::path::PathPolicy;
+use remote_exec_proto::rpc::{ExecResponse, ExecWriteRequest, RpcErrorCode};
 use remote_exec_proto::transfer::TransferLimits;
 
 use crate::{
+    daemon_client::{RpcToolErrorMode, normalize_tool_result},
     local::{self, BrokerHostOrTarget},
     port_forward,
-    session_store::SessionStore,
+    session_store::{SessionRecord, SessionStore},
     target::{CachedDaemonInfo, RemoteTargetHandle, TargetHandle},
 };
 
@@ -43,6 +45,16 @@ pub struct BrokerState {
 pub(crate) struct TargetStatusSnapshot {
     pub(crate) name: String,
     pub(crate) daemon_info: Option<CachedDaemonInfo>,
+}
+
+pub(crate) struct RegisteredExecSession {
+    pub(crate) public_session_id: String,
+}
+
+pub(crate) struct ExecSessionWrite {
+    pub(crate) record: SessionRecord,
+    pub(crate) response: ExecResponse,
+    pub(crate) public_session_id: Option<String>,
 }
 
 impl BrokerState {
@@ -129,6 +141,95 @@ impl BrokerState {
         self.verified_target(name).await
     }
 
+    pub(crate) async fn register_exec_session(
+        &self,
+        target: &str,
+        daemon_session_id: String,
+        daemon_instance_id: String,
+        session_command: String,
+    ) -> RegisteredExecSession {
+        let record = self
+            .sessions
+            .insert(
+                target.to_string(),
+                daemon_session_id,
+                daemon_instance_id,
+                session_command,
+            )
+            .await;
+        RegisteredExecSession {
+            public_session_id: record.session_id,
+        }
+    }
+
+    pub(crate) async fn write_exec_session(
+        &self,
+        public_session_id: &str,
+        requested_target: Option<&str>,
+        chars: String,
+        yield_time_ms: Option<u64>,
+        max_output_tokens: Option<u32>,
+        pty_size: Option<remote_exec_proto::rpc::ExecPtySize>,
+    ) -> anyhow::Result<ExecSessionWrite> {
+        let record = self
+            .sessions
+            .get(public_session_id)
+            .await
+            .with_context(|| unknown_process_id_message(public_session_id))?;
+        crate::request_context::set_current_target(record.target.clone());
+
+        if let Some(target) = requested_target {
+            anyhow::ensure!(
+                target == record.target,
+                "session does not belong to target `{target}`"
+            );
+        }
+
+        let target = self.session_target(&record.target).await?;
+        let request = ExecWriteRequest {
+            daemon_session_id: record.daemon_session_id.clone(),
+            chars,
+            yield_time_ms,
+            max_output_tokens,
+            pty_size,
+        };
+        let response = target.exec_write(&request).await;
+        let response = match response {
+            Ok(response) => response,
+            Err(err) if err.is_rpc_error_code(RpcErrorCode::UnknownSession) => {
+                self.sessions.remove(&record.session_id).await;
+                return Err(anyhow::anyhow!(unknown_process_id_message(
+                    &record.session_id
+                )));
+            }
+            Err(err) => {
+                if let Ok(info) = target.target_info().await {
+                    if info.daemon_instance_id != record.daemon_instance_id {
+                        target.invalidate_cached_daemon_info().await;
+                        self.sessions.remove(&record.session_id).await;
+                        return Err(anyhow::anyhow!(unknown_process_id_message(
+                            &record.session_id
+                        )));
+                    }
+                }
+                return normalize_tool_result(Err(err), RpcToolErrorMode::Full);
+            }
+        };
+
+        let public_session_id = if response.running() {
+            Some(record.session_id.clone())
+        } else {
+            self.sessions.remove(&record.session_id).await;
+            None
+        };
+
+        Ok(ExecSessionWrite {
+            record,
+            response,
+            public_session_id,
+        })
+    }
+
     pub(crate) async fn file_tool_target(&self, name: &str) -> anyhow::Result<&TargetHandle> {
         let target = self.verified_target(name).await?;
         let info = target.cached_daemon_info_after_verification(name).await?;
@@ -140,6 +241,10 @@ impl BrokerState {
             "target `{name}` does not support file tool protocol version 1"
         );
         Ok(target)
+    }
+
+    pub(crate) async fn invalidate_target_exec_sessions(&self, target: &str) {
+        self.sessions.remove_target(target).await;
     }
 
     pub(crate) async fn transfer_remote_target<'a>(
@@ -197,4 +302,8 @@ impl BrokerState {
             .as_remote()
             .with_context(|| format!("target `{name}` is not a remote target"))
     }
+}
+
+pub(crate) fn unknown_process_id_message(session_id: &str) -> String {
+    format!("Unknown process id {session_id}")
 }

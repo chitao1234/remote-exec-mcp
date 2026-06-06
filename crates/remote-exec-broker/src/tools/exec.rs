@@ -7,10 +7,9 @@ use remote_exec_proto::path::PathPolicy;
 use remote_exec_proto::public::{CommandToolResult, ExecCommandInput, WriteStdinInput};
 use remote_exec_proto::rpc::{
     ExecCompletedResponse, ExecOutputResponse, ExecResponse, ExecRunningResponse, ExecStartRequest,
-    ExecStartResponse, ExecWarning, ExecWriteRequest, ExecWriteResponse, RpcErrorCode,
+    ExecStartResponse, ExecWarning,
 };
 
-use crate::daemon_client::RpcToolErrorMode;
 use crate::mcp_server::ToolCallOutput;
 use format::{
     format_command_text, format_intercepted_patch_text, format_poll_text, prepend_warning_text,
@@ -118,33 +117,19 @@ async fn write_stdin_inner(
     state: &crate::BrokerState,
     input: WriteStdinInput,
 ) -> anyhow::Result<WriteStdinCompletion> {
-    let record = state
-        .sessions
-        .get(&input.session_id)
-        .await
-        .with_context(|| unknown_process_id_message(&input.session_id))?;
-    crate::request_context::set_current_target(record.target.clone());
+    let written = state
+        .write_exec_session(
+            &input.session_id,
+            input.target.as_deref(),
+            input.chars.unwrap_or_default(),
+            input.yield_time_ms,
+            input.max_output_tokens,
+            input.pty_size,
+        )
+        .await?;
+    validate_exec_response(&written.response)?;
 
-    if let Some(target) = &input.target {
-        anyhow::ensure!(
-            target == &record.target,
-            "session does not belong to target `{target}`"
-        );
-    }
-
-    let target = state.session_target(&record.target).await?;
-    let response = forward_exec_write(state, target, &record, input).await?;
-    validate_exec_response(&response)?;
-    let write_response = ExecWriteResponse { response };
-
-    let session_id = if write_response.response.running() {
-        Some(record.session_id.clone())
-    } else {
-        state.sessions.remove(&record.session_id).await;
-        None
-    };
-
-    write_stdin_output(record, write_response.response, session_id)
+    write_stdin_output(written.record, written.response, written.public_session_id)
 }
 
 async fn maybe_intercepted_exec_output(
@@ -203,15 +188,14 @@ async fn register_public_session(
 
     Some(
         state
-            .sessions
-            .insert(
-                target.to_string(),
+            .register_exec_session(
+                target,
                 response.daemon_session_id.clone(),
                 response.response.output().daemon_instance_id.clone(),
                 session_command.to_string(),
             )
             .await
-            .session_id,
+            .public_session_id,
     )
 }
 
@@ -240,45 +224,6 @@ fn exec_command_output(
             warnings: output.warnings,
         })?,
     ))
-}
-
-async fn forward_exec_write(
-    state: &crate::BrokerState,
-    target: &crate::TargetHandle,
-    record: &crate::session_store::SessionRecord,
-    input: WriteStdinInput,
-) -> anyhow::Result<ExecResponse> {
-    let response = target
-        .exec_write(&ExecWriteRequest {
-            daemon_session_id: record.daemon_session_id.clone(),
-            chars: input.chars.unwrap_or_default(),
-            yield_time_ms: input.yield_time_ms,
-            max_output_tokens: input.max_output_tokens,
-            pty_size: input.pty_size,
-        })
-        .await;
-
-    match response {
-        Ok(response) => Ok(response),
-        Err(err) if err.is_rpc_error_code(RpcErrorCode::UnknownSession) => {
-            state.sessions.remove(&record.session_id).await;
-            Err(anyhow::anyhow!(unknown_process_id_message(
-                &record.session_id
-            )))
-        }
-        Err(err) => {
-            if let Ok(info) = target.target_info().await {
-                if info.daemon_instance_id != record.daemon_instance_id {
-                    target.invalidate_cached_daemon_info().await;
-                    state.sessions.remove(&record.session_id).await;
-                    return Err(anyhow::anyhow!(unknown_process_id_message(
-                        &record.session_id
-                    )));
-                }
-            }
-            Err(err.into_tool_error(RpcToolErrorMode::Full))
-        }
-    }
 }
 
 fn write_stdin_output(
@@ -311,10 +256,6 @@ fn write_stdin_output(
         exit_code: result.exit_code,
         output: ToolCallOutput::text_and_structured(text, serde_json::to_value(result)?),
     })
-}
-
-fn unknown_process_id_message(session_id: &str) -> String {
-    format!("Unknown process id {session_id}")
 }
 
 fn exec_start_response(response: ExecResponse) -> anyhow::Result<ExecStartResponse> {

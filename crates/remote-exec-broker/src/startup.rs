@@ -276,7 +276,7 @@ async fn periodic_target_refresh_loop(state: BrokerState, cancel: CancellationTo
 
             match result {
                 Ok(Some(previous_daemon_instance_id)) => {
-                    state.sessions.remove_target(&name).await;
+                    state.invalidate_target_exec_sessions(&name).await;
                     match state
                         .port_forwards
                         .close_target_instance(
