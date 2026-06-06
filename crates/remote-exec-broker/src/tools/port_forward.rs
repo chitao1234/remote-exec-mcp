@@ -102,7 +102,7 @@ async fn open_forwards(
             .expect("reservation count should match requested forwards");
         match open_forward(
             state.port_forwards.clone(),
-            reservation.clone(),
+            reservation,
             state.port_forward_limits.public_summary(),
             listen_side.clone(),
             connect_side.clone(),
@@ -112,14 +112,7 @@ async fn open_forwards(
         {
             Ok(forward) => opened.push(forward),
             Err(err) => {
-                state
-                    .port_forwards
-                    .release_open_reservation(reservation)
-                    .await;
-                state
-                    .port_forwards
-                    .release_open_reservations(reservations)
-                    .await;
+                state.port_forwards.release_open_reservations(reservations);
                 for forward in opened {
                     let _ = forward
                         .close_unregistered(state.port_forwards.clone())

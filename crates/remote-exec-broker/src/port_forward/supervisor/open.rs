@@ -412,17 +412,20 @@ mod tests {
             data: Vec::new(),
         });
 
+        let store = PortForwardStore::default();
+        let mut reservations = store
+            .reserve_open_batch("local", "local", 1, BrokerPortForwardLimits::default())
+            .await
+            .unwrap();
+        let reservation = reservations.pop().unwrap();
+
         let result = build_opened_forward(
             ForwardOpenContext {
-                store: PortForwardStore::default(),
-                reservation: OpenForwardReservation::new(
-                    ForwardId::new("fwd_test"),
-                    "local",
-                    "local",
-                ),
+                store,
+                forward_id: reservation.forward_id().clone(),
+                reservation,
                 listen_side: SideHandle::broker_host().unwrap(),
                 connect_side: SideHandle::broker_host().unwrap(),
-                forward_id: ForwardId::new("fwd_test"),
                 listen_endpoint: "127.0.0.1:10000".to_string(),
                 connect_endpoint: "127.0.0.1:10001".to_string(),
                 requested_limits: BrokerPortForwardLimits::default().public_summary(),

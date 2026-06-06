@@ -281,7 +281,7 @@ impl OpenedForward {
         self,
         store: super::store::PortForwardStore,
     ) -> ForwardPortEntry {
-        store.release_open_reservation(self.reservation).await;
+        store.release_open_reservation(self.reservation);
         close_record(self.record).await
     }
 }

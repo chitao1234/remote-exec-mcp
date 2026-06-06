@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use remote_exec_proto::port_forward::ForwardId;
 use remote_exec_proto::public::{
     ForwardPortEntry, ForwardPortPhase, ForwardPortSideHealth, ForwardPortSideRole,
     ForwardPortSideState, ForwardPortStatus, Timestamp,
 };
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -40,22 +40,69 @@ impl ForwardSidePair {
     }
 }
 
-#[derive(Debug, Clone)]
 pub struct OpenForwardReservation {
     forward_id: ForwardId,
     side_pair: ForwardSidePair,
+    state: Arc<StoreStateLock>,
+    pending: bool,
 }
 
 impl OpenForwardReservation {
-    pub(super) fn new(forward_id: ForwardId, listen_side: &str, connect_side: &str) -> Self {
+    fn new(
+        forward_id: ForwardId,
+        listen_side: &str,
+        connect_side: &str,
+        state: Arc<StoreStateLock>,
+    ) -> Self {
         Self {
             forward_id,
             side_pair: ForwardSidePair::new(listen_side, connect_side),
+            state,
+            pending: true,
         }
     }
 
     pub fn forward_id(&self) -> &ForwardId {
         &self.forward_id
+    }
+
+    fn side_pair_matches_entry(&self, entry: &ForwardPortEntry) -> bool {
+        self.side_pair.matches_entry(entry)
+    }
+
+    fn release(mut self) {
+        self.release_inner();
+    }
+
+    fn disarm(&mut self) {
+        self.pending = false;
+    }
+
+    fn release_inner(&mut self) {
+        if !self.pending {
+            return;
+        }
+        if let Ok(mut state) = self.state.write() {
+            state.pending_opens.remove(&self.forward_id);
+        }
+        self.pending = false;
+    }
+}
+
+impl Drop for OpenForwardReservation {
+    fn drop(&mut self) {
+        self.release_inner();
+    }
+}
+
+impl fmt::Debug for OpenForwardReservation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("OpenForwardReservation")
+            .field("forward_id", self.forward_id())
+            .field("side_pair", &self.side_pair)
+            .field("pending", &self.pending)
+            .finish_non_exhaustive()
     }
 }
 
@@ -63,9 +110,19 @@ struct PendingForwardOpen {
     side_pair: ForwardSidePair,
 }
 
+type StoreStateLock = RwLock<PortForwardStoreState>;
+
+fn read_store_state(state: &StoreStateLock) -> RwLockReadGuard<'_, PortForwardStoreState> {
+    state.read().expect("port forward store lock poisoned")
+}
+
+fn write_store_state(state: &StoreStateLock) -> RwLockWriteGuard<'_, PortForwardStoreState> {
+    state.write().expect("port forward store lock poisoned")
+}
+
 #[derive(Clone, Default)]
 pub struct PortForwardStore {
-    state: Arc<RwLock<PortForwardStoreState>>,
+    state: Arc<StoreStateLock>,
     close_lock: Arc<Mutex<()>>,
 }
 
@@ -77,7 +134,7 @@ impl PortForwardStore {
         requested_forwards: usize,
         limits: BrokerPortForwardLimits,
     ) -> anyhow::Result<Vec<OpenForwardReservation>> {
-        let mut state = self.state.write().await;
+        let mut state = write_store_state(&self.state);
         let side_pair = ForwardSidePair::new(listen_side, connect_side);
         anyhow::ensure!(
             state.open_count() + requested_forwards <= limits.max_open_forwards_total,
@@ -92,9 +149,14 @@ impl PortForwardStore {
         let mut reservations = Vec::with_capacity(requested_forwards);
         for _ in 0..requested_forwards {
             let forward_id = state.unused_forward_id();
-            let reservation = OpenForwardReservation::new(forward_id, listen_side, connect_side);
+            let reservation = OpenForwardReservation::new(
+                forward_id,
+                listen_side,
+                connect_side,
+                self.state.clone(),
+            );
             state.pending_opens.insert(
-                reservation.forward_id.clone(),
+                reservation.forward_id().clone(),
                 PendingForwardOpen {
                     side_pair: reservation.side_pair.clone(),
                 },
@@ -106,68 +168,68 @@ impl PortForwardStore {
 
     pub async fn commit_open(
         &self,
-        reservation: OpenForwardReservation,
+        mut reservation: OpenForwardReservation,
         record: PortForwardRecord,
     ) -> Result<(), PortForwardCommitError> {
-        let validation_error = if record.entry().forward_id != reservation.forward_id {
+        let validation_error = if record.entry().forward_id != *reservation.forward_id() {
             Some(anyhow::anyhow!(
                 "port forward open reservation does not match opened forward"
             ))
-        } else if !reservation.side_pair.matches_entry(record.entry()) {
+        } else if !reservation.side_pair_matches_entry(record.entry()) {
             Some(anyhow::anyhow!(
                 "port forward open reservation side pair does not match opened forward"
             ))
         } else {
             None
         };
-        let mut state = self.state.write().await;
+        let mut state = write_store_state(&self.state);
         if let Some(error) = validation_error {
-            state.pending_opens.remove(&reservation.forward_id);
+            state.pending_opens.remove(reservation.forward_id());
+            reservation.disarm();
             return Err(PortForwardCommitError::new(record, error));
         }
         if state
             .pending_opens
-            .remove(&reservation.forward_id)
+            .remove(reservation.forward_id())
             .is_none()
         {
+            let forward_id = reservation.forward_id().clone();
+            reservation.disarm();
             return Err(PortForwardCommitError::new(
                 record,
                 anyhow::anyhow!(
                     "port forward open reservation `{}` is not pending",
-                    reservation.forward_id
+                    forward_id
                 ),
             ));
         }
+        reservation.disarm();
         state.insert_record(record);
         Ok(())
     }
 
-    pub async fn release_open_reservation(&self, reservation: OpenForwardReservation) {
-        let mut state = self.state.write().await;
-        state.pending_opens.remove(&reservation.forward_id);
+    pub fn release_open_reservation(&self, reservation: OpenForwardReservation) {
+        reservation.release();
     }
 
-    pub async fn release_open_reservations(
+    pub fn release_open_reservations(
         &self,
         reservations: impl IntoIterator<Item = OpenForwardReservation>,
     ) {
-        let mut state = self.state.write().await;
         for reservation in reservations {
-            state.pending_opens.remove(&reservation.forward_id);
+            reservation.release();
         }
     }
 
     #[cfg(test)]
     pub async fn insert(&self, record: PortForwardRecord) {
-        let mut state = self.state.write().await;
+        let mut state = write_store_state(&self.state);
         state.insert_record(record);
     }
 
     pub async fn list(&self, filter: &PortForwardFilter) -> Vec<ForwardPortEntry> {
         let mut entries = self
-            .state
-            .read()
-            .await
+            .state_read()
             .entries
             .values()
             .filter(|record| filter.matches(record.entry()))
@@ -207,7 +269,7 @@ impl PortForwardStore {
         &self,
         forward_ids: &[ForwardId],
     ) -> anyhow::Result<Vec<ForwardId>> {
-        let state = self.state.read().await;
+        let state = self.state_read();
         let mut seen = HashSet::with_capacity(forward_ids.len());
         let mut unique = Vec::with_capacity(forward_ids.len());
         for forward_id in forward_ids {
@@ -227,7 +289,7 @@ impl PortForwardStore {
         forward_ids: &[ForwardId],
     ) -> anyhow::Result<Vec<PortForwardCloseCandidate>> {
         let forward_ids = self.validated_unique_close_ids(forward_ids).await?;
-        let mut state = self.state.write().await;
+        let mut state = self.state_write();
         let mut candidates = Vec::with_capacity(forward_ids.len());
         for forward_id in forward_ids {
             let record = state
@@ -246,14 +308,14 @@ impl PortForwardStore {
         if candidates.is_empty() {
             return;
         }
-        let mut state = self.state.write().await;
+        let mut state = self.state_write();
         for candidate in candidates {
             state.insert_record(candidate.record);
         }
     }
 
     pub async fn mark_failed(&self, forward_id: &str, error: String) {
-        let mut state = self.state.write().await;
+        let mut state = self.state_write();
         if let Some(record) = state.entries.get_mut(forward_id) {
             let before = is_reconnecting_entry(record.entry());
             mark_entry_failed(record.entry_mut(), error);
@@ -263,7 +325,7 @@ impl PortForwardStore {
     }
 
     pub async fn update_entry(&self, forward_id: &str, update: impl FnOnce(&mut ForwardPortEntry)) {
-        let mut state = self.state.write().await;
+        let mut state = self.state_write();
         if let Some(record) = state.entries.get_mut(forward_id) {
             let before = is_reconnecting_entry(record.entry());
             update(record.entry_mut());
@@ -279,7 +341,7 @@ impl PortForwardStore {
         error: String,
         max_reconnecting_forwards: usize,
     ) -> anyhow::Result<()> {
-        let mut state = self.state.write().await;
+        let mut state = self.state_write();
         ensure_reconnect_capacity(&mut state, forward_id, max_reconnecting_forwards)?;
         if let Some(record) = state.entries.get_mut(forward_id) {
             if record.entry().status != ForwardPortStatus::Open {
@@ -302,7 +364,7 @@ impl PortForwardStore {
         error: String,
         max_reconnecting_forwards: usize,
     ) -> anyhow::Result<()> {
-        let mut state = self.state.write().await;
+        let mut state = self.state_write();
         ensure_reconnect_capacity(&mut state, forward_id, max_reconnecting_forwards)?;
         if let Some(record) = state.entries.get_mut(forward_id) {
             if record.entry().status != ForwardPortStatus::Open {
@@ -348,9 +410,17 @@ impl PortForwardStore {
     }
 
     pub async fn drain(&self) -> Vec<PortForwardRecord> {
-        let mut state = self.state.write().await;
+        let mut state = self.state_write();
         state.reconnecting_count = 0;
         state.entries.drain().map(|(_, record)| record).collect()
+    }
+
+    fn state_read(&self) -> RwLockReadGuard<'_, PortForwardStoreState> {
+        read_store_state(&self.state)
+    }
+
+    fn state_write(&self) -> RwLockWriteGuard<'_, PortForwardStoreState> {
+        write_store_state(&self.state)
     }
 }
 
@@ -863,7 +933,7 @@ mod tests {
             "pending opens are internal reservations and should not be listed"
         );
         assert!(error.contains(OPEN_LIMIT_EXCEEDED));
-        store.release_open_reservations(reservations).await;
+        store.release_open_reservations(reservations);
     }
 
     #[tokio::test]
@@ -886,8 +956,8 @@ mod tests {
             .unwrap();
 
         assert!(same_pair_error.contains(SIDE_PAIR_LIMIT_EXCEEDED));
-        store.release_open_reservations(reservations).await;
-        store.release_open_reservations(other_pair).await;
+        store.release_open_reservations(reservations);
+        store.release_open_reservations(other_pair);
     }
 
     #[tokio::test]
@@ -899,7 +969,32 @@ mod tests {
             .await
             .unwrap();
 
-        store.release_open_reservations(reservations).await;
+        store.release_open_reservations(reservations);
+
+        assert!(
+            store
+                .reserve_open_batch("local", DEFAULT_TEST_TARGET, 1, limits)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn dropping_pending_open_reservations_frees_capacity() {
+        let store = PortForwardStore::default();
+        let limits = test_limits(1, 1);
+        let reservations = store
+            .reserve_open_batch("local", DEFAULT_TEST_TARGET, 1, limits)
+            .await
+            .unwrap();
+        assert!(
+            store
+                .reserve_open_batch("local", DEFAULT_TEST_TARGET, 1, limits)
+                .await
+                .is_err()
+        );
+
+        drop(reservations);
 
         assert!(
             store
