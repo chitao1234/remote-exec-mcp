@@ -6,9 +6,7 @@
 #include <string>
 
 #include "codec/base64_codec.h"
-#include "capabilities/daemon_capabilities.h"
 #include "core/config.h"
-#include "policy/filesystem_sandbox.h"
 #include "http/http_helpers.h"
 #include "policy/path_policy.h"
 #include "platform/platform.h"
@@ -26,14 +24,6 @@ namespace fs = test_fs;
 
 namespace {
 
-std::string stable_test_shell() {
-#ifdef _WIN32
-    return platform::resolve_default_shell("");
-#else
-    return platform::resolve_default_shell("/bin/sh");
-#endif
-}
-
 #ifndef _WIN32
 bool path_can_be_opened_for_read(const fs::path& path) {
     FILE* probe = std::fopen(path.string().c_str(), "rb");
@@ -48,35 +38,15 @@ bool path_can_be_opened_for_read(const fs::path& path) {
 } // namespace
 
 fs::path make_server_routes_test_root(const std::string& directory_name) {
-    const fs::path root = fs::unique_test_root(directory_name);
-    fs::remove_all(root);
-    fs::create_directories(root);
-    return root;
+    return make_daemon_test_root(directory_name);
+}
+
+DaemonConfig make_server_routes_test_config(const fs::path& root) {
+    return make_test_daemon_config(root);
 }
 
 void initialize_server_routes_state(AppState& state, const fs::path& root) {
-    state.config = make_server_routes_test_config(root);
-    state.daemon_instance_id = "test-instance";
-    state.hostname = "test-host";
-    state.default_shell = stable_test_shell();
-    state.capabilities = detect_daemon_capabilities();
-    state.port_tunnel_service = create_port_tunnel_service(state.config.port_forward_limits);
-}
-
-static void enable_sandbox(AppState& state) {
-    state.sandbox_enabled = state.config.sandbox_configured;
-    if (state.sandbox_enabled) {
-        state.sandbox = compile_filesystem_sandbox(state.config.sandbox);
-    }
-}
-
-static HttpRequest json_request(const std::string& path, const Json& body) {
-    HttpRequest request;
-    request.method = "POST";
-    request.path = path;
-    request.headers["content-type"] = "application/json";
-    request.body = body.dump();
-    return request;
+    initialize_test_daemon_state(state, root);
 }
 
 #ifndef _WIN32
@@ -224,7 +194,7 @@ static std::string decode_framed_transfer_archive(const std::string& body) {
 }
 
 static HttpRequest transfer_export_request(const Json& body) {
-    HttpRequest request = json_request("/v1/transfer/export", body);
+    HttpRequest request = make_json_http_request("/v1/transfer/export", body);
     request.headers[server_contract::TRANSFER_STREAM_VERSION_HEADER] =
         server_contract::TRANSFER_STREAM_VERSION_VALUE;
     return request;
@@ -338,7 +308,7 @@ static void assert_image_routes(AppState& state, const fs::path& root) {
     const std::string original_image = read_binary_file(image_file);
 
     const HttpResponse image_response =
-        route_request(state, json_request("/v1/image/read", Json{{"path", "tiny.png"}, {"workdir", root.string()}}));
+        route_request(state, make_json_http_request("/v1/image/read", Json{{"path", "tiny.png"}, {"workdir", root.string()}}));
     TEST_ASSERT(image_response.status == 200);
     const Json image = Json::parse(image_response.body);
     TEST_ASSERT(image.at("detail").get<std::string>() == "original");
@@ -347,13 +317,13 @@ static void assert_image_routes(AppState& state, const fs::path& root) {
 
     const HttpResponse invalid_detail_response = route_request(
         state,
-        json_request("/v1/image/read", Json{{"path", "tiny.png"}, {"workdir", root.string()}, {"detail", "low"}}));
+        make_json_http_request("/v1/image/read", Json{{"path", "tiny.png"}, {"workdir", root.string()}, {"detail", "low"}}));
     TEST_ASSERT(invalid_detail_response.status == 400);
     const Json invalid_detail = Json::parse(invalid_detail_response.body);
     TEST_ASSERT(invalid_detail.at("code").get<std::string>() == "invalid_detail");
 
     const HttpResponse missing_image_response =
-        route_request(state, json_request("/v1/image/read", Json{{"path", "missing.png"}, {"workdir", root.string()}}));
+        route_request(state, make_json_http_request("/v1/image/read", Json{{"path", "missing.png"}, {"workdir", root.string()}}));
     TEST_ASSERT(missing_image_response.status == 400);
     const Json missing_image = Json::parse(missing_image_response.body);
     TEST_ASSERT(missing_image.at("code").get<std::string>() == "image_missing");
@@ -362,7 +332,7 @@ static void assert_image_routes(AppState& state, const fs::path& root) {
     write_binary_file(gif_file, base64_decode_bytes("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="));
 
     const HttpResponse gif_response =
-        route_request(state, json_request("/v1/image/read", Json{{"path", "tiny.gif"}, {"workdir", root.string()}}));
+        route_request(state, make_json_http_request("/v1/image/read", Json{{"path", "tiny.gif"}, {"workdir", root.string()}}));
     TEST_ASSERT(gif_response.status == 400);
     const Json gif_error = Json::parse(gif_response.body);
     TEST_ASSERT(gif_error.at("code").get<std::string>() == "image_decode_failed");
@@ -383,7 +353,7 @@ static void assert_image_routes(AppState& state, const fs::path& root) {
     if (platform_enforces_blocked_directory) {
         blocked_image_response = route_request(
             state,
-            json_request("/v1/image/read", Json{{"path", "blocked-image/blocked.png"}, {"workdir", root.string()}}));
+            make_json_http_request("/v1/image/read", Json{{"path", "blocked-image/blocked.png"}, {"workdir", root.string()}}));
     }
     fs::permissions(blocked_image_dir, fs::perms::owner_all, fs::perm_options::replace);
     if (platform_enforces_blocked_directory) {
@@ -402,7 +372,7 @@ static void assert_patch_route_audit_fields(AppState& state, const fs::path& roo
                                    "*** End Patch\n";
 
     const HttpResponse response =
-        route_request(state, json_request("/v1/patch/apply", Json{{"workdir", root.string()}, {"patch", patch_text}}));
+        route_request(state, make_json_http_request("/v1/patch/apply", Json{{"workdir", root.string()}, {"patch", patch_text}}));
     TEST_ASSERT(response.status == 200);
     const Json body = Json::parse(response.body);
     TEST_ASSERT(body.at("output").get<std::string>().find("A patch-audit.txt") != std::string::npos);
@@ -417,21 +387,21 @@ static void assert_transfer_path_info_routes(AppState& state, const fs::path& ro
     write_text_file(source_file, "route transfer payload");
 
     const HttpResponse source_info_response =
-        route_request(state, json_request("/v1/transfer/path-info", Json{{"path", source_file.string()}}));
+        route_request(state, make_json_http_request("/v1/transfer/path-info", Json{{"path", source_file.string()}}));
     TEST_ASSERT(source_info_response.status == 200);
     const Json source_info = Json::parse(source_info_response.body);
     TEST_ASSERT(source_info.at("exists").get<bool>());
     TEST_ASSERT(!source_info.at("is_directory").get<bool>());
 
     const HttpResponse root_info_response =
-        route_request(state, json_request("/v1/transfer/path-info", Json{{"path", root.string()}}));
+        route_request(state, make_json_http_request("/v1/transfer/path-info", Json{{"path", root.string()}}));
     TEST_ASSERT(root_info_response.status == 200);
     const Json root_info = Json::parse(root_info_response.body);
     TEST_ASSERT(root_info.at("exists").get<bool>());
     TEST_ASSERT(root_info.at("is_directory").get<bool>());
 
     const HttpResponse relative_info_response =
-        route_request(state, json_request("/v1/transfer/path-info", Json{{"path", "relative/path.txt"}}));
+        route_request(state, make_json_http_request("/v1/transfer/path-info", Json{{"path", "relative/path.txt"}}));
     TEST_ASSERT(relative_info_response.status == 400);
     const Json relative_info_error = Json::parse(relative_info_response.body);
     TEST_ASSERT(relative_info_error.at("code").get<std::string>() == "transfer_path_not_absolute");
@@ -446,7 +416,7 @@ static void assert_transfer_path_info_routes(AppState& state, const fs::path& ro
     HttpResponse blocked_transfer_info_response;
     if (platform_enforces_blocked_transfer_directory) {
         blocked_transfer_info_response =
-            route_request(state, json_request("/v1/transfer/path-info", Json{{"path", blocked_transfer_file.string()}}));
+            route_request(state, make_json_http_request("/v1/transfer/path-info", Json{{"path", blocked_transfer_file.string()}}));
     }
     fs::permissions(blocked_transfer_dir, fs::perms::owner_all, fs::perm_options::replace);
     if (platform_enforces_blocked_transfer_directory) {
@@ -619,7 +589,7 @@ static void assert_sandbox_export_and_path_info_denied(AppState& sandbox_state, 
     assert_sandbox_denied(sandbox_export_denied);
 
     const HttpResponse sandbox_path_info_denied = route_request(
-        sandbox_state, json_request("/v1/transfer/path-info", Json{{"path", (outside / "dest.txt").string()}}));
+        sandbox_state, make_json_http_request("/v1/transfer/path-info", Json{{"path", (outside / "dest.txt").string()}}));
     assert_sandbox_denied(sandbox_path_info_denied);
 }
 
@@ -663,21 +633,21 @@ static void assert_sandbox_patch_denied(AppState& sandbox_state, const fs::path&
                                           "*** End Patch\n";
     const HttpResponse sandbox_patch_denied = route_request(
         sandbox_state,
-        json_request("/v1/patch/apply", Json{{"workdir", write_allowed.string()}, {"patch", patch_denied_text}}));
+        make_json_http_request("/v1/patch/apply", Json{{"workdir", write_allowed.string()}, {"patch", patch_denied_text}}));
     assert_sandbox_denied(sandbox_patch_denied);
     TEST_ASSERT(!fs::exists(outside / "patched.txt"));
 }
 
 static void assert_sandbox_exec_denied(AppState& sandbox_state, const fs::path& outside) {
     const HttpResponse sandbox_exec_denied = route_request(sandbox_state,
-                                                           json_request("/v1/exec/start",
-                                                                        Json{
-                                                                            {"cmd", "printf denied"},
-                                                                            {"workdir", outside.string()},
-                                                                            {"login", false},
-                                                                            {"tty", false},
-                                                                            {"yield_time_ms", 250},
-                                                                        }));
+                                                           make_json_http_request("/v1/exec/start",
+                                                                             Json{
+                                                                                 {"cmd", "printf denied"},
+                                                                                 {"workdir", outside.string()},
+                                                                                 {"login", false},
+                                                                                 {"tty", false},
+                                                                                 {"yield_time_ms", 250},
+                                                                             }));
     assert_sandbox_denied(sandbox_exec_denied);
 }
 
@@ -703,7 +673,7 @@ static void assert_sandbox_routes(const fs::path& root) {
     sandbox_state.config.sandbox.read.allow.push_back(read_allowed.string());
     sandbox_state.config.sandbox.write.allow.push_back(write_allowed.string());
     sandbox_state.config.sandbox.write.deny.push_back(denied_link_target_root.string());
-    enable_sandbox(sandbox_state);
+    enable_test_daemon_sandbox(sandbox_state);
 
     assert_sandbox_export_and_path_info_denied(sandbox_state, outside);
     const std::string sandbox_export_body = assert_sandbox_export_allowed(sandbox_state, read_allowed);

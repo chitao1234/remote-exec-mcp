@@ -22,15 +22,6 @@ const unsigned long WINDOWS_RESIZE_HELPER_SLEEP_SECONDS = 2UL;
 
 } // namespace
 
-static HttpRequest json_request(const std::string& path, const Json& body) {
-    HttpRequest request;
-    request.method = "POST";
-    request.path = path;
-    request.headers["content-type"] = "application/json";
-    request.body = body.dump();
-    return request;
-}
-
 static std::string normalize_output(const std::string& input) {
     std::string output;
     output.reserve(input.size());
@@ -65,7 +56,7 @@ static Json exec_write_json(AppState& state,
                             unsigned long yield_time_ms) {
     const HttpResponse response = route_request(
         state,
-        json_request("/v1/exec/write",
+        make_json_http_request("/v1/exec/write",
                      Json{
                          {"daemon_session_id", daemon_session_id},
                          {"chars", chars},
@@ -83,7 +74,7 @@ static Json exec_write_json_with_pty_size(AppState& state,
                                           unsigned short cols) {
     const HttpResponse response = route_request(
         state,
-        json_request("/v1/exec/write",
+        make_json_http_request("/v1/exec/write",
                      Json{
                          {"daemon_session_id", daemon_session_id},
                          {"chars", chars},
@@ -192,12 +183,12 @@ static std::string tty_resize_command() {
 
 static void assert_exec_routes(AppState& state, const fs::path& root) {
     const HttpResponse missing_cmd_response =
-        route_request(state, json_request("/v1/exec/start", Json{{"workdir", root.string()}}));
+        route_request(state, make_json_http_request("/v1/exec/start", Json{{"workdir", root.string()}}));
     TEST_ASSERT(missing_cmd_response.status == 400);
     TEST_ASSERT(Json::parse(missing_cmd_response.body).at("code").get<std::string>() == "bad_request");
 
     const HttpResponse non_tty_start_response = route_request(state,
-                                                              json_request("/v1/exec/start",
+                                                              make_json_http_request("/v1/exec/start",
                                                                            Json{
                                                                                {"cmd", long_running_non_tty_command()},
                                                                                {"workdir", root.string()},
@@ -218,7 +209,7 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
 #ifdef _WIN32
     const HttpResponse stdin_write_response = route_request(
         state,
-        json_request("/v1/exec/write",
+        make_json_http_request("/v1/exec/write",
                      Json{
                          {"daemon_session_id", non_tty_started.at("daemon_session_id").get<std::string>()},
                          {"chars", "hello\n"},
@@ -229,7 +220,7 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
 #else
     const HttpResponse stdin_closed_response = route_request(
         state,
-        json_request("/v1/exec/write",
+        make_json_http_request("/v1/exec/write",
                      Json{
                          {"daemon_session_id", non_tty_started.at("daemon_session_id").get<std::string>()},
                          {"chars", "hello\n"},
@@ -241,7 +232,7 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
 
     const HttpResponse invalid_pty_size_response = route_request(
         state,
-        json_request("/v1/exec/write",
+        make_json_http_request("/v1/exec/write",
                      Json{
                          {"daemon_session_id", non_tty_started.at("daemon_session_id").get<std::string>()},
                          {"chars", ""},
@@ -253,7 +244,7 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
 
     const HttpResponse non_tty_resize_response = route_request(
         state,
-        json_request("/v1/exec/write",
+        make_json_http_request("/v1/exec/write",
                      Json{
                          {"daemon_session_id", non_tty_started.at("daemon_session_id").get<std::string>()},
                          {"chars", ""},
@@ -265,7 +256,7 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
 
     const HttpResponse invalid_session_id_type_response = route_request(
         state,
-        json_request("/v1/exec/write",
+        make_json_http_request("/v1/exec/write",
                      Json{
                          {"daemon_session_id", Json{{"unexpected", true}}},
                          {"chars", ""},
@@ -276,7 +267,7 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
 
     if (!test_exec_pty::should_skip_pty_tests(process_session_supports_pty())) {
         const HttpResponse slow_start_response = route_request(state,
-                                                               json_request("/v1/exec/start",
+                                                               make_json_http_request("/v1/exec/start",
                                                                             Json{
                                                                                 {"cmd", slow_tty_command()},
                                                                                 {"workdir", root.string()},
@@ -292,7 +283,7 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
         fs::remove_all(fast_input_path);
         const HttpResponse fast_start_response =
             route_request(state,
-                          json_request("/v1/exec/start",
+                          make_json_http_request("/v1/exec/start",
                                        Json{
                                            {"cmd", fast_tty_file_command()},
                                            {"workdir", root.string()},
@@ -308,7 +299,7 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
         std::thread slow_thread([&]() {
             slow_poll_response = route_request(
                 state,
-                json_request("/v1/exec/write",
+                make_json_http_request("/v1/exec/write",
                              Json{
                                  {"daemon_session_id", slow_started.at("daemon_session_id").get<std::string>()},
                                  {"chars", ""},
@@ -320,7 +311,7 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
         const std::uint64_t fast_started_at = platform::monotonic_ms();
         const HttpResponse fast_write_response = route_request(
             state,
-            json_request("/v1/exec/write",
+            make_json_http_request("/v1/exec/write",
                          Json{
                              {"daemon_session_id", fast_started.at("daemon_session_id").get<std::string>()},
                              {"chars", test_exec_pty::terminal_input_line("ping")},
@@ -335,7 +326,7 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
 
         const HttpResponse start_response =
             route_request(state,
-                          json_request("/v1/exec/start",
+                          make_json_http_request("/v1/exec/start",
                                        Json{
                                            {"cmd", tty_round_trip_command()},
                                            {"workdir", root.string()},
@@ -368,7 +359,7 @@ static void assert_exec_routes(AppState& state, const fs::path& root) {
 
         const HttpResponse resize_start_response =
             route_request(state,
-                          json_request("/v1/exec/start",
+                          make_json_http_request("/v1/exec/start",
                                        Json{
                                            {"cmd", tty_resize_command()},
                                            {"workdir", root.string()},

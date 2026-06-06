@@ -16,8 +16,8 @@
 #include "runtime/server.h"
 #include "http/server_transport.h"
 #include "test_assert.h"
+#include "test_daemon_fixtures.h"
 #include "test_filesystem.h"
-#include "test_server_routes_shared.h"
 
 namespace fs = test_fs;
 

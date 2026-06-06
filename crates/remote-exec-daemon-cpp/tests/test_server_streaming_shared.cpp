@@ -13,23 +13,8 @@
 
 #include "test_socket_pair.h"
 
-namespace {
-
-std::string stable_test_shell() {
-#ifdef _WIN32
-    return platform::resolve_default_shell("");
-#else
-    return platform::resolve_default_shell("/bin/sh");
-#endif
-}
-
-} // namespace
-
 fs::path make_test_root() {
-    const fs::path root = fs::unique_test_root("remote-exec-cpp-server-streaming-test");
-    fs::remove_all(root);
-    fs::create_directories(root);
-    return root;
+    return make_daemon_test_root("remote-exec-cpp-server-streaming-test");
 }
 
 bool wait_until_true(const std::atomic<bool>& value, unsigned long timeout_ms) {
@@ -51,30 +36,21 @@ void wait_past_resume_timeout(unsigned long resume_timeout_ms) {
 void initialize_state_with_port_forward_limits(AppState& state,
                                                const fs::path& root,
                                                const PortForwardLimitConfig& limits) {
-    state.config = make_server_routes_test_config(root);
-    state.config.port_forward_limits = limits;
-    state.daemon_instance_id = "test-instance";
-    state.hostname = "test-host";
-    state.default_shell = stable_test_shell();
-    state.capabilities = detect_daemon_capabilities();
-    state.port_tunnel_service = create_port_tunnel_service(limits);
+    initialize_test_daemon_state_with_port_forward_limits(state, root, limits);
 }
 
 void initialize_state_with_worker_limit(AppState& state, const fs::path& root, unsigned long max_workers) {
     PortForwardLimitConfig limits;
     limits.max_worker_threads = max_workers;
-    initialize_state_with_port_forward_limits(state, root, limits);
+    initialize_test_daemon_state_with_port_forward_limits(state, root, limits);
 }
 
 void initialize_state(AppState& state, const fs::path& root) {
-    initialize_state_with_worker_limit(state, root, DEFAULT_PORT_FORWARD_MAX_WORKER_THREADS);
+    initialize_test_daemon_state(state, root);
 }
 
 void enable_sandbox(AppState& state) {
-    state.sandbox_enabled = state.config.sandbox_configured;
-    if (state.sandbox_enabled) {
-        state.sandbox = compile_filesystem_sandbox(state.config.sandbox);
-    }
+    enable_test_daemon_sandbox(state);
 }
 
 static std::string socket_label(SOCKET socket) {

@@ -259,6 +259,7 @@ WINDOWS_SERVER_TRANSPORT_TEST_SRCS = \
 	$(WIN32_ERROR_SRCS)
 
 SERVER_STREAMING_TEST_COMMON_SRCS = \
+	$(SOURCE_PREFIX)tests/test_daemon_fixtures.cpp \
 	$(SOURCE_PREFIX)tests/test_server_streaming.cpp \
 	$(SOURCE_PREFIX)tests/test_server_streaming_shared.cpp \
 	$(SOURCE_PREFIX)tests/test_server_streaming_routes.cpp \
@@ -326,6 +327,7 @@ WINDOWS_SERVER_RUNTIME_TEST_SUPPORT_SRCS = \
 	$(WINDOWS_BASE_SRCS_NO_MAIN)
 
 SERVER_ROUTES_TEST_COMMON_SRCS = \
+	$(SOURCE_PREFIX)tests/test_daemon_fixtures.cpp \
 	$(SOURCE_PREFIX)tests/test_server_routes_shared.cpp \
 	$(CAPABILITIES_SRCS) \
 	$(ROUTE_SRCS) \
