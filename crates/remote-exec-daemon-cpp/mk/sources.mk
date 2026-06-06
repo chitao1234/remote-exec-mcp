@@ -5,10 +5,15 @@
 
 TRANSFER_SRCS = \
 	$(SOURCE_PREFIX)src/transfer/transfer_ops.cpp \
+	$(SOURCE_PREFIX)src/transfer/transfer_archive.cpp \
 	$(SOURCE_PREFIX)src/transfer/transfer_ops_fs.cpp \
 	$(SOURCE_PREFIX)src/transfer/transfer_ops_tar.cpp \
 	$(SOURCE_PREFIX)src/transfer/transfer_ops_export.cpp \
 	$(SOURCE_PREFIX)src/transfer/transfer_ops_import.cpp \
+	$(SOURCE_PREFIX)src/transfer/transfer_import_materializer.cpp \
+	$(SOURCE_PREFIX)src/transfer/transfer_import_plan.cpp \
+	$(SOURCE_PREFIX)src/transfer/transfer_options.cpp \
+	$(SOURCE_PREFIX)src/transfer/transfer_warning_codec.cpp \
 	$(SOURCE_PREFIX)src/transfer/transfer_glob.cpp
 
 POLICY_SRCS = \

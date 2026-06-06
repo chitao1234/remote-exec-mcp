@@ -442,6 +442,36 @@ static TransferPathAuthorizer deny_path_containing(const std::string& needle) {
     };
 }
 
+static bool string_vector_contains(const std::vector<std::string>& values, const std::string& value) {
+    return std::find(values.begin(), values.end(), value) != values.end();
+}
+
+static std::size_t string_vector_index_of(const std::vector<std::string>& values, const std::string& value) {
+    const std::vector<std::string>::const_iterator it = std::find(values.begin(), values.end(), value);
+    TEST_ASSERT(it != values.end());
+    return static_cast<std::size_t>(it - values.begin());
+}
+
+static std::size_t string_vector_nth_index_of(const std::vector<std::string>& values,
+                                              const std::string& value,
+                                              std::size_t occurrence) {
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (values[i] != value) {
+            continue;
+        }
+        if (occurrence == 0U) {
+            return i;
+        }
+        --occurrence;
+    }
+    TEST_ASSERT(false);
+    return values.size();
+}
+
+static std::size_t string_vector_count(const std::vector<std::string>& values, const std::string& value) {
+    return static_cast<std::size_t>(std::count(values.begin(), values.end(), value));
+}
+
 class CaptureArchiveSink : public TransferArchiveSink {
 public:
     void write(const char* data, std::size_t size) { bytes.append(data, size); }
@@ -951,6 +981,36 @@ static void assert_directory_export_authorizer_checks_children() {
     TEST_ASSERT(rejected);
 }
 
+static void assert_directory_export_authorizer_order_skips_excluded_paths() {
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-export-authorizer-order");
+    fs::remove_all(root);
+    fs::create_directories(root / "source" / "drop");
+    fs::create_directories(root / "source" / "keep");
+    write_text(root / "source" / "drop" / "secret.txt", "secret");
+    write_text(root / "source" / "keep" / "public.txt", "public");
+
+    std::vector<std::string> authorized;
+    std::vector<std::string> exclude;
+    exclude.push_back("drop/**");
+    const ExportedPayload exported = export_path((root / "source").string(),
+                                                 TransferSymlinkMode::Preserve,
+                                                 exclude,
+                                                 [&authorized](const std::string& path) { authorized.push_back(path); });
+
+    TEST_ASSERT(exported.source_type == TransferSourceType::Directory);
+    TEST_ASSERT(string_vector_index_of(authorized, (root / "source").string()) == 0U);
+    TEST_ASSERT(string_vector_contains(authorized, (root / "source" / "keep").string()));
+    TEST_ASSERT(string_vector_contains(authorized, (root / "source" / "keep" / "public.txt").string()));
+    TEST_ASSERT(!string_vector_contains(authorized, (root / "source" / "drop").string()));
+    TEST_ASSERT(!string_vector_contains(authorized, (root / "source" / "drop" / "secret.txt").string()));
+
+    const std::vector<std::string> archive_paths = read_tar_paths(exported.bytes);
+    TEST_ASSERT(std::find(archive_paths.begin(), archive_paths.end(), "keep") != archive_paths.end());
+    TEST_ASSERT(std::find(archive_paths.begin(), archive_paths.end(), "keep/public.txt") != archive_paths.end());
+    TEST_ASSERT(std::find(archive_paths.begin(), archive_paths.end(), "drop") == archive_paths.end());
+    TEST_ASSERT(std::find(archive_paths.begin(), archive_paths.end(), "drop/secret.txt") == archive_paths.end());
+}
+
 static void assert_directory_export_sink_reports_authorizer_failure() {
     const fs::path root = transfer_test_root("remote-exec-cpp-transfer-export-sink-failure");
     fs::remove_all(root);
@@ -1128,6 +1188,35 @@ static void assert_symlink_import_preserves_links() {
     TEST_ASSERT(imported.files_copied == 2);
     TEST_ASSERT(read_text(root / "dest" / "alpha.txt") == "alpha");
     TEST_ASSERT(fs::read_symlink(root / "dest" / "alpha-link") == fs::path("alpha.txt"));
+}
+
+static void assert_symlink_import_authorizes_link_and_resolved_target_before_create() {
+    std::string archive;
+    append_tar_directory(archive, "links");
+    append_tar_symlink(&archive, "links/alpha-link", "alpha.txt");
+    finalize_tar(archive);
+
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-symlink-authorizer-order");
+    fs::remove_all(root);
+
+    std::vector<std::string> authorized;
+    const ImportSummary imported = import_path(
+        archive,
+        TransferSourceType::Directory,
+        (root / "dest").string(),
+        TransferOverwrite::Replace,
+        true,
+        TransferSymlinkMode::Preserve,
+        default_transfer_limit_config(),
+        [&authorized](const std::string& path) { authorized.push_back(path); });
+
+    TEST_ASSERT(imported.files_copied == 1);
+    TEST_ASSERT(fs::read_symlink(root / "dest" / "links" / "alpha-link") == fs::path("alpha.txt"));
+    TEST_ASSERT(string_vector_index_of(authorized, (root / "dest").string()) == 0U);
+    TEST_ASSERT(string_vector_index_of(authorized, (root / "dest" / "links").string()) <
+                string_vector_nth_index_of(authorized, (root / "dest" / "links" / "alpha-link").string(), 0U));
+    TEST_ASSERT(string_vector_nth_index_of(authorized, (root / "dest" / "links" / "alpha-link").string(), 1U) <
+                string_vector_index_of(authorized, (root / "dest" / "links" / "alpha.txt").string()));
 }
 
 static void assert_symlink_import_skip_reports_warning() {
@@ -1339,6 +1428,62 @@ static void assert_directory_import_authorizer_checks_children() {
     TEST_ASSERT(!fs::exists(root / "dest" / "secret.txt"));
 }
 
+static void assert_directory_import_authorizer_order_for_nested_file() {
+    std::string archive;
+    append_tar_file(archive, "nested/child.txt", "child");
+    finalize_tar(archive);
+
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-import-authorizer-order");
+    fs::remove_all(root);
+
+    std::vector<std::string> authorized;
+    const ImportSummary imported = import_path(
+        archive,
+        TransferSourceType::Directory,
+        (root / "dest").string(),
+        TransferOverwrite::Replace,
+        true,
+        TransferSymlinkMode::Preserve,
+        default_transfer_limit_config(),
+        [&authorized](const std::string& path) { authorized.push_back(path); });
+
+    TEST_ASSERT(imported.files_copied == 1);
+    TEST_ASSERT(read_text(root / "dest" / "nested" / "child.txt") == "child");
+    TEST_ASSERT(string_vector_index_of(authorized, (root / "dest").string()) == 0U);
+    TEST_ASSERT(string_vector_index_of(authorized, (root / "dest" / "nested").string()) >
+                string_vector_index_of(authorized, (root / "dest").string()));
+    TEST_ASSERT(string_vector_index_of(authorized, (root / "dest" / "nested" / "child.txt").string()) >
+                string_vector_index_of(authorized, (root / "dest" / "nested").string()));
+    TEST_ASSERT(string_vector_count(authorized, (root / "dest" / "nested" / "child.txt").string()) == 2U);
+}
+
+static void assert_transfer_summary_entry_does_not_authorize_or_materialize_path() {
+    std::string archive;
+    append_tar_directory(archive, ".");
+    append_tar_entry(&archive, TRANSFER_SUMMARY_ENTRY, '0', "{\"warnings\":[]}");
+    finalize_tar(archive);
+
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-summary-authorizer");
+    fs::remove_all(root);
+
+    std::vector<std::string> authorized;
+    const ImportSummary imported = import_path(
+        archive,
+        TransferSourceType::Directory,
+        (root / "dest").string(),
+        TransferOverwrite::Replace,
+        true,
+        TransferSymlinkMode::Preserve,
+        default_transfer_limit_config(),
+        [&authorized](const std::string& path) { authorized.push_back(path); });
+
+    TEST_ASSERT(imported.files_copied == 0);
+    TEST_ASSERT(imported.warnings.empty());
+    TEST_ASSERT(string_vector_index_of(authorized, (root / "dest").string()) == 0U);
+    TEST_ASSERT(!string_vector_contains(authorized, (root / "dest" / TRANSFER_SUMMARY_ENTRY).string()));
+    TEST_ASSERT(!fs::exists(root / "dest" / TRANSFER_SUMMARY_ENTRY));
+}
+
 static void assert_directory_replace_authorizer_checks_existing_children() {
     std::string archive;
     append_tar_file(archive, "fresh.txt", "fresh");
@@ -1366,6 +1511,39 @@ static void assert_directory_replace_authorizer_checks_existing_children() {
     TEST_ASSERT(rejected);
     TEST_ASSERT(read_text(root / "dest" / "secret.txt") == "keep");
     TEST_ASSERT(!fs::exists(root / "dest" / "fresh.txt"));
+}
+
+static void assert_multiple_replace_authorizer_order_for_existing_unit() {
+    std::string archive;
+    append_tar_file(archive, "unit/fresh.txt", "fresh");
+    finalize_tar(archive);
+
+    const fs::path root = transfer_test_root("remote-exec-cpp-transfer-multiple-replace-order");
+    fs::remove_all(root);
+    fs::create_directories(root / "dest" / "unit" / "old-dir");
+    write_text(root / "dest" / "unit" / "old-dir" / "old.txt", "old");
+
+    std::vector<std::string> authorized;
+    const ImportSummary imported = import_path(
+        archive,
+        TransferSourceType::Multiple,
+        (root / "dest").string(),
+        TransferOverwrite::Replace,
+        true,
+        TransferSymlinkMode::Preserve,
+        default_transfer_limit_config(),
+        [&authorized](const std::string& path) { authorized.push_back(path); });
+
+    TEST_ASSERT(imported.files_copied == 1);
+    TEST_ASSERT(read_text(root / "dest" / "unit" / "fresh.txt") == "fresh");
+    TEST_ASSERT(!fs::exists(root / "dest" / "unit" / "old-dir" / "old.txt"));
+    TEST_ASSERT(string_vector_index_of(authorized, (root / "dest").string()) == 0U);
+    TEST_ASSERT(string_vector_index_of(authorized, (root / "dest" / "unit").string()) <
+                string_vector_nth_index_of(authorized, (root / "dest" / "unit" / "fresh.txt").string(), 0U));
+    TEST_ASSERT(string_vector_index_of(authorized, (root / "dest" / "unit" / "old-dir").string()) <
+                string_vector_nth_index_of(authorized, (root / "dest" / "unit" / "fresh.txt").string(), 0U));
+    TEST_ASSERT(string_vector_index_of(authorized, (root / "dest" / "unit" / "old-dir" / "old.txt").string()) <
+                string_vector_nth_index_of(authorized, (root / "dest" / "unit" / "fresh.txt").string(), 0U));
 }
 
 static void assert_shared_transfer_contract_cases() {
@@ -1528,6 +1706,7 @@ int main() {
     assert_directory_long_path_round_trip();
     assert_directory_export_excludes_matching_entries();
     assert_directory_export_authorizer_checks_children();
+    assert_directory_export_authorizer_order_skips_excluded_paths();
     assert_directory_export_sink_reports_authorizer_failure();
     assert_single_file_export_ignores_exclude_patterns();
 #ifndef _WIN32
@@ -1538,6 +1717,7 @@ int main() {
     assert_transfer_skips_special_files_with_warning();
     assert_top_level_special_files_are_unsupported();
     assert_symlink_import_preserves_links();
+    assert_symlink_import_authorizes_link_and_resolved_target_before_create();
     assert_symlink_import_skip_reports_warning();
     assert_symlink_import_rejects_absolute_target();
     assert_symlink_import_rejects_parent_target();
@@ -1548,7 +1728,10 @@ int main() {
     assert_directory_traversal_is_rejected();
     assert_multiple_sources_import();
     assert_directory_import_authorizer_checks_children();
+    assert_directory_import_authorizer_order_for_nested_file();
+    assert_transfer_summary_entry_does_not_authorize_or_materialize_path();
     assert_directory_replace_authorizer_checks_existing_children();
+    assert_multiple_replace_authorizer_order_for_existing_unit();
     assert_shared_transfer_contract_cases();
     return 0;
 }

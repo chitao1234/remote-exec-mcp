@@ -15,9 +15,9 @@
 
 #include "platform/path_utils.h"
 #include "rpc/rpc_failures.h"
-#include "transfer_ops_internal.h"
+#include "transfer_filesystem.h"
 
-namespace transfer_ops_internal {
+namespace transfer_filesystem {
 
 bool is_absolute_path(const std::string& path) {
 #ifdef _WIN32
@@ -257,4 +257,4 @@ bool prepare_destination_path(const std::string& absolute_path,
     return existed && overwrite == TransferOverwrite::Replace;
 }
 
-} // namespace transfer_ops_internal
+} // namespace transfer_filesystem

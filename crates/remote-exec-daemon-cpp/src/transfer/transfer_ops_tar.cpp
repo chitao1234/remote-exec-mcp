@@ -14,15 +14,14 @@
 #endif
 
 #include "core/stdio_retry.h"
-#include "json.hpp"
 #include "platform/path_utils.h"
 #include "platform/scoped_file.h"
 #include "rpc/rpc_failures.h"
-#include "transfer_ops_internal.h"
+#include "transfer_archive.h"
+#include "transfer_tar_codec.h"
+#include "transfer_warning_codec.h"
 
-using Json = nlohmann::json;
-
-namespace transfer_ops_internal {
+namespace transfer_tar_codec {
 
 extern const std::size_t TAR_BLOCK_SIZE = 512;
 extern const char SINGLE_FILE_ENTRY[] = ".remote-exec-file";
@@ -136,13 +135,6 @@ std::uint64_t parse_octal_field(const char* data, std::size_t size) {
     return value;
 }
 
-std::uint64_t checked_add_u64(std::uint64_t left, std::uint64_t right, const std::string& label) {
-    if (left > std::numeric_limits<std::uint64_t>::max() - right) {
-        throw TransferFailure(TransferRpcCode::TransferFailed, label + " is too large");
-    }
-    return left + right;
-}
-
 bool checksum_valid(const char* block) {
     const std::uint64_t stored = parse_octal_field(block + 148, 8);
     std::uint64_t computed = 0;
@@ -154,17 +146,6 @@ bool checksum_valid(const char* block) {
         }
     }
     return stored == computed;
-}
-
-Json transfer_warnings_json(const std::vector<TransferWarning>& warnings) {
-    Json json = Json::array();
-    for (std::size_t i = 0; i < warnings.size(); ++i) {
-        json.push_back(Json{
-            {"code", warnings[i].code},
-            {"message", warnings[i].message},
-        });
-    }
-    return json;
 }
 
 std::string header_path(const char* block) {
@@ -276,25 +257,7 @@ void append_transfer_summary_entry(TransferArchiveSink* archive, const std::vect
     if (warnings.empty()) {
         return;
     }
-    const Json summary = Json{{"warnings", transfer_warnings_json(warnings)}};
-    append_file_entry(archive, TRANSFER_SUMMARY_ENTRY, summary.dump());
-}
-
-std::vector<TransferWarning> read_transfer_summary(const std::string& body) {
-    std::vector<TransferWarning> warnings;
-    const Json summary = Json::parse(body);
-    const Json raw_warnings = summary.value("warnings", Json::array());
-    for (std::size_t i = 0; i < raw_warnings.size(); ++i) {
-        warnings.push_back(TransferWarning{
-            raw_warnings[i].value("code", std::string()),
-            raw_warnings[i].value("message", std::string()),
-        });
-    }
-    return warnings;
-}
-
-void append_warnings(std::vector<TransferWarning>* destination, const std::vector<TransferWarning>& source) {
-    destination->insert(destination->end(), source.begin(), source.end());
+    append_file_entry(archive, TRANSFER_SUMMARY_ENTRY, transfer_warning_codec::transfer_summary_body(warnings));
 }
 
 TarHeaderView parse_header(const char* block) {
@@ -332,26 +295,52 @@ void ensure_transfer_entry_within_limits(std::uint64_t entry_size,
     }
 }
 
-std::size_t padded_length(std::uint64_t size) {
-    const std::uint64_t padded = checked_add_u64(size, static_cast<std::uint64_t>(tar_padding(size)), "tar entry size");
-    ensure_u64_fits_size_t(padded, "tar entry size");
-    return static_cast<std::size_t>(padded);
+std::uint64_t entry_padding(std::uint64_t size) {
+    const std::uint64_t remainder = size % TAR_BLOCK_SIZE;
+    return remainder == 0U ? 0U : static_cast<std::uint64_t>(TAR_BLOCK_SIZE) - remainder;
 }
 
-std::string read_gnu_long_name(const std::string& archive, std::size_t body_offset, std::uint64_t size) {
-    if (body_offset + padded_length(size) > archive.size()) {
-        throw TransferFailure(TransferRpcCode::TransferFailed, "truncated tar entry body");
+std::uint64_t entry_body_with_padding(std::uint64_t size) {
+    if (size > std::numeric_limits<std::uint64_t>::max() - entry_padding(size)) {
+        throw TransferFailure(TransferRpcCode::TransferFailed, "tar entry size is too large");
     }
-    ensure_u64_fits_size_t(size, "GNU long name entry size");
-    std::string value = archive.substr(body_offset, static_cast<std::size_t>(size));
+    return size + entry_padding(size);
+}
+
+void require_archive_terminator(TransferArchiveReader& reader) {
+    std::vector<char> terminator(TAR_BLOCK_SIZE);
+    transfer_archive::read_exact_or_throw(reader, terminator.data(), terminator.size(), "truncated tar terminator");
+    if (!is_zero_block(terminator.data())) {
+        throw TransferFailure(TransferRpcCode::SourceUnsupported, "invalid tar terminator");
+    }
+
+    while (reader.read_exact_or_eof(terminator.data(), terminator.size())) {
+        if (!is_zero_block(terminator.data())) {
+            throw TransferFailure(TransferRpcCode::SourceUnsupported, "trailing data after tar terminator");
+        }
+    }
+}
+
+void skip_entry_padding(TransferArchiveReader& reader, std::uint64_t size) {
+    transfer_archive::skip_exact(reader, entry_padding(size), "truncated tar entry body");
+}
+
+std::string read_limited_metadata_string(TransferArchiveReader& reader,
+                                         std::uint64_t size,
+                                         const TransferLimitConfig& limits,
+                                         const std::string& error_message) {
+    ensure_transfer_entry_within_limits(size, 0U, limits);
+    return transfer_archive::read_exact_string(reader, size, error_message);
+}
+
+std::string
+read_gnu_long_name_from_reader(TransferArchiveReader& reader, std::uint64_t size, const TransferLimitConfig& limits) {
+    std::string value = read_limited_metadata_string(reader, size, limits, "truncated tar entry body");
+    skip_entry_padding(reader, size);
     while (!value.empty() && value[value.size() - 1] == '\0') {
         value.erase(value.size() - 1);
     }
     return value;
 }
 
-void validate_transfer_options(const ExportOptions& options) {
-    (void)options;
-}
-
-} // namespace transfer_ops_internal
+} // namespace transfer_tar_codec

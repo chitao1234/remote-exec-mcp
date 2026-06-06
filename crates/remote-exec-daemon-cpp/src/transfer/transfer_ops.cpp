@@ -13,9 +13,7 @@
 #include "platform/platform.h"
 #include "rpc/rpc_failures.h"
 #include "transfer/transfer_ops.h"
-#include "transfer_ops_internal.h"
-
-using namespace transfer_ops_internal;
+#include "transfer_filesystem.h"
 
 TransferArchiveReader::~TransferArchiveReader() {
 }
@@ -112,7 +110,7 @@ bool parse_transfer_overwrite_wire_value(const std::string& value, TransferOverw
 }
 
 PathInfo path_info(const std::string& absolute_path) {
-    if (!is_absolute_path(absolute_path)) {
+    if (!transfer_filesystem::is_absolute_path(absolute_path)) {
         throw TransferFailure(TransferRpcCode::PathNotAbsolute, "transfer path is not absolute");
     }
 

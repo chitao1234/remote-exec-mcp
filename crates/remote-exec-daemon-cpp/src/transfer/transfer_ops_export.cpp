@@ -10,22 +10,18 @@
 
 #include "platform/path_utils.h"
 #include "rpc/rpc_failures.h"
+#include "transfer_archive.h"
+#include "transfer_filesystem.h"
 #include "transfer_glob.h"
-#include "transfer_ops_internal.h"
+#include "transfer_options.h"
+#include "transfer_tar_codec.h"
 
 namespace {
 
-using namespace transfer_ops_internal;
-
-class StringTransferArchiveSink : public TransferArchiveSink {
-public:
-    explicit StringTransferArchiveSink(std::string* output) : output_(output) {}
-
-    void write(const char* data, std::size_t size) { output_->append(data, size); }
-
-private:
-    std::string* output_;
-};
+using transfer_archive::StringArchiveSink;
+using namespace transfer_filesystem;
+using namespace transfer_tar_codec;
+using transfer_options::ExportOptions;
 
 struct ExportContext {
     ExportOptions options;
@@ -213,7 +209,7 @@ ExportOptions normalized_options(TransferSymlinkMode symlink_mode, const std::ve
     ExportOptions options;
     options.symlink_mode = symlink_mode;
     options.exclude = exclude;
-    validate_transfer_options(options);
+    transfer_options::validate_transfer_options(options);
     return options;
 }
 
@@ -302,7 +298,7 @@ ExportedPayload export_path(const std::string& absolute_path,
                             const std::vector<std::string>& exclude,
                             const TransferPathAuthorizer& authorizer) {
     std::string archive;
-    StringTransferArchiveSink sink(&archive);
+    StringArchiveSink sink(&archive);
     const TransferSourceType source_type = export_path_to_sink(sink, absolute_path, symlink_mode, exclude, authorizer);
     return ExportedPayload{source_type, archive};
 }
