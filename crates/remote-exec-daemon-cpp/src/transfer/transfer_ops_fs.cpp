@@ -6,13 +6,6 @@
 #include <string>
 #include <vector>
 
-#ifdef _WIN32
-#include <sys/stat.h>
-#include <windows.h>
-#else
-#include <sys/stat.h>
-#endif
-
 #include "platform/path_utils.h"
 #include "rpc/rpc_failures.h"
 #include "transfer_filesystem.h"
@@ -30,18 +23,6 @@ bool is_absolute_path(const std::string& path) {
 }
 
 namespace {
-
-bool stat_path_no_follow(const std::string& path, struct stat* st) {
-    return path_utils::lstat_path(path, st);
-}
-
-bool stat_is_regular_file(const struct stat& st) {
-    return (st.st_mode & S_IFMT) == S_IFREG;
-}
-
-bool stat_is_directory(const struct stat& st) {
-    return (st.st_mode & S_IFMT) == S_IFDIR;
-}
 
 static const std::size_t MAX_REMOVE_DEPTH = 256;
 
@@ -103,38 +84,33 @@ void remove_existing_path(const std::string& path) {
 } // namespace
 
 bool is_symlink_path(const std::string& path) {
-#ifdef _WIN32
-    const DWORD attributes = GetFileAttributesW(path_utils::wide_from_utf8(path).c_str());
-    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
-#else
-    struct stat st;
-    return path_utils::lstat_path(path, &st) && S_ISLNK(st.st_mode);
-#endif
+    path_utils::PathMetadata metadata;
+    return path_utils::path_metadata_no_follow(path, &metadata) && metadata.is_symlink;
 }
 
 bool path_exists(const std::string& path) {
-    struct stat st;
-    return stat_path_no_follow(path, &st);
+    path_utils::PathMetadata metadata;
+    return path_utils::path_metadata_no_follow(path, &metadata);
 }
 
 bool is_regular_file(const std::string& path) {
-    struct stat st;
-    return stat_path_no_follow(path, &st) && stat_is_regular_file(st);
+    path_utils::PathMetadata metadata;
+    return path_utils::path_metadata_no_follow(path, &metadata) && metadata.is_regular_file;
 }
 
 bool is_regular_file_follow(const std::string& path) {
-    struct stat st;
-    return path_utils::stat_path(path, &st) && stat_is_regular_file(st);
+    path_utils::PathMetadata metadata;
+    return path_utils::path_metadata(path, &metadata) && metadata.is_regular_file;
 }
 
 bool is_directory(const std::string& path) {
-    struct stat st;
-    return stat_path_no_follow(path, &st) && stat_is_directory(st);
+    path_utils::PathMetadata metadata;
+    return path_utils::path_metadata_no_follow(path, &metadata) && metadata.is_directory;
 }
 
 bool is_directory_follow(const std::string& path) {
-    struct stat st;
-    return path_utils::stat_path(path, &st) && stat_is_directory(st);
+    path_utils::PathMetadata metadata;
+    return path_utils::path_metadata(path, &metadata) && metadata.is_directory;
 }
 
 std::string join_path(const std::string& base, const std::string& child) {

@@ -4,7 +4,6 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
-#include <sys/stat.h>
 
 #include "core/stdio_retry.h"
 #include "platform/path_utils.h"
@@ -65,12 +64,12 @@ std::string read_binary_file_bytes(const std::string& path) {
 }
 
 void require_regular_image_file(const std::string& path) {
-    struct stat st;
-    if (path_utils::stat_path(path, &st)) {
-        if ((st.st_mode & S_IFMT) != S_IFREG) {
+    path_utils::PathMetadata metadata;
+    if (path_utils::path_metadata(path, &metadata)) {
+        if (!metadata.is_regular_file) {
             throw not_file_image_failure(path);
         }
-        if (st.st_size > 0 && static_cast<std::size_t>(st.st_size) > MAX_IMAGE_FILE_SIZE) {
+        if (metadata.size > static_cast<std::uint64_t>(MAX_IMAGE_FILE_SIZE)) {
             throw too_large_image_failure(path);
         }
         return;

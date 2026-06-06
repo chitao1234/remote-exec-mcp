@@ -2,13 +2,6 @@
 #include <stdexcept>
 #include <string>
 
-#ifdef _WIN32
-#include <sys/stat.h>
-#else
-#include <sys/stat.h>
-#include <unistd.h>
-#endif
-
 #include "platform/path_utils.h"
 #include "platform/platform.h"
 #include "rpc/rpc_failures.h"
@@ -114,12 +107,8 @@ PathInfo path_info(const std::string& absolute_path) {
         throw TransferFailure(TransferRpcCode::PathNotAbsolute, "transfer path is not absolute");
     }
 
-    struct stat st;
-#ifdef _WIN32
-    if (!path_utils::stat_path(absolute_path, &st)) {
-#else
-    if (!path_utils::lstat_path(absolute_path, &st)) {
-#endif
+    path_utils::PathMetadata metadata;
+    if (!path_utils::path_metadata_no_follow(absolute_path, &metadata)) {
         const int error_code = errno;
         if (error_code == ENOENT || error_code == ENOTDIR) {
             return PathInfo{false, false};
@@ -127,12 +116,8 @@ PathInfo path_info(const std::string& absolute_path) {
         throw TransferFailure(TransferRpcCode::Internal, errno_error::message_from_errno(error_code));
     }
 
-#ifdef _WIN32
-    return PathInfo{true, (st.st_mode & S_IFMT) == S_IFDIR};
-#else
-    if ((st.st_mode & S_IFMT) == S_IFLNK) {
+    if (metadata.is_symlink) {
         throw TransferFailure(TransferRpcCode::DestinationUnsupported, "destination path contains unsupported symlink");
     }
-    return PathInfo{true, (st.st_mode & S_IFMT) == S_IFDIR};
-#endif
+    return PathInfo{true, metadata.is_directory};
 }

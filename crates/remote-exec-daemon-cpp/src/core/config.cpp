@@ -6,7 +6,6 @@
 #include <map>
 #include <sstream>
 #include <stdexcept>
-#include <sys/stat.h>
 
 #include "core/config.h"
 #include "core/stdio_retry.h"
@@ -296,15 +295,11 @@ static void validate_transfer_limits(const TransferLimitConfig& limits) {
 }
 
 static void validate_existing_directory(const std::string& path, const std::string& key) {
-    struct stat info;
-    if (!path_utils::stat_path(path, &info)) {
+    path_utils::PathMetadata metadata;
+    if (!path_utils::path_metadata(path, &metadata)) {
         throw std::runtime_error(key + " `" + path + "` does not exist");
     }
-#ifdef _WIN32
-    if ((info.st_mode & S_IFDIR) == 0) {
-#else
-    if (!S_ISDIR(info.st_mode)) {
-#endif
+    if (!metadata.is_directory) {
         throw std::runtime_error(key + " `" + path + "` must be a directory");
     }
 }

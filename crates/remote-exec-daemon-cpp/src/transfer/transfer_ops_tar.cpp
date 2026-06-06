@@ -9,10 +9,6 @@
 #include <string>
 #include <vector>
 
-#ifndef _WIN32
-#include <sys/stat.h>
-#endif
-
 #include "core/stdio_retry.h"
 #include "platform/path_utils.h"
 #include "platform/scoped_file.h"
@@ -193,19 +189,16 @@ void append_file_entry(TransferArchiveSink* archive, const std::string& rel_path
 void append_file_entry_from_path(TransferArchiveSink* archive,
                                  const std::string& rel_path,
                                  const std::string& source_path) {
-    struct stat st;
-    if (!path_utils::stat_path(source_path, &st)) {
+    path_utils::PathMetadata metadata;
+    if (!path_utils::path_metadata(source_path, &metadata)) {
         throw TransferFailure(TransferRpcCode::SourceMissing, "transfer source missing");
     }
-    const std::uint64_t mode = static_cast<std::uint64_t>(st.st_mode & 0777);
+    const std::uint64_t mode = metadata.has_mode_bits ? static_cast<std::uint64_t>(metadata.mode_bits & 0777U) : 0644U;
     ScopedFile input(path_utils::open_file(source_path, "rb"));
     if (!input.valid()) {
         throw TransferFailure(TransferRpcCode::SourceMissing, "transfer source missing");
     }
-    if (st.st_size < 0) {
-        throw std::runtime_error("unable to read transfer source");
-    }
-    const std::uint64_t file_size = static_cast<std::uint64_t>(st.st_size);
+    const std::uint64_t file_size = metadata.size;
 
     const bool long_name_emitted = rel_path.size() > 100;
     if (long_name_emitted) {

@@ -3,7 +3,6 @@
 #include <cctype>
 #include <cerrno>
 #include <cstdio>
-#include <cstring>
 #include <functional>
 #include <sstream>
 #include <stdexcept>
@@ -13,7 +12,6 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
-#include <sys/stat.h>
 #ifndef _WIN32
 #include <unistd.h>
 #endif
@@ -222,16 +220,8 @@ std::string resolve_patch_path(const std::string& root, const std::string& path)
 }
 
 bool file_exists(const std::string& path) {
-    struct stat st;
-    return path_utils::stat_path(path, &st);
-}
-
-bool is_regular_file_mode(const struct stat& st) {
-    return (st.st_mode & S_IFMT) == S_IFREG;
-}
-
-bool is_directory_mode(const struct stat& st) {
-    return (st.st_mode & S_IFMT) == S_IFDIR;
+    path_utils::PathMetadata metadata;
+    return path_utils::path_metadata(path, &metadata);
 }
 
 bool paths_equal(const std::string& left, const std::string& right) {
@@ -263,10 +253,8 @@ std::string read_text_file(const std::string& path) {
 void write_text_atomic(const std::string& path, const std::string& content) {
     path_utils::create_parent_directories(path);
     const std::string temp_path = unique_atomic_write_temp_path(path);
-#ifndef _WIN32
-    struct stat existing;
-    const bool preserve_mode = path_utils::stat_path(path, &existing);
-#endif
+    path_utils::PathMetadata existing;
+    const bool preserve_mode = path_utils::path_metadata(path, &existing);
 
     ScopedFile output(path_utils::open_file(temp_path, "wb"));
     if (!output.valid()) {
@@ -278,12 +266,10 @@ void write_text_atomic(const std::string& path, const std::string& content) {
     if (output.close() != 0) {
         throw std::runtime_error("unable to write " + temp_path);
     }
-#ifndef _WIN32
-    if (preserve_mode && !path_utils::set_path_mode(temp_path, static_cast<unsigned int>(existing.st_mode))) {
+    if (preserve_mode && existing.has_mode_bits && !path_utils::set_path_mode(temp_path, existing.mode_bits)) {
         (void)path_utils::remove_path(temp_path);
         throw std::runtime_error("unable to preserve mode for " + temp_path);
     }
-#endif
 
     if (!path_utils::rename_path(temp_path, path)) {
         (void)path_utils::remove_path(temp_path);
@@ -653,9 +639,9 @@ void mark_overlay_parent_directories(PathOverlay* overlay, const std::string& pa
     }
 }
 
-void require_stat_or_missing(const std::string& path, struct stat* st, bool* exists) {
+void require_metadata_or_missing(const std::string& path, path_utils::PathMetadata* metadata, bool* exists) {
     errno = 0;
-    if (path_utils::stat_path(path, st)) {
+    if (path_utils::path_metadata(path, metadata)) {
         *exists = true;
         return;
     }
@@ -682,10 +668,10 @@ void ensure_parent_directories_can_exist(const std::string& path, const PathOver
             continue;
         }
 
-        struct stat st;
+        path_utils::PathMetadata metadata;
         bool exists = false;
-        require_stat_or_missing(parent, &st, &exists);
-        if (exists && !is_directory_mode(st)) {
+        require_metadata_or_missing(parent, &metadata, &exists);
+        if (exists && !metadata.is_directory) {
             throw std::runtime_error("parent path is not a directory: " + parent);
         }
         parent = path_utils::parent_directory(parent);
@@ -703,10 +689,10 @@ void ensure_writable_file_target(const std::string& path, const PathOverlay& ove
         return;
     }
 
-    struct stat st;
+    path_utils::PathMetadata metadata;
     bool exists = false;
-    require_stat_or_missing(path, &st, &exists);
-    if (exists && !is_regular_file_mode(st)) {
+    require_metadata_or_missing(path, &metadata, &exists);
+    if (exists && !metadata.is_regular_file) {
         throw std::runtime_error("patch target is not a file: " + path);
     }
 }
@@ -724,10 +710,10 @@ PlannedFile require_planned_file(const std::string& path, const PathOverlay& ove
         return planned->state.file;
     }
 
-    struct stat st;
+    path_utils::PathMetadata metadata;
     bool exists = false;
-    require_stat_or_missing(path, &st, &exists);
-    if (!exists || !is_regular_file_mode(st)) {
+    require_metadata_or_missing(path, &metadata, &exists);
+    if (!exists || !metadata.is_regular_file) {
         throw std::runtime_error("unable to read " + path);
     }
 

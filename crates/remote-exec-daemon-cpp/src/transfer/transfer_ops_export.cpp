@@ -4,10 +4,6 @@
 #include <utility>
 #include <vector>
 
-#ifndef _WIN32
-#include <sys/stat.h>
-#endif
-
 #include "platform/path_utils.h"
 #include "rpc/rpc_failures.h"
 #include "transfer_archive.h"
@@ -86,18 +82,15 @@ bool append_followed_symlink_entry(TransferArchiveSink* archive,
             handle_skipped_symlink(context, child_path);
             return true;
         }
-#ifndef _WIN32
-        struct stat st;
-        if (path_utils::stat_path(child_path, &st)) {
-            const std::pair<unsigned long long, unsigned long long> inode_key(
-                static_cast<unsigned long long>(st.st_dev), static_cast<unsigned long long>(st.st_ino));
+        path_utils::FileIdentity identity;
+        if (path_utils::file_identity(child_path, &identity) && identity.valid) {
+            const std::pair<unsigned long long, unsigned long long> inode_key(identity.device, identity.file);
             if (context->followed_inodes.count(inode_key) != 0) {
                 handle_skipped_symlink(context, child_path);
                 return true;
             }
             context->followed_inodes.insert(inode_key);
         }
-#endif
         ++context->recursion_depth;
         append_directory_entry(archive, child_rel);
         append_directory_contents(archive, child_path, child_rel, exclude_matcher, context);

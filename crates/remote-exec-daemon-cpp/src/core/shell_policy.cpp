@@ -9,7 +9,6 @@
 #else
 #include <errno.h>
 #include <pwd.h>
-#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -58,8 +57,9 @@ bool is_disallowed_unix_shell(const std::string& shell) {
 }
 
 bool is_executable_file(const std::string& path) {
-    struct stat st;
-    return path_utils::stat_path(path, &st) && S_ISREG(st.st_mode) && posix_fd::access_path(path.c_str(), X_OK) == 0;
+    path_utils::PathMetadata metadata;
+    return path_utils::path_metadata(path, &metadata) && metadata.is_regular_file &&
+           posix_fd::access_path(path.c_str(), X_OK) == 0;
 }
 
 bool probe_unix_shell(const std::string& shell) {

@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cerrno>
-#include <cstring>
 #include <stdexcept>
 #include <vector>
 
@@ -80,15 +79,18 @@ bool has_find_wildcard(const std::wstring& path) {
     return false;
 }
 
-void fill_stat_from_win32_attributes(struct stat* st, DWORD attributes, DWORD file_size_high, DWORD file_size_low) {
-    std::memset(st, 0, sizeof(*st));
-    st->st_mode = (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ? S_IFDIR : S_IFREG;
-    if ((attributes & FILE_ATTRIBUTE_READONLY) != 0) {
-        st->st_mode |= 0444;
-    } else {
-        st->st_mode |= 0666;
-    }
-    st->st_size = static_cast<_off_t>((static_cast<unsigned long long>(file_size_high) << 32) | file_size_low);
+void fill_metadata_from_win32_attributes(PathMetadata* metadata,
+                                         DWORD attributes,
+                                         DWORD file_size_high,
+                                         DWORD file_size_low) {
+    *metadata = PathMetadata();
+    metadata->exists = true;
+    metadata->is_symlink = (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+    metadata->is_directory = !metadata->is_symlink && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    metadata->is_regular_file = !metadata->is_directory && !metadata->is_symlink;
+    metadata->size = (static_cast<std::uint64_t>(file_size_high) << 32) | file_size_low;
+    metadata->mode_bits = (attributes & FILE_ATTRIBUTE_READONLY) != 0 ? 0444U : 0666U;
+    metadata->has_mode_bits = true;
 }
 
 class ScopedFindHandle {
@@ -130,6 +132,17 @@ public:
 private:
     DIR* dir_;
 };
+
+void fill_metadata_from_stat(PathMetadata* metadata, const struct stat& st) {
+    *metadata = PathMetadata();
+    metadata->exists = true;
+    metadata->is_regular_file = S_ISREG(st.st_mode);
+    metadata->is_directory = S_ISDIR(st.st_mode);
+    metadata->is_symlink = S_ISLNK(st.st_mode);
+    metadata->size = st.st_size < 0 ? 0U : static_cast<std::uint64_t>(st.st_size);
+    metadata->mode_bits = static_cast<unsigned int>(st.st_mode & 07777U);
+    metadata->has_mode_bits = true;
+}
 
 } // namespace
 #endif
@@ -234,7 +247,7 @@ FILE* open_file(const std::string& path, const char* mode) {
 #endif
 }
 
-bool stat_path(const std::string& path, struct stat* st) {
+bool path_metadata(const std::string& path, PathMetadata* metadata) {
 #ifdef _WIN32
     const std::wstring wide_path = wide_from_utf8(path);
     if (has_find_wildcard(wide_path)) {
@@ -245,29 +258,60 @@ bool stat_path(const std::string& path, struct stat* st) {
     WIN32_FIND_DATAW data;
     ScopedFindHandle handle(FindFirstFileW(wide_path.c_str(), &data));
     if (handle.valid()) {
-        fill_stat_from_win32_attributes(st, data.dwFileAttributes, data.nFileSizeHigh, data.nFileSizeLow);
+        fill_metadata_from_win32_attributes(metadata, data.dwFileAttributes, data.nFileSizeHigh, data.nFileSizeLow);
         return true;
     }
 
     const DWORD find_error = GetLastError();
     const DWORD attributes = GetFileAttributesW(wide_path.c_str());
     if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-        fill_stat_from_win32_attributes(st, attributes, 0U, 0U);
+        fill_metadata_from_win32_attributes(metadata, attributes, 0U, 0U);
         return true;
     }
 
     errno = last_error_to_errno(find_error);
     return false;
 #else
-    return posix_eintr::retry<int>([&]() { return stat(path.c_str(), st); }) == 0;
+    struct stat st;
+    if (posix_eintr::retry<int>([&]() { return stat(path.c_str(), &st); }) != 0) {
+        return false;
+    }
+    fill_metadata_from_stat(metadata, st);
+    return true;
 #endif
 }
 
-bool lstat_path(const std::string& path, struct stat* st) {
+bool path_metadata_no_follow(const std::string& path, PathMetadata* metadata) {
 #ifdef _WIN32
-    return stat_path(path, st);
+    return path_metadata(path, metadata);
 #else
-    return posix_eintr::retry<int>([&]() { return lstat(path.c_str(), st); }) == 0;
+    struct stat st;
+    if (posix_eintr::retry<int>([&]() { return lstat(path.c_str(), &st); }) != 0) {
+        return false;
+    }
+    fill_metadata_from_stat(metadata, st);
+    return true;
+#endif
+}
+
+bool file_identity(const std::string& path, FileIdentity* identity) {
+    if (identity == nullptr) {
+        errno = EINVAL;
+        return false;
+    }
+    *identity = FileIdentity();
+#ifdef _WIN32
+    (void)path;
+    return false;
+#else
+    struct stat st;
+    if (posix_eintr::retry<int>([&]() { return stat(path.c_str(), &st); }) != 0) {
+        return false;
+    }
+    identity->valid = true;
+    identity->device = static_cast<unsigned long long>(st.st_dev);
+    identity->file = static_cast<unsigned long long>(st.st_ino);
+    return true;
 #endif
 }
 
@@ -446,11 +490,12 @@ std::vector<DirectoryEntryInfo> read_directory_entries(const std::string& path) 
             continue;
         }
         const std::string child = join_path(path, name);
-        struct stat st;
-        if (!lstat_path(child, &st)) {
+        PathMetadata metadata;
+        if (!path_metadata_no_follow(child, &metadata)) {
             throw std::runtime_error("unable to stat path " + child);
         }
-        entries.push_back(DirectoryEntryInfo{name, S_ISDIR(st.st_mode), S_ISREG(st.st_mode), S_ISLNK(st.st_mode)});
+        entries.push_back(
+            DirectoryEntryInfo{name, metadata.is_directory, metadata.is_regular_file, metadata.is_symlink});
         errno = 0;
     }
     if (errno != 0) {
