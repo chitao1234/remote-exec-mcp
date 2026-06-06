@@ -5,9 +5,22 @@ use crate::local::port::LocalPortClient;
 
 use super::tunnel::PortTunnel;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum SideOwner {
+    BrokerHost,
+    Target {
+        name: String,
+        daemon_instance_id: String,
+    },
+}
+
 #[derive(Clone)]
 pub enum SideHandle {
-    Target { name: String, handle: TargetHandle },
+    Target {
+        name: String,
+        handle: TargetHandle,
+        daemon_instance_id: String,
+    },
     Local(LocalPortClient),
 }
 
@@ -16,14 +29,32 @@ impl SideHandle {
         Ok(Self::Local(LocalPortClient::global()?))
     }
 
-    pub fn target(name: String, handle: TargetHandle) -> Self {
-        Self::Target { name, handle }
+    pub fn target(name: String, handle: TargetHandle, daemon_instance_id: String) -> Self {
+        Self::Target {
+            name,
+            handle,
+            daemon_instance_id,
+        }
     }
 
     pub fn name(&self) -> &str {
         match self {
             Self::Target { name, .. } => name,
             Self::Local(_) => TARGET_NAME,
+        }
+    }
+
+    pub(super) fn owner(&self) -> SideOwner {
+        match self {
+            Self::Target {
+                name,
+                daemon_instance_id,
+                ..
+            } => SideOwner::Target {
+                name: name.clone(),
+                daemon_instance_id: daemon_instance_id.clone(),
+            },
+            Self::Local(_) => SideOwner::BrokerHost,
         }
     }
 

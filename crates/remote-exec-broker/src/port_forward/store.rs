@@ -13,6 +13,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::BrokerPortForwardLimits;
+use super::side::SideOwner;
 use super::supervisor::{ListenSessionControl, close_listen_session, wait_for_forward_task_stop};
 
 const RECONNECT_LIMIT_EXCEEDED: &str =
@@ -266,28 +267,30 @@ impl PortForwardStore {
         let candidates = self.take_close_candidates(forward_ids).await?;
         drop(_close_guard);
 
-        let mut candidates = candidates;
-        let mut closed = Vec::with_capacity(candidates.len());
-        while !candidates.is_empty() {
-            let candidate = candidates.remove(0);
-            let PortForwardCloseCandidate {
-                forward_id,
-                mut public,
-                lifecycle,
-            } = candidate;
-            if let Err(err) = close_lifecycle(&lifecycle).await {
-                let error = format!("closing port forward `{}`: {err:#}", forward_id);
-                mark_entry_failed(public.entry_mut(), error.clone());
-                let mut restore_candidates = vec![PortForwardCloseCandidate {
-                    forward_id,
-                    public,
-                    lifecycle,
-                }];
-                restore_candidates.extend(candidates);
-                self.restore_close_candidates(restore_candidates).await;
-                return Err(anyhow::anyhow!(error));
-            }
-            closed.push(closed_entry(public.into_entry()));
+        self.close_candidates(candidates).await
+    }
+
+    pub async fn close_target_instance(
+        &self,
+        target: &str,
+        daemon_instance_id: &str,
+        reason: &str,
+    ) -> anyhow::Result<Vec<ForwardPortEntry>> {
+        let _close_guard = self.close_lock.lock().await;
+        let candidates = self
+            .take_target_instance_close_candidates(target, daemon_instance_id)
+            .await;
+        drop(_close_guard);
+
+        let closed = self.close_candidates(candidates).await?;
+        for entry in &closed {
+            tracing::info!(
+                forward_id = %entry.forward_id,
+                target,
+                daemon_instance_id,
+                reason,
+                "closed port forward after target daemon instance invalidation"
+            );
         }
         Ok(closed)
     }
@@ -322,6 +325,75 @@ impl PortForwardStore {
             candidates.push(state.take_forward(forward_id)?);
         }
         Ok(candidates)
+    }
+
+    async fn take_target_instance_close_candidates(
+        &self,
+        target: &str,
+        daemon_instance_id: &str,
+    ) -> Vec<PortForwardCloseCandidate> {
+        let mut state = self.state_write();
+        let forward_ids = state
+            .public
+            .entries
+            .iter()
+            .filter_map(|(forward_id, _)| {
+                state
+                    .lifecycles
+                    .entries
+                    .get(forward_id.as_str())
+                    .filter(|lifecycle| {
+                        lifecycle.owned_by_target_instance(target, daemon_instance_id)
+                    })
+                    .map(|_| forward_id.clone())
+            })
+            .collect::<Vec<_>>();
+
+        forward_ids
+            .into_iter()
+            .filter_map(|forward_id| match state.take_forward(forward_id.clone()) {
+                Ok(candidate) => Some(candidate),
+                Err(err) => {
+                    tracing::warn!(
+                        forward_id = %forward_id,
+                        target,
+                        daemon_instance_id,
+                        error = %err,
+                        "failed to take port forward for target daemon instance invalidation"
+                    );
+                    None
+                }
+            })
+            .collect()
+    }
+
+    async fn close_candidates(
+        &self,
+        mut candidates: Vec<PortForwardCloseCandidate>,
+    ) -> anyhow::Result<Vec<ForwardPortEntry>> {
+        let mut closed = Vec::with_capacity(candidates.len());
+        while !candidates.is_empty() {
+            let candidate = candidates.remove(0);
+            let PortForwardCloseCandidate {
+                forward_id,
+                mut public,
+                lifecycle,
+            } = candidate;
+            if let Err(err) = close_lifecycle(&lifecycle).await {
+                let error = format!("closing port forward `{}`: {err:#}", forward_id);
+                mark_entry_failed(public.entry_mut(), error.clone());
+                let mut restore_candidates = vec![PortForwardCloseCandidate {
+                    forward_id,
+                    public,
+                    lifecycle,
+                }];
+                restore_candidates.extend(candidates);
+                self.restore_close_candidates(restore_candidates).await;
+                return Err(anyhow::anyhow!(error));
+            }
+            closed.push(closed_entry(public.into_entry()));
+        }
+        Ok(closed)
     }
 
     async fn restore_close_candidates(&self, candidates: Vec<PortForwardCloseCandidate>) {
@@ -745,10 +817,17 @@ impl PortForwardRecord {
         entry: ForwardPortEntry,
         listen_session: Arc<ListenSessionControl>,
         cancel: CancellationToken,
+        listen_owner: SideOwner,
+        connect_owner: SideOwner,
     ) -> Self {
         Self {
             public: ForwardPublicState::new(entry),
-            lifecycle: PortForwardLifecycle::new(listen_session, cancel),
+            lifecycle: PortForwardLifecycle::new(
+                listen_session,
+                cancel,
+                listen_owner,
+                connect_owner,
+            ),
         }
     }
 
@@ -820,14 +899,23 @@ struct PortForwardLifecycle {
     listen_session: Arc<ListenSessionControl>,
     cancel: CancellationToken,
     task: Mutex<Option<JoinHandle<()>>>,
+    listen_owner: SideOwner,
+    connect_owner: SideOwner,
 }
 
 impl PortForwardLifecycle {
-    fn new(listen_session: Arc<ListenSessionControl>, cancel: CancellationToken) -> Self {
+    fn new(
+        listen_session: Arc<ListenSessionControl>,
+        cancel: CancellationToken,
+        listen_owner: SideOwner,
+        connect_owner: SideOwner,
+    ) -> Self {
         Self {
             listen_session,
             cancel,
             task: Mutex::new(None),
+            listen_owner,
+            connect_owner,
         }
     }
 
@@ -838,6 +926,25 @@ impl PortForwardLifecycle {
     async fn take_task(&self) -> Option<JoinHandle<()>> {
         self.task.lock().await.take()
     }
+
+    fn owned_by_target_instance(&self, target: &str, daemon_instance_id: &str) -> bool {
+        side_owned_by_target_instance(&self.listen_owner, target, daemon_instance_id)
+            || side_owned_by_target_instance(&self.connect_owner, target, daemon_instance_id)
+    }
+}
+
+fn side_owned_by_target_instance(
+    owner: &SideOwner,
+    target: &str,
+    daemon_instance_id: &str,
+) -> bool {
+    matches!(
+        owner,
+        SideOwner::Target {
+            name,
+            daemon_instance_id: owner_instance,
+        } if name == target && owner_instance == daemon_instance_id
+    )
 }
 
 pub async fn close_record(record: PortForwardRecord) -> ForwardPortEntry {
@@ -918,6 +1025,8 @@ mod tests {
     use super::*;
     use crate::port_forward::SideHandle;
     use remote_exec_test_support::test_helpers::DEFAULT_TEST_TARGET;
+
+    const TEST_DAEMON_INSTANCE_ID: &str = "daemon-test-instance";
 
     #[tokio::test]
     async fn mark_ready_keeps_forward_reconnecting_until_both_sides_ready() {
@@ -1326,6 +1435,78 @@ mod tests {
         assert!(blocked_close.await.unwrap().is_ok());
     }
 
+    #[tokio::test]
+    async fn close_target_instance_closes_only_matching_remote_owned_forwards() {
+        let store = PortForwardStore::default();
+        store.insert(test_record("fwd_matching_connect")).await;
+        store
+            .insert(test_record_with_target_owner(
+                "fwd_matching_listen",
+                DEFAULT_TEST_TARGET,
+                Some(TEST_DAEMON_INSTANCE_ID),
+                "local",
+                None,
+            ))
+            .await;
+        store
+            .insert(test_record_with_target_owner(
+                "fwd_other_instance",
+                "local",
+                None,
+                DEFAULT_TEST_TARGET,
+                Some("daemon-other-instance"),
+            ))
+            .await;
+        store
+            .insert(test_record_with_sides("fwd_local_only", "local", "local"))
+            .await;
+
+        let closed = store
+            .close_target_instance(
+                DEFAULT_TEST_TARGET,
+                TEST_DAEMON_INSTANCE_ID,
+                "target daemon instance changed",
+            )
+            .await
+            .unwrap();
+        let closed_ids = closed
+            .iter()
+            .map(|entry| entry.forward_id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            closed_ids,
+            vec!["fwd_matching_connect", "fwd_matching_listen"]
+        );
+        assert_eq!(
+            store
+                .list(&filter_all())
+                .await
+                .iter()
+                .map(|entry| entry.forward_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["fwd_local_only", "fwd_other_instance"]
+        );
+    }
+
+    #[tokio::test]
+    async fn close_target_instance_is_noop_for_unmatched_instance() {
+        let store = PortForwardStore::default();
+        store.insert(test_record("fwd_keep")).await;
+
+        let closed = store
+            .close_target_instance(
+                DEFAULT_TEST_TARGET,
+                "daemon-other-instance",
+                "target daemon instance changed",
+            )
+            .await
+            .unwrap();
+
+        assert!(closed.is_empty());
+        assert_eq!(store.list(&filter_all()).await.len(), 1);
+    }
+
     fn filter_one(forward_id: &str) -> PortForwardFilter {
         PortForwardFilter {
             listen_side: None,
@@ -1362,6 +1543,8 @@ mod tests {
         listen_side: &str,
         connect_side: &str,
     ) -> PortForwardRecord {
+        let listen_owner = test_side_owner(listen_side);
+        let connect_owner = test_side_owner(connect_side);
         PortForwardRecord::new(
             ForwardPortEntry::new_open(
                 ForwardId::new(forward_id),
@@ -1390,6 +1573,73 @@ mod tests {
                 None,
             )),
             CancellationToken::new(),
+            listen_owner,
+            connect_owner,
         )
+    }
+
+    fn test_record_with_target_owner(
+        forward_id: &str,
+        listen_side: &str,
+        listen_daemon_instance_id: Option<&str>,
+        connect_side: &str,
+        connect_daemon_instance_id: Option<&str>,
+    ) -> PortForwardRecord {
+        let listen_owner = match listen_daemon_instance_id {
+            Some(daemon_instance_id) => SideOwner::Target {
+                name: listen_side.to_string(),
+                daemon_instance_id: daemon_instance_id.to_string(),
+            },
+            None => SideOwner::BrokerHost,
+        };
+        let connect_owner = match connect_daemon_instance_id {
+            Some(daemon_instance_id) => SideOwner::Target {
+                name: connect_side.to_string(),
+                daemon_instance_id: daemon_instance_id.to_string(),
+            },
+            None => SideOwner::BrokerHost,
+        };
+        PortForwardRecord::new(
+            ForwardPortEntry::new_open(
+                ForwardId::new(forward_id),
+                listen_side.to_string(),
+                "127.0.0.1:10000".to_string(),
+                connect_side.to_string(),
+                "127.0.0.1:10001".to_string(),
+                ForwardPortProtocol::Tcp,
+                ForwardPortLimitSummary {
+                    max_active_tcp_streams: 256,
+                    max_udp_peers: 256,
+                    max_pending_tcp_bytes_per_stream: 256 * 1024,
+                    max_pending_tcp_bytes_per_forward: 2 * 1024 * 1024,
+                    max_tunnel_queued_bytes:
+                        remote_exec_proto::port_forward::DEFAULT_TUNNEL_QUEUE_BYTES,
+                    max_reconnecting_forwards: 16,
+                },
+            ),
+            Arc::new(ListenSessionControl::new_for_test(
+                SideHandle::broker_host().unwrap(),
+                ForwardId::new(forward_id),
+                format!("session-{forward_id}"),
+                ForwardPortProtocol::Tcp,
+                Duration::from_secs(5),
+                remote_exec_proto::port_forward::DEFAULT_TUNNEL_QUEUE_BYTES as usize,
+                None,
+            )),
+            CancellationToken::new(),
+            listen_owner,
+            connect_owner,
+        )
+    }
+
+    fn test_side_owner(side: &str) -> SideOwner {
+        if side == "local" {
+            SideOwner::BrokerHost
+        } else {
+            SideOwner::Target {
+                name: side.to_string(),
+                daemon_instance_id: TEST_DAEMON_INSTANCE_ID.to_string(),
+            }
+        }
     }
 }

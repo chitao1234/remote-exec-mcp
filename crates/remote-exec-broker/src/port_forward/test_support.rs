@@ -149,6 +149,8 @@ pub(super) fn test_record(runtime: &ForwardRuntime, listen_endpoint: &str) -> Po
         ),
         runtime.listen_session.clone(),
         runtime.cancel.clone(),
+        runtime.listen_side().owner(),
+        runtime.connect_side().owner(),
     )
 }
 

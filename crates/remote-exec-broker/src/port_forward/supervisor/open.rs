@@ -264,6 +264,8 @@ async fn build_opened_forward(
             ),
             listen_session,
             cancel,
+            listen_side.owner(),
+            connect_side.owner(),
         ),
         reservation,
         runtime,

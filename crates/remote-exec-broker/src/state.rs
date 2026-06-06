@@ -69,19 +69,22 @@ impl BrokerState {
         }
 
         let handle = self.verified_configured_target(name).await?;
-        if let Some(info) = handle.cached_daemon_info().await {
-            anyhow::ensure!(
-                info.capabilities.supports_port_forward
-                    && info
-                        .capabilities
-                        .port_forward_protocol_version
-                        .is_some_and(|version| version.get() >= 4),
-                "target `{name}` does not support port forward protocol version 4"
-            );
-        }
+        let info = handle
+            .cached_daemon_info()
+            .await
+            .with_context(|| format!("target `{name}` metadata missing after verification"))?;
+        anyhow::ensure!(
+            info.capabilities.supports_port_forward
+                && info
+                    .capabilities
+                    .port_forward_protocol_version
+                    .is_some_and(|version| version.get() >= 4),
+            "target `{name}` does not support port forward protocol version 4"
+        );
         Ok(port_forward::SideHandle::target(
             name.to_string(),
             handle.clone(),
+            info.daemon_instance_id,
         ))
     }
 }

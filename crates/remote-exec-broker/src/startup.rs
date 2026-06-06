@@ -274,14 +274,41 @@ async fn periodic_target_refresh_loop(state: BrokerState, cancel: CancellationTo
             };
 
             match result {
-                Ok(true) => {
+                Ok(Some(previous_daemon_instance_id)) => {
                     state.sessions.remove_target(name).await;
+                    match state
+                        .port_forwards
+                        .close_target_instance(
+                            name,
+                            &previous_daemon_instance_id,
+                            "target daemon instance changed",
+                        )
+                        .await
+                    {
+                        Ok(closed) if !closed.is_empty() => {
+                            tracing::info!(
+                                target = %name,
+                                previous_daemon_instance_id = %previous_daemon_instance_id,
+                                closed_forwards = closed.len(),
+                                "closed broker port forwards after daemon instance change"
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(err) => {
+                            tracing::warn!(
+                                target = %name,
+                                previous_daemon_instance_id = %previous_daemon_instance_id,
+                                error = %err,
+                                "failed to close broker port forwards after daemon instance change"
+                            );
+                        }
+                    }
                     tracing::info!(
                         target = %name,
                         "invalidated broker sessions after daemon instance change"
                     );
                 }
-                Ok(false) => {}
+                Ok(None) => {}
                 Err(err) => {
                     tracing::debug!(
                         target = %name,

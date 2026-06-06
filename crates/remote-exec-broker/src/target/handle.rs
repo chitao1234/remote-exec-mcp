@@ -267,12 +267,18 @@ impl TargetHandle {
         Ok(())
     }
 
-    pub(crate) async fn refresh_health_and_cache(&self, name: &str) -> anyhow::Result<bool> {
+    pub(crate) async fn refresh_health_and_cache(
+        &self,
+        name: &str,
+    ) -> anyhow::Result<Option<String>> {
         match self.health().await {
             Ok(health) => {
                 *self.cached_health.lock().await = Some(CachedTargetHealth::healthy(&health));
 
                 let existing = self.cached_daemon_info().await;
+                let previous_daemon_instance_id = existing
+                    .as_ref()
+                    .map(|info| info.daemon_instance_id.clone());
                 let instance_changed = existing
                     .as_ref()
                     .map(|info| info.daemon_instance_id != health.daemon_instance_id)
@@ -292,7 +298,9 @@ impl TargetHandle {
                         Some(Self::cache_from_target_info(&info));
                 }
 
-                Ok(instance_changed)
+                Ok(instance_changed
+                    .then_some(previous_daemon_instance_id)
+                    .flatten())
             }
             Err(err) => {
                 *self.cached_health.lock().await = Some(CachedTargetHealth::unhealthy(&err));
